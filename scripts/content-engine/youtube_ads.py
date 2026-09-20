@@ -49,7 +49,7 @@ def _node():
     return "node"
 
 
-def _run(argv, timeout=3900):
+def _run(argv, timeout=7500):      # longer than youtube_ads.js's own two-hour watchdog, so the JS reports first
     r = subprocess.run([_node(), JS] + argv, capture_output=True, text=True, timeout=timeout)
     out = (r.stdout or "").strip()
     if "{" not in out: raise SystemExit("youtube_ads.js gave nothing back: %s" % ((r.stderr or out)[-240:]))

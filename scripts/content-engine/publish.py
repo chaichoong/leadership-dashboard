@@ -839,6 +839,33 @@ FB_SHARES = {
     "summary": {"key": "facebook_share", "record": "Short Form Video", "field": "Facebook Reels Copy"},
     "lfmd": {"key": "facebook_share_lfmd", "record": "Learnings From My Diary", "field": "Facebook Post Copy"},
 }
+# Catching up is PACED. When the second share was switched on, twelve past episodes were missing their
+# Learnings share; pressing all twelve in one hourly run would put twelve posts on Kevin's personal
+# profile in a few minutes, which reads as a dump and costs reach on the new ones (his call, 20 Sep 2026).
+# Today's episode is never held. Anything older than a day and a half waits its turn.
+FB_CATCHUP_PER_DAY = 2
+FB_CATCHUP_AFTER_HOURS = 36
+
+
+def shares_pressed_today(state, now=None):
+    """How many shares the robot has already pressed today, across every episode and both clips."""
+    today = (now or dt.datetime.now(dt.timezone.utc)).astimezone(LONDON).date()
+    n = 0
+    for e in state.values():
+        if not isinstance(e, dict): continue
+        for spec in FB_SHARES.values():
+            at = (e.get(spec["key"]) or {}).get("shared_at")
+            if not at: continue
+            try:
+                if dt.datetime.fromisoformat(at.replace("Z", "+00:00")).astimezone(LONDON).date() == today: n += 1
+            except ValueError: pass
+    return n
+
+
+def is_catchup(post, now=None):
+    """A page post old enough that sharing it is catching up, not publishing today's episode."""
+    mins = minutes_since(post.get("published_at") or post.get("scheduled"), now or dt.datetime.now(dt.timezone.utc))
+    return mins is not None and mins > FB_CATCHUP_AFTER_HOURS * 60
 
 
 def share_to_facebook_profile(day, entry, state, clip="summary"):
@@ -883,6 +910,10 @@ def share_to_facebook_profile(day, entry, state, clip="summary"):
         print("episode %s: the %s page post is not on the Facebook page yet; looking again next run" % (day, clip))
         return True
     fb["post_url"] = url
+    if is_catchup(post) and shares_pressed_today(state) >= FB_CATCHUP_PER_DAY:
+        fb["status"] = "queued"          # listed as pending, never hidden; it goes out tomorrow
+        print("episode %s: the %s share waits its turn (%d already shared today)" % (day, clip, FB_CATCHUP_PER_DAY))
+        return True
     test = mode() == "test"
     plan_path, text = facebook_share.write_plan(int(day), url, copy, entry.get("youtube_link", ""), test, os.path.dirname(STATE), clip=clip)
     shot = os.path.join(os.path.dirname(STATE), "facebook_share_%s%s.png" % (day, "" if clip == "summary" else "_" + clip))
@@ -987,7 +1018,7 @@ def section_status(entry):
     # share is on the profile; the worst of the two decides it, so a missing Learnings share still shows.
     shares = [(entry.get(s["key"]) or {}).get("status") for s in FB_SHARES.values()]
     fb = "done" if all(s == "shared" for s in shares) else \
-         ("pending" if any(s in ("sharing", "unconfirmed", "page-post-not-found", "signin-needed") for s in shares) else "missing")
+         ("pending" if any(s in ("sharing", "unconfirmed", "page-post-not-found", "signin-needed", "queued") for s in shares) else "missing")
     return {"YouTube episode": clips(True, "full"), "YouTube Short": clips(True, "lfmd"),
             "Teaser clips": clips(False, "summary"), "Learnings clips": clips(False, "lfmd"),
             "Blog": "done" if (entry.get("blog") or {}).get("url") else ("pending" if (entry.get("blog") or {}).get("status") in ("creating", "unconfirmed") else "missing"),
@@ -1606,6 +1637,20 @@ def selftest():
     assert not any("timeline" in v for v in FB_SHARES.values()), "there is one list, and it is the reels list"
     assert set(FB_SHARES["lfmd"]) == set(FB_SHARES["summary"]) == {"key", "record", "field"}
     assert "for clip in FB_SHARES" in _i.getsource(sync), "sync shares every configured page post, not just the first"
+    # catching up is paced: twelve missing Learnings shares must not land on Kevin's profile at once
+    now_t = dt.datetime(2026, 9, 20, 12, 0, tzinfo=dt.timezone.utc)
+    fresh = {"scheduled": "2026-09-20T09:00:00Z"}
+    old_post = {"scheduled": "2026-09-11T09:00:00Z"}
+    assert not is_catchup(fresh, now_t) and is_catchup(old_post, now_t), "today's episode is never held; last week's is"
+    assert not is_catchup({}, now_t), "a post with no time is treated as today's, never silently deferred"
+    st = {"2060": {"facebook_share": {"shared_at": "2026-09-20T08:00:00Z"}, "facebook_share_lfmd": {"shared_at": "2026-09-20T08:30:00Z"}},
+          "2059": {"facebook_share": {"shared_at": "2026-09-19T08:00:00Z"}}, "_cursor": 2061}
+    assert shares_pressed_today(st, now_t) == 2 and FB_CATCHUP_PER_DAY == 2, "both clips count toward the day's pace"
+    assert shares_pressed_today({"2059": {"facebook_share": {"shared_at": "rubbish"}}}, now_t) == 0, "an unreadable stamp never blocks the pace"
+    ssrc3 = _i.getsource(share_to_facebook_profile)
+    assert 'fb["status"] = "queued"' in ssrc3 and ssrc3.index("is_catchup(post)") < ssrc3.index("run_plan"), "the pace is checked before Share is ever pressed"
+    assert "queued" in _i.getsource(section_status), "a queued share reads pending, not missing"
+
     fsrc = _i.getsource(share_to_facebook_profile); assert "find_page_post" in fsrc and "verify_shared" in fsrc, "it shares the page post and checks the profile afterwards"
     assert fsrc.index('"status": "sharing"') < fsrc.index("run_plan(") and fsrc.index("save_state(state)") < fsrc.index("run_plan("), "the share is on disk before Share is pressed"
     assert re.search(r"except Exception as ex:\s+# a page read timed out", _i.getsource(sync)), "a failing share never ends the run"

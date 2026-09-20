@@ -17,6 +17,7 @@
  *
  *   youtube_ads.js audit [--out FILE]              every video, its ad breaks and ad formats
  *   youtube_ads.js fix --ids FILE [--dry]          mid-roll (+pre/post-roll) On for those video ids
+ *   youtube_ads.js legacy --ids FILE [--dry]       convert pre-2024 videos off legacy ad settings
  *   youtube_ads.js verify --ids FILE               read back only
  */
 const path = require('path'), os = require('os'), fs = require('fs');
@@ -31,7 +32,9 @@ const MIDROLL_LABEL = 'Show mid-roll ads during my video';
 // Mid-roll needs 8 minutes of video; YouTube hides the checkbox below that (read in Studio 20 Sep 2026).
 const MIDROLL_MIN_SECONDS = 480;
 const REMINT_AFTER = 120;        // a fresh attestation well inside its 6-hour TTL
-const WATCHDOG_MS = 3600000;
+// Two hours. A full-channel backfill is ~900 videos at two writes each plus a paged read-back per
+// round; one hour was not enough headroom for a retry round (20 Sep 2026).
+const WATCHDOG_MS = 7200000;
 
 function args() {
   const a = {}; const v = process.argv.slice(2); a.mode = v[0];
@@ -134,25 +137,102 @@ async function mint(page, videoId) {
   return upd;
 }
 
+// What a write asks for. MIDROLL is the modern case; LEGACY_FORMATS is the first half of converting a
+// pre-2024 video off "legacy ad settings", which is the change YouTube warns cannot be reversed
+// (Kevin approved it, 20 Sep 2026). Field names read off Studio's own two saves on xxYZcW8SFQk.
+const MIDROLL = { adBreaks: { newHasPrerolls: 'ENABLED', newHasMidrollAds: 'ENABLED',
+                              newHasPostrolls: 'ENABLED', newAutoMidrollEnabled: 'ENABLED' } };
+const LEGACY_FORMATS = { adFormats: { newHasSkippableVideoAds: 'ENABLED', newHasNonSkippableVideoAds: 'ENABLED',
+                                      newDisableDisplayAds: 'DISABLED' },
+                         adBreaks: { newHasPrerolls: 'ENABLED', newHasPostrolls: 'ENABLED' } };
+
 // Replay the minted write for one video. A 200 here is NOT proof: the caller reads every id back.
-async function replay(page, upd, videoId) {
-  return page.evaluate(async ({ upd, videoId }) => {
+async function replay(page, upd, videoId, adSettings) {
+  return page.evaluate(async ({ upd, videoId, adSettings }) => {
     const hdr = {}; for (const [k, v] of Object.entries(upd.headers)) if (!/^:|^host$|^content-length$/i.test(k)) hdr[k] = v;
     const b = JSON.parse(upd.body);
     b.encryptedVideoId = videoId;
-    b.adSettings = { adBreaks: { newHasPrerolls: 'ENABLED', newHasMidrollAds: 'ENABLED',
-                                 newHasPostrolls: 'ENABLED', newAutoMidrollEnabled: 'ENABLED' } };
+    b.adSettings = adSettings;
     const r = await fetch(upd.url, { method: 'POST', headers: hdr, body: JSON.stringify(b), credentials: 'include' });
     return { status: r.status };
-  }, { upd, videoId });
+  }, { upd, videoId, adSettings });
 }
 
+// The legacy conversion, through the UI, on one video. Two saves: the banner's irreversible "Update",
+// which turns video ads on, and then mid-roll if the video is long enough. Either save mints an
+// attestation the replays can reuse.
+async function mintLegacy(page, videoId) {
+  let upd = null;
+  const grab = (r) => { if (/metadata_update/.test(r.url())) upd = { url: r.url(), headers: r.headers(), body: r.postData() }; };
+  page.on('request', grab);
+  try {
+    await page.goto(EARN_URL(videoId), { waitUntil: 'domcontentloaded' });
+    await page.waitForTimeout(14000);
+    const banner = page.locator('ytcp-button:has-text("Update")').first();
+    if (!(await banner.count())) { const e = new Error('not a legacy video: ' + videoId); e.notLegacy = true; throw e; }
+    await banner.click({ timeout: 20000 });
+    await page.waitForTimeout(3000);
+    const dlg = page.locator('ytcp-dialog:visible, tp-yt-paper-dialog:visible').filter({ hasText: 'Update ad settings' }).first();
+    if (!(await dlg.count())) throw new Error('no "Update ad settings?" confirmation on ' + videoId);
+    await dlg.locator('ytcp-button:has-text("Update")').last().click({ timeout: 20000 });
+    await page.waitForTimeout(7000);
+    // and mid-roll while we are here, when the video is long enough to carry one
+    const lit = page.locator('ytcp-checkbox-lit').filter({ hasText: MIDROLL_LABEL }).first();
+    if (await lit.count()) {
+      const box = lit.locator('#checkbox').first();
+      if ((await box.getAttribute('aria-checked')) !== 'true') {
+        await lit.scrollIntoViewIfNeeded();
+        const bb = await box.boundingBox();
+        if (bb) { await page.mouse.click(bb.x + bb.width / 2, bb.y + bb.height / 2); await page.waitForTimeout(1500); }
+      }
+      const save = page.locator('ytcp-button:has-text("Save"):not([disabled]), #save-button:not([disabled])').first();
+      if (await save.count()) { await save.click({ timeout: 25000 }); await page.waitForTimeout(8000); }
+    }
+  } finally { page.off('request', grab); }
+  if (!upd) throw new Error('no metadata_update captured from ' + videoId);
+  return upd;
+}
+
+// The 923 pre-2024 videos on legacy ad settings: display banners only, no video ads at all. Two
+// replayed writes each, then read back on hasSkippableVideoAds, which is what the conversion buys.
+async function legacy(page, ids, dry) {
+  const done = {}, errors = {};
+  let todo = ids.slice();
+  if (dry) return { dry: true, would: todo.length, sample: todo.slice(0, 5) };
+  for (let round = 1; round <= 3 && todo.length; round++) {
+    let upd = null, since = 0;
+    for (const id of todo) {
+      if (!upd || since >= REMINT_AFTER) {
+        try { upd = await mintLegacy(page, id); since = 0; done[id] = 'ui-save'; continue; }
+        catch (e) {
+          if (e.notLegacy) { done[id] = 'already-modern'; upd = null; continue; }
+          errors[id] = 'mint: ' + e.message.slice(0, 160); upd = null; continue;
+        }
+      }
+      try {
+        await replay(page, upd, id, LEGACY_FORMATS);
+        await replay(page, upd, id, MIDROLL);      // refused by YouTube under 8 minutes; harmless
+        done[id] = 'replay'; since++;
+      } catch (e) { errors[id] = 'replay: ' + e.message.slice(0, 160); }
+    }
+    const back = await readBack(page, todo);
+    todo = todo.filter((id) => !videoAdsOn(back[id]));
+    if (!todo.length) break;
+  }
+  return { done, errors, stillLegacy: todo };
+}
+
+// The ad settings Studio itself reports for these ids. This is the only proof any write took:
+// metadata_update answers 200 whether or not it did anything (Rs8xHbD5miQ, 20 Sep 2026).
 async function readBack(page, ids) {
-  const { long } = { long: await listTab(page, 'upload') };
+  const long = await listTab(page, 'upload');
   const want = new Set(ids), out = {};
-  for (const r of long) if (want.has(r.id)) out[r.id] = ((r.adSettings || {}).adBreaks || {}).hasMidrollAds === true;
+  for (const r of long) if (want.has(r.id)) out[r.id] = r.adSettings || {};
   return out;
 }
+
+const midrollOn = (ad) => ((ad || {}).adBreaks || {}).hasMidrollAds === true;
+const videoAdsOn = (ad) => ((ad || {}).adFormats || {}).hasSkippableVideoAds === true;
 
 async function fix(page, ids, dry) {
   const done = {}, errors = {}, notEligible = [];
@@ -174,7 +254,7 @@ async function fix(page, ids, dry) {
     }
     const back = await readBack(page, todo);          // the only proof that counts
     const skip = new Set(notEligible);
-    todo = todo.filter((id) => back[id] !== true && !skip.has(id));
+    todo = todo.filter((id) => !midrollOn(back[id]) && !skip.has(id));
     if (!todo.length) break;
   }
   return { done, errors, notEligible, stillOff: todo };
@@ -202,17 +282,25 @@ async function fix(page, ids, dry) {
       return finish({ long: r.long.length, shorts: r.shorts.length, publicLong: pub.length,
                       midrollEligible: elig.length, midrollOff: off.length, out: a.out || null });
     }
+    if (a.mode === 'legacy') {
+      if (!a.ids) return finish({ error: '--ids FILE required' });
+      let ids = JSON.parse(fs.readFileSync(a.ids, 'utf8'));
+      if (a.limit) ids = ids.slice(0, a.limit);
+      return finish(await legacy(page, ids, a.dry));
+    }
     if (a.mode === 'fix' || a.mode === 'verify') {
       if (!a.ids) return finish({ error: '--ids FILE required' });
       let ids = JSON.parse(fs.readFileSync(a.ids, 'utf8'));
       if (a.limit) ids = ids.slice(0, a.limit);
       if (a.mode === 'verify') {
         const back = await readBack(page, ids);
-        const on = ids.filter((i) => back[i] === true);
-        return finish({ checked: ids.length, midrollOn: on.length, stillOff: ids.filter((i) => back[i] !== true) });
+        return finish({ checked: ids.length,
+                        midrollOn: ids.filter((i) => midrollOn(back[i])).length,
+                        videoAdsOn: ids.filter((i) => videoAdsOn(back[i])).length,
+                        stillOff: ids.filter((i) => !midrollOn(back[i]) && !videoAdsOn(back[i])) });
       }
       return finish(await fix(page, ids, a.dry));
     }
-    return finish({ error: 'usage: youtube_ads.js audit|fix|verify' });
+    return finish({ error: 'usage: youtube_ads.js audit|fix|legacy|verify' });
   } catch (e) { return finish({ error: e.message.slice(0, 300) }); }
 })();

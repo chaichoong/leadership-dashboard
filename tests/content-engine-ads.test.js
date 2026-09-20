@@ -135,6 +135,20 @@ describe('both Facebook page posts reach Kevin profile', () => {
     expect(sync).toMatch(/share_to_facebook_profile\(day, entry, state, clip=clip\)/);
   });
 
+  it('paces the catch-up so old episodes do not land on the profile all at once', () => {
+    // Kevin, 20 Sep 2026: twelve past episodes were missing their Learnings share. Twelve posts on his
+    // personal profile inside one hourly run reads as a dump and costs reach on the new ones.
+    expect(PUBLISH).toMatch(/FB_CATCHUP_PER_DAY = 2/);
+    expect(PUBLISH).toMatch(/FB_CATCHUP_AFTER_HOURS = 36/);
+    const share = PUBLISH.match(/def share_to_facebook_profile[\s\S]*?\n(?=CURSOR_KEY)/)[0];
+    // the pace is checked BEFORE Share is pressed, never after
+    expect(share.indexOf('is_catchup(post)')).toBeGreaterThan(-1);
+    expect(share.indexOf('is_catchup(post)')).toBeLessThan(share.indexOf('run_plan'));
+    // and a held share is visible as pending, not silently missing
+    expect(share).toMatch(/fb\["status"\] = "queued"/);
+    expect(PUBLISH.match(/def section_status[\s\S]*?\n(?=def )/)[0]).toMatch(/queued/);
+  });
+
   it('keeps the two shares of one episode in separate plan and screenshot files', () => {
     const fb = read(`${CE}/facebook_share.py`);
     expect(fb).toMatch(/def write_plan\(day, post_url, copy, youtube_link, test, out_dir, clip="summary"\)/);
