@@ -67,6 +67,17 @@ describe('youtube_ads', () => {
     expect(ADS_JS).toMatch(/b\.encryptedVideoId = videoId/);
   });
 
+  it('treats a video whose mid-roll is already on as done, not failed', () => {
+    // 20 Sep 2026: an already-ticked box leaves Save disabled. The first run read that as
+    // "Save never enabled" on the four videos switched on by hand, which would have left them
+    // failed on every future run and re-opened the earn page nightly for ever.
+    expect(ADS_JS).toMatch(/e\.alreadyOn = true/);
+    expect(ADS_JS).toMatch(/if \(e\.alreadyOn\) \{ done\[id\] = 'already-on'/);
+    // and the not-eligible answer is kept out of the retry list the same way
+    expect(ADS_JS).toMatch(/e\.notEligible = true/);
+    expect(ADS_JS).toMatch(/const skip = new Set\(notEligible\)/);
+  });
+
   it('never sends anything but an 11-character video id to the browser', () => {
     expect(ADS_JS).toMatch(/MIDROLL_MIN_SECONDS = 480/);
     const out = JSON.parse(py(['-c', [

@@ -116,14 +116,15 @@ async function mint(page, videoId) {
     // it is reported as not-eligible so a short episode never sits in the backlog for ever (20 Sep 2026).
     if (!(await lit.count())) { const e = new Error('not eligible for mid-roll: ' + videoId); e.notEligible = true; throw e; }
     const box = lit.locator('#checkbox').first();
-    if ((await box.getAttribute('aria-checked')) !== 'true') {
-      await lit.scrollIntoViewIfNeeded();
-      const bb = await box.boundingBox();
-      if (!bb) throw new Error('mid-roll checkbox not on screen for ' + videoId);
-      await page.mouse.click(bb.x + bb.width / 2, bb.y + bb.height / 2);
-      await page.waitForTimeout(1800);
-      if ((await box.getAttribute('aria-checked')) !== 'true') throw new Error('mid-roll did not tick on ' + videoId);
-    }
+    // Already ticked: there is nothing to save, so Save stays disabled. That is a video that is DONE,
+    // not a video that failed — treating it as a failure would leave it "failed" on every future run.
+    if ((await box.getAttribute('aria-checked')) === 'true') { const e = new Error('already on: ' + videoId); e.alreadyOn = true; throw e; }
+    await lit.scrollIntoViewIfNeeded();
+    const bb = await box.boundingBox();
+    if (!bb) throw new Error('mid-roll checkbox not on screen for ' + videoId);
+    await page.mouse.click(bb.x + bb.width / 2, bb.y + bb.height / 2);
+    await page.waitForTimeout(1800);
+    if ((await box.getAttribute('aria-checked')) !== 'true') throw new Error('mid-roll did not tick on ' + videoId);
     const save = page.locator('ytcp-button:has-text("Save"):not([disabled]), #save-button:not([disabled])').first();
     if (!(await save.count())) throw new Error('Save never enabled on ' + videoId);
     await save.click({ timeout: 25000 });
@@ -164,6 +165,7 @@ async function fix(page, ids, dry) {
         try { upd = await mint(page, id); since = 0; done[id] = 'ui-save'; continue; }
         catch (e) {
           if (e.notEligible) { notEligible.push(id); upd = null; continue; }
+          if (e.alreadyOn) { done[id] = 'already-on'; upd = null; continue; }   // still needs a mint from the next one
           errors[id] = 'mint: ' + e.message.slice(0, 160); upd = null; continue;
         }
       }
