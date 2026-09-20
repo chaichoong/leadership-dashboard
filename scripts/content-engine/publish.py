@@ -830,13 +830,14 @@ def monetise_long_video(day, entry):
 
 # The Runpreneur page gets TWO posts per episode and Kevin's profile was only ever given one of them
 # (Kevin, 20 Sep 2026: "you haven't been sharing the posts from the Runpreneur Facebook page to my personal
-# profile"). The summary goes out as a reel and is found on the page's /reels list; the Learnings post goes out
-# as a plain post, so it is looked for on the page's timeline instead, where a reels-only search never saw it.
-# Each share keeps its own state, and the summary keeps the original key so the twelve shares already on record
-# are not re-pressed.
+# profile"). Nothing was wrong with the finder: share_to_facebook_profile simply only ever looked at the
+# summary clip. Both posts publish as reels on the page (GoHighLevel sends the Learnings clip as a "post",
+# but Facebook renders a vertical video as a reel, checked on the live page 20 Sep 2026), so both are found
+# on the same /reels list. Each share keeps its own state, and the summary keeps the original key so the
+# twelve shares already on record are not re-pressed.
 FB_SHARES = {
-    "summary": {"key": "facebook_share", "record": "Short Form Video", "field": "Facebook Reels Copy", "timeline": False},
-    "lfmd": {"key": "facebook_share_lfmd", "record": "Learnings From My Diary", "field": "Facebook Post Copy", "timeline": True},
+    "summary": {"key": "facebook_share", "record": "Short Form Video", "field": "Facebook Reels Copy"},
+    "lfmd": {"key": "facebook_share_lfmd", "record": "Learnings From My Diary", "field": "Facebook Post Copy"},
 }
 
 
@@ -876,8 +877,7 @@ def share_to_facebook_profile(day, entry, state, clip="summary"):
         return True
     recs = bundle(int(day))
     copy = ((recs.get(spec["record"]) or {}).get("fields", {}).get(spec["field"]) or "").strip()
-    url = fb.get("post_url") or facebook_share.find_page_post(
-        copy, url=facebook_share.PAGE_URL if spec["timeline"] else None, day=int(day))
+    url = fb.get("post_url") or facebook_share.find_page_post(copy, day=int(day))
     if not url:
         fb["status"] = "page-post-not-found"
         print("episode %s: the %s page post is not on the Facebook page yet; looking again next run" % (day, clip))
@@ -1600,7 +1600,11 @@ def selftest():
     assert "share_to_facebook_profile(day, entry, state, clip=clip)" in _i.getsource(sync) and "signin-needed" in _i.getsource(share_to_facebook_profile), "the profile share runs from sync, on the page post, and waits for sign-in"
     # Kevin, 20 Sep 2026: the page publishes two posts a day and only the summary ever reached his profile
     assert set(FB_SHARES) == {"summary", "lfmd"} and FB_SHARES["summary"]["key"] == "facebook_share", "both page posts are shared, and the summary keeps the original state key"
-    assert FB_SHARES["lfmd"]["key"] != FB_SHARES["summary"]["key"] and FB_SHARES["lfmd"]["field"] == "Facebook Post Copy" and FB_SHARES["lfmd"]["timeline"], "the Learnings post has its own state and is looked for on the timeline, not the reels list"
+    assert FB_SHARES["lfmd"]["key"] != FB_SHARES["summary"]["key"] and FB_SHARES["lfmd"]["field"] == "Facebook Post Copy", "the Learnings post has its own state and its own copy field"
+    # both posts publish as reels on the page, so both are found on the same list (checked live 20 Sep 2026:
+    # the page timeline exposes no post links at all, while /reels carries both a day)
+    assert not any("timeline" in v for v in FB_SHARES.values()), "there is one list, and it is the reels list"
+    assert set(FB_SHARES["lfmd"]) == set(FB_SHARES["summary"]) == {"key", "record", "field"}
     assert "for clip in FB_SHARES" in _i.getsource(sync), "sync shares every configured page post, not just the first"
     fsrc = _i.getsource(share_to_facebook_profile); assert "find_page_post" in fsrc and "verify_shared" in fsrc, "it shares the page post and checks the profile afterwards"
     assert fsrc.index('"status": "sharing"') < fsrc.index("run_plan(") and fsrc.index("save_state(state)") < fsrc.index("run_plan("), "the share is on disk before Share is pressed"

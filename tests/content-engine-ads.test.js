@@ -122,9 +122,11 @@ describe('both Facebook page posts reach Kevin profile', () => {
     expect(cfg).toMatch(/"summary": \{"key": "facebook_share"/);   // history stays on the original key
     expect(cfg).toMatch(/"lfmd": \{"key": "facebook_share_lfmd"/);
     expect(cfg).toMatch(/"field": "Facebook Post Copy"/);
-    // the Learnings post publishes as a plain post, so a reels-only search would never find it
-    expect(cfg).toMatch(/"lfmd":[^\n]*"timeline": True/);
-    expect(cfg).toMatch(/"summary":[^\n]*"timeline": False/);
+    // Both publish as reels on the page, so both are found on the same /reels list. Checked live on
+    // 20 Sep 2026: the page timeline exposes no post links at all, and searching it returned None for
+    // 2061 and 2060, while the reels list found both (reel/1125120666860774 and reel/1595684122253976).
+    expect(cfg).not.toMatch(/timeline/);
+    expect(read(`${CE}/facebook_share.py`)).toMatch(/SCAN_POSTS = 14/);
   });
 
   it('shares every configured post from sync, not just the first', () => {

@@ -28,6 +28,10 @@ SHARE_BOX = "[role='dialog'] [contenteditable='true'], [role='dialog'] [role='te
 SHARE_NOW = "[role='dialog'] [aria-label='Share now'], [role='dialog'] div[role='button']:has-text('Share now')"
 SHARE_MAX = 400
 MATCH_WORDS = 6                           # words of the caption that identify our post
+# How far back down the reels list to look. The page publishes TWO posts a day (the Summary and the
+# Learnings clip), and from 20 Sep 2026 both are shared to Kevin's profile, so a six-post window only
+# reached three days back and would miss a share the moment a run was skipped. Fourteen covers a week.
+SCAN_POSTS = 14
 
 
 def share_text(copy, youtube_link):
@@ -110,7 +114,7 @@ const { chromium } = require('%(pw)s');
   const urls = await page.evaluate(() => Array.from(document.querySelectorAll('a[href*="/reel/"], a[href*="/posts/"], a[href*="/videos/"]'))
     .map(a => a.href.split('?')[0].replace(/\\/$/, ''))
     .filter(h => /\\/(reel|posts|videos)\\/\\d+/.test(h))
-    .filter((v, i, arr) => arr.indexOf(v) === i).slice(0, 6));
+    .filter((v, i, arr) => arr.indexOf(v) === i).slice(0, %(scan)s));
   let hit = null;
   for (const u of urls) {
     await page.goto(u, { waitUntil: 'domcontentloaded' });
@@ -132,7 +136,7 @@ def find_page_post(copy, url=None, day=None):
     Day 2056 of running every day." while the record's Facebook copy began "Day 2056. I'm still catching...")."""
     keys = [k for k in (match_key(copy), ("Day %d" % day) if day else "") if k]
     for key in keys:
-        js = FIND_JS % {"pw": PW, "profile": PROFILE, "list_url": json.dumps(url or POSTS_URL), "key": json.dumps(key)}
+        js = FIND_JS % {"pw": PW, "profile": PROFILE, "list_url": json.dumps(url or POSTS_URL), "key": json.dumps(key), "scan": SCAN_POSTS}
         try: r = _browser(js)
         except SystemExit as ex: print("facebook: page read failed (%s)" % str(ex)[:160], file=sys.stderr); return None
         if r.get("found"): return r.get("url")
@@ -213,6 +217,7 @@ def selftest():
     assert post_id("https://www.facebook.com/reel/2551081102055515") == "2551081102055515" and post_id("https://x/") == ""
     assert PAGE_ID in PAGE_URL and POSTS_URL.endswith("/reels") and "aria-label='Share now'" in SHARE_NOW
     assert "for (const u of urls)" in FIND_JS and "txt.includes(key)" in FIND_JS, "each recent post is opened and matched on its caption"
+    assert SCAN_POSTS >= 14 and ("slice(0, %d)" % SCAN_POSTS) in (FIND_JS % {"pw": "", "profile": "", "list_url": "\"\"", "key": "\"\"", "scan": SCAN_POSTS}), "a week of two-posts-a-day is in reach"
     print(json.dumps({"checks": 9, "failed": []}))
 
 

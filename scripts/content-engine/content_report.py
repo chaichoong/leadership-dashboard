@@ -220,7 +220,9 @@ def selftest():
     state = {"_cursor": 2057,
              "2057": {"youtube_link": "https://youtu.be/a", "posts": {"youtube|full|y": yt("https://youtu.be/a", "2026-09-15T05:00:00Z"),
                       "youtube|lfmd|y": pub("youtube", "lfmd"), "facebook|summary|f": pub("facebook", "summary"), "facebook|lfmd|f": pub("facebook", "lfmd")},
-                      "blog": {"url": "https://runpreneur.org.uk/blog/b/x"}, "podcast": {"status": "published"}, "facebook_share": {"status": "shared"}},
+                      "blog": {"url": "https://runpreneur.org.uk/blog/b/x"}, "podcast": {"status": "published"},
+                      # BOTH page posts on Kevin's profile: one share is no longer a finished episode (20 Sep 2026)
+                      "facebook_share": {"status": "shared"}, "facebook_share_lfmd": {"status": "shared"}},
              "2058": {"posts": {"youtube|full|y": {"platform": "youtube", "clip": "full", "status": "scheduled", "scheduled": "2026-09-16T05:00:00Z"}}}}
     approvals = {"2057": {"verdict": "approved", "task": "t1"}, "2058": {"verdict": "approved", "task": "t2"}, "2059": {"task": "t3"}}
     ledger = {"a": {"status": "rendered", "episode": 2059, "role": "teaser"}, "b": {"status": "failed", "day": 2060, "requeued": "x"},
@@ -228,6 +230,11 @@ def selftest():
     r = build(now, state, approvals, ledger, {"day": 2298, "last_push": {"at": "2026-09-15T19:15:00"}}, plan=[2060, 2061])
     assert [h["date"] for h in r["history"]][:2] == ["2026-09-16", "2026-09-15"] and len(r["history"]) == 7, "seven days, empty ones included"
     assert r["history"][1]["episodes"][0]["day"] == 2057 and r["history"][1]["episodes"][0]["done"] == 7
+    # the Learnings post is the half that was never shared before 20 Sep 2026: without it, six of seven
+    import copy as _c
+    one_share = _c.deepcopy(state); del one_share["2057"]["facebook_share_lfmd"]
+    r1 = build(now, one_share, approvals, ledger, {"day": 2298}, plan=[])
+    assert r1["history"][1]["episodes"][0]["done"] == 6, "an episode with only the summary shared is not complete"
     assert r["cleanDaysInRow"] == 1 and r["waitingForKevin"] == [2059] and r["failedRenders"] == [2060] and r["retryTonight"] == [2061]
     assert r["renderedNoCard"] == [2062], "a rendered teaser alone is not an episode waiting for its card"
     led = {"f": {"status": "failed", "day": 2057, "date": "2026-01-17", "episode": 2057, "size": 5, "error": "x"}}
