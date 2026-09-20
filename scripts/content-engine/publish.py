@@ -847,14 +847,21 @@ FB_CATCHUP_PER_DAY = 2
 FB_CATCHUP_AFTER_HOURS = 36
 
 
-def shares_pressed_today(state, now=None):
-    """How many shares the robot has already pressed today, across every episode and both clips."""
+def catchups_pressed_today(state, now=None):
+    """How many CATCH-UP shares the robot has pressed today, across every episode and both clips.
+
+    Counting every share instead was a bug that would have frozen the queue for good (found by Kevin,
+    20 Sep 2026): today's episode presses two shares of its own, which filled a budget of two, so a
+    catch-up could never have fired again and the ten waiting Learnings posts would have sat there
+    for ever. Only a share that was itself a catch-up spends the catch-up budget."""
     today = (now or dt.datetime.now(dt.timezone.utc)).astimezone(LONDON).date()
     n = 0
     for e in state.values():
         if not isinstance(e, dict): continue
         for spec in FB_SHARES.values():
-            at = (e.get(spec["key"]) or {}).get("shared_at")
+            fb = e.get(spec["key"]) or {}
+            if not fb.get("catchup"): continue
+            at = fb.get("shared_at")
             if not at: continue
             try:
                 if dt.datetime.fromisoformat(at.replace("Z", "+00:00")).astimezone(LONDON).date() == today: n += 1
@@ -913,10 +920,14 @@ def share_to_facebook_profile(day, entry, state, clip="summary"):
         print("episode %s: the %s page post is not on the Facebook page yet; looking again next run" % (day, clip))
         return True
     fb["post_url"] = url
-    if is_catchup(post) and shares_pressed_today(state) >= FB_CATCHUP_PER_DAY:
-        fb["status"] = "queued"          # listed as pending, never hidden; it goes out tomorrow
-        print("episode %s: the %s share waits its turn (%d already shared today)" % (day, clip, FB_CATCHUP_PER_DAY))
-        return True
+    catchup = is_catchup(post)
+    if catchup:
+        pressed = catchups_pressed_today(state)
+        if pressed >= FB_CATCHUP_PER_DAY:
+            fb["status"] = "queued"      # listed as pending, never hidden; it goes out tomorrow
+            print("episode %s: the %s share waits its turn (%d catch-up share(s) already today)" % (day, clip, pressed))
+            return True
+    fb["catchup"] = catchup              # only a catch-up spends the catch-up budget
     test = mode() == "test"
     plan_path, text = facebook_share.write_plan(int(day), url, copy, entry.get("youtube_link", ""), test, os.path.dirname(STATE), clip=clip)
     shot = os.path.join(os.path.dirname(STATE), "facebook_share_%s%s.png" % (day, "" if clip == "summary" else "_" + clip))
@@ -1019,9 +1030,13 @@ def section_status(entry):
     pod = (entry.get("podcast") or {}).get("status")
     # BOTH page posts, not just the summary (Kevin, 20 Sep 2026). The section is only done when every
     # share is on the profile; the worst of the two decides it, so a missing Learnings share still shows.
-    shares = [(entry.get(s["key"]) or {}).get("status") for s in FB_SHARES.values()]
-    fb = "done" if all(s == "shared" for s in shares) else \
-         ("pending" if any(s in ("sharing", "unconfirmed", "page-post-not-found", "signin-needed", "queued") for s in shares) else "missing")
+    # Only clips the page ACTUALLY carries are counted: episode 1841 has no Learnings post, so counting
+    # one would have read "Facebook share missing" on a finished episode for ever (20 Sep 2026).
+    shares = [(entry.get(spec["key"]) or {}).get("status") for clip, spec in FB_SHARES.items()
+              if any(p.get("platform") == "facebook" and p.get("clip") == clip for p in posts)]
+    fb = "missing" if not shares else \
+         ("done" if all(s == "shared" for s in shares) else
+          ("pending" if any(s in ("sharing", "unconfirmed", "page-post-not-found", "signin-needed", "queued") for s in shares) else "missing"))
     return {"YouTube episode": clips(True, "full"), "YouTube Short": clips(True, "lfmd"),
             "Teaser clips": clips(False, "summary"), "Learnings clips": clips(False, "lfmd"),
             "Blog": "done" if (entry.get("blog") or {}).get("url") else ("pending" if (entry.get("blog") or {}).get("status") in ("creating", "unconfirmed") else "missing"),
@@ -1646,12 +1661,24 @@ def selftest():
     old_post = {"scheduled": "2026-09-11T09:00:00Z"}
     assert not is_catchup(fresh, now_t) and is_catchup(old_post, now_t), "today's episode is never held; last week's is"
     assert not is_catchup({}, now_t), "a post with no time is treated as today's, never silently deferred"
-    st = {"2060": {"facebook_share": {"shared_at": "2026-09-20T08:00:00Z"}, "facebook_share_lfmd": {"shared_at": "2026-09-20T08:30:00Z"}},
-          "2059": {"facebook_share": {"shared_at": "2026-09-19T08:00:00Z"}}, "_cursor": 2061}
-    assert shares_pressed_today(st, now_t) == 2 and FB_CATCHUP_PER_DAY == 2, "both clips count toward the day's pace"
-    assert shares_pressed_today({"2059": {"facebook_share": {"shared_at": "rubbish"}}}, now_t) == 0, "an unreadable stamp never blocks the pace"
+    # ONLY a catch-up spends the catch-up budget. Counting every share froze the queue: today's episode
+    # presses two of its own, which filled a budget of two, so no catch-up could ever fire again.
+    st = {"2060": {"facebook_share": {"shared_at": "2026-09-20T08:00:00Z", "catchup": True},
+                   "facebook_share_lfmd": {"shared_at": "2026-09-20T08:30:00Z", "catchup": True}},
+          "2059": {"facebook_share": {"shared_at": "2026-09-19T08:00:00Z", "catchup": True}}, "_cursor": 2061}
+    assert catchups_pressed_today(st, now_t) == 2 and FB_CATCHUP_PER_DAY == 2, "both clips count toward the day's pace"
+    today_own = {"2061": {"facebook_share": {"shared_at": "2026-09-20T09:00:00Z", "catchup": False},
+                          "facebook_share_lfmd": {"shared_at": "2026-09-20T09:05:00Z", "catchup": False}}}
+    assert catchups_pressed_today(today_own, now_t) == 0, "today's own episode never spends the catch-up budget"
+    assert catchups_pressed_today({"2059": {"facebook_share": {"shared_at": "rubbish", "catchup": True}}}, now_t) == 0, "an unreadable stamp never blocks the pace"
+    # an episode with no Learnings post on the page is not an episode missing a share (1841, 20 Sep 2026)
+    only_summary = {"posts": {"facebook|summary|f": {"platform": "facebook", "clip": "summary", "status": "published"}},
+                    "facebook_share": {"status": "shared"}, "facebook_share_lfmd": {}}
+    assert section_status(only_summary)["Facebook share"] == "done", "a clip the page never carried is not counted"
+    assert section_status({"posts": {}})["Facebook share"] == "missing", "no Facebook post at all is still missing"
     ssrc3 = _i.getsource(share_to_facebook_profile)
     assert 'fb["status"] = "queued"' in ssrc3 and ssrc3.index("is_catchup(post)") < ssrc3.index("run_plan"), "the pace is checked before Share is ever pressed"
+    assert 'fb["catchup"] = catchup' in ssrc3, "every share records whether it was a catch-up, so the budget can be counted"
     assert "queued" in _i.getsource(section_status), "a queued share reads pending, not missing"
     assert "SCAN_POSTS_CATCHUP if is_catchup(post)" in ssrc3, "a catch-up searches further back than today's post does"
 

@@ -153,11 +153,26 @@ describe('both Facebook page posts reach Kevin profile', () => {
     expect(sync).toMatch(/share_to_facebook_profile\(day, entry, state, clip=clip\)/);
   });
 
+  it('does not call an episode incomplete for a clip the page never carried', () => {
+    // episode 1841 has a summary reel and no Learnings post at all, so counting a Learnings share
+    // read "Facebook share missing" on a finished episode for ever (20 Sep 2026)
+    const section = PUBLISH.match(/def section_status[\s\S]*?\n(?=def )/)[0];
+    expect(section).toMatch(/if any\(p\.get\("platform"\) == "facebook" and p\.get\("clip"\) == clip for p in posts\)/);
+    expect(section).toMatch(/"missing" if not shares/);
+  });
+
   it('paces the catch-up so old episodes do not land on the profile all at once', () => {
     // Kevin, 20 Sep 2026: twelve past episodes were missing their Learnings share. Twelve posts on his
     // personal profile inside one hourly run reads as a dump and costs reach on the new ones.
     expect(PUBLISH).toMatch(/FB_CATCHUP_PER_DAY = 2/);
     expect(PUBLISH).toMatch(/FB_CATCHUP_AFTER_HOURS = 36/);
+    // Kevin, 20 Sep 2026: counting EVERY share against the budget froze the queue. Today's episode
+    // presses two shares of its own, which filled a budget of two, so no catch-up could ever fire
+    // again and the ten waiting Learnings posts would have sat there for ever.
+    expect(PUBLISH).toMatch(/def catchups_pressed_today/);
+    expect(PUBLISH).not.toMatch(/def shares_pressed_today/);
+    expect(PUBLISH).toMatch(/if not fb\.get\("catchup"\): continue/);
+    expect(PUBLISH).toMatch(/fb\["catchup"\] = catchup/);
     const share = PUBLISH.match(/def share_to_facebook_profile[\s\S]*?\n(?=CURSOR_KEY)/)[0];
     // the pace is checked BEFORE Share is pressed, never after
     expect(share.indexOf('is_catchup(post)')).toBeGreaterThan(-1);
