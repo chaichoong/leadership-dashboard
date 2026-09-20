@@ -177,10 +177,12 @@ def verify_shared(post_url):
     except SystemExit: return False
 
 
-def write_plan(day, post_url, copy, youtube_link, test, out_dir):
+def write_plan(day, post_url, copy, youtube_link, test, out_dir, clip="summary"):
+    """`clip` keeps the two shares of one episode apart on disk. The page publishes two posts a day and both
+    are shared to Kevin's profile from 20 Sep 2026; one plan file per episode would have one overwrite the other."""
     text = share_text(copy, youtube_link)
     os.makedirs(out_dir, exist_ok=True)
-    path = os.path.join(out_dir, "facebook_share_%d.json" % day)
+    path = os.path.join(out_dir, "facebook_share_%d%s.json" % (day, "" if clip == "summary" else "_" + clip))
     with open(path, "w") as fh: json.dump(build_plan(post_url, text, test), fh, indent=1)
     return path, text
 
