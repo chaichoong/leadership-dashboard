@@ -59,10 +59,11 @@ def caption(day, raised, km):
 
 
 def strava_name(text):
-    """The whole caption on one line, the team's own title (Strava, 3 Sep 2026: "Day #2,286/5,000 #runpreneurchallenge
-    Total raised so far £76,840/£1,000,000 Total distance so far 17,510.61km/40,075km"). From 4 Sep to 15 Sep 2026
-    the title kept only the first line, so the totals vanished from the feed and sat in the description."""
-    return " ".join(l.strip() for l in text.splitlines() if l.strip())
+    """The run's title is the caption's first line only, "Day #2,304/5,000 #runpreneurchallenge", the way every run up
+    to day 2,297 was named. The totals live in the description (Kevin, 21 Sep 2026: "I quite like all the additional
+    information in the subtitle and just having the title as the number of the streak and #RunpreneurChallenge, as we
+    used to do"). From 15 to 20 Sep 2026 the whole caption went into the title as well, repeating the description."""
+    return next((l.strip() for l in text.splitlines() if l.strip()), "")
 
 
 def progress(km):
@@ -241,8 +242,21 @@ def report():
 def selftest():
     assert streak_day(dt.date(2020, 6, 1)) == 1 and streak_day(dt.date(2026, 9, 3)) == 2286
     assert caption(2286, 76842, 17503.21) == "Day #2,286/5,000 #runpreneurchallenge\nTotal raised so far £76,842/£1,000,000\nTotal distance so far 17,503.21km/40,075km"
-    assert strava_name(caption(2286, 76840, 17510.61)) == "Day #2,286/5,000 #runpreneurchallenge Total raised so far £76,840/£1,000,000 Total distance so far 17,510.61km/40,075km", "the team's one-line title"
-    import inspect; assert 'strava_name(text)' in inspect.getsource(run), "the rename writes the whole caption into the title, not its first line"
+    assert strava_name(caption(2304, 76877, 17640.3)) == "Day #2,304/5,000 #runpreneurchallenge", "the title is the streak line only (Kevin, 21 Sep 2026)"
+    assert "Total raised so far" in caption(2304, 76877, 17640.3), "the totals stay in the description"
+    sent = []; real = globals()["strava"]; globals()["strava"] = lambda method, path, body=None: sent.append((method, path, body)) or {}
+    try:
+        for fn, ret in (("stripe_lifetime_gross", (6842.0, 3)), ("load_state", {"total_km": 17632.0, "folded": [], "seeded_from_site": {"days": "2303", "raised": 76840.0, "stripe_gross": 6842.0}}),
+                        ("recent_runs", [{"id": 9, "distance": 8300, "start_date_local": "2026-09-21T18:00:00Z"}]), ("push_values", {}), ("save_state", None)):
+            globals()["_real_" + fn] = globals()[fn]; globals()[fn] = (lambda r: (lambda *a, **k: r))(ret)
+        import io, contextlib
+        with contextlib.redirect_stdout(io.StringIO()): run()
+    finally:
+        globals()["strava"] = real
+        for fn in ("stripe_lifetime_gross", "load_state", "recent_runs", "push_values", "save_state"): globals()[fn] = globals().pop("_real_" + fn)
+    (m, path, body), = sent
+    assert m == "PUT" and path == "/activities/9" and body["name"] == "Day #2,304/5,000 #runpreneurchallenge", body
+    assert body["description"].splitlines()[0] == body["name"] and "Total distance so far 17,640.30km/40,075km" in body["description"], body["description"]
     assert progress(17496.06) == "43.66%" and progress(50000) == "100.00%"
     st = {"total_km": 17496.06, "folded": [], "seeded_from_site": {"days": "2284", "raised": 76840.0, "stripe_gross": 6842.0}}
     st, old = fold(st, {"id": 0, "distance": 7150, "start_date_local": "2026-09-01T19:20:00Z"}); assert not old, "a run the site already counted is never re-added"
@@ -254,7 +268,7 @@ def selftest():
     seeded = {"seeded_from_site": {"raised": 76840.0, "stripe_gross": 6842.0}}
     assert raised_now(seeded, 6842.0) == 76840.0, "first run changes nothing"
     assert raised_now(seeded, 6892.0) == 76890.0, "later runs add only what Stripe took since"
-    print(json.dumps({"checks": 13, "failed": []}))
+    print(json.dumps({"checks": 16, "failed": []}))
 
 
 if __name__ == "__main__":
