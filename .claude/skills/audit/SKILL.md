@@ -31,7 +31,7 @@ Run a robustness audit on the specified page/dashboard.
    - **Error handling** — failed API calls, empty states, auth expiry
    - **Performance** — no obvious N+1 fetches, pagination respected
    - **UX polish** — loading states, mobile layout, accessibility basics
-   - **Maintainability** — uses tokens.css, file split per CLAUDE.md, no hardcoded IDs
+   - **Maintainability** — uses tokens.css, file split per the file table in `.claude/rules/frontend.md`, no hardcoded IDs
    Report each dimension's sub-score and the total.
 
 ## Output format

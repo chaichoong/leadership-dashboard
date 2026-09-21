@@ -9,6 +9,7 @@
   },
   "devDependencies": {
     "@playwright/test": "^1.49.0",
+    "htmlhint": "1.1.4",
     "vitest": "^3.2.1"
   }
 }

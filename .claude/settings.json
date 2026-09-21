@@ -5,15 +5,22 @@
     ]
   },
   "hooks": {
-    "PostToolUse": [{
-      "matcher": "Edit|Write",
-      "hooks": [{
-        "type": "command",
-        "command": "bash -c 'for f in $CLAUDE_FILE_PATHS; do case \"$f\" in *.html) npx -y htmlhint@1.1.4 \"$f\" 2>&1 || true ;; esac; done'"
-      }, {
-        "type": "command",
-        "command": "bash -c '\"$CLAUDE_PROJECT_DIR/scripts/check-model-ids.sh\" $CLAUDE_FILE_PATHS'"
-      }]
-    }]
+    "PostToolUse": [
+      {
+        "matcher": "Edit|Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash -c 'J=/usr/bin/jq; [ -x \"$J\" ] || J=$(command -v jq) || exit 0; f=$(\"$J\" -r \".tool_input.file_path // empty\" 2>/dev/null) || exit 0; case \"$f\" in *.html|*.htm) ;; *) exit 0 ;; esac; [ -f \"$f\" ] || exit 0; H=\"$CLAUDE_PROJECT_DIR/node_modules/.bin/htmlhint\"; [ -x \"$H\" ] || exit 0; out=$(\"$H\" --nocolor \"$f\" 2>&1); [ $? -eq 1 ] || exit 0; printf \"%s\\n\" \"$out\" | grep -qE \"found [1-9][0-9]* errors?\" || exit 0; { echo \"htmlhint found problems in $f (some may predate this edit):\"; printf \"%s\\n\" \"$out\" | head -n 60; } >&2; exit 2'",
+            "timeout": 30
+          },
+          {
+            "type": "command",
+            "command": "bash -c 'J=/usr/bin/jq; [ -x \"$J\" ] || J=$(command -v jq) || exit 0; f=$(\"$J\" -r \".tool_input.file_path // empty\" 2>/dev/null) || exit 0; case \"$f\" in *.js|*.html) ;; *) exit 0 ;; esac; [ -f \"$f\" ] || exit 0; S=\"$CLAUDE_PROJECT_DIR/scripts/check-model-ids.sh\"; [ -f \"$S\" ] || exit 0; out=$(bash \"$S\" \"$f\" 2>/dev/null); [ -n \"$out\" ] || exit 0; printf \"%s\\n\" \"$out\" >&2; exit 2'",
+            "timeout": 30
+          }
+        ]
+      }
+    ]
   }
 }
