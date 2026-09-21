@@ -1,6 +1,7 @@
 ---
 name: test-gaps
-description: Find untested code paths in changed files and generate Vitest tests. Prioritises data writes, business logic, and error handling. Use after implementing a feature or fix. Also called automatically by /build-feature and /fix workflows.
+description: Find untested code paths in changed files and generate Vitest tests. Prioritises data writes, business logic, and error handling. Use after implementing a feature or fix.
+disable-model-invocation: true
 ---
 
 # Test Gaps — Find and Fill

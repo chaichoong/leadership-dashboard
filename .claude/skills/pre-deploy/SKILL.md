@@ -1,6 +1,7 @@
 ---
 name: pre-deploy
-description: Pre-deployment checklist before pushing to GitHub Pages or deploying a Worker. Checks for console.log, security issues, config consistency, and deploy verification. Use before any push to main or deployment. Also called automatically by /build-feature and /fix workflows.
+description: Pre-deployment checklist before pushing to GitHub Pages or deploying a Worker. Checks for console.log, security issues, config consistency, and deploy verification. Use before any push to main or deployment.
+disable-model-invocation: true
 ---
 
 # Pre-Deploy Checklist

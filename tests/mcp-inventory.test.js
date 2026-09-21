@@ -77,21 +77,38 @@ describe('MCP tools list', () => {
 
     it.runIf(hasSources)('lists every locally configured MCP server', () => {
         const cfg = JSON.parse(readFileSync(CLAUDE_JSON, 'utf8'));
+        // Control on the READ, not the count. Zero local servers is a real
+        // state since 21 Sep 2026 (github and metricool approved for removal),
+        // but every folder Claude Code has opened sits in `projects`, so an
+        // empty map means the key moved and this check could see nothing.
+        expect(Object.keys(cfg.projects || {}).length, 'control: ~/.claude.json has no '
+            + 'projects map, so this check would pass no matter what the list said')
+            .toBeGreaterThan(0);
         const configured = new Set();
         for (const proj of Object.values(cfg.projects || {})) {
             for (const name of Object.keys(proj.mcpServers || {})) configured.add(name.toLowerCase());
         }
-        expect(configured.size, 'control: ~/.claude.json yielded no MCP servers at all, '
-            + 'so this check would pass no matter what the list said').toBeGreaterThan(0);
         const missing = [...configured].filter((n) => !names.has(n));
         expect(missing, `regenerate js/mcp-tools-data.js — missing: ${missing.join(', ')}`).toEqual([]);
     });
 
     it.runIf(hasSources)('lists every server that needs authorising', () => {
         const cache = JSON.parse(readFileSync(NEEDS_AUTH, 'utf8'));
-        const keys = Object.keys(cache);
-        expect(keys.length, 'control: the needs-auth cache was empty, so this check '
-            + 'would pass no matter what the list said').toBeGreaterThan(0);
+        // Control on the shape. An EMPTY cache is a clean estate once the
+        // unused plugin bundles are gone; a cache that is not a map is a
+        // broken read.
+        expect(cache !== null && typeof cache === 'object' && !Array.isArray(cache),
+            'control: the needs-auth cache is not a map').toBe(true);
+        // Claude Code never prunes this cache (entries 157 days old on 21 Sep
+        // 2026), so a server removed from ~/.claude.json keeps its entry for
+        // good and has no row to appear in. Only names the list can place are
+        // required: plugin and claude.ai connectors, and servers still set up
+        // in a file.
+        const cfg = JSON.parse(readFileSync(CLAUDE_JSON, 'utf8'));
+        const localNames = new Set(Object.values(cfg.projects || {})
+            .flatMap((proj) => Object.keys(proj.mcpServers || {})));
+        const keys = Object.keys(cache).filter((k) => k.startsWith('plugin:')
+            || k.startsWith('claude.ai ') || localNames.has(k));
         // Stored as "plugin:bundle:server" or "claude.ai Name"; the list keeps
         // the bare server name and moves the bundle into `scope`.
         const bare = keys.map((k) => (k.startsWith('plugin:')
@@ -167,17 +184,48 @@ describe('generator refuses to write on a bad read', () => {
         return run({ ...process.env, HOME: home }, join(home, 'out.js')).status;
     }
 
-    it('fails when no MCP server is configured anywhere', () => {
-        expect(runFixture({ ...goodJson, projects: {} }, goodAuth)).toBe(1);
+    // No claude binary reachable: PATH stripped and a HOME with no
+    // ~/.local/bin/claude. Returns the whole result so a test can check WHY.
+    function runOffline(claudeJson, needsAuth) {
+        const home = tmpHome(claudeJson, needsAuth);
+        const out = join(home, 'out.js');
+        return { ...run({ HOME: home, PATH: '/usr/bin:/bin' }, out), out };
+    }
+
+    it('fails when ~/.claude.json has no projects map', () => {
+        const r = runOffline({ ...goodJson, projects: {} }, goodAuth);
+        expect(r.status).toBe(1);
+        expect(r.stderr).toContain('no `projects` map');
     });
 
     it('fails when the claude.ai connector list is empty', () => {
         expect(runFixture({ ...goodJson, claudeAiMcpEverConnected: [] }, goodAuth)).toBe(1);
     });
 
-    it('fails when the needs-auth cache is empty', () => {
-        expect(runFixture(goodJson, {})).toBe(1);
-    });
+    it('fails when the needs-auth cache has lost its shape', () => {
+        // An empty cache is a clean estate (see the next test). A cache that is
+        // not a map of timestamped entries means the format moved under us.
+        for (const broken of [['plugin:x:a'], { 'plugin:x:a': 1 }, { 'plugin:x:a': {} }]) {
+            const r = runOffline(goodJson, broken);
+            expect(r.status, JSON.stringify(broken)).toBe(1);
+            expect(r.stderr).toContain('format has changed');
+        }
+    }, 30_000);
+
+    it('writes the list when this repo has no MCP servers and nothing needs authorising', () => {
+        // The state after github and metricool leave (approved 21 Sep 2026):
+        // the repo has no local servers, so `claude mcp list` has nothing to
+        // report and an empty health answer is correct, not a failed check.
+        // A server set up for another folder still appears.
+        const r = runOffline({
+            ...goodJson,
+            projects: { [ROOT]: {}, '/elsewhere/project': { mcpServers: { 'gmail-write': {} } } },
+        }, {});
+        expect(r.status, r.stderr).toBe(0);
+        expect(existsSync(r.out)).toBe(true);
+        expect(r.stdout).toContain('unauthorised: 0');
+        expect(readFileSync(r.out, 'utf8')).toContain('"name": "gmail-write"');
+    }, 30_000);
 
     it('refuses to write when the health check finds nothing', () => {
         // THE BUG THIS CATCHES (28 Aug 2026). MCP servers are stored per project
@@ -187,23 +235,20 @@ describe('generator refuses to write on a bad read', () => {
         // "Not checked" instead of "Connected", and dropped Kevin's reachable
         // count from 21 to 20. It would have published that as fact every night.
         //
-        // Copy the REAL config into a home with no ~/.local/bin/claude, and
-        // strip PATH. The config reads then succeed so we actually reach the
-        // health check, and the binary cannot be found, which reproduces the
-        // same empty-health condition the wrong cwd produced. Pointing HOME at
-        // the real home would not work: the fallback binary path is deliberately
-        // robust enough to find claude even with PATH stripped.
-        const home = mkdtempSync(join(tmpdir(), 'mcp-health-'));
-        execFileSync('mkdir', ['-p', join(home, '.claude')]);
-        writeFileSync(join(home, '.claude.json'),
-            readFileSync(join(homedir(), '.claude.json'), 'utf8'));
-        writeFileSync(join(home, '.claude', 'mcp-needs-auth-cache.json'),
-            readFileSync(join(homedir(), '.claude', 'mcp-needs-auth-cache.json'), 'utf8'));
-        const out = join(home, 'out.js');
-        const r = run({ HOME: home, PATH: '/usr/bin:/bin' }, out);
+        // A fixture with two servers set up for THIS repo, in a home with no
+        // ~/.local/bin/claude, and PATH stripped. The config reads succeed so
+        // we actually reach the health check, and the binary cannot be found,
+        // which reproduces the same empty-health condition the wrong cwd
+        // produced. Pointing HOME at the real home would not work: the fallback
+        // binary path is deliberately robust enough to find claude even with
+        // PATH stripped. A fixture rather than a copy of the real config
+        // (21 Sep 2026): the real repo is losing its local servers, and with
+        // none an empty health answer is correct, so the copy would stop
+        // proving anything. It also stops copying a config that holds tokens.
+        const r = runOffline(goodJson, goodAuth);
         expect(r.status, 'an unreadable health check must not produce a file').toBe(1);
         expect(r.stderr).toContain('failed check, not an empty estate');
-        expect(existsSync(out), 'nothing should have been written').toBe(false);
+        expect(existsSync(r.out), 'nothing should have been written').toBe(false);
     }, 30_000);
 
     it('pins the working directory when checking health', () => {

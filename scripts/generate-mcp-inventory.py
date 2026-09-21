@@ -9,10 +9,11 @@ was no answer anywhere, because MCP servers reach Claude Code from four
 different places and no single file lists them.
 
 The trap this script is built around: `claude mcp list` from a shell returns
-only TWO servers (github, metricool). The ~20 connectors Kevin uses
-interactively are delivered through the desktop app's session and are invisible
-to any script. So a naively "generated" list would confidently report an estate
-of 2 and be wrong by an order of magnitude.
+only the few servers configured in files for this repo (two until Sep 2026,
+github and metricool; none once both were removed). The ~20 connectors Kevin
+uses interactively are delivered through the desktop app's session and are
+invisible to any script. So a naively "generated" list would confidently
+report an estate of 0 to 2 and be wrong by an order of magnitude.
 
 Every row therefore carries `source`:
   verified — read from a real config file or a live health check THIS RUN
@@ -61,8 +62,8 @@ OUT = os.path.join(REPO, "js", "mcp-tools-data.js")
 # meaningless.
 DESCRIPTIONS = {
     # Local / repo
-    "github": "Reads and writes code on GitHub: pull requests, issues, file contents. This is how the platform ships.",
-    "metricool": "Social media scheduling and stats. Never authorised, so nothing uses it.",
+    "github": "Reads GitHub: pull requests, issues, file contents. Writes do not work through it; the platform ships through the gh command line.",
+    "metricool": "Social media scheduling and stats. Never authorised and never used; removal from this repo was approved on 21 Sep 2026.",
     "gmail-write": "A second, separate Gmail connection that can send. Set up outside this repo; day-to-day sending goes through scripts/send-email.py instead.",
     # claude.ai connectors
     "claude.ai Airtable": "Reads and writes the Operations Director base: tasks, tenancies, costs, agents.",
@@ -113,10 +114,19 @@ DECLARED_BUILTINS = [
 # Floors. Each is the number below which the source has plainly failed to read
 # rather than genuinely shrunk. Deliberately set at the level that proves the
 # read worked, not at today's count, so adding a tool does not fail the run.
+#
+# local and needsauth are 0 (21 Sep 2026). Kevin approved removing the repo's
+# last two local servers (github, metricool), and the same audit proposes
+# uninstalling the plugin bundles behind most of the needs-auth cache, so zero
+# is now a real state for both and a count floor would fail the job on a clean
+# estate. The broken read those
+# two floors were guarding against is still caught, by SHAPE instead of count:
+# local_servers() fails when ~/.claude.json has no `projects` map, and
+# needs_auth() fails when the cache is not a map of timestamped entries.
 FLOORS = {
-    "local": 1,
+    "local": 0,
     "claudeai": 3,
-    "needsauth": 5,
+    "needsauth": 0,
     "builtins": 5,
     "agenttools": 3,
 }
@@ -145,9 +155,20 @@ def describe(name):
 
 
 def local_servers(claude_json):
-    """MCP servers configured in files on this Mac. Names only, never env."""
+    """MCP servers configured in files on this Mac. Names only, never env.
+
+    Zero servers is a real answer. A missing or empty `projects` map is not:
+    every folder Claude Code has ever opened gets an entry there, so an empty
+    one means the key moved in an upgrade and the read found nothing."""
+    projects = claude_json.get("projects")
+    if not isinstance(projects, dict) or not projects:
+        raise SourceFailure(
+            "~/.claude.json: no `projects` map found, so the locally configured "
+            "MCP servers could not be read. The key may have moved in a Claude "
+            "Code upgrade."
+        )
     found = {}
-    for project, cfg in (claude_json.get("projects") or {}).items():
+    for project, cfg in projects.items():
         for name in (cfg.get("mcpServers") or {}):
             # Worktrees give REPO a different path to the main checkout, so
             # match the project by name rather than by exact path.
@@ -175,6 +196,19 @@ def claudeai_connectors(claude_json):
 
 
 def needs_auth(cache):
+    """Servers waiting for authorisation. An empty cache is a clean estate.
+
+    A cache that has lost its shape is a broken read: every entry Claude Code
+    has ever written is `name -> {"timestamp": <ms>, ...}` (21 of 21 on 21 Sep
+    2026), so anything else means the format changed under us."""
+    if not isinstance(cache, dict) or not all(
+            isinstance(k, str) and k and isinstance(v, dict)
+            and isinstance(v.get("timestamp"), (int, float))
+            for k, v in cache.items()):
+        raise SourceFailure(
+            "mcp-needs-auth-cache.json: expected a map of server name to "
+            "{timestamp: ...}; the format has changed, so it cannot be trusted."
+        )
     if len(cache) < FLOORS["needsauth"]:
         raise SourceFailure(
             f"mcp-needs-auth-cache.json: held {len(cache)} entries, expected at "
@@ -291,10 +325,16 @@ def build():
     # downgrades every local server to "Not checked" and quietly publishes it.
     # Refusing to write leaves the last good list in place, which is correct and
     # current, and the job failure is what gets noticed.
-    if not health:
+    #
+    # `claude mcp list` runs with cwd=REPO, so it can only ever report the
+    # servers configured for THIS repo. When there are none (the state after
+    # github and metricool were removed, 21 Sep 2026), an empty answer is the
+    # right answer and the health check has nothing to prove.
+    expected = [n for n, scopes in local.items() if "this repo" in scopes]
+    if not health and expected:
         raise SourceFailure(
             f"`claude mcp list` returned no servers while ~/.claude.json holds "
-            f"{len(local)}. That is a failed check, not an empty estate "
+            f"{len(expected)} for this repo. That is a failed check, not an empty estate "
             f"({health_note or 'no reason given'}). Most likely cause: it ran "
             f"with the wrong working directory — MCP servers are stored per "
             f"project, so it must run with cwd={REPO}."
@@ -423,8 +463,9 @@ HEADER = """// ═════════════════════�
 //
 // Each row is marked `verified` (read from a real config file or a live health
 // check) or `declared` (hand-listed because nothing on disk records it). The
-// page shows that split, because `claude mcp list` only ever sees two of these
-// servers and a list you cannot attribute cannot be acted on.
+// page shows that split, because `claude mcp list` only ever sees the few
+// servers configured for this repo and a list you cannot attribute cannot be
+// acted on.
 //
 // Guarded by tests/mcp-inventory.test.js.
 """
