@@ -1557,6 +1557,28 @@ def receipt_block(receipt, round_no, stamp):
     return f"[{stamp} — agent-dispatch] {RECEIPT_MARK} (round {round_no}):\n{body}"
 
 
+# Only the receipt blocks THIS task wrote set its round (21 Sep 2026). Notes
+# also carries TRACK RECORD lines copied from the task history, in the form
+# "- 15 Sep 2026 10:11 — agent-dispatch: FEEDBACK ANSWERED (round 7): (link)",
+# many of them from other tasks. Counting the bare mark counted every one: on
+# 21 Sep 63 of 109 tasks were misnumbered, 46 of them with no receipt of their
+# own, and rec0D35XfxR2QgvIX's first receipt went out as round 7.
+RECEIPT_HEADER_RE = re.compile(
+    r"^\[\d{1,2} \w{3} \d{4}(?: \d{2}:\d{2})?\s*[—–-]\s*agent-dispatch\] "
+    + RECEIPT_MARK + r" \(round \d+\):(?P<rest>[^\n]*)$", re.M)
+
+
+def receipt_round(notes, task_id):
+    """The round a new receipt carries: this task's own receipt blocks, plus one.
+    A header naming a different record id was copied in, so it never counts."""
+    own = 0
+    for m in RECEIPT_HEADER_RE.finditer(str(notes or "")):
+        if set(re.findall(r"\brec[A-Za-z0-9]{14}\b", m.group("rest"))) - {task_id}:
+            continue
+        own += 1
+    return own + 1
+
+
 def feedback_archived(history, text):
     """True when this feedback text is already in the archive, stamps ignored.
 
@@ -3745,7 +3767,7 @@ def cmd_submit(args):
                 "       His card shows these lines first, so he sees he was understood "
                 "before he reads the draft (30 of 132 feedback tasks went round twice, "
                 "7 Sep 2026).")
-        round_no = str(tf.get(AF["notes"]) or "").count(RECEIPT_MARK) + 1
+        round_no = receipt_round(tf.get(AF["notes"]), args.task)
         rb = receipt_block(receipt_text, round_no,
                            datetime.now(LONDON).strftime("%d %b %Y %H:%M"))
         # Written into the local copy so every write path below (filed,
