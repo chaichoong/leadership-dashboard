@@ -1083,10 +1083,14 @@ if (tabId === 'comms') lazyLoadFrame('commsFrame', 'follow-up');
         overlay.id = 'quickTaskOverlay';
         overlay.style.cssText = 'position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.5);z-index:99999;display:flex;align-items:center;justify-content:center';
 
-        // Build team options
-        const teamOptions = (typeof TASK_TEAM !== 'undefined' ? TASK_TEAM : []).map(m =>
-            `<option value="${escHtml(m.key)}"${(m.email === valAssignee || m.key === valAssignee) ? ' selected' : ''}>${escHtml(m.name)}</option>`
-        ).join('');
+        // Build team options. Someone who has left (TASK_TEAM `left`) is never
+        // offered for new work; they appear only when they already hold the task
+        // being edited, so its assignee still reads true.
+        const holdsTask = m => m.email === valAssignee || m.key === valAssignee;
+        const teamOptions = (typeof TASK_TEAM !== 'undefined' ? TASK_TEAM : [])
+            .filter(m => !m.left || holdsTask(m))
+            .map(m => `<option value="${escHtml(m.key)}"${holdsTask(m) ? ' selected' : ''}>${escHtml(m.name)}${m.left ? ' (left)' : ''}</option>`)
+            .join('');
 
         // Build project options. The shell has no allProjects global (that
         // lives inside the os/tasks iframe), so projects are fetched once
