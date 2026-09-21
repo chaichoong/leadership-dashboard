@@ -192,6 +192,120 @@ describe('robot-only deny list (scripts/agent-settings.json)', () => {
   });
 });
 
+// ─────────────────────────────────────────────────────────────────────────────
+// 21 Sep 2026, Kevin approved. Every runner tells its robot to keep working
+// files in a folder under ~/knowledge-os/logs/, and the deny list above keeps
+// it out of the code paths in the repo. But a run started in the repo may only
+// mkdir or redirect (`> file`) inside its working directories, and none of
+// those folders was one: "mkdir in '.../logs/agent-dispatch/<run>/...' was
+// blocked. For security, Claude Code may only create directories in the
+// allowed working directories", in 10 of 12 robot runs on 19 Sep and 11 of 13
+// on 20 Sep. Each runner now passes --add-dir for exactly the folder it is
+// told to write. Back-tested on 2.1.278 with each runner's exact flags: mkdir
+// and `echo x > file` in the granted folder went through; a sibling of it,
+// /tmp and scripts/ stayed refused; without the flag the same write was
+// refused. These tests keep every runner granting its folder, and only it.
+// ─────────────────────────────────────────────────────────────────────────────
+describe('robot working folders (--add-dir)', () => {
+  const LOGS = '/Users/kevinbrittain/knowledge-os/logs';
+  const esc = (s) => s.replace(/[.*+?^${}()|[\]\\/]/g, '\\$&');
+  const L = esc(LOGS);
+  // What each runner must grant, and what each variable must resolve to.
+  const WANT = {
+    'scripts/agent-slot-run.sh': { SCRATCH: new RegExp(`^${L}/ceo-agent/scratch$`) },
+    'scripts/task-manager-run.sh': { SCRATCH: new RegExp(`^${L}/task-manager/scratch$`) },
+    'scripts/inbound-triage-run.sh': {
+      SCRATCH: new RegExp(`^${L}/inbound-triage/scratch$`),
+      DISPATCH_RUNS: new RegExp(`^${L}/agent-dispatch$`),
+    },
+    'scripts/handback-poll-run.sh': { RUNDIR: new RegExp(`^${L}/agent-dispatch/\\d{8}-\\d{6}$`) },
+    'scripts/signin-pickup-run.sh': { RUNDIR: new RegExp(`^${L}/agent-dispatch/\\d{8}-\\d{6}-signin$`) },
+  };
+  const RUNNERS_ALL = Object.keys(WANT);
+  const callOf = (src) => src.match(/"\$CLAUDE" -p [\s\S]*?--allowedTools /g) || [];
+  // The runner's OWN assignment lines, run by bash, so the test reads the
+  // folder the runner would really pass rather than a copy of it. Only these
+  // five names are taken: other top-level lines call Airtable.
+  const resolveVars = (r, names) => {
+    const src = read(r);
+    const head = src.slice(0, src.indexOf('"$CLAUDE" -p'));
+    const lines = head.split('\n').filter((l) => /^(JOB|LOG_DIR|SCRATCH|RUNDIR|DISPATCH_RUNS)=/.test(l));
+    const script = [...lines, ...names.map((n) => `printf '%s\\n' "$${n}"`)].join('\n');
+    // agent-slot-run.sh takes the job name as $1; ceo-agent is a real slot.
+    const out = execFileSync('/bin/bash', ['-c', script, 'runner', 'ceo-agent'], {
+      encoding: 'utf8', env: { PATH: '/usr/bin:/bin', HOME: '/Users/kevinbrittain' },
+    }).split('\n');
+    return Object.fromEntries(names.map((n, i) => [n, out[i]]));
+  };
+
+  it('every agent runner is covered here (control: the five that start claude with the agent tools)', () => {
+    const found = readdirSync(resolve(ROOT, 'scripts'))
+      .filter((f) => /\.(sh|py)$/.test(f)).map((f) => `scripts/${f}`)
+      .filter((f) => read(f).includes('${AGENT_ALLOWED_TOOLS[@]}'));
+    expect(found.sort()).toEqual([...RUNNERS_ALL].sort());
+  });
+
+  it('each claude run grants exactly its own folder(s), by variable, nothing else', () => {
+    for (const r of RUNNERS_ALL) {
+      const calls = callOf(read(r));
+      expect(calls.length, `${r} starts claude`).toBeGreaterThan(0);
+      for (const c of calls) {
+        const all = [...c.matchAll(/--add-dir\b/g)].length;
+        const vars = [...c.matchAll(/--add-dir "\$([A-Z_]+)"/g)].map((m) => m[1]);
+        expect(vars.length, `${r}: every --add-dir names a variable, never a literal path`).toBe(all);
+        expect(vars.sort(), `${r}: a robot refused its own working folder falls back to /tmp and the repo`)
+          .toEqual(Object.keys(WANT[r]).sort());
+      }
+    }
+  });
+
+  it('each granted folder resolves to that runner’s own folder under logs/, never wider', () => {
+    for (const r of RUNNERS_ALL) {
+      const got = resolveVars(r, Object.keys(WANT[r]));
+      for (const [name, re] of Object.entries(WANT[r])) {
+        expect(got[name], `${r}: $${name}`).toMatch(re);
+        // Explicit, although the patterns above already imply it.
+        for (const wide of [LOGS, '/Users/kevinbrittain', '/tmp', '/', resolve(ROOT)]) {
+          expect(got[name], `${r}: $${name} must not grant ${wide}`).not.toBe(wide);
+        }
+        expect(got[name].startsWith(`${LOGS}/`), `${r}: $${name}`).toBe(true);
+      }
+    }
+  });
+
+  it('each granted folder is created before claude starts', () => {
+    for (const r of RUNNERS_ALL) {
+      const src = read(r);
+      const start = src.indexOf('"$CLAUDE" -p');
+      for (const name of Object.keys(WANT[r])) {
+        const mk = src.search(new RegExp(`^\\s*mkdir -p [^\\n]*"\\$${name}"`, 'm'));
+        expect(mk, `${r}: mkdir -p "$${name}" is missing`).toBeGreaterThan(-1);
+        expect(mk, `${r}: mkdir -p "$${name}" must come before the claude run`).toBeLessThan(start);
+      }
+    }
+  });
+
+  it('the folder granted is the folder the robot is told to write', () => {
+    // The prompt names it for SCRATCH and RUNDIR runs.
+    for (const r of RUNNERS_ALL) {
+      const prompt = callOf(read(r))[0].split(/\n\s+--/)[0];
+      for (const name of Object.keys(WANT[r]).filter((n) => n !== 'DISPATCH_RUNS')) {
+        expect(prompt, `${r}: the prompt must send working files to $${name}`).toContain(`$${name}`);
+      }
+    }
+    // The dispatch skill names its own run folder mid-run: it must sit inside
+    // the folder inbound-triage grants, or step 3 is refused again.
+    const skill = read('.claude/scheduled-tasks/agent-dispatch/SKILL.md');
+    const m = skill.match(/RUNDIR="\$HOME(\/knowledge-os\/logs\/[^"$]+)\/\$\(date/);
+    expect(m, 'agent-dispatch SKILL.md step 1 RUNDIR line').not.toBeNull();
+    const { DISPATCH_RUNS } = resolveVars('scripts/inbound-triage-run.sh', ['DISPATCH_RUNS']);
+    expect(`/Users/kevinbrittain${m[1]}`).toBe(DISPATCH_RUNS);
+    // Control: the task-manager skill's scratch is the one its runner grants.
+    expect(read('.claude/scheduled-tasks/task-manager-board/SKILL.md'))
+      .toContain('~/knowledge-os/logs/task-manager/scratch');
+  });
+});
+
 describe('browser lane — prepare can never submit', () => {
   // The stub is the page: runSteps is the thing under test, and driving it
   // with a fake page proves the control flow without a network round trip.

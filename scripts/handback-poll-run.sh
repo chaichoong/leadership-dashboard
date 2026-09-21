@@ -147,6 +147,7 @@ Everything else in the skill still applies in full and must not be weakened: the
 Step 5: write $RUNDIR/report.json exactly as the skill specifies, copying queueCounts, roleAgentsError and skippedTier2 VERBATIM from queue.json. Step 6's escalation DM applies as written. Step 7 (verify) is MANDATORY — run it and do not swallow its exit code. SKIP step 7b (score): the daily slots compute it and recomputing it forty-eight times a day is waste.
 
 Do not take the queue lock — this run is lock-exempt (14 Sep 2026) and must never queue for it; the intent ledger and the in-flight check are what stop a double carry-out. Do not edit, commit or push code; file anything needing a code change via scripts/findings.py. Working and temp files go under $RUNDIR/TASKID/ only, never in monitoring/ and never anywhere else in the repo. Close with at most ten lines of counts only: no message content, no sender names, no record IDs." \
+  --add-dir "$RUNDIR" \
   --settings "$AGENT_SETTINGS_FILE" \
   --permission-mode acceptEdits \
   --allowedTools "${AGENT_ALLOWED_TOOLS[@]}" "Bash(osascript:*)" >> "$LOG" 2>&1 &

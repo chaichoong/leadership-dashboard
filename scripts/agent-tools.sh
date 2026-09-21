@@ -107,3 +107,32 @@ export AGENT_ALLOWED_TOOLS
 # fails the run loudly. tests/agent-initiative.test.js parses it on every push.
 AGENT_SETTINGS_FILE="$(CDPATH= cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/agent-settings.json"
 export AGENT_SETTINGS_FILE
+
+# WORKING FOLDERS (Kevin approved 21 Sep 2026)
+# --------------------------------------------
+# Every runner tells its robot to keep working files in a folder under
+# ~/knowledge-os/logs/, outside the repo, and since the deny list above it may
+# not write code paths in the repo either. But a run started in the repo may
+# only mkdir or redirect (`> file`) inside its working directories, and nothing
+# ever added that folder. The robots' own transcripts, 14-21 Sep 2026: "mkdir
+# in '.../logs/agent-dispatch/<run>/...' was blocked. For security, Claude Code
+# may only create directories in the allowed working directories", in 10 of 12
+# robot runs on 19 Sep and 11 of 13 on 20 Sep, on 2.1.128 and 2.1.278 alike;
+# refused robots tried /tmp next (refused too) and left temp files in the
+# repo. (The Write tool was never blocked: Kevin's user settings allow it.)
+#
+# So each runner passes `--add-dir` for exactly the folder it is told to write,
+# created before claude starts, and nothing wider:
+#   agent-slot-run.sh      $SCRATCH        logs/<job>/scratch
+#   task-manager-run.sh    $SCRATCH        logs/task-manager/scratch
+#   inbound-triage-run.sh  $SCRATCH        logs/inbound-triage/scratch
+#                          $DISPATCH_RUNS  logs/agent-dispatch (the dispatch
+#                                          skill names its run folder mid-run)
+#   handback-poll-run.sh   $RUNDIR         logs/agent-dispatch/<this run>
+#   signin-pickup-run.sh   $RUNDIR         logs/agent-dispatch/<this run>-signin
+# An added directory follows the working directory's rules (code.claude.com/
+# docs/en/permissions, "Working directories"), so under --permission-mode
+# acceptEdits mkdir and redirects there are accepted, /tmp and the rest of the
+# disk stay refused, and the deny list still wins inside the repo. Back-tested
+# on 2.1.278 with each runner's exact flags. Guarded by
+# tests/agent-initiative.test.js ("robot working folders").

@@ -32,7 +32,12 @@ REPO="/Users/kevinbrittain/Projects/leadership-dashboard"
 LOG_DIR="/Users/kevinbrittain/knowledge-os/logs/inbound-triage"
 SCRATCH="$LOG_DIR/scratch"
 LOG="$LOG_DIR/runs.log"
-mkdir -p "$SCRATCH"
+# Step 3 runs the agent-dispatch skill, which makes its own run folder in
+# here (RUNDIR=$HOME/knowledge-os/logs/agent-dispatch/<time>) once the run has
+# started, so the folder name is not known yet: the parent is granted with
+# --add-dir below. See "WORKING FOLDERS" in agent-tools.sh.
+DISPATCH_RUNS="/Users/kevinbrittain/knowledge-os/logs/agent-dispatch"
+mkdir -p "$SCRATCH" "$DISPATCH_RUNS"
 
 # Same token discipline as compound_brain.sh: without the exported OAuth token
 # a headless `claude -p` dies with "OAuth access token has expired".
@@ -256,6 +261,8 @@ Then do these three skills in order, each in full:
 2. /Users/kevinbrittain/.claude/scheduled-tasks/inbound-messages-sweep/SKILL.md — IMPORTANT: in this context chat.db reads are DENIED to you; the fresh pre-read dumps at $SCRATCH/imessage-scan.json and $SCRATCH/imessage-sent.json are your scan and sent-check data, per the skill's pre-dump rules.
 3. /Users/kevinbrittain/.claude/scheduled-tasks/agent-dispatch/SKILL.md (Kevin's ruling, 24 Aug 2026: dispatch runs in every slot so the work triaged above reaches the approval queue in the same slot)
 Rules for the whole run: this is real mail — when unsure between outcomes choose the agent-lane task; when unsure about archiving, do not archive; never send, reply, or delete anything yourself (dispatch prepares and submits through its own gated script only). Working and temp files go ONLY under $SCRATCH — NEVER under the repo, and never in monitoring/, because monitoring/ is committed to a public repository and scan output carries full email bodies. Counts-only reports in monitoring/ are fine. A broken read (Gmail or iMessage) is reported loudly, never treated as a quiet day. Do not take the queue lock (this run already holds it). Do not edit, commit, or push code; file anything needing a code change via scripts/findings.py. Complete each skill's closing steps in full (watermark, score, publish; dispatch's verify step). End with at most twenty lines of counts only — never message content, sender names, or record IDs." \
+  --add-dir "$SCRATCH" \
+  --add-dir "$DISPATCH_RUNS" \
   --settings "$AGENT_SETTINGS_FILE" \
   --permission-mode acceptEdits \
   --allowedTools "${AGENT_ALLOWED_TOOLS[@]}" < /dev/null >> "$LOG" 2>&1
