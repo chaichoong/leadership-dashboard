@@ -694,15 +694,17 @@ function readPlan(p) {
 // Kept pure so a test can drive it without a browser (21 Sep 2026: the Spotify show page names each
 // episode only in its link).
 function pickLinks(anchors, needle, cap = 500) {
-  const seen = new Set(), out = [];
+  const byHref = new Map();
   for (const a of anchors || []) {
     const href = String((a && a.href) || '');
-    if (!needle || !href.includes(needle) || seen.has(href)) continue;
-    seen.add(href);
-    out.push({ href, text: String(a.text || '').trim().slice(0, 200) });
-    if (out.length >= cap) break;
+    if (!needle || !href.includes(needle)) continue;
+    const text = String(a.text || '').trim().slice(0, 200);
+    const had = byHref.get(href);
+    if (had) { if (!had.text && text) had.text = text; continue; }   // a cover image linked ahead of the title
+    if (byHref.size >= cap) continue;
+    byHref.set(href, { href, text });
   }
-  return out;
+  return [...byHref.values()];
 }
 
 function arg(argv, name, dflt) {

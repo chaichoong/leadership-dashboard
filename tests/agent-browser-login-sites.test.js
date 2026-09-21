@@ -83,6 +83,8 @@ describe('the public Spotify show page', () => {
     ], '/episode/');
     expect(got).toEqual([{ href: 'https://open.spotify.com/episode/5XRmBZhlJptMDKnyW1tRNi', text: 'Episode 2064 - Regaining Fitness' }]);
     expect(pickLinks([{ href: 'https://x/episode/a', text: 'a' }], '')).toEqual([]);
+    expect(pickLinks([{ href: 'https://x/episode/a', text: ' ' }, { href: 'https://x/episode/a', text: 'Episode 2064 - T' }], '/episode/'))
+      .toEqual([{ href: 'https://x/episode/a', text: 'Episode 2064 - T' }]);   // review: a wordless cover link ahead of the title
     expect(pickLinks([...Array(9)].map((_, i) => ({ href: `https://x/episode/${i}`, text: String(i) })), '/episode/', 3)).toHaveLength(3);
   });
 });
