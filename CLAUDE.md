@@ -30,7 +30,7 @@ Never guess an entity attribute — property location, tenancy status, cost stat
 
 ## Airtable queries (a wrong query still returns 200)
 
-- Paginate every read: follow `offset`, or use `airtableFetch()`. A hand-rolled fetch once read only the first 100 rows and the card showed a wrong score for a month.
+- Paginate every read, including the existence check before a bulk create (a missed page writes duplicates): follow `offset`, or use `airtableFetch()`. A hand-rolled fetch once read only the first 100 rows and the card showed a wrong score for a month.
 - A GET by record id ignores the table in the URL. To prove which table a record is in, list that table or attempt a write.
 - `ARRAYJOIN()` over a link field returns display names, never record ids. Match ids through a lookup of `RECORD_ID()`; a name match needs a control.
 - Date equality needs `DATESTR()` or `IS_SAME()`. `{Date}="2026-08-06"` returns zero.
@@ -39,23 +39,16 @@ Never guess an entity attribute — property location, tenancy status, cost stat
 - Anything that accumulates value lives in Airtable, never localStorage, keyed on something stable across records.
 - Never set a unit to Void without the six-question gate in the airtable-tenancy-ender skill. Occupancy lives in both the `Tenancies` and `Tenancies copy` links. A payment belongs to the tenancy in its own `Tenancy` link, not the tenancy record that displays it.
 - **New KPI compute code ships with its KPI Library entry in the same commit** — add the template to `KPI_LIBRARY` in `js/kpi-library.js` (canonical) and the rationale to `docs/kpi-library-spec.md`. The daily `kpi-library-coverage` invariant in `scripts/check-data-invariants.py` fails the sweep whenever a live automated KPI has no library template, so forgetting is loud, not silent
-- Only show ACTIVE businesses in dropdowns (filter by Active field)
 - Use exact field names consistently between read and write paths (e.g., 'Quarter End' vs 'QuarterEnd' caused a sync bug)
-- Watch for pagination when bulk-creating records to avoid duplicates
 - Bulk operations on invoices/transactions: never mark legitimate unpaid items as paid without explicit reconcile logic
 
 Incident write-ups: `docs/incident-lessons.md`.
 
 ## Standard Workflow
 
-Two commands cover all work. Kevin talks conversationally after either one. Claude handles the full pipeline.
+`/build-feature` for anything new, `/fix` for bugs, feedback and tweaks to existing work. Each runs start to finish: Kevin approves the plan once and receives a working, deployed result.
 
-- **`/build-feature`** — for anything new: new tab, new page, new OS, new feature, significant extension of an existing feature. Rewrites Kevin's input into a BILD prompt, plans, gets approval, builds, runs the full quality pipeline (simplify, test-gaps, review, security-review if auth/data/money, pre-deploy), deploys, verifies live.
-- **`/fix`** — for bugs, errors, feedback, amendments, tweaks to existing work. Rewrites Kevin's input into a focused BILD prompt, diagnoses, fixes, runs the quality pipeline (verify, simplify, test-gaps, pre-deploy), deploys, verifies live.
-
-Both skills run start-to-finish. Kevin approves the plan once, then receives a working, deployed result. No manual skill-chaining needed.
-
-- After merging any change to a repo skill or rule, refresh the main checkout (`git fetch origin && git reset --keep origin/main`) and grep the file on disk; skills and rules load from the checkout, not from GitHub. The GOAL contract is injected by a hook; rule: `~/.claude/skills/goal-line/SKILL.md`.
+- After merging any change to a repo skill or rule, refresh the main checkout (`git fetch origin && git reset --keep origin/main`) and grep the file on disk; skills and rules load from the checkout, not from GitHub.
 
 ## Forbidden Patterns
 
@@ -74,13 +67,13 @@ These patterns cause production bugs. Never introduce them:
 
 These have caused production bugs in this codebase. Check for them during every build, fix, and audit.
 
-- **Front-end lessons** (PATCH typecast, renderTasks vs renderAll, `returnFieldsByFieldId`, CSS overflow, localStorage quota): `.claude/rules/frontend.md`, loaded when a file under `js/`, an `.html` file or a file under `css/` is read
+- **Front end** (lessons: PATCH typecast, renderTasks vs renderAll, `returnFieldsByFieldId`, CSS overflow, localStorage quota; plus the file-ownership table, Protected Sections, Global Variables, the Verification Checklist with the Regression Protocol, and Version Tracking): `.claude/rules/frontend.md`, loaded when a file under `js/`, an `.html` file or a file under `css/` is read
 - **Airtable rules** (blank fields, the table a record id really lives in, voiding a unit) sit in "Airtable queries" above. The incident write-ups are in `docs/incident-lessons.md`
 - **Reconciliation lessons** (split sign, paginated reads, the learning loop): `.claude/rules/reconciliation.md`, loaded when `js/reconciliation.js` or a recon test is read
 - **Agent task pipeline lessons** (duplicate key, auto-replies and stranded mail, the alert lane, idle hand-backs): `.claude/rules/agent-task-pipeline.md`, loaded when the agent task scripts, `os/agents/index.html` or their tests are read
 - **Python script lessons** (atomic lock-file writes, a deleted name that still passes import): `.claude/rules/python-scripts.md`, loaded when any `scripts/**/*.py` is read
 - **Cloudflare cron:** never put the day of the week in a Cloudflare cron. Detail: `.claude/rules/cloudflare-cron.md`, loaded when a wrangler toml or Worker file is read
-- **A master switch that reads On is not the setting that earns, and a filter on HOW something was uploaded hides it from the report that would have caught it** — the Content Engine switched every YouTube video's monetisation On and every surface agreed: the morning line read "content monetisation: every YouTube episode and Short On". On 20 Sep 2026 Kevin said the long episodes were not earning. He was right. The master switch buys a pre-roll; **mid-roll ads were off on 817 of the 888 videos over 8 minutes**, with YouTube's own break point already computed and waiting on 695 of them, and a further 923 videos from 2020 to Nov 2023 had no video ads at all, only display banners. Nothing was broken, nothing errored, and the thing being measured was simply not the thing that makes money. Three rules came out of it. **Measure the setting that produces the outcome, not the switch nearest to it.** **A selector on provenance is a selector on visibility** — `monetise_long_video` matched posts with `route == "api"`, so every GoHighLevel upload (which carries GHL's own post id, not a YouTube one) was stepped over in silence, and the report used the same filter, so 2054's episode, 2054's Short and 2195's episode were invisible in both places; match on the identity of the thing (the video id, resolved through the episode's `youtube_link`), never on how it arrived, and report what you cannot resolve. And **a 200 from an undocumented internal endpoint is not a write**: Studio's `metadata_update` needs the page's minted BotGuard `attestationResponseData`, and replayed without it it answers `200 OK` and changes nothing — proved on `Rs8xHbD5miQ`, 200 then `hasMidrollAds` still false on read-back. Same family as the Airtable silent-zero rule above. So a genuine UI save mints an attestation, the rest of the batch replays it, and **every id is read back off the source before anything is called done**. Guarded by `tests/content-engine-ads.test.js` (back-tested: restoring the route filter fails "does not filter YouTube posts by upload route")
+- **Content Engine monetisation (20 Sep 2026):** measure the setting that produces the outcome, not the switch nearest to it. A selector on provenance is a selector on visibility: match on the identity of the thing (the video id), never on how it arrived, and report what you cannot resolve. A 200 from an undocumented internal endpoint is not a write: read every id back off the source before calling it done. Write-up: `docs/incident-lessons.md`. Guarded by `tests/content-engine-ads.test.js`
 
 ## Regression Tests (no bug is fixed until it is caught)
 
@@ -108,41 +101,6 @@ returns zero rows and reads as a pass forever. Each invariant declares a `contro
 matching the population the bug would corrupt; if the control matches nothing, the run FAILS
 rather than passing. Back-test a new invariant by evaluating the *broken* formula inline in a
 read-only query and confirming it fires — never by writing bad data.
-
-## File Architecture
-
-Where every file lives: `STRUCTURE.md`. The old source tree below is kept for maintainers only.
-
-<!--
-The platform has been split from a single monolith into separate files so that **multiple Claude sessions can work on different features at the same time** without overwriting each other.
-
-### Source Files
-
-```
-index.html          ← HTML shell only (sidebar, tab containers, no logic)
-css/tokens.css      ← Design tokens (colour, typography, spacing) — single source of truth
-css/styles.css      ← Main stylesheet (consumes tokens.css)
-js/config.js        ← Constants, Table IDs, Field IDs, Budget Targets
-js/shared.js        ← Auth, API layer, helpers, UI utilities (expandableCard, switchTab, escHtml)
-js/dashboard.js     ← Leadership Dashboard tab (loadDashboard, renderDashboard)
-js/cashflow.js      ← Cash flow forecast, balance calculator, UC checks, what-if
-js/reconciliation.js ← Reconciliation engine, knowledge base, accuracy tracking
-js/invoices.js      ← Invoices tab (fetch, render, match, approve, pay)
-js/cfv.js           ← CFV tab (detection, actions, comments)
-js/fintable.js      ← Fintable Sync Monitor tab
-js/sitemap.js       ← Site Map & Links tab, SOP update requests
-js/ai-assistant.js  ← AI chat panel, context gathering, streaming
-os/                 ← Operating Systems (separate pages loaded via iframe)
-```
-
-### Other Files
-- `follow-up.html` — Inbound Comms (standalone, loaded via iframe)
-- `compliance.html` — Property Compliance (standalone, loaded via iframe)
-- `sop*.html` — SOPs for each page
-- `os/business-plan-builder/` — retired from the shell 1 Aug 2026 (no sidebar entry); files kept for the Supabase client product, where Plan Builder remains a toggleable module
-- `os/tasks/`, `os/operations/`, `os/strategy/`, `os/systemisation/`, `os/team/` — Operating Systems pages (loaded via iframe; the old os/index.html hub and os/launch-plan.html were removed in the sidebar restructure)
-- `sitemap.xml` / `robots.txt` — SEO files (update when adding new pages)
--->
 
 ## Concurrent sessions
 
@@ -227,12 +185,8 @@ MCP servers and CLI tools configured with `--api-key <token>` put that token in 
 table, where any process running as the same user can read it with `ps`. It also lands in
 session transcripts on disk. Use a file (`~/.config/od/airtable_pat`) or an env var.
 
-Which file to edit for each feature: the file-ownership table is in `.claude/rules/frontend.md`, loaded when a file under `js/`, an `.html` file or a file under `css/` is read.
-
 ### If you need to change a shared file (config.js, shared.js, index.html, styles.css)
 These files are used by ALL features. Only ONE session should edit them at a time. If your feature change requires a config or shared change, make it in the same session — don't leave it for another session.
-
-Protected Sections (the `index.html` OS integration points) and Global Variables: `.claude/rules/frontend.md`, loaded when a file under `js/`, an `.html` file or a file under `css/` is read.
 
 ## Quality gate
 
@@ -241,8 +195,6 @@ The user is a non-technical operator. Every task must be delivered working and v
 ### Rule: No "Done" Without Proof
 
 Never say a task is complete until you have personally verified it works. "I've made the changes" is not done. "I've verified in the browser that the feature works correctly" is done.
-
-The Verification Checklist (Phases 1-6) and the Regression Protocol for shared files: `.claude/rules/frontend.md`, loaded when a file under `js/`, an `.html` file or a file under `css/` is read.
 
 ### When You Find Issues During Verification
 
@@ -297,8 +249,6 @@ Never say "done" after pushing and leave the user waiting. The task is not compl
 
 Sage Executive tokens, and the rule that every new HTML page links `css/tokens.css` first: `.claude/rules/design-system.md`, loaded when a `.js`, `.html` or `.css` file is read.
 
-Version Tracking (`PAGE_REGISTRY` `pageVer` auto-bump, manual `sopVer`, the pre-commit mapping): `.claude/rules/frontend.md`, loaded when a file under `js/`, an `.html` file or a file under `css/` is read.
-
 ## Deployment & Git
 
 ### Branch Strategy
@@ -307,15 +257,11 @@ Version Tracking (`PAGE_REGISTRY` `pageVer` auto-bump, manual `sopVer`, the pre-
 - **New features, multi-file changes, anything touching shared files (config.js, shared.js, index.html, styles.css):** work on a branch, push, create a PR. This protects against concurrent session conflicts
 - Branch naming: `feature/short-description` or `fix/short-description`
 
-**Decide branch-or-main BEFORE you commit, never after.** Committing to local `main` and
-*then* branching off it to open a PR leaves a stale twin of every commit on local `main`
-forever: `gh pr merge --squash` creates a NEW commit on origin, so the original never
-becomes an ancestor of `origin/main` and nothing ever cleans it up. If you are going to
-open a PR, create the branch first — `./scripts/worktree.sh new <topic>` — so nothing
-lands on `main` at all.
-
-**Never do both for one piece of work.** One change = one route. A commit on `main` AND a
-PR for the same change is always a bug, not belt-and-braces.
+**Decide branch-or-main BEFORE you commit, and use one route per change.** `gh pr merge --squash`
+puts a NEW commit on origin, so a commit made before you branched is stranded as a stale twin
+that nothing cleans up. Going to open a PR? Create the branch first with
+`./scripts/worktree.sh new <topic>`. A commit on `main` AND a PR for the same change is always
+a bug.
 
 ### Creating the PR
 
@@ -337,12 +283,7 @@ Do NOT quietly merge to main locally as a fallback when a branch was created for
 
 **If the pre-push gate blocks a push to main on a test that is unrelated to your change:** do not reach for `SKIP_SYNC_TESTS=1`. Only `main` is gated (see `scripts/pre-push`), so push a branch and merge it with `gh` instead. Verify the failure really is unrelated first — run the failing test in isolation, and re-run the suite to see whether a *different* test fails, which indicates flakiness rather than a regression.
 
-⚠️ **This fallback is the one that has actually caused duplicates.** You have already
-committed to `main`, the gate blocks the push, so you branch off that commit and PR it.
-The squash merge then puts a different SHA on origin and your original commit is stranded
-on local `main`.
-
-So when the gate sends you down the branch route, finish the job:
+This fallback is the one that has actually stranded commits, so finish the job:
 
 ```bash
 gh pr merge --squash --delete-branch

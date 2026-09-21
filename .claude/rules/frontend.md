@@ -13,6 +13,7 @@ Moved from CLAUDE.md on 21 Sep 2026, word for word: the front-end Known Anti-Pat
 
 These have caused production bugs in this codebase. Check for them during every build, fix, and audit.
 
+- **Only show ACTIVE businesses in dropdowns** (filter by the Active field). Moved from CLAUDE.md "Airtable queries" on 21 Sep 2026
 - **Missing typecast on PATCH calls** — Airtable number fields must receive a Number, not a string. Always wrap with `Number()` before sending: `fields: { [F.amount]: Number(value) }`
 - **renderTasks vs renderAll stale-state** — after an inline edit, status change, or filter change, call the full list re-render function (e.g. `renderAll()`), not just the single-item updater. Partial re-renders leave badges, counts, and visible rows out of sync
 - **returnFieldsByFieldId returning IDs not names** — when using `returnFieldsByFieldId=true` in Airtable API calls, field keys in the response are field IDs (e.g. `fldXyz123`), not human-readable names. If your code expects `rec.fields['Amount']` but gets `rec.fields['fldXyz123']`, every field read silently returns undefined. Match the approach used by the rest of the codebase (this project uses field names via the `F` constants in config.js, not raw field IDs)

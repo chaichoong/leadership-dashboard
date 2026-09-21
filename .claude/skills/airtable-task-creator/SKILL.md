@@ -1,12 +1,13 @@
 ---
 name: airtable-task-creator
-description: Create a task in Kevin Brittain's Operations Director Airtable base (Tasks table) with the two-phase workflow, routed to the right owner. Routing (21 Sep 2026) - an AI agent owns the task by default (Assignee left blank, Team Member set to the agent); repairs, and property work Kevin asks to be Roy's, go to Roy Lavin, head of the property business (a team member, not a contractor); Kevin only when no agent can do it. Never Mica (no routing since 25 Aug 2026) or Ericamae (left 17 Sep 2026). This project copy REPLACES the claude.ai skill of the same name (anthropic-skills:airtable-task-creator), which still routed to Mica and Ericamae, treated Roy as a contractor and defaulted the assignee to Kevin. Use when Kevin asks to create a task, add a task, or schedule work in Airtable.
+description: Create a task in Kevin Brittain's Operations Director Airtable base (Tasks table) with the two-phase workflow, routed to the right owner. An AI agent owns the task by default (Assignee left blank, Team Member set to the agent); repairs, and property work Kevin asks to be Roy's, go to Roy Lavin; Kevin only when no agent can do it; never Mica or Ericamae. Use when Kevin asks to create a task, add a task, or schedule work in Airtable.
 ---
 
 # Airtable Task Creator
 
-This is the reviewed project copy (21 Sep 2026). It replaces the claude.ai skill
-`anthropic-skills:airtable-task-creator`. The field IDs and the two-phase workflow are the
+This is the reviewed project copy (21 Sep 2026). It REPLACES the claude.ai skill
+`anthropic-skills:airtable-task-creator`, which still routed to Mica and Ericamae, treated Roy
+as a contractor and defaulted the assignee to Kevin. The field IDs and the two-phase workflow are the
 original skill's. The routing is rewritten to the current rules, each checked against its
 source (listed under "Sources" at the bottom), and the Airtable calls use the path that runs
 in this repo.
