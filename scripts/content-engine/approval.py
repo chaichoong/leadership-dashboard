@@ -233,13 +233,13 @@ def recheck_gate(day):
     rebuild fixes the files, but nothing read the gate again, so the report would call the day blocked for good.
     Returns True when the gate passes; a failure is recorded exactly as output_gate records it."""
     state = load_state()
-    before = dict(state.get(str(day)) or {})
+    had, before = str(day) in state, dict(state.get(str(day)) or {})
     ok = output_gate(day, watch.load_ledger(), state) is not None
-    e = state.get(str(day)) or {}
-    if not ok and e.get("qa_waiting") and before.get("qa_blocked"):
+    if not ok and (state.get(str(day)) or {}).get("qa_waiting"):
         # files not readable yet is no verdict on the rebuilt files, and nothing retries a wait on an approved card:
-        # keep the old block, which the report shows, rather than a wait nothing will clear (review, 21 Sep 2026)
-        e.pop("qa_waiting", None); e["qa_blocked"] = before["qa_blocked"]
+        # the entry goes back exactly as it was, an old block included, never a wait nothing will clear (review, 21 Sep 2026)
+        if had: state[str(day)] = before
+        else: state.pop(str(day), None)
     save_state(state)
     return ok
 
@@ -386,6 +386,9 @@ def _selftest_gate_wait():
             fake.gate = lambda day, ledger=None, files=None: (False, [(fake.WAIT_CHECK, "not readable from this Mac yet")], [])
             with contextlib.redirect_stdout(io.StringIO()): assert not recheck_gate(1841)
             assert "qa_blocked" in disk["1841"] and "qa_waiting" not in disk["1841"], "a wait never swaps a block for a wait nothing retries"
+            disk["2059"] = {"verdict": "approved", "task": "t9"}
+            with contextlib.redirect_stdout(io.StringIO()): assert not recheck_gate(2059)
+            assert disk["2059"] == {"verdict": "approved", "task": "t9"}, "an unblocked card is left exactly as it was on a wait"
         finally:
             globals()["load_state"] = real_load; watch.load_ledger = real_ledger
     finally:
