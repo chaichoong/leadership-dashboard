@@ -183,24 +183,70 @@ def list_status(text, title):
     return best
 
 
-def public_link(title):
-    """The open.spotify.com link once the episode is out: read from the show's public embed page (no login)."""
+SHOW_PAGE = "https://open.spotify.com/show/%s" % SHOW_ID
+EPISODE_ID_RE = re.compile(r"/episode/([A-Za-z0-9]{22})")
+_show_links = None
+
+
+def embed_links():
+    """{episode name: open.spotify.com link} from the show's public embed page: one HTTP read, no login, no browser.
+    It lists ONLY the newest episode."""
     import urllib.request
     try:
         req = urllib.request.Request("https://open.spotify.com/embed/show/%s" % SHOW_ID, headers={"User-Agent": "Mozilla/5.0"})
         html = urllib.request.urlopen(req, timeout=30).read().decode("utf8", "ignore")
-    except Exception: return ""
+    except Exception as ex:
+        print("spotify: embed page not readable (%s)" % str(ex)[:120], file=sys.stderr); return {}
     m = re.search(r'<script id="__NEXT_DATA__"[^>]*>(.*?)</script>', html, re.S)
-    if not m: return ""
-    data = json.loads(m.group(1)); key = title[:50]
+    if not m: return {}
+    out = {}
     def walk(o):
         if isinstance(o, dict):
-            if str(o.get("uri", "")).startswith("spotify:episode:") and key in str(o.get("name", "")): yield o["uri"]
-            for v in o.values(): yield from walk(v)
+            if str(o.get("uri", "")).startswith("spotify:episode:") and o.get("name"):
+                out[str(o["name"])] = "https://open.spotify.com/episode/" + o["uri"].split(":")[-1]
+            for v in o.values(): walk(v)
         elif isinstance(o, list):
-            for v in o: yield from walk(v)
-    for uri in walk(data): return "https://open.spotify.com/episode/" + uri.split(":")[-1]
+            for v in o: walk(v)
+    walk(json.loads(m.group(1)))
+    return out
+
+
+def show_links(run=None):
+    """{episode title: link} from the full show page, read through the browser lane: the newest episodes, about six.
+    21 Sep 2026: the embed page shows only the newest episode, so when two or three went out in one run the older
+    ones never got a link (2062 and 2063 were read by hand). Read once per process; an empty read is not kept."""
+    global _show_links
+    if _show_links: return _show_links
+    import subprocess
+    run = run or subprocess.run
+    try:
+        r = run(["node", lane(), "read", "--url", SHOW_PAGE, "--profile", PROFILE, "--wait", "8000", "--links", "/episode/", "--max-text", "2000"],
+                capture_output=True, text=True, timeout=240)
+        out = r.stdout
+        links = json.loads(out[out.index("{"):]).get("links") or []
+    except Exception as ex:
+        print("spotify: show page not readable (%s)" % str(ex)[:120], file=sys.stderr); return {}
+    found = {}
+    for l in links:
+        m = EPISODE_ID_RE.search(l.get("href") or "")
+        if m and l.get("text"): found.setdefault(l["text"], "https://open.spotify.com/episode/" + m.group(1))
+    _show_links = found or None
+    return found
+
+
+def link_from(links, title):
+    """The link whose name starts like the title (its first 50 characters, which carry "Episode NNNN - ")."""
+    key = (title or "")[:50]
+    if not key: return ""
+    for name, link in (links or {}).items():
+        if key in name: return link
     return ""
+
+
+def public_link(title):
+    """The open.spotify.com link once the episode is out: the embed page first (cheap, newest only), then the full
+    show page through the browser lane when the episode is not the newest."""
+    return link_from(embed_links(), title) or link_from(show_links(), title)
 
 
 def selftest():
@@ -240,7 +286,34 @@ def selftest():
     assert verify_published.__defaults__[0] >= 2, "the list lags the upload, so it is read more than once"
     assert os.path.exists(os.path.join(os.path.dirname(HERE), "agent-browser.js")), "the browser lane path must resolve (2055 failed with MODULE_NOT_FOUND)"
     assert WIZARD.endswith("/episode/wizard") and SHOW_ID in WIZARD and PODCAST_FORMAT in ("audio", "video")
-    print(json.dumps({"checks": 16, "failed": []}))
+    # 21 Sep 2026: three episodes in one run; the embed page showed only the newest, so the older two had no link
+    global _show_links
+    lane_out = json.dumps({"title": "Runpreneur", "links": [
+        {"href": "https://open.spotify.com/episode/2ArPaZQIZZgvWGOky3iB77", "text": "Episode 2063 - Contingency Forecasting: Budget for What Goes Wrong"},
+        {"href": "https://open.spotify.com/episode/4lpJm9VwYNClc6PLErvIJG?si=x", "text": "Episode 2062 - ADHD Entrepreneur: Match or Disaster for Business?"},
+        {"href": "https://open.spotify.com/show/6hL5SLvsU1VDMHVaWZZ3tO", "text": "Runpreneur"}]})
+    calls = []
+    fake_run = lambda cmd, **kw: calls.append(cmd) or type("R", (), {"stdout": "lane says hi\n" + lane_out})()
+    _show_links = None
+    got = show_links(run=fake_run)
+    assert got == {"Episode 2063 - Contingency Forecasting: Budget for What Goes Wrong": "https://open.spotify.com/episode/2ArPaZQIZZgvWGOky3iB77",
+                   "Episode 2062 - ADHD Entrepreneur: Match or Disaster for Business?": "https://open.spotify.com/episode/4lpJm9VwYNClc6PLErvIJG"}, got
+    assert "--links" in calls[0] and SHOW_PAGE in calls[0] and show_links(run=fake_run) == got and len(calls) == 1, "one browser read per run"
+    assert link_from(got, "Episode 2062 - ADHD Entrepreneur: Match or Disaster for Business?") == "https://open.spotify.com/episode/4lpJm9VwYNClc6PLErvIJG"
+    assert link_from(got, "Episode 2064 - Regaining Fitness After Injury") == "" and link_from(got, "") == ""
+    real_embed, real_show = globals()["embed_links"], globals()["show_links"]
+    try:
+        globals()["embed_links"] = lambda: {"Episode 2064 - Regaining Fitness After Injury: the 6-week rule": "https://open.spotify.com/episode/NEWEST"}
+        globals()["show_links"] = lambda run=None: got
+        assert public_link("Episode 2064 - Regaining Fitness After Injury: the 6-week rule") == "https://open.spotify.com/episode/NEWEST", "the newest comes off the cheap page"
+        assert public_link("Episode 2062 - ADHD Entrepreneur: Match or Disaster for Business?") == "https://open.spotify.com/episode/4lpJm9VwYNClc6PLErvIJG", "an older one off the show page"
+    finally:
+        globals()["embed_links"], globals()["show_links"] = real_embed, real_show
+    _show_links = None
+    bad = lambda cmd, **kw: type("R", (), {"stdout": "no json here"})()
+    import io, contextlib
+    with contextlib.redirect_stderr(io.StringIO()): assert show_links(run=bad) == {} and _show_links is None, "an unreadable page is said, never cached"
+    print(json.dumps({"checks": 23, "failed": []}))
 
 
 if __name__ == "__main__":

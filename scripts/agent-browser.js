@@ -226,6 +226,11 @@ const BUILTIN_SITES = {
   'creators.spotify.com':       { label: 'Spotify for Creators', login: true,
                                   loginUrl: 'https://creators.spotify.com/pod/login',
                                   sessionWalk: ['Continue with Spotify'] },
+  // The Runpreneur podcast's PUBLIC show page (21 Sep 2026). Spotify's embed page lists only the newest
+  // episode, so on a night two or three episodes went out the older ones never got their open.spotify.com
+  // link. The show page lists them all, but only once a browser has run its script. Read-only, no login:
+  // the content engine reads it with `read --links /episode/`.
+  'open.spotify.com':           { label: 'Spotify (public show pages)', login: false },
 };
 
 function loadSites() {
@@ -685,6 +690,23 @@ function readPlan(p) {
   return plan;
 }
 
+// The page's links whose href contains `needle`, with their words, first seen first, one per href, capped.
+// Kept pure so a test can drive it without a browser (21 Sep 2026: the Spotify show page names each
+// episode only in its link).
+function pickLinks(anchors, needle, cap = 500) {
+  const byHref = new Map();
+  for (const a of anchors || []) {
+    const href = String((a && a.href) || '');
+    if (!needle || !href.includes(needle)) continue;
+    const text = String(a.text || '').trim().slice(0, 200);
+    const had = byHref.get(href);
+    if (had) { if (!had.text && text) had.text = text; continue; }   // a cover image linked ahead of the title
+    if (byHref.size >= cap) continue;
+    byHref.set(href, { href, text });
+  }
+  return [...byHref.values()];
+}
+
 function arg(argv, name, dflt) {
   const i = argv.indexOf('--' + name);
   return i >= 0 && argv[i + 1] ? argv[i + 1] : dflt;
@@ -832,7 +854,10 @@ async function main() {
       // two facts the session keep-alive needs to tell "signed in" from "the
       // login page came back" (4 Sep 2026).
       const passwordFields = await passwordFieldCount(page);
-      return { title: await page.title(), url: page.url(), passwordFields, text, screenshot: png };
+      // --links <text>: also return the page's links whose href contains <text>, with their words.
+      const needle = arg(rest, 'links');
+      const links = needle ? pickLinks(await page.$$eval('a[href]', as => as.map(a => ({ href: a.href, text: a.textContent || '' }))), needle) : undefined;
+      return { title: await page.title(), url: page.url(), passwordFields, text, screenshot: png, links };
     });
     ledger({ cmd: 'read', url, profile, screenshot: res.screenshot });
     console.log(JSON.stringify(res));
@@ -1015,5 +1040,5 @@ if (require.main === module) {
   main().catch(e => { console.error('BROWSER ERROR: ' + (e && e.stack || e)); process.exit(1); });
 }
 
-module.exports = { hostAllowed, runSteps, assertNotCredential, assertApproved, SECRET_NAME_RE, loadSites, sessionVerdict,
+module.exports = { hostAllowed, pickLinks, runSteps, assertNotCredential, assertApproved, SECRET_NAME_RE, loadSites, sessionVerdict,
                    assertUploadable, assertConfirmable, UPLOAD_DIR, UPLOAD_EXTENSIONS, persistSessionCookies };
