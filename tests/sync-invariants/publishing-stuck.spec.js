@@ -80,6 +80,16 @@ test('a report with nothing stuck shows no stuck rows (an older report without t
   await expect(body).toContainText('day 2062 is not approved yet');
 });
 
+test('a rejected card and an old sent-back day say so, and an old day claims to hold nothing', async ({ page }) => {
+  await openPublishing(page, [report({ blocker: null, sentBack: [
+    { day: 2063, since: '19 Sep', feedback: '', rejected: true, holdsOrder: true },
+    { day: 1841, since: '15 Sep', feedback: '', rejected: false, holdsOrder: false }] })]);
+  const body = page.locator('#body');
+  await expect(body).toContainText('Rejected, not resubmitted');
+  await expect(body).toContainText('Episode 2063: you rejected it on 19 Sep. Every later episode waits');
+  await expect(body).toContainText('Episode 1841: you sent it back on 15 Sep. It is an older day, so no other episode waits for it.');
+});
+
 test('a page left open reads the report again every 5 minutes', async ({ page }) => {
   await page.clock.install();
   const reads = await openPublishing(page, [report({ headline: 'Content: the first read.' }), report({ headline: 'Content: the second read.' })]);
@@ -87,7 +97,56 @@ test('a page left open reads the report again every 5 minutes', async ({ page })
   expect(reads()).toBe(1);
   await page.clock.runFor(4 * 60 * 1000);
   expect(reads(), 'no read before the 5 minutes are up').toBe(1);
-  await page.clock.runFor(60 * 1000 + 1000);
+  await page.clock.runFor(76 * 1000);
   await expect.poll(reads).toBe(2);
   await expect(page.locator('#headline')).toHaveText('Content: the second read.');
+});
+
+// Inside the app the page is a frame the shell hides on other tabs. Switching back fires no visibilitychange, so the
+// frame checks its own visibility: hidden, it never reads; back in view with an old copy, it reads straight away.
+test('inside the app shell: a hidden frame does not read, and reads as soon as it is shown again', async ({ page }) => {
+  await page.clock.install();
+  let reads = 0;
+  await page.addInitScript(() => { try { localStorage.setItem('_dlr_pat', 'patFIXTURE.test'); } catch (e) { /* storage blocked */ } });
+  await page.route('**/shell-fixture.html', (route) => route.fulfill({ contentType: 'text/html',
+    body: '<!doctype html><div id="panel"><iframe id="f" src="/publishing.html" style="width:900px;height:600px"></iframe></div>' }));
+  await page.route('**/api.airtable.com/v0/**', async (route) => {
+    reads += route.request().url().includes(ESTATE_TBL) ? 1 : 0;
+    await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ records: [{
+      id: 'recREPORT', createdTime: new Date().toISOString(),
+      fields: { Key: 'content-publishing', Updated: new Date().toISOString(), Payload: JSON.stringify(report()) } }] }) });
+  });
+  await page.goto('/shell-fixture.html');
+  await expect(page.frameLocator('#f').locator('#body')).toContainText('Needs you');
+  expect(reads).toBe(1);
+  await page.evaluate(() => { document.getElementById('panel').style.display = 'none'; });   // Kevin opens another tab
+  await page.clock.runFor(10 * 60 * 1000);
+  expect(reads, 'a hidden frame never reads').toBe(1);
+  await page.evaluate(() => { document.getElementById('panel').style.display = ''; });       // and comes back
+  await page.clock.runFor(16 * 1000);
+  await expect.poll(() => reads).toBe(2);
+});
+
+test('the next update time follows the last write, not the clock', async ({ page }) => {
+  await openPublishing(page, [report()]);
+  const cases = await page.evaluate(() => [
+    ['07:15 BST, last write 20:17 the night before', '2026-09-21T06:15:00Z', '2026-09-20T19:17:00Z'],
+    ['07:17 BST, the 07:15 write landed', '2026-09-21T06:17:00Z', '2026-09-21T06:16:30Z'],
+    ['15:52 BST, written 15:17', '2026-09-21T14:52:00Z', '2026-09-21T14:17:00Z'],
+    ['20:30 BST, written 20:17', '2026-09-21T19:30:00Z', '2026-09-21T19:17:00Z'],
+    ['23:40 BST, the night render wrote at 23:20', '2026-09-21T22:40:00Z', '2026-09-21T22:20:00Z'],
+    ['00:30 BST, the night render still running', '2026-09-21T23:30:00Z', '2026-09-21T19:17:00Z'],
+    ['03:00 BST, the night render wrote at 00:09', '2026-09-22T02:00:00Z', '2026-09-21T23:09:00Z'],
+    ['07:15 GMT in December, last write 20:17 the night before', '2026-12-01T07:15:00Z', '2026-11-30T20:17:00Z'],
+  ].map(([label, now, upd]) => [label, nextUpdateText(Date.parse(now), upd)]));
+  expect(cases).toEqual([
+    ['07:15 BST, last write 20:17 the night before', 'Next update about 07:15.'],
+    ['07:17 BST, the 07:15 write landed', 'Next update about 08:15.'],
+    ['15:52 BST, written 15:17', 'Next update about 16:15.'],
+    ['20:30 BST, written 20:17', "Next update after tonight's render, then 07:15."],
+    ['23:40 BST, the night render wrote at 23:20', 'Next update about 07:15.'],
+    ['00:30 BST, the night render still running', 'Next update when the night render finishes, or at 07:15.'],
+    ['03:00 BST, the night render wrote at 00:09', 'Next update about 07:15.'],
+    ['07:15 GMT in December, last write 20:17 the night before', 'Next update about 07:15.'],
+  ]);
 });

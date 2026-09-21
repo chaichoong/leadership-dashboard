@@ -76,12 +76,26 @@ function staleLimitMin(now) {
 }
 // A page left open used to show the report it loaded with, for hours (Kevin, 21 Sep 2026: "not staying up to date").
 const AUTO_RELOAD_MS = 5 * 60 * 1000;
-function nextUpdateText(now) {
-    const parts = new Intl.DateTimeFormat('en-GB', { timeZone: 'Europe/London', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).formatToParts(new Date(now));
-    const h = Number(parts.find(p => p.type === 'hour').value), m = Number(parts.find(p => p.type === 'minute').value);
-    if (h < 7 || (h === 7 && m < 15)) return 'Next update about 07:15.';
-    if (h > 20 || (h === 20 && m >= 15)) return 'Next update after tonight\'s render, then 07:15.';
-    return `Next update about ${String(m < 15 ? h : h + 1).padStart(2, '0')}:15.`;
+// The hourly publisher writes the report 07:15-20:15 London (it lands a minute or two after the slot), the night render
+// once when it finishes. The next write is the first hourly slot after the one the report came from (review, 21 Sep
+// 2026: counting from the clock said 08:15 at 07:15, before the 07:15 write had landed).
+const HOURLY_SLOTS = [...Array(14)].map((_, i) => (7 + i) * 60 + 15);   // 07:15 ... 20:15, minutes after midnight
+function londonParts(t) {
+    const p = new Intl.DateTimeFormat('en-GB', { timeZone: 'Europe/London', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).formatToParts(new Date(t));
+    const g = k => p.find(x => x.type === k).value;
+    return { date: `${g('year')}-${g('month')}-${g('day')}`, min: Number(g('hour')) * 60 + Number(g('minute')) };
+}
+function nextUpdateText(now, updated) {
+    const n = londonParts(now), u = updated ? londonParts(updated) : null;
+    const doneMin = u && u.date === n.date ? u.min : -1;               // -1: nothing written yet today
+    if (doneMin >= 21 * 60) return 'Next update about 07:15.';         // tonight's render has written already
+    if (doneMin === -1 && n.min < HOURLY_SLOTS[0]) {
+        const renderWrote = u && u.min >= 21 * 60 && now - new Date(updated).getTime() < 12 * 3600 * 1000;
+        return renderWrote ? 'Next update about 07:15.' : 'Next update when the night render finishes, or at 07:15.';
+    }
+    const next = HOURLY_SLOTS.find(slot => slot > doneMin);
+    if (next === undefined) return 'Next update after tonight\'s render, then 07:15.';
+    return `Next update about ${String(Math.floor(next / 60)).padStart(2, '0')}:15.`;
 }
 const QUEUE_URL = 'os/agents/index.html#tab=approvals';
 const SECTIONS = ['YouTube episode', 'YouTube Short', 'Teaser clips', 'Learnings clips', 'Blog', 'Podcast', 'Facebook share'];
@@ -133,7 +147,7 @@ function render(rec) {
     const staleMin = updated ? Math.round((Date.now() - new Date(updated).getTime()) / 60000) : null;
     document.getElementById('updated').innerHTML = staleMin !== null && staleMin > staleLimitMin(Date.now())
         ? `<span class="stale">Last updated ${esc(ago(updated))}. The publisher has stopped writing this report, so everything below may be out of date.</span>`
-        : `Updated ${esc(ago(updated))}. ${esc(nextUpdateText(Date.now()))}`;
+        : `Updated ${esc(ago(updated))}. ${esc(nextUpdateText(Date.now(), updated))}`;
 
     const hist = (r.history || []).map(h => {
         if (!h.episodes.length) return `<tr class="none"><td style="white-space:nowrap">${esc(dayLabel(h.date, r.today))}</td><td colspan="3"><strong>Nothing went out</strong></td></tr>`;
@@ -157,7 +171,11 @@ function render(rec) {
     const cards = r.waitingForKevin || [];
     needs.push(cards.length ? `<li><strong>${cards.length} episode card${cards.length === 1 ? '' : 's'}</strong> to approve (Episode ${cards.map(esc).join(', ')}). <a href="${QUEUE_URL}" target="_top">Open the queue</a></li>` : '<li>No episode cards wait for you.</li>');
     // A sent-back card is neither waiting for you nor approved: until 21 Sep 2026 it vanished from this page while 2062 held every later day.
-    (r.sentBack || []).forEach(s => needs.push(`<li><span class="chip missing">Sent back, not resubmitted</span> Episode ${esc(s.day)}: you sent it back${s.since ? ' on ' + esc(s.since) : ''}${s.feedback ? ` ("${esc(s.feedback)}")` : ''}. Every later episode waits until the fixed card comes back to you.</li>`));
+    (r.sentBack || []).forEach(s => {
+        const since = s.since ? ' on ' + esc(s.since) : '', said = s.feedback ? ` ("${esc(s.feedback)}")` : '';
+        const tail = s.holdsOrder === false ? 'It is an older day, so no other episode waits for it.' : 'Every later episode waits until the fixed card comes back to you.';
+        needs.push(`<li><span class="chip missing">${s.rejected ? 'Rejected' : 'Sent back'}, not resubmitted</span> Episode ${esc(s.day)}: you ${s.rejected ? 'rejected it' : 'sent it back'}${since}${said}. ${tail}</li>`);
+    });
     (r.teaserOnly || []).forEach(d => needs.push(`<li><span class="chip missing">No full episode</span> Day ${esc(d)}: the engine has found only its teaser. Every later day waits behind it once the run reaches it.</li>`));
     Object.entries(r.qaBlocked || {}).forEach(([d, why]) => needs.push(`<li><span class="chip missing">Blocked</span> Episode ${esc(d)} failed its output check: ${esc(why)}</li>`));
     (r.failedRenders || []).forEach(d => needs.push(`<li><span class="chip missing">Render failed twice</span> Episode ${esc(d)} needs a look.</li>`));
@@ -169,7 +187,8 @@ function render(rec) {
         : '<div class="muted">Every episode from the last fortnight has all seven sections.</div>';
 
     const skipped = r.skippedNames || [];
-    const skippedCard = skipped.length ? `<div class="card"><h2>Raw files the engine skips</h2><div class="muted" style="font-size:var(--fs-sm)">The engine cannot read these file names, so it never renders them. A day's recording must be named like "2066 Full.insv" or "2066 Summary.insv".</div><ul class="plain">${skipped.map(n => `<li>${esc(n)}</li>`).join('')}</ul></div>` : '';
+    const skippedCard = skipped.length ? `<div class="card"><h2>Raw files the engine skips</h2><div class="muted" style="font-size:var(--fs-sm)">The engine cannot read these file names, so it never renders them. A day's recording must be named like "2066 Full.insv" or "2066 Summary.insv".</div><ul class="plain">${skipped.map(n => `<li>${esc(n)}</li>`).join('')}</ul></div>`
+        : r.skippedNames === null ? '<div class="card"><h2>Raw files the engine skips</h2><div class="muted" style="font-size:var(--fs-sm)">No list yet. The nightly scan writes it.</div></div>' : '';
     const st = r.strava || {};
     document.getElementById('body').innerHTML = `
         <div class="card"><div class="stat-row">
@@ -243,8 +262,17 @@ function start() { document.getElementById('auth').hidden = true; document.getEl
     try { PAT = localStorage.getItem('_dlr_pat') || ''; } catch (e) { console.warn('publishing: storage unavailable', e); }
     registerChecks();
     if (PAT) start(); else showAuth();
-    const live = () => PAT && !document.getElementById('main').hidden && document.visibilityState === 'visible';
-    setInterval(() => { if (live()) load(); }, AUTO_RELOAD_MS);
+    // Inside the app the page sits in a frame the shell hides on other tabs, and switching back fires no visibilitychange
+    // (review, 21 Sep 2026). So one 15-second tick: a hidden page never reads; a page in view reads every 5 minutes, and
+    // straight away when it comes back into view with a copy over a minute old.
+    const hiddenInShell = () => !!window.frameElement && window.frameElement.offsetParent === null;   // frameElement is null across origins
+    const live = () => PAT && !document.getElementById('main').hidden && document.visibilityState === 'visible' && !hiddenInShell();
+    let wasHidden = false;
+    setInterval(() => {
+        const inView = live(), age = Date.now() - _loadedAt;
+        if (inView && (age >= AUTO_RELOAD_MS || (wasHidden && age > 60 * 1000))) load();
+        wasHidden = !inView;
+    }, 15 * 1000);
     document.addEventListener('visibilitychange', () => { if (live() && Date.now() - _loadedAt > 60 * 1000) load(); });
 })();
 </script>
