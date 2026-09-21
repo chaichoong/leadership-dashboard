@@ -29,6 +29,10 @@ checkout to the latest merged code before they start, and both say so in the log
 **1. Scan the Drive folder** (`watch.py scan --create`)
 Every new clip in the raw Insta360 folder gets a ledger entry. Every new shooting day gets one
 "Episode N Full Episode" record at New Upload, carrying the Drive link of its first clip.
+A clip named by its day must read exactly `2066 Full.insv`, `2066 Summary.insv` or `2071 Full Part 2.insv`.
+Any other day-numbered name (`2066 Full-Real.insv`, `2006 Full (1).insv`) is skipped, listed in
+`skipped_names.json` and shown on the Publishing page under "Raw files the engine skips". Until
+21 Sep 2026 it was skipped without a word, and 2066's full episode sat on Drive unseen.
 
 **2. Pull one clip** (`watch.py next`)
 The oldest waiting clip comes down to the local work folder. One per run, never more than two waiting
