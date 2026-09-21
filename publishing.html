@@ -75,7 +75,7 @@ function staleLimitMin(now) {
     return h >= 9 && h <= 20 ? 90 : 12 * 60;   // the last hourly write lands about 20:15; from 21:00 the overnight window applies
 }
 // A page left open used to show the report it loaded with, for hours (Kevin, 21 Sep 2026: "not staying up to date").
-const AUTO_RELOAD_MS = 5 * 60 * 1000;
+const AUTO_RELOAD_MS = 5 * 60 * 1000, READ_TIMEOUT_MS = 30 * 1000;
 // The hourly publisher writes the report 07:15-20:15 London (it lands a minute or two after the slot), the night render
 // once when it finishes. The next write is the first hourly slot after the one the report came from (review, 21 Sep
 // 2026: counting from the clock said 08:15 at 07:15, before the 07:15 write had landed).
@@ -124,7 +124,12 @@ function saveAuth() {
 
 async function readReport() {
     const params = new URLSearchParams({ filterByFormula: `{Key}="${REPORT_KEY}"`, pageSize: '10' });
-    const res = await fetch(`https://api.airtable.com/v0/${BASE_ID}/${ESTATE_TBL}?${params}`, { headers: { Authorization: `Bearer ${PAT}` } });
+    // A read that never settles (the Mac asleep mid-request) would hold _loading for ever and stop every later read (review, 21 Sep 2026)
+    const ctl = new AbortController(), timer = setTimeout(() => ctl.abort(), READ_TIMEOUT_MS);
+    let res;
+    try { res = await fetch(`https://api.airtable.com/v0/${BASE_ID}/${ESTATE_TBL}?${params}`, { headers: { Authorization: `Bearer ${PAT}` }, signal: ctl.signal }); }
+    catch (e) { throw e.name === 'AbortError' ? new Error(`Airtable did not answer within ${READ_TIMEOUT_MS / 1000} seconds`) : e; }
+    finally { clearTimeout(timer); }
     if (res.status === 401 || res.status === 403) { const e = new Error('auth'); e.auth = true; throw e; }
     if (!res.ok) throw new Error(`Airtable answered ${res.status}`);
     const data = await res.json();
@@ -163,7 +168,8 @@ function render(rec) {
     const nextUp = (r.nextInOrder || []).length ? `Approved and next in order: Episode ${r.nextInOrder.map(esc).join(', ')}.`
         : (r.heldBehind || []).length ? (r.blocker
             ? `<span class="stale">Approved but held for order: Episode ${r.heldBehind.map(esc).join(', ')} wait behind day ${esc(r.blocker.day)} (${esc(r.blocker.why)}).</span>`
-            : `Approved but held for order: Episode ${r.heldBehind.map(esc).join(', ')} (${esc(r.heldWhy)}).`) : 'No approved episode is waiting to go out.';
+            : `Approved but held for order: Episode ${r.heldBehind.map(esc).join(', ')} (${esc(r.heldWhy)}).`)
+        : r.blocker ? `<span class="stale">Nothing can go out: day ${esc(r.blocker.day)} (${esc(r.blocker.why)}).</span>` : 'No approved episode is waiting to go out.';
     const tonight = r.tonight === null || r.tonight === undefined ? '<span class="stale">Tonight\'s render plan could not be read.</span>'
         : r.tonight.length ? `Tonight's render: Episode ${r.tonight.map(esc).join(' and ')}.` : 'Tonight\'s render: nothing waiting.';
 

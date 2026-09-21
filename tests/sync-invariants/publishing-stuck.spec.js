@@ -150,3 +150,26 @@ test('the next update time follows the last write, not the clock', async ({ page
     ['07:15 GMT in December, last write 20:17 the night before', 'Next update about 07:15.'],
   ]);
 });
+
+// A read that never answers (the Mac asleep mid-request) used to hold the page's "already loading" flag for ever, so no
+// later read ever ran. It now gives up after 30 seconds, says so, and the next read goes through.
+test('a read that never answers gives up after 30 seconds, and the page reads again', async ({ page }) => {
+  await page.clock.install();
+  let reads = 0;
+  await page.addInitScript(() => { try { localStorage.setItem('_dlr_pat', 'patFIXTURE.test'); } catch (e) { /* storage blocked */ } });
+  await page.route('**/api.airtable.com/v0/**', async (route) => {
+    if (!route.request().url().includes(ESTATE_TBL)) { await route.fulfill({ status: 200, contentType: 'application/json', body: '{"records":[]}' }); return; }
+    reads += 1;
+    if (reads === 1) return;                                  // the first read hangs
+    await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ records: [{
+      id: 'recREPORT', createdTime: new Date().toISOString(),
+      fields: { Key: 'content-publishing', Updated: new Date().toISOString(), Payload: JSON.stringify(report({ headline: 'Content: read after the hang.' })) } }] }) });
+  });
+  await page.goto('/publishing.html');
+  await expect.poll(() => reads).toBe(1);
+  await page.clock.runFor(31 * 1000);
+  await expect(page.locator('#error')).toContainText('did not answer within 30 seconds');
+  await page.clock.runFor(5 * 60 * 1000);
+  await expect.poll(() => reads).toBe(2);
+  await expect(page.locator('#headline')).toHaveText('Content: read after the hang.');
+});
