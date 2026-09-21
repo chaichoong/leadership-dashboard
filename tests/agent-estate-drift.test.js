@@ -8,6 +8,13 @@
 // This drives the real Python against a fake estate so the three verdicts are
 // proven: stale wording fires, a ruling newer than ESTATE.md's stamp fires, and
 // a scan that can see almost nothing exits 2 rather than reading as clean.
+//
+// 21 Sep 2026: the scan also reads Kevin's global ~/.claude/CLAUDE.md and the
+// project memory folder, because every session loads them before it acts and
+// the memory still told sessions to route to Mica and post to #agent-approvals
+// after the agent files were cleaned. Memory topic files keep history on
+// purpose, so a dated SUPERSEDED marker line ends the scan of a TOPIC file;
+// MEMORY.md and CLAUDE.md are fully live.
 import { describe, it, expect, afterAll } from 'vitest';
 import { spawnSync } from 'node:child_process';
 import { mkdtempSync, rmSync, writeFileSync, mkdirSync } from 'node:fs';
@@ -27,7 +34,10 @@ function estate(opts = {}) {
   const tasks = join(box, 'tasks');
   const brain = join(box, 'brain');
   const repo = join(box, 'repo');
-  // 17 strategic files + 3 skills + 5 tasks + 5 brain + 1 worker = 31 surfaces.
+  const claudeMd = join(box, 'CLAUDE.md');
+  const memory = join(box, 'memory');
+  // 17 strategic files + 3 skills + 5 tasks + 5 brain + 1 worker = 31 surfaces,
+  // plus CLAUDE.md, MEMORY.md and one topic file, which do not count toward the floor.
   mkdirSync(agents, { recursive: true });
   const heads = ['od-ceo', 'worker-writer', ...Array.from({ length: 15 }, (_, i) => `dept-${i}`)];
   for (const h of heads) writeFileSync(join(agents, `${h}.md`), `# ${h}\nRoute to the right agent.\n`);
@@ -50,12 +60,17 @@ function estate(opts = {}) {
   if (opts.stamp !== null) {
     writeFileSync(join(agents, 'ESTATE.md'), `# Estate\n\nAs at: ${opts.stamp || '2026-09-07'}\n`);
   }
-  return { agents, skills, tasks, brain, repo };
+  writeFileSync(claudeMd, '# global\nAI first, Kevin last.\n');
+  mkdirSync(memory, { recursive: true });
+  writeFileSync(join(memory, 'MEMORY.md'), '- [Topic](project_topic.md) — clean.\n');
+  writeFileSync(join(memory, 'project_topic.md'), '---\nname: topic\n---\nclean\n');
+  return { agents, skills, tasks, brain, repo, claudeMd, memory };
 }
 
 function run(e, extra = []) {
   const r = spawnSync('python3', [SCRIPT, '--json', '--agents', e.agents, '--skills', e.skills,
-    '--tasks', e.tasks, '--brain', e.brain, '--repo', e.repo, ...extra], { encoding: 'utf8' });
+    '--tasks', e.tasks, '--brain', e.brain, '--repo', e.repo,
+    '--claude-md', e.claudeMd, '--memory', e.memory, ...extra], { encoding: 'utf8' });
   let json = null;
   try { json = JSON.parse(r.stdout); } catch (_) { /* cannot verify path prints no JSON body */ }
   return { code: r.status, json, stderr: r.stderr, stdout: r.stdout };
@@ -74,6 +89,7 @@ describe('agent-estate-drift', () => {
     expect(r.json.hits, JSON.stringify(r.json.hits)).toEqual([]);
     expect(r.json.rulings_behind).toEqual([]);
     expect(r.json.files_scanned).toBeGreaterThanOrEqual(20);
+    expect(r.json.memory_files_scanned).toBe(3);
   });
 
   it('retired wording in a department head is a hit with the replacement named', () => {
@@ -117,6 +133,75 @@ describe('agent-estate-drift', () => {
     const r = run(e);
     expect(r.code).toBe(1);
     expect(r.json.hits.map((h) => h.line)).toEqual([2]);
+  });
+
+  // The three memory-scope rules. Each uses the same retired phrase, so the only
+  // thing that differs is WHERE it sits.
+  const STALE = 'Delegation order: AI first, then Mica or Ericamae, then Kevin.';
+  const MARKER = '**SUPERSEDED in part (noted 21 Sep 2026):** no work routes to Mica since 25 Aug 2026. The order below is history.';
+
+  it('a retired phrase in ~/.claude/CLAUDE.md fires', () => {
+    const e = estate();
+    writeFileSync(e.claudeMd, `# global\n${STALE}\n`);
+    const r = run(e);
+    expect(r.code).toBe(1);
+    expect(r.json.hits).toHaveLength(1);
+    expect(r.json.hits[0].file).toBe(e.claudeMd);
+    expect(r.json.hits[0].line).toBe(2);
+  });
+
+  it('the same phrase under a dated SUPERSEDED marker in a memory topic file does not fire', () => {
+    const e = estate();
+    writeFileSync(join(e.memory, 'feedback_old_order.md'),
+      `---\nname: old\n---\nThe rule itself stands.\n\n${MARKER}\n\n${STALE}\n`);
+    const r = run(e);
+    expect(r.code, JSON.stringify(r.json && r.json.hits)).toBe(0);
+    expect(r.json.memory_files_scanned).toBe(4);
+  });
+
+  it('in a topic file the phrase ABOVE the marker is live, and an undated marker exempts nothing', () => {
+    const e = estate();
+    writeFileSync(join(e.memory, 'feedback_live_above.md'), `# t\n${STALE}\n${MARKER}\n${STALE}\n`);
+    writeFileSync(join(e.memory, 'feedback_undated.md'), `# t\n**SUPERSEDED:** see below.\n${STALE}\n`);
+    const r = run(e);
+    expect(r.code).toBe(1);
+    const got = r.json.hits.map((h) => `${h.file.split('/').pop()}:${h.line}`).sort();
+    expect(got).toEqual(['feedback_live_above.md:2', 'feedback_undated.md:3']);
+  });
+
+  it('the same phrase in MEMORY.md fires, even below a SUPERSEDED marker (the index is fully live)', () => {
+    const e = estate();
+    writeFileSync(join(e.memory, 'MEMORY.md'), `- [Topic](project_topic.md) — clean.\n${MARKER}\n${STALE}\n`);
+    const r = run(e);
+    expect(r.code).toBe(1);
+    expect(r.json.hits).toHaveLength(1);
+    expect(r.json.hits[0].file).toMatch(/memory\/MEMORY\.md$/);
+    expect(r.json.hits[0].line).toBe(3);
+  });
+
+  it('CONTROL: a missing ~/.claude/CLAUDE.md or MEMORY.md exits 2, never a clean pass', () => {
+    const e = estate();
+    rmSync(e.claudeMd);
+    const a = run(e);
+    expect(a.code).toBe(2);
+    expect(a.stderr).toMatch(/CLAUDE\.md/);
+    const f = estate();
+    rmSync(join(f.memory, 'MEMORY.md'));
+    const b = run(f);
+    expect(b.code).toBe(2);
+    expect(b.stderr).toMatch(/MEMORY\.md/);
+  });
+
+  it('CONTROL: memory files do not count toward the estate floor', () => {
+    // Two hundred memory files must not hide an emptied agents folder.
+    const e = estate();
+    rmSync(e.agents, { recursive: true, force: true });
+    mkdirSync(e.agents);
+    writeFileSync(join(e.agents, 'ESTATE.md'), 'As at: 2026-09-07\n');
+    for (let i = 0; i < 30; i++) writeFileSync(join(e.memory, `project_${i}.md`), 'clean\n');
+    const r = run(e);
+    expect(r.code).toBe(2);
+    expect(r.stderr).toMatch(/estate surfaces readable/);
   });
 
   it('a ruling in Decisions/ newer than the stamp that touches the estate fires', () => {

@@ -18,7 +18,8 @@ nothing — it is this script, and it is stricter than a glance:
      suite is where render, state and PATCH-payload bugs live, and both of this
      platform's worst incidents would have walked through a vitest-only check.
   2. PROTECTED PATHS ARE NEVER AUTO-MERGED. Money, auth, the approval loop
-     itself, the outbound send path, and the shared files every page loads. A
+     itself, the outbound send path, the shared files every page loads, and
+     (21 Sep 2026) the robots' permissions (deny list, tool list, runners). A
      wrong fix in any of those is not a bug, it is an incident, and those still
      stop at Kevin as a PR.
   3. A RED GATE LEAVES THE PR OPEN. It never merges "probably fine".
@@ -67,6 +68,16 @@ PROTECTED = (
     # removes the check that stands between every other change and main —
     # and it would be merged by the very code being changed. 1 Sep 2026.
     "scripts/fixer-merge.py",
+    # The robots' permissions (21 Sep 2026, after PR #495). agent-settings.json
+    # holds the deny list every headless run is started with, agent-tools.sh
+    # the one definition of the tools it may use, and the five runners are what
+    # pass both to claude. A fix that loosens any of them hands the robots the
+    # power to edit code or push, so the fixer, itself a robot, must never be
+    # able to merge one on its own.
+    "scripts/agent-settings.json", "scripts/agent-tools.sh",
+    "scripts/agent-slot-run.sh", "scripts/task-manager-run.sh",
+    "scripts/inbound-triage-run.sh", "scripts/handback-poll-run.sh",
+    "scripts/signin-pickup-run.sh",
 )
 
 
