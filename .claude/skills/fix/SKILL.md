@@ -41,7 +41,7 @@ Before asking Kevin:
 - Read the relevant JS file and surrounding code
 - Check browser console for errors (if preview tools available)
 - Read git log for recent changes that may have caused the issue
-- Check CLAUDE.md for file ownership and conventions
+- Check CLAUDE.md for conventions and `.claude/rules/frontend.md` for the file-ownership table
 
 **Cite what you read.** Every factual claim in the Background carries its source: a code fact carries `file:line`, a data fact carries the record ID or the filter formula. Anything you could not verify is written as `ASSUMPTION:` so Kevin can shoot it down. Never state a field name, table ID, record count or status value you have not actually read.
 
@@ -259,7 +259,7 @@ Include a screenshot if the fix is visual.
 |---------|-----------|
 | Fix works but breaks something else | Always regression-check the same tab |
 | Fix addresses symptom, not root cause | State root cause before coding |
-| Fix is correct but in the wrong file | Check CLAUDE.md file ownership table |
+| Fix is correct but in the wrong file | Check the file-ownership table in `.claude/rules/frontend.md` |
 | Scope creep during fix (refactoring, adding features) | Minimum change only |
 | Field name mismatch between read and write | Verify exact names in config.js |
 | Badge/count mismatch after fix | Check both badge logic and render logic |

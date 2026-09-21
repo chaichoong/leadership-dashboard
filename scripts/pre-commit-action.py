@@ -46,7 +46,7 @@ FILE_TO_PAGE = {
     'js/skills-data.js':        'skills',
     'os/systemisation/index.html': 'systemisation',
     # SOP files (sop-*.html) are deliberately NOT mapped: sopVer moves by hand
-    # when the SOP is updated to match the page (see CLAUDE.md Version Tracking).
+    # when the SOP is updated to match the page (see .claude/rules/frontend.md, Version Tracking).
     'os/agents/index.html':        'agents',
     'os/team/index.html':          'os-team',
     'property-manager/index.html': 'property-manager',

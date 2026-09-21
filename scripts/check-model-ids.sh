@@ -15,7 +15,9 @@
 # the claude-proxy.kevinbrittain.workers.dev hostname and the SOP docs that describe
 # which model a feature uses are legitimate and must not trip this.
 #
-# Called from .claude/settings.json PostToolUse. Always exits 0 — advisory, never blocks.
+# Called from .claude/settings.json PostToolUse with the edited path, which the hook reads
+# from its stdin JSON; the hook turns any output from this script into exit 2 so Claude
+# sees the warning. The script itself always exits 0 (the daily sweeps also run it).
 
 set -uo pipefail
 

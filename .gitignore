@@ -58,3 +58,9 @@ rec[A-Za-z0-9]*-merged.pdf
 # tax return figures and a director's loan balance. They must never be committed.
 monitoring/hmrc-cfs-2427425-*
 monitoring/hmrc-amex-*/
+
+# The prospecting agent's learned playbook (21 Sep 2026). THIS REPO IS PUBLIC and
+# the playbook names real prospects and their email addresses. It lives only on
+# this Mac, next to the skill that reads and appends to it
+# (.claude/skills/prospect-daily/SKILL.md, section "Learned playbook").
+.claude/skills/prospect-daily/learned-playbook.local.md
