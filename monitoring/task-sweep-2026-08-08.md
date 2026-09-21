@@ -13,7 +13,7 @@ section below before reacting to it. The real state of your task list is better 
 | Contact EDF to reduce monthly direct debit | Business | Real Estate | every other EDF task in the base is Real Estate, 13 Eldon Road |
 | Apartment 9 Duckworth Building: Intus email | Business | Real Estate | apartment tenancy and lettings agent |
 | Apartment 9 Duckworth Building: Intus email | Time Estimate | 30 min | draft already written; send it and correct one record |
-| INBOUND: Outstanding invocies | Business | Real Estate | from Hayden at MHH, the accountants; 7 of 8 MHH tasks are Real Estate |
+| INBOUND: Outstanding invocies | Business | Real Estate | from [name redacted] at MHH, the accountants; 7 of 8 MHH tasks are Real Estate |
 | Confirm the six GHL prospecting workflows | Business | Operations Director | prospecting setup |
 | Confirm the six GHL prospecting workflows | Time Estimate | 30 min | check six folders, their triggers and the booking link |
 | Fix email authentication for operationsdirector.co.uk | Business | Operations Director | your OD domain |

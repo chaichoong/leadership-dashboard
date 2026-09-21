@@ -37,11 +37,11 @@ inbound-comms-response (4 tasks + 1 annotation):
 creditor-management (7 tasks — first agent went off-track, re-dispatched):
 - rec9g6PKSy4nhdriO: submitted Tier-1 (redo — Companies House portal now requires GOV.UK One Login; login step cannot be automated; £50 fee not £34; identity verification required; screenshot attached)
 - recxMj6XK6drqLSII: submitted Tier-1 (Brett Wilson invoices escalated — solicitor lane, Kevin-only)
-- rec0sqChAfLaRMBUv: submitted Tier-1 (Fylde 23242388/23242374 correspondence)
+- rec0sqChAfLaRMBUv: submitted Tier-1 (Fylde XXXXX388/XXXXX374 correspondence)
 - rec6kWhSJNqNEzGo1: submitted Tier-1 (Anglia Revenues written-exchange proposal)
 - rec9ZtCYgcI5Lzr4m: submitted Tier-1 (Burnley liability order — enforcement suspension request, URGENT)
 - recf5BKV0LL6X3Xyy: submitted Tier-1 (SSE Energy resent to c***@***.co.uk)
-- recyfrSQmz9W44ExM: submitted Tier-1 (Fylde 23242360 correspondence)
+- recyfrSQmz9W44ExM: submitted Tier-1 (Fylde XXXXX360 correspondence)
 
 ### Score
 

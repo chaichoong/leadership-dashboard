@@ -15,7 +15,7 @@ that property, including one for the certificate due today.
 ## Fixed tonight (no approval needed)
 | Task | Field | Value | Why |
 |---|---|---|---|
-| INBOUND: reply re CreditStyle debt notice for Ciara | Business | Personal | debt notice addressed to Ciara Brittain, a household matter |
+| INBOUND: reply re CreditStyle debt notice for [name redacted] | Business | Personal | debt notice addressed to [name redacted], a household matter |
 | INBOUND: reply to Virgin Media fibre switch text | Business | Personal | home phone line at Kevin's own house |
 | INBOUND: verify Interactive Investor password change | Business | Personal | Kevin's personal investment account |
 | INBOUND: reply to P&J 50th Anniversary group | Business | Personal | family caravan weekend |
@@ -36,9 +36,9 @@ the ones to drop. Only 2 of them are assignee writes, so approving sends 2 Slack
 4 tasks where I could not make an honest call:
 
 - **INBOUND: reply to SSE Energy Solutions** — no business. £1,073.08 energy balance, account
-  8702010539. The task itself says the property or business behind the account is still to be
+  XXXXXXX539. The task itself says the property or business behind the account is still to be
   identified, so Real Estate or Personal is a coin toss.
-- **INBOUND: reply to UKSL re Utilita debt** — no business. Same reason, reference 5482505.
+- **INBOUND: reply to UKSL re Utilita debt** — no business. Same reason, reference XXXX505.
 - **INBOUND: reply to Anglia Revenues council tax notice** — no business. Anglia Revenues bills
   for several of the Haverhill-area properties and for a home address, so I cannot tell which.
 - **PARKED — revisit after the first client** — no owner. It is a holding record for four jobs
@@ -53,7 +53,7 @@ task in the window carries a time estimate, so coverage is 100 of 100%.
 | Task | Due | Days late | My read |
 |---|---|---|---|
 | Pay Final Council Tax Adjustment – 32 Elmdon Place | 22 Jan | 204 | Probably done already. Mica owns it and the property pays £165 council tax monthly. Propose asking her to confirm and close. |
-| Pay tax liability for tax return 2023/24 – Ciara Brittain | 13 Feb | 182 | Still live and it is a debt. Marked Urgent, seven months untouched. Propose a new date and a check of what is outstanding. |
+| Pay tax liability for tax return 2023/24 – [name redacted] | 13 Feb | 182 | Still live and it is a debt. Marked Urgent, seven months untouched. Propose a new date and a check of what is outstanding. |
 | Fwd: Invoice INV-0549, PPE & Sons for Roy Lavin | 20 Mar | 147 | Cannot tell. No payment matching this supplier exists in the transactions, but the invoice went to Roy Lavin, who may have settled it himself. Propose one message to Roy covering all four. |
 | DD Fire Alarms Ltd – Duckworth Buildings | 20 Mar | 147 | Same. This one is an estimate, not an invoice, so it may simply be dead. |
 | Invoice 40859 from DD Fire Alarms Ltd | 20 Mar | 147 | Same. No DD Fire payment found in transactions. |
@@ -82,7 +82,7 @@ Reviewed by AI CEO. Verdict: six of eight writes sound, two changed.
   a chase for a date and a certificate, not a legal question, and it matches how the last
   Manchester council email was routed. The CEO also found the expired 10 August deadline,
   which is now at the top of this report.
-- **Dropped** the Sam Atherton business fill. I had read "Personal" from the task's own
+- **Dropped** the [name redacted] business fill. I had read "Personal" from the task's own
   description, which the inbound sweep wrote. The invoice PDF sits unread in WhatsApp since
   5 August, so the answer is retrievable rather than inferred. Left blank.
 - Kept the two Mica assignments. The CEO checked and Mica is the standing owner for

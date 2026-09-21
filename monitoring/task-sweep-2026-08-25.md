@@ -9,18 +9,18 @@ Owned by an AI agent: 99. Owned by a person: 99. Owned by nobody: 13.
 |---|---|---|---|
 | Reconnect Monese to Fintable (Airtable to Monese connection  | Time Estimate | 30 min | Reconnect Monese to Fintable: repeated bank re-auth attempts, half an hour of fiddling |
 | Reconnect Monese to Fintable (Airtable to Monese connection  | Business | Personal | Monese CB/PB is Kevin's personal account (js/skills-data.js:1169: every Monese transaction is Personal) |
-| INBOUND: reply to Lee Drury (WhatsApp) | Business | Personal | Lee Drury reply - task text says close personal friendship, not business |
-| INBOUND: reply to Ciara Brittain (WhatsApp) | Business | Personal | Ciara reply about a shopping errand - family |
-| INBOUND: reply to Maia re screen time limit (WhatsApp) | Business | Personal | Daughter's screen-time limit - parenting decision |
-| INBOUND: reply to James Dunham (WhatsApp) | Business | Personal | James Dunham, football club refund for the children |
+| INBOUND: reply to [name redacted] (WhatsApp) | Business | Personal | [name redacted] reply - task text says close personal friendship, not business |
+| INBOUND: reply to [name redacted] (WhatsApp) | Business | Personal | [name redacted] reply about a shopping errand - family |
+| INBOUND: reply to [name redacted] re screen time limit (WhatsApp) | Business | Personal | Daughter's screen-time limit - parenting decision |
+| INBOUND: reply to [name redacted] (WhatsApp) | Business | Personal | [name redacted], football club refund for the children |
 | INBOUND: reply to Roy Lavin re payments (WhatsApp) | Business | Real Estate | Roy Lavin payment requests: Oldham Road electrician and materials - property costs |
 | INBOUND: reply to Roy Lavin (WhatsApp) | Business | Real Estate | Roy Lavin forwarded post from a property; his entire lane is Real Estate |
-| INBOUND: reply to Lee Drury (WhatsApp) | Business | Personal | Lee Drury missed call - personal, task says do not push business talk |
-| INBOUND: reply to Paul Brittain (WhatsApp) | Business | Personal | Paul Brittain, family visit |
-| INBOUND: reply to Nigel Partridge (WhatsApp) | Business | Personal | Son's football fixtures and registration |
-| INBOUND: reply to James Dunham re club refund and discounts  | Business | Personal | Football club registration discounts and refund for the children |
-| INBOUND: reply to Nigel Partridge (WhatsApp) | Business | Personal | Registering Leo for the football season |
-| INBOUND: reply to Ciara Brittain (WhatsApp) | Business | Personal | Maia's phone not turning on - family safety |
+| INBOUND: reply to [name redacted] (WhatsApp) | Business | Personal | [name redacted] missed call - personal, task says do not push business talk |
+| INBOUND: reply to [name redacted] (WhatsApp) | Business | Personal | [name redacted], family visit |
+| INBOUND: reply to [name redacted] (WhatsApp) | Business | Personal | Son's football fixtures and registration |
+| INBOUND: reply to [name redacted] re club refund and discounts  | Business | Personal | Football club registration discounts and refund for the children |
+| INBOUND: reply to [name redacted] (WhatsApp) | Business | Personal | Registering [name redacted] for the football season |
+| INBOUND: reply to [name redacted] (WhatsApp) | Business | Personal | [name redacted]'s phone not turning on - family safety |
 
 ## Waiting on you
 14 decisions held. Say "approve the sweep" in any Claude session to apply them all, or name the ones to drop.
@@ -54,7 +54,7 @@ All six are **still live**. Every one is an unpaid bill, and I checked the money
 
 | Task | Amount | Days overdue | What I propose |
 |---|---|---|---|
-| Pay tax liability for tax return 2023/24 – Ciara Brittain | £124.60 | 193 | New due date 1 Sep. Currently Mica's, marked Urgent since 13 Feb. |
+| Pay tax liability for tax return 2023/24 – [name redacted] | £124.60 | 193 | New due date 1 Sep. Currently Mica's, marked Urgent since 13 Feb. |
 | DD Fire Alarms Ltd – Duckworth Buildings | £258.00 | 158 | New due date 1 Sep. |
 | Fwd: Invoice INV-0549, PPE & Sons Heating & Plumbing (Roy Lavin) | £168.00 | 158 | New due date 1 Sep. |
 | Invoice 40893 from DD Fire Alarms Ltd | £121.80 | 151 | New due date 1 Sep. |

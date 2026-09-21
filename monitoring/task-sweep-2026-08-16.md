@@ -94,7 +94,7 @@ All 8 reached, none skipped. I did not act on any of them.
 | Task | Due | Days late | Owner | My read |
 |---|---|---|---|---|
 | Pay Final Council Tax Adjustment – 32 Elmdon Place | 22 Jan | 206 | person | Probably done already. Ask Mica to confirm and close. |
-| Pay tax liability 2023/24 – Ciara Brittain | 13 Feb | 184 | person | Still live, and it is a debt. Marked Urgent, untouched seven months. Needs a new date and a check of what is outstanding. |
+| Pay tax liability 2023/24 – [name redacted] | 13 Feb | 184 | person | Still live, and it is a debt. Marked Urgent, untouched seven months. Needs a new date and a check of what is outstanding. |
 | Fwd: Invoice INV-0549, PPE & Sons for Roy Lavin | 20 Mar | 149 | agent | Cannot tell. No matching payment in transactions, but it went to Roy Lavin who may have settled it. One message to Roy covers this and the next four. |
 | DD Fire Alarms Ltd – Duckworth Buildings | 20 Mar | 149 | agent | Same. This one is an estimate rather than an invoice, so it may simply be dead. |
 | Invoice 40859 from DD Fire Alarms Ltd | 20 Mar | 149 | agent | Same. No DD Fire payment found. |

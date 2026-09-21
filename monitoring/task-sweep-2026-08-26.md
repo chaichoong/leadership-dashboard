@@ -59,7 +59,7 @@ Open tasks: 263. Fully compliant: 195 (74.1%). Was 93.8% yesterday. The drop is 
 | MAINTENANCE: 1406 Oldham Road - dangerous ceiling rat infest | Business | Real Estate | urgent disrepair at 1406 Oldham Road rental |
 | MAINTENANCE: Tenant SMS re running tap water damage ongoing | Time estimate | 30 min | identify tenant and property, book tap repair |
 | MAINTENANCE: Tenant SMS re running tap water damage ongoing | Business | Real Estate | tenant tap repair at a rental property |
-| INBOUND: Roy Lavin invoice query David Clements | Business | Real Estate | contractor invoice for property maintenance |
+| INBOUND: Roy Lavin invoice query [name redacted] | Business | Real Estate | contractor invoice for property maintenance |
 | INBOUND: Final Charging Order 72891 over 17 Newington Willin | Business | Real Estate | charging order over 17 Newington Willingham property |
 | INBOUND: UTILITA payment reminder 457 for TNT Management | Business | Real Estate | TNT Management energy arrears at a property |
 | INBOUND: Suffolk Council fire safety audit 55 Elmdon Place H | Business | Real Estate | fire safety at 55 Elmdon Place HMO |
@@ -78,7 +78,7 @@ Open tasks: 263. Fully compliant: 195 (74.1%). Was 93.8% yesterday. The drop is 
 | INBOUND: Meetings to Supabase Apps Script failures | Business | Operations Director | platform meetings sync script |
 | INBOUND: AssemblyAI transcript retention policy change | Business | Operations Director | AI brain audiobook pipeline is platform infrastructure |
 | INBOUND: Supabase sellmate project flagged for pausing | Business | Personal | SellMate is James venture with its own repo and Supabase project, not OD (CEO review) |
-| INBOUND: Paul Brittain Queen Budapest tickets info | Business | Personal | family message about concert tickets |
+| INBOUND: [name redacted] Queen Budapest tickets info | Business | Personal | family message about concert tickets |
 | INBOUND: YouTube Runpreneur monetization terms update needed | Business | Personal | Runpreneur channel sits under Kevin personally |
 | INBOUND: Namecheap SSL certificate expiring 30 days runprene | Business | Personal | runpreneur.org.uk is Kevin personal site |
 | INBOUND: AmEx card near limit may decline future transaction | Business | Personal | family credit card |
@@ -110,7 +110,7 @@ Heads up: 5 of them set a person as owner (2 to you, 3 to Roy). Approving fires 
 | Drift Monitor [WARNING]: Client CEO Brief is merged but not  | Project | Complete all modules for OD Web App | client CEO Brief is a web app module |
 
 ## Left alone
-4 open tasks keep a blank business because I could not tell who pays: the Buffer account problem, the Stripe "Boost 100" request, the Anglia Revenues council tax text (may relate to the dissolved cafe at Over) and the Dan Lawrence reply.
+4 open tasks keep a blank business because I could not tell who pays: the Buffer account problem, the Stripe "Boost 100" request, the Anglia Revenues council tax text (may relate to the dissolved cafe at Over) and the [name redacted] reply.
 
 124 tasks are missing only a project link. I judged them not project-based: UC verifications, standing orders, invoices and licensing are ordinary operations. Only 2 project links are proposed above.
 

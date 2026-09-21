@@ -53,4 +53,4 @@ FLAGS FOR KEVIN
   before drafts can be sent; appeal window is time-sensitive (30 days from notice date)
 - rec6qlRKv6dXLHVo8: SSE Energy warrant threat is the most urgent — approve and send first
 - rec0H1P4bDRhUQFa4: ACH Investments response is 29 days late; solicitor review recommended
-  before sending (Simon Rice for criminal overlap check only; this needs insolvency solicitor)
+  before sending ([name redacted] for criminal overlap check only; this needs insolvency solicitor)

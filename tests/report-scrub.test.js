@@ -93,6 +93,55 @@ describe('report_scrub masks personal data', () => {
     expect(scrub([s]).scrubbed[s].text).toBe(s);
   });
 
+  // 21 Sep 2026: the tracked reports carried a family member's NI number, a
+  // UTR, council tax account and summons numbers, a court claim number and a
+  // mortgage account. None has a phone, email or postcode shape. All values
+  // below are fictional. Back-tested: dropping `nino` from RULES fails the
+  // spaced NI case, dropping `account_ref` fails every reference case.
+  it('masks NI numbers, spaced or not', () => {
+    const a = 'HMRC Self Assessment, Mrs A Example, ref AB123456C, overdue';
+    const b = 'NI number AB 12 34 56 C on the form';
+    const r = scrub([a, b]).scrubbed;
+    expect(r[a].text).not.toContain('123456');
+    expect(r[b].text).toBe('NI number XXXXXXXXX on the form');
+    expect(r[b].hits).toContain('nino');
+  });
+
+  it('masks an account reference after a keyword, keeping its last three characters', () => {
+    const cases = {
+      'Council Tax summons - account 900000291 - Summons 100078':
+        'Council Tax summons - account XXXXXX291 - Summons XXX078',
+      's.9A check, case ABC-1000425, UTR 1000000560': 's.9A check, case XXX-XXXX425, UTR XXXXXXX560',
+      'Court order, claim X00AB745, costs due': 'Court order, claim XXXXX745, costs due',
+      'LCS ref 40000151, client ref A40000345.': 'LCS ref XXXXX151, client ref XXXXXX345.',
+      'Council Tax Property Reference : 300000820': 'Council Tax Property Reference : XXXXXX820',
+      'SA penalty (ref 70000 30733), same year': 'SA penalty (ref XXXXX XX733), same year',
+      'arrangement on mortgage 70000083, 22 Example St': 'arrangement on mortgage XXXXX083, 22 Example St',
+    };
+    const r = scrub(Object.keys(cases)).scrubbed;
+    for (const [s, want] of Object.entries(cases)) {
+      expect(r[s].text, s).toBe(want);
+      expect(r[s].hits, s).toContain('account_ref');
+    }
+    // A second pass must not change a masked report.
+    const masked = Object.values(cases);
+    const again = scrub(masked).scrubbed;
+    for (const s of masked) expect(again[s].text).toBe(s);
+  });
+
+  it('leaves ids, dates, years, short numbers and prose after a keyword alone', () => {
+    const samples = [
+      'Reference: recSvXxaEz57i7YQK, case recQxOwx7swgS1Vd4',
+      'account 2026-08-12 review, policy 2026, MANDATE NO 0207',
+      'Example Estates Ltd, company 10000161; reference-map.json rolled',
+      'the reference is Example Estates Ltd, ref `0efc866b`',
+      'Invoice INV-0549 and finding 20260821-task-hygiene-sweep-286',
+      'loan of 2000 over 60 months, 100 cases, account for 12 days',
+    ];
+    const r = scrub(samples).scrubbed;
+    for (const s of samples) expect(r[s].text, `mangled: ${s}`).toBe(s);
+  });
+
   it('does not touch dates, money, counts or Airtable ids', () => {
     const samples = [
       '8,690 transactions on 2026-08-12 totalling 1742.60',
@@ -187,6 +236,35 @@ describe('no tracked monitoring report contains personal data', () => {
     }
     expect(offenders, 'a raw phone number is in the public repo').toEqual([]);
   });
+
+  it('holds nothing the scrubber would still mask (phone, email, postcode, NI, reference)', () => {
+    // Drives the real scrubber over every tracked text report, JSON included.
+    // A report committed round the collector, or one collected before a rule
+    // existed, shows up here. On 21 Sep 2026 this found an NI number, a UTR and
+    // 30-odd council tax, court and mortgage references in the tracked reports.
+    const all = execFileSync('git', ['ls-files', 'monitoring/'], { cwd: ROOT, encoding: 'utf8' })
+      .split('\n')
+      .filter((f) => /\.(md|txt|json)$/.test(f));
+    expect(all.length).toBeGreaterThan(50);
+    const script = `
+import importlib.util, json, sys
+spec = importlib.util.spec_from_file_location('rs', ${JSON.stringify(SCRUB)})
+m = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(m)
+out = []
+for path in json.loads(sys.argv[1]):
+    with open(path, encoding='utf-8') as fh:
+        _, hits = m.scrub(fh.read(), names=[])
+    kinds = sorted({kind for kind, _ in hits})
+    if kinds:
+        out.append('%s: %s' % (path, ', '.join(kinds)))
+print(json.dumps(out))
+`;
+    const offenders = JSON.parse(
+      execFileSync('python3', ['-c', script, JSON.stringify(all)], { cwd: ROOT, encoding: 'utf8' })
+    );
+    expect(offenders, 'personal data the scrubber masks is in the public repo').toEqual([]);
+  }, 30000); // ~3 s alone; generous so a busy machine cannot time it out
 
   it('contains no name from the local roster (skipped where no roster exists)', () => {
     // This is the check that would have caught finding 286. It can only run

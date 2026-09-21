@@ -29,11 +29,11 @@ Twenty-one business tags filled in. No due dates, no owners, no projects.
 | EDF, get back on track | Real Estate | every existing EDF task is Real Estate (13 Eldon Road) |
 | Companies House, overdue ID verification, Brittain Holdings | Real Estate | same company as above |
 | Council tax query, 14 Wentworth Terrace | Real Estate | occupancy question on a let property |
-| HMRC late tax return penalty, Mrs CM Brittain | Personal | self assessment; existing HMRC self-assessment tasks are Personal |
+| HMRC late tax return penalty, Mrs [name redacted] | Personal | self assessment; existing HMRC self-assessment tasks are Personal |
 | HMRC late tax return penalty, Mr KJ Brittain | Personal | same |
-| Reply to Lee Drury (WhatsApp) | Personal | the task itself says this is personal, not business |
+| Reply to [name redacted] (WhatsApp) | Personal | the task itself says this is personal, not business |
 | Alamo hire car return | Personal | your holiday car |
-| SMS reply from Anthony (completed) | Real Estate | tenant chasing a fridge freezer swap |
+| SMS reply from [name redacted] (completed) | Real Estate | tenant chasing a fridge freezer swap |
 | Reply to Roy Lavin re UC payment dates (completed) | Real Estate | rent payments on lets |
 | Reply to Roy Lavin re Viola Street (completed) | Real Estate | Airbnb guest and neighbour's garden |
 
@@ -87,7 +87,7 @@ I reached all 8. None acted on; these are proposals only.
 | Task | Overdue | Verdict |
 |---|---|---|
 | Pay final council tax adjustment, 32 Elmdon Place | 209 days | **Probably done.** Nothing in Costs or Transactions matches. Check the council account, then close. |
-| Pay tax liability 2023/24, Ciara Brittain | 187 days | **Still live.** Fresh HMRC late-return penalties arrived in the post on 16 August. Needs a new due date and an owner. |
+| Pay tax liability 2023/24, [name redacted] | 187 days | **Still live.** Fresh HMRC late-return penalties arrived in the post on 16 August. Needs a new due date and an owner. |
 | Invoice INV-0549, PPE & Sons for Roy Lavin | 152 days | **Cannot tell.** No matching invoice record exists, so I cannot prove it was paid. Someone has to look. |
 | DD Fire Alarms Ltd, Duckworth Buildings | 152 days | **Cannot tell.** Same: no invoice record, no cost record. |
 | Invoice 40859, DD Fire Alarms | 152 days | **Cannot tell.** Same. |

@@ -55,7 +55,7 @@
         "Tenancy Status": "Live",
         "Days Overdue (3+ Check)": "CFV",
         "Next Rent Due Date (Auto)": "2025-10-06",
-        "Transactions copy": "\"BANK GIRO CREDIT REF [name redacted], 000000003136258148\", \"BANK GIRO CREDIT REF [name redacted], 000000003081427444\", \"BANK GIRO CREDIT REF [name redacted], 000000003025515727\"",
+        "Transactions copy": "\"BANK GIRO CREDIT REF [name redacted], XXXXXXXXXXXXXXX148\", \"BANK GIRO CREDIT REF [name redacted], XXXXXXXXXXXXXXX444\", \"BANK GIRO CREDIT REF [name redacted], XXXXXXXXXXXXXXX727\"",
         "Unit Reference": [
           "Unit 1 \u2013 25 Abercorn Court"
         ],
@@ -158,7 +158,7 @@
         "Tenancy Status": "Live",
         "Days Overdue (3+ Check)": "CFV",
         "Next Rent Due Date (Auto)": "2025-10-15",
-        "Transactions copy": "\"BANK GIRO CREDIT REF [name redacted], 000000003148394780\", \"BANK GIRO CREDIT REF [name redacted], 000000003096811634\", \"BANK GIRO CREDIT REF [name redacted], 000000003044626394\"",
+        "Transactions copy": "\"BANK GIRO CREDIT REF [name redacted], XXXXXXXXXXXXXXX780\", \"BANK GIRO CREDIT REF [name redacted], XXXXXXXXXXXXXXX634\", \"BANK GIRO CREDIT REF [name redacted], XXXXXXXXXXXXXXX394\"",
         "Unit Reference": [
           "Unit 1 \u2013 25 Abercorn Court"
         ],

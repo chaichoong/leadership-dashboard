@@ -734,8 +734,8 @@ def dupe_task_key(name):
 #   "Sefton Council HMO licence fee 150 unpaid 23 Viola St Bootle"
 #   "pay Sefton landlord licence fee 150 GBP for 23 Viola Street Bootle"
 #
-#   "SMS reply from +447538631747"          (INBOUND lane)
-#   "SMS from 447538631747 - maintenance"   (MAINTENANCE lane)
+#   "SMS reply from +447700900747"          (INBOUND lane)
+#   "SMS from 447700900747 - maintenance"   (MAINTENANCE lane)
 #
 # Three reasons the key alone could not catch them:
 #
@@ -743,7 +743,7 @@ def dupe_task_key(name):
 #      and "pay Sefton" therefore differ, because `council` and `pay` both
 #      survive as distinctive and only two slots exist.
 #   2. IT DELETES EVERY NUMBER. A phone number or a house number is the
-#      STRONGEST identity signal there is — two tasks quoting 447538631747 are
+#      STRONGEST identity signal there is — two tasks quoting 447700900747 are
 #      the same thread, whatever words surround them — and the key strips them
 #      as reference noise.
 #   3. IT SPLITS ON THE LANE PREFIX. Deliberate, and right for FOLDING (a
@@ -787,8 +787,8 @@ DUPE_ACTION_WORDS = {
     "updates", "incoming", "new", "important", "info", "information",
 }
 
-# A UK phone number in any of the shapes these tasks carry: +447538631747,
-# 447538631747, 07538631747. The last nine digits are the same in all three,
+# A UK phone number in any of the shapes these tasks carry: +447700900747,
+# 447700900747, 07700900747. The last nine digits are the same in all three,
 # which is what makes them comparable.
 DUPE_PHONE_RE = re.compile(r"\b(?:\+?44|0)?(\d{9,12})\b")
 
@@ -921,7 +921,7 @@ def dupe_verdict(name_a, name_b, mode="group"):
     # THE LANE CHECK COMES FIRST IN FOLD MODE, ahead of even a shared phone
     # number. Folding is destructive — one task absorbs the other — and a
     # maintenance job absorbed into a reply task is a real obligation lost.
-    # "SMS reply from +447538631747" and "SMS from 447538631747 - maintenance
+    # "SMS reply from +447700900747" and "SMS from 447700900747 - maintenance
     # reply" ARE one thread, and Kevin should SEE them together; that does not
     # mean one may quietly eat the other. Grouping shows, folding destroys, and
     # only the second needs to be careful. The lane is reply-vs-maintenance
@@ -1443,17 +1443,17 @@ def selftest():
           fold("COMPLIANCE: EICR quote follow-up - AC1 Electrical Services - 6 Chedburgh Place",
                "CORRESPONDENCE: Reply to AC1 Electrical - EICR bedroom count - 6 Chedburgh Place"))
     check("INBOUND (follow-up) vs INBOUND is one lane and folds",
-          fold("INBOUND: 1406 Oldham Road electrical safety cert outstanding - Hannah Lea chasing",
+          fold("INBOUND: 1406 Oldham Road electrical safety cert outstanding - Hester Ray chasing",
                "INBOUND (follow-up): 1406 Oldham Road EICR cert - send to Manchester Council"))
     check("a repair ticket never folds into a reply task (28 Aug lesson stands)",
-          not fold("INBOUND: SMS reply from +447538631747", "REPAIR: SMS from 447538631747 - leaking tap")
-          and not fold("INBOUND: SMS reply from +447538631747",
-                       "MAINTENANCE: SMS from 447538631747 - maintenance reply"))
+          not fold("INBOUND: SMS reply from +447700900747", "REPAIR: SMS from 447700900747 - leaking tap")
+          and not fold("INBOUND: SMS reply from +447700900747",
+                       "MAINTENANCE: SMS from 447700900747 - maintenance reply"))
     check("two repair tickets are one lane (control for the lane test)",
-          fold("REPAIR: SMS from 447538631747 - leaking tap", "MAINTENANCE: SMS reply from +447538631747"))
+          fold("REPAIR: SMS from 447700900747 - leaking tap", "MAINTENANCE: SMS reply from +447700900747"))
     check("grouping still crosses the repair lane",
-          dupe_verdict("INBOUND: SMS reply from +447538631747",
-                       "REPAIR: SMS from 447538631747 - leaking tap", mode="group")["match"])
+          dupe_verdict("INBOUND: SMS reply from +447700900747",
+                       "REPAIR: SMS from 447700900747 - leaking tap", mode="group")["match"])
     check("the fold lane is never the raw prefix",
           dupe_signals("COMPLIANCE: x")[0] == "reply" and dupe_signals("no prefix")[0] == "reply"
           and dupe_signals("REPAIR: x")[0] == "maintenance")
@@ -1599,7 +1599,7 @@ def selftest():
     check("a GBP 1.42 payout failure is refused",
           nac("INBOUND: GoCardless payout of 1.42 failed, resend or investigate") is not None)
     check("a failed rent collection is created whatever the amount",
-          nac("INBOUND: GoCardless Lee Drury payment failed rent arrears", "Amount 1.42") is None)
+          nac("INBOUND: GoCardless Lex Dorey payment failed rent arrears", "Amount 1.42") is None)
     check("a GBP 250 payment failure is created",
           nac("INBOUND: Barclaycard payment of £250.00 failed") is None)
     check("a failure with no amount is created",

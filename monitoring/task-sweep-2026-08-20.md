@@ -97,7 +97,7 @@ whatever is paid with a note saying what was and was not verified, and put any g
 remainder into a single payment run.
 
 **The two payment tasks on Mica** — 32 Elmdon Place council tax adjustment (210 days
-late) and Ciara Brittain's 2023/24 tax liability (188 days late). Your CEO's read: this
+late) and [name redacted] Brittain's 2023/24 tax liability (188 days late). Your CEO's read: this
 is not untidy tasks, it is a payment queue that has stopped moving. It should be raised
 as a payments blocker, not swept.
 

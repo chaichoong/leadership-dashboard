@@ -12,10 +12,10 @@ because anything went backwards.
 ## Fixed tonight (no approval needed)
 | Task | Field | Value | Why |
 |---|---|---|---|
-| INBOUND: reply to James Brittain (WhatsApp) | Business | Personal | Reply to his son about a birthday present |
-| INBOUND: reply to Ciara Brittain re order (WhatsApp) | Business | Personal | Personal shopping order |
-| INBOUND: reply to Tabitha Ashurst (WhatsApp) | Business | Personal | Personal chat, France and her apprenticeship |
-| INBOUND: reply to Sam Atherton (WhatsApp) — already done | Business | Personal | A sum Kevin owes personally |
+| INBOUND: reply to [name redacted] (WhatsApp) | Business | Personal | Reply to his son about a birthday present |
+| INBOUND: reply to [name redacted] re order (WhatsApp) | Business | Personal | Personal shopping order |
+| INBOUND: reply to [name redacted] (WhatsApp) | Business | Personal | Personal chat, France and her apprenticeship |
+| INBOUND: reply to [name redacted] (WhatsApp) — already done | Business | Personal | A sum Kevin owes personally |
 | INBOUND: Important information (SSE smart meters) | Due Date | 2026-09-14 | No deadline in the email, priority Not Urgent, so 15 working days out |
 
 ## Waiting on you
@@ -75,7 +75,7 @@ the bank. **It caught me out, and the result matters more than the tasks.**
 | Invoice 40893, DD Fire Alarms | Invoice says Paid, bank shows no payment to DD Fire ever | Do NOT close. Verify first |
 | DD Fire Alarms, Duckworth Buildings | This is an expired estimate, not an invoice, and it is flagged a duplicate | Do NOT close. Verify first |
 | Invoice 40859, DD Fire Alarms | No matching invoice record at all | AI Finance searches Gmail and the Intus statement before anyone phones DD Fire |
-| Pay tax liability 2023/24, Ciara Brittain | 192 days past due, assigned to Mica, who cannot make payments | Kevin confirms whether it is paid, then close it or re-date it. Its business is Real Estate, not Personal |
+| Pay tax liability 2023/24, [name redacted] | 192 days past due, assigned to Mica, who cannot make payments | Kevin confirms whether it is paid, then close it or re-date it. Its business is Real Estate, not Personal |
 
 **Why none of them close.** Seven-plus invoice rows all carry the same "paid" date of
 29 June 2026 with no bank transaction attached to any of them. That is one bulk button
@@ -89,8 +89,8 @@ The letting agent may well have netted the Duckworth and Intus ones off the rent
 never touches the bank. That is plausible. It is not proven, which is exactly the point.
 
 ## CEO review
-Ran. It approved all five auto writes and checked the Sam Atherton one independently
-(£45 to Samuel John Atherton on 22 Aug, a bill at Kevin's own home, so Personal is right).
+Ran. It approved all five auto writes and checked the [name redacted] one independently
+(£45 to [name redacted] on 22 Aug, a bill at Kevin's own home, so Personal is right).
 
 It made me change four things:
 1. Dropped all four "propose complete" stale proposals, because the Paid stamp is fake.

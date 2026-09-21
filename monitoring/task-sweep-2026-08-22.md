@@ -37,7 +37,7 @@ Only ONE of them is a person, so approving sends ONE Slack message, not twelve.
 
 ## Left alone
 - **PARKED — revisit after the first client.** No owner on purpose. It is parked until client one.
-- **INBOUND: reply to SSE Energy Solutions.** Business left blank because the task itself still has to work out which property account 8702010539 belongs to. See the flag below.
+- **INBOUND: reply to SSE Energy Solutions.** Business left blank because the task itself still has to work out which property account XXXXXXX539 belongs to. See the flag below.
 - **INBOUND: 123 Reg renewal notice (done)** and **INBOUND: Welcome to NeighborsCU (done).** Cannot tell which business pays for the domains, and the credit union email looks like it was sent to the wrong person. Left blank rather than guessed.
 - **137 of the 139 tasks with no project** are ordinary day-to-day work and belong to no project. Only 2 were linked. That is a real answer, not a miss.
 - Project links proposed are only 2 of 139 because the open projects are narrow and forcing links would pull project collaborators onto unrelated tasks.
@@ -49,7 +49,7 @@ Only ONE of them is a person, so approving sends ONE Slack message, not twelve.
 ## Still real? (6 tasks over 90 days past due — proposals only, nothing changed)
 | Task | Overdue | My read | Proposal |
 |---|---|---|---|
-| Pay tax liability 2023/24, Ciara Brittain | 190 days | still live — a tax debt does not go away | give it a new date; it sits in your lane with the legal matter |
+| Pay tax liability 2023/24, [name redacted] | 190 days | still live — a tax debt does not go away | give it a new date; it sits in your lane with the legal matter |
 | DD Fire Alarms Ltd, Duckworth Buildings | 155 days | dead — this is a quote that expired on 23 Feb 2026 | close it, reason: estimate expired |
 | Invoice 40859 from DD Fire Alarms | 155 days | still live | no matching payment in the accounts, so it looks unpaid |
 | Invoice 40893 from DD Fire Alarms | 148 days | still live | same, and the letting agent asked for direct settlement |

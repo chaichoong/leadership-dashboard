@@ -20,13 +20,13 @@
     //
     // The old key was the first three words with punctuation deleted and digits kept, which
     // baked per-transaction references into the rule's identity. Five separate rules existed
-    // for one £2 recurring charge — "british a1252236611488" through "…492" — and not one of
+    // for one £2 recurring charge — "british a9000000001488" through "…492" — and not one of
     // them could ever match again, because the next payment carries a different reference.
     // 131 of 238 stored rules (55%) had fired exactly once.
     //
     // So: drop tokens that are pure digits (store and card numbers — "one stop 1036",
     // "american exp 3773") and tokens that mix letters with 3+ digits (references —
-    // "a1252236611489", "503fa4"). Two digits in a token is a brand, not a reference, which
+    // "a9000000001489", "503fa4"). Two digits in a token is a brand, not a reference, which
     // keeps "v12 retail finance" and "57a west street" intact. Calibrated against all 238
     // live rules and 5,704 real vendor strings on 6 Aug 2026: 23 duplicate rules collapse
     // and nothing legitimate is lost.
@@ -750,8 +750,8 @@
     // Account/policy/mandate references embedded in a bank descriptor. Nearly every cost
     // in this base carries its reference in the NAME and the bank repeats it in the
     // descriptor, which makes the reference a far stronger signal than the amount:
-    //     cost  "Kent Reliance - 4AP - MOM0840638BRI1"
-    //     bank  "DIRECT DEBIT PAYMENT TO KENT RELIANCE IP REF MOM0840638BRI1, MANDATE NO 0100"
+    //     cost  "Kent Reliance - 4AP - MOM0100401BRI1"
+    //     bank  "DIRECT DEBIT PAYMENT TO KENT RELIANCE IP REF MOM0100401BRI1, MANDATE NO 0100"
     // Verified 27/27 across the three biggest clusters (Kent Reliance 8/8, Birmingham
     // Midshires 12/12, West Suffolk 7/7) in the Jul 2026 audit.
     //
@@ -770,13 +770,13 @@
     //
     // A reference is only trusted when history shows it serving exactly ONE cost. That
     // caveat is the whole reason this is safe: Close Brothers finances two Swinton policies
-    // under a single agreement, so "REF 85376969" appears on BOTH policies' payments while
+    // under a single agreement, so "REF 80000069" appears on BOTH policies' payments while
     // sitting in only ONE policy's cost name. Trusting it blindly would send every £45.30
     // payment to the £42.01 policy — precisely the bug fixed in 87d6b62. History shows that
     // token against two costs, so it is discarded here and the amount decides instead.
     //
-    // Sort codes and account numbers self-neutralise the same way: "090128"/"44385270"
-    // appear on both Paul Brittain loans, so neither token discriminates.
+    // Sort codes and account numbers self-neutralise the same way: a lender's sort code
+    // and account number appear on both of that lender's loans, so neither token discriminates.
     function pickCostByReference(desc, refIndex, costLookup) {
         if (!refIndex) return '';
         const hits = [];
@@ -796,9 +796,9 @@
     // "Cost is stable per vendor" was the old assumption, and it is false. Close
     // Brothers finances several Swinton policies under ONE direct-debit mandate, so
     // every payment arrives with a byte-identical descriptor:
-    //     DIRECT DEBIT PAYMENT TO CLOSE-SWINTON REF 85376969, MANDATE NO 0207
+    //     DIRECT DEBIT PAYMENT TO CLOSE-SWINTON REF 80000069, MANDATE NO 0207
     // The ONLY thing separating the policies is the amount and the day: £42.01 on the
-    // 27th (policy RSAP6837602300) vs £45.30 on the 2nd (policy BE26ACTP...). The
+    // 27th (policy RSAP6800000100) vs £45.30 on the 2nd (policy BE26ACTP...). The
     // history map kept a single costId per vendor key on a last-writer-wins basis, so
     // all 12 payments were attributed to one policy and the other read overdue for
     // four months while being paid every month (Jul 2026).
@@ -904,13 +904,13 @@
     // right 68, wrong 268):
     //   1. Knowledge-base rules are keyed by VENDOR but store tenancy/cost/property,
     //      so "ONESAVINGS BANK" sends all 13 Kent Reliance mortgages to whichever one
-    //      Kevin approved last, "COLLINS S" sends five tenancies to one, and
+    //      Kevin approved last, "TENANT A" sends five tenancies to one, and
     //      "JOELIN LIMITED" puts every job on one property.
     //   2. The composite fallback key "bank giro|credit ref" matches every tenant's
     //      rent and proposes whoever paid last.
-    // Meanwhile the identifier is sitting in the descriptor: the surname ("REF WALKER"),
-    // the account number the cost is named after ("REF 70015535" ↔ "Kent Reliance -
-    // 13CP - 70015535"), the property code or street ("28CP-LANDLORD", "5 WOODCOCK").
+    // Meanwhile the identifier is sitting in the descriptor: the surname ("REF SURNAME"),
+    // the account number the cost is named after ("REF 70000135" ↔ "Kent Reliance -
+    // 13CP - 70000135"), the property code or street ("28CP-LANDLORD", "5 WOODCOCK").
     // This layer reads those against the live records and overrides the learned guess
     // for that field. It never proposes an inactive tenancy or cost — the dropdowns
     // cannot hold them, so the suggestion would silently drop on Approve.
@@ -972,7 +972,7 @@
         (allTenancies || []).forEach(t => {
             if (!isTenancyActive(getField(t, F.tenPayStatus))) return;
             const tenant = getTenantForTenancy(t, tenantLookup);
-            // The surname is what a bank reference carries ("REF WALKER"), so when the
+            // The surname is what a bank reference carries ("REF SURNAME"), so when the
             // tenancy has a usable one, only the surname identifies it — a first name
             // alone ("GARY" in a refund from Gary Marsh) must not. Tenancies whose
             // surname rollup is generic ("Lettings", "(UK) Limited") fall back to the
@@ -996,7 +996,7 @@
         });
 
         // ── Costs (active only): reference tokens in the cost NAME ──
-        // "Kent Reliance - 13CP - 70015535" → 70015535 identifies that cost, with no
+        // "Kent Reliance - 13CP - 70000135" → 70000135 identifies that cost, with no
         // history needed. A token naming two active costs identifies neither.
         const costRefs = {};  // token → Set(costId)
         (allCosts || []).forEach(c => {
@@ -1117,7 +1117,7 @@
         extractRefTokens(desc).forEach(tok => {
             let ids = index.costRefs[tok];
             if (!ids) {
-                // Banks pad some account numbers ("6092235458060000" for 60922354580600):
+                // Banks pad some account numbers ("6090000000050000" for 60900000000500):
                 // accept a descriptor token that starts with a cost's ≥8-char token.
                 const pref = Object.keys(index.costRefs).filter(k => k.length >= 8 && tok.length > k.length && tok.startsWith(k));
                 if (pref.length === 1) ids = index.costRefs[pref[0]];
