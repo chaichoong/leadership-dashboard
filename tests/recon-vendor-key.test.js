@@ -35,8 +35,8 @@ describe('reconVendorKey', () => {
   // identical category, sub-category and business, stored as five separate rules.
   it('collapses reference numbers so one vendor is one rule', () => {
     const keys = [
-      'BRITISH A1252236611488', 'BRITISH A1252236611489', 'BRITISH A1252236611490',
-      'BRITISH A1252236611491', 'BRITISH A1252236611492',
+      'BRITISH A9000000001488', 'BRITISH A9000000001489', 'BRITISH A9000000001490',
+      'BRITISH A9000000001491', 'BRITISH A9000000001492',
     ].map(reconVendorKey);
     expect(new Set(keys).size).toBe(1);
     expect(keys[0]).toBe('british');
@@ -46,7 +46,7 @@ describe('reconVendorKey', () => {
     expect(reconVendorKey('ONE STOP 1036')).toBe(reconVendorKey('One Stop'));
     expect(reconVendorKey('ONE STOP 1036')).toBe('one stop');
     expect(reconVendorKey('MCDONALDS 849')).toBe('mcdonalds');
-    expect(reconVendorKey('American Express 3773')).toBe('american express');
+    expect(reconVendorKey('American Express 1001')).toBe('american express');
   });
 
   it('keeps digits that are part of the name, not a reference', () => {

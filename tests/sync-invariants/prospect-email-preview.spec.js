@@ -32,7 +32,7 @@ test.describe('Prospecting email preview', () => {
     await openProspecting(page);
     const card = page.locator(CARD);
     await expect(card).toContainText('Kevin Brittain <kevin@operationsdirector.co.uk>');
-    await expect(card).toContainText('Jane Whitehouse <enquiries@is-group.co.uk>');
+    await expect(card).toContainText('Jane Testwood <enquiries@example-signs.example>');
     await expect(card.locator('input[data-subject-for="recProsLtd"]'))
       .toHaveValue('your part-time bookkeeper ad');
   });
@@ -61,7 +61,7 @@ test.describe('Prospecting email preview', () => {
     const subject = page.locator('input[data-subject-for="recProsLtd"]');
     await subject.fill('');
     // The placeholder tells Kevin what will actually be used.
-    await expect(subject).toHaveAttribute('placeholder', 'A thought for IS Group Signs Limited');
+    await expect(subject).toHaveAttribute('placeholder', 'A thought for Example Signs Limited');
   });
 
   test('non-email routes get no envelope, no subject and no signature', async ({ page }) => {

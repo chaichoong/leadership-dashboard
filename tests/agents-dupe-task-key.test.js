@@ -51,13 +51,13 @@ describe('dupeTaskKey — one subject, one key', () => {
 
   it('collides the same job carrying different reference numbers', () => {
     expect(key('Chase Acme invoice #2')).toBe(key('Chase Acme invoice #3'));
-    expect(key('Reply to British Gas a1252236611488')).toBe(key('Reply to British Gas a1252236611492'));
+    expect(key('Reply to British Gas a9000000001488')).toBe(key('Reply to British Gas a9000000001492'));
   });
 
   it('drops pure numbers and long references, keeps short brand digits', () => {
     expect(key('Renew v12 licence')).toContain('v12');       // two digits = a brand
     expect(key('Pay ref 4471902')).not.toContain('4471902'); // pure digits = reference
-    expect(key('Close a1252236611488')).toBe('close');       // letters + 3+ digits = reference
+    expect(key('Close a9000000001488')).toBe('close');       // letters + 3+ digits = reference
   });
 
   it('different subjects stay apart', () => {
@@ -80,8 +80,8 @@ describe('dupe_task_key (Python) matches dupeTaskKey (JS)', () => {
   const CORPUS = [
     '', '#12345', 'Chase Acme invoice #2', 'Chase Acme invoice #3',
     'INBOUND: Outstanding invoices', 'Renew v12 licence', 'Pay ref 4471902',
-    'Reply to British Gas a1252236611488', 'UC47 form for Flat 3B',
-    'MAINTENANCE: boiler service, 12 High St', 'Council Tax 23242388 payment arrangement',
+    'Reply to British Gas a9000000001488', 'UC47 form for Flat 3B',
+    'MAINTENANCE: boiler service, 12 High St', 'Council Tax 10000088 payment arrangement',
     'Fixed cost review: find savings (weekly)', 'Email  with   extra    spaces',
     'MiXeD CaSe TiTlE', '£1,742.60 refund from EDF', '2026-08-25 court hearing',
     'CONTENT (OD): Fri 11 Sep, The offer: Five signs your business runs on you',
@@ -157,8 +157,8 @@ describe('dupeTaskKey — the live clog it was rewritten for', () => {
   it('keeps the maintenance lane separate from the inbound lane', () => {
     // Deliberate: the triage skill only dedupes a lane-13 thread against other
     // maintenance tasks, so collapsing these would cross a designed boundary.
-    expect(key('MAINTENANCE: SMS reply from 447738707077 - unknown content'))
-      .not.toBe(key('INBOUND: Incoming SMS from +447738707077'));
+    expect(key('MAINTENANCE: SMS reply from 447700900077 - unknown content'))
+      .not.toBe(key('INBOUND: Incoming SMS from +447700900077'));
   });
 
   it('platform and outcome words alone never make a key', () => {
@@ -253,15 +253,15 @@ ${code}`, arg], { encoding: 'utf8' }));
       ['INBOUND: Sefton Council HMO licence fee 150 unpaid 23 Viola St Bootle urgent',
        'INBOUND: pay Sefton landlord licence fee 150 GBP for 23 Viola Street Bootle'],
       ['INBOUND: Anglia Revenues council tax arrears further recovery - call or respond',
-       'INBOUND: respond to Anglia Revenues re council tax arrears (Kevin & Ciara)'],
+       'INBOUND: respond to Anglia Revenues re council tax arrears (Kevin & partner)'],
       ['INBOUND: Stripe Boost 100 payouts paused - provide business info urgently',
        'INBOUND: Stripe action required - provide business info for Boost 100'],
-      ['INBOUND: 1406 Oldham Road electrical safety cert outstanding - Hannah Lea chasing',
+      ['INBOUND: 1406 Oldham Road electrical safety cert outstanding - Hester Ray chasing',
        'INBOUND (follow-up): 1406 Oldham Road EICR cert - send to Manchester Council'],
-      ['INBOUND: SMS reply from +447538631747',
-       'MAINTENANCE: SMS from 447538631747 - maintenance reply'],
-      ['INBOUND: Incoming SMS from +447738707077',
-       'MAINTENANCE: SMS reply from 447738707077 - unknown content'],
+      ['INBOUND: SMS reply from +447700900747',
+       'MAINTENANCE: SMS from 447700900747 - maintenance reply'],
+      ['INBOUND: Incoming SMS from +447700900077',
+       'MAINTENANCE: SMS reply from 447700900077 - unknown content'],
     ];
     pairs.forEach(([a, b]) => {
       const v = verdict(a, b);
@@ -280,15 +280,15 @@ ${code}`, arg], { encoding: 'utf8' }));
   });
 
   it('two different phone numbers never merge on the words around them', () => {
-    expect(verdict('INBOUND: SMS reply from +447538631747',
-                   'MAINTENANCE: SMS reply from 447738707077 - unknown content').match).toBe(false);
+    expect(verdict('INBOUND: SMS reply from +447700900747',
+                   'MAINTENANCE: SMS reply from 447700900077 - unknown content').match).toBe(false);
   });
 
   it('FOLDING keeps the lane rule that GROUPING drops', () => {
     // Folding is destructive; a maintenance job absorbed into a reply task is
     // a real obligation lost. Showing them together costs nothing.
-    const a = 'INBOUND: SMS reply from +447538631747';
-    const b = 'MAINTENANCE: SMS from 447538631747 - maintenance reply';
+    const a = 'INBOUND: SMS reply from +447700900747';
+    const b = 'MAINTENANCE: SMS from 447700900747 - maintenance reply';
     expect(verdict(a, b, 'group').match).toBe(true);
     expect(verdict(a, b, 'fold').match).toBe(false);
   });
@@ -307,21 +307,21 @@ ${code}`, arg], { encoding: 'utf8' }));
     expect(chedburgh.match, 'COMPLIANCE vs CORRESPONDENCE is not a lane difference').toBe(true);
     expect(chedburgh.why).toContain('eicr');
     const oldham = verdict(
-      'INBOUND: 1406 Oldham Road electrical safety cert outstanding - Hannah Lea chasing',
+      'INBOUND: 1406 Oldham Road electrical safety cert outstanding - Hester Ray chasing',
       'INBOUND (follow-up): 1406 Oldham Road EICR cert - send to Manchester Council', 'fold');
     expect(oldham.match, 'INBOUND (follow-up) vs INBOUND is not a lane difference').toBe(true);
     expect(oldham.why).toBe('same reference 1406');
-    expect(verdict('INBOUND: SMS reply from +447538631747',
-                   'INBOUND (follow-up): SMS from 447538631747 - chase', 'fold').match).toBe(true);
+    expect(verdict('INBOUND: SMS reply from +447700900747',
+                   'INBOUND (follow-up): SMS from 447700900747 - chase', 'fold').match).toBe(true);
   });
 
   it('a repair ticket still never folds into a reply task, whichever prefix spells it', () => {
     // The 28 Aug lesson stands: a maintenance job absorbed into a reply task
     // is a real obligation lost. REPAIR: and MAINTENANCE: are the same lane
     // as each other and a different lane from every reply prefix.
-    const reply = 'INBOUND: SMS reply from +447538631747';
-    for (const repair of ['REPAIR: SMS from 447538631747 - leaking tap',
-                          'MAINTENANCE: SMS from 447538631747 - leaking tap']) {
+    const reply = 'INBOUND: SMS reply from +447700900747';
+    for (const repair of ['REPAIR: SMS from 447700900747 - leaking tap',
+                          'MAINTENANCE: SMS from 447700900747 - leaking tap']) {
       expect(verdict(reply, repair, 'fold').match, repair).toBe(false);
       expect(verdict(reply, repair, 'group').match, `${repair} still SHOWS together`).toBe(true);
     }
@@ -329,8 +329,8 @@ ${code}`, arg], { encoding: 'utf8' }));
                    'REPAIR: EICR remedial works - AC1 Electrical - 6 Chedburgh Place', 'fold').match)
       .toBe(false);
     // CONTROL: two repair tickets on one thread are one lane and DO fold.
-    expect(verdict('REPAIR: SMS from 447538631747 - leaking tap',
-                   'MAINTENANCE: SMS reply from +447538631747', 'fold').match).toBe(true);
+    expect(verdict('REPAIR: SMS from 447700900747 - leaking tap',
+                   'MAINTENANCE: SMS reply from +447700900747', 'fold').match).toBe(true);
   });
 
   // 20260901-inbound-comms-triage-427. On 1 Sep 2026 an HMRC compliance-check
@@ -411,13 +411,13 @@ ${code}`, arg], { encoding: 'utf8' }));
       'return dupeVerdict;',
     ].join('\n'))();
     const CORPUS = [
-      'INBOUND: SMS reply from +447538631747',
-      'INBOUND (follow-up): SMS from 447538631747 - chase',
-      'MAINTENANCE: SMS from 447538631747 - maintenance reply',
-      'REPAIR: SMS from 447538631747 - leaking tap',
+      'INBOUND: SMS reply from +447700900747',
+      'INBOUND (follow-up): SMS from 447700900747 - chase',
+      'MAINTENANCE: SMS from 447700900747 - maintenance reply',
+      'REPAIR: SMS from 447700900747 - leaking tap',
       'COMPLIANCE: EICR quote follow-up - AC1 Electrical Services - 6 Chedburgh Place',
       'CORRESPONDENCE: Reply to AC1 Electrical - EICR bedroom count - 6 Chedburgh Place',
-      'INBOUND: 1406 Oldham Road electrical safety cert outstanding - Hannah Lea chasing',
+      'INBOUND: 1406 Oldham Road electrical safety cert outstanding - Hester Ray chasing',
       'INBOUND (follow-up): 1406 Oldham Road EICR cert - send to Manchester Council',
       'INBOUND: Sefton Council HMO licence fee 150 unpaid 23 Viola St Bootle urgent',
       'INBOUND: action overdue licensing tasks 23 Viola Street Bootle - EICR and Gas',
@@ -425,10 +425,10 @@ ${code}`, arg], { encoding: 'utf8' }));
       'INBOUND: Fylde Council Tax 2026 demand',
       'Clear and tidy garden',
       // A letters+digits reference must not read as a phone number: without
-      // the word boundary the page matched "223661148" inside a1252236611488
+      // the word boundary the page matched "000000148" inside a9000000001488
       // (found 15 Sep 2026 by this test's reviewer; Python always had \b).
-      'INBOUND: Reply to British Gas a1252236611488',
-      'INBOUND: Chase EDF a1252236611488',
+      'INBOUND: Reply to British Gas a9000000001488',
+      'INBOUND: Chase EDF a9000000001488',
       // A repeated distinctive word counts once in the ratio (Python set).
       'INBOUND: boiler boiler boiler service quote',
       'INBOUND: boiler service quote from Gasco',

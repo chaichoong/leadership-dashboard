@@ -56,20 +56,21 @@ print('ATTENTION=' + str(att))
 import importlib.util
 spec = importlib.util.spec_from_file_location('ub', ${JSON.stringify(script)})
 ub = importlib.util.module_from_spec(spec); spec.loader.exec_module(ub)
-A, B = '9826003801209677811', '9826003801208182409'
+A, B = '9826000000000000011', '9826000000000000022'
 print('DIFFERENT=' + str(ub.meter_problem(A, B)))
 print('SAME=' + str(ub.meter_problem(A, A)))
 print('MISSING=' + str(ub.meter_problem(A, None)))
 print('UNPINNED=' + str(ub.meter_problem(None, B)))
 row = ub.parse_energy(ub.SAMPLE_APT1)
-print('PARSED=' + str(row['topUpNumber']))
+want = __import__('re').search(r'Top-up Number\\n(\\d+)', ub.SAMPLE_APT1).group(1)
+print('PARSED=' + str(len(want) == 19 and row['topUpNumber'] == want))
 `;
         const out = execFileSync('python3', ['-c', py], { encoding: 'utf8' });
-        expect(out).toMatch(/DIFFERENT=METER CHANGED[^\n]*2409/);
+        expect(out).toMatch(/DIFFERENT=METER CHANGED[^\n]*0022/);
         expect(out).toMatch(/SAME=None/);
         expect(out).toMatch(/MISSING=None/);
         expect(out).toMatch(/UNPINNED=None/);
-        expect(out).toMatch(/PARSED=9826003801209677811/);
+        expect(out).toMatch(/PARSED=True/);
     });
 
     it('read_account routes its meter check through that gate, not a private copy', () => {
@@ -126,7 +127,7 @@ import importlib.util
 spec = importlib.util.spec_from_file_location('ub', ${JSON.stringify(script)})
 ub = importlib.util.module_from_spec(spec); spec.loader.exec_module(ub)
 shapes = {
- 'UNPAINTED': 'My energy\\nBalance\\nREFRESH\\n5 days left\\nElectricity Top-up Number\\n9826003801209677811\\nOTHER CHARGES\\n£1350.60\\n',
+ 'UNPAINTED': 'My energy\\nBalance\\nREFRESH\\n5 days left\\nElectricity Top-up Number\\n9826000000000000011\\nOTHER CHARGES\\n£1350.60\\n',
  'PLACEHOLDER': 'Balance\\nREFRESH\\n£--\\nOTHER CHARGES\\n£1350.60\\n',
  'TWOCARDS': 'Balance\\nMy energy\\nBalance\\nREFRESH\\n£20.26\\n5 days left\\n',
  'FARDOWN': 'Balance\\nREFRESH\\na\\nb\\nc\\nd\\n£1350.60\\n',
@@ -137,7 +138,7 @@ shapes = {
 for k, v in shapes.items():
     r = ub.parse_energy(v)
     print(k + '=' + str(r['balanceGbp']) + '|refused=' + str(bool(r['refused'])))
-d = ub.parse_energy('Balance\\nREFRESH\\n-£5.20\\n\\nOff supply\\nElectricity Top-up Number\\n9826003801209677811\\nOTHER CHARGES\\n£1350.60\\n')
+d = ub.parse_energy('Balance\\nREFRESH\\n-£5.20\\n\\nOff supply\\nElectricity Top-up Number\\n9826000000000000011\\nOTHER CHARGES\\n£1350.60\\n')
 print('DEBT=' + str(d['balanceGbp']) + '|' + str(d['daysLeft']))
 `;
         const out = execFileSync('python3', ['-c', py], { encoding: 'utf8' });
@@ -338,7 +339,7 @@ ub.read_account = lambda acct, node=None: dict(
 
 def ok(bal, days):
     return {'ok': True, 'balance': '\u00a3%.2f' % bal, 'balanceGbp': bal,
-            'daysLeft': days, 'daysLeftRecognised': True, 'meterLast4': '7811',
+            'daysLeft': days, 'daysLeftRecognised': True, 'meterLast4': '0011',
             'problem': None, 'signedIn': True, 'implausible': False}
 def down():
     return {'ok': False, 'balance': None, 'balanceGbp': None, 'daysLeft': None,

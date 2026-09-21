@@ -15,11 +15,11 @@ const WORKER = readFileSync(resolve(ROOT, 'scripts/slack-automation/money-daily-
 // count of the queue at all.
 //
 // On 11 Aug 2026 the 09:00 brief (recbv7w4clndYdztn) made the one thing
-// 'Re-engage Jack Duddy', the first step 'Spend 10 minutes writing one honest,
+// 'Re-engage Jack Sample', the first step 'Spend 10 minutes writing one honest,
 // short re-opener in your own voice', and handed off 'worker-writer — draft a
-// warm re-opener message for Jack Duddy'. All 20 'Warm lane: re-engage <name>'
+// warm re-opener message for Jack Sample'. All 20 'Warm lane: re-engage <name>'
 // tasks were already in Approval with complete addressed emails in Agent Output
-// (Jack Duddy: TO hello@leofood.co.uk). The brief invented ten minutes of writing
+// (Jack Sample: TO hello@larkfoods.example). The brief invented ten minutes of writing
 // and a duplicate agent dispatch for work that needed one tap, and never
 // mentioned that 60 tasks were blocked behind Kevin.
 //
@@ -40,14 +40,14 @@ const { dropAlreadyWaiting } = load(['HANDOFF_STOPWORDS', 'distinctiveWords', 'w
 
 describe('CEO brief and the approval queue', () => {
   it('does not dispatch an agent to redo work already waiting on a tick', () => {
-    const tasks = { approvalNames: ['warm lane: re-engage jack duddy'] };
+    const tasks = { approvalNames: ['warm lane: re-engage jack sample'] };
     const out = dropAlreadyWaiting(
-      ['worker-writer — draft a warm re-opener message for Jack Duddy'], tasks);
+      ['worker-writer — draft a warm re-opener message for Jack Sample'], tasks);
     expect(out, 'the same email would be written and approved twice').toEqual([]);
   });
 
   it('leaves genuine hand-offs alone', () => {
-    const tasks = { approvalNames: ['warm lane: re-engage jack duddy'] };
+    const tasks = { approvalNames: ['warm lane: re-engage jack sample'] };
     const out = dropAlreadyWaiting([
       'worker-analyst — pull the Q3 conversion rate',
       'worker-builder — fix the CFV sidebar badge',
@@ -59,7 +59,7 @@ describe('CEO brief and the approval queue', () => {
     // 'draft' and 'email' are stopwords precisely so a single overlap cannot
     // strip half the list.
     const tasks = { approvalNames: ['draft the email to the council'] };
-    const out = dropAlreadyWaiting(['worker-writer — draft the email to Intus'], tasks);
+    const out = dropAlreadyWaiting(['worker-writer — draft the email to Dummy Lettings'], tasks);
     expect(out).toHaveLength(1);
   });
 
@@ -73,7 +73,7 @@ describe('CEO brief and the approval queue', () => {
 // Finding 20260819-ceo-huddle-218.
 //
 // The guard only ever covered handed_off. The SAME 11 Aug brief that correctly
-// refused to dispatch 'worker-writer — draft a warm re-opener for Jack Duddy'
+// refused to dispatch 'worker-writer — draft a warm re-opener for Jack Sample'
 // still told Kevin, in first_step, to 'spend 10 minutes writing one honest,
 // short re-opener in your own voice' — for an email that was finished, addressed
 // and one tap from sending. The two fields cannot simply be dropped: callCeo
@@ -82,30 +82,30 @@ describe('the brief does not re-commission work already waiting', () => {
   const { redirectToWaiting, waitingMatch } = load([
     'HANDOFF_STOPWORDS', 'distinctiveWords', 'waitingMatch', 'redirectToWaiting']);
   const tasks = {
-    approvalNames: ['warm lane: re-engage jack duddy'],
-    approvalDisplayNames: ['Warm lane: re-engage Jack Duddy'],
+    approvalNames: ['warm lane: re-engage jack sample'],
+    approvalDisplayNames: ['Warm lane: re-engage Jack Sample'],
   };
 
   it('rewrites a first_step that duplicates a waiting task', () => {
     const out = redirectToWaiting(
-      'Spend 10 minutes writing one honest, short re-opener to Jack Duddy in your own voice',
+      'Spend 10 minutes writing one honest, short re-opener to Jack Sample in your own voice',
       tasks, 'first_step');
     expect(out, 'Kevin was sent to write an email that was already written')
       .not.toMatch(/spend 10 minutes/i);
     expect(out).toMatch(/approve/i);
-    expect(out).toContain('Warm lane: re-engage Jack Duddy');
+    expect(out).toContain('Warm lane: re-engage Jack Sample');
   });
 
   it('rewrites, never blanks — the field is required', () => {
-    const out = redirectToWaiting('write to Jack Duddy re-engage', tasks, 'first_step');
+    const out = redirectToWaiting('write to Jack Sample re-engage', tasks, 'first_step');
     expect(out.trim().length).toBeGreaterThan(0);
   });
 
   it('rewrites one_thing differently, so the brief does not say it twice', () => {
-    const step = redirectToWaiting('re-engage Jack Duddy today', tasks, 'first_step');
-    const one = redirectToWaiting('Re-engage Jack Duddy', tasks, 'one_thing');
+    const step = redirectToWaiting('re-engage Jack Sample today', tasks, 'first_step');
+    const one = redirectToWaiting('Re-engage Jack Sample', tasks, 'one_thing');
     expect(one).not.toBe(step);
-    expect(one).toContain('Warm lane: re-engage Jack Duddy');
+    expect(one).toContain('Warm lane: re-engage Jack Sample');
   });
 
   it('leaves a genuine step alone', () => {
@@ -114,13 +114,13 @@ describe('the brief does not re-commission work already waiting', () => {
   });
 
   it('leaves everything alone when nothing is waiting', () => {
-    const step = 'Re-engage Jack Duddy';
+    const step = 'Re-engage Jack Sample';
     expect(redirectToWaiting(step, { approvalNames: [] }, 'first_step')).toBe(step);
     expect(redirectToWaiting(step, undefined, 'first_step')).toBe(step);
   });
 
   it('uses the SAME match as the hand-off guard, so the two cannot disagree', () => {
-    const line = 'draft a warm re-opener message for Jack Duddy';
+    const line = 'draft a warm re-opener message for Jack Sample';
     expect(waitingMatch(line, tasks)).toBe(0);
     expect(dropAlreadyWaiting([line], tasks)).toEqual([]);
     expect(redirectToWaiting(line, tasks, 'first_step')).not.toBe(line);

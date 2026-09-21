@@ -23,7 +23,7 @@ function fixture(overrides = {}) {
             { id: 'u3', propertyId: 'p1', number: 3, type: 'Room', status: 'Occupied', rent: 524.90, incomeType: 'Universal Credit', tenantIds: ['t3'] },
         ],
         tenants: [
-            { id: 't1', name: 'Adam Older', status: 'Active', dob: '1988-11-24', payType: 'Universal Credit', capExemption: 'Unknown' },
+            { id: 't1', name: 'Adam Older', status: 'Active', dob: '1988-11-20', payType: 'Universal Credit', capExemption: 'Unknown' },
             { id: 't2', name: 'Paul Flat', status: 'Active', dob: '1974-01-01', payType: 'Universal Credit', capExemption: 'LCWRA' },
             { id: 't3', name: 'Travis Young', status: 'Active', dob: '2002-05-05', payType: 'Universal Credit', capExemption: 'Unknown' },
         ],
@@ -75,7 +75,7 @@ describe('benefit cap calculator (2026-27 figures)', () => {
 
 describe('ages, BRMAs and rates', () => {
     it('computes age from a date of birth on a given day', () => {
-        expect(M.ageOn('1988-11-24', TODAY)).toBe(37);
+        expect(M.ageOn('1988-11-20', TODAY)).toBe(37);
         expect(M.ageOn('1991-09-10', TODAY)).toBe(34); // birthday tomorrow
         expect(M.ageOn('1991-09-09', TODAY)).toBe(35);
         expect(M.ageOn('', TODAY)).toBe(null);
@@ -155,7 +155,7 @@ describe('buildPlan levers', () => {
     });
     it('a block\'s potential is priced apartment by apartment: two over-35s in a 2-bed, one in a 1-bed', () => {
         const f = fixture();
-        f.properties.push({ id: 'p5', name: 'Duckworth Building', type: 'Block', agent: 'Intus Lettings', postcode: 'FY8 1SQ' });
+        f.properties.push({ id: 'p5', name: 'Duckworth Building', type: 'Block', agent: 'Dummy Lettings', postcode: 'FY8 1SQ' });
         f.units.push({ id: 'f1', propertyId: 'p5', number: 1, type: 'Flat', status: 'Occupied', beds: 2, tenantIds: [] });
         f.units.push({ id: 'f2', propertyId: 'p5', number: 2, type: 'Flat', status: 'Occupied', beds: 1, tenantIds: [] });
         f.tenancies.push({ id: 'cf1', tenantIds: [], unitId: 'f1', rent: 500 }, { id: 'cf2', tenantIds: [], unitId: 'f2', rent: 600 });
@@ -197,9 +197,9 @@ describe('buildPlan levers', () => {
         const f = fixture();
         f.properties.push({ id: 'p3', name: '28 Chedburgh Place', agent: 'Roc Immo', postcode: 'CB9 0AJ', lettableRooms: 5 });
         f.units.push({ id: 'u9', propertyId: 'p3', number: 1, type: 'Room', status: 'Occupied', rent: 1750, tenantIds: [] });
-        f.properties.push({ id: 'p4', name: '22 Newton Street', agent: 'Staycay', postcode: 'BB12 0LG', beds: 3 });
+        f.properties.push({ id: 'p4', name: '22 Newton Street', agent: 'Example Stays', postcode: 'BB12 0LG', beds: 3 });
         f.units.push({ id: 'u10', propertyId: 'p4', number: 1, type: 'Whole Property', status: 'Occupied', rent: 1800, tenantIds: [] });
-        f.properties.push({ id: 'p6', name: '30 Burnbank Gardens', agent: 'Mears', postcode: 'ML3 9HD', beds: 1 });
+        f.properties.push({ id: 'p6', name: '30 Burnbank Gardens', agent: 'Example Housing', postcode: 'ML3 9HD', beds: 1 });
         f.units.push({ id: 'u11', propertyId: 'p6', number: 1, type: 'Whole Property', status: 'Occupied', rent: 540, tenantIds: [] });
         f.tenancies.push({ id: 'c9', tenantIds: [], unitId: 'u9', rent: 1750 }, { id: 'c10', tenantIds: [], unitId: 'u10', rent: 1800 }, { id: 'c11', tenantIds: [], unitId: 'u11', rent: 540 });
         const p = M.buildPlan(f, S, TODAY);
@@ -260,7 +260,7 @@ describe('buildPlan levers', () => {
     });
     it('packs come in strategic order and a blocked tenant is shown but not counted', () => {
         const f = fixture(); f.tenants[2].dob = '';
-        f.properties.push({ id: 'p2', name: '13 Far Street', agent: 'Simon Collins', postcode: 'BB5 5PT' });
+        f.properties.push({ id: 'p2', name: '13 Far Street', agent: 'Collins Head Lease', postcode: 'BB5 5PT' });
         const p = M.buildPlan(f, S, TODAY);
         expect(p.packs.map(x => x.name)).toEqual(['18 Test Park', '13 Far Street']);
         expect(p.packs[0].stage).toBe(1);
@@ -357,7 +357,7 @@ describe('buildPlan levers', () => {
     });
     it('prices a Collins property as a £250 take-back and keeps it out of the agent-held potential', () => {
         const f = fixture();
-        f.properties.push({ id: 'p2', name: '13 John Street', agent: 'Simon Collins', postcode: 'BB5 5PT' });
+        f.properties.push({ id: 'p2', name: '13 John Street', agent: 'Collins Head Lease', postcode: 'BB5 5PT' });
         const p = M.buildPlan(f, S, TODAY);
         expect(p.levers.find(x => x.key === 'takeback:p2').monthly).toBe(250);
         expect(p.levers.find(x => x.key === 'agent:p2')).toBeUndefined();
@@ -579,9 +579,9 @@ describe('council tax', () => {
 });
 
 describe('self-managed versus agent-run', () => {
-    it('Simon Collins is ours, a letting agent is not, and a tenant pay type never decides it', () => {
+    it('the Collins head lease is ours, a letting agent is not, and a tenant pay type never decides it', () => {
         const f = fixture();
-        f.properties.push({ id: 'c1', name: 'Collins house', agent: 'Simon Collins', postcode: 'BB5 5PT' });
+        f.properties.push({ id: 'c1', name: 'Collins house', agent: 'Collins Head Lease', postcode: 'BB5 5PT' });
         f.properties.push({ id: 'a1', name: 'Agent house', agent: 'Roc Immo', postcode: 'CB9 0AH' });
         f.properties.push({ id: 'n1', name: 'No agent named', agent: '', postcode: 'CB9 0AJ' });
         const p = M.buildPlan(f, S, TODAY);
@@ -601,7 +601,7 @@ describe('self-managed versus agent-run', () => {
 describe('a block of flats', () => {
     it('a block with no flat units recorded is still priced as one block', () => {
         const f = fixture();
-        f.properties = [{ id: 'b1', name: 'Duckworth Building', type: 'Block', beds: 3, agent: 'Intus Lettings', postcode: 'FY8 1SQ' }];
+        f.properties = [{ id: 'b1', name: 'Duckworth Building', type: 'Block', beds: 3, agent: 'Dummy Lettings', postcode: 'FY8 1SQ' }];
         f.units = []; f.tenants = []; f.tenancies = []; f.costs = [];
         const v = M.buildPlan(f, S, TODAY).properties[0];
         expect(v.current).toBe('Block of flats');
@@ -615,10 +615,10 @@ describe('a block of flats', () => {
 function duckworth() {
     const flats = [[1, 2, 500, 'Serviced accommodation'], [2, 2, 500, 'Serviced accommodation'], [3, 2, 651, 'Single let'], [5, 1, 687, 'Single let']];
     return {
-        properties: [{ id: 'blk', name: 'Duckworth Building', type: 'Block', beds: 9, agent: 'Intus Lettings', postcode: 'FY8 1SQ', ctPayer: 'Unknown', baselineRent: 2338, baselineCt: 0 }],
+        properties: [{ id: 'blk', name: 'Duckworth Building', type: 'Block', beds: 9, agent: 'Dummy Lettings', postcode: 'FY8 1SQ', ctPayer: 'Unknown', baselineRent: 2338, baselineCt: 0 }],
         units: flats.map(([n, beds, , how]) => ({ id: 'apt' + n, propertyId: 'blk', number: n, type: 'Flat', status: 'Occupied', beds, rent: 9999, tenantIds: ['ta' + n],
             lettingStrategy: how, ctBand: n === 5 ? '' : 'A', baselineRent: n === 5 ? null : 1, baselineCt: n === 5 ? null : 2, baselineDate: n === 5 ? '' : '2026-09-16' })),
-        tenants: flats.map(([n]) => ({ id: 'ta' + n, name: n <= 2 ? 'Staycay Management' : 'Tenant ' + n, status: 'Active', payType: 'Working' })),
+        tenants: flats.map(([n]) => ({ id: 'ta' + n, name: n <= 2 ? 'Example Stays Ltd' : 'Tenant ' + n, status: 'Active', payType: 'Working' })),
         tenancies: flats.map(([n, , rent]) => ({ id: 'tc' + n, tenantIds: ['ta' + n], unitId: 'apt' + n, rent })),
         costs: [], planRows: [],
     };
@@ -633,7 +633,7 @@ describe('Duckworth Building: one row per apartment (16 Sep 2026)', () => {
         const a1 = p.properties[0];
         expect(a1.unitRecord).toBe(true);
         expect(a1.parentId).toBe('blk');
-        expect(a1.selfManaged).toBe(false);   // Intus runs the block, so every flat is agent-run
+        expect(a1.selfManaged).toBe(false);   // Dummy Lettings runs the block, so every flat is agent-run
     });
     it('apartments 1 and 2 read serviced accommodation, 3 onwards single let', () => {
         const p = M.buildPlan(duckworth(), S, TODAY);
@@ -692,12 +692,12 @@ describe('Duckworth Building: one row per apartment (16 Sep 2026)', () => {
 });
 
 describe('rent now reads live tenancies, never the unit rollup (16 Sep 2026)', () => {
-    // 22 Newton Street: the unit's Expected Rent said £1,800, the live Staycay tenancy £500 and
+    // 22 Newton Street: the unit's Expected Rent said £1,800, the live Example Stays tenancy £500 and
     // a tenancy that had ended £1,300. Only the live one is rent coming in.
     const newton = () => ({
         properties: [{ id: 'nw', name: '22 Newton Street', type: 'Single Let', beds: 3, agent: 'Property Portfolio', postcode: 'BB12 0LG', ctBand: 'B', ctPayer: 'Unknown', strategy: 'Serviced accommodation' }],
         units: [{ id: 'nu', propertyId: 'nw', number: 1, type: 'Whole Property', status: 'Occupied', rent: 1800, tenantIds: ['sc'], lettingStrategy: 'Serviced accommodation' }],
-        tenants: [{ id: 'sc', name: 'Staycay Management', status: 'Active', payType: 'Working' }],
+        tenants: [{ id: 'sc', name: 'Example Stays Ltd', status: 'Active', payType: 'Working' }],
         tenancies: [{ id: 'live', tenantIds: ['sc'], unitId: 'nu', rent: 500, status: 'Live' }, { id: 'old', tenantIds: ['sc'], unitId: 'nu', rent: 1300, status: 'Ended' }],
         costs: [], planRows: [],
     });
@@ -869,7 +869,7 @@ describe('council tax now follows the letting and the paperwork', () => {
         expect(M.buildPlan(f, S, TODAY).properties[0].ctNow).toBe(158.41);
     });
     it('on an agent-run property it is only what the bank shows we pay', () => {
-        const f = singleLet({ agent: 'Mears', ctBand: 'B' });
+        const f = singleLet({ agent: 'Example Housing', ctBand: 'B' });
         expect(M.buildPlan(f, S, TODAY).properties[0].ctNow).toBe(0);
         f.costs = [{ propertyId: 'sl', name: 'Stirling Park - CT', monthly: 195 }];
         const v = M.buildPlan(f, S, TODAY).properties[0];
@@ -1071,7 +1071,7 @@ describe('review fix 1: a property that is ours gets the self-managed moves', ()
         expect(p.levers.find(l => l.key === 'uplift:t1')).toBeTruthy();
     });
     it('a Collins house keeps its take-back', () => {
-        const f = fixture(); f.properties[0].agent = 'Simon Collins';
+        const f = fixture(); f.properties[0].agent = 'Collins Head Lease';
         expect(M.buildPlan(f, S, TODAY).levers.find(l => l.lever === 'Take-back')).toBeTruthy();
     });
 });
@@ -1156,7 +1156,7 @@ describe('review fix 5: where we started', () => {
 
 describe('a single let is planned at the open-market rent (Kevin, 16 Sep 2026)', () => {
     const marloes = (over = {}) => {
-        const f = singleLet(Object.assign({ name: '15 Marloes Court', postcode: 'SA5 7JW', beds: 3, ctBand: 'A', ctAnnual: 1492.19, agent: 'Simon Collins', strategy: 'Single let' }, over));
+        const f = singleLet(Object.assign({ name: '15 Marloes Court', postcode: 'SA5 7JW', beds: 3, ctBand: 'A', ctAnnual: 1492.19, agent: 'Collins Head Lease', strategy: 'Single let' }, over));
         f.units[0].rent = 237; f.tenancies[0].rent = 237;
         return f;
     };
@@ -1291,8 +1291,8 @@ describe('an empty property (Kevin, 16 Sep 2026)', () => {
     });
 });
 
-// Kevin, 16 Sep 2026 (14 Wentworth Terrace): "We'll still be doing the joint tenancy for Stacey and
-// Kinga to get the historical council tax liability removed from us, but at the point at which we
+// Kevin, 16 Sep 2026 (14 Wentworth Terrace): "We'll still be doing the joint tenancy for the two tenants
+// there to get the historical council tax liability removed from us, but at the point at which we
 // move a third tenant into that property, the council tax will come back to us."
 describe('a joint tenancy before the third tenant on a UC HMO house', () => {
     const twoTenantHmo = (status) => {

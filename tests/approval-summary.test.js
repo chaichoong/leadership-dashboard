@@ -23,7 +23,7 @@ const FIXTURES = {
         '# Big report\n\nWHAT WAS CHECKED\n' + LONG +
         '\n\n**Carrying this out will involve:** closing Airtable task recXYZ as already done.',
     emailDraft:
-        'TO: hello@leofood.co.uk\nSUBJECT: the call you booked about Leo Food\n---\nHi Jack,\n\n' + LONG,
+        'TO: hello@larkfoods.example\nSUBJECT: the call you booked about Lark Foods\n---\nHi Jack,\n\n' + LONG,
     reportFirstLine:
         ':rotating_light: TIER 1. This touches your private matter.\n\n# Heading noise\n\n' +
         'The invoice is already paid. The task is a false overdue.\n' + LONG,
@@ -37,7 +37,7 @@ describe('apvSummary derives the ask', () => {
     });
     it('turns an email draft into a send-this action', () => {
         expect(webSummary(FIXTURES.emailDraft)).toBe(
-            'Send an email to hello@leofood.co.uk. Subject: the call you booked about Leo Food');
+            'Send an email to hello@larkfoods.example. Subject: the call you booked about Lark Foods');
     });
     it('falls back to the first meaningful line, skipping banners and headings', () => {
         expect(webSummary(FIXTURES.reportFirstLine)).toBe(

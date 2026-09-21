@@ -296,10 +296,10 @@ print('---JSON---'); print(json.dumps(captured['fields'].get(m.AF['notes'], ''))
     const out = py(`
 print('---JSON---'); print(json.dumps({
   'terms': m.history_terms(emails=['kevinbrittain@gmail.com', 'Karlo@Example.com', 'karlo@example.com'], refs=['2026-07-29', '12345', '12345']),
-  'tokens': m.reference_tokens('Ref 447538631747 dated 2026-07-29, again 447538631747, policy AB12345, ' + ' '.join(str(100000 + i) for i in range(20))),
+  'tokens': m.reference_tokens('Ref 447700900747 dated 2026-07-29, again 447700900747, policy AB12345, ' + ' '.join(str(100000 + i) for i in range(20))),
 }))`);
     expect(out.terms).toEqual([['email', 'karlo@example.com'], ['ref', '12345']]);
-    expect(out.tokens.slice(0, 2)).toEqual(['447538631747', 'AB12345']);
+    expect(out.tokens.slice(0, 2)).toEqual(['447700900747', 'AB12345']);
     expect(out.tokens).not.toContain('2026-07-29');
     expect(out.tokens.length).toBeLessThanOrEqual(8);
   });

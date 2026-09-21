@@ -39,7 +39,7 @@ DB = {
   # the twin's under the fold check, one that does not (cross-lane), one that
   # is newer but already Completed, and an OLDER keeper that is Completed.
   'recNEWERSAME00001': {'id':'recNEWERSAME00001','createdTime':'2026-09-07T02:10:00.000Z','fields':{AF['name']:'CORRESPONDENCE: Reply to AC1 Electrical - EICR bedroom count - 6 Chedburgh Place','fldx4qCw17UfrKpaN':'Approval'}},
-  'recNEWERLANE00001': {'id':'recNEWERLANE00001','createdTime':'2026-09-07T02:10:00.000Z','fields':{AF['name']:'MAINTENANCE: SMS from 447538631747 - maintenance reply','fldx4qCw17UfrKpaN':'Today'}},
+  'recNEWERLANE00001': {'id':'recNEWERLANE00001','createdTime':'2026-09-07T02:10:00.000Z','fields':{AF['name']:'MAINTENANCE: SMS from 447700900747 - maintenance reply','fldx4qCw17UfrKpaN':'Today'}},
   'recNEWERDONE00001': {'id':'recNEWERDONE00001','createdTime':'2026-09-07T02:10:00.000Z','fields':{AF['name']:'CORRESPONDENCE: Reply to AC1 Electrical - EICR bedroom count - 6 Chedburgh Place','fldx4qCw17UfrKpaN':'Completed'}},
   'recOLDERDONE00001': {'id':'recOLDERDONE00001','createdTime':'2026-09-01T10:00:00.000Z','fields':{AF['name']:'INBOUND: Pingen letters on hold','fldx4qCw17UfrKpaN':'Completed'}},
   # Unprefixed repair keepers: Roy holds one, the other carries the
@@ -161,7 +161,7 @@ describe('either creation order folds when both are open and the fold check agre
   it('a NEWER keeper across lanes is still a card: folding may not cross lanes', () => {
     // Since Kevin's ruling of 15 Sep 2026 the lane is read off both RECORDS
     // ahead of the age check, so the refusal names the lanes, not the age.
-    const d = py(`print(json.dumps(lvl('CLOSE PROPOSAL: duplicate of recNEWERLANE00001', 'Admin', 'INBOUND: SMS reply from +447538631747')))`);
+    const d = py(`print(json.dumps(lvl('CLOSE PROPOSAL: duplicate of recNEWERLANE00001', 'Admin', 'INBOUND: SMS reply from +447700900747')))`);
     expect(d.level).toBe('B');
     expect(d.text).toMatch(/this is a reply task and keeper recNEWERLANE00001 is a maintenance task/);
   });

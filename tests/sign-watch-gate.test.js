@@ -18,7 +18,7 @@ const src = readFileSync(DISPATCH, 'utf8');
 const pyEval = makeRunPy(DISPATCH);
 
 describe('sign_output_needs_watch — only a SIGN output arms the gate', () => {
-  const SIGN = 'DOCUMENT: ~/knowledge-os/attachments/loa.pdf\nSIGNERS: ciara@example.com\n---\nWhat signing commits Kevin to.';
+  const SIGN = 'DOCUMENT: ~/knowledge-os/attachments/loa.pdf\nSIGNERS: signer@example.com\n---\nWhat signing commits Kevin to.';
   const CASES = [
     [SIGN, true],
     ['TIER-1 BANNER LINE\n' + SIGN, true],                       // banner on top

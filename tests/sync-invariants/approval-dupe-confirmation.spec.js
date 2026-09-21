@@ -49,19 +49,19 @@ test.describe('duplicate detection catches the pairs Kevin was seeing twice', ()
      'INBOUND: pay Sefton landlord licence fee 150 GBP for 23 Viola Street Bootle'],
     ['a verb is not identity: "respond to X" is X',
      'INBOUND: Anglia Revenues council tax arrears further recovery - call or respond',
-     'INBOUND: respond to Anglia Revenues re council tax arrears (Kevin & Ciara)'],
+     'INBOUND: respond to Anglia Revenues re council tax arrears (Kevin & partner)'],
     ['word order moved the distinctive pair',
      'INBOUND: Stripe Boost 100 payouts paused - provide business info urgently',
      'INBOUND: Stripe action required - provide business info for Boost 100'],
     ['a house number is the identity, and the key deleted it',
-     'INBOUND: 1406 Oldham Road electrical safety cert outstanding - Hannah Lea chasing',
+     'INBOUND: 1406 Oldham Road electrical safety cert outstanding - Hester Ray chasing',
      'INBOUND (follow-up): 1406 Oldham Road EICR cert - send to Manchester Council'],
     ['one SMS thread, once in each lane',
-     'INBOUND: SMS reply from +447538631747',
-     'MAINTENANCE: SMS from 447538631747 - maintenance reply'],
+     'INBOUND: SMS reply from +447700900747',
+     'MAINTENANCE: SMS from 447700900747 - maintenance reply'],
     ['the same number written three different ways',
-     'INBOUND: Incoming SMS from +447738707077',
-     'MAINTENANCE: SMS reply from 447738707077 - unknown content'],
+     'INBOUND: Incoming SMS from +447700900077',
+     'MAINTENANCE: SMS reply from 447700900077 - unknown content'],
     ['same sender, same matter, different summary',
      'MAINTENANCE: SSE Energy Solutions important information',
      'MAINTENANCE: SSE Energy Solutions smart meter national upgrade notice'],
@@ -78,9 +78,9 @@ test.describe('duplicate detection catches the pairs Kevin was seeing twice', ()
 
   test('says WHY in words Kevin can check, not a key', async ({ page }) => {
     expect((await verdict(page,
-      'INBOUND: SMS reply from +447538631747',
-      'MAINTENANCE: SMS from 447538631747 - maintenance reply')).why)
-      .toBe('same phone 538631747');
+      'INBOUND: SMS reply from +447700900747',
+      'MAINTENANCE: SMS from 447700900747 - maintenance reply')).why)
+      .toBe('same phone 700900747');
     expect((await verdict(page,
       'INBOUND: Sefton Council HMO licence fee 150 unpaid 23 Viola St Bootle urgent',
       'INBOUND: pay Sefton landlord licence fee 150 GBP for 23 Viola Street Bootle')).why)
@@ -120,11 +120,11 @@ test.describe('and does not group things that merely look alike', () => {
     // tasks covering TWO separate threads collapse into one cluster. Kevin
     // would be told they are one thing, and they are not.
     expect((await verdict(page,
-      'INBOUND: SMS reply from +447538631747',
-      'MAINTENANCE: SMS reply from 447738707077 - unknown content')).match).toBe(false);
+      'INBOUND: SMS reply from +447700900747',
+      'MAINTENANCE: SMS reply from 447700900077 - unknown content')).match).toBe(false);
     expect((await verdict(page,
-      'INBOUND: Incoming SMS from +447738707077',
-      'MAINTENANCE: SMS from 447538631747 - maintenance reply')).match).toBe(false);
+      'INBOUND: Incoming SMS from +447700900077',
+      'MAINTENANCE: SMS from 447700900747 - maintenance reply')).match).toBe(false);
   });
 
   test('two different creditors are not one matter', async ({ page }) => {
@@ -138,12 +138,12 @@ test.describe('and does not group things that merely look alike', () => {
     // Grouping shows; folding destroys. A maintenance job absorbed into a
     // reply task is a real obligation lost, so the destructive path keeps the
     // lane rule the display path drops.
-    const pair = ['INBOUND: SMS reply from +447538631747',
-                  'MAINTENANCE: SMS from 447538631747 - maintenance reply'];
+    const pair = ['INBOUND: SMS reply from +447700900747',
+                  'MAINTENANCE: SMS from 447700900747 - maintenance reply'];
     expect((await verdict(page, ...pair, 'group')).match).toBe(true);
     expect((await verdict(page, ...pair, 'fold')).match).toBe(false);
-    expect((await verdict(page, 'INBOUND: SMS reply from +447538631747',
-      'REPAIR: SMS from 447538631747 - leaking tap', 'fold')).match).toBe(false);
+    expect((await verdict(page, 'INBOUND: SMS reply from +447700900747',
+      'REPAIR: SMS from 447700900747 - leaking tap', 'fold')).match).toBe(false);
   });
 
   test('but the lane means reply-vs-maintenance ONLY: agent prefixes are not lanes', async ({ page }) => {
@@ -159,7 +159,7 @@ test.describe('and does not group things that merely look alike', () => {
     expect(chedburgh.match).toBe(true);
     expect(chedburgh.why).toContain('eicr');
     const oldham = await verdict(page,
-      'INBOUND: 1406 Oldham Road electrical safety cert outstanding - Hannah Lea chasing',
+      'INBOUND: 1406 Oldham Road electrical safety cert outstanding - Hester Ray chasing',
       'INBOUND (follow-up): 1406 Oldham Road EICR cert - send to Manchester Council', 'fold');
     expect(oldham.match).toBe(true);
     expect(oldham.why).toBe('same reference 1406');
@@ -198,13 +198,13 @@ test.describe('the Duplicates lane sees what the queue sees', () => {
   test('a duplicate ACROSS two agents is reported, not hidden', async ({ page }) => {
     const f = defaultFixtures();
     f.openTasks = [
-      openTask('recX1', 'INBOUND: SMS reply from +447538631747', AGENT_A),
-      openTask('recX2', 'MAINTENANCE: SMS from 447538631747 - maintenance reply', AGENT_B),
+      openTask('recX1', 'INBOUND: SMS reply from +447700900747', AGENT_A),
+      openTask('recX2', 'MAINTENANCE: SMS from 447700900747 - maintenance reply', AGENT_B),
     ];
     await mockAgentsPage(page, f);
     await loadAgentsPage(page);
     await page.click('#ptab-checks');
     await expect(page.locator('#checksBody')).toContainText('both have an open task for the same job');
-    await expect(page.locator('#checksBody')).toContainText('same phone 538631747');
+    await expect(page.locator('#checksBody')).toContainText('same phone 700900747');
   });
 });

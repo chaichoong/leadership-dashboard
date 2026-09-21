@@ -498,7 +498,7 @@ describe('hand-backs are refused at submit (4 Sep 2026)', () => {
     'Kevin signing in person at the branch.',
     'Nothing more without Kevin calling it off.',
     'Kevin calling the meeting to order.',
-    'Kevin paying EUR 45 at www.amendes.gouv.fr using reference 3866676730.',
+    'Kevin paying EUR 45 at www.amendes.gouv.fr using reference 1234509876.',
     'Once Kevin approves, the letter is posted.',
     'Kevin can review the attached statement.',
     'You can see the balance on the attached PDF.',

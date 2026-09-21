@@ -118,10 +118,10 @@ test.describe('Reconciliation knowledge base', () => {
       // The five real "british" rules: one recurring £2 charge stored five times because the
       // old key baked the payment reference into the rule's identity.
       const legacy = [
-        { vendorKey: 'british a1252236611488', subCatId: 'recT', subCatName: 'Personal Transport', confidence: 1 },
-        { vendorKey: 'british a1252236611489', subCatId: 'recT', subCatName: 'Personal Transport', confidence: 1 },
-        { vendorKey: 'british a1252236611490', subCatId: 'recT', subCatName: 'Personal Transport', confidence: 3 },
-        { vendorKey: 'british a1252236611491', subCatId: 'recT', subCatName: 'Personal Transport', confidence: 1 },
+        { vendorKey: 'british a9000000001488', subCatId: 'recT', subCatName: 'Personal Transport', confidence: 1 },
+        { vendorKey: 'british a9000000001489', subCatId: 'recT', subCatName: 'Personal Transport', confidence: 1 },
+        { vendorKey: 'british a9000000001490', subCatId: 'recT', subCatName: 'Personal Transport', confidence: 3 },
+        { vendorKey: 'british a9000000001491', subCatId: 'recT', subCatName: 'Personal Transport', confidence: 1 },
         { vendorKey: 'one stop 1036', subCatId: 'recG', subCatName: 'Groceries', confidence: 2 },
       ];
       localStorage.setItem('recon_rules', JSON.stringify(legacy));

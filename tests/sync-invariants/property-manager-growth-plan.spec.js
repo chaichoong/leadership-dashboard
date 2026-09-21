@@ -23,7 +23,7 @@ function growthPayload() {
       { id: 'recU2', fields: { [U.property]: ['recProp1'], [U.number]: 2, [U.type]: 'Room', [U.status]: 'Occupied', [U.tenants]: ['recT2'], [U.incomeType]: 'Universal Credit' } },
     ],
     tenants: [
-      { id: 'recT1', fields: { [T.name]: 'Adam Older', [T.status]: 'Active', [T.dob]: '1988-11-24', [T.payType]: 'Universal Credit' } },
+      { id: 'recT1', fields: { [T.name]: 'Adam Older', [T.status]: 'Active', [T.dob]: '1988-11-20', [T.payType]: 'Universal Credit' } },
       { id: 'recT2', fields: { [T.name]: 'Paul Flat', [T.status]: 'Active', [T.dob]: '1974-01-01', [T.payType]: 'Universal Credit' } },
     ],
     tenancies: [

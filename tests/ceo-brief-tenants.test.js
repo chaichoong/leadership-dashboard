@@ -131,7 +131,7 @@ describe('the CEO prompt', () => {
 describe('task piles', () => {
   const today = '2026-08-03';
   const rows = [
-    { name: 'Warm lane: re-engage Jack Duddy', who: 'unassigned', due: '2026-08-01', status: 'Approval', type: 'Correspondence' },
+    { name: 'Warm lane: re-engage Jack Sample', who: 'unassigned', due: '2026-08-01', status: 'Approval', type: 'Correspondence' },
     { name: 'Fix the invoice page', who: 'Sam Carter', due: '2026-08-01', status: 'In Progress', priority: 'High' },
     { name: 'Call the accountant', who: 'Sam Carter', due: today, status: 'To Do' },
     { name: 'Order stock', who: 'Priya', due: '2026-09-01', status: 'To Do' },
@@ -140,7 +140,7 @@ describe('task piles', () => {
     const t = shapeTasks(rows, today, readyConfig());
     expect(t.counts).toEqual({ open: 3, overdue: 1, dueToday: 1, founders: 2, awaitingApproval: 1, awaitingSend: 1 });
     expect(t.approvalList).toContain('APPROVING SENDS THE EMAIL');
-    expect(t.approvalNames).toEqual(['warm lane: re-engage jack duddy']);
+    expect(t.approvalNames).toEqual(['warm lane: re-engage jack sample']);
   });
   it('respects a tenant who names the approval status differently', () => {
     const cfg = readyConfig({ tasks_source: { approval_status: 'Waiting', correspondence_type: 'Email' } });
@@ -153,15 +153,15 @@ describe('task piles', () => {
 
 // Same inputs as tests/ceo-brief-approval-queue.test.js, so the two briefs cannot disagree.
 describe('approval-queue guards (parity with the single-tenant brief)', () => {
-  const tasks = { approvalNames: ['warm lane: re-engage jack duddy'], approvalDisplayNames: ['Warm lane: re-engage Jack Duddy'] };
+  const tasks = { approvalNames: ['warm lane: re-engage jack sample'], approvalDisplayNames: ['Warm lane: re-engage Jack Sample'] };
   it('does not dispatch an agent to redo work already waiting on a tick', () => {
-    expect(dropAlreadyWaiting(['worker-writer — draft a warm re-opener message for Jack Duddy'], tasks)).toEqual([]);
+    expect(dropAlreadyWaiting(['worker-writer — draft a warm re-opener message for Jack Sample'], tasks)).toEqual([]);
   });
   it('leaves genuine hand-offs alone', () => {
     expect(dropAlreadyWaiting(['worker-analyst — pull the Q3 conversion rate', 'worker-builder — fix the CFV sidebar badge'], tasks)).toHaveLength(2);
   });
   it('one shared generic word is not a match', () => {
-    expect(dropAlreadyWaiting(['worker-writer — draft the email to Intus'], { approvalNames: ['draft the email to the council'] })).toHaveLength(1);
+    expect(dropAlreadyWaiting(['worker-writer — draft the email to Dummy Lettings'], { approvalNames: ['draft the email to the council'] })).toHaveLength(1);
   });
   it('an empty approval queue changes nothing', () => {
     const items = ['worker-writer — draft something'];
@@ -169,25 +169,25 @@ describe('approval-queue guards (parity with the single-tenant brief)', () => {
     expect(dropAlreadyWaiting(items, undefined)).toEqual(items);
   });
   it('rewrites a first_step that duplicates a waiting task, never blanks it', () => {
-    const out = redirectToWaiting('Spend 10 minutes writing one honest, short re-opener to Jack Duddy in your own voice', tasks, 'first_step');
+    const out = redirectToWaiting('Spend 10 minutes writing one honest, short re-opener to Jack Sample in your own voice', tasks, 'first_step');
     expect(out).not.toMatch(/spend 10 minutes/i);
     expect(out).toMatch(/approve/i);
-    expect(out).toContain('Warm lane: re-engage Jack Duddy');
+    expect(out).toContain('Warm lane: re-engage Jack Sample');
     expect(out).not.toMatch(/—/);
   });
   it('rewrites one_thing differently from first_step', () => {
-    const step = redirectToWaiting('re-engage Jack Duddy today', tasks, 'first_step');
-    const one = redirectToWaiting('Re-engage Jack Duddy', tasks, 'one_thing');
+    const step = redirectToWaiting('re-engage Jack Sample today', tasks, 'first_step');
+    const one = redirectToWaiting('Re-engage Jack Sample', tasks, 'one_thing');
     expect(one).not.toBe(step);
-    expect(one).toContain('Warm lane: re-engage Jack Duddy');
+    expect(one).toContain('Warm lane: re-engage Jack Sample');
   });
   it('leaves a genuine step alone, and everything when nothing waits', () => {
     const step = 'Call the accountant about the Q3 filing deadline';
     expect(redirectToWaiting(step, tasks, 'first_step')).toBe(step);
-    expect(redirectToWaiting('Re-engage Jack Duddy', { approvalNames: [] }, 'first_step')).toBe('Re-engage Jack Duddy');
+    expect(redirectToWaiting('Re-engage Jack Sample', { approvalNames: [] }, 'first_step')).toBe('Re-engage Jack Sample');
   });
   it('uses the SAME match for both guards', () => {
-    const line = 'draft a warm re-opener message for Jack Duddy';
+    const line = 'draft a warm re-opener message for Jack Sample';
     expect(waitingMatch(line, tasks)).toBe(0);
     expect(dropAlreadyWaiting([line], tasks)).toEqual([]);
     expect(redirectToWaiting(line, tasks, 'first_step')).not.toBe(line);
@@ -200,13 +200,13 @@ describe('approval-queue guards (parity with the single-tenant brief)', () => {
 describe('finaliseBrief', () => {
   const cfg = readyConfig();
   cfg.board = cfg.board.map(s => ({ ...s, enabled: s.seat !== 'Wealth' }));
-  const tasks = { approvalNames: ['warm lane: re-engage jack duddy'], approvalDisplayNames: ['Warm lane: re-engage Jack Duddy'] };
+  const tasks = { approvalNames: ['warm lane: re-engage jack sample'], approvalDisplayNames: ['Warm lane: re-engage Jack Sample'] };
   it('applies the limits, drops flags from disabled seats, and runs both guards', () => {
     const b = finaliseBrief({
-      one_thing: 'Re-engage Jack Duddy', first_step: 'write to Jack Duddy re-engage',
+      one_thing: 'Re-engage Jack Sample', first_step: 'write to Jack Sample re-engage',
       ignore: ['a', 'b', 'c', 'd', 'e'],
       flags: ['Kiyosaki: buy an asset', 'Keller: this is scatter', 'Crabtree: cash', 'Bailey: x'],
-      handed_off: ['worker-writer — draft a warm re-opener for Jack Duddy', 'worker-analyst — count leads', 'worker-analyst — count leads'],
+      handed_off: ['worker-writer — draft a warm re-opener for Jack Sample', 'worker-analyst — count leads', 'worker-analyst — count leads'],
     }, tasks, cfg);
     expect(b.ignore).toHaveLength(4);
     expect(b.flags).toEqual(['Keller: this is scatter', 'Crabtree: cash']);

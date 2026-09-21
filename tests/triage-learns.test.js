@@ -70,7 +70,7 @@ describe('a lesson reaches the agent that made the decision', () => {
   });
 
   it('non-inbound work stays with its raiser — triage never saw it', () => {
-    expect(destination('Warm lane: re-engage Andrew Bizzell', 'Roy owns it', false).agent)
+    expect(destination('Warm lane: re-engage Andrew Sample', 'Roy owns it', false).agent)
       .toBe('inbound-comms-response');
   });
 

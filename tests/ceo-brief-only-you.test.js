@@ -34,13 +34,13 @@ const BANKING = [
   kevin('Set up Standing Order - Anglian Water payment plan - 32 EP , 28 CP on the 22nd of every month', '2026-09-04'),
   kevin('Update SO amount - 13 Chedburgh - £158 per month', '2026-09-04'),
   kevin('Pay Property Redress Membership', '2026-09-04'),
-  kevin('Pay tax liability for tax return 2023/24- Ciara Brittain', '2026-09-04'),
+  kevin('Pay tax liability for tax return 2023/24- Jo Example', '2026-09-04'),
   kevin('Create SO - 4 Abington Council Tax - £190 per month', '2026-09-04'),
   kevin('Credit Card Payments - payments due 5th of the month', '2026-09-05'),
 ];
 const NOT_ONLY_YOU = [
   kevin('INBOUND: POST [MEDIUM]: Birmingham Midshires (Bank of Scotland) - IO Mortgage EndTerm_15 Marloe', '2026-08-31'),
-  kevin('Fit skirting boards in Jason\'s bedroom', '2026-07-10'),
+  kevin('Fit skirting boards in Theo\'s bedroom', '2026-07-10'),
   kevin('Buy an external SSD and switch on Time Machine for the MacBook Air (no backup exists today)', '2026-09-15'),
   kevin('SIGN-IN: EDF Energy session lapsed', '2026-09-16'),
   kevin('Debt recovery decision session — Monies Owed ledger (~£13k, 13 items)', '2026-09-04'),
@@ -51,7 +51,7 @@ const NOT_ONLY_YOU = [
   kevin('Open your Property Manager dashboard and sign in', '2026-09-16'),
   kevin('Sign up for GHL trial', '2026-09-16'),
   kevin('INBOUND: EMAIL [HIGH]: WHY IS THIS TAKING SO LONG', '2026-09-16'),
-  kevin('Chase tenant Lee Drury for missed rent payment', '2026-09-16'),
+  kevin('Chase tenant Lee Example for missed rent payment', '2026-09-16'),
   kevin('INBOUND: EMAIL [HIGH]: Re: WHY IS THIS TAKING SO LONG', '2026-09-16'),
   kevin('Sign into Zempler', '2026-09-16'),
   kevin('Five signs your business runs on you', '2026-09-16'),
@@ -59,7 +59,7 @@ const NOT_ONLY_YOU = [
   kevin('INBOUND: Adobe Sign: agreement signed by Roy Lavin', '2026-09-16'),
   kevin('Email signature for Kevin Brittain', '2026-09-16'),
   kevin('Sign the robot browser into Facebook', '2026-09-16'),
-  kevin('UC payment status (Paul Murcutt)', '2026-09-16'),
+  kevin('UC payment status (Pat Example)', '2026-09-16'),
 ];
 
 describe('selectOnlyYou picks only bank, payment and signature items', () => {
