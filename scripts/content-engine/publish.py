@@ -619,7 +619,8 @@ def finish_extras(day, entry, recs, test, save):
                     # without the podcast): look at Spotify before uploading, so a retry never publishes a second copy
                     seen, why = spotify.verify_published(ptitle, tries=1)
                     if seen in ("published", "processing"):
-                        pod.update({"plan": plan_path, "title": ptitle, "status": seen, "note": "found on Spotify before a retry"}); save()
+                        pod.update({"plan": plan_path, "title": ptitle, "status": seen, "note": "found on Spotify before a retry",
+                                    "started": now_utc()}); save()   # starts the three days the sync asks for its link (review, 21 Sep 2026)
                         print("episode %d: already on Spotify (%s); not uploaded again" % (day, seen)); return done
                     if "not readable" in str(why):
                         # an unreadable list (signed out, blank page) is not proof of absence: wait for the next hour
@@ -1168,11 +1169,10 @@ def spotify_link_due(pod, now=None):
     episodes list already called 'published' kept an empty link for good: 2055 to 2196, eleven in a row, and the
     Publishing page showed no Spotify link. The public page lists only the newest episode, so the link must be read
     while the episode is newest: asked every hourly run for SPOTIFY_LINK_DAYS after the upload started, then left."""
-    if not pod.get("title") or pod.get("link"): return False
-    if pod.get("status") == "processing": return True
-    if pod.get("status") != "published": return False
+    if not pod.get("title") or pod.get("link") or pod.get("status") not in ("processing", "published"): return False
     age = minutes_since(pod.get("started"), now)
-    return age is not None and age <= SPOTIFY_LINK_DAYS * 24 * 60
+    if age is None: return pod.get("status") == "processing"          # no start time: 'processing' keeps its old retry
+    return age <= SPOTIFY_LINK_DAYS * 24 * 60                        # older than that, a newer episode has taken the page
 
 
 def minutes_since(iso, now=None):
@@ -1772,7 +1772,9 @@ def selftest():
     assert not spotify_link_due({"title": "t", "status": "published", "started": "2026-09-19T05:00:00Z", "link": "https://open.spotify.com/episode/x"}, t0), "a link ends it"
     assert not spotify_link_due({"title": "t", "status": "published", "started": "2026-09-17T11:00:00Z"}, t0), "after three days the page no longer shows it"
     assert not spotify_link_due({"title": "t", "status": "failed", "started": "2026-09-21T05:00:00Z"}, t0) and not spotify_link_due({"status": "published"}, t0)
-    print(json.dumps({"checks": 52, "failed": []}))
+    assert not spotify_link_due({"title": "t", "status": "processing", "started": "2026-09-10T05:00:00Z"}, t0), "an old 'processing' episode is no longer asked every hour for good"
+    assert not spotify_link_due({"title": "t", "status": "published"}, t0), "no start time and published: nothing to measure three days from"
+    print(json.dumps({"checks": 54, "failed": []}))
 
 
 if __name__ == "__main__":
