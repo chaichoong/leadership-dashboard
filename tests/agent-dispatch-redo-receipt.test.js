@@ -66,6 +66,80 @@ describe('the redo receipt', () => {
   });
 });
 
+// THE ROUND NUMBER (21 Sep 2026). submit numbered a redo by counting every
+// "FEEDBACK ANSWERED" in Notes, which also holds TRACK RECORD lines copied from
+// the task history, some from other tasks. On 21 Sep 63 of 109 live tasks were
+// misnumbered and rec0D35XfxR2QgvIX's first receipt went out as round 7. Only
+// the receipt blocks the task wrote itself count.
+const OWN = 'recOwnTaskAAAA001';
+const FOREIGN = 'recForeignTask001';
+const LINK = 'https://airtable.com/appnqjDpqDniH3IRl/tblqB8b22hKBL4PF1/';
+const TWO_OWN_RECEIPTS = [
+  '[09 Sep 2026 — create-agent-task] TRACK RECORD: (searched tasks for ref 3-BED)',
+  `- 08 Sep 2026 12:31 — agent-dispatch: FEEDBACK ANSWERED (round 7): (${LINK}${FOREIGN})`,
+  `- 08 Sep 2026 12:31 — agent-dispatch: SUBMITTED (round 1) as Admin with no new file (${LINK}${FOREIGN})`,
+  `- 08 Sep 2026 12:40 — agent-dispatch: FEEDBACK ANSWERED (round 1):`,
+  '',
+  '[15 Sep 2026 10:11 — agent-dispatch] FEEDBACK ANSWERED (round 1):',
+  '- check the bedrooms → 5 bedrooms across 2 units',
+  '',
+  '[15 Sep 2026 10:11 — agent-dispatch] SUBMITTED (round 1) as Drafting with no new file',
+  '',
+  '[15 Sep 2026 12:24 — agent-dispatch] FEEDBACK ANSWERED (round 2):',
+  '- resend it → resent with the corrected count',
+  '',
+  '[15 Sep 2026 12:24 — agent-dispatch] SUBMITTED (round 2) as Drafting with no new file',
+].join('\n');
+
+describe('the redo round counts only this task\'s own receipts', () => {
+  it('a redo submit over a copied foreign trail line and two own receipts writes round 3', () => {
+    const redoFeedback = 'The number of bedrooms is still wrong on this draft. Check the Rental Units table and correct the email before resending it.';
+    const out = j(`
+import types, tempfile, os, io, contextlib
+captured = {}
+def fake_patch(t, f):
+    captured['fields'] = f
+    return {'id': t}
+ad.patch_task = fake_patch
+def fake_get(t):
+    f = {ad.AF['notes']: ${JSON.stringify(TWO_OWN_RECEIPTS)}, ad.AF['approvalOutcome']: 'Changes requested',
+         ad.AF['approvalFeedback']: ${JSON.stringify(redoFeedback)}, ad.AF['agentOutput']: 'The old draft.'}
+    f.update(captured.get('fields', {}))
+    return {'id': t, 'fields': f}
+ad.get_task = fake_get
+ad.supersede_attachments = lambda *a, **k: []
+ad.upload_attachment = lambda *a, **k: 'x'
+ad.load_login_sites = lambda: {}
+def tmp(text):
+    fh = tempfile.NamedTemporaryFile('w', suffix='.md', delete=False)
+    fh.write(text)
+    fh.close()
+    return fh.name
+draft = tmp('The new draft, with 5 bedrooms across 2 units.')
+receipt = tmp('- The number of bedrooms is still wrong on this draft → now 5 across 2 units, read from Rental Units\\n- Check the Rental Units table and correct the email before resending it → done, email corrected')
+with contextlib.redirect_stdout(io.StringIO()):
+    ad.cmd_submit(types.SimpleNamespace(task=${JSON.stringify(OWN)}, agent=sorted(ad.AGENTS)[0], type='Drafting',
+                                        output_file=draft, tier1=False, receipt=receipt))
+os.unlink(draft)
+os.unlink(receipt)
+print(json.dumps(captured['fields'][ad.AF['notes']]))`);
+    const added = out.slice(TWO_OWN_RECEIPTS.length);
+    expect(added).toMatch(/\] FEEDBACK ANSWERED \(round 3\):\n- The number of bedrooms/);
+    expect(added).not.toMatch(/round [4-9]\):/);
+  });
+
+  it('trail lines, including ones about this task, never count; a header naming another record never counts', () => {
+    const r = j(`print(json.dumps([
+  ad.receipt_round("", ${JSON.stringify(OWN)}),
+  ad.receipt_round(${JSON.stringify(TWO_OWN_RECEIPTS)}, ${JSON.stringify(OWN)}),
+  ad.receipt_round("- 15 Sep 2026 13:22 — agent-dispatch: FEEDBACK ANSWERED (round 9): (${LINK}${OWN})", ${JSON.stringify(OWN)}),
+  ad.receipt_round("[15 Sep 2026 13:22 — agent-dispatch] FEEDBACK ANSWERED (round 9): (${LINK}${FOREIGN})\\n- a → b", ${JSON.stringify(OWN)}),
+  ad.receipt_round("[15 Sep 2026 13:22 — agent-dispatch] FEEDBACK ANSWERED (round 9): (${LINK}${OWN})\\n- a → b", ${JSON.stringify(OWN)}),
+]))`);
+    expect(r).toEqual([1, 3, 1, 1, 2]);
+  });
+});
+
 describe('the archive is written once', () => {
   it('the same words already archived under another stamp are not archived again', () => {
     const r = j(`print(json.dumps([ad.feedback_archived("[2026-09-04 12:03] Check the bedrooms.\\n\\n[2026-09-04 19:08] Check the bedrooms.", "Check   the bedrooms."), ad.feedback_archived("[2026-09-04 12:03] Check the bedrooms.", "Something new"), ad.feedback_archived("", "")]))`);
