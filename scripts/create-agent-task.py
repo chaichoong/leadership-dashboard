@@ -1532,10 +1532,10 @@ def selftest():
     check("a human reply inside the auto-reply thread is NOT one",
           sig({}, "RE: Automatic reply: Liability Order", "Hi Kevin, can you resend?") is None)
     fylde = ("Thank you for contacting Fylde Borough Council.\n\nYour request has been "
-             "logged with reference CSV-2026-1159. Please quote this reference in any "
+             "logged with reference CSV-2026-1000. Please quote this reference in any "
              "future correspondence.\n\nYou will receive an initial response within two "
              "working days.")
-    check("Fylde receipt body flags", sig({}, "RE: Council Tax Account 23242360", fylde) is not None)
+    check("Fylde receipt body flags", sig({}, "RE: Council Tax Account 20000360", fylde) is not None)
     check("forwarded-to-department body flags",
           sig({}, "RE: Follow-up", "Good Morning,\n\nThank you for your email.\n\nWe have "
               "forwarded your email to our Revenues department for their attention.") is not None)
@@ -1576,7 +1576,7 @@ def selftest():
     cache = {"m1": {"threadId": "1a047d45bad0d05a", "auto_reply": "subject: Automatic reply"},
              "m2": {"threadId": "1a0496b9df667238", "auto_reply": "body: has been logged with reference"},
              "m3": {"threadId": "1a0496b9df667238", "auto_reply": None}}
-    fylde_task = {F["name"]: "INBOUND: RE: Council Tax Account 23242360",
+    fylde_task = {F["name"]: "INBOUND: RE: Council Tax Account 20000360",
                   F["inboundUrl"]: "https://mail.google.com/mail/u/0/#all/1a047d45bad0d05a"}
     check("gate refuses a task whose thread is all auto-replies",
           auto_reply_refusal(fylde_task, cache) and "thread 1a047d45bad0d05a" in

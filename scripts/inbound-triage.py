@@ -1689,9 +1689,9 @@ def selftest():
     msgs = [
         {"id": "a", "threadId": "1a047d45bad0d05a", "headers": {"subject": "Automatic reply: Liability Order",
                                                    "from": "lt@burnley.gov.uk"}, "body": "Your email has reached the team."},
-        {"id": "b", "threadId": "1a0496b9df667238", "headers": {"subject": "RE: Council Tax Account 23242360",
+        {"id": "b", "threadId": "1a0496b9df667238", "headers": {"subject": "RE: Council Tax Account 20000360",
                                                    "from": "l@fylde.gov.uk"},
-         "body": "Thank you for contacting Fylde Borough Council.\n\nYour request has been logged with reference CSV-2026-1159."},
+         "body": "Thank you for contacting Fylde Borough Council.\n\nYour request has been logged with reference CSV-2026-1000."},
         {"id": "c", "threadId": "1a05bdd5ac5c463e", "headers": {"subject": "Boiler", "from": "t@x.com"},
          "body": "Hi Kevin, the boiler has failed again, can someone come?"},
     ]
@@ -1758,7 +1758,7 @@ def selftest():
             check("the gate reads the SAME cache file the scan wrote",
                   gate.scan_cache_path() == str(base_dir() / "scan-cache.json"))
             check("the gate refuses a task on the flagged thread",
-                  gate.auto_reply_refusal({gate.F["name"]: "INBOUND: RE: Council Tax Account 23242360",
+                  gate.auto_reply_refusal({gate.F["name"]: "INBOUND: RE: Council Tax Account 20000360",
                                            gate.F["inboundUrl"]: "https://mail.google.com/mail/u/0/#all/1a0496b9df667238"},
                                           gate.load_scan_cache()) is not None)
             check("the gate creates for the human thread",
