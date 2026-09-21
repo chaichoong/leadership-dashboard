@@ -53,7 +53,7 @@ const units = [
   ['uD_1', P.dalham, '5 Dalham Place', 1], ['uD_3', P.dalham, '5 Dalham Place', 3],
   ['uDk_3', P.duck, 'Duckworth Building', 3], ['uDk_9', P.duck, 'Duckworth Building', 9],
 ];
-const tenants = [['tRoc', 'ROC IMMO LTD'], ['tWalker', 'Gary Walker'], ['tMartinM', 'Marilyn Martin'], ['tMartinA', 'Andrew Martin'], ['tIntus', 'Intus Lettings'], ['tLambert', 'Ryan Lambert'], ['tCheff', 'Cheffins']];
+const tenants = [['tRoc', 'ROC IMMO LTD'], ['tWalker', 'Gary Walker'], ['tMartinM', 'Marilyn Martin'], ['tMartinA', 'Andrew Martin'], ['tIntus', 'Intus Lettings'], ['tLambert', 'Ryan Lambert'], ['tAgent', 'Brackenfold']];
 const tenancies = [
   ['ten32_1', 'tRoc', 'IMMO LTD', 'u32_1', 350], ['ten32_2', 'tRoc', 'IMMO LTD', 'u32_2', 350], ['ten32_3', 'tRoc', 'IMMO LTD', 'u32_3', 350],
   ['ten32_4', 'tRoc', 'IMMO LTD', 'u32_4', 350], ['ten32_5', 'tRoc', 'IMMO LTD', 'u32_5', 350],
@@ -61,7 +61,7 @@ const tenancies = [
   ['tenMartinM', 'tMartinM', 'Martin', 'uD_1', 1296.45], ['tenMartinA', 'tMartinA', 'Martin', 'uD_3', 897.52],
   ['tenIntus3', 'tIntus', 'Lettings', 'uDk_3', 651], ['tenIntus9', 'tIntus', 'Lettings', 'uDk_9', 641.2],
   ['tenLambert', 'tLambert', 'Lambert', 'u42_1', 524.9],
-  ['tenCheff', 'tCheff', 'Cheffins', 'uD_1', 1096.8],
+  ['tenAgent', 'tAgent', 'Brackenfold', 'uD_1', 1105.5],
 ];
 const costs = [
   ['c32', 'Kent Reliance - 32EP - 70015544', P.elm32, 660.69, 'In Payment'],
@@ -143,7 +143,7 @@ describe('matchTenancyDirect', () => {
     expect(m.candidates.sort()).toEqual(['ten32_1', 'ten32_2', 'ten32_3', 'ten32_4', 'ten32_5']);
   });
   it('copes with the bank truncating the name', () => {
-    expect(ctx.matchTenancyDirect('BANK GIRO CREDIT REF CHEFF ELY CLIENT, .', '', 1096.8, idx)).toEqual({ tenancyId: 'tenCheff' });
+    expect(ctx.matchTenancyDirect('BANK GIRO CREDIT REF BRACK CLIENT, .', '', 1105.5, idx)).toEqual({ tenancyId: 'tenAgent' });
   });
   it('finds nothing when no active tenant is named', () => {
     expect(ctx.matchTenancyDirect('BANK GIRO CREDIT REF SERCO LIMITED, S10115028210222026', '', 320, idx)).toBeNull();

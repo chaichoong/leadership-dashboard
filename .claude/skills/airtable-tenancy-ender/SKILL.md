@@ -10,9 +10,9 @@ This skill automates the multi-table updates required to formally end a tenancy 
 
 ## SAFETY GATE: run before ANY write (added 18 Sep 2026)
 
-This skill sets a rental unit to `Void`. On 18 Sep 2026 it was run for Kevin Radford,
+This skill sets a rental unit to `Void`. On 18 Sep 2026 it was run for a former tenant
 whose old unit had already been re-let: voiding it would have wiped an occupied unit
-earning £1,096.80 a month and corrupted the occupancy rollups and the cash flow
+earning a monthly rent and corrupted the occupancy rollups and the cash flow
 forecast. Nothing in the skill checked. These six questions now gate every run.
 
 1. **Is there more than one tenant record with this name?** Search Tenants on
@@ -30,8 +30,8 @@ forecast. Nothing in the skill checked. These six questions now gate every run.
    being ended may be a legacy billing record sitting alongside the current let.
 4. **Is the unit's `Tenants Field` being used as evidence?** It must not be. It is plain
    text (`fldUs1pONuxxL6Mcm`), it is not maintained, and on 18 Sep 2026 it still read
-   "Kevin Radford" seventeen months after Cheffins took the unit. Ownership lives in the
-   `Tenants` / `Tenancies` LINK fields only.
+   the former tenant's name seventeen months after the live tenancy on that unit began.
+   Ownership lives in the `Tenants` / `Tenancies` LINK fields only.
 
 5. **Is the record even in the table you think?** `GET /v0/{base}/{table}/{recordId}`
    resolves the ID across the WHOLE BASE and IGNORES the table in the URL, returning 200 with

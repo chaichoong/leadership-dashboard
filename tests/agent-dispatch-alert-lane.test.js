@@ -14,7 +14,7 @@ const SRC = readFileSync(DISPATCH, 'utf8');
 // carry every agent run log, and those logs say "Gmail quota" whenever a scan
 // hit a limit, so real matters were parked and never dispatched: measured on
 // the live queue that morning, 11 of the 24 "alerts" were a letter before
-// action 19 days overdue, a £1,096.80 payment to verify, a £50+VAT demand,
+// action 19 days overdue, a four-figure rent payment to verify, a £50+VAT demand,
 // two compliance renewals, a domain renewal and quote replies. These fixtures
 // are those tasks' real shapes.
 function py(snippet) {
@@ -59,7 +59,7 @@ print(json.dumps({"hit": m.system_alert_match(t["inboundSender"], t["name"]), "v
   it('money is never an alert, even when the subject says Apps Script', () => {
     const r = py(`
 cases = [
-  {"name": "INBOUND: Cheffins - £1,096.80 paid to Ciara Brittain account, verify and reconcile", "description": ""},
+  {"name": "INBOUND: Letting agent - £1,234.56 paid to Ciara Brittain account, verify and reconcile", "description": ""},
   {"name": "INBOUND: Hayden Watson (MHHP) - £50+VAT payment required before meeting", "description": ""},
   {"name": "INBOUND: cafehighgate.co.uk expires in 24 hours - renew at $9.98 or let lapse", "description": "Apps Script forwarded this. Renewal is GBP 8"},
 ]

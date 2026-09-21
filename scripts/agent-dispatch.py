@@ -2536,7 +2536,7 @@ def build_queue(args=None):
         # the Description and the Notes too. Notes carry every agent's run
         # log, and those logs say "Gmail quota" and "Apps Script" whenever a
         # scan hit a limit — so eleven real matters (the CST Law letter before
-        # action, Cheffins' £1,096.80, Hayden Watson's £50+VAT, two compliance
+        # action, a four-figure rent payment to verify, Hayden Watson's £50+VAT, two compliance
         # renewals, a domain renewal, an EICR quote) were parked here for up to
         # 19 days and no agent ever saw them. A monitoring alert names itself
         # in its subject line and comes from a machine address; that is enough.

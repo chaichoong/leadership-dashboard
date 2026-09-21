@@ -676,7 +676,7 @@
             // When the AI suggests a tenancy but the transaction amount doesn't
             // match that tenancy's rent, check if a sibling tenancy (same tenant,
             // different unit) has a rent that matches. Prevents mislinks when
-            // multiple tenancies share a surname (e.g. Peters Unit 1 vs Unit 2).
+            // multiple tenancies share a surname (e.g. one surname on Unit 1 and Unit 2).
             // Skipped when the direct layer identified the tenancy: it has already used
             // property, unit number and rent to split siblings, and "INTUS LETTINGS
             // LTDRENT APARTMENT 3" must not be moved to Apartment 9 because £641.20
@@ -1046,8 +1046,8 @@
 
     // Does this descriptor name the tenant on this tenancy? A whole token match on any
     // distinctive name token ≥4 chars, two shorter tokens ("ROC IMMO"), or a descriptor
-    // token ≥5 chars that starts a longer name token (banks truncate: "CHEFF ELY CLIENT"
-    // for Cheffins, "BUTTERFIEL" for Butterfield).
+    // token ≥5 chars that starts a longer name token (banks truncate: a letting agent's
+    // name cut to its first five letters, "BUTTERFIEL" for Butterfield).
     function tenancyNamedIn(tokSet, ten) {
         let hits = 0;
         for (const w of ten.nameTokens) {
