@@ -58,7 +58,7 @@
         // guides/crm.html still describes the page without it, so sopVer stays at 1.0 and
         // this now reads as the version gap it always was.
         { id: 'crm',        name: 'CRM',                           icon: '👥', pageVer: '1.2', sopFile: 'guides/crm.html',             sopVer: '1.0', standalone: 'crm-supabase.html' },
-        { id: 'publishing', name: 'Publishing',                     icon: '📅', pageVer: '1.4', sopFile: '',                            sopVer: '1.0', standalone: 'publishing.html' },
+        { id: 'publishing', name: 'Publishing',                     icon: '📅', pageVer: '1.5', sopFile: '',                            sopVer: '1.0', standalone: 'publishing.html' },
         { id: 'content-machine', name: 'Content Machine',           icon: '🎬', pageVer: '1.0', sopFile: '',                            sopVer: '1.0', standalone: 'https://chaichoong.github.io/content-machine/' },
         { id: 'prospecting', name: 'Prospecting',                   icon: '🧲', pageVer: '1.20', sopFile: 'sop-prospecting.html',        sopVer: '1.5', standalone: 'index.html#prospecting' },
         { id: 'sitemap',    name: 'Site Map & Guides',             icon: '🔗', pageVer: '1.24', sopFile: 'sop-sitemap.html',            sopVer: '1.19', standalone: 'index.html#sitemap' },

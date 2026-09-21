@@ -167,8 +167,10 @@ def build(now=None, state=None, approvals=None, ledger=None, sync_state=None, pl
     if bd is None and held and not nxt:
         # every approved day ahead is held, so the order rule saw nothing approved (review, 21 Sep 2026: 2060's case):
         # ask it again without the holds to find the first day in order, which is then held
-        first, _ = publish.next_publishable(copy.deepcopy(state), ledger, set(approved) - set(gaps))
-        bd = first if first in holds else None
+        first, why_first = publish.next_publishable(copy.deepcopy(state), ledger, set(approved) - set(gaps))
+        m = re.match(r"day (\d+) ", why_first or "")
+        if first in holds: bd = first
+        elif m: bd, why_held = int(m.group(1)), why_first   # an unapproved day comes first: that day is the one to name (third review)
     if held and not nxt and bd is not None:
         blocker = {"day": bd, "why": blocker_why(bd, sent_back, holds, waiting_cards, {int(d) for d in blocked},
                                                  {int(d) for d, a in approvals.items() if isinstance(a, dict) and a.get("qa_waiting")},
@@ -375,7 +377,13 @@ def _selftest():
     assert hd["heldBehind"] == [2059], "the day the queue waits on is not listed behind itself"
     wt = build(now, held_state, {"2058": {"task": "t"}, "2059": {"verdict": "approved", "task": "t2"}}, two, {}, plan=[], skipped=[], holds={2058: "x"})
     assert wt["blocker"]["why"] == "its card waits for your approval", wt["blocker"]
-    print(json.dumps({"checks": 44, "failed": []}))
+    # third review, 21 Sep 2026: 2058 sent back, 2059 approved and held. The first ask sees nothing approved; the day to
+    # name is still 2058, sent back, never "an earlier day that is not approved"
+    sh = build(now, held_state, {"2058": {"task": "t", "verdict": "changes", "synced": "2026-09-14T09:00:00"}, "2059": {"verdict": "approved", "task": "t2"}},
+               two, {}, plan=[], skipped=[], holds={2059: "x"})
+    assert sh["blocker"] == {"day": 2058, "why": "sent back on 14 Sep, not resubmitted"} and sh["heldBehind"] == [2059], (sh["blocker"], sh["heldBehind"])
+    assert "day 2058 is not approved yet" in sh["heldWhy"] and "behind day 2058 (sent back on 14 Sep" in sh["headline"], (sh["heldWhy"], sh["headline"])
+    print(json.dumps({"checks": 46, "failed": []}))
 
 
 if __name__ == "__main__":

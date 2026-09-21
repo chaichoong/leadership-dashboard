@@ -126,15 +126,15 @@ async function readReport() {
     const params = new URLSearchParams({ filterByFormula: `{Key}="${REPORT_KEY}"`, pageSize: '10' });
     // A read that never settles (the Mac asleep mid-request) would hold _loading for ever and stop every later read (review, 21 Sep 2026)
     const ctl = new AbortController(), timer = setTimeout(() => ctl.abort(), READ_TIMEOUT_MS);
-    let res;
-    try { res = await fetch(`https://api.airtable.com/v0/${BASE_ID}/${ESTATE_TBL}?${params}`, { headers: { Authorization: `Bearer ${PAT}` }, signal: ctl.signal }); }
-    catch (e) { throw e.name === 'AbortError' ? new Error(`Airtable did not answer within ${READ_TIMEOUT_MS / 1000} seconds`) : e; }
+    try {
+        const res = await fetch(`https://api.airtable.com/v0/${BASE_ID}/${ESTATE_TBL}?${params}`, { headers: { Authorization: `Bearer ${PAT}` }, signal: ctl.signal });
+        if (res.status === 401 || res.status === 403) { const e = new Error('auth'); e.auth = true; throw e; }
+        if (!res.ok) throw new Error(`Airtable answered ${res.status}`);
+        const data = await res.json();                          // inside the timeout too: a body that stalls is the same hang
+        if (!Array.isArray(data.records)) throw new Error('Airtable gave no records list');
+        return data.records[0] || null;
+    } catch (e) { throw e.name === 'AbortError' ? new Error(`Airtable did not answer within ${READ_TIMEOUT_MS / 1000} seconds`) : e; }
     finally { clearTimeout(timer); }
-    if (res.status === 401 || res.status === 403) { const e = new Error('auth'); e.auth = true; throw e; }
-    if (!res.ok) throw new Error(`Airtable answered ${res.status}`);
-    const data = await res.json();
-    if (!Array.isArray(data.records)) throw new Error('Airtable gave no records list');
-    return data.records[0] || null;
 }
 
 function sectionChips(sections) {
