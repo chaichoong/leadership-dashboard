@@ -68,6 +68,26 @@ describe('what the fixer may never merge on its own', () => {
     }
   });
 
+  it("the robots' permissions cannot be loosened by a robot", () => {
+    // 21 Sep 2026, after PR #495: the deny list and the runners that pass it
+    // are what stop a headless agent editing code or pushing. Driven through
+    // the real protected_hits(), with a control that an ordinary script clears.
+    const robot = ['scripts/agent-settings.json', 'scripts/agent-tools.sh',
+      'scripts/agent-slot-run.sh', 'scripts/task-manager-run.sh',
+      'scripts/inbound-triage-run.sh', 'scripts/handback-poll-run.sh',
+      'scripts/signin-pickup-run.sh'];
+    for (const f of robot) expect(existsSync(resolve(ROOT, f)), `missing: ${f}`).toBe(true);
+    const code = [
+      'import importlib.util, json, sys',
+      `spec = importlib.util.spec_from_file_location("fm", ${JSON.stringify(GATE)})`,
+      'm = importlib.util.module_from_spec(spec); spec.loader.exec_module(m)',
+      'print(json.dumps([h["file"] for h in m.protected_hits(json.loads(sys.argv[1]))]))',
+    ].join('\n');
+    const files = [...robot, 'scripts/mac-status.sh'];
+    const out = execFileSync('python3', ['-c', code, JSON.stringify(files)], { encoding: 'utf8' });
+    expect(JSON.parse(out)).toEqual(robot);
+  });
+
   it('the approval loop cannot fix itself', () => {
     // A wrong fix here breaks the mechanism that stops agents acting without
     // Kevin. It must not be able to merge a change to that mechanism.
