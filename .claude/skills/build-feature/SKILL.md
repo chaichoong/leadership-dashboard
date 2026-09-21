@@ -346,6 +346,7 @@ This is a hard gate, not a self-check. Get a fresh, independent perspective on t
    - Style inconsistencies with the rest of the codebase
    - Performance issues (N+1 queries, unnecessary re-renders, missing pagination)
    - Accessibility gaps (missing aria attributes, broken keyboard nav)
+   - Runs but does nothing: for a date window, catch-up, backfill, scheduled job or lane sort, tell the reviewer to find the input where it silently does nothing or moves the wrong items, and to say which test covers each case
 3. Fix every correctness finding. Then run the review AGAIN on the updated diff.
 4. Repeat until the review returns no correctness findings (a clean pass). Only then continue to the next step.
 5. If the reviewer and you disagree on a finding, surface it to Kevin rather than silently overriding it.

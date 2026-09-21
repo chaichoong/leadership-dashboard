@@ -142,6 +142,7 @@ Before moving to the quality pipeline:
 2. Verify field names match between read and write paths
 3. Check that your fix does not introduce a new bug (badge/count mismatch, filter logic error, missing null check)
 4. If you changed a function signature, grep for all callers
+5. If the fix touches a date window, a catch-up or backfill, a scheduled job or a lane sort, run the "Runs but does nothing" checks in `.claude/skills/build-feature/references/verify.md` (6b) on real data and show the result
 
 ---
 
@@ -182,7 +183,7 @@ If no test framework, skip and note it.
 
 Get a fresh perspective on the diff before shipping. Skip only for pure CSS/copy tweaks.
 
-1. Run `/code-review` on the diff, or spawn a fresh reviewer subagent (Agent tool) that has not seen the fix reasoning.
+1. Run `/code-review` on the diff, or spawn a fresh reviewer subagent (Agent tool) that has not seen the fix reasoning. For a date window, catch-up, backfill, scheduled job or lane sort, tell the reviewer to find the input where the change silently does nothing or moves the wrong items, and to say which test covers each case.
 2. Fix every correctness finding, then re-run the review on the updated diff.
 3. Repeat until the review returns a clean pass. Do not deploy on a failing or unreviewed diff.
 4. If you disagree with a finding, surface it to Kevin rather than overriding it silently.
