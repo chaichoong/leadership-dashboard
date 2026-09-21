@@ -20,6 +20,12 @@ Start the preview server and test the golden path:
 - Rapid clicks (double-submit prevention)
 - Tab switch and return (does state persist correctly?)
 
+**Runs but does nothing** (added 21 Sep 2026: the payment run scanned an empty future week, the Content Engine catch-up never reached old posts, and both passed every test). If the feature has a date window, a catch-up or backfill, a scheduled job, or sorts items into lanes, prove each of these on REAL data and show the result:
+- Date window: print the window's start and end for the day and hour the job really runs, and for a month or week boundary. Name the rows it finds.
+- Catch-up or backfill: run it on the real history and name one OLD item it picked up, not just the next new one.
+- Sorting into lanes (cleanse, classify, route): list what moved and check three items that should have stayed put did stay put.
+- A zero result from a real run is a fail until the source shows zero too.
+
 ### 6c. Visual check
 
 - Screenshot the feature at desktop width
