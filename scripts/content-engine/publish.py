@@ -1159,6 +1159,22 @@ CACHE_KEEP_DAYS = 3
 THUMB_TRIES = 6
 
 
+SPOTIFY_LINK_DAYS = 3
+
+
+def spotify_link_due(pod, now=None):
+    """Ask Spotify's public page for the episode link this run? Until 21 Sep 2026 only a 'processing' episode was asked,
+    and the publish step asks once, straight after Publish, before the public page has caught up. So an episode the
+    episodes list already called 'published' kept an empty link for good: 2055 to 2196, eleven in a row, and the
+    Publishing page showed no Spotify link. The public page lists only the newest episode, so the link must be read
+    while the episode is newest: asked every hourly run for SPOTIFY_LINK_DAYS after the upload started, then left."""
+    if not pod.get("title") or pod.get("link"): return False
+    if pod.get("status") == "processing": return True
+    if pod.get("status") != "published": return False
+    age = minutes_since(pod.get("started"), now)
+    return age is not None and age <= SPOTIFY_LINK_DAYS * 24 * 60
+
+
 def minutes_since(iso, now=None):
     try: t = dt.datetime.strptime((iso or "")[:19], "%Y-%m-%dT%H:%M:%S").replace(tzinfo=dt.timezone.utc)
     except ValueError: return None
@@ -1224,7 +1240,7 @@ def sync():
             except Exception as ex:       # a page read timed out on 11 Sep 2026 and ended the whole hourly run
                 print("episode %s: Facebook %s profile share skipped this run (%s)" % (day, clip, str(ex)[-160:]), file=sys.stderr)
         pod = entry.get("podcast") or {}
-        if pod.get("status") == "processing" and pod.get("title"):
+        if spotify_link_due(pod):
             # the public link arrives once Spotify has processed the video (a few minutes after Publish)
             import spotify
             link = spotify.public_link(pod["title"])
@@ -1749,7 +1765,14 @@ def selftest():
     assert _recheck_due(None) and not _recheck_due(now_utc()) and _recheck_due("rubbish"), "a missing or unreadable stamp re-checks rather than blocking for ever"
     assert 'certify_none=approved' in ms and '.get("verdict") == "approved"' in ms, "the rating is answered only for an approved card"
     rp = _i5.getsource(report); assert "content monetisation:" in rp and "content posts to check once:" in rp, "the morning report shows both"
-    print(json.dumps({"checks": 47, "failed": []}))
+    # 21 Sep 2026: a 'published' episode with no link is asked again, for three days, then left alone
+    t0 = dt.datetime(2026, 9, 21, 12, 0, tzinfo=dt.timezone.utc)
+    assert spotify_link_due({"title": "Episode 2061 - x", "status": "published", "started": "2026-09-19T05:00:00Z"}, t0), "2061's case: published, no link"
+    assert spotify_link_due({"title": "t", "status": "processing"}, t0), "processing is still asked"
+    assert not spotify_link_due({"title": "t", "status": "published", "started": "2026-09-19T05:00:00Z", "link": "https://open.spotify.com/episode/x"}, t0), "a link ends it"
+    assert not spotify_link_due({"title": "t", "status": "published", "started": "2026-09-17T11:00:00Z"}, t0), "after three days the page no longer shows it"
+    assert not spotify_link_due({"title": "t", "status": "failed", "started": "2026-09-21T05:00:00Z"}, t0) and not spotify_link_due({"status": "published"}, t0)
+    print(json.dumps({"checks": 52, "failed": []}))
 
 
 if __name__ == "__main__":
