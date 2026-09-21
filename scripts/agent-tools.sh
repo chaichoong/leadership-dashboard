@@ -33,11 +33,13 @@
 #   removal of the audit trail. Each new capability gets its own named script
 #   so the run log says what was actually done.
 # * Edit / Write. Agents are read-only with respect to code (agent-slot-run.sh
-#   states the rule); a tool they cannot use cannot be used by accident.
+#   states the rule). Leaving them off THIS list is not what enforces that:
+#   see AGENT_SETTINGS_FILE below.
 #
 # Sourced by: agent-slot-run.sh, handback-poll-run.sh, inbound-triage-run.sh,
-# task-manager-run.sh. Guarded by tests/agent-initiative.test.js, which fails
-# if a runner hand-rolls its own list again.
+# task-manager-run.sh, signin-pickup-run.sh. Guarded by
+# tests/agent-initiative.test.js, which fails if a runner hand-rolls its own
+# list again or drops the deny list below.
 
 # Node lives under nvm, which launchd does not put on PATH. Resolve it once
 # here so the browser lane is not silently unavailable in exactly the
@@ -73,3 +75,35 @@ AGENT_ALLOWED_TOOLS=(
   "Bash(node:*)"
 )
 export AGENT_ALLOWED_TOOLS
+
+# THE ROBOT-ONLY DENY LIST (audit item 121, Kevin approved 21 Sep 2026)
+# ----------------------------------------------------------------------
+# --allowedTools ADDS permissions; it never takes any away. A headless run also
+# loads Kevin's own ~/.claude/settings.json and the repo's untracked
+# .claude/settings.local.json, which allow Edit, Write, Bash(git:*) and
+# Bash(gh:*). So every agent that "could not edit code" could, and could commit
+# and push. Measured from the robots' own transcripts, 14-21 Sep 2026, all
+# five runners: 0 commits or pushes, 0 edits to a tracked code file, 3 stray
+# `git checkout -- <temp file>` clean-up attempts, and 186 temp-file writes into
+# scripts/ plus 114 at the repo root, all against the runners' own
+# "scratch only" rule.
+#
+# agent-settings.json is passed with --settings, which sits above every file
+# except managed settings, and a deny there beats an allow from any tier. It
+# denies git/gh writes and Edit/Write on the code folders and root code files,
+# and deliberately leaves writable: monitoring/ (counts-only reports), the
+# per-run scratch under ~/knowledge-os/logs/, the brain, and memory.
+#
+# Not dropped with --setting-sources, because that would also drop Kevin's
+# user hooks, which apply to headless runs on purpose.
+#
+# Limits (documented by Claude Code, not a gap in this file): a deny rule
+# matches the command Claude writes, so `/usr/bin/git push`, `sh -c 'git ...'`
+# or a python3 script that opens a file itself are not caught. It closes the
+# ordinary route, which is the one every agent actually used.
+#
+# The engine silently IGNORES a settings file that is not valid JSON and the
+# run goes ahead without it (rc=0, back-tested 21 Sep 2026); a missing file
+# fails the run loudly. tests/agent-initiative.test.js parses it on every push.
+AGENT_SETTINGS_FILE="$(CDPATH= cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/agent-settings.json"
+export AGENT_SETTINGS_FILE

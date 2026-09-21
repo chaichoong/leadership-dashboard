@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { execFileSync } from 'child_process';
-import { readFileSync } from 'fs';
+import { readFileSync, readdirSync, existsSync } from 'fs';
 import { resolve, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import { createRequire } from 'module';
@@ -73,6 +73,122 @@ describe('tool policy is shared, not copied', () => {
     const list = src.match(/AGENT_ALLOWED_TOOLS=\(([\s\S]*?)\n\)/)[1];
     expect(list).not.toMatch(/"Bash\(\*\)"|"Bash"/);
     expect(list).not.toMatch(/"(Edit|Write|NotebookEdit)"/);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 21 Sep 2026, audit item 121. Leaving Edit/Write off the list above never
+// enforced anything: --allowedTools only ADDS permissions, and a headless run
+// also loads Kevin's own settings, which allow Edit, Write, Bash(git:*) and
+// Bash(gh:*). What enforces "read-only for code" is the deny list in
+// scripts/agent-settings.json, passed to every run with --settings. Its rules
+// were back-tested on the real engine (2.1.278) in throwaway repos: with the
+// file, git commit, git -C commit, a commit from a subagent, a Write into
+// scripts/, an Edit of a tracked script, a root .html and a `> js/x` redirect
+// were all refused while monitoring/, the scratch dir and read-only commands
+// still worked; without it, all of them went through. These tests keep the
+// wiring and the file from drifting away from what was proved.
+// ─────────────────────────────────────────────────────────────────────────────
+describe('robot-only deny list (scripts/agent-settings.json)', () => {
+  const SETTINGS = 'scripts/agent-settings.json';
+  const RUNNERS_ALL = [...RUNNERS, 'scripts/signin-pickup-run.sh'];
+  const deny = () => JSON.parse(read(SETTINGS)).permissions.deny;
+  const editRules = () => deny().filter((r) => r.startsWith('Edit('))
+    .map((r) => r.slice(5, -1));
+  // The repo every runner cds into before starting claude.
+  const repoOf = (r) => read(r).match(/^REPO="(?:\$\{[A-Z_]+:-)?(\/[^"}]+)/m)[1];
+  const REPO = repoOf('scripts/agent-slot-run.sh');
+  // The three rule shapes this file uses, and only those (asserted below), so
+  // this matcher is complete for it. The engine's own reading of each shape is
+  // what the back-test proved.
+  const covers = (rule, abs) => {
+    const base = `/${REPO}/`;
+    if (!rule.startsWith(base)) return false;
+    const rest = rule.slice(base.length);
+    const rel = abs.startsWith(`${REPO}/`) ? abs.slice(REPO.length + 1) : null;
+    if (rel === null) return false;
+    if (rest.endsWith('/**')) return rel.startsWith(rest.slice(0, -2));
+    if (rest.startsWith('*.')) return !rel.includes('/') && rel.endsWith(rest.slice(1));
+    return rel === rest;
+  };
+  const covered = (abs) => editRules().some((r) => covers(r, abs));
+
+  it('every script that hands claude the agent tool list also passes the deny list (control: five)', () => {
+    const found = readdirSync(resolve(ROOT, 'scripts'))
+      .filter((f) => /\.(sh|py)$/.test(f))
+      .map((f) => `scripts/${f}`)
+      .filter((f) => read(f).includes('${AGENT_ALLOWED_TOOLS[@]}'));
+    expect(found.sort()).toEqual([...RUNNERS_ALL].sort());
+    for (const r of found) {
+      const calls = read(r).match(/"\$CLAUDE" -p [\s\S]*?--allowedTools /g) || [];
+      expect(calls.length, `${r} starts claude`).toBeGreaterThan(0);
+      for (const c of calls) {
+        expect(c, `${r}: a claude run without --settings "$AGENT_SETTINGS_FILE" runs on Kevin's permissions`)
+          .toContain('--settings "$AGENT_SETTINGS_FILE"');
+      }
+      expect(repoOf(r), `${r} must cd into the repo the deny list names`).toBe(REPO);
+    }
+  });
+
+  it('agent-tools.sh exports the path of the file, and the file exists', () => {
+    const out = execFileSync('/bin/bash', ['-c',
+      `set -u; . ${JSON.stringify(resolve(ROOT, 'scripts/agent-tools.sh'))}; echo "$AGENT_SETTINGS_FILE"`,
+    ], { encoding: 'utf8', cwd: '/' }).trim();
+    expect(out).toBe(resolve(ROOT, SETTINGS));
+    expect(existsSync(out)).toBe(true);
+  });
+
+  it('is valid JSON with a deny list (the engine silently IGNORES an invalid file)', () => {
+    expect(() => JSON.parse(read(SETTINGS))).not.toThrow();
+    expect(Array.isArray(deny())).toBe(true);
+    // Only deny: an allow here would widen what the agents can do.
+    expect(Object.keys(JSON.parse(read(SETTINGS)).permissions)).toEqual(['deny']);
+  });
+
+  it('denies the git and gh writes', () => {
+    for (const r of ['Bash(git commit *)', 'Bash(git push *)', 'Bash(git reset *)',
+      'Bash(git checkout *)', 'Bash(git -C *)', 'Bash(gh *)']) {
+      expect(deny(), r).toContain(r);
+    }
+  });
+
+  it('never removes a whole tool the agents rely on', () => {
+    for (const bare of ['Bash', 'Read', 'Edit', 'Write', 'Grep', 'Glob', 'WebFetch', 'WebSearch', 'Agent']) {
+      expect(deny(), `a bare "${bare}" deny takes the tool away from every agent`).not.toContain(bare);
+    }
+    for (const r of deny()) {
+      if (!r.startsWith('Bash(')) continue;
+      expect(r, 'Bash denies are git/gh writes only').toMatch(/^Bash\((git |gh )/);
+    }
+  });
+
+  it('every Edit rule is one of the three proven shapes, anchored at the repo or ~/.claude', () => {
+    for (const r of editRules()) {
+      if (r.startsWith('~/.claude/')) continue;
+      expect(r.startsWith(`/${REPO}/`), `${r} must be anchored with // at ${REPO}`).toBe(true);
+      const rest = r.slice(REPO.length + 2);
+      expect(rest, r).toMatch(/^([A-Za-z0-9._-]+\/\*\*|\*\.[a-z]+|[A-Za-z0-9._-]+)$/);
+    }
+  });
+
+  it('covers every tracked file outside monitoring/', () => {
+    const tracked = execFileSync('git', ['ls-files'], { cwd: ROOT, encoding: 'utf8' })
+      .split('\n').filter(Boolean);
+    expect(tracked.length, 'git ls-files returned nothing').toBeGreaterThan(500);
+    const open = tracked.filter((f) => !f.startsWith('monitoring/'))
+      .filter((f) => !covered(`${REPO}/${f}`));
+    expect(open, 'tracked code an agent could still edit: add its folder or name to the deny list').toEqual([]);
+  });
+
+  it('leaves monitoring/, the root temp files and the agents’ scratch writable', () => {
+    for (const p of [`${REPO}/monitoring/e2e-sweep-2026-09-20.md`, `${REPO}/monitoring/dispatch/rec1.md`,
+      `${REPO}/queue_13_tmp.json`, `${REPO}/check_tmp.py`,
+      '/Users/kevinbrittain/knowledge-os/logs/task-manager/scratch/board.json']) {
+      expect(covered(p), p).toBe(false);
+    }
+    // Control: the matcher does see a code path, or the lines above prove nothing.
+    expect(covered(`${REPO}/scripts/agent-dispatch.py`)).toBe(true);
+    expect(covered(`${REPO}/index.html`)).toBe(true);
   });
 });
 
