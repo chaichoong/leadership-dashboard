@@ -85,6 +85,8 @@ RETIRED = [
      "routing is AI only; no human fallback except Roy for property"),
     (r"Human task \(Mica/Ericamae/Kevin\)", "2026-08-25",
      "tasks go to an AI agent or, fully prepared, to Kevin; never Mica or Ericamae"),
+    (r"needs you or Mica", "2026-08-25",
+     "an escalation off the agents needs Kevin; no work routes to Mica"),
     (r"^\s*\d\.\s+Mica\s+[—-]", "2026-08-25",
      "Mica is not a delegation destination"),
     (r"^\s*\d\.\s+Ericamae\s+[—-]", "2026-08-25",

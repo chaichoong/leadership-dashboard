@@ -196,7 +196,7 @@ STEPS
 
    Set "tier1": true on the ACTION as well as listing it in tier1Flags. verify re-reads the live Agent Output for every action marked tier1 and fails the run if the banner is missing — that is the control that stops tier-1 work reaching Kevin looking like ordinary admin.
 
-6. NO TIER-1 DM. A tier-1 task being worked is normal now, so it needs no alert: it reaches Kevin labelled in the dashboard approval queue like everything else. Send a Slack DM (his ID U08HW8F1MA8) in one case only — you escalated a task off the agents under step 2 because preparing it would itself mean acting for him in the legal matter: "Escalated off the AI agents, needs you or Mica: <task name(s)>".
+6. NO TIER-1 DM. A tier-1 task being worked is normal now, so it needs no alert: it reaches Kevin labelled in the dashboard approval queue like everything else. Send a Slack DM (his ID U08HW8F1MA8) in one case only — you escalated a task off the agents under step 2 because preparing it would itself mean acting for him in the legal matter: "Escalated off the AI agents, needs you: <task name(s)>" (no work routes to Mica since 25 Aug 2026).
 
 6b. LESSONS — ALWAYS run this, even when the worklist was empty: python3 /Users/kevinbrittain/Projects/leadership-dashboard/scripts/agent-dispatch.py lessons. It stores every "reject and remember" Kevin has ticked into the agent files, deterministically and idempotently. It exits non-zero if a lesson could not be stored (no feedback text, or no known agent on the task) — name those in the closing log, because a lesson with nowhere to land is Kevin's instruction quietly going missing.
 
