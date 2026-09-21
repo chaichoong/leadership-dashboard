@@ -19,7 +19,7 @@
 
 `STRUCTURE.md` is the single source of truth for where every file lives: repo folders, the AI context layer (CLAUDE.md, memory, skills), and Google Drive. Read it before creating any file. If you add a file in a location it does not cover, update STRUCTURE.md in the same commit. Code is ONLY edited in this repo; copies found in Google Drive are stale exports.
 
-**Two folders, one rule (Kevin, 21 Sep 2026): this repo is for code; private working files never land here.** It is PUBLIC. Non-code work (property, HMRC and legal, money, learning, personal) runs from `~/Projects/kevin-hq`, which shares this repo's memory and its task and tenancy skills but is not in git. A session here that produces a letter, a calculation or a data dump writes it to `~/Projects/kevin-hq`, not the working tree. `scripts/private-name-guard.py` (run by the pre-commit hook) refuses any commit that adds a line naming someone on the private roster.
+**Two folders, one rule (Kevin, 21 Sep 2026): this repo is for code; private working files never land here.** It is PUBLIC. Non-code work runs from the private projects in `~/Projects/kevin-hq`: `property`, `money-legal`, `runpreneur`, and HQ itself (CEO, learning, personal). They share this repo's memory and its task and tenancy skills but are not in git. A SessionStart hook (`~/.claude/hooks/project-check.py`) moves a new chat to the right project on its first reply. A session here that produces a letter, a calculation or a data dump writes it to `~/Projects/kevin-hq`, not the working tree. `scripts/private-name-guard.py` (run by the pre-commit hook) refuses any commit that adds a line naming someone on the private roster.
 
 ## Data Lookups
 
