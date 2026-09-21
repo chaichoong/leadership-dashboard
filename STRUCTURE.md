@@ -99,7 +99,7 @@ Each private project folder holds:
 
 HQ also holds `learning/` (transcript and book working files) and `_from-repo/2026-09-21/` (259 scratch files moved out of this checkout, listed in `MOVED.txt`).
 
-Enforcement: `~/.claude/hooks/project-check.py` (SessionStart, interactive sessions only) tells a new chat which project it started in; if the first prompt belongs to another, Claude moves it with `mcp__ccd_directory__change_directory` during the model-check reply (`FIRST_PROMPT_ALLOWED` in `~/.claude/skills/model-check/gate.py`). `scripts/private-name-guard.py`, run first by `scripts/pre-commit`, refuses a commit that adds a line naming someone on `~/.config/od/redact-names.txt`.
+Enforcement: `~/.claude/hooks/project-check.py` (SessionStart, interactive sessions only) tells a new chat which project it started in; if the first prompt belongs to another, Claude moves it with `mcp__ccd_directory__change_directory` during the model-check reply (`FIRST_PROMPT_ALLOWED` in `~/.claude/skills/model-check/gate.py`). That hook is desktop-only: a session started on the web or in the cloud has no `~/.claude/`, no hook and no `change_directory` tool, so it never moves and the routing is unenforced there (21 Sep 2026). `scripts/private-name-guard.py`, run first by `scripts/pre-commit`, refuses a commit that adds a line naming someone on `~/.config/od/redact-names.txt`.
 
 ## 7. Hygiene rules
 
