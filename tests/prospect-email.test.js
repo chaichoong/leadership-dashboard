@@ -51,9 +51,9 @@ const { buildProspectEmail, prospectDefaultSubject, prosLinkify, prosStripSignOf
 const rec = (fields) => ({ id: 'recTest', fields });
 
 const ltd = rec({
-  'Name': 'Jane Whitehouse',
-  'Company': 'IS Group Signs Limited',
-  'Contact Email': 'enquiries@is-group.co.uk',
+  'Name': 'Jane Testwood',
+  'Company': 'Example Signs Limited',
+  'Contact Email': 'enquiries@example-signs.example',
   'Contact Route': 'Email sequence (Ltd)',
   'Draft Message': `Hi Jane, I saw your part-time bookkeeper ad.\nWorth a quick call? ${OD_BOOKING_URL}`,
   'Email Subject': 'your bookkeeper ad',
@@ -64,8 +64,8 @@ describe('buildProspectEmail — the preview IS the sent email', () => {
     const e = buildProspectEmail(ltd);
     expect(e.from).toBe('kevin@operationsdirector.co.uk');
     expect(e.fromName).toBe('Kevin Brittain');
-    expect(e.to).toBe('enquiries@is-group.co.uk');
-    expect(e.toName).toBe('Jane Whitehouse');
+    expect(e.to).toBe('enquiries@example-signs.example');
+    expect(e.toName).toBe('Jane Testwood');
   });
 
   it('uses the agent-written subject when there is one', () => {
@@ -76,9 +76,9 @@ describe('buildProspectEmail — the preview IS the sent email', () => {
   // subject. A blank subject line would be sent verbatim by GHL, so it must fall back.
   it('falls back to a generated subject when the field is blank or whitespace', () => {
     expect(buildProspectEmail(rec({ ...ltd.fields, 'Email Subject': '' })).subject)
-      .toBe('A thought for IS Group Signs Limited');
+      .toBe('A thought for Example Signs Limited');
     expect(buildProspectEmail(rec({ ...ltd.fields, 'Email Subject': '   ' })).subject)
-      .toBe('A thought for IS Group Signs Limited');
+      .toBe('A thought for Example Signs Limited');
   });
 
   it('lets an unsaved edit in the card drive the preview', () => {

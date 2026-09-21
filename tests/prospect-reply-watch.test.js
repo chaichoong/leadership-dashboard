@@ -7,8 +7,8 @@ const prospect = (id, email, extra = {}) => ({
   id,
   fields: {
     'Contact Email': email,
-    'Name': 'Jane Whitehouse',
-    'Company': 'IS Group Signs Limited',
+    'Name': 'Jane Testwood',
+    'Company': 'Example Signs Limited',
     'Pain Signal': 'Advertising a part-time bookkeeper.',
     'Draft Message': 'Hi Jane, I saw your ad. Worth a call?',
     'Email Subject': 'your part-time bookkeeper ad',
@@ -18,7 +18,7 @@ const prospect = (id, email, extra = {}) => ({
 
 const conv = (over = {}) => ({
   id: 'conv1',
-  email: 'enquiries@is-group.co.uk',
+  email: 'enquiries@example-signs.example',
   lastMessageDirection: 'inbound',
   lastMessageType: 'TYPE_EMAIL',
   lastMessageBody: 'Yes, tell me more about pricing.',
@@ -27,7 +27,7 @@ const conv = (over = {}) => ({
 });
 
 describe('matchReplies — only genuine new replies from watched prospects', () => {
-  const watched = [prospect('recA', 'enquiries@is-group.co.uk')];
+  const watched = [prospect('recA', 'enquiries@example-signs.example')];
 
   it('matches an inbound email from a contacted prospect', () => {
     const out = matchReplies([conv()], watched);
@@ -38,7 +38,7 @@ describe('matchReplies — only genuine new replies from watched prospects', () 
   });
 
   it('matches case-insensitively and ignores whitespace in the stored email', () => {
-    const w = [prospect('recB', '  Enquiries@IS-Group.co.uk ')];
+    const w = [prospect('recB', '  Enquiries@Example-Signs.example ')];
     expect(matchReplies([conv()], w)).toHaveLength(1);
   });
 
@@ -67,7 +67,7 @@ describe('matchReplies — only genuine new replies from watched prospects', () 
 });
 
 describe('draftTaskFields — the task the dispatch engine picks up', () => {
-  const r = matchReplies([conv()], [prospect('recA', 'enquiries@is-group.co.uk')])[0];
+  const r = matchReplies([conv()], [prospect('recA', 'enquiries@example-signs.example')])[0];
   const f = draftTaskFields(r, '2026-08-08');
 
   it('lands on the dispatch worklist: Status Today, due today, owned by the Writer agent', () => {

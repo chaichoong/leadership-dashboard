@@ -22,7 +22,7 @@ function fixtures() {
     [TBL.properties]: [
       { id: 'recProp1', fields: { [P.name]: ['18 Test Park'], [P.type]: 'HMO', [P.beds]: 3, [P.agent]: 'Property Portfolio', [P.postcode]: 'CB9 0AJ', [P.area]: 'Haverhill', [P.ctNote]: '£135.00', [P.active]: [true], [P.strategy]: 'HMO', [P.plannedExtra]: 1 } },
       { id: 'recAgent', fields: { [P.name]: ['9 Agent Road'], [P.type]: 'Single Let', [P.beds]: 2, [P.agent]: 'Roc Immo', [P.postcode]: 'CB9 0AH', [P.active]: [true], [P.ctBand]: 'B' } },
-      { id: 'recProp2', fields: { [P.name]: ['13 Far Street'], [P.type]: 'Single Let', [P.beds]: 2, [P.agent]: 'Simon Collins', [P.postcode]: 'BB5 5PT', [P.active]: [true], [P.ctBand]: 'A' } },
+      { id: 'recProp2', fields: { [P.name]: ['13 Far Street'], [P.type]: 'Single Let', [P.beds]: 2, [P.agent]: 'Collins Head Lease', [P.postcode]: 'BB5 5PT', [P.active]: [true], [P.ctBand]: 'A' } },
     ],
     [TBL.units]: [
       { id: 'recU1', fields: { [U.property]: ['recProp1'], [U.number]: 1, [U.type]: 'Room', [U.status]: 'Occupied', [U.rent]: 524.90, [U.incomeType]: 'Universal Credit', [U.tenants]: ['recT1'] } },
@@ -31,10 +31,10 @@ function fixtures() {
       { id: 'recU4', fields: { [U.property]: ['recProp2'], [U.number]: 1, [U.type]: 'Whole Property', [U.status]: 'Occupied', [U.rent]: 257, [U.incomeType]: 'Working', [U.tenants]: ['recT4'] } },
     ],
     [TBL.tenants]: [
-      { id: 'recT1', fields: { [T.name]: 'Adam Older', [T.status]: 'Active', [T.dob]: '1988-11-24', [T.payType]: 'Universal Credit', [T.capExemption]: 'Unknown' } },
+      { id: 'recT1', fields: { [T.name]: 'Adam Older', [T.status]: 'Active', [T.dob]: '1988-11-20', [T.payType]: 'Universal Credit', [T.capExemption]: 'Unknown' } },
       { id: 'recT2', fields: { [T.name]: 'Paul Flat', [T.status]: 'Active', [T.dob]: '1974-01-01', [T.payType]: 'Universal Credit', [T.capExemption]: 'LCWRA' } },
       { id: 'recT3', fields: { [T.name]: 'Gary Unknown', [T.status]: 'Active', [T.payType]: 'Universal Credit' } },
-      { id: 'recT4', fields: { [T.name]: 'Simon Collins', [T.status]: 'Active', [T.payType]: 'Working' } },
+      { id: 'recT4', fields: { [T.name]: 'Collins Head Lease', [T.status]: 'Active', [T.payType]: 'Working' } },
     ],
     [TBL.tenancies]: [
       { id: 'recC1', fields: { [C.tenants]: ['recT1'], [C.unit]: ['recU1'], [C.rent]: 524.90 } },
@@ -58,7 +58,7 @@ function withBlock(fx, agent) {
     { id: 'recApt2', fields: { [U.property]: ['recBlock'], [U.number]: 2, [U.type]: 'Flat', [U.status]: 'Occupied', [U.tenants]: ['recT6'], [UX.beds]: 1, [UX.lettingStrategy]: 'Single let', [UX.ctBand]: 'A' } },
   );
   fx[TBL.tenants].push(
-    { id: 'recT5', fields: { [T.name]: 'Staycay Management', [T.status]: 'Active', [T.payType]: 'Working' } },
+    { id: 'recT5', fields: { [T.name]: 'Example Stays Ltd', [T.status]: 'Active', [T.payType]: 'Working' } },
     { id: 'recT6', fields: { [T.name]: 'Flat Tenant', [T.status]: 'Active', [T.payType]: 'Working' } },
   );
   fx[TBL.tenancies].push(
@@ -115,7 +115,7 @@ test.describe('Growth Plan page', () => {
     await expect(grid.locator('tbody tr').nth(1).locator('td').nth(1)).toHaveText('−£135');
     await expect(page.locator('#selfCount')).toContainText('2 properties');
     await expect(page.locator('#agentCount')).toHaveText('1 properties');
-    await expect(page.locator('#selfList')).toContainText('13 Far Street');   // Simon Collins is ours
+    await expect(page.locator('#selfList')).toContainText('13 Far Street');   // the Collins head lease is ours
     await expect(page.locator('#agentList')).toContainText('9 Agent Road');
   });
 
@@ -155,7 +155,7 @@ test.describe('Growth Plan page', () => {
   test('the checklist sits on the closed card and counts what is done', async ({ page }) => {
     const fx = fixtures();
     [TT.correctAgreement, TT.proofOfAddress, TT.authoritySigned].forEach(f => { fx[TBL.tenants][3].fields[f] = true; });
-    fx[TBL.tenants][3].fields[TT.rentUplift] = 'Not needed';    // Simon Collins: all four ticked
+    fx[TBL.tenants][3].fields[TT.rentUplift] = 'Not needed';    // Collins Head Lease: all four ticked
     await openPage(page, fx);
     const card = page.locator('#selfList .pack', { hasText: '13 Far Street' });
     await expect(card.locator('.cl-head')).toContainText('What needs doing');
@@ -569,7 +569,7 @@ test.describe('Growth Plan page', () => {
   });
 
   test('a block of flats shows one row per apartment, each with its own letting and council tax', async ({ page }) => {
-    const writes = await openPage(page, withBlock(fixtures(), 'Intus Lettings'));
+    const writes = await openPage(page, withBlock(fixtures(), 'Dummy Lettings'));
     const list = page.locator('#agentList');
     await expect(page.locator('#agentCount')).toHaveText('3 properties');
     const a1 = list.locator('.pack', { hasText: 'Duckworth Building, Apartment 1' });
@@ -630,7 +630,7 @@ test.describe('Growth Plan page', () => {
   });
 
   test('Freeze saves an apartment\'s starting figures on its rental unit', async ({ page }) => {
-    const writes = await openPage(page, withBlock(fixtures(), 'Intus Lettings'));
+    const writes = await openPage(page, withBlock(fixtures(), 'Dummy Lettings'));
     await page.locator('button[data-act="freeze-started"]').click();
     await expect(page.locator('#toast')).toContainText('Froze where we started for 5 properties');
     const units = writes.filter(x => x.tableId === TBL.units).flatMap(x => x.records);

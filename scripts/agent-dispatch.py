@@ -136,11 +136,12 @@ KEVIN_REC_ID = "recHEt2VPYothaqTd"
 # Members tblco0p2OnlLQVAX7 on 19 Aug 2026, not inferred.
 HUMANS = {
     "kevin@runpreneur.org.uk": {"rec": KEVIN_REC_ID, "name": "Kevin Brittain"},
-    # Kevin's ruling, 25 Aug 2026: no NEW routing to Mica or Ericamae — their
-    # entries stay ONLY so an explicit Kevin-ordered handover still lands on a
-    # real row instead of failing into a typo'd address.
+    # Kevin's ruling, 25 Aug 2026: no NEW routing to Mica — her entry stays ONLY
+    # so an explicit Kevin-ordered handover still lands on a real row instead of
+    # failing into a typo'd address. Ericamae left on 17 Sep 2026 (Team Members
+    # recEvm9wgsEnoNVZh: Active=false, Status=Offboarded), so her entry is gone
+    # and a handover to her address is refused like any non-team address.
     "micaa.work@gmail.com":    {"rec": "rec4b5MDoaxEC7WRE", "name": "Mica Albovias"},
-    "atentaerica@gmail.com":   {"rec": "recEvm9wgsEnoNVZh", "name": "Ericamae Atenta"},
     # Roy Lavin, Head of Property since 25 Aug 2026 (team member, not a
     # contractor). Maintenance handovers to him carry Kevin's STANDING
     # approval; other passes go through the gate first.

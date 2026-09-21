@@ -100,8 +100,8 @@ describe('company_key', () => {
 // 11 Aug 2026 — finding 20260811-prospect-daily-086. Prospects held the SAME
 // employer twice: recbZXMmAMOo6Mv07 'Cornerstone Supplies Limited (Abbeydale
 // Direct)' (3 Aug) and rec9p6crluEJaTSpa 'Cornerstone Supplies Limited (t/a
-// Abbeydale Direct)' (10 Aug), same email mail@abbeydale-direct.co.uk, same
-// Companies House number 01854182, both sitting in Ready for Review. The 't/a'
+// Abbeydale Direct)' (10 Aug), same email address, same
+// Companies House number, both sitting in Ready for Review. The 't/a'
 // survived punctuation stripping as the token 'ta', so the two keys differed by
 // one word and the name gate waved the second through. The same class of miss
 // hit 'Abbey Antiques & Furnishings Ltd (The Abbey Group)', which an Indeed

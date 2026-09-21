@@ -189,15 +189,15 @@ function makeFixtures() {
     prospects: [
       {
         id: 'recProsLtd', fields: {
-          'Name': 'Jane Whitehouse',
-          'Company': 'IS Group Signs Limited',
-          'Contact Email': 'enquiries@is-group.co.uk',
+          'Name': 'Jane Testwood',
+          'Company': 'Example Signs Limited',
+          'Contact Email': 'enquiries@example-signs.example',
           'Email Confidence': 'High',
           'Entity Type': 'Limited Company',
           'Contact Route': 'Email sequence (Ltd)',
           'Pain Signal': 'Advertising a part-time Bookkeeper.',
           'Email Subject': 'your part-time bookkeeper ad',
-          'Draft Message': 'Hi Jane, I saw your part-time bookkeeper ad for isGroup. Worth a quick call? https://operationsdirector.co.uk/book-a-demo/',
+          'Draft Message': 'Hi Jane, I saw your part-time bookkeeper ad for Example Signs. Worth a quick call? https://operationsdirector.co.uk/book-a-demo/',
           'Status': 'Ready for Review',
           'Date Found': '2026-08-06',
         }
@@ -205,8 +205,8 @@ function makeFixtures() {
       {
         // Non-email route: must NOT gain a subject line or a signature.
         id: 'recProsLinkedIn', fields: {
-          'Name': 'Sophie Hackett',
-          'Company': 'Sophie Hackett Design',
+          'Name': 'Sophie Sample',
+          'Company': 'Sophie Sample Design',
           'Entity Type': 'Sole Trader / Partnership',
           'Contact Route': 'LinkedIn connect',
           'Draft Message': 'Saw your post about being buried in admin. Worth a chat?',

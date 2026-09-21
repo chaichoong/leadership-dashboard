@@ -22,9 +22,9 @@ function prospectFixture(id, over = {}) {
   return {
     id,
     fields: {
-      'Name': 'Jane Whitehouse',
-      'Company': 'IS Group Signs Limited',
-      'Contact Email': 'enquiries@is-group.co.uk',
+      'Name': 'Jane Testwood',
+      'Company': 'Example Signs Limited',
+      'Contact Email': 'enquiries@example-signs.example',
       'Email Confidence': 'High',
       'Entity Type': 'Limited Company',
       'Contact Route': 'Email sequence (Ltd)',

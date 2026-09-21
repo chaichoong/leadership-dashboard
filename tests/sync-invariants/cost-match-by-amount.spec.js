@@ -2,8 +2,8 @@
 //
 // Bug (Jul 2026): Close Brothers finances several Swinton policies under ONE direct-debit
 // mandate, so every payment arrives with a byte-identical descriptor:
-//     DIRECT DEBIT PAYMENT TO CLOSE-SWINTON REF 85376969, MANDATE NO 0207
-// Only the amount and day separate the policies — £42.01 on the 27th (RSAP6837602300) vs
+//     DIRECT DEBIT PAYMENT TO CLOSE-SWINTON REF 80000069, MANDATE NO 0207
+// Only the amount and day separate the policies — £42.01 on the 27th (RSAP6800000100) vs
 // £45.30 on the 2nd (BE26ACTP...). The history map stored a single costId per vendor key
 // (`vendorOnly[key].costId = data.costId`, last writer wins) and applyHistoricalToResult
 // applied it with no amount check at all, commenting "Cost — stable per vendor". All 12
@@ -23,8 +23,8 @@ const { loadDashboardWithFixtures, FIELDS } = require('./helpers');
 
 // The two real Swinton policies, reduced to what the picker reads.
 const LOOKUP = {
-  rsap: { id: 'rsap', fields: { [FIELDS.costName]: 'Swinton RSAP6837602300', [FIELDS.costExpected]: 42.01 } },
-  be26: { id: 'be26', fields: { [FIELDS.costName]: 'Swinton BE26ACTP000000015675', [FIELDS.costExpected]: 45.30 } },
+  rsap: { id: 'rsap', fields: { [FIELDS.costName]: 'Swinton RSAP6800000100', [FIELDS.costExpected]: 42.01 } },
+  be26: { id: 'be26', fields: { [FIELDS.costName]: 'Swinton BE26ACTP000000010001', [FIELDS.costExpected]: 45.30 } },
 };
 
 async function pick(page, ids, amount, lookup = LOOKUP) {

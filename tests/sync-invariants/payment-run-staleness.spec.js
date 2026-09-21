@@ -53,7 +53,7 @@ function invoice(id, over = {}) {
       [F.ref]: over.ref || '0004/09/2026',
       [F.status]: 'Unpaid',
       [F.gmailUrl]: 'https://mail.google.com/mail/u/0/#all/abc',
-      [F.payTo]: over.payTo === undefined ? 'Sort Code 60-83-71\nAccount Number 75833335' : over.payTo,
+      [F.payTo]: over.payTo === undefined ? 'Sort Code 12-34-56\nAccount Number 12345678' : over.payTo,
       [F.runDate]: over.runDate === undefined ? daysAgo(0) : over.runDate,
       [F.bankChanged]: !!over.bankChanged,
     },
@@ -161,7 +161,7 @@ test.describe('Payment Run list', () => {
     await openPaymentRun(page, [
       invoice('recNew', { emailDate: daysAgo(0), amount: 90, payee: 'Arrived Since Cutoff Ltd' }),
       invoice('recLast', { emailDate: daysAgo(4), amount: 300, payee: 'Paying Tonight Ltd' }),
-      invoice('recOld', { emailDate: daysAgo(120), amount: 2450, payee: 'Esme McKenzie' }),
+      invoice('recOld', { emailDate: daysAgo(120), amount: 2450, payee: 'Edna Example' }),
     ]);
     const headers = await page.$$eval('#invoiceTableBody tr.inv-section-header',
       (rows) => rows.map((r) => r.textContent.trim().split('\n')[0].trim()));
@@ -179,13 +179,13 @@ test.describe('Payment Run list', () => {
     // And the one that arrived after the cutoff is above it, in This week.
     expect(order.indexOf('Arrived Since Cutoff Ltd')).toBeLessThan(lastIdx);
     // February is below Still owed, where it belongs.
-    expect(order.indexOf('Esme McKenzie')).toBeGreaterThan(stillIdx);
+    expect(order.indexOf('Edna Example')).toBeGreaterThan(stillIdx);
   });
 
   test('carries the older payables forward under Still owed', async ({ page }) => {
     await openPaymentRun(page, [
       invoice('recNew', { emailDate: daysAgo(1), amount: 90 }),
-      invoice('recOld', { emailDate: daysAgo(120), amount: 2450, payee: 'Esme McKenzie' }),
+      invoice('recOld', { emailDate: daysAgo(120), amount: 2450, payee: 'Edna Example' }),
     ]);
     const body = await page.textContent('#invoiceTableBody');
     expect(body).toContain('This week');
@@ -198,20 +198,20 @@ test.describe('Payment Run list', () => {
     // returns, so it is read off the field rather than the rendered text.
     const payees = await page.$$eval('#invoiceTableBody input[data-field]', (els) =>
       els.map((e) => e.value).filter(Boolean));
-    expect(payees).toContain('Esme McKenzie');
+    expect(payees).toContain('Edna Example');
     // And it is in the SECOND section, not mixed into this week's list.
     const order = await page.$$eval('#invoiceTableBody tr', (rows) =>
       rows.map((r) => (r.classList.contains('inv-section-header')
         ? r.textContent.trim().split('\n')[0].trim()
         : (r.querySelector('input[data-field]') || {}).value || '')).filter(Boolean));
-    expect(order.indexOf('Esme McKenzie')).toBeGreaterThan(order.indexOf('Still owed'));
+    expect(order.indexOf('Edna Example')).toBeGreaterThan(order.indexOf('Still owed'));
   });
 
   test('the bank details Kevin pays from are on screen', async ({ page }) => {
     await openPaymentRun(page, [invoice('rec1')]);
     const body = await page.textContent('#invoiceTableBody');
-    expect(body).toContain('60-83-71');
-    expect(body).toContain('75833335');
+    expect(body).toContain('12-34-56');
+    expect(body).toContain('12345678');
   });
 
   test('a duplicated Gmail message fails the no-duplicates check', async ({ page }) => {

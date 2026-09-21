@@ -48,7 +48,7 @@ describe('system-alert lane — sender and subject only', () => {
 
   it('a note that mentions the Gmail quota does not make a letter before action an alert', () => {
     const r = py(`
-t = {"name": "INBOUND: POST: CST Law British Gas letter before action Ciara GBP 80 - overdue", "description": "",
+t = {"name": "INBOUND: POST: Example Law energy letter before action Jo GBP 80 - overdue", "description": "",
      "notes": "[11 Sep 2026 - agent] scan hit the Gmail quota, retried", "inboundSender": "kevinbrittain@gmail.com",
      "tier1": True, "creditor": "letter before action"}
 print(json.dumps({"hit": m.system_alert_match(t["inboundSender"], t["name"]), "veto": m.alert_veto(t)}))`);
@@ -59,8 +59,8 @@ print(json.dumps({"hit": m.system_alert_match(t["inboundSender"], t["name"]), "v
   it('money is never an alert, even when the subject says Apps Script', () => {
     const r = py(`
 cases = [
-  {"name": "INBOUND: Letting agent - £1,234.56 paid to Ciara Brittain account, verify and reconcile", "description": ""},
-  {"name": "INBOUND: Hayden Watson (MHHP) - £50+VAT payment required before meeting", "description": ""},
+  {"name": "INBOUND: Letting agent - £1,234.56 paid to Jo Example account, verify and reconcile", "description": ""},
+  {"name": "INBOUND: Harry Example (Example Advisers) - £50+VAT payment required before meeting", "description": ""},
   {"name": "INBOUND: cafehighgate.co.uk expires in 24 hours - renew at $9.98 or let lapse", "description": "Apps Script forwarded this. Renewal is GBP 8"},
 ]
 print(json.dumps([m.alert_veto(dict(c, tier1=False, creditor="")) for c in cases]))`);

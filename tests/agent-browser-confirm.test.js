@@ -3,7 +3,7 @@
 // WHAT THIS EXISTS FOR
 // On 28 Aug 2026 four Adobe e-sign sends logged every plan step executed:true,
 // ending with a click on "Send" — and all four agreements sat in Adobe as
-// DRAFTS for four days. Ciara was never emailed, nothing errored, and the
+// DRAFTS for four days. The signer was never emailed, nothing errored, and the
 // tasks were completed. `executed: true` records that Playwright clicked an
 // element, never that the site accepted the action. Two rules came out:
 //   1. A commit plan that submits must DECLARE its proof of landing

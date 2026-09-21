@@ -13,8 +13,7 @@ const SWEEP = resolve(ROOT, 'scripts/task-hygiene-sweep.py');
 // owner_kind() asked one question of the Team Member link: is this an AI agent?
 // If not, and the link existed at all, the task was "human owned". Nothing ever
 // read the member's Status. Team Members currently holds 18 people marked
-// Offboarding or Offboarded (verified against the live base 13 Aug 2026) —
-// Karlo Teves, Ollie Butler, Poppy Squires and fifteen others — and a task
+// Offboarding or Offboarded (verified against the live base 13 Aug 2026), and a task
 // linked to any of them passed the ownership check, stayed off the unowned list,
 // and was never proposed to anybody.
 //

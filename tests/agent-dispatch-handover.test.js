@@ -130,10 +130,20 @@ describe('agent-dispatch handover', () => {
   });
 
   it('clears the agent link, or the task is worked again tomorrow', () => {
-    const r = handover({ to: 'atentaerica@gmail.com' });
+    const r = handover({ to: 'micaa.work@gmail.com' });
     const link = r.captured.fields[r.fieldMap.teamMember];
     expect(link).toHaveLength(1);
-    expect(link[0]).toBe(r.humans['atentaerica@gmail.com'].rec);
+    expect(link[0]).toBe(r.humans['micaa.work@gmail.com'].rec);
+  });
+
+  // Ericamae left on 17 Sep 2026 (Team Members recEvm9wgsEnoNVZh: Active=false,
+  // Status=Offboarded). Her HUMANS entry is gone, so a handover to her is
+  // refused like any address that is not on the team, and nothing is written.
+  it('refuses Ericamae, who left on 17 Sep 2026', () => {
+    const r = handover({ to: 'atentaerica@gmail.com' });
+    expect(Object.keys(r.humans)).not.toContain('atentaerica@gmail.com');
+    expect(r.refused, 'a task was handed to someone who has left').toBe(true);
+    expect(r.captured.fields, 'a refused handover still patched Airtable').toBeUndefined();
   });
 
   // 20260823-agent-dispatch-324. Team Member alone is NOT the agent population.

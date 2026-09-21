@@ -64,18 +64,18 @@ describe('report_scrub masks personal data', () => {
   });
 
   it('masks the number that actually leaked', () => {
-    const s = '| SMS reply from +447538631747 | Business | Real Estate |';
+    const s = '| SMS reply from +447700900747 | Business | Real Estate |';
     const r = scrub([s]).scrubbed[s];
-    expect(r.text).not.toContain('7538631747');
-    expect(r.text).toContain('+4475XXXXX747');
+    expect(r.text).not.toContain('7700900747');
+    expect(r.text).toContain('+4477XXXXX747');
     expect(r.hits).toContain('phone');
     // The surrounding table cell must survive intact — the first draft ate the
     // trailing space and ran the mask into the next word.
-    expect(r.text).toBe('| SMS reply from +4475XXXXX747 | Business | Real Estate |');
+    expect(r.text).toBe('| SMS reply from +4477XXXXX747 | Business | Real Estate |');
   });
 
   it('masking is idempotent, so a second pass cannot corrupt a masked report', () => {
-    const s = 'from +4475XXXXX747 today';
+    const s = 'from +4477XXXXX747 today';
     expect(scrub([s]).scrubbed[s].text).toBe(s);
   });
 

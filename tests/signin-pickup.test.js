@@ -50,7 +50,7 @@ print('---JSON---'); print(json.dumps([
     const out = py(`
 sites = json.loads(sys.argv[1])
 sites['aistudio.google.com'] = {'label': 'Google AI Studio', 'login': True}
-line = 'SIGN-IN NEEDED: Bromcom Parent App / Cottenham Village College portal (check the email at https://mail.google.com/mail/u/0/#search/from%3A12573%40bromcomcloud.com+after%3A2026/09/13)'
+line = 'SIGN-IN NEEDED: Bromcom Parent App / Example Village College portal (check the email at https://mail.google.com/mail/u/0/#search/from%3A10001%40bromcomcloud.com+after%3A2026/09/13)'
 p = m.parse_signin_line(line)
 print('---JSON---'); print(json.dumps([
   m.signin_site_for(p['site'], p['url'], sites),

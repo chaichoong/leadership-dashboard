@@ -3,7 +3,7 @@
 // Regression origin: finding 20260824-prospect-daily-run-342 (24 Aug 2026).
 // Two Airtable Prospects rows can carry the same Contact Email — five such
 // pairs existed that day — and approveAndSendProspect posted straight to GHL
-// with no per-address check. Tom Hooper at admin@noblepaintingdecorating.co.uk
+// with no per-address check. Tom Tester at admin@brushwork-decorating.example
 // got two different cold openers, 14 Aug 07:56 and 16 Aug 15:42, both
 // delivered. Kevin had rejected the other four twins by hand, which is the only
 // reason it happened once rather than five times.
@@ -53,14 +53,14 @@ const row = (id, email, status) => ({ id, fields: { 'Contact Email': email, Stat
 
 describe('alreadyEmailedAddress', () => {
   it('blocks a second opener to an address another record already emailed', () => {
-    const twin = row('recA', 'admin@noblepaintingdecorating.co.uk', 'Contacted (1:1)');
-    const mine = row('recB', 'admin@noblepaintingdecorating.co.uk', 'Approved');
+    const twin = row('recA', 'admin@brushwork-decorating.example', 'Contacted (1:1)');
+    const mine = row('recB', 'admin@brushwork-decorating.example', 'Approved');
     expect(load([twin, mine])(mine)).toBe(true);
   });
 
   it('ignores case and surrounding spaces', () => {
-    const twin = row('recA', '  Admin@Noble.CO.UK ', 'Replied');
-    const mine = row('recB', 'admin@noble.co.uk', 'Approved');
+    const twin = row('recA', '  Admin@Brushwork.EXAMPLE ', 'Replied');
+    const mine = row('recB', 'admin@brushwork.example', 'Approved');
     expect(load([twin, mine])(mine)).toBe(true);
   });
 
@@ -68,18 +68,18 @@ describe('alreadyEmailedAddress', () => {
   // nothing, and would make the test above pass for the wrong reason.
   it('lets a genuinely new address through', () => {
     const other = row('recA', 'someone@else.co.uk', 'Contacted (1:1)');
-    const mine = row('recB', 'admin@noble.co.uk', 'Approved');
+    const mine = row('recB', 'admin@brushwork.example', 'Approved');
     expect(load([other, mine])(mine)).toBe(false);
   });
 
   it('does not block on a twin that has NOT been emailed yet', () => {
-    const twin = row('recA', 'admin@noble.co.uk', 'Ready for Review');
-    const mine = row('recB', 'admin@noble.co.uk', 'Approved');
+    const twin = row('recA', 'admin@brushwork.example', 'Ready for Review');
+    const mine = row('recB', 'admin@brushwork.example', 'Approved');
     expect(load([twin, mine])(mine)).toBe(false);
   });
 
   it('never blocks a record on its own row', () => {
-    const mine = row('recB', 'admin@noble.co.uk', 'Contacted (1:1)');
+    const mine = row('recB', 'admin@brushwork.example', 'Contacted (1:1)');
     expect(load([mine])(mine)).toBe(false);
   });
 

@@ -178,7 +178,10 @@ describe('the wiring names one identity everywhere', () => {
     it('Roy is a permitted handover target in dispatch, with the ruling recorded', () => {
         expect(dispatch).toContain('"roy.lavin1978@gmail.com"');
         expect(dispatch).toContain(`"${ROY_REC}"`);
-        expect(dispatch).toMatch(/no NEW routing to Mica or Ericamae/);
+        expect(dispatch).toMatch(/no NEW routing to Mica/);
+        // Ericamae left on 17 Sep 2026: she is no longer a handover target at all.
+        expect(dispatch).toMatch(/Ericamae left on 17 Sep 2026/);
+        expect(dispatch).not.toContain('"atentaerica@gmail.com"');
     });
 });
 

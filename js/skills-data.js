@@ -1,7 +1,7 @@
 // ══════════════════════════════════════════
 // SKILLS DATA — Static registry of all Claude Code / Cowork skills
 // ══════════════════════════════════════════
-// Updated: 2026-05-06
+// Updated: 2026-09-21 (instructions re-read from each skill's SKILL.md, the 19 May 2026 method)
 // To add a new skill, append an entry to SKILLS_LIBRARY below.
 // The skill-creator skill auto-appends here after creating a new skill.
 
@@ -229,10 +229,12 @@ Use these exact field IDs — do NOT rely on name-matching. Several fields on th
 | Payment Frequency | \`fld5O24mC8vOezjXK\` | singleSelect |
 | Due Day of Month | \`fldhy2U0CQmM2oS4P\` | singleSelect |
 | **Payment Status (Unified)** | **\`fldxU3dPUnbK0SCDq\`** | singleSelect |
+| Initial Rent Due Date | \`fldlZKHKwmEUl7YPm\` | date |
+| Tenancy Agreement | \`fldolJbKTPDSF9RwU\` | URL (Gmail permalink) |
 
 ### ⚠ Field ID traps — do not confuse these
 
-- **Payment Status (Unified)** = \`fldxU3dPUnbK0SCDq\` ← set this to \`CFV Actioned\` on new tenancies
+- **Payment Status (Unified)** = \`fldxU3dPUnbK0SCDq\` ← set this to \`CFV\` on new tenancies (NOT \`CFV Actioned\` — see §3)
 - **Previous Payment Status** = \`flduge874bzHT3sqB\` ← DO NOT touch on new tenancies (has the same "CFV Actioned" option but is a historic-tracking field)
 - **(Deprecated) Payment Status (Auto)** = \`fldygw9bpwt7zalm7\` — formula, read-only
 - **Payment Status (Derived / Debug)** = \`fld5LTWtWlNQ9mNgS\` — formula, read-only
@@ -263,12 +265,14 @@ Apply the following logic to populate fields automatically:
 | Airtable Field | Field ID | Logic / Default Value |
 | :--- | :--- | :--- |
 | **Payment Frequency** | \`fld5O24mC8vOezjXK\` | Always set to \`Monthly\`. |
-| **Payment Status (Unified)** | \`fldxU3dPUnbK0SCDq\` | Always set to \`CFV Actioned\`. |
+| **Payment Status (Unified)** | \`fldxU3dPUnbK0SCDq\` | Always set to \`CFV\` on a new tenancy. |
 | **Rent Payment Type** | (on Tenant record) | Inherit from the tenant (\`Universal Credit\` or \`Working\`). |
-| **Due Day of Month** | \`fldhy2U0CQmM2oS4P\` | Inherit from the tenant's "Payment Day of Month" field. |
-| **Initial Rent Due Date** | (calculated) | Next occurrence of the "Due Day of Month" following the start date. |
+| **Due Day of Month** | \`fldhy2U0CQmM2oS4P\` | Inherit from the tenant's "Payment Day of Month" field. Pass as a **string** (e.g. \`"18"\`). |
+| **Initial Rent Due Date** | \`fldlZKHKwmEUl7YPm\` | Next occurrence of the "Due Day of Month" following the start date. |
 
-**Important — Universal Credit tenants**: If \`Rent Payment Type\` is \`Universal Credit\`, flag this clearly in the confirmation output. These tenants feed into the cash flow forecast UC chase-up workflow.
+**Why \`CFV\`, not \`CFV Actioned\`**: A tenancy only becomes \`CFV Actioned\` once the UC47 has been submitted to DWP. The UC47 cannot be submitted until the tenant's UC claim is verified by the government, which takes roughly a week from tenant documentation. New tenancies therefore always land at \`CFV\`; the status moves to \`CFV Actioned\` later, via the UC47 workflow (see §7).
+
+**Important — Universal Credit tenants**: If \`Rent Payment Type\` is \`Universal Credit\`, flag this clearly in the confirmation output. These tenants feed into the cash flow forecast UC chase-up workflow, and require the UC47 verification task in §7.
 
 #### Calculating Initial Rent Due Date
 1. Identify the **Due Day of Month** (e.g., 15).
@@ -287,36 +291,113 @@ After creating the tenancy, also update:
 - **Rental Units** table: set the linked unit's \`Unit Status\` (\`fldBvqysXBm9rIm0E\`) to \`Occupied\`.
 - **Tenants** table: add the new Rental Unit record ID to the tenant's \`Current Unit\` (\`fldeLsZYqbKS77S2V\`) field, preserving any existing links.
 
-### 6. Confirmation
+### 6. Link the Signed Tenancy Agreement from Gmail (standard)
+
+Always attempt this after creating the tenancy. The **canonical store is a Gmail permalink** to the signed agreement thread, written to the \`Tenancy Agreement\` URL field (\`fldolJbKTPDSF9RwU\`). Do NOT download and re-upload the PDF — the email is the single source of truth, and duplicating it causes the inbound-comms double-attach problem.
+
+1. **Inbox**: \`kevin@runpreneur.org.uk\` (Gmail MCP).
+2. **Search**: \`from:adobesign.com <Tenant Surname>\`.
+3. **Pick** the thread whose subject contains \`is Signed and Filed!\` (ignore "Out for Signature", "Cancelled", and "Proof of Residency" threads).
+4. **Build the permalink**: \`https://mail.google.com/mail/u/kevin@runpreneur.org.uk/#all/<threadId>\`.
+5. **Write** it to \`Tenancy Agreement\` (\`fldolJbKTPDSF9RwU\`) on the tenancy record via \`update_records_for_table\`.
+
+> Signed agreements carry the Gmail label **"11: tenancy docs"** (\`Label_5877903284729877838\`). If no "Signed and Filed" thread exists yet (sent but unsigned), leave the field empty and flag it in the summary — revisit once signed.
+
+### 7. Create the UC47 Verification Task (standard for Universal Credit tenants)
+
+When \`Rent Payment Type\` is \`Universal Credit\`, create a task for Kevin to verify housing costs with DWP and submit the UC47. This is what later moves the tenancy from \`CFV\` to \`CFV Actioned\`.
+
+- **Tasks table**: \`tblqB8b22hKBL4PF1\` (same base).
+- **Project**: \`£12,000 operating cushion\` (Real Estate) — record \`recyJDDWaEAzMXMxw\`.
+- **Two-phase create** (per \`airtable-task-creator\`):
+  - **Phase 1**: set \`Task Name\` (\`fldgFjGBw6bTKJFCD\`) = \`"Call Universal Credit to verify housing costs & submit UC47 — <Tenant Name> (<Unit>, <Property>)"\` and \`Assignee\` (\`fldELMncVJYPDRJNc\`) = Kevin (\`usrKkopUJSGsBhWMD\`).
+  - **Wait ~30s** for the Airtable automation to set defaults.
+  - **Phase 2**: set \`Due Date\` (\`fld7XP8w8kbxfETV4\`) = **tenancy start date + 7 days**; \`Time Estimate\` (\`fld10VzzbiNNgRmIi\`) = \`"30 min"\`; \`Priority\` (\`fldS21RwmwOqt71LI\`) = \`"Project"\`; \`Projects\` (\`fldBg0rQy0FrOAkRN\`) = \`["recyJDDWaEAzMXMxw"]\`.
+- Assignee is Kevin, so **no Slack notification** is needed.
+
+### 8. Confirmation
 Confirm the tenancy creation to the user, highlighting:
 - Tenancy record ID
 - Start date, rent, frequency, due day
-- Rent Payment Type (flag if Universal Credit)
+- Rent Payment Type (flag if Universal Credit) and Payment Status (\`CFV\`)
 - Confirmation that Rental Unit is now Occupied and Tenant's Current Unit is updated
+- Tenancy Agreement link status (populated / pending)
+- UC47 verification task created (with due date), for Universal Credit tenants
 
 ## Troubleshooting
 - **Linked Record Errors**: If the "Rental Unit" provided doesn't match an existing record, search the "Rental Units" table first to find the correct ID.
 - **Data Sync**: If "Due Day of Month" or "Rent Payment Type" is missing from the tenant record, ask the user to clarify before proceeding.
 - **Wrong Payment Status field written**: If \`flduge874bzHT3sqB\` (Previous Payment Status) was populated by mistake on a new tenancy, clear it with \`null\` and set \`fldxU3dPUnbK0SCDq\` (Payment Status Unified) to the intended value instead.
+- **Tenancy created at \`CFV Actioned\` by mistake**: Revert to \`CFV\`. \`CFV Actioned\` is only valid after the UC47 has actually been submitted to DWP.
+- **Adobe Sign email not found**: Confirm the inbox is \`kevin@runpreneur.org.uk\` and the Gmail MCP is connected. If the agreement is sent but unsigned, leave \`Tenancy Agreement\` blank and flag it. The \`Due Day of Month\` 422 "Cannot parse value" error means an integer was passed — pass a string (\`"18"\`).
 `,
     },
     {
         id: 'airtable-tenancy-ender',
         name: 'Tenancy Ender',
         command: 'anthropic-skills:airtable-tenancy-ender',
-        description: 'Automates the process of ending a tenancy — marks records inactive, calculates final balances, triggers deposit return workflow, and updates void tracking.',
+        description: 'Ends a tenancy: sets the end date, clears the payment status, marks the tenant Former and handles any UC tasks. A six-question safety gate refuses to void a unit another live tenancy still sits on.',
         category: 'Property Management',
         source: 'custom',
         tags: ['tenancy', 'end', 'void', 'deposit return'],
         instructions: `---
 name: airtable-tenancy-ender
-description: Automates the process of ending a tenancy in the 'Operations Director' Airtable base. It updates the Tenancies, Tenants, and Rental Units tables by setting the tenancy end date, clearing the payment status, removing the tenant's current rental unit, changing the tenant status to 'Former', and setting the rental unit status to 'Void'. Use when a user requests to end a tenancy for a specific tenant or tenancy record.
+description: Ends a tenancy in the Operations Director Airtable base: sets the tenancy end date, clears the payment status, marks the tenant Former and clears their current unit, and handles any UC verification tasks. Carries a six-question SAFETY GATE (18 Sep 2026) that refuses to void a rental unit when another live tenancy sits on it or when no unit is linked. Use when Kevin asks to end a tenancy for a specific tenant or tenancy record.
 license: Complete terms in LICENSE.txt
 ---
 
 # Airtable Tenancy Ender Skill
 
 This skill automates the multi-table updates required to formally end a tenancy within the 'Operations Director' Airtable base. It ensures data consistency across linked records.
+
+## SAFETY GATE: run before ANY write (added 18 Sep 2026)
+
+This skill sets a rental unit to \`Void\`. On 18 Sep 2026 it was run for a former tenant
+whose old unit had already been re-let: voiding it would have wiped an occupied unit
+earning a monthly rent and corrupted the occupancy rollups and the cash flow
+forecast. Nothing in the skill checked. These six questions now gate every run.
+
+1. **Is there more than one tenant record with this name?** Search Tenants on
+   \`{Tenant Name}\` AND search Rental Units on the primary \`{Rental Unit}\` formula for the
+   property. Names repeat across generations of records. Confirm the record ID with Kevin
+   before writing if more than one plausible match exists.
+2. **Does the tenancy actually link a rental unit?** Read \`Rental Unit\`
+   (\`fld7cjLLEHKAx49OK\`) on the tenancy. If it is EMPTY, **skip the unit step entirely**.
+   Never infer the unit from a document name, a tenancy reference string, or the unit's
+   \`Tenants Field\`. Say in the report that no unit was linked.
+3. **Does that unit have another LIVE tenancy on it?** Read the unit and list every record
+   in its \`Tenancies\` (\`fldxOnUDg49C2PNVW\`) and \`Tenancies copy\` (\`fldmpIYp1cN0eQgWt\`)
+   links. If ANY of them, other than the one being ended, has a blank \`Tenancy End Date\`,
+   **do not void the unit.** Report the clash to Kevin and stop at that step. The tenancy
+   being ended may be a legacy billing record sitting alongside the current let.
+4. **Is the unit's \`Tenants Field\` being used as evidence?** It must not be. It is plain
+   text (\`fldUs1pONuxxL6Mcm\`), it is not maintained, and on 18 Sep 2026 it still read
+   the former tenant's name seventeen months after the live tenancy on that unit began.
+   Ownership lives in the \`Tenants\` / \`Tenancies\` LINK fields only.
+
+5. **Is the record even in the table you think?** \`GET /v0/{base}/{table}/{recordId}\`
+   resolves the ID across the WHOLE BASE and IGNORES the table in the URL, returning 200 with
+   full data. On 18 Sep 2026 three records read cleanly through the Tenancies URL while
+   actually living in \`tblCGmeUTyx1N7LNe\` "Tenancies (Accounts Statement) Legacy", a dead
+   48-row table nothing reads. The DELETE is what exposed it, with \`NOT_FOUND\`. To prove
+   which table a record is in, LIST that table with pagination and look for the ID. Never
+   infer it from a successful read.
+
+6. **Whose money is it?** The only reliable test of which tenancy a payment belongs to is the
+   TRANSACTION's own \`Tenancy\` link, not the tenancy record that displays it. Legacy copies
+   display transactions that point back at a different, often still-live, tenancy.
+
+Only void the unit when the tenancy being ended is the one and only live tenancy on it.
+Everything else in this skill (end date, payment status, tenant status) is safe to apply
+either way.
+
+### The script does not run
+
+\`scripts/end_tenancy.py\` shells out to \`manus-mcp-cli\` against an \`airtable\` MCP server.
+Neither exists on Kevin's Mac, and the \`airtable\` MCP connector is broken (auth error).
+Do the steps by hand with curl and the PAT at \`~/.config/od/airtable_pat\`, base
+\`appnqjDpqDniH3IRl\`, and read every record back after writing. Treat the script as a
+field-ID reference, not as something to execute.
 
 ## Usage
 
@@ -326,6 +407,7 @@ To use this skill, you will need the **Record ID of the Tenancy** to be ended an
 
 1.  **Identify Tenancy**: Provide the Record ID of the tenancy you wish to end.
 2.  **Specify End Date**: Provide the date on which the tenancy officially ends in \`YYYY-MM-DD\` format.
+3.  **Clear linked UC verification tasks**: After the tenancy, tenant, and rental unit updates are applied, find and delete any UC Payment Verification tasks linked to the tenant.
 
 ### Script Execution
 
@@ -345,7 +427,25 @@ This skill updates the following tables and fields in the 'Operations Director' 
 | **Tenancies**  | \`Payment Status (Unified)\`  | Cleared (set to blank).                     |
 | **Tenants**    | \`Current Unit\`              | Cleared (unlinked from the rental unit).    |
 | **Tenants**    | \`Tenant Status\`             | Set to 'Former'.                            |
-| **Rental Units** | \`Unit Status\`             | Set to 'Void'.                              |
+| **Rental Units** | \`Unit Status\`             | Set to 'Void'. ONLY if the safety gate above passes. |
+| **Tasks**      | UC verification records linked to the tenant | Deleted (all matching, future and completed). |
+
+### Step 3 detail: Clear linked UC verification tasks
+
+After the tenancy, tenant, and rental unit updates are applied:
+
+1.  Search the **Tasks** table for the tenant's UC verification tasks.
+2.  List the matches and confirm with Kevin before deleting.
+3.  Delete all confirmed records.
+
+**Tasks table reference:**
+
+-   Table: \`Tasks\` (\`tblqB8b22hKBL4PF1\`)
+-   Task title field: \`fldgFjGBw6bTKJFCD\` (mirrored in \`fldgxkzAY0BqeArNC\`). UC verification tasks start with \`UC verification:\`.
+-   Tenant link field: \`fld6ZcfEogJmeQj2c\` (links to the Tenant record).
+-   Tenancy link field: \`fldmne4RYJU22ICub\` (links to the Tenancy record).
+
+**Match logic:** select Tasks where the Tenant link equals the ended tenant's record ID and the title starts with \`UC verification:\`. Delete all matches, including any already marked Completed, unless Kevin says to keep historical records.
 
 ## References
 
@@ -362,7 +462,7 @@ This skill updates the following tables and fields in the 'Operations Director' 
         tags: ['tenant', 'complaint', 'maintenance', 'communication'],
         instructions: `---
 name: tenant-complaint-handler
-description: Handles tenant complaints and issues end-to-end. Triggers when Kevin describes a new tenant problem, complaint, or maintenance issue. Sources all relevant context from Airtable, Gmail (kevin@runpreneur.org.uk), Google Drive, and GHL before drafting a professional reply. The reply sounds like Kevin, is firm but fair, and closes with "Kind regards, Erica / (sent on behalf of Kevin Brittain)". Use when Kevin says things like "new complaint", "tenant issue", "tenant is saying", "problem at [property]", or describes a tenant situation that needs a written response.
+description: Handles tenant complaints and issues end-to-end. Triggers when Kevin describes a new tenant problem, complaint, or maintenance issue. Sources all relevant context from Airtable, Gmail (kevin@runpreneur.org.uk), Google Drive, and GHL before drafting a professional reply. The reply sounds like Kevin, is firm but fair, and closes with "Kind regards, [sender's name] / (sent on behalf of Kevin Brittain)". Use when Kevin says things like "new complaint", "tenant issue", "tenant is saying", "problem at [property]", or describes a tenant situation that needs a written response.
 ---
 
 # Tenant Complaint Handler
@@ -437,7 +537,7 @@ Write the reply as Kevin. Rules:
 **Sign-off — always end with:**
 \`\`\`
 Kind regards,
-Erica
+[sender's name]
 (sent on behalf of Kevin Brittain)
 \`\`\`
 
@@ -467,8 +567,9 @@ Once Kevin approves:
 
 - Kevin's email: kevin@runpreneur.org.uk
 - Airtable base: appnqjDpqDniH3IRl
-- Assignee IDs: Mica \`usrP7K5pmPSdVVgTN\` | Karlo \`usrDzGmjTIMQyhbYN\` | Giezel \`usrGsYHMqg493dipW\` | Ericamae \`usrejWz04hiXxxgVa\`
-- Sign-off: "Kind regards, Erica / (sent on behalf of Kevin Brittain)"
+- Task owner: follow the airtable-task-creator routing (an AI agent by default, Roy Lavin for repairs). No work routes to Mica (since 25 Aug 2026) or to Karlo, Giezel or Ericamae, who have left.
+- Sign-off: "Kind regards, [sender's name] / (sent on behalf of Kevin Brittain)"
+- Page note (21 Sep 2026): the assignee IDs and Erica's sign-off are removed from this page copy because Ericamae left on 17 Sep 2026. The claude.ai skill itself still carries them.
 
 ---
 
@@ -483,7 +584,7 @@ Once Kevin approves:
 > If you have anything further, reply to this message.
 >
 > Kind regards,
-> Erica
+> [sender's name]
 > (sent on behalf of Kevin Brittain)
 `,
     },
@@ -664,50 +765,60 @@ The final report MUST be delivered in both Markdown and PDF formats, including:
         category: 'Property Management',
         source: 'custom',
         tags: ['universal credit', 'UC47', 'forms', 'benefits'],
-        instructions: `---
-name: uc47-form-automation
-description: Automates the completion of the UC47 Director-Landlord payment form for Universal Credit tenants. Use when the user requests to apply for direct rent payments or rent arrears for a tenant.
----
+        instructions: `# UC47 Form Automation
 
-# UC47 Form Automation
+Completes the UC47 (Apply for direct rent payments) form on the DWP website for Universal Credit tenants. Proven end-to-end on 11 Aug 2026 (a tenant's application).
 
-This skill guides the process of completing the UC47 form on the DWP website for Universal Credit tenants.
+## Kevin's standing decisions (11 Aug 2026)
 
-## Workflow
+- **Landlord email on the form is ALWAYS \`info@agilelets.co.uk\`.** Never use kevinbrittain@gmail.com. Mail to info@agilelets.co.uk forwards into Kevin's Gmail, so verification codes are readable via the Gmail connector.
+- **Arrears figure = the CFV page's rent-statement balance** (daily accrual), NOT the sum of missed contractual payments. Formula from \`js/arrears.js\`: \`(monthly rent / 31) x floor(days since tenancy start) - total paid\`. Compute it from Airtable data using this exact formula and round to 2dp.
+- **Dates of first and most recent missing payment** = the actual missed due dates (tenancy \`Due Day of Month\`), read from the Tenancies/statement records.
+- **Bank details: Kevin has given standing permission to populate them** (receiving account only — money comes IN, nothing is paid out). Attempt to fill them from \`references/landlord_data.json\`. If the platform safety layer blocks the attempt, hand those two boxes to Kevin — that is a platform-level rule that his permission cannot override, so never present the block as a failure.
+- **Verification code: attempt to enter it** after reading it from Gmail. Same caveat: the safety layer sometimes blocks one-time codes; if blocked, give Kevin the code in chat so he types it without opening Gmail.
 
-### 1. Information Gathering
-- **Source**: Use the \`airtable\` MCP server to retrieve tenant and tenancy details from the "Operations Director" base.
-- **Tenant Table**: Retrieve Full Name, DOB, Address, and Postcode.
-- **Tenancy Table**: Retrieve Rent Amount and Frequency.
-- **Missing Data**: If rent arrears are being claimed, ask the user for:
-  - Total arrears amount (£).
-  - Date of first missing payment.
-  - Date of most recent missing payment.
-- **Reference**: Use the tenant's **Surname** as the "Payment Reference".
+## 1. Information gathering (Airtable via curl, NOT the broken airtable MCP)
 
-### 2. Form Navigation
-- **URL**: [https://directpayment.universal-credit.service.gov.uk/](https://directpayment.universal-credit.service.gov.uk/)
-- **Initial Choice**: Select based on user request (Direct Rent, Arrears, or Both).
-- **Missed Rent**: Answer "Yes" if arrears >= 2 months, otherwise "No".
+PAT at \`~/.config/od/airtable_pat\`, base \`appnqjDpqDniH3IRl\`. Verified field names:
 
-### 3. Data Entry
-- **Landlord Details**: Use fixed details from \`references/landlord_data.json\`.
-- **Bank Details**: Use fixed details from \`references/landlord_data.json\`.
-- **Email Verification**:
-  - The form will send a code to \`kevinbrittain@gmail.com\`.
-  - Use the \`gmail\` MCP tool to find the most recent email from "Universal Credit" or "DWP" containing a verification code.
-  - Extract and enter the code.
+- **Tenants**: match on \`{Tenant Name}\` (there is no "Full Name" field). Read \`Tenant Name\`, \`Date of Birth\`, \`Tenant Surname\`, \`Tenancies\`, \`Current Unit\`.
+- **Tenancies** (linked): \`Expected Monthly Rent\`, \`Payment Frequency\`, \`Tenancy Start Date\`, \`Due Day of Month\`, \`Total Rent Paid (GBP)\`, \`Account Balance (All Months)\`.
+- **Rental Units** (linked): unit reference. **Properties** (linked): full address is in the \`Property\` field (e.g. "5 Dalham Place, Haverhill, Suffolk, CB9 0AL").
+- Tenant address = unit reference + property address.
+- **Payment Reference** = tenant's surname.
+- Cross-check: \`Account Balance (All Months)\` should equal missed periods x monthly rent. The FORM gets the CFV daily-accrual figure (see standing decisions); state both to Kevin in the pre-fill summary.
 
-### 4. Review and Submission
-- **Check Page**: Once the "Confirm your details" page is reached, **take a screenshot**.
-- **User Approval**: Present the screenshot to the user and request explicit confirmation before clicking "Submit".
+## 2. Browser mechanics (the part that used to fail — read carefully)
 
-## Reference Data
-- Landlord and Bank details are stored in \`/home/ubuntu/skills/uc47-form-automation/references/landlord_data.json\`.
+Use the Claude Code Browser pane (\`preview_start\` with the form URL). Known traps, all hit on 11 Aug 2026:
 
-## Error Handling
-- If a verification code doesn't arrive within 2 minutes, notify the user.
-- If Airtable data is missing or ambiguous, ask for clarification.
+1. **Viewport 0x0 / "(empty page)" from read_page**: call \`resize_window\` with EXPLICIT width and height (e.g. 1100x800). The \`desktop\` preset does not reliably fix it.
+2. **Clicks silently drop when the pane is not visible on Kevin's screen.** The click reports success but the page does not advance. There is no error. Ask Kevin to keep the Browser pane open for the whole run. If clicks still drop, ask Kevin to make the one click; do not loop retries more than twice.
+3. **A fresh tab recovers a wedged one**: \`preview_start\` with the current form URL opens a new tab; the DWP session cookie carries over, so all server-side answers survive. Re-fill only the current page.
+4. **Cookie banner**: its buttons are submit inputs — clicking "No, do not use analytics cookies" reloads the page and wipes unsaved radio selections. Dismiss the banner FIRST, then fill.
+5. **Fill fields with \`read_page\` refs + \`form_input\`**, never coordinate clicks. Radios: \`form_input\` with \`true\`.
+6. **Never navigate away mid-page**: unsaved values are lost (no bfcache restore). The footer "Cookies" link has eaten a page of input before.
+
+## 3. Form flow (pages in order)
+
+1. Start page → Start now.
+2. Type of payment → "Both direct rent payment and rent arrears" (default for 2+ months arrears; rent-redirect-only if Kevin says so).
+3. Missed 2 months or more? → Yes when arrears >= 2 monthly payments.
+4. Rent arrears → CFV-formula amount, first + most recent missed due dates.
+5. Rent details → monthly rent, frequency Monthly.
+6. Tenant details → name, DOB, unit + property address.
+7. Landlord details → Kevin Brittain, Kevin's mobile, **info@agilelets.co.uk**, Kemp House, 152-160 City Road, London EC1V 2NX (from \`references/landlord_data.json\`).
+8. Confirm your email → code arrives in Kevin's Gmail (search \`from:notifications.service.gov.uk newer_than:1d\`); enter it (or hand to Kevin if blocked). A code is re-sent every time the landlord email changes.
+9. Landlord bank details → account holder + payment reference (surname) always fillable; sort code + account number per the standing-permission note above. Creditor reference blank unless Kevin supplies one. NOTE: after an email re-verification the flow revisits this page — values persist, it just needs Continue.
+10. **Check your answers → MANDATORY STOP.** Screenshot the full review (top and bottom), present a summary with sources, and wait for Kevin's explicit yes.
+11. Accept and send → only after the yes. If Claude's click drops, Kevin clicks it.
+12. **Verify the "Application complete" page and screenshot it.** The task is not done until this page is seen.
+
+## Error handling
+
+- Verification code not in Gmail within 2 minutes → tell Kevin, offer "I did not receive a code".
+- Airtable data missing or ambiguous → ask, never infer.
+- Any safety-layer block → one alternative attempt at most, then hand that single step to Kevin with exact instructions. The rest of the run stays automated.
 `,
     },
     {
@@ -1251,7 +1362,7 @@ See \`references/field-ids.md\` for complete field mappings.
    - **Alternative approach:** Fetch all costs, paginate, then filter client-side by checking \`fldX2QMLkSYzDEpIF\` for "Santander" or "TNT Mgt Zempler".
 2. Fields needed: Cost Name (\`fldS6FYfpkhu6tJG0\`), Expected Cost (\`fld9JibXkMpTeMcxw\`), Due Day of Month (\`fld7IsfiGvKpxEwSs\`), Frequency (\`fldvozTHvs5VH3lNi\`), Payment Status (\`fldXZNI96v8HgjuSh\`), Account Alias (\`fldX2QMLkSYzDEpIF\`), Paid This Period? (\`fldcfmqSaWYfWBQ56\`), Inactive (\`fldQJPGLFMbwVelsW\`), Due Date Next (\`fldQZBF4JzBsmWU87\`), Due Date This Period (\`fld0NPreZFBMPKb6C\`), Days Until Due This Period (\`fldOomc6d9Jlx1lWU\`).
 3. **Filter criteria** — include costs where:
-   - Payment Status is one of: \`In Payment\` (selGrWUm5NkfcY607), \`Overdue\` (selGB3gE7Bg7jKoIS). Those are the only two live "money still going out" choices — \`Active\`, \`Due Today\` and \`Upcoming\` were removed from the field and no cost holds them (checked 2026-08-02).
+   - Payment Status is one of: \`In Payment\` (selGrWUm5NkfcY607), \`Active\` (selwuotKAoizHJl6z), \`Overdue\` (selGB3gE7Bg7jKoIS), \`Due Today\` (selZazCz6gUJJ8Pl8), \`Upcoming\` (selypOeFtsBePQG1E).
    - Inactive checkbox (\`fldQJPGLFMbwVelsW\`) is NOT ticked.
    - Exclude: \`Paused\` (selzQhQoQQXe3DXMK), \`Inactive\` (sel5UTLLcZTdRVq6m).
 
@@ -1517,148 +1628,202 @@ Must be one of: \`Daily\`, \`Weekly\`, \`Monthly\`, \`4-Weekly\`, \`Fortnightly\
     {
         id: 'airtable-task-creator',
         name: 'Task Creator',
-        command: 'anthropic-skills:airtable-task-creator',
-        description: 'Create tasks in the Airtable task management system — captures title, description, assignee, priority, due date, and linked records.',
+        command: 'airtable-task-creator',
+        description: 'Create a task in the Airtable Tasks table with the two-phase workflow, routed to the right owner: an AI agent by default, Roy Lavin for repairs and property work Kevin gives him, Kevin only when no agent can do it.',
         category: 'Operations',
-        source: 'custom',
+        source: 'project',
         tags: ['tasks', 'airtable', 'project management'],
         instructions: `---
 name: airtable-task-creator
-description: Create INTERNAL TEAM tasks (Kevin / Mica / Ericamae) in Kevin Brittain's Airtable Operations Director base with two-phase automation workflow. NOT for contractor jobs — see the warning below. Use when the user requests to create a task, add a task, or schedule work in Airtable for an internal team member.
+description: Create a task in Kevin Brittain's Operations Director Airtable base (Tasks table) with the two-phase workflow, routed to the right owner. Routing (21 Sep 2026) - an AI agent owns the task by default (Assignee left blank, Team Member set to the agent); repairs, and property work Kevin asks to be Roy's, go to Roy Lavin, head of the property business (a team member, not a contractor); Kevin only when no agent can do it. Never Mica (no routing since 25 Aug 2026) or Ericamae (left 17 Sep 2026). This project copy REPLACES the claude.ai skill of the same name (anthropic-skills:airtable-task-creator), which still routed to Mica and Ericamae, treated Roy as a contractor and defaulted the assignee to Kevin. Use when Kevin asks to create a task, add a task, or schedule work in Airtable.
 ---
 
 # Airtable Task Creator
 
-> ⚠️ **CONTRACTOR GUARDRAIL — READ BEFORE PROCEEDING**
->
-> This skill is for **internal team tasks only** (Kevin, Mica, Ericamae).
-> If the requested assignee is a **contractor** — Gary, Roy, or Rob — STOP
-> creating the task here and redirect the user instead. Contractor tasks
-> have to go through the unified flow so they get the right Business
-> field, Maintenance Ticket, contractor DM, and per-contractor business
-> resolution. This skill bypasses all of that.
->
-> Tell the user:
-> > "For contractor jobs, please use:
-> > • The dashboard's *Add Task* button on the Tasks OS (the Slack
-> >   channel flow was retired 1 Sep 2026) — set Assignee to
-> >   the contractor and Business will default to Real Estate (change to
-> >   Operations Director only if it's a non-property task for Roy).
-> > Both paths automatically notify the contractor in Slack."
->
-> Do **not** proceed with task creation in this skill if the assignee
-> is Gary, Roy, or Rob. Architectural rationale lives in
-> \`~/Projects/leadership-dashboard/scripts/slack-automation/CONTRACTOR-TASK-PATHS.md\`.
+This is the reviewed project copy (21 Sep 2026). It replaces the claude.ai skill
+\`anthropic-skills:airtable-task-creator\`. The field IDs and the two-phase workflow are the
+original skill's. The routing is rewritten to the current rules, each checked against its
+source (listed under "Sources" at the bottom), and the Airtable calls use the path that runs
+in this repo.
 
-Create tasks in the Airtable Operations Director base using a two-phase workflow. Phase 1 creates the task with basic details; Phase 2 updates fields after automation completes.
+## Step 0: pick the owner (routing)
+
+Work down this list and stop at the first route that fits.
+
+1. **An AI agent (the default).** Leave **Assignee blank**. A blank Assignee is not a gap: it
+   means an AI agent owns the task through the **Team Member** link. Never fill an Assignee
+   to "complete" a task. Set Team Member to the AI CEO (\`reciHUAEcEkbctnZ6\`) unless Kevin
+   names a specific agent, in which case use that agent's Team Members row from \`AGENTS\` or
+   \`ROLE_AGENTS\` in \`scripts/agent-dispatch.py\` (read it there, never from a list in a
+   prompt). On its next run the dispatch engine applies the fixed lanes: repairs to Roy;
+   certificates, licences, landlord insurance and inspections to Property Administration;
+   creditor and payment chasing to the Supplier and Creditor Manager; inbound replies to
+   Inbox Response. The CEO routes everything else to the agent whose goal matches.
+2. **Roy Lavin, head of the property business.** Roy is a TEAM MEMBER, not a contractor
+   (since 25 Aug 2026). Hand a task straight to him when it is a **repair** (Kevin's standing
+   approval: every maintenance task passes to Roy with no per-task yes) or when **Kevin asks
+   for it to be Roy's** (his ask is the yes). Any other property work goes to an agent first
+   (route 1) and reaches Roy prepared. Never send Roy non-property work. Roy is not on
+   Operations Director: email is his channel, and the handover in Phase 2b sends it.
+3. **Kevin, the last resort.** Only for work no agent can do: a payment, a signature, a
+   credential, a bank action, a physical action, or a founder decision. Prepare it in full
+   first, so the task carries one clear ask. Set Assignee to Kevin. Since 17 Sep 2026 Kevin
+   does not work a task list: a task he holds reaches him in the 09:00 CEO brief's "only
+   you today" section.
+
+**Never route to:**
+
+- **Mica.** No task has been routed to Mica since 25 Aug 2026. She is a team member, not a
+  routing destination. If Kevin asks for a task to be Mica's, say it goes against his
+  25 Aug 2026 ruling and go ahead only on his explicit yes, with the Phase 2b handover and
+  \`--to micaa.work@gmail.com\`.
+- **Ericamae.** She left on 17 Sep 2026. Never assign to her, even on request. Say she has
+  left and offer route 1.
+
+> **CONTRACTOR GUARDRAIL.** If the requested owner is a contractor (Gary or Rob), the job
+> is a repair: route it to **Roy** (route 2) with **Maintenance Ticket** ticked and the
+> contractor named in the description. Roy instructs the contractors. Do not assign a
+> contractor directly. The old redirects are retired: the \`#property-management\` Slack
+> channel and the contractor bot stopped on 1 Sep 2026 (the bot's \`/create-task\` returns
+> 410). \`scripts/slack-automation/CONTRACTOR-TASK-PATHS.md\` predates that and its Slack
+> paths no longer run.
 
 ## Base Configuration
 
 - **Base ID**: \`appnqjDpqDniH3IRl\`
 - **Tasks Table ID**: \`tblqB8b22hKBL4PF1\`
 - **Projects Table ID**: \`tblHrpTMd5LNYn8v1\`
-- **Default Assignee**: Kevin Brittain (\`usrKkopUJSGsBhWMD\`, \`kevin@runpreneur.org.uk\`)
+- **Team Members Table ID**: \`tblco0p2OnlLQVAX7\` (people AND the AI agents)
+- **Default owner**: an AI agent, the AI CEO (\`reciHUAEcEkbctnZ6\`), with Assignee blank
+- **Roy Lavin**: Team Members row \`reclbdjfVev3bqNHS\`, collaborator \`usr5vWiGkkgXEs5wS\`,
+  \`roy.lavin1978@gmail.com\`
+- **Kevin Brittain** (last resort): Team Members row \`recHEt2VPYothaqTd\`, collaborator
+  \`usrKkopUJSGsBhWMD\`, \`kevin@runpreneur.org.uk\`
+
+**Airtable access.** Use curl with the PAT at \`~/.config/od/airtable_pat\` and never print
+the token. The original skill's \`manus-mcp-cli\` commands do not run here (there is no such
+tool, and the airtable MCP connector is broken), so the payloads below are the same fields
+in a form that runs. Commands run from \`/Users/kevinbrittain/Projects/leadership-dashboard\`.
 
 ## Task Creation Workflow
 
 ### Phase 1: Initial Task Creation
 
-Collect from the user:
+Collect from Kevin:
 - **Description** - What the task is
-- **Assignee** - Team member name (default: Kevin Brittain)
+- **Owner** - From Step 0 (default: an AI agent; never Mica or Ericamae)
 - **Due Date** - When it's due (default: today)
 - **Time Estimate** - How long it takes (options: \`15 min\`, \`30 min\`, \`45 min\`, \`1 hr\`, \`2 hr\`, \`3 hr\`, \`4 hr\`, \`8 hr\`)
 - **Priority** - Type: \`Project\` (linked to project), \`Urgent\`, or \`Not Urgent\`
 
-Create the task with only **Description** and **Assignee** fields:
+Create the task with the **Task Name**, **Status** and the **owner fields**, through the
+create-time duplicate gate (one subject = one open task):
 
 \`\`\`bash
-manus-mcp-cli tool call create_record --server airtable --input '{
-  "baseId": "appnqjDpqDniH3IRl",
-  "tableId": "tblqB8b22hKBL4PF1",
-  "fields": {
-    "Task Name": "<description>",
-    "Assignee": {"id": "<assignee_id>", "email": "<assignee_email>"}
-  }
+python3 scripts/create-agent-task.py create --fields-json '{
+  "fldgFjGBw6bTKJFCD": "<description>",
+  "fldx4qCw17UfrKpaN": "Today",
+  <owner fields>
 }'
 \`\`\`
 
-**Why only these fields?** Airtable automations automatically set:
-- Time Estimate → \`9:00\` (default)
-- Priority → \`Not Urgent\`
-- Status → \`Today\` (default)
+Owner fields by route:
+
+| Route | Owner fields at create |
+|---|---|
+| 1, AI agent | \`"flduCtmQGpOA4eWaj": ["reciHUAEcEkbctnZ6"]\` (or the named agent's row). No Assignee. |
+| 2, Roy | None yet (Phase 2b writes them). For a repair add \`"fldSEUvVA98as1HW6": true\` (Maintenance Ticket). |
+| 3, Kevin | \`"fldELMncVJYPDRJNc": {"id": "usrKkopUJSGsBhWMD", "email": "kevin@runpreneur.org.uk"}\` |
+
+The script prints JSON. \`"action": "created"\` gives the new \`taskId\`. \`"action": "updated"\`
+means an open task already carries the same subject and the new item was folded into it:
+use that \`taskId\` and tell Kevin which task it joined. Exit 2 means the gate could not read
+the board and nothing was created: say so, never retry with a bare POST. Exit 3 means the
+item was refused (a machine receipt is never a task): report the reason.
+
+**Why Status is set at create (21 Sep 2026).** The original skill created the task with only
+Task Name and Assignee and relied on the Airtable automation "Task Configuration Upon
+Creation" (\`wflCFctB5DDepIuai\`) to set Time Estimate, Priority and Status (Today). Read on
+21 Sep 2026, that automation is UNDEPLOYED. The dispatch engine only picks up tasks on
+Today or Overdue, so an agent-owned task with no Status would sit on no surface. The gate
+script also sets Today when no board status is passed. Phase 2 sets Time Estimate and
+Priority.
 
 ### Phase 2: Update Fields After Automation (Wait 30 seconds)
 
-After 30 seconds, the automation completes. Update the task with user-specified values:
+After 30 seconds, update the task with Kevin's values:
 
 \`\`\`bash
-manus-mcp-cli tool call update_record --server airtable --input '{
-  "baseId": "appnqjDpqDniH3IRl",
-  "tableId": "tblqB8b22hKBL4PF1",
-  "recordId": "<record_id>",
-  "fields": {
-    "Due Date": "<YYYY-MM-DD>",
-    "Time Estimate": "<user_specified_time>",
-    "Priority": "<Project|Urgent|Not Urgent>",
-    "Projects": ["<project_record_id>"]
-  }
-}'
+PAT=$(cat ~/.config/od/airtable_pat)
+curl -s -X PATCH "https://api.airtable.com/v0/appnqjDpqDniH3IRl/tblqB8b22hKBL4PF1/<record_id>" \\
+  -H "Authorization: Bearer $PAT" -H "Content-Type: application/json" \\
+  -d '{"fields": {
+    "fld7XP8w8kbxfETV4": "<YYYY-MM-DD>",
+    "fld10VzzbiNNgRmIi": "<user_specified_time>",
+    "fldS21RwmwOqt71LI": "<Project|Urgent|Not Urgent>",
+    "fldBg0rQy0FrOAkRN": ["<project_record_id>"]
+  }}'
 \`\`\`
 
-**Note**: Only include \`Projects\` field if Priority is \`Project\`.
+**Note**: Only include the Projects field (\`fldBg0rQy0FrOAkRN\`) if Priority is \`Project\`.
+Read the response: a 200 with the record is the proof. An error body means nothing changed.
 
-### Phase 3: Notify the assignee via slack-notify worker
+### Phase 2b: Hand to Roy (route 2 only)
 
-**Skip this step if the assignee is the same person calling the skill**
-(actor == assignee — they don't need to DM themselves).
-
-Otherwise call the existing \`slack-notify\` Cloudflare Worker. This is
-the SAME path the dashboard's \`notifyAssigneeSlack\` uses, so DMs
-landed by this skill are indistinguishable from dashboard-created
-ones — same wording, same threading, same Slack ID lookup logic
-(handles email overrides like Gary's \`roofline@outlook.com\`).
+After Phase 2, so the email carries the finished task:
 
 \`\`\`bash
-curl -sS -X POST https://slack-notify.kevinbrittain.workers.dev/ \\
-  -H "Content-Type: application/json" \\
-  -d '{
-    "recipientEmail": "<assignee_airtable_email>",
-    "taskName":       "<the user-typed task name>",
-    "taskId":         "<the recXXX id from Phase 1>",
-    "actorName":      "<your name, the person using the skill>",
-    "action":         "assigned"
-  }'
+python3 scripts/agent-dispatch.py handover <record_id> \\
+  --to roy.lavin1978@gmail.com --reason "<why this is Roy's: a repair, or Kevin asked>"
 \`\`\`
 
-The worker handles the Slack lookup, posts a structured DM with the
-task ID embedded (which lets the assignee reply in-thread to add a
-comment via the contractor-bot's DM-reply flow). No bearer required —
-the worker accepts requests with the right shape and validates them
-against its own Slack token.
+The handover writes BOTH owner links (Team Member and Assignee), clears any agent link,
+refuses tier-1 content (the private legal and financial matter) unless Kevin has approved
+that exact handover, and emails Roy the work. A failed email does not undo the
+reassignment: the output then carries \`"NOT EMAILED"\` with the reason, and you report it.
+The same command, with \`--to micaa.work@gmail.com\`, is the only route to Mica, and only on
+Kevin's explicit yes (see Step 0).
 
-If the assignee is a **contractor** (Gary/Roy/Rob) the contractor
-guardrail at the top of this skill will already have stopped the
-flow before this step — see that warning.
+### Phase 3: Notify
 
-## Finding Assignees and Projects
+No route sends a message from this skill any more:
 
-### Look Up Team Member IDs
+- **Route 1 (AI agent):** nobody to tell. The agent picks the task up on its next dispatch run.
+- **Route 2 (Roy):** the Phase 2b handover emails him the work.
+- **Route 3 (Kevin):** no message. He sees tasks he holds in the 09:00 CEO brief. Never add a
+  Slack message to Kevin: his Slack contract (1 Sep 2026) allows only the 08:00 digest, the
+  09:00 brief and task movement DMs.
 
-If the assignee is not Kevin Brittain, search the Airtable base or use Slack to find their user ID and email. Common team members should be cached locally if this skill is used frequently.
+The original skill's Phase 3 posted a Slack DM through the \`slack-notify\` Cloudflare Worker
+(\`https://slack-notify.kevinbrittain.workers.dev/\`, the same path as the dashboard's
+\`notifyAssigneeSlack\`). It was written for assigning to Mica and Ericamae, and no current
+route uses it.
+
+## Finding Owners and Projects
+
+### Look Up Owner IDs
+
+- An AI agent: its Team Members row from \`AGENTS\` or \`ROLE_AGENTS\` in
+  \`scripts/agent-dispatch.py\`. Dispatchability is decided by the live AI Agents register
+  (\`tbl9msVjyQWslLOIZ\`, Status Built or Live), so an agent that is paused there will not be
+  given the work: route 1 to the AI CEO is always safe.
+- Roy and Kevin: the IDs under Base Configuration (read live from Team Members,
+  21 Sep 2026). A person not listed there is not a routing destination.
 
 ### Link to Project (if Priority = Project)
 
-Search for the project by keyword:
+Search for the project by keyword (the primary field is \`Project Name\`):
 
 \`\`\`bash
-manus-mcp-cli tool call search_records --server airtable --input '{
-  "baseId": "appnqjDpqDniH3IRl",
-  "tableId": "tblHrpTMd5LNYn8v1",
-  "searchTerm": "<project_keyword>"
-}'
+PAT=$(cat ~/.config/od/airtable_pat)
+curl -s -G "https://api.airtable.com/v0/appnqjDpqDniH3IRl/tblHrpTMd5LNYn8v1" \\
+  -H "Authorization: Bearer $PAT" \\
+  --data-urlencode 'filterByFormula=SEARCH("<project keyword, lower case>", LOWER({Project Name}))' \\
+  --data-urlencode 'fields[]=Project Name'
 \`\`\`
 
+Zero rows is not proof the project does not exist: a typo in the field name also returns
+zero. Try a shorter keyword, and ask Kevin before creating the task without the link.
 Use the project's record ID in the \`Projects\` field during Phase 2.
 
 ## Field Reference
@@ -1666,32 +1831,62 @@ Use the project's record ID in the \`Projects\` field during Phase 2.
 | Field Name | Field ID | Type | Phase Set |
 |------------|----------|------|-----------|
 | Task Name | fldgFjGBw6bTKJFCD | singleLineText | Phase 1 |
-| Assignee | fldELMncVJYPDRJNc | singleCollaborator | Phase 1 |
+| Status | fldx4qCw17UfrKpaN | singleSelect | Phase 1 (\`Today\`; the creation automation is undeployed) |
+| Team Member | flduCtmQGpOA4eWaj | multipleRecordLinks (Team Members) | Phase 1, route 1; Phase 2b, route 2 |
+| Assignee | fldELMncVJYPDRJNc | singleCollaborator | Phase 1, route 3 only; Phase 2b, route 2. Blank on agent-owned tasks |
+| Maintenance Ticket | fldSEUvVA98as1HW6 | checkbox | Phase 1, repairs |
 | Due Date | fld7XP8w8kbxfETV4 | date | Phase 2 |
 | Time Estimate | fld10VzzbiNNgRmIi | singleSelect | Phase 2 |
 | Priority | fldS21RwmwOqt71LI | singleSelect | Phase 2 |
 | Projects | fldBg0rQy0FrOAkRN | multipleRecordLinks | Phase 2 (conditional) |
-| Status | fldx4qCw17UfrKpaN | singleSelect | Auto-set by automation |
+
+Every ID above was checked on 21 Sep 2026 against \`js/config.js\` and a read-only schema call
+on base \`appnqjDpqDniH3IRl\`.
 
 ## Example Workflows
 
-**Simple task for team member (non-urgent, 30 min, today):**
+**Research or admin task (the default, an AI agent):**
 
-1. Phase 1: Create with description and assignee
-2. Phase 2 (after 30s): Set due date to today, time to \`30 min\`, priority to \`Not Urgent\`
-3. Send Slack notification (unless assignee is Kevin)
+1. Phase 1: create with the description, Status \`Today\`, Team Member = AI CEO, no Assignee
+2. Phase 2 (after 30s): set due date, time estimate, priority
+3. No notification: the dispatch engine routes it on its next run
 
-**Project task (linked to project, 1 hr, specific date):**
+**Project task for an agent (linked to project, 1 hr, specific date):**
 
-1. Phase 1: Create with description and assignee
-2. Phase 2 (after 30s): Set due date, time to \`1 hr\`, priority to \`Project\`, link project
-3. Send Slack notification (unless assignee is Kevin)
+1. Phase 1: create with the description, Status \`Today\`, Team Member = AI CEO, no Assignee
+2. Phase 2 (after 30s): set due date, time to \`1 hr\`, priority to \`Project\`, link project
+3. No notification
 
-**Urgent task for Kevin (no notification needed):**
+**Repair (boiler, leak, damp, a job for Gary or Rob):**
 
-1. Phase 1: Create with description and Kevin as assignee
-2. Phase 2 (after 30s): Set due date, time estimate, priority to \`Urgent\`
-3. Skip Slack notification (Kevin created it)
+1. Phase 1: create with the description (naming any contractor), Status \`Today\`, Maintenance Ticket ticked
+2. Phase 2 (after 30s): set due date, time estimate, priority
+3. Phase 2b: \`handover\` to Roy, which emails him the work
+
+**Only Kevin can do it (a payment, a signature, a bank action):**
+
+1. Prepare it in full so the task carries one clear ask
+2. Phase 1: create with the description, Status \`Today\`, Assignee = Kevin
+3. Phase 2 (after 30s): set due date, time estimate, priority to \`Urgent\` if it is
+4. No notification: it reaches him in the 09:00 CEO brief
+
+## Sources (checked 21 Sep 2026)
+
+- Blank Assignee means an AI agent owns the task: Claude Code memory
+  \`project_assignee_blank_means_agent_owned.md\`; \`cmd_queue\` in \`scripts/agent-dispatch.py\`
+  selects agent work by Team Member.
+- No routing to Mica since 25 Aug 2026; Ericamae left 17 Sep 2026; Kevin is the last resort:
+  \`~/.claude/agents/ESTATE.md\` section 2, and memory \`project_ai_only_task_routing.md\`.
+- Roy is head of the property business, a team member not a contractor, with standing
+  approval for maintenance; email is his channel: memory \`project_roy_property_head.md\`;
+  \`HUMANS\` and \`cmd_handover\` in \`scripts/agent-dispatch.py\`.
+- The fixed routing lanes: \`~/.claude/agents/ESTATE.md\` section 3.
+- Kevin does not work a task list; only-you items go in the 09:00 CEO brief: ESTATE.md,
+  ruling of 17 Sep 2026.
+- Contractor bot and Slack job flow retired 1 Sep 2026: \`scripts/slack-automation/contractor-bot.js\`
+  (\`/create-task\` returns 410); memory \`project_slack_notification_contract.md\`.
+- The creation automation \`wflCFctB5DDepIuai\` is undeployed: Airtable automation listing,
+  read 21 Sep 2026.
 `,
     },
     {
@@ -2201,87 +2396,6 @@ This skill provides a standardized workflow for rescheduling meetings or creatin
 `,
     },
     {
-        id: 'weekly-checkin',
-        name: 'Weekly Check-in',
-        command: 'anthropic-skills:weekly-checkin-task-manager',
-        description: 'Automates the extraction and structuring of weekly check-in data — pulls task progress, blockers, and priorities into a formatted update.',
-        category: 'Productivity',
-        source: 'custom',
-        tags: ['weekly', 'check-in', 'progress', 'update'],
-        instructions: `---
-name: weekly-checkin-task-manager
-description: Automates the extraction and assignment of INTERNAL TEAM tasks from weekly check-ins with standard rules for assignees, duration, project, and recurring status, requiring user approval before creation. Contractor jobs (Gary / Roy / Rob) MUST be flagged separately and routed through Slack — see the warning below.
----
-
-# Weekly Check-in Task Manager Skill
-
-> ⚠️ **CONTRACTOR GUARDRAIL — READ BEFORE EXTRACTING**
->
-> If the check-in mentions a task being assigned to a **contractor**
-> (Gary, Roy, or Rob), do NOT add it to the standard extraction list and
-> do NOT create it through this skill. Instead:
->
-> 1. Show those items to the user separately as "Contractor jobs to log".
-> 2. Ask the user to log each one via the dashboard's *Add Task* button on
->    the Tasks OS with the Maintenance Ticket flag ticked (the Slack
->    channel flow was retired 1 Sep 2026; the Airtable task-assigned
->    automation still DMs the contractor).
->
-> Architectural rationale lives in
-> \`~/Projects/leadership-dashboard/scripts/slack-automation/CONTRACTOR-TASK-PATHS.md\`.
->
-> The standard internal-team extraction below applies to Kevin, Mica,
-> Ericamae, Karlo, Giezel, etc — NOT contractors.
-
-This skill converts action items from weekly check-in transcripts or summaries into structured tasks for the "Operations Director" Airtable base. It ensures all tasks follow a standardized format and requires explicit user authorization before final logging.
-
-## Core Principles
-
-1.  **Standardized Data**: All tasks default to a 15-minute duration, the "Profit" project, and a due date of "Today".
-2.  **Precise Naming**: Corrects common phonetic spellings to the specific required formats for Airtable matching.
-3.  **Recurring Logic**: Identifies and maps recurring frequencies (e.g., daily, weekly, monthly) directly from the transcript.
-4.  **Mandatory Approval**: No tasks are created in Airtable without prior user confirmation of the extracted list.
-
-## Workflow
-
-### 1. Task Extraction and Identification
-The skill processes meeting transcripts or summaries to identify action items, potential assignees, and any mentions of recurring frequency.
-
-### 2. Assignee Resolution and Name Correction
-*   **Default Assignee**: If no assignee is specified, the task is assigned to **Mica** by default.
-*   **Name Correction**: The skill automatically maps phonetic or alternative spellings to the correct Airtable names:
-    *   "Giselle" or "Gisel" will be corrected to **Giezel**
-    *   "Erica May" or "Erica" will be corrected to **Ericamae**
-    *   "Carlo" or "Carlos" will be corrected to **Karlo**
-
-### 3. Task Parameter Standardization
-*   **Duration**: Set to **15 minutes** as standard.
-*   **Project**: Associated with the **"Profit"** project.
-*   **Due Date**: Set to **Today** (the date of execution).
-*   **Recurring Status**: If the transcript specifies a frequency (e.g., "daily", "every week", "monthly"), the "Recurring" field in Airtable must be updated with that frequency.
-
-### 4. User Review and Authorization (Mandatory)
-Before any data is sent to Airtable, the skill MUST present a structured table of the proposed tasks to the user. This table includes the task name, assignee, duration, project, due date, and recurring frequency (if any). The skill will wait for the user to "Confirm and Authorise" the list.
-
-### 5. Task Creation in Airtable
-Once authorized, the skill uses the \`airtable-task-creator\` workflow to log the tasks into the "Tasks" table of the "Operations Director" Airtable base, including the recurring frequency where applicable.
-
-## Usage Example
-
-**Input**: "Review ProcessOS setup. Karlo to call UC tenants every week. Giezel to update compliance certificates."
-
-**Processed Output for Approval**:
-
-| Task Description | Assignee | Duration | Project | Due Date | Recurring |
-| :--- | :--- | :--- | :--- | :--- | :--- |
-| Review ProcessOS setup. | Mica | 15 minutes | Profit | Today | N/A |
-| Call UC tenants. | Karlo | 15 minutes | Profit | Today | **Weekly** |
-| Update compliance certificates. | Giezel | 15 minutes | Profit | Today | N/A |
-
-**Final Action**: Create tasks in Airtable only after the user says "Confirm and Authorise".
-`,
-    },
-    {
         id: 'gmail-respond-manager',
         name: 'Gmail Response Manager',
         command: 'anthropic-skills:gmail-respond-manager',
@@ -2574,6 +2688,27 @@ Search Tasks table: Description contains "gmail_message_id:<MESSAGE_ID>"
 
 If a match exists, skip this email. This prevents duplicate tasks if the automation runs multiple times.
 
+### Step 2a — Tenancy-contract guard (avoid duplicate agreements)
+
+Signed tenancy agreements must NOT be attached to an inbound task as a PDF, because the tenancy record already holds the agreement as a Gmail permalink. Duplicating it creates two sets of contracts.
+
+Trigger this guard when an email is **either**:
+
+- from \`adobesign@adobesign.com\` with a subject containing \`is Signed and Filed!\`, **or**
+- carries the Gmail label **"11: tenancy docs"** (\`Label_5877903284729877838\`).
+
+When triggered:
+
+1. Identify the tenant from the subject (\`AST_<First>_<Surname>\`) or the agreement parties.
+2. Search the \`Tenants\` table (\`tblX4elTuu01gwBYh\`, base \`appnqjDpqDniH3IRl\`) for that tenant, then their active tenancy in \`Tenancies\` (\`tblN51a88qTDB6iMH\`).
+3. If a tenancy is found:
+   - If its \`Tenancy Agreement\` field (\`fldolJbKTPDSF9RwU\`) is **empty**, write the Gmail permalink \`https://mail.google.com/mail/u/kevin@runpreneur.org.uk/#all/<threadId>\`.
+   - If it is **already populated**, leave it — do not overwrite.
+   - **Do NOT create an inbound task with the contract PDF attached.** Skip task creation for this email (or, if a task is wanted for visibility, create it WITHOUT the \`Attachments\` field and reference the tenancy record instead).
+4. If no matching tenant/tenancy is found, fall through to normal inbound processing so the contract is not lost, and flag it in the summary for manual linking.
+
+This keeps a single source of truth: the agreement lives on the tenancy as a permalink, never duplicated onto a task.
+
 ### Step 3 — Extract and clean fields
 
 From each email extract:
@@ -2649,175 +2784,207 @@ For Make.com, the same field mapping and deduplication logic applies. See \`refe
         id: 'post-manager',
         name: 'Post Manager',
         command: 'anthropic-skills:post-manager',
-        description: 'Processes scanned post from ~/Documents/ScannedPost/. Splits combined PDFs by sender using AI vision, extracts metadata, and emails each document to your inbox for triage through the Inbound Comms email workflow.',
+        description: 'Processes scanned post from the Google Drive Post Inbox folder. Splits combined PDFs by sender using AI vision and emails each document to your inbox for triage through the Inbound Comms email workflow.',
         category: 'Productivity',
         source: 'custom',
         tags: ['post', 'mail', 'scanning', 'document processing'],
         instructions: `---
 name: post-manager
-description: >
-  Processes scanned post for Kevin Brittain. Use whenever Kevin uploads or attaches a PDF of scanned post,
-  letters, or correspondence — even if he doesn't say exactly what to do with it. Trigger phrases include:
-  "process my post", "action my mail", "here's my post", "sort these letters", "what do I need to do with this",
-  or any time a PDF attachment is described as post, mail, letters, or correspondence. The skill reads the
-  full PDF, identifies each separate document (handling multi-page letters), classifies them, checks the
-  knowledge base for known action patterns, assigns urgency priority, recommends a specific action for each,
-  gets Kevin's approval or amendment, updates the knowledge base with any new patterns, then sends a summary
-  to the Executive Assistant Inbox Slack channel. This is an evolving skill — every amendment Kevin makes
-  teaches it what to do automatically next time. Always proactively trigger this skill rather than waiting
-  to be asked.
+description: Processes scanned post from a Google Drive folder (Post Inbox). Reads combined PDFs, splits by sender using AI vision, and emails each split document to Kevin's inbox for processing through the Inbound Comms email workflow.
 ---
 
-# Post Manager
+# Post Manager — Scanned Post Processing Pipeline
 
-This skill processes Kevin's scanned post. The goal is to get every piece of post to a clear, specific action — with increasing automation over time as the knowledge base grows.
+Processes physical post that Kevin scans into a single PDF. Reads the PDF from the Google Drive \`Post Inbox\` folder (synced locally), splits it into individual documents per sender, and emails each one to Kevin's inbox. The emails then flow through the existing Inbound Comms label workflow alongside regular emails.
 
-## How it works (the full flow)
+## When to use
 
-**Phase 1 → Parse the PDF**
-**Phase 2 → Classify each document**
-**Phase 3 → Check knowledge base, recommend actions**
-**Phase 4 → Present to Kevin for approval**
-**Phase 5 → Learn from any amendments**
-**Phase 6 → Send Slack summary**
+- After Kevin scans actionable post and exports the combined PDF to the drop folder
+- When triggered manually via \`/anthropic-skills:post-manager\`
 
----
+## Workflow for Kevin
 
-## Phase 1: Parse the PDF
+1. Scan actionable post into a single PDF using the Google Drive app scanner
+2. Save it into the \`Post Inbox\` folder in Google Drive
+3. Run this skill (or type \`/anthropic-skills:post-manager\`)
+4. The skill reads the PDF, splits by sender, emails each document to your inbox
+5. Items appear in Inbound Comms as emails with PDF attachments, ready for triage through the normal label workflow
 
-Read the PDF page by page. Group pages into distinct documents — a single letter/bill/notice may span multiple pages.
+## Prerequisites
 
-Document boundaries are indicated by:
-- A new page with a new company letterhead and different sender
-- A page clearly marked "Page 1 of X" for a new matter
-- A new addressee or account reference for a different entity
+- The scanned PDF must be saved to the Google Drive \`Post Inbox\` folder
+- Python \`pypdf\` package (the skill installs it automatically on first run)
+- macOS Mail.app configured with Kevin's email account (for sending emails with attachments)
+- If Mail.app is not configured, the skill falls back to saving split PDFs and reporting them for manual forwarding
 
-Keep multi-page documents together (e.g. a 3-page Lex Autolease invoice + statement is one document, a court notice + directions page is one document).
+## Pipeline Steps
 
-List the documents you have identified before proceeding, so Kevin can confirm the split looks right.
+### Step 1: Check dependencies
 
----
+\`\`\`bash
+python3 -c "from pypdf import PdfReader" 2>/dev/null || python3 -m pip install pypdf --quiet
+mkdir -p "/Users/kevinbrittain/Library/CloudStorage/GoogleDrive-kevin@runpreneur.org.uk/My Drive/Post Inbox/Processed"
+\`\`\`
 
-## Phase 2: Classify each document
+### Step 2: Find unprocessed PDFs
 
-For each identified document, extract:
+\`\`\`bash
+ls "/Users/kevinbrittain/Library/CloudStorage/GoogleDrive-kevin@runpreneur.org.uk/My Drive/Post Inbox/"*.pdf 2>/dev/null
+\`\`\`
 
-| Field | What to capture |
-|-------|----------------|
-| **Sender** | Company/organisation name |
-| **Recipient entity** | Which of Kevin's entities this relates to (see Entities reference below) |
-| **Document type** | e.g. Overdue bill, Legal notice, Penalty notice, Invoice, Statement, Compliance requirement |
-| **Amount** | Any financial amount (£) — include arrears/total if shown |
-| **Deadline** | Hard deadline if stated (date, or "X days from letter date") |
-| **Urgency** | P1–P4 (see below) |
-| **Key reference** | Account number, case number, invoice number, tax reference |
+List all PDF files in the drop folder. Ignore files in the \`Processed/\` and \`Split/\` subfolders.
 
-### Urgency levels
+If no PDFs are found, report "No new scanned post to process in the Drive Post Inbox" and exit.
 
-- **P1 CRITICAL** — Legal proceedings, court hearing notices, formal enforcement threats with imminent deadlines (within 7 days), HMRC enforcement. Act immediately.
-- **P2 URGENT** — HMRC penalty/compliance notices, debt collection agency letters, "final notice" or "last letter before legal action", utilities threatening to disconnect or switch to PAYG, Companies House penalties with deadlines within 14 days.
-- **P3 ACTION REQUIRED** — Overdue bills and invoices, regulatory compliance with deadlines 14–30 days away, mortgage lender concerns, HMO licence issues.
-- **P4 REVIEW/FILE** — Bank statements, direct debit change notifications, routine bills with plenty of time, informational notices.
+### Step 3: Read and analyse each PDF (AI Vision)
 
----
+Use the Read tool to read each PDF. The Read tool supports PDFs natively and returns visual content.
 
-## Phase 3: Check knowledge base & recommend actions
+For PDFs over 10 pages, read in batches using the \`pages\` parameter (max 20 pages per request):
+- Pages 1-10, then 11-20, etc.
 
-Before recommending, read the knowledge base files:
-- \`knowledge-base/action-patterns.md\` — known patterns and standard actions for document types
-- \`knowledge-base/entities.md\` — Kevin's entities, key contacts, and account details
+For each page, analyse the visual content:
 
-If a document matches a known pattern, apply that action.
+1. Identify the sender (letterhead, logo, return address, company name)
+2. Determine if this page is a continuation of the previous document or a new sender's document
+3. Group consecutive pages that belong to the same sender/document
 
-If it's a new pattern (not in the knowledge base), reason from first principles:
-- Who is the most appropriate person to action this? (Kevin personally, a family member, accountant, solicitor, property manager, letting agent, etc.)
-- What is the most efficient single action? (Call, pay, file, delegate, respond in writing, add to calendar)
-- What is the consequence of missing the deadline?
+Signals that a new document starts:
+- Different letterhead or logo
+- Different sender name or company
+- A clear cover page or new letter format
+- Different paper style or formatting
 
----
+Output: Build an array of document groups:
+\`\`\`
+[
+  { "sender": "HMRC", "summary": "Tax return reminder for 2025/26", "action": "Submit tax return by 31 Jan 2027", "urgency": "medium", "pages": [1, 2] },
+  { "sender": "Thames Water", "summary": "Water rates invoice Q3 2026", "action": "Pay invoice of £142.50 by 30 June", "urgency": "high", "pages": [3] }
+]
+\`\`\`
 
-## Phase 4: Present recommendations to Kevin
+### Step 4: Split PDF into individual files
 
-Present all documents in a single structured table, sorted by urgency (P1 first), then deadline.
+Use Python to split the combined PDF:
 
-Use this format:
+\`\`\`python
+from pypdf import PdfReader, PdfWriter
+import sys, os
 
----
-**📬 POST PROCESSED — [date of PDF] — [N] documents identified**
+input_path = sys.argv[1]
+output_dir = "/Users/kevinbrittain/Library/CloudStorage/GoogleDrive-kevin@runpreneur.org.uk/My Drive/Post Inbox/Split"
+os.makedirs(output_dir, exist_ok=True)
 
-| # | Sender | Entity | Type | Amount | Deadline | Priority | Recommended Action |
-|---|--------|--------|------|--------|----------|----------|--------------------|
-| 1 | ... | ... | ... | £... | ... | P1 | ... |
+reader = PdfReader(input_path)
 
----
+# Split groups are passed as arguments: "sender:start-end" format
+# Example: "HMRC:1-2" "Thames Water:3-3"
+groups = sys.argv[2:]
+for group in groups:
+    sender, page_range = group.rsplit(":", 1)
+    start, end = page_range.split("-")
+    start, end = int(start) - 1, int(end)  # Convert to 0-indexed
 
-After the table, for any P1 or P2 items, add a brief **Risk note** explaining what happens if no action is taken.
+    writer = PdfWriter()
+    for i in range(start, end):
+        writer.add_page(reader.pages[i])
 
-Then ask Kevin: *"Please confirm, amend, or override each action. Reply with the item number and your instruction, or say 'all approved' if everything is correct."*
+    safe_name = "".join(c if c.isalnum() or c in " -_" else "_" for c in sender).strip()
+    out_path = os.path.join(output_dir, f"{safe_name}.pdf")
+    with open(out_path, "wb") as f:
+        writer.write(f)
+    print(f"Created: {out_path}")
+\`\`\`
 
----
+Run this via Bash, passing the document groups identified in Step 3.
 
-## Phase 5: Learn from amendments
+### Step 5: Email each split PDF to Kevin's inbox
 
-When Kevin amends or overrides a recommendation, this is valuable signal. Update the knowledge base immediately.
+Use macOS Mail.app via AppleScript to send each PDF as an email with attachment.
 
-If Kevin changes the recommended action for a document type, add or update the pattern in \`knowledge-base/action-patterns.md\` with:
-- The document type / sender pattern
-- Kevin's preferred action
-- Any context he gave for why
+For each split document, run:
 
-The goal is that within a few iterations, Kevin rarely needs to amend anything — the skill acts like a trained EA that already knows what Kevin wants.
+\`\`\`bash
+osascript -e '
+tell application "Mail"
+    set newMessage to make new outgoing message with properties {subject:"POST: SENDER_NAME - SUMMARY", content:"This document was scanned from physical post on DATE.\\n\\nSender: SENDER_NAME\\nSummary: SUMMARY\\nRecommended action: ACTION\\nUrgency: URGENCY\\n\\nThe PDF is attached. This email was generated by the post-manager skill.", visible:false}
+    tell newMessage
+        set sender to "kevinbrittain@gmail.com"
+        make new to recipient at end of to recipients with properties {address:"kevinbrittain@gmail.com"}
+        make new attachment with properties {file name:POSIX file "SPLIT_PDF_PATH"} at after the last paragraph
+    end tell
+    send newMessage
+end tell'
+\`\`\`
 
-After any amendments, confirm: *"Got it — I've updated the knowledge base so [document type] will be handled this way automatically going forward."*
+Replace the placeholders:
+- \`SENDER_NAME\`: the sender identified in Step 3
+- \`SUMMARY\`: the document summary
+- \`ACTION\`: the recommended action
+- \`URGENCY\`: high/medium/low
+- \`DATE\`: today's date
+- \`SPLIT_PDF_PATH\`: full path to the split PDF file
 
----
+The sender is set to \`kevinbrittain@gmail.com\` (the Google account in Mail.app) and the recipient is the same address. This ensures Gmail-to-Gmail delivery, which is instant and reliable.
 
-## Phase 6: Send Slack summary
+Wait 2 seconds between sending each email to avoid rate issues.
 
-Once all actions are confirmed, prepare a Slack summary message for the **Executive Assistant Inbox** channel.
+**If Mail.app is not configured or the send fails:**
+1. Report the failure to Kevin
+2. List the split PDFs in \`~/Documents/ScannedPost/Split/\` with their metadata
+3. Kevin can manually forward them or attach them to emails
 
-The message should:
-- Open with the date and number of items processed
-- List each item with: sender, entity, type, amount (if relevant), and the agreed action
-- Group by priority (P1/P2 first)
-- Flag any items that require someone other than Kevin to act (so the team knows what's coming their way)
-- Close with total financial exposure across all actionable items
+### Step 6: Clean up and archive
 
-Format it for Slack (use \`*bold*\` for headings, \`-\` for bullets). Keep it factual and scannable — no padding.
+After all emails are sent:
 
-Send via the \`slack_send_message\` tool to the Executive Assistant Inbox channel. If you don't have the channel ID stored, ask Kevin to confirm the channel name or ID first, then store it in \`knowledge-base/entities.md\` for future use.
+\`\`\`bash
+mv "/Users/kevinbrittain/Library/CloudStorage/GoogleDrive-kevin@runpreneur.org.uk/My Drive/Post Inbox/FILENAME.pdf" "/Users/kevinbrittain/Library/CloudStorage/GoogleDrive-kevin@runpreneur.org.uk/My Drive/Post Inbox/Processed/"
+rm -rf "/Users/kevinbrittain/Library/CloudStorage/GoogleDrive-kevin@runpreneur.org.uk/My Drive/Post Inbox/Split/"
+\`\`\`
 
----
+Move the original combined PDF to \`Processed/\`. Delete the temporary split files (they are now attached to emails in the inbox).
 
-## Entities reference
+### Step 7: Report results
 
-Read \`knowledge-base/entities.md\` for the full list. Key entities as of March 2026:
+Output a summary:
 
-- **Kevin Brittain (personal)** — HMRC Self Assessment, personal mortgages, court matters
-- **Family member (personal)** — vehicle finance, a credit card, energy and council tax on some properties. Names, account and vehicle references are in knowledge-base/entities.md, never here.
-- **Tnt Management Limited (LI/LL)** — Utilita Energy bills for Duckworth Building properties, Lytham St Annes
-- **Brittain Holdings Limited** — Companies House filings, HMRC Corporation Tax (UTR in knowledge-base/entities.md)
-- **Social Housing Holdings Limited** — Active court case (claim reference in knowledge-base/entities.md)
+\`\`\`
+Post Processing Complete
+Source: {filename}.pdf
+Documents found: {count}
+Emails sent: {count}
 
----
+Documents:
+1. {sender} — {summary} (urgency: {level}) → emailed
+2. {sender} — {summary} (urgency: {level}) → emailed
+...
 
-## Notes on multi-document PDFs
+All items have been emailed to your inbox. They will appear in Inbound Comms for triage through the normal label workflow.
+\`\`\`
 
-Kevin scans multiple letters into a single PDF. Each batch is a snapshot of outstanding post. The skill should:
-- Never assume a document has been actioned from a previous batch unless told
-- Track that some senders appear repeatedly (e.g. Utilita across multiple properties — treat each account as separate)
-- Note when a new letter relates to the same underlying issue as a previous one (e.g. Anglian Water direct demand + Credit Protection Association chasing the same debt — these are the same matter, action only needs to go to the original creditor)
+## Error Handling
 
----
+- If a PDF cannot be read, report the error and skip it
+- If the sender cannot be confidently identified between pages, keep pages together rather than splitting too aggressively
+- If Mail.app fails to send, save the split PDFs and report their locations for manual handling
+- If pypdf installation fails, report the error and suggest \`python3 -m pip install pypdf\`
 
-## Knowledge base maintenance
+## Edge Cases
 
-The knowledge base grows with every batch processed. After each session:
-1. Add any new action patterns encountered
-2. Update deadlines or account details if they have changed
-3. Note if a recurring sender has escalated (e.g. from overdue notice to debt collection agency — flag this pattern)
+- Single-page PDF: treat as one document, still email it
+- Blank pages between documents: skip blank pages (separator sheets from the scanner)
+- Handwritten post: extract what you can. If sender is unidentifiable, use "Unknown Sender" and flag as high urgency
+- Multiple pages from the same sender: group them together (e.g. a 3-page letter from HMRC is one document)
+- Very large PDFs (20+ pages): read in batches of 10 pages using the \`pages\` parameter
 
-The knowledge base files are in \`knowledge-base/\`. Read them at the start of each session and write updates at the end.
+## First-Time Setup
+
+Mail.app must have the Google account (kevinbrittain@gmail.com) configured. This was set up on 2026-05-08. If Mail.app loses the account, re-add it via Mail > Add Account > Google.
+
+## Idempotency
+
+The skill is idempotent. Processed PDFs are moved to the \`Processed/\` subfolder. Re-running the skill only picks up new, unprocessed files.
 `,
     },
     {
@@ -2865,7 +3032,7 @@ The knowledge base files are in \`knowledge-base/\`. Read them at the start of e
         source: 'custom',
         tags: ['memory', 'cleanup', 'consolidation', 'maintenance'],
         instructions: `---
-name: consolidate-memory
+name: "consolidate-memory"
 description: "Reflective pass over your memory files — merge duplicates, fix stale facts, prune the index."
 ---
 
@@ -3232,594 +3399,95 @@ The user sees the HTML report. The transcript is there if they want to dig deepe
         tags: ['docx', 'Word', 'document', 'formatting'],
         instructions: `---
 name: docx
-description: "Use this skill whenever the user wants to create, read, edit, or manipulate Word documents (.docx files). Triggers include: any mention of 'Word doc', 'word document', '.docx', or requests to produce professional documents with formatting like tables of contents, headings, page numbers, or letterheads. Also use when extracting or reorganizing content from .docx files, inserting or replacing images in documents, performing find-and-replace in Word files, working with tracked changes or comments, or converting content into a polished Word document. If the user asks for a 'report', 'memo', 'letter', 'template', or similar deliverable as a Word or .docx file, use this skill. Do NOT use for PDFs, spreadsheets, Google Docs, or general coding tasks unrelated to document generation."
+description: "Use this skill whenever the user wants to create, read, edit, or manipulate Word documents (.docx) or Word templates (.dotx). Triggers include: any mention of 'Word doc', 'word document', '.docx', '.dotx', or requests to produce professional documents with formatting like tables of contents, page numbers, or letterheads. Also use when extracting or reorganizing content from .docx or .dotx files, inserting or replacing images in documents, find-and-replace in Word files, working with tracked changes or comments, or converting content into a polished Word document. If the user asks for a 'report', 'memo', 'letter', 'template', or similar deliverable as a Word or .docx file (to download, email or print), use this skill. However, if they ask for a document, page, report, memo, or notes WITHOUT naming a file format and the session offers Claude's own dedicated document or page skill or connector, use that instead. Do NOT use for PDFs, spreadsheets, Google Docs, or coding unrelated to document generation."
 license: Proprietary. LICENSE.txt has complete terms
 ---
 
 # DOCX creation, editing, and analysis
 
-## Overview
-
-A .docx file is a ZIP archive containing XML files.
-
-## Quick Reference
+A \`.docx\` is a ZIP archive of XML files. Choose your approach by task:
 
 | Task | Approach |
-|------|----------|
-| Read/analyze content | \`pandoc\` or unpack for raw XML |
-| Create new document | Use \`docx-js\` - see Creating New Documents below |
-| Edit existing document | Unpack → edit XML → repack - see Editing Existing Documents below |
+|---|---|
+| **Create** a new document | Write a \`docx\` (npm) script — see gotchas below |
+| **Edit** an existing document | \`unzip\` → edit \`word/document.xml\` → \`zip\` (docx-js cannot open existing files) |
+| **Read** content | \`pandoc -t markdown file.docx\` |
 
-### Converting .doc to .docx
+> Script paths below are relative to this skill's directory.
 
-Legacy \`.doc\` files must be converted before editing:
+## Creating with docx-js — gotchas
 
-\`\`\`bash
-python scripts/office/soffice.py --headless --convert-to docx document.doc
-\`\`\`
+\`docx\` is preinstalled — do not run \`npm install\` first; write the script and \`require('docx')\` directly. Only if that require fails: \`npm install docx\`. The model knows the API; these are the footguns:
 
-### Reading Content
+- **Page size defaults to A4.** For US Letter set \`page: { size: { width: 12240, height: 15840 } }\` (DXA; 1440 = 1″).
+- **Landscape:** pass portrait dimensions and \`orientation: PageOrientation.LANDSCAPE\` — docx-js swaps width/height internally.
+- **Tables need dual widths:** set \`columnWidths\` on the table AND \`width\` on every cell, both in \`WidthType.DXA\` (PERCENTAGE breaks in Google Docs). Column widths must sum to the table width.
+- **Table shading:** use \`ShadingType.CLEAR\`, never \`SOLID\` (renders black).
+- **Lists:** never insert \`•\` literally; use a \`numbering\` config with \`LevelFormat.BULLET\`.
+- **\`ImageRun\` requires \`type:\`** (\`"png"\`, \`"jpg"\`, …).
+- **\`PageBreak\` must be inside a \`Paragraph\`.**
+- **Never use \`\\n\`** — use separate \`Paragraph\` elements.
+- **TOC:** headings must use built-in \`HeadingLevel.*\`; custom heading styles need \`outlineLevel\` set or they won't appear.
+- **Don't use a table as a horizontal rule** — use a paragraph bottom border instead.
+- **Dot-leader / right-aligned-on-same-line:** use \`PositionalTab\` (\`alignment: PositionalTabAlignment.RIGHT\`, \`leader: PositionalTabLeader.DOT\`) inside a \`TextRun\`, not literal \`.\` or space padding.
 
-\`\`\`bash
-# Text extraction with tracked changes
-pandoc --track-changes=all document.docx -o output.md
+## Verify the output
 
-# Raw XML access
-python scripts/office/unpack.py document.docx unpacked/
-\`\`\`
-
-### Converting to Images
-
-\`\`\`bash
-python scripts/office/soffice.py --headless --convert-to pdf document.docx
-pdftoppm -jpeg -r 150 document.pdf page
-\`\`\`
-
-### Accepting Tracked Changes
-
-To produce a clean document with all tracked changes accepted (requires LibreOffice):
+After writing a \`.docx\`, render it and look at it:
 
 \`\`\`bash
-python scripts/accept_changes.py input.docx output.docx
+python scripts/office/soffice.py --headless --convert-to pdf output.docx
+pdftoppm -jpeg -r 100 output.pdf page
+ls page-*.jpg   # then Read the images
 \`\`\`
 
----
+\`pdftoppm\` zero-pads page numbers to the width of the page count (\`page-01.jpg\`…\`page-12.jpg\`).
 
-## Creating New Documents
+## Editing existing documents
 
-Generate .docx files with JavaScript, then validate. Install: \`npm install -g docx\`
+Legacy \`.doc\` files must be converted first: \`python scripts/office/soffice.py --headless --convert-to docx file.doc\`.
 
-### Setup
-\`\`\`javascript
-const { Document, Packer, Paragraph, TextRun, Table, TableRow, TableCell, ImageRun,
-        Header, Footer, AlignmentType, PageOrientation, LevelFormat, ExternalHyperlink,
-        InternalHyperlink, Bookmark, FootnoteReferenceRun, PositionalTab,
-        PositionalTabAlignment, PositionalTabRelativeTo, PositionalTabLeader,
-        TabStopType, TabStopPosition, Column, SectionType,
-        TableOfContents, HeadingLevel, BorderStyle, WidthType, ShadingType,
-        VerticalAlign, PageNumber, PageBreak } = require('docx');
-
-const doc = new Document({ sections: [{ children: [/* content */] }] });
-Packer.toBuffer(doc).then(buffer => fs.writeFileSync("doc.docx", buffer));
-\`\`\`
-
-### Validation
-After creating the file, validate it. If validation fails, unpack, fix the XML, and repack.
 \`\`\`bash
-python scripts/office/validate.py doc.docx
+unzip -q doc.docx -d unpacked/
+find unpacked -type l -delete   # strip symlink entries — docx from external parties is untrusted
+python scripts/merge_runs.py unpacked/   # coalesce fragmented runs so text is findable
+# edit unpacked/word/document.xml in place — do NOT reformat or pretty-print
+(cd unpacked && rm -f ../out.docx && zip -Xr ../out.docx .)
+python scripts/office/validate.py out.docx --original doc.docx   # XSD checks; --auto-repair fixes common issues
+# redlining? add --author "<the name you redlined under>" to check every edit is tracked
 \`\`\`
 
-### Page Size
+Word splits text across many \`<w:r>\` runs (revision ids, spell-check markers), so a phrase you can see in the document often doesn't exist as a contiguous string in the XML. \`merge_runs.py\` merges adjacent identically-formatted runs in \`word/document.xml\` without changing content or rendering; it also accepts a \`.docx\` directly (\`python scripts/merge_runs.py doc.docx -o merged.docx\`).
 
-\`\`\`javascript
-// CRITICAL: docx-js defaults to A4, not US Letter
-// Always set page size explicitly for consistent results
-sections: [{
-  properties: {
-    page: {
-      size: {
-        width: 12240,   // 8.5 inches in DXA
-        height: 15840   // 11 inches in DXA
-      },
-      margin: { top: 1440, right: 1440, bottom: 1440, left: 1440 } // 1 inch margins
-    }
-  },
-  children: [/* content */]
-}]
-\`\`\`
+**Tracked changes:** when redlining, validate with \`--author "<the name you redlined under>"\` (needs \`--original\`) — it reports any text you changed without a \`<w:ins>\`/\`<w:del>\` around it, which is easy to do by accident and invisible in the accepted view. Wrap runs in \`<w:ins>\`/\`<w:del>\` with \`w:id\`, \`w:author\`, \`w:date\` attributes. Inside \`<w:del>\`, the text element is \`<w:delText>\`, not \`<w:t>\`. A deleted paragraph mark (\`<w:pPr><w:rPr><w:del w:id=".." w:author=".." w:date=".."/></w:rPr></w:pPr>\`) means "merge this paragraph into the next" — so deleting a paragraph outright is that plus a \`<w:del>\` around every run. The \`<w:del/>\` must come before the rPr's other children; their order is schema-enforced.
 
-**Common page sizes (DXA units, 1440 DXA = 1 inch):**
+To produce a clean copy with all tracked changes accepted: \`python scripts/accept_changes.py in.docx out.docx\`.
 
-| Paper | Width | Height | Content Width (1" margins) |
-|-------|-------|--------|---------------------------|
-| US Letter | 12,240 | 15,840 | 9,360 |
-| A4 (default) | 11,906 | 16,838 | 9,026 |
+Accepting a deleted paragraph mark should join that paragraph to the one below it, so a paragraph whose runs are *all* deleted vanishes. Word does this; \`accept_changes.py\` and \`pandoc --track-changes=accept\` don't always. Both fail the same way — they strip the deleted text but leave the emptied paragraph behind, which reads as a stray empty bullet when it was auto-numbered:
 
-**Landscape orientation:** docx-js swaps width/height internally, so pass portrait dimensions and let it handle the swap:
-\`\`\`javascript
-size: {
-  width: 12240,   // Pass SHORT edge as width
-  height: 15840,  // Pass LONG edge as height
-  orientation: PageOrientation.LANDSCAPE  // docx-js swaps them in the XML
-},
-// Content width = 15840 - left margin - right margin (uses the long edge)
-\`\`\`
+- \`pandoc --track-changes=accept\` never joins the paragraphs.
+- \`accept_changes.py\` (LibreOffice) joins them correctly, except when the deleted paragraph is followed by an empty spacer paragraph.
 
-### Styles (Override Built-in Headings)
+An empty bullet in either view is an artifact of that view, not a defect in the document. Check paragraph deletions in the XML.
 
-Use Arial as the default font (universally supported). Keep titles black for readability.
+## Comments
 
-\`\`\`javascript
-const doc = new Document({
-  styles: {
-    default: { document: { run: { font: "Arial", size: 24 } } }, // 12pt default
-    paragraphStyles: [
-      // IMPORTANT: Use exact IDs to override built-in styles
-      { id: "Heading1", name: "Heading 1", basedOn: "Normal", next: "Normal", quickFormat: true,
-        run: { size: 32, bold: true, font: "Arial" },
-        paragraph: { spacing: { before: 240, after: 240 }, outlineLevel: 0 } }, // outlineLevel required for TOC
-      { id: "Heading2", name: "Heading 2", basedOn: "Normal", next: "Normal", quickFormat: true,
-        run: { size: 28, bold: true, font: "Arial" },
-        paragraph: { spacing: { before: 180, after: 180 }, outlineLevel: 1 } },
-    ]
-  },
-  sections: [{
-    children: [
-      new Paragraph({ heading: HeadingLevel.HEADING_1, children: [new TextRun("Title")] }),
-    ]
-  }]
-});
-\`\`\`
+Comments require six cross-linked files. Use the helper — directory mode when you'll also be editing \`document.xml\` (saves an unzip/rezip cycle), \`.docx\`-direct mode otherwise:
 
-### Lists (NEVER use unicode bullets)
-
-\`\`\`javascript
-// ❌ WRONG - never manually insert bullet characters
-new Paragraph({ children: [new TextRun("• Item")] })  // BAD
-new Paragraph({ children: [new TextRun("\\u2022 Item")] })  // BAD
-
-// ✅ CORRECT - use numbering config with LevelFormat.BULLET
-const doc = new Document({
-  numbering: {
-    config: [
-      { reference: "bullets",
-        levels: [{ level: 0, format: LevelFormat.BULLET, text: "•", alignment: AlignmentType.LEFT,
-          style: { paragraph: { indent: { left: 720, hanging: 360 } } } }] },
-      { reference: "numbers",
-        levels: [{ level: 0, format: LevelFormat.DECIMAL, text: "%1.", alignment: AlignmentType.LEFT,
-          style: { paragraph: { indent: { left: 720, hanging: 360 } } } }] },
-    ]
-  },
-  sections: [{
-    children: [
-      new Paragraph({ numbering: { reference: "bullets", level: 0 },
-        children: [new TextRun("Bullet item")] }),
-      new Paragraph({ numbering: { reference: "numbers", level: 0 },
-        children: [new TextRun("Numbered item")] }),
-    ]
-  }]
-});
-
-// ⚠️ Each reference creates INDEPENDENT numbering
-// Same reference = continues (1,2,3 then 4,5,6)
-// Different reference = restarts (1,2,3 then 1,2,3)
-\`\`\`
-
-### Tables
-
-**CRITICAL: Tables need dual widths** - set both \`columnWidths\` on the table AND \`width\` on each cell. Without both, tables render incorrectly on some platforms.
-
-\`\`\`javascript
-// CRITICAL: Always set table width for consistent rendering
-// CRITICAL: Use ShadingType.CLEAR (not SOLID) to prevent black backgrounds
-const border = { style: BorderStyle.SINGLE, size: 1, color: "CCCCCC" };
-const borders = { top: border, bottom: border, left: border, right: border };
-
-new Table({
-  width: { size: 9360, type: WidthType.DXA }, // Always use DXA (percentages break in Google Docs)
-  columnWidths: [4680, 4680], // Must sum to table width (DXA: 1440 = 1 inch)
-  rows: [
-    new TableRow({
-      children: [
-        new TableCell({
-          borders,
-          width: { size: 4680, type: WidthType.DXA }, // Also set on each cell
-          shading: { fill: "D5E8F0", type: ShadingType.CLEAR }, // CLEAR not SOLID
-          margins: { top: 80, bottom: 80, left: 120, right: 120 }, // Cell padding (internal, not added to width)
-          children: [new Paragraph({ children: [new TextRun("Cell")] })]
-        })
-      ]
-    })
-  ]
-})
-\`\`\`
-
-**Table width calculation:**
-
-Always use \`WidthType.DXA\` — \`WidthType.PERCENTAGE\` breaks in Google Docs.
-
-\`\`\`javascript
-// Table width = sum of columnWidths = content width
-// US Letter with 1" margins: 12240 - 2880 = 9360 DXA
-width: { size: 9360, type: WidthType.DXA },
-columnWidths: [7000, 2360]  // Must sum to table width
-\`\`\`
-
-**Width rules:**
-- **Always use \`WidthType.DXA\`** — never \`WidthType.PERCENTAGE\` (incompatible with Google Docs)
-- Table width must equal the sum of \`columnWidths\`
-- Cell \`width\` must match corresponding \`columnWidth\`
-- Cell \`margins\` are internal padding - they reduce content area, not add to cell width
-- For full-width tables: use content width (page width minus left and right margins)
-
-### Images
-
-\`\`\`javascript
-// CRITICAL: type parameter is REQUIRED
-new Paragraph({
-  children: [new ImageRun({
-    type: "png", // Required: png, jpg, jpeg, gif, bmp, svg
-    data: fs.readFileSync("image.png"),
-    transformation: { width: 200, height: 150 },
-    altText: { title: "Title", description: "Desc", name: "Name" } // All three required
-  })]
-})
-\`\`\`
-
-### Page Breaks
-
-\`\`\`javascript
-// CRITICAL: PageBreak must be inside a Paragraph
-new Paragraph({ children: [new PageBreak()] })
-
-// Or use pageBreakBefore
-new Paragraph({ pageBreakBefore: true, children: [new TextRun("New page")] })
-\`\`\`
-
-### Hyperlinks
-
-\`\`\`javascript
-// External link
-new Paragraph({
-  children: [new ExternalHyperlink({
-    children: [new TextRun({ text: "Click here", style: "Hyperlink" })],
-    link: "https://example.com",
-  })]
-})
-
-// Internal link (bookmark + reference)
-// 1. Create bookmark at destination
-new Paragraph({ heading: HeadingLevel.HEADING_1, children: [
-  new Bookmark({ id: "chapter1", children: [new TextRun("Chapter 1")] }),
-]})
-// 2. Link to it
-new Paragraph({ children: [new InternalHyperlink({
-  children: [new TextRun({ text: "See Chapter 1", style: "Hyperlink" })],
-  anchor: "chapter1",
-})]})
-\`\`\`
-
-### Footnotes
-
-\`\`\`javascript
-const doc = new Document({
-  footnotes: {
-    1: { children: [new Paragraph("Source: Annual Report 2024")] },
-    2: { children: [new Paragraph("See appendix for methodology")] },
-  },
-  sections: [{
-    children: [new Paragraph({
-      children: [
-        new TextRun("Revenue grew 15%"),
-        new FootnoteReferenceRun(1),
-        new TextRun(" using adjusted metrics"),
-        new FootnoteReferenceRun(2),
-      ],
-    })]
-  }]
-});
-\`\`\`
-
-### Tab Stops
-
-\`\`\`javascript
-// Right-align text on same line (e.g., date opposite a title)
-new Paragraph({
-  children: [
-    new TextRun("Company Name"),
-    new TextRun("\\tJanuary 2025"),
-  ],
-  tabStops: [{ type: TabStopType.RIGHT, position: TabStopPosition.MAX }],
-})
-
-// Dot leader (e.g., TOC-style)
-new Paragraph({
-  children: [
-    new TextRun("Introduction"),
-    new TextRun({ children: [
-      new PositionalTab({
-        alignment: PositionalTabAlignment.RIGHT,
-        relativeTo: PositionalTabRelativeTo.MARGIN,
-        leader: PositionalTabLeader.DOT,
-      }),
-      "3",
-    ]}),
-  ],
-})
-\`\`\`
-
-### Multi-Column Layouts
-
-\`\`\`javascript
-// Equal-width columns
-sections: [{
-  properties: {
-    column: {
-      count: 2,          // number of columns
-      space: 720,        // gap between columns in DXA (720 = 0.5 inch)
-      equalWidth: true,
-      separate: true,    // vertical line between columns
-    },
-  },
-  children: [/* content flows naturally across columns */]
-}]
-
-// Custom-width columns (equalWidth must be false)
-sections: [{
-  properties: {
-    column: {
-      equalWidth: false,
-      children: [
-        new Column({ width: 5400, space: 720 }),
-        new Column({ width: 3240 }),
-      ],
-    },
-  },
-  children: [/* content */]
-}]
-\`\`\`
-
-Force a column break with a new section using \`type: SectionType.NEXT_COLUMN\`.
-
-### Table of Contents
-
-\`\`\`javascript
-// CRITICAL: Headings must use HeadingLevel ONLY - no custom styles
-new TableOfContents("Table of Contents", { hyperlink: true, headingStyleRange: "1-3" })
-\`\`\`
-
-### Headers/Footers
-
-\`\`\`javascript
-sections: [{
-  properties: {
-    page: { margin: { top: 1440, right: 1440, bottom: 1440, left: 1440 } } // 1440 = 1 inch
-  },
-  headers: {
-    default: new Header({ children: [new Paragraph({ children: [new TextRun("Header")] })] })
-  },
-  footers: {
-    default: new Footer({ children: [new Paragraph({
-      children: [new TextRun("Page "), new TextRun({ children: [PageNumber.CURRENT] })]
-    })] })
-  },
-  children: [/* content */]
-}]
-\`\`\`
-
-### Critical Rules for docx-js
-
-- **Set page size explicitly** - docx-js defaults to A4; use US Letter (12240 x 15840 DXA) for US documents
-- **Landscape: pass portrait dimensions** - docx-js swaps width/height internally; pass short edge as \`width\`, long edge as \`height\`, and set \`orientation: PageOrientation.LANDSCAPE\`
-- **Never use \`\\n\`** - use separate Paragraph elements
-- **Never use unicode bullets** - use \`LevelFormat.BULLET\` with numbering config
-- **PageBreak must be in Paragraph** - standalone creates invalid XML
-- **ImageRun requires \`type\`** - always specify png/jpg/etc
-- **Always set table \`width\` with DXA** - never use \`WidthType.PERCENTAGE\` (breaks in Google Docs)
-- **Tables need dual widths** - \`columnWidths\` array AND cell \`width\`, both must match
-- **Table width = sum of columnWidths** - for DXA, ensure they add up exactly
-- **Always add cell margins** - use \`margins: { top: 80, bottom: 80, left: 120, right: 120 }\` for readable padding
-- **Use \`ShadingType.CLEAR\`** - never SOLID for table shading
-- **Never use tables as dividers/rules** - cells have minimum height and render as empty boxes (including in headers/footers); use \`border: { bottom: { style: BorderStyle.SINGLE, size: 6, color: "2E75B6", space: 1 } }\` on a Paragraph instead. For two-column footers, use tab stops (see Tab Stops section), not tables
-- **TOC requires HeadingLevel only** - no custom styles on heading paragraphs
-- **Override built-in styles** - use exact IDs: "Heading1", "Heading2", etc.
-- **Include \`outlineLevel\`** - required for TOC (0 for H1, 1 for H2, etc.)
-
----
-
-## Editing Existing Documents
-
-**Follow all 3 steps in order.**
-
-### Step 1: Unpack
 \`\`\`bash
-python scripts/office/unpack.py document.docx unpacked/
-\`\`\`
-Extracts XML, pretty-prints, merges adjacent runs, and converts smart quotes to XML entities (\`&#x201C;\` etc.) so they survive editing. Use \`--merge-runs false\` to skip run merging.
+# Against an already-unpacked directory (preferred when also placing markers)
+python scripts/comment.py unpacked/ "Fees & expenses cap is too low"
+python scripts/comment.py unpacked/ "Agreed" --parent 0
 
-### Step 2: Edit XML
-
-Edit files in \`unpacked/word/\`. See XML Reference below for patterns.
-
-**Use "Claude" as the author** for tracked changes and comments, unless the user explicitly requests use of a different name.
-
-**Use the Edit tool directly for string replacement. Do not write Python scripts.** Scripts introduce unnecessary complexity. The Edit tool shows exactly what is being replaced.
-
-**CRITICAL: Use smart quotes for new content.** When adding text with apostrophes or quotes, use XML entities to produce smart quotes:
-\`\`\`xml
-<!-- Use these entities for professional typography -->
-<w:t>Here&#x2019;s a quote: &#x201C;Hello&#x201D;</w:t>
-\`\`\`
-| Entity | Character |
-|--------|-----------|
-| \`&#x2018;\` | ‘ (left single) |
-| \`&#x2019;\` | ’ (right single / apostrophe) |
-| \`&#x201C;\` | “ (left double) |
-| \`&#x201D;\` | ” (right double) |
-
-**Adding comments:** Use \`comment.py\` to handle boilerplate across multiple XML files (text must be pre-escaped XML):
-\`\`\`bash
-python scripts/comment.py unpacked/ 0 "Comment text with &amp; and &#x2019;"
-python scripts/comment.py unpacked/ 1 "Reply text" --parent 0  # reply to comment 0
-python scripts/comment.py unpacked/ 0 "Text" --author "Custom Author"  # custom author name
-\`\`\`
-Then add markers to document.xml (see Comments in XML Reference).
-
-### Step 3: Pack
-\`\`\`bash
-python scripts/office/pack.py unpacked/ output.docx --original document.docx
-\`\`\`
-Validates with auto-repair, condenses XML, and creates DOCX. Use \`--validate false\` to skip.
-
-**Auto-repair will fix:**
-- \`durableId\` >= 0x7FFFFFFF (regenerates valid ID)
-- Missing \`xml:space="preserve"\` on \`<w:t>\` with whitespace
-
-**Auto-repair won't fix:**
-- Malformed XML, invalid element nesting, missing relationships, schema violations
-
-### Common Pitfalls
-
-- **Replace entire \`<w:r>\` elements**: When adding tracked changes, replace the whole \`<w:r>...</w:r>\` block with \`<w:del>...<w:ins>...\` as siblings. Don't inject tracked change tags inside a run.
-- **Preserve \`<w:rPr>\` formatting**: Copy the original run's \`<w:rPr>\` block into your tracked change runs to maintain bold, font size, etc.
-
----
-
-## XML Reference
-
-### Schema Compliance
-
-- **Element order in \`<w:pPr>\`**: \`<w:pStyle>\`, \`<w:numPr>\`, \`<w:spacing>\`, \`<w:ind>\`, \`<w:jc>\`, \`<w:rPr>\` last
-- **Whitespace**: Add \`xml:space="preserve"\` to \`<w:t>\` with leading/trailing spaces
-- **RSIDs**: Must be 8-digit hex (e.g., \`00AB1234\`)
-
-### Tracked Changes
-
-**Insertion:**
-\`\`\`xml
-<w:ins w:id="1" w:author="Claude" w:date="2025-01-01T00:00:00Z">
-  <w:r><w:t>inserted text</w:t></w:r>
-</w:ins>
+# Against a .docx directly
+python scripts/comment.py contract.docx "This cap is too low" -o annotated.docx
 \`\`\`
 
-**Deletion:**
-\`\`\`xml
-<w:del w:id="2" w:author="Claude" w:date="2025-01-01T00:00:00Z">
-  <w:r><w:delText>deleted text</w:delText></w:r>
-</w:del>
-\`\`\`
-
-**Inside \`<w:del>\`**: Use \`<w:delText>\` instead of \`<w:t>\`, and \`<w:delInstrText>\` instead of \`<w:instrText>\`.
-
-**Minimal edits** - only mark what changes:
-\`\`\`xml
-<!-- Change "30 days" to "60 days" -->
-<w:r><w:t>The term is </w:t></w:r>
-<w:del w:id="1" w:author="Claude" w:date="...">
-  <w:r><w:delText>30</w:delText></w:r>
-</w:del>
-<w:ins w:id="2" w:author="Claude" w:date="...">
-  <w:r><w:t>60</w:t></w:r>
-</w:ins>
-<w:r><w:t> days.</w:t></w:r>
-\`\`\`
-
-**Deleting entire paragraphs/list items** - when removing ALL content from a paragraph, also mark the paragraph mark as deleted so it merges with the next paragraph. Add \`<w:del/>\` inside \`<w:pPr><w:rPr>\`:
-\`\`\`xml
-<w:p>
-  <w:pPr>
-    <w:numPr>...</w:numPr>  <!-- list numbering if present -->
-    <w:rPr>
-      <w:del w:id="1" w:author="Claude" w:date="2025-01-01T00:00:00Z"/>
-    </w:rPr>
-  </w:pPr>
-  <w:del w:id="2" w:author="Claude" w:date="2025-01-01T00:00:00Z">
-    <w:r><w:delText>Entire paragraph content being deleted...</w:delText></w:r>
-  </w:del>
-</w:p>
-\`\`\`
-Without the \`<w:del/>\` in \`<w:pPr><w:rPr>\`, accepting changes leaves an empty paragraph/list item.
-
-**Rejecting another author's insertion** - nest deletion inside their insertion:
-\`\`\`xml
-<w:ins w:author="Jane" w:id="5">
-  <w:del w:author="Claude" w:id="10">
-    <w:r><w:delText>their inserted text</w:delText></w:r>
-  </w:del>
-</w:ins>
-\`\`\`
-
-**Restoring another author's deletion** - add insertion after (don't modify their deletion):
-\`\`\`xml
-<w:del w:author="Jane" w:id="5">
-  <w:r><w:delText>deleted text</w:delText></w:r>
-</w:del>
-<w:ins w:author="Claude" w:id="10">
-  <w:r><w:t>deleted text</w:t></w:r>
-</w:ins>
-\`\`\`
-
-### Comments
-
-After running \`comment.py\` (see Step 2), add markers to document.xml. For replies, use \`--parent\` flag and nest markers inside the parent's.
-
-**CRITICAL: \`<w:commentRangeStart>\` and \`<w:commentRangeEnd>\` are siblings of \`<w:r>\`, never inside \`<w:r>\`.**
-
-\`\`\`xml
-<!-- Comment markers are direct children of w:p, never inside w:r -->
-<w:commentRangeStart w:id="0"/>
-<w:del w:id="1" w:author="Claude" w:date="2025-01-01T00:00:00Z">
-  <w:r><w:delText>deleted</w:delText></w:r>
-</w:del>
-<w:r><w:t> more text</w:t></w:r>
-<w:commentRangeEnd w:id="0"/>
-<w:r><w:rPr><w:rStyle w:val="CommentReference"/></w:rPr><w:commentReference w:id="0"/></w:r>
-
-<!-- Comment 0 with reply 1 nested inside -->
-<w:commentRangeStart w:id="0"/>
-  <w:commentRangeStart w:id="1"/>
-  <w:r><w:t>text</w:t></w:r>
-  <w:commentRangeEnd w:id="1"/>
-<w:commentRangeEnd w:id="0"/>
-<w:r><w:rPr><w:rStyle w:val="CommentReference"/></w:rPr><w:commentReference w:id="0"/></w:r>
-<w:r><w:rPr><w:rStyle w:val="CommentReference"/></w:rPr><w:commentReference w:id="1"/></w:r>
-\`\`\`
-
-### Images
-
-1. Add image file to \`word/media/\`
-2. Add relationship to \`word/_rels/document.xml.rels\`:
-\`\`\`xml
-<Relationship Id="rId5" Type=".../image" Target="media/image1.png"/>
-\`\`\`
-3. Add content type to \`[Content_Types].xml\`:
-\`\`\`xml
-<Default Extension="png" ContentType="image/png"/>
-\`\`\`
-4. Reference in document.xml:
-\`\`\`xml
-<w:drawing>
-  <wp:inline>
-    <wp:extent cx="914400" cy="914400"/>  <!-- EMUs: 914400 = 1 inch -->
-    <a:graphic>
-      <a:graphicData uri=".../picture">
-        <pic:pic>
-          <pic:blipFill><a:blip r:embed="rId5"/></pic:blipFill>
-        </pic:pic>
-      </a:graphicData>
-    </a:graphic>
-  </wp:inline>
-</w:drawing>
-\`\`\`
-
----
+The script writes \`comments.xml\`, \`commentsExtended.xml\`, \`commentsIds.xml\`, \`commentsExtensible.xml\`, the relationships, and the content-type overrides. Comment IDs are auto-assigned. It then prints the \`<w:commentRangeStart>\`/\`<w:commentRangeEnd>\`/\`<w:commentReference>\` snippet to add to \`word/document.xml\` so the comment anchors to specific text — until you place those markers, the comment exists but is not visible.
 
 ## Dependencies
 
-- **pandoc**: Text extraction
-- **docx**: \`npm install -g docx\` (new documents)
-- **LibreOffice**: PDF conversion (auto-configured for sandboxed environments via \`scripts/office/soffice.py\`)
-- **Poppler**: \`pdftoppm\` for images
+\`docx\` (npm, preinstalled — install only if \`require('docx')\` fails) · \`pandoc\` · LibreOffice (\`soffice\`) · \`pdftoppm\` (Poppler)
 `,
     },
     {
@@ -3832,296 +3500,104 @@ After running \`comment.py\` (see Step 2), add markers to document.xml. For repl
         tags: ['xlsx', 'Excel', 'spreadsheet', 'formulas'],
         instructions: `---
 name: xlsx
-description: "Use this skill any time a spreadsheet file is the primary input or output. This means any task where the user wants to: open, read, edit, or fix an existing .xlsx, .xlsm, .csv, or .tsv file (e.g., adding columns, computing formulas, formatting, charting, cleaning messy data); create a new spreadsheet from scratch or from other data sources; or convert between tabular file formats. Trigger especially when the user references a spreadsheet file by name or path — even casually (like \\"the xlsx in my downloads\\") — and wants something done to it or produced from it. Also trigger for cleaning or restructuring messy tabular data files (malformed rows, misplaced headers, junk data) into proper spreadsheets. The deliverable must be a spreadsheet file. Do NOT trigger when the primary deliverable is a Word document, HTML report, standalone Python script, database pipeline, or Google Sheets API integration, even if tabular data is involved."
+description: "Use this skill any time a spreadsheet file is the primary input or output. This means any task where the user wants to: open, read, edit, or fix an existing .xlsx, .xlsm, .xltx, .csv, or .tsv file (e.g., adding columns, computing formulas, formatting, charting, cleaning messy data); create a new spreadsheet from scratch or from other data sources; or convert between tabular file formats. Trigger especially when the user references a spreadsheet file by name or path — even casually (like \\"the xlsx in my downloads\\") — and wants something done to it or produced from it. Also trigger for cleaning or restructuring messy tabular data files (malformed rows, misplaced headers, junk data) into proper spreadsheets. The deliverable must be a spreadsheet file. Do NOT trigger when the primary deliverable is a Word document, HTML report, standalone Python script, database pipeline, or Google Sheets API integration, even if tabular data is involved."
 license: Proprietary. LICENSE.txt has complete terms
 ---
 
-# Requirements for Outputs
+# XLSX creation, editing, and analysis
 
-## All Excel files
+| Task | Approach |
+|---|---|
+| **Create** or **edit** with formulas/formatting | \`openpyxl\` — see gotchas below |
+| **Bulk data** in or out | \`pandas\` (\`read_excel\`, \`to_excel\`) |
+| **Quick look** at a sheet | \`markitdown file.xlsx\` — \`## SheetName\` per sheet; reads \`.xlsm\` too. No cell coordinates, so don't plan edits from it |
+| **Read** a model (formulas *and* values) | two \`load_workbook\` passes — see gotchas |
 
-### Professional Font
-- Use a consistent, professional font (e.g., Arial, Times New Roman) for all deliverables unless otherwise instructed by the user
+> \`openpyxl\`, \`pandas\`, and \`markitdown\` are preinstalled — do not run \`pip install\` first; write the script and import directly. Only if an import fails (or the \`markitdown\` command is missing): \`pip install\` the missing package.
 
-### Zero Formula Errors
-- Every Excel model MUST be delivered with ZERO formula errors (#REF!, #DIV/0!, #VALUE!, #N/A, #NAME?)
+> Script paths below are relative to this skill's directory.
 
-### Preserve Existing Templates (when updating templates)
-- Study and EXACTLY match existing format, style, and conventions when modifying files
-- Never impose standardized formatting on files with established patterns
-- Existing template conventions ALWAYS override these guidelines
+## Requirements for every output
+
+- **Professional font** (Arial, Times New Roman) throughout, unless the user says otherwise.
+- **Zero formula errors.** Never ship while \`recalc.py\` reports \`errors_found\`. If you think an error predates you, prove it: load the *original* with \`data_only=True\` and look at that cell. An error you introduced looks exactly like one you inherited.
+- **Use formulas, never hardcoded results.** Write \`sheet['B10'] = '=SUM(B2:B9)'\`, not the Python-computed total. The sheet must recalculate when its inputs change.
+- **Follow the user's spec literally.** Exact tab names, exact column headers, and the formula they spelled out. A redesign that computes something else fails, however elegant.
+- **Document every assumption and hardcoded number** where the reader will see it — a cell comment, or an adjacent cell at a table's end. Cite a real source when one exists (\`Source: Company 10-K, FY2024, Page 45, Revenue Note, [SEC EDGAR URL]\`); when the number came from the user, say so plainly.
+- **A workbook *you create* for someone to fill in** needs a short legend naming which cells to edit, and one example row of realistic values showing the expected format. Never add such a row to a file you were asked to edit.
+- **Editing an existing file: match its conventions exactly.** They override every guideline here. Find its designated input cells first — a distinct font color, fill, or shading marks them — write only there, and leave every existing formula untouched.
+
+## Recalculate (mandatory whenever the file contains formulas)
+
+openpyxl writes formulas as strings with **no cached values**. Until you recalculate, every
+formula cell reads back as \`None\` to anything reading cached values — \`pandas\`,
+\`load_workbook(data_only=True)\`, and most previewers.
+
+\`\`\`bash
+python scripts/recalc.py output.xlsx [timeout_seconds]   # default 30
+\`\`\`
+
+LibreOffice computes every formula, the file is **rewritten in place**, and you get JSON:
+\`status\` (\`success\` | \`errors_found\`), \`total_formulas\`, \`total_errors\`, and an
+\`error_summary\` naming up to 100 cells per error type (\`locations_truncated\` says how many it
+withheld — trust \`total_errors\`, not the length of the list). Fix what it names and run it
+again. **JSON with an \`error\` key instead of a \`status\` means nothing was recalculated**, and
+only that case exits non-zero — \`errors_found\` exits 0, so never treat a clean exit as a clean
+workbook.
+
+**A green recalc proves your formulas *evaluate*, not that they are *right*.** An off-by-one
+range or a reference to the wrong row yields a clean, error-free file with wrong numbers.
+Write 2–3 formulas first and check they pull the values you expect, before building out a grid.
+
+**A workbook that links to another file loses those links** if you re-save it with openpyxl and
+then recalculate. Such a formula reads \`='[1]Returns Analysis'!$B$2\` — the \`[1]\` is an index
+into the workbook's external-reference list, naming a *separate file on disk*, not a sheet.
+That file is rarely present here, so the cell's cached value is the only thing holding its
+data. openpyxl strips that value on save; LibreOffice then has to resolve the reference for
+real, fails, writes \`#NAME?\`, and deletes every link. \`recalc.py\` refuses to run in that state
+— copy those cells' values out of the original before you save over them (\`--force\` overrides,
+and accepts the loss).
+
+## Choosing formulas that survive verification
+
+LibreOffice implements fewer functions than Excel, and one it cannot evaluate becomes a
+literal \`#NAME?\` baked into the file you deliver.
+
+- **Prefer Excel-2007-era functions** — \`SUMIFS\`, \`INDEX\`, \`MATCH\`, \`IFERROR\`, \`SUMPRODUCT\` — which need no prefix.
+- **Six post-2007 functions work, but only with an \`_xlfn.\` prefix**, because openpyxl writes your formula into the XML verbatim and Excel stores post-2007 names prefixed (its UI hides the prefix): \`_xlfn.TEXTJOIN\`, \`_xlfn.CONCAT\`, \`_xlfn.IFS\`, \`_xlfn.SWITCH\`, \`_xlfn.MAXIFS\`, \`_xlfn.MINIFS\`. Written bare, each yields \`#NAME?\`.
+- **Never use \`XLOOKUP\`, \`XMATCH\`, \`SORT\`, \`FILTER\`, \`UNIQUE\`, or \`SEQUENCE\`.** The runtime's LibreOffice cannot evaluate them under *any* prefix. Newer builds do evaluate them, but they are spilling array functions and an openpyxl-written file has no spill metadata, so only the top-left cell of the range gets a value — and \`recalc.py\` reports \`total_errors: 0\` on the truncated result. Use \`INDEX\`/\`MATCH\` for lookups, and sort, filter, and de-duplicate in Python before writing the cells.
+- A formula LibreOffice could not parse is written back **lowercased** — a quick tell beside a \`#NAME?\`.
+
+## openpyxl gotchas
+
+- **Reading a model takes two loads.** \`data_only=True\` yields cached values with the formulas gone; the default yields formula strings with no values. One pass cannot give you both.
+- **\`data_only=True\` is destructive if you save.** That workbook has no formulas left, so saving replaces every one with a literal — permanently.
+- **\`data_only=True\` on a file openpyxl just wrote returns \`None\` everywhere** — run \`recalc.py\` first. (A formula whose result is \`""\` also reads back as \`None\`.)
+- **Merged cells: write the top-left anchor only.** Every other cell in the range is a \`MergedCell\` whose \`.value\` is read-only.
+- **\`.xlsm\` loses its macros unless you pass \`keep_vba=True\`** to \`load_workbook\`.
+- **A sheet name containing a space must be quoted** in a cross-sheet reference: \`='Assumptions Inputs'!$B$5\`. Unquoted, it evaluates to \`#VALUE!\`.
 
 ## Financial models
 
-### Color Coding Standards
-Unless otherwise stated by the user or existing template
+Unless the user says otherwise, or the existing file already does something else.
 
-#### Industry-Standard Color Conventions
-- **Blue text (RGB: 0,0,255)**: Hardcoded inputs, and numbers users will change for scenarios
-- **Black text (RGB: 0,0,0)**: ALL formulas and calculations
-- **Green text (RGB: 0,128,0)**: Links pulling from other worksheets within same workbook
-- **Red text (RGB: 255,0,0)**: External links to other files
-- **Yellow background (RGB: 255,255,0)**: Key assumptions needing attention or cells that need to be updated
+**Color:** blue text (\`0,0,255\`) for hardcoded inputs and scenario levers · black for formulas ·
+green (\`0,128,0\`) for links to another sheet · red (\`255,0,0\`) for links to another file ·
+yellow fill (\`255,255,0\`) for key assumptions and cells the user should fill in.
 
-### Number Formatting Standards
+**Numbers:** currency \`$#,##0\`, with the unit named in the header (\`Revenue ($mm)\`) · zeros
+render as \`-\`, including in percentages (\`$#,##0;($#,##0);-\`) · negatives in parentheses ·
+percentages \`0.0%\`, **stored as fractions** (\`0.15\` renders \`15.0%\`; storing \`15\` renders
+\`1500.0%\`) · valuation multiples \`0.0x\` · years as text (\`"2024"\`, never \`2,024\`).
 
-#### Required Format Rules
-- **Years**: Format as text strings (e.g., "2024" not "2,024")
-- **Currency**: Use \$#,##0 format; ALWAYS specify units in headers ("Revenue (\$mm)")
-- **Zeros**: Use number formatting to make all zeros "-", including percentages (e.g., "\$#,##0;(\$#,##0);-")
-- **Percentages**: Default to 0.0% format (one decimal)
-- **Multiples**: Format as 0.0x for valuation multiples (EV/EBITDA, P/E)
-- **Negative numbers**: Use parentheses (123) not minus -123
+**Structure:** every assumption in its own labeled cell, referenced by the formulas that use it
+(\`=B5*(1+$B$6)\`, never \`=B5*1.05\`) · formulas consistent across every projection period, since a
+lone edited cell mid-row is the commonest silent error · guard denominators that can be zero.
 
-### Formula Construction Rules
+## Dependencies
 
-#### Assumptions Placement
-- Place ALL assumptions (growth rates, margins, multiples, etc.) in separate assumption cells
-- Use cell references instead of hardcoded values in formulas
-- Example: Use =B5*(1+\$B\$6) instead of =B5*1.05
-
-#### Formula Error Prevention
-- Verify all cell references are correct
-- Check for off-by-one errors in ranges
-- Ensure consistent formulas across all projection periods
-- Test with edge cases (zero values, negative numbers)
-- Verify no unintended circular references
-
-#### Documentation Requirements for Hardcodes
-- Comment or in cells beside (if end of table). Format: "Source: [System/Document], [Date], [Specific Reference], [URL if applicable]"
-- Examples:
-  - "Source: Company 10-K, FY2024, Page 45, Revenue Note, [SEC EDGAR URL]"
-  - "Source: Company 10-Q, Q2 2025, Exhibit 99.1, [SEC EDGAR URL]"
-  - "Source: Bloomberg Terminal, 8/15/2025, AAPL US Equity"
-  - "Source: FactSet, 8/20/2025, Consensus Estimates Screen"
-
-# XLSX creation, editing, and analysis
-
-## Overview
-
-A user may ask you to create, edit, or analyze the contents of an .xlsx file. You have different tools and workflows available for different tasks.
-
-## Important Requirements
-
-**LibreOffice Required for Formula Recalculation**: You can assume LibreOffice is installed for recalculating formula values using the \`scripts/recalc.py\` script. The script automatically configures LibreOffice on first run, including in sandboxed environments where Unix sockets are restricted (handled by \`scripts/office/soffice.py\`)
-
-## Reading and analyzing data
-
-### Data analysis with pandas
-For data analysis, visualization, and basic operations, use **pandas** which provides powerful data manipulation capabilities:
-
-\`\`\`python
-import pandas as pd
-
-# Read Excel
-df = pd.read_excel('file.xlsx')  # Default: first sheet
-all_sheets = pd.read_excel('file.xlsx', sheet_name=None)  # All sheets as dict
-
-# Analyze
-df.head()      # Preview data
-df.info()      # Column info
-df.describe()  # Statistics
-
-# Write Excel
-df.to_excel('output.xlsx', index=False)
-\`\`\`
-
-## Excel File Workflows
-
-## CRITICAL: Use Formulas, Not Hardcoded Values
-
-**Always use Excel formulas instead of calculating values in Python and hardcoding them.** This ensures the spreadsheet remains dynamic and updateable.
-
-### ❌ WRONG - Hardcoding Calculated Values
-\`\`\`python
-# Bad: Calculating in Python and hardcoding result
-total = df['Sales'].sum()
-sheet['B10'] = total  # Hardcodes 5000
-
-# Bad: Computing growth rate in Python
-growth = (df.iloc[-1]['Revenue'] - df.iloc[0]['Revenue']) / df.iloc[0]['Revenue']
-sheet['C5'] = growth  # Hardcodes 0.15
-
-# Bad: Python calculation for average
-avg = sum(values) / len(values)
-sheet['D20'] = avg  # Hardcodes 42.5
-\`\`\`
-
-### ✅ CORRECT - Using Excel Formulas
-\`\`\`python
-# Good: Let Excel calculate the sum
-sheet['B10'] = '=SUM(B2:B9)'
-
-# Good: Growth rate as Excel formula
-sheet['C5'] = '=(C4-C2)/C2'
-
-# Good: Average using Excel function
-sheet['D20'] = '=AVERAGE(D2:D19)'
-\`\`\`
-
-This applies to ALL calculations - totals, percentages, ratios, differences, etc. The spreadsheet should be able to recalculate when source data changes.
-
-## Common Workflow
-1. **Choose tool**: pandas for data, openpyxl for formulas/formatting
-2. **Create/Load**: Create new workbook or load existing file
-3. **Modify**: Add/edit data, formulas, and formatting
-4. **Save**: Write to file
-5. **Recalculate formulas (MANDATORY IF USING FORMULAS)**: Use the scripts/recalc.py script
-   \`\`\`bash
-   python scripts/recalc.py output.xlsx
-   \`\`\`
-6. **Verify and fix any errors**: 
-   - The script returns JSON with error details
-   - If \`status\` is \`errors_found\`, check \`error_summary\` for specific error types and locations
-   - Fix the identified errors and recalculate again
-   - Common errors to fix:
-     - \`#REF!\`: Invalid cell references
-     - \`#DIV/0!\`: Division by zero
-     - \`#VALUE!\`: Wrong data type in formula
-     - \`#NAME?\`: Unrecognized formula name
-
-### Creating new Excel files
-
-\`\`\`python
-# Using openpyxl for formulas and formatting
-from openpyxl import Workbook
-from openpyxl.styles import Font, PatternFill, Alignment
-
-wb = Workbook()
-sheet = wb.active
-
-# Add data
-sheet['A1'] = 'Hello'
-sheet['B1'] = 'World'
-sheet.append(['Row', 'of', 'data'])
-
-# Add formula
-sheet['B2'] = '=SUM(A1:A10)'
-
-# Formatting
-sheet['A1'].font = Font(bold=True, color='FF0000')
-sheet['A1'].fill = PatternFill('solid', start_color='FFFF00')
-sheet['A1'].alignment = Alignment(horizontal='center')
-
-# Column width
-sheet.column_dimensions['A'].width = 20
-
-wb.save('output.xlsx')
-\`\`\`
-
-### Editing existing Excel files
-
-\`\`\`python
-# Using openpyxl to preserve formulas and formatting
-from openpyxl import load_workbook
-
-# Load existing file
-wb = load_workbook('existing.xlsx')
-sheet = wb.active  # or wb['SheetName'] for specific sheet
-
-# Working with multiple sheets
-for sheet_name in wb.sheetnames:
-    sheet = wb[sheet_name]
-    print(f"Sheet: {sheet_name}")
-
-# Modify cells
-sheet['A1'] = 'New Value'
-sheet.insert_rows(2)  # Insert row at position 2
-sheet.delete_cols(3)  # Delete column 3
-
-# Add new sheet
-new_sheet = wb.create_sheet('NewSheet')
-new_sheet['A1'] = 'Data'
-
-wb.save('modified.xlsx')
-\`\`\`
-
-## Recalculating formulas
-
-Excel files created or modified by openpyxl contain formulas as strings but not calculated values. Use the provided \`scripts/recalc.py\` script to recalculate formulas:
-
-\`\`\`bash
-python scripts/recalc.py <excel_file> [timeout_seconds]
-\`\`\`
-
-Example:
-\`\`\`bash
-python scripts/recalc.py output.xlsx 30
-\`\`\`
-
-The script:
-- Automatically sets up LibreOffice macro on first run
-- Recalculates all formulas in all sheets
-- Scans ALL cells for Excel errors (#REF!, #DIV/0!, etc.)
-- Returns JSON with detailed error locations and counts
-- Works on both Linux and macOS
-
-## Formula Verification Checklist
-
-Quick checks to ensure formulas work correctly:
-
-### Essential Verification
-- [ ] **Test 2-3 sample references**: Verify they pull correct values before building full model
-- [ ] **Column mapping**: Confirm Excel columns match (e.g., column 64 = BL, not BK)
-- [ ] **Row offset**: Remember Excel rows are 1-indexed (DataFrame row 5 = Excel row 6)
-
-### Common Pitfalls
-- [ ] **NaN handling**: Check for null values with \`pd.notna()\`
-- [ ] **Far-right columns**: FY data often in columns 50+ 
-- [ ] **Multiple matches**: Search all occurrences, not just first
-- [ ] **Division by zero**: Check denominators before using \`/\` in formulas (#DIV/0!)
-- [ ] **Wrong references**: Verify all cell references point to intended cells (#REF!)
-- [ ] **Cross-sheet references**: Use correct format (Sheet1!A1) for linking sheets
-
-### Formula Testing Strategy
-- [ ] **Start small**: Test formulas on 2-3 cells before applying broadly
-- [ ] **Verify dependencies**: Check all cells referenced in formulas exist
-- [ ] **Test edge cases**: Include zero, negative, and very large values
-
-### Interpreting scripts/recalc.py Output
-The script returns JSON with error details:
-\`\`\`json
-{
-  "status": "success",           // or "errors_found"
-  "total_errors": 0,              // Total error count
-  "total_formulas": 42,           // Number of formulas in file
-  "error_summary": {              // Only present if errors found
-    "#REF!": {
-      "count": 2,
-      "locations": ["Sheet1!B5", "Sheet1!C10"]
-    }
-  }
-}
-\`\`\`
-
-## Best Practices
-
-### Library Selection
-- **pandas**: Best for data analysis, bulk operations, and simple data export
-- **openpyxl**: Best for complex formatting, formulas, and Excel-specific features
-
-### Working with openpyxl
-- Cell indices are 1-based (row=1, column=1 refers to cell A1)
-- Use \`data_only=True\` to read calculated values: \`load_workbook('file.xlsx', data_only=True)\`
-- **Warning**: If opened with \`data_only=True\` and saved, formulas are replaced with values and permanently lost
-- For large files: Use \`read_only=True\` for reading or \`write_only=True\` for writing
-- Formulas are preserved but not evaluated - use scripts/recalc.py to update values
-
-### Working with pandas
-- Specify data types to avoid inference issues: \`pd.read_excel('file.xlsx', dtype={'id': str})\`
-- For large files, read specific columns: \`pd.read_excel('file.xlsx', usecols=['A', 'C', 'E'])\`
-- Handle dates properly: \`pd.read_excel('file.xlsx', parse_dates=['date_column'])\`
-
-## Code Style Guidelines
-**IMPORTANT**: When generating Python code for Excel operations:
-- Write minimal, concise Python code without unnecessary comments
-- Avoid verbose variable names and redundant operations
-- Avoid unnecessary print statements
-
-**For Excel files themselves**:
-- Add comments to cells with complex formulas or important assumptions
-- Document data sources for hardcoded values
-- Include notes for key calculations and model sections`,
+\`openpyxl\`, \`pandas\`, \`markitdown\` (pip, preinstalled — install only if an import fails or the command is missing) · LibreOffice (\`soffice\`, auto-configured for sandboxed environments via \`scripts/office/soffice.py\`)
+`,
     },
     {
         id: 'pdf',
@@ -4457,53 +3933,85 @@ with open("encrypted.pdf", "wb") as output:
         tags: ['pptx', 'PowerPoint', 'presentation', 'slides'],
         instructions: `---
 name: pptx
-description: "Use this skill any time a .pptx file is involved in any way — as input, output, or both. This includes: creating slide decks, pitch decks, or presentations; reading, parsing, or extracting text from any .pptx file (even if the extracted content will be used elsewhere, like in an email or summary); editing, modifying, or updating existing presentations; combining or splitting slide files; working with templates, layouts, speaker notes, or comments. Trigger whenever the user mentions \\"deck,\\" \\"slides,\\" \\"presentation,\\" or references a .pptx filename, regardless of what they plan to do with the content afterward. If a .pptx file needs to be opened, created, or touched, use this skill."
+description: "Use this skill any time a .pptx or .potx file is involved in any way — as input, output, or both. This includes: creating slide decks, pitch decks, or presentations as PowerPoint (.pptx) files; reading, parsing, or extracting text from any .pptx or .potx file (even if the extracted content will be used elsewhere, like in an email, summary, or creating a different type of slide deck); editing, modifying, or updating existing presentations; combining or splitting slide files; working with templates (.potx), layouts, speaker notes, or comments. Trigger whenever the user asks for a PowerPoint or .pptx file, or references a .pptx or .potx filename, regardless of what they plan to do with the content afterward. However, when the user asks for a deck, slides, a slide deck, or a presentation without naming a file format, default to using a dedicated slide-deck artifact type or a separate slides skill if this session offers one; otherwise, use this skill."
 license: Proprietary. LICENSE.txt has complete terms
 ---
 
-# PPTX Skill
+# PPTX creation, editing, and analysis
 
-## Quick Reference
+If this session offers a dedicated slide-deck artifact type or a separate slides skill, and the user has neither asked for a PowerPoint/.pptx file nor supplied a .pptx/.potx file, build the deck with that type or skill instead; this skill remains the right tool for producing .pptx files and for reading, editing, templating, or converting existing .pptx/.potx files.
 
-| Task | Guide |
-|------|-------|
-| Read/analyze content | \`python -m markitdown presentation.pptx\` |
-| Edit or create from template | Read [editing.md](editing.md) |
-| Create from scratch | Read [pptxgenjs.md](pptxgenjs.md) |
+A \`.pptx\` is a ZIP archive of XML files. Choose your approach by task:
 
----
+| Task | Approach |
+|---|---|
+| **Create** a new deck | Write a \`pptxgenjs\` script — see gotchas below |
+| **Edit** an existing deck, or build from a template | unzip → edit \`ppt/slides/slideN.xml\` → zip |
+| **Read** content | \`markitdown deck.pptx\` (one block per slide under \`<!-- Slide number: N -->\` markers); visual grid: \`python scripts/thumbnail.py deck.pptx\` |
 
-## Reading Content
+## Scripts
+
+Paths are relative to this skill's directory. Everything else is plain Python, \`node\`, or shell.
+
+| Script | What it does |
+|---|---|
+| \`scripts/thumbnail.py deck.pptx [prefix]\` | Labeled grid of every slide, for picking template layouts. \`.pptx\` only. Pass \`prefix\` — it defaults to \`thumbnails\`, which overwrites the grids of any other deck done in the same directory |
+| \`scripts/add_slide.py unpacked/ slide2.xml [--after slideN.xml]\` | Duplicate a slide (or a \`slideLayoutN.xml\`) with all the package bookkeeping. Also takes a \`.pptx\` directly with \`-o out.pptx\` |
+| \`scripts/clean.py unpacked/\` | Delete slides, media, and rels no longer referenced. Run **after** \`<p:sldIdLst>\` is final |
+| \`scripts/office/validate.py deck.pptx [--original src.pptx]\` | Schema, relationship, content-type, chart and slide checks; each failure names its fix. Pass \`--original\` for any template-derived deck — it baselines the schema checks against the template, so the template's own XSD errors don't read as yours |
+| \`scripts/office/soffice.py --headless --convert-to pdf deck.pptx\` | LibreOffice wrapper — bare \`soffice\` hangs in this sandbox |
+
+## Creating with pptxgenjs — gotchas
+
+\`pptxgenjs\` is preinstalled — do not run \`npm install\` first; write the script and \`require('pptxgenjs')\` directly. Only if that require fails: \`npm install pptxgenjs\`. The model knows the API; these are the footguns:
+
+- **Set \`pres.layout\` before adding slides.** The default canvas is \`LAYOUT_16x9\` = **10" × 5.625"**, not 13.3" wide. Coordinates past the edge are written, not clamped — the shape just isn't on the slide. (\`LAYOUT_WIDE\` is 13.3" × 7.5".)
+- **Hex colors: never \`#\`, never 8 digits.** \`color: "FF0000"\`. Both \`"#FF0000"\` and alpha baked into the hex (\`"00000020"\`) **corrupt the file**. For translucency: \`transparency: 0-100\` on fills and images, \`opacity: 0.0-1.0\` on shadows — each is silently ignored on the other.
+- **pptxgenjs mutates option objects in place** (converts values to EMU on first use). Never share one \`shadow\`/options object across two \`add*\` calls — build a fresh object each time.
+- **Shadow \`offset\` must be ≥ 0** — a negative offset corrupts the file. To cast a shadow upward, use \`angle: 270\` with a positive offset.
+- **\`letterSpacing\` is silently ignored** — the real option is \`charSpacing\`.
+- **Lists:** \`bullet: true\` on each item, never a literal \`•\` (renders double bullets). Set \`breakLine: true\` on every array item except the last. Space bulleted paragraphs with \`paraSpaceAfter\`, not \`lineSpacing\` (huge gaps).
+- **One \`new pptxgen()\` per output file** — never reuse an instance.
+- **\`rectRadius\` only works on \`ROUNDED_RECTANGLE\`**, not \`RECTANGLE\`.
+- **Gradient fills aren't supported** — use a gradient image as the background instead.
+- **Every \`addText\` call needs \`isTextBox: true\`** — without it the shape lacks \`txBox="1"\`, so screen readers announce the text as a "graphic" instead of a text box. No visual change.
+- **Text boxes have built-in internal padding** — set \`margin: 0\` whenever text must align with a shape, line, or icon at the same x.
+- **Speaker notes go in \`slide.addNotes("...")\`** (plain text, once per slide), never in a text box on the slide.
+- **Keep charts native.** Use \`addChart()\` for everything PowerPoint can chart (pass an array of \`{type, data, options}\` for combos). For PowerPoint-native features the library doesn't expose (trendlines, error bars), compute the extra series yourself or post-process the generated OOXML — do not fall back to a rendered image. Only chart types PowerPoint has no native form for (Sankey, network, chord) go in as images.
+- **Default charts render bare** — no title, no data labels, dated palette. Set \`showTitle\` + \`title\`, \`showValue: true\` + \`dataLabelPosition\`, \`chartColors: [...]\` from your palette, and quiet the frame (\`catAxisLabelColor\`/\`valAxisLabelColor\`, \`valGridLine: { color, size }\`, \`catGridLine: { style: "none" }\`, \`showLegend: false\` for a single series).
+- **On a stacked bar or column chart, \`dataLabelPosition\` must be \`ctr\`, \`inEnd\`, or \`inBase\`.** \`outEnd\` **corrupts the file**.
+- **A combo series using \`secondaryValAxis\`/\`secondaryCatAxis\` needs both \`valAxes\` and \`catAxes\` on the chart options, two entries each.** Without them pptxgenjs writes axis *ids* it never declares, and PowerPoint **discards that chart** and reports the file as corrupt. Supplying only \`valAxes\` is not enough.
+- **After \`writeFile()\`, run \`python scripts/office/validate.py deck.pptx\`.** It reports the two chart faults above and the slide-XML defects PowerPoint refuses, and names the fix for each. Fix them in your generator, not by hand-editing the packed XML.
+- **Never reorder the children of \`<p:presentation>\`.** pptxgenjs writes \`<p:notesMasterIdLst>\` right after \`<p:sldIdLst>\` and points both masters at one theme part. PowerPoint reads that happily — move the element and the same deck becomes unopenable.
+- **Icons:** render \`react-icons\` to SVG (\`ReactDOMServer.renderToStaticMarkup\`), rasterize with \`sharp\` at ≥256px, and insert via \`addImage({ data: "image/png;base64," + buf.toString("base64") })\` — the \`image/png;base64,\` prefix is required (\`react-icons\`, \`react\`, \`react-dom\`, and \`sharp\` are preinstalled — \`npm install react-icons react react-dom sharp\` only if a require fails).
+
+## Editing existing decks and templates
+
+Pick layouts first: \`python scripts/thumbnail.py template.pptx template-thumbs\` writes a labeled grid of every slide and prints the file(s) it created — \`template-thumbs.jpg\`, split into \`template-thumbs-N.jpg\` past 12 slides. **Always pass that second argument, named after the deck.** It defaults to \`thumbnails\`, so two decks thumbnailed in one directory silently overwrite each other's grids — the first deck's are simply gone (template analysis only — visual QA needs the full-resolution renders from [Converting to Images](#converting-to-images); it only accepts \`.pptx\`, so copy a \`.potx\` to a \`.pptx\` name first). Use it with \`markitdown\` to map each content section onto a template slide, and vary the layouts — don't put every section on the same title-and-bullets slide.
 
 \`\`\`bash
-# Text extraction
-python -m markitdown presentation.pptx
-
-# Visual overview
-python scripts/thumbnail.py presentation.pptx
-
-# Raw XML
-python scripts/office/unpack.py presentation.pptx unpacked/
+python3 -c "import sys,zipfile; zipfile.ZipFile(sys.argv[1]).extractall('unpacked')" deck.pptx
+python scripts/add_slide.py unpacked/ slide2.xml --after slide2.xml   # duplicate a slide (or slideLayoutN.xml); prints the new slide's path
+# reorder / delete slides = edit <p:sldIdLst> in ppt/presentation.xml
+python scripts/clean.py unpacked/                                     # after deletions: removes orphaned slides, media, rels
+# edit slide content in ppt/slides/slideN.xml
+(cd unpacked && rm -f ../out.pptx && zip -Xr ../out.pptx .)           # zip from INSIDE the dir; rm first or deleted parts survive
+python scripts/office/validate.py out.pptx --original deck.pptx
 \`\`\`
 
----
+- **Do all structural work — add, delete, reorder — before editing any slide's content.** \`add_slide.py\` copies a slide file verbatim, so duplicating after you edit clones the edited content; and \`clean.py\` deletes any slide missing from \`<p:sldIdLst>\`, including one you just wrote.
+- **Never copy a slide file by hand** — \`add_slide.py\` does every registration a new slide needs and reports what it made (\`Created ppt/slides/slide17.xml from slide2.xml\`). It also works directly on a file: \`add_slide.py deck.pptx slide2.xml -o out.pptx\` — **pass \`-o\`, or it rewrites the input deck in place.** A duplicated slide still *references* its source's chart/SmartArt/embedded-object parts rather than cloning them, so editing one slide's chart changes the other's.
+- **If you use \`python-pptx\`**, three things it won't do: duplicate a slide (its only entry point is \`add_slide(layout)\`), preserve formatting through \`text_frame.text = "..."\` (that collapses the paragraph to a single unstyled run — assign \`run.text\` instead), or read the SVG/EMF most template art uses (\`add_picture\` raises \`UnidentifiedImageError\`).
+- Legacy \`.ppt\` must be converted first: \`python scripts/office/soffice.py --headless --convert-to pptx file.ppt\`. \`.potx\` templates unpack and pack identically — keep the \`.potx\` extension on the output.
+- To reuse a template icon or image, duplicate a slide or layout that already contains it.
 
-## Editing Workflow
+When filling in a template:
 
-**Read [editing.md](editing.md) for full details.**
-
-1. Analyze template with \`thumbnail.py\`
-2. Unpack → manipulate slides → edit content → clean → pack
-
----
-
-## Creating from Scratch
-
-**Read [pptxgenjs.md](pptxgenjs.md) for full details.**
-
-Use when no template or reference presentation is available.
-
----
+- If you script an XML transform, parse with \`defusedxml.minidom\` — round-tripping OOXML through \`xml.etree.ElementTree\` rewrites namespace prefixes and corrupts the deck.
+- **Template slots ≠ source items.** If the template shows 4 team members and you have 3, delete the 4th member's entire group (image + text boxes), not just its text — then check for orphaned visuals in QA.
+- One \`<a:p>\` per list item — never concatenate items into a single paragraph. Copy the sibling \`<a:pPr>\` to preserve spacing, and put \`b="1"\` on the \`<a:rPr>\` of titles, section headers, and inline labels (\`Status:\`, \`Owner:\`).
+- Let bullets inherit from the layout; only add \`<a:buChar>\`, \`<a:buAutoNum>\` (numbered), or \`<a:buNone>\` to override — never a literal \`•\` in the text.
+- Text with leading or trailing spaces needs \`xml:space="preserve"\` on its \`<a:t>\`.
 
 ## Design Ideas
 
@@ -4514,7 +4022,7 @@ Use when no template or reference presentation is available.
 - **Pick a bold, content-informed color palette**: The palette should feel designed for THIS topic. If swapping your colors into a completely different presentation would still "work," you haven't made specific enough choices.
 - **Dominance over equality**: One color should dominate (60-70% visual weight), with 1-2 supporting tones and one sharp accent. Never give all colors equal weight.
 - **Dark/light contrast**: Dark backgrounds for title + conclusion slides, light for content ("sandwich" structure). Or commit to dark throughout for a premium feel.
-- **Commit to a visual motif**: Pick ONE distinctive element and repeat it — rounded image frames, icons in colored circles, thick single-side borders. Carry it across every slide.
+- **Commit to a visual motif**: Pick ONE distinctive element and repeat it — rounded image frames, icons in colored circles. Carry it across every slide. **Do not use a color bar or accent stripe as your motif** (see Avoid list).
 
 ### Color Palettes
 
@@ -4554,18 +4062,13 @@ Choose colors that match your topic — don't default to generic blue. Use these
 
 ### Typography
 
-**Choose an interesting font pairing** — don't default to Arial. Pick a header font with personality and pair it with a clean body font.
+**Font names you write into the .pptx are rendered by the user's PowerPoint, not by this environment.** Your visual QA renders via LibreOffice, which substitutes fonts it doesn't have — and for some fonts the substitute has different widths, so your QA preview can show text overflow (or fit) that the real deck won't have. To keep your QA trustworthy:
 
-| Header Font | Body Font |
-|-------------|-----------|
-| Georgia | Calibri |
-| Arial Black | Arial |
-| Calibri | Calibri Light |
-| Cambria | Calibri |
-| Trebuchet MS | Calibri |
-| Impact | Arial |
-| Palatino | Garamond |
-| Consolas | Calibri |
+- **Safe fonts** (render true-to-width in QA *and* ship with Office): **Arial, Calibri, Cambria, Times New Roman, Courier New, Bookman Old Style, Century Schoolbook**. Use these for body text and anything where fit matters.
+- **Headers with personality at zero QA risk**: pair a safe-list serif header (Cambria, Bookman Old Style, Century Schoolbook) with a safe-list sans body (Calibri or Arial). You get visual contrast without giving up reliable overflow checks.
+- **If the user asks for a font outside the safe list** (e.g. Georgia or Trebuchet MS): use it where the user asked, but size those containers with extra slack (~10%) and don't trust QA text-fit on those elements — the preview of that font is approximate. If the user hasn't specified, prefer safe-list fonts for body text.
+- **QA-unreliable fonts** (substitute has different widths — overflow checks can be wrong): Georgia, Trebuchet MS, Impact, Arial Black, Garamond, Consolas, Palatino Linotype. Calibri Light substitution varies by environment; treat as QA-unreliable. Fine for titles/accents with slack; don't trust QA text-fit on these.
+- **Never default to Aptos** — Office's post-2023 default has no metric-compatible substitute here *and* is missing from older Office installs, so it's unreliable on both ends.
 
 | Element | Size |
 |---------|------|
@@ -4592,19 +4095,18 @@ Choose colors that match your topic — don't default to generic blue. Use these
 - **Don't forget text box padding** — when aligning lines or shapes with text edges, set \`margin: 0\` on the text box or offset the shape to account for padding
 - **Don't use low-contrast elements** — icons AND text need strong contrast against the background; avoid light text on light backgrounds or dark text on dark backgrounds
 - **NEVER use accent lines under titles** — these are a hallmark of AI-generated slides; use whitespace or background color instead
-
----
+- **NEVER add decorative color bars or accent stripes** — this includes: header/footer bars spanning the slide width, vertical sidebar stripes down one edge of the slide, thin accent stripes along one edge of a card or content block, and "single-side borders" on rectangles. These read as AI-generated filler. If you want to set a card apart, use a subtle background tint, a drop shadow, or an icon — not an edge stripe.
+- **Don't default to cream/beige backgrounds** — when no background is specified, use white (\`FFFFFF\`) or the user's brand palette; avoid warm-neutral defaults like \`F5F5DC\`, \`FAF0E6\`, \`FAEBD7\`, \`FFF8E1\`
+- **Don't ship text that overflows its shape** — if text doesn't fit, reduce font size, split across slides, or enlarge the container; never leave content cut off or spilling past bounds
 
 ## QA (Required)
 
-**Assume there are problems. Your job is to find them.**
-
-Your first render is almost never correct. Approach QA as a bug hunt, not a confirmation step. If you found zero issues on first inspection, you weren't looking hard enough.
+Your first render usually has a few real issues — overlaps, overflow, misalignment. Find and fix those, re-render only the slides you changed, and stop.
 
 ### Content QA
 
 \`\`\`bash
-python -m markitdown output.pptx
+markitdown output.pptx
 \`\`\`
 
 Check for missing content, typos, wrong order.
@@ -4612,55 +4114,45 @@ Check for missing content, typos, wrong order.
 **When using templates, check for leftover placeholder text:**
 
 \`\`\`bash
-python -m markitdown output.pptx | grep -iE "\\bx{3,}\\b|lorem|ipsum|\\bTODO|\\[insert|this.*(page|slide).*layout"
+markitdown output.pptx | grep -iE "\\bx{3,}\\b|lorem|ipsum|\\bTODO|\\[insert|this.*(page|slide).*layout"
 \`\`\`
 
 If grep returns results, fix them before declaring success.
 
+### File QA (required)
+
+\`\`\`bash
+python scripts/office/validate.py output.pptx                      # built from scratch
+python scripts/office/validate.py output.pptx --original src.pptx  # built from a template
+\`\`\`
+
+**If the deck came from a template, always pass \`--original\`.** A template may itself
+contain parts the XSD rejects, so a bare run can report failures you never caused — and
+a genuine regression can hide among them. \`--original\` baselines
+the schema and slide checks against the template, suppressing errors it already had.
+The structural checks — relationships, content types, charts — ignore \`--original\` and
+report template-inherited problems either way, so read those on their own merits.
+
+pptxgenjs emits chart XML PowerPoint refuses to open, and every other tool
+accepts: python-pptx opens those decks, LibreOffice renders them, the XSD
+passes them. Every failure names its fix. Fix it in the generator and rebuild.
+
 ### Visual QA
 
-**⚠️ USE SUBAGENTS** — even for 2-3 slides. You've been staring at the code and will see what you expect, not what's there. Subagents have fresh eyes.
+Convert the slides to images (see [Converting to Images](#converting-to-images)) and inspect every one. After staring at the generating code you tend to see what you expect rather than what rendered, so look at the images fresh (a subagent works well for this if you have one). User-visible defects to look for:
 
-Convert slides to images (see [Converting to Images](#converting-to-images)), then use this prompt:
-
-\`\`\`
-Visually inspect these slides. Assume there are issues — find them.
-
-Look for:
+- **Text overflow or text cut off at a box or slide boundary — check this first.** It is the most common defect and always user-visible. (For a font the previewer renders unreliably per Typography, the preview is approximate: trust the ~10% slack you left, not its apparent fit.)
 - Overlapping elements (text through shapes, lines through words, stacked elements)
-- Text overflow or cut off at edges/box boundaries
-- Decorative lines positioned for single-line text but title wrapped to two lines
 - Source citations or footers colliding with content above
 - Elements too close (< 0.3" gaps) or cards/sections nearly touching
 - Uneven gaps (large empty area in one place, cramped in another)
 - Insufficient margin from slide edges (< 0.5")
 - Columns or similar elements not aligned consistently
 - Low-contrast text (e.g., light gray text on cream-colored background)
+- Template decoration mispositioned after text replacement — e.g., a title underline positioned for one line, but the replaced title wrapped to two
 - Low-contrast icons (e.g., dark icons on dark backgrounds without a contrasting circle)
 - Text boxes too narrow causing excessive wrapping
 - Leftover placeholder content
-
-For each slide, list issues or areas of concern, even if minor.
-
-Read and analyze these images — run \`ls -1 "\$PWD"/slide-*.jpg\` and use the exact absolute paths it prints:
-1. <absolute-path>/slide-N.jpg — (Expected: [brief description])
-2. <absolute-path>/slide-N.jpg — (Expected: [brief description])
-...
-
-Report ALL issues found, including minor ones.
-\`\`\`
-
-### Verification Loop
-
-1. Generate slides → Convert to images → Inspect
-2. **List issues found** (if none found, look again more critically)
-3. Fix issues
-4. **Re-verify affected slides** — one fix often creates another problem
-5. Repeat until a full pass reveals no new issues
-
-**Do not declare success until you've completed at least one fix-and-verify cycle.**
-
----
 
 ## Converting to Images
 
@@ -4670,22 +4162,16 @@ Convert presentations to individual slide images for visual inspection:
 python scripts/office/soffice.py --headless --convert-to pdf output.pptx
 rm -f slide-*.jpg
 pdftoppm -jpeg -r 150 output.pdf slide
-ls -1 "\$PWD"/slide-*.jpg
+ls -1 "$PWD"/slide-*.jpg
 \`\`\`
 
 **Pass the absolute paths printed above directly to the view tool.** The \`rm\` clears stale images from prior runs. \`pdftoppm\` zero-pads based on page count: \`slide-1.jpg\` for decks under 10 pages, \`slide-01.jpg\` for 10-99, \`slide-001.jpg\` for 100+.
 
 **After fixes, rerun all four commands above** — the PDF must be regenerated from the edited \`.pptx\` before \`pdftoppm\` can reflect your changes.
 
----
-
 ## Dependencies
 
-- \`pip install "markitdown[pptx]"\` - text extraction
-- \`pip install Pillow\` - thumbnail grids
-- \`npm install -g pptxgenjs\` - creating from scratch
-- LibreOffice (\`soffice\`) - PDF conversion (auto-configured for sandboxed environments via \`scripts/office/soffice.py\`)
-- Poppler (\`pdftoppm\`) - PDF to images
+\`pptxgenjs\` (npm, preinstalled — install only if \`require('pptxgenjs')\` fails) · \`markitdown[pptx]\`, \`Pillow\`, \`defusedxml\`, \`lxml\` (pip — text dump, thumbnail, clean, validate) · LibreOffice (\`soffice\`, auto-configured for sandboxed environments via \`scripts/office/soffice.py\`) · \`pdftoppm\` (Poppler)
 `,
     },
     {
@@ -5357,7 +4843,7 @@ API calls may fail mid-execution due to credit depletion. **Always save all retr
         id: 'uc-check-slack-notifier',
         name: 'UC Check Slack Notifier',
         command: 'scheduled:uc-check-slack-notifier',
-        description: 'Runs daily at 08:00 and sends Mica one Slack DM listing every Universal Credit check that is due, so she rings UC before the rent falls due. Silent when nothing is due.',
+        description: 'RETIRED 1 Sep 2026 (Kevin\'s ruling). The Universal Credit check process stopped: no list is sent and no tasks are created. A missed UC payment now surfaces as arrears.',
         category: 'Automation',
         source: 'scheduled',
         tags: ['Slack', 'notification', 'UC check', 'automation']
@@ -5371,8 +4857,8 @@ API calls may fail mid-execution due to credit depletion. **Always save all retr
         source: 'preset',
         tags: ['schedule', 'cron', 'automation', 'recurring'],
         instructions: `---
-name: schedule
-description: "Create or update a scheduled task that runs automatically. Use when the user says things like "every day", "each morning", "remind me in an hour", "run this at noon", or wants to reschedule an existing task."
+name: "schedule"
+description: "Create or update a scheduled task that runs automatically. Use when the user says things like \\"every day\\", \\"each morning\\", \\"remind me in an hour\\", \\"run this at noon\\", or wants to reschedule an existing task."
 ---
 
 First, decide whether the user wants to **create a new** scheduled task or **change an existing** one.
@@ -5408,7 +4894,7 @@ Pick a short, descriptive name in kebab-case (e.g. "daily-inbox-summary", "weekl
 
 ### 4. Determine scheduling
 
-The \`create_scheduled_task\` tool description explains the options (\`cronExpression\` for recurring, \`fireAt\` for one-time, omit both for ad-hoc) and their formats. If the user didn't give a clear schedule, propose one and ask them to confirm before proceeding.
+The \`create_scheduled_task\` tool description explains the options (\`cronExpression\` for recurring, \`fireAt\` for one-time, omit both for ad-hoc) and their formats. If the user didn't give a clear schedule, propose one and ask them to confirm before proceeding — don't rely on an approval prompt to catch a wrong guess, since task creation may be approved automatically in some permission modes.
 
 Finally, call the \`create_scheduled_task\` tool.`,
     },
@@ -5445,6 +4931,18 @@ This workflow eliminates those by making every step explicit.
 
 ---
 
+## THE HARD RULE: read-only until the Phase 2d gate
+
+From the start of this workflow until Kevin approves at the Phase 2d gate, you are **read-only**.
+
+You MAY: read files, grep, run read-only Airtable queries, read git history, load a page in the browser to look at it.
+
+You MAY NOT: create, edit or delete any file, write to Airtable, send anything, commit, push, or deploy.
+
+This is the reason the brief is worth writing. Kevin gets to change the plan while changing it is still free. If you catch yourself thinking "I will just quickly try it and see", that is the rule doing its job. Stop and finish the plan.
+
+---
+
 ## Phase 0: BILD PROMPT (restructure Kevin's input)
 
 Kevin talks conversationally. Before doing anything else, restructure his input into a precise BILD prompt. This eliminates the #1 source of rework: misunderstanding what to build.
@@ -5462,11 +4960,13 @@ Note which sections are thin or empty.
 ### 0b. Fill gaps from available context
 
 Before asking Kevin questions, check what you can answer yourself:
-- Read CLAUDE.md for conventions, file architecture, design tokens
+- Read CLAUDE.md for conventions, \`STRUCTURE.md\` for file locations, \`.claude/rules/frontend.md\` for the file-ownership table and front-end rules, and \`.claude/rules/design-system.md\` for design tokens
 - Read \`js/config.js\` for existing field maps and table IDs
 - Check memory files for project state and preferences
 - Look at git history for recent changes and patterns
 - Read the most similar existing feature's code
+
+**Cite what you read.** Every factual claim in the Background carries its source: a code fact carries \`file:line\`, a data fact carries the record ID or the filter formula. Anything you could not verify is written as \`ASSUMPTION:\` in plain sight, so Kevin can shoot it down at the gate. Never state a field name, table ID, record count or status value you have not actually read. This project's worst bugs all started as a plausible guess.
 
 ### 0c. Ask targeted questions (maximum one round)
 
@@ -5479,7 +4979,7 @@ Use AskUserQuestion to fill remaining gaps. Batch into a single call (max 4 ques
 
 Skip questions you can answer from context. One round maximum. Work with what you have.
 
-### 0d. Present the BILD prompt
+### 0d. Draft the BILD prompt (do not present it yet)
 
 Format:
 
@@ -5489,6 +4989,7 @@ Format:
 
 ## I — Instruction
 [The task. 1-2 sentences, imperative voice. Priority stated if multi-part.]
+Fork: [the genuine alternative you considered] — recommend [choice], because [reason].
 
 ## L — Limitations
 - [Constraint 1]
@@ -5499,9 +5000,11 @@ Format:
 - [How to verify it works]
 \`\`\`
 
-Ask: "Should I build this as-is, or adjust anything?"
+Include the Fork line whenever the change is structural: a new tab, a new page, an architecture decision, a workflow redesign or a data model change. One sentence, no essay. If Kevin says go ahead, do not raise it again.
 
-On approval, the BILD prompt becomes the instruction set for the rest of this workflow. Proceed to Phase 1.
+**Do not ask for approval yet.** Hold the draft brief. Kevin approves it once, together with the implementation plan, at the single gate in Phase 2d. Two approval stops for one build is one too many, and a brief approved before the code has been read is a brief approved on guesswork.
+
+Proceed to Phase 1.
 
 ---
 
@@ -5531,12 +5034,12 @@ Kevin often describes what the finished result looks like. Capture:
 
 ### 1c. Identify constraints early
 
-- **File scope** — which file(s) will this touch? (check CLAUDE.md's file table)
+- **File scope** — which file(s) will this touch? (check the file table in \`.claude/rules/frontend.md\`)
 - **Shared dependencies** — does this need new entries in \`config.js\`, \`shared.js\`, or \`index.html\`?
 - **Existing patterns** — is there a similar feature already built that this should mirror?
 - **Airtable field names** — get EXACT field names (including capitalisation and spaces). Read \`js/config.js\` for existing field maps. If new fields are needed, confirm them before coding.
 
-### 1d. Confirm the plan in one message
+### 1d. Draft the plan summary (do not present it yet)
 
 Present a short summary back to Kevin:
 
@@ -5550,7 +5053,7 @@ Actions: [list]
 Health checks: [what sync bar will verify]
 \`\`\`
 
-Wait for Kevin's "yes" or corrections before proceeding. This single confirmation replaces 3-4 mid-build check-ins.
+**Do not ask yet.** Hold this summary alongside the brief. Both go to Kevin at the single gate in Phase 2d, once the code has actually been read and the plan is real rather than intended.
 
 ---
 
@@ -5597,6 +5100,58 @@ Before writing fetch/write code:
 - Note which fields are computed/formula (read-only)
 - Plan pagination if the table could exceed 100 records
 
+### 2d. THE ONE GATE (the only place this workflow stops)
+
+Everything above was read-only research. Now show Kevin the whole thing in one message and ask once.
+
+\`\`\`
+## B — Background
+[Context with sources. 2-5 sentences.]
+
+## I — Instruction
+[The task. 1-2 sentences, imperative voice. Priority stated if multi-part.]
+Fork: [alternative considered] — recommend [choice], because [reason].
+
+## L — Limitations
+- [Constraint 1]
+- [Constraint 2]
+
+## D — Deliverable
+- [Output with success criteria]
+- [How to verify it works]
+
+## Steps
+1. [file] — [change, anchored to what you read]
+2. [file] — [change]
+
+Not touching: [files and areas that stay untouched]
+Verified by: [the checks that prove it works]
+
+## Assumptions  (omit if none)
+- ASSUMPTION: [anything you could not verify]
+
+GOAL
+[One sentence: the end state]
+Checks
+1. [check] - proved by [a test exit code / the deploy poll printing the new pageVer / a page read or screenshot of the live page / an Airtable record read back by id]
+2. [check] - proved by [...]
+Not touching: [the same list as above]
+\`\`\`
+
+The GOAL block is built from D and "Verified by". Each check is a numbered line of its own that names its proof. Never "works" or "looks right". Never put the close-out or a Kevin decision inside it. An optional last line may be a paste-ready \`/goal ... or stop after 20 turns\` for a long run. Format and rules: \`~/.claude/skills/goal-line/SKILL.md\`. A hook prints this rule when \`/build-feature\` is typed, and a Stop hook refuses "done" until the GOAL CHECK in Phase 10d answers every check.
+
+Three rules for the Steps block:
+
+- **Each step names a real file you have already read**, with the line you are anchoring to where possible. A step you cannot anchor is a step you have not researched.
+- **"Not touching" is compulsory.** Naming what stays untouched is how Kevin spots a build about to sprawl, and it is the half of scope that constraints alone never capture.
+- **Verification is stated before the build, not invented after it.** If you cannot say how it will be proved, the deliverable is not testable yet, so sharpen D.
+
+Ask once: "Should I build this as-is, or adjust anything?"
+
+The read-only rule lifts on Kevin's yes. **The first thing in the reply after his yes is the GOAL block, re-posted** (amended if his answer changed it), so the goal the build is checked against sits on screen at the start of the work.
+
+The brief and the steps become the instruction set for the rest of this workflow. If reality contradicts a step once you start building, say so in one line and carry on. Do not silently build something else.
+
 ---
 
 ## Phase 3: BUILD (one complete pass)
@@ -5613,69 +5168,9 @@ Follow this exact order — it prevents dependency issues:
 4. **css/styles.css** — only if feature needs styles beyond what tokens.css provides
 5. **shared.js** — only if adding a genuinely shared utility (not feature-specific logic)
 
-### 3b. Mandatory patterns (baked into every feature)
+### 3b. Mandatory patterns and 3c. code quality gates
 
-Every feature MUST include all of these. Not "should" — MUST:
-
-**Data layer:**
-- [ ] Airtable fetch with pagination (\`offset\` handling)
-- [ ] Error handling on fetch (try/catch, show toast on failure, don't silently fail)
-- [ ] Rate-limit handling — catch 429 responses, pause 500ms between bulk writes, exponential backoff on retries (see \`reconciliation.js\` for the pattern)
-- [ ] Filter by Active status where applicable
-- [ ] Field name constants from config.js (never hardcode field names in fetch URLs)
-- [ ] Prefer shared global arrays (\`allTenancies\`, \`allTransactions\`, \`allCosts\`, etc.) over independent fetches when the data is already loaded by \`dashboard.js\`. Only make a separate Airtable call if the feature needs data from a table not already cached globally
-- [ ] If the feature makes expensive fetches (multiple tables, 100+ records), add IndexedDB caching with TTL — follow the \`dashboard.js\` pattern: \`_idbSet(key, { savedAt: Date.now(), data })\`, check age on load, bypass cache on manual refresh
-
-**Render layer:**
-- [ ] Loading state shown during fetch (spinner + explainer text if load takes >3s — see \`costs.js\` pattern)
-- [ ] Empty state when no data matches filters
-- [ ] All colours from \`tokens.css\` custom properties (never hardcode hex)
-- [ ] All text uses \`escHtml()\` for any user-supplied data
-- [ ] Responsive — works on tablet width (no horizontal scroll below 1024px)
-- [ ] Print-friendly — hide non-essential UI in \`@media print\` if the feature contains data users might print (tables, reports, summaries)
-
-**Action layer:**
-- [ ] Confirm before destructive actions (use the branded \`confirmDialog\` from shared.js)
-- [ ] Toast feedback on success/failure (use \`showToast\` from shared.js)
-- [ ] Disable button during async operation (prevent double-submit)
-- [ ] Optimistic UI where possible (update display immediately, roll back on error)
-- [ ] Undo pattern for reversible destructive actions — sliding toast with "Undo" button, auto-dismiss after 8s (see \`costs.js\` \`pushUndoAction\` pattern). Use for: status changes, dismissals, field edits. Don't use for: Airtable record deletion (not reversible)
-
-**State persistence (when the feature needs to remember things across page loads):**
-- [ ] Use localStorage for UI state: dismissed items, filter selections, user preferences, chase/stage tracking
-- [ ] Namespace all keys with the feature prefix (e.g. \`cfv_\`, \`recon_\`) to avoid collisions
-- [ ] Handle the "cleared site data" case — if localStorage is empty, the feature should still work (degrade gracefully, re-derive state from Airtable where possible)
-- [ ] Consider what happens on a different device — localStorage is per-browser. If the state matters across devices, write it back to Airtable instead
-
-**Accessibility:**
-- [ ] \`aria-expanded\` on expandable/collapsible sections (cards, drawers)
-- [ ] \`aria-modal="true"\` on modal dialogs
-- [ ] \`aria-live="polite"\` on regions that update dynamically (counts, status messages)
-- [ ] Keyboard navigation — Escape closes drawers/modals, Enter submits, Tab order is logical
-- [ ] Interactive elements have visible focus styles (\`:focus-visible\`)
-- [ ] Icons/emoji used decoratively get \`aria-hidden="true"\`; meaningful ones get \`aria-label\`
-
-**Health & monitoring:**
-- [ ] \`registerSyncBar()\` with 5-8 checks (see health-bar skill for check design)
-- [ ] \`markTabSynced()\` called after successful render
-- [ ] Sidebar badge (if the feature has a count worth showing)
-- [ ] Sidebar health dot wired up
-- [ ] Feature integrates with idle auto-refresh — if \`loadDashboard()\` is called by the idle timer in \`shared.js\`, does your feature's data update too? If your feature has its own fetch, consider whether it should also refresh on idle return
-
-**Integration:**
-- [ ] \`tabLabelMap\` entry in shared.js (for tab label display)
-- [ ] PAGE_REGISTRY entry in config.js (for version tracking)
-- [ ] Sidebar menu item in index.html
-- [ ] **AI Assistant context** — if the feature exposes data Kevin might ask the AI about, add a context block in \`js/ai-assistant.js\` so the AI panel can reference it (see existing \`ctx.compliancePage\`, \`ctx.commsPage\` patterns)
-- [ ] **Iframe communication** (iframe pages only) — \`postMessage\` status up to parent shell, listen for messages from parent (e.g. \`qt:open-new-task-drawer\`). Sync bar handles health broadcasting automatically, but feature-specific messages need manual wiring
-
-### 3c. Code quality gates (check as you write)
-
-- No \`var\` — use \`const\` / \`let\`
-- No \`document.write\` or \`eval\`
-- No inline event handlers (\`onclick="..."\`) — use \`addEventListener\` or delegated events
-- Template literals for HTML generation (not string concatenation)
-- Early returns for guard clauses (not deeply nested if/else)
+Read \`references/build-patterns.md\` before you write the first line of code. Every feature MUST include every pattern in it (data, render, action, state persistence, accessibility, health and monitoring, integration), and the code must pass its quality gates as you write.
 
 ---
 
@@ -5683,54 +5178,7 @@ Every feature MUST include all of these. Not "should" — MUST:
 
 This is the step that eliminates most rework. After writing all the code, audit your own work:
 
-### 4a. Logic audit
-
-- [ ] **Badge/count mismatch** — does the sidebar badge count match what the user sees in the tab? Account for dismissed items, active filters, and pagination.
-- [ ] **Filter state persistence** — if the user filters data, does the filter survive a refresh? Does it reset on tab switch? Is that the right behaviour?
-- [ ] **Empty state** — what happens if Airtable returns zero records? What if the filter produces zero results from non-zero data?
-- [ ] **Stale data** — after an action (status change, dismiss), does the display update immediately? Does it refetch or locally mutate?
-- [ ] **Race conditions** — if the user clicks Refresh while a fetch is in progress, what happens? If they click an action button twice fast?
-
-### 4b. Integration audit
-
-- [ ] **Sidebar wiring** — is the menu item's \`onclick\` calling \`switchTab('correct-id')\`?
-- [ ] **Tab panel** — does the \`id="tab-xxx"\` match what \`switchTab\` expects?
-- [ ] **Health bar container** — is \`data-sync-bar="xxx"\` present and matching the \`registerSyncBar\` call?
-- [ ] **Globals** — are all globals you read (e.g. \`allTenancies\`) actually loaded before your code runs?
-- [ ] **OS-INTEGRATION** — did you accidentally modify or delete code between OS-INTEGRATION comment pairs?
-
-### 4c. Design token audit
-
-- [ ] Grep your new code for any hardcoded hex colour (\`#[0-9a-fA-F]{3,8}\`)
-- [ ] Grep for hardcoded font-family declarations
-- [ ] Grep for hardcoded pixel values that should use spacing tokens
-- [ ] Verify all status colours use semantic tokens (success/warning/danger/info)
-
-### 4d. Cross-feature regression check
-
-When a feature writes back to Airtable (status changes, field updates, record creation), check which other features read that same data:
-
-- [ ] **Dashboard KPIs** — does changing a tenancy status affect rent roll, void count, arrears totals?
-- [ ] **Cash flow** — does marking an invoice paid or changing a cost amount affect the forecast?
-- [ ] **Reconciliation** — does a transaction status change break the matching logic?
-- [ ] **CFV detection** — does a tenancy status change cause a false positive or miss a real CFV?
-- [ ] **Sidebar badges** — do counts on OTHER tabs update correctly after your feature's write-back?
-
-If your feature only reads data (no Airtable writes), this check is N/A.
-
-### 4e. Performance check
-
-- [ ] **API call count** — how many Airtable requests does the feature make on initial load? Target: 1-3 calls. If >5, consider whether shared globals can be reused
-- [ ] **Payload size** — are you fetching all fields when you only need 3? Use \`fields[]\` parameter in the Airtable URL to limit the response
-- [ ] **Render cost** — if rendering 100+ rows, use a table (not 100 expandable cards). Consider virtual scrolling or "show more" pagination for >200 items
-- [ ] **No N+1 queries** — don't fetch related records one-by-one inside a loop. Batch them into a single \`filterByFormula=OR(...)\` call, or resolve from global arrays
-
-### 4f. Security audit
-
-- [ ] All user-facing text passed through \`escHtml()\`
-- [ ] No raw Airtable field values inserted into innerHTML without escaping
-- [ ] API tokens only accessed via \`PAT\` global (never hardcoded)
-- [ ] No \`eval()\`, no \`innerHTML\` with unsanitised input
+Read \`references/self-audit.md\` now: logic (4a), integration (4b), design tokens (4c), cross-feature regression (4d), performance (4e) and security (4f). Report every item as pass, fixed or N/A before you show Kevin anything.
 
 ---
 
@@ -5752,44 +5200,7 @@ If the health bar was already included during Phase 3 (as it should be for exper
 
 ## Phase 6: VERIFY (prove it works)
 
-### 6a. Dev server test
-
-Start the preview server and test the golden path:
-1. Load the page — does it render without console errors?
-2. Does data appear (or correct empty state)?
-3. Click every action button — do they work?
-4. Check the health bar — does it render, do checks pass?
-5. Click Refresh in the health bar — does it re-sync?
-6. Check sidebar badge — does the count match?
-
-### 6b. Edge case test
-
-- Empty data (no records match)
-- Large data (100+ records — does pagination work?)
-- Network error (temporarily wrong PAT — does it show an error toast, not crash?)
-- Rapid clicks (double-submit prevention)
-- Tab switch and return (does state persist correctly?)
-
-### 6c. Visual check
-
-- Screenshot the feature at desktop width
-- Check it at 1024px width (tablet)
-- Verify colours match the design system (no rogue greys or blues)
-
-### 6d. Screenshot walkthrough evidence (MANDATORY)
-
-Before declaring the feature done, produce screenshot evidence of a full walkthrough. This proves the feature works and gives Kevin a visual record of what was built. Use the preview tools to capture each screenshot.
-
-**Required screenshots (minimum):**
-
-1. **Initial load state** — the feature as it appears when first opened (or empty state if no data)
-2. **Data populated** — the feature with real or representative data loaded
-3. **Primary interaction** — the main action being performed (e.g. opening a modal, expanding a card, clicking a button)
-4. **Action result** — the outcome of the primary action (e.g. record created, status changed, form submitted)
-5. **Secondary views** — if the feature has tabs, filters, or alternative views, screenshot at least one
-6. **Tablet width** — the feature at 1024px width to verify responsive behaviour
-
-Present all screenshots to Kevin with a brief caption for each. This is not optional. The feature is not done until the walkthrough is shared.
+Read \`references/verify.md\` now. Run the dev server test (6a), the edge cases (6b) and the visual check (6c), then produce the screenshot walkthrough (6d). The walkthrough is MANDATORY: the feature is not done until it is shared with Kevin.
 
 ---
 
@@ -5835,15 +5246,21 @@ If Vitest is set up in the project:
 
 If no test framework exists, skip this step and note it in the final report.
 
-### 8c. Code review
+### 8c. Independent review gate (blocking — iterate until approved)
 
-Review all changed files for:
-1. Logic bugs (off-by-one, wrong operator, missing null check)
-2. Style inconsistencies with the rest of the codebase
-3. Performance issues (N+1 queries, unnecessary re-renders, missing pagination)
-4. Accessibility gaps (missing aria attributes, broken keyboard nav)
+This is a hard gate, not a self-check. Get a fresh, independent perspective on the changed code and do not proceed to deploy until it comes back clean.
 
-Fix anything found.
+1. Run an independent review of the diff. Use the \`/code-review\` skill, or spawn a fresh reviewer subagent (Agent tool, \`code-reviewer\` or \`general-purpose\`) that has NOT seen the build reasoning, so it reviews the code on its own merits.
+2. The reviewer checks for:
+   - Logic bugs (off-by-one, wrong operator, missing null check)
+   - Style inconsistencies with the rest of the codebase
+   - Performance issues (N+1 queries, unnecessary re-renders, missing pagination)
+   - Accessibility gaps (missing aria attributes, broken keyboard nav)
+3. Fix every correctness finding. Then run the review AGAIN on the updated diff.
+4. Repeat until the review returns no correctness findings (a clean pass). Only then continue to the next step.
+5. If the reviewer and you disagree on a finding, surface it to Kevin rather than silently overriding it.
+
+Do not deploy on an unreviewed or failing diff. The independent approval is what lets the agent verify its own work instead of Kevin hand-checking every change.
 
 ### 8d. Security review (always run if the feature touches auth, data writes, or money)
 
@@ -5859,27 +5276,7 @@ Output a numbered list of issues with severity (critical, high, medium, low). Fi
 
 ### 8e. Pre-deploy checklist
 
-Run and report pass/fail for each:
-
-**Current stack (GitHub Pages):**
-1. No \`console.log\` or \`debugger\` in production code paths
-2. HTML passes htmlhint (the PostToolUse hook covers this, but verify)
-3. All PAGE_REGISTRY entries correct (pageVer, sopFile, standalone URL)
-4. \`escHtml()\` used on all external data rendered in HTML
-5. Design tokens used (no hardcoded colours, fonts, or spacing)
-6. \`sitemap.xml\` updated if new pages added
-7. Pre-commit mapping updated in \`scripts/pre-commit-action.py\` if new pages added
-8. Rollback path identified (which commit to revert to if this breaks production)
-
-**Future stack (activate when SaaS migration begins):**
-9. Supabase RLS policies on any new tables
-10. Supabase migrations run on production
-11. Cloudflare Worker env vars documented and set
-12. CORS origins set correctly on Workers
-13. Rate limiting on public endpoints
-14. Error tracking/logging in place for new endpoints
-
-Block deployment if any current-stack item fails. Future-stack items are informational until migration begins.
+Read \`references/pre-deploy.md\` now. Run and report pass/fail for every item in it, one line each. Block deployment if any current-stack item fails.
 
 ---
 
@@ -5906,8 +5303,8 @@ Ensure the entry in \`js/config.js\` has:
 
 Add the new page and its SOP to \`sitemap.xml\`:
 \`\`\`xml
-<url><loc>https://app.operationsdirector.co.uk/[page-path]</loc></url>
-<url><loc>https://app.operationsdirector.co.uk/[sop-path]</loc></url>
+<url><loc>https://chaichoong.github.io/leadership-dashboard/[page-path]</loc></url>
+<url><loc>https://chaichoong.github.io/leadership-dashboard/[sop-path]</loc></url>
 \`\`\`
 
 ### 8d. Update robots.txt (if needed)
@@ -5936,7 +5333,15 @@ git pull --rebase origin main && git push origin main
 
 Then verify the deploy is live (pageVer matches, hard reload).
 
-### 10c. Report to Kevin
+### 10c. Live test
+
+After deploy is confirmed live, run \`/test\` against the deployed site. This creates real test data, exercises the feature through the browser, verifies backend state, and cleans up. The feature is not done until \`/test\` passes.
+
+Skip \`/test\` only if:
+- The feature is purely informational (read-only display with no actions or backend writes)
+- Kevin explicitly says to skip testing
+
+### 10d. Report to Kevin
 
 Short summary:
 
@@ -5946,9 +5351,18 @@ Files changed: [list]
 What it does: [2-3 sentences]
 Health checks: [count] checks registered
 Audit score: XX/100
+Test result: [PASS/FAIL]
 SOP: [created/updated] at [path]
 Live at: [URL if applicable]
+
+GOAL CHECK
+[The end state from the GOAL, repeated]
+1. [check] - PASS [proof visible in this conversation]
+2. [check] - FAIL [why]
+Goal met? Yes | No
 \`\`\`
+
+The GOAL CHECK is compulsory. It answers every numbered check from the GOAL block posted at the gate. Run any check you have not run yet so its output is on screen first. \`Goal met? Yes\` only when every check is PASS. An honest FAIL goes out with \`Goal met? No\` and becomes an Outstanding item in the close-out. It sits above any CLOSE-OUT block.
 
 Include a screenshot if the feature is visual.
 
@@ -5956,29 +5370,7 @@ Include a screenshot if the feature is visual.
 
 ## Quick reference: common mistakes to avoid
 
-| Mistake | Prevention |
-|---------|-----------|
-| Wrong Airtable field name (capitalisation/spaces) | Always read from config.js or confirm with Kevin |
-| Badge shows raw count, not filtered count | Badge logic must match the rendered/visible items |
-| Hardcoded colour | Grep for \`#\` in your new code |
-| Missing health bar | It's in the checklist — don't skip it |
-| Missing empty state | Test with zero records |
-| Missing loading state | Show spinner/skeleton before fetch resolves |
-| Double-submit on buttons | Disable button, re-enable after async completes |
-| Stale display after action | Locally mutate or refetch + rerender |
-| Missing escHtml on user data | Grep for \`innerHTML\` assignments, verify all have escHtml |
-| Forgot PAGE_REGISTRY entry | Auto-bump won't work without it |
-| Forgot tabLabelMap entry | Tab label will show raw ID instead of human name |
-| Broke OS-INTEGRATION section | Read index.html first, mark those sections as untouchable |
-| Airtable 429 rate limit on bulk writes | 500ms pause between requests, exponential backoff on retry |
-| N+1 query pattern (fetch in a loop) | Batch into single \`filterByFormula=OR(...)\` or resolve from globals |
-| Redundant Airtable fetch when global array exists | Check if \`allTenancies\`, \`allTransactions\`, etc. already have the data |
-| localStorage collision with another feature | Namespace all keys with feature prefix (\`cfv_\`, \`recon_\`, \`inv_\`) |
-| Feature write-back breaks another tab's counts | Run cross-feature regression check (Phase 4d) |
-| No undo on destructive actions | Add sliding undo toast for dismiss/status-change/field-edit |
-| Missing accessibility (no keyboard nav) | Escape closes, Enter submits, aria-expanded on collapsibles |
-| AI assistant can't answer questions about new feature | Add context block in \`ai-assistant.js\` |
-| Forgot SOP / sitemap update | Phase 8 — it's not done until the SOP exists |
+The table of common mistakes and how to prevent each one is in \`references/common-mistakes.md\`. Read it while planning (Phase 1 and 2) and again during the Phase 4 self-audit.
 `,
     },
     {
@@ -6009,12 +5401,20 @@ Run a robustness audit on the specified page/dashboard.
    git pull --rebase origin main && git push origin main
    \`\`\`
    Then verify the GitHub Pages deploy is actually live (hard reload, check \`pageVer\` in \`js/config.js\` matches what's served).
-6. **Score readiness out of 100** using this rubric (20 pts each):
+6. **Filtering standards check** — if the page has any filtering, dropdowns, or date inputs, verify all four:
+   - **Clear All Filters button** exists and resets every filter to its default state
+   - **Date format is DD/MM/YYYY** throughout (not MM/DD/YYYY or YYYY-MM-DD in user-facing UI)
+   - **Active-only filter on dropdowns** — business, tenant, and property dropdowns default to showing only active records, not archived or inactive
+   - **renderAll vs renderTasks after edits** — after any inline edit, status change, or filter change, the correct re-render function is called (full list re-render, not just the single item) so counts, badges, and visible rows stay in sync
+   
+   Report each as PASS / FAIL with a one-line explanation. Fix any failures before scoring.
+
+7. **Score readiness out of 100** using this rubric (20 pts each):
    - **Correctness** — no logic bugs, counts match underlying data
    - **Error handling** — failed API calls, empty states, auth expiry
    - **Performance** — no obvious N+1 fetches, pagination respected
    - **UX polish** — loading states, mobile layout, accessibility basics
-   - **Maintainability** — uses tokens.css, file split per CLAUDE.md, no hardcoded IDs
+   - **Maintainability** — uses tokens.css, file split per the file table in \`.claude/rules/frontend.md\`, no hardcoded IDs
    Report each dimension's sub-score and the total.
 
 ## Output format
@@ -6030,6 +5430,12 @@ Run a robustness audit on the specified page/dashboard.
 ### Fixes applied
 - <commit sha> <message>
 ...
+
+### Filtering standards
+- Clear All Filters: PASS / FAIL / N/A
+- Date format DD/MM/YYYY: PASS / FAIL / N/A
+- Active-only dropdowns: PASS / FAIL / N/A
+- Correct re-render after edits: PASS / FAIL / N/A
 
 ### Re-audit
 <self-introduced issues, or "clean">
@@ -6471,24 +5877,11 @@ Rules:
 
 ---
 
-## Step 5 — Notify Mica via Slack
+## Step 5 — Upload (no Slack hand-off)
 
-Send a DM to Mica (Slack user ID: \`U08HW0TAWAE\`) with the following message:
+Page note (21 Sep 2026): the Slack DM to Mica that used to sit here is removed from this page copy, because no work routes to Mica since 25 Aug 2026. The claude.ai skill itself still carries it.
 
-\`\`\`
-Hey Mica 👋 A new SOP has been generated and needs uploading to GitHub.
-
-*Task:* Upload two files to the \`sops/\` folder in https://github.com/chaichoong/sops
-
-*Files to upload:*
-• \`[skill-name].html\`
-• \`[skill-name].json\`
-
-Both files have been downloaded from Cowork. Once uploaded, the SOP will be live at:
-https://chaichoong.github.io/sops/[skill-name].html
-
-Thanks! ✅
-\`\`\`
+Both files are uploaded to the \`sops/\` folder in https://github.com/chaichoong/sops. Once uploaded, the SOP is live at https://chaichoong.github.io/sops/[skill-name].html
 
 ---
 
@@ -6496,7 +5889,7 @@ Thanks! ✅
 
 Present both files for download, then confirm:
 
-> ✅ SOP generated and Mica notified on Slack.
+> ✅ SOP generated. Upload both files to the \`sops/\` folder.
 > - \`[skill-name].html\`
 > - \`[skill-name].json\`
 
@@ -7103,7 +6496,7 @@ Put each with_skill version before its baseline counterpart.
      --skill-name "my-skill" \\
      --benchmark <workspace>/iteration-N/benchmark.json \\
      > /dev/null 2>&1 &
-   VIEWER_PID=\$!
+   VIEWER_PID=$!
    \`\`\`
    For iteration 2+, also pass \`--previous-workspace <workspace>/iteration-<N-1>\`.
 
@@ -7147,7 +6540,7 @@ Empty feedback means the user thought it was fine. Focus your improvements on th
 Kill the viewer server when you're done with it:
 
 \`\`\`bash
-kill \$VIEWER_PID 2>/dev/null
+kill $VIEWER_PID 2>/dev/null
 \`\`\`
 
 ---
@@ -7268,15 +6661,15 @@ Take \`best_description\` from the JSON output and update the skill's SKILL.md f
 
 ---
 
-### Package and Present (only if \`present_files\` tool is available)
+### Package and Present (only if a file-delivery tool is available)
 
-Check whether you have access to the \`present_files\` tool. If you don't, skip this step. If you do, package the skill and present the .skill file to the user:
+Check whether you have access to a tool that presents files to the user — \`present_files\`, or \`SendUserFile\` in Cowork remote. If you have neither, skip this step. If you do, package the skill and send the user the resulting \`.skill\` file with that tool:
 
 \`\`\`bash
 python -m scripts.package_skill <path/to/skill-folder>
 \`\`\`
 
-After packaging, direct the user to the resulting \`.skill\` file path so they can install it.
+The presented \`.skill\` (or bare \`SKILL.md\`) file card shows a **Save skill** button when the user's org allows skill creation; clicking it installs the skill into their profile.
 
 ---
 
@@ -7637,13 +7030,14 @@ After testing the skill, users may request improvements. Often this happens righ
         source: 'preset',
         tags: ['setup', 'cowork', 'onboarding', 'plugins'],
         instructions: `---
-name: setup-cowork
-description: "Guided Cowork setup — install role-matched plugins, connect your tools, try a skill."
+name: "setup-cowork"
+description: "Guided setup — install role-matched plugins, connect your tools, try a skill."
+disable-model-invocation: true
 ---
 
-# Setup Cowork
+# Guided setup
 
-Help the user get Cowork configured for their work. Five steps — role, plugins, connectors, try a skill, wrap.
+Help the user get Claude set up for their work. The steps — role, plugins, connectors, try a skill, writing voice (only when available — Step 0 says when), wrap.
 
 ## Step 0 — Checklist
 
@@ -7653,17 +7047,20 @@ Before your first user-facing message, create a TODO list with these items so th
 2. Suggest plugins
 3. Suggest connectors
 4. Try a skill
-5. Wrap up
+5. Set up writing voice
+6. Wrap up
 
-Mark each one complete as you finish it. Keep it to these five — don't add sub-items.
+Include "5. Set up writing voice" only if \`setup-writing-style\` appears in the skills list in your system context. If it doesn't, use the five-item list — "5. Wrap up" is the last item — and never mention writing voice anywhere in the flow.
+
+Mark each one complete as you finish it. Keep it to this list — don't add sub-items.
 
 ## Step 1 — Role
 
-Your initial message should frame what Cowork is: it autonomously handles tasks like reading your email, searching your docs, drafting reports, etc. Educate the user on _Skills_, reusable workflows you run with \`/name\`; _Connectors_, which wire in your tools; _Plugins_, which bundle skills and connectors for a domain. Two or three sentences. Hit the beats: multi-step and autonomous, uses your real tools, skills/plugins/connectors defined.
+Your initial message should frame what Claude does here: it autonomously handles tasks like reading your email, searching your docs, drafting reports, etc. Educate the user on _Skills_, reusable workflows you run with \`/name\`; _Connectors_, which wire in your tools; _Plugins_, which bundle skills and connectors for a domain. Two or three sentences. Hit the beats: multi-step and autonomous, uses your real tools, skills/plugins/connectors defined.
 
-**Check memory first.** If your memory already records the user's role or job function, don't ask — state it back: "Looks like you do [role] work — I'll set things up for that." Then skip straight to Step 2.
+**Check the system context first.** If the system prompt includes a line like "The user's role from their account profile is: [role]", use that role directly — weave it into your framing ("Since you're in [role], I'll set things up for that.") and skip the role-picker tool entirely.
 
-If memory has nothing, ask: "Let's get you set up — takes a few minutes. What kind of work do you do?" Then call the tool to show the onboarding role picker, which displays roles for the user to click. Do not list the roles yourself.
+If the system context has no role, end the framing with "Let's get you set up — takes a few minutes." then call the role-picker tool. Do not ask the question in text — the tool's chip panel asks for them. Do not list the roles yourself.
 
 ## Step 2 — Suggest plugins
 
@@ -7689,15 +7086,39 @@ Below the suggestions, explain what they're looking at before moving on: "Click 
 
 ## Step 4 — Try a skill
 
-If they say yes, call list_skills with the plugin's skill names and a context_label like "[Plugin] skills" so they get clickable Try-it cards. Introduce the card in one line so it doesn't land cold: "Here's what [Plugin] adds — click any of these to run it now." End your turn.
+If they say yes, call list_skills with the plugin's skill names and a context_label like "[Plugin] skills" so they get clickable Try-it cards. Introduce the card in one line so it doesn't land cold: "Here's what [Plugin] adds — click any of these to run it now." End your turn. These cards are [Plugin]'s skills only, not the account's skills — when a later step needs to know what's on the user's account (Step 5 does), the answer comes from the skills list in your system context, never from this card.
 
 When they click one (you'll see a \`/name\` message), help them with it. Keep it brief; you're still inside setup. When it finishes, bring it back: "Nice — that's how skills work."
 
 If they wave it off at either point, that's fine — go to Step 5.
 
-## Step 5 — Wrap
+## Step 5 — Writing voice
+
+**Before doing anything in this step:** if \`setup-writing-style\` is not in the skills list in your system context, do not offer writing-voice setup and never call the Skill tool with \`setup-writing-style\` — mark this TODO done if it's on your list, and go straight to Step 6.
+
+Everything so far taught Claude about the user's *tools*. This step teaches it about the *user*. This matters because so much of what Claude produces here is prose the user will send under their own name.
+
+**First, settle which opener you're writing — the skills list in your system context decides.** That list is the account's full skills list; any skill cards you showed at Step 4 covered one plugin and can't answer this. If \`my-writing-style\` is there (the saved profile — not \`setup-writing-style\`, the flow that creates it) — or the user says they've already set one up — your whole message is one line ("You've already got a voice profile, so anything I draft for you will use it") and you go to Step 6. Only if it's absent do you offer setup. Re-running the flow on someone who's already done it wastes their time and risks overwriting a profile they've tuned. If they *want* to update or redo it, that counts as a yes — invoke the skill the same way.
+
+If the user says they already have one, that settles it — a profile saved recently won't show in your skills list until their next session, so their word beats the list. Never tell a user they don't have a profile on the strength of a widget result; the widgets in this flow are plugin-filtered, and silence from one means nothing. Skipping a redundant offer costs a sentence; overwriting a tuned profile costs the user their work.
+
+Otherwise, offer it. Make the case in two or three sentences of prose — these are the beats to hit, not a list to reproduce — then ask. Don't just launch into it:
+
+- **What it does:** reads writing they've already sent, learns how they write, and saves it so future drafts sound like them instead of like Claude.
+- **What it costs:** about two minutes.
+- **What it protects:** only writing they authored, and nothing saves without their review. (One clause — the skill itself walks through consent in detail once they say yes.)
+
+Phrase the ask so passing is obviously fine — "Want to do that now, or skip it?" A user who feels cornered into a two-minute detour at the end of setup will just abandon the whole thing.
+
+**If they say yes:** invoke the \`setup-writing-style\` skill (via the Skill tool — don't improvise its flow from memory) and let it run end to end. Don't paraphrase its steps, re-explain consent, or interleave your own commentary — it opens with its own framing, and a second voice narrating over it is confusing. Setup is paused, not over. The voice flow counts as finished when one of three things happens: the save tool reports success; the user confirms the profile is saved (when saving happens via a Save skill button, you can't see the click and the new skill won't appear in your skills list until their next session — the flow already has you ask them to click it, so their answer is your signal; don't ask twice); or they ask to skip or move on to something else. Only then mark this TODO done and move to Step 6 — invoking the skill starts this step; it doesn't complete it.
+
+**If they say no or defer:** mark the TODO done and tell them they can always create their voice profile later by simply asking — e.g. "No problem. Whenever you want drafts to sound like you, just ask me to learn your writing voice." Then Step 6. Don't sell it twice.
+
+## Step 6 — Wrap
 
 Close short: "You're set. Start a new task from the sidebar anytime, or type \`/\` to see your skills."
+
+If \`setup-writing-style\` is in your skills list and they don't have a voice profile by the wrap, add one clause and no more: "…and whenever you want drafts to sound like you, just ask me to learn your writing voice."
 
 ## Ground rules
 
@@ -7705,7 +7126,7 @@ Close short: "You're set. Start a new task from the sidebar anytime, or type \`/
 - Skips are fine. If they pass on a step, mark its TODO done and move on.
 - Keep each message short. Two or three sentences plus the widget, not a wall.
 - Never write text that presumes a tool result before the tool runs. Don't say "you already have…" or "you're connected to…" above a widget — call the tool first, then react to what came back below it. The widget shows the data; your sentence reacts to it.
-- The user trying a skill mid-flow is expected. Help with it, then return to where you left off. Don't let a skill invocation end the setup.
+- The user trying a skill mid-flow is expected. Help with it, then return to where you left off. Don't let a skill invocation end the setup. This applies to Step 5 too: \`setup-writing-style\` is a long flow, and when it ends — however it ends — the user still needs the Step 6 wrap.
 `,
     },
     {
