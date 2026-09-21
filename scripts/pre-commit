@@ -14,6 +14,18 @@ import sys
 # Found 2026-08-06 by installing it and watching pageVer refuse to move.
 script_dir = os.path.dirname(os.path.realpath(__file__))
 shared_script = os.path.join(script_dir, 'pre-commit-action.py')
+guard_script = os.path.join(script_dir, 'private-name-guard.py')
+
+# The private-name guard runs FIRST and is the only step here allowed to block:
+# this repo is PUBLIC, and a staged line naming someone on the private roster
+# must never reach it. See scripts/private-name-guard.py.
+if os.path.exists(guard_script):
+    guard = subprocess.run([sys.executable, guard_script], cwd=os.getcwd())
+    if guard.returncode != 0:
+        sys.exit(guard.returncode)
+else:
+    print(f"⚠️  pre-commit hook: {guard_script} not found — private names NOT checked.",
+          file=sys.stderr)
 
 if not os.path.exists(shared_script):
     # Do not exit 0 quietly. A missing sibling means a broken install, and a

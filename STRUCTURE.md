@@ -43,7 +43,7 @@ Single source of truth for file locations across the Operations Director Platfor
 3. **`STRUCTURE.md` (this file)** — where everything lives.
    **`MASTER-PLAN.md`** — THE one plan for OD (launch, migration, GTM, delivery). Never create another plan doc; amend this one. Protocol in the file + CLAUDE.md.
    **`PRODUCTISATION.md`** — what a generic client gets on each page (universal / module / vertical / bespoke). Read before building any client-facing version of a page.
-4. **Memory** (`~/.claude/projects/-Users-kevinbrittain-Projects-leadership-dashboard/memory/`) — durable facts, preferences, project state. Indexed by `MEMORY.md`.
+4. **Memory** (`~/.claude/projects/-Users-kevinbrittain-Projects-leadership-dashboard/memory/`) — durable facts, preferences, project state. Indexed by `MEMORY.md`. The private desk `~/Projects/kevin-hq` reads and writes this same folder (its `autoMemoryDirectory`), so there is one memory, not two.
 5. **Skills** — three tiers, by design:
    - Project skills: `.claude/skills/` in this repo (workflow pipeline)
    - Personal skills: `~/.claude/skills/` (`build-prompt`, `challenge`, `adhd` + `i-have-adhd` always-on pair, `close-out` and `goal-line` always-on pairs (each a SKILL.md plus an `always-on.sh` run by a SessionStart hook in `~/.claude/settings.json`; `goal-line`, 13 Sep 2026, enforced at both ends 14 Sep 2026, also carries `goal-start.sh` (UserPromptExpansion hook on `/fix`, `/build-feature`, `/build-prompt`: prints the GOAL rule, logs to `logs/expansion.jsonl`) and `goal-check.py` (Stop hook: refuses a finished message with no complete GOAL CHECK; `selftest`)), `evaluate-guide` (21 Sep 2026: checks an outside guide against the real setup, logs verdicts to `~/.claude/maintenance-log.md`), and others)
@@ -76,7 +76,21 @@ Do not move skills between tiers without reason: project skills travel with the 
 | Reports and deliverables | Drive `Claude Outputs/` | Stays in Drive |
 | Business records (invoices, certs, legal) | Drive (currently unstructured at root) | Planned folders: `Properties/`, `Finance/`, `Legal/`, `Operations Director/`, `Runpreneur/`, `Archive/` — reorganisation pending as its own task |
 
-## 6. Hygiene rules
+## 6. The private desk (`~/Projects/kevin-hq`, 21 Sep 2026)
+
+This repo is PUBLIC, so work that is not code runs from a second folder on this Mac: property and tenants, HMRC and legal, money, learning, CEO sessions, personal questions. It is not a git repo and never goes to GitHub.
+
+| Location | Purpose |
+|---|---|
+| `CLAUDE.md` | What the desk is for; working files go in dated subfolders |
+| `.claude/settings.json` | `autoMemoryDirectory` = this repo's memory folder (one shared memory); `permissions.additionalDirectories` = this repo (file access only, it does not load the repo's skills) |
+| `.claude/skills/` | Symlinks to this repo's `airtable-task-creator` and `airtable-tenancy-ender`, so there is one copy of each |
+| `property/`, `legal/`, `money/`, `learning/` | Working files, one dated subfolder per piece of work |
+| `_from-repo/2026-09-21/` | 258 loose scratch files moved out of this checkout on 21 Sep 2026, paths kept, listed in `MOVED.txt` |
+
+Code skills (`/fix`, `/build-feature`) and the robots stay in this repo. `scripts/private-name-guard.py`, run first by `scripts/pre-commit`, refuses a commit that adds a line naming someone on `~/.config/od/redact-names.txt`.
+
+## 7. Hygiene rules
 
 - After a branch merges, delete the branch and its worktree in the same session.
 - Commit or stash uncommitted edits before context-switching; parallel sessions sweep loose files.
