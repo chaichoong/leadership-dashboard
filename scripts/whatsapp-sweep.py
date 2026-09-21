@@ -68,7 +68,7 @@ TEXT_MESSAGE_TYPE = 0
 # surfaces with no reply expected.
 GROUP_SUFFIX = "@g.us"
 # Matched against the DOMAIN PART of the JID, not the whole string. A plain
-# endswith("@status") misses "252514733658243@lid.status", which is a real JID
+# endswith("@status") misses "100000000000001@lid.status", which is a real JID
 # form on this machine (a status post from a linked-identity contact) and leaked
 # a status post into the candidates on the first live run.
 BROADCAST_DOMAIN_MARKERS = ("status", "newsletter", "broadcast")
@@ -156,12 +156,12 @@ def sender_identity(row):
       ZPUSHNAME  is NOT a display name in this WhatsApp build. It holds an
                  opaque base64 token (e.g. "CPPq+NMGIABIAZABAPABAtgC..."). Using
                  it puts gibberish in the task's sender field.
-      ZFROMJID   is a "@lid" linked-identity (e.g. "82338818043926@lid"), not a
+      ZFROMJID   is a "@lid" linked-identity (e.g. "10000000000002@lid"), not a
                  phone number. You cannot reply to it and it does not match the
                  chat JID, so sent_check would never find the outgoing message.
 
     What is actually reliable:
-      1:1   the CHAT's ZCONTACTJID / ZPARTNERNAME  ("447881924047@s.whatsapp.net", "Roy Lavin")
+      1:1   the CHAT's ZCONTACTJID / ZPARTNERNAME  ("447700900111@s.whatsapp.net", "Roy Lavin")
       group the GROUP MEMBER's ZMEMBERJID / ZCONTACTNAME
 
     Verified against the live database on 14 Aug 2026.
@@ -347,16 +347,16 @@ def selftest():
         if not cond:
             failures.append(name)
 
-    check("group jid", jid_is_group("120363047228879289@g.us"))
-    check("individual not group", not jid_is_group("447775404207@s.whatsapp.net"))
-    check("newsletter is broadcast", jid_is_broadcast("120363169319669622@newsletter"))
-    check("status is broadcast", jid_is_broadcast("447957869197@status"))
+    check("group jid", jid_is_group("120363000000000001@g.us"))
+    check("individual not group", not jid_is_group("447700900222@s.whatsapp.net"))
+    check("newsletter is broadcast", jid_is_broadcast("120363000000000002@newsletter"))
+    check("status is broadcast", jid_is_broadcast("447700900333@status"))
     # Real JID form seen live: a status post from a linked-identity contact.
     # endswith("@status") does NOT catch this, and it leaked one through.
-    check("lid.status is broadcast", jid_is_broadcast("252514733658243@lid.status"))
-    check("individual not broadcast", not jid_is_broadcast("447775404207@s.whatsapp.net"))
-    check("group not broadcast", not jid_is_broadcast("120363047228879289@g.us"))
-    check("plain lid not broadcast", not jid_is_broadcast("252514733658243@lid"))
+    check("lid.status is broadcast", jid_is_broadcast("100000000000001@lid.status"))
+    check("individual not broadcast", not jid_is_broadcast("447700900222@s.whatsapp.net"))
+    check("group not broadcast", not jid_is_broadcast("120363000000000001@g.us"))
+    check("plain lid not broadcast", not jid_is_broadcast("100000000000001@lid"))
     check("none jid safe", not jid_is_group(None) and not jid_is_broadcast(None))
     check("malformed jid safe", not jid_is_broadcast("nonsense-no-at-sign"))
 
@@ -370,18 +370,18 @@ def selftest():
     # @lid ZFROMJID and an opaque base64 ZPUSHNAME, neither of which may leak
     # into the sender fields. If someone "simplifies" sender_identity back to
     # ZFROMJID/ZPUSHNAME, these fail.
-    one_to_one = {"chat_jid": "447881924047@s.whatsapp.net", "chat_name": "Roy Lavin",
+    one_to_one = {"chat_jid": "447700900111@s.whatsapp.net", "chat_name": "Roy Lavin",
                   "member_jid": None, "member_name": None}
     jid, name = sender_identity(one_to_one)
-    check("1:1 sender is phone jid", jid == "447881924047@s.whatsapp.net")
+    check("1:1 sender is phone jid", jid == "447700900111@s.whatsapp.net")
     check("1:1 sender name", name == "Roy Lavin")
     check("1:1 sender not lid", "@lid" not in jid)
 
-    group = {"chat_jid": "120363047228879289@g.us", "chat_name": "Any excuse",
-             "member_jid": "447900000002@s.whatsapp.net", "member_name": "Sam Atherton"}
+    group = {"chat_jid": "120363000000000001@g.us", "chat_name": "Example group",
+             "member_jid": "447900000002@s.whatsapp.net", "member_name": "Sam Testwood"}
     jid, name = sender_identity(group)
     check("group sender is member", jid == "447900000002@s.whatsapp.net")
-    check("group sender name", name == "Sam Atherton")
+    check("group sender name", name == "Sam Testwood")
 
     unknown = {"chat_jid": None, "chat_name": None, "member_jid": None, "member_name": None}
     check("missing jid degrades safely", sender_identity(unknown) == ("unknown", ""))

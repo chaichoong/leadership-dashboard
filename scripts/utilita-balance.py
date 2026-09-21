@@ -816,7 +816,7 @@ REFRESH
 5 days left
 
 Electricity Top-up Number
-9826003801209677811
+9826000000000007811
 OTHER CHARGES
 £1350.60
 """
@@ -830,7 +830,7 @@ REFRESH
 More than a week left
 
 Electricity Top-up Number
-9826003801208182409
+9826000000000002409
 OTHER CHARGES
 £957.92
 """
@@ -853,7 +853,7 @@ def selftest():
     a, b = parse_energy(SAMPLE_APT1), parse_energy(SAMPLE_APT2)
     chk("apt1 balance", 20.26, a["balanceGbp"])
     chk("apt1 days", "5 days left", a["daysLeft"])
-    chk("apt1 meter", "9826003801209677811", a["topUpNumber"])
+    chk("apt1 meter", "9826000000000007811", a["topUpNumber"])
     chk("apt2 balance", 34.37, b["balanceGbp"])
     chk("apt2 days", "More than a week left", b["daysLeft"])
     chk("apt1 not refused", None, a["refused"])
@@ -862,7 +862,7 @@ def selftest():
     # Every shape below reported £1350.60 before the card-end fix (18 Sep 2026).
     unpainted = parse_energy(
         "My energy\nApartment 1 Duckworth Building, FY8 1SQ\nBalance\nREFRESH\n"
-        "5 days left\nElectricity Top-up Number\n9826003801209677811\n"
+        "5 days left\nElectricity Top-up Number\n9826000000000007811\n"
         "OTHER CHARGES\n£1350.60\n")
     chk("balance tile unpainted -> no figure", None, unpainted["balanceGbp"])
     if not unpainted["refused"]:
@@ -907,7 +907,7 @@ def selftest():
     # "usage" as a substring ended the card on "See your usage", which sat
     # above "Off supply", so an off-supply meter raised no alarm at all.
     seen = parse_energy("Balance\nREFRESH\n£12.40\nSee your usage\nOff supply\n"
-                        "Electricity Top-up Number\n9826003801209677811\n")
+                        "Electricity Top-up Number\n9826000000000007811\n")
     chk("days line survives a substring marker", "Off supply", seen["daysLeft"])
     chk("and it alarms", True, row_alarm(
         {"ok": True, "balanceGbp": 12.40, "daysLeft": seen["daysLeft"]}, 10))
@@ -921,7 +921,7 @@ def selftest():
 
     # ── a meter in debt parses, and alarms ────────────────────────────────
     debt = parse_energy("Balance\nREFRESH\n-£5.20\n\nOff supply\n"
-                        "Electricity Top-up Number\n9826003801209677811\n"
+                        "Electricity Top-up Number\n9826000000000007811\n"
                         "OTHER CHARGES\n£1350.60\n")
     chk("negative balance parses", -5.20, debt["balanceGbp"])
     chk("negative balance renders", "-£5.20", debt["balance"])
@@ -938,8 +938,8 @@ def selftest():
     chk("reworded days flagged", False, reworded["daysLeftRecognised"])
 
     spaced = parse_energy("Balance\nREFRESH\n£8.00\n2 days left\n"
-                          "Electricity Top-up Number\n9826 0038 0120 9677 811\n")
-    chk("spaced meter number still read", "9826003801209677811", spaced["topUpNumber"])
+                          "Electricity Top-up Number\n9826 0000 0000 0007 811\n")
+    chk("spaced meter number still read", "9826000000000007811", spaced["topUpNumber"])
 
     # ── DAYS LEFT is the primary trigger (Kevin, 18 Sep 2026) ─────────────
     # £20 lasts about five days, so the old £10 floor gave barely two and a
@@ -989,7 +989,7 @@ def selftest():
     chk("a password box is not signed in", False, signed_in("https://my.utilita.co.uk/energy", 1))
 
     # ── the meter gate ───────────────────────────────────────────────────
-    A, B = "9826003801209677811", "9826003801208182409"
+    A, B = "9826000000000007811", "9826000000000002409"
     if meter_problem(A, B) is None:
         bad.append(("meter mismatch not caught", "refusal", None))
     if "…2409" not in (meter_problem(A, B) or ""):

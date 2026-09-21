@@ -1817,7 +1817,7 @@ const WEALTH_CARD_NAMES = ['American Express', 'Santander Credit Card', 'Lloyds 
 const _num = v => (v === '' || v == null) ? null : (isFinite(Number(v)) ? Number(v) : null);
 
 // Account number = the trailing 6+ alphanumeric token of a debt/cost name, e.g.
-// "Kent Reliance - 55EP - 70016005" → "70016005". This joins a Debt Terms record to
+// "Lender - 12AB - 70000245" → "70000245". This joins a Debt Terms record to
 // its real monthly payment in the Costs table (both carry the same account number).
 function debtAcctKey(name) {
     const m = String(name || '').match(/([A-Za-z0-9]{6,})\s*$/);
