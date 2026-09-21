@@ -43,6 +43,7 @@ const ESTATE_SCRIPTS = [
   'scripts/agent-accuracy-report.py',
   'scripts/utilita-balance.py',
   'scripts/payment-run.py',
+  'scripts/private-name-guard.py',
 ];
 
 describe('estate scripts read no name they never bind', () => {
