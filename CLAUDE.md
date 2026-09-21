@@ -28,6 +28,24 @@ Never guess an entity attribute — property location, tenancy status, cost stat
 - **Match on the right field.** Costs use the LEGACY `Payment Status`, not `Cost Status`. Filtering the wrong status field has produced confidently wrong impact stories before.
 - **A skill's own learning log is evidence, not proof.** Verify its claims against the table before acting on them.
 
+## Airtable queries (a wrong query still returns 200)
+
+- Paginate every read: follow `offset`, or use `airtableFetch()`. A hand-rolled fetch once read only the first 100 rows and the card showed a wrong score for a month.
+- A GET by record id ignores the table in the URL. To prove which table a record is in, list that table or attempt a write.
+- `ARRAYJOIN()` over a link field returns display names, never record ids. Match ids through a lookup of `RECORD_ID()`; a name match needs a control.
+- Date equality needs `DATESTR()` or `IS_SAME()`. `{Date}="2026-08-06"` returns zero.
+- A blank number field passes `!= 0` and fails `> 0`. Use `ABS({field}) > 0` for "set and non-zero", and test every formula change against a blank record.
+- Every count states the number it expects and fails loudly on a miss.
+- Anything that accumulates value lives in Airtable, never localStorage, keyed on something stable across records.
+- Never set a unit to Void without the six-question gate in the airtable-tenancy-ender skill. Occupancy lives in both the `Tenancies` and `Tenancies copy` links. A payment belongs to the tenancy in its own `Tenancy` link, not the tenancy record that displays it.
+- **New KPI compute code ships with its KPI Library entry in the same commit** — add the template to `KPI_LIBRARY` in `js/kpi-library.js` (canonical) and the rationale to `docs/kpi-library-spec.md`. The daily `kpi-library-coverage` invariant in `scripts/check-data-invariants.py` fails the sweep whenever a live automated KPI has no library template, so forgetting is loud, not silent
+- Only show ACTIVE businesses in dropdowns (filter by Active field)
+- Use exact field names consistently between read and write paths (e.g., 'Quarter End' vs 'QuarterEnd' caused a sync bug)
+- Watch for pagination when bulk-creating records to avoid duplicates
+- Bulk operations on invoices/transactions: never mark legitimate unpaid items as paid without explicit reconcile logic
+
+Incident write-ups: `docs/incident-lessons.md`.
+
 ## Standard Workflow
 
 Two commands cover all work. Kevin talks conversationally after either one. Claude handles the full pipeline.
@@ -37,7 +55,7 @@ Two commands cover all work. Kevin talks conversationally after either one. Clau
 
 Both skills run start-to-finish. Kevin approves the plan once, then receives a working, deployed result. No manual skill-chaining needed.
 
-- **GOAL and GOAL CHECK** (13 Sep 2026; both ends enforced 14 Sep 2026): every `/fix`, `/build-feature` and `/build-prompt` run states a GOAL block at the gate (one end state, numbered checks each naming its proof) and ends with a GOAL CHECK (every check PASS with proof or FAIL with why, then `Goal met? Yes/No`). Both ends run from hooks in `~/.claude/settings.json`, not from these skill files: the 13 Sep version lived only in the skill text and never fired, because the main checkout was not refreshed after the merge and three /fix runs loaded the old copy. **After merging any change to a repo skill, refresh the main checkout (`git fetch origin && git reset --keep origin/main`) and grep the file on disk; the skills load from there, not from GitHub.** A paste-ready line for Claude Code's built-in `/goal` is optional for long runs. Rules: `~/.claude/skills/goal-line/SKILL.md`.
+- After merging any change to a repo skill or rule, refresh the main checkout (`git fetch origin && git reset --keep origin/main`) and grep the file on disk; skills and rules load from the checkout, not from GitHub. The GOAL contract is injected by a hook; rule: `~/.claude/skills/goal-line/SKILL.md`.
 
 ## Forbidden Patterns
 
@@ -61,30 +79,12 @@ These have caused production bugs in this codebase. Check for them during every 
 - **returnFieldsByFieldId returning IDs not names** — when using `returnFieldsByFieldId=true` in Airtable API calls, field keys in the response are field IDs (e.g. `fldXyz123`), not human-readable names. If your code expects `rec.fields['Amount']` but gets `rec.fields['fldXyz123']`, every field read silently returns undefined. Match the approach used by the rest of the codebase (this project uses field names via the `F` constants in config.js, not raw field IDs)
 - **CSS overflow truncation** — long tenant names, property addresses, and note text clip without ellipsis or wrapping. Use `overflow: hidden; text-overflow: ellipsis; white-space: nowrap` on single-line cells, or `word-break: break-word` on multi-line content
 - **localStorage quota issues** — Safari has a 5MB localStorage limit. Large cached datasets (100+ transaction records with all fields) can exceed this. Use IndexedDB for large caches (follow the `dashboard.js` pattern), keep localStorage for small UI state only
-- **Airtable blank fields pass `!= 0` but fail `> 0`** — in an Airtable formula an empty number/currency field is NOT equal to 0, so `{blank} != 0` is TRUE while `{blank} > 0` is FALSE. Swapping `> 0` for `!= 0` to allow negatives makes every blank-field record take the wrong branch. This blanked `Report Amount` on 8,667 of 8,690 transactions in Jul 2026, taking out the P&L, dashboard, wealth and cashflow at once. To test "is this signed value set and non-zero" while keeping the blank fall-through, use **`ABS({field}) > 0`**. Whenever you change a formula condition, check it against a blank record, not just a populated one
-- **Split Override Amount must carry the sign of `**GBP`** — the split modal collects positive magnitudes (`totalRaw` uses `Math.abs`, validation requires every portion `> 0`), but Airtable's `Report Amount` returns the override verbatim. Writing a positive override on an expense flips an outflow into revenue across every report. Always multiply the portion by the sign of `**GBP` before writing (see `performReconSplit` in `js/reconciliation.js`). Inflow splits hid this for years because their sign is already positive — the first expense split would have posted £1,742.60 of costs as income
-- **A hand-rolled Airtable read must paginate, and a metric graded all-or-nothing must say which part failed** — `refreshReconAccuracyStats()` fetched the AI Recon Audit table with `pageSize=100` and never followed the `offset` token, so the AI Reconciliation Accuracy card measured the FIRST 100 rows and presented that as the score. On 6 Aug 2026 there were 259 rows in the window: the card read "66/100" while the truth was 167/259 = 64%. Nothing errored, and the number looked plausible for a month. The shared `airtableFetch()` helper paginates correctly; this code bypassed it with its own `fetch`, which is exactly how it escaped the existing `pagination-dedup` guard. **Any hand-rolled Airtable read is vulnerable the same way — grep for `fetch(` against `api.airtable.com` before trusting a number.** The same metric was also graded all-or-nothing across seven fields (category, sub-category, business, tenancy, unit, property, cost), so one habitually blank link dragged the headline down while the other six were fine, and the audit row recorded only a yes/no — never which field missed. A score you cannot attribute cannot be acted on. Guarded by `tests/sync-invariants/recon-accuracy-stats.spec.js` (back-tested: reverting the loop makes it report exactly 100)
-
-- **An address says WHERE, not WHICH, and a phone number IS the identity** — the duplicate key that groups agent tasks kept only the first two distinctive words, deleted every number as reference noise, and split on the lane prefix. Measured against the 55 tasks at the approval gate on 28 Aug 2026 it produced 43 cards and missed **seven real pairs**, each the same matter written twice: `Sefton Council HMO licence fee ... Viola St` vs `pay Sefton landlord licence fee ... Viola Street`, and one SMS thread appearing once in each lane. Kevin was working the queue and said so. Two rules came out of fixing it, and both were found by TESTING rather than reasoning. **Address words must never count as evidence of a duplicate** — he has ~27 properties with many open tasks each, so counting them folds a garden complaint into a rent arrears chase at the same house; place tokens (a street type, the name before it, the town after it) still show in the explanation but never toward the threshold, and the key defers them to the back of its two slots. **A verb is not identity** — `pay Sefton` and `Sefton Council` are one matter, and without `DUPE_ACTION_WORDS` two DIFFERENT phone numbers merge on the shared words \SMS\ and 
-eply\. Matching is now two passes (exact key, then `dupe_verdict`) with different strictness per caller: **grouping shows and may cross lanes; folding destroys and may not**, because a maintenance job absorbed into a reply task is a real obligation lost. Every grouping states its reason on screen — a duplicate Kevin cannot check is one he has to take on trust. Guarded by `tests/sync-invariants/approval-dupe-confirmation.spec.js` (16, using the real task names off the live queue) and `tests/agents-dupe-task-key.test.js`; back-tested by breaking each of the six mechanisms in turn
-
-- **A learning loop that stores what it learned in localStorage is not learning** — the reconciliation knowledge base saved a rule for every correction Kevin made, applied it at top priority, and looked like a working feedback loop. It was not compounding, for three reasons that only showed up in the stored data. (1) The key was the first three words with punctuation deleted and digits kept, so a per-transaction reference became part of the rule's identity: five separate rules existed for one recurring £2 charge (`british a1252236611488` … `492`), and **131 of 238 rules (55%) had fired exactly once**. Strip pure-digit tokens and tokens mixing letters with 3+ digits; two digits is a brand (`v12`, `57a`), three or more is a reference. (2) `findReconRule` returned the FIRST rule whose key appeared in the descriptor, so with 15 overlapping keys the winner depended on insertion order and a generic rule could hijack a specific one — prefer the LONGEST match. (3) The whole base lived in `localStorage`: one browser, one device, one cache clear from zero, which had already destroyed the accuracy log in Apr 2026. **Any store that accumulates value over time belongs in Airtable, and the key it is indexed by must be stable across transactions or nothing ever gets a second hit.** Keep the raw source text on each row: the old key format deleted token boundaries, so the existing keys could not be re-derived and had to be migrated best-effort. Guarded by `tests/recon-vendor-key.test.js` (extracts the real function from source rather than copying it) and `tests/sync-invariants/recon-knowledge-base.spec.js`
-
-- **"Labelled with no OPEN task" is not "stranded", and a machine receipt is never a matter** — the triage skill's stranded-mail rescue re-created a task for every lane-12 message whose thread had no open task. A thread keeps its label after its real task COMPLETES, so each later auto-acknowledgement ("Automatic reply: …", "Thank you for contacting… logged with reference CSV-…") minted a fresh task, a role agent turned it into a NO ACTION REQUIRED briefing or a CLOSE PROPOSAL, and Kevin was asked to approve nothing, four times between 28 Aug and 1 Sep 2026. Two rules: an auto-reply is decided by a machine signal (`auto_reply_signal` in `scripts/create-agent-task.py` — the RFC 3834 header, the subject family, or a receipt-shaped body with no question, no instruction and no position taken), never by the agent's judgement of a tier-1 subject; and the refusal sits in the task gate every create passes through, with the scan excluding flagged mail from the stranded lists and `act` refusing to lane it. Bounces are excluded on purpose: a bounce means something Kevin sent did NOT arrive, which is a task. Back-test any change to the signal read-only against the live lane-12 listing (the 100 newest), not against a fixture: the first version of the body test flagged a "do not reply to this email" data notice, and the header-presence version flagged a phishing mail. Guarded by both scripts' selftests and `tests/inbound-email-triage.test.js`. The second half of the same bug, found the same day: eight "nothing to decide" items Kevin cleared were re-creations of tasks he had already COMPLETED, because the rescue looked for an OPEN task. A thread that has EVER had a task is handled: the scan now looks up any-status tasks on every stranded thread (`lookup_thread_tasks`, both URL forms, batched) and moves them to `stranded_handled` before the agent sees them, with the lane-13 exception preserved (a reply task never handles a repair) and a failed lookup reading UNCHECKED rather than "nothing handled". Measured on 2 Sep 2026: 83 of 83 labelled threads in the 14-day window already had a task, so the old rule had been re-minting the whole board
-
-- **A lock file rewritten in place is empty for an instant, and "unreadable" is not "abandoned"** — the job queue's heartbeat refreshed `holder.json` with `open(path, "w")`, which truncates before it writes. On 2 Sep 2026 the inbound-triage waiter, polling every two seconds, read the file in that gap, decoded nothing, judged the lock ownerless (the age gate keyed on the lock DIRECTORY's stamp, fixed at acquire time, so a 15-minute-old live lock read as 903 seconds of debris) and took it. The heartbeat then saw a foreign holder and SIGKILLed the Task Manager's 13:00 slot mid-run: no score, no report, no done line, and no alarm anywhere, because every step behaved as designed. Three rules: write shared state to a temp file and `os.replace()` it over the real one (rename is atomic, truncate-then-write is not); age-gate a "debris" verdict on the NEWEST stamp the live holder refreshes, by a margin longer than one lease; and a run that loses a lock nobody else has taken should re-take it, not die. Stop a displaced child with TERM first so its wrapper can write its own done line. Guarded by `tests/job-queue.test.js` ("holder rewrites never expose a live lock", "re-takes a lapsed lock nobody claimed")
-
-- **A deleted constant with live uses passes every import and dies at 2am** — PR #399 (13 Sep 2026) removed `INTRO_LOCAL` from `scripts/content-engine/render.py` and left four uses inside `intro_clip()`. Python raises NameError only when that function RUNS, so the module imported, its selftest stayed green, and every long-episode render died clip by clip for two nights while the publisher held three approved episodes behind the day that could not render. Guarded by `tests/py-undefined-names.test.js`, which reads every estate script for a name it uses but never binds anywhere (back-tested: the #399 file reports `["INTRO_LOCAL"]`). Add any new production Python script to its list
-
-- **A classifier that reads the Notes reads every agent's run log** — the system-alert lane matched "Gmail quota" and "Apps Script" over the task's Notes as well as its name. Agent run logs say those words whenever a scan hits a limit, so eleven real matters (a letter before action 19 days overdue, £1,096.80 to verify, £50+VAT, two compliance renewals) were parked as machine alerts and never dispatched (found 14 Sep 2026). A lane that decides what a task IS reads the sender and the subject, never the trail agents write on it, and money, a creditor marker or the tier-1 banner is never an alert (`alert_veto`). Guarded by `tests/agent-dispatch-alert-lane.test.js`
-
-- **An approved task that stays open is not a hand-back every half hour** — `complete --keep-open` left the task Approved, so the 30-minute poll re-carried the same two EICR chases 48 times a day (one task's Notes reached 46,000 characters) and re-parked three login-gated tasks every tick; that poll used more of the weekly Claude allowance than the Content Engine and triage together, and the allowance ran out at Friday lunchtime (11 Sep 2026). A hand-back that was carried out and kept open, or parked on a sign-in, rests 24 hours as `idleHandbacks` (listed with its reason, never hidden) and wakes early when Approved At moves. Guarded by `tests/agent-dispatch-idle-handback.test.js`
-
-- **Never express the day of the week in a Cloudflare cron** — `"0 8 * * 1-5"` reads as Mon–Fri to every human and to standard cron, where Sunday is 0. Cloudflare starts the week at **Sunday = 1**, so `1-5` runs **Sun–Thu**. The CEO brief lost every Friday and gained a Sunday for a week before anyone noticed, because a brief still arrived most mornings and no error was ever raised. Measured via `workersInvocationsAdaptive` for 27 Jul – 3 Aug 2026: zero invocations Sat 1 Aug, a full pair Sun 2 Aug, no 08:00 firing Fri 31 Jul. Set the cron to `* * *` (every day) and decide the day **in the worker**, in the target timezone, with a test. See `isLondonSendTime()` in `scripts/slack-automation/money-daily-worker.js` and `tests/ceo-brief-schedule.test.js`, which also fails if a day-of-week filter reappears in the cron. Applies to the hour too: a scheduled job that must land at a UK local time needs two UTC crons plus a code gate, never one cron and an assumption about BST
-
-- **A read against the WRONG Airtable table returns 200 with full data** — `GET /v0/{base}/{table}/{recordId}` resolves the record id across the **whole base** and ignores the table in the URL. On 18 Sep 2026 three records were read, cross-checked, tabulated and queued for deletion as rows of `Tenancies` (`tblN51a88qTDB6iMH`); every read succeeded and every field was real. They actually lived in `tblCGmeUTyx1N7LNe` "Tenancies (Accounts Statement) Legacy", a dead 48-row table nothing reads. The **DELETE** is what exposed it, with `NOT_FOUND` on an id a `GET` had just returned in full. A write tells the truth; a read does not. To prove which table a record is in, LIST that table with pagination and look for the id, or attempt a write. This is the same family as the silent-zero rule below: Airtable answers `200 OK` to questions it has not actually been asked
+- **Airtable rules** (blank fields, the table a record id really lives in, voiding a unit) sit in "Airtable queries" above. The incident write-ups are in `docs/incident-lessons.md`
+- **Reconciliation lessons** (split sign, paginated reads, the learning loop): `.claude/rules/reconciliation.md`, loaded when `js/reconciliation.js` or a recon test is read
+- **Agent task pipeline lessons** (duplicate key, auto-replies and stranded mail, the alert lane, idle hand-backs): `.claude/rules/agent-task-pipeline.md`, loaded when the agent task scripts, `os/agents/index.html` or their tests are read
+- **Python script lessons** (atomic lock-file writes, a deleted name that still passes import): `.claude/rules/python-scripts.md`, loaded when any `scripts/**/*.py` is read
+- **Cloudflare cron:** never put the day of the week in a Cloudflare cron. Detail: `.claude/rules/cloudflare-cron.md`, loaded when a wrangler toml or Worker file is read
 - **A master switch that reads On is not the setting that earns, and a filter on HOW something was uploaded hides it from the report that would have caught it** — the Content Engine switched every YouTube video's monetisation On and every surface agreed: the morning line read "content monetisation: every YouTube episode and Short On". On 20 Sep 2026 Kevin said the long episodes were not earning. He was right. The master switch buys a pre-roll; **mid-roll ads were off on 817 of the 888 videos over 8 minutes**, with YouTube's own break point already computed and waiting on 695 of them, and a further 923 videos from 2020 to Nov 2023 had no video ads at all, only display banners. Nothing was broken, nothing errored, and the thing being measured was simply not the thing that makes money. Three rules came out of it. **Measure the setting that produces the outcome, not the switch nearest to it.** **A selector on provenance is a selector on visibility** — `monetise_long_video` matched posts with `route == "api"`, so every GoHighLevel upload (which carries GHL's own post id, not a YouTube one) was stepped over in silence, and the report used the same filter, so 2054's episode, 2054's Short and 2195's episode were invisible in both places; match on the identity of the thing (the video id, resolved through the episode's `youtube_link`), never on how it arrived, and report what you cannot resolve. And **a 200 from an undocumented internal endpoint is not a write**: Studio's `metadata_update` needs the page's minted BotGuard `attestationResponseData`, and replayed without it it answers `200 OK` and changes nothing — proved on `Rs8xHbD5miQ`, 200 then `hasMidrollAds` still false on read-back. Same family as the Airtable silent-zero rule above. So a genuine UI save mints an attestation, the rest of the batch replays it, and **every id is read back off the source before anything is called done**. Guarded by `tests/content-engine-ads.test.js` (back-tested: restoring the route filter fails "does not filter YouTube posts by upload route")
-- **Never void a rental unit without checking every tenancy link on it** — the `airtable-tenancy-ender` skill set `Unit Status = Void` from the tenancy's own `Rental Unit` link with no check. On 18 Sep 2026, ending Kevin Radford's tenancy, that link was EMPTY on the live billing record while a legacy copy carried it, and the unit it pointed at was let to Cheffins for £1,096.80 a month. Voiding it would have taken out the occupancy rollups and the cash flow forecast, and nothing would have errored. Three rules, all of which cost a wrong turn to find. A unit's occupancy lives ONLY in its link fields, and in BOTH of them: `Tenancies` (`fldxOnUDg49C2PNVW`) and `Tenancies copy` (`fldmpIYp1cN0eQgWt`, which points into the legacy table). The plain-text `Tenants Field` (`fldUs1pONuxxL6Mcm`) is unmaintained and read "Kevin Radford" seventeen months after he left. And **the only reliable test of which tenancy a payment belongs to is the transaction's own `Tenancy` link, not the tenancy record that displays it** — legacy copies display transactions that point back at a different, often still-live, tenancy, which is how both Peters and Cheffins were nearly closed as past lets. The six-question gate is in the skill, mirrored at `.claude/skills/airtable-tenancy-ender/`
 
 ## Regression Tests (no bug is fixed until it is caught)
 
@@ -113,8 +113,11 @@ matching the population the bug would corrupt; if the control matches nothing, t
 rather than passing. Back-test a new invariant by evaluating the *broken* formula inline in a
 read-only query and confirming it fires — never by writing bad data.
 
-## File Architecture (Split for Concurrent Editing)
+## File Architecture
 
+Where every file lives: `STRUCTURE.md`. The old source tree below is kept for maintainers only.
+
+<!--
 The platform has been split from a single monolith into separate files so that **multiple Claude sessions can work on different features at the same time** without overwriting each other.
 
 ### Source Files
@@ -143,32 +146,20 @@ os/                 ← Operating Systems (separate pages loaded via iframe)
 - `os/business-plan-builder/` — retired from the shell 1 Aug 2026 (no sidebar entry); files kept for the Supabase client product, where Plan Builder remains a toggleable module
 - `os/tasks/`, `os/operations/`, `os/strategy/`, `os/systemisation/`, `os/team/` — Operating Systems pages (loaded via iframe; the old os/index.html hub and os/launch-plan.html were removed in the sidebar restructure)
 - `sitemap.xml` / `robots.txt` — SEO files (update when adding new pages)
+-->
 
-## CRITICAL: Concurrent Session Rules
+## Concurrent sessions
 
 ### The Golden Rule
 **Two sessions must NEVER edit the same file at the same time.**
 
-Each session should only edit the file(s) for its feature. Before starting work:
-1. Run `git pull` to get the latest code
-2. Edit ONLY the file(s) for your feature
-3. Commit and push promptly when done
+Each session edits only the file(s) for its feature, and commits and pushes its branch promptly when done.
 
 ### The Golden Rule is necessary but NOT sufficient — use separate worktrees
 
 File-level ownership does not protect what git actually shares: **HEAD, the index, the stash,
-and the working tree**. On 2026-07-16 two sessions in one checkout produced all of the
-following, and not one of them is a file collision:
-
-- Session B ran `git stash` and swept Session A's uncommitted fix into a stash it labelled
-  "not-mine", then checked out another branch. A's edits vanished from the tree mid-task.
-- Session B pushed `main` while A's unpushed commit sat on it — A's commit shipped inside B's
-  push, untested by A.
-- Session B switched the checkout onto a feature branch, so A's next commit landed on the
-  wrong branch. `git push origin main` then reported "Everything up-to-date" while A was
-  three commits ahead somewhere else. A only noticed because the push was suspiciously quiet.
-- B's dev server held the Playwright port, so A's pre-push test gate failed for a reason that
-  had nothing to do with A's code — a false red that invites a `SKIP_SYNC_TESTS=1` bypass.
+and the working tree**. Two sessions in one checkout have swept each other's work into stashes,
+shipped each other's commits and pushed to the wrong branch (16 Jul 2026).
 
 **Run concurrent sessions in separate git worktrees.** A single checkout cannot be shared.
 Do not hand-roll the `git worktree` command — use the script, which also assigns a preview
@@ -213,14 +204,13 @@ If a checkout genuinely must be shared: commit before EVERY context switch, neve
 work you did not write (leave it and say so), and run `git status -sb` before assuming which
 branch you are on — especially before reading a quiet "Everything up-to-date" as success.
 
+When a feature gets overwritten by another commit, check git history before reimplementing.
+
 ### Session hygiene — this Mac has 16 GB and 8 cores
 
 Worktrees fix *correctness* under concurrency. They do nothing for *capacity*, and capacity
-is a real limit here. On 2026-08-06 six sessions ran at once in one checkout and the machine
-became unusable: 25.5 GB of demand squashed into 16 GB of RAM (a 3.9x compression ratio),
-9.2 GB of swap, 0.1 GB genuinely free, and a load average of 105 on 8 cores. Nothing had
-leaked and nothing was broken. It was simply oversubscribed, which is why no error was ever
-raised and why it went unexplained for days.
+is a real limit here: six sessions at once on 6 Aug 2026 made the machine unusable, with no
+error raised, because nothing was broken, only oversubscribed.
 
 - **Three concurrent sessions maximum.** Close one before opening a fourth. Each session
   carries its own MCP servers and helper processes on top of its own memory.
@@ -239,9 +229,7 @@ raised and why it went unexplained for days.
 
 MCP servers and CLI tools configured with `--api-key <token>` put that token in the process
 table, where any process running as the same user can read it with `ps`. It also lands in
-session transcripts on disk. Use a file (`~/.config/od/airtable_pat`) or an env var. Found on
-2026-07-16: the Airtable PAT was visible 7 times in `ps` output, passed to an MCP connector
-that was broken and unused anyway.
+session transcripts on disk. Use a file (`~/.config/od/airtable_pat`) or an env var.
 
 ### Which file to edit for each feature
 
@@ -282,7 +270,7 @@ All JS files share a global scope (loaded as plain `<script>` tags). Key globals
 - `F`, `TABLES`, `INV`, `REC`, `PS` — field/table/record ID constants in `config.js`
 - Helper functions (`getField`, `fmt`, `escHtml`, `expandableCard`, etc.) in `shared.js`
 
-## MANDATORY: Quality Gate (Every Task, No Exceptions)
+## Quality gate
 
 The user is a non-technical operator. Every task must be delivered working and verified. Do NOT ask the user to check the console, run commands, test manually, or debug. If Claude Code can do it, Claude Code does it.
 
@@ -357,10 +345,7 @@ If any of these are needed, do them yourself. The user's role is to describe wha
 
 `~/.claude/agents/ESTATE.md` is the one dated page saying how the AI workforce, the approval
 gate, Kevin's surfaces and the clocks fit together. The CEO, every head, every worker, the
-`/ceo` and `/huddle` skills and the 06:45 CEO slot read it first. Kevin stopped using his CEO
-on 7 Sep 2026 because the files around him had drifted: eight heads, the `/ceo` skill, four
-brain files and the 09:00 brief worker still routed work to Mica, quoted £50/£250 and
-described Slack cards weeks after each was retired.
+`/ceo` and `/huddle` skills and the 06:45 CEO slot read it first.
 
 - **Any ruling that changes routing, autonomy levels, the money rule, where Kevin decides, the
   workforce shape or the clocks** goes to the brain's `Decisions/` AND into `ESTATE.md` with
@@ -375,99 +360,23 @@ described Slack cards weeks after each was retired.
 
 The git repo IS the source of truth. Edit files directly here.
 - Live URL: https://app.operationsdirector.co.uk/ (GitHub Pages custom domain since 8 Sep 2026; the old https://chaichoong.github.io/leadership-dashboard/ redirects)
-- Push to `main` branch → auto-deploys in 2-3 minutes
-- Always `git pull` before starting work, and push promptly after committing
+- Every push or merge that lands on origin/main auto-deploys in 2-3 minutes
+- Push promptly after committing
 
-### MANDATORY: Confirm Deploy is Live
+### Confirm the deploy is live
 
-After every `git push origin main`, you MUST:
-1. Push the code
-2. Poll the GitHub Pages deployment until it completes (use the deploy monitor script or check the GitHub Actions status)
+After every push or merge that lands on origin/main:
+1. Push or merge the code
+2. Poll the GitHub Pages deployment until it completes (use the poll in memory `reference_deploy_poll.md`, Pages workflow 253912194, or `gh run watch`)
 3. Only THEN tell the user the work is done and the changes are live
 
 Never say "done" after pushing and leave the user waiting. The task is not complete until the deploy is confirmed live. If the deploy takes longer than expected, keep the user informed with a short status update.
 
 **Never claim an outcome you have not observed.** Do not say a nightly sync will pick something up, that a cron will fire, or that a deploy carried a change, unless you watched it happen. Report exactly what you clicked and what you saw. Bump the cache-bust version as part of the change, not after Kevin reports a stale page.
 
-## Communication
+## Design System
 
-Kevin is a non-technical operator. Explain in plain English at roughly a 13-year-old reading level — no jargon, no unexplained acronyms, no internal codenames. Keep it short. Lead with what happened, then the detail. Chunk long output across several messages rather than one wall of text.
-
-## Design System — Sage Executive (light)
-
-The platform uses a **single design-token stylesheet** so every page — main shell, iframe pages, OS pages, SOPs — looks like part of the same software.
-
-### The rule for every new page
-
-**Every new HTML file MUST link `css/tokens.css` in its `<head>` BEFORE any other stylesheet or `<style>` block:**
-
-```html
-<!-- Root level (follow-up.html, compliance.html, sop*.html) -->
-<link rel="stylesheet" href="css/tokens.css?v=1">
-
-<!-- os/*.html -->
-<link rel="stylesheet" href="../css/tokens.css?v=1">
-
-<!-- os/{subdir}/*.html -->
-<link rel="stylesheet" href="../../css/tokens.css?v=1">
-```
-
-This gives the page:
-- **DM Sans** font (auto-loaded from Google Fonts; the platform switched from Inter — never reintroduce Inter in new code or export templates)
-- The sage-executive palette via CSS custom properties
-- Default body background, text colour, and font rendering
-
-### Token reference — always use these, never hardcode
-
-| Purpose | Token | Value |
-|--------|-------|-------|
-| Page/app background | `var(--bg-app)` | pale sage `#F1F3EF` |
-| Card/panel surface | `var(--bg-surface)` | `#FBFBF9` |
-| Hover surface / zebra | `var(--bg-surface-2)` | `#F4F6F1` |
-| Table header / subtle chip | `var(--bg-subtle)` | `#E5E8E1` |
-| Sidebar (dark accent) | `var(--bg-sidebar)` | forest `#263330` |
-| Primary text | `var(--text-primary)` | `#1C2422` |
-| Secondary text | `var(--text-secondary)` | `#5A6660` |
-| Muted text | `var(--text-muted)` | `#8A928C` |
-| Border (default) | `var(--border-default)` | `#DDE1D9` |
-| Border (subtle / divider) | `var(--border-subtle)` | `#E5E8E1` |
-| Accent / primary CTA | `var(--accent)` | green `#2C6E49` |
-| Accent hover | `var(--accent-hover)` | `#1B4A30` |
-| Accent-tinted bg | `var(--accent-soft)` | `#DDE8DF` |
-| Gold highlight (KPI / warn) | `var(--accent-gold)` | `#C6A15B` |
-| Success (text) / bg | `var(--success)` / `var(--success-bg)` |  |
-| Warning | `var(--warning)` / `var(--warning-bg)` |  |
-| Danger | `var(--danger)` / `var(--danger-bg)` |  |
-| Info | `var(--info)` / `var(--info-bg)` |  |
-
-**Tonal palette** — for categorical colour-coding (e.g. 5 sequential weeks, tag categories) where you want distinct colours that still read as part of the sage-executive family. All five are muted earth tones at the same saturation:
-
-| Token | Colour | Example use |
-|-------|--------|------------|
-| `var(--tone-sage)` | `#2C6E49` | Week 1 / default / primary group |
-| `var(--tone-olive)` | `#5F7A3A` | Week 2 / secondary group |
-| `var(--tone-gold)` | `#B8933A` | Week 3 / tertiary group |
-| `var(--tone-blue)` | `#5A86CF` | Week 4 / quaternary group |
-| `var(--tone-plum)` | `#8B6FAE` | Week 5 / final group |
-
-Use these for sequential/categorical differentiation, NOT for status (use success/warning/danger/info for that).
-
-Typography tokens: `--fs-xs` to `--fs-3xl`, `--fw-regular/medium/semibold/bold`, `--font-family-base`.
-Spacing: `--space-1` through `--space-10` (4px scale).
-Radii: `--radius-sm/md/lg/xl/full`.
-Shadows: `--shadow-sm/md/lg`.
-
-### Rules
-
-1. **Never hardcode a colour.** If the token palette lacks what you need, add it to `css/tokens.css` rather than inlining a hex. Example: a new status colour should be added as `--info-2` in tokens, not `#abcdef` in a feature stylesheet.
-2. **Never set `font-family` manually.** DM Sans comes via tokens.css; body inherits it. Delete any `-apple-system, BlinkMacSystemFont, ...` declarations in new code. Exception: print/export popups that cannot load tokens.css carry their own self-contained 'DM Sans' declaration with a comment saying why.
-3. **Don't introduce a dark theme** for a single page. The whole platform is light-only for now; a dark-mode toggle would be a platform-level change.
-4. **Inline styles should use tokens too:** `<div style="color:var(--text-secondary)">` rather than `color:#64748b`. This makes future rebrands painless.
-5. **Iframe pages** must import tokens.css with the correct relative path (see examples above) so they render on the same palette as the parent shell.
-
-### When changing the look of the whole app
-
-Edit `css/tokens.css` only. A change there propagates to every page.
+Sage Executive tokens, and the rule that every new HTML page links `css/tokens.css` first: `.claude/rules/design-system.md`, loaded when a `.js`, `.html` or `.css` file is read.
 
 ## Version Tracking
 
@@ -477,23 +386,7 @@ PAGE_REGISTRY in `js/config.js` tracks page and SOP versions.
 - The file-to-page mapping is in `scripts/pre-commit-action.py`. Update it when adding new pages.
 - When the SOP is updated to match, manually bump `sopVer` to match `pageVer`.
 
-## Airtable Conventions
-
-- **New KPI compute code ships with its KPI Library entry in the same commit** — add the template to `KPI_LIBRARY` in `js/kpi-library.js` (canonical) and the rationale to `docs/kpi-library-spec.md`. The daily `kpi-library-coverage` invariant in `scripts/check-data-invariants.py` fails the sweep whenever a live automated KPI has no library template, so forgetting is loud, not silent
-- Only show ACTIVE businesses in dropdowns (filter by Active field)
-- Use exact field names consistently between read and write paths (e.g., 'Quarter End' vs 'QuarterEnd' caused a sync bug)
-- **Filter linked records by record ID — but only a LOOKUP of record IDs, never the link field itself.** `ARRAYJOIN()` over a *link* field yields the linked record's **primary field (its display name)**, never its ID, so `FIND("recXXX", ARRAYJOIN({LinkField}))` matches nothing and returns `200 OK` with an empty list. Verified on Tasks `tblqB8b22hKBL4PF1`, 6 Aug 2026: `FIND("reca9ofzhuw13ZzGE", ARRAYJOIN({Business}))` → **0 rows**, while `ARRAYJOIN({Business})="Operations Director"` and `FIND("rec4b5MDoaxEC7WRE", ARRAYJOIN({Record ID (Used for Automation) (from Team Members)}))` both match. So:
-  - **Preferred:** add or use a lookup field that surfaces the linked record's `RECORD_ID()`, then `FIND()` against that. Stable across renames. This is what the rule has always meant
-  - **Acceptable when no such lookup exists:** match the display name (`{Business}="Operations Director"`). Works today, but breaks silently the day someone renames the record, so pair it with a control
-- **Every filterByFormula that counts something needs an expected count.** A wrong field name, a link-field ID match, or a bare date comparison all return `200 OK` and `{"records":[]}` — a broken query and a genuinely empty result are indistinguishable. State the number you expect and fail loudly on a miss. Date fields are the sharpest edge: `{Date}="2026-08-06"` returns zero even when the record exists; use `DATESTR({Date})="2026-08-06"` or `IS_SAME({Date},DATETIME_PARSE(...),'day')`. A silent zero on an existence check that gates a create writes the duplicate the check exists to prevent
-- Watch for pagination when bulk-creating records to avoid duplicates
-- Bulk operations on invoices/transactions: never mark legitimate unpaid items as paid without explicit reconcile logic
-
 ## Deployment & Git
-
-- After pushing changes, verify the deploy is live before declaring done (check for stale browser cache, hard reload if needed)
-- Be aware that parallel sessions can sweep uncommitted edits into other commits — commit before context-switching
-- When a feature gets overwritten by another commit, check git history before reimplementing
 
 ### Branch Strategy
 
@@ -513,7 +406,7 @@ PR for the same change is always a bug, not belt-and-braces.
 
 ### Creating the PR
 
-**`gh` IS installed and authenticated** (3 Aug 2026). Binary at `~/tools/bin/gh`, v2.97.0, on PATH via `~/.zshrc`. Logged in as `chaichoong` with scopes `repo`, `workflow`, `read:org`, `gist`. There is no Homebrew on this Mac; it was installed as the official release binary into a user directory, so no admin password is involved. Claude creates and merges PRs itself — do not send Kevin a compare URL to click any more.
+`gh` is installed and authenticated as `chaichoong`; Claude creates and merges PRs itself, and never sends Kevin a compare URL to click.
 
 ```bash
 git push -u origin <branch>
@@ -534,8 +427,7 @@ Do NOT quietly merge to main locally as a fallback when a branch was created for
 ⚠️ **This fallback is the one that has actually caused duplicates.** You have already
 committed to `main`, the gate blocks the push, so you branch off that commit and PR it.
 The squash merge then puts a different SHA on origin and your original commit is stranded
-on local `main`. On 6 Aug 2026 this happened three times in twenty minutes (PRs #36, #37,
-#38), leaving local `main` seven commits ahead of origin while being 379 lines *behind* it.
+on local `main`.
 
 So when the gate sends you down the branch route, finish the job:
 

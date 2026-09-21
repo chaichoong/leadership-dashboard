@@ -50,7 +50,7 @@ Note which sections are thin or empty.
 ### 0b. Fill gaps from available context
 
 Before asking Kevin questions, check what you can answer yourself:
-- Read CLAUDE.md for conventions, file architecture, design tokens
+- Read CLAUDE.md for conventions, `STRUCTURE.md` for file locations, and `.claude/rules/design-system.md` for design tokens
 - Read `js/config.js` for existing field maps and table IDs
 - Check memory files for project state and preferences
 - Look at git history for recent changes and patterns

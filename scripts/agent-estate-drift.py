@@ -99,6 +99,10 @@ RETIRED = [
      "tier 1 is PREPARED by an agent and lands with Kevin labelled; tier 2 no longer exists"),
     (r"Mica handles ALL creditor and debt correspondence", "2026-08-25",
      "the Supplier and Creditor Manager agent prepares every creditor matter; Kevin approves"),
+    # Case-insensitive on purpose: the retired name appears as both "the
+    # teardown call" and "The Teardown call" (dept-sales.md, 21 Sep 2026).
+    (r"(?i)teardown call", "2026-07-31",
+     "the sales call is the Operations Review Call, everywhere, with no exceptions"),
 ]
 
 # A line that is describing the old rule, not stating it.
@@ -245,6 +249,8 @@ def selftest():
     # 7 fires too: its history word comes AFTER the stale rule.
     assert lines == [4, 5, 6, 7], "selftest: expected hits on 4,5,6,7 got %s" % lines
     assert not scan_text("Route to the Supplier and Creditor Manager agent.", "x")
+    assert scan_text("Use for the teardown call.", "x")
+    assert scan_text("The Teardown Call runs first.", "x")
     assert stamp_of(os.devnull) is None
     assert rulings_after("2026-09-07", os.devnull) == []
     print("selftest ok: %d retired patterns, fixture fires on lines 4, 5, 6, 7"
