@@ -36,6 +36,7 @@ When genuinely unsure whether someone is a founder-buyer or a seller, lean towar
 - Airtable PAT: `~/.config/od/airtable_pat` (curl, base `appnqjDpqDniH3IRl`)
 - Prospects table: `tbljHVGJoKJf8acy3` — field IDs in `js/config.js` (`PROSPECT` map)
 - Prospect Keywords table: `tblB5tZrXNaKFe02j` (`PKEY` map)
+- Prospecting Playbook table: `tbldWLYm49Bw21WB8` — the learned playbook, one row per lesson (see "Learned playbook" at the bottom)
 - GHL Private Integration token: `~/.config/od/ghl_api_key` (optional — if missing, skip step 6 and tell Kevin what to create)
 - GHL Location ID: `~/.config/od/ghl_location_id` — MUST be `dgsHwbYbp6xrhRGZr9ik` (the "Operations Director" sub-account, Kevin-confirmed 13 Jul). The Runpreneur sub-account (4ags…UT0) is the property business — tenant SMS lives there; prospects must NEVER be created in it.
 - Email sends via GHL conversations REQUIRE `"emailFrom": "kevin@operationsdirector.co.uk"` (the location 500s without it). Dedicated sending domain mail.operationsdirector.co.uk is configured.
@@ -45,6 +46,7 @@ When genuinely unsure whether someone is a founder-buyer or a seller, lean towar
 ### 1. Load state from Airtable
 
 - Fetch all Prospect Keywords where Active is true. Sort by Last Used ascending (never-used first). Pick the top 2-3 for this run.
+- Read the learned playbook from Airtable with the READ command in "Learned playbook" at the bottom of this file. It writes every lesson to a scratch file and prints the row count; search that file by keyword whenever a step needs a past lesson.
 - **Build the dedupe set with the script, never by hand:**
 
   ```
@@ -303,7 +305,7 @@ Kevin's end state: he first sees a prospect when the call lands in his diary. Th
 **North star: calls ATTENDED.** The full chain is found → contacted → replied → booked → attended. Each run, compute the funnel numbers and identify the current bottleneck stage; bias the next run's effort toward it (more finding, sharper drafts, faster follow-ups, or reminder tuning).
 
 1. **Keyword evolution:** using each prospect's Keyword Matched field, score keywords by what they produced DOWNSTREAM (approvals, replies, calls — not just finds). After a keyword has been used 4+ times with zero approved prospects, deactivate it (never delete; note why in its Notes). When producing posts reveal new first-person pain language, add at most 2 new keyword variants per week, marked "agent-proposed" in Notes.
-2. **Playbook write-back:** any repeatable discovery (where an email was hiding, which group produced, which platform pattern worked or failed, which draft wording got a reply) gets appended as ONE dated bullet to the local-only playbook file named in the "Learned playbook" section at the bottom of this file (not to this file). Keep it curated: merge duplicates, prune bullets disproven later. This is how the agent gets permanently smarter.
+2. **Playbook write-back:** any repeatable discovery (where an email was hiding, which group produced, which platform pattern worked or failed, which draft wording got a reply) gets appended as ONE new row in the Airtable Prospecting Playbook table with the APPEND command in the "Learned playbook" section at the bottom of this file (never to this file, never to the local snapshot). Keep it curated: correct or retire a lesson disproven later with a dated note on its row, and check the scratch copy for an existing lesson before adding a near-duplicate. This is how the agent gets permanently smarter.
 3. **Draft evolution:** track which opener styles get replies (the Pain Signal + Draft Message of Replied prospects vs silent ones). Fold winning patterns into the drafting rules in §4.5 by editing them — with a dated note of what changed and the evidence.
 4. **Attendance loop:** read appointment outcomes from GHL for booked calls. If no-shows exceed 1 in 3, say so in the report and propose reminder-sequence changes to Kevin.
 5. **Evidence bar:** at 5 prospects/day the numbers are small — never change anything on fewer than 4 data points, and log EVERY self-change in the daily report so Kevin sees each mutation.
@@ -323,6 +325,88 @@ Keep it honest — a zero-result run says so plainly, with the likely reason. In
 
 ---
 
-## Learned playbook (local-only, read on demand)
+## Learned playbook (Airtable, read on demand)
 
-The learned playbook lives at `/Users/kevinbrittain/Projects/leadership-dashboard/.claude/skills/prospect-daily/learned-playbook.local.md`. It is git-ignored and exists only on this Mac: it moved out of this file on 21 Sep 2026 (63,662 bytes, every bullet kept) because this repo is public and the bullets name real prospects and their email addresses, and because it loaded about 16,000 tokens into every run. Search it by keyword when a step needs a past lesson (where an email was hiding, which group or query produces or has decayed, a namesake trap, draft wording) rather than reading it whole. The §8 write-back appends its dated bullets to that file, never to this one. It is this skill's own state file, not code and not a working file, and nothing in it is committed, so appending to it is allowed in the read-only prospecting slot. If the file is missing, say so in the report and carry on; never rebuild it from memory.
+The learned playbook lives in Airtable: table **Prospecting Playbook** (`tbldWLYm49Bw21WB8`, base `appnqjDpqDniH3IRl`), one row per lesson. Fields: `Title` (short label), `Lesson` (the lesson, verbatim, starting with its date), `Section` (`Learned playbook`), `Added` (date), `Source` (where the row came from), `Key` (the stable dedupe key). It moved there on 21 Sep 2026 (Kevin approved): 120 lessons, every byte kept. It left this public file that morning because the lessons name real prospects and their email addresses. It left the local file the same day because the robot runners may no longer write under `.claude/`, and because a store that builds up value belongs in Airtable, not on one Mac.
+
+Both commands read the PAT file inside the command and never print it or put it on a command line. They run on python3 (covered by the robots' `Bash(python3:*)`) and call the same Airtable REST API the curl steps above use.
+
+**READ (start of every run, §1).** Pages through the whole table, writes every lesson to a scratch file and prints the row count. Search that file by keyword (Grep) when a step needs a past lesson: where an email was hiding, which query produces or has decayed, a namesake trap, draft wording. Do not load it whole; it is about 16,000 tokens.
+
+```
+python3 - <<'EOF'
+import json, os, tempfile, urllib.parse, urllib.request
+PAT = open(os.path.expanduser("~/.config/od/airtable_pat")).read().strip()
+URL = "https://api.airtable.com/v0/appnqjDpqDniH3IRl/tbldWLYm49Bw21WB8"
+rows, offset = [], None
+try:
+    while True:
+        q = {"pageSize": "100", "sort[0][field]": "Added", "sort[0][direction]": "asc"}
+        if offset:
+            q["offset"] = offset
+        req = urllib.request.Request(URL + "?" + urllib.parse.urlencode(q), headers={"Authorization": "Bearer " + PAT})
+        d = json.load(urllib.request.urlopen(req, timeout=60))
+        rows += d["records"]
+        offset = d.get("offset")
+        if not offset:
+            break
+except Exception as e:
+    raise SystemExit("PLAYBOOK READ FAILED: %s. Search the local read-only snapshot instead and say so in the report." % e)
+out = os.path.join(os.environ.get("AGENT_SLOT_SCRATCH") or tempfile.gettempdir(), "prospecting-playbook.txt")
+with open(out, "w", encoding="utf-8") as fh:
+    for r in rows:
+        f = r["fields"]
+        fh.write("[%s] %s (%s)\n%s\n\n" % (f.get("Added", "?"), f.get("Title", ""), r["id"], f.get("Lesson", "")))
+print("PLAYBOOK: %d rows read from Airtable -> %s" % (len(rows), out))
+if len(rows) < 120:
+    print("PLAYBOOK READ SUSPECT: fewer than the 120 rows migrated on 21 Sep 2026, and rows are never deleted. Treat it as a broken read.")
+EOF
+```
+
+**APPEND (end of every run, §8.2).** One command per lesson. Fill in `TITLE` and `LESSON` only, and write the lesson the way the existing rows read: `YYYY-MM-DD (SHORT LABEL): what happened, the evidence, and the rule it gives`. The command builds the key from Section plus the whitespace-collapsed Lesson and reads every existing key first (paginated). If the key is already there it skips the write, so a retried append never makes a duplicate. It refuses to write at all if it reads fewer than 120 rows, because a broken read would wave a duplicate through. It reads the new row back before it reports success. If the lesson contains three single quotes in a row, change them; nothing else needs escaping.
+
+```
+python3 - <<'EOF'
+import datetime, hashlib, json, os, re, urllib.parse, urllib.request
+TITLE = r'''SHORT LABEL'''
+LESSON = r'''YYYY-MM-DD (SHORT LABEL): the lesson.'''
+SOURCE = "prospecting run " + datetime.date.today().isoformat()
+SECTION = "Learned playbook"
+PAT = open(os.path.expanduser("~/.config/od/airtable_pat")).read().strip()
+URL = "https://api.airtable.com/v0/appnqjDpqDniH3IRl/tbldWLYm49Bw21WB8"
+def call(method, url, body=None):
+    data = None if body is None else json.dumps(body).encode("utf-8")
+    req = urllib.request.Request(url, data=data, method=method, headers={"Authorization": "Bearer " + PAT, "Content-Type": "application/json"})
+    return json.load(urllib.request.urlopen(req, timeout=60))
+LESSON = LESSON.strip()
+key = "pb-" + hashlib.sha256((SECTION + "\n" + " ".join(LESSON.split())).encode("utf-8")).hexdigest()[:16]
+rows, offset = [], None
+while True:
+    q = {"pageSize": "100", "fields[]": "Key"}
+    if offset:
+        q["offset"] = offset
+    d = call("GET", URL + "?" + urllib.parse.urlencode(q))
+    rows += d["records"]
+    offset = d.get("offset")
+    if not offset:
+        break
+if len(rows) < 120:
+    raise SystemExit("PLAYBOOK APPEND REFUSED: read %d rows, expected 120 or more, so the duplicate check cannot be trusted." % len(rows))
+hit = [r["id"] for r in rows if r["fields"].get("Key") == key]
+if hit:
+    print("PLAYBOOK APPEND SKIPPED: key %s already exists on %s" % (key, hit[0]))
+    raise SystemExit(0)
+m = re.match(r"(\d{4}-\d{2}-\d{2})", LESSON)
+added = m.group(1) if m else datetime.date.today().isoformat()
+title = TITLE.strip() or LESSON[:100]
+fields = {"Title": title[:100], "Lesson": LESSON, "Section": SECTION, "Added": added, "Source": SOURCE, "Key": key}
+rec = call("POST", URL, {"records": [{"fields": fields}]})["records"][0]
+back = call("GET", URL + "/" + rec["id"])["fields"]
+ok = back.get("Key") == key and back.get("Lesson") == LESSON
+print("PLAYBOOK APPENDED %s key %s, read back %s, table now %d rows" % (rec["id"], key, "OK" if ok else "MISMATCH", len(rows) + 1))
+EOF
+```
+
+**Curating.** Never delete a row, and never change a row's `Key`: it is the row's identity, set once at creation. To correct or retire a lesson disproven later, PATCH that row's `Lesson` (its record id is in brackets in the scratch file) so it starts with `CORRECTED YYYY-MM-DD:` or `RETIRED YYYY-MM-DD:` and the reason, the way the 23 Jul Cloudflare lesson was corrected on 7 Aug. List every correction in the run report.
+
+**If Airtable is unreachable.** Only then, search the local read-only snapshot at `/Users/kevinbrittain/Projects/leadership-dashboard/.claude/skills/prospect-daily/learned-playbook.local.md` (git-ignored, frozen at the 120 lessons of 21 Sep 2026) and say in the report that you did. Never append to it and never rebuild it from memory. If an APPEND fails, put the lesson text in the run report under `PLAYBOOK APPEND FAILED` so it is not lost, and carry on.
