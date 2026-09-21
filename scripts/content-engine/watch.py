@@ -131,6 +131,24 @@ def plan(ledger, slots, gaps=None, free=None, start=None):
 # ---------- pure helpers (selftested) ----------
 
 DAY_NAMED_RE = re.compile(r"^(\d{4})\s+(full|summary)(?:\s*-?\s*part\s*(\d))?\.insv$", re.I)
+# A clip named by its day that DAY_NAMED_RE still refuses ("2066 Full-Real.insv", "2006 Full (1).insv"). Until 21 Sep
+# 2026 the scan dropped these without a word: 2066's whole episode sat on Drive unseen and would have held every day
+# after it. Listed by the scan, shown on the Publishing page.
+DAY_LIKE_RE = re.compile(r"^\s*\d{4}\D.*\.insv$", re.I)
+SKIPPED_NAMES_FILE = os.path.join(os.path.dirname(LEDGER), "skipped_names.json")
+
+
+def save_skipped_names(names, path=None):
+    path = path or SKIPPED_NAMES_FILE
+    tmp = path + ".tmp"
+    json.dump({"at": dt.datetime.now().isoformat(timespec="seconds"), "names": sorted(names)}, open(tmp, "w"), indent=1)
+    os.replace(tmp, path)
+
+
+def skipped_names(path=None):
+    """The last whole-folder scan's unreadable day-numbered clips, or None when no scan has written the list."""
+    try: return json.load(open(path or SKIPPED_NAMES_FILE)).get("names", [])
+    except (OSError, ValueError): return None
 
 
 def parse_clip(name):
@@ -301,10 +319,11 @@ def find_record(file_id, day):
     return None, None
 
 
-def list_clips(batch=None, since=None, root=None, gaps=None):
+def list_clips(batch=None, since=None, root=None, gaps=None, skipped=None):
     """Every clip under the raw folder, however deep: the 2026 batches sit under "2026/", the 2025 months
     under "2025/<month>/Ep NNNN - date/" (8 Sep 2026). `batch` matches the folder path relative to the root.
-    Clips older than `since` are skipped unless their day is on Kevin's gap list."""
+    Clips older than `since` are skipped unless their day is on Kevin's gap list. A day-numbered clip whose name
+    parse_clip cannot read is appended to `skipped` (its path under the root), never dropped in silence."""
     since = since or since_for_start_day()
     root = root or RAW_ROOT
     gaps = gap_days() if gaps is None else gaps
@@ -316,7 +335,9 @@ def list_clips(batch=None, since=None, root=None, gaps=None):
         if batch and rel != batch and not rel.startswith(batch + os.sep): continue
         for name in files:
             p = parse_clip(name)
-            if not p: continue
+            if not p:
+                if skipped is not None and DAY_LIKE_RE.match(name): skipped.append(os.path.join(rel, name))
+                continue
             date, hms, seq = p
             if since and date < since and streak_day(date) not in gaps: continue
             path = os.path.join(dirpath, name)
@@ -333,9 +354,13 @@ def scan(create=False, batch=None, since=None):
     back = requeue_failed(ledger)
     for k in back: print("scan: %s put back in the queue for one more try (failed last time)" % k)
     if stale or back: save_ledger(ledger)
-    clips = list_clips(batch, since)
+    skipped = []
+    clips = list_clips(batch, since, skipped=skipped)
     if not clips:
         raise SystemExit("scan: no clips found under %s (batch=%s since=%s) - is Drive mounted?" % (RAW_ROOT, batch, since))
+    if batch is None:                                        # a whole-folder walk: the list is complete, so the report may show it
+        save_skipped_names(skipped)
+        if skipped: print("scan: %d day-numbered clip%s skipped, the name cannot be read: %s" % (len(skipped), "" if len(skipped) == 1 else "s", "; ".join(skipped)))
     added = created = linked = 0
     for c in clips:
         key = c["name"]
@@ -586,11 +611,17 @@ def selftest():
     import tempfile, shutil as _sh
     root = tempfile.mkdtemp(prefix="od-raw-")
     for rel in ("2026/28 December 2025 - 25 January 2026/2054 Full.insv", "2026/28 December 2025 - 25 January 2026/2054 summary.insv",
-                "2025/25_05(May 2025)/Ep 1799 - May 4/VID_20250504_162936_00_022.insv", "4 June 26 - 19 July 26/VID_20260604_172435_00_001.insv", "Image/VID_20260604_000000_00_099.insv"):
+                "2025/25_05(May 2025)/Ep 1799 - May 4/VID_20250504_162936_00_022.insv", "4 June 26 - 19 July 26/VID_20260604_172435_00_001.insv", "Image/VID_20260604_000000_00_099.insv",
+                "2026/26 Jan 26 - 1 Mar 26/2066 Full-Real.insv", "2026/26 Jan 26 - 1 Mar 26/2066 Full not.lrv", "2021/Trailer/VID_20210525_091635_10_038.insv"):
         os.makedirs(os.path.dirname(os.path.join(root, rel)), exist_ok=True); open(os.path.join(root, rel), "wb").write(b"x")
-    got = list_clips(since=dt.date(2025, 1, 1), root=root)
+    skipped = []
+    got = list_clips(since=dt.date(2025, 1, 1), root=root, skipped=skipped)
     assert [c["name"] for c in got] == ["VID_20250504_162936_00_022.insv", "2054 Full.insv", "2054 summary.insv", "VID_20260604_172435_00_001.insv"], [c["name"] for c in got]
     assert got[1]["batch"].startswith("2026/") and "Image" not in str(got), "walks every depth, skips the Image folder"
+    # 21 Sep 2026: "2066 Full-Real.insv" is listed, not dropped; a second-lens file and a proxy are not day clips
+    assert skipped == [os.path.join("2026", "26 Jan 26 - 1 Mar 26", "2066 Full-Real.insv")], skipped
+    sf = os.path.join(root, "skipped.json"); save_skipped_names(skipped, sf)
+    assert skipped_names(sf) == skipped and skipped_names(os.path.join(root, "none.json")) is None
     _sh.rmtree(root)
     assert parse_clip("notes.txt") is None and parse_clip("2053 Full.insv")[1] < parse_clip("2053 summary.insv")[1], "full sorts before summary"
     _selftest_repair_stale()

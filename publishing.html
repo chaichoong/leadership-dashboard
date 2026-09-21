@@ -45,7 +45,7 @@
 <body>
 <div class="wrap">
     <h1>Publishing</h1>
-    <div class="sub">What the Content Engine published each day and what is booked next. Built from what the engine actually did, refreshed every hour from 07:15 to 20:15 and after the nightly render.</div>
+    <div class="sub">What the Content Engine published each day and what is booked next. Built from what the engine actually did, refreshed every hour from 07:15 to 20:15 and after the nightly render. This page reads it again every 5 minutes.</div>
 
     <div id="auth" class="card" hidden>
         <h2>Connect</h2>
@@ -74,10 +74,34 @@ function staleLimitMin(now) {
     const h = Number(new Date(now).toLocaleString('en-GB', { timeZone: 'Europe/London', hour: '2-digit', hourCycle: 'h23' }));
     return h >= 9 && h <= 20 ? 90 : 12 * 60;   // the last hourly write lands about 20:15; from 21:00 the overnight window applies
 }
+// A page left open used to show the report it loaded with, for hours (Kevin, 21 Sep 2026: "not staying up to date").
+const AUTO_RELOAD_MS = 5 * 60 * 1000, READ_TIMEOUT_MS = 30 * 1000;
+// The hourly publisher writes the report 07:15-20:15 London (it lands a minute or two after the slot), the night render
+// once when it finishes. The next write is the first hourly slot after the one the report came from (review, 21 Sep
+// 2026: counting from the clock said 08:15 at 07:15, before the 07:15 write had landed).
+const HOURLY_SLOTS = [...Array(14)].map((_, i) => (7 + i) * 60 + 15);   // 07:15 ... 20:15, minutes after midnight
+function londonParts(t) {
+    const p = new Intl.DateTimeFormat('en-GB', { timeZone: 'Europe/London', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).formatToParts(new Date(t));
+    const g = k => p.find(x => x.type === k).value;
+    return { date: `${g('year')}-${g('month')}-${g('day')}`, min: Number(g('hour')) * 60 + Number(g('minute')) };
+}
+function nextUpdateText(now, updated) {
+    const n = londonParts(now), u = updated ? londonParts(updated) : null;
+    const doneMin = u && u.date === n.date ? u.min : -1;               // -1: nothing written yet today
+    if (doneMin >= 21 * 60) return 'Next update about 07:15.';         // tonight's render has written already
+    if (doneMin === -1 && n.min < HOURLY_SLOTS[0]) {
+        const renderWrote = u && u.min >= 21 * 60 && now - new Date(updated).getTime() < 12 * 3600 * 1000;
+        return renderWrote ? 'Next update about 07:15.' : 'Next update when the night render finishes, or at 07:15.';
+    }
+    const next = HOURLY_SLOTS.find(slot => slot > doneMin);
+    if (next === undefined) return 'Next update after tonight\'s render, then 07:15.';
+    return `Next update about ${String(Math.floor(next / 60)).padStart(2, '0')}:15.`;
+}
 const QUEUE_URL = 'os/agents/index.html#tab=approvals';
 const SECTIONS = ['YouTube episode', 'YouTube Short', 'Teaser clips', 'Learnings clips', 'Blog', 'Podcast', 'Facebook share'];
 let PAT = '';
 let _report = null, _row = null, _readState = 'idle';   // idle | ready | 'error: <message>'
+let _loadedAt = 0, _loading = false;
 
 function esc(s) { return s === null || s === undefined ? '' : String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;'); }
 function safeUrl(u) { return /^https:\/\//.test(String(u || '')) ? u : ''; }
@@ -100,12 +124,17 @@ function saveAuth() {
 
 async function readReport() {
     const params = new URLSearchParams({ filterByFormula: `{Key}="${REPORT_KEY}"`, pageSize: '10' });
-    const res = await fetch(`https://api.airtable.com/v0/${BASE_ID}/${ESTATE_TBL}?${params}`, { headers: { Authorization: `Bearer ${PAT}` } });
-    if (res.status === 401 || res.status === 403) { const e = new Error('auth'); e.auth = true; throw e; }
-    if (!res.ok) throw new Error(`Airtable answered ${res.status}`);
-    const data = await res.json();
-    if (!Array.isArray(data.records)) throw new Error('Airtable gave no records list');
-    return data.records[0] || null;
+    // A read that never settles (the Mac asleep mid-request) would hold _loading for ever and stop every later read (review, 21 Sep 2026)
+    const ctl = new AbortController(), timer = setTimeout(() => ctl.abort(), READ_TIMEOUT_MS);
+    try {
+        const res = await fetch(`https://api.airtable.com/v0/${BASE_ID}/${ESTATE_TBL}?${params}`, { headers: { Authorization: `Bearer ${PAT}` }, signal: ctl.signal });
+        if (res.status === 401 || res.status === 403) { const e = new Error('auth'); e.auth = true; throw e; }
+        if (!res.ok) throw new Error(`Airtable answered ${res.status}`);
+        const data = await res.json();                          // inside the timeout too: a body that stalls is the same hang
+        if (!Array.isArray(data.records)) throw new Error('Airtable gave no records list');
+        return data.records[0] || null;
+    } catch (e) { throw e.name === 'AbortError' ? new Error(`Airtable did not answer within ${READ_TIMEOUT_MS / 1000} seconds`) : e; }
+    finally { clearTimeout(timer); }
 }
 
 function sectionChips(sections) {
@@ -123,7 +152,7 @@ function render(rec) {
     const staleMin = updated ? Math.round((Date.now() - new Date(updated).getTime()) / 60000) : null;
     document.getElementById('updated').innerHTML = staleMin !== null && staleMin > staleLimitMin(Date.now())
         ? `<span class="stale">Last updated ${esc(ago(updated))}. The publisher has stopped writing this report, so everything below may be out of date.</span>`
-        : `Updated ${esc(ago(updated))}`;
+        : `Updated ${esc(ago(updated))}. ${esc(nextUpdateText(Date.now(), updated))}`;
 
     const hist = (r.history || []).map(h => {
         if (!h.episodes.length) return `<tr class="none"><td style="white-space:nowrap">${esc(dayLabel(h.date, r.today))}</td><td colspan="3"><strong>Nothing went out</strong></td></tr>`;
@@ -137,13 +166,23 @@ function render(rec) {
         ? `<ul class="plain">${r.scheduled.map(s => `<li><strong>${esc(london(s.when, { weekday: 'short', hour: '2-digit', minute: '2-digit' }))}</strong> · Episode ${esc(s.day)} · ${esc(s.channel)}</li>`).join('')}</ul>`
         : '<div class="muted">Nothing booked.</div>';
     const nextUp = (r.nextInOrder || []).length ? `Approved and next in order: Episode ${r.nextInOrder.map(esc).join(', ')}.`
-        : (r.heldBehind || []).length ? `Approved but held for order: Episode ${r.heldBehind.map(esc).join(', ')} (${esc(r.heldWhy)}).` : 'No approved episode is waiting to go out.';
+        : (r.heldBehind || []).length ? (r.blocker
+            ? `<span class="stale">Approved but held for order: Episode ${r.heldBehind.map(esc).join(', ')} wait behind day ${esc(r.blocker.day)} (${esc(r.blocker.why)}).</span>`
+            : `Approved but held for order: Episode ${r.heldBehind.map(esc).join(', ')} (${esc(r.heldWhy)}).`)
+        : r.blocker ? `<span class="stale">Nothing can go out: day ${esc(r.blocker.day)} (${esc(r.blocker.why)}).</span>` : 'No approved episode is waiting to go out.';
     const tonight = r.tonight === null || r.tonight === undefined ? '<span class="stale">Tonight\'s render plan could not be read.</span>'
         : r.tonight.length ? `Tonight's render: Episode ${r.tonight.map(esc).join(' and ')}.` : 'Tonight\'s render: nothing waiting.';
 
     const needs = [];
     const cards = r.waitingForKevin || [];
     needs.push(cards.length ? `<li><strong>${cards.length} episode card${cards.length === 1 ? '' : 's'}</strong> to approve (Episode ${cards.map(esc).join(', ')}). <a href="${QUEUE_URL}" target="_top">Open the queue</a></li>` : '<li>No episode cards wait for you.</li>');
+    // A sent-back card is neither waiting for you nor approved: until 21 Sep 2026 it vanished from this page while 2062 held every later day.
+    (r.sentBack || []).forEach(s => {
+        const since = s.since ? ' on ' + esc(s.since) : '', said = s.feedback ? ` ("${esc(s.feedback)}")` : '';
+        const tail = s.holdsOrder === false ? 'It is an older day, so no other episode waits for it.' : 'Every later episode waits until the fixed card comes back to you.';
+        needs.push(`<li><span class="chip missing">${s.rejected ? 'Rejected' : 'Sent back'}, not resubmitted</span> Episode ${esc(s.day)}: you ${s.rejected ? 'rejected it' : 'sent it back'}${since}${said}. ${tail}</li>`);
+    });
+    (r.teaserOnly || []).forEach(d => needs.push(`<li><span class="chip missing">No full episode</span> Day ${esc(d)}: the engine has found only its teaser. Every later day waits behind it once the run reaches it.</li>`));
     Object.entries(r.qaBlocked || {}).forEach(([d, why]) => needs.push(`<li><span class="chip missing">Blocked</span> Episode ${esc(d)} failed its output check: ${esc(why)}</li>`));
     (r.failedRenders || []).forEach(d => needs.push(`<li><span class="chip missing">Render failed twice</span> Episode ${esc(d)} needs a look.</li>`));
     (r.retryTonight || []).forEach(d => needs.push(`<li><span class="chip pending">Render failed once</span> Episode ${esc(d)} gets one more try tonight. Nothing for you to do.</li>`));
@@ -153,6 +192,9 @@ function render(rec) {
         ? `<ul class="plain">${r.incomplete.map(i => `<li><strong>Episode ${esc(i.day)}</strong>: ${i.missing.length ? `<span class="chip missing">missing</span> ${i.missing.map(esc).join(', ')}` : ''} ${i.pending.length ? `<span class="chip pending">not confirmed yet</span> ${i.pending.map(esc).join(', ')}` : ''}</li>`).join('')}</ul>`
         : '<div class="muted">Every episode from the last fortnight has all seven sections.</div>';
 
+    const skipped = r.skippedNames || [];
+    const skippedCard = skipped.length ? `<div class="card"><h2>Raw files the engine skips</h2><div class="muted" style="font-size:var(--fs-sm)">The engine cannot read these file names, so it never renders them. A day's recording must be named like "2066 Full.insv" or "2066 Summary.insv".</div><ul class="plain">${skipped.map(n => `<li>${esc(n)}</li>`).join('')}</ul></div>`
+        : r.skippedNames === null ? '<div class="card"><h2>Raw files the engine skips</h2><div class="muted" style="font-size:var(--fs-sm)">No list yet. The nightly scan writes it.</div></div>' : '';
     const st = r.strava || {};
     document.getElementById('body').innerHTML = `
         <div class="card"><div class="stat-row">
@@ -166,10 +208,17 @@ function render(rec) {
             <div class="card"><h2>Needs you</h2><ul class="plain">${needs.join('')}</ul></div>
         </div>
         <div class="card"><h2>Sections still missing</h2>${incomplete}</div>
+        ${skippedCard}
         <div class="card"><h2>Strava and the website numbers</h2><div style="font-size:var(--fs-sm)">${st.lastPush ? `Last update ${esc(london(st.lastPush, { weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }))}, run day ${esc(st.day)}: ${st.lastRunKm ? esc(st.lastRunKm) + ' km, ' : ''}${st.renamed ? 'renamed on Strava' : '<span class="stale">not renamed</span>'}` : '<span class="stale">No Strava update recorded.</span>'}</div></div>`;
 }
 
 async function load() {
+    if (_loading) return;
+    _loading = true; _loadedAt = Date.now();
+    try { await readAndRender(); } finally { _loading = false; }
+}
+
+async function readAndRender() {
     document.getElementById('error').innerHTML = '';
     if (typeof markTabRefreshing === 'function') markTabRefreshing('publishing');
     try {
@@ -204,6 +253,10 @@ function registerChecks() {
                 const m = Math.round((Date.now() - new Date(u).getTime()) / 60000); return m > staleLimitMin(Date.now()) ? { status: 'fail', detail: `Last written ${ago(u)}; the hourly publisher writes it` } : { status: 'pass', detail: `Written ${ago(u)}` }; } },
             { name: 'Something went out yesterday', kind: 'automation', run: () => { const h = (_report && _report.history) || []; if (h.length < 2) return { status: 'warn', detail: 'No history in the report' };
                 return h[1].episodes.length ? { status: 'pass', detail: h[1].episodes.map(e => `Episode ${e.day}`).join(', ') } : { status: 'fail', detail: 'Nothing was published yesterday' }; } },
+            { name: 'Nothing stuck', kind: 'automation', run: () => { if (!_report) return { status: 'warn', detail: 'No report loaded' };
+                const s = _report.sentBack || [], t = _report.teaserOnly || [];
+                const why = [...s.map(x => `Episode ${x.day} sent back, not resubmitted`), ...t.map(d => `Day ${d} has no full episode`)];
+                return why.length ? { status: 'fail', detail: why.join('; ') } : { status: 'pass', detail: 'No sent-back card or missing full episode' }; } },
         ],
     });
 }
@@ -215,6 +268,18 @@ function start() { document.getElementById('auth').hidden = true; document.getEl
     try { PAT = localStorage.getItem('_dlr_pat') || ''; } catch (e) { console.warn('publishing: storage unavailable', e); }
     registerChecks();
     if (PAT) start(); else showAuth();
+    // Inside the app the page sits in a frame the shell hides on other tabs, and switching back fires no visibilitychange
+    // (review, 21 Sep 2026). So one 15-second tick: a hidden page never reads; a page in view reads every 5 minutes, and
+    // straight away when it comes back into view with a copy over a minute old.
+    const hiddenInShell = () => !!window.frameElement && window.frameElement.offsetParent === null;   // frameElement is null across origins
+    const live = () => PAT && !document.getElementById('main').hidden && document.visibilityState === 'visible' && !hiddenInShell();
+    let wasHidden = false;
+    setInterval(() => {
+        const inView = live(), age = Date.now() - _loadedAt;
+        if (inView && (age >= AUTO_RELOAD_MS || (wasHidden && age > 60 * 1000))) load();
+        wasHidden = !inView;
+    }, 15 * 1000);
+    document.addEventListener('visibilitychange', () => { if (live() && Date.now() - _loadedAt > 60 * 1000) load(); });
 })();
 </script>
 </body>
