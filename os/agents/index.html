@@ -3902,8 +3902,8 @@ function dupeSignals(name){
         if(prefix.split(' ').some(function(w){ return DUPE_MAINTENANCE_LANE_WORDS.indexOf(w) !== -1; })) lane = 'maintenance';
     }
     const strong = [];
-    // A UK number in any shape these tasks carry: +447538631747, 447538631747,
-    // 07538631747. The last nine digits are the same in all three.
+    // A UK number in any shape these tasks carry: +447700900747, 447700900747,
+    // 07700900747. The last nine digits are the same in all three.
     (raw.match(/\b(?:\+?44|0)?\d{9,12}\b/g) || []).forEach(function(d){
         const k = 'tel:' + d.slice(-9);
         if(strong.indexOf(k) === -1) strong.push(k);

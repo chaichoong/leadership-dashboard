@@ -20,9 +20,11 @@ solved by ignoring it. So the markdown gets scrubbed on the way in instead.
 
 WHAT IT MASKS
 -------------
-  phone     +447538631747        -> +4475XXXXX747     (UK, national or +44)
+  phone     +447700900747        -> +4477XXXXX747     (UK, national or +44)
   email     jane@acme-lets.co.uk -> j***@***.co.uk
   postcode  CB23 6DL             -> CB23 XXX          (inward code removed)
+  NI number AB123456C            -> XXXXXXXXX         (National Insurance)
+  reference account 900000291    -> account XXXXXX291 (after a keyword only)
 
 Shape is preserved on purpose. A report is an audit trail: "an SMS from a
 +44 mobile ending 747" is still useful to Kevin, who can look the record up in
@@ -67,7 +69,7 @@ ALLOWED_EMAILS = ("kevinbrittain@gmail.com",)
 #   * the match must END on a digit. Ending on the trailing space swallowed it,
 #     so the masked text ran into the next word.
 #   * a BARE 44-led number with no plus and no leading zero. GoHighLevel and the
-#     SMS bridge write the sender as "447738707077", and neither the "+44" branch
+#     SMS bridge write the sender as "447700900077", and neither the "+44" branch
 #     nor the "0" branch matches that shape. Found 26 Aug 2026 while collecting
 #     monitoring/task-sweep-2026-08-26.md: two tenant mobiles were sitting in the
 #     task titles, reported as "masked 3 phone" because OTHER numbers on the page
@@ -76,7 +78,7 @@ ALLOWED_EMAILS = ("kevinbrittain@gmail.com",)
 #
 # Blocking on a bare "." blocked a full stop, so a number at the END OF A
 # SENTENCE could never be masked (finding 20260821-task-hygiene-sweep-286, found
-# while testing the fix for it). "+447700907077." sailed through every sweep,
+# while testing the fix for it). "+447700900907." sailed through every sweep,
 # and monitoring/task-sweep-2026-08-23.md carried a real one into this PUBLIC
 # repo for five days.
 #
@@ -130,6 +132,69 @@ def _mask_email(match):
 def _mask_postcode(match):
     return "%s XXX" % match.group(1)
 
+
+# ─── NI NUMBERS AND ACCOUNT REFERENCES (21 Sep 2026) ──────────────────
+#
+# The reports quote task titles and letters, and a debt or tax letter is
+# titled with its reference. By 21 Sep 2026 the tracked reports carried a
+# family member's National Insurance number, a Unique Taxpayer Reference,
+# council tax account and summons numbers, a court claim number, a mortgage
+# account and several debt-collector references, none of which the phone,
+# email or postcode rules could see.
+#
+# An NI number has a fixed shape, so it gets a shape rule. Its prefix letters
+# follow HMRC's allocation rules (no D, F, I, Q, U or V first; no D, F, I, O,
+# Q, U or V second), which keeps ordinary codes out of it.
+_NINO = re.compile(
+    r"(?<![A-Za-z0-9])[A-CEGHJ-PR-TW-Z][A-CEGHJ-NPR-TW-Z]"
+    r" ?\d{2} ?\d{2} ?\d{2} ?[A-D](?![A-Za-z0-9])"
+)
+
+
+def _mask_nino(match):
+    return "XXXXXXXXX"
+
+
+# An account reference has NO fixed shape: nine plain digits, three letters and
+# a hyphen before seven digits, a short letter-digit mix, and two digit groups
+# split by a space are all real shapes seen in the reports. What they share is
+# the word in front of them, so this rule only fires straight after a keyword
+# ("account", "ref", "case", "claim", "summons", "UTR" ...), and only on a token
+# of five or more characters holding three or more digits in a row. That keeps
+# years, counts, mandate numbers ("MANDATE NO 0207"), Airtable ids and dates out.
+# Like a phone number, the last three characters survive, so the report still
+# says WHICH reference without giving it away.
+#
+# A reference with no keyword in front ("Council Tax - 10000000078") is not
+# caught. That is the price of not mangling ordinary numbers; a scrubber that
+# eats every figure gets switched off.
+_REF_KEYWORD = (
+    r"(?:account|acct|a/c|mortgage|policy|mandate|agreement|loan|customer|"
+    r"client|case|claim|summons|title|utr|ref(?:erence)?)"
+    r"(?:[ \t]+(?:no\.?|number|ref(?:erence)?))?"
+)
+_ACCOUNT_REF = re.compile(
+    r"(?i)(?<![A-Za-z0-9])(" + _REF_KEYWORD + r")"
+    r"((?:[ \t]*[:#][ \t]*|[ \t]+))"
+    r"(?!(?:rec|tbl|fld|app|viw|sel|usr|wfl)[A-Za-z0-9]{14}(?![A-Za-z0-9]))"
+    r"(?!\d{4}-\d{2}-\d{2})"
+    r"(?=[A-Za-z0-9\-]*\d{3})"
+    r"(\d{3,}(?: \d{3,})+|[A-Za-z0-9][A-Za-z0-9\-]{3,30}[A-Za-z0-9])"
+    r"(?![A-Za-z0-9\-])"
+)
+
+
+def _mask_account_ref(match):
+    keyword, sep, ref = match.group(1), match.group(2), match.group(3)
+    keep = 3
+    out = []
+    for ch in reversed(ref):
+        if ch.isalnum():
+            out.append(ch if keep > 0 else "X")
+            keep -= 1
+        else:
+            out.append(ch)
+    return keyword + sep + "".join(reversed(out))
 
 
 # ─── NAME ROSTER (finding 20260821-task-hygiene-sweep-286) ───────────
@@ -215,6 +280,9 @@ RULES = (
     ("phone", _PHONE_CANDIDATE, _mask_phone),
     ("email", _EMAIL, _mask_email),
     ("postcode", _POSTCODE, _mask_postcode),
+    # NI before references, so "ref AB123456C" is masked whole, not to its tail.
+    ("nino", _NINO, _mask_nino),
+    ("account_ref", _ACCOUNT_REF, _mask_account_ref),
 )
 
 
@@ -250,19 +318,33 @@ def scrub(text, names=None):
 # Known-bad inputs, each with the substring that must NOT survive. If a pattern
 # is broken or deleted, one of these comes back unmasked and every caller stops.
 SELFTEST_CASES = (
-    ("SMS reply from +447538631747 about a tap", "7538631747"),
-    ("SMS reply from +44 7538 631747 about a tap", "631747"),
-    ("Called 07538631747 twice", "7538631747"),
+    ("SMS reply from +447700900747 about a tap", "7700900747"),
+    ("SMS reply from +44 7700 900747 about a tap", "900747"),
+    ("Called 07700900747 twice", "7700900747"),
     # GoHighLevel / SMS-bridge shape: no plus, no leading zero.
-    ("SMS reply from 447738707077 - second thread", "7738707077"),
-    ("MAINTENANCE: SMS from 447538631747 - maintenance reply", "7538631747"),
+    ("SMS reply from 447700900077 - second thread", "7700900077"),
+    ("MAINTENANCE: SMS from 447700900747 - maintenance reply", "7700900747"),
     ("Landline 01223 456789 rang out", "456789"),
     ("Chase accounts@some-letting-agent.co.uk for the statement", "some-letting-agent"),
     ("Tenant at CB23 6DL reported damp", "6DL"),
     # END OF SENTENCE. The old trailing lookahead blocked on a bare ".", so this
     # shape survived every sweep and reached the public repo.
-    ("INBOUND: SMS reply from +447700907077.", "7700907077"),
-    ("Ring 07538631747. Then log it.", "7538631747"),
+    ("INBOUND: SMS reply from +447700900907.", "7700900907"),
+    ("Ring 07700900747. Then log it.", "7700900747"),
+    # NI numbers, with and without the spaces HMRC prints them with.
+    ("HMRC statement for Mrs A Example, ref AB123456C, overdue", "123456"),
+    ("NI number AB 12 34 56 C on the form", "12 34 56"),
+    # Account references, only ever after a keyword.
+    ("Council Tax summons - account 900000291 - Summons 100078", "900000291"),
+    ("Council Tax summons - account 900000291 - Summons 100078", "100078"),
+    ("s.9A check, case ABC-1000425, UTR 1000000560", "1000425"),
+    ("s.9A check, case ABC-1000425, UTR 1000000560", "1000000560"),
+    ("Court order, claim X00AB745, costs due", "X00AB7"),
+    ("LCS ref 40000151, client ref A40000345", "40000151"),
+    ("LCS ref 40000151, client ref A40000345", "A40000"),
+    ("Council Tax Property Reference : 300000820 set up", "300000820"),
+    ("HMRC penalty, ref 70000 30733, same year", "70000 30"),
+    ("Arrangement on mortgage 70000083, 22 Example St", "70000083"),
 )
 
 # Inputs that must survive UNTOUCHED. A scrubber that mangles ordinary report
@@ -275,6 +357,18 @@ SELFTEST_UNTOUCHED = (
     # Real false positive from monitoring/ceo-brief-cron-findings.md: a table
     # cell ending "00" followed by a newline and the next row's date.
     "| invocations | 00\n2026-08-05 | 1 |",
+    # Words that trigger the reference rule, followed by things that are NOT
+    # references: an Airtable id, a date, a year, a short mandate number, a
+    # company number with no keyword, a hyphenated file name, a git sha in
+    # backticks, and prose.
+    "Reference: recSvXxaEz57i7YQK, case recQxOwx7swgS1Vd4",
+    "account 2026-08-12 review, policy 2026, MANDATE NO 0207",
+    "Example Estates Ltd, company 10000161; reference-map.json rolled",
+    "the reference is Example Estates Ltd, ref `0efc866b`",
+    "Invoice INV-0549 and finding 20260821-task-hygiene-sweep-286",
+    "loan of 2000 over 60 months, 100 cases, account for 12 days",
+    # Already masked: a second pass must not change it.
+    "account XXXXXX291 and ref XXX-XXXX425",
 )
 
 

@@ -900,9 +900,9 @@ python /home/ubuntu/skills/commercial-loan-agreement-generator/scripts/generate_
     "borrower_legal_name": "TNT MANAGEMENT LIMITED", \\
     "borrower_company_number": "09634334", \\
     "borrower_registered_office": "17 Newington, Willingham, Cambridge, CB24 5JE", \\
-    "lender_full_name": "Paul Brittain", \\
-    "lender_address": "59 Earith Road, Willingham, Cambridge, CB24 5LS", \\
-    "lender_email": "pauljooee@hotmail.com", \\
+    "lender_full_name": "Alex Lender", \\
+    "lender_address": "1 Example Road, Anytown, AB1 2CD", \\
+    "lender_email": "lender@example.com", \\
     "borrower_email": "kevinbrittain@gmail.com", \\
     "loan_amount": 2000, \\
     "actual_advance_date": "28 February 2026", \\
@@ -910,13 +910,15 @@ python /home/ubuntu/skills/commercial-loan-agreement-generator/scripts/generate_
     "default_interest_rate": 12.00, \\
     "term_months": 60, \\
     "repayment_day_of_month": "28", \\
-    "lender_repayment_bank_name": "J E Brittain", \\
-    "lender_repayment_sort_code": "09-01-28", \\
-    "lender_repayment_account_number": "44385270", \\
+    "lender_repayment_bank_name": "A Lender", \\
+    "lender_repayment_sort_code": "12-34-56", \\
+    "lender_repayment_account_number": "12345678", \\
     "governing_law": "England and Wales", \\
     "unsecured_or_secured": "unsecured" \\
 }\\'
 \`\`\`
+
+Page note (21 Sep 2026): the lender's name, address, email and bank details in this example are fictional on this page copy, because this repository is public. The skill itself keeps the real values.
 
 **Minimal First Iteration (Current Capability)**:
 

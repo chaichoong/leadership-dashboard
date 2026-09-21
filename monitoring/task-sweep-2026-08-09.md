@@ -34,27 +34,27 @@ solved twice.
 
 | Task | Field | Value | Why |
 |---|---|---|---|
-| Warm lane: re-engage Jack Duddy | Time Estimate | 15 min | read one drafted email and approve it |
-| Warm lane: re-engage Jack Duddy | Business | Operations Director | sales work, not property |
-| Warm lane: re-engage Saqib Javaid | Time Estimate / Business | 15 min / Operations Director | as above |
-| Warm lane: re-engage Suyesh Sharma | Time Estimate / Business | 15 min / Operations Director | as above |
-| Warm lane: re-engage Tory Bloom | Time Estimate / Business | 15 min / Operations Director | as above |
-| Warm lane: re-engage Edson Diaz-Fuentes | Time Estimate / Business | 15 min / Operations Director | as above |
-| Warm lane: re-engage Jonathan Mottram | Time Estimate / Business | 15 min / Operations Director | as above |
-| Warm lane: re-engage Adrian Cierpikowski | Time Estimate / Business | 15 min / Operations Director | as above |
-| Warm lane: re-engage Joyce Tetteh | Time Estimate / Business | 15 min / Operations Director | as above |
-| Warm lane: re-engage Darren Wolff | Time Estimate / Business | 15 min / Operations Director | as above |
-| Warm lane: re-engage Agnese Daverio | Time Estimate / Business | 15 min / Operations Director | as above |
-| Warm lane: re-engage Reginald Flint | Time Estimate / Business | 15 min / Operations Director | as above |
-| Warm lane: re-engage Gemma Coles | Time Estimate / Business | 15 min / Operations Director | as above |
-| Warm lane: re-engage Charlie Corless | Time Estimate / Business | 15 min / Operations Director | as above |
-| Warm lane: re-engage Josephine Ann Wilson | Time Estimate / Business | 15 min / Operations Director | as above |
-| Warm lane: re-engage Andrew Bizzell | Time Estimate / Business | 15 min / Operations Director | as above |
-| Warm lane: re-engage Neil Gillan | Time Estimate / Business | 15 min / Operations Director | as above |
-| Warm lane: re-engage Luke Field | Time Estimate / Business | 15 min / Operations Director | as above |
-| Warm lane: re-engage Adesina Okuboyejo | Time Estimate / Business | 15 min / Operations Director | as above |
-| Warm lane: re-engage James Anyanwu | Time Estimate / Business | 15 min / Operations Director | as above |
-| Warm lane: re-engage Cassandra Ademola | Time Estimate / Business | 15 min / Operations Director | as above |
+| Warm lane: re-engage [name redacted] | Time Estimate | 15 min | read one drafted email and approve it |
+| Warm lane: re-engage [name redacted] | Business | Operations Director | sales work, not property |
+| Warm lane: re-engage [name redacted] | Time Estimate / Business | 15 min / Operations Director | as above |
+| Warm lane: re-engage [name redacted] | Time Estimate / Business | 15 min / Operations Director | as above |
+| Warm lane: re-engage [name redacted] | Time Estimate / Business | 15 min / Operations Director | as above |
+| Warm lane: re-engage [name redacted] | Time Estimate / Business | 15 min / Operations Director | as above |
+| Warm lane: re-engage [name redacted] | Time Estimate / Business | 15 min / Operations Director | as above |
+| Warm lane: re-engage [name redacted] | Time Estimate / Business | 15 min / Operations Director | as above |
+| Warm lane: re-engage [name redacted] | Time Estimate / Business | 15 min / Operations Director | as above |
+| Warm lane: re-engage [name redacted] | Time Estimate / Business | 15 min / Operations Director | as above |
+| Warm lane: re-engage [name redacted] | Time Estimate / Business | 15 min / Operations Director | as above |
+| Warm lane: re-engage [name redacted] | Time Estimate / Business | 15 min / Operations Director | as above |
+| Warm lane: re-engage [name redacted] | Time Estimate / Business | 15 min / Operations Director | as above |
+| Warm lane: re-engage [name redacted] | Time Estimate / Business | 15 min / Operations Director | as above |
+| Warm lane: re-engage [name redacted] | Time Estimate / Business | 15 min / Operations Director | as above |
+| Warm lane: re-engage [name redacted] | Time Estimate / Business | 15 min / Operations Director | as above |
+| Warm lane: re-engage [name redacted] | Time Estimate / Business | 15 min / Operations Director | as above |
+| Warm lane: re-engage [name redacted] | Time Estimate / Business | 15 min / Operations Director | as above |
+| Warm lane: re-engage [name redacted] | Time Estimate / Business | 15 min / Operations Director | as above |
+| Warm lane: re-engage [name redacted] | Time Estimate / Business | 15 min / Operations Director | as above |
+| Warm lane: re-engage [name redacted] | Time Estimate / Business | 15 min / Operations Director | as above |
 | E2E Sweep: 143 tasks carry a stale Completion Date (8 Aug original) | Time Estimate | 2 hr | clear 143 records, then prove the count is zero |
 | E2E Sweep: 143 tasks carry a stale Completion Date (8 Aug original) | Business | Operations Director | defect in your own platform |
 

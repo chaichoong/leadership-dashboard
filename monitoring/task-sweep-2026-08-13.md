@@ -8,7 +8,7 @@ On Mon 10 Aug the tenant texted "Get some one around to fix our tap. Water is po
 people (task `reccQAxF8x2TZIla2`). The chase sits with Ericamae, who does marketing, not property.
 Three days, no contractor booked. This needs a plumber today.
 
-**2. A council deadline has already passed.** Hannah Lea, Housing Enforcement Officer at
+**2. A council deadline has already passed.** [name redacted], Housing Enforcement Officer at
 Manchester City Council, asked for the electrical inspection date and a satisfactory EICR on
 1406 Oldham Road "no later than Monday 10 August 2026" (task `rec6sFWeMMhtSzgrE`). No reply has
 been sent. An electrician has to attend, so this is not just a letter to write.
@@ -23,11 +23,11 @@ Six business tags. Nothing else needed filling: no task was missing a time estim
 
 | Task | Field | Value | Why |
 |---|---|---|---|
-| INBOUND: Re: Council Tax - 20005049078 | Business | Real Estate | Burnley council tax for 22 Newton Street, a rental property |
+| INBOUND: Re: Council Tax - XXXXXXXX078 | Business | Real Estate | Burnley council tax for 22 Newton Street, a rental property |
 | INBOUND: Fix: Monese — 10 days to deletion | Business | Personal | the Monese CB account is documented as Personal in our own reconciliation rules |
 | INBOUND: SMS reply from +4475XXXXX747 | Business | Real Estate | tenant text about a fridge freezer and maintenance people |
 | INBOUND: Reply from Kent Reliance | Business | Real Estate | Kent Reliance is a buy-to-let mortgage lender |
-| INBOUND: HMRC SelfAssessment DailyPenalty_CM Brittain (completed 29 Jul) | Business | Personal | personal self assessment |
+| INBOUND: HMRC SelfAssessment DailyPenalty_[name redacted] (completed 29 Jul) | Business | Personal | personal self assessment |
 | INBOUND: BW Legal (acting for HMRC) SelfAssessment debt (completed 29 Jul) | Business | Personal | personal self assessment |
 
 Undo log: `monitoring/task-sweep-applied-2026-08-13.json`.
@@ -59,7 +59,7 @@ to apply them, or name the ones to drop.
 | Task | Days late | My read |
 |---|---|---|
 | Pay Final Council Tax Adjustment – 32 Elmdon Place, Haverhill | 203 | Still live. Needs a new due date and a person, as paying is a Kevin action. |
-| Pay tax liability for tax return 2023/24 – Ciara Brittain | 181 | Still live, and connected to the HMRC penalty letters above. Needs a new date. |
+| Pay tax liability for tax return 2023/24 – [name redacted] | 181 | Still live, and connected to the HMRC penalty letters above. Needs a new date. |
 | Fwd: Invoice INV-0549 from PPE & Sons (£168, due 16 Mar) | 146 | Probably done already. Check the payment before closing. |
 | DD Fire Alarms Ltd – Duckworth Buildings | 146 | Probably done already. Same check. |
 | Invoice 40859 from DD Fire Alarms Ltd | 146 | Probably done already. Same check. |

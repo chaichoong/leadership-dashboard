@@ -48,11 +48,17 @@ task-sweep-detail-*.md
 # `git add -A` away from being published, and collect-routine-reports.py had to
 # print a REFUSED line for each one every single day.
 #
-# `dispatch-[0-9]*/` and not `dispatch-*/` on purpose: monitoring/dispatch-runs/ is
-# TRACKED, and a pattern matching a tracked path makes the never-commit guard red
-# on day one, which is how a rule gets deleted instead of obeyed.
+# `dispatch-[0-9]*/` and not `dispatch-*/` on purpose: it names the dated folders
+# only. monitoring/dispatch-runs/ has its own rule below.
 dispatch-[0-9]*/
 dispatch-report-*.json
+# monitoring/dispatch-runs/ held two full dispatch queue dumps from 3 Sep 2026
+# (queue-09.json, queue2-09.json): the creditor ledger with account numbers and
+# notes, tier-1 legal and tax tasks, and private email addresses. They were
+# committed by hand, are read by nothing, and a subfolder is never a report
+# (collect-routine-reports.py is_report). Untracked on 21 Sep 2026. Written as
+# `dispatch-runs/*` so tests/never-commit-paths.test.js can match the files in it.
+dispatch-runs/*
 # Scratch reads an agent left behind: a raw Airtable dump, a queue snapshot, a
 # stderr capture, a single task's card. Named by hand, so matched by hand.
 *_tmp.json

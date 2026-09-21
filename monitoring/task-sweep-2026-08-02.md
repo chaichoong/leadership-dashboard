@@ -49,7 +49,7 @@ doing by a human. Both are right to stay empty.
 
 | Task | Field | Value | Why |
 |---|---|---|---|
-| INBOUND: Companies House Ref COH2241140X | Business | Real Estate | I opened the actual email chain. The reference is Agile Estates Ltd, company 12168161, about overdue confirmation statements. |
+| INBOUND: Companies House Ref XXXXXXXX40X | Business | Real Estate | I opened the actual email chain. The reference is Agile Estates Ltd, company 12168161, about overdue confirmation statements. |
 | Drift Monitor: SOP staleness under-reported | Business | Operations Director | Platform documentation, your software. |
 | Drift Monitor: SOP staleness under-reported | Time Estimate | 1 hr | It asks you for a decision, not code: read 12 pages whose guides are behind and 13 with no guide, and say which need one. |
 | E2E Sweep: red push gate | Business | Operations Director | Platform deploy check, your software. |

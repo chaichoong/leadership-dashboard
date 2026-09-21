@@ -21,9 +21,9 @@ not over whatever happened to carry an estimate.
 | Urgent Update required: 1406 Oldham Road | Business | Real Estate | Manchester Council chasing the electrical safety certificate for one of your properties. |
 | Urgent Update required: 1406 Oldham Road | Due date | 14 Aug | Council marked it urgent but gave no deadline in the email, so three working days. |
 | Agile Estates Ltd, company number 12168161 | Business | Real Estate | Companies House late filing penalty for Agile Estates. |
-| SMS from Stacey, 14 Wentworth | Business | Real Estate | Tenant reporting a broken window. 14 Wentworth Terrace is one of yours. |
+| SMS from [name redacted], 14 Wentworth | Business | Real Estate | Tenant reporting a broken window. 14 Wentworth Terrace is one of yours. |
 | British Gas — [family member] | Business | Personal | [family member] is not a tenant anywhere in the base, so this is family, not property. |
-| Council Tax Payment Overdue (ARP) | Business | Real Estate | Account 101287570 is 18 Northfield Park. Matched to the cost record, not guessed. |
+| Council Tax Payment Overdue (ARP) | Business | Real Estate | Account XXXXXX570 is 18 Northfield Park. Matched to the cost record, not guessed. |
 | Companies House appeal 12168161 (done) | Business | Real Estate | Same Agile Estates matter. |
 | FCC Paragon / Legal Protection Group (done) | Business | Real Estate | Landlord legal-expenses cover. |
 | British Gas final bill, [family member] (done) | Business | Personal | Same matter as the live one above. |
@@ -60,7 +60,7 @@ deliberately. Naming anyone would ping them about work you have decided not to s
 - Google Payments: your payments are on hold. Cannot tell which of your businesses is owed.
 - Virgin Media order documents (done). Could be a property or your home.
 - "Session 5 Replay" (done). No clue in the record what it belongs to.
-- Reply from Ibrahim Fayed at primemover.com (done). No context in the record.
+- Reply from [name redacted] at primemover.com (done). No context in the record.
 - 123 Reg domain renewal (done). You hold domains across all three businesses.
 
 **Two HMRC penalty tasks for [family member] (both done) left blank on purpose.** Your history
@@ -127,7 +127,7 @@ od-ceo reviewed the whole set before anything was written, and changed four thin
    reason for it was not.
 4. **Refused to accept "11 of 11 similar tasks went to Real Estate" as proof** for the
    council tax item and told me to match the account number instead. I did: account
-   101287570 is 18 Northfield Park. Same answer, now evidenced.
+   XXXXXX570 is 18 Northfield Park. Same answer, now evidenced.
 
 It also flagged that inbound capture stamps nearly every email Urgent / today / 15 minutes,
 so Priority carries almost no information. Filed as a finding.

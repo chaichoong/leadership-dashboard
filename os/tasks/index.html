@@ -879,10 +879,16 @@ const TM = {
 };
 let allTeamMembers = [];
 
+// Every picker on this page builds from TEAM, and every lookup reads it back by
+// key or email to name who holds a task. A member marked `left` is never
+// offered for new work (teamForNewWork), but stays here so a task or project
+// they still hold keeps showing their name, as "Name (left)". Same rule as
+// TASK_TEAM in js/config.js. Ericamae left on 17 Sep 2026: Team Members
+// recEvm9wgsEnoNVZh is Active=false, Status=Offboarded.
 const TEAM = [
   { key:'kevin', name:'Kevin Brittain',  email:'kevin@runpreneur.org.uk' },
   { key:'mica',  name:'Mica Albovias',   email:'micaa.work@gmail.com' },
-  { key:'erica', name:'Ericamae Atenta', email:'atentaerica@gmail.com' },
+  { key:'erica', name:'Ericamae Atenta', email:'atentaerica@gmail.com', left:'2026-09-17' },
   // Gary's Airtable collaborator email differs from his Slack email — the
   // first goes on the Assignee / Collaborators fields, the second is what
   // the Slack worker needs to find his DM. slackEmail overrides the main
@@ -891,6 +897,16 @@ const TEAM = [
   { key:'rob',   name:'Rob Jackson',     email:'rjm320@hotmail.com' },
   { key:'roy',   name:'Roy Lavin',       email:'roy.lavin1978@gmail.com' },
 ];
+
+// Who may be offered for NEW work. `holds` returns true for a member who
+// already holds the record being shown, so a leaver still appears (and stays
+// selected) on their own old task, and nowhere else.
+function teamForNewWork(holds){return TEAM.filter(m=>!m.left||(holds?holds(m):false))}
+function teamLabel(m,short){const n=short?m.name.split(' ')[0]:m.name;return m.left?n+' (left)':n}
+// The person whose day or column is on screen, as the default owner of a task
+// created there. Never a leaver: viewing their old work to reassign it must
+// not hand them a new task. Falls back to the signed-in user, as before.
+function viewedMemberForNewWork(){return (typeof activeTeam!=='undefined'&&TEAM.find(m=>m.key===activeTeam&&!m.left))||null}
 
 const STATUS_OPTIONS = ['Today','Upcoming','Approval','Completed','Overdue'];
 const PRIORITY_OPTIONS = ['Project','Urgent','Not Urgent'];
@@ -1878,7 +1894,7 @@ function initIdentity(){
 }
 function showIdentityOverlay(){
   const btns=document.getElementById('identityBtns');
-  btns.innerHTML=TEAM.map(m=>{const i=m.name.split(' ').map(w=>w[0]).join('');
+  btns.innerHTML=teamForNewWork().map(m=>{const i=m.name.split(' ').map(w=>w[0]).join('');
     return`<button class="identity-btn" onclick="selectIdentity('${m.key}')"><span class="avatar avatar-${m.key}">${i}</span>${escHtml(m.name)}</button>`}).join('');
   document.getElementById('identityOverlay').style.display='flex';
 }
@@ -2880,7 +2896,7 @@ function assigneeOptionsHtml(t,short){
   // holds it RIGHT NOW, so a human assignee wins; the agent link still shows
   // in the AI avatar and keeps the task under the AI Agents filter.
   const agentId=t.assigneeEmail?'':taskAgentId(t);
-  const people=TEAM.map(m=>`<option value="${m.key}" ${t.assigneeEmail===m.email?'selected':''}>${escHtml(short?m.name.split(' ')[0]:m.name)}</option>`).join('');
+  const people=teamForNewWork(m=>t.assigneeEmail===m.email).map(m=>`<option value="${m.key}" ${t.assigneeEmail===m.email?'selected':''}>${escHtml(teamLabel(m,short))}</option>`).join('');
   const ids=Object.keys(AGENT_MAP||{}).sort((a,b)=>AGENT_MAP[a].localeCompare(AGENT_MAP[b]));
   const agents=ids.map(id=>`<option value="agent:${id}" ${agentId===id?'selected':''}>${escHtml(short?shortAgentName(AGENT_MAP[id]):AGENT_MAP[id])}</option>`).join('');
   return `<option value="__unassigned" ${taskIsTrulyUnassigned(t)?'selected':''}>Unassigned</option>${people}`
@@ -2912,6 +2928,7 @@ function renderTeamBar(){
   });
   let h=`<button class="team-btn ${activeTeam==='all'?'active':''}" onclick="setTeam('all')">All<span class="count">${counts.all}</span></button>`;
   TEAM.forEach(m=>{const f=m.name.split(' ')[0];
+    if(m.left&&!counts[m.key]&&activeTeam!==m.key)return; // a leaver shows only while holding open work
     h+=`<button class="team-btn ${activeTeam===m.key?'active':''}" onclick="setTeam('${m.key}')"><span class="avatar avatar-${m.key}">${f[0]}</span> ${f}<span class="count">${counts[m.key]}</span></button>`;
   });
   h+=`<button class="team-btn ${activeTeam==='agents'?'active':''}" onclick="setTeam('agents')" title="Work held by the AI workforce. Assignee cannot hold an agent, so these sit on the Team Member link."><span class="avatar avatar-agent">AI</span> AI Agents<span class="count">${counts.agents}</span></button>`;
@@ -3287,7 +3304,7 @@ function collabKeyForEmail(email){const m=TEAM.find(t=>t.email===email);return m
 function renderCollaboratorsDrawer(t){
   const taskId=t.id;
   const usedEmails=new Set((t.collaborators||[]).map(c=>(c.email||'').toLowerCase()));
-  const available=TEAM.filter(m=>!usedEmails.has(m.email.toLowerCase()));
+  const available=teamForNewWork().filter(m=>!usedEmails.has(m.email.toLowerCase()));
   const chips=(t.collaborators||[]).map(c=>{
     const k=collabKeyForEmail(c.email);
     const nm=(c.name||c.email||'?');
@@ -4740,7 +4757,7 @@ function tlDoubleClickAddTask(e){
       // logged-in user. Otherwise filtering by Mica/Erica/Gary etc. would
       // create a task for Kevin and immediately filter it out, making
       // the task look like it disappeared from the timeline.
-      const viewMember=TEAM.find(m=>m.key===activeTeam);
+      const viewMember=viewedMemberForNewWork();
       const assigneeEmail=viewMember?viewMember.email:(currentUser&&currentUser.email);
       created=await createSimpleTask({name,dueDate:todayStr(),timeEst:'15 min',assigneeEmail});
     }catch(err){console.error('[tlInlineAdd] exception',err)}
@@ -4758,7 +4775,7 @@ function tlDoubleClickAddTask(e){
         if(!t.assigneeEmail){
           // Match the same fallback used at POST time so the task lands
           // on the timeline currently being viewed.
-          const viewMember=TEAM.find(m=>m.key===activeTeam);
+          const viewMember=viewedMemberForNewWork();
           if(viewMember){t.assigneeEmail=viewMember.email;t.assignee=viewMember.name}
           else if(currentUser&&currentUser.email){t.assigneeEmail=currentUser.email;t.assignee=currentUser.name||currentUser.email}
         }
@@ -5836,7 +5853,7 @@ function updateBulkBar(){
     // Populate assignee dropdown (HTML-side template was literal text — inject TEAM list here)
     const asg=document.getElementById('bulkAsgSel');
     if(asg&&typeof TEAM!=='undefined'&&!asg.dataset.filled){
-      asg.innerHTML=`<option value="">Change assignee…</option>`+TEAM.map(m=>`<option value="${m.key}">${escHtml(m.name.split(' ')[0])}</option>`).join('')+(Object.keys(AGENT_MAP||{}).length?`<optgroup label="AI agents">`+Object.keys(AGENT_MAP).sort((a,b)=>AGENT_MAP[a].localeCompare(AGENT_MAP[b])).map(id=>`<option value="agent:${id}">${escHtml(shortAgentName(AGENT_MAP[id]))}</option>`).join('')+`</optgroup>`:'');
+      asg.innerHTML=`<option value="">Change assignee…</option>`+teamForNewWork().map(m=>`<option value="${m.key}">${escHtml(m.name.split(' ')[0])}</option>`).join('')+(Object.keys(AGENT_MAP||{}).length?`<optgroup label="AI agents">`+Object.keys(AGENT_MAP).sort((a,b)=>AGENT_MAP[a].localeCompare(AGENT_MAP[b])).map(id=>`<option value="agent:${id}">${escHtml(shortAgentName(AGENT_MAP[id]))}</option>`).join('')+`</optgroup>`:'');
       asg.dataset.filled='1';
     }
     // Populate project dropdown each open (projects may have changed)
@@ -6363,7 +6380,7 @@ function renderProjects(){
       // Details section
       const curOwner=p.ownerKey||'';
       html+=`<h4>Details</h4><div style="display:grid;grid-template-columns:repeat(2,1fr);gap:8px;margin-bottom:10px">
-        <div style="grid-column:1/-1"><label style="font-size:11px;color:var(--text-secondary);display:block;margin-bottom:2px">Owner</label><select class="inline-select" onchange="updateProjectField('${p.id}','owner',this.value)" style="width:100%"><option value="" ${curOwner===''?'selected':''}>No owner</option>${TEAM.map(m=>`<option value="${m.key}" ${curOwner===m.key?'selected':''}>${m.name}</option>`).join('')}</select></div>
+        <div style="grid-column:1/-1"><label style="font-size:11px;color:var(--text-secondary);display:block;margin-bottom:2px">Owner</label><select class="inline-select" onchange="updateProjectField('${p.id}','owner',this.value)" style="width:100%"><option value="" ${curOwner===''?'selected':''}>No owner</option>${teamForNewWork(m=>curOwner===m.key).map(m=>`<option value="${m.key}" ${curOwner===m.key?'selected':''}>${escHtml(teamLabel(m))}</option>`).join('')}</select></div>
         <div style="grid-column:1/-1"><label style="font-size:11px;color:var(--text-secondary);display:block;margin-bottom:2px">Project Name</label><textarea data-autosize onblur="updateProjectField('${p.id}','name',this.value)" oninput="autoSizeTextarea(this)" class="inline-input" style="width:100%;min-height:38px;resize:none;font-family:inherit;line-height:1.4;overflow:hidden;padding:8px">${escHtml(p.name)}</textarea></div>
         <div><label style="font-size:11px;color:var(--text-secondary);display:block;margin-bottom:2px">Status</label><select class="inline-select" onchange="updateProjectField('${p.id}','status',this.value)" style="width:100%"><option value="">-</option>${PROJ_STATUS_OPTIONS.map(s=>`<option value="${s}" ${p.status===s?'selected':''}>${s}</option>`).join('')}</select></div>
         <div><label style="font-size:11px;color:var(--text-secondary);display:block;margin-bottom:2px">Business</label><select class="inline-select" onchange="updateProjectField('${p.id}','business',this.value)" style="width:100%"><option value="">-</option>${BUSINESS_OPTIONS.map(b=>`<option value="${b}" ${p.business===b?'selected':''}>${b}</option>`).join('')}</select></div>
@@ -7850,7 +7867,7 @@ function startQuickAddInline(opts){
     // Defaults: dueDate = caller-provided OR today; assignee = whoever's
     // day is currently being viewed (matches timeline behaviour so the
     // task doesn't immediately get filtered off-screen).
-    const viewMember=(typeof TEAM!=='undefined'&&TEAM&&typeof activeTeam!=='undefined')?TEAM.find(m=>m.key===activeTeam):null;
+    const viewMember=viewedMemberForNewWork();
     const assigneeEmail=opts.assigneeEmail
       ||(viewMember?viewMember.email:null)
       ||(currentUser&&currentUser.email);
@@ -8004,7 +8021,7 @@ function kanbanInlineAdd(colBody,dueDate,dateLabel){
     const hint=document.getElementById('kqaHint');
     if(hint)hint.innerHTML=`<span style="color:var(--accent)">⟳ Creating "${escHtml(name)}"…</span>`;
     // Assignee: whoever's day is currently being viewed (matches timeline).
-    const viewMember=(typeof TEAM!=='undefined'&&TEAM&&typeof activeTeam!=='undefined')?TEAM.find(m=>m.key===activeTeam):null;
+    const viewMember=viewedMemberForNewWork();
     const assigneeEmail=(viewMember?viewMember.email:null)||(currentUser&&currentUser.email);
     let created=null;
     try{
@@ -8052,7 +8069,7 @@ window.kanbanInlineAdd=kanbanInlineAdd;
 // the H2's onblur fires drwSaveText to persist the real name.
 async function openNewTaskDrawer(opts){
   opts=opts||{};
-  const viewMember=(typeof TEAM!=='undefined'&&TEAM&&typeof activeTeam!=='undefined')?TEAM.find(m=>m.key===activeTeam):null;
+  const viewMember=viewedMemberForNewWork();
   const assigneeEmail=opts.assigneeEmail
     ||(viewMember?viewMember.email:null)
     ||(currentUser&&currentUser.email);
@@ -8147,7 +8164,7 @@ function openCreateTaskModal(){
   const activeProjs=(allProjects||[]).filter(p=>!p.completed&&selectName(p.status)!=='Completed');
   overlay.innerHTML=`<div class="modal"><h2>Add Task</h2>
     <div class="field-row" style="flex-direction:column;align-items:stretch"><label>Task</label><input type="text" id="ctName" placeholder="Task name" autofocus></div>
-    <div class="field-row"><label>Assignee</label><select id="ctAssignee">${TEAM.map(m=>`<option value="${m.key}" ${m.key===defaultKey?'selected':''}>${m.name}</option>`).join('')}</select></div>
+    <div class="field-row"><label>Assignee</label><select id="ctAssignee">${teamForNewWork().map(m=>`<option value="${m.key}" ${m.key===defaultKey?'selected':''}>${escHtml(m.name)}</option>`).join('')}</select></div>
     <div class="field-row"><label>Due Date</label><div class="field-val" style="display:flex;gap:8px;align-items:center"><input type="date" id="ctDue" value="${today}" style="flex:1" oninput="ctSyncStatusFromDue()"><label style="display:flex;align-items:center;gap:4px;font-size:11px;color:var(--danger);min-width:auto;text-transform:none;letter-spacing:0"><input type="checkbox" id="ctHard">Hard Deadline</label></div></div>
     <div class="field-row"><label>Time Estimate</label><select id="ctTimeEst">${TIME_OPTIONS.map(o=>`<option ${o==='15 min'?'selected':''}>${o}</option>`).join('')}</select></div>
     <div class="field-row"><label>Priority</label><select id="ctPriority">${PRIORITY_OPTIONS.map(p=>`<option ${p==='Not Urgent'?'selected':''}>${p}</option>`).join('')}</select></div>
@@ -8344,13 +8361,15 @@ function effectiveWeeklyMinutes(t){
 }
 
 function renderCapacity(){
-  const members=activeTeam==='all'?TEAM:TEAM.filter(m=>m.key===activeTeam);
+  // A leaver adds no capacity, and gets a card only while still holding open work.
+  const holdsOpen=m=>allTasks.some(t=>t.assigneeEmail===m.email&&t.status!=='Completed'&&!t.someDay);
+  const members=activeTeam==='all'?teamForNewWork(holdsOpen):TEAM.filter(m=>m.key===activeTeam);
   let html='';
 
   if(activeTeam==='all'){
     const allActive=allTasks.filter(t=>t.status!=='Completed'&&!t.someDay);
     const totalTeamHrs=allActive.reduce((s,t)=>s+effectiveWeeklyMinutes(t),0)/60;
-    const teamCap=TEAM.reduce((s,m)=>s+getPersonCapacity(m.key),0);
+    const teamCap=teamForNewWork().reduce((s,m)=>s+getPersonCapacity(m.key),0);
     const teamPct=Math.min(100,(totalTeamHrs/teamCap)*100);
     html+=`<div class="capacity-card" style="grid-column:1/-1;border-color:var(--accent)">
       <h3>Team Overview</h3>
@@ -8544,7 +8563,8 @@ async function createMaintenanceTask(opts){
     const matched=matchPropertyFromText((opts.name||'')+' '+(opts.description||''));
     if(matched)fields[F.property]=[matched];
   }
-  const collabEmails=['kevin@runpreneur.org.uk','micaa.work@gmail.com','atentaerica@gmail.com'];
+  // Kevin and Mica are copied in on a new maintenance task; a leaver never is.
+  const collabEmails=teamForNewWork().filter(m=>['kevin','mica','erica'].includes(m.key)).map(m=>m.email);
   const taskCollabs=collabEmails.filter(e=>e!==opts.assigneeEmail).map(e=>({email:e}));
   if(taskCollabs.length)fields[F.collaborators]=taskCollabs;
   const creatorEmail=(currentUser&&currentUser.email)||'';

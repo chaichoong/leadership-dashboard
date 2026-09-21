@@ -149,7 +149,7 @@ li { margin-bottom:0.2rem; font-size:0.9rem; } hr { border:none; border-top:1px 
       </div>
       <div class="qr-item">
         <div class="qr-label">Team Members</div>
-        <div class="qr-value">Kevin Brittain, Mica Albovias, Ericamae Atenta</div>
+        <div class="qr-value">Kevin Brittain, Mica Albovias (Ericamae Atenta left 17 Sep 2026)</div>
       </div>
       <div class="qr-item">
         <div class="qr-label">Calendar Integration</div>
@@ -221,7 +221,7 @@ li { margin-bottom:0.2rem; font-size:0.9rem; } hr { border:none; border-top:1px 
         <ol class="steps">
           <li>Open <strong>os/tasks/index.html</strong> in your browser (or click <strong>Tasks &amp; Projects</strong> in the Operations section of the sidebar to load it as an iframe).</li>
           <li>If prompted, enter your <strong>Airtable Personal Access Token</strong> (starting with <code>pat_</code>) in the auth bar at the top and click <strong>Connect</strong>. The token is stored in <code>localStorage</code> under the key <code>_dlr_pat</code> and will not be asked for again on the same device.</li>
-          <li>The <strong>identity overlay</strong> appears. Select your name (Kevin Brittain, Mica Albovias, or Ericamae Atenta). Your choice is saved to <code>localStorage</code> under <code>_task_user</code>. The system defaults to showing your tasks in the team filter.</li>
+          <li>The <strong>identity overlay</strong> appears. Select your name (Kevin Brittain or Mica Albovias). Someone who has left is not listed. Your choice is saved to <code>localStorage</code> under <code>_task_user</code>. The system defaults to showing your tasks in the team filter.</li>
           <li>Data loads automatically. The top bar shows the sync timestamp once loading is complete.</li>
         </ol>
         <div class="info-box info">
@@ -669,7 +669,7 @@ li { margin-bottom:0.2rem; font-size:0.9rem; } hr { border:none; border-top:1px 
             <td>Calls <code>switchUser()</code>. Clears <code>_task_user</code> from localStorage and shows the identity overlay.</td>
           </tr>
           <tr>
-            <td>Team switcher buttons (All / Kevin / Mica / Ericamae)</td>
+            <td>Team switcher buttons (All / Kevin / Mica / Gary / Rob / Roy). Someone who has left shows only while they still hold open tasks.</td>
             <td>Team bar below topbar</td>
             <td>Calls <code>setTeam(key)</code>. Filters all views to the selected person. Badge shows count of active non-someday tasks.</td>
           </tr>

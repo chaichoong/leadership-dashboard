@@ -86,7 +86,7 @@ transaction records are not linked to these tasks.
 
 | Task | Overdue | Why |
 |---|---|---|
-| Onyx Bureau — ONYX888-0255 | 332 days | No detail at all on the record and nearly a year old |
+| Onyx Bureau — XXXXXXX-X255 | 332 days | No detail at all on the record and nearly a year old |
 | Pay AXA Outstanding Balances | 318 days | Insurance has since moved to Swinton |
 | duckworth snagging 23rd | 290 days | Superseded by the later Duckworth compliance work |
 | DD Fire Alarms Ltd — Duckworth Buildings | 143 days | This is an estimate, not an invoice; the invoice above covers it |
@@ -100,7 +100,7 @@ transaction records are not linked to these tasks.
 | Pay tax liability for 2023/24 — [family member] | 178 days | Part of the live HMRC matter. Stays with you. New date 24 Aug |
 | MHH Confirmation statements | 435 days | Check Companies House for what is actually outstanding, then close or file. AI legal and compliance agent, due 24 Aug |
 | Pay Final Council Tax Adjustment — 32 Elmdon Place | 200 days | Council tax is now on standing orders. Confirm the balance, then close. Due 24 Aug |
-| Housing Benefits Overpayments — 41052677 (£15.99) | 161 days | Pay it and close. Due 17 Aug |
+| Housing Benefits Overpayments — XXXXX677 (£15.99) | 161 days | Pay it and close. Due 17 Aug |
 | Send Rob Jackson the referral email list | 164 days | An agent can draft it for your approval. Due 17 Aug |
 | Land registry Docs — 4 Abington | 350 days | No detail on the record. Needs one line from you: still needed, or close it |
 | 42 elmdon doors | 304 days | No detail on the record. Needs one line from you: still needed, or close it |

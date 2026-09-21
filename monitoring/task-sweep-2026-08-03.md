@@ -79,7 +79,7 @@ bar meaningless.
 **Two business tags I started to write and then dropped**, both after reading the actual email:
 
 - *INBOUND: BW Legal - Our response to your query* — the letter says only "Dear customer" and
-  gives reference X2096880. No company named. BW Legal chases you on two separate fronts, one
+  gives reference XXXXX880. No company named. BW Legal chases you on two separate fronts, one
   property and one personal, so a guess had a real chance of being wrong.
 - *INBOUND: Outstanding invoices (MHH)* — the email states the total outstanding is **across
   all companies**. Business is a single-company box, so tagging it Real Estate would hide a
@@ -106,7 +106,7 @@ Somebody should check what else on that channel has the same problem.
 Ran before anything was written. Verdict, in its words:
 
 > "Reviewed against live Airtable before writing. Seven of nine writes approved. Two dropped:
-> recD9FGOFtuKQ7ea3 (BW Legal reference X2096880 names no entity, and BW Legal chases both a
+> recD9FGOFtuKQ7ea3 (BW Legal reference XXXXX880 names no entity, and BW Legal chases both a
 > Real Estate and a Personal matter) and recgNHgmM19B1Nbey (the MHH email says the debt spans
 > all companies, so a single-entity tag would hide it, the same reason reckPoVJf9ml8YdTw was
 > left blank). One carried item dropped: receS4ea0c6kGrqKF must not be made Annually, because

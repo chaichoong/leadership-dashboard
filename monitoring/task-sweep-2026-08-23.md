@@ -45,7 +45,7 @@ Only one auto write tonight because the CEO review killed the other one (see bel
 - **Recurring: nothing proposed.** Writing "None" would arm one-off tasks to clone themselves. The real fix is a code change to five Airtable formulas, not a bulk write here.
 
 ## Needs your eye (not a field the sweep can fix)
-1. **The £1,073 SSE debt is still stuck, 5 days on.** "INBOUND: reply to SSE Energy Solutions" (account 8702010539) is Urgent, due today, sitting in Approval. The balance has gone £60.75 in May, £773.45 in June, £1,073.08 now, and SSE threaten a site visit. Nothing has been sent since it was approved on 18 Aug. Yesterday's sweep flagged the same thing.
+1. **The £1,073 SSE debt is still stuck, 5 days on.** "INBOUND: reply to SSE Energy Solutions" (account XXXXXXX539) is Urgent, due today, sitting in Approval. The balance has gone £60.75 in May, £773.45 in June, £1,073.08 now, and SSE threaten a site visit. Nothing has been sent since it was approved on 18 Aug. Yesterday's sweep flagged the same thing.
 2. **Two council letters are marked Not Urgent and are overdue.** 1406 Oldham Road (Manchester, titled "Urgent Update required") is 9 days past due; 18 Siddows Avenue (Ribble Valley licence conditions) is 2 days past due. Housing enforcement runs to legal deadlines. The sweep does not touch priority.
 3. **Approve SPF and DKIM before you approve the 6 test emails.** Both are on your list today. Sending test emails from a domain that is not yet authenticated burns sender reputation to measure a problem you already know about. The DNS change needs your registrar login, so it is yours; 10 minutes.
 4. **Filed a finding for the inbound router** (`20260823-task-hygiene-sweep-320`): it stamps "Maintenance Ticket" on council letters and marketing emails. 10 live records are wrong. No code was changed here.
@@ -63,7 +63,7 @@ All 6 reviewed, none skipped. All 6 are money, and all 6 already have an owner, 
 
 | Task | Overdue | My read | Proposal |
 |---|---|---|---|
-| Pay tax liability 2023/24, Ciara Brittain | 191 days | still live — a tax debt does not disappear | give it a new date; it sits with the legal matter in your lane |
+| Pay tax liability 2023/24, [name redacted] | 191 days | still live — a tax debt does not disappear | give it a new date; it sits with the legal matter in your lane |
 | DD Fire Alarms Ltd, Duckworth Buildings | 156 days | dead — this is an estimate, not an invoice | close it, reason: quote expired |
 | Invoice 40859 from DD Fire Alarms | 156 days | still live | no matching payment in the ledger |
 | Invoice 40893 from DD Fire Alarms | 149 days | still live | the letting agent asked for direct settlement, still no payment found |

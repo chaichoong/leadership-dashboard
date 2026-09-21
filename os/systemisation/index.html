@@ -558,10 +558,14 @@ const TF = {
 // Agents) on 24 Aug 2026, Kevin's ruling: everything about the agent
 // workforce lives on ONE page. This page keeps only the SOP-building flow
 // and a pointer on the old tab.
+// Only createVideoTask() reads this list, and nothing on the page calls it any
+// more: "Record video" opens the shell's quick-task drawer (qt:open-new-task-drawer),
+// whose picker is TASK_TEAM in js/config.js. A member marked `left` is never
+// given new work here either, matching that list. Ericamae left on 17 Sep 2026.
 const TEAM = [
     { key:'kevin', name:'Kevin Brittain',  email:'kevin@runpreneur.org.uk' },
     { key:'mica',  name:'Mica Albovias',   email:'micaa.work@gmail.com' },
-    { key:'erica', name:'Ericamae Atenta', email:'atentaerica@gmail.com' },
+    { key:'erica', name:'Ericamae Atenta', email:'atentaerica@gmail.com', left:'2026-09-17' },
     { key:'gary',  name:'Gary Marsh',      email:'gkm.property.maintenance@outlook.com' },
     { key:'rob',   name:'Rob Jackson',     email:'rjm320@hotmail.com' },
     { key:'roy',   name:'Roy Lavin',       email:'roy.lavin1978@gmail.com' },
@@ -4409,6 +4413,7 @@ async function createVideoTask(wfId){
 
     const member = TEAM.find(m=>m.key===assigneeKey);
     if(!member){ toast('Invalid team member selected'); return; }
+    if(member.left){ toast(member.name+' has left and cannot be given new work'); return; }
 
     const saveBtn = document.querySelector('#modalOverlay .btn-primary');
     if(saveBtn){ saveBtn.disabled=true; saveBtn.textContent='Creating...'; }

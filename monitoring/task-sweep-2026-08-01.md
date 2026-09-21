@@ -132,7 +132,7 @@ direction was right either way, so the 9 moves stand.
 - recCeYjOO4URqmOtR — Companies House reply, but it is an automatic acknowledgement and never
   names which of your companies it is about.
 - recD9FGOFtuKQ7ea3 and recGO5pvoBxY8Iy6p — two BW Legal letters. Your old BW Legal tasks were
-  about TNT Management, but those carry reference T9790936 and these carry X2096880. Different
+  about TNT Management, but those carry reference XXXXX936 and these carry XXXXX880. Different
   matter. Could be the personal HMRC debt instead.
 - recgNHgmM19B1Nbey and recsv02sVimmH3rFw — the two MHH accountant ones, explained above.
 - recnEuReyawSFxLzE — YouTube pulled a video called "Email Utility Company to Request that
