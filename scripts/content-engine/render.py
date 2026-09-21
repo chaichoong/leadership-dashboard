@@ -767,6 +767,9 @@ def redo_lfmd(day):
             finally: os.remove(rpath)
         else:
             print("episode %d: Kevin's feedback asks for more than the Learnings clip; the card is left for a person to resubmit" % day, file=sys.stderr)
+            # The clip is built; only the resubmission is left, and the Publishing page shows the card as sent back.
+            # Kept listed, 2062 was rebuilt every night from 18 to 20 Sep 2026 while nobody resubmitted it.
+            if links.get("lfmd") and links.get("lfmd_yt"): _drop_day(REDO_LFMD_FILE, day)
     else:
         approval.refresh_card(day); resubmitted = True
     if links.get("lfmd") and links.get("lfmd_yt") and resubmitted: release_hold(day)
