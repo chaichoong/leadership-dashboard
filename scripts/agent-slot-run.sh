@@ -137,6 +137,7 @@ Rules for the whole run:
   never as clean.
 $EXTRA
 End with at most fifteen lines: what you did, what you found, what you could not do." \
+  --settings "$AGENT_SETTINGS_FILE" \
   --permission-mode acceptEdits \
   --allowedTools "${AGENT_ALLOWED_TOOLS[@]}" >> "$LOG" 2>&1
 RC=$?
