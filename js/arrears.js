@@ -471,7 +471,7 @@
             // the tenancy's Due Day of Month or rent changes after the task was
             // created: the computed name changes, the old exact-match test misses,
             // and a second task appears for a rent date that no longer exists.
-            // Ryan Lambert ended up with "due 5 August" and "due 6 August" tasks
+            // One tenant ended up with "due 5 August" and "due 6 August" tasks
             // this way (1 Aug 2026). Reconcile the existing one instead of adding
             // to the pile. A task for a DIFFERENT month is a genuinely different
             // period and is left alone.
@@ -586,7 +586,7 @@
         return linked.some(l => (typeof l === 'string' ? l : l?.id) === tenancyId);
     }
 
-    // "UC verification: Ryan Lambert, £524.90 due 6 August 2026" → Date(2026-08-06)
+    // "UC verification: Jane Testwood, £500.00 due 6 August 2026" → Date(2026-08-06)
     function ucRentDueFromTaskName(name) {
         const m = /\bdue\s+(\d{1,2})\s+([A-Za-z]+)\s+(\d{4})\s*$/.exec(name || '');
         if (!m) return null;

@@ -609,8 +609,8 @@ Produces two PDFs ready to upload to e-signing software:
 2. **Proof of Residency Letter** (on Agile Lets letterhead)
 
 Output matches the visual format of the reference PDFs in
-\`/sessions/clever-great-carson/mnt/Claude/Templates/\` (AST_Daniel_Gathercole.pdf and
-ProofofResidency_Daniel_Gathercole.pdf).
+\`/sessions/clever-great-carson/mnt/Claude/Templates/\` (AST_Jane_Testwood.pdf and
+ProofofResidency_Jane_Testwood.pdf).
 
 ## Variables Required
 
@@ -647,9 +647,9 @@ PDFs.
 
 \`\`\`bash
 python3 ~/.claude/skills/tenant-doc-generator/scripts/generate_docs.py \\
-  --name "Kinga Gnerowicz" \\
-  --address "14 Wentworth Terrace, Haverhill, Suffolk, CB9 9BP" \\
-  --rent "897.52" \\
+  --name "Jane Testwood" \\
+  --address "1 Example Road, Testville, Suffolk, ZZ1 1ZZ" \\
+  --rent "650.00" \\
   --start-date "17 April 2026" \\
   --out "/sessions/clever-great-carson/mnt/Claude/Claude Outputs/Tenant Docs"
 \`\`\`
@@ -661,6 +661,8 @@ Flags:
 - \`--rent\` — monthly rent, with or without £
 - \`--start-date\` — any readable UK date (e.g. "17/04/2026", "17 April 2026", "2026-04-17")
 - \`--out\` — output directory (defaults to current working directory)
+
+Page note (21 Sep 2026): the tenant name, address, rent and reference PDF names in this example are fictional on this page copy, because this repository is public. The skill itself keeps the real values.
 
 Output filenames:
 
@@ -691,8 +693,8 @@ pip install weasyprint --break-system-packages
 - Script: \`scripts/generate_docs.py\`
 - Legacy markdown templates (for reference only): \`templates/\`
 - Reference PDFs on Kevin's disk:
-  \`/sessions/clever-great-carson/mnt/Claude/Templates/AST_Daniel_Gathercole.pdf\`
-  \`/sessions/clever-great-carson/mnt/Claude/Templates/ProofofResidency_Daniel_Gathercole.pdf\`
+  \`/sessions/clever-great-carson/mnt/Claude/Templates/AST_Jane_Testwood.pdf\`
+  \`/sessions/clever-great-carson/mnt/Claude/Templates/ProofofResidency_Jane_Testwood.pdf\`
 `,
     },
     // contractor-job-creator skill RETIRED 2026-05-08 — superseded by the
@@ -1240,16 +1242,16 @@ Every mortgage interest payment has an account/loan reference number. Cross-refe
 
 | Vendor | Reference contains | Cost (link) | Property (link) |
 |---|---|---|---|
-| TOGETHER COMMERCIAL FINANCE | 10210721 | Together loan 10210721 | (lookup at apply time) |
-| TOGETHER COMMERCIAL FINANCE | 10207194 | Together loan 10207194 | (lookup at apply time) |
-| BHAM MIDSHIRES | 6092231472 | BHam Midshires 6092231472 | (lookup at apply time) |
-| TMW DDR | 12330194/1224013 | TMW 12330194 | (lookup at apply time) |
-| Secure Trust Bank | 016369061 | Secure Trust 016369061 | **MUST be linked — Kevin's explicit instruction** |
+| TOGETHER COMMERCIAL FINANCE | 10200001 | Together loan 10200001 | (lookup at apply time) |
+| TOGETHER COMMERCIAL FINANCE | 10200002 | Together loan 10200002 | (lookup at apply time) |
+| BHAM MIDSHIRES | 6000000001 | BHam Midshires 6000000001 | (lookup at apply time) |
+| TMW DDR | 12300001/1200001 | TMW 12300001 | (lookup at apply time) |
+| Secure Trust Bank | 010000001 | Secure Trust 010000001 | **MUST be linked — Kevin's explicit instruction** |
 
 → Category: Operating Expenses, Sub Category: Mortgage Interest, Business: Real Estate.
 
 ### Rental income — Aigburth pattern
-COLLINS S faster payment with reference "AIGBURTH" → Property: Aigburth (look up by name in the Property table). Pull active Tenancy/Unit from the property record.
+TENANT A faster payment with reference "AIGBURTH" → Property: Aigburth (look up by name in the Property table). Pull active Tenancy/Unit from the property record.
 → Category: Revenue, Sub Category: Rental Income, Business: Real Estate.
 
 ### Transfers — Category AND Sub Category are both "Transfers"
@@ -1263,18 +1265,20 @@ Applies to:
 NOTEMACHINE / ATM cash withdrawals on Santander are NOT personal cash. They are Real Estate reactive maintenance for **22 Newton Street**.
 → Category: COGS, Sub Category: COGS Reactive Maintenance, Business: Real Estate, Property: 22 Newton Street.
 
-### Gary Marsh contractor payments
+### Building contractor payments
 → Category: Capital Expenditure, Sub Category: Capital Expenditure, Business: Real Estate.
 - Parse property reference from \`*Name\` (e.g. "1406 Oldham" → 1406 Oldham, "5 Woodcock" → 5 Woodcock) and link Property only.
-- Do NOT set Team Member (Gary Marsh is not a team member).
+- Do NOT set Team Member (the contractor is not a team member).
 - Do NOT set Rental Unit.
 - Property is the only linked record beyond Business + Cat + Sub Cat.
 
-### Paul Brittain loan inflows
-→ Category: Loan Receipt, Sub Category: Loan Receipt. Match historical Paul Brittain loan entries.
+### Family lender A loan inflows
+→ Category: Loan Receipt, Sub Category: Loan Receipt. Match historical loan entries from the same lender.
 
-### Joo Ee Brittain loan repayments
-JOO EE BRITTAIN bill payments with "LOAN" reference → look up the matching Loan Repayment cost in the Costs table by matching the reference date (e.g. "LOAN 280226" → 28-02-2026 loan period) and link the Cost.
+### Family lender B loan repayments
+LENDER B bill payments with "LOAN" reference → look up the matching Loan Repayment cost in the Costs table by matching the reference date (e.g. "LOAN 280226" → 28-02-2026 loan period) and link the Cost.
+
+Page note (21 Sep 2026): the mortgage account numbers, the tenant in the Aigburth rule, the contractor and the two family lenders in this section are fictional or generic on this page copy, because this repository is public. The skill itself keeps the real values.
 
 ### Shelley Co
 SHELLEY CO faster payment → Operating Expenses / Professional Fees / Real Estate.
