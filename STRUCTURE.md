@@ -47,7 +47,7 @@ Single source of truth for file locations across the Operations Director Platfor
 5. **Skills** — three tiers, by design:
    - Project skills: `.claude/skills/` in this repo (workflow pipeline)
    - Personal skills: `~/.claude/skills/` (`build-prompt`, `challenge`, `adhd` + `i-have-adhd` always-on pair, `close-out` and `goal-line` always-on pairs (each a SKILL.md plus an `always-on.sh` run by a SessionStart hook in `~/.claude/settings.json`; `goal-line`, 13 Sep 2026, enforced at both ends 14 Sep 2026, also carries `goal-start.sh` (UserPromptExpansion hook on `/fix`, `/build-feature`, `/build-prompt`: prints the GOAL rule, logs to `logs/expansion.jsonl`) and `goal-check.py` (Stop hook: refuses a finished message with no complete GOAL CHECK; `selftest`)), `evaluate-guide` (21 Sep 2026: checks an outside guide against the real setup, logs verdicts to `~/.claude/maintenance-log.md`), and others)
-   - Personal hooks with no skill of their own: `~/.claude/hooks/` (`syntax-check.py`, 21 Sep 2026: PostToolUse on Edit/Write, blocks a syntax error in the file just edited, inline `<script>` blocks in HTML included; `selftest`)
+   - Personal hooks with no skill of their own: `~/.claude/hooks/` (`project-check.py`, 21 Sep 2026: SessionStart, moves a new chat to the right one of the five projects, see section 6; `syntax-check.py`, 21 Sep 2026: PostToolUse on Edit/Write, blocks a syntax error in the file just edited, inline `<script>` blocks in HTML included; `selftest`)
    - Cowork plugin skills: managed by the Claude desktop app (Airtable automations, document tools)
 
 Do not move skills between tiers without reason: project skills travel with the repo, personal skills apply everywhere, plugin skills are managed by the app.
@@ -76,19 +76,30 @@ Do not move skills between tiers without reason: project skills travel with the 
 | Reports and deliverables | Drive `Claude Outputs/` | Stays in Drive |
 | Business records (invoices, certs, legal) | Drive (currently unstructured at root) | Planned folders: `Properties/`, `Finance/`, `Legal/`, `Operations Director/`, `Runpreneur/`, `Archive/` — reorganisation pending as its own task |
 
-## 6. The private desk (`~/Projects/kevin-hq`, 21 Sep 2026)
+## 6. The five Claude Code projects (21 Sep 2026)
 
-This repo is PUBLIC, so work that is not code runs from a second folder on this Mac: property and tenants, HMRC and legal, money, learning, CEO sessions, personal questions. It is not a git repo and never goes to GitHub.
+Every Claude Code session starts in one of five project folders. The folder decides which briefing (CLAUDE.md) and skills load. All five share this repo's memory. This repo is PUBLIC, so the four private projects live outside it, in `~/Projects/kevin-hq`, which is not a git repo and never goes to GitHub.
+
+| Project | Folder | What goes there |
+|---|---|---|
+| Operations Director | `~/Projects/leadership-dashboard` (this repo) | Code: the dashboard, AI agents, scripts, hooks, skills, Claude's own setup. The robots and scheduled jobs run here |
+| Property | `~/Projects/kevin-hq/property` | Portfolio, tenants, Roy, compliance, growth questions |
+| Money & Legal | `~/Projects/kevin-hq/money-legal` | Wealth, cash, tax, HMRC, creditors, legal matters |
+| Runpreneur | `~/Projects/kevin-hq/runpreneur` | Running, charity, content ideas |
+| HQ | `~/Projects/kevin-hq` | CEO and board sessions, learning, personal, anything else |
+
+Each private project folder holds:
 
 | Location | Purpose |
 |---|---|
-| `CLAUDE.md` | What the desk is for; working files go in dated subfolders |
-| `.claude/settings.json` | `autoMemoryDirectory` = this repo's memory folder (one shared memory); `permissions.additionalDirectories` = this repo (file access only, it does not load the repo's skills) |
-| `.claude/skills/` | Symlinks to this repo's `airtable-task-creator` and `airtable-tenancy-ender`, so there is one copy of each |
-| `property/`, `legal/`, `money/`, `learning/` | Working files, one dated subfolder per piece of work |
-| `_from-repo/2026-09-21/` | 258 loose scratch files moved out of this checkout on 21 Sep 2026, paths kept, listed in `MOVED.txt` |
+| `CLAUDE.md` | The project's briefing: purpose, people, where its facts live (Airtable tables, brain notes, memory files), rules that have bitten. HQ's `CLAUDE.md` also loads in the three projects inside it |
+| `.claude/settings.json` | `autoMemoryDirectory` = this repo's memory folder (one shared memory); `permissions.additionalDirectories` = this repo (file access only, it loads no skills) |
+| `.claude/skills/` | Symlinks to this repo's `airtable-task-creator` (all) and `airtable-tenancy-ender` (property, HQ), so there is one copy of each |
+| dated subfolders | Working files, one per piece of work |
 
-Code skills (`/fix`, `/build-feature`) and the robots stay in this repo. `scripts/private-name-guard.py`, run first by `scripts/pre-commit`, refuses a commit that adds a line naming someone on `~/.config/od/redact-names.txt`.
+HQ also holds `learning/` (transcript and book working files) and `_from-repo/2026-09-21/` (259 scratch files moved out of this checkout, listed in `MOVED.txt`).
+
+Enforcement: `~/.claude/hooks/project-check.py` (SessionStart, interactive sessions only) tells a new chat which project it started in; if the first prompt belongs to another, Claude moves it with `mcp__ccd_directory__change_directory` during the model-check reply (`FIRST_PROMPT_ALLOWED` in `~/.claude/skills/model-check/gate.py`). `scripts/private-name-guard.py`, run first by `scripts/pre-commit`, refuses a commit that adds a line naming someone on `~/.config/od/redact-names.txt`.
 
 ## 7. Hygiene rules
 
