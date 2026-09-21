@@ -9,9 +9,9 @@ const REPO_SKILL = resolve(ROOT, '.claude/skills/airtable-tenancy-ender/SKILL.md
 const REPO_SCHEMA = resolve(ROOT, '.claude/skills/airtable-tenancy-ender/references/airtable_schema.md');
 const PERSONAL_SKILL = resolve(homedir(), '.claude/skills/anthropic-skills/airtable-tenancy-ender/SKILL.md');
 
-// 18 Sep 2026. Ending Kevin Radford's tenancy, the skill was one step away from
-// setting Unit 1 - 25 Abercorn Court to Void. That unit is let to Cheffins for
-// £1,096.80 a month. The tenancy's own Rental Unit link was EMPTY; a legacy copy
+// 18 Sep 2026. Ending a former tenant's tenancy, the skill was one step away from
+// setting Unit 1 - 25 Abercorn Court to Void. That unit carries a live tenancy
+// paying a monthly rent. The tenancy's own Rental Unit link was EMPTY; a legacy copy
 // of the record carried it. Nothing in the skill checked, and nothing would have
 // errored: the occupancy rollups and the cash flow forecast would simply have been
 // wrong. The gate below is the fix. This test exists so a re-sync of the upstream

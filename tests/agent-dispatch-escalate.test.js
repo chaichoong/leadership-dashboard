@@ -74,8 +74,8 @@ describe('agent-dispatch escalate makes a decision card', () => {
   });
 
   it('a task at Approval WITHOUT a DECIDE: ask is still escalated (an old draft card is not a decision)', () => {
-    const r = escalate({ status: 'Approval', agentOutput: 'Draft reply to the council', reason: 'Pay the £1,096.80 or dispute it?' });
-    expect(r.captured.fields[r.AF.agentOutput]).toMatch(/^DECIDE: Pay the £1,096.80 or dispute it\?/);
+    const r = escalate({ status: 'Approval', agentOutput: 'Draft reply to the council', reason: 'Pay the £1,234.56 or dispute it?' });
+    expect(r.captured.fields[r.AF.agentOutput]).toMatch(/^DECIDE: Pay the £1,234.56 or dispute it\?/);
     expect(r.captured.fields[r.AF.agentOutput]).toContain('Earlier output:\nDraft reply to the council');
   });
 

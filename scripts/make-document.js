@@ -205,7 +205,7 @@ async function selftest() {
     process.exit = orig;
     eq(code, 1, 'should have exited 1');
   });
-  check('a filled document passes', () => validate({ markdown: 'To Mark Peters of 6 Chedburgh Place' }));
+  check('a filled document passes', () => validate({ markdown: 'To Sam Taylor of 6 Chedburgh Place' }));
   check('a blank template passes when asked for',
     () => validate({ markdown: 'To [Tenant Name]', allowPlaceholders: true }));
 
