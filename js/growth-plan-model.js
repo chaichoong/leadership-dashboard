@@ -327,8 +327,8 @@
     function councilFor(postcode) { return COUNCIL_BY_OUTWARD[outward(postcode)] || null; }
 
     // Kevin, 16 Sep 2026: a property is ours unless a live letting agent runs it.
-    // "Property Portfolio" is our own landlord name, and Simon Collins stopped
-    // counting as an agent, so his houses come back into our list.
+    // "Property Portfolio" is our own landlord name, and the head lessee stopped
+    // counting as an agent, so those houses come back into our list.
     function isSelfManaged(prop) {
         if (prop && prop.movingToSelfManage) return true;   // being taken back: treat it as ours
         const agent = String((prop && prop.agent) || '').trim();
@@ -826,10 +826,10 @@
                 const margin = s('collins_margin_per_property', 250);
                 levers.push(lever({
                     key: `takeback:${prop.id}`, lever: 'Take-back', propertyId: prop.id, property: prop.name,
-                    title: `${prop.name}: take back from the Collins head lease`,
+                    title: `${prop.name}: take back from the head lease`,
                     monthly: margin, monthlyIfExempt: margin, oneOff: 0, effort: 'Legal', counted: 'now',
                     evidence: [`Rent received now £${propRent.toFixed(2)} (live tenancies)`, `Margin on take-back £${margin} a month (Kevin, 9 Sep 2026)`],
-                    needs: ['Q4 only, after the legal question set comes back (ruling 31 Jul 2026)', 'Say nothing to Collins or the sub-tenants until then'],
+                    needs: ['Q4 only, after the legal question set comes back (ruling 31 Jul 2026)', 'Say nothing to the head lessee or the sub-tenants until then'],
                     firstStep: 'Check the legal question set on approaching sub-tenants has an answer',
                 }, planByKey));
             }
@@ -1037,7 +1037,7 @@
                 // checklist Kevin works from is built below (checklistFor).
                 paperwork: selfManaged ? (CHECKLIST[chosen] || null) : null,
                 // Kevin, 16 Sep 2026: the split reads the PROPERTY, never a tenant's pay type.
-                // Simon Collins is not an agent, and a ticked "Moving to self-manage" promotes
+                // The head lessee is not an agent, and a ticked "Moving to self-manage" promotes
                 // an agent-run property into our list with everything that comes with it.
                 selfManaged, movingToSelfManage: !!prop.movingToSelfManage,
                 // An apartment shown on its own row: its plan and frozen start save to its Rental Units record.

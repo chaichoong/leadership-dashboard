@@ -146,7 +146,7 @@ const BUILTIN_SITES = {
   // holding a bank session in the robot profile is his call to make.
   // AmEx was on that excluded list until 18 Sep 2026, when Kevin made the call
   // and asked for it, along with Amazon and Airbnb, so that the HMRC compliance
-  // check (CFS-2427425) could be worked without tying up his own browser. The
+  // check could be worked without tying up his own browser. The
   // credential and payment guards above are unchanged: `fill` still refuses
   // every password and card field in code, so the robot reads statements and
   // order history and can never pay, transfer or change a card.
@@ -172,15 +172,15 @@ const BUILTIN_SITES = {
                                   loginUrl: 'https://www.edfenergy.com/myaccount/login' },
   // Added 18 Sep 2026 on Kevin's instruction, for the HMRC compliance check.
   // AmEx statements older than two years are PDF-only, so the robot downloads
-  // them rather than reading a CSV. The card account is in Ciara's name and
-  // Kevin is a cardholder; reading is all that is unlocked.
+  // them rather than reading a CSV. The card account is in a family member's
+  // name and Kevin is a cardholder; reading is all that is unlocked.
   'global.americanexpress.com': { label: 'American Express',    login: true,
                                   loginUrl: 'https://www.americanexpress.com/en-gb/account/login' },
   'www.americanexpress.com':    { label: 'American Express (login)', login: true,
                                   loginUrl: 'https://www.americanexpress.com/en-gb/account/login' },
   // Amazon order history, to match card charges to what was actually bought.
-  // The account is SHARED (orders dispatch to Kevin, Sarah Ashurst and Paul
-  // Brittain), so an order is only Kevin's when its total matches one of his
+  // The account is SHARED (orders dispatch to Kevin and two other people),
+  // so an order is only Kevin's when its total matches one of his
   // card charges. Never assume every order on the account is his.
   'www.amazon.co.uk':           { label: 'Amazon (order history)', login: true,
                                   loginUrl: 'https://www.amazon.co.uk/gp/css/order-history' },

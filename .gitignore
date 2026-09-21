@@ -53,11 +53,12 @@ rec[A-Za-z0-9]*-revised.md
 rec[A-Za-z0-9]*-letter-*
 rec[A-Za-z0-9]*-merged.pdf
 
-# HMRC compliance check CFS-2427425 working files (18 Sep 2026).
+# HMRC compliance check working files (18 Sep 2026).
 # THIS REPO IS PUBLIC. These hold Amex statements, card transactions, UTRs,
 # tax return figures and a director's loan balance. They must never be committed.
-monitoring/hmrc-cfs-2427425-*
-monitoring/hmrc-amex-*/
+# Widened 21 Sep 2026 from two case-specific patterns: any monitoring/hmrc-* file
+# or folder is ignored, so the case number no longer sits in this public file.
+monitoring/hmrc-*
 
 # The prospecting agent's learned playbook (21 Sep 2026). THIS REPO IS PUBLIC and
 # the playbook names real prospects and their email addresses. The live playbook

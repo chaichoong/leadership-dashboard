@@ -16,7 +16,7 @@
  * USAGE
  *   node scripts/make-tenancy-pack.js --property "6 Chedburgh Place" [--dry]
  *   node scripts/make-tenancy-pack.js --all [--dry]
- *   node scripts/make-tenancy-pack.js --tenant "Gary Walker" [--dry]
+ *   node scripts/make-tenancy-pack.js --tenant "Jane Testwood" [--dry]
  *   node scripts/make-tenancy-pack.js --new --name "Jane Doe" --property "5 Dalham Place" \
  *                                     [--start 2026-10-01] [--dry]
  *
@@ -56,21 +56,21 @@ function strategyOf(p) {
 // than listed, and it keeps working as tenants come and go.
 //
 // AUTHORITY TO ACT could not be derived. Kevin dropped it at 5 Dalham Place and
-// for David Pinder, and kept it everywhere else, including tenants with no rent
-// change at 55 Elmdon Place and 13 Chedburgh Place. The exceptions are listed
+// for the one tenant listed below, and kept it everywhere else, including
+// tenants with no rent change at 55 Elmdon Place and 13 Chedburgh Place. The exceptions are listed
 // here with his name and the date on them, so every gap is attributable and
 // nothing is silently inferred.
 const NO_AUTHORITY_PROPERTY = ['5 Dalham Place'];
 const NO_AUTHORITY_TENANT = ['David Pinder'];
-// Tristram Guthrie has no date of birth on file, so the age test could not put
-// him on the one-bed rate. Kevin's instruction to raise his agreement at that
-// rate IS the confirmation that he is 35 or over. His rent is £524.52 today.
+// The tenant below has no date of birth on file, so the age test could not put
+// them on the one-bed rate. Kevin's instruction to raise their agreement at that
+// rate IS the confirmation that they are 35 or over.
 const CONFIRMED_OVER_35 = ['Tristram Guthrie'];
 // WHO HOLDS THE EARLIER-TERM AGREEMENT (Kevin, 10 Sep 2026). By default it is
-// whoever moved in first. At 1406 Oldham Road Kevin says it is William Aiton,
-// not Neil Huggins, and deleted the Neil Huggins draft. Airtable records Neil
-// from 12 Dec 2019 and William from 3 Jan 2025, so the record and the instruction
-// disagree; the instruction wins, and the term date still comes from the
+// whoever moved in first. At 1406 Oldham Road Kevin names the tenant below,
+// not the one who moved in first, and deleted the other draft. Airtable records
+// the first from 12 Dec 2019 and the named tenant from 3 Jan 2025, so the record
+// and the instruction disagree; the instruction wins, and the term date still comes from the
 // property's first tenancy, which is what the backdated council tax covers.
 const EARLIER_TERM_HOLDER = { '1406 Oldham Road': 'William Aiton' };
 
@@ -145,7 +145,7 @@ async function main(argv) {
     if (!/^\d{4}-\d{2}-\d{2}$/.test(newStart)) die('--start must be YYYY-MM-DD');
   }
   if (!wanted && !wantedTenant && !argv.includes('--all')) {
-    die('usage: --property "6 Chedburgh Place" | --tenant "Gary Walker" | --new --name N --property P | --all [--dry]');
+    die('usage: --property "6 Chedburgh Place" | --tenant "Jane Testwood" | --new --name N --property P | --all [--dry]');
   }
 
   const props = await all('tbl6f0OkAmTC2jbuG',

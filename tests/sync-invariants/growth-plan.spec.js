@@ -162,7 +162,7 @@ test.describe('Growth Plan page', () => {
     await expect(card.locator('.cl-head')).toContainText('4 of 5 done');   // the take-back is the fifth
     await expect(card.locator('.cl-item')).toHaveCount(5);
     await expect(card.locator('.cl-item.done')).toHaveCount(4);
-    await expect(card.locator('.cl-item', { hasText: 'take back from the Collins head lease' })).toHaveCount(1);
+    await expect(card.locator('.cl-item', { hasText: 'take back from the head lease' })).toHaveCount(1);
   });
 
   test('places to let count the plan, and the extra ones say they are not in the database yet', async ({ page }) => {

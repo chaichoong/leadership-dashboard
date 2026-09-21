@@ -15,8 +15,8 @@
  * which belongs to whom, then click each one", so this is a script rather than
  * a plan. It is the automation of a process Kevin already ran by hand: the
  * adobe-sign-field-setup skill describes the same clicks, and his account has
- * sent multi-signer tenancy agreements this way before (AST_Daniel_Gathercole,
- * AST_Nathan_Ingerson and others).
+ * sent multi-signer tenancy agreements this way before (AST_Jane_Testwood,
+ * AST_Edna_Example and others).
  *
  * WHAT IT WILL NOT DO
  * -------------------
@@ -232,7 +232,7 @@ function parseFieldMap(raw, fields, signerCount) {
  * blank on one authority and back fine on the next, and the sending account's
  * own boxes never read at all. Every refusal on 10 Sep 2026 was that silence,
  * on documents the screenshots showed were correct in every box, including
- * Andrew Martin's authority, refused twice while perfect.
+ * one tenant's authority, refused twice while perfect.
  *
  * Correctness comes from the assignment step, which is correct by construction:
  * it picks the recipient BY EMAIL and stops dead if a move fails, and anything

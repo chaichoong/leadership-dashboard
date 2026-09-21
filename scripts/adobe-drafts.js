@@ -11,13 +11,13 @@
  * DELETING IS THE DANGEROUS HALF, SO IT IS THE NARROW ONE.
  * There is no "delete everything". A delete names exactly what it may remove
  * and refuses anything else, because the same list holds real agreements that
- * predate today (ciara-hmrc-loa, british-gas-loa-ciara and others). The run
+ * predate today (letters of authority and others). The run
  * prints what it deleted and what it left.
  *
  * USAGE
  *   node scripts/adobe-drafts.js --list
- *   node scripts/adobe-drafts.js --delete "AST_Tristram_Guthrie" --dry
- *   node scripts/adobe-drafts.js --delete "AST_Tristram_Guthrie,ZZ_TagProbe"
+ *   node scripts/adobe-drafts.js --delete "AST_Jane_Testwood" --dry
+ *   node scripts/adobe-drafts.js --delete "AST_Jane_Testwood,ZZ_TagProbe"
  */
 
 'use strict';
@@ -101,8 +101,8 @@ const readVisible = (page) => page.evaluate(() => {
     const r = el.getBoundingClientRect();
     if (r.width === 0 || r.height === 0) return;
     // THE FULL NAME IS IN THE TITLE ATTRIBUTE. The drawn column is truncated:
-    // "Authority_Daniel_Gathercole_55" loses the "(2)" that tells copies apart.
-    // Measured 11 Sep 2026: title="AST- Jason Smith-agreement (1).pdf".
+    // "Authority_Jane_Testwood_55" loses the "(2)" that tells copies apart.
+    // Measured 11 Sep 2026: title="AST- Jane Testwood-agreement (1).pdf".
     const t = [...el.querySelectorAll('[title]')].map((x) => x.getAttribute('title'))
       .find((v) => v && /\.pdf$|-agreement/i.test(v));
     const lines = (el.innerText || '').split('\n').map((x) => x.trim()).filter((l) => l.length > 1);
@@ -248,7 +248,7 @@ function baseName(title) {
  * For each document with more than one draft, keep the most recently modified
  * and mark the rest to delete. A bracket number is NOT recency: the first upload
  * has none and later ones count up, so where an early attempt failed and a later
- * one passed, the good copy is the numbered one (Adam Bishop-Bridges' authority
+ * one passed, the good copy is the numbered one (one tenant's authority
  * is "(2)").
  */
 function planDuplicates(rows, now) {
@@ -298,17 +298,17 @@ function selftest() {
 
   check('a name of six characters or more is accepted',
     () => parsePatterns('ZZ_TagProbe').length === 1);
-  check('several names are accepted', () => parsePatterns('AST_Tristram,ZZ_TagProbe').length === 2);
+  check('several names are accepted', () => parsePatterns('AST_Jane,ZZ_TagProbe').length === 2);
   check('a short name is refused, or it would take real agreements too',
     () => refuses(() => parsePatterns('AST')));
   check('a wildcard is refused', () => refuses(() => parsePatterns('*')));
   check('nothing at all is refused', () => refuses(() => parsePatterns('')));
   check('matching is a plain substring, not a regex',
-    () => matches('AST_Tristram_Guthrie-agreement (3).pdf', ['AST_Tristram']));
+    () => matches('AST_Jane_Testwood-agreement (3).pdf', ['AST_Jane']));
   check('a real agreement is left alone by a test-name pattern',
-    () => !matches('ciara-hmrc-loa', ['AST_Tristram', 'ZZ_TagProbe']));
-  check('british-gas-loa-ciara is left alone too',
-    () => !matches('british-gas-loa-ciara', ['AST_Tristram', 'ZZ_TagProbe']));
+    () => !matches('family-hmrc-loa', ['AST_Jane', 'ZZ_TagProbe']));
+  check('british-gas-loa-family is left alone too',
+    () => !matches('british-gas-loa-family', ['AST_Jane', 'ZZ_TagProbe']));
 
   const NOW = new Date('2026-09-11T03:00:00');
   check('copies with and without a bracket number are one document',
