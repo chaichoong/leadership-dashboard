@@ -17,6 +17,18 @@ This script is the mechanical half of the fix. Two checks:
    exempt (a lesson is never deleted), and so is a line that quotes the old rule
    as history ("lowered from", "superseded", "previous rule").
 
+   Since 21 Sep 2026 the scan also reads what every Claude Code session loads
+   before it acts: Kevin's global `~/.claude/CLAUDE.md` and the project memory
+   folder (`MEMORY.md` and every topic `.md`). The agent files had been cleaned
+   while the memory kept telling sessions to route to Mica and to post to
+   #agent-approvals. Memory topic files deliberately keep history, so in a TOPIC
+   file a dated marker line (`**SUPERSEDED in part (noted 21 Sep 2026):** ...`,
+   `SUPERSEDED 16 Sep 2026: ...`) ends the scan of that file: what sits below
+   it is the record, what sits above it is live. The marker must carry a date,
+   so it records a ruling rather than acting as a mute switch. `MEMORY.md` and
+   `~/.claude/CLAUDE.md` are loaded whole into every session, so they are fully
+   live: a marker in either exempts nothing.
+
 2. THE STAMP. `~/.claude/agents/ESTATE.md` carries `As at: YYYY-MM-DD`. Any
    ruling file in the brain's Decisions/ folder dated after that stamp whose
    text touches the estate (agents, approvals, routing, levels, the money rule,
@@ -25,7 +37,10 @@ This script is the mechanical half of the fix. Two checks:
    ruling changes nothing here.
 
 CONTROLS, because a scan that sees nothing looks exactly like a clean scan:
-- fewer than MIN_FILES readable surfaces exits 2 (cannot verify), never 0;
+- fewer than MIN_FILES readable estate surfaces exits 2 (cannot verify), never
+  0; the memory topic files do not count toward that floor, so two hundred of
+  them cannot hide an emptied agents folder;
+- a missing `~/.claude/CLAUDE.md` or `MEMORY.md` is an unreadable surface (2);
 - the retired list must fire on the built-in fixture (`--selftest`);
 - a missing or unstamped ESTATE.md is an exception, not a pass;
 - any unreadable surface, or a missing Decisions/ folder (the Drive mount is
@@ -52,6 +67,9 @@ BRAIN = os.path.join(HOME, "Library/CloudStorage/GoogleDrive-kevin@runpreneur.or
 AGENTS = os.path.join(HOME, ".claude/agents")
 SKILLS = os.path.join(HOME, ".claude/skills")
 TASKS = os.path.join(HOME, ".claude/scheduled-tasks")
+CLAUDE_MD = os.path.join(HOME, ".claude/CLAUDE.md")
+MEMORY = os.path.join(HOME, ".claude/projects",
+                      "-Users-kevinbrittain-Projects-leadership-dashboard", "memory")
 
 MIN_FILES = 20
 
@@ -110,6 +128,14 @@ HISTORY = re.compile(
     r"(lowered from|back up to|previous rule|previously|superseded|supersedes|"
     r"kept for history|used to |no longer|retired|RETIRED|was \d|history)", re.I)
 LESSON = re.compile(r"^\s*- 20\d\d-\d\d-\d\d:")
+# In a memory TOPIC file, a line that OPENS with SUPERSEDED (after list, bold or
+# heading marks) and carries a date marks everything below it as kept history.
+# Upper case on purpose: prose that says "superseded" mid-sentence is not a
+# marker. No date, no exemption.
+SUPERSEDED = re.compile(
+    r"^[\s#>*_-]*SUPERSEDED\b.*?"
+    r"(\d{1,2} (Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]* 20\d\d"
+    r"|20\d\d-\d\d-\d\d)")
 
 ESTATE_WORDS = re.compile(
     r"\b(agent|agents|approval|approvals|gate|route|routing|autonomy|level [ABC]|"
@@ -131,13 +157,32 @@ def surfaces(agents=AGENTS, skills=SKILLS, tasks=TASKS, brain=BRAIN, repo=REPO):
     return files
 
 
-def scan_text(text, path, retired=RETIRED):
+def memory_surfaces(claude_md=CLAUDE_MD, memory=MEMORY):
+    """Kevin's global CLAUDE.md, then MEMORY.md, then every memory topic file.
+    The first two are named outright so a missing one reads as unreadable."""
+    index = os.path.join(memory, "MEMORY.md")
+    topics = [p for p in sorted(glob.glob(os.path.join(memory, "*.md"))) if p != index]
+    return [claude_md, index] + topics
+
+
+def keeps_history(path, memory=MEMORY):
+    """True for a memory TOPIC file, the only kind whose SUPERSEDED marker
+    exempts what follows it. MEMORY.md and ~/.claude/CLAUDE.md are fully live."""
+    return (os.path.dirname(os.path.abspath(path)) == os.path.abspath(memory)
+            and os.path.basename(path) != "MEMORY.md")
+
+
+def scan_text(text, path, retired=RETIRED, history_below_marker=False):
     """Every line of `text` against RETIRED. A Lessons line is exempt outright.
     A history word exempts a match only when it comes BEFORE the match on the
     line ("lowered from £50/£250"); a stale rule followed by an unrelated
-    "retired" later in the sentence still fires (review finding, 7 Sep 2026)."""
+    "retired" later in the sentence still fires (review finding, 7 Sep 2026).
+    With `history_below_marker` (memory topic files only) the scan stops at the
+    first dated SUPERSEDED marker line: below it is the record, not a rule."""
     hits = []
     for n, line in enumerate(text.splitlines(), 1):
+        if history_below_marker and SUPERSEDED.match(line):
+            break
         if LESSON.match(line):
             continue
         hist = HISTORY.search(line)
@@ -187,10 +232,12 @@ def rulings_after(stamp, decisions_dir, estate_text=""):
     return out
 
 
-def run(agents=AGENTS, skills=SKILLS, tasks=TASKS, brain=BRAIN, repo=REPO):
+def run(agents=AGENTS, skills=SKILLS, tasks=TASKS, brain=BRAIN, repo=REPO,
+        claude_md=CLAUDE_MD, memory=MEMORY):
     res = {"hits": [], "stamp": None, "rulings_behind": [], "files_scanned": 0,
-           "files_missing": []}
-    for p in surfaces(agents, skills, tasks, brain, repo):
+           "memory_files_scanned": 0, "files_missing": []}
+    core = surfaces(agents, skills, tasks, brain, repo)
+    for p in core + memory_surfaces(claude_md, memory):
         try:
             with open(p) as f:
                 text = f.read()
@@ -198,10 +245,14 @@ def run(agents=AGENTS, skills=SKILLS, tasks=TASKS, brain=BRAIN, repo=REPO):
             res["files_missing"].append(p)
             continue
         res["files_scanned"] += 1
-        res["hits"] += scan_text(text, p)
-    if res["files_scanned"] < MIN_FILES:
-        return 2, dict(res, reason="only %d surfaces readable (floor %d)"
-                       % (res["files_scanned"], MIN_FILES))
+        if p not in core:
+            res["memory_files_scanned"] += 1
+        res["hits"] += scan_text(text, p,
+                                 history_below_marker=keeps_history(p, memory))
+    estate_read = res["files_scanned"] - res["memory_files_scanned"]
+    if estate_read < MIN_FILES:
+        return 2, dict(res, reason="only %d estate surfaces readable (floor %d)"
+                       % (estate_read, MIN_FILES))
     # A surface that cannot be read is a scan that cannot see it. The brain
     # lives on a Drive mount that is sometimes absent; with it gone the five
     # brain files and Decisions/ vanish and the old version printed
@@ -253,9 +304,51 @@ def selftest():
     assert scan_text("The Teardown Call runs first.", "x")
     assert stamp_of(os.devnull) is None
     assert rulings_after("2026-09-07", os.devnull) == []
-    print("selftest ok: %d retired patterns, fixture fires on lines 4, 5, 6, 7"
-          % len(RETIRED))
+    memory_selftest()
+    print("selftest ok: %d retired patterns, fixture fires on lines 4, 5, 6, 7; "
+          "memory rule: CLAUDE.md and MEMORY.md live, topic history below a "
+          "dated SUPERSEDED marker exempt" % len(RETIRED))
     return 0
+
+
+STALE = "Delegation order: AI first, then Mica or Ericamae, then Kevin."
+MARKER = ("**SUPERSEDED in part (noted 21 Sep 2026):** no work routes to Mica "
+          "since 25 Aug 2026. The order below is history.")
+
+
+def memory_selftest():
+    """Drive the real file-level rule on a throwaway ~/.claude layout."""
+    import tempfile
+    with tempfile.TemporaryDirectory() as root:
+        memory = os.path.join(root, "memory")
+        os.makedirs(memory)
+        claude_md = os.path.join(root, "CLAUDE.md")
+        files = {
+            claude_md: "# global\n%s\n" % STALE,
+            os.path.join(memory, "MEMORY.md"): "- index\n%s\n%s\n" % (MARKER, STALE),
+            os.path.join(memory, "topic_history.md"): "# t\n%s\n%s\n" % (MARKER, STALE),
+            os.path.join(memory, "topic_live.md"): "# t\n%s\n%s\n" % (STALE, MARKER),
+            os.path.join(memory, "topic_undated.md"):
+                "# t\n**SUPERSEDED:** see below.\n%s\n" % STALE,
+        }
+        for p, body in files.items():
+            with open(p, "w") as f:
+                f.write(body)
+        got = {}
+        for p in memory_surfaces(claude_md, memory):
+            with open(p) as f:
+                got[os.path.basename(p)] = [h["line"] for h in scan_text(
+                    f.read(), p, history_below_marker=keeps_history(p, memory))]
+    # A retired phrase in ~/.claude/CLAUDE.md fires.
+    assert got["CLAUDE.md"] == [2], "selftest: CLAUDE.md %s" % got["CLAUDE.md"]
+    # MEMORY.md is fully live: its marker exempts nothing.
+    assert got["MEMORY.md"] == [3], "selftest: MEMORY.md %s" % got["MEMORY.md"]
+    # The same phrase under a dated marker in a topic file is history.
+    assert got["topic_history.md"] == [], "selftest: history %s" % got["topic_history.md"]
+    # Above the marker it is still a live instruction.
+    assert got["topic_live.md"] == [2], "selftest: live %s" % got["topic_live.md"]
+    # An undated marker is a mute switch, not a record: it exempts nothing.
+    assert got["topic_undated.md"] == [3], "selftest: undated %s" % got["topic_undated.md"]
 
 
 def main(argv=None):
@@ -267,10 +360,13 @@ def main(argv=None):
     p.add_argument("--tasks", default=TASKS)
     p.add_argument("--brain", default=BRAIN)
     p.add_argument("--repo", default=REPO)
+    p.add_argument("--claude-md", default=CLAUDE_MD)
+    p.add_argument("--memory", default=MEMORY)
     a = p.parse_args(argv)
     if a.selftest:
         return selftest()
-    code, res = run(a.agents, a.skills, a.tasks, a.brain, a.repo)
+    code, res = run(a.agents, a.skills, a.tasks, a.brain, a.repo,
+                    a.claude_md, a.memory)
     if a.json:
         print(json.dumps(res, indent=2))
     if code == 2:
@@ -284,8 +380,10 @@ def main(argv=None):
         for r in res["rulings_behind"]:
             print("BEHIND ESTATE.md (as at %s) has not absorbed: %s"
                   % (res["stamp"], r))
-    summary = ("estate drift: %d stale lines, %d rulings behind, %d files scanned"
-               % (len(res["hits"]), len(res["rulings_behind"]), res["files_scanned"]))
+    summary = ("estate drift: %d stale lines, %d rulings behind, %d files scanned "
+               "(%d of them CLAUDE.md and memory)"
+               % (len(res["hits"]), len(res["rulings_behind"]), res["files_scanned"],
+                  res["memory_files_scanned"]))
     # In --json mode stdout is the JSON document and nothing else, or the caller
     # cannot parse a clean run (the first version printed the summary after it).
     print(summary, file=sys.stderr if (code or a.json) else sys.stdout)
