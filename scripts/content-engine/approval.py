@@ -227,6 +227,23 @@ def output_gate(day, ledger, state):
     return qa.card_lines(passed)
 
 
+def recheck_gate(day):
+    """Read the output gate again for a day whose card is already approved, so a block recorded before its files were
+    rebuilt does not outlive them. 1841 was blocked on 15 Sep 2026 because its clean Short was never uploaded; a
+    rebuild fixes the files, but nothing read the gate again, so the report would call the day blocked for good.
+    Returns True when the gate passes; a failure is recorded exactly as output_gate records it."""
+    state = load_state()
+    had, before = str(day) in state, dict(state.get(str(day)) or {})
+    ok = output_gate(day, watch.load_ledger(), state) is not None
+    if not ok and (state.get(str(day)) or {}).get("qa_waiting"):
+        # files not readable yet is no verdict on the rebuilt files, and nothing retries a wait on an approved card:
+        # the entry goes back exactly as it was, an old block included, never a wait nothing will clear (review, 21 Sep 2026)
+        if had: state[str(day)] = before
+        else: state.pop(str(day), None)
+    save_state(state)
+    return ok
+
+
 def raise_card(day, dry_run=False):
     recs = bundle(day)
     full = recs["Long Form Video"]
@@ -355,6 +372,25 @@ def _selftest_gate_wait():
         assert "qa_blocked" in state["2058"] and "qa_waiting" not in state["2058"], state
         fake.gate = lambda day, ledger=None, files=None: (True, [], [("full episode file", "465 s")])
         with contextlib.redirect_stdout(io.StringIO()): assert output_gate(2057, {}, state) == ["ok"] and not state["2057"].get("qa_waiting"), state
+        # 21 Sep 2026: an approved day blocked before its rebuild is cleared once the rebuilt files pass
+        disk = {"1841": {"verdict": "approved", "task": "t", "qa_blocked": {"at": "2026-09-15T08:44:00", "failures": ["clean Short: 0 s"]}}}
+        real_load, real_ledger = globals()["load_state"], watch.load_ledger
+        globals()["load_state"] = lambda: disk; watch.load_ledger = lambda: {}
+        globals()["save_state"] = lambda st: disk.update(st)
+        try:
+            with contextlib.redirect_stdout(io.StringIO()): assert recheck_gate(1841)
+            assert "qa_blocked" not in disk["1841"] and disk["1841"]["verdict"] == "approved", disk
+            fake.gate = lambda day, ledger=None, files=None: (False, [("Learnings clip (clean, for Shorts)", "0 s")], [])
+            with contextlib.redirect_stdout(io.StringIO()): assert not recheck_gate(1841)
+            assert "qa_blocked" in disk["1841"], "a rebuild that still fails stays blocked, never cleared by the recheck"
+            fake.gate = lambda day, ledger=None, files=None: (False, [(fake.WAIT_CHECK, "not readable from this Mac yet")], [])
+            with contextlib.redirect_stdout(io.StringIO()): assert not recheck_gate(1841)
+            assert "qa_blocked" in disk["1841"] and "qa_waiting" not in disk["1841"], "a wait never swaps a block for a wait nothing retries"
+            disk["2059"] = {"verdict": "approved", "task": "t9"}
+            with contextlib.redirect_stdout(io.StringIO()): assert not recheck_gate(2059)
+            assert disk["2059"] == {"verdict": "approved", "task": "t9"}, "an unblocked card is left exactly as it was on a wait"
+        finally:
+            globals()["load_state"] = real_load; watch.load_ledger = real_ledger
     finally:
         globals()["save_state"] = saved
         if real is not None: _s.modules["qa"] = real

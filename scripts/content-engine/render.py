@@ -755,6 +755,8 @@ def redo_lfmd(day):
         # Kevin already approved and asked for the clip to be reinstated before publishing: not sent back for a second yes
         print("episode %d: card already approved; not resubmitted" % day)
         resubmitted = True
+        # a block the output gate recorded before this rebuild is read again against the new files (1841, 21 Sep 2026)
+        print("episode %d: output gate %s" % (day, "passes on the rebuilt files" if approval.recheck_gate(day) else "still BLOCKED on the rebuilt files"))
     elif card.get("verdict") == "changes":
         # 2060 (17 Sep 2026): Kevin sent the card back with "There are no learnings from my diary on this, which need to be
         # added." A sent-back card needs one receipt line per point. When every point is about the missing Learnings
