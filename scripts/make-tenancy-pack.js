@@ -56,23 +56,38 @@ function strategyOf(p) {
 // than listed, and it keeps working as tenants come and go.
 //
 // AUTHORITY TO ACT could not be derived. Kevin dropped it at 5 Dalham Place and
-// for the one tenant listed below, and kept it everywhere else, including
+// for one tenant (noAuthorityTenant), and kept it everywhere else, including
 // tenants with no rent change at 55 Elmdon Place and 13 Chedburgh Place. The exceptions are listed
 // here with his name and the date on them, so every gap is attributable and
 // nothing is silently inferred.
 const NO_AUTHORITY_PROPERTY = ['5 Dalham Place'];
-const NO_AUTHORITY_TENANT = ['David Pinder'];
-// The tenant below has no date of birth on file, so the age test could not put
-// them on the one-bed rate. Kevin's instruction to raise their agreement at that
-// rate IS the confirmation that they are 35 or over.
-const CONFIRMED_OVER_35 = ['Tristram Guthrie'];
-// WHO HOLDS THE EARLIER-TERM AGREEMENT (Kevin, 10 Sep 2026). By default it is
-// whoever moved in first. At 1406 Oldham Road Kevin names the tenant below,
-// not the one who moved in first, and deleted the other draft. Airtable records
-// the first from 12 Dec 2019 and the named tenant from 3 Jan 2025, so the record
-// and the instruction disagree; the instruction wins, and the term date still comes from the
-// property's first tenancy, which is what the backdated council tax covers.
-const EARLIER_TERM_HOLDER = { '1406 Oldham Road': 'William Aiton' };
+// confirmedOver35: a tenant with no date of birth on file, so the age test could
+// not put them on the one-bed rate. Kevin's instruction to raise their agreement
+// at that rate IS the confirmation that they are 35 or over.
+// earlierTermHolder: WHO HOLDS THE EARLIER-TERM AGREEMENT (Kevin, 10 Sep 2026).
+// By default it is whoever moved in first. At 1406 Oldham Road Kevin names a
+// different tenant, and deleted the other draft. Airtable records the first from
+// 12 Dec 2019 and the named tenant from 3 Jan 2025, so the record and the
+// instruction disagree; the instruction wins, and the term date still comes from
+// the property's first tenancy, which is what the backdated council tax covers.
+//
+// THE TENANT NAMES LIVE OFF THE REPO (21 Sep 2026). This repository is public, so
+// the three tenant-level exceptions above sit in a private file on Kevin's Mac. A
+// missing or malformed file stops the run: a pack drawn without them would quietly
+// drop an exception Kevin made, and nothing downstream would notice.
+const EXCEPTIONS_FILE = path.join(os.homedir(), '.config', 'od', 'tenancy-pack-exceptions.json');
+function parseExceptions(text) {
+  let j;
+  try { j = JSON.parse(text); } catch (e) { throw new Error('tenancy-pack-exceptions.json is not valid JSON: ' + e.message); }
+  const names = (v) => Array.isArray(v) && v.every((x) => typeof x === 'string' && x.trim().includes(' '));
+  if (!j || !names(j.noAuthorityTenant)) throw new Error('tenancy-pack-exceptions.json: noAuthorityTenant must be a list of full names');
+  if (!names(j.confirmedOver35)) throw new Error('tenancy-pack-exceptions.json: confirmedOver35 must be a list of full names');
+  const held = j.earlierTermHolder;
+  if (!held || typeof held !== 'object' || Array.isArray(held) || !names(Object.values(held))) {
+    throw new Error('tenancy-pack-exceptions.json: earlierTermHolder must map a property to a full name');
+  }
+  return { noAuthorityTenant: j.noAuthorityTenant, confirmedOver35: j.confirmedOver35, earlierTermHolder: held };
+}
 
 const BASE = 'appnqjDpqDniH3IRl';
 const TPL = path.join(os.homedir(), 'knowledge-os', 'templates');
@@ -147,6 +162,9 @@ async function main(argv) {
   if (!wanted && !wantedTenant && !argv.includes('--all')) {
     die('usage: --property "6 Chedburgh Place" | --tenant "Jane Testwood" | --new --name N --property P | --all [--dry]');
   }
+  let EX;
+  try { EX = parseExceptions(fs.readFileSync(EXCEPTIONS_FILE, 'utf8')); }
+  catch (e) { die(e.code === 'ENOENT' ? `missing ${EXCEPTIONS_FILE}: it holds Kevin's tenant exceptions, so no pack is drawn without it` : e.message); }
 
   const props = await all('tbl6f0OkAmTC2jbuG',
     ['Property Name (Short)', 'Property', '📮 Postcode', '🏙️ Area', 'Growth Strategy', 'Planned Extra Tenants']);
@@ -264,7 +282,7 @@ async function main(argv) {
       console.log(`   joint tenancy from ${termStart} (${b.name} moved in), rent ${gbp(total)} = 2 x ${rates.brma} 1-bed ${gbp(oneBed)}`);
       // The earlier period: one tenant, whole property, from their own move-in.
       // Same clauses, singular, at what they were actually paying.
-      const holderName = EARLIER_TERM_HOLDER[name];
+      const holderName = EX.earlierTermHolder[name];
       const holder = holderName ? (people.find((p) => p.name === holderName) || a) : a;
       if (a.start && a.start < termStart) {
         made.push(renderPdf({
@@ -286,7 +304,7 @@ async function main(argv) {
       if (wantedTenant && person.name.toLowerCase() !== wantedTenant.toLowerCase()) continue;
       const f = person.f;
       const age = MODEL.ageOn(f['Date of Birth'], TODAY);
-      const over35 = CONFIRMED_OVER_35.includes(person.name)
+      const over35 = EX.confirmedOver35.includes(person.name)
         || (age != null ? age >= 35 : !!f['Aged 35 or Over (confirmed)']);
       const uc = f['Rent Payment Type'] === 'Universal Credit';
       // Decide the agreement FIRST, because the proof of residency depends on it.
@@ -318,7 +336,7 @@ async function main(argv) {
       // Tax Reduction form and any CRF Housing Payment, and the gaps are
       // filled in at the meeting. Age does not decide it: two tenants have no
       // date of birth on file, and a joint claim is made in both names.
-      if (uc && !NO_AUTHORITY_PROPERTY.includes(name) && !NO_AUTHORITY_TENANT.includes(person.name)) {
+      if (uc && !NO_AUTHORITY_PROPERTY.includes(name) && !EX.noAuthorityTenant.includes(person.name)) {
         made.push(renderPdf({
           name: `Authority_${person.name.replace(/[^A-Za-z0-9]+/g, '_')}_${name.replace(/[^A-Za-z0-9]+/g, '_')}`,
           title: 'Authority to act: council tax reduction and housing payment',
