@@ -190,9 +190,38 @@
 
   var loaded = false, loading = false;
 
-  function setSync(text, isErr){
+  // level: false = fine, 'warn' = stale, true = error. A stale feed must never
+  // wear the same green as a fresh one (finding 20260821-prod-e2e-sweep-281).
+  function setSync(text, level){
     document.getElementById('syncStatus').textContent = text;
-    document.getElementById('syncDot').style.background = isErr ? 'var(--danger)' : 'var(--success)';
+    document.getElementById('syncDot').style.background =
+      level === 'warn' ? 'var(--warning)' : (level ? 'var(--danger)' : 'var(--success)');
+  }
+
+  // Today in London as YYYY-MM-DD: the feed's Date is Kevin's day, not UTC's.
+  function londonToday(){
+    return new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/London' }).format(new Date());
+  }
+
+  // Whole days between two YYYY-MM-DD strings (b - a). NaN if either is malformed.
+  function dayGap(a, b){
+    var pa = String(a || '').split('-'), pb = String(b || '').split('-');
+    if (pa.length !== 3 || pb.length !== 3) return NaN;
+    return Math.round((Date.UTC(+pb[0], +pb[1] - 1, +pb[2]) - Date.UTC(+pa[0], +pa[1] - 1, +pa[2])) / 86400000);
+  }
+
+  // The feed's age drives the wording. On 21 Aug 2026 the nightly publisher had
+  // been dead for three days and this line still read "Synced · 18 August 2026"
+  // in green. Today = Synced; one day behind = amber; two or more = red; an
+  // empty feed is amber, never a clean sync.
+  function syncFromRows(rows){
+    var newest = '';
+    rows.forEach(function(f){ if (f.Date && f.Date > newest) newest = f.Date; });
+    if (!newest) return setSync('Nothing published yet', 'warn');
+    var age = dayGap(newest, londonToday());
+    if (!(age > 0)) return setSync('Synced · ' + fmtDate(newest), false);
+    var ago = age === 1 ? '1 day ago' : age + ' days ago';
+    setSync('Last published ' + fmtDate(newest) + ' (' + ago + ')', age === 1 ? 'warn' : true);
   }
 
   function loadToday(force){
@@ -228,8 +257,7 @@
     var rows = records.map(function(r){ var f = r.fields || {}; f._id = r.id; return f; });
     rows.sort(function(a,b){ return (a.SortOrder || 0) - (b.SortOrder || 0); });
 
-    var date = rows.length ? (rows[0].Date || '') : '';
-    setSync(date ? 'Synced · ' + fmtDate(date) : 'No data yet', false);
+    syncFromRows(rows);
 
     // Metrics — what was captured today
     var order = ['notes','meetings','documents','videos'];
