@@ -142,6 +142,24 @@ test.describe('Payment Run staleness', () => {
     const header = await page.textContent('#tab-invoices .section span');
     expect(header).toMatch(/the weekly scan has stopped/i);
   });
+
+  // The age is counted in calendar days. Counted in elapsed hours, the 25-hour
+  // day when the clocks go back made an 8-day-old run read as 9 from 23:00 to
+  // midnight all that week, and the 23-hour day in spring made a 9-day-old run
+  // read as 8 from midnight to 01:00. Frozen at those hours, in London.
+  test.describe('across a clock change', () => {
+    test.use({ timezoneId: 'Europe/London' });
+
+    test('8 days after the clocks go back still passes at 23:30', async ({ page }) => {
+      await openPaymentRun(page, [invoice('rec1', { runDate: '2026-10-18' })], '2026-10-26T23:30:00+00:00');
+      expect((await runCheck(page, STALE_CHECK)).status).toBe('pass');
+    });
+
+    test('9 days after the clocks go forward still FAILS at 00:30', async ({ page }) => {
+      await openPaymentRun(page, [invoice('rec1', { runDate: '2027-03-28' })], '2027-04-06T00:30:00+01:00');
+      expect((await runCheck(page, STALE_CHECK)).status).toBe('fail');
+    });
+  });
 });
 
 test.describe('Payment Run list', () => {

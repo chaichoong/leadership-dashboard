@@ -305,11 +305,15 @@
         return stamps.length ? stamps[stamps.length - 1] : null;
     }
 
+    // Calendar days, not elapsed hours. The 25-hour day when the clocks go back
+    // made an 8-day-old run read as 9 (a false red) from 23:00 all that week,
+    // and the 23-hour spring day hid a 9-day-old run for an hour after midnight.
     function daysSinceLastRun(now) {
         const last = lastPaymentRunDate();
         if (!last) return null;
         const ref = now ? new Date(now) : new Date();
-        return Math.floor((ref - new Date(last + 'T00:00:00')) / 86400000);
+        const [y, m, d] = last.slice(0, 10).split('-').map(Number);
+        return (Date.UTC(ref.getFullYear(), ref.getMonth(), ref.getDate()) - Date.UTC(y, m - 1, d)) / 86400000;
     }
 
     function renderInvoiceTab() {
