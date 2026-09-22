@@ -110,6 +110,31 @@ NAMED_REPORTS = {"schema-baseline.json", "reference-map.json", "ceo-brief-cron-f
 WORKING_WORDS = ("tmp", "queue", "worklist", "draft", "scratch")
 
 
+# THE PRIVATE-MATTER HOLD (finding 20260921-daily-ops-559).
+#
+# Masking removes identifiers: phones, emails, postcodes, account numbers,
+# roster names. It cannot remove a FACT. monitoring/daily-ops-2026-09-18.md
+# reached the public repo with an HMRC penalty, a mortgage term ending and a
+# court order in plain words, every identifier masked and the matter itself
+# still readable. 27 tracked daily-ops reports carried the same class. So a
+# text report that names Kevin's legal or financial matters is HELD: left
+# where it is in the main checkout, listed, never copied. A false hold costs a
+# report in git; a false pass is private detail in a public repo for ever.
+# Markdown only: the schema JSON names fields like "Mortgage" and is not prose.
+PRIVATE_MATTER = re.compile(
+    r"\b(?:HMRC|court orders?|charging orders?|liability orders?|winding[- ]up"
+    r"|restraint orders?|mortgages?|summons(?:es|ed)?|director'?s loan|bailiffs?)\b",
+    re.IGNORECASE)
+
+
+def private_matter_hits(rel, text):
+    """How many lines of a markdown report name a private legal or financial
+    matter. The matched words are never returned: this output is committed."""
+    if os.path.splitext(rel)[1].lower() != ".md":
+        return 0
+    return sum(1 for line in text.splitlines() if PRIVATE_MATTER.search(line))
+
+
 def is_report(rel):
     parts = rel.split("/")
     if len(parts) != 2 or parts[0] != REPORT_DIR:
@@ -266,6 +291,7 @@ def main():
         return 0
 
     refused = []
+    held = []
     for rel in files:
         # Defence in depth: never step outside monitoring/, never take an ignored file.
         if not rel.startswith(REPORT_DIR + "/"):
@@ -293,6 +319,13 @@ def main():
 
         with open(src, encoding="utf-8") as fh:
             original = fh.read()
+        held_lines = private_matter_hits(rel, original)
+        if held_lines:
+            held.append(rel)
+            print("%s (names a private legal or financial matter on %d line(s); "
+                  "this repo is PUBLIC): %s"
+                  % ("WOULD HOLD" if args.check else "HELD", held_lines, rel))
+            continue
         cleaned, hits = scrub(original)
 
         if args.check:
@@ -313,6 +346,11 @@ def main():
         print("REFUSED %d file(s) in %s/%s that are not reports. Move them out "
               "of monitoring/ or file a finding; do not rename them to pass."
               % (len(refused), source, REPORT_DIR))
+
+    if held:
+        print("HELD %d report(s) in %s/%s: they stay on this Mac only. Keep the "
+              "private matter out of the report, never reword it to pass."
+              % (len(held), source, REPORT_DIR))
 
     if args.check:
         print("WOULD REFRESH %s from the newest local snapshot" % SCHEMA_BASELINE)

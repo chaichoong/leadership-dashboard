@@ -248,6 +248,8 @@
   "retryWhenDeferred": true
  },
  "feed-brain": {
+  "maxRuntimeMinutes": 60,
+  "maxRuntimeNote": "maxRuntimeMinutes 60 (22 Sep 2026, finding 20260922-daily-ops-564): compound-brain's headless claude -p went idle at 00:33 on 22 Sep (1 s of CPU in 6.5 h, sockets closed) while the heartbeat kept renewing its lease, so it held the queue past 07:00 with ceo-agent and four other jobs waiting. Healthy runs of all three brain jobs take 0-18 min on the queue log (compound-brain 1-11 min over 4-20 Sep); the 480-min default ceiling was useless here.",
   "queueTimeoutMinutes": 360,
   "queueTimeoutNote": "360 minutes, not the default 120 (finding 20260919-daily-ops-phase2-excepti-548). This job fires straight into content-engine's nightly render, which held the queue for 265, 343 and 253 minutes on 16, 17 and 18 Sep 2026. At 120 it gave up every night without running \u2014 twenty queue-timeouts across these five jobs on 15-19 Sep \u2014 while needing under fifteen minutes of machine time itself. 360 clears the worst observed hold with headroom. The proper fix is 502's: take the ffmpeg render out of the global lock so content-engine only holds it for its Airtable and Drive writes.",
   "note": "Drive-gated. maxLateMinutes raised 29 Aug 2026 (findings 394/397): a morning Drive-mount flap used to cost the whole day. feed/compound/publish fire at 22:45-23:20, so 720 min expired at ~11:00 — on 28 Aug the mount cleared at 10:06 and they were marked MISSED at 11:06 anyway. 960 carries them to mid-afternoon, which is still worth doing; beyond that they would collide with the next night's run, so the window stops there rather than becoming never-skipped.",
@@ -263,6 +265,8 @@
   "retryWhenDeferred": true
  },
  "compound-brain": {
+  "maxRuntimeMinutes": 60,
+  "maxRuntimeNote": "maxRuntimeMinutes 60 (22 Sep 2026, finding 20260922-daily-ops-564): compound-brain's headless claude -p went idle at 00:33 on 22 Sep (1 s of CPU in 6.5 h, sockets closed) while the heartbeat kept renewing its lease, so it held the queue past 07:00 with ceo-agent and four other jobs waiting. Healthy runs of all three brain jobs take 0-18 min on the queue log (compound-brain 1-11 min over 4-20 Sep); the 480-min default ceiling was useless here.",
   "queueTimeoutMinutes": 360,
   "queueTimeoutNote": "360 minutes, not the default 120 (finding 20260919-daily-ops-phase2-excepti-548). This job fires straight into content-engine's nightly render, which held the queue for 265, 343 and 253 minutes on 16, 17 and 18 Sep 2026. At 120 it gave up every night without running \u2014 twenty queue-timeouts across these five jobs on 15-19 Sep \u2014 while needing under fifteen minutes of machine time itself. 360 clears the worst observed hold with headroom. The proper fix is 502's: take the ffmpeg render out of the global lock so content-engine only holds it for its Airtable and Drive writes.",
   "note": "Drive-gated. maxLateMinutes raised 29 Aug 2026 (findings 394/397): a morning Drive-mount flap used to cost the whole day. feed/compound/publish fire at 22:45-23:20, so 720 min expired at ~11:00 — on 28 Aug the mount cleared at 10:06 and they were marked MISSED at 11:06 anyway. 960 carries them to mid-afternoon, which is still worth doing; beyond that they would collide with the next night's run, so the window stops there rather than becoming never-skipped.",
@@ -278,6 +282,8 @@
   "retryWhenDeferred": true
  },
  "publish-brain": {
+  "maxRuntimeMinutes": 60,
+  "maxRuntimeNote": "maxRuntimeMinutes 60 (22 Sep 2026, finding 20260922-daily-ops-564): compound-brain's headless claude -p went idle at 00:33 on 22 Sep (1 s of CPU in 6.5 h, sockets closed) while the heartbeat kept renewing its lease, so it held the queue past 07:00 with ceo-agent and four other jobs waiting. Healthy runs of all three brain jobs take 0-18 min on the queue log (compound-brain 1-11 min over 4-20 Sep); the 480-min default ceiling was useless here.",
   "queueTimeoutMinutes": 360,
   "queueTimeoutNote": "360 minutes, not the default 120 (finding 20260919-daily-ops-phase2-excepti-548). This job fires straight into content-engine's nightly render, which held the queue for 265, 343 and 253 minutes on 16, 17 and 18 Sep 2026. At 120 it gave up every night without running \u2014 twenty queue-timeouts across these five jobs on 15-19 Sep \u2014 while needing under fifteen minutes of machine time itself. 360 clears the worst observed hold with headroom. The proper fix is 502's: take the ffmpeg render out of the global lock so content-engine only holds it for its Airtable and Drive writes.",
   "note": "Drive-gated. maxLateMinutes raised 29 Aug 2026 (findings 394/397): a morning Drive-mount flap used to cost the whole day. feed/compound/publish fire at 22:45-23:20, so 720 min expired at ~11:00 — on 28 Aug the mount cleared at 10:06 and they were marked MISSED at 11:06 anyway. 960 carries them to mid-afternoon, which is still worth doing; beyond that they would collide with the next night's run, so the window stops there rather than becoming never-skipped.",

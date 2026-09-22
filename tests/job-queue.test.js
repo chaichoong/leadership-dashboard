@@ -1581,6 +1581,31 @@ time.sleep(40)`;
     expect(r.code).toBe(124);
   });
 
+  // Finding 20260922-daily-ops-564. compound-brain's claude -p went idle at
+  // 00:33 on 22 Sep 2026 (1 s of CPU in 6.5 h) while its heartbeat renewed the
+  // lease, so it held the queue past 07:00 with ceo-agent waiting behind it. It
+  // had no ceiling of its own and inherited the 8-hour default. Driven through
+  // the real max_runtime_minutes() against the REAL schedule file; the control
+  // proves a job without its own ceiling still reads the default, so a renamed
+  // key cannot pass by returning the same number for everything.
+  it('the brain jobs carry a one-hour ceiling of their own, not the 8-hour default', () => {
+    const code = [
+      'import importlib.util, json, sys',
+      `spec = importlib.util.spec_from_file_location("q", ${JSON.stringify(QUEUE)})`,
+      'm = importlib.util.module_from_spec(spec); spec.loader.exec_module(m)',
+      'print(json.dumps({j: m.max_runtime_minutes(j) for j in sys.argv[1:]}))',
+    ].join('\n');
+    const jobs = ['feed-brain', 'compound-brain', 'publish-brain', 'ceo-agent'];
+    const e = { ...process.env, JOB_QUEUE_MAX_RUNTIME_MIN: '480' };
+    delete e.JOB_QUEUE_SCHEDULE;
+    const got = JSON.parse(execFileSync('python3', ['-c', code, ...jobs], { encoding: 'utf8', env: e }));
+    for (const j of ['feed-brain', 'compound-brain', 'publish-brain']) {
+      expect(got[j], `${j} has no ceiling of its own`).toBeGreaterThan(0);
+      expect(got[j], `${j} ceiling is not below the default`).toBeLessThanOrEqual(60);
+    }
+    expect(got['ceo-agent'], 'control: a job without its own ceiling reads the default').toBe(480);
+  });
+
   it('a job that finishes inside its ceiling is untouched', () => {
     const r = run(['run', 'quick', '--no-stale-check', '--', 'python3', '-c', 'print("ok")'],
       { env: { JOB_QUEUE_MAX_RUNTIME_MIN: '0.5' } });

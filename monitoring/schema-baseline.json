@@ -12928,6 +12928,35 @@
   },
   "name": "Income Buckets"
  },
+ "tbldWLYm49Bw21WB8": {
+  "fields": {
+   "fld7iEwqMRfo2Dcvz": {
+    "name": "Source",
+    "type": "singleLineText"
+   },
+   "fldS05Q1Toc8evjNE": {
+    "name": "Key",
+    "type": "singleLineText"
+   },
+   "fldYnZolOuE2WzZe9": {
+    "name": "Section",
+    "type": "singleLineText"
+   },
+   "flddKPwa85rbFWdhU": {
+    "name": "Added",
+    "type": "date"
+   },
+   "fldkVfeuGmNzzjR5A": {
+    "name": "Lesson",
+    "type": "multilineText"
+   },
+   "fldnHWmTm5EzOZw0y": {
+    "name": "Title",
+    "type": "singleLineText"
+   }
+  },
+  "name": "Prospecting Playbook"
+ },
  "tbleWb8ioptnEwPR8": {
   "fields": {
    "fldAkFZX1OOc8AQws": {
