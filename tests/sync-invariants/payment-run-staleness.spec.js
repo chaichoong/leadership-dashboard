@@ -16,7 +16,7 @@
 // filed it.
 
 const { test, expect } = require('@playwright/test');
-const { loadDashboard } = require('./helpers');
+const { loadDashboard, localTodayISO } = require('./helpers');
 
 const INVOICES_TABLE = 'tblkOTKIG2Tyiy9aM';
 const F = {
@@ -33,11 +33,12 @@ const F = {
   bankChanged: 'fldom7XtxiN9ojCKi',
 };
 
-const iso = (d) => d.toISOString().slice(0, 10);
+// Local date parts, not toISOString(): UTC is the previous day before 01:00
+// in BST, so "8 days ago" became 9 and the 8-day test failed for that hour.
 const daysAgo = (n) => {
   const d = new Date();
   d.setDate(d.getDate() - n);
-  return iso(d);
+  return localTodayISO(d);
 };
 
 function invoice(id, over = {}) {
@@ -78,8 +79,11 @@ async function routeInvoices(page, rows) {
   });
 }
 
-async function openPaymentRun(page, rows) {
+// `at` freezes the page's clock before the tab renders, for tests whose answer
+// depends on where "now" falls against the Friday 21:00 cutoff.
+async function openPaymentRun(page, rows, at) {
   await loadDashboard(page);
+  if (at) await page.clock.setFixedTime(at);
   await routeInvoices(page, rows);
   await page.evaluate(() => switchTab('invoices'));
   await page.evaluate(() => fetchInvoicesFromAirtable());
@@ -153,33 +157,53 @@ test.describe('Payment Run list', () => {
     expect(result.detail).toContain('Acme Roofing');
   });
 
-  test('splits the list into three sections, with last week its own', async ({ page }) => {
-    // Kevin, 18 Sep 2026, just past the 9pm cutoff with the week's invoices
-    // still unpaid: what he was about to pay had dropped out of "This week" and
-    // into "Still owed" beside February's debts. A row from 2-8 days ago must
-    // land in "Last week" — the run he is actually paying.
-    await openPaymentRun(page, [
-      invoice('recNew', { emailDate: daysAgo(0), amount: 90, payee: 'Arrived Since Cutoff Ltd' }),
-      invoice('recLast', { emailDate: daysAgo(4), amount: 300, payee: 'Paying Tonight Ltd' }),
-      invoice('recOld', { emailDate: daysAgo(120), amount: 2450, payee: 'Edna Example' }),
-    ]);
-    const headers = await page.$$eval('#invoiceTableBody tr.inv-section-header',
-      (rows) => rows.map((r) => r.textContent.trim().split('\n')[0].trim()));
-    expect(headers).toEqual(['This week', 'Last week', 'Still owed']);
-    const order = await page.$$eval('#invoiceTableBody tr', (rows) =>
-      rows.map((r) => (r.classList.contains('inv-section-header')
-        ? r.textContent.trim().split('\n')[0].trim()
-        : (r.querySelector('input[data-field]') || {}).value || '')).filter(Boolean));
-    // The one he pays tonight sits under Last week, above Still owed.
-    const lastIdx = order.indexOf('Last week');
-    const stillIdx = order.indexOf('Still owed');
-    const payIdx = order.indexOf('Paying Tonight Ltd');
-    expect(payIdx).toBeGreaterThan(lastIdx);
-    expect(payIdx).toBeLessThan(stillIdx);
-    // And the one that arrived after the cutoff is above it, in This week.
-    expect(order.indexOf('Arrived Since Cutoff Ltd')).toBeLessThan(lastIdx);
-    // February is below Still owed, where it belongs.
-    expect(order.indexOf('Edna Example')).toBeGreaterThan(stillIdx);
+  // Kevin, 18 Sep 2026, just past the 9pm cutoff with the week's invoices
+  // still unpaid: what he was about to pay had dropped out of "This week" and
+  // into "Still owed" beside February's debts. A row from the week before the
+  // last cutoff must land in "Last week", the run he is actually paying.
+  //
+  // The sections are anchored on the Friday 21:00 cutoff, not on today, so the
+  // clock is frozen and the dates are fixed. With "4 days ago" instead, the
+  // test passed Friday night to Monday and failed Tuesday to Friday: on Tuesday
+  // 22 Sep, 4 days ago is the cutoff Friday itself, which counts as This week.
+  // London is pinned because the cutoff is 21:00 London, whatever the host is.
+  //
+  // A row dated a boundary Friday belongs to the newer section, by design
+  // (bucket_rows() in scripts/payment-run.py).
+  const MOMENTS = [
+    { when: 'six minutes past the Friday cutoff', at: '2026-09-18T21:06:00+01:00',
+      thisWeek: '2026-09-18', lastWeek: '2026-09-14', stillOwed: '2026-02-12' },
+    // One minute earlier the same 14 Sep row is still This week. No real
+    // clock after 21:00 on 18 Sep gives this split, so it proves the freeze works.
+    { when: 'one minute before the Friday cutoff', at: '2026-09-18T20:59:00+01:00',
+      thisWeek: '2026-09-14', lastWeek: '2026-09-04', stillOwed: '2026-09-03' },
+    { when: 'on a Tuesday night mid-week', at: '2026-09-22T23:00:00+01:00',
+      thisWeek: '2026-09-18', lastWeek: '2026-09-16', stillOwed: '2026-02-12' },
+  ];
+
+  test.describe('at a fixed moment', () => {
+    test.use({ timezoneId: 'Europe/London' });
+
+    for (const m of MOMENTS) {
+      test(`splits the list into three sections, with last week its own, ${m.when}`, async ({ page }) => {
+        await openPaymentRun(page, [
+          invoice('recNew', { emailDate: m.thisWeek, amount: 90, payee: 'Arrived Since Cutoff Ltd', runDate: '2026-09-18' }),
+          invoice('recLast', { emailDate: m.lastWeek, amount: 300, payee: 'Paying Tonight Ltd', runDate: '2026-09-18' }),
+          invoice('recOld', { emailDate: m.stillOwed, amount: 2450, payee: 'Edna Example', runDate: '2026-09-18' }),
+        ], m.at);
+        // Section headers and payees in page order. Every row must be present:
+        // an indexOf check alone passes when a row lands in no section at all.
+        const order = await page.$$eval('#invoiceTableBody tr', (rows) =>
+          rows.map((r) => (r.classList.contains('inv-section-header')
+            ? r.textContent.trim().split('\n')[0].trim()
+            : (r.querySelector('input[data-field]') || {}).value || '')).filter(Boolean));
+        expect(order).toEqual([
+          'This week', 'Arrived Since Cutoff Ltd',
+          'Last week', 'Paying Tonight Ltd',
+          'Still owed', 'Edna Example',
+        ]);
+      });
+    }
   });
 
   test('carries the older payables forward under Still owed', async ({ page }) => {
