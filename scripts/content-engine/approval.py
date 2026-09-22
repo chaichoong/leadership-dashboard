@@ -138,6 +138,21 @@ def publish_mode():
     except Exception: return "test"
 
 
+# THE PLAIN SUMMARY (Kevin, 22 Sep 2026): every card opens with what the task
+# is and what approving does, in words a 13-year-old understands. submit
+# refuses a card without them. The engine writes no free text, so the lines
+# are fixed, one pair per card, and follow the mode the closing line states.
+def plain_args(task, approve):
+    return ["--plain-task", task, "--plain-approve", approve]
+
+
+def episode_plain(day, m):
+    task = "Run episode %d is edited and ready: the full video, two short clips, their words and a thumbnail." % day
+    if m == "live":
+        return plain_args(task, "The full episode goes on YouTube tomorrow at 6am and the two clips are scheduled on social media the day after.")
+    return plain_args(task, "Test mode: the episode goes on YouTube as a hidden video and the clips are saved as drafts for you to check. Nothing goes public.")
+
+
 def closing_line(m):
     if m == "live":
         return ("%s uploading the full episode to YouTube with this thumbnail and copy tomorrow at 06:00, then the day after, "
@@ -269,8 +284,8 @@ def raise_card(day, dry_run=False):
     with tempfile.NamedTemporaryFile("w", suffix=".md", delete=False) as fh:
         fh.write(out); path = fh.name
     try:
-        r = subprocess.run([sys.executable, DISPATCH, "submit", tid, "--agent", AGENT_TM, "--type", TASK_TYPE, "--output-file", path],
-                           capture_output=True, text=True)
+        r = subprocess.run([sys.executable, DISPATCH, "submit", tid, "--agent", AGENT_TM, "--type", TASK_TYPE, "--output-file", path]
+                           + episode_plain(day, publish_mode()), capture_output=True, text=True)
     finally:
         os.remove(path)
     if r.returncode != 0: raise SystemExit("approval: submit failed for %s: %s" % (tid, (r.stderr or r.stdout)[-400:]))
@@ -299,7 +314,7 @@ def refresh_card(day, receipt=None):
     name, desc, out = build_card(day, full, recs["Learnings From My Diary"], recs["Short Form Video"], headline_for(day, ledger), pans_for(day, ledger), proof)
     with tempfile.NamedTemporaryFile("w", suffix=".md", delete=False) as fh:
         fh.write(out); path = fh.name
-    cmd = [sys.executable, DISPATCH, "submit", e["task"], "--agent", AGENT_TM, "--type", TASK_TYPE, "--output-file", path]
+    cmd = [sys.executable, DISPATCH, "submit", e["task"], "--agent", AGENT_TM, "--type", TASK_TYPE, "--output-file", path] + episode_plain(day, publish_mode())
     if receipt: cmd += ["--receipt", receipt]
     try:
         r = subprocess.run(cmd, capture_output=True, text=True)

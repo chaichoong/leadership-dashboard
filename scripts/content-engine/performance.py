@@ -316,7 +316,9 @@ def run(days=30, dry_run=False, no_records=False):
     with tempfile.NamedTemporaryFile("w", suffix=".md", delete=False) as fh:
         fh.write(out); path = fh.name
     try:
-        r = subprocess.run([sys.executable, approval.DISPATCH, "submit", tid, "--agent", approval.AGENT_TM, "--type", CARD_TYPE, "--output-file", path], capture_output=True, text=True)
+        r = subprocess.run([sys.executable, approval.DISPATCH, "submit", tid, "--agent", approval.AGENT_TM, "--type", CARD_TYPE, "--output-file", path] + approval.plain_args(
+            "The monthly report on how the Runpreneur videos did, with three ideas to make the next ones better.",
+            "The three ideas are saved so the next episodes follow them. Nothing is published or changed anywhere."), capture_output=True, text=True)
     finally:
         os.remove(path)
     if r.returncode != 0: raise SystemExit("performance: submit failed for %s: %s" % (tid, (r.stderr or r.stdout)[-400:]))
