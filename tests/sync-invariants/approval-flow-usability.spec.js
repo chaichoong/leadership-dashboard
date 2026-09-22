@@ -49,7 +49,8 @@ test.describe('two buttons, everything else one tap away', () => {
     // The promise line is never a bare task name: a short draft still gets one.
     const tenant = page.locator('.apv-card', { hasText: 'Reply to tenant email' });
     await expect(tenant.locator('.apv-ask')).toContainText('Drafting: Draft: thanks, will confirm.');
-    await expect(tenant).toContainText('Task: Reply to tenant email');
+    // The task name moved to the top, as the plain summary's fallback (22 Sep 2026).
+    await expect(tenant.locator('[data-apv-plain-task]')).toHaveText('Reply to tenant email');
   });
   test('More opens the note, attach, kind of work, the two slower approvals and knock-back', async ({ page }) => {
     await mockAgentsPage(page);

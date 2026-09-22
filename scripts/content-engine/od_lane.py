@@ -897,7 +897,27 @@ def receipt_for(points, post=None):
     return "\n".join(lines)
 
 
-def _raise(name, desc, out, record, note_ref, files=None, post=None):
+def post_plain(post, mode):
+    """The two plain lines for a post card (22 Sep 2026); fixed, following the mode the closing line states."""
+    when = dt.date.fromisoformat(post["date"]).strftime("%A %-d %B")
+    if post.get("thin"):
+        return approval.plain_args("There is not enough real material to write the Operations Director post for %s." % when,
+                                   "Nothing is written. Use Request changes to give one line of real context and the post is written from it.")
+    task = "An Operations Director LinkedIn post for %s is written and ready, with its picture." % when
+    if mode == "live":
+        return approval.plain_args(task, "The post and its picture are scheduled to go out on %s at 8am. Nothing else." % when)
+    return approval.plain_args(task, "Test mode: the post and its picture are saved as a draft for you to check. Nothing goes public.")
+
+
+def newsletter_plain(ed, mode):
+    task = "Edition %d of your LinkedIn newsletter is written and ready." % ed.get("n", 1)
+    if mode == "live":
+        return approval.plain_args(task, "A robot publishes it on your LinkedIn on %s morning. If it cannot, you paste it in, about five minutes."
+                                   % dt.date.fromisoformat(ed["date"]).strftime("%A"))
+    return approval.plain_args(task, "Test mode: a robot fills it in as a draft and sends you a screenshot. Nothing is published.")
+
+
+def _raise(name, desc, out, record, note_ref, files=None, post=None, *, plain):
     today = dt.date.today().isoformat()
     tid = approval.existing_task(name)
     if not tid:
@@ -909,7 +929,7 @@ def _raise(name, desc, out, record, note_ref, files=None, post=None):
         tid = json.loads(r.stdout.strip().splitlines()[-1])["taskId"]
     with tempfile.NamedTemporaryFile("w", suffix=".md", delete=False) as fh:
         fh.write(out); path = fh.name
-    cmd = [sys.executable, approval.DISPATCH, "submit", tid, "--agent", approval.AGENT_TM, "--type", approval.TASK_TYPE, "--output-file", path]
+    cmd = [sys.executable, approval.DISPATCH, "submit", tid, "--agent", approval.AGENT_TM, "--type", approval.TASK_TYPE, "--output-file", path] + list(plain)
     for f in (files or []):
         if f and os.path.exists(f): cmd += ["--attach", f]
     # a redo after "Changes requested" must answer Kevin's points one by one (the dispatcher's receipt gate, 7 Sep 2026)
@@ -948,14 +968,14 @@ def raise_cards(dry_run=False):
                     except SystemExit as ex: print("od cards: upload of %s failed for %s (%s)" % (k, pid, str(ex)[:120]))
         name, desc, out = build_card(p, m, tp)
         if dry_run: print(out); print("-----"); continue
-        p["task"] = _raise(name, desc, out, p.get("record"), p.get("record"), files=[p.get("card_png"), p.get("card_pdf")], post=p); p["raised"] = dt.datetime.now().isoformat(timespec="seconds")
+        p["task"] = _raise(name, desc, out, p.get("record"), p.get("record"), files=[p.get("card_png"), p.get("card_pdf")], post=p, plain=post_plain(p, m)); p["raised"] = dt.datetime.now().isoformat(timespec="seconds")
         p["attached"] = [os.path.basename(x) for x in (p.get("card_png"), p.get("card_pdf")) if x and os.path.exists(x)]
         _save(STATE, state); print("od cards: %s -> %s (%s)%s" % (pid, p["task"], name, (" + %d file%s" % (len(p["attached"]), "" if len(p["attached"]) == 1 else "s")) if p["attached"] else ""))
     for key, ed in sorted(state.get("newsletters", {}).items()):
         if ed.get("task") or ed.get("verdict") or ed["date"] < today: continue
         name, desc, out = build_newsletter_card(ed, m, tp)
         if dry_run: print(out); print("-----"); continue
-        ed["task"] = _raise(name, desc, out, ed.get("record"), ed.get("record")); ed["raised"] = dt.datetime.now().isoformat(timespec="seconds")
+        ed["task"] = _raise(name, desc, out, ed.get("record"), ed.get("record"), plain=newsletter_plain(ed, m)); ed["raised"] = dt.datetime.now().isoformat(timespec="seconds")
         _save(STATE, state); print("od cards: newsletter %s -> %s" % (ed["date"], ed["task"]))
 
 

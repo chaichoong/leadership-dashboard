@@ -376,7 +376,7 @@ exit codes):
 - escalate: `python3 scripts/agent-dispatch.py escalate TASKID --reason "<the one clear ask>"`
   (the reason becomes the card's `DECIDE:` line; no separate annotate)
 - close / pass-to-Roy / in-house finish:
-  `python3 scripts/agent-dispatch.py submit TASKID --agent rec1hYELb4zS8pjjO --type Admin --output-file <path>`
+  `python3 scripts/agent-dispatch.py submit TASKID --agent rec1hYELb4zS8pjjO --type Admin --output-file <path> --plain-task "<what the task is, one short sentence a 13-year-old understands>" --plain-approve "<what happens the moment Kevin taps Approve, one short plain sentence>"`
   (output ends with the mandatory closing line
   `**Carrying this out will involve:** <what happens on approval>`)
 - chase: the route + annotate pair from Step 2 rule 5 (record it with

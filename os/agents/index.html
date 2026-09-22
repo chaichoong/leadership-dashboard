@@ -110,6 +110,14 @@ a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}
 .apv-card{border:1px solid var(--border-default);border-left:4px solid var(--warning);border-radius:var(--radius-md);background:var(--bg-surface);padding:14px 16px;margin-bottom:12px}
 .apv-ask{font-size:var(--fs-base);font-weight:var(--fw-semibold);line-height:1.5;margin-bottom:6px}
 .apv-ask-stem{color:var(--accent);font-weight:var(--fw-bold)}
+/* The plain summary (Kevin, 22 Sep 2026): what the task is and what approving
+   does, in words a 13-year-old understands, read before anything else. */
+.apv-plain{display:grid;grid-template-columns:auto 1fr;gap:4px 12px;background:var(--bg-subtle);border-radius:var(--radius-md);padding:10px 12px;margin-bottom:10px;font-size:var(--fs-base);line-height:1.5}
+.apv-plain-label{font-weight:var(--fw-bold);color:var(--accent);white-space:nowrap}
+.apv-plain-text{color:var(--text-primary);font-weight:var(--fw-semibold)}
+.apv-ask.apv-ask-detail{font-size:var(--fs-sm);font-weight:var(--fw-regular);color:var(--text-secondary)}
+.apv-ask-detail .apv-ask-stem{color:var(--text-secondary);font-weight:var(--fw-semibold)}
+@media (max-width:480px){.apv-plain{grid-template-columns:1fr;gap:0 0}.apv-plain-text{margin-bottom:6px}}
 .apv-email-from{display:flex;gap:16px;flex-wrap:wrap;font-size:var(--fs-xs);color:var(--text-secondary);background:var(--bg-subtle);border-radius:var(--radius-md);padding:4px 10px;margin-bottom:6px}
 .apv-meta{display:flex;gap:8px;flex-wrap:wrap;align-items:center;font-size:var(--fs-xs);color:var(--text-secondary);margin-bottom:8px}
 .apv-chip{background:var(--bg-subtle);color:var(--text-secondary);padding:1px 8px;border-radius:var(--radius-full);font-weight:var(--fw-semibold);white-space:nowrap}
@@ -530,6 +538,7 @@ const TF = {
     verdictReason:    'fldF9Bs4N5mttQvtl',
     feedbackHistory:  'fldOzsq68lhfprKJu',
     inboundSender:    'fldzf4xlbrQuktx0i',
+    plainSummary:     'fld3PrM8AJcnWHemG', // TASK: / IF YOU APPROVE: lines, written at submit (22 Sep 2026)
     // Knock it back (28 Aug 2026) — see TASK_FIELDS.deferredUntil in
     // js/config.js for why this is a date on the task rather than a queue
     // somewhere else.
@@ -972,7 +981,7 @@ const APV_QUEUE_FIELDS = () => [
     TF.name, TF.status, TF.description, TF.notes, TF.dueDate, TF.taskType,
     TF.agentOutput, TF.sentForApprovalBy, TF.teamMember, TF.lmt, TF.slackBaseline,
     TF.approver, TF.priority, TF.inboundUrl, TF.attachments, TF.deferredUntil,
-    TF.feedbackHistory, TF.inboundSender];
+    TF.feedbackHistory, TF.inboundSender, TF.plainSummary];
 
 async function loadApprovals(){
     _approvalsState = 'loading';
@@ -1004,6 +1013,7 @@ async function loadApprovals(){
             tier1: isTier1Output(gf(r,TF.agentOutput)||''),
             emailLinks: apvEmailLinks(gf(r,TF.inboundUrl)),
             inboundSender: gf(r,TF.inboundSender)||'',
+            plainSummary: gf(r,TF.plainSummary)||'',
             // Files already ON the task — normally the agent's own work
             // (a drafted letter of authority, a filled form) attached with
             // `agent-dispatch.py submit --attach`, so Kevin can open and
@@ -2219,7 +2229,31 @@ function apvCoverage(notes){
     return { full, short: Array.from(new Set(districts)).join(', ') || 'checked' };
 }
 
+// THE PLAIN SUMMARY (Kevin, 22 Sep 2026): "too much information, difficult
+// to decipher". agent-dispatch.py submit writes two lines into Plain Summary
+// (TASK: / IF YOU APPROVE:). A card submitted before that, or an escalation,
+// has none, so the task line falls back to the task name with its filing tags
+// ("INBOUND: POST [MEDIUM]:") taken off, and the approve line is left out
+// rather than guessed: the detailed line below still says what happens.
+// Known filing tags only, read off 1,187 task names (22 Sep 2026). A general
+// all-caps rule took "HMRC CFS-2427425:" off a tier-1 card, so anything not
+// on this list stays. SIGN-IN stays too: it is the point of that card.
+const APV_FILING_TAG = /^(?:INBOUND|MAINTENANCE|COMPLIANCE|CORRESPONDENCE|CONTENT(?: \(OD\))?|POST(?:\s*\[[A-Z]+\])?|REMINDER|ACTION REQUIRED)\s*:\s*/;
+const APV_MAIL_TAG = /^(?:re|fwd?)\s*:\s*/i;
+function apvTidyName(name){
+    let s = String(name||'').trim(), prev;
+    do { prev = s; s = s.replace(APV_FILING_TAG, '').replace(APV_MAIL_TAG, ''); } while(s !== prev && s);
+    return s || String(name||'').trim();
+}
+function apvPlain(t){
+    const raw = String(t.plainSummary||'');
+    const task = (/^\s*TASK:\s*(.+)$/im.exec(raw)||[])[1];
+    const approve = (/^\s*IF YOU APPROVE:\s*(.+)$/im.exec(raw)||[])[1];
+    return { task: (task||'').trim() || apvTidyName(t.name), approve: (approve||'').trim(), written: !!(task && approve) };
+}
+
 function apvCardHtml(t){
+    const plain = apvPlain(t);
     const askBits = apvAskLine(t);
     const isAction = askBits.isAction;
     const summary = askBits.summary;
@@ -2238,6 +2272,10 @@ function apvCardHtml(t){
     const askLine = askBits.askLine;
     const kindText = t.taskType ? esc(t.taskType) : '<span style="color:var(--danger)">not set</span>';
     return `<div class="apv-card${_apvSelected.has(t.id)?' apv-selected':''}" data-apv-card="${t.id}">
+        <div class="apv-plain" data-apv-plain="${plain.written?'written':'fallback'}">
+            <span class="apv-plain-label">The task</span><span class="apv-plain-text" data-apv-plain-task>${esc(plain.task)}</span>
+            ${plain.approve ? `<span class="apv-plain-label">If you approve</span><span class="apv-plain-text" data-apv-plain-approve>${esc(plain.approve)}</span>` : ''}
+        </div>
         ${tier1 ? `<div class="apv-tier1">TIER 1. This touches your private legal and financial matter. An AI agent prepared it. Nothing has been sent, filed, paid or changed anywhere. Read it before you approve.</div>` : ''}
         ${(()=>{
             const r = apvReceipt(t.notes);
@@ -2247,7 +2285,7 @@ function apvCardHtml(t){
                 ${r.lines.map(l=>`<div class="apv-receipt-line"><span class="apv-receipt-point">${esc(l.point)}</span><span class="apv-receipt-arrow">&rarr;</span><span class="apv-receipt-change${/^cannot\b/i.test(l.change)?' cannot':''}">${esc(l.change)}</span></div>`).join('')}
             </div>`;
         })()}
-        <div class="apv-ask">${isAction ? `<span class="apv-ask-stem">If you approve, the agent will:</span> ` : ''}${esc(askLine)}</div>
+        <div class="apv-ask${plain.approve?' apv-ask-detail':''}">${isAction ? `<span class="apv-ask-stem">${plain.approve?'In detail, the agent will:':'If you approve, the agent will:'}</span> ` : ''}${esc(askLine)}</div>
         ${(()=>{
             const need = apvSignInNeeded(t.agentOutput);
             if(!need) return '';
@@ -2279,7 +2317,6 @@ function apvCardHtml(t){
                 <span><strong>To:</strong> ${esc(e.to)}</span>
             </div>`;
         })()}
-        ${askLine !== t.name ? `<div style="font-size:var(--fs-xs);color:var(--text-muted);margin-bottom:4px">Task: ${esc(t.name)}</div>` : ''}
         <details class="apv-details"${_apvOpen.work.has(t.id)?' open':''} ontoggle="if(this.open)_apvOpen.work.add('${t.id}');else _apvOpen.work.delete('${t.id}')">
             <summary>${work ? 'Read the agent’s full work' : 'The agent left its work empty'}</summary>
             ${work

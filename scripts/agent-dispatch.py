@@ -204,6 +204,9 @@ AF = {
     # Knock-back date (28 Aug 2026): the queue and the digest hide a task while
     # this is after today. Sign-in waits are parked on it until the morning.
     "deferredUntil":     "fldJ9IHS1yxwYzYSN",
+    # THE PLAIN SUMMARY (Kevin, 22 Sep 2026): two lines a 13-year-old
+    # understands, written by the agent at submit, shown first on his card.
+    "plainSummary":      "fld3PrM8AJcnWHemG",
 }
 
 TASK_TYPES = ("Drafting", "Research", "Analysis", "Build",
@@ -2149,6 +2152,7 @@ def handle_without_kevin(args, output, task_rec, level, attached):
         AF["approvalFeedback"]: None,
         AF["approvedAt"]: None,
         AF["notes"]: (existing + "\n\n" + note).strip()[-90000:],
+        **plain_summary_fields(args),
     }
     carry = level["carry"]
     status = None
@@ -2308,6 +2312,51 @@ def handback_problem(output, task_type=""):
     end_ = text.find("\n", m.end())
     line = text[text.rfind("\n", 0, m.start()) + 1: end_ if end_ != -1 else len(text)]
     return line.strip()[:160]
+
+
+# THE PLAIN SUMMARY (Kevin, 22 Sep 2026): "too much information, difficult to
+# decipher". Every card opens with what the task is and what approving does,
+# each in one short sentence a thirteen-year-old understands. The agent writes
+# both at submit (--plain-task, --plain-approve); the card shows them first.
+PLAIN_MIN, PLAIN_MAX = 15, 200
+PLAIN_MARKUP_RE = re.compile(r"[*`|]|\[[^\]]*\]\(|^#")
+
+
+def plain_summary_problem(task_line, approve_line):
+    """Reason the two plain lines cannot go on Kevin's card; empty if fine."""
+    for flag, line in (("--plain-task", task_line), ("--plain-approve", approve_line)):
+        text = str(line or "").strip()
+        if not text:
+            return f"{flag} is empty"
+        if "\n" in text or "\r" in text:
+            return f"{flag} must be one line"
+        if len(text) < PLAIN_MIN:
+            return f"{flag} is too short to explain anything ({len(text)} characters)"
+        if len(text) > PLAIN_MAX:
+            return (f"{flag} is {len(text)} characters; keep it under {PLAIN_MAX}. "
+                    "One short sentence, not a report")
+        jargon = JARGON_RE.search(text)
+        if jargon:
+            return (f"{flag} contains '{jargon.group(0)}'. That is machine detail. "
+                    "Say it the way you would to a thirteen-year-old")
+        if PLAIN_MARKUP_RE.search(text):
+            return f"{flag} contains formatting (*, `, |, a leading # or a link). Plain words only"
+    return ""
+
+
+def plain_summary_text(task_line, approve_line):
+    return f"TASK: {task_line.strip()}\nIF YOU APPROVE: {approve_line.strip()}"
+
+
+def plain_summary_fields(args):
+    """The Plain Summary write for every patch a submit makes. Every path,
+    not only the card: a Level A action that falls back to a card, or a task
+    filed now and reopened later, must never show a previous round's lines.
+    Empty for an internal caller that never had the flags."""
+    t, a = getattr(args, "plain_task", None), getattr(args, "plain_approve", None)
+    if t is None or a is None:
+        return {}
+    return {AF["plainSummary"]: plain_summary_text(t, a)}
 
 
 def carry_out_problem(output, strict=True):
@@ -3049,6 +3098,10 @@ def cmd_escalate(args):
         # decided; the card is a fresh question.
         AF["approvalOutcome"]: None,
         AF["approvedAt"]: None,
+        # The card is a new question, so an earlier submit's plain lines would
+        # describe the wrong proposal (review, 22 Sep 2026). Cleared: the page
+        # then shows the task name and the DECIDE line.
+        AF["plainSummary"]: None,
         AF["notes"]: (existing + "\n\n" + note).strip()[-90000:],
     })
     print(json.dumps({"escalated": args.task, "to": "Kevin Brittain", "card": True,
@@ -3513,6 +3566,24 @@ def cmd_submit(args):
     # Kevin's mandate. Checked AFTER the banner so a tier-1 submit is judged on
     # the text that will actually be stored, and refused rather than patched:
     # a fabricated closing line would be the very guesswork this removes.
+    # The plain summary is checked FIRST among the content gates: it is the
+    # first thing Kevin reads, and it costs the agent one retry to fix. None
+    # means an internal caller that never had the flags (argparse requires
+    # them on the command line, which is the only way an agent submits).
+    plain_task = getattr(args, "plain_task", None)
+    plain_approve = getattr(args, "plain_approve", None)
+    if plain_task is not None or plain_approve is not None:
+        problem = plain_summary_problem(plain_task, plain_approve)
+        if problem:
+            sys.exit(
+                f"ERROR: refusing to submit {args.task} — {problem}.\n"
+                "       Kevin's card opens with these two lines (22 Sep 2026):\n"
+                "         --plain-task    \"What the task is, in one short sentence\"\n"
+                "         --plain-approve \"What happens the moment he taps Approve\"\n"
+                "       Write both so a thirteen-year-old understands them. Example:\n"
+                "         --plain-task \"A company keeps emailing to say it wants to buy Runpreneur.\"\n"
+                "         --plain-approve \"The agent sends one short no-thanks reply and stops answering.\"")
+
     problem = carry_out_problem(output)
     if problem:
         sys.exit(
@@ -3825,6 +3896,7 @@ def cmd_submit(args):
             AF["approvalFeedback"]: None,
             AF["approvedAt"]: None,
             AF["notes"]: (str(tf.get(AF["notes"]) or "").rstrip() + "\n\n" + note).strip()[-90000:],
+            **plain_summary_fields(args),
         }
         # Attachments were uploaded above, once; never again here.
         patch_task(args.task, filed)
@@ -3870,6 +3942,7 @@ def cmd_submit(args):
         # every throughput and Completed Month figure as finished work.
         AF["completion"]: None,
     }
+    fields.update(plain_summary_fields(args))
     if signin_wait:
         fields[AF["deferredUntil"]] = tomorrow_london()
     if archived:
@@ -7438,6 +7511,12 @@ def main():
     s.add_argument("--agent", required=True)
     s.add_argument("--type", required=True)
     s.add_argument("--output-file", required=True)
+    s.add_argument("--plain-task", required=True, metavar="SENTENCE",
+                   help="what the task is, one short sentence a thirteen-year-old "
+                        "understands; first line of Kevin's card (22 Sep 2026)")
+    s.add_argument("--plain-approve", required=True, metavar="SENTENCE",
+                   help="what happens the moment Kevin approves, one short plain "
+                        "sentence; second line of his card (22 Sep 2026)")
     s.add_argument("--siblings", metavar="recA,recB",
                    help="property work only: the sibling ids the queue grouped under this "
                         "lead (same certificate type and postcode district); refused "
