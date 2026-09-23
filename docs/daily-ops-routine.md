@@ -382,7 +382,7 @@ Check the date first and SKIP with a note when not due. A skip you announce is f
 Follow `~/.claude/scheduled-tasks/queue-fixer/SKILL.md`, with these changes:
 
 - Do NOT take the queue lock; you already hold the machine.
-- **Also commit the reports** the scripts and slots left in `monitoring/`. Copy them into the worktree before committing — they are written in the main checkout and a fresh worktree cannot see them. APPEND to existing report files, never overwrite: on 7 Aug 2026 rewriting one destroyed 195 lines of earlier investigation.
+- **Also commit the reports** the scripts and slots left in `monitoring/`, EXCEPT this routine's own `daily-ops-*.md`: it names properties, sums and Kevin's legal and financial matters, so since 24 Sep 2026 it is gitignored under the never-commit markers and stays on the Mac. Never `git add -f` one. Copy them into the worktree before committing — they are written in the main checkout and a fresh worktree cannot see them. APPEND to existing report files, never overwrite: on 7 Aug 2026 rewriting one destroyed 195 lines of earlier investigation.
 
 **Close findings honestly.** A fix that is written but sitting in an open PR is `--outcome pending --pr <n>`, NOT `--outcome fixed`. On 26 Aug 2026 four fixer PRs (#107, #110, #126, #137) were all open and unmerged while forty findings sat closed as "fixed" citing them — the queue was reporting work as done that had never reached production. When a PR merges, `python3 scripts/findings.py land --pr <n>` turns its pending findings into fixed.
 
@@ -416,7 +416,7 @@ Put anything under **NOT MOVING** into the report's *STUCK* block, with the coun
 
 If NOT MOVING is zero, say that explicitly — "nothing has stalled" is the sentence that earns the trust, and a silent omission reads identically to the check never having run.
 
-**Write the full report file:** `monitoring/daily-ops-{date}.md`. Run time, one line per phase, one line per slot and script in the last 24 hours, counts, record IDs, finding numbers, PR links. Phase 4 commits it tomorrow. The file is the record.
+**Write the full report file:** `monitoring/daily-ops-{date}.md`. Run time, one line per phase, one line per slot and script in the last 24 hours, counts, record IDs, finding numbers, PR links. It is NEVER committed (the repo is public; it is gitignored since 24 Sep 2026) and stays in the main checkout, where `scripts/estate-status.py` reads it. The file is the record.
 
 **NO Slack DM. None.** Kevin retired the Daily Ops DM on 1 Sep 2026. He does not read this file (found 23 Sep 2026: its NEEDS YOU line named a legal deadline due that day, and nothing carried it to him). So `scripts/estate-status.py` lifts the NEEDS YOU block out of `monitoring/daily-ops-{date}.md` every ten minutes and the 09:00 CEO brief prints it. **The summary block's shape is therefore a contract with code:** the first line starts `*Daily Ops`, the heading is exactly `*NEEDS YOU*`, each item is ONE numbered line (`1. ...`), and the block ends at the blank line before `*STUCK`. A report the reader cannot parse shows in the brief as "could not be read", never as "nothing needs you". Open the report with the summary block:
 
