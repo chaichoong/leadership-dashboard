@@ -40,7 +40,6 @@ test.describe('the file this round uses, and the dated trail', () => {
     await expect(doc.locator('[data-apv-file]')).toHaveAttribute('data-apv-file', 'cover.pdf');
     // No separate files block any more: the earlier and sender files are trail rows.
     await expect(card.locator('[data-apv-files]')).toHaveCount(0);
-    await card.locator('[data-apv-trail] summary').click();
     await expect(card.locator('[data-apv-trail] [data-apv-file="loa.pdf"]')).toBeVisible();
     await expect(card.locator('[data-apv-trail] [data-apv-file="notice.pdf"]')).toBeVisible();
     await expect(card.locator('[data-apv-trail] .apv-trail-row', { hasText: 'Came with the task: notice.pdf' })).toHaveCount(1);
@@ -79,7 +78,8 @@ test.describe('the file this round uses, and the dated trail', () => {
     await expect(trail).toBeVisible();
     await expect(trail.locator('summary')).toContainText('The story so far · 12 steps');
     await expect(trail.locator('summary')).toContainText('latest: 8 Sep 2026');
-    await trail.locator('summary').click();
+    // Open on arrival since 23 Sep 2026: no click to read the story.
+    await expect(trail).toHaveAttribute('open', '');
     const rows = trail.locator('.apv-trail-row');
     await expect(rows).toHaveCount(12);
     // Oldest first: the track record's July email leads, the round-2 submit ends.
@@ -113,7 +113,6 @@ test.describe('the file this round uses, and the dated trail', () => {
     // No stamps and no document promise: no document line, and the sender's
     // file is the trail's only step.
     await expect(card.locator('[data-apv-doc-line]')).toHaveCount(0);
-    await card.locator('[data-apv-trail] summary').click();
     await expect(card.locator('[data-apv-trail] [data-apv-file="bill.pdf"]')).toBeVisible();
   });
 });
