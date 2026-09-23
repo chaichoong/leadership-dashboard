@@ -42,7 +42,7 @@ async function openApprovals(page) {
 function withLongWork() {
   const fx = defaultFixtures();
   const r = fx.approvals[1]; // recApvA2
-  r.fields[TF.agentOutput] = Array.from({ length: 30 }, (_, i) => `Line ${i + 1} of the agent's report.`).join('\n')
+  r.fields[TF.agentOutput] = Array.from({ length: 60 },(_, i) => `Line ${i + 1} of the agent's report.`).join('\n')
     + '\n\nLAST LINE OF THE WORK';
   r.fields[TF.description] = 'Draft the lowest possible payment plan for the lender.';
   return fx;
@@ -96,7 +96,11 @@ test.describe('every option on the card, one click each', () => {
     expect(patch.fields['fldtI7SJI4gEohHD1']).toBe('Ask for a freeze first, then the plan.');
   });
 
-  test('the work, the task it was given and the story so far start open; a long report shows its start with Show all', async ({ page }) => {
+  // SCROLL, NEVER A CLICK (Kevin, 24 Sep 2026): "When I click the agent's full
+  // work ... it needs to be like how it is with the task it was given: I can
+  // just scroll down in a larger box rather than having to click another Show
+  // all button." The work box capped at eight lines had scrolling switched off.
+  test('the work, the task it was given and the story so far start open; a long report scrolls in its box with no Show all', async ({ page }) => {
     await mockAgentsPage(page, withLongWork());
     await loadAgentsPage(page);
     await openApprovals(page);
@@ -105,13 +109,20 @@ test.describe('every option on the card, one click each', () => {
     await expect(card.locator('[data-apv-given]')).toContainText('lowest possible payment plan');
     const body = card.locator('[data-apv-work]');
     await expect(body).toContainText('Line 1 of the agent');
-    await expect(body).toHaveClass(/apv-clamp/);
-    const capped = (await body.boundingBox()).height;
-    await card.locator('[data-apv-show-all]').click();
-    await expect(body).toHaveClass(/apv-full/);
-    expect((await body.boundingBox()).height).toBeGreaterThan(capped * 2);
-    // A short draft has nothing to expand.
-    await expect(page.locator('[data-apv-card="recApvB1"] [data-apv-show-all]')).toHaveCount(0);
+    await expect(card.locator('button', { hasText: /Show (all|less)/ })).toHaveCount(0);
+    // The same box as the task it was given: same height cap, scrollable.
+    const style = (el) => { const s = getComputedStyle(el); return { maxHeight: s.maxHeight, overflowY: s.overflowY }; };
+    const work = await body.evaluate(style);
+    expect(work).toEqual(await card.locator('[data-apv-given]').evaluate(style));
+    expect(work.overflowY).toBe('auto');
+    // The report is longer than the box, and the mouse wheel reaches its end.
+    const fit = await body.evaluate((el) => ({ sh: el.scrollHeight, ch: el.clientHeight }));
+    expect(fit.sh).toBeGreaterThan(fit.ch * 1.5);
+    await body.scrollIntoViewIfNeeded();
+    const box = await body.boundingBox();
+    await page.mouse.move(box.x + box.width / 2, box.y + 20);
+    await page.mouse.wheel(0, 5000);
+    await expect.poll(() => body.evaluate((el) => el.scrollTop > 0 && el.scrollTop + el.clientHeight >= el.scrollHeight - 2)).toBe(true);
   });
 
   test('a long note grows the box only so far, so the buttons never cover the work', async ({ page }) => {

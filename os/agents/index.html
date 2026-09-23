@@ -127,13 +127,9 @@ a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}
 .apv-details{margin:8px 0}
 .apv-details summary{cursor:pointer;font-size:var(--fs-xs);font-weight:var(--fw-semibold);color:var(--accent)}
 .apv-body{font-size:var(--fs-xs);color:var(--text-secondary);white-space:pre-wrap;word-break:break-word;max-height:340px;overflow:auto;border:1px solid var(--border-subtle);border-radius:var(--radius-md);padding:10px 12px;background:var(--bg-surface-2);margin-top:6px}
-/* The work starts OPEN (Kevin, 23 Sep 2026) at its first eight lines, so the
-   draft is read without a click and a long report does not bury the buttons.
-   "Show all" takes the cap off entirely. */
-.apv-body.apv-clamp{line-height:1.5;max-height:calc(12em + 20px);overflow:hidden}
-.apv-body.apv-full{max-height:none;overflow:visible}
-.apv-show-all{font-family:inherit;font-size:var(--fs-xs);font-weight:var(--fw-semibold);color:var(--accent);background:none;border:none;cursor:pointer;padding:4px 0}
-.apv-show-all:hover{text-decoration:underline}
+/* The work starts OPEN (Kevin, 23 Sep 2026) and scrolls in its own box, the
+   same as the task it was given (Kevin, 24 Sep 2026). A long report is read by
+   scrolling, never a "Show all" click, and it does not bury the buttons. */
 .apv-note{width:100%;border:1px solid var(--border-default);background:var(--bg-surface);border-radius:var(--radius-md);padding:8px 10px;font-size:var(--fs-sm);color:var(--text-primary);font-family:inherit;resize:vertical;min-height:44px;margin:8px 0}
 .apv-note:focus{outline:none;border-color:var(--accent)}
 /* Tick to decide several at once (Kevin, 15 Sep 2026). The tick lives in
@@ -2298,9 +2294,6 @@ function apvCardHtml(t){
     const ageH = hoursSince(t.submittedAt);
     const late = ageH !== null && ageH > 24;
     const work = askBits.work;
-    // Long enough to cap at eight lines: a wrapped line is counted at 120
-    // characters, about the width of the card on a laptop.
-    const workLong = work.split('\n').reduce((n, l) => n + Math.max(1, Math.ceil(l.length / 120)), 0) > 8;
     const signIn = askBits.signIn;
     const askLine = askBits.askLine;
     const kindText = t.taskType ? esc(t.taskType) : '<span style="color:var(--danger)">not set</span>';
@@ -2358,8 +2351,7 @@ function apvCardHtml(t){
         <details class="apv-details"${_apvOpen.workShut.has(t.id)?'':' open'} ontoggle="if(this.open)_apvOpen.workShut.delete('${t.id}');else _apvOpen.workShut.add('${t.id}')">
             <summary>${work ? 'The agent’s full work' : 'The agent left its work empty'}</summary>
             ${work
-                ? `<div class="apv-body${workLong ? (_apvOpen.workFull.has(t.id) ? ' apv-full' : ' apv-clamp') : ''}" data-apv-work>${apvLinkify(work)}</div>${workLong
-                    ? `<button type="button" class="apv-show-all" data-apv-show-all onclick="apvShowAllWork('${t.id}', this)">${_apvOpen.workFull.has(t.id) ? 'Show less' : 'Show all'}</button>` : ''}`
+                ? `<div class="apv-body" data-apv-work>${apvLinkify(work)}</div>`
                 : `<div class="apv-body">The agent left its work empty, so there is nothing here to judge. Do not approve it blind. Use Request changes and tell it to show its work.</div>`}
             ${t.description ? `<div style="font-size:var(--fs-xs);font-weight:var(--fw-semibold);color:var(--text-secondary);margin-top:8px">The task it was given</div><div class="apv-body" data-apv-given>${esc(t.description)}</div>` : ''}
         </details>
@@ -2407,16 +2399,6 @@ function apvGrowNote(el){
     el.style.height = el.scrollHeight + 'px';
 }
 window.apvGrowNote = apvGrowNote;
-
-// "Show all" on a long piece of work, remembered per card so a redraw keeps it.
-function apvShowAllWork(taskId, btn){
-    const body = btn.previousElementSibling;
-    const full = !_apvOpen.workFull.has(taskId);
-    if(full) _apvOpen.workFull.add(taskId); else _apvOpen.workFull.delete(taskId);
-    if(body){ body.classList.toggle('apv-clamp', !full); body.classList.toggle('apv-full', full); }
-    btn.textContent = full ? 'Show less' : 'Show all';
-}
-window.apvShowAllWork = apvShowAllWork;
 
 // Record Kevin's verdict — the SAME writes as the Tasks drawer's apvDecide and
 // the Slack loop's applyDecision. This page is the third face of the ONE
@@ -2478,9 +2460,9 @@ let _apvReason = {};
 // stays behind this flag for one release in case Kevin wants it back.
 const APV_LEGACY_REJECT_DIALOG = false;
 // Everything on a card starts open since 23 Sep 2026. These record, by task
-// id, what Kevin folded shut or expanded with "Show all", so a redraw after a
-// decision on one card never changes another (finding 4).
-const _apvOpen = { workShut: new Set(), workFull: new Set(), trailShut: new Set() };
+// id, what Kevin folded shut, so a redraw after a decision on one card never
+// changes another (finding 4).
+const _apvOpen = { workShut: new Set(), trailShut: new Set() };
 
 // ONE TAP, NO DIALOG (Kevin, 7 Sep 2026, usability audit finding 7): a reason
 // chip IS the rejection. The Remember box lives here, at the moment of
