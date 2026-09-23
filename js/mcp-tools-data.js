@@ -7,58 +7,31 @@
 //
 // Each row is marked `verified` (read from a real config file or a live health
 // check) or `declared` (hand-listed because nothing on disk records it). The
-// page shows that split, because `claude mcp list` only ever sees two of these
-// servers and a list you cannot attribute cannot be acted on.
+// page shows that split, because `claude mcp list` only ever sees the few
+// servers configured for this repo and a list you cannot attribute cannot be
+// acted on.
 //
 // Guarded by tests/mcp-inventory.test.js.
 
 var MCP_TOOLS = {
-  "generatedAt": "2026-08-28T12:22:23Z",
+  "generatedAt": "2026-09-23T05:10:06Z",
   "generator": "scripts/generate-mcp-inventory.py",
-  "healthNote": "",
+  "healthNote": "claude mcp list returned no servers",
   "agentAllowlistSize": 9,
   "counts": {
-    "total": 43,
-    "verified": 30,
+    "total": 40,
+    "verified": 27,
     "declared": 13,
-    "kevin": 21,
+    "kevin": 20,
     "agents": 0,
-    "needsAuth": 21
+    "needsAuth": 20
   },
   "groups": [
     {
       "key": "local",
       "title": "Set up in files on this Mac",
       "blurb": "The only tools a script can check the health of. Everything below this group is invisible to the command line.",
-      "tools": [
-        {
-          "name": "github",
-          "what": "Reads and writes code on GitHub: pull requests, issues, file contents. This is how the platform ships.",
-          "auth": "connected",
-          "kevin": true,
-          "agents": false,
-          "source": "verified",
-          "scope": "this repo, ~"
-        },
-        {
-          "name": "gmail-write",
-          "what": "A second, separate Gmail connection that can send. Set up outside this repo; day-to-day sending goes through scripts/send-email.py instead.",
-          "auth": "unknown",
-          "kevin": false,
-          "agents": false,
-          "source": "verified",
-          "scope": "~"
-        },
-        {
-          "name": "metricool",
-          "what": "Social media scheduling and stats. Never authorised, so nothing uses it.",
-          "auth": "needs-auth",
-          "kevin": false,
-          "agents": false,
-          "source": "verified",
-          "scope": "this repo"
-        }
-      ]
+      "tools": []
     },
     {
       "key": "claudeai",
@@ -275,7 +248,7 @@ var MCP_TOOLS = {
     {
       "key": "plugins",
       "title": "Plugin bundles",
-      "blurb": "8 bundles are installed (anthropic-skills, cowork-plugin-management, customer-support, data, finance, legal, operations, productivity). Every connector inside them is unauthorised, so none of them does anything today. Either authorise the ones you want or remove the bundles.",
+      "blurb": "10 bundles are installed (agents-md, anthropic-skills, cowork-plugin-management, customer-support, data, finance, legal, operations, productivity, telemetry). Every connector inside them is unauthorised, so none of them does anything today. Either authorise the ones you want or remove the bundles.",
       "tools": [
         {
           "name": "atlassian",
