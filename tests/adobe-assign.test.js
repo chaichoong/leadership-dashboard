@@ -64,7 +64,7 @@ async function readAndJudge(html) {
   try {
     const page = await browser.newPage();
     await page.setContent(html);
-    const saved = await page.evaluate(mod.readOwnersInPage, mod.SEL);
+    const saved = await page.evaluate(mod.readOwnersInPage, { sel: mod.SEL });
     return mod.judgeSavedDraft({ map: MAP, expected: EXPECTED, saved: saved.fields,
                                  recipients: saved.recipients, signers: SIGNERS });
   } finally {
@@ -132,6 +132,31 @@ describe.skipIf(!chromium)('readOwnersInPage on a page shaped like Adobe', () =>
       [SIG(1), GREEN, { y: 300 }], [DTE(1), GREEN, { y: 340 }],
     ]));
     expect(v.ok).toBe(true);
+  });
+
+  it('reads only the target page when the viewer keeps another page drawn', async () => {
+    // Each box sits in its page's container, data-index = page number - 1
+    // (measured 24 Sep 2026). A stray box on page 1 must not join page 6's.
+    const html = adobePage([[SIG(1), GREEN], [DTE(1), GREEN], [SIG(2), PURPLE], [DTE(2), PURPLE]])
+      .replace(/(<div data-testid="authoring-field"[\s\S]*$)/, '<div data-index="5">$1</div>')
+      .replace('</div><div data-index="5">', '</div><div data-index="0"><div data-fieldid="stray" '
+        + 'aria-label="signature-form-field, Stray" outline="1px solid #50A65E" '
+        + 'style="position:absolute; left:420px; top:100px; width:240px; height:30px; background: rgba(80,166,94,0.3)"></div></div>'
+        + '<div data-index="5">');
+    const browser = await chromium.launch();
+    try {
+      const page = await browser.newPage();
+      await page.setContent(html);
+      const all = await page.evaluate(mod.readOwnersInPage, { sel: mod.SEL });
+      const six = await page.evaluate(mod.readOwnersInPage, { sel: mod.SEL, pageIndex: 5 });
+      expect(all.fields.length).toBe(5);
+      expect(six.fields.map((f) => f.id)).toEqual(['f-0', 'f-1', 'f-2', 'f-3']);
+      const v = mod.judgeSavedDraft({ map: MAP, expected: EXPECTED, saved: six.fields,
+                                     recipients: six.recipients, signers: SIGNERS });
+      expect(v.ok).toBe(true);
+    } finally {
+      await browser.close();
+    }
   });
 
   it('refuses when the recipient list carries no colour to trace a box to', async () => {
