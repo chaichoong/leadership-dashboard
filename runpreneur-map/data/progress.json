@@ -1,5 +1,5 @@
 {
- "as_at": "2026-09-22",
+ "as_at": "2026-09-23",
  "outline_names": {
   "United Kingdom": "United Kingdom",
   "Spain": "Spain",
@@ -21,20 +21,20 @@
   "United States": "United States of America",
   "Singapore": "Singapore"
  },
- "days": 2305,
- "total_km": 17648.2,
+ "days": 2306,
+ "total_km": 17655.42,
  "lap_km": 40075.0,
- "lap_pct": 44.04,
- "km_left": 22426.8,
+ "lap_pct": 44.06,
+ "km_left": 22419.58,
  "raised": 76840.0,
  "raise_target": 1000000,
  "avg_km_per_day": 7.66,
- "runs_counted": 2402,
+ "runs_counted": 2403,
  "countries_count": 19,
  "countries": [
   {
    "name": "United Kingdom",
-   "runs": 2177
+   "runs": 2178
   },
   {
    "name": "Spain",
@@ -120,8 +120,8 @@
  "date_of_next_day_milestone": "2026-12-26",
  "lap_finish_estimate": "2034-09-30",
  "marker": {
-  "lat": -41.3483,
-  "lon": 154.3018,
+  "lat": -41.3283,
+  "lon": 154.3925,
   "leg": "Hobart, Tasmania to Auckland"
  },
  "route": [
