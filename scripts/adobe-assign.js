@@ -256,8 +256,14 @@ function parseFieldMap(raw, fields, signerCount) {
  * selected, rather than by re-selecting the box, which is what failed before.
  * A selected box has a blue selection outline, so its outline and fill
  * disagree and it reads as unproven, never as somebody's.
+ *
+ * ONE PAGE ONLY when pageIndex is given. Each box sits inside its page's
+ * container, marked data-index (page 6 is data-index 5, measured 24 Sep 2026).
+ * Reading every box in the DOM would count another page's boxes whenever the
+ * viewer happens to keep that page drawn, and the assigned boxes and the saved
+ * ones would stop lining up.
  */
-function readOwnersInPage(sel) {
+function readOwnersInPage({ sel, pageIndex }) {
   // A fully transparent paint is no colour, not black.
   const rgbHex = (s) => {
     const m = String(s || '').match(/rgba?\((\d+),\s*(\d+),\s*(\d+)(?:,\s*([\d.]+))?/);
@@ -272,7 +278,9 @@ function readOwnersInPage(sel) {
     const swatch = r.querySelector(sel.recipientSwatch);
     return { text: r.innerText.trim(), colour: rgbHex(swatch && getComputedStyle(swatch).backgroundColor) };
   });
-  const fields = [...document.querySelectorAll(sel.anyField)].map((e) => {
+  const onPage = (e) => pageIndex === undefined ||
+    (e.closest('[data-index]') || { getAttribute: () => null }).getAttribute('data-index') === String(pageIndex);
+  const fields = [...document.querySelectorAll(sel.anyField)].filter(onPage).map((e) => {
     const r = e.getBoundingClientRect();
     return { id: e.getAttribute('data-fieldid'), label: e.getAttribute('aria-label') || '',
              outline: attrHex(e.getAttribute('outline')),
@@ -605,7 +613,8 @@ async function run({ document: doc, signers, fields, page: pageNo, shot }) {
 
     // The same reader the final check uses, so the boxes assigned here and the
     // boxes proven there are counted and ordered by one rule.
-    const found = (await page.evaluate(readOwnersInPage, SEL)).fields;
+    const onTarget = { sel: SEL, pageIndex: target - 1 };
+    const found = (await page.evaluate(readOwnersInPage, onTarget)).fields;
     if (!found.length) die('Auto-place placed no fields on page ' + target);
     const map = parseFieldMap(fields, found, signers.length);
     checkEverySignerHasAField(map, signers.length, signers);
@@ -629,7 +638,7 @@ async function run({ document: doc, signers, fields, page: pageNo, shot }) {
     const autoOwner = signers.length;
     // Who owns one box right now, by Adobe's id for it, read off the open page.
     const ownerNow = async (id) => {
-      const now = await page.evaluate(readOwnersInPage, SEL);
+      const now = await page.evaluate(readOwnersInPage, onTarget);
       const box = now.fields.filter((x) => x.id === id);
       if (box.length !== 1) return { owner: 0, why: 'the box is no longer on the page' };
       const r = ownersFromReads({ recipients: now.recipients, fields: box, signers });
@@ -688,14 +697,18 @@ async function run({ document: doc, signers, fields, page: pageNo, shot }) {
       // then moves EVERY field, and the last write wins, which looks exactly
       // like nothing having happened. Insist on one field before touching the
       // menu; the counter only renders when more than one is selected.
-      const selText = await page.locator(SEL.selectionCount).innerText().catch(() => '');
+      // Read the counter only when it is on the page. innerText() on a missing
+      // element waits Playwright's full 30 seconds, and it is missing whenever
+      // one box is selected, which is every normal move.
+      const counter = page.locator(SEL.selectionCount);
+      const selText = (await counter.count()) ? await counter.innerText().catch(() => '') : '';
       if (/\d+\s+fields selected/i.test(selText)) {
         await page.keyboard.press('Escape');
         await page.waitForTimeout(1500);
         const alone = await boxHandle(page, f.id);
         if (alone) await alone.click({ timeout: 10000 }).catch((e) => log(`field ${i + 1}: ${e.message.split('\n')[0]}`));
         await page.waitForTimeout(WAIT.settle);
-        const again = await page.locator(SEL.selectionCount).innerText().catch(() => '');
+        const again = (await counter.count()) ? await counter.innerText().catch(() => '') : '';
         if (/\d+\s+fields selected/i.test(again)) {
           die(`field ${i + 1} will not select on its own (${again.trim()}), so a ` +
               'reassignment would move every field at once. Nothing has been sent.');
@@ -766,23 +779,24 @@ async function run({ document: doc, signers, fields, page: pageNo, shot }) {
       unsaved = true;
       d.accept().catch((e) => log(`could not answer Adobe's leave-page prompt: ${e.message}`));
     });
-    // ADOBE CAN ANSWER A RELOAD WITH "Something went wrong". Seen once, on a
-    // proof reloaded 40 seconds after its upload (23 Sep 2026); the drafts that
-    // reopened were a couple of minutes old. So try again, twice, 15 seconds
-    // apart, opening the draft's own address without the upload's session id.
+    // THE FIRST REOPEN OF A FRESH UPLOAD CAN SHOW NOTHING. Measured 24 Sep 2026
+    // on a test agreement: the first reload drew no editor for 60 seconds, and
+    // every reopen after it drew the editor in about 4 seconds, by reload or by
+    // the draft's own address. A proof uploaded 40 seconds earlier showed
+    // "Something went wrong" the same way. So give each try a short wait, then
+    // open the draft's own address (without the upload's session id) again at
+    // once. The last try waits longest, for a genuinely slow cold load.
     const draftUrl = page.url().replace(/([?&])transientId=[^&]*&?/, '$1').replace(/[?&]$/, '');
+    const reopenWait = [20000, 30000, 60000];
     let reopened = false;
-    for (let attempt = 1; attempt <= 3 && !reopened; attempt++) {
-      if (attempt > 1) {
-        log(`the draft did not reopen (try ${attempt - 1} of 3); waiting 15s and opening it again`);
-        await page.waitForTimeout(15000);
-      }
+    for (let attempt = 1; attempt <= reopenWait.length && !reopened; attempt++) {
+      if (attempt > 1) log(`the draft did not reopen (try ${attempt - 1} of ${reopenWait.length}); opening it again`);
       const nav = attempt === 1
         ? page.reload({ waitUntil: 'domcontentloaded', timeout: 60000 })
         : page.goto(draftUrl, { waitUntil: 'domcontentloaded', timeout: 60000 });
       await nav.catch((e) => log(`opening the draft: ${e.message.split('\n')[0]}`));
       reopened = await page.locator(SEL.send)
-        .waitFor({ state: 'visible', timeout: 60000 }).then(() => true).catch(() => false);
+        .waitFor({ state: 'visible', timeout: reopenWait[attempt - 1] }).then(() => true).catch(() => false);
     }
     if (!reopened) {
       const png = await shotOn('reload');
@@ -796,12 +810,12 @@ async function run({ document: doc, signers, fields, page: pageNo, shot }) {
     // The recipients panel took 25 seconds to paint on a cold run. Read until
     // every recipient shows a colour and every assigned box is back, or time
     // runs out, and judge the last read either way.
-    let saved = await page.evaluate(readOwnersInPage, SEL);
+    let saved = await page.evaluate(readOwnersInPage, onTarget);
     for (const until = Date.now() + WAIT.panel; Date.now() < until;) {
       const painted = saved.recipients.length === signers.length && saved.recipients.every((r) => r.colour);
       if (painted && saved.fields.length === found.length) break;
       await page.waitForTimeout(1000);
-      saved = await page.evaluate(readOwnersInPage, SEL);
+      saved = await page.evaluate(readOwnersInPage, onTarget);
     }
 
     const png = shot || path.join(os.tmpdir(), path.basename(doc, '.pdf') + '.png');
