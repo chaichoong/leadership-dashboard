@@ -28,6 +28,10 @@
  * missing" dialog, and the whole point of this script is that nobody should
  * find out that late.
  *
+ * And it never reports a box as assigned until the SAVED draft says so: it
+ * waits for Adobe to save, reloads, and proves every signature and date box
+ * from the stored copy (see judgeSavedDraft, and the 23 Sep 2026 false pass).
+ *
  * THE THREE THINGS THAT LOOK OPTIONAL AND ARE NOT
  * -----------------------------------------------
  * 1. THE RECIPIENT BOX IS MATCHED ON THE ATTRIBUTE, NOT THE TEXT. Adobe's
@@ -72,7 +76,9 @@ const EMAIL_RE = /^[^@\s,;<>]+@[^@\s,;<>]+\.[^@\s,;<>]+$/;
 // Adobe's screens, measured. These look generous and are not: the app is a
 // heavy SPA and the recipients panel took 25 seconds to paint on a cold run.
 const WAIT = { load: 20000, upload: 14000, panel: 25000, chip: 4500, menu: 2500,
-               fields: 20000, page: 9000, settle: 3000 };
+               fields: 20000, page: 9000, settle: 3000,
+               // Adobe saved 8.5 and 11.2 seconds after a move went quiet on 23 Sep 2026.
+               save: 45000, moved: 5000 };
 
 const SEL = {
   filePick: 'article:has-text("Request e-signatures") >> text=select a file',
@@ -92,11 +98,17 @@ const SEL = {
   send: '[data-testid="review-send-button"]',
   selectionCount: '[data-testid="num-fields-selected"]',
   toastClose: '[data-testid="rsp-Toast-closeButton"]',
-  // The highlight wrapper exists ONLY while its field is selected. These inner
-  // elements are in the page the whole time, so they are what a click aims at.
-  fieldBody: '[data-testid$="-form-field"], [data-testid$="-field"]',
   addSignature: '[data-testid="menu-item-signature-form-field"]',
+  // One element per box, selected or not: what a click aims at, and it carries
+  // the owner's colour.
+  anyField: '[data-fieldid]',
+  // Inside each recipient row, painted in that recipient's colour.
+  recipientSwatch: '[data-testid^="recipient-item-wrapper-"]',
 };
+
+// Adobe saves the draft with a PUT to the document's asset. Seen on 23 Sep 2026
+// as https://dc-api-v2.adobe.io/<n>/assets?asset_uri=... returning 204.
+const SAVE_RE = /^https:\/\/dc-api[^/]*\.adobe\.io\/[^?]*\/assets\?asset_uri=/;
 
 let THROW_ON_REFUSE = require.main !== module;
 function die(msg) {
@@ -125,6 +137,14 @@ function parseSigners(raw) {
   if (new Set(list).size !== list.length) die('the same address appears twice in --signers');
   return list;
 }
+
+/**
+ * What kind of box a label names. ONE rule, used both to build the map and to
+ * judge the saved draft, so a box the map counts as a signature can never be
+ * judged as a data blank (which may go unproven).
+ */
+const kindOf = (label) => (/signature/i.test(label) ? 'signature'
+  : /date-of-signing/i.test(label) ? 'date' : 'other');
 
 /**
  * Which signer each field belongs to, reading DOWN THE PAGE.
@@ -168,8 +188,8 @@ function parseFieldMap(raw, fields, signerCount) {
       return order[b - 1];
     };
     for (const k of kinds) {
-      if (/signature/i.test(k)) { block += 1; map.push(forBlock(block)); }
-      else if (/date-of-signing/i.test(k)) { map.push(forBlock(Math.max(block, 1))); }
+      if (kindOf(k) === 'signature') { block += 1; map.push(forBlock(block)); }
+      else if (kindOf(k) === 'date') { map.push(forBlock(Math.max(block, 1))); }
       // A data blank belongs to whoever owns the FIRST block, which is the
       // tenant on every one of these templates: they are the details the tenant
       // fills in.
@@ -225,52 +245,156 @@ function parseFieldMap(raw, fields, signerCount) {
 }
 
 /**
- * Did every signer end up with the boxes the map gave them?
+ * Read every box on the page and every recipient's colour, WITHOUT CLICKING.
+ * Runs inside the page (page.evaluate), so it may use only the DOM.
  *
- * REFUSE ON EVIDENCE, NOT ON SILENCE. Reading a box back means re-selecting it,
- * and that is unreliable in Adobe for EVERY kind of box: a tenant's boxes read
- * blank on one authority and back fine on the next, and the sending account's
- * own boxes never read at all. Every refusal on 10 Sep 2026 was that silence,
- * on documents the screenshots showed were correct in every box, including
- * one tenant's authority, refused twice while perfect.
- *
- * Correctness comes from the assignment step, which is correct by construction:
- * it picks the recipient BY EMAIL and stops dead if a move fails, and anything
- * it leaves alone sits on the last recipient, which is where Auto-place always
- * puts everything. So this refuses only what it can actually see is wrong: two
- * signers showing the same colour (their boxes are on one person), or one
- * signer's boxes in two colours (one did not move). A blank read is reported,
- * never counted as a colour and never counted as a failure.
+ * WHO OWNS A BOX IS WRITTEN ON THE BOX. Measured on a live draft, 23 Sep 2026:
+ * each box is one element carrying `data-fieldid`, its fill is its owner's
+ * colour, and while it is not selected its `outline` attribute names the same
+ * colour ("1px solid #7E4BF3"). Each recipient in the left panel is painted in
+ * that colour too. So a box's owner is read by matching colours, with nothing
+ * selected, rather than by re-selecting the box, which is what failed before.
+ * A selected box has a blue selection outline, so its outline and fill
+ * disagree and it reads as unproven, never as somebody's.
  */
-function judgeColours({ colours, checked, map, signers }) {
-  const bySigner = new Map();
-  for (let k = 0; k < colours.length; k++) {
-    const sN = map[checked[k]];
-    if (!bySigner.has(sN)) bySigner.set(sN, []);
-    bySigner.get(sN).push(colours[k]);
-  }
+function readOwnersInPage(sel) {
+  // A fully transparent paint is no colour, not black.
+  const rgbHex = (s) => {
+    const m = String(s || '').match(/rgba?\((\d+),\s*(\d+),\s*(\d+)(?:,\s*([\d.]+))?/);
+    if (!m || (m[4] !== undefined && Number(m[4]) === 0)) return null;
+    return m.slice(1, 4).map((n) => Number(n).toString(16).padStart(2, '0')).join('');
+  };
+  const attrHex = (s) => {
+    const m = String(s || '').match(/#([0-9a-f]{6})\b/i);
+    return m ? m[1].toLowerCase() : null;
+  };
+  const recipients = [...document.querySelectorAll(sel.recipientRow)].map((r) => {
+    const swatch = r.querySelector(sel.recipientSwatch);
+    return { text: r.innerText.trim(), colour: rgbHex(swatch && getComputedStyle(swatch).backgroundColor) };
+  });
+  const fields = [...document.querySelectorAll(sel.anyField)].map((e) => {
+    const r = e.getBoundingClientRect();
+    return { id: e.getAttribute('data-fieldid'), label: e.getAttribute('aria-label') || '',
+             outline: attrHex(e.getAttribute('outline')),
+             fill: rgbHex(getComputedStyle(e).backgroundColor),
+             x: Math.round(r.x), y: Math.round(r.y), w: Math.round(r.width), h: Math.round(r.height) };
+  }).filter((f) => f.w > 0)
+    // DOWN THE PAGE, the same order the map was built in.
+    .sort((a, b) => a.y - b.y || a.x - b.x);
+  return { recipients, fields };
+}
+
+/**
+ * Which signer owns each box, from the colours readOwnersInPage returned.
+ * Returns one { owner, why } per box: owner is the signer number, or 0 with
+ * the reason it could not be proven. Never guesses: a colour that matches no
+ * recipient, or two recipients sharing one colour, proves nothing.
+ */
+function ownersFromReads({ recipients, fields, signers }) {
+  const colourOf = new Map();
   for (let n = 1; n <= signers.length; n++) {
-    if (!bySigner.has(n)) {
-      return { ok: false, why: `signer ${n} (${signers[n - 1]}) has no box in the signature block.` };
+    const email = signers[n - 1].toLowerCase();
+    // Match the address as a whole word: the row reads "info@agilelets.co.uk (myself)".
+    const rows = recipients.filter((r) =>
+      String(r.text || '').toLowerCase().split(/[\s()<>,;]+/).includes(email));
+    if (rows.length !== 1 || !rows[0].colour) {
+      return { ok: false, why: `Adobe's recipient list does not show one colour for ${signers[n - 1]}, ` +
+                               'so no box can be traced to them' };
     }
+    colourOf.set(n, rows[0].colour);
   }
-  const seen = new Map();
-  let unread = 0;
-  for (const [sN, list] of bySigner) {
-    const real = new Set(list.filter((c) => c !== 'none'));
-    unread += list.filter((c) => c === 'none').length;
-    if (real.size > 1) {
-      return { ok: false, why: `the boxes for signer ${sN} (${signers[sN - 1]}) came out in ${real.size} different colours, so at least one did not move.` };
+  const used = [...colourOf.values()];
+  if (new Set(used).size !== used.length) {
+    return { ok: false, why: 'two recipients share one colour, so a box cannot be traced to one person' };
+  }
+  const owners = fields.map((f) => {
+    if (!f.outline || !f.fill) return { owner: 0, why: 'the box carries no owner colour' };
+    if (f.outline !== f.fill) {
+      return { owner: 0, why: `its outline (#${f.outline}) and fill (#${f.fill}) disagree, so it is still selected or misread` };
     }
-    if (real.size === 1) {
-      const c = [...real][0];
-      if (seen.has(c)) {
-        return { ok: false, why: `signers ${seen.get(c)} and ${sN} show the same colour, so their boxes are on one person.` };
+    const hit = [...colourOf].filter(([, c]) => c === f.outline).map(([n]) => n);
+    if (hit.length !== 1) return { owner: 0, why: `its colour #${f.outline} belongs to no recipient` };
+    return { owner: hit[0] };
+  });
+  return { ok: true, owners };
+}
+
+/**
+ * Does the SAVED draft give every box to the signer the map says?
+ *
+ * WHY THE SAVED DRAFT AND NOT THE OPEN PAGE (23 Sep 2026). A tenancy
+ * agreement passed this check with the landlord's date box on the tenant. The
+ * old check re-selected each box in the open page and read its colour, and the
+ * page was telling the truth: the box HAD moved there. Adobe had not saved it.
+ * Adobe saves a draft about 8 to 11 seconds after changes go quiet, and the
+ * old read-back clicked a box every 3 seconds straight after the last move,
+ * then closed the browser. Reproduced twice on a test draft: the page showed
+ * the date box on Agile Lets, the reopened draft showed it on the tenant.
+ *
+ * So this judges what Adobe HOLDS, read after a reload, and it refuses on
+ * silence for the signature block: a signature or date box whose owner cannot
+ * be proven is a refusal, not a pass. A data blank (date of birth and the
+ * like) that cannot be proven is counted and reported; one proven to sit on
+ * the wrong person is still a refusal.
+ */
+function judgeSavedDraft({ map, expected, saved, recipients, signers }) {
+  // `expected` is the boxes as assigned: labels, or reads with a position.
+  expected = expected.map((e) => (typeof e === 'string' ? { label: e } : e));
+  if (saved.length !== expected.length) {
+    return { ok: false, why: `the saved draft shows ${saved.length} boxes on the page where ` +
+                             `${expected.length} were assigned, so they cannot be lined up.` };
+  }
+  for (let i = 0; i < saved.length; i++) {
+    if (kindOf(saved[i].label) !== kindOf(expected[i].label)) {
+      return { ok: false, why: `box ${i + 1} is a ${kindOf(saved[i].label)} box in the saved draft but ` +
+                               `was assigned as a ${kindOf(expected[i].label)} box, so they do not line up.` };
+    }
+    // SAME KIND IS NOT SAME BOX. Two boxes of one kind side by side can swap
+    // places in the order when the page scrolls by a fraction of a pixel. Where
+    // is each box relative to the first? Scrolling moves them all together, so
+    // that must match what was assigned, or the boxes have been mixed up.
+    const at = (list, k) => [list[k].x - list[0].x, list[k].y - list[0].y];
+    if ([saved[i], saved[0], expected[i], expected[0]].every((b) => Number.isFinite(b.x) && Number.isFinite(b.y))) {
+      const [sx, sy] = at(saved, i);
+      const [ex, ey] = at(expected, i);
+      if (Math.abs(sx - ex) > 6 || Math.abs(sy - ey) > 6) {
+        return { ok: false, why: `box ${i + 1} sits in a different place in the saved draft from the box ` +
+                                 'that was assigned, so they do not line up.' };
       }
-      seen.set(c, sN);
     }
   }
-  return { ok: true, unread };
+  // ONE RECIPIENT CANNOT HAVE A BOX ON THE WRONG PERSON: Adobe gives every box
+  // a recipient and there is only one. So a proof of residency is judged on the
+  // boxes lining up above, not on a colour read, which the sending account's
+  // own hand-placed box has failed to give before.
+  if (signers.length === 1) return { ok: true, unproven: 0, owners: saved.map(() => signers[0]) };
+  const read = ownersFromReads({ recipients, fields: saved, signers });
+  if (!read.ok) return { ok: false, why: read.why + '.' };
+  let unproven = 0;
+  const owners = [];
+  for (let i = 0; i < map.length; i++) {
+    const { owner, why } = read.owners[i];
+    const want = map[i];
+    const name = `field ${i + 1} (${kindOf(expected[i].label)})`;
+    if (!owner) {
+      if (kindOf(expected[i].label) !== 'other') {
+        return { ok: false, why: `${name} should be ${signers[want - 1]}'s, but the saved draft does ` +
+                                 `not prove who owns it: ${why}.` };
+      }
+      unproven += 1;
+      owners.push(null);
+      continue;
+    }
+    if (owner !== want) {
+      return { ok: false, why: `${name} is on ${signers[owner - 1]} in the saved draft, but it ` +
+                               `belongs to ${signers[want - 1]}.` };
+    }
+    owners.push(signers[owner - 1]);
+  }
+  for (const who of signers) {
+    if (!owners.includes(who)) return { ok: false, why: `${who} has no box proven as theirs in the saved draft.` };
+  }
+  return { ok: true, unproven, owners };
 }
 
 /** Every signer must end up with something to sign. */
@@ -284,28 +408,23 @@ function checkEverySignerHasAField(map, signerCount, signers) {
 }
 
 /**
- * The clickable field bodies, ordered DOWN THE PAGE. Adobe's DOM order does not
- * follow the visual order, so position decides, the same rule the map uses.
+ * The box Adobe placed with this id, or null.
+ *
+ * AIM AT THE BOX BY ADOBE'S OWN ID FOR IT (23 Sep 2026). This used to collect
+ * every element whose test id ended in "-field", order them down the page and
+ * click the i-th. On an authority to act Adobe also draws a "detected-field"
+ * hint at exactly the same spot as each placed box, earlier in the page and
+ * underneath it, so the hint was the one clicked: the click timed out behind
+ * the real box, the fallback aimed below the fold, and the landlord's date box
+ * "would not open its menu" three times. The i-th element was also never
+ * checked against the box the map meant. The placed box is the one element
+ * carrying data-fieldid, selected or not, and the id stays the same while the
+ * page is open (it changes only on a reload). Clicking it opened the menu
+ * first time (measured, 236 ms).
  */
-async function orderedFieldHandles(page) {
-  const all = await page.locator(SEL.fieldBody).elementHandles();
-  const withBoxes = [];
-  for (const h of all) {
-    const b = await h.boundingBox();
-    // Skip the panel's own buttons on the left and anything with no size.
-    if (!b || b.width < 20 || b.height < 8 || b.x < 300) continue;
-    withBoxes.push({ h, y: b.y, x: b.x, w: b.width, h2: b.height });
-  }
-  // A field paints several nested elements at the same spot; keep the outermost
-  // one per position so a click is not aimed at a label inside a field.
-  const seen = [];
-  const kept = [];
-  for (const f of withBoxes.sort((a, b) => a.y - b.y || b.w - a.w)) {
-    if (seen.some((s) => Math.abs(s.y - f.y) < 6 && Math.abs(s.x - f.x) < 40)) continue;
-    seen.push(f);
-    kept.push(f.h);
-  }
-  return kept;
+async function boxHandle(page, id) {
+  if (!/^[\w-]+$/.test(String(id || ''))) die(`a box has an id that cannot be addressed safely: ${id}`);
+  return page.$(`${SEL.anyField}[data-fieldid="${id}"]`);
 }
 
 async function run({ document: doc, signers, fields, page: pageNo, shot }) {
@@ -316,10 +435,15 @@ async function run({ document: doc, signers, fields, page: pageNo, shot }) {
     ignoreDefaultArgs: fs.existsSync('/Applications/Google Chrome.app') ? ['--enable-automation'] : undefined,
   });
   const log = (m) => console.error(new Date().toISOString().slice(11, 19) + ' ' + m);
-  // Set when Adobe detected nothing and this run placed the field itself.
-  let handPlaced = false;
   try {
     const page = ctx.pages()[0] || await ctx.newPage();
+    // EVERY SAVE ADOBE MAKES, and when the last change was made, so the check
+    // at the end can wait for the save that carries that change.
+    const saves = [];
+    page.on('request', (r) => {
+      if (r.method() === 'PUT' && SAVE_RE.test(r.url())) saves.push({ req: r, at: Date.now() });
+    });
+    let lastChange = 0;
     await page.goto(ESIGN_URL, { waitUntil: 'domcontentloaded', timeout: 60000 });
     await page.waitForTimeout(WAIT.load);
 
@@ -381,6 +505,7 @@ async function run({ document: doc, signers, fields, page: pageNo, shot }) {
     // all, and the run should say that plainly rather than time out.
     if (await page.locator(SEL.autoPlace).count()) {
       await page.locator(SEL.autoPlace).click();
+      lastChange = Date.now();
       await page.waitForTimeout(WAIT.fields);
     } else if (signers.length === 1) {
       // Auto-place only appears when Adobe recognised something to place. The
@@ -397,7 +522,6 @@ async function run({ document: doc, signers, fields, page: pageNo, shot }) {
       // proof of residency), which is text on the page and does not move, so
       // it is a far steadier anchor than a remembered coordinate.
       const anchorText = process.env.ASSIGN_ANCHOR || 'Roy Lavin';
-      handPlaced = true;
       log(`no Auto-place offered; placing one signature field above "${anchorText}"`);
       // FIND THE NAME AS TEXT, AT ANY SPLIT. An exact match on "Roy Lavin"
       // timed out on a real proof: Adobe's viewer lays the PDF's words out as
@@ -437,6 +561,7 @@ async function run({ document: doc, signers, fields, page: pageNo, shot }) {
       // The rule starts at the left margin, level with the name's first word.
       // The surname is to the right of that, so aim back and up onto the rule.
       await page.mouse.click(Math.max(ab.x - 20, 360), ab.y - 18);
+      lastChange = Date.now();
       await page.waitForTimeout(WAIT.fields);
       await page.keyboard.press('Escape');
       await page.waitForTimeout(1500);
@@ -454,53 +579,33 @@ async function run({ document: doc, signers, fields, page: pageNo, shot }) {
     // on the banner instead and no menu opens. Measured on a real authority to
     // act: field 5 of 7 failed three times running, and the retry could not
     // help because nothing about waiting moves a banner.
-    const toasts = await page.locator(SEL.toastClose).count();
-    for (let i = 0; i < toasts; i++) {
-      await page.locator(SEL.toastClose).first().click({ timeout: 5000 }).catch(() => {});
-      await page.waitForTimeout(1200);
-    }
-    if (toasts) log(`closed ${toasts} notification banner(s) covering the page`);
+    const closeToasts = async () => {
+      const toasts = await page.locator(SEL.toastClose).count();
+      for (let i = 0; i < toasts; i++) {
+        await page.locator(SEL.toastClose).first().click({ timeout: 5000 }).catch(() => {});
+        await page.waitForTimeout(1200);
+      }
+      if (toasts) log(`closed ${toasts} notification banner(s) covering the page`);
+    };
+    await closeToasts();
 
     // The signature block lives on the last page of these documents.
     const total = Number(await page.locator(SEL.pageTotal).innerText().catch(() => '0')) || 0;
     const target = pageNo || total;
     if (!target) die('could not read how many pages the document has');
-    await page.locator(SEL.pageBox).click();
-    await page.keyboard.press('Meta+A');
-    await page.keyboard.type(String(target));
-    await page.keyboard.press('Enter');
-    await page.waitForTimeout(WAIT.page);
+    const goToPage = async (n) => {
+      await page.locator(SEL.pageBox).click();
+      await page.keyboard.press('Meta+A');
+      await page.keyboard.type(String(n));
+      await page.keyboard.press('Enter');
+      await page.waitForTimeout(WAIT.page);
+    };
+    await goToPage(target);
     log('on page ' + target + ' of ' + total);
 
-    const read = () => page.evaluate((sel) => {
-      const out = [];
-      // THE SIGNER COLOUR IS NOT ON THE WRAPPER. Reading the wrapper's own
-      // background returns transparent once the field is deselected, so all
-      // four fields look identical and a correct assignment reads as a failed
-      // one. That false refusal cost a live run on 10 Sep 2026: the screenshot
-      // showed two purple fields and two green ones while the check said one
-      // colour. Walk into the field and take the first painted background.
-      const painted = (el) => {
-        const seen = [el, ...el.querySelectorAll('*')];
-        for (const n of seen) {
-          const c = getComputedStyle(n).backgroundColor;
-          if (c && c !== 'rgba(0, 0, 0, 0)' && c !== 'transparent') return c;
-        }
-        return 'none';
-      };
-      document.querySelectorAll(sel).forEach((el) => {
-        const r = el.getBoundingClientRect();
-        if (r.width === 0) return;
-        out.push({ label: el.getAttribute('aria-label') || '',
-                   bg: painted(el),
-                   x: Math.round(r.x), y: Math.round(r.y),
-                   w: Math.round(r.width), h: Math.round(r.height) });
-      });
-      // DOWN THE PAGE. Adobe's own numbering does not follow the visual order.
-      return out.sort((a, b) => a.y - b.y || a.x - b.x);
-    }, SEL.field);
-
-    let found = await read();
+    // The same reader the final check uses, so the boxes assigned here and the
+    // boxes proven there are counted and ordered by one rule.
+    const found = (await page.evaluate(readOwnersInPage, SEL)).fields;
     if (!found.length) die('Auto-place placed no fields on page ' + target);
     const map = parseFieldMap(fields, found, signers.length);
     checkEverySignerHasAField(map, signers.length, signers);
@@ -511,7 +616,6 @@ async function run({ document: doc, signers, fields, page: pageNo, shot }) {
     await page.keyboard.press('Escape');
     await page.waitForTimeout(WAIT.settle);
 
-    const before2 = found.map((f) => f.bg);
     // TOUCH ONLY WHAT IS WRONG. Auto-place gives every field to the LAST
     // recipient. With Agile Lets first (Kevin's rule), the last recipient is
     // the tenant, so every tenant field is already right and only the Agile
@@ -520,10 +624,17 @@ async function run({ document: doc, signers, fields, page: pageNo, shot }) {
     // the tenant's data blanks sit at the top of the letter, scrolled off the
     // page by the time the loop reaches them, and their menu will not open.
     // The Agile Lets boxes are at the foot of the page, on screen. If the
-    // assumption about Auto-place is ever wrong, the read-back below catches
-    // it: the colours will not group by signer and the run is refused.
+    // assumption about Auto-place is ever wrong, the saved-draft check below
+    // catches it: that box reads as the wrong person's and the run is refused.
     const autoOwner = signers.length;
-    const moved = new Set();
+    // Who owns one box right now, by Adobe's id for it, read off the open page.
+    const ownerNow = async (id) => {
+      const now = await page.evaluate(readOwnersInPage, SEL);
+      const box = now.fields.filter((x) => x.id === id);
+      if (box.length !== 1) return { owner: 0, why: 'the box is no longer on the page' };
+      const r = ownersFromReads({ recipients: now.recipients, fields: box, signers });
+      return r.ok ? r.owners[0] : { owner: 0, why: r.why };
+    };
     for (let i = 0; i < found.length; i++) {
       if (map[i] === autoOwner) {
         log(`field ${i + 1} (${found[i].label.split(',')[0]}) already on signer ${autoOwner}, left alone`);
@@ -539,18 +650,7 @@ async function run({ document: doc, signers, fields, page: pageNo, shot }) {
       // are resolved fresh each time and Playwright scrolls them into view.
       let opened = false;
       for (let attempt = 1; attempt <= 3 && !opened; attempt++) {
-        const handles = await orderedFieldHandles(page);
-        // THE HANDLE LIST MUST LINE UP WITH THE FIELD LIST, or handles[i] is a
-        // different field from the one the map is about to reassign, and the
-        // document goes out with somebody else's signature box. A field paints
-        // several nested elements at one spot, so this count is the thing most
-        // likely to drift.
-        if (handles.length !== found.length) {
-          die(`Adobe shows ${found.length} fields but ${handles.length} clickable ` +
-              'field bodies, so they cannot be lined up and a reassignment would ' +
-              'move the wrong one. Nothing has been sent.');
-        }
-        const h = handles[i];
+        const h = await boxHandle(page, f.id);
         // NEVER FALL BACK TO A REMEMBERED POINT. Coordinates were read at one
         // scroll position and the viewer scrolls as it works, so a stale click
         // lands on blank paper and the failure looks like the field refusing to
@@ -592,7 +692,8 @@ async function run({ document: doc, signers, fields, page: pageNo, shot }) {
       if (/\d+\s+fields selected/i.test(selText)) {
         await page.keyboard.press('Escape');
         await page.waitForTimeout(1500);
-        await page.mouse.click(f.x + f.w / 2, f.y + f.h / 2);
+        const alone = await boxHandle(page, f.id);
+        if (alone) await alone.click({ timeout: 10000 }).catch((e) => log(`field ${i + 1}: ${e.message.split('\n')[0]}`));
         await page.waitForTimeout(WAIT.settle);
         const again = await page.locator(SEL.selectionCount).innerText().catch(() => '');
         if (/\d+\s+fields selected/i.test(again)) {
@@ -600,111 +701,127 @@ async function run({ document: doc, signers, fields, page: pageNo, shot }) {
               'reassignment would move every field at once. Nothing has been sent.');
         }
       }
+      // Which box is selected, by Adobe's own id, so the move is checked on
+      // that box and no other.
+      const selected = await page.$$eval(SEL.field, (els) => els.map((e) => e.getAttribute('data-fieldid')));
+      if (selected.length !== 1 || selected[0] !== f.id) {
+        die(`field ${i + 1}: the selected box is not the one being moved (${selected.length} selected), ` +
+            'so a reassignment would move the wrong box. Nothing has been sent.');
+      }
       await page.locator(SEL.changeRecipients).click();
       await page.waitForTimeout(WAIT.menu);
       const option = page.locator(SEL.recipientOption).filter({ hasText: want }).first();
       if (!(await option.count())) die(`no recipient option for ${want} on field ${i + 1}`);
       await option.click();
+      lastChange = Date.now();
       await page.waitForTimeout(WAIT.settle);
       await page.keyboard.press('Escape');
       await page.waitForTimeout(1000);
-      moved.add(i);
+      // CONFIRM THE MOVE ON THE BOX ITSELF. Adobe repaints a box in its new
+      // owner's colour the moment the recipient is picked (measured 23 Sep 2026),
+      // so a box still in the old colour after that did not move.
+      let now = await ownerNow(selected[0]);
+      for (const until = Date.now() + WAIT.moved; now.owner !== map[i] && Date.now() < until;) {
+        await page.waitForTimeout(250);
+        now = await ownerNow(selected[0]);
+      }
+      if (now.owner !== map[i]) {
+        die(`field ${i + 1} did not move to ${want}: ` +
+            (now.owner ? `it is still on ${signers[now.owner - 1]}` : now.why) + '. Nothing has been sent.');
+      }
       log(`field ${i + 1} (${f.label.split(',')[0]}) -> signer ${map[i]} ${want}`);
     }
 
-    // VERIFY BY SELECTING EACH FIELD IN TURN, NOT BY READING THE PAGE ONCE.
-    // The highlight wrapper these fields are addressed by exists ONLY while
-    // that field is selected. Reading the page after the loop therefore
-    // returns the single field left selected, whose colour is whatever it was
-    // assigned, and one colour reads as "nothing moved". Two live runs on
-    // 10 Sep 2026 were refused that way while the screenshot showed a
-    // perfectly correct split. Click each field, read the one wrapper that
-    // exists, move on.
-    // A FIELD THIS RUN PLACED BY HAND counts the same as one it moved. On a
-    // proof of residency Adobe detects no line, so the single Agile Lets field
-    // is placed, not reassigned, and never enters "moved". As the sending
-    // account's own box it also reads back blank, so without this the verdict
-    // would refuse every proof for being exactly what it should be. Only with
-    // one signer: with several, a hand-placed field has no proven owner.
-    if (handPlaced && signers.length === 1) found.forEach((_, i) => moved.add(i));
-
-    // READ BACK THE SIGNATURE BLOCK, where who-signs-what actually lives.
-    // Data blanks belong to the tenant by construction and sit at the top of
-    // the letter, off screen, where re-selecting them is exactly the operation
-    // that fails. Every signer still has to show up in the signature block,
-    // and each signer's boxes still have to share one colour, so this proves
-    // the thing that matters.
-    const isSig = (f) => /signature-form-field|date-of-signing-form-field/i.test(f.label);
-    const colours = [];
-    const checked = [];
-    for (let i = 0; i < found.length; i++) {
-      if (!isSig(found[i])) continue;
-      checked.push(i);
-      const f = found[i];
-      await page.keyboard.press('Escape');
-      await page.waitForTimeout(1200);
-      // Select it the same way the assignment did. This step used to click a
-      // remembered point, which is the weaker of the two paths and the one that
-      // failed: on a joint agreement every field read back as "none", meaning
-      // the click never selected anything and the wrapper never appeared. A
-      // correct document was refused for it.
-      const vh = await orderedFieldHandles(page);
-      // Same rule as the assignment step, and for the same reason: a remembered
-      // point is meaningless once the viewer has scrolled. Reading back through
-      // a stale click reports "none" for a field that is perfectly well
-      // assigned, and a correct document gets refused.
-      const h = (vh.length === found.length) ? vh[i] : null;
-      if (h) {
-        try {
-          await h.click({ timeout: 10000 });
-        } catch {
-          await h.scrollIntoViewIfNeeded().catch(() => {});
-          const box = await h.boundingBox();
-          if (box) await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
-        }
-      } else {
-        log(`field ${i + 1}: could not be selected to read back`);
-      }
-      await page.waitForTimeout(1800);
-      let c = await page.evaluate((sel) => {
-        const el = document.querySelector(sel);
-        return el ? getComputedStyle(el).backgroundColor : 'none';
-      }, SEL.field);
-      // Re-selecting a field to read it back is not reliable first time,
-      // especially a signature field: it reports nothing while being perfectly
-      // well assigned, and a correct document gets refused. Try again before
-      // believing it.
-      for (let t = 0; t < 3 && c === 'none'; t++) {
-        await page.keyboard.press('Escape');
-        await page.waitForTimeout(1200);
-        const again = await orderedFieldHandles(page);
-        if (again.length === found.length && again[i]) {
-          await again[i].click({ timeout: 8000 }).catch(() => {});
-          await page.waitForTimeout(1800);
-          c = await page.evaluate((sel) => {
-            const el = document.querySelector(sel);
-            return el ? getComputedStyle(el).backgroundColor : 'none';
-          }, SEL.field);
-        }
-      }
-      colours.push(c);
-      log(`field ${i + 1} reads ${c}`);
-    }
+    // PROVE IT FROM WHAT ADOBE SAVED, NOT FROM THE OPEN PAGE (23 Sep 2026).
+    // The open page shows a move the instant it is made; Adobe saves the draft
+    // only once changes go quiet. So let the page sit untouched until the save
+    // that follows the last change lands, then reload and read every owner off
+    // the saved draft. The old check clicked through the boxes here instead,
+    // which kept the save from firing, and passed a date box Adobe never kept.
     await page.keyboard.press('Escape');
-    await page.waitForTimeout(1000);
+    // Wait for a save after the last change, then 3 quiet seconds so a second
+    // save still in flight is not cut off, all inside WAIT.save.
+    let saveStatus = null;
+    const saveBy = Date.now() + WAIT.save;
+    while (Date.now() < saveBy) {
+      const after = saves.filter((x) => x.at > lastChange);
+      const latest = after[after.length - 1];
+      if (latest && Date.now() - latest.at >= 3000) {
+        const resp = await Promise.race([
+          latest.req.response().catch(() => null),
+          page.waitForTimeout(Math.max(saveBy - Date.now(), 1000)).then(() => null),
+        ]);
+        saveStatus = resp ? resp.status() : 0;
+        break;
+      }
+      await page.waitForTimeout(500);
+    }
+    log(saveStatus === null
+      ? `no save seen within ${WAIT.save / 1000}s of the last change; reloading to read what Adobe holds`
+      : `Adobe saved the draft (HTTP ${saveStatus}); reloading it to prove every box`);
+    // A "leave this page?" prompt means Adobe still held an unsaved change.
+    // Leave anyway: the saved draft read below is what decides.
+    let unsaved = false;
+    page.on('dialog', (d) => {
+      unsaved = true;
+      d.accept().catch((e) => log(`could not answer Adobe's leave-page prompt: ${e.message}`));
+    });
+    // ADOBE CAN ANSWER A RELOAD WITH "Something went wrong". Seen once, on a
+    // proof reloaded 40 seconds after its upload (23 Sep 2026); the drafts that
+    // reopened were a couple of minutes old. So try again, twice, 15 seconds
+    // apart, opening the draft's own address without the upload's session id.
+    const draftUrl = page.url().replace(/([?&])transientId=[^&]*&?/, '$1').replace(/[?&]$/, '');
+    let reopened = false;
+    for (let attempt = 1; attempt <= 3 && !reopened; attempt++) {
+      if (attempt > 1) {
+        log(`the draft did not reopen (try ${attempt - 1} of 3); waiting 15s and opening it again`);
+        await page.waitForTimeout(15000);
+      }
+      const nav = attempt === 1
+        ? page.reload({ waitUntil: 'domcontentloaded', timeout: 60000 })
+        : page.goto(draftUrl, { waitUntil: 'domcontentloaded', timeout: 60000 });
+      await nav.catch((e) => log(`opening the draft: ${e.message.split('\n')[0]}`));
+      reopened = await page.locator(SEL.send)
+        .waitFor({ state: 'visible', timeout: 60000 }).then(() => true).catch(() => false);
+    }
+    if (!reopened) {
+      const png = await shotOn('reload');
+      die(`the draft did not reopen after saving, so no box can be proven. Nothing has been sent. See ${png}.`);
+    }
+    if (unsaved) log('Adobe warned of an unsaved change on reload; the saved draft decides');
+    await page.waitForTimeout(WAIT.settle);
+    await closeToasts();
+    await goToPage(target);
+    await page.keyboard.press('Escape');
+    // The recipients panel took 25 seconds to paint on a cold run. Read until
+    // every recipient shows a colour and every assigned box is back, or time
+    // runs out, and judge the last read either way.
+    let saved = await page.evaluate(readOwnersInPage, SEL);
+    for (const until = Date.now() + WAIT.panel; Date.now() < until;) {
+      const painted = saved.recipients.length === signers.length && saved.recipients.every((r) => r.colour);
+      if (painted && saved.fields.length === found.length) break;
+      await page.waitForTimeout(1000);
+      saved = await page.evaluate(readOwnersInPage, SEL);
+    }
 
     const png = shot || path.join(os.tmpdir(), path.basename(doc, '.pdf') + '.png');
+    // Show the signature block, which sits at the foot of a one-page letter.
+    const lowest = saved.fields.length ? await boxHandle(page, saved.fields[saved.fields.length - 1].id) : null;
+    if (lowest) {
+      await lowest.scrollIntoViewIfNeeded()
+        .catch((e) => log(`could not scroll the signature block into the screenshot: ${e.message}`));
+    }
     await page.screenshot({ path: png });
     log('screenshot ' + png);
-    // One colour per signer. If every field still shares one colour and more
-    // than one signer was asked for, nothing actually moved.
-    const verdict = judgeColours({ colours, checked, map, signers });
+    const verdict = judgeSavedDraft({ map, expected: found, saved: saved.fields,
+                                      recipients: saved.recipients, signers });
     if (!verdict.ok) die(verdict.why + ` Nothing has been sent. See ${png}.`);
-    if (verdict.unread) log(`${verdict.unread} box(es) could not be read back; correct by construction, see ${png}`);
+    verdict.owners.forEach((o, i) => log(`saved draft: field ${i + 1} (${kindOf(found[i].label)}) is ${o || 'unproven'}`));
+    if (verdict.unproven) log(`${verdict.unproven} data blank(s) could not be proven; see ${png}`);
 
     return { document: doc, agreement: path.basename(doc, path.extname(doc)),
-             signers, fields: found.length, map, coloursBefore: before2, coloursAfter: colours,
-             screenshot: png, sent: false, unread: verdict.unread,
+             signers, fields: found.length, map, owners: verdict.owners, proven: 'saved draft',
+             screenshot: png, sent: false, unproven: verdict.unproven,
              note: 'Built and NOT sent. Adobe holds it as a draft until a person presses Send.' };
   } finally {
     await ctx.close();
@@ -795,28 +912,71 @@ function selftest() {
   check('no signer at all is refused', () => refuses(() => parseSigners('')));
   check('more than one signer is ALLOWED here, unlike adobe-plan',
     () => parseSigners('a@b.com,c@d.com').length === 2);
+  // The saved-draft verdict, fed the reads measured on a live draft, 23 Sep 2026.
   const S2 = ['info@agilelets.co.uk', 'tenant@x.com'];
-  const J = (colours, checked, map, signers = S2) => judgeColours({ colours, checked, map, signers });
-  check('two real, distinct, consistent colours pass',
-    () => J(['g', 'g', 'p', 'p'], [0, 1, 2, 3], [2, 2, 1, 1]).ok);
-  check('two signers showing the same real colour are refused',
-    () => !J(['g', 'g', 'g', 'g'], [0, 1, 2, 3], [2, 2, 1, 1]).ok);
-  check('one signer whose boxes show two real colours is refused',
-    () => !J(['g', 'p', 'p', 'p'], [0, 1, 2, 3], [2, 2, 1, 1]).ok);
-  check('a signer with no box in the signature block is refused',
-    () => !J(['g', 'g'], [0, 1], [2, 2]).ok);
-  // The rule that changed on 10 Sep 2026, after every refusal that night was a
-  // correct document whose boxes simply would not read back.
-  check('boxes that read back blank are not by themselves a refusal',
-    () => J(['none', 'none', 'none', 'none'], [0, 1, 2, 3], [2, 2, 1, 1]).ok);
-  check('a real colour beside a blank for one signer is not a contradiction',
-    () => J(['g', 'none', 'none', 'none'], [0, 1, 2, 3], [2, 2, 1, 1]).ok);
-  check('blank reads are counted and reported, never hidden',
-    () => J(['g', 'g', 'none', 'none'], [0, 1, 2, 3], [2, 2, 1, 1]).unread === 2);
-  check('a blank never stands in for a colour when checking two signers apart',
-    () => J(['none', 'none', 'none', 'none'], [0, 1, 2, 3], [2, 2, 1, 1]).unread === 4);
-  check('a proof: one Agile Lets box reading blank passes',
-    () => J(['none'], [0], [1], ['info@agilelets.co.uk']).ok);
+  const PURPLE = '7e4bf3';
+  const GREEN = '50a65e';
+  const ROWS = [{ text: 'info@agilelets.co.uk (myself)', colour: PURPLE }, { text: 'tenant@x.com', colour: GREEN }];
+  const box = (label, c, fill = c) => ({ label, outline: c, fill });
+  const AST = [SIG, DTE, SIG, DTE];
+  const V = (saved, { map = [2, 2, 1, 1], expected = AST, recipients = ROWS, signers = S2 } = {}) =>
+    judgeSavedDraft({ map, expected, saved, recipients, signers });
+  check('a saved draft with every box on its signer passes',
+    () => V([box(SIG, GREEN), box(DTE, GREEN), box(SIG, PURPLE), box(DTE, PURPLE)]).ok);
+  // THE 23 SEP 2026 FALSE PASS. The open page read the landlord's date box as
+  // purple; the saved draft had it on the tenant. judgeColours passed it.
+  check('23 Sep: the landlord date box left on the tenant in the saved draft is refused',
+    () => /field 4 \(date\) is on tenant@x\.com in the saved draft, but it belongs to info@agilelets\.co\.uk/
+      .test(V([box(SIG, GREEN), box(DTE, GREEN), box(SIG, PURPLE), box(DTE, GREEN)]).why));
+  check('a box still selected (blue outline) proves nothing and is refused',
+    () => /does not prove who owns it/.test(V([box(SIG, GREEN), box(DTE, GREEN), box(SIG, PURPLE),
+                                                box(DTE, '2680eb', PURPLE)]).why));
+  check('a signature box with no owner colour at all is refused',
+    () => !V([box(SIG, GREEN), box(DTE, GREEN), box(SIG, null, null), box(DTE, PURPLE)]).ok);
+  check('a colour no recipient has is refused',
+    () => /belongs to no recipient/.test(V([box(SIG, GREEN), box(DTE, GREEN), box(SIG, 'aaaaaa'), box(DTE, PURPLE)]).why));
+  check('two recipients sharing one colour prove nothing',
+    () => !V([box(SIG, GREEN), box(DTE, GREEN), box(SIG, GREEN), box(DTE, GREEN)],
+             { recipients: [{ text: 'info@agilelets.co.uk (myself)', colour: GREEN }, ROWS[1]] }).ok);
+  check('a recipient missing from the list is refused, not guessed',
+    () => /does not show one colour for tenant@x\.com/.test(V([box(SIG, GREEN), box(DTE, GREEN), box(SIG, PURPLE), box(DTE, PURPLE)],
+             { recipients: [ROWS[0]] }).why));
+  check('an address is matched whole, never as part of a longer one',
+    () => !V([box(SIG, GREEN), box(DTE, GREEN), box(SIG, PURPLE), box(DTE, PURPLE)],
+             { recipients: [ROWS[0], { text: 'xtenant@x.com', colour: GREEN }] }).ok);
+  check('a saved draft with a different number of boxes is refused',
+    () => /cannot be lined up/.test(V([box(SIG, GREEN), box(DTE, GREEN), box(SIG, PURPLE)]).why));
+  check('a saved draft whose boxes are in a different order is refused',
+    () => /do not line up/.test(V([box(DTE, GREEN), box(SIG, GREEN), box(SIG, PURPLE), box(DTE, PURPLE)]).why));
+  check('a data blank that cannot be proven is counted, not refused',
+    () => V([box(TXT, null, null), box(SIG, GREEN), box(DTE, GREEN), box(SIG, PURPLE), box(DTE, PURPLE)],
+            { map: [2, 2, 2, 1, 1], expected: [TXT, ...AST] }).unproven === 1);
+  check('a data blank proven to be on the wrong person is refused',
+    () => !V([box(TXT, PURPLE), box(SIG, GREEN), box(DTE, GREEN), box(SIG, PURPLE), box(DTE, PURPLE)],
+             { map: [2, 2, 2, 1, 1], expected: [TXT, ...AST] }).ok);
+  // From the independent review, 23 Sep 2026.
+  check('any label naming a signature is judged as a signature, so it must be proven',
+    () => !V([box(SIG, GREEN), box(DTE, GREEN), box('signature-block-form-field, Sig', null, null), box(DTE, PURPLE)],
+             { expected: [SIG, DTE, 'signature-block-form-field, Sig', DTE] }).ok);
+  const placed = (label, c, x, y) => ({ ...box(label, c), x, y });
+  const SIDE = [placed(SIG, GREEN, 400, 300), placed(SIG, PURPLE, 700, 300)];
+  // The dangerous swap: the loop moved the wrong one of two side-by-side boxes
+  // and the saved read lists them in the other order, so kind and owner both
+  // line up. Only where each box sits gives it away.
+  check('two boxes side by side read back in swapped order are refused',
+    () => /different place/.test(V([placed(SIG, GREEN, 700, 900), placed(SIG, PURPLE, 400, 900)],
+                                   { map: [2, 1], expected: SIDE }).why));
+  check('the same two boxes after a scroll, in place, pass',
+    () => V([placed(SIG, GREEN, 400, 900), placed(SIG, PURPLE, 700, 900)], { map: [2, 1], expected: SIDE }).ok);
+  check('a signer with no proven box of their own is refused',
+    () => /info@agilelets\.co\.uk has no box proven/.test(V([box(TXT, GREEN), box(SIG, GREEN), box(TXT, null, null)],
+             { map: [2, 2, 1], expected: [TXT, SIG, TXT] }).why));
+  check('a proof of residency whose one box reads no colour still passes: nobody else could own it',
+    () => V([box(SIG, null, null)], { map: [1], expected: [SIG], recipients: [], signers: [S2[0]] }).ok);
+  check('a proof of residency whose saved draft lost its box is still refused',
+    () => !V([], { map: [1], expected: [SIG], recipients: [ROWS[0]], signers: [S2[0]] }).ok);
+  check('a proof of residency: one Agile Lets box passes',
+    () => V([box(SIG, PURPLE)], { map: [1], expected: [SIG], recipients: [ROWS[0]], signers: [S2[0]] }).ok);
   check('the recipient box is never matched on its visible placeholder text',
     () => !JSON.stringify(SEL).match(/placeholder[*^$~|]?="Enter email/));
   check('nothing in the selectors relies on an Adobe hashed class',
@@ -834,4 +994,5 @@ if (require.main === module) {
   process.on('unhandledRejection', (e) => die(String((e && e.message) || e)));
   main().catch((e) => die(e.message));
 }
-module.exports = { parseFieldMap, checkEverySignerHasAField, parseSigners, judgeColours, SEL };
+module.exports = { parseFieldMap, checkEverySignerHasAField, parseSigners, readOwnersInPage,
+                   ownersFromReads, judgeSavedDraft, boxHandle, SEL, SAVE_RE };
