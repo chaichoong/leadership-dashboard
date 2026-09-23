@@ -466,12 +466,12 @@ NEEDS_YOU_KEY = "daily-ops-needs-you"
 MONITORING = os.path.join(REPO, "monitoring")
 _REPORT_NAME = re.compile(r"^daily-ops-(\d{4}-\d{2}-\d{2})\.md$")
 _ITEM = re.compile(r"^\s*(?:\d+[.)]|[•-])\s+(.*\S)")
-# A heading is a WHOLE bold line ("*STUCK: 17*"). A wrapped line that only starts in bold
+# A heading is a WHOLE bold line led by a capital word ("*STUCK: 17*"). A wrapped line that only starts in bold
 # ("*HMRC* letter today.") continues the item above it (second review, 24 Sep 2026).
-_HEADING = re.compile(r"^\*{1,2}[^*]+\*{1,2}:?\s*$")
+_HEADING = re.compile(r"^\*{1,2}[A-Z]{3,}\b[^*]*\*{1,2}:?\s*$")
 # Slack strikethrough at the start of an item ("~Old item~ ..."). A lone "~" means "about"
 # ("~£4,500 of costs") and keeps the item.
-_STRUCK = re.compile(r"^~[^~\s][^~]*~(?:\s|$)")
+_STRUCK = re.compile(r"^~~?[^~\s](?:[^~]*[^~\s])?~~?(?:\s|$)")
 _NEEDS_HEAD = re.compile(r"^\*{1,2}\s*needs you\b[^*]*\*{1,2}:?\s*$", re.I)
 
 
@@ -821,6 +821,10 @@ def selftest():
     ok(parse_needs_you("*Daily Ops, x.*\n*NEEDS YOU*\n1. ~£4,500 of costs is due today.\n*STUCK: 1*\n") == ["~£4,500 of costs is due today."],
        "a lone ~ means 'about' and keeps the item")
     ok(parse_needs_you("*Daily Ops, x.*\n*NEEDS YOU*\n1. ~Old~ gone.\n2. Keep.\n*STUCK: 1*\n") == ["Keep."], "a struck item is dropped")
+    ok(parse_needs_you("*Daily Ops, x.*\n*NEEDS YOU*\n1. ~~Old item~~ gone now.\n2. Keep.\n*STUCK: 1*\n") == ["Keep."], "a double-tilde strike is dropped")
+    ok(parse_needs_you("*Daily Ops, x.*\n*NEEDS YOU*\n1. ~£4,500 or ~ £5k due.\n*STUCK: 1*\n") == ["~£4,500 or ~ £5k due."], "two 'about' tildes keep the item")
+    ok(parse_needs_you("*Daily Ops, x.*\n*NEEDS YOU*\n1. Pay the court\n*by Friday at noon.*\n2. Sign.\n*STUCK: 1*\n")
+       == ["Pay the court *by Friday at noon.*", "Sign."], "a fully bold lower-case wrapped line continues the item")
     ok(parse_needs_you("*Daily Ops, x.*\n\n*STUCK: 1*\n\n*NEEDS YOU*\n1. Drifted below.\n\n---\n## Detail\n") is None,
        "a NEEDS YOU block drifted below STUCK is unreadable, never 'nothing needs you'")
     tmp3 = tempfile.mkdtemp()
