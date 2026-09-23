@@ -342,6 +342,9 @@ Manual test (guarded by `TRIGGER_KEY`):
 ```
 # compute only, returns JSON, no Slack:
 curl "https://money-confidence-daily.kevinbrittain.workers.dev/?mode=compute&key=KEY"
+# the code-picked top sections (hard deadlines, only you, 07:00 check) exactly as the DM
+# renders them; no model call, no Slack (23 Sep 2026):
+curl "https://money-confidence-daily.kevinbrittain.workers.dev/?mode=must&key=KEY"
 # compute AND send the DM now (bypasses the DST gate):
 curl "https://money-confidence-daily.kevinbrittain.workers.dev/?mode=send&key=KEY"
 ```

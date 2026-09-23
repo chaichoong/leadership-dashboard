@@ -486,6 +486,7 @@ def task_view(rec, activity_ids, dispatch_ids, now):
         "taskType": f.get("Task Type"),
         "teamMember": team,
         "assigneeEmail": assignee,
+        "hasAssignee": bool(f.get("Assignee")),
         "sentForApprovalBy": f.get("Sent For Approval By") or [],
         "maintenanceTicket": bool(f.get("Maintenance Ticket")),
         "hardDeadline": bool(f.get("Hard Deadline")),
@@ -623,6 +624,33 @@ APPROVAL_STAMP_FIELDS = [
 ]
 
 
+def ownerless_views(buckets):
+    """Open tasks with no Team Member and no Assignee, whatever their age (Kevin, 23 Sep 2026).
+    The stuck rule waits seven days for no movement, so a task created with no owner sat unseen for
+    a week: on 23 Sep a legal task due in October had been ownerless for five days.
+    Only the actionable buckets: an Approval card has its raiser, a parked task is parked on
+    purpose, and dispatch's in-flight work is dispatch's."""
+    return [v for b in ("stuck", "moving") for v in buckets.get(b, [])
+            if not v.get("teamMember") and not v.get("hasAssignee") and not v.get("assigneeEmail")]
+
+
+def ownerless_problems(actions, scratch=None):
+    """Every task on this slot's ownerless list must carry a recorded move (any move, `leave`
+    included, because leaving it is a decision with a reason). Read from this slot's board.json,
+    so the list checked is the list the foreman was shown."""
+    scratch = scratch or os.environ.get("TASK_MANAGER_SCRATCH")
+    if not scratch:
+        return []
+    try:
+        board = json.loads((Path(scratch) / "board.json").read_text())
+    except (OSError, ValueError):
+        return []   # freshness_problems already reports a missing or unreadable board
+    moved = {a.get("task") for a in actions if a.get("ok")}
+    return ["ownerless task %s (%s) was given no owner and no move this slot"
+            % (v.get("id"), (v.get("name") or "")[:60])
+            for v in board.get("ownerless") or [] if v.get("id") not in moved]
+
+
 def cmd_board(dispatch_queue_path=None):
     formula = "OR(%s)" % ",".join("{Status}='%s'" % s for s in OPEN_STATUSES)
     recs = query_all(TASKS_TABLE, formula, TASK_FIELDS, "board read")
@@ -681,6 +709,7 @@ def cmd_board(dispatch_queue_path=None):
 
     for k in buckets:
         buckets[k].sort(key=lambda v: (v["lastMoved"] or ""))
+    ownerless = ownerless_views(buckets)
     # Duplicates are judged over ACTIONABLE views only: parked (Some Day)
     # twins are deliberately dormant, and dispatch's in-flight tasks are not
     # the foreman's to touch this slot. waitingOnKevin views join so an
@@ -706,7 +735,11 @@ def cmd_board(dispatch_queue_path=None):
             "decided": len(buckets["decided"]),
             "duplicateGroups": len(dupes),
             "duplicateExtras": sum(len(g["closable"]) for g in dupes),
+            "ownerless": len(ownerless),
         },
+        # Open tasks nobody holds, ANY age: each gets one move THIS slot (Step 2a), and verify
+        # fails the slot if one was left without a recorded move.
+        "ownerless": ownerless,
         "stuck": buckets["stuck"],
         "duplicates": dupes,
         "waitingOnKevin": buckets["waitingOnKevin"],
@@ -946,6 +979,7 @@ def cmd_verify(report_path):
         problems.append("no score history entry for today — score claim is false")
 
     problems.extend(freshness_problems(board))
+    problems.extend(ownerless_problems(actions))
 
     verdict = {
         "verified": not problems,
