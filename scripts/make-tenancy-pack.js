@@ -92,7 +92,9 @@ function parseExceptions(text) {
 const BASE = 'appnqjDpqDniH3IRl';
 const TPL = path.join(os.homedir(), 'knowledge-os', 'templates');
 const OUT = path.join(os.homedir(), 'knowledge-os', 'attachments');
-const PAT = fs.readFileSync(path.join(os.homedir(), '.config', 'od', 'airtable_pat'), 'utf8').trim();
+// Read on the first Airtable call, not on load, so tests can require the pack builders.
+let PAT = null;
+const pat = () => PAT || (PAT = fs.readFileSync(path.join(os.homedir(), '.config', 'od', 'airtable_pat'), 'utf8').trim());
 const TODAY = new Date().toISOString().slice(0, 10);
 
 const die = (m) => { console.error('make-tenancy-pack: ' + m); process.exit(1); };
@@ -105,7 +107,7 @@ const longDate = (iso) => {
 
 function api(pathAndQuery) {
   return new Promise((res, rej) => {
-    https.get({ hostname: 'api.airtable.com', path: '/v0/' + BASE + pathAndQuery, headers: { Authorization: 'Bearer ' + PAT } }, (r) => {
+    https.get({ hostname: 'api.airtable.com', path: '/v0/' + BASE + pathAndQuery, headers: { Authorization: 'Bearer ' + pat() } }, (r) => {
       let d = ''; r.on('data', (c) => (d += c));
       r.on('end', () => { try { const j = JSON.parse(d); if (j.error) rej(new Error(JSON.stringify(j.error))); else res(j); } catch (e) { rej(e); } });
     }).on('error', rej);
@@ -144,6 +146,72 @@ function councilFor(area, postcode) {
   if (pc.startsWith('CB7')) return { council: 'East Cambridgeshire District Council', team: 'Anglia Revenues Partnership' };
   if (pc.startsWith('M40')) return { council: 'Manchester City Council', team: 'Manchester City Council benefits team' };
   return { council: `${area || 'the'} council`, team: `${area || 'the'} council benefits team` };
+}
+
+// ONE SPEC PER DOCUMENT, WHICHEVER PATH ASKS (23 Sep 2026). --new kept its own copy
+// of the proof and the authority after the main path changed: its proof still had a
+// title and reference and never filled the address lines the template gained, so
+// make-document.js refused it and --new died after writing the agreement, and it drew
+// an authority at 5 Dalham Place. Both paths now call these.
+//
+// No title or reference line on the proof: this is the letter Agile Lets already
+// sends, and Kevin wants it to look like the one Universal Credit has seen before.
+function proofOfResidencySpec(tenantName, address, tenancyStart) {
+  const addrLines = String(address).split(',').map((x) => x.trim()).filter(Boolean);
+  return {
+    name: `Proof_of_Residency_${tenantName.replace(/[^A-Za-z0-9]+/g, '_')}`,
+    footer: `${tenantName} — proof of residency — Agile Lets Limited`,
+    markdown: fill('proof_of_residency_template.md', {
+      'Tenant Name': tenantName, 'Property address': address,
+      'Property line 1': addrLines[0] || '', 'Property line 2': addrLines[1] || '',
+      'Property line 3': addrLines[2] || '', 'Property line 4': addrLines[3] || '',
+      Date: longDate(TODAY), 'Tenancy start': longDate(tenancyStart),
+    }),
+  };
+}
+
+// Kevin's two authority exceptions (see NO_AUTHORITY_PROPERTY above).
+function signsAuthority(propertyName, tenantName, EX) {
+  return !NO_AUTHORITY_PROPERTY.includes(propertyName) && !EX.noAuthorityTenant.includes(tenantName);
+}
+
+// f is the tenant's Airtable fields; a gap is left as a line to fill in at the meeting.
+function authoritySpec(tenantName, propertyName, address, council, team, f) {
+  return {
+    name: `Authority_${tenantName.replace(/[^A-Za-z0-9]+/g, '_')}_${propertyName.replace(/[^A-Za-z0-9]+/g, '_')}`,
+    title: 'Authority to act: council tax reduction and housing payment',
+    reference: `${tenantName} — ${address}`,
+    footer: `${tenantName} — authority to act — ${council}`,
+    allowPlaceholders: true,   // DOB and NI are filled in at the meeting where we do not hold them
+    markdown: fill('authority_to_act_template.md', {
+      'Council benefits team': team, Council: council,
+      'Tenant Name': tenantName, DOB: f['Date of Birth'] ? longDate(f['Date of Birth']) : '________________',
+      NI: f['National Insurance Number'] || '________________',
+      'Property address': address,
+      'CT account': f['Council Tax Account Number'] || '________________',
+    }),
+  };
+}
+
+// The --new pack for one room. Nobody is in Airtable yet, so it comes from the flags
+// plus the property's own LHA rate. It returns the specs rather than rendering them,
+// so tests/tenancy-pack-new.test.js can check exactly what --new would draw.
+function newTenantPack({ propertyName, address, council, team, oneBed, tenantName, start, EX }) {
+  const specs = [{
+    name: `AST_${tenantName.replace(/[^A-Za-z0-9]+/g, '_')}_${propertyName.replace(/[^A-Za-z0-9]+/g, '_')}`,
+    title: 'Assured shorthold tenancy agreement',
+    reference: `${tenantName} — ${address} — one room, ${gbp(oneBed)} a month from ${longDate(start)}`,
+    footer: `${tenantName} — ${propertyName} — not valid until signed by both parties`,
+    markdown: fill('ast_single_template.md', {
+      'Agreement date': longDate(TODAY), 'Term start date': longDate(start),
+      'First payment date': longDate(start), 'Tenant Name': tenantName,
+      'Property address': address, Rent: gbp(oneBed),
+    }),
+  }, proofOfResidencySpec(tenantName, address, start)];
+  if (signsAuthority(propertyName, tenantName, EX)) {
+    specs.push(authoritySpec(tenantName, propertyName, address, council, team, {}));
+  }
+  return specs;
 }
 
 async function main(argv) {
@@ -212,46 +280,15 @@ async function main(argv) {
     })).filter((x) => x.id);
 
     if (isNew) {
-      // Nobody is in Airtable yet, so the pack comes from the flags plus the
-      // property's own strategy and LHA rate.
       console.log(`\n== ${name} (${strategy || 'no strategy'}) — new tenant ${newName}, ${council}`);
       if (strategy === 'UC joint tenancy') {
         die('this property is on a joint tenancy: a new tenant needs the joint agreement, ' +
             'which names both people. Run --property "' + name + '" once both are known.');
       }
-      made.push(renderPdf({
-        name: `AST_${newName.replace(/[^A-Za-z0-9]+/g, '_')}_${name.replace(/[^A-Za-z0-9]+/g, '_')}`,
-        title: 'Assured shorthold tenancy agreement',
-        reference: `${newName} — ${address} — one room, ${gbp(oneBed)} a month from ${longDate(newStart)}`,
-        footer: `${newName} — ${name} — not valid until signed by both parties`,
-        markdown: fill('ast_single_template.md', {
-          'Agreement date': longDate(TODAY), 'Term start date': longDate(newStart),
-          'First payment date': longDate(newStart), 'Tenant Name': newName,
-          'Property address': address, Rent: gbp(oneBed),
-        }),
-      }, dry));
-      made.push(renderPdf({
-        name: `Proof_of_Residency_${newName.replace(/[^A-Za-z0-9]+/g, '_')}`,
-        title: 'Proof of residency', reference: `${newName} — ${address}`,
-        footer: `${newName} — proof of residency — Agile Lets Limited`,
-        markdown: fill('proof_of_residency_template.md', {
-          'Tenant Name': newName, 'Property address': address,
-          Date: longDate(TODAY), 'Tenancy start': longDate(newStart),
-        }),
-      }, dry));
-      made.push(renderPdf({
-        name: `Authority_${newName.replace(/[^A-Za-z0-9]+/g, '_')}_${name.replace(/[^A-Za-z0-9]+/g, '_')}`,
-        title: 'Authority to act: council tax reduction and housing payment',
-        reference: `${newName} — ${address}`,
-        footer: `${newName} — authority to act — ${council}`,
-        allowPlaceholders: true,
-        markdown: fill('authority_to_act_template.md', {
-          'Council benefits team': team, Council: council, 'Tenant Name': newName,
-          DOB: '________________', NI: '________________',
-          'Property address': address, 'CT account': '________________',
-        }),
-      }, dry));
-      console.log(`   HMO pack for ${newName}: agreement at ${gbp(oneBed)} from ${newStart}, proof of residency, authority`);
+      newTenantPack({ propertyName: name, address, council, team, oneBed, tenantName: newName, start: newStart, EX })
+        .forEach((spec) => made.push(renderPdf(spec, dry)));
+      console.log(`   HMO pack for ${newName}: agreement at ${gbp(oneBed)} from ${newStart}, proof of residency, ` +
+        (signsAuthority(name, newName, EX) ? 'authority' : 'no authority (Kevin\'s exception)'));
       continue;
     }
 
@@ -316,41 +353,16 @@ async function main(argv) {
       // Only where the tenancy is new or changed (Kevin, 10 Sep 2026): a tenant
       // whose agreement and rent are untouched has nothing for UC to re-verify.
       if (uc && signsNewTenancy) {
-        // No title or reference line: this is the letter Agile Lets already sends,
-        // and Kevin wants it to look like the one Universal Credit has seen before.
-        const addrLines = String(address).split(',').map((x) => x.trim()).filter(Boolean);
-        made.push(renderPdf({
-          name: `Proof_of_Residency_${person.name.replace(/[^A-Za-z0-9]+/g, '_')}`,
-          footer: `${person.name} — proof of residency — Agile Lets Limited`,
-          markdown: fill('proof_of_residency_template.md', {
-            'Tenant Name': person.name, 'Property address': address,
-            'Property line 1': addrLines[0] || '', 'Property line 2': addrLines[1] || '',
-            'Property line 3': addrLines[2] || '', 'Property line 4': addrLines[3] || '',
-            Date: longDate(TODAY),
-            'Tenancy start': longDate(strategy === 'UC joint tenancy' ? people[people.length - 1].start : person.start),
-          }),
-        }, dry));
+        made.push(renderPdf(proofOfResidencySpec(person.name, address,
+          strategy === 'UC joint tenancy' ? people[people.length - 1].start : person.start), dry));
       }
       // Every tenant Roy sees signs an authority, whatever we hold on them
       // (Kevin, 10 Sep 2026). It is what lets Roy or Kevin submit the Council
       // Tax Reduction form and any CRF Housing Payment, and the gaps are
       // filled in at the meeting. Age does not decide it: two tenants have no
       // date of birth on file, and a joint claim is made in both names.
-      if (uc && !NO_AUTHORITY_PROPERTY.includes(name) && !EX.noAuthorityTenant.includes(person.name)) {
-        made.push(renderPdf({
-          name: `Authority_${person.name.replace(/[^A-Za-z0-9]+/g, '_')}_${name.replace(/[^A-Za-z0-9]+/g, '_')}`,
-          title: 'Authority to act: council tax reduction and housing payment',
-          reference: `${person.name} — ${address}`,
-          footer: `${person.name} — authority to act — ${council}`,
-          allowPlaceholders: true,   // DOB and NI are filled in at the meeting where we do not hold them
-          markdown: fill('authority_to_act_template.md', {
-            'Council benefits team': team, Council: council,
-            'Tenant Name': person.name, DOB: f['Date of Birth'] ? longDate(f['Date of Birth']) : '________________',
-            NI: f['National Insurance Number'] || '________________',
-            'Property address': address,
-            'CT account': f['Council Tax Account Number'] || '________________',
-            }),
-        }, dry));
+      if (uc && signsAuthority(name, person.name, EX)) {
+        made.push(renderPdf(authoritySpec(person.name, name, address, council, team, f), dry));
       }
       // A rent rise is a NEW TENANCY, not a letter about one (Kevin, 10 Sep 2026).
       // The HMO tenant signs the standard agreement at the new rate, with the
@@ -377,4 +389,5 @@ async function main(argv) {
   written.forEach((f) => console.log('  ' + path.basename(f)));
 }
 
-main(process.argv.slice(2)).catch((e) => die(e.message));
+if (require.main === module) main(process.argv.slice(2)).catch((e) => die(e.message));
+module.exports = { newTenantPack, proofOfResidencySpec, signsAuthority };
