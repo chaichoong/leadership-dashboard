@@ -268,6 +268,30 @@ def run_guarded(job, cmd, **kw):
     return r
 
 
+def claude_error(r, limit=400):
+    """A failure message that can never come out blank.
+
+    Finding 20260923-daily-ops-577. The Content Engine's copy and thumbnail
+    steps raised SystemExit("claude failed: " + r.stderr[-400:]). They run the
+    CLI with --output-format json, and with that flag the CLI writes its error
+    object to STDOUT, so stderr is empty. The 02:25 run on 23 Sep 2026 died with
+    the literal line "claude failed: " and nothing after the colon — a whole
+    night's episodes abandoned with no way to tell why.
+
+    So read BOTH streams, name the exit code, and say plainly when the process
+    said nothing at all rather than returning an empty string.
+    """
+    parts = []
+    for name in ("stdout", "stderr"):
+        text = (getattr(r, name, None) or "").strip()
+        if text:
+            parts.append("%s: %s" % (name, text[-limit:]))
+    rc = getattr(r, "returncode", None)
+    if not parts:
+        parts.append("no output on stdout or stderr")
+    return "claude failed (exit %s) — %s" % (rc, " | ".join(parts))
+
+
 def cmd_status(now=None):
     now = now or datetime.now(timezone.utc)
     st = load_state()

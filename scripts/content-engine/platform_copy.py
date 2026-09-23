@@ -222,7 +222,7 @@ def ask_claude(system, user, timeout=600, thinking=None, no_mcp=False):
     cmd = [CLAUDE, "-p", user, "--system-prompt", system, "--model", MODEL, "--output-format", "json", "--tools", "", "--max-turns", "1"]
     if no_mcp: cmd += ["--strict-mcp-config", "--mcp-config", '{"mcpServers":{}}']   # a headless writer needs no connectors; skipping them saves the init wait
     r = _allowance().run_guarded("content-engine", cmd, capture_output=True, text=True, env=env, timeout=timeout)   # skipped while the allowance is out; marks the pause from its output
-    if r.returncode != 0: raise SystemExit("claude failed: " + r.stderr[-400:])
+    if r.returncode != 0: raise SystemExit(_allowance().claude_error(r))
     d = json.loads(r.stdout)
     return (d.get("result") or "").strip(), d.get("usage", {}), d.get("total_cost_usd")
 
