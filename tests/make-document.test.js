@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { execFileSync } from 'child_process';
+import { execFileSync, spawnSync } from 'child_process';
 import { existsSync, mkdtempSync, rmSync } from 'fs';
 import { tmpdir } from 'os';
 import { resolve, dirname, join } from 'path';
@@ -58,6 +58,17 @@ describe('make-document', () => {
       });
     } catch (e) { threw = true; expect(String(e.stderr)).toMatch(/\[Property line 1\]/); }
     expect(threw).toBe(true);
+  });
+
+  it('--check fails wherever a real render fails to build the page', () => {
+    // A table with no header row breaks the page build. Whatever the renderer does
+    // with it, --check must give the same answer as a real render.
+    const spec = JSON.stringify({ name: 'x', markdown: 'Hello\n\n| --- |\n' });
+    const dir = mkdtempSync(join(tmpdir(), 'make-document-'));
+    try {
+      const status = (extra) => spawnSync('node', [DOC, '--spec', '-', ...extra], { input: spec, encoding: 'utf8' }).status;
+      expect(status(['--check'])).toBe(status(['--out', join(dir, 'x.pdf')]));
+    } finally { rmSync(dir, { recursive: true, force: true }); }
   });
 
   it('refuses a spec with no body', () => {

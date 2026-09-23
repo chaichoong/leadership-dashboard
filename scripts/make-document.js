@@ -224,11 +224,13 @@ async function main(argv) {
   let spec;
   try { spec = JSON.parse(raw); } catch (e) { die('spec is not valid JSON: ' + e.message); }
   validate(spec);
-  // --check is a caller's dry run: the same refusals as a real render, and no PDF.
+  const html = buildHtml(spec);
+  // --check is a caller's dry run: the same refusals as a real render, page build
+  // included, and no PDF.
   if (argv.includes('--check')) { console.log(JSON.stringify({ ok: true })); return; }
   const stem = String(spec.name || spec.title || 'document').replace(/[^A-Za-z0-9]+/g, '_').replace(/^_|_$/g, '');
   const out = argv.includes('--out') ? argv[argv.indexOf('--out') + 1] : path.join(OUT_DIR, stem + '.pdf');
-  await render(buildHtml(spec), out, spec.footer);
+  await render(html, out, spec.footer);
   console.log(JSON.stringify({ pdf: out, bytes: fs.statSync(out).size, title: spec.title || null }));
 }
 

@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeAll } from 'vitest';
 import { createRequire } from 'node:module';
-import { existsSync, readFileSync } from 'node:fs';
-import { homedir } from 'node:os';
+import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { homedir, tmpdir } from 'node:os';
 import { join, resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -82,7 +82,19 @@ describe('a dry run refuses what the real run would', () => {
         expect(() => P.renderPdf({ name: 'x', markdown: 'To [Property line 1]' }, true)).toThrow('unfilled placeholders');
     });
     it('passes the whole --new pack without writing anything', () => {
-        for (const spec of pack('5 Dalham Place', 'Jane Testwood')) expect(P.renderPdf(spec, true)).toBeNull();
+        const specs = pack('5 Dalham Place', 'Jane Testwood');
+        // make-document.js writes under $HOME/knowledge-os/attachments, so a throwaway
+        // HOME shows any PDF a dry run wrongly renders, and keeps it out of the real folder.
+        const home = mkdtempSync(join(tmpdir(), 'tenancy-pack-dry-'));
+        const realHome = process.env.HOME;
+        process.env.HOME = home;
+        try {
+            for (const spec of specs) expect(P.renderPdf(spec, true)).toBeNull();
+            expect(existsSync(join(home, 'knowledge-os'))).toBe(false);
+        } finally {
+            process.env.HOME = realHome;
+            rmSync(home, { recursive: true, force: true });
+        }
     });
 });
 
