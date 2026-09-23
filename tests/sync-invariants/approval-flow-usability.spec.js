@@ -131,14 +131,16 @@ test.describe('every option on the card, one click each', () => {
     expect(decide.height).toBeLessThan(300);
   });
 
-  test('a sign-in wait has one button and no verdicts, but can still be knocked back in one click', async ({ page }) => {
+  test('a sign-in wait has one button and no approve, but can still be closed or knocked back in one click', async ({ page }) => {
     await mockAgentsPage(page, withAlike());
     await loadAgentsPage(page);
     await openApprovals(page);
     const card = page.locator('[data-apv-card="recSignIn"]');
     await expect(card.locator('[data-apv-signin-actions] a', { hasText: 'Sign in now' })).toHaveAttribute('href', 'robotsignin://site/ewf.companieshouse.gov.uk');
     await expect(card.locator('button', { hasText: /^Approve$/ })).toHaveCount(0);
-    await expect(card.locator('.apv-reason')).toHaveCount(0);
+    await expect(card.locator('button', { hasText: 'Request changes' })).toHaveCount(0);
+    // A wait still needs a way out (Kevin, 23 Sep 2026).
+    await expect(card.locator('.apv-reason', { hasText: 'No longer relevant' })).toBeVisible();
     await expect(card.locator('.apv-defer-btn', { hasText: 'A week' }).first()).toBeVisible();
     await expect(card.locator('.apv-ask')).toContainText('Waiting on a sign-in: Companies House WebFiling. Not a decision.');
   });
