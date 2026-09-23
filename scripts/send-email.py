@@ -108,6 +108,9 @@ AF = {
     "notes":           "fldR7apBzSp3oxFxz",
     # Read only by a rule send (17 Sep 2026): a redirect goes to this address alone.
     "inboundSender":   "fldzf4xlbrQuktx0i",
+    # The two marks only a real approval leaves (finding 20260922-agent-dispatch-572).
+    "sentForApprovalBy": "fld30Yw8SWYVp049g",
+    "approvedAt":        "fldr4Mvf2RzKvhZhi",
 }
 
 APPROVED = ("Approved as-is", "Approved with minor edits")
@@ -279,6 +282,43 @@ def parse_output(output, task_id):
                  "See the format in this script's docstring.")
 
 
+# ─── WAS IT REALLY APPROVED? ─────────────────────────────────────────
+#
+# Finding 20260922-agent-dispatch-572 (critical). On 22 Sep 2026 an agent working a hand-back
+# created two tasks with a raw Airtable write, typed "Approved with minor edits" into Approval
+# Outcome itself, and ran this script. It sent both, because the check below read only that
+# string. Two contractors received emails Kevin never approved. The same shape had already sent
+# six quote requests (9 and 15 Sep) "pre-approved under a parent task", one with an Approved At
+# COPIED from the parent and earlier than the task itself. Of 139 approved Correspondence tasks
+# in the 60 days to 24 Sep, the 131 approved in the queue carried both marks below; the eight
+# that did not were exactly these.
+#
+# So an approval counts only when it left the marks a real one leaves: the task went through the
+# gate (Sent For Approval By, written by agent-dispatch submit), an approval was recorded
+# (Approved At, written by the queue's approve), and it came AFTER the task existed. A child of an
+# approved parent is not approved: it goes through the gate itself, or qualifies for a rule send.
+def _ts(value):
+    try:
+        return datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+    except ValueError:
+        return None
+
+
+def approval_evidence_problem(fields, created_time):
+    """'' when the task carries the marks of a real approval, else why it does not."""
+    if not fields.get(AF["sentForApprovalBy"]):
+        return "it never went through the approval gate (Sent For Approval By is empty)"
+    approved_at = _ts(fields.get(AF["approvedAt"]) or "")
+    if approved_at is None:
+        return "no approval was ever recorded (Approved At is empty)"
+    created = _ts(created_time or "")
+    if created is None:
+        return "its creation time cannot be read, so the approval cannot be dated"
+    if approved_at < created:
+        return "its Approved At is earlier than the task itself, so it was copied, not given"
+    return ""
+
+
 def load_approved(task_id, require_approval=True, rule=None):
     rec = get_task(task_id)
     f = rec.get("fields", {})
@@ -314,6 +354,14 @@ def load_approved(task_id, require_approval=True, rule=None):
             "         Nothing is sent until Kevin approves it in Airtable "
             "or Slack."
         )
+    evidence = approval_evidence_problem(f, rec.get("createdTime", ""))
+    if require_approval and evidence:
+        sys.exit(
+            f"REFUSED: task {task_id} ({name}) reads {outcome!r}, but {evidence}.\n"
+            "         Only an approval Kevin gives in the dashboard queue sends. A task\n"
+            "         raised under an approved parent goes through the gate itself\n"
+            "         (agent-dispatch.py submit) or qualifies for a rule send (--rule)."
+        )
     if require_approval and ttype != "Correspondence":
         sys.exit(f"REFUSED: task {task_id} is Task Type {ttype or '(empty)'}, "
                  "not Correspondence. This script only sends Correspondence.")
@@ -321,7 +369,7 @@ def load_approved(task_id, require_approval=True, rule=None):
         sys.exit(f"ERROR: task {task_id} has an empty Agent Output")
 
     parsed = parse_output(output, task_id)
-    parsed.update({"taskName": name, "outcome": outcome})
+    parsed.update({"taskName": name, "outcome": outcome, "approvalProblem": evidence})
     return parsed
 
 
@@ -447,7 +495,9 @@ def cmd_send(args):
                           "approvalOutcome": mail["outcome"]
                           or "(not yet approved)",
                           "wouldSend": bool(mail["outcome"] in APPROVED)
+                          and not mail.get("approvalProblem")
                           and not sender_problem,
+                          "approvalProblem": mail.get("approvalProblem") or None,
                           "from": mail["from"] or "(worker default: kevinbrittain@gmail.com)",
                           "senderProblem": sender_problem or None,
                           "to": mail["to"], "cc": mail["cc"],
