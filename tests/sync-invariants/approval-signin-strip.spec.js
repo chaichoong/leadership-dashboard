@@ -140,6 +140,29 @@ test.describe('sign-ins waiting are a tap, not a decision', () => {
     expect(patch.fields['fldF9Bs4N5mttQvtl']).toBe('The work is wrong');   // Verdict Reason
     expect(String(patch.fields['fldtI7SJI4gEohHD1'])).toBe('Wrong site.');
   });
+  // Found in review, 23 Sep 2026: the banner kept its count after a sign-in
+  // card was closed or knocked back, until the next full redraw.
+  test('the banner counts down as sign-in cards are closed, back up on Undo, and goes when none are left', async ({ page }) => {
+    const fx = withSignIns();
+    await mockAgentsPage(page, fx);
+    await loadAgentsPage(page);
+    await page.click('#ptab-approvals');
+    const strip = page.locator('[data-apv-signin-strip]');
+    await expect(strip).toContainText('2 tasks are waiting on a sign-in');
+    const [first, second] = [fx.approvals[0].id, fx.approvals[1].id];
+    await page.locator(`[data-apv-card="${first}"] .apv-reason`, { hasText: 'No longer relevant' }).click();
+    await expect(strip).toContainText('One task is waiting on a sign-in');
+    await expect(strip.locator('a', { hasText: 'Sign in to all (1)' })).toBeVisible();
+    await expect(strip.locator('.apv-signin-site', { hasText: 'Companies House WebFiling' })).toHaveCount(0);
+    await page.locator(`[data-apv-card="${first}"] [data-apv-undo]`).click();
+    await expect(strip).toContainText('2 tasks are waiting on a sign-in');
+    await page.locator(`[data-apv-card="${first}"] .apv-reason`, { hasText: 'No longer relevant' }).click();
+    await page.locator(`[data-apv-card="${second}"] .apv-defer-btn`, { hasText: 'A week' }).click();
+    await expect(page.locator('[data-apv-signin-strip]')).toHaveCount(0);
+    // Undo the knock-back: the last sign-in card is back, so is the banner.
+    await page.locator(`[data-apv-card="${second}"] [data-apv-undo]`).click();
+    await expect(page.locator('[data-apv-signin-strip]')).toContainText('One task is waiting on a sign-in');
+  });
   test('no strip and no button when nothing waits on a sign-in', async ({ page }) => {
     await mockAgentsPage(page);
     await loadAgentsPage(page);

@@ -2986,6 +2986,15 @@ function apvSyncCountsInPlace(decidedId){
     updateApprovalsTabBadge();
     const all = document.querySelector('.apv-filter');
     if(all && /^All \(/.test(all.textContent)) all.textContent = `All (${allApprovals.length})`;
+    // The sign-in banner counts the queue too (23 Sep 2026): closing or
+    // knocking back a sign-in card left it one higher until a full redraw.
+    const strip = document.querySelector('#approvalsBody [data-apv-signin-strip]');
+    const stripHtml = apvSignInStripHtml(allApprovals);
+    if(strip){ if(stripHtml) strip.outerHTML = stripHtml; else strip.remove(); }
+    else if(stripHtml){
+        const filters = document.querySelector('#approvalsBody .apv-filters');
+        if(filters) filters.insertAdjacentHTML('beforebegin', stripHtml);
+    }
     apvBulkSync();
     if(!allApprovals.length){
         const body = document.getElementById('approvalsBody');
