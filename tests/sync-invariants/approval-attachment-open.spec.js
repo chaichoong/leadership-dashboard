@@ -85,9 +85,9 @@ async function attachmentLink(page) {
   await page.click('#ptab-approvals');
   await expect(page.locator('#view-approvals')).toBeVisible();
   // Since 8 Sep 2026 a file with no stamp lives in the trail ("Came with the
-  // task"), one Open button per file; the trail opens on a click.
+  // task"), one Open button per file; the trail is open on arrival since
+  // 23 Sep 2026.
   const card = page.locator(`[data-apv-card="${TASK_ID}"]`);
-  await card.locator('[data-apv-trail] summary').click();
   const link = card.locator(`[data-apv-file="${FILENAME}"]`);
   await expect(link, 'the card must offer the agent’s file').toBeVisible();
   return link;

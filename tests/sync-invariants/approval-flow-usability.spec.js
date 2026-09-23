@@ -1,9 +1,10 @@
 // THE APPROVAL GATE FOR A 13-YEAR-OLD (Kevin, 7 Sep 2026). The usability audit
 // measured 16 buttons per card, a 600px jump after every decision, no saving
 // state, open panels snapping shut, Approve below the fold on a laptop, and a
-// wait dressed up as a decision. These guard the shape that replaced it: two
-// buttons, everything else one tap away, the decision saved in place with an
-// Undo, nothing else on the page rebuilt. (The alike-items strip was removed
+// wait dressed up as a decision. These guard the shape that replaced it: the
+// decision saved in place with an Undo, nothing else on the page rebuilt, and
+// (since 23 Sep 2026) every option on the card rather than two buttons and a
+// More panel. (The alike-items strip was removed
 // on 15 Sep 2026: Kevin ticks the cards he wants decided together instead.)
 const { test, expect } = require('@playwright/test');
 const { TF, defaultFixtures, mockAgentsPage, loadAgentsPage } = require('./agents-page.helpers');
@@ -32,17 +33,45 @@ async function openApprovals(page) {
   await expect(page.locator('#view-approvals')).toBeVisible();
 }
 
-test.describe('two buttons, everything else one tap away', () => {
-  test('a card shows Approve, No and More; the reasons and the rest are hidden until asked', async ({ page }) => {
+// EVERY OPTION ON THE CARD (Kevin, 23 Sep 2026): "When I need to provide
+// feedback, I don't want to have to click the More button. When I want to
+// knock it back, I don't want to have to click a checkbox and then a Knock
+// Back button. All of my options need to be available." The More panel and
+// the "No" toggle are gone; each option is one click, feedback is typing plus
+// one click, and the work, the task given and the story so far start open.
+function withLongWork() {
+  const fx = defaultFixtures();
+  const r = fx.approvals[1]; // recApvA2
+  r.fields[TF.agentOutput] = Array.from({ length: 30 }, (_, i) => `Line ${i + 1} of the agent's report.`).join('\n')
+    + '\n\nLAST LINE OF THE WORK';
+  r.fields[TF.description] = 'Draft the lowest possible payment plan for the lender.';
+  return fx;
+}
+
+test.describe('every option on the card, one click each', () => {
+  test('Approve, the note, both slower approvals, every reason and every date show without a click', async ({ page }) => {
     await mockAgentsPage(page);
     await loadAgentsPage(page);
     await openApprovals(page);
     const card = page.locator('.apv-card').first();
+    const taskId = await card.getAttribute('data-apv-card');
     await expect(card.locator('.apv-actions button', { hasText: /^Approve$/ })).toBeVisible();
-    await expect(card.locator('.apv-actions button', { hasText: /^No$/ })).toBeVisible();
-    await expect(card.locator('.apv-more')).toBeVisible();
-    await expect(card.locator('.apv-reasons')).toBeHidden();
-    await expect(card.locator('.apv-panel')).toBeHidden();
+    await expect(card.locator('#apvNote-' + taskId)).toBeVisible();
+    await expect(card.locator('.apv-actions label', { hasText: 'Attach' })).toBeVisible();
+    await expect(card.locator('.apv-actions button', { hasText: 'Approve with minor edits' })).toBeVisible();
+    await expect(card.locator('.apv-actions button', { hasText: 'Request changes' })).toBeVisible();
+    await expect(card.locator('.apv-reasons')).toBeVisible();
+    await expect(card.locator('.apv-reason')).toHaveCount(8);
+    for (const label of ['3 days', 'A week', '2 weeks', 'A month']) {
+      await expect(card.locator('.apv-defer-btn', { hasText: label }).first()).toBeVisible();
+    }
+    await expect(card.locator('#apvDeferDate-' + taskId)).toBeVisible();
+    // Nothing left to open first.
+    await expect(page.locator('.apv-more')).toHaveCount(0);
+    await expect(page.locator('.apv-panel')).toHaveCount(0);
+    await expect(card.locator('.apv-actions button', { hasText: /^No$/ })).toHaveCount(0);
+    await expect(card.locator('.apv-kind')).toContainText('Kind of work: Correspondence');
+    await expect(card.locator('.apv-kind select')).toBeHidden();
     // The old dialog and the bare Reject button are gone.
     await expect(card.locator('.apv-actions button', { hasText: /^Reject$/ })).toHaveCount(0);
     await expect(page.locator('#apvRememberConfirm')).toHaveCount(0);
@@ -52,22 +81,57 @@ test.describe('two buttons, everything else one tap away', () => {
     // The task name moved to the top, as the plain summary's fallback (22 Sep 2026).
     await expect(tenant.locator('[data-apv-plain-task]')).toHaveText('Reply to tenant email');
   });
-  test('More opens the note, attach, kind of work, the two slower approvals and knock-back', async ({ page }) => {
+
+  test('feedback is typing plus one click: Request changes sends the note', async ({ page }) => {
+    const patches = await mockAgentsPage(page);
+    await loadAgentsPage(page);
+    await openApprovals(page);
+    const card = page.locator('.apv-card').first();
+    const taskId = await card.getAttribute('data-apv-card');
+    await card.locator('#apvNote-' + taskId).fill('Ask for a freeze first, then the plan.');
+    await card.locator('.apv-actions button', { hasText: 'Request changes' }).click();
+    await expect.poll(() => patches.some((p) => p.id === taskId)).toBe(true);
+    const patch = patches.find((p) => p.id === taskId);
+    expect(patch.fields[TF.approvalOutcome]).toBe('Changes requested');
+    expect(patch.fields['fldtI7SJI4gEohHD1']).toBe('Ask for a freeze first, then the plan.');
+  });
+
+  test('the work, the task it was given and the story so far start open; a long report shows its start with Show all', async ({ page }) => {
+    await mockAgentsPage(page, withLongWork());
+    await loadAgentsPage(page);
+    await openApprovals(page);
+    const card = page.locator('[data-apv-card="recApvA2"]');
+    await expect(card.locator('.apv-details')).toHaveAttribute('open', '');
+    await expect(card.locator('[data-apv-given]')).toContainText('lowest possible payment plan');
+    const body = card.locator('[data-apv-work]');
+    await expect(body).toContainText('Line 1 of the agent');
+    await expect(body).toHaveClass(/apv-clamp/);
+    const capped = (await body.boundingBox()).height;
+    await card.locator('[data-apv-show-all]').click();
+    await expect(body).toHaveClass(/apv-full/);
+    expect((await body.boundingBox()).height).toBeGreaterThan(capped * 2);
+    // A short draft has nothing to expand.
+    await expect(page.locator('[data-apv-card="recApvB1"] [data-apv-show-all]')).toHaveCount(0);
+  });
+
+  test('a long note grows the box only so far, so the buttons never cover the work', async ({ page }) => {
+    // Found in review, 23 Sep 2026: a pasted 25-line note grew the pinned
+    // block to 481px and hid the card behind it on a laptop screen.
+    await page.setViewportSize({ width: 1280, height: 720 });
     await mockAgentsPage(page);
     await loadAgentsPage(page);
     await openApprovals(page);
     const card = page.locator('.apv-card').first();
-    await card.locator('.apv-more').click();
-    const panel = card.locator('.apv-panel');
-    await expect(panel).toBeVisible();
-    await expect(panel.locator('.apv-note')).toBeVisible();
-    await expect(panel.locator('.apv-kind')).toContainText('Kind of work: Correspondence');
-    await expect(panel.locator('.apv-kind select')).toBeHidden();
-    await expect(panel.locator('button', { hasText: 'Approve with minor edits' })).toBeVisible();
-    await expect(panel.locator('button', { hasText: 'Request changes' })).toBeVisible();
-    await expect(panel.locator('.apv-defer-btn', { hasText: 'A week' })).toBeVisible();
+    const taskId = await card.getAttribute('data-apv-card');
+    await card.locator('#apvNote-' + taskId).fill(Array.from({ length: 25 }, (_, i) => 'Point ' + (i + 1)).join('\n'));
+    const box = await card.locator('#apvNote-' + taskId).boundingBox();
+    expect(box.height).toBeLessThanOrEqual(162);
+    expect(box.height).toBeGreaterThan(60);
+    const decide = await card.locator('[data-apv-decide]').boundingBox();
+    expect(decide.height).toBeLessThan(300);
   });
-  test('a sign-in wait has one button, no verdicts', async ({ page }) => {
+
+  test('a sign-in wait has one button and no verdicts, but can still be knocked back in one click', async ({ page }) => {
     await mockAgentsPage(page, withAlike());
     await loadAgentsPage(page);
     await openApprovals(page);
@@ -75,6 +139,7 @@ test.describe('two buttons, everything else one tap away', () => {
     await expect(card.locator('[data-apv-signin-actions] a', { hasText: 'Sign in now' })).toHaveAttribute('href', 'robotsignin://site/ewf.companieshouse.gov.uk');
     await expect(card.locator('button', { hasText: /^Approve$/ })).toHaveCount(0);
     await expect(card.locator('.apv-reason')).toHaveCount(0);
+    await expect(card.locator('.apv-defer-btn', { hasText: 'A week' }).first()).toBeVisible();
     await expect(card.locator('.apv-ask')).toContainText('Waiting on a sign-in: Companies House WebFiling. Not a decision.');
   });
 });
@@ -85,9 +150,10 @@ test.describe('a decision is saved in place; nothing else moves', () => {
     await loadAgentsPage(page);
     await openApprovals(page);
     const cards = page.locator('.apv-card');
-    // Open the second card's work and More panel, then decide the first.
+    // Fold the second card's work shut and start a note on it, then decide the first.
     await cards.nth(1).locator('.apv-details summary').click();
-    await cards.nth(1).locator('.apv-more').click();
+    const secondId = await cards.nth(1).getAttribute('data-apv-card');
+    await cards.nth(1).locator('#apvNote-' + secondId).fill('Half-written note');
     const secondTop = (await cards.nth(1).boundingBox()).y;
     await cards.nth(0).locator('.apv-actions button', { hasText: /^Approve$/ }).click();
     await expect(cards.nth(0).locator('[data-apv-state="saved"]')).toContainText('Saved');
@@ -95,8 +161,8 @@ test.describe('a decision is saved in place; nothing else moves', () => {
     await expect.poll(() => patches.length).toBe(1);
     // Still three cards in the DOM (the decided one is folding, not re-rendered).
     await expect(page.locator('.apv-card')).toHaveCount(3);
-    await expect(cards.nth(1).locator('.apv-details')).toHaveAttribute('open', '');
-    await expect(cards.nth(1).locator('.apv-panel')).toBeVisible();
+    await expect(cards.nth(1).locator('.apv-details')).not.toHaveAttribute('open', '');
+    await expect(cards.nth(1).locator('#apvNote-' + secondId)).toHaveValue('Half-written note');
     // The counts updated in place.
     await expect(page.locator('#approvalsTabBadge')).toHaveText('2');
     await expect(page.locator('.apv-filter', { hasText: 'All (2)' })).toHaveCount(1);

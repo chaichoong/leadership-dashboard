@@ -285,13 +285,16 @@ describe('apvDeferReasonFrom — the note to his future self', () => {
 });
 
 describe('the card offers both missing verdicts', () => {
-  it('has a "No" button that opens the reasons, with "Something else" for his own words', () => {
+  it('shows the reasons on the card, with "Something else" for his own words', () => {
     // Before 27 Aug the ONLY route to a rejection was one of seven chips; Kevin
     // asked for an explicit reject ("can I also have an option to reject").
-    // Since 7 Sep 2026 the card carries two buttons (usability audit: 16 was
-    // the count before): "No" opens the reasons in place and "Something else"
-    // is the route for his own words. The bare Reject button is gone.
-    expect(agentsPage).toMatch(/onclick="apvToggle\('\$\{t\.id\}','reasons'\)"[^>]*>No<\/button>/);
+    // From 7 Sep 2026 a "No" button opened the reasons. Since 23 Sep 2026 the
+    // reasons are always on the card ("all of my options need to be
+    // available"), so one tap on a reason is the whole no, and there is no
+    // toggle left to open them. The bare Reject button stays gone.
+    expect(agentsPage).not.toMatch(/apvToggle/);
+    expect(agentsPage).toMatch(/\$\{apvReasonChips\(t\.id\)\}/);
+    expect(agentsPage).toMatch(/<div class="apv-reasons" id="apvReasons-\$\{taskId\}"/);
     expect(agentsPage).toMatch(/agRejectWithReason\('\$\{taskId\}','\$\{esc\(APV_UNCLASSIFIED\)\}'\)[^>]*>Something else<\/button>/);
     expect(agentsPage).not.toMatch(/data-apv-btn onclick="agDecide\('\$\{t\.id\}','Rejected'\)"/);
   });
@@ -366,9 +369,9 @@ describe('the queue asserts the filter held, client-side', () => {
 
 describe('the write itself', () => {
   // Since 15 Sep 2026 the write lives in apvDeferWrite, shared by the card and
-  // the bulk bar; applyApprovalDefer is the card's wrapper around it. The
-  // slice covers both, so a verdict or a status change sneaking into either
-  // half still fails here.
+  // the bulk bar; apvDeferNow is the card's one-click wrapper around it (23 Sep
+  // 2026). The slice covers both, so a verdict or a status change sneaking into
+  // either half still fails here.
   const fn = agentsPage.slice(agentsPage.indexOf('async function apvDeferWrite'),
                               agentsPage.indexOf('async function agUndefer'));
 
@@ -401,8 +404,11 @@ describe('the write itself', () => {
   });
 
   it('refuses a date that is not in the future', () => {
-    const picker = agentsPage.slice(agentsPage.indexOf('function agDeferOnDate'),
-                                    agentsPage.indexOf('function apvConfirmDefer'));
+    const from = agentsPage.indexOf('function agDeferOnDate');
+    const to = agentsPage.indexOf('async function apvDeferWrite');
+    expect(from).toBeGreaterThan(0);
+    expect(to).toBeGreaterThan(from);
+    const picker = agentsPage.slice(from, to);
     expect(picker).toContain('until <= todayStr()');
   });
 });

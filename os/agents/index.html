@@ -127,6 +127,13 @@ a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}
 .apv-details{margin:8px 0}
 .apv-details summary{cursor:pointer;font-size:var(--fs-xs);font-weight:var(--fw-semibold);color:var(--accent)}
 .apv-body{font-size:var(--fs-xs);color:var(--text-secondary);white-space:pre-wrap;word-break:break-word;max-height:340px;overflow:auto;border:1px solid var(--border-subtle);border-radius:var(--radius-md);padding:10px 12px;background:var(--bg-surface-2);margin-top:6px}
+/* The work starts OPEN (Kevin, 23 Sep 2026) at its first eight lines, so the
+   draft is read without a click and a long report does not bury the buttons.
+   "Show all" takes the cap off entirely. */
+.apv-body.apv-clamp{line-height:1.5;max-height:calc(12em + 20px);overflow:hidden}
+.apv-body.apv-full{max-height:none;overflow:visible}
+.apv-show-all{font-family:inherit;font-size:var(--fs-xs);font-weight:var(--fw-semibold);color:var(--accent);background:none;border:none;cursor:pointer;padding:4px 0}
+.apv-show-all:hover{text-decoration:underline}
 .apv-note{width:100%;border:1px solid var(--border-default);background:var(--bg-surface);border-radius:var(--radius-md);padding:8px 10px;font-size:var(--fs-sm);color:var(--text-primary);font-family:inherit;resize:vertical;min-height:44px;margin:8px 0}
 .apv-note:focus{outline:none;border-color:var(--accent)}
 /* Tick to decide several at once (Kevin, 15 Sep 2026). The tick lives in
@@ -192,13 +199,22 @@ a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}
 .apv-later-when{font-size:var(--fs-xs);font-weight:var(--fw-semibold);color:var(--accent);
     background:var(--accent-soft);border-radius:var(--radius-full);padding:2px 9px;white-space:nowrap}
 .apv-later-why{font-size:var(--fs-xs);color:var(--text-muted);flex:1 1 180px}
-.apv-actions{display:flex;gap:8px;flex-wrap:wrap;align-items:center;position:sticky;bottom:0;background:var(--bg-surface);padding:10px 0 4px;margin-top:8px;border-top:1px solid var(--border-subtle);z-index:2}
-.apv-actions .apv-more{margin-left:auto;font-size:var(--fs-xs);color:var(--text-secondary);background:none;border:none;cursor:pointer;padding:6px 8px;border-radius:var(--radius-md)}
-.apv-actions .apv-more:hover{background:var(--bg-subtle)}
-.apv-panel{display:none;margin-top:8px}
-.apv-panel.open{display:block}
-.apv-card .apv-reasons{display:none}
-.apv-card .apv-reasons.open{display:flex}
+/* EVERY OPTION ON THE CARD (Kevin, 23 Sep 2026): "I don't want to have to
+   click More ... all of my options need to be available". Three rows, always
+   showing, pinned to the bottom of the screen while the card is read:
+   decide (Approve, the note, the two slower approvals), no (the reasons), and
+   not yet (the dates). Every one is a single click. */
+.apv-decide{position:sticky;bottom:0;background:var(--bg-surface);padding:10px 0 4px;margin-top:8px;border-top:1px solid var(--border-subtle);z-index:2}
+.apv-actions{display:flex;gap:8px;flex-wrap:wrap;align-items:flex-start}
+.apv-decide .apv-reasons,.apv-decide .apv-defer{margin-top:6px;padding-top:6px}
+.apv-actions .apv-note-row{display:flex;flex:1 1 260px;min-width:0;margin-top:0;padding:0;flex-wrap:nowrap;align-items:flex-start;gap:6px}
+.apv-note-row .apv-note{margin:0;min-height:36px;height:36px;max-height:160px;overflow:auto;padding:7px 10px;flex:1 1 auto;min-width:0}
+.apv-note-row .apv-attach-btn{padding:7px 10px;white-space:nowrap}
+.apv-decide .apv-file-list:not(:empty){margin-top:6px}
+.apv-remember{display:inline-flex;align-items:center;gap:5px;font-size:var(--fs-xs);color:var(--text-secondary);cursor:pointer;margin-left:4px}
+/* On a phone the three rows would cover half the screen, so they sit at the
+   foot of the card instead of following the scroll. */
+@media (max-width:600px){.apv-decide{position:static}}
 .apv-card.apv-saving{opacity:.6;pointer-events:none}
 .apv-state{display:flex;align-items:center;gap:10px;border-radius:var(--radius-md);padding:10px 14px;font-size:var(--fs-sm);font-weight:var(--fw-semibold)}
 .apv-state.saving{background:var(--bg-subtle);color:var(--text-secondary)}
@@ -238,6 +254,9 @@ a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}
 .apv-trail-last{color:var(--text-primary);font-weight:var(--fw-regular)}
 .apv-trail-day{font-size:var(--fs-xs);font-weight:var(--fw-bold);color:var(--text-secondary);margin:8px 0 2px;padding-bottom:2px;border-bottom:1px solid var(--border-subtle)}
 .apv-trail-day.latest{color:var(--accent-hover)}
+/* Open by default (23 Sep 2026), newest at the bottom and scrolled to it:
+   column-reverse starts a scroll box at its end, so no script has to. */
+.apv-trail-list{display:flex;flex-direction:column-reverse;max-height:220px;overflow:auto;margin-top:4px}
 .apv-trail-row{display:grid;grid-template-columns:44px 118px minmax(0,1fr);gap:8px;font-size:var(--fs-sm);padding:3px 0;align-items:start;word-break:break-word}
 .apv-trail-row.latest{background:var(--accent-soft);border-radius:var(--radius-sm);padding:3px 4px}
 .apv-trail-time{color:var(--text-muted);font-size:var(--fs-xs)}
@@ -1394,7 +1413,7 @@ function restoreApprovalDrafts(){
         const rm = document.getElementById('apvRemember-'+id);
         if(rm && d.remember === false) rm.checked = false;
         renderApvFileChips(id);   // queued files survive a filter click
-        if(d.note){ const p = document.getElementById('apvPanel-'+id); if(p) p.classList.add('open'); }
+        if(n && d.note) apvGrowNote(n);
     });
 }
 
@@ -1404,13 +1423,13 @@ function restoreApprovalDrafts(){
 // queue is smaller because he made it smaller, not because something broke.
 function apvDeferredLaneHtml(){
     if(String(_deferredState).indexOf('error') === 0){
-        return `<div class="zone-error">Could not load what you have knocked back: ${esc(String(_deferredState).slice(7))}.
+        return `<div class="zone-error" data-apv-later>Could not load what you have knocked back: ${esc(String(_deferredState).slice(7))}.
             Some approvals may be hidden. <button class="btn btn-sm" style="margin-left:8px" onclick="refreshAll()">Retry</button></div>`;
     }
     if(!allDeferred.length) return '';
     const next = allDeferred[0];
     const due = allDeferred.filter(t=>{ const d = apvDaysUntil(t.until); return d !== null && d <= 1; }).length;
-    return `<details class="apv-later">
+    return `<details class="apv-later" data-apv-later>
         <summary>&#128340; ${allDeferred.length} knocked back &mdash; ${due ? `${due} back within a day` : `next back ${esc(apvDeferDateLabel(next.until))}`}</summary>
         <div class="apv-later-list">
             ${allDeferred.map(t=>{
@@ -2091,7 +2110,7 @@ function apvDocumentLineHtml(t, askLine){
         // Files from before the stamps existed, or from an earlier round: shown, but not claimed as this round's.
         return `<div class="apv-doc-line" data-apv-doc-line data-apv-doc-earlier>&#128206; Uses a file from an earlier round: ${earlier.map(f=>`<a class="apv-agent-file" data-apv-file="${esc(f.filename)}" data-apv-file-round="earlier" href="${esc(f.url)}" target="_blank" rel="noopener noreferrer" onclick="return apvOpenAttachment(event,'${t.id}',this.dataset.apvFile)" title="Not attached this round: check it is the current copy before you approve">${esc(f.filename)} &#8599;</a>`).join(' ')} <span class="apv-file-meta">(check it is the current copy)</span></div>`;
     }
-    return `<div class="apv-doc-line apv-doc-missing" data-apv-doc-line data-apv-doc-missing>&#9888; No document was attached this round. Do not approve blind: use More &rarr; Request changes and ask for the file.</div>`;
+    return `<div class="apv-doc-line apv-doc-missing" data-apv-doc-line data-apv-doc-missing>&#9888; No document was attached this round. Do not approve blind: say which file you need in the box below and press Request changes.</div>`;
 }
 const APV_TRAIL_MAX = 80;
 function apvTrailHtml(t){
@@ -2108,10 +2127,10 @@ function apvTrailHtml(t){
         const open = e.link ? ` <a class="apv-trail-open" href="${esc(e.link)}" target="_blank" rel="noopener noreferrer"${e.file ? ` data-apv-file="${esc(e.file)}" onclick="return apvOpenAttachment(event,'${t.id}',this.dataset.apvFile)"` : ''} title="Opens in a new tab">Open &#8599;</a>` : '';
         out += `<div class="apv-trail-row${day===lastDay?' latest':''}" data-apv-trail-kind="${e.kind}"><span class="apv-trail-time">${esc(e.time||'')}</span><span class="apv-trail-who${whoClass}" title="${esc(e.who)}">${esc(e.who)}</span><span>${apvLinkify(e.text)}${open}</span></div>`;
     });
-    return `<details class="apv-trail" data-apv-trail${_apvOpen.trail.has(t.id)?' open':''} ontoggle="if(this.open)_apvOpen.trail.add('${t.id}');else _apvOpen.trail.delete('${t.id}')">
+    return `<details class="apv-trail" data-apv-trail${_apvOpen.trailShut.has(t.id)?'':' open'} ontoggle="if(this.open)_apvOpen.trailShut.delete('${t.id}');else _apvOpen.trailShut.add('${t.id}')">
         <summary>The story so far · ${all.length} ${all.length===1?'step':'steps'}, each with a link <span class="apv-trail-last">· latest: ${esc(apvDayLabel(last.day))}, ${esc(last.who)}: ${esc(last.text.slice(0,70))}${last.text.length>70?'…':''}</span></summary>
         ${hidden ? `<div class="apv-trail-more">${hidden} earlier ${hidden===1?'event':'events'} not shown (open the agent’s full work and the task in Airtable for all of it).</div>` : ''}
-        ${out}
+        <div class="apv-trail-list"><div>${out}</div></div>
     </details>`;
 }
 
@@ -2268,6 +2287,9 @@ function apvCardHtml(t){
     const ageH = hoursSince(t.submittedAt);
     const late = ageH !== null && ageH > 24;
     const work = askBits.work;
+    // Long enough to cap at eight lines: a wrapped line is counted at 120
+    // characters, about the width of the card on a laptop.
+    const workLong = work.split('\n').reduce((n, l) => n + Math.max(1, Math.ceil(l.length / 120)), 0) > 8;
     const signIn = askBits.signIn;
     const askLine = askBits.askLine;
     const kindText = t.taskType ? esc(t.taskType) : '<span style="color:var(--danger)">not set</span>';
@@ -2298,7 +2320,12 @@ function apvCardHtml(t){
             ${signIn ? '' : `<label class="apv-pick" title="Tick to decide this together with other cards"><input type="checkbox" data-apv-pick${_apvSelected.has(t.id)?' checked':''} onchange="apvPick('${t.id}', this.checked)" aria-label="Select this card"></label>`}
             ${t.priority==='Urgent' ? '<span class="apv-chip" style="background:var(--danger-bg);color:var(--danger)">Urgent</span>' : ''}
             <span class="apv-chip">${esc(agent)}</span>
-            ${t.taskType ? `<span class="apv-chip">${esc(t.taskType)}</span>` : ''}
+            <span class="apv-kind" id="apvKind-${t.id}">Kind of work: <strong>${kindText}</strong><a onclick="const k=document.getElementById('apvKind-${t.id}');k.querySelector('select').style.display='';this.style.display='none'">change</a>
+                <select class="apv-type" id="apvType-${t.id}" style="${t.taskType?'display:none':''};margin-left:6px">
+                    <option value="">Not set</option>
+                    ${TASK_TYPE_OPTIONS.map(o=>`<option value="${o}" ${t.taskType===o?'selected':''}>${o}</option>`).join('')}
+                </select>
+            </span>
             ${(()=>{ const w = apvTrigger(t.agentOutput); return w ? `<span class="apv-chip apv-chip-why" data-apv-why title="The agent checked: not already handled, not Roy's, not a machine, no open task. This is the reason it is yours.">Why you: ${esc(w)}</span>` : ''; })()}
             ${(()=>{ const c = apvCoverage(t.notes); return c ? `<span class="apv-chip apv-chip-ok" data-apv-coverage title="${esc(c.full)}">Covers ${esc(c.short)} &#10003;</span>` : ''; })()}
             <span class="apv-age${late?' late':''}" title="Measured from when it was posted for approval (or last changed, if it has not been posted yet)">waiting ${esc(agoText(t.submittedAt))}</span>
@@ -2317,49 +2344,67 @@ function apvCardHtml(t){
                 <span><strong>To:</strong> ${esc(e.to)}</span>
             </div>`;
         })()}
-        <details class="apv-details"${_apvOpen.work.has(t.id)?' open':''} ontoggle="if(this.open)_apvOpen.work.add('${t.id}');else _apvOpen.work.delete('${t.id}')">
-            <summary>${work ? 'Read the agent’s full work' : 'The agent left its work empty'}</summary>
+        <details class="apv-details"${_apvOpen.workShut.has(t.id)?'':' open'} ontoggle="if(this.open)_apvOpen.workShut.delete('${t.id}');else _apvOpen.workShut.add('${t.id}')">
+            <summary>${work ? 'The agent’s full work' : 'The agent left its work empty'}</summary>
             ${work
-                ? `<div class="apv-body">${apvLinkify(work)}</div>`
+                ? `<div class="apv-body${workLong ? (_apvOpen.workFull.has(t.id) ? ' apv-full' : ' apv-clamp') : ''}" data-apv-work>${apvLinkify(work)}</div>${workLong
+                    ? `<button type="button" class="apv-show-all" data-apv-show-all onclick="apvShowAllWork('${t.id}', this)">${_apvOpen.workFull.has(t.id) ? 'Show less' : 'Show all'}</button>` : ''}`
                 : `<div class="apv-body">The agent left its work empty, so there is nothing here to judge. Do not approve it blind. Use Request changes and tell it to show its work.</div>`}
-            ${t.description ? `<div style="font-size:var(--fs-xs);font-weight:var(--fw-semibold);color:var(--text-secondary);margin-top:8px">The task it was given</div><div class="apv-body">${esc(t.description)}</div>` : ''}
+            ${t.description ? `<div style="font-size:var(--fs-xs);font-weight:var(--fw-semibold);color:var(--text-secondary);margin-top:8px">The task it was given</div><div class="apv-body" data-apv-given>${esc(t.description)}</div>` : ''}
         </details>
         ${apvDocumentLineHtml(t, askLine)}
         ${apvTrailHtml(t)}
-        ${signIn ? `<div class="apv-actions" data-apv-signin-actions>
-            <a class="btn btn-success" href="${esc(apvSignInLink(signIn))}" title="Opens the Robot sign-in app on your Mac at this site. Sign in, then Cmd+Q.">Sign in now</a>
-            <button class="apv-more" type="button" onclick="apvToggle('${t.id}','panel')" title="Knock it back, or send it back to the agent">More &#9662;</button>
-        </div>` : `<div class="apv-actions">
-            <button class="btn btn-success" data-apv-btn onclick="agDecide('${t.id}','Approved as-is')" title="Approved as it is. The agent carries it out.">Approve</button>
-            <button class="btn btn-danger" data-apv-btn onclick="apvToggle('${t.id}','reasons')" title="Opens the reasons. One tap on a reason closes it.">No</button>
-            <button class="apv-more" type="button" onclick="apvToggle('${t.id}','panel')" title="Approve with an edit, send it back with a note, knock it back to a date, attach a file, change the kind of work">More &#9662;</button>
-        </div>`}
-        ${signIn ? '' : apvReasonChips(t.id)}
-        <div class="apv-panel${_apvOpen.panel.has(t.id)?' open':''}" id="apvPanel-${t.id}">
-            <textarea class="apv-note" id="apvNote-${t.id}" placeholder="What needs changing, or a note to go with your decision. Easier to say than type? Paste a Loom link and the agent reads what you said."></textarea>
-            <div class="apv-attach" id="apvDrop-${t.id}"
-                 ondragover="event.preventDefault();this.classList.add('apv-drop-over')"
-                 ondragleave="this.classList.remove('apv-drop-over')"
-                 ondrop="event.preventDefault();this.classList.remove('apv-drop-over');apvQueueFiles('${t.id}', event.dataTransfer.files)">
-                <label class="apv-attach-btn" for="apvFile-${t.id}" title="Attach a screenshot, letter or document, or drop one here. It goes onto the task with your feedback.">&#128206; Attach a file <span style="font-weight:var(--fw-regular);color:var(--text-muted)">or drop one here</span></label>
-                <input type="file" id="apvFile-${t.id}" multiple style="display:none"
-                       onchange="apvQueueFiles('${t.id}', this.files); this.value='';">
-                <span id="apvFiles-${t.id}" class="apv-file-list">${apvFileChipsHtml(t.id)}</span>
+        <div class="apv-decide" data-apv-decide>
+            ${signIn ? `<div class="apv-actions" data-apv-signin-actions>
+                <a class="btn btn-success" href="${esc(apvSignInLink(signIn))}" title="Opens the Robot sign-in app on your Mac at this site. Sign in, then Cmd+Q.">Sign in now</a>
+                ${apvNoteRowHtml(t.id, 'Optional: what are you waiting for? Kept with a knock-back.', false)}
+            </div>` : `<div class="apv-actions">
+                <button class="btn btn-success" data-apv-btn onclick="agDecide('${t.id}','Approved as-is')" title="Approved as it is. The agent carries it out.">Approve</button>
+                ${apvNoteRowHtml(t.id, 'Feedback or an edit for the agent', true)}
+                <button class="btn" data-apv-btn onclick="agDecide('${t.id}','Approved with minor edits')" title="Approved, but you tidied it first. Say the edit in the box; the agent applies exactly that. Still counts as accurate.">Approve with minor edits</button>
+                <button class="btn" data-apv-btn onclick="agDecide('${t.id}','Changes requested')" title="Goes back to the agent to redo. Say what needs changing in the box. The agent must answer every point you make.">Request changes</button>
             </div>
-            <div class="apv-kind" id="apvKind-${t.id}">Kind of work: <strong>${kindText}</strong><a onclick="const k=document.getElementById('apvKind-${t.id}');k.querySelector('select').style.display='';this.style.display='none'">change</a>
-                <select class="apv-type" id="apvType-${t.id}" style="${t.taskType?'display:none':''};margin-left:6px">
-                    <option value="">Not set</option>
-                    ${TASK_TYPE_OPTIONS.map(o=>`<option value="${o}" ${t.taskType===o?'selected':''}>${o}</option>`).join('')}
-                </select>
-            </div>
-            ${signIn ? '' : `<div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:8px">
-                <button class="btn" data-apv-btn onclick="agDecide('${t.id}','Approved with minor edits')" title="Approved, but you tidied it first. Say the edit in the note; the agent applies exactly that. Still counts as accurate.">Approve with minor edits</button>
-                <button class="btn" data-apv-btn onclick="agDecide('${t.id}','Changes requested')" title="Goes back to the agent to redo. Needs a note. The agent must answer every point you make.">Request changes</button>
-            </div>`}
+            <div id="apvFiles-${t.id}" class="apv-file-list">${apvFileChipsHtml(t.id)}</div>
+            ${apvReasonChips(t.id)}`}
             ${apvDeferRow(t.id)}
         </div>
     </div>`;
 }
+
+// The note box sits in the decide row, open on every card: typing and one
+// click is the whole of feedback. It is also where a file is dropped, and
+// the "what are you waiting for" line a knock-back keeps. A sign-in wait has
+// no decision to carry a file, so its box has no Attach.
+function apvNoteRowHtml(taskId, placeholder, withAttach){
+    const note = `<textarea class="apv-note" id="apvNote-${taskId}" rows="1" placeholder="${esc(placeholder)}" title="Easier to say than type? Paste a Loom link and the agent reads what you said." oninput="apvGrowNote(this)"></textarea>`;
+    // No .apv-attach here: that class is what lets a drop through the page-wide
+    // guard, and this box has no drop handler to catch it.
+    if(!withAttach) return `<div class="apv-note-row">${note}</div>`;
+    return `<div class="apv-attach apv-note-row" id="apvDrop-${taskId}"
+             ondragover="event.preventDefault();this.classList.add('apv-drop-over')"
+             ondragleave="this.classList.remove('apv-drop-over')"
+             ondrop="event.preventDefault();this.classList.remove('apv-drop-over');apvQueueFiles('${taskId}', event.dataTransfer.files)">
+            ${note}
+            <label class="apv-attach-btn" for="apvFile-${taskId}" title="Attach a screenshot, letter or document, or drop one on the box. It goes onto the task with your decision.">&#128206; Attach</label>
+            <input type="file" id="apvFile-${taskId}" multiple style="display:none"
+                   onchange="apvQueueFiles('${taskId}', this.files); this.value='';">
+        </div>`;
+}
+function apvGrowNote(el){
+    el.style.height = 'auto';
+    el.style.height = el.scrollHeight + 'px';
+}
+window.apvGrowNote = apvGrowNote;
+
+// "Show all" on a long piece of work, remembered per card so a redraw keeps it.
+function apvShowAllWork(taskId, btn){
+    const body = btn.previousElementSibling;
+    const full = !_apvOpen.workFull.has(taskId);
+    if(full) _apvOpen.workFull.add(taskId); else _apvOpen.workFull.delete(taskId);
+    if(body){ body.classList.toggle('apv-clamp', !full); body.classList.toggle('apv-full', full); }
+    btn.textContent = full ? 'Show less' : 'Show all';
+}
+window.apvShowAllWork = apvShowAllWork;
 
 // Record Kevin's verdict — the SAME writes as the Tasks drawer's apvDecide and
 // the Slack loop's applyDecision. This page is the third face of the ONE
@@ -2420,9 +2465,10 @@ let _apvReason = {};
 // (usability audit: two clicks and a 500px mouse trip for every no). The code
 // stays behind this flag for one release in case Kevin wants it back.
 const APV_LEGACY_REJECT_DIALOG = false;
-// Open "Read the agent's full work" panels and open More panels, by task id,
-// so a decision on one card never snaps the others shut (finding 4).
-const _apvOpen = { work: new Set(), panel: new Set(), reasons: new Set(), trail: new Set() };
+// Everything on a card starts open since 23 Sep 2026. These record, by task
+// id, what Kevin folded shut or expanded with "Show all", so a redraw after a
+// decision on one card never changes another (finding 4).
+const _apvOpen = { workShut: new Set(), workFull: new Set(), trailShut: new Set() };
 
 // ONE TAP, NO DIALOG (Kevin, 7 Sep 2026, usability audit finding 7): a reason
 // chip IS the rejection. The Remember box lives here, at the moment of
@@ -2431,7 +2477,7 @@ const _apvOpen = { work: new Set(), panel: new Set(), reasons: new Set(), trail:
 // open the note and a Reject button in place, never a dialog in the middle of
 // the screen. A wrong tap has a five-second Undo.
 function apvReasonChips(taskId){
-    return `<div class="apv-reasons${_apvOpen.reasons.has(taskId)?' open':''}" id="apvReasons-${taskId}" role="group" aria-label="Why are you rejecting this?">
+    return `<div class="apv-reasons" id="apvReasons-${taskId}" role="group" aria-label="Why are you rejecting this?">
         <span class="apv-reasons-label">No, because&hellip;</span>
         ${APV_REASONS.map(r=>`<button class="apv-reason${r.countsAgainstDraft?' apv-reason-quality':''}"
              data-apv-btn onclick="agRejectWithReason('${taskId}','${esc(r.key)}')"
@@ -2444,7 +2490,7 @@ function apvReasonChips(taskId){
             <input type="checkbox" id="apvRemember-${taskId}" checked style="margin:0"> Remember this
         </label>
         <span class="apv-reject-note" id="apvRejectNote-${taskId}" style="display:none;flex-basis:100%;margin-top:6px">
-            <textarea class="apv-note" id="apvNote2-${taskId}" placeholder="Say what is wrong, in a sentence. The agent reads exactly this." oninput="const n=document.getElementById('apvNote-${taskId}'); if(n) n.value=this.value;"></textarea>
+            <span class="apv-reasons-label">Say what is wrong in the box above, in a sentence. The agent reads exactly that. Then</span>
             <button class="btn btn-danger btn-sm" data-apv-btn onclick="agRejectNow('${taskId}')">Reject</button>
         </span>
     </div>`;
@@ -2491,8 +2537,12 @@ function agRejectWithReason(taskId, reasonKey){
     if(noteEl && !noteEl.value.trim() && r.note) noteEl.value = r.note;
     const needsWords = r.countsAgainstDraft || r.key === APV_UNCLASSIFIED;
     if(needsWords && noteEl && !noteEl.value.trim()){
+        // ONE box (23 Sep 2026): the card's note is always open now, so the
+        // words go there. A second box beside it let an edit in one be lost
+        // to the other.
         const slot = document.getElementById('apvRejectNote-'+taskId);
-        if(slot){ slot.style.display = ''; const n2 = document.getElementById('apvNote2-'+taskId); if(n2) n2.focus(); }
+        if(slot) slot.style.display = '';
+        noteEl.focus();
         return;
     }
     agRejectNow(taskId);
@@ -2502,36 +2552,17 @@ window.agRejectWithReason = agRejectWithReason;
 // The commit: reads the card's own Remember box at the moment of the tap.
 function agRejectNow(taskId){
     const noteEl = document.getElementById('apvNote-'+taskId);
-    const n2 = document.getElementById('apvNote2-'+taskId);
-    if(n2 && n2.value.trim() && noteEl) noteEl.value = n2.value.trim();
     const note = (noteEl && noteEl.value || '').trim();
     if(!note){
         const slot = document.getElementById('apvRejectNote-'+taskId);
-        if(slot){ slot.style.display = ''; if(n2) n2.focus(); }
+        if(slot) slot.style.display = '';
+        if(noteEl) noteEl.focus();
         return;
     }
     const box = document.getElementById('apvRemember-'+taskId);
     applyApprovalDecision(taskId, 'Rejected', !!(box && box.checked));
 }
 window.agRejectNow = agRejectNow;
-
-// The card's two toggles: "No" opens the reasons, "More" opens everything
-// else. Nothing on the card moves except the panel that opens.
-// Which ones are open is RECORDED (15 Sep 2026): a knock-back or bring-back
-// rebuilds the list, and until now every open More panel snapped shut.
-function apvToggle(taskId, which){
-    const el = document.getElementById((which === 'reasons' ? 'apvReasons-' : 'apvPanel-') + taskId);
-    if(!el) return;
-    const open = el.classList.toggle('open');
-    const set = which === 'reasons' ? _apvOpen.reasons : _apvOpen.panel;
-    if(open) set.add(taskId); else set.delete(taskId);
-    if(which === 'reasons' && open){
-        const other = document.getElementById('apvPanel-'+taskId);
-        if(other) other.classList.remove('open');
-        _apvOpen.panel.delete(taskId);
-    }
-}
-window.apvToggle = apvToggle;
 
 // mechanism, never a new one. Reject asks for confirmation first.
 function agDecide(taskId, outcome, remember){
@@ -2814,7 +2845,7 @@ window.applyApprovalDecision = applyApprovalDecision;
 
 // Card state strips. The card keeps its place in the list until it folds.
 const APV_UNDO_MS = 5000;
-const _apvUndo = {};   // taskId → { t, payload, timer }
+const _apvUndo = {};   // taskId → { t, payload, timer, kind }
 function apvStateStrip(taskId, cls, text, extraHtml){
     const card = document.querySelector(`[data-apv-card="${taskId}"]`);
     if(!card) return null;
@@ -2830,7 +2861,7 @@ function apvShowSaving(taskId, what){
     if(card) card.classList.add('apv-saving');
     apvStateStrip(taskId, 'saving', `Saving ${what}…`);
 }
-function apvShowSaved(taskId, t, text, undoPayload){
+function apvShowSaved(taskId, t, text, undoPayload, kind){
     const card = document.querySelector(`[data-apv-card="${taskId}"]`);
     if(!card) return;
     card.classList.remove('apv-saving');
@@ -2839,7 +2870,7 @@ function apvShowSaved(taskId, t, text, undoPayload){
     Array.from(card.children).forEach(ch=>{ if(!ch.classList.contains('apv-state')) ch.style.display = 'none'; });
     apvStateStrip(taskId, 'saved', `Saved. ${text}`, `<button class="apv-undo" type="button" data-apv-undo onclick="apvUndo('${taskId}')">Undo</button>`);
     const timer = setTimeout(()=>apvFoldAway(taskId), APV_UNDO_MS);
-    _apvUndo[taskId] = { t, payload: undoPayload, timer };
+    _apvUndo[taskId] = { t, payload: undoPayload, timer, kind: kind || 'decision' };
     apvScrollToFirstCard();
 }
 
@@ -2905,8 +2936,19 @@ async function apvUndo(taskId){
     const card = document.querySelector(`[data-apv-card="${taskId}"]`);
     apvStateStrip(taskId, 'saving', 'Undoing…');
     try {
-        await atUpdate(TASKS_TBL, taskId, u.payload);
-        await postTaskComment(taskId, 'Undone by Kevin within five seconds. Back in the approval queue, not decided.');
+        const back = await atUpdate(TASKS_TBL, taskId, u.payload);
+        // The Undo is itself a write, so the card comes back carrying the
+        // record's new modified time. With the old one, the stale guard
+        // refused the very next click on the card and reloaded the queue.
+        const lmt = back && back.fields && back.fields[TF.lmt];
+        if(lmt) u.t = Object.assign({}, u.t, { lmt });
+        await postTaskComment(taskId, u.kind === 'defer'
+            ? 'Knock-back undone by Kevin within five seconds. Back in the approval queue.'
+            : 'Undone by Kevin within five seconds. Back in the approval queue, not decided.');
+        if(u.kind === 'defer'){
+            allDeferred = allDeferred.filter(x=>x.id!==taskId);
+            apvRefreshDeferredLane();
+        }
         allApprovals.push(u.t);
         allApprovals.sort((a,b)=>apvRank(b)-apvRank(a));
         if(card){
@@ -2991,11 +3033,13 @@ function apvDaysUntil(iso){
     return Math.round((t - now) / 86400000);
 }
 
+// ONE CLICK (Kevin, 23 Sep 2026): "when I want to knock it back, I don't
+// want to have to click a checkbox and then a Knock Back button". The date IS
+// the knock-back, the way a reason chip is the no. The "Knock this back?"
+// dialog is gone: what he is waiting for is whatever is in the card's note
+// box, and a wrong tap has the same five-second Undo as every decision.
 function agDefer(taskId, days){
-    const t = allApprovals.find(x=>x.id===taskId);
-    if(!t) return;
-    const until = apvDatePlus(days);
-    apvConfirmDefer(taskId, until);
+    apvDeferNow(taskId, apvDatePlus(days));
 }
 window.agDefer = agDefer;
 
@@ -3010,40 +3054,9 @@ function agDeferOnDate(taskId){
         toast('Pick a date after today — anything earlier leaves it in the queue.');
         return;
     }
-    apvConfirmDefer(taskId, until);
+    apvDeferNow(taskId, until);
 }
 window.agDeferOnDate = agDeferOnDate;
-
-function apvConfirmDefer(taskId, until){
-    const t = allApprovals.find(x=>x.id===taskId);
-    if(!t) return;
-    const noteEl = document.getElementById('apvNote-'+taskId);
-    const note = (noteEl && noteEl.value || '').trim();
-    const n = apvDaysUntil(until);
-    showModal('Knock this back?',
-        `<p style="font-size:var(--fs-sm);color:var(--text-secondary);line-height:1.6">
-            It leaves your queue, Slack and the CEO brief until
-            <strong>${esc(apvDeferDateLabel(until))}</strong>${n!==null?` (${n} day${n===1?'':'s'})`:''},
-            then comes back on its own with the agent&rsquo;s work exactly as it is now.
-            Nothing is approved, nothing is sent, and it does not count against
-            ${esc(teamName(t.raiserId) || 'the agent')}.
-         </p>
-         <label style="display:block;font-size:var(--fs-xs);font-weight:var(--fw-semibold);color:var(--text-secondary);margin-top:12px">
-            What are you waiting for? <span style="font-weight:var(--fw-regular);color:var(--text-muted)">Optional, but you will be glad of it in ${n!==null&&n>1?n+' days':'a few days'}.</span></label>
-         <input type="text" id="apvDeferWhy" value="${esc(note)}"
-                placeholder="e.g. waiting on the Companies House authentication code"
-                style="width:100%;margin-top:5px;padding:8px 10px;border:1px solid var(--border-default);border-radius:var(--radius-md);font-family:inherit;font-size:var(--fs-sm)">`,
-        `<button class="btn" onclick="closeModal()">Cancel</button>
-         <button class="btn btn-primary" onclick="agConfirmDefer('${taskId}','${esc(until)}')">Knock it back</button>`);
-}
-
-function agConfirmDefer(taskId, until){
-    const el = document.getElementById('apvDeferWhy');
-    const why = (el && el.value || '').trim();
-    closeModal();
-    applyApprovalDefer(taskId, until, why);
-}
-window.agConfirmDefer = agConfirmDefer;
 
 // The write, shared by the card and the bulk bar. Same stale guard as a
 // decision: a card shows what was true when it rendered, and deferring
@@ -3075,23 +3088,64 @@ async function apvDeferWrite(taskId, until, why){
     return true;
 }
 
-async function applyApprovalDefer(taskId, until, why){
+// Saved in place, like a decision: the card says so where his eye already
+// is, offers Undo for five seconds, then folds away. The knocked-back list
+// above the queue gains the task at once, so it never looks lost.
+async function apvDeferNow(taskId, until){
     const t = allApprovals.find(x=>x.id===taskId);
     if(!t) return;
+    const noteEl = document.getElementById('apvNote-'+taskId);
+    // One line: the knocked-back list reads the reason back off one line of
+    // Feedback History, and the note box takes several.
+    const why = (noteEl && noteEl.value || '').replace(/\s+/g, ' ').trim();
     const card = document.querySelector(`[data-apv-card="${taskId}"]`);
     const btns = card ? Array.from(card.querySelectorAll('[data-apv-btn]')) : [];
     btns.forEach(b=>{ b.disabled = true; });
+    apvShowSaving(taskId, 'your knock-back');
     try {
         const ok = await apvDeferWrite(taskId, until, why);
-        if(!ok) toast('Already decided elsewhere (Slack or the Tasks drawer). Reloading the queue.');
-        await refreshApprovalZone(true);
-        if(ok) toast('Knocked back to ' + apvDeferDateLabel(until) + '.');
+        if(!ok){
+            toast('Already decided elsewhere (Slack or the Tasks drawer). Reloading the queue.');
+            await refreshApprovalZone(true);
+            return;
+        }
+        allApprovals = allApprovals.filter(x=>x.id!==taskId);
+        delete _apvDrafts[taskId];
+        allDeferred = allDeferred.filter(x=>x.id!==taskId).concat([{
+            id: taskId, name: t.name, raiserId: t.raiserId, until, tier1: t.tier1, why,
+        }]).sort((a,b)=>String(a.until).localeCompare(String(b.until)));
+        apvRefreshDeferredLane();
+        apvShowSaved(taskId, t, `Knocked back to ${apvDeferDateLabel(until)}. It comes back on its own that day.`,
+            { [TF.deferredUntil]: null }, 'defer');
+        apvSyncCountsInPlace(taskId);
+        postApprovalBadge();
+        loadChecksAndRender();
+        renderRegister();
     } catch(e){
-        if(e.message==='auth') return;
+        if(e.message==='auth'){ btns.forEach(b=>{ b.disabled = false; }); return; }
         console.error('defer failed', e);
-        toast('Could not knock it back: ' + (e && e.message || e));
+        if(card) card.classList.remove('apv-saving');
+        apvStateStrip(taskId, 'failed', 'Not knocked back. ' + (e && e.message || e),
+            `<button class="apv-undo" type="button" data-apv-retry onclick="apvDeferNow('${taskId}','${esc(until)}')">Try again</button>`);
         btns.forEach(b=>{ b.disabled = false; });
     }
+}
+window.apvDeferNow = apvDeferNow;
+
+// The knocked-back list, redrawn on its own so the cards below keep their
+// place, their open sections and whatever Kevin has typed.
+function apvRefreshDeferredLane(){
+    const body = document.getElementById('approvalsBody');
+    if(!body) return;
+    // Either shape the lane takes: the list, or the banner saying it failed.
+    const old = body.querySelector(':scope > [data-apv-later]');
+    const holder = document.createElement('div');
+    holder.innerHTML = apvDeferredLaneHtml();
+    const fresh = holder.firstElementChild;
+    if(fresh && old && old.open) fresh.open = true;
+    if(old && fresh) old.replaceWith(fresh);
+    else if(old) old.remove();
+    else if(fresh) body.insertBefore(fresh, body.firstChild);
 }
 
 // Bring one back now — the way out of a knock-back that was wrong, or that

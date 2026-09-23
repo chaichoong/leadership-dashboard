@@ -299,25 +299,26 @@ test.describe('the view returns to the first card', () => {
     expect(await page.evaluate(() => window.pageYOffset)).toBeGreaterThan(there - 120);
   });
 
-  test('after Knock back the rebuilt list opens on the first card and keeps open More panels', async ({ page }) => {
+  test('a one-click Knock back on a card far down saves in place: the first card goes to the top, nothing typed is lost', async ({ page }) => {
     const patches = await mockAgentsPage(page, withMany());
     await loadAgentsPage(page);
     await openApprovals(page);
-    // Open the second card's More panel, then knock back the last card.
-    await page.locator('.apv-card').nth(1).locator('.apv-more').click();
-    await expect(page.locator('.apv-card').nth(1).locator('.apv-panel')).toBeVisible();
+    const before = await page.locator('.apv-card').count();
+    // A half-written note on the second card, then knock back the last card.
+    const second = page.locator('.apv-card').nth(1);
+    const secondId = await second.getAttribute('data-apv-card');
+    await second.locator('#apvNote-' + secondId).fill('Check the dates with Roy first.');
     await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight));
     const last = page.locator('.apv-card').last();
     const lastId = await last.getAttribute('data-apv-card');
-    await last.locator('.apv-more').click();
     await last.locator('.apv-defer-btn', { hasText: 'A week' }).first().click();
-    await page.locator('button', { hasText: 'Knock it back' }).last().click();
     await expect.poll(() => patches.some((p) => p.id === lastId)).toBe(true);
-    await expect(page.locator('#toast')).toContainText('Knocked back to');
-    // The list was rebuilt (the mock returns the full queue again), the
-    // second card's More panel is still open, and the first card is at the top.
-    await expect(page.locator('.apv-card').nth(1).locator('.apv-panel')).toBeVisible();
+    await expect(page.locator(`[data-apv-card="${lastId}"] [data-apv-state="saved"]`)).toContainText('Knocked back to');
+    // No rebuild: the note is still there, and the first card is at the top.
+    await expect(page.locator('#apvNote-' + secondId)).toHaveValue('Check the dates with Roy first.');
     await expectFirstCardAtTop(page);
+    await expect(page.locator('.apv-card')).toHaveCount(before - 1, { timeout: 8000 });
+    await expect(page.locator('#apvNote-' + secondId)).toHaveValue('Check the dates with Roy first.');
   });
 
   test('a bulk knock back returns to the first card once, not once per card', async ({ page }) => {

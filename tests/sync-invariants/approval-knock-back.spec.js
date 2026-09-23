@@ -40,16 +40,16 @@ async function openApprovals(page) {
   await expect(page.locator('#view-approvals')).toBeVisible();
 }
 
-/** Knock the first card back by clicking one of the preset buttons. */
+/** Knock the first card back with ONE click on a preset date (23 Sep 2026:
+ *  no More panel to open, no dialog to confirm). What he is waiting for is
+ *  whatever is in the card's note box when he clicks. */
 async function knockBack(page, patches, label = 'A week', why = '') {
   await openApprovals(page);
   const card = page.locator('.apv-card').first();
   const taskId = await card.getAttribute('data-apv-card');
-  // Knock-back lives behind "More" since 7 Sep 2026 (two buttons on the card).
-  await card.locator('.apv-more').click();
+  if (why) await card.locator('#apvNote-' + taskId).fill(why);
   await card.locator('.apv-defer-btn', { hasText: label }).first().click();
-  if (why) await page.locator('#apvDeferWhy').fill(why);
-  await page.locator('button', { hasText: 'Knock it back' }).last().click();
+  await expect(page.locator('#apvDeferWhy')).toHaveCount(0);
   await expect.poll(() => patches.some((p) => p.id === taskId)).toBe(true);
   return { taskId, patch: patches.find((p) => p.id === taskId) };
 }
@@ -62,10 +62,37 @@ test.describe('knocking an approval back', () => {
     const cards = page.locator('.apv-card');
     const n = await cards.count();
     expect(n).toBeGreaterThan(0);
+    // On show, with nothing opened first (23 Sep 2026).
     for (let i = 0; i < n; i++) {
-      await cards.nth(i).locator('.apv-more').click();
       await expect(cards.nth(i).locator('.apv-defer-btn', { hasText: 'A week' }).first()).toBeVisible();
     }
+    await expect(page.locator('.apv-more')).toHaveCount(0);
+  });
+
+  test('one click knocks it back in place, and Undo puts it straight back', async ({ page }) => {
+    const patches = await mockAgentsPage(page);
+    await loadAgentsPage(page);
+    await openApprovals(page);
+    const before = await page.locator('.apv-card').count();
+    const card = page.locator('.apv-card').first();
+    const taskId = await card.getAttribute('data-apv-card');
+    // The only click: the date.
+    await card.locator('.apv-defer-btn', { hasText: '3 days' }).first().click();
+    await expect.poll(() => patches.filter((p) => p.id === taskId).length).toBe(1);
+    expect(patches.find((p) => p.id === taskId).fields[TF.deferredUntil]).toBe(isoPlus(3));
+    // Saved where his eye is, with Undo; the list above already counts it.
+    await expect(card.locator('[data-apv-state="saved"]')).toContainText('Knocked back to');
+    await expect(page.locator('.apv-later summary')).toContainText('1 knocked back');
+    await expect(page.locator('#approvalsTabBadge')).toHaveText(String(before - 1));
+    // Undo clears the date and nothing else, and the card is back.
+    await card.locator('[data-apv-undo]').click();
+    await expect.poll(() => patches.filter((p) => p.id === taskId).length).toBe(2);
+    const undo = patches.filter((p) => p.id === taskId)[1];
+    expect(Object.keys(undo.fields)).toEqual([TF.deferredUntil]);
+    expect(undo.fields[TF.deferredUntil]).toBeNull();
+    await expect(page.locator('.apv-later')).toHaveCount(0);
+    await expect(page.locator(`[data-apv-card="${taskId}"] .apv-defer-btn`, { hasText: '3 days' })).toBeVisible();
+    await expect(page.locator('.apv-card')).toHaveCount(before);
   });
 
   test('it writes ONLY the date and his note — no verdict, no status change', async ({ page }) => {
@@ -133,13 +160,37 @@ test.describe('knocking an approval back', () => {
     expect(patches.length).toBeGreaterThan(0);
   });
 
+  test('a knock-back while the knocked-back list failed to load leaves one warning, not a stack of them', async ({ page }) => {
+    const patches = await mockAgentsPage(page);
+    // Registered after the mock, so it wins: only the knocked-back read fails.
+    await page.route('**/api.airtable.com/**', (route) => {
+      const decoded = decodeURIComponent(route.request().url().replace(/\+/g, ' '));
+      if (route.request().method() === 'GET' && decoded.includes(', IS_AFTER({Deferred Until}')) {
+        return route.fulfill({ status: 500, contentType: 'application/json', body: '{"error":"SERVER_ERROR"}' });
+      }
+      return route.fallback();
+    });
+    await loadAgentsPage(page);
+    await openApprovals(page);
+    await expect(page.locator('#approvalsBody > [data-apv-later]')).toHaveCount(1);
+    await expect(page.locator('#approvalsBody > [data-apv-later]')).toContainText('Could not load what you have knocked back');
+    const card = page.locator('.apv-card').first();
+    const taskId = await card.getAttribute('data-apv-card');
+    await card.locator('.apv-defer-btn', { hasText: 'A week' }).first().click();
+    await expect.poll(() => patches.some((p) => p.id === taskId)).toBe(true);
+    await expect(card.locator('[data-apv-state="saved"]')).toBeVisible();
+    await expect(page.locator('#approvalsBody > [data-apv-later]')).toHaveCount(1);
+    await card.locator('[data-apv-undo]').click();
+    await expect.poll(() => patches.filter((p) => p.id === taskId).length).toBe(2);
+    await expect(page.locator('#approvalsBody > [data-apv-later]')).toHaveCount(1);
+  });
+
   test('a date in the past is refused rather than silently doing nothing', async ({ page }) => {
     const patches = await mockAgentsPage(page);
     await loadAgentsPage(page);
     await openApprovals(page);
     const card = page.locator('.apv-card').first();
     const taskId = await card.getAttribute('data-apv-card');
-    await card.locator('.apv-more').click();
     await card.locator('#apvDeferDate-' + taskId).fill(isoPlus(-3));
     await card.locator('.apv-defer-btn', { hasText: 'Go' }).click();
     // No confirm dialog, no write: a "defer" that leaves the task exactly
@@ -235,18 +286,17 @@ test.describe('nothing is hidden without being reported', () => {
 });
 
 test.describe('the reject option Kevin asked for', () => {
-  test('"No" opens the reasons, and his own words are one of them', async ({ page }) => {
+  test('the reasons are on the card, and his own words are one of them', async ({ page }) => {
     // Before this, the ONLY route to a rejection was one of seven preset
     // reasons. If none of them fitted, there was no way to reject at all.
-    // Since 7 Sep 2026 the card has two buttons; "No" opens the reasons and
-    // "Something else" is the route for his own words.
+    // "Something else" is the route for his own words. Since 23 Sep 2026 the
+    // reasons show without a "No" click first.
     await mockAgentsPage(page);
     await loadAgentsPage(page);
     await openApprovals(page);
     const card = page.locator('.apv-card').first();
-    await expect(card.locator('.apv-actions button', { hasText: /^No$/ })).toBeVisible();
-    await expect(card.locator('.apv-reasons')).toBeHidden();
-    await card.locator('.apv-actions button', { hasText: /^No$/ }).click();
+    await expect(card.locator('.apv-actions button', { hasText: /^No$/ })).toHaveCount(0);
+    await expect(card.locator('.apv-reasons')).toBeVisible();
     await expect(card.locator('.apv-reason', { hasText: 'Something else' })).toBeVisible();
   });
 
@@ -259,13 +309,12 @@ test.describe('the reject option Kevin asked for', () => {
 
     // Empty first: an unexplained rejection counts against the agent with
     // nothing to learn from, which is what the chips were built to stop.
-    await card.locator('.apv-actions button', { hasText: /^No$/ }).click();
     await card.locator('.apv-reason', { hasText: 'Something else' }).first().click();
-    await expect(card.locator('#apvNote2-' + taskId)).toBeVisible();
+    await expect(card.locator('#apvNote-' + taskId)).toBeFocused();
     await card.locator('#apvRejectNote-' + taskId + ' button', { hasText: 'Reject' }).click();
     expect(patches.filter((p) => p.id === taskId)).toHaveLength(0);
 
-    await card.locator('#apvNote2-' + taskId).fill('Companies House changed the form, this whole approach is dead.');
+    await card.locator('#apvNote-' + taskId).fill('Companies House changed the form, this whole approach is dead.');
     await card.locator('#apvRejectNote-' + taskId + ' button', { hasText: 'Reject' }).click();
     await expect.poll(() => patches.some((p) => p.id === taskId)).toBe(true);
     const patch = patches.find((p) => p.id === taskId);

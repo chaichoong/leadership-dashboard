@@ -78,11 +78,11 @@ test.describe('AI Agents page tabs', () => {
     // rejections Kevin had ever made were classified that day and not one was
     // about the draft, so the card asks which kind it is and records the answer
     // — the same close, one tap instead of a typed paragraph.
-    // Since 7 Sep 2026 the reasons open on "No" and one tap on a reason IS the
-    // close: no dialog, a "Saved" line in place, and a five-second Undo.
+    // One tap on a reason IS the close: no dialog, a "Saved" line in place,
+    // and a five-second Undo. Since 23 Sep 2026 the reasons are always on the
+    // card, with no "No" button to open them first.
     const first = page.locator('.apv-card').first();
-    await expect(first.locator('.apv-reasons')).toBeHidden();
-    await first.locator('.apv-actions button', { hasText: /^No$/ }).click();
+    await expect(first.locator('.apv-reasons')).toBeVisible();
     // Seven kinds of no plus "Something else" for his own words.
     await expect(first.locator('.apv-reason')).toHaveCount(8);
     await expect(first.locator('.apv-reasons')).toContainText('No, because');
