@@ -90,4 +90,43 @@ describe('send-email refuses an approval nobody gave', () => {
     expect(r.sent).toBe(false);
     expect(r.refusal).toMatch(/is not approved/);
   });
+
+  it('a bare date or an unreadable time refuses cleanly, never with a crash', () => {
+    expect(load({ ...genuine, approvedAt: '2026-09-23' }).sent).toBe(true);        // read as UTC midnight, after creation
+    expect(load({ ...genuine, approvedAt: '2026-09-21' }).refusal).toMatch(/earlier than the task itself/);
+    expect(load({ ...genuine, approvedAt: 'yesterday' }).refusal).toMatch(/cannot be read/);
+  });
+});
+
+// The dry run is how an agent proves a payload before the real send. It must not say wouldSend
+// for a forged approval (review, 24 Sep 2026: deleting that clause left every other test green).
+describe('the dry run reports a forged approval as not sendable', () => {
+  function dry(fields) {
+    const out = execFileSync('python3', ['-c', `
+import importlib.util, json, sys, io, argparse, contextlib
+sys.argv = ["send-email.py"]
+spec = importlib.util.spec_from_file_location("se", ${SCRIPT})
+m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m)
+F = {m.AF[k]: v for k, v in json.loads(sys.stdin.read()).items()}
+m.get_task = lambda task_id: {"id": task_id, "createdTime": "2026-09-22T12:00:00.000Z", "fields": F}
+m.already_sent = lambda task_id: None
+buf = io.StringIO()
+with contextlib.redirect_stdout(buf):
+    m.cmd_send(argparse.Namespace(task="recTEST", dry_run=True, rule=None))
+print(json.dumps(json.loads(buf.getvalue())))
+`], { input: JSON.stringify(fields), encoding: 'utf8' });
+    return JSON.parse(out.trim().split('\n').pop());
+  }
+
+  it('forged: wouldSend false, with the reason', () => {
+    const r = dry(base);
+    expect(r.wouldSend).toBe(false);
+    expect(r.approvalProblem).toMatch(/never went through the approval gate/);
+  });
+
+  it('genuine: wouldSend true', () => {
+    const r = dry(genuine);
+    expect(r.wouldSend).toBe(true);
+    expect(r.approvalProblem).toBeNull();
+  });
 });
