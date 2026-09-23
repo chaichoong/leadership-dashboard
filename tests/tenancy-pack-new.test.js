@@ -77,6 +77,15 @@ describe('--new draws the same proof of residency as the main path', () => {
     });
 });
 
+describe('a dry run refuses what the real run would', () => {
+    it('refuses a spec with an unfilled placeholder', () => {
+        expect(() => P.renderPdf({ name: 'x', markdown: 'To [Property line 1]' }, true)).toThrow('unfilled placeholders');
+    });
+    it('passes the whole --new pack without writing anything', () => {
+        for (const spec of pack('5 Dalham Place', 'Jane Testwood')) expect(P.renderPdf(spec, true)).toBeNull();
+    });
+});
+
 describe('--new skips the authority where the main path would', () => {
     it('draws no authority at 5 Dalham Place', () => {
         const specs = pack('5 Dalham Place', 'Jane Testwood');

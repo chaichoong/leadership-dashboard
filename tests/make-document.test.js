@@ -1,6 +1,8 @@
 import { describe, it, expect } from 'vitest';
 import { execFileSync } from 'child_process';
-import { resolve, dirname } from 'path';
+import { existsSync, mkdtempSync, rmSync } from 'fs';
+import { tmpdir } from 'os';
+import { resolve, dirname, join } from 'path';
 import { fileURLToPath } from 'url';
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
@@ -30,6 +32,31 @@ describe('make-document', () => {
       expect(String(e.stderr)).toMatch(/unfilled placeholders/);
       expect(String(e.stderr)).toMatch(/\[Tenant Name\]/);
     }
+    expect(threw).toBe(true);
+  });
+
+  // --check is what make-tenancy-pack.js --dry calls: it must refuse exactly what a
+  // real render refuses, and write nothing when the spec is fine.
+  it('--check accepts a clean spec and writes no PDF', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'make-document-'));
+    const out = join(dir, 'x.pdf');
+    try {
+      const stdout = execFileSync('node', [DOC, '--spec', '-', '--check', '--out', out], {
+        input: JSON.stringify({ name: 'x', markdown: 'To Jane Testwood' }), encoding: 'utf8',
+      });
+      expect(JSON.parse(stdout)).toEqual({ ok: true });
+      expect(existsSync(out)).toBe(false);
+    } finally { rmSync(dir, { recursive: true, force: true }); }
+  });
+
+  it('--check still refuses an unfilled placeholder', () => {
+    let threw = false;
+    try {
+      execFileSync('node', [DOC, '--spec', '-', '--check'], {
+        input: JSON.stringify({ name: 'x', markdown: 'To [Property line 1]' }),
+        encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'],
+      });
+    } catch (e) { threw = true; expect(String(e.stderr)).toMatch(/\[Property line 1\]/); }
     expect(threw).toBe(true);
   });
 

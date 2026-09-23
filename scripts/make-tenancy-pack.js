@@ -131,10 +131,12 @@ function fill(template, map) {
   return s;
 }
 
+// A dry run sends every spec through make-document.js --check, so it refuses what the
+// real run would (23 Sep 2026: --new passed a dry run, then died on unfilled placeholders).
 function renderPdf(spec, dry) {
-  if (dry) { console.log(`   would write ${spec.name}.pdf`); return null; }
-  const out = execFileSync('node', [path.join(__dirname, 'make-document.js'), '--spec', '-'],
+  const out = execFileSync('node', [path.join(__dirname, 'make-document.js'), '--spec', '-', ...(dry ? ['--check'] : [])],
     { input: JSON.stringify(spec), encoding: 'utf8' });
+  if (dry) { console.log(`   would write ${spec.name}.pdf`); return null; }
   return JSON.parse(out).pdf;
 }
 
@@ -390,4 +392,4 @@ async function main(argv) {
 }
 
 if (require.main === module) main(process.argv.slice(2)).catch((e) => die(e.message));
-module.exports = { newTenantPack, proofOfResidencySpec, signsAuthority };
+module.exports = { newTenantPack, proofOfResidencySpec, signsAuthority, renderPdf };
