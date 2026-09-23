@@ -560,3 +560,62 @@ print(json.dumps({"code": code}))
         expect(runner).toMatch(/Record IDs come ONLY from board\.json/);
     });
 });
+
+// Kevin, 23 Sep 2026: "no task without an owner". The stuck rule waits seven days, so a task
+// created with no owner sat unseen: a legal task due in October had been ownerless for five
+// days. The board now lists every ownerless task, any age, and verify fails the
+// slot if one was left with no recorded move. Driven through the real script.
+describe('ownerless tasks get a move every slot', () => {
+    const TM = JSON.stringify(path.join(root, 'scripts/task-manager.py'));
+    function py(body, arg) {
+        const out = execFileSync('python3', ['-c', `
+import json, importlib.util, sys, os, tempfile
+from pathlib import Path
+from datetime import datetime, timezone
+spec = importlib.util.spec_from_file_location("tm", ${TM})
+m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m)
+${body}
+`, arg || '{}'], { encoding: 'utf8' });
+        return JSON.parse(out.trim().split('\n').pop());
+    }
+    const views = `
+now = datetime(2026, 9, 23, 12, 0, tzinfo=timezone.utc)
+def rec(i, f): return {"id": "recTASK00000000%02d" % i, "fields": dict({"Task Name": "t%d" % i, "Created Time": "2026-09-18T10:00:00.000Z"}, **f)}
+recs = [rec(1, {"Status": "Upcoming", "Hard Deadline": True}),                       # nobody: ownerless
+        rec(2, {"Status": "Today", "Team Member": ["recAGENT000000001"]}),              # an agent holds it
+        rec(3, {"Status": "Today", "Assignee": {"email": "someone@example.com"}}),     # a person holds it
+        rec(4, {"Status": "Approval", "Sent For Approval By": ["recAGENT000000001"]}), # a card: its raiser
+        rec(5, {"Status": "Today", "Some Day": True})]                                 # parked on purpose
+buckets = {}
+for r in recs:
+    b, _, v = m.task_view(r, set(), set(), now)
+    buckets.setdefault(b, []).append(v)
+print(json.dumps([v["id"] for v in m.ownerless_views(buckets)]))
+`;
+
+    it('lists a task nobody holds, whatever its age, and nothing that has a holder, a card or a parking', () => {
+        expect(py(views)).toEqual(['recTASK0000000001']);
+    });
+
+    const verify = `
+tmp = tempfile.mkdtemp()
+Path(tmp, "board.json").write_text(json.dumps({"ownerless": [{"id": "recA", "name": "Tax check first batch"}, {"id": "recB", "name": "E2E finding"}]}))
+actions = json.loads(sys.argv[1])
+print(json.dumps(m.ownerless_problems(actions, scratch=tmp)))
+`;
+    it('verify fails the slot for an ownerless task with no move, and passes once each has one', () => {
+        const missing = py(verify, JSON.stringify([{ task: 'recA', move: 'route', ok: true }]));
+        expect(missing).toHaveLength(1);
+        expect(missing[0]).toMatch(/recB/);
+        expect(py(verify, JSON.stringify([{ task: 'recA', move: 'route', ok: true }, { task: 'recB', move: 'leave', ok: true }])))
+            .toEqual([]);
+        // a move that failed is not a move
+        expect(py(verify, JSON.stringify([{ task: 'recA', move: 'route', ok: true }, { task: 'recB', move: 'route', ok: false }])))
+            .toHaveLength(1);
+    });
+
+    it('the skill tells the foreman to move every ownerless task first', () => {
+        expect(skill).toMatch(/## Step 2a — Ownerless tasks/);
+        expect(skill).toMatch(/`ownerless`/);
+    });
+});

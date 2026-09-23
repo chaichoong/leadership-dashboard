@@ -353,10 +353,12 @@ async function gatherHuddle(pat) {
 async function gatherTasks(pat) {
     const rows = await airtableFetch(pat, TBL_TASKS, {
         filterByFormula: `AND({Task Name}!='',NOT({Status}='Completed'),NOT({Status}='Cancelled'))`,
-        'fields[]': ['Task Name', 'Assignee', 'Due Date', 'Status', 'Priority', 'Task Type', 'Deferred Until', 'Team Member'],
+        'fields[]': ['Task Name', 'Assignee', 'Due Date', 'Status', 'Priority', 'Task Type', 'Deferred Until', 'Team Member', 'Hard Deadline'],
     }, true);
     const today = todayLondonISO();
     const t = rows.map(r => ({
+        id: r.id,
+        hard: Boolean(r.fields['Hard Deadline']),
         name: String(r.fields['Task Name'] || '').slice(0, 90),
         holders: Array.isArray(r.fields['Team Member']) ? r.fields['Team Member'] : [],
         who: (r.fields['Assignee'] && r.fields['Assignee'].name) || 'unassigned',
@@ -383,6 +385,7 @@ async function gatherTasks(pat) {
     const sends = waiting.filter(x => x.type === 'Correspondence');
     const line = x => `- ${x.name} | ${x.who} | due ${x.due || 'none'} | ${x.priority || x.status}`;
     const waitLine = x => `- ${x.name}${x.type === 'Correspondence' ? ' | APPROVING SENDS THE EMAIL' : ''} | waiting since ${x.due || 'unknown'}`;
+    const deadlines = selectDeadlines(t, today);
     return {
         counts: {
             open: live.length,
@@ -402,7 +405,11 @@ async function gatherTasks(pat) {
         // The same list as written, for quoting back at Kevin when the brief's
         // step turns out to be work already waiting on his tick.
         approvalDisplayNames: waiting.map(x => x.name),
-        onlyYou: selectOnlyYou(t, today),
+        deadlines,
+        deadlineList: deadlines.all.map(x => `- ${x.name} | ${whenText(x.due, today)} | ${x.who}`).join('\n'),
+        // A task already SHOWN on the deadline list is not repeated under "only you". One
+        // cut into the deadline list's "+N more" is still named here.
+        onlyYou: selectOnlyYou(t, today, new Set(deadlines.items.map(x => x.id))),
     };
 }
 
@@ -417,30 +424,155 @@ async function gatherTasks(pat) {
 // the product "Adobe Sign". SO is a standing order only in capitals and only when an amount,
 // a dash or "for" follows ("Update SO amount", "UPDATE SO - 5 DALHAM"), so "TAKING SO LONG"
 // never counts. A chase is money owed TO Kevin, the agents' lane; arrears Kevin PAYS still count.
+//
+// WIDENED 23 Sep 2026 (Kevin: "build it", after the audit of what reaches him). The name rule
+// caught 1 of the 18 tasks he held outside the queue, so two dated tasks tied to a live legal
+// matter would never have reached him. Now EVERY due task he holds outside the approval queue counts, whatever its words. The name
+// rule still applies INSIDE the queue, where Kevin's holder link also sits on agent DECIDE cards
+// that are not his own to-dos.
 const KEVIN_TEAM_MEMBER = 'recHEt2VPYothaqTd';
+const ROY_TEAM_MEMBER = 'reclbdjfVev3bqNHS';
+const ONLY_YOU_SHOW = 5;
 
-function selectOnlyYou(tasks, today) {
+function selectOnlyYou(tasks, today, shown) {
     const isOnlyYou = name => !/\b(chase|chasing)\b|\brent payments?\b|\bUC payment|adobe sign|email signature|\bsign\b[^.]{0,40}\binto\b/i.test(name) && (
         /standing order|direct debit|docusign|\bbank (details|account|transfer|change)|\bbanking\b|\bpay\b|\bpayments?\b|\bsignatures?\b|\b(counter)?sign(ing)?\b(?![\s-]*(in|into|up|out)\b)/i.test(name)
         || /\bSO\b(?=\s*(?:[-–£]|amount\b|for\b))/.test(name));
     const due = (tasks || [])
         .filter(x => (x.holders || []).includes(KEVIN_TEAM_MEMBER))
         .filter(x => x.due && x.due <= today && !(x.deferred && x.deferred > today))
-        .filter(x => isOnlyYou(x.name))
+        .filter(x => x.status !== 'Approval' || isOnlyYou(x.name))
+        .filter(x => !(shown && shown.has(x.id)))
         .sort((a, b) => a.due.localeCompare(b.due) || a.name.localeCompare(b.name));
-    return { items: due.slice(0, 3).map(x => ({ name: x.name, due: x.due })), more: Math.max(0, due.length - 3) };
+    return { items: due.slice(0, ONLY_YOU_SHOW).map(x => ({ name: x.name, due: x.due })), more: Math.max(0, due.length - ONLY_YOU_SHOW) };
+}
+
+// Fixed month names: ICU builds disagree on "Sep" vs "Sept", so no locale formatting.
+const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+function dayMonth(d) {
+    return `${Number(d.slice(8, 10))} ${MONTHS[Number(d.slice(5, 7)) - 1]}`;
+}
+function whenText(d, today) {
+    if (d === today) return 'due today';
+    return d < today ? `overdue since ${dayMonth(d)}` : `due ${dayMonth(d)}`;
+}
+function slackEsc(s) {
+    return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 }
 
 // The Slack text for the section, or '' when nothing is due (the section is then left out).
 function onlyYouText(onlyYou, today) {
     if (!onlyYou || !onlyYou.items || !onlyYou.items.length) return '';
-    const esc = s => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-    // Fixed month names: ICU builds disagree on "Sep" vs "Sept", so no locale formatting.
-    const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-    const when = d => d === today ? 'due today' : `due ${Number(d.slice(8, 10))} ${MONTHS[Number(d.slice(5, 7)) - 1]}`;
-    const lines = onlyYou.items.map(x => `• ${esc(x.name)} (${when(x.due)})`);
+    const lines = onlyYou.items.map(x => `• ${slackEsc(x.name)} (${whenText(x.due, today)})`);
     if (onlyYou.more) lines.push(`+${onlyYou.more} more due`);
     return `*ONLY YOU TODAY*\n${lines.join('\n')}`;
+}
+
+// ── Hard deadlines (Kevin, 23 Sep 2026: "build it") ─────────────────────────────────────────
+// On 23 Sep a legal deadline due that day had sat in a 155-card approval queue since 26 Aug. The 09:00 brief never named it (its one thing was sales work parked until
+// January), and the 07:00 check that did name it wrote only to a file. So the brief now OPENS
+// with every task carrying the Hard Deadline tick that falls due within seven days or is already
+// overdue, WHOEVER holds it, picked by this code and never by the model. The tick, not the Due
+// Date, because due dates are soft reminders the board moves to today (78 of 229 open tasks sat
+// at "today" that morning); the tick is what triage stamps from a letter's own deadline
+// (scripts/create-agent-task.py) and what the hard-deadline invariant guards. A knock-back to a
+// later date is respected, as everywhere else in the brief. "UC verification:" tasks are the
+// retired Universal Credit process, excluded exactly as the invariant excludes them.
+// Order: overdue and due-today first, then the rest of the week; legal before money before
+// anything else within each; then by date.
+const DEADLINE_DAYS = 7;
+const DEADLINE_SHOW = 5;
+const LEGAL_RE = /\b(court|charging order|ccj|tribunal|solicitors?|claim form|bailiffs?|enforcement|hmrc|companies ?house|strike ?off|liquidat\w*|insolven\w*|bankrupt\w*|restraint|statutory demand|notice|summons|writ|legal)\b/i;
+const MONEY_RE = /\b(pay|payments?|arrears|minimum|debt|invoice|direct debit|standing order|mortgage|loan|fine|refund|gbp)\b|£/i;
+
+function addDaysISO(iso, n) {
+    const d = new Date(`${iso}T12:00:00Z`);
+    d.setUTCDate(d.getUTCDate() + n);
+    return d.toISOString().slice(0, 10);
+}
+function deadlineHolder(x) {
+    if (x.status === 'Approval') return 'waiting in your approval queue';
+    const holders = x.holders || [];
+    if (holders.includes(KEVIN_TEAM_MEMBER)) return 'yours';
+    if (holders.includes(ROY_TEAM_MEMBER)) return 'with Roy';
+    if (holders.length) return 'with an AI agent';
+    if (x.who && x.who !== 'unassigned') return `with ${x.who}`;
+    return 'NO OWNER';
+}
+function selectDeadlines(tasks, today) {
+    const horizon = addDaysISO(today, DEADLINE_DAYS);
+    const kind = name => (LEGAL_RE.test(name) ? 0 : MONEY_RE.test(name) ? 1 : 2);
+    const all = (tasks || [])
+        .filter(x => x.hard && x.due && x.due <= horizon)
+        .filter(x => !(x.deferred && x.deferred > today))
+        .filter(x => !/^UC verification:/i.test(x.name))
+        .map(x => ({ id: x.id, name: x.name, due: x.due, who: deadlineHolder(x), kind: kind(x.name) }))
+        .sort((a, b) => ((a.due > today) - (b.due > today)) || (a.kind - b.kind)
+            || a.due.localeCompare(b.due) || a.name.localeCompare(b.name));
+    return { all, items: all.slice(0, DEADLINE_SHOW), more: Math.max(0, all.length - DEADLINE_SHOW) };
+}
+function deadlinesText(deadlines, today) {
+    if (!deadlines) return '_The deadline list could not be read this morning. Open the approval queue._';
+    if (!deadlines.items.length) return '*HARD DEADLINES, NEXT 7 DAYS:* none.';
+    const lines = deadlines.items.map(x => `• ${slackEsc(x.name)} (${whenText(x.due, today)}, ${x.who})`);
+    if (deadlines.more) lines.push(`+${deadlines.more} more with a hard deadline this week`);
+    return `*HARD DEADLINES, NEXT 7 DAYS*\n${lines.join('\n')}`;
+}
+
+// ── What the 07:00 check says needs Kevin ────────────────────────────────────────────────────
+// daily-ops writes its report to a file on the Mac (its Slack DM was retired on 1 Sep 2026), so
+// on 23 Sep its "NEEDS YOU" line about the charging order reached nobody. scripts/estate-status.py
+// lifts that block out of the day's report every ten minutes into one Estate Status row, and the
+// brief reads it here. A row from an earlier day, a missing row and a failed read each say so in
+// words: silence would read as "nothing needs you".
+const NEEDS_YOU_KEY = 'daily-ops-needs-you';
+const ESTATE_STATUS_TBL = 'tblZVrdzivyBueZVf';
+const NEEDS_YOU_SHOW = 5;
+
+async function readNeedsYouRow(pat) {
+    try {
+        const url = `https://api.airtable.com/v0/${BASE_ID}/${ESTATE_STATUS_TBL}?pageSize=1`
+            + `&filterByFormula=${encodeURIComponent(`{Key}='${NEEDS_YOU_KEY}'`)}`;
+        const r = await fetch(url, { headers: { Authorization: `Bearer ${pat}` } });
+        if (!r.ok) throw new Error(`HTTP ${r.status}`);
+        return ((await r.json()).records || [])[0] || null;
+    } catch (e) {
+        console.error('[ceo-brief] 07:00 check row unreadable:', e && e.message || e);
+        return undefined;
+    }
+}
+function needsYouText(row, today) {
+    if (row === undefined) return '_The 07:00 check could not be read this morning._';
+    let p;
+    try { p = JSON.parse((row && row.fields && row.fields.Payload) || 'null'); }
+    catch (e) { return '_The 07:00 check left a damaged row, so its list for you could not be read. It is in the morning report._'; }
+    if (!p || !p.date) return '_The 07:00 check has not reported yet._';
+    if (p.date !== today) return `_The 07:00 check has not reported this morning. Its last report was ${dayMonth(p.date)}._`;
+    if (p.unreadable) return '_The 07:00 check ran, but its list for you could not be read. It is in the morning report._';
+    const items = Array.isArray(p.items) ? p.items : [];
+    if (!items.length) return '*07:00 CHECK:* nothing needs you.';
+    const lines = items.slice(0, NEEDS_YOU_SHOW).map((x, i) => `${i + 1}. ${slackEsc(String(x).slice(0, 400))}`);
+    if (items.length > NEEDS_YOU_SHOW) lines.push(`+${items.length - NEEDS_YOU_SHOW} more in the morning report`);
+    return `*FROM THE 07:00 CHECK*\n${lines.join('\n')}`;
+}
+
+// The lock-screen line. A phone notification shows the message's `text`, never its blocks, so a
+// deadline that is due or overdue is counted there too.
+function deadlinePreview(deadlines, today) {
+    const n = ((deadlines && deadlines.all) || []).filter(x => x.due <= today).length;
+    return n ? `${n} hard deadline${n === 1 ? '' : 's'} due or overdue | ` : '';
+}
+
+// The sections Kevin must see whatever the model says, in the order he reads them. Shared by the
+// CEO brief and the money-only fallback, so a failed CEO call never hides a deadline. `tasks` is
+// null when the task read itself failed.
+function mustSeeBlocks(tasks, needsRow, today) {
+    const section = text => ({ type: 'section', text: { type: 'mrkdwn', text } });
+    const blocks = [section(deadlinesText(tasks ? tasks.deadlines : null, today))];
+    const onlyYou = tasks ? onlyYouText(tasks.onlyYou, today) : '';
+    if (onlyYou) blocks.push(section(onlyYou));
+    blocks.push(section(needsYouText(needsRow, today)));
+    return blocks;
 }
 
 // Today's calendar from a private ICS feed (no OAuth needed). Optional: when the
@@ -574,6 +706,8 @@ DUE TODAY:
 ${tasks.dueTodayList || '(none)'}
 KEVIN'S OPEN TASKS (top):
 ${tasks.kevinList || '(none)'}
+HARD DEADLINES, NEXT 7 DAYS (Kevin already sees this list at the top of the message, above your one thing. An item here that is overdue or due today and sits with him or in his queue outranks any project work):
+${tasks.deadlineList || '(none)'}
 
 ${huddleBlock}
 Write today's brief.`;
@@ -796,14 +930,15 @@ async function slackPost(token, channel, text, blocks) {
     return d;
 }
 
-// The 09:00 CEO brief blocks. Money line included so ONE message covers the morning.
-function buildBriefBlocks(m, brief) {
+// The 09:00 CEO brief blocks. Money line included so ONE message covers the morning. `must` is
+// mustSeeBlocks(): the deadlines, only-you and 07:00 sections, placed above the model's one thing
+// so the code-picked list is the first thing Kevin reads (23 Sep 2026).
+function buildBriefBlocks(m, brief, must) {
     const blocks = [
         { type: 'header', text: { type: 'plain_text', text: `☀️ ${brief.headline || 'Your day, decided.'}`, emoji: true } },
+        ...(must || []),
         { type: 'section', text: { type: 'mrkdwn', text: `*THE ONE THING*\n${brief.one_thing}\n\n*Start here (10 min):* ${brief.first_step}` } },
     ];
-    const onlyYou = onlyYouText(brief.only_you, todayLondonISO());
-    if (onlyYou) blocks.push({ type: 'section', text: { type: 'mrkdwn', text: onlyYou } });
     blocks.push(
         { type: 'section', text: { type: 'mrkdwn', text: `*Why this wins today:* ${brief.why || ''}` } },
         { type: 'section', text: { type: 'mrkdwn', text: `${LIGHT_EMOJI[m.light]} *Safe to act today: ${fmt(m.safeToActToday)}* (${LIGHT_LABEL[m.light]})` } },
@@ -835,6 +970,11 @@ async function sendDailyDM(env) {
     const userId = await slackLookup(token, recipient);
     const m = await loadAndCompute(pat);
 
+    // Read before the CEO layer so the fallback carries it too. Never throws: a failed read is
+    // `undefined`, which needsYouText says in words.
+    const needsRow = await readNeedsYouRow(pat);
+    const today = todayLondonISO();
+
     // CEO layer — any failure here falls back to the proven money-only DM.
     let huddle = null, tasks = null;
     try {
@@ -847,8 +987,10 @@ async function sendDailyDM(env) {
         // departments had actually said, so an override could not be audited.
         brief.huddle = huddle ? { one_thing: huddle.oneThing, first_step: huddle.firstStep, flags: huddle.flags } : null;
         brief.only_you = tasks.onlyYou;
-        const fallbackText = `ONE thing: ${brief.one_thing} | Safe to act: ${fmt(m.safeToActToday)} (${LIGHT_LABEL[m.light]})`;
-        await slackPost(token, userId, fallbackText, buildBriefBlocks(m, brief));
+        brief.deadlines = tasks.deadlines.items;
+        brief.needs_you = needsYouText(needsRow, today);
+        const fallbackText = `${deadlinePreview(tasks.deadlines, today)}ONE thing: ${brief.one_thing} | Safe to act: ${fmt(m.safeToActToday)} (${LIGHT_LABEL[m.light]})`;
+        await slackPost(token, userId, fallbackText, buildBriefBlocks(m, brief, mustSeeBlocks(tasks, needsRow, today)));
         try { await storeBrief(pat, brief, m, tasks, huddle); }
         catch (e) {
             // No Slack alert: the brief itself arrived, so a save failure is an
@@ -859,8 +1001,9 @@ async function sendDailyDM(env) {
         }
         return m;
     } catch (ceoErr) {
-        const fallback = `Safe to act today: ${fmt(m.safeToActToday)} (${LIGHT_LABEL[m.light]})`;
-        await slackPost(token, userId, fallback, buildBlocks(m));
+        // The deadlines are code, not model: they go out even when the CEO layer fails.
+        const fallback = `${tasks ? deadlinePreview(tasks.deadlines, today) : ''}Safe to act today: ${fmt(m.safeToActToday)} (${LIGHT_LABEL[m.light]})`;
+        await slackPost(token, userId, fallback, [...buildBlocks(m), ...mustSeeBlocks(tasks, needsRow, today)]);
         // The money DM reached him, which is the story he needs; the WHY the
         // CEO layer failed lives in Workers Logs, not his phone (1 Sep 2026).
         console.error('[ceo-brief] CEO layer failed, money DM sent as fallback:', ceoErr && ceoErr.message || ceoErr);
@@ -1001,6 +1144,8 @@ export default {
     // Manual test endpoint (guarded). Never expose financial data publicly.
     //   /?mode=compute&key=KEY  → JSON of the computed figure, no Slack
     //   /?mode=send&key=KEY     → computes AND sends the DM (ignores DST gate)
+    //   /?mode=must&key=KEY     → the code-picked sections (deadlines, only you, 07:00 check)
+    //                             exactly as the DM would render them; no model call, no Slack
     async fetch(request, env) {
         const url = new URL(request.url);
         const key = url.searchParams.get('key');
@@ -1012,14 +1157,22 @@ export default {
                 const m = await sendDailyDM(env);
                 return Response.json({ ok: true, sent: true, safeToActToday: m.safeToActToday, light: m.light });
             }
+            if (url.searchParams.get('mode') === 'must') {
+                const today = todayLondonISO();
+                const [tasks, needsRow] = await Promise.all([gatherTasks(env.AIRTABLE_PAT), readNeedsYouRow(env.AIRTABLE_PAT)]);
+                return Response.json({ ok: true, today, preview: deadlinePreview(tasks.deadlines, today),
+                    blocks: mustSeeBlocks(tasks, needsRow, today), deadlinesAll: tasks.deadlines.all.length });
+            }
             // mode=brief → compute the full CEO brief WITHOUT sending or storing.
             if (url.searchParams.get('mode') === 'brief') {
                 const m = await loadAndCompute(env.AIRTABLE_PAT);
-                const [tasks, calendar] = await Promise.all([gatherTasks(env.AIRTABLE_PAT), gatherCalendar(env)]);
+                const [tasks, calendar, needsRow] = await Promise.all([gatherTasks(env.AIRTABLE_PAT), gatherCalendar(env), readNeedsYouRow(env.AIRTABLE_PAT)]);
                 const huddle = await gatherHuddle(env.AIRTABLE_PAT);
                 const brief = await callCeo(env, buildCeoPrompt(m, tasks, calendar, env, huddle), huddle, tasks);
                 brief.only_you = tasks.onlyYou;
-                return Response.json({ ok: true, brief, money: { safeToActToday: m.safeToActToday, light: m.light }, taskCounts: tasks.counts, calendarConnected: calendar.connected });
+                const today = todayLondonISO();
+                return Response.json({ ok: true, brief, blocks: buildBriefBlocks(m, brief, mustSeeBlocks(tasks, needsRow, today)),
+                    money: { safeToActToday: m.safeToActToday, light: m.light }, taskCounts: tasks.counts, calendarConnected: calendar.connected });
             }
             const m = await loadAndCompute(env.AIRTABLE_PAT);
             return Response.json({ ok: true, ...m });
