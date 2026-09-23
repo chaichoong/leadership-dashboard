@@ -54,4 +54,65 @@ describe('allowance.py', () => {
     expect(page).toMatch(/gf\(r,'key'\) === 'allowance'/);
     expect(page).toMatch(/Agents paused\./);
   });
+
+  // ── Finding 20260923-daily-ops-577 ────────────────────────────────────
+  // The Content Engine's copy and thumbnail steps raised
+  //   SystemExit("claude failed: " + r.stderr[-400:])
+  // while running the CLI with --output-format json. That flag makes the CLI
+  // write its error object to STDOUT, so stderr was empty and the 02:25 run on
+  // 23 Sep 2026 died with the literal line "claude failed: " — nothing after
+  // the colon, and a night of episodes abandoned with no diagnosable cause.
+  //
+  // These drive the real helper rather than reading the source, because the bug
+  // was never in what the code said, it was in which stream it read.
+  describe('a failed claude call always says what went wrong (577)', () => {
+    const fmt = (stdout, stderr, rc) => {
+      const py = [
+        'import importlib.util, json, sys',
+        `spec=importlib.util.spec_from_file_location('a', ${JSON.stringify(GUARD)})`,
+        'a=importlib.util.module_from_spec(spec); spec.loader.exec_module(a)',
+        'class R: pass',
+        'r=R()',
+        `r.stdout=json.loads(${JSON.stringify(JSON.stringify(stdout))})`,
+        `r.stderr=json.loads(${JSON.stringify(JSON.stringify(stderr))})`,
+        `r.returncode=${rc}`,
+        'print(a.claude_error(r))',
+      ].join('\n');
+      return execFileSync('python3', ['-c', py], { encoding: 'utf8' }).trim();
+    };
+
+    it('reads STDOUT, which is where --output-format json puts the error', () => {
+      const msg = fmt('{"type":"result","is_error":true,"result":"Credit balance is too low"}', '', 1);
+      expect(msg).toContain('Credit balance is too low');
+      expect(msg).toContain('exit 1');
+    });
+
+    it('still reads stderr when that is where the text landed', () => {
+      const msg = fmt('', 'Error: connection reset by peer', 1);
+      expect(msg).toContain('connection reset by peer');
+    });
+
+    // The actual 23 Sep failure shape. The old line produced "claude failed: "
+    // and stopped there; nothing in the log said even that the process was mute.
+    it('never comes out blank when the process said nothing at all', () => {
+      const msg = fmt('', '', 143);
+      expect(msg).toContain('no output on stdout or stderr');
+      expect(msg).toContain('exit 143');
+      expect(msg.replace(/claude failed[^a-z]*/i, '').trim().length).toBeGreaterThan(0);
+    });
+
+    // CONTROL. Without this the three above would pass against a helper that
+    // exists but is wired to nothing, which is exactly the state that let the
+    // blank message ship.
+    it('both Content Engine call sites use it, and neither reads stderr alone', () => {
+      for (const f of ['scripts/content-engine/platform_copy.py',
+                       'scripts/content-engine/thumbnail.py']) {
+        const src = read(f);
+        expect(src, `${f} must raise through the shared formatter`)
+          .toMatch(/SystemExit\(_allowance\(\)\.claude_error\(r\)\)/);
+        expect(src, `${f} still has a stderr-only claude failure message`)
+          .not.toMatch(/"claude failed: " \+ r\.stderr/);
+      }
+    });
+  });
 });

@@ -515,9 +515,19 @@ CANDIDATE = os.path.join(REPO, ".git", "mcp-inventory-candidate.js")
 
 
 def tool(*names):
-    """Resolve a binary without relying on PATH. launchd sources no profile."""
+    """Resolve a binary without relying on PATH. launchd sources no profile.
+
+    It must search the SAME enriched PATH that shell_env() builds, not the bare
+    one launchd hands the job. Finding 20260923-daily-ops-575: launchd gives
+    PATH=/usr/bin:/bin with no profile, so `shutil.which("npx")` returned None
+    even though nvm has it at ~/.nvm/versions/node/*/bin. The guard tests could
+    therefore NEVER pass unattended, the job refused to merge its own work every
+    night, and PR #516 sat open. The fix this file already carried for
+    `claude mcp list` simply was not used here.
+    """
+    path = shell_env().get("PATH") or None
     for n in names:
-        found = shutil.which(n)
+        found = shutil.which(n, path=path) or shutil.which(n)
         if found:
             return found
     for cand in (os.path.join(HOME, "tools/bin/gh"),
