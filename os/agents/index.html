@@ -1921,8 +1921,16 @@ function apvWatchingSignIns(){ return apvSignInsWaiting() || (Date.now() - _apvS
 async function apvSilentRefresh(){
     if(_approvalsState === 'loading') return false;
     const before = apvQueueSignature();
+    // loadApprovals forgets the chosen reasons and ticks. This refresh runs
+    // every 30 seconds while a sign-in wait is on the page and often redraws
+    // nothing, so it keeps them for cards still queued: otherwise "The work
+    // is wrong", typed slowly, saves as "Something else" (review, 23 Sep 2026).
+    const keptReason = { ..._apvReason }, keptPicks = new Set(_apvSelected);
     try { await loadApprovals(); }
     catch(e){ if(e.message === 'auth') throw e; return false; }
+    const queued = new Set(allApprovals.map(t => t.id));
+    Object.keys(keptReason).forEach(id => { if(queued.has(id)) _apvReason[id] = keptReason[id]; });
+    keptPicks.forEach(id => { if(queued.has(id)) _apvSelected.add(id); });
     _apvLastQueueLoad = Date.now();
     if(String(_approvalsState).indexOf('error') === 0) return false;
     if(apvQueueSignature() === before) return false;
@@ -2148,6 +2156,9 @@ function apvLinkify(text){
 // and offers all of them in one go. The app opens the sites one after another
 // (the robot profile can only be open in one window) and hands each site's
 // tasks back the moment he quits its window.
+// A wait still carries the "No, because…" reasons (Kevin, 23 Sep 2026): a
+// Bromcom card posted before the submit gate linked a Gmail search the robot
+// cannot open, and with no close on the card he could only knock it back.
 // Agents do not keep to the form: "SIGN-IN NEEDED: pingen.com (https://…/login) — to
 // send the letter" put the whole sentence in the site and lost the URL (8 Sep 2026).
 // The URL is taken from anywhere on the line; the site is the text before it.
@@ -2357,8 +2368,9 @@ function apvCardHtml(t){
         <div class="apv-decide" data-apv-decide>
             ${signIn ? `<div class="apv-actions" data-apv-signin-actions>
                 <a class="btn btn-success" href="${esc(apvSignInLink(signIn))}" title="Opens the Robot sign-in app on your Mac at this site. Sign in, then Cmd+Q.">Sign in now</a>
-                ${apvNoteRowHtml(t.id, 'Optional: what are you waiting for? Kept with a knock-back.', false)}
-            </div>` : `<div class="apv-actions">
+                ${apvNoteRowHtml(t.id, 'Optional note. Kept with a knock-back or a close.', false)}
+            </div>
+            ${apvReasonChips(t.id)}` : `<div class="apv-actions">
                 <button class="btn btn-success" data-apv-btn onclick="agDecide('${t.id}','Approved as-is')" title="Approved as it is. The agent carries it out.">Approve</button>
                 ${apvNoteRowHtml(t.id, 'Feedback or an edit for the agent', true)}
                 <button class="btn" data-apv-btn onclick="agDecide('${t.id}','Approved with minor edits')" title="Approved, but you tidied it first. Say the edit in the box; the agent applies exactly that. Still counts as accurate.">Approve with minor edits</button>

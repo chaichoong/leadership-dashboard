@@ -97,6 +97,49 @@ test.describe('sign-ins waiting are a tap, not a decision', () => {
     // Nothing changed: no redraw (open panels and scroll survive).
     expect(await page.evaluate(() => window.apvSilentRefresh())).toBe(false);
   });
+  // THE BROMCOM CARD (Kevin, 23 Sep 2026). recENq43EhNKW4VTO was posted on
+  // 15 Sep, before the submit gate refused Gmail and off-list sites, with a
+  // sign-in line naming the school's Bromcom portal and linking a Gmail
+  // search. The robot can open neither, so "Sign in now" went nowhere, and the
+  // card had no close: his only way out was a knock-back. A sign-in card now
+  // carries the same "No, because…" reasons as every other card.
+  test('a sign-in card whose link goes nowhere can be closed in one tap as No longer relevant', async ({ page }) => {
+    const fx = defaultFixtures();
+    fx.approvals[0].fields[TF.agentOutput] = 'Meet the Tutor evening, Thursday 24 September.\nSIGN-IN NEEDED: Bromcom Parent App / Example Village College portal (check the email at https://mail.google.com/mail/u/0/#search/from%3A10001%40bromcomcloud.com+after%3A2026/09/13) — (unverified: BROWSER REFUSED: aistudio.google.com has no login page to open no loginUrl .)';
+    const patches = await mockAgentsPage(page, fx);
+    await loadAgentsPage(page);
+    await page.click('#ptab-approvals');
+    const taskId = fx.approvals[0].id;
+    const card = page.locator(`[data-apv-card="${taskId}"]`);
+    await expect(card.locator('[data-apv-signin-actions]')).toBeVisible();
+    await card.locator('.apv-reason', { hasText: 'No longer relevant' }).click();
+    await expect.poll(() => patches.some((p) => p.id === taskId)).toBe(true);
+    const patch = patches.find((p) => p.id === taskId);
+    expect(patch.fields[TF.approvalOutcome]).toBe('Rejected');
+    expect(patch.fields['fldF9Bs4N5mttQvtl']).toBe('No longer relevant');   // Verdict Reason
+    expect(String(patch.fields['fldtI7SJI4gEohHD1'])).toContain('no longer applies');   // Approval Feedback
+    await expect(card.locator('[data-apv-state="saved"]')).toContainText('Closed');
+  });
+  // Found in review, 23 Sep 2026: with a sign-in wait on the page the queue
+  // re-reads every 30 seconds, and each re-read forgot the chosen reason, so
+  // "The work is wrong" typed slowly was saved as "Something else".
+  test('the background re-read keeps the reason he chose while he types', async ({ page }) => {
+    const fx = withSignIns();
+    const patches = await mockAgentsPage(page, fx);
+    await loadAgentsPage(page);
+    await page.click('#ptab-approvals');
+    const taskId = fx.approvals[0].id;
+    const card = page.locator(`[data-apv-card="${taskId}"]`);
+    await card.locator('.apv-reason', { hasText: 'The work is wrong' }).click();
+    await card.locator('#apvNote-' + taskId).fill('Wrong site.');
+    // The 30-second tick, run now: nothing in the queue changed, so no redraw.
+    expect(await page.evaluate(() => window.apvSilentRefresh())).toBe(false);
+    await card.locator('#apvRejectNote-' + taskId + ' button', { hasText: 'Reject' }).click();
+    await expect.poll(() => patches.some((p) => p.id === taskId)).toBe(true);
+    const patch = patches.find((p) => p.id === taskId);
+    expect(patch.fields['fldF9Bs4N5mttQvtl']).toBe('The work is wrong');   // Verdict Reason
+    expect(String(patch.fields['fldtI7SJI4gEohHD1'])).toBe('Wrong site.');
+  });
   test('no strip and no button when nothing waits on a sign-in', async ({ page }) => {
     await mockAgentsPage(page);
     await loadAgentsPage(page);
