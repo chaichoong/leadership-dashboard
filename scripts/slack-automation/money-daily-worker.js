@@ -431,8 +431,8 @@ async function gatherTasks(pat) {
 // never counts. A chase is money owed TO Kevin, the agents' lane; arrears Kevin PAYS still count.
 //
 // WIDENED 23 Sep 2026 (Kevin: "build it", after the audit of what reaches him). The name rule
-// caught 1 of the 18 tasks he held outside the queue, so two dated tasks tied to a live legal
-// matter would never have reached him. Now EVERY due task he holds outside the approval queue counts, whatever its words. The name
+// caught 1 of the 18 tasks he held outside the queue, so two dated tasks due within ten days
+// would never have reached him. Now EVERY due task he holds outside the approval queue counts, whatever its words. The name
 // rule still applies INSIDE the queue, where Kevin's holder link also sits on agent DECIDE cards
 // that are not his own to-dos. A Some Day task is parked on purpose (task-manager.py) and stays out.
 const KEVIN_TEAM_MEMBER = 'recHEt2VPYothaqTd';

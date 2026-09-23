@@ -466,9 +466,12 @@ NEEDS_YOU_KEY = "daily-ops-needs-you"
 MONITORING = os.path.join(REPO, "monitoring")
 _REPORT_NAME = re.compile(r"^daily-ops-(\d{4}-\d{2}-\d{2})\.md$")
 _ITEM = re.compile(r"^\s*(?:\d+[.)]|[•-])\s+(.*\S)")
-# A summary heading: bold, and its first word all capitals ("*STUCK: 17*", "*BROKEN: 7 things*").
-# A wrapped line that happens to start in bold ("*Court* hearing ...") is not one.
-_HEADING = re.compile(r"^\*{1,2}[A-Z]{3,}\b")
+# A heading is a WHOLE bold line ("*STUCK: 17*"). A wrapped line that only starts in bold
+# ("*HMRC* letter today.") continues the item above it (second review, 24 Sep 2026).
+_HEADING = re.compile(r"^\*{1,2}[^*]+\*{1,2}:?\s*$")
+# Slack strikethrough at the start of an item ("~Old item~ ..."). A lone "~" means "about"
+# ("~£4,500 of costs") and keeps the item.
+_STRUCK = re.compile(r"^~[^~\s][^~]*~(?:\s|$)")
 _NEEDS_HEAD = re.compile(r"^\*{1,2}\s*needs you\b[^*]*\*{1,2}:?\s*$", re.I)
 
 
@@ -492,7 +495,14 @@ def parse_needs_you(text):
     region = lines[start + 1:stop]
     head = next((i for i, l in enumerate(region) if _NEEDS_HEAD.match(l.strip())), None)
     if head is None:
-        return None if any(re.search(r"\bneeds? you\b", l, re.I) for l in region) else []
+        # No heading in the summary. A mention anywhere in it, or in a NEEDS YOU block that drifted
+        # below *STUCK (before the detail starts), is unreadable, never "nothing needs you".
+        tail = []
+        for l in lines[stop:]:
+            if l.startswith("#") or l.startswith("---"):
+                break
+            tail.append(l)
+        return None if any(re.search(r"\bneeds? you\b", l, re.I) for l in region + tail) else []
     items = []
     for line in region[head + 1:]:
         st = line.strip()
@@ -507,7 +517,7 @@ def parse_needs_you(text):
             items[-1] += " " + st
         else:
             return None   # something unrecognised sits under the heading: not a list we can trust
-    return [x for x in items if not x.startswith("~") and not re.search(r"\bWITHDRAWN\b", x)]
+    return [x for x in items if not _STRUCK.match(x) and not re.search(r"\bWITHDRAWN\b", x)]
 
 
 def needs_you_row(now, monitoring=MONITORING):
@@ -805,6 +815,14 @@ def selftest():
        "a mention in an unknown shape is unreadable, never 'nothing needs you'")
     ok(parse_needs_you("*Daily Ops, x.* Ran fine.\n\n*STUCK: 1*\n\n## Detail\n*NEEDS YOU*\n1. Detail item.\n") == [],
        "the detail section below STUCK is never read as the summary")
+    # second review, 24 Sep 2026
+    ok(parse_needs_you("*Daily Ops, x.*\n*NEEDS YOU*\n1. Reply to the\n*TAX* letter today.\n2. Sign the deed.\n*STUCK: 1*\n")
+       == ["Reply to the *TAX* letter today.", "Sign the deed."], "a wrapped line led by a bold capital word continues the item")
+    ok(parse_needs_you("*Daily Ops, x.*\n*NEEDS YOU*\n1. ~£4,500 of costs is due today.\n*STUCK: 1*\n") == ["~£4,500 of costs is due today."],
+       "a lone ~ means 'about' and keeps the item")
+    ok(parse_needs_you("*Daily Ops, x.*\n*NEEDS YOU*\n1. ~Old~ gone.\n2. Keep.\n*STUCK: 1*\n") == ["Keep."], "a struck item is dropped")
+    ok(parse_needs_you("*Daily Ops, x.*\n\n*STUCK: 1*\n\n*NEEDS YOU*\n1. Drifted below.\n\n---\n## Detail\n") is None,
+       "a NEEDS YOU block drifted below STUCK is unreadable, never 'nothing needs you'")
     tmp3 = tempfile.mkdtemp()
     at = datetime(2026, 9, 23, 8, 0, tzinfo=timezone.utc)   # 09:00 London
     row = needs_you_row(at, monitoring=tmp3)
