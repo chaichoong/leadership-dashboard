@@ -20,7 +20,7 @@ function pick(n) {
 const HELPERS = ['KEVIN_TEAM_MEMBER', 'ROY_TEAM_MEMBER', 'ONLY_YOU_SHOW', 'MONTHS', 'dayMonth', 'whenText',
   'slackEsc', 'selectOnlyYou', 'onlyYouText', 'DEADLINE_DAYS', 'DEADLINE_SHOW', 'LEGAL_RE', 'MONEY_RE',
   'addDaysISO', 'deadlineHolder', 'selectDeadlines', 'deadlinesText', 'NEEDS_YOU_SHOW', 'needsYouText',
-  'deadlinePreview', 'mustSeeBlocks', 'fmt', 'LIGHT_EMOJI', 'LIGHT_LABEL', 'londonDateLabel', 'buildBlocks',
+  'deadlinePreview', 'SECTION_MAX', 'capSection', 'mustSeeBlocks', 'fmt', 'LIGHT_EMOJI', 'LIGHT_LABEL', 'londonDateLabel', 'buildBlocks',
   'buildBriefBlocks'];
 // eslint-disable-next-line no-new-func
 const W = new Function(`${HELPERS.map(pick).join('\n')}\nreturn { ${HELPERS.join(', ')} };`)();
@@ -29,12 +29,14 @@ const { selectDeadlines, deadlinesText, needsYouText, deadlinePreview, mustSeeBl
 
 const TODAY = '2026-09-23';
 let n = 0;
+// inQueue mirrors gatherTasks: Status Approval AND raised by the loop.
 const task = (name, due, extra = {}) => ({ id: `rec${++n}`, name, due, hard: true, holders: [], who: 'unassigned',
-  status: 'Today', deferred: '', ...extra });
+  status: 'Today', deferred: '', someDay: false, inQueue: extra.status === 'Approval', ...extra });
 
-// The hard-deadline tasks open on 23-24 Sep 2026, names as read from Tasks tblqB8b22hKBL4PF1.
+// The shape of the hard-deadline tasks open on 23-24 Sep 2026 (Tasks tblqB8b22hKBL4PF1), with
+// every name, address and amount replaced: this repo is public.
 const LIVE = [
-  task('INBOUND: Final Charging Order 50000 over 1 Example Road', TODAY, { status: 'Approval', holders: [KEVIN_TEAM_MEMBER] }),
+  task('INBOUND: Final court notice 50000 over 1 Example Road', TODAY, { status: 'Approval', holders: [KEVIN_TEAM_MEMBER] }),
   task('INBOUND: respond to court order Jo Example X00XX000 GBP 1000 costs', '2026-06-03', { status: 'Approval', deferred: '2026-09-23' }),
   task('MAINTENANCE: pest warning re-inspection 2 Example Street', '2026-08-30', { holders: [ROY_TEAM_MEMBER] }),
   task('COMPLIANCE: Property Owners Insurance renewal due 3 Oct 2026 - Example Insurer', '2026-09-17', { status: 'Approval' }),
@@ -42,7 +44,7 @@ const LIVE = [
   task('POST: UNILATERAL NOTICE- 3EX', TODAY, { holders: ['recAgentXXXXXXXXX'] }),
   task('Lender arrears top up payments', TODAY, { holders: [KEVIN_TEAM_MEMBER] }),
   task('UC verification: Pat Example, £500.00 due 2 October 2026', TODAY),
-  task('Tax check: send the first batch to the officer by 9 Oct', '2026-09-30'),
+  task('Send the first batch of papers by 9 Oct', '2026-09-30'),
   task('Update Master Prompt', '2026-10-03', { status: 'Approval' }),
 ];
 
@@ -50,14 +52,14 @@ describe('selectDeadlines: every hard deadline in the next seven days, whoever h
   const out = selectDeadlines(LIVE, TODAY);
   const names = out.all.map(x => x.name);
 
-  it('the two legal items waiting in the queue lead: the overdue court order, then the charging order due today', () => {
+  it('the two legal items waiting in the queue lead: the overdue court order, then the court notice due today', () => {
     expect(out.items[0].name).toMatch(/court order Jo Example/);
-    expect(out.items[1].name).toMatch(/Final Charging Order/);
+    expect(out.items[1].name).toMatch(/Final court notice/);
     expect(out.items[1].who).toBe('waiting in your approval queue');
   });
 
   it('a task nobody holds says NO OWNER', () => {
-    expect(out.all.find(x => /Tax check: send/.test(x.name)).who).toBe('NO OWNER');
+    expect(out.all.find(x => /first batch of papers/.test(x.name)).who).toBe('NO OWNER');
   });
 
   it('names who holds each one: Kevin, Roy, an agent', () => {
@@ -101,8 +103,8 @@ describe('selectDeadlines: every hard deadline in the next seven days, whoever h
   });
 
   it('empty or missing input gives an empty list', () => {
-    expect(selectDeadlines([], TODAY)).toEqual({ all: [], items: [], more: 0 });
-    expect(selectDeadlines(undefined, TODAY)).toEqual({ all: [], items: [], more: 0 });
+    expect(selectDeadlines([], TODAY)).toEqual({ all: [], items: [], more: 0, ticked: 0 });
+    expect(selectDeadlines(undefined, TODAY)).toEqual({ all: [], items: [], more: 0, ticked: 0 });
   });
 });
 
@@ -116,7 +118,12 @@ describe('deadlinesText renders the section, and says so when there is nothing',
   });
 
   it('an empty week is stated, never silent', () => {
-    expect(deadlinesText({ all: [], items: [], more: 0 }, TODAY)).toBe('*HARD DEADLINES, NEXT 7 DAYS:* none.');
+    expect(deadlinesText(selectDeadlines([task('Next month', '2026-11-01')], TODAY), TODAY)).toBe('*HARD DEADLINES, NEXT 7 DAYS:* none.');
+  });
+
+  it('CONTROL: no open task carrying the tick at all is a warning, never a calm "none"', () => {
+    const text = deadlinesText(selectDeadlines([task('Soft', TODAY, { hard: false })], TODAY), TODAY);
+    expect(text).toMatch(/No open task carries the Hard Deadline tick at all/);
   });
 
   it('a failed read is stated', () => {
@@ -231,14 +238,14 @@ describe('sendDailyDM sends the sections on both paths', () => {
 
   it('the CEO brief', async () => {
     const out = await run();
-    expect(out.all).toContain('Final Charging Order');
+    expect(out.all).toContain('Final court notice');
     expect(out.all).toContain('FROM THE 07:00 CHECK');
     expect(out.text).toMatch(/^\d+ hard deadlines? due or overdue \| ONE thing/);
   });
 
   it('the money-only fallback when the CEO call fails', async () => {
     const out = await run({ ceoFails: true });
-    expect(out.all).toContain('Final Charging Order');
+    expect(out.all).toContain('Final court notice');
     expect(out.all).toContain('FROM THE 07:00 CHECK');
     expect(out.text).toMatch(/hard deadlines? due or overdue \| Safe to act/);
   });
@@ -247,5 +254,90 @@ describe('sendDailyDM sends the sections on both paths', () => {
     const out = await run({ tasksFail: true });
     expect(out.all).toMatch(/deadline list could not be read/);
     expect(out.all).toContain('FROM THE 07:00 CHECK');
+  });
+});
+
+describe('review findings, 24 Sep 2026', () => {
+  it('a legacy Approval row with no raiser is in no queue: labelled by its holder, and the name rule does not hide it', () => {
+    const legacy = task('Old Approval row nobody raised', TODAY, { status: 'Approval', inQueue: false, holders: [KEVIN_TEAM_MEMBER] });
+    expect(selectDeadlines([legacy], TODAY).all[0].who).toBe('yours');
+    expect(selectOnlyYou([{ ...legacy, hard: false }], TODAY).items.map(x => x.name)).toEqual(['Old Approval row nobody raised']);
+  });
+
+  it('a Some Day task is parked on purpose and stays out of ONLY YOU', () => {
+    const parked = task('Parked idea', TODAY, { holders: [KEVIN_TEAM_MEMBER], someDay: true });
+    expect(selectOnlyYou([parked], TODAY).items).toEqual([]);
+  });
+
+  it('a section never passes Slack\'s 3000 characters, even after escaping', () => {
+    const long = Array.from({ length: 5 }, () => '&<>'.repeat(200));
+    const row = { fields: { Payload: JSON.stringify({ date: TODAY, items: long }) } };
+    for (const b of mustSeeBlocks(null, row, TODAY)) expect(b.text.text.length).toBeLessThanOrEqual(3000);
+    expect(needsYouText(row, TODAY).length).toBeGreaterThan(3000);   // control: uncapped it would be refused
+  });
+});
+
+describe('the reads the brief depends on', () => {
+  it('readNeedsYouRow asks the Estate Status table for the one key, and a failed read is undefined, never null', async () => {
+    const names = ['BASE_ID', 'ESTATE_STATUS_TBL', 'NEEDS_YOU_KEY'];
+    const make = (fetchImpl) => new Function('fetch', 'console',
+      `${[...names.map(pick), pick('readNeedsYouRow')].join('\n')}\nreturn readNeedsYouRow;`)(fetchImpl, { error() {} });
+    let asked = '';
+    const row = { id: 'recX', fields: { Key: 'daily-ops-needs-you', Payload: '{}' } };
+    const ok = make(async (url) => { asked = url; return { ok: true, json: async () => ({ records: [row] }) }; });
+    expect(await ok('pat')).toEqual(row);
+    expect(asked).toContain('/tblZVrdzivyBueZVf?');
+    expect(decodeURIComponent(asked)).toContain("{Key}='daily-ops-needs-you'");
+    expect(await make(async () => ({ ok: true, json: async () => ({ records: [] }) }))('pat')).toBeNull();
+    expect(await make(async () => ({ ok: false, status: 500 }))('pat')).toBeUndefined();
+    expect(await make(async () => { throw new Error('offline'); })('pat')).toBeUndefined();
+  });
+
+  it('gatherTasks reads the tick, the raiser and Some Day, and ONLY YOU skips what the deadline list shows', async () => {
+    let params;
+    const rec = (id, f) => ({ id, fields: { 'Task Name': id, 'Due Date': TODAY, Status: 'Today', ...f } });
+    const rows = [
+      rec('onDeadlineList', { 'Team Member': [KEVIN_TEAM_MEMBER], 'Hard Deadline': true }),
+      rec('kevinsOwn', { 'Team Member': [KEVIN_TEAM_MEMBER] }),
+      rec('queued', { Status: 'Approval', 'Sent For Approval By': ['recAGENT'], 'Hard Deadline': true }),
+      rec('parked', { 'Team Member': [KEVIN_TEAM_MEMBER], 'Some Day': true }),
+    ];
+    const deps = ['KEVIN_TEAM_MEMBER', 'ROY_TEAM_MEMBER', 'ONLY_YOU_SHOW', 'MONTHS', 'dayMonth', 'whenText', 'selectOnlyYou',
+      'DEADLINE_DAYS', 'DEADLINE_SHOW', 'LEGAL_RE', 'MONEY_RE', 'addDaysISO', 'deadlineHolder', 'selectDeadlines'];
+    // eslint-disable-next-line no-new-func
+    const gather = new Function('airtableFetch', 'todayLondonISO', 'TBL_TASKS',
+      `${[...deps.map(pick), pick('gatherTasks')].join('\n')}\nreturn gatherTasks;`)(
+      async (pat, tbl, p) => { params = p; return rows; }, () => TODAY, 'tblTASKS');
+    const t = await gather('pat');
+    for (const f of ['Hard Deadline', 'Sent For Approval By', 'Some Day', 'Team Member']) expect(params['fields[]']).toContain(f);
+    expect(t.deadlines.all.map(x => [x.id, x.who])).toEqual([['onDeadlineList', 'yours'], ['queued', 'waiting in your approval queue']]);
+    expect(t.onlyYou.items.map(x => x.name)).toEqual(['kevinsOwn']);
+    expect(t.deadlineList).toContain('onDeadlineList');
+  });
+});
+
+describe('a refused section never costs Kevin the money DM', () => {
+  it('the fallback retries with the money blocks alone', async () => {
+    const src = pick('sendDailyDM');
+    const deps = ['slackLookup', 'loadAndCompute', 'gatherTasks', 'gatherCalendar', 'gatherHuddle', 'callCeo',
+      'buildCeoPrompt', 'slackPost', 'storeBrief', 'storeFallbackMarker', 'readNeedsYouRow', 'todayLondonISO',
+      'DEFAULT_RECIPIENT', 'fmt', 'LIGHT_LABEL', 'buildBlocks', 'buildBriefBlocks', 'mustSeeBlocks',
+      'needsYouText', 'deadlinePreview', 'console'];
+    const posts = [];
+    // eslint-disable-next-line no-new-func
+    const send = new Function(...deps, `${src}\nreturn sendDailyDM;`)(
+      async () => 'U1', async () => ({ light: 'green', safeToActToday: 10 }),
+      async () => ({ deadlines: selectDeadlines(LIVE, TODAY), onlyYou: selectOnlyYou(LIVE, TODAY) }),
+      async () => ({ connected: false }), async () => null,
+      async () => { throw new Error('proxy down'); }, () => ({}),
+      async (token, channel, text, blocks) => {
+        posts.push(blocks);
+        if (blocks.some(b => b.text && /HARD DEADLINES/.test(b.text.text))) throw new Error('invalid_blocks');
+      },
+      async () => {}, async () => {}, async () => null, () => TODAY, 'k@example.com', W.fmt, W.LIGHT_LABEL,
+      W.buildBlocks, W.buildBriefBlocks, W.mustSeeBlocks, W.needsYouText, W.deadlinePreview, { error() {} });
+    await send({ SLACK_BOT_TOKEN: 't', AIRTABLE_PAT: 'p' });
+    expect(posts).toHaveLength(2);
+    expect(posts[1].some(b => b.text && /HARD DEADLINES/.test(b.text.text))).toBe(false);
   });
 });

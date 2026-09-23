@@ -486,6 +486,7 @@ def task_view(rec, activity_ids, dispatch_ids, now):
         "taskType": f.get("Task Type"),
         "teamMember": team,
         "assigneeEmail": assignee,
+        "hasAssignee": bool(f.get("Assignee")),
         "sentForApprovalBy": f.get("Sent For Approval By") or [],
         "maintenanceTicket": bool(f.get("Maintenance Ticket")),
         "hardDeadline": bool(f.get("Hard Deadline")),
@@ -630,7 +631,7 @@ def ownerless_views(buckets):
     Only the actionable buckets: an Approval card has its raiser, a parked task is parked on
     purpose, and dispatch's in-flight work is dispatch's."""
     return [v for b in ("stuck", "moving") for v in buckets.get(b, [])
-            if not v.get("teamMember") and not v.get("assigneeEmail")]
+            if not v.get("teamMember") and not v.get("hasAssignee") and not v.get("assigneeEmail")]
 
 
 def ownerless_problems(actions, scratch=None):

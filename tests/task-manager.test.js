@@ -584,6 +584,7 @@ def rec(i, f): return {"id": "recTASK00000000%02d" % i, "fields": dict({"Task Na
 recs = [rec(1, {"Status": "Upcoming", "Hard Deadline": True}),                       # nobody: ownerless
         rec(2, {"Status": "Today", "Team Member": ["recAGENT000000001"]}),              # an agent holds it
         rec(3, {"Status": "Today", "Assignee": {"email": "someone@example.com"}}),     # a person holds it
+        rec(6, {"Status": "Today", "Assignee": {"id": "usrNOEMAIL0000001"}}),          # a person with no email on the record
         rec(4, {"Status": "Approval", "Sent For Approval By": ["recAGENT000000001"]}), # a card: its raiser
         rec(5, {"Status": "Today", "Some Day": True})]                                 # parked on purpose
 buckets = {}
@@ -599,7 +600,7 @@ print(json.dumps([v["id"] for v in m.ownerless_views(buckets)]))
 
     const verify = `
 tmp = tempfile.mkdtemp()
-Path(tmp, "board.json").write_text(json.dumps({"ownerless": [{"id": "recA", "name": "Tax check first batch"}, {"id": "recB", "name": "E2E finding"}]}))
+Path(tmp, "board.json").write_text(json.dumps({"ownerless": [{"id": "recA", "name": "First batch of papers"}, {"id": "recB", "name": "E2E finding"}]}))
 actions = json.loads(sys.argv[1])
 print(json.dumps(m.ownerless_problems(actions, scratch=tmp)))
 `;

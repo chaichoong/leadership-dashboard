@@ -466,38 +466,48 @@ NEEDS_YOU_KEY = "daily-ops-needs-you"
 MONITORING = os.path.join(REPO, "monitoring")
 _REPORT_NAME = re.compile(r"^daily-ops-(\d{4}-\d{2}-\d{2})\.md$")
 _ITEM = re.compile(r"^\s*(?:\d+[.)]|[•-])\s+(.*\S)")
+# A summary heading: bold, and its first word all capitals ("*STUCK: 17*", "*BROKEN: 7 things*").
+# A wrapped line that happens to start in bold ("*Court* hearing ...") is not one.
+_HEADING = re.compile(r"^\*{1,2}[A-Z]{3,}\b")
+_NEEDS_HEAD = re.compile(r"^\*{1,2}\s*needs you\b[^*]*\*{1,2}:?\s*$", re.I)
 
 
 def parse_needs_you(text):
-    """The daily-ops summary block's NEEDS YOU items, or None when the summary block itself is not
-    there (a partial or reshaped report: say so, never read it as "nothing needs you"). The routine
-    leaves the heading out when nothing needs Kevin, so a summary with no heading is []. A line under
-    an item that is not a new item continues it."""
+    """The daily-ops summary block's NEEDS YOU items, or None when the block cannot be trusted.
+
+    Only the summary is read: from the first line starting `*Daily Ops` (an intro paragraph may sit
+    above it, as on 2, 4 and 7 Sep 2026) to the first `*STUCK` heading after it, so the detail
+    sections further down can never be mistaken for it. The routine leaves the heading out when
+    nothing needs Kevin, so a summary with no mention of it is []. Anything that mentions "needs
+    you" in a shape this reader does not recognise is None, never [], because [] prints "nothing
+    needs you" (review finding, 24 Sep 2026). Blank lines between items are allowed; a line that is
+    not an item continues the one above; an item struck out or marked WITHDRAWN is dropped."""
     lines = text.splitlines()
-    if not any(l.startswith("*Daily Ops") for l in lines[:5]) or not any(l.startswith("*STUCK") for l in lines):
+    start = next((i for i, l in enumerate(lines) if l.startswith("*Daily Ops")), None)
+    if start is None:
         return None
-    items, inside = [], False
-    for line in lines:
-        s = line.strip()
-        if s.startswith("*NEEDS YOU*"):
-            inside = True
+    stop = next((i for i in range(start + 1, len(lines)) if lines[i].startswith("*STUCK")), None)
+    if stop is None:
+        return None
+    region = lines[start + 1:stop]
+    head = next((i for i, l in enumerate(region) if _NEEDS_HEAD.match(l.strip())), None)
+    if head is None:
+        return None if any(re.search(r"\bneeds? you\b", l, re.I) for l in region) else []
+    items = []
+    for line in region[head + 1:]:
+        st = line.strip()
+        if not st:
             continue
-        if not inside:
-            continue
-        if not s:
-            if items:
-                break
-            continue
-        if s.startswith("*") or s.startswith("#") or s.startswith("---"):
+        if _HEADING.match(st) or st.startswith("#") or st.startswith("---"):
             break
         m = _ITEM.match(line)
         if m:
             items.append(m.group(1))
         elif items:
-            items[-1] += " " + s
+            items[-1] += " " + st
         else:
             return None   # something unrecognised sits under the heading: not a list we can trust
-    return items
+    return [x for x in items if not x.startswith("~") and not re.search(r"\bWITHDRAWN\b", x)]
 
 
 def needs_you_row(now, monitoring=MONITORING):
@@ -779,6 +789,22 @@ def selftest():
     ok(parse_needs_you("*Daily Ops, Thursday.* Ran fine.\n\n*STUCK: nothing has stalled*\n") == [], "no heading = nothing needs Kevin")
     ok(parse_needs_you("# half a report\n1. something\n") is None, "no summary block = unreadable, never []")
     ok(parse_needs_you("*Daily Ops, x.*\n*NEEDS YOU*\nsee below\n*STUCK: 1*\n") is None, "unrecognised lines under the heading = unreadable")
+    # review findings, 24 Sep 2026: every shape below was read wrongly by the first version
+    ok(parse_needs_you("Late run after the allowance reset.\nPhases 1-3 ran.\n\n" + report) == parse_needs_you(report),
+       "an intro paragraph above the summary (2, 4, 7 Sep reports)")
+    for head in ("*NEEDS YOU (2)*", "*NEEDS YOU:*", "**NEEDS YOU**", "*Needs you*"):
+        ok(parse_needs_you("*Daily Ops, x.*\n\n%s\n1. First.\n2. Second.\n\n*STUCK: 1*\n" % head) == ["First.", "Second."],
+           "heading variant %s" % head)
+    ok(parse_needs_you("*Daily Ops, x.*\n*NEEDS YOU*\n1. First.\n\n2. Second.\n\n*STUCK: 1*\n") == ["First.", "Second."],
+       "a blank line between items keeps both")
+    ok(parse_needs_you("*Daily Ops, x.*\n*NEEDS YOU*\n1. First, see the\n*Court* hearing notes.\n*STUCK: 1*\n") == ["First, see the *Court* hearing notes."],
+       "a wrapped line starting in bold continues the item")
+    ok(parse_needs_you("*Daily Ops, x.*\n*NEEDS YOU*\n1. Keep.\n2. ~Old item~ WITHDRAWN, handled.\n*STUCK: 1*\n") == ["Keep."],
+       "a withdrawn item is dropped")
+    ok(parse_needs_you("*Daily Ops, x.*\nThree things need you, below.\n*STUCK: 1*\n") is None,
+       "a mention in an unknown shape is unreadable, never 'nothing needs you'")
+    ok(parse_needs_you("*Daily Ops, x.* Ran fine.\n\n*STUCK: 1*\n\n## Detail\n*NEEDS YOU*\n1. Detail item.\n") == [],
+       "the detail section below STUCK is never read as the summary")
     tmp3 = tempfile.mkdtemp()
     at = datetime(2026, 9, 23, 8, 0, tzinfo=timezone.utc)   # 09:00 London
     row = needs_you_row(at, monitoring=tmp3)

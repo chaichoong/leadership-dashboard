@@ -353,12 +353,17 @@ async function gatherHuddle(pat) {
 async function gatherTasks(pat) {
     const rows = await airtableFetch(pat, TBL_TASKS, {
         filterByFormula: `AND({Task Name}!='',NOT({Status}='Completed'),NOT({Status}='Cancelled'))`,
-        'fields[]': ['Task Name', 'Assignee', 'Due Date', 'Status', 'Priority', 'Task Type', 'Deferred Until', 'Team Member', 'Hard Deadline'],
+        'fields[]': ['Task Name', 'Assignee', 'Due Date', 'Status', 'Priority', 'Task Type', 'Deferred Until', 'Team Member', 'Hard Deadline', 'Sent For Approval By', 'Some Day'],
     }, true);
     const today = todayLondonISO();
     const t = rows.map(r => ({
         id: r.id,
         hard: Boolean(r.fields['Hard Deadline']),
+        // The approval queue is Status Approval AND raised by the loop (os/agents/index.html,
+        // approvals.js). A legacy Approval row with no raiser is in no queue: it is ordinary work.
+        inQueue: String(r.fields['Status'] || '') === 'Approval'
+            && Array.isArray(r.fields['Sent For Approval By']) && r.fields['Sent For Approval By'].length > 0,
+        someDay: Boolean(r.fields['Some Day']),
         name: String(r.fields['Task Name'] || '').slice(0, 90),
         holders: Array.isArray(r.fields['Team Member']) ? r.fields['Team Member'] : [],
         who: (r.fields['Assignee'] && r.fields['Assignee'].name) || 'unassigned',
@@ -429,7 +434,7 @@ async function gatherTasks(pat) {
 // caught 1 of the 18 tasks he held outside the queue, so two dated tasks tied to a live legal
 // matter would never have reached him. Now EVERY due task he holds outside the approval queue counts, whatever its words. The name
 // rule still applies INSIDE the queue, where Kevin's holder link also sits on agent DECIDE cards
-// that are not his own to-dos.
+// that are not his own to-dos. A Some Day task is parked on purpose (task-manager.py) and stays out.
 const KEVIN_TEAM_MEMBER = 'recHEt2VPYothaqTd';
 const ROY_TEAM_MEMBER = 'reclbdjfVev3bqNHS';
 const ONLY_YOU_SHOW = 5;
@@ -440,8 +445,8 @@ function selectOnlyYou(tasks, today, shown) {
         || /\bSO\b(?=\s*(?:[-–£]|amount\b|for\b))/.test(name));
     const due = (tasks || [])
         .filter(x => (x.holders || []).includes(KEVIN_TEAM_MEMBER))
-        .filter(x => x.due && x.due <= today && !(x.deferred && x.deferred > today))
-        .filter(x => x.status !== 'Approval' || isOnlyYou(x.name))
+        .filter(x => x.due && x.due <= today && !(x.deferred && x.deferred > today) && !x.someDay)
+        .filter(x => !x.inQueue || isOnlyYou(x.name))
         .filter(x => !(shown && shown.has(x.id)))
         .sort((a, b) => a.due.localeCompare(b.due) || a.name.localeCompare(b.name));
     return { items: due.slice(0, ONLY_YOU_SHOW).map(x => ({ name: x.name, due: x.due })), more: Math.max(0, due.length - ONLY_YOU_SHOW) };
@@ -491,7 +496,7 @@ function addDaysISO(iso, n) {
     return d.toISOString().slice(0, 10);
 }
 function deadlineHolder(x) {
-    if (x.status === 'Approval') return 'waiting in your approval queue';
+    if (x.inQueue) return 'waiting in your approval queue';
     const holders = x.holders || [];
     if (holders.includes(KEVIN_TEAM_MEMBER)) return 'yours';
     if (holders.includes(ROY_TEAM_MEMBER)) return 'with Roy';
@@ -509,10 +514,14 @@ function selectDeadlines(tasks, today) {
         .map(x => ({ id: x.id, name: x.name, due: x.due, who: deadlineHolder(x), kind: kind(x.name) }))
         .sort((a, b) => ((a.due > today) - (b.due > today)) || (a.kind - b.kind)
             || a.due.localeCompare(b.due) || a.name.localeCompare(b.name));
-    return { all, items: all.slice(0, DEADLINE_SHOW), more: Math.max(0, all.length - DEADLINE_SHOW) };
+    // The CONTROL: how many open tasks carry the tick at all. Zero means the tick has stopped
+    // being written or read, and an empty list would then read as a calm week for ever.
+    const ticked = (tasks || []).filter(x => x.hard).length;
+    return { all, items: all.slice(0, DEADLINE_SHOW), more: Math.max(0, all.length - DEADLINE_SHOW), ticked };
 }
 function deadlinesText(deadlines, today) {
     if (!deadlines) return '_The deadline list could not be read this morning. Open the approval queue._';
+    if (!deadlines.ticked) return '_No open task carries the Hard Deadline tick at all, so this list cannot be trusted today. Open the approval queue._';
     if (!deadlines.items.length) return '*HARD DEADLINES, NEXT 7 DAYS:* none.';
     const lines = deadlines.items.map(x => `• ${slackEsc(x.name)} (${whenText(x.due, today)}, ${x.who})`);
     if (deadlines.more) lines.push(`+${deadlines.more} more with a hard deadline this week`);
@@ -521,7 +530,7 @@ function deadlinesText(deadlines, today) {
 
 // ── What the 07:00 check says needs Kevin ────────────────────────────────────────────────────
 // daily-ops writes its report to a file on the Mac (its Slack DM was retired on 1 Sep 2026), so
-// on 23 Sep its "NEEDS YOU" line about the charging order reached nobody. scripts/estate-status.py
+// on 23 Sep its "NEEDS YOU" line about a same-day legal deadline reached nobody. scripts/estate-status.py
 // lifts that block out of the day's report every ten minutes into one Estate Status row, and the
 // brief reads it here. A row from an earlier day, a missing row and a failed read each say so in
 // words: silence would read as "nothing needs you".
@@ -566,8 +575,14 @@ function deadlinePreview(deadlines, today) {
 // The sections Kevin must see whatever the model says, in the order he reads them. Shared by the
 // CEO brief and the money-only fallback, so a failed CEO call never hides a deadline. `tasks` is
 // null when the task read itself failed.
+// Slack refuses a section over 3000 characters, and a refused block loses the WHOLE message, so each
+// section is cut after escaping (escaping lengthens the text).
+const SECTION_MAX = 2900;
+function capSection(text) {
+    return text.length > SECTION_MAX ? `${text.slice(0, SECTION_MAX - 40)}\n… cut short: the rest is in the morning report` : text;
+}
 function mustSeeBlocks(tasks, needsRow, today) {
-    const section = text => ({ type: 'section', text: { type: 'mrkdwn', text } });
+    const section = text => ({ type: 'section', text: { type: 'mrkdwn', text: capSection(text) } });
     const blocks = [section(deadlinesText(tasks ? tasks.deadlines : null, today))];
     const onlyYou = tasks ? onlyYouText(tasks.onlyYou, today) : '';
     if (onlyYou) blocks.push(section(onlyYou));
@@ -1003,7 +1018,13 @@ async function sendDailyDM(env) {
     } catch (ceoErr) {
         // The deadlines are code, not model: they go out even when the CEO layer fails.
         const fallback = `${tasks ? deadlinePreview(tasks.deadlines, today) : ''}Safe to act today: ${fmt(m.safeToActToday)} (${LIGHT_LABEL[m.light]})`;
-        await slackPost(token, userId, fallback, [...buildBlocks(m), ...mustSeeBlocks(tasks, needsRow, today)]);
+        try {
+            await slackPost(token, userId, fallback, [...buildBlocks(m), ...mustSeeBlocks(tasks, needsRow, today)]);
+        } catch (postErr) {
+            // A section Slack refuses must never cost the proven money-only DM.
+            console.error('[ceo-brief] fallback with the deadline sections refused, sending money only:', postErr && postErr.message || postErr);
+            await slackPost(token, userId, fallback, buildBlocks(m));
+        }
         // The money DM reached him, which is the story he needs; the WHY the
         // CEO layer failed lives in Workers Logs, not his phone (1 Sep 2026).
         console.error('[ceo-brief] CEO layer failed, money DM sent as fallback:', ceoErr && ceoErr.message || ceoErr);

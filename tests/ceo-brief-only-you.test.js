@@ -62,7 +62,7 @@ const NOT_ONLY_YOU = [
 
 // Inside the approval queue the name rule still decides: Kevin's holder link also sits on agent
 // DECIDE cards there that are not his own to-dos (17 Sep 2026).
-const card = (name, due, extra = {}) => kevin(name, due, { status: 'Approval', ...extra });
+const card = (name, due, extra = {}) => kevin(name, due, { status: 'Approval', inQueue: true, ...extra });
 
 describe('outside the queue, every due task Kevin holds counts (widened 23 Sep 2026)', () => {
   it('the tasks the bank-and-signature rule used to drop now reach him', () => {
@@ -73,12 +73,12 @@ describe('outside the queue, every due task Kevin holds counts (widened 23 Sep 2
   it('the two dated tasks from the 23 Sep audit are named, whatever their words', () => {
     const day = '2026-10-03';
     const out = selectOnlyYou([
-      kevin('Reply to the adviser disengagement letter by 30 Sep', '2026-09-30'),
-      kevin('Appoint a new adviser for the open check', day),
+      kevin('Reply to the letter by 30 Sep', '2026-09-30'),
+      kevin('Book the review meeting', day),
     ], day);
     expect(out.items.map(x => x.name)).toEqual([
-      'Reply to the adviser disengagement letter by 30 Sep',
-      'Appoint a new adviser for the open check',
+      'Reply to the letter by 30 Sep',
+      'Book the review meeting',
     ]);
   });
 
@@ -97,14 +97,14 @@ describe('outside the queue, every due task Kevin holds counts (widened 23 Sep 2
 
 describe('inside the approval queue, only bank, payment and signature cards count', () => {
   it('keeps the banking cards and skips the rest', () => {
-    const out = selectOnlyYou([...NOT_ONLY_YOU.map(x => ({ ...x, status: 'Approval' })),
-      ...BANKING.map(x => ({ ...x, status: 'Approval' }))], TODAY);
+    const out = selectOnlyYou([...NOT_ONLY_YOU.map(x => ({ ...x, status: 'Approval', inQueue: true })),
+      ...BANKING.map(x => ({ ...x, status: 'Approval', inQueue: true }))], TODAY);
     expect(out.items.length + out.more).toBe(BANKING.length);
     for (const x of out.items) expect(BANKING.map(b => b.name)).toContain(x.name);
   });
 
   it('every non-banking card Kevin holds is left out', () => {
-    expect(selectOnlyYou(NOT_ONLY_YOU.map(x => ({ ...x, status: 'Approval' })), TODAY)).toEqual({ items: [], more: 0 });
+    expect(selectOnlyYou(NOT_ONLY_YOU.map(x => ({ ...x, status: 'Approval', inQueue: true })), TODAY)).toEqual({ items: [], more: 0 });
   });
 
   it('a real signature counts in any tense', () => {
