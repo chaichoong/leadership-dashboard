@@ -456,14 +456,19 @@ def allowance_row(now):
 
 
 # ─── the 07:00 check's NEEDS YOU list, for the 09:00 brief ────────────
-# Kevin, 23 Sep 2026 ("build it"). daily-ops writes its report to monitoring/ and nowhere else (its
+# Kevin, 23 Sep 2026 ("build it"). daily-ops writes its report to one file and nowhere else (its
 # Slack DM was retired on 1 Sep 2026). That morning its NEEDS YOU block named a legal deadline due
 # the same day, and the line reached nobody. This lifts the block out of today's report
 # into one REPORT row; the 09:00 brief (scripts/slack-automation/money-daily-worker.js,
 # needsYouText) reads it and says in words when the row is from an earlier day. The date in the
 # payload is the report's own date, so yesterday's list can never pass for today's.
+#
+# The report lives OUTSIDE the repo (Kevin, 24 Sep 2026). It names properties, sums and his legal
+# and financial matters, and the repo is public: 29 reports sat in it until PR #531. They were
+# gitignored first, then moved here, so no checkout, worktree or `git add -f` can reach them. The
+# selftest fails if this path is ever pointed back inside the repo.
 NEEDS_YOU_KEY = "daily-ops-needs-you"
-MONITORING = os.path.join(REPO, "monitoring")
+DAILY_OPS_REPORTS = os.path.join(LOGS, "daily-ops")
 _REPORT_NAME = re.compile(r"^daily-ops-(\d{4}-\d{2}-\d{2})\.md$")
 _ITEM = re.compile(r"^\s*(?:\d+[.)]|[•-])\s+(.*\S)")
 # A heading is a WHOLE bold line led by a capital word ("*STUCK: 17*"). A wrapped line that only starts in bold
@@ -520,18 +525,18 @@ def parse_needs_you(text):
     return [x for x in items if not _STRUCK.match(x) and not re.search(r"\bWITHDRAWN\b", x)]
 
 
-def needs_you_row(now, monitoring=MONITORING):
+def needs_you_row(now, reports=DAILY_OPS_REPORTS):
     """One REPORT row carrying today's NEEDS YOU items; a Failed row says why, never a blank."""
     today = now.astimezone(LONDON).strftime("%Y-%m-%d")
     stamp = now.strftime("%Y-%m-%dT%H:%M:%S.000Z")
     row = {"key": NEEDS_YOU_KEY, "kind": "report", "label": "07:00 check: needs Kevin", "lastRun": stamp}
     try:
-        dates = sorted(m.group(1) for m in (_REPORT_NAME.match(f) for f in os.listdir(monitoring)) if m)
+        dates = sorted(m.group(1) for m in (_REPORT_NAME.match(f) for f in os.listdir(reports)) if m)
         if today not in dates:
             last = dates[-1] if dates else None
             return dict(row, status="Idle", payload=json.dumps({"date": last, "items": None}),
                         detail="No 07:00 report for today yet%s." % ((". The last one is from %s" % last) if last else ""))
-        with open(os.path.join(monitoring, "daily-ops-%s.md" % today), encoding="utf-8") as fh:
+        with open(os.path.join(reports, "daily-ops-%s.md" % today), encoding="utf-8") as fh:
             items = parse_needs_you(fh.read())
     except Exception as exc:  # noqa: BLE001 — the row must say WHY, whatever went wrong
         return dict(row, status="Failed", payload=json.dumps({"date": today, "unreadable": True}),
@@ -829,24 +834,27 @@ def selftest():
        "a NEEDS YOU block drifted below STUCK is unreadable, never 'nothing needs you'")
     tmp3 = tempfile.mkdtemp()
     at = datetime(2026, 9, 23, 8, 0, tzinfo=timezone.utc)   # 09:00 London
-    row = needs_you_row(at, monitoring=tmp3)
+    row = needs_you_row(at, reports=tmp3)
     ok(row["status"] == "Idle" and json.loads(row["payload"]) == {"date": None, "items": None}, "no reports at all: %r" % row)
     with open(os.path.join(tmp3, "daily-ops-2026-09-22.md"), "w") as fh:
         fh.write(report)
     with open(os.path.join(tmp3, "daily-ops-2026-09-23-1300.md"), "w") as fh:
         fh.write(report)
-    row = needs_you_row(at, monitoring=tmp3)
+    row = needs_you_row(at, reports=tmp3)
     ok(json.loads(row["payload"])["date"] == "2026-09-22" and "2026-09-22" in row["detail"],
        "yesterday's report is never today's, and a -1300 rerun is not the day's report: %r" % row)
     with open(os.path.join(tmp3, "daily-ops-2026-09-23.md"), "w") as fh:
         fh.write(report)
-    row = needs_you_row(at, monitoring=tmp3)
+    row = needs_you_row(at, reports=tmp3)
     p = json.loads(row["payload"])
     ok(row["status"] == "Worked" and p["date"] == "2026-09-23" and len(p["items"]) == 3 and row["key"] == NEEDS_YOU_KEY,
        "today's report -> Worked with its items: %r" % row)
-    ok(needs_you_row(datetime(2026, 9, 23, 23, 30, tzinfo=timezone.utc), monitoring=tmp3)["status"] == "Idle",
+    ok(needs_you_row(datetime(2026, 9, 23, 23, 30, tzinfo=timezone.utc), reports=tmp3)["status"] == "Idle",
        "00:30 London on the 24th reads the 24th, not the 23rd")
-    ok(needs_you_row(at, monitoring=os.path.join(tmp3, "missing"))["status"] == "Failed", "unreadable folder -> Failed")
+    ok(needs_you_row(at, reports=os.path.join(tmp3, "missing"))["status"] == "Failed", "unreadable folder -> Failed")
+    # The report names Kevin's legal and financial matters and the repo is public (24 Sep 2026).
+    ok(not (os.path.realpath(DAILY_OPS_REPORTS) + os.sep).startswith(os.path.realpath(REPO) + os.sep),
+       "the daily-ops report folder is outside the repo: %s" % DAILY_OPS_REPORTS)
     # 9. field map is complete and every status is a table choice
     ok(set(ES) == {"key", "kind", "label", "schedule", "status", "lastRun", "lastWorked", "detail", "nextDue", "runs24h", "fails24h", "payload", "updated"}, "ES keys")
     ok(all(v.startswith("fld") and len(v) == 17 for v in ES.values()), "ES ids")
