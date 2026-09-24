@@ -118,9 +118,17 @@ def run_plan(plan_path, task_id, test, shot):
     if not test: cmd += ["--task", task_id]
     r = subprocess.run(cmd, capture_output=True, text=True, timeout=1500)
     out = r.stdout.strip()
-    if r.returncode != 0: raise SystemExit((r.stderr.strip() or out)[-600:])
+    if r.returncode != 0: raise SystemExit(lane_error(r.stderr.strip() or out))
     try: return json.loads(out[out.index("{"):])
     except Exception: raise SystemExit("unreadable lane output: " + out[-300:])
+
+
+def lane_error(err):
+    """The lane's own message, not its stack: 2070's podcast failed hourly from 23 Sep 2026 and the record kept only the last
+    200 characters, which were stack frames ("owser.js:472:12)"), so nobody could say why. First line first, kept short."""
+    head = next((l.strip() for l in (err or "").splitlines() if l.strip()), "")
+    head = head.replace("BROWSER ERROR: ", "")
+    return head[:190] if head else (err or "")[-190:]
 
 
 def write_plan(day, video_path, podcast_copy, youtube_link, test, out_dir, thumb=""):
@@ -250,6 +258,8 @@ def public_link(title):
 
 
 def selftest():
+    e = lane_error("BROWSER ERROR: TimeoutError: page.waitForSelector: Timeout 60000ms exceeded. Failure screenshot: /x.png\n    at runSteps (/r/agent-browser.js:472:12)\n    at async main (/r/agent-browser.js:996:17)")
+    assert e.startswith("TimeoutError: page.waitForSelector") and "472:12" not in e and len(e) <= 190, e
     rows = " ".join("Episode %d - Title %d Published 9/1/26 Video 04:00" % (2000 + i, i) for i in range(25))
     assert not list_incomplete(rows) and list_incomplete("Episode 2054 x Load more") and not list_incomplete("see more of this description"), "only a load-more control means the list goes on"
     assert list_status("Episode 2054 - T Published", "Episode 2054 - T")[0] == "published" and list_status("nothing", "Episode 2054")[0] == "missing"
