@@ -216,9 +216,15 @@ def split_sections(text, ctype):
 
 
 KM_RE = re.compile(r"(\d[\d,]*(?:\.\d+)?)\s?km\b", re.I)
-KM_LEFT = r"to go|to run|to cover|left|remain|still"
+KM_LEFT = r"to go|to run|to cover|left|remain|still|ahead"
 KM_DONE = r"\b(?:down|behind|covered|done|so far|in the bank|logged|completed)\b"
 KM_IN_RE = re.compile(r"^\s*in\b(?!\s+total)", re.I)          # "15,899km in" is km done; a bare "in" elsewhere is not
+
+
+def _km(fig):
+    m = KM_RE.match(fig or "")
+    try: return float(m.group(1).replace(",", "")) if m else 0.0
+    except ValueError: return 0.0
 
 
 def _nearest(text, from_end=False):
@@ -252,11 +258,14 @@ def check_km(t, cum, transcript=""):
         # The words that decide "so far" or "to go" run from this figure to the next one (or the sentence's end), and back
         # to the one before (or the sentence's start); the words after it count first. 24 Sep 2026: "Roughly 20,690km down,
         # 19,385km left" read the second figure's "left" and made the first the km left ("24,098km down, 24,098km left").
-        nxt = min([a for a, _ in spans if a >= m.end()] + [len(t)]); prv = max([b for _, b in spans if b <= m.start()] + [0])
+        nxt = min([a for a, _ in spans if a >= m.end()] + [len(t)]); before = [sp for sp in spans if sp[1] <= m.start()]
+        prv = before[-1][1] if before else 0
         tail = re.split(r"[.!?\n]", t[m.end():nxt], 1)[0].lower()
         gap = t[prv:m.start()]; head = re.split(r"[.!?\n]", gap[::-1], 1)[0][::-1].lower()
-        if prv and len(head) == len(gap):
-            own = _nearest(head)          # same sentence as the figure before: the first word after THAT figure is its own
+        if before and len(head) == len(gap) and not KM_IN_RE.match(gap) and abs(_km(t[before[-1][0]:before[-1][1]]) - MISSION_KM) >= 1:
+            # same sentence as the figure before: the first word after THAT figure is its own. Not when it owns "in"
+            # (already spent) or is the 40,075km lap, which takes no direction word (review, 24 Sep 2026)
+            own = _nearest(head)
             if own: head = head[own[1]:]
         hit = ("done",) if KM_IN_RE.match(tail) else (_nearest(tail) or _nearest(head, from_end=True))   # nearest word wins (review, 24 Sep 2026)
         want = left if hit and hit[-1] == "left" else cum
@@ -484,7 +493,9 @@ def selftest():
                        ("20,690km down and still 19,385km to run.", "15,977km down and still 24,098km to run"),
                        ("Still to go in the lap: 19,385km.", "24,098km"), ("19,385km in total still to go.", "24,098km in total"),
                        ("I have 24,000km left, after 16,000km.", "24,098km left, after 15,977km"),
-                       ("Roughly 20,690km down, 19,385km left toward the 40,075km lap.", "15,977km down, 24,098km left")):
+                       ("Roughly 20,690km down, 19,385km left toward the 40,075km lap.", "15,977km down, 24,098km left"),
+                       ("20,690km in, still 19,385km ahead.", "15,977km in, still 24,098km ahead"),
+                       ("Of the 40,075km lap, still 19,385km ahead.", "still 24,098km ahead")):
         got = rules_check({"LinkedIn Copy": said}, "", km=15977.0)[0]["LinkedIn Copy"]
         assert want in got, (said, got)          # the reviewer's cases, 24 Sep 2026
     f5, i5 = rules_check({"Facebook Post Copy": "15,899.70km logged of 40,075km"}, "", km=15899.70); assert not i5 and f5["Facebook Post Copy"].startswith("15,899.70km"), "the right figure passes untouched"
