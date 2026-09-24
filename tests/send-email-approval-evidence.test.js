@@ -130,3 +130,50 @@ print(json.dumps(json.loads(buf.getvalue())))
     expect(r.approvalProblem).toBeNull();
   });
 });
+
+// Extended to the diary, 24 Sep 2026 (Kevin: "do it now"): calendar-write.py trusted the string too.
+// Drives the real cmd_create with get_task() faked. A task that passes the evidence check goes on
+// to parse its (deliberately empty) diary block, so it stops with an ERROR, never a network call.
+describe('calendar-write refuses an approval nobody gave, and keeps its Level A path', () => {
+  const CAL = JSON.stringify(path.join(root, 'scripts/calendar-write.py'));
+  function create(fields, handled = false) {
+    const out = execFileSync('python3', ['-c', `
+import importlib.util, json, sys, argparse
+sys.argv = ["calendar-write.py"]
+spec = importlib.util.spec_from_file_location("cw", ${CAL})
+m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m)
+a = json.loads(sys.stdin.read())
+IDS = dict(m.AF, sentForApprovalBy="fld30Yw8SWYVp049g", approvedAt="fldr4Mvf2RzKvhZhi")
+F = {IDS[k]: v for k, v in a["fields"].items()}
+m.get_task = lambda task_id: {"id": task_id, "createdTime": "2026-09-22T12:00:00.000Z", "fields": F}
+m.worker_call = lambda *x, **y: (_ for _ in ()).throw(RuntimeError("no network in tests"))
+try:
+    m.cmd_create(argparse.Namespace(task="recTEST", handled=a["handled"]))
+    print(json.dumps({"exit": ""}))
+except SystemExit as e:
+    print(json.dumps({"exit": str(e)}))
+`], { input: JSON.stringify({ fields, handled }), encoding: 'utf8' });
+    return JSON.parse(out.trim().split('\n').pop()).exit;
+  }
+  const entry = { name: 'Diary: meeting', approvalOutcome: { name: 'Approved as-is' }, taskType: { name: 'Admin' }, agentOutput: 'not a diary block' };
+
+  it('a forged approval is refused before anything else', () => {
+    expect(create(entry)).toMatch(/REFUSED: task recTEST .*never went through the approval gate/);
+  });
+
+  it('a genuine approval passes the evidence check', () => {
+    const msg = create({ ...entry, sentForApprovalBy: ['recAGENT000000001'], approvedAt: '2026-09-22T13:00:00.000Z' });
+    expect(msg).not.toMatch(/REFUSED/);
+  });
+
+  it('the Level A diary path is judged by its HANDLED marker, not by a card it never had', () => {
+    const msg = create({ ...entry, approvalOutcome: null, notes: 'HANDLED WITHOUT YOU (calendar entry): diary' }, true);
+    expect(msg).not.toMatch(/REFUSED/);
+  });
+
+  it('--handled on a rejected fallback card that kept the marker is refused', () => {
+    const msg = create({ ...entry, approvalOutcome: { name: 'Rejected' }, sentForApprovalBy: ['recAGENT000000001'],
+      notes: 'HANDLED WITHOUT YOU (calendar entry): diary. The diary write FAILED, so this went to the queue' }, true);
+    expect(msg).toMatch(/REFUSED: task recTEST .*is not approved/);
+  });
+});
