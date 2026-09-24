@@ -312,23 +312,59 @@ def run_day(day, only=None):
     if len(transcript) < watch.MIN_TRANSCRIPT_CHARS if hasattr(watch, "MIN_TRANSCRIPT_CHARS") else len(transcript) < 50:
         raise SystemExit("episode %d has no transcript yet; the render step writes it from the long clip" % day)
     yt = full["fields"].get("YouTube Full Link") or ""
-    results = {}
+    results, failed = {}, []
     for ctype in (only or list(TYPES)):
-        rec = full if ctype == "Long Form Video" else ensure_record(day, ctype, full)
-        n, issues, cost = generate_for(rec, ctype, transcript, day, yt)
+        # one record's failed run never costs the others their copy (24 Sep 2026: 2069's Short run died and took nothing
+        # else with it only because it came last; 2071's Learnings run died and its Short was never tried)
+        try:
+            rec = full if ctype == "Long Form Video" else ensure_record(day, ctype, full)
+            n, issues, cost = generate_for(rec, ctype, transcript, day, yt)
+        except (Exception, SystemExit) as ex:
+            failed.append("%s (%s)" % (ctype, str(ex)[-200:])); print("Episode %d %s: copy NOT written: %s" % (day, ctype, str(ex)[-200:]), file=sys.stderr); continue
         results[ctype] = {"fields": n, "issues": issues, "cost_usd": cost, "record": rec["id"]}
         print("Episode %d %s: %d copy fields written%s" % (day, ctype, n, ("; review: " + "; ".join(issues)) if issues else ""))
+    if failed: raise SystemExit("Episode %d: copy failed for %s; the next run tries again" % (day, "; ".join(failed)))
     return results
+
+
+# A Learnings or Short record the writer made but never filled. Until 24 Sep 2026 only a Full record with no YouTube copy
+# counted as pending, so when the Full copy landed and the Short's run failed, 2069's teasers never had copy and never posted.
+UNFILLED = ('AND({Category}="Runpreneur", {Responsible}="Content Engine (AI)", {TikTok Copy}="", {Record Status}!="Published", '
+            'OR({Content Type}="Learnings From My Diary", {Content Type}="Short Form Video"), IS_AFTER(CREATED_TIME(), DATEADD(TODAY(), -30, "days")))')
+
+
+def unfilled_work(records):
+    """[(day, content type)] from Learnings/Short records with no copy, oldest day first."""
+    out = []
+    for rec in records:
+        m = re.search(r"Episode (\d+)", rec["fields"].get("Content Name", ""))
+        ctype = rec["fields"].get("Content Type")
+        if m and ctype in TYPES: out.append((int(m.group(1)), ctype))
+    return sorted(set(out))
 
 
 def run_pending(limit=3):
     f = 'AND({Content Type}="Long Form Video", {Responsible}="Content Engine (AI)", {Transcription}!="", {YouTube Copy}="")'
     r = watch._airtable("GET", watch.API + "?maxRecords=%d&filterByFormula=%s" % (limit, urllib.parse.quote(f)))
     recs = r.get("records", [])
-    if not recs: print("copy: nothing pending"); return
+    unfilled, off = [], None
+    while True:                                   # every page (CLAUDE.md: a missed page is a silent miss)
+        u = watch._airtable("GET", watch.API + "?pageSize=100&filterByFormula=%s%s" % (urllib.parse.quote(UNFILLED), "&offset=" + off if off else ""))
+        unfilled += u.get("records", []); off = u.get("offset")
+        if not off: break
+    later = unfilled_work(unfilled)
+    if not recs and not later: print("copy: nothing pending"); return
+    failed = []
     for rec in recs:
         m = re.search(r"Episode (\d+)", rec["fields"].get("Content Name", ""))
-        if m: run_day(int(m.group(1)))
+        if not m: continue
+        try: run_day(int(m.group(1)))
+        except SystemExit as ex: failed.append(str(ex))
+    done = {int(re.search(r"Episode (\d+)", x["fields"].get("Content Name", "")).group(1)) for x in recs if re.search(r"Episode (\d+)", x["fields"].get("Content Name", ""))}
+    for day, ctype in [w for w in later if w[0] not in done][:limit * 2]:
+        try: run_day(day, [ctype])
+        except SystemExit as ex: failed.append(str(ex))
+    if failed: raise SystemExit("copy: " + " | ".join(failed))
 
 
 def selftest():
@@ -360,7 +396,31 @@ def selftest():
     assert rules_check({"X": "20,540km"}, "", km=None)[1] == [], "no Strava figure known: nothing to correct against (the prompt then says do not state a distance)"
     assert cm_prompts.KEVIN_SYSTEM.startswith("You are Kevin Brittain.") and "#Insta360" in cm_prompts.KEVIN_SYSTEM
     _selftest_session_text()
-    print(json.dumps({"checks": 17, "failed": []}))
+    assert unfilled_work([{"fields": {"Content Name": "Episode 2069 Short", "Content Type": "Short Form Video"}},
+                          {"fields": {"Content Name": "Episode 2066 Learnings from My Diary", "Content Type": "Learnings From My Diary"}},
+                          {"fields": {"Content Name": "odd", "Content Type": "Short Form Video"}}]) == [(2066, "Learnings From My Diary"), (2069, "Short Form Video")]
+    _selftest_run_day_isolation()
+    print(json.dumps({"checks": 19, "failed": []}))
+
+
+def _selftest_run_day_isolation():
+    """A failed Learnings run still lets the Short run, and the failure is raised at the end (24 Sep 2026, 2071)."""
+    g = globals(); saved = {k: g[k] for k in ("find_by_name", "ensure_record", "generate_for")}
+    tried = []
+    def gen(rec, ctype, transcript, day, yt):
+        tried.append(ctype)
+        if ctype == "Learnings From My Diary": raise SystemExit("claude failed (exit 1): error_max_turns")
+        return 6, [], 0
+    g.update({"find_by_name": lambda n: {"id": "recF", "fields": {"Transcription": "x" * 400}},
+              "ensure_record": lambda day, ctype, full: {"id": "rec" + ctype[:1], "fields": {}}, "generate_for": gen})
+    import contextlib, io
+    try:
+        with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
+            try: run_day(2071); raise AssertionError("a failed record must fail the run")
+            except SystemExit as ex: assert "Learnings From My Diary" in str(ex), ex
+        assert tried == ["Long Form Video", "Learnings From My Diary", "Short Form Video"], tried
+    finally:
+        g.update(saved)
 
 
 def _selftest_session_text():

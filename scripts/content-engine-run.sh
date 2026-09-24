@@ -134,7 +134,9 @@ done
 # Learnings clips Kevin asked to be rebuilt (content_engine_redo_lfmd, one day per line). A success releases the
 # day's publishing hold; a failure stays listed for the next night (2060, 17 Sep 2026).
 python3 scripts/content-engine/render.py redo-requested || echo "redo: Learnings rebuilds skipped this run (see above)"
-python3 scripts/content-engine/platform_copy.py run --pending --limit 2 || exit 1
+# A failed copy run is said and retried next night; it never ends the night (24 Sep 2026: 2071's Learnings copy failed
+# and nothing after this line ran: no card sync, no cards, no publish, no report until the hourly job came round).
+python3 scripts/content-engine/platform_copy.py run --pending --limit 2 || echo "copy: some copy NOT written this run, retried next run (see above)"
 python3 scripts/content-engine/approval.py sync || exit 1
 # 5b. Performance read (Kevin, 8 Sep 2026: once a month, last 30 days, three recommendations that become lessons).
 #     Every night: his verdict on an open read -> lessons. Mondays: GoHighLevel's 7-day platform totals stored

@@ -232,6 +232,11 @@ def output_gate(day, ledger, state, recs=None):
     if leak:
         ok = False
         failures = list(failures) + [("copy holds session text", "%s %s (%s); regenerate: platform_copy.py run --day %d" % (c, f, m, day)) for c, f, m in leak]
+    full_f = ((recs or {}).get("Long Form Video") or {}).get("fields") or {}
+    for ctype, link in (("Learnings From My Diary", "Reframed Video URL"), ("Short Form Video", "Summary Video URL")):
+        # a clip with no copy would publish nothing for it (2069's teasers, 23 Sep 2026); the nightly copy step retries it
+        if recs and full_f.get(link) and not ((((recs.get(ctype) or {}).get("fields")) or {}).get("TikTok Copy") or "").strip():
+            ok = False; failures = list(failures) + [("copy missing", "%s has its clip but no copy yet; the nightly copy step writes it" % ctype)]
     if not ok:
         waiting = qa.is_wait(failures)
         entry = state.setdefault(str(day), {})
@@ -476,6 +481,11 @@ def _selftest_session_text_gate():
         clean = {"Long Form Video": {"fields": {"Podcast Copy": "Day 2067. I ran at midnight."}}}
         st2 = {}
         assert output_gate(2067, {}, st2, clean) is not None and "2067" not in st2, "clean copy passes"
+        no_copy = {"Long Form Video": {"fields": {"Summary Video URL": "https://drive/s", "Reframed Video URL": "https://drive/l"}},
+                   "Short Form Video": {"fields": {"TikTok Copy": ""}}, "Learnings From My Diary": {"fields": {"TikTok Copy": "Day 2069."}}}
+        st3 = {}
+        with contextlib.redirect_stdout(io.StringIO()): assert output_gate(2069, {}, st3, no_copy) is None, "a teaser with no copy holds the card"
+        assert st3["2069"]["qa_blocked"]["failures"] == ["copy missing: Short Form Video has its clip but no copy yet; the nightly copy step writes it"], st3
     finally:
         qa.gate, save_state = real_gate, real_save
 
