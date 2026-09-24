@@ -35,6 +35,7 @@ const ESTATE_SCRIPTS = [
   'scripts/content-engine/youtube_ads.py',
   'scripts/content-engine/facebook_share.py',
   'scripts/agent-dispatch.py',
+  'scripts/standing_holds.py',
   'scripts/handback-poll.py',
   'scripts/session-keepalive.py',
   'scripts/create-agent-task.py',

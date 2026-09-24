@@ -67,6 +67,9 @@ from zoneinfo import ZoneInfo
 # with scripts/send-email.py. Two copies is how submit came to accept an output
 # the send gate could not parse.
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+# Standing holds (24 Sep 2026): Kevin's rulings that stay true only until an
+# event, written once for the whole team. The queue never hands one to an agent.
+import standing_holds  # noqa: E402
 from agent_email_format import (  # noqa: E402
     CARRY_OUT_MARKER,
     CARRY_OUT_RE,
@@ -2496,6 +2499,17 @@ def sort_key(t):
 
 # ─── QUEUE ────────────────────────────────────────────────────────────
 
+def load_standing_holds():
+    """(holds, error). An unreadable holds file must not stop the queue: the
+    30-minute `standing_holds.py run` parks held tasks on the board itself, so
+    this read is the belt for the gap between a task arriving and that run.
+    The error rides in the queue JSON, never silently."""
+    try:
+        return standing_holds.load_holds(), ""
+    except Exception as exc:  # noqa: BLE001 — any failure is the same story
+        return [], str(exc)[:200]
+
+
 def build_queue(args=None):
     """Classify the open board. Returns the queue dict, prints nothing.
 
@@ -2565,9 +2579,25 @@ def build_queue(args=None):
             property_ok = False
     property_count = 0
     held_under = []
+    standing, standing_error = load_standing_holds()
+    if standing_error:
+        print(f"WARNING: standing holds unreadable: {standing_error}", file=sys.stderr)
+    standing_held = []
     open_leads = open_lead_ids({held_lead_id(t) for t in agent_linked if held_lead_id(t)})
 
     for t in agent_linked:
+        # A STANDING HOLD WINS FIRST (Kevin, 24 Sep 2026). He ruled that nothing
+        # on the matter moves until an event (a named person's reply); on
+        # 23 Sep the Task Board Manager raised eight cards he had already ruled
+        # on, because the ruling lived in two other agents' files. A hold is
+        # read here for every agent, and an approval he gave AFTER the hold
+        # began is his newer word, so hold_for never holds it. Listed, never
+        # dropped: the task waits on the board with the reason on it.
+        hold = standing_holds.hold_for(t, standing)
+        if hold:
+            standing_held.append({**t, "holdId": hold["id"],
+                                  "holdTitle": hold.get("title", "")})
+            continue
         # Tier 1 no longer drops out of the worklist. It is MARKED and worked,
         # and the mark rides all the way to the Slack post. Removing this line
         # so tier-1 work is prepared silently is the regression to fear.
@@ -2829,6 +2859,10 @@ def build_queue(args=None):
         # Property siblings held under a lead: grouped this run, or submitted
         # under a lead that is still open. Listed with groupLead, never dropped.
         "heldUnderLead": held_under,
+        # Tasks a standing hold covers (scripts/standing_holds.py): waiting on
+        # the event Kevin named. Parked on the board by the 30-minute run.
+        "heldByStandingHold": standing_held,
+        "standingHoldsError": standing_error,
         "decided": decided,            # answered DECIDE: cards; the Task Manager's move, never a carry-out
         "unmappedAgent": unmapped,
         "unclassified": unclassified,  # states the buckets cannot place — eyes, not silence
@@ -2863,6 +2897,7 @@ def build_queue(args=None):
             "systemAlerts": len(system_alerts),
             "royLane": len(roy_lane),
             "heldUnderLead": len(held_under),
+            "heldByStandingHold": len(standing_held),
             "propertyGroups": len([t for t in worklist if t.get("siblings")]),
             "decided": len(decided),
             # Creditor-lane keyword matches across the whole agent-linked

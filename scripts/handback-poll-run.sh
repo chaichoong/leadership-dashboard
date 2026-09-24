@@ -63,6 +63,20 @@ if ! /usr/bin/python3 "$REPO/scripts/agent-dispatch.py" lessons > "$SCRATCH/less
   tail -c 500 "$SCRATCH/lessons.json" >&2
 fi
 
+# --- free half: standing holds (Kevin, 24 Sep 2026) ------------------------
+# A ruling that stays true only until an event ("nothing on that council's tax
+# until the officer replies") is written ONCE in ~/.config/od/standing-holds.json.
+# This parks every open task a hold covers, lifts a hold when the awaited reply
+# lands in Gmail or its review date passes, and hands the parked tasks back to
+# their owners. BEFORE the queue read, so a held task is off the board before
+# anything is dispatched. No model tokens. A failure is loud but never stops
+# the hand-backs; the queue re-checks every hold itself as the belt.
+if ! /usr/bin/python3 "$REPO/scripts/standing_holds.py" run > "$SCRATCH/holds.json" 2>"$SCRATCH/holds.err"; then
+  echo "WARNING: standing holds run failed — a held matter may reach an agent, or a lifted one stay parked" >&2
+  tail -c 500 "$SCRATCH/holds.err" >&2
+  tail -c 800 "$SCRATCH/holds.json" >&2
+fi
+
 # --- cheap half: is anything actually handed back? -------------------------
 # One read, through the SAME command the real run uses, so the gate and the run
 # can never disagree about what is queued. cmd_queue has its own control and
