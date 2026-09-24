@@ -23,6 +23,9 @@ const CHECK = resolve(ROOT, 'tests/helpers/py_undefined_names.py');
 // ["INTRO_LOCAL"]; the repaired file reports [].
 const ESTATE_SCRIPTS = [
   'scripts/content-engine/render.py',
+  'scripts/approval_evidence.py',
+  'scripts/calendar-write.py',
+  'scripts/send-email.py',
   'scripts/content-engine/publish.py',
   'scripts/content-engine/watch.py',
   'scripts/content-engine/approval.py',
