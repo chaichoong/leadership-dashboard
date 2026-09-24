@@ -137,7 +137,10 @@ def lane_error(err):
     lines = [l.strip() for l in (err or "").splitlines() if l.strip()]
     head = (lines[0] if lines else "").replace("BROWSER ERROR: ", "")
     step = next((l.lstrip("- ") for l in lines if l.lstrip("- ").startswith("waiting for")), "")
-    msg = (head[:110] + (" | " + step[:78] if step else "")) if head else (err or "")[-190:]
+    if step:     # name the step by its status word, not by a selector the cut would truncate (review, 24 Sep 2026)
+        word = re.search(r':text\("([^"]+)"\)|text=([^\')]+)', step); state = re.search(r"to be (\w+)", step)
+        step = "waiting for '%s'%s" % (next(g for g in word.groups() if g) if word else step[12:70], (" to be " + state.group(1)) if state else "")
+    msg = (head[:110] + (" | " + step if step else "")) if head else (err or "")[-190:]
     return msg[:190]
 
 
@@ -271,7 +274,9 @@ def selftest():
     e = lane_error("BROWSER ERROR: TimeoutError: page.waitForSelector: Timeout 60000ms exceeded. Failure screenshot: /x.png\n    at runSteps (/r/agent-browser.js:472:12)\n    at async main (/r/agent-browser.js:996:17)")
     assert e.startswith("TimeoutError: page.waitForSelector") and "472:12" not in e and len(e) <= 190, e
     e2 = lane_error("BROWSER ERROR: page.waitForSelector: Timeout 600000ms exceeded.\nCall log:\n  - waiting for locator('text=Uploading') to be hidden\n    123 x locator resolved")
-    assert "waiting for locator('text=Uploading') to be hidden" in e2 and len(e2) <= 190, e2
+    assert "waiting for 'Uploading' to be hidden" in e2 and len(e2) <= 190, e2
+    e3 = lane_error("BROWSER ERROR: page.waitForSelector: Timeout 600000ms exceeded.\nCall log:\n  - waiting for locator(':not([contenteditable=\"true\"] *):not([contenteditable=\"true\"]):text(\"Processing\")') to be hidden\n")
+    assert "waiting for 'Processing' to be hidden" in e3 and len(e3) <= 190, e3
     steps = build_plan("/x.mp4", "T", "I tried uploading my statements", "", True)["steps"]
     assert not any((st.get("for") or st.get("gone") or "").startswith("text=") for st in steps if st["do"] == "wait"), "no bare text= wait: it matches the copy"
     rows = " ".join("Episode %d - Title %d Published 9/1/26 Video 04:00" % (2000 + i, i) for i in range(25))
