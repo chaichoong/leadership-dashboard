@@ -77,7 +77,8 @@ rec[A-Za-z0-9][A-Za-z0-9][A-Za-z0-9][A-Za-z0-9][A-Za-z0-9][A-Za-z0-9][A-Za-z0-9]
 # him: properties, sums, tenants and his legal and financial matters. Masking removes
 # identifiers, never facts, and the private-matter hold in collect-routine-reports.py catches only
 # the words it knows: the 19 Sep report named a property, and the 1-4 Sep reports named the
-# matter itself and sat in this public repo. It stays on the Mac. scripts/estate-status.py reads
-# today's copy from the main checkout for the 09:00 brief; nothing needs it in git.
+# matter itself and sat in this public repo. Since 24 Sep 2026 it is written to
+# ~/knowledge-os/logs/daily-ops/, outside the repo, where scripts/estate-status.py reads it for the
+# 09:00 brief. This rule stays as the backstop for a run that follows an old instruction.
 daily-ops-*.md
 # never-commit:end

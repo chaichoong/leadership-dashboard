@@ -26,6 +26,7 @@ import { resolve } from 'node:path';
 
 const ROOT = resolve(__dirname, '..');
 const SCRUB = resolve(ROOT, 'scripts/report_scrub.py');
+const COLLECT = resolve(ROOT, 'scripts/collect-routine-reports.py');
 
 // Drive the REAL Python patterns. Re-implementing them in JS would guard a copy
 // and let the shipped regex rot (recon-vendor-key.test.js learned this the hard
@@ -297,5 +298,33 @@ print(json.dumps(out))
     );
     if (!res.roster) return; // no roster on this machine — nothing to assert
     expect(res.offenders, 'a rostered name is in the public repo').toEqual([]);
+  });
+
+  it('names none of Kevin\'s legal or financial matters (the collector\'s hold words)', () => {
+    // 24 Sep 2026. Masking removes identifiers, never facts: 19 tracked reports
+    // from 31 Jul to 6 Sep still named HMRC, a restraint order, charging orders,
+    // summonses and mortgages in plain words. The collector has HELD such reports
+    // since 21 Sep, but these were committed before the hold existed. Drives the
+    // collector's own private_matter_hits, so the words live in one place. The
+    // control proves the matcher still fires: a dead regex would pass for ever.
+    // Back-tested: `git add -f` of a report naming HMRC turns this red.
+    const script = `
+import importlib.util, json, sys
+spec = importlib.util.spec_from_file_location('c', ${JSON.stringify(COLLECT)})
+m = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(m)
+out = {'control': m.private_matter_hits('monitoring/x-2026-01-01.md', 'An HMRC letter came.'), 'offenders': []}
+for path in json.loads(sys.argv[1]):
+    with open(path, encoding='utf-8') as fh:
+        n = m.private_matter_hits(path, fh.read())
+    if n:
+        out['offenders'].append('%s: %d line(s)' % (path, n))
+print(json.dumps(out))
+`;
+    const res = JSON.parse(
+      execFileSync('python3', ['-c', script, JSON.stringify(files)], { cwd: ROOT, encoding: 'utf8' })
+    );
+    expect(res.control, 'the private-matter matcher no longer fires on a known line').toBe(1);
+    expect(res.offenders, 'a legal or financial matter is named in the public repo').toEqual([]);
   });
 });
