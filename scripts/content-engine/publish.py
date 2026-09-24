@@ -577,6 +577,9 @@ def adopt_youtube(entry, key, have):
     return True
 
 
+SPOTIFY_MAX_ATTEMPTS = 3
+
+
 def finish_extras(day, entry, recs, test, save):
     """The blog article, the podcast audio and Spotify, once each, after the socials. Each has its own status and is
     marked BEFORE the call that publishes it, so a run that dies never repeats it (13 Sep 2026: 2195's blog went out
@@ -619,6 +622,11 @@ def finish_extras(day, entry, recs, test, save):
         entry.setdefault("podcast", {})["audio_error"] = "%s (%s)" % (str(ex)[-160:], now_utc()); save()
         print("episode %d: podcast audio not uploaded (%s)" % (day, str(ex)[-120:]), file=sys.stderr)
     pod = entry.setdefault("podcast", {})
+    if pod.get("status") == "failed" and int(pod.get("upload_attempts") or 0) >= SPOTIFY_MAX_ATTEMPTS:
+        # 23-24 Sep 2026: 2070 failed hourly for a day and every attempt left an "Untitled" draft on Spotify. A person looks
+        # after three; set the status back to failed (and the count to 0) to try again.
+        pod.update({"status": "held", "note": "held after %d failed uploads (each leaves an Untitled draft on Spotify): %s" % (SPOTIFY_MAX_ATTEMPTS, pod.get("error", ""))}); save()
+        print("episode %d: podcast HELD after %d failed Spotify uploads; a person looks before the next" % (day, SPOTIFY_MAX_ATTEMPTS), file=sys.stderr)
     if pod.get("status") in (None, "", "failed"):
         try:
             import spotify
@@ -645,7 +653,8 @@ def finish_extras(day, entry, recs, test, save):
                         # an unreadable list (signed out, blank page) is not proof of absence: wait for the next hour
                         pod.update({"status": "failed", "error": "retry held: the Spotify episodes list could not be read"}); save()
                         print("episode %d: Spotify list unreadable, podcast retry held until next run" % day, file=sys.stderr); return done
-                pod.update({"plan": plan_path, "title": ptitle, "status": "uploading", "started": now_utc()}); save()
+                pod.update({"plan": plan_path, "title": ptitle, "status": "uploading", "started": now_utc(),
+                            "upload_attempts": int(pod.get("upload_attempts") or 0) + (0 if test else 1)}); save()
                 done.append(run_spotify(day, card_task(day, full), plan_path, ptitle, test, pod)); save()
         except (Exception, SystemExit) as ex:
             pod.update({"status": "failed", "error": str(ex)[-200:]}); save()
@@ -1611,6 +1620,11 @@ def selftest():
     assert next_publishable(st_r, led_r, {2196}) == (None, "day 2071 is not approved yet, so 2196 wait behind it") and st_r["_cursor"] == 2070, \
         "a day waiting to re-render is held, never stepped over (24 Sep 2026)"
     assert not day_was_recorded(2080, {"b": {"day": 2080, "status": "broll"}}), "a day of B-roll only is still stepped over"
+    ent_h = {"youtube_link": "y", "blog": {"url": "u"}, "podcast": {"status": "failed", "upload_attempts": 3, "error": "Timeout"}}
+    import io as _io3, contextlib as _cl3
+    with _cl3.redirect_stderr(_io3.StringIO()), _cl3.redirect_stdout(_io3.StringIO()):
+        finish_extras(2070, ent_h, {"Long Form Video": {"id": "recX", "fields": {}}}, False, lambda: None)
+    assert ent_h["podcast"]["status"] == "held" and "Untitled draft" in ent_h["podcast"]["note"], ent_h["podcast"]
     assert slot_iso(dt.date(2026, 9, 4), (6, 0)) == "2026-09-04T05:00:00Z", "BST: 06:00 London is 05:00 UTC"
     assert slot_iso(dt.date(2026, 12, 4), (6, 0)) == "2026-12-04T06:00:00Z", "GMT: the same wall clock"
     t, b = youtube_parts("SEO Title: Running Off-Road at Pace (Day 2195)\n\nDescription: Day 2195 body.\n\nHashtags: #a #b", 2195)
