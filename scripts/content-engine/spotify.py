@@ -40,6 +40,13 @@ UPLOAD_WAIT_MS = 600000        # a 740 MB episode uploads in about two minutes (
 NEXT_ENABLED = "button:has-text('Next'):not([disabled])"
 PUBLISH_ENABLED = "button:has-text('Publish'):not([disabled])"
 PUBLISHED_PROOF = "text=/published|is live|now live/i"
+# Spotify's own status words, never the episode's copy. `text=Uploading` matches any element holding "uploading" in any case,
+# and 2070's description says "uploading your bank statements": the wait for "Uploading" to clear found the description in the
+# editor and never finished, every hour from 23 Sep 09:39 until 24 Sep 2026, each run leaving an Untitled draft (2069, whose
+# copy has no such word, went out an hour before). Anything inside the description editor is ignored.
+def status_text(words):
+    return ':not([contenteditable="true"] *):not([contenteditable="true"]):text("%s")' % words
+UPLOADING, PROCESSING, GENERATING = status_text("Uploading"), status_text("Processing"), status_text("Generating preview")
 EPISODES = "https://creators.spotify.com/pod/show/%s/episodes" % SHOW_ID
 
 
@@ -69,21 +76,21 @@ def build_plan(video_path, title, description, youtube_link, test, thumb=""):
         {"do": "goto", "url": WIZARD},
         {"do": "wait", "for": "#uploadAreaInput", "state": "attached", "ms": 60000},   # the input is hidden off-screen
         {"do": "upload", "selector": "#uploadAreaInput", "file": video_path},
-        {"do": "wait", "for": "text=Uploading", "ms": 60000},
+        {"do": "wait", "for": UPLOADING, "ms": 60000},
         {"do": "fill", "selector": "input[name='title'], input[aria-label*='Title'], input[placeholder*='title' i]", "value": title},
         {"do": "fill", "selector": "textarea[name='description'], [contenteditable='true'], textarea", "value": desc},
     ]
     if thumb:   # the branded 16:9 thumbnail is what the Episodes list and the mobile app show (Kevin, 9 Sep 2026: 2054 showed a raw frame)
         steps += [{"do": "upload", "selector": THUMB_INPUT, "file": thumb}, {"do": "wait", "ms": 6000}]
     steps += [
-        {"do": "wait", "gone": "text=Uploading", "ms": UPLOAD_WAIT_MS},
-        {"do": "wait", "gone": "text=Processing", "ms": UPLOAD_WAIT_MS},
+        {"do": "wait", "gone": UPLOADING, "ms": UPLOAD_WAIT_MS},
+        {"do": "wait", "gone": PROCESSING, "ms": UPLOAD_WAIT_MS},
         {"do": "wait", "for": NEXT_ENABLED, "ms": UPLOAD_WAIT_MS},
         {"do": "click", "selector": NEXT_ENABLED},
         {"do": "wait", "ms": 6000},
         # Review: "Now" is pre-selected; Publish stays greyed out while "Generating preview" spins
         {"do": "click", "selector": "label[for='publish-date-now']"},   # the publish-date radio starts unticked and Publish refuses without it; the input itself is visually hidden (9 Sep 2026)
-        {"do": "wait", "gone": "text=Generating preview", "ms": UPLOAD_WAIT_MS},
+        {"do": "wait", "gone": GENERATING, "ms": UPLOAD_WAIT_MS},
         {"do": "wait", "for": PUBLISH_ENABLED, "ms": UPLOAD_WAIT_MS},
     ]
     if not test: steps.append({"do": "submit", "selector": PUBLISH_ENABLED})
@@ -125,10 +132,16 @@ def run_plan(plan_path, task_id, test, shot):
 
 def lane_error(err):
     """The lane's own message, not its stack: 2070's podcast failed hourly from 23 Sep 2026 and the record kept only the last
-    200 characters, which were stack frames ("owser.js:472:12)"), so nobody could say why. First line first, kept short."""
-    head = next((l.strip() for l in (err or "").splitlines() if l.strip()), "")
-    head = head.replace("BROWSER ERROR: ", "")
-    return head[:190] if head else (err or "")[-190:]
+    200 characters, which were stack frames ("owser.js:472:12)"), so nobody could say why. First line, plus the step it was
+    waiting on ("waiting for locator('text=Uploading') to be hidden" named the 2070 fault), kept short."""
+    lines = [l.strip() for l in (err or "").splitlines() if l.strip()]
+    head = (lines[0] if lines else "").replace("BROWSER ERROR: ", "")
+    step = next((l.lstrip("- ") for l in lines if l.lstrip("- ").startswith("waiting for")), "")
+    if step:     # name the step by its status word, not by a selector the cut would truncate (review, 24 Sep 2026)
+        word = re.search(r':text\("([^"]+)"\)|text=([^\')]+)', step); state = re.search(r"to be (\w+)", step)
+        step = "waiting for '%s'%s" % (next(g for g in word.groups() if g) if word else step[12:70], (" to be " + state.group(1)) if state else "")
+    msg = (head[:110] + (" | " + step if step else "")) if head else (err or "")[-190:]
+    return msg[:190]
 
 
 def write_plan(day, video_path, podcast_copy, youtube_link, test, out_dir, thumb=""):
@@ -260,6 +273,12 @@ def public_link(title):
 def selftest():
     e = lane_error("BROWSER ERROR: TimeoutError: page.waitForSelector: Timeout 60000ms exceeded. Failure screenshot: /x.png\n    at runSteps (/r/agent-browser.js:472:12)\n    at async main (/r/agent-browser.js:996:17)")
     assert e.startswith("TimeoutError: page.waitForSelector") and "472:12" not in e and len(e) <= 190, e
+    e2 = lane_error("BROWSER ERROR: page.waitForSelector: Timeout 600000ms exceeded.\nCall log:\n  - waiting for locator('text=Uploading') to be hidden\n    123 x locator resolved")
+    assert "waiting for 'Uploading' to be hidden" in e2 and len(e2) <= 190, e2
+    e3 = lane_error("BROWSER ERROR: page.waitForSelector: Timeout 600000ms exceeded.\nCall log:\n  - waiting for locator(':not([contenteditable=\"true\"] *):not([contenteditable=\"true\"]):text(\"Processing\")') to be hidden\n")
+    assert "waiting for 'Processing' to be hidden" in e3 and len(e3) <= 190, e3
+    steps = build_plan("/x.mp4", "T", "I tried uploading my statements", "", True)["steps"]
+    assert not any((st.get("for") or st.get("gone") or "").startswith("text=") for st in steps if st["do"] == "wait"), "no bare text= wait: it matches the copy"
     rows = " ".join("Episode %d - Title %d Published 9/1/26 Video 04:00" % (2000 + i, i) for i in range(25))
     assert not list_incomplete(rows) and list_incomplete("Episode 2054 x Load more") and not list_incomplete("see more of this description"), "only a load-more control means the list goes on"
     assert list_status("Episode 2054 - T Published", "Episode 2054 - T")[0] == "published" and list_status("nothing", "Episode 2054")[0] == "missing"
@@ -282,7 +301,7 @@ def selftest():
     assert ups[0]["selector"] == "#uploadAreaInput" and ups[1] == {"do": "upload", "selector": THUMB_INPUT, "file": "/x/Episode_1_Thumbnail.png"}
     assert pt["steps"].index(ups[1]) > pt["steps"].index([s for s in pt["steps"] if s["do"] == "fill"][1]), "thumbnail after the copy, before the upload wait"
     waits = [s for s in p["steps"] if s["do"] == "wait" and (s.get("gone") or s.get("for"))]
-    assert all(s["ms"] <= 600000 for s in waits) and any(s.get("gone") == "text=Uploading" for s in waits)
+    assert all(s["ms"] <= 600000 for s in waits) and any(s.get("gone") == UPLOADING for s in waits)
     live = build_plan("/x", "T", "D", "", False)
     assert live["steps"][-1]["do"] == "submit" and live["confirm"]["selector"] and live["mode"] == "live"
     assert live["steps"][-2] == {"do": "wait", "for": PUBLISH_ENABLED, "ms": UPLOAD_WAIT_MS}
