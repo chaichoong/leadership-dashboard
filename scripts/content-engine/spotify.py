@@ -71,6 +71,7 @@ THUMB_INPUT = "input[type='file'][accept^='image/']#uploadAreaInput"   # the Det
 # In the wizard Spotify's own frames are <canvas> tiles and an uploaded image is an <img> tile ("Uploaded thumbnail" on the 24 Sep
 # 2026 pages); the selected tile holding an image is the upload, whatever its alt text says
 THUMB_SELECTED = "#thumbnail-list button[role='radio'][aria-checked='true'] img"
+THUMB_TILE = "#thumbnail-list button[role='radio'] img"         # the uploaded image has landed in the carousel
 
 
 def build_plan(video_path, title, description, youtube_link, test, thumb=""):
@@ -95,9 +96,11 @@ def build_plan(video_path, title, description, youtube_link, test, thumb=""):
         # frame). It goes on AFTER processing, and Next waits until it is the selected thumbnail: Spotify draws its own frame
         # thumbnails from the video in the page, and an upload made while the video was still uploading lost to frame 1 on
         # 2061, 2068 and 2069 (published with a captioned frame; fixed by hand 24 Sep 2026). No selected upload, no Publish.
-        steps += [{"do": "upload", "selector": THUMB_INPUT, "file": thumb}, {"do": "wait", "for": THUMB_SELECTED, "ms": 60000}]
+        steps += [{"do": "upload", "selector": THUMB_INPUT, "file": thumb}, {"do": "wait", "for": THUMB_TILE, "ms": 60000}]
+    steps += [{"do": "wait", "for": NEXT_ENABLED, "ms": UPLOAD_WAIT_MS}]
+    if thumb:   # checked last, straight before Next: frames that arrive late can take the selection back (review, 24 Sep 2026)
+        steps += [{"do": "wait", "for": THUMB_SELECTED, "ms": 30000}]
     steps += [
-        {"do": "wait", "for": NEXT_ENABLED, "ms": UPLOAD_WAIT_MS},
         {"do": "click", "selector": NEXT_ENABLED},
         {"do": "wait", "ms": 6000},
         # Review: "Now" is pre-selected; Publish stays greyed out while "Generating preview" spins
@@ -292,9 +295,10 @@ def selftest():
     steps = build_plan("/x.mp4", "T", "I tried uploading my statements", "", True)["steps"]
     assert not any((st.get("for") or st.get("gone") or "").startswith("text=") for st in steps if st["do"] == "wait"), "no bare text= wait: it matches the copy"
     st = build_plan("/x.mp4", "T", "d", "", False, thumb="/t.png")["steps"]
-    order = [i for i, x in enumerate(st) if x.get("gone") == PROCESSING] + [i for i, x in enumerate(st) if x.get("selector") == THUMB_INPUT] \
-        + [i for i, x in enumerate(st) if x.get("for") == THUMB_SELECTED] + [i for i, x in enumerate(st) if x.get("selector") == NEXT_ENABLED and x["do"] == "click"]
-    assert len(order) == 4 and order == sorted(order), "thumbnail after processing, confirmed selected, then Next (2061/2068/2069): %s" % order
+    at = lambda f: [i for i, x in enumerate(st) if f(x)]
+    order = at(lambda x: x.get("gone") == PROCESSING) + at(lambda x: x.get("selector") == THUMB_INPUT) + at(lambda x: x.get("for") == THUMB_TILE) \
+        + at(lambda x: x.get("for") == NEXT_ENABLED) + at(lambda x: x.get("for") == THUMB_SELECTED) + at(lambda x: x.get("selector") == NEXT_ENABLED and x["do"] == "click")
+    assert len(order) == 6 and order == sorted(order) and order[-1] - order[-2] == 1, "processing, upload, tile, Next enabled, still selected, click Next (2061/2068/2069): %s" % order
     assert not any(x.get("for") == THUMB_SELECTED for x in build_plan("/x.mp4", "T", "d", "", False)["steps"]), "no thumbnail, no thumbnail wait"
     plan_c = build_plan("/x.mp4", "T", "Now live: I published my plan", "", False)
     assert plan_c["confirm"]["selector"] == PUBLISHED_PROOF and not PUBLISHED_PROOF.startswith("text="), "the Publish proof is never a word the copy can hold"
