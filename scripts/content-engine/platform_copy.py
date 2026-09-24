@@ -81,14 +81,27 @@ ALL_LABELS = sorted({label for t in TYPES.values() for label, _ in t["sections"]
 HEADING_RE = re.compile(r"^[ \t#*>_]*(?:%s)[ \t*:_]*$" % "|".join(re.escape(l) for l in ALL_LABELS), re.I | re.M)
 
 
+SEPARATOR_LINE_RE = re.compile(r"^[ \t]*(?:-{3,}|\*{3,}|_{3,})[ \t]*$")
+# the lines a close-out block is made of, above its "Safe to close?" line (2071, 24 Sep 2026: "---", Brief:, Asks along the
+# way:, Outstanding:, Written down:, with no CLOSE-OUT heading; cutting at the marker alone left four of them in)
+CLOSE_LINE_RE = re.compile(r"^\s*(?:$|\**(?:original\s+)?brief\b|\**asks\b|\**outstanding\b|\**(?:what\s+was\s+)?written\s+down\b|\**deliverables\b"
+                           r"|[-*\u2022]\s.*\b(?:DONE|LOGGED|DROPPED)\b)", re.I)
+
+
 def strip_session_text(text):
-    """(text cut before the first session-rule line and any '---' rule above it, True if anything was cut). Only a
-    TRAILING block is cut: when a section label follows the marker, nothing is cut and the field check refuses instead."""
+    """(text cut before the session block, True if anything was cut). The cut starts at the TOP of the block: from the
+    marker, back over the block's own lines and the '---' rule above them. Only a trailing block is cut: when a section
+    heading follows the marker nothing is cut, and the field check refuses instead."""
     m = SESSION_TEXT_RE.search(text or "")
     if not m: return text, False
     if HEADING_RE.search(text[m.start():]): return text, False
-    head = re.sub(r"(?:\s*\n)?[ \t]*(?:-{3,}|\*{3,}|_{3,})?\s*$", "", text[:m.start()])
-    return head.rstrip(), True
+    lines = text[:m.start()].split("\n"); k = len(lines)
+    while k > 0 and CLOSE_LINE_RE.match(lines[k - 1]): k -= 1
+    if k > 0 and SEPARATOR_LINE_RE.match(lines[k - 1]): k -= 1
+    return "\n".join(lines[:k]).rstrip(), True
+
+
+LEFTOVER_RE = re.compile(r"^\s*\**(?:original\s+)?(?:brief|asks\b[^\n]*|outstanding|(?:what\s+was\s+)?written\s+down)\s*:", re.I | re.M)
 
 
 def clean_fields(fields):
@@ -97,7 +110,7 @@ def clean_fields(fields):
     for field, val in (fields or {}).items():
         if (field.endswith("Copy") or field == "Blog Post Description") and isinstance(val, str) and session_text_in(val):
             new, cut = strip_session_text(val)
-            if cut and not session_text_in(new): out[field] = new
+            if cut and not session_text_in(new) and not LEFTOVER_RE.search(new[-600:]): out[field] = new
     return out
 
 
@@ -349,20 +362,53 @@ def run_day(day, only=None):
     return results
 
 
-# A Learnings or Short record the writer made but never filled. Until 24 Sep 2026 only a Full record with no YouTube copy
-# counted as pending, so when the Full copy landed and the Short's run failed, 2069's teasers never had copy and never posted.
-UNFILLED = ('AND({Category}="Runpreneur", {Responsible}="Content Engine (AI)", {TikTok Copy}="", {Record Status}!="Published", '
-            'OR({Content Type}="Learnings From My Diary", {Content Type}="Short Form Video"), IS_AFTER(CREATED_TIME(), DATEADD(TODAY(), -30, "days")))')
+# A Learnings or Short record left without copy. Until 24 Sep 2026 only a Full record with no YouTube copy counted as pending,
+# so when the Full copy landed and the Short's run failed, 2069's teasers never had copy. Only for a card Kevin has NOT
+# approved: copy written after his yes would reach the world unseen (review, 24 Sep 2026), so an approved day is left for him.
+WRITTEN = ('AND({Category}="Runpreneur", {Content Type}="Long Form Video", {Responsible}="Content Engine (AI)", '
+           '{YouTube Copy}!="", {Record Status}!="Published")')
+CLIP_LINK = {"Learnings From My Diary": "Reframed Video URL", "Short Form Video": "Summary Video URL"}
 
 
-def unfilled_work(records):
-    """[(day, content type)] from Learnings/Short records with no copy, oldest day first."""
+def unfilled_work(fulls, approved, find=None):
+    """[(day, content type)], newest day first: a clip on the Full record whose Learnings/Short record is missing or has no copy."""
+    find = find or find_by_name
     out = []
-    for rec in records:
+    for full in fulls:
+        m = re.search(r"Episode (\d+)", full["fields"].get("Content Name", ""))
+        if not m or int(m.group(1)) in approved: continue
+        day = int(m.group(1))
+        for ctype, link in CLIP_LINK.items():
+            if not full["fields"].get(link): continue
+            rec = find(record_name(day, ctype))
+            if not rec or not (rec["fields"].get("TikTok Copy") or "").strip(): out.append((day, ctype))
+    return sorted(set(out), key=lambda w: (-w[0], w[1]))
+
+
+def run_pending(limit=3):
+    f = 'AND({Content Type}="Long Form Video", {Responsible}="Content Engine (AI)", {Transcription}!="", {YouTube Copy}="")'
+    r = watch._airtable("GET", watch.API + "?maxRecords=%d&filterByFormula=%s" % (limit, urllib.parse.quote(f)))
+    recs = r.get("records", [])
+    fulls, off = [], None
+    while True:                                   # every page (CLAUDE.md: a missed page is a silent miss)
+        u = watch._airtable("GET", watch.API + "?pageSize=100&filterByFormula=%s%s" % (urllib.parse.quote(WRITTEN), "&offset=" + off if off else ""))
+        fulls += u.get("records", []); off = u.get("offset")
+        if not off: break
+    import approval
+    approved = {int(d) for d, e in approval.load_state().items() if str(d).isdigit() and e.get("verdict") == "approved"}
+    later = unfilled_work(fulls, approved)
+    if not recs and not later: print("copy: nothing pending"); return
+    failed = []
+    for rec in recs:
         m = re.search(r"Episode (\d+)", rec["fields"].get("Content Name", ""))
-        ctype = rec["fields"].get("Content Type")
-        if m and ctype in TYPES: out.append((int(m.group(1)), ctype))
-    return sorted(set(out))
+        if not m: continue
+        try: run_day(int(m.group(1)))
+        except SystemExit as ex: failed.append(str(ex))
+    done = {int(re.search(r"Episode (\d+)", x["fields"]["Content Name"]).group(1)) for x in recs if re.search(r"Episode (\d+)", x["fields"].get("Content Name", ""))}
+    for day, ctype in [w for w in later if w[0] not in done][:limit * 3]:
+        try: run_day(day, [ctype])
+        except SystemExit as ex: failed.append(str(ex))
+    if failed: raise SystemExit("copy: " + " | ".join(failed))
 
 
 def clean_day(day, dry_run=False):
@@ -438,9 +484,13 @@ def selftest():
     assert rules_check({"X": "20,540km"}, "", km=None)[1] == [], "no Strava figure known: nothing to correct against (the prompt then says do not state a distance)"
     assert cm_prompts.KEVIN_SYSTEM.startswith("You are Kevin Brittain.") and "#Insta360" in cm_prompts.KEVIN_SYSTEM
     _selftest_session_text()
-    assert unfilled_work([{"fields": {"Content Name": "Episode 2069 Short", "Content Type": "Short Form Video"}},
-                          {"fields": {"Content Name": "Episode 2066 Learnings from My Diary", "Content Type": "Learnings From My Diary"}},
-                          {"fields": {"Content Name": "odd", "Content Type": "Short Form Video"}}]) == [(2066, "Learnings From My Diary"), (2069, "Short Form Video")]
+    fulls = [{"fields": {"Content Name": "Episode 2069 Full Episode", "Summary Video URL": "s", "Reframed Video URL": "l"}},
+             {"fields": {"Content Name": "Episode 2071 Full Episode", "Summary Video URL": "s", "Reframed Video URL": "l"}},
+             {"fields": {"Content Name": "Episode 2072 Full Episode", "Reframed Video URL": "l"}}, {"fields": {"Content Name": "odd"}}]
+    recs = {"Episode 2071 Learnings from My Diary": {"fields": {"TikTok Copy": ""}}, "Episode 2072 Learnings from My Diary": {"fields": {"TikTok Copy": "ok"}},
+            "Episode 2069 Short": {"fields": {}}}
+    assert unfilled_work(fulls, {2069}, find=recs.get) == [(2071, "Learnings From My Diary"), (2071, "Short Form Video")], \
+        "an approved day is never rewritten; a missing record counts; a record with copy does not"
     _selftest_run_day_isolation()
     print(json.dumps({"checks": 19, "failed": []}))
 
@@ -488,6 +538,16 @@ def _selftest_session_text():
     assert strip_session_text(mid) == (mid, False), "a marker with a section after it is never cut; the field check refuses it"
     fixed = clean_fields({"Podcast Copy": leaked.replace("YOUTUBE REELS POST\n", ""), "Blog Copy": "clean", "Transcription": "CLOSE-OUT"})
     assert list(fixed) == ["Podcast Copy"] and fixed["Podcast Copy"].endswith("#vibramfivefingers"), fixed
+    # 2071's live block: no CLOSE-OUT heading, four lines above "Safe to close? Yes" (the reviewer's find, 24 Sep 2026)
+    b2071 = ("I will see you again tomorrow.\n\nHashtags: #recoveryrun #Insta360 #vibramfivefingers\n\n---\n\nBrief: generate blog, YouTube and "
+             "podcast copy for Episode 2071.\n\nAsks along the way: none added beyond the brief.\n\nOutstanding: none.\n\nWritten down: nothing new "
+             "to memory.\n\nSafe to close? Yes")
+    assert clean_fields({"Podcast Copy": b2071})["Podcast Copy"].endswith("#vibramfivefingers"), clean_fields({"Podcast Copy": b2071})
+    b2068 = "one honest reflection at a time.\n\nHashtags: #mindset #vibramfivefingers\n\n---\n\nSafe to close? Yes"
+    assert clean_fields({"Podcast Copy": b2068})["Podcast Copy"].endswith("#vibramfivefingers")
+    blog = "Intro.\n\n---\n\nPart two of the run, with the rain.\n\nSafe to close? Yes"
+    assert strip_session_text(blog)[0].endswith("with the rain."), "a --- far above the block, with real copy between, is never the cut"
+    assert clean_fields({"Podcast Copy": "x\nBrief: y\nnormal line\nSafe to close? Yes"}) == {}, "a block that cannot be cut cleanly is left for a person"
     recs = {"Long Form Video": {"fields": {"Podcast Copy": "x\n\nCLOSE-OUT\nSafe to close? Yes", "Transcription": "CLOSE-OUT"}},
             "Short Form Video": {"fields": {"TikTok Copy": "clean"}}, "Learnings From My Diary": None}
     assert session_leak(recs) == [("Long Form Video", "Podcast Copy", "CLOSE-OUT")], session_leak(recs)

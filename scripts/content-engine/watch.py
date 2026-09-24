@@ -479,7 +479,7 @@ def clear_leftovers(ledger, work=WORK, attach=ATTACH_DIR, publishing=None, now=N
     now = now or _t.time()
     remove = remove or (lambda p: shutil.rmtree(p) if os.path.isdir(p) else os.remove(p))
     done_keys = {k for k, v in ledger.items() if v.get("status") in ("rendered", "broll")}
-    busy_keys = {k for k, v in ledger.items() if v.get("status") in ("pulled", "pulling", "rendering", "new")}
+    busy_keys = {k for k, v in ledger.items() if v.get("status") in ("pulled", "pulling", "rendering", "new") or v.get("keep_masters")}   # kept for the next part (render.py)
     def size(p):
         if os.path.isfile(p): return os.path.getsize(p)
         return sum(os.path.getsize(os.path.join(r, f)) for r, _, fs in os.walk(p) for f in fs)
@@ -666,13 +666,16 @@ def _selftest_leftovers():
     for n, t in {"Episode_2069_Full_Episode.mp4": 0, "Episode_2070_Full_Episode.mp4": old, "Episode_2054_Thumbnail.png": stale, "full": stale}.items():
         f = os.path.join(att, n); open(f, "w").write("y")
         if t: os.utime(f, (t, t))
-    ledger = {"2060 Full.insv": {"status": "rendered"}, "2072 full.insv": {"status": "pulled"}, "VID_20260201_092348_00_013.insv": {"status": "new"}}
+    os.makedirs(os.path.join(work, "render_2071 Full - Part 1"))
+    ledger = {"2060 Full.insv": {"status": "rendered"}, "2072 full.insv": {"status": "pulled"}, "VID_20260201_092348_00_013.insv": {"status": "new"},
+              "2071 Full - Part 1.insv": {"status": "rendered", "keep_masters": os.path.join(work, "render_2071 Full - Part 1")}}
     pub = {"2069": {"podcast": {"status": "published"}}, "2070": {"podcast": {"status": "uploading"}}}
     gone = sorted(os.path.relpath(p, root) for p, _ in clear_leftovers(ledger, work, att, pub))
     assert gone == ["att/Episode_2054_Thumbnail.png", "att/Episode_2069_Full_Episode.mp4", "att/full", "work/2060 Full.insv",
                     "work/Ep2057_Summary_local.mp4", "work/render_2060 Full"], gone
     left = sorted(os.listdir(work))
-    assert left == ["2072 full.insv", "2073 x.insv.part", "VID_20260201_092348_00_013.insv", "upload_Ep2071_LFMD.mp4"], "a clip waiting to render, a pull in flight and a fresh file stay: %s" % left
+    assert left == ["2072 full.insv", "2073 x.insv.part", "VID_20260201_092348_00_013.insv", "render_2071 Full - Part 1", "upload_Ep2071_LFMD.mp4"], \
+        "a clip waiting to render, a pull in flight, part 1's kept masters and a fresh file stay: %s" % left
     assert os.listdir(att) == ["Episode_2070_Full_Episode.mp4"], "a podcast not out yet keeps its staged file"
     assert clear_leftovers(ledger, work, att, pub) == [], "nothing twice"
     shutil.rmtree(root)

@@ -414,12 +414,16 @@ def fill_learnings(day, entry, recs, acct_map, stage, ledger, gaps, state, save)
     the posts that are missing; tried at most REPLACE_ATTEMPTS times, and said each time. Called for a Published
     record as well as a publishable one (21 Sep 2026). Returns True when it scheduled."""
     s_now = section_status(entry)
-    if not (stage == "done" and entry.get("youtube_link") and output_link(day, "lfmd", ledger) and not ahead_of_order(day, gaps, state)
-            and "missing" in (s_now["Learnings clips"], s_now["YouTube Short"]) and int(entry.get("fill_attempts") or 0) < REPLACE_ATTEMPTS):
+    lf_missing = bool(output_link(day, "lfmd", ledger)) and "missing" in (s_now["Learnings clips"], s_now["YouTube Short"])
+    # the teasers too (24 Sep 2026): 2069's Short copy was never written, so its teaser posts were never made, and a
+    # Published record only ever came back here for its Learnings clip
+    te_missing = bool(output_link(day, "summary", ledger)) and s_now["Teaser clips"] == "missing"
+    if not (stage == "done" and entry.get("youtube_link") and (lf_missing or te_missing) and not ahead_of_order(day, gaps, state)
+            and int(entry.get("fill_attempts") or 0) < REPLACE_ATTEMPTS):
         return False
     entry["fill_attempts"] = int(entry.get("fill_attempts") or 0) + 1; save()
     n_fill = schedule_stage(day, entry, recs, acct_map, 2, False, index=0, save=save)
-    print("episode %d: missing Learnings posts scheduled (%d), attempt %d" % (day, n_fill or 0, entry["fill_attempts"]))
+    print("episode %d: missing %s posts scheduled (%d), attempt %d" % (day, " and ".join(x for x, y in (("Learnings", lf_missing), ("teaser", te_missing)) if y), n_fill or 0, entry["fill_attempts"]))
     return True
 
 
@@ -1551,13 +1555,14 @@ def _selftest_fill_learnings():
              "output_link", "schedule_stage", "finish_extras", "extras_done", "mode")
     saved = {k: g[k] for k in names}
     sched, extras = [], []
+    teaser = [False]
     def run_once(status, entry):
         state = {"_cursor": 2061, "1841": entry}
         g.update({"approved_days": lambda: [1841], "held_days": lambda path=None: {}, "accounts": lambda brand="Runpreneur": [],
                   "account_map": lambda a: {"youtube": [{"id": "yt"}]}, "load_state": lambda: state, "save_state": lambda st: None,
                   "bundle": lambda day: {"Long Form Video": {"id": "recF", "fields": {"Record Status": status}}, "Short Form Video": None, "Learnings From My Diary": None},
                   "stage_for": lambda e, yt: "done", "watch": _types.SimpleNamespace(load_ledger=lambda: {}, gap_days=lambda path=None: {1841}),
-                  "output_link": lambda day, kind, ledger=None: "https://drive/%s" % kind,
+                  "output_link": lambda day, kind, ledger=None: None if kind == "summary" and not teaser[0] else "https://drive/%s" % kind,
                   "schedule_stage": lambda day, e, recs, am, st_no, dry_run=False, index=0, save=None: sched.append((day, st_no)) or 2,
                   "finish_extras": lambda *a, **k: extras.append(a[0]), "extras_done": lambda e: True, "mode": lambda: "live"})
         with _cl.redirect_stdout(_io.StringIO()): run()
@@ -1574,6 +1579,11 @@ def _selftest_fill_learnings():
         run_once(STATUS_PUBLISHED, {"youtube_link": "https://youtu.be/x", "posts": {"youtube|lfmd|a": {"platform": "youtube", "clip": "lfmd", "status": "published"},
                  "facebook|lfmd|b": {"platform": "facebook", "clip": "lfmd", "status": "published"}}})
         assert sched == [], "nothing missing: nothing scheduled"
+        teaser[0] = True             # 2069 (24 Sep 2026): the teaser rendered, its posts were never made, the record is Published
+        run_once(STATUS_PUBLISHED, {"youtube_link": "https://youtu.be/x", "posts": {"youtube|lfmd|a": {"platform": "youtube", "clip": "lfmd", "status": "published"},
+                 "facebook|lfmd|b": {"platform": "facebook", "clip": "lfmd", "status": "published"}}})
+        assert sched == [(1841, 2)], "a rendered teaser with no posts is filled on a Published record"
+        del sched[:]; teaser[0] = False
         g["output_link"] = lambda day, kind, ledger=None: None
         assert not fill_learnings(1841, {"youtube_link": "y"}, {}, {}, "done", {}, {1841}, {"_cursor": 2061}, lambda: None), "no rebuilt clip yet: nothing to post"
         # 24 Sep 2026: copy holding a session's close-out block is never posted, on any path (the 2070 podcast was
