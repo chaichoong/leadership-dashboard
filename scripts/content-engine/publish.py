@@ -414,7 +414,8 @@ def fill_learnings(day, entry, recs, acct_map, stage, ledger, gaps, state, save)
     the posts that are missing; tried at most REPLACE_ATTEMPTS times, and said each time. Called for a Published
     record as well as a publishable one (21 Sep 2026). Returns True when it scheduled."""
     s_now = section_status(entry)
-    lf_missing = bool(output_link(day, "lfmd", ledger)) and "missing" in (s_now["Learnings clips"], s_now["YouTube Short"])
+    lf_missing = bool(output_link(day, "lfmd", ledger)) and "missing" in (s_now["Learnings clips"], s_now["YouTube Short"]) \
+        and bool((((recs or {}).get("Learnings From My Diary") or {}).get("fields") or {}).get("YouTube Reels Copy"))    # no copy, no attempt spent
     # the teasers too (24 Sep 2026): 2069's Short copy was never written, so its teaser posts were never made, and a
     # Published record only ever came back here for its Learnings clip
     te_missing = bool(output_link(day, "summary", ledger)) and s_now["Teaser clips"] == "missing" \
@@ -625,8 +626,9 @@ def finish_extras(day, entry, recs, test, save):
     pod = entry.setdefault("podcast", {})
     if pod.get("status") == "failed" and int(pod.get("upload_attempts") or 0) >= SPOTIFY_MAX_ATTEMPTS:
         # 23-24 Sep 2026: 2070 failed hourly for a day and every attempt left an "Untitled" draft on Spotify. A person looks
-        # after three; set the status back to failed (and the count to 0) to try again.
-        pod.update({"status": "held", "note": "held after %d failed uploads (each leaves an Untitled draft on Spotify): %s" % (SPOTIFY_MAX_ATTEMPTS, pod.get("error", ""))}); save()
+        # after three; to try again set status to "failed" AND upload_attempts to 0 (the note says so).
+        pod.update({"status": "held", "note": "held after %d failed uploads (each leaves an Untitled draft on Spotify): %s. To retry: status failed and upload_attempts 0"
+                    % (SPOTIFY_MAX_ATTEMPTS, pod.get("error", ""))}); save()
         print("episode %d: podcast HELD after %d failed Spotify uploads; a person looks before the next" % (day, SPOTIFY_MAX_ATTEMPTS), file=sys.stderr)
     if pod.get("status") in (None, "", "failed"):
         try:
@@ -998,7 +1000,9 @@ def day_was_recorded(day, ledger):
     """A clip of the day exists, rendered (its episode) or still waiting (its ledger day). 24 Sep 2026: 2071 was set back to
     new for a re-render, lost its episode number, and the order check read it, and every unrendered day after it up to
     2193, as never recorded and stepped over them all. A day with footage is held, never skipped."""
-    return any(v.get("episode") == day or (v.get("day") == day and v.get("status") != "broll") for v in ledger.values())   # B-roll alone is not an episode
+    # a clip's day counts only while it has no episode yet: a rendered clip belongs to its episode (a teaser dated 2072 that
+    # says "day 2,071" must not hold 2072 for ever, review 24 Sep 2026); B-roll alone is not an episode
+    return any(v.get("episode") == day or (v.get("day") == day and not v.get("episode") and v.get("status") != "broll") for v in ledger.values())
 
 
 def next_publishable(state, ledger, approved):
@@ -1574,7 +1578,8 @@ def _selftest_fill_learnings():
         g.update({"approved_days": lambda: [1841], "held_days": lambda path=None: {}, "accounts": lambda brand="Runpreneur": [],
                   "account_map": lambda a: {"youtube": [{"id": "yt"}]}, "load_state": lambda: state, "save_state": lambda st: None,
                   "bundle": lambda day: {"Long Form Video": {"id": "recF", "fields": {"Record Status": status}},
-                                         "Short Form Video": {"fields": {"TikTok Copy": "t"}} if teaser[1] else None, "Learnings From My Diary": None},
+                                         "Short Form Video": {"fields": {"TikTok Copy": "t"}} if teaser[1] else None,
+                                         "Learnings From My Diary": {"fields": {"YouTube Reels Copy": "y"}}},
                   "stage_for": lambda e, yt: "done", "watch": _types.SimpleNamespace(load_ledger=lambda: {}, gap_days=lambda path=None: {1841}),
                   "output_link": lambda day, kind, ledger=None: None if kind == "summary" and not teaser[0] else "https://drive/%s" % kind,
                   "schedule_stage": lambda day, e, recs, am, st_no, dry_run=False, index=0, save=None: sched.append((day, st_no)) or 2,
@@ -1626,6 +1631,7 @@ def selftest():
     assert next_publishable(st_r, led_r, {2196}) == (None, "day 2071 is not approved yet, so 2196 wait behind it") and st_r["_cursor"] == 2070, \
         "a day waiting to re-render is held, never stepped over (24 Sep 2026)"
     assert not day_was_recorded(2080, {"b": {"day": 2080, "status": "broll"}}), "a day of B-roll only is still stepped over"
+    assert not day_was_recorded(2072, {"t": {"day": 2072, "episode": 2071, "status": "rendered", "role": "teaser"}}), "a rendered clip counts for its episode only"
     ent_h = {"youtube_link": "y", "blog": {"url": "u"}, "podcast": {"status": "failed", "upload_attempts": 3, "error": "Timeout"}}
     import io as _io3, contextlib as _cl3
     with _cl3.redirect_stderr(_io3.StringIO()), _cl3.redirect_stdout(_io3.StringIO()):
