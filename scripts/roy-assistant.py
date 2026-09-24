@@ -482,6 +482,26 @@ def list_sent(since_s):
     return msgs, truncated
 
 
+# info@ mail is copied into Kevin's triage hub, so every Roy request and every
+# note back to Roy would also sit in HIS inbox for ever (measured on the first
+# live day, 24 Sep 2026: 18 copies). Inbox Triage leaves them alone by design
+# (inbound-triage.py roy_assistant_copy), so this is where they are archived:
+# only info@-to-info@ mail, only the INBOX label removed, reversible, and the
+# originals stay in info@.
+def list_hub_inbox(since_s):
+    tri = mod("tri")
+    msgs, _ = tri.worker_list(q=f"in:inbox from:{ROY_INBOX} to:{ROY_INBOX} after:{since_s}",
+                              account=tri.TRIAGE_ACCOUNT)
+    return msgs
+
+
+def archive_hub(ids):
+    tri = mod("tri")
+    for i in range(0, len(ids), 40):
+        tri.worker_post("/gmail/modify", {"ids": ids[i:i + 40], "removeLabels": ["INBOX"],
+                                          "account": tri.TRIAGE_ACCOUNT})
+
+
 def list_personal_forwards(since_s, roy_gmail):
     tri = mod("tri")
     msgs, _ = tri.worker_list(q=f"in:inbox from:{roy_gmail} after:{since_s}", account=ROY_INBOX)
@@ -608,11 +628,18 @@ def cmd_poll(args):
             nudged.append(mid)
         except SystemExit as e:
             errors.append(f"nudge failed for {mid}: {e}")
+    hub = []
+    try:
+        hub = [m["id"] for m in list_hub_inbox(since_s) if mod("tri").roy_assistant_copy(m)]
+        if hub and not args.dry_run:
+            archive_hub(hub)
+    except SystemExit as e:                  # the triage transport exits on a worker error
+        errors.append(f"archiving the triage-inbox copies failed: {e}")
     if not args.dry_run:
         trim(state, now_ms)
         write_state(state)
     print(json.dumps({"created": created, "skipped": skipped, "nudged": nudged,
-                      "errors": errors}))
+                      "hubArchived": len(hub), "errors": errors}))
     return 1 if errors else 0
 
 

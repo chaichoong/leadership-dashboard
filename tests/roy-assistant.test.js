@@ -72,6 +72,9 @@ ra.airtable_all = fake_all
 ra.list_sent = lambda since_s: (list(SENT), False)
 ra.list_personal_forwards = lambda since_s, g: list(PERSONAL)
 ra.related_open_tasks = lambda req, AF: list(RELATED)
+HUB, ARCHIVED = [], []
+ra.list_hub_inbox = lambda since_s: list(HUB)
+ra.archive_hub = lambda ids: ARCHIVED.extend(ids)
 se = ra.mod("se")
 def fake_note(task_id, kind, subject, body, to=se.ROY_INBOX, dry_run=False):
     notes_sent.append({"task": task_id, "kind": kind, "to": to, "subject": subject, "body": body})
@@ -227,6 +230,18 @@ note = twin[0][1]["fields"][AF["notes"]]
 print(json.dumps({"note": note, "lead": ad.roy_handling_lead(note)}))`);
     expect(r.lead).toBe('recNEW00000000001');
     expect(r.note).toContain('ROY IS HANDLING THIS: recNEW00000000001');
+  });
+  it("the triage-inbox copies of info@-to-info@ mail are archived; anything else there is left alone", () => {
+    const r = py(`${WORLD}
+HUB.append(msg("h1", FWD))
+HUB.append(msg("h2", "x", subject="Assistant: got it - Boiler"))
+HUB.append({"id": "h3", "labelIds": ["INBOX"], "internalDate": "5000", "body": "hi",
+            "headers": {"from": "Stacey <stacey@example.com>", "to": "info@agilelets.co.uk", "subject": "Boiler"}})
+HUB.append(msg("h4", FWD, to="info@agilelets.co.uk, kevin@runpreneur.org.uk"))
+rc, out = poll()
+print(json.dumps({"archived": ARCHIVED, "count": out["hubArchived"]}))`);
+    expect(r.archived).toEqual(['h1', 'h2']);
+    expect(r.count).toBe(2);
   });
   it('a forward from his personal Gmail is not worked; he is asked once to forward from info@', () => {
     const r = py(`${WORLD}
