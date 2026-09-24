@@ -227,12 +227,30 @@ def choose_next(ledger, day=None):
     return sorted(cands)[0][3] if cands else None
 
 
+def part_no(key):
+    """2 for "2071 Full Part 2.insv", 0 for a clip that is not a named part."""
+    m = DAY_NAMED_RE.match((key or "").strip())
+    return int(m.group(3)) if m and m.group(3) else 0
+
+
+def _day_of(v):
+    return v.get("day") if v.get("day") is not None else v.get("date")
+
+
 def waits_for_bigger(key, ledger):
-    """A pulled clip is parked while a bigger clip of the same date is still new, pulled or rendering: the long clip
-    renders first. A parked clip is not in the render queue, so the pull limit never counts it."""
-    e = ledger[key]
-    bigger = [v for k2, v in ledger.items() if k2 != key and v.get("date") == e.get("date") and (v.get("size") or 0) > (e.get("size") or 0)]
-    return any(v.get("status") in ("new", "pulled", "rendering") for v in bigger)
+    """A pulled clip is parked while a bigger clip of the same day is still new, pulled or rendering: the long clip
+    renders first. A parked clip is not in the render queue, so the pull limit never counts it. Named parts go in
+    order whatever their size (24 Sep 2026): part 2 waits for part 1, and part 1 never waits for part 2, because
+    render.py joins a later part onto the part before it and cannot join onto one that has not rendered."""
+    e = ledger[key]; pn = part_no(key)
+    for k2, v in ledger.items():
+        if k2 == key or _day_of(v) != _day_of(e) or v.get("status") not in ("new", "pulled", "rendering"): continue
+        p2 = part_no(k2)
+        if pn and p2:
+            if p2 < pn: return True
+            continue
+        if (v.get("size") or 0) > (e.get("size") or 0): return True
+    return False
 
 
 def pulled_in_queue(ledger):
@@ -650,6 +668,18 @@ def _selftest_jam_and_retry():
     assert requeue_failed(led) == [], "nothing is put back twice"
 
 
+def _selftest_part_order():
+    led = {"2071 Full - Part 1.insv": {"day": 2071, "status": "new", "size": 1e9}, "2071 Full Part 2.insv": {"day": 2071, "status": "pulled", "size": 6e9},
+           "013.insv": {"day": 2071, "date": "2026-02-01", "status": "pulled", "size": 5.6e8}, "014.insv": {"day": 2072, "date": "2026-02-01", "status": "new", "size": 6e9}}
+    assert waits_for_bigger("2071 Full Part 2.insv", led), "part 2 waits for part 1 even when it is the bigger file"
+    led["2071 Full - Part 1.insv"]["status"] = "pulled"
+    assert not waits_for_bigger("2071 Full - Part 1.insv", led), "part 1 never waits for part 2"
+    assert waits_for_bigger("013.insv", led), "the teaser waits for its own day's long clips"
+    for k in ("2071 Full - Part 1.insv", "2071 Full Part 2.insv"): led[k]["status"] = "rendered"
+    assert not waits_for_bigger("013.insv", led), "...and not for the next day's clip recorded the same morning"
+    assert waits_for_bigger("b", {"a": {"date": "d", "status": "new", "size": 9}, "b": {"date": "d", "status": "pulled", "size": 1}}), "no day field: the date decides, as before"
+
+
 def _selftest_leftovers():
     """24 Sep 2026: 34 GB of finished working copies refused 2072's pull. Driven on a temp folder."""
     import tempfile
@@ -685,6 +715,7 @@ def selftest():
     _selftest_airtable_retry()
     _selftest_jam_and_retry()
     _selftest_leftovers()
+    _selftest_part_order()
     assert parse_clip("2053 Full.insv") == (dt.date(2026, 1, 13), "001000", 1) and parse_clip("2053 summary.insv")[0] == dt.date(2026, 1, 13)
     assert parse_clip("2071 Full Part 2.insv") == (dt.date(2026, 1, 31), "002000", 2) and parse_clip("2071 Full - Part 1.insv")[2] == 1
     globals()["START_DAY_FILE"] = "/nonexistent/od-start-day"; assert since_for_start_day() == DEFAULT_SINCE

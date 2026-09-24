@@ -520,7 +520,10 @@ LAST_CUT = {}
 # as a second full episode and its outputs replaced part 1's, so the card showed 1:52 of instructions to the editor.
 # Kevin's rule: "Anything that relates to the same title relates to the same episode number." A later part is JOINED to
 # the part before it; a second long recording that is not a part is never rendered over the first.
-STITCH_RE = re.compile(r"\b(?:stitch|join|splice|merge|attach|add)\w*\b(?:\W+\w+){0,8}?\W+(?:together|onto|on to|previous|earlier|last one|other (?:one|clip|video|bit))\b", re.I)
+# "stitch/splice/merge ... together|onto|previous", or "join/add/attach/put THIS|IT ... together|onto|to my previous"; never
+# "join me" or "add to that" in an ordinary opening
+STITCH_RE = re.compile(r"\b(?:stitch|splice|merge)\w*\b(?:\W+\w+){0,8}?\W+(?:together|onto|on to|previous|earlier|last one|other (?:one|clip|video|bit))\b"
+                       r"|\b(?:join|add|attach|put)\w*\s+(?:this|it|these)\b(?:\W+\w+){0,6}?\W+(?:together|onto|on to|to (?:my|the) (?:previous|last|earlier|other))\b", re.I)
 TOKENS_ONLY_RE = re.compile(r"^\s*(?:\[[^\]]*\]\s*)*$")
 LOOSE_DIARY_RE = re.compile(r"\b(?:from|for)\s+(?:a|my|the|our)\s+d(?:ia|ie|ai|iv)\w*", re.I)   # part 1's own learnings, as whisper hears it ("loads from a diary")
 JOIN_SEARCH_S = 45.0          # the note to the editor comes at the start of the part
@@ -535,8 +538,7 @@ def teaser_for_day_before(role, spoken, date_day, ledger):
 
 
 def part_number(key):
-    m = watch.DAY_NAMED_RE.match(key or "")
-    return int(m.group(3)) if m and m.group(3) else None
+    return watch.part_no(key) or None
 
 
 def is_continuation(key, text):
@@ -622,7 +624,8 @@ def join_masters(base_dir, part_dir, p1_end, p2_start, workdir):
 def release_kept(ledger, remove=None):
     """Part 1's masters are kept only while a clip of its day still waits; afterwards they go. Returns the released keys."""
     remove = remove or (lambda p: shutil.rmtree(p, ignore_errors=True))
-    busy = {v.get("day") for v in ledger.values() if v.get("status") in ("new", "pulled", "pulling", "rendering")}
+    busy = {v.get("day") for v in ledger.values() if v.get("status") in ("new", "pulled", "pulling", "rendering")
+            or (v.get("status") == "failed" and not v.get("requeued"))}      # a failed join gets one retry, and needs part 1's masters for it
     gone = []
     for k, v in ledger.items():
         if v.get("keep_masters") and v.get("day") not in busy:
@@ -813,6 +816,11 @@ def process(key, ledger, keep=False):
     base = None
     if role == "episode":
         earlier = [k2 for k2, v in ledger.items() if k2 != key and v.get("episode") == day and v.get("role") == "episode" and v.get("status") == "rendered"]
+        if not earlier and (part_number(key) or 0) >= 2:
+            # never render a later part alone: it would become the episode (the 2071 fault itself)
+            e["status"] = "failed"; e["error"] = "part %d of episode %d, but no earlier part has rendered to join it to" % (part_number(key), day)
+            if not keep: os.remove(clip); shutil.rmtree(workdir, ignore_errors=True)
+            watch.save_ledger(ledger); print("%s: NOT rendered: %s" % (key, e["error"]), file=sys.stderr); return
         if earlier:
             b = ledger[earlier[0]]
             kept = b.get("keep_masters") or ""
@@ -868,7 +876,11 @@ def process(key, ledger, keep=False):
         paths["thumb"], e["thumb_lines"] = make_thumbnail(masters["9:16"], duration, text, day, workdir, lines=lines)
     folder, links = publish_to_drive(paths, day, os.path.join(workdir, "transcript.txt"))
     rid, how = find_or_create_record(day, e.get("drive_id"), key, dt.date.fromisoformat(e["date"]))
-    watch._airtable("PATCH", watch.API + "/" + rid, {"fields": record_updates(day, links, text, reason, key, role)})
+    upd = record_updates(day, links, text, reason, key, role)
+    if role == "episode" and card_sent_back(day):
+        # the copy was written from the old transcript: cleared, so tonight's copy step writes it from this one (2071, 24 Sep 2026)
+        upd.update({f: None for f in FULL_COPY_FIELDS})
+    watch._airtable("PATCH", watch.API + "/" + rid, {"fields": upd})
     e.update({"status": "rendered", "record_id": rid, "outputs": links, "edited_folder": folder, "title": title,
               "render_seconds": round(time.time() - t0), "rendered": dt.datetime.now().isoformat(timespec="seconds")})
     if base:
@@ -876,12 +888,11 @@ def process(key, ledger, keep=False):
         # and the Learnings redo all read the day's "episode" entry)
         b = ledger[base]; b["role"] = "part"; b["joined_into"] = key
         shutil.rmtree(b.pop("keep_masters"), ignore_errors=True)
-    if not keep:
-        os.remove(clip)
-        if role == "episode" and not base and keep_for_next_part(key, e, ledger):
-            e["keep_masters"] = workdir; print("%s: masters kept for the next part of day %s" % (key, e.get("day")))
-        else:
-            shutil.rmtree(workdir, ignore_errors=True)
+    if role == "episode" and not base and keep_for_next_part(key, e, ledger):
+        e["keep_masters"] = workdir; print("%s: masters kept for the next part of day %s" % (key, e.get("day")))
+    elif not keep:
+        shutil.rmtree(workdir, ignore_errors=True)
+    if not keep: os.remove(clip)
     for k2 in release_kept(ledger): print("%s: kept masters released (no part of its day is waiting)" % k2)
     watch.save_ledger(ledger)
     print("%s -> Episode %d %s (%s) in %d s; record %s (%s); links %s" % (key, day, role, reason, e["render_seconds"], rid, how,
@@ -895,6 +906,8 @@ def redo_lfmd(day):
     keys = [k for k, v in ledger.items() if v.get("episode") == day and v.get("role") == "episode"]
     if not keys: raise SystemExit("no episode clip for day %d in the ledger" % day)
     key = keys[0]; e = ledger[key]
+    if e.get("joined_from"):
+        raise SystemExit("episode %d is joined from %s and %s: set both back to new in the ledger so the night renders and joins them again" % (day, e["joined_from"], key))
     clip = e.get("local") or ""
     if not clip or not os.path.exists(clip):
         e["status"] = "new"; watch.save_ledger(ledger)
@@ -1021,6 +1034,26 @@ def redo_full(day, keep=False):
     return key
 
 
+FULL_COPY_FIELDS = ("Blog Copy", "Blog Post Description", "YouTube Copy", "Podcast Copy")   # platform_copy.TYPES["Long Form Video"]
+
+
+def card_sent_back(day):
+    try:
+        import approval
+        return (approval.load_state().get(str(day)) or {}).get("verdict") == "changes"
+    except Exception as ex:
+        print("render: approval state not readable (%s); the copy is left as it is" % str(ex)[:100], file=sys.stderr); return False
+
+
+def _when(iso):
+    """An aware datetime from the ledger's local stamp or Airtable's UTC one; None when unreadable."""
+    try:
+        t = dt.datetime.fromisoformat(str(iso).replace("Z", "+00:00"))
+        return t if t.tzinfo else t.astimezone()
+    except ValueError:
+        return None
+
+
 RESUBMIT_DIR = os.path.expanduser("~/.config/od/content_engine_resubmit")   # <day>.md: the receipt for a card Kevin sent back
 
 
@@ -1036,6 +1069,8 @@ def resubmit_due(day, ledger, receipt_mtime, card, full_fields):
     if max((v.get("rendered") or "") for v in ep) < dt.datetime.fromtimestamp(receipt_mtime).isoformat(timespec="seconds"):
         return "the episode has not rendered since the receipt was written"
     if not (full_fields.get("YouTube Copy") or "").strip(): return "the copy has not been written again yet"
+    wrote, made = _when(full_fields.get("AI Last Run")), _when(max((v.get("rendered") or "") for v in ep))
+    if not wrote or not made or wrote < made: return "the copy is older than the render"
     return ""
 
 
@@ -1149,13 +1184,18 @@ def _selftest_parts():
     assert not teaser_for_day_before("teaser", 2071, 2072, {"x": {"episode": 2071, "role": "teaser", "status": "rendered"}}), "the day already has its teaser"
     import time as _t
     t0 = _t.mktime(dt.datetime(2026, 9, 24, 18, 0).timetuple())
-    card, fullf = {"verdict": "changes"}, {"YouTube Copy": "x"}
+    card, fullf = {"verdict": "changes"}, {"YouTube Copy": "x", "AI Last Run": "2026-09-25T02:10:00.000Z"}
     led = {"p2": {"episode": 2071, "day": 2071, "role": "episode", "status": "rendered", "rendered": "2026-09-25T01:30:00"},
            "t": {"episode": 2071, "day": 2072, "role": "teaser", "status": "rendered", "rendered": "2026-09-25T03:40:00"}}
     assert resubmit_due(2071, led, t0, card, fullf) == "", "re-rendered after the receipt, nothing waiting, copy written: goes back"
     assert "not rendered since" in resubmit_due(2071, dict(led, p2=dict(led["p2"], rendered="2026-09-24T00:46:50")), t0, card, fullf)
     assert "still waiting" in resubmit_due(2071, dict(led, p1={"day": 2071, "status": "new"}), t0, card, fullf)
     assert "copy" in resubmit_due(2071, led, t0, card, {"YouTube Copy": ""}) and "not sent back" in resubmit_due(2071, led, t0, {"verdict": "approved"}, fullf)
+    assert "older than the render" in resubmit_due(2071, led, t0, card, {"YouTube Copy": "x", "AI Last Run": "2026-09-23T22:48:00.000Z"}), "yesterday's copy is not today's"
+    import platform_copy as _pc
+    assert FULL_COPY_FIELDS == tuple(f for _, f in _pc.TYPES["Long Form Video"]["sections"]), "the fields cleared are the fields the writer writes"
+    assert STITCH_RE.search("So Sam if you can stitch this together to my previous run") and STITCH_RE.search("can you add this onto the last clip")
+    assert not STITCH_RE.search("join me today as I talk about the previous week") and not STITCH_RE.search("I want to add to that the earlier point")
 
 
 def selftest():
