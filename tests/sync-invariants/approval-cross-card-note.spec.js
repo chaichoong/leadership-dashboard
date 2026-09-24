@@ -232,7 +232,9 @@ test.describe('one note, every card it fits', () => {
     await expect(page.locator('[data-apv-cross-notice]')).toHaveCount(0);
   });
 
-  test('no check without a note, for Duplicate, or from the bulk bar', async ({ page }) => {
+  // Each of these leaves other cards waiting, so a check that wrongly fired
+  // would have something to send: a queue with nothing left proves nothing.
+  test('no check for a decision without a note, or for Duplicate', async ({ page }) => {
     const patches = await mockAgentsPage(page, queue());
     const calls = await mockProxy(page, matchGas);
     await loadAgentsPage(page);
@@ -243,12 +245,25 @@ test.describe('one note, every card it fits', () => {
     // Duplicate: the card most like it is the one being kept.
     await cardEl(page, 'recBootle').locator('.apv-reason', { hasText: 'Duplicate' }).first().click();
     await expect.poll(() => patches.some((p) => p.id === 'recBootle')).toBe(true);
-    // Bulk with a note: one decision on the ticked cards, no fan-out.
-    await cardEl(page, 'recGas').locator('[data-apv-pick]').check();
+    await expect(cardEl(page, 'recBootle').locator('[data-apv-state="saved"]')).toBeVisible();
+    await page.waitForTimeout(400);
+    expect(calls.length).toBe(0);
+    await expect(page.locator('[data-apv-cross-notice]')).toHaveCount(0);
+  });
+
+  test('no check from the bulk bar', async ({ page }) => {
+    const patches = await mockAgentsPage(page, queue());
+    const calls = await mockProxy(page, matchGas);
+    await loadAgentsPage(page);
+    await openApprovals(page);
+    // One ticked card with a note; two others still waiting.
+    await cardEl(page, 'recSrc').locator('[data-apv-pick]').check();
     await page.locator('#apvBulk [data-apv-bulk-open="changes"]').click();
     await page.locator('#apvBulkNote-changes').fill(HAVERHILL_NOTE);
     await page.locator('#apvBulk [data-apv-bulk-changes]').click();
-    await expect.poll(() => patches.some((p) => p.id === 'recGas')).toBe(true);
+    await expect.poll(() => patches.some((p) => p.id === 'recSrc')).toBe(true);
+    await expect(page.locator('#toast')).toContainText('Sent back');
+    await page.waitForTimeout(400);
     expect(calls.length).toBe(0);
   });
 });
