@@ -216,6 +216,22 @@ def split_sections(text, ctype):
 
 
 KM_RE = re.compile(r"(\d[\d,]*(?:\.\d+)?)\s?km\b", re.I)
+KM_LEFT = r"to go|to run|to cover|left|remain|still|ahead"
+KM_DONE = r"\b(?:down|behind|covered|done|so far|in the bank|logged|completed)\b"
+KM_IN_RE = re.compile(r"^\s*in\b(?!\s+total)", re.I)          # "15,899km in" is km done; a bare "in" elsewhere is not
+
+
+def _km(fig):
+    m = KM_RE.match(fig or "")
+    try: return float(m.group(1).replace(",", "")) if m else 0.0
+    except ValueError: return 0.0
+
+
+def _nearest(text, from_end=False):
+    """(start, end, 'left'|'done') of the direction word nearest the figure (the first after it, or the last before it), or None."""
+    hits = [(x.start(), x.end(), "left") for x in re.finditer(KM_LEFT, text)] + [(x.start(), x.end(), "done") for x in re.finditer(KM_DONE, text)]
+    if not hits: return None
+    return max(hits) if from_end else min(hits)
 MISSION_KM = 40075.0
 
 
@@ -232,15 +248,27 @@ def check_km(t, cum, transcript=""):
     issues = []
     if cum is None: return t, issues
     left = MISSION_KM - cum
+    spans = [(x.start(), x.end()) for x in KM_RE.finditer(t)]
     def fix(m):
         raw = m.group(1); bare = raw.replace(",", "")
         try: v = float(bare)
         except ValueError: return m.group(0)
         if abs(v - MISSION_KM) < 1 or abs(v - cum) < 1 or abs(v - left) < 1: return m.group(0)
         if bare in transcript.replace(",", "") or raw in transcript: return m.group(0)
-        tail = re.split(r"[.!?\n]", t[m.end():m.end() + 60], 1)[0].lower()            # this sentence only: the next one may say "to go"
-        head = re.split(r"[.!?\n]", t[max(0, m.start() - 60):m.start()][::-1], 1)[0][::-1].lower()
-        want = left if re.search(r"to go|left|remain|still", tail + " " + head) else cum
+        # The words that decide "so far" or "to go" run from this figure to the next one (or the sentence's end), and back
+        # to the one before (or the sentence's start); the words after it count first. 24 Sep 2026: "Roughly 20,690km down,
+        # 19,385km left" read the second figure's "left" and made the first the km left ("24,098km down, 24,098km left").
+        nxt = min([a for a, _ in spans if a >= m.end()] + [len(t)]); before = [sp for sp in spans if sp[1] <= m.start()]
+        prv = before[-1][1] if before else 0
+        tail = re.split(r"[.!?\n]", t[m.end():nxt], 1)[0].lower()
+        gap = t[prv:m.start()]; head = re.split(r"[.!?\n]", gap[::-1], 1)[0][::-1].lower()
+        if before and len(head) == len(gap) and not KM_IN_RE.match(gap) and abs(_km(t[before[-1][0]:before[-1][1]]) - MISSION_KM) >= 1:
+            # same sentence as the figure before: the first word after THAT figure is its own. Not when it owns "in"
+            # (already spent) or is the 40,075km lap, which takes no direction word (review, 24 Sep 2026)
+            own = _nearest(head)
+            if own: head = head[own[1]:]
+        hit = ("done",) if KM_IN_RE.match(tail) else (_nearest(tail) or _nearest(head, from_end=True))   # nearest word wins (review, 24 Sep 2026)
+        want = left if hit and hit[-1] == "left" else cum
         issues.append("distance %skm is not the day's Strava figure; corrected to %s" % (raw, fmt_km(want, raw)))
         return fmt_km(want, raw)
     return KM_RE.sub(fix, t), issues
@@ -431,30 +459,6 @@ def clean_day(day, dry_run=False):
     return done
 
 
-def run_pending(limit=3):
-    f = 'AND({Content Type}="Long Form Video", {Responsible}="Content Engine (AI)", {Transcription}!="", {YouTube Copy}="")'
-    r = watch._airtable("GET", watch.API + "?maxRecords=%d&filterByFormula=%s" % (limit, urllib.parse.quote(f)))
-    recs = r.get("records", [])
-    unfilled, off = [], None
-    while True:                                   # every page (CLAUDE.md: a missed page is a silent miss)
-        u = watch._airtable("GET", watch.API + "?pageSize=100&filterByFormula=%s%s" % (urllib.parse.quote(UNFILLED), "&offset=" + off if off else ""))
-        unfilled += u.get("records", []); off = u.get("offset")
-        if not off: break
-    later = unfilled_work(unfilled)
-    if not recs and not later: print("copy: nothing pending"); return
-    failed = []
-    for rec in recs:
-        m = re.search(r"Episode (\d+)", rec["fields"].get("Content Name", ""))
-        if not m: continue
-        try: run_day(int(m.group(1)))
-        except SystemExit as ex: failed.append(str(ex))
-    done = {int(re.search(r"Episode (\d+)", x["fields"].get("Content Name", "")).group(1)) for x in recs if re.search(r"Episode (\d+)", x["fields"].get("Content Name", ""))}
-    for day, ctype in [w for w in later if w[0] not in done][:limit * 2]:
-        try: run_day(day, [ctype])
-        except SystemExit as ex: failed.append(str(ex))
-    if failed: raise SystemExit("copy: " + " | ".join(failed))
-
-
 def selftest():
     assert record_name(2195, "Short Form Video") == "Episode 2195 Short"
     p = build_prompt("Short Form Video", "hello", "Episode 2195 Short", 2195)
@@ -480,6 +484,20 @@ def selftest():
     f4, i4 = rules_check({"LinkedIn Copy": "Day 2054. 20,540km in. 19,535km still to go to 40,075km. I ran 8km today."}, "I ran 8km today", km=15899.70)
     assert f4["LinkedIn Copy"] == "Day 2054. 15,900km in. 24,175km still to go to 40,075km. I ran 8km today.", f4
     assert len(i4) == 2 and "20,540km" in i4[0] and "19,535km" in i4[1], i4
+    f6, _ = rules_check({"Instagram Reels Copy": "Day 2069 of the streak. Roughly 20,690km down, 19,385km left toward the 40,075km lap."}, "", km=15977.0)
+    assert "Roughly 15,977km down, 24,098km left" in f6["Instagram Reels Copy"], f6
+    for said, want in (("Still to go, 24,000km.", "24,098km"), ("About 19,385km, give or take, still to go.", "24,098km"),
+                       ("19,385km to go and 20,690km behind me.", "24,098km to go and 15,977km behind me"),
+                       ("15,899km in, with 24,175km to go.", "15,977km in, with 24,098km to go"),
+                       ("20,690km in, still 19,385km to go.", "15,977km in, still 24,098km to go"),
+                       ("20,690km down and still 19,385km to run.", "15,977km down and still 24,098km to run"),
+                       ("Still to go in the lap: 19,385km.", "24,098km"), ("19,385km in total still to go.", "24,098km in total"),
+                       ("I have 24,000km left, after 16,000km.", "24,098km left, after 15,977km"),
+                       ("Roughly 20,690km down, 19,385km left toward the 40,075km lap.", "15,977km down, 24,098km left"),
+                       ("20,690km in, still 19,385km ahead.", "15,977km in, still 24,098km ahead"),
+                       ("Of the 40,075km lap, still 19,385km ahead.", "still 24,098km ahead")):
+        got = rules_check({"LinkedIn Copy": said}, "", km=15977.0)[0]["LinkedIn Copy"]
+        assert want in got, (said, got)          # the reviewer's cases, 24 Sep 2026
     f5, i5 = rules_check({"Facebook Post Copy": "15,899.70km logged of 40,075km"}, "", km=15899.70); assert not i5 and f5["Facebook Post Copy"].startswith("15,899.70km"), "the right figure passes untouched"
     assert rules_check({"X": "20,540km"}, "", km=None)[1] == [], "no Strava figure known: nothing to correct against (the prompt then says do not state a distance)"
     assert cm_prompts.KEVIN_SYSTEM.startswith("You are Kevin Brittain.") and "#Insta360" in cm_prompts.KEVIN_SYSTEM
