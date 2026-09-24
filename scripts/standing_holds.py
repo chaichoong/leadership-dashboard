@@ -26,11 +26,18 @@ The holds live in a private file (HOLDS_FILE), never in this public repo, becaus
 property addresses and people's names.
 
 What a hold does to a task (`run`, every 30 minutes on the hand-back poll):
-  park     Status -> Upcoming, Some Day ticked, Notes stamped HELD (<id>, was <status>). Some Day is
-           the estate's existing "parked on purpose" flag: dispatch, the Task Manager's board, the
-           09:00 brief, loop-health and the task-hygiene sweep all leave it alone already.
-  release  when the hold is lifted or expires: Status -> Today, Some Day cleared, Notes stamped
+  park     Status -> Upcoming, Due Date -> the hold's review date, Notes stamped HELD (<id>, was
+           <status>, due <date>). An Upcoming task with a future date is outside dispatch, the
+           09:00 brief's due list and loop-health, and still a board status (the
+           open-task-status-is-a-board-status invariant). On the review date the task-hygiene
+           flip-due and this script's expiry both bring it back, so the two can never disagree.
+  release  when the hold is lifted or expires: Status -> Today, Due Date -> today, Notes stamped
            HOLD ENDED (<id>) with the evidence, so the owning agent picks it up and reads why.
+
+NEVER PARK WITH SOME DAY. The first live run (24 Sep 2026) ticked Some Day, and the deployed
+Airtable automation "When Some Day field is checked, Then clear airtable fields"
+(wflwN7tFqQy8V8cKz) blanked Status, Due Date and Assignee on all nine tasks within a minute.
+A blank Status is on no board at all. The selftest fails if a park or release writes Some Day.
 An approval Kevin gave AFTER the hold began is his newer word on that exact task and is never held.
 
 Usage:
@@ -71,12 +78,13 @@ LONDON = ZoneInfo("Europe/London")
 WHO = "standing-holds"
 
 APPROVED = ("Approved as-is", "Approved with minor edits")
-# The statuses a hold reads. Completed and Cancelled are finished; a parked
-# (Some Day) task is already out of every lane.
+# The statuses a hold reads. Completed and Cancelled are finished; a Some Day
+# task is Kevin's own "someday" list and is left alone.
 HOLDABLE = ("Today", "Overdue", "Approval", "Upcoming")
 HELD_MARK = "HELD ("
 ENDED_MARK = "HOLD ENDED ("
 RELEASE_STATUS = "Today"
+PARK_STATUS = "Upcoming"
 # A new hold may cover at most this many open tasks. A wider one is a pattern
 # that has caught more than Kevin said, not a bigger ruling.
 MAX_HELD = 15
@@ -191,9 +199,9 @@ def append_notes(existing, line):
     return (str(existing or "").rstrip() + "\n\n" + line).strip()[-90000:]
 
 
-def held_line(hold, prior_status):
+def held_line(hold, prior_status, prior_due=""):
     return note_line(
-        f"{HELD_MARK}{hold['id']}, was {prior_status}): {hold.get('title', '')}. "
+        f"{HELD_MARK}{hold['id']}, was {prior_status}, due {prior_due or 'none'}): {hold.get('title', '')}. "
         f"Kevin: \"{hold.get('ruling', '')}\" Nobody acts on this until {hold.get('lift', {}).get('label', 'the hold ends')}, "
         f"or {hold.get('review_by', '?')} at the latest.")
 
@@ -235,7 +243,7 @@ def airtable(method, path, token, params=None, body=None):
                            f"{e.read().decode('utf-8', 'replace')[:200]}") from None
 
 
-FIELDS = ["Task Name", "Description", "Notes", "Status", "Some Day",
+FIELDS = ["Task Name", "Description", "Notes", "Status", "Some Day", "Due Date",
           "Approval Outcome", "Approved At"]
 
 
@@ -259,6 +267,7 @@ def task_of(rec):
     outcome = f.get("Approval Outcome")
     return {"id": rec["id"], "name": f.get("Task Name", ""), "description": f.get("Description", ""),
             "notes": f.get("Notes", ""), "status": f.get("Status", ""), "someDay": bool(f.get("Some Day")),
+            "dueDate": f.get("Due Date", ""),
             "outcome": outcome.get("name") if isinstance(outcome, dict) else (outcome or ""),
             "approvedAt": f.get("Approved At", "")}
 
@@ -319,7 +328,24 @@ def open_formula():
 
 
 def parked_formula():
-    return "AND({Some Day},FIND('" + HELD_MARK + "',{Notes}&''))"
+    return ("AND({Status}!='Completed',{Status}!='Cancelled',FIND('" + HELD_MARK
+            + "',{Notes}&''))")
+
+
+def park_fields(hold, task):
+    return {"Status": PARK_STATUS, "Due Date": hold["review_by"],
+            "Notes": append_notes(task["notes"], held_line(hold, task["status"], task.get("dueDate")))}
+
+
+def release_fields(hold, task, why, today):
+    return {"Status": RELEASE_STATUS, "Due Date": today,
+            "Notes": append_notes(task["notes"], ended_line(hold, why))}
+
+
+def still_parked(task, hold_id):
+    """Held by this hold and still where the park put it. Someone moving it back to Today while
+    the hold stands does not end the hold: the next run parks it again."""
+    return task["status"] == PARK_STATUS and carries_open_hold(task["notes"], hold_id)
 
 
 def run(token, holds, dry_run=False, search=gmail_count, today=None, write=None):
@@ -372,8 +398,7 @@ def run(token, holds, dry_run=False, search=gmail_count, today=None, write=None)
             _row(report, hid)["released"].append(t["id"])
             if not dry_run:
                 try:
-                    write(t["id"], {"Status": RELEASE_STATUS, "Some Day": False,
-                                    "Notes": append_notes(t["notes"], ended_line(h, why))})
+                    write(t["id"], release_fields(h, t, why, today))
                 except Exception as e:  # noqa: BLE001
                     report["errors"].append(f"release {t['id']} failed: {str(e)[:200]}")
     if report["orphans"]:
@@ -390,14 +415,13 @@ def run(token, holds, dry_run=False, search=gmail_count, today=None, write=None)
                                     "not the board empty")
         for t in open_tasks:
             h = hold_for(t, live)
-            if not h:
+            if not h or still_parked(t, h["id"]):
                 continue
             _row(report, h["id"])["parked"].append({"id": t["id"], "name": t["name"][:80],
                                                    "was": t["status"]})
             if not dry_run:
                 try:
-                    write(t["id"], {"Status": "Upcoming", "Some Day": True,
-                                    "Notes": append_notes(t["notes"], held_line(h, t["status"]))})
+                    write(t["id"], park_fields(h, t))
                 except Exception as e:  # noqa: BLE001
                     report["errors"].append(f"park {t['id']} failed: {str(e)[:200]}")
 
@@ -613,7 +637,7 @@ def selftest():
 
     # run(): park, lift, release, orphan, all through a fake board.
     board = {
-        "recHELD": {"Task Name": "Update SO amount - 5 Maple", "Status": "Today", "Notes": ""},
+        "recHELD": {"Task Name": "Update SO amount - 5 Maple", "Status": "Today", "Due Date": "2026-09-24", "Notes": ""},
         "recFREE": {"Task Name": "Council Tax 18 Other Road", "Status": "Today", "Notes": ""},
     }
     writes = []
@@ -621,16 +645,20 @@ def selftest():
     def fake_query(_token, formula):
         rows = []
         for rid, f in board.items():
-            parked = bool(f.get("Some Day"))
-            if ("Some Day},FIND" in formula) == parked:
-                if parked and HELD_MARK not in (f.get("Notes") or ""):
-                    continue
+            if "FIND('" + HELD_MARK in formula:
+                keep = HELD_MARK in (f.get("Notes") or "") and f.get("Status") not in ("Completed", "Cancelled")
+            else:
+                keep = f.get("Status") in HOLDABLE and not f.get("Some Day")
+            if keep:
                 rows.append({"id": rid, "fields": dict(f)})
         return rows
 
     def fake_write(rid, fields):
         writes.append((rid, fields))
         board[rid].update(fields)
+        if fields.get("Some Day"):
+            # What the live automation wflwN7tFqQy8V8cKz does to a ticked Some Day.
+            board[rid].update({"Status": None, "Due Date": None, "Assignee": None})
 
     real_query = globals()["query_tasks"]
     globals()["query_tasks"] = fake_query
@@ -641,9 +669,13 @@ def selftest():
         no_reply = lambda q, a: (0, []) if "after:" in q else (2, [])  # noqa: E731
         holds = [json.loads(json.dumps(SAMPLE))]
         rep = run("t", holds, search=no_reply, today="2026-09-24", write=fake_write)
-        check("run parks the covered task", board["recHELD"]["Some Day"] is True
-              and board["recHELD"]["Status"] == "Upcoming" and "HELD (sample-council-tax, was Today)" in board["recHELD"]["Notes"])
-        check("run leaves the other council alone", "Some Day" not in board["recFREE"])
+        check("run parks the covered task: Upcoming, due on the review date",
+              board["recHELD"]["Status"] == "Upcoming" and board["recHELD"]["Due Date"] == "2026-10-23"
+              and "HELD (sample-council-tax, was Today, due 2026-09-24)" in board["recHELD"]["Notes"])
+        check("run leaves the other council alone", board["recFREE"]["Status"] == "Today"
+              and "Notes" in board["recFREE"] and board["recFREE"]["Notes"] == "")
+        check("a park never writes Some Day (its automation blanks Status, Due Date, Assignee)",
+              all("Some Day" not in f for _, f in writes))
         check("a clean run reports no errors", rep["errors"] == [])
         n = len(writes)
         run("t", holds, search=no_reply, today="2026-09-24", write=fake_write)
@@ -651,28 +683,36 @@ def selftest():
         replied = lambda q, a: (1, [{"when": "2026-10-02", "id": "m9", "snippet": "Dear Mr"}])  # noqa: E731
         rep = run("t", holds, search=replied, today="2026-10-02", write=fake_write)
         check("the reply lifts the hold", holds[0]["status"] == "lifted")
-        check("the lift releases the task to Today", board["recHELD"]["Status"] == "Today"
-              and board["recHELD"]["Some Day"] is False and "HOLD ENDED (sample-council-tax)" in board["recHELD"]["Notes"])
+        check("the lift releases the task to Today, due the day it comes back",
+              board["recHELD"]["Status"] == "Today" and board["recHELD"]["Due Date"] == "2026-10-02"
+              and "HOLD ENDED (sample-council-tax)" in board["recHELD"]["Notes"])
+        check("a release never writes Some Day", all("Some Day" not in f for _, f in writes))
+        n = len(writes)
+        run("t", holds, search=replied, today="2026-10-02", write=fake_write)
+        check("a released task is not released twice", len(writes) == n)
         check("the lifted hold is saved", json.loads(Path(globals()["HOLDS_FILE"]).read_text())["holds"][0]["status"] == "lifted")
         # Expiry: a fresh hold whose review date passes with no reply.
-        board["recHELD"].update({"Status": "Today", "Some Day": False, "Notes": ""})
+        board["recHELD"].update({"Status": "Today", "Notes": ""})
         holds = [json.loads(json.dumps(SAMPLE))]
         run("t", holds, search=no_reply, today="2026-09-24", write=fake_write)
+        board["recHELD"]["Status"] = "Today"          # someone moves it back while the hold stands
+        run("t", holds, search=no_reply, today="2026-09-25", write=fake_write)
+        check("a held task moved back to Today is parked again", board["recHELD"]["Status"] == "Upcoming")
         rep = run("t", holds, search=no_reply, today="2026-10-24", write=fake_write)
         check("a passed review date expires the hold", holds[0]["status"] == "expired")
         check("expiry releases the task with the reason", board["recHELD"]["Status"] == "Today"
               and "never came" in board["recHELD"]["Notes"])
         # Orphan: a stamp for a hold the file does not know.
-        board["recHELD"].update({"Some Day": True, "Status": "Upcoming",
-                                 "Notes": note_line("HELD (ghost-hold, was Today): x")})
+        board["recHELD"].update({"Status": "Upcoming",
+                                 "Notes": note_line("HELD (ghost-hold, was Today, due none): x")})
         rep = run("t", holds, search=no_reply, today="2026-10-25", write=fake_write)
         check("an orphaned stamp fails the run", rep["orphans"] and rep["errors"])
         # A broken hold holds nothing and fails the run.
-        board["recHELD"].update({"Some Day": False, "Status": "Today", "Notes": ""})
+        board["recHELD"].update({"Status": "Today", "Notes": ""})
         broken = json.loads(json.dumps(SAMPLE))
         broken["match"]["all"][0] = "sampeltown"
         rep = run("t", [broken], search=no_reply, today="2026-09-24", write=fake_write)
-        check("a broken hold parks nothing", board["recHELD"].get("Some Day") is False)
+        check("a broken hold parks nothing", board["recHELD"]["Status"] == "Today")
         check("a broken hold fails the run", any("BROKEN" in e for e in rep["errors"]))
         # Dry run writes nothing.
         n = len(writes)
