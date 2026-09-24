@@ -270,6 +270,18 @@ ${code}`, arg], { encoding: 'utf8' }));
     });
   });
 
+  it('a fault state is not identity: "not working" never folds two different repairs (24 Sep 2026)', () => {
+    // The live fold: a test repair overwrote a real, open task at 25 Abercorn
+    // Court on the shared words bathroom / not / working (finding 602).
+    const wrong = verdict('MAINTENANCE: Bathroom extractor fan not working - TEST',
+      'MAINTENANCE: bathroom light not working - 25 Abercorn Court', 'fold');
+    expect(wrong.match).toBe(false);
+    // Control: the same fault in different words still folds.
+    const same = verdict('MAINTENANCE: bathroom extractor fan not working - 5 Dalham Place',
+      'MAINTENANCE: extractor fan in the bathroom has stopped - 5 Dalham Place', 'fold');
+    expect(same.match, same.why).toBe(true);
+  });
+
   it('an address says WHERE, not WHICH', () => {
     // Kevin has ~27 properties with many open tasks each. Counting address
     // words would eventually fold a garden complaint into a rent arrears chase.

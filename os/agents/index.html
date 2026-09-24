@@ -4338,7 +4338,9 @@ function dupeTaskKey(name){
 const DUPE_ACTION_WORDS = ['respond','reply','replies','replying','required','require',
   'requires','send','sending','sent','provide','pay','paid','paying','call','calling',
   'chase','chasing','contact','unpaid','outstanding','overdue','further','recovery',
-  'notice','notification','update','updates','incoming','new','important','info','information'];
+  'notice','notification','update','updates','incoming','new','important','info','information',
+  // A fault state is not identity (finding 20260924-agent-dispatch-602).
+  'not','no','working','stopped'];
 const DUPE_STREET_TYPES = ['street','st','road','rd','avenue','ave','lane','close','drive',
   'way','court','place','crescent','grove','terrace','gardens','square','walk','hill',
   'park','row','view','rise','mews'];
