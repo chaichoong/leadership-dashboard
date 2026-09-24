@@ -415,7 +415,7 @@ def fill_learnings(day, entry, recs, acct_map, stage, ledger, gaps, state, save)
     record as well as a publishable one (21 Sep 2026). Returns True when it scheduled."""
     s_now = section_status(entry)
     lf_missing = bool(output_link(day, "lfmd", ledger)) and "missing" in (s_now["Learnings clips"], s_now["YouTube Short"]) \
-        and bool((((recs or {}).get("Learnings From My Diary") or {}).get("fields") or {}).get("YouTube Reels Copy"))    # no copy, no attempt spent
+        and bool((((recs or {}).get("Learnings From My Diary") or {}).get("fields") or {}).get("TikTok Copy"))    # no copy, no attempt spent
     # the teasers too (24 Sep 2026): 2069's Short copy was never written, so its teaser posts were never made, and a
     # Published record only ever came back here for its Learnings clip
     te_missing = bool(output_link(day, "summary", ledger)) and s_now["Teaser clips"] == "missing" \
@@ -1579,7 +1579,7 @@ def _selftest_fill_learnings():
                   "account_map": lambda a: {"youtube": [{"id": "yt"}]}, "load_state": lambda: state, "save_state": lambda st: None,
                   "bundle": lambda day: {"Long Form Video": {"id": "recF", "fields": {"Record Status": status}},
                                          "Short Form Video": {"fields": {"TikTok Copy": "t"}} if teaser[1] else None,
-                                         "Learnings From My Diary": {"fields": {"YouTube Reels Copy": "y"}}},
+                                         "Learnings From My Diary": {"fields": {"TikTok Copy": "y"}}},
                   "stage_for": lambda e, yt: "done", "watch": _types.SimpleNamespace(load_ledger=lambda: {}, gap_days=lambda path=None: {1841}),
                   "output_link": lambda day, kind, ledger=None: None if kind == "summary" and not teaser[0] else "https://drive/%s" % kind,
                   "schedule_stage": lambda day, e, recs, am, st_no, dry_run=False, index=0, save=None: sched.append((day, st_no)) or 2,
