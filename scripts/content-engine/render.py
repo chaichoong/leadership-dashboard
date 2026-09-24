@@ -832,7 +832,7 @@ def process(key, ledger, keep=False):
         b = ledger[base]; bdir = b["keep_masters"]
         segs1, segs2 = srt_segments(open(os.path.join(bdir, "transcript.srt")).read()), srt_segments(open(srt).read())
         p2_start, why2 = part_two_start(segs2, window)
-        if p2_start is None: raise SystemExit("%s: %s" % (key, why2))
+        if p2_start is None: raise RuntimeError("%s: %s" % (key, why2))     # run() fails this clip only; a SystemExit would end the night
         p1_end, why1 = part_one_end(segs1, bool(window) and window[0] >= p2_start)
         masters = join_masters(bdir, workdir, p1_end, p2_start, workdir)
         joined = join_srt(segs1, p1_end, segs2, p2_start)
