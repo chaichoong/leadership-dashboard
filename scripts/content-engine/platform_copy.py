@@ -56,6 +56,42 @@ TYPES = {
         ("THREADS POST", "Threads Copy"), ("TIKTOK POST", "TikTok Copy"),
         ("YOUTUBE REELS POST", "YouTube Reels Copy")]},
 }
+# The writer runs with NO hooks. From 21 Sep 2026 the session rules Kevin's own chats carry (the close-out block, the goal
+# check) reached this headless writer, which signed off its copy with "CLOSE-OUT ... Safe to close? Yes". The block rode
+# on the last section of each reply into the Podcast Copy and YouTube Reels Copy of 2066-2071 and went out on four
+# YouTube Shorts and three Spotify episodes; when the Stop hook asked for a second turn the run died on --max-turns 1,
+# so 2069's teasers had no copy at all. Proved 24 Sep 2026: one prompt, hooks on ends "Safe to close? Yes", hooks off
+# comes back clean. The copy is published word for word, so it must never carry anything a session rule adds.
+NO_HOOKS = '{"disableAllHooks": true}'
+# Lines only a session rule writes. A reply is cut at the first one; a field that still holds one is never written.
+SESSION_TEXT_RE = re.compile(r"^[ \t>*#_-]*(CLOSE-OUT\b|GOAL CHECK\b|MODEL CHECK\b|Safe to close\?|Goal met\?|What was written down\b)", re.I | re.M)
+
+
+def session_text_in(text):
+    """The first session-rule line in `text`, or None."""
+    m = SESSION_TEXT_RE.search(text or "")
+    return m.group(1) if m else None
+
+
+def strip_session_text(text):
+    """(text cut before the first session-rule line and any '---' rule above it, True if anything was cut)."""
+    m = SESSION_TEXT_RE.search(text or "")
+    if not m: return text, False
+    head = re.sub(r"(?:\s*\n)?[ \t]*(?:-{3,}|\*{3,}|_{3,})?\s*$", "", text[:m.start()])
+    return head.rstrip(), True
+
+
+def session_leak(recs):
+    """[(record type, field, marker)] for every copy field on an episode's records that holds session text."""
+    out = []
+    for ctype, rec in (recs or {}).items():
+        for field, val in ((rec or {}).get("fields") or {}).items():
+            if (field.endswith("Copy") or field == "Blog Post Description") and isinstance(val, str):
+                m = session_text_in(val)
+                if m: out.append((ctype, field, m))
+    return out
+
+
 BANNED = ["amazing", "incredible journey", "crushing it", "smashing goals"]
 US_SPELLINGS = re.compile(r"\b(realiz\w*|organiz\w*|color|favorite|center|analyz\w*|behavior|optimiz\w*)\b", re.I)
 LIMITS = {"Threads Copy": 500, "TikTok Copy": 300}
@@ -219,7 +255,8 @@ def ask_claude(system, user, timeout=600, thinking=None, no_mcp=False):
     env = dict(os.environ)
     if thinking is not None: env["MAX_THINKING_TOKENS"] = str(int(thinking))
     if os.path.exists(TOKEN_FILE): env["CLAUDE_CODE_OAUTH_TOKEN"] = open(TOKEN_FILE).read().strip()
-    cmd = [CLAUDE, "-p", user, "--system-prompt", system, "--model", MODEL, "--output-format", "json", "--tools", "", "--max-turns", "1"]
+    cmd = [CLAUDE, "-p", user, "--system-prompt", system, "--model", MODEL, "--output-format", "json", "--tools", "", "--max-turns", "1",
+           "--settings", NO_HOOKS]
     if no_mcp: cmd += ["--strict-mcp-config", "--mcp-config", '{"mcpServers":{}}']   # a headless writer needs no connectors; skipping them saves the init wait
     r = _allowance().run_guarded("content-engine", cmd, capture_output=True, text=True, env=env, timeout=timeout)   # skipped while the allowance is out; marks the pause from its output
     if r.returncode != 0: raise SystemExit(_allowance().claude_error(r))
@@ -251,9 +288,13 @@ def generate_for(rec, ctype, transcript, day, yt_full_link):
     km = km_for_day(day)
     prompt = build_prompt(ctype, transcript, name, day, yt_full_link, km)
     text, usage, cost = ask_claude(cm_prompts.KEVIN_SYSTEM, prompt)
+    text, cut = strip_session_text(text)
     fields = split_sections(text, ctype)
     if not fields: raise SystemExit("no sections parsed for %s; first 300 chars: %r" % (name, text[:300]))
+    left = [(f, session_text_in(v)) for f, v in fields.items() if session_text_in(v)]
+    if left: raise SystemExit("%s: session text in %s; nothing written" % (name, ", ".join("%s (%s)" % x for x in left)))
     fields, issues = rules_check(fields, transcript + "\n" + prompt, km)   # the prompt's own figures (day, km so far, km left) are sourced; any other distance is corrected
+    if cut: issues.insert(0, "session text cut from the reply")
     fields.update({"AI Generated": True, "AI Feature": "Copywriting", "AI Last Run": dt.datetime.now(dt.timezone.utc).isoformat(),
                    "Model": MODEL, "AI Input Tokens": int(usage.get("input_tokens", 0) or 0), "AI Output Tokens": int(usage.get("output_tokens", 0) or 0),
                    "Record Status": STATUS_COPIES})
@@ -318,7 +359,40 @@ def selftest():
     f5, i5 = rules_check({"Facebook Post Copy": "15,899.70km logged of 40,075km"}, "", km=15899.70); assert not i5 and f5["Facebook Post Copy"].startswith("15,899.70km"), "the right figure passes untouched"
     assert rules_check({"X": "20,540km"}, "", km=None)[1] == [], "no Strava figure known: nothing to correct against (the prompt then says do not state a distance)"
     assert cm_prompts.KEVIN_SYSTEM.startswith("You are Kevin Brittain.") and "#Insta360" in cm_prompts.KEVIN_SYSTEM
-    print(json.dumps({"checks": 12, "failed": []}))
+    _selftest_session_text()
+    print(json.dumps({"checks": 17, "failed": []}))
+
+
+def _selftest_session_text():
+    # the reply that went out on the 2066 Learnings Short (825Tve2Bh74), word for word from the record
+    leaked = ("YOUTUBE REELS POST\nStreak Running: Why I Run Twice Before Every Flight\nDay 2066 of my running streak.\n"
+              "#streakrunning #Insta360 #vibramfivefingers\n\n---\n\nCLOSE-OUT\n\nBrief: generate short-form social content "
+              "(Facebook, Instagram, LinkedIn, Threads, TikTok, YouTube Reels) from the Episode 2066 transcript.\n\n"
+              "Asks added: none beyond the original brief.\n\nOutstanding: none.\n\nWhat was written down: nothing new to the "
+              "brain.\n\nSafe to close? Yes")
+    clean, cut = strip_session_text(leaked)
+    assert cut and clean.endswith("#vibramfivefingers") and "CLOSE-OUT" not in clean and "---" not in clean, clean[-80:]
+    assert split_sections(clean, "Short Form Video")["YouTube Reels Copy"].endswith("#vibramfivefingers")
+    ok = "PODCAST POST\nTitle: Day 2067\nDescription: I ran at midnight.\n\nHashtags: #runstreak"
+    assert strip_session_text(ok) == (ok, False) and session_text_in(ok) is None, "clean copy passes untouched"
+    assert session_text_in("fine\nSafe to close? Yes") == "Safe to close?" and session_text_in("**GOAL CHECK**") == "GOAL CHECK"
+    assert session_text_in("I was not safe to close the gap on the leader") is None, "only a line that starts with the marker counts"
+    recs = {"Long Form Video": {"fields": {"Podcast Copy": "x\n\nCLOSE-OUT\nSafe to close? Yes", "Transcription": "CLOSE-OUT"}},
+            "Short Form Video": {"fields": {"TikTok Copy": "clean"}}, "Learnings From My Diary": None}
+    assert session_leak(recs) == [("Long Form Video", "Podcast Copy", "CLOSE-OUT")], session_leak(recs)
+    # the writer's own call carries the no-hooks settings (driven through ask_claude, not read off the source)
+    global _allowance
+    seen = {}
+    class Fake:
+        def run_guarded(self, job, cmd, **kw):
+            seen["cmd"] = cmd
+            return subprocess.CompletedProcess(cmd, 0, json.dumps({"result": "ok", "usage": {}}), "")
+        def claude_error(self, r): return "err"
+    real = _allowance; _allowance = lambda: Fake()
+    try: ask_claude("s", "u")
+    finally: _allowance = real
+    i = seen["cmd"].index("--settings")
+    assert json.loads(seen["cmd"][i + 1]) == {"disableAllHooks": True}, seen["cmd"]
 
 
 if __name__ == "__main__":

@@ -927,6 +927,9 @@ def share_to_facebook_profile(day, entry, state, clip="summary"):
         return True
     recs = bundle(int(day))
     copy = ((recs.get(spec["record"]) or {}).get("fields", {}).get(spec["field"]) or "").strip()
+    if pc.session_text_in(copy):
+        print("episode %s: Facebook profile share NOT made: session text in %s" % (day, spec["field"]), file=sys.stderr)
+        return False
     # a catch-up looks further down the reels list: 2054, 2055, 2056 and 2195 sat beyond a week of
     # two-posts-a-day and read "not on the page yet" every run (20 Sep 2026)
     depth = facebook_share.SCAN_POSTS_CATCHUP if is_catchup(post) else facebook_share.SCAN_POSTS
@@ -1083,6 +1086,13 @@ def run(dry_run=False, limit=3):
         recs = bundle(day)
         full = recs["Long Form Video"]
         if not full: continue
+        leak = pc.session_leak(recs)
+        if leak:
+            # 24 Sep 2026: a session's close-out block rode on the copy of 2066-2071 onto YouTube and Spotify. The writer now
+            # runs with no hooks and cuts such text; this is the last stop before anything is posted, for every stage.
+            print("episode %d: NOT published: session text in %s (regenerate the copy: platform_copy.py run --day %d)"
+                  % (day, ", ".join("%s %s" % (c, f) for c, f, _ in leak), day), file=sys.stderr)
+            continue
         test = mode() == "test"
         stage = stage_for(entry, yt_ok)
         if full["fields"].get("Record Status") not in PUBLISHABLE:
@@ -1565,6 +1575,18 @@ def _selftest_fill_learnings():
         assert sched == [], "nothing missing: nothing scheduled"
         g["output_link"] = lambda day, kind, ledger=None: None
         assert not fill_learnings(1841, {"youtube_link": "y"}, {}, {}, "done", {}, {1841}, {"_cursor": 2061}, lambda: None), "no rebuilt clip yet: nothing to post"
+        # 24 Sep 2026: copy holding a session's close-out block is never posted, on any path (the 2070 podcast was
+        # being retried hourly with "CLOSE-OUT ... Safe to close? Yes" in its Spotify description)
+        del sched[:]; del extras[:]
+        leaked = {"Long Form Video": {"id": "recF", "fields": {"Record Status": STATUS_PUBLISHED, "Podcast Copy": "Day 2070.\n\n---\n\nCLOSE-OUT\nSafe to close? Yes"}},
+                  "Short Form Video": None, "Learnings From My Diary": None}
+        for status in (STATUS_PUBLISHED, STATUS_APPROVED):
+            leaked["Long Form Video"]["fields"]["Record Status"] = status
+            g["bundle"] = lambda day: leaked
+            g["extras_done"] = lambda e: False
+            with _cl.redirect_stderr(_io.StringIO()) as err, _cl.redirect_stdout(_io.StringIO()): run()
+            assert sched == [] and extras == [], (status, sched, extras)
+            assert "NOT published: session text in Long Form Video Podcast Copy" in err.getvalue(), err.getvalue()
     finally:
         g.update(saved)
 

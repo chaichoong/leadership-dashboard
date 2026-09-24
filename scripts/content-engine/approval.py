@@ -222,11 +222,16 @@ def append_note(rec, line):
     return ((old + "\n" + line).strip())[:2000]
 
 
-def output_gate(day, ledger, state):
+def output_gate(day, ledger, state, recs=None):
     """qa.py's verdict on the files. A hard failure blocks the card, is written to the state for the morning
-    report, and the reasons go on the record's Notes so nobody wonders why the card never came."""
+    report, and the reasons go on the record's Notes so nobody wonders why the card never came.
+    With `recs`, copy holding a session's close-out text blocks the card too (24 Sep 2026, 2066-2071)."""
     import qa
     ok, failures, passed = qa.gate(day, ledger)
+    leak = pc.session_leak(recs) if recs else []
+    if leak:
+        ok = False
+        failures = list(failures) + [("copy holds session text", "%s %s (%s); regenerate: platform_copy.py run --day %d" % (c, f, m, day)) for c, f, m in leak]
     if not ok:
         waiting = qa.is_wait(failures)
         entry = state.setdefault(str(day), {})
@@ -265,7 +270,7 @@ def raise_card(day, dry_run=False):
     if not full: raise SystemExit("no Full record for episode %d" % day)
     ledger = watch.load_ledger(); headline = headline_for(day, ledger)
     state = load_state()
-    proof = output_gate(day, ledger, state)
+    proof = output_gate(day, ledger, state, recs)
     if proof is None: return None
     name, desc, out = build_card(day, full, recs["Learnings From My Diary"], recs["Short Form Video"], headline, pans_for(day, ledger), proof)
     if str(day) in state and state[str(day)].get("task"):
@@ -309,7 +314,7 @@ def refresh_card(day, receipt=None):
         raise SystemExit("episode %d: Kevin sent this card back (%s); the resubmission needs --receipt FILE with one '- <his point> → <what changed>' line per point of his feedback" % (day, e.get("feedback", "")[:120]))
     recs = bundle(day); full = recs["Long Form Video"]
     ledger = watch.load_ledger()
-    proof = output_gate(day, ledger, state)
+    proof = output_gate(day, ledger, state, recs)
     if proof is None: raise SystemExit("episode %d: the output gate blocked the refresh; fix the files first (qa.py check --day %d)" % (day, day))
     name, desc, out = build_card(day, full, recs["Learnings From My Diary"], recs["Short Form Video"], headline_for(day, ledger), pans_for(day, ledger), proof)
     with tempfile.NamedTemporaryFile("w", suffix=".md", delete=False) as fh:
@@ -448,9 +453,31 @@ def selftest():
     assert "- jingle: 7.0 s" in outp2 and outp2.index("- jingle: 7.0 s") < outp2.index(CLOSING), "the proof block sits just before the closing line"
     assert "YouTube content rating: approving this card also tells YouTube" in outp2 and "controversial issues" in outp2 and outp2.index("YouTube content rating") < outp2.index(CLOSING), "the card says what approving declares to YouTube"
     import inspect as _iq; rc = _iq.getsource(raise_card); rf = _iq.getsource(refresh_card)
-    assert "output_gate(day, ledger, state)" in rc and rc.index("output_gate(") < rc.index("build_card(") and "output_gate(day, ledger, state)" in rf, "no card, new or refreshed, without the output gate"
+    assert "output_gate(day, ledger, state, recs)" in rc and rc.index("output_gate(") < rc.index("build_card(") and "output_gate(day, ledger, state, recs)" in rf, "no card, new or refreshed, without the output gate"
     assert "qa_blocked" in _iq.getsource(report)
-    print(json.dumps({"checks": 18, "failed": []}))
+    _selftest_session_text_gate()
+    print(json.dumps({"checks": 19, "failed": []}))
+
+
+def _selftest_session_text_gate():
+    """24 Sep 2026: copy carrying a session's close-out block blocks the card, driven through output_gate itself."""
+    import qa
+    global save_state
+    real_gate, real_save = qa.gate, save_state
+    qa.gate = lambda day, ledger=None, files=None: (True, [], [("jingle", "7.0 s")])
+    save_state = lambda st: None
+    try:
+        st = {}
+        leaked = {"Long Form Video": {"fields": {"Podcast Copy": "Day 2066.\n\n---\n\nCLOSE-OUT\n\nSafe to close? Yes"}}}
+        import contextlib, io
+        with contextlib.redirect_stdout(io.StringIO()) as said: blocked = output_gate(2066, {}, st, leaked)
+        assert blocked is None and "BLOCKED" in said.getvalue(), "leaked copy must block the card, and say so"
+        assert "copy holds session text" in st["2066"]["qa_blocked"]["failures"][0] and "qa_waiting" not in st["2066"], st
+        clean = {"Long Form Video": {"fields": {"Podcast Copy": "Day 2067. I ran at midnight."}}}
+        st2 = {}
+        assert output_gate(2067, {}, st2, clean) is not None and "2067" not in st2, "clean copy passes"
+    finally:
+        qa.gate, save_state = real_gate, real_save
 
 
 if __name__ == "__main__":
