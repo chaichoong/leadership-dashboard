@@ -1841,7 +1841,11 @@ describe('lock-exempt read-only checks', () => {
     // only a visit renews: one night behind a four-hour render and the session
     // lapses, so every morning becomes SIGN-IN NEEDED and the watcher is worse
     // than useless.
-    expect(exempt.sort()).toEqual(['data-invariants', 'drift-scan', 'drive-auth', 'estate-drift', 'estate-status', 'handback-poll', 'job-digest', 'utilita-balance']);
+    // roy-assistant (24 Sep 2026): Roy must not wait behind a 34-minute triage
+    // slot. Its new requests are worked ONLY by its own queue read
+    // (ROY_ASSISTANT_RUN=1), so no other run drafts them, and the runner keeps
+    // its own one-tick-at-a-time lock (tests/roy-assistant.test.js).
+    expect(exempt.sort()).toEqual(['data-invariants', 'drift-scan', 'drive-auth', 'estate-drift', 'estate-status', 'handback-poll', 'job-digest', 'roy-assistant', 'utilita-balance']);
     // content-engine must never be exempt: it renders and writes.
     expect(real['content-engine'].lockExempt).toBeUndefined();
   });

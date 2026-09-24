@@ -275,6 +275,7 @@ def task_fields(req, msg, AF, now, response_rec):
 CARRY_LINE_RE = re.compile(r"\n*\s*(?:-{3,}\s*\n)?\s*\**\s*Carrying this out will involve:.*\Z",
                            re.I | re.S)
 TOLD_RE = re.compile(r"\] " + TOLD_MARK + r" \(([a-z-]+)\)")
+RECORDS_LINE_RE = re.compile(r"^\s*Records:.*$\n?", re.I | re.M)
 
 
 def told_kinds(notes):
@@ -330,6 +331,8 @@ def next_note(task, tier1, AF, handled_mark):
     if done and (re.search(r"\((roy answer|roy work logged)\)", notes)
                  or "FILED, not queued" in notes):
         text = strip_label(output, re.compile(r"^\s*ROY (?:ANSWER|DONE):\s*", re.I))
+        # The Records: line is for submit's check, never for Roy.
+        text = RECORDS_LINE_RE.sub("", text).strip()
         return ("answer", "done", text or "Done.")
     if done and outcome.startswith("Approved"):
         summary = str(f.get(AF["plainSummary"]) or "").strip()
