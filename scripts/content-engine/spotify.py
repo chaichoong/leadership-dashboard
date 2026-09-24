@@ -96,7 +96,8 @@ def build_plan(video_path, title, description, youtube_link, test, thumb=""):
         # frame). It goes on AFTER processing, and Next waits until it is the selected thumbnail: Spotify draws its own frame
         # thumbnails from the video in the page, and an upload made while the video was still uploading lost to frame 1 on
         # 2061, 2068 and 2069 (published with a captioned frame; fixed by hand 24 Sep 2026). No selected upload, no Publish.
-        steps += [{"do": "upload", "selector": THUMB_INPUT, "file": thumb}, {"do": "wait", "for": THUMB_TILE, "ms": 60000}]
+        steps += [{"do": "upload", "selector": THUMB_INPUT, "file": thumb}, {"do": "wait", "for": THUMB_TILE, "ms": 60000},
+                  {"do": "wait", "ms": 6000}]          # the tile shows before the image has finished uploading to Spotify (review)
     steps += [{"do": "wait", "for": NEXT_ENABLED, "ms": UPLOAD_WAIT_MS}]
     if thumb:   # checked last, straight before Next: frames that arrive late can take the selection back (review, 24 Sep 2026)
         steps += [{"do": "wait", "for": THUMB_SELECTED, "ms": 30000}]
