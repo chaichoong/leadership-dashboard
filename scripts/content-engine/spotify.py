@@ -68,7 +68,9 @@ def stage_file(video_path):
 
 
 THUMB_INPUT = "input[type='file'][accept^='image/']#uploadAreaInput"   # the Details step's Thumbnails "Upload" (9 Sep 2026: sets at once, no crop dialog)
-THUMB_SELECTED = "#thumbnail-list button[role='radio'][aria-checked='true'] img[alt='Uploaded thumbnail']"   # frames are <canvas> tiles
+# In the wizard Spotify's own frames are <canvas> tiles and an uploaded image is an <img> tile ("Uploaded thumbnail" on the 24 Sep
+# 2026 pages); the selected tile holding an image is the upload, whatever its alt text says
+THUMB_SELECTED = "#thumbnail-list button[role='radio'][aria-checked='true'] img"
 
 
 def build_plan(video_path, title, description, youtube_link, test, thumb=""):
