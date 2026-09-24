@@ -157,6 +157,19 @@ print(json.dumps({"f": f, "roy": ad.is_roy_request(f[AF["name"]], f[AF["notes"]]
     expect(r.f.fldx4qCw17UfrKpaN).toBe('Today');
     expect(r.f.fldR7apBzSp3oxFxz).toContain('Gmail message m1');
   });
+  it("a message forwarded from one of OUR addresses has no tenant: no Inbound Sender, no twin search", () => {
+    const r = py(`
+from datetime import datetime, timezone
+body = FWD.replace("Stacey Cole <stacey@example.com>", "Kevin Brittain <kevinbrittain@gmail.com>")
+req = ra.parse_request(msg("m1", body))
+f = ra.task_fields(req, msg("m1", body), AF, datetime(2026, 9, 24, 9, 30, tzinfo=timezone.utc), ad.RESPONSE_REC_ID)
+calls = []
+ra.airtable_all = lambda *a, **k: calls.append(a) or []
+print(json.dumps({"sender": f.get(AF["inboundSender"]), "twins": ra.related_open_tasks(req, AF), "calls": len(calls)}))`);
+    expect(r.sender).toBeNull();
+    expect(r.twins).toEqual([]);
+    expect(r.calls).toBe(0);
+  });
   it('a name alone is not a Roy request: the stamp is what roy-assistant.py writes', () => {
     expect(py(`print(json.dumps([ad.is_roy_request("ROY: anything", ""), ad.is_roy_request("ROY: x", "ROY REQUEST typed by hand")]))`))
       .toEqual([false, false]);

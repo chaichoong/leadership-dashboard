@@ -66,7 +66,7 @@ from zoneinfo import ZoneInfo
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
-from agent_email_format import PROPERTY_SENDER  # noqa: E402  the one home of sending identities
+from agent_email_format import PROPERTY_SENDER, RULE_OWN_ADDRESSES  # noqa: E402  the one home of sending identities
 
 LONDON = ZoneInfo("Europe/London")
 
@@ -259,7 +259,9 @@ def task_fields(req, msg, AF, now, response_rec):
         AF["dueDate"]: now.astimezone(LONDON).strftime("%Y-%m-%d"),
     }
     email = (fwd or {}).get("email") or ""
-    if email and email not in (ROY_INBOX, SMS_FROM):
+    # Our own addresses are Kevin or Roy, never the tenant: an Inbound Sender
+    # of one would let the twin check hold every task Kevin ever forwarded.
+    if email and email not in RULE_OWN_ADDRESSES | {SMS_FROM}:
         fields[AF["inboundSender"]] = email
     if sms:
         fields[AF["inboundSourceType"]] = "SMS"
@@ -493,7 +495,7 @@ def related_open_tasks(req, AF):
     if sms and sms.get("conversation"):
         cond = ("OR(FIND('%s', {Inbound Message Content}), FIND('%s', {Description}))"
                 % ((formula_str(sms["conversation"]),) * 2))
-    elif email and email not in (ROY_INBOX, SMS_FROM) and EMAIL_RE.fullmatch(email):
+    elif email and email not in RULE_OWN_ADDRESSES | {SMS_FROM} and EMAIL_RE.fullmatch(email):
         cond = "LOWER({Inbound Sender})='%s'" % formula_str(email)
     else:
         return []
