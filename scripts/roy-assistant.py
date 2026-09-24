@@ -46,6 +46,8 @@ USAGE
   roy-assistant.py tell [--dry-run]          outcome notes to Roy
   roy-assistant.py waiting                   ids of open Roy requests no agent has worked
   roy-assistant.py pending QUEUE_JSON        those of them the queue would hand an agent now
+  roy-assistant.py task-update TASK --task ROYTASK [--complete]   (text on STDIN)
+                                             Roy's reply recorded on one of HIS tasks
   roy-assistant.py tenant-note TENANT --task ROYTASK   (text on STDIN)
                                              one dated line on a tenant's Notes,
                                              the only tenant write the agent has
@@ -119,6 +121,8 @@ FORWARD_START_RE = re.compile(
     r"-{3,}\s*Original Message\s*-{3,})\s*$", re.I | re.M)
 FWD_HEADER_RE = re.compile(r"^\s*(From|Date|Sent|Subject|To|Cc)\s*:\s*(.*)$", re.I)
 REF_RE = re.compile(r"\bRef:\s*(rec[A-Za-z0-9]{14})\b")
+# Where a reply's quoted history starts: his words are the lines above it.
+REPLY_QUOTE_RE = re.compile(r"^(?:On .+wrote:\s*$|>)", re.M)
 SUBJECT_PREFIX_RE = re.compile(r"^\s*(?:(?:re|fwd?|fw)\s*:\s*)+", re.I)
 
 
@@ -155,6 +159,9 @@ def parse_request(msg):
     body = str(msg.get("body") or "").replace("\r\n", "\n")
     m = FORWARD_START_RE.search(body)
     instruction = (body[:m.start()] if m else body).strip()
+    q = REPLY_QUOTE_RE.search(instruction)
+    if q and instruction[:q.start()].strip():
+        instruction = instruction[:q.start()].strip()
     fwd = None
     if m:
         rest = body[m.end():].lstrip("\n").split("\n")
@@ -226,15 +233,22 @@ def request_text(req):
                       fwd.get("body") or ""])
 
 
-def task_fields(req, msg, AF, now, response_rec):
-    """The Airtable fields (by id) for one Roy request."""
+def task_fields(req, msg, AF, now, response_rec, followup=None):
+    """The Airtable fields (by id) for one Roy request. `followup` is the task
+    his Ref points at ({id, name, roy}) when poll could read it."""
     stamp = now.astimezone(LONDON).strftime("%d %b %Y %H:%M")
     fwd = req.get("forwarded")
     sms = req.get("sms")
     topics = kevin_topics(request_text(req))
     lines = [f"Roy's request, sent from {ROY_INBOX} on {stamp}:",
              req["instruction"] or "(No instruction line. Ask Roy what he wants done with this.)"]
-    if req.get("followUp"):
+    if followup and not followup.get("roy"):
+        # A reply to the email that told him a task was his (send-email.py notify).
+        lines += ["", f"Roy is replying about HIS task {followup['id']} \"{followup['name']}\". "
+                  "Record his words on it: python3 scripts/roy-assistant.py task-update "
+                  f"{followup['id']} --task <this task> (add --complete if he says it is done), "
+                  f"text on STDIN. Then ROY DONE: saying what you recorded, Records: {followup['id']}."]
+    elif req.get("followUp"):
         lines += ["", f"This follows up Roy's earlier request {req['followUp']}. Read that task first."]
     if topics:
         lines += ["", "Touches " + ", ".join(topics) + ". Any reply to anyone goes to Kevin's "
@@ -565,7 +579,18 @@ def cmd_poll(args):
             processed[mid] = {"at": now_ms, "task": found[0]["id"]}
             continue
         req = parse_request(msg)
-        fields = task_fields(req, msg, AF, now, ad.RESPONSE_REC_ID)
+        followup = None
+        if req.get("followUp"):
+            try:
+                fr = airtable("GET", f"{TASKS}/{req['followUp']}", params={"returnFieldsByFieldId": "true"})
+                ff = fr.get("fields", {}) or {}
+                followup = {"id": fr["id"], "name": str(ff.get(AF["name"]) or "")[:90],
+                            "roy": ad.is_roy_request(ff.get(AF["name"]), ff.get(AF["notes"]))}
+                if not followup["roy"]:
+                    req["summary"] = ("update on: " + followup["name"])[:70]
+            except (RuntimeError, KeyError) as e:
+                errors.append(f"follow-up {req['followUp']} unreadable: {e}")
+        fields = task_fields(req, msg, AF, now, ad.RESPONSE_REC_ID, followup)
         if args.dry_run:
             created.append({"dryRun": True, "name": fields[AF["name"]]})
             continue
@@ -691,7 +716,8 @@ def cmd_waiting(args):
     ad = mod("ad")
     AF = ad.AF
     formula = ("AND(LEFT({Task Name}, 4)='ROY:', FIND('%s', {Notes}), "
-               "OR({Status}='Today', {Status}='Overdue'))" % formula_str(ad.ROY_REQUEST_MARK))
+               "OR({Status}='Today', {Status}='Overdue'), LEN({Approval Outcome}&'')=0)"
+               % formula_str(ad.ROY_REQUEST_MARK))
     rows = airtable_all(TASKS, formula, fields=[AF["name"], AF["notes"]])
     ids = [r["id"] for r in rows
            if ad.is_roy_request((r.get("fields") or {}).get(AF["name"]),
@@ -741,6 +767,73 @@ def cmd_tenant_note(args):
     return 0
 
 
+ROY_TASK_NOTE_TAG = "Roy Lavin via his assistant, "
+
+
+def roy_task_scope(fields, AF, roy_rec, roy_email):
+    """Why a task is Roy's (Team Member, Assignee or a repair ticket), or ''.
+    The same scope the Property Manager Worker lets Roy write (isRoyScope)."""
+    if roy_rec in (fields.get(AF["teamMember"]) or []):
+        return "team member"
+    if ((fields.get(AF["assignee"]) or {}).get("email") or "").lower() == roy_email:
+        return "assignee"
+    if fields.get(AF["maintenanceTicket"]):
+        return "repair ticket"
+    return ""
+
+
+def cmd_task_update(args):
+    """Record Roy's reply on one of HIS tasks: a dated note in his words and,
+    with --complete, Status Completed. The only write the assistant has on a
+    task that is not its own, and it touches nothing else."""
+    ad = mod("ad")
+    AF = ad.AF
+    text = sys.stdin.read().strip()
+    if not text:
+        sys.exit("REFUSED: empty update")
+    if len(text) > 2000:
+        sys.exit("REFUSED: an update is at most 2,000 characters")
+    for rid in (args.target, args.task):
+        if not re.fullmatch(r"rec[A-Za-z0-9]{14}", rid or ""):
+            sys.exit(f"REFUSED: {rid!r} is not a record id")
+    if args.target == args.task:
+        sys.exit("REFUSED: the request cannot update itself")
+    req = airtable("GET", f"{TASKS}/{args.task}", params={"returnFieldsByFieldId": "true"})
+    rf = req.get("fields", {}) or {}
+    if not ad.is_roy_request(rf.get(AF["name"]), rf.get(AF["notes"])):
+        sys.exit(f"REFUSED: {args.task} is not a request Roy sent through info@")
+    # A GET by id ignores the table, so prove the target is a TASK by listing Tasks.
+    rows = airtable_all(TASKS, "RECORD_ID()='%s'" % args.target,
+                        fields=[AF[k] for k in ("name", "description", "notes", "status",
+                                                "teamMember", "assignee", "maintenanceTicket")])
+    if len(rows) != 1:
+        sys.exit(f"REFUSED: {args.target} is not in the Tasks table")
+    tf = rows[0].get("fields", {}) or {}
+    name = str(tf.get(AF["name"]) or "")
+    if name.startswith(ad.ROY_REQUEST_PREFIX):
+        sys.exit("REFUSED: that is one of Roy's requests, not one of his tasks")
+    if not roy_task_scope(tf, AF, ad.ROY_REC_ID, ad.ROY_EMAIL):
+        sys.exit(f"REFUSED: {args.target} is not Roy's task (not his as team member, "
+                 "assignee or repair ticket)")
+    status = tf.get(AF["status"])
+    status = status.get("name") if isinstance(status, dict) else (status or "")
+    if status in ("Approval", "Cancelled"):
+        sys.exit(f"REFUSED: {args.target} is {status}; that is Kevin's to move")
+    hit = ad.tier_match(ad.TIER1_PATTERNS, name, tf.get(AF["description"]) or "", text)
+    if hit:
+        sys.exit(f"REFUSED: matches tier-1 ({hit!r}); it goes to Kevin")
+    stamp = now_utc().astimezone(LONDON).strftime("%d %b %Y %H:%M")
+    fields = {AF["notes"]: (str(tf.get(AF["notes"]) or "").rstrip() + "\n\n"
+                            + f"[{stamp} {ROY_TASK_NOTE_TAG}{args.task}] {text}").strip()[-90000:]}
+    if args.complete and status != "Completed":
+        fields[AF["status"]] = "Completed"
+        fields[AF["completion"]] = now_utc().strftime("%Y-%m-%dT%H:%M:%S.000Z")
+    airtable("PATCH", f"{TASKS}/{args.target}", {"fields": fields})
+    print(json.dumps({"task": args.target, "noted": True,
+                      "completed": AF["status"] in fields, "request": args.task}))
+    return 0
+
+
 def cmd_selftest(args):
     cases = []
     base = {"labelIds": ["SENT", "INBOX"], "internalDate": "2000",
@@ -782,6 +875,11 @@ def main():
     q = sub.add_parser("pending")
     q.add_argument("queue")
     q.set_defaults(func=cmd_pending)
+    u = sub.add_parser("task-update")
+    u.add_argument("target")
+    u.add_argument("--task", required=True)
+    u.add_argument("--complete", action="store_true")
+    u.set_defaults(func=cmd_task_update)
     n = sub.add_parser("tenant-note")
     n.add_argument("tenant")
     n.add_argument("--task", required=True)

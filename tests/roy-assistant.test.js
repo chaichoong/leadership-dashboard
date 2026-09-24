@@ -541,3 +541,100 @@ exit 0
     expect(existsSync(join(dir, 'logs', 'run.lock'))).toBe(false);
   });
 });
+
+// Roy's task emails (Kevin, 24 Sep 2026): they went to his personal Gmail and
+// promised "reply and it will be logged"; nothing read the replies. Now they
+// go to info@ as assistant notes, and a reply updates the task.
+describe("Roy's task emails reach info@, and his replies update the task", () => {
+  const SEND = resolve(ROOT, 'scripts/send-email.py');
+  const notify = (to) => py(`
+import argparse, io, contextlib, tempfile, os
+spec2 = importlib.util.spec_from_file_location("se2", ${JSON.stringify(SEND)})
+se = importlib.util.module_from_spec(spec2); spec2.loader.exec_module(se)
+sent = []
+se.get_task = lambda t: {"id": t, "fields": {se.AF["name"]: "MAINTENANCE: boiler - 5 Dalham Place",
+                                             se.AF["description"]: "No heating", se.AF["notes"]: ""}}
+se.worker_call = lambda url, payload=None: sent.append(payload) or {"id": "gm1"}
+se.already_sent = lambda t: None
+se.ledger_append = lambda row: None
+buf = io.StringIO()
+with contextlib.redirect_stdout(buf):
+    se.cmd_notify(argparse.Namespace(task="recBOILER00000001", to=${JSON.stringify(to)}, reason="", dry_run=False))
+print(json.dumps(sent[0]))`);
+
+  it("a task email to Roy goes to info@ as one of his assistant's notes, with the task's Ref", () => {
+    const m = notify('roy.lavin1978@gmail.com');
+    expect(m.to).toBe('info@agilelets.co.uk');
+    expect(m.from).toBe('info@agilelets.co.uk');
+    expect(m.subject).toBe('Assistant: a task is yours - MAINTENANCE: boiler - 5 Dalham Place');
+    expect(m.text).toContain('Ref: recBOILER00000001');
+    expect(m.text).toContain('Your assistant records it on the task');
+  });
+  it('control: another team member is still emailed at their own address', () => {
+    const m = notify('micaa.work@gmail.com');
+    expect(m.to).toBe('micaa.work@gmail.com');
+    expect(m.subject).toMatch(/^Operations Director: a task is now yours/);
+  });
+  it("his reply's quoted history is not his instruction", () => {
+    const r = py(`print(json.dumps(ra.parse_request(msg("m9", "Done, plumber fixed it Tuesday\\n\\nOn Thu, 24 Sept 2026 at 17:30 Agile Lets <info@agilelets.co.uk> wrote:\\n> Roy,\\n> Ref: recBOILER00000001", subject="Re: Assistant: a task is yours - boiler"))))`);
+    expect(r.instruction).toBe('Done, plumber fixed it Tuesday');
+    expect(r.followUp).toBe('recBOILER00000001');
+  });
+
+  const U = `
+import argparse, io, contextlib
+STAMP = "[24 Sep 2026 09:30 — roy-assistant] ROY REQUEST from info@agilelets.co.uk (Gmail message m1, thread t1)."
+TASKS = {
+  "recROYREQ00000001": {AF["name"]: "ROY: update on: boiler", AF["notes"]: STAMP, AF["status"]: "Today"},
+  "recBOILER00000001": {AF["name"]: "MAINTENANCE: boiler - 5 Dalham Place", AF["status"]: "Today", AF["teamMember"]: [ad.ROY_REC_ID], AF["notes"]: "old"},
+  "recNOTROYS0000001": {AF["name"]: "Renew insurance", AF["status"]: "Today", AF["teamMember"]: [ad.RESPONSE_REC_ID]},
+  "recWAITING0000001": {AF["name"]: "MAINTENANCE: roof", AF["status"]: "Approval", AF["maintenanceTicket"]: True},
+  "recOTHERROY000001": {AF["name"]: "ROY: another request", AF["notes"]: STAMP, AF["status"]: "Today", AF["teamMember"]: [ad.ROY_REC_ID]},
+}
+patches = []
+def fake_airtable(method, path, payload=None, params=None):
+    rid = path.split("/")[-1]
+    if method == "GET": return {"id": rid, "fields": TASKS.get(rid, {})}
+    patches.append((rid, payload["fields"])); return {"id": rid}
+ra.airtable = fake_airtable
+ra.airtable_all = lambda table, formula, fields=None: [{"id": r, "fields": f} for r, f in TASKS.items() if "'%s'" % r in formula]
+def update(target, text="Done, fixed Tuesday", complete=True):
+    sys.stdin = io.StringIO(text)
+    try:
+        with contextlib.redirect_stdout(io.StringIO()):
+            ra.cmd_task_update(argparse.Namespace(target=target, task="recROYREQ00000001", complete=complete))
+        return "ok"
+    except SystemExit as e:
+        return str(e)
+`;
+  it('records his words and completes HIS task, naming the request (so ROY DONE verifies)', () => {
+    const r = py(`${U}
+res = update("recBOILER00000001")
+f = patches[0][1]
+print(json.dumps({"res": res, "status": f.get(AF["status"]), "done": bool(f.get(AF["completion"])), "note": f[AF["notes"]]}))`);
+    expect(r.res).toBe('ok');
+    expect(r.status).toBe('Completed');
+    expect(r.done).toBe(true);
+    expect(r.note).toMatch(/Roy Lavin via his assistant, recROYREQ00000001\] Done, fixed Tuesday$/);
+  });
+  it("refuses anyone else's task, a card waiting for Kevin, another request, and tier-1 words", () => {
+    const r = py(`${U}
+print(json.dumps([update("recNOTROYS0000001"), update("recWAITING0000001"), update("recOTHERROY000001"),
+                  update("recBOILER00000001", "tell the bailiff he can come"), len(patches)]))`);
+    expect(r[0]).toMatch(/not Roy's task/);
+    expect(r[1]).toMatch(/Approval; that is Kevin's/);
+    expect(r[2]).toMatch(/one of Roy's requests/);
+    expect(r[3]).toMatch(/tier-1/);
+    expect(r[4]).toBe(0);
+  });
+  it('an approved Roy card waiting to be sent does not wake the heavy half of a tick', () => {
+    const r = py(`
+seen = []
+ra.airtable_all = lambda table, formula, fields=None: seen.append(formula) or []
+import io, contextlib
+with contextlib.redirect_stdout(io.StringIO()):
+    ra.cmd_waiting(None)
+print(json.dumps(seen[0]))`);
+    expect(r).toContain("LEN({Approval Outcome}&'')=0");
+  });
+});

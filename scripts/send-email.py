@@ -607,6 +607,13 @@ def cmd_notify(args):
                  "private legal and financial matter is never emailed onward, "
                  "not even to the team.")
 
+    # ROY WORKS IN info@ (Kevin, 24 Sep 2026). His task emails went to his
+    # personal Gmail and promised "reply and it will be logged"; nothing read
+    # the replies, and 46 of his tasks sat untouched. Now they go to info@ as
+    # one of his assistant's notes, and a reply to one is a request that
+    # roy-assistant.py turns into an update on this task (task-update).
+    roy_addr = next((e for e, h in humans.items() if h.get("name") == "Roy Lavin"), "")
+    to_roy = bool(roy_addr) and to == roy_addr
     # The point of the email is that Roy can ACT without the app. So it carries
     # the work, not a link to it: he has no login to follow.
     parts = [f"{who['name']},", "",
@@ -619,13 +626,21 @@ def cmd_notify(args):
         parts += ["", "WHAT WE FOUND", output]
     if args.reason:
         parts += ["", f"WHY IT IS YOURS: {args.reason}"]
-    parts += ["", "Reply to this email with what you have done and it will be "
-              "logged against the task.", "", "Kevin"]
+    if to_roy:
+        parts += ["", "Reply to this email with what you have done, or \"done\" when it "
+                  "is finished. Your assistant records it on the task.", "",
+                  f"Ref: {args.task}", "Kevin"]
+        deliver = {"to": ROY_INBOX, "from": ROY_INBOX,
+                   "subject": f"{ROY_NOTE_PREFIX} a task is yours - {name}"[:150]}
+    else:
+        parts += ["", "Reply to this email with what you have done and it will be "
+                  "logged against the task.", "", "Kevin"]
+        deliver = {"to": to, "subject": f"{TEAM_NOTIFY_SUBJECT}: {name}"}
     body = "\n".join(parts)
 
     if args.dry_run:
         print(json.dumps({"dryRun": True, "to": to, "name": who["name"],
-                          "subject": f"{TEAM_NOTIFY_SUBJECT}: {name}",
+                          "deliveredTo": deliver["to"], "subject": deliver["subject"],
                           "bodyChars": len(body), "tier1": False}, indent=2))
         return
 
@@ -637,15 +652,13 @@ def cmd_notify(args):
         return
 
     ledger_append({"task": args.task, "ts": now_iso(), "event": "intent",
-                   "to": [to], "cc": [], "subject": TEAM_NOTIFY_SUBJECT})
-    result = worker_call(SEND_URL, {"to": to,
-                                    "subject": f"{TEAM_NOTIFY_SUBJECT}: {name}",
-                                    "text": body})
+                   "to": [deliver["to"]], "cc": [], "subject": deliver["subject"]})
+    result = worker_call(SEND_URL, {**deliver, "text": body})
     ledger_append({"task": args.task, "ts": now_iso(), "event": "sent",
-                   "from": "(default)", "to": [to], "cc": [],
-                   "subject": TEAM_NOTIFY_SUBJECT, "taskName": name,
+                   "from": deliver.get("from", "(default)"), "to": [deliver["to"]], "cc": [],
+                   "subject": deliver["subject"], "taskName": name,
                    "messageId": result.get("id")})
-    print(json.dumps({"notified": args.task, "to": to, "name": who["name"],
+    print(json.dumps({"notified": args.task, "to": deliver["to"], "name": who["name"],
                       "messageId": result.get("id")}))
 
 
