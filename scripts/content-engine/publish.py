@@ -985,7 +985,10 @@ def cursor(state):
 
 
 def day_was_recorded(day, ledger):
-    return any(v.get("episode") == day for v in ledger.values())
+    """A clip of the day exists, rendered (its episode) or still waiting (its ledger day). 24 Sep 2026: 2071 was set back to
+    new for a re-render, lost its episode number, and the order check read it, and every unrendered day after it up to
+    2193, as never recorded and stepped over them all. A day with footage is held, never skipped."""
+    return any(v.get("episode") == day or (v.get("day") == day and v.get("status") != "broll") for v in ledger.values())   # B-roll alone is not an episode
 
 
 def next_publishable(state, ledger, approved):
@@ -1603,6 +1606,11 @@ def _selftest_fill_learnings():
 
 
 def selftest():
+    led_r = {"p1": {"day": 2071, "status": "new"}, "x": {"episode": 2196, "day": 2196, "status": "rendered"}}
+    st_r = {"_cursor": 2070}
+    assert next_publishable(st_r, led_r, {2196}) == (None, "day 2071 is not approved yet, so 2196 wait behind it") and st_r["_cursor"] == 2070, \
+        "a day waiting to re-render is held, never stepped over (24 Sep 2026)"
+    assert not day_was_recorded(2080, {"b": {"day": 2080, "status": "broll"}}), "a day of B-roll only is still stepped over"
     assert slot_iso(dt.date(2026, 9, 4), (6, 0)) == "2026-09-04T05:00:00Z", "BST: 06:00 London is 05:00 UTC"
     assert slot_iso(dt.date(2026, 12, 4), (6, 0)) == "2026-12-04T06:00:00Z", "GMT: the same wall clock"
     t, b = youtube_parts("SEO Title: Running Off-Road at Pace (Day 2195)\n\nDescription: Day 2195 body.\n\nHashtags: #a #b", 2195)

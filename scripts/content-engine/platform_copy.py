@@ -238,8 +238,10 @@ def check_km(t, cum, transcript=""):
         except ValueError: return m.group(0)
         if abs(v - MISSION_KM) < 1 or abs(v - cum) < 1 or abs(v - left) < 1: return m.group(0)
         if bare in transcript.replace(",", "") or raw in transcript: return m.group(0)
-        tail = re.split(r"[.!?\n]", t[m.end():m.end() + 60], 1)[0].lower()            # this sentence only: the next one may say "to go"
-        head = re.split(r"[.!?\n]", t[max(0, m.start() - 60):m.start()][::-1], 1)[0][::-1].lower()
+        # this clause only: the next sentence OR the next clause may say "to go" ("Roughly 20,690km down, 24,098km left" made
+        # the first figure the km left, 24 Sep 2026: "24,098km down, 24,098km left" in 2069's Instagram draft)
+        tail = re.split(r"[.,;!?\n]", t[m.end():m.end() + 60], 1)[0].lower()
+        head = re.split(r"[.,;!?\n]", t[max(0, m.start() - 60):m.start()][::-1], 1)[0][::-1].lower()
         want = left if re.search(r"to go|left|remain|still", tail + " " + head) else cum
         issues.append("distance %skm is not the day's Strava figure; corrected to %s" % (raw, fmt_km(want, raw)))
         return fmt_km(want, raw)
@@ -480,6 +482,8 @@ def selftest():
     f4, i4 = rules_check({"LinkedIn Copy": "Day 2054. 20,540km in. 19,535km still to go to 40,075km. I ran 8km today."}, "I ran 8km today", km=15899.70)
     assert f4["LinkedIn Copy"] == "Day 2054. 15,900km in. 24,175km still to go to 40,075km. I ran 8km today.", f4
     assert len(i4) == 2 and "20,540km" in i4[0] and "19,535km" in i4[1], i4
+    f6, _ = rules_check({"Instagram Reels Copy": "Day 2069 of the streak. Roughly 20,690km down, 19,385km left toward the 40,075km lap."}, "", km=15977.0)
+    assert "Roughly 15,977km down, 24,098km left" in f6["Instagram Reels Copy"], f6
     f5, i5 = rules_check({"Facebook Post Copy": "15,899.70km logged of 40,075km"}, "", km=15899.70); assert not i5 and f5["Facebook Post Copy"].startswith("15,899.70km"), "the right figure passes untouched"
     assert rules_check({"X": "20,540km"}, "", km=None)[1] == [], "no Strava figure known: nothing to correct against (the prompt then says do not state a distance)"
     assert cm_prompts.KEVIN_SYSTEM.startswith("You are Kevin Brittain.") and "#Insta360" in cm_prompts.KEVIN_SYSTEM
