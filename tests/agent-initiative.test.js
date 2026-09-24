@@ -91,7 +91,7 @@ describe('tool policy is shared, not copied', () => {
 // ─────────────────────────────────────────────────────────────────────────────
 describe('robot-only deny list (scripts/agent-settings.json)', () => {
   const SETTINGS = 'scripts/agent-settings.json';
-  const RUNNERS_ALL = [...RUNNERS, 'scripts/signin-pickup-run.sh'];
+  const RUNNERS_ALL = [...RUNNERS, 'scripts/signin-pickup-run.sh', 'scripts/roy-assistant-run.sh'];
   const deny = () => JSON.parse(read(SETTINGS)).permissions.deny;
   const editRules = () => deny().filter((r) => r.startsWith('Edit('))
     .map((r) => r.slice(5, -1));
@@ -220,6 +220,7 @@ describe('robot working folders (--add-dir)', () => {
     },
     'scripts/handback-poll-run.sh': { RUNDIR: new RegExp(`^${L}/agent-dispatch/\\d{8}-\\d{6}$`) },
     'scripts/signin-pickup-run.sh': { RUNDIR: new RegExp(`^${L}/agent-dispatch/\\d{8}-\\d{6}-signin$`) },
+    'scripts/roy-assistant-run.sh': { RUNDIR: new RegExp(`^${L}/agent-dispatch/\\d{8}-\\d{6}-roy$`) },
   };
   const RUNNERS_ALL = Object.keys(WANT);
   const callOf = (src) => src.match(/"\$CLAUDE" -p [\s\S]*?--allowedTools /g) || [];

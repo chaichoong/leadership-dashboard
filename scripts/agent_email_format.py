@@ -485,7 +485,53 @@ def validate_submission(output):
             "%s Sign off as `Kevin Brittain`, or `Kevin Brittain` on its own "
             "line above `on behalf of <company>` when writing for an entity. "
             "No address, no phone number, no contact block." % bad)
+    bad = sms_reply_problem(parsed)
+    if bad:
+        raise EmailFormatError(bad)
     return parsed
+
+
+# ─── A REPLY TO A TENANT'S TEXT (Roy's assistant, 24 Sep 2026) ──────────
+#
+# Tenant texts arrive at info@ as emails from the SMS bridge, and a "Re:"
+# message in info@'s SENT folder that carries the conversation marker is
+# texted back to the tenant: the words ABOVE the first quoted line
+# (workers/sms-email-bridge/worker.js, parseEmailReply). So an approved email
+# TO info@agilelets.co.uk is how an agent answers a text. Any other email to
+# info@ would land in our own inbox and read on the card as if it had reached
+# someone, so it is refused here, before Kevin ever sees it.
+SMS_BRIDGE_MARK_RE = re.compile(r"(?:GHL Conversation:|SMS_BRIDGE_ID:)\s*[A-Za-z0-9_-]{6,}")
+# Kept identical to QUOTE_START_RE in the bridge (tests/roy-assistant.test.js).
+SMS_QUOTE_START_RE = re.compile(r"^(On .+wrote:|-{2,}\s*Original Message|From: .+|>)", re.M)
+SMS_MAX_CHARS = 1000
+
+
+def sms_reply_problem(parsed):
+    """Why an email addressed to info@ would not reach the tenant as a text, or ""."""
+    to = [a.lower() for a in parsed.get("to") or []]
+    if PROPERTY_SENDER not in to:
+        return ""
+    why = ("an email to %s is only ever a reply to a tenant's text, which the SMS "
+           "bridge texts back: " % PROPERTY_SENDER)
+    if to != [PROPERTY_SENDER] or parsed.get("cc"):
+        return why + "it must go to that address alone, with no CC"
+    if (parsed.get("from") or "").lower() != PROPERTY_SENDER:
+        return why + "it must go FROM %s, the only Sent folder the bridge reads" % PROPERTY_SENDER
+    subject = parsed.get("subject") or ""
+    if not re.match(r"^re:", subject, re.I) or "[sms]" not in subject.lower():
+        return why + "the subject must be `Re: ` plus the text email's own subject, [SMS] included"
+    if parsed.get("attach"):
+        return why + "a text cannot carry an attachment"
+    body = parsed.get("body") or ""
+    if not SMS_BRIDGE_MARK_RE.search(body):
+        return why + "the body must quote the text email's SMS_BRIDGE_ID line, or the bridge cannot tell who to text"
+    quote = SMS_QUOTE_START_RE.search(body)
+    text = body[:quote.start()].strip() if quote else ""
+    if not text:
+        return why + "the words for the tenant go ABOVE a quoted line starting `> `; nothing is above it"
+    if len(text) > SMS_MAX_CHARS:
+        return why + "a text is at most %d characters; this one is %d" % (SMS_MAX_CHARS, len(text))
+    return ""
 
 
 # ─── THE OTHER TWO SHAPES: POST AND SIGN ─────────────────────────────

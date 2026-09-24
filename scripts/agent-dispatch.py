@@ -1723,6 +1723,83 @@ CLOSE_HANDLED_RE = re.compile(
     r"[^\n]*?\b(rec[A-Za-z0-9]{14})\b", re.I)
 PASS_TO_ROY_RE = re.compile(r"^\s*PASS TO ROY:", re.I)
 
+# ─── ROY'S ASSISTANT (Kevin, 24 Sep 2026) ───────────────────────────────
+# Roy forwards a message from info@agilelets.co.uk to itself with one line
+# saying what he wants. scripts/roy-assistant.py reads it out of info@'s Sent
+# folder, makes one "ROY:" task for Inbox Response and stamps ROY_REQUEST_MARK
+# on its Notes. BOTH are required: the prefix alone is a name anyone can type,
+# the stamp is written only after the message was read from the Sent folder.
+# A Roy request is work FOR Roy, so it never goes back to him through the Roy
+# lane, and every email to a tenant, contractor or agent is still a card in
+# Kevin's one queue. Two shapes are Level A because nobody outside sees them:
+# an answer to Roy (ROY ANSWER:) and a record of work logged for him (ROY
+# DONE:), each emailed by roy-assistant.py to info@ only.
+ROY_REQUEST_PREFIX = "ROY:"
+ROY_REQUEST_MARK = "ROY REQUEST"
+ROY_REQUEST_STAMP_RE = re.compile(r"— roy-assistant\] " + ROY_REQUEST_MARK + r"\b")
+ROY_ANSWER_RE = re.compile(r"^\s*ROY ANSWER:", re.I)
+ROY_DONE_RE = re.compile(r"^\s*ROY DONE:", re.I)
+# The one Tenants field the assistant may write (roy-assistant.py tenant-note),
+# and the stamp each line carries so ROY DONE can prove the line is its own.
+TENANT_NOTES_FIELD = "fldfwxEf7I3XQDVtR"
+ROY_TENANT_NOTE_TAG = "Roy's assistant, "
+
+
+def is_roy_request(name, notes):
+    """True for a task roy-assistant.py made from a message Roy sent."""
+    return (str(name or "").startswith(ROY_REQUEST_PREFIX)
+            and bool(ROY_REQUEST_STAMP_RE.search(str(notes or ""))))
+
+
+# When Roy forwards a tenant's message, the same message has usually reached
+# the board already through Inbox Triage (info@ mail is copied to the triage
+# inbox). roy-assistant.py marks that open task with this line, and the queue
+# holds it while Roy's request is open: one tenant, one card.
+ROY_HANDLING_MARK = "ROY IS HANDLING THIS"
+ROY_HANDLING_RE = re.compile(r"— roy-assistant\] " + ROY_HANDLING_MARK + r": (rec[A-Za-z0-9]{14})\b")
+
+
+def roy_handling_lead(notes):
+    """The Roy request holding this task (the newest mark), or ''."""
+    found = ROY_HANDLING_RE.findall(str(notes or ""))
+    return found[-1] if found else ""
+
+
+def roy_done_problem(body, task_rec, fetch):
+    """Why a ROY DONE: output cannot be trusted without a card, or ''.
+
+    Every record it cites must be work done FOR this request: a task created
+    after the request, a task whose Notes name the request, or a tenant whose
+    Notes carry a line roy-assistant.py tenant-note wrote for it. A GET by
+    record id ignores the table, so the record's own fields say which it is.
+    """
+    task_id = task_rec.get("id", "")
+    created = task_rec.get("createdTime") or ""
+    cited = [r for r in dict.fromkeys(re.findall(r"\brec[A-Za-z0-9]{14}\b", body or ""))
+             if r != task_id]
+    if not cited:
+        return "ROY DONE names no record it created or changed"
+    for rid in cited:
+        try:
+            rec = fetch(rid) or {}
+        except Exception as exc:                          # noqa: BLE001
+            return f"cited record {rid} could not be read ({str(exc)[:80]})"
+        f = rec.get("fields", {}) or {}
+        if not f:
+            return f"cited record {rid} does not exist"
+        if AF["name"] in f:
+            if created and (rec.get("createdTime") or "") >= created:
+                continue
+            if task_id and task_id in str(f.get(AF["notes"]) or ""):
+                continue
+            return (f"cited task {rid} is older than this request and its Notes do not "
+                    f"name {task_id}, so it is not work done for Roy")
+        if f"{ROY_TENANT_NOTE_TAG}{task_id}]" in str(f.get(TENANT_NOTES_FIELD) or ""):
+            continue
+        return (f"cited record {rid} is neither a task made for this request nor a "
+                "tenant note roy-assistant.py wrote for it")
+    return ""
+
 # No-card caps per statutory certificate booked through Roy (Kevin's tranche 3
 # interview, 17 Sep 2026). A named exception to the £100 money rule for these
 # four certificates only; the brain file Knowledge/property-compliance-
@@ -2073,6 +2150,24 @@ def decision_level(output, task_type, task_rec, fetch=None, agent_banner=None,
                 return act("quote request", "send-rule",
                            f"{certificate_type(name)} quote request, coverage checked, from "
                            "info@ signed Roy Lavin (Kevin, 17 Sep 2026)", rule="quote-request")
+
+    roy_answer, roy_done = ROY_ANSWER_RE.match(body), ROY_DONE_RE.match(body)
+    if roy_answer or roy_done:
+        cat = "roy answer" if roy_answer else "roy work logged"
+        if not is_roy_request(name, notes):
+            return card(cat, "only a request Roy sent from info@ (a ROY: task carrying the "
+                             "roy-assistant stamp) is answered to Roy without a card")
+        if task_type == "Correspondence":
+            return card(cat, "an answer to Roy is not an email to anyone else: submit it "
+                             "as Research or Admin")
+        if roy_done:
+            problem = roy_done_problem(body, task_rec, fetch)
+            if problem:
+                return card(cat, problem)
+            return act(cat, "close", "work logged for Roy's request, every cited record "
+                                     "verified; roy-assistant.py emails the receipt to info@ only")
+        return act(cat, "close", "an answer for Roy's own request; roy-assistant.py emails it "
+                                 "to info@agilelets.co.uk only, nobody outside sees it")
 
     if PASS_TO_ROY_RE.match(out):
         why = roy_match(name, desc, notes)
@@ -2584,6 +2679,8 @@ def build_queue(args=None):
         print(f"WARNING: standing holds unreadable: {standing_error}", file=sys.stderr)
     standing_held = []
     open_leads = open_lead_ids({held_lead_id(t) for t in agent_linked if held_lead_id(t)})
+    open_roy_leads = open_lead_ids({roy_handling_lead(t["notes"]) for t in agent_linked
+                                    if roy_handling_lead(t["notes"])})
 
     for t in agent_linked:
         # A STANDING HOLD WINS FIRST (Kevin, 24 Sep 2026). He ruled that nothing
@@ -2597,6 +2694,15 @@ def build_queue(args=None):
         if hold:
             standing_held.append({**t, "holdId": hold["id"],
                                   "holdTitle": hold.get("title", "")})
+            continue
+        # ROY IS HANDLING THIS (24 Sep 2026): Roy forwarded this same matter to
+        # his assistant. While his request is open this twin waits, listed
+        # under heldUnderLead with the request as its lead, so Kevin never gets
+        # two cards for one tenant. An approval Kevin already gave still runs.
+        roy_lead = roy_handling_lead(t["notes"])
+        if roy_lead and roy_lead != t["id"] and roy_lead in open_roy_leads \
+                and t["outcome"] not in APPROVED:
+            held_under.append({**t, "groupLead": roy_lead, "heldFor": "Roy's request"})
             continue
         # Tier 1 no longer drops out of the worklist. It is MARKED and worked,
         # and the mark rides all the way to the Slack post. Removing this line
@@ -2660,8 +2766,16 @@ def build_queue(args=None):
         # row is not Built/Live (Kevin's pause lever) the mark is dropped and
         # the task falls through to the Roy lane exactly as before this
         # build — the same fallback shape as the creditor tier-2 park.
+        # ROY'S OWN REQUESTS (24 Sep 2026) stay with the agent he asked. A
+        # "log a repair for the boiler" request matches the Roy lane's repair
+        # words, and diverting it would hand Roy's request straight back to
+        # him; the property steal would move it to an agent that has no
+        # answer-to-Roy shapes. Tier 1 and the creditor lane still win.
+        roy_request = is_roy_request(t["name"], t["notes"])
         t["property"] = ("" if (t["tier1"] or t["creditor"] or not property_ok) else
                          property_match(t["name"], t["description"], t["notes"]))
+        if roy_request:
+            t["property"] = ""
         # A CEO-lane task the fresh lane cannot place (neither inbound nor
         # COMPLIANCE-named) keeps its old home — the Roy lane — rather than
         # being taken from Roy and routed nowhere (review finding, 2 Sep 2026).
@@ -2673,6 +2787,8 @@ def build_queue(args=None):
         hit_roy = ("" if (t["tier1"] or t["creditor"] or t["outcome"] in APPROVED
                           or t["property"])
                    else roy_match(t["name"], t["description"], t["notes"]))
+        if roy_request:
+            hit_roy = ""
         if hit_roy:
             roy_lane.append({**t, "royReason": hit_roy})
             continue

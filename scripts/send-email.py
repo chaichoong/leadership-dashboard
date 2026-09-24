@@ -90,6 +90,7 @@ from agent_email_format import (  # noqa: E402
     parse_output as parse_email_output,
     BUSINESS_SENDER,
     BUSINESS_BRAND_RE,
+    PROPERTY_SENDER,
     rule_send_problem,
 )
 
@@ -565,12 +566,23 @@ def team_roster():
     Imported rather than copied: a second list of who may be emailed is how an
     address gets added in one file and trusted in the other.
     """
-    spec = importlib.util.spec_from_file_location(
-        "ad", os.path.join(os.path.dirname(os.path.abspath(__file__)),
-                           "agent-dispatch.py"))
-    ad = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(ad)
+    ad = dispatch_module()
     return ad.HUMANS, ad.TIER1_PATTERNS, ad.tier_match
+
+
+_DISPATCH = {}
+
+
+def dispatch_module():
+    """agent-dispatch.py, loaded once: the roster and the Roy-request rule live there."""
+    if "ad" not in _DISPATCH:
+        spec = importlib.util.spec_from_file_location(
+            "ad", os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                               "agent-dispatch.py"))
+        ad = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(ad)
+        _DISPATCH["ad"] = ad
+    return _DISPATCH["ad"]
 
 
 def cmd_notify(args):
@@ -635,6 +647,104 @@ def cmd_notify(args):
                    "messageId": result.get("id")})
     print(json.dumps({"notified": args.task, "to": to, "name": who["name"],
                       "messageId": result.get("id")}))
+
+
+# ─── NOTES TO ROY ABOUT HIS OWN REQUESTS (Roy's assistant, 24 Sep 2026) ──
+#
+# Roy forwards a message from info@agilelets.co.uk to itself and
+# scripts/roy-assistant.py tells him, by email to that same inbox, what became
+# of it: got it, the answer, with Kevin, sent, not sent. Those words are built
+# by roy-assistant.py, so this path takes a body — and is safe to, because it
+# can only ever reach OUR OWN mailboxes:
+#
+#   * the recipient is info@agilelets.co.uk, or Roy's roster address for the
+#     one "forward from info@ please" nudge — nothing else, whatever is asked;
+#   * the task must be a Roy request (ROY: name + the roy-assistant stamp);
+#   * tier-1 content never travels: a tier-1 request gets the fixed private
+#     line and nothing from the task;
+#   * one note per (task, kind), in its OWN ledger, because the sent ledger is
+#     keyed by task alone and `send` would refuse the approved reply after it.
+# The subject always opens ROY_NOTE_PREFIX, which is how roy-assistant.py
+# knows its own mail in info@'s Sent folder and never takes it for a request.
+ROY_INBOX = PROPERTY_SENDER
+ROY_NOTE_PREFIX = "Assistant:"
+ROY_NOTE_KINDS = ("got-it", "answer", "with-kevin", "sent", "not-sent", "closed",
+                  "private", "nudge")
+ROY_NOTE_LEDGER = os.path.join(STATE_DIR, "roy-notes.jsonl")
+ROY_PRIVATE_SUBJECT = ROY_NOTE_PREFIX + " with Kevin"
+ROY_PRIVATE_BODY = ("Roy,\n\nKevin is dealing with this one himself. Nothing more is "
+                    "needed from you.\n\nRoy's assistant")
+
+
+def roy_note_sent(task_id, kind):
+    try:
+        with open(ROY_NOTE_LEDGER) as fh:
+            for line in fh:
+                row = json.loads(line) if line.strip() else {}
+                if (row.get("event") == "sent" and row.get("task") == task_id
+                        and row.get("kind") == kind):
+                    return row
+    except FileNotFoundError:
+        return None
+    return None
+
+
+def send_roy_note(task_id, kind, subject, body, to=ROY_INBOX, dry_run=False):
+    """Send one note to Roy about his own request. Returns a result dict; a
+    refusal raises SystemExit with the reason, like every gate here."""
+    humans, tier1_patterns, tier_match = team_roster()
+    roy_addr = next((e for e, h in humans.items() if h.get("name") == "Roy Lavin"), "")
+    to = (to or "").strip().lower()
+    if to not in {ROY_INBOX, roy_addr}:
+        sys.exit(f"REFUSED: a note to Roy goes to {ROY_INBOX} (or his own address for "
+                 f"the nudge), never {to or '(nobody)'}.")
+    if kind not in ROY_NOTE_KINDS:
+        sys.exit(f"REFUSED: unknown note kind {kind!r}")
+    if kind == "nudge":
+        if to != roy_addr:
+            sys.exit("REFUSED: the nudge goes to Roy's own address only.")
+    else:
+        rec = get_task(task_id)
+        f = rec.get("fields", {}) or {}
+        name = f.get(AF["name"], "") or ""
+        notes = f.get(AF["notes"], "") or ""
+        if not dispatch_module().is_roy_request(name, notes):
+            sys.exit(f"REFUSED: {task_id} is not a request Roy sent through info@.")
+        hit = tier_match(tier1_patterns, name, f.get(AF["description"], "") or "", notes)
+        if hit and kind != "private":
+            sys.exit(f"REFUSED: {task_id} matches tier-1 ({hit!r}); only the fixed "
+                     "private line may go to Roy.")
+    if kind == "private":
+        subject, body = ROY_PRIVATE_SUBJECT, ROY_PRIVATE_BODY
+    subject = (subject or "").replace("\n", " ").strip()
+    if not subject.startswith(ROY_NOTE_PREFIX):
+        sys.exit(f"REFUSED: a note to Roy opens its subject with {ROY_NOTE_PREFIX!r}, so "
+                 "roy-assistant.py never mistakes it for a new request.")
+    if not (body or "").strip():
+        sys.exit("REFUSED: empty note")
+    key = task_id or "nudge"
+    prior = roy_note_sent(key, kind)
+    if prior:
+        return {"skipped": key, "kind": kind, "why": f"already sent at {prior.get('ts')}"}
+    if dry_run:
+        return {"dryRun": True, "task": key, "kind": kind, "to": to, "subject": subject,
+                "bodyChars": len(body)}
+    os.makedirs(STATE_DIR, exist_ok=True)
+    with open(ROY_NOTE_LEDGER, "a") as fh:
+        fh.write(json.dumps({"task": key, "kind": kind, "ts": now_iso(),
+                             "event": "intent", "to": to}) + "\n")
+    result = worker_call(SEND_URL, {"to": to, "from": ROY_INBOX,
+                                    "subject": subject, "text": body})
+    with open(ROY_NOTE_LEDGER, "a") as fh:
+        fh.write(json.dumps({"task": key, "kind": kind, "ts": now_iso(), "event": "sent",
+                             "to": to, "messageId": result.get("id")}) + "\n")
+    return {"noted": key, "kind": kind, "to": to, "messageId": result.get("id")}
+
+
+def cmd_roy_note(args):
+    body = sys.stdin.read()
+    print(json.dumps(send_roy_note(args.task, args.kind, args.subject, body,
+                                   to=args.to or ROY_INBOX, dry_run=args.dry_run)))
 
 
 def cmd_selftest(args):
@@ -844,6 +954,16 @@ def main():
     n.add_argument("--reason", default="", help="why it is theirs")
     n.add_argument("--dry-run", action="store_true")
     n.set_defaults(func=cmd_notify)
+
+    r = sub.add_parser("roy-note",
+                       help="tell Roy, at info@, what became of his own request "
+                            "(body on STDIN; never a third party)")
+    r.add_argument("task", nargs="?", default="")
+    r.add_argument("--kind", required=True, choices=ROY_NOTE_KINDS)
+    r.add_argument("--subject", default="")
+    r.add_argument("--to", default="")
+    r.add_argument("--dry-run", action="store_true")
+    r.set_defaults(func=cmd_roy_note)
 
     v = sub.add_parser("preview", help="parse and print, never sends")
     v.add_argument("task")

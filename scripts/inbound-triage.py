@@ -91,6 +91,9 @@ import urllib.request
 from datetime import date, datetime, timedelta
 from pathlib import Path
 
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from agent_email_format import PROPERTY_SENDER  # noqa: E402  Roy's inbox, info@
+
 WORKER_URL = "https://drive-upload.kevinbrittain.workers.dev"
 
 # The mailbox this agent triages: the business hub every address forwards into
@@ -590,6 +593,9 @@ def cmd_scan(back_hours):
 
     new_inbox, new_trunc = worker_list(q="in:inbox -in:chats after:%d" % after_s)
     stale, stale_trunc = worker_list(q="in:inbox -in:chats older_than:2d")
+    roy_copies = sum(1 for m in new_inbox + stale if roy_assistant_copy(m))
+    new_inbox = [m for m in new_inbox if not roy_assistant_copy(m)]
+    stale = [m for m in stale if not roy_assistant_copy(m)]
     # Stranded lookups use exact label IDs — no query syntax to mis-parse.
     stranded_8, s8_trunc = worker_list(label_ids=[l8["id"]], q="newer_than:14d")
     stranded_12, s12_trunc = worker_list(label_ids=[l12["id"]], q="newer_than:14d")
@@ -669,7 +675,9 @@ def cmd_scan(back_hours):
                    "stranded_13": len(stranded_13), "sent": len(sent_msgs),
                    "inbox_auto_replies": inbox_auto_replies,
                    "stranded_auto_replies": len(stranded_auto_replies),
-                   "stranded_handled": len(stranded_handled)},
+                   "stranded_handled": len(stranded_handled),
+                   # Roy's requests to his assistant: roy-assistant.py's, never a task here.
+                   "roy_assistant_skipped": roy_copies},
         # "checked", or "UNCHECKED: <why>" — then the stranded lists still
         # hold threads that may already have a task; say so in the report.
         "stranded_lookup": stranded_lookup,
@@ -814,6 +822,21 @@ def self_addressed(headers):
     for field in ("to", "cc", "bcc"):
         to.update(EMAIL_RE.findall(str(headers.get(field) or "").lower()))
     return to.issubset(set(sender))
+
+
+# Roy's assistant (24 Sep 2026): Roy forwards a message from info@ to info@
+# itself, and scripts/roy-assistant.py makes the task from info@'s Sent folder.
+# info@ mail is copied into this inbox, so the same message could otherwise
+# become a second task here. Machine signal only: sender and recipients.
+ROY_ASSISTANT_INBOX = PROPERTY_SENDER
+
+
+def roy_assistant_copy(m):
+    """True for a message info@ sent to itself (Roy's request, or the
+    assistant's own note back): roy-assistant.py owns it, never triage."""
+    h = (m or {}).get("headers") or {}
+    return (parse_bare_email(str(h.get("from") or "")).lower() == ROY_ASSISTANT_INBOX
+            and self_addressed(h))
 
 
 def cmd_sentcheck(days):
