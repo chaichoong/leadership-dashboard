@@ -39,8 +39,13 @@ EXEMPTIONS (assumed 2026-07-30, Kevin can overturn)
 Usage:
   python3 scripts/task-hygiene-sweep.py flip-due [--dry-run]
   python3 scripts/task-hygiene-sweep.py audit [--out FILE]
-  python3 scripts/task-hygiene-sweep.py apply --decisions FILE [--tier auto|all] [--dry-run]
+  python3 scripts/task-hygiene-sweep.py apply --decisions FILE [--out FILE] [--tier auto|all] [--dry-run]
+
   python3 scripts/task-hygiene-sweep.py undo --applied FILE [--dry-run]
+
+--out is where the work-list / undo log is written. Omitted, it defaults to
+$TASK_MANAGER_SCRATCH (or $AGENT_SLOT_SCRATCH); with neither set the run refuses,
+because these files carry private task text and this repo is PUBLIC.
 
 Exit: 0 = fine, 1 = control failure, violation of a safety rule, or a write error.
 Auth: ~/.config/od/airtable_pat (never printed).
@@ -64,6 +69,46 @@ PROJECTS = "tblHrpTMd5LNYn8v1"
 
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 MONITORING = os.path.join(REPO, "monitoring")
+
+# ─── WHERE WORKING FILES GO ──────────────────────────────────────────
+#
+# 24 Sep 2026, finding 20260923-task-manager-585. audit's work-list and
+# apply's undo log both defaulted into the repo's monitoring/ folder. This
+# repo is PUBLIC and a work-list carries every open task's name and
+# description, so on 23 Sep a 372KB file of private task text landed there.
+# Nothing caught it except one exact gitignore pattern — a pattern is not a
+# control, because the next filename that drifts from it is committed.
+#
+# The default is now the slot's own scratch directory, and with no scratch set
+# the run REFUSES rather than silently picking a public path.
+SCRATCH_ENV = ("TASK_MANAGER_SCRATCH", "AGENT_SLOT_SCRATCH")
+
+
+def scratch_dir(env=None):
+    env = os.environ if env is None else env
+    for var in SCRATCH_ENV:
+        value = (env.get(var) or "").strip()
+        if value:
+            return value
+    return None
+
+
+def work_path(explicit, filename, env=None):
+    """Where a working file goes. An explicit --out always wins; otherwise the
+    slot's scratch directory. Never monitoring/, and never a quiet fallback:
+    with no scratch and no --out this raises, so the caller has to choose."""
+    if explicit:
+        return explicit
+    target = scratch_dir(env)
+    if not target:
+        raise SystemExit(
+            "ERROR: no scratch directory set (%s) and no --out given.\n"
+            "Working files carry private task text and this repo is PUBLIC, so "
+            "they must not default into monitoring/.\n"
+            "Pass --out /path/to/%s, or run under a slot that exports a scratch "
+            "directory." % (" or ".join(SCRATCH_ENV), filename))
+    os.makedirs(target, exist_ok=True)
+    return os.path.join(target, filename)
 
 # Field names as the rest of the codebase uses them (config.js reads by name, not ID).
 # The ID is recorded alongside so a rename upstream is caught by the schema check.
@@ -471,18 +516,26 @@ def previous_worklist(today):
 
     Read to compare denominators. The file name carries its date, so no parsing of
     the contents is needed to order them.
+
+    Two directories are searched, newest stamp first: the slot's scratch (where
+    runs write from 24 Sep 2026) and monitoring/ (where earlier runs wrote, so
+    the comparison does not lose its history when the default moved).
     """
-    try:
-        names = sorted(n for n in os.listdir(MONITORING)
-                       if n.startswith("task-sweep-worklist-") and n.endswith(".json"))
-    except FileNotFoundError:
-        return None
-    for name in reversed(names):
-        stamp = name[len("task-sweep-worklist-"):-len(".json")]
+    found = []
+    for folder in [d for d in (scratch_dir(), MONITORING) if d]:
+        try:
+            names = os.listdir(folder)
+        except OSError:
+            continue
+        for name in names:
+            if name.startswith("task-sweep-worklist-") and name.endswith(".json"):
+                found.append((name[len("task-sweep-worklist-"):-len(".json")],
+                              folder, name))
+    for stamp, folder, name in sorted(found, reverse=True):
         if stamp >= str(today):
             continue
         try:
-            with open(os.path.join(MONITORING, name)) as fh:
+            with open(os.path.join(folder, name)) as fh:
                 prev = json.load(fh)
         except (OSError, ValueError):
             continue
@@ -710,8 +763,7 @@ def cmd_audit(args):
         "tasks": items,
     }
 
-    os.makedirs(MONITORING, exist_ok=True)
-    path = args.out or os.path.join(MONITORING, f"task-sweep-worklist-{date.today()}.json")
+    path = work_path(args.out, f"task-sweep-worklist-{date.today()}.json")
     with open(path, "w") as fh:
         json.dump(out, fh, indent=2)
 
@@ -916,8 +968,8 @@ def cmd_apply(args):
         print(f"\nDRY RUN — {len(applied)} write(s) would have been made, none were.")
         return 0
 
-    os.makedirs(MONITORING, exist_ok=True)
-    log_path = os.path.join(MONITORING, f"task-sweep-applied-{date.today()}.json")
+    log_path = work_path(getattr(args, "out", None),
+                         f"task-sweep-applied-{date.today()}.json")
     existing_log = []
     if os.path.exists(log_path):
         with open(log_path) as fh:
@@ -1009,6 +1061,7 @@ def main():
 
     p_apply = sub.add_parser("apply", help="apply a decision file")
     p_apply.add_argument("--decisions", required=True)
+    p_apply.add_argument("--out")
     p_apply.add_argument("--tier", choices=["auto", "all"], default="auto")
     p_apply.add_argument("--dry-run", action="store_true")
     p_apply.set_defaults(func=cmd_apply)

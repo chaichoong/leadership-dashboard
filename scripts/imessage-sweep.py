@@ -67,8 +67,77 @@ CONTEXT_MESSAGES = 10
 # people typing "Kevin" without a formal mention.
 MENTION_PATTERN = re.compile(r"\bkevin\b", re.IGNORECASE)
 
+# ─── ONE ASK CAN ARRIVE AS SEVERAL MESSAGES ──────────────────────────
+#
+# Finding 20260824-agent-dispatch-340. Task recdX1iKpBUplFIUb asked an agent to
+# order a specific item and the description the sweep wrote said "the actual
+# product is NOT known from this task". The thread showed why: the link and the
+# words went out as two messages 46 seconds apart, and one message became one
+# candidate, so the sweep kept the second and lost the first. In a group chat it
+# is worse — the mention test ran per message, so the message carrying the link
+# was dropped before anything could read it.
+#
+# A block is consecutive messages from the SAME sender in the SAME chat with no
+# more than this gap between them. The block is mentioned if ANY of its messages
+# is, and every URL in the block is carried on the candidate.
+GROUP_WINDOW_SECONDS = 60
+URL_PATTERN = re.compile(r"\b(?:https?://|www\.)[^\s<>\"')]+", re.IGNORECASE)
+
 SHORTCODE_SENDER = re.compile(r"^\d{3,8}$")
 OTP_TEXT = re.compile(r"\b(verification code|security code|one[- ]time|passcode|OTP)\b|\b\d{4,8}\b.*\bcode\b|\bcode\b.*\b\d{4,8}\b", re.IGNORECASE)
+
+
+def urls_in(text):
+    """Every link in a block, in order, deduped. A task written without the link
+    the sender sent is a task nobody can carry out."""
+    seen, out = set(), []
+    for raw in URL_PATTERN.findall(text or ""):
+        url = raw.rstrip(".,;:!?)")
+        if url not in seen:
+            seen.add(url)
+            out.append(url)
+    return out
+
+
+def group_messages(messages, window_seconds=GROUP_WINDOW_SECONDS):
+    """Consecutive messages from one sender in one chat, within `window_seconds`
+    of the previous one, become a single block.
+
+    Input is dicts with chat_rowid, sender, date_ns, text (already decoded),
+    guid and mentioned. Input must be in ascending date order, which is how the
+    scan query returns it. Output keeps that order.
+    """
+    blocks = []
+    gap_ns = int(window_seconds * 1e9)
+    for m in messages:
+        last = blocks[-1] if blocks else None
+        same_thread = (last
+                       and last["chat_rowid"] == m["chat_rowid"]
+                       and last["sender"] == m["sender"]
+                       and m["date_ns"] - last["last_date_ns"] <= gap_ns)
+        if same_thread:
+            last["parts"].append(m["text"])
+            last["guids"].append(m["guid"])
+            last["last_date_ns"] = m["date_ns"]
+            # ANY message in the block mentioning Kevin makes the whole block
+            # his. The link-only message never mentions anyone.
+            last["mentioned"] = last["mentioned"] or m["mentioned"]
+            continue
+        blocks.append({
+            "chat_rowid": m["chat_rowid"],
+            "sender": m["sender"],
+            "date_ns": m["date_ns"],
+            "last_date_ns": m["date_ns"],
+            "parts": [m["text"]],
+            "guids": [m["guid"]],
+            "mentioned": m["mentioned"],
+            "row": m.get("row"),
+        })
+    for b in blocks:
+        b["text"] = "\n".join(b["parts"])
+        b["urls"] = urls_in(b["text"])
+        b["message_count"] = len(b["parts"])
+    return blocks
 
 
 def apple_ns_to_iso(ns):
@@ -212,11 +281,9 @@ def scan():
     ).fetchall()
 
     scanned = 0
-    group_skipped = 0
     empty_skipped = 0
-    candidates = []
     max_date_ns = since_ns
-    seen_chat_context = {}
+    messages = []
 
     for r in rows:
         scanned += 1
@@ -228,22 +295,51 @@ def scan():
         if not text:
             empty_skipped += 1
             continue
+        messages.append({
+            "chat_rowid": r["chat_rowid"],
+            "sender": r["sender"] or "unknown",
+            "date_ns": r["date"],
+            "guid": r["guid"],
+            "text": text,
+            # Read PER MESSAGE, applied per BLOCK below. A link sent on its own
+            # names nobody, and judging it alone is what lost it (finding 340).
+            "mentioned": is_mentioned(text, r["attributedBody"]),
+            "row": r,
+        })
+
+    # GROUP FIRST, THEN FILTER. Doing it the other way round is the bug.
+    blocks = group_messages(messages)
+
+    group_skipped = 0
+    candidates = []
+    seen_chat_context = {}
+    for b in blocks:
+        r = b["row"]
         is_group = r["style"] == 43
-        if is_group and not is_mentioned(text, r["attributedBody"]):
+        if is_group and not b["mentioned"]:
             group_skipped += 1
             continue
-        chat_key = r["chat_rowid"]
+        chat_key = b["chat_rowid"]
         if chat_key not in seen_chat_context:
-            seen_chat_context[chat_key] = chat_context(conn, chat_key, r["date"])
+            seen_chat_context[chat_key] = chat_context(conn, chat_key, b["last_date_ns"])
         candidates.append({
-            "guid": r["guid"],
-            "date_ns": r["date"],
-            "at": apple_ns_to_iso(r["date"]),
-            "sender": r["sender"] or "unknown",
+            # The first message of the block keys the candidate, so a block that
+            # grows on the next run (the overlap window re-reads it) keys the
+            # same and the Airtable dedupe still holds.
+            "guid": b["guids"][0],
+            "guids": b["guids"],
+            "message_count": b["message_count"],
+            "date_ns": b["date_ns"],
+            "at": apple_ns_to_iso(b["date_ns"]),
+            "last_at": apple_ns_to_iso(b["last_date_ns"]),
+            "sender": b["sender"],
             "chat": r["display_name"] or r["chat_identifier"],
             "is_group": bool(is_group),
-            "text": text[:2000],
-            "likely_automated": likely_automated(r["sender"], text),
+            "text": b["text"][:2000],
+            # Carried separately as well as in the text: truncation at 2000
+            # characters must never be what drops the link.
+            "urls": b["urls"],
+            "likely_automated": likely_automated(b["sender"], b["text"]),
             "context": seen_chat_context[chat_key],
         })
 
@@ -252,6 +348,7 @@ def scan():
         "db_total_messages": db_total,
         "window_start": apple_ns_to_iso(since_ns),
         "scanned_incoming": scanned,
+        "message_blocks": len(blocks),
         "group_skipped_no_mention": group_skipped,
         "empty_or_undecodable": empty_skipped,
         "candidates": candidates,
@@ -371,6 +468,43 @@ def selftest():
     check("shortcode automated", likely_automated("62884", "Your delivery is on its way"))
     check("otp automated", likely_automated("+447900000001", "Your verification code is 482913"))
     check("normal not automated", not likely_automated("+447900000001", "Hi Kevin, are we still on for Friday?"))
+
+    # Finding 20260824-agent-dispatch-340: the link and the words, 46s apart.
+    def msg(rowid, sender, secs, text, guid):
+        return {"chat_rowid": rowid, "sender": sender, "date_ns": int(secs * 1e9),
+                "guid": guid, "text": text, "mentioned": is_mentioned(text), "row": None}
+
+    split = group_messages([
+        msg(1, "+447900000001", 0, "https://example.com/product/123", "g1"),
+        msg(1, "+447900000001", 46, "Kevin can you order this one please", "g2"),
+    ])
+    check("split ask groups", len(split) == 1 and split[0]["message_count"] == 2)
+    check("split ask keeps the link", split[0]["urls"] == ["https://example.com/product/123"])
+    check("split ask is mentioned", split[0]["mentioned"] is True)
+    check("split ask keeps both guids", split[0]["guids"] == ["g1", "g2"])
+
+    apart = group_messages([
+        msg(1, "+447900000001", 0, "first thing Kevin", "g1"),
+        msg(1, "+447900000001", 300, "unrelated later thing Kevin", "g2"),
+    ])
+    check("a 5 minute gap stays two", len(apart) == 2)
+
+    mixed = group_messages([
+        msg(1, "+447900000001", 0, "one Kevin", "g1"),
+        msg(1, "+447900000002", 10, "two Kevin", "g2"),
+    ])
+    check("different senders never group", len(mixed) == 2)
+
+    chats = group_messages([
+        msg(1, "+447900000001", 0, "one Kevin", "g1"),
+        msg(2, "+447900000001", 10, "two Kevin", "g2"),
+    ])
+    check("different chats never group", len(chats) == 2)
+
+    check("url trailing punctuation", urls_in("see www.example.com/x. thanks")
+          == ["www.example.com/x"])
+    check("url dedupe", urls_in("a http://x.co b http://x.co") == ["http://x.co"])
+    check("no url", urls_in("no links here") == [])
 
     if failures:
         print("SELFTEST FAIL: " + ", ".join(failures))
