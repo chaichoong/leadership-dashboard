@@ -2721,12 +2721,8 @@ window.agConfirmReject = agConfirmReject;
 // later verdict would win (review, 24 Sep 2026).
 const _apvSaving = new Set();
 async function applyApprovalDecision(taskId, outcome, remember, opts){
+    opts = opts || {};
     if(_apvSaving.has(taskId)) return 'elsewhere';
-    _apvSaving.add(taskId);
-    try { return await apvDecisionWrite(taskId, outcome, remember, opts || {}); }
-    finally { _apvSaving.delete(taskId); }
-}
-async function apvDecisionWrite(taskId, outcome, remember, opts){
     const t = allApprovals.find(x=>x.id===taskId);
     if(!t) return 'elsewhere';
     const noteEl = document.getElementById('apvNote-'+taskId);
@@ -2741,6 +2737,7 @@ async function apvDecisionWrite(taskId, outcome, remember, opts){
     btns.forEach(b=>{ b.disabled = true; });
     apvShowSaving(taskId, outcome==='Rejected' ? 'your no' : outcome==='Changes requested' ? 'your note' : 'your approval');
     let phase = 'check';
+    _apvSaving.add(taskId);
     try {
         // STALE-APPROVAL GUARD (same principle as the Slack baseline): a click
         // approves what was on screen when the card RENDERED. Re-read the task
@@ -2887,6 +2884,8 @@ async function apvDecisionWrite(taskId, outcome, remember, opts){
             : 'Not saved. ' + (e && e.message || e), outcome, remember, opts);
         btns.forEach(b=>{ b.disabled = false; });
         return 'failed';
+    } finally {
+        _apvSaving.delete(taskId);
     }
 }
 window.applyApprovalDecision = applyApprovalDecision;
