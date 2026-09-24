@@ -39,7 +39,10 @@ ATTACH_DIR = os.path.expanduser("~/knowledge-os/attachments/content-engine")   #
 UPLOAD_WAIT_MS = 600000        # a 740 MB episode uploads in about two minutes (9 Sep 2026); ten is the lane's ceiling
 NEXT_ENABLED = "button:has-text('Next'):not([disabled])"
 PUBLISH_ENABLED = "button:has-text('Publish'):not([disabled])"
-PUBLISHED_PROOF = "text=/published|is live|now live/i"
+# Proof of a Publish: the wizard closes onto the Episodes list, whose "Rows per page" footer no episode copy carries. Every
+# successful upload from 21 to 24 Sep 2026 ended on that page. The old proof, text=/published|is live|now live/, could be met
+# by the episode's own copy on the Review page (review, 24 Sep 2026), and run_publish now leans on this proof.
+PUBLISHED_PROOF = ':text("Rows per page")'
 # Spotify's own status words, never the episode's copy. `text=Uploading` matches any element holding "uploading" in any case,
 # and 2070's description says "uploading your bank statements": the wait for "Uploading" to clear found the description in the
 # editor and never finished, every hour from 23 Sep 09:39 until 24 Sep 2026, each run leaving an Untitled draft (2069, whose
@@ -95,7 +98,7 @@ def build_plan(video_path, title, description, youtube_link, test, thumb=""):
     ]
     if not test: steps.append({"do": "submit", "selector": PUBLISH_ENABLED})
     plan = {"profile": PROFILE, "label": "Spotify for Creators: %s" % title[:60], "steps": steps,
-            "confirm": {"selector": PUBLISHED_PROOF, "timeoutMs": 120000, "proof": "the wizard says the episode is published"},
+            "confirm": {"selector": PUBLISHED_PROOF, "timeoutMs": 120000, "proof": "the wizard closed onto the Episodes list, which it does only after Publish"},
             "mode": "test" if test else "live"}
     return plan
 
@@ -279,6 +282,8 @@ def selftest():
     assert "waiting for 'Processing' to be hidden" in e3 and len(e3) <= 190, e3
     steps = build_plan("/x.mp4", "T", "I tried uploading my statements", "", True)["steps"]
     assert not any((st.get("for") or st.get("gone") or "").startswith("text=") for st in steps if st["do"] == "wait"), "no bare text= wait: it matches the copy"
+    plan_c = build_plan("/x.mp4", "T", "Now live: I published my plan", "", False)
+    assert plan_c["confirm"]["selector"] == PUBLISHED_PROOF and not PUBLISHED_PROOF.startswith("text="), "the Publish proof is never a word the copy can hold"
     rows = " ".join("Episode %d - Title %d Published 9/1/26 Video 04:00" % (2000 + i, i) for i in range(25))
     assert not list_incomplete(rows) and list_incomplete("Episode 2054 x Load more") and not list_incomplete("see more of this description"), "only a load-more control means the list goes on"
     assert list_status("Episode 2054 - T Published", "Episode 2054 - T")[0] == "published" and list_status("nothing", "Episode 2054")[0] == "missing"
