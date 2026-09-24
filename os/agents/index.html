@@ -2715,8 +2715,18 @@ window.agConfirmReject = agConfirmReject;
 // opts.reasonKey: the rejection reason, likewise, instead of the chip map.
 // opts.noCrossCheck: do not check the other cards for this note (the bulk
 // bar, and a carried note, which would only find its own source).
+// One save per card at a time, whichever route asked (the card's own
+// buttons, a strip, Send all, Try again): a card stays in allApprovals until
+// its write lands, so a second route could otherwise write it again and the
+// later verdict would win (review, 24 Sep 2026).
+const _apvSaving = new Set();
 async function applyApprovalDecision(taskId, outcome, remember, opts){
-    opts = opts || {};
+    if(_apvSaving.has(taskId)) return 'elsewhere';
+    _apvSaving.add(taskId);
+    try { return await apvDecisionWrite(taskId, outcome, remember, opts || {}); }
+    finally { _apvSaving.delete(taskId); }
+}
+async function apvDecisionWrite(taskId, outcome, remember, opts){
     const t = allApprovals.find(x=>x.id===taskId);
     if(!t) return 'elsewhere';
     const noteEl = document.getElementById('apvNote-'+taskId);
@@ -3033,7 +3043,8 @@ async function apvCrossCheck(src, note, outcome, reasonKey){
         matches = apvCrossParse(parsed, others);
     } catch(e){
         console.error('cross-card note check failed', e);
-        setNotice(Object.assign({ state: 'failed', error: (e && e.message) || String(e) }, base));
+        // A note he has since taken back needs no failure line either.
+        setNotice(_apvCrossLive[src.id] === seq ? Object.assign({ state: 'failed', error: (e && e.message) || String(e) }, base) : null);
         return;
     }
     // Undone, or decided again, while the model was reading: this note no

@@ -368,6 +368,25 @@ test.describe('the review findings', () => {
     expect(verdicts('recBootle')).toBe(1);
   });
 
+  test('Approve on a marked card, then Send all: the card keeps the one verdict he gave it', async ({ page }) => {
+    const patches = await mockAgentsPage(page, queue());
+    await mockProxy(page, matchGas);
+    await loadAgentsPage(page);
+    await openApprovals(page);
+    await decideWithNote(page, 'recSrc', 'Request changes', HAVERHILL_NOTE);
+    await expect(page.locator('[data-apv-cross-all]')).toBeVisible();
+    await page.route('**/api.airtable.com/**', async (route) => {
+      if (route.request().method() === 'PATCH') await new Promise((r) => setTimeout(r, 300));
+      return route.fallback();
+    });
+    await page.evaluate(() => Promise.all([agDecide('recGas', 'Approved as-is'), apvCrossApplyAll('recSrc')]));
+    const verdicts = () => patches.filter((p) => p.id === 'recGas' && p.fields[TF.approvalOutcome]);
+    await expect.poll(() => verdicts().length).toBe(1);
+    await page.waitForTimeout(800);
+    expect(verdicts().length).toBe(1);
+    expect(verdicts()[0].fields[TF.approvalOutcome]).toBe('Approved as-is');
+  });
+
   test('a strip about work the agent has since redone disappears', async ({ page }) => {
     const fx = queue();
     await mockAgentsPage(page, fx);
