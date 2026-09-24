@@ -170,4 +170,10 @@ except SystemExit as e:
     const msg = create({ ...entry, approvalOutcome: null, notes: 'HANDLED WITHOUT YOU (calendar entry): diary' }, true);
     expect(msg).not.toMatch(/REFUSED/);
   });
+
+  it('--handled on a rejected fallback card that kept the marker is refused', () => {
+    const msg = create({ ...entry, approvalOutcome: { name: 'Rejected' }, sentForApprovalBy: ['recAGENT000000001'],
+      notes: 'HANDLED WITHOUT YOU (calendar entry): diary. The diary write FAILED, so this went to the queue' }, true);
+    expect(msg).toMatch(/REFUSED: task recTEST .*is not approved/);
+  });
 });

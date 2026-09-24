@@ -42,7 +42,7 @@ from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from approval_evidence import approval_evidence_problem  # noqa: E402
+from approval_evidence import SENT_FOR_APPROVAL_BY, approval_evidence_problem  # noqa: E402
 from agent_calendar_format import (  # noqa: E402
     TIMEZONE,
     CalendarFormatError,
@@ -192,9 +192,13 @@ def cmd_create(args):
     # submit without a card. The gate is still a gate — agent-dispatch.py
     # leaves its HANDLED marker naming the calendar category on the task
     # BEFORE calling this with --handled, and nothing else writes that marker.
+    # The Level A step clears Approval Outcome and Sent For Approval By before it calls this
+    # (agent-dispatch.py handle_without_kevin), so a task carrying either is not a Level A entry:
+    # a fallback card Kevin rejected keeps the marker in its Notes (review, 24 Sep 2026).
     handled = bool(getattr(args, "handled", False)) and \
         HANDLED_MARK in str(f.get(AF["notes"]) or "") and \
-        "(calendar entry)" in str(f.get(AF["notes"]) or "")
+        "(calendar entry)" in str(f.get(AF["notes"]) or "") and \
+        not outcome and not f.get(SENT_FOR_APPROVAL_BY)
     if outcome not in APPROVED and not handled:
         sys.exit(
             f"REFUSED: task {task_id} ({name}) is not approved.\n"
