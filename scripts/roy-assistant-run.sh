@@ -40,6 +40,31 @@ PY="$REPO/scripts/roy-assistant.py"
 mkdir -p "$SCRATCH"
 cd "$REPO" || { echo "ERROR: repo not found at $REPO" >&2; exit 1; }
 
+# --- one tick at a time (24 Sep 2026) ----------------------------------------
+# This job is LOCK-EXEMPT: the inbox triage slots hold the queue lock for a
+# median of 34 minutes (90th percentile 83) three times a day, and Roy must not
+# wait behind them. So it keeps its own lock: a tick that starts while the last
+# one is still working leaves at once. mkdir is atomic; the holder's pid says
+# whether a lock left behind is live, and a dead holder's lock is taken over,
+# never waited on. A lock younger than a minute with no pid yet is a holder
+# between its mkdir and its pid write, so it counts as live.
+RUNLOCK="$LOG_DIR/run.lock"
+if ! mkdir "$RUNLOCK" 2>/dev/null; then
+  HOLDER=$(cat "$RUNLOCK/pid" 2>/dev/null || echo "")
+  if [ -n "$HOLDER" ] && kill -0 "$HOLDER" 2>/dev/null; then
+    echo "roy-assistant: the previous tick (pid $HOLDER) is still running; this one leaves"
+    exit 0
+  fi
+  if [ -z "$HOLDER" ] && [ -n "$(find "$RUNLOCK" -maxdepth 0 -mmin -1 2>/dev/null)" ]; then
+    echo "roy-assistant: another tick is just starting; this one leaves"
+    exit 0
+  fi
+  rm -rf "$RUNLOCK"
+  mkdir "$RUNLOCK" 2>/dev/null || { echo "roy-assistant: another tick took the run lock first; this one leaves"; exit 0; }
+fi
+echo $$ > "$RUNLOCK/pid"
+trap 'rm -rf "$RUNLOCK"' EXIT
+
 BROKEN=""
 note_broken() { BROKEN="$BROKEN $1"; echo "===== roy-assistant $(date) $1 =====" >> "$LOG"; }
 
@@ -77,7 +102,10 @@ fail() {
   exit 1
 }
 
-if ! /usr/bin/python3 "$REPO/scripts/agent-dispatch.py" queue > "$RUNDIR/queue.json" 2>"$RUNDIR/queue.err"; then
+# ROY_ASSISTANT_RUN=1: only this read puts Roy's new requests in the worklist;
+# every other dispatch run lists them under royRequests and leaves them alone,
+# so two runs never draft the same request (this job runs outside the lock).
+if ! ROY_ASSISTANT_RUN=1 /usr/bin/python3 "$REPO/scripts/agent-dispatch.py" queue > "$RUNDIR/queue.json" 2>"$RUNDIR/queue.err"; then
   tail -c 400 "$RUNDIR/queue.err" >&2; fail "queue read failed"
 fi
 # Only what the queue itself would hand an agent now: a held or parked task
@@ -112,7 +140,7 @@ RUNDIR is $RUNDIR and STEP 1 IS ALREADY DONE — $RUNDIR/queue.json was written 
 
 WORK ONLY THESE TASK IDS: $IDS. Ignore every other item in the worklist, and do NO routing or escalation. Each is a ROY: task owned by Inbox Response; dispatch it to that local agent, whose file has a section 'Roy's requests' saying exactly how to work one: a question is answered to Roy with ROY ANSWER:, work logged for him is ROY DONE: naming every record id, and every email to a tenant, contractor or letting agent is Correspondence FROM info@agilelets.co.uk signed Roy Lavin, Agile Lets, which goes to Kevin's queue like any other card. Roy approves nothing. Do NOT send anything to Roy yourself: roy-assistant.py emails him the outcome after this run.
 
-Everything else in the skill applies in full: the gate sits BEFORE the action; tier-1 labelling and --tier1 on tier-1 work; the carry-out closing line; step 4b's CEO review pass on non-tier-1 drafts; step 5's report.json in $RUNDIR; step 7 (verify) is mandatory. Do not take the queue lock — this run already holds it. Do not edit, commit or push code; file anything needing a code change via scripts/findings.py. Working files go under $RUNDIR/TASKID/ only. End with at most ten lines of counts: no message content, no names, no record ids." \
+Everything else in the skill applies in full: the gate sits BEFORE the action; tier-1 labelling and --tier1 on tier-1 work; the carry-out closing line; step 4b's CEO review pass on non-tier-1 drafts; step 5's report.json in $RUNDIR; step 7 (verify) is mandatory. Do not take the queue lock — this run is lock-exempt and must never queue for it; Roy's new requests are listed in the worklist of THIS queue read only, so no other run drafts them. Do not edit, commit or push code; file anything needing a code change via scripts/findings.py. Working files go under $RUNDIR/TASKID/ only. End with at most ten lines of counts: no message content, no names, no record ids." \
   --add-dir "$RUNDIR" \
   --settings "$AGENT_SETTINGS_FILE" \
   --permission-mode acceptEdits \
@@ -126,10 +154,13 @@ __CLAUDE_PID=$!
     sleep 20
     kill -KILL "$__CLAUDE_PID" 2>/dev/null
   fi
-) &
+) >/dev/null 2>&1 &
 __WATCHDOG_PID=$!
 wait "$__CLAUDE_PID"
 RC=$?
+# Stop the timer AND its sleep: an orphaned sleep holding this script's output
+# kept the caller waiting 30 minutes after a finished run (found by the test).
+pkill -P "$__WATCHDOG_PID" 2>/dev/null
 kill "$__WATCHDOG_PID" 2>/dev/null
 /usr/bin/python3 "$REPO/scripts/allowance.py" mark --job roy-assistant --log "$LOG" --since-line "$__START_LINE" >/dev/null 2>&1 || true
 __TAIL=$(tail -n +$((__START_LINE + 1)) "$LOG" 2>/dev/null)

@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { execFileSync } from 'child_process';
-import { mkdtempSync, readFileSync } from 'fs';
+import { mkdtempSync, readFileSync, writeFileSync, existsSync, readdirSync, chmodSync } from 'fs';
 import { tmpdir } from 'os';
 import { resolve, dirname, join } from 'path';
 import { fileURLToPath } from 'url';
@@ -281,6 +281,13 @@ print(json.dumps(step(task("Completed", "", "ROY ANSWER: Flat 2 is paid up to da
     expect(r[0]).toBe('answer');
     expect(r[2]).toBe('Flat 2 is paid up to date.');
   });
+  it('a ROY DONE receipt reaches Roy without its Records: line', () => {
+    const r = py(`${T}
+n = task()["fields"][AF["notes"]] + "\\n[24 Sep 2026 09:40 — agent-dispatch] HANDLED WITHOUT YOU (roy work logged): x. Level A"
+print(json.dumps(step(task("Completed", "", "ROY DONE: Logged the boiler repair for Tuesday.\\nRecords: recNEWTASK0000001\\n\\n**Carrying this out will involve:** emailing Roy.", n))))`);
+    expect(r[0]).toBe('answer');
+    expect(r[2]).toBe('Logged the boiler repair for Tuesday.');
+  });
   it('each stage is told once; a tier-1 request only ever gets the private line', () => {
     const r = py(`${T}
 told = task()["fields"][AF["notes"]] + "\\n[24 Sep 2026 09:41 — roy-assistant] ROY TOLD (with-kevin): Gmail 1"
@@ -394,18 +401,32 @@ ad.compliance_book_pages = lambda refresh=False: []
 ad.load_standing_holds = lambda: ([], "")
 ad.ledger_last_events = lambda: {}
 ad.open_intents = lambda: set()
-q = ad.build_queue()
-ids = lambda key: sorted(t["id"] for t in q.get(key, []))
-work = sorted(t["id"] for t in q["worklist"] + q["reserve"])
-print(json.dumps({"roy": ids("royLane"), "held": ids("heldUnderLead"), "work": work}))
+import os
+def read(roy_run):
+    os.environ.pop("ROY_ASSISTANT_RUN", None)
+    if roy_run:
+        os.environ["ROY_ASSISTANT_RUN"] = "1"
+    q = ad.build_queue()
+    ids = lambda key: sorted(t["id"] for t in q.get(key, []))
+    return {"roy": ids("royLane"), "held": ids("heldUnderLead"), "requests": ids("royRequests"),
+            "work": sorted(t["id"] for t in q["worklist"] + q["reserve"])}
+print(json.dumps({"other": read(False), "own": read(True)}))
 `;
-  it('a repair-worded Roy request is worked, not handed back to Roy; its twin is held; a plain repair still goes to Roy', () => {
-    const r = py(Q);
-    expect(r.work).toContain('recROY00000000001');
-    expect(r.roy).not.toContain('recROY00000000001');
-    expect(r.held).toEqual(['recTWIN0000000001']);
+  it("a repair-worded Roy request is worked by Roy's own run, not handed back to Roy; its twin is held; a plain repair still goes to Roy", () => {
+    const { own } = py(Q);
+    expect(own.work).toContain('recROY00000000001');
+    expect(own.roy).not.toContain('recROY00000000001');
+    expect(own.held).toEqual(['recTWIN0000000001']);
     // Control: the Roy lane itself still works, so the first line proves something.
-    expect(r.roy).toContain('recPLAIN000000001');
+    expect(own.roy).toContain('recPLAIN000000001');
+  });
+  it('every OTHER dispatch run lists a new Roy request and leaves it alone (his job runs outside the lock)', () => {
+    const { other } = py(Q);
+    expect(other.requests).toEqual(['recROY00000000001']);
+    expect(other.work).not.toContain('recROY00000000001');
+    expect(other.roy).not.toContain('recROY00000000001');
+    // Control: ordinary new work is still in the worklist of the same read.
+    expect(other.roy).toContain('recPLAIN000000001');
   });
 });
 
@@ -413,7 +434,7 @@ describe('the scheduled run', () => {
   it('is registered: a job, an automations row, a guarded robot runner', () => {
     const sched = JSON.parse(readFileSync(resolve(ROOT, 'scripts/job-schedule.json'), 'utf8'));
     expect(sched['roy-assistant'].cron).toBe('*/10 7-20 * * *');
-    expect(sched['roy-assistant'].lockExempt).toBeUndefined();
+    expect(sched['roy-assistant'].lockExempt).toBe(true);
     const run = readFileSync(resolve(ROOT, 'scripts/roy-assistant-run.sh'), 'utf8');
     // A quiet tick must never leave a run folder under agent-dispatch/: handback-poll
     // reads one with no report.json as a dispatch run in flight.
@@ -422,5 +443,86 @@ describe('the scheduled run', () => {
   it('the selftest passes', () => {
     const out = execFileSync('/usr/bin/python3', [RA, 'selftest'], { encoding: 'utf8' });
     expect(out).toMatch(/selftest OK/);
+  });
+});
+
+// The runner itself, driven with stand-ins for every script it calls and for
+// claude, so the real bash (lock, quiet tick, queue flag) is what is tested.
+describe('roy-assistant-run.sh, run for real against stand-ins', () => {
+  const RUNNER = resolve(ROOT, 'scripts/roy-assistant-run.sh');
+  const setup = () => {
+    const dir = mkdtempSync(join(tmpdir(), 'roy-run-'));
+    const repo = join(dir, 'repo');
+    execFileSync('/bin/mkdir', ['-p', join(repo, 'scripts'), join(dir, 'logs'), join(dir, 'runs')]);
+    const log = join(dir, 'calls.log');
+    const stub = (name, body) => writeFileSync(join(repo, 'scripts', name), body);
+    stub('roy-assistant.py', `import os, sys
+open(os.environ["STUB_LOG"], "a").write("ra " + sys.argv[1] + "\\n")
+print(os.environ.get("STUB_WAITING", "") if sys.argv[1] in ("waiting", "pending") else "{}")
+`);
+    stub('agent-dispatch.py', `import os, sys
+open(os.environ["STUB_LOG"], "a").write("queue ROY_ASSISTANT_RUN=" + os.environ.get("ROY_ASSISTANT_RUN", "") + "\\n")
+print("{}")
+`);
+    stub('allowance.py', 'import sys\nsys.exit(0)\n');
+    const claude = join(dir, 'claude');
+    writeFileSync(claude, `#!/bin/bash
+printf 'claude %s\\n' "$(printf '%s' "$2" | tr '\\n' ' ')" >> "$STUB_LOG"
+while [ $# -gt 0 ]; do if [ "$1" = "--add-dir" ]; then echo '{}' > "$2/report.json"; fi; shift; done
+exit 0
+`);
+    chmodSync(claude, 0o755);
+    const token = join(dir, 'token');
+    writeFileSync(token, 'x');
+    const run = (waiting = '') => {
+      let rc = 0;
+      try {
+        execFileSync('/bin/bash', [RUNNER], {
+          encoding: 'utf8',
+          env: {
+            PATH: '/usr/bin:/bin', HOME: dir, STUB_LOG: log, STUB_WAITING: waiting,
+            ROY_ASSISTANT_REPO: repo, ROY_ASSISTANT_LOG_DIR: join(dir, 'logs'),
+            ROY_ASSISTANT_RUNS: join(dir, 'runs'), ROY_ASSISTANT_CLAUDE: claude, ROY_ASSISTANT_TOKEN: token,
+          },
+        });
+      } catch (e) { rc = e.status; }
+      const calls = existsSync(log) ? readFileSync(log, 'utf8').trim().split('\n').filter(Boolean) : [];
+      return { rc, calls, runs: readdirSync(join(dir, 'runs')) };
+    };
+    return { dir, run };
+  };
+
+  it('a quiet tick polls, tells and leaves: no queue read, no claude, no run folder', () => {
+    const { run } = setup();
+    const r = run('');
+    expect(r.rc).toBe(0);
+    expect(r.calls).toEqual(['ra poll', 'ra tell', 'ra waiting']);
+    expect(r.runs).toEqual([]);
+  });
+  it("a waiting request: the queue is read WITH the Roy flag, claude works exactly those ids, Roy is told after", () => {
+    const { run } = setup();
+    const r = run('recROY00000000001');
+    expect(r.rc).toBe(0);
+    expect(r.calls).toContain('queue ROY_ASSISTANT_RUN=1');
+    expect(r.calls.find((c) => c.startsWith('claude'))).toContain('WORK ONLY THESE TASK IDS: recROY00000000001');
+    expect(r.calls.filter((c) => c === 'ra tell')).toHaveLength(2);
+    expect(r.runs).toHaveLength(1);
+    expect(r.runs[0]).toMatch(/^\d{8}-\d{6}-roy$/);
+  });
+  it('while the previous tick is still running, a new tick leaves at once', () => {
+    const { dir, run } = setup();
+    execFileSync('/bin/mkdir', ['-p', join(dir, 'logs', 'run.lock')]);
+    writeFileSync(join(dir, 'logs', 'run.lock', 'pid'), String(process.pid));
+    const r = run('recROY00000000001');
+    expect(r.rc).toBe(0);
+    expect(r.calls).toEqual([]);
+  });
+  it("a lock left by a tick that died is taken over, and released after the run", () => {
+    const { dir, run } = setup();
+    execFileSync('/bin/mkdir', ['-p', join(dir, 'logs', 'run.lock')]);
+    writeFileSync(join(dir, 'logs', 'run.lock', 'pid'), '999999');
+    const r = run('');
+    expect(r.calls).toEqual(['ra poll', 'ra tell', 'ra waiting']);
+    expect(existsSync(join(dir, 'logs', 'run.lock'))).toBe(false);
   });
 });

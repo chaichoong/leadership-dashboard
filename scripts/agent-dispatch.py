@@ -2652,6 +2652,14 @@ def build_queue(args=None):
     tier1, skipped_tier2, unmapped, unclassified = [], [], [], []
     system_alerts = []
     roy_lane = []
+    # Roy's NEW requests are worked by his own job alone (24 Sep 2026). It runs
+    # outside the queue lock so he is not kept waiting behind a 34-minute triage
+    # slot, which means another dispatch run could otherwise draft the same
+    # request at the same time. Only a queue read made for roy-assistant-run.sh
+    # (ROY_ASSISTANT_RUN=1) puts them in the worklist; every other run lists
+    # them under royRequests, counted, never worked and never dropped.
+    roy_requests = []
+    roy_run = os.environ.get("ROY_ASSISTANT_RUN") == "1"
     approved_hb, changes_hb, new_work, routing = [], [], [], []
     decided = []
     own_signal = []
@@ -2791,6 +2799,9 @@ def build_queue(args=None):
             hit_roy = ""
         if hit_roy:
             roy_lane.append({**t, "royReason": hit_roy})
+            continue
+        if roy_request and not t["outcome"] and not roy_run:
+            roy_requests.append(t)
             continue
         if not t["localAgent"]:
             unmapped.append(t)
@@ -2972,6 +2983,8 @@ def build_queue(args=None):
         # acted on here: cmd_queue is a read. `handover-property` does the
         # writing, so one command owns the change.
         "royLane": roy_lane,
+        # Roy's new requests, for roy-assistant-run.sh only (see roy_run above).
+        "royRequests": roy_requests,
         # Property siblings held under a lead: grouped this run, or submitted
         # under a lead that is still open. Listed with groupLead, never dropped.
         "heldUnderLead": held_under,
@@ -3012,6 +3025,7 @@ def build_queue(args=None):
             "tier2Parked": len(skipped_tier2),
             "systemAlerts": len(system_alerts),
             "royLane": len(roy_lane),
+            "royRequests": len(roy_requests),
             "heldUnderLead": len(held_under),
             "heldByStandingHold": len(standing_held),
             "propertyGroups": len([t for t in worklist if t.get("siblings")]),
