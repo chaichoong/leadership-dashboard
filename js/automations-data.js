@@ -74,6 +74,8 @@ var AUTOMATIONS = {
           what: 'Reads the pay-as-you-go electric balance on both Duckworth serviced flats and sends Kevin and Roy one Slack message a day with the figures and the days left. It runs hourly because Utilita signs you out after an hour unless something looks in, so most runs only keep the login alive. If a login does lapse it says SIGN-IN NEEDED rather than reporting a blank, and it refuses to report a balance at all if the meter behind a login has changed.' },
         { key: 'handback-poll', agent: true, name: 'Hand-back Poll', when: 'every 30 minutes', status: 'on',
           what: 'Runs the hand-back check for the Work Dispatcher agent, which has its own register row above. Listed here so every scheduled job is accounted for.' },
+        { key: 'roy-assistant', agent: true, name: "Roy's assistant", when: 'every 10 minutes, 7am to 9pm', status: 'on',
+          what: "Picks up what Roy forwards from info@ to info@, has the Inbox Response agent work it straight away, and emails Roy what happened. Every email to a tenant, contractor or agent still waits for Kevin's yes." },
         { key: 'daily-ops', agent: true, name: 'Systems Check', when: '7:00am daily', status: 'on',
           what: 'Runs the Systems Check agent, which has its own register row above. Listed here so every scheduled job is accounted for.' },
         { key: 'inbound-triage', agent: true, name: 'Inbox Triage', when: '9am, 1pm, 5pm', status: 'on',

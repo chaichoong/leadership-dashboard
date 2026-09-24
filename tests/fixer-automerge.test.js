@@ -75,7 +75,7 @@ describe('what the fixer may never merge on its own', () => {
     const robot = ['scripts/agent-settings.json', 'scripts/agent-tools.sh',
       'scripts/agent-slot-run.sh', 'scripts/task-manager-run.sh',
       'scripts/inbound-triage-run.sh', 'scripts/handback-poll-run.sh',
-      'scripts/signin-pickup-run.sh'];
+      'scripts/signin-pickup-run.sh', 'scripts/roy-assistant-run.sh'];
     for (const f of robot) expect(existsSync(resolve(ROOT, f)), `missing: ${f}`).toBe(true);
     const code = [
       'import importlib.util, json, sys',
