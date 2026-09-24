@@ -795,6 +795,11 @@ def run_spotify(day, task_id, plan_path, title, test, pod):
     if test:
         pod["status"] = "reviewed"; return "Spotify episode filled to the Review step (test mode, not published)"
     status, snippet = spotify.verify_published(title)
+    if status == "missing":
+        # Publish was pressed and its proof appeared (run_plan returns only then), but the list check reads the first page
+        # only, and Untitled drafts had filled it: 2070 went live at 20:20 on 24 Sep 2026 and was recorded "missing", so
+        # nothing asked for its link again. Processing: sync reads the public page for the link, as for any new episode.
+        status, snippet = "processing", "not on the list's first page after a confirmed Publish (%s)" % snippet
     pod["status"] = status; pod["list_snippet"] = snippet
     link = spotify.public_link(title) if status == "published" else ""
     if link: pod["link"] = link
@@ -1884,6 +1889,17 @@ def selftest():
     # 21 Sep 2026: a 'published' episode with no link is asked again, for three days, then left alone
     t0 = dt.datetime(2026, 9, 21, 12, 0, tzinfo=dt.timezone.utc)
     assert spotify_link_due({"title": "Episode 2061 - x", "status": "published", "started": "2026-09-19T05:00:00Z"}, t0), "2061's case: published, no link"
+    import types as _ty, contextlib, io
+    _sp = _ty.SimpleNamespace(run_plan=lambda *a: {"ok": True}, verify_published=lambda t: ("missing", "title not in the first page of episodes"),
+                              public_link=lambda t: "")
+    _saved_sp = sys.modules.get("spotify"); sys.modules["spotify"] = _sp
+    try:
+        pod_m = {}
+        with contextlib.redirect_stdout(io.StringIO()): run_spotify(2070, "rec", "/p.json", "Episode 2070 - T", False, pod_m)
+        assert pod_m["status"] == "processing" and spotify_link_due(dict(pod_m, title="Episode 2070 - T", started=now_utc())), pod_m
+    finally:
+        if _saved_sp is not None: sys.modules["spotify"] = _saved_sp
+        else: sys.modules.pop("spotify", None)
     assert spotify_link_due({"title": "t", "status": "processing"}, t0), "processing is still asked"
     assert not spotify_link_due({"title": "t", "status": "published", "started": "2026-09-19T05:00:00Z", "link": "https://open.spotify.com/episode/x"}, t0), "a link ends it"
     assert not spotify_link_due({"title": "t", "status": "published", "started": "2026-09-17T11:00:00Z"}, t0), "after three days the page no longer shows it"
