@@ -1064,6 +1064,7 @@ def resubmit_due(day, ledger, receipt_mtime, card, full_fields):
     if (card or {}).get("verdict") != "changes": return "the card is not sent back"
     mine = [v for v in ledger.values() if v.get("episode") == day or (v.get("day") == day and not v.get("episode"))]
     if any(v.get("status") in ("new", "pulled", "pulling", "rendering") for v in mine): return "a clip of the day is still waiting to render"
+    if any(v.get("status") == "failed" for v in mine): return "a clip of the day failed to render; it goes back once that is put right"   # never part 1 alone (review, 24 Sep 2026)
     ep = [v for v in mine if v.get("role") == "episode" and v.get("status") == "rendered"]
     if not ep: return "the episode has not rendered"
     if max((v.get("rendered") or "") for v in ep) < dt.datetime.fromtimestamp(receipt_mtime).isoformat(timespec="seconds"):
@@ -1190,6 +1191,7 @@ def _selftest_parts():
     assert resubmit_due(2071, led, t0, card, fullf) == "", "re-rendered after the receipt, nothing waiting, copy written: goes back"
     assert "not rendered since" in resubmit_due(2071, dict(led, p2=dict(led["p2"], rendered="2026-09-24T00:46:50")), t0, card, fullf)
     assert "still waiting" in resubmit_due(2071, dict(led, p1={"day": 2071, "status": "new"}), t0, card, fullf)
+    assert "failed" in resubmit_due(2071, dict(led, p3={"day": 2071, "episode": 2071, "status": "failed"}), t0, card, fullf), "a failed part holds the card"
     assert "copy" in resubmit_due(2071, led, t0, card, {"YouTube Copy": ""}) and "not sent back" in resubmit_due(2071, led, t0, {"verdict": "approved"}, fullf)
     assert "older than the render" in resubmit_due(2071, led, t0, card, {"YouTube Copy": "x", "AI Last Run": "2026-09-23T22:48:00.000Z"}), "yesterday's copy is not today's"
     import platform_copy as _pc
