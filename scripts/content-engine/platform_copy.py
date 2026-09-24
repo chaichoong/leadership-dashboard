@@ -217,14 +217,15 @@ def split_sections(text, ctype):
 
 KM_RE = re.compile(r"(\d[\d,]*(?:\.\d+)?)\s?km\b", re.I)
 KM_LEFT = r"to go|to run|to cover|left|remain|still"
-KM_DONE = r"\b(?:down|behind|covered|done|so far|in the bank|logged|completed|in)\b"
+KM_DONE = r"\b(?:down|behind|covered|done|so far|in the bank|logged|completed)\b"
+KM_IN_RE = re.compile(r"^\s*in\b(?!\s+total)", re.I)          # "15,899km in" is km done; a bare "in" elsewhere is not
 
 
 def _nearest(text, from_end=False):
-    """'left', 'done' or None: the direction word nearest the figure (the first after it, or the last before it)."""
-    hits = [(x.start(), "left") for x in re.finditer(KM_LEFT, text)] + [(x.start(), "done") for x in re.finditer(KM_DONE, text)]
+    """(start, end, 'left'|'done') of the direction word nearest the figure (the first after it, or the last before it), or None."""
+    hits = [(x.start(), x.end(), "left") for x in re.finditer(KM_LEFT, text)] + [(x.start(), x.end(), "done") for x in re.finditer(KM_DONE, text)]
     if not hits: return None
-    return (max(hits) if from_end else min(hits))[1]
+    return max(hits) if from_end else min(hits)
 MISSION_KM = 40075.0
 
 
@@ -253,9 +254,12 @@ def check_km(t, cum, transcript=""):
         # 19,385km left" read the second figure's "left" and made the first the km left ("24,098km down, 24,098km left").
         nxt = min([a for a, _ in spans if a >= m.end()] + [len(t)]); prv = max([b for _, b in spans if b <= m.start()] + [0])
         tail = re.split(r"[.!?\n]", t[m.end():nxt], 1)[0].lower()
-        head = re.split(r"[.!?\n]", t[prv:m.start()][::-1], 1)[0][::-1].lower()
-        side = _nearest(tail) or _nearest(head, from_end=True)       # the word nearest the figure wins (review, 24 Sep 2026)
-        want = left if side == "left" else cum
+        gap = t[prv:m.start()]; head = re.split(r"[.!?\n]", gap[::-1], 1)[0][::-1].lower()
+        if prv and len(head) == len(gap):
+            own = _nearest(head)          # same sentence as the figure before: the first word after THAT figure is its own
+            if own: head = head[own[1]:]
+        hit = ("done",) if KM_IN_RE.match(tail) else (_nearest(tail) or _nearest(head, from_end=True))   # nearest word wins (review, 24 Sep 2026)
+        want = left if hit and hit[-1] == "left" else cum
         issues.append("distance %skm is not the day's Strava figure; corrected to %s" % (raw, fmt_km(want, raw)))
         return fmt_km(want, raw)
     return KM_RE.sub(fix, t), issues
@@ -477,7 +481,10 @@ def selftest():
                        ("19,385km to go and 20,690km behind me.", "24,098km to go and 15,977km behind me"),
                        ("15,899km in, with 24,175km to go.", "15,977km in, with 24,098km to go"),
                        ("20,690km in, still 19,385km to go.", "15,977km in, still 24,098km to go"),
-                       ("20,690km down and still 19,385km to run.", "15,977km down and still 24,098km to run")):
+                       ("20,690km down and still 19,385km to run.", "15,977km down and still 24,098km to run"),
+                       ("Still to go in the lap: 19,385km.", "24,098km"), ("19,385km in total still to go.", "24,098km in total"),
+                       ("I have 24,000km left, after 16,000km.", "24,098km left, after 15,977km"),
+                       ("Roughly 20,690km down, 19,385km left toward the 40,075km lap.", "15,977km down, 24,098km left")):
         got = rules_check({"LinkedIn Copy": said}, "", km=15977.0)[0]["LinkedIn Copy"]
         assert want in got, (said, got)          # the reviewer's cases, 24 Sep 2026
     f5, i5 = rules_check({"Facebook Post Copy": "15,899.70km logged of 40,075km"}, "", km=15899.70); assert not i5 and f5["Facebook Post Copy"].startswith("15,899.70km"), "the right figure passes untouched"
