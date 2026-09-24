@@ -30,3 +30,21 @@ describe('Spotify upload waits read the page, not the copy', () => {
     } finally { await browser.close(); }
   }, 30000);
 });
+
+describe('the Spotify thumbnail is confirmed selected before Next (2061, 2068, 2069 went out with a frame)', () => {
+  const sel = JSON.parse(execFileSync('python3', ['-c', 'import json, spotify; print(json.dumps(spotify.THUMB_SELECTED))'], { cwd: DIR, encoding: 'utf8' }));
+  const tile = (checked, inner) => '<button role="radio" aria-checked="' + checked + '" type="button">' + inner + '</button>';
+  it('matches only when the checked tile is the uploaded image, never a frame', async () => {
+    const browser = await chromium.launch();
+    try {
+      const page = await browser.newPage();
+      await page.setContent('<div id="thumbnail-list" role="radiogroup">' + tile(true, '<canvas></canvas>') + tile(false, '<img alt="Uploaded thumbnail" src="data:,">') + '</div>');
+      expect(await page.locator(sel).count()).toBe(0);                 // frame 1 selected: the 2061/2068/2069 state
+      await page.setContent('<div id="thumbnail-list" role="radiogroup">' + tile(true, '<img alt="Uploaded thumbnail" src="data:,">') + tile(false, '<canvas></canvas>') + '</div>');
+      expect(await page.locator(sel).count()).toBe(1);                 // the branded upload selected
+      await page.setContent('<div id="thumbnail-list" role="radiogroup">' + tile(true, '<img src="data:,">') + '</div>');
+      expect(await page.locator(sel).count()).toBe(1);                 // whatever alt text the wizard gives it
+    } finally { await browser.close(); }
+  }, 30000);
+});
+
