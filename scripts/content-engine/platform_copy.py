@@ -63,8 +63,10 @@ TYPES = {
 # so 2069's teasers had no copy at all. Proved 24 Sep 2026: one prompt, hooks on ends "Safe to close? Yes", hooks off
 # comes back clean. The copy is published word for word, so it must never carry anything a session rule adds.
 NO_HOOKS = '{"disableAllHooks": true}'
-# Lines only a session rule writes. A reply is cut at the first one; a field that still holds one is never written.
-SESSION_TEXT_RE = re.compile(r"^[ \t>*#_-]*(CLOSE-OUT\b|GOAL CHECK\b|MODEL CHECK\b|Safe to close\?|Goal met\?|What was written down\b)", re.I | re.M)
+# Lines only a session rule writes, in the exact case the rules write them: "Goal check: 15,899km" or "Close-out of the
+# week" is ordinary copy (review, 24 Sep 2026). A reply is cut at the first one only when no section label follows it;
+# a field that still holds one is never written, and a cut that loses a section writes nothing.
+SESSION_TEXT_RE = re.compile(r"^[ \t>*#_-]*(CLOSE-OUT\b|GOAL CHECK\b|MODEL CHECK\b|Safe to close\? (?:Yes|No)\b|Goal met\? (?:Yes|No)\b)", re.M)
 
 
 def session_text_in(text):
@@ -73,12 +75,30 @@ def session_text_in(text):
     return m.group(1) if m else None
 
 
+ALL_LABELS = sorted({label for t in TYPES.values() for label, _ in t["sections"]})
+# a section heading is a label on a line of its own ("PODCAST POST", "**PODCAST POST:**"); a close-out that lists
+# "- Blog article + SEO title, DONE NOW" names a section without being one (2069, 24 Sep 2026)
+HEADING_RE = re.compile(r"^[ \t#*>_]*(?:%s)[ \t*:_]*$" % "|".join(re.escape(l) for l in ALL_LABELS), re.I | re.M)
+
+
 def strip_session_text(text):
-    """(text cut before the first session-rule line and any '---' rule above it, True if anything was cut)."""
+    """(text cut before the first session-rule line and any '---' rule above it, True if anything was cut). Only a
+    TRAILING block is cut: when a section label follows the marker, nothing is cut and the field check refuses instead."""
     m = SESSION_TEXT_RE.search(text or "")
     if not m: return text, False
+    if HEADING_RE.search(text[m.start():]): return text, False
     head = re.sub(r"(?:\s*\n)?[ \t]*(?:-{3,}|\*{3,}|_{3,})?\s*$", "", text[:m.start()])
     return head.rstrip(), True
+
+
+def clean_fields(fields):
+    """{field: cleaned} for every copy field holding a trailing session block (the stored-copy repair: status untouched)."""
+    out = {}
+    for field, val in (fields or {}).items():
+        if (field.endswith("Copy") or field == "Blog Post Description") and isinstance(val, str) and session_text_in(val):
+            new, cut = strip_session_text(val)
+            if cut and not session_text_in(new): out[field] = new
+    return out
 
 
 def session_leak(recs):
@@ -293,6 +313,8 @@ def generate_for(rec, ctype, transcript, day, yt_full_link):
     if not fields: raise SystemExit("no sections parsed for %s; first 300 chars: %r" % (name, text[:300]))
     left = [(f, session_text_in(v)) for f, v in fields.items() if session_text_in(v)]
     if left: raise SystemExit("%s: session text in %s; nothing written" % (name, ", ".join("%s (%s)" % x for x in left)))
+    if cut and len(fields) < len(TYPES[ctype]["sections"]):
+        raise SystemExit("%s: session text cut and %d of %d sections left; nothing written" % (name, len(fields), len(TYPES[ctype]["sections"])))
     fields, issues = rules_check(fields, transcript + "\n" + prompt, km)   # the prompt's own figures (day, km so far, km left) are sourced; any other distance is corrected
     if cut: issues.insert(0, "session text cut from the reply")
     fields.update({"AI Generated": True, "AI Feature": "Copywriting", "AI Last Run": dt.datetime.now(dt.timezone.utc).isoformat(),
@@ -341,6 +363,26 @@ def unfilled_work(records):
         ctype = rec["fields"].get("Content Type")
         if m and ctype in TYPES: out.append((int(m.group(1)), ctype))
     return sorted(set(out))
+
+
+def clean_day(day, dry_run=False):
+    """Strip a trailing session block from the stored copy of one episode's three records; nothing else changes (no
+    regeneration, no status change, so an approved or live episode stays where it is). Returns {record id: [fields]}."""
+    done = {}
+    for ctype in TYPES:
+        rec = find_by_name(record_name(day, ctype))
+        if not rec: continue
+        fix = clean_fields(rec["fields"])
+        left = [f for f, v in rec["fields"].items() if isinstance(v, str) and (f.endswith("Copy") or f == "Blog Post Description") and session_text_in(v) and f not in fix]
+        if left: print("Episode %d %s: session text in %s is not a trailing block; left for a person" % (day, ctype, ", ".join(left)), file=sys.stderr)
+        if not fix: continue
+        if not dry_run:
+            note = "session text removed from %s %s" % (", ".join(sorted(fix)), dt.date.today().isoformat())
+            fix2 = dict(fix); fix2["Notes"] = ((rec["fields"].get("Notes") or "") + "\n" + note).strip()[:2000]
+            watch._airtable("PATCH", watch.API + "/" + rec["id"], {"fields": fix2})
+        done[rec["id"]] = sorted(fix)
+        print("Episode %d %s: session text %s from %s" % (day, ctype, "would be removed" if dry_run else "removed", ", ".join(sorted(fix))))
+    return done
 
 
 def run_pending(limit=3):
@@ -435,8 +477,17 @@ def _selftest_session_text():
     assert split_sections(clean, "Short Form Video")["YouTube Reels Copy"].endswith("#vibramfivefingers")
     ok = "PODCAST POST\nTitle: Day 2067\nDescription: I ran at midnight.\n\nHashtags: #runstreak"
     assert strip_session_text(ok) == (ok, False) and session_text_in(ok) is None, "clean copy passes untouched"
-    assert session_text_in("fine\nSafe to close? Yes") == "Safe to close?" and session_text_in("**GOAL CHECK**") == "GOAL CHECK"
+    assert session_text_in("fine\nSafe to close? Yes") == "Safe to close? Yes" and session_text_in("**GOAL CHECK**") == "GOAL CHECK"
     assert session_text_in("I was not safe to close the gap on the leader") is None, "only a line that starts with the marker counts"
+    for ordinary in ("Goal check: 15,899km of 40,075km", "Goal met? Not yet.", "What was written down in my diary today",
+                     "Close-out of the week: 7 runs", "## Goal Check", "Safe to close? Only if the road is clear"):
+        assert session_text_in(ordinary) is None, ordinary          # the reviewer's false positives, 24 Sep 2026
+    listed = "PODCAST POST\nTitle: T\n\n---\n\nCLOSE-OUT\n\nDeliverables:\n- Blog article + SEO title, DONE NOW\n- Podcast post, DONE NOW\n\nSafe to close? Yes"
+    assert strip_session_text(listed) == ("PODCAST POST\nTitle: T", True), "a close-out that lists the sections is still a trailing block (2069)"
+    mid = "FACEBOOK POST\nDay 2070.\nCLOSE-OUT\nINSTAGRAM POST\nig"
+    assert strip_session_text(mid) == (mid, False), "a marker with a section after it is never cut; the field check refuses it"
+    fixed = clean_fields({"Podcast Copy": leaked.replace("YOUTUBE REELS POST\n", ""), "Blog Copy": "clean", "Transcription": "CLOSE-OUT"})
+    assert list(fixed) == ["Podcast Copy"] and fixed["Podcast Copy"].endswith("#vibramfivefingers"), fixed
     recs = {"Long Form Video": {"fields": {"Podcast Copy": "x\n\nCLOSE-OUT\nSafe to close? Yes", "Transcription": "CLOSE-OUT"}},
             "Short Form Video": {"fields": {"TikTok Copy": "clean"}}, "Learnings From My Diary": None}
     assert session_leak(recs) == [("Long Form Video", "Podcast Copy", "CLOSE-OUT")], session_leak(recs)
@@ -458,9 +509,10 @@ def _selftest_session_text():
 if __name__ == "__main__":
     ap = argparse.ArgumentParser()
     ap.add_argument("mode"); ap.add_argument("--day", type=int, default=0); ap.add_argument("--pending", action="store_true")
-    ap.add_argument("--limit", type=int, default=3); ap.add_argument("--only", default=None)
+    ap.add_argument("--limit", type=int, default=3); ap.add_argument("--only", default=None); ap.add_argument("--dry-run", action="store_true")
     a = ap.parse_args()
     if a.mode == "selftest": selftest()
     elif a.mode == "run" and a.day: run_day(a.day, [a.only] if a.only else None)
     elif a.mode == "run" and a.pending: run_pending(a.limit)
-    else: raise SystemExit("usage: platform_copy.py run --day N | run --pending | selftest")
+    elif a.mode == "clean" and a.day: clean_day(a.day, dry_run=a.dry_run)
+    else: raise SystemExit("usage: platform_copy.py run --day N | run --pending | clean --day N [--dry-run] | selftest")

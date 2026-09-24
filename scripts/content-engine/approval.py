@@ -114,8 +114,8 @@ def build_card(day, full, lfmd=None, short=None, headline="", pans_lines=None, p
     review = []
     for rec in (full, lfmd, short):
         note = ((rec or {}).get("fields", {}).get("Notes") or "")
-        m = re.search(r"review: (.+)", note)
-        if m: review.append(m.group(1).strip())
+        hits = re.findall(r"review: (.+)", note, re.I)          # the writer notes "REVIEW:"; a lowercase-only search missed every one (24 Sep 2026)
+        if hits: review.append(hits[-1].strip())
     checks = ("Rules check flagged: " + " | ".join(review)) if review else "Rules check: nothing flagged (UK English, no em dashes, no figures that are not in the transcript)."
     closing = closing_line(publish_mode())
     pans_block = "\n".join(pans_lines) if pans_lines else ""
@@ -231,7 +231,7 @@ def output_gate(day, ledger, state, recs=None):
     leak = pc.session_leak(recs) if recs else []
     if leak:
         ok = False
-        failures = list(failures) + [("copy holds session text", "%s %s (%s); regenerate: platform_copy.py run --day %d" % (c, f, m, day)) for c, f, m in leak]
+        failures = list(failures) + [("copy holds session text", "%s %s (%s); remove it: platform_copy.py clean --day %d" % (c, f, m, day)) for c, f, m in leak]
     full_f = ((recs or {}).get("Long Form Video") or {}).get("fields") or {}
     for ctype, link in (("Learnings From My Diary", "Reframed Video URL"), ("Short Form Video", "Summary Video URL")):
         # a clip with no copy would publish nothing for it (2069's teasers, 23 Sep 2026); the nightly copy step retries it
@@ -259,7 +259,7 @@ def recheck_gate(day):
     Returns True when the gate passes; a failure is recorded exactly as output_gate records it."""
     state = load_state()
     had, before = str(day) in state, dict(state.get(str(day)) or {})
-    ok = output_gate(day, watch.load_ledger(), state) is not None
+    ok = output_gate(day, watch.load_ledger(), state, bundle(day)) is not None      # with the copy: a rebuild never clears a copy block
     if not ok and (state.get(str(day)) or {}).get("qa_waiting"):
         # files not readable yet is no verdict on the rebuilt files, and nothing retries a wait on an approved card:
         # the entry goes back exactly as it was, an old block included, never a wait nothing will clear (review, 21 Sep 2026)

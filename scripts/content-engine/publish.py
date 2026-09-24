@@ -928,8 +928,9 @@ def share_to_facebook_profile(day, entry, state, clip="summary"):
     recs = bundle(int(day))
     copy = ((recs.get(spec["record"]) or {}).get("fields", {}).get(spec["field"]) or "").strip()
     if pc.session_text_in(copy):
-        print("episode %s: Facebook profile share NOT made: session text in %s" % (day, spec["field"]), file=sys.stderr)
-        return False
+        fb["status"] = "copy-blocked"
+        print("episode %s: Facebook profile share NOT made: session text in %s (remove it: platform_copy.py clean --day %s)" % (day, spec["field"], day), file=sys.stderr)
+        return True
     # a catch-up looks further down the reels list: 2054, 2055, 2056 and 2195 sat beyond a week of
     # two-posts-a-day and read "not on the page yet" every run (20 Sep 2026)
     depth = facebook_share.SCAN_POSTS_CATCHUP if is_catchup(post) else facebook_share.SCAN_POSTS
@@ -1090,7 +1091,7 @@ def run(dry_run=False, limit=3):
         if leak:
             # 24 Sep 2026: a session's close-out block rode on the copy of 2066-2071 onto YouTube and Spotify. The writer now
             # runs with no hooks and cuts such text; this is the last stop before anything is posted, for every stage.
-            print("episode %d: NOT published: session text in %s (regenerate the copy: platform_copy.py run --day %d)"
+            print("episode %d: NOT published: session text in %s (remove it: platform_copy.py clean --day %d)"
                   % (day, ", ".join("%s %s" % (c, f) for c, f, _ in leak), day), file=sys.stderr)
             continue
         test = mode() == "test"
