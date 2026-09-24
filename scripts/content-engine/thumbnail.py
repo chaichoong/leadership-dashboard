@@ -294,8 +294,10 @@ def titles_from_transcript(transcript):
     env = dict(os.environ)
     if os.path.exists(TOKEN_FILE): env["CLAUDE_CODE_OAUTH_TOKEN"] = open(TOKEN_FILE).read().strip()
     r = _allowance().run_guarded("content-engine", [CLAUDE, "-p", TITLE_PROMPT % transcript[:2000], "--system-prompt", system, "--model", "sonnet",
-                        "--output-format", "json", "--tools", "", "--max-turns", "1"], capture_output=True, text=True, env=env, timeout=300)
-    if r.returncode != 0: raise SystemExit("claude failed: " + r.stderr[-300:])
+                        "--output-format", "json", "--tools", "", "--max-turns", "1",
+                        "--settings", '{"disableAllHooks": true}'],   # no session rules in a published title (platform_copy.NO_HOOKS, 24 Sep 2026)
+                        capture_output=True, text=True, env=env, timeout=300)
+    if r.returncode != 0: raise SystemExit(_allowance().claude_error(r))
     out = json.loads(r.stdout).get("result", "")
     l1 = re.search(r"LINE1:\s*(.+)", out, re.I); l2 = re.search(r"LINE2:\s*(.+)", out, re.I)
     return (l1.group(1).strip().upper() if l1 else ""), (l2.group(1).strip().upper() if l2 else "")

@@ -9,7 +9,8 @@ to anyone. "Only call it for approved work" is a rule written in a memory file,
 and a rule in prose is not a control.
 
 This script is the CONTROL. It is how agents send email, and it refuses to send
-unless Airtable shows Kevin approved the task, sending the approved words
+unless Airtable shows Kevin approved the task in an approval surface (the
+dashboard queue, the Tasks drawer or Slack), sending the approved words
 verbatim. There is no --force, no --yes, and no way to pass a recipient or a
 body on the command line. The ONLY source of the email is the Agent Output of an
 approved Correspondence task. So:
@@ -83,11 +84,13 @@ from datetime import datetime, timezone
 # prepended by one script and rejected by the other.
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from adobe_audit import audit_problem  # noqa: E402
+from approval_evidence import approval_evidence_problem  # noqa: E402
 from agent_email_format import (  # noqa: E402
     EmailFormatError,
     parse_output as parse_email_output,
     BUSINESS_SENDER,
     BUSINESS_BRAND_RE,
+    PROPERTY_SENDER,
     rule_send_problem,
 )
 
@@ -108,6 +111,9 @@ AF = {
     "notes":           "fldR7apBzSp3oxFxz",
     # Read only by a rule send (17 Sep 2026): a redirect goes to this address alone.
     "inboundSender":   "fldzf4xlbrQuktx0i",
+    # The two marks only a real approval leaves (finding 20260922-agent-dispatch-572).
+    "sentForApprovalBy": "fld30Yw8SWYVp049g",
+    "approvedAt":        "fldr4Mvf2RzKvhZhi",
 }
 
 APPROVED = ("Approved as-is", "Approved with minor edits")
@@ -279,6 +285,12 @@ def parse_output(output, task_id):
                  "See the format in this script's docstring.")
 
 
+# ─── WAS IT REALLY APPROVED? ─────────────────────────────────────────
+# Finding 20260922-agent-dispatch-572: the Approval Outcome string alone is not an approval. The
+# check, its history and its limit live in scripts/approval_evidence.py, shared with
+# calendar-write.py. AF["sentForApprovalBy"] and AF["approvedAt"] above name the same two fields.
+
+
 def load_approved(task_id, require_approval=True, rule=None):
     rec = get_task(task_id)
     f = rec.get("fields", {})
@@ -311,8 +323,17 @@ def load_approved(task_id, require_approval=True, rule=None):
             f"REFUSED: task {task_id} ({name}) is not approved.\n"
             f"         Approval Outcome = {outcome or '(empty)'}, "
             f"Status = {status or '(empty)'}.\n"
-            "         Nothing is sent until Kevin approves it in Airtable "
+            "         Nothing is sent until Kevin approves it in the dashboard queue "
             "or Slack."
+        )
+    evidence = approval_evidence_problem(f, rec.get("createdTime", ""))
+    if require_approval and evidence:
+        sys.exit(
+            f"REFUSED: task {task_id} ({name}) reads {outcome!r}, but {evidence}.\n"
+            "         Only an approval Kevin gives in an approval surface (the dashboard\n"
+            "         queue, the Tasks drawer or Slack) sends. A task\n"
+            "         raised under an approved parent goes through the gate itself\n"
+            "         (agent-dispatch.py submit) or qualifies for a rule send (--rule)."
         )
     if require_approval and ttype != "Correspondence":
         sys.exit(f"REFUSED: task {task_id} is Task Type {ttype or '(empty)'}, "
@@ -321,7 +342,7 @@ def load_approved(task_id, require_approval=True, rule=None):
         sys.exit(f"ERROR: task {task_id} has an empty Agent Output")
 
     parsed = parse_output(output, task_id)
-    parsed.update({"taskName": name, "outcome": outcome})
+    parsed.update({"taskName": name, "outcome": outcome, "approvalProblem": evidence})
     return parsed
 
 
@@ -447,7 +468,9 @@ def cmd_send(args):
                           "approvalOutcome": mail["outcome"]
                           or "(not yet approved)",
                           "wouldSend": bool(mail["outcome"] in APPROVED)
+                          and not mail.get("approvalProblem")
                           and not sender_problem,
+                          "approvalProblem": mail.get("approvalProblem") or None,
                           "from": mail["from"] or "(worker default: kevinbrittain@gmail.com)",
                           "senderProblem": sender_problem or None,
                           "to": mail["to"], "cc": mail["cc"],
@@ -543,12 +566,23 @@ def team_roster():
     Imported rather than copied: a second list of who may be emailed is how an
     address gets added in one file and trusted in the other.
     """
-    spec = importlib.util.spec_from_file_location(
-        "ad", os.path.join(os.path.dirname(os.path.abspath(__file__)),
-                           "agent-dispatch.py"))
-    ad = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(ad)
+    ad = dispatch_module()
     return ad.HUMANS, ad.TIER1_PATTERNS, ad.tier_match
+
+
+_DISPATCH = {}
+
+
+def dispatch_module():
+    """agent-dispatch.py, loaded once: the roster and the Roy-request rule live there."""
+    if "ad" not in _DISPATCH:
+        spec = importlib.util.spec_from_file_location(
+            "ad", os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                               "agent-dispatch.py"))
+        ad = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(ad)
+        _DISPATCH["ad"] = ad
+    return _DISPATCH["ad"]
 
 
 def cmd_notify(args):
@@ -573,6 +607,13 @@ def cmd_notify(args):
                  "private legal and financial matter is never emailed onward, "
                  "not even to the team.")
 
+    # ROY WORKS IN info@ (Kevin, 24 Sep 2026). His task emails went to his
+    # personal Gmail and promised "reply and it will be logged"; nothing read
+    # the replies, and 46 of his tasks sat untouched. Now they go to info@ as
+    # one of his assistant's notes, and a reply to one is a request that
+    # roy-assistant.py turns into an update on this task (task-update).
+    roy_addr = next((e for e, h in humans.items() if h.get("name") == "Roy Lavin"), "")
+    to_roy = bool(roy_addr) and to == roy_addr
     # The point of the email is that Roy can ACT without the app. So it carries
     # the work, not a link to it: he has no login to follow.
     parts = [f"{who['name']},", "",
@@ -585,13 +626,21 @@ def cmd_notify(args):
         parts += ["", "WHAT WE FOUND", output]
     if args.reason:
         parts += ["", f"WHY IT IS YOURS: {args.reason}"]
-    parts += ["", "Reply to this email with what you have done and it will be "
-              "logged against the task.", "", "Kevin"]
+    if to_roy:
+        parts += ["", "Reply to this email with what you have done, or \"done\" when it "
+                  "is finished. Your assistant records it on the task.", "",
+                  f"Ref: {args.task}", "Kevin"]
+        deliver = {"to": ROY_INBOX, "from": ROY_INBOX,
+                   "subject": f"{ROY_NOTE_PREFIX} a task is yours - {name}"[:150]}
+    else:
+        parts += ["", "Reply to this email with what you have done and it will be "
+                  "logged against the task.", "", "Kevin"]
+        deliver = {"to": to, "subject": f"{TEAM_NOTIFY_SUBJECT}: {name}"}
     body = "\n".join(parts)
 
     if args.dry_run:
         print(json.dumps({"dryRun": True, "to": to, "name": who["name"],
-                          "subject": f"{TEAM_NOTIFY_SUBJECT}: {name}",
+                          "deliveredTo": deliver["to"], "subject": deliver["subject"],
                           "bodyChars": len(body), "tier1": False}, indent=2))
         return
 
@@ -603,16 +652,112 @@ def cmd_notify(args):
         return
 
     ledger_append({"task": args.task, "ts": now_iso(), "event": "intent",
-                   "to": [to], "cc": [], "subject": TEAM_NOTIFY_SUBJECT})
-    result = worker_call(SEND_URL, {"to": to,
-                                    "subject": f"{TEAM_NOTIFY_SUBJECT}: {name}",
-                                    "text": body})
+                   "to": [deliver["to"]], "cc": [], "subject": deliver["subject"]})
+    result = worker_call(SEND_URL, {**deliver, "text": body})
     ledger_append({"task": args.task, "ts": now_iso(), "event": "sent",
-                   "from": "(default)", "to": [to], "cc": [],
-                   "subject": TEAM_NOTIFY_SUBJECT, "taskName": name,
+                   "from": deliver.get("from", "(default)"), "to": [deliver["to"]], "cc": [],
+                   "subject": deliver["subject"], "taskName": name,
                    "messageId": result.get("id")})
-    print(json.dumps({"notified": args.task, "to": to, "name": who["name"],
+    print(json.dumps({"notified": args.task, "to": deliver["to"], "name": who["name"],
                       "messageId": result.get("id")}))
+
+
+# ─── NOTES TO ROY ABOUT HIS OWN REQUESTS (Roy's assistant, 24 Sep 2026) ──
+#
+# Roy forwards a message from info@agilelets.co.uk to itself and
+# scripts/roy-assistant.py tells him, by email to that same inbox, what became
+# of it: got it, the answer, with Kevin, sent, not sent. Those words are built
+# by roy-assistant.py, so this path takes a body — and is safe to, because it
+# can only ever reach OUR OWN mailboxes:
+#
+#   * the recipient is info@agilelets.co.uk, or Roy's roster address for the
+#     one "forward from info@ please" nudge — nothing else, whatever is asked;
+#   * the task must be a Roy request (ROY: name + the roy-assistant stamp);
+#   * tier-1 content never travels: a tier-1 request gets the fixed private
+#     line and nothing from the task;
+#   * one note per (task, kind), in its OWN ledger, because the sent ledger is
+#     keyed by task alone and `send` would refuse the approved reply after it.
+# The subject always opens ROY_NOTE_PREFIX, which is how roy-assistant.py
+# knows its own mail in info@'s Sent folder and never takes it for a request.
+ROY_INBOX = PROPERTY_SENDER
+ROY_NOTE_PREFIX = "Assistant:"
+ROY_NOTE_KINDS = ("got-it", "answer", "with-kevin", "sent", "not-sent", "closed",
+                  "private", "nudge")
+ROY_NOTE_LEDGER = os.path.join(STATE_DIR, "roy-notes.jsonl")
+ROY_PRIVATE_SUBJECT = ROY_NOTE_PREFIX + " with Kevin"
+ROY_PRIVATE_BODY = ("Roy,\n\nKevin is dealing with this one himself. Nothing more is "
+                    "needed from you.\n\nRoy's assistant")
+
+
+def roy_note_sent(task_id, kind):
+    try:
+        with open(ROY_NOTE_LEDGER) as fh:
+            for line in fh:
+                row = json.loads(line) if line.strip() else {}
+                if (row.get("event") == "sent" and row.get("task") == task_id
+                        and row.get("kind") == kind):
+                    return row
+    except FileNotFoundError:
+        return None
+    return None
+
+
+def send_roy_note(task_id, kind, subject, body, to=ROY_INBOX, dry_run=False):
+    """Send one note to Roy about his own request. Returns a result dict; a
+    refusal raises SystemExit with the reason, like every gate here."""
+    humans, tier1_patterns, tier_match = team_roster()
+    roy_addr = next((e for e, h in humans.items() if h.get("name") == "Roy Lavin"), "")
+    to = (to or "").strip().lower()
+    if to not in {ROY_INBOX, roy_addr}:
+        sys.exit(f"REFUSED: a note to Roy goes to {ROY_INBOX} (or his own address for "
+                 f"the nudge), never {to or '(nobody)'}.")
+    if kind not in ROY_NOTE_KINDS:
+        sys.exit(f"REFUSED: unknown note kind {kind!r}")
+    if kind == "nudge":
+        if to != roy_addr:
+            sys.exit("REFUSED: the nudge goes to Roy's own address only.")
+    else:
+        rec = get_task(task_id)
+        f = rec.get("fields", {}) or {}
+        name = f.get(AF["name"], "") or ""
+        notes = f.get(AF["notes"], "") or ""
+        if not dispatch_module().is_roy_request(name, notes):
+            sys.exit(f"REFUSED: {task_id} is not a request Roy sent through info@.")
+        hit = tier_match(tier1_patterns, name, f.get(AF["description"], "") or "", notes)
+        if hit and kind != "private":
+            sys.exit(f"REFUSED: {task_id} matches tier-1 ({hit!r}); only the fixed "
+                     "private line may go to Roy.")
+    if kind == "private":
+        subject, body = ROY_PRIVATE_SUBJECT, ROY_PRIVATE_BODY
+    subject = (subject or "").replace("\n", " ").strip()
+    if not subject.startswith(ROY_NOTE_PREFIX):
+        sys.exit(f"REFUSED: a note to Roy opens its subject with {ROY_NOTE_PREFIX!r}, so "
+                 "roy-assistant.py never mistakes it for a new request.")
+    if not (body or "").strip():
+        sys.exit("REFUSED: empty note")
+    key = task_id or "nudge"
+    prior = roy_note_sent(key, kind)
+    if prior:
+        return {"skipped": key, "kind": kind, "why": f"already sent at {prior.get('ts')}"}
+    if dry_run:
+        return {"dryRun": True, "task": key, "kind": kind, "to": to, "subject": subject,
+                "bodyChars": len(body)}
+    os.makedirs(STATE_DIR, exist_ok=True)
+    with open(ROY_NOTE_LEDGER, "a") as fh:
+        fh.write(json.dumps({"task": key, "kind": kind, "ts": now_iso(),
+                             "event": "intent", "to": to}) + "\n")
+    result = worker_call(SEND_URL, {"to": to, "from": ROY_INBOX,
+                                    "subject": subject, "text": body})
+    with open(ROY_NOTE_LEDGER, "a") as fh:
+        fh.write(json.dumps({"task": key, "kind": kind, "ts": now_iso(), "event": "sent",
+                             "to": to, "messageId": result.get("id")}) + "\n")
+    return {"noted": key, "kind": kind, "to": to, "messageId": result.get("id")}
+
+
+def cmd_roy_note(args):
+    body = sys.stdin.read()
+    print(json.dumps(send_roy_note(args.task, args.kind, args.subject, body,
+                                   to=args.to or ROY_INBOX, dry_run=args.dry_run)))
 
 
 def cmd_selftest(args):
@@ -822,6 +967,16 @@ def main():
     n.add_argument("--reason", default="", help="why it is theirs")
     n.add_argument("--dry-run", action="store_true")
     n.set_defaults(func=cmd_notify)
+
+    r = sub.add_parser("roy-note",
+                       help="tell Roy, at info@, what became of his own request "
+                            "(body on STDIN; never a third party)")
+    r.add_argument("task", nargs="?", default="")
+    r.add_argument("--kind", required=True, choices=ROY_NOTE_KINDS)
+    r.add_argument("--subject", default="")
+    r.add_argument("--to", default="")
+    r.add_argument("--dry-run", action="store_true")
+    r.set_defaults(func=cmd_roy_note)
 
     v = sub.add_parser("preview", help="parse and print, never sends")
     v.add_argument("task")

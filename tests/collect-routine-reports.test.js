@@ -186,4 +186,58 @@ describe('collect-routine-reports', () => {
     expect(collect(worktree)).toContain(`ALREADY HERE ${rel}`);
     expect(readFileSync(join(worktree, rel), 'utf8')).toBe('same\n');
   });
+
+  // Finding 20260921-daily-ops-559. monitoring/daily-ops-2026-09-18.md reached
+  // the PUBLIC repo naming an HMRC penalty, a mortgage term ending and a court
+  // order. Masking hides identifiers, not facts, so such a report is HELD.
+  it('HOLDS a report that names a private legal or financial matter, and still collects a clean one', () => {
+    const bad = 'monitoring/daily-ops-2026-09-18.md';
+    const clean = 'monitoring/daily-ops-2026-09-19.md';
+    writeFileSync(join(main, bad), '# ops\n1. The mortgage term ends in three months.\n2. HMRC penalty due.\n');
+    writeFileSync(join(main, clean), '# ops\nAll phases ran. 3 findings filed.\n');
+
+    const out = collect(worktree);
+
+    expect(out).toContain(`HELD (names a private legal or financial matter on 2 line(s)`);
+    expect(out).toContain(bad);
+    expect(existsSync(join(worktree, bad)), 'the private report was copied into the worktree').toBe(false);
+    // Control: the hold is not a blanket refusal.
+    expect(out).toContain(`COLLECTED ${clean}`);
+    expect(existsSync(join(worktree, clean))).toBe(true);
+    // The held words themselves never reach this output, which is committed.
+    expect(out).not.toMatch(/mortgage term|HMRC penalty/i);
+  });
+
+  it('--check says WOULD HOLD and copies nothing', () => {
+    const bad = 'monitoring/task-sweep-2026-09-18.md';
+    writeFileSync(join(main, bad), 'Respond to court order by Friday\n');
+    const out = collect(worktree, ['--check']);
+    expect(out).toContain(`WOULD HOLD`);
+    expect(existsSync(join(worktree, bad))).toBe(false);
+  });
+
+  it('does not hold on a word that merely contains a matter word', () => {
+    // Guards against a pattern that loses its \b anchors and starts holding
+    // every report: "HMRCX2" is not the word HMRC.
+    const rel = 'monitoring/daily-ops-2026-09-20.md';
+    writeFileSync(join(main, rel), 'HMRCX2 code path; courtroom; enforcement queue\n');
+    expect(collect(worktree)).toContain(`COLLECTED ${rel}`);
+  });
+
+  // Kevin, 24 Sep 2026: the daily-ops report never travels, whatever it says. Read with the REAL
+  // ignore rules from this repo, not the fixture above, so deleting the rule fails here.
+  it('never collects a daily-ops report under the real monitoring/.gitignore, even a harmless one', () => {
+    writeFileSync(join(main, 'monitoring/.gitignore'),
+      readFileSync(resolve(__dirname, '../monitoring/.gitignore'), 'utf8'));
+    git(['add', '-A'], main);
+    git(['commit', '-q', '-m', 'real rules'], main);
+    writeFileSync(join(main, 'monitoring/daily-ops-2026-09-24.md'), '*Daily Ops, x.* Ran fine.\n');
+    writeFileSync(join(main, 'monitoring/task-sweep-2026-09-24.md'), '# sweep\n');
+
+    const out = collect(worktree);
+
+    expect(out).not.toContain('monitoring/daily-ops-2026-09-24.md');
+    expect(out).toContain('COLLECTED monitoring/task-sweep-2026-09-24.md');   // control: collection still works
+    expect(existsSync(join(worktree, 'monitoring/daily-ops-2026-09-24.md'))).toBe(false);
+  });
 });

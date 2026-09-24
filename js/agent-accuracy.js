@@ -253,6 +253,10 @@
         'information only':        { level: 'A', since: '2026-09-04' },
         'calendar entry':          { level: 'A', since: '2026-09-07' },
         'pass to Roy':             { level: 'A', since: '2026-09-07' },
+        // Roy's assistant (24 Sep 2026): an answer to Roy's own request, or a
+        // record of work logged for it, goes to info@ only, so nobody outside sees it.
+        'roy answer':              { level: 'A', since: '2026-09-24' },
+        'roy work logged':         { level: 'A', since: '2026-09-24' },
         'close: judgement':        { level: 'B' },
         'email: reply':            { level: 'B' },
         'email: quote request':    { level: 'B' },
@@ -298,6 +302,8 @@
         if (/^CLOSE PROPOSAL:\s*(?:already (?:handled|done|dealt with)|done already|handled)\b[^\n]*?\brec[A-Za-z0-9]{14}\b/i.test(out)) return 'close: already handled';
         if (up.indexOf('CLOSE PROPOSAL:') === 0) return 'close: judgement';
         if (up.indexOf('PASS TO ROY:') === 0) return 'pass to Roy';
+        if (up.indexOf('ROY ANSWER:') === 0) return 'roy answer';
+        if (up.indexOf('ROY DONE:') === 0) return 'roy work logged';
         if (/^CONTENT/i.test(nm)) return 'content card';
         if (up.indexOf('CALENDAR:') === 0) return 'calendar entry';
         if (up.indexOf('DOCUMENT:') === 0) return 'sign document';

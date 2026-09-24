@@ -49,6 +49,7 @@ const TF = {
   deferredUntil: 'fldJ9IHS1yxwYzYSN',
   verdictReason: 'fldF9Bs4N5mttQvtl',
   lessonWrittenAt: 'fldFfzXOME9Rh8SyM',
+  plainSummary: 'fld3PrM8AJcnWHemG',
 };
 const TM = { name: 'flds7xoRFQhcRTnbB', active: 'fld2YLfcPqSe6b60u', isAi: 'fldKGsz9kTpFypeOr' };
 const AG = {

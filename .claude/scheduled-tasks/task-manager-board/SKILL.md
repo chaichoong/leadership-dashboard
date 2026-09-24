@@ -170,6 +170,25 @@ Before deciding any move, check the AI brain for standing rulings. Paths are in
 - A ruling never overrides the hard rules above. On a conflict, escalate the
   task with the conflict named — never silently pick a side.
 
+## Step 2a — Ownerless tasks (EVERY slot, before the stuck list)
+
+Kevin, 23 Sep 2026: "no task without an owner". Kevin no longer opens a task
+list, so a task nobody holds is a task nobody will ever see. The stuck rule
+waits seven days; a legal task due in October sat with no owner for five
+days and was on no list at all.
+
+`board.json` carries `ownerless`: every open task with no Team Member and no
+Assignee, whatever its age. Give EACH one exactly one move this slot, using
+the Step 2 rules below (tier-1 and legal → `escalate`, creditor → the Supplier
+and Creditor Manager, repairs → `roy`, a domain agent's goal → `route`,
+generic work → the right worker, a system alert or sweep finding → the
+auditor). `leave` is allowed only with a reason ("sweep finding already
+tracked in finding N"), and a left task comes back next slot. Record each in
+`report.json` as usual. **Verify fails the slot** if any `ownerless` id has no
+successful recorded move, so this step cannot be skipped quietly. Report the
+count and where each one went on its own line in Step 5 ("Ownerless: N, all
+given an owner" or the ones left and why).
+
 ## Step 2 — Decide ONE move per stuck task
 
 Work oldest-first, hard deadlines and Overdue first of all. For each stuck task
@@ -376,7 +395,7 @@ exit codes):
 - escalate: `python3 scripts/agent-dispatch.py escalate TASKID --reason "<the one clear ask>"`
   (the reason becomes the card's `DECIDE:` line; no separate annotate)
 - close / pass-to-Roy / in-house finish:
-  `python3 scripts/agent-dispatch.py submit TASKID --agent rec1hYELb4zS8pjjO --type Admin --output-file <path>`
+  `python3 scripts/agent-dispatch.py submit TASKID --agent rec1hYELb4zS8pjjO --type Admin --output-file <path> --plain-task "<what the task is, one short sentence a 13-year-old understands>" --plain-approve "<what happens the moment Kevin taps Approve, one short plain sentence>"`
   (output ends with the mandatory closing line
   `**Carrying this out will involve:** <what happens on approval>`)
 - chase: the route + annotate pair from Step 2 rule 5 (record it with

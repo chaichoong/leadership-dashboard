@@ -89,7 +89,9 @@ describe('content-engine render', () => {
 
   it("works out the episode with Kevin's rule: date first, spoken day as a check, catch-up keeps the spoken day", () => {
     const src = readFileSync(RENDER, 'utf8');
-    expect(src).toContain('watch.resolve_episode(date_day, watch.spoken_day(text)');
+    expect(src).toContain('spoken = watch.spoken_day(text)');
+    expect(src).toContain('watch.resolve_episode(date_day, spoken, prev_day_has_talk=prev_has_talk)');
+    expect(src).toContain('if teaser_for_day_before(role, spoken, date_day, ledger):');   // 2071's summary, recorded the next morning (24 Sep 2026)
     const w = readFileSync(WATCH, 'utf8');
     expect(w).toContain('"catch-up for the missed previous day"');
     expect(w).toMatch(/spoken day %d disagrees with the date/);

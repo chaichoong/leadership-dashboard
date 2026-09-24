@@ -438,3 +438,57 @@ describe('the automatic publish cannot damage the checkout', () => {
         expect(r.stdout, r.stderr).toContain('already matches origin/main');
     }, 60_000);
 });
+
+// ── Finding 20260923-daily-ops-575 ────────────────────────────────────────
+// The job runs under launchd, which hands it PATH=/usr/bin:/bin and sources no
+// shell profile. `tool()` used a bare shutil.which(), so `npx` resolved to None
+// and run_guard_tests() returned "npx not found, cannot run the guard tests"
+// every single night. The job then refused to merge its own work, which is the
+// correct behaviour on a red gate — but the gate could never be green, so PR
+// #516 sat open and the tools list was never published.
+//
+// This drives the real function with the real launchd environment. It does not
+// grep the source: a comment claiming the PATH is enriched proves nothing.
+describe('the nightly job can find its own tools under launchd', () => {
+    // Exactly what launchd gives a job with no profile. HOME is kept because
+    // nvm lives under it and the job legitimately reads ~/.claude.json.
+    const LAUNCHD_ENV = { HOME: process.env.HOME, PATH: '/usr/bin:/bin' };
+
+    const resolve = (name) => {
+        const py = [
+            "import importlib.util",
+            "spec=importlib.util.spec_from_file_location('g','scripts/generate-mcp-inventory.py')",
+            "g=importlib.util.module_from_spec(spec); spec.loader.exec_module(g)",
+            `print(g.tool(${JSON.stringify(name)}) or 'NONE')`,
+        ].join('\n');
+        const r = spawnSync('python3', ['-c', py],
+            { cwd: ROOT, encoding: 'utf8', env: LAUNCHD_ENV });
+        return { out: (r.stdout || '').trim(), err: r.stderr || '' };
+    };
+
+    it('resolves npx on the bare launchd PATH, so the guard tests can run', () => {
+        const { out, err } = resolve('npx');
+        expect(out, `tool("npx") returned nothing under launchd's PATH.\n${err}`)
+            .not.toBe('NONE');
+        expect(out).toMatch(/npx$/);
+    });
+
+    // CONTROL. Without this, the test above would pass just as well on a host
+    // where npx happens to sit in /usr/bin — proving nothing about the fix. The
+    // bare lookup the old code used must still fail on this same environment.
+    it('BACK-TEST: the bare PATH lookup it replaced still finds nothing', () => {
+        const r = spawnSync('python3',
+            ["-c", "import shutil; print(shutil.which('npx') or 'NONE')"],
+            { cwd: ROOT, encoding: 'utf8', env: LAUNCHD_ENV });
+        expect((r.stdout || '').trim(),
+            'npx is on the bare launchd PATH on this host, so the test above '
+            + 'cannot tell a working fix from a lucky environment')
+            .toBe('NONE');
+    });
+
+    it('resolves gh too, so it can open the PR', () => {
+        const { out, err } = resolve('gh');
+        expect(out, `tool("gh") returned nothing under launchd's PATH.\n${err}`)
+            .not.toBe('NONE');
+    });
+});

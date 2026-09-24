@@ -23,6 +23,9 @@ const CHECK = resolve(ROOT, 'tests/helpers/py_undefined_names.py');
 // ["INTRO_LOCAL"]; the repaired file reports [].
 const ESTATE_SCRIPTS = [
   'scripts/content-engine/render.py',
+  'scripts/approval_evidence.py',
+  'scripts/calendar-write.py',
+  'scripts/send-email.py',
   'scripts/content-engine/publish.py',
   'scripts/content-engine/watch.py',
   'scripts/content-engine/approval.py',
@@ -31,7 +34,14 @@ const ESTATE_SCRIPTS = [
   'scripts/content-engine/youtube_studio.py',
   'scripts/content-engine/youtube_ads.py',
   'scripts/content-engine/facebook_share.py',
+  // 24 Sep 2026: PR #545 left a second run_pending in platform_copy.py reading UNFILLED, which the same PR had removed;
+  // the last definition wins in Python, so the night's copy step would have died with NameError behind `|| echo`
+  'scripts/content-engine/platform_copy.py',
+  'scripts/content-engine/spotify.py',
+  'scripts/content-engine/qa.py',
+  'scripts/content-engine/thumbnail.py',
   'scripts/agent-dispatch.py',
+  'scripts/standing_holds.py',
   'scripts/handback-poll.py',
   'scripts/session-keepalive.py',
   'scripts/create-agent-task.py',
@@ -43,6 +53,7 @@ const ESTATE_SCRIPTS = [
   'scripts/agent-accuracy-report.py',
   'scripts/utilita-balance.py',
   'scripts/payment-run.py',
+  'scripts/roy-assistant.py',
   'scripts/private-name-guard.py',
   'scripts/host-move.py',
 ];
@@ -61,5 +72,20 @@ describe('estate scripts read no name they never bind', () => {
     writeFileSync(p, 'import os\ndef f():\n    return os.path.join(INTRO_LOCAL, "x")\n');
     const r = JSON.parse(execFileSync('python3', [CHECK, p], { encoding: 'utf8' }));
     expect(r[p]).toEqual(['INTRO_LOCAL']);
+  });
+});
+
+describe('content engine scripts define each top-level function once', () => {
+  // the second definition silently replaces the first (platform_copy.run_pending, 24 Sep 2026)
+  const out = JSON.parse(execFileSync('python3', ['-c', `
+import ast, collections, glob, json
+res = {}
+for f in sorted(glob.glob("scripts/content-engine/*.py")):
+    c = collections.Counter(n.name for n in ast.parse(open(f).read()).body if isinstance(n, (ast.FunctionDef, ast.ClassDef)))
+    res[f] = sorted(k for k, v in c.items() if v > 1)
+print(json.dumps(res))
+`], { cwd: ROOT, encoding: 'utf8' }));
+  it('no duplicate top-level def', () => {
+    expect(Object.entries(out).filter(([, d]) => d.length)).toEqual([]);
   });
 });

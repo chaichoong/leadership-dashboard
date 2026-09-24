@@ -77,7 +77,7 @@ PROTECTED = (
     "scripts/agent-settings.json", "scripts/agent-tools.sh",
     "scripts/agent-slot-run.sh", "scripts/task-manager-run.sh",
     "scripts/inbound-triage-run.sh", "scripts/handback-poll-run.sh",
-    "scripts/signin-pickup-run.sh",
+    "scripts/signin-pickup-run.sh", "scripts/roy-assistant-run.sh",
 )
 
 

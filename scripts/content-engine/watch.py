@@ -227,12 +227,30 @@ def choose_next(ledger, day=None):
     return sorted(cands)[0][3] if cands else None
 
 
+def part_no(key):
+    """2 for "2071 Full Part 2.insv", 0 for a clip that is not a named part."""
+    m = DAY_NAMED_RE.match((key or "").strip())
+    return int(m.group(3)) if m and m.group(3) else 0
+
+
+def _day_of(v):
+    return v.get("day") if v.get("day") is not None else v.get("date")
+
+
 def waits_for_bigger(key, ledger):
-    """A pulled clip is parked while a bigger clip of the same date is still new, pulled or rendering: the long clip
-    renders first. A parked clip is not in the render queue, so the pull limit never counts it."""
-    e = ledger[key]
-    bigger = [v for k2, v in ledger.items() if k2 != key and v.get("date") == e.get("date") and (v.get("size") or 0) > (e.get("size") or 0)]
-    return any(v.get("status") in ("new", "pulled", "rendering") for v in bigger)
+    """A pulled clip is parked while a bigger clip of the same day is still new, pulled or rendering: the long clip
+    renders first. A parked clip is not in the render queue, so the pull limit never counts it. Named parts go in
+    order whatever their size (24 Sep 2026): part 2 waits for part 1, and part 1 never waits for part 2, because
+    render.py joins a later part onto the part before it and cannot join onto one that has not rendered."""
+    e = ledger[key]; pn = part_no(key)
+    for k2, v in ledger.items():
+        if k2 == key or _day_of(v) != _day_of(e) or v.get("status") not in ("new", "pulled", "rendering"): continue
+        p2 = part_no(k2)
+        if pn and p2:
+            if p2 < pn: return True
+            continue
+        if (v.get("size") or 0) > (e.get("size") or 0): return True
+    return False
 
 
 def pulled_in_queue(ledger):
@@ -462,6 +480,52 @@ def repair_stale_pulls(ledger, work=WORK):
     return fixed
 
 
+ATTACH_DIR = os.path.expanduser("~/knowledge-os/attachments/content-engine")   # spotify.ATTACH_DIR: the lane's upload folder
+LOOSE_KEEP_DAYS = 3        # a hand-made copy in the work folder (a test, a one-off) older than this is debris
+STAGED_KEEP_DAYS = 7       # an episode staged for Spotify goes once its podcast is out, or after this long
+
+
+def clear_leftovers(ledger, work=WORK, attach=ATTACH_DIR, publishing=None, now=None, remove=None):
+    """Delete working copies nothing will read again; returns [(path, bytes)]. 24 Sep 2026: a Learnings rebuild and the
+    daytime one-offs kept their 5-9 GB raw copies and render folders, and every Spotify upload kept its staged episode,
+    until 34 GB sat unused and 2072's pull was refused 1 GB short: no card, nothing to publish the next day. Only copies
+    are removed: a raw clip's original is on Drive and every render output is filed there before its status is set.
+      - a clip (and its render_ folder) whose ledger status is rendered or broll; never pulled/pulling/rendering/new
+      - any other loose file in the work folder older than LOOSE_KEEP_DAYS (hand-made test copies, old upload shrinks)
+      - a staged Spotify file once that episode's podcast is published, or older than STAGED_KEEP_DAYS"""
+    import time as _t
+    now = now or _t.time()
+    remove = remove or (lambda p: shutil.rmtree(p) if os.path.isdir(p) else os.remove(p))
+    done_keys = {k for k, v in ledger.items() if v.get("status") in ("rendered", "broll")}
+    busy_keys = {k for k, v in ledger.items() if v.get("status") in ("pulled", "pulling", "rendering", "new") or v.get("keep_masters")}   # kept for the next part (render.py)
+    def size(p):
+        if os.path.isfile(p): return os.path.getsize(p)
+        return sum(os.path.getsize(os.path.join(r, f)) for r, _, fs in os.walk(p) for f in fs)
+    gone = []
+    def drop(p):
+        n = size(p)
+        try: remove(p); gone.append((p, n))
+        except OSError as ex: print("leftovers: could not remove %s (%s)" % (p, ex), file=sys.stderr)
+    if os.path.isdir(work):
+        for name in sorted(os.listdir(work)):
+            p = os.path.join(work, name)
+            key = name[len("render_"):] + ".insv" if name.startswith("render_") and os.path.isdir(p) else name
+            if key in busy_keys or name.endswith(".part"): continue           # the chooser's and repair_stale_pulls' business
+            if key in done_keys: drop(p)
+            elif os.path.isfile(p) and now - os.path.getmtime(p) > LOOSE_KEEP_DAYS * 86400: drop(p)
+    if os.path.isdir(attach):
+        if publishing is None:
+            try: publishing = json.load(open(os.path.join(os.path.dirname(LEDGER), "publishing.json")))
+            except Exception: publishing = {}
+        for name in sorted(os.listdir(attach)):
+            p = os.path.join(attach, name)
+            if not os.path.isfile(p): continue
+            m = re.match(r"(?:Episode_|Ep)(\d+)_", name)
+            pod = ((publishing.get(m.group(1)) or {}).get("podcast") or {}) if m else {}
+            if pod.get("status") == "published" or now - os.path.getmtime(p) > STAGED_KEEP_DAYS * 86400: drop(p)
+    return gone
+
+
 def pull(ledger, key, work=WORK):
     e = ledger[key]
     waiting = pulled_in_queue(ledger)
@@ -470,6 +534,10 @@ def pull(ledger, key, work=WORK):
     os.makedirs(work, exist_ok=True)
     dest = os.path.join(work, key)
     free = shutil.disk_usage(work).free
+    if free < pull_needs(e["size"]):
+        gone = clear_leftovers(ledger, work)
+        if gone: print("pull: cleared %d leftover working copies (%.1f GB) to make room" % (len(gone), sum(n for _, n in gone) / 1e9))
+        free = shutil.disk_usage(work).free
     if free < pull_needs(e["size"]):
         raise SystemExit("pull: only %.1f GB free, need %.1f GB for %s" % (free / 1e9, pull_needs(e["size"]) / 1e9, key))
     t0 = time.time()
@@ -600,9 +668,54 @@ def _selftest_jam_and_retry():
     assert requeue_failed(led) == [], "nothing is put back twice"
 
 
+def _selftest_part_order():
+    led = {"2071 Full - Part 1.insv": {"day": 2071, "status": "new", "size": 1e9}, "2071 Full Part 2.insv": {"day": 2071, "status": "pulled", "size": 6e9},
+           "013.insv": {"day": 2071, "date": "2026-02-01", "status": "pulled", "size": 5.6e8}, "014.insv": {"day": 2072, "date": "2026-02-01", "status": "new", "size": 6e9}}
+    assert waits_for_bigger("2071 Full Part 2.insv", led), "part 2 waits for part 1 even when it is the bigger file"
+    led["2071 Full - Part 1.insv"]["status"] = "pulled"
+    assert not waits_for_bigger("2071 Full - Part 1.insv", led), "part 1 never waits for part 2"
+    assert waits_for_bigger("013.insv", led), "the teaser waits for its own day's long clips"
+    for k in ("2071 Full - Part 1.insv", "2071 Full Part 2.insv"): led[k]["status"] = "rendered"
+    assert not waits_for_bigger("013.insv", led), "...and not for the next day's clip recorded the same morning"
+    assert waits_for_bigger("b", {"a": {"date": "d", "status": "new", "size": 9}, "b": {"date": "d", "status": "pulled", "size": 1}}), "no day field: the date decides, as before"
+
+
+def _selftest_leftovers():
+    """24 Sep 2026: 34 GB of finished working copies refused 2072's pull. Driven on a temp folder."""
+    import tempfile
+    root = tempfile.mkdtemp(); work = os.path.join(root, "work"); att = os.path.join(root, "att")
+    os.makedirs(os.path.join(work, "render_2060 Full")); os.makedirs(att)
+    old = time.time() - 5 * 86400
+    files = {"2060 Full.insv": 0, "2072 full.insv": 0, "2073 x.insv.part": old, "Ep2057_Summary_local.mp4": old,
+             "upload_Ep2071_LFMD.mp4": 0, "VID_20260201_092348_00_013.insv": old}
+    for n, t in files.items():
+        f = os.path.join(work, n); open(f, "w").write("x" * 10)
+        if t: os.utime(f, (t, t))
+    open(os.path.join(work, "render_2060 Full", "master.mp4"), "w").write("x" * 5)
+    stale = time.time() - 10 * 86400
+    for n, t in {"Episode_2069_Full_Episode.mp4": 0, "Episode_2070_Full_Episode.mp4": old, "Episode_2054_Thumbnail.png": stale, "full": stale}.items():
+        f = os.path.join(att, n); open(f, "w").write("y")
+        if t: os.utime(f, (t, t))
+    os.makedirs(os.path.join(work, "render_2071 Full - Part 1"))
+    ledger = {"2060 Full.insv": {"status": "rendered"}, "2072 full.insv": {"status": "pulled"}, "VID_20260201_092348_00_013.insv": {"status": "new"},
+              "2071 Full - Part 1.insv": {"status": "rendered", "keep_masters": os.path.join(work, "render_2071 Full - Part 1")}}
+    pub = {"2069": {"podcast": {"status": "published"}}, "2070": {"podcast": {"status": "uploading"}}}
+    gone = sorted(os.path.relpath(p, root) for p, _ in clear_leftovers(ledger, work, att, pub))
+    assert gone == ["att/Episode_2054_Thumbnail.png", "att/Episode_2069_Full_Episode.mp4", "att/full", "work/2060 Full.insv",
+                    "work/Ep2057_Summary_local.mp4", "work/render_2060 Full"], gone
+    left = sorted(os.listdir(work))
+    assert left == ["2072 full.insv", "2073 x.insv.part", "VID_20260201_092348_00_013.insv", "render_2071 Full - Part 1", "upload_Ep2071_LFMD.mp4"], \
+        "a clip waiting to render, a pull in flight, part 1's kept masters and a fresh file stay: %s" % left
+    assert os.listdir(att) == ["Episode_2070_Full_Episode.mp4"], "a podcast not out yet keeps its staged file"
+    assert clear_leftovers(ledger, work, att, pub) == [], "nothing twice"
+    shutil.rmtree(root)
+
+
 def selftest():
     _selftest_airtable_retry()
     _selftest_jam_and_retry()
+    _selftest_leftovers()
+    _selftest_part_order()
     assert parse_clip("2053 Full.insv") == (dt.date(2026, 1, 13), "001000", 1) and parse_clip("2053 summary.insv")[0] == dt.date(2026, 1, 13)
     assert parse_clip("2071 Full Part 2.insv") == (dt.date(2026, 1, 31), "002000", 2) and parse_clip("2071 Full - Part 1.insv")[2] == 1
     globals()["START_DAY_FILE"] = "/nonexistent/od-start-day"; assert since_for_start_day() == DEFAULT_SINCE

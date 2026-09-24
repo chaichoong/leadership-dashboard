@@ -25,7 +25,9 @@ where nothing is wrong.
 
 It also writes one REPORT row, loop-health, from scripts/loop-health.py: the
 tasks that are not moving, so the page's "not moving" list is the same list
-daily-ops prints, not a second opinion.
+daily-ops prints, not a second opinion. And one more, daily-ops-needs-you
+(23 Sep 2026): the NEEDS YOU block of today's 07:00 report, which the 09:00 CEO
+brief reads, because the report itself only ever lands in a file.
 
 Usage:
   estate-status.py refresh [--dry-run] [--no-loop-health]
@@ -453,6 +455,101 @@ def allowance_row(now):
     return row
 
 
+# ─── the 07:00 check's NEEDS YOU list, for the 09:00 brief ────────────
+# Kevin, 23 Sep 2026 ("build it"). daily-ops writes its report to one file and nowhere else (its
+# Slack DM was retired on 1 Sep 2026). That morning its NEEDS YOU block named a legal deadline due
+# the same day, and the line reached nobody. This lifts the block out of today's report
+# into one REPORT row; the 09:00 brief (scripts/slack-automation/money-daily-worker.js,
+# needsYouText) reads it and says in words when the row is from an earlier day. The date in the
+# payload is the report's own date, so yesterday's list can never pass for today's.
+#
+# The report lives OUTSIDE the repo (Kevin, 24 Sep 2026). It names properties, sums and his legal
+# and financial matters, and the repo is public: 29 reports sat in it until PR #531. They were
+# gitignored first, then moved here, so no checkout, worktree or `git add -f` can reach them. The
+# selftest fails if this path is ever pointed back inside the repo.
+NEEDS_YOU_KEY = "daily-ops-needs-you"
+DAILY_OPS_REPORTS = os.path.join(LOGS, "daily-ops")
+_REPORT_NAME = re.compile(r"^daily-ops-(\d{4}-\d{2}-\d{2})\.md$")
+_ITEM = re.compile(r"^\s*(?:\d+[.)]|[•-])\s+(.*\S)")
+# A heading is a WHOLE bold line led by a capital word ("*STUCK: 17*"). A wrapped line that only starts in bold
+# ("*HMRC* letter today.") continues the item above it (second review, 24 Sep 2026).
+_HEADING = re.compile(r"^\*{1,2}[A-Z]{3,}\b[^*]*\*{1,2}:?\s*$")
+# Slack strikethrough at the start of an item ("~Old item~ ..."). A lone "~" means "about"
+# ("~£4,500 of costs") and keeps the item.
+_STRUCK = re.compile(r"^~~?[^~\s](?:[^~]*[^~\s])?~~?(?:\s|$)")
+_NEEDS_HEAD = re.compile(r"^\*{1,2}\s*needs you\b[^*]*\*{1,2}:?\s*$", re.I)
+
+
+def parse_needs_you(text):
+    """The daily-ops summary block's NEEDS YOU items, or None when the block cannot be trusted.
+
+    Only the summary is read: from the first line starting `*Daily Ops` (an intro paragraph may sit
+    above it, as on 2, 4 and 7 Sep 2026) to the first `*STUCK` heading after it, so the detail
+    sections further down can never be mistaken for it. The routine leaves the heading out when
+    nothing needs Kevin, so a summary with no mention of it is []. Anything that mentions "needs
+    you" in a shape this reader does not recognise is None, never [], because [] prints "nothing
+    needs you" (review finding, 24 Sep 2026). Blank lines between items are allowed; a line that is
+    not an item continues the one above; an item struck out or marked WITHDRAWN is dropped."""
+    lines = text.splitlines()
+    start = next((i for i, l in enumerate(lines) if l.startswith("*Daily Ops")), None)
+    if start is None:
+        return None
+    stop = next((i for i in range(start + 1, len(lines)) if lines[i].startswith("*STUCK")), None)
+    if stop is None:
+        return None
+    region = lines[start + 1:stop]
+    head = next((i for i, l in enumerate(region) if _NEEDS_HEAD.match(l.strip())), None)
+    if head is None:
+        # No heading in the summary. A mention anywhere in it, or in a NEEDS YOU block that drifted
+        # below *STUCK (before the detail starts), is unreadable, never "nothing needs you".
+        tail = []
+        for l in lines[stop:]:
+            if l.startswith("#") or l.startswith("---"):
+                break
+            tail.append(l)
+        return None if any(re.search(r"\bneeds? you\b", l, re.I) for l in region + tail) else []
+    items = []
+    for line in region[head + 1:]:
+        st = line.strip()
+        if not st:
+            continue
+        if _HEADING.match(st) or st.startswith("#") or st.startswith("---"):
+            break
+        m = _ITEM.match(line)
+        if m:
+            items.append(m.group(1))
+        elif items:
+            items[-1] += " " + st
+        else:
+            return None   # something unrecognised sits under the heading: not a list we can trust
+    return [x for x in items if not _STRUCK.match(x) and not re.search(r"\bWITHDRAWN\b", x)]
+
+
+def needs_you_row(now, reports=DAILY_OPS_REPORTS):
+    """One REPORT row carrying today's NEEDS YOU items; a Failed row says why, never a blank."""
+    today = now.astimezone(LONDON).strftime("%Y-%m-%d")
+    stamp = now.strftime("%Y-%m-%dT%H:%M:%S.000Z")
+    row = {"key": NEEDS_YOU_KEY, "kind": "report", "label": "07:00 check: needs Kevin", "lastRun": stamp}
+    try:
+        dates = sorted(m.group(1) for m in (_REPORT_NAME.match(f) for f in os.listdir(reports)) if m)
+        if today not in dates:
+            last = dates[-1] if dates else None
+            return dict(row, status="Idle", payload=json.dumps({"date": last, "items": None}),
+                        detail="No 07:00 report for today yet%s." % ((". The last one is from %s" % last) if last else ""))
+        with open(os.path.join(reports, "daily-ops-%s.md" % today), encoding="utf-8") as fh:
+            items = parse_needs_you(fh.read())
+    except Exception as exc:  # noqa: BLE001 — the row must say WHY, whatever went wrong
+        return dict(row, status="Failed", payload=json.dumps({"date": today, "unreadable": True}),
+                    detail="Could not read today's 07:00 report: %s" % str(exc)[:300])
+    if items is None:
+        return dict(row, status="Failed", payload=json.dumps({"date": today, "unreadable": True}),
+                    detail="Today's 07:00 report has no summary block this reader recognises.")
+    return dict(row, status="Worked", lastWorked=stamp, payload=json.dumps({"date": today, "items": items}),
+                detail=("%d thing%s need%s Kevin: %s" % (len(items), "" if len(items) == 1 else "s",
+                                                           "s" if len(items) == 1 else "", items[0][:200]))
+                if items else "Nothing needs Kevin today.")
+
+
 def loop_health_row(now):
     """The loop-health report as one row; a failed control is a Failed row, never a blank."""
     try:
@@ -559,6 +656,7 @@ def build_rows(now, with_loop_health=True):
         row["label"] = labels.get(job, job)
         rows.append(row)
     rows.append(allowance_row(now))
+    rows.append(needs_you_row(now))
     if with_loop_health:
         rows.append(loop_health_row(now))
     return rows
@@ -695,6 +793,68 @@ def selftest():
     ok(blocked_reason("GMAIL RATE METRIC STILL FULL after 585s").startswith("Gmail's per-minute limit"), "gmail words")
     ok(blocked_reason("LOST LOCK: task-manager was stopped mid-run").startswith("Another job took"), "lock words")
     ok(blocked_reason("all fine") == "", "no false blocker")
+    # 8b. the 07:00 NEEDS YOU block reaches the brief (23 Sep 2026)
+    report = ("*Daily Ops, Wednesday 23 September.* 7 things broke.\n\n*NEEDS YOU*\n"
+              "1. A legal deadline is TODAY.\n2. A repair waits for your yes.\n"
+              "It touches the send path.\n3. Thirteen things are past a hard deadline.\n\n"
+              "*STUCK: 17*\n• Court order response\n")
+    ok(parse_needs_you(report) == ["A legal deadline is TODAY.",
+                                   "A repair waits for your yes. It touches the send path.",
+                                   "Thirteen things are past a hard deadline."], "needs-you items: %r" % parse_needs_you(report))
+    ok(parse_needs_you("*Daily Ops, Thursday.* Ran fine.\n\n*STUCK: nothing has stalled*\n") == [], "no heading = nothing needs Kevin")
+    ok(parse_needs_you("# half a report\n1. something\n") is None, "no summary block = unreadable, never []")
+    ok(parse_needs_you("*Daily Ops, x.*\n*NEEDS YOU*\nsee below\n*STUCK: 1*\n") is None, "unrecognised lines under the heading = unreadable")
+    # review findings, 24 Sep 2026: every shape below was read wrongly by the first version
+    ok(parse_needs_you("Late run after the allowance reset.\nPhases 1-3 ran.\n\n" + report) == parse_needs_you(report),
+       "an intro paragraph above the summary (2, 4, 7 Sep reports)")
+    for head in ("*NEEDS YOU (2)*", "*NEEDS YOU:*", "**NEEDS YOU**", "*Needs you*"):
+        ok(parse_needs_you("*Daily Ops, x.*\n\n%s\n1. First.\n2. Second.\n\n*STUCK: 1*\n" % head) == ["First.", "Second."],
+           "heading variant %s" % head)
+    ok(parse_needs_you("*Daily Ops, x.*\n*NEEDS YOU*\n1. First.\n\n2. Second.\n\n*STUCK: 1*\n") == ["First.", "Second."],
+       "a blank line between items keeps both")
+    ok(parse_needs_you("*Daily Ops, x.*\n*NEEDS YOU*\n1. First, see the\n*Court* hearing notes.\n*STUCK: 1*\n") == ["First, see the *Court* hearing notes."],
+       "a wrapped line starting in bold continues the item")
+    ok(parse_needs_you("*Daily Ops, x.*\n*NEEDS YOU*\n1. Keep.\n2. ~Old item~ WITHDRAWN, handled.\n*STUCK: 1*\n") == ["Keep."],
+       "a withdrawn item is dropped")
+    ok(parse_needs_you("*Daily Ops, x.*\nThree things need you, below.\n*STUCK: 1*\n") is None,
+       "a mention in an unknown shape is unreadable, never 'nothing needs you'")
+    ok(parse_needs_you("*Daily Ops, x.* Ran fine.\n\n*STUCK: 1*\n\n## Detail\n*NEEDS YOU*\n1. Detail item.\n") == [],
+       "the detail section below STUCK is never read as the summary")
+    # second review, 24 Sep 2026
+    ok(parse_needs_you("*Daily Ops, x.*\n*NEEDS YOU*\n1. Reply to the\n*TAX* letter today.\n2. Sign the deed.\n*STUCK: 1*\n")
+       == ["Reply to the *TAX* letter today.", "Sign the deed."], "a wrapped line led by a bold capital word continues the item")
+    ok(parse_needs_you("*Daily Ops, x.*\n*NEEDS YOU*\n1. ~£4,500 of costs is due today.\n*STUCK: 1*\n") == ["~£4,500 of costs is due today."],
+       "a lone ~ means 'about' and keeps the item")
+    ok(parse_needs_you("*Daily Ops, x.*\n*NEEDS YOU*\n1. ~Old~ gone.\n2. Keep.\n*STUCK: 1*\n") == ["Keep."], "a struck item is dropped")
+    ok(parse_needs_you("*Daily Ops, x.*\n*NEEDS YOU*\n1. ~~Old item~~ gone now.\n2. Keep.\n*STUCK: 1*\n") == ["Keep."], "a double-tilde strike is dropped")
+    ok(parse_needs_you("*Daily Ops, x.*\n*NEEDS YOU*\n1. ~£4,500 or ~ £5k due.\n*STUCK: 1*\n") == ["~£4,500 or ~ £5k due."], "two 'about' tildes keep the item")
+    ok(parse_needs_you("*Daily Ops, x.*\n*NEEDS YOU*\n1. Pay the court\n*by Friday at noon.*\n2. Sign.\n*STUCK: 1*\n")
+       == ["Pay the court *by Friday at noon.*", "Sign."], "a fully bold lower-case wrapped line continues the item")
+    ok(parse_needs_you("*Daily Ops, x.*\n\n*STUCK: 1*\n\n*NEEDS YOU*\n1. Drifted below.\n\n---\n## Detail\n") is None,
+       "a NEEDS YOU block drifted below STUCK is unreadable, never 'nothing needs you'")
+    tmp3 = tempfile.mkdtemp()
+    at = datetime(2026, 9, 23, 8, 0, tzinfo=timezone.utc)   # 09:00 London
+    row = needs_you_row(at, reports=tmp3)
+    ok(row["status"] == "Idle" and json.loads(row["payload"]) == {"date": None, "items": None}, "no reports at all: %r" % row)
+    with open(os.path.join(tmp3, "daily-ops-2026-09-22.md"), "w") as fh:
+        fh.write(report)
+    with open(os.path.join(tmp3, "daily-ops-2026-09-23-1300.md"), "w") as fh:
+        fh.write(report)
+    row = needs_you_row(at, reports=tmp3)
+    ok(json.loads(row["payload"])["date"] == "2026-09-22" and "2026-09-22" in row["detail"],
+       "yesterday's report is never today's, and a -1300 rerun is not the day's report: %r" % row)
+    with open(os.path.join(tmp3, "daily-ops-2026-09-23.md"), "w") as fh:
+        fh.write(report)
+    row = needs_you_row(at, reports=tmp3)
+    p = json.loads(row["payload"])
+    ok(row["status"] == "Worked" and p["date"] == "2026-09-23" and len(p["items"]) == 3 and row["key"] == NEEDS_YOU_KEY,
+       "today's report -> Worked with its items: %r" % row)
+    ok(needs_you_row(datetime(2026, 9, 23, 23, 30, tzinfo=timezone.utc), reports=tmp3)["status"] == "Idle",
+       "00:30 London on the 24th reads the 24th, not the 23rd")
+    ok(needs_you_row(at, reports=os.path.join(tmp3, "missing"))["status"] == "Failed", "unreadable folder -> Failed")
+    # The report names Kevin's legal and financial matters and the repo is public (24 Sep 2026).
+    ok(not (os.path.realpath(DAILY_OPS_REPORTS) + os.sep).startswith(os.path.realpath(REPO) + os.sep),
+       "the daily-ops report folder is outside the repo: %s" % DAILY_OPS_REPORTS)
     # 9. field map is complete and every status is a table choice
     ok(set(ES) == {"key", "kind", "label", "schedule", "status", "lastRun", "lastWorked", "detail", "nextDue", "runs24h", "fails24h", "payload", "updated"}, "ES keys")
     ok(all(v.startswith("fld") and len(v) == 17 for v in ES.values()), "ES ids")

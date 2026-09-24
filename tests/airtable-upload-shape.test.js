@@ -190,7 +190,8 @@ describe('agents can attach a deliverable to an approval', () => {
 
   it('the attach zone accepts a dropped file', () => {
     expect(page).toMatch(/ondrop="event\.preventDefault\(\)/);
-    expect(page).toMatch(/apvQueueFiles\('\$\{t\.id\}', event\.dataTransfer\.files\)/);
+    // The drop zone moved into the note box on 23 Sep 2026 (apvNoteRowHtml).
+    expect(page).toMatch(/apvQueueFiles\('\$\{taskId\}', event\.dataTransfer\.files\)/);
     expect(page).toMatch(/ondragover=/);
     expect(page).toMatch(/apv-drop-over/);
   });

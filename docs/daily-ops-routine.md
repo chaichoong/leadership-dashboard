@@ -269,7 +269,7 @@ Kevin set the first version of this on 21 Aug 2026 after nine automated message 
 **On a normal day, at most three messages, all morning:**
 
 1. The 08:00 approvals digest (`approvals.js` in the contractor-bot worker). ONE DM: how many items wait for his decision, the top names, a link to the dashboard queue, and one content publishing line (what went out yesterday, what is booked today). Sent every morning since 15 Sep 2026: with nothing waiting it carries the content line alone, because a day with nothing published is news.
-2. The 09:00 CEO brief (`money-daily-worker.js`). Owns "what to do today".
+2. The 09:00 CEO brief (`money-daily-worker.js`). Owns "what to do today". Since 23 Sep 2026 it OPENS with three code-picked sections, never the model's choice: every Hard Deadline task due within seven days or overdue (whoever holds it), every due task Kevin holds, and this report's NEEDS YOU block.
 3. Task movement DMs (assigned / completed / comment) via the slack-notify worker and the Airtable task automations. These are working messages between people, not reports.
 
 **Only when it applies:**
@@ -279,7 +279,7 @@ Kevin set the first version of this on 21 Aug 2026 after nine automated message 
 - Production DOWN, from the weekly sweep. The single surviving system alert, kept by Kevin's explicit choice on 1 Sep 2026.
 - A correction to an earlier message, only when it changes what Kevin should do.
 
-**Retired on 1 Sep 2026 (do not bring these back without his word):** the Daily Ops DM (phase 5 now writes the report file ONLY — he reads it in Claude Code), per-task approval cards to Kevin, the 09:30 guard DM, the job digest Slack post, Drive-auth DMs, the "brief was late" DM, the CEO huddle late-path DM (write the record, skip the DM), the contractor bot in full, the CEO DM chat, and the Universal Credit list and process.
+**Retired on 1 Sep 2026 (do not bring these back without his word):** the Daily Ops DM (phase 5 now writes the report file ONLY; since 23 Sep 2026 its NEEDS YOU block reaches Kevin inside the 09:00 CEO brief, lifted from the file by `scripts/estate-status.py`), per-task approval cards to Kevin, the 09:30 guard DM, the job digest Slack post, Drive-auth DMs, the "brief was late" DM, the CEO huddle late-path DM (write the record, skip the DM), the contractor bot in full, the CEO DM chat, and the Universal Credit list and process.
 
 **Never a separate DM from:** any slot, any script, the fixer, drift, the memory sweep. Each returns its lines to you, and you fold them into the one report file. A fault that is not urgent goes to `scripts/findings.py` and is counted in the report's BROKEN line.
 
@@ -382,7 +382,7 @@ Check the date first and SKIP with a note when not due. A skip you announce is f
 Follow `~/.claude/scheduled-tasks/queue-fixer/SKILL.md`, with these changes:
 
 - Do NOT take the queue lock; you already hold the machine.
-- **Also commit the reports** the scripts and slots left in `monitoring/`. Copy them into the worktree before committing — they are written in the main checkout and a fresh worktree cannot see them. APPEND to existing report files, never overwrite: on 7 Aug 2026 rewriting one destroyed 195 lines of earlier investigation.
+- **Also commit the reports** the scripts and slots left in `monitoring/`, EXCEPT this routine's own report, which is never in `monitoring/` and never in git: it names properties, sums and Kevin's legal and financial matters, so since 24 Sep 2026 it lives in `~/knowledge-os/logs/daily-ops/`, outside the repo. If you ever find a `daily-ops-*.md` in `monitoring/`, move it there; never `git add -f` one. Copy them into the worktree before committing — they are written in the main checkout and a fresh worktree cannot see them. APPEND to existing report files, never overwrite: on 7 Aug 2026 rewriting one destroyed 195 lines of earlier investigation.
 
 **Close findings honestly.** A fix that is written but sitting in an open PR is `--outcome pending --pr <n>`, NOT `--outcome fixed`. On 26 Aug 2026 four fixer PRs (#107, #110, #126, #137) were all open and unmerged while forty findings sat closed as "fixed" citing them — the queue was reporting work as done that had never reached production. When a PR merges, `python3 scripts/findings.py land --pr <n>` turns its pending findings into fixed.
 
@@ -416,9 +416,9 @@ Put anything under **NOT MOVING** into the report's *STUCK* block, with the coun
 
 If NOT MOVING is zero, say that explicitly — "nothing has stalled" is the sentence that earns the trust, and a silent omission reads identically to the check never having run.
 
-**Write the full report file:** `monitoring/daily-ops-{date}.md`. Run time, one line per phase, one line per slot and script in the last 24 hours, counts, record IDs, finding numbers, PR links. Phase 4 commits it tomorrow. The file is the record.
+**Write the full report file:** `~/knowledge-os/logs/daily-ops/daily-ops-{date}.md` (create the folder if it is missing). Run time, one line per phase, one line per slot and script in the last 24 hours, counts, record IDs, finding numbers, PR links. Never write it into the repo: the repo is public, and since 24 Sep 2026 the report lives outside it, where `scripts/estate-status.py` reads it. The file is the record.
 
-**NO Slack DM. None.** Kevin retired the Daily Ops DM on 1 Sep 2026: he reads this in Claude Code each morning, so the DM told him nothing the file did not. Open the report with a summary block in exactly the shape the DM used, so his morning read starts the same way:
+**NO Slack DM. None.** Kevin retired the Daily Ops DM on 1 Sep 2026. He does not read this file (found 23 Sep 2026: its NEEDS YOU line named a legal deadline due that day, and nothing carried it to him). So `scripts/estate-status.py` lifts the NEEDS YOU block out of `~/knowledge-os/logs/daily-ops/daily-ops-{date}.md` every ten minutes and the 09:00 CEO brief prints it. **The summary block's shape is therefore a contract with code:** the first line starts `*Daily Ops`, the heading is exactly `*NEEDS YOU*`, each item is ONE numbered line (`1. ...`), and the block ends at the blank line before `*STUCK`. A report the reader cannot parse shows in the brief as "could not be read", never as "nothing needs you". Open the report with the summary block:
 
 ```
 *Daily Ops, {weekday} {day} {month}.* {Ran fine. | N things broke.}

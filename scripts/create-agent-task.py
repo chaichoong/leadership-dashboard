@@ -785,6 +785,11 @@ DUPE_ACTION_WORDS = {
     "call", "calling", "chase", "chasing", "contact", "unpaid", "outstanding",
     "overdue", "further", "recovery", "notice", "notification", "update",
     "updates", "incoming", "new", "important", "info", "information",
+    # A FAULT STATE is not identity either (finding 20260924-agent-dispatch-602).
+    # "bathroom extractor fan not working" folded into "bathroom light not
+    # working - 25 Abercorn Court" on bathroom/not/working, and the fold
+    # overwrote the live task. The object (fan, light, boiler) is the matter.
+    "not", "no", "working", "stopped",
 }
 
 # A UK phone number in any of the shapes these tasks carry: +447700900747,

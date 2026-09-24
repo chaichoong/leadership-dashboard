@@ -101,7 +101,9 @@ print(json.dumps(out))
 
   it('the approvals page turns the links in the work into links Kevin can open (escaped first)', () => {
     const html = readFileSync(path.join(ROOT, 'os', 'agents', 'index.html'), 'utf8');
-    expect(html).toContain('<div class="apv-body">${apvLinkify(work)}</div>');
+    // Match the element that carries the work, not its classes, which have
+    // changed before (23 and 24 Sep 2026).
+    expect(html).toMatch(/<div class="apv-body[^"]*" data-apv-work>\$\{apvLinkify\(work\)\}<\/div>/);
     const start = html.indexOf('function apvLinkify(');
     const end = html.indexOf('function apvCardHtml(', start);
     const esc = (s) => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');

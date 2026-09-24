@@ -514,6 +514,131 @@ def shift_srt(srt_text, offset, end):
 LAST_CUT = {}
 
 
+# ---------- one episode recorded in parts (Kevin, 24 Sep 2026) ----------
+# 2071: the sound died at 6:48 of an 8:20 recording, so the next morning he recorded part 2: "Sam, if you can stitch this
+# together to my previous run, as the sound cut out halfway through", then the learnings again. The engine rendered part 2
+# as a second full episode and its outputs replaced part 1's, so the card showed 1:52 of instructions to the editor.
+# Kevin's rule: "Anything that relates to the same title relates to the same episode number." A later part is JOINED to
+# the part before it; a second long recording that is not a part is never rendered over the first.
+# "stitch/splice/merge ... together|onto|previous", or "join/add/attach/put THIS|IT ... together|onto|to my previous"; never
+# "join me" or "add to that" in an ordinary opening
+STITCH_RE = re.compile(r"\b(?:stitch|splice|merge)\w*\b(?:\W+\w+){0,8}?\W+(?:together|onto|on to|previous|earlier|last one|other (?:one|clip|video|bit))\b"
+                       r"|\b(?:join|add|attach|put)\w*\s+(?:this|it|these)\b(?:\W+\w+){0,6}?\W+(?:together|onto|on to|to (?:my|the) (?:previous|last|earlier|other))\b", re.I)
+TOKENS_ONLY_RE = re.compile(r"^\s*(?:\[[^\]]*\]\s*)*$")
+LOOSE_DIARY_RE = re.compile(r"\b(?:from|for)\s+(?:a|my|the|our)\s+d(?:ia|ie|ai|iv)\w*", re.I)   # part 1's own learnings, as whisper hears it ("loads from a diary")
+JOIN_SEARCH_S = 45.0          # the note to the editor comes at the start of the part
+PART_KEEP_MIN_BYTES = 900_000_000   # a waiting clip this big (or named "Part N") may be the next part: part 1 keeps its masters for it
+
+
+def teaser_for_day_before(role, spoken, date_day, ledger):
+    """A teaser that names the day before, when that day has none yet, is that day's teaser: 2071's summary was recorded
+    the next morning (1 Feb 2026, 09:23) and says "day 2,071"; by date it would have been a second teaser for 2072."""
+    return role == "teaser" and spoken is not None and spoken == date_day - 1 and not any(
+        v.get("episode") == spoken and v.get("role") == "teaser" and v.get("status") == "rendered" for v in ledger.values())
+
+
+def part_number(key):
+    return watch.part_no(key) or None
+
+
+def is_continuation(key, text):
+    """True when this clip continues an earlier one: named "Part 2" or later, or it opens with a note to the editor."""
+    n = part_number(key)
+    return bool((n and n >= 2) or STITCH_RE.search((text or "")[:400]))
+
+
+def speech(segs):
+    return [s for s in segs if not TOKENS_ONLY_RE.match(s[2])]
+
+
+def _at(seg, idx):
+    a, b, t = seg
+    return a + (b - a) * (idx / max(1, len(t)))
+
+
+def part_one_end(segs1, next_has_learnings):
+    """(seconds, why) where part 1 stops: before its own learnings when the next part re-records them, else where speech stops."""
+    sp = speech(segs1)
+    if not sp: return None, "no speech"
+    if next_has_learnings:
+        for i, seg in enumerate(sp):
+            if seg[0] < sp[-1][1] * 0.5: continue
+            m = LFMD_START_RE.search(seg[2]) or LOOSE_DIARY_RE.search(seg[2])
+            if m:
+                why = "before its own learnings, which the next part records again"
+                t = seg[2]; k = max(t.rfind(". ", 0, m.start()), t.rfind("? ", 0, m.start()), t.rfind("! ", 0, m.start()))
+                if k >= 0: return round(_at(seg, k + 2), 2), why
+                if i > 0:        # the sentence began in the segment before: "...longer than necessary. So," | "ultimately, loads from a diary"
+                    pt = sp[i - 1][2].rstrip(); k = max(pt.rfind(". "), pt.rfind("? "), pt.rfind("! "))
+                    if k >= 0 and len(pt) - k < 25: return round(_at(sp[i - 1], k + 2), 2), why
+                return round(seg[0], 2), why
+    return round(sp[-1][1] + 0.3, 2), "where the speech stops"
+
+
+def part_two_start(segs2, window2):
+    """(seconds, why) where the later part starts: after the note to the editor. None when there is no note."""
+    sp = speech(segs2)
+    for i, seg in enumerate(sp):
+        if seg[0] > JOIN_SEARCH_S: break
+        if STITCH_RE.search(seg[2] + (" " + sp[i + 1][2] if i + 1 < len(sp) else "")):
+            if window2 and seg[0] <= window2[0] <= seg[1] + 30: return round(window2[0], 2), "at the learnings, after the note to the editor"
+            if i + 1 < len(sp): return round(sp[i + 1][0], 2), "after the note to the editor"
+            return None, "the part is only the note"
+    return 0.0, "no note to the editor; the whole part is used"
+
+
+def join_srt(segs1, p1_end, segs2, p2_start):
+    """One caption track: part 1 up to p1_end, then part 2 from p2_start, re-timed to follow on."""
+    out = []
+    for a, b, t in segs1:
+        if a >= p1_end - 0.2: continue
+        if b > p1_end:
+            t = t[:int(len(t) * (p1_end - a) / max(0.01, b - a))].rsplit(" ", 1)[0].strip(); b = p1_end
+        if t: out.append((a, b, t))
+    shift = p1_end - p2_start
+    for a, b, t in segs2:
+        if b <= p2_start + 0.2: continue
+        if a < p2_start:
+            t = t[int(len(t) * (p2_start - a) / max(0.01, b - a)):].split(" ", 1)[-1].strip(); a = p2_start
+        if t: out.append((a + shift, b + shift, t))
+    return "\n".join("%d\n%s --> %s\n%s\n" % (i + 1, srt_ts(a), srt_ts(b), t) for i, (a, b, t) in enumerate(out))
+
+
+def join_masters(base_dir, part_dir, p1_end, p2_start, workdir):
+    """Each aspect's master: part 1 [0, p1_end) then part 2 [p2_start, end), frame-exact (both pieces re-encoded alike)."""
+    out = {}
+    for aspect in RECIPE:
+        name = "master_%s.mp4" % aspect.replace(":", "x")
+        src2 = os.path.join(part_dir, name)
+        a = trim(os.path.join(base_dir, name), 0.0, p1_end, os.path.join(workdir, "join_a_" + name))
+        b = trim(src2, p2_start, media_seconds(src2), os.path.join(workdir, "join_b_" + name))
+        lst = os.path.join(workdir, "join_%s.txt" % aspect.replace(":", "x"))
+        with open(lst, "w") as fh: fh.write("file '%s'\nfile '%s'\n" % (a.replace("'", "'\\''"), b.replace("'", "'\\''")))
+        dest = os.path.join(workdir, "joined_" + name)
+        subprocess.run([FFMPEG, "-v", "error", "-y", "-f", "concat", "-safe", "0", "-i", lst, "-c", "copy", dest], check=True)
+        assert_has_video(dest, "joined %s master" % aspect)
+        out[aspect] = dest
+    return out
+
+
+def release_kept(ledger, remove=None):
+    """Part 1's masters are kept only while a clip of its day still waits; afterwards they go. Returns the released keys."""
+    remove = remove or (lambda p: shutil.rmtree(p, ignore_errors=True))
+    busy = {v.get("day") for v in ledger.values() if v.get("status") in ("new", "pulled", "pulling", "rendering")
+            or (v.get("status") == "failed" and not v.get("requeued"))}      # a failed join gets one retry, and needs part 1's masters for it
+    gone = []
+    for k, v in ledger.items():
+        if v.get("keep_masters") and v.get("day") not in busy:
+            remove(v.pop("keep_masters")); gone.append(k)
+    return gone
+
+
+def keep_for_next_part(key, e, ledger):
+    """True when a clip of the same day that could be the next part still waits (named Part N, or long-clip sized)."""
+    return any(k2 != key and v.get("day") == e.get("day") and v.get("status") in ("new", "pulled", "pulling")
+               and ((part_number(k2) or 0) >= 2 or (v.get("size") or 0) >= PART_KEEP_MIN_BYTES) for k2, v in ledger.items())
+
+
 def srt_cue_count(text):
     """Cues in an SRT body. Zero means ffmpeg's subtitles filter has nothing to burn in and aborts."""
     return len([b for b in re.split(r"\n\s*\n", text.strip()) if "-->" in b])
@@ -677,14 +802,57 @@ def process(key, ledger, keep=False):
     same_day = [v for k2, v in ledger.items() if v["date"] == e["date"] and k2 != key]
     prev = [v for v in ledger.values() if v["date"] == (dt.date.fromisoformat(e["date"]) - dt.timedelta(days=1)).isoformat()]
     prev_has_talk = any(v.get("status") in ("rendered",) for v in prev) or (bool(prev) and not same_day)
-    day, reason = watch.resolve_episode(date_day, watch.spoken_day(text), prev_day_has_talk=prev_has_talk)
-    e["episode"] = day; e["episode_reason"] = reason; e["status"] = "rendering"; watch.save_ledger(ledger)
     window = lfmd_window(srt_segments(open(srt).read()))
     duration = float(subprocess.run([os.path.expanduser("~/tools/bin/ffprobe"), "-v", "error", "-show_entries", "format=duration",
                                      "-of", "csv=p=0", clip], capture_output=True, text=True).stdout or 0)
     role = clip_role(duration, bool(window))
+    spoken = watch.spoken_day(text)
+    if teaser_for_day_before(role, spoken, date_day, ledger):
+        day, reason = spoken, "teaser for day %d, recorded the next day (it says day %d)" % (spoken, spoken)
+    else:
+        day, reason = watch.resolve_episode(date_day, spoken, prev_day_has_talk=prev_has_talk)
+    e["episode"] = day; e["episode_reason"] = reason; e["status"] = "rendering"; watch.save_ledger(ledger)
     e["lfmd_window"] = window; e["role"] = role; e["duration"] = round(duration, 1); watch.save_ledger(ledger)
+    base = None
     if role == "episode":
+        earlier = [k2 for k2, v in ledger.items() if k2 != key and v.get("episode") == day and v.get("role") == "episode" and v.get("status") == "rendered"]
+        if not earlier and (part_number(key) or 0) >= 2:
+            # never render a later part alone: it would become the episode (the 2071 fault itself)
+            e["status"] = "failed"; e["error"] = "part %d of episode %d, but no earlier part has rendered to join it to" % (part_number(key), day)
+            if not keep: os.remove(clip); shutil.rmtree(workdir, ignore_errors=True)
+            watch.save_ledger(ledger); print("%s: NOT rendered: %s" % (key, e["error"]), file=sys.stderr); return
+        if earlier:
+            b = ledger[earlier[0]]
+            kept = b.get("keep_masters") or ""
+            if not is_continuation(key, text):
+                why = "a second long recording for episode %d (%s is already its episode) and not a part of it: not rendered, so it cannot replace that episode" % (day, earlier[0])
+            elif not all(os.path.exists(os.path.join(kept, "master_%s.mp4" % a.replace(":", "x"))) for a in RECIPE) or not os.path.exists(os.path.join(kept, "transcript.srt")):
+                why = "part of episode %d, but %s's masters are gone, so it cannot be joined; re-render both parts (set both to new in the ledger)" % (day, earlier[0])
+            else:
+                why = None; base = earlier[0]
+            if why:
+                e["status"] = "failed"; e["error"] = why; e["requeued"] = "not requeued: it needs a person"   # the page names it; a retry would do the same
+                if not keep: os.remove(clip); shutil.rmtree(workdir, ignore_errors=True)
+                watch.save_ledger(ledger); print("%s: NOT rendered: %s" % (key, why), file=sys.stderr); return
+    if role == "episode" and base:
+        # the later part: its own masters, then part 1 + part 2 joined into the episode's masters and one caption track
+        masters2 = render_masters(clip, workdir)
+        b = ledger[base]; bdir = b["keep_masters"]
+        segs1, segs2 = srt_segments(open(os.path.join(bdir, "transcript.srt")).read()), srt_segments(open(srt).read())
+        p2_start, why2 = part_two_start(segs2, window)
+        if p2_start is None: raise RuntimeError("%s: %s" % (key, why2))     # run() fails this clip only; a SystemExit would end the night
+        p1_end, why1 = part_one_end(segs1, bool(window) and window[0] >= p2_start)
+        masters = join_masters(bdir, workdir, p1_end, p2_start, workdir)
+        joined = join_srt(segs1, p1_end, segs2, p2_start)
+        srt = os.path.join(workdir, "joined.srt"); open(srt, "w").write(joined)
+        text = " ".join(t for _, _, t in srt_segments(joined))
+        open(os.path.join(workdir, "transcript.txt"), "w").write(text)
+        window = lfmd_window(srt_segments(joined)); duration = media_seconds(masters["16:9"])
+        e.update({"joined_from": base, "join": {"part1_end": p1_end, "part1_why": why1, "part2_start": p2_start, "part2_why": why2},
+                  "lfmd_window": window, "duration": round(duration, 1), "pans": [], "horizon_part1": b.get("horizon")})
+        watch.save_ledger(ledger)
+        print("join: %s 0-%.1f s (%s) + %s from %.1f s (%s) -> %.0f s" % (base, p1_end, why1, key, p2_start, why2, duration))
+    elif role == "episode":
         import pointing
         pans = find_pans_for(clip, srt); e["pans"] = pans; watch.save_ledger(ledger)
         if pans: print("pointing: %d pan(s) planned: %s" % (len(pans), pointing.pans_arg(pans)))
@@ -702,17 +870,30 @@ def process(key, ledger, keep=False):
     if role == "teaser":
         title = episode_title_for(day, ledger) or title      # the long clip's title on the teaser banner (Kevin, 10 Sep 2026)
     paths = build_outputs(masters, srt, day, title, workdir, lfmd=window, role=role)
-    e["horizon"] = horizon_for(masters); e["source_fps"] = source_fps(clip)
+    e["horizon"] = horizon_for(masters) or e.get("horizon_part1"); e["source_fps"] = source_fps(clip)
     if role == "episode":
         e["intro_at"] = LAST_CUT.get("at"); e["podcast_resume"] = LAST_CUT.get("resume")
         paths["thumb"], e["thumb_lines"] = make_thumbnail(masters["9:16"], duration, text, day, workdir, lines=lines)
     folder, links = publish_to_drive(paths, day, os.path.join(workdir, "transcript.txt"))
     rid, how = find_or_create_record(day, e.get("drive_id"), key, dt.date.fromisoformat(e["date"]))
-    watch._airtable("PATCH", watch.API + "/" + rid, {"fields": record_updates(day, links, text, reason, key, role)})
+    upd = record_updates(day, links, text, reason, key, role)
+    if role == "episode" and card_sent_back(day):
+        # the copy was written from the old transcript: cleared, so tonight's copy step writes it from this one (2071, 24 Sep 2026)
+        upd.update({f: None for f in FULL_COPY_FIELDS})
+    watch._airtable("PATCH", watch.API + "/" + rid, {"fields": upd})
     e.update({"status": "rendered", "record_id": rid, "outputs": links, "edited_folder": folder, "title": title,
               "render_seconds": round(time.time() - t0), "rendered": dt.datetime.now().isoformat(timespec="seconds")})
-    if not keep:
-        os.remove(clip); shutil.rmtree(workdir, ignore_errors=True)
+    if base:
+        # the joined episode is the day's episode from now on; part 1 is kept on the ledger as a part (qa, the publisher
+        # and the Learnings redo all read the day's "episode" entry)
+        b = ledger[base]; b["role"] = "part"; b["joined_into"] = key
+        shutil.rmtree(b.pop("keep_masters"), ignore_errors=True)
+    if role == "episode" and not base and keep_for_next_part(key, e, ledger):
+        e["keep_masters"] = workdir; print("%s: masters kept for the next part of day %s" % (key, e.get("day")))
+    elif not keep:
+        shutil.rmtree(workdir, ignore_errors=True)
+    if not keep: os.remove(clip)
+    for k2 in release_kept(ledger): print("%s: kept masters released (no part of its day is waiting)" % k2)
     watch.save_ledger(ledger)
     print("%s -> Episode %d %s (%s) in %d s; record %s (%s); links %s" % (key, day, role, reason, e["render_seconds"], rid, how,
           {k: ("ok" if v else "NO DRIVE ID YET") for k, v in links.items()}))
@@ -725,6 +906,8 @@ def redo_lfmd(day):
     keys = [k for k, v in ledger.items() if v.get("episode") == day and v.get("role") == "episode"]
     if not keys: raise SystemExit("no episode clip for day %d in the ledger" % day)
     key = keys[0]; e = ledger[key]
+    if e.get("joined_from"):
+        raise SystemExit("episode %d is joined from %s and %s: set both back to new in the ledger so the night renders and joins them again" % (day, e["joined_from"], key))
     clip = e.get("local") or ""
     if not clip or not os.path.exists(clip):
         e["status"] = "new"; watch.save_ledger(ledger)
@@ -834,6 +1017,8 @@ def redo_full(day, keep=False):
     keys = [k for k, v in ledger.items() if v.get("episode") == day and v.get("role") == "episode"]
     if not keys: raise SystemExit("no episode clip for day %d in the ledger" % day)
     key = keys[0]; e = ledger[key]
+    if e.get("joined_from"):
+        raise SystemExit("episode %d is joined from %s and %s: set both back to new in the ledger so the night renders and joins them again" % (day, e["joined_from"], key))
     clip = e.get("local") or ""
     if not clip or not os.path.exists(clip):
         e["status"] = "new"; watch.save_ledger(ledger)
@@ -847,6 +1032,69 @@ def redo_full(day, keep=False):
     if str(day) in approval.load_state():      # a card already exists: refresh it (a sent-back card needs --receipt, see approval.py)
         approval.refresh_card(day, receipt=os.environ.get("CE_RECEIPT") or None)
     return key
+
+
+FULL_COPY_FIELDS = ("Blog Copy", "Blog Post Description", "YouTube Copy", "Podcast Copy")   # platform_copy.TYPES["Long Form Video"]
+
+
+def card_sent_back(day):
+    try:
+        import approval
+        return (approval.load_state().get(str(day)) or {}).get("verdict") == "changes"
+    except Exception as ex:
+        print("render: approval state not readable (%s); the copy is left as it is" % str(ex)[:100], file=sys.stderr); return False
+
+
+def _when(iso):
+    """An aware datetime from the ledger's local stamp or Airtable's UTC one; None when unreadable."""
+    try:
+        t = dt.datetime.fromisoformat(str(iso).replace("Z", "+00:00"))
+        return t if t.tzinfo else t.astimezone()
+    except ValueError:
+        return None
+
+
+RESUBMIT_DIR = os.path.expanduser("~/.config/od/content_engine_resubmit")   # <day>.md: the receipt for a card Kevin sent back
+
+
+def resubmit_due(day, ledger, receipt_mtime, card, full_fields):
+    """'' when a sent-back card may go back to Kevin with its receipt, else why not yet. The receipt is written when the
+    fix is set in motion; the card waits until the night has re-rendered the episode AFTER that, nothing of the day is
+    still waiting, and the copy has been written again (24 Sep 2026, 2071: re-rendered overnight, copy rewritten after)."""
+    if (card or {}).get("verdict") != "changes": return "the card is not sent back"
+    mine = [v for v in ledger.values() if v.get("episode") == day or (v.get("day") == day and not v.get("episode"))]
+    if any(v.get("status") in ("new", "pulled", "pulling", "rendering") for v in mine): return "a clip of the day is still waiting to render"
+    if any(v.get("status") == "failed" for v in mine): return "a clip of the day failed to render; it goes back once that is put right"   # never part 1 alone (review, 24 Sep 2026)
+    ep = [v for v in mine if v.get("role") == "episode" and v.get("status") == "rendered"]
+    if not ep: return "the episode has not rendered"
+    if max((v.get("rendered") or "") for v in ep) < dt.datetime.fromtimestamp(receipt_mtime).isoformat(timespec="seconds"):
+        return "the episode has not rendered since the receipt was written"
+    if not (full_fields.get("YouTube Copy") or "").strip(): return "the copy has not been written again yet"
+    wrote, made = _when(full_fields.get("AI Last Run")), _when(max((v.get("rendered") or "") for v in ep))
+    if not wrote or not made or wrote < made: return "the copy is older than the render"
+    return ""
+
+
+def resubmit_ready(root=None):
+    """Send back to Kevin every sent-back card whose fix has landed, with the receipt written for it. Returns the days sent."""
+    import approval
+    root = root or RESUBMIT_DIR
+    if not os.path.isdir(root): return []
+    ledger = watch.load_ledger(); state = approval.load_state(); sent = []
+    for name in sorted(os.listdir(root)):
+        m = re.match(r"^(\d+)\.md$", name)
+        if not m: continue
+        day, path = int(m.group(1)), os.path.join(root, name)
+        full = approval.bundle(day)["Long Form Video"] or {"fields": {}}
+        why = resubmit_due(day, ledger, os.path.getmtime(path), state.get(str(day)), full["fields"])
+        if why: print("resubmit: episode %d waits: %s" % (day, why)); continue
+        try:
+            approval.refresh_card(day, receipt=path)
+        except SystemExit as ex:
+            print("resubmit: episode %d NOT resubmitted: %s" % (day, str(ex)[-300:]), file=sys.stderr); continue
+        os.replace(path, path + ".sent"); sent.append(day)
+        print("resubmit: episode %d card back with Kevin, with its receipt" % day)
+    return sent
 
 
 def teaser_waits(key, ledger):
@@ -904,7 +1152,56 @@ def one(clip, day, out):
     print(json.dumps(paths, indent=1))
 
 
+def _selftest_parts():
+    """2071 (24 Sep 2026), from the real captions: part 1's sound died at 6:48, part 2 is a note to Sam and the learnings."""
+    segs1 = [(355.12, 362.64, "just don't be afraid to kind of stop having regular breaks. The last thing you want to do is give"),
+             (362.64, 368.48, "yourself a longer term injury or make yourself feel rougher for longer than necessary. So,"),
+             (368.48, 374.48, "ultimately, loads from a diary is if how can you exercise when you're feeling under the weather?"),
+             (374.48, 380.40, "Well, my first suggestion would be that if you are feeling under the weather, your body is"),
+             (402.96, 410.96, "and use the exercise as a kind of recovery."), (410.96, 416.96, "[silence]"), (416.96, 422.96, "[silence]")]
+    segs2 = [(0.0, 7.54, "So Sam if you can stitch this together to my previous run as it the sound cut out off"), (7.54, 9.38, "way through."),
+             (9.38, 17.16, "So learning from my diary for today are that if you are feeling rough and you need to run"),
+             (17.16, 21.6, "or exercise there's a few things you can do to try and get through it to mitigate the"),
+             (100.0, 109.3, "Thank you as always, stay positive, stay happy and I'll see you again tomorrow.")]
+    assert is_continuation("2071 Full Part 2.insv", "") and is_continuation("VID_x.insv", " ".join(t for _, _, t in segs2))
+    assert not is_continuation("2071 Full - Part 1.insv", " ".join(t for _, _, t in segs1)) and not is_continuation("2072 Full.insv", "welcome back to day 2072")
+    w2 = lfmd_window(segs2); assert w2 and w2[0] == 9.38, w2
+    p2, why2 = part_two_start(segs2, w2); assert p2 == 9.38 and "note to the editor" in why2, (p2, why2)
+    p1, why1 = part_one_end(segs1, True); assert 367.5 < p1 < 368.48 and "own learnings" in why1, (p1, why1)
+    assert part_one_end(segs1, False)[0] == 411.26, "no learnings to replace: part 1 runs to where the speech stops"
+    assert part_two_start([(0.0, 5.0, "Welcome back to day 2072")], None) == (0.0, "no note to the editor; the whole part is used")
+    j = srt_segments(join_srt(segs1, p1, segs2, p2))
+    assert j[1][2].endswith("necessary.") and not any("loads from a diary" in t or "Sam" in t for _, _, t in j), j
+    assert j[2][2].startswith("So learning from my diary") and abs(j[2][0] - p1) < 0.01, "part 2 follows on at the join"
+    # the summary he recorded the next morning (1 Feb 09:23, "day 2,071") and a clip of the day waiting keep part 1's masters
+    led = {"p1": {"day": 2071, "status": "rendered", "keep_masters": "/nonexistent/render_p1"}, "p2": {"day": 2071, "status": "new"},
+           "t": {"day": 2072, "status": "new", "size": 5e8}}
+    assert release_kept(led, remove=lambda p: None) == [] and led["p1"]["keep_masters"], "part 2 still waits: kept"
+    led["p2"]["status"] = "rendered"; assert release_kept(led, remove=lambda p: None) == ["p1"] and "keep_masters" not in led["p1"]
+    assert keep_for_next_part("2071 Full - Part 1.insv", {"day": 2071}, {"2071 Full Part 2.insv": {"day": 2071, "status": "new", "size": 1.3e9}})
+    assert not keep_for_next_part("2072 Full.insv", {"day": 2072}, {"2072 Summary.insv": {"day": 2072, "status": "new", "size": 5.7e8}}), "a teaser is not a part"
+    assert teaser_for_day_before("teaser", 2071, 2072, {}) and not teaser_for_day_before("episode", 2071, 2072, {})
+    assert not teaser_for_day_before("teaser", 2072, 2072, {}) and not teaser_for_day_before("teaser", None, 2072, {})
+    assert not teaser_for_day_before("teaser", 2071, 2072, {"x": {"episode": 2071, "role": "teaser", "status": "rendered"}}), "the day already has its teaser"
+    import time as _t
+    t0 = _t.mktime(dt.datetime(2026, 9, 24, 18, 0).timetuple())
+    card, fullf = {"verdict": "changes"}, {"YouTube Copy": "x", "AI Last Run": "2026-09-25T02:10:00.000Z"}
+    led = {"p2": {"episode": 2071, "day": 2071, "role": "episode", "status": "rendered", "rendered": "2026-09-25T01:30:00"},
+           "t": {"episode": 2071, "day": 2072, "role": "teaser", "status": "rendered", "rendered": "2026-09-25T03:40:00"}}
+    assert resubmit_due(2071, led, t0, card, fullf) == "", "re-rendered after the receipt, nothing waiting, copy written: goes back"
+    assert "not rendered since" in resubmit_due(2071, dict(led, p2=dict(led["p2"], rendered="2026-09-24T00:46:50")), t0, card, fullf)
+    assert "still waiting" in resubmit_due(2071, dict(led, p1={"day": 2071, "status": "new"}), t0, card, fullf)
+    assert "failed" in resubmit_due(2071, dict(led, p3={"day": 2071, "episode": 2071, "status": "failed"}), t0, card, fullf), "a failed part holds the card"
+    assert "copy" in resubmit_due(2071, led, t0, card, {"YouTube Copy": ""}) and "not sent back" in resubmit_due(2071, led, t0, {"verdict": "approved"}, fullf)
+    assert "older than the render" in resubmit_due(2071, led, t0, card, {"YouTube Copy": "x", "AI Last Run": "2026-09-23T22:48:00.000Z"}), "yesterday's copy is not today's"
+    import platform_copy as _pc
+    assert FULL_COPY_FIELDS == tuple(f for _, f in _pc.TYPES["Long Form Video"]["sections"]), "the fields cleared are the fields the writer writes"
+    assert STITCH_RE.search("So Sam if you can stitch this together to my previous run") and STITCH_RE.search("can you add this onto the last clip")
+    assert not STITCH_RE.search("join me today as I talk about the previous week") and not STITCH_RE.search("I want to add to that the earlier point")
+
+
 def selftest():
+    _selftest_parts()
     assert hundreds_folder(2049) == "2001-2100" and hundreds_folder(2100) == "2001-2100" and hundreds_folder(2101) == "2101-2200"
     assert output_names(2225)["full"] == "Episode_2225_Full_Episode.mp4" and output_names(2225)["podcast"] == "Ep2225_Podcast.mp3"
     assert output_names(2225)["full_yt"] == "Episode_2225_Full_Episode_YT.mp4" and output_names(2225)["lfmd_srt"] == "Ep2225_LFMD_YT.srt"
@@ -1035,4 +1332,5 @@ if __name__ == "__main__":
     elif a.mode == "redo-requested": redo_requested()
     elif a.mode == "redo": redo_full(a.day, keep=a.keep if hasattr(a, "keep") else False)
     elif a.mode == "one": one(a.clip, a.day, a.out)
+    elif a.mode == "resubmit-ready": resubmit_ready()
     else: raise SystemExit("unknown mode")

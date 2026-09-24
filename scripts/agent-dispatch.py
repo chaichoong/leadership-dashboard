@@ -67,6 +67,9 @@ from zoneinfo import ZoneInfo
 # with scripts/send-email.py. Two copies is how submit came to accept an output
 # the send gate could not parse.
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+# Standing holds (24 Sep 2026): Kevin's rulings that stay true only until an
+# event, written once for the whole team. The queue never hands one to an agent.
+import standing_holds  # noqa: E402
 from agent_email_format import (  # noqa: E402
     CARRY_OUT_MARKER,
     CARRY_OUT_RE,
@@ -204,6 +207,9 @@ AF = {
     # Knock-back date (28 Aug 2026): the queue and the digest hide a task while
     # this is after today. Sign-in waits are parked on it until the morning.
     "deferredUntil":     "fldJ9IHS1yxwYzYSN",
+    # THE PLAIN SUMMARY (Kevin, 22 Sep 2026): two lines a 13-year-old
+    # understands, written by the agent at submit, shown first on his card.
+    "plainSummary":      "fld3PrM8AJcnWHemG",
 }
 
 TASK_TYPES = ("Drafting", "Research", "Analysis", "Build",
@@ -1717,6 +1723,83 @@ CLOSE_HANDLED_RE = re.compile(
     r"[^\n]*?\b(rec[A-Za-z0-9]{14})\b", re.I)
 PASS_TO_ROY_RE = re.compile(r"^\s*PASS TO ROY:", re.I)
 
+# ─── ROY'S ASSISTANT (Kevin, 24 Sep 2026) ───────────────────────────────
+# Roy forwards a message from info@agilelets.co.uk to itself with one line
+# saying what he wants. scripts/roy-assistant.py reads it out of info@'s Sent
+# folder, makes one "ROY:" task for Inbox Response and stamps ROY_REQUEST_MARK
+# on its Notes. BOTH are required: the prefix alone is a name anyone can type,
+# the stamp is written only after the message was read from the Sent folder.
+# A Roy request is work FOR Roy, so it never goes back to him through the Roy
+# lane, and every email to a tenant, contractor or agent is still a card in
+# Kevin's one queue. Two shapes are Level A because nobody outside sees them:
+# an answer to Roy (ROY ANSWER:) and a record of work logged for him (ROY
+# DONE:), each emailed by roy-assistant.py to info@ only.
+ROY_REQUEST_PREFIX = "ROY:"
+ROY_REQUEST_MARK = "ROY REQUEST"
+ROY_REQUEST_STAMP_RE = re.compile(r"— roy-assistant\] " + ROY_REQUEST_MARK + r"\b")
+ROY_ANSWER_RE = re.compile(r"^\s*ROY ANSWER:", re.I)
+ROY_DONE_RE = re.compile(r"^\s*ROY DONE:", re.I)
+# The one Tenants field the assistant may write (roy-assistant.py tenant-note),
+# and the stamp each line carries so ROY DONE can prove the line is its own.
+TENANT_NOTES_FIELD = "fldfwxEf7I3XQDVtR"
+ROY_TENANT_NOTE_TAG = "Roy's assistant, "
+
+
+def is_roy_request(name, notes):
+    """True for a task roy-assistant.py made from a message Roy sent."""
+    return (str(name or "").startswith(ROY_REQUEST_PREFIX)
+            and bool(ROY_REQUEST_STAMP_RE.search(str(notes or ""))))
+
+
+# When Roy forwards a tenant's message, the same message has usually reached
+# the board already through Inbox Triage (info@ mail is copied to the triage
+# inbox). roy-assistant.py marks that open task with this line, and the queue
+# holds it while Roy's request is open: one tenant, one card.
+ROY_HANDLING_MARK = "ROY IS HANDLING THIS"
+ROY_HANDLING_RE = re.compile(r"— roy-assistant\] " + ROY_HANDLING_MARK + r": (rec[A-Za-z0-9]{14})\b")
+
+
+def roy_handling_lead(notes):
+    """The Roy request holding this task (the newest mark), or ''."""
+    found = ROY_HANDLING_RE.findall(str(notes or ""))
+    return found[-1] if found else ""
+
+
+def roy_done_problem(body, task_rec, fetch):
+    """Why a ROY DONE: output cannot be trusted without a card, or ''.
+
+    Every record it cites must be work done FOR this request: a task created
+    after the request, a task whose Notes name the request, or a tenant whose
+    Notes carry a line roy-assistant.py tenant-note wrote for it. A GET by
+    record id ignores the table, so the record's own fields say which it is.
+    """
+    task_id = task_rec.get("id", "")
+    created = task_rec.get("createdTime") or ""
+    cited = [r for r in dict.fromkeys(re.findall(r"\brec[A-Za-z0-9]{14}\b", body or ""))
+             if r != task_id]
+    if not cited:
+        return "ROY DONE names no record it created or changed"
+    for rid in cited:
+        try:
+            rec = fetch(rid) or {}
+        except Exception as exc:                          # noqa: BLE001
+            return f"cited record {rid} could not be read ({str(exc)[:80]})"
+        f = rec.get("fields", {}) or {}
+        if not f:
+            return f"cited record {rid} does not exist"
+        if AF["name"] in f:
+            if created and (rec.get("createdTime") or "") >= created:
+                continue
+            if task_id and task_id in str(f.get(AF["notes"]) or ""):
+                continue
+            return (f"cited task {rid} is older than this request and its Notes do not "
+                    f"name {task_id}, so it is not work done for Roy")
+        if f"{ROY_TENANT_NOTE_TAG}{task_id}]" in str(f.get(TENANT_NOTES_FIELD) or ""):
+            continue
+        return (f"cited record {rid} is neither a task made for this request nor a "
+                "tenant note roy-assistant.py wrote for it")
+    return ""
+
 # No-card caps per statutory certificate booked through Roy (Kevin's tranche 3
 # interview, 17 Sep 2026). A named exception to the £100 money rule for these
 # four certificates only; the brain file Knowledge/property-compliance-
@@ -2068,6 +2151,24 @@ def decision_level(output, task_type, task_rec, fetch=None, agent_banner=None,
                            f"{certificate_type(name)} quote request, coverage checked, from "
                            "info@ signed Roy Lavin (Kevin, 17 Sep 2026)", rule="quote-request")
 
+    roy_answer, roy_done = ROY_ANSWER_RE.match(body), ROY_DONE_RE.match(body)
+    if roy_answer or roy_done:
+        cat = "roy answer" if roy_answer else "roy work logged"
+        if not is_roy_request(name, notes):
+            return card(cat, "only a request Roy sent from info@ (a ROY: task carrying the "
+                             "roy-assistant stamp) is answered to Roy without a card")
+        if task_type == "Correspondence":
+            return card(cat, "an answer to Roy is not an email to anyone else: submit it "
+                             "as Research or Admin")
+        if roy_done:
+            problem = roy_done_problem(body, task_rec, fetch)
+            if problem:
+                return card(cat, problem)
+            return act(cat, "close", "work logged for Roy's request, every cited record "
+                                     "verified; roy-assistant.py emails the receipt to info@ only")
+        return act(cat, "close", "an answer for Roy's own request; roy-assistant.py emails it "
+                                 "to info@agilelets.co.uk only, nobody outside sees it")
+
     if PASS_TO_ROY_RE.match(out):
         why = roy_match(name, desc, notes)
         if not why and cert_cap:
@@ -2149,6 +2250,7 @@ def handle_without_kevin(args, output, task_rec, level, attached):
         AF["approvalFeedback"]: None,
         AF["approvedAt"]: None,
         AF["notes"]: (existing + "\n\n" + note).strip()[-90000:],
+        **plain_summary_fields(args),
     }
     carry = level["carry"]
     status = None
@@ -2310,6 +2412,51 @@ def handback_problem(output, task_type=""):
     return line.strip()[:160]
 
 
+# THE PLAIN SUMMARY (Kevin, 22 Sep 2026): "too much information, difficult to
+# decipher". Every card opens with what the task is and what approving does,
+# each in one short sentence a thirteen-year-old understands. The agent writes
+# both at submit (--plain-task, --plain-approve); the card shows them first.
+PLAIN_MIN, PLAIN_MAX = 15, 200
+PLAIN_MARKUP_RE = re.compile(r"[*`|]|\[[^\]]*\]\(|^#")
+
+
+def plain_summary_problem(task_line, approve_line):
+    """Reason the two plain lines cannot go on Kevin's card; empty if fine."""
+    for flag, line in (("--plain-task", task_line), ("--plain-approve", approve_line)):
+        text = str(line or "").strip()
+        if not text:
+            return f"{flag} is empty"
+        if "\n" in text or "\r" in text:
+            return f"{flag} must be one line"
+        if len(text) < PLAIN_MIN:
+            return f"{flag} is too short to explain anything ({len(text)} characters)"
+        if len(text) > PLAIN_MAX:
+            return (f"{flag} is {len(text)} characters; keep it under {PLAIN_MAX}. "
+                    "One short sentence, not a report")
+        jargon = JARGON_RE.search(text)
+        if jargon:
+            return (f"{flag} contains '{jargon.group(0)}'. That is machine detail. "
+                    "Say it the way you would to a thirteen-year-old")
+        if PLAIN_MARKUP_RE.search(text):
+            return f"{flag} contains formatting (*, `, |, a leading # or a link). Plain words only"
+    return ""
+
+
+def plain_summary_text(task_line, approve_line):
+    return f"TASK: {task_line.strip()}\nIF YOU APPROVE: {approve_line.strip()}"
+
+
+def plain_summary_fields(args):
+    """The Plain Summary write for every patch a submit makes. Every path,
+    not only the card: a Level A action that falls back to a card, or a task
+    filed now and reopened later, must never show a previous round's lines.
+    Empty for an internal caller that never had the flags."""
+    t, a = getattr(args, "plain_task", None), getattr(args, "plain_approve", None)
+    if t is None or a is None:
+        return {}
+    return {AF["plainSummary"]: plain_summary_text(t, a)}
+
+
 def carry_out_problem(output, strict=True):
     """Reason the approval box would have to guess this output's summary.
 
@@ -2447,6 +2594,17 @@ def sort_key(t):
 
 # ─── QUEUE ────────────────────────────────────────────────────────────
 
+def load_standing_holds():
+    """(holds, error). An unreadable holds file must not stop the queue: the
+    30-minute `standing_holds.py run` parks held tasks on the board itself, so
+    this read is the belt for the gap between a task arriving and that run.
+    The error rides in the queue JSON, never silently."""
+    try:
+        return standing_holds.load_holds(), ""
+    except Exception as exc:  # noqa: BLE001 — any failure is the same story
+        return [], str(exc)[:200]
+
+
 def build_queue(args=None):
     """Classify the open board. Returns the queue dict, prints nothing.
 
@@ -2494,6 +2652,14 @@ def build_queue(args=None):
     tier1, skipped_tier2, unmapped, unclassified = [], [], [], []
     system_alerts = []
     roy_lane = []
+    # Roy's NEW requests are worked by his own job alone (24 Sep 2026). It runs
+    # outside the queue lock so he is not kept waiting behind a 34-minute triage
+    # slot, which means another dispatch run could otherwise draft the same
+    # request at the same time. Only a queue read made for roy-assistant-run.sh
+    # (ROY_ASSISTANT_RUN=1) puts them in the worklist; every other run lists
+    # them under royRequests, counted, never worked and never dropped.
+    roy_requests = []
+    roy_run = os.environ.get("ROY_ASSISTANT_RUN") == "1"
     approved_hb, changes_hb, new_work, routing = [], [], [], []
     decided = []
     own_signal = []
@@ -2516,9 +2682,36 @@ def build_queue(args=None):
             property_ok = False
     property_count = 0
     held_under = []
+    standing, standing_error = load_standing_holds()
+    if standing_error:
+        print(f"WARNING: standing holds unreadable: {standing_error}", file=sys.stderr)
+    standing_held = []
     open_leads = open_lead_ids({held_lead_id(t) for t in agent_linked if held_lead_id(t)})
+    open_roy_leads = open_lead_ids({roy_handling_lead(t["notes"]) for t in agent_linked
+                                    if roy_handling_lead(t["notes"])})
 
     for t in agent_linked:
+        # A STANDING HOLD WINS FIRST (Kevin, 24 Sep 2026). He ruled that nothing
+        # on the matter moves until an event (a named person's reply); on
+        # 23 Sep the Task Board Manager raised eight cards he had already ruled
+        # on, because the ruling lived in two other agents' files. A hold is
+        # read here for every agent, and an approval he gave AFTER the hold
+        # began is his newer word, so hold_for never holds it. Listed, never
+        # dropped: the task waits on the board with the reason on it.
+        hold = standing_holds.hold_for(t, standing)
+        if hold:
+            standing_held.append({**t, "holdId": hold["id"],
+                                  "holdTitle": hold.get("title", "")})
+            continue
+        # ROY IS HANDLING THIS (24 Sep 2026): Roy forwarded this same matter to
+        # his assistant. While his request is open this twin waits, listed
+        # under heldUnderLead with the request as its lead, so Kevin never gets
+        # two cards for one tenant. An approval Kevin already gave still runs.
+        roy_lead = roy_handling_lead(t["notes"])
+        if roy_lead and roy_lead != t["id"] and roy_lead in open_roy_leads \
+                and t["outcome"] not in APPROVED:
+            held_under.append({**t, "groupLead": roy_lead, "heldFor": "Roy's request"})
+            continue
         # Tier 1 no longer drops out of the worklist. It is MARKED and worked,
         # and the mark rides all the way to the Slack post. Removing this line
         # so tier-1 work is prepared silently is the regression to fear.
@@ -2581,8 +2774,16 @@ def build_queue(args=None):
         # row is not Built/Live (Kevin's pause lever) the mark is dropped and
         # the task falls through to the Roy lane exactly as before this
         # build — the same fallback shape as the creditor tier-2 park.
+        # ROY'S OWN REQUESTS (24 Sep 2026) stay with the agent he asked. A
+        # "log a repair for the boiler" request matches the Roy lane's repair
+        # words, and diverting it would hand Roy's request straight back to
+        # him; the property steal would move it to an agent that has no
+        # answer-to-Roy shapes. Tier 1 and the creditor lane still win.
+        roy_request = is_roy_request(t["name"], t["notes"])
         t["property"] = ("" if (t["tier1"] or t["creditor"] or not property_ok) else
                          property_match(t["name"], t["description"], t["notes"]))
+        if roy_request:
+            t["property"] = ""
         # A CEO-lane task the fresh lane cannot place (neither inbound nor
         # COMPLIANCE-named) keeps its old home — the Roy lane — rather than
         # being taken from Roy and routed nowhere (review finding, 2 Sep 2026).
@@ -2594,8 +2795,13 @@ def build_queue(args=None):
         hit_roy = ("" if (t["tier1"] or t["creditor"] or t["outcome"] in APPROVED
                           or t["property"])
                    else roy_match(t["name"], t["description"], t["notes"]))
+        if roy_request:
+            hit_roy = ""
         if hit_roy:
             roy_lane.append({**t, "royReason": hit_roy})
+            continue
+        if roy_request and not t["outcome"] and not roy_run:
+            roy_requests.append(t)
             continue
         if not t["localAgent"]:
             unmapped.append(t)
@@ -2777,9 +2983,15 @@ def build_queue(args=None):
         # acted on here: cmd_queue is a read. `handover-property` does the
         # writing, so one command owns the change.
         "royLane": roy_lane,
+        # Roy's new requests, for roy-assistant-run.sh only (see roy_run above).
+        "royRequests": roy_requests,
         # Property siblings held under a lead: grouped this run, or submitted
         # under a lead that is still open. Listed with groupLead, never dropped.
         "heldUnderLead": held_under,
+        # Tasks a standing hold covers (scripts/standing_holds.py): waiting on
+        # the event Kevin named. Parked on the board by the 30-minute run.
+        "heldByStandingHold": standing_held,
+        "standingHoldsError": standing_error,
         "decided": decided,            # answered DECIDE: cards; the Task Manager's move, never a carry-out
         "unmappedAgent": unmapped,
         "unclassified": unclassified,  # states the buckets cannot place — eyes, not silence
@@ -2813,7 +3025,9 @@ def build_queue(args=None):
             "tier2Parked": len(skipped_tier2),
             "systemAlerts": len(system_alerts),
             "royLane": len(roy_lane),
+            "royRequests": len(roy_requests),
             "heldUnderLead": len(held_under),
+            "heldByStandingHold": len(standing_held),
             "propertyGroups": len([t for t in worklist if t.get("siblings")]),
             "decided": len(decided),
             # Creditor-lane keyword matches across the whole agent-linked
@@ -3049,6 +3263,10 @@ def cmd_escalate(args):
         # decided; the card is a fresh question.
         AF["approvalOutcome"]: None,
         AF["approvedAt"]: None,
+        # The card is a new question, so an earlier submit's plain lines would
+        # describe the wrong proposal (review, 22 Sep 2026). Cleared: the page
+        # then shows the task name and the DECIDE line.
+        AF["plainSummary"]: None,
         AF["notes"]: (existing + "\n\n" + note).strip()[-90000:],
     })
     print(json.dumps({"escalated": args.task, "to": "Kevin Brittain", "card": True,
@@ -3513,6 +3731,24 @@ def cmd_submit(args):
     # Kevin's mandate. Checked AFTER the banner so a tier-1 submit is judged on
     # the text that will actually be stored, and refused rather than patched:
     # a fabricated closing line would be the very guesswork this removes.
+    # The plain summary is checked FIRST among the content gates: it is the
+    # first thing Kevin reads, and it costs the agent one retry to fix. None
+    # means an internal caller that never had the flags (argparse requires
+    # them on the command line, which is the only way an agent submits).
+    plain_task = getattr(args, "plain_task", None)
+    plain_approve = getattr(args, "plain_approve", None)
+    if plain_task is not None or plain_approve is not None:
+        problem = plain_summary_problem(plain_task, plain_approve)
+        if problem:
+            sys.exit(
+                f"ERROR: refusing to submit {args.task} — {problem}.\n"
+                "       Kevin's card opens with these two lines (22 Sep 2026):\n"
+                "         --plain-task    \"What the task is, in one short sentence\"\n"
+                "         --plain-approve \"What happens the moment he taps Approve\"\n"
+                "       Write both so a thirteen-year-old understands them. Example:\n"
+                "         --plain-task \"A company keeps emailing to say it wants to buy Runpreneur.\"\n"
+                "         --plain-approve \"The agent sends one short no-thanks reply and stops answering.\"")
+
     problem = carry_out_problem(output)
     if problem:
         sys.exit(
@@ -3825,6 +4061,7 @@ def cmd_submit(args):
             AF["approvalFeedback"]: None,
             AF["approvedAt"]: None,
             AF["notes"]: (str(tf.get(AF["notes"]) or "").rstrip() + "\n\n" + note).strip()[-90000:],
+            **plain_summary_fields(args),
         }
         # Attachments were uploaded above, once; never again here.
         patch_task(args.task, filed)
@@ -3870,6 +4107,7 @@ def cmd_submit(args):
         # every throughput and Completed Month figure as finished work.
         AF["completion"]: None,
     }
+    fields.update(plain_summary_fields(args))
     if signin_wait:
         fields[AF["deferredUntil"]] = tomorrow_london()
     if archived:
@@ -7438,6 +7676,12 @@ def main():
     s.add_argument("--agent", required=True)
     s.add_argument("--type", required=True)
     s.add_argument("--output-file", required=True)
+    s.add_argument("--plain-task", required=True, metavar="SENTENCE",
+                   help="what the task is, one short sentence a thirteen-year-old "
+                        "understands; first line of Kevin's card (22 Sep 2026)")
+    s.add_argument("--plain-approve", required=True, metavar="SENTENCE",
+                   help="what happens the moment Kevin approves, one short plain "
+                        "sentence; second line of his card (22 Sep 2026)")
     s.add_argument("--siblings", metavar="recA,recB",
                    help="property work only: the sibling ids the queue grouped under this "
                         "lead (same certificate type and postcode district); refused "

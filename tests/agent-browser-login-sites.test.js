@@ -66,3 +66,25 @@ describe('loadSites merges sites.json per host', () => {
     }
   });
 });
+
+// 21 Sep 2026: the content engine reads the Runpreneur podcast's public show page for each episode's link.
+describe('the public Spotify show page', () => {
+  const { pickLinks, hostAllowed } = require_(join(ROOT, 'scripts', 'agent-browser.js'));
+  it('is allowed, and holds no login', () => {
+    expect(hostAllowed('https://open.spotify.com/show/6hL5SLvsU1VDMHVaWZZ3tO')).toBe(true);
+    expect(loadSites()['open.spotify.com'].login).toBe(false);
+  });
+  it('read --links returns each matching link once, with its words, and nothing else', () => {
+    const got = pickLinks([
+      { href: 'https://open.spotify.com/episode/5XRmBZhlJptMDKnyW1tRNi', text: '  Episode 2064 - Regaining Fitness  ' },
+      { href: 'https://open.spotify.com/episode/5XRmBZhlJptMDKnyW1tRNi', text: 'play button' },
+      { href: 'https://open.spotify.com/show/6hL5SLvsU1VDMHVaWZZ3tO', text: 'Runpreneur' },
+      { href: null, text: 'broken' },
+    ], '/episode/');
+    expect(got).toEqual([{ href: 'https://open.spotify.com/episode/5XRmBZhlJptMDKnyW1tRNi', text: 'Episode 2064 - Regaining Fitness' }]);
+    expect(pickLinks([{ href: 'https://x/episode/a', text: 'a' }], '')).toEqual([]);
+    expect(pickLinks([{ href: 'https://x/episode/a', text: ' ' }, { href: 'https://x/episode/a', text: 'Episode 2064 - T' }], '/episode/'))
+      .toEqual([{ href: 'https://x/episode/a', text: 'Episode 2064 - T' }]);   // review: a wordless cover link ahead of the title
+    expect(pickLinks([...Array(9)].map((_, i) => ({ href: `https://x/episode/${i}`, text: String(i) })), '/episode/', 3)).toHaveLength(3);
+  });
+});

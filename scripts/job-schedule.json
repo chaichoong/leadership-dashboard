@@ -248,6 +248,8 @@
   "retryWhenDeferred": true
  },
  "feed-brain": {
+  "maxRuntimeMinutes": 60,
+  "maxRuntimeNote": "maxRuntimeMinutes 60 (22 Sep 2026, finding 20260922-daily-ops-564): compound-brain's headless claude -p went idle at 00:33 on 22 Sep (1 s of CPU in 6.5 h, sockets closed) while the heartbeat kept renewing its lease, so it held the queue past 07:00 with ceo-agent and four other jobs waiting. Healthy runs of all three brain jobs take 0-18 min on the queue log (compound-brain 1-11 min over 4-20 Sep); the 480-min default ceiling was useless here.",
   "queueTimeoutMinutes": 360,
   "queueTimeoutNote": "360 minutes, not the default 120 (finding 20260919-daily-ops-phase2-excepti-548). This job fires straight into content-engine's nightly render, which held the queue for 265, 343 and 253 minutes on 16, 17 and 18 Sep 2026. At 120 it gave up every night without running \u2014 twenty queue-timeouts across these five jobs on 15-19 Sep \u2014 while needing under fifteen minutes of machine time itself. 360 clears the worst observed hold with headroom. The proper fix is 502's: take the ffmpeg render out of the global lock so content-engine only holds it for its Airtable and Drive writes.",
   "note": "Drive-gated. maxLateMinutes raised 29 Aug 2026 (findings 394/397): a morning Drive-mount flap used to cost the whole day. feed/compound/publish fire at 22:45-23:20, so 720 min expired at ~11:00 — on 28 Aug the mount cleared at 10:06 and they were marked MISSED at 11:06 anyway. 960 carries them to mid-afternoon, which is still worth doing; beyond that they would collide with the next night's run, so the window stops there rather than becoming never-skipped.",
@@ -263,6 +265,8 @@
   "retryWhenDeferred": true
  },
  "compound-brain": {
+  "maxRuntimeMinutes": 60,
+  "maxRuntimeNote": "maxRuntimeMinutes 60 (22 Sep 2026, finding 20260922-daily-ops-564): compound-brain's headless claude -p went idle at 00:33 on 22 Sep (1 s of CPU in 6.5 h, sockets closed) while the heartbeat kept renewing its lease, so it held the queue past 07:00 with ceo-agent and four other jobs waiting. Healthy runs of all three brain jobs take 0-18 min on the queue log (compound-brain 1-11 min over 4-20 Sep); the 480-min default ceiling was useless here.",
   "queueTimeoutMinutes": 360,
   "queueTimeoutNote": "360 minutes, not the default 120 (finding 20260919-daily-ops-phase2-excepti-548). This job fires straight into content-engine's nightly render, which held the queue for 265, 343 and 253 minutes on 16, 17 and 18 Sep 2026. At 120 it gave up every night without running \u2014 twenty queue-timeouts across these five jobs on 15-19 Sep \u2014 while needing under fifteen minutes of machine time itself. 360 clears the worst observed hold with headroom. The proper fix is 502's: take the ffmpeg render out of the global lock so content-engine only holds it for its Airtable and Drive writes.",
   "note": "Drive-gated. maxLateMinutes raised 29 Aug 2026 (findings 394/397): a morning Drive-mount flap used to cost the whole day. feed/compound/publish fire at 22:45-23:20, so 720 min expired at ~11:00 — on 28 Aug the mount cleared at 10:06 and they were marked MISSED at 11:06 anyway. 960 carries them to mid-afternoon, which is still worth doing; beyond that they would collide with the next night's run, so the window stops there rather than becoming never-skipped.",
@@ -278,6 +282,8 @@
   "retryWhenDeferred": true
  },
  "publish-brain": {
+  "maxRuntimeMinutes": 60,
+  "maxRuntimeNote": "maxRuntimeMinutes 60 (22 Sep 2026, finding 20260922-daily-ops-564): compound-brain's headless claude -p went idle at 00:33 on 22 Sep (1 s of CPU in 6.5 h, sockets closed) while the heartbeat kept renewing its lease, so it held the queue past 07:00 with ceo-agent and four other jobs waiting. Healthy runs of all three brain jobs take 0-18 min on the queue log (compound-brain 1-11 min over 4-20 Sep); the 480-min default ceiling was useless here.",
   "queueTimeoutMinutes": 360,
   "queueTimeoutNote": "360 minutes, not the default 120 (finding 20260919-daily-ops-phase2-excepti-548). This job fires straight into content-engine's nightly render, which held the queue for 265, 343 and 253 minutes on 16, 17 and 18 Sep 2026. At 120 it gave up every night without running \u2014 twenty queue-timeouts across these five jobs on 15-19 Sep \u2014 while needing under fifteen minutes of machine time itself. 360 clears the worst observed hold with headroom. The proper fix is 502's: take the ffmpeg render out of the global lock so content-engine only holds it for its Airtable and Drive writes.",
   "note": "Drive-gated. maxLateMinutes raised 29 Aug 2026 (findings 394/397): a morning Drive-mount flap used to cost the whole day. feed/compound/publish fire at 22:45-23:20, so 720 min expired at ~11:00 — on 28 Aug the mount cleared at 10:06 and they were marked MISSED at 11:06 anyway. 960 carries them to mid-afternoon, which is still worth doing; beyond that they would collide with the next night's run, so the window stops there rather than becoming never-skipped.",
@@ -461,6 +467,18 @@
   ],
   "retryWhenDeferred": false,
   "retryWhenDeferredNote": "Deliberately OFF, not forgotten. handback-poll runs every 30 minutes, so a deferred slot is picked up by the next one 30 minutes later — re-firing it would add a duplicate poll, not rescue a lost day. Revisit only if the cadence drops below hourly.",
+  "lockExempt": true
+ },
+ "roy-assistant": {
+  "cron": "*/10 7-20 * * *",
+  "maxLateMinutes": 9,
+  "mode": "wrapped",
+  "note": "Roy's assistant (Kevin, 24 Sep 2026). Roy forwards a message from info@agilelets.co.uk to itself with one line saying what he wants; scripts/roy-assistant.py reads info@'s Sent folder, makes one ROY: task per message for Inbox Response and emails him 'Got it', then this job runs the agent on those tasks straight away, because new work otherwise waits for the 07:00 run or the next triage slot. It also emails Roy what became of each request (the answer, with Kevin, sent, not sent). Every email to a tenant, contractor or agent is still a card in Kevin's one queue. A quiet tick is two Gmail reads and one Airtable read and costs no model tokens: the headless claude run starts only when a Roy request is waiting. Every ten minutes from 07:00 to 20:50; lateness is tight because the next tick is ten minutes away. LOCK-EXEMPT (24 Sep 2026, measured the same day): the inbox triage slots hold the queue lock for a median of 34 minutes (90th percentile 83) three times a day, and the first live tick queued behind the Task Manager slot, so Roy would often wait an hour. Two things make running outside the lock safe: Roy's NEW requests reach a worklist only in the queue read this job makes (ROY_ASSISTANT_RUN=1; every other run lists them under royRequests and leaves them alone), and the runner keeps its own one-tick-at-a-time lock. His approved cards are carried out by the hand-back poll like any other. The job name is not a skill folder, so check-routines.py sees a registered shell job.",
+  "needs": [
+   "network"
+  ],
+  "retryWhenDeferred": false,
+  "retryWhenDeferredNote": "Deliberately OFF: the next tick is ten minutes away, so a re-fire would only add a duplicate run.",
   "lockExempt": true
  },
  "retry-deferred": {
