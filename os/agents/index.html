@@ -2710,9 +2710,11 @@ window.agConfirmReject = agConfirmReject;
 // bar is showing and nothing more should be tried). Single-card callers
 // ignore it.
 // opts.note: the words to write when they did not come from the card's own
-// box (a note carried over from another card, whose box may not be on
-// screen). opts.noCrossCheck: do not check the other cards for this note
-// (the bulk bar, and a carried note, which would only find its own source).
+// box (a note carried over from another card; it never goes INTO the box,
+// where a failed save would leave it to be saved later as his own words).
+// opts.reasonKey: the rejection reason, likewise, instead of the chip map.
+// opts.noCrossCheck: do not check the other cards for this note (the bulk
+// bar, and a carried note, which would only find its own source).
 async function applyApprovalDecision(taskId, outcome, remember, opts){
     opts = opts || {};
     const t = allApprovals.find(x=>x.id===taskId);
@@ -2721,7 +2723,7 @@ async function applyApprovalDecision(taskId, outcome, remember, opts){
     const note = (typeof opts.note === 'string' ? opts.note : (noteEl && noteEl.value || '')).trim();
     // Captured now: the check after the save needs the reason this verdict
     // was given, and the chip map is per card.
-    const reasonKey = outcome === 'Rejected' ? (_apvReason[taskId] || APV_UNCLASSIFIED) : '';
+    const reasonKey = outcome === 'Rejected' ? (opts.reasonKey || _apvReason[taskId] || APV_UNCLASSIFIED) : '';
     const typeEl = document.getElementById('apvType-'+taskId);
     const chosenType = (typeEl && typeEl.value) || '';
     const card = document.querySelector(`[data-apv-card="${taskId}"]`);
@@ -2782,7 +2784,7 @@ async function applyApprovalDecision(taskId, outcome, remember, opts){
         // 28 Aug) — it just stores APV_UNCLASSIFIED rather than nothing, which
         // scores exactly as a blank always did and is visible as a choice.
         if(outcome === 'Rejected'){
-            payload[TF.verdictReason] = _apvReason[taskId] || APV_UNCLASSIFIED;
+            payload[TF.verdictReason] = reasonKey;
         } else if(_apvReason[taskId]){
             payload[TF.verdictReason] = _apvReason[taskId];
         }
@@ -2872,7 +2874,7 @@ async function applyApprovalDecision(taskId, outcome, remember, opts){
         // vanishing toast, no card that looks untouched.
         apvShowFailed(taskId, phase === 'upload'
             ? 'File not attached, so nothing was decided. ' + (e && e.message || e)
-            : 'Not saved. ' + (e && e.message || e), outcome, remember, !!opts.noCrossCheck);
+            : 'Not saved. ' + (e && e.message || e), outcome, remember, opts);
         btns.forEach(b=>{ b.disabled = false; });
         return 'failed';
     }
@@ -2918,6 +2920,14 @@ let _apvCross = {};
 // The line at the top of the queue: the newest check and what it found.
 let _apvCrossNotice = null;
 let _apvCrossSeq = 0;
+// sourceId -> the seq of the check that still stands for it. Undo deletes it
+// and a new decision replaces it, so an answer that arrives after either is
+// dropped: a note he took back must never reach another card.
+const _apvCrossLive = {};
+// Targets being written right now, and whether Send all is running: a second
+// tap must not write the same card twice.
+const _apvCrossBusy = new Set();
+let _apvCrossAllBusy = false;
 
 function apvCrossCardText(t){
     const plain = apvPlain(t);
@@ -3010,6 +3020,7 @@ async function apvCrossCheck(src, note, outcome, reasonKey){
     const others = allApprovals.filter(t=>t.id!==src.id && !apvSignInNeeded(t.agentOutput)).slice(0, APV_CROSS_MAX_CARDS);
     if(!others.length) return;
     const seq = ++_apvCrossSeq;
+    _apvCrossLive[src.id] = seq;
     const base = { fromId: src.id, fromTask: apvPlain(src).task, checked: others.length, outcome, reasonKey };
     const setNotice = n=>{ if(seq === _apvCrossSeq){ _apvCrossNotice = n; apvCrossRenderNotice(); } };
     setNotice(Object.assign({ state: 'checking' }, base));
@@ -3025,35 +3036,55 @@ async function apvCrossCheck(src, note, outcome, reasonKey){
         setNotice(Object.assign({ state: 'failed', error: (e && e.message) || String(e) }, base));
         return;
     }
-    // Undone while the model was reading: the note no longer stands.
-    if(allApprovals.some(t=>t.id===src.id)){ setNotice(null); return; }
+    // Undone, or decided again, while the model was reading: this note no
+    // longer stands, so nothing it found may reach another card.
+    if(_apvCrossLive[src.id] !== seq){ setNotice(null); return; }
     const at = new Date().toISOString();
     let placed = 0;
     matches.forEach(m=>{
         // Decided while the model was reading: no longer waiting.
-        if(!allApprovals.some(t=>t.id===m.id)) return;
+        const target = allApprovals.find(t=>t.id===m.id);
+        if(!target) return;
         const list = _apvCross[m.id] = _apvCross[m.id] || [];
         // The same words from two cards are one suggestion, not two.
         if(list.some(s=>s.note === note)) return;
-        list.push({ fromId: src.id, fromTask: base.fromTask, note, why: m.why, outcome, reasonKey, at });
+        // The card as it was when matched: if its agent redoes it, the
+        // suggestion was about work that is no longer there (apvCrossEntries).
+        list.push({ fromId: src.id, fromTask: base.fromTask, note, why: m.why, outcome, reasonKey, at, targetLmt: target.lmt });
         placed++;
         apvCrossRenderCard(m.id);
     });
     setNotice(Object.assign({ state: placed ? 'found' : 'none' }, base));
 }
 
-/** Cards still waiting that carry a suggestion from this note. */
+/** The suggestions on a card that still stand: the card is still waiting,
+ *  is not a sign-in wait, and is the same work that was matched. A card its
+ *  agent redid since (Slack, the drawer, a resubmit) has a new modified time,
+ *  and a strip about the old work must not sit on the new. */
+function apvCrossEntries(taskId){
+    const t = allApprovals.find(x=>x.id===taskId);
+    if(!t || apvSignInNeeded(t.agentOutput)) return [];
+    return (_apvCross[taskId]||[]).filter(s=>s.targetLmt === t.lmt);
+}
+
+/** Cards carrying a suggestion from this note, split by whether the filters
+ *  show them. Send all acts on the SHOWN ones only: a card he cannot see is
+ *  a card he did not check and could not Undo (the bulk bar's rule). */
 function apvCrossPending(fromId){
-    return allApprovals.filter(t=>(_apvCross[t.id]||[]).some(s=>s.fromId===fromId)).map(t=>t.id);
+    const has = t=>apvCrossEntries(t.id).some(s=>s.fromId===fromId);
+    const shown = apvVisibleRows().filter(has).map(t=>t.id);
+    const hidden = allApprovals.filter(has).length - shown.length;
+    return { shown, hidden };
 }
 
 function apvCrossStripHtml(taskId){
-    return (_apvCross[taskId]||[]).map(s=>`<div class="apv-cross" data-apv-cross="${esc(s.fromId)}">
+    const busy = _apvCrossBusy.has(taskId) ? ' disabled' : '';
+    return apvCrossEntries(taskId).map(s=>`<div class="apv-cross" data-apv-cross="${esc(s.fromId)}">
         <div class="apv-cross-head">You said this on another card ${esc(agoText(s.at))} ago. It may apply here too.</div>
         <div class="apv-cross-note" data-apv-cross-note>${esc(s.note)}</div>
         <div class="apv-cross-why" data-apv-cross-why>Written on: ${esc(s.fromTask)}${s.why ? `. Why it may fit: ${esc(s.why)}` : ''}</div>
         <div class="apv-cross-actions">
-            <button class="btn btn-sm" data-apv-btn data-apv-cross-apply onclick="apvCrossApply('${taskId}','${esc(s.fromId)}')">${s.outcome==='Rejected' ? 'Close this too, same reason' : 'Send back with my note'}</button>
+            <button class="btn btn-sm" data-apv-btn data-apv-cross-apply${busy} onclick="apvCrossApply('${taskId}','${esc(s.fromId)}')">${s.outcome==='Rejected' ? 'Close this too, same reason' : 'Send back with my note'}</button>
             <button class="apv-defer-btn" data-apv-cross-dismiss onclick="apvCrossDismiss('${taskId}','${esc(s.fromId)}')">Not this one</button>
         </div>
     </div>`).join('');
@@ -3070,13 +3101,14 @@ function apvCrossNoticeHtml(){
     if(n.state === 'failed'){
         return `<div class="apv-cross-notice failed" data-apv-cross-notice="failed"><span class="apv-cross-notice-text">Could not check the other cards for your note on ${from} (${esc(n.error)}). They are unchanged, so read them as usual.</span>${hide}</div>`;
     }
-    const pending = apvCrossPending(n.fromId);
-    if(!pending.length){
-        return `<div class="apv-cross-notice quiet" data-apv-cross-notice="none"><span class="apv-cross-notice-text">Checked your note on ${from} against the other ${n.checked} cards. ${n.state === 'none' ? 'None look affected.' : 'Nothing left for it to apply to.'}</span>${hide}</div>`;
+    const { shown, hidden } = apvCrossPending(n.fromId);
+    const hiddenLine = hidden ? ` ${hidden} more ${hidden === 1 ? 'is' : 'are'} hidden by your filters.` : '';
+    if(!shown.length){
+        return `<div class="apv-cross-notice quiet" data-apv-cross-notice="none"><span class="apv-cross-notice-text">Checked your note on ${from} against the other ${n.checked} cards. ${n.state === 'none' ? 'None look affected.' : hidden ? `The ${hidden === 1 ? 'card' : hidden + ' cards'} it may apply to ${hidden === 1 ? 'is' : 'are'} hidden by your filters.` : 'Nothing left for it to apply to.'}</span>${hide}</div>`;
     }
-    const k = pending.length, plural = k === 1 ? '' : 's';
-    return `<div class="apv-cross-notice" data-apv-cross-notice="found"><span class="apv-cross-notice-text"><strong>Your note on ${from} may apply to ${k} other card${plural}.</strong> Each one is marked below with the reason. Nothing changes until you tap.</span>
-        <button class="btn btn-sm" data-apv-cross-all onclick="apvCrossApplyAll('${esc(n.fromId)}')">${n.outcome === 'Rejected' ? `Close ${k === 1 ? 'it' : 'all '+k}, same reason` : `Send ${k === 1 ? 'it' : 'all '+k} back with my note`}</button>
+    const k = shown.length, plural = k === 1 ? '' : 's';
+    return `<div class="apv-cross-notice" data-apv-cross-notice="found"><span class="apv-cross-notice-text"><strong>Your note on ${from} may apply to ${k} other card${plural}.</strong> Each one is marked below with the reason. Nothing changes until you tap.${hiddenLine}</span>
+        <button class="btn btn-sm" data-apv-cross-all${_apvCrossAllBusy ? ' disabled' : ''} onclick="apvCrossApplyAll('${esc(n.fromId)}')">${n.outcome === 'Rejected' ? `Close ${k === 1 ? 'it' : 'all '+k}, same reason` : `Send ${k === 1 ? 'it' : 'all '+k} back with my note`}</button>
         ${hide}</div>`;
 }
 
@@ -3090,44 +3122,52 @@ function apvCrossRenderNotice(){
 }
 
 // His note, carried with where it came from, so the agent can find the
-// original and never has to guess why it is being asked.
+// original and never has to guess why it is being asked. Words he already
+// typed on THIS card go first, never overwritten. Nothing is written into
+// the card's box: the words travel in opts, and Try again repeats them.
 function apvCrossCarriedNote(targetId, s){
     const carried = `Same as my note on another card ("${s.fromTask}"): ${s.note}`;
     const box = document.getElementById('apvNote-'+targetId);
     const typed = (box && box.value || '').trim();
-    // Words he already typed on THIS card are kept, never overwritten.
-    const full = !typed ? carried : typed.indexOf(carried) !== -1 ? typed : typed + '\n\n' + carried;
-    // In the box too, so Try again after a failed save re-sends the same words.
-    if(box) box.value = full;
-    return full;
+    return !typed ? carried : typed.indexOf(carried) !== -1 ? typed : typed + '\n\n' + carried;
 }
 
 async function apvCrossApply(targetId, fromId){
-    const s = (_apvCross[targetId]||[]).find(x=>x.fromId===fromId);
-    if(!s || !allApprovals.some(t=>t.id===targetId)) return 'elsewhere';
+    if(_apvCrossBusy.has(targetId)) return 'elsewhere';
+    const s = apvCrossEntries(targetId).find(x=>x.fromId===fromId);
+    if(!s) return 'elsewhere';
     const note = apvCrossCarriedNote(targetId, s);
+    const opts = { note, noCrossCheck: true };
     let outcome = 'Changes requested';
-    if(s.outcome === 'Rejected'){
-        outcome = 'Rejected';
-        if(s.reasonKey && s.reasonKey !== APV_UNCLASSIFIED) _apvReason[targetId] = s.reasonKey;
-        else delete _apvReason[targetId];
+    if(s.outcome === 'Rejected'){ outcome = 'Rejected'; opts.reasonKey = s.reasonKey || APV_UNCLASSIFIED; }
+    _apvCrossBusy.add(targetId);
+    apvCrossRenderCard(targetId);
+    try {
+        return await applyApprovalDecision(targetId, outcome, false, opts);
+    } finally {
+        _apvCrossBusy.delete(targetId);
+        apvCrossRenderCard(targetId);
+        apvCrossRenderNotice();
     }
-    const result = await applyApprovalDecision(targetId, outcome, false, { note, noCrossCheck: true });
-    apvCrossRenderNotice();
-    return result;
 }
 window.apvCrossApply = apvCrossApply;
 
 async function apvCrossApplyAll(fromId){
-    const ids = apvCrossPending(fromId);
+    if(_apvCrossAllBusy) return;
+    const ids = apvCrossPending(fromId).shown;
     if(!ids.length) return;
-    document.querySelectorAll('[data-apv-cross-all]').forEach(b=>{ b.disabled = true; });
+    _apvCrossAllBusy = true;
+    apvCrossRenderNotice();
     let done = 0, notDone = 0;
-    for(const id of ids){
-        const r = await apvCrossApply(id, fromId);
-        if(r === 'saved') done++;
-        else if(r === 'auth') break;
-        else notDone++;
+    try {
+        for(const id of ids){
+            const r = await apvCrossApply(id, fromId);
+            if(r === 'saved') done++;
+            else if(r === 'auth') break;
+            else notDone++;
+        }
+    } finally {
+        _apvCrossAllBusy = false;
     }
     toast(notDone ? `Done ${done} of ${ids.length}. ${notDone} were already decided or could not be saved.` : `Done all ${done}.`);
     apvCrossRenderNotice();
@@ -3156,6 +3196,7 @@ function apvCrossForgetSource(fromId){
         if(!_apvCross[id].length) delete _apvCross[id];
         if(before !== ((_apvCross[id]||[]).length)) apvCrossRenderCard(id);
     });
+    delete _apvCrossLive[fromId];
     if(_apvCrossNotice && _apvCrossNotice.fromId === fromId) _apvCrossNotice = null;
     apvCrossRenderNotice();
 }
@@ -3218,13 +3259,22 @@ function apvScrollToFirstCard(){
     const y = card.getBoundingClientRect().top + window.pageYOffset - offset;
     window.scrollTo({ top: Math.max(0, Math.round(y)) });
 }
-// Try again re-reads the card's note box, which a carried note also fills,
-// and keeps a carried note from checking the other cards a second time.
-function apvShowFailed(taskId, text, outcome, remember, noCrossCheck){
+// Try again repeats the SAME call, options included: a carried note is not
+// in the card's box, so re-reading the box would send it back with no words.
+const _apvRetry = {};   // taskId -> [outcome, remember, opts]
+function apvShowFailed(taskId, text, outcome, remember, opts){
     const card = document.querySelector(`[data-apv-card="${taskId}"]`);
     if(card) card.classList.remove('apv-saving');
-    apvStateStrip(taskId, 'failed', text, `<button class="apv-undo" type="button" data-apv-retry onclick="applyApprovalDecision('${taskId}','${esc(outcome)}',${remember?'true':'false'}${noCrossCheck?',{noCrossCheck:true}':''})">Try again</button>`);
+    _apvRetry[taskId] = [outcome, remember, opts || {}];
+    apvStateStrip(taskId, 'failed', text, `<button class="apv-undo" type="button" data-apv-retry onclick="apvRetry('${taskId}')">Try again</button>`);
 }
+function apvRetry(taskId){
+    const r = _apvRetry[taskId];
+    if(!r) return;
+    delete _apvRetry[taskId];
+    return applyApprovalDecision(taskId, r[0], r[1], r[2]);
+}
+window.apvRetry = apvRetry;
 function apvFoldAway(taskId){
     delete _apvUndo[taskId];
     const card = document.querySelector(`[data-apv-card="${taskId}"]`);

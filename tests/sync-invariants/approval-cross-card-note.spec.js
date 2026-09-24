@@ -30,7 +30,7 @@
 // live on real cards (the fix's report); a fixture cannot test that.
 
 const { test, expect } = require('@playwright/test');
-const { TF, AGENT_B, defaultFixtures, mockAgentsPage, loadAgentsPage } = require('./agents-page.helpers');
+const { TF, AGENT_A, AGENT_B, defaultFixtures, mockAgentsPage, loadAgentsPage } = require('./agents-page.helpers');
 
 const REMEMBER_THIS = 'fldZurhdHutYIDKVx';
 const APPROVAL_FEEDBACK = 'fldtI7SJI4gEohHD1';
@@ -265,6 +265,122 @@ test.describe('one note, every card it fits', () => {
     await expect(page.locator('#toast')).toContainText('Sent back');
     await page.waitForTimeout(400);
     expect(calls.length).toBe(0);
+  });
+});
+
+// The independent review of 24 Sep 2026 found these four; none was covered.
+test.describe('the review findings', () => {
+  test('a note undone before the model answers never reaches another card', async ({ page }) => {
+    const patches = await mockAgentsPage(page, queue());
+    let release;
+    const held = new Promise((r) => { release = r; });
+    const calls = [];
+    await page.route((url) => url.hostname === PROXY_HOST, async (route) => {
+      calls.push(1);
+      await held;
+      await route.fulfill({ status: 200, contentType: 'application/json',
+        body: JSON.stringify({ content: [{ type: 'text', text: matchGas }] }) });
+    });
+    await loadAgentsPage(page);
+    await openApprovals(page);
+    await decideWithNote(page, 'recSrc', 'Approve', HAVERHILL_NOTE);
+    await expect.poll(() => calls.length).toBe(1);
+    await cardEl(page, 'recSrc').locator('[data-apv-undo]').click();
+    await expect(cardEl(page, 'recSrc').locator('.apv-actions button', { hasText: /^Approve$/ })).toBeVisible();
+    // Decided again, with no words this time, before the first answer lands.
+    await cardEl(page, 'recSrc').locator('.apv-actions button', { hasText: /^Approve$/ }).click();
+    await expect.poll(() => patches.filter((p) => p.id === 'recSrc').length).toBeGreaterThanOrEqual(3);
+    release();
+    await page.waitForTimeout(500);
+    await expect(page.locator('.apv-cross')).toHaveCount(0);
+    await expect(page.locator('[data-apv-cross-notice="found"]')).toHaveCount(0);
+  });
+
+  test('Send all acts on the cards the filters show, and says how many are hidden', async ({ page }) => {
+    const fx = queue();
+    fx.approvals[2].fields[TF.sentForApprovalBy] = [AGENT_A];
+    fx.approvals[2].fields[TF.teamMember] = [AGENT_A];
+    const patches = await mockAgentsPage(page, fx);
+    await mockProxy(page, JSON.stringify({ matches: [
+      { id: 'recGas', why: 'Haverhill gas' }, { id: 'recBootle', why: 'EICR quote' }] }));
+    await loadAgentsPage(page);
+    await openApprovals(page);
+    await page.locator('.apv-filter', { hasText: 'Inbound Comms Response' }).click();
+    await expect(cardEl(page, 'recBootle')).toHaveCount(0);
+    await decideWithNote(page, 'recSrc', 'Request changes', HAVERHILL_NOTE);
+    const notice = page.locator('[data-apv-cross-notice="found"]');
+    await expect(notice).toContainText('may apply to 1 other card');
+    await expect(notice).toContainText('1 more is hidden by your filters');
+    await page.locator('[data-apv-cross-all]').click();
+    await expect.poll(() => patches.some((p) => p.id === 'recGas')).toBe(true);
+    await page.waitForTimeout(400);
+    expect(patches.some((p) => p.id === 'recBootle')).toBe(false);
+  });
+
+  test('a carried note never goes into the card box, and Try again re-sends it', async ({ page }) => {
+    const patches = await mockAgentsPage(page, queue());
+    await mockProxy(page, matchGas);
+    let failNext = true;
+    await page.route('**/api.airtable.com/**', async (route) => {
+      const url = route.request().url();
+      if (route.request().method() === 'PATCH' && url.includes('recGas') && failNext) {
+        failNext = false;
+        return route.fulfill({ status: 500, contentType: 'application/json', body: '{"error":"boom"}' });
+      }
+      return route.fallback();
+    });
+    await loadAgentsPage(page);
+    await openApprovals(page);
+    await decideWithNote(page, 'recSrc', 'Approve', HAVERHILL_NOTE);
+    await cardEl(page, 'recGas').locator('[data-apv-cross-apply]').click();
+    const retry = cardEl(page, 'recGas').locator('[data-apv-retry]');
+    await expect(retry).toBeVisible();
+    // His box on that card is untouched: a later Approve there cannot save
+    // the carried words as his own, or remember them.
+    await expect(cardEl(page, 'recGas').locator('#apvNote-recGas')).toHaveValue('');
+    await retry.click();
+    await expect.poll(() => patches.some((p) => p.id === 'recGas')).toBe(true);
+    const sent = patches.find((p) => p.id === 'recGas');
+    expect(sent.fields[TF.approvalOutcome]).toBe('Changes requested');
+    expect(sent.fields[APPROVAL_FEEDBACK]).toContain(HAVERHILL_NOTE);
+    expect(sent.fields[REMEMBER_THIS]).toBeUndefined();
+  });
+
+  test('two taps on Send all, or Send all and a strip, write each card once', async ({ page }) => {
+    const patches = await mockAgentsPage(page, queue());
+    await mockProxy(page, JSON.stringify({ matches: [
+      { id: 'recGas', why: 'Haverhill gas' }, { id: 'recBootle', why: 'EICR quote' }] }));
+    // Slow writes, so the second tap lands while the first is still running.
+    await page.route('**/api.airtable.com/**', async (route) => {
+      if (route.request().method() === 'PATCH') await new Promise((r) => setTimeout(r, 300));
+      return route.fallback();
+    });
+    await loadAgentsPage(page);
+    await openApprovals(page);
+    await decideWithNote(page, 'recSrc', 'Request changes', HAVERHILL_NOTE);
+    await expect(page.locator('[data-apv-cross-all]')).toBeVisible();
+    await page.evaluate(() => Promise.all([
+      apvCrossApplyAll('recSrc'), apvCrossApplyAll('recSrc'), apvCrossApply('recBootle', 'recSrc')]));
+    const verdicts = (id) => patches.filter((p) => p.id === id && p.fields[TF.approvalOutcome]).length;
+    await expect.poll(() => verdicts('recGas') + verdicts('recBootle')).toBe(2);
+    await page.waitForTimeout(800);
+    expect(verdicts('recGas')).toBe(1);
+    expect(verdicts('recBootle')).toBe(1);
+  });
+
+  test('a strip about work the agent has since redone disappears', async ({ page }) => {
+    const fx = queue();
+    await mockAgentsPage(page, fx);
+    await mockProxy(page, matchGas);
+    await loadAgentsPage(page);
+    await openApprovals(page);
+    await decideWithNote(page, 'recSrc', 'Approve', HAVERHILL_NOTE);
+    await expect(cardEl(page, 'recGas').locator('.apv-cross')).toBeVisible();
+    // Redone elsewhere and resubmitted: a new modified time on reload.
+    fx.approvals[1].fields[TF.lmt] = new Date(Date.now() + 60000).toISOString();
+    await page.evaluate(async () => { await loadApprovals(); renderApprovals(); });
+    await expect(cardEl(page, 'recGas')).toBeVisible();
+    await expect(cardEl(page, 'recGas').locator('.apv-cross')).toHaveCount(0);
   });
 });
 
