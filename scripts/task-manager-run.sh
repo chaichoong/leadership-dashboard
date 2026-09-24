@@ -110,6 +110,12 @@ cd "$REPO" || { echo "ERROR: repo not found at $REPO" >&2; exit 1; }
 /usr/bin/python3 "$REPO/scripts/task-hygiene-sweep.py" flip-due >> "$LOG" 2>&1 \
   || echo "WARNING: flip-due failed (rc=$?) — Upcoming tasks now due may be missing from this slot's board" >> "$LOG"
 
+# STANDING HOLDS (Kevin, 24 Sep 2026): park whatever a hold covers BEFORE the
+# board is read, so the foreman never cards a matter Kevin has put on hold
+# (eight such cards on 23 Sep 2026). Same script the 30-minute poll runs.
+/usr/bin/python3 "$REPO/scripts/standing_holds.py" run > /dev/null 2>> "$LOG" \
+  || echo "WARNING: standing holds run failed (rc=$?) — a held matter may be on this slot's board" >> "$LOG"
+
 # THE ALLOWANCE GUARD (Kevin, 14 Sep 2026): while scripts/allowance.py says the
 # Claude allowance is out, this slot does not start. It is recorded as missed
 # and re-run once at the reset by `allowance.py replay`. Exit 0: a paused tick
