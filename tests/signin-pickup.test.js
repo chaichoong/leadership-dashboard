@@ -405,7 +405,9 @@ os.unlink(fh.name)
 print('---JSON---'); print(json.dumps({'refused': refused}))`, SITES);
     expect(out.refused).toMatch(/names 'Namecheap', which is not a site the robot can sign into/);
     expect(out.refused).toMatch(/Pingen \(letters\)/);
-    expect(out.refused).toMatch(/The robot has no access to Namecheap/);
+    // 25 Sep 2026: the old "The robot has no access" line was a dead end; the refusal now
+    // points at a SITE wall, which asks Kevin to add the site and wakes the task when he does.
+    expect(out.refused).toMatch(/block TASKID --kind SITE --subject <the site's host>/);
   });
   it('submit parks a SIGN-IN NEEDED output until tomorrow (the queue and digest hide it today)', () => {
     const out = py(`

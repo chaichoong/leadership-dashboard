@@ -440,17 +440,18 @@ describe('the Writer against the real command outputs', () => {
   const r = py(`
 import types
 calls = []
-def cmd_create(fields, force=False, dry_run=False):
-    calls.append(("create", force)); print(json.dumps({"action": "created", "taskId": "recNEW1"})); return 0
 def cmd_handover(args):
     calls.append(("handover", args.task, args.to))
     print(json.dumps({"handedOver": args.task, "to": args.to, "name": "Roy Lavin", "reason": args.reason, "emailed": True, "NOT EMAILED": None}))
 def cmd_submit(args):
     calls.append(("submit", args.task)); sys.exit("ERROR: refusing to submit recNEW1 - test refusal")
 ad = types.SimpleNamespace(cmd_handover=cmd_handover, cmd_submit=cmd_submit, ROY_EMAIL="roy@example.com", PROPERTY_REC_ID="recPA")
-tl._MODS.update({"ad": ad, "ct": types.SimpleNamespace(cmd_create=cmd_create)})
+tl._MODS.update({"ad": ad})
 patched = []
-tl.api = lambda method, path, payload=None, params=None: patched.append((method, path, payload)) or {}
+def fake_api(method, path, payload=None, params=None):
+    patched.append((method, path, payload))
+    return {"records": [{"id": "recNEW1"}]} if method == "POST" else {}
+tl.api = fake_api
 w = tl.Writer(False)
 out["handover"] = w.to_roy({"name": "TENANT ADVERTS: Haverhill advert copy", "description": "x", "kind": "adverts", "town": "Haverhill"})
 def not_emailed(args):
@@ -466,7 +467,9 @@ try:
 except RuntimeError:
     out["refused"] = True
 out["cancelled"] = any(p[0] == "PATCH" and p[2]["records"][0]["fields"].get(tl.TK["status"]) == "Cancelled" for p in patched)
-out["forced"] = all(c[1] is True for c in calls if c[0] == "create")
+posts = [p for p in patched if p[0] == "POST" and p[1] == tl.T_TASKS]
+out["direct"] = bool(posts) and all("Notes" not in json.dumps(p[2]) or "TRACK RECORD" not in json.dumps(p[2]) for p in posts)
+out["noCreateGate"] = "ct" not in tl._MODS
 `);
   it('a normal handover (its NOT EMAILED key is null) is a success', () => {
     expect(r.handover).toBe('recNEW1');
@@ -478,8 +481,9 @@ out["forced"] = all(c[1] is True for c in calls if c[0] == "create")
     expect(r.refused).toBe(true);
     expect(r.cancelled).toBe(true);
   });
-  it('chain tasks are created past the inbox-task word matcher (the chain dedupes itself)', () => {
-    expect(r.forced).toBe(true);
+  it('chain tasks are created directly: no inbox-task word matcher, no track-record search in their notes', () => {
+    expect(r.direct).toBe(true);
+    expect(r.noCreateGate).toBe(true);
   });
 });
 
@@ -583,8 +587,14 @@ m3 = tl.monitor(w, DAY, o, [])
 w["tasks"][0]["fields"][TK["notes"]] += "\\n[22 Sep 2026 09:05 — send-email] SENT: mail-out \\"x\\" to 1 address(es)"
 m4 = tl.monitor(w, DAY, o, [])
 s = lambda m: {x["key"]: x["state"] for x in m["steps"]}
+wv = world()
+wv["tasks"] = [task("TENANT VIEWINGS: Haverhill people to call 25 Sep 2026", status="Today")]
+vid = wv["tasks"][0]["id"]
+wv["leads"] = [lead("recP1x", stage="Past applicant", legacyRef="tenant-app:2019-01-01 10:00:00", royTask=[vid]),
+               lead("recW1", stage="With Roy")]
+viewNote = [x["note"] for x in tl.monitor(wv, DAY, o, [])["steps"] if x["key"] == "viewings"][0]
 big = dict(m1, run=["x" * 1000] * 200)
-out = {"none": s(m1), "unsent": s(m2), "partial": s(m3), "sent": s(m4), "worst1": m1["worst"],
+out = {"none": s(m1), "unsent": s(m2), "partial": s(m3), "sent": s(m4), "worst1": m1["worst"], "viewNote": viewNote,
        "payloadParses": bool(json.loads(tl.payload_json(big, limit=5000)))}
 `);
   it('open rooms and no mail-out or adverts is a failure; no sign-ups before the first mail-out is not', () => {
@@ -600,6 +610,9 @@ out = {"none": s(m1), "unsent": s(m2), "partial": s(m3), "sent": s(m4), "worst1"
   });
   it('a sign-up with no date of birth is flagged to watch, not a broken chain', () => {
     expect(r.unsent.screening).toBe('warn');
+  });
+  it("the viewings note counts past applicants on Roy's open list, not only sign-ups", () => {
+    expect(r.viewNote).toBe('Roy has 1 sign-up(s) and 1 past applicant(s) to call');
   });
   it('an oversized report is trimmed and still parses', () => {
     expect(r.payloadParses).toBe(true);
