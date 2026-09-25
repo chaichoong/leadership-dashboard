@@ -43,7 +43,8 @@
  * is auditable after the fact rather than trusted at the time.
  *
  * USAGE
- *   node scripts/agent-browser.js login   --url URL [--profile NAME]
+ *   node scripts/agent-browser.js login   --url URL [--profile NAME] [--label NAME]
+ *   node scripts/agent-browser.js signin-list                          every sign-in the Robot sign-in app can open
  *   node scripts/agent-browser.js session --site HOST [--shot PATH]   is the robot signed in there? (walks the door)
  *   node scripts/agent-browser.js read    --url URL [--shot OUT.png] [--wait MS] [--wait-for SELECTOR] [--max-text N]
  *   node scripts/agent-browser.js loom-search --query "..." [--limit 20]
@@ -250,6 +251,85 @@ function hostAllowed(url) {
   let h;
   try { h = new URL(url).hostname.toLowerCase(); } catch { return false; }
   return Object.keys(loadSites()).some(d => h === d || h.endsWith('.' + d));
+}
+
+// sites.json as written, without the builtins merged in. A missing file is an
+// empty list; a file that will not parse THROWS, because rewriting it from one
+// new entry would wipe every site already on it.
+function readSitesFile() {
+  let raw;
+  try { raw = fs.readFileSync(SITES_FILE, 'utf8'); } catch (e) {
+    if (e.code === 'ENOENT') return {};
+    throw e;
+  }
+  return JSON.parse(raw);
+}
+
+// A profile is a folder under PROFILE_ROOT, so a name that could climb out of
+// it (a slash, a dot) is refused wherever a profile is chosen.
+const PROFILE_NAME_RE = /^[a-z0-9][a-z0-9-]*$/i;
+
+// What `login` writes on the allowlist (25 Sep 2026). Until now it wrote
+// {label, login} and no sign-in page, so every site added that way (TopCashback,
+// Evernote, Strava) was missing from the Robot sign-in app and from the daily
+// keep-alive: once its login lapsed, only a Claude session could open it again.
+// It also wrote the whole merged list, builtins included, into sites.json, where
+// the copies then outranked any later change to a builtin.
+//
+// A sign-in on the MAIN profile records its page, so the app lists it for every
+// sign-in after. A sign-in on any other profile never touches the entry's
+// loginUrl: that field is the main profile's door, and the keep-alive tests it
+// on the main profile. Utilita keeps one profile per flat and no top-level
+// loginUrl for exactly that reason (utilita-balance.py), and its flats reach the
+// app through the entry's `profiles` list instead.
+function recordLoginSite(url, { label, profile } = {}) {
+  let u;
+  try { u = new URL(url); } catch { die(`${url} is not a web address.`); }
+  if (u.protocol !== 'https:') die(`${url} is not an https address. A sign-in page always is.`);
+  const host = u.hostname.toLowerCase();
+  const have = loadSites()[host];
+  const onMain = (profile || 'default') === 'default' && !(have && Array.isArray(have.profiles));
+  if (hostAllowed(url) && (!onMain || (have && have.login && have.loginUrl))) return { host, changed: false };
+  const extra = readSitesFile();
+  const entry = Object.assign({}, extra[host] || {});
+  entry.label = entry.label || (have && have.label) || label || host;
+  entry.login = true;
+  if (onMain && !(have && have.loginUrl)) entry.loginUrl = url;
+  extra[host] = entry;
+  fs.mkdirSync(path.dirname(SITES_FILE), { recursive: true });
+  const tmp = SITES_FILE + '.tmp';
+  fs.writeFileSync(tmp, JSON.stringify(extra, null, 2));
+  fs.renameSync(tmp, SITES_FILE);
+  return { host, changed: true };
+}
+
+// Every sign-in the Robot sign-in app can open (25 Sep 2026): one per login
+// site with a sign-in page on the main profile, plus one per entry in a site's
+// `profiles` list. Utilita is the case that needed it: each Duckworth flat is a
+// separate Utilita login held in its own profile, the app only ever opened the
+// main one, and the watcher's Slack line sent Kevin to an app that could not
+// sign either flat back in.
+// A profile entry that cannot be used is named in `problems`, never dropped in
+// silence: a flat missing from the list reads exactly like a flat nobody set up.
+function signinTargets(sites = loadSites(), problems = []) {
+  const out = [];
+  const clean = s => String(s).replace(/\s*\|\s*/g, ' - ').trim();   // " | " splits the app's lines
+  for (const [host, v] of Object.entries(sites)) {
+    if (!v || !v.login) continue;
+    if (v.loginUrl) out.push({ label: clean(v.label || host), host, url: v.loginUrl, profile: 'default' });
+    for (const p of Array.isArray(v.profiles) ? v.profiles : []) {
+      const name = String((p && p.profile) || '');
+      if (!PROFILE_NAME_RE.test(name)) { problems.push(`${host}: profile "${name}" is not a plain folder name`); continue; }
+      let h = '';
+      try { h = new URL(p.loginUrl).hostname.toLowerCase(); } catch { /* reported just below */ }
+      if (h !== host && !h.endsWith('.' + host)) {                    // a profile opens its own site only
+        problems.push(`${host}: profile ${name} has no sign-in page on ${host}`);
+        continue;
+      }
+      out.push({ label: clean(p.label || `${v.label || host} (${name})`), host, url: p.loginUrl, profile: name });
+    }
+  }
+  return out;
 }
 
 // A refusal exits the process when run as a command, and THROWS when required
@@ -721,19 +801,25 @@ async function main() {
     return;
   }
 
+  // One "label | host | url | profile" line per sign-in, for the Robot sign-in
+  // app's picker. Unusable profile entries go to stderr by name.
+  if (cmd === 'signin-list') {
+    const problems = [];
+    for (const t of signinTargets(loadSites(), problems)) {
+      console.log([t.label, t.host, t.url, t.profile].join(' | '));
+    }
+    for (const p of problems) console.error('SKIPPED: ' + p);
+    return;
+  }
+
   if (cmd === 'login') {
     // The one-time human step. Headed on purpose: Kevin signs in himself, the
     // profile keeps the cookie, and no password ever reaches an agent.
     const url = arg(rest, 'url');
     if (!url) die('--url is required');
-    const host = new URL(url).hostname.toLowerCase();
-    const sites = loadSites();
-    if (!hostAllowed(url)) {
-      sites[host] = { label: arg(rest, 'label', host), login: true };
-      fs.mkdirSync(path.dirname(SITES_FILE), { recursive: true });
-      fs.writeFileSync(SITES_FILE, JSON.stringify(sites, null, 2));
-      console.log(`Added ${host} to the allowlist.`);
-    }
+    if (!PROFILE_NAME_RE.test(profile)) die(`--profile ${profile} is not a plain folder name.`);
+    const { host, changed } = recordLoginSite(url, { label: arg(rest, 'label', null), profile });
+    if (changed) console.log(`Recorded ${host} on the allowlist.`);
     // TWO TRAPS, both paid for on 2 Sep 2026 (Evernote):
     //
     // 1. A login window driven by Playwright is still an automated browser,
@@ -1028,7 +1114,11 @@ async function main() {
     return;
   }
 
-  console.error(fs.readFileSync(__filename, 'utf8').split('\n').slice(38, 52).join('\n'));
+  // The USAGE block, found by its heading: a fixed line range silently cut
+  // the last command off the moment a new one was added above it.
+  const lines = fs.readFileSync(__filename, 'utf8').split('\n');
+  const from = lines.indexOf(' * USAGE');
+  console.error(lines.slice(from, lines.indexOf(' *', from)).join('\n'));
   process.exit(2);
 }
 
@@ -1041,4 +1131,5 @@ if (require.main === module) {
 }
 
 module.exports = { hostAllowed, pickLinks, runSteps, assertNotCredential, assertApproved, SECRET_NAME_RE, loadSites, sessionVerdict,
+                   recordLoginSite, signinTargets, readSitesFile,
                    assertUploadable, assertConfirmable, UPLOAD_DIR, UPLOAD_EXTENSIONS, persistSessionCookies };

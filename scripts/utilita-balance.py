@@ -501,9 +501,15 @@ def build_message(rows, low_gbp, when=None, alarm_days=ALARM_DAYS_LEFT):
         else:
             attention = True
             body.append("*" + r["label"] + "*: _" + (r["problem"] or "no reading") + "_")
-    if any(r.get("problem") == "SIGN-IN NEEDED" for r in rows):
+    # Name the entries to pick (25 Sep 2026). "Open the Robot sign-in app" was all
+    # this said, and the app could not open either flat until each got its own
+    # line ("Utilita Apartment 1 (...)", from the `profiles` list in sites.json).
+    lapsed = [r["label"] for r in rows if r.get("problem") == "SIGN-IN NEEDED"]
+    if lapsed:
         body.append("")
-        body.append("_Open the Robot sign-in app on the Desktop to put that right._")
+        body.append("_Kevin: open the Robot sign-in app on the Desktop and pick "
+                    + " and ".join("Utilita " + l for l in lapsed)
+                    + " (if it lists other sites first, press Pick a site instead)._")
     body.append("")
     body.append("_Read at " + when.strftime("%H:%M") + "._")
     return head + "\n" + "\n".join(body), attention, alarm
@@ -1030,8 +1036,9 @@ def selftest():
              days="More than a week left", meter="2409")], 10)
     if "SIGN-IN NEEDED" not in msg or "£0.00" in msg or not att:
         bad.append(("lapsed session message", "SIGN-IN NEEDED + attention", msg[:80]))
-    if "Robot sign-in" not in msg:
-        bad.append(("lapsed session lacks the fix", "Robot sign-in line", "missing"))
+    if "Robot sign-in" not in msg or "pick Utilita Apartment 1 (" not in msg or "Utilita Apartment 2" in msg:
+        bad.append(("lapsed session names the app entry for that flat only",
+                    "pick Utilita Apartment 1", msg[-160:]))
     if "…2409" not in msg:
         bad.append(("the meter is shown so a dropped check is visible", "…2409", "missing"))
 

@@ -40,11 +40,69 @@ on sh(cmd)
 	return do shell script "cd " & quoted form of repo & " && " & cmd
 end sh
 
--- Every allowlisted login site as "label | host | url" lines.
+-- Every sign-in this app can open, as "label | host | url | profile" lines. One line per robot
+-- profile, not per site (25 Sep 2026): each Duckworth flat is its own Utilita login in its own
+-- profile, and while this list held only the main profile the watcher's "open the Robot sign-in
+-- app" line sent Kevin somewhere that could not sign either flat back in.
 on allSites()
-	set js to "const s=require('./scripts/agent-browser.js').loadSites();for(const [h,v] of Object.entries(s)){if(v.login&&v.loginUrl)console.log(v.label+' | '+h+' | '+v.loginUrl)}"
-	return paragraphs of sh(quoted form of nodeBin() & " -e " & quoted form of js)
+	return paragraphs of sh(quoted form of nodeBin() & " scripts/agent-browser.js signin-list")
 end allSites
+
+-- The first line of the full list: give the robot a site it has never had.
+property addNewItem : "+ Add a new site…"
+
+on fieldCount(theLine)
+	set AppleScript's text item delimiters to " | "
+	set n to count of text items of theLine
+	set AppleScript's text item delimiters to ""
+	return n
+end fieldCount
+
+-- The robot profile a line signs into. Lines from waitingSites() carry three fields: a task
+-- waiting on a site always means the main profile.
+on profileOf(theLine)
+	if fieldCount(theLine) < 4 then return "default"
+	return fieldOf(theLine, 4)
+end profileOf
+
+-- A line for runChain from what Kevin typed. " | " separates the fields, so a bar in the name
+-- would shift the url into the host's place.
+on newSiteLine(theName, theHost, theUrl)
+	set AppleScript's text item delimiters to "|"
+	set bits to text items of theName
+	set AppleScript's text item delimiters to "-"
+	set theName to bits as text
+	set AppleScript's text item delimiters to ""
+	if theName is "" then set theName to theHost
+	return theName & " | " & theHost & " | " & theUrl & " | default"
+end newSiteLine
+
+-- "Add a new site…" (25 Sep 2026): Kevin pastes the site's sign-in page and names it, and the
+-- window opens as for any other site. `login` puts the site on the allowlist WITH that page, so
+-- it is on this list for every sign-in after, and the daily keep-alive visits it. Returns a line
+-- for runChain, or "" when he cancels or the address is not an https one.
+on askNewSite()
+	try
+		set theUrl to text returned of (display dialog "Paste the address of the site's sign-in page. The robots will be able to use this site once you have signed in." default answer "https://" with title "Robot sign-in: add a site" buttons {"Cancel", "Next"} default button "Next" cancel button "Cancel")
+	on error number -128
+		return ""
+	end try
+	-- Node parses it, so a pasted address with stray spaces comes back clean: host, then href.
+	try
+		set parsed to paragraphs of sh(quoted form of nodeBin() & " -e " & quoted form of "const u=new URL(process.argv[1]);if(u.protocol!=='https:'||!u.hostname.includes('.'))process.exit(1);console.log(u.hostname.toLowerCase()+'\\n'+u.href)" & " " & quoted form of theUrl)
+		set theHost to item 1 of parsed
+		set theUrl to item 2 of parsed
+	on error
+		display alert "That is not a sign-in page address" message "It needs to start with https:// and name a website. Nothing was added."
+		return ""
+	end try
+	try
+		set theName to text returned of (display dialog "What should the robots call this site?" default answer theHost with title "Robot sign-in: add a site" buttons {"Cancel", "Open sign-in"} default button "Open sign-in" cancel button "Cancel")
+	on error number -128
+		return ""
+	end try
+	return newSiteLine(theName, theHost, theUrl)
+end askNewSite
 
 -- Ask the engine ONCE what is waiting and keep its answer in a file the readers below
 -- share. signin-waiting checks every site's session before it answers and hands back the
@@ -126,21 +184,36 @@ on fieldOf(theLine, n)
 	return v
 end fieldOf
 
+-- The window command for one line, on that line's profile. Only a four-field line carries a
+-- clean name (a waiting line's reads "Pingen (2 waiting)"), and the name is used only when the
+-- site is new to the allowlist. stdout only to /dev/null: `do shell script` reports stderr as
+-- the error text, and that is what signInTo's notification shows.
+on loginCommand(theLine)
+	set nameArg to ""
+	if fieldCount(theLine) > 3 then set nameArg to " --label " & quoted form of fieldOf(theLine, 1)
+	return quoted form of nodeBin() & " scripts/agent-browser.js login --url " & quoted form of fieldOf(theLine, 3) & " --profile " & quoted form of profileOf(theLine) & nameArg & " > /dev/null"
+end loginCommand
+
 -- One site: open the window, wait for Cmd+Q, hand the waiting tasks back.
 -- Returns the number of tasks handed back, or -1 if the window could not open.
 on signInTo(theLine)
 	set theHost to fieldOf(theLine, 2)
 	set theUrl to fieldOf(theLine, 3)
 	set theLabel to fieldOf(theLine, 1)
+	set theProfile to profileOf(theLine)
 	display notification "Sign in, then press Cmd+Q on the Chrome window." with title "Robot sign-in: " & theLabel
 	try
-		-- stdout only to /dev/null: `do shell script` reports stderr as the error
-		-- text, and that is what the notification below shows.
-		sh(quoted form of nodeBin() & " scripts/agent-browser.js login --url " & quoted form of theUrl & " > /dev/null")
+		sh(loginCommand(theLine))
 	on error errMsg
 		display notification "Could not open the window: " & errMsg with title "Robot sign-in: " & theLabel
 		return -1
 	end try
+	-- A task waiting on a site means the main profile. A sign-in to any other profile (a
+	-- Utilita flat) hands nothing back: its reader runs on its own clock.
+	if theProfile is not "default" then
+		display notification "Signed in. The robot holds this login in its own browser." with title "Robot sign-in: " & theLabel
+		return 0
+	end if
 	-- Hand this site's waiting tasks back to their robots now (Airtable only,
 	-- seconds). The pickup run itself starts once every window has closed.
 	try
@@ -216,10 +289,18 @@ on run
 		runChain({}, liveN)
 		return
 	end if
-	set choice to choose from list allSites() with title "Robot sign-in" with prompt "Which site should the robot be signed into?" OK button name "Open" cancel button name "Cancel"
+	set choice to choose from list ({addNewItem} & allSites()) with title "Robot sign-in" with prompt "Which site should the robot be signed into? Pick the first line to give it a new one." OK button name "Open" cancel button name "Cancel"
 	if choice is false then
 		if liveN > 0 then runChain({}, liveN)
 		return
+	end if
+	if (item 1 of choice) as text is addNewItem then
+		set newLine to askNewSite()
+		if newLine is "" then
+			if liveN > 0 then runChain({}, liveN)
+			return
+		end if
+		set choice to {newLine}
 	end if
 	runChain(choice, liveN)
 end run
@@ -273,12 +354,15 @@ on open location theURL
 			runChain({}, liveN)
 			return
 		end if
+		-- Every sign-in on that host, in turn: robotsignin://site/my.utilita.co.uk opens both flats.
+		set matches to {}
 		repeat with L in allSites()
-			if fieldOf(L as text, 2) is wantHost then
-				runChain({L as text}, liveN)
-				return
-			end if
+			if fieldOf(L as text, 2) is wantHost then set end of matches to (L as text)
 		end repeat
+		if (count of matches) > 0 then
+			runChain(matches, liveN)
+			return
+		end if
 		display alert "Unknown site" message wantHost & " is not on the robot's sign-in list."
 	end if
 end open location

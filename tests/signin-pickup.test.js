@@ -224,6 +224,41 @@ describe('the Robot sign-in app and its link', () => {
       expect(out).toBe('all|site/app.pingen.com');
     } finally { rmSync(dir, { recursive: true, force: true }); }
   });
+  // 25 Sep 2026: each Duckworth flat is its own Utilita login in its own robot profile, and the
+  // app opened only the main one. Driven through osascript, not read off the source.
+  it('opens each sign-in on its own profile, and a waiting-task line always on the main one', () => {
+    const { mkdtempSync, rmSync } = require('node:fs');
+    const { tmpdir } = require('node:os');
+    const dir = mkdtempSync(join(tmpdir(), 'od-robot-'));
+    try {
+      execFileSync('osacompile', ['-o', join(dir, 'r.scpt'), join(ROOT, 'scripts', 'robot-signin.applescript')]);
+      const run = (expr) => execFileSync('osascript', ['-e',
+        `set s to (load script POSIX file "${join(dir, 'r.scpt')}")\nreturn ${expr}`], { encoding: 'utf8' }).trim();
+      const flat = 'Utilita Apartment 1 (a@b.com) | my.utilita.co.uk | https://my.utilita.co.uk/energy | utilita-apt1';
+      const waiting = 'Pingen (letters) (2 waiting) | app.pingen.com | https://app.pingen.com/';
+      expect(run(`s's profileOf("${flat}")`)).toBe('utilita-apt1');
+      expect(run(`s's profileOf("${waiting}")`)).toBe('default');
+      const flatCmd = run(`s's loginCommand("${flat}")`);
+      expect(flatCmd).toMatch(/agent-browser\.js login --url 'https:\/\/my\.utilita\.co\.uk\/energy' --profile 'utilita-apt1' --label 'Utilita Apartment 1 \(a@b\.com\)' > \/dev\/null$/);
+      // A waiting line's name carries "(2 waiting)", so it is never offered as the site's name.
+      expect(run(`s's loginCommand("${waiting}")`)).toMatch(/login --url 'https:\/\/app\.pingen\.com\/' --profile 'default' > \/dev\/null$/);
+      // Add a new site: a bar in the typed name cannot shift the fields, and a blank name is the host.
+      expect(run(`s's newSiteLine("Acme | Portal", "portal.acme.co.uk", "https://portal.acme.co.uk/login")`))
+        .toBe('Acme - Portal | portal.acme.co.uk | https://portal.acme.co.uk/login | default');
+      expect(run(`s's newSiteLine("", "portal.acme.co.uk", "https://portal.acme.co.uk/login")`))
+        .toBe('portal.acme.co.uk | portal.acme.co.uk | https://portal.acme.co.uk/login | default');
+      expect(run(`s's addNewItem`)).toBe('+ Add a new site…');
+    } finally { rmSync(dir, { recursive: true, force: true }); }
+  });
+  it('the site list comes from signin-list, a flat hands nothing back, and a site link opens every profile on it', () => {
+    expect(src).toMatch(/scripts\/agent-browser\.js signin-list/);
+    const signIn = src.slice(src.indexOf('on signInTo'), src.indexOf('end signInTo'));
+    expect(signIn.indexOf('if theProfile is not "default"')).toBeGreaterThan(-1);
+    expect(signIn.indexOf('if theProfile is not "default"')).toBeLessThan(signIn.indexOf('signin-done --site'));
+    const link = src.slice(src.indexOf('on open location'), src.indexOf('end open location'));
+    expect(link).toMatch(/set end of matches to/);
+    expect(link).toMatch(/runChain\(matches, liveN\)/);
+  });
   it('resolves node the way the runners do, never a bare "node" under launchd', () => {
     const py = readFileSync(join(ROOT, 'scripts', 'agent-dispatch.py'), 'utf8');
     expect(py).toMatch(/AGENT_NODE_BIN/);
