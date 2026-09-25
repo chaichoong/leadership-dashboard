@@ -573,6 +573,58 @@ out["scopeFail"] = {"screened": stages(fw5).get("recS1"), "failed": any(x.starts
   });
 });
 
+describe("Roy's replies, colleagues' STOPs and people who sign up again", () => {
+  const r = py(`
+w = world()
+vt = task("TENANT VIEWINGS: Haverhill people to call 25 Sep 2026", status="Today",
+          notes="[25 Sep 2026 14:02 Roy Lavin via his assistant, recREQ1] Booked John Smith for Tuesday. Jane no answer, Dave Brown not interested\\nMary Past is interested")
+w["tasks"] = [vt]
+w["leads"] = [lead("recJ", name="John Smith", stage="With Roy", royTask=[vt["id"]]),
+              lead("recJa", name="Jane Doe", stage="With Roy", royTask=[vt["id"]]),
+              lead("recD", name="Dave Brown", stage="With Roy", royTask=[vt["id"]]),
+              lead("recM", name="Mary Past", stage="Past applicant", legacyRef="tenant-app:2019-01-01 10:00:00", royTask=[vt["id"]])]
+fw = FakeWriter()
+tl.run(w, DAY, fw, only="roy", replies=lambda: [])
+got = {p["id"]: p["fields"] for p in fw.patches}
+out["roy"] = {k: (v.get(L["stage"]), v.get(L["screening"])) for k, v in got.items()}
+w2 = world(); w2["tasks"] = [task("TENANT VIEWINGS: Haverhill x", status="Today", notes="[25 Sep 2026 14:02 Roy Lavin via his assistant, recREQ1] all done, thanks")]
+w2["leads"] = [lead("recZ", name="Zed Person", stage="With Roy", royTask=[w2["tasks"][0]["id"]])]
+tl.run(w2, DAY, FakeWriter(), only="roy", replies=lambda: [])
+out["unmatched"] = w2.get("royUnmatched")
+w3 = world(); w3["sentThreads"] = {"t9": "housing@westsuffolk.gov.uk"}
+fw3 = FakeWriter()
+tl.run(w3, DAY, fw3, only="replies", replies=lambda: [{"id": "q1", "threadId": "t9",
+    "headers": {"from": "Jane Smith <jane.smith@westsuffolk.gov.uk>", "subject": "RE: Rooms in Haverhill"}, "body": "Please stop"}])
+out["colleague"] = sorted(fw3.optouts)
+w4 = world()
+w4["leads"] = [lead("recOld", name="Pat Old", stage="Past applicant", phone="07123456789", legacyRef="tenant-app:2018-01-01 10:00:00"),
+               lead("recNew", name="Pat Old", phone="07123 456789")]
+fw4 = FakeWriter()
+tl.run(w4, DAY, fw4, only="screen", replies=lambda: [])
+out["reregistered"] = stages(fw4)
+`);
+  it("Roy's words move each named person: booked, not interested, and a first name alone when it is unique", () => {
+    expect(r.roy.recJ[0]).toBe('Viewing booked');
+    expect(r.roy.recD[0]).toBe('Not looking');
+    expect(r.roy.recJa[0]).toBeNull();
+    expect(r.roy.recJa[1]).toMatch(/no answer/);
+  });
+  it('a past applicant Roy says is interested stays phone-only, with a note to get them on the form', () => {
+    expect(r.roy.recM[0]).toBeNull();
+    expect(r.roy.recM[1]).toMatch(/fill in the form/);
+  });
+  it("a reply from Roy that names nobody on the list is flagged, not guessed", () => {
+    expect(r.unmatched).toEqual(['TENANT VIEWINGS: Haverhill x']);
+  });
+  it('a STOP from a colleague in the thread of our email opts out the address we emailed too', () => {
+    expect(r.colleague).toEqual([['housing@westsuffolk.gov.uk', 'Referrer'], ['jane.smith@westsuffolk.gov.uk', 'Other']]);
+  });
+  it('a past applicant who signs up again on the form has the old row retired', () => {
+    expect(r.reregistered.recOld).toBe('Archived');
+    expect(r.reregistered.recNew).toBe('Qualified');
+  });
+});
+
 describe('the monitor reports what did NOT happen', () => {
   const r = py(`
 w = world()

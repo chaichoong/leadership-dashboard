@@ -640,7 +640,9 @@ def send_each(args, mail, sender_problem):
         ledger_append({"task": args.task, "recipient": addr, "ts": now_iso(),
                        "event": "sent", "from": mail["from"] or "(default)",
                        "subject": mail["subject"], "taskName": mail["taskName"],
-                       "messageId": result.get("id")})
+                       # The thread lets the tenant chain match a STOP sent from a colleague's
+                       # address back to the address we emailed (25 Sep 2026).
+                       "messageId": result.get("id"), "threadId": result.get("threadId")})
         sent.append(addr)
     now_done, now_retry, now_unsure = mailout_progress(args.task)
     wanted = {a.lower() for a in mail["toEach"]}
