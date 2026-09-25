@@ -4860,17 +4860,38 @@ def track_record_problem(output, required):
 # ── history: the dated record of everything with a contact or reference ──
 REF_TOKEN_RE = re.compile(r"\b(?=[A-Z0-9-]{5,}\b)(?:[A-Z]*\d[A-Z0-9-]*)\b")
 ISO_DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
+# A link is an address, not a reference (25 Sep 2026). An Airtable form link
+# in a tenant-chain task gave the refs APPNQJDPQDNIH3IRL, the base id in
+# nearly every task and email that links to Airtable, and SHRTUDF8S04KP5XGT;
+# the search matched hundreds of unrelated tasks and threads and wrote ~72,000
+# characters into two tasks' Notes, a tier-1 line among them. Links go before
+# the tokens are read, and an Airtable id (app/tbl/rec/viw/shr/fld + 14) is
+# never a reference even bare: every TRACK RECORD line links its task, so a
+# record id matches every record that ever cited it. Both match on the text
+# as written, before it is upper-cased: a scheme-less link needs a lowercase
+# host (so "Acc.No/12345678" stays a reference) and an id a lowercase prefix
+# (so RECEIPT1234567890 does too).
+REF_URL_RE = re.compile(r"(?i:https?://|www\.)\S+|\b(?:[a-z0-9-]+\.)+[a-z]{2,}/\S*")
+AIRTABLE_ID_RE = re.compile(r"\b(?:app|tbl|rec|viw|shr|fld)[A-Za-z0-9]{14}\b")
 HISTORY_MAX_REFS = 8
+HISTORY_MAX_LINES = 40
 
 
 def reference_tokens(text):
     """Reference-like tokens in free text: five or more characters carrying a
     digit, never a plain date, each once (review, 8 Sep 2026: one letter
     yielded 18 tokens, seven of them the same number, and dates matched
-    thirteen unrelated tasks)."""
+    thirteen unrelated tasks). Never from a link, never an Airtable id (25 Sep
+    2026). A phone number stays: on the SMS lane it is the only thing naming
+    the contact."""
+    text = AIRTABLE_ID_RE.sub(" ", REF_URL_RE.sub(" ", str(text or "")))
+    # A link wrapped across lines leaves a piece of an id behind (DNIH3IRL
+    # from appnqjDpq / DniH3IRl), and the search matches on substrings, so
+    # that piece finds every record the base id is in (review, 25 Sep 2026).
+    ours = f"{BASE_ID} {TASKS}".upper()
     out = []
-    for t in REF_TOKEN_RE.findall(str(text or "").upper()):
-        if t.isalpha() or ISO_DATE_RE.match(t) or t in out:
+    for t in REF_TOKEN_RE.findall(text.upper()):
+        if t.isalpha() or ISO_DATE_RE.match(t) or t in ours or t in out:
             continue
         out.append(t)
     return out[:HISTORY_MAX_REFS]
@@ -4886,7 +4907,7 @@ def history_terms(emails=(), refs=(), properties=()):
             terms.append(("email", e))
     for r in refs:
         r = (r or "").strip()
-        if len(r) >= 3 and not ISO_DATE_RE.match(r) and ("ref", r) not in terms:
+        if len(r) >= 3 and not ISO_DATE_RE.match(r) and not AIRTABLE_ID_RE.fullmatch(r) and ("ref", r) not in terms:
             terms.append(("ref", r))
     for p in properties:
         p = (p or "").strip()
@@ -5023,11 +5044,19 @@ def history_text(result):
     """The block an agent pastes into its output."""
     terms = ", ".join(result.get("terms") or []) or "nothing"
     searched = " + ".join(result.get("searched") or ["tasks"])
-    tail = ("; " + "; ".join(result["notes"])) if result.get("notes") else ""
-    if not result.get("entries"):
+    entries = result.get("entries") or []
+    notes = list(result.get("notes") or [])
+    # A term that matches everything must never write tens of thousands of
+    # characters into a task (25 Sep 2026). The newest lines are kept, and the
+    # header says how many were left out, so the cut is visible on the card.
+    if len(entries) > HISTORY_MAX_LINES:
+        notes.append(f"showing the newest {HISTORY_MAX_LINES} of {len(entries)} lines")
+        entries = entries[-HISTORY_MAX_LINES:]
+    tail = ("; " + "; ".join(notes)) if notes else ""
+    if not entries:
         return f"{TRACK_RECORD_MARK} none found (searched {searched} for {terms}{tail})"
     lines = [f"{TRACK_RECORD_MARK} (searched {searched} for {terms}{tail})"]
-    for e in result["entries"]:
+    for e in entries:
         day = e.get("date") or "undated"
         try:
             day = datetime.strptime(day[:10], "%Y-%m-%d").strftime("%d %b %Y") + (day[10:] if len(day) > 10 else "")
