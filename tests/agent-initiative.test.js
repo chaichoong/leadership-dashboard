@@ -74,6 +74,21 @@ describe('tool policy is shared, not copied', () => {
     expect(list).not.toMatch(/"Bash\(\*\)"|"Bash"/);
     expect(list).not.toMatch(/"(Edit|Write|NotebookEdit)"/);
   });
+
+  // Finding 20260925-agent-dispatch-617 (25 Sep 2026): SKILL step 7's verify goes
+  // through ~/tools/run-job.sh (the Estate board record and the alert). Headless it
+  // needed an approval nobody could give. Proved live the same day: a multi-word
+  // absolute-path prefix rule of this shape runs headless, and without it the
+  // engine answers "This command requires approval". The WRAPPER itself must never
+  // be allowed bare: it runs whatever it is handed.
+  it('lets the run record its own verify through run-job.sh, and nothing else through it', () => {
+    const out = execFileSync('bash', ['-c',
+      `. ${JSON.stringify(resolve(ROOT, 'scripts/agent-tools.sh'))}; printf '%s\\n' "\${AGENT_ALLOWED_TOOLS[@]}"`,
+    ], { encoding: 'utf8' }).trim().split('\n');
+    expect(out).toContain('Bash(/Users/kevinbrittain/tools/run-job.sh agent-dispatch python3 /Users/kevinbrittain/Projects/leadership-dashboard/scripts/agent-dispatch.py verify:*)');
+    const wrapper = out.filter((t) => t.includes('run-job.sh'));
+    for (const t of wrapper) expect(t, 'run-job.sh is allowed only for verify').toMatch(/agent-dispatch\.py verify:\*\)$/);
+  });
 });
 
 // ─────────────────────────────────────────────────────────────────────────────

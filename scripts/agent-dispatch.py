@@ -2617,13 +2617,60 @@ def carry_out_problem(output, strict=True):
 #
 # Deliberately matched on the CLOSING line only, not the whole document: an
 # analysis that discusses emailing somebody is not a promise to send one.
+#
+# Widened 25 Sep 2026 (finding 20260923-agent-dispatch-586). Three approved
+# cards typed Admin or Analysis promised an email this pattern did not read,
+# so each was approved and then could never be sent: "sending the
+# ACKNOWLEDGEMENT reply" (a word between the article and the noun, the PIB
+# renewal), "then it goes to the council" (Siddows Avenue) and "the response
+# being sent by email" (LCS). Back-tested on the 765 closing lines of 26 Aug to
+# 25 Sep 2026: 5 matches before, 20 after, 14 of them cards Kevin rejected and
+# the approved ones exactly the stuck three plus one. What stays out, tested on
+# the same data: a send only denied or described ("no response will be sent",
+# "without sending any reply", "before being sent", "whether Roy sends", "which
+# sends" another task's email) and a message that is not email (iMessage, SMS).
 SEND_LANGUAGE_RE = re.compile(
     r"\b(?:"
-    r"send(?:s|ing)?\s+(?:the\s+|this\s+|an?\s+)?(?:email|e-mail|letter|reply|message)"
+    r"send(?:s|ing)?\s+(?:the\s+|this\s+|an?\s+|one\s+|that\s+)?(?:[\w'-]+\s+){0,2}?"
+    r"(?:email|e-mail|letter|reply|response|message)s?"
     r"|email(?:s|ing)?\s+(?:it|the|this|them|him|her)"
     r"|from\s+Kevin'?s\s+Gmail"
     r"|sent\s+(?:from|to)\s+[^\s@]+@[^\s@]+"
-    r")\b", re.I)
+    r"|(?:it|the\s+(?:email|reply|letter|response|message))\s+(?:then\s+)?goes\s+(?:out\s+)?to"
+    # the passive only with an email noun: "the invoice will be sent by the
+    # supplier" is not our send (second review, 25 Sep 2026)
+    r"|(?:email|e-mail|reply|letter|response|message)s?\s+(?:is\s+|will\s+be\s+|being\s+|gets?\s+|then\s+)?sent\b"
+    r")", re.I)
+# Words that deny or describe a send rather than promise one. NOT "before" or
+# "or": "checking the balance before sending the reply" and "updating the
+# record or sending the reply" are promises, and the second review found the
+# first version letting both through. ("before being sent", a gate being
+# described, no longer matches at all: the passive needs an email noun.)
+NOT_A_SEND_BEFORE_RE = re.compile(r"\b(?:no|not|nothing|never|without|whether|which)\b[^.;]{0,30}$", re.I)
+NOT_EMAIL_RE = re.compile(r"\b(?:iMessage|SMS|text\s+message|WhatsApp|osascript)\b", re.I)
+CLAUSE_SPLIT_RE = re.compile(r"[.;,]|\band\b|\bthen\b", re.I)
+
+
+def send_language_hit(closing):
+    """The first words of a closing line that promise an EMAIL send, or None.
+    A message that is not email is judged in its own clause only: "a text
+    message to Roy and sending the email to the council" still promises an
+    email (second review)."""
+    closing = closing or ""
+    for m in SEND_LANGUAGE_RE.finditer(closing):
+        before = closing[max(0, m.start() - 40): m.start()]
+        if NOT_A_SEND_BEFORE_RE.search(before):
+            continue
+        # "this chase task closes WHEN that email is sent": a condition on
+        # someone else's send, not a promise of ours (the passive form only).
+        if m.group(0).lower().endswith("sent") and re.search(r"\b(?:when|once|until|after)\b[^.;]{0,20}$", before, re.I):
+            continue
+        starts = [0] + [x.end() for x in CLAUSE_SPLIT_RE.finditer(closing) if x.end() <= m.start()]
+        ends = [x.start() for x in CLAUSE_SPLIT_RE.finditer(closing) if x.start() >= m.end()] + [len(closing)]
+        if NOT_EMAIL_RE.search(closing[max(starts): min(ends)]):
+            continue
+        return m
+    return None
 
 
 def send_promise_problem(output, task_type):
@@ -2643,7 +2690,7 @@ def send_promise_problem(output, task_type):
     closing = text[m.end():].strip()
     if not closing or len(closing) > CARRY_OUT_TAIL_MAX:
         return ""
-    found = SEND_LANGUAGE_RE.search(closing)
+    found = send_language_hit(closing)
     if not found:
         return ""
     return ("its closing line promises to send something (%r) but the Task Type "
@@ -5443,7 +5490,8 @@ def load_login_sites():
     return json.loads(r.stdout)
 
 
-def ledger_session_verdict(host, max_age_minutes=SIGNIN_LEDGER_FRESH_MINUTES, path=None, now=None):
+def ledger_session_verdict(host, max_age_minutes=SIGNIN_LEDGER_FRESH_MINUTES, path=None, now=None,
+                           profile="default"):
     """The newest `session` verdict agent-browser.js logged for HOST, if it is
     under max_age_minutes old; else None. The ledger is append-only, one JSON
     line per browser command ({"at", "cmd": "session", "site", "signedIn",
@@ -5457,7 +5505,7 @@ def ledger_session_verdict(host, max_age_minutes=SIGNIN_LEDGER_FRESH_MINUTES, pa
                 except ValueError:
                     continue
                 if (isinstance(rec, dict) and rec.get("cmd") == "session" and rec.get("site") == host
-                        and (rec.get("profile") or "default") == "default"):
+                        and (rec.get("profile") or "default") == profile):
                     newest = rec
     except OSError:
         return None
@@ -5474,7 +5522,7 @@ def ledger_session_verdict(host, max_age_minutes=SIGNIN_LEDGER_FRESH_MINUTES, pa
             "at": str(newest["at"]), "source": "ledger"}
 
 
-def session_walk(host, timeout=SIGNIN_WALK_TIMEOUT):
+def session_walk(host, timeout=SIGNIN_WALK_TIMEOUT, profile=None, url=None):
     """Walk HOST's sign-in door now (`agent-browser.js session --site HOST`).
     {"signedIn", "url", "at", "source": "walk"}, or {"error": why} when the
     walk could not run — never a guess."""
@@ -5483,8 +5531,12 @@ def session_walk(host, timeout=SIGNIN_WALK_TIMEOUT):
     except RuntimeError as exc:
         return {"error": str(exc)}
     try:
-        r = subprocess.run([node, AGENT_BROWSER, "session", "--site", host],
-                           capture_output=True, text=True, timeout=timeout)
+        cmd = [node, AGENT_BROWSER, "session", "--site", host]
+        if profile:
+            cmd += ["--profile", profile]
+        if url:
+            cmd += ["--url", url]
+        r = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
     except subprocess.TimeoutExpired:
         return {"error": f"session walk timed out after {timeout}s (robot profile busy, or the site is slow)"}
     if r.returncode != 0:
@@ -6051,6 +6103,7 @@ BLOCKER_LINE_RE = re.compile(
     r"\((?P<kind>SIGN-IN|SITE|TOOL|KEVIN) (?P<subject>[^)\n]+)\):\s*(?P<rest>[^\n]*)$", re.M)
 BLOCKER_SINCE_RE = re.compile(r"\[since (\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z)\]")
 BLOCKER_FINDING_RE = re.compile(r"\[finding (\d{8}-[\w-]+-\d{3,})\]")
+BLOCKER_PROFILE_RE = re.compile(r"\[profile ([a-z0-9][a-z0-9-]*)\]", re.I)
 
 
 def task_blocker(notes):
@@ -6063,17 +6116,20 @@ def task_blocker(notes):
     rest = last.group("rest")
     since = BLOCKER_SINCE_RE.search(rest)
     finding = BLOCKER_FINDING_RE.search(rest)
-    why = BLOCKER_SINCE_RE.sub("", BLOCKER_FINDING_RE.sub("", rest))
+    profile = BLOCKER_PROFILE_RE.search(rest)
+    why = BLOCKER_SINCE_RE.sub("", BLOCKER_FINDING_RE.sub("", BLOCKER_PROFILE_RE.sub("", rest)))
     why = why.split(" Fix: ")[0].strip()
     return {"kind": last.group("kind"), "subject": last.group("subject").strip(),
             "why": why, "since": since.group(1) if since else "",
-            "finding": finding.group(1) if finding else ""}
+            "finding": finding.group(1) if finding else "",
+            "profile": profile.group(1) if profile else ""}
 
 
 def blocker_fix_text(b):
     kind, subject = b["kind"], b["subject"]
     if kind == "SIGN-IN":
-        return f"Kevin signs in to {subject} with the Robot sign-in app."
+        who = f" ({b['profile']})" if b.get("profile") else ""
+        return f"Kevin signs in to {subject}{who} with the Robot sign-in app."
     if kind == "SITE":
         return (f"Kevin adds {subject} to the robot's list with \"Add a new site\" "
                 "in the Robot sign-in app.")
@@ -6136,7 +6192,15 @@ def finding_states():
     return {k: v.get("status", "") for k, v in _findings.current_state().items()}
 
 
-def blocker_clear_reason(b, sites, fstates):
+def profile_door(host, profile, sites):
+    """The sign-in page of HOST's named profile, or ''."""
+    for p in (sites.get(host) or {}).get("profiles") or []:
+        if isinstance(p, dict) and p.get("profile") == profile:
+            return p.get("loginUrl") or ""
+    return ""
+
+
+def blocker_clear_reason(b, sites, fstates, walk=None):
     """Why this wall is gone, or '' while it stands. SIGN-IN clears in
     signin_done (the sign-in IS the event); KEVIN clears only on the agent's
     evidence (`unblock`), never on a guess."""
@@ -6148,9 +6212,20 @@ def blocker_clear_reason(b, sites, fstates):
     if b["kind"] == "SIGN-IN" and b.get("since"):
         # Signed in some other way (the keep-alive, a sign-in for another task):
         # a session check newer than the wall that found it live.
-        v = ledger_session_verdict(b["subject"], max_age_minutes=IDLE_HOURS * 60)
+        profile = b.get("profile") or "default"
+        v = ledger_session_verdict(b["subject"], max_age_minutes=IDLE_HOURS * 60, profile=profile)
         if v and v["signedIn"] and v["at"] > b["since"]:
-            return f"the robot's session on {b['subject']} was live at {v['at'][:16]}"
+            who = f" ({profile})" if b.get("profile") else ""
+            return f"the robot's session on {b['subject']}{who} was live at {v['at'][:16]}"
+        # A site kept on per-profile sign-ins (Utilita's flats) never hands a task
+        # back from the sign-in app, and nothing else checks those sessions, so
+        # the sweep walks that profile's door itself (25 Sep 2026: such a wall
+        # could otherwise never clear). The walk writes its own ledger line.
+        if walk and b.get("profile"):
+            door = profile_door(b["subject"], b["profile"], sites)
+            w = walk(b["subject"], profile=b["profile"], url=door or None) if door else {}
+            if w.get("signedIn"):
+                return f"the robot's session on {b['subject']} ({b['profile']}) is live"
     if b["kind"] == "TOOL" and b.get("finding"):
         status = fstates.get(b["finding"], "")
         if status == "fixed":
@@ -6236,6 +6311,12 @@ def cmd_block(args):
                      "If it is signed out, that is a SIGN-IN wall; check with "
                      f"`node scripts/agent-browser.js session --site {entry}` first.")
         subject = signin_door_host(entry, sites) if kind == "SIGN-IN" else host
+        names = [p.get("profile") for p in (sites.get(entry) or {}).get("profiles") or [] if isinstance(p, dict)]
+        if kind == "SIGN-IN" and names and getattr(args, "profile", None) not in names:
+            sys.exit(f"ERROR: {entry} keeps one sign-in per profile. Name which one: "
+                     f"--profile {' | '.join(names)}")
+        if getattr(args, "profile", None) and not (kind == "SIGN-IN" and names):
+            sys.exit(f"ERROR: --profile is only for a SIGN-IN wall on a site with profiles; {host} has none.")
     if kind == "KEVIN" and subject.lower() not in KEVIN_ONLY_REASONS:
         sys.exit(f"ERROR: a KEVIN wall is one of: {', '.join(KEVIN_ONLY_REASONS)}. "
                  f"{subject!r} is not: work that an agent could do stays the agent's, "
@@ -6244,7 +6325,8 @@ def cmd_block(args):
         subject = subject.lower()
     b = {"kind": kind, "subject": subject, "why": why, "finding": ""}
     current = task_blocker(t["notes"])
-    if current and current["kind"] == kind and current["subject"] == subject:
+    if (current and current["kind"] == kind and current["subject"] == subject
+            and current.get("profile", "") == (getattr(args, "profile", None) or "")):
         # Same wall, seen again: rest again, never a second line (the 46,000-
         # character Notes of 11 Sep came from exactly this repetition).
         ledger_append(args.task, "parked")
@@ -6262,7 +6344,11 @@ def cmd_block(args):
             sys.exit("ERROR: could not file the TOOL finding (findings.py add failed). Nothing "
                      "was written; run it again, or pass --finding <id> if one exists.")
     stamp = datetime.now(LONDON).strftime("%d %b %Y %H:%M")
+    if getattr(args, "profile", None):
+        b["profile"] = args.profile
     tail = f"{why[:400]} Fix: {blocker_fix_text(b)} [since {now_iso()}]"
+    if b.get("profile"):
+        tail += f" [profile {b['profile']}]"
     if b["finding"]:
         tail += f" [finding {b['finding']}]"
     note = blocker_note(stamp, "agent", BLOCKER_OPEN_MARK, b, tail)
@@ -6314,7 +6400,8 @@ def blockers_scan(sweep=False, now=None):
         b = task_blocker(t["notes"])
         if not b:
             continue
-        reason = blocker_clear_reason(b, sites, fstates) if not (sites_error and b["kind"] == "SITE") else ""
+        reason = (blocker_clear_reason(b, sites, fstates, walk=session_walk if sweep else None)
+                  if not (sites_error and b["kind"] == "SITE") else "")
         if reason and sweep:
             woken.append(wake_blocked(t["id"], b, reason))
             continue
@@ -6324,7 +6411,9 @@ def blockers_scan(sweep=False, now=None):
             since = None
         days = round((now - since).total_seconds() / 86400, 1) if since else None
         row = {"task": t["id"], "name": t["name"][:90], "agent": t["agentName"],
-               "kind": b["kind"], "subject": b["subject"], "why": b["why"][:200],
+               "kind": b["kind"],
+               "subject": b["subject"] + (f" ({b['profile']})" if b.get("profile") else ""),
+               "why": b["why"][:200],
                "fix": blocker_fix_text(b), "finding": b["finding"],
                "findingStatus": fstates.get(b["finding"], "") if b["finding"] else "",
                "days": days, "clearsNow": bool(reason)}
@@ -8496,6 +8585,7 @@ def main():
                          "broken; KEVIN: " + "|".join(KEVIN_ONLY_REASONS))
     bk.add_argument("--why", required=True, help="what you saw, in one or two sentences")
     bk.add_argument("--finding", help="TOOL only: an existing finding id instead of filing one")
+    bk.add_argument("--profile", help="SIGN-IN on a site with one sign-in per profile (Utilita's flats): which one")
 
     ub = sub.add_parser("unblock",
                         help="clear a wall with the evidence that the job can go on or is done")
