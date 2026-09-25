@@ -960,6 +960,56 @@ def check_ceo_brief_complete(pat):
     return violations, control
 
 
+
+INVOICES = "tblkOTKIG2Tyiy9aM"  # Dashboard Invoices (the Payment Run list)
+
+
+def _payment_run():
+    """scripts/payment-run.py as a module. Its file name has a hyphen, so it is
+    loaded by path; importing it runs nothing (its work sits under main())."""
+    import importlib.util
+    spec = importlib.util.spec_from_file_location(
+        "payment_run", os.path.join(os.path.dirname(os.path.abspath(__file__)), "payment-run.py"))
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def check_payments_came_through_the_list(pat):
+    """Money left the business account for a bill that was never on the list.
+
+    One rule and one classifier, both in scripts/payment-run.py, so the Friday
+    report, the daily job and this check can never disagree about what counts
+    as a hand-made payment. The window stops short of today because the bank
+    feed lands late. This job is not queued behind the 06:30 payment-run-daily
+    job, so it does not rely on that job having run: a payment the settle would
+    claim counts as listed, worked out here in memory.
+
+    Samples carry the transaction id and date only, never the payee or amount:
+    this output can travel, and the repo is public."""
+    import datetime
+    pr = _payment_run()
+    start, end = pr.unlisted_window(datetime.date.today(), 7)
+    window = query(pat, TX,
+                   "AND(NOT(IS_BEFORE({**Date}, '%s')), IS_BEFORE({**Date}, '%s'), {**GBP} < 0)"
+                   % (start, end),
+                   pr.OUTFLOW_FIELDS)
+    business = [t for t in window
+                if any(a in pr.BUSINESS_PAYMENT_ACCOUNTS
+                       for a in t["fields"].get("Account Alias (from **Account)") or [])]
+    rows = query(pat, INVOICES, "TRUE()")
+    missing = pr.unlisted_transfers(window, rows)
+    return [{
+        "id": t["id"],
+        "date": (t["fields"].get("**Date") or "")[:10],
+        "problem": "paid from the business account and no Payment Run row claims it. Not a code bug. "
+                   "Either the request reached Kevin some other way than an email to "
+                   "info@agilelets.co.uk (his rule, 25 Sep 2026): find who asked and have them "
+                   "email it. Or its row is on the list but the bank line does not name the payee: "
+                   "link the row to this transaction.",
+    } for t in missing], len(business)
+
+
 SCANS = [
     {
         "name": "ceo-brief-complete",
@@ -988,6 +1038,13 @@ SCANS = [
         "incident": "Jul 2026 — Santander re-linked; 64 duplicates, £2,316 double-counted across Wealth and P&L. Aug 2026 — Fintable moved Santander onto gocardless_v3 ids; 201 duplicates, and the Jul guard reported 0 because it keyed on the provider id the migration changed",
         "control_means": "transactions carrying a bank transaction id in their raw feed payload (the population a re-import duplicates)",
         "run": check_reimport_duplicates,
+    },
+    {
+        "name": "payments-came-through-the-list",
+        "asserts": "a hand-made payment from the business account => a Payment Run row claims it (Matched Transaction)",
+        "incident": "Sep 2026 — 30+ contractor payments (1 Aug to 24 Sep) left the business account with no row on the Payment Run, because the requests never came by email; and a paid 90 pound gas certificate stayed listed as owed for four days",
+        "control_means": "business-account outflows in the window (proves the bank feed and the query both work)",
+        "run": check_payments_came_through_the_list,
     },
 ]
 

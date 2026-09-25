@@ -57,9 +57,20 @@ USAGE
                                           `truncated` flag per account — a
                                           capped listing must never be reported
                                           as a complete week.
-  payment-run.py check                    cross-reference every open row against
-                                          Transactions; prints what is already
-                                          paid and why, writes nothing.
+  payment-run.py check                    the settle plan, printed. Writes nothing.
+  payment-run.py settle [--apply]         mark Paid every open row a payee-
+                                          corroborated bank payment covers.
+                                          DRY BY DEFAULT.
+  payment-run.py tasks [--apply] [--asof ISO]
+                                          put Kevin's approved MARK FOR PAYMENT
+                                          cards on the list, from the Friday
+                                          before they are due. DRY BY DEFAULT.
+  payment-run.py unlisted [--days N]      business-account transfers no row on
+                                          the list accounts for. Writes nothing.
+  payment-run.py daily                    tasks --apply, then settle --apply,
+                                          then unlisted. The 06:30 job.
+  payment-run.py done                     the Friday run's last step: the scan
+                                          it read becomes the next run's start.
   payment-run.py write --items FILE       upsert the model's classified items
                                           (JSON list) keyed on Gmail Message ID.
   payment-run.py cleanse [--apply]        one-off: delete exact duplicate rows,
@@ -105,6 +116,34 @@ T_TRANSACTIONS = "tbln0gzhCAorFc3zB"  # Transactions
 T_TASKS = "tblqB8b22hKBL4PF1"        # Tasks (creditor agent MARK FOR PAYMENT lane)
 
 STATE_DIR = Path.home() / "knowledge-os/logs/payment-run"
+# The Friday scan's two stamps. `scan` writes PENDING with the end of the mail
+# it read; `done`, the run's last step, promotes it to LAST_GOOD. The next scan
+# reads from LAST_GOOD, so a Friday that never ran, died half way or was
+# truncated is read again rather than lost. Until 25 Sep 2026 the scan only
+# ever looked back seven days, and its one scheduled run (18 Sep) scanned the
+# wrong week, so the week to 18 Sep was never read by the job at all.
+SCAN_PENDING = STATE_DIR / "scan-pending.json"
+SCAN_LAST_GOOD = STATE_DIR / "scan-last-good.json"
+# How far a catch-up may reach. A month of missed Fridays is a broken job that
+# needs a human, not a scan of every newsletter since spring.
+MAX_CATCHUP_DAYS = 35
+
+# Tasks fields, by id (js/config.js TASK_FIELDS). The approval marks themselves
+# are checked by approval_evidence.py, the one check every send path uses.
+TASK_F = {
+    "name": "fldgFjGBw6bTKJFCD",
+    "status": "fldx4qCw17UfrKpaN",
+    "outcome": "fldrHBSr6qoUfaKuZ",
+    "output": "fldzswp8fx6PqpLQ5",
+    "notes": "fldR7apBzSp3oxFxz",
+}
+APPROVED_OUTCOMES = ("Approved as-is", "Approved with minor edits")
+APPROVED_AT_FIELD = "fldr4Mvf2RzKvhZhi"   # approval_evidence.APPROVED_AT
+
+# The account Kevin pays suppliers and contractors from. Every contractor
+# payment from 1 Aug to 24 Sep 2026 left from here. Named by the account's alias, never
+# by payee, because the repo is public.
+BUSINESS_PAYMENT_ACCOUNTS = ("TNT Mgt Zempler",)
 
 # Kevin's cutoff: Friday 21:00 Europe/London (moved from 16:00 on 18 Sep 2026 —
 # "quite often things come in quite late"). Monday=0 ... Friday=4.
@@ -367,7 +406,7 @@ def run_window(asof=None):
     return end - timedelta(days=7), end
 
 
-def scan_range(asof=None, back_days=1):
+def scan_range(asof=None, back_days=1, last_good=None):
     """(start, end) of the mail to READ. Deliberately NOT run_window().
 
     The job is scheduled for Friday 21:00, which is the cutoff itself. Asked for
@@ -381,9 +420,40 @@ def scan_range(asof=None, back_days=1):
     So the scan does not ask which week it is. It reads the last seven days plus
     an overlap, ending NOW, which covers the week that just closed however late
     or early the job fires, and survives the Mac having been asleep. Re-reading
-    mail is free: every write upserts on Gmail Message ID."""
+    mail is free: every write upserts on Gmail Message ID.
+
+    `last_good` is the end of the last scan a Friday run finished (see `done`).
+    When it is older than the usual reach, the scan starts there instead, so a
+    week the job missed is read by the next run rather than lost for ever.
+    Capped at MAX_CATCHUP_DAYS."""
     end = (asof or datetime.now(LONDON)).astimezone(LONDON)
-    return end - timedelta(days=7 + max(0, back_days)), end
+    overlap = timedelta(days=max(0, back_days))
+    start = end - timedelta(days=7) - overlap
+    if last_good is not None:
+        start = min(start, last_good.astimezone(LONDON) - overlap)
+    return max(start, end - timedelta(days=MAX_CATCHUP_DAYS)), end
+
+
+def read_stamp(path):
+    """The datetime a scan stamp holds, or None. A stamp that cannot be read is
+    treated as absent: the scan then falls back to its usual reach, which is
+    the pre-25 Sep behaviour, never to reading nothing."""
+    try:
+        data = json.loads(Path(path).read_text())
+        return datetime.fromisoformat(data["end"])
+    except (OSError, ValueError, KeyError, TypeError):
+        return None
+
+
+def write_stamp(path, payload):
+    """Atomic: a temp file renamed over the real one. A stamp rewritten in place
+    is empty for an instant, and a scan starting in that instant would read no
+    stamp at all (the lock-file lesson in .claude/rules/python-scripts.md)."""
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_suffix(".tmp")
+    tmp.write_text(json.dumps(payload, indent=2))
+    os.replace(tmp, path)
 
 
 def week_buckets(asof=None):
@@ -675,8 +745,15 @@ def gmail_query(start, end, back_days):
         int(lower.timestamp()), int(end.timestamp()), NARROW_TERMS)
 
 
-def list_account(account, query):
-    """Follow nextPageToken up to MAX_PAGES. (messages, truncated).
+def pages_for(days):
+    """The page cap for a scan of `days`: MAX_PAGES per seven days. A catch-up
+    over a missed week reads two weeks of mail, and a fixed cap sized for one
+    would truncate exactly the run that exists to recover it."""
+    return max(MAX_PAGES, min(MAX_PAGES * 5, -(-int(days * MAX_PAGES) // 7)))
+
+
+def list_account(account, query, max_pages=MAX_PAGES):
+    """Follow nextPageToken up to max_pages. (messages, truncated).
 
     `truncated=True` means Gmail had MORE than this run fetched: the caller
     must report an incomplete week rather than present it as the whole one.
@@ -686,7 +763,7 @@ def list_account(account, query):
     burst exhausts the per-minute metric partway through, which is how the
     first live run died."""
     messages, token = [], None
-    for page in range(MAX_PAGES):
+    for page in range(max_pages):
         payload = {"q": query, "maxResults": 25}
         if token:
             payload["pageToken"] = token
@@ -695,21 +772,44 @@ def list_account(account, query):
         token = data.get("nextPageToken")
         if not token:
             return messages, False
-        if page < MAX_PAGES - 1:
+        if page < max_pages - 1:
             time.sleep(PAGE_PACE_SECONDS)
     return messages, True
+
+
+def card_for_message(message_id, amounts, cards):
+    """The approved payment card this email already is, or None.
+
+    A card names its source email in its TRACK RECORD (a Gmail URL ending in the
+    message id). That record also lists the sender's EARLIER emails, so an id
+    alone could tie this week's second invoice to last month's card and hide
+    it. The card's amount must also appear in this email before it counts."""
+    for card in cards:
+        if card.get("amount") is None or ("#all/%s" % message_id) not in card.get("text", ""):
+            continue
+        if any(abs(a - card["amount"]) < 0.005 for a in amounts):
+            return card["taskId"]
+    return None
 
 
 def cmd_scan(args):
     # The mail to read, NOT the display week. See scan_range() for why those are
     # two different questions and what it cost to learn that.
-    start, end = scan_range(parse_asof(args.asof), args.back_days)
+    start, end = scan_range(parse_asof(args.asof), args.back_days,
+                            None if args.asof else read_stamp(SCAN_LAST_GOOD))
     query = gmail_query(start, end, 0)
-    budget = args.max_attachments
+    days = (end - start).total_seconds() / 86400
+    max_pages = pages_for(days)
+    # --max-attachments is a per-WEEK budget; a catch-up over two weeks gets two.
+    budget = max(args.max_attachments, -(-int(args.max_attachments * days) // 7))
+    # Approved payment cards, so an email that already is one is marked and the
+    # skill leaves it to the card lane (listed on the Friday before it is due).
+    cards = [c for c in approved_payment_cards() if c.get("card")]
+    card_refs = [dict(c["card"], taskId=c["id"], text=c["text"]) for c in cards]
     accounts_out, kept_total, seen_total = [], 0, 0
 
     for account in ACCOUNTS:
-        messages, truncated = list_account(account, query)
+        messages, truncated = list_account(account, query, max_pages)
         seen_total += len(messages)
         kept, dropped = [], []
         for msg in messages:
@@ -732,13 +832,18 @@ def cmd_scan(args):
             attachments, budget_hit = fetch_attachment_text(msg, account, budget)
             if budget_hit:
                 truncated = True
+            amounts = find_amounts(
+                (headers.get("subject") or "") + "\n" + (msg.get("body") or ""))
             summary.update({
                 "body": (msg.get("body") or "")[:4000],
-                "amountsInBody": find_amounts(
-                    (headers.get("subject") or "") + "\n" + (msg.get("body") or "")),
+                "amountsInBody": amounts,
                 "attachments": attachments,
                 "attachmentNames": [a.get("filename") for a in (msg.get("attachments") or [])],
             })
+            card = card_for_message(msg["id"], amounts + [
+                a for att in attachments for a in find_amounts(att.get("text"))], card_refs)
+            if card:
+                summary["paymentCard"] = card
             kept.append(summary)
         kept_total += len(kept)
         accounts_out.append({
@@ -765,8 +870,17 @@ def cmd_scan(args):
         for key, members in groups.items() if len(members) > 1
     ]
 
+    complete = not any(a["truncated"] for a in accounts_out)
+    if not args.asof:
+        # Only a live scan stamps. A back-test with --asof reads history and
+        # must never move where the next Friday starts.
+        write_stamp(SCAN_PENDING, {"end": end.isoformat(), "start": start.isoformat(),
+                                   "complete": complete})
+
     print(json.dumps({
         "window": {"start": start.isoformat(), "end": end.isoformat()},
+        "catchUp": days > 8.5,
+        "complete": complete,
         "query": query,
         "listed": seen_total,
         "candidates": kept_total,
@@ -804,15 +918,28 @@ def status_of(record):
     return value or ""
 
 
+OUTFLOW_FIELDS = ["*Name", "**Date", "**GBP", "*Vendor", "Split Override Amount",
+                  "Account Alias (from **Account)"]
+
+
 def load_outflows(since):
     """Money OUT since `since`. The control is printed by the caller: a
     filterByFormula with a wrong field name returns 200 OK and an empty list,
     which is indistinguishable from a genuinely quiet bank account."""
     formula = "AND(IS_AFTER({**Date}, '%s'), {**GBP} < 0)" % since
     return airtable_list(T_TRANSACTIONS,
-                         {"filterByFormula": formula,
-                          "fields[]": ["*Name", "**Date", "**GBP", "*Vendor"]},
+                         {"filterByFormula": formula, "fields[]": OUTFLOW_FIELDS},
                          what="Transactions outflows")
+
+
+# Words that name a KIND of payee, not a payee. "Oakfield Properties" must be
+# told apart from every other properties company by "oakfield", and a council
+# or a city is never evidence on its own.
+PAYEE_STOP = {"limited", "ltd", "the", "and", "group", "services", "service",
+              "company", "council", "energy", "water", "invoice", "payment",
+              "properties", "property", "city", "county", "borough", "district",
+              "management", "maintenance", "solutions", "holdings", "partnership",
+              "trading", "contractors", "lettings", "estates", "homes", "building"}
 
 
 def payee_tokens(name):
@@ -821,14 +948,59 @@ def payee_tokens(name):
     own, and an email address contributes nothing useful."""
     if not name or "@" in str(name):
         return set()
-    stop = {"limited", "ltd", "the", "and", "group", "services", "service",
-            "company", "council", "energy", "water", "invoice", "payment"}
     words = re.findall(r"[a-z]{4,}", str(name).lower())
-    return {w for w in words if w not in stop}
+    return {w for w in words if w not in PAYEE_STOP}
 
 
-def match_transaction(invoice, by_amount):
+def memo_text(tx):
+    f = tx.get("fields", {})
+    return " ".join(str(f.get(k) or "") for k in ("*Name", "*Vendor")).lower()
+
+
+def memo_words(tx):
+    """Whole words (and numbers of two digits or more) on the bank line."""
+    return set(re.findall(r"[a-z]{4,}|\d{2,}", memo_text(tx)))
+
+
+def memo_names_payee(tokens, tx):
+    """True when a payee word is a WORD on the bank line. Whole words, not
+    substrings: "city" sits inside "electricity", and a substring test closed
+    a council's bill on an electricity direct debit (review, 25 Sep 2026). A
+    shared start of five letters or more still counts, because banks cut
+    names short ("OAKFIELD ROOFI") and invoices add an s ("Brightwells")."""
+    words = memo_words(tx)
+    for t in tokens:
+        for w in words:
+            short, long_ = sorted((t, w), key=len)
+            if t == w or (len(short) >= 5 and len(short) >= 0.7 * len(long_)
+                          and long_.startswith(short)):
+                return True
+    return False
+
+
+def tx_amount(tx):
+    """What a transaction pays, as matched against a bill. A split parent's
+    **GBP is the whole bank amount; its Split Override Amount is its own part,
+    and each part pays its own bill."""
+    f = tx.get("fields", {})
+    value = f.get("Split Override Amount")
+    if value is None:
+        value = f.get("**GBP")
+    return None if value is None else round(abs(float(value)), 2)
+
+
+def tx_date(tx):
+    return (tx.get("fields", {}).get("**Date") or "")[:10]
+
+
+def match_transaction(invoice, by_amount, exclude=()):
     """The transaction that paid this invoice, or None.
+
+    `exclude` holds transactions another row already claims. One bank payment
+    settles ONE invoice: two open £180 invoices from one contractor must not
+    both close on a single £180 transfer, or the one still owed disappears.
+    Candidates are tried oldest first, so an invoice takes the first payment
+    made after it arrived.
 
     Returns (tx, confidence) where confidence is "confirmed" or "probable".
 
@@ -840,9 +1012,9 @@ def match_transaction(invoice, by_amount):
     £180 to Shaun Lingham matched on 18 Sep 2026 because the bank memo really
     did read "Shaun Lingham 55 Elmdon" — but nothing in that test looked at the
     payee, so an unrelated £180 on the right day would have hidden the invoice
-    just as confidently. So the payee must corroborate: a shared word between
-    the payee and the bank memo makes it `confirmed` and the row is hidden;
-    without one it is `probable` and the row STAYS on the list carrying a note.
+    just as confidently. So the payee must corroborate: a payee word that is a
+    word on the bank line makes it `confirmed` and the row is hidden; without
+    one it is `probable` and the row STAYS on the list carrying a note.
     Kevin dismissing a paid row costs seconds; a supplier never being paid
     costs a relationship."""
     fields = invoice.get("fields", {})
@@ -851,16 +1023,14 @@ def match_transaction(invoice, by_amount):
         return None
     email_date = (fields.get("Email Date") or "")[:10]
     tokens = payee_tokens(fields.get("Payee"))
-    candidates = by_amount.get(round(abs(float(amount)), 2), [])
+    candidates = sorted(by_amount.get(round(abs(float(amount)), 2), []), key=tx_date)
     best = None
     for tx in candidates:
-        tx_fields = tx.get("fields", {})
-        tx_date = (tx_fields.get("**Date") or "")[:10]
-        if not (email_date and tx_date and tx_date >= email_date):
+        if tx.get("id") in exclude:
             continue
-        memo = " ".join(str(tx_fields.get(k) or "")
-                        for k in ("*Name", "*Vendor")).lower()
-        if tokens and any(token in memo for token in tokens):
+        if not (email_date and tx_date(tx) and tx_date(tx) >= email_date):
+            continue
+        if tokens and memo_names_payee(tokens, tx):
             return tx, "confirmed"
         best = best or (tx, "probable")
     return best
@@ -869,56 +1039,784 @@ def match_transaction(invoice, by_amount):
 def index_by_amount(transactions):
     index = {}
     for tx in transactions:
-        gbp = tx.get("fields", {}).get("**GBP")
-        if gbp is None:
-            continue
-        index.setdefault(round(abs(float(gbp)), 2), []).append(tx)
+        amount = tx_amount(tx)
+        if amount is not None:
+            index.setdefault(amount, []).append(tx)
     return index
 
 
-def cmd_check(args):
-    invoices = load_open_invoices()
-    transactions = load_outflows(args.since)
-    print("Open invoice rows: %d" % len(invoices))
-    print("Outflow transactions since %s: %d   (CONTROL — a zero here means the "
-          "query is broken, not that nothing was paid)" % (args.since, len(transactions)))
+def claimed_transactions(records):
+    """Every transaction id already linked to a row, whatever its status."""
+    out = set()
+    for rec in records:
+        out.update(rec.get("fields", {}).get("Matched Transaction") or [])
+    return out
+
+
+def days_between(a, b):
+    return abs((datetime.fromisoformat(a) - datetime.fromisoformat(b)).days)
+
+
+def plus_days(day, n):
+    return (datetime.fromisoformat(day) + timedelta(days=n)).date().isoformat()
+
+
+def better_open_row(rec, tx, records):
+    """True when an OPEN bill of the same size and payee fits this payment
+    better than `rec` does: its property or reference is on the bank line and
+    rec's is not (or less so). The payment is then that bill's, and a
+    hand-paid row taking it would leave the open bill listed and paid twice
+    (third review, 25 Sep 2026)."""
+    named = memo_words(tx)
+    mine = len(row_words(rec["fields"]) & named)
+    amount = tx_amount(tx)
+    for r in records:
+        f = r["fields"]
+        if r["id"] == rec["id"] or not settleable(r) or f.get("Amount") is None:
+            continue
+        if round(abs(float(f["Amount"])), 2) != amount:
+            continue
+        if (f.get("Email Date") or "")[:10] > tx_date(tx):
+            continue
+        tokens = payee_tokens(f.get("Payee"))
+        if tokens and memo_names_payee(tokens, tx) and len(row_words(f) & named) > mine:
+            return True
+    return False
+
+
+def plan_links(records, by_amount, since, exclude=(), named=True, skip_rows=()):
+    """(row, tx) for rows marked Paid by hand, with no transaction recorded.
+
+    The page's Mark Paid sets Status and Paid Date but links nothing, so the
+    payment behind it looks unclaimed and the absence check would report it as
+    money that left without a bill. Nothing about the row's status changes.
+
+    Kevin has already said this row is paid, so the bar is lower than for
+    closing an open row: a payment of the amount, on or after the bill and no
+    later than three days after he marked it paid (the bank books a transfer a
+    day or two after it is sent).
+
+    Two passes, run either side of the settle (see plan_all). named=True links
+    only a payment whose bank line names the row's payee. named=False takes the
+    rest, only within three days of the Paid Date, and never a payment whose
+    bank line names the payee of a bill still OPEN on the list: that payment is
+    evidence the open bill was paid, and taking it would leave the open bill
+    listed and paid twice (second review, 25 Sep 2026)."""
+    used = claimed_transactions(records) | set(exclude)
+    open_tokens = [payee_tokens(r["fields"].get("Payee")) for r in records if settleable(r)]
+    out = []
+    for rec in sorted(records, key=lambda r: (r["fields"].get("Email Date") or "", r["id"])):
+        f = rec["fields"]
+        paid_on = (f.get("Paid Date") or "")[:10]
+        email_date = (f.get("Email Date") or "")[:10]
+        if (rec["id"] in skip_rows or status_of(rec) != "Paid" or f.get("Matched Transaction")
+                or f.get("Amount") is None or not paid_on or paid_on < since):
+            continue
+        tokens = payee_tokens(f.get("Payee"))
+        for tx in sorted(by_amount.get(round(abs(float(f["Amount"])), 2), []), key=tx_date):
+            d = tx_date(tx)
+            if tx["id"] in used or not d or d < email_date or d > plus_days(paid_on, 3):
+                continue
+            names_this = bool(tokens) and memo_names_payee(tokens, tx)
+            if named and names_this and not better_open_row(rec, tx, records):
+                break
+            if (not named and not names_this and days_between(d, paid_on) <= 3
+                    and not any(tk and memo_names_payee(tk, tx) for tk in open_tokens)):
+                break
+        else:
+            continue
+        used.add(tx["id"])
+        out.append((rec, tx))
+    return out
+
+
+def row_words(fields):
+    """The words that tell one bill from another of the same size and payee:
+    the property and the reference."""
+    text = " ".join(str(fields.get(k) or "") for k in ("Description", "Reference"))
+    return set(re.findall(r"[a-z]{4,}|\d{2,}", text.lower()))
+
+
+def settleable(rec):
+    """An open row the bank match may close. Not one where Kevin rejected the
+    page's suggested payment: he has said the obvious match is wrong."""
+    return status_of(rec) in ("Unpaid", "") and not rec["fields"].get("AI Match Rejected")
+
+
+def plan_settle(records, by_amount, also_used=()):
+    """(paid, probable) across every open row. Pure, so the dry run and the
+    daily job cannot disagree about what is about to happen.
+
+    WHY THIS WRITES NOW (25 Sep 2026). Until then `check` found the payments and
+    only PRINTED them, into a log file nobody reads, so a paid row stayed on the
+    list until Kevin clicked Mark Paid himself. A £90 gas certificate paid on
+    21 Sep, the bank line naming the engineer's company, was still listed as
+    owed four days later while its task sat open asking Kevin to check his bank.
+
+    Each PAYMENT picks its bill, oldest payment first. Among the open rows it
+    could pay (amount to the penny, on or after the bill, the payee named on
+    the bank line), it takes the one whose property or reference the bank line
+    also names, then the oldest. Two £90 bills from one engineer for two houses
+    must not swap: the row the bank line names is the one paid, or Kevin pays
+    the other twice. A payment claimed once is never claimed again.
+
+    Only a payee-corroborated match closes a row; a `probable` one leaves it
+    open with a note (Kevin's rule, 18 Sep 2026: an amount and a date alone
+    marked 5 of 9 rows paid wrongly)."""
+    used = claimed_transactions(records) | set(also_used)
+    open_rows = sorted((r for r in records if settleable(r)),
+                       key=lambda r: (r["fields"].get("Email Date") or "", r["id"]))
+    order = {r["id"]: i for i, r in enumerate(open_rows)}
+    txs = sorted({tx["id"]: tx for group in by_amount.values() for tx in group}.values(),
+                 key=lambda tx: (tx_date(tx), tx["id"]))
+    paid, closed = [], set()
+    for tx in txs:
+        if tx["id"] in used:
+            continue
+        amount = tx_amount(tx)
+        eligible = []
+        for rec in open_rows:
+            f = rec["fields"]
+            if rec["id"] in closed or f.get("Amount") is None:
+                continue
+            if round(abs(float(f["Amount"])), 2) != amount:
+                continue
+            email_date = (f.get("Email Date") or "")[:10]
+            if not email_date or tx_date(tx) < email_date:
+                continue
+            tokens = payee_tokens(f.get("Payee"))
+            if tokens and memo_names_payee(tokens, tx):
+                eligible.append(rec)
+        if not eligible:
+            continue
+        named = memo_words(tx)
+        best = max(eligible, key=lambda r: (len(row_words(r["fields"]) & named), -order[r["id"]]))
+        paid.append((best, tx))
+        closed.add(best["id"])
+        used.add(tx["id"])
+    probable = []
+    for rec in open_rows:
+        if rec["id"] in closed or not payee_tokens(rec["fields"].get("Payee")):
+            # With no payee words to compare (a legacy row whose payee is an
+            # email address) every same-sized payment is "possible", and a note
+            # naming a stranger's payment invites a wrong Mark Paid.
+            continue
+        hit = match_transaction(rec, by_amount, exclude=used)
+        if hit and hit[1] == "probable":
+            probable.append((rec, hit[0]))
+    return paid, probable
+
+
+def tx_line(tx):
+    f = tx.get("fields", {})
+    return "%s on %s, £%.2f" % (str(f.get("*Name") or "a payment").strip()[:60],
+                                tx_date(tx), tx_amount(tx) or 0)
+
+
+def settle_updates(paid, probable):
+    """The PATCHes that carry out a settle plan. A probable match writes its
+    note once (keyed on the transaction id), not every morning."""
+    updates = []
+    for rec, tx in paid:
+        updates.append({"id": rec["id"], "fields": {
+            "Status": "Paid",
+            "Paid Date": tx_date(tx) or None,
+            "Matched Transaction": [tx["id"]],
+            "Notes": append_note(rec, "Marked paid by the bank match: %s. The bank "
+                                      "line names the payee. (%s)" % (tx_line(tx), tx["id"])),
+        }})
+    for rec, tx in probable:
+        if tx["id"] in (rec["fields"].get("Notes") or ""):
+            continue
+        updates.append({"id": rec["id"], "fields": {
+            "Notes": append_note(rec, "Possible payment: %s. The bank line does not "
+                                      "name the payee, so this stays on the list. If "
+                                      "it is this bill, press Mark Paid. (%s)"
+                                      % (tx_line(tx), tx["id"])),
+        }})
+    return updates
+
+
+def default_since(days=180):
+    return (datetime.now(LONDON) - timedelta(days=days)).date().isoformat()
+
+
+def load_controlled_outflows(since):
+    transactions = load_outflows(since)
+    print("Outflow transactions since %s: %d   (CONTROL: a zero here means the "
+          "query is broken, not that nothing was paid)" % (since, len(transactions)))
     if not transactions:
         fail("the outflow control matched nothing. Refusing to report every "
              "invoice as unpaid off a query that returned an empty list.")
-    by_amount = index_by_amount(transactions)
-    paid, probable, still_owed, no_amount = [], [], [], []
-    for inv in invoices:
-        if inv["fields"].get("Amount") is None:
-            no_amount.append(inv)
-            continue
-        hit = match_transaction(inv, by_amount)
-        if hit and hit[1] == "confirmed":
-            paid.append((inv, hit[0]))
-        elif hit:
-            probable.append((inv, hit[0]))
-        else:
-            still_owed.append((inv, None))
+    return transactions
+
+
+def plan_all(records, by_amount, link_since):
+    """Named links, then settle, then unnamed links. A row Kevin marked paid by
+    hand claims a payment that NAMES its payee before an open twin of the same
+    size can, so the bill still owed stays on the list; and a payment that
+    names nobody on the list is only linked to a hand-paid row after every open
+    bill has had its chance at the payments that name it."""
+    named = plan_links(records, by_amount, link_since)
+    taken = {tx["id"] for _r, tx in named}
+    paid, probable = plan_settle(records, by_amount, taken)
+    taken |= {tx["id"] for _r, tx in paid}
+    unnamed = plan_links(records, by_amount, link_since, exclude=taken, named=False,
+                         skip_rows={r["id"] for r, _tx in named})
+    return named + unnamed, paid, probable
+
+
+def run_settle(records, transactions, apply):
+    links, paid, probable = plan_all(records, index_by_amount(transactions), default_since(30))
 
     def line(inv, tx):
         f = inv["fields"]
         return "  £%9.2f | %s | %-28s | %s (%s) %s" % (
             float(f["Amount"]), (f.get("Email Date") or "")[:10],
-            str(f.get("Payee"))[:28], tx["id"],
-            (tx["fields"].get("**Date") or "")[:10],
+            str(f.get("Payee"))[:28], tx["id"], tx_date(tx),
             str(tx["fields"].get("*Name") or "")[:34])
 
-    print("\nALREADY PAID, payee corroborated — hidden from the payment run (%d):" % len(paid))
+    print("\nPAID, payee corroborated — %s (%d):"
+          % ("marked Paid now" if apply else "would be marked Paid", len(paid)))
     for inv, tx in paid:
         print(line(inv, tx))
     print("\nPROBABLE match on amount and date but the payee does NOT corroborate "
           "(%d) — these STAY on the list with a note:" % len(probable))
     for inv, tx in probable:
         print(line(inv, tx))
-    owed_total = sum(float(i["fields"]["Amount"]) for i, _ in still_owed)
-    print("\nSTILL OWED (%d): £%.2f" % (len(still_owed), owed_total))
-    print("NO AMOUNT RECORDED — attachment never read (%d)" % len(no_amount))
-    return {"paid": paid, "probable": probable,
-            "stillOwed": still_owed, "noAmount": no_amount}
+    print("\nMARKED PAID BY HAND, payment now linked (%d)" % len(links))
+    for rec, tx in links:
+        print("  %s | %s" % (str(rec["fields"].get("Payee"))[:28], tx_line(tx)))
+    closed = {inv["id"] for inv, _ in paid}
+    still_open = [r for r in records if status_of(r) in ("Unpaid", "") and r["id"] not in closed]
+    no_amount = [r for r in still_open if r["fields"].get("Amount") is None]
+    owed = sum(float(r["fields"]["Amount"]) for r in still_open
+               if r["fields"].get("Amount") is not None)
+    print("\nSTILL OWED (%d): £%.2f, of which %d have no amount read"
+          % (len(still_open), owed, len(no_amount)))
+    updates = settle_updates(paid, probable) + [
+        {"id": rec["id"], "fields": {"Matched Transaction": [tx["id"]]}} for rec, tx in links]
+    if apply and updates:
+        airtable_write(T_INVOICES, "PATCH", updates, "settle paid rows")
+    elif updates:
+        print("\nDRY RUN: %d rows would change. Re-run with --apply." % len(updates))
+    return paid, probable
+
+
+def cmd_check(args):
+    """The settle plan, printed. Kept so the old command still answers."""
+    records = airtable_list(T_INVOICES, what="Dashboard Invoices")
+    print("Open invoice rows: %d" % sum(1 for r in records if status_of(r) in ("Unpaid", "")))
+    return run_settle(records, load_controlled_outflows(args.since or default_since()), False)
+
+
+def cmd_settle(args):
+    records = airtable_list(T_INVOICES, what="Dashboard Invoices")
+    print("Open invoice rows: %d" % sum(1 for r in records if status_of(r) in ("Unpaid", "")))
+    return run_settle(records, load_controlled_outflows(args.since or default_since()), args.apply)
+
+
+# ══════════════════════════════════════════════════════════════════════════
+# unlisted — money that left without ever being on the list
+# ══════════════════════════════════════════════════════════════════════════
+
+# A line on the business account that is NOT a payment Kevin chose to make: a
+# card purchase ("Fin:"), a direct debit ("DD:"), the bank's own fee, the loan
+# repayment, and the second half of a split (the parent line carries the real
+# bank amount, the child is a bookkeeping copy).
+NOT_A_TRANSFER_RE = re.compile(
+    r"^\s*(?:Fin:|DD:|Electronic Payment Fee)|\(Split (?!1 of)\d+ of \d+\)", re.I)
+# Standing collections that arrive without a "DD:" prefix (a lender, say) are
+# named in a private file, never here: the repo is public.
+PRIVATE_CONFIG = Path.home() / ".config/od/payment-run.json"
+_not_transfers = []
+
+
+def private_not_transfers():
+    """Lower-case name fragments of standing collections, from PRIVATE_CONFIG
+    {"notTransfers": [...]}. A missing file means none: the absence report then
+    over-reports rather than hiding anything."""
+    if not _not_transfers:
+        try:
+            data = json.loads(PRIVATE_CONFIG.read_text())
+            _not_transfers.extend(str(x).lower() for x in data.get("notTransfers", []) if x)
+        except (OSError, ValueError, AttributeError):
+            pass
+        _not_transfers.append("\0")   # read once, even when empty
+    return [x for x in _not_transfers if x != "\0"]
+SPLIT_SUFFIX_RE = re.compile(r"\s*\(Split \d+ of \d+\)\s*$", re.I)
+
+
+def is_business_transfer(tx):
+    """True for a payment Kevin sent by hand from the business account."""
+    f = tx.get("fields", {})
+    accounts = f.get("Account Alias (from **Account)") or []
+    if not any(a in BUSINESS_PAYMENT_ACCOUNTS for a in accounts):
+        return False
+    gbp = f.get("**GBP")
+    if gbp is None or float(gbp) >= 0:
+        return False
+    name = str(f.get("*Name") or "").strip()
+    return (bool(name) and not NOT_A_TRANSFER_RE.search(name)
+            and not any(x in name.lower() for x in private_not_transfers()))
+
+
+def split_group(tx):
+    """One bank payment, however many bookkeeping parts it was split into, or
+    None for a payment that was never split: two separate same-day payments to
+    one contractor are two payments, and one being listed says nothing about
+    the other (second review, 25 Sep 2026)."""
+    name = str(tx.get("fields", {}).get("*Name") or "")
+    if not SPLIT_SUFFIX_RE.search(name):
+        return None
+    return tx_date(tx), SPLIT_SUFFIX_RE.sub("", name)
+
+
+def unlisted_transfers(transactions, records):
+    """Business-account transfers that no row on the list accounts for.
+
+    The absence report (Kevin, 25 Sep 2026). From 1 Aug to 24 Sep 2026 more
+    than thirty payments left this account to contractors whose requests never
+    came by email, so no scan could see them and the list never held them. A
+    list of what IS on the list cannot show what is missing from it; this can.
+    Kevin's ruling the same day: every payment request comes to info@ by email,
+    so a line here means a request arrived some other way.
+
+    A payment counts as listed when a row claims it OR the settle and link
+    plans WOULD claim it, computed here in memory. The data check that uses
+    this is not queued behind the 06:30 job, so on a morning the job runs late
+    it must not report payments the job is about to settle. A split payment is
+    listed when any of its parts is."""
+    by_amount = index_by_amount(transactions)
+    links, paid, _probable = plan_all(records, by_amount, "")
+    claimed = (claimed_transactions(records) | {tx["id"] for _r, tx in links}
+               | {tx["id"] for _r, tx in paid})
+    groups = {split_group(tx) for tx in transactions if tx["id"] in claimed} - {None}
+    return [tx for tx in transactions if is_business_transfer(tx)
+            and tx["id"] not in claimed and split_group(tx) not in groups]
+
+
+def load_window_outflows(start, end):
+    """Outflows dated start <= date < end, with the account each left from."""
+    formula = ("AND(NOT(IS_BEFORE({**Date}, '%s')), IS_BEFORE({**Date}, '%s'), {**GBP} < 0)"
+               % (start, end))
+    return airtable_list(T_TRANSACTIONS,
+                         {"filterByFormula": formula, "fields[]": OUTFLOW_FIELDS},
+                         what="Transactions window")
+
+
+def unlisted_window(today, days):
+    """[start, end) for the absence check: the `days` before yesterday. The
+    bank feed lands a day or two late, so the newest two days are left for the
+    next morning."""
+    end = today - timedelta(days=1)
+    return (end - timedelta(days=days)).isoformat(), end.isoformat()
+
+
+def cmd_unlisted(args, records=None):
+    today = datetime.now(LONDON).date()
+    start, end = unlisted_window(today, args.days)
+    records = records if records is not None else airtable_list(T_INVOICES, what="Dashboard Invoices")
+    window = load_window_outflows(start, end)
+    business = [tx for tx in window
+                if any(a in BUSINESS_PAYMENT_ACCOUNTS
+                       for a in tx["fields"].get("Account Alias (from **Account)") or [])]
+    print("\nBusiness-account outflows %s to %s: %d   (CONTROL: zero means the "
+          "feed or the query is broken)" % (start, end, len(business)))
+    missing = unlisted_transfers(window, records)
+    print("PAID BUT NEVER ON THE LIST (%d):" % len(missing))
+    for tx in sorted(missing, key=tx_date):
+        print("  %s  (%s)" % (tx_line(tx), tx["id"]))
+    if missing:
+        print("  Each of these was paid without a row on the Payment Run. Kevin's "
+              "rule (25 Sep 2026): every request comes to info@agilelets.co.uk by email.")
+    return missing, len(business)
+
+
+# ══════════════════════════════════════════════════════════════════════════
+# tasks — Kevin's approved MARK FOR PAYMENT cards
+# ══════════════════════════════════════════════════════════════════════════
+
+# The heading may be bold, a heading, quoted, a bullet or numbered.
+MFP_LINE_RE = re.compile(r"^[ \t>*_#\-•]*(?:\d+[.)][ \t]*)?[*_]*MARK FOR PAYMENT\b",
+                         re.I | re.M)
+
+
+def card_field(text, label):
+    """The value after `LABEL:` on its own line, markdown emphasis stripped.
+    Never a quoted line (">"): that is a letter pasted into the card."""
+    match = re.search(r"^[ \t*_\-•]*%s[ \t*_]*:[ \t*_]*(.+?)[ \t*_]*$" % re.escape(label),
+                      text or "", re.I | re.M)
+    return match.group(1).strip() if match else ""
+
+
+MONTHS = {m: i for i, m in enumerate(
+    ("jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec"), 1)}
+
+
+def parse_due(text):
+    """An ISO date out of '2026-10-24', '24 Oct 2026', '24 October 2026' or
+    '24/10/2026'. None when there is no date to read, never a guess."""
+    text = (text or "").strip()
+    m = re.search(r"\b(\d{4})-(\d{2})-(\d{2})\b", text)
+    try:
+        if m:
+            return datetime(int(m.group(1)), int(m.group(2)), int(m.group(3))).date().isoformat()
+        m = re.search(r"\b(\d{1,2})\s+([A-Za-z]{3})[a-z]*\.?\s+(\d{4})\b", text)
+        if m and m.group(2).lower() in MONTHS:
+            return datetime(int(m.group(3)), MONTHS[m.group(2).lower()],
+                            int(m.group(1))).date().isoformat()
+        m = re.search(r"\b(\d{1,2})/(\d{1,2})/(\d{4})\b", text)
+        if m:
+            return datetime(int(m.group(3)), int(m.group(2)), int(m.group(1))).date().isoformat()
+    except ValueError:
+        return None
+    return None
+
+
+def parse_payment_card(output):
+    """The payable a MARK FOR PAYMENT card describes, or None if it is not one.
+
+    The card lives in the task's Agent Output (the 18 Sep skill looked in Notes,
+    and no code read either). Every field is read from the heading DOWN: an
+    arrears summary above the card can carry its own AMOUNT line, and that
+    figure is not the one to pay. The FIRST amount on the AMOUNT line is:
+    '£2.22 (£1.11 ground rent + £1.11 arrears)' is £2.22."""
+    head = MFP_LINE_RE.search(output or "")
+    if not head:
+        return None
+    card = output[head.start():]
+    # No agent prompt defines the card's shape, so cards arrive free-form too:
+    # one reads "MARK FOR PAYMENT — £330.00 total (...)" with no AMOUNT line.
+    # The AMOUNT line is the figure to pay; the heading's figure is used only
+    # when there is none, because a heading can name a part ("ground rent
+    # £1.11 + arrears £1.11") where the AMOUNT line holds the total. A QUOTED
+    # line ("> AMOUNT: ...", a pasted letter) is never the card's own field.
+    # Read the heading from the END of the match: that line, whatever preceded.
+    heading = output[head.end():].split("\n", 1)[0]
+    first = MONEY_RE.search(card_field(card, "AMOUNT")) or MONEY_RE.search(heading)
+    amount = None
+    if first:
+        amount = float((first.group(1) or first.group(2)).replace(",", ""))
+    return {
+        "payee": card_field(card, "PAYEE"),
+        "amount": amount,
+        "reference": card_field(card, "REFERENCE"),
+        "dueDate": parse_due(card_field(card, "DUE DATE")),
+        "payToDetails": card_field(card, "PAY TO"),
+        "description": card_field(card, "DESCRIPTION"),
+        "notes": card_field(card, "NOTES"),
+    }
+
+
+def listing_date(due_iso):
+    """The Friday strictly before the due date: when Kevin wants it on the list.
+    Kevin, 25 Sep 2026, on a ground rent card: "put it on the Friday before the
+    payment due for a payment run". A bill due on a Friday goes on the Friday
+    before that, so it is paid in time rather than on the day."""
+    due = datetime.fromisoformat(due_iso).date()
+    return due - timedelta(days=((due.weekday() - CUTOFF_WEEKDAY) % 7) or 7)
+
+
+def card_email_date(today):
+    """The Email Date a card row carries: the day it came onto the list, except
+    on a Friday, when it is the Thursday. The list's sections split on the
+    Friday cutoff and a row dated the cutoff DAY counts as the newer week, so a
+    card listed on a Friday and dated Friday would sit under "This week" (next
+    Friday's run) the moment the 9pm cutoff passed, and a bill due on the
+    Saturday would be paid a week late (review, 25 Sep 2026)."""
+    return today - timedelta(days=1) if today.weekday() == CUTOFF_WEEKDAY else today
+
+
+def norm_ref(value):
+    return re.sub(r"[^a-z0-9]", "", str(value or "").lower())
+
+
+def same_amount(fields, card):
+    amount = fields.get("Amount")
+    return (amount is not None and card.get("amount") is not None
+            and abs(abs(float(amount)) - card["amount"]) < 0.005)
+
+
+def near_card(day, c, days):
+    """Within `days` of when the card was raised OR approved. A task raised in
+    February and approved in September is about a bill Kevin was reminded of
+    in September (third review, 25 Sep 2026)."""
+    return any(days_between(day, ref) <= days for ref in (c.get("created"), c.get("approved")) if ref)
+
+
+def card_twin(c, records):
+    """(row, how) for the row on the list that already IS this card's bill, or
+    (None, None).
+
+    how = "strong": the row's email is the NEWEST one the card names (its Gmail
+    id, within 14 days of the card) and the amounts agree, or the row already
+    records the card. "reference": the same amount and the same reference on both,
+    within 30 days of the card.
+    "weak": the same amount and payee around the card's date, nothing more.
+    A weak twin is never folded in silently (review, 25 Sep 2026): a second bill
+    of one size from one contractor looks exactly like it. The card is listed
+    and the row's description says what to check."""
+    card, text = c["card"], c.get("text", "")
+    candidates = [r for r in records if status_of(r) in ("Unpaid", "Paid", "")]
+    # Gmail message ids rise with time, so the largest the card names is its
+    # newest email. The track record also names the sender's EARLIER emails,
+    # and last week's paid bill of the same size must not stand in for this
+    # week's (fourth review, 25 Sep 2026).
+    named_ids = re.findall(r"#all/([0-9a-f]{12,20})\b", text)
+    newest = max(named_ids, key=lambda i: int(i, 16)) if named_ids else None
+    for r in candidates:
+        mid = r["fields"].get(FIELD_MSG_ID) or ""
+        if c["id"] in (r["fields"].get("Notes") or ""):
+            return r, "strong"
+        day = (r["fields"].get("Email Date") or "")[:10]
+        # The track record also lists the sender's EARLIER emails, so the id
+        # alone could be last month's bill of the same size (second review).
+        # The card's own email is days old, not weeks.
+        if (mid and mid == newest and day and near_card(day, c, 14)
+                and (card.get("amount") is None or same_amount(r["fields"], card))):
+            return r, "strong"
+    for r in candidates:
+        ref_row, ref_card = norm_ref(r["fields"].get("Reference")), norm_ref(card.get("reference"))
+        day = (r["fields"].get("Email Date") or "")[:10]
+        # Recurring bills (ground rent, service charge, council tax) carry the
+        # same reference every period, so last half-year's paid row must not
+        # stand in for this one (fifth review, 25 Sep 2026).
+        if ref_row and ref_card and ref_row == ref_card and same_amount(r["fields"], card):
+            if day and near_card(day, c, 30):
+                return r, "reference"
+            if status_of(r) in ("Unpaid", ""):
+                # Still owed from an earlier period: the same bill, or last
+                # period's demand left unpaid. Listed with a CHECK, never
+                # folded and never silent (seventh review, 25 Sep 2026).
+                return r, "weak"
+    for r in candidates:
+        day = (r["fields"].get("Email Date") or "")[:10]
+        # An OPEN row of the same payee and size is a likely twin whatever its
+        # age: a bill still owed since March is exactly the bill a September
+        # reminder card is about. The 30 days only guard against last period's
+        # PAID bill (sixth review, 25 Sep 2026).
+        recent = bool(day) and near_card(day, c, 30)
+        if (same_amount(r["fields"], card) and (recent or status_of(r) in ("Unpaid", ""))
+                and payee_tokens(r["fields"].get("Payee")) & payee_tokens(card.get("payee"))):
+            return r, "weak"
+    return None, None
+
+
+def approved_payment_cards():
+    """Every task carrying a MARK FOR PAYMENT card that Kevin really approved.
+
+    Real means the approval_evidence marks, the check every send path uses: an
+    agent that typed "Approved" into the field itself must never be able to put
+    money on Kevin's list. Cancelled tasks are out. Completed ones stay in: an
+    approved card is still owed after its task closes."""
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
+    from approval_evidence import approval_evidence_problem
+    formula = ("AND(FIND('MARK FOR PAYMENT', UPPER({Agent Output}&'')), "
+               "OR({Approval Outcome}='Approved as-is', "
+               "{Approval Outcome}='Approved with minor edits'), "
+               "NOT({Status}='Cancelled'))")
+    rows = airtable_list(T_TASKS, [("filterByFormula", formula),
+                                   ("returnFieldsByFieldId", "true")],
+                         what="approved payment cards")
+    out = []
+    for row in rows:
+        f = row.get("fields", {})
+        problem = approval_evidence_problem(f, row.get("createdTime", ""))
+        out.append({
+            "id": row["id"],
+            "name": f.get(TASK_F["name"]) or "",
+            "created": (row.get("createdTime") or "")[:10],
+            "approved": str(f.get(APPROVED_AT_FIELD) or "")[:10],
+            "card": None if problem else parse_payment_card(f.get(TASK_F["output"])),
+            "refused": problem,
+            "text": (f.get(TASK_F["output"]) or "") + "\n" + (f.get(TASK_F["notes"]) or ""),
+        })
+    return out
+
+
+def plan_tasks(cards, records, by_amount, today):
+    """What each approved card needs. Pure, so the dry run and the job agree.
+
+    Returns a list of (action, card, detail):
+      create       add it to the list
+      check        add it, and its description names a possible twin (a weak match)
+      check_paid   add it, and its description names a payment since the card
+                   that may already be this bill
+      link         an open row already is this bill (strong or reference twin)
+      paid         a Paid row already is this bill
+      wait         not yet the Friday before it is due
+      listed       its own row exists
+      refused      no real approval
+      unreadable   no MARK FOR PAYMENT heading could be read"""
+    by_key = {r["fields"].get(FIELD_MSG_ID): r for r in records}
+    used = claimed_transactions(records)
+    plan = []
+    for c in cards:
+        card = c.get("card")
+        if c.get("refused"):
+            plan.append(("refused", c, c["refused"]))
+            continue
+        if not card:
+            plan.append(("unreadable", c, "no MARK FOR PAYMENT heading could be read"))
+            continue
+        # A card with no PAYEE line is named after its task. A card with no
+        # amount anywhere still goes on the list, amount blank, pointing at the
+        # task: a row Kevin dismisses in two seconds beats an approved bill that
+        # silently never appears (the skill's own rule since 18 Sep 2026).
+        card["payee"] = card.get("payee") or re.split(r"\s+[-–—]\s+", c["name"])[0].strip()
+        key = "task:%s" % c["id"]
+        if key in by_key:
+            plan.append(("listed", c, by_key[key]["id"]))
+            continue
+        twin, how = card_twin(c, records)
+        if twin is not None and how in ("strong", "reference"):
+            plan.append(("paid" if status_of(twin) == "Paid" else "link", c, twin))
+            continue
+        if card.get("dueDate") and today < listing_date(card["dueDate"]):
+            plan.append(("wait", c, listing_date(card["dueDate"]).isoformat()))
+            continue
+        lf = listing_date(card["dueDate"]) if card.get("dueDate") else None
+        # Dated for the run it belongs to. A Mac asleep on the Friday lists it
+        # on the Saturday, and dated Saturday it would sit in NEXT Friday's
+        # section; dated the Thursday before its Friday it is in the run to pay.
+        c["emailDate"] = ((lf - timedelta(days=1)) if lf and 0 <= (today - lf).days <= 3
+                          else card_email_date(today)).isoformat()
+        # A payment since the card, naming the payee, MAY be this bill, or may
+        # be another job for the same firm. Never decided here (second review,
+        # 25 Sep 2026): the card is listed and its description says to check.
+        probe = {"fields": {"Amount": card.get("amount"), "Email Date": c["created"],
+                            "Payee": card.get("payee")}}
+        hit = match_transaction(probe, by_amount, exclude=used) if card.get("amount") else None
+        if hit and hit[1] == "confirmed":
+            plan.append(("check_paid", c, hit[0]))
+            continue
+        plan.append(("check", c, twin) if twin is not None else ("create", c, None))
+    return plan
+
+
+def task_row_fields(c, today, twin=None, maybe_paid=None):
+    """A new list row for a card, always Unpaid. Run Date is left alone: it is
+    the Friday scan's own proof of life. A CHECK: description is the only way
+    a doubt reaches Kevin, because the page shows the description and not the
+    notes."""
+    card = c["card"]
+    description = card.get("description") or c["name"]
+    if twin is not None:
+        f = twin["fields"]
+        description = "CHECK: this may be the same bill as the £%.2f %s row dated %s. %s" % (
+            float(f.get("Amount") or 0), f.get("Payee") or "", (f.get("Email Date") or "")[:10],
+            description)
+    if maybe_paid is not None:
+        description = "CHECK: may already be paid (%s). %s" % (tx_line(maybe_paid), description)
+    fields = {
+        FIELD_MSG_ID: "task:%s" % c["id"],
+        "Payee": card.get("payee") or c["name"],
+        "Description": description,
+        "Email Date": c.get("emailDate") or card_email_date(today).isoformat(),
+        "Status": "Unpaid",
+        "Source": "Payment card",
+        "Notes": ("[%s — payment-run] From Kevin's approved payment card, task %s "
+                  "(https://airtable.com/%s/%s/%s).%s" % (
+                      today.strftime("%-d %b %Y"), c["id"], BASE, T_TASKS, c["id"],
+                      (" " + card["notes"]) if card.get("notes") else "")),
+    }
+    if card.get("amount") is not None:
+        fields["Amount"] = card["amount"]
+    else:
+        fields["Notes"] += " Amount not stated on the card: open the task."
+    for key, column in (("reference", "Reference"), ("dueDate", "Due Date"),
+                        ("payToDetails", "Pay To Details")):
+        if card.get(key):
+            fields[column] = card[key]
+    return fields
+
+
+def run_tasks(records, transactions, apply, today):
+    """Returns the plan. A refused card is a card an agent approved itself; the
+    daily job goes red on it rather than leaving the fact in a log."""
+    cards = approved_payment_cards()
+    plan = plan_tasks(cards, records, index_by_amount(transactions), today)
+    print("\nAPPROVED PAYMENT CARDS: %d" % len(cards))
+    creates, updates = [], []
+    for action, c, detail in plan:
+        card = c.get("card") or {}
+        label = "%s | %s | £%s" % (c["id"], str(card.get("payee") or c["name"])[:34],
+                                   card.get("amount"))
+        if action in ("create", "check", "check_paid"):
+            print("  %-20s %s | due %s" % ({"create": "ADD to the list",
+                                             "check": "ADD, POSSIBLE TWIN",
+                                             "check_paid": "ADD, MAY BE PAID"}[action],
+                                            label, card.get("dueDate") or "-"))
+            creates.append({"fields": task_row_fields(
+                c, today, twin=detail if action == "check" else None,
+                maybe_paid=detail if action == "check_paid" else None)})
+        elif action == "link":
+            print("  ALREADY LISTED       %s | as row %s (the same bill)" % (label, detail["id"]))
+            if c["id"] not in (detail["fields"].get("Notes") or ""):
+                fields = {"Notes": append_note(detail, "Also Kevin's approved payment card, "
+                                                       "task %s." % c["id"])}
+                if card.get("dueDate") and not detail["fields"].get("Due Date"):
+                    fields["Due Date"] = card["dueDate"]
+                updates.append({"id": detail["id"], "fields": fields})
+        elif action == "paid":
+            print("  ALREADY PAID         %s | row %s" % (label, detail["id"]))
+        elif action == "wait":
+            print("  WAITING until %s %s" % (detail, label))
+        elif action == "listed":
+            print("  on the list          %s | row %s" % (label, detail))
+        else:
+            print("  %-20s %s | %s" % (action.upper(), label, detail))
+    if apply:
+        if creates:
+            airtable_write(T_INVOICES, "POST", creates, "add payment-card rows")
+        if updates:
+            airtable_write(T_INVOICES, "PATCH", updates, "link payment cards")
+    elif creates or updates:
+        print("DRY RUN: %d to add, %d to link. Re-run with --apply." % (len(creates), len(updates)))
+    return plan
+
+
+def cmd_tasks(args):
+    today = (parse_asof(args.asof) or datetime.now(LONDON)).date()
+    records = airtable_list(T_INVOICES, what="Dashboard Invoices")
+    return run_tasks(records, load_controlled_outflows(default_since()), args.apply, today)
+
+
+def cmd_daily(args):
+    """The 06:30 job. Settle first, so every payment already on the list is
+    claimed before a card asks whether the bank shows it paid; then the cards;
+    then settle again for what the cards just added; then the absence report.
+    Pure script, no model, so it costs no Claude allowance (Kevin declined a
+    daily Claude run on cost, 18 Sep 2026). Exits 1 when a card was refused:
+    an agent approving its own payment must turn the job red, not sit in a log."""
+    today = datetime.now(LONDON).date()
+    transactions = load_controlled_outflows(default_since())
+    run_settle(airtable_list(T_INVOICES, what="Dashboard Invoices"), transactions, True)
+    plan = run_tasks(airtable_list(T_INVOICES, what="Dashboard Invoices"), transactions, True, today)
+    run_settle(airtable_list(T_INVOICES, what="Dashboard Invoices"), transactions, True)
+    args.days = 7
+    cmd_unlisted(args, airtable_list(T_INVOICES, what="Dashboard Invoices"))
+    refused = [c["id"] for action, c, _d in plan if action == "refused"]
+    if refused:
+        fail("%d payment card(s) carry no real approval and were NOT listed: %s. "
+             "An agent marked them approved itself; find out how." % (len(refused), ", ".join(refused)))
+    print("\npayment-run daily: done")
+
+
+def cmd_done(_args):
+    """The Friday run's last step. The scan it read becomes where the next
+    Friday starts, but only if that scan was complete: a truncated week is
+    read again next time rather than stamped as done."""
+    try:
+        pending = json.loads(SCAN_PENDING.read_text())
+    except (OSError, ValueError):
+        fail("no scan stamp at %s: run `scan` first. Nothing moved." % SCAN_PENDING)
+    if not pending.get("complete"):
+        fail("the scan ending %s was truncated, so this week is NOT done. The "
+             "next run starts from the last complete one." % pending.get("end"))
+    write_stamp(SCAN_LAST_GOOD, pending)
+    print("Next Friday's scan starts from %s." % pending["end"])
 
 
 # ══════════════════════════════════════════════════════════════════════════
@@ -1466,6 +2364,305 @@ def cmd_selftest(_args):
     check("real words survive", payee_tokens("Priority Response Group LTD"),
           {"priority", "response"})
 
+    # ── 25 Sep 2026 audit: the four ways the list went wrong ──────────────
+    # Invented names and fake bank details throughout: the repo is public.
+    D = lambda s: datetime.fromisoformat(s).date()
+    txn = lambda i, day, gbp, name, **extra: {"id": i, "fields": dict(
+        {"**Date": day, "**GBP": gbp, "*Name": name}, **extra)}
+    bill = lambda i, day, amount, payee, **extra: {"id": i, "fields": dict(
+        {"Status": "Unpaid", "Amount": amount, "Email Date": day, "Payee": payee}, **extra)}
+
+    # 1. A paid row never left the list. The shape of the real case: a £90 gas
+    #    certificate emailed on the 16th, paid on the 21st, the bank line naming
+    #    the engineer's company.
+    gas = bill("recGas", "2026-09-16", 90, "Brightwater Gas Ltd", Description="LGSR, 5 Mill Lane")
+    gas_tx = txn("txGas", "2026-09-21", -90, "Brightwater Gas Ltd 5 Mill Lane")
+    paid, probable = plan_settle([gas], index_by_amount([gas_tx]))
+    check("a corroborated payment settles its row",
+          [(r["id"], t["id"]) for r, t in paid], [("recGas", "txGas")])
+    ups = settle_updates(paid, probable)
+    check("settling writes Paid, the date and the transaction",
+          (ups[0]["fields"]["Status"], ups[0]["fields"]["Paid Date"],
+           ups[0]["fields"]["Matched Transaction"]), ("Paid", "2026-09-21", ["txGas"]))
+    paid2, _ = plan_settle([dict(gas, id="recA"), dict(gas, id="recB")], index_by_amount([gas_tx]))
+    check("one bank payment settles one bill, not two", len(paid2), 1)
+    claimed = [bill("recOld", "2026-09-01", 90, "Brightwater Gas Ltd", Status="Paid",
+                    **{"Matched Transaction": ["txGas"]}), gas]
+    check("a payment already claimed is never reused",
+          plan_settle(claimed, index_by_amount([gas_tx]))[0], [])
+    # Two £90 bills from one engineer for two houses: the bank line names the
+    # second house, so the second bill is the one paid, not the oldest.
+    house_a = bill("recHouseA", "2026-09-10", 90, "Brightwater Gas Ltd", Description="LGSR, 22 Oak Road")
+    house_b = bill("recHouseB", "2026-09-16", 90, "Brightwater Gas Ltd", Description="LGSR, 5 Mill Lane")
+    check("the bill whose property the bank line names is the one settled",
+          [r["id"] for r, _t in plan_settle([house_a, house_b], index_by_amount([gas_tx]))[0]],
+          ["recHouseB"])
+    check("with nothing to tell them apart, the oldest is settled",
+          [r["id"] for r, _t in plan_settle(
+              [house_a, house_b],
+              index_by_amount([txn("txBare", "2026-09-21", -90, "Brightwater Gas Ltd")]))[0]],
+          ["recHouseA"])
+    stranger = txn("txX", "2026-09-21", -90, "Oakfield Roofing")
+    paid4, prob4 = plan_settle([gas], index_by_amount([stranger]))
+    check("an uncorroborated match does not settle", (len(paid4), len(prob4)), (0, 1))
+    noted = dict(gas, fields=dict(gas["fields"], Notes="... (txX)"))
+    check("a probable note is written once", settle_updates([], [(noted, stranger)]), [])
+    check("Historic rows are never settled",
+          plan_settle([dict(gas, fields=dict(gas["fields"], Status="Historic"))],
+                      index_by_amount([gas_tx])), ([], []))
+    check("a row whose suggested match Kevin rejected is never settled",
+          plan_settle([dict(gas, fields=dict(gas["fields"], **{"AI Match Rejected": True}))],
+                      index_by_amount([gas_tx])), ([], []))
+    check("no payee words to compare means no 'possible payment' note",
+          plan_settle([bill("recS", "2026-06-12", 90, "licensing@council.gov.uk")],
+                      index_by_amount([stranger])), ([], []))
+    # Whole words: "city" is inside "electricity", and that closed a council's
+    # bill on an electricity direct debit in review.
+    council = bill("recCity", "2026-09-01", 150, "Coventry City Council")
+    check("a payee word inside another word is not the payee",
+          plan_settle([council], index_by_amount(
+              [txn("txDD", "2026-09-05", -150, "DD:OCTOPUS ELECTRICITY")]))[0], [])
+    check("a bank line that cuts the name short still names the payee",
+          len(plan_settle([bill("recGl", "2026-09-01", 60, "Brightwells Glazing")],
+                          index_by_amount([txn("txGl", "2026-09-02", -60, "BRIGHTWELL GLAZ")]))[0]), 1)
+    check("generic words never corroborate", payee_tokens("Oakfield Properties Limited"), {"oakfield"})
+    check("a short shared start is not the payee",
+          len(plan_settle([bill("recBw", "2026-09-01", 60, "Brightwater Gas Ltd")],
+                          index_by_amount([txn("txBs", "2026-09-02", -60, "BRIGHT SPARK ELEC")]))[0]), 0)
+    # A split payment: the parent line keeps the whole bank amount, and its
+    # Split Override Amount is its own part. Each part pays its own bill.
+    parent = txn("txP", "2026-09-05", -512, "Oakfield Roofing 3 Ash Road 9 Elm Road (Split 1 of 2)",
+                 **{"Split Override Amount": -256})
+    child = txn("txC", "2026-09-05", -256, "Oakfield Roofing 3 Ash Road 9 Elm Road (Split 2 of 2)")
+    two = [bill("recR1", "2026-09-01", 256, "Oakfield Roofing", Description="3 Ash Road"),
+           bill("recR2", "2026-09-01", 256, "Oakfield Roofing", Description="9 Elm Road")]
+    check("both halves of a split payment settle their own bills",
+          len(plan_settle(two, index_by_amount([parent, child]))[0]), 2)
+    # A row marked Paid by hand gets its payment linked, and claims it FIRST:
+    # the open twin of the same size stays owed.
+    hand_paid = bill("recHand", "2026-09-16", 90, "Brightwater Gas Ltd", Status="Paid",
+                     Description="LGSR, 22 Oak Road", **{"Paid Date": "2026-09-22"})
+    oak_tx = txn("txOak", "2026-09-21", -90, "Brightwater Gas Ltd 22 Oak Road")
+    links, paid5, _p = plan_all([hand_paid, gas], index_by_amount([oak_tx]), "2026-09-01")
+    check("a hand-paid row is linked to the payment naming its house; the open bill stays owed",
+          ([(r["id"], t["id"]) for r, t in links], paid5), ([("recHand", "txOak")], []))
+    links7, paid7, _p = plan_all([hand_paid, gas], index_by_amount([gas_tx]), "2026-09-01")
+    check("a payment naming the OPEN bill's house settles that bill, not the hand-paid row",
+          ([r["id"] for r, _t in links7], [r["id"] for r, _t in paid7]), ([], ["recGas"]))
+    bare_paid = bill("recBare", "2026-09-16", 90, "Brightwater Gas Ltd", Status="Paid",
+                     **{"Paid Date": "2026-09-22"})
+    bare_open = bill("recBareOpen", "2026-09-16", 90, "Brightwater Gas Ltd")
+    bare_tx = txn("txBare2", "2026-09-21", -90, "Brightwater Gas Ltd")
+    links8, paid8, _p = plan_all([bare_paid, bare_open], index_by_amount([bare_tx]), "2026-09-01")
+    check("with nothing to tell them apart, the payment is the hand-paid row's and the open one stays",
+          ([r["id"] for r, _t in links8], paid8), (["recBare"], []))
+    check("a hand-paid row is not linked to a payment booked 4+ days after it was marked paid",
+          plan_links([dict(hand_paid, fields=dict(hand_paid["fields"], **{"Paid Date": "2026-09-17"}))],
+                     index_by_amount([gas_tx]), "2026-09-01"), [])
+    check("nor, without the payee named, to one far from the day it was marked paid",
+          plan_links([dict(hand_paid, fields=dict(hand_paid["fields"], **{"Paid Date": "2026-09-30"}))],
+                     index_by_amount([stranger]), "2026-09-01"), [])
+    acme_paid = bill("recAcme", "2026-09-10", 90, "Acme Roofing", Status="Paid", **{"Paid Date": "2026-09-21"})
+    links6, paid6, _p6 = plan_all([acme_paid, gas], index_by_amount([gas_tx]), "2026-09-01")
+    check("a hand-paid row never takes a payment that names an open bill's payee",
+          ([r["id"] for r, _t in links6], [r["id"] for r, _t in paid6]), ([], ["recGas"]))
+    check("an old hand-paid row is left alone",
+          plan_links([hand_paid], index_by_amount([gas_tx]), "2026-09-23"), [])
+
+    # 2. Approved MARK FOR PAYMENT cards never reached the list.
+    card_text = ("MARK FOR PAYMENT: Oakfield ground rent, 4 Park Row\n\n"
+                 "PAYEE: Oakfield Ground Rents Limited\n"
+                 "AMOUNT: £2.22 (£1.11 ground rent + £1.11 arrears)\n"
+                 "REFERENCE: GR-4471\nDUE DATE: 2026-10-24\n"
+                 "PAY TO: Example Bank, sort code 00-00-00, account 00000000\n"
+                 "DESCRIPTION: Half-yearly ground rent\n")
+    card = parse_payment_card(card_text)
+    check("the card's payee, FIRST amount, reference and due date are read",
+          (card["payee"], card["amount"], card["reference"], card["dueDate"]),
+          ("Oakfield Ground Rents Limited", 2.22, "GR-4471", "2026-10-24"))
+    check("fields above the card's heading are not the card's",
+          parse_payment_card("Arrears summary\nAMOUNT: £3,000.00\n\nMARK FOR PAYMENT\n"
+                             "PAYEE: Oakfield Roofing\nAMOUNT: £100.00")["amount"], 100.0)
+    check("bold markdown labels still read",
+          parse_payment_card("**MARK FOR PAYMENT**\n**PAYEE:** Acme Ltd\n**AMOUNT:** £45.00")
+          ["amount"], 45.0)
+    check("a bullet or numbered heading is a heading",
+          [bool(parse_payment_card(h + "MARK FOR PAYMENT\nAMOUNT: £1")) for h in ("- ", "1. ", "## ")],
+          [True, True, True])
+    check("a TIER banner above the card is fine",
+          parse_payment_card(":rotating_light: TIER 1.\n\nMARK FOR PAYMENT: x\nPAYEE: A\nAMOUNT: £1")
+          ["payee"], "A")
+    check("a task that is not a card is not a card", parse_payment_card("Decision brief"), None)
+    check("due dates in words", parse_due("24 October 2026"), "2026-10-24")
+    check("due dates with slashes", parse_due("29/09/2026"), "2026-09-29")
+    check("no date is None, never a guess", parse_due("by the end of the month"), None)
+    check("a Saturday bill lists the Friday before",
+          listing_date("2026-10-24").isoformat(), "2026-10-23")
+    check("a Friday bill lists a week early, not on the day",
+          listing_date("2026-10-30").isoformat(), "2026-10-23")
+    # A card listed on a Friday is dated the Thursday, so after the 9pm cutoff
+    # it sits in "Last week — the run to pay", not in next Friday's section.
+    t_start, l_start = week_buckets(datetime(2026, 10, 23, 21, 5, tzinfo=LONDON))
+    listed = {"id": "c", "fields": {"Email Date": card_email_date(D("2026-10-23")).isoformat()}}
+    check("a card listed on a Friday is in the run to pay after the cutoff",
+          [r["id"] for r in bucket_rows([listed], t_start, l_start)[1]], ["c"])
+    check("a card listed midweek keeps its own day",
+          card_email_date(D("2026-10-20")).isoformat(), "2026-10-20")
+    task = {"id": "recCard", "name": "Oakfield ground rent", "created": "2026-09-25",
+            "card": card, "refused": "", "text": card_text}
+    act = lambda plan: [(a, d if isinstance(d, (str, type(None))) else d.get("id"))
+                        for a, _c, d in plan]
+    check("before its Friday the card waits",
+          act(plan_tasks([task], [], {}, D("2026-09-26"))), [("wait", "2026-10-23")])
+    check("on its Friday the card goes on the list",
+          act(plan_tasks([task], [], {}, D("2026-10-23"))), [("create", None)])
+    fields = task_row_fields(task, D("2026-10-23"))
+    check("its row names the card and never stamps Run Date",
+          ("Run Date" in fields, fields[FIELD_MSG_ID]), (False, "task:recCard"))
+    # The email came on Monday and triage made the card on Tuesday: the card's
+    # track record names that email, so they are one bill, not two.
+    email_row = bill("recMail", "2026-09-21", 2.22, "Oakfield Ground Rents Ltd",
+                     **{FIELD_MSG_ID: "18a0f00dcafe0001"})
+    tuesday = dict(task, created="2026-09-22", text=card_text + "\n- email: #all/18a0f00dcafe0001")
+    check("an email the card itself names is linked, even from the day before",
+          act(plan_tasks([tuesday], [email_row], {}, D("2026-10-23"))), [("link", "recMail")])
+    check("and if that row is paid, the card is never added again",
+          act(plan_tasks([tuesday], [dict(email_row, fields=dict(email_row["fields"], Status="Paid"))],
+                         {}, D("2026-10-23"))), [("paid", "recMail")])
+    check("the same reference and amount is the same bill",
+          act(plan_tasks([task], [bill("recRef", "2026-09-01", 2.22, "Other name",
+                                       Reference="GR 4471")], {}, D("2026-10-23"))),
+          [("link", "recRef")])
+    # Same payee, same size, nothing else: could be a second bill. Listed, with
+    # the description saying what to check, never folded in silently.
+    weak = act(plan_tasks([task], [bill("recWeak", "2026-09-24", 2.22, "Oakfield Ground Rents Ltd")],
+                          {}, D("2026-10-23")))
+    check("last period's paid row with the same reference is not this period's bill",
+          act(plan_tasks([task], [bill("recPrev", "2026-03-20", 2.22, "Other name", Status="Paid",
+                                       Reference="GR-4471")], {}, D("2026-10-23"))),
+          [("create", None)])
+    check("an old unpaid row with the same reference is flagged, even under another payee name",
+          act(plan_tasks([task], [bill("recMay", "2026-05-08", 2.22, "OGR Managing Agents",
+                                       Reference="GR 4471")], {}, D("2026-10-23"))),
+          [("check", "recMay")])
+    check("a same-payee same-size bill still owed from months ago is flagged as a possible twin",
+          act(plan_tasks([task], [bill("recMarch", "2026-03-26", 2.22, "Oakfield Ground Rents Ltd")],
+                         {}, D("2026-10-23"))), [("check", "recMarch")])
+    check("a same-payee same-size row is only a possible twin, and the card is still listed",
+          weak, [("check", "recWeak")])
+    check("and its description says what to check",
+          task_row_fields(task, D("2026-10-23"),
+                          twin=bill("recWeak", "2026-09-24", 2.22, "Oakfield")).get("Description", "")
+          .startswith("CHECK:"), True)
+    check("an Estimate row is never a twin",
+          act(plan_tasks([task], [bill("recEst", "2026-09-24", 2.22, "Oakfield Ground Rents Ltd",
+                                       Status="Estimate", Reference="GR-4471")], {}, D("2026-10-23"))),
+          [("create", None)])
+    early = txn("txEarly", "2026-10-01", -2.22, "Oakfield Ground Rents GR4471")
+    check("a card with a possible earlier payment is still listed, never assumed paid",
+          act(plan_tasks([task], [], index_by_amount([early]), D("2026-10-23"))),
+          [("check_paid", "txEarly")])
+    mp = task_row_fields(task, D("2026-10-23"), maybe_paid=early)
+    check("and it is listed Unpaid with the payment named in its description",
+          (mp["Status"], mp["Description"].startswith("CHECK: may already be paid")), ("Unpaid", True))
+    sat = plan_tasks([task], [], {}, D("2026-10-24"))[0][1]
+    check("a card listed late on the Saturday is dated for the Friday run it missed",
+          task_row_fields(sat, D("2026-10-24"))["Email Date"], "2026-10-22")
+    check("an old id in the card's track record is not this card's bill",
+          act(plan_tasks([dict(task, text=card_text + "\n- email: #all/18a0f00dcafe0009")],
+                         [bill("recLast", "2026-08-20", 2.22, "Oakfield Ground Rents Ltd", Status="Paid",
+                               **{FIELD_MSG_ID: "18a0f00dcafe0009"})], {}, D("2026-10-23"))),
+          [("create", None)])
+    check("a quoted AMOUNT line from a pasted letter is not the card's",
+          parse_payment_card("MARK FOR PAYMENT — £330.00\n\n> quoted letter\n> AMOUNT: £3,000.00")
+          ["amount"], 330.0)
+    check("the AMOUNT line's total beats a part named in the heading",
+          parse_payment_card("MARK FOR PAYMENT: ground rent £1.11 + arrears £1.11\nAMOUNT: £2.22")
+          ["amount"], 2.22)
+    reminder = bill("recRem", "2026-09-20", 330, "Oakfield Alarms Ltd", **{FIELD_MSG_ID: "18a0f00dcafe0330"})
+    feb = {"id": "recFeb", "name": "Oakfield Alarms Ltd - 2 Ash Court", "created": "2026-02-18",
+           "approved": "2026-09-25", "card": parse_payment_card("MARK FOR PAYMENT — £330.00"),
+           "refused": "", "text": "- email: #all/18a0f00dcafe0330"}
+    wk = bill("recWk38", "2026-09-15", 2.22, "Oakfield Ground Rents Ltd", Status="Paid",
+              **{FIELD_MSG_ID: "18a0f00dcafe0038"})
+    wk_card = dict(task, created="2026-09-22", approved="2026-09-23",
+                   text=card_text + "\nthis week #all/18a0f00dcafe0039; earlier: #all/18a0f00dcafe0038")
+    check("last week's paid bill named in a card's history is not this week's bill",
+          act(plan_tasks([wk_card], [wk], {}, D("2026-10-23"))), [("check", "recWk38")])
+    check("a card raised in February and approved in September links to September's reminder",
+          act(plan_tasks([feb], [reminder], {}, D("2026-09-25"))), [("link", "recRem")])
+    check("a card already on the list is left alone",
+          act(plan_tasks([task], [{"id": "recRow", "fields": {FIELD_MSG_ID: "task:recCard"}}],
+                         {}, D("2026-10-23"))), [("listed", "recRow")])
+    check("a card without a real approval is refused",
+          plan_tasks([dict(task, refused="no approval was ever recorded")], [], {},
+                     D("2026-10-23"))[0][0], "refused")
+    check("the scan marks the email a card already is",
+          card_for_message("18a0f00dcafe0001", [2.22, 1.11],
+                           [dict(card, taskId="recCard", text="#all/18a0f00dcafe0001")]), "recCard")
+    check("but not a different bill from the same sender",
+          card_for_message("18a0f00dcafe0001", [45.0],
+                           [dict(card, taskId="recCard", text="#all/18a0f00dcafe0001")]), None)
+    # The free-form shape a real approved card used: no PAYEE or AMOUNT line,
+    # the figure on the heading. It had never reached the list.
+    freeform = parse_payment_card("Six reminders since April.\n\nMARK FOR PAYMENT — £330.00 "
+                                  "total (two invoices)\n\nKevin's feedback: ...")
+    check("a free-form card's amount comes from its heading", freeform["amount"], 330.0)
+    ff_task = {"id": "recFF", "name": "Oakfield Alarms Ltd - 2 Ash Court", "created": "2026-02-18",
+               "card": freeform, "refused": "", "text": ""}
+    ff_plan = plan_tasks([ff_task], [], {}, D("2026-09-25"))
+    check("a free-form card with no due date goes on the list now, named after its task",
+          (ff_plan[0][0], ff_plan[0][1]["card"]["payee"]), ("create", "Oakfield Alarms Ltd"))
+    blank = parse_payment_card("MARK FOR PAYMENT\nSee the attached statement.")
+    b_task = {"id": "recB", "name": "Council tax", "created": "2026-09-01", "card": blank,
+              "refused": "", "text": ""}
+    b_fields = task_row_fields(plan_tasks([b_task], [], {}, D("2026-09-25"))[0][1], D("2026-09-25"))
+    check("a card with no amount still goes on the list, amount blank, pointing at its task",
+          ("Amount" in b_fields, "open the task" in b_fields["Notes"]), (False, True))
+
+    # 3. Money that left without ever being on the list.
+    zem = lambda i, name, gbp=-80, **extra: {"id": i, "fields": dict({
+        "Account Alias (from **Account)": ["TNT Mgt Zempler"], "**GBP": gbp, "*Name": name,
+        "**Date": "2026-09-20"}, **extra)}
+    txs = [zem("t1", "Oakfield Roofing 3 Ash Road"), zem("t2", "Fin: AMZNMktplace*TA1"),
+           zem("t3", "DD:LOAN CO 1234"), zem("t4", "Electronic Payment Fee 17/08"),
+           zem("t5", "Oakfield Roofing 9 Elm (Split 2 of 2)"),
+           zem("t6", "Oakfield Roofing 9 Elm (Split 1 of 2)"),
+           zem("t7", "Brightwater Gas Ltd 5 Mill Lane", -90),
+           {"id": "t8", "fields": {"Account Alias (from **Account)": ["Santander"],
+                                   "**GBP": -45, "*Name": "BILL PAYMENT TO X", "**Date": "2026-09-20"}},
+           zem("t9", "Refund in", 50)]
+    check("hand-made business transfers no row claims are reported",
+          sorted(t["id"] for t in unlisted_transfers(
+              txs, [{"id": "r1", "fields": {"Matched Transaction": ["t7"]}}])), ["t1", "t6"])
+    check("a payment an open row is about to settle is not reported",
+          sorted(t["id"] for t in unlisted_transfers(
+              txs, [bill("rOpen", "2026-09-16", 90, "Brightwater Gas Ltd")])), ["t1", "t6"])
+    check("a split payment is listed when any of its parts is",
+          sorted(t["id"] for t in unlisted_transfers(
+              txs, [{"id": "r2", "fields": {"Matched Transaction": ["t5", "t7"]}}])), ["t1"])
+    same_day = [zem("s1", "Oakfield Roofing 3 Ash Road", -80), zem("s2", "Oakfield Roofing 3 Ash Road", -100)]
+    check("two same-day payments are two payments, not one split",
+          [t["id"] for t in unlisted_transfers(same_day, [{"id": "r", "fields": {"Matched Transaction": ["s1"]}}])],
+          ["s2"])
+    check("the absence window leaves the newest day for the feed",
+          unlisted_window(D("2026-09-25"), 7), ("2026-09-17", "2026-09-24"))
+
+    # 4. A missed Friday was lost for good: the scan never looked back further
+    #    than seven days, and its one scheduled run read the wrong week.
+    now = datetime(2026, 9, 25, 21, 0, tzinfo=LONDON)
+    s, _e = scan_range(now, 1, datetime(2026, 9, 11, 21, 0, tzinfo=LONDON))
+    check("after a missed Friday the scan starts from the last good run",
+          s.isoformat(), "2026-09-10T21:00:00+01:00")
+    s, _e = scan_range(now, 1, datetime(2026, 9, 18, 21, 0, tzinfo=LONDON))
+    check("after a normal week it reads its usual reach",
+          s.isoformat(), "2026-09-17T21:00:00+01:00")
+    s, _e = scan_range(now, 1, datetime(2026, 1, 1, tzinfo=LONDON))
+    check("a catch-up never reaches past the cap", (now - s).days, MAX_CATCHUP_DAYS)
+    check("a two-week catch-up gets two weeks of pages", pages_for(15), 26)
+    check("one week keeps the old page cap", pages_for(8), MAX_PAGES + 2)
+    check("the page cap has a ceiling", pages_for(365), MAX_PAGES * 5)
+
     if failures:
         for line in failures:
             print("FAIL " + line)
@@ -1486,14 +2683,35 @@ def main(argv=None):
 
     p = sub.add_parser("scan")
     p.add_argument("--asof")
-    p.add_argument("--back-days", type=int, default=0,
+    # One day of overlap, as the skill has always said. The default was 0, so
+    # the scan read exactly seven days and a run firing a minute early left a
+    # minute of mail between two Fridays that neither read.
+    p.add_argument("--back-days", type=int, default=1,
                    help="re-read this many days behind the window start")
-    p.add_argument("--max-attachments", type=int, default=MAX_ATTACHMENTS)
+    p.add_argument("--max-attachments", type=int, default=MAX_ATTACHMENTS,
+                   help="attachment budget per seven days scanned")
     p.set_defaults(fn=cmd_scan)
 
     p = sub.add_parser("check")
-    p.add_argument("--since", default="2026-01-01")
+    p.add_argument("--since")
     p.set_defaults(fn=cmd_check)
+
+    p = sub.add_parser("settle")
+    p.add_argument("--apply", action="store_true")
+    p.add_argument("--since")
+    p.set_defaults(fn=cmd_settle)
+
+    p = sub.add_parser("tasks")
+    p.add_argument("--apply", action="store_true")
+    p.add_argument("--asof", help="judge 'the Friday before it is due' as of this date")
+    p.set_defaults(fn=cmd_tasks)
+
+    p = sub.add_parser("unlisted")
+    p.add_argument("--days", type=int, default=7)
+    p.set_defaults(fn=cmd_unlisted)
+
+    p = sub.add_parser("daily"); p.set_defaults(fn=cmd_daily)
+    p = sub.add_parser("done"); p.set_defaults(fn=cmd_done)
 
     p = sub.add_parser("write")
     p.add_argument("--items", required=True)

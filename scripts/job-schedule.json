@@ -591,6 +591,16 @@
   "retryWhenDeferred": true,
   "note": "Kevin's weekly Friday payment run (PRs #483/#484, 18 Sep 2026). launchd com.kevinbrittain.payment-run fires StartCalendarInterval Weekday 5, Hour 21, LOCAL time, and launchd counts Sunday as 0 \u2014 so weekday 5 is Friday, which is the same day standard five-field cron means by 5. This entry mirrors that one firing so slot attendance can grade it; it fires nothing itself. Registered 19 Sep 2026 (finding 20260919-daily-ops-551): the job was in neither list, so check-routines.py saw a SKILL.md routine running beside daily-ops and reported ROUTINE STACKING every weekend, and the digest would never have noticed it stop. Lateness is generous because the list is still worth having on Saturday morning; it prepares only and pays nothing."
   },
+ "payment-run-daily": {
+  "cron": "30 6 * * *",
+  "maxLateMinutes": 900,
+  "mode": "wrapped",
+  "needs": [
+   "network"
+  ],
+  "retryWhenDeferred": true,
+  "note": "The daily half of the Friday payment run (Kevin, 25 Sep 2026): scripts/payment-run.py daily. No model, so no Claude allowance. It puts Kevin's approved MARK FOR PAYMENT cards on the list (on the Friday before they are due), marks Paid every open row a payee-corroborated bank payment covers, and prints the business-account transfers no row accounts for. Built because the Friday job only PRINTED what was paid: a 90 pound gas certificate, paid 21 Sep, was still listed as owed four days later. 06:30 so it lands before the 06:40 data check that reads the same claims. Lateness is generous: a list cleared at lunchtime is still cleared before Friday."
+ },
  "tenant-leads": {
   "cron": "10 8 * * *",
   "maxLateMinutes": 600,
