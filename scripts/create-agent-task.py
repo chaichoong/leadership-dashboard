@@ -1283,19 +1283,46 @@ APPROVED_OUTCOMES = ("Approved as-is", "Approved with minor edits")
 
 
 def parent_problem(parent_id):
-    """Why PARENT cannot vouch for a new child task, or ''."""
+    """Why PARENT cannot vouch for a new child task, or ''. The approval is
+    judged by the ONE shared check (scripts/approval_evidence.py), so an
+    Approved At copied from elsewhere and older than the task fails here as it
+    does at the send (second review, 25 Sep 2026)."""
     try:
-        pf = (_request("GET", f"/{TASKS}/{parent_id}?returnFieldsByFieldId=true") or {}).get("fields", {}) or {}
+        rec = _request("GET", f"/{TASKS}/{parent_id}?returnFieldsByFieldId=true") or {}
     except RuntimeError as exc:
         return f"the parent {parent_id} could not be read ({str(exc)[:120]})"
+    pf = rec.get("fields", {}) or {}
     sel_ = lambda v: v.get("name", "") if isinstance(v, dict) else (v or "")
-    if sel_(pf.get(F["status"])) == "Completed":
-        return f"the parent {parent_id} is Completed"
+    status = sel_(pf.get(F["status"]))
+    if status in ("Completed", "Cancelled"):
+        return f"the parent {parent_id} is {status}"
     if sel_(pf.get(F["approvalOutcome"])) not in APPROVED_OUTCOMES:
         return f"the parent {parent_id} is not approved (outcome {sel_(pf.get(F['approvalOutcome'])) or 'empty'!r})"
-    if not pf.get(F["sentForApprovalBy"]) or not pf.get(F["approvedAt"]):
-        return f"the parent {parent_id} carries no real approval (no gate or no Approved At)"
-    return ""
+    sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+    from approval_evidence import approval_evidence_problem
+    why = approval_evidence_problem(pf, rec.get("createdTime") or "")
+    return f"the parent {parent_id} carries no real approval: {why}" if why else ""
+
+
+def open_child_of(parent_id, key):
+    """An open task already raised as a child of PARENT with the same key, or
+    None. The fold is off for a child, so this is its duplicate check: an agent
+    that retries the same --parent create gets the first child back, never a
+    second one (and a second quote-request email to the same contractor)."""
+    formula = f"AND(NOT({{Status}}='Completed'), FIND('CHILD OF {parent_id} ', {{Description}}))"
+    offset = None
+    while True:
+        q = [("filterByFormula", formula), ("pageSize", "100"), ("returnFieldsByFieldId", "true"),
+             ("fields[]", F["name"])]
+        if offset:
+            q.append(("offset", offset))
+        page = _request("GET", f"/{TASKS}?" + urllib.parse.urlencode(q)) or {}
+        for row in page.get("records", []):
+            if dupe_task_key((row.get("fields", {}) or {}).get(F["name"], "")) == key:
+                return row
+        offset = page.get("offset")
+        if not offset:
+            return None
 
 
 def cmd_create(fields, force=False, dry_run=False, parent=None):
@@ -1343,6 +1370,13 @@ def cmd_create(fields, force=False, dry_run=False, parent=None):
             print(json.dumps({"action": "refused", "reason": why,
                               "key": verdict["key"], "dryRun": dry_run}))
             return 3
+    if parent and not force:
+        twin = open_child_of(parent, verdict["key"])
+        if twin:
+            print(json.dumps({"action": "exists", "taskId": twin["id"], "key": verdict["key"],
+                              "why": f"an open child of {parent} with the same subject already exists",
+                              "dryRun": dry_run}))
+            return 0
     if not force and not parent:
         rows = fetch_open_tasks()
         if not rows:

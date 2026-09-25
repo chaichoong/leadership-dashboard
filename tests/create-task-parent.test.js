@@ -11,7 +11,7 @@ const GATE = resolve(ROOT, 'scripts/create-agent-task.py');
 // matched each to the open sibling recIJ4zuu2B7kSW6p ("quote request eicr") and folded
 // it in, so the emails could never be raised. `--parent` creates the child as its own
 // task, only for an open, really approved parent; the refusals still run.
-function create(parent, parentFields, extra = {}) {
+function create(parent, parentFields, extra = {}, twins = []) {
   return JSON.parse(execFileSync('python3', ['-c', `
 import importlib.util, json, io, contextlib
 spec = importlib.util.spec_from_file_location('g', ${JSON.stringify(GATE)})
@@ -19,10 +19,14 @@ g = importlib.util.module_from_spec(spec); spec.loader.exec_module(g)
 F = g.F
 calls = []
 PARENT = json.loads(${JSON.stringify(JSON.stringify(parentFields))})
+TWINS = json.loads(${JSON.stringify(JSON.stringify(twins))})
 def req(method, path, body=None):
     calls.append([method, path.split("?")[0]])
+    if method == "GET" and "filterByFormula" in path:
+        return {"records": [{"id": t, "fields": {F["name"]: fields[F["name"]]}} for t in TWINS]}
     if method == "GET":
-        return {"id": "recPFxDmGX5pbonD2", "fields": {F[k]: v for k, v in PARENT.items()}}
+        return {"id": "recPFxDmGX5pbonD2", "createdTime": "2026-09-20T09:00:00.000Z",
+                "fields": {F[k]: v for k, v in PARENT.items()}}
     if method == "POST":
         return {"id": "recNEWCHILD000001", "fields": body["fields"]}
     return {}
@@ -62,12 +66,21 @@ describe('create --parent: a child of an approved task is created, never folded'
       { ...APPROVED, approvedAt: '' },                       // the string alone is not an approval
       { ...APPROVED, sentForApprovalBy: [] },
       { ...APPROVED, status: 'Completed' },
+      { ...APPROVED, status: 'Cancelled' },
+      { ...APPROVED, approvedAt: '2026-09-19T09:00:00.000Z' },   // approved before the task existed: copied, not given
     ]) {
       const r = create('recPFxDmGX5pbonD2', bad);
       expect(r.rc, JSON.stringify(bad)).toBe(3);
       expect(JSON.parse(r.out).reason).toMatch(/^--parent refused: the parent recPFxDmGX5pbonD2/);
       expect(r.posted).toBe(0);
     }
+  });
+
+  it('a retried --parent create returns the open child it already made, and creates nothing', () => {
+    const r = create('recPFxDmGX5pbonD2', APPROVED, {}, ['recFIRSTCHILD0001']);
+    expect(r.rc).toBe(0);
+    expect(r.posted).toBe(0);
+    expect(JSON.parse(r.out)).toMatchObject({ action: 'exists', taskId: 'recFIRSTCHILD0001' });
   });
 
   it('without --parent the same task still goes through the fold gate (the board is read)', () => {

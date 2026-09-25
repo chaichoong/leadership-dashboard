@@ -2637,18 +2637,37 @@ SEND_LANGUAGE_RE = re.compile(
     r"|from\s+Kevin'?s\s+Gmail"
     r"|sent\s+(?:from|to)\s+[^\s@]+@[^\s@]+"
     r"|(?:it|the\s+(?:email|reply|letter|response|message))\s+(?:then\s+)?goes\s+(?:out\s+)?to"
-    r"|(?:being|gets?|will\s+be)\s+sent\b|then\s+sent\b"
+    # the passive only with an email noun: "the invoice will be sent by the
+    # supplier" is not our send (second review, 25 Sep 2026)
+    r"|(?:email|e-mail|reply|letter|response|message)s?\s+(?:is\s+|will\s+be\s+|being\s+|gets?\s+|then\s+)?sent\b"
     r")", re.I)
-NOT_A_SEND_BEFORE_RE = re.compile(r"\b(?:no|not|nothing|never|without|before|whether|which|or)\b[^.;]{0,30}$", re.I)
+# Words that deny or describe a send rather than promise one. NOT "before" or
+# "or": "checking the balance before sending the reply" and "updating the
+# record or sending the reply" are promises, and the second review found the
+# first version letting both through. ("before being sent", a gate being
+# described, no longer matches at all: the passive needs an email noun.)
+NOT_A_SEND_BEFORE_RE = re.compile(r"\b(?:no|not|nothing|never|without|whether|which)\b[^.;]{0,30}$", re.I)
 NOT_EMAIL_RE = re.compile(r"\b(?:iMessage|SMS|text\s+message|WhatsApp|osascript)\b", re.I)
+CLAUSE_SPLIT_RE = re.compile(r"[.;,]|\band\b|\bthen\b", re.I)
 
 
 def send_language_hit(closing):
-    """The first words of a closing line that promise an EMAIL send, or None."""
-    if NOT_EMAIL_RE.search(closing or ""):
-        return None
-    for m in SEND_LANGUAGE_RE.finditer(closing or ""):
-        if NOT_A_SEND_BEFORE_RE.search(closing[max(0, m.start() - 40): m.start()]):
+    """The first words of a closing line that promise an EMAIL send, or None.
+    A message that is not email is judged in its own clause only: "a text
+    message to Roy and sending the email to the council" still promises an
+    email (second review)."""
+    closing = closing or ""
+    for m in SEND_LANGUAGE_RE.finditer(closing):
+        before = closing[max(0, m.start() - 40): m.start()]
+        if NOT_A_SEND_BEFORE_RE.search(before):
+            continue
+        # "this chase task closes WHEN that email is sent": a condition on
+        # someone else's send, not a promise of ours (the passive form only).
+        if m.group(0).lower().endswith("sent") and re.search(r"\b(?:when|once|until|after)\b[^.;]{0,20}$", before, re.I):
+            continue
+        starts = [0] + [x.end() for x in CLAUSE_SPLIT_RE.finditer(closing) if x.end() <= m.start()]
+        ends = [x.start() for x in CLAUSE_SPLIT_RE.finditer(closing) if x.start() >= m.end()] + [len(closing)]
+        if NOT_EMAIL_RE.search(closing[max(starts): min(ends)]):
             continue
         return m
     return None

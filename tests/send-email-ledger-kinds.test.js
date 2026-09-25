@@ -38,7 +38,11 @@ calls, searches = [], []
 F = {m.AF["name"]: "INBOUND: Manchester City Council EICR", m.AF["agentOutput"]: a["output"],
      m.AF["taskType"]: {"name": "Correspondence"}, m.AF["status"]: {"name": "Today"},
      m.AF["approvalOutcome"]: {"name": "Approved as-is"}}
-m.get_task = lambda tid: {"id": tid, "createdTime": "2026-08-30T09:00:00.000Z", "fields": F}
+def _get(tid):
+    if a.get("airtableDown"):
+        sys.exit("ERROR: Airtable GET 503: unavailable")
+    return {"id": tid, "createdTime": "2026-08-30T09:00:00.000Z", "fields": F}
+m.get_task = _get
 m.load_approved.__globals__["approval_evidence_problem"] = lambda f, created: ""
 def fake_worker(url, payload=None):
     calls.append(payload)
@@ -117,8 +121,43 @@ describe('a send that dies is recorded, and an unfinished one is settled from th
     const a = run({ cmd: 'send', failWith: 'ERROR: worker call failed: TimeoutError: timed out' });
     expect(a.ledger.map((x) => x.event)).toEqual(['intent', 'uncertain']);
     const b = run({ cmd: 'send', rows: a.ledger });
-    expect(b.message).toMatch(/already sent/);
+    expect(b.message).toMatch(/has an unfinished send .*resolve-intent/s);
     expect(b.calls).toHaveLength(0);
+  });
+
+  it('a `sent` row refuses for ever: the losing run of two overlapping sends cannot free it (second review)', () => {
+    const rows = ['intent', 'intent', 'sent', 'failed'].map((event, i) => ({
+      task: 'recKho3l7jJKk9T0t', ts: `2026-09-25T10:00:0${i}.000Z`, event, kind: 'send', to: ['housing@manchester.gov.uk'] }));
+    const r = run({ cmd: 'send', rows });
+    expect(r.message).toMatch(/was already sent/);
+    expect(r.calls).toHaveLength(0);
+    const legacy = run({ cmd: 'send', rows: [{ task: 'recKho3l7jJKk9T0t', ts: '2026-09-01T10:00:00.000Z', event: 'sent', to: ['housing@manchester.gov.uk'], subject: '1406 Oldham Road EICR' },
+      { task: 'recKho3l7jJKk9T0t', ts: '2026-09-02T10:00:00.000Z', event: 'failed' }] });
+    expect(legacy.message).toMatch(/was already sent/);
+    const resolve = run({ cmd: 'resolve', rows: [...rows, { task: 'recKho3l7jJKk9T0t', ts: '2026-09-25T11:00:00.000Z', event: 'intent', kind: 'send', to: ['housing@manchester.gov.uk'] }] });
+    expect(resolve.message).toMatch(/no unfinished send to resolve/);
+  });
+
+  it('resolve-intent reads the mailbox the row says it went from (an alias maps to its account) and matches the subject', () => {
+    const rows = [{ task: 'recKho3l7jJKk9T0t', ts: '2026-09-23T15:09:00.000Z', event: 'intent', kind: 'send',
+      from: 'kevin@operationsdirector.co.uk', to: ['dave@example.com'], subject: 'Re: Hey Kevin, about "Operations Director"' }];
+    const r = run({ cmd: 'resolve', rows, hits: [] });
+    expect(r.searches[1]).toEqual(['in:sent to:dave@example.com after:2026/09/22 subject:"Hey Kevin, about  Operations Director"', 'kevin@runpreneur.org.uk']);
+  });
+
+  it('resolve-intent refuses, and changes nothing, when an old row names no mailbox and the task cannot be read', () => {
+    const rows = [{ task: 'recKho3l7jJKk9T0t', ts: '2026-09-23T15:09:00.000Z', event: 'intent', to: ['housing@manchester.gov.uk'] }];
+    const r = run({ cmd: 'resolve', rows, airtableDown: true });
+    expect(r.message).toMatch(/could not read recKho3l7jJKk9T0t to learn which mailbox sent it/);
+    expect(r.ledger).toHaveLength(1);
+    expect(r.searches).toHaveLength(0);
+  });
+
+  it('an `uncertain` send can be settled from the Sent folder too', () => {
+    const rows = [{ task: 'recKho3l7jJKk9T0t', ts: '2026-09-23T15:09:00.000Z', event: 'intent', kind: 'send', from: 'kevinbrittain@gmail.com', to: ['housing@manchester.gov.uk'] },
+      { task: 'recKho3l7jJKk9T0t', ts: '2026-09-23T15:09:30.000Z', event: 'uncertain', kind: 'send', error: 'timed out' }];
+    const r = run({ cmd: 'resolve', rows, hits: [{ id: 'gm-9' }] });
+    expect(r.ledger.slice(-1)[0]).toMatchObject({ event: 'sent', recovered: true });
   });
 
   it('an intent with nothing after it is refused with the way out, not "already sent"', () => {

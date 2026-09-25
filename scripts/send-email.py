@@ -275,17 +275,18 @@ def ledger_kind(row):
 
 
 def already_sent(task_id, kind="send"):
-    """The newest ledger row for this task and kind, when it says the email
-    went or may have gone; None when it may be sent.
+    """The ledger row that stops this task and kind being sent, or None.
 
-    The NEWEST row decides (it used to be the first): `sent`, `intent` (the
-    run died mid-send) and `uncertain` refuse, because a missed email is
-    recoverable and a second copy is not. `failed` (the worker refused before
-    anything left) and `intent-cleared` (resolve-intent found nothing in the
-    Sent folder) free it. A TO-EACH mail-out writes one row per address (it
-    carries a `recipient`); those are judged address by address in
-    send_each(), so a half-finished mail-out can resume."""
-    last = None
+    A `sent` row refuses FOR EVER, whatever follows it: two overlapping runs
+    can leave `intent, intent, sent, failed`, and the `failed` belongs to the
+    run that lost (second review, 25 Sep 2026). With no `sent`, the newest
+    row decides: `intent` (a run died mid-send) and `uncertain` refuse until
+    resolve-intent settles them from the Sent folder; `failed` (the worker
+    refused before anything left) and `intent-cleared` free it. A missed
+    email is recoverable; a second copy is not. A TO-EACH mail-out writes one
+    row per address (it carries a `recipient`); those are judged address by
+    address in send_each(), so a half-finished mail-out can resume."""
+    last = sent = None
     try:
         with open(SENT_LEDGER) as fh:
             for line in fh:
@@ -294,8 +295,12 @@ def already_sent(task_id, kind="send"):
                 row = json.loads(line)
                 if row.get("task") == task_id and not row.get("recipient") and ledger_kind(row) == kind:
                     last = row
+                    if row.get("event") == "sent":
+                        sent = row
     except FileNotFoundError:
         return None
+    if sent:
+        return sent
     if last and last.get("event") in ("failed", "intent-cleared"):
         return None
     return last
@@ -516,7 +521,7 @@ def load_attachment(attach, task_id):
 
 def cmd_send(args):
     prior = already_sent(args.task)
-    if prior and prior.get("event") == "intent":
+    if prior and prior.get("event") in ("intent", "uncertain"):
         # A run died between "about to send" and "sent": it may or may not
         # have gone. Never guessed: resolve-intent reads the Sent folder.
         sys.exit(f"REFUSED: task {args.task} has an unfinished send from {prior.get('ts')} "
@@ -583,6 +588,7 @@ def cmd_send(args):
     # but before the sent row lands, the next run still sees the task in the
     # ledger and refuses, rather than sending a second copy.
     ledger_append({"task": args.task, "ts": now_iso(), "event": "intent", "kind": "send",
+                   "from": mail["from"] or PERSONAL_SENDER,
                    "to": mail["to"], "cc": mail["cc"],
                    "subject": mail["subject"]})
 
@@ -1156,21 +1162,47 @@ def sent_folder_search(q, account):
     return msgs
 
 
+# A send-as alias has no mailbox of its own: its sent mail sits in the Sent
+# folder of the account it belongs to (checked 25 Sep 2026: 6 messages from
+# the alias in 60 days, in kevin@runpreneur.org.uk's Sent).
+SENT_FOLDER_OF = {BUSINESS_SENDER: "kevin@runpreneur.org.uk"}
+
+
 def cmd_resolve_intent(args):
-    last = already_sent(args.task)
-    if not last or last.get("event") != "intent":
+    state = already_sent(args.task)
+    if not state or state.get("event") not in ("intent", "uncertain"):
         sys.exit(f"REFUSED: {args.task} has no unfinished send to resolve "
-                 f"(newest send row: {(last or {}).get('event') or 'none'}).")
+                 f"(newest send row: {(state or {}).get('event') or 'none'}).")
+    # The recipient, mailbox and subject are on the INTENT row; an `uncertain`
+    # row after it records only the error.
+    last = state
+    try:
+        with open(SENT_LEDGER) as fh:
+            for line in fh:
+                row = json.loads(line) if line.strip() else {}
+                if (row.get("task") == args.task and not row.get("recipient")
+                        and ledger_kind(row) == "send" and row.get("event") == "intent"):
+                    last = row
+    except FileNotFoundError:
+        pass
     to = [a for a in (last.get("to") or []) if a]
     if not to:
         sys.exit(f"REFUSED: the unfinished send on {args.task} names no recipient, so the "
                  "Sent folder cannot be checked. Kevin decides this one.")
-    try:
-        mail = parse_output((get_task(args.task).get("fields", {}) or {}).get(AF["agentOutput"], "") or "",
-                            args.task)
-        account = (mail.get("from") or SENDER_DEFAULT).strip().lower()
-    except SystemExit:
-        account = SENDER_DEFAULT
+    # WHICH MAILBOX: from the ledger row, written at send time since 25 Sep 2026.
+    # An older row is read from the task, and a task that cannot be read is a
+    # refusal, never a guess: searching the wrong Sent folder finds nothing and
+    # would clear a send that went (second review, 25 Sep 2026).
+    sender = (last.get("from") or "").strip().lower()
+    if not sender or sender == "(default)":
+        try:
+            fields = (get_task(args.task).get("fields", {}) or {})
+        except SystemExit as exc:
+            sys.exit(f"REFUSED: could not read {args.task} to learn which mailbox sent it "
+                     f"({str(exc)[:120]}). Nothing was changed.")
+        mail = parse_output(fields.get(AF["agentOutput"], "") or "", args.task)
+        sender = (mail.get("from") or PERSONAL_SENDER).strip().lower()
+    account = SENT_FOLDER_OF.get(sender, sender)
     try:
         since = (datetime.fromisoformat(str(last.get("ts")).replace("Z", "+00:00"))
                  - timedelta(days=1)).strftime("%Y/%m/%d")
@@ -1180,7 +1212,12 @@ def cmd_resolve_intent(args):
     if not control:
         sys.exit(f"REFUSED: {account}'s Sent folder shows nothing in 30 days, so this read is "
                  "blind. Nothing was changed.")
-    hits = sent_folder_search(f"in:sent to:{to[0]} after:{since}", account)
+    # The subject as well as the recipient: a contractor who had several of our
+    # emails that week must not make this one look sent (second review).
+    subject = re.sub(r"^(?:(?:re|fwd?|fw)\s*:\s*)+", "", str(last.get("subject") or ""), flags=re.I)
+    subject = re.sub(r'["()]', " ", subject).strip()[:80]
+    query = f"in:sent to:{to[0]} after:{since}" + (f' subject:"{subject}"' if subject else "")
+    hits = sent_folder_search(query, account)
     if hits:
         ledger_append({"task": args.task, "ts": now_iso(), "event": "sent", "kind": "send",
                        "to": to, "recovered": True, "messageId": hits[0].get("id"),
@@ -1189,7 +1226,7 @@ def cmd_resolve_intent(args):
                           "found": len(hits), "to": to[0]}))
         return
     ledger_append({"task": args.task, "ts": now_iso(), "event": "intent-cleared", "kind": "send",
-                   "to": to, "why": f"nothing to {to[0]} in {account} Sent since {since}"})
+                   "to": to, "why": f"nothing matching {query!r} in {account} Sent"})
     print(json.dumps({"resolved": args.task, "went": False, "account": account, "to": to[0],
                       "since": since, "controlSeen": len(control)}))
 
