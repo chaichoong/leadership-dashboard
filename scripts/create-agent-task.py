@@ -13,6 +13,9 @@ inbound-messages-sweep Step 5) calls this instead of a bare curl POST:
     python3 scripts/create-agent-task.py create --fields-json '<json keyed by
         Airtable field ID, exactly the payload the skill already specifies>'
 
+    An approved task whose job is to raise a new task of its own (one email per
+    contractor) adds `--parent <approved task id>`: never folded into a sibling.
+
 Behaviour:
   * No open task shares the subject  -> POST creates it (unchanged payload).
   * An open task shares the subject AND the sender agrees -> PATCH folds the
@@ -76,6 +79,9 @@ F = {
     # Checkbox: Maintenance Ticket (js/config.js `maintenance`). A ticked task
     # is a repair, whatever its name says; the fold lane reads it first.
     "maintenance":  "fldSEUvVA98as1HW6",
+    # Read only for --parent (25 Sep 2026): is the parent really approved?
+    "approvalOutcome": "fldrHBSr6qoUfaKuZ",
+    "approvedAt":   "fldr4Mvf2RzKvhZhi",
 }
 
 # Roy Lavin's Team Members row (same id as ROY_REC in task-manager.py and
@@ -1264,10 +1270,46 @@ def post_comment(task_id, text):
         print(f"comment failed (non-fatal): {e}", file=sys.stderr)
 
 
-def cmd_create(fields, force=False, dry_run=False):
+# A CHILD OF AN APPROVED TASK (finding 20260924-agent-dispatch-590, 25 Sep 2026).
+# recPFxDmGX5pbonD2 (23 Viola Street EICR) was approved to raise one quote-request
+# email per contractor as tasks of their own, each with its own card. The fold
+# gate matched the new task to its open sibling on "quote request eicr" and
+# folded it in, so the emails could never be raised. `--parent <approved task>`
+# creates the child as its own task: the parent must be open and carry the marks
+# only a real approval leaves (Sent For Approval By and Approved At), the
+# refusals still run, only the fold is skipped, and the child goes to the gate
+# itself, because a child of an approved parent is not approved.
+APPROVED_OUTCOMES = ("Approved as-is", "Approved with minor edits")
+
+
+def parent_problem(parent_id):
+    """Why PARENT cannot vouch for a new child task, or ''."""
+    try:
+        pf = (_request("GET", f"/{TASKS}/{parent_id}?returnFieldsByFieldId=true") or {}).get("fields", {}) or {}
+    except RuntimeError as exc:
+        return f"the parent {parent_id} could not be read ({str(exc)[:120]})"
+    sel_ = lambda v: v.get("name", "") if isinstance(v, dict) else (v or "")
+    if sel_(pf.get(F["status"])) == "Completed":
+        return f"the parent {parent_id} is Completed"
+    if sel_(pf.get(F["approvalOutcome"])) not in APPROVED_OUTCOMES:
+        return f"the parent {parent_id} is not approved (outcome {sel_(pf.get(F['approvalOutcome'])) or 'empty'!r})"
+    if not pf.get(F["sentForApprovalBy"]) or not pf.get(F["approvedAt"]):
+        return f"the parent {parent_id} carries no real approval (no gate or no Approved At)"
+    return ""
+
+
+def cmd_create(fields, force=False, dry_run=False, parent=None):
     if F["name"] not in fields or not str(fields[F["name"]]).strip():
         print("fields JSON must carry the Task Name field " + F["name"], file=sys.stderr)
         return 1
+    if parent:
+        why = parent_problem(parent)
+        if why:
+            print(json.dumps({"action": "refused", "reason": f"--parent refused: {why}", "dryRun": dry_run}))
+            return 3
+        fields = dict(fields)
+        fields[F["desc"]] = (f"CHILD OF {parent} (an approved task whose job is to raise this one; "
+                             "it goes to the gate itself).\n\n" + str(fields.get(F["desc"]) or "")).strip()
 
     cache = load_scan_cache()
 
@@ -1301,6 +1343,7 @@ def cmd_create(fields, force=False, dry_run=False):
             print(json.dumps({"action": "refused", "reason": why,
                               "key": verdict["key"], "dryRun": dry_run}))
             return 3
+    if not force and not parent:
         rows = fetch_open_tasks()
         if not rows:
             # CONTROL: the board carries hundreds of open tasks at all times.
@@ -1871,11 +1914,13 @@ def main(argv):
             return 1
         return cmd_check(argv[2])
     if cmd == "create":
-        fields, force, dry = None, False, False
+        fields, force, dry, parent = None, False, False, None
         i = 1
         while i < len(argv):
             if argv[i] == "--fields-json":
                 fields = json.loads(argv[i + 1]); i += 2
+            elif argv[i] == "--parent":
+                parent = argv[i + 1]; i += 2
             elif argv[i] == "--force":
                 force = True; i += 1
             elif argv[i] == "--dry-run":
@@ -1885,7 +1930,7 @@ def main(argv):
         if fields is None:
             print("create needs --fields-json", file=sys.stderr)
             return 1
-        return cmd_create(fields, force=force, dry_run=dry)
+        return cmd_create(fields, force=force, dry_run=dry, parent=parent)
     print(f"unknown command {cmd}", file=sys.stderr)
     return 1
 

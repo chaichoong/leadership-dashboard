@@ -545,11 +545,11 @@ print(json.dumps([m.blocked_rest(t, ("parked", "2026-09-25T10:00:00.000Z"), now)
   it('a SIGN-IN wall also clears when the browser ledger shows the session live after the wall', () => {
     const r = py(`
 b = {"kind": "SIGN-IN", "subject": "www.topcashback.co.uk", "since": "2026-09-25T08:00:00.000Z", "finding": ""}
-m.ledger_session_verdict = lambda h, max_age_minutes=None: {"signedIn": True, "at": "2026-09-25T09:00:00.000Z", "url": "", "source": "ledger"}
+m.ledger_session_verdict = lambda h, max_age_minutes=None, **k: {"signedIn": True, "at": "2026-09-25T09:00:00.000Z", "url": "", "source": "ledger"}
 live = m.blocker_clear_reason(b, SITES, {})
-m.ledger_session_verdict = lambda h, max_age_minutes=None: {"signedIn": True, "at": "2026-09-25T07:00:00.000Z", "url": "", "source": "ledger"}
+m.ledger_session_verdict = lambda h, max_age_minutes=None, **k: {"signedIn": True, "at": "2026-09-25T07:00:00.000Z", "url": "", "source": "ledger"}
 before = m.blocker_clear_reason(b, SITES, {})
-m.ledger_session_verdict = lambda h, max_age_minutes=None: {"signedIn": False, "at": "2026-09-25T09:00:00.000Z", "url": "", "source": "ledger"}
+m.ledger_session_verdict = lambda h, max_age_minutes=None, **k: {"signedIn": False, "at": "2026-09-25T09:00:00.000Z", "url": "", "source": "ledger"}
 out = m.blocker_clear_reason(b, SITES, {})
 print(json.dumps([live, before, out]))`);
     expect(r[0]).toMatch(/session on www\.topcashback\.co\.uk was live at 2026-09-25T09:00/);
@@ -625,5 +625,44 @@ print(json.dumps({k: bool(m.work_handoff_problem(v, ks(v))) for k, v in cases.it
       expect(prompt, f).toMatch(/is CARRIED OUT and closed with complete .*NEVER submitted: a submit wipes Kevin's approval/);
       expect(prompt, f).toContain('block TASKID --kind SIGN-IN --subject <host> --why "<what you saw>" and stop.');
     }
+  });
+});
+
+describe('per-flat sign-ins (Utilita): the wall names its flat, and the sweep clears it when that flat is signed in', () => {
+  const UTIL = `
+SITES["my.utilita.co.uk"] = {"label": "Utilita", "login": True, "profiles": [
+  {"profile": "utilita-apt1", "label": "Apartment 1", "loginUrl": "https://my.utilita.co.uk/energy"},
+  {"profile": "utilita-apt2", "label": "Apartment 2", "loginUrl": "https://my.utilita.co.uk/energy"}]}
+`;
+  it('block needs --profile on a per-flat site, records it, and two flats are two walls', () => {
+    const r = py(UTIL + `
+rec("t1")
+a = run(m.cmd_block, {"task": "t1", "kind": "SIGN-IN", "subject": "my.utilita.co.uk", "why": "Signed out.", "finding": None})
+b = run(m.cmd_block, {"task": "t1", "kind": "SIGN-IN", "subject": "my.utilita.co.uk", "why": "Flat 1 signed out.", "finding": None, "profile": "utilita-apt1"})
+first = m.task_blocker(notes("t1"))
+c = run(m.cmd_block, {"task": "t1", "kind": "SIGN-IN", "subject": "my.utilita.co.uk", "why": "Flat 2 signed out.", "finding": None, "profile": "utilita-apt2"})
+print(json.dumps({"a": a["err"], "b": b["err"], "first": first, "second": m.task_blocker(notes("t1")), "lines": notes("t1").count("BLOCKER OPEN")}))`);
+    expect(r.a).toMatch(/keeps one sign-in per profile. Name which one: --profile utilita-apt1 \| utilita-apt2/);
+    expect(r.b).toBeNull();
+    expect(r.first).toMatchObject({ kind: 'SIGN-IN', subject: 'my.utilita.co.uk', profile: 'utilita-apt1', why: 'Flat 1 signed out.' });
+    expect(r.second.profile).toBe('utilita-apt2');
+    expect(r.lines).toBe(2);
+  });
+
+  it("the sweep walks that flat's own door and clears the wall when it is signed in; a dry read never walks", () => {
+    const r = py(UTIL + `
+b = {"kind": "SIGN-IN", "subject": "my.utilita.co.uk", "since": "2026-09-25T08:00:00.000Z", "finding": "", "profile": "utilita-apt1"}
+m.ledger_session_verdict = lambda *a, **k: None
+W = []
+def walk(host, profile=None, url=None):
+    W.append([host, profile, url]); return {"signedIn": True}
+live = m.blocker_clear_reason(b, SITES, {}, walk=walk)
+dry = m.blocker_clear_reason(b, SITES, {}, walk=None)
+out = m.blocker_clear_reason(b, SITES, {}, walk=lambda h, profile=None, url=None: {"signedIn": False})
+print(json.dumps([live, dry, out, W]))`);
+    expect(r[0]).toMatch(/session on my\.utilita\.co\.uk \(utilita-apt1\) is live/);
+    expect(r[1]).toBe('');
+    expect(r[2]).toBe('');
+    expect(r[3]).toEqual([['my.utilita.co.uk', 'utilita-apt1', 'https://my.utilita.co.uk/energy']]);
   });
 });
