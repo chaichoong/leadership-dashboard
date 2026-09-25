@@ -157,7 +157,7 @@ describe('signin-list and login: every sign-in the Robot sign-in app can open', 
 
   it('a new site signed in on the main profile keeps its sign-in page, so the app lists it next time', () => {
     withSites({ 'www.topcashback.co.uk': { label: 'TopCashback', login: true } }, (m, file) => {
-      expect(m.recordLoginSite('https://portal.example.co.uk/login', { label: 'Example portal' }))
+      expect(m.recordLoginSite('https://portal.example.co.uk/login', { label: 'Example portal', add: true }))
         .toEqual({ host: 'portal.example.co.uk', changed: true });
       const saved = JSON.parse(readFileSync(file, 'utf8'));
       expect(saved['portal.example.co.uk']).toEqual({ label: 'Example portal', login: true, loginUrl: 'https://portal.example.co.uk/login' });
@@ -181,7 +181,8 @@ describe('signin-list and login: every sign-in the Robot sign-in app can open', 
       expect(m.recordLoginSite('https://my.utilita.co.uk/energy', {}).changed).toBe(false);
       expect(JSON.parse(readFileSync(file, 'utf8'))['my.utilita.co.uk'].loginUrl).toBeUndefined();
       // A brand-new site on its own profile joins the allowlist without a main-profile page.
-      m.recordLoginSite('https://app.newthing.co.uk/', { profile: 'newthing', label: 'New thing' });
+      expect(m.recordLoginSite('https://app.newthing.co.uk/', { profile: 'newthing', label: 'New thing' }).changed).toBe(false);
+      m.recordLoginSite('https://app.newthing.co.uk/', { profile: 'newthing', label: 'New thing', add: true });
       expect(JSON.parse(readFileSync(file, 'utf8'))['app.newthing.co.uk']).toEqual({ label: 'New thing', login: true });
     });
   });
@@ -190,14 +191,14 @@ describe('signin-list and login: every sign-in the Robot sign-in app can open', 
     withSites({}, (m, file) => {
       expect(m.recordLoginSite('https://app.pingen.com/', {}).changed).toBe(false);
       // An http page still opens (agents' lines accept http), it is just never written.
-      const plain = m.recordLoginSite('http://plain.example.com/login', {});
+      const plain = m.recordLoginSite('http://plain.example.com/login', { add: true });
       expect(plain.changed).toBe(false);
       expect(plain.note).toMatch(/not https/);
       expect(m.recordLoginSite('http://www.topcashback.co.uk/account', {}).changed).toBe(false);
       expect(() => m.recordLoginSite('not a url', {})).toThrow(/not a web address/);
       // A pasted address carrying a name and password is refused, and the password is not echoed.
       let msg = '';
-      try { m.recordLoginSite('https://kevin:hunter2@portal.example.co.uk/login', {}); } catch (e) { msg = e.message; }
+      try { m.recordLoginSite('https://kevin:hunter2@portal.example.co.uk/login', { add: true }); } catch (e) { msg = e.message; }
       expect(msg).toMatch(/name or password/);
       expect(msg).not.toMatch(/hunter2/);
       expect(JSON.parse(readFileSync(file, 'utf8'))).toEqual({});
@@ -224,7 +225,7 @@ describe('signin-list and login: every sign-in the Robot sign-in app can open', 
     // It keeps the parent's short session: a GOV.UK service signs in through One Login, which
     // lapses in an hour, and without the flag the keep-alive raises a task for it every morning.
     withSites({}, (m, file) => {
-      m.recordLoginSite('https://www.council.gov.uk/login', { label: 'Council' });
+      m.recordLoginSite('https://www.council.gov.uk/login', { label: 'Council', add: true });
       const saved = JSON.parse(readFileSync(file, 'utf8'));
       expect(saved).toEqual({ 'www.council.gov.uk': { label: 'Council', login: true, loginUrl: 'https://www.council.gov.uk/login', shortSession: true } });
       expect(m.loadSites()['gov.uk'].login).toBe(false);
@@ -259,7 +260,7 @@ describe('signin-list and login: every sign-in the Robot sign-in app can open', 
     });
     // A shared platform domain is never a sibling: Amazon Business is its own site.
     withSites({}, (m, file) => {
-      expect(m.recordLoginSite('https://business.amazon.co.uk/signin', { label: 'Amazon Business' }).changed).toBe(true);
+      expect(m.recordLoginSite('https://business.amazon.co.uk/signin', { label: 'Amazon Business', add: true }).changed).toBe(true);
       expect(JSON.parse(readFileSync(file, 'utf8'))['business.amazon.co.uk'].loginUrl).toBe('https://business.amazon.co.uk/signin');
     });
   });
@@ -280,9 +281,28 @@ describe('signin-list and login: every sign-in the Robot sign-in app can open', 
     });
   });
 
+  // Fourth review: an agent line "SIGN-IN NEEDED: Strava (https://strava-login.example.net/)" is
+  // grouped under Strava by its label, and Strava has no page, so the app opened the agent's URL
+  // and `login` put that host on the list. Only "Add a new site" (add) puts a new host on it.
+  it('a sign-in from a task line never puts a new host on the list', () => {
+    withSites({ 'www.strava.com': { label: 'Strava', login: true } }, (m, file) => {
+      const before = readFileSync(file, 'utf8');
+      const r = m.recordLoginSite('https://strava-login.example.net/', {});
+      expect(r.changed).toBe(false);
+      expect(r.note).toMatch(/not on the robot's list.*Add a new site/);
+      expect(m.hostAllowed('https://strava-login.example.net/')).toBe(false);
+      // A parent that holds no login is not a way in either.
+      expect(m.recordLoginSite('https://portal.fylde.gov.uk/login', {}).changed).toBe(false);
+      expect(readFileSync(file, 'utf8')).toBe(before);
+      // An existing login site still gets its page from a task line.
+      expect(m.recordLoginSite('https://www.strava.com/login', {}).changed).toBe(true);
+      expect(JSON.parse(readFileSync(file, 'utf8'))['www.strava.com'].loginUrl).toBe('https://www.strava.com/login');
+    });
+  });
+
   it('a short session is inherited from any ancestor, and a bare platform domain is never a site', () => {
     withSites({}, (m, file) => {
-      m.recordLoginSite('https://idam.companieshouse.gov.uk/login', { label: 'Companies House account' });
+      m.recordLoginSite('https://idam.companieshouse.gov.uk/login', { label: 'Companies House account', add: true });
       expect(JSON.parse(readFileSync(file, 'utf8'))['idam.companieshouse.gov.uk'].shortSession).toBe(true);
       const g = m.recordLoginSite('https://google.com/', { add: true });
       expect(g.changed).toBe(false);
@@ -314,17 +334,17 @@ print(json.dumps([m.signin_domain(h) for h in json.loads(sys.argv[1])]))`, JSON.
 
   it('a sites file that will not parse is refused, never rewritten from one entry', () => {
     withSites('{ "www.loom.com": { "label": "Loom", ', (m, file) => {
-      expect(() => m.recordLoginSite('https://portal.example.co.uk/login', {})).toThrow();
+      expect(() => m.recordLoginSite('https://portal.example.co.uk/login', { add: true })).toThrow();
       expect(readFileSync(file, 'utf8')).toBe('{ "www.loom.com": { "label": "Loom", ');
     });
     // An empty file reads as an empty list, the way loadSites reads it.
     withSites('', (m, file) => {
-      m.recordLoginSite('https://portal.example.co.uk/login', {});
+      m.recordLoginSite('https://portal.example.co.uk/login', { add: true });
       expect(Object.keys(JSON.parse(readFileSync(file, 'utf8')))).toEqual(['portal.example.co.uk']);
     });
     // A missing file is a first run: the site is written.
     withSites(undefined, (m, file) => {
-      m.recordLoginSite('https://portal.example.co.uk/login', {});
+      m.recordLoginSite('https://portal.example.co.uk/login', { add: true });
       expect(Object.keys(JSON.parse(readFileSync(file, 'utf8')))).toEqual(['portal.example.co.uk']);
     });
   });

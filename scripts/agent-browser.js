@@ -43,7 +43,7 @@
  * is auditable after the fact rather than trusted at the time.
  *
  * USAGE
- *   node scripts/agent-browser.js login   --url URL [--profile NAME] [--label NAME] [--add]
+ *   node scripts/agent-browser.js login   --url URL [--profile NAME] [--label NAME] [--add]   --add: a NEW site, Kevin's choice
  *   node scripts/agent-browser.js signin-list [--for URL]              every sign-in the Robot sign-in app can open
  *   node scripts/agent-browser.js session --site HOST [--shot PATH]   is the robot signed in there? (walks the door)
  *   node scripts/agent-browser.js read    --url URL [--shot OUT.png] [--wait MS] [--wait-for SELECTOR] [--max-text N]
@@ -345,6 +345,13 @@ function recordLoginSite(url, { label, profile, add } = {}) {
   if (owner && !owner.login && ownerKey === host && BUILTIN_SITES[host]) {
     return Object.assign(kept, { note: `${host} is on the list as a read-only site, so the sign-in was not recorded.` });
   }
+  // Only Kevin adds a site (fourth review, a gap older than this change): a
+  // task line naming a host nothing owns used to put that host on the list
+  // before the window even opened, so a misled agent could steer his sign-in
+  // to a stranger. Without `add`, only an existing login site is updated.
+  if (!add && !(owner && owner.login)) {
+    return Object.assign(kept, { note: `${host} is not on the robot's list, so the sign-in was not recorded. Add it with "Add a new site" in the Robot sign-in app.` });
+  }
   // An http page still opens (agents' lines take http too), but is never written.
   if (u.protocol !== 'https:') return Object.assign(kept, { note: `${url} is not https, so it was not recorded on the allowlist.` });
   // A parent that holds no login (gov.uk) is not turned into one: the new site
@@ -355,7 +362,7 @@ function recordLoginSite(url, { label, profile, add } = {}) {
   // A bare platform domain would let the robot into every service under it
   // (google.com: Gmail, Drive). The service's own address is the site.
   if (SIGNIN_SHARED_DOMAINS.has(key)) {
-    return Object.assign(kept, { note: `${key} holds many separate sign-ins, so it was not recorded. Add the service's own address instead (for example mail.google.com).` });
+    return Object.assign(kept, { note: `${key} holds many separate sign-ins, so it was not recorded. Add the exact service's address instead of ${key}.` });
   }
   // Short session from ANY ancestor: idam.companieshouse.gov.uk sits under
   // companieshouse.gov.uk, which has no flag, and under gov.uk, which has.
@@ -906,7 +913,9 @@ async function main() {
     const url = arg(rest, 'url');
     if (!url) die('--url is required');
     if (!PROFILE_NAME_RE.test(profile)) die(`--profile ${profile} is not a plain folder name.`);
-    const rec = recordLoginSite(url, { label: arg(rest, 'label', null), profile, add: rest.includes('--add') });
+    // --add is a flag of its own, never the value of another (a label "--add").
+    const add = rest.some((a, i) => a === '--add' && !['--url', '--profile', '--label'].includes(rest[i - 1]));
+    const rec = recordLoginSite(url, { label: arg(rest, 'label', null), profile, add });
     const host = new URL(url).hostname.toLowerCase();
     if (rec.changed) console.log(`Recorded ${rec.host} on the allowlist.`);
     if (rec.note) console.log('NOTE: ' + rec.note);                   // the Robot sign-in app shows NOTE lines
