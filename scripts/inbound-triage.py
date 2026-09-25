@@ -78,6 +78,8 @@ distinct from the send key by design), Airtable PAT at
 ~/.config/od/airtable_pat. Read from file, never printed, never in argv.
 """
 
+import base64
+import io
 import json
 import os
 import random
@@ -92,7 +94,7 @@ from datetime import date, datetime, timedelta
 from pathlib import Path
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from agent_email_format import PROPERTY_SENDER  # noqa: E402  Roy's inbox, info@
+from agent_email_format import PROPERTY_SENDER, PERSONAL_SENDER  # noqa: E402  Roy's inbox, info@
 
 WORKER_URL = "https://drive-upload.kevinbrittain.workers.dev"
 
@@ -102,7 +104,10 @@ WORKER_URL = "https://drive-upload.kevinbrittain.workers.dev"
 # first live run, 24 Aug 2026: kevinbrittain@gmail.com is a DIFFERENT mailbox
 # (273 property-address labels, no taxonomy) and is out of triage scope.
 TRIAGE_ACCOUNT = "kevin@runpreneur.org.uk"
-SEARCH_ACCOUNTS = {TRIAGE_ACCOUNT, "info@agilelets.co.uk"}
+# kevinbrittain@gmail.com joined 25 Sep 2026: the PIB renewal sat there, and the
+# agent could say only that "the email body cannot be read without your session".
+# The worker already holds its consent (it is the default sender).
+SEARCH_ACCOUNTS = {TRIAGE_ACCOUNT, "info@agilelets.co.uk", PERSONAL_SENDER}
 
 TRIAGE_KEY_FILE = Path.home() / ".config/od/gmail_triage_key"
 AIRTABLE_PAT_FILE = Path.home() / ".config/od/airtable_pat"
@@ -2287,6 +2292,12 @@ def cmd_search(q, limit, account=None):
     rows = []
     for m in msgs[:limit]:
         row = {k: m.get(k) for k in keep if m.get(k) is not None}
+        # What is attached, so an agent knows there is something to read
+        # (25 Sep 2026: the search dropped it and every agent was blind to it).
+        atts = [{"filename": a.get("filename"), "mimeType": a.get("mimeType"), "size": a.get("size")}
+                for a in (m.get("attachments") or [])]
+        if atts:
+            row["attachments"] = atts
         ts = int(m.get("internalDate") or 0)
         if ts:
             row["when"] = datetime.fromtimestamp(ts / 1000).strftime("%Y-%m-%d %H:%M")
@@ -2294,6 +2305,101 @@ def cmd_search(q, limit, account=None):
     print(json.dumps({"q": q.strip(), "count": len(msgs), "shown": len(rows),
                       "truncated": truncated or len(msgs) > limit,
                       "messages": rows}, indent=1))
+
+
+# ══════════════════════════════════════════════════════════════════════════
+# attachments (Kevin, 25 Sep 2026)
+# ══════════════════════════════════════════════════════════════════════════
+# "There's a major bottleneck with the AI agents where they can't read
+# attachments or download attachments to emails. Any agent who's accessing the
+# Gmail needs to have that facility." The worker has served /gmail/attachment
+# since 18 Sep (the Payment Run uses it), but the agents' route into Gmail, this
+# script's `search`, dropped the attachment list and had no way to fetch one:
+# the Close Brothers credit agreement and the PIB policy schedule were PDFs no
+# agent could open. This saves a message's attachments where the agent can read
+# them (PDF, image and document files open in its Read tool) and writes a PDF's
+# text beside it. Documents and images only, capped in size: an executable or an
+# archive is listed and never saved, and nothing is ever opened as a program.
+ATTACH_DIR = Path.home() / "knowledge-os" / "attachments" / "inbound"
+ATTACH_MAX_BYTES = 10 * 1024 * 1024
+ATTACH_MAX_PER_RUN = 12
+ATTACH_ALLOWED = {".pdf", ".doc", ".docx", ".xls", ".xlsx", ".csv", ".txt", ".rtf", ".odt", ".ods",
+                  ".png", ".jpg", ".jpeg", ".gif", ".heic", ".tif", ".tiff", ".eml"}
+
+
+def safe_attachment_name(name):
+    """A plain file name: no folders, no leading dot, nothing odd."""
+    base = os.path.basename(str(name or "").replace("\\", "/")).strip()
+    base = re.sub(r"[^\w .,()&+-]", "_", base).lstrip(". ")[:120]
+    return base or "attachment"
+
+
+def attachment_pdf_text(raw, max_pages=10):
+    """(text, error) of a PDF's first pages; ('', why) when it has none."""
+    try:
+        import pypdf
+    except ImportError:
+        return "", "pypdf not installed"
+    try:
+        reader = pypdf.PdfReader(io.BytesIO(raw))
+        text = "\n".join((p.extract_text() or "") for p in reader.pages[:max_pages]).strip()
+        return text, (None if text else "no text layer (a scan): open the PDF itself")
+    except Exception as exc:  # noqa: BLE001 — any malformed PDF is reported, not fatal
+        return "", "pdf read failed: %s" % str(exc)[:120]
+
+
+def cmd_attachments(q, msg_id=None, account=None, out_dir=None):
+    """Save the attachments of the messages a Gmail query finds (or of one of
+    them, --id) and print where each one is."""
+    if not q or not q.strip():
+        fail("attachments needs --q <gmail query> (the one that found the message); "
+             "--id <message id> narrows it to one message")
+    if account and account not in SEARCH_ACCOUNTS:
+        fail("attachments --account must be one of: " + ", ".join(sorted(SEARCH_ACCOUNTS)))
+    msgs, _ = worker_list(q=q.strip(), max_pages=1, account=account)
+    if msg_id:
+        msgs = [m for m in msgs if m.get("id") == msg_id]
+        if not msgs:
+            fail(f"no message {msg_id} among those the query found: search again and use its id")
+    root = Path(out_dir).expanduser() if out_dir else ATTACH_DIR
+    saved, fetched = [], 0
+    for m in msgs:
+        for a in (m.get("attachments") or []):
+            name = safe_attachment_name(a.get("filename"))
+            row = {"messageId": m.get("id"), "subject": m.get("subject"), "filename": name,
+                   "mimeType": a.get("mimeType"), "bytes": a.get("size")}
+            ext = os.path.splitext(name)[1].lower()
+            if ext not in ATTACH_ALLOWED:
+                saved.append(dict(row, skipped="not a document or image; never saved"))
+                continue
+            if (a.get("size") or 0) > ATTACH_MAX_BYTES:
+                saved.append(dict(row, skipped="over %d MB" % (ATTACH_MAX_BYTES // 1048576)))
+                continue
+            if fetched >= ATTACH_MAX_PER_RUN:
+                saved.append(dict(row, skipped="over %d attachments this run; narrow with --id" % ATTACH_MAX_PER_RUN))
+                continue
+            fetched += 1
+            payload = {"messageId": m.get("id"), "attachmentId": a.get("attachmentId")}
+            if account:
+                payload["account"] = account
+            data = (worker_post("/gmail/attachment", payload) or {}).get("data") or ""
+            raw = base64.urlsafe_b64decode(data + "=" * (-len(data) % 4))
+            folder = root / safe_attachment_name(m.get("id"))
+            folder.mkdir(parents=True, exist_ok=True)
+            path = folder / name
+            path.write_bytes(raw)
+            row.update({"path": str(path), "bytes": len(raw)})
+            if ext == ".pdf":
+                text, err = attachment_pdf_text(raw)
+                if text:
+                    tpath = folder / (name + ".txt")
+                    tpath.write_text(text)
+                    row.update({"textPath": str(tpath), "textChars": len(text)})
+                if err:
+                    row["note"] = err
+            saved.append(row)
+    print(json.dumps({"q": q.strip(), "account": account or TRIAGE_ACCOUNT, "messages": len(msgs),
+                      "attachments": saved}, indent=1))
 
 
 def main(argv):
@@ -2348,6 +2454,8 @@ def main(argv):
         return cmd_matters()
     elif cmd == "search":
         cmd_search(opt("--q"), int(opt("--limit", "20")), opt("--account"))
+    elif cmd == "attachments":
+        cmd_attachments(opt("--q"), opt("--id"), opt("--account"), opt("--out"))
     elif cmd == "health":
         return cmd_health()
     elif cmd == "slot-record":

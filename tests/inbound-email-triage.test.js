@@ -99,10 +99,11 @@ describe('triage stays triage-only', () => {
         expect(worker).toContain('https://www.googleapis.com/auth/gmail.modify');
     });
 
-    it('the script only ever calls the three read/label endpoints, with its own key', () => {
+    it('the script only ever calls the read/label endpoints, with its own key', () => {
         const endpoints = [...script.matchAll(/worker_post\("([^"]+)"/g)].map(m => m[1]);
         expect(endpoints.length).toBeGreaterThan(0);
-        const allowed = new Set(['/gmail/labels', '/gmail/list', '/gmail/modify']);
+        // /gmail/attachment is read-only (25 Sep 2026: agents read email attachments).
+        const allowed = new Set(['/gmail/labels', '/gmail/list', '/gmail/modify', '/gmail/attachment']);
         for (const e of endpoints) expect(allowed.has(e), `unexpected worker endpoint ${e}`).toBe(true);
         expect(script).toContain('gmail_triage_key');
         expect(script).not.toContain('gmail_send_key');
