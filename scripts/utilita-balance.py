@@ -300,8 +300,10 @@ def parse_energy(text):
 AT_DOOR = re.compile(r"oauthSignIn|seclogin|/(?:log-?in|sign-?in|signin|login|auth)(?:/|\?|$)", re.I)
 
 
-def signed_in(url, password_fields):
-    if password_fields is None or int(password_fields) != 0:
+def signed_in(url, password_fields, bot_check=False):
+    # bot_check: agent-browser.js's own isBotCheck on the page (25 Sep 2026);
+    # a "verify you are human" page is never a signed-in dashboard.
+    if bot_check or password_fields is None or int(password_fields) != 0:
         return False
     return not AT_DOOR.search(url or "")
 
@@ -335,7 +337,9 @@ def meter_problem(pinned, seen):
 # and waitForProfile's pgrep then saw that orphan for ever, so every later run
 # also timed out and added another orphan. start_new_session + killpg fixes the
 # orphan; the longer timeout stops the false alarm.
-READ_TIMEOUT_S = 11 * 60
+# Since 25 Sep 2026 a read also waits while Kevin holds the profile for a
+# sign-in (up to 20 minutes) before the 10-minute profile wait, so 32 minutes.
+READ_TIMEOUT_S = 32 * 60
 
 
 def read_account(acct, node=None):
@@ -391,7 +395,7 @@ def read_account(acct, node=None):
         row["problem"] = "the browser returned something unreadable"
         return row
 
-    row["signedIn"] = signed_in(data.get("url") or "", data.get("passwordFields"))
+    row["signedIn"] = signed_in(data.get("url") or "", data.get("passwordFields"), bool(data.get("botCheck")))
     if not row["signedIn"]:
         row["problem"] = "SIGN-IN NEEDED"
         return row

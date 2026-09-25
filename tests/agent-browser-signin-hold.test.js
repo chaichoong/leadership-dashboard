@@ -28,6 +28,14 @@ const made = [];
 afterAll(() => { for (const d of made) rmSync(d, { recursive: true, force: true }); });
 const sleep = (ms) => new Promise(r => setTimeout(r, ms));
 const running = (dir) => spawnSync('pgrep', ['-f', `user-data-dir=${dir}`]).status === 0;
+// If a fix is ever removed, the step under test launches a real Chrome on the
+// throwaway profile: never leave it running after the test.
+const reap = (dir) => spawnSync('pkill', ['-9', '-f', `user-data-dir=${dir}`]);
+async function until(fn, ms) {
+  const end = Date.now() + ms;
+  while (Date.now() < end) { if (fn()) return true; await sleep(100); }
+  return fn();
+}
 
 // A throwaway HOME: the robot profile, its ledger and its hold all live under it.
 function home() {
@@ -64,6 +72,11 @@ describe('Kevin\'s sign-in holds the robot profile', () => {
     expect(b.signinHoldActive(dir, Date.now() + b.HOLD_MAX_MS + 1000)).toBe(false);
     b.releaseSigninHold(dir);
     expect(existsSync(dir + '.signin-hold')).toBe(false);
+    // Only the sign-in that took the hold lifts it: a second sign-in's hold survives the first one ending.
+    writeFileSync(dir + '.signin-hold', JSON.stringify({ pid: process.ppid, at: Date.now() }));
+    b.releaseSigninHold(dir);
+    expect(existsSync(dir + '.signin-hold')).toBe(true);
+    rmSync(dir + '.signin-hold');
     // A sign-in that crashed leaves its file behind; a dead owner frees the profile.
     const dead = spawnSync('true').pid;
     writeFileSync(dir + '.signin-hold', JSON.stringify({ pid: dead, at: Date.now() }));
@@ -85,8 +98,74 @@ describe('Kevin\'s sign-in holds the robot profile', () => {
       expect(running(dir)).toBe(false);    // and no Chrome on the profile
     } finally {
       child.kill('SIGKILL');
+      reap(dir);
     }
   }, 15000);
+
+  it('a step already waiting for the profile does not launch if a sign-in takes the hold meanwhile (the race)', async () => {
+    const { h, dir, sites } = home();
+    // Another step holds the profile for 3 seconds; ours queues behind it with no hold in sight.
+    const other = spawn('sh', ['-c', 'sleep 3; :', `--user-data-dir=${dir}`], { stdio: 'ignore' });
+    await until(() => running(dir), 2000);
+    const child = spawn(process.execPath, [SCRIPT, 'read', '--url', 'https://www.example.com/'], {
+      env: { ...process.env, HOME: h, AGENT_BROWSER_SITES_FILE: sites }, stdio: 'ignore',
+    });
+    let exited = false;
+    child.on('exit', () => { exited = true; });
+    try {
+      await sleep(1000);
+      // Kevin starts a sign-in while our step is still queued.
+      writeFileSync(dir + '.signin-hold', JSON.stringify({ pid: process.pid, at: Date.now() }));
+      await sleep(5000);                   // the other step has ended; the profile is free
+      expect(exited).toBe(false);
+      expect(running(dir)).toBe(false);    // our step re-checked the hold and did not launch
+    } finally {
+      child.kill('SIGKILL');
+      other.kill('SIGKILL');
+      reap(dir);
+    }
+  }, 20000);
+
+  it('an agent\'s headless Chrome is never taken for Kevin\'s window', async () => {
+    const { dir } = home();
+    const headless = spawn('sh', ['-c', 'sleep 3; :', '--headless', `--user-data-dir=${dir}`], { stdio: 'ignore' });
+    try {
+      await until(() => b.profileProcs(dir).length > 0, 2000);
+      expect(b.profileProcs(dir).length).toBe(1);
+      expect(b.plainWindowOpen(dir)).toBe(false);
+    } finally {
+      headless.kill('SIGKILL');
+    }
+    const plain = spawn('sh', ['-c', 'sleep 3; :', `--user-data-dir=${dir}`], { stdio: 'ignore' });
+    try {
+      await until(() => b.profileProcs(dir).length > 0, 2000);
+      expect(b.plainWindowOpen(dir)).toBe(true);
+    } finally {
+      plain.kill('SIGKILL');
+    }
+  });
+
+  it('a window that never opens is reported as a failure, and the hold is released', async () => {
+    const { h, dir, sites } = home();
+    const bin = join(h, 'bin');
+    mkdirSync(bin);
+    writeFileSync(join(bin, 'open'), '#!/bin/sh\nexit 0\n');   // Chrome never shows a window
+    chmodSync(join(bin, 'open'), 0o755);
+    const r = await new Promise(resolveRun => {
+      const c = spawn(process.execPath, [SCRIPT, 'login', '--url', 'https://www.example.com/'], {
+        env: { ...process.env, HOME: h, AGENT_BROWSER_SITES_FILE: sites, PATH: `${bin}:${process.env.PATH}`,
+               AGENT_BROWSER_WINDOW_OPEN_MS: '3000' }, stdio: ['ignore', 'pipe', 'pipe'] });
+      let err = '';
+      c.stderr.on('data', d => { err += d; });
+      c.on('exit', code => resolveRun({ code, err }));
+    });
+    expect(r.code).not.toBe(0);
+    expect(r.err).toMatch(/the sign-in window did not open, so nothing was signed in/);
+    expect(existsSync(dir + '.signin-hold')).toBe(false);
+    // And no login was written to the robot's log.
+    const log = join(h, 'knowledge-os', 'logs', 'agent-browser', 'runs.jsonl');
+    expect(existsSync(log) ? readFileSync(log, 'utf8') : '').not.toMatch(/"cmd":"login"/);
+  }, 30000);
 
   it('login takes the hold BEFORE the agent\'s step ends, opens the window after it, and releases on close', async () => {
     const { h, dir, sites } = home();
@@ -102,10 +181,9 @@ echo "$(date +%s) $d" >> ${JSON.stringify(log)}
 nohup sh -c 'sleep 3; :' "$d" >/dev/null 2>&1 &
 `);
     chmodSync(join(bin, 'open'), 0o755);
-    // The agent's step, already running on the profile, ends in 3 seconds.
-    const step = spawn('sh', ['-c', 'sleep 3; :', `--user-data-dir=${dir}`], { stdio: 'ignore' });
-    await sleep(300);
-    expect(running(dir)).toBe(true);
+    // The agent's step, already running on the profile, ends in 6 seconds.
+    const step = spawn('sh', ['-c', 'sleep 6; :', `--user-data-dir=${dir}`], { stdio: 'ignore' });
+    expect(await until(() => running(dir), 2000)).toBe(true);
     const child = spawn(process.execPath, [SCRIPT, 'login', '--url', 'https://www.example.com/'], {
       env: { ...process.env, HOME: h, AGENT_BROWSER_SITES_FILE: sites, PATH: `${bin}:${process.env.PATH}` },
       stdio: ['ignore', 'pipe', 'pipe'],
@@ -115,9 +193,9 @@ nohup sh -c 'sleep 3; :' "$d" >/dev/null 2>&1 &
     child.stderr.on('data', d => { out += d; });
     const done = new Promise(r => child.on('exit', code => r(code)));
     try {
-      await sleep(1200);
       // The hold stands while the step is still running, and no window yet.
-      expect(b.signinHoldActive(dir)).toBe(true);
+      expect(await until(() => b.signinHoldActive(dir), 3000)).toBe(true);
+      expect(running(dir)).toBe(true);
       expect(existsSync(log)).toBe(false);
       const code = await done;
       expect(code).toBe(0);

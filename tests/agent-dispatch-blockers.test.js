@@ -88,20 +88,36 @@ print(json.dumps({"a": a["err"], "b": b["err"], "c": c["err"], "blk": m.task_blo
     const dir = mkdtempSync(tmpdir() + '/od-botcheck-');
     const ledger = dir + '/runs.jsonl';
     const now = new Date();
+    // Today's shape: the session walk passed, then the agent's own READ met the wall.
     writeFileSync(ledger, [
-      JSON.stringify({ at: new Date(now - 3 * 3600e3).toISOString(), cmd: 'session', site: 'www.topcashback.co.uk', url: 'https://www.topcashback.co.uk/', signedIn: false, botCheck: true, profile: 'default' }),
-      JSON.stringify({ at: new Date(now - 26 * 3600e3).toISOString(), cmd: 'session', site: 'namecheap.com', url: 'https://namecheap.com/', signedIn: false, botCheck: true, profile: 'default' }),
+      JSON.stringify({ at: new Date(now - 4 * 3600e3).toISOString(), cmd: 'session', site: 'www.topcashback.co.uk', url: 'https://www.topcashback.co.uk/home/', signedIn: true, profile: 'default' }),
+      JSON.stringify({ at: new Date(now - 3 * 3600e3).toISOString(), cmd: 'read', url: 'https://www.topcashback.co.uk/logon/', botCheck: true, profile: 'default' }),
+    ].join('\n') + '\n');
+    const old = dir + '/old.jsonl';     // a bot check more than a day old no longer stands
+    writeFileSync(old, JSON.stringify({ at: new Date(now - 26 * 3600e3).toISOString(), cmd: 'session', site: 'www.topcashback.co.uk', url: 'https://www.topcashback.co.uk/', signedIn: false, botCheck: true, profile: 'default' }) + '\n');
+    const gone = dir + '/gone.jsonl';   // a later clean read means the check has gone
+    writeFileSync(gone, [
+      JSON.stringify({ at: new Date(now - 3 * 3600e3).toISOString(), cmd: 'read', url: 'https://www.topcashback.co.uk/logon/', botCheck: true, profile: 'default' }),
+      JSON.stringify({ at: new Date(now - 1 * 3600e3).toISOString(), cmd: 'read', url: 'https://www.topcashback.co.uk/logon/', profile: 'default' }),
     ].join('\n') + '\n');
     const r = py(`
 m.BROWSER_LEDGER = ${JSON.stringify(ledger)}
 rec("t1")
 a = run(m.cmd_block, {"task": "t1", "kind": "SIGN-IN", "subject": "www.topcashback.co.uk", "why": "Stuck on verify you are human.", "finding": None})
-b = run(m.cmd_block, {"task": "t1", "kind": "TOOL", "subject": "Cloudflare DNS needs an API key with DNS edit", "why": "Bot check on the dashboard.", "finding": "x"})
-print(json.dumps({"a": a["err"], "blk": m.task_blocker(notes("t1")), "b": b["err"]}))`);
-    expect(r.a).toMatch(/showed the robot a bot check/);
+blk = m.task_blocker(notes("t1"))
+m.BROWSER_LEDGER = ${JSON.stringify(old)}
+rec("t2")
+c = run(m.cmd_block, {"task": "t2", "kind": "SIGN-IN", "subject": "www.topcashback.co.uk", "why": "Signed out.", "finding": None})
+m.BROWSER_LEDGER = ${JSON.stringify(gone)}
+rec("t3")
+d = run(m.cmd_block, {"task": "t3", "kind": "SIGN-IN", "subject": "www.topcashback.co.uk", "why": "Signed out.", "finding": None})
+print(json.dumps({"a": a["err"], "blk": blk, "c": c["err"], "d": d["err"]}))`);
+    expect(r.a).toMatch(/showed the robot a bot check \("verify you are human", read at/);
     expect(r.a).toMatch(/not a SIGN-IN wall/);
+    expect(r.a).toMatch(/block t1 --kind KEVIN --subject credential/);   // a route block accepts, not a circle
     expect(r.blk).toBeNull();          // nothing written
-    expect(r.b).toMatch(/is not a finding in the queue/);   // TOOL is the route offered, and it still checks its finding
+    expect(r.c).toBeNull();            // 26 hours old: SIGN-IN is allowed again
+    expect(r.d).toBeNull();            // cleared by a newer clean read
   });
 
   it('KEVIN only for the steps that are his by rule; "get the quote" is not one', () => {

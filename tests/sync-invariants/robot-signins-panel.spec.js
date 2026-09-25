@@ -66,6 +66,17 @@ test.describe('Robot sign-ins panel on a Mac', () => {
     await expect(panel).toContainText('No sign-in page on file yet, so not listed: Evernote, Strava.');
   });
 
+  test('a site that stops the robot with a bot check is shown, never counted as a sign-in, and has no button (25 Sep 2026)', async ({ page }) => {
+    const panel = await open(page, [signinRow([line('Pingen (letters)', 'app.pingen.com', 'signed-in'),
+      line('dash.cloudflare.com', 'dash.cloudflare.com', 'bot-check', { how: 'robot check' })])]);
+    await expect(panel).toContainText('All good. 1 signed in, 0 sign in when a task needs them, 1 stops the robot with a bot check (a sign-in cannot fix it).');
+    await expect(page.locator('#signinsCount')).toHaveText('0');
+    const bot = panel.locator('[data-rs-line="bot-check"]');
+    await expect(bot).toContainText('dash.cloudflare.com');
+    await expect(bot).toContainText('Signing in will not help.');
+    await expect(bot.locator('a')).toHaveCount(0);
+  });
+
   test('all good is one line, and nothing asks for a tap until the list is opened', async ({ page }) => {
     const panel = await open(page, [signinRow([line('Pingen (letters)', 'app.pingen.com', 'signed-in'),
       line('HMRC', 'tax.service.gov.uk', 'on-demand', { at: null })])]);

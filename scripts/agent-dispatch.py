@@ -5558,6 +5558,52 @@ def ledger_session_verdict(host, max_age_minutes=SIGNIN_LEDGER_FRESH_MINUTES, pa
             "url": str(newest.get("url") or ""), "at": str(newest["at"]), "source": "ledger"}
 
 
+def ledger_bot_check(hosts, max_age_minutes=BOT_CHECK_FRESH_MINUTES, path=None, now=None, profile="default"):
+    """The newest browser look at any of HOSTS (a `session` line by its site or
+    landing, or a `read` line by the page's host), if it showed the robot a bot
+    check and is under max_age_minutes old; else None. The newest look decides:
+    a later clean read of the same site means the check has gone. Agents meet
+    the wall in their own reads as often as in a session walk (25 Sep 2026)."""
+    want = {str(h or "").lower() for h in hosts if h}
+    newest = None
+    try:
+        with open(path or BROWSER_LEDGER) as fh:
+            for line in fh:
+                try:
+                    rec = json.loads(line)
+                except ValueError:
+                    continue
+                if not isinstance(rec, dict) or rec.get("cmd") not in ("session", "read"):
+                    continue
+                if (rec.get("profile") or "default") != profile:
+                    continue
+                try:
+                    url_host = (urllib.parse.urlsplit(str(rec.get("url") or "")).hostname or "").lower()
+                except ValueError:
+                    url_host = ""
+                if url_host in want or str(rec.get("site") or "").lower() in want:
+                    newest = rec
+    except OSError:
+        return None
+    if not newest or not newest.get("botCheck") or not newest.get("at"):
+        return None
+    try:
+        at = datetime.fromisoformat(str(newest["at"]).replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if (now or datetime.now(timezone.utc)) - at > timedelta(minutes=max_age_minutes):
+        return None
+    return {"at": str(newest["at"]), "url": str(newest.get("url") or ""), "cmd": newest.get("cmd")}
+
+
+BOT_CHECK_ROUTE = ("A sign-in does not remove it and the robot never clicks one, so this is not a "
+                   "SIGN-IN wall. If the step needs Kevin's own browser or a key only he can make "
+                   "(an API key with the right permission), block it as KEVIN:\n"
+                   "         python3 scripts/agent-dispatch.py block TASK --kind KEVIN --subject credential "
+                   "--why \"<site> stops the robot with a bot check; <the exact step, or the key it needs>\"\n"
+                   "       Block as TOOL only when code in this repo can build another route.")
+
+
 def session_walk(host, timeout=SIGNIN_WALK_TIMEOUT, profile=None, url=None):
     """Walk HOST's sign-in door now (`agent-browser.js session --site HOST`).
     {"signedIn", "url", "at", "source": "walk"}, or {"error": why} when the
@@ -5634,6 +5680,11 @@ def signin_verify_line(output, sites=None, check=None):
     if v.get("error"):
         print(f"NOTE: sign-in line for {host} kept unverified — {v['error'][:160]}", file=sys.stderr)
         return "", mark_signin_unverified(output, v["error"])
+    if v.get("botCheck"):
+        # Kevin would be asked for a sign-in that cannot help (review, 25 Sep 2026).
+        return (f"its SIGN-IN NEEDED line names {m['site']!r}, but {host} stops the robot with a bot "
+                f"check (\"verify you are human\", seen at {str(v.get('at') or '')[:16]}). "
+                + BOT_CHECK_ROUTE), output
     if not v.get("signedIn"):
         return "", output
     label = sites[host].get("label") or host
@@ -6370,14 +6421,10 @@ def cmd_block(args):
             # you are human" was filed as SIGN-IN, Kevin's sign-in could not
             # clear it, and the task went round the loop again).
             prof = getattr(args, "profile", None) or "default"
-            seen = (ledger_session_verdict(subject, BOT_CHECK_FRESH_MINUTES, profile=prof)
-                    or ledger_session_verdict(entry, BOT_CHECK_FRESH_MINUTES, profile=prof))
-            if seen and seen.get("botCheck"):
+            seen = ledger_bot_check([subject, entry, host], profile=prof)
+            if seen:
                 sys.exit(f"ERROR: {entry} showed the robot a bot check (\"verify you are human\", "
-                         f"{seen['at']}). A sign-in does not remove it and the robot never clicks one, "
-                         "so this is not a SIGN-IN wall. If the job has another route (an API key with the "
-                         "right permission), block as TOOL naming what the route needs; if a person has "
-                         "to do the step in a normal browser, block as KEVIN.")
+                         f"{seen['cmd']} at {seen['at']}). " + BOT_CHECK_ROUTE.replace("TASK", args.task))
     if kind == "KEVIN" and subject.lower() not in KEVIN_ONLY_REASONS:
         sys.exit(f"ERROR: a KEVIN wall is one of: {', '.join(KEVIN_ONLY_REASONS)}. "
                  f"{subject!r} is not: work that an agent could do stays the agent's, "

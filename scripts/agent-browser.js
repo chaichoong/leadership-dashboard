@@ -58,7 +58,7 @@
  *     "steps": [
  *       {"do":"goto",   "url":"https://..."},
  *       {"do":"fill",   "selector":"#ref",  "value":"123456"},
- *       {"do":"select", "selector":"#type", "value":"arrears"},
+ *       {"do":"select", "selector":"#type", "value":"arrears"},   (value code or the label shown; a miss lists the options)
  *       {"do":"check",  "selector":"#agree"},
  *       {"do":"upload", "selector":"#pick", "file":"~/knowledge-os/attachments/ast.pdf"},
  *       {"do":"press",  "selector":"#email", "key":"Enter"},
@@ -568,9 +568,18 @@ function persistSessionCookies(dir, ttlMs = 60 * 60 * 1000) {
 // again. The robot never clicks one of these, and a sign-in does not remove
 // it, so it is its own verdict: botCheck.
 const BOT_CHECK_TITLE_RE = /^\s*just a moment/i;
-const BOT_CHECK_TEXT_RE = /verify you are (?:a )?human|performing security verification|checking if the site connection is secure|checking your browser before accessing/i;
+const BOT_CHECK_TEXT_RE = /verify you are (?:a )?human|performing security verification|checking if the site connection is secure|checking your browser before accessing|make sure you(?:'|’)re not a robot|press (?:&|and) hold to confirm/i;
 function isBotCheck(text = '', title = '') {
   return BOT_CHECK_TITLE_RE.test(String(title || '')) || BOT_CHECK_TEXT_RE.test(String(text || '').slice(0, 2000));
+}
+// A challenge that clears on its own ("Just a moment..." for a few seconds)
+// is not a wall. Give it up to maxMs before a verdict is taken (review,
+// 25 Sep 2026); a page with no challenge costs one extra read.
+async function settleBotCheck(page, maxMs = 15000) {
+  const deadline = Date.now() + maxMs;
+  while (Date.now() < deadline && isBotCheck(await domText(page, 2000), await page.title().catch(() => ''))) {
+    await page.waitForTimeout(2000);
+  }
 }
 function sessionVerdict(url, passwordFields, text = '', title = '') {
   let host = '';
@@ -585,9 +594,18 @@ function sessionVerdict(url, passwordFields, text = '', title = '') {
 // The robot profile can be open in ONE place: a sign-in window or a headless
 // run, never both (Chromium's profile lock, an opaque error). Poll until it is
 // free, for up to maxMs, then die with the caller's message.
-async function waitForProfile(dir, maxMs, message) {
+// Every process holding the profile, as command lines. The plain sign-in window
+// is the one without --headless: an agent's headless Chrome on the same profile
+// must never be mistaken for Kevin's window (review, 25 Sep 2026).
+function profileProcs(dir) {
   const { spawnSync } = require('child_process');
-  const busy = () => spawnSync('pgrep', ['-f', `user-data-dir=${dir}`]).status === 0;
+  const out = spawnSync('ps', ['-axww', '-o', 'command='], { encoding: 'utf8' }).stdout || '';
+  const flag = `--user-data-dir=${dir}`;
+  return out.split('\n').filter(l => l.split(/\s+/).includes(flag) || l.includes(flag + ' '));
+}
+function plainWindowOpen(dir) { return profileProcs(dir).some(l => !/\s--headless\b/.test(l)); }
+async function waitForProfile(dir, maxMs, message) {
+  const busy = () => profileProcs(dir).length > 0;
   if (!busy()) return;
   const deadline = Date.now() + maxMs;
   while (Date.now() < deadline) {
@@ -616,8 +634,18 @@ function signinHoldActive(dir, now = Date.now()) {
   return true;
 }
 function takeSigninHold(dir) { fs.writeFileSync(holdPath(dir), JSON.stringify({ pid: process.pid, at: Date.now() })); }
-function releaseSigninHold(dir) { try { fs.unlinkSync(holdPath(dir)); } catch { /* already gone */ } }
+// Only the sign-in that took the hold removes it: a second sign-in's hold is
+// never lifted by the first one ending.
+function releaseSigninHold(dir) {
+  try {
+    const h = JSON.parse(fs.readFileSync(holdPath(dir), 'utf8'));
+    if (h && h.pid && h.pid !== process.pid) return;
+    fs.unlinkSync(holdPath(dir));
+  } catch { /* already gone, or unreadable and so already inactive */ }
+}
 async function waitForSigninHold(dir) {
+  if (!signinHoldActive(dir)) return;
+  console.error(`WAITING: Kevin is signing in on the robot profile (${path.basename(dir)}). This step starts when he closes that window (at most ${HOLD_MAX_MS / 60000} minutes).`);
   const deadline = Date.now() + HOLD_MAX_MS;
   while (signinHoldActive(dir) && Date.now() < deadline) await new Promise(r => setTimeout(r, 2000));
 }
@@ -635,8 +663,10 @@ async function withPage(profile, headed, fn) {
   if (!chromium) die(`playwright not found (tried: ${tried.join(', ')}). Run npm install in ${REPO}.`);
   const dir = path.join(PROFILE_ROOT, profile || 'default');
   fs.mkdirSync(dir, { recursive: true });
-  // Kevin's sign-in first: never start a step while he holds the profile.
-  await waitForSigninHold(dir);
+  // Kevin's sign-in first: never start a step while he holds the profile,
+  // checked again after the profile wait, just before the launch.
+  for (;;) {
+    await waitForSigninHold(dir);
   // The `login` window is a plain Chrome holding this same profile. Launching
   // on top of it trips Chromium's profile lock with an opaque error, and the
   // 30-minute hand-back poller can easily fire while Kevin is still signing in
@@ -644,8 +674,10 @@ async function withPage(profile, headed, fn) {
   // Wait for it rather than fail (8 Sep 2026): the Robot sign-in app opens
   // the waiting sites one after another, a chain of a few minutes, and a
   // scheduled slot that dies the instant it meets that window loses its run.
-  await waitForProfile(dir, 10 * 60 * 1000,
-    `the profile at ${dir} is open in a sign-in window. Kevin has not quit it yet (Cmd+Q); try again afterwards.`);
+    await waitForProfile(dir, 10 * 60 * 1000,
+      `the profile at ${dir} is open in a sign-in window. Kevin has not quit it yet (Cmd+Q); try again afterwards.`);
+    if (!signinHoldActive(dir)) break;
+  }
   // Prefer Kevin's installed Google Chrome over Playwright's bundled test build
   // (2 Sep 2026). The bundled Chromium announces itself as automated
   // (navigator.webdriver = true, "controlled by automated test software"),
@@ -746,6 +778,22 @@ function assertConfirmable(plan) {
 // the loop returns before it, it does not skip past it. `confirm` is the
 // declared proof of landing; checked after the final step whenever a submit
 // actually executed.
+// Which <select> option a plan means: exact value, then exact label (case and
+// spacing ignored), then the single option whose label contains the words.
+// Two or more partial matches is a question, never a guess.
+function pickOption(opts, want) {
+  const norm = t => String(t || '').replace(/\s+/g, ' ').trim().toLowerCase();
+  const w = norm(want);
+  if (!w) return { option: null, why: 'no value or label given.' };
+  const byValue = opts.find(o => o.value === String(want));
+  if (byValue) return { option: byValue };
+  const exact = opts.filter(o => norm(o.label) === w);
+  if (exact.length === 1) return { option: exact[0] };
+  const part = opts.filter(o => norm(o.label).includes(w));
+  if (part.length === 1) return { option: part[0] };
+  return { option: null, why: part.length ? `"${want}" matches ${part.length} options; name one exactly.` : `no option matches "${want}".` };
+}
+
 async function runSteps(page, steps, allowSubmit, confirm) {
   const done = [];
   let submitted = false;
@@ -763,9 +811,25 @@ async function runSteps(page, steps, allowSubmit, confirm) {
         await assertNotCredential(page, s.selector, s.value);
         await page.fill(s.selector, String(s.value), { timeout: 20000 });
         break;
-      case 'select':
-        await page.selectOption(s.selector, String(s.value), { timeout: 20000 });
+      case 'select': {
+        // By what the page SHOWS (25 Sep 2026): the agent wrote "Terraced" and
+        // "House" for AXA's property type, Playwright wanted the option's exact
+        // value code or exact label, and the step failed with no clue which
+        // options existed. Now: exact value, then the label ignoring case and
+        // spacing, then the one option whose label contains the words; on a
+        // miss the error lists every option, so the next plan can name one.
+        const want = String(s.label !== undefined ? s.label : s.value);
+        const box = page.locator(s.selector).first();
+        await box.waitFor({ state: 'attached', timeout: 20000 });
+        const opts = await box.evaluate(el => el.tagName === 'SELECT'
+          ? Array.from(el.options).map(o => ({ value: o.value, label: (o.label || o.textContent || '').replace(/\s+/g, ' ').trim() }))
+          : null);
+        if (!opts) throw new Error(`select: ${s.selector} is not a <select> but a styled dropdown. Click it open, then click the option by its text.`);
+        const pick = pickOption(opts, want);
+        if (!pick.option) throw new Error(`select: ${pick.why} Options: ${opts.map(o => `"${o.label}" [${o.value}]`).join(' | ')}`);
+        await box.selectOption({ value: pick.option.value }, { timeout: 20000 });
         break;
+      }
       case 'check':
         await page.check(s.selector, { timeout: 20000 });
         break;
@@ -981,23 +1045,33 @@ async function main() {
     const dir = path.join(PROFILE_ROOT, profile || 'default');
     if (fs.existsSync('/Applications/Google Chrome.app')) {
       fs.mkdirSync(dir, { recursive: true });
-      const { spawnSync, spawn } = require('child_process');
+      const { spawn } = require('child_process');
       // Hold the profile, then let the step in flight finish (25 Sep 2026).
       takeSigninHold(dir);
       process.on('exit', () => releaseSigninHold(dir));
       try {
+        // A step that passed its last hold check a moment ago launches within
+        // a second or two; wait for it to show before looking for a free profile.
+        await new Promise(r => setTimeout(r, 3000));
         await waitForProfile(dir, 5 * 60 * 1000,
           'the robot is still finishing a step in its browser. Nothing is wrong: try this sign-in again in a minute.');
         spawn('open', ['-na', 'Google Chrome', '--args', `--user-data-dir=${dir}`,
           '--use-mock-keychain', '--no-first-run', url], { stdio: 'ignore' }).unref();
         console.log(`Plain Chrome window open for ${host} (no automation attached). Log in, then Cmd+Q that window.`);
-        const deadline = Date.now() + 15 * 60 * 1000;
+        const opened = Date.now();
+        const deadline = opened + 15 * 60 * 1000;
         let seen = false;
         while (Date.now() < deadline) {
           await new Promise(r => setTimeout(r, 2000));
-          const running = spawnSync('pgrep', ['-f', `user-data-dir=${dir}`]).status === 0;
+          const running = plainWindowOpen(dir);
           if (running) seen = true;
           else if (seen) break;
+          // No window a minute on means it never opened: say so, never report a
+          // sign-in that did not happen (the old loop waited 15 minutes, then
+          // handed the tasks back as if it had).
+          else if (Date.now() - opened > (Number(process.env.AGENT_BROWSER_WINDOW_OPEN_MS) || 60 * 1000)) {
+            die('the sign-in window did not open, so nothing was signed in. Start this sign-in again.');
+          }
         }
       } finally {
         releaseSigninHold(dir);
@@ -1052,6 +1126,7 @@ async function main() {
       for (let i = 0; i < 10 && sessionVerdict(page.url(), 0).atOneLogin; i++) {
         await page.waitForTimeout(2000);
       }
+      await settleBotCheck(page);
       const url = page.url();
       const passwordFields = await passwordFieldCount(page);
       const text = await domText(page, 600);
@@ -1082,6 +1157,7 @@ async function main() {
       // Amazon's department menu alone is ~19k characters, so a fixed 20k cap
       // returned nothing but navigation and no order data at all (18 Sep 2026).
       // --max-text lets a caller ask for more when the page is that heavy.
+      await settleBotCheck(page);
       const maxText = Math.min(Number(arg(rest, 'max-text', '20000')) || 20000, 400000);
       const text = await domText(page, maxText);
       const png = await shoot(page, shot);
@@ -1283,4 +1359,5 @@ if (require.main === module) {
 module.exports = { hostAllowed, pickLinks, runSteps, assertNotCredential, assertApproved, SECRET_NAME_RE, loadSites, sessionVerdict,
                    recordLoginSite, signinTargets, signinOwner, signinDomain, readSitesFile,
                    assertUploadable, assertConfirmable, UPLOAD_DIR, UPLOAD_EXTENSIONS, persistSessionCookies,
-                   signinHoldActive, takeSigninHold, releaseSigninHold, waitForSigninHold, HOLD_MAX_MS, isBotCheck };
+                   signinHoldActive, takeSigninHold, releaseSigninHold, waitForSigninHold, HOLD_MAX_MS, isBotCheck,
+                   profileProcs, plainWindowOpen, pickOption };

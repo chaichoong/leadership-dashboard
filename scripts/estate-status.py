@@ -799,17 +799,20 @@ def signin_payload(now, src):
         seen = []                                           # (at, signedIn, how)
         if profile == "default":
             ks = keep_sites.get(host) or {}
-            if keep_at and ks.get("state") in ("signed-in", "signed-out"):
-                seen.append((keep_at, ks["state"] == "signed-in", "06:40 check"))
+            if keep_at and ks.get("state") in ("signed-in", "signed-out", "bot-check"):
+                seen.append((keep_at, ks["state"], "06:40 check"))
             for e in ledger:
                 if e.get("cmd") == "session" and e.get("site") == host and (e.get("profile") or "default") == "default" \
                         and isinstance(e.get("signedIn"), bool):
                     at = _utc(e.get("at"))
                     if at:
-                        seen.append((at, e["signedIn"], "robot check"))
+                        # A bot check is its own state: the site stops the robot and a
+                        # sign-in button would not help (review, 25 Sep 2026).
+                        seen.append((at, "bot-check" if e.get("botCheck") else
+                                     ("signed-in" if e["signedIn"] else "signed-out"), "robot check"))
         elif profile in last_read:
             at, rd = last_read[profile]
-            seen.append((at, bool(rd.get("ok")), "hourly read"))
+            seen.append((at, "signed-in" if rd.get("ok") else "signed-out", "hourly read"))
         last = max(seen, key=lambda s: s[0]) if seen else None
         # Kevin's own sign-in, if it came after the last look.
         mine = [_utc(e.get("at")) for e in ledger
@@ -821,7 +824,7 @@ def signin_payload(now, src):
         elif mine and (not last or mine > last[0]):
             state, at, how = "you-signed-in", mine, "you signed in"
         elif last:
-            state, at, how = ("signed-in" if last[1] else "signed-out"), last[0], last[2]
+            state, at, how = last[1], last[0], last[2]
         else:
             state, at, how = "unchecked", None, "not checked yet"
         lines.append({"label": t["label"], "host": host, "url": t["url"], "profile": profile,
@@ -855,6 +858,8 @@ def robot_signins_row(now, src=None):
         detail += ", %d signed in by you and not re-checked yet" % len(by["you-signed-in"])
     if by.get("unchecked"):
         detail += ", %d not checked yet" % len(by["unchecked"])
+    if by.get("bot-check"):
+        detail += ", %d stop the robot with a bot check (%s)" % (len(by["bot-check"]), ", ".join(by["bot-check"][:4]))
     return dict(row, status="Worked", lastWorked=stamp, payload=json.dumps(payload), detail=detail + ".")
 
 
@@ -1170,6 +1175,7 @@ def selftest():
             {"label": "Utilita Apartment 1", "host": "my.utilita.co.uk", "url": "https://my.utilita.co.uk/energy", "profile": "utilita-apt1"},
             {"label": "Utilita Apartment 2", "host": "my.utilita.co.uk", "url": "https://my.utilita.co.uk/energy", "profile": "utilita-apt2"},
             {"label": "New", "host": "new.example.com", "url": "https://new.example.com/", "profile": "default"},
+            {"label": "Cloudflare", "host": "dash.cloudflare.com", "url": "https://dash.cloudflare.com/", "profile": "default"},
         ],
         "sites": {"tax.service.gov.uk": {"login": True, "shortSession": True, "loginUrl": "x"},
                   "www.topcashback.co.uk": {"label": "TopCashback", "login": True},
@@ -1182,6 +1188,8 @@ def selftest():
             {"at": "2026-09-25T05:00:00Z", "cmd": "session", "site": "www.edfenergy.com", "signedIn": True, "profile": "default"},
             {"at": "2026-09-25T07:10:00Z", "cmd": "login", "host": "www.loom.com", "profile": "default"},
             {"at": "2026-09-25T08:24:07Z", "cmd": "login", "host": "my.utilita.co.uk", "profile": "utilita-apt1"},
+            {"at": "2026-09-25T06:00:00Z", "cmd": "login", "host": "dash.cloudflare.com", "profile": "default"},
+            {"at": "2026-09-25T08:00:00Z", "cmd": "session", "site": "dash.cloudflare.com", "signedIn": False, "botCheck": True, "profile": "default"},
         ],
         "readings": [
             {"at": "2026-09-25T08:05:22", "label": "Apartment 1", "ok": False, "problem": "SIGN-IN NEEDED"},
@@ -1203,6 +1211,10 @@ def selftest():
     ok(got["Utilita Apartment 2"]["state"] == "signed-in" and got["Utilita Apartment 2"]["at"] == "2026-09-25T08:25:00.000Z",
        "the newest DECIDING meter read (a later page failure says nothing), London time with no offset: %r" % got["Utilita Apartment 2"])
     ok(got["New"]["state"] == "unchecked" and got["New"]["at"] is None, "nothing looked: unchecked, never green")
+    ok(got["Cloudflare"]["state"] == "bot-check" and got["Cloudflare"]["how"] == "robot check",
+       "a bot check is its own state, never 'signed out' with a Sign in button (25 Sep 2026): %r" % got["Cloudflare"])
+    ok("1 stop the robot with a bot check (Cloudflare)" in robot_signins_row(t0, src)["detail"],
+       "the row names the site a bot check stops: %r" % robot_signins_row(t0, src)["detail"])
     ok(signin_payload(t0, src)["unlisted"] == ["Evernote", "TopCashback"], "login sites with no page are named once each")
     empty = robot_signins_row(t0, dict(src, targets=[]))
     ok(empty["status"] == "Failed" and "empty" in empty["detail"], "an empty list is a broken read, not a quiet day: %r" % empty)

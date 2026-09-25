@@ -512,6 +512,12 @@ print('---JSON---'); print(json.dumps({'refused': refused, 'output': f.get(m.AF[
     expect(out.refused).toMatch(/session --site app\.pingen\.com/);
     expect(out.status).toBeNull();   // nothing was patched
   });
+  it('submit REFUSES the line when the site stops the robot with a bot check, and names the route (25 Sep 2026)', () => {
+    const out = submitWith(`m.session_check = lambda host, **k: {'signedIn': False, 'botCheck': True, 'url': 'https://app.pingen.com/', 'at': '2026-09-25T16:55:37.000Z', 'source': 'walk'}`);
+    expect(out.refused).toMatch(/stops the robot with a bot check/);
+    expect(out.refused).toMatch(/--kind KEVIN --subject credential/);
+    expect(out.status).toBeNull();
+  });
   it('submit keeps the line when the walk says signed out', () => {
     const out = submitWith(`m.session_check = lambda host, **k: {'signedIn': False, 'url': 'https://app.pingen.com/login', 'at': 'x', 'source': 'walk'}`);
     expect(out.refused).toBe(false);

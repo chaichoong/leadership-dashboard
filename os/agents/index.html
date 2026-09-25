@@ -6420,6 +6420,9 @@ const SIGNIN_ROW_KEY = 'robot-signins';
 const SIGNIN_ON_MAC = /Macintosh/.test(navigator.userAgent) && !(navigator.maxTouchPoints > 1);
 const SIGNIN_STATE = {
     'signed-out':    { order: 0, label: 'Signed out',      style: ['var(--danger-bg)', 'var(--danger)'] },
+    // The site stops the robot with "verify you are human" (Cloudflare, 25 Sep 2026):
+    // a sign-in cannot fix that, so the line carries no button.
+    'bot-check':     { order: 1, label: 'Bot check',       style: ['var(--warning-bg)', 'var(--warning)'] },
     'unchecked':     { order: 1, label: 'Not checked yet', style: ['var(--warning-bg)', 'var(--warning)'] },
     'you-signed-in': { order: 2, label: 'You signed in',   style: ['var(--info-bg)', 'var(--info)'] },
     'signed-in':     { order: 3, label: 'Signed in',       style: ['var(--success-bg)', 'var(--success)'] },
@@ -6451,6 +6454,7 @@ function signinLineHtml(ln){
     const st = SIGNIN_STATE[ln.state] || SIGNIN_STATE.unchecked;
     const when = ln.state === 'on-demand' ? 'Short login: sign in when a task asks for it'
         : ln.state === 'you-signed-in' ? `You signed in ${estateAgo(ln.at)}. The robot confirms it at its next check.`
+        : ln.state === 'bot-check' ? `Stops the robot with a "verify you are human" check (seen ${estateAgo(ln.at)}). Signing in will not help.`
         : ln.at ? `Checked ${estateAgo(ln.at)} by the ${ln.how || 'robot'}` : 'Not checked yet';
     const act = (signinNeedsYou(ln) || ln.state === 'on-demand') ? signinButton(ln) : '';
     return `<div class="rs-line" data-rs-line="${esc(ln.state)}">
@@ -6601,7 +6605,7 @@ function renderSignins(){
     const lines = p.lines.slice().sort((a, b) => order(a) - order(b) || String(a.label).localeCompare(String(b.label)));
     const pick = st => lines.filter(ln => ln.state === st);
     const needs = lines.filter(signinNeedsYou);
-    const mine = pick('you-signed-in'), ok = pick('signed-in'), od = pick('on-demand');
+    const mine = pick('you-signed-in'), ok = pick('signed-in'), od = pick('on-demand'), bot = pick('bot-check');
     const { walls, failed: wallsFailed } = signinWalls();
     signinMarkWalls(walls, lines);
     // A blocked robot's site counts once, whether or not the list already calls it signed out;
@@ -6612,10 +6616,10 @@ function renderSignins(){
     setCount(needNames.length, needNames.length > 0);
     const summary = needNames.length
         ? `<span><strong>${needNames.length === 1 ? 'One sign-in needs' : needNames.length + ' sign-ins need'} you:</strong> ${esc(needNames.join(', '))}.</span>`
-        : `<span><strong>All good.</strong> ${ok.length} signed in, ${od.length} sign in when a task needs them${mine.length ? `, ${mine.length} you signed in (the robot confirms at its next check)` : ''}.</span>`;
+        : `<span><strong>All good.</strong> ${ok.length} signed in, ${od.length} sign in when a task needs them${mine.length ? `, ${mine.length} you signed in (the robot confirms at its next check)` : ''}${bot.length ? `, ${bot.length} stop${bot.length === 1 ? 's' : ''} the robot with a bot check (a sign-in cannot fix it)` : ''}.</span>`;
     const toggle = `<button type="button" class="btn btn-sm" data-rs-toggle aria-expanded="${_signinsOpen}">${_signinsOpen ? 'Hide the list' : 'Show all ' + lines.length}</button>`;
-    // Always on show: what needs him, and what he has just signed in to.
-    const shown = needs.concat(mine);
+    // Always on show: what needs him, what stops the robot, and what he has just signed in to.
+    const shown = needs.concat(bot, mine);
     let rest = '';
     if(_signinsOpen){
         rest = ok.concat(od).map(signinLineHtml).join('');
