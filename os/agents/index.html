@@ -6426,6 +6426,7 @@ function renderEstateStatus(){
         const paused = gf(allowance,'status') === 'Blocked';
         stale += `<div class="${paused ? 'zone-error' : ''}" style="margin-bottom:10px;${paused ? '' : 'font-size:var(--fs-xs);color:var(--text-muted)'}">${paused ? '<strong>Agents paused.</strong> ' : ''}${esc(gf(allowance,'detail')||'')}</div>`;
     }
+    stale += estateBlockersHtml(_estateRows.find(r => gf(r,'key') === 'agent-blockers'), gf);
     const rows = jobs.map(r => {
         const status = gf(r,'status'), fails = Number(gf(r,'fails24h')||0), runs = Number(gf(r,'runs24h')||0);
         return `<tr>
@@ -6454,6 +6455,28 @@ function estateLaneChip(lane){
     if(!label) return '';
     const danger = lane === 'invisible';
     return `<span style="display:inline-block;margin-left:6px;padding:1px 6px;border-radius:var(--radius-full);font-size:var(--fs-xs);font-weight:var(--fw-medium);background:${danger ? 'var(--danger-bg)' : 'var(--bg-subtle)'};color:${danger ? 'var(--danger)' : 'var(--text-secondary)'}">${esc(label)}</span>`;
+}
+// THE BLOCKER LOOP (Kevin, 25 Sep 2026): every task an agent could not finish,
+// and what clears it. Written by scripts/estate-status.py from the half-hourly
+// blocker sweep; the 08:00 DM links here for "each one and what clears it".
+// Red when a wall is three days old, a task closed while blocked, or the
+// sweep has stopped; silent only when the row says nothing is blocked.
+function estateBlockersHtml(row, gf){
+    if(!row) return '';
+    const detail = String(gf(row,'detail')||'');
+    if(gf(row,'status') === 'Worked' && /^No robot is blocked\./.test(detail)) return '';
+    let p = {};
+    try { p = JSON.parse(gf(row,'payload')||'{}'); } catch(e){ p = {}; }
+    const walls = Array.isArray(p.open) ? p.open : [];
+    const red = gf(row,'status') !== 'Worked';
+    const list = walls.map(w => `<div style="padding:4px 0;border-bottom:1px solid var(--border-subtle)">
+            <span style="font-weight:var(--fw-medium)">${esc(w.name||'')}</span>
+            <span style="color:var(--text-muted)"> · ${esc(w.kind||'')} ${esc(w.subject||'')}${w.days != null ? ' · ' + esc(String(w.days)) + ' days' : ''}</span>
+            <div style="color:var(--text-secondary)">${esc(w.fix||'')}</div>
+        </div>`).join('');
+    return `<div class="${red ? 'zone-error' : ''}" id="estateBlockers" style="margin-bottom:10px;font-size:var(--fs-sm)"><strong>Robots blocked.</strong> ${esc(detail)}${walls.length
+        ? `<details style="margin-top:6px"><summary style="cursor:pointer">Each one and what clears it (${walls.length})</summary><div style="margin-top:4px;font-size:var(--fs-xs)">${list}</div></details>`
+        : ''}</div>`;
 }
 function renderEstateStalled(gf){
     // The not-moving list, written by the same job from scripts/loop-health.py.
