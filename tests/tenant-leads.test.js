@@ -63,14 +63,14 @@ def world():
                rec("recR4", {R["org"]: "Far away", R["area"]: "Hull", R["email"]: "hull@x.org", R["status"]: "Active"}),
                rec("recR5", {R["org"]: "Soham only", R["area"]: "Soham", R["email"]: "soham@x.org", R["status"]: "Active"})],
       "optouts": [rec("recO1", {O["email"]: "stopped@example.com"})],
-      "leads": [], "tasks": [],
+      "leads": [], "tasks": [], "linkLive": True,
     }
 
 def lead(i, **kw):
     f = {L["name"]: kw.get("name", "Test Person"), L["consent"]: kw.get("consent", True), L["uc"]: kw.get("uc", "Yes"),
          L["single"]: kw.get("single", "Yes"), L["areas"]: kw.get("areas", ["Haverhill"])}
     if kw.get("dob", "1980-01-01"): f[L["dob"]] = kw.get("dob", "1980-01-01")
-    for k in ("stage", "phone", "email", "legacyRef", "referredTenant", "tenant", "bonus", "lastContacted", "referredName", "royTask", "heardFrom"):
+    for k in ("stage", "phone", "email", "legacyRef", "referredTenant", "tenant", "bonus", "lastContacted", "referredName", "royTask", "heardFrom", "cap"):
         if k in kw: f[L[k]] = kw[k]
     return rec(i, f, created=kw.get("created", "2026-09-24T10:00:00.000Z"))
 
@@ -228,13 +228,15 @@ out["keys"] = [ct.dupe_task_key(n) for n in names]
   it('every card clears carry-out, track record, plain summary, hand-back and tier-1 checks', () => {
     for (const c of r.cards) expect(c.gates, c.kind).toEqual(['', '', '', '', '']);
   });
-  it('the mail-out goes to active referrers near Haverhill only, from info@, street not door', () => {
+  it('the mail-out goes to active referrers near Haverhill only (never a Cambridge one), from info@, street not door', () => {
     const m = r.cards[0];
     expect(m.from).toBe('info@agilelets.co.uk');
-    expect(m.toEach.sort()).toEqual(['housing@westsuffolk.gov.uk', 'moveon@jimmys.org.uk']);
+    // Kevin, 25 Sep 2026: Haverhill and West Suffolk contacts only, not "people who are miles away".
+    expect(m.toEach.sort()).toEqual(['housing@westsuffolk.gov.uk']);
     expect(m.body).toMatch(/Dalham Place/);
     expect(m.body).not.toMatch(/\b5 Dalham/);
-    expect(m.body).toMatch(/prefill_How\+They\+Heard=Referrer/);
+    expect(m.body).toMatch(/https:\/\/rooms\.agilelets\.co\.uk\/r\b/);
+    expect(m.body).not.toMatch(/airtable\.com/);
     expect(m.body).toMatch(/reply STOP/);
   });
   it('the referral email reaches UC tenants aged 35+ only, and never an address that opted out', () => {
@@ -272,7 +274,8 @@ out["all"] = t["description"]
   it('other sites say 35+ positively, and nothing says "no children" (Renters\' Rights Act s.33)', () => {
     expect(r.spareroom).toMatch(/aged 35/);
     expect(r.all).not.toMatch(/children/i);
-    expect(r.all).toMatch(/prefill_How\+They\+Heard=SpareRoom/);
+    expect(r.all).toMatch(/https:\/\/rooms\.agilelets\.co\.uk\/s\b/);
+    expect(r.all).not.toMatch(/airtable\.com/);
   });
 });
 
@@ -318,9 +321,10 @@ out["third"] = {"roy": [t["kind"] for t in fw3.roy], "leads": [t.get("leadIds") 
   });
   it('screens new sign-ups to Qualified and sends them to Roy with a past applicant to phone', () => {
     expect(r.stages.recL1).toBe('With Roy');
-    expect(r.stages.recL7).toBe('With Roy');
+    // Cambridge is no longer "near Haverhill" (Kevin, 25 Sep 2026): qualified, but not on a Haverhill list.
+    expect(r.stages.recL7).toBe('Qualified');
     expect(r.stages.recL2).toBe('Waiting to turn 35');
-    expect(r.viewingLeads).toEqual(['recL1', 'recL7', 'recL3']);
+    expect(r.viewingLeads).toEqual(['recL1', 'recL3']);
   });
   it('a past applicant who turns 35 stays phone-only, even with a consent tick', () => {
     expect(r.stages.recL4).toBe('Past applicant');
@@ -551,6 +555,7 @@ o6 = tl.by_town(tl.openings(w6, DAY))
 out["rejectedNextDay"] = len(tl.mailout_cards(w6, o6, DAY))
 out["rejected15Days"] = len(tl.mailout_cards(w6, o6, DAY + timedelta(days=15)))
 w7 = world(); w7["optouts"].append(rec("recO2", {O["email"]: "housing@westsuffolk.gov.uk", O["decision"]: "Check needed"}))
+w7["refs"].append(rec("recR6", {R["org"]: "Another West Suffolk team", R["area"]: "West Suffolk", R["email"]: "team@westsuffolk.org", R["status"]: "Active"}))
 out["flaggedHeld"] = [c["emails"] for c in tl.mailout_cards(w7, tl.by_town(tl.openings(w7, DAY)), DAY)]
 w7["optouts"][-1]["fields"][O["decision"]] = "Not an opt-out"
 out["clearedBack"] = sorted(tl.mailout_cards(w7, tl.by_town(tl.openings(w7, DAY)), DAY)[0]["emails"])
@@ -576,7 +581,8 @@ out["scopeFail"] = {"screened": stages(fw5).get("recS1"), "failed": any(x.starts
   });
   it('with Haverhill and Soham both open, every referrer is told once, about every open town near them', () => {
     expect(r.twoTowns).toEqual([['Haverhill', 'Soham'], ['Soham']]);
-    expect(r.twoTownsTo).toEqual([['housing@westsuffolk.gov.uk', 'moveon@jimmys.org.uk'], ['soham@x.org']]);
+    // A Cambridge contact is near Soham but not Haverhill (Kevin, 25 Sep 2026), so it hears only of Soham.
+    expect(r.twoTownsTo).toEqual([['housing@westsuffolk.gov.uk'], ['moveon@jimmys.org.uk', 'soham@x.org']]);
     expect(r.twoTownsBody).toMatch(/- Haverhill: .*\n- Soham: /);
   });
   it('when the property read fails, sign-ups are left unscreened (not rejected) and the failure is recorded', () => {
@@ -587,8 +593,8 @@ out["scopeFail"] = {"screened": stages(fw5).get("recS1"), "failed": any(x.starts
     expect(r.rejected15Days).toBe(1);
   });
   it('a sender waiting on an opt-out check is held off until a person decides, and back once cleared', () => {
-    expect(r.flaggedHeld).toEqual([['moveon@jimmys.org.uk']]);
-    expect(r.clearedBack).toEqual(['housing@westsuffolk.gov.uk', 'moveon@jimmys.org.uk']);
+    expect(r.flaggedHeld).toEqual([['team@westsuffolk.org']]);
+    expect(r.clearedBack).toEqual(['housing@westsuffolk.gov.uk', 'team@westsuffolk.org']);
   });
   it('a rejected, unsent mail-out does not count as telling anyone', () => {
     expect(r.rejectedMonitor[0]).toBe('fail');
@@ -729,6 +735,56 @@ out["noConsent"] = resign(dict(name="Pat Old", phone="07123456789"), dict(name="
     expect(r.reregistered.recNew).toBe('Qualified');
     expect(r.phoneOnly.recOld).toBeUndefined();
     expect(r.noConsent.recOld).toBeUndefined();
+  });
+});
+
+describe("Kevin's card review, 25 Sep 2026: short link, Haverhill only, the benefit cap", () => {
+  const r = py(`
+# A dead short link holds every email and advert, and the monitor says so in red.
+w = world(); w["linkLive"] = False; w["leads"] = [lead("recH1")]
+fw = FakeWriter(); opens, notes, fails = tl.run(w, DAY, fw, replies=lambda: [])
+out["held"] = {"cards": [c["kind"] for c in fw.cards], "roy": sorted(t["kind"] for t in fw.roy),
+               "notes": [n for n in notes if "held:" in n]}
+out["linkStep"] = next(x for x in tl.monitor(w, DAY, opens, [])["steps"] if x["key"] == "link")
+out["links"] = [tl.form_link(c) for c in ("Referrer", "Tenant referral", "SpareRoom", "Other")]
+# A card withdrawn for a change that needs code holds nobody: the corrected card goes straight away.
+w2 = world()
+w2["tasks"] = [task("TENANT MAILOUT: Haverhill rooms 25 Sep 2026", status="Cancelled",
+                    notes="TENANT CHAIN IDS: recR1\\n\\n[25 Sep 2026 — tenant-leads] TENANT CHAIN SUPERSEDED: Kevin asked for changes")]
+out["afterSupersede"] = [c["emails"] for c in tl.mailout_cards(w2, tl.by_town(tl.openings(w2, DAY)), DAY)]
+# The form no longer asks which towns: a sign-up with none is for Haverhill.
+w3 = world(); w3["leads"] = [lead("recB1", areas=[], cap="None of these"), lead("recB2", areas=[], cap="PIP or DLA"),
+                             lead("recB3", areas=[])]
+fw3 = FakeWriter(); tl.run(w3, DAY, fw3, only="screen", replies=lambda: [])
+got = {p["id"]: p["fields"] for p in fw3.patches}
+out["noTown"] = {k: (v.get(L["stage"]), v.get(L["screening"])) for k, v in got.items()}
+fw4 = FakeWriter()
+for l in w3["leads"]: l["fields"].update(got.get(l["id"], {}))
+tl.run(w3, DAY, fw4, only="viewings", replies=lambda: [])
+v = next(t for t in fw4.roy if t["kind"] == "viewings")
+out["order"] = v["leadIds"]
+out["royText"] = v["description"]
+`);
+  it('a short link that does not open the form holds every email and advert, and the monitor is red', () => {
+    expect(r.held.cards).toEqual([]);
+    expect(r.held.roy).toEqual(['viewings']);
+    expect(r.held.notes.length).toBeGreaterThan(0);
+    expect(r.linkStep.state).toBe('fail');
+    expect(r.links).toEqual(['https://rooms.agilelets.co.uk/r', 'https://rooms.agilelets.co.uk/t',
+      'https://rooms.agilelets.co.uk/s', 'https://rooms.agilelets.co.uk']);
+  });
+  it('a card withdrawn because the change needs code holds nobody', () => {
+    expect(r.afterSupersede).toEqual([['housing@westsuffolk.gov.uk']]);
+  });
+  it('a sign-up with no town is for Haverhill', () => {
+    expect(Object.values(r.noTown).map(x => x[0])).toEqual(['Qualified', 'Qualified', 'Qualified']);
+  });
+  it('the benefit cap answer is on the screening note and Roy calls the exempt first', () => {
+    expect(r.noTown.recB1[1]).toMatch(/benefit cap: applies, so the rent may be short/);
+    expect(r.noTown.recB2[1]).toMatch(/benefit cap: exempt \(PIP or DLA\)/);
+    expect(r.noTown.recB3[1]).toMatch(/benefit cap: not known, ask at the first call/);
+    expect(r.order).toEqual(['recB2', 'recB3', 'recB1']);
+    expect(r.royText).toMatch(/benefit cap: exempt \(PIP or DLA\)/);
   });
 });
 
