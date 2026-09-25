@@ -462,7 +462,7 @@ print(json.dumps(sorted(m.open_intents())))`);
     expect(r).toEqual(['t1']);
   });
 
-  it('the pickup run works a task the sign-in woke through its wall, approved or not; a plain agent note is not that', () => {
+  it('the pickup run works a task the sign-in woke through its wall (new, approved, or a redo he asked for); a plain agent note is not that', () => {
     const r = py(`
 from datetime import datetime
 now = datetime.now(m.LONDON)
@@ -473,7 +473,7 @@ print(json.dumps([bool(m.signin_reopened_reason({"status": "Today", "outcome": "
                   bool(m.signin_reopened_reason({"status": "Today", "outcome": "Approved as-is", "notes": woke})),
                   bool(m.signin_reopened_reason({"status": "Today", "outcome": "Changes requested", "notes": woke})),
                   bool(m.signin_reopened_reason({"status": "Today", "outcome": "", "notes": agent}))]))`);
-    expect(r).toEqual([true, true, false, false]);
+    expect(r).toEqual([true, true, true, false]);   // a redo Kevin asked for is worked too (25 Sep 2026)
   });
 
   it('a resubmit supersedes the old wall, and a declared step opens (only) its own KEVIN wall', () => {
