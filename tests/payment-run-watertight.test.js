@@ -182,6 +182,11 @@ def last_periods_reference_is_not_this_bill():
     return pr.plan_tasks([task()], [prev], {}, D("2026-10-23"))[0][0]
 case("last_periods_reference_is_not_this_bill", last_periods_reference_is_not_this_bill)
 
+def old_open_twin_is_flagged():
+    old = bill("recMarch", "2026-03-26", 2.22, "Oakfield Ground Rents Ltd")
+    return pr.plan_tasks([task()], [old], {}, D("2026-10-23"))[0][0]
+case("old_open_twin_is_flagged", old_open_twin_is_flagged)
+
 def missed_friday_is_read():
     tz = pr.LONDON
     start, _ = pr.scan_range(datetime(2026, 9, 25, 21, 0, tzinfo=tz), 1,
@@ -251,6 +256,9 @@ describe('payment run: approved payment cards reach the list (cause 2)', () => {
   });
   it('last period\'s paid row with the same reference never stands in for this period\'s card', () => {
     expect(value('last_periods_reference_is_not_this_bill')).toBe('create');
+  });
+  it('a same-payee same-size bill still owed from months ago is flagged, never listed silently twice', () => {
+    expect(value('old_open_twin_is_flagged')).toBe('check');
   });
   it('a card is never assumed paid: a possible payment is named on it, and it stays Unpaid', () => {
     expect(value('card_never_assumed_paid')).toEqual(['check_paid', 'Unpaid']);

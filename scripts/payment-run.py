@@ -1587,7 +1587,12 @@ def card_twin(c, records):
             return r, "reference"
     for r in candidates:
         day = (r["fields"].get("Email Date") or "")[:10]
-        if (same_amount(r["fields"], card) and day and near_card(day, c, 30)
+        # An OPEN row of the same payee and size is a likely twin whatever its
+        # age: a bill still owed since March is exactly the bill a September
+        # reminder card is about. The 30 days only guard against last period's
+        # PAID bill (sixth review, 25 Sep 2026).
+        recent = bool(day) and near_card(day, c, 30)
+        if (same_amount(r["fields"], card) and (recent or status_of(r) in ("Unpaid", ""))
                 and payee_tokens(r["fields"].get("Payee")) & payee_tokens(card.get("payee"))):
             return r, "weak"
     return None, None
@@ -2531,6 +2536,9 @@ def cmd_selftest(_args):
           act(plan_tasks([task], [bill("recPrev", "2026-03-20", 2.22, "Other name", Status="Paid",
                                        Reference="GR-4471")], {}, D("2026-10-23"))),
           [("create", None)])
+    check("a same-payee same-size bill still owed from months ago is flagged as a possible twin",
+          act(plan_tasks([task], [bill("recMarch", "2026-03-26", 2.22, "Oakfield Ground Rents Ltd")],
+                         {}, D("2026-10-23"))), [("check", "recMarch")])
     check("a same-payee same-size row is only a possible twin, and the card is still listed",
           weak, [("check", "recWeak")])
     check("and its description says what to check",
