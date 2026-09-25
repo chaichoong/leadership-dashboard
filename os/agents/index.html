@@ -6460,6 +6460,38 @@ function signinLineHtml(ln){
         ${act}
     </div>`;
 }
+// Robots blocked on a sign-in or on a site missing from their list (the agent-blockers
+// row, written by the same job from the blocker sweep). A block does not re-check the
+// session, so a robot can be stuck on a site the last check called signed in (Amazon
+// asks for the password again); the panel must name it, or the 08:00 message says
+// "sign in" while this says "All good" (review, 25 Sep 2026).
+function signinWalls(){
+    const row = _estateRows.find(r => (r.fields || {})[ES.key] === 'agent-blockers');
+    const p = row ? signinPayload(row) : null;
+    const open = p && Array.isArray(p.open) ? p.open : [];
+    const by = {};
+    open.filter(w => w && (w.kind === 'SIGN-IN' || w.kind === 'SITE') && w.subject).forEach(w => {
+        const k = w.kind + ' ' + String(w.subject).toLowerCase();
+        (by[k] = by[k] || { kind: w.kind, subject: String(w.subject), names: [] }).names.push(String(w.name || ''));
+    });
+    return Object.values(by);
+}
+function signinWallsHtml(walls){
+    if(!walls.length) return '';
+    const rows = walls.map(w => {
+        const n = w.names.length, tasks = n === 1 ? 'One task is' : `${n} tasks are`;
+        const what = w.kind === 'SIGN-IN'
+            ? `${tasks} blocked until the robot is signed in to ${esc(w.subject)}.`
+            : `${tasks} blocked until ${esc(w.subject)} is on the robot's list.`;
+        const btn = !SIGNIN_ON_MAC ? `<span class="rs-mac">Sign in on your Mac</span>`
+            : w.kind === 'SIGN-IN'
+                ? `<a class="btn btn-success btn-sm" href="${esc('robotsignin://site/' + encodeURIComponent(w.subject))}" data-rs-wall="${esc(w.subject)}" aria-label="Sign in to ${esc(w.subject)}">Sign in</a>`
+                : `<a class="btn btn-sm" href="robotsignin://add" data-rs-wall-add="${esc(w.subject)}" aria-label="Add ${esc(w.subject)} to the robot's list">+ Add this site</a>`;
+        return `<div class="rs-line" data-rs-wall-line="${esc(w.kind)}"><div><span class="rs-label">${what}</span>
+            <span class="rs-when">${esc(w.names.slice(0, 3).join('; '))}${n > 3 ? ' and ' + (n - 3) + ' more' : ''}</span></div>${btn}</div>`;
+    }).join('');
+    return `<div class="rs-list" data-rs-walls style="margin:0 0 10px">${rows}</div>`;
+}
 function renderSignins(){
     const body = document.getElementById('signinsBody'); if(!body) return;
     const countEl = document.getElementById('signinsCount');
@@ -6514,9 +6546,15 @@ function renderSignins(){
     const pick = st => lines.filter(ln => ln.state === st);
     const needs = lines.filter(signinNeedsYou);
     const mine = pick('you-signed-in'), ok = pick('signed-in'), od = pick('on-demand');
-    setCount(needs.length, needs.length > 0);
-    const summary = needs.length
-        ? `<span><strong>${needs.length === 1 ? 'One sign-in needs' : needs.length + ' sign-ins need'} you:</strong> ${esc(needs.map(ln => ln.label).join(', '))}.</span>`
+    const walls = signinWalls();
+    // A blocked robot's site counts once, whether or not the list already calls it signed out.
+    const outHosts = needs.map(ln => String(ln.host).toLowerCase());
+    const wallNames = walls.filter(w => !outHosts.some(h => { const sub = w.subject.toLowerCase(); return sub === h || sub.endsWith('.' + h) || h.endsWith('.' + sub); }))
+        .map(w => w.subject);
+    const needNames = needs.map(ln => ln.label).concat(wallNames);
+    setCount(needNames.length, needNames.length > 0);
+    const summary = needNames.length
+        ? `<span><strong>${needNames.length === 1 ? 'One sign-in needs' : needNames.length + ' sign-ins need'} you:</strong> ${esc(needNames.join(', '))}.</span>`
         : `<span><strong>All good.</strong> ${ok.length} signed in, ${od.length} sign in when a task needs them${mine.length ? `, ${mine.length} you signed in (the robot confirms at its next check)` : ''}.</span>`;
     const toggle = `<button type="button" class="btn btn-sm" data-rs-toggle aria-expanded="${_signinsOpen}">${_signinsOpen ? 'Hide the list' : 'Show all ' + lines.length}</button>`;
     // Always on show: what needs him, and what he has just signed in to.
@@ -6531,8 +6569,10 @@ function renderSignins(){
     const had = document.activeElement && body.contains(document.activeElement) ? document.activeElement : null;
     const hadKey = !had ? '' : had.getAttribute('data-rs-signin') ? `[data-rs-signin="${CSS.escape(had.getAttribute('data-rs-signin'))}"]`
         : had.hasAttribute('data-rs-toggle') ? '[data-rs-toggle]' : had.hasAttribute('data-rs-add') ? '[data-rs-add]'
+        : had.getAttribute('data-rs-wall') ? `[data-rs-wall="${CSS.escape(had.getAttribute('data-rs-wall'))}"]`
+        : had.getAttribute('data-rs-wall-add') ? `[data-rs-wall-add="${CSS.escape(had.getAttribute('data-rs-wall-add'))}"]`
         : had.getAttribute('href') ? `a[href="${CSS.escape(had.getAttribute('href'))}"]` : '';
-    body.innerHTML = strip + warn + `<div class="rs-summary"><span>${summary}</span>
+    body.innerHTML = strip + signinWallsHtml(walls) + warn + `<div class="rs-summary"><span>${summary}</span>
             <div class="rs-actions">${toggle}${addBtn}</div></div>
         <div class="rs-note">Updated ${esc(estateAgo(f[ES.updated]))}.</div>
         ${shown.length || rest ? `<div class="rs-list">${shown.map(signinLineHtml).join('')}${rest}</div>` : ''}
@@ -6541,7 +6581,7 @@ function renderSignins(){
     // works the queue further down the page (review, 25 Sep 2026).
     if(hadKey){ const again = body.querySelector(hadKey); if(again) again.focus({ preventScroll: true }); }
     // Said once when it changes, from the one live region that stays in the page.
-    signinsSay(needs.length ? (needs.length === 1 ? '1 robot sign-in needs you' : `${needs.length} robot sign-ins need you`) : 'All robot sign-ins are fine');
+    signinsSay(needNames.length ? (needNames.length === 1 ? '1 robot sign-in needs you' : `${needNames.length} robot sign-ins need you`) : 'All robot sign-ins are fine');
 }
 // The one live region, said once when it changes; the unreadable paths say so too (review).
 function signinsSay(said){

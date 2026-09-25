@@ -174,6 +174,45 @@ test.describe('Robot sign-ins panel on a Mac', () => {
   });
 });
 
+// The blocker sweep's row (agent-blockers): a robot blocked on a sign-in the last check
+// called fine, a site missing from the list, and a step only Kevin can do (not a sign-in).
+function blockersRow(open) {
+  return { id: 'recBlockers', createdTime: ago(3), fields: {
+    [ES.key]: 'agent-blockers', [ES.kind]: 'report', [ES.status]: 'Worked', [ES.detail]: 'fixture',
+    [ES.payload]: JSON.stringify({ open, stale: 0, closedWhileBlocked: [] }), [ES.updated]: ago(3) } };
+}
+const WALLS = [
+  { task: 'recW1', name: 'Match the 12 Sep card charge', agent: 'Finance', kind: 'SIGN-IN', subject: 'www.amazon.co.uk', fix: 'sign in', days: 1 },
+  { task: 'recW2', name: 'Read the council portal', agent: 'Property', kind: 'SITE', subject: 'portal.fylde.gov.uk', fix: 'add it', days: 0 },
+  { task: 'recW3', name: 'Phone-free step', agent: 'Admin', kind: 'KEVIN', subject: 'signature', fix: 'sign it', days: 0 },
+];
+
+test.describe('Robot sign-ins panel and blocked robots', () => {
+  test.use({ userAgent: MAC_UA });
+
+  test('a robot blocked on a sign-in the list calls fine still needs him, never "All good"', async ({ page }) => {
+    const panel = await open(page, [signinRow([line('Amazon (order history)', 'www.amazon.co.uk', 'signed-in'),
+      line('Pingen (letters)', 'app.pingen.com', 'signed-in')]), blockersRow(WALLS)]);
+    await expect(panel).not.toContainText('All good');
+    await expect(panel).toContainText('2 sign-ins need you: www.amazon.co.uk, portal.fylde.gov.uk.');
+    await expect(page.locator('#signinsCount')).toHaveText('2');
+    await expect(panel.locator('[data-rs-wall-line="SIGN-IN"]')).toContainText('One task is blocked until the robot is signed in to www.amazon.co.uk.');
+    await expect(panel.locator('[data-rs-wall="www.amazon.co.uk"]')).toHaveAttribute('href', 'robotsignin://site/www.amazon.co.uk');
+    await expect(panel.locator('[data-rs-wall-add="portal.fylde.gov.uk"]')).toHaveAttribute('href', 'robotsignin://add');
+    await expect(panel.locator('[data-rs-wall-line]')).toHaveCount(2);   // a KEVIN step is not a sign-in
+    // The keyboard stays on the blocked site's own button through a redraw.
+    await panel.locator('[data-rs-wall-add="portal.fylde.gov.uk"]').focus();
+    await page.evaluate(() => renderSignins());
+    await expect(panel.locator('[data-rs-wall-add="portal.fylde.gov.uk"]')).toBeFocused();
+  });
+
+  test('a blocked site the list already calls signed out is counted once', async ({ page }) => {
+    const panel = await open(page, [signinRow([line('Amazon (order history)', 'www.amazon.co.uk', 'signed-out')]), blockersRow(WALLS.slice(0, 1))]);
+    await expect(panel).toContainText('One sign-in needs you: Amazon (order history).');
+    await expect(page.locator('#signinsCount')).toHaveText('1');
+  });
+});
+
 test.describe('Robot sign-ins panel on a phone', () => {
   test.use({ userAgent: PHONE_UA });
 
