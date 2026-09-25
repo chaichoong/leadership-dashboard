@@ -191,7 +191,8 @@ test.describe('Robot sign-ins panel and blocked robots', () => {
   test.use({ userAgent: MAC_UA });
 
   test('a robot blocked on a sign-in the list calls fine still needs him, never "All good"', async ({ page }) => {
-    const panel = await open(page, [signinRow([line('Amazon (order history)', 'www.amazon.co.uk', 'signed-in'),
+    // The last check called Amazon fine two days ago; the wall is a day old.
+    const panel = await open(page, [signinRow([line('Amazon (order history)', 'www.amazon.co.uk', 'signed-in', { at: ago(2880), how: 'robot check' }),
       line('Pingen (letters)', 'app.pingen.com', 'signed-in')]), blockersRow(WALLS)]);
     await expect(panel).not.toContainText('All good');
     await expect(panel).toContainText('2 sign-ins need you: www.amazon.co.uk, portal.fylde.gov.uk.');
@@ -214,6 +215,22 @@ test.describe('Robot sign-ins panel and blocked robots', () => {
     await expect(panel.locator('[data-rs-wall="www.amazon.co.uk"]')).toHaveCount(0);
     await expect(page.locator('#signinsCount')).toHaveText('0');
     await expect(panel).not.toContainText('needs you');
+  });
+
+  test('a robot confirming his sign-in keeps the wall cleared; a check from before the wall does not', async ({ page }) => {
+    // Wall 0.2 days old at a sweep 25 min ago; the robot found the site signed in 2 min ago.
+    const w = Object.assign({}, WALLS[0], { days: 0.2 });
+    let panel = await open(page, [signinRow([line('Amazon (order history)', 'www.amazon.co.uk', 'signed-in', { at: ago(2), how: 'robot check' })]),
+      blockersRow([w], 25)]);
+    await expect(panel.locator('[data-rs-wall-line="done"]')).toContainText('The robot has found it signed in since.');
+    await expect(page.locator('#signinsCount')).toHaveText('0');
+    // The Amazon case: a check said signed in BEFORE the wall opened (the password prompt came
+    // back after it), so the wall still needs him.
+    const fresh = Object.assign({}, WALLS[0], { days: 0 });
+    panel = await open(page, [signinRow([line('Amazon (order history)', 'www.amazon.co.uk', 'signed-in', { at: ago(300), how: 'robot check' })]),
+      blockersRow([fresh], 5)]);
+    await expect(panel.locator('[data-rs-wall="www.amazon.co.uk"]')).toBeVisible();
+    await expect(page.locator('#signinsCount')).toHaveText('1');
   });
 
   test('a wall that may have opened AFTER his sign-in still needs him', async ({ page }) => {
@@ -260,7 +277,7 @@ test.describe('Robot sign-ins panel and blocked robots', () => {
     // PR #561: a flat's wall subject reads "my.utilita.co.uk (utilita-apt2)".
     const flat = { task: 'recW9', name: 'Read the Duckworth meter', agent: 'Property', kind: 'SIGN-IN', subject: 'my.utilita.co.uk (utilita-apt2)', fix: 'sign in', days: 1 };
     const lines = [line('Utilita Apartment 1', 'my.utilita.co.uk', 'you-signed-in', { profile: 'utilita-apt1', at: ago(2), how: 'you signed in' }),
-      line('Utilita Apartment 2', 'my.utilita.co.uk', 'signed-in', { profile: 'utilita-apt2', how: 'hourly read' })];
+      line('Utilita Apartment 2', 'my.utilita.co.uk', 'signed-in', { profile: 'utilita-apt2', how: 'hourly read', at: ago(2880) })];   // read before the wall
     const panel = await open(page, [signinRow(lines), blockersRow([flat])]);
     const btn = panel.locator('[data-rs-wall="my.utilita.co.uk (utilita-apt2)"]');
     await expect(btn).toHaveAttribute('href', 'robotsignin://profile/utilita-apt2');   // never site/<"host (profile)">

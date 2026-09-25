@@ -6513,7 +6513,9 @@ function signinWallsHtml(walls, lines, failed){
             : w.kind === 'SIGN-IN'
                 ? `<a class="btn btn-success btn-sm" href="${esc(w.profile ? 'robotsignin://profile/' + encodeURIComponent(w.profile) : 'robotsignin://site/' + encodeURIComponent(w.host))}" data-rs-wall="${esc(w.subject)}" aria-label="Sign in to ${esc(w.label || w.subject)}">Sign in</a>`
                 : `<a class="btn btn-sm" href="robotsignin://add" data-rs-wall-add="${esc(w.subject)}" aria-label="Add ${esc(w.subject)} to the robot's list">+ Add this site</a>`;
-        const note = w.done ? 'You signed in since. The robot picks the task up at its next pass.'
+        const note = w.done ? (w.doneBy === 'signed-in'
+                ? 'The robot has found it signed in since. It picks the task up at its next pass.'
+                : 'You signed in since. The robot picks the task up at its next pass.')
             : w.names.slice(0, 3).join(', ') + (n > 3 ? ' and ' + (n - 3) + ' more' : '');
         return `<div class="rs-line" data-rs-wall-line="${esc(w.done ? 'done' : w.kind)}"><div><span class="rs-label">${what}</span>
             <span class="rs-when">${esc(note)}</span></div>${btn}</div>`;
@@ -6536,8 +6538,13 @@ function signinMarkWalls(walls, lines){
         // A flat's wall is named by that flat's line ("Utilita Apartment 1 (…)"), not its host.
         const own = w.profile ? lines.find(ln => signinLineIsWall(ln, w)) : null;
         w.label = own ? own.label : '';
-        w.done = w.kind === 'SIGN-IN' && isFinite(w.openedBy) && lines.some(ln => ln.state === 'you-signed-in'
-            && signinLineIsWall(ln, w) && Date.parse(ln.at || '') >= w.openedBy);
+        // Cleared by his sign-in OR a robot's signed-in look, either one after the wall opened:
+        // the first look after he signs in turns "You signed in" into "Signed in", and the
+        // wall must not come back for it (review). The same rule the sweep clears walls by.
+        const clear = isFinite(w.openedBy) ? lines.find(ln => (ln.state === 'you-signed-in' || ln.state === 'signed-in')
+            && signinLineIsWall(ln, w) && Date.parse(ln.at || '') >= w.openedBy) : null;
+        w.done = w.kind === 'SIGN-IN' && !!clear;
+        w.doneBy = clear ? clear.state : '';
     });
     return walls;
 }
