@@ -169,6 +169,14 @@ def late_approved_card_links_to_reminder():
     return pr.plan_tasks([t], [row], {}, D("2026-09-25"))[0][0]
 case("late_approved_card_links_to_reminder", late_approved_card_links_to_reminder)
 
+def history_email_is_not_this_bill():
+    wk38 = bill("recWk38", "2026-09-15", 2.22, "Oakfield Ground Rents Ltd", Status="Paid",
+                **{"Gmail Message ID": "18a0f00dcafe0038"})
+    t = task(created="2026-09-22", approved="2026-09-23",
+             text=CARD + "\nthis week #all/18a0f00dcafe0039; earlier: #all/18a0f00dcafe0038")
+    return pr.plan_tasks([t], [wk38], {}, D("2026-10-23"))[0][0]
+case("history_email_is_not_this_bill", history_email_is_not_this_bill)
+
 def missed_friday_is_read():
     tz = pr.LONDON
     start, _ = pr.scan_range(datetime(2026, 9, 25, 21, 0, tzinfo=tz), 1,
@@ -232,6 +240,9 @@ describe('payment run: approved payment cards reach the list (cause 2)', () => {
   });
   it('a card raised months ago but approved now links to this month\'s reminder email', () => {
     expect(value('late_approved_card_links_to_reminder')).toBe('link');
+  });
+  it('last week\'s paid bill named in a card\'s history never stands in for this week\'s', () => {
+    expect(value('history_email_is_not_this_bill')).toBe('check');
   });
   it('a card is never assumed paid: a possible payment is named on it, and it stays Unpaid', () => {
     expect(value('card_never_assumed_paid')).toEqual(['check_paid', 'Unpaid']);

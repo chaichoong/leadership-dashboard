@@ -1549,15 +1549,21 @@ def card_twin(c, records):
     """(row, how) for the row on the list that already IS this card's bill, or
     (None, None).
 
-    how = "strong": the card names the row's own email (its Gmail id is in the
-    card's track record, the row is within 14 days of the card) and the amounts
-    agree, or the row already records the card. "reference": the same amount and the same reference on both.
+    how = "strong": the row's email is the NEWEST one the card names (its Gmail
+    id, within 14 days of the card) and the amounts agree, or the row already
+    records the card. "reference": the same amount and the same reference on both.
     "weak": the same amount and payee around the card's date, nothing more.
     A weak twin is never folded in silently (review, 25 Sep 2026): a second bill
     of one size from one contractor looks exactly like it. The card is listed
     and the row's description says what to check."""
     card, text = c["card"], c.get("text", "")
     candidates = [r for r in records if status_of(r) in ("Unpaid", "Paid", "")]
+    # Gmail message ids rise with time, so the largest the card names is its
+    # newest email. The track record also names the sender's EARLIER emails,
+    # and last week's paid bill of the same size must not stand in for this
+    # week's (fourth review, 25 Sep 2026).
+    named_ids = re.findall(r"#all/([0-9a-f]{12,20})\b", text)
+    newest = max(named_ids, key=lambda i: int(i, 16)) if named_ids else None
     for r in candidates:
         mid = r["fields"].get(FIELD_MSG_ID) or ""
         if c["id"] in (r["fields"].get("Notes") or ""):
@@ -1566,7 +1572,7 @@ def card_twin(c, records):
         # The track record also lists the sender's EARLIER emails, so the id
         # alone could be last month's bill of the same size (second review).
         # The card's own email is days old, not weeks.
-        if (mid and ("#all/%s" % mid) in text and day and near_card(day, c, 14)
+        if (mid and mid == newest and day and near_card(day, c, 14)
                 and (card.get("amount") is None or same_amount(r["fields"], card))):
             return r, "strong"
     for r in candidates:
@@ -2550,6 +2556,12 @@ def cmd_selftest(_args):
     feb = {"id": "recFeb", "name": "Oakfield Alarms Ltd - 2 Ash Court", "created": "2026-02-18",
            "approved": "2026-09-25", "card": parse_payment_card("MARK FOR PAYMENT — £330.00"),
            "refused": "", "text": "- email: #all/18a0f00dcafe0330"}
+    wk = bill("recWk38", "2026-09-15", 2.22, "Oakfield Ground Rents Ltd", Status="Paid",
+              **{FIELD_MSG_ID: "18a0f00dcafe0038"})
+    wk_card = dict(task, created="2026-09-22", approved="2026-09-23",
+                   text=card_text + "\nthis week #all/18a0f00dcafe0039; earlier: #all/18a0f00dcafe0038")
+    check("last week's paid bill named in a card's history is not this week's bill",
+          act(plan_tasks([wk_card], [wk], {}, D("2026-10-23"))), [("check", "recWk38")])
     check("a card raised in February and approved in September links to September's reminder",
           act(plan_tasks([feb], [reminder], {}, D("2026-09-25"))), [("link", "recRem")])
     check("a card already on the list is left alone",
