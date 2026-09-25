@@ -61,6 +61,15 @@ describe('tool policy is shared, not copied', () => {
     expect(out).toContain('Bash(curl:*)');
   });
 
+  it('lets a run wait 40 minutes for its agents, under the hand-back poll\'s own 45-minute limit (25 Sep 2026)', () => {
+    const out = execFileSync('bash', ['-c',
+      `. ${JSON.stringify(resolve(ROOT, 'scripts/agent-tools.sh'))}; echo "$CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS"`,
+    ], { encoding: 'utf8', env: { PATH: process.env.PATH, HOME: process.env.HOME } }).trim();
+    expect(Number(out)).toBe(2400000);
+    const poll = read('scripts/handback-poll-run.sh').match(/HANDBACK_MAX_MINUTES:-(\d+)/);
+    expect(Number(out) / 60000).toBeLessThan(Number(poll[1]));
+  });
+
   it('resolves node by absolute path, because launchd has no nvm on PATH', () => {
     const out = execFileSync('bash', ['-c',
       `. ${JSON.stringify(resolve(ROOT, 'scripts/agent-tools.sh'))}; echo "$AGENT_NODE_BIN"`,
