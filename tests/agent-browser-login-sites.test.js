@@ -264,6 +264,35 @@ describe('signin-list and login: every sign-in the Robot sign-in app can open', 
     });
   });
 
+  // Third review: "Add a new site" on www.youtube.com opened YouTube Studio and said it was
+  // already listed, while robots still could not read www.youtube.com. A site Kevin adds on
+  // purpose (`add`, the app's "new" lines) is its own site; only a site with flats absorbs it.
+  it('a sibling Kevin adds on purpose becomes its own site, except beside a site with flats', () => {
+    withSites({ ...FLATS }, (m, file) => {
+      const env = { ...process.env, AGENT_BROWSER_SITES_FILE: file };
+      expect(execFileSync('node', [modPath, 'signin-list', '--for', 'https://www.youtube.com/'], { encoding: 'utf8', env }).trim()).toBe('');
+      expect(m.recordLoginSite('https://www.youtube.com/', {}).changed).toBe(false);          // a task line: never
+      expect(m.recordLoginSite('https://www.youtube.com/', { label: 'YouTube', add: true }))
+        .toEqual({ host: 'www.youtube.com', changed: true });
+      expect(m.hostAllowed('https://www.youtube.com/watch?v=x')).toBe(true);
+      expect(m.recordLoginSite('https://www.utilita.co.uk/login', { add: true }).changed).toBe(false);
+      expect(JSON.parse(readFileSync(file, 'utf8'))['www.utilita.co.uk']).toBeUndefined();
+    });
+  });
+
+  it('a short session is inherited from any ancestor, and a bare platform domain is never a site', () => {
+    withSites({}, (m, file) => {
+      m.recordLoginSite('https://idam.companieshouse.gov.uk/login', { label: 'Companies House account' });
+      expect(JSON.parse(readFileSync(file, 'utf8'))['idam.companieshouse.gov.uk'].shortSession).toBe(true);
+      const g = m.recordLoginSite('https://google.com/', { add: true });
+      expect(g.changed).toBe(false);
+      expect(g.note).toMatch(/many separate sign-ins/);
+      expect(m.hostAllowed('https://mail.google.com/')).toBe(false);
+      expect(m.recordLoginSite('https://mail.google.com/mail/u/0/', { label: 'Gmail', add: true }).changed).toBe(true);
+      expect(m.hostAllowed('https://drive.google.com/')).toBe(false);
+    });
+  });
+
   it('the registrable domain agrees with agent-dispatch.py, host for host', () => {
     const hosts = ['app.pingen.com', 'www.topcashback.co.uk', 'my.utilita.co.uk', 'www.tax.service.gov.uk',
       'gov.uk', 'evernote.com', 'a.b.nhs.uk', 'x.co', 'localhost', 'www.amazon.co.uk'];

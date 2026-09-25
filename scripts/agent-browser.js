@@ -43,7 +43,7 @@
  * is auditable after the fact rather than trusted at the time.
  *
  * USAGE
- *   node scripts/agent-browser.js login   --url URL [--profile NAME] [--label NAME]
+ *   node scripts/agent-browser.js login   --url URL [--profile NAME] [--label NAME] [--add]
  *   node scripts/agent-browser.js signin-list [--for URL]              every sign-in the Robot sign-in app can open
  *   node scripts/agent-browser.js session --site HOST [--shot PATH]   is the robot signed in there? (walks the door)
  *   node scripts/agent-browser.js read    --url URL [--shot OUT.png] [--wait MS] [--wait-for SELECTOR] [--max-text N]
@@ -312,7 +312,7 @@ function signinOwner(host, sites = loadSites()) {
   return sib ? { key: sib, sibling: true } : null;
 }
 
-function recordLoginSite(url, { label, profile } = {}) {
+function recordLoginSite(url, { label, profile, add } = {}) {
   let u;
   try { u = new URL(url); } catch { die(`${url} is not a web address.`); }
   if (u.username || u.password) die('that address carries a name or password in it. A sign-in page address never does.');
@@ -322,16 +322,20 @@ function recordLoginSite(url, { label, profile } = {}) {
   // made an HMRC or Loom sign-in, whose pages sit on www., write a second entry
   // without HMRC's shortSession, and the keep-alive would then have raised a
   // false HMRC task every morning.
-  const found = signinOwner(host, sites);
+  let found = signinOwner(host, sites);
+  const kept = { host, changed: false };
+  // A sibling is written only when Kevin adds it on purpose ("Add a new site",
+  // `add`): from a task line its page would sit on a host its entry does not
+  // allow, and a new entry would widen the allowlist to a whole domain on the
+  // strength of one line (evernote.com beside www.evernote.com). A site with
+  // flats (my.utilita.co.uk) settles every sibling, on any profile, always.
+  if (found && found.sibling) {
+    if (!add || Array.isArray(sites[found.key].profiles)) return kept;
+    found = null;                                                      // www.youtube.com beside studio.youtube.com is its own site
+  }
   const ownerKey = found ? found.key : null;
   const owner = ownerKey ? sites[ownerKey] : null;
   const onMain = (profile || 'default') === 'default' && !(owner && Array.isArray(owner.profiles));
-  const kept = { host, changed: false };
-  // A sibling is never written: its page would sit on a host its entry does not
-  // allow, and a new entry would widen the allowlist to a whole domain on the
-  // strength of one task line (evernote.com beside www.evernote.com). A site
-  // with flats (my.utilita.co.uk) settles every sibling, on any profile.
-  if (found && found.sibling) return kept;
   // A profile sign-in only ever adds a stranger, as before; a main-profile
   // sign-in also gives a login site with no page its page.
   if (onMain ? !!(owner && owner.login && owner.loginUrl) : !!owner) return kept;
@@ -344,16 +348,24 @@ function recordLoginSite(url, { label, profile } = {}) {
   // An http page still opens (agents' lines take http too), but is never written.
   if (u.protocol !== 'https:') return Object.assign(kept, { note: `${url} is not https, so it was not recorded on the allowlist.` });
   // A parent that holds no login (gov.uk) is not turned into one: the new site
-  // gets its own entry, and keeps the parent's short session (a GOV.UK service
+  // gets its own entry, and keeps any ancestor's short session (a GOV.UK service
   // signs in through One Login, which lapses in an hour; without the flag the
   // keep-alive raises a sign-in task for it every morning).
   const key = owner && (ownerKey === host || owner.login) ? ownerKey : host;
+  // A bare platform domain would let the robot into every service under it
+  // (google.com: Gmail, Drive). The service's own address is the site.
+  if (SIGNIN_SHARED_DOMAINS.has(key)) {
+    return Object.assign(kept, { note: `${key} holds many separate sign-ins, so it was not recorded. Add the service's own address instead (for example mail.google.com).` });
+  }
+  // Short session from ANY ancestor: idam.companieshouse.gov.uk sits under
+  // companieshouse.gov.uk, which has no flag, and under gov.uk, which has.
+  const shortAbove = Object.keys(sites).some(k => k !== key && (key === k || key.endsWith('.' + k)) && sites[k].shortSession);
   const extra = readSitesFile();
   const entry = Object.assign({}, extra[key] || {});
   entry.label = entry.label || (key === ownerKey && owner.label) || label || host;
   entry.login = true;
   if (onMain) entry.loginUrl = url;
-  if (key !== ownerKey && owner && owner.shortSession) entry.shortSession = true;
+  if (key !== ownerKey && shortAbove) entry.shortSession = true;
   extra[key] = entry;
   fs.mkdirSync(path.dirname(SITES_FILE), { recursive: true });
   const tmp = SITES_FILE + '.tmp';
@@ -874,8 +886,11 @@ async function main() {
     if (forUrl) {
       let h;
       try { h = new URL(forUrl).hostname.toLowerCase(); } catch { die(`${forUrl} is not a web address.`); }
-      const found = signinOwner(h);
-      only = found ? found.key : '';
+      const sites = loadSites();
+      const found = signinOwner(h, sites);
+      // A sibling counts only when it holds flats: www.utilita.co.uk IS the two
+      // flats, while www.youtube.com is not YouTube Studio and is added as a site.
+      only = found && (!found.sibling || Array.isArray(sites[found.key].profiles)) ? found.key : '';
     }
     for (const t of signinTargets(loadSites(), problems)) {
       if (only !== null && t.host !== only) continue;
@@ -891,10 +906,11 @@ async function main() {
     const url = arg(rest, 'url');
     if (!url) die('--url is required');
     if (!PROFILE_NAME_RE.test(profile)) die(`--profile ${profile} is not a plain folder name.`);
-    const rec = recordLoginSite(url, { label: arg(rest, 'label', null), profile });
+    const rec = recordLoginSite(url, { label: arg(rest, 'label', null), profile, add: rest.includes('--add') });
     const host = new URL(url).hostname.toLowerCase();
     if (rec.changed) console.log(`Recorded ${rec.host} on the allowlist.`);
-    if (rec.note) console.log(rec.note);
+    if (rec.note) console.log('NOTE: ' + rec.note);                   // the Robot sign-in app shows NOTE lines
+
     // TWO TRAPS, both paid for on 2 Sep 2026 (Evernote):
     //
     // 1. A login window driven by Playwright is still an automated browser,

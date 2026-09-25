@@ -239,18 +239,24 @@ describe('the Robot sign-in app and its link', () => {
       expect(run(`s's profileOf("${flat}")`)).toBe('utilita-apt1');
       expect(run(`s's profileOf("${waiting}")`)).toBe('default');
       const flatCmd = run(`s's loginCommand("${flat}")`);
-      expect(flatCmd).toMatch(/agent-browser\.js login --url 'https:\/\/my\.utilita\.co\.uk\/energy' --profile 'utilita-apt1' --label 'Utilita Apartment 1 \(a@b\.com\)' > \/dev\/null$/);
+      expect(flatCmd).toMatch(/agent-browser\.js login --url 'https:\/\/my\.utilita\.co\.uk\/energy' --profile 'utilita-apt1' --label 'Utilita Apartment 1 \(a@b\.com\)'$/);
+      expect(flatCmd).not.toMatch(/--add/);
       // A waiting line's name carries "(2 waiting)", so it is never offered as the site's name.
-      expect(run(`s's loginCommand("${waiting}")`)).toMatch(/login --url 'https:\/\/app\.pingen\.com\/' --profile 'default' > \/dev\/null$/);
+      expect(run(`s's loginCommand("${waiting}")`)).toMatch(/login --url 'https:\/\/app\.pingen\.com\/' --profile 'default'$/);
       // Add a new site: a bar in the typed name cannot shift the fields, and a blank name is the host.
-      expect(run(`s's newSiteLine("Acme | Portal", "portal.acme.co.uk", "https://portal.acme.co.uk/login")`))
-        .toBe('Acme - Portal | portal.acme.co.uk | https://portal.acme.co.uk/login | default');
+      const added = run(`s's newSiteLine("Acme | Portal", "portal.acme.co.uk", "https://portal.acme.co.uk/login")`);
+      expect(added).toBe('Acme - Portal | portal.acme.co.uk | https://portal.acme.co.uk/login | default | new');
       expect(run(`s's newSiteLine("", "portal.acme.co.uk", "https://portal.acme.co.uk/login")`))
-        .toBe('portal.acme.co.uk | portal.acme.co.uk | https://portal.acme.co.uk/login | default');
+        .toBe('portal.acme.co.uk | portal.acme.co.uk | https://portal.acme.co.uk/login | default | new');
+      // Only a line Kevin added on purpose carries --add, and it still opens on the main profile.
+      expect(run(`s's loginCommand("${added}")`)).toMatch(/--url 'https:\/\/portal\.acme\.co\.uk\/login' --profile 'default' --label 'Acme - Portal' --add$/);
+      // login's NOTE lines reach Kevin; its other output does not.
+      expect(run(`s's notesIn("Plain Chrome window open" & linefeed & "NOTE: gov.uk is read-only" & linefeed & "Kept 2 session cookie(s)")`))
+        .toBe('gov.uk is read-only');
       expect(run(`s's addNewItem`)).toBe('+ Add a new site…');
       // A line break in a typed name is flattened, never a second line in the list.
       expect(run(`s's newSiteLine("Two" & linefeed & "Lines", "h.example.com", "https://h.example.com/")`))
-        .toBe('Two Lines | h.example.com | https://h.example.com/ | default');
+        .toBe('Two Lines | h.example.com | https://h.example.com/ | default | new');
       // signin-list's SKIPPED lines are said aloud and never offered as a site (review: do shell
       // script drops stderr on success, so they arrive on stdout).
       expect(run(`((count of (sites of (s's splitSiteList("A | a.com | https://a.com/ | default" & linefeed & "SKIPPED: x: bad" & linefeed)))) as text) & "/" & (item 1 of (skipped of (s's splitSiteList("SKIPPED: x: bad"))))`))

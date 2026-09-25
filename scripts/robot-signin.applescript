@@ -101,7 +101,9 @@ on newSiteLine(theName, theHost, theUrl)
 	set theName to bits as text
 	set AppleScript's text item delimiters to ""
 	if theName is "" then set theName to theHost
-	return theName & " | " & theHost & " | " & theUrl & " | default"
+	-- The fifth field marks a site Kevin added on purpose: `login --add` may then record a
+	-- sibling of a listed site (www.youtube.com beside studio.youtube.com) as its own site.
+	return theName & " | " & theHost & " | " & theUrl & " | default | new"
 end newSiteLine
 
 -- "Add a new site…" (25 Sep 2026): Kevin pastes the site's sign-in page and names it, and the
@@ -223,13 +225,27 @@ end fieldOf
 
 -- The window command for one line, on that line's profile. Only a four-field line carries a
 -- clean name (a waiting line's reads "Pingen (2 waiting)"), and the name is used only when the
--- site is new to the allowlist. stdout only to /dev/null: `do shell script` reports stderr as
--- the error text, and that is what signInTo's notification shows.
+-- site is new to the allowlist. stderr stays out of stdout: `do shell script` reports stderr as
+-- the error text, and that is what signInTo's notification shows. stdout is read for NOTE lines.
 on loginCommand(theLine)
-	set nameArg to ""
-	if fieldCount(theLine) > 3 then set nameArg to " --label " & quoted form of fieldOf(theLine, 1)
-	return quoted form of nodeBin() & " scripts/agent-browser.js login --url " & quoted form of fieldOf(theLine, 3) & " --profile " & quoted form of profileOf(theLine) & nameArg & " > /dev/null"
+	set extra to ""
+	if fieldCount(theLine) > 3 then set extra to " --label " & quoted form of fieldOf(theLine, 1)
+	if fieldCount(theLine) > 4 then
+		if fieldOf(theLine, 5) is "new" then set extra to extra & " --add"
+	end if
+	return quoted form of nodeBin() & " scripts/agent-browser.js login --url " & quoted form of fieldOf(theLine, 3) & " --profile " & quoted form of profileOf(theLine) & extra
 end loginCommand
+
+-- What `login` said that Kevin must hear: its NOTE lines (a site it could not record, and why).
+-- Before this the app sent login's output to /dev/null, so "gov.uk is read-only, not recorded"
+-- reached nobody and the site was simply missing from the list next time (found in review).
+on notesIn(theOutput)
+	set theNotes to {}
+	repeat with L in paragraphs of theOutput
+		if (L as text) starts with "NOTE: " then set end of theNotes to text 7 thru -1 of (L as text)
+	end repeat
+	return theNotes
+end notesIn
 
 -- One site: open the window, wait for Cmd+Q, hand the waiting tasks back.
 -- Returns the number of tasks handed back, or -1 if the window could not open.
@@ -240,7 +256,10 @@ on signInTo(theLine)
 	set theProfile to profileOf(theLine)
 	display notification "Sign in, then press Cmd+Q on the Chrome window." with title "Robot sign-in: " & theLabel
 	try
-		sh(loginCommand(theLine))
+		set said to sh(loginCommand(theLine))
+		repeat with N in notesIn(said)
+			display notification (N as text) with title "Robot sign-in: " & theLabel
+		end repeat
 	on error errMsg
 		display notification "Could not open the window: " & errMsg with title "Robot sign-in: " & theLabel
 		return -1
