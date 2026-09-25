@@ -1582,9 +1582,14 @@ def card_twin(c, records):
         # Recurring bills (ground rent, service charge, council tax) carry the
         # same reference every period, so last half-year's paid row must not
         # stand in for this one (fifth review, 25 Sep 2026).
-        if (ref_row and ref_card and ref_row == ref_card and same_amount(r["fields"], card)
-                and day and near_card(day, c, 30)):
-            return r, "reference"
+        if ref_row and ref_card and ref_row == ref_card and same_amount(r["fields"], card):
+            if day and near_card(day, c, 30):
+                return r, "reference"
+            if status_of(r) in ("Unpaid", ""):
+                # Still owed from an earlier period: the same bill, or last
+                # period's demand left unpaid. Listed with a CHECK, never
+                # folded and never silent (seventh review, 25 Sep 2026).
+                return r, "weak"
     for r in candidates:
         day = (r["fields"].get("Email Date") or "")[:10]
         # An OPEN row of the same payee and size is a likely twin whatever its
@@ -2536,6 +2541,10 @@ def cmd_selftest(_args):
           act(plan_tasks([task], [bill("recPrev", "2026-03-20", 2.22, "Other name", Status="Paid",
                                        Reference="GR-4471")], {}, D("2026-10-23"))),
           [("create", None)])
+    check("an old unpaid row with the same reference is flagged, even under another payee name",
+          act(plan_tasks([task], [bill("recMay", "2026-05-08", 2.22, "OGR Managing Agents",
+                                       Reference="GR 4471")], {}, D("2026-10-23"))),
+          [("check", "recMay")])
     check("a same-payee same-size bill still owed from months ago is flagged as a possible twin",
           act(plan_tasks([task], [bill("recMarch", "2026-03-26", 2.22, "Oakfield Ground Rents Ltd")],
                          {}, D("2026-10-23"))), [("check", "recMarch")])

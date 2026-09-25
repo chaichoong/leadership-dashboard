@@ -187,6 +187,11 @@ def old_open_twin_is_flagged():
     return pr.plan_tasks([task()], [old], {}, D("2026-10-23"))[0][0]
 case("old_open_twin_is_flagged", old_open_twin_is_flagged)
 
+def old_open_same_reference_is_flagged():
+    old = bill("recMay", "2026-05-08", 2.22, "OGR Managing Agents", Reference="GR 4471")
+    return pr.plan_tasks([task()], [old], {}, D("2026-10-23"))[0][0]
+case("old_open_same_reference_is_flagged", old_open_same_reference_is_flagged)
+
 def missed_friday_is_read():
     tz = pr.LONDON
     start, _ = pr.scan_range(datetime(2026, 9, 25, 21, 0, tzinfo=tz), 1,
@@ -259,6 +264,9 @@ describe('payment run: approved payment cards reach the list (cause 2)', () => {
   });
   it('a same-payee same-size bill still owed from months ago is flagged, never listed silently twice', () => {
     expect(value('old_open_twin_is_flagged')).toBe('check');
+  });
+  it('an old unpaid row with the same reference is flagged, even under another payee name', () => {
+    expect(value('old_open_same_reference_is_flagged')).toBe('check');
   });
   it('a card is never assumed paid: a possible payment is named on it, and it stays Unpaid', () => {
     expect(value('card_never_assumed_paid')).toEqual(['check_paid', 'Unpaid']);
