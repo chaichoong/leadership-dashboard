@@ -88,6 +88,7 @@ L = {  # Tenant Leads
     "stage": "fldRpqg93nUnBZLZy", "screening": "fld3djcL3Pf60GWyS", "lastContacted": "fldEma41pcggmWigd",
     "tenant": "fldH5J4SEXEIh0SYm", "royTask": "fldgRbFt08VdrymVH", "bonus": "fldm8vbIfeF8NveIf",
     "legacyRef": "fldKg8Y9IKV7xfuQI", "notes": "fld4jJYvUceieZfi3", "heardFrom": "fldeQgocKOksteeoR",
+    "cap": "fldNpufMz6nTzPDhY",
 }
 R = {  # Tenant Referrers
     "org": "fldO709oy06qsarDq", "type": "fldJHElViKNWjynR0", "area": "fldBNwAQHaZRwqYhV",
@@ -121,6 +122,13 @@ ES = {"key": "fldLO6xJqkokvVR4g", "kind": "fldfjQOn76VpgKEfZ", "label": "fldlnvv
 
 # ─── the chain's rules (Kevin, 25 Sep 2026) ──────────────────────────
 FORM_URL = "https://airtable.com/appnqjDpqDniH3IRl/shrTuDF8s04Kp5XGT"
+# The link people see (Kevin, 25 Sep 2026: "the link needs to be simplified"). rooms.agilelets.co.uk is
+# the chaichoong/agilelets-rooms GitHub Pages site: one page per channel that opens FORM_URL with the
+# channel set and hidden, and the area set to Haverhill and hidden. The run checks it opens the form
+# before any email or advert carries it (link_works), so a dead link never goes out.
+SHORT_BASE = "https://rooms.agilelets.co.uk"
+SHORT_LINKS = {"Other": "", "Referrer": "r", "Tenant referral": "t", "SpareRoom": "s", "OpenRent": "o",
+               "Gumtree": "g", "Facebook": "f", "Past applicant": "p"}
 STATUS_KEY = "tenant-chain"
 SELF_MANAGED = "Property Portfolio"
 # Growth Strategy values meaning rooms for our niche. The old names are still read (Growth Plan v3).
@@ -136,10 +144,10 @@ PAST_APPLICANTS_PER_TASK, PAST_APPLICANT_TASK_EVERY_DAYS = 5, 7
 BONUS_AMOUNT = 50
 # Towns that always get the quiet "register now" mail-out, openings or not: the home cluster.
 HOME_TOWNS = ("Haverhill",)
-# Referrers who serve people near a town. A Haverhill room suits someone moving on from Cambridge.
+# Referrers who serve people near a town. Kevin, 25 Sep 2026 (card review): Haverhill only for now,
+# and only contacts in and around it, never "people who are miles away": Haverhill and West Suffolk.
 NEAR = {
-    "Haverhill": {"Haverhill", "West Suffolk", "Cambridge", "South Cambridgeshire",
-                  "East Cambridgeshire", "Braintree", "Uttlesford"},
+    "Haverhill": {"Haverhill", "West Suffolk"},
     "Soham": {"Soham", "East Cambridgeshire", "Cambridge", "West Suffolk"},
 }
 # Task-name lanes. No hyphens: create-agent-task.py keys a task on its "LANE:" prefix only when
@@ -302,8 +310,21 @@ def street(name):
 
 
 def form_link(channel):
-    q = urllib.parse.urlencode({"prefill_How They Heard": channel, "hide_How They Heard": "true"})
-    return f"{FORM_URL}?{q}"
+    code = SHORT_LINKS[channel]
+    return f"{SHORT_BASE}/{code}" if code else SHORT_BASE
+
+
+def link_works():
+    """True when every short link opens a page that sends the reader to the sign-up form."""
+    for code in SHORT_LINKS.values():
+        try:
+            with urllib.request.urlopen(urllib.request.Request(f"{SHORT_BASE}/{code}",
+                                                               headers={"User-Agent": "tenant-leads"}), timeout=20) as r:
+                if r.status != 200 or FORM_URL not in r.read().decode("utf-8", "replace"):
+                    return False
+        except Exception:                               # noqa: BLE001 — any failure is "does not work"
+            return False
+    return True
 
 
 def fmt_day(d):
@@ -324,7 +345,9 @@ def is_legacy(lead):
 
 
 def lead_areas(lead):
-    return [sel(a) for a in lead["fields"].get(L["areas"]) or []]
+    """The towns a person asked for. The form stopped asking on 25 Sep 2026 (Kevin: Haverhill only for
+    now), so none given means Haverhill, for screening, Roy's list and the move-in alike."""
+    return [sel(a) for a in lead["fields"].get(L["areas"]) or []] or list(HOME_TOWNS)
 
 
 # ─── Airtable ────────────────────────────────────────────────────────
@@ -382,6 +405,7 @@ def load(day):
                                      "fields[]": list(TK.values())}),
     }
     data["sentThreads"] = sent_threads(data["tasks"])
+    data["linkLive"] = link_works()
     # The compliance book (agent-dispatch's reading, the one the Property Compliance page draws) says
     # what each house holds. Unreadable is recorded, never taken as "all in order".
     try:
@@ -680,6 +704,7 @@ def funnel(data, day):
 
 # ─── the chain's own tasks ───────────────────────────────────────────
 REFUSED_MARK = "TENANT CHAIN REFUSED"
+SUPERSEDED_MARK = "TENANT CHAIN SUPERSEDED"
 
 
 def chain_tasks(data, kind, town=None):
@@ -687,7 +712,8 @@ def chain_tasks(data, kind, town=None):
     left out, so the chain tries again the next day and the monitor stays red until one lands."""
     pre = PREFIXES[kind] + (town or "")
     return [t for t in data["tasks"] if str(t["fields"].get(TK["name"]) or "").startswith(pre)
-            and REFUSED_MARK not in str(t["fields"].get(TK["notes"]) or "")]
+            and REFUSED_MARK not in str(t["fields"].get(TK["notes"]) or "")
+            and SUPERSEDED_MARK not in str(t["fields"].get(TK["notes"]) or "")]
 
 
 def created_day(rec):
@@ -1001,13 +1027,35 @@ def screen(f, day, towns):
         return "Not suitable", "not on Universal Credit", extra
     if sel(f.get(L["single"])) == "No":
         return "Not suitable", "not moving in on their own", extra
-    areas = [sel(a) for a in (f.get(L["areas"]) or [])]
+    # Kevin, 25 Sep 2026: the form no longer asks which towns; every sign-up is for Haverhill.
+    areas = lead_areas({"fields": f})
     if not lead_towns(areas) & towns:
         return "Not suitable", f"wants {', '.join(areas) or 'no town'}; we have no rooms there", extra
     note = "fits: 35+, on Universal Credit, living alone"
     if sel(f.get(L["uc"])) in ("Applying", "Unknown"):
         note += f" (Universal Credit: {sel(f.get(L['uc'])).lower()}, check at the viewing)"
-    return "Qualified", note, extra
+    return "Qualified", note + "; " + cap_note(f), extra
+
+
+# The benefit cap decides whether Universal Credit covers the rent (the Growth Plan's calculator:
+# earnings over the threshold, LCWRA, PIP or DLA, or a carer element lift it). Capped people still
+# qualify; Roy's list puts the exempt first and names the gap to check.
+CAP_EXEMPT = ("LCWRA (health element in my UC)", "PIP or DLA", "Carer (carer element or Carer's Allowance)",
+              "I work and earn £881+ a month")
+
+
+def cap_state(f):
+    v = sel(f.get(L["cap"]))
+    return "exempt" if v in CAP_EXEMPT else "capped" if v == "None of these" else "unknown"
+
+
+def cap_note(f):
+    v, state = sel(f.get(L["cap"])), cap_state(f)
+    if state == "exempt":
+        return f"benefit cap: exempt ({v.split(' (')[0]})"
+    if state == "capped":
+        return "benefit cap: applies, so the rent may be short; check the gap, a CRF top-up covers it"
+    return "benefit cap: not known, ask at the first call"
 
 
 def match_tenant_by_name(data, text):
@@ -1026,7 +1074,7 @@ def lead_line(lead, day):
             str(f.get(L["phone"]) or ""), str(f.get(L["email"]) or ""),
             f"move by {fmt_day(parse_day(f.get(L['moveBy'])))}" if f.get(L["moveBy"]) else "",
             sel(f.get(L["situation"])), f"heard via {sel(f.get(L['heard']))}" if f.get(L["heard"]) else "",
-            f"registered {fmt_day(created_day(lead))}"]
+            cap_note(f), f"registered {fmt_day(created_day(lead))}"]
     return ", ".join(b for b in bits if b)
 
 
@@ -1051,6 +1099,8 @@ def viewings_text(town, opens, leads, past, day):
 
 
 def viewings_task(data, town, opens, leads, past, day):
+    # People the benefit cap cannot touch first: their rent is covered in full.
+    leads = sorted(leads, key=lambda l: {"exempt": 0, "unknown": 1, "capped": 2}[cap_state(l["fields"])])
     n = len(leads) + len(past)
     return {"kind": "viewings", "town": town, "name": f"{PREFIXES['viewings']}{town} people to call {fmt_day(day)}",
             "description": viewings_text(town, opens, leads, past, day), "leadIds": [l["id"] for l in leads + past],
@@ -1281,6 +1331,13 @@ def monitor(data, day, opens, run_notes):
     step("openings", "Openings found", day if opens else None, "ok" if opens else "idle",
          f"{sum(o['rooms'] for o in opens)} room(s): " + "; ".join(o["label"] for o in opens) if opens
          else "No void, notice or adopted room move right now.")
+
+    live = bool(data.get("linkLive"))
+    step("link", "Form link opens the form", day if live else None,
+         "ok" if live else "fail" if opens else "warn",
+         f"{SHORT_BASE} and its channel links open the sign-up form." if live else
+         f"{SHORT_BASE} does not open the sign-up form, so no email or advert is going out"
+         + (" while rooms need tenants." if opens else "."))
 
     for kind, label, every in (("mailout", "Referrer mail-out", MAILOUT_EVERY_DAYS),
                                ("adverts", "Adverts to Roy", ADVERTS_EVERY_DAYS),
@@ -1702,6 +1759,10 @@ def run(data, day, w, only=None, replies=None):
         opens, ours, scope_ok = [], set(HOME_TOWNS), False
     towns = by_town(opens)
     ours |= set(towns)       # a town with an opening is one we let in, even through a take-back
+    # Nothing carrying the form link goes out until the short link opens the form (Kevin, 25 Sep
+    # 2026: no long link, and never a dead one). Viewings and move-ins are phone and in person.
+    link_ok = bool(data.get("linkLive"))
+    HELD = f"held: {SHORT_BASE} does not open the sign-up form yet"
 
     def do_replies():
         got = (replies or list_replies)()
@@ -1902,6 +1963,8 @@ def run(data, day, w, only=None, replies=None):
         return f"{len(rows)} lead(s) moved" if rows else ""
 
     def do_mailouts():
+        if not link_ok:
+            return HELD
         for town in towns:
             if not referrers_near(data, town):
                 failures.append(f"mail-out {town}: no active referrer with an email near {town}")
@@ -1911,6 +1974,8 @@ def run(data, day, w, only=None, replies=None):
         return ", ".join(c["name"][len(PREFIXES["mailout"]):] for c in cards)
 
     def do_adverts():
+        if not link_ok:
+            return HELD
         done = []
         for town, os_ in towns.items():
             if due_again(chain_tasks(data, "adverts", town), ADVERTS_EVERY_DAYS, day)[0]:
@@ -1919,6 +1984,8 @@ def run(data, day, w, only=None, replies=None):
         return ", ".join(done)
 
     def do_referrals():
+        if not link_ok:
+            return HELD
         done = []
         for town, os_ in towns.items():
             if due_again(chain_tasks(data, "referral", town), REFERRAL_EVERY_DAYS, day)[0]:
@@ -1972,6 +2039,8 @@ def run(data, day, w, only=None, replies=None):
         return ", ".join(made)
 
     def do_keepwarm():
+        if not link_ok:
+            return HELD
         if due_again(chain_tasks(data, "keepwarm"), KEEPWARM_EVERY_DAYS, day)[0]:
             card = keepwarm_card(data, day)
             if card:
