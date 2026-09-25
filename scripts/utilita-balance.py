@@ -509,7 +509,9 @@ def build_message(rows, low_gbp, when=None, alarm_days=ALARM_DAYS_LEFT):
         body.append("")
         body.append("_Kevin: open the Robot sign-in app on the Desktop and pick "
                     + " and ".join("Utilita " + l for l in lapsed)
-                    + " (if it lists other sites first, press Pick a site instead)._")
+                    + (" (Cmd-click to pick both" if len(lapsed) > 1 else " (")
+                    + ("; " if len(lapsed) > 1 else "")
+                    + "if it lists other sites first, press Pick a site instead)._")
     body.append("")
     body.append("_Read at " + when.strftime("%H:%M") + "._")
     return head + "\n" + "\n".join(body), attention, alarm
@@ -1036,9 +1038,13 @@ def selftest():
              days="More than a week left", meter="2409")], 10)
     if "SIGN-IN NEEDED" not in msg or "£0.00" in msg or not att:
         bad.append(("lapsed session message", "SIGN-IN NEEDED + attention", msg[:80]))
-    if "Robot sign-in" not in msg or "pick Utilita Apartment 1 (" not in msg or "Utilita Apartment 2" in msg:
+    if "Robot sign-in" not in msg or "pick Utilita Apartment 1 (if it lists" not in msg or "Utilita Apartment 2" in msg:
         bad.append(("lapsed session names the app entry for that flat only",
                     "pick Utilita Apartment 1", msg[-160:]))
+    both, _, _ = build_message([row(ok=False, problem="SIGN-IN NEEDED", meter=None),
+                                row(label="Apartment 2", ok=False, problem="SIGN-IN NEEDED", meter=None)], 10)
+    if "pick Utilita Apartment 1 and Utilita Apartment 2 (Cmd-click to pick both; if it lists" not in both:
+        bad.append(("both flats lapsed: both named, and how to pick both", "Cmd-click to pick both", both[-200:]))
     if "…2409" not in msg:
         bad.append(("the meter is shown so a dropped check is visible", "…2409", "missing"))
 

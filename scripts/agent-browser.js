@@ -262,7 +262,7 @@ function readSitesFile() {
     if (e.code === 'ENOENT') return {};
     throw e;
   }
-  return JSON.parse(raw);
+  return raw.trim() ? JSON.parse(raw) : {};                            // an empty file, as loadSites reads it
 }
 
 // A profile is a folder under PROFILE_ROOT, so a name that could climb out of
@@ -285,22 +285,36 @@ const PROFILE_NAME_RE = /^[a-z0-9][a-z0-9-]*$/i;
 function recordLoginSite(url, { label, profile } = {}) {
   let u;
   try { u = new URL(url); } catch { die(`${url} is not a web address.`); }
-  if (u.protocol !== 'https:') die(`${url} is not an https address. A sign-in page always is.`);
+  if (u.username || u.password) die('that address carries a name or password in it. A sign-in page address never does.');
   const host = u.hostname.toLowerCase();
-  const have = loadSites()[host];
-  const onMain = (profile || 'default') === 'default' && !(have && Array.isArray(have.profiles));
-  if (hostAllowed(url) && (!onMain || (have && have.login && have.loginUrl))) return { host, changed: false };
+  const sites = loadSites();
+  // The entry that OWNS this host: its own, else the nearest parent. Found in
+  // review: matching the exact host alone made an HMRC or Loom sign-in, whose
+  // pages sit on www., write a second entry without HMRC's shortSession, and
+  // the keep-alive would then have raised a false HMRC task every morning.
+  const ownerKey = Object.keys(sites).filter(k => host === k || host.endsWith('.' + k))
+    .sort((a, b) => b.length - a.length)[0] || null;
+  const owner = ownerKey ? sites[ownerKey] : null;
+  const onMain = (profile || 'default') === 'default' && !(owner && Array.isArray(owner.profiles));
+  // A profile sign-in only ever adds a stranger, as before; a main-profile
+  // sign-in also gives a login site with no page its page.
+  const settled = onMain ? !!(owner && owner.login && owner.loginUrl) : !!owner;
+  if (settled) return { host, changed: false };
+  // An http page still opens (agents' lines take http too), but is never written.
+  if (u.protocol !== 'https:') return { host, changed: false, note: `${url} is not https, so it was not recorded on the allowlist.` };
+  // A parent that holds no login (gov.uk) is not turned into one: the new site gets its own entry.
+  const key = owner && (ownerKey === host || owner.login) ? ownerKey : host;
   const extra = readSitesFile();
-  const entry = Object.assign({}, extra[host] || {});
-  entry.label = entry.label || (have && have.label) || label || host;
+  const entry = Object.assign({}, extra[key] || {});
+  entry.label = entry.label || (key === ownerKey && owner.label) || label || host;
   entry.login = true;
-  if (onMain && !(have && have.loginUrl)) entry.loginUrl = url;
-  extra[host] = entry;
+  if (onMain) entry.loginUrl = url;
+  extra[key] = entry;
   fs.mkdirSync(path.dirname(SITES_FILE), { recursive: true });
   const tmp = SITES_FILE + '.tmp';
   fs.writeFileSync(tmp, JSON.stringify(extra, null, 2));
   fs.renameSync(tmp, SITES_FILE);
-  return { host, changed: true };
+  return { host: key, changed: true };
 }
 
 // Every sign-in the Robot sign-in app can open (25 Sep 2026): one per login
@@ -313,7 +327,8 @@ function recordLoginSite(url, { label, profile } = {}) {
 // silence: a flat missing from the list reads exactly like a flat nobody set up.
 function signinTargets(sites = loadSites(), problems = []) {
   const out = [];
-  const clean = s => String(s).replace(/\s*\|\s*/g, ' - ').trim();   // " | " splits the app's lines
+  // " | " splits the app's fields and a line break splits its lines.
+  const clean = s => String(s).replace(/[\r\n]+/g, ' ').replace(/\s*\|\s*/g, ' - ').trim();
   for (const [host, v] of Object.entries(sites)) {
     if (!v || !v.login) continue;
     if (v.loginUrl) out.push({ label: clean(v.label || host), host, url: v.loginUrl, profile: 'default' });
@@ -818,8 +833,10 @@ async function main() {
     const url = arg(rest, 'url');
     if (!url) die('--url is required');
     if (!PROFILE_NAME_RE.test(profile)) die(`--profile ${profile} is not a plain folder name.`);
-    const { host, changed } = recordLoginSite(url, { label: arg(rest, 'label', null), profile });
-    if (changed) console.log(`Recorded ${host} on the allowlist.`);
+    const rec = recordLoginSite(url, { label: arg(rest, 'label', null), profile });
+    const host = new URL(url).hostname.toLowerCase();
+    if (rec.changed) console.log(`Recorded ${rec.host} on the allowlist.`);
+    if (rec.note) console.log(rec.note);
     // TWO TRAPS, both paid for on 2 Sep 2026 (Evernote):
     //
     // 1. A login window driven by Playwright is still an automated browser,

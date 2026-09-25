@@ -189,9 +189,50 @@ describe('signin-list and login: every sign-in the Robot sign-in app can open', 
   it('a site that already has its page is left alone, and nothing but https is ever recorded', () => {
     withSites({}, (m, file) => {
       expect(m.recordLoginSite('https://app.pingen.com/', {}).changed).toBe(false);
-      expect(() => m.recordLoginSite('http://plain.example.com/login', {})).toThrow(/not an https address/);
+      // An http page still opens (agents' lines accept http), it is just never written.
+      const plain = m.recordLoginSite('http://plain.example.com/login', {});
+      expect(plain.changed).toBe(false);
+      expect(plain.note).toMatch(/not https/);
+      expect(m.recordLoginSite('http://www.topcashback.co.uk/account', {}).changed).toBe(false);
       expect(() => m.recordLoginSite('not a url', {})).toThrow(/not a web address/);
+      // A pasted address carrying a name and password is refused, and the password is not echoed.
+      let msg = '';
+      try { m.recordLoginSite('https://kevin:hunter2@portal.example.co.uk/login', {}); } catch (e) { msg = e.message; }
+      expect(msg).toMatch(/name or password/);
+      expect(msg).not.toMatch(/hunter2/);
       expect(JSON.parse(readFileSync(file, 'utf8'))).toEqual({});
+    });
+  });
+
+  // Found in review: HMRC's and Loom's sign-in pages sit on www., under entries keyed on the
+  // parent. Matching the exact host alone wrote a second HMRC entry without shortSession, and
+  // the keep-alive would then have raised a false HMRC sign-in task every morning.
+  it('a sign-in page on a subdomain belongs to its parent entry: HMRC and Loom add nothing', () => {
+    withSites({}, (m, file) => {
+      expect(m.recordLoginSite('https://www.tax.service.gov.uk/gg/sign-in', {}).changed).toBe(false);
+      expect(m.recordLoginSite('https://www.loom.com/looms/videos', {}).changed).toBe(false);
+      expect(JSON.parse(readFileSync(file, 'utf8'))).toEqual({});
+      const hmrc = m.signinTargets().filter(t => t.label === 'HMRC');
+      expect(hmrc).toHaveLength(1);
+    });
+    // A parent that holds a login but no page gets the page, on the parent's own entry.
+    withSites({ 'example.co.uk': { label: 'Example', login: true } }, (m, file) => {
+      expect(m.recordLoginSite('https://www.example.co.uk/signin', {})).toEqual({ host: 'example.co.uk', changed: true });
+      expect(JSON.parse(readFileSync(file, 'utf8'))).toEqual({ 'example.co.uk': { label: 'Example', login: true, loginUrl: 'https://www.example.co.uk/signin' } });
+    });
+    // A parent that holds NO login (gov.uk) is never turned into one: the new site gets its own entry.
+    withSites({}, (m, file) => {
+      m.recordLoginSite('https://www.council.gov.uk/login', { label: 'Council' });
+      const saved = JSON.parse(readFileSync(file, 'utf8'));
+      expect(saved).toEqual({ 'www.council.gov.uk': { label: 'Council', login: true, loginUrl: 'https://www.council.gov.uk/login' } });
+      expect(m.loadSites()['gov.uk'].login).toBe(false);
+    });
+  });
+
+  it('a label with a line break stays on one line of the app\'s list', () => {
+    withSites({ 'x.example.co.uk': { label: 'Two\nlines | here', login: true, loginUrl: 'https://x.example.co.uk/' } }, (m) => {
+      const t = m.signinTargets().find(t => t.host === 'x.example.co.uk');
+      expect(t.label).toBe('Two lines - here');
     });
   });
 
@@ -199,6 +240,11 @@ describe('signin-list and login: every sign-in the Robot sign-in app can open', 
     withSites('{ "www.loom.com": { "label": "Loom", ', (m, file) => {
       expect(() => m.recordLoginSite('https://portal.example.co.uk/login', {})).toThrow();
       expect(readFileSync(file, 'utf8')).toBe('{ "www.loom.com": { "label": "Loom", ');
+    });
+    // An empty file reads as an empty list, the way loadSites reads it.
+    withSites('', (m, file) => {
+      m.recordLoginSite('https://portal.example.co.uk/login', {});
+      expect(Object.keys(JSON.parse(readFileSync(file, 'utf8')))).toEqual(['portal.example.co.uk']);
     });
     // A missing file is a first run: the site is written.
     withSites(undefined, (m, file) => {

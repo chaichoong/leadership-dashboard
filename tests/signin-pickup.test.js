@@ -248,6 +248,13 @@ describe('the Robot sign-in app and its link', () => {
       expect(run(`s's newSiteLine("", "portal.acme.co.uk", "https://portal.acme.co.uk/login")`))
         .toBe('portal.acme.co.uk | portal.acme.co.uk | https://portal.acme.co.uk/login | default');
       expect(run(`s's addNewItem`)).toBe('+ Add a new site…');
+      // A line break in a typed name is flattened, never a second line in the list.
+      expect(run(`s's newSiteLine("Two" & linefeed & "Lines", "h.example.com", "https://h.example.com/")`))
+        .toBe('Two Lines | h.example.com | https://h.example.com/ | default');
+      // signin-list's SKIPPED lines are said aloud and never offered as a site (review: do shell
+      // script drops stderr on success, so they arrive on stdout).
+      expect(run(`((count of (sites of (s's splitSiteList("A | a.com | https://a.com/ | default" & linefeed & "SKIPPED: x: bad" & linefeed)))) as text) & "/" & (item 1 of (skipped of (s's splitSiteList("SKIPPED: x: bad"))))`))
+        .toBe('1/x: bad');
     } finally { rmSync(dir, { recursive: true, force: true }); }
   });
   it('the site list comes from signin-list, a flat hands nothing back, and a site link opens every profile on it', () => {
@@ -255,6 +262,14 @@ describe('the Robot sign-in app and its link', () => {
     const signIn = src.slice(src.indexOf('on signInTo'), src.indexOf('end signInTo'));
     expect(signIn.indexOf('if theProfile is not "default"')).toBeGreaterThan(-1);
     expect(signIn.indexOf('if theProfile is not "default"')).toBeLessThan(signIn.indexOf('signin-done --site'));
+    expect(src).toMatch(/signin-list 2>&1/);
+    // The full list takes several picks at once: the watcher's message asks for both flats.
+    const runH = src.slice(src.indexOf('\non run\n'), src.indexOf('\nend run\n'));
+    expect(runH).toMatch(/choose from list \(\{addNewItem\} & allSites\(\)\)[^\n]*with multiple selections allowed/);
+    // A site already on the list opens on its own lines (a flat's profile), never as a new main-profile line.
+    const ask = src.slice(src.indexOf('on askNewSite'), src.indexOf('end askNewSite'));
+    expect(ask.indexOf('return known')).toBeGreaterThan(-1);
+    expect(ask.indexOf('return known')).toBeLessThan(ask.indexOf('newSiteLine('));
     const link = src.slice(src.indexOf('on open location'), src.indexOf('end open location'));
     expect(link).toMatch(/set end of matches to/);
     expect(link).toMatch(/runChain\(matches, liveN\)/);
