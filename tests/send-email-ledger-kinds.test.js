@@ -24,7 +24,7 @@ const EMAIL = 'TO: housing@manchester.gov.uk\nFROM: kevinbrittain@gmail.com\nSUB
   + '**Carrying this out will involve:** sending the reply to Manchester City Council.';
 
 function run(opts) {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ledger-kinds-'));
+  const dir = opts.dir || fs.mkdtempSync(path.join(os.tmpdir(), 'ledger-kinds-'));
   const ledger = path.join(dir, 'sent-email.jsonl');
   if (opts.rows) fs.writeFileSync(ledger, opts.rows.map((r) => JSON.stringify(r)).join('\n') + '\n');
   const out = execFileSync('python3', ['-c', `
@@ -55,6 +55,8 @@ def fake_search(q, account):
     searches.append([q, account])
     if "newer_than:30d" in q:
         return a.get("control", [{"id": "c1"}])
+    if "subject:" not in q:
+        return a.get("recipientHits", a.get("hits", []))
     return a.get("hits", [])
 m.sent_folder_search = fake_search
 res = {"calls": calls, "searches": searches}
@@ -151,6 +153,41 @@ describe('a send that dies is recorded, and an unfinished one is settled from th
     expect(r.message).toMatch(/could not read recKho3l7jJKk9T0t to learn which mailbox sent it/);
     expect(r.ledger).toHaveLength(1);
     expect(r.searches).toHaveLength(0);
+  });
+
+  it('a long subject is searched on whole words, and a subject miss with other mail to them is refused, never cleared (third review)', () => {
+    const long = 'Re: Council Tax account 60012345 - 18 Siddows Avenue Clitheroe - request for the empty property exemption from 8 May 2026';
+    const rows = [{ task: 'recKho3l7jJKk9T0t', ts: '2026-09-23T15:09:00.000Z', event: 'intent', kind: 'send', from: 'kevinbrittain@gmail.com', to: ['ctax@ribblevalley.gov.uk'], subject: long }];
+    const a = run({ cmd: 'resolve', rows, hits: [], recipientHits: [] });
+    const q = a.searches[1][0];
+    const subj = q.match(/subject:"([^"]*)"/)[1];
+    expect(subj.length).toBeLessThanOrEqual(80);
+    expect(long).toContain(subj);
+    expect(long.slice(4)).toMatch(new RegExp('^' + subj.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + ' '));   // ends on a whole word
+    const b = run({ cmd: 'resolve', rows, hits: [], recipientHits: [{ id: 'other' }] });
+    expect(b.message).toMatch(/none matched the subject .* nothing was changed/s);
+    expect(b.ledger).toHaveLength(1);
+  });
+
+  it('two runs sending one task wait for each other (the lock is held from the check to the last row)', () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'send-lock-'));
+    const holder = `
+import fcntl, os, time, sys
+os.makedirs(os.path.join(sys.argv[1], "send-locks"), exist_ok=True)
+fh = open(os.path.join(sys.argv[1], "send-locks", "recKho3l7jJKk9T0t.lock"), "a")
+fcntl.flock(fh, fcntl.LOCK_EX); print("held", flush=True); time.sleep(1.5)`;
+    const { spawn } = require('node:child_process');
+    return new Promise((resolveP) => {
+      const h = spawn('python3', ['-c', holder, dir]);
+      h.stdout.once('data', () => {
+        const t0 = Date.now();
+        const r = run({ cmd: 'send', dir });
+        const waited = Date.now() - t0;
+        expect(r.exit).toBe(0);
+        expect(waited).toBeGreaterThan(900);
+        h.on('close', () => resolveP());
+      });
+    });
   });
 
   it('an `uncertain` send can be settled from the Sent folder too', () => {

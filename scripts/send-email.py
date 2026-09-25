@@ -519,7 +519,30 @@ def load_attachment(attach, task_id):
             "dataB64": base64.b64encode(data).decode(), "bytes": size}
 
 
+def send_lock(task_id):
+    """An exclusive lock for one task's send, held from the ledger check to
+    the last ledger row. Two runs sending the same task at once could both
+    pass the check and leave `intent, intent, uncertain, failed`, which frees
+    a task one of them may have sent (third review, 25 Sep 2026). Per task, so
+    unrelated sends never wait on each other."""
+    import fcntl
+    lock_dir = os.path.join(STATE_DIR, "send-locks")
+    os.makedirs(lock_dir, exist_ok=True)
+    fh = open(os.path.join(lock_dir, f"{task_id}.lock"), "a")
+    fcntl.flock(fh, fcntl.LOCK_EX)
+    return fh
+
+
 def cmd_send(args):
+    lock = send_lock(args.task) if not getattr(args, "dry_run", False) else None
+    try:
+        return _cmd_send(args)
+    finally:
+        if lock:
+            lock.close()
+
+
+def _cmd_send(args):
     prior = already_sent(args.task)
     if prior and prior.get("event") in ("intent", "uncertain"):
         # A run died between "about to send" and "sent": it may or may not
@@ -1215,7 +1238,12 @@ def cmd_resolve_intent(args):
     # The subject as well as the recipient: a contractor who had several of our
     # emails that week must not make this one look sent (second review).
     subject = re.sub(r"^(?:(?:re|fwd?|fw)\s*:\s*)+", "", str(last.get("subject") or ""), flags=re.I)
-    subject = re.sub(r'["()]', " ", subject).strip()[:80]
+    subject = re.sub(r'["()]', " ", subject).strip()
+    if len(subject) > 80:
+        # Whole words only: a subject cut mid-word matches nothing, and a miss
+        # here would clear a send that went (third review: 44 of 153 real
+        # subjects are longer than 80 characters).
+        subject = subject[:80].rsplit(" ", 1)[0]
     query = f"in:sent to:{to[0]} after:{since}" + (f' subject:"{subject}"' if subject else "")
     hits = sent_folder_search(query, account)
     if hits:
@@ -1225,6 +1253,12 @@ def cmd_resolve_intent(args):
         print(json.dumps({"resolved": args.task, "went": True, "account": account,
                           "found": len(hits), "to": to[0]}))
         return
+    if subject and sent_folder_search(f"in:sent to:{to[0]} after:{since}", account):
+        # Mail to them since then, none with this subject: the subject search
+        # may simply have missed. Never clear on a maybe.
+        sys.exit(f"REFUSED: {account} sent mail to {to[0]} since {since}, but none matched the "
+                 f"subject {subject!r}. It may have gone under another subject, so nothing was "
+                 "changed. Kevin decides this one.")
     ledger_append({"task": args.task, "ts": now_iso(), "event": "intent-cleared", "kind": "send",
                    "to": to, "why": f"nothing matching {query!r} in {account} Sent"})
     print(json.dumps({"resolved": args.task, "went": False, "account": account, "to": to[0],

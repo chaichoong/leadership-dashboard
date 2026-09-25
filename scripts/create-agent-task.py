@@ -1304,12 +1304,16 @@ def parent_problem(parent_id):
     return f"the parent {parent_id} carries no real approval: {why}" if why else ""
 
 
-def open_child_of(parent_id, key):
-    """An open task already raised as a child of PARENT with the same key, or
+def open_child_of(parent_id, name):
+    """An open task already raised as a child of PARENT with the same NAME, or
     None. The fold is off for a child, so this is its duplicate check: an agent
     that retries the same --parent create gets the first child back, never a
-    second one (and a second quote-request email to the same contractor)."""
-    formula = f"AND(NOT({{Status}}='Completed'), FIND('CHILD OF {parent_id} ', {{Description}}))"
+    second one. The exact name, not the fold key: the key reads "compliance
+    eicr quote" for every contractor, so a second contractor's child would
+    have been swallowed, which is finding 590 again (third review)."""
+    want = " ".join(str(name or "").lower().split())
+    formula = (f"AND(NOT({{Status}}='Completed'), NOT({{Status}}='Cancelled'), "
+               f"FIND('CHILD OF {parent_id} ', {{Description}}))")
     offset = None
     while True:
         q = [("filterByFormula", formula), ("pageSize", "100"), ("returnFieldsByFieldId", "true"),
@@ -1318,7 +1322,7 @@ def open_child_of(parent_id, key):
             q.append(("offset", offset))
         page = _request("GET", f"/{TASKS}?" + urllib.parse.urlencode(q)) or {}
         for row in page.get("records", []):
-            if dupe_task_key((row.get("fields", {}) or {}).get(F["name"], "")) == key:
+            if " ".join(str((row.get("fields", {}) or {}).get(F["name"], "")).lower().split()) == want:
                 return row
         offset = page.get("offset")
         if not offset:
@@ -1371,7 +1375,7 @@ def cmd_create(fields, force=False, dry_run=False, parent=None):
                               "key": verdict["key"], "dryRun": dry_run}))
             return 3
     if parent and not force:
-        twin = open_child_of(parent, verdict["key"])
+        twin = open_child_of(parent, fields.get(F["name"], ""))
         if twin:
             print(json.dumps({"action": "exists", "taskId": twin["id"], "key": verdict["key"],
                               "why": f"an open child of {parent} with the same subject already exists",

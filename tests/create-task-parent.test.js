@@ -23,7 +23,7 @@ TWINS = json.loads(${JSON.stringify(JSON.stringify(twins))})
 def req(method, path, body=None):
     calls.append([method, path.split("?")[0]])
     if method == "GET" and "filterByFormula" in path:
-        return {"records": [{"id": t, "fields": {F["name"]: fields[F["name"]]}} for t in TWINS]}
+        return {"records": [{"id": t[0], "fields": {F["name"]: t[1] or fields[F["name"]]}} for t in TWINS]}
     if method == "GET":
         return {"id": "recPFxDmGX5pbonD2", "createdTime": "2026-09-20T09:00:00.000Z",
                 "fields": {F[k]: v for k, v in PARENT.items()}}
@@ -77,10 +77,17 @@ describe('create --parent: a child of an approved task is created, never folded'
   });
 
   it('a retried --parent create returns the open child it already made, and creates nothing', () => {
-    const r = create('recPFxDmGX5pbonD2', APPROVED, {}, ['recFIRSTCHILD0001']);
+    const r = create('recPFxDmGX5pbonD2', APPROVED, {}, [['recFIRSTCHILD0001', '']]);
     expect(r.rc).toBe(0);
     expect(r.posted).toBe(0);
     expect(JSON.parse(r.out)).toMatchObject({ action: 'exists', taskId: 'recFIRSTCHILD0001' });
+  });
+
+  it("a second contractor's child is created, not taken for the first (the fold key is the same for both)", () => {
+    const r = create('recPFxDmGX5pbonD2', APPROVED, {}, [['recFIRSTCHILD0001', 'COMPLIANCE: EICR quote request - Sparks Electrical - 23 Viola Street Bootle L20 7DR']]);
+    expect(r.rc).toBe(0);
+    expect(r.posted).toBe(1);
+    expect(JSON.parse(r.out)).toMatchObject({ action: 'created' });
   });
 
   it('without --parent the same task still goes through the fold gate (the board is read)', () => {
