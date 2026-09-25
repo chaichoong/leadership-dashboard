@@ -177,6 +177,11 @@ def history_email_is_not_this_bill():
     return pr.plan_tasks([t], [wk38], {}, D("2026-10-23"))[0][0]
 case("history_email_is_not_this_bill", history_email_is_not_this_bill)
 
+def last_periods_reference_is_not_this_bill():
+    prev = bill("recPrev", "2026-03-20", 2.22, "Other name", Status="Paid", Reference="GR-4471")
+    return pr.plan_tasks([task()], [prev], {}, D("2026-10-23"))[0][0]
+case("last_periods_reference_is_not_this_bill", last_periods_reference_is_not_this_bill)
+
 def missed_friday_is_read():
     tz = pr.LONDON
     start, _ = pr.scan_range(datetime(2026, 9, 25, 21, 0, tzinfo=tz), 1,
@@ -243,6 +248,9 @@ describe('payment run: approved payment cards reach the list (cause 2)', () => {
   });
   it('last week\'s paid bill named in a card\'s history never stands in for this week\'s', () => {
     expect(value('history_email_is_not_this_bill')).toBe('check');
+  });
+  it('last period\'s paid row with the same reference never stands in for this period\'s card', () => {
+    expect(value('last_periods_reference_is_not_this_bill')).toBe('create');
   });
   it('a card is never assumed paid: a possible payment is named on it, and it stays Unpaid', () => {
     expect(value('card_never_assumed_paid')).toEqual(['check_paid', 'Unpaid']);

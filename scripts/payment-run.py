@@ -1551,7 +1551,8 @@ def card_twin(c, records):
 
     how = "strong": the row's email is the NEWEST one the card names (its Gmail
     id, within 14 days of the card) and the amounts agree, or the row already
-    records the card. "reference": the same amount and the same reference on both.
+    records the card. "reference": the same amount and the same reference on both,
+    within 30 days of the card.
     "weak": the same amount and payee around the card's date, nothing more.
     A weak twin is never folded in silently (review, 25 Sep 2026): a second bill
     of one size from one contractor looks exactly like it. The card is listed
@@ -1577,7 +1578,12 @@ def card_twin(c, records):
             return r, "strong"
     for r in candidates:
         ref_row, ref_card = norm_ref(r["fields"].get("Reference")), norm_ref(card.get("reference"))
-        if ref_row and ref_card and ref_row == ref_card and same_amount(r["fields"], card):
+        day = (r["fields"].get("Email Date") or "")[:10]
+        # Recurring bills (ground rent, service charge, council tax) carry the
+        # same reference every period, so last half-year's paid row must not
+        # stand in for this one (fifth review, 25 Sep 2026).
+        if (ref_row and ref_card and ref_row == ref_card and same_amount(r["fields"], card)
+                and day and near_card(day, c, 30)):
             return r, "reference"
     for r in candidates:
         day = (r["fields"].get("Email Date") or "")[:10]
@@ -2521,6 +2527,10 @@ def cmd_selftest(_args):
     # the description saying what to check, never folded in silently.
     weak = act(plan_tasks([task], [bill("recWeak", "2026-09-24", 2.22, "Oakfield Ground Rents Ltd")],
                           {}, D("2026-10-23")))
+    check("last period's paid row with the same reference is not this period's bill",
+          act(plan_tasks([task], [bill("recPrev", "2026-03-20", 2.22, "Other name", Status="Paid",
+                                       Reference="GR-4471")], {}, D("2026-10-23"))),
+          [("create", None)])
     check("a same-payee same-size row is only a possible twin, and the card is still listed",
           weak, [("check", "recWeak")])
     check("and its description says what to check",
