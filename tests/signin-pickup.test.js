@@ -262,7 +262,7 @@ describe('the Robot sign-in app and its link', () => {
       expect(run(`((count of (sites of (s's splitSiteList("A | a.com | https://a.com/ | default" & linefeed & "SKIPPED: x: bad" & linefeed)))) as text) & "/" & (item 1 of (skipped of (s's splitSiteList("SKIPPED: x: bad"))))`))
         .toBe('1/x: bad');
     } finally { rmSync(dir, { recursive: true, force: true }); }
-  });
+  }, 30000);   // osacompile + ten osascript runs: ~7 s when the full suite loads the Mac
   it('the site list comes from signin-list, a flat hands nothing back, and a site link opens every profile on it', () => {
     expect(src).toMatch(/scripts\/agent-browser\.js signin-list/);
     const signIn = src.slice(src.indexOf('on signInTo'), src.indexOf('end signInTo'));
@@ -281,6 +281,33 @@ describe('the Robot sign-in app and its link', () => {
     expect(link).toMatch(/set end of matches to/);
     expect(link).toMatch(/runChain\(matches, liveN\)/);
   });
+  // 25 Sep 2026: the AI Agents page's Robot sign-ins panel opens one flat
+  // (robotsignin://profile/<name>) and the add dialog (robotsignin://add), and
+  // after every sign-in the app rewrites the panel's row so it updates in a minute.
+  it('the panel links open one flat or the add dialog, and every chain tells the page', () => {
+    const { mkdtempSync, rmSync } = require('node:fs');
+    const { tmpdir } = require('node:os');
+    const dir = mkdtempSync(join(tmpdir(), 'od-robot-'));
+    try {
+      execFileSync('osacompile', ['-o', join(dir, 'r.scpt'), join(ROOT, 'scripts', 'robot-signin.applescript')]);
+      const run = (expr) => execFileSync('osascript', ['-e',
+        `set s to (load script POSIX file "${join(dir, 'r.scpt')}")\nreturn ${expr}`], { encoding: 'utf8' }).trim();
+      const ls = '{"Pingen | app.pingen.com | https://app.pingen.com/ | default", '
+        + '"Flat 1 | my.utilita.co.uk | https://my.utilita.co.uk/energy | utilita-apt1", '
+        + '"Flat 2 | my.utilita.co.uk | https://my.utilita.co.uk/energy | utilita-apt2"}';
+      expect(run(`s's linesForProfile("utilita-apt2", ${ls})`)).toBe('Flat 2 | my.utilita.co.uk | https://my.utilita.co.uk/energy | utilita-apt2');
+      expect(run(`(count of (s's linesForProfile("utilita-apt9", ${ls}))) as text`)).toBe('0');
+      // A waiting-task line has three fields and means the main profile, never a flat.
+      expect(run(`(count of (s's linesForProfile("default", {"Pingen (2 waiting) | app.pingen.com | https://app.pingen.com/"}))) as text`)).toBe('1');
+    } finally { rmSync(dir, { recursive: true, force: true }); }
+    const link = src.slice(src.indexOf('on open location'), src.indexOf('end open location'));
+    expect(link).toMatch(/if body starts with "add" then\s+set theLines to askNewSite\(\)/);
+    expect(link).toMatch(/if body starts with "profile\/" then\s+set wantProfile to text 9 thru -1 of body/);
+    const chain = src.slice(src.indexOf('on runChain'), src.indexOf('end runChain'));
+    expect(chain.trim().split('\n').pop().trim()).toBe('refreshPanel()');
+    const refresh = src.slice(src.indexOf('on refreshPanel'), src.indexOf('end refreshPanel'));
+    expect(refresh).toMatch(/detach\.py --cwd .* -- \/usr\/bin\/python3 scripts\/estate-status\.py signins > \/dev\/null/);
+  }, 30000);   // osacompile + osascript runs
   it('resolves node the way the runners do, never a bare "node" under launchd', () => {
     const py = readFileSync(join(ROOT, 'scripts', 'agent-dispatch.py'), 'utf8');
     expect(py).toMatch(/AGENT_NODE_BIN/);

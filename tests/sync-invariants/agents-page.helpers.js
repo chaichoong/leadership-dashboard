@@ -23,6 +23,7 @@ const TABLES = {
   steps: 'tblTadoyWXFHbmYxm',
   businesses: 'tblpqkvWJJo8Uu25q',
   ceoBriefs: 'tblIxbzDSOCI5hqJn',
+  // Estate Status (scripts/estate-status.py). Empty by default; robot-signins-panel.spec.js fills it.
   estate: 'tblZVrdzivyBueZVf',
 };
 
@@ -171,6 +172,7 @@ function defaultFixtures() {
     workflows: [],
     steps: [],
     businesses: [],
+    estate: [],
     ceoBriefs: [
       { id: 'recBriefToday', createdTime: now, fields: {
         [CEO.date]: today,
