@@ -292,7 +292,7 @@ describe('the work itself is never handed to Kevin in the closing line', () => {
     expect(r).toEqual({ swinton: true, chedburgh: true, closeBrothers: true, draft: false, decide: false, already: false });
   });
 
-  it('submit refuses the Swinton line, and accepts it once the step is declared KEVIN ONLY', () => {
+  it('submit refuses the Swinton line even with a KEVIN ONLY line (the quote was never his), and accepts a line naming only the declared step', () => {
     const agent = 'recwWvBju2ycB63i4';
     const r = py(`
 import tempfile, os
@@ -307,12 +307,18 @@ def submit(text):
                                    "plain_task": None, "plain_approve": None, "files": [], "receipt": None})["err"]
     except Reached:
         return "REACHED-THE-RECORD"
+K = "KEVIN ONLY: purchase: buy the Everywhen policy through the TopCashback link once the quote is saved.\\n\\n"
 bad = ${JSON.stringify(out(lines.swinton))}
-good = ${JSON.stringify('KEVIN ONLY: purchase: buy the Everywhen policy through the TopCashback link once the quote is saved.\n\n' + out(lines.swinton))}
-wrong = good.replace("KEVIN ONLY: purchase", "KEVIN ONLY: quote")
-print(json.dumps({"bad": submit(bad), "good": submit(good), "wrong": submit(wrong)}))`);
+own = "Report body.\\n\\n**Carrying this out will involve:** saving the Everywhen quote on TopCashback, so that Kevin then buys the policy through the TopCashback link."
+mixed = "Report body.\\n\\n**Carrying this out will involve:** Kevin then pays the £20 fee, and someone can get three quotes."
+print(json.dumps({"bad": submit(bad), "badDeclared": submit(K + bad), "own": submit(K + own),
+                  "ownUndeclared": submit(own), "mixed": submit(K.replace("purchase", "payment") + mixed),
+                  "wrong": submit(K.replace("KEVIN ONLY: purchase", "KEVIN ONLY: quote") + own)}))`);
     expect(r.bad).toMatch(/its closing line hands the job to Kevin or 'someone': '.*Kevin visiting/);
-    expect(r.good).toBe('REACHED-THE-RECORD');   // passed every text gate and went on to read the task
+    expect(r.badDeclared).toMatch(/A KEVIN ONLY line covers only its own step \(purchase\)/);
+    expect(r.own).toBe('REACHED-THE-RECORD');          // passed every text gate and went on to read the task
+    expect(r.ownUndeclared).toMatch(/hands the job to Kevin/);
+    expect(r.mixed).toMatch(/someone can get/);        // the declared payment is covered, the quotes are not
     expect(r.wrong).toMatch(/KEVIN ONLY line names 'quote'/);
   });
 });
@@ -408,5 +414,144 @@ print(json.dumps([e.blockers_row(now, path=p)["status"], e.blockers_row(now, pat
     expect(blockersLine({ fields: { Detail: 'Robots blocked on 1 task.', Updated: '2026-09-25T06:40:00Z' } }, now)).toMatch(/24 hours ago: the blocker check has stopped/);
     expect(buildDigestText(2, ['A', 'B'], 'u', false, [], 0, '', line)).toContain('Robots blocked on 1 task');
     expect(buildContentOnlyText('C', line)).toContain('Robots blocked on 1 task');
+  });
+});
+
+describe('the review of 25 Sep 2026: walls that could never clear, or cleared wrongly', () => {
+  it('a SIGN-IN wall is stored and listed under the door the sign-in app opens, and that tap clears it', () => {
+    const r = py(`
+SITES["signin.account.gov.uk"] = {"label": "GOV.UK One Login", "login": True, "loginUrl": "https://ewf.companieshouse.gov.uk/"}
+SITES["ewf.companieshouse.gov.uk"] = {"label": "Companies House WebFiling", "login": True, "loginUrl": "https://ewf.companieshouse.gov.uk/"}
+rec("t1", outcome="Approved as-is", approved_at="2026-09-25T07:00:00.000Z")
+res = run(m.cmd_block, {"task": "t1", "kind": "SIGN-IN", "subject": "signin.account.gov.uk", "why": "Signed out.", "finding": None})
+stored = m.task_blocker(notes("t1"))["subject"]
+m.query_tasks = lambda f, **k: [json.loads(json.dumps(TASKS["t1"]))] if "SIGN-IN" in f else []
+import tempfile
+m.SIGNIN_PICKUP_DIR = tempfile.mkdtemp()
+groups = m.signin_waiting(SITES)
+door = m.signin_site_for("", "https://ewf.companieshouse.gov.uk/", SITES)
+done = m.signin_done(door, SITES, groups)
+print(json.dumps({"err": res["err"], "stored": stored, "groups": [g["host"] for g in groups], "door": door,
+                  "handed": [h["task"] for h in done["handedBack"]], "open": m.task_blocker(notes("t1"))}))`);
+    expect(r.err).toBeNull();
+    expect(r.stored).toBe('ewf.companieshouse.gov.uk');   // the host the session check is logged under
+    expect(r.groups).toEqual(['ewf.companieshouse.gov.uk']);
+    expect(r.door).toBe('ewf.companieshouse.gov.uk');
+    expect(r.handed).toEqual(['t1']);
+    expect(r.open).toBeNull();
+  });
+
+  it('a site kept on per-flat profiles (Utilita) is on the list: SITE is refused, so no wall is created that can never clear', () => {
+    const r = py(`
+SITES["my.utilita.co.uk"] = {"label": "Utilita", "login": True, "profiles": [{"profile": "flat1", "label": "Flat 1"}]}
+rec("t1")
+print(json.dumps(run(m.cmd_block, {"task": "t1", "kind": "SITE", "subject": "my.utilita.co.uk", "why": "x", "finding": None})["err"]))`);
+    expect(r).toMatch(/IS on the robot's list/);
+  });
+
+  it('a wall and its wake keep an earlier carry-out intent open, so the woken run still checks what already happened', () => {
+    const r = py(`
+import tempfile, os
+m.INTENT_LEDGER = os.path.join(tempfile.mkdtemp(), "l.jsonl")
+with open(m.INTENT_LEDGER, "w") as fh:
+    for e in ("intent", "parked", "unblocked"):
+        fh.write(json.dumps({"task": "t1", "ts": "2026-09-25T10:00:00Z", "event": e}) + "\\n")
+print(json.dumps(sorted(m.open_intents())))`);
+    expect(r).toEqual(['t1']);
+  });
+
+  it('the pickup run works a task the sign-in woke through its wall, approved or not; a plain agent note is not that', () => {
+    const r = py(`
+from datetime import datetime
+now = datetime.now(m.LONDON)
+stamp = now.strftime("%d %b %Y %H:%M")
+woke = f"[{stamp} — Robot sign-in] BLOCKER CLEARED (SIGN-IN www.topcashback.co.uk): Kevin signed in to TopCashback (www.topcashback.co.uk). The session is live now. Carry on."
+agent = f"[{stamp} — agent] BLOCKER CLEARED (SIGN-IN www.topcashback.co.uk): evidence: saw the account page."
+print(json.dumps([bool(m.signin_reopened_reason({"status": "Today", "outcome": "", "notes": woke})),
+                  bool(m.signin_reopened_reason({"status": "Today", "outcome": "Approved as-is", "notes": woke})),
+                  bool(m.signin_reopened_reason({"status": "Today", "outcome": "Changes requested", "notes": woke})),
+                  bool(m.signin_reopened_reason({"status": "Today", "outcome": "", "notes": agent}))]))`);
+    expect(r).toEqual([true, true, false, false]);
+  });
+
+  it('a resubmit supersedes the old wall, and a declared step opens (only) its own KEVIN wall', () => {
+    const r = py(`
+o = "[x — agent] BLOCKER OPEN (SITE namecheap.com): why Fix: f [since 2026-09-25T08:00:00.000Z]"
+k = {"reason": "payment", "step": "pay the £12 renewal"}
+a = m.submit_wall_notes(o, None)
+b = m.submit_wall_notes(o, k)
+c = m.submit_wall_notes(b, k)
+d = m.submit_wall_notes("", None)
+print(json.dumps([m.task_blocker(a), m.task_blocker(b), c, d, b.count("BLOCKER CLEARED (SITE namecheap.com): superseded")]))`);
+    expect(r[0]).toBeNull();
+    expect(r[1]).toMatchObject({ kind: 'KEVIN', subject: 'payment', why: 'pay the £12 renewal' });
+    expect(r[2]).toBeNull();     // the same KEVIN wall already open: nothing written
+    expect(r[3]).toBeNull();
+    expect(r[4]).toBe(1);
+  });
+
+  it("Kevin's Reject is not a close while blocked: the query leaves Rejected cards out", () => {
+    const r = py(`
+F = []
+def q(formula, max_records=None, minimal=False):
+    F.append(formula); return [{"id": "c", "fields": {AF["notes"]: "", AF["status"]: "Today"}}]
+m.query_tasks = q
+m.finding_states = lambda: {}
+m.blockers_scan(sweep=False)
+print(json.dumps([f for f in F if f.startswith("AND({Status}='Completed'")]))`);
+    expect(r).toHaveLength(1);
+    expect(r[0]).toContain("NOT({Approval Outcome}='Rejected')");
+  });
+
+  it('annotate cannot write or clear a wall; only block, unblock with evidence and the sweep can', () => {
+    const r = py(`
+rec("t1", outcome="Approved as-is")
+run(m.cmd_block, {"task": "t1", "kind": "KEVIN", "subject": "payment", "why": "Kevin pays.", "finding": None})
+a = run(m.cmd_annotate, {"task": "t1", "note": "BLOCKER CLEARED (KEVIN payment): paid"})
+print(json.dumps({"err": a["err"], "still": m.task_blocker(notes("t1"))["kind"]}))`);
+    expect(r.err).toMatch(/writes a blocker line/);
+    expect(r.still).toBe('KEVIN');
+  });
+
+  it('a TOOL wall with a mistyped finding id is refused, so it cannot sit "being fixed" for ever', () => {
+    const r = py(`
+rec("t1")
+m.finding_states = lambda: {"20260925-agent-dispatch-606": "open"}
+a = run(m.cmd_block, {"task": "t1", "kind": "TOOL", "subject": "retype", "why": "x", "finding": "606"})
+b = run(m.cmd_block, {"task": "t1", "kind": "TOOL", "subject": "retype", "why": "x", "finding": "20260925-agent-dispatch-606"})
+print(json.dumps([a["err"], b["err"], m.task_blocker(notes("t1"))["finding"]]))`);
+    expect(r[0]).toMatch(/is not a finding in the queue/);
+    expect(r[1]).toBeNull();
+    expect(r[2]).toBe('20260925-agent-dispatch-606');
+  });
+
+  it('blocked work Kevin has not approved rests a day too, and wakes when the wall clears or his verdict moves', () => {
+    const r = py(`
+now = datetime(2026, 9, 25, 12, 0, tzinfo=timezone.utc)
+n = "[x — agent] BLOCKER OPEN (SITE namecheap.com): why Fix: f [since 2026-09-25T10:00:00.000Z]"
+t = {"outcome": "", "notes": n, "approvedAt": ""}
+print(json.dumps([m.blocked_rest(t, ("parked", "2026-09-25T10:00:00.000Z"), now),
+                  m.blocked_rest(t, ("unblocked", "2026-09-25T11:00:00.000Z"), now),
+                  m.blocked_rest(dict(t, approvedAt="2026-09-25T11:00:00.000Z"), ("parked", "2026-09-25T10:00:00.000Z"), now),
+                  m.blocked_rest(dict(t, notes=""), ("parked", "2026-09-25T10:00:00.000Z"), now),
+                  m.blocked_rest(t, ("parked", "2026-09-24T10:00:00.000Z"), now),
+                  m.blocked_rest(dict(t, outcome="Approved as-is"), ("parked", "2026-09-25T10:00:00.000Z"), now)]))`);
+    expect(r[0]).toMatch(/^blocked on SITE namecheap\.com since 2026-09-25T10:00; rests 2[0-2]h more/);
+    expect(r.slice(1)).toEqual(['', '', '', '', '']);
+  });
+
+  it('a SIGN-IN wall also clears when the browser ledger shows the session live after the wall', () => {
+    const r = py(`
+b = {"kind": "SIGN-IN", "subject": "www.topcashback.co.uk", "since": "2026-09-25T08:00:00.000Z", "finding": ""}
+m.ledger_session_verdict = lambda h, max_age_minutes=None: {"signedIn": True, "at": "2026-09-25T09:00:00.000Z", "url": "", "source": "ledger"}
+live = m.blocker_clear_reason(b, SITES, {})
+m.ledger_session_verdict = lambda h, max_age_minutes=None: {"signedIn": True, "at": "2026-09-25T07:00:00.000Z", "url": "", "source": "ledger"}
+before = m.blocker_clear_reason(b, SITES, {})
+m.ledger_session_verdict = lambda h, max_age_minutes=None: {"signedIn": False, "at": "2026-09-25T09:00:00.000Z", "url": "", "source": "ledger"}
+out = m.blocker_clear_reason(b, SITES, {})
+print(json.dumps([live, before, out]))`);
+    expect(r[0]).toMatch(/session on www\.topcashback\.co\.uk was live at 2026-09-25T09:00/);
+    expect(r[1]).toBe('');
+    expect(r[2]).toBe('');
   });
 });

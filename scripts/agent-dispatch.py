@@ -1286,6 +1286,30 @@ def idle_handback(t, last, now=None):
     return "%s at %s; rests %dh more, or until Kevin's verdict changes" % (what, ts[:16], left)
 
 
+def blocked_rest(t, last, now=None):
+    """Why an UNAPPROVED task with an open wall is resting, or ''. Same clock
+    as idle_handback: IDLE_HOURS from the `parked` event `block` writes, and
+    an earlier end the moment Kevin's verdict moves or the wall clears (the
+    clear writes `unblocked`, so `last` is no longer parked)."""
+    if t.get("outcome") in APPROVED or not last or last[0] != "parked" or not last[1]:
+        return ""
+    b = task_blocker(t.get("notes"))
+    if not b:
+        return ""
+    if str(t.get("approvedAt") or "") > last[1]:
+        return ""
+    try:
+        when = datetime.fromisoformat(last[1].replace("Z", "+00:00"))
+    except ValueError:
+        return ""
+    now = now or datetime.now(timezone.utc)
+    if now - when >= timedelta(hours=IDLE_HOURS):
+        return ""
+    left = int((timedelta(hours=IDLE_HOURS) - (now - when)).total_seconds() // 3600)
+    return (f"blocked on {b['kind']} {b['subject']} since {last[1][:16]}; rests {left}h more, "
+            "or until the wall clears")
+
+
 def open_intents():
     """Task IDs with a carry-out intent never followed by a done marker —
     i.e. the action may already have happened without the task completing."""
@@ -1297,8 +1321,11 @@ def open_intents():
                     rec = json.loads(line)
                 except ValueError:
                     continue
-                if not isinstance(rec, dict) or rec.get("event") == "parked":
-                    continue   # a PARKED note (14 Sep 2026) says nothing about whether the action ran
+                if not isinstance(rec, dict) or rec.get("event") in ("parked", "unblocked"):
+                    # A wall recorded or cleared (14 and 25 Sep 2026) says nothing about
+                    # whether the action ran; skipping it keeps an earlier intent open, so
+                    # the woken carry-out still checks what already happened (review).
+                    continue
                 state[rec.get("task")] = rec.get("event")
     except FileNotFoundError:
         pass
@@ -2432,13 +2459,36 @@ KEVIN_ONLY_LINE_RE = re.compile(
     r"^\s*\**KEVIN ONLY:\**\s*(?P<reason>[A-Za-z]+)\s*[:\-–]\s*(?P<step>\S[^\n]*)$", re.M)
 
 
-def work_handoff_problem(output):
-    """The closing-line words that hand the job to Kevin or 'someone'; ''."""
+# What each KEVIN ONLY reason lets the closing line hand him. A declared step
+# covers ITS OWN verb and nothing else: "KEVIN ONLY: purchase" lets the line say
+# he buys the policy, never that he gets the quote (review, 25 Sep 2026: the
+# first version let any valid line switch the whole check off). "visit" is on
+# no list, because "Kevin visiting TopCashback" is the Swinton failure itself.
+KEVIN_REASON_WORDS = {
+    "payment": r"pay|pays|paying|paid|payment|direct\s+debit|DD|standing\s+order|transfer|settle",
+    "purchase": r"buy|buys|buying|purchase|purchasing|pay|pays|paying",
+    "signature": r"sign|signs|signing|signature|countersign",
+    "credential": r"log\s*in|logging|sign\s*in|signing\s+in|password|passcode|card|consent|re-?consent|authori[sz]e",
+    "identity": r"verify|verifies|verifying|verification|identity|ID|passport",
+    "physical": r"attend|collect|deliver|meet|hand\s+over|post",
+}
+
+
+def work_handoff_problem(output, kevin_step=None):
+    """The closing-line words that hand the job to Kevin or 'someone'; ''.
+    With a valid declared KEVIN ONLY step, a hand-off that names that step's
+    own verb (in the phrase or the 60 characters after it) is allowed; any
+    other hand-off in the same line is still refused."""
     tail = carry_out_tail((output or "").strip())
+    words = None
+    if kevin_step and not kevin_step.get("invalid"):
+        words = re.compile(r"\b(?:%s)\b" % KEVIN_REASON_WORDS[kevin_step["reason"]], re.I)
     for m in WORK_HANDOFF_RE.finditer(tail):
         # "you already pay this card's minimum yourself" describes, it does
         # not hand over (the one false alarm left in the 765-output back-test).
         if re.search(r"\balready\b", tail[max(0, m.start() - 20): m.end()], re.I):
+            continue
+        if words and words.search(tail[m.start(): m.end() + 60]):
             continue
         return tail[max(0, m.start() - 50): m.end() + 60].strip()
     return ""
@@ -2961,9 +3011,23 @@ def build_queue(args=None):
         if why:
             t["idleReason"] = why
             idle_hb.append(t)
+    # A wall on work he has NOT approved (a redo or new work) rests the same
+    # day: before the blocker loop the agent's submit took it off the list;
+    # now it stays on Today and would be dispatched again every slot to meet
+    # the same wall (review, 25 Sep 2026).
+    for t in list(changes_hb) + list(new_work) + list(deferred_hb):
+        why = blocked_rest(t, ledger.get(t["id"]))
+        if why and t in idle_hb:
+            continue
+        if why:
+            t["idleReason"] = why
+            idle_hb.append(t)
     if idle_hb:
         idle_ids = {t["id"] for t in idle_hb}
         approved_hb = [t for t in approved_hb if t["id"] not in idle_ids]
+        changes_hb = [t for t in changes_hb if t["id"] not in idle_ids]
+        new_work = [t for t in new_work if t["id"] not in idle_ids]
+        deferred_hb = [t for t in deferred_hb if t["id"] not in idle_ids]
 
     combined = approved_hb + changes_hb + new_work + deferred_hb
     intents = open_intents()
@@ -3844,11 +3908,13 @@ def cmd_submit(args):
             f"ERROR: refusing to submit {args.task}: its KEVIN ONLY line names "
             f"{kevin_step['reason']!r}. Only these are Kevin's alone: "
             f"{', '.join(KEVIN_ONLY_REASONS)}. Anything else an agent does, or blocks on.")
-    handoff = work_handoff_problem(output)
-    if handoff and not kevin_step and not SIGNIN_NEEDED_RE.search(output):
+    handoff = work_handoff_problem(output, kevin_step)
+    if handoff and not SIGNIN_NEEDED_RE.search(output):
         sys.exit(
             f"ERROR: refusing to submit {args.task}: its closing line hands the job to Kevin "
             f"or 'someone': {handoff!r}.\n"
+            + ("       A KEVIN ONLY line covers only its own step "
+               f"({kevin_step['reason']}); this part is still handed over.\n" if kevin_step else "") +
             "       Nothing an agent can do goes back to him as a to-do (Kevin, 25 Sep 2026:\n"
             "       the Swinton policy renewed that way). Do ONE of these:\n"
             "         (a) do the work (the browser, the research, the quote) and submit the result;\n"
@@ -4202,14 +4268,9 @@ def cmd_submit(args):
         fields[AF["feedbackHistory"]] = archived
     if tf.get("_receiptAdded"):
         fields[AF["notes"]] = str(tf.get(AF["notes"]) or "")[-90000:]
-    if kevin_step:
-        cur = task_blocker(tf.get(AF["notes"]))
-        if not (cur and cur["kind"] == "KEVIN" and cur["subject"] == kevin_step["reason"]):
-            kb = {"kind": "KEVIN", "subject": kevin_step["reason"], "why": kevin_step["step"], "finding": ""}
-            line = blocker_note(datetime.now(LONDON).strftime("%d %b %Y %H:%M"), "agent-dispatch",
-                                BLOCKER_OPEN_MARK, kb,
-                                f"{kevin_step['step']} Fix: {blocker_fix_text(kb)} [since {now_iso()}]")
-            fields[AF["notes"]] = (str(tf.get(AF["notes"]) or "").rstrip() + "\n\n" + line).strip()[-90000:]
+    walled = submit_wall_notes(tf.get(AF["notes"]), kevin_step)
+    if walled is not None:
+        fields[AF["notes"]] = walled
     # RESET THE REMEMBER CYCLE, BUT ONLY ONCE THE LESSON IS SAFE. An agent can
     # redo and resubmit inside the 30-minute lesson poll, so clearing the flag
     # unconditionally would drop exactly the lessons from the fastest redos.
@@ -4281,6 +4342,11 @@ def cmd_annotate(args):
     # nine times that way while its house had no insurance (25 Sep 2026). A
     # wall is now a `block` with a kind, which routes the fix and wakes the
     # task when it lands. The free-text form is refused so it cannot come back.
+    if BLOCKER_OPEN_MARK in (args.note or "") or BLOCKER_CLEARED_MARK in (args.note or ""):
+        # Only block, unblock (with evidence) and the sweep write these lines; a
+        # hand-written CLEARED line would let a task close with nothing proved.
+        sys.exit(f"ERROR: refusing a note on {args.task} that writes a blocker line. Use\n"
+                 f"         python3 scripts/agent-dispatch.py block|unblock {args.task} ...")
     if PARKED_NOTE_RE.match(args.note or ""):
         sys.exit(
             f"ERROR: refusing a PARKED/BLOCKED note on {args.task}. A wall is recorded with\n"
@@ -5487,12 +5553,22 @@ def signin_reopened_reason(t, now=None):
     them. A stamp older than IDLE_HOURS drops out (the session has lapsed by
     then; the daily slots take the task as ordinary new work), so a run that
     never touches one cannot wake the poll every half hour for ever."""
-    if t.get("outcome") or t.get("status") not in ("Today", "Overdue"):
+    if t.get("status") not in ("Today", "Overdue"):
         return ""
     last = None
     for m in NOTE_STAMP_RE.finditer(str(t.get("notes") or "")):
         last = m
-    if not last or not last.group("text").lstrip().startswith(SIGNIN_DONE_MARK):
+    if not last:
+        return ""
+    text = last.group("text").lstrip()
+    # A SIGN-IN wall the sign-in cleared (25 Sep 2026) is the same moment: the
+    # session is live NOW, so the pickup run must work it, approved or not (an
+    # approved carry-out keeps its verdict through the wake).
+    via_wall = (text.startswith(f"{BLOCKER_CLEARED_MARK} (SIGN-IN ")
+                and last.group("who").strip() == "Robot sign-in")
+    if not (text.startswith(SIGNIN_DONE_MARK) or via_wall):
+        return ""
+    if t.get("outcome") and not (via_wall and t.get("outcome") in APPROVED):
         return ""
     try:
         when = datetime.strptime(last.group("day") + " " + (last.group("time") or "00:00"),
@@ -5651,7 +5727,9 @@ def signin_waiting(sites=None):
         b = task_blocker(f.get(AF["notes"]))
         if not b or b["kind"] != "SIGN-IN":
             continue
-        host = b["subject"] if b["subject"] in sites else (
+        # The door host, as signin-done resolves it, or the tap never matches
+        # (One Login's entries open WebFiling's door; review, 25 Sep 2026).
+        host = signin_door_host(b["subject"], sites) if b["subject"] in sites else (
             signin_site_for("", "https://" + b["subject"] + "/", sites) or "unknown")
         entry = sites.get(host, {})
         key = host if host != "unknown" else "unknown:" + b["subject"]
@@ -5743,12 +5821,15 @@ def signin_done(host, sites, groups=None):
             f = rec.get("fields", {}) or {}
             team = links(f.get(AF["teamMember"])) or links(f.get(AF["sentForApprovalBy"]))
             b = task_blocker(f.get(AF["notes"]))
-            if t.get("blocker") and b and b["kind"] == "SIGN-IN":
+            if t.get("blocker"):
                 # A `block`ed task keeps Kevin's verdict: the sign-in clears the
-                # wall and the agent finishes what he approved.
-                woke = wake_blocked(t["id"], b, f"Kevin signed in to {g['label']} ({host}); the "
-                                    "session is live now", by="Robot sign-in")
-                handed.append({"task": t["id"], "agent": t["agent"], "name": woke["name"], "blocker": True})
+                # wall and the agent finishes what he approved. One cleared since
+                # the list was read is left alone, never put through the reset
+                # below, which would wipe his approval (review, 25 Sep 2026).
+                if b and b["kind"] == "SIGN-IN":
+                    woke = wake_blocked(t["id"], b, f"Kevin signed in to {g['label']} ({host}). The "
+                                        "session is live now", by="Robot sign-in")
+                    handed.append({"task": t["id"], "agent": t["agent"], "name": woke["name"], "blocker": True})
                 continue
             if KEEPALIVE_MARK in str(f.get(AF["notes"]) or ""):
                 # Raised by the keep-alive because the session had lapsed; the
@@ -6004,7 +6085,10 @@ def site_reachable(host, sites):
     if not best:
         best = signin_site_for("", "https://" + host + "/", sites) or ""
     v = sites.get(best) or {}
-    return best if v.get("login") and v.get("loginUrl") else ""
+    # A site whose sign-ins live on separate profiles (Utilita's flats) has no
+    # top-level page by design, and "Add a new site" treats it as covered, so
+    # it is reachable: its wall is a SIGN-IN, never a SITE that cannot clear.
+    return best if v.get("login") and (v.get("loginUrl") or v.get("profiles")) else ""
 
 
 def file_tool_finding(task_id, subject, why):
@@ -6039,6 +6123,12 @@ def blocker_clear_reason(b, sites, fstates):
         entry = site_reachable(host, sites) if host else ""
         return (f"{host} is on the robot's list now, with its sign-in page ({sites[entry].get('loginUrl')})"
                 if entry else "")
+    if b["kind"] == "SIGN-IN" and b.get("since"):
+        # Signed in some other way (the keep-alive, a sign-in for another task):
+        # a session check newer than the wall that found it live.
+        v = ledger_session_verdict(b["subject"], max_age_minutes=IDLE_HOURS * 60)
+        if v and v["signedIn"] and v["at"] > b["since"]:
+            return f"the robot's session on {b['subject']} was live at {v['at'][:16]}"
     if b["kind"] == "TOOL" and b.get("finding"):
         status = fstates.get(b["finding"], "")
         if status == "fixed":
@@ -6075,6 +6165,28 @@ def wake_blocked(task_id, b, reason, by="agent-dispatch"):
             "subject": b["subject"], "reason": reason}
 
 
+def submit_wall_notes(notes, kevin_step, now=None):
+    """The Notes a card submit should store for its walls, or None to leave
+    them. A new submission is new work: the wall the old draft met is
+    CLEARED as superseded (else complete refuses for ever and the 08:00 line
+    keeps asking Kevin; review, 25 Sep 2026), and a declared KEVIN ONLY step
+    opens its own KEVIN wall unless that exact wall is already open."""
+    cur = task_blocker(notes)
+    same = bool(kevin_step and cur and cur["kind"] == "KEVIN" and cur["subject"] == kevin_step["reason"])
+    if same or (not cur and not kevin_step):
+        return None
+    stamp = (now or datetime.now(LONDON)).strftime("%d %b %Y %H:%M")
+    out = str(notes or "").rstrip()
+    if cur:
+        out += "\n\n" + blocker_note(stamp, "agent-dispatch", BLOCKER_CLEARED_MARK, cur,
+                                     "superseded: a new submission replaced the work that met this wall.")
+    if kevin_step:
+        kb = {"kind": "KEVIN", "subject": kevin_step["reason"], "why": kevin_step["step"], "finding": ""}
+        out += "\n\n" + blocker_note(stamp, "agent-dispatch", BLOCKER_OPEN_MARK, kb,
+                                     f"{kevin_step['step']} Fix: {blocker_fix_text(kb)} [since {now_iso()}]")
+    return out.strip()[-90000:]
+
+
 def cmd_block(args):
     kind = args.kind.upper()
     subject = " ".join(str(args.subject or "").split()).replace(")", "")
@@ -6101,7 +6213,7 @@ def cmd_block(args):
             sys.exit(f"ERROR: {host} IS on the robot's list with a sign-in page ({entry}). "
                      "If it is signed out, that is a SIGN-IN wall; check with "
                      f"`node scripts/agent-browser.js session --site {entry}` first.")
-        subject = entry if kind == "SIGN-IN" else host
+        subject = signin_door_host(entry, sites) if kind == "SIGN-IN" else host
     if kind == "KEVIN" and subject.lower() not in KEVIN_ONLY_REASONS:
         sys.exit(f"ERROR: a KEVIN wall is one of: {', '.join(KEVIN_ONLY_REASONS)}. "
                  f"{subject!r} is not: work that an agent could do stays the agent's, "
@@ -6116,6 +6228,12 @@ def cmd_block(args):
         ledger_append(args.task, "parked")
         print(json.dumps({"blocked": args.task, "already": True, **current}))
         return
+    if kind == "TOOL" and args.finding:
+        # A mistyped id would never clear, and the row would say it is being
+        # fixed (review, 25 Sep 2026). It must be one findings.py knows.
+        if not BLOCKER_FINDING_RE.match(f"[finding {args.finding}]") or args.finding not in finding_states():
+            sys.exit(f"ERROR: --finding {args.finding!r} is not a finding in the queue "
+                     "(python3 scripts/findings.py list). Leave it off and one is filed.")
     if kind == "TOOL":
         b["finding"] = args.finding or file_tool_finding(args.task, subject, why)
         if not b["finding"]:
@@ -6154,6 +6272,9 @@ def blockers_scan(sweep=False, now=None):
     recs = query_tasks(f"AND(NOT({{Status}}='Completed'), FIND('{BLOCKER_OPEN_MARK}', {{Notes}}))")
     closed = query_tasks(
         f"AND({{Status}}='Completed', FIND('{BLOCKER_OPEN_MARK}', {{Notes}}), "
+        # Kevin's Reject closes a card by HIS decision; only a close nobody
+        # decided is the loss this reports (review, 25 Sep 2026).
+        "NOT({Approval Outcome}='Rejected'), "
         "IS_AFTER({Completion Date}, DATEADD(TODAY(), -14, 'days')))")
     sites, sites_error = {}, ""
     try:
