@@ -262,7 +262,7 @@ describe('the Robot sign-in app and its link', () => {
       expect(run(`((count of (sites of (s's splitSiteList("A | a.com | https://a.com/ | default" & linefeed & "SKIPPED: x: bad" & linefeed)))) as text) & "/" & (item 1 of (skipped of (s's splitSiteList("SKIPPED: x: bad"))))`))
         .toBe('1/x: bad');
     } finally { rmSync(dir, { recursive: true, force: true }); }
-  });
+  }, 30000);   // osacompile + ten osascript runs: ~7 s when the full suite loads the Mac
   it('the site list comes from signin-list, a flat hands nothing back, and a site link opens every profile on it', () => {
     expect(src).toMatch(/scripts\/agent-browser\.js signin-list/);
     const signIn = src.slice(src.indexOf('on signInTo'), src.indexOf('end signInTo'));
@@ -307,7 +307,7 @@ describe('the Robot sign-in app and its link', () => {
     expect(chain.trim().split('\n').pop().trim()).toBe('refreshPanel()');
     const refresh = src.slice(src.indexOf('on refreshPanel'), src.indexOf('end refreshPanel'));
     expect(refresh).toMatch(/detach\.py --cwd .* -- \/usr\/bin\/python3 scripts\/estate-status\.py signins > \/dev\/null/);
-  });
+  }, 30000);   // osacompile + osascript runs
   it('resolves node the way the runners do, never a bare "node" under launchd', () => {
     const py = readFileSync(join(ROOT, 'scripts', 'agent-dispatch.py'), 'utf8');
     expect(py).toMatch(/AGENT_NODE_BIN/);
