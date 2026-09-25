@@ -77,6 +77,7 @@ from agent_email_format import (  # noqa: E402
     TIER1_BANNER,
     EmailFormatError,
     parse_output as parse_email_output,
+    strip_track_record,
     validate_submission as validate_email_submission,
     validate_submission_any as validate_any_submission,
     PERSONAL_SENDER,
@@ -1478,11 +1479,34 @@ def area_covers(areas, address):
     return False
 
 
+# A quote REFERENCE is a label, not a request for a trade quote: "Quote Ref:
+# 931520229" on an insurer's renewal (25 Sep 2026, PIB) tripped this check.
+QUOTE_REF_RE = re.compile(r"\bquot(?:e|ation)\s*(?:ref(?:erence)?|no|number|#)\.?\s*[:#]?\s*[\w/-]+", re.I)
+
+
+def quote_scope(output):
+    """The words the quote test reads: the email itself (subject and body),
+    never the briefing above its headers or the TRACK RECORD (history
+    addressed to Kevin), and with quote REFERENCES taken out. The PIB reply
+    to an insurer was refused because its track record quoted her subject
+    ("[Quote Ref: 931520229]") and its briefing compared insurance quotes;
+    neither is a request to a tradesperson."""
+    text = strip_track_record(output or "")
+    start = re.search(r"^\s*(?:TO|TO-EACH):", text, re.M | re.I)
+    email = text[start.start():] if start else text
+    try:
+        mail = parse_email_output(email)
+        email = f"{mail.get('subject', '')}\n{mail.get('body', '')}"
+    except EmailFormatError:
+        pass
+    return QUOTE_REF_RE.sub(" ", email)
+
+
 def coverage_problem(coverage_text, output, task_name, task_type):
     """Why a quote-related email may not go, or '' when every property is covered."""
     if task_type != "Correspondence" or not PROPERTY_LANE_RE.match(task_name or ""):
         return ""
-    if not QUOTE_WORDS_RE.search(output or ""):
+    if not QUOTE_WORDS_RE.search(quote_scope(output)):
         return ""
     props, contractors = coverage_parse(coverage_text)
     if not props or not contractors:
