@@ -256,6 +256,20 @@ test.describe('Robot sign-ins panel and blocked robots', () => {
     await expect(panel.locator('[data-rs-wall="www.amazon.co.uk"]')).toBeVisible();
   });
 
+  test('a wall on one Utilita flat opens that flat, is named by it, and only its own sign-in clears it', async ({ page }) => {
+    // PR #561: a flat's wall subject reads "my.utilita.co.uk (utilita-apt2)".
+    const flat = { task: 'recW9', name: 'Read the Duckworth meter', agent: 'Property', kind: 'SIGN-IN', subject: 'my.utilita.co.uk (utilita-apt2)', fix: 'sign in', days: 1 };
+    const lines = [line('Utilita Apartment 1', 'my.utilita.co.uk', 'you-signed-in', { profile: 'utilita-apt1', at: ago(2), how: 'you signed in' }),
+      line('Utilita Apartment 2', 'my.utilita.co.uk', 'signed-in', { profile: 'utilita-apt2', how: 'hourly read' })];
+    const panel = await open(page, [signinRow(lines), blockersRow([flat])]);
+    const btn = panel.locator('[data-rs-wall="my.utilita.co.uk (utilita-apt2)"]');
+    await expect(btn).toHaveAttribute('href', 'robotsignin://profile/utilita-apt2');   // never site/<"host (profile)">
+    await expect(panel.locator('[data-rs-wall-line="SIGN-IN"]')).toContainText('blocked until the robot is signed in to Utilita Apartment 2.');
+    // Flat 1's fresh sign-in does not clear flat 2's wall.
+    await expect(page.locator('#signinsCount')).toHaveText('1');
+    await expect(panel).toContainText('One sign-in needs you: Utilita Apartment 2.');
+  });
+
   test('a blocked site the list already calls signed out is counted once', async ({ page }) => {
     const panel = await open(page, [signinRow([line('Amazon (order history)', 'www.amazon.co.uk', 'signed-out')]), blockersRow(WALLS.slice(0, 1))]);
     await expect(panel).toContainText('One sign-in needs you: Amazon (order history).');

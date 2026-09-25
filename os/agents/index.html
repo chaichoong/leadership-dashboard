@@ -6476,7 +6476,11 @@ function signinWalls(){
     const swept = p ? Date.parse(p.sweptAt || '') : NaN;
     open.filter(w => w && (w.kind === 'SIGN-IN' || w.kind === 'SITE') && w.subject).forEach(w => {
         const k = w.kind + ' ' + String(w.subject).toLowerCase();
-        const g = (by[k] = by[k] || { kind: w.kind, subject: String(w.subject), names: [], openedBy: -Infinity });
+        // A wall on one Utilita flat reads "my.utilita.co.uk (utilita-apt1)" (PR #561): the
+        // host and the flat's profile, so its button opens that flat and matches its line.
+        const m = /^(\S+)\s+\(([a-z0-9][a-z0-9-]*)\)$/i.exec(String(w.subject));
+        const g = (by[k] = by[k] || { kind: w.kind, subject: String(w.subject), host: m ? m[1] : String(w.subject),
+            profile: m ? m[2] : '', names: [], openedBy: -Infinity });
         g.names.push(String(w.name || ''));
         const latest = (typeof w.days === 'number' && !isNaN(swept)) ? swept - Math.max(0, w.days - 0.05) * 86400000 : Infinity;
         g.openedBy = Math.max(g.openedBy, latest);   // the newest wall on the site decides
@@ -6492,18 +6496,22 @@ function signinWalls(){
 }
 // One site name covers another when they are equal or one is a subdomain of the other.
 function signinSameSite(a, b){ a = String(a).toLowerCase(); b = String(b).toLowerCase(); return a === b || a.endsWith('.' + b) || b.endsWith('.' + a); }
+// A line is the wall's sign-in: the same site, and the same flat when the wall names one.
+function signinLineIsWall(ln, w){
+    return signinSameSite(ln.host, w.host) && (!w.profile || ln.profile === w.profile);
+}
 function signinWallsHtml(walls, lines, failed){
     const warn = failed ? `<div class="rs-note">Blocked robots could not be checked just now: ${esc(failed)} What is listed below is from the last good check.</div>` : '';
     if(!walls.length) return warn;
     const rows = walls.map(w => {
         const n = w.names.length, tasks = n === 1 ? 'One task is' : `${n} tasks are`;
         const what = w.kind === 'SIGN-IN'
-            ? `${tasks} blocked until the robot is signed in to ${esc(w.subject)}.`
+            ? `${tasks} blocked until the robot is signed in to ${esc(w.label || w.subject)}.`
             : `${tasks} blocked until ${esc(w.subject)} is on the robot's list.`;
         const btn = w.done ? ''
             : !SIGNIN_ON_MAC ? `<span class="rs-mac">${w.kind === 'SIGN-IN' ? 'Sign in' : 'Add it'} on your Mac</span>`
             : w.kind === 'SIGN-IN'
-                ? `<a class="btn btn-success btn-sm" href="${esc('robotsignin://site/' + encodeURIComponent(w.subject))}" data-rs-wall="${esc(w.subject)}" aria-label="Sign in to ${esc(w.subject)}">Sign in</a>`
+                ? `<a class="btn btn-success btn-sm" href="${esc(w.profile ? 'robotsignin://profile/' + encodeURIComponent(w.profile) : 'robotsignin://site/' + encodeURIComponent(w.host))}" data-rs-wall="${esc(w.subject)}" aria-label="Sign in to ${esc(w.label || w.subject)}">Sign in</a>`
                 : `<a class="btn btn-sm" href="robotsignin://add" data-rs-wall-add="${esc(w.subject)}" aria-label="Add ${esc(w.subject)} to the robot's list">+ Add this site</a>`;
         const note = w.done ? 'You signed in since. The robot picks the task up at its next pass.'
             : w.names.slice(0, 3).join(', ') + (n > 3 ? ' and ' + (n - 3) + ' more' : '');
@@ -6525,8 +6533,11 @@ function signinWallsBare(){
 // unknown age, or from a writer without sweptAt, stays too (review, 25 Sep 2026).
 function signinMarkWalls(walls, lines){
     walls.forEach(w => {
+        // A flat's wall is named by that flat's line ("Utilita Apartment 1 (…)"), not its host.
+        const own = w.profile ? lines.find(ln => signinLineIsWall(ln, w)) : null;
+        w.label = own ? own.label : '';
         w.done = w.kind === 'SIGN-IN' && isFinite(w.openedBy) && lines.some(ln => ln.state === 'you-signed-in'
-            && signinSameSite(ln.host, w.subject) && Date.parse(ln.at || '') >= w.openedBy);
+            && signinLineIsWall(ln, w) && Date.parse(ln.at || '') >= w.openedBy);
     });
     return walls;
 }
@@ -6588,8 +6599,8 @@ function renderSignins(){
     signinMarkWalls(walls, lines);
     // A blocked robot's site counts once, whether or not the list already calls it signed out;
     // only a SIGN-IN wall can be the same thing as a signed-out line.
-    const wallNames = walls.filter(w => !w.done && !(w.kind === 'SIGN-IN' && needs.some(ln => signinSameSite(ln.host, w.subject))))
-        .map(w => w.subject);
+    const wallNames = walls.filter(w => !w.done && !(w.kind === 'SIGN-IN' && needs.some(ln => signinLineIsWall(ln, w))))
+        .map(w => w.label || w.subject);
     const needNames = needs.map(ln => ln.label).concat(wallNames);
     setCount(needNames.length, needNames.length > 0);
     const summary = needNames.length
