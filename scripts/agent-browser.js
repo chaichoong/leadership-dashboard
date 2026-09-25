@@ -345,12 +345,13 @@ function recordLoginSite(url, { label, profile, add } = {}) {
   if (owner && !owner.login && ownerKey === host && BUILTIN_SITES[host]) {
     return Object.assign(kept, { note: `${host} is on the list as a read-only site, so the sign-in was not recorded.` });
   }
-  // Only Kevin adds a site (fourth review, a gap older than this change): a
-  // task line naming a host nothing owns used to put that host on the list
-  // before the window even opened, so a misled agent could steer his sign-in
-  // to a stranger. Without `add`, only an existing login site is updated.
+  // Only Kevin adds a site (review, a gap older than this change): a task line
+  // naming a host nothing owns used to put that host on the list, and open the
+  // window there, so a misled agent could steer his sign-in to a stranger.
+  // Without `add`, only an existing login site is updated, and `login` REFUSES
+  // to open anything else: the refusal is what the app shows him.
   if (!add && !(owner && owner.login)) {
-    return Object.assign(kept, { note: `${host} is not on the robot's list, so the sign-in was not recorded. Add it with "Add a new site" in the Robot sign-in app.` });
+    return Object.assign(kept, { refuse: `${host} is not on the robot's list, so no sign-in window was opened there. If you want the robots to use it, add it yourself with "Add a new site".` });
   }
   // An http page still opens (agents' lines take http too), but is never written.
   if (u.protocol !== 'https:') return Object.assign(kept, { note: `${url} is not https, so it was not recorded on the allowlist.` });
@@ -916,6 +917,7 @@ async function main() {
     // --add is a flag of its own, never the value of another (a label "--add").
     const add = rest.some((a, i) => a === '--add' && !['--url', '--profile', '--label'].includes(rest[i - 1]));
     const rec = recordLoginSite(url, { label: arg(rest, 'label', null), profile, add });
+    if (rec.refuse) die(rec.refuse);
     const host = new URL(url).hostname.toLowerCase();
     if (rec.changed) console.log(`Recorded ${rec.host} on the allowlist.`);
     if (rec.note) console.log('NOTE: ' + rec.note);                   // the Robot sign-in app shows NOTE lines

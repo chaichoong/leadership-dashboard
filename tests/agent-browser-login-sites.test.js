@@ -289,10 +289,21 @@ describe('signin-list and login: every sign-in the Robot sign-in app can open', 
       const before = readFileSync(file, 'utf8');
       const r = m.recordLoginSite('https://strava-login.example.net/', {});
       expect(r.changed).toBe(false);
-      expect(r.note).toMatch(/not on the robot's list.*Add a new site/);
+      expect(r.refuse).toMatch(/not on the robot's list, so no sign-in window was opened/);
       expect(m.hostAllowed('https://strava-login.example.net/')).toBe(false);
       // A parent that holds no login is not a way in either.
-      expect(m.recordLoginSite('https://portal.fylde.gov.uk/login', {}).changed).toBe(false);
+      expect(m.recordLoginSite('https://portal.fylde.gov.uk/login', {}).refuse).toBeTruthy();
+      // And `login` itself refuses before any window opens: exit 1, the reason on stderr
+      // (which the app shows as "Could not open the window"). Never reaches Chrome.
+      // Fenced so a regression can never open Chrome on the real robot profile: a throwaway
+      // HOME (the profile and ledger live under it) and no PATH (`open` cannot be found).
+      const home = mkdtempSync(join(tmpdir(), 'od-refuse-home-'));
+      const run = spawnSync(process.execPath, [modPath, 'login', '--url', 'https://strava-login.example.net/'],
+        { encoding: 'utf8', env: { AGENT_BROWSER_SITES_FILE: file, HOME: home, PATH: '/nonexistent' }, timeout: 20000 });
+      rmSync(home, { recursive: true, force: true });
+      expect(run.status).toBe(1);
+      expect(run.stderr).toMatch(/BROWSER REFUSED: strava-login\.example\.net is not on the robot's list/);
+      expect(run.stdout).not.toMatch(/Chrome window open/);
       expect(readFileSync(file, 'utf8')).toBe(before);
       // An existing login site still gets its page from a task line.
       expect(m.recordLoginSite('https://www.strava.com/login', {}).changed).toBe(true);
