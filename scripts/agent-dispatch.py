@@ -4040,6 +4040,15 @@ def cmd_submit(args):
     tf_early = (get_task(args.task).get("fields", {}) or {})
     is_inbound = bool(tf_early.get(AF["inboundTask"]))
 
+    # THE WITHDRAWN GATE (25 Sep 2026). A person can cancel a task while an agent is still working
+    # on it: the tenant chain withdrew a mail-out card whose change needed code, but the hand-back
+    # poll's run had already read it, and 50 minutes later its submit put the card back in Kevin's
+    # queue with the contacts he had excluded. A task closed as Cancelled is never revived by a submit.
+    if sel(tf_early.get(AF["status"])) == "Cancelled":
+        sys.exit(f"ERROR: refusing to submit {args.task}: it was cancelled while you worked on it.\n"
+                 "       Someone withdrew it on purpose. Read the newest line of its Notes and stop;\n"
+                 "       do not resubmit or reopen it.")
+
     # THE WALL GATE (25 Sep 2026, review). A submit while a SIGN-IN, SITE or
     # TOOL wall stands would bury it: the card would supersede the wall the
     # agent had just recorded, so Kevin is never asked to fix it and nothing

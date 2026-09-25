@@ -638,6 +638,32 @@ print(json.dumps({w: submit(w) for w in ("SITE namecheap.com", "TOOL retype", "S
     expect(r['KEVIN payment']).not.toMatch(/it is blocked/);
   });
 
+  it('submit refuses a task someone cancelled while the agent worked on it (the withdrawn tenant card, 25 Sep 2026)', () => {
+    const agent = 'recwWvBju2ycB63i4';
+    const r = py(`
+import tempfile, os
+m.require_role_agent_live = lambda *a, **k: None
+class Reached(Exception): pass
+def submit(status):
+    calls = []
+    def g(i):
+        calls.append(i)
+        if len(calls) > 1: raise Reached()
+        return {"id": i, "fields": {AF["notes"]: "TENANT CHAIN SUPERSEDED: withdrawn", AF["status"]: status}}
+    m.get_task = g; m.query_tasks = lambda *a, **k: (_ for _ in ()).throw(Reached())
+    m.load_login_sites = lambda: (_ for _ in ()).throw(Reached())
+    p = os.path.join(tempfile.mkdtemp(), "o.md")
+    open(p, "w").write("Report body.\\n\\n**Carrying this out will involve:** sending the saved quote summary to the file.")
+    try:
+        return run(m.cmd_submit, {"agent": "${agent}", "task": "t1", "type": "Research", "output_file": p, "tier1": False,
+                                   "plain_task": None, "plain_approve": None, "files": [], "receipt": None})["err"]
+    except Reached:
+        return "PAST-THE-GATE"
+print(json.dumps({s: submit(s) for s in ("Cancelled", "Today")}))`);
+    expect(r.Cancelled).toMatch(/refusing to submit t1: it was cancelled while you worked on it/);
+    expect(r.Today).not.toMatch(/cancelled while you worked/);
+  });
+
   it('a declared step covers only its own verb in the phrase: the Chedburgh quotes and "someone can post" stay refused', () => {
     const r = py(`
 def o(k, tail): return f"KEVIN ONLY: {k}: the step\\n\\nReport.\\n\\n**Carrying this out will involve:** {tail}"
