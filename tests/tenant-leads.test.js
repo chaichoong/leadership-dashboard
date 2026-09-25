@@ -938,6 +938,56 @@ out["settled"] = [(p["id"], p["fields"].get(L["lastContacted"])) for p in fw7.pa
   });
 });
 
+describe('the second form: documents from a person securing a room (Kevin, 25 Sep 2026)', () => {
+  const r = py(`
+w = world()
+w["leads"] = [lead("recS", name="Sam Secure", stage="Securing room", email="sam@example.com")]
+fw = FakeWriter(); tl.run(w, DAY, fw, only="move-in", replies=lambda: [])
+out["docsBody"] = [c["output"] for c in fw.cards if c["kind"] == "docs"][0]
+wd = world(); wd["linkLive"] = False; wd["leads"] = [lead("recS", name="Sam Secure", stage="Securing room", email="sam@example.com")]
+fwd = FakeWriter(); tl.run(wd, DAY, fwd, only="move-in", replies=lambda: [])
+out["deadLink"] = ([c["kind"] for c in fwd.cards], [t["kind"] for t in fwd.roy])
+# A submission with Sam's id: linked, stamped and handed to Property Administration once.
+w["docs"] = [rec("recDOC1", {tl.D["name"]: "Sam Secure", tl.D["leadId"]: "recS", tl.D["refName"]: "Pat Landlord",
+                             tl.D["refContact"]: "07000 000000", tl.D["refIs"]: "Previous landlord"}),
+             rec("recDOC2", {tl.D["name"]: "Nobody", tl.D["leadId"]: "recNOPE"})]
+fw2 = FakeWriter(); made = []
+fw2.create_task = lambda name, desc, notes="": made.append((name, desc, notes)) or "recCHECK"
+tl.run(w, DAY, fw2, only="docs-in", replies=lambda: [])
+out["docRows"] = {p["id"]: p["fields"] for p in fw2.patches if p.get("table") == tl.T_DOCS}
+out["leadNotes"] = [p["fields"].get(L["notes"]) for p in fw2.patches if p["id"] == "recS"]
+out["check"] = [(n, notes) for n, d, notes in made]
+out["checkDesc"] = made[0][1] if made else ""
+for d in w["docs"]: d["fields"].update(out["docRows"].get(d["id"], {}))
+fw3 = FakeWriter(); made3 = []
+fw3.create_task = lambda name, desc, notes="": made3.append(name) or "x"
+tl.run(w, DAY, fw3, only="docs-in", replies=lambda: [])
+out["again"] = made3
+w["tasks"] += [task(t["name"], status="Today", notes=t["notes"]) for t in fw.roy]
+w["tasks"] += [task(c["name"], status="Approval", notes="TENANT CHAIN IDS: " + ",".join(c["ids"])) for c in fw.cards]
+m = tl.monitor(w, DAY, tl.openings(w, DAY), [])
+out["movein"] = next(x for x in m["steps"] if x["key"] == "movein")
+`);
+  it('the documents email links to the second form with the person\'s id, and waits while the link is dead', () => {
+    expect(r.docsBody).toMatch(/https:\/\/rooms\.agilelets\.co\.uk\/d\?id=recS\b/);
+    expect(r.docsBody).toMatch(/reply to this email with them instead/);
+    expect(r.deadLink).toEqual([[], ['movein']]);
+  });
+  it('a submission is linked to its person, stamped, and its check handed to Property Administration once', () => {
+    expect(Object.values(r.docRows.recDOC1)).toContain('Linked');
+    expect(Object.values(r.docRows.recDOC2)).toEqual(['No match']);
+    expect(r.leadNotes[0]).toMatch(/DOCS REPLIED 25 Sep 2026 \(form\)/);
+    expect(r.check).toEqual([['TENANT DOCS CHECK: Sam Secure 25 Sep 2026', 'TENANT CHAIN IDS: recS,recDOC1']]);
+    expect(r.checkDesc).toMatch(/Pat Landlord \(07000 000000, their previous landlord\)/);
+    expect(r.checkDesc).toMatch(/never either of those here/);
+    expect(r.again).toEqual([]);
+  });
+  it('the monitor counts the documents back and shows a form that matched nobody', () => {
+    expect(r.movein.note).toMatch(/documents back from 1/);
+    expect(r.movein.note).toMatch(/1 document form\(s\) matched nobody/);
+  });
+});
+
 describe('the monitor reports what did NOT happen', () => {
   const r = py(`
 w = world()

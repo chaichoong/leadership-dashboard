@@ -78,6 +78,11 @@ T_LEADS, T_REFS, T_OPTOUTS = "tbliYKA44VBFeLduP", "tbl0V6ginecespKny", "tblQwebv
 T_UNITS, T_TENANCIES, T_TENANTS = "tblM3mZCR5kiEdWMj", "tblN51a88qTDB6iMH", "tblX4elTuu01gwBYh"
 T_PROPS, T_GROWTH, T_TASKS = "tbl6f0OkAmTC2jbuG", "tblHqr2kyiL15a8LN", "tblqB8b22hKBL4PF1"
 T_INVOICES, T_ESTATE = "tblkOTKIG2Tyiy9aM", "tblZVrdzivyBueZVf"
+T_DOCS = "tblBBpMcX7xrJXvqx"   # Tenant Documents: the second form (Kevin, 25 Sep 2026)
+D = {"name": "fldomQgAfSLaoDCef", "leadId": "fld1vGx3yxiAeg7yQ", "uc": "fld04vczJQIGgRUvZ",
+     "refName": "fldqRKhSlcncZYmq7", "refContact": "fldTQRagpglRlCRit", "refIs": "fldkM9vhE1wcyqRMF",
+     "address": "fldETlvReDby2nyxC", "other": "fld4OV6Z75k46tEDd", "lead": "flde2sB5TWPEyEMw4",
+     "status": "fldiMt2qFUG1SG9WO"}
 
 L = {  # Tenant Leads
     "name": "fldraNPm1mfryIiaw", "phone": "fldiyFfkZwg71HAtD", "email": "fldKwSkfjnLNfUppM",
@@ -129,6 +134,9 @@ FORM_URL = "https://airtable.com/appnqjDpqDniH3IRl/shrTuDF8s04Kp5XGT"
 SHORT_BASE = "https://rooms.agilelets.co.uk"
 SHORT_LINKS = {"Other": "", "Referrer": "r", "Tenant referral": "t", "SpareRoom": "s", "OpenRent": "o",
                "Gumtree": "g", "Facebook": "f", "Past applicant": "p"}
+# The second form (Kevin chose it, 25 Sep 2026): UC statement and a reference from a person securing a
+# room. rooms.agilelets.co.uk/d?id=<their Tenant Leads id> opens it with that id stored, hidden.
+DOCS_FORM_URL = "https://airtable.com/appnqjDpqDniH3IRl/shrNbmUzIT32hKHje"
 STATUS_KEY = "tenant-chain"
 SELF_MANAGED = "Property Portfolio"
 # Growth Strategy values meaning rooms for our niche. The old names are still read (Growth Plan v3).
@@ -155,7 +163,7 @@ NEAR = {
 # never fold into another kind (review, 25 Sep 2026).
 PREFIXES = {"mailout": "TENANT MAILOUT: ", "adverts": "TENANT ADVERTS: ", "referral": "TENANT REFERRAL: ",
             "viewings": "TENANT VIEWINGS: ", "keepwarm": "TENANT KEEPWARM: ", "movein": "TENANT MOVE-IN: ",
-            "docs": "TENANT DOCS: ", "rooms": "TENANT ROOMS: "}
+            "docs": "TENANT DOCS: ", "rooms": "TENANT ROOMS: ", "check": "TENANT DOCS CHECK: "}
 ROOMS_TASK_EVERY_DAYS = 14   # a house still not legal gets a fresh task this long after the last one closed
 EMAIL_KINDS = ("mailout", "referral", "keepwarm", "docs")
 # Kevin's lettings model (25 Sep 2026): market a room the moment it is void or identified; the tenant
@@ -315,13 +323,18 @@ def form_link(channel):
     return f"{SHORT_BASE}/{code}" if code else SHORT_BASE
 
 
+def docs_link(lead):
+    return f"{SHORT_BASE}/d?id={lead['id']}"
+
+
 def link_works():
-    """True when every short link opens a page that sends the reader to the sign-up form."""
-    for code in SHORT_LINKS.values():
+    """True when every short link opens a page that sends the reader to its form."""
+    pages = [(code, FORM_URL) for code in SHORT_LINKS.values()] + [("d/", DOCS_FORM_URL)]
+    for code, target in pages:
         try:
             with urllib.request.urlopen(urllib.request.Request(f"{SHORT_BASE}/{code}",
                                                                headers={"User-Agent": "tenant-leads"}), timeout=20) as r:
-                if r.status != 200 or FORM_URL not in r.read().decode("utf-8", "replace"):
+                if r.status != 200 or target not in r.read().decode("utf-8", "replace"):
                     return False
         except Exception:                               # noqa: BLE001 — any failure is "does not work"
             return False
@@ -395,6 +408,7 @@ def load(day):
     """Everything the chain reads, once. Controls: tables that always hold rows fail loudly on zero."""
     data = {
         "leads": fetch_all(T_LEADS),
+        "docs": fetch_all(T_DOCS),
         "refs": fetch_all(T_REFS),
         "optouts": fetch_all(T_OPTOUTS),
         "units": fetch_all(T_UNITS, {"fields[]": list(U.values())}),
@@ -686,11 +700,12 @@ def docs_card(data, lead, town, day):
     """The one email asking a person who is securing a room for their UC statement and a reference."""
     e = email_of(lead["fields"].get(L["email"]))
     body = (f"Hello {first_name(lead)},\n\nThank you for choosing a room with Agile Lets in {town}. To hold it "
-            "for you, please reply to this email with:\n\n"
+            f"for you, please send us these with our two-minute form: {docs_link(lead)}\n\n"
             "1. Your latest Universal Credit statement showing the housing element. A screenshot of the "
             "statement in your UC journal is fine.\n"
             "2. The name and phone number or email of someone who can give you a reference: a previous "
             "landlord or a support worker.\n\n"
+            "If the form does not work for you, reply to this email with them instead.\n\n"
             "Roy will also check your photo ID in person before you move in. It is the right to rent check "
             "the law asks every landlord to make.\n\n"
             "If you would rather not hear from us, reply STOP.")
@@ -1492,13 +1507,17 @@ def monitor(data, day, opens, run_notes):
     slow = [l for l in securing if (day - (heard_day(l) or day)).days > SECURING_WARN_DAYS]
     back = [l for l in securing if DOCS_REPLIED in str(l["fields"].get(L["notes"]) or "")]
     mi = chain_tasks(data, "movein")
+    unmatched_docs = [d for d in data.get("docs") or [] if sel(d["fields"].get(D["status"])) == "No match"]
     step("movein", "Move-ins", max((created_day(t) for t in mi), default=None),
-         "fail" if no_task or no_card else "warn" if slow else "ok" if securing else "idle",
-         ("; ".join(([f"{len(no_task)} securing a room with no move-in task for Roy"] if no_task else [])
-                    + ([f"{len(no_card)} securing a room with no documents email raised"] if no_card else [])))
-         or (f"{len(securing)} securing a room: documents back from {len(back)}"
-             + (f"; {len(slow)} waiting over {SECURING_WARN_DAYS} days" if slow else "") if securing
-             else "Nobody is securing a room yet."))
+         "fail" if no_task or (no_card and bool(data.get("linkLive"))) else "warn" if slow or unmatched_docs
+         else "ok" if securing else "idle",
+         "; ".join(([f"{len(no_task)} securing a room with no move-in task for Roy"] if no_task else [])
+                   + ([f"{len(no_card)} securing a room with no documents email raised"] if no_card else [])
+                   + ([f"{len(unmatched_docs)} document form(s) matched nobody: see Tenant Documents"]
+                      if unmatched_docs else [])
+                   + [f"{len(securing)} securing a room: documents back from {len(back)}"
+                      + (f"; {len(slow)} waiting over {SECURING_WARN_DAYS} days" if slow else "") if securing
+                      else "Nobody is securing a room yet."]))
 
     kw = chain_tasks(data, "keepwarm")
     due = keepwarm_leads(data, day)
@@ -1757,7 +1776,7 @@ class Writer:
 
 
 # ─── the daily run ───────────────────────────────────────────────────
-STEPS = ("replies", "roy", "screen", "mail-out", "adverts", "referral", "viewings", "move-in", "rooms",
+STEPS = ("replies", "roy", "screen", "mail-out", "adverts", "referral", "viewings", "move-in", "docs-in", "rooms",
          "keep-warm", "settle", "convert", "bonus", "archive")
 
 
@@ -2060,10 +2079,47 @@ def run(data, day, w, only=None, replies=None):
             if l["id"] not in tasks:
                 w.to_roy(dict(t, notes=f"TENANT CHAIN IDS: {l['id']}"))
                 made.append(f"move-in task for {first_name(l)}")
-            if l["id"] not in cards and can_email(data, l):
+            if l["id"] not in cards and can_email(data, l) and link_ok:
                 w.raise_card(docs_card(data, l, t["town"], day))
                 made.append(f"documents email for {first_name(l)}")
         return ", ".join(made)
+
+    def do_docs_in():
+        """Each second-form submission: linked to its person, their record stamped, and the check handed to
+        AI Property Administration (read the UC statement, take up the reference: an email is a card for
+        Kevin). A submission whose id matches nobody is marked No match and shown on the monitor."""
+        leads = {l["id"]: l for l in data["leads"]}
+        done, doc_rows, lead_rows = [], [], []
+        for d in data.get("docs") or []:
+            f = d["fields"]
+            if sel(f.get(D["status"])) in ("Linked", "No match"):
+                continue
+            l = leads.get(str(f.get(D["leadId"]) or "").strip())
+            if not l:
+                doc_rows.append({"id": d["id"], "fields": {D["status"]: "No match"}})
+                done.append("1 with no matching person")
+                continue
+            doc_rows.append({"id": d["id"], "fields": {D["lead"]: [l["id"]], D["status"]: "Linked"}})
+            lf = l["fields"]
+            if DOCS_REPLIED not in str(lf.get(L["notes"]) or ""):
+                note = (str(lf.get(L["notes"]) or "").rstrip() + f"\n{DOCS_REPLIED} {fmt_day(day)} (form)").strip()
+                lead_rows.append({"id": l["id"], "fields": {L["notes"]: note, L["heardFrom"]: day.isoformat()}})
+                lf[L["notes"]] = note
+            who = str(lf.get(L["name"]) or f.get(D["name"]) or "this person")
+            ref = f"{f.get(D['refName']) or 'not given'} ({f.get(D['refContact']) or 'no contact'}, their {sel(f.get(D['refIs'])).lower() or 'referee'})"
+            w.create_task(f"{PREFIXES['check']}{who} {fmt_day(day)}",
+                          f"{who} is securing a room and sent the second form (Tenant Documents {d['id']}).\n\n"
+                          "1. Read the UC statement attached there: it must show their name and a housing "
+                          "element. Note the amount and the statement date.\n"
+                          f"2. Take up the reference: {ref}. Ask them to confirm how they know {who} and whether "
+                          "they would recommend them as a tenant. That email is a card for Kevin.\n"
+                          "3. Report back here. Roy does the right-to-rent check in person and the signing on "
+                          "his move-in task; never either of those here.",
+                          f"TENANT CHAIN IDS: {l['id']},{d['id']}")
+            done.append(f"documents from {first_name(l)}")
+        w.patch(T_DOCS, doc_rows, "document submission(s)")
+        w.patch_leads(lead_rows)
+        return ", ".join(done)
 
     def do_rooms():
         """Each house with an opening that is not legal to move into gets ONE task for AI Property
@@ -2162,7 +2218,7 @@ def run(data, day, w, only=None, replies=None):
         return f"{len(rows)} archived" if rows else ""
 
     fns = dict(zip(STEPS, (do_replies, do_roy, do_screen, do_mailouts, do_adverts, do_referrals, do_viewings,
-                           do_movein, do_rooms, do_keepwarm, do_settle, do_convert, do_bonus, do_archive)))
+                           do_movein, do_docs_in, do_rooms, do_keepwarm, do_settle, do_convert, do_bonus, do_archive)))
     for label in STEPS:
         if only in (None, label):
             guard(label, fns[label])
