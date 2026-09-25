@@ -155,7 +155,8 @@ NEAR = {
 # never fold into another kind (review, 25 Sep 2026).
 PREFIXES = {"mailout": "TENANT MAILOUT: ", "adverts": "TENANT ADVERTS: ", "referral": "TENANT REFERRAL: ",
             "viewings": "TENANT VIEWINGS: ", "keepwarm": "TENANT KEEPWARM: ", "movein": "TENANT MOVE-IN: ",
-            "docs": "TENANT DOCS: "}
+            "docs": "TENANT DOCS: ", "rooms": "TENANT ROOMS: "}
+ROOMS_TASK_EVERY_DAYS = 14   # a house still not legal gets a fresh task this long after the last one closed
 EMAIL_KINDS = ("mailout", "referral", "keepwarm", "docs")
 # Kevin's lettings model (25 Sep 2026): market a room the moment it is void or identified; the tenant
 # SECURES it with the documents done; then the works; then they move in a few days later. So readiness
@@ -597,6 +598,25 @@ def room_blockers(data, opens):
             r["blockers"].append(text)
             r["short"].append(BLOCKER_SHORT.get(t, t))
     return out
+
+
+def rooms_task(pid, r, day):
+    """One task per house for AI Property Administration (its standing lane: certificates, licences,
+    landlord insurance): everything that stops a new tenant moving in, found in the compliance book."""
+    desc = (f"{r['property']} has rooms we are finding tenants for (the tenant-finding chain). Kevin's way: "
+            "tenants secure a room with their documents done, the works are done, and they move in a few days "
+            f"later. Nobody new can move in until the house is legal for the {r['people']} people it will hold.\n\n"
+            "Open today (from the compliance book):\n" + "\n".join(f"- {b}" for b in r["blockers"])
+            + (f"\n\nRenewing soon: {'; '.join(r['renewals'])}" if r["renewals"] else "")
+            + "\n\nSearch every record first (the compliance book, both Drives, Gmail): a certificate may exist "
+            "and not be filed, or a policy may cover this house under another name. Link any open COMPLIANCE "
+            "task for the same item instead of starting a second one. Our own certificates: three quotes, "
+            "cheapest to Roy to book. An HMO licence: prepare the West Suffolk application; Kevin pays the fee. "
+            "File each certificate with agent-dispatch.py certificate. The chain re-reads the book every morning "
+            "and shows what is still open on the Growth Plan and in Kevin's 09:00 brief.")
+    return {"kind": "rooms", "town": r["town"],
+            "name": f"{PREFIXES['rooms']}{r['property']}: make it legal for new tenants {fmt_day(day)}",
+            "description": desc, "notes": f"TENANT CHAIN IDS: {pid}"}
 
 
 def blockers_line(rb):
@@ -1452,12 +1472,19 @@ def monitor(data, day, opens, run_notes):
     note = ("Before anyone new moves in: " + "; ".join(f"{r['property']}: {', '.join(r['blockers'] + r['works'])}"
                                                        for r in blocked)
             if blocked else "Every house with an open room holds what it needs." if rb else "No open room to check.")
+    rtasks = chain_tasks(data, "rooms")
+    unowned = [r["property"] for pid, r in rb.items() if r["blockers"]
+               and not any(is_open(t) and pid in chain_ids(t) for t in rtasks)]
+    if unowned:
+        note = f"Nobody is working on {', '.join(unowned)}. " + note
+    elif blocked:
+        note += ". AI Property Administration holds a task for each house"
     if stuck:
         note = f"{len(stuck)} securing a room for 14+ days while its house is not legal to move into. " + note
     if renew:
         note += ". Renewing soon: " + "; ".join(renew)
     step("rooms", "Rooms legal to move into", day if rb else None,
-         "fail" if stuck else "warn" if blocked else ("ok" if rb else "idle"), note)
+         "fail" if stuck or unowned else "warn" if blocked else ("ok" if rb else "idle"), note)
 
     tasks_by, cards_by = by_lead(data, "movein"), by_lead(data, "docs")
     no_task = [l for l in securing if l["id"] not in tasks_by]
@@ -1513,7 +1540,7 @@ def brief_line(mon):
     results, and what stops anyone moving in. The brief adds the colour and the staleness check."""
     fails = [x for x in mon["steps"] if x["state"] == "fail"]
     warns = [x for x in mon["steps"] if x["state"] == "warn"]
-    head = (f"NOT WORKING: {fails[0]['label']}: {fails[0]['note'][:160]}" if fails
+    head = (f"NOT WORKING: {fails[0]['label']}: {fails[0]['note'][:160].rstrip('.')}" if fails
             else f"working, {len(warns)} to watch ({', '.join(x['label'] for x in warns)})" if warns else "working")
     fn = mon.get("funnel") or {}
     nums = (f"Last {fn.get('days', FUNNEL_DAYS)} days: {fn.get('told', 0)} referrers told, {fn.get('signedUp', 0)} signed up. "
@@ -1730,8 +1757,8 @@ class Writer:
 
 
 # ─── the daily run ───────────────────────────────────────────────────
-STEPS = ("replies", "roy", "screen", "mail-out", "adverts", "referral", "viewings", "move-in", "keep-warm",
-         "settle", "convert", "bonus", "archive")
+STEPS = ("replies", "roy", "screen", "mail-out", "adverts", "referral", "viewings", "move-in", "rooms",
+         "keep-warm", "settle", "convert", "bonus", "archive")
 
 
 def run(data, day, w, only=None, replies=None):
@@ -2038,6 +2065,21 @@ def run(data, day, w, only=None, replies=None):
                 made.append(f"documents email for {first_name(l)}")
         return ", ".join(made)
 
+    def do_rooms():
+        """Each house with an opening that is not legal to move into gets ONE task for AI Property
+        Administration; a fresh one only after the last closed 14 days ago and the house is still not legal."""
+        made = []
+        for pid, r in room_blockers(data, opens).items():
+            if not r["blockers"]:
+                continue
+            mine = [t for t in chain_tasks(data, "rooms") if pid in chain_ids(t)]
+            if any(is_open(t) for t in mine) or any((day - (created_day(t) or day)).days < ROOMS_TASK_EVERY_DAYS for t in mine):
+                continue
+            t = rooms_task(pid, r, day)
+            w.create_task(t["name"], t["description"], t["notes"])
+            made.append(r["property"])
+        return ", ".join(made)
+
     def do_keepwarm():
         if not link_ok:
             return HELD
@@ -2120,7 +2162,7 @@ def run(data, day, w, only=None, replies=None):
         return f"{len(rows)} archived" if rows else ""
 
     fns = dict(zip(STEPS, (do_replies, do_roy, do_screen, do_mailouts, do_adverts, do_referrals, do_viewings,
-                           do_movein, do_keepwarm, do_settle, do_convert, do_bonus, do_archive)))
+                           do_movein, do_rooms, do_keepwarm, do_settle, do_convert, do_bonus, do_archive)))
     for label in STEPS:
         if only in (None, label):
             guard(label, fns[label])
