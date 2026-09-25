@@ -982,10 +982,13 @@ def monitor(data, day, opens, run_notes):
     unhanded = [l for l in real if sel(l["fields"].get(L["stage"])) == "Qualified"
                 and lead_towns(lead_areas(l)) & set(towns)]
     with_roy = [l for l in real if sel(l["fields"].get(L["stage"])) == "With Roy"]
+    open_roy = {t["id"] for t in roy if is_open(t)}
+    past_with_roy = [l for l in data["leads"] if is_legacy(l) and sel(l["fields"].get(L["stage"])) == "Past applicant"
+                     and set(links(l["fields"].get(L["royTask"]))) & open_roy]
     step("viewings", "Viewings list to Roy", max((created_day(t) for t in roy), default=None),
          "fail" if unhanded else "ok" if roy else "idle",
          (f"{len(unhanded)} qualified people for an open town not yet with Roy" if unhanded else
-          f"{len(with_roy)} people with Roy to call"))
+          f"Roy has {len(with_roy)} sign-up(s) and {len(past_with_roy)} past applicant(s) to call"))
 
     kw = chain_tasks(data, "keepwarm")
     due = keepwarm_leads(data, day)
