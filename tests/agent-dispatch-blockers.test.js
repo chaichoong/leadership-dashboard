@@ -41,6 +41,7 @@ SITES = {"www.topcashback.co.uk": {"label": "TopCashback", "login": True, "login
          "namecheap.com": {"label": "Namecheap", "login": True},
          "gov.uk": {"label": "GOV.UK", "login": False}}
 m.load_login_sites = lambda: SITES
+m.BROWSER_LEDGER = "/nonexistent/od-test-browser-ledger.jsonl"   # never the live robot's log
 class A:
     def __init__(self, **kw): self.__dict__.update(kw)
 def run(fn, args):
@@ -81,6 +82,54 @@ print(json.dumps({"a": a["err"], "b": b["err"], "c": c["err"], "blk": m.task_blo
     expect(r.b).toMatch(/That is a SITE wall/);   // namecheap is listed but has no sign-in page
     expect(r.c).toBeNull();
     expect(r.blk).toMatchObject({ kind: 'SIGN-IN', subject: 'www.topcashback.co.uk' });
+  });
+
+  it('SIGN-IN is refused for a site that showed the robot a bot check today (Cloudflare, 25 Sep 2026)', () => {
+    const dir = mkdtempSync(tmpdir() + '/od-botcheck-');
+    const ledger = dir + '/runs.jsonl';
+    const now = new Date();
+    // Today's shape: the session walk passed, then the agent's own READ met the wall.
+    writeFileSync(ledger, [
+      JSON.stringify({ at: new Date(now - 4 * 3600e3).toISOString(), cmd: 'session', site: 'www.topcashback.co.uk', url: 'https://www.topcashback.co.uk/home/', signedIn: true, profile: 'default' }),
+      JSON.stringify({ at: new Date(now - 3 * 3600e3).toISOString(), cmd: 'read', url: 'https://www.topcashback.co.uk/logon/', botCheck: true, profile: 'default' }),
+    ].join('\n') + '\n');
+    const old = dir + '/old.jsonl';     // a bot check more than a day old no longer stands
+    writeFileSync(old, JSON.stringify({ at: new Date(now - 26 * 3600e3).toISOString(), cmd: 'session', site: 'www.topcashback.co.uk', url: 'https://www.topcashback.co.uk/', signedIn: false, botCheck: true, profile: 'default' }) + '\n');
+    const gone = dir + '/gone.jsonl';   // a later clean read means the check has gone
+    writeFileSync(gone, [
+      JSON.stringify({ at: new Date(now - 3 * 3600e3).toISOString(), cmd: 'read', url: 'https://www.topcashback.co.uk/logon/', botCheck: true, profile: 'default' }),
+      JSON.stringify({ at: new Date(now - 1 * 3600e3).toISOString(), cmd: 'read', url: 'https://www.topcashback.co.uk/logon/', profile: 'default' }),
+    ].join('\n') + '\n');
+    const r = py(`
+m.BROWSER_LEDGER = ${JSON.stringify(ledger)}
+rec("t1")
+a = run(m.cmd_block, {"task": "t1", "kind": "SIGN-IN", "subject": "www.topcashback.co.uk", "why": "Stuck on verify you are human.", "finding": None})
+blk = m.task_blocker(notes("t1"))
+m.BROWSER_LEDGER = ${JSON.stringify(old)}
+rec("t2")
+c = run(m.cmd_block, {"task": "t2", "kind": "SIGN-IN", "subject": "www.topcashback.co.uk", "why": "Signed out.", "finding": None})
+m.BROWSER_LEDGER = ${JSON.stringify(gone)}
+rec("t3")
+d = run(m.cmd_block, {"task": "t3", "kind": "SIGN-IN", "subject": "www.topcashback.co.uk", "why": "Signed out.", "finding": None})
+print(json.dumps({"a": a["err"], "blk": blk, "c": c["err"], "d": d["err"]}))`);
+    expect(r.a).toMatch(/showed the robot a bot check \("verify you are human", read at/);
+    expect(r.a).toMatch(/not a SIGN-IN wall/);
+    expect(r.a).toMatch(/block t1 --kind KEVIN --subject credential/);   // a route block accepts, not a circle
+    expect(r.blk).toBeNull();          // nothing written
+    expect(r.c).toBeNull();            // 26 hours old: SIGN-IN is allowed again
+    expect(r.d).toBeNull();            // cleared by a newer clean read
+  });
+
+  it('a bot check on a subdomain counts for its site; a parent or a look-alike never does', () => {
+    const dir = mkdtempSync(tmpdir() + '/od-botcheck-sub-');
+    const ledger = dir + '/runs.jsonl';
+    writeFileSync(ledger, JSON.stringify({ at: new Date().toISOString(), cmd: 'read', url: 'https://www.loom.com/looms', botCheck: true, profile: 'default' }) + '\n');
+    const r = py(`
+L = ${JSON.stringify(ledger)}
+print(json.dumps([bool(m.ledger_bot_check(["loom.com"], path=L)), bool(m.ledger_bot_check(["www.loom.com"], path=L)),
+                  bool(m.ledger_bot_check(["app.www.loom.com"], path=L)), bool(m.ledger_bot_check(["oom.com"], path=L)),
+                  bool(m.ledger_bot_check(["loom.com"], path=L, profile="spotify"))]))`);
+    expect(r).toEqual([true, true, false, false, false]);
   });
 
   it('KEVIN only for the steps that are his by rule; "get the quote" is not one', () => {

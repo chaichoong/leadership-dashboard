@@ -235,24 +235,28 @@ print('HEALTHY=' + str(ub.row_alarm(r(34.30, 'More than a week left'), 10)))
         // OUT session read as signed in, so the message said "the balance was
         // not on the page" and WITHHELD the Robot sign-in line.
         const { sessionVerdict } = require_(resolve(root, 'scripts/agent-browser.js'));
+        const { isBotCheck } = require_(resolve(root, 'scripts/agent-browser.js'));
+        // The fourth field is the page's words: a bot check on the dashboard's own
+        // address is never signed in (25 Sep 2026). The read passes botCheck on.
         const urls = [
-            ['https://my.utilita.co.uk/energy', 0],
-            ['https://my.utilita.co.uk/login?returnUrl=/energy', 0],
-            ['https://my.utilita.co.uk/login', 0],
-            ['https://my.utilita.co.uk/energy', 1],
+            ['https://my.utilita.co.uk/energy', 0, 'Your balance'],
+            ['https://my.utilita.co.uk/login?returnUrl=/energy', 0, ''],
+            ['https://my.utilita.co.uk/login', 0, ''],
+            ['https://my.utilita.co.uk/energy', 1, ''],
+            ['https://my.utilita.co.uk/energy', 0, 'Verify you are human by completing the action below.'],
         ];
         const py = `
 import importlib.util, json
 spec = importlib.util.spec_from_file_location('ub', ${JSON.stringify(script)})
 ub = importlib.util.module_from_spec(spec); spec.loader.exec_module(ub)
-for url, pw in json.loads(${JSON.stringify(JSON.stringify(urls))}):
-    print(str(ub.signed_in(url, pw)))
+for url, pw, bot in json.loads(${JSON.stringify(JSON.stringify(urls.map(([u, pw, t]) => [u, pw, isBotCheck(t, '')])))}):
+    print(str(ub.signed_in(url, pw, bot)))
 `;
         const mine = execFileSync('python3', ['-c', py], { encoding: 'utf8' })
             .trim().split('\n').map(l => l === 'True');
-        const theirs = urls.map(([u, pw]) => sessionVerdict(u, pw).signedIn);
+        const theirs = urls.map(([u, pw, t]) => sessionVerdict(u, pw, t, '').signedIn);
         expect(mine).toEqual(theirs);
-        expect(mine).toEqual([true, false, false, false]);
+        expect(mine).toEqual([true, false, false, false, false]);
     });
 
     it('a trimmed accounts list is refused, not reported as a clean run', () => {
@@ -407,7 +411,8 @@ except SystemExit:
         expect(src).toMatch(/os\.killpg\(os\.getpgid/);
         // And the timeout must exceed agent-browser.js's own 10-minute wait for
         // the profile lock, or contention guarantees a false "did not load".
-        expect(src).toMatch(/READ_TIMEOUT_S = 11 \* 60/);
+        // Since 25 Sep 2026 a read also waits out Kevin's sign-in hold first.
+        expect(src).toMatch(/READ_TIMEOUT_S = 32 \* 60/);
         // The old assertion was an alternation ending in a bare /waitForProfile/,
         // which always matched: raising agent-browser's own lock wait to 20
         // minutes would have made READ_TIMEOUT_S too short again and stayed green.
@@ -418,7 +423,8 @@ except SystemExit:
         const waitMinutes = Number(m[1]);
         const ours = Number(readFileSync(script, 'utf8')
             .match(/READ_TIMEOUT_S = (\d+) \* 60/)[1]);
-        expect(ours).toBeGreaterThan(waitMinutes);
+        const { HOLD_MAX_MS } = require_(resolve(root, 'scripts/agent-browser.js'));
+        expect(ours).toBeGreaterThan(waitMinutes + HOLD_MAX_MS / 60000);
     });
 
     it('a browser failure reports no filesystem path to Roy (driven)', () => {
@@ -442,6 +448,28 @@ print('OK=' + str(r['ok']))
         expect(out).toMatch(/PROBLEM=could not open the page/);
         expect(out).not.toMatch(/\/Users\//);          // no path reaches the message
         expect(out).not.toMatch(/agent-browser/);
+    });
+
+    it('a bot check on the dashboard is reported as one, never as a lapsed sign-in (driven, 25 Sep 2026)', () => {
+        // The read printed botCheck; before this the flat said SIGN-IN NEEDED and
+        // the message asked Kevin for a sign-in that could not help.
+        const py = `
+import importlib.util, os, stat, tempfile, json
+spec = importlib.util.spec_from_file_location('ub', ${JSON.stringify(script)})
+ub = importlib.util.module_from_spec(spec); spec.loader.exec_module(ub)
+d = tempfile.mkdtemp()
+fake = os.path.join(d, 'node')
+out = json.dumps({"url": "https://my.utilita.co.uk/energy", "passwordFields": 0, "botCheck": True, "title": "Just a moment...", "text": "Verify you are human"})
+open(fake, 'w').write("#!/bin/bash\\necho '" + out + "'\\n")
+os.chmod(fake, os.stat(fake).st_mode | stat.S_IEXEC)
+r = ub.read_account({'label': 'Apartment 1', 'profile': 'utilita-apt1'}, node=fake)
+print('PROBLEM=' + str(r['problem']))
+print('SIGNEDIN=' + str(r['signedIn']))
+`;
+        const out = execFileSync('python3', ['-c', py], { encoding: 'utf8' });
+        expect(out).toMatch(/PROBLEM=BOT CHECK: Utilita showed the robot a "verify you are human" page/);
+        expect(out).toMatch(/SIGNEDIN=False/);
+        expect(out).not.toMatch(/SIGN-IN NEEDED/);
     });
 
     it('the runner prefers the MAINTAINED checkout, not the runtime worktree', () => {

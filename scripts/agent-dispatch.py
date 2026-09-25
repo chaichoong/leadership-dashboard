@@ -5453,6 +5453,7 @@ SIGNIN_UNVERIFIED_MARK = "(unverified"
 SIGNIN_UNVERIFIED_RE = re.compile(r"\s*(?:[—–-]\s*)?\(unverified(?::[^)]*)?\)\s*$", re.I)
 SIGNIN_WALK_TIMEOUT = 180                # seconds: the walk's own worst case is ~125 s (door 48 s, two clicks 56 s each, One Login settle 20 s)
 SIGNIN_LEDGER_FRESH_MINUTES = 30         # a verdict newer than this is reused, not re-walked
+BOT_CHECK_FRESH_MINUTES = 24 * 60        # a bot check seen today still stands (block refuses SIGN-IN)
 BROWSER_LEDGER = (os.environ.get("AGENT_BROWSER_LEDGER")
                   or os.path.expanduser("~/knowledge-os/logs/agent-browser/runs.jsonl"))
 
@@ -5553,8 +5554,57 @@ def ledger_session_verdict(host, max_age_minutes=SIGNIN_LEDGER_FRESH_MINUTES, pa
     now = now or datetime.now(timezone.utc)
     if now - at > timedelta(minutes=max_age_minutes):
         return None
-    return {"signedIn": bool(newest.get("signedIn")), "url": str(newest.get("url") or ""),
-            "at": str(newest["at"]), "source": "ledger"}
+    return {"signedIn": bool(newest.get("signedIn")), "botCheck": bool(newest.get("botCheck")),
+            "url": str(newest.get("url") or ""), "at": str(newest["at"]), "source": "ledger"}
+
+
+def ledger_bot_check(hosts, max_age_minutes=BOT_CHECK_FRESH_MINUTES, path=None, now=None, profile="default"):
+    """The newest browser look at any of HOSTS (a `session` line by its site or
+    landing, or a `read` line by the page's host), if it showed the robot a bot
+    check and is under max_age_minutes old; else None. The newest look decides:
+    a later clean read of the same site means the check has gone. Agents meet
+    the wall in their own reads as often as in a session walk (25 Sep 2026)."""
+    want = {str(h or "").lower() for h in hosts if h}
+    # A read on www.loom.com is a look at the entry loom.com: subdomains count, parents never.
+    def matches(h):
+        return bool(h) and any(h == w or h.endswith("." + w) for w in want)
+    newest = None
+    try:
+        with open(path or BROWSER_LEDGER) as fh:
+            for line in fh:
+                try:
+                    rec = json.loads(line)
+                except ValueError:
+                    continue
+                if not isinstance(rec, dict) or rec.get("cmd") not in ("session", "read"):
+                    continue
+                if (rec.get("profile") or "default") != profile:
+                    continue
+                try:
+                    url_host = (urllib.parse.urlsplit(str(rec.get("url") or "")).hostname or "").lower()
+                except ValueError:
+                    url_host = ""
+                if matches(url_host) or matches(str(rec.get("site") or "").lower()):
+                    newest = rec
+    except OSError:
+        return None
+    if not newest or not newest.get("botCheck") or not newest.get("at"):
+        return None
+    try:
+        at = datetime.fromisoformat(str(newest["at"]).replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if (now or datetime.now(timezone.utc)) - at > timedelta(minutes=max_age_minutes):
+        return None
+    return {"at": str(newest["at"]), "url": str(newest.get("url") or ""), "cmd": newest.get("cmd")}
+
+
+BOT_CHECK_ROUTE = ("A sign-in does not remove it and the robot never clicks one, so this is not a "
+                   "SIGN-IN wall. If the step needs Kevin's own browser or a key only he can make "
+                   "(an API key with the right permission), block it as KEVIN:\n"
+                   "         python3 scripts/agent-dispatch.py block TASK --kind KEVIN --subject credential "
+                   "--why \"<site> stops the robot with a bot check; <the exact step, or the key it needs>\"\n"
+                   "       Block as TOOL only when code in this repo can build another route.")
 
 
 def session_walk(host, timeout=SIGNIN_WALK_TIMEOUT, profile=None, url=None):
@@ -5580,8 +5630,8 @@ def session_walk(host, timeout=SIGNIN_WALK_TIMEOUT, profile=None, url=None):
         d = json.loads(r.stdout)
     except ValueError:
         return {"error": "session walk printed no JSON"}
-    return {"signedIn": bool(d.get("signedIn")), "url": str(d.get("url") or ""),
-            "at": now_iso(), "source": "walk"}
+    return {"signedIn": bool(d.get("signedIn")), "botCheck": bool(d.get("botCheck")),
+            "url": str(d.get("url") or ""), "at": now_iso(), "source": "walk"}
 
 
 def session_check(host, use_ledger=False, max_age_minutes=SIGNIN_LEDGER_FRESH_MINUTES):
@@ -5633,6 +5683,11 @@ def signin_verify_line(output, sites=None, check=None):
     if v.get("error"):
         print(f"NOTE: sign-in line for {host} kept unverified — {v['error'][:160]}", file=sys.stderr)
         return "", mark_signin_unverified(output, v["error"])
+    if v.get("botCheck"):
+        # Kevin would be asked for a sign-in that cannot help (review, 25 Sep 2026).
+        return (f"its SIGN-IN NEEDED line names {m['site']!r}, but {host} stops the robot with a bot "
+                f"check (\"verify you are human\", seen at {str(v.get('at') or '')[:16]}). "
+                + BOT_CHECK_ROUTE), output
     if not v.get("signedIn"):
         return "", output
     label = sites[host].get("label") or host
@@ -5875,7 +5930,7 @@ def cmd_signin_waiting(args):
     walk = not getattr(args, "no_walk", False) and not os.environ.get("SIGNIN_SKIP_WALK")
     dry = bool(getattr(args, "dry_run", False))
     only = (getattr(args, "site", "") or "").strip().lower()
-    waiting, already_live = [], []
+    waiting, already_live, bot_checked = [], [], []
     groups = signin_waiting(sites)
     for g in groups:
         if not walk or g["host"] == "unknown" or not g["loginUrl"] or (only and g["host"] != only):
@@ -5889,6 +5944,14 @@ def cmd_signin_waiting(args):
             g["sessionCheck"] = {"state": "unverified", "why": v["error"][:200]}
             waiting.append(g)
             continue
+        if v.get("botCheck"):
+            # The site stops the robot with "verify you are human" (Cloudflare,
+            # 25 Sep 2026). A window would not help and a hand-back would only
+            # send the agent into the same wall, so it is neither waiting nor
+            # live: the app tells Kevin, and the task keeps its blocker.
+            g["sessionCheck"] = {"state": "bot-check", "source": v["source"], "at": v["at"], "landedOn": v["url"][:160]}
+            bot_checked.append(g)
+            continue
         if not v.get("signedIn"):
             g["sessionCheck"] = {"state": "signed-out", "source": v["source"], "at": v["at"], "landedOn": v["url"][:160]}
             waiting.append(g)
@@ -5897,7 +5960,8 @@ def cmd_signin_waiting(args):
         already_live.append({"host": g["host"], "label": g["label"], "source": v["source"], "at": v["at"],
                              "landedOn": v["url"][:160], "handedBack": done["handedBack"],
                              "wouldHandBack": [t["id"] for t in g["tasks"]] if dry else None})
-    print(json.dumps({"sites": waiting, "alreadyLive": already_live, "dryRun": dry, "at": now_iso()}, indent=2))
+    print(json.dumps({"sites": waiting, "alreadyLive": already_live, "botCheck": bot_checked,
+                      "dryRun": dry, "at": now_iso()}, indent=2))
     return 0
 
 
@@ -6355,6 +6419,15 @@ def cmd_block(args):
                      f"--profile {' | '.join(names)}")
         if getattr(args, "profile", None) and not (kind == "SIGN-IN" and names):
             sys.exit(f"ERROR: --profile is only for a SIGN-IN wall on a site with profiles; {host} has none.")
+        if kind == "SIGN-IN":
+            # A bot check is not a sign-out (25 Sep 2026: Cloudflare's "verify
+            # you are human" was filed as SIGN-IN, Kevin's sign-in could not
+            # clear it, and the task went round the loop again).
+            prof = getattr(args, "profile", None) or "default"
+            seen = ledger_bot_check([subject, entry, host], profile=prof)
+            if seen:
+                sys.exit(f"ERROR: {entry} showed the robot a bot check (\"verify you are human\", "
+                         f"{seen['cmd']} at {seen['at']}). " + BOT_CHECK_ROUTE.replace("TASK", args.task))
     if kind == "KEVIN" and subject.lower() not in KEVIN_ONLY_REASONS:
         sys.exit(f"ERROR: a KEVIN wall is one of: {', '.join(KEVIN_ONLY_REASONS)}. "
                  f"{subject!r} is not: work that an agent could do stays the agent's, "

@@ -6420,6 +6420,9 @@ const SIGNIN_ROW_KEY = 'robot-signins';
 const SIGNIN_ON_MAC = /Macintosh/.test(navigator.userAgent) && !(navigator.maxTouchPoints > 1);
 const SIGNIN_STATE = {
     'signed-out':    { order: 0, label: 'Signed out',      style: ['var(--danger-bg)', 'var(--danger)'] },
+    // The site stops the robot with "verify you are human" (Cloudflare, 25 Sep 2026):
+    // a sign-in cannot fix that, so the line carries no button.
+    'bot-check':     { order: 1, label: 'Bot check',       style: ['var(--warning-bg)', 'var(--warning)'] },
     'unchecked':     { order: 1, label: 'Not checked yet', style: ['var(--warning-bg)', 'var(--warning)'] },
     'you-signed-in': { order: 2, label: 'You signed in',   style: ['var(--info-bg)', 'var(--info)'] },
     'signed-in':     { order: 3, label: 'Signed in',       style: ['var(--success-bg)', 'var(--success)'] },
@@ -6451,6 +6454,7 @@ function signinLineHtml(ln){
     const st = SIGNIN_STATE[ln.state] || SIGNIN_STATE.unchecked;
     const when = ln.state === 'on-demand' ? 'Short login: sign in when a task asks for it'
         : ln.state === 'you-signed-in' ? `You signed in ${estateAgo(ln.at)}. The robot confirms it at its next check.`
+        : ln.state === 'bot-check' ? `Stops the robot with a "verify you are human" check (seen ${estateAgo(ln.at)}). Signing in will not help.`
         : ln.at ? `Checked ${estateAgo(ln.at)} by the ${ln.how || 'robot'}` : 'Not checked yet';
     const act = (signinNeedsYou(ln) || ln.state === 'on-demand') ? signinButton(ln) : '';
     return `<div class="rs-line" data-rs-line="${esc(ln.state)}">
@@ -6505,10 +6509,12 @@ function signinWallsHtml(walls, lines, failed){
     if(!walls.length) return warn;
     const rows = walls.map(w => {
         const n = w.names.length, tasks = n === 1 ? 'One task is' : `${n} tasks are`;
-        const what = w.kind === 'SIGN-IN'
+        const what = w.botCheck
+            ? `${tasks} blocked: ${esc(w.label || w.subject)} stops the robot with a bot check, which a sign-in cannot fix.`
+            : w.kind === 'SIGN-IN'
             ? `${tasks} blocked until the robot is signed in to ${esc(w.label || w.subject)}.`
             : `${tasks} blocked until ${esc(w.subject)} is on the robot's list.`;
-        const btn = w.done ? ''
+        const btn = (w.done || w.botCheck) ? ''
             : !SIGNIN_ON_MAC ? `<span class="rs-mac">${w.kind === 'SIGN-IN' ? 'Sign in' : 'Add it'} on your Mac</span>`
             : w.kind === 'SIGN-IN'
                 ? `<a class="btn btn-success btn-sm" href="${esc(w.profile ? 'robotsignin://profile/' + encodeURIComponent(w.profile) : 'robotsignin://site/' + encodeURIComponent(w.host))}" data-rs-wall="${esc(w.subject)}" aria-label="Sign in to ${esc(w.label || w.subject)}">Sign in</a>`
@@ -6517,7 +6523,7 @@ function signinWallsHtml(walls, lines, failed){
                 ? 'The robot has found it signed in since. It picks the task up at its next pass.'
                 : 'You signed in since. The robot picks the task up at its next pass.')
             : w.names.slice(0, 3).join(', ') + (n > 3 ? ' and ' + (n - 3) + ' more' : '');
-        return `<div class="rs-line" data-rs-wall-line="${esc(w.done ? 'done' : w.kind)}"><div><span class="rs-label">${what}</span>
+        return `<div class="rs-line" data-rs-wall-line="${esc(w.done ? 'done' : w.botCheck ? 'bot-check' : w.kind)}"><div><span class="rs-label">${what}</span>
             <span class="rs-when">${esc(note)}</span></div>${btn}</div>`;
     }).join('');
     return warn + `<div class="rs-list" data-rs-walls style="margin:0 0 10px">${rows}</div>`;
@@ -6545,6 +6551,12 @@ function signinMarkWalls(walls, lines){
             && signinLineIsWall(ln, w) && Date.parse(ln.at || '') >= w.openedBy) : null;
         w.done = w.kind === 'SIGN-IN' && !!clear;
         w.doneBy = clear ? clear.state : '';
+        // A SIGN-IN wall on a site that stops the robot with a bot check: no Sign in
+        // button, and not counted as a sign-in he owes (review, 25 Sep 2026).
+        // Only a bot check seen AFTER the wall opened: an older one may have gone, and a
+        // real sign-in wall must never lose its button to it (review round 3).
+        w.botCheck = w.kind === 'SIGN-IN' && !w.done && isFinite(w.openedBy) && lines.some(ln => ln.state === 'bot-check'
+            && signinLineIsWall(ln, w) && Date.parse(ln.at || '') >= w.openedBy);
     });
     return walls;
 }
@@ -6601,21 +6613,24 @@ function renderSignins(){
     const lines = p.lines.slice().sort((a, b) => order(a) - order(b) || String(a.label).localeCompare(String(b.label)));
     const pick = st => lines.filter(ln => ln.state === st);
     const needs = lines.filter(signinNeedsYou);
-    const mine = pick('you-signed-in'), ok = pick('signed-in'), od = pick('on-demand');
+    const mine = pick('you-signed-in'), ok = pick('signed-in'), od = pick('on-demand'), bot = pick('bot-check');
     const { walls, failed: wallsFailed } = signinWalls();
     signinMarkWalls(walls, lines);
     // A blocked robot's site counts once, whether or not the list already calls it signed out;
     // only a SIGN-IN wall can be the same thing as a signed-out line.
-    const wallNames = walls.filter(w => !w.done && !(w.kind === 'SIGN-IN' && needs.some(ln => signinLineIsWall(ln, w))))
+    const wallNames = walls.filter(w => !w.done && !w.botCheck && !(w.kind === 'SIGN-IN' && needs.some(ln => signinLineIsWall(ln, w))))
         .map(w => w.label || w.subject);
     const needNames = needs.map(ln => ln.label).concat(wallNames);
     setCount(needNames.length, needNames.length > 0);
     const summary = needNames.length
         ? `<span><strong>${needNames.length === 1 ? 'One sign-in needs' : needNames.length + ' sign-ins need'} you:</strong> ${esc(needNames.join(', '))}.</span>`
+        : bot.length
+        // Never "All good" beside a site that stops the robot (review, 25 Sep 2026).
+        ? `<span><strong>No sign-in needed.</strong> ${bot.length === 1 ? 'One site stops' : bot.length + ' sites stop'} the robot with a bot check, which a sign-in cannot fix: ${esc(bot.map(ln => ln.label).join(', '))}. ${ok.length} signed in, ${od.length} sign in when a task needs them.</span>`
         : `<span><strong>All good.</strong> ${ok.length} signed in, ${od.length} sign in when a task needs them${mine.length ? `, ${mine.length} you signed in (the robot confirms at its next check)` : ''}.</span>`;
     const toggle = `<button type="button" class="btn btn-sm" data-rs-toggle aria-expanded="${_signinsOpen}">${_signinsOpen ? 'Hide the list' : 'Show all ' + lines.length}</button>`;
-    // Always on show: what needs him, and what he has just signed in to.
-    const shown = needs.concat(mine);
+    // Always on show: what needs him, what stops the robot, and what he has just signed in to.
+    const shown = needs.concat(bot, mine);
     let rest = '';
     if(_signinsOpen){
         rest = ok.concat(od).map(signinLineHtml).join('');
