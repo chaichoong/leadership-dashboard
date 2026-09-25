@@ -590,5 +590,15 @@
   ],
   "retryWhenDeferred": true,
   "note": "Kevin's weekly Friday payment run (PRs #483/#484, 18 Sep 2026). launchd com.kevinbrittain.payment-run fires StartCalendarInterval Weekday 5, Hour 21, LOCAL time, and launchd counts Sunday as 0 \u2014 so weekday 5 is Friday, which is the same day standard five-field cron means by 5. This entry mirrors that one firing so slot attendance can grade it; it fires nothing itself. Registered 19 Sep 2026 (finding 20260919-daily-ops-551): the job was in neither list, so check-routines.py saw a SKILL.md routine running beside daily-ops and reported ROUTINE STACKING every weekend, and the digest would never have noticed it stop. Lateness is generous because the list is still worth having on Saturday morning; it prepares only and pays nothing."
+  },
+ "tenant-leads": {
+  "cron": "10 8 * * *",
+  "maxLateMinutes": 600,
+  "mode": "wrapped",
+  "needs": [
+   "network"
+  ],
+  "retryWhenDeferred": true,
+  "note": "The tenant-finding chain (Kevin, 25 Sep 2026): scripts/tenant-leads.py. Once a day it finds openings (a UC void, a notice inside 60 days, an adopted Growth Plan room move), raises the referrer mail-out, tenant referral and keep-warm cards for Kevin's queue under AI Property Administration, hands adverts and viewings to Roy (Kevin's standing handover, 25 Sep 2026), screens form sign-ups, puts a 50 pound referral bonus on the Payment Run, and writes the tenant-chain row on the Estate Status board with what did NOT happen. 08:10 so its cards are in the queue before the 09:00 brief. Lateness is generous: a day-late opening is still worth telling referrers about. It exits 1 when a step failed, so a red run here means a real gap in the chain."
  }
 }

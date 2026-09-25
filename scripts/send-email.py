@@ -63,6 +63,11 @@ A task already in there is refused. The intent row is written BEFORE the send,
 so a crash between the worker accepting the message and the result landing can
 never send Intus a second copy.
 
+TO-EACH (25 Sep 2026): a card whose headers carry `TO-EACH:` instead of `TO:` sends
+the same approved words to each address as a SEPARATE email (a mail-out: one card,
+thirty contacts, none sees the others). The ledger is kept per address, so a run that
+stops half way resumes without a second copy to anyone. See send_each() below.
+
 Usage:
   python3 scripts/send-email.py send TASKID [--dry-run]
   python3 scripts/send-email.py preview TASKID     # parse only, never sends
@@ -75,6 +80,7 @@ import json
 import os
 import re
 import sys
+import time
 import urllib.error
 import urllib.request
 from datetime import datetime, timezone
@@ -253,11 +259,43 @@ def already_sent(task_id):
                 if not line.strip():
                     continue
                 row = json.loads(line)
-                if row.get("task") == task_id:
+                # A TO-EACH mail-out writes one row per address (it carries a
+                # `recipient`); those are judged address by address in
+                # send_each(), so a half-finished mail-out can resume.
+                if row.get("task") == task_id and not row.get("recipient"):
                     return row
     except FileNotFoundError:
         return None
     return None
+
+
+def mailout_progress(task_id):
+    """(done, retry, uncertain) addresses for one TO-EACH task, lower-cased.
+
+    The LAST event recorded for an address decides:
+      sent       -> done
+      failed     -> retry: the worker refused before anything left (see send_each)
+      uncertain  -> done, never retried, and reported: it may have gone
+      intent     -> done, never retried, and reported: the run died mid-send
+    A missed email is recoverable; a second copy is not.
+    """
+    state = {}
+    try:
+        with open(SENT_LEDGER) as fh:
+            for line in fh:
+                if not line.strip():
+                    continue
+                row = json.loads(line)
+                addr = (row.get("recipient") or "").lower()
+                if row.get("task") != task_id or not addr:
+                    continue
+                state[addr] = row.get("event")
+    except FileNotFoundError:
+        pass
+    done = {a for a, ev in state.items() if ev in ("intent", "sent", "uncertain")}
+    retry = {a for a, ev in state.items() if ev == "failed"}
+    uncertain = {a for a, ev in state.items() if ev in ("intent", "uncertain")}
+    return done, retry, uncertain
 
 
 def ledger_append(row):
@@ -356,6 +394,7 @@ def cmd_preview(args):
         "task": args.task, "taskName": mail["taskName"],
         "approvalOutcome": mail["outcome"] or "(not yet approved)",
         "to": mail["to"], "cc": mail["cc"], "subject": mail["subject"],
+        "toEach": mail.get("toEach") or None,
         "bodyChars": len(mail["body"]),
         # Surfaced here so it is fixable at draft time rather than discovered
         # by `send` after Kevin has already approved the words.
@@ -458,6 +497,9 @@ def cmd_send(args):
     sender_problem = business_identity_mismatch(
         mail["subject"], mail["body"], mail["from"])
 
+    if mail.get("toEach"):
+        return send_each(args, mail, sender_problem)
+
     # The attachment guards run for the dry run too: proving the payload is
     # the dry run's whole point, and a missing or out-of-bounds file is
     # exactly what it exists to catch before the real send.
@@ -528,6 +570,104 @@ def cmd_send(args):
     print(json.dumps({"sent": args.task, "to": mail["to"], "cc": mail["cc"],
                       "subject": mail["subject"],
                       "messageId": result.get("id")}))
+
+
+# ─── A MAIL-OUT: ONE CARD, ONE SEPARATE EMAIL PER ADDRESS (25 Sep 2026) ─
+#
+# The tenant-finding chain tells thirty council and charity contacts when a room
+# opens. As thirty cards that is thirty approvals for one decision, and Kevin's
+# queue is where work already waits; as one TO line it shows every contact to
+# every other. So the approved card carries TO-EACH and this sends the SAME
+# approved words to each address on its own. The ledger is written per address,
+# before each send, so a run that dies half way resumes where it stopped and no
+# address is ever sent a second copy.
+MAILOUT_PAUSE_SECONDS = 1.0
+
+# A refusal that proves nothing left: no Gmail consent (409), a rejected key or a
+# Cloudflare block (403), a malformed request or a rate limit (400/404/422/429), Gmail
+# refusing the message or a failed token refresh (a worker 500 that says so), or no
+# network at all. Anything else (a bare 500, a timeout, a reset) may have happened AFTER
+# Gmail accepted the message, so that address is never sent again: it is UNCERTAIN.
+NOT_SENT_RE = re.compile(
+    r"no Gmail consent|rejected the key|error 1010|worker (400|404|422|429)\b|"
+    # The worker answers 500 with these words when Gmail refused the message or the
+    # token could not be refreshed: in both cases nothing left (review, 25 Sep 2026).
+    r"worker 500: .*(Gmail send failed|token|refresh)|"
+    r"nodename nor servname|Name or service not known|Connection refused|"
+    r"Network is unreachable|Temporary failure in name resolution", re.I)
+
+
+def send_each(args, mail, sender_problem):
+    done, retry, _ = mailout_progress(args.task)
+    todo = [a for a in mail["toEach"] if a.lower() not in done or a.lower() in retry]
+    if args.dry_run:
+        print(json.dumps({"dryRun": True, "task": args.task, "mailOut": True,
+                          "approvalOutcome": mail["outcome"] or "(not yet approved)",
+                          "wouldSend": bool(mail["outcome"] in APPROVED)
+                          and not mail.get("approvalProblem") and not sender_problem,
+                          "approvalProblem": mail.get("approvalProblem") or None,
+                          "from": mail["from"] or "(worker default: kevinbrittain@gmail.com)",
+                          "senderProblem": sender_problem or None,
+                          "subject": mail["subject"], "addresses": len(mail["toEach"]),
+                          "alreadySent": sorted(a for a in mail["toEach"] if a.lower() in done
+                                                and a.lower() not in retry),
+                          "wouldSendTo": todo, "bodyChars": len(mail["body"])}, indent=2))
+        return
+    if sender_problem:
+        sys.exit(f"REFUSED: task {args.task} ({mail['taskName']}) — {sender_problem}")
+    if not todo:
+        sys.exit(f"REFUSED: task {args.task} mail-out already went to all "
+                 f"{len(mail['toEach'])} addresses. Refusing to send it twice.")
+    sent, error = [], ""
+    for i, addr in enumerate(todo):
+        if i:
+            time.sleep(MAILOUT_PAUSE_SECONDS)
+        ledger_append({"task": args.task, "recipient": addr, "ts": now_iso(),
+                       "event": "intent", "subject": mail["subject"]})
+        payload = {"to": addr, "subject": mail["subject"], "text": mail["body"]}
+        if mail["from"]:
+            payload["from"] = mail["from"]
+        try:
+            result = worker_call(SEND_URL, payload)
+        except SystemExit as exc:
+            # worker_call exits on any failure. Stop the run either way: the next
+            # address would meet the same worker.
+            error = str(exc)[:300]
+            event = "failed" if NOT_SENT_RE.search(error) else "uncertain"
+            ledger_append({"task": args.task, "recipient": addr, "ts": now_iso(),
+                           "event": event, "error": error})
+            break
+        ledger_append({"task": args.task, "recipient": addr, "ts": now_iso(),
+                       "event": "sent", "from": mail["from"] or "(default)",
+                       "subject": mail["subject"], "taskName": mail["taskName"],
+                       "messageId": result.get("id")})
+        sent.append(addr)
+    now_done, now_retry, now_unsure = mailout_progress(args.task)
+    wanted = {a.lower() for a in mail["toEach"]}
+    finished = (wanted <= now_done) and not (wanted & now_retry)
+    unsure = sorted(wanted & now_unsure)
+    try:
+        stamp = datetime.now().strftime("%d %b %Y %H:%M")
+        # SENT only when every address is done: the tenant chain settles a card (and the
+        # monitor calls it sent) on this word alone, so a half-finished run must not use it.
+        word = "SENT" if finished else "PARTIAL"
+        line = (f"[{stamp} — send-email] {word}: mail-out \"{mail['subject']}\" to "
+                f"{len(sent)} address(es) this run, each separately "
+                f"({len(wanted & now_done - now_retry)} of {len(wanted)} done)"
+                + (f". UNCERTAIN (may or may not have arrived, never resent): {', '.join(unsure)}" if unsure else "")
+                + (f". STOPPED: {error}" if error else "."))
+        live = get_task(args.task).get("fields", {}) or {}
+        notes = (str(live.get(AF["notes"]) or "").rstrip() + "\n\n" + line).strip()[-90000:]
+        api("PATCH", f"https://api.airtable.com/v0/{BASE_ID}/{TASKS}/{args.task}",
+            {"fields": {AF["notes"]: notes}})
+    except (SystemExit, Exception) as e:                     # noqa: BLE001
+        print(f"WARNING: sent, but the SENT stamp could not be written: {e}", file=sys.stderr)
+    print(json.dumps({"sent": args.task, "mailOut": True, "sentThisRun": sent,
+                      "finished": finished, "uncertain": unsure or None,
+                      "addresses": len(mail["toEach"]),
+                      "subject": mail["subject"], "error": error or None}))
+    if error or not finished:
+        sys.exit(1)
 
 
 # ─── TELLING A TEAM MEMBER THEY NOW OWN SOMETHING (28 Aug 2026) ─────

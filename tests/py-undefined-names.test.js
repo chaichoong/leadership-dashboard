@@ -53,6 +53,7 @@ const ESTATE_SCRIPTS = [
   'scripts/agent-accuracy-report.py',
   'scripts/utilita-balance.py',
   'scripts/payment-run.py',
+  'scripts/tenant-leads.py',
   'scripts/roy-assistant.py',
   'scripts/private-name-guard.py',
 ];

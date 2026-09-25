@@ -20,7 +20,7 @@
     // ── Page & SOP Version Registry ──
     const PAGE_REGISTRY = [
         { id: 'overview',    name: 'Leadership Dashboard',           icon: '📊', pageVer: '2.110', sopFile: 'sop.html',                   sopVer: '2.94', standalone: 'index.html#overview' },
-        { id: 'os-strategy', name: 'Objective & Strategy',           icon: '🎯', pageVer: '1.62', sopFile: 'os/strategy/sop.html',       sopVer: '1.1', standalone: 'os/strategy/index.html' },
+        { id: 'os-strategy', name: 'Objective & Strategy',           icon: '🎯', pageVer: '1.63', sopFile: 'os/strategy/sop.html',       sopVer: '1.1', standalone: 'os/strategy/index.html' },
         { id: 'tasks',       name: 'Tasks & Projects',   icon: '✅', pageVer: '1.176', sopFile: 'os/tasks/sop.html',             sopVer: '1.4', standalone: 'os/tasks/index.html' },
         { id: 'cfv',        name: 'CFVs',                          icon: '🚨', pageVer: '1.42', sopFile: 'sop-cfvs.html',               sopVer: '1.34', standalone: 'index.html#cfv' },
         { id: 'money',      name: 'Money Confidence',              icon: '🧭', pageVer: '1.1', sopFile: '',                            sopVer: '1.0', standalone: 'index.html#money' },
@@ -33,7 +33,7 @@
         { id: 'transactions', name: 'Transactions',                icon: '🔍', pageVer: '1.1', sopFile: '',                            sopVer: '1.0', standalone: 'index.html#transactions' },
         { id: 'coa',        name: 'Chart of Accounts',             icon: '📒', pageVer: '1.3', sopFile: 'sop-coa.html',                sopVer: '1.1', standalone: 'index.html#coa' },
         { id: 'comms',      name: 'Inbound Comms',                 icon: '📨', pageVer: '2.82', sopFile: 'inbound-comms-sop.html',      sopVer: '2.60', standalone: 'follow-up.html' },
-        { id: 'growth-plan', name: 'Growth Plan',                    icon: '📈', pageVer: '1.53', sopFile: 'sop-growth-plan.html',        sopVer: '1.5', standalone: 'growth-plan.html' },
+        { id: 'growth-plan', name: 'Growth Plan',                    icon: '📈', pageVer: '1.54', sopFile: 'sop-growth-plan.html',        sopVer: '1.5', standalone: 'growth-plan.html' },
         { id: 'compliance', name: 'Property Compliance',            icon: '✅', pageVer: '1.16', sopFile: 'sop-compliance.html',         sopVer: '1.14', standalone: 'compliance.html' },
         // Property Manager (Operations) — Roy Lavin's single page. Standalone at
         // property-manager/ behind its own passcode; the property-manager Worker
@@ -48,10 +48,10 @@
         // AI Agents (Leadership) — ADMIN ONLY, like KPI Library. Approvals,
         // checks and the workforce register in one place (Kevin's ruling,
         // 24 Aug 2026; moved out of the Systemisation page).
-        { id: 'agents', name: 'AI Agents', icon: '🤖', pageVer: '1.118', sopFile: 'sop-ai-agents.html', sopVer: '1.113', standalone: 'os/agents/index.html', adminOnly: true },
+        { id: 'agents', name: 'AI Agents', icon: '🤖', pageVer: '1.119', sopFile: 'sop-ai-agents.html', sopVer: '1.113', standalone: 'os/agents/index.html', adminOnly: true },
         { id: 'fintable',  name: 'Accounts',                       icon: '🏦', pageVer: '1.19', sopFile: '',                            sopVer: '1.0', standalone: 'index.html#fintable' },
         { id: 'systemisation', name: 'Systemisation',              icon: '⚙️', pageVer: '1.21', sopFile: 'guides/systemisation.html',    sopVer: '1.11', standalone: 'os/systemisation/index.html' },
-        { id: 'os-team',    name: 'Team Members',                  icon: '👥', pageVer: '1.39', sopFile: '',                            sopVer: '1.1', standalone: 'os/team/index.html' },
+        { id: 'os-team',    name: 'Team Members',                  icon: '👥', pageVer: '1.40', sopFile: '',                            sopVer: '1.1', standalone: 'os/team/index.html' },
         // pageVer corrected by hand 2026-08-06: the auto-bump never fired for this page
         // (crm-supabase.html was missing from the workflow `paths:` filter), so 1.0 was
         // stale — the CRM gained a 14-step interactive walkthrough on 2026-08-04 (319b438).
@@ -112,6 +112,8 @@
         ceoBriefs:     'tblIxbzDSOCI5hqJn', // CEO Briefs — one row per weekday, written by the 09:00 money-daily worker
         growthPlan:         'tblHqr2kyiL15a8LN', // Growth Plan — one row per adopted revenue opportunity (growth-plan.html)
         growthPlanSettings: 'tbl6hJaGOijdcvRdw', // Growth Plan Settings — the page's editable assumptions, one row per key
+        estateStatus:       'tblZVrdzivyBueZVf', // Estate Status — one row per scheduled job (growth-plan.html reads the tenant-chain row; os/agents and publishing.html keep their own ESTATE_TBL)
+        tenantLeads:        'tbliYKA44VBFeLduP', // Tenant Leads — over-35 UC tenant sign-ups, worked daily by scripts/tenant-leads.py (25 Sep 2026)
     };
 
     // ── Real Estate Growth Plan (growth-plan.html, Leadership) — 9 Sep 2026 ──
@@ -164,6 +166,16 @@
         owners: {
             kevin: { teamMember: 'recHEt2VPYothaqTd', email: 'kevin@runpreneur.org.uk', name: 'Kevin Brittain' },
             roy:   { teamMember: 'reclbdjfVev3bqNHS', email: 'roy.lavin1978@gmail.com', name: 'Roy Lavin' },
+        },
+        // The tenant-finding chain monitor (Kevin only, 25 Sep 2026). scripts/tenant-leads.py runs daily at
+        // 08:10 and writes ONE row to Estate Status (TABLES.estateStatus) with Key tenant-chain. Field IDs
+        // below; the payload is a JSON string of the steps, openings and lead counts.
+        chain: {
+            rowKey: 'tenant-chain',
+            key: 'fldLO6xJqkokvVR4g', status: 'fldhOUiva3bqPNk1c', lastRun: 'flduxV3TYwp9wQX9O',
+            detail: 'fldLRFP2nJttDVQOa', payload: 'fldiqs9lvyLimoR7i',
+            formUrl: 'https://airtable.com/appnqjDpqDniH3IRl/shrTuDF8s04Kp5XGT',    // the public sign-up form
+            leadsUrl: 'https://airtable.com/appnqjDpqDniH3IRl/tbliYKA44VBFeLduP',   // the Tenant Leads table
         },
     };
 

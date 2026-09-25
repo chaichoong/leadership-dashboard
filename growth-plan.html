@@ -251,6 +251,51 @@
   label.tick input { accent-color: var(--accent); }
   label.selfmanage { font-size: var(--fs-md); font-weight: var(--fw-semibold); color: var(--text-primary); margin: var(--space-2) 0; }
   @media (max-width: 900px) { table.grid { font-size: var(--fs-sm); } table.grid th, table.grid td { padding: 6px 8px; } .gsum { gap: var(--space-2); flex-direction: column; } }
+  /* Is the tenant chain working? (Kevin only, 25 Sep 2026). Red means a step that should have happened did not. */
+  .chain { margin-bottom: var(--space-5); padding-bottom: var(--space-5); border-bottom: 1px solid var(--border-subtle); }
+  .chain h3 { margin: 0 0 var(--space-3); font-size: var(--fs-md); font-weight: var(--fw-semibold); }
+  .chain h4 { margin: 0 0 6px; font-size: var(--fs-xs); text-transform: uppercase; letter-spacing: .04em; color: var(--text-secondary); font-weight: var(--fw-semibold); }
+  .chain-head { display: flex; gap: var(--space-2); align-items: flex-start; padding: var(--space-3) var(--space-4); border: 1px solid var(--border-default); border-radius: var(--radius-md); background: var(--bg-surface-2); color: var(--text-secondary); font-weight: var(--fw-semibold); word-break: break-word; }
+  .chain-head .when { display: block; margin-top: 2px; font-size: var(--fs-xs); font-weight: var(--fw-regular); color: var(--text-secondary); }
+  .chain-head.ok { background: var(--success-bg); border-color: var(--success); color: var(--success); }
+  .chain-head.warn { background: var(--warning-bg); border-color: var(--warning); color: var(--warning); }
+  .chain-head.fail, .chain-head.stale, .chain-head.err { background: var(--danger-bg); border-color: var(--danger); color: var(--danger); }
+  .sdot { display: inline-block; flex: 0 0 10px; width: 10px; height: 10px; border-radius: var(--radius-full); background: var(--text-muted); }
+  .chain-head .sdot { margin-top: .4em; }
+  .sdot.ok { background: var(--success); } .sdot.warn { background: var(--warning); } .sdot.fail { background: var(--danger); } .sdot.idle { background: var(--text-muted); }
+  .chain-errs { margin: var(--space-2) 0 0; padding-left: 18px; font-size: var(--fs-sm); color: var(--danger); }
+  .chain-errs li { margin: 2px 0; word-break: break-word; }
+  table.chain-tbl { margin-top: var(--space-3); }
+  table.chain-tbl td.c-step { font-weight: var(--fw-medium); }
+  table.chain-tbl td.c-last, table.chain-tbl td.c-state { white-space: nowrap; }
+  table.chain-tbl td.c-note { word-break: break-word; color: var(--text-secondary); }
+  .chain-st { display: inline-flex; gap: 6px; align-items: center; font-weight: var(--fw-medium); }
+  .chain-st.ok { color: var(--success); } .chain-st.warn { color: var(--warning); } .chain-st.fail { color: var(--danger); } .chain-st.idle { color: var(--text-muted); }
+  .chain .two { margin-top: var(--space-4); }
+  .chain ul.plain .muted { margin-left: 4px; }
+  .chain-kpis { grid-template-columns: repeat(auto-fit, minmax(110px, 1fr)); gap: var(--space-2); }
+  .chain-kpis .kpi { padding: var(--space-2) var(--space-3); }
+  .chain-kpis .kpi .l { text-transform: none; letter-spacing: 0; }
+  .chain-kpis .kpi .v { font-size: var(--fs-xl); }
+  .chain-src { margin-top: var(--space-2); font-size: var(--fs-sm); color: var(--text-secondary); word-break: break-word; }
+  .chain-links { display: flex; gap: var(--space-2); flex-wrap: wrap; margin-top: var(--space-4); }
+  .chain-links a.btn { text-decoration: none; }
+  .chain-report { margin-top: var(--space-3); font-size: var(--fs-sm); }
+  .chain-report summary { cursor: pointer; color: var(--accent); font-weight: var(--fw-semibold); }
+  .chain-report pre { margin: var(--space-2) 0 0; padding: var(--space-3); white-space: pre-wrap; word-break: break-word; font: inherit; background: var(--bg-surface-2); border: 1px solid var(--border-subtle); border-radius: var(--radius-md); }
+  .pill.c-ok { background: var(--success-bg); color: var(--success); } .pill.c-warn { background: var(--warning-bg); color: var(--warning); } .pill.c-fail { background: var(--danger-bg); color: var(--danger); }
+  details.more > summary .chain-pill { margin-left: var(--space-2); vertical-align: middle; }
+  @media (max-width: 640px) {
+    table.chain-tbl thead { display: none; }
+    table.chain-tbl, table.chain-tbl tbody { display: block; }
+    table.chain-tbl tr { display: grid; grid-template-columns: 1fr auto; gap: 2px var(--space-2); padding: var(--space-2) 0; border-bottom: 1px solid var(--border-subtle); }
+    table.chain-tbl td { display: block; padding: 0; border: 0; }
+    table.chain-tbl td.c-step { grid-column: 1; grid-row: 1; }
+    table.chain-tbl td.c-state { grid-column: 2; grid-row: 1; }
+    table.chain-tbl td.c-last, table.chain-tbl td.c-note { grid-column: 1 / -1; font-size: var(--fs-xs); }
+    table.chain-tbl td.c-last::before { content: 'Last happened: '; color: var(--text-muted); }
+    table.chain-tbl td.empty { grid-column: 1 / -1; }
+  }
   body.pm .kevinonly { display: none !important; }
   @media print { .gp-actions, .row-actions, .filters, [data-sync-bar], .btn, input, select, #gp-settings, #gp-calc { display: none !important; } section.card { break-inside: avoid; border: 0; } }
 </style>
@@ -474,8 +519,12 @@
       </div>
     </details>
 
-    <details class="more"><summary>Finding tenants aged 35 and over on Universal Credit</summary>
+    <details class="more"><summary>Finding tenants aged 35 and over on Universal Credit <span class="pill kevinonly chain-pill" id="chainPill" hidden></span></summary>
       <div class="more-body">
+        <div class="chain kevinonly" id="chainBox">
+          <h3>Is the tenant chain working?</h3>
+          <div id="chainBody" aria-live="polite"><div class="empty">Checking the tenant chain…</div></div>
+        </div>
         <div class="two">
           <div class="tbl-wrap"><table aria-label="Applicant sources"><thead><tr><th>Channel</th><th class="num">Past applicants</th><th>What to do</th></tr></thead><tbody id="mktBody"></tbody></table></div>
           <div id="mktFigures"></div>
@@ -502,7 +551,7 @@
 <div id="toast" role="status" aria-live="polite"></div>
 
 <script src="js/ai-models.js?v=1"></script>
-<script src="js/config.js?v=66"></script>
+<script src="js/config.js?v=67"></script>
 <script src="js/sync-bar.js?v=6"></script>
 <script src="js/growth-plan-model.js?v=14"></script>
 <script>
@@ -623,6 +672,9 @@
     $('errorBox').style.display = 'none';
     state.pmPromise = null;   // Refresh re-reads from the Worker
     if (typeof markTabRefreshing === 'function') markTabRefreshing('growth-plan');
+    // The tenant chain row loads on its own, alongside the portfolio: a failure there shows in
+    // its own box and never blocks the page. Roy's tab has no access to it, so it never asks.
+    if (!PM) loadChain();
     $('loadingText').textContent = 'Loading the portfolio…';
     const slow = setTimeout(() => { $('loadingText').textContent = 'Still loading: seven tables, one moment…'; }, 3000);
     try {
@@ -1208,6 +1260,142 @@ BEFORE THE FIRST ONE IS SIGNED (all in writing)
       <p class="hint" style="margin-top:12px">From ${gbp(t.rentNow)} a month now to ${gbp(t.rentNow + t.actionable)} with every actionable lever, and ${gbp(t.rentNow + t.maximum)} if every unknown lands your way. Fill rooms in stage order: paper trail first so the rate is right before a new tenant signs.</p>`;
   }
 
+  // ── Is the tenant chain working? (Kevin only, 25 Sep 2026) ──
+  // scripts/tenant-leads.py runs daily at 08:10 and writes ONE Estate Status row (Key
+  // tenant-chain): every step, the day it last happened, and what did NOT happen that
+  // should have. A monitor that stops running must never look green, so a row older than
+  // 26 hours turns the whole block red. Roy's tab reads through the Worker, which has no
+  // access to this table, so nothing here is fetched or built there.
+  const CHAIN_STALE_HOURS = 26;
+  const CHAIN_STATE = { ok: 'On time', warn: 'Watch', fail: 'Not happening', idle: 'Nothing to do' };
+  const CHAIN_TILES = [['Qualified', 'Qualified'], ['With Roy', 'With Roy'], ['Became tenant', 'Became tenant'], ['Past applicant', 'Past applicants to phone'], ['Waiting to turn 35', 'Waiting to turn 35']];
+  const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+  const plural = (n, word) => `${n} ${word}${n === 1 ? '' : 's'}`;
+  // "2026-09-25" → "25 Sep 2026". Read from the string, never through Date, so a day never shifts a zone.
+  const chainDay = iso => {
+    const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(iso || ''));
+    return m && Number(m[2]) >= 1 && Number(m[2]) <= 12 ? `${m[3]} ${MONTHS[Number(m[2]) - 1]} ${m[1]}` : '';
+  };
+  // Last Run is a UTC timestamp: shown in the viewer's own clock, "25 Sep 2026, 08:10".
+  const chainWhen = iso => {
+    const d = new Date(iso || ''); if (!iso || isNaN(d)) return '';
+    return `${String(d.getDate()).padStart(2, '0')} ${MONTHS[d.getMonth()]} ${d.getFullYear()}, ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+  };
+  const chainAgeHours = iso => { const t = Date.parse(iso || ''); return Number.isFinite(t) ? (Date.now() - t) / 3600000 : null; };
+
+  // The payload is a JSON string the script writes. Bad or partial JSON is an error state,
+  // never a blank block.
+  function parseChainPayload(raw) {
+    if (raw == null || raw === '') return { payload: null, parseError: 'the row has no report in it' };
+    let p;
+    try { p = JSON.parse(raw); } catch (e) { return { payload: null, parseError: `the report is not readable (${e.message})` }; }
+    if (!p || typeof p !== 'object' || !Array.isArray(p.steps)) return { payload: null, parseError: 'the report has no list of steps' };
+    return { payload: p, parseError: '' };
+  }
+
+  let chainSeq = 0;
+  async function loadChain() {
+    if (PM) return;
+    const seq = ++chainSeq;
+    const C = GP.chain;
+    // A browser holding an older copy of js/config.js has no chain constants yet.
+    if (!C || !TABLES.estateStatus) { state.chain = { error: 'this page loaded an older copy of its settings file. Reload the page' }; renderChain(); return; }
+    state.chain = { loading: true }; renderChain();
+    let next;
+    try {
+      const rows = await airtableFetch(TABLES.estateStatus, { 'fields[]': [C.key, C.lastRun, C.detail, C.payload], filterByFormula: `{Key}='${C.rowKey}'` });
+      // Newest first, in case the row was ever written twice.
+      rows.sort((a, b) => String(b.fields[C.lastRun] || '').localeCompare(String(a.fields[C.lastRun] || '')));
+      const row = rows[0] || null;
+      next = row
+        ? Object.assign({ row: row.id, lastRun: row.fields[C.lastRun] || '', detail: row.fields[C.detail] || '' }, parseChainPayload(row.fields[C.payload]))
+        : { row: null };
+    } catch (e) {
+      next = { error: e.message === 'Auth failed' ? 'the Airtable token was refused' : e.message };
+    }
+    if (seq !== chainSeq) return;   // a newer Refresh has already started
+    state.chain = next;
+    renderChain();
+    if (typeof runHealthChecks === 'function') runHealthChecks('growth-plan', { activeOnly: false });
+  }
+
+  // What the block says, worked out in one place from the row: the headline class and words,
+  // the run-time line, the label on the section heading, and the parsed report for the body.
+  function chainView(c) {
+    if (!c || c.loading) return { cls: 'empty', text: 'Checking the tenant chain…', pill: ['', 'Checking'] };
+    if (c.error) return { cls: 'err', text: `The chain's status could not be read: ${c.error}.`, when: 'Click Refresh to try again.', pill: ['c-fail', 'Chain status unreadable'] };
+    if (!c.row) return { cls: 'empty', text: 'The chain has not run yet.', when: 'It runs every day at 08:10 and reports here.', pill: ['', 'Chain not run yet'] };
+    const when = chainWhen(c.lastRun), age = chainAgeHours(c.lastRun);
+    const stale = age == null || age > CHAIN_STALE_HOURS;
+    const staleText = when ? `The chain has not run since ${when}: nothing below is current.` : 'The chain has no run time on record: nothing below is current.';
+    if (c.parseError) {
+      return { cls: 'err', text: `The chain's last report could not be read: ${c.parseError}.`, when: stale ? staleText : `Last run ${when}`, pill: ['c-fail', 'Chain report unreadable'], report: c.detail };
+    }
+    const p = c.payload;
+    const steps = p.steps.filter(s => s && typeof s === 'object');
+    const nFail = steps.filter(s => s.state === 'fail').length;
+    // A state this page does not know means the script and the page disagree: watch it, never read it as fine.
+    const nWarn = steps.filter(s => s.state === 'warn' || !CHAIN_STATE[s.state]).length;
+    const errs = (Array.isArray(p.run) ? p.run : []).map(String).filter(x => /^ERROR\b/.test(x)).map(x => x.replace(/^ERROR\s*/, ''));
+    // The worse of what the report says and what its own steps say: a failing step never reads green.
+    const RANK = { ok: 0, warn: 1, fail: 2 };
+    const derived = nFail || errs.length ? 'fail' : nWarn ? 'warn' : 'ok';
+    const level = (RANK[p.worst] || 0) > RANK[derived] ? p.worst : derived;
+    let v;
+    if (stale) v = { cls: 'stale', text: staleText, when: '', pill: ['c-fail', 'Chain stopped'] };
+    else if (level === 'fail') {
+      const head = nFail ? `${plural(nFail, 'step')} not happening.` : errs.length ? `The last run hit ${plural(errs.length, 'error')}.` : 'A step is not happening.';
+      v = { cls: 'fail', text: head + (nWarn ? ` ${plural(nWarn, 'thing')} to watch.` : ''), when: `Last run ${when}`, pill: ['c-fail', nFail ? `Chain: ${nFail} not happening` : errs.length ? 'Chain: run error' : 'Chain: not happening'] };
+    } else if (level === 'warn') v = { cls: 'warn', text: `Working, with ${plural(nWarn || 1, 'thing')} to watch.`, when: `Last run ${when}`, pill: ['c-warn', `Chain: ${nWarn || 1} to watch`] };
+    else v = { cls: 'ok', text: 'Working: every step on time.', when: `Last run ${when}`, pill: ['c-ok', 'Chain working'] };
+    return Object.assign(v, { steps, errs, payload: p });
+  }
+
+  function chainBodyHtml(v) {
+    const p = v.payload;
+    const stepRow = s => {
+      const st = CHAIN_STATE[s.state] ? s.state : 'idle';
+      const word = CHAIN_STATE[s.state] || 'Unknown';
+      return `<tr><td class="c-step">${esc(s.label || s.key || 'Unnamed step')}</td><td class="c-last">${s.last ? esc(chainDay(s.last) || s.last) : 'Never'}</td><td class="c-state"><span class="chain-st ${st}"><span class="sdot ${st}" aria-hidden="true"></span>${esc(word)}</span></td><td class="c-note">${esc(s.note || '')}</td></tr>`;
+    };
+    const table = `<div class="tbl-wrap"><table class="chain-tbl" aria-label="Each step of the tenant chain"><thead><tr><th>Step</th><th>Last happened</th><th>State</th><th>Note</th></tr></thead><tbody>${v.steps.length ? v.steps.map(stepRow).join('') : '<tr><td class="empty" colspan="4">The report lists no steps.</td></tr>'}</tbody></table></div>`;
+    const opens = (Array.isArray(p.openings) ? p.openings : []).filter(o => o && typeof o === 'object');
+    const openLabel = o => o.label || [o.property, Number(o.rooms) > 0 ? plural(Number(o.rooms), 'room') : ''].filter(Boolean).join(': ') || 'A room';
+    const openHtml = opens.length
+      ? `<ul class="plain">${opens.map(o => `<li>${esc(openLabel(o))}${o.town ? `<span class="muted small">${esc(o.town)}</span>` : ''}</li>`).join('')}</ul>`
+      : '<div class="empty">No rooms waiting for a tenant.</div>';
+    const stages = (p.stages && typeof p.stages === 'object') ? p.stages : {};
+    const count = k => { const n = Number(stages[k]); return Number.isFinite(n) ? n : 0; };
+    const tiles = CHAIN_TILES.map(([k, label]) => `<div class="kpi"><div class="l">${esc(label)}</div><div class="v">${count(k)}</div></div>`).join('');
+    const src = (p.sources && typeof p.sources === 'object' ? Object.entries(p.sources) : [])
+      .map(([k, n]) => [k, Number(n)]).filter(([, n]) => Number.isFinite(n) && n > 0).sort((a, b) => b[1] - a[1]);
+    const srcLine = src.length ? src.map(([k, n]) => `${esc(k)} ${n}`).join(' · ') : 'None yet';
+    return `${v.errs.length ? `<ul class="chain-errs">${v.errs.map(e => `<li>Run error: ${esc(e)}</li>`).join('')}</ul>` : ''}
+      ${table}
+      <div class="two">
+        <div><h4>Rooms waiting for a tenant</h4>${openHtml}</div>
+        <div><h4>Leads</h4><div class="kpis chain-kpis">${tiles}</div><div class="chain-src"><b>New sign-ups by channel:</b> ${srcLine}</div></div>
+      </div>`;
+  }
+
+  function renderChain() {
+    const box = $('chainBody'), pill = $('chainPill');
+    if (PM || !box) return;
+    let v;
+    try { v = chainView(state.chain); } catch (e) { v = { cls: 'err', text: `The chain's report could not be shown: ${e.message}.`, pill: ['c-fail', 'Chain report unreadable'] }; }
+    const head = `<div class="chain-head ${v.cls}"><span class="sdot ${v.cls === 'ok' ? 'ok' : v.cls === 'warn' ? 'warn' : v.cls === 'empty' ? 'idle' : 'fail'}" aria-hidden="true"></span><span>${esc(v.text)}${v.when ? `<span class="when">${esc(v.when)}</span>` : ''}</span></div>`;
+    let body = '';
+    if (v.payload) {
+      try { body = chainBodyHtml(v); } catch (e) { body = `<div class="chain-errs">The steps could not be shown: ${esc(e.message)}</div>`; }
+    }
+    const report = v.report ? `<details class="chain-report" open><summary>The last run's report, as written</summary><pre>${esc(v.report)}</pre></details>` : '';
+    const links = `<div class="chain-links"><a class="btn" href="${esc(GP.chain ? GP.chain.formUrl : '')}" target="_blank" rel="noopener">Open the sign-up form</a><a class="btn" href="${esc(GP.chain ? GP.chain.leadsUrl : '')}" target="_blank" rel="noopener">Open the lead list in Airtable</a></div>`;
+    box.innerHTML = head + report + body + (GP.chain ? links : '');
+    pill.className = `pill kevinonly chain-pill ${v.pill[0]}`;
+    pill.textContent = v.pill[1];
+    pill.hidden = false;
+  }
+
   function renderSettings() {
     const keys = Object.keys(state.settingRows).sort();
     $('settings').innerHTML = keys.length ? keys.map(k => `<div class="setting"><span class="lbl">${esc(state.settingRows[k].label)}<span class="note">${esc(state.settingRows[k].note)}</span></span><input type="number" step="0.01" data-setting="${esc(k)}" value="${esc(state.settings[k])}" aria-label="${esc(state.settingRows[k].label)}"></div>`).join('') : '<div class="empty">No settings rows found in Airtable.</div>';
@@ -1457,6 +1645,10 @@ BEFORE THE FIRST ONE IS SIGNED (all in writing)
         { name: 'Grid adds up', kind: 'automation', run: () => { const g2 = (((g().plan || {}).totals || {}).grid) || {}; const bad = ['started', 'now', 'plan', 'best'].filter(k => !g2[k] || Math.abs(g2[k].rent - g2[k].ct - g2[k].left) > 0.01); return bad.length ? { status: 'fail', detail: `Left for us does not equal rent less council tax in: ${bad.join(', ')}` } : { status: 'pass', detail: `Every column: left for us = rent − council tax` }; } },
         { name: 'Rent uplift set on every tenant we run', kind: 'sync', run: () => { const p = ((g().plan || {}).properties || []).filter(v => v.selfManaged); const blank = []; p.forEach(v => v.tenants.forEach(t => { const raw = ((g().data || {}).tenants || []).find(x => x.id === t.id); if (raw && !raw.rentUplift) blank.push(t.name); })); return blank.length ? { status: 'warn', detail: `${blank.length} tenant${blank.length > 1 ? 's' : ''} with no Rent Uplift set, read as To do: ${blank.join(', ')}` } : { status: 'pass', detail: 'Every tenant in a property we run has Rent Uplift set' }; } },
         { name: 'Self-managed and agent-run split', kind: 'sync', run: () => { const pl = g().plan || {}; const s = (pl.selfManaged || []).length, a = (pl.agentManaged || []).length; if (!s) return { status: 'fail', detail: 'No self-managed properties: the split has broken' }; return { status: 'pass', detail: `${s} run by us (Collins houses included), ${a} run by an agent` }; } },
+        // Kevin only: Roy's tab cannot read Estate Status, so the check would be red there for ever.
+        ...(PM ? [] : [
+          { name: 'Tenant chain ran in the last 26 hours', kind: 'automation', run: () => { const c = g().chain; if (!c || c.loading) return { status: 'pending', detail: 'Still loading the tenant chain row' }; if (c.error) return { status: 'fail', detail: `The tenant-chain row in Estate Status could not be read: ${c.error}` }; if (!c.row) return { status: 'fail', detail: 'No tenant-chain row in Estate Status: scripts/tenant-leads.py (daily 08:10) has never reported' }; const age = chainAgeHours(c.lastRun); if (age == null) return { status: 'fail', detail: 'The tenant-chain row has no Last Run time' }; const hrs = Math.floor(age); if (age > CHAIN_STALE_HOURS) return { status: 'fail', detail: `Last run ${chainWhen(c.lastRun)}, ${hrs} hours ago: the chain has stopped (scripts/tenant-leads.py, daily 08:10)` }; return { status: 'pass', detail: `Last run ${chainWhen(c.lastRun)}, ${hrs < 1 ? 'under an hour' : hrs + ' hour' + (hrs === 1 ? '' : 's')} ago` }; } },
+        ]),
       ],
     });
   }

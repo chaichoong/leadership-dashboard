@@ -1172,7 +1172,13 @@ function apvEmailFrom(raw){
     if(cut === -1) return null;
     const head = text.slice(0, cut);
     const body = text.slice(cut);
-    const to = head.match(/^\s*TO:\s*(.+)$/im);
+    // TO-EACH (25 Sep 2026): a mail-out sends the same words to each address
+    // separately, so the card says so and counts them rather than showing a
+    // line that reads as one email to thirty people.
+    const each = head.match(/^\s*TO-EACH:\s*(.+)$/im);
+    const eachList = each ? each[1].split(/[,;]/).map(a => a.trim()).filter(Boolean) : [];
+    const to = each ? [null, `each of ${eachList.length} separately: ${eachList.join(', ')}`]
+                    : head.match(/^\s*TO:\s*(.+)$/im);
     if(!to) return null;                                   // not an email draft
     const subj = head.match(/^\s*SUBJECT:\s*(.+)$/im);
     const from = head.match(/^\s*FROM:\s*(.+)$/im);

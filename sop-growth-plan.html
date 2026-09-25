@@ -88,12 +88,49 @@ a { color: var(--accent); }
       <li><strong>Property cards:</strong> rooms in use against lettable rooms, each tenant's rent against their rate, and the three fields the plan needs per house.</li>
       <li><strong>Documents:</strong> scanned ID, bank statements and screen grabs attach to the tenant's Airtable record straight from the form, up to 3.7MB each, so whoever fills in a council form has them to hand.</li>
       <li><strong>Joint tenancies:</strong> the candidate houses, the tenancy clause and the side letter. The AI Legal and Compliance head reviewed the wording on 9 September 2026: the landlord's payment goes to the council under a side letter, never through the rent account. Templates ast_joint_template.md and council_tax_side_letter_template.md sit in Drive beside the standard AST.</li>
-      <li><strong>Finding tenants:</strong> where the last 254 applicants came from and what each channel is worth now.</li>
+      <li><strong>Finding tenants:</strong> where the last 254 applicants came from and what each channel is worth now. Above that list, Kevin sees whether the tenant chain is working (section 5).</li>
       <li><strong>Assumptions:</strong> every figure not read from a live record. Edit here; it saves to Airtable. Update the LHA and benefit rows each April.</li>
     </ol>
   </div></div>
 
-  <div class="section"><h2>5. What the page reads and writes</h2><div class="card">
+  <div class="section"><h2>5. Finding tenants: the chain monitor</h2><div class="card">
+    <p>The tenant chain finds single adults aged 35 or over on Universal Credit for rooms that are coming free. A script runs it every morning at 08:10 (<code>scripts/tenant-leads.py</code>). When it finishes, it writes one report to the Estate Status table in Airtable. The box <strong>Is the tenant chain working?</strong> shows that report. It sits at the top of <em>Finding tenants aged 35 and over on Universal Credit</em>, under Further information. The heading carries a small label, so you see the chain's state without opening it.</p>
+    <p style="margin-top:.6rem">Only Kevin sees the box. Roy's copy of the page does not show it or read it.</p>
+    <h3 style="margin-top:1rem">The headline</h3>
+    <ul>
+      <li><strong>Green, "Working: every step on time."</strong> Nothing to do.</li>
+      <li><strong>Amber, "Working, with 1 thing to watch."</strong> Something is slow or has sat open for a few days. Read its note.</li>
+      <li><strong>Red, "2 steps not happening."</strong> A step that should have happened did not. The note on that row says what is missing.</li>
+      <li><strong>Red, "The chain has not run since ...: nothing below is current."</strong> The script itself has stopped. The page shows this once the last run is more than 26 hours old. Nothing in the box can be trusted until it runs again.</li>
+      <li><strong>Grey, "The chain has not run yet."</strong> No report exists yet.</li>
+    </ul>
+    <h3 style="margin-top:1rem">Each step</h3>
+    <table><thead><tr><th>Step</th><th>What it means</th><th>Red when</th></tr></thead><tbody>
+      <tr><td>Openings found</td><td>A room is coming free in a house we run ourselves whose plan is UC HMO or UC joint tenancy: a unit is Void, Rent Ready or Not Ready, a tenancy on one ends in the next 60 days, or a room move on this page is Adopted or In progress. Mark the move Done once its rooms are let, or the chain keeps telling referrers about them.</td><td>Never red. With no openings the step reads "Nothing to do".</td></tr>
+      <tr><td>Referrer mail-out</td><td>An email to the people and teams who send us tenants. Each one hears at most every 14 days while a town near them has rooms (every 28 days when none do), in one email naming every open town near them. Each email is one card for Kevin.</td><td>A town with open rooms has had none in 16 days, or no referrer near it has an email address.</td></tr>
+      <tr><td>Adverts to Roy</td><td>Roy gets the SpareRoom, OpenRent, Gumtree and Facebook wording for each town with open rooms, and posts it.</td><td>A town with open rooms has had none in 16 days.</td></tr>
+      <tr><td>Tenant referral email</td><td>Current Universal Credit tenants aged 35 or over hear about the £50 bonus for a friend who moves in. Every 28 days while rooms are open.</td><td>Amber, not red, after 30 days.</td></tr>
+      <tr><td>Approved emails actually sent</td><td>Every email Kevin approved went out.</td><td>An approved email has not gone out a day later.</td></tr>
+      <tr><td>New sign-ups</td><td>People filling in the sign-up form.</td><td>Rooms are open and nobody has signed up for 30 days after the first mail-out went. Amber at 14 days.</td></tr>
+      <tr><td>Sign-ups screened</td><td>Each sign-up is sorted by rule: Qualified, Waiting to turn 35 or Not suitable.</td><td>A sign-up has no stage after 2 days: the script is not running. A sign-up with no date of birth shows amber: ask at the first call.</td></tr>
+      <tr><td>Viewings list to Roy</td><td>Qualified people for a town with open rooms go to Roy in one list a day, with up to five past applicants to phone.</td><td>A qualified person for an open town has not reached Roy.</td></tr>
+      <tr><td>Keep-warm check-in</td><td>Once a month, one email asks qualified people if they still need a room.</td><td>Amber, not red, when a check-in is overdue.</td></tr>
+      <tr><td>Possible opt-outs to check</td><td>A reply that mentions stopping but is not a clear "stop" (a signature reading "One Stop Shop", say). The sender is held off every email until a person decides.</td><td>Amber while one waits. The address is already on the Email Opt-outs table in Airtable with Decision "Check needed", and nobody on it is emailed. Read what they wrote there and set Decision to "Opted out" or "Not an opt-out".</td></tr>
+      <tr><td>£50 referral bonuses</td><td>A tenant who referred someone who moved in and paid their first rent is owed £50.</td><td>Amber, not red, when a bonus is due and not on the Payment Run list.</td></tr>
+    </tbody></table>
+    <p style="margin-top:.8rem">Below the steps: the rooms waiting for a tenant, the lead counts (Qualified, With Roy, Became tenant, past applicants to phone, waiting to turn 35) and new sign-ups by channel. Two buttons open the sign-up form and the lead list in Airtable.</p>
+    <h3 style="margin-top:1rem">Who does what</h3>
+    <ul>
+      <li><strong>Roy</strong> gets the adverts and the viewing lists without a yes from Kevin on each task. This is Kevin's standing handover of 25 September 2026. His condition was that he can see the chain working, which is what this box is for.</li>
+      <li><strong>Every email</strong> goes through Kevin's approval queue. Each mail-out is one card, sent to each person separately. Nothing leaves until Kevin approves it.</li>
+      <li><strong>The £50 referral bonus</strong> lands on the Friday Payment Run list. Kevin pays it. Nothing pays it automatically.</li>
+      <li><strong>Replies.</strong> Each morning the chain reads replies to its emails in info@. Anyone who replies STOP goes on the Email Opt-outs table in Airtable and is never emailed again. A NO to the check-in marks the person Not looking. A YES keeps them on the list for another 180 days.</li>
+      <li><strong>Past applicants</strong> (people who applied between 2017 and 2021) are phoned by Roy, never emailed or texted, because they never agreed to be contacted about new rooms.</li>
+    </ul>
+    <div class="warn">A red row is not a crash. It is a step that should have happened and did not. Read the note on the row first, then open the lead list or the task board.</div>
+  </div></div>
+
+  <div class="section"><h2>6. What the page reads and writes</h2><div class="card">
     <table><thead><tr><th>Table</th><th>Reads</th><th>Writes</th></tr></thead><tbody>
       <tr><td>Properties</td><td>name, type, bedrooms, agent, postcode, area, council tax note</td><td>Growth Strategy, Planned Extra Tenants, Lettable Rooms, PAYG Meters, Council Tax Payer</td></tr>
       <tr><td>Rental Units</td><td>type, number, status, income type, expected rent, tenants</td><td>&mdash;</td></tr>
@@ -103,11 +140,12 @@ a { color: var(--accent); }
       <tr><td>Growth Plan</td><td>status and tasks per lever key</td><td>one row per adopted lever</td></tr>
       <tr><td>Growth Plan Settings</td><td>every assumption</td><td>Value</td></tr>
       <tr><td>Tasks</td><td>&mdash;</td><td>one task per "Task" click, business Real Estate, due in 7 days</td></tr>
+      <tr><td>Estate Status</td><td>the one tenant-chain row: last run, report and payload (Kevin only)</td><td>nothing</td></tr>
     </tbody></table>
     <p style="margin-top:.8rem">Lever keys are stable (<code>uplift:&lt;tenant id&gt;</code>, <code>rooms:&lt;property id&gt;</code>, <code>ct:&lt;property id&gt;</code> and so on), so a re-run updates a row rather than duplicating it. The maths is in <code>js/growth-plan-model.js</code>, tested by <code>tests/growth-plan-model.test.js</code>; the page is tested by <code>tests/sync-invariants/growth-plan.spec.js</code>.</p>
   </div></div>
 
-  <div class="section"><h2>6. Health checks</h2><div class="card">
+  <div class="section"><h2>7. Health checks</h2><div class="card">
     <ul>
       <li><strong>Portfolio tables fetched:</strong> fails on a zero count in properties, units, tenants or tenancies.</li>
       <li><strong>Settings rows present:</strong> fails under 10 rows (the page would be running on built-in defaults).</li>
@@ -116,10 +154,11 @@ a { color: var(--accent); }
       <li><strong>Ages known for UC room tenants</strong> and <strong>Benefit cap exemptions recorded:</strong> the two facts that move the paper-trail total most.</li>
       <li><strong>Plan rows match a live lever:</strong> a Growth Plan row whose key no longer exists (tenant moved).</li>
       <li><strong>Totals reconcile:</strong> the actionable figure equals its four buckets.</li>
+      <li><strong>Tenant chain ran in the last 26 hours:</strong> fails when the tenant-chain row is missing, cannot be read, or is more than 26 hours old. Kevin only: Roy's tab does not run it.</li>
     </ul>
   </div></div>
 
-  <div class="section"><h2>7. Sources</h2><div class="card"><ul>
+  <div class="section"><h2>8. Sources</h2><div class="card"><ul>
     <li><a href="https://england.shelter.org.uk/professional_resources/legal/benefits/universal_credit/size-related_criteria_for_universal_credit_housing_costs_element" target="_blank" rel="noopener">Shelter Legal: size criteria for the UC housing costs element</a> (35+ rule; joint renters)</li>
     <li><a href="https://lha-direct.voa.gov.uk/" target="_blank" rel="noopener">LHA Direct (VOA): weekly rates by postcode</a>, read for every portfolio postcode in September 2026</li>
     <li><a href="https://www.angliarevenues.gov.uk/services/housing-benefits/discretionary/index.cfm" target="_blank" rel="noopener">Anglia Revenues Partnership: CRF Housing Payment</a> and <a href="https://www.angliarevenues.gov.uk/services/housing-benefits/apply//?council=westsuffolk" target="_blank" rel="noopener">apply for Council Tax Reduction (West Suffolk)</a></li>
