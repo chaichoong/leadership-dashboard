@@ -421,9 +421,32 @@ print(json.dumps({s["name"]: s["lane"] for s in res["stalled"]}))
     it('controls the fields each rule depends on', () => {
       // Every rule fires on the ABSENCE of something, so a field that silently
       // stops being written turns this into a permanent all-clear.
-      expect(py).toMatch(/waiting approvals carrying an Approval Slack TS/);
       expect(py).toMatch(/tasks carrying Agent Output/);
       expect(py).toMatch(/open tasks linked to an AI agent/);
+      expect(py).toMatch(/tasks carrying Hard Deadline/);
+    });
+
+    it('rule 3 is controlled on the population, not on a retired stamp', () => {
+      // Finding 20260924-report-596. The control counted "waiting approvals
+      // carrying an Approval Slack TS". That stamp died with the per-task
+      // Slack approval cards on 1 Sep 2026 — ZERO tasks in the whole table
+      // carried it on 24 Sep — so the control was zero, report() raised, and
+      // the one surface in daily-ops that says what SHOULD have moved and did
+      // not produced "could not check" every morning instead.
+      expect(py).not.toMatch(/"waiting approvals carrying an Approval Slack TS"/);
+      expect(py).toMatch(/"waiting approvals sent for approval"/);
+      // Sent For Approval By is written by the gate itself, so it matches the
+      // population rule 3 is about.
+      expect(py).toMatch(/f\.get\("Sent For Approval By"\)/);
+    });
+
+    it('names the decide rule as BLIND rather than reporting a silent zero', () => {
+      // Swapping the control alone would be worse than the crash: rule 3 would
+      // read "nothing waiting too long" while its anchor stays dead. A trust
+      // surface has to report what it cannot see.
+      expect(py).toMatch(/res\["degraded"\]/);
+      expect(py).toMatch(/decide rule BLIND/);
+      expect(py).toMatch(/CANNOT CHECK/);
     });
 
     it('counts the agent-link control over OPEN tasks only', () => {

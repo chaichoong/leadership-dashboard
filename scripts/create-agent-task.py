@@ -846,6 +846,76 @@ def _is_calendar_year(digits):
     return len(digits) == 4 and 1900 <= int(digits) <= 2099
 
 
+# ─── A POSTCODE IS THE PUREST "WHERE" THERE IS ───────────────────────
+#
+# Finding 20260925-agent-dispatch-605. `_place_tokens` above recognises a
+# place by its STREET TYPE and the words either side of it, so in
+# "23 Viola Street Bootle L20 7DR" it correctly sets aside viola, street and
+# bootle — and leaves `l20` and `7dr` counting as subject words, because
+# nothing marks them as address. That was enough on its own:
+#
+#   "Send GSC quote requests - Bootle Gas Engineers and Able Group -
+#    23 Viola Street Bootle L20 7DR"
+#   "COMPLIANCE: Sefton Council HMO licence fee overdue -
+#    23 Viola Street Bootle L20 7DR"
+#
+# shared exactly two telling words, `l20` and `7dr`, at a ratio of 0.5, so
+# the fold went ahead and overwrote the licence-fee card's Description with
+# gas-safety content WHILE IT SAT AT KEVIN'S APPROVAL GATE. A gas safety
+# certificate and a council licence fee are not the same matter; the only
+# thing they had in common was the house. This property alone carries around
+# thirty tasks across unrelated subjects, so the same trap is live on every
+# one of the ~27 properties.
+#
+# Same family as finding 602 (generic words `bathroom`/`not`/`working`) and
+# 427 (the year `2026` read as a strong reference): a token that appears on
+# everything cannot identify anything.
+DUPE_POSTCODE_OUT_RE = re.compile(r"^[a-z]{1,2}\d[a-z\d]?$")
+DUPE_POSTCODE_IN_RE = re.compile(r"^\d[a-z]{2}$")
+
+
+def _postcode_tokens(name):
+    """Both halves of any UK postcode in `name`, plus the word in front of it
+    (the town, which a postcode does not always follow a street type).
+
+    Matched as an ADJACENT PAIR (`l20` then `7dr`) on purpose. The outward
+    half alone reads like plenty of harmless tokens — `b2`, `q3`, `s1` — and
+    only the pair is unambiguously an address.
+    """
+    words = re.sub(r"[^a-z0-9\s]", " ", str(name or "").lower()).split()
+    found = set()
+    for i in range(len(words) - 1):
+        if (DUPE_POSTCODE_OUT_RE.match(words[i])
+                and DUPE_POSTCODE_IN_RE.match(words[i + 1])):
+            found.add(words[i])
+            found.add(words[i + 1])
+            if i:
+                found.add(words[i - 1])
+    return found
+
+
+def fold_on_address_only(name_a, name_b, shared):
+    """True when the ONLY thing these two task names agree on is the address.
+
+    Deliberately guards FOLDING, not grouping, and so lives here rather than
+    inside `dupe_verdict`: the page's Duplicates lane SHOWING Kevin two tasks
+    at one house is useful, and one of them silently eating the other is the
+    incident. That is this file's own doctrine — "Grouping shows, folding
+    destroys, and only the second needs to be careful" — and it keeps
+    `dupe_verdict` byte-identical to the page's mirror, which the drift test
+    in tests/agents-dupe-task-key.test.js exists to enforce.
+
+    A phone number or a reference number is identity, not address, so a
+    strong-id match is never blocked.
+    """
+    shared = list(shared or [])
+    if any(str(s).startswith(("tel:", "num:")) for s in shared):
+        return False
+    noise = (dupe_signals(name_a)[3] | dupe_signals(name_b)[3]
+             | _postcode_tokens(name_a) | _postcode_tokens(name_b))
+    return len([w for w in shared if w not in noise]) < DUPE_MIN_SHARED
+
+
 def dupe_signals(name):
     """(lane, strong_ids, distinctive_words, place_words): what identifies
     this matter. `lane` is "maintenance" or "reply", never the raw prefix:
@@ -1026,12 +1096,22 @@ def decide(incoming_fields, open_rows):
         # and keeps every catch it already had; the verdict is the second pass
         # over what it missed — seven real pairs on the live queue of 28 Aug
         # 2026, each the same matter written two different ways.
+        # AN ADDRESS IS NOT A SUBJECT, AND A FOLD IS DESTRUCTIVE (25 Sep 2026,
+        # finding 605). Applied to BOTH passes, because either can come to rest
+        # on the address alone: the key's own subject slots fall back to place
+        # words when nothing else survives, and the verdict's threshold counted
+        # postcode halves as telling words. Skipping the match leaves the pair
+        # to the page's Duplicates lane, where Kevin sees both and decides.
         if dupe_task_key(other) == key:
+            if fold_on_address_only(incoming_name, other, key.split("|")[-1].split()):
+                continue
             why_matched[row["id"]] = "same subject"
             matches.append(row)
             continue
         verdict = dupe_verdict(incoming_name, other, mode="fold")
         if verdict["match"]:
+            if fold_on_address_only(incoming_name, other, verdict["shared"]):
+                continue
             why_matched[row["id"]] = verdict["why"]
             matches.append(row)
 

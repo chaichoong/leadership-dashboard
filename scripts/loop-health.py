@@ -330,11 +330,23 @@ def report():
         "open tasks linked to an AI agent":
             sum(1 for f in open_tasks
                 if any(x in agent_ids for x in (f.get("Team Member") or []))),
-        # Rule 3's only anchor. If the Slack poster stops stamping it, rule 3
-        # reports zero for ever, which is exactly the vacuity it was built to fix.
-        "waiting approvals carrying an Approval Slack TS":
+        # Rule 3's population: what is sitting at Kevin's gate right now.
+        #
+        # This control used to count "waiting approvals carrying an Approval
+        # Slack TS". That stamp died when per-task approval cards to Kevin were
+        # retired on 1 Sep 2026 (the Slack notification contract), and on
+        # 24 Sep 2026 ZERO tasks in the whole table carried it — so the control
+        # was zero, and this script, the only surface in daily-ops that reports
+        # what SHOULD have moved and did not, exited 1 every morning and
+        # reported nothing at all (finding 20260924-report-596).
+        #
+        # A control must match the population the bug would corrupt, not the
+        # mechanism that happens to be nearest it. Every one of the 28 tasks at
+        # Approval on 24 Sep carries Sent For Approval By, because the gate
+        # itself writes it, so that is the population.
+        "waiting approvals sent for approval":
             sum(1 for f in fields
-                if f.get("Status") == "Approval" and f.get("Approval Slack TS")),
+                if f.get("Status") == "Approval" and f.get("Sent For Approval By")),
         # Rule 2 fires on the ABSENCE of Agent Output. If the field stopped being
         # written, every agent task would look undrafted and the list becomes
         # noise rather than signal — the opposite failure, equally useless.
@@ -359,8 +371,26 @@ def report():
     linked = controls["open tasks linked to an AI agent"]
 
     res = compute(tasks, agent_ids, roy_ids=roy_ids)
+    # A TRUST SURFACE MUST REPORT WHAT IT CANNOT SEE. Swapping the control
+    # above lets the other four rules report again, and on its own that would
+    # be worse than the crash: rule 3 would read "nothing waiting too long"
+    # while its anchor stays dead, and a silent zero from a rule that cannot
+    # fire is the exact failure this file was built to end. So the absence is
+    # named, counted, and carried in the result every consumer already reads.
+    waiting = sum(1 for f in fields if f.get("Status") == "Approval")
+    anchored = sum(1 for f in fields
+                   if f.get("Status") == "Approval" and f.get("Approval Slack TS"))
+    res["degraded"] = []
+    if waiting and not anchored:
+        res["degraded"].append(
+            "decide rule BLIND: %d task(s) sit at your approval gate and none "
+            "carries an Approval Slack TS, the only 'sent for approval' time on "
+            "the record. How long each has waited cannot be measured, so "
+            "'waiting on your decision' reports nothing until the approval path "
+            "stamps a time again (finding 20260924-report-596)." % waiting)
     res["control"] = {"agents": len(agent_ids), "agentLinkedTasks": linked,
-                      "tasksRead": len(tasks), "royRows": len(roy_ids)}
+                      "tasksRead": len(tasks), "royRows": len(roy_ids),
+                      "waitingApprovals": waiting, "decideAnchored": anchored}
     res["lanes"] = {lane: sum(1 for s in res["stalled"] if s["lane"] == lane) for lane in LANES}
     return res
 
@@ -381,6 +411,8 @@ def main():
         return
 
     print(f"Approval loop — {tasks_read} tasks read, {linked} agent-linked")
+    for line in res.get("degraded", []):
+        print(f"  CANNOT CHECK: {line}")
     print(f"  Needs Kevin : {len(res['needsYou'])}")
     print(f"  Done (7d)   : {len(res['done'])}")
     print(f"  NOT MOVING  : {len(res['stalled'])}  "
