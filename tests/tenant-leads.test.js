@@ -84,6 +84,8 @@ class FakeWriter(tl.Writer):
     def set_decision(self, email, decision, data): self.optouts.append((email, "decision", decision))
     def seen_replies(self): return set(getattr(self, "seen", set()))
     def mark_replies_seen(self, ids): self.seen = set(ids)
+    def roy_state(self): return getattr(self, "rs", {"read": {}, "unclear": {}})
+    def save_roy_state(self, state): self.rs = state
 
 def task(name, status="Approval", created="2026-09-25T08:00:00.000Z", **f):
     fields = {TK["name"]: name, TK["status"]: status}
@@ -587,21 +589,65 @@ fw = FakeWriter()
 tl.run(w, DAY, fw, only="roy", replies=lambda: [])
 got = {p["id"]: p["fields"] for p in fw.patches}
 out["roy"] = {k: (v.get(L["stage"]), v.get(L["screening"])) for k, v in got.items()}
+# Kevin corrects John by hand; the next run must not re-apply the old line over it.
+[l for l in w["leads"] if l["id"] == "recJ"][0]["fields"][L["stage"]] = "With Roy"
+fw_again = FakeWriter(); fw_again.rs = fw.rs
+tl.run(w, DAY + tl.timedelta(days=1), fw_again, only="roy", replies=lambda: [])
+out["again"] = fw_again.patches
+# A NEW line from Roy is still read.
+vt["fields"][TK["notes"]] += "\\n\\n[26 Sep 2026 09:10 Roy Lavin via his assistant, recREQ2] John Smith viewing on Friday at 2pm"
+fw_new = FakeWriter(); fw_new.rs = fw_again.rs
+tl.run(w, DAY + tl.timedelta(days=1), fw_new, only="roy", replies=lambda: [])
+out["newLine"] = stages(fw_new)
+
+def says(words, names):
+    t = task("TENANT VIEWINGS: Soham x " + words[:20], status="Today",
+             notes="[25 Sep 2026 15:00 Roy Lavin via his assistant, recREQ9] " + words)
+    wx = world(); wx["tasks"] = [t]
+    wx["leads"] = [lead("rec%d" % i, name=n, stage="With Roy", royTask=[t["id"]]) for i, n in enumerate(names)]
+    f = FakeWriter(); tl.run(wx, DAY, f, only="roy", replies=lambda: [])
+    st = stages(f)
+    return [st.get("rec%d" % i) for i in range(len(names))], f.rs["unclear"]
+out["twoInOne"] = says("John Smith booked and Jane Doe no answer", ["John Smith", "Jane Doe"])[0]
+out["shared"] = says("Booked John Smith and Dave Brown for Tuesday", ["John Smith", "Dave Brown"])[0]
+out["mixed"] = says("Dave Brown not interested and wants the room", ["Dave Brown"])[0]
+out["negated"] = says("Dave Brown isn't interested. Jane Doe cancelled the viewing on Tuesday", ["Dave Brown", "Jane Doe"])[0]
+out["bareViewing"] = says("John Smith viewing", ["John Smith"])
+out["willCome"] = says("Will come round and look at the boiler, booked the plumber", ["Will Jones"])
+out["surname"] = says("Lee booked for Monday", ["Lee Grant", "Mary Lee"])
+out["lowercase"] = says("john booked for monday", ["John Smith"])
+out["andJoin"] = says("Booked Mary and John Smith", ["John Smith", "Mary Smith", "Mary Jones"])[0]
+
 w2 = world(); w2["tasks"] = [task("TENANT VIEWINGS: Haverhill x", status="Today", notes="[25 Sep 2026 14:02 Roy Lavin via his assistant, recREQ1] all done, thanks")]
 w2["leads"] = [lead("recZ", name="Zed Person", stage="With Roy", royTask=[w2["tasks"][0]["id"]])]
-tl.run(w2, DAY, FakeWriter(), only="roy", replies=lambda: [])
-out["unmatched"] = w2.get("royUnmatched")
+fw2 = FakeWriter()
+tl.run(w2, DAY, fw2, only="roy", replies=lambda: [])
+out["unclear"] = [v["task"] for v in fw2.rs["unclear"].values()]
+m2 = tl.monitor(w2, DAY, [], [])
+out["unclearMonitor"] = next(s for s in m2["steps"] if s["key"] == "roy")
+w2["royState"] = fw2.rs
+m2b = tl.monitor(w2, DAY, [], [])
+out["unclearMonitorState"] = next(s for s in m2b["steps"] if s["key"] == "roy")
+out["unclearLater"] = next(s for s in tl.monitor(w2, DAY + tl.timedelta(days=8), [], [])["steps"] if s["key"] == "roy")["state"]
+w5 = world(); w5["tasks"] = [task("TENANT VIEWINGS: Haverhill quiet", status="Today", created="2026-09-10T08:00:00.000Z")]
+out["quiet"] = next(s for s in tl.monitor(w5, DAY, [], [])["steps"] if s["key"] == "roy")
+
 w3 = world(); w3["sentThreads"] = {"t9": "housing@westsuffolk.gov.uk"}
 fw3 = FakeWriter()
 tl.run(w3, DAY, fw3, only="replies", replies=lambda: [{"id": "q1", "threadId": "t9",
     "headers": {"from": "Jane Smith <jane.smith@westsuffolk.gov.uk>", "subject": "RE: Rooms in Haverhill"}, "body": "Please stop"}])
 out["colleague"] = sorted(fw3.optouts)
-w4 = world()
-w4["leads"] = [lead("recOld", name="Pat Old", stage="Past applicant", phone="07123456789", legacyRef="tenant-app:2018-01-01 10:00:00"),
-               lead("recNew", name="Pat Old", phone="07123 456789")]
-fw4 = FakeWriter()
-tl.run(w4, DAY, fw4, only="screen", replies=lambda: [])
-out["reregistered"] = stages(fw4)
+out["colleagueRefs"] = [p for p in fw3.patches if p.get("table") == tl.T_REFS]
+
+def resign(old_kw, new_kw):
+    w4 = world()
+    w4["leads"] = [lead("recOld", stage="Past applicant", legacyRef="tenant-app:2018-01-01 10:00:00", **old_kw),
+                   lead("recNew", **new_kw)]
+    f4 = FakeWriter(); tl.run(w4, DAY, f4, only="screen", replies=lambda: [])
+    return stages(f4)
+out["reregistered"] = resign(dict(name="Pat Old", phone="07123456789"), dict(name="Pat Old", phone="07123 456789"))
+out["phoneOnly"] = resign(dict(name="Pat Old", phone="07123456789"), dict(name="Sam New", phone="07123 456789"))
+out["noConsent"] = resign(dict(name="Pat Old", phone="07123456789"), dict(name="Pat Old", phone="07123 456789", consent=False))
 `);
   it("Roy's words move each named person: booked, not interested, and a first name alone when it is unique", () => {
     expect(r.roy.recJ[0]).toBe('Viewing booked');
@@ -613,15 +659,45 @@ out["reregistered"] = stages(fw4)
     expect(r.roy.recM[0]).toBeNull();
     expect(r.roy.recM[1]).toMatch(/fill in the form/);
   });
-  it("a reply from Roy that names nobody on the list is flagged, not guessed", () => {
-    expect(r.unmatched).toEqual(['TENANT VIEWINGS: Haverhill x']);
+  it("each of Roy's lines is read once: a hand correction is never undone, and a new line still counts", () => {
+    expect(r.again).toEqual([]);
+    expect(r.newLine).toEqual({ recJ: 'Viewing booked' });
   });
-  it('a STOP from a colleague in the thread of our email opts out the address we emailed too', () => {
-    expect(r.colleague).toEqual([['housing@westsuffolk.gov.uk', 'Referrer'], ['jane.smith@westsuffolk.gov.uk', 'Other']]);
+  it('one sentence about two people gives each their own words, and shared words to both', () => {
+    expect(r.twoInOne).toEqual(['Viewing booked', null]);
+    expect(r.shared).toEqual(['Viewing booked', 'Viewing booked']);
   });
-  it('a past applicant who signs up again on the form has the old row retired', () => {
+  it('a negation or a mixed message moves nobody', () => {
+    expect(r.mixed).toEqual([null]);
+    expect(r.negated).toEqual(['Not looking', null]);
+    expect(r.bareViewing[0]).toEqual([null]);
+    expect(Object.keys(r.bareViewing[1])).toHaveLength(1);
+  });
+  it("a first name alone never matches an everyday word, someone else's surname, or lower case", () => {
+    expect(r.willCome[0]).toEqual([null]);
+    expect(r.surname[0]).toEqual([null, null]);
+    expect(r.lowercase[0]).toEqual([null]);
+    // "Mary ... Smith" across two people is not Mary Smith, and two Marys make "Mary" alone nobody.
+    expect(r.andJoin).toEqual(['Viewing booked', null, null]);
+  });
+  it("a reply from Roy that moves nobody shows on the monitor for a week, and a silent list warns", () => {
+    expect(r.unclear).toEqual(['TENANT VIEWINGS: Haverhill x']);
+    expect(r.unclearMonitorState.state).toBe('warn');
+    expect(r.unclearMonitorState.note).toMatch(/moved nobody/);
+    expect(r.unclearMonitorState.last).toBe('2026-09-25');
+    expect(r.unclearLater).toBe('ok');
+    expect(r.quiet.state).toBe('warn');
+    expect(r.quiet.note).toMatch(/no word from Roy on 1 list/);
+  });
+  it("a colleague's STOP in our thread puts the team inbox on Check needed, never a straight opt-out", () => {
+    expect(r.colleague).toEqual([['housing@westsuffolk.gov.uk', 'Referrer', 'Check needed'], ['jane.smith@westsuffolk.gov.uk', 'Other']]);
+    expect(r.colleagueRefs).toEqual([]);
+  });
+  it('a past applicant who signs up again WITH consent has the old row retired; a shared phone alone does not', () => {
     expect(r.reregistered.recOld).toBe('Archived');
     expect(r.reregistered.recNew).toBe('Qualified');
+    expect(r.phoneOnly.recOld).toBeUndefined();
+    expect(r.noConsent.recOld).toBeUndefined();
   });
 });
 

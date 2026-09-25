@@ -150,18 +150,45 @@ PREFIXES = {"mailout": "TENANT MAILOUT: ", "adverts": "TENANT ADVERTS: ", "refer
 EMAIL_KINDS = ("mailout", "referral", "keepwarm")
 # Roy's replies to a viewings list, recorded on HIS task by roy-assistant.py task-update as
 # "[25 Sep 2026 14:00 Roy Lavin via his assistant, recREQ] his words" (ROY_TASK_NOTE_TAG there).
-ROY_LINE_RE = re.compile(r"^\[(\d{1,2} \w{3} \d{4})[^\]]*Roy Lavin via his assistant, rec\w+\]\s*(.*?)(?=\n\s*\n\[|\Z)",
+# Group 1 is the whole header (unique per line: minute + request id), group 2 the date, 3 his words.
+ROY_LINE_RE = re.compile(r"^\[((\d{1,2} \w{3} \d{4})[^\]]*Roy Lavin via his assistant, rec\w+)\]\s*(.*?)(?=\n\s*\n\[|\Z)",
                          re.M | re.S)
-# What Roy's words about one person mean, most specific first ("not interested" before "interested").
-ROY_OUTCOMES = (
-    ("Not looking", re.compile(r"\b(not interested|no longer (looking|interested)|does(n'?t| not) want|found (somewhere|a place)"
-                               r"|declined|not looking|already (housed|sorted))\b", re.I)),
-    ("Not suitable", re.compile(r"\b(not suitable|unsuitable|too young|not on (uc|universal credit))\b", re.I)),
-    ("Viewing booked", re.compile(r"\b(booked|viewing|coming (to see|round|over)|will (view|come)|seeing (it|the room|them|him|her))\b", re.I)),
-    ("No answer", re.compile(r"\b(no answer|voicemail|did(n'?t| not) answer|not answering|no reply|wrong number"
-                             r"|number (not|no longer) in use|dead number)\b", re.I)),
-    ("Interested", re.compile(r"\b(interested|wants? (a|the) room|keen|still looking)\b", re.I)),
+# What Roy's words about one person mean. The negative readings are taken out of the text first,
+# so "not interested" never also reads as "interested"; a positive reading counts only when no
+# negation is left ("not booked yet", "cancelled the viewing", "didn't come"). Two different
+# readings for one person are UNCLEAR: nothing moves and a person reads the line (review, 25 Sep 2026).
+_NOT = r"(?:n'?t|\s+not|\s+no longer)"
+ROY_NEGATIVE = (
+    ("Not looking", re.compile(r"\b(not (interested|looking|keen|bothered)|no longer (looking|interested|keen)"
+                               rf"|(is|was|are|were|does|did|do){_NOT} (interested|looking|keen|want\w*)"
+                               r"|found (somewhere|a place|a room|a flat|a house)|declined|turned (it|us) down"
+                               r"|already (housed|sorted)|changed (his|her|their) mind)\b", re.I)),
+    ("Not suitable", re.compile(r"\b(not suitable|unsuitable|too young|not on (uc|universal credit)"
+                                rf"|(is|was){_NOT} on (uc|universal credit))\b", re.I)),
+    ("No answer", re.compile(r"\b(no answer|voicemail|(did|does|is|was)(n'?t| not) (answer\w*|pick\w* up)|not answering"
+                             r"|no reply|wrong number|number (not|no longer) in use|dead number"
+                             r"|(could|can)(n'?t| not) (reach|get hold of|get through))\b", re.I)),
 )
+ROY_POSITIVE = (
+    ("Viewing booked", re.compile(r"\b(booked|viewing (is )?(on|at|for|booked|arranged|set|tomorrow|today|this|next)"
+                                  r"|arranged a viewing|coming (to see|round|over|to view)|will (view|come (round|over|to see))"
+                                  r"|seeing (it|the room|the house|the flat) (on|at|tomorrow|today|this|next))\b", re.I)),
+    ("Interested", re.compile(r"\b(interested|wants? (a|the|to see the) room|keen|still looking)\b", re.I)),
+)
+ROY_NEGATION = re.compile(r"\b(not|no|never|nobody|cancel\w*|called off)\b|n't\b", re.I)
+UNCLEAR = "unclear"
+# A first name alone never stands for a person when it is also an everyday word ("Will come
+# Tuesday", "Mark it done"): only the full name counts for these.
+COMMON_WORD_NAMES = {
+    "will", "mark", "bill", "may", "june", "april", "rose", "grace", "hope", "faith", "joy", "dawn",
+    "frank", "art", "pat", "sue", "ray", "rob", "jack", "don", "guy", "bob", "pearl", "ruby", "amber",
+    "rich", "dean", "drew", "chase", "carol", "holly", "ivy", "iris", "lily", "daisy", "jay", "kit",
+    "wade", "miles", "rod", "sandy", "penny", "sunny", "crystal", "heather", "olive", "sage", "eve",
+    "summer", "autumn", "cash", "chance", "hunter", "norm", "pip", "reed", "sonny", "win", "hazel",
+    "robin", "angel", "cliff", "clay", "sky", "storm", "river", "brook", "glen", "dale", "rocky",
+}
+ROY_SEEN = os.path.expanduser("~/knowledge-os/logs/tenant-leads/roy-seen.json")
+ROY_UNCLEAR_SHOW_DAYS = 7      # an unreadable line of Roy's stays on the monitor this long
 OPEN_TASK_STATES = ("Completed", "Cancelled")
 QUALIFIED_STAGES = ("Qualified", "With Roy")
 BOOKED = "Viewing booked"
@@ -261,6 +288,14 @@ def form_link(channel):
 
 def fmt_day(d):
     return d.strftime("%-d %b %Y") if d else ""
+
+
+def same_person(a, b):
+    """How many of phone, email and full name two lead records share (blank never matches)."""
+    return sum(1 for x, y in ((digits(a.get(L["phone"])), digits(b.get(L["phone"]))),
+                              (email_of(a.get(L["email"])), email_of(b.get(L["email"]))),
+                              (norm_name(a.get(L["name"])), norm_name(b.get(L["name"]))))
+               if x and x == y)
 
 
 def is_legacy(lead):
@@ -925,38 +960,102 @@ def list_replies():
 
 # ─── Roy's updates ───────────────────────────────────────────────────
 def roy_lines(notes_text):
-    """[(date, words)] Roy wrote on a task, oldest first."""
+    """[(header, date, words)] Roy wrote on a task, oldest first. The header (minute + request id)
+    is the line's own key: it is how a line is read ONCE."""
     out = []
-    for d, words in ROY_LINE_RE.findall(str(notes_text or "")):
+    for header, d, words in ROY_LINE_RE.findall(str(notes_text or "")):
         try:
-            out.append((datetime.strptime(d, "%d %b %Y").date(), words.strip()))
+            out.append((header, datetime.strptime(d, "%d %b %Y").date(), words.strip()))
         except ValueError:
             continue
     return out
 
 
-def roy_outcome(segment):
-    for label, rx in ROY_OUTCOMES:
-        if rx.search(segment):
-            return label
-    return None
+def roy_outcome(text):
+    """One reading of Roy's words: a ROY_NEGATIVE / ROY_POSITIVE label, UNCLEAR, or None (nothing said)."""
+    found, rest = set(), str(text or "").replace("\u2019", "'")      # "isn’t" as typed on a phone
+    for label, rx in ROY_NEGATIVE:
+        if rx.search(rest):
+            found.add(label)
+            rest = rx.sub(" ", rest)
+    negated = bool(ROY_NEGATION.search(rest))
+    for label, rx in ROY_POSITIVE:
+        if rx.search(rest):
+            found.add(UNCLEAR if negated else label)
+            break
+    if len(found) > 1:
+        return UNCLEAR
+    return next(iter(found), None)
+
+
+def name_spans(text, lead, others):
+    """Where Roy's text names this person: the full name (middle names allowed), or the first name
+    alone when it is written with a capital, is not an everyday word, and is no part of anyone
+    else's name on the same list (a first name can be someone else's surname)."""
+    parts = norm_name(lead["fields"].get(L["name"])).split()
+    if not parts:
+        return []
+    spans = []
+    if len(parts) >= 2:
+        # One middle name at most, and never a joining word: "John and Mary Smith" is not John Smith.
+        full = re.compile(r"\b%s\W+(?:(?!(?:and|or|with|to)\b)[a-z]+\W+)?%s\b" % (re.escape(parts[0]), re.escape(parts[-1])), re.I)
+        spans += [m.span() for m in full.finditer(text)]
+    first = parts[0]
+    elsewhere = {tok for o in others if o["id"] != lead["id"] for tok in norm_name(o["fields"].get(L["name"])).split()}
+    if len(first) >= 3 and first not in COMMON_WORD_NAMES and first not in elsewhere:
+        for m in re.finditer(r"\b%s\b" % re.escape(first), text, re.I):
+            if m.group(0)[0].isupper() and not any(a <= m.start() < b for a, b in spans):
+                spans.append(m.span())
+    return sorted(spans)
 
 
 def roy_says(words, lead, others):
-    """What Roy's words say about one person on his list, or None. The full name is looked for first;
-    a first name alone counts only when nobody else on the same list shares it."""
-    name = norm_name(lead["fields"].get(L["name"]))
-    if not name:
-        return None
-    first = name.split()[0]
-    unique_first = len(first) >= 3 and sum(1 for o in others if norm_name(o["fields"].get(L["name"])).split()[:1] == [first]) == 1
-    segments = [x for x in re.split(r"\n+|;|(?<=[.!?])\s+|,\s+(?=[A-Z])", words) if x.strip()]
-    said = None
+    """What Roy's words say about one person on his list: a label, UNCLEAR, or None (not named).
+
+    Each sentence that names them is read. When it names someone else too, only the words from
+    this person's name up to the next person's name count ("John booked and Mary no answer"); when
+    those say nothing, the whole sentence does ("Booked John and Mary for Tuesday"). Two different
+    readings, or a mention with nothing readable, is UNCLEAR: nothing moves and a person reads it."""
+    words = str(words or "").replace("\u2019", "'")
+    segments = [x for x in re.split(r"\n+|;|(?<=[.!?])\s+|,\s+(?=[A-Z])|\s+but\s+", words) if x.strip()]
+    named, readings = False, set()
     for seg in segments:
-        low = f" {norm_name(seg)} "
-        if f" {name} " in low or (unique_first and f" {first} " in low):
-            said = roy_outcome(seg) or said
-    return said
+        mine = name_spans(seg, lead, others)
+        if not mine:
+            continue
+        named = True
+        theirs = sorted(a for o in others if o["id"] != lead["id"] for a, _ in name_spans(seg, o, others))
+        if theirs:
+            part = " ".join(seg[a:min((x for x in theirs if x >= b), default=len(seg))] for a, b in mine)
+            reading = roy_outcome(part) or roy_outcome(seg)
+        else:
+            reading = roy_outcome(seg)
+        readings.add(reading or UNCLEAR)
+    if not named:
+        return None
+    return readings.pop() if len(readings) == 1 else UNCLEAR
+
+
+def roy_state_file():
+    """{"read": {line key: day read}, "unclear": {line key: {...}}}. A bad file is a failure of the
+    roy step only, never a silent re-read of every line (that would undo hand corrections)."""
+    try:
+        with open(ROY_SEEN) as fh:
+            d = json.load(fh)
+    except FileNotFoundError:
+        return {"read": {}, "unclear": {}}
+    except ValueError as exc:
+        raise RuntimeError(f"Roy's seen-file is unreadable ({exc}); fix or remove {ROY_SEEN}")
+    return {"read": dict(d.get("read") or {}), "unclear": dict(d.get("unclear") or {})}
+
+
+def save_roy_state(state):
+    """Atomic, like the replies seen-file (python-scripts rule)."""
+    os.makedirs(os.path.dirname(ROY_SEEN), exist_ok=True)
+    tmp = ROY_SEEN + ".tmp"
+    with open(tmp, "w") as fh:
+        json.dump(state, fh, indent=1, sort_keys=True)
+    os.replace(tmp, ROY_SEEN)
 
 
 # ─── the monitor ─────────────────────────────────────────────────────
@@ -1062,11 +1161,21 @@ def monitor(data, day, opens, run_notes):
          (f"{len(unhanded)} qualified people for an open town not yet with Roy" if unhanded else
           f"Roy has {len(with_roy)} sign-up(s) and {len(past_with_roy)} past applicant(s) to call"))
 
-    unmatched = data.get("royUnmatched") or []
+    # Roy's replies: an unreadable line, and a list he has said nothing on for a week, are absences.
+    unclear = [v for v in ((data.get("royState") or {}).get("unclear") or {}).values()
+               if (day - (parse_day(v.get("first")) or day)).days < ROY_UNCLEAR_SHOW_DAYS]
+    said = [when for t in roy for _, when, _ in roy_lines(t["fields"].get(TK["notes"]))]
+    quiet = [t for t in roy if is_open(t) and (day - (created_day(t) or day)).days > 7
+             and not roy_lines(t["fields"].get(TK["notes"]))]
     booked = [l for l in data["leads"] if sel(l["fields"].get(L["stage"])) == BOOKED]
-    step("roy", "Roy's updates read", None, "warn" if unmatched else "ok",
-         (f"Roy replied on {', '.join(unmatched)} but named nobody on the list: read it on the task" if unmatched
-          else f"{len(booked)} viewing(s) booked"))
+    msgs = []
+    if unclear:
+        msgs.append(f"{len(unclear)} reply(ies) from Roy moved nobody (on "
+                    f"{', '.join(sorted({v.get('task', '?') for v in unclear}))}): read them on the task")
+    if quiet:
+        msgs.append(f"no word from Roy on {len(quiet)} list(s) older than 7 days")
+    step("roy", "Roy's updates read", max(said, default=None), "warn" if msgs else "ok" if said else "idle",
+         "; ".join(msgs) if msgs else (f"{len(booked)} viewing(s) booked" if said else "No reply from Roy on a list yet."))
 
     kw = chain_tasks(data, "keepwarm")
     due = keepwarm_leads(data, day)
@@ -1262,6 +1371,13 @@ class Writer:
         if not self.dry:
             save_replies_seen(ids)
 
+    def roy_state(self):
+        return roy_state_file()
+
+    def save_roy_state(self, state):
+        if not self.dry:
+            save_roy_state(state)
+
     def bonus_row(self, lead, referrer_name, new_tenant, first_rent, day):
         self.note(f"£{BONUS_AMOUNT} bonus on the Payment Run")
         if self.dry:
@@ -1351,12 +1467,14 @@ def run(data, day, w, only=None, replies=None):
             return ("Referrer" if addr in refs else "Lead" if addr in leads else
                     "Tenant" if addr in tenants else "Other")
 
-        def act(sender, verdict, subject, m, h):
-            """One reply, one address: record what it asks. Returns 1 when something was acted on."""
+        def act(sender, verdict, subject, m, h, via=""):
+            """One reply, one address: record what it asks. Returns 1 when something was acted on.
+            via = the colleague who wrote, when the address is the one we emailed, not the replier."""
             if verdict == "check":
                 if on_table.get(sender) in (None, NOT_AN_OPTOUT):     # a new doubt after a clearance is asked again
                     said = new_text(m.get("body") or m.get("snippet") or "")[:300]
-                    rid = w.opt_out(sender, who_is(sender), f"MAY be asking us to stop, in reply to \"{subject}\": "
+                    whose = f"{via} wrote in the thread we sent to this address, and MAY" if via else "MAY"
+                    rid = w.opt_out(sender, who_is(sender), f"{whose} be asking us to stop, in reply to \"{subject}\": "
                                     f"\"{said}\"", day, decision=CHECK_NEEDED)
                     on_table[sender] = CHECK_NEEDED
                     data.setdefault("optouts", []).append({"id": rid, "fields": {
@@ -1400,11 +1518,13 @@ def run(data, day, w, only=None, replies=None):
             if not replier or replier == SENDER or not verdict:
                 continue
             acted += act(replier, verdict, subject, m, h)
-            # A STOP (or a maybe) sent from a colleague's address, in the thread of an email we sent to
-            # a team inbox, speaks for the address we emailed too (known gap closed, 25 Sep 2026).
+            # A STOP (or a maybe) from a colleague's address, in the thread of an email we sent to a
+            # team inbox, MAY speak for that inbox: one person leaving is not the whole team leaving.
+            # The inbox goes on the table as Check needed, held off every list until a person decides
+            # (known gap closed, review, 25 Sep 2026).
             emailed = (data.get("sentThreads") or {}).get(m.get("threadId") or "")
             if emailed and emailed != replier and verdict in ("stop", "check"):
-                acted += act(emailed, verdict, subject, m, h)
+                act(emailed, "check", subject, m, h, via=replier)
         for r in lead_rows:
             next((l for l in data["leads"] if l["id"] == r["id"]), {"fields": {}})["fields"].update(r["fields"])
         w.patch(T_REFS, ref_rows, "referrer(s)")
@@ -1415,23 +1535,32 @@ def run(data, day, w, only=None, replies=None):
         return f"{acted} repl(ies) acted on" if acted else ""
 
     def do_roy():
-        """Roy's replies on his viewing lists move the people on them (known gap closed, 25 Sep 2026)."""
-        rows, unmatched = [], []
+        """Roy's replies on his viewing lists move the people on them (known gap closed, 25 Sep 2026).
+        Each line of his is read ONCE (roy-seen.json), so an old line never undoes a stage someone
+        has since corrected by hand or another step has moved. A line that names nobody, or names
+        someone without a clear meaning, moves nothing and shows on the monitor for a person to read."""
+        state = w.roy_state()
+        read, unclear = state.setdefault("read", {}), state.setdefault("unclear", {})
+        rows = {}
         for t in chain_tasks(data, "viewings"):
-            said_lines = roy_lines(t["fields"].get(TK["notes"]))
-            if not said_lines:
-                continue
+            lines = roy_lines(t["fields"].get(TK["notes"]))
             on_list = [l for l in data["leads"] if t["id"] in links(l["fields"].get(L["royTask"]))]
-            named_any = False
-            for when, words in said_lines:
+            for header, when, words in lines:
+                key = f"{t['id']}|{header}"
+                if key in read:
+                    continue
+                read[key] = day.isoformat()
+                named, doubts = 0, []
                 for l in on_list:
                     verdict = roy_says(words, l, on_list)
                     if not verdict:
                         continue
-                    named_any = True
+                    named += 1
                     f = l["fields"]
-                    stage = sel(f.get(L["stage"]))
-                    if stage in ("Became tenant", "Opted out", "Archived"):
+                    if verdict == UNCLEAR:
+                        doubts.append(str(f.get(L["name"]) or l["id"]))
+                        continue
+                    if sel(f.get(L["stage"])) in ("Became tenant", "Opted out", "Archived"):
                         continue
                     fields = {L["screening"]: f"{fmt_day(when)}: Roy: {verdict.lower()}"}
                     if verdict in ("Not looking", "Not suitable", BOOKED):
@@ -1441,12 +1570,16 @@ def run(data, day, w, only=None, replies=None):
                     if verdict == "Interested" and is_legacy(l):
                         fields[L["screening"]] += " (ask them to fill in the form: no consent is on file for texts or emails)"
                     if any(f.get(k) != v for k, v in fields.items()):
-                        rows.append({"id": l["id"], "fields": fields})
+                        rows.setdefault(l["id"], {}).update(fields)
                         f.update(fields)
-            if not named_any:
-                unmatched.append(str(t["fields"].get(TK["name"]) or t["id"]))
-        data["royUnmatched"] = unmatched
-        w.patch_leads(rows)
+                if not named or doubts:
+                    unclear[key] = {"first": day.isoformat(), "task": str(t["fields"].get(TK["name"]) or t["id"]),
+                                    "said": words[:200], "people": doubts}
+        for k in [k for k, v in unclear.items() if (day - (parse_day(v.get("first")) or day)).days > 30]:
+            del unclear[k]
+        w.save_roy_state(state)
+        data["royState"] = state
+        w.patch_leads([{"id": i, "fields": f} for i, f in rows.items()])
         return f"{len(rows)} lead(s) moved by Roy's replies" if rows else ""
 
     def do_screen():
@@ -1477,15 +1610,17 @@ def run(data, day, w, only=None, replies=None):
                 tid = match_tenant_by_name(data, f.get(L["referredName"]))
                 if tid:
                     fields[L["referredTenant"]] = [tid]
-            # The same person on the 2017-2021 list has now signed up with consent: retire the old row.
-            keys = {digits(f.get(L["phone"])), email_of(f.get(L["email"]))} - {""}
-            for old in data["leads"]:
-                of = old["fields"]
-                if (is_legacy(old) and sel(of.get(L["stage"])) not in ("Archived", "Became tenant")
-                        and keys & ({digits(of.get(L["phone"])), email_of(of.get(L["email"]))} - {""})):
-                    rows.append({"id": old["id"], "fields": {L["stage"]: "Archived", L["screening"]:
-                                 f"{fmt_day(day)}: signed up again on the form as {f.get(L['name']) or 'a new sign-up'}"}})
-                    of[L["stage"]] = "Archived"
+            # The same person on the 2017-2021 list has now signed up WITH consent: retire the old row.
+            # Same person = two of phone, email and full name agree (a shared phone or a recycled
+            # number alone is not enough), and only a sign-up that gave consent retires anything.
+            if f.get(L["consent"]):
+                for old in data["leads"]:
+                    of = old["fields"]
+                    if (is_legacy(old) and sel(of.get(L["stage"])) not in ("Archived", "Became tenant")
+                            and same_person(f, of) >= 2):
+                        rows.append({"id": old["id"], "fields": {L["stage"]: "Archived", L["screening"]:
+                                     f"{fmt_day(day)}: signed up again on the form as {f.get(L['name']) or 'a new sign-up'}"}})
+                        of[L["stage"]] = "Archived"
             if new != stage or any(f.get(k) != v for k, v in fields.items() if k != L["screening"]):
                 rows.append({"id": l["id"], "fields": fields})
                 f.update(fields)
@@ -1661,9 +1796,9 @@ def main(argv=None):
                           "failures": failures}, indent=2))
         return 1 if failures else 0
     if not a.dry_run:
-        unmatched = data.get("royUnmatched")
+        roy_state = data.get("royState")
         data = load(day)          # the monitor reads what the run wrote, not what it meant to write
-        data["royUnmatched"] = unmatched
+        data["royState"] = roy_state
     mon = monitor(data, day, opens, notes + [f"ERROR {f}" for f in failures])
     failed = bool(failures) or mon["worst"] == "fail"
     try:
