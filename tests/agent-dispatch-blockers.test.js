@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { execFileSync } from 'child_process';
-import { readFileSync } from 'fs';
+import { readFileSync, mkdtempSync, writeFileSync } from 'fs';
+import { tmpdir } from 'os';
 import { resolve, dirname } from 'path';
 import { fileURLToPath } from 'url';
 
@@ -604,11 +605,25 @@ print(json.dumps({k: bool(m.work_handoff_problem(v, ks(v))) for k, v in cases.it
     expect(r).toEqual({ chedburgh: true, post: true, pays: false, sign: false, far: true, someonePays: true });
   });
 
-  it('both robot prompts carry an approved woken task out and close it, never submit it (a submit wipes the approval)', () => {
+  // RUN the prompt through bash, never grep it (second review, 25 Sep 2026): a
+  // bare "<what you saw>" inside the double-quoted prompt made bash read
+  // `<what` as a redirect, so the poll died before Claude started and no
+  // approved hand-back would ever have been worked. `bash -n` passed.
+  it('both robot prompts survive bash, and carry an approved woken task out and close it, never submit it', () => {
     for (const f of ['scripts/handback-poll-run.sh', 'scripts/signin-pickup-run.sh']) {
-      const src = readFileSync(resolve(ROOT, f), 'utf8');
-      expect(src, f).toMatch(/is CARRIED OUT and closed with complete .*NEVER submitted: a submit wipes Kevin's approval/);
-      expect(src, f).toMatch(/block TASKID --kind SIGN-IN --subject <host>/);
+      const lines = readFileSync(resolve(ROOT, f), 'utf8').split('\n');
+      const start = lines.findIndex(l => l.startsWith('"$CLAUDE" -p "'));
+      const end = lines.findIndex((l, i) => i > start && /^\s+--add-dir /.test(l));
+      expect(start, f).toBeGreaterThan(0);
+      expect(end, f).toBeGreaterThan(start);
+      const call = lines.slice(start, end).join('\n').replace(/^"\$CLAUDE"/, 'stub').replace(/\s*\\$/, '');
+      const dir = mkdtempSync(resolve(tmpdir(), 'prompt-'));
+      const script = resolve(dir, 'run.sh');
+      writeFileSync(script, `set -e\ncd "${dir}"\nstub() { printf '%s' "$2" > "${dir}/prompt.txt"; }\n${call}\n`);
+      execFileSync('bash', [script], { encoding: 'utf8' });   // throws on "what: No such file or directory"
+      const prompt = readFileSync(resolve(dir, 'prompt.txt'), 'utf8');
+      expect(prompt, f).toMatch(/is CARRIED OUT and closed with complete .*NEVER submitted: a submit wipes Kevin's approval/);
+      expect(prompt, f).toContain('block TASKID --kind SIGN-IN --subject <host> --why "<what you saw>" and stop.');
     }
   });
 });
