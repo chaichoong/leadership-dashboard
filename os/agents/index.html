@@ -6476,6 +6476,7 @@ function renderSignins(){
     if(String(_estateState).indexOf('error') === 0){
         setCount('?', true);
         body.innerHTML = strip + `<div class="zone-error">Could not read the sign-in list (${esc(String(_estateState).slice(7))}). This list is NOT empty. It could not be read.</div>`;
+        signinsSay('Robot sign-ins could not be read');
         return;
     }
     if(!haveRows){
@@ -6486,6 +6487,7 @@ function renderSignins(){
     if(!row){
         setCount('?', true);
         body.innerHTML = strip + `<div class="zone-error">No sign-in list yet. The estate-status job writes it every ten minutes. If this stays, that job has stopped.</div>`;
+        signinsSay('Robot sign-ins could not be read');
         return;
     }
     const f = row.fields || {};
@@ -6504,6 +6506,7 @@ function renderSignins(){
     if(!p || p.broken || !Array.isArray(p.lines) || !p.lines.length){
         setCount('?', true);
         body.innerHTML = strip + warn + `<div class="zone-error">The sign-in list could not be read${p && p.broken ? ' (' + esc(p.broken) + ')' : ''}. This list is NOT empty. It could not be read.</div>`;
+        signinsSay('Robot sign-ins could not be read');
         return;
     }
     const order = ln => (SIGNIN_STATE[ln.state] || SIGNIN_STATE.unchecked).order;
@@ -6526,24 +6529,44 @@ function renderSignins(){
     }
     // Keep the keyboard where it was: the panel is redrawn whole, every 30 s while watching.
     const had = document.activeElement && body.contains(document.activeElement) ? document.activeElement : null;
-    const hadKey = had ? (had.getAttribute('data-rs-signin') ? `[data-rs-signin="${CSS.escape(had.getAttribute('data-rs-signin'))}"]`
-        : had.hasAttribute('data-rs-toggle') ? '[data-rs-toggle]' : had.hasAttribute('data-rs-add') ? '[data-rs-add]' : '') : '';
+    const hadKey = !had ? '' : had.getAttribute('data-rs-signin') ? `[data-rs-signin="${CSS.escape(had.getAttribute('data-rs-signin'))}"]`
+        : had.hasAttribute('data-rs-toggle') ? '[data-rs-toggle]' : had.hasAttribute('data-rs-add') ? '[data-rs-add]'
+        : had.getAttribute('href') ? `a[href="${CSS.escape(had.getAttribute('href'))}"]` : '';
     body.innerHTML = strip + warn + `<div class="rs-summary"><span>${summary}</span>
             <div class="rs-actions">${toggle}${addBtn}</div></div>
         <div class="rs-note">Updated ${esc(estateAgo(f[ES.updated]))}.</div>
         ${shown.length || rest ? `<div class="rs-list">${shown.map(signinLineHtml).join('')}${rest}</div>` : ''}
         ${macNote}`;
-    if(hadKey){ const again = body.querySelector(hadKey); if(again) again.focus(); }
+    // preventScroll: a focus() scrolls to the panel, and this redraw runs every 30 s while he
+    // works the queue further down the page (review, 25 Sep 2026).
+    if(hadKey){ const again = body.querySelector(hadKey); if(again) again.focus({ preventScroll: true }); }
     // Said once when it changes, from the one live region that stays in the page.
-    const said = needs.length ? `${needs.length} robot sign-in${needs.length === 1 ? '' : 's'} need you` : 'All robot sign-ins are fine';
+    signinsSay(needs.length ? (needs.length === 1 ? '1 robot sign-in needs you' : `${needs.length} robot sign-ins need you`) : 'All robot sign-ins are fine');
+}
+// The one live region, said once when it changes; the unreadable paths say so too (review).
+function signinsSay(said){
     const live = document.getElementById('signinsLive');
     if(live && said !== _signinsSaid){ live.textContent = said; _signinsSaid = said; }
+}
+// The health-bar check for the panel: a missing row, any mark but Worked, or an
+// unreadable or empty list fails, the same rule the panel warns on.
+function signinsHealth(){
+    if(String(_estateState).indexOf('error') === 0) return { status:'fail', detail:String(_estateState).slice(7) };
+    if(_estateState !== 'ready') return { status:'warn', detail:'Estate status not loaded yet' };
+    const row = signinRow();
+    if(!row) return { status:'fail', detail:'No robot-signins row: the estate-status job has not written the sign-in list' };
+    const f = row.fields || {};
+    if(f[ES.status] !== 'Worked') return { status:'fail', detail:`${f[ES.status] || 'No status'}: ${f[ES.detail] || 'the sign-in list could not be refreshed'}` };
+    const p = signinPayload(row);
+    if(!p || p.broken || !Array.isArray(p.lines) || !p.lines.length) return { status:'fail', detail:'The sign-in list is unreadable or empty' };
+    const out = p.lines.filter(ln => ln.state === 'signed-out').length;
+    return { status:'pass', detail:`${p.lines.length} sign-ins listed, ${out} signed out` };
 }
 document.addEventListener('click', (ev) => {
     const t = ev.target && ev.target.closest ? ev.target.closest('[data-rs-toggle]') : null;
     if(!t) return;
     _signinsOpen = !_signinsOpen;
-    t.focus();          // renderSignins puts the keyboard back on the redrawn toggle
+    t.focus({ preventScroll: true });   // renderSignins puts the keyboard back on the redrawn toggle
     renderSignins();
 });
 
@@ -6711,20 +6734,7 @@ function registerAgentsSyncBar(){
                 }
             },
             {
-                name: 'Robot sign-ins listed', kind: 'automation', run: () => {
-                    // The panel above the queue reads one row. A missing or failed row
-                    // leaves Kevin guessing which logins are live, so it fails here.
-                    if(String(_estateState).indexOf('error') === 0) return { status:'fail', detail:String(_estateState).slice(7) };
-                    if(_estateState !== 'ready') return { status:'warn', detail:'Estate status not loaded yet' };
-                    const row = signinRow();
-                    if(!row) return { status:'fail', detail:'No robot-signins row: the estate-status job has not written the sign-in list' };
-                    const f = row.fields || {};
-                    if(f[ES.status] === 'Failed') return { status:'fail', detail:String(f[ES.detail] || 'The sign-in list could not be refreshed') };
-                    const p = signinPayload(row);
-                    if(!p || p.broken || !Array.isArray(p.lines) || !p.lines.length) return { status:'fail', detail:'The sign-in list is unreadable or empty' };
-                    const out = p.lines.filter(ln => ln.state === 'signed-out').length;
-                    return { status:'pass', detail:`${p.lines.length} sign-ins listed, ${out} signed out` };
-                }
+                name: 'Robot sign-ins listed', kind: 'automation', run: () => signinsHealth()
             },
             {
                 name: 'Approvals queue read', kind: 'sync', run: () => {

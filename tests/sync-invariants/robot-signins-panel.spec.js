@@ -87,6 +87,23 @@ test.describe('Robot sign-ins panel on a Mac', () => {
     await expect(panel.locator('[data-rs-signin="utilita-apt1"]')).toBeFocused();
     await expect(page.locator('#signinsLive')).toHaveText('2 robot sign-ins need you');
     await expect(page.locator('#signinsLive')).toHaveAttribute('role', 'status');
+    // The redraw never pulls the page back up to the panel while he works the queue below.
+    await page.setViewportSize({ width: 1000, height: 400 });
+    await page.evaluate(() => { document.body.style.minHeight = '4000px'; window.scrollTo(0, 1500); });
+    const before = await page.evaluate(() => window.scrollY);
+    await page.evaluate(() => renderSignins());
+    expect(await page.evaluate(() => window.scrollY)).toBe(before);
+    await expect(panel.locator('[data-rs-signin="utilita-apt1"]')).toBeFocused();
+    // An unreadable list says so in the live region too.
+    await page.evaluate(() => { _estateState = 'error: boom'; renderSignins(); });
+    await expect(page.locator('#signinsLive')).toHaveText('Robot sign-ins could not be read');
+  });
+
+  test('the health-bar check fails on any mark but Worked, as the panel warns', async ({ page }) => {
+    await open(page, [signinRow(MIXED, { [ES.status]: 'Idle', [ES.detail]: 'No longer scheduled' })]);
+    expect(await page.evaluate(() => signinsHealth())).toEqual({ status: 'fail', detail: 'Idle: No longer scheduled' });
+    await open(page, [signinRow(MIXED)]);
+    expect(await page.evaluate(() => signinsHealth())).toEqual({ status: 'pass', detail: '5 sign-ins listed, 2 signed out' });
   });
 
   test('closing the last sign-in card mid re-read clears the strip at once', async ({ page }) => {
