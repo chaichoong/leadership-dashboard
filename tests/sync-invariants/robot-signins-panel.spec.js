@@ -176,10 +176,10 @@ test.describe('Robot sign-ins panel on a Mac', () => {
 
 // The blocker sweep's row (agent-blockers): a robot blocked on a sign-in the last check
 // called fine, a site missing from the list, and a step only Kevin can do (not a sign-in).
-function blockersRow(open) {
+function blockersRow(open, sweptMinAgo = 5) {
   return { id: 'recBlockers', createdTime: ago(3), fields: {
     [ES.key]: 'agent-blockers', [ES.kind]: 'report', [ES.status]: 'Worked', [ES.detail]: 'fixture',
-    [ES.payload]: JSON.stringify({ open, stale: 0, closedWhileBlocked: [] }), [ES.updated]: ago(3) } };
+    [ES.payload]: JSON.stringify({ open, stale: 0, closedWhileBlocked: [], sweptAt: ago(sweptMinAgo) }), [ES.updated]: ago(3) } };
 }
 const WALLS = [
   { task: 'recW1', name: 'Match the 12 Sep card charge', agent: 'Finance', kind: 'SIGN-IN', subject: 'www.amazon.co.uk', fix: 'sign in', days: 1 },
@@ -216,13 +216,24 @@ test.describe('Robot sign-ins panel and blocked robots', () => {
     await expect(panel).not.toContainText('needs you');
   });
 
-  test('a wall that opened AFTER his sign-in still needs him', async ({ page }) => {
+  test('a wall that may have opened AFTER his sign-in still needs him', async ({ page }) => {
     // He signed in 150 minutes ago; a robot then met the password prompt again (the wall is fresh).
     const fresh = Object.assign({}, WALLS[0], { days: 0 });
-    const panel = await open(page, [signinRow([line('Amazon (order history)', 'www.amazon.co.uk', 'you-signed-in', { at: ago(150), how: 'you signed in' })]),
+    let panel = await open(page, [signinRow([line('Amazon (order history)', 'www.amazon.co.uk', 'you-signed-in', { at: ago(150), how: 'you signed in' })]),
       blockersRow([fresh])]);
     await expect(panel.locator('[data-rs-wall="www.amazon.co.uk"]')).toBeVisible();
     await expect(page.locator('#signinsCount')).toHaveText('1');
+    // The review's case: sign-in 190 min ago, wall opened 100 min later, swept at 86 min old,
+    // which rounds to 0.1 of a day. It may have opened after him, so it still needs him.
+    const later = Object.assign({}, WALLS[0], { days: 0.1 });
+    panel = await open(page, [signinRow([line('Amazon (order history)', 'www.amazon.co.uk', 'you-signed-in', { at: ago(190), how: 'you signed in' })]),
+      blockersRow([later], 4)]);
+    await expect(panel.locator('[data-rs-wall="www.amazon.co.uk"]')).toBeVisible();
+    // A writer without sweptAt never marks a wall done.
+    const noSweep = blockersRow(WALLS.slice(0, 1));
+    noSweep.fields[ES.payload] = JSON.stringify({ open: WALLS.slice(0, 1) });
+    panel = await open(page, [signinRow([line('Amazon (order history)', 'www.amazon.co.uk', 'you-signed-in', { at: ago(2), how: 'you signed in' })]), noSweep]);
+    await expect(panel.locator('[data-rs-wall="www.amazon.co.uk"]')).toBeVisible();
   });
 
   test('a check that worked but found an old wall is not called a failed check', async ({ page }) => {

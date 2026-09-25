@@ -6470,15 +6470,16 @@ function signinWalls(){
     const p = row ? signinPayload(row) : null;
     const open = p && Array.isArray(p.open) ? p.open : [];
     const by = {};
-    // When each wall opened, near enough: the sweep carries only its age in days (to 0.1),
-    // taken at the sweep, which this row copies within the half hour.
-    const asOf = row ? Date.parse((row.fields || {})[ES.updated] || '') : NaN;
+    // The LATEST a wall can have opened: the sweep's exact run time (sweptAt) less its age in
+    // days, which the sweep rounds to 0.1 (72 minutes either way). A sign-in at or after that
+    // came after the wall for certain; anything earlier is not assumed (review, 25 Sep 2026).
+    const swept = p ? Date.parse(p.sweptAt || '') : NaN;
     open.filter(w => w && (w.kind === 'SIGN-IN' || w.kind === 'SITE') && w.subject).forEach(w => {
         const k = w.kind + ' ' + String(w.subject).toLowerCase();
-        const g = (by[k] = by[k] || { kind: w.kind, subject: String(w.subject), names: [], openedAt: 0 });
+        const g = (by[k] = by[k] || { kind: w.kind, subject: String(w.subject), names: [], openedBy: -Infinity });
         g.names.push(String(w.name || ''));
-        const opened = (typeof w.days === 'number' && !isNaN(asOf)) ? asOf - w.days * 86400000 : Infinity;
-        g.openedAt = Math.max(g.openedAt, opened);   // the newest wall on the site decides
+        const latest = (typeof w.days === 'number' && !isNaN(swept)) ? swept - Math.max(0, w.days - 0.05) * 86400000 : Infinity;
+        g.openedBy = Math.max(g.openedBy, latest);   // the newest wall on the site decides
     });
     // "Could not be checked" is the sweep's OWN failure only. The row is also Failed when the
     // check worked and found a wall 3 days old or a task closed while blocked; that list is
@@ -6519,14 +6520,13 @@ function signinWallsBare(){
     return signinWallsHtml(walls, [], failed);
 }
 // Which walls still need him: a SIGN-IN wall on a site he has signed in to SINCE it opened
-// does not (the sweep rewrites its list only every half hour). A wall that opened after his
-// sign-in (a robot met the password prompt again) still needs him (review, 25 Sep 2026).
-// 90 minutes of slack covers the age rounding to 0.1 of a day; a wall of unknown age stays.
-const SIGNIN_WALL_SLACK_MS = 90 * 60 * 1000;
+// does not (the sweep rewrites its list only every half hour). A wall that may have opened
+// after his sign-in (a robot met the password prompt again) still needs him; a wall of
+// unknown age, or from a writer without sweptAt, stays too (review, 25 Sep 2026).
 function signinMarkWalls(walls, lines){
     walls.forEach(w => {
-        w.done = w.kind === 'SIGN-IN' && isFinite(w.openedAt) && lines.some(ln => ln.state === 'you-signed-in'
-            && signinSameSite(ln.host, w.subject) && Date.parse(ln.at || '') >= w.openedAt - SIGNIN_WALL_SLACK_MS);
+        w.done = w.kind === 'SIGN-IN' && isFinite(w.openedBy) && lines.some(ln => ln.state === 'you-signed-in'
+            && signinSameSite(ln.host, w.subject) && Date.parse(ln.at || '') >= w.openedBy);
     });
     return walls;
 }
