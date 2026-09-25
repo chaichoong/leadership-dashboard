@@ -587,8 +587,14 @@ m3 = tl.monitor(w, DAY, o, [])
 w["tasks"][0]["fields"][TK["notes"]] += "\\n[22 Sep 2026 09:05 — send-email] SENT: mail-out \\"x\\" to 1 address(es)"
 m4 = tl.monitor(w, DAY, o, [])
 s = lambda m: {x["key"]: x["state"] for x in m["steps"]}
+wv = world()
+wv["tasks"] = [task("TENANT VIEWINGS: Haverhill people to call 25 Sep 2026", status="Today")]
+vid = wv["tasks"][0]["id"]
+wv["leads"] = [lead("recP1x", stage="Past applicant", legacyRef="tenant-app:2019-01-01 10:00:00", royTask=[vid]),
+               lead("recW1", stage="With Roy")]
+viewNote = [x["note"] for x in tl.monitor(wv, DAY, o, [])["steps"] if x["key"] == "viewings"][0]
 big = dict(m1, run=["x" * 1000] * 200)
-out = {"none": s(m1), "unsent": s(m2), "partial": s(m3), "sent": s(m4), "worst1": m1["worst"],
+out = {"none": s(m1), "unsent": s(m2), "partial": s(m3), "sent": s(m4), "worst1": m1["worst"], "viewNote": viewNote,
        "payloadParses": bool(json.loads(tl.payload_json(big, limit=5000)))}
 `);
   it('open rooms and no mail-out or adverts is a failure; no sign-ups before the first mail-out is not', () => {
@@ -604,6 +610,9 @@ out = {"none": s(m1), "unsent": s(m2), "partial": s(m3), "sent": s(m4), "worst1"
   });
   it('a sign-up with no date of birth is flagged to watch, not a broken chain', () => {
     expect(r.unsent.screening).toBe('warn');
+  });
+  it("the viewings note counts past applicants on Roy's open list, not only sign-ups", () => {
+    expect(r.viewNote).toBe('Roy has 1 sign-up(s) and 1 past applicant(s) to call');
   });
   it('an oversized report is trimmed and still parses', () => {
     expect(r.payloadParses).toBe(true);
