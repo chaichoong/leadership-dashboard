@@ -207,12 +207,31 @@ test.describe('Robot sign-ins panel and blocked robots', () => {
   });
 
   test('a wall on a site he has just signed in to says so, with no second button and no count', async ({ page }) => {
+    // The wall is a day old; he signed in two minutes ago.
     const panel = await open(page, [signinRow([line('Amazon (order history)', 'www.amazon.co.uk', 'you-signed-in', { at: ago(2), how: 'you signed in' })]),
       blockersRow(WALLS.slice(0, 1))]);
     await expect(panel.locator('[data-rs-wall-line="done"]')).toContainText('You signed in since. The robot picks the task up at its next pass.');
     await expect(panel.locator('[data-rs-wall="www.amazon.co.uk"]')).toHaveCount(0);
     await expect(page.locator('#signinsCount')).toHaveText('0');
     await expect(panel).not.toContainText('needs you');
+  });
+
+  test('a wall that opened AFTER his sign-in still needs him', async ({ page }) => {
+    // He signed in 150 minutes ago; a robot then met the password prompt again (the wall is fresh).
+    const fresh = Object.assign({}, WALLS[0], { days: 0 });
+    const panel = await open(page, [signinRow([line('Amazon (order history)', 'www.amazon.co.uk', 'you-signed-in', { at: ago(150), how: 'you signed in' })]),
+      blockersRow([fresh])]);
+    await expect(panel.locator('[data-rs-wall="www.amazon.co.uk"]')).toBeVisible();
+    await expect(page.locator('#signinsCount')).toHaveText('1');
+  });
+
+  test('a check that worked but found an old wall is not called a failed check', async ({ page }) => {
+    const old = blockersRow(WALLS.slice(0, 1));
+    old.fields[ES.status] = 'Failed';
+    old.fields[ES.detail] = 'Robots blocked on 1 task. For you: sign the robot in to www.amazon.co.uk. 1 task blocked 3 days or more.';
+    const panel = await open(page, [signinRow([line('Pingen (letters)', 'app.pingen.com', 'signed-in')]), old]);
+    await expect(panel).not.toContainText('could not be checked');
+    await expect(panel.locator('[data-rs-wall="www.amazon.co.uk"]')).toBeVisible();
   });
 
   test('a failed blocked-robots check says so, and a broken sign-in list never hides a stuck robot', async ({ page }) => {

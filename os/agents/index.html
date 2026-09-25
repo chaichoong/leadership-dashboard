@@ -6470,15 +6470,24 @@ function signinWalls(){
     const p = row ? signinPayload(row) : null;
     const open = p && Array.isArray(p.open) ? p.open : [];
     const by = {};
+    // When each wall opened, near enough: the sweep carries only its age in days (to 0.1),
+    // taken at the sweep, which this row copies within the half hour.
+    const asOf = row ? Date.parse((row.fields || {})[ES.updated] || '') : NaN;
     open.filter(w => w && (w.kind === 'SIGN-IN' || w.kind === 'SITE') && w.subject).forEach(w => {
         const k = w.kind + ' ' + String(w.subject).toLowerCase();
-        (by[k] = by[k] || { kind: w.kind, subject: String(w.subject), names: [] }).names.push(String(w.name || ''));
+        const g = (by[k] = by[k] || { kind: w.kind, subject: String(w.subject), names: [], openedAt: 0 });
+        g.names.push(String(w.name || ''));
+        const opened = (typeof w.days === 'number' && !isNaN(asOf)) ? asOf - w.days * 86400000 : Infinity;
+        g.openedAt = Math.max(g.openedAt, opened);   // the newest wall on the site decides
     });
-    // The sweep only rewrites its list every half hour. A wall on a site he has signed in to
-    // since (the line reads "You signed in") is his step done: said so, no second button,
-    // not counted (review, 25 Sep 2026).
-    const status = row ? (row.fields || {})[ES.status] : 'Worked';
-    return { walls: Object.values(by), failed: row && status !== 'Worked' ? String((row.fields || {})[ES.detail] || status || 'no reason given') : '' };
+    // "Could not be checked" is the sweep's OWN failure only. The row is also Failed when the
+    // check worked and found a wall 3 days old or a task closed while blocked; that list is
+    // current, and calling it "from the last good check" would be false (review).
+    const f = row ? (row.fields || {}) : {};
+    const detail = String(f[ES.detail] || '');
+    const sweepFailed = row && f[ES.status] !== 'Worked'
+        && ((p && p.controlFailed) || !/^(Robots blocked on|No robot is blocked\.)/.test(detail));
+    return { walls: Object.values(by), failed: sweepFailed ? (detail || String(f[ES.status] || 'no reason given')) : '' };
 }
 // One site name covers another when they are equal or one is a subdomain of the other.
 function signinSameSite(a, b){ a = String(a).toLowerCase(); b = String(b).toLowerCase(); return a === b || a.endsWith('.' + b) || b.endsWith('.' + a); }
@@ -6509,9 +6518,16 @@ function signinWallsBare(){
     const { walls, failed } = signinWalls();
     return signinWallsHtml(walls, [], failed);
 }
-// Which walls still need him: a SIGN-IN wall on a site he has just signed in to does not.
+// Which walls still need him: a SIGN-IN wall on a site he has signed in to SINCE it opened
+// does not (the sweep rewrites its list only every half hour). A wall that opened after his
+// sign-in (a robot met the password prompt again) still needs him (review, 25 Sep 2026).
+// 90 minutes of slack covers the age rounding to 0.1 of a day; a wall of unknown age stays.
+const SIGNIN_WALL_SLACK_MS = 90 * 60 * 1000;
 function signinMarkWalls(walls, lines){
-    walls.forEach(w => { w.done = w.kind === 'SIGN-IN' && lines.some(ln => ln.state === 'you-signed-in' && signinSameSite(ln.host, w.subject)); });
+    walls.forEach(w => {
+        w.done = w.kind === 'SIGN-IN' && isFinite(w.openedAt) && lines.some(ln => ln.state === 'you-signed-in'
+            && signinSameSite(ln.host, w.subject) && Date.parse(ln.at || '') >= w.openedAt - SIGNIN_WALL_SLACK_MS);
+    });
     return walls;
 }
 function renderSignins(){
