@@ -666,3 +666,20 @@ print(json.dumps([live, dry, out, W]))`);
     expect(r[3]).toEqual([['my.utilita.co.uk', 'utilita-apt1', 'https://my.utilita.co.uk/energy']]);
   });
 });
+
+describe('a blocked task is never escalated to Kevin as a decision', () => {
+  it('escalate refuses a task with an open wall and writes nothing; a task without one still escalates', () => {
+    const r = py(`
+m.TASKMGR_REC_ID = "recTM"
+rec("t1", "[x — agent] BLOCKER OPEN (SIGN-IN ewf.companieshouse.gov.uk): signed out Fix: f [since 2026-09-25T11:36:00.000Z]")
+a = run(m.cmd_escalate, {"task": "t1", "reason": "blocked by a code defect"})
+w1 = len(WRITES)
+rec("t2", "")
+b = run(m.cmd_escalate, {"task": "t2", "reason": "which quote do you want?"})
+print(json.dumps({"a": a["err"], "writesAfterA": w1, "b": b["err"], "t2": TASKS["t2"]["fields"][AF["status"]]}))`);
+    expect(r.a).toMatch(/is blocked \(SIGN-IN ewf\.companieshouse\.gov\.uk\), so it is not a decision for Kevin/);
+    expect(r.writesAfterA).toBe(0);
+    expect(r.b).toBeNull();
+    expect(r.t2).toBe('Approval');
+  });
+});

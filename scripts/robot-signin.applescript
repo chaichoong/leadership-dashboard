@@ -351,13 +351,26 @@ on linesForProfile(theProfile, theLines)
 end linesForProfile
 
 -- Double-click: waiting sites first; if none, offer the full list.
-on run
+-- The check before the list takes up to a minute per site, and a notification
+-- can be hidden (Focus, or notifications off for this app): on 25 Sep 2026 Kevin
+-- saw nothing for 55 seconds and took the app for broken. A dialog that closes
+-- itself after four seconds is always seen.
+on sayChecking()
 	display notification "Checking which sites are really signed out (up to a minute per site)…" with title "Robot sign-in"
+	try
+		display dialog "Robot sign-in is checking which sites need you. This can take a minute. The list opens next." with title "Robot sign-in" buttons {"OK"} default button "OK" giving up after 4
+	end try
+end sayChecking
+
+on run
+	sayChecking()
 	refreshWaiting("")
 	set liveN to announceLive()
 	set waiting to waitingSites()
 	if (count of waiting) > 0 then
-		set choice to choose from list waiting with title "Robot sign-in" with prompt "These sites have work waiting and are signed out. Open them one after another? (sign in, Cmd+Q, next opens)" OK button name "Start" cancel button name "Pick a site instead" with multiple selections allowed
+		-- Every waiting site pre-selected (25 Sep 2026): with none selected, one click picked
+		-- a single site and Start opened only that one, so TopCashback never opened.
+		set choice to choose from list waiting with title "Robot sign-in" with prompt "These sites have work waiting and are signed out. All are selected: press Start to open them one after another (sign in, Cmd+Q, next opens)." OK button name "Start" cancel button name "Pick a site instead" default items waiting with multiple selections allowed
 		if choice is not false then
 			runChain(choice, liveN)
 			return
@@ -411,7 +424,7 @@ on open location theURL
 		return
 	end if
 	if body starts with "all" then
-		display notification "Checking which sites are really signed out (up to a minute per site)…" with title "Robot sign-in"
+		sayChecking()
 		refreshWaiting("")
 		set liveN to announceLive()
 		set waiting to waitingSites()

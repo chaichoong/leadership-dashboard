@@ -3413,6 +3413,17 @@ def cmd_escalate(args):
         print(json.dumps({"alreadyEscalated": args.task, "status": status,
                           "ask": prior_output.strip().splitlines()[0][:200]}))
         return
+    # A BLOCKED TASK IS NOT A DECISION (25 Sep 2026). The Agile Estates filing
+    # (recGImsRxDQ1UYBti) had a SIGN-IN wall open; the Task Manager saw it not
+    # moving and escalated it as "DECIDE: blocked by a code defect", which put a
+    # stale question in Kevin's queue, wiped the redo Kevin had asked for, and
+    # took the task off the list the sign-in would wake. The wall already routes
+    # the ask to whoever clears it and wakes the task when it is cleared.
+    wall = task_blocker(tf.get(AF["notes"]))
+    if wall:
+        sys.exit(f"REFUSED: {args.task} is blocked ({wall['kind']} {wall['subject']}), so it is not a "
+                 f"decision for Kevin. Its fix is already routed: {blocker_fix_text(wall)} It wakes by "
+                 "itself when that is done. Leave it.")
     ask = escalate_ask(getattr(args, "reason", ""))
     stamp = datetime.now(LONDON).strftime("%d %b %Y")
     # The holder at escalation is recorded on the stamp: the gate's approve
