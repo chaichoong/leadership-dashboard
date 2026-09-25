@@ -190,6 +190,26 @@ fcntl.flock(fh, fcntl.LOCK_EX); print("held", flush=True); time.sleep(1.5)`;
     });
   });
 
+  it('resolve-intent refuses while a send of the same task holds the lock', () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'resolve-lock-'));
+    const rows = [{ task: 'recKho3l7jJKk9T0t', ts: '2026-09-23T15:09:00.000Z', event: 'intent', kind: 'send', from: 'kevinbrittain@gmail.com', to: ['housing@manchester.gov.uk'] }];
+    const holder = `
+import fcntl, os, time, sys
+os.makedirs(os.path.join(sys.argv[1], "send-locks"), exist_ok=True)
+fh = open(os.path.join(sys.argv[1], "send-locks", "recKho3l7jJKk9T0t.lock"), "a")
+fcntl.flock(fh, fcntl.LOCK_EX); print("held", flush=True); time.sleep(3)`;
+    const { spawn } = require('node:child_process');
+    return new Promise((resolveP) => {
+      const h = spawn('python3', ['-c', holder, dir]);
+      h.stdout.once('data', () => {
+        const r = run({ cmd: 'resolve', rows, dir, hits: [] });
+        expect(r.message).toMatch(/a send of recKho3l7jJKk9T0t is running now/);
+        expect(r.ledger).toHaveLength(1);
+        h.kill(); h.on('close', () => resolveP());
+      });
+    });
+  });
+
   it('an `uncertain` send can be settled from the Sent folder too', () => {
     const rows = [{ task: 'recKho3l7jJKk9T0t', ts: '2026-09-23T15:09:00.000Z', event: 'intent', kind: 'send', from: 'kevinbrittain@gmail.com', to: ['housing@manchester.gov.uk'] },
       { task: 'recKho3l7jJKk9T0t', ts: '2026-09-23T15:09:30.000Z', event: 'uncertain', kind: 'send', error: 'timed out' }];

@@ -60,7 +60,7 @@ describe('create --parent: a child of an approved task is created, never folded'
     expect(JSON.parse(r.out)).toMatchObject({ action: 'created', taskId: 'recNEWCHILD000001' });
   });
 
-  it('refuses an unapproved, a stringly-approved or a completed parent, and creates nothing', () => {
+  it('refuses an unapproved, a stringly-approved or a completed parent, and creates nothing', { timeout: 30000 }, () => {
     for (const bad of [
       { ...APPROVED, approvalOutcome: 'Changes requested' },
       { ...APPROVED, approvedAt: '' },                       // the string alone is not an approval

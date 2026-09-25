@@ -519,7 +519,7 @@ def load_attachment(attach, task_id):
             "dataB64": base64.b64encode(data).decode(), "bytes": size}
 
 
-def send_lock(task_id):
+def send_lock(task_id, wait=True):
     """An exclusive lock for one task's send, held from the ledger check to
     the last ledger row. Two runs sending the same task at once could both
     pass the check and leave `intent, intent, uncertain, failed`, which frees
@@ -529,7 +529,11 @@ def send_lock(task_id):
     lock_dir = os.path.join(STATE_DIR, "send-locks")
     os.makedirs(lock_dir, exist_ok=True)
     fh = open(os.path.join(lock_dir, f"{task_id}.lock"), "a")
-    fcntl.flock(fh, fcntl.LOCK_EX)
+    try:
+        fcntl.flock(fh, fcntl.LOCK_EX if wait else fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except BlockingIOError:
+        fh.close()
+        return None
     return fh
 
 
@@ -1192,6 +1196,19 @@ SENT_FOLDER_OF = {BUSINESS_SENDER: "kevin@runpreneur.org.uk"}
 
 
 def cmd_resolve_intent(args):
+    # A send in flight holds the lock, and its email is not in Sent yet:
+    # clearing its intent now could free a send that is about to land
+    # (fourth review, 25 Sep 2026). Refuse while it runs.
+    lock = send_lock(args.task, wait=False)
+    if lock is None:
+        sys.exit(f"REFUSED: a send of {args.task} is running now. Try again when it has finished.")
+    try:
+        return _resolve_intent(args)
+    finally:
+        lock.close()
+
+
+def _resolve_intent(args):
     state = already_sent(args.task)
     if not state or state.get("event") not in ("intent", "uncertain"):
         sys.exit(f"REFUSED: {args.task} has no unfinished send to resolve "
