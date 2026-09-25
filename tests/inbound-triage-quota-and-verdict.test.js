@@ -107,6 +107,46 @@ describe('a history rebuild that failed on quota does not retry next slot', () =
     expect(JSON.parse(r.out).cooldown).toBeUndefined();
   });
 
+  // ─── 609: A COOLDOWN THAT NEVER ENDS ──────────────────────────────────
+  //
+  // The 513 fix above stopped the retry storm and then hid the fault behind
+  // it. The book's last successful build was 1 Sep 2026; every slot for the
+  // next three weeks logged the same calm `cooldown` line, and nothing said
+  // the book was dead. Back-tested by raising HISTORY_DEAD_DAYS above the age
+  // under test: the `dead` flag disappears and these two fail.
+  it('names a book dead once it is three rebuild cycles old', () => {
+    const d = box('dead-book');
+    writeFileSync(join(d, 'state.json'), JSON.stringify({
+      history_built_ms: Date.now() - 23 * 86400 * 1000,   // the real 25 Sep age
+      history_build_failed_ms: Date.now() - 60_000,
+    }));
+    const j = JSON.parse(py(['history-stale'], { INBOUND_TRIAGE_DIR: d }).out);
+    expect(j.dead).toBe(true);
+    expect(j.age_days).toBe(23);
+    expect(j.escalate).toMatch(/HISTORY BOOK DEAD/);
+    // The cooldown still holds — raising is not retrying.
+    expect(j.cooldown).toBe(true);
+  });
+
+  it('a merely stale book is not dead, so the escalation keeps its meaning', () => {
+    const d = box('stale-not-dead');
+    writeFileSync(join(d, 'state.json'), JSON.stringify({
+      history_built_ms: Date.now() - 8 * 86400 * 1000,
+    }));
+    const j = JSON.parse(py(['history-stale'], { INBOUND_TRIAGE_DIR: d }).out);
+    expect(j.stale).toBe(true);
+    expect(j.dead).toBeUndefined();
+    expect(j.escalate).toBeUndefined();
+  });
+
+  it('a book that was NEVER built is dead from the first check', () => {
+    const d = box('never-built');
+    writeFileSync(join(d, 'state.json'), JSON.stringify({}));
+    const j = JSON.parse(py(['history-stale'], { INBOUND_TRIAGE_DIR: d }).out);
+    expect(j.dead).toBe(true);
+    expect(j.escalate).toMatch(/ever days|HISTORY BOOK DEAD/);
+  });
+
   it('the failure is recorded by the build itself, not by the caller', () => {
     // The whole mechanism rests on cmd_history_build remembering its own
     // death; a wrapper that only the shell sets would be lost on a SIGKILL.

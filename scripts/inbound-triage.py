@@ -1046,6 +1046,20 @@ HISTORY_MIN_SHARE = 0.8       # ...and 80% agreement on one outcome
 # day is still fourteen times more often than it needs to be rebuilt.
 HISTORY_RETRY_COOLDOWN_HOURS = 24
 
+# A COOLDOWN IS NOT AN OUTCOME (finding 20260925-exceptions-609).
+#
+# The cooldown above did its job — it stopped nine failed rebuilds a day
+# burning the slot's Gmail quota. What it never did was END. The book was last
+# built on 1 Sep 2026; every slot since has logged the same soothing line,
+# `{"stale": true, "cooldown": true, "retry_in_seconds": ...}`, and nothing
+# anywhere said the book had been dead for three weeks. A quiet retry that has
+# never once succeeded reads exactly like a system working to plan.
+#
+# So past this age the line stops being reassuring and says DEAD, with the age
+# in days, on the runs.log line the exceptions phase already reads. Three times
+# the weekly rebuild cadence: one missed week is weather, three is a fault.
+HISTORY_DEAD_DAYS = HISTORY_STALE_DAYS * 3
+
 TEAM_TABLE = "tblco0p2OnlLQVAX7"
 TM_NAME_FIELDS = ("fldFyTZu3vu1a7X3a", "fld1DYEbtyVsO2GVP")  # Preferred, Legal
 
@@ -1395,6 +1409,23 @@ def history_rebuild_decision(built, failed, now_ms,
     return stale, True, int(window_s - age_s)
 
 
+def history_book_age_days(built, now_ms):
+    """Whole days since the book was last built, or None if it never was."""
+    if not built:
+        return None
+    return int(max(0, now_ms - built) // (86400 * 1000))
+
+
+def history_book_dead(built, now_ms, dead_days=None):
+    """True once the book is so far past its weekly rebuild that the quiet
+    cooldown line is hiding a fault. A book that was NEVER built is dead from
+    the first check: there is nothing for the agent to file against."""
+    if built is None:
+        return True
+    limit = HISTORY_DEAD_DAYS if dead_days is None else dead_days
+    return (now_ms - built) > limit * 86400 * 1000
+
+
 def cmd_history_stale():
     state = read_state()
     built = state.get("history_built_ms")
@@ -1410,6 +1441,17 @@ def cmd_history_stale():
         out["reason"] = ("the last rebuild failed and the cooldown has not "
                          "passed; skipping it leaves the slot's Gmail quota "
                          "for the scan that actually triages mail")
+    age_days = history_book_age_days(built, now_ms)
+    if age_days is not None:
+        out["age_days"] = age_days
+    if history_book_dead(built, now_ms):
+        out["dead"] = True
+        out["escalate"] = (
+            "HISTORY BOOK DEAD: not rebuilt for %s days (weekly artefact). "
+            "Every rebuild since has failed and been deferred by the cooldown, "
+            "so the deferral is hiding a fault, not managing one. The senders "
+            "the agent files against are that far out of date."
+            % ("ever" if age_days is None else age_days))
     print(json.dumps(out))
     # Exit 0 means "rebuild now". A stale book inside the cooldown is exit 1:
     # still stale, deliberately not rebuilt, and SAID so rather than silently.
