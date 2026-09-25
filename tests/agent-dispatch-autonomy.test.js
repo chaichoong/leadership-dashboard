@@ -381,8 +381,8 @@ describe('submit wires the level in, and the carry-out leaves its marker', () =>
   it('cmd_submit consults decision_level after the informational branch; tier 1 vetoes Level A unless the close ran its own tier check', () => {
     const i = SRC.indexOf('files_itself = informational_only(output, args.type');
     const j = SRC.indexOf('level = decision_level(output, args.type, trec, agent_banner=agent_banner)');
-    // `and not kevin_step` (25 Sep 2026): a declared KEVIN ONLY step is never a Level A close.
-    const k = SRC.indexOf('if level["level"] == AUTONOMY_ACT and (not is_tier1 or level.get("tierChecked")) and not kevin_step:');
+    // `and not (kevin_step or cur_wall)` (25 Sep 2026): a declared KEVIN ONLY step or an open KEVIN wall is never a Level A close.
+    const k = SRC.indexOf('if level["level"] == AUTONOMY_ACT and (not is_tier1 or level.get("tierChecked")) and not (kevin_step or cur_wall):');
     expect(i).toBeGreaterThan(0);
     expect(j).toBeGreaterThan(i);
     expect(k).toBeGreaterThan(j);

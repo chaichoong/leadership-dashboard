@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { execFileSync } from 'child_process';
+import { readFileSync } from 'fs';
 import { resolve, dirname } from 'path';
 import { fileURLToPath } from 'url';
 
@@ -553,5 +554,61 @@ print(json.dumps([live, before, out]))`);
     expect(r[0]).toMatch(/session on www\.topcashback\.co\.uk was live at 2026-09-25T09:00/);
     expect(r[1]).toBe('');
     expect(r[2]).toBe('');
+  });
+});
+
+describe('the second review of 25 Sep 2026', () => {
+  it('submit refuses while a SIGN-IN, SITE or TOOL wall stands (it would bury it), but a KEVIN wall may come back as a new card', () => {
+    const agent = 'recwWvBju2ycB63i4';
+    const r = py(`
+import tempfile, os
+m.require_role_agent_live = lambda *a, **k: None
+class Reached(Exception): pass
+def submit(wall):
+    n = f"[x — agent] BLOCKER OPEN ({wall}): why Fix: f [since 2026-09-25T08:00:00.000Z]"
+    calls = []
+    def g(i):
+        calls.append(i)
+        if len(calls) > 1: raise Reached()
+        return {"id": i, "fields": {AF["notes"]: n, AF["status"]: "Today"}}
+    m.get_task = g; m.query_tasks = lambda *a, **k: (_ for _ in ()).throw(Reached())
+    m.load_login_sites = lambda: (_ for _ in ()).throw(Reached())
+    p = os.path.join(tempfile.mkdtemp(), "o.md")
+    open(p, "w").write("Report body.\\n\\n**Carrying this out will involve:** sending the saved quote summary to the file.")
+    try:
+        return run(m.cmd_submit, {"agent": "${agent}", "task": "t1", "type": "Research", "output_file": p, "tier1": False,
+                                   "plain_task": None, "plain_approve": None, "files": [], "receipt": None})["err"]
+    except Reached:
+        return "PAST-THE-WALL-GATE"
+print(json.dumps({w: submit(w) for w in ("SITE namecheap.com", "TOOL retype", "SIGN-IN www.topcashback.co.uk", "KEVIN payment")}))`);
+    expect(r['SITE namecheap.com']).toMatch(/refusing to submit t1: it is blocked \(SITE namecheap\.com/);
+    expect(r['SITE namecheap.com']).toMatch(/unblock t1 --evidence/);
+    expect(r['TOOL retype']).toMatch(/it is blocked \(TOOL retype/);
+    expect(r['SIGN-IN www.topcashback.co.uk']).toMatch(/it is blocked \(SIGN-IN/);
+    expect(r['KEVIN payment']).not.toMatch(/it is blocked/);
+  });
+
+  it('a declared step covers only its own verb in the phrase: the Chedburgh quotes and "someone can post" stay refused', () => {
+    const r = py(`
+def o(k, tail): return f"KEVIN ONLY: {k}: the step\\n\\nReport.\\n\\n**Carrying this out will involve:** {tail}"
+def ks(t): return m.kevin_only_step(t)
+cases = {
+  "chedburgh": o("purchase", "Flagging that this house has no buildings insurance yet, so someone can get three price quotes for Kevin to look at and buy, nothing bought yet."),
+  "post": o("physical", "someone can post the letter to the council."),
+  "pays": o("payment", "sending the reply. Kevin then pays the £45 invoice by bank transfer."),
+  "sign": o("signature", "sending the agreement link, for Kevin to sign before 15 October."),
+  "far": o("signature", "Kevin visiting TopCashback and completing the quote before signing the agreement."),
+  "someonePays": o("payment", "sending the reminder, so someone can pay the £45 invoice."),
+}
+print(json.dumps({k: bool(m.work_handoff_problem(v, ks(v))) for k, v in cases.items()}))`);
+    expect(r).toEqual({ chedburgh: true, post: true, pays: false, sign: false, far: true, someonePays: true });
+  });
+
+  it('both robot prompts carry an approved woken task out and close it, never submit it (a submit wipes the approval)', () => {
+    for (const f of ['scripts/handback-poll-run.sh', 'scripts/signin-pickup-run.sh']) {
+      const src = readFileSync(resolve(ROOT, f), 'utf8');
+      expect(src, f).toMatch(/is CARRIED OUT and closed with complete .*NEVER submitted: a submit wipes Kevin's approval/);
+      expect(src, f).toMatch(/block TASKID --kind SIGN-IN --subject <host>/);
+    }
   });
 });

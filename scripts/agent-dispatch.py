@@ -2470,15 +2470,15 @@ KEVIN_REASON_WORDS = {
     "signature": r"sign|signs|signing|signature|countersign",
     "credential": r"log\s*in|logging|sign\s*in|signing\s+in|password|passcode|card|consent|re-?consent|authori[sz]e",
     "identity": r"verify|verifies|verifying|verification|identity|ID|passport",
-    "physical": r"attend|collect|deliver|meet|hand\s+over|post",
+    "physical": r"attend|collect|deliver|meet|hand\s+over",   # posting a letter is agent work (Pingen)
 }
 
 
 def work_handoff_problem(output, kevin_step=None):
     """The closing-line words that hand the job to Kevin or 'someone'; ''.
-    With a valid declared KEVIN ONLY step, a hand-off that names that step's
-    own verb (in the phrase or the 60 characters after it) is allowed; any
-    other hand-off in the same line is still refused."""
+    With a valid declared KEVIN ONLY step, a hand-off whose phrase or next two
+    words name that step's own verb is allowed; any other hand-off in the same
+    line, and any "someone", is still refused."""
     tail = carry_out_tail((output or "").strip())
     words = None
     if kevin_step and not kevin_step.get("invalid"):
@@ -2488,8 +2488,14 @@ def work_handoff_problem(output, kevin_step=None):
         # not hand over (the one false alarm left in the 765-output back-test).
         if re.search(r"\balready\b", tail[max(0, m.start() - 20): m.end()], re.I):
             continue
-        if words and words.search(tail[m.start(): m.end() + 60]):
-            continue
+        if words and not re.match(r"some(?:one|body)", m.group(0), re.I):
+            # The phrase itself or its next two words ("Kevin then pays", "for
+            # Kevin to sign"), never a verb further on: "someone can get three
+            # quotes for Kevin to look at and buy" is still the quotes handed
+            # over (second review). "someone" is never Kevin's declared step.
+            after = re.match(r"\s*(\S+(?:\s+\S+)?)", tail[m.end():])
+            if words.search(m.group(0) + " " + (after.group(1) if after else "")):
+                continue
         return tail[max(0, m.start() - 50): m.end() + 60].strip()
     return ""
 
@@ -3952,6 +3958,22 @@ def cmd_submit(args):
     tf_early = (get_task(args.task).get("fields", {}) or {})
     is_inbound = bool(tf_early.get(AF["inboundTask"]))
 
+    # THE WALL GATE (25 Sep 2026, review). A submit while a SIGN-IN, SITE or
+    # TOOL wall stands would bury it: the card would supersede the wall the
+    # agent had just recorded, so Kevin is never asked to fix it and nothing
+    # wakes the task. Clear it with evidence first (the site is reachable now,
+    # or the work went round it). A KEVIN wall is different: a new card is how
+    # the step he owes comes back to him, so it may be resubmitted, never filed.
+    cur_wall = task_blocker(tf_early.get(AF["notes"]))
+    if cur_wall and cur_wall["kind"] != "KEVIN":
+        sys.exit(
+            f"ERROR: refusing to submit {args.task}: it is blocked ({cur_wall['kind']} "
+            f"{cur_wall['subject']}: {cur_wall['why'][:140]}).\n"
+            f"       Fix: {blocker_fix_text(cur_wall)} The task wakes by itself when it is fixed.\n"
+            "       If the wall is gone, or your work no longer needs what was behind it, say what\n"
+            "       you saw first:\n"
+            f"         python3 scripts/agent-dispatch.py unblock {args.task} --evidence \"<what you saw>\"")
+
     # THE FILE GATE (Kevin, 8 Sep 2026): the document the action uses is on
     # the card, from this round, or the submit is refused.
     attach_names = {os.path.basename(p) for p in (getattr(args, "attach", None) or [])}
@@ -4191,7 +4213,7 @@ def cmd_submit(args):
     if not files_itself and is_inbound and args.type in REPORT_TYPES \
             and checked_trigger(output) == "none" and not is_tier1:
         files_itself = True
-    if kevin_step:
+    if kevin_step or cur_wall:
         # A step Kevin still owes is not information, and not a close.
         files_itself = False
     if files_itself:
@@ -4231,7 +4253,7 @@ def cmd_submit(args):
     # tierChecked: the two verifiable closes ran their own tier check inside
     # decision_level (name, description, banner — never the Notes, which hold
     # every agent's run log), so is_tier1 from the Notes must not re-veto them.
-    if level["level"] == AUTONOMY_ACT and (not is_tier1 or level.get("tierChecked")) and not kevin_step:
+    if level["level"] == AUTONOMY_ACT and (not is_tier1 or level.get("tierChecked")) and not (kevin_step or cur_wall):
         return handle_without_kevin(args, output, trec, level, to_attach)
     if level["level"] == AUTONOMY_APPROVE and level["category"] not in ("other",):
         # Say WHY a shaped output still became a card, so a Task Manager that
