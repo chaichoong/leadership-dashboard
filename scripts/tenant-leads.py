@@ -1036,11 +1036,9 @@ _MODS = {}
 
 
 def module(key):
-    """agent-dispatch.py (submit, handover, Roy's address, the Property Administration id) and
-    create-agent-task.py (the task create), loaded once and called IN PROCESS, so there is no
-    command line to get wrong. (create-agent-task's own track-record step may still start a
-    subprocess of its own.)"""
-    files = {"ad": "agent-dispatch.py", "ct": "create-agent-task.py"}
+    """agent-dispatch.py (submit, handover, Roy's address, the Property Administration id), loaded
+    once and called IN PROCESS, so there is no command line to get wrong."""
+    files = {"ad": "agent-dispatch.py"}
     if key not in _MODS:
         spec = importlib.util.spec_from_file_location("tl_" + key, os.path.join(HERE, files[key]))
         m = importlib.util.module_from_spec(spec)
@@ -1125,14 +1123,19 @@ class Writer:
         self.note(f"create task: {name}")
         if self.dry:
             return "recDRYRUN"
-        # force=True: the duplicate gate's word pass is built for inbox tasks, and in testing it
-        # folded a mail-out into the inbox task a referrer's reply raised ("both about haverhill,
-        # rooms"), which would have held every later mail-out back. The chain dedupes its own tasks
-        # by lane and interval (due_again) before it gets here (review, 25 Sep 2026).
-        out = call_in_process(module("ct").cmd_create, fields, force=True)
-        if out.get("action") != "created" or not out.get("taskId"):
-            raise RuntimeError(f"create-agent-task did not create '{name}': {out}")
-        return out["taskId"]
+        # A DIRECT create, not create-agent-task.py. That gate is built for inbox tasks and did two
+        # wrong things to the chain's own: its word pass folded a mail-out into the inbox task a
+        # referrer's reply raised, and its track-record step (first live run, 25 Sep 2026) read the
+        # Airtable base id inside the form link as a reference, pulling 72,000 characters of
+        # unrelated history, a private legal email among them, into the Notes of two tasks bound
+        # for Roy. The handover's tier-1 gate refused them, which is the only reason nothing
+        # reached him. The chain dedupes its own tasks by lane and interval (due_again), and each
+        # email card carries its own TRACK RECORD, so neither step is needed here.
+        out = api("POST", T_TASKS, {"records": [{"fields": fields}]})
+        tid = ((out.get("records") or [{}])[0]).get("id")
+        if not tid:
+            raise RuntimeError(f"the task '{name}' was not created: {str(out)[:200]}")
+        return tid
 
     def raise_card(self, card):
         tid = self.create_task(card["name"], card["description"],
