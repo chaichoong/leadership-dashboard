@@ -112,7 +112,7 @@ TK = {"name": "fldgFjGBw6bTKJFCD", "status": "fldx4qCw17UfrKpaN", "due": "fld7XP
       "outcome": "fldrHBSr6qoUfaKuZ", "approvedAt": "fldr4Mvf2RzKvhZhi"}
 INV = {"payee": "fldBVAMn9vA1by7MN", "description": "fldT0onwVg9JDJ1sv", "amount": "fldauZCUSWeIfGryG",
        "emailDate": "fldEpaivUV4uXW3DP", "due": "fldrZ0BrweP0VCVyR", "status": "fldJ5InUPlY4t7MgP",
-       "msgId": "fldnbLSFMemMuLSzP", "runDate": "fldwtlpZOL9oa7OZo", "source": "fldQeBwA2nnepf9wv",
+       "msgId": "fldnbLSFMemMuLSzP", "source": "fldQeBwA2nnepf9wv",
        "notes": "fldV2xsw9en67ts0o"}
 ES = {"key": "fldLO6xJqkokvVR4g", "kind": "fldfjQOn76VpgKEfZ", "label": "fldlnvvTh8l5UIih4",
       "schedule": "fldZGa0UD76lVLww7", "status": "fldhOUiva3bqPNk1c", "lastRun": "flduxV3TYwp9wQX9O",
@@ -1379,6 +1379,8 @@ class Writer:
             save_roy_state(state)
 
     def bonus_row(self, lead, referrer_name, new_tenant, first_rent, day):
+        # Run Date is left alone: it is the Friday scan's own proof of life, and a
+        # bonus row stamped on a weekday would make a dead scan read as current.
         self.note(f"£{BONUS_AMOUNT} bonus on the Payment Run")
         if self.dry:
             return
@@ -1389,7 +1391,7 @@ class Writer:
         api("POST", T_INVOICES, {"records": [{"fields": {
             INV["payee"]: referrer_name, INV["amount"]: float(BONUS_AMOUNT), INV["status"]: "Unpaid",
             INV["description"]: f"Tenant referral bonus: {new_tenant} moved in, first rent {fmt_day(first_rent)}",
-            INV["msgId"]: key, INV["emailDate"]: day.isoformat(), INV["runDate"]: day.isoformat(),
+            INV["msgId"]: key, INV["emailDate"]: day.isoformat(),
             INV["due"]: day.isoformat(), INV["source"]: "Tenant referral",
             INV["notes"]: "Raised by the tenant-finding chain (scripts/tenant-leads.py). Kevin pays; nothing is automated."}}],
             "typecast": True})

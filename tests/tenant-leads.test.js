@@ -12,8 +12,10 @@
 //   * due_again() always due               -> "a second run the same day raises nothing new" fails
 //   * monitor() without the SENT check     -> "an approved card with no SENT stamp is a failure" fails
 //   * keepwarm_leads() without is_legacy() -> "a past applicant is never on an email list" fails
+//   * bonus_row() stamping Run Date again   -> "never stamps Run Date" fails
 import { describe, it, expect } from 'vitest';
 import { execFileSync } from 'node:child_process';
+import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -486,6 +488,35 @@ out["noCreateGate"] = "ct" not in tl._MODS
   it('chain tasks are created directly: no inbox-task word matcher, no track-record search in their notes', () => {
     expect(r.direct).toBe(true);
     expect(r.noCreateGate).toBe(true);
+  });
+});
+
+describe('the referral bonus row', () => {
+  // Run Date is the Friday scan's proof of life: js/invoices.js lastPaymentRunDate() takes the newest
+  // one on any row. The field id is read from js/config.js, the page's own source, not copied here.
+  const runDateId = (readFileSync(path.join(root, 'js', 'config.js'), 'utf8').match(/runDate:\s*'(fld\w+)'/) || [])[1];
+  const r = py(`
+posted = []
+def fake_api(method, path, payload=None, params=None):
+    if method == "POST":
+        posted.append((path, payload))
+    return {"records": []}
+tl.api = fake_api
+tl.Writer(False).bonus_row({"id": "recLEAD1"}, "Alan Tenant", "New Person", DAY, DAY)
+out["posts"] = [(p, [r["fields"] for r in body["records"]]) for p, body in posted]
+out["invoices"] = tl.T_INVOICES
+`);
+  const fields = r.posts.length === 1 ? r.posts[0][1][0] : {};
+  it('writes one unpaid £50 row to the Payment Run for the referrer', () => {
+    expect(r.posts.length).toBe(1);
+    expect(r.posts[0][0]).toBe(r.invoices);
+    expect(Object.values(fields)).toEqual(expect.arrayContaining(['Alan Tenant', 50, 'Unpaid', 'Tenant referral']));
+  });
+  it('never stamps Run Date, so a weekday bonus cannot make a dead Friday scan read as current', () => {
+    expect(runDateId).toMatch(/^fld/);
+    expect(Object.keys(fields).length).toBeGreaterThan(0);
+    expect(Object.keys(fields)).not.toContain(runDateId);
+    expect(Object.keys(fields)).not.toContain('Run Date');
   });
 });
 
