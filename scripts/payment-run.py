@@ -138,6 +138,7 @@ TASK_F = {
     "notes": "fldR7apBzSp3oxFxz",
 }
 APPROVED_OUTCOMES = ("Approved as-is", "Approved with minor edits")
+APPROVED_AT_FIELD = "fldr4Mvf2RzKvhZhi"   # approval_evidence.APPROVED_AT
 
 # The account Kevin pays suppliers and contractors from. Every contractor
 # payment from 1 Aug to 24 Sep 2026 left from here. Named by the account's alias, never
@@ -1060,6 +1061,29 @@ def plus_days(day, n):
     return (datetime.fromisoformat(day) + timedelta(days=n)).date().isoformat()
 
 
+def better_open_row(rec, tx, records):
+    """True when an OPEN bill of the same size and payee fits this payment
+    better than `rec` does: its property or reference is on the bank line and
+    rec's is not (or less so). The payment is then that bill's, and a
+    hand-paid row taking it would leave the open bill listed and paid twice
+    (third review, 25 Sep 2026)."""
+    named = memo_words(tx)
+    mine = len(row_words(rec["fields"]) & named)
+    amount = tx_amount(tx)
+    for r in records:
+        f = r["fields"]
+        if r["id"] == rec["id"] or not settleable(r) or f.get("Amount") is None:
+            continue
+        if round(abs(float(f["Amount"])), 2) != amount:
+            continue
+        if (f.get("Email Date") or "")[:10] > tx_date(tx):
+            continue
+        tokens = payee_tokens(f.get("Payee"))
+        if tokens and memo_names_payee(tokens, tx) and len(row_words(f) & named) > mine:
+            return True
+    return False
+
+
 def plan_links(records, by_amount, since, exclude=(), named=True, skip_rows=()):
     """(row, tx) for rows marked Paid by hand, with no transaction recorded.
 
@@ -1094,7 +1118,7 @@ def plan_links(records, by_amount, since, exclude=(), named=True, skip_rows=()):
             if tx["id"] in used or not d or d < email_date or d > plus_days(paid_on, 3):
                 continue
             names_this = bool(tokens) and memo_names_payee(tokens, tx)
-            if named and names_this:
+            if named and names_this and not better_open_row(rec, tx, records):
                 break
             if (not named and not names_this and days_between(d, paid_on) <= 3
                     and not any(tk and memo_names_payee(tk, tx) for tk in open_tokens)):
@@ -1419,8 +1443,9 @@ MFP_LINE_RE = re.compile(r"^[ \t>*_#\-•]*(?:\d+[.)][ \t]*)?[*_]*MARK FOR PAYME
 
 
 def card_field(text, label):
-    """The value after `LABEL:` on its own line, markdown emphasis stripped."""
-    match = re.search(r"^[ \t>*_\-•]*%s[ \t*_]*:[ \t*_]*(.+?)[ \t*_]*$" % re.escape(label),
+    """The value after `LABEL:` on its own line, markdown emphasis stripped.
+    Never a quoted line (">"): that is a letter pasted into the card."""
+    match = re.search(r"^[ \t*_\-•]*%s[ \t*_]*:[ \t*_]*(.+?)[ \t*_]*$" % re.escape(label),
                       text or "", re.I | re.M)
     return match.group(1).strip() if match else ""
 
@@ -1463,11 +1488,13 @@ def parse_payment_card(output):
     card = output[head.start():]
     # No agent prompt defines the card's shape, so cards arrive free-form too:
     # one reads "MARK FOR PAYMENT — £330.00 total (...)" with no AMOUNT line.
-    # A figure on the heading line is the card's own and wins over any AMOUNT
-    # line further down, which may belong to a quoted letter. Read from the END
-    # of the match: the heading line itself, whatever came before it.
+    # The AMOUNT line is the figure to pay; the heading's figure is used only
+    # when there is none, because a heading can name a part ("ground rent
+    # £1.11 + arrears £1.11") where the AMOUNT line holds the total. A QUOTED
+    # line ("> AMOUNT: ...", a pasted letter) is never the card's own field.
+    # Read the heading from the END of the match: that line, whatever preceded.
     heading = output[head.end():].split("\n", 1)[0]
-    first = MONEY_RE.search(heading) or MONEY_RE.search(card_field(card, "AMOUNT"))
+    first = MONEY_RE.search(card_field(card, "AMOUNT")) or MONEY_RE.search(heading)
     amount = None
     if first:
         amount = float((first.group(1) or first.group(2)).replace(",", ""))
@@ -1511,6 +1538,13 @@ def same_amount(fields, card):
             and abs(abs(float(amount)) - card["amount"]) < 0.005)
 
 
+def near_card(day, c, days):
+    """Within `days` of when the card was raised OR approved. A task raised in
+    February and approved in September is about a bill Kevin was reminded of
+    in September (third review, 25 Sep 2026)."""
+    return any(days_between(day, ref) <= days for ref in (c.get("created"), c.get("approved")) if ref)
+
+
 def card_twin(c, records):
     """(row, how) for the row on the list that already IS this card's bill, or
     (None, None).
@@ -1532,7 +1566,7 @@ def card_twin(c, records):
         # The track record also lists the sender's EARLIER emails, so the id
         # alone could be last month's bill of the same size (second review).
         # The card's own email is days old, not weeks.
-        if (mid and ("#all/%s" % mid) in text and day and days_between(day, c["created"]) <= 14
+        if (mid and ("#all/%s" % mid) in text and day and near_card(day, c, 14)
                 and (card.get("amount") is None or same_amount(r["fields"], card))):
             return r, "strong"
     for r in candidates:
@@ -1541,7 +1575,7 @@ def card_twin(c, records):
             return r, "reference"
     for r in candidates:
         day = (r["fields"].get("Email Date") or "")[:10]
-        if (same_amount(r["fields"], card) and day and days_between(day, c["created"]) <= 30
+        if (same_amount(r["fields"], card) and day and near_card(day, c, 30)
                 and payee_tokens(r["fields"].get("Payee")) & payee_tokens(card.get("payee"))):
             return r, "weak"
     return None, None
@@ -1571,6 +1605,7 @@ def approved_payment_cards():
             "id": row["id"],
             "name": f.get(TASK_F["name"]) or "",
             "created": (row.get("createdTime") or "")[:10],
+            "approved": str(f.get(APPROVED_AT_FIELD) or "")[:10],
             "card": None if problem else parse_payment_card(f.get(TASK_F["output"])),
             "refused": problem,
             "text": (f.get(TASK_F["output"]) or "") + "\n" + (f.get(TASK_F["notes"]) or ""),
@@ -2384,10 +2419,21 @@ def cmd_selftest(_args):
     # A row marked Paid by hand gets its payment linked, and claims it FIRST:
     # the open twin of the same size stays owed.
     hand_paid = bill("recHand", "2026-09-16", 90, "Brightwater Gas Ltd", Status="Paid",
+                     Description="LGSR, 22 Oak Road", **{"Paid Date": "2026-09-22"})
+    oak_tx = txn("txOak", "2026-09-21", -90, "Brightwater Gas Ltd 22 Oak Road")
+    links, paid5, _p = plan_all([hand_paid, gas], index_by_amount([oak_tx]), "2026-09-01")
+    check("a hand-paid row is linked to the payment naming its house; the open bill stays owed",
+          ([(r["id"], t["id"]) for r, t in links], paid5), ([("recHand", "txOak")], []))
+    links7, paid7, _p = plan_all([hand_paid, gas], index_by_amount([gas_tx]), "2026-09-01")
+    check("a payment naming the OPEN bill's house settles that bill, not the hand-paid row",
+          ([r["id"] for r, _t in links7], [r["id"] for r, _t in paid7]), ([], ["recGas"]))
+    bare_paid = bill("recBare", "2026-09-16", 90, "Brightwater Gas Ltd", Status="Paid",
                      **{"Paid Date": "2026-09-22"})
-    links, paid5, _p = plan_all([hand_paid, gas], index_by_amount([gas_tx]), "2026-09-01")
-    check("a hand-paid row is linked to its payment, and its open twin is not settled by it",
-          ([(r["id"], t["id"]) for r, t in links], paid5), ([("recHand", "txGas")], []))
+    bare_open = bill("recBareOpen", "2026-09-16", 90, "Brightwater Gas Ltd")
+    bare_tx = txn("txBare2", "2026-09-21", -90, "Brightwater Gas Ltd")
+    links8, paid8, _p = plan_all([bare_paid, bare_open], index_by_amount([bare_tx]), "2026-09-01")
+    check("with nothing to tell them apart, the payment is the hand-paid row's and the open one stays",
+          ([r["id"] for r, _t in links8], paid8), (["recBare"], []))
     check("a hand-paid row is not linked to a payment booked 4+ days after it was marked paid",
           plan_links([dict(hand_paid, fields=dict(hand_paid["fields"], **{"Paid Date": "2026-09-17"}))],
                      index_by_amount([gas_tx]), "2026-09-01"), [])
@@ -2494,9 +2540,18 @@ def cmd_selftest(_args):
                          [bill("recLast", "2026-08-20", 2.22, "Oakfield Ground Rents Ltd", Status="Paid",
                                **{FIELD_MSG_ID: "18a0f00dcafe0009"})], {}, D("2026-10-23"))),
           [("create", None)])
-    check("a heading's own amount wins over an AMOUNT line lower down",
+    check("a quoted AMOUNT line from a pasted letter is not the card's",
           parse_payment_card("MARK FOR PAYMENT — £330.00\n\n> quoted letter\n> AMOUNT: £3,000.00")
           ["amount"], 330.0)
+    check("the AMOUNT line's total beats a part named in the heading",
+          parse_payment_card("MARK FOR PAYMENT: ground rent £1.11 + arrears £1.11\nAMOUNT: £2.22")
+          ["amount"], 2.22)
+    reminder = bill("recRem", "2026-09-20", 330, "Oakfield Alarms Ltd", **{FIELD_MSG_ID: "18a0f00dcafe0330"})
+    feb = {"id": "recFeb", "name": "Oakfield Alarms Ltd - 2 Ash Court", "created": "2026-02-18",
+           "approved": "2026-09-25", "card": parse_payment_card("MARK FOR PAYMENT — £330.00"),
+           "refused": "", "text": "- email: #all/18a0f00dcafe0330"}
+    check("a card raised in February and approved in September links to September's reminder",
+          act(plan_tasks([feb], [reminder], {}, D("2026-09-25"))), [("link", "recRem")])
     check("a card already on the list is left alone",
           act(plan_tasks([task], [{"id": "recRow", "fields": {FIELD_MSG_ID: "task:recCard"}}],
                          {}, D("2026-10-23"))), [("listed", "recRow")])

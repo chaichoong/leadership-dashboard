@@ -150,6 +150,25 @@ def card_never_assumed_paid():
     return [action, pr.task_row_fields(c, D("2026-10-23"), maybe_paid=d)["Status"]]
 case("card_never_assumed_paid", card_never_assumed_paid)
 
+def open_bill_named_by_house_wins():
+    h = bill("recH", "2026-09-16", 90, "Brightwater Gas Ltd", Status="Paid",
+             Description="LGSR, 22 Oak Road", **{"Paid Date": "2026-09-22"})
+    links, paid, _p = pr.plan_all([h, gas], pr.index_by_amount([gas_tx]), "2026-09-01")
+    return [[r["id"] for r, _t in links], [r["id"] for r, _t in paid]]
+case("open_bill_named_by_house_wins", open_bill_named_by_house_wins)
+
+def amount_line_beats_heading_part():
+    return pr.parse_payment_card("MARK FOR PAYMENT: ground rent £1.11 + arrears £1.11\nAMOUNT: £2.22")["amount"]
+case("amount_line_beats_heading_part", amount_line_beats_heading_part)
+
+def late_approved_card_links_to_reminder():
+    row = bill("recRem", "2026-09-20", 330, "Oakfield Alarms Ltd", **{"Gmail Message ID": "18a0f00dcafe0330"})
+    t = {"id": "recFeb", "name": "Oakfield Alarms Ltd - 2 Ash Court", "created": "2026-02-18",
+         "approved": "2026-09-25", "card": pr.parse_payment_card("MARK FOR PAYMENT — £330.00"),
+         "refused": "", "text": "- email: #all/18a0f00dcafe0330"}
+    return pr.plan_tasks([t], [row], {}, D("2026-09-25"))[0][0]
+case("late_approved_card_links_to_reminder", late_approved_card_links_to_reminder)
+
 def missed_friday_is_read():
     tz = pr.LONDON
     start, _ = pr.scan_range(datetime(2026, 9, 25, 21, 0, tzinfo=tz), 1,
@@ -184,6 +203,9 @@ describe('payment run: a paid bill leaves the list by itself (cause 1)', () => {
   it('a payee word inside another word ("city" in "electricity") never closes a bill', () => {
     expect(value('whole_words_only')).toBe(0);
   });
+  it('a payment naming an open bill\'s house settles that bill, not a hand-paid twin', () => {
+    expect(value('open_bill_named_by_house_wins')).toEqual([[], ['recGas']]);
+  });
   it('a row marked paid by hand never takes a payment that names an open bill', () => {
     expect(value('hand_paid_never_takes_open_bills_payment')).toEqual([[], ['recGas']]);
   });
@@ -204,6 +226,12 @@ describe('payment run: approved payment cards reach the list (cause 2)', () => {
   });
   it('a free-form card is listed, named after its task, amount from its heading', () => {
     expect(value('freeform_card_is_listed')).toEqual(['create', 'Oakfield Alarms Ltd', 330]);
+  });
+  it('the AMOUNT line\'s total beats a part named in the heading', () => {
+    expect(value('amount_line_beats_heading_part')).toBe(2.22);
+  });
+  it('a card raised months ago but approved now links to this month\'s reminder email', () => {
+    expect(value('late_approved_card_links_to_reminder')).toBe('link');
   });
   it('a card is never assumed paid: a possible payment is named on it, and it stays Unpaid', () => {
     expect(value('card_never_assumed_paid')).toEqual(['check_paid', 'Unpaid']);
