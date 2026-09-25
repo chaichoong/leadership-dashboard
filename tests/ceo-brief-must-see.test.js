@@ -20,12 +20,12 @@ function pick(n) {
 const HELPERS = ['KEVIN_TEAM_MEMBER', 'ROY_TEAM_MEMBER', 'ONLY_YOU_SHOW', 'MONTHS', 'dayMonth', 'whenText',
   'slackEsc', 'selectOnlyYou', 'onlyYouText', 'DEADLINE_DAYS', 'DEADLINE_SHOW', 'LEGAL_RE', 'MONEY_RE',
   'addDaysISO', 'deadlineHolder', 'selectDeadlines', 'deadlinesText', 'NEEDS_YOU_SHOW', 'needsYouText',
-  'deadlinePreview', 'SECTION_MAX', 'capSection', 'mustSeeBlocks', 'fmt', 'LIGHT_EMOJI', 'LIGHT_LABEL', 'londonDateLabel', 'buildBlocks',
+  'deadlinePreview', 'SECTION_MAX', 'capSection', 'TENANT_LIGHT', 'tenantChainText', 'mustSeeBlocks', 'fmt', 'LIGHT_EMOJI', 'LIGHT_LABEL', 'londonDateLabel', 'buildBlocks',
   'buildBriefBlocks'];
 // eslint-disable-next-line no-new-func
 const W = new Function(`${HELPERS.map(pick).join('\n')}\nreturn { ${HELPERS.join(', ')} };`)();
 const { selectDeadlines, deadlinesText, needsYouText, deadlinePreview, mustSeeBlocks, buildBriefBlocks,
-  selectOnlyYou, KEVIN_TEAM_MEMBER, ROY_TEAM_MEMBER } = W;
+  selectOnlyYou, KEVIN_TEAM_MEMBER, ROY_TEAM_MEMBER, tenantChainText } = W;
 
 const TODAY = '2026-09-23';
 let n = 0;
@@ -182,16 +182,18 @@ describe('the brief carries the sections above the model\'s one thing', () => {
   const tasks = { deadlines: selectDeadlines(LIVE, TODAY), onlyYou: selectOnlyYou(LIVE, TODAY) };
   const needs = { fields: { Payload: JSON.stringify({ date: TODAY, items: ['Decide the legal deadline card.'] }) } };
 
-  it('mustSeeBlocks: deadlines, then only you, then the 07:00 check', () => {
-    const texts = mustSeeBlocks(tasks, needs, TODAY).map(b => b.text.text);
+  const tenants = { fields: { Payload: JSON.stringify({ asAt: TODAY, worst: 'warn', briefLine: 'working, 1 to watch.' }) } };
+  it('mustSeeBlocks: deadlines, then only you, then the 07:00 check, then the tenant line', () => {
+    const texts = mustSeeBlocks(tasks, needs, TODAY, tenants).map(b => b.text.text);
     expect(texts[0]).toMatch(/^\*HARD DEADLINES/);
     expect(texts[1]).toMatch(/^\*ONLY YOU TODAY/);
     expect(texts[2]).toMatch(/^\*FROM THE 07:00 CHECK/);
+    expect(texts[3]).toBe('🟡 *TENANTS:* working, 1 to watch.');
   });
 
   it('a failed task read still sends the other sections and says the list is missing', () => {
-    const texts = mustSeeBlocks(null, needs, TODAY).map(b => b.text.text);
-    expect(texts).toHaveLength(2);
+    const texts = mustSeeBlocks(null, needs, TODAY, tenants).map(b => b.text.text);
+    expect(texts).toHaveLength(3);
     expect(texts[0]).toMatch(/could not be read/);
   });
 
@@ -201,7 +203,7 @@ describe('the brief carries the sections above the model\'s one thing', () => {
     expect(blocks[0].type).toBe('header');
     expect(blocks[1].text.text).toMatch(/^\*HARD DEADLINES/);
     const oneThing = blocks.findIndex(b => b.text && /THE ONE THING/.test(b.text.text));
-    expect(oneThing).toBe(4);
+    expect(oneThing).toBe(5);
   });
 });
 
@@ -212,7 +214,7 @@ describe('sendDailyDM sends the sections on both paths', () => {
   const deps = ['slackLookup', 'loadAndCompute', 'gatherTasks', 'gatherCalendar', 'gatherHuddle', 'callCeo',
     'buildCeoPrompt', 'slackPost', 'storeBrief', 'storeFallbackMarker', 'readNeedsYouRow', 'todayLondonISO',
     'DEFAULT_RECIPIENT', 'fmt', 'LIGHT_LABEL', 'buildBlocks', 'buildBriefBlocks', 'mustSeeBlocks',
-    'needsYouText', 'deadlinePreview'];
+    'needsYouText', 'deadlinePreview', 'readEstateRow', 'TENANT_CHAIN_KEY'];
   // eslint-disable-next-line no-new-func
   const make = new Function(...deps, `${src}\nreturn sendDailyDM;`);
   const run = async ({ ceoFails = false, tasksFail = false } = {}) => {
@@ -230,7 +232,10 @@ describe('sendDailyDM sends the sections on both paths', () => {
       async () => {}, async () => {},
       async () => ({ fields: { Payload: JSON.stringify({ date: TODAY, items: ['Decide it.'] }) } }),
       () => TODAY, 'k@example.com', W.fmt, W.LIGHT_LABEL, W.buildBlocks, W.buildBriefBlocks, W.mustSeeBlocks,
-      W.needsYouText, W.deadlinePreview);
+      W.needsYouText, W.deadlinePreview,
+      async (pat, key) => (key === 'tenant-chain'
+        ? { fields: { Payload: JSON.stringify({ asAt: TODAY, worst: 'ok', briefLine: 'working. 3 referrers told.' }) } } : null),
+      'tenant-chain');
     await send({ SLACK_BOT_TOKEN: 't', AIRTABLE_PAT: 'p' });
     expect(posts).toHaveLength(1);
     return { text: posts[0].text, all: posts[0].blocks.map(b => (b.text && b.text.text) || '').join('\n') };
@@ -240,6 +245,7 @@ describe('sendDailyDM sends the sections on both paths', () => {
     const out = await run();
     expect(out.all).toContain('Final court notice');
     expect(out.all).toContain('FROM THE 07:00 CHECK');
+    expect(out.all).toContain('🟢 *TENANTS:* working. 3 referrers told.');
     expect(out.text).toMatch(/^\d+ hard deadlines? due or overdue \| ONE thing/);
   });
 
@@ -247,6 +253,7 @@ describe('sendDailyDM sends the sections on both paths', () => {
     const out = await run({ ceoFails: true });
     expect(out.all).toContain('Final court notice');
     expect(out.all).toContain('FROM THE 07:00 CHECK');
+    expect(out.all).toContain('*TENANTS:*');
     expect(out.text).toMatch(/hard deadlines? due or overdue \| Safe to act/);
   });
 
@@ -281,7 +288,7 @@ describe('the reads the brief depends on', () => {
   it('readNeedsYouRow asks the Estate Status table for the one key, and a failed read is undefined, never null', async () => {
     const names = ['BASE_ID', 'ESTATE_STATUS_TBL', 'NEEDS_YOU_KEY'];
     const make = (fetchImpl) => new Function('fetch', 'console',
-      `${[...names.map(pick), pick('readNeedsYouRow')].join('\n')}\nreturn readNeedsYouRow;`)(fetchImpl, { error() {} });
+      `${[...names.map(pick), pick('readEstateRow'), pick('readNeedsYouRow')].join('\n')}\nreturn readNeedsYouRow;`)(fetchImpl, { error() {} });
     let asked = '';
     const row = { id: 'recX', fields: { Key: 'daily-ops-needs-you', Payload: '{}' } };
     const ok = make(async (url) => { asked = url; return { ok: true, json: async () => ({ records: [row] }) }; });
@@ -316,13 +323,29 @@ describe('the reads the brief depends on', () => {
   });
 });
 
+describe('the tenant chain in one line (Kevin, 25 Sep 2026: "One line daily")', () => {
+  const row = p => ({ fields: { Payload: typeof p === 'string' ? p : JSON.stringify(p) } });
+  it('prints the chain\'s own line with a light for its worst step, escaped for Slack', () => {
+    expect(tenantChainText(row({ asAt: TODAY, worst: 'ok', briefLine: 'working. 31 referrers told.' }), TODAY))
+      .toBe('🟢 *TENANTS:* working. 31 referrers told.');
+    expect(tenantChainText(row({ asAt: TODAY, worst: 'fail', briefLine: 'NOT WORKING: <x>' }), TODAY))
+      .toBe('🔴 *TENANTS:* NOT WORKING: &lt;x&gt;');
+  });
+  it('says so in words when the chain did not run today, left no row, a damaged row, or could not be read', () => {
+    expect(tenantChainText(row({ asAt: '2026-09-21', worst: 'ok', briefLine: 'working.' }), TODAY)).toMatch(/^🔴 .*has not run today.*21 Sep/);
+    expect(tenantChainText(null, TODAY)).toMatch(/has not reported/);
+    expect(tenantChainText(row('{bad'), TODAY)).toMatch(/damaged report/);
+    expect(tenantChainText(undefined, TODAY)).toMatch(/could not be read/);
+  });
+});
+
 describe('a refused section never costs Kevin the money DM', () => {
   it('the fallback retries with the money blocks alone', async () => {
     const src = pick('sendDailyDM');
     const deps = ['slackLookup', 'loadAndCompute', 'gatherTasks', 'gatherCalendar', 'gatherHuddle', 'callCeo',
       'buildCeoPrompt', 'slackPost', 'storeBrief', 'storeFallbackMarker', 'readNeedsYouRow', 'todayLondonISO',
       'DEFAULT_RECIPIENT', 'fmt', 'LIGHT_LABEL', 'buildBlocks', 'buildBriefBlocks', 'mustSeeBlocks',
-      'needsYouText', 'deadlinePreview', 'console'];
+      'needsYouText', 'deadlinePreview', 'console', 'readEstateRow', 'TENANT_CHAIN_KEY'];
     const posts = [];
     // eslint-disable-next-line no-new-func
     const send = new Function(...deps, `${src}\nreturn sendDailyDM;`)(
@@ -335,7 +358,8 @@ describe('a refused section never costs Kevin the money DM', () => {
         if (blocks.some(b => b.text && /HARD DEADLINES/.test(b.text.text))) throw new Error('invalid_blocks');
       },
       async () => {}, async () => {}, async () => null, () => TODAY, 'k@example.com', W.fmt, W.LIGHT_LABEL,
-      W.buildBlocks, W.buildBriefBlocks, W.mustSeeBlocks, W.needsYouText, W.deadlinePreview, { error() {} });
+      W.buildBlocks, W.buildBriefBlocks, W.mustSeeBlocks, W.needsYouText, W.deadlinePreview, { error() {} },
+      async () => null, 'tenant-chain');
     await send({ SLACK_BOT_TOKEN: 't', AIRTABLE_PAT: 'p' });
     expect(posts).toHaveLength(2);
     expect(posts[1].some(b => b.text && /HARD DEADLINES/.test(b.text.text))).toBe(false);

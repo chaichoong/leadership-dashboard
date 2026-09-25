@@ -538,17 +538,20 @@ const NEEDS_YOU_KEY = 'daily-ops-needs-you';
 const ESTATE_STATUS_TBL = 'tblZVrdzivyBueZVf';
 const NEEDS_YOU_SHOW = 5;
 
-async function readNeedsYouRow(pat) {
+async function readEstateRow(pat, key) {
     try {
         const url = `https://api.airtable.com/v0/${BASE_ID}/${ESTATE_STATUS_TBL}?pageSize=1`
-            + `&filterByFormula=${encodeURIComponent(`{Key}='${NEEDS_YOU_KEY}'`)}`;
+            + `&filterByFormula=${encodeURIComponent(`{Key}='${key}'`)}`;
         const r = await fetch(url, { headers: { Authorization: `Bearer ${pat}` } });
         if (!r.ok) throw new Error(`HTTP ${r.status}`);
         return ((await r.json()).records || [])[0] || null;
     } catch (e) {
-        console.error('[ceo-brief] 07:00 check row unreadable:', e && e.message || e);
+        console.error(`[ceo-brief] Estate Status row ${key} unreadable:`, e && e.message || e);
         return undefined;
     }
+}
+async function readNeedsYouRow(pat) {
+    return readEstateRow(pat, NEEDS_YOU_KEY);
 }
 function needsYouText(row, today) {
     if (row === undefined) return '_The 07:00 check could not be read this morning._';
@@ -563,6 +566,24 @@ function needsYouText(row, today) {
     const lines = items.slice(0, NEEDS_YOU_SHOW).map((x, i) => `${i + 1}. ${slackEsc(String(x).slice(0, 400))}`);
     if (items.length > NEEDS_YOU_SHOW) lines.push(`+${items.length - NEEDS_YOU_SHOW} more in the morning report`);
     return `*FROM THE 07:00 CHECK*\n${lines.join('\n')}`;
+}
+
+// ── The tenant chain in one line (Kevin, 25 Sep 2026: "One line daily") ─────────────────────
+// scripts/tenant-leads.py writes the tenant-chain row at 08:10 with the line already worded
+// (briefLine): whether it works, the results, and what stops anyone moving in. The brief adds the
+// light, and says so in words when the row is missing, from another day or damaged: silence would
+// read as "all fine".
+const TENANT_CHAIN_KEY = 'tenant-chain';
+const TENANT_LIGHT = { ok: '🟢', warn: '🟡', fail: '🔴' };
+function tenantChainText(row, today) {
+    if (row === undefined) return '🔴 *TENANTS:* _the tenant chain could not be read this morning._';
+    let p;
+    try { p = JSON.parse((row && row.fields && row.fields.Payload) || 'null'); }
+    catch (e) { return '🔴 *TENANTS:* _the tenant chain left a damaged report, so nothing about it is known._'; }
+    if (!p || !p.asAt) return '🔴 *TENANTS:* _the tenant chain has not reported._';
+    if (p.asAt !== today) return `🔴 *TENANTS:* the chain has not run today. Its last run was ${dayMonth(p.asAt)}, so nothing about it is current.`;
+    const line = String(p.briefLine || '').slice(0, 700) || 'ran, but left no summary line.';
+    return `${TENANT_LIGHT[p.worst] || '⚪'} *TENANTS:* ${slackEsc(line)}`;
 }
 
 // The lock-screen line. A phone notification shows the message's `text`, never its blocks, so a
@@ -581,12 +602,13 @@ const SECTION_MAX = 2900;
 function capSection(text) {
     return text.length > SECTION_MAX ? `${text.slice(0, SECTION_MAX - 40)}\n… cut short: the rest is in the morning report` : text;
 }
-function mustSeeBlocks(tasks, needsRow, today) {
+function mustSeeBlocks(tasks, needsRow, today, tenantRow) {
     const section = text => ({ type: 'section', text: { type: 'mrkdwn', text: capSection(text) } });
     const blocks = [section(deadlinesText(tasks ? tasks.deadlines : null, today))];
     const onlyYou = tasks ? onlyYouText(tasks.onlyYou, today) : '';
     if (onlyYou) blocks.push(section(onlyYou));
     blocks.push(section(needsYouText(needsRow, today)));
+    blocks.push(section(tenantChainText(tenantRow, today)));
     return blocks;
 }
 
@@ -987,7 +1009,7 @@ async function sendDailyDM(env) {
 
     // Read before the CEO layer so the fallback carries it too. Never throws: a failed read is
     // `undefined`, which needsYouText says in words.
-    const needsRow = await readNeedsYouRow(pat);
+    const [needsRow, tenantRow] = await Promise.all([readNeedsYouRow(pat), readEstateRow(pat, TENANT_CHAIN_KEY)]);
     const today = todayLondonISO();
 
     // CEO layer — any failure here falls back to the proven money-only DM.
@@ -1005,7 +1027,7 @@ async function sendDailyDM(env) {
         brief.deadlines = tasks.deadlines.items;
         brief.needs_you = needsYouText(needsRow, today);
         const fallbackText = `${deadlinePreview(tasks.deadlines, today)}ONE thing: ${brief.one_thing} | Safe to act: ${fmt(m.safeToActToday)} (${LIGHT_LABEL[m.light]})`;
-        await slackPost(token, userId, fallbackText, buildBriefBlocks(m, brief, mustSeeBlocks(tasks, needsRow, today)));
+        await slackPost(token, userId, fallbackText, buildBriefBlocks(m, brief, mustSeeBlocks(tasks, needsRow, today, tenantRow)));
         try { await storeBrief(pat, brief, m, tasks, huddle); }
         catch (e) {
             // No Slack alert: the brief itself arrived, so a save failure is an
@@ -1019,7 +1041,7 @@ async function sendDailyDM(env) {
         // The deadlines are code, not model: they go out even when the CEO layer fails.
         const fallback = `${tasks ? deadlinePreview(tasks.deadlines, today) : ''}Safe to act today: ${fmt(m.safeToActToday)} (${LIGHT_LABEL[m.light]})`;
         try {
-            await slackPost(token, userId, fallback, [...buildBlocks(m), ...mustSeeBlocks(tasks, needsRow, today)]);
+            await slackPost(token, userId, fallback, [...buildBlocks(m), ...mustSeeBlocks(tasks, needsRow, today, tenantRow)]);
         } catch (postErr) {
             // A section Slack refuses must never cost the proven money-only DM.
             console.error('[ceo-brief] fallback with the deadline sections refused, sending money only:', postErr && postErr.message || postErr);
@@ -1180,19 +1202,21 @@ export default {
             }
             if (url.searchParams.get('mode') === 'must') {
                 const today = todayLondonISO();
-                const [tasks, needsRow] = await Promise.all([gatherTasks(env.AIRTABLE_PAT), readNeedsYouRow(env.AIRTABLE_PAT)]);
+                const [tasks, needsRow, tenantRow] = await Promise.all([gatherTasks(env.AIRTABLE_PAT), readNeedsYouRow(env.AIRTABLE_PAT),
+                    readEstateRow(env.AIRTABLE_PAT, TENANT_CHAIN_KEY)]);
                 return Response.json({ ok: true, today, preview: deadlinePreview(tasks.deadlines, today),
-                    blocks: mustSeeBlocks(tasks, needsRow, today), deadlinesAll: tasks.deadlines.all.length });
+                    blocks: mustSeeBlocks(tasks, needsRow, today, tenantRow), deadlinesAll: tasks.deadlines.all.length });
             }
             // mode=brief → compute the full CEO brief WITHOUT sending or storing.
             if (url.searchParams.get('mode') === 'brief') {
                 const m = await loadAndCompute(env.AIRTABLE_PAT);
-                const [tasks, calendar, needsRow] = await Promise.all([gatherTasks(env.AIRTABLE_PAT), gatherCalendar(env), readNeedsYouRow(env.AIRTABLE_PAT)]);
+                const [tasks, calendar, needsRow, tenantRow] = await Promise.all([gatherTasks(env.AIRTABLE_PAT), gatherCalendar(env),
+                    readNeedsYouRow(env.AIRTABLE_PAT), readEstateRow(env.AIRTABLE_PAT, TENANT_CHAIN_KEY)]);
                 const huddle = await gatherHuddle(env.AIRTABLE_PAT);
                 const brief = await callCeo(env, buildCeoPrompt(m, tasks, calendar, env, huddle), huddle, tasks);
                 brief.only_you = tasks.onlyYou;
                 const today = todayLondonISO();
-                return Response.json({ ok: true, brief, blocks: buildBriefBlocks(m, brief, mustSeeBlocks(tasks, needsRow, today)),
+                return Response.json({ ok: true, brief, blocks: buildBriefBlocks(m, brief, mustSeeBlocks(tasks, needsRow, today, tenantRow)),
                     money: { safeToActToday: m.safeToActToday, light: m.light }, taskCounts: tasks.counts, calendarConnected: calendar.connected });
             }
             const m = await loadAndCompute(env.AIRTABLE_PAT);
