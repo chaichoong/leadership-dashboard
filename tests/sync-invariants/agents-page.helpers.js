@@ -23,6 +23,7 @@ const TABLES = {
   steps: 'tblTadoyWXFHbmYxm',
   businesses: 'tblpqkvWJJo8Uu25q',
   ceoBriefs: 'tblIxbzDSOCI5hqJn',
+  estate: 'tblZVrdzivyBueZVf',
 };
 
 // Field IDs mirrored from the constants block in os/agents/index.html.
@@ -255,6 +256,7 @@ async function mockAgentsPage(page, overrides = {}) {
     if (url.includes(TABLES.steps)) return json({ records: fixtures.steps });
     if (url.includes(TABLES.businesses)) return json({ records: fixtures.businesses });
     if (url.includes(TABLES.ceoBriefs)) return json({ records: fixtures.ceoBriefs });
+    if (url.includes(TABLES.estate)) return json({ records: fixtures.estate || [] });
     return json({ records: [] });
   });
   await stubExternalHosts(page);
