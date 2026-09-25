@@ -6553,7 +6553,10 @@ function signinMarkWalls(walls, lines){
         w.doneBy = clear ? clear.state : '';
         // A SIGN-IN wall on a site that stops the robot with a bot check: no Sign in
         // button, and not counted as a sign-in he owes (review, 25 Sep 2026).
-        w.botCheck = w.kind === 'SIGN-IN' && !w.done && lines.some(ln => ln.state === 'bot-check' && signinLineIsWall(ln, w));
+        // Only a bot check seen AFTER the wall opened: an older one may have gone, and a
+        // real sign-in wall must never lose its button to it (review round 3).
+        w.botCheck = w.kind === 'SIGN-IN' && !w.done && isFinite(w.openedBy) && lines.some(ln => ln.state === 'bot-check'
+            && signinLineIsWall(ln, w) && Date.parse(ln.at || '') >= w.openedBy);
     });
     return walls;
 }

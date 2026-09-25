@@ -221,12 +221,21 @@ test.describe('Robot sign-ins panel and blocked robots', () => {
 
   test('a SIGN-IN wall on a site that stops the robot with a bot check has no Sign in button and is not counted (25 Sep 2026)', async ({ page }) => {
     const wall = { task: 'recW9', name: 'Fix SPF and DKIM', agent: 'Builder', kind: 'SIGN-IN', subject: 'dash.cloudflare.com', fix: 'sign in', days: 0 };
-    const panel = await open(page, [signinRow([line('dash.cloudflare.com', 'dash.cloudflare.com', 'bot-check', { how: 'robot check' })]),
+    // The bot check was seen a minute ago, after the wall opened (the sweep ran 5 minutes ago).
+    const panel = await open(page, [signinRow([line('dash.cloudflare.com', 'dash.cloudflare.com', 'bot-check', { how: 'robot check', at: ago(1) })]),
       blockersRow([wall])]);
     await expect(panel.locator('[data-rs-wall-line="bot-check"]')).toContainText('One task is blocked: dash.cloudflare.com stops the robot with a bot check, which a sign-in cannot fix.');
     await expect(panel.locator('[data-rs-wall="dash.cloudflare.com"]')).toHaveCount(0);
     await expect(page.locator('#signinsCount')).toHaveText('0');
     await expect(panel).not.toContainText('All good');
+  });
+
+  test('a bot check seen BEFORE a sign-in wall opened does not hide that wall\'s Sign in button (review round 3)', async ({ page }) => {
+    const wall = { task: 'recW9', name: 'Fix SPF and DKIM', agent: 'Builder', kind: 'SIGN-IN', subject: 'dash.cloudflare.com', fix: 'sign in', days: 0 };
+    const panel = await open(page, [signinRow([line('dash.cloudflare.com', 'dash.cloudflare.com', 'bot-check', { how: 'robot check', at: ago(300) })]),
+      blockersRow([wall])]);
+    await expect(panel.locator('[data-rs-wall="dash.cloudflare.com"]')).toHaveAttribute('href', 'robotsignin://site/dash.cloudflare.com');
+    await expect(page.locator('#signinsCount')).toHaveText('1');
   });
 
   test('a wall on a site he has just signed in to says so, with no second button and no count', async ({ page }) => {
