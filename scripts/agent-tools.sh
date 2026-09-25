@@ -59,6 +59,14 @@ if [ -n "$AGENT_NODE_BIN" ]; then
   esac
 fi
 
+# LET THE AGENTS FINISH (25 Sep 2026). `claude -p` waits 600 seconds for the
+# agents a run starts in the background, then terminates them: "Background
+# tasks still running after 600s; terminating." Three hand-back runs hit it that
+# day, the last with both insurance agents "actively working through the
+# TopCashback quote wizards", so a quote could never be finished. Forty
+# minutes: still a ceiling, and under the hand-back poll's own 45-minute limit.
+export CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS="${CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS:-2400000}"
+
 # The shared set. Extra per-runner tools are appended by the caller, never
 # substituted (handback-poll needs osascript for iMessage sends).
 AGENT_ALLOWED_TOOLS=(
