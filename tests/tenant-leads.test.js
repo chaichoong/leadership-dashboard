@@ -835,6 +835,18 @@ out["noPage"] = tl.room_blockers(wp, tl.openings(wp, DAY))["recP1"]["blockers"]
 
 # The monitor: amber for blockers, red once someone has waited 14 days on a house that is not legal,
 # red when a person securing a room has no move-in task.
+out["unowned"] = next(x for x in tl.monitor(w, DAY, tl.openings(w, DAY), [])["steps"] if x["key"] == "rooms")
+# The rooms step hands the house to AI Property Administration once; a second run adds nothing.
+fwr = FakeWriter(); made = []
+fwr.create_task = lambda name, desc, notes="": made.append((name, desc, notes)) or "recROOMS"
+tl.run(w, DAY, fwr, only="rooms", replies=lambda: [])
+out["roomsMade"] = [(n.split(":")[0] + ":" + n.split(":")[1], notes) for n, d, notes in made]
+out["roomsDesc"] = made[0][1] if made else ""
+w["tasks"] += [task(n, status="Today", notes=notes) for n, d, notes in made]
+fwr2 = FakeWriter(); made2 = []
+fwr2.create_task = lambda name, desc, notes="": made2.append(name) or "recROOMS2"
+tl.run(w, DAY, fwr2, only="rooms", replies=lambda: [])
+out["roomsAgain"] = made2
 m = tl.monitor(w, DAY, tl.openings(w, DAY), [])
 out["rooms"] = next(x for x in m["steps"] if x["key"] == "rooms")
 out["movein"] = next(x for x in m["steps"] if x["key"] == "movein")
@@ -893,6 +905,15 @@ out["settled"] = [(p["id"], p["fields"].get(L["lastContacted"])) for p in fw7.pa
   it('an unreadable compliance book, or a house with no page, is a blocker, never a clean bill', () => {
     expect(r.noBook[0]).toMatch(/could not be read/);
     expect(r.noPage[0]).toMatch(/no page in the compliance book/);
+  });
+  it('a house that is not legal goes to AI Property Administration once, and is red while nobody holds it', () => {
+    expect(r.unowned.state).toBe('fail');
+    expect(r.unowned.note).toMatch(/^Nobody is working on 5 Dalham Place/);
+    expect(r.roomsMade).toEqual([['TENANT ROOMS: 5 Dalham Place', 'TENANT CHAIN IDS: recP1']]);
+    expect(r.roomsDesc).toMatch(/gas safety certificate expired 8 Sep 2026/);
+    expect(r.roomsDesc).toMatch(/Search every record first/);
+    expect(r.roomsAgain).toEqual([]);
+    expect(r.rooms.note).toMatch(/AI Property Administration holds a task for each house/);
   });
   it('the monitor: amber while a house is not legal, red once someone has waited 14 days on it or has no move-in task', () => {
     expect(r.rooms.state).toBe('warn');
