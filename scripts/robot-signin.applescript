@@ -208,6 +208,28 @@ on announceLive()
 	return n
 end announceLive
 
+-- Sites that stop the robot with a "verify you are human" check (Cloudflare, 25 Sep 2026).
+-- A sign-in window would not help, so none opens. A dialog, not a notification: a hidden
+-- notification left Kevin watching Chrome flicker with nothing happening.
+on announceBotChecks()
+	set labels to readWaiting("for(const g of (d.botCheck||[]))console.log(g.label)")
+	if (count of labels) is 0 then return
+	set AppleScript's text item delimiters to ", "
+	set msg to (labels as text) & " stops the robot with a \"Verify you are human\" check. Signing in does not remove it, so no window opens for it. Its task stays blocked and needs another route (an API key, or you doing that one step)."
+	set AppleScript's text item delimiters to ""
+	try
+		display dialog msg with title "Robot sign-in" buttons {"OK"} default button "OK" giving up after 30
+	end try
+end announceBotChecks
+
+-- The chain's outcome, always seen: a dialog that closes itself (25 Sep 2026).
+on sayDone(msg)
+	display notification msg with title "Robot sign-in"
+	try
+		display dialog msg with title "Robot sign-in" buttons {"OK"} default button "OK" giving up after 15
+	end try
+end sayDone
+
 on liveHosts()
 	set hosts to {}
 	repeat with L in alreadyLive()
@@ -319,12 +341,12 @@ on runChain(theLines, liveHanded)
 	end if
 	if handed > 0 then
 		if startPickup() then
-			display notification "All signed in. Pickup queued for " & handed & " task(s); the robots start when the queue is free." & tail with title "Robot sign-in"
+			sayDone("All signed in. Pickup queued for " & handed & " task(s); the robots start when the queue is free." & tail)
 		else
-			display notification "Signed in; the " & handed & " task(s) are on the board and the 30-minute poll works them (it counts a sign-in as a hand-back)." & tail with title "Robot sign-in"
+			sayDone("Signed in; the " & handed & " task(s) are on the board and the 30-minute poll works them (it counts a sign-in as a hand-back)." & tail)
 		end if
 	else
-		display notification "All done. Nothing was waiting on a robot." & tail with title "Robot sign-in"
+		sayDone("All done. Nothing was waiting on a robot." & tail)
 	end if
 	refreshPanel()
 end runChain
@@ -366,6 +388,7 @@ on run
 	sayChecking()
 	refreshWaiting("")
 	set liveN to announceLive()
+	announceBotChecks()
 	set waiting to waitingSites()
 	if (count of waiting) > 0 then
 		-- Every waiting site pre-selected (25 Sep 2026): with none selected, one click picked
@@ -427,6 +450,7 @@ on open location theURL
 		sayChecking()
 		refreshWaiting("")
 		set liveN to announceLive()
+		announceBotChecks()
 		set waiting to waitingSites()
 		set unknown to unknownWaiting()
 		if (count of unknown) > 0 then
@@ -438,7 +462,7 @@ on open location theURL
 			if liveN > 0 then
 				runChain({}, liveN)
 			else
-				display notification "Nothing is waiting on a sign-in the robot can use." with title "Robot sign-in"
+				sayDone("Nothing is waiting on a sign-in the robot can use.")
 			end if
 			return
 		end if
@@ -462,6 +486,10 @@ on open location theURL
 		set liveN to announceLive()
 		if liveHosts() contains wantHost then
 			runChain({}, liveN)
+			return
+		end if
+		if readWaiting("for(const g of (d.botCheck||[]))console.log(g.host)") contains wantHost then
+			announceBotChecks()
 			return
 		end if
 		-- Every sign-in on that host, in turn: robotsignin://site/my.utilita.co.uk opens both flats.

@@ -41,6 +41,7 @@ SITES = {"www.topcashback.co.uk": {"label": "TopCashback", "login": True, "login
          "namecheap.com": {"label": "Namecheap", "login": True},
          "gov.uk": {"label": "GOV.UK", "login": False}}
 m.load_login_sites = lambda: SITES
+m.BROWSER_LEDGER = "/nonexistent/od-test-browser-ledger.jsonl"   # never the live robot's log
 class A:
     def __init__(self, **kw): self.__dict__.update(kw)
 def run(fn, args):
@@ -81,6 +82,26 @@ print(json.dumps({"a": a["err"], "b": b["err"], "c": c["err"], "blk": m.task_blo
     expect(r.b).toMatch(/That is a SITE wall/);   // namecheap is listed but has no sign-in page
     expect(r.c).toBeNull();
     expect(r.blk).toMatchObject({ kind: 'SIGN-IN', subject: 'www.topcashback.co.uk' });
+  });
+
+  it('SIGN-IN is refused for a site that showed the robot a bot check today (Cloudflare, 25 Sep 2026)', () => {
+    const dir = mkdtempSync(tmpdir() + '/od-botcheck-');
+    const ledger = dir + '/runs.jsonl';
+    const now = new Date();
+    writeFileSync(ledger, [
+      JSON.stringify({ at: new Date(now - 3 * 3600e3).toISOString(), cmd: 'session', site: 'www.topcashback.co.uk', url: 'https://www.topcashback.co.uk/', signedIn: false, botCheck: true, profile: 'default' }),
+      JSON.stringify({ at: new Date(now - 26 * 3600e3).toISOString(), cmd: 'session', site: 'namecheap.com', url: 'https://namecheap.com/', signedIn: false, botCheck: true, profile: 'default' }),
+    ].join('\n') + '\n');
+    const r = py(`
+m.BROWSER_LEDGER = ${JSON.stringify(ledger)}
+rec("t1")
+a = run(m.cmd_block, {"task": "t1", "kind": "SIGN-IN", "subject": "www.topcashback.co.uk", "why": "Stuck on verify you are human.", "finding": None})
+b = run(m.cmd_block, {"task": "t1", "kind": "TOOL", "subject": "Cloudflare DNS needs an API key with DNS edit", "why": "Bot check on the dashboard.", "finding": "x"})
+print(json.dumps({"a": a["err"], "blk": m.task_blocker(notes("t1")), "b": b["err"]}))`);
+    expect(r.a).toMatch(/showed the robot a bot check/);
+    expect(r.a).toMatch(/not a SIGN-IN wall/);
+    expect(r.blk).toBeNull();          // nothing written
+    expect(r.b).toMatch(/is not a finding in the queue/);   // TOOL is the route offered, and it still checks its finding
   });
 
   it('KEVIN only for the steps that are his by rule; "get the quote" is not one', () => {

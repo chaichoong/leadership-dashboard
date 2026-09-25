@@ -560,12 +560,25 @@ function persistSessionCookies(dir, ttlMs = 60 * 60 * 1000) {
 // Signed out: a password box, GOV.UK One Login's own pages, or a URL that is
 // still a door (WebFiling's oauthSignIn/seclogin, any /login-shaped path).
 // Signed in: none of those, on a page of the site itself.
-function sessionVerdict(url, passwordFields) {
+//
+// Nor a bot check (25 Sep 2026). Cloudflare's dashboard shows the robot
+// "Performing security verification / Verify you are human" on its own
+// address, with no password box, so it read as signed in: the Robot sign-in
+// app opened no window, handed the task back, and the agent hit the same wall
+// again. The robot never clicks one of these, and a sign-in does not remove
+// it, so it is its own verdict: botCheck.
+const BOT_CHECK_TITLE_RE = /^\s*just a moment/i;
+const BOT_CHECK_TEXT_RE = /verify you are (?:a )?human|performing security verification|checking if the site connection is secure|checking your browser before accessing/i;
+function isBotCheck(text = '', title = '') {
+  return BOT_CHECK_TITLE_RE.test(String(title || '')) || BOT_CHECK_TEXT_RE.test(String(text || '').slice(0, 2000));
+}
+function sessionVerdict(url, passwordFields, text = '', title = '') {
   let host = '';
   try { host = new URL(url).hostname.toLowerCase(); } catch { host = ''; }
   const atDoor = /oauthSignIn|seclogin|\/(?:log-?in|sign-?in|signin|login|auth)(?:\/|\?|$)/i.test(url);
   const atOneLogin = /(^|\.)account\.gov\.uk$/i.test(host);
-  return { signedIn: Number(passwordFields) === 0 && !atOneLogin && !atDoor, atDoor, atOneLogin };
+  const botCheck = isBotCheck(text, title);
+  return { signedIn: Number(passwordFields) === 0 && !atOneLogin && !atDoor && !botCheck, atDoor, atOneLogin, botCheck };
 }
 
 // ── Browser ──────────────────────────────────────────────────────────────────
@@ -584,6 +597,31 @@ async function waitForProfile(dir, maxMs, message) {
   die(message);
 }
 
+// ── Kevin's sign-in comes first (25 Sep 2026) ────────────────────────────────
+// A sign-in window and an agent share this one profile. While an agent filled
+// the RightSure form, step after step, the profile was almost never free: the
+// sign-in waited, caught a gap, and the agent's next step and Kevin's window
+// fought for the lock (Chrome's icon flicking on and off, nothing opening), or
+// it gave up after three minutes telling him to quit a Chrome he did not have.
+// So a sign-in takes a HOLD: no new agent step starts while it stands, the
+// step in flight finishes, and then his window opens. The hold ends when his
+// window closes, and on its own after HOLD_MAX_MS or when its process is gone.
+const HOLD_MAX_MS = 20 * 60 * 1000;
+const holdPath = (dir) => dir + '.signin-hold';
+function signinHoldActive(dir, now = Date.now()) {
+  let h;
+  try { h = JSON.parse(fs.readFileSync(holdPath(dir), 'utf8')); } catch { return false; }
+  if (!h || !h.at || now - h.at > HOLD_MAX_MS) return false;
+  if (h.pid) { try { process.kill(h.pid, 0); } catch { return false; } }
+  return true;
+}
+function takeSigninHold(dir) { fs.writeFileSync(holdPath(dir), JSON.stringify({ pid: process.pid, at: Date.now() })); }
+function releaseSigninHold(dir) { try { fs.unlinkSync(holdPath(dir)); } catch { /* already gone */ } }
+async function waitForSigninHold(dir) {
+  const deadline = Date.now() + HOLD_MAX_MS;
+  while (signinHoldActive(dir) && Date.now() < deadline) await new Promise(r => setTimeout(r, 2000));
+}
+
 async function withPage(profile, headed, fn) {
   // Resolution chain rather than one hardcoded path: node walks parent
   // directories, so a worktree under .claude/worktrees/ finds the main
@@ -597,6 +635,8 @@ async function withPage(profile, headed, fn) {
   if (!chromium) die(`playwright not found (tried: ${tried.join(', ')}). Run npm install in ${REPO}.`);
   const dir = path.join(PROFILE_ROOT, profile || 'default');
   fs.mkdirSync(dir, { recursive: true });
+  // Kevin's sign-in first: never start a step while he holds the profile.
+  await waitForSigninHold(dir);
   // The `login` window is a plain Chrome holding this same profile. Launching
   // on top of it trips Chromium's profile lock with an opaque error, and the
   // 30-minute hand-back poller can easily fire while Kevin is still signing in
@@ -942,20 +982,25 @@ async function main() {
     if (fs.existsSync('/Applications/Google Chrome.app')) {
       fs.mkdirSync(dir, { recursive: true });
       const { spawnSync, spawn } = require('child_process');
-      // A headless robot step on this profile lasts seconds to a minute;
-      // wait it out rather than refuse the window (8 Sep 2026).
-      await waitForProfile(dir, 3 * 60 * 1000,
-        `the profile at ${dir} is already open in another Chrome. Quit it (Cmd+Q) first.`);
-      spawn('open', ['-na', 'Google Chrome', '--args', `--user-data-dir=${dir}`,
-        '--use-mock-keychain', '--no-first-run', url], { stdio: 'ignore' }).unref();
-      console.log(`Plain Chrome window open for ${host} (no automation attached). Log in, then Cmd+Q that window.`);
-      const deadline = Date.now() + 15 * 60 * 1000;
-      let seen = false;
-      while (Date.now() < deadline) {
-        await new Promise(r => setTimeout(r, 2000));
-        const running = spawnSync('pgrep', ['-f', `user-data-dir=${dir}`]).status === 0;
-        if (running) seen = true;
-        else if (seen) break;
+      // Hold the profile, then let the step in flight finish (25 Sep 2026).
+      takeSigninHold(dir);
+      process.on('exit', () => releaseSigninHold(dir));
+      try {
+        await waitForProfile(dir, 5 * 60 * 1000,
+          'the robot is still finishing a step in its browser. Nothing is wrong: try this sign-in again in a minute.');
+        spawn('open', ['-na', 'Google Chrome', '--args', `--user-data-dir=${dir}`,
+          '--use-mock-keychain', '--no-first-run', url], { stdio: 'ignore' }).unref();
+        console.log(`Plain Chrome window open for ${host} (no automation attached). Log in, then Cmd+Q that window.`);
+        const deadline = Date.now() + 15 * 60 * 1000;
+        let seen = false;
+        while (Date.now() < deadline) {
+          await new Promise(r => setTimeout(r, 2000));
+          const running = spawnSync('pgrep', ['-f', `user-data-dir=${dir}`]).status === 0;
+          if (running) seen = true;
+          else if (seen) break;
+        }
+      } finally {
+        releaseSigninHold(dir);
       }
       const kept = persistSessionCookies(dir);
       console.log(`Kept ${kept} session cookie(s) alive for one hour.`);
@@ -1010,11 +1055,13 @@ async function main() {
       const url = page.url();
       const passwordFields = await passwordFieldCount(page);
       const text = await domText(page, 600);
-      const verdict = sessionVerdict(url, passwordFields);
+      const title = await page.title();
+      const verdict = sessionVerdict(url, passwordFields, text, title);
       const png = await shoot(page, shot);
-      return { site, signedIn: verdict.signedIn, url, title: await page.title(), passwordFields, walked: clicked, text, screenshot: png };
+      return { site, signedIn: verdict.signedIn, botCheck: verdict.botCheck, url, title, passwordFields, walked: clicked, text, screenshot: png };
     });
-    ledger({ cmd: 'session', site, url: res.url, signedIn: res.signedIn, profile });
+    ledger({ cmd: 'session', site, url: res.url, signedIn: res.signedIn, botCheck: res.botCheck, profile });
+    if (res.botCheck) console.error(`BOT CHECK: ${site} shows the robot a "verify you are human" page. A sign-in will not remove it and the robot never clicks one. This is not a SIGN-IN wall.`);
     console.log(JSON.stringify(res));
     return;
   }
@@ -1045,9 +1092,10 @@ async function main() {
       // --links <text>: also return the page's links whose href contains <text>, with their words.
       const needle = arg(rest, 'links');
       const links = needle ? pickLinks(await page.$$eval('a[href]', as => as.map(a => ({ href: a.href, text: a.textContent || '' }))), needle) : undefined;
-      return { title: await page.title(), url: page.url(), passwordFields, text, screenshot: png, links };
+      const title = await page.title();
+      return { title, url: page.url(), passwordFields, botCheck: isBotCheck(text, title), text, screenshot: png, links };
     });
-    ledger({ cmd: 'read', url, profile, screenshot: res.screenshot });
+    ledger({ cmd: 'read', url, profile, screenshot: res.screenshot, ...(res.botCheck ? { botCheck: true } : {}) });
     console.log(JSON.stringify(res));
     return;
   }
@@ -1234,4 +1282,5 @@ if (require.main === module) {
 
 module.exports = { hostAllowed, pickLinks, runSteps, assertNotCredential, assertApproved, SECRET_NAME_RE, loadSites, sessionVerdict,
                    recordLoginSite, signinTargets, signinOwner, signinDomain, readSitesFile,
-                   assertUploadable, assertConfirmable, UPLOAD_DIR, UPLOAD_EXTENSIONS, persistSessionCookies };
+                   assertUploadable, assertConfirmable, UPLOAD_DIR, UPLOAD_EXTENSIONS, persistSessionCookies,
+                   signinHoldActive, takeSigninHold, releaseSigninHold, waitForSigninHold, HOLD_MAX_MS, isBotCheck };

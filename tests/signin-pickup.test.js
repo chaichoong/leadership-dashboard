@@ -563,7 +563,7 @@ print('---JSON---'); print(json.dumps([
   m.ledger_session_verdict('www.facebook.com', 30, L + '.missing', datetime(2026, 9, 15, 9, 40, tzinfo=timezone.utc)),
 ]))`);
     // the default profile's verdict, not the later one from another profile
-    expect(out[0]).toEqual({ signedIn: true, url: 'https://www.facebook.com/home.php', at: '2026-09-15T09:23:03.599Z', source: 'ledger' });
+    expect(out[0]).toEqual({ signedIn: true, botCheck: false, url: 'https://www.facebook.com/home.php', at: '2026-09-15T09:23:03.599Z', source: 'ledger' });
     expect(out.slice(1)).toEqual([null, null, null]);
   });
   it('signin-waiting hands a site already signed in straight back (alreadyLive) and lists the rest with its check', () => {
@@ -598,6 +598,45 @@ print('---JSON---'); print(json.dumps({'walked': walked, 'waiting': [(g['host'],
     expect(out.live).toEqual([['app.pingen.com', ['rec3']]]);
     expect(out.patched).toEqual(['rec3']);
     expect(out.status).toBe('Today');
+  });
+  it('signin-waiting never hands back or lists a site that shows the robot a bot check (Cloudflare, 25 Sep 2026)', () => {
+    // At 17:16 on 25 Sep the walk read Cloudflare's "verify you are human" page
+    // as signed in: no window opened, the task went back to the agent, and the
+    // agent hit the same wall. A bot check is its own group: nothing handed back,
+    // no window offered, and the app says so.
+    const out = py(`
+sites = json.loads(sys.argv[1])
+sites['dash.cloudflare.com'] = {'label': 'dash.cloudflare.com', 'login': True, 'loginUrl': 'https://dash.cloudflare.com/'}
+recs = [
+  {'id': 'rec1', 'fields': {m.AF['name']: 'SPF fix', m.AF['agentOutput']: 'SIGN-IN NEEDED: dash.cloudflare.com (https://dash.cloudflare.com/)', m.AF['teamMember']: ['recjh6mmaF8KJW8t3']}},
+  {'id': 'rec3', 'fields': {m.AF['name']: 'HMRC letter', m.AF['agentOutput']: 'SIGN-IN NEEDED: Pingen (https://app.pingen.com/)', m.AF['teamMember']: ['recjh6mmaF8KJW8t3']}},
+]
+m.query_tasks = lambda formula, **kw: recs
+m.get_task = lambda tid: next(r for r in recs if r['id'] == tid)
+m.load_login_sites = lambda: sites
+patched = {}
+m.patch_task = lambda tid, fields: patched.__setitem__(tid, fields)
+def check(host, use_ledger=False, **k):
+    if host == 'dash.cloudflare.com':
+        return {'signedIn': False, 'botCheck': True, 'url': 'https://dash.cloudflare.com/', 'at': 't', 'source': 'walk'}
+    return {'signedIn': False, 'botCheck': False, 'url': 'https://app.pingen.com/login', 'at': 't', 'source': 'walk'}
+m.session_check = check
+import io, contextlib, os
+os.environ.pop('SIGNIN_SKIP_WALK', None)
+buf = io.StringIO()
+with contextlib.redirect_stdout(buf):
+    m.cmd_signin_waiting(types.SimpleNamespace(no_walk=False, dry_run=False))
+d = json.loads(buf.getvalue())
+print('---JSON---'); print(json.dumps({'waiting': [g['host'] for g in d['sites']], 'live': d['alreadyLive'],
+  'bot': [(g['host'], g['sessionCheck']['state'], [t['id'] for t in g['tasks']]) for g in d['botCheck']], 'patched': sorted(patched)}))`, SITES);
+    expect(out.waiting).toEqual(['app.pingen.com']);
+    expect(out.live).toEqual([]);
+    expect(out.bot).toEqual([['dash.cloudflare.com', 'bot-check', ['rec1']]]);
+    expect(out.patched).toEqual([]);
+    // The app tells Kevin in a dialog on every route that checks, and a site link opens no window for it.
+    const app = readFileSync(join(ROOT, 'scripts', 'robot-signin.applescript'), 'utf8');
+    expect(app.match(/\tannounceBotChecks\(\)\n/g).length).toBe(3);
+    expect(app).toMatch(/d\.botCheck\|\|\[\]\)\)console\.log\(g\.host\)"\) contains wantHost then\n\t\t\tannounceBotChecks\(\)\n\t\t\treturn/);
   });
   it('signin-waiting --site checks that one host only and lists the rest unchecked (the per-site link)', () => {
     const out = py(`
