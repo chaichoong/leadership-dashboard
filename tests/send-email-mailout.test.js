@@ -42,7 +42,7 @@ def fake_worker(url, payload=None):
     calls.append(payload)
     if payload and payload.get("to") in a.get("failOn", []):
         sys.exit(a.get("failWith", "ERROR: worker 500: boom"))
-    return {"id": "msg-%d" % len(calls)}
+    return {"id": "msg-%d" % len(calls), "threadId": "thr-%d" % len(calls)}
 m.worker_call = fake_worker
 m.api = lambda method, url, payload=None: patches.append(payload) or {}
 res = {"calls": calls, "patches": patches}
@@ -137,6 +137,8 @@ describe('send_each', () => {
       expect(c.text).toContain('We have rooms in Haverhill.');
     }
     expect(r.ledger.filter((x) => x.event === 'sent')).toHaveLength(3);
+    // the thread is kept per address, so a STOP from a colleague can be matched to who we emailed
+    expect(r.ledger.filter((x) => x.event === 'sent').map((x) => x.threadId)).toEqual(['thr-1', 'thr-2', 'thr-3']);
     expect(JSON.stringify(r.patches)).toMatch(/3 of 3 done/);
   });
 
