@@ -85,6 +85,16 @@ AGENT_ALLOWED_TOOLS=(
   # scripts/agent-browser.js, which is the only route to a browser and which
   # physically cannot submit a form without an approved task id.
   "Bash(node:*)"
+
+  # THE RUN'S OWN CONTROL (finding 20260925-agent-dispatch-617, 25 Sep 2026).
+  # SKILL step 7 runs verify through ~/tools/run-job.sh, which records the run
+  # for the Estate board and alerts on a failure. A headless run had no
+  # permission for it, so the call waited for an approval nobody could give and
+  # the agent fell back to a bare verify: the check ran, the record and the
+  # alert did not. Exactly that command is allowed, never run-job.sh itself,
+  # which would run anything it is handed.
+  "Bash(/Users/kevinbrittain/tools/run-job.sh agent-dispatch python3 /Users/kevinbrittain/Projects/leadership-dashboard/scripts/agent-dispatch.py verify:*)"
+  "Bash(/Users/kevinbrittain/tools/run-job.sh agent-dispatch python3 scripts/agent-dispatch.py verify:*)"
 )
 export AGENT_ALLOWED_TOOLS
 
