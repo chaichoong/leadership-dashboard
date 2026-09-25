@@ -16,6 +16,9 @@ function withSignIns() {
 }
 
 test.describe('sign-ins waiting are a tap, not a decision', () => {
+  // The strip's links open the Robot sign-in app, which lives on the Mac; off a Mac it names
+  // the sites without links (25 Sep 2026). Pin a Mac so this suite means the same on any host.
+  test.use({ userAgent: 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0 Safari/537.36' });
   test('the strip names each site with its count and offers all of them in one link', async ({ page }) => {
     await mockAgentsPage(page, withSignIns());
     await loadAgentsPage(page);

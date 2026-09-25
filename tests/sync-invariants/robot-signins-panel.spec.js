@@ -73,6 +73,32 @@ test.describe('Robot sign-ins panel on a Mac', () => {
     await expect(page.locator('#signinsCount')).toHaveText('0');
     await expect(panel.locator('[data-rs-signin]')).toHaveCount(0);
     await expect(panel.locator('[data-rs-toggle]')).toHaveText('Show all 2');
+    // The keyboard stays on the toggle through the redraw, and each button names its site.
+    await panel.locator('[data-rs-toggle]').focus();
+    await page.keyboard.press('Enter');
+    await expect(panel.locator('[data-rs-toggle]')).toBeFocused();
+    await expect(panel.locator('[data-rs-signin="tax.service.gov.uk"]')).toHaveAttribute('aria-label', 'Sign in to HMRC');
+  });
+
+  test('a line in a state the page does not know is shown as needing him, never hidden', async ({ page }) => {
+    const panel = await open(page, [signinRow([line('Pingen (letters)', 'app.pingen.com', 'signed-in'),
+      line('Mystery', 'mystery.example.com', 'half-signed-in')])]);
+    await expect(panel).toContainText('One sign-in needs you: Mystery.');
+    await expect(panel.locator('[data-rs-signin="mystery.example.com"]')).toBeVisible();
+  });
+
+  test('the waiting strip survives the 30-second re-read after a Sign in tap', async ({ page }) => {
+    const fx = defaultFixtures();
+    fx.approvals = fx.approvals.map((r, i) => {
+      if (i === 0) r.fields[TF.agentOutput] = 'Letter built.\nSIGN-IN NEEDED: Pingen (https://app.pingen.com/)';
+      return r;
+    });
+    const panel = await open(page, [signinRow(MIXED)], { approvals: fx.approvals });
+    await expect(panel.locator('[data-apv-signin-strip]')).toBeVisible();
+    // The queue re-read is still in flight when the estate re-read lands (the race the review proved).
+    await page.route('**/api.airtable.com/**tblqB8b22hKBL4PF1**', async (route) => { await new Promise((r) => setTimeout(r, 1500)); await route.fallback(); });
+    await page.evaluate(async () => { const q = window.apvSilentRefresh(); await loadEstateStatus(); await q; });
+    await expect(panel.locator('[data-apv-signin-strip]')).toContainText('One task is waiting on a sign-in');
   });
 
   test('a failed refresh, a stale row and a missing row each say so; none reads as an empty list', async ({ page }) => {
@@ -109,7 +135,13 @@ test.describe('Robot sign-ins panel on a phone', () => {
   test.use({ userAgent: PHONE_UA });
 
   test('shows where each sign-in stands, with no button that cannot work there', async ({ page }) => {
-    const panel = await open(page, [signinRow(MIXED)]);
+    const fx = defaultFixtures();
+    fx.approvals = fx.approvals.map((r, i) => {
+      if (i === 0) r.fields[TF.agentOutput] = 'Letter built.\nSIGN-IN NEEDED: Pingen (https://app.pingen.com/)';
+      return r;
+    });
+    const panel = await open(page, [signinRow(MIXED)], { approvals: fx.approvals });
+    await expect(panel.locator('[data-apv-signin-strip]')).toContainText('One task is waiting on a sign-in');   // control: the strip is there
     await expect(panel).toContainText('2 sign-ins need you: EDF Energy, Utilita Apartment 1.');
     await expect(panel.locator('a[href^="robotsignin://"]')).toHaveCount(0);
     await expect(panel.locator('[data-rs-line="signed-out"]').first()).toContainText('Sign in on your Mac');

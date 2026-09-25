@@ -336,7 +336,7 @@ on refreshPanel()
 	try
 		sh("/usr/bin/python3 scripts/detach.py --cwd " & quoted form of repo & " -- /usr/bin/python3 scripts/estate-status.py signins > /dev/null")
 	on error errMsg
-		display notification "Signed in, but the AI Agents page could not be told: " & errMsg & " It catches up within ten minutes." with title "Robot sign-in"
+		display notification "The AI Agents page could not be told: " & errMsg & " It catches up within ten minutes." with title "Robot sign-in"
 	end try
 end refreshPanel
 
@@ -461,5 +461,9 @@ on open location theURL
 			return
 		end if
 		display alert "Unknown site" message wantHost & " is not on the robot's sign-in list."
+		return
 	end if
+	-- A link this app does not know says so, never nothing (review, 25 Sep 2026: an older app
+	-- met the page's profile/ and add links and silently did nothing).
+	display alert "Robot sign-in" message "This link is not one the app knows: " & theURL & ". Rebuild the app with scripts/build-robot-signin.sh if the AI Agents page is newer."
 end open location

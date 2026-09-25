@@ -693,6 +693,11 @@ def signin_payload(now, src):
     profile_of = {a["label"]: a["profile"] for a in (src.get("accounts") or []) if a.get("label") and a.get("profile")}
     last_read = {}
     for rd in src.get("readings") or []:
+        # Only a read that answers the question counts: "could not open the page"
+        # says nothing about the login, and ranking it newest wiped a good read
+        # an hour old and put a Sign in button on a live flat (review, 25 Sep 2026).
+        if not (rd.get("ok") or rd.get("problem") == "SIGN-IN NEEDED"):
+            continue
         prof = profile_of.get(rd.get("label"))
         at = _utc(rd.get("at"), naive_is_london=True)
         if prof and at and (prof not in last_read or at >= last_read[prof][0]):
@@ -718,10 +723,7 @@ def signin_payload(now, src):
                         seen.append((at, e["signedIn"], "robot check"))
         elif profile in last_read:
             at, rd = last_read[profile]
-            if rd.get("ok"):
-                seen.append((at, True, "hourly read"))
-            elif rd.get("problem") == "SIGN-IN NEEDED":
-                seen.append((at, False, "hourly read"))
+            seen.append((at, bool(rd.get("ok")), "hourly read"))
         last = max(seen, key=lambda s: s[0]) if seen else None
         # Kevin's own sign-in, if it came after the last look.
         mine = [_utc(e.get("at")) for e in ledger
@@ -1098,6 +1100,7 @@ def selftest():
             {"at": "2026-09-25T08:05:22", "label": "Apartment 1", "ok": False, "problem": "SIGN-IN NEEDED"},
             {"at": "2026-09-25T08:05:22", "label": "Apartment 2", "ok": False, "problem": "SIGN-IN NEEDED"},
             {"at": "2026-09-25T09:25:00", "label": "Apartment 2", "ok": True, "problem": None},
+            {"at": "2026-09-25T09:30:00", "label": "Apartment 2", "ok": False, "problem": "could not open the page"},
         ],
         "accounts": [{"label": "Apartment 1", "profile": "utilita-apt1"}, {"label": "Apartment 2", "profile": "utilita-apt2"}],
     }
@@ -1111,7 +1114,7 @@ def selftest():
     ok(got["HMRC"]["state"] == "on-demand", "a short login is never shown as signed out: %r" % got["HMRC"])
     ok(got["Utilita Apartment 1"]["state"] == "you-signed-in", "the flat's own profile sign-in at 08:24Z beats the 08:05 read (07:05Z)")
     ok(got["Utilita Apartment 2"]["state"] == "signed-in" and got["Utilita Apartment 2"]["at"] == "2026-09-25T08:25:00.000Z",
-       "the newest meter read, London time with no offset: %r" % got["Utilita Apartment 2"])
+       "the newest DECIDING meter read (a later page failure says nothing), London time with no offset: %r" % got["Utilita Apartment 2"])
     ok(got["New"]["state"] == "unchecked" and got["New"]["at"] is None, "nothing looked: unchecked, never green")
     ok(signin_payload(t0, src)["unlisted"] == ["Evernote", "TopCashback"], "login sites with no page are named once each")
     empty = robot_signins_row(t0, dict(src, targets=[]))

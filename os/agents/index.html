@@ -472,10 +472,10 @@ a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}
         <div class="zone" id="zoneSignins">
             <div class="zone-header">
                 <span class="zone-title">Robot sign-ins</span>
-                <span class="zone-count" id="signinsCount">0</span>
-                <span class="zone-sub">The logins your robots use. You sign in on your Mac; the robots never see a password.</span>
+                <span class="zone-count" id="signinsCount">…</span>
+                <span class="zone-sub">The logins your robots use. You sign in on your Mac. The robots never see a password.</span>
             </div>
-            <div id="signinsBody" aria-live="polite"><div class="zone-loading"><div class="sop-spinner"></div><span>Loading the robot's sign-ins…</span></div></div>
+            <div id="signinsBody"><div class="zone-loading"><div class="sop-spinner"></div><span>Loading the robot's sign-ins…</span></div></div>
         </div>
         <div class="zone" id="zoneApprovals">
             <div class="zone-header">
@@ -2218,18 +2218,25 @@ function apvSignInNeeded(output){
 function apvSignInLink(need){
     return need.host ? `robotsignin://site/${encodeURIComponent(need.host)}` : 'robotsignin://all';
 }
-function apvSignInStripHtml(items){
+function apvSignInStripHtml(items, onMac = true){
     const needs = items.map(t => apvSignInNeeded(t.agentOutput)).filter(Boolean);
     if(!needs.length) return '';
     const bySite = {};
     needs.forEach(n => { const k = n.host || n.site.toLowerCase(); (bySite[k] = bySite[k] || { site: n.site, host: n.host, n: 0 }).n++; });
+    // Off a Mac the robotsignin:// links cannot open anything (the app lives on the Mac), so the
+    // strip names the sites as plain text and says where to sign in (review, 25 Sep 2026).
     const parts = Object.values(bySite).sort((a,b)=>b.n-a.n)
-        .map(g => `<a class="apv-signin-site" href="${esc(apvSignInLink(g))}" title="Opens the Robot sign-in app on your Mac at this site">${esc(g.site)} <span style="color:var(--text-muted)">(${g.n})</span></a>`).join('');
+        .map(g => onMac
+            ? `<a class="apv-signin-site" href="${esc(apvSignInLink(g))}" title="Opens the Robot sign-in app on your Mac at this site">${esc(g.site)} <span style="color:var(--text-muted)">(${g.n})</span></a>`
+            : `<span class="apv-signin-site">${esc(g.site)} <span style="color:var(--text-muted)">(${g.n})</span></span>`).join('');
+    const all = onMac
+        ? `<a class="btn btn-success btn-sm" href="robotsignin://all" title="Opens the Robot sign-in app on your Mac and goes through every waiting site in turn">Sign in to all (${needs.length})</a>`
+        : `<span class="rs-mac">Sign in on your Mac</span>`;
     return `<div class="apv-signin-strip" data-apv-signin-strip>
         <div><strong>${needs.length === 1 ? 'One task is' : needs.length + ' tasks are'} waiting on a sign-in.</strong>
             <span style="color:var(--text-secondary)">Not a decision. Each site opens in turn: sign in, press Cmd+Q, the next opens. When the last one closes, the robots start on the work. This page updates itself as each site is handed back.</span></div>
         <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-top:6px">
-            <a class="btn btn-success btn-sm" href="robotsignin://all" title="Opens the Robot sign-in app on your Mac and goes through every waiting site in turn">Sign in to all (${needs.length})</a>${parts}
+            ${all}${parts}
         </div>
     </div>`;
 }
@@ -6417,7 +6424,7 @@ const SIGNIN_STATE = {
     'signed-in':     { order: 3, label: 'Signed in',       style: ['var(--success-bg)', 'var(--success)'] },
     'on-demand':     { order: 4, label: 'When needed',     style: ['var(--bg-subtle)', 'var(--text-muted)'] },
 };
-let _signinsOpen = false;
+let _signinsOpen = false, _signinStripCache = '';
 
 function signinRow(){ return _estateRows.find(r => (r.fields || {})[ES.key] === SIGNIN_ROW_KEY) || null; }
 // A payload that will not parse is reported on the panel, never read as an empty list.
@@ -6435,14 +6442,16 @@ function signinLink(ln){
 }
 function signinButton(ln){
     if(!SIGNIN_ON_MAC) return `<span class="rs-mac">Sign in on your Mac</span>`;
-    return `<a class="btn btn-success btn-sm" href="${esc(signinLink(ln))}" data-rs-signin="${esc(ln.profile && ln.profile !== 'default' ? ln.profile : ln.host)}" title="Opens the Robot sign-in app on your Mac at this sign-in">Sign in</a>`;
+    return `<a class="btn btn-success btn-sm" href="${esc(signinLink(ln))}" data-rs-signin="${esc(ln.profile && ln.profile !== 'default' ? ln.profile : ln.host)}" aria-label="Sign in to ${esc(ln.label)}" title="Opens the Robot sign-in app on your Mac at this sign-in">Sign in</a>`;
 }
+// A state this page does not know is treated as "not checked yet": shown, with a button, never hidden.
+function signinNeedsYou(ln){ return ln.state === 'signed-out' || ln.state === 'unchecked' || !SIGNIN_STATE[ln.state]; }
 function signinLineHtml(ln){
     const st = SIGNIN_STATE[ln.state] || SIGNIN_STATE.unchecked;
     const when = ln.state === 'on-demand' ? 'Short login: sign in when a task asks for it'
         : ln.state === 'you-signed-in' ? `You signed in ${estateAgo(ln.at)}. The robot confirms it at its next check.`
-        : ln.at ? `${ln.how || 'checked'} ${estateAgo(ln.at)}` : 'Not checked yet';
-    const act = (ln.state === 'signed-out' || ln.state === 'unchecked' || ln.state === 'on-demand') ? signinButton(ln) : '';
+        : ln.at ? `Checked ${estateAgo(ln.at)} by the ${ln.how || 'robot'}` : 'Not checked yet';
+    const act = (signinNeedsYou(ln) || ln.state === 'on-demand') ? signinButton(ln) : '';
     return `<div class="rs-line" data-rs-line="${esc(ln.state)}">
         <div><span class="rs-label">${esc(ln.label)}</span>
             <span class="agent-pill" style="background:${st.style[0]};color:${st.style[1]};margin-left:6px">${esc(st.label)}</span>
@@ -6455,14 +6464,18 @@ function renderSignins(){
     const countEl = document.getElementById('signinsCount');
     const setCount = (n, hot) => { if(countEl){ countEl.textContent = n; countEl.className = 'zone-count' + (hot ? ' hot' : ''); } };
     // The waiting-task strip (4 Sep 2026) leads the panel: work that stopped on a sign-in.
-    const strip = _approvalsState === 'ready' ? apvSignInStripHtml(allApprovals) : '';
+    // While the queue re-reads (every 30 s after a Sign in tap) the last good strip stays:
+    // redrawn from nothing, it vanished and the unchanged queue never brought it back (review).
+    if(_approvalsState === 'ready') _signinStripCache = apvSignInStripHtml(allApprovals, SIGNIN_ON_MAC);
+    else if(String(_approvalsState).indexOf('error') === 0) _signinStripCache = '';
+    const strip = _signinStripCache;
     const addBtn = SIGNIN_ON_MAC
         ? `<a class="btn btn-sm" href="robotsignin://add" data-rs-add title="Opens the Robot sign-in app on your Mac: paste the site's sign-in page, name it, sign in">+ Add a new site</a>` : '';
     const macNote = SIGNIN_ON_MAC ? '' : `<div class="rs-note">Sign-ins open on your Mac, where the robots' browser lives. This page shows where each one stands.</div>`;
     const haveRows = _estateState === 'ready' || (_estateState === 'loading' && _estateRows.length);
     if(String(_estateState).indexOf('error') === 0){
         setCount('?', true);
-        body.innerHTML = strip + `<div class="zone-error">Could not read the sign-in list (${esc(String(_estateState).slice(7))}). This list is NOT empty — it could not be read.</div>`;
+        body.innerHTML = strip + `<div class="zone-error">Could not read the sign-in list (${esc(String(_estateState).slice(7))}). This list is NOT empty. It could not be read.</div>`;
         return;
     }
     if(!haveRows){
@@ -6488,13 +6501,13 @@ function renderSignins(){
     // 4 Sep 2026, and "All good. 0 signed in" would be a calm lie.
     if(!p || p.broken || !Array.isArray(p.lines) || !p.lines.length){
         setCount('?', true);
-        body.innerHTML = strip + warn + `<div class="zone-error">The sign-in list could not be read${p && p.broken ? ' (' + esc(p.broken) + ')' : ''}. This list is NOT empty — it could not be read.</div>`;
+        body.innerHTML = strip + warn + `<div class="zone-error">The sign-in list could not be read${p && p.broken ? ' (' + esc(p.broken) + ')' : ''}. This list is NOT empty. It could not be read.</div>`;
         return;
     }
     const order = ln => (SIGNIN_STATE[ln.state] || SIGNIN_STATE.unchecked).order;
     const lines = p.lines.slice().sort((a, b) => order(a) - order(b) || String(a.label).localeCompare(String(b.label)));
     const pick = st => lines.filter(ln => ln.state === st);
-    const needs = lines.filter(ln => ln.state === 'signed-out' || ln.state === 'unchecked');
+    const needs = lines.filter(signinNeedsYou);
     const mine = pick('you-signed-in'), ok = pick('signed-in'), od = pick('on-demand');
     setCount(needs.length, needs.length > 0);
     const summary = needs.length
@@ -6506,10 +6519,10 @@ function renderSignins(){
     let rest = '';
     if(_signinsOpen){
         rest = ok.concat(od).map(signinLineHtml).join('');
-        if((p.unlisted || []).length) rest += `<div class="rs-note">No sign-in page on file yet, so not listed: ${esc(p.unlisted.join(', '))}. Use + Add a new site with each one's sign-in page to add it here.</div>`;
+        if((p.unlisted || []).length) rest += `<div class="rs-note">No sign-in page on file yet, so not listed: ${esc(p.unlisted.join(', '))}. On your Mac, use + Add a new site with each one's sign-in page to add it here.</div>`;
         if((p.skipped || []).length) rest += `<div class="rs-note">Could not list: ${esc(p.skipped.join('; '))}.</div>`;
     }
-    body.innerHTML = strip + warn + `<div class="rs-summary">${summary}
+    body.innerHTML = strip + warn + `<div class="rs-summary"><span role="status">${summary}</span>
             <div class="rs-actions">${toggle}${addBtn}</div></div>
         <div class="rs-note">Updated ${esc(estateAgo(f[ES.updated]))}.</div>
         ${shown.length || rest ? `<div class="rs-list">${shown.map(signinLineHtml).join('')}${rest}</div>` : ''}
@@ -6520,6 +6533,9 @@ document.addEventListener('click', (ev) => {
     if(!t) return;
     _signinsOpen = !_signinsOpen;
     renderSignins();
+    // The panel is redrawn whole; keep the keyboard where it was.
+    const again = document.querySelector('#signinsBody [data-rs-toggle]');
+    if(again) again.focus();
 });
 
 async function loadEstateStatus(){
