@@ -206,6 +206,26 @@ test.describe('Robot sign-ins panel and blocked robots', () => {
     await expect(panel.locator('[data-rs-wall-add="portal.fylde.gov.uk"]')).toBeFocused();
   });
 
+  test('a wall on a site he has just signed in to says so, with no second button and no count', async ({ page }) => {
+    const panel = await open(page, [signinRow([line('Amazon (order history)', 'www.amazon.co.uk', 'you-signed-in', { at: ago(2), how: 'you signed in' })]),
+      blockersRow(WALLS.slice(0, 1))]);
+    await expect(panel.locator('[data-rs-wall-line="done"]')).toContainText('You signed in since. The robot picks the task up at its next pass.');
+    await expect(panel.locator('[data-rs-wall="www.amazon.co.uk"]')).toHaveCount(0);
+    await expect(page.locator('#signinsCount')).toHaveText('0');
+    await expect(panel).not.toContainText('needs you');
+  });
+
+  test('a failed blocked-robots check says so, and a broken sign-in list never hides a stuck robot', async ({ page }) => {
+    const failedRow = blockersRow(WALLS.slice(0, 1));
+    failedRow.fields[ES.status] = 'Failed';
+    failedRow.fields[ES.detail] = 'The blocker sweep has not run for 9 hours.';
+    let panel = await open(page, [signinRow([line('Pingen (letters)', 'app.pingen.com', 'signed-in')]), failedRow]);
+    await expect(panel).toContainText('Blocked robots could not be checked just now: The blocker sweep has not run for 9 hours.');
+    panel = await open(page, [signinRow([], { [ES.payload]: '{"lines":[' }), blockersRow(WALLS.slice(0, 1))]);
+    await expect(panel).toContainText('The sign-in list could not be read');
+    await expect(panel.locator('[data-rs-wall="www.amazon.co.uk"]')).toBeVisible();
+  });
+
   test('a blocked site the list already calls signed out is counted once', async ({ page }) => {
     const panel = await open(page, [signinRow([line('Amazon (order history)', 'www.amazon.co.uk', 'signed-out')]), blockersRow(WALLS.slice(0, 1))]);
     await expect(panel).toContainText('One sign-in needs you: Amazon (order history).');

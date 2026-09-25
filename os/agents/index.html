@@ -6474,23 +6474,45 @@ function signinWalls(){
         const k = w.kind + ' ' + String(w.subject).toLowerCase();
         (by[k] = by[k] || { kind: w.kind, subject: String(w.subject), names: [] }).names.push(String(w.name || ''));
     });
-    return Object.values(by);
+    // The sweep only rewrites its list every half hour. A wall on a site he has signed in to
+    // since (the line reads "You signed in") is his step done: said so, no second button,
+    // not counted (review, 25 Sep 2026).
+    const status = row ? (row.fields || {})[ES.status] : 'Worked';
+    return { walls: Object.values(by), failed: row && status !== 'Worked' ? String((row.fields || {})[ES.detail] || status || 'no reason given') : '' };
 }
-function signinWallsHtml(walls){
-    if(!walls.length) return '';
+// One site name covers another when they are equal or one is a subdomain of the other.
+function signinSameSite(a, b){ a = String(a).toLowerCase(); b = String(b).toLowerCase(); return a === b || a.endsWith('.' + b) || b.endsWith('.' + a); }
+function signinWallsHtml(walls, lines, failed){
+    const warn = failed ? `<div class="rs-note">Blocked robots could not be checked just now: ${esc(failed)} What is listed below is from the last good check.</div>` : '';
+    if(!walls.length) return warn;
     const rows = walls.map(w => {
         const n = w.names.length, tasks = n === 1 ? 'One task is' : `${n} tasks are`;
         const what = w.kind === 'SIGN-IN'
             ? `${tasks} blocked until the robot is signed in to ${esc(w.subject)}.`
             : `${tasks} blocked until ${esc(w.subject)} is on the robot's list.`;
-        const btn = !SIGNIN_ON_MAC ? `<span class="rs-mac">Sign in on your Mac</span>`
+        const btn = w.done ? ''
+            : !SIGNIN_ON_MAC ? `<span class="rs-mac">${w.kind === 'SIGN-IN' ? 'Sign in' : 'Add it'} on your Mac</span>`
             : w.kind === 'SIGN-IN'
                 ? `<a class="btn btn-success btn-sm" href="${esc('robotsignin://site/' + encodeURIComponent(w.subject))}" data-rs-wall="${esc(w.subject)}" aria-label="Sign in to ${esc(w.subject)}">Sign in</a>`
                 : `<a class="btn btn-sm" href="robotsignin://add" data-rs-wall-add="${esc(w.subject)}" aria-label="Add ${esc(w.subject)} to the robot's list">+ Add this site</a>`;
-        return `<div class="rs-line" data-rs-wall-line="${esc(w.kind)}"><div><span class="rs-label">${what}</span>
-            <span class="rs-when">${esc(w.names.slice(0, 3).join('; '))}${n > 3 ? ' and ' + (n - 3) + ' more' : ''}</span></div>${btn}</div>`;
+        const note = w.done ? 'You signed in since. The robot picks the task up at its next pass.'
+            : w.names.slice(0, 3).join(', ') + (n > 3 ? ' and ' + (n - 3) + ' more' : '');
+        return `<div class="rs-line" data-rs-wall-line="${esc(w.done ? 'done' : w.kind)}"><div><span class="rs-label">${what}</span>
+            <span class="rs-when">${esc(note)}</span></div>${btn}</div>`;
     }).join('');
-    return `<div class="rs-list" data-rs-walls style="margin:0 0 10px">${rows}</div>`;
+    return warn + `<div class="rs-list" data-rs-walls style="margin:0 0 10px">${rows}</div>`;
+}
+// The walls on their own, for the paths where the sign-in list cannot be shown: they come
+// from a separate row, so a broken list must not hide a robot that is stuck.
+function signinWallsBare(){
+    if(String(_estateState).indexOf('error') === 0) return '';
+    const { walls, failed } = signinWalls();
+    return signinWallsHtml(walls, [], failed);
+}
+// Which walls still need him: a SIGN-IN wall on a site he has just signed in to does not.
+function signinMarkWalls(walls, lines){
+    walls.forEach(w => { w.done = w.kind === 'SIGN-IN' && lines.some(ln => ln.state === 'you-signed-in' && signinSameSite(ln.host, w.subject)); });
+    return walls;
 }
 function renderSignins(){
     const body = document.getElementById('signinsBody'); if(!body) return;
@@ -6507,7 +6529,7 @@ function renderSignins(){
     const haveRows = _estateState === 'ready' || (_estateState === 'loading' && _estateRows.length);
     if(String(_estateState).indexOf('error') === 0){
         setCount('?', true);
-        body.innerHTML = strip + `<div class="zone-error">Could not read the sign-in list (${esc(String(_estateState).slice(7))}). This list is NOT empty. It could not be read.</div>`;
+        body.innerHTML = strip + signinWallsBare() + `<div class="zone-error">Could not read the sign-in list (${esc(String(_estateState).slice(7))}). This list is NOT empty. It could not be read.</div>`;
         signinsSay('Robot sign-ins could not be read');
         return;
     }
@@ -6518,7 +6540,7 @@ function renderSignins(){
     const row = signinRow();
     if(!row){
         setCount('?', true);
-        body.innerHTML = strip + `<div class="zone-error">No sign-in list yet. The estate-status job writes it every ten minutes. If this stays, that job has stopped.</div>`;
+        body.innerHTML = strip + signinWallsBare() + `<div class="zone-error">No sign-in list yet. The estate-status job writes it every ten minutes. If this stays, that job has stopped.</div>`;
         signinsSay('Robot sign-ins could not be read');
         return;
     }
@@ -6537,7 +6559,7 @@ function renderSignins(){
     // 4 Sep 2026, and "All good. 0 signed in" would be a calm lie.
     if(!p || p.broken || !Array.isArray(p.lines) || !p.lines.length){
         setCount('?', true);
-        body.innerHTML = strip + warn + `<div class="zone-error">The sign-in list could not be read${p && p.broken ? ' (' + esc(p.broken) + ')' : ''}. This list is NOT empty. It could not be read.</div>`;
+        body.innerHTML = strip + signinWallsBare() + warn + `<div class="zone-error">The sign-in list could not be read${p && p.broken ? ' (' + esc(p.broken) + ')' : ''}. This list is NOT empty. It could not be read.</div>`;
         signinsSay('Robot sign-ins could not be read');
         return;
     }
@@ -6546,10 +6568,11 @@ function renderSignins(){
     const pick = st => lines.filter(ln => ln.state === st);
     const needs = lines.filter(signinNeedsYou);
     const mine = pick('you-signed-in'), ok = pick('signed-in'), od = pick('on-demand');
-    const walls = signinWalls();
-    // A blocked robot's site counts once, whether or not the list already calls it signed out.
-    const outHosts = needs.map(ln => String(ln.host).toLowerCase());
-    const wallNames = walls.filter(w => !outHosts.some(h => { const sub = w.subject.toLowerCase(); return sub === h || sub.endsWith('.' + h) || h.endsWith('.' + sub); }))
+    const { walls, failed: wallsFailed } = signinWalls();
+    signinMarkWalls(walls, lines);
+    // A blocked robot's site counts once, whether or not the list already calls it signed out;
+    // only a SIGN-IN wall can be the same thing as a signed-out line.
+    const wallNames = walls.filter(w => !w.done && !(w.kind === 'SIGN-IN' && needs.some(ln => signinSameSite(ln.host, w.subject))))
         .map(w => w.subject);
     const needNames = needs.map(ln => ln.label).concat(wallNames);
     setCount(needNames.length, needNames.length > 0);
@@ -6572,7 +6595,7 @@ function renderSignins(){
         : had.getAttribute('data-rs-wall') ? `[data-rs-wall="${CSS.escape(had.getAttribute('data-rs-wall'))}"]`
         : had.getAttribute('data-rs-wall-add') ? `[data-rs-wall-add="${CSS.escape(had.getAttribute('data-rs-wall-add'))}"]`
         : had.getAttribute('href') ? `a[href="${CSS.escape(had.getAttribute('href'))}"]` : '';
-    body.innerHTML = strip + signinWallsHtml(walls) + warn + `<div class="rs-summary"><span>${summary}</span>
+    body.innerHTML = strip + signinWallsHtml(walls, lines, wallsFailed) + warn + `<div class="rs-summary"><span>${summary}</span>
             <div class="rs-actions">${toggle}${addBtn}</div></div>
         <div class="rs-note">Updated ${esc(estateAgo(f[ES.updated]))}.</div>
         ${shown.length || rest ? `<div class="rs-list">${shown.map(signinLineHtml).join('')}${rest}</div>` : ''}
