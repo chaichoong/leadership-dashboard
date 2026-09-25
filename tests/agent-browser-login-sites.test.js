@@ -221,12 +221,59 @@ describe('signin-list and login: every sign-in the Robot sign-in app can open', 
       expect(JSON.parse(readFileSync(file, 'utf8'))).toEqual({ 'example.co.uk': { label: 'Example', login: true, loginUrl: 'https://www.example.co.uk/signin' } });
     });
     // A parent that holds NO login (gov.uk) is never turned into one: the new site gets its own entry.
+    // It keeps the parent's short session: a GOV.UK service signs in through One Login, which
+    // lapses in an hour, and without the flag the keep-alive raises a task for it every morning.
     withSites({}, (m, file) => {
       m.recordLoginSite('https://www.council.gov.uk/login', { label: 'Council' });
       const saved = JSON.parse(readFileSync(file, 'utf8'));
-      expect(saved).toEqual({ 'www.council.gov.uk': { label: 'Council', login: true, loginUrl: 'https://www.council.gov.uk/login' } });
+      expect(saved).toEqual({ 'www.council.gov.uk': { label: 'Council', login: true, loginUrl: 'https://www.council.gov.uk/login', shortSession: true } });
+      expect(m.loadSites()['gov.uk'].login).toBe(false);
+      // gov.uk's own address is refused too: it covers every *.gov.uk host.
+      const own = m.recordLoginSite('https://gov.uk/login', {});
+      expect(own.changed).toBe(false);
+      expect(own.note).toMatch(/read-only site/);
       expect(m.loadSites()['gov.uk'].login).toBe(false);
     });
+  });
+
+  // Second review: a sibling on the same registrable domain is that site, as agent-dispatch.py
+  // signin_site_for already resolves a task line. Writing it widened the allowlist to a whole
+  // domain (evernote.com) or put a Utilita login on the main profile (www.utilita.co.uk).
+  it('a sibling address is never recorded as a second site, and the app opens the owner\'s lines', () => {
+    const sites = { ...FLATS, 'www.evernote.com': { label: 'Evernote', login: true } };
+    withSites(sites, (m, file) => {
+      const before = readFileSync(file, 'utf8');
+      expect(m.recordLoginSite('https://www.utilita.co.uk/login', {}).changed).toBe(false);
+      expect(m.recordLoginSite('https://www.utilita.co.uk/login', { profile: 'utilita-apt1' }).changed).toBe(false);
+      expect(m.recordLoginSite('https://evernote.com/login', {}).changed).toBe(false);
+      expect(readFileSync(file, 'utf8')).toBe(before);
+      const forUtilita = execFileSync('node', [modPath, 'signin-list', '--for', 'https://www.utilita.co.uk/login'],
+        { encoding: 'utf8', env: { ...process.env, AGENT_BROWSER_SITES_FILE: file } }).trim().split('\n');
+      expect(forUtilita.map(l => l.split(' | ')[3])).toEqual(['utilita-apt1', 'utilita-apt2']);
+      const forNew = execFileSync('node', [modPath, 'signin-list', '--for', 'https://portal.example.co.uk/'],
+        { encoding: 'utf8', env: { ...process.env, AGENT_BROWSER_SITES_FILE: file } }).trim();
+      expect(forNew).toBe('');
+      const forHmrc = execFileSync('node', [modPath, 'signin-list', '--for', 'https://www.tax.service.gov.uk/gg/sign-in'],
+        { encoding: 'utf8', env: { ...process.env, AGENT_BROWSER_SITES_FILE: file } }).trim();
+      expect(forHmrc).toBe('HMRC | tax.service.gov.uk | https://www.tax.service.gov.uk/gg/sign-in | default');
+    });
+    // A shared platform domain is never a sibling: Amazon Business is its own site.
+    withSites({}, (m, file) => {
+      expect(m.recordLoginSite('https://business.amazon.co.uk/signin', { label: 'Amazon Business' }).changed).toBe(true);
+      expect(JSON.parse(readFileSync(file, 'utf8'))['business.amazon.co.uk'].loginUrl).toBe('https://business.amazon.co.uk/signin');
+    });
+  });
+
+  it('the registrable domain agrees with agent-dispatch.py, host for host', () => {
+    const hosts = ['app.pingen.com', 'www.topcashback.co.uk', 'my.utilita.co.uk', 'www.tax.service.gov.uk',
+      'gov.uk', 'evernote.com', 'a.b.nhs.uk', 'x.co', 'localhost', 'www.amazon.co.uk'];
+    const py = execFileSync('python3', ['-c', `
+import importlib.util, json, sys
+spec = importlib.util.spec_from_file_location('ad', ${JSON.stringify(join(ROOT, 'scripts', 'agent-dispatch.py'))})
+m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m)
+print(json.dumps([m.signin_domain(h) for h in json.loads(sys.argv[1])]))`, JSON.stringify(hosts)], { encoding: 'utf8' });
+    const { signinDomain } = require_(modPath);
+    expect(hosts.map(signinDomain)).toEqual(JSON.parse(py.trim().split('\n').pop()));
   });
 
   it('a label with a line break stays on one line of the app\'s list', () => {

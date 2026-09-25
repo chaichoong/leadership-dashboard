@@ -125,12 +125,12 @@ on askNewSite()
 		display alert "That is not a sign-in page address" message "It needs to start with https:// and name a website, with no name or password in it. Nothing was added."
 		return {}
 	end try
-	set known to {}
-	repeat with L in allSites()
-		if fieldOf(L as text, 2) is theHost then set end of known to (L as text)
-	end repeat
+	-- The site this address belongs to, resolved as the task side resolves a sign-in line: its
+	-- own entry, a parent (www.tax.service.gov.uk is HMRC) or a sibling (www.utilita.co.uk is
+	-- the two flats). Only an address nothing owns is a new site.
+	set known to sites of splitSiteList(sh(quoted form of nodeBin() & " scripts/agent-browser.js signin-list --for " & quoted form of theUrl & " 2>&1"))
 	if (count of known) > 0 then
-		display notification theHost & " is already on the list. Opening it." with title "Robot sign-in"
+		display notification theHost & " is already on the list as " & fieldOf(item 1 of known, 1) & ". Opening it." with title "Robot sign-in"
 		return known
 	end if
 	try

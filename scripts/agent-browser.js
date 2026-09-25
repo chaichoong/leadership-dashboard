@@ -44,7 +44,7 @@
  *
  * USAGE
  *   node scripts/agent-browser.js login   --url URL [--profile NAME] [--label NAME]
- *   node scripts/agent-browser.js signin-list                          every sign-in the Robot sign-in app can open
+ *   node scripts/agent-browser.js signin-list [--for URL]              every sign-in the Robot sign-in app can open
  *   node scripts/agent-browser.js session --site HOST [--shot PATH]   is the robot signed in there? (walks the door)
  *   node scripts/agent-browser.js read    --url URL [--shot OUT.png] [--wait MS] [--wait-for SELECTOR] [--max-text N]
  *   node scripts/agent-browser.js loom-search --query "..." [--limit 20]
@@ -282,33 +282,78 @@ const PROFILE_NAME_RE = /^[a-z0-9][a-z0-9-]*$/i;
 // on the main profile. Utilita keeps one profile per flat and no top-level
 // loginUrl for exactly that reason (utilita-balance.py), and its flats reach the
 // app through the entry's `profiles` list instead.
+// The registrable domain, by the same rule as agent-dispatch.py signin_domain:
+// app.pingen.com -> pingen.com, www.topcashback.co.uk -> topcashback.co.uk.
+function signinDomain(host) {
+  const parts = String(host || '').toLowerCase().split('.').filter(Boolean);
+  if (parts.length >= 3 && parts[parts.length - 1].length === 2 &&
+      ['co', 'gov', 'org', 'ac', 'net', 'ltd', 'plc', 'me', 'sch', 'nhs'].includes(parts[parts.length - 2])) {
+    return parts.slice(-3).join('.');
+  }
+  return parts.slice(-2).join('.');
+}
+// One platform domain hosts unrelated sign-ins (Gmail, Drive, AI Studio), so a
+// sibling there is never the same site. Same list as agent-dispatch.py.
+const SIGNIN_SHARED_DOMAINS = new Set(['google.com', 'google.co.uk', 'microsoft.com', 'live.com', 'office.com',
+  'apple.com', 'amazon.com', 'amazon.co.uk', 'facebook.com', 'meta.com']);
+
+// The entry a sign-in on HOST belongs to, resolved the way agent-dispatch.py
+// signin_site_for resolves a task's sign-in line, so the app and the task
+// side agree: its own entry or its nearest parent (www.tax.service.gov.uk is
+// HMRC's), else a login site on the same registrable domain (evernote.com is
+// www.evernote.com's), never on a shared platform domain.
+function signinOwner(host, sites = loadSites()) {
+  const parent = Object.keys(sites).filter(k => host === k || host.endsWith('.' + k))
+    .sort((a, b) => b.length - a.length)[0];
+  if (parent) return { key: parent, sibling: false };
+  const dom = signinDomain(host);
+  if (SIGNIN_SHARED_DOMAINS.has(dom)) return null;
+  const sib = Object.keys(sites).find(k => sites[k] && sites[k].login && signinDomain(k) === dom);
+  return sib ? { key: sib, sibling: true } : null;
+}
+
 function recordLoginSite(url, { label, profile } = {}) {
   let u;
   try { u = new URL(url); } catch { die(`${url} is not a web address.`); }
   if (u.username || u.password) die('that address carries a name or password in it. A sign-in page address never does.');
   const host = u.hostname.toLowerCase();
   const sites = loadSites();
-  // The entry that OWNS this host: its own, else the nearest parent. Found in
-  // review: matching the exact host alone made an HMRC or Loom sign-in, whose
-  // pages sit on www., write a second entry without HMRC's shortSession, and
-  // the keep-alive would then have raised a false HMRC task every morning.
-  const ownerKey = Object.keys(sites).filter(k => host === k || host.endsWith('.' + k))
-    .sort((a, b) => b.length - a.length)[0] || null;
+  // The OWNING entry, not the exact host. Found in review: an exact-host match
+  // made an HMRC or Loom sign-in, whose pages sit on www., write a second entry
+  // without HMRC's shortSession, and the keep-alive would then have raised a
+  // false HMRC task every morning.
+  const found = signinOwner(host, sites);
+  const ownerKey = found ? found.key : null;
   const owner = ownerKey ? sites[ownerKey] : null;
   const onMain = (profile || 'default') === 'default' && !(owner && Array.isArray(owner.profiles));
+  const kept = { host, changed: false };
+  // A sibling is never written: its page would sit on a host its entry does not
+  // allow, and a new entry would widen the allowlist to a whole domain on the
+  // strength of one task line (evernote.com beside www.evernote.com). A site
+  // with flats (my.utilita.co.uk) settles every sibling, on any profile.
+  if (found && found.sibling) return kept;
   // A profile sign-in only ever adds a stranger, as before; a main-profile
   // sign-in also gives a login site with no page its page.
-  const settled = onMain ? !!(owner && owner.login && owner.loginUrl) : !!owner;
-  if (settled) return { host, changed: false };
+  if (onMain ? !!(owner && owner.login && owner.loginUrl) : !!owner) return kept;
+  // A builtin that holds no login (gov.uk, Companies House search) stays that
+  // way even when its own address is signed in at: it covers every host under
+  // it, and making it a login site would pull strangers' task lines onto it.
+  if (owner && !owner.login && ownerKey === host && BUILTIN_SITES[host]) {
+    return Object.assign(kept, { note: `${host} is on the list as a read-only site, so the sign-in was not recorded.` });
+  }
   // An http page still opens (agents' lines take http too), but is never written.
-  if (u.protocol !== 'https:') return { host, changed: false, note: `${url} is not https, so it was not recorded on the allowlist.` };
-  // A parent that holds no login (gov.uk) is not turned into one: the new site gets its own entry.
+  if (u.protocol !== 'https:') return Object.assign(kept, { note: `${url} is not https, so it was not recorded on the allowlist.` });
+  // A parent that holds no login (gov.uk) is not turned into one: the new site
+  // gets its own entry, and keeps the parent's short session (a GOV.UK service
+  // signs in through One Login, which lapses in an hour; without the flag the
+  // keep-alive raises a sign-in task for it every morning).
   const key = owner && (ownerKey === host || owner.login) ? ownerKey : host;
   const extra = readSitesFile();
   const entry = Object.assign({}, extra[key] || {});
   entry.label = entry.label || (key === ownerKey && owner.label) || label || host;
   entry.login = true;
   if (onMain) entry.loginUrl = url;
+  if (key !== ownerKey && owner && owner.shortSession) entry.shortSession = true;
   extra[key] = entry;
   fs.mkdirSync(path.dirname(SITES_FILE), { recursive: true });
   const tmp = SITES_FILE + '.tmp';
@@ -818,9 +863,22 @@ async function main() {
 
   // One "label | host | url | profile" line per sign-in, for the Robot sign-in
   // app's picker. Unusable profile entries go to stderr by name.
+  // --for URL: only the sign-ins of the site that address belongs to (its
+  // owner, as recordLoginSite resolves it). The app's "Add a new site" asks
+  // this first, so an address already covered opens on its own lines (a
+  // Utilita flat's profile) and is never recorded as a second site.
   if (cmd === 'signin-list') {
     const problems = [];
+    const forUrl = arg(rest, 'for', null);
+    let only = null;
+    if (forUrl) {
+      let h;
+      try { h = new URL(forUrl).hostname.toLowerCase(); } catch { die(`${forUrl} is not a web address.`); }
+      const found = signinOwner(h);
+      only = found ? found.key : '';
+    }
     for (const t of signinTargets(loadSites(), problems)) {
+      if (only !== null && t.host !== only) continue;
       console.log([t.label, t.host, t.url, t.profile].join(' | '));
     }
     for (const p of problems) console.error('SKIPPED: ' + p);
@@ -1148,5 +1206,5 @@ if (require.main === module) {
 }
 
 module.exports = { hostAllowed, pickLinks, runSteps, assertNotCredential, assertApproved, SECRET_NAME_RE, loadSites, sessionVerdict,
-                   recordLoginSite, signinTargets, readSitesFile,
+                   recordLoginSite, signinTargets, signinOwner, signinDomain, readSitesFile,
                    assertUploadable, assertConfirmable, UPLOAD_DIR, UPLOAD_EXTENSIONS, persistSessionCookies };

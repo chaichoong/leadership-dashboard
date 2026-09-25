@@ -268,6 +268,7 @@ describe('the Robot sign-in app and its link', () => {
     expect(runH).toMatch(/choose from list \(\{addNewItem\} & allSites\(\)\)[^\n]*with multiple selections allowed/);
     // A site already on the list opens on its own lines (a flat's profile), never as a new main-profile line.
     const ask = src.slice(src.indexOf('on askNewSite'), src.indexOf('end askNewSite'));
+    expect(ask).toMatch(/agent-browser\.js signin-list --for " & quoted form of theUrl/);
     expect(ask.indexOf('return known')).toBeGreaterThan(-1);
     expect(ask.indexOf('return known')).toBeLessThan(ask.indexOf('newSiteLine('));
     const link = src.slice(src.indexOf('on open location'), src.indexOf('end open location'));
