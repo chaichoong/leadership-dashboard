@@ -59,6 +59,37 @@ print('---JSON---'); print(json.dumps(m.reference_tokens(json.loads(sys.argv[1])
     expect(out).toEqual(['RECEIPT1234567890', '12345678']);
   });
 
+  it('a form link wrapped inside its share id gives nothing, and a wrap that is not an id keeps the next word', () => {
+    const out = py(`
+texts = json.loads(sys.argv[1])
+print('---JSON---'); print(json.dumps([m.reference_tokens(t) for t in texts]))`, [
+      'Apply here: https://airtable.com/appnqjDpqDniH3IRl/shrTuDF8s\n04Kp5XGT today.',
+      'Apply here: https://airtable.com/app\nnqjDpqDniH3IRl/shrTuDF8s04Kp5XGT today.',
+      // A link that ends in a word which merely starts like an id: the next
+      // line is not its tail, so the reference on it survives.
+      'Portal https://example.com/apply\nAB12345 is the claim.',
+      'Portal https://example.com/app\nAB12345 is the claim.',
+      // Lengths that add to 14 on a link that is not Airtable's (review).
+      'Receipts at https://portal.example.com/receipts\nINV123456 is the one.',
+    ]);
+    expect(out).toEqual([[], [], ['AB12345'], ['AB12345'], ['INV123456']]);
+  });
+
+  it('a pasted TRACK RECORD header gives no refs, so an id it printed in capitals is never searched again', () => {
+    const text = 'Follow-up.\nTRACK RECORD: (searched tasks + Gmail for email a@b.com, ref RECNM5HLORVICCOOY, ref TBLQB8B22HKBL4PF1)\n'
+      + '- 03 Jul 2026 — task: task opened: Arrears AB12345 (Today)\nPolicy CD67890.';
+    const out = py(`
+texts = json.loads(sys.argv[1])
+print('---JSON---'); print(json.dumps([m.reference_tokens(t) for t in texts]))`, [
+      text,
+      '[24 Sep 2026 — create-agent-task] TRACK RECORD: (searched tasks for ref RECNM5HLORVICCOOY)\nPolicy CD67890.',
+      // Only a line that starts with the header is one: prose that quotes
+      // the words mid-line keeps the reference after it (review).
+      'Note TRACK RECORD: none found (searched tasks for ref AB12345) then Policy CD67890',
+    ]);
+    expect(out).toEqual([['AB12345', 'CD67890'], ['CD67890'], ['AB12345', 'CD67890']]);
+  });
+
   it('the history command the create gate shells out to searches none of the URL parts', () => {
     const out = py(`
 seen = {}

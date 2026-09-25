@@ -4873,6 +4873,19 @@ ISO_DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 # (so RECEIPT1234567890 does too).
 REF_URL_RE = re.compile(r"(?i:https?://|www\.)\S+|\b(?:[a-z0-9-]+\.)+[a-z]{2,}/\S*")
 AIRTABLE_ID_RE = re.compile(r"\b(?:app|tbl|rec|viw|shr|fld)[A-Za-z0-9]{14}\b")
+# A link wrapped across lines cuts an id in two ("…/shrTuDF8s" then
+# "04Kp5XGT"), and the second half would search every record holding the
+# link. When an Airtable link ends in an id cut short and the next line starts
+# with a word of exactly the missing length, the two are one id and are
+# rejoined before the link is stripped (Kevin, 25 Sep 2026). Airtable links
+# only: "…/receipts" then "INV123456" elsewhere is a reference (review).
+WRAPPED_ID_RE = re.compile(
+    r"((?i:(?:https?://)?(?:www\.)?airtable\.com/)\S*?\b(?:app|tbl|rec|viw|shr|fld)([A-Za-z0-9]{0,13}))"
+    r"[ \t]*\r?\n[ \t]*([A-Za-z0-9]{1,14})(?![A-Za-z0-9])")
+# A pasted TRACK RECORD header lists what was already searched, every ref in
+# capitals, so an id copied from one no longer looks like an id. Its terms
+# are never read again. A header starts its line, after an optional stamp.
+TRACK_RECORD_HEADER_RE = re.compile(r"^[ \t]*(?:\[[^\]\n]*\][ \t]*)?TRACK RECORD:[^\n]*", re.M)
 HISTORY_MAX_REFS = 8
 HISTORY_MAX_LINES = 40
 
@@ -4884,7 +4897,9 @@ def reference_tokens(text):
     thirteen unrelated tasks). Never from a link, never an Airtable id (25 Sep
     2026). A phone number stays: on the SMS lane it is the only thing naming
     the contact."""
-    text = AIRTABLE_ID_RE.sub(" ", REF_URL_RE.sub(" ", str(text or "")))
+    text = TRACK_RECORD_HEADER_RE.sub(" ", str(text or ""))
+    text = WRAPPED_ID_RE.sub(lambda m: m.group(1) + m.group(3) if len(m.group(2)) + len(m.group(3)) == 14 else m.group(0), text)
+    text = AIRTABLE_ID_RE.sub(" ", REF_URL_RE.sub(" ", text))
     # A link wrapped across lines leaves a piece of an id behind (DNIH3IRL
     # from appnqjDpq / DniH3IRl), and the search matches on substrings, so
     # that piece finds every record the base id is in (review, 25 Sep 2026).
