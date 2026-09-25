@@ -732,6 +732,135 @@ out["noConsent"] = resign(dict(name="Pat Old", phone="07123456789"), dict(name="
   });
 });
 
+describe("move-ins on Kevin's model: secure the room, then the works, then move in (25 Sep 2026)", () => {
+  const r = py(`
+BOOK = {"recP1": {"id": "recP1", "required": ["Landlord Insurance", "EICR", "EPC", "GSC"],
+                  "holds": {"GSC": {"state": "expired", "renewalDate": "2026-09-08"},
+                            "EICR": {"state": "due", "renewalDate": "2026-10-14"},
+                            "EPC": {"state": "in date", "renewalDate": "2030-01-01"},
+                            "Landlord Insurance": {"state": "in date", "renewalDate": "2027-03-02"}}}}
+def roy_world(words):
+    w = world(); w["book"] = BOOK
+    vt = task("TENANT VIEWINGS: Haverhill people to call 25 Sep 2026", status="Today",
+              notes="[25 Sep 2026 14:02 Roy Lavin via his assistant, recREQ1] " + words)
+    w["tasks"] = [vt]
+    w["leads"] = [lead("recS", name="Sam Secure", stage="Viewing booked", email="sam@example.com", royTask=[vt["id"]]),
+                  lead("recP", name="Pat Past", stage="Past applicant", phone="07000111222", email="pat@example.com",
+                       legacyRef="tenant-app:2019-01-01 10:00:00", royTask=[vt["id"]])]
+    return w
+w = roy_world("Sam Secure wants the room. Pat Past is taking it")
+fw = FakeWriter(); tl.run(w, DAY, fw, only="roy", replies=lambda: [])
+out["secured"] = stages(fw)
+out["wantsA"] = tl.roy_outcome("wants a room in Haverhill")
+out["doesNot"] = tl.roy_outcome("doesn't want the room")
+
+# The move-in step: one task for Roy each, one documents card for the person who can be emailed.
+fw2 = FakeWriter(); tl.run(w, DAY, fw2, only="move-in", replies=lambda: [])
+out["roy"] = [(t["name"], t.get("notes"), t["kind"]) for t in fw2.roy]
+out["royDesc"] = {t["notes"]: t["description"] for t in fw2.roy}
+out["cards"] = [(c["kind"], c["ids"], c["emails"], c["output"].split("\\n---")[0].splitlines()[-2:]) for c in fw2.cards]
+# Run again with those tasks on the board: nothing new.
+w["tasks"] += [task(t["name"], status="Today", notes=t["notes"]) for t in fw2.roy]
+w["tasks"] += [task(c["name"], status="Approval", notes="TENANT CHAIN IDS: " + ",".join(c["ids"])) for c in fw2.cards]
+fw3 = FakeWriter(); tl.run(w, DAY, fw3, only="move-in", replies=lambda: [])
+out["again"] = (fw3.roy, fw3.cards)
+# An opted-out address gets Roy's task but never the documents email.
+w4 = roy_world("x"); w4["leads"][0]["fields"][L["stage"]] = "Securing room"; w4["leads"][0]["fields"][L["email"]] = "stopped@example.com"
+fw4 = FakeWriter(); tl.run(w4, DAY, fw4, only="move-in", replies=lambda: [])
+out["optedOut"] = (len(fw4.roy), len(fw4.cards))
+
+# Room blockers from the compliance book, and the house's needs growing with its people.
+rb = tl.room_blockers(w, tl.openings(w, DAY))
+out["rb"] = {k: {x: v[x] for x in ("people", "blockers", "short", "renewals", "works")} for k, v in rb.items()}
+wn = world(); wn["book"] = None
+out["noBook"] = tl.room_blockers(wn, tl.openings(wn, DAY))["recP1"]["blockers"]
+wp = world(); wp["book"] = {}
+out["noPage"] = tl.room_blockers(wp, tl.openings(wp, DAY))["recP1"]["blockers"]
+
+# The monitor: amber for blockers, red once someone has waited 14 days on a house that is not legal,
+# red when a person securing a room has no move-in task.
+m = tl.monitor(w, DAY, tl.openings(w, DAY), [])
+out["rooms"] = next(x for x in m["steps"] if x["key"] == "rooms")
+out["movein"] = next(x for x in m["steps"] if x["key"] == "movein")
+w5 = roy_world("x"); w5["leads"][0]["fields"][L["stage"]] = "Securing room"; w5["leads"][0]["fields"][L["heardFrom"]] = "2026-09-01"
+m5 = tl.monitor(w5, DAY, tl.openings(w5, DAY), [])
+out["stuck"] = next(x for x in m5["steps"] if x["key"] == "rooms")["state"]
+out["noTask"] = next(x for x in m5["steps"] if x["key"] == "movein")
+out["brief"] = m5["briefLine"]
+out["funnel"] = m["funnel"]
+out["briefOk"] = m["briefLine"]
+
+# The documents reply is noted on the person, and the monitor counts it.
+fw6 = FakeWriter()
+tl.run(w, DAY, fw6, only="replies", replies=lambda: [{"id": "d1", "headers": {"from": "Sam <sam@example.com>",
+       "subject": "RE: Your room with Agile Lets: what we need to hold it"}, "body": "Here is my statement"}])
+out["docsBack"] = [p["fields"].get(L["notes"]) for p in fw6.patches if p["id"] == "recS"]
+m6 = tl.monitor(w, DAY, tl.openings(w, DAY), [])
+out["movein6"] = next(x for x in m6["steps"] if x["key"] == "movein")["note"]
+
+# A sent documents card settles as contact with that person.
+w7 = world(); w7["tasks"] = [task("TENANT DOCS: Sam for a room in Haverhill 25 Sep 2026", status="Completed",
+    notes="TENANT CHAIN IDS: recS\\n\\n[25 Sep 2026 10:00 — send-email] SENT: mail-out to 1 of 1")]
+fw7 = FakeWriter(); tl.run(w7, DAY, fw7, only="settle", replies=lambda: [])
+out["settled"] = [(p["id"], p["fields"].get(L["lastContacted"])) for p in fw7.patches if p.get("table") == tl.T_LEADS]
+`);
+  it("Roy's 'wants the room' or 'taking it' moves a person to Securing room; 'wants a room' does not", () => {
+    expect(r.secured).toEqual({ recS: 'Securing room', recP: 'Securing room' });
+    expect(r.wantsA).toBe('Interested');
+    expect(r.doesNot).toBe('Not looking');
+  });
+  it('each person securing a room gets one move-in task for Roy; only a consented form sign-up gets the documents email', () => {
+    expect(r.roy).toHaveLength(2);
+    expect(r.roy.map(x => x[1]).sort()).toEqual(['TENANT CHAIN IDS: recP', 'TENANT CHAIN IDS: recS']);
+    expect(r.royDesc['TENANT CHAIN IDS: recS']).toMatch(/Right to rent/);
+    expect(r.royDesc['TENANT CHAIN IDS: recS']).toMatch(/Agile Lets signs first/);
+    expect(r.royDesc['TENANT CHAIN IDS: recS']).toMatch(/gas safety certificate expired/);
+    expect(r.royDesc['TENANT CHAIN IDS: recP']).toMatch(/phone only/);
+    expect(r.cards).toHaveLength(1);
+    expect(r.cards[0][0]).toBe('docs');
+    expect(r.cards[0][1]).toEqual(['recS']);
+    expect(r.cards[0][3]).toEqual(['FROM: info@agilelets.co.uk', 'SUBJECT: Your room with Agile Lets: what we need to hold it']);
+  });
+  it('a second run raises nothing new, and an opted-out address never gets the documents email', () => {
+    expect(r.again).toEqual([[], []]);
+    expect(r.optedOut).toEqual([1, 0]);
+  });
+  it("a house's needs grow with its people: 7 people need a fire alarm certificate and an HMO licence", () => {
+    const d = r.rb.recP1;
+    expect(d.people).toBe(7);
+    expect(d.blockers).toEqual(['gas safety certificate expired 8 Sep 2026',
+      'no fire alarm certificate on file (needed with 7 people)', 'no HMO licence on file (needed with 7 people)']);
+    expect(d.short).toEqual(['works', 'gas cert', 'fire alarm cert', 'HMO licence']);
+    expect(d.renewals).toEqual(['electrical certificate (EICR) renews 14 Oct 2026']);
+    expect(d.works.join(' ')).toMatch(/room works not done yet/);
+  });
+  it('an unreadable compliance book, or a house with no page, is a blocker, never a clean bill', () => {
+    expect(r.noBook[0]).toMatch(/could not be read/);
+    expect(r.noPage[0]).toMatch(/no page in the compliance book/);
+  });
+  it('the monitor: amber while a house is not legal, red once someone has waited 14 days on it or has no move-in task', () => {
+    expect(r.rooms.state).toBe('warn');
+    expect(r.rooms.note).toMatch(/^Before anyone new moves in: 5 Dalham Place: gas safety certificate expired/);
+    expect(r.stuck).toBe('fail');
+    expect(r.noTask.state).toBe('fail');
+    expect(r.noTask.note).toMatch(/no move-in task for Roy/);
+    expect(r.brief).toMatch(/^NOT WORKING: /);
+  });
+  it('the brief line carries the results and what stops anyone moving in', () => {
+    // A past applicant securing a room is not a new sign-up.
+    expect(r.funnel).toEqual({ days: 30, told: 0, signedUp: 1, qualified: 0, viewings: 0, securing: 2, movedIn: 0 });
+    expect(r.briefOk).toMatch(/Now: 0 qualified, 0 viewing\(s\) booked, 2 securing a room, 0 moved in so far\./);
+    expect(r.briefOk).toMatch(/Before anyone moves in: 5 Dalham Place: works, gas cert, fire alarm cert, HMO licence\.$/);
+  });
+  it('a reply to the documents email is noted on the person and counted', () => {
+    expect(r.docsBack[0]).toMatch(/^DOCS REPLIED 25 Sep 2026$/);
+    expect(r.movein6).toMatch(/documents back from 1/);
+  });
+  it('a sent documents email counts as contact with that person', () => {
+    expect(r.settled).toEqual([['recS', '2026-09-25']]);
+  });
+});
+
 describe('the monitor reports what did NOT happen', () => {
   const r = py(`
 w = world()
