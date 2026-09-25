@@ -98,6 +98,7 @@ from agent_email_format import (  # noqa: E402
     BUSINESS_SENDER,
     BUSINESS_BRAND_RE,
     PROPERTY_SENDER,
+    PERSONAL_SENDER,
     rule_send_problem,
 )
 
@@ -262,7 +263,7 @@ def worker_call(url, payload=None):
 # booking (recPFxDmGX5pbonD2) were stuck that way for weeks. Each row now says
 # its kind; an old row without one is a notify when its subject is a notify
 # subject, which is how every notify row before this change was written.
-SENDER_DEFAULT = "kevinbrittain@gmail.com"
+SENDER_DEFAULT = PERSONAL_SENDER   # the one definition, in agent_email_format.py
 
 
 def ledger_kind(row):

@@ -555,7 +555,7 @@ sent = []
 se.get_task = lambda t: {"id": t, "fields": {se.AF["name"]: "MAINTENANCE: boiler - 5 Dalham Place",
                                              se.AF["description"]: "No heating", se.AF["notes"]: ""}}
 se.worker_call = lambda url, payload=None: sent.append(payload) or {"id": "gm1"}
-se.already_sent = lambda t: None
+se.already_sent = lambda t, kind='send': None
 se.ledger_append = lambda row: None
 buf = io.StringIO()
 with contextlib.redirect_stdout(buf):
