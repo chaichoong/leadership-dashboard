@@ -450,6 +450,28 @@ print('OK=' + str(r['ok']))
         expect(out).not.toMatch(/agent-browser/);
     });
 
+    it('a bot check on the dashboard is reported as one, never as a lapsed sign-in (driven, 25 Sep 2026)', () => {
+        // The read printed botCheck; before this the flat said SIGN-IN NEEDED and
+        // the message asked Kevin for a sign-in that could not help.
+        const py = `
+import importlib.util, os, stat, tempfile, json
+spec = importlib.util.spec_from_file_location('ub', ${JSON.stringify(script)})
+ub = importlib.util.module_from_spec(spec); spec.loader.exec_module(ub)
+d = tempfile.mkdtemp()
+fake = os.path.join(d, 'node')
+out = json.dumps({"url": "https://my.utilita.co.uk/energy", "passwordFields": 0, "botCheck": True, "title": "Just a moment...", "text": "Verify you are human"})
+open(fake, 'w').write("#!/bin/bash\\necho '" + out + "'\\n")
+os.chmod(fake, os.stat(fake).st_mode | stat.S_IEXEC)
+r = ub.read_account({'label': 'Apartment 1', 'profile': 'utilita-apt1'}, node=fake)
+print('PROBLEM=' + str(r['problem']))
+print('SIGNEDIN=' + str(r['signedIn']))
+`;
+        const out = execFileSync('python3', ['-c', py], { encoding: 'utf8' });
+        expect(out).toMatch(/PROBLEM=BOT CHECK: Utilita showed the robot a "verify you are human" page/);
+        expect(out).toMatch(/SIGNEDIN=False/);
+        expect(out).not.toMatch(/SIGN-IN NEEDED/);
+    });
+
     it('the runner prefers the MAINTAINED checkout, not the runtime worktree', () => {
         // The runtime worktree is fast-forwarded only before the content-engine
         // jobs, and its own jobs leave tracked files modified there: on 18 Sep

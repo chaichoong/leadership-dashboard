@@ -782,7 +782,7 @@ def signin_payload(now, src):
         # Only a read that answers the question counts: "could not open the page"
         # says nothing about the login, and ranking it newest wiped a good read
         # an hour old and put a Sign in button on a live flat (review, 25 Sep 2026).
-        if not (rd.get("ok") or rd.get("problem") == "SIGN-IN NEEDED"):
+        if not (rd.get("ok") or rd.get("problem") == "SIGN-IN NEEDED" or str(rd.get("problem") or "").startswith("BOT CHECK")):
             continue
         prof = profile_of.get(rd.get("label"))
         at = _utc(rd.get("at"), naive_is_london=True)
@@ -812,7 +812,8 @@ def signin_payload(now, src):
                                      ("signed-in" if e["signedIn"] else "signed-out"), "robot check"))
         elif profile in last_read:
             at, rd = last_read[profile]
-            seen.append((at, "signed-in" if rd.get("ok") else "signed-out", "hourly read"))
+            seen.append((at, "signed-in" if rd.get("ok") else
+                         "bot-check" if str(rd.get("problem") or "").startswith("BOT CHECK") else "signed-out", "hourly read"))
         last = max(seen, key=lambda s: s[0]) if seen else None
         # Kevin's own sign-in, if it came after the last look.
         mine = [_utc(e.get("at")) for e in ledger
@@ -859,7 +860,8 @@ def robot_signins_row(now, src=None):
     if by.get("unchecked"):
         detail += ", %d not checked yet" % len(by["unchecked"])
     if by.get("bot-check"):
-        detail += ", %d stop the robot with a bot check (%s)" % (len(by["bot-check"]), ", ".join(by["bot-check"][:4]))
+        n = len(by["bot-check"])
+        detail += ", %d %s the robot with a bot check (%s)" % (n, "stops" if n == 1 else "stop", ", ".join(by["bot-check"][:4]))
     return dict(row, status="Worked", lastWorked=stamp, payload=json.dumps(payload), detail=detail + ".")
 
 
@@ -1197,6 +1199,9 @@ def selftest():
             {"at": "2026-09-25T09:25:00", "label": "Apartment 2", "ok": True, "problem": None},
             {"at": "2026-09-25T09:30:00", "label": "Apartment 2", "ok": False, "problem": "could not open the page"},
         ],
+        "readingsBot": [
+            {"at": "2026-09-25T09:40:00", "label": "Apartment 2", "ok": False, "problem": "BOT CHECK: Utilita showed the robot a \"verify you are human\" page"},
+        ],
         "accounts": [{"label": "Apartment 1", "profile": "utilita-apt1"}, {"label": "Apartment 2", "profile": "utilita-apt2"}],
     }
     got = {ln["label"]: ln for ln in signin_payload(t0, src)["lines"]}
@@ -1211,9 +1216,12 @@ def selftest():
     ok(got["Utilita Apartment 2"]["state"] == "signed-in" and got["Utilita Apartment 2"]["at"] == "2026-09-25T08:25:00.000Z",
        "the newest DECIDING meter read (a later page failure says nothing), London time with no offset: %r" % got["Utilita Apartment 2"])
     ok(got["New"]["state"] == "unchecked" and got["New"]["at"] is None, "nothing looked: unchecked, never green")
+    bot_flat = {ln["label"]: ln for ln in signin_payload(t0, dict(src, readings=src["readings"] + src["readingsBot"]))["lines"]}
+    ok(bot_flat["Utilita Apartment 2"]["state"] == "bot-check",
+       "a flat's hourly read that met a bot check is a bot check, not a Sign in button: %r" % bot_flat["Utilita Apartment 2"])
     ok(got["Cloudflare"]["state"] == "bot-check" and got["Cloudflare"]["how"] == "robot check",
        "a bot check is its own state, never 'signed out' with a Sign in button (25 Sep 2026): %r" % got["Cloudflare"])
-    ok("1 stop the robot with a bot check (Cloudflare)" in robot_signins_row(t0, src)["detail"],
+    ok("1 stops the robot with a bot check (Cloudflare)" in robot_signins_row(t0, src)["detail"],
        "the row names the site a bot check stops: %r" % robot_signins_row(t0, src)["detail"])
     ok(signin_payload(t0, src)["unlisted"] == ["Evernote", "TopCashback"], "login sites with no page are named once each")
     empty = robot_signins_row(t0, dict(src, targets=[]))

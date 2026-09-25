@@ -5565,6 +5565,9 @@ def ledger_bot_check(hosts, max_age_minutes=BOT_CHECK_FRESH_MINUTES, path=None, 
     a later clean read of the same site means the check has gone. Agents meet
     the wall in their own reads as often as in a session walk (25 Sep 2026)."""
     want = {str(h or "").lower() for h in hosts if h}
+    # A read on www.loom.com is a look at the entry loom.com: subdomains count, parents never.
+    def matches(h):
+        return bool(h) and any(h == w or h.endswith("." + w) for w in want)
     newest = None
     try:
         with open(path or BROWSER_LEDGER) as fh:
@@ -5581,7 +5584,7 @@ def ledger_bot_check(hosts, max_age_minutes=BOT_CHECK_FRESH_MINUTES, path=None, 
                     url_host = (urllib.parse.urlsplit(str(rec.get("url") or "")).hostname or "").lower()
                 except ValueError:
                     url_host = ""
-                if url_host in want or str(rec.get("site") or "").lower() in want:
+                if matches(url_host) or matches(str(rec.get("site") or "").lower()):
                     newest = rec
     except OSError:
         return None

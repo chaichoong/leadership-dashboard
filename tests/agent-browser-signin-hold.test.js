@@ -63,6 +63,25 @@ describe('a bot check is never a live session', () => {
   });
 });
 
+describe('a check that clears on its own is waited out, and never crashes the read', () => {
+  it('a read that lands mid-navigation (the check clearing) is looked at again, not thrown', async () => {
+    let n = 0;
+    const page = {   // the parts of a Playwright page settleBotCheck touches
+      evaluate: async () => {
+        n++;
+        if (n === 1) return 'Performing security verification. Verify you are human';
+        if (n === 2) throw new Error('page.evaluate: Execution context was destroyed, most likely because of a navigation');
+        return 'DNS Records Add record';
+      },
+      title: async () => (n < 3 ? 'Just a moment...' : 'DNS | Cloudflare'),
+      waitForLoadState: async () => {},
+      waitForTimeout: async () => {},
+    };
+    await expect(b.settleBotCheck(page, 5000)).resolves.toBeUndefined();
+    expect(n).toBe(3);
+  });
+});
+
 describe('Kevin\'s sign-in holds the robot profile', () => {
   it('a hold stands only while its process lives and for at most 20 minutes, and release removes it', () => {
     const { dir } = home();
@@ -136,6 +155,19 @@ describe('Kevin\'s sign-in holds the robot profile', () => {
     } finally {
       headless.kill('SIGKILL');
     }
+    // Real headless Chrome (review round 2): only the browser process carries --headless;
+    // its renderer and utility helpers carry the profile and --type=, never --headless.
+    const main = spawn('sh', ['-c', 'sleep 3; :', '--headless', `--user-data-dir=${dir}`], { stdio: 'ignore' });
+    const helper = spawn('sh', ['-c', 'sleep 3; :', '--type=renderer', `--user-data-dir=${dir}`], { stdio: 'ignore' });
+    try {
+      await until(() => b.profileProcs(dir).length === 2, 2000);
+      expect(b.profileProcs(dir).length).toBe(2);
+      expect(b.plainWindowOpen(dir)).toBe(false);
+    } finally {
+      main.kill('SIGKILL');
+      helper.kill('SIGKILL');
+    }
+    await until(() => b.profileProcs(dir).length === 0, 2000);
     const plain = spawn('sh', ['-c', 'sleep 3; :', `--user-data-dir=${dir}`], { stdio: 'ignore' });
     try {
       await until(() => b.profileProcs(dir).length > 0, 2000);

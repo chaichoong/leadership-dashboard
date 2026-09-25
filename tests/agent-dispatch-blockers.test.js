@@ -120,6 +120,18 @@ print(json.dumps({"a": a["err"], "blk": blk, "c": c["err"], "d": d["err"]}))`);
     expect(r.d).toBeNull();            // cleared by a newer clean read
   });
 
+  it('a bot check on a subdomain counts for its site; a parent or a look-alike never does', () => {
+    const dir = mkdtempSync(tmpdir() + '/od-botcheck-sub-');
+    const ledger = dir + '/runs.jsonl';
+    writeFileSync(ledger, JSON.stringify({ at: new Date().toISOString(), cmd: 'read', url: 'https://www.loom.com/looms', botCheck: true, profile: 'default' }) + '\n');
+    const r = py(`
+L = ${JSON.stringify(ledger)}
+print(json.dumps([bool(m.ledger_bot_check(["loom.com"], path=L)), bool(m.ledger_bot_check(["www.loom.com"], path=L)),
+                  bool(m.ledger_bot_check(["app.www.loom.com"], path=L)), bool(m.ledger_bot_check(["oom.com"], path=L)),
+                  bool(m.ledger_bot_check(["loom.com"], path=L, profile="spotify"))]))`);
+    expect(r).toEqual([true, true, false, false, false]);
+  });
+
   it('KEVIN only for the steps that are his by rule; "get the quote" is not one', () => {
     const r = py(`
 rec("t1")

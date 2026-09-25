@@ -69,7 +69,8 @@ test.describe('Robot sign-ins panel on a Mac', () => {
   test('a site that stops the robot with a bot check is shown, never counted as a sign-in, and has no button (25 Sep 2026)', async ({ page }) => {
     const panel = await open(page, [signinRow([line('Pingen (letters)', 'app.pingen.com', 'signed-in'),
       line('dash.cloudflare.com', 'dash.cloudflare.com', 'bot-check', { how: 'robot check' })])]);
-    await expect(panel).toContainText('All good. 1 signed in, 0 sign in when a task needs them, 1 stops the robot with a bot check (a sign-in cannot fix it).');
+    await expect(panel).toContainText('No sign-in needed. One site stops the robot with a bot check, which a sign-in cannot fix: dash.cloudflare.com. 1 signed in, 0 sign in when a task needs them.');
+    await expect(panel).not.toContainText('All good');
     await expect(page.locator('#signinsCount')).toHaveText('0');
     const bot = panel.locator('[data-rs-line="bot-check"]');
     await expect(bot).toContainText('dash.cloudflare.com');
@@ -216,6 +217,16 @@ test.describe('Robot sign-ins panel and blocked robots', () => {
     await panel.locator('[data-rs-wall-add="portal.fylde.gov.uk"]').focus();
     await page.evaluate(() => renderSignins());
     await expect(panel.locator('[data-rs-wall-add="portal.fylde.gov.uk"]')).toBeFocused();
+  });
+
+  test('a SIGN-IN wall on a site that stops the robot with a bot check has no Sign in button and is not counted (25 Sep 2026)', async ({ page }) => {
+    const wall = { task: 'recW9', name: 'Fix SPF and DKIM', agent: 'Builder', kind: 'SIGN-IN', subject: 'dash.cloudflare.com', fix: 'sign in', days: 0 };
+    const panel = await open(page, [signinRow([line('dash.cloudflare.com', 'dash.cloudflare.com', 'bot-check', { how: 'robot check' })]),
+      blockersRow([wall])]);
+    await expect(panel.locator('[data-rs-wall-line="bot-check"]')).toContainText('One task is blocked: dash.cloudflare.com stops the robot with a bot check, which a sign-in cannot fix.');
+    await expect(panel.locator('[data-rs-wall="dash.cloudflare.com"]')).toHaveCount(0);
+    await expect(page.locator('#signinsCount')).toHaveText('0');
+    await expect(panel).not.toContainText('All good');
   });
 
   test('a wall on a site he has just signed in to says so, with no second button and no count', async ({ page }) => {

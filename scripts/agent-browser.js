@@ -577,7 +577,14 @@ function isBotCheck(text = '', title = '') {
 // 25 Sep 2026); a page with no challenge costs one extra read.
 async function settleBotCheck(page, maxMs = 15000) {
   const deadline = Date.now() + maxMs;
-  while (Date.now() < deadline && isBotCheck(await domText(page, 2000), await page.title().catch(() => ''))) {
+  while (Date.now() < deadline) {
+    let challenged;
+    // A check that clears navigates the page, and a read at that instant throws
+    // "Execution context was destroyed": that is the check clearing, never a
+    // failure of the whole command (review, 25 Sep 2026). Look again.
+    try { challenged = isBotCheck(await domText(page, 2000), await page.title()); } catch { challenged = true; }
+    if (!challenged) return;
+    await page.waitForLoadState('domcontentloaded', { timeout: 5000 }).catch(() => {});
     await page.waitForTimeout(2000);
   }
 }
@@ -603,7 +610,10 @@ function profileProcs(dir) {
   const flag = `--user-data-dir=${dir}`;
   return out.split('\n').filter(l => l.split(/\s+/).includes(flag) || l.includes(flag + ' '));
 }
-function plainWindowOpen(dir) { return profileProcs(dir).some(l => !/\s--headless\b/.test(l)); }
+// Only the BROWSER process counts: a headless Chrome's renderer and utility
+// helpers carry the profile but not --headless, so judging every line took an
+// agent's browser for Kevin's window (review, 25 Sep 2026). Helpers carry --type=.
+function plainWindowOpen(dir) { return profileProcs(dir).some(l => !/\s--type=/.test(l) && !/\s--headless\b/.test(l)); }
 async function waitForProfile(dir, maxMs, message) {
   const busy = () => profileProcs(dir).length > 0;
   if (!busy()) return;
@@ -1066,10 +1076,10 @@ async function main() {
           const running = plainWindowOpen(dir);
           if (running) seen = true;
           else if (seen) break;
-          // No window a minute on means it never opened: say so, never report a
+          // No window two minutes on means it never opened: say so, never report a
           // sign-in that did not happen (the old loop waited 15 minutes, then
           // handed the tasks back as if it had).
-          else if (Date.now() - opened > (Number(process.env.AGENT_BROWSER_WINDOW_OPEN_MS) || 60 * 1000)) {
+          else if (Date.now() - opened > (Number(process.env.AGENT_BROWSER_WINDOW_OPEN_MS) || 2 * 60 * 1000)) {
             die('the sign-in window did not open, so nothing was signed in. Start this sign-in again.');
           }
         }
@@ -1108,6 +1118,8 @@ async function main() {
     const res = await withPage(profile, false, async (page) => {
       await page.goto(start, { waitUntil: 'domcontentloaded', timeout: 45000 });
       await page.waitForTimeout(3000);
+      // A short check on the door itself would stop the walk at its first click.
+      await settleBotCheck(page);
       const clicked = [];
       for (const label of walk) {
         const re = new RegExp('^\\s*' + String(label).replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '\\s*$', 'i');
@@ -1360,4 +1372,4 @@ module.exports = { hostAllowed, pickLinks, runSteps, assertNotCredential, assert
                    recordLoginSite, signinTargets, signinOwner, signinDomain, readSitesFile,
                    assertUploadable, assertConfirmable, UPLOAD_DIR, UPLOAD_EXTENSIONS, persistSessionCookies,
                    signinHoldActive, takeSigninHold, releaseSigninHold, waitForSigninHold, HOLD_MAX_MS, isBotCheck,
-                   profileProcs, plainWindowOpen, pickOption };
+                   profileProcs, plainWindowOpen, pickOption, settleBotCheck };
