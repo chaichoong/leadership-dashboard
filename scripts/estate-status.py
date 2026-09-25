@@ -756,7 +756,7 @@ def robot_signins_row(now, src=None):
     lines = payload["lines"]
     if not lines:
         # The control: the list has held 22 sign-ins since 25 Sep 2026, so none at all is a broken read.
-        return dict(row, status="Failed", detail="The robot's sign-in list came back empty; the list could not be read.")
+        return dict(row, status="Failed", detail="The robot's sign-in list came back empty. The list could not be read.")
     by = {}
     for ln in lines:
         by.setdefault(ln["state"], []).append(ln["label"])

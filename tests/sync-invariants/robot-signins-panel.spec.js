@@ -80,6 +80,28 @@ test.describe('Robot sign-ins panel on a Mac', () => {
     await expect(panel.locator('[data-rs-signin="tax.service.gov.uk"]')).toHaveAttribute('aria-label', 'Sign in to HMRC');
   });
 
+  test('the keyboard stays on a Sign in button through a redraw, and the change is said once', async ({ page }) => {
+    const panel = await open(page, [signinRow(MIXED)]);
+    await panel.locator('[data-rs-signin="utilita-apt1"]').focus();
+    await page.evaluate(() => renderSignins());   // the 30-second re-read redraws the whole panel
+    await expect(panel.locator('[data-rs-signin="utilita-apt1"]')).toBeFocused();
+    await expect(page.locator('#signinsLive')).toHaveText('2 robot sign-ins need you');
+    await expect(page.locator('#signinsLive')).toHaveAttribute('role', 'status');
+  });
+
+  test('closing the last sign-in card mid re-read clears the strip at once', async ({ page }) => {
+    const fx = defaultFixtures();
+    fx.approvals = fx.approvals.map((r, i) => {
+      if (i === 0) r.fields[TF.agentOutput] = 'Letter built.\nSIGN-IN NEEDED: Pingen (https://app.pingen.com/)';
+      return r;
+    });
+    const panel = await open(page, [signinRow(MIXED)], { approvals: fx.approvals });
+    await expect(panel.locator('[data-apv-signin-strip]')).toBeVisible();
+    // The queue is re-reading, and the sign-in card leaves the list (a decision edits allApprovals).
+    await page.evaluate(() => { _approvalsState = 'loading'; allApprovals = allApprovals.filter(t => !apvSignInNeeded(t.agentOutput)); renderSignins(); });
+    await expect(panel.locator('[data-apv-signin-strip]')).toHaveCount(0);
+  });
+
   test('a line in a state the page does not know is shown as needing him, never hidden', async ({ page }) => {
     const panel = await open(page, [signinRow([line('Pingen (letters)', 'app.pingen.com', 'signed-in'),
       line('Mystery', 'mystery.example.com', 'half-signed-in')])]);
@@ -103,8 +125,12 @@ test.describe('Robot sign-ins panel on a Mac', () => {
 
   test('a failed refresh, a stale row and a missing row each say so; none reads as an empty list', async ({ page }) => {
     let panel = await open(page, [signinRow(MIXED, { [ES.status]: 'Failed', [ES.detail]: 'node not found' })]);
-    await expect(panel).toContainText('The sign-in list could not be refreshed: node not found');
+    await expect(panel).toContainText('The sign-in list could not be refreshed (Failed): node not found');
     await expect(panel.locator('[data-rs-signin="www.edfenergy.com"]')).toBeVisible();   // the last good list stays
+    // Any mark but Worked is a warning: an older writer once called an unknown row "Idle,
+    // No longer scheduled" and froze it with a fresh time.
+    panel = await open(page, [signinRow(MIXED, { [ES.status]: 'Idle', [ES.detail]: 'No longer scheduled' })]);
+    await expect(panel).toContainText('The sign-in list could not be refreshed (Idle): No longer scheduled');
     panel = await open(page, [signinRow(MIXED, { [ES.updated]: ago(95) })]);
     await expect(panel).toContainText('The estate-status job that refreshes it has stopped');
     panel = await open(page, [signinRow(MIXED, { [ES.payload]: '{"lines":[' })]);

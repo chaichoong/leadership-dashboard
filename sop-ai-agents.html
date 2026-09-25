@@ -141,10 +141,10 @@ code { background: var(--bg-subtle); padding: 0.1rem 0.4rem; border-radius: 4px;
   <div class="section">
     <h2 class="section-title">5. Health checks</h2>
     <div class="card">
-      <p>The sync bar at the top of the page runs these checks, among others; the sidebar dot in the shell mirrors the worst of them.</p>
+      <p>The sync bar at the top of the page runs these checks, among others. The sidebar dot in the shell mirrors the worst of them.</p>
       <table>
         <tr><th>Check</th><th>If it fails</th></tr>
-        <tr><td>Robot sign-ins listed</td><td>The robot-signins row is missing, failed or unreadable, so the Robot sign-ins panel cannot say which logins are live. Its detail says why; the estate-status job writes the row every ten minutes.</td></tr>
+        <tr><td>Robot sign-ins listed</td><td>The robot-signins row is missing, failed or unreadable, so the Robot sign-ins panel cannot say which logins are live. Its detail says why. The estate-status job writes the row every ten minutes.</td></tr>
         <tr><td>Approvals queue read</td><td>Airtable auth or a broken formula. Hit Refresh; if it persists, the Status or Sent For Approval By field name changed.</td></tr>
         <tr><td>Legacy Approval records excluded</td><td>A task with no raising agent leaked into the queue. The filter broke; do not decide legacy records here.</td></tr>
         <tr><td>Agents register read</td><td>The AI Agents or Team Members read failed, or the Is AI Agent / Active fields were renamed.</td></tr>

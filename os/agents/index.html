@@ -474,6 +474,7 @@ a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}
                 <span class="zone-title">Robot sign-ins</span>
                 <span class="zone-count" id="signinsCount">…</span>
                 <span class="zone-sub">The logins your robots use. You sign in on your Mac. The robots never see a password.</span>
+                <span id="signinsLive" role="status" style="position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap"></span>
             </div>
             <div id="signinsBody"><div class="zone-loading"><div class="sop-spinner"></div><span>Loading the robot's sign-ins…</span></div></div>
         </div>
@@ -2234,7 +2235,7 @@ function apvSignInStripHtml(items, onMac = true){
         : `<span class="rs-mac">Sign in on your Mac</span>`;
     return `<div class="apv-signin-strip" data-apv-signin-strip>
         <div><strong>${needs.length === 1 ? 'One task is' : needs.length + ' tasks are'} waiting on a sign-in.</strong>
-            <span style="color:var(--text-secondary)">Not a decision. Each site opens in turn: sign in, press Cmd+Q, the next opens. When the last one closes, the robots start on the work. This page updates itself as each site is handed back.</span></div>
+            <span style="color:var(--text-secondary)">${onMac ? 'Not a decision. Each site opens in turn: sign in, press Cmd+Q, the next opens. When the last one closes, the robots start on the work. This page updates itself as each site is handed back.' : 'Not a decision. Sign in from your Mac, where each site opens in turn.'}</span></div>
         <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-top:6px">
             ${all}${parts}
         </div>
@@ -6424,7 +6425,7 @@ const SIGNIN_STATE = {
     'signed-in':     { order: 3, label: 'Signed in',       style: ['var(--success-bg)', 'var(--success)'] },
     'on-demand':     { order: 4, label: 'When needed',     style: ['var(--bg-subtle)', 'var(--text-muted)'] },
 };
-let _signinsOpen = false, _signinStripCache = '';
+let _signinsOpen = false, _signinsSaid = '';
 
 function signinRow(){ return _estateRows.find(r => (r.fields || {})[ES.key] === SIGNIN_ROW_KEY) || null; }
 // A payload that will not parse is reported on the panel, never read as an empty list.
@@ -6464,11 +6465,10 @@ function renderSignins(){
     const countEl = document.getElementById('signinsCount');
     const setCount = (n, hot) => { if(countEl){ countEl.textContent = n; countEl.className = 'zone-count' + (hot ? ' hot' : ''); } };
     // The waiting-task strip (4 Sep 2026) leads the panel: work that stopped on a sign-in.
-    // While the queue re-reads (every 30 s after a Sign in tap) the last good strip stays:
-    // redrawn from nothing, it vanished and the unchanged queue never brought it back (review).
-    if(_approvalsState === 'ready') _signinStripCache = apvSignInStripHtml(allApprovals, SIGNIN_ON_MAC);
-    else if(String(_approvalsState).indexOf('error') === 0) _signinStripCache = '';
-    const strip = _signinStripCache;
+    // Built from allApprovals while the queue re-reads too (every 30 s after a Sign in tap):
+    // that list keeps the last good read during a load and every decision edits it, so the
+    // strip neither vanishes mid re-read nor keeps a card he has just closed (review).
+    const strip = (_approvalsState === 'ready' || _approvalsState === 'loading') ? apvSignInStripHtml(allApprovals, SIGNIN_ON_MAC) : '';
     const addBtn = SIGNIN_ON_MAC
         ? `<a class="btn btn-sm" href="robotsignin://add" data-rs-add title="Opens the Robot sign-in app on your Mac: paste the site's sign-in page, name it, sign in">+ Add a new site</a>` : '';
     const macNote = SIGNIN_ON_MAC ? '' : `<div class="rs-note">Sign-ins open on your Mac, where the robots' browser lives. This page shows where each one stands.</div>`;
@@ -6485,14 +6485,16 @@ function renderSignins(){
     const row = signinRow();
     if(!row){
         setCount('?', true);
-        body.innerHTML = strip + `<div class="zone-error">No sign-in list yet. The estate-status job writes it every ten minutes; if this stays, that job has stopped.</div>`;
+        body.innerHTML = strip + `<div class="zone-error">No sign-in list yet. The estate-status job writes it every ten minutes. If this stays, that job has stopped.</div>`;
         return;
     }
     const f = row.fields || {};
     const p = signinPayload(row);
     let warn = '';
-    if(f[ES.status] === 'Failed'){
-        warn = `<div class="zone-error" style="margin-bottom:8px">The sign-in list could not be refreshed: ${esc(f[ES.detail] || 'no reason given')}${p && p.asOf ? ` Showing the list from ${esc(estateAgo(p.asOf))}.` : ''}</div>`;
+    if(f[ES.status] !== 'Worked'){
+        // Failed, or any other mark (an older writer once called an unknown row "No longer
+        // scheduled" and froze it): never shown as a current list without saying so.
+        warn = `<div class="zone-error" style="margin-bottom:8px">The sign-in list could not be refreshed (${esc(f[ES.status] || 'no status')}): ${esc(f[ES.detail] || 'no reason given')}${p && p.asOf ? ` Showing the list from ${esc(estateAgo(p.asOf))}.` : ''}</div>`;
     } else {
         const ageMin = f[ES.updated] ? Math.round((Date.now() - new Date(f[ES.updated]).getTime()) / 60000) : null;
         if(ageMin === null || ageMin > ESTATE_STALE_MIN) warn = `<div class="zone-error" style="margin-bottom:8px">This list was last updated ${esc(estateAgo(f[ES.updated]))}. The estate-status job that refreshes it has stopped, so it may be out of date.</div>`;
@@ -6522,20 +6524,27 @@ function renderSignins(){
         if((p.unlisted || []).length) rest += `<div class="rs-note">No sign-in page on file yet, so not listed: ${esc(p.unlisted.join(', '))}. On your Mac, use + Add a new site with each one's sign-in page to add it here.</div>`;
         if((p.skipped || []).length) rest += `<div class="rs-note">Could not list: ${esc(p.skipped.join('; '))}.</div>`;
     }
-    body.innerHTML = strip + warn + `<div class="rs-summary"><span role="status">${summary}</span>
+    // Keep the keyboard where it was: the panel is redrawn whole, every 30 s while watching.
+    const had = document.activeElement && body.contains(document.activeElement) ? document.activeElement : null;
+    const hadKey = had ? (had.getAttribute('data-rs-signin') ? `[data-rs-signin="${CSS.escape(had.getAttribute('data-rs-signin'))}"]`
+        : had.hasAttribute('data-rs-toggle') ? '[data-rs-toggle]' : had.hasAttribute('data-rs-add') ? '[data-rs-add]' : '') : '';
+    body.innerHTML = strip + warn + `<div class="rs-summary"><span>${summary}</span>
             <div class="rs-actions">${toggle}${addBtn}</div></div>
         <div class="rs-note">Updated ${esc(estateAgo(f[ES.updated]))}.</div>
         ${shown.length || rest ? `<div class="rs-list">${shown.map(signinLineHtml).join('')}${rest}</div>` : ''}
         ${macNote}`;
+    if(hadKey){ const again = body.querySelector(hadKey); if(again) again.focus(); }
+    // Said once when it changes, from the one live region that stays in the page.
+    const said = needs.length ? `${needs.length} robot sign-in${needs.length === 1 ? '' : 's'} need you` : 'All robot sign-ins are fine';
+    const live = document.getElementById('signinsLive');
+    if(live && said !== _signinsSaid){ live.textContent = said; _signinsSaid = said; }
 }
 document.addEventListener('click', (ev) => {
     const t = ev.target && ev.target.closest ? ev.target.closest('[data-rs-toggle]') : null;
     if(!t) return;
     _signinsOpen = !_signinsOpen;
+    t.focus();          // renderSignins puts the keyboard back on the redrawn toggle
     renderSignins();
-    // The panel is redrawn whole; keep the keyboard where it was.
-    const again = document.querySelector('#signinsBody [data-rs-toggle]');
-    if(again) again.focus();
 });
 
 async function loadEstateStatus(){
