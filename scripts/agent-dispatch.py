@@ -5677,7 +5677,10 @@ def signin_reopened_reason(t, now=None):
                 and last.group("who").strip() == "Robot sign-in")
     if not (text.startswith(SIGNIN_DONE_MARK) or via_wall):
         return ""
-    if t.get("outcome") and not (via_wall and t.get("outcome") in APPROVED):
+    # A redo Kevin asked for is worked too (25 Sep 2026): the 6 Chedburgh quote,
+    # "Changes requested", was skipped by the 15:00 pickup while TopCashback was
+    # live and waited for the next half-hourly poll.
+    if t.get("outcome") and not (via_wall and t.get("outcome") in APPROVED + ("Changes requested",)):
         return ""
     try:
         when = datetime.strptime(last.group("day") + " " + (last.group("time") or "00:00"),
