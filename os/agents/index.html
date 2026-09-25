@@ -156,6 +156,15 @@ a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}
 .apv-signin{display:flex;gap:10px;align-items:center;flex-wrap:wrap;justify-content:space-between;border:1px solid var(--border-default);border-radius:var(--radius-md);background:var(--accent-soft);padding:8px 12px;margin:6px 0 8px;font-size:var(--fs-sm)}
 .apv-signin-site{display:inline-block;border:1px solid var(--border-default);border-radius:var(--radius-full);padding:3px 10px;background:var(--bg-surface);color:var(--text-primary);text-decoration:none;font-size:var(--fs-xs)}
 .apv-signin-site:hover{border-color:var(--accent)}
+/* Robot sign-ins panel (25 Sep 2026): every login the robots use, above the approval queue. */
+.rs-summary{display:flex;gap:10px;align-items:center;flex-wrap:wrap;justify-content:space-between;font-size:var(--fs-sm);color:var(--text-primary)}
+.rs-actions{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+.rs-list{margin-top:10px;display:flex;flex-direction:column;gap:6px}
+.rs-line{display:flex;gap:10px;align-items:center;flex-wrap:wrap;justify-content:space-between;border:1px solid var(--border-default);border-radius:var(--radius-md);background:var(--bg-surface);padding:8px 12px;font-size:var(--fs-sm)}
+.rs-line .rs-label{font-weight:600;color:var(--text-primary);overflow-wrap:anywhere}
+.rs-line .rs-when{display:block;color:var(--text-muted);font-size:var(--fs-xs);margin-top:2px}
+.rs-note{margin-top:8px;color:var(--text-secondary);font-size:var(--fs-xs)}
+.rs-mac{color:var(--text-muted);font-size:var(--fs-xs)}
 .apv-reasons{display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin-top:8px;
     padding-top:10px;border-top:1px dashed var(--border-subtle)}
 .apv-reasons-label{font-size:var(--fs-xs);color:var(--text-muted);font-weight:var(--fw-semibold);margin-right:2px}
@@ -457,6 +466,17 @@ a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}
     </div>
 
     <div class="page-view" id="view-approvals">
+        <!-- Robot sign-ins (25 Sep 2026): every login the robots use, read from the
+             robot-signins row that scripts/estate-status.py rewrites every ten minutes.
+             The sign-in itself happens in the Robot sign-in app on the Mac. -->
+        <div class="zone" id="zoneSignins">
+            <div class="zone-header">
+                <span class="zone-title">Robot sign-ins</span>
+                <span class="zone-count" id="signinsCount">0</span>
+                <span class="zone-sub">The logins your robots use. You sign in on your Mac; the robots never see a password.</span>
+            </div>
+            <div id="signinsBody" aria-live="polite"><div class="zone-loading"><div class="sop-spinner"></div><span>Loading the robot's sign-ins…</span></div></div>
+        </div>
         <div class="zone" id="zoneApprovals">
             <div class="zone-header">
                 <span class="zone-title">Waiting for your approval</span>
@@ -1465,6 +1485,7 @@ function apvDeferredLaneHtml(){
 }
 
 function renderApprovals(){
+    renderSignins();   // the waiting-task strip lives in the sign-ins panel since 25 Sep 2026
     const body = document.getElementById('approvalsBody');
     const countEl = document.getElementById('approvalsCount');
     if(String(_approvalsState).indexOf('error') === 0){
@@ -1493,7 +1514,6 @@ function renderApprovals(){
     }
 
     snapshotApprovalDrafts();
-    const signInStrip = apvSignInStripHtml(allApprovals);
 
     // Filter chips per raising agent; the list itself stays FLAT in the
     // queue's importance order (tier 1, then priority, then longest
@@ -1517,7 +1537,7 @@ function renderApprovals(){
     const tier1Count = allApprovals.filter(t=>t.tier1 && inAgent(t)).length;
     const anyFilter = _apvAgentFilter || _apvTier1Only;
 
-    let html = laterHtml + signInStrip + `<div id="apvCrossNotice">${apvCrossNoticeHtml()}</div>` + `<div class="apv-filters">
+    let html = laterHtml + `<div id="apvCrossNotice">${apvCrossNoticeHtml()}</div>` + `<div class="apv-filters">
         <button class="apv-filter${anyFilter?'':' active'}" onclick="clearApvFilters()">All (${allApprovals.length})</button>
         ${chips.map(g=>{
             const n = g.rows.filter(inTier).length;
@@ -1958,9 +1978,14 @@ document.addEventListener('click', (ev) => {
     _apvSignInClickedAt = Date.now();
     toast('Opening the Robot sign-in app. This page updates itself as each site is handed back.');
 });
+// After a Sign in tap the Robot sign-in app rewrites the robot-signins row
+// (estate-status.py signins); re-read it on the same clock so the panel says
+// "You signed in" within a minute, not at the next ten-minute run.
+function signinsWatching(){ return (Date.now() - _apvSignInClickedAt) < APV_SIGNIN_WATCH_MS; }
 setInterval(() => {
     if(_agentsView !== 'approvals' || document.visibilityState === 'hidden') return;
     if(apvWatchingSignIns()) apvSilentRefresh().catch(() => {});
+    if(signinsWatching() && _estateState !== 'loading') loadEstateStatus();
 }, 30000);
 document.addEventListener('visibilitychange', () => {
     if(document.visibilityState !== 'visible') return;
@@ -3363,13 +3388,8 @@ function apvSyncCountsInPlace(decidedId){
     if(all && /^All \(/.test(all.textContent)) all.textContent = `All (${allApprovals.length})`;
     // The sign-in banner counts the queue too (23 Sep 2026): closing or
     // knocking back a sign-in card left it one higher until a full redraw.
-    const strip = document.querySelector('#approvalsBody [data-apv-signin-strip]');
-    const stripHtml = apvSignInStripHtml(allApprovals);
-    if(strip){ if(stripHtml) strip.outerHTML = stripHtml; else strip.remove(); }
-    else if(stripHtml){
-        const filters = document.querySelector('#approvalsBody .apv-filters');
-        if(filters) filters.insertAdjacentHTML('beforebegin', stripHtml);
-    }
+    // It sits in the Robot sign-ins panel now, which redraws on its own.
+    renderSignins();
     apvBulkSync();
     if(!allApprovals.length){
         const body = document.getElementById('approvalsBody');
@@ -6378,6 +6398,130 @@ function estatePill(status){
     return `<span class="agent-pill" style="background:${st[0]};color:${st[1]}">${esc(status||'?')}</span>`;
 }
 
+// ═══════════════════════════════════════════════════════════════════════
+// ROBOT SIGN-INS PANEL (Kevin, 25 Sep 2026: "Where is the signing section now?
+// Ultimately it probably needs to be on my Operations Director app, in the AI
+// agent section.") Every login the robots use, with its state and when it was
+// last looked at, from the robot-signins row of the Estate Status table
+// (scripts/estate-status.py). The sign-in itself stays in the Robot sign-in app
+// on his Mac, where the robots' browser lives: the buttons are robotsignin://
+// links, and a phone shows the state with no buttons.
+// ═══════════════════════════════════════════════════════════════════════
+const SIGNIN_ROW_KEY = 'robot-signins';
+// An iPad asks for the desktop site with a Mac user agent; touch rules it out.
+const SIGNIN_ON_MAC = /Macintosh/.test(navigator.userAgent) && !(navigator.maxTouchPoints > 1);
+const SIGNIN_STATE = {
+    'signed-out':    { order: 0, label: 'Signed out',      style: ['var(--danger-bg)', 'var(--danger)'] },
+    'unchecked':     { order: 1, label: 'Not checked yet', style: ['var(--warning-bg)', 'var(--warning)'] },
+    'you-signed-in': { order: 2, label: 'You signed in',   style: ['var(--info-bg)', 'var(--info)'] },
+    'signed-in':     { order: 3, label: 'Signed in',       style: ['var(--success-bg)', 'var(--success)'] },
+    'on-demand':     { order: 4, label: 'When needed',     style: ['var(--bg-subtle)', 'var(--text-muted)'] },
+};
+let _signinsOpen = false;
+
+function signinRow(){ return _estateRows.find(r => (r.fields || {})[ES.key] === SIGNIN_ROW_KEY) || null; }
+// A payload that will not parse is reported on the panel, never read as an empty list.
+function signinPayload(row){
+    const raw = row && row.fields ? row.fields[ES.payload] : '';
+    if(!raw) return null;
+    try { return JSON.parse(raw); } catch(e){ return { broken: String(e.message || e) }; }
+}
+// A Utilita flat is its own login in its own profile, so its button opens that
+// flat only; a site on the main profile opens by host.
+function signinLink(ln){
+    return ln.profile && ln.profile !== 'default'
+        ? `robotsignin://profile/${encodeURIComponent(ln.profile)}`
+        : `robotsignin://site/${encodeURIComponent(ln.host)}`;
+}
+function signinButton(ln){
+    if(!SIGNIN_ON_MAC) return `<span class="rs-mac">Sign in on your Mac</span>`;
+    return `<a class="btn btn-success btn-sm" href="${esc(signinLink(ln))}" data-rs-signin="${esc(ln.profile && ln.profile !== 'default' ? ln.profile : ln.host)}" title="Opens the Robot sign-in app on your Mac at this sign-in">Sign in</a>`;
+}
+function signinLineHtml(ln){
+    const st = SIGNIN_STATE[ln.state] || SIGNIN_STATE.unchecked;
+    const when = ln.state === 'on-demand' ? 'Short login: sign in when a task asks for it'
+        : ln.state === 'you-signed-in' ? `You signed in ${estateAgo(ln.at)}. The robot confirms it at its next check.`
+        : ln.at ? `${ln.how || 'checked'} ${estateAgo(ln.at)}` : 'Not checked yet';
+    const act = (ln.state === 'signed-out' || ln.state === 'unchecked' || ln.state === 'on-demand') ? signinButton(ln) : '';
+    return `<div class="rs-line" data-rs-line="${esc(ln.state)}">
+        <div><span class="rs-label">${esc(ln.label)}</span>
+            <span class="agent-pill" style="background:${st.style[0]};color:${st.style[1]};margin-left:6px">${esc(st.label)}</span>
+            <span class="rs-when">${esc(when)}</span></div>
+        ${act}
+    </div>`;
+}
+function renderSignins(){
+    const body = document.getElementById('signinsBody'); if(!body) return;
+    const countEl = document.getElementById('signinsCount');
+    const setCount = (n, hot) => { if(countEl){ countEl.textContent = n; countEl.className = 'zone-count' + (hot ? ' hot' : ''); } };
+    // The waiting-task strip (4 Sep 2026) leads the panel: work that stopped on a sign-in.
+    const strip = _approvalsState === 'ready' ? apvSignInStripHtml(allApprovals) : '';
+    const addBtn = SIGNIN_ON_MAC
+        ? `<a class="btn btn-sm" href="robotsignin://add" data-rs-add title="Opens the Robot sign-in app on your Mac: paste the site's sign-in page, name it, sign in">+ Add a new site</a>` : '';
+    const macNote = SIGNIN_ON_MAC ? '' : `<div class="rs-note">Sign-ins open on your Mac, where the robots' browser lives. This page shows where each one stands.</div>`;
+    const haveRows = _estateState === 'ready' || (_estateState === 'loading' && _estateRows.length);
+    if(String(_estateState).indexOf('error') === 0){
+        setCount('?', true);
+        body.innerHTML = strip + `<div class="zone-error">Could not read the sign-in list (${esc(String(_estateState).slice(7))}). This list is NOT empty — it could not be read.</div>`;
+        return;
+    }
+    if(!haveRows){
+        body.innerHTML = strip + `<div class="zone-loading"><div class="sop-spinner"></div><span>Loading the robot's sign-ins…</span></div>`;
+        return;
+    }
+    const row = signinRow();
+    if(!row){
+        setCount('?', true);
+        body.innerHTML = strip + `<div class="zone-error">No sign-in list yet. The estate-status job writes it every ten minutes; if this stays, that job has stopped.</div>`;
+        return;
+    }
+    const f = row.fields || {};
+    const p = signinPayload(row);
+    let warn = '';
+    if(f[ES.status] === 'Failed'){
+        warn = `<div class="zone-error" style="margin-bottom:8px">The sign-in list could not be refreshed: ${esc(f[ES.detail] || 'no reason given')}${p && p.asOf ? ` Showing the list from ${esc(estateAgo(p.asOf))}.` : ''}</div>`;
+    } else {
+        const ageMin = f[ES.updated] ? Math.round((Date.now() - new Date(f[ES.updated]).getTime()) / 60000) : null;
+        if(ageMin === null || ageMin > ESTATE_STALE_MIN) warn = `<div class="zone-error" style="margin-bottom:8px">This list was last updated ${esc(estateAgo(f[ES.updated]))}. The estate-status job that refreshes it has stopped, so it may be out of date.</div>`;
+    }
+    // An empty list is a broken read too: the robots have held 20-odd logins since
+    // 4 Sep 2026, and "All good. 0 signed in" would be a calm lie.
+    if(!p || p.broken || !Array.isArray(p.lines) || !p.lines.length){
+        setCount('?', true);
+        body.innerHTML = strip + warn + `<div class="zone-error">The sign-in list could not be read${p && p.broken ? ' (' + esc(p.broken) + ')' : ''}. This list is NOT empty — it could not be read.</div>`;
+        return;
+    }
+    const order = ln => (SIGNIN_STATE[ln.state] || SIGNIN_STATE.unchecked).order;
+    const lines = p.lines.slice().sort((a, b) => order(a) - order(b) || String(a.label).localeCompare(String(b.label)));
+    const pick = st => lines.filter(ln => ln.state === st);
+    const needs = lines.filter(ln => ln.state === 'signed-out' || ln.state === 'unchecked');
+    const mine = pick('you-signed-in'), ok = pick('signed-in'), od = pick('on-demand');
+    setCount(needs.length, needs.length > 0);
+    const summary = needs.length
+        ? `<span><strong>${needs.length === 1 ? 'One sign-in needs' : needs.length + ' sign-ins need'} you:</strong> ${esc(needs.map(ln => ln.label).join(', '))}.</span>`
+        : `<span><strong>All good.</strong> ${ok.length} signed in, ${od.length} sign in when a task needs them${mine.length ? `, ${mine.length} you signed in (the robot confirms at its next check)` : ''}.</span>`;
+    const toggle = `<button type="button" class="btn btn-sm" data-rs-toggle aria-expanded="${_signinsOpen}">${_signinsOpen ? 'Hide the list' : 'Show all ' + lines.length}</button>`;
+    // Always on show: what needs him, and what he has just signed in to.
+    const shown = needs.concat(mine);
+    let rest = '';
+    if(_signinsOpen){
+        rest = ok.concat(od).map(signinLineHtml).join('');
+        if((p.unlisted || []).length) rest += `<div class="rs-note">No sign-in page on file yet, so not listed: ${esc(p.unlisted.join(', '))}. Use + Add a new site with each one's sign-in page to add it here.</div>`;
+        if((p.skipped || []).length) rest += `<div class="rs-note">Could not list: ${esc(p.skipped.join('; '))}.</div>`;
+    }
+    body.innerHTML = strip + warn + `<div class="rs-summary">${summary}
+            <div class="rs-actions">${toggle}${addBtn}</div></div>
+        <div class="rs-note">Updated ${esc(estateAgo(f[ES.updated]))}.</div>
+        ${shown.length || rest ? `<div class="rs-list">${shown.map(signinLineHtml).join('')}${rest}</div>` : ''}
+        ${macNote}`;
+}
+document.addEventListener('click', (ev) => {
+    const t = ev.target && ev.target.closest ? ev.target.closest('[data-rs-toggle]') : null;
+    if(!t) return;
+    _signinsOpen = !_signinsOpen;
+    renderSignins();
+});
+
 async function loadEstateStatus(){
     const jobs = document.getElementById('estateJobsBody'); if(!jobs) return;
     _estateState = 'loading';
@@ -6391,6 +6535,7 @@ async function loadEstateStatus(){
         if(sb) sb.innerHTML = `<div class="zone-error">Could not read the not-moving list either (same table). This list is NOT empty — it could not be read.</div>`;
     }
     renderEstateStatus();
+    renderSignins();
     if(_agentsView === 'estate') loadEstateContent();
 }
 function renderEstateStatus(){
@@ -6538,6 +6683,22 @@ function registerAgentsSyncBar(){
                     const ageMin = newest ? Math.round((Date.now() - new Date(newest).getTime())/60000) : null;
                     if(ageMin === null || ageMin > ESTATE_STALE_MIN) return { status:'fail', detail:`Estate status rows last updated ${newest ? estateAgo(newest) : 'never'} — the estate-status job has stopped` };
                     return { status:'pass', detail:`Updated ${estateAgo(newest)}` };
+                }
+            },
+            {
+                name: 'Robot sign-ins listed', kind: 'automation', run: () => {
+                    // The panel above the queue reads one row. A missing or failed row
+                    // leaves Kevin guessing which logins are live, so it fails here.
+                    if(String(_estateState).indexOf('error') === 0) return { status:'fail', detail:String(_estateState).slice(7) };
+                    if(_estateState !== 'ready') return { status:'warn', detail:'Estate status not loaded yet' };
+                    const row = signinRow();
+                    if(!row) return { status:'fail', detail:'No robot-signins row: the estate-status job has not written the sign-in list' };
+                    const f = row.fields || {};
+                    if(f[ES.status] === 'Failed') return { status:'fail', detail:String(f[ES.detail] || 'The sign-in list could not be refreshed') };
+                    const p = signinPayload(row);
+                    if(!p || p.broken || !Array.isArray(p.lines) || !p.lines.length) return { status:'fail', detail:'The sign-in list is unreadable or empty' };
+                    const out = p.lines.filter(ln => ln.state === 'signed-out').length;
+                    return { status:'pass', detail:`${p.lines.length} sign-ins listed, ${out} signed out` };
                 }
             },
             {

@@ -77,6 +77,19 @@ code { background: var(--bg-subtle); padding: 0.1rem 0.4rem; border-radius: 4px;
   <div class="section">
     <h2 class="section-title">2. The Approvals tab</h2>
     <div class="card">
+      <h3>Robot sign-ins (top of the tab)</h3>
+      <p>Every login the robots use: the sites on their main browser, and each Utilita flat on its own. Each line says where it stands and when it was last looked at:</p>
+      <table>
+        <tr><th>State</th><th>What it means</th><th>What to do</th></tr>
+        <tr><td>Signed out</td><td>A robot looked and found no login.</td><td>Press <strong>Sign in</strong> on your Mac. The Robot sign-in app opens that site. Sign in, then press Cmd+Q.</td></tr>
+        <tr><td>Not checked yet</td><td>Nothing has looked at it since it was added.</td><td>Sign in if a robot needs it today; otherwise the 06:40 check looks tomorrow.</td></tr>
+        <tr><td>You signed in</td><td>You closed a sign-in window after the last check.</td><td>Nothing. The robot confirms it at its next check.</td></tr>
+        <tr><td>Signed in</td><td>The last check found the robot signed in.</td><td>Nothing.</td></tr>
+        <tr><td>When needed</td><td>A short login (GOV.UK, HMRC, GoCardless, American Express) that lapses within the hour.</td><td>Sign in when a task asks for it.</td></tr>
+      </table>
+      <p><strong>+ Add a new site</strong> opens the same app's add dialog: paste the site's sign-in page, name it, sign in. The robots can use it from then on, and it joins this list. Sites the robots hold a login for but have no sign-in page on file are named under <strong>Show all</strong>; add each one once the same way.</p>
+      <p>The buttons are Mac only, because the robots' browser lives on your Mac. On a phone the panel shows the states with no buttons. The list comes from the <code>robot-signins</code> row of the Estate Status table, which <code>scripts/estate-status.py</code> rewrites every ten minutes from the 06:40 keep-alive, the robots' own session checks, the hourly Utilita read and the sign-in log. The app rewrites it straight after each sign-in, so the line changes within a minute. When tasks are waiting on a sign-in, the strip naming them sits at the top of this panel, and each card keeps its own <strong>Sign in now</strong> button.</p>
+      <h3>The queue</h3>
       <p>The queue shows ONLY loop-raised work: tasks at Status <code>Approval</code> that carry a <code>Sent For Approval By</code> agent link. Legacy records parked at Approval status never appear. Cards are ordered <strong>tier 1 first, then priority, then longest waiting</strong>. Each card leads with the one-line ask (the agent's own "Carrying this out will involve" line), then the agent's full work, the brief it was given, and the age it has been waiting. Tier 1 items carry a red banner: read those fully before deciding. Where the task came from an email, the card links straight to the original thread.</p><h3>Filters</h3><p>Above the cards: <strong>All</strong>, one chip per agent with its count, and a <strong>Tier 1</strong> toggle for the work touching your private legal and financial matter. The two combine, so they can narrow to nothing (an agent with no tier-1 work) &ndash; when that happens the page says so and offers <strong>Clear filters</strong> rather than looking like an empty queue.</p>
       <h3>The four actions and exactly what each writes</h3>
       <p>This page is the third face of ONE mechanism. It writes the same fields as the Tasks drawer and the Slack loop, so the three surfaces can never disagree.</p>
@@ -128,9 +141,10 @@ code { background: var(--bg-subtle); padding: 0.1rem 0.4rem; border-radius: 4px;
   <div class="section">
     <h2 class="section-title">5. Health checks</h2>
     <div class="card">
-      <p>The sync bar at the top of the page runs ten checks; the sidebar dot in the shell mirrors the worst of them.</p>
+      <p>The sync bar at the top of the page runs these checks, among others; the sidebar dot in the shell mirrors the worst of them.</p>
       <table>
         <tr><th>Check</th><th>If it fails</th></tr>
+        <tr><td>Robot sign-ins listed</td><td>The robot-signins row is missing, failed or unreadable, so the Robot sign-ins panel cannot say which logins are live. Its detail says why; the estate-status job writes the row every ten minutes.</td></tr>
         <tr><td>Approvals queue read</td><td>Airtable auth or a broken formula. Hit Refresh; if it persists, the Status or Sent For Approval By field name changed.</td></tr>
         <tr><td>Legacy Approval records excluded</td><td>A task with no raising agent leaked into the queue. The filter broke; do not decide legacy records here.</td></tr>
         <tr><td>Agents register read</td><td>The AI Agents or Team Members read failed, or the Is AI Agent / Active fields were renamed.</td></tr>

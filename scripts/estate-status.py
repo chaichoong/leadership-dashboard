@@ -577,6 +577,199 @@ def loop_health_row(now):
             "lastRun": now.strftime("%Y-%m-%dT%H:%M:%S.000Z"), "lastWorked": now.strftime("%Y-%m-%dT%H:%M:%S.000Z")}
 
 
+# ─── robot sign-ins (25 Sep 2026) ─────────────────────────────────────
+# Kevin: "Where is the signing section now? Ultimately it probably needs to be on
+# my Operations Director app, in the AI agent section." The sign-in itself stays
+# in the Robot sign-in app on the Mac (the robots' browser lives there); this
+# row tells the AI Agents page which sign-ins are live, which need him and when
+# each was last checked, so the Approvals tab can show all of them at once and
+# not only the ones a stuck task happens to name.
+#
+# Every state comes from something that LOOKED, newest wins:
+#   the 06:40 keep-alive (session-keepalive/status.json), the robot's own
+#   session checks (agent-browser runs.jsonl, cmd "session"), and for a site
+#   held in its own profile (the Utilita flats) the hourly meter read.
+# A sign-in window Kevin closed after the last look reads "you-signed-in": he
+# did the step, but no robot has confirmed it yet, and green would claim more.
+SIGNIN_KEY = "robot-signins"
+KEEPALIVE_STATUS = os.path.join(LOGS, "session-keepalive", "status.json")
+BROWSER_LEDGER = os.path.join(LOGS, "agent-browser", "runs.jsonl")
+UTILITA_READINGS = os.path.join(LOGS, "utilita-balance", "readings.jsonl")
+UTILITA_ACCOUNTS = os.path.expanduser("~/.config/od/utilita_accounts.json")
+LEDGER_TAIL_BYTES = 2_000_000          # the ledger grows forever; weeks of runs fit in this
+
+
+def _node():
+    import glob
+    import shutil
+    node = (os.environ.get("AGENT_NODE_BIN") or shutil.which("node")
+            or (sorted(glob.glob(os.path.expanduser("~/.nvm/versions/node/*/bin/node"))) or [None])[-1])
+    if not node:
+        raise RuntimeError("node not found: no AGENT_NODE_BIN, not on PATH, no nvm install")
+    return node
+
+
+def _browser(*args):
+    """agent-browser.js from THIS checkout, so the list is the one the app shows."""
+    import subprocess
+    r = subprocess.run([_node(), os.path.join(HERE, "agent-browser.js")] + list(args),
+                       capture_output=True, text=True, timeout=60)
+    if r.returncode != 0:
+        raise RuntimeError("agent-browser.js %s exited %s: %s" % (args[0], r.returncode, (r.stderr or "").strip()[:200]))
+    return r
+
+
+def _tail_jsonl(path, max_bytes=LEDGER_TAIL_BYTES):
+    """The last max_bytes of a JSONL file as dicts. A missing file is an empty list."""
+    try:
+        with open(path, "rb") as fh:
+            fh.seek(0, os.SEEK_END)
+            size = fh.tell()
+            fh.seek(max(0, size - max_bytes))
+            raw = fh.read().decode("utf-8", "replace")
+    except FileNotFoundError:
+        return []
+    lines = raw.splitlines()
+    if size > max_bytes and lines:
+        lines = lines[1:]                  # the first line was cut part way
+    out = []
+    for ln in lines:
+        try:
+            out.append(json.loads(ln))
+        except ValueError:
+            continue
+    return out
+
+
+def load_signin_sources():
+    """Everything signin_payload needs, read from disk. Raises when a source that must exist cannot be read."""
+    r = _browser("signin-list")
+    targets = []
+    for ln in r.stdout.splitlines():
+        parts = [p.strip() for p in ln.split(" | ")]
+        if len(parts) == 4:
+            targets.append({"label": parts[0], "host": parts[1], "url": parts[2], "profile": parts[3]})
+    skipped = [ln[len("SKIPPED: "):] for ln in (r.stderr or "").splitlines() if ln.startswith("SKIPPED: ")]
+    sites = json.loads(_browser("sites").stdout)
+    try:
+        with open(KEEPALIVE_STATUS, encoding="utf-8") as fh:
+            keepalive = json.load(fh)
+    except FileNotFoundError:
+        keepalive = {}
+    try:
+        with open(UTILITA_ACCOUNTS, encoding="utf-8") as fh:
+            accounts = json.load(fh).get("accounts") or []
+    except FileNotFoundError:
+        accounts = []
+    return {"targets": targets, "skipped": skipped, "sites": sites, "keepalive": keepalive,
+            "ledger": _tail_jsonl(BROWSER_LEDGER), "readings": _tail_jsonl(UTILITA_READINGS, 400_000),
+            "accounts": [{"label": a.get("label"), "profile": a.get("profile")} for a in accounts]}
+
+
+def _utc(ts, naive_is_london=False):
+    """An ISO time as an aware UTC datetime, or None. The meter log writes London time with no offset."""
+    if not ts:
+        return None
+    try:
+        d = datetime.fromisoformat(str(ts).replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if d.tzinfo is None:
+        d = d.replace(tzinfo=LONDON if naive_is_london else timezone.utc)
+    return d.astimezone(timezone.utc)
+
+
+def _iso(d):
+    return d.strftime("%Y-%m-%dT%H:%M:%S.000Z") if d else None
+
+
+def signin_payload(now, src):
+    """The panel's list, pure: one line per sign-in with its state, when and how it was known."""
+    sites = src.get("sites") or {}
+    keep = src.get("keepalive") or {}
+    keep_at = _utc(keep.get("at"))
+    keep_sites = keep.get("sites") or {}
+    ledger = src.get("ledger") or []
+    profile_of = {a["label"]: a["profile"] for a in (src.get("accounts") or []) if a.get("label") and a.get("profile")}
+    last_read = {}
+    for rd in src.get("readings") or []:
+        prof = profile_of.get(rd.get("label"))
+        at = _utc(rd.get("at"), naive_is_london=True)
+        if prof and at and (prof not in last_read or at >= last_read[prof][0]):
+            last_read[prof] = (at, rd)
+    lines = []
+    for t in src.get("targets") or []:
+        host, profile = t["host"], t["profile"]
+        try:
+            url_host = urllib.parse.urlsplit(t["url"]).hostname or ""
+        except ValueError:
+            url_host = ""
+        entry = sites.get(host) or {}
+        seen = []                                           # (at, signedIn, how)
+        if profile == "default":
+            ks = keep_sites.get(host) or {}
+            if keep_at and ks.get("state") in ("signed-in", "signed-out"):
+                seen.append((keep_at, ks["state"] == "signed-in", "06:40 check"))
+            for e in ledger:
+                if e.get("cmd") == "session" and e.get("site") == host and (e.get("profile") or "default") == "default" \
+                        and isinstance(e.get("signedIn"), bool):
+                    at = _utc(e.get("at"))
+                    if at:
+                        seen.append((at, e["signedIn"], "robot check"))
+        elif profile in last_read:
+            at, rd = last_read[profile]
+            if rd.get("ok"):
+                seen.append((at, True, "hourly read"))
+            elif rd.get("problem") == "SIGN-IN NEEDED":
+                seen.append((at, False, "hourly read"))
+        last = max(seen, key=lambda s: s[0]) if seen else None
+        # Kevin's own sign-in, if it came after the last look.
+        mine = [_utc(e.get("at")) for e in ledger
+                if e.get("cmd") == "login" and (e.get("profile") or "default") == profile
+                and e.get("host") in (host, url_host)]
+        mine = max([m for m in mine if m], default=None)
+        if profile == "default" and entry.get("shortSession"):
+            state, at, how = "on-demand", (last[0] if last else None), "short login"
+        elif mine and (not last or mine > last[0]):
+            state, at, how = "you-signed-in", mine, "you signed in"
+        elif last:
+            state, at, how = ("signed-in" if last[1] else "signed-out"), last[0], last[2]
+        else:
+            state, at, how = "unchecked", None, "not checked yet"
+        lines.append({"label": t["label"], "host": host, "url": t["url"], "profile": profile,
+                      "state": state, "at": _iso(at), "how": how})
+    unlisted = sorted({(v.get("label") or h) for h, v in sites.items()
+                       if isinstance(v, dict) and v.get("login") and not v.get("loginUrl") and not v.get("profiles")})
+    return {"asOf": _iso(now), "lines": lines, "unlisted": unlisted, "skipped": src.get("skipped") or []}
+
+
+def robot_signins_row(now, src=None):
+    """The sign-in list as one REPORT row. A source that cannot be read, or an empty list, is a Failed row saying why."""
+    stamp = _iso(now)
+    row = {"key": SIGNIN_KEY, "kind": "report", "label": "Robot sign-ins", "lastRun": stamp}
+    try:
+        payload = signin_payload(now, src if src is not None else load_signin_sources())
+    except Exception as exc:  # noqa: BLE001 — the row must say WHY, whatever went wrong
+        return dict(row, status="Failed", detail="Could not read the robot's sign-ins: %s" % str(exc)[:300])
+    lines = payload["lines"]
+    if not lines:
+        # The control: the list has held 22 sign-ins since 25 Sep 2026, so none at all is a broken read.
+        return dict(row, status="Failed", detail="The robot's sign-in list came back empty; the list could not be read.")
+    by = {}
+    for ln in lines:
+        by.setdefault(ln["state"], []).append(ln["label"])
+    out = by.get("signed-out", [])
+    detail = "%d sign-ins: %d signed in, %d signed out%s" % (
+        len(lines), len(by.get("signed-in", [])), len(out), (" (%s)" % ", ".join(out[:6])) if out else "")
+    if by.get("on-demand"):
+        detail += ", %d sign in when needed" % len(by["on-demand"])
+    if by.get("you-signed-in"):
+        detail += ", %d signed in by you and not re-checked yet" % len(by["you-signed-in"])
+    if by.get("unchecked"):
+        detail += ", %d not checked yet" % len(by["unchecked"])
+    return dict(row, status="Worked", lastWorked=stamp, payload=json.dumps(payload), detail=detail + ".")
+
+
 # ─── Airtable ─────────────────────────────────────────────────────────
 def pat():
     with open(os.path.expanduser("~/.config/od/airtable_pat")) as fh:
@@ -659,6 +852,7 @@ def build_rows(now, with_loop_health=True):
         rows.append(row)
     rows.append(allowance_row(now))
     rows.append(needs_you_row(now))
+    rows.append(robot_signins_row(now))
     if with_loop_health:
         rows.append(loop_health_row(now))
     return rows
@@ -673,6 +867,25 @@ def cmd_refresh(args):
     res = upsert(rows, now, dry_run=args.dry_run)
     print(json.dumps({"rows": len(rows), "byStatus": counts, "written": res, "dryRun": bool(args.dry_run),
                       "attention": [r["key"] + ": " + r["status"] for r in rows if r["status"] in ("Failed", "Blocked")]}))
+
+
+def cmd_signins(args):
+    """Refresh ONLY the sign-in row (the Robot sign-in app runs this after a sign-in, so
+    the page shows it within a minute). Never the full-board write: that marks every row
+    it was not given as "No longer scheduled"."""
+    now = datetime.now(timezone.utc)
+    row = robot_signins_row(now)
+    f = to_fields(row, now)
+    if args.dry_run:
+        print(json.dumps({"row": row["key"], "status": row["status"], "detail": row["detail"], "dryRun": True}))
+        return 0 if row["status"] == "Worked" else 1
+    rid = existing_rows().get(SIGNIN_KEY)
+    if rid:
+        _request("PATCH", TABLE, {"records": [{"id": rid, "fields": f}], "typecast": True})
+    else:
+        _request("POST", TABLE, {"records": [{"fields": f}], "typecast": True})
+    print(json.dumps({"row": row["key"], "status": row["status"], "detail": row["detail"], "written": "update" if rid else "create"}))
+    return 0 if row["status"] == "Worked" else 1
 
 
 def selftest():
@@ -857,6 +1070,57 @@ def selftest():
     # The report names Kevin's legal and financial matters and the repo is public (24 Sep 2026).
     ok(not (os.path.realpath(DAILY_OPS_REPORTS) + os.sep).startswith(os.path.realpath(REPO) + os.sep),
        "the daily-ops report folder is outside the repo: %s" % DAILY_OPS_REPORTS)
+    # 10. robot sign-ins (25 Sep 2026): newest look wins, Kevin's own sign-in is not a robot's check
+    t0 = datetime(2026, 9, 25, 8, 30, tzinfo=timezone.utc)
+    src = {
+        "targets": [
+            {"label": "Pingen", "host": "app.pingen.com", "url": "https://app.pingen.com/", "profile": "default"},
+            {"label": "EDF", "host": "www.edfenergy.com", "url": "https://www.edfenergy.com/myaccount/login", "profile": "default"},
+            {"label": "Loom", "host": "loom.com", "url": "https://www.loom.com/looms/videos", "profile": "default"},
+            {"label": "HMRC", "host": "tax.service.gov.uk", "url": "https://www.tax.service.gov.uk/gg/sign-in", "profile": "default"},
+            {"label": "Utilita Apartment 1", "host": "my.utilita.co.uk", "url": "https://my.utilita.co.uk/energy", "profile": "utilita-apt1"},
+            {"label": "Utilita Apartment 2", "host": "my.utilita.co.uk", "url": "https://my.utilita.co.uk/energy", "profile": "utilita-apt2"},
+            {"label": "New", "host": "new.example.com", "url": "https://new.example.com/", "profile": "default"},
+        ],
+        "sites": {"tax.service.gov.uk": {"login": True, "shortSession": True, "loginUrl": "x"},
+                  "www.topcashback.co.uk": {"label": "TopCashback", "login": True},
+                  "www.evernote.com": {"label": "Evernote", "login": True}, "accounts.evernote.com": {"label": "Evernote", "login": True},
+                  "my.utilita.co.uk": {"label": "Utilita", "login": True, "profiles": [{}]}},
+        "keepalive": {"at": "2026-09-25T06:40:05+01:00", "sites": {
+            "app.pingen.com": {"state": "signed-in"}, "www.edfenergy.com": {"state": "signed-out"}, "loom.com": {"state": "signed-out"}}},
+        "ledger": [
+            {"at": "2026-09-25T06:56:32Z", "cmd": "session", "site": "app.pingen.com", "signedIn": False, "profile": "default"},
+            {"at": "2026-09-25T05:00:00Z", "cmd": "session", "site": "www.edfenergy.com", "signedIn": True, "profile": "default"},
+            {"at": "2026-09-25T07:10:00Z", "cmd": "login", "host": "www.loom.com", "profile": "default"},
+            {"at": "2026-09-25T08:24:07Z", "cmd": "login", "host": "my.utilita.co.uk", "profile": "utilita-apt1"},
+        ],
+        "readings": [
+            {"at": "2026-09-25T08:05:22", "label": "Apartment 1", "ok": False, "problem": "SIGN-IN NEEDED"},
+            {"at": "2026-09-25T08:05:22", "label": "Apartment 2", "ok": False, "problem": "SIGN-IN NEEDED"},
+            {"at": "2026-09-25T09:25:00", "label": "Apartment 2", "ok": True, "problem": None},
+        ],
+        "accounts": [{"label": "Apartment 1", "profile": "utilita-apt1"}, {"label": "Apartment 2", "profile": "utilita-apt2"}],
+    }
+    got = {ln["label"]: ln for ln in signin_payload(t0, src)["lines"]}
+    ok(got["Pingen"]["state"] == "signed-out" and got["Pingen"]["how"] == "robot check",
+       "a robot check at 06:56 outranks the 06:40 keep-alive: %r" % got["Pingen"])
+    ok(got["EDF"]["state"] == "signed-out" and got["EDF"]["at"] == "2026-09-25T05:40:05.000Z",
+       "an OLDER robot check does not outrank the keep-alive (06:40 BST = 05:40Z): %r" % got["EDF"])
+    ok(got["Loom"]["state"] == "you-signed-in" and got["Loom"]["at"] == "2026-09-25T07:10:00.000Z",
+       "Kevin's sign-in on the page's host (www.loom.com for loom.com) after the last look: %r" % got["Loom"])
+    ok(got["HMRC"]["state"] == "on-demand", "a short login is never shown as signed out: %r" % got["HMRC"])
+    ok(got["Utilita Apartment 1"]["state"] == "you-signed-in", "the flat's own profile sign-in at 08:24Z beats the 08:05 read (07:05Z)")
+    ok(got["Utilita Apartment 2"]["state"] == "signed-in" and got["Utilita Apartment 2"]["at"] == "2026-09-25T08:25:00.000Z",
+       "the newest meter read, London time with no offset: %r" % got["Utilita Apartment 2"])
+    ok(got["New"]["state"] == "unchecked" and got["New"]["at"] is None, "nothing looked: unchecked, never green")
+    ok(signin_payload(t0, src)["unlisted"] == ["Evernote", "TopCashback"], "login sites with no page are named once each")
+    empty = robot_signins_row(t0, dict(src, targets=[]))
+    ok(empty["status"] == "Failed" and "empty" in empty["detail"], "an empty list is a broken read, not a quiet day: %r" % empty)
+    worked = robot_signins_row(t0, src)
+    ok(worked["status"] == "Worked" and worked["key"] == SIGNIN_KEY and "1 signed out (EDF" not in worked["detail"]
+       and "2 signed out (Pingen, EDF)" in worked["detail"], "detail names what is signed out: %r" % worked["detail"])
+    ok(robot_signins_row(t0, {"targets": None, "sites": None, "keepalive": {"at": "garbage"}})["status"] == "Failed",
+       "a missing list fails with the reason, never a blank")
     # 9. field map is complete and every status is a table choice
     ok(set(ES) == {"key", "kind", "label", "schedule", "status", "lastRun", "lastWorked", "detail", "nextDue", "runs24h", "fails24h", "payload", "updated"}, "ES keys")
     ok(all(v.startswith("fld") and len(v) == 17 for v in ES.values()), "ES ids")
@@ -870,6 +1134,8 @@ def main(argv=None):
     r.add_argument("--dry-run", action="store_true")
     r.add_argument("--no-loop-health", action="store_true")
     sub.add_parser("selftest")
+    si = sub.add_parser("signins")
+    si.add_argument("--dry-run", action="store_true")
     args = ap.parse_args(argv)
     if args.cmd == "selftest":
         try:
@@ -878,6 +1144,8 @@ def main(argv=None):
             print(json.dumps({"checks": 0, "failed": [str(exc)]}))
             return 1
         return 0
+    if args.cmd == "signins":
+        return cmd_signins(args)
     cmd_refresh(args)
     return 0
 

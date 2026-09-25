@@ -326,7 +326,29 @@ on runChain(theLines, liveHanded)
 	else
 		display notification "All done. Nothing was waiting on a robot." & tail with title "Robot sign-in"
 	end if
+	refreshPanel()
 end runChain
+
+-- Tell the AI Agents page (25 Sep 2026). Its Robot sign-ins panel reads one row that the
+-- estate-status job rewrites every ten minutes; this rewrites just that row now, detached,
+-- so the page shows "You signed in" within a minute instead of up to ten.
+on refreshPanel()
+	try
+		sh("/usr/bin/python3 scripts/detach.py --cwd " & quoted form of repo & " -- /usr/bin/python3 scripts/estate-status.py signins > /dev/null")
+	on error errMsg
+		display notification "Signed in, but the AI Agents page could not be told: " & errMsg & " It catches up within ten minutes." with title "Robot sign-in"
+	end try
+end refreshPanel
+
+-- The sign-ins held in one robot profile: robotsignin://profile/utilita-apt1 is one Duckworth
+-- flat, where robotsignin://site/my.utilita.co.uk is both.
+on linesForProfile(theProfile, theLines)
+	set out to {}
+	repeat with L in theLines
+		if profileOf(L as text) is theProfile then set end of out to (L as text)
+	end repeat
+	return out
+end linesForProfile
 
 -- Double-click: waiting sites first; if none, offer the full list.
 on run
@@ -363,7 +385,9 @@ on run
 	runChain(theLines, liveN)
 end run
 
--- A link: robotsignin://all opens every waiting site in turn; robotsignin://site/<host> opens one.
+-- A link: robotsignin://all opens every waiting site in turn; robotsignin://site/<host> opens one;
+-- robotsignin://profile/<name> opens the sign-ins held in that profile (a Utilita flat) and
+-- robotsignin://add asks for a new site. The last two are the AI Agents page's panel buttons.
 -- "robotsignin://" is 14 characters, so the body starts at 15 (found in review).
 on bodyOf(theURL)
 	return text 15 thru -1 of theURL
@@ -371,6 +395,21 @@ end bodyOf
 
 on open location theURL
 	set body to bodyOf(theURL)
+	if body starts with "add" then
+		set theLines to askNewSite()
+		if (count of theLines) > 0 then runChain(theLines, 0)
+		return
+	end if
+	if body starts with "profile/" then
+		set wantProfile to text 9 thru -1 of body
+		set theLines to linesForProfile(wantProfile, allSites())
+		if (count of theLines) is 0 then
+			display alert "Unknown sign-in" message wantProfile & " is not on the robot's sign-in list."
+			return
+		end if
+		runChain(theLines, 0)
+		return
+	end if
 	if body starts with "all" then
 		display notification "Checking which sites are really signed out (up to a minute per site)…" with title "Robot sign-in"
 		refreshWaiting("")
