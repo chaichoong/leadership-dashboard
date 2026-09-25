@@ -46,6 +46,18 @@
 # unattended runs it exists for.
 AGENT_NODE_BIN="$(command -v node || ls -1d /Users/kevinbrittain/.nvm/versions/node/*/bin/node 2>/dev/null | tail -1)"
 export AGENT_NODE_BIN
+# Resolving it was not enough. Agents are allowed `Bash(node:*)` and type
+# `node scripts/agent-browser.js`, which looks node up on PATH, and launchd's
+# PATH is /usr/bin:/bin:/usr/sbin:/sbin. So every unattended browser step died
+# with "command not found: node" while this variable sat unused (6 Chedburgh
+# Place insurance, parked 21-25 Sep 2026 after Kevin had signed in). Put its
+# folder on PATH, which the agent's shell inherits.
+if [ -n "$AGENT_NODE_BIN" ]; then
+  case ":$PATH:" in
+    *":$(dirname "$AGENT_NODE_BIN"):"*) ;;
+    *) PATH="$(dirname "$AGENT_NODE_BIN"):$PATH"; export PATH ;;
+  esac
+fi
 
 # The shared set. Extra per-runner tools are appended by the caller, never
 # substituted (handback-poll needs osascript for iMessage sends).

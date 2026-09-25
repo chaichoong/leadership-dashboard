@@ -552,6 +552,88 @@ def needs_you_row(now, reports=DAILY_OPS_REPORTS):
                 if items else "Nothing needs Kevin today.")
 
 
+# ─── THE BLOCKER LOOP ROW (Kevin, 25 Sep 2026) ────────────────────────
+# Every task an agent could not finish, by who can clear it. Written from the
+# blocker sweep the half-hourly hand-back poll runs (agent-dispatch.py
+# blockers --sweep), so the board and the wake-ups read the same list. The
+# 08:00 DM reads this row's Detail, so the words here are what Kevin reads.
+# Red (Failed) when a wall is older than three days, a task was closed while
+# blocked, or the sweep itself did not run: a list of what is fine cannot show
+# what was lost, so the absence is the thing reported.
+BLOCKERS_KEY = "agent-blockers"
+BLOCKERS_FILE = os.path.join(LOGS, "handback-poll", "scratch", "blockers.json")
+BLOCKERS_STALE_MIN = 120
+
+
+def _plural(n, word):
+    return "%d %s%s" % (n, word, "" if n == 1 else "s")
+
+
+def blockers_summary(r):
+    """(status, detail, payload) from the sweep's JSON. Plain words only."""
+    walls = r.get("open") or []
+    stale = r.get("stale") or []
+    closed = r.get("closedWhileBlocked") or []
+    errors = [e for e in (r.get("sitesError"), r.get("findingsError")) if e]
+    if not r.get("openTasksRead"):
+        return ("Failed", "The blocker check could not read the task board, so it cannot say what is blocked.",
+                {"open": [], "controlFailed": True})
+    signin = sorted({w["subject"] for w in walls if w["kind"] == "SIGN-IN"})
+    sites = sorted({w["subject"] for w in walls if w["kind"] == "SITE"})
+    kevin = [w for w in walls if w["kind"] == "KEVIN"]
+    build = [w for w in walls if w["kind"] == "TOOL" and w.get("findingStatus") == "deferred"]
+    fixing = [w for w in walls if w["kind"] == "TOOL" and w.get("findingStatus") != "deferred"]
+    parts = []
+    if signin:
+        parts.append("sign the robot in to " + ", ".join(signin))
+    if sites:
+        parts.append("add " + ", ".join(sites) + " to the robot's list (Add a new site)")
+    if kevin:
+        parts.append("%s only you can do (%s)" % (_plural(len(kevin), "step"),
+                                                   ", ".join(sorted({w["subject"] for w in kevin}))))
+    if build:
+        parts.append("%s need a Claude Code session to fix the robot" % _plural(len(build), "task"))
+    detail = ("Robots blocked on %s. For you: %s." % (_plural(len(walls), "task"), "; ".join(parts))
+              if parts else ("Robots blocked on %s." % _plural(len(walls), "task") if walls else "No robot is blocked."))
+    if fixing:
+        detail += " %s waiting on the daily robot fix." % _plural(len(fixing), "task")
+    if stale:
+        detail += " %s blocked 3 days or more." % _plural(len(stale), "task")
+    if closed:
+        detail += " %s CLOSED while still blocked in the last 14 days: %s." % (
+            _plural(len(closed), "task"), "; ".join(c["name"][:60] for c in closed[:3]))
+    if r.get("woken"):
+        detail += " %s woken this sweep because the fix landed." % _plural(len(r["woken"]), "task")
+    if errors:
+        detail += " The sweep could not read: " + "; ".join(e[:120] for e in errors) + "."
+    status = "Failed" if (stale or closed or errors) else "Worked"
+    slim = [{k: w.get(k) for k in ("task", "name", "agent", "kind", "subject", "fix", "days", "findingStatus")}
+            for w in walls][:40]
+    return status, detail, {"open": slim, "stale": len(stale), "closedWhileBlocked": closed[:10],
+                            "woken": len(r.get("woken") or [])}
+
+
+def blockers_row(now, path=BLOCKERS_FILE):
+    stamp = now.strftime("%Y-%m-%dT%H:%M:%S.000Z")
+    row = {"key": BLOCKERS_KEY, "kind": "report", "label": "Robots blocked", "lastRun": stamp}
+    try:
+        age_min = (now.timestamp() - os.path.getmtime(path)) / 60
+        with open(path, encoding="utf-8") as fh:
+            r = json.load(fh)
+    except Exception as exc:  # noqa: BLE001 — the row must say WHY, whatever went wrong
+        return dict(row, status="Failed",
+                    detail="The blocker sweep's report could not be read: %s" % str(exc)[:200])
+    if age_min > BLOCKERS_STALE_MIN:
+        return dict(row, status="Failed",
+                    detail="The blocker sweep has not run for %d hours. It runs every 30 minutes with the "
+                           "hand-back poll, so the poll has stopped too." % int(age_min // 60))
+    status, detail, payload = blockers_summary(r)
+    out = dict(row, status=status, detail=detail, payload=json.dumps(payload))
+    if status == "Worked":
+        out["lastWorked"] = stamp
+    return out
+
+
 def loop_health_row(now):
     """The loop-health report as one row; a failed control is a Failed row, never a blank."""
     try:
@@ -659,6 +741,7 @@ def build_rows(now, with_loop_health=True):
         rows.append(row)
     rows.append(allowance_row(now))
     rows.append(needs_you_row(now))
+    rows.append(blockers_row(now))
     if with_loop_health:
         rows.append(loop_health_row(now))
     return rows
