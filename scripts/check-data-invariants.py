@@ -652,6 +652,46 @@ INVARIANTS = [
         "control_means": "cold-email drafts (the population the first-touch rule governs)",
         "fields": ["Name", "Company", "Status", "Contact Route", "Draft Message"],
     },
+    {
+        # The tenant-finding chain (Kevin, 25 Sep 2026). A form sign-up with no stage is on
+        # no list: Roy is never told, and the monitor that should say so is the same job
+        # that failed to screen it. This asks the table directly, so a chain that has
+        # stopped still shows up here. The class of failure is the Payment Run's: 70 days
+        # with every check green because none asked "did the feed actually run".
+        #
+        # NOTE ON THE CONTROL: form sign-ups start at zero (the 248 imported past
+        # applicants carry a Legacy Ref and a stage), so it reports WAITING until the first
+        # real sign-up; field_probe still catches a renamed field. Back-tested read-only on
+        # 25 Sep 2026 with the same shape pointed at the imported rows (Legacy Ref set, stage
+        # 'Past applicant', created before 2 days from now): 154 rows, the imported count, so
+        # the formula fires when a row qualifies. 'New' is NOT a violation: it is the known
+        # state of a sign-up with no date of birth, which the chain's monitor flags itself.
+        "name": "tenant-signups-get-screened",
+        "table": "tbliYKA44VBFeLduP",  # Tenant Leads
+        "incident": "Sep 2026 design: an unscreened sign-up reaches nobody, and the chain's own monitor cannot report a chain that stopped",
+        "asserts": "a form sign-up older than 2 days has a stage (the screen step writes one every run)",
+        "violation": ("AND(LEN({Legacy Ref} & '') = 0, LEN({Stage} & '') = 0, "
+                      "IS_BEFORE(CREATED_TIME(), DATEADD(TODAY(), -2, 'days')))"),
+        "control": "LEN({Legacy Ref} & '') = 0",
+        "control_means": "sign-ups from the form (the only rows the screen step creates a stage for)",
+        "field_probe": "OR(LEN({Legacy Ref} & '') >= 0, LEN({Stage} & '') >= 0, LEN({Name} & '') >= 0)",
+        "fields": ["Name", "Stage", "Legacy Ref"],
+    },
+    {
+        # The tenant-chain row on the Estate Status board is Kevin's proof the chain works
+        # (his condition for letting Roy take its tasks unasked, 25 Sep 2026). A row that
+        # stopped updating looks exactly like a chain with nothing to report, so its age is
+        # checked here, outside the job that writes it. 26 hours: one missed 08:10 run.
+        "name": "tenant-chain-monitor-is-current",
+        "table": "tblZVrdzivyBueZVf",  # Estate Status
+        "incident": "Sep 2026 design: a monitor that stops writing reads as all-clear (the 70-day Payment Run feed)",
+        "asserts": "the tenant-chain status row was written in the last 26 hours",
+        "violation": "AND({Key} = 'tenant-chain', IS_BEFORE({Last Run}, DATEADD(NOW(), -26, 'hours')))",
+        "control": "{Key} = 'tenant-chain'",
+        "control_means": "the one tenant-chain row (written by every run of scripts/tenant-leads.py)",
+        "field_probe": "OR(LEN({Key} & '') >= 0, LEN({Last Run} & '') >= 0)",
+        "fields": ["Key", "Last Run", "Status", "Detail"],
+    },
 ]
 
 

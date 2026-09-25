@@ -62,6 +62,9 @@ JOBS=(
   # 18 Sep 2026 because things often come in late on a Friday. It prepares
   # only: it never pays, sends or agrees anything.
   "payment-run|Fri 21:00|/bin/bash $SLOT payment-run $TASKS/payment-run/SKILL.md"
+  # The tenant-finding chain (Kevin, 25 Sep 2026). Rules only, no model: it raises
+  # cards for Kevin's queue and tasks for Roy, and writes the tenant-chain status row.
+  "tenant-leads|8:10|/usr/bin/python3 $REPO/scripts/tenant-leads.py run"
 )
 
 # launchd's own numbering: Sunday = 0. Mapped here once so no caller ever writes

@@ -79,7 +79,9 @@ STATUSES = ("Worked", "Failed", "Blocked", "Skipped", "Idle", "Running")
 # Rows this writer must never mark "No longer scheduled". content-publishing is written by
 # scripts/content-engine/content_report.py (Kevin's publishing report, 15 Sep 2026); without it here the
 # 10-minute refresh would overwrite the report's headline with an Idle line.
-REPORT_ROWS_OWNED_ELSEWHERE = ("loop-health", "allowance", "content-publishing")
+REPORT_ROWS_OWNED_ELSEWHERE = ("loop-health", "allowance", "content-publishing",
+                               # scripts/tenant-leads.py, the tenant-finding chain's monitor (25 Sep 2026)
+                               "tenant-chain")
 
 # Why a run did not work, in Kevin's words. Matched against the wrapper's
 # reason and the last 600 characters the job printed. Order matters: the first

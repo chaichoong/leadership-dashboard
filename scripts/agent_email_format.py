@@ -31,6 +31,19 @@ FORMAT
     ---
     The body of the email, as many lines as needed.
 
+TO-EACH (Kevin, 25 Sep 2026, the tenant-finding chain) replaces TO for a
+mail-out: the SAME approved words go to each address as a SEPARATE email, so
+one card covers thirty council and charity contacts without any of them seeing
+the others. BCC stays refused: every address Kevin approves is written on the
+card. TO-EACH takes no CC and no ATTACH, holds at most TO_EACH_MAX addresses,
+and refuses a repeated address rather than guessing which copy was meant.
+
+    TO-EACH: housing@council.gov.uk, moveon@charity.org.uk
+    FROM: info@agilelets.co.uk
+    SUBJECT: Rooms for single adults aged 35+ on Universal Credit
+    ---
+    The body, identical for every recipient.
+
 ATTACH names ONE local file (added 25 Aug 2026 for the Creditor Management
 agent's restraint-order pages). The parser checks shape only; the send path
 enforces the real guards — the file must live under the attachments
@@ -57,7 +70,13 @@ import re
 
 EMAIL_RE = re.compile(r"^[^@\s,]+@[^@\s,]+\.[^@\s,]+$")
 
-ALLOWED_HEADERS = {"TO", "CC", "SUBJECT", "FROM", "ATTACH"}
+ALLOWED_HEADERS = {"TO", "TO-EACH", "CC", "SUBJECT", "FROM", "ATTACH"}
+
+# A mail-out card lists every address; past this many the card stops being
+# something Kevin can read before approving, so the sender splits the list.
+TO_EACH_MAX = 50
+# More than this many on one visible TO line is a mail-out in disguise (validate_submission).
+TO_MAX_VISIBLE = 10
 
 # Prepended by agent-dispatch.py `submit --tier1`. Defined here so the writer
 # and the parser can never drift: the string that gets added is the string that
@@ -190,11 +209,30 @@ def parse_output(output):
         # approval is a recipient he did not approve.
         raise EmailFormatError(
             f"unsupported header(s): {', '.join(sorted(unknown))}. "
-            "Only TO, CC, FROM and SUBJECT."
+            "Only TO, TO-EACH, CC, FROM, SUBJECT and ATTACH."
         )
 
     to = parse_addresses(headers.get("TO", ""), "TO")
     cc = parse_addresses(headers.get("CC", ""), "CC")
+    to_each = parse_addresses(headers.get("TO-EACH", ""), "TO-EACH")
+    if to_each:
+        if to:
+            raise EmailFormatError("TO and TO-EACH together: a mail-out uses "
+                                   "TO-EACH alone")
+        if cc:
+            raise EmailFormatError("CC is not allowed with TO-EACH: it would copy "
+                                   "every separate email to the same address")
+        if headers.get("ATTACH", "").strip():
+            raise EmailFormatError("ATTACH is not allowed with TO-EACH")
+        if len(to_each) > TO_EACH_MAX:
+            raise EmailFormatError(
+                f"TO-EACH holds {len(to_each)} addresses; the most one card may "
+                f"carry is {TO_EACH_MAX}")
+        seen = set()
+        for addr in to_each:
+            if addr.lower() in seen:
+                raise EmailFormatError(f"TO-EACH names {addr} twice")
+            seen.add(addr.lower())
     senders = parse_addresses(headers.get("FROM", ""), "FROM")
     if len(senders) > 1:
         raise EmailFormatError("more than one FROM address")
@@ -214,14 +252,14 @@ def parse_output(output):
     # nothing BUT the marker is refused rather than sent as a blank email.
     body = strip_carry_out_line(body)
 
-    if not to:
+    if not to and not to_each:
         raise EmailFormatError("no TO recipient")
     if not subject:
         raise EmailFormatError("no SUBJECT")
     if not body:
         raise EmailFormatError("empty body")
     return {"to": to, "cc": cc, "from": sender, "subject": subject,
-            "body": body, "attach": attach}
+            "body": body, "attach": attach, "toEach": to_each}
 
 
 # ─── SENDER IDENTITY AND SIGN-OFF: THE TWO MISSING DEFAULTS ──────────
@@ -299,6 +337,8 @@ def rule_send_problem(rule, mail, task, require_stamp=True):
         return "only a Correspondence task is sent by rule"
     if mail.get("attach"):
         return "an attachment is never sent by rule"
+    if mail.get("toEach"):
+        return "a TO-EACH mail-out is never sent by rule"
     if mail.get("cc"):
         return "CC is never sent by rule"
     to = [a.strip().lower() for a in (mail.get("to") or [])]
@@ -488,6 +528,14 @@ def validate_submission(output):
     bad = sms_reply_problem(parsed)
     if bad:
         raise EmailFormatError(bad)
+    # A mail-out redrafted as one long TO line shows every contact to every other
+    # (review of the tenant-finding chain, 25 Sep 2026). Refused at submit, where the
+    # fix is one word, rather than discovered by thirty people.
+    if len(parsed["to"]) > TO_MAX_VISIBLE:
+        raise EmailFormatError(
+            "TO carries %d addresses, so every recipient would see all the others. "
+            "Use `TO-EACH:` instead: the same words go to each address separately."
+            % len(parsed["to"]))
     return parsed
 
 
