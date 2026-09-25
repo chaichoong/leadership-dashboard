@@ -127,15 +127,19 @@ ES = {"key": "fldLO6xJqkokvVR4g", "kind": "fldfjQOn76VpgKEfZ", "label": "fldlnvv
 
 # ─── the chain's rules (Kevin, 25 Sep 2026) ──────────────────────────
 FORM_URL = "https://airtable.com/appnqjDpqDniH3IRl/shrTuDF8s04Kp5XGT"
-# The link people see (Kevin, 25 Sep 2026: "the link needs to be simplified"). rooms.agilelets.co.uk is
-# the chaichoong/agilelets-rooms GitHub Pages site: one page per channel that opens FORM_URL with the
-# channel set and hidden, and the area set to Haverhill and hidden. The run checks it opens the form
-# before any email or advert carries it (link_works), so a dead link never goes out.
-SHORT_BASE = "https://rooms.agilelets.co.uk"
+# The link people see (Kevin, 25 Sep 2026: "the link needs to be simplified"). www.agilelets.co.uk is a
+# Google Site owned by info@agilelets.co.uk ("Agile Lets rooms"): each page embeds FORM_URL with the area
+# set to Haverhill and hidden, and the four tracked channels also set and hide "How They Heard". The
+# home page leaves that question showing, so Gumtree, Facebook and past applicants say it themselves
+# (Kevin chose www.agilelets.co.uk after the domaindiscount24 login failed). The run checks every page
+# carries its form before any email or advert uses it (link_works), so a dead link never goes out.
+SHORT_BASE = "https://www.agilelets.co.uk"
 SHORT_LINKS = {"Other": "", "Referrer": "r", "Tenant referral": "t", "SpareRoom": "s", "OpenRent": "o",
-               "Gumtree": "g", "Facebook": "f", "Past applicant": "p"}
+               "Gumtree": "", "Facebook": "", "Past applicant": ""}
+FORM_SHARE_ID = FORM_URL.rsplit("/", 1)[-1]
 # The second form (Kevin chose it, 25 Sep 2026): UC statement and a reference from a person securing a
-# room. rooms.agilelets.co.uk/d?id=<their Tenant Leads id> opens it with that id stored, hidden.
+# room. Its link carries the person's Tenant Leads id, hidden, so it stays an Airtable link (it goes to
+# one person in one email; Kevin accepted the longer link for this one).
 DOCS_FORM_URL = "https://airtable.com/appnqjDpqDniH3IRl/shrNbmUzIT32hKHje"
 STATUS_KEY = "tenant-chain"
 SELF_MANAGED = "Property Portfolio"
@@ -324,17 +328,21 @@ def form_link(channel):
 
 
 def docs_link(lead):
-    return f"{SHORT_BASE}/d?id={lead['id']}"
+    return f"{DOCS_FORM_URL}?" + urllib.parse.urlencode({"prefill_Lead ID": lead["id"], "hide_Lead ID": "true"})
 
 
 def link_works():
-    """True when every short link opens a page that sends the reader to its form."""
-    pages = [(code, FORM_URL) for code in SHORT_LINKS.values()] + [("d/", DOCS_FORM_URL)]
-    for code, target in pages:
+    """True when every short link opens a page carrying the sign-up form, each tracked channel's page
+    with its own channel set (a page that opened the wrong channel would mislabel every sign-up)."""
+    pages = [(code, channel) for channel, code in SHORT_LINKS.items() if code] + [("", None)]
+    for code, channel in pages:
         try:
             with urllib.request.urlopen(urllib.request.Request(f"{SHORT_BASE}/{code}",
                                                                headers={"User-Agent": "tenant-leads"}), timeout=20) as r:
-                if r.status != 200 or target not in r.read().decode("utf-8", "replace"):
+                html = r.read().decode("utf-8", "replace")
+                if r.status != 200 or FORM_SHARE_ID not in html:
+                    return False
+                if channel and "prefill_How+They+Heard=" + urllib.parse.quote_plus(channel) not in html:
                     return False
         except Exception:                               # noqa: BLE001 — any failure is "does not work"
             return False
@@ -2079,7 +2087,7 @@ def run(data, day, w, only=None, replies=None):
             if l["id"] not in tasks:
                 w.to_roy(dict(t, notes=f"TENANT CHAIN IDS: {l['id']}"))
                 made.append(f"move-in task for {first_name(l)}")
-            if l["id"] not in cards and can_email(data, l) and link_ok:
+            if l["id"] not in cards and can_email(data, l):
                 w.raise_card(docs_card(data, l, t["town"], day))
                 made.append(f"documents email for {first_name(l)}")
         return ", ".join(made)

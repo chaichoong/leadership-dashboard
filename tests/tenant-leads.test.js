@@ -235,7 +235,7 @@ out["keys"] = [ct.dupe_task_key(n) for n in names]
     expect(m.toEach.sort()).toEqual(['housing@westsuffolk.gov.uk']);
     expect(m.body).toMatch(/Dalham Place/);
     expect(m.body).not.toMatch(/\b5 Dalham/);
-    expect(m.body).toMatch(/https:\/\/rooms\.agilelets\.co\.uk\/r\b/);
+    expect(m.body).toMatch(/https:\/\/www\.agilelets\.co\.uk\/r\b/);
     expect(m.body).not.toMatch(/airtable\.com/);
     expect(m.body).toMatch(/reply STOP/);
   });
@@ -274,7 +274,7 @@ out["all"] = t["description"]
   it('other sites say 35+ positively, and nothing says "no children" (Renters\' Rights Act s.33)', () => {
     expect(r.spareroom).toMatch(/aged 35/);
     expect(r.all).not.toMatch(/children/i);
-    expect(r.all).toMatch(/https:\/\/rooms\.agilelets\.co\.uk\/s\b/);
+    expect(r.all).toMatch(/https:\/\/www\.agilelets\.co\.uk\/s\b/);
     expect(r.all).not.toMatch(/airtable\.com/);
   });
 });
@@ -770,8 +770,8 @@ out["royText"] = v["description"]
     expect(r.held.roy).toEqual(['viewings']);
     expect(r.held.notes.length).toBeGreaterThan(0);
     expect(r.linkStep.state).toBe('fail');
-    expect(r.links).toEqual(['https://rooms.agilelets.co.uk/r', 'https://rooms.agilelets.co.uk/t',
-      'https://rooms.agilelets.co.uk/s', 'https://rooms.agilelets.co.uk']);
+    expect(r.links).toEqual(['https://www.agilelets.co.uk/r', 'https://www.agilelets.co.uk/t',
+      'https://www.agilelets.co.uk/s', 'https://www.agilelets.co.uk']);
   });
   it('a card withdrawn because the change needs code holds nobody', () => {
     expect(r.afterSupersede).toEqual([['housing@westsuffolk.gov.uk']]);
@@ -968,10 +968,12 @@ w["tasks"] += [task(c["name"], status="Approval", notes="TENANT CHAIN IDS: " + "
 m = tl.monitor(w, DAY, tl.openings(w, DAY), [])
 out["movein"] = next(x for x in m["steps"] if x["key"] == "movein")
 `);
-  it('the documents email links to the second form with the person\'s id, and waits while the link is dead', () => {
-    expect(r.docsBody).toMatch(/https:\/\/rooms\.agilelets\.co\.uk\/d\?id=recS\b/);
+  it('the documents email links to the second form with the person\'s id, and goes even while the short link is dead', () => {
+    // The second form's link carries the person's id, so it stays an Airtable link (Kevin accepted it).
+    expect(r.docsBody).toMatch(/https:\/\/airtable\.com\/appnqjDpqDniH3IRl\/shrNbmUzIT32hKHje\?prefill_Lead\+ID=recS&hide_Lead\+ID=true/);
     expect(r.docsBody).toMatch(/reply to this email with them instead/);
-    expect(r.deadLink).toEqual([[], ['movein']]);
+    // It carries no short link, so a dead short link does not hold it.
+    expect(r.deadLink).toEqual([['docs'], ['movein']]);
   });
   it('a submission is linked to its person, stamped, and its check handed to Property Administration once', () => {
     expect(Object.values(r.docRows.recDOC1)).toContain('Linked');
