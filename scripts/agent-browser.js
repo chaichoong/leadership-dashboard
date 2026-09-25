@@ -43,7 +43,8 @@
  * is auditable after the fact rather than trusted at the time.
  *
  * USAGE
- *   node scripts/agent-browser.js login   --url URL [--profile NAME]
+ *   node scripts/agent-browser.js login   --url URL [--profile NAME] [--label NAME] [--add]   --add: a NEW site, Kevin's choice
+ *   node scripts/agent-browser.js signin-list [--for URL]              every sign-in the Robot sign-in app can open
  *   node scripts/agent-browser.js session --site HOST [--shot PATH]   is the robot signed in there? (walks the door)
  *   node scripts/agent-browser.js read    --url URL [--shot OUT.png] [--wait MS] [--wait-for SELECTOR] [--max-text N]
  *   node scripts/agent-browser.js loom-search --query "..." [--limit 20]
@@ -250,6 +251,165 @@ function hostAllowed(url) {
   let h;
   try { h = new URL(url).hostname.toLowerCase(); } catch { return false; }
   return Object.keys(loadSites()).some(d => h === d || h.endsWith('.' + d));
+}
+
+// sites.json as written, without the builtins merged in. A missing file is an
+// empty list; a file that will not parse THROWS, because rewriting it from one
+// new entry would wipe every site already on it.
+function readSitesFile() {
+  let raw;
+  try { raw = fs.readFileSync(SITES_FILE, 'utf8'); } catch (e) {
+    if (e.code === 'ENOENT') return {};
+    throw e;
+  }
+  return raw.trim() ? JSON.parse(raw) : {};                            // an empty file, as loadSites reads it
+}
+
+// A profile is a folder under PROFILE_ROOT, so a name that could climb out of
+// it (a slash, a dot) is refused wherever a profile is chosen.
+const PROFILE_NAME_RE = /^[a-z0-9][a-z0-9-]*$/i;
+
+// What `login` writes on the allowlist (25 Sep 2026). Until now it wrote
+// {label, login} and no sign-in page, so every site added that way (TopCashback,
+// Evernote, Strava) was missing from the Robot sign-in app and from the daily
+// keep-alive: once its login lapsed, only a Claude session could open it again.
+// It also wrote the whole merged list, builtins included, into sites.json, where
+// the copies then outranked any later change to a builtin.
+//
+// A sign-in on the MAIN profile records its page, so the app lists it for every
+// sign-in after. A sign-in on any other profile never touches the entry's
+// loginUrl: that field is the main profile's door, and the keep-alive tests it
+// on the main profile. Utilita keeps one profile per flat and no top-level
+// loginUrl for exactly that reason (utilita-balance.py), and its flats reach the
+// app through the entry's `profiles` list instead.
+// The registrable domain, by the same rule as agent-dispatch.py signin_domain:
+// app.pingen.com -> pingen.com, www.topcashback.co.uk -> topcashback.co.uk.
+function signinDomain(host) {
+  const parts = String(host || '').toLowerCase().split('.').filter(Boolean);
+  if (parts.length >= 3 && parts[parts.length - 1].length === 2 &&
+      ['co', 'gov', 'org', 'ac', 'net', 'ltd', 'plc', 'me', 'sch', 'nhs'].includes(parts[parts.length - 2])) {
+    return parts.slice(-3).join('.');
+  }
+  return parts.slice(-2).join('.');
+}
+// One platform domain hosts unrelated sign-ins (Gmail, Drive, AI Studio), so a
+// sibling there is never the same site. Same list as agent-dispatch.py.
+const SIGNIN_SHARED_DOMAINS = new Set(['google.com', 'google.co.uk', 'microsoft.com', 'live.com', 'office.com',
+  'apple.com', 'amazon.com', 'amazon.co.uk', 'facebook.com', 'meta.com']);
+
+// The entry a sign-in on HOST belongs to, resolved the way agent-dispatch.py
+// signin_site_for resolves a task's sign-in line, so the app and the task
+// side agree: its own entry or its nearest parent (www.tax.service.gov.uk is
+// HMRC's), else a login site on the same registrable domain (evernote.com is
+// www.evernote.com's), never on a shared platform domain.
+function signinOwner(host, sites = loadSites()) {
+  const parent = Object.keys(sites).filter(k => host === k || host.endsWith('.' + k))
+    .sort((a, b) => b.length - a.length)[0];
+  if (parent) return { key: parent, sibling: false };
+  const dom = signinDomain(host);
+  if (SIGNIN_SHARED_DOMAINS.has(dom)) return null;
+  const sib = Object.keys(sites).find(k => sites[k] && sites[k].login && signinDomain(k) === dom);
+  return sib ? { key: sib, sibling: true } : null;
+}
+
+function recordLoginSite(url, { label, profile, add } = {}) {
+  let u;
+  try { u = new URL(url); } catch { die(`${url} is not a web address.`); }
+  if (u.username || u.password) die('that address carries a name or password in it. A sign-in page address never does.');
+  const host = u.hostname.toLowerCase();
+  const sites = loadSites();
+  // The OWNING entry, not the exact host. Found in review: an exact-host match
+  // made an HMRC or Loom sign-in, whose pages sit on www., write a second entry
+  // without HMRC's shortSession, and the keep-alive would then have raised a
+  // false HMRC task every morning.
+  let found = signinOwner(host, sites);
+  const kept = { host, changed: false };
+  // A sibling is written only when Kevin adds it on purpose ("Add a new site",
+  // `add`): from a task line its page would sit on a host its entry does not
+  // allow, and a new entry would widen the allowlist to a whole domain on the
+  // strength of one line (evernote.com beside www.evernote.com). A site with
+  // flats (my.utilita.co.uk) settles every sibling, on any profile, always.
+  if (found && found.sibling) {
+    if (!add || Array.isArray(sites[found.key].profiles)) return kept;
+    found = null;                                                      // www.youtube.com beside studio.youtube.com is its own site
+  }
+  const ownerKey = found ? found.key : null;
+  const owner = ownerKey ? sites[ownerKey] : null;
+  const onMain = (profile || 'default') === 'default' && !(owner && Array.isArray(owner.profiles));
+  // A profile sign-in only ever adds a stranger, as before; a main-profile
+  // sign-in also gives a login site with no page its page.
+  if (onMain ? !!(owner && owner.login && owner.loginUrl) : !!owner) return kept;
+  // A builtin that holds no login (gov.uk, Companies House search) stays that
+  // way even when its own address is signed in at: it covers every host under
+  // it, and making it a login site would pull strangers' task lines onto it.
+  if (owner && !owner.login && ownerKey === host && BUILTIN_SITES[host]) {
+    return Object.assign(kept, { note: `${host} is on the list as a read-only site, so the sign-in was not recorded.` });
+  }
+  // Only Kevin adds a site (review, a gap older than this change): a task line
+  // naming a host nothing owns used to put that host on the list, and open the
+  // window there, so a misled agent could steer his sign-in to a stranger.
+  // Without `add`, only an existing login site is updated, and `login` REFUSES
+  // to open anything else: the refusal is what the app shows him.
+  if (!add && !(owner && owner.login)) {
+    return Object.assign(kept, { refuse: `${host} is not on the robot's list, so no sign-in window was opened there. If you want the robots to use it, add it yourself with "Add a new site".` });
+  }
+  // An http page still opens (agents' lines take http too), but is never written.
+  if (u.protocol !== 'https:') return Object.assign(kept, { note: `${url} is not https, so it was not recorded on the allowlist.` });
+  // A parent that holds no login (gov.uk) is not turned into one: the new site
+  // gets its own entry, and keeps any ancestor's short session (a GOV.UK service
+  // signs in through One Login, which lapses in an hour; without the flag the
+  // keep-alive raises a sign-in task for it every morning).
+  const key = owner && (ownerKey === host || owner.login) ? ownerKey : host;
+  // A bare platform domain would let the robot into every service under it
+  // (google.com: Gmail, Drive). The service's own address is the site.
+  if (SIGNIN_SHARED_DOMAINS.has(key)) {
+    return Object.assign(kept, { note: `${key} holds many separate sign-ins, so it was not recorded. Add the exact service's address instead of ${key}.` });
+  }
+  // Short session from ANY ancestor: idam.companieshouse.gov.uk sits under
+  // companieshouse.gov.uk, which has no flag, and under gov.uk, which has.
+  const shortAbove = Object.keys(sites).some(k => k !== key && (key === k || key.endsWith('.' + k)) && sites[k].shortSession);
+  const extra = readSitesFile();
+  const entry = Object.assign({}, extra[key] || {});
+  entry.label = entry.label || (key === ownerKey && owner.label) || label || host;
+  entry.login = true;
+  if (onMain) entry.loginUrl = url;
+  if (key !== ownerKey && shortAbove) entry.shortSession = true;
+  extra[key] = entry;
+  fs.mkdirSync(path.dirname(SITES_FILE), { recursive: true });
+  const tmp = SITES_FILE + '.tmp';
+  fs.writeFileSync(tmp, JSON.stringify(extra, null, 2));
+  fs.renameSync(tmp, SITES_FILE);
+  return { host: key, changed: true };
+}
+
+// Every sign-in the Robot sign-in app can open (25 Sep 2026): one per login
+// site with a sign-in page on the main profile, plus one per entry in a site's
+// `profiles` list. Utilita is the case that needed it: each Duckworth flat is a
+// separate Utilita login held in its own profile, the app only ever opened the
+// main one, and the watcher's Slack line sent Kevin to an app that could not
+// sign either flat back in.
+// A profile entry that cannot be used is named in `problems`, never dropped in
+// silence: a flat missing from the list reads exactly like a flat nobody set up.
+function signinTargets(sites = loadSites(), problems = []) {
+  const out = [];
+  // " | " splits the app's fields and a line break splits its lines.
+  const clean = s => String(s).replace(/[\r\n]+/g, ' ').replace(/\s*\|\s*/g, ' - ').trim();
+  for (const [host, v] of Object.entries(sites)) {
+    if (!v || !v.login) continue;
+    if (v.loginUrl) out.push({ label: clean(v.label || host), host, url: v.loginUrl, profile: 'default' });
+    for (const p of Array.isArray(v.profiles) ? v.profiles : []) {
+      const name = String((p && p.profile) || '');
+      if (!PROFILE_NAME_RE.test(name)) { problems.push(`${host}: profile "${name}" is not a plain folder name`); continue; }
+      let h = '';
+      try { h = new URL(p.loginUrl).hostname.toLowerCase(); } catch { /* reported just below */ }
+      if (h !== host && !h.endsWith('.' + host)) {                    // a profile opens its own site only
+        problems.push(`${host}: profile ${name} has no sign-in page on ${host}`);
+        continue;
+      }
+      out.push({ label: clean(p.label || `${v.label || host} (${name})`), host, url: p.loginUrl, profile: name });
+    }
+  }
+  return out;
 }
 
 // A refusal exits the process when run as a command, and THROWS when required
@@ -721,19 +881,47 @@ async function main() {
     return;
   }
 
+  // One "label | host | url | profile" line per sign-in, for the Robot sign-in
+  // app's picker. Unusable profile entries go to stderr by name.
+  // --for URL: only the sign-ins of the site that address belongs to (its
+  // owner, as recordLoginSite resolves it). The app's "Add a new site" asks
+  // this first, so an address already covered opens on its own lines (a
+  // Utilita flat's profile) and is never recorded as a second site.
+  if (cmd === 'signin-list') {
+    const problems = [];
+    const forUrl = arg(rest, 'for', null);
+    let only = null;
+    if (forUrl) {
+      let h;
+      try { h = new URL(forUrl).hostname.toLowerCase(); } catch { die(`${forUrl} is not a web address.`); }
+      const sites = loadSites();
+      const found = signinOwner(h, sites);
+      // A sibling counts only when it holds flats: www.utilita.co.uk IS the two
+      // flats, while www.youtube.com is not YouTube Studio and is added as a site.
+      only = found && (!found.sibling || Array.isArray(sites[found.key].profiles)) ? found.key : '';
+    }
+    for (const t of signinTargets(loadSites(), problems)) {
+      if (only !== null && t.host !== only) continue;
+      console.log([t.label, t.host, t.url, t.profile].join(' | '));
+    }
+    for (const p of problems) console.error('SKIPPED: ' + p);
+    return;
+  }
+
   if (cmd === 'login') {
     // The one-time human step. Headed on purpose: Kevin signs in himself, the
     // profile keeps the cookie, and no password ever reaches an agent.
     const url = arg(rest, 'url');
     if (!url) die('--url is required');
+    if (!PROFILE_NAME_RE.test(profile)) die(`--profile ${profile} is not a plain folder name.`);
+    // --add is a flag of its own, never the value of another (a label "--add").
+    const add = rest.some((a, i) => a === '--add' && !['--url', '--profile', '--label'].includes(rest[i - 1]));
+    const rec = recordLoginSite(url, { label: arg(rest, 'label', null), profile, add });
+    if (rec.refuse) die(rec.refuse);
     const host = new URL(url).hostname.toLowerCase();
-    const sites = loadSites();
-    if (!hostAllowed(url)) {
-      sites[host] = { label: arg(rest, 'label', host), login: true };
-      fs.mkdirSync(path.dirname(SITES_FILE), { recursive: true });
-      fs.writeFileSync(SITES_FILE, JSON.stringify(sites, null, 2));
-      console.log(`Added ${host} to the allowlist.`);
-    }
+    if (rec.changed) console.log(`Recorded ${rec.host} on the allowlist.`);
+    if (rec.note) console.log('NOTE: ' + rec.note);                   // the Robot sign-in app shows NOTE lines
+
     // TWO TRAPS, both paid for on 2 Sep 2026 (Evernote):
     //
     // 1. A login window driven by Playwright is still an automated browser,
@@ -1028,7 +1216,11 @@ async function main() {
     return;
   }
 
-  console.error(fs.readFileSync(__filename, 'utf8').split('\n').slice(38, 52).join('\n'));
+  // The USAGE block, found by its heading: a fixed line range silently cut
+  // the last command off the moment a new one was added above it.
+  const lines = fs.readFileSync(__filename, 'utf8').split('\n');
+  const from = lines.indexOf(' * USAGE');
+  console.error(lines.slice(from, lines.indexOf(' *', from)).join('\n'));
   process.exit(2);
 }
 
@@ -1041,4 +1233,5 @@ if (require.main === module) {
 }
 
 module.exports = { hostAllowed, pickLinks, runSteps, assertNotCredential, assertApproved, SECRET_NAME_RE, loadSites, sessionVerdict,
+                   recordLoginSite, signinTargets, signinOwner, signinDomain, readSitesFile,
                    assertUploadable, assertConfirmable, UPLOAD_DIR, UPLOAD_EXTENSIONS, persistSessionCookies };

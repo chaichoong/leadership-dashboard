@@ -43,6 +43,9 @@ print('ATTENTION=' + str(att))
         const out = execFileSync('python3', ['-c', py], { encoding: 'utf8' });
         expect(out).toMatch(/SIGN-IN NEEDED/);
         expect(out).toMatch(/Robot sign-in/);
+        // 25 Sep 2026: the line names the app entry to pick, and only for the flat that lapsed.
+        expect(out).toMatch(/pick Utilita Apartment 1 \(if it lists other sites first, press Pick a site instead\)/);
+        expect(out).not.toMatch(/Apartment 2/);
         expect(out).not.toMatch(/£0\.00/);
         expect(out).toMatch(/ATTENTION=True/);
     });
