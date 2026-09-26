@@ -1065,6 +1065,33 @@ HISTORY_RETRY_COOLDOWN_HOURS = 24
 # the weekly rebuild cadence: one missed week is weather, three is a fault.
 HISTORY_DEAD_DAYS = HISTORY_STALE_DAYS * 3
 
+# A DEAD BOOK MUST STOP THE SLOT, NOT JUST NARRATE (finding 20260926-exceptions-627).
+#
+# Saying DEAD was still not an outcome. On 25 Sep 2026 all three slots printed
+# the DEAD line, all three recorded ok:true and rc=0, and the book had by then
+# been 24 days stale — so the agent filed three and a half weeks of mail against
+# sender knowledge from 1 Sep while every health surface read green. Worse, the
+# one rebuild a day the cooldown still allowed spent 585 seconds fighting the
+# Gmail per-minute metric and then the 09:00 scan itself truncated after cycle 1:
+# the dead rebuild was taking quota off the work that does triage mail.
+#
+# So after this many consecutive failures the retry STOPS and the run says
+# BROKEN. Two things follow from that word, both deliberate:
+#   * every slot wrapper's BAD_ERE already matches `BROKEN`, so slot-postrun.sh
+#     turns the slot's rc=0 into exit 1, job-status records it, and the morning
+#     sweep sees a failing routine instead of a soothing cooldown line. No
+#     wrapper change is needed, which matters: the wrappers are protected paths.
+#   * the escalation line carries only a failure KIND, never the raw error text.
+#     inbound-triage-run.sh passes `GMAIL RATE METRIC STILL FULL` as its
+#     TOLERATED_ERE, and that phrase is exactly what this failure's raw message
+#     contains — echoing it onto the escalation line would have the tolerated
+#     grep subtract the very line meant to fail the run. The raw message is kept
+#     in state.json (and the build's own traceback is already in runs.log) for
+#     diagnosis.
+# The unblock is explicit and manual: `history-build --force` ignores the
+# give-up state, so a fixed quota or a fixed query can be proven in one command.
+HISTORY_MAX_BUILD_FAILS = 2
+
 TEAM_TABLE = "tblco0p2OnlLQVAX7"
 TM_NAME_FIELDS = ("fldFyTZu3vu1a7X3a", "fld1DYEbtyVsO2GVP")  # Preferred, Legal
 
@@ -1431,6 +1458,36 @@ def history_book_dead(built, now_ms, dead_days=None):
     return (now_ms - built) > limit * 86400 * 1000
 
 
+def history_build_given_up(built, fail_count, now_ms,
+                          max_fails=None, dead_days=None):
+    """True when the rebuild must STOP being retried and the run must say so.
+
+    Pure, so the selftest can replay 25 Sep 2026 offline. Both halves are
+    required: a book can be dead because nobody ran the slot for three weeks
+    (nothing is broken, rebuild it), and a rebuild can fail twice in a fresh
+    book inside one week (the cooldown is the right answer, not an escalation).
+    Dead AND repeatedly failing is the shape that hid for 24 days."""
+    limit = HISTORY_MAX_BUILD_FAILS if max_fails is None else max_fails
+    if int(fail_count or 0) < limit:
+        return False
+    return history_book_dead(built, now_ms, dead_days)
+
+
+def history_force_clear():
+    """Drop the give-up state so the next rebuild is judged on its own result.
+
+    The unblock has to clear the COUNTER and the cooldown stamp together: a
+    force that left either behind would refuse or defer the very attempt it
+    was asked to make."""
+    st = read_state()
+    dropped = [k for k in ("history_build_fail_count", "history_build_failed_ms",
+                           "history_build_fail_kind", "history_build_fail_reason")
+               if st.pop(k, None) is not None]
+    if dropped:
+        write_state(st)
+    return dropped
+
+
 def cmd_history_stale():
     state = read_state()
     built = state.get("history_built_ms")
@@ -1449,6 +1506,7 @@ def cmd_history_stale():
     age_days = history_book_age_days(built, now_ms)
     if age_days is not None:
         out["age_days"] = age_days
+    fail_count = int(state.get("history_build_fail_count") or 0)
     if history_book_dead(built, now_ms):
         out["dead"] = True
         out["escalate"] = (
@@ -1457,10 +1515,33 @@ def cmd_history_stale():
             "so the deferral is hiding a fault, not managing one. The senders "
             "the agent files against are that far out of date."
             % ("ever" if age_days is None else age_days))
+    # The retry stops here, and the word BROKEN is what carries it out of this
+    # script: every slot wrapper's BAD_ERE matches it, so slot-postrun.sh turns
+    # this slot's rc=0 into exit 1 and the fault reaches the morning sweep.
+    # Only the failure KIND goes on this line — the raw message contains the
+    # phrase the wrapper tolerates, which would subtract this very line.
+    given_up = history_build_given_up(built, fail_count, now_ms)
+    if given_up:
+        out["given_up"] = True
+        out["fail_count"] = fail_count
+        out["fail_kind"] = state.get("history_build_fail_kind") or "unknown"
+        for k in ("cooldown", "retry_in_seconds", "reason"):
+            out.pop(k, None)
+        out["escalate"] = (
+            "HISTORY BOOK BROKEN: %s consecutive rebuild failures (kind=%s) and "
+            "the book is %s days old. Retrying is now REFUSED, because each "
+            "attempt spent about ten minutes of this slot's Gmail quota and the "
+            "scan that actually triages mail was truncated behind it. The agent "
+            "is filing against sender knowledge that far out of date. Cause is "
+            "in state.json (history_build_fail_reason) and in this log above. "
+            "Unblock with: inbound-triage.py history-build --force"
+            % (fail_count, out["fail_kind"],
+               "ever" if age_days is None else age_days))
     print(json.dumps(out))
     # Exit 0 means "rebuild now". A stale book inside the cooldown is exit 1:
     # still stale, deliberately not rebuilt, and SAID so rather than silently.
-    return 0 if (stale and not cooling) else 1
+    # A given-up book is exit 1 too, and the BROKEN line above fails the slot.
+    return 0 if (stale and not cooling and not given_up) else 1
 
 
 def cmd_history_build(pages):
@@ -1468,13 +1549,28 @@ def cmd_history_build(pages):
 
     Without this the failure is invisible to the next slot: the book stays
     stale, the rebuild runs again, and it spends the same ten minutes of the
-    serial queue lock and the same Gmail quota to fail the same way."""
+    serial queue lock and the same Gmail quota to fail the same way.
+
+    It now remembers WHAT failed and HOW MANY TIMES (finding
+    20260926-exceptions-627). `history_build_failed_ms` alone said only that
+    something went wrong, so 24 days of identical failures were indistinguishable
+    from one transient blip, and nothing could ever decide to stop trying."""
     try:
         return _history_build(pages)
     except BaseException:
         try:
             st = read_state()
             st["history_build_failed_ms"] = int(datetime.now().timestamp() * 1000)
+            st["history_build_fail_count"] = int(
+                st.get("history_build_fail_count") or 0) + 1
+            # fail() records both before raising SystemExit; anything else that
+            # escapes _history_build is classified 'other' and named by type.
+            st["history_build_fail_kind"] = (_last_fail.get("kind")
+                                             or "other")
+            st["history_build_fail_reason"] = (
+                _last_fail.get("message")
+                or "%s" % (sys.exc_info()[0].__name__ if sys.exc_info()[0]
+                           else "unknown"))[:500]
             write_state(st)
         except Exception:
             pass          # never let the bookkeeping mask the real failure
@@ -1537,8 +1633,12 @@ def _history_build(pages):
     state = read_state()
     state["history_built_ms"] = int(datetime.now().timestamp() * 1000)
     # A success clears the cooldown, so a transient quota blip never costs a
-    # whole day of rebuilds once the quota is back.
+    # whole day of rebuilds once the quota is back. It clears the give-up
+    # counter with it: a book that has just been rebuilt is not broken.
     state.pop("history_build_failed_ms", None)
+    state.pop("history_build_fail_count", None)
+    state.pop("history_build_fail_kind", None)
+    state.pop("history_build_fail_reason", None)
     write_state(state)
     # Counts only — runs.log must never carry sender addresses.
     print(json.dumps({"built": now_iso, "senders": len(stats),
@@ -1950,6 +2050,57 @@ def selftest():
             check("a fresh book stops asking for a rebuild at all",
                   cmd_history_stale() == 1
                   and read_state().get("history_build_failed_ms") is None)
+
+            # ── a dead book STOPS retrying and says BROKEN ───────────────
+            # Back-tested against 25 Sep 2026, when all three slots printed
+            # {"dead": true, ...} with a 24-day-old book, all three recorded
+            # ok:true, and the 09:00 scan truncated behind the rebuild that
+            # had already failed every day since 1 Sep.
+            _sep25 = _sep9_built + 24 * 86400 * 1000
+            check("25 Sep back-test: dead + 2 failures gives up",
+                  history_build_given_up(_sep9_built, 2, _sep25) is True)
+            check("one failure alone never gives up — that is the cooldown's job",
+                  history_build_given_up(_sep9_built, 1, _sep25) is False)
+            check("a FRESH book never gives up however often it has failed",
+                  history_build_given_up(_sep25, 9, _sep25 + 1000) is False)
+            check("a book dead only through disuse does not give up",
+                  history_build_given_up(_sep9_built, 0, _sep25) is False)
+            write_state({"history_built_ms": _sep9_built,
+                         "history_build_failed_ms": _sep25 - 3600 * 1000,
+                         "history_build_fail_count": 3,
+                         "history_build_fail_kind": "rate",
+                         "history_build_fail_reason":
+                             "GMAIL RATE METRIC STILL FULL after 585s"})
+            import io as _io, contextlib as _ctx
+            _buf = _io.StringIO()
+            with _ctx.redirect_stdout(_buf):
+                _rc = cmd_history_stale()
+            _line = _buf.getvalue()
+            _out = json.loads(_line)
+            check("a given-up book still exits 1 (no rebuild is attempted)",
+                  _rc == 1 and _out.get("given_up") is True)
+            check("the line carries the word the wrappers fail on",
+                  "BROKEN" in _out.get("escalate", ""))
+            check("it names the failure count and kind, and the manual unblock",
+                  _out.get("fail_count") == 3 and _out.get("fail_kind") == "rate"
+                  and "history-build --force" in _out.get("escalate", ""))
+            # THE branch that decides the outcome: inbound-triage-run.sh passes
+            # GMAIL RATE METRIC STILL FULL as TOLERATED_ERE, and slot-postrun.sh
+            # subtracts any matching line AFTER matching BAD_ERE. A raw reason
+            # echoed here would delete the only line that fails the slot.
+            check("the raw reason never reaches the printed line",
+                  "GMAIL RATE METRIC STILL FULL" not in _line
+                  and read_state().get("history_build_fail_reason"))
+            check("the soothing cooldown keys are gone once it has given up",
+                  "cooldown" not in _out and "retry_in_seconds" not in _out)
+            check("--force clears every key that would refuse or defer it",
+                  sorted(history_force_clear()) == sorted([
+                      "history_build_fail_count", "history_build_failed_ms",
+                      "history_build_fail_kind", "history_build_fail_reason"])
+                  and history_build_given_up(
+                      _sep9_built,
+                      read_state().get("history_build_fail_count"),
+                      _sep25) is False)
         finally:
             if _prev is None:
                 os.environ.pop("INBOUND_TRIAGE_DIR", None)
@@ -2447,6 +2598,10 @@ def main(argv):
     elif cmd == "history-stale":
         return cmd_history_stale()
     elif cmd == "history-build":
+        # --force is the documented unblock for a given-up book: it clears the
+        # give-up state FIRST so this attempt is judged on its own result.
+        if "--force" in sys.argv:
+            history_force_clear()
         cmd_history_build(int(opt("--pages", str(HISTORY_BUILD_PAGES))))
     elif cmd == "history-dump":
         return cmd_history_dump()

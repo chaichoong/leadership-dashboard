@@ -692,6 +692,33 @@ INVARIANTS = [
         "field_probe": "OR(LEN({Key} & '') >= 0, LEN({Last Run} & '') >= 0)",
         "fields": ["Key", "Last Run", "Status", "Detail"],
     },
+    {
+        # The triage history book is WHERE HUMANS FILED each sender's mail, and it is
+        # the only thing stopping the agent filing from its own guesses. It is rebuilt
+        # weekly. It stopped rebuilding on 1 Sep 2026 and nobody found out for 24 days
+        # (finding 20260926-exceptions-627): every rebuild failed on the Gmail
+        # per-minute metric, the cooldown deferred each one with a soothing line, and
+        # the slot exited 0. The freshness check has to live OUTSIDE the job that
+        # writes the book, for the same reason the tenant-chain row above does.
+        # 14 days = two missed weekly rebuilds.
+        "name": "triage-history-book-is-current",
+        "table": "tblK1aGR7dYYYX2Bo",  # Triage History Book
+        "incident": "Sep 2026 — the book went 24 days without a rebuild; three slots a day reported ok while the agent filed against 1 Sep sender knowledge",
+        "asserts": "every history-book row was rebuilt within the last 14 days",
+        # Last Built is singleLineText holding an ISO datetime, so it needs parsing:
+        # IS_BEFORE on the bare text returns nothing and reads as a pass for ever.
+        "violation": ("AND(LEN({Last Built} & '') > 0, "
+                      "IS_BEFORE(DATETIME_PARSE({Last Built}), "
+                      "DATEADD(NOW(), -14, 'days')))"),
+        "control": "LEN({Last Built} & '') > 0",
+        "control_means": "history-book rows carrying a build stamp (the population a dead rebuild staleness-corrupts)",
+        "field_probe": "OR(LEN({Sender} & '') >= 0, LEN({Last Built} & '') >= 0)",
+        # Deliberately NOT Sender: the violation sample is printed into the sweep
+        # log and quoted into reports, and this repo is public. inbound-triage.py
+        # holds the same rule for runs.log. The build stamp is what is wrong here,
+        # and the record id is enough to find the row.
+        "fields": ["Dominant", "Last Built"],
+    },
 ]
 
 

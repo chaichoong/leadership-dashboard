@@ -567,11 +567,40 @@ AMOUNT_RE = re.compile(r"(?:£|GBP\s?|\$|USD\s?|EUR\s?|€)\s*([0-9][0-9,]*(?:\.
 SMALL_FAILURE_LIMIT = 25
 
 
+# A GATE MUST NOT BE DEFEATED BY ITS OWN EXPLANATION (finding
+# 20260925-inbound-email-triage-622). On 25 Sep 2026 the 17:00 triage run
+# rescued two stranded items for companies Kevin has ruled never-a-card, and
+# both descriptions ended "No legal wording." — so LEGAL_MATTER_RE found the
+# bare word `legal` in the agent's own note SAYING there was nothing legal,
+# the dissolved-company refusal was skipped, and recA7bNh8Bid06MjC and
+# recm06Zfp44UK8Bdr were created and had to be cancelled by hand.
+#
+# The scan is not moved off the description: the description is real evidence,
+# and a legal matter about a dissolved company (a liquidator, a claim form)
+# often names it there and nowhere else. Kevin's rule is that such a matter is
+# NEVER refused, so losing that text would be the worse bug.
+#
+# Instead the negation is read. A legal word directly preceded by a negator —
+# "no legal wording", "nothing legal in it" — does not count. A legal word
+# followed by one, "the liquidator has not yet responded", still does: the
+# direction is what tells "there is nothing legal here" from "the legal thing
+# has not happened yet".
+NEGATED_LEGAL_RE = re.compile(
+    r"\b(?:no|not|nothing|none|never|without|lacks?|absent)\b"
+    r"(?:\W+\w+){0,2}\W+(?:" + LEGAL_MATTER_RE.pattern + r")", re.I)
+
+
+def legal_matter_hit(text):
+    """True when the text names a real legal matter, ignoring any legal word a
+    negator directly introduces. Pure, so the selftest replays 25 Sep 2026."""
+    return bool(LEGAL_MATTER_RE.search(NEGATED_LEGAL_RE.sub(" ", text or "")))
+
+
 def never_a_card_refusal(fields):
     """Why Kevin ruled this create never becomes a card, or None."""
     text = "%s %s" % (fields.get(F["name"], ""), str(fields.get(F["desc"], ""))[:2000])
     company = DISSOLVED_COMPANY_RE.search(text)
-    if company and not LEGAL_MATTER_RE.search(text):
+    if company and not legal_matter_hit(text):
         return ("about %s, a company that no longer trades, with nothing legal in it "
                 "(Kevin, 17 Sep 2026)" % company.group(0))
     if (PAYMENT_WORD_RE.search(text) and FAILED_WORD_RE.search(text)
@@ -1329,6 +1358,44 @@ def open_child_of(parent_id, name):
             return None
 
 
+# A FIELD THAT DID NOT STICK MUST NOT BE SILENT (finding 20260925-daily-ops-613).
+#
+# On 25 Sep 2026 a create passed Team Member = [recHEt2VPYothaqTd] (Kevin), the
+# script printed {"action":"created"} with no warning, and reading the new record
+# recrOZw5yeFI9M5hG straight back showed Team Member: None. A direct PATCH of the
+# same field with the same id then worked first try, so neither the id nor the
+# field was wrong. That silence is the damaging part: a blank Team Member means an
+# AI AGENT owns the task, so every task raised FOR KEVIN became agent-owned and
+# nothing on any surface said so.
+#
+# The root cause is still unknown and is deliberately not guessed at here. What is
+# fixed is the silence: the record is read back, anything asked for and missing is
+# PATCHed once (the route the finding proved works), and whatever still will not
+# stick is printed loudly and exits non-zero rather than reporting a clean create.
+def unwritten_fields(sent, live):
+    """Field ids that were asked for and are absent from the live record.
+
+    Pure, so the selftest covers every shape offline. Only ABSENCE is checked,
+    never equality: Airtable legitimately reshapes what it stores (a link field
+    comes back as a list of ids, a date normalises), and a mismatch check would
+    fail on its own formatting. A falsy value asked for is skipped — clearing a
+    field is the one case where absent IS what was asked for."""
+    out = []
+    for key, want in (sent or {}).items():
+        if want is None or want == "" or want == [] or want is False:
+            continue
+        got = (live or {}).get(key)
+        if got is None or got == "" or got == []:
+            out.append(key)
+    return out
+
+
+def _field_names(ids):
+    """Field ids back to the names in F, so the error names something readable."""
+    rev = {v: k for k, v in F.items()}
+    return [rev.get(i, i) for i in ids]
+
+
 def cmd_create(fields, force=False, dry_run=False, parent=None):
     if F["name"] not in fields or not str(fields[F["name"]]).strip():
         print("fields JSON must carry the Task Name field " + F["name"], file=sys.stderr)
@@ -1434,11 +1501,42 @@ def cmd_create(fields, force=False, dry_run=False, parent=None):
         task_id = "(dry run)"
     out = {"action": "created", "taskId": task_id, "key": verdict.get("key", ""),
            "dryRun": dry_run, "status": fields.get(F["status"])}
+    missing, repaired = [], []
+    if not dry_run and task_id:
+        live = _request("GET", f"/{TASKS}/{task_id}?returnFieldsByFieldId=true")
+        missing = unwritten_fields(fields, live.get("fields", {}))
+        if missing:
+            print("FIELDS DID NOT STICK ON CREATE: %s — retrying as a PATCH"
+                  % ", ".join(_field_names(missing)), file=sys.stderr)
+            try:
+                _request("PATCH", f"/{TASKS}/{task_id}",
+                         {"typecast": True,
+                          "fields": {k: fields[k] for k in missing}})
+                live = _request("GET", f"/{TASKS}/{task_id}?returnFieldsByFieldId=true")
+                still = unwritten_fields(fields, live.get("fields", {}))
+            except RuntimeError as exc:
+                print("REPAIR PATCH FAILED: %s" % str(exc)[:200], file=sys.stderr)
+                still = missing
+            repaired = [k for k in missing if k not in still]
+            missing = still
+            if repaired:
+                out["fieldsRepaired"] = _field_names(repaired)
+        if missing:
+            out["fieldsNotWritten"] = _field_names(missing)
     if fixed:
         out["statusCorrected"] = fixed
     if verdict.get("note"):
         out["note"] = verdict["note"]
     print(json.dumps(out))
+    if missing:
+        # The task EXISTS — the caller must not create it again. Exit 4 says
+        # "created, but incomplete", so a wrapper grades the run as failed and
+        # somebody looks, instead of the drop passing as a clean create.
+        print("CREATED BUT INCOMPLETE: %s could not be written on %s. A blank "
+              "Team Member means an AI agent owns this task, so an owner that "
+              "did not stick changes who holds it."
+              % (", ".join(_field_names(missing)), task_id), file=sys.stderr)
+        return 4
     return 0
 
 
@@ -1771,6 +1869,28 @@ def selftest():
     check("a failure with no amount is created",
           nac("INBOUND: NatWest payment failed - check account") is None)
     check("an ordinary task passes", nac("INBOUND: Sefton Council licence fee £150") is None)
+    # ── the gate's own explanation must not defeat it (finding …-622) ────
+    # The two descriptions verbatim off recA7bNh8Bid06MjC and recm06Zfp44UK8Bdr,
+    # created by the 25 Sep 17:00 run and cancelled by hand the same run.
+    check("25 Sep back-test: 'No legal wording' no longer buys a card (Stripe)",
+          nac("INBOUND: Stripe - Two Chefs Cambridge Limited business info verification",
+              "Stripe action-required notice for Two Chefs Cambridge Limited "
+              "(dissolved/non-trading) asking to verify business owners/directors. "
+              "No legal wording.") is not None)
+    check("25 Sep back-test: 'No legal wording' no longer buys a card (Cloudflare)",
+          nac("INBOUND: Cloudflare - restore nameservers for cafehighgate.co.uk",
+              "Cloudflare notice that cafehighgate.co.uk (Cafe @ Highgate, "
+              "dissolved/non-trading) has moved off its assigned nameservers and will "
+              "be deleted after 7 days unless restored. No legal wording.") is not None)
+    check("a legal word the agent found in the DESCRIPTION still creates",
+          nac("INBOUND: Two Chefs Cambridge Limited - letter",
+              "A claim form has been issued against the company.") is None)
+    check("direction matters: a legal thing that has NOT happened yet still creates",
+          nac("INBOUND: Two Chefs Cambridge Limited - update",
+              "The liquidator has not yet responded to our email.") is None)
+    check("'nothing legal in it' does not count either",
+          nac("INBOUND: Two Chefs Cambridge Limited - receipt",
+              "Nothing legal in it, just a receipt.") is not None)
 
     # ── Hard deadline vs receipt date (finding …-447) ───────────────────
     # The two live tasks that exposed it, verbatim off the board on 4 Sep 2026.
@@ -1914,23 +2034,64 @@ def selftest():
     sent = []
     g = globals()
     saved = (g["_request"], g["load_scan_cache"], g["write_track_record"])
-    try:
-        g["_request"] = lambda m, p, body=None: (sent.append((m, p, body)) or {"id": "recNEW"})
-        g["load_scan_cache"] = lambda: {}
-        g["write_track_record"] = lambda tid, fields: None
-        import io, contextlib
+    import io, contextlib
+
+    def run_create(drop=(), heal=True, fields=None):
+        """cmd_create against a stubbed Airtable that can DROP fields on create
+        (what 25 Sep 2026 did) and optionally accept the repair PATCH."""
+        sent.clear()
+        stored = {}
+
+        def req(m, p, body=None):
+            sent.append((m, p, body))
+            if m == "POST":
+                stored.update({k: v for k, v in body["fields"].items()
+                               if k not in drop})
+                return {"id": "recNEW"}
+            if m == "PATCH" and heal:
+                stored.update(body["fields"])
+            return {"id": "recNEW", "fields": dict(stored)}
+
+        g["_request"] = req
         buf = io.StringIO()
         with contextlib.redirect_stdout(buf), contextlib.redirect_stderr(io.StringIO()):
-            rc = cmd_create({F["name"]: "INBOUND: selftest", F["status"]: "Open",
-                             F["due"]: "2026-09-20"}, force=True)
-        posted = [b for m, p, b in sent if m == "POST"]
+            rc = cmd_create(fields or {F["name"]: "INBOUND: selftest",
+                                       F["status"]: "Open", F["due"]: "2026-09-20"},
+                            force=True)
+        return rc, buf.getvalue(), [b for m, p, b in sent if m == "POST"], \
+            [b for m, p, b in sent if m == "PATCH"]
+
+    try:
+        g["load_scan_cache"] = lambda: {}
+        g["write_track_record"] = lambda tid, fields: None
+        rc, text, posted, patched = run_create()
         check("create POSTs once with typecast off",
               rc == 0 and len(posted) == 1 and posted[0]["typecast"] is False)
         check("create POSTs the corrected status, never the passed one",
               posted and posted[0]["fields"][F["status"]] == "Today"
               and STATUS_FIX_MARK in posted[0]["fields"][F["notes"]])
         check("the caller is told the status was corrected",
-              json.loads(buf.getvalue().strip().splitlines()[-1]).get("statusCorrected"))
+              json.loads(text.strip().splitlines()[-1]).get("statusCorrected"))
+        check("a create whose fields all stuck patches nothing", not patched)
+
+        # ── a dropped field is repaired, and said so (finding …-613) ──────
+        owner = {F["name"]: "INBOUND: selftest owner", F["status"]: "Today",
+                 F["team"]: ["recHEt2VPYothaqTd"]}
+        check("unwritten_fields names only what was asked for and is absent",
+              unwritten_fields({"a": ["rec1"], "b": "x", "c": "", "d": False},
+                               {"b": "x"}) == ["a"])
+        rc, text, posted, patched = run_create(drop=(F["team"],), fields=dict(owner))
+        out = json.loads(text.strip().splitlines()[-1])
+        check("25 Sep back-test: a dropped Team Member is caught and re-PATCHed",
+              rc == 0 and len(patched) == 1
+              and patched[0]["fields"][F["team"]] == ["recHEt2VPYothaqTd"]
+              and out.get("fieldsRepaired") == ["team"])
+        rc, text, posted, patched = run_create(drop=(F["team"],), heal=False,
+                                               fields=dict(owner))
+        out = json.loads(text.strip().splitlines()[-1])
+        check("a field that will not stick at all exits 4, never a clean create",
+              rc == 4 and out.get("fieldsNotWritten") == ["team"]
+              and out.get("taskId") == "recNEW")
     finally:
         g["_request"], g["load_scan_cache"], g["write_track_record"] = saved
 

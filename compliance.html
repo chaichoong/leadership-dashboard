@@ -374,10 +374,20 @@ function fmtDate(d) {
     return dt.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' });
 }
 
+// Whole calendar days, counted between two UTC midnights (finding
+// 20260926-queue-fixer-629). Differencing two LOCAL midnights leaks the clock
+// change into the answer: on 26 Sep 2026 (BST) a renewal on 26 Oct 2026 (GMT)
+// is 30 days plus one hour away, ceil() returned 31, and certStatus's
+// `days <= 30` branch was missed — so a certificate 30 days from renewal read
+// Active, with no colour, on the surface whose job is to warn early. It fired
+// for about a month before each clock change, in both directions.
 function daysUntil(d) {
     if (!d) return null;
-    const dt = new Date(d + 'T00:00:00'), n = new Date(); n.setHours(0,0,0,0);
-    return Math.ceil((dt - n) / 86400000);
+    const dt = new Date(d + 'T00:00:00Z');
+    if (isNaN(dt)) return null;
+    const n = new Date();
+    const today = Date.UTC(n.getFullYear(), n.getMonth(), n.getDate());
+    return Math.round((dt - today) / 86400000);
 }
 
 // One place decides what a certificate's status is, so the cell, the KPI tiles and the
