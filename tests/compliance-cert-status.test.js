@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi, afterEach } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -35,6 +35,8 @@ function extract(name) {
 const certStatus = new Function(
   `${extract('daysUntil')}; ${extract('certStatus')}; return certStatus;`
 )();
+
+const daysUntil = new Function(`${extract('daysUntil')}; return daysUntil;`)();
 
 const iso = (offsetDays) => {
   const d = new Date();
@@ -161,5 +163,43 @@ describe('a rejected PAT is cleared from every store it was written to', () => {
     // and this test should be revisited rather than quietly still passing.
     const init = src.slice(src.indexOf('(function init('), src.indexOf('async function airtableFetch('));
     expect(init).toMatch(/localStorage\.getItem\('airtable_pat'\)\s*\|\|\s*sessionStorage\.getItem\('_dlr_pat'\)/);
+  });
+});
+
+// THE CLOCK CHANGE MUST NOT MOVE A RENEWAL DATE (finding 20260926-queue-fixer-629).
+//
+// daysUntil used to difference two LOCAL midnights and ceil the result. Across a
+// clock change that difference is 30 days plus (or minus) an hour, so a renewal
+// exactly 30 days out counted as 31 and certStatus's `days <= 30` branch was
+// missed: the cell read Active, with no colour, one month before renewal. It hid
+// for about a month before each change, in both directions, and it took the whole
+// vitest gate going red on 26 Sep 2026 to find it.
+//
+// The dates are PINNED rather than computed from today, so this keeps testing the
+// boundary on every day of the year instead of only in late September.
+describe('daysUntil counts calendar days across a clock change', () => {
+  afterEach(() => { vi.useRealTimers(); });
+
+  const at = (ymd) => { vi.useFakeTimers(); vi.setSystemTime(new Date(`${ymd}T09:00:00`)); };
+
+  it('BST to GMT: 30 days is 30, not 31', () => {
+    at('2026-09-26');                       // BST; +30 days lands after the change
+    expect(daysUntil('2026-10-26')).toBe(30);
+    expect(certStatus({ s: 'Active', d: '2026-10-26' }).label).toBe('Expiring');
+  });
+
+  it('GMT to BST: 30 days is still 30, not 29', () => {
+    at('2026-03-15');                       // GMT; +30 days lands after the change
+    expect(daysUntil('2026-04-14')).toBe(30);
+    expect(certStatus({ s: 'Active', d: '2026-04-14' }).label).toBe('Expiring');
+  });
+
+  it('the ordinary cases are unchanged', () => {
+    at('2026-06-10');
+    expect(daysUntil('2026-06-10')).toBe(0);
+    expect(daysUntil('2026-06-09')).toBe(-1);
+    expect(daysUntil('2026-06-11')).toBe(1);
+    expect(daysUntil('2026-10-08')).toBe(120);
+    expect(daysUntil('')).toBeNull();
   });
 });
