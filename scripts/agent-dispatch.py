@@ -57,7 +57,7 @@ import sys
 import urllib.error
 import urllib.parse
 import urllib.request
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 
 # The Correspondence contract and the tier-1 banner live in one place, shared
@@ -844,6 +844,14 @@ def cmd_handover(args):
         # The agent link goes. Leaving it would keep the task in the queue's
         # agent-linked population and it would be worked again tomorrow.
         AF["teamMember"]: [who["rec"]],
+        # ...and so does the "an agent is waiting on this" flag. cmd_queue's
+        # agent_linked population is an OR over Team Member and Sent For
+        # Approval By (:670), so moving Team Member alone left the task in the
+        # queue for ever, re-selected every run as an approved carry-out with
+        # its standing approval intact (20260822-agent-dispatch-308). The
+        # field means "an agent is waiting on this", which stops being true
+        # the moment a human owns the work.
+        AF["sentForApprovalBy"]: None,
         AF["assignee"]: {"email": args.to},
         AF["notes"]: (existing + "\n\n" + note).strip(),
     })
@@ -963,11 +971,39 @@ def cmd_submit(args):
     if is_tier1:
         fields[AF["approver"]] = {"email": KEVIN_AIRTABLE_EMAIL}
     patch_task(args.task, fields)
+
+    # SUBMIT IS THE THING THAT COMPLETES THE ACTION, not a step after it.
+    #
+    # 19 Aug 2026, finding 20260819-agent-dispatch-244. An agent finished a
+    # tier-1 deliverable to disk, the run ended before the submit landed, and
+    # the task sat open with an empty Agent Output. A five-day court deadline
+    # was invisible in every surface Kevin looks at, and nothing alarmed:
+    # the action was never RECORDED, so verify had nothing to re-read.
+    #
+    # So the write is not trusted on the strength of a 200. Read the record
+    # back and prove the two fields that make the work visible actually hold
+    # what we sent. A caller that sees a non-zero exit here must record the
+    # action as FAILED, which is what puts it back in tomorrow's queue.
+    try:
+        live = task_view(get_task(args.task))
+    except Exception as exc:
+        sys.exit(f"ERROR: submitted {args.task} but could not read it back "
+                 f"({exc}). Treat this as a FAILED action — the deliverable "
+                 f"is at {args.output_file} and reconcile will find it.")
+    if not live["agentOutput"] or live["status"] != "Approval":
+        sys.exit(
+            f"ERROR: the submit of {args.task} did not land. Agent Output is "
+            f"{len(live['agentOutput'])} characters and Status is "
+            f"'{live['status']}', expected 'Approval'. Nothing reached Kevin. "
+            f"The deliverable is at {args.output_file}; record this action as "
+            f"FAILED so it is picked up again."
+        )
     print(json.dumps({"submitted": args.task,
                       "agent": AGENTS[args.agent]["name"],
                       "type": args.type, "tier1": is_tier1,
                       "approver": approver_email,
-                      "chars": len(output)}))
+                      "chars": len(output),
+                      "verifiedChars": len(live["agentOutput"])}))
 
 
 def cmd_annotate(args):
@@ -1034,6 +1070,106 @@ def cmd_complete(args):
     })
     ledger_append(args.task, "done")
     print(json.dumps({"completed": args.task}))
+
+
+# ─── RECONCILE (a deliverable on disk that never reached Airtable) ────
+#
+# The other half of finding 20260819-agent-dispatch-244. The read-back in
+# submit closes the case where the run is alive to see the failure. It cannot
+# close the case where the run DIES — the Mac sleeps, an agent outlives its
+# dispatch phase, the context runs out — because then nothing runs at all.
+#
+# The evidence survives on disk. Every finished deliverable is written to
+# RUNDIR/TASKID.md before submit is called, so a .md file whose Airtable record
+# carries no Agent Output is, by definition, work that was done and never
+# reached Kevin. This is the control the finding asks for: the count of
+# deliverable files must equal the count of records carrying output, and a
+# mismatch fails loudly with the record IDs.
+#
+# It REPORTS rather than submitting on its own, deliberately. submit needs the
+# agent record and the Task Type, and Correspondence is validated against the
+# send parser — inventing either here would push a guess through the gate.
+# The dispatcher submits what this names, with the values it already holds.
+
+# Same root the run directories are created under (STATE_DIR, :517).
+DISPATCH_LOG_ROOT = STATE_DIR
+TASK_ID_RE = re.compile(r"^rec[A-Za-z0-9]{14}$")
+
+
+def deliverable_files(root, days):
+    """Every RUNDIR/TASKID.md written in the last `days` days.
+
+    Run directories are named YYYYmmdd-HHMMSS, so the window is read off the
+    directory name rather than off mtime: a file copied or touched later must
+    not fall out of the window that would have caught it.
+    """
+    cutoff = (datetime.now(LONDON) - timedelta(days=days)).strftime("%Y%m%d")
+    found = []
+    if not os.path.isdir(root):
+        return found
+    for run in sorted(os.listdir(root)):
+        if run[:8] < cutoff:
+            continue
+        rundir = os.path.join(root, run)
+        if not os.path.isdir(rundir):
+            continue
+        for name in sorted(os.listdir(rundir)):
+            if not name.endswith(".md"):
+                continue
+            task = name[:-3]
+            if not TASK_ID_RE.match(task):
+                continue
+            path = os.path.join(rundir, name)
+            try:
+                chars = len(open(path).read().strip())
+            except OSError:
+                continue
+            if chars:
+                found.append({"task": task, "file": path, "chars": chars})
+    return found
+
+
+def cmd_reconcile(args):
+    files = deliverable_files(args.logdir, args.days)
+    # Newest wins: a task redone on a later run has one deliverable, not two.
+    by_task = {}
+    for f in files:
+        by_task[f["task"]] = f
+
+    orphans, unreadable, carried = [], [], 0
+    for task, f in sorted(by_task.items()):
+        try:
+            live = task_view(get_task(task))
+        except Exception as exc:
+            unreadable.append({**f, "error": str(exc)[:120]})
+            continue
+        if live["agentOutput"]:
+            carried += 1
+            continue
+        orphans.append({**f, "name": live["name"], "status": live["status"],
+                        "outcome": live["outcome"]})
+
+    out = {
+        "checkedFrom": args.logdir,
+        "days": args.days,
+        "deliverablesOnDisk": len(by_task),
+        "recordsCarryingOutput": carried,
+        "orphans": orphans,
+        "unreadable": unreadable,
+        "ok": not orphans and not unreadable,
+    }
+    print(json.dumps(out, indent=2))
+    # Loud, with the record IDs, exactly as the finding asks. A run that finds
+    # an orphan must submit it before it works anything new.
+    for o in orphans:
+        print(f"ERROR: {o['task']} '{o['name'][:60]}' has a {o['chars']}-char "
+              f"deliverable at {o['file']} and an EMPTY Agent Output — the "
+              f"work was done and never reached Kevin", file=sys.stderr)
+    for u in unreadable:
+        print(f"ERROR: could not read {u['task']} to check its deliverable "
+              f"({u['error']})", file=sys.stderr)
+    if not out["ok"]:
+        sys.exit(1)
 
 
 # ─── VERIFY (the control run-job.sh wraps) ────────────────────────────
@@ -1169,12 +1305,44 @@ def cmd_verify(args):
                                 "marked Completed — the work is not done, it "
                                 "changed hands")
 
+    # THE DELIVERABLE CONTROL (20260819-agent-dispatch-244).
+    #
+    # Everything above verifies actions the run REPORTED. The failure that
+    # started this finding reported nothing at all: the deliverable was
+    # written, the run died before submit, and a five-day court deadline was
+    # invisible in every surface Kevin looks at. Nothing in a report can catch
+    # a missing report line, so this control reads the disk instead.
+    #
+    # report.json lives in the run directory, alongside the RUNDIR/TASKID.md
+    # deliverables, so the directory is derived rather than passed — one less
+    # argument a caller can get wrong or quietly omit.
+    rundir = os.path.dirname(os.path.abspath(args.report))
+    disk = deliverable_files(os.path.dirname(rundir), 3650)
+    mine = {f["task"]: f for f in disk
+            if os.path.dirname(f["file"]) == rundir}
+    orphans = []
+    for task, f in sorted(mine.items()):
+        try:
+            live = task_view(get_task(task))
+        except Exception as e:
+            problems.append(f"could not re-read {task} to check its "
+                            f"deliverable: {e}")
+            continue
+        if not live["agentOutput"]:
+            orphans.append((task, f, live))
+    for task, f, live in orphans:
+        problems.append(
+            f"{task} '{live['name'][:60]}' has a {f['chars']}-char deliverable "
+            f"at {f['file']} and an EMPTY Agent Output — the work was done and "
+            f"never reached Kevin. Submit it before the next run.")
+
     if problems:
         for p in problems:
             print(f"ERROR: {p}", file=sys.stderr)
         sys.exit(1)
     print(json.dumps({"ok": True,
                       "actionsVerified": len(ok_actions),
+                      "deliverablesOnDisk": len(mine),
                       "worklistAtStart": counts.get("worklist", 0)}))
 
 
@@ -1225,6 +1393,14 @@ def main():
     c.add_argument("--note", default="",
                    help="what was carried out (goes into Notes with --keep-open)")
 
+    rc = sub.add_parser(
+        "reconcile",
+        help="find deliverables written to disk whose Airtable record still "
+             "carries no Agent Output — work done that never reached Kevin")
+    rc.add_argument("--logdir", default=DISPATCH_LOG_ROOT)
+    rc.add_argument("--days", type=int, default=3,
+                    help="how far back to look (default 3)")
+
     v = sub.add_parser("verify")
     v.add_argument("--report", required=True)
 
@@ -1232,6 +1408,7 @@ def main():
     {"queue": cmd_queue, "route": cmd_route, "escalate": cmd_escalate,
      "handover": cmd_handover, "submit": cmd_submit, "annotate": cmd_annotate,
      "intent": cmd_intent, "complete": cmd_complete,
+     "reconcile": cmd_reconcile,
      "verify": cmd_verify}[args.cmd](args)
 
 

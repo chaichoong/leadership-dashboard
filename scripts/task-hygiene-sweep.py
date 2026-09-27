@@ -367,6 +367,101 @@ def is_stale(rec, today):
     return days if days > STALE_DAYS else None
 
 
+
+# ─── THE DENOMINATOR CONTROL ──────────────────────────────────────────
+#
+# 16 Aug 2026, finding 20260816-task-hygiene-sweep-183. The compliance score is
+# clean tasks over LIVE work, and Approval-status tasks are excluded from live
+# work on purpose (they are waiting on Kevin, not being worked). So every task
+# an agent sends for approval leaves the denominator, and the percentage rises
+# without a single field being filled. The sweep then reported that rise as
+# progress. It is the opposite: the queue Kevin has to clear got longer.
+#
+# Two guards. The score is always printed as a PAIR — compliance AND the size
+# of the approval queue — so the number can never be read alone. And a sharp
+# drop in the denominator must RECONCILE against work that actually finished,
+# or the run fails rather than reporting a better percentage.
+DENOM_DROP_ALARM_PCT = 10.0
+
+
+def previous_worklist(today_path):
+    """The most recent earlier worklist file, or None on the first ever run."""
+    try:
+        names = sorted(n for n in os.listdir(MONITORING)
+                       if n.startswith("task-sweep-worklist-")
+                       and n.endswith(".json"))
+    except OSError:
+        return None
+    here = os.path.basename(today_path)
+    earlier = [n for n in names if n < here]
+    if not earlier:
+        return None
+    try:
+        with open(os.path.join(MONITORING, earlier[-1])) as fh:
+            prev = json.load(fh)
+    except (OSError, ValueError):
+        return None
+    prev["_file"] = earlier[-1]
+    return prev
+
+
+def completed_since(records, since):
+    """Tasks carrying a Completion Date on or after `since` (YYYY-MM-DD).
+
+    Counted off the FULL record set the audit already read, not off the
+    recently-completed list in the report — that list holds only completed
+    tasks with FIELD GAPS, so using it would understate finished work and
+    alarm on healthy days. Inclusive of the boundary date on purpose: a task
+    completed later the same day as the previous run is legitimate.
+    """
+    if not since:
+        return 0
+    n = 0
+    for rec in records:
+        done = str(get(rec, "completionDate") or "")[:10]
+        if done and done >= since:
+            n += 1
+    return n
+
+
+def denominator_check(open_now, waiting_now, records, prev):
+    """Does a shrinking live-work population reconcile with finished work?
+
+    Tasks that actually FINISHED since the previous run are the only
+    legitimate reason for the live-work denominator to fall. Anything else is
+    work that moved sideways — most often into Kevin's approval queue, which
+    is excluded from live work and therefore flatters the percentage.
+    """
+    if not prev or not prev.get("openTasks"):
+        return {"previous": None, "note": "no earlier worklist to compare"}
+    before = prev["openTasks"]
+    drop = before - open_now
+    drop_pct = round(100.0 * drop / before, 1)
+    since = str(prev.get("generatedAt", ""))[:10]
+    finished = completed_since(records, since)
+    approval_growth = waiting_now - (prev.get("excluded", {}).get("waitingApproval") or 0)
+    out = {
+        "previousFile": prev.get("_file"),
+        "previousDate": since,
+        "previous": before,
+        "current": open_now,
+        "droppedBy": drop,
+        "droppedPct": drop_pct,
+        "completedSince": finished,
+        "approvalQueueGrowth": approval_growth,
+        "alarmThresholdPct": DENOM_DROP_ALARM_PCT,
+    }
+    # Only a FALL matters. Growth in live work cannot flatter the score.
+    if drop_pct < DENOM_DROP_ALARM_PCT:
+        out["reconciles"] = True
+        return out
+    # Unexplained = the fall is bigger than the work that actually finished.
+    unexplained = drop - finished
+    out["unexplained"] = unexplained
+    out["reconciles"] = unexplained <= 0
+    return out
+
+
 def cmd_audit(args):
     token = pat()
     load_schema(token)
@@ -482,6 +577,9 @@ def cmd_audit(args):
         })
 
     clean = len(open_tasks) - non_compliant
+    path = args.out or os.path.join(MONITORING, f"task-sweep-worklist-{date.today()}.json")
+    denom = denominator_check(len(open_tasks), len(waiting), records,
+                              previous_worklist(path))
     out = {
         "generatedAt": datetime.now().isoformat(timespec="seconds"),
         "openTasks": len(open_tasks),
@@ -492,6 +590,8 @@ def cmd_audit(args):
         "ownership": owners,
         "aiSharePct": round(100 * owners["ai"] / len(open_tasks), 1),
         "excluded": {"waitingApproval": len(waiting), "noStatus": len(untriaged)},
+        # Never read compliancePct without this. See denominator_check.
+        "denominator": denom,
         "stale": sorted(stale, key=lambda s: -s["daysOverdue"]),
         "recentlyCompleted": completed,
         "metricCoverage": {
@@ -515,11 +615,13 @@ def cmd_audit(args):
     }
 
     os.makedirs(MONITORING, exist_ok=True)
-    path = args.out or os.path.join(MONITORING, f"task-sweep-worklist-{date.today()}.json")
     with open(path, "w") as fh:
         json.dump(out, fh, indent=2)
 
-    print(f"Live work: {len(open_tasks)} tasks   compliant: {clean} ({out['compliancePct']}%)")
+    # The PAIR, on one line. A compliance percentage on its own is unreadable:
+    # it rises whenever work leaves the denominator for Kevin's approval queue.
+    print(f"Live work: {len(open_tasks)} tasks   compliant: {clean} "
+          f"({out['compliancePct']}%)   waiting on Kevin: {len(waiting)}")
     print(f"  excluded: {len(waiting)} waiting on approval, {len(untriaged)} with no status")
     print(f"  owned by AI: {owners['ai']} ({out['aiSharePct']}%)   human: {owners['human']}   nobody: {owners['unowned']}")
     # Reported on its own line, never folded into "human" or "nobody": these
@@ -539,6 +641,25 @@ def cmd_audit(args):
     print(f"  completed in {COMPLETED_WINDOW_DAYS}d missing a business: {no_biz}"
           f"  (attribution only; the KPI is unaffected)")
     print(f"Work-list: {path}")
+
+    if denom.get("previous"):
+        print(f"  live work vs {denom['previousDate']}: {denom['previous']} -> "
+              f"{denom['current']} ({denom['droppedPct']}%), "
+              f"{denom['completedSince']} completed since, "
+              f"approval queue {denom['approvalQueueGrowth']:+d}")
+    if denom.get("reconciles") is False:
+        print("ERROR: live work fell by "
+              f"{denom['droppedBy']} ({denom['droppedPct']}%) since "
+              f"{denom['previousDate']} but only {denom['completedSince']} "
+              f"tasks were completed in that time. "
+              f"{denom['unexplained']} of the fall is unexplained and the "
+              f"approval queue grew by {denom['approvalQueueGrowth']}. "
+              f"The compliance figure of {out['compliancePct']}% is NOT "
+              "progress — the denominator shrank.", file=sys.stderr)
+        # The work-list is written first, so the next step still has its input.
+        # This exit is the alarm: a better percentage on a smaller population
+        # must never pass as an improvement.
+        return 2
     return 0
 
 

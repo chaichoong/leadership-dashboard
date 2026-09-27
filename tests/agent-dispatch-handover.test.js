@@ -62,6 +62,58 @@ describe('agent-dispatch handover', () => {
     expect(link[0]).toBe(r.humans['atentaerica@gmail.com'].rec);
   });
 
+  // 20260822-agent-dispatch-308. Moving Team Member alone was not enough.
+  // cmd_queue builds its population as an OR over Team Member and Sent For
+  // Approval By, so a handed-over task still matched on the second link, still
+  // carried its standing Approved outcome, and was re-selected as a carry-out
+  // every single run — for ever.
+  it('clears Sent For Approval By, or the task re-queues as a carry-out for ever', () => {
+    const r = handover({ to: 'micaa.work@gmail.com' });
+    expect(Object.keys(r.captured.fields)).toContain(r.fieldMap.sentForApprovalBy);
+    expect(r.captured.fields[r.fieldMap.sentForApprovalBy]).toBeNull();
+  });
+
+  it('a handed-over task drops out of the next queue read', () => {
+    // Replays cmd_queue's agent_linked filter against the record as it stands
+    // AFTER the handover patch, rather than trusting the payload alone.
+    const script = `
+import importlib.util, json
+spec = importlib.util.spec_from_file_location('ad', ${JSON.stringify(DISPATCH)})
+m = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(m)
+agent = next(iter(m.AGENTS))
+before = {"id": "recTEST", "fields": {
+    m.AF["name"]: "Draft a reply",
+    m.AF["teamMember"]: [agent],
+    m.AF["sentForApprovalBy"]: [agent],
+    m.AF["approvalOutcome"]: {"name": "Approved"},
+}}
+captured = {}
+m.get_task = lambda tid: before
+def fake_patch(tid, fields):
+    captured.update(fields)
+    return {}
+m.patch_task = fake_patch
+class A: pass
+a = A(); a.task = 'recTEST'; a.to = 'micaa.work@gmail.com'; a.reason = ''
+m.cmd_handover(a)
+after = {"id": "recTEST", "fields": dict(before["fields"])}
+for k, v in captured.items():
+    if v is None:
+        after["fields"].pop(k, None)
+    else:
+        after["fields"][k] = v
+t = m.task_view(after)
+linked = (any(i in m.AGENTS for i in t["teamMemberIds"])
+          or any(i in m.AGENTS for i in t["sentForApprovalByIds"]))
+print('@@@' + json.dumps({"agentLinked": linked, "localAgent": t["localAgent"]}))
+`;
+    const out = execFileSync('python3', ['-c', script], { encoding: 'utf8' });
+    const r = JSON.parse(out.slice(out.indexOf('@@@') + 3));
+    expect(r.agentLinked, 'handed-over task is still in the agent queue population').toBe(false);
+    expect(r.localAgent, 'a local agent would still be dispatched to work it').toBe('');
+  });
+
   it('does NOT mark the task Completed — it changed hands, it is not done', () => {
     const r = handover({ to: 'micaa.work@gmail.com' });
     expect(Object.keys(r.captured.fields)).not.toContain(r.fieldMap.status);
