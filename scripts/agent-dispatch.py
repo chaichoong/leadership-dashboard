@@ -6612,9 +6612,10 @@ def silent_run_problem(report, queue=None, handback_only=False, rested=(), known
     new work too) or tried a carry-out that met its wall. Counted from the
     queue.json the run was handed, never from what the run says it ignored.
 
-    A task resting on its wall (`rested`) or parked and already alerted
-    (`known_parked`, whether or not this run lists it again: it needs Kevin, not
-    the agent) is not owed, and neither ever counts as the run's work: only
+    A task resting on its wall (`rested`) or parked, already alerted AND listed
+    again in this run's parkedFlags (`known_parked` is never pruned, so an id in
+    it alone excuses nothing) is not owed, and neither ever counts as the run's
+    work: only
     a completed action, a failure that alarms, or a new parked flag on an owed
     task does, and an action on a task outside the worklist counts for nothing
     (review, 27 Sep 2026). A run that did some of its work and left the rest for
@@ -6623,7 +6624,7 @@ def silent_run_problem(report, queue=None, handback_only=False, rested=(), known
     if isinstance(queue, dict):
         actions = report.get("actions") or []
         parked = {p.get("id") for p in (report.get("parkedFlags") or [])}
-        excused = set(rested) | set(known_parked)
+        excused = set(rested) | (parked & set(known_parked))
         owed = [i for i in owed_ids(queue, handback_only) if i not in excused]
         real = ({a.get("task") for a in actions if a.get("ok")}
                 | {a.get("task") for a in actions if not a.get("ok") and a.get("task") not in excused}
@@ -6705,6 +6706,10 @@ def cmd_verify(args):
         problems.append("queueCounts is missing or empty — the queue read "
                         "failed and the run was blind")
 
+    # When the run began, from the queue the script stamped, never the report's
+    # startedAt: the agent writes that, and half of them carry London time with a
+    # "Z" on the end, an hour late (review, 27 Sep 2026).
+    started_at = (queue or {}).get("generatedAt") or report.get("startedAt")
     rested = []
     ledger = ledger_last_events() if failed else {}
     for a in failed:
@@ -6712,7 +6717,7 @@ def cmd_verify(args):
             live = task_view(get_task(a.get("task")))
         except Exception:                                 # noqa: BLE001
             live = None       # unreadable: it cannot be excused, so it alarms below
-        if live and rested_on_wall(live, ledger.get(a.get("task")), report.get("startedAt")):
+        if live and rested_on_wall(live, ledger.get(a.get("task")), started_at):
             rested.append(a.get("task"))
             print(f"INFO: {a.get('task')} met its recorded wall again and rests "
                   f"on it — {str(a.get('error'))[:120]}", file=sys.stderr)

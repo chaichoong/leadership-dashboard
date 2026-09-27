@@ -39,7 +39,7 @@ m.STATE_DIR = tmp
 rundir = os.path.join(tmp, 'run'); os.makedirs(rundir)
 open(os.path.join(rundir, 'report.json'), 'w').write(ago(json.dumps(${J(report)})))
 queue = ${J(queue)}
-if queue is not None: json.dump(queue, open(os.path.join(rundir, 'queue.json'), 'w'))
+if queue is not None: open(os.path.join(rundir, 'queue.json'), 'w').write(ago(json.dumps(queue)))
 if ${handbackOnly ? 'True' : 'False'}: open(os.path.join(rundir, m.HANDBACK_ONLY_MARK), 'w').close()
 pre = ${J(preAlerted)}
 if pre is not None: json.dump(pre, open(os.path.join(tmp, 'tier1-alerted.json'), 'w'))
@@ -120,6 +120,17 @@ describe('owed work is checked task by task, from the queue the run was handed',
     expect(r.err).toContain('ZERO attempted: recA');
   });
 
+  it('review: an id alerted long ago and not listed as parked again this run is still owed', () => {
+    const r = verify({ report: { queueCounts: COUNTS(1), actions: [] }, queue: Q(['recOLD', 'carry_out']), preAlerted: ['recOLD'] });
+    expect(r.code).toBe(1);
+    expect(r.err).toContain('ZERO attempted: recOLD');
+  });
+
+  it('a parked task alerted before and listed again this run is excused (it needs Kevin, not the agent)', () => {
+    const r = verify({ report: { queueCounts: COUNTS(1), actions: [], parkedFlags: [{ id: 'recOLD', name: 'invoice' }] }, queue: Q(['recOLD', 'carry_out']), preAlerted: ['recOLD'] });
+    expect(r.code).toBe(0);
+  });
+
   it('review 4: an action on a task outside the worklist excuses nothing', () => {
     const r = verify({ report: { queueCounts: COUNTS(2), actions: [{ task: 'recIDLE', kind: 'carry_out', ok: false, error: 'x' }] }, queue: Q(['recA', 'carry_out'], ['recB', 'new']), tasks: { recIDLE: { notes: '' } } });
     expect(r.code).toBe(1);
@@ -156,6 +167,16 @@ describe('a failure on a wall already on record rests on it; nothing else does',
 
   it('review 5: a wall met for the first time in this run still alarms once', () => {
     const r = verify({ ...base, tasks: { recWALL: { notes: WALL(0.1) } }, ledger: { recWALL: ['parked', '{h:0.1}'] } });
+    expect(r.code).toBe(1);
+    expect(r.err).toContain('action failed: carry_out recWALL');
+  });
+
+  it("review: the run's start comes from the queue's own stamp, not the agent's startedAt (half are an hour late)", () => {
+    const r = verify({
+      report: { startedAt: '{h:0}', queueCounts: COUNTS(1), actions: [onWall] },
+      queue: { generatedAt: '{h:1}', worklist: [{ id: 'recWALL', kind: 'carry_out' }] }, handbackOnly: true,
+      tasks: { recWALL: { notes: WALL(0.5) } }, ledger: { recWALL: ['parked', '{h:0.5}'] },
+    });
     expect(r.code).toBe(1);
     expect(r.err).toContain('action failed: carry_out recWALL');
   });
