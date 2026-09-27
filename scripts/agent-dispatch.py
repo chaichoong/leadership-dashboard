@@ -6577,6 +6577,45 @@ def cmd_blockers(args):
 
 # ─── VERIFY (the control run-job.sh wraps) ────────────────────────────
 
+# The hand-back poll's runner drops this file in its run folder. A hand-back-only
+# run is told to IGNORE new work, so the new items in its own queue are not work
+# it owed. Written by the runner, never by the agent, so a run cannot excuse
+# itself (27 Sep 2026).
+HANDBACK_ONLY_MARK = "handback-only"
+
+
+def silent_run_problem(report, queue=None, handback_only=False):
+    """The rule verify exists for, or '': work existed and the run attempted none.
+
+    27 Sep 2026: seven "ZERO completed actions" alerts in one afternoon, every one
+    a hand-back poll that rightly left new work for the slots (its worklist counts
+    new work too) or tried a carry-out that met its wall. A run that tried and
+    failed is not silent: each failure alarms on its own line. In a hand-back-only
+    run the eligible work is counted from the queue it was handed, never from what
+    the run says it ignored."""
+    counts = report.get("queueCounts") or {}
+    try:
+        eligible = int(counts.get("worklist", 0) or 0)
+    except (TypeError, ValueError):
+        eligible = 0
+    if handback_only and isinstance(queue, dict):
+        eligible = sum(1 for w in (queue.get("worklist") or [])
+                       if w.get("kind") != "new" or w.get("signinReopened"))
+    attempted = list(report.get("actions") or []) + list(report.get("parkedFlags") or [])
+    if eligible > 0 and not attempted:
+        return f"{eligible} eligible tasks and ZERO actions attempted"
+    return ""
+
+
+def rested_on_wall(live, last_event):
+    """True when a failed action's task carries an open BLOCKER in its live Notes
+    and the ledger shows it parked: the wall is on record, the task rests, and the
+    blocker loop owns it (the Estate "Robots blocked" row, the fix routed to its
+    owner). Alarming again every time it wakes to re-check the same wall trains
+    Kevin to ignore the alarm channel (27 Sep 2026: the Meta dispute task)."""
+    return bool(task_blocker(live.get("notes"))) and bool(last_event) and last_event[0] == "parked"
+
+
 def cmd_verify(args):
     try:
         with open(args.report) as fh:
@@ -6585,6 +6624,23 @@ def cmd_verify(args):
         print(f"ERROR: run report unreadable ({e}) — the run was blind",
               file=sys.stderr)
         sys.exit(1)
+    # --dry-run is the agent's own self-check during a run: the same checks, no
+    # state written, and nothing wraps it, so a draft report that the agent then
+    # corrects never reaches the alarm channel. The runner's wrapped call on the
+    # final report is the one that counts (27 Sep 2026: five of twelve alerts were
+    # drafts the agent fixed a minute later).
+    dry_run = bool(getattr(args, "dry_run", False))
+    rundir = os.path.dirname(os.path.abspath(args.report))
+    handback_only = os.path.exists(os.path.join(rundir, HANDBACK_ONLY_MARK))
+    queue = None
+    if handback_only:
+        try:
+            with open(os.path.join(rundir, "queue.json")) as fh:
+                queue = json.load(fh)
+        except Exception as e:                            # noqa: BLE001
+            print(f"ERROR: hand-back run's queue.json unreadable ({e}) — "
+                  "its eligible work cannot be counted", file=sys.stderr)
+            sys.exit(1)
 
     problems = []
     counts = report.get("queueCounts", {})
@@ -6600,10 +6656,21 @@ def cmd_verify(args):
                         "failed and the run was blind")
 
     # The rule this control exists for: work existed and the run did none.
-    if counts.get("worklist", 0) > 0 and not ok_actions:
-        problems.append(
-            f"{counts['worklist']} eligible tasks and ZERO completed actions")
+    silent = silent_run_problem(report, queue, handback_only)
+    if silent:
+        problems.append(silent)
+    rested = []
+    ledger = ledger_last_events() if failed else {}
     for a in failed:
+        try:
+            live = task_view(get_task(a.get("task")))
+        except Exception:                                 # noqa: BLE001
+            live = None       # unreadable: it cannot be excused, so it alarms below
+        if live and rested_on_wall(live, ledger.get(a.get("task"))):
+            rested.append(a.get("task"))
+            print(f"INFO: {a.get('task')} met its recorded wall again and rests "
+                  f"on it — {str(a.get('error'))[:120]}", file=sys.stderr)
+            continue
         problems.append(f"action failed: {a.get('kind')} {a.get('task')} — "
                         f"{str(a.get('error'))[:120]}")
 
@@ -6699,7 +6766,7 @@ def cmd_verify(args):
         if t.get("id") not in alerted:
             problems.append(f"{label}: {t.get('id')} "
                             f"'{str(t.get('name'))[:60]}'")
-    if flags:
+    if flags and not dry_run:       # a self-check must not spend the once-per-task alarm
         os.makedirs(STATE_DIR, exist_ok=True)
         with open(state_path, "w") as fh:
             json.dump(sorted(alerted | {t.get("id") for _, t in flags}), fh)
@@ -6862,7 +6929,10 @@ def cmd_verify(args):
                       "systemAlertsHeldBack": len(alerts),
                       "handedToRoy": len(roy),
                       "systemAlertsBySource": alert_summary,
-                      "worklistAtStart": counts.get("worklist", 0)}))
+                      "worklistAtStart": counts.get("worklist", 0),
+                      # Failed on a wall already on record: listed, never hidden.
+                      "restedOnWall": rested,
+                      "dryRun": dry_run}))
 
 
 # ─── ENTRY ────────────────────────────────────────────────────────────
@@ -8682,6 +8752,9 @@ def main():
 
     v = sub.add_parser("verify")
     v.add_argument("--report", required=True)
+    v.add_argument("--dry-run", action="store_true",
+                   help="the agent's own self-check: same checks, no state written, "
+                        "never wrapped; the runner's wrapped call is the control")
 
     rc = sub.add_parser("reconcile",
                         help="name finished deliverables on disk whose Airtable "
