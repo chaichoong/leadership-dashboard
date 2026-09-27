@@ -1122,7 +1122,9 @@ def resubmit_ready(root=None):
     return sent
 
 
-RESET_STALE = ("error", "requeued", "role", "episode", "episode_reason", "lfmd_window")   # a failed clip's verdicts, recomputed
+# A failed clip's verdicts, recomputed by the night. Its episode number stays: popping it moved a teaser recorded the
+# next morning onto the day it was recorded, and its card went back without it (review, 27 Sep 2026).
+RESET_STALE = ("error", "requeued", "role", "episode_reason", "lfmd_window")
 
 
 def receipt_lines(text):
@@ -1151,7 +1153,11 @@ def redo_day(day, receipt_path, why, ledger=None, state=None, root=None, today=N
         raise SystemExit("episode %d: the receipt answers %d point(s) but Kevin made %d; one '- <his point> → <what changed>' line each"
                          % (day, len(lines), len(points)))
     dest = os.path.join(root, "%d.md" % day)
-    if os.path.exists(dest): raise SystemExit("episode %d: a receipt already waits (%s); the fix is already in motion" % (day, dest))
+    if os.path.exists(dest):
+        age = (dt.datetime.now().timestamp() - os.path.getmtime(dest)) / 3600
+        if age < 24: raise SystemExit("episode %d: a receipt already waits (%s, %.0f h old); the fix is already in motion" % (day, dest, age))
+        # stale: the night had its chance and the card did not go back. Kept beside it, never deleted.
+        os.replace(dest, dest + ".stale-" + dt.datetime.now().strftime("%Y%m%d-%H%M%S"))
     ledger = watch.load_ledger() if ledger is None else ledger
     mine = [k for k, v in ledger.items() if v.get("episode") == day or (v.get("day") == day and not v.get("episode"))]
     if not mine: raise SystemExit("episode %d: no clip of the day in the ledger" % day)

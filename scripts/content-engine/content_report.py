@@ -261,16 +261,21 @@ def lift_gap_pause(report, path=None, remove=os.remove, say=print):
     return True
 
 
-IN_MOTION = ("new", "pulling", "pulled", "rendering")
+RENDERING = ("pulling", "rendering")          # mid-run: in motion whatever else holds
+WAITING = ("new", "pulled")                   # in motion only on a day the night planner will reach
 
 
-def stuck_sent_back(now=None, hours=24, approvals=None, ledger=None, episodes=None, redo_days=None, receipts=None):
+def stuck_sent_back(now=None, hours=24, approvals=None, ledger=None, episodes=None, redo_days=None, receipts=None,
+                    reachable=None, why_waiting=None):
     """Sent-back cards nobody has set a fix in motion for after `hours` (Kevin, 27 Sep 2026: daily-ops works them).
 
     2072 held every later episode for two days behind a question ("can you confirm the folder that contains the raw
-    footage") that only a Claude session could answer, and none looked. In motion means: a receipt waiting to go back
-    with the card, the day on the Learnings rebuild list, or a clip of the day waiting to render. A rejected card is
-    his no, not a job, and a day already on YouTube holds nothing."""
+    footage") that only a Claude session could answer, and none looked. In motion means: a clip of the day rendering
+    now; a clip waiting to render on a day the night planner will reach (a paused catch-up day never is); the day on
+    the Learnings rebuild list; or a receipt waiting to go back with the card for under `hours` (review, 27 Sep 2026:
+    a receipt whose re-render failed again, or whose card the gate refused, would otherwise hide the card for good, the
+    same ownerless stall). `receipts` maps day -> the receipt's age in hours. A rejected card is his no, not a job, and
+    a day already on YouTube holds nothing."""
     import render
     now = now or dt.datetime.now()
     approvals = approval.load_state() if approvals is None else approvals
@@ -280,8 +285,15 @@ def stuck_sent_back(now=None, hours=24, approvals=None, ledger=None, episodes=No
         try: redo_days = {int(m.group(1)) for m in (re.match(r"\s*(\d{3,4})\b", l) for l in open(render.REDO_LFMD_FILE)) if m}
         except OSError: redo_days = set()
     if receipts is None:
-        try: receipts = {int(n[:-3]) for n in os.listdir(render.RESUBMIT_DIR) if re.match(r"^\d+\.md$", n)}
-        except OSError: receipts = set()
+        receipts = {}
+        try:
+            for n in os.listdir(render.RESUBMIT_DIR):
+                if re.match(r"^\d+\.md$", n):
+                    age = now - dt.datetime.fromtimestamp(os.path.getmtime(os.path.join(render.RESUBMIT_DIR, n)))
+                    receipts[int(n[:-3])] = age.total_seconds() / 3600
+        except OSError: pass
+    if reachable is None:
+        reachable = set(watch.plan(ledger, 10 ** 6)[0])
     out = []
     for d, a in sorted(approvals.items()):
         if not (isinstance(a, dict) and a.get("task") and a.get("verdict") == "changes"): continue
@@ -292,12 +304,33 @@ def stuck_sent_back(now=None, hours=24, approvals=None, ledger=None, episodes=No
         waited = (now - since).total_seconds() / 3600 if since else None
         if waited is not None and waited < hours: continue
         mine = {k: v for k, v in ledger.items() if v.get("episode") == day or (v.get("day") == day and not v.get("episode"))}
-        if day in receipts or day in redo_days or any(v.get("status") in IN_MOTION for v in mine.values()): continue
+        if any(v.get("status") in RENDERING for v in mine.values()) or day in redo_days: continue
+        if any(v.get("status") in WAITING for v in mine.values()) and day in reachable: continue
+        age = receipts.get(day)
+        if age is not None and age < hours: continue
+        if age is not None:
+            why = "a receipt has waited %d h and the card has not gone back" % round(age)
+            if why_waiting: why += ": " + why_waiting(day)
+        elif any(v.get("status") in WAITING for v in mine.values()):
+            why = "clips wait to render, but the night never reaches day %d (a catch-up day while gap days are paused, or no room on disk)" % day
+        else:
+            why = "nothing in motion: no receipt, not on the Learnings rebuild list, no clip waiting"
         out.append({"day": day, "task": a["task"], "since": a.get("synced") or "", "hoursWaiting": round(waited) if waited is not None else None,
-                    "feedback": (a.get("feedback") or "").strip(),
+                    "why": why, "feedback": (a.get("feedback") or "").strip(),
                     "clips": [{"name": k, "status": v.get("status"), "role": v.get("role"), "seconds": v.get("duration"),
                                "path": v.get("path"), "error": v.get("error")} for k, v in sorted(mine.items())]})
     return out
+
+
+def resubmit_reason(day):
+    """Why a waiting receipt has not gone back, in resubmit-ready's own words."""
+    import render
+    try:
+        full = approval.bundle(day)["Long Form Video"] or {"fields": {}}
+        path = os.path.join(render.RESUBMIT_DIR, "%d.md" % day)
+        return render.resubmit_due(day, watch.load_ledger(), os.path.getmtime(path), approval.load_state().get(str(day)), full["fields"]) or "due now"
+    except Exception as ex:                                       # noqa: BLE001
+        return "could not tell (%s)" % str(ex)[:120]
 
 
 def write(report, dry_run=False):
@@ -435,7 +468,7 @@ if __name__ == "__main__":
         rep = build(); lift_gap_pause(rep); write(rep); print("content report: " + rep["headline"])
     elif a.mode == "stuck":
         # daily-ops reads this (Kevin, 27 Sep 2026). Exit 2 when the state cannot be read: never "nothing stuck".
-        try: rows = stuck_sent_back(hours=a.hours)
+        try: rows = stuck_sent_back(hours=a.hours, why_waiting=resubmit_reason)
         except Exception as ex:                                   # noqa: BLE001
             print("content stuck: could not tell (%s)" % str(ex)[:200], file=sys.stderr); sys.exit(2)
         print(json.dumps({"stuck": rows}, indent=1))

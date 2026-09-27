@@ -52,24 +52,24 @@ const RECEIPT = [
 
 describe('stuck: a sent-back card with nothing in motion is named', () => {
   it('2072 as it stood on the afternoon of 27 Sep: listed, 59 h, both clips with the failed summary', () => {
-    const r = py(`res = content_report.stuck_sent_back(now=dt.datetime(2026, 9, 27, 19, 0), approvals=${J(APPROVALS)}, ledger=${J(LEDGER)}, episodes={}, redo_days=set(), receipts=set())`);
+    const r = py(`res = content_report.stuck_sent_back(now=dt.datetime(2026, 9, 27, 19, 0), approvals=${J(APPROVALS)}, ledger=${J(LEDGER)}, episodes={}, redo_days=set(), receipts={}, reachable={2072})`);
     expect(r.res.map((x) => x.day)).toEqual([2072]);
     expect(r.res[0].hoursWaiting).toBe(59);
     expect(r.res[0].clips.map((c) => c.status)).toEqual(['rendered', 'failed']);
   });
 
   it('under 24 hours it waits (the night may still be working it)', () => {
-    const r = py(`res = content_report.stuck_sent_back(now=dt.datetime(2026, 9, 25, 20, 0), approvals=${J(APPROVALS)}, ledger=${J(LEDGER)}, episodes={}, redo_days=set(), receipts=set())`);
+    const r = py(`res = content_report.stuck_sent_back(now=dt.datetime(2026, 9, 25, 20, 0), approvals=${J(APPROVALS)}, ledger=${J(LEDGER)}, episodes={}, redo_days=set(), receipts={}, reachable={2072})`);
     expect(r.res).toEqual([]);
   });
 
   for (const [what, extra] of [
-    ['a receipt waits', 'receipts={2072}'],
+    ['a receipt has waited under 24 h', 'receipts={2072: 2}'],
     ['the day is on the Learnings rebuild list', 'redo_days={2072}'],
     ['already on YouTube', 'episodes={"2072": {"youtube_link": "https://youtu.be/x"}}'],
   ]) {
     it(`not stuck when ${what}`, () => {
-      const kw = { receipts: 'receipts=set()', redo_days: 'redo_days=set()', episodes: 'episodes={}' };
+      const kw = { receipts: 'receipts={}', redo_days: 'redo_days=set()', episodes: 'episodes={}', reachable: 'reachable={2072}' };
       const key = extra.split('=')[0];
       kw[key] = extra;
       const r = py(`res = content_report.stuck_sent_back(now=dt.datetime(2026, 9, 27, 19, 0), approvals=${J(APPROVALS)}, ledger=${J(LEDGER)}, ${Object.values(kw).join(', ')})`);
@@ -79,22 +79,43 @@ describe('stuck: a sent-back card with nothing in motion is named', () => {
 
   it('not stuck when a clip of the day waits to render', () => {
     const led = { ...LEDGER, 'VID_20260201_092713_00_014.insv': { ...LEDGER['VID_20260201_092713_00_014.insv'], status: 'new' } };
-    const r = py(`res = content_report.stuck_sent_back(now=dt.datetime(2026, 9, 27, 19, 0), approvals=${J(APPROVALS)}, ledger=${J(led)}, episodes={}, redo_days=set(), receipts=set())`);
+    const r = py(`res = content_report.stuck_sent_back(now=dt.datetime(2026, 9, 27, 19, 0), approvals=${J(APPROVALS)}, ledger=${J(led)}, episodes={}, redo_days=set(), receipts={}, reachable={2072})`);
+    expect(r.res).toEqual([]);
+  });
+
+  it('review: a receipt that has waited over 24 h lists the card again, with the reason', () => {
+    const r = py(`res = content_report.stuck_sent_back(now=dt.datetime(2026, 9, 29, 9, 0), approvals=${J(APPROVALS)}, ledger=${J(LEDGER)}, episodes={}, redo_days=set(), receipts={2072: 30}, reachable={2072}, why_waiting=lambda d: "a clip of the day failed to render")`);
+    expect(r.res.map((x) => x.day)).toEqual([2072]);
+    expect(r.res[0].why).toContain('a receipt has waited 30 h');
+    expect(r.res[0].why).toContain('a clip of the day failed to render');
+  });
+
+  it('review: clips set to new on a day the night never reaches are not in motion', () => {
+    const led = { ...LEDGER, 'VID_20260201_092713_00_014.insv': { ...LEDGER['VID_20260201_092713_00_014.insv'], status: 'new' } };
+    const r = py(`res = content_report.stuck_sent_back(now=dt.datetime(2026, 9, 27, 19, 0), approvals=${J(APPROVALS)}, ledger=${J(led)}, episodes={}, redo_days=set(), receipts={}, reachable=set())`);
+    expect(r.res.map((x) => x.day)).toEqual([2072]);
+    expect(r.res[0].why).toContain('the night never reaches day 2072');
+  });
+
+  it('CONTROL: a clip rendering right now is in motion whatever the planner says', () => {
+    const led = { ...LEDGER, 'VID_20260201_092713_00_014.insv': { ...LEDGER['VID_20260201_092713_00_014.insv'], status: 'rendering' } };
+    const r = py(`res = content_report.stuck_sent_back(now=dt.datetime(2026, 9, 27, 19, 0), approvals=${J(APPROVALS)}, ledger=${J(led)}, episodes={}, redo_days=set(), receipts={}, reachable=set())`);
     expect(r.res).toEqual([]);
   });
 
   it('a rejected card is his no, not a job', () => {
-    const r = py(`res = content_report.stuck_sent_back(now=dt.datetime(2026, 9, 27, 19, 0), approvals=${J({ 2072: { ...APPROVALS[2072], verdict: 'rejected' } })}, ledger=${J(LEDGER)}, episodes={}, redo_days=set(), receipts=set())`);
+    const r = py(`res = content_report.stuck_sent_back(now=dt.datetime(2026, 9, 27, 19, 0), approvals=${J({ 2072: { ...APPROVALS[2072], verdict: 'rejected' } })}, ledger=${J(LEDGER)}, episodes={}, redo_days=set(), receipts={}, reachable={2072})`);
     expect(r.res).toEqual([]);
   });
 });
 
 describe('redo-day: sets the fix in motion the way 2071 and 2072 were', () => {
-  const run = (approvals, receipt, ledger = LEDGER, preReceipt = false) => py(`
+  const run = (approvals, receipt, ledger = LEDGER, preReceipt = false, preAgeH = 0) => py(`
 root = tempfile.mkdtemp(); rp = os.path.join(root, 'in.md'); open(rp, 'w').write(${JSON.stringify(receipt)})
-if ${preReceipt ? 'True' : 'False'}: open(os.path.join(root, '2072.md'), 'w').write('x')
+if ${preReceipt ? 'True' : 'False'}:
+    open(os.path.join(root, '2072.md'), 'w').write('x'); t0 = dt.datetime.now().timestamp() - ${preAgeH} * 3600; os.utime(os.path.join(root, '2072.md'), (t0, t0))
 res = render.redo_day(2072, rp, "re-render with the 44 s summary", ledger=${J(ledger)}, state=${J(approvals)}, root=root, today=dt.date(2026, 9, 27))
-res = {"reset": res, "receipt": open(os.path.join(root, '2072.md')).read()}`);
+res = {"reset": res, "receipt": open(os.path.join(root, '2072.md')).read(), "stale": [n for n in os.listdir(root) if ".stale-" in n]}`);
 
   it('resets every clip of the day, not the day before, and parks the receipt', () => {
     const r = run(APPROVALS, RECEIPT);
@@ -109,8 +130,19 @@ res = {"reset": res, "receipt": open(os.path.join(root, '2072.md')).read()}`);
 
   it("a failed clip loses its old verdicts, so the night judges it afresh", () => {
     const f = run(APPROVALS, RECEIPT).saved.at(-1)['VID_20260201_093632_00_015.insv'];
-    for (const k of ['error', 'requeued', 'role', 'episode', 'lfmd_window']) expect(f[k]).toBeUndefined();
+    for (const k of ['error', 'requeued', 'role', 'lfmd_window']) expect(f[k]).toBeUndefined();
     expect(f.day).toBe(2072);
+    expect(f.episode).toBe(2072);   // kept: the night recomputes it, and dropping it can move a clip to another day
+  });
+
+  it("review: a failed teaser recorded the next morning keeps its episode, so it stays with its day", () => {
+    const led = { ...LEDGER, 'VID_20260202_080000_00_020.insv': { day: 2073, episode: 2072, role: 'teaser', status: 'failed', error: 'x' } };
+    const r = run(APPROVALS, RECEIPT, led);
+    expect(r.code).toBe(0);
+    const t = r.saved.at(-1)['VID_20260202_080000_00_020.insv'];
+    expect(t.episode).toBe(2072);
+    expect(t.status).toBe('new');
+    expect(t.error).toBeUndefined();
   });
 
   it('refuses a receipt that misses one of his points, and writes nothing', () => {
@@ -133,6 +165,13 @@ res = {"reset": res, "receipt": open(os.path.join(root, '2072.md')).read()}`);
     expect(r.code).toBe(1);
     expect(r.err).toContain('mid-render');
     expect(r.saved).toEqual([]);
+  });
+
+  it('review: a receipt older than 24 h is set aside (kept, never deleted) and replaced', () => {
+    const r = run(APPROVALS, RECEIPT, LEDGER, true, 30);
+    expect(r.code).toBe(0);
+    expect(r.res.receipt).toContain('Found, so you do not need to look.');
+    expect(r.res.stale.length).toBe(1);
   });
 
   it('refuses when a receipt already waits (the fix is already in motion)', () => {
