@@ -66,6 +66,12 @@ describe('prod-walk.js classify', () => {
   it('never passes a page that stopped at its gate: its data went unchecked', () => {
     expect(walk.classify({ ...ok, gate: 'asks who is viewing' })).toBe('WARN');
   });
+  it('fails a broken value after a label or with a unit, which a WARN would let through unreported', () => {
+    for (const t of ['Voids: NaN', 'Tenant: undefined', 'Arrears for NaN days', 'Rent = NaN']) {
+      expect(walk.findLeaks(t, SECRET).hard, t).toHaveLength(1);
+    }
+    expect(walk.findLeaks('task: fix pnl NaN leak', SECRET).hard).toHaveLength(0);
+  });
   it('warns, not fails, on a bare NaN or undefined, which can be someone\'s own words', () => {
     expect(walk.classify({ ...ok, softLeaks: ['task: fix pnl NaN leak'] })).toBe('WARN');
   });
@@ -117,6 +123,8 @@ describe('prod-walk.js noise and app errors', () => {
     expect(walk.isAppError(`TypeError: x\n    at render (${ORIGIN}/js/pnl.js:10:5)`, ORIGIN)).toBe(true);
     expect(walk.isAppError('Error: boom', ORIGIN)).toBe(true);
     expect(walk.isAppError('Error: x\n    at https://accounts.google.com/gsi/client:1:2', ORIGIN)).toBe(false);
+    // Content Machine is a registry page on Kevin's other host: its crash is the app's.
+    expect(walk.isAppError('Error: x\n    at https://chaichoong.github.io/content-machine/app.js:3:1', ORIGIN)).toBe(true);
   });
 });
 
@@ -149,7 +157,10 @@ F = m.F
 T, S = sys.argv[1], sys.argv[2]
 def row(i, name): return {"id": i, "createdTime": "2026-09-01T00:00:00Z", "fields": {F["name"]: name, F["status"]: "Today"}}
 others = [row("rX", "Fix compliance page auth screen"), row("rY", "Check CFV figures for Elmdon"),
-          row("rZ", "E2E Sweep [CRITICAL]: hard-deadline-passed-still-open"), row("rV", "Dashboard: fix overview KPI tiles")]
+          row("rZ", "E2E Sweep [CRITICAL]: hard-deadline-passed-still-open"), row("rV", "Dashboard: fix overview KPI tiles"),
+          row("rA", "Fix dashboard faults"), row("rB", "Faults found on the Money dashboard"),
+          row("rC", "Leadership dashboard faults on cash flow"), row("rD", "Sunday walk faults"),
+          row("rE", "SITE CHECK: payments page walk")]
 print(json.dumps({"statusOk": S in m.NEW_TASK_STATUSES,
                   "first": m.decide({F["name"]: T}, others)["action"],
                   "again": m.decide({F["name"]: T}, others + [row("rS", T)]).get("taskId")}))

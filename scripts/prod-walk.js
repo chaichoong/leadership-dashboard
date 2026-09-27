@@ -63,13 +63,19 @@ const SIGNIN_BUDGET_MS = 150000;
 // that prints nothing, so the walk stops itself first and says what it missed.
 const TOTAL_BUDGET_MS = 480000;
 const FRAME_BUDGET_MS = 30000;
+// The budget is checked between pages. A page that hangs inside one step would
+// run past it into the command timeout and print nothing, so a hard stop prints
+// what was walked and exits 1 first.
+const HARD_STOP_MS = 560000;
 // A panel shorter than this after settling is blank.
 const MIN_CHARS = 40;
 
-// A broken value leaking into the page. The value-shaped ones are FAILs. A bare
-// "undefined" or "NaN" can be someone's own words (a task titled "pnl NaN leak"
-// on the agents page), so it is a WARN the slot reads, never a FAIL on its own.
-const HARD_LEAK_RE = /\[object Object\]|£\s?NaN|NaN\s?%/g;
+// A broken value leaking into the page. The value-shaped ones are FAILs: an
+// object, money or a percentage, a value after a label ("Voids: NaN", "Tenant:
+// undefined") and a count with a unit ("NaN days"). A bare "undefined" or "NaN"
+// elsewhere can be someone's own words (a task titled "pnl NaN leak" on the
+// agents page), so it is a WARN the slot reads, never a FAIL on its own.
+const HARD_LEAK_RE = /\[object Object\]|£\s?NaN|NaN\s?%|[:=]\s*(NaN|undefined)\b|\bNaN\s+(days?|weeks?|months?|years?|hours?|units?|rooms?|tenants?|tasks?)\b/g;
 const SOFT_LEAK_RE = /\bundefined\b|\bNaN\b/g;
 
 // A page that stops at its own entry gate rendered, but its data went unchecked.
@@ -82,6 +88,10 @@ const GATES = [
   [/Personal Access Token|Sign in from the main app|passcode/i, 'shows its own sign-in screen'],
   [/\bLoading\b[^\n]{0,40}(\.\.\.|…)/, 'still loading'],
 ];
+
+// Registry pages that live on another host of Kevin's (Content Machine). Their
+// uncaught exceptions are the app's, not outside noise.
+const APP_HOSTS = ['https://chaichoong.github.io'];
 
 // Hosts that are never the app: telemetry and browser extensions. Everything
 // else, including the Google and CDN hosts the app calls on purpose, is charged
@@ -140,7 +150,7 @@ function isNoise(url) {
 function isAppError(stack, origin) {
   const urls = String(stack || '').match(/(https?|chrome-extension):\/\/[^\s)]+/g) || [];
   if (!urls.length) return true;
-  return urls.some(u => u === origin || u.startsWith(origin + '/'));
+  return urls.some(u => [origin, ...APP_HOSTS].some(o => u === o || u.startsWith(o + '/')));
 }
 
 /** Only the live app, or a local copy of it, may be walked: the token goes to
@@ -214,9 +224,16 @@ function authFormVisible() {
     ['patInput', 'authScreen', 'loginNote'].some(id => shown(document.getElementById(id)));
 }
 
+// The pages walked so far, for the hard stop.
+const DONE = [];
+
 async function main() {
   const a = args(process.argv.slice(2));
   const started = Date.now();
+  setTimeout(() => finish({ ok: false, ran: true, reason: `HARD STOP: a page hung past ${HARD_STOP_MS / 1000}s; the pages after the last one listed were not walked`,
+                            pagesWalked: DONE.length, counts: summarise(DONE),
+                            pages: DONE.map(({ id, status, gate, error }) => ({ id, status, gate: gate || undefined, error })) }, 1),
+             HARD_STOP_MS).unref();
   const base = allowedBase(a.base);
   if (!base) return finish({ ok: false, ran: false, reason: 'refused --base: only the live app or a local copy may be walked' }, 2);
   try { SECRET = fs.readFileSync(PAT_FILE, 'utf8').trim(); } catch (e) { /* reported below */ }
@@ -397,6 +414,7 @@ async function walk(browser, a, base, origin, started) {
     current = null;
     r.status = classify(r);
     pages.push(r);
+    DONE.push(r);
   }
 
   const counts = summarise(pages);

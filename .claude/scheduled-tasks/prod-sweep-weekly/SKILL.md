@@ -64,7 +64,9 @@ skill named them. Use these instead:
   (never signed in, site unreachable, or an empty page catalogue): that is the NOT
   RUN case below. Never read, print or pass the token yourself.
 - **Read it honestly.** Report `counts`, `pagesWalked` and `records`. For each FAIL
-  or WARN name the page and the error, leak or gate it printed. A WARN with a
+  or WARN name the page and the error, leak or gate it printed. Leak snippets are
+  real page text: they go in your returned lines and the scratch report, never in
+  `monitoring/`, which is public. A WARN with a
   `gate` rendered, but its data went unchecked (Tasks asks who is viewing, Inbound
   Comms asks for a Google sign-in): say so, never call it clean. `outsideNoise`
   counts errors from hosts the app does not own (telemetry, extensions): report the
@@ -73,7 +75,7 @@ skill named them. Use these instead:
   the ONE sweep task with `python3 scripts/create-agent-task.py create --fields-json
   '<json>'`. It reads the token itself and carries the duplicate gate and its
   zero-row control, which replace the base file's own dedupe query. Fields by id:
-  Task Name `fldgFjGBw6bTKJFCD` = `SITE CHECK: dashboard faults found by the Sunday walk`,
+  Task Name `fldgFjGBw6bTKJFCD` = `SITE CHECK: prodwalk results from the Sunday page walk`,
   exactly these words every week, so the gate folds a recurrence into the open task
   and never into an unrelated one (tested in tests/prod-walk.test.js; a title
   carrying the page or fault folds different faults together); Status
