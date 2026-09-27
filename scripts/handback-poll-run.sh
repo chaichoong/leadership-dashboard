@@ -144,6 +144,9 @@ fi
 RUNDIR="$HOME/knowledge-os/logs/agent-dispatch/$(date +%Y%m%d-%H%M%S)"
 mkdir -p "$RUNDIR"
 cp "$QJSON" "$RUNDIR/queue.json"
+# This run ignores new work by design, so verify counts only the hand-backs in
+# queue.json as work it owed. Written here, never by the agent (27 Sep 2026).
+: > "$RUNDIR/handback-only"
 
 __START_LINE=$( { wc -l < "$LOG"; } 2>/dev/null || echo 0)
 echo "===== handback-poll run $(date) — $REASON =====" >> "$LOG"
