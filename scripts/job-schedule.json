@@ -392,11 +392,12 @@
   "cron": "15 9 * * *",
   "maxLateMinutes": 240,
   "mode": "wrapped",
-  "note": "Kevin's restructure of 26 Aug 2026: role-specific work leaves the daily-ops sequence and runs as its own slot. A wrapped shell job, so it takes the lock and heartbeats — a slot, never a second Claude routine. Allowlisted in scripts/check-routines.py. The Prospecting agent (register row: status Built). Runs after the 09:00 slots so a prospect task it creates is picked up by the same morning's board pass.",
+  "note": "PARKED 27 Sep 2026 (Kevin, in-session, bringing forward his 16 Sep ruling that Operations Director is parked to January 2027 with no OD prospecting in Q4). The launchd job is unloaded and its plist removed, the allowlist entry is removed from scripts/check-routines.py, and install-slot-jobs.sh no longer installs it. Revisit at the January 2027 OD decision session. Previously: Kevin's restructure of 26 Aug 2026, a wrapped slot at 09:15 running the Prospecting agent.",
   "needs": [
    "network"
   ],
-  "retryWhenDeferred": true
+  "retryWhenDeferred": true,
+  "enabled": false
  },
  "prod-sweep-weekly": {
   "cron": "0 11 * * *",

@@ -120,15 +120,17 @@ describe('retry-deferred wiring check', () => {
 
   it('BACK-TEST: removing the flag from a NETWORK-gated job also FAILS', () => {
     const broken = JSON.parse(readFileSync(SCHEDULE, 'utf8'));
-    expect(networkGated(broken.prospecting)).toBe(true);
-    expect(driveGated(broken.prospecting)).toBe(false); // network only — the half 386 missed
-    delete broken.prospecting.retryWhenDeferred;
+    // inbound-triage since 27 Sep 2026: prospecting, the old example, is parked and
+    // a disabled job is rightly skipped by checkwiring.
+    expect(networkGated(broken['inbound-triage'])).toBe(true);
+    expect(driveGated(broken['inbound-triage'])).toBe(false); // network only — the half 386 missed
+    delete broken['inbound-triage'].retryWhenDeferred;
     const p = join(mkdtempSync(join(tmpdir(), 'retry-wiring-')), 'job-schedule.json');
     writeFileSync(p, JSON.stringify(broken));
 
     const r = run(['checkwiring', p]);
     expect(r.code).toBe(1);
-    expect(r.stdout).toMatch(/UNDECLARED\s+prospecting/);
+    expect(r.stdout).toMatch(/UNDECLARED\s+inbound-triage/);
   });
 
   it('an explicit false is a decision and passes; only a missing key fails', () => {
