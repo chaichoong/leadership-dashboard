@@ -323,13 +323,26 @@ def title_from_transcript(text):
 # the loose first alternative, because "dive" and "diet" are ordinary words he uses: this very episode says "when you
 # dive deeper into it". Measured 18 Sep 2026 over all 295 stored transcripts: adding "iv" gains exactly 10 matches
 # and every one is a real Learnings line ("learnings from my dive", "learning from a diver"). Zero false positives.
-LFMD_START_RE = re.compile(r"(?:\w+\s+)?(?:from|for|of|through|in|to)\s+(?:my|the)\s+d(?:ia|ie|ai)\w*\b(?!\s+of\s+(?:a|an|the)\b)"
+LFMD_START_RE = re.compile(r"(?:\w+\s+)?(?P<prep>from|for|of|through|in|to)\s+(?:my|the)\s+d(?:ia|ie|ai)\w*\b(?!\s+of\s+(?:a|an|the)\b)"
                            r"|(?:learn\w*|lesson\w*)(?:\s+\w+){0,2}\s+(?:for|of)\s+(?:today|the day)"
                            # 2060 (17 Sep 2026): he said "the learning from my diary today", whisper wrote "the learning from a diet today"
                            # 2062 (18 Sep 2026): "the learning for my diary is there" -> "the learning for my dive is there". The section
                            # was skipped, and because the near-miss guard below did not cover it either, the card reached Kevin with no
                            # Learnings clip and no warning. The same mis-hearing had already cost 1964, 2032, 2033, 2042 and 2043.
-                           r"|learn\w*\s+(?:from|for)\s+(?:a|my|the|our)\s+d(?:ia|ie|ai|iv)\w*", re.I)
+                           # 2073 (27 Sep 2026): "the learnings of my dive today", so "of" joins from/for here too.
+                           r"|learn\w*\s+(?:from|for|of)\s+(?:a|my|the|our)\s+d(?:ia|ie|ai|iv)\w*", re.I)
+# The show's own name is "day 2072 of the diary of a Runpreneur". Whisper garbles the tail ("of the diary cover on
+# printer", 2072, 27 Sep 2026), so the "of a" guard above cannot be relied on. The day number in front is what marks it.
+SHOW_NAME_DAY_RE = re.compile(r"\d,?\d{3}(?:st|nd|rd|th)?,?\s*$")
+
+
+def lfmd_start(text, before=""):
+    """The first 'Learnings from my diary' phrase in text that is not the show's name. before is the caption chunk in
+    front of text, because the day number and "of the diary" can fall in different chunks."""
+    for m in LFMD_START_RE.finditer(text):
+        if m.group("prep") and SHOW_NAME_DAY_RE.search(before + " " + text[:m.start("prep")]): continue
+        return m
+    return None
 # A near miss: "learn..." followed within four words by something that sounds like diary. When no section is found but
 # this is, the output gate refuses the card (qa.py), so a mis-heard Learnings line can never ship silently.
 DIARY_NEAR_MISS_RE = re.compile(r"\blearn\w*\W+(?:\w+\W+){0,4}(?:d(?:ia|ie|ai|iv)\w*|dairy|dire)\b(?!\s+of\s+(?:a|an|the|our)\b)", re.I)
@@ -365,7 +378,7 @@ def lfmd_window(segments, min_len=20.0, max_len=180.0):
     # speech into five-word chunks, and "the learning from | a diet today" was missed that way (2060, 17 Sep 2026).
     starts = []
     for i, (_, _, t) in enumerate(segments):
-        m = LFMD_START_RE.search(t + (" " + segments[i + 1][2] if i + 1 < len(segments) else ""))
+        m = lfmd_start(t + (" " + segments[i + 1][2] if i + 1 < len(segments) else ""), segments[i - 1][2] if i else "")
         if m and m.start() < len(t): starts.append(i)
     if not starts: return None
     i = starts[-1]
@@ -1249,6 +1262,19 @@ def selftest():
     assert lfmd_window([(0, 5, "when you dive deeper into it"), (40, 50, "stay positive")]) is None, "a dive on its own is not the section"
     assert lfmd_window([(0, 5, "I want to dive into the numbers"), (40, 50, "stay positive")]) is None
     assert not DIARY_NEAR_MISS_RE.search("we learn a lot when we all go and dive deeper into the numbers together"), "too far from learn to be the section"
+    # 2073 (27 Sep 2026): whisper wrote "the learnings of my dive today". "of" + a mis-heard diary was not covered, so no
+    # clip was cut and the output gate held the card (rightly), with every later day stuck behind it.
+    assert lfmd_window([(0, 5, "intro"), (375.36, 383.28, "So ultimately, the learnings of my dive today are that the people you spend the most time"), (400, 410, "see you tomorrow")]) == (375.36, 410.0), "2073: 'learnings of my dive'"
+    # 2072 (27 Sep 2026): the 44-second summary says "day 2072 of the diary of a Runpreneur", which whisper wrote as "of the
+    # diary cover on printer". The "of a" guard missed it, the show's name read as a Learnings line, and the summary was
+    # refused as a second episode. The day number in front of "of the diary" is what marks the show's name.
+    s2072 = [(0.0, 8.68, "So, consecutive day, 2072 of the diary cover on printer, and today's episode I talk all"),
+             (8.68, 15.44, "about an injury recovery update from having a broken foot to back running again, and what"),
+             (15.44, 20.56, "I learned and what would I do differently to expedite the recovery process."), (35, 38.96, "Stay positive, stay happy. I'll see you again tomorrow.")]
+    assert lfmd_window(s2072) is None, "2072: the show's name, mis-heard, is not a Learnings section"
+    assert lfmd_window([(0, 3, "So, consecutive day, 2072"), (3, 8, "of the diary cover on printer, and today's"), (30, 40, "see you tomorrow")]) is None, "the day number in the chunk before still marks the show's name"
+    assert lfmd_window([(0, 5, "welcome to day 2,071 of the diary cover of Prenner"), (30, 40, "see you tomorrow")]) is None, "'2,071' as whisper writes it"
+    assert lfmd_window([(0, 5, "day 2072 of the diary cover on printer, and the learnings from my diary today"), (30, 40, "see you tomorrow")]) == (0, 40), "a real Learnings line after the show's name still counts"
 
     r = lfmd_receipt("", (295.52, 403.35), points=["There are no learnings from my diary on this, which need to be added."])
     assert r.startswith("- There are no learnings from my diary on this") and "4:55 to 6:43" in r and r.count("\n") == 1, r

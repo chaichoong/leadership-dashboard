@@ -60,7 +60,7 @@ def cue_count(srt_path):
 
 def diary_phrase_in(transcript_path):
     import render
-    try: return bool(render.LFMD_START_RE.search(open(transcript_path).read()))
+    try: return bool(render.lfmd_start(open(transcript_path).read()))     # the show's name never counts (2072, 27 Sep 2026)
     except Exception: return False
 
 
