@@ -1159,7 +1159,18 @@ def receipt_stale(written, now, last_night, hours=24):
     return (now - written).total_seconds() >= hours * 3600 or bool(last_night and written < last_night <= now)
 
 
-def redo_day(day, receipt_path, why, ledger=None, state=None, root=None, today=None, last_night=None):
+def render_running():
+    """True while a content render is actually running on this Mac. A clip left "rendering" or "pulling" by a night
+    that was killed (the Mac slept, a SIGKILL) is orphaned, not in motion; nothing else resets a stale "rendering"
+    (review, 27 Sep 2026). An unreadable process table counts as running, so nothing is reset on a guess."""
+    try:
+        r = subprocess.run(["/usr/bin/pgrep", "-f", "content-engine-run.sh|content-engine/render.py"], capture_output=True, text=True, timeout=10)
+    except Exception:                                             # noqa: BLE001
+        return True
+    return r.returncode == 0
+
+
+def redo_day(day, receipt_path, why, ledger=None, state=None, root=None, today=None, last_night=None, running=None):
     """Set a sent-back day's fix in motion the way 2071 and 2072 were (Kevin, 27 Sep 2026: daily-ops works sent-back
     cards). Every clip of the day goes back to 'new' with a dated note, so the night re-renders the whole day on the
     current code and rewrites its copy; the receipt waits in RESUBMIT_DIR until resubmit-ready sends the card back
@@ -1177,18 +1188,21 @@ def redo_day(day, receipt_path, why, ledger=None, state=None, root=None, today=N
         raise SystemExit("episode %d: the receipt answers %d point(s) but Kevin made %d; one '- <his point> → <what changed>' line each"
                          % (day, len(lines), len(points)))
     dest = os.path.join(root, "%d.md" % day)
+    stale = False
     if os.path.exists(dest):
         written, now = dt.datetime.fromtimestamp(os.path.getmtime(dest)), dt.datetime.now()
         if not receipt_stale(written, now, last_nightly_finish() if last_night is None else last_night):
             raise SystemExit("episode %d: a receipt already waits (%s, written %s) and no night has run since; the fix is already in motion"
                              % (day, dest, written.strftime("%d %b %H:%M")))
-        # stale: the night had its chance and the card did not go back. Kept beside it, never deleted.
-        os.replace(dest, dest + ".stale-" + dt.datetime.now().strftime("%Y%m%d-%H%M%S"))
+        stale = True
     ledger = watch.load_ledger() if ledger is None else ledger
     mine = [k for k, v in ledger.items() if v.get("episode") == day or (v.get("day") == day and not v.get("episode"))]
     if not mine: raise SystemExit("episode %d: no clip of the day in the ledger" % day)
     busy = [k for k in mine if ledger[k].get("status") in ("pulling", "rendering")]
-    if busy: raise SystemExit("episode %d: %s mid-render; try again after the night's run" % (day, ", ".join(busy)))
+    if busy and (render_running() if running is None else running):
+        raise SystemExit("episode %d: %s mid-render; try again after the night's run" % (day, ", ".join(busy)))
+    # every refusal is behind us: only now is a stale receipt set aside (kept beside it, never deleted)
+    if stale: os.replace(dest, dest + ".stale-" + dt.datetime.now().strftime("%Y%m%d-%H%M%S"))
     note = "%s: %s" % ((today or dt.date.today()).strftime("%-d %b %Y"), why)
     for k in mine:
         e = ledger[k]

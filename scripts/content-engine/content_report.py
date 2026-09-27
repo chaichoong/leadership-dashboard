@@ -266,7 +266,7 @@ WAITING = ("new", "pulled")                   # in motion only on a day the nigh
 
 
 def stuck_sent_back(now=None, hours=24, approvals=None, ledger=None, episodes=None, redo_days=None, receipts=None,
-                    reachable=None, why_waiting=None, last_night=None):
+                    reachable=None, why_waiting=None, last_night=None, running=None):
     """Sent-back cards nobody has set a fix in motion for after `hours` (Kevin, 27 Sep 2026: daily-ops works them).
 
     2072 held every later episode for two days behind a question ("can you confirm the folder that contains the raw
@@ -293,6 +293,7 @@ def stuck_sent_back(now=None, hours=24, approvals=None, ledger=None, episodes=No
                     receipts[int(n[:-3])] = dt.datetime.fromtimestamp(os.path.getmtime(os.path.join(render.RESUBMIT_DIR, n)))
         except OSError: pass
     if last_night is None: last_night = render.last_nightly_finish()
+    if running is None: running = render.render_running()      # a "rendering" clip with no render running is orphaned
     if reachable is None:
         reachable = set(watch.plan(ledger, 10 ** 6)[0])
     out = []
@@ -305,13 +306,15 @@ def stuck_sent_back(now=None, hours=24, approvals=None, ledger=None, episodes=No
         waited = (now - since).total_seconds() / 3600 if since else None
         if waited is not None and waited < hours: continue
         mine = {k: v for k, v in ledger.items() if v.get("episode") == day or (v.get("day") == day and not v.get("episode"))}
-        if any(v.get("status") in RENDERING for v in mine.values()) or day in redo_days: continue
+        if (running and any(v.get("status") in RENDERING for v in mine.values())) or day in redo_days: continue
         if any(v.get("status") in WAITING and v.get("day") in reachable for v in mine.values()): continue
         written = receipts.get(day)
         if written is not None and not render.receipt_stale(written, now, last_night, hours): continue
         if written is not None:
             why = "a receipt has waited %d h and the card has not gone back after the night had its chance" % round((now - written).total_seconds() / 3600)
             if why_waiting: why += ": " + why_waiting(day)
+        elif any(v.get("status") in RENDERING for v in mine.values()):
+            why = "a clip was left mid-render by a night that did not finish, and no render is running"
         elif any(v.get("status") in WAITING for v in mine.values()):
             why = "clips wait to render, but the night never reaches day %d (a catch-up day while gap days are paused, or no room on disk)" % day
         else:
