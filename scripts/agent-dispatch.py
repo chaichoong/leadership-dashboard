@@ -6582,38 +6582,83 @@ def cmd_blockers(args):
 # it owed. Written by the runner, never by the agent, so a run cannot excuse
 # itself (27 Sep 2026).
 HANDBACK_ONLY_MARK = "handback-only"
+# What the agent's self-check saw failed or parked. The control alarms on any of
+# them missing from the final report: a failure is a result, never a draft error
+# to delete (review, 27 Sep 2026).
+SELFCHECK_FILE = "selfcheck.json"
 
 
-def silent_run_problem(report, queue=None, handback_only=False):
-    """The rule verify exists for, or '': work existed and the run attempted none.
+def _utc(ts):
+    try:
+        t = datetime.fromisoformat(str(ts or "").replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    return t if t.tzinfo else t.replace(tzinfo=timezone.utc)
+
+
+def owed_ids(queue, handback_only=False):
+    """The worklist ids a run owed: all of them, or in a hand-back-only run all
+    but plain new work (a sign-in reopened item is owed whatever its kind)."""
+    return [w.get("id") for w in (queue.get("worklist") or [])
+            if w.get("id") and (not handback_only or w.get("kind") != "new"
+                                or w.get("signinReopened"))]
+
+
+def silent_run_problem(report, queue=None, handback_only=False, rested=(), known_parked=()):
+    """The rule verify exists for, or '': work existed and the run did none.
 
     27 Sep 2026: seven "ZERO completed actions" alerts in one afternoon, every one
     a hand-back poll that rightly left new work for the slots (its worklist counts
-    new work too) or tried a carry-out that met its wall. A run that tried and
-    failed is not silent: each failure alarms on its own line. In a hand-back-only
-    run the eligible work is counted from the queue it was handed, never from what
-    the run says it ignored."""
+    new work too) or tried a carry-out that met its wall. Counted from the
+    queue.json the run was handed, never from what the run says it ignored.
+
+    A task resting on its wall (`rested`) or parked and already alerted
+    (`known_parked`, whether or not this run lists it again: it needs Kevin, not
+    the agent) is not owed, and neither ever counts as the run's work: only
+    a completed action, a failure that alarms, or a new parked flag on an owed
+    task does, and an action on a task outside the worklist counts for nothing
+    (review, 27 Sep 2026). A run that did some of its work and left the rest for
+    the next tick is not silent: counting per task alarmed on 33 of 34 real runs.
+    With no queue.json the old rule stands."""
+    if isinstance(queue, dict):
+        actions = report.get("actions") or []
+        parked = {p.get("id") for p in (report.get("parkedFlags") or [])}
+        excused = set(rested) | set(known_parked)
+        owed = [i for i in owed_ids(queue, handback_only) if i not in excused]
+        real = ({a.get("task") for a in actions if a.get("ok")}
+                | {a.get("task") for a in actions if not a.get("ok") and a.get("task") not in excused}
+                | (parked - excused))
+        if owed and not (real & set(owed)):
+            return (f"{len(owed)} eligible tasks and ZERO attempted: "
+                    f"{', '.join(owed[:8])}")
+        return ""
     counts = report.get("queueCounts") or {}
     try:
         eligible = int(counts.get("worklist", 0) or 0)
     except (TypeError, ValueError):
         eligible = 0
-    if handback_only and isinstance(queue, dict):
-        eligible = sum(1 for w in (queue.get("worklist") or [])
-                       if w.get("kind") != "new" or w.get("signinReopened"))
-    attempted = list(report.get("actions") or []) + list(report.get("parkedFlags") or [])
-    if eligible > 0 and not attempted:
-        return f"{eligible} eligible tasks and ZERO actions attempted"
+    if eligible > 0 and not any(a.get("ok") for a in (report.get("actions") or [])):
+        return f"{eligible} eligible tasks and ZERO completed actions"
     return ""
 
 
-def rested_on_wall(live, last_event):
-    """True when a failed action's task carries an open BLOCKER in its live Notes
-    and the ledger shows it parked: the wall is on record, the task rests, and the
-    blocker loop owns it (the Estate "Robots blocked" row, the fix routed to its
-    owner). Alarming again every time it wakes to re-check the same wall trains
-    Kevin to ignore the alarm channel (27 Sep 2026: the Meta dispute task)."""
-    return bool(task_blocker(live.get("notes"))) and bool(last_event) and last_event[0] == "parked"
+def rested_on_wall(live, last_event, started_at, now=None):
+    """True when a failed action met a wall the blocker loop already owns (the
+    Estate "Robots blocked" row, the fix routed to its owner), so alarming again
+    each time the task wakes to re-check it only trains Kevin to ignore the alarm
+    channel (27 Sep 2026: the Meta dispute task). Both must hold (review, 27 Sep
+    2026): the open BLOCKER was on record BEFORE this run started, so a wall met
+    for the first time still alarms once; and the task rests on it NOW (parked
+    within IDLE_HOURS), so a week-old wall never excuses today's unrelated
+    failure."""
+    b = task_blocker(live.get("notes"))
+    if not b or not last_event or last_event[0] != "parked":
+        return False
+    since, parked, start = _utc(b.get("since")), _utc(last_event[1]), _utc(started_at)
+    if not (since and parked and start):
+        return False
+    now = now or datetime.now(timezone.utc)
+    return since < start and now - parked < timedelta(hours=IDLE_HOURS)
 
 
 def cmd_verify(args):
@@ -6625,7 +6670,7 @@ def cmd_verify(args):
               file=sys.stderr)
         sys.exit(1)
     # --dry-run is the agent's own self-check during a run: the same checks, no
-    # state written, and nothing wraps it, so a draft report that the agent then
+    # alarm state written (only what it saw, for the control), and nothing wraps it, so a draft report that the agent then
     # corrects never reaches the alarm channel. The runner's wrapped call on the
     # final report is the one that counts (27 Sep 2026: five of twelve alerts were
     # drafts the agent fixed a minute later).
@@ -6633,14 +6678,19 @@ def cmd_verify(args):
     rundir = os.path.dirname(os.path.abspath(args.report))
     handback_only = os.path.exists(os.path.join(rundir, HANDBACK_ONLY_MARK))
     queue = None
-    if handback_only:
-        try:
-            with open(os.path.join(rundir, "queue.json")) as fh:
-                queue = json.load(fh)
-        except Exception as e:                            # noqa: BLE001
-            print(f"ERROR: hand-back run's queue.json unreadable ({e}) — "
-                  "its eligible work cannot be counted", file=sys.stderr)
-            sys.exit(1)
+    try:
+        with open(os.path.join(rundir, "queue.json")) as fh:
+            queue = json.load(fh)
+    except FileNotFoundError:
+        queue = None      # the counts rule below stands in; a hand-back run may not lack it
+    except Exception as e:                                # noqa: BLE001
+        print(f"ERROR: the run's queue.json is unreadable ({e}) — its owed work "
+              "cannot be counted", file=sys.stderr)
+        sys.exit(1)
+    if handback_only and queue is None:
+        print("ERROR: hand-back run has no queue.json — its owed work cannot be "
+              "counted", file=sys.stderr)
+        sys.exit(1)
 
     problems = []
     counts = report.get("queueCounts", {})
@@ -6655,10 +6705,6 @@ def cmd_verify(args):
         problems.append("queueCounts is missing or empty — the queue read "
                         "failed and the run was blind")
 
-    # The rule this control exists for: work existed and the run did none.
-    silent = silent_run_problem(report, queue, handback_only)
-    if silent:
-        problems.append(silent)
     rested = []
     ledger = ledger_last_events() if failed else {}
     for a in failed:
@@ -6666,13 +6712,55 @@ def cmd_verify(args):
             live = task_view(get_task(a.get("task")))
         except Exception:                                 # noqa: BLE001
             live = None       # unreadable: it cannot be excused, so it alarms below
-        if live and rested_on_wall(live, ledger.get(a.get("task"))):
+        if live and rested_on_wall(live, ledger.get(a.get("task")), report.get("startedAt")):
             rested.append(a.get("task"))
             print(f"INFO: {a.get('task')} met its recorded wall again and rests "
                   f"on it — {str(a.get('error'))[:120]}", file=sys.stderr)
             continue
         problems.append(f"action failed: {a.get('kind')} {a.get('task')} — "
                         f"{str(a.get('error'))[:120]}")
+
+    # The rule this control exists for: work existed and the run did none. Read
+    # after the walls, because a task resting on one is not owed; and against the
+    # parked tasks already alerted before this run, which are not owed either.
+    try:
+        with open(os.path.join(STATE_DIR, "tier1-alerted.json")) as fh:
+            known_parked = set(json.load(fh))
+    except Exception:                                     # noqa: BLE001
+        known_parked = set()      # none known: every parked flag counts as new work
+    silent = silent_run_problem(report, queue, handback_only, rested, known_parked)
+    if silent:
+        problems.append(silent)
+
+    # The self-check records what it saw failed or parked; the control alarms on
+    # any of it missing from the final report. Deleting a failure is the one
+    # "fix" a dry run could otherwise teach (review, 27 Sep 2026).
+    seen_path = os.path.join(rundir, SELFCHECK_FILE)
+    final_ids = ({a.get("task") for a in actions}
+                 | {p.get("id") for p in (report.get("parkedFlags") or [])})
+    try:
+        with open(seen_path) as fh:
+            seen = set(json.load(fh))
+    except FileNotFoundError:
+        seen = set()
+    except Exception as e:                                # noqa: BLE001
+        problems.append(f"self-check record unreadable ({e}) — cannot tell "
+                        "whether a failure was removed from the report")
+        seen = set()
+    if dry_run:
+        now_seen = seen | {a.get("task") for a in failed} | {
+            p.get("id") for p in (report.get("parkedFlags") or [])}
+        tmp = seen_path + ".tmp"
+        with open(tmp, "w") as fh:
+            json.dump(sorted(i for i in now_seen if i), fh)
+        os.replace(tmp, seen_path)
+    else:
+        vanished = sorted(i for i in seen - final_ids if i)
+        if vanished:
+            problems.append(
+                "removed from the report after the self-check saw them failed "
+                f"or parked: {', '.join(vanished)} — a failure or a parked task "
+                "is a result, never a draft error to delete")
 
     # A register roster the queue could not read must never stay a stderr
     # whisper: role agents silently stop receiving routed work and lessons.
@@ -8753,7 +8841,7 @@ def main():
     v = sub.add_parser("verify")
     v.add_argument("--report", required=True)
     v.add_argument("--dry-run", action="store_true",
-                   help="the agent's own self-check: same checks, no state written, "
+                   help="the agent's own self-check: same checks, no alarm state written, "
                         "never wrapped; the runner's wrapped call is the control")
 
     rc = sub.add_parser("reconcile",
