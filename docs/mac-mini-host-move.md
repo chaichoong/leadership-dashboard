@@ -136,9 +136,20 @@ survive the copy, and `session-keepalive` will raise a sign-in task for any you 
 
 ## After the move
 
-- **The Air is now a satellite.** Interactive Claude sessions there are fine. Never run
-  `install-slot-jobs.sh` or `resume` on it.
-- **The Air keeps an old copy of `~/knowledge-os`.** Do not run anything that writes to the brain from the
-  Air until we decide how the Air reaches the mini's copy.
+Kevin's rules for the Air, 27 Sep 2026. They replace the earlier "interactive Claude sessions there are fine".
+
+- **Sessions run on the mini. The Air is only a window onto them.** Claude memory, skills and the private
+  project folders live separately on each Mac and do not sync, so a session on the Air forks them. Never
+  run `install-slot-jobs.sh` or `resume` on the Air.
+- **The Air's `~/knowledge-os` is a stale copy from 27 Sep.** Nothing on the Air may write to it. It is
+  renamed to `~/knowledge-os.air-stale` so an accidental write fails loudly instead of forking. Many
+  scripts create the folder again if it is missing (`mkdir -p`, `os.makedirs`), so a rename on its own
+  does not make every write fail.
+- **Cloud tools are safe on the Air directly:** Gmail, Airtable, Slack, Drive, the OD web app.
+- **Reaching the mini from outside:** only over a VPN. Never port-forward Screen Sharing.
+- **Power cuts:** FileVault is on with no automatic login. After a power cut the mini waits at the unlock
+  screen, runs no jobs and cannot be reached remotely until someone types the password on it. The UPS
+  covers short cuts only. "Start up automatically after a power failure" gets it as far as that screen.
 - **UPS:** the Office unit powers the mini with its USB data cable **not** connected. A UPS-triggered
-  shutdown can leave the mini off when power returns; without the cable, it restarts on its own.
+  shutdown can leave the mini off when power returns; without the cable, it restarts on its own (to the
+  unlock screen, above).
