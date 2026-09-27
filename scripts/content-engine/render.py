@@ -1135,7 +1135,31 @@ def receipt_lines(text):
     return mod.receipt_lines(text)
 
 
-def redo_day(day, receipt_path, why, ledger=None, state=None, root=None, today=None):
+def last_nightly_finish(path=None):
+    """When the nightly content run last finished, in local time, from run-job.sh's status log; None if unknown."""
+    path = path or os.path.expanduser("~/knowledge-os/logs/job-status.jsonl")
+    last = None
+    try:
+        with open(path) as fh:
+            for line in fh:
+                if '"content-engine"' not in line: continue
+                try: r = json.loads(line)
+                except ValueError: continue
+                if r.get("job") == "content-engine": last = r.get("ts")
+    except OSError:
+        return None
+    try: return dt.datetime.fromisoformat(str(last).replace("Z", "+00:00")).astimezone().replace(tzinfo=None) if last else None
+    except ValueError: return None
+
+
+def receipt_stale(written, now, last_night, hours=24):
+    """A waiting receipt is stale once a nightly run has finished after it was written (the night had its chance and
+    the card did not go back), or after `hours` whatever the log says. A plain 24 h cut-off against a check that runs
+    once a day at 07:05 cost a whole extra day for a receipt written at 07:20 (review, 27 Sep 2026)."""
+    return (now - written).total_seconds() >= hours * 3600 or bool(last_night and written < last_night <= now)
+
+
+def redo_day(day, receipt_path, why, ledger=None, state=None, root=None, today=None, last_night=None):
     """Set a sent-back day's fix in motion the way 2071 and 2072 were (Kevin, 27 Sep 2026: daily-ops works sent-back
     cards). Every clip of the day goes back to 'new' with a dated note, so the night re-renders the whole day on the
     current code and rewrites its copy; the receipt waits in RESUBMIT_DIR until resubmit-ready sends the card back
@@ -1154,8 +1178,10 @@ def redo_day(day, receipt_path, why, ledger=None, state=None, root=None, today=N
                          % (day, len(lines), len(points)))
     dest = os.path.join(root, "%d.md" % day)
     if os.path.exists(dest):
-        age = (dt.datetime.now().timestamp() - os.path.getmtime(dest)) / 3600
-        if age < 24: raise SystemExit("episode %d: a receipt already waits (%s, %.0f h old); the fix is already in motion" % (day, dest, age))
+        written, now = dt.datetime.fromtimestamp(os.path.getmtime(dest)), dt.datetime.now()
+        if not receipt_stale(written, now, last_nightly_finish() if last_night is None else last_night):
+            raise SystemExit("episode %d: a receipt already waits (%s, written %s) and no night has run since; the fix is already in motion"
+                             % (day, dest, written.strftime("%d %b %H:%M")))
         # stale: the night had its chance and the card did not go back. Kept beside it, never deleted.
         os.replace(dest, dest + ".stale-" + dt.datetime.now().strftime("%Y%m%d-%H%M%S"))
     ledger = watch.load_ledger() if ledger is None else ledger

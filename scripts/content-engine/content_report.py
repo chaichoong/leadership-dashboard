@@ -266,15 +266,16 @@ WAITING = ("new", "pulled")                   # in motion only on a day the nigh
 
 
 def stuck_sent_back(now=None, hours=24, approvals=None, ledger=None, episodes=None, redo_days=None, receipts=None,
-                    reachable=None, why_waiting=None):
+                    reachable=None, why_waiting=None, last_night=None):
     """Sent-back cards nobody has set a fix in motion for after `hours` (Kevin, 27 Sep 2026: daily-ops works them).
 
     2072 held every later episode for two days behind a question ("can you confirm the folder that contains the raw
     footage") that only a Claude session could answer, and none looked. In motion means: a clip of the day rendering
     now; a clip waiting to render on a day the night planner will reach (a paused catch-up day never is); the day on
-    the Learnings rebuild list; or a receipt waiting to go back with the card for under `hours` (review, 27 Sep 2026:
-    a receipt whose re-render failed again, or whose card the gate refused, would otherwise hide the card for good, the
-    same ownerless stall). `receipts` maps day -> the receipt's age in hours. A rejected card is his no, not a job, and
+    the Learnings rebuild list; or a receipt waiting to go back with the card that no night has had its chance at yet
+    (render.receipt_stale; review, 27 Sep 2026: a receipt whose re-render failed again, or whose card the gate refused,
+    would otherwise hide the card for good, the same ownerless stall). `receipts` maps day -> when it was written. A
+    waiting clip counts on its OWN recording day, the one the planner schedules: 2194's clips were recorded on 2195. A rejected card is his no, not a job, and
     a day already on YouTube holds nothing."""
     import render
     now = now or dt.datetime.now()
@@ -289,9 +290,9 @@ def stuck_sent_back(now=None, hours=24, approvals=None, ledger=None, episodes=No
         try:
             for n in os.listdir(render.RESUBMIT_DIR):
                 if re.match(r"^\d+\.md$", n):
-                    age = now - dt.datetime.fromtimestamp(os.path.getmtime(os.path.join(render.RESUBMIT_DIR, n)))
-                    receipts[int(n[:-3])] = age.total_seconds() / 3600
+                    receipts[int(n[:-3])] = dt.datetime.fromtimestamp(os.path.getmtime(os.path.join(render.RESUBMIT_DIR, n)))
         except OSError: pass
+    if last_night is None: last_night = render.last_nightly_finish()
     if reachable is None:
         reachable = set(watch.plan(ledger, 10 ** 6)[0])
     out = []
@@ -305,11 +306,11 @@ def stuck_sent_back(now=None, hours=24, approvals=None, ledger=None, episodes=No
         if waited is not None and waited < hours: continue
         mine = {k: v for k, v in ledger.items() if v.get("episode") == day or (v.get("day") == day and not v.get("episode"))}
         if any(v.get("status") in RENDERING for v in mine.values()) or day in redo_days: continue
-        if any(v.get("status") in WAITING for v in mine.values()) and day in reachable: continue
-        age = receipts.get(day)
-        if age is not None and age < hours: continue
-        if age is not None:
-            why = "a receipt has waited %d h and the card has not gone back" % round(age)
+        if any(v.get("status") in WAITING and v.get("day") in reachable for v in mine.values()): continue
+        written = receipts.get(day)
+        if written is not None and not render.receipt_stale(written, now, last_night, hours): continue
+        if written is not None:
+            why = "a receipt has waited %d h and the card has not gone back after the night had its chance" % round((now - written).total_seconds() / 3600)
             if why_waiting: why += ": " + why_waiting(day)
         elif any(v.get("status") in WAITING for v in mine.values()):
             why = "clips wait to render, but the night never reaches day %d (a catch-up day while gap days are paused, or no room on disk)" % day
