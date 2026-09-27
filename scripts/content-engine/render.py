@@ -323,24 +323,27 @@ def title_from_transcript(text):
 # the loose first alternative, because "dive" and "diet" are ordinary words he uses: this very episode says "when you
 # dive deeper into it". Measured 18 Sep 2026 over all 295 stored transcripts: adding "iv" gains exactly 10 matches
 # and every one is a real Learnings line ("learnings from my dive", "learning from a diver"). Zero false positives.
-LFMD_START_RE = re.compile(r"(?:\w+\s+)?(?P<prep>from|for|of|through|in|to)\s+(?:my|the)\s+d(?:ia|ie|ai)\w*\b(?!\s+of\s+(?:a|an|the)\b)"
+LFMD_START_RE = re.compile(r"(?:\w+\s+)?(?P<prep>from|for|of|through|in|to)\s+(?P<det>my|the)\s+d(?:ia|ie|ai)\w*\b(?!\s+of\s+(?:a|an|the)\b)"
                            r"|(?:learn\w*|lesson\w*)(?:\s+\w+){0,2}\s+(?:for|of)\s+(?:today|the day)"
                            # 2060 (17 Sep 2026): he said "the learning from my diary today", whisper wrote "the learning from a diet today"
                            # 2062 (18 Sep 2026): "the learning for my diary is there" -> "the learning for my dive is there". The section
                            # was skipped, and because the near-miss guard below did not cover it either, the card reached Kevin with no
                            # Learnings clip and no warning. The same mis-hearing had already cost 1964, 2032, 2033, 2042 and 2043.
-                           # 2073 (27 Sep 2026): "the learnings of my dive today", so "of" joins from/for here too.
-                           r"|learn\w*\s+(?:from|for|of)\s+(?:a|my|the|our)\s+d(?:ia|ie|ai|iv)\w*", re.I)
+                           # 2073 (27 Sep 2026): "the learnings of my dive today". "of" takes my/the/our only: "learned of a diver" is not it.
+                           r"|learn\w*\s+(?:(?:from|for)\s+(?:a|my|the|our)|of\s+(?:my|the|our))\s+d(?:ia|ie|ai|iv)\w*\b(?!\s+of\s+(?:a|an|the)\b)", re.I)
 # The show's own name is "day 2072 of the diary of a Runpreneur". Whisper garbles the tail ("of the diary cover on
-# printer", 2072, 27 Sep 2026), so the "of a" guard above cannot be relied on. The day number in front is what marks it.
-SHOW_NAME_DAY_RE = re.compile(r"\d,?\d{3}(?:st|nd|rd|th)?,?\s*$")
+# printer", 2072, 27 Sep 2026), so the "of a" guard above cannot be relied on. "of the diary" straight after a day
+# number (2072, 2,072, 2072th, then any commas, full stops, ellipses or dashes) is what marks it. "of MY diary" or
+# "FROM the diary" is never the show's name, so "the learnings from day 2073 of my diary" still counts (review, 27 Sep 2026).
+SHOW_NAME_DAY_RE = re.compile(r"\d,?\d{3}(?:st|nd|rd|th)?[\s.,;:…–—-]*$")
 
 
 def lfmd_start(text, before=""):
     """The first 'Learnings from my diary' phrase in text that is not the show's name. before is the caption chunk in
     front of text, because the day number and "of the diary" can fall in different chunks."""
     for m in LFMD_START_RE.finditer(text):
-        if m.group("prep") and SHOW_NAME_DAY_RE.search(before + " " + text[:m.start("prep")]): continue
+        show = (m.group("prep") or "").lower() == "of" and (m.group("det") or "").lower() == "the"
+        if show and SHOW_NAME_DAY_RE.search(before + " " + text[:m.start("prep")]): continue
         return m
     return None
 # A near miss: "learn..." followed within four words by something that sounds like diary. When no section is found but
@@ -1275,6 +1278,17 @@ def selftest():
     assert lfmd_window([(0, 3, "So, consecutive day, 2072"), (3, 8, "of the diary cover on printer, and today's"), (30, 40, "see you tomorrow")]) is None, "the day number in the chunk before still marks the show's name"
     assert lfmd_window([(0, 5, "welcome to day 2,071 of the diary cover of Prenner"), (30, 40, "see you tomorrow")]) is None, "'2,071' as whisper writes it"
     assert lfmd_window([(0, 5, "day 2072 of the diary cover on printer, and the learnings from my diary today"), (30, 40, "see you tomorrow")]) == (0, 40), "a real Learnings line after the show's name still counts"
+    # review, 27 Sep 2026: a number before "of MY diary" is a real line; a full stop or dash after the day number is still the show
+    assert lfmd_window([(0, 5, "So the learnings from day 2073 of my diary are that"), (30, 40, "see you tomorrow")]) == (0, 40), "'day 2073 of my diary' is a Learnings line"
+    assert lfmd_window([(0, 5, "the learnings for day 2073"), (5, 9, "in my diary today are"), (30, 40, "see you tomorrow")]) == (5, 40), "a number in the chunk before 'in my diary'"
+    assert lfmd_window([(0, 4, "So, consecutive day 2072."), (4, 8, "Of the diary cover on printer, and today's"), (30, 40, "see you tomorrow")]) is None, "a full stop after the day number"
+    assert lfmd_window([(0, 5, "consecutive day 2072 - of the diary cover on printer"), (30, 40, "see you tomorrow")]) is None, "a dash after the day number"
+    assert lfmd_window([(0, 5, "I learned of a diver who ran it barefoot"), (30, 40, "see you tomorrow")]) is None, "'learned of a diver' is not the section"
+    assert lfmd_window([(0, 5, "So, consecutive day 2072... of the diary cover on printer"), (30, 40, "see you tomorrow")]) is None, "an ellipsis after the day number"
+    assert lfmd_window([(0, 5, "consecutive day 2072 — of the diary cover on printer"), (30, 40, "see you tomorrow")]) is None, "a long dash after the day number"
+    assert lfmd_window([(0, 5, "these are the learnings of the diary of a Runpreneur"), (30, 40, "see you tomorrow")]) is None, "the 'of' route keeps the 'of a' guard"
+    assert lfmd_window([(0, 5, "the learnings for day 2073 from the diary are"), (30, 40, "see you tomorrow")]) == (0, 40), "'from the diary' after a number still counts"
+    assert lfmd_window([(0, 5, "I started in 2019. From the diary today, rest more"), (30, 40, "see you tomorrow")]) == (0, 40), "a year, then 'From the diary'"
 
     r = lfmd_receipt("", (295.52, 403.35), points=["There are no learnings from my diary on this, which need to be added."])
     assert r.startswith("- There are no learnings from my diary on this") and "4:55 to 6:43" in r and r.count("\n") == 1, r
