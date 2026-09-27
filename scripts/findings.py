@@ -192,6 +192,87 @@ def dedupe_key(routine, title, where):
     return "|".join(norm(v) for v in (routine, title, where))
 
 
+# ─── WHEN ONE DEFECT IS FILED SIX TIMES (finding 639, 27 Sep 2026) ───
+#
+# `dedupe_key` above keys on routine + title + where, so it only catches the
+# SAME routine reporting the SAME defect in near-identical words. It did not
+# catch this:
+#
+#   554 task-manager-board  "submit gate rejects CLOSE PROPOSAL on OD post cards"
+#   598 task-manager-board  "od_picture_problem blocks closing a stale CONTENT (OD) card"
+#   614 task-manager-board  "OD post-card gate blocks a CLOSE PROPOSAL, not just a POST"
+#   633 task-manager-board  "Gate cleanse cannot close a stale OD content card ..."
+#   634 task-manager-board  "od_picture_problem gate blocks CLOSE PROPOSAL submissions ..."
+#   636 task-manager-board  "submit refuses a CLOSE PROPOSAL on an OD content card ..."
+#   639 daily-ops-phase2    "... has been filed SIX times since 19 Sep and never fixed"
+#
+# One bug, one agreed one-line fix, seven ids across two routines and nineteen
+# days. The queue got WIDER instead of LOUDER, which is the opposite of what a
+# recurring defect should do: seven low-severity findings look like seven small
+# things, and the one thing they actually are never rose up the list.
+#
+# WHAT THIS CAN AND CANNOT DO, honestly. Two of those seven name the symbol
+# `od_picture_problem` in `where`; the rest describe it in prose ("the OD-post
+# picture-link check", "the image-link guard"). No textual rule matches prose to
+# a symbol, and pretending otherwise would be worse than the gap. So there are
+# two mechanisms, and only the first merges anything:
+#
+#   1. SAME FILE AND SAME SYMBOL → a recurrence on the existing finding. A
+#      symbol is specific enough that two findings naming both the same file
+#      and the same function are about the same code.
+#   2. SAME FILE ALONE → NOT merged, because one file holds many defects
+#      (agent-dispatch.py has six unrelated open findings against it today).
+#      Instead the new finding records the open ids that already name that
+#      file, and `list` prints them. The fixer reading the queue then sees
+#      "also open on this file: 598, 614, 633" at the point of decision.
+#
+# Matching on the file alone would have folded finding 615 (a slowdown budget)
+# into finding 623 (the duplicate gate) purely because both name
+# agent-dispatch.py. That is why rule 2 reports rather than merges.
+
+CODE_PATH_RE = re.compile(
+    r"\b([\w./-]+\.(?:py|js|mjs|cjs|ts|html|css|sh|json|yml|yaml|toml))\b")
+# A symbol worth matching on: snake_case or camelCase, at least two parts, so
+# bare English words ("submit", "gate", "close") never key anything. Those are
+# exactly the words the prose findings used, and they are not specific enough.
+SYMBOL_RE = re.compile(r"\b(?:[a-z]+(?:_[a-z0-9]+)+|[a-z]+[A-Z][A-Za-z0-9]*)\b")
+
+
+def code_paths(where):
+    """Every file path named in a finding's `where`, lowercased."""
+    return {m.group(1).lower() for m in CODE_PATH_RE.finditer(where or "")}
+
+
+def code_symbols(where):
+    """Multi-part identifiers named in `where`, minus the file paths themselves."""
+    text = CODE_PATH_RE.sub(" ", where or "")
+    return {m.group(0) for m in SYMBOL_RE.finditer(text)}
+
+
+def same_code_target(a_where, b_where):
+    """True when two findings name the same file AND the same symbol in it."""
+    pa, pb = code_paths(a_where), code_paths(b_where)
+    if not pa or not (pa & pb):
+        return False
+    sa, sb = code_symbols(a_where), code_symbols(b_where)
+    return bool(sa and (sa & sb))
+
+
+def open_sharing_file(state, where, exclude_id=None):
+    """Open findings that name at least one of the same files. Reported, never
+    merged — see rule 2 above."""
+    mine = code_paths(where)
+    if not mine:
+        return []
+    out = []
+    for r in state.values():
+        if r.get("status") not in OPEN_STATES or r.get("id") == exclude_id:
+            continue
+        if code_paths(r.get("where")) & mine:
+            out.append(r["id"])
+    return sorted(out)
+
+
 def open_findings_for(state, routine):
     return [r for r in state.values()
             if r.get("routine") == routine and r.get("status") in OPEN_STATES]
@@ -246,6 +327,24 @@ def cmd_add(a):
               % (r["id"], r.get("seen", 1) + 1), file=sys.stderr)
         return 0
 
+    # 1b. Same FILE and same SYMBOL, whatever the routine or the wording. See
+    #     the block above open_findings_for for why this is narrower than "same
+    #     file" and why it has to be.
+    for r in state.values():
+        if r.get("status") not in OPEN_STATES:
+            continue
+        if not same_code_target(a.where, r.get("where")):
+            continue
+        append({"op": "recur", "id": r["id"], "ts": iso(),
+                "severity": a.severity, "note": a.detail})
+        print(r["id"])
+        print("RECURRENCE of %s (seen %d times) — same code target (%s). "
+              "No duplicate filed."
+              % (r["id"], r.get("seen", 1) + 1,
+                 ", ".join(sorted(code_paths(a.where) & code_paths(r.get("where"))))),
+              file=sys.stderr)
+        return 0
+
     # 2. Cap the routine's own open queue. Critical and high are never refused.
     if a.severity not in ALWAYS_ACCEPT:
         mine = open_findings_for(state, a.routine)
@@ -268,12 +367,22 @@ def cmd_add(a):
             return 2
 
     fid = next_id(a.routine)
-    append({
+    rec = {
         "op": "add", "id": fid, "ts": iso(), "routine": a.routine,
         "severity": a.severity, "title": a.title, "where": a.where,
         "detail": a.detail, "proposed_fix": a.fix, "touches_code": a.touches_code,
-    })
+    }
+    # Rule 2: not the same defect, but the same file. Carried on the record so
+    # the fixer sees the cluster in `list` instead of meeting six ids one at a
+    # time and treating each as a small separate thing.
+    neighbours = open_sharing_file(state, a.where, exclude_id=fid)
+    if neighbours:
+        rec["same_file_as"] = neighbours
+    append(rec)
     print(fid)
+    if neighbours:
+        print("NOTE: %d open finding(s) already name this file: %s"
+              % (len(neighbours), ", ".join(neighbours)), file=sys.stderr)
     return 0
 
 
@@ -297,6 +406,13 @@ def cmd_list(a):
                                       r["routine"], r["title"]))
         if r.get("where"):
             print("         where: %s" % r["where"])
+        if r.get("seen", 1) > 1:
+            print("         SEEN %d TIMES (last %s) — recurring, not new"
+                  % (r["seen"], r.get("last_seen") or "?"))
+        still_open = [i for i in (r.get("same_file_as") or [])
+                      if (state.get(i) or {}).get("status") in OPEN_STATES]
+        if still_open:
+            print("         also open on this file: %s" % ", ".join(still_open))
         if r.get("proposed_fix"):
             print("         fix:   %s" % r["proposed_fix"])
     return 0

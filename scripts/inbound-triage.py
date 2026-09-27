@@ -2033,11 +2033,14 @@ def selftest():
                 r.get("reason") == "scan-did-not-complete" for r in _rows))
             check("the optimistic line is kept, never rewritten", len(_rows) == 2)
             check("one corrected slot alone does not escalate", rc == 0)
-            # A slot whose scan DID complete must be left exactly as it is.
+            # A slot whose scan DID complete AND which decided something must be
+            # left exactly as it is. The digest line is what makes it a working
+            # slot rather than the 26 Sep 17:00 one below (finding 637).
             cmd_slot_record("17:00", "email", True, "ok", path=_f)
             write_state({"last_scan_ok_ms": _start + 60_000})
+            digest_append({"id": "m-worked", "do": "archive"})
             rc2 = cmd_slot_verify("17:00", "email", _start, path=_f)
-            check("a slot with a completed scan is left alone",
+            check("a slot with a completed scan AND decisions is left alone",
                   len(read_slot_results(_f)) == 3 and rc2 == 0)
             # And with no stamp at all — a machine that has never scanned — the
             # verdict is broken, not silently confirmed.
@@ -2060,8 +2063,55 @@ def selftest():
             cmd_slot_record("17:00", "email", True, "ok", path=_f)
             write_state({"last_scan_ok_ms": _start + 60_000})
             cmd_slot_verify("17:00", "email", _start, path=_f, agent_rc=0)
-            check("rc 0 with a completed scan is still left alone",
+            check("rc 0 with a completed scan and decisions is still left alone",
                   collapse_slots(read_slot_results(_f))[-1]["ok"] is True)
+
+            # ── SCANNED BUT DECIDED NOTHING (finding 637, 26 Sep 2026) ──
+            # The pure verdict first, so the rule is testable without a disk.
+            check("no decisions and an unmoved watermark is no work at all",
+                  slot_did_work(_start, 0, _start - 1) == "none")
+            check("one decision is work",
+                  slot_did_work(_start, 1, _start - 1) == "worked")
+            check("an advanced watermark is work even with no digest line",
+                  slot_did_work(_start, 0, _start + 1) == "worked")
+            check("no slot start cannot be measured, and says so",
+                  slot_did_work(0, 0, _start) == "unknown")
+            check("an unreadable digest cannot be measured, and says so",
+                  slot_did_work(_start, None, _start - 1) == "unknown")
+            check("digest_lines_since with no slot start returns None, never 0",
+                  digest_lines_since(0) is None)
+            check("digest_lines_since counts the lines written in the window",
+                  digest_lines_since(_start) >= 1)
+
+            # Now end to end, against the real 26 Sep 17:00 shape: a scan that
+            # completed AFTER the slot began, rc 0, and a watermark still
+            # sitting at the morning's value.
+            _d2 = Path(_d) / "empty-digest"
+            _d2.mkdir()
+            os.environ["INBOUND_TRIAGE_DIR"] = str(_d2)
+            _f2 = _d2 / "slot-results.jsonl"
+            cmd_slot_record("17:00", "email", True, "ok", path=_f2)
+            write_state({"last_scan_ok_ms": _start + 60_000,
+                         "watermark_ms": _start - 8 * 3600 * 1000})
+            cmd_slot_verify("17:00", "email", _start, path=_f2, agent_rc=0)
+            _last = collapse_slots(read_slot_results(_f2))[-1]
+            check("a slot that scanned and decided nothing is graded broken",
+                  _last["ok"] is False)
+            check("and the correction names what it measured",
+                  "scanned-but-decided-nothing" in (_last.get("reason") or ""))
+            # Back-test: restore the old rule (scan stamp alone) and the same
+            # slot reads clean — which is exactly how 26 Sep 17:00 shipped.
+            check("under the OLD scan-stamp-only rule this same slot passed",
+                  bool(read_state().get("last_scan_ok_ms") >= _start))
+            # A slot in the SAME empty-digest directory that moved the watermark
+            # is still fine, so this is not simply failing everything here.
+            cmd_slot_record("09:00", "email", True, "ok", path=_f2)
+            write_state({"last_scan_ok_ms": _start + 60_000,
+                         "watermark_ms": _start + 60_000})
+            cmd_slot_verify("09:00", "email", _start, path=_f2, agent_rc=0)
+            check("a slot that moved the watermark passes with no digest line",
+                  collapse_slots(read_slot_results(_f2))[-1]["ok"] is True)
+            os.environ["INBOUND_TRIAGE_DIR"] = _d
         finally:
             if _prev is None:
                 os.environ.pop("INBOUND_TRIAGE_DIR", None)
@@ -2163,6 +2213,99 @@ def consecutive_broken(rows, lane="email"):
     return n
 
 
+# ─── A COMPLETED SCAN IS NOT A DECIDED INBOX ─────────────────────────
+#
+# Finding 20260927-daily-ops-phase2-637. On 26 Sep 2026 the 13:00 slot broke
+# correctly on a Gmail 403 and did NOT advance the watermark, so the backlog
+# fell to 17:00. The 17:00 slot recorded ok:true, `slot-verify` confirmed "a
+# scan completed at 1790438627348", reported changed:false, and the run ended
+# 4m33s later having written ZERO digest lines. Seven messages that arrived
+# between 09:12 and 17:00 — a forwarded personal message, a failed-script
+# notice, an order confirmation, a delivery notice — were never triaged, and
+# the next slot was 09:00 the following day.
+#
+# `slot-verify` already refuses to take the pre-flight probe's word for it
+# (finding 20260907-daily-ops-487) and already refuses to let a scan stamp
+# overrule a non-zero agent rc (20260908-daily-ops-494). This is the third
+# member of the same family: a scan that REACHED THE END is still not a slot
+# that DECIDED ANYTHING. The scan is skill 1 of three, and a run can complete
+# it and then exit before the judgement step ever starts.
+#
+# What is measured here is work, and both signals are local — no Gmail call,
+# so this cannot itself spend the quota it exists to detect:
+#   * digest lines written at or after the slot began. Every decision the agent
+#     takes appends one, including its no-action notes.
+#   * the watermark. It moves ONLY through `mark` (cmd_mark), which the agent
+#     runs after handling mail; a scan never moves it. On 26 Sep 17:00 the scan
+#     stamp read 17:03:47 while the watermark still read 09:01:03.
+#
+# BACK-TESTED against the real slot-results.jsonl and digest files for 6-26 Sep
+# 2026, 62 email slots. 55 ok slots wrote between 9 and 398 digest lines. FIVE
+# ok slots wrote zero: 6 Sep 13:00 and 17:00 (the incident finding 487 was
+# filed for), 7 Sep 17:00, 25 Sep 13:00 and 26 Sep 17:00 (this finding). Every
+# slot already graded broken is untouched by this rule. It discriminates.
+#
+# THE CONTROL (the empty-population rule). A count of zero must never be able
+# to read as a pass. Here a zero count grades the slot BROKEN, so a digest path
+# that stops resolving — a rename, a typo, a changed INBOUND_TRIAGE_DIR — makes
+# every slot fail loudly instead of every slot pass silently. The one case that
+# cannot be measured is a missing slot-start, and that is reported as UNKNOWN
+# rather than as ok.
+
+def digest_lines_since(since_ms, base=None):
+    """How many decisions were written at or after `since_ms` (epoch ms).
+
+    Returns None when the window cannot be established. Reads today's and
+    yesterday's digest so a slot running across local midnight still counts.
+    """
+    if not since_ms:
+        return None
+    d = Path(base) if base else base_dir()
+    start = datetime.fromtimestamp(int(since_ms) / 1000.0)
+    n = 0
+    for day in (start.date(), date.today()):
+        p = d / ("digest-%s.jsonl" % day.isoformat())
+        if not p.exists():
+            continue
+        try:
+            lines = p.read_text().splitlines()
+        except OSError:
+            return None
+        for line in lines:
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                ts = json.loads(line).get("ts")
+            except ValueError:
+                continue
+            if not ts:
+                continue
+            try:
+                if datetime.fromisoformat(ts) >= start:
+                    n += 1
+            except ValueError:
+                continue
+    return n
+
+
+def slot_did_work(since_ms, decided, watermark_ms):
+    """Pure verdict: did this slot do any triage work? Selftested.
+
+    'unknown' when there is no slot start to measure against — reported, never
+    quietly treated as ok.
+    """
+    if not since_ms:
+        return "unknown"
+    if decided is None:
+        return "unknown"
+    if decided > 0:
+        return "worked"
+    if watermark_ms and int(watermark_ms) >= int(since_ms):
+        return "worked"
+    return "none"
+
+
 def cmd_slot_record(slot, lane, ok, reason, scanned=None, path=None):
     """Append this slot's verdict for one lane. Exit 3 once the lane has been
     broken for ESCALATE_AFTER_BROKEN slots running, so the wrapper can say so
@@ -2238,12 +2381,33 @@ def cmd_slot_verify(slot, lane="email", since_ms=None, path=None, agent_rc=None)
     if agent_rc not in (None, 0):
         return cmd_slot_record(
             slot, lane, False, "agent-exited-%s" % agent_rc, path=path)
-    last_ok = read_state().get("last_scan_ok_ms")
+    state = read_state()
+    last_ok = state.get("last_scan_ok_ms")
     since = int(since_ms) if since_ms else 0
     if last_ok and int(last_ok) >= since:
-        print(json.dumps({"verified": True, "changed": False,
-                          "reason": "a scan completed at %d, after the slot began at %d"
-                                    % (int(last_ok), since)}))
+        # The scan finished. Now: did the slot DECIDE anything? See the block
+        # above cmd_slot_record for the incident and the back-test.
+        decided = digest_lines_since(since)
+        wm = state.get("watermark_ms")
+        did = slot_did_work(since, decided, wm)
+        if did == "none":
+            return cmd_slot_record(
+                slot, lane, False,
+                "scanned-but-decided-nothing (scan stamp %d, 0 digest lines since "
+                "the slot began at %d, watermark still %s)"
+                % (int(last_ok), since, wm),
+                path=path)
+        if did == "unknown":
+            print(json.dumps({"verified": False,
+                              "reason": "a scan completed at %d, but this slot's work "
+                                        "could not be measured (slot start %s, digest "
+                                        "count %s) — UNCHECKED, not clean"
+                                        % (int(last_ok), since_ms, decided)}))
+            return 0
+        print(json.dumps({"verified": True, "changed": False, "decided": decided,
+                          "reason": "a scan completed at %d, after the slot began at %d, "
+                                    "and %d decisions were written"
+                                    % (int(last_ok), since, decided)}))
         return 0
     return cmd_slot_record(
         slot, lane, False, "scan-did-not-complete",
