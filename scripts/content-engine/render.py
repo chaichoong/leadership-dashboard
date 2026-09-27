@@ -330,7 +330,8 @@ LFMD_START_RE = re.compile(r"(?:\w+\s+)?(?P<prep>from|for|of|through|in|to)\s+(?
                            # was skipped, and because the near-miss guard below did not cover it either, the card reached Kevin with no
                            # Learnings clip and no warning. The same mis-hearing had already cost 1964, 2032, 2033, 2042 and 2043.
                            # 2073 (27 Sep 2026): "the learnings of my dive today". "of" takes my/the/our only: "learned of a diver" is not it.
-                           r"|learn\w*\s+(?:(?:from|for)\s+(?:a|my|the|our)|of\s+(?:my|the|our))\s+d(?:ia|ie|ai|iv)\w*\b(?!\s+of\s+(?:a|an|the)\b)", re.I)
+                           # The "of a" guard sits on the "of" route only: "the learnings from my diary of the day" is a real line.
+                           r"|learn\w*\s+(?:(?:from|for)\s+(?:a|my|the|our)\s+d(?:ia|ie|ai|iv)\w*|of\s+(?:my|the|our)\s+d(?:ia|ie|ai|iv)\w*\b(?!\s+of\s+(?:a|an|the)\b))", re.I)
 # The show's own name is "day 2072 of the diary of a Runpreneur". Whisper garbles the tail ("of the diary cover on
 # printer", 2072, 27 Sep 2026), so the "of a" guard above cannot be relied on. "of the diary" straight after a day
 # number (2072, 2,072, 2072th, then any commas, full stops, ellipses or dashes) is what marks it. "of MY diary" or
@@ -1287,6 +1288,8 @@ def selftest():
     assert lfmd_window([(0, 5, "So, consecutive day 2072... of the diary cover on printer"), (30, 40, "see you tomorrow")]) is None, "an ellipsis after the day number"
     assert lfmd_window([(0, 5, "consecutive day 2072 — of the diary cover on printer"), (30, 40, "see you tomorrow")]) is None, "a long dash after the day number"
     assert lfmd_window([(0, 5, "these are the learnings of the diary of a Runpreneur"), (30, 40, "see you tomorrow")]) is None, "the 'of' route keeps the 'of a' guard"
+    assert lfmd_window([(0, 5, "So the learnings from my diary of the day are rest more"), (30, 40, "see you tomorrow")]) == (0, 40), "'from my diary of the day' is a real line"
+    assert lfmd_window([(0, 5, "the learnings from my dive of the day are rest"), (30, 40, "see you tomorrow")]) == (0, 40), "'from my dive of the day' too"
     assert lfmd_window([(0, 5, "the learnings for day 2073 from the diary are"), (30, 40, "see you tomorrow")]) == (0, 40), "'from the diary' after a number still counts"
     assert lfmd_window([(0, 5, "I started in 2019. From the diary today, rest more"), (30, 40, "see you tomorrow")]) == (0, 40), "a year, then 'From the diary'"
 
