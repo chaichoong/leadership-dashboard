@@ -119,7 +119,10 @@ describe('slot attendance', () => {
     expect(res.slot_attendance['inbound-triage'].ran).toBe(1);
     expect(res.slot_attendance['inbound-triage'].expected).toBeGreaterThanOrEqual(2);
     expect(res.slot_shortfalls).toContain('inbound-triage');
-    expect(res.slot_shortfalls).toContain('prospecting');
+    // ceo-agent never ran in the window. prospecting is in the fixture but no longer an
+    // approved slot (parked 27 Sep 2026), so attendance must not count it at all.
+    expect(res.slot_shortfalls).toContain('ceo-agent');
+    expect(res.slot_attendance).not.toHaveProperty('prospecting');
     expect(res.missed_slot_runs).toMatch(/inbound-triage 1 of/);
   });
 
