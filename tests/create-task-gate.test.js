@@ -192,3 +192,61 @@ describe('a hard deadline carries the stated date, not the receipt date', () => 
     expect(fix).toBeLessThan(dupe);
   });
 });
+
+// ─── AN ADDRESS IS NOT A SUBJECT (finding 20260925-agent-dispatch-605) ──
+//
+// Reproduced before the fix: creating "Send GSC quote requests ... 23 Viola
+// Street Bootle L20 7DR" folded into the licence-fee card sitting at Kevin's
+// approval gate and overwrote its Description with gas-safety content. The
+// two names shared exactly two "telling" words — `l20` and `7dr` — because
+// placeTokens recognises a place by its STREET TYPE and nothing marked the
+// postcode halves as address.
+//
+// Back-tested by deleting the fold_on_address_only calls in decide(): the
+// first case below flips to action "update" on recX.
+describe('a shared address is never enough to fold one task into another', () => {
+  const F = runPy('mod.F');
+  const board = (name) => ([{
+    id: 'recX',
+    createdTime: '2026-09-20T00:00:00.000Z',
+    fields: { [F.name]: name, [F.status]: { name: 'Approval' } },
+  }]);
+  const decide = (incoming, existing) => runPy(
+    `mod.decide(arg[0], arg[1])`, [{ [F.name]: incoming }, board(existing)]);
+
+  const LICENCE = 'COMPLIANCE: Sefton Council HMO licence fee overdue - 23 Viola Street Bootle L20 7DR';
+
+  it('the incident: gas safety quotes do NOT fold into a licence fee at the same house', () => {
+    const v = decide(
+      'Send GSC quote requests - Bootle Gas Engineers and Able Group - 23 Viola Street Bootle L20 7DR',
+      LICENCE);
+    expect(v.action).toBe('create');
+    expect(v.taskId).toBeUndefined();
+  });
+
+  it('the postcode halves are what did it: both are read as address, not subject', () => {
+    expect(runPy('sorted(mod._postcode_tokens(arg))',
+      '23 Viola Street Bootle L20 7DR')).toEqual(['7dr', 'bootle', 'l20']);
+    // The outward half ALONE is not an address — plenty of harmless tokens
+    // look like it — so only the adjacent pair counts.
+    expect(runPy('sorted(mod._postcode_tokens(arg))', 'quote ref L20 for the job')).toEqual([]);
+  });
+
+  it('CONTROL: the same matter at the same address still folds', () => {
+    // Without this the fix would be indistinguishable from switching folding
+    // off, which is the failure mode the 28 Aug 2026 second pass exists for.
+    const v = decide(
+      'INBOUND: Sefton Council HMO licence fee 150 unpaid 23 Viola Street Bootle L20 7DR',
+      LICENCE);
+    expect(v.action).toBe('update');
+    expect(v.taskId).toBe('recX');
+  });
+
+  it('CONTROL: a phone number is identity, not address, and still folds across one house', () => {
+    const v = decide(
+      'INBOUND: SMS reply from +447700900747 about 23 Viola Street Bootle L20 7DR',
+      'INBOUND: SMS from 447700900747 - 23 Viola Street Bootle L20 7DR');
+    expect(v.action).toBe('update');
+    expect(v.matchedWhy).toContain('phone');
+  });
+});

@@ -123,6 +123,12 @@ RETIRED = [
     # teardown call" and "The Teardown call" (dept-sales.md, 21 Sep 2026).
     (r"(?i)teardown call", "2026-07-31",
      "the sales call is the Operations Review Call, everywhere, with no exceptions"),
+    # The blocker loop (Decisions/2026-09-25 Agent blockers are named, fixed and
+    # resumed). Both lines told an agent how to STOP, never who fixes the wall.
+    (r"The robot has no access to", "2026-09-25",
+     "a site the robot cannot reach is a SITE wall: agent-dispatch.py block --kind SITE, and the task wakes when Kevin adds it"),
+    (r"OPENS with 'PARKED:'", "2026-09-25",
+     "a wall is recorded with agent-dispatch.py block and its kind; annotate refuses a PARKED note"),
 ]
 
 # A line that is describing the old rule, not stating it.

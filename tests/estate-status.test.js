@@ -103,3 +103,69 @@ describe('the Estate status tab', () => {
     }
   });
 });
+
+// Kevin, 25 Sep 2026: the Robot sign-ins panel on the AI Agents page. Driven end
+// to end on files in a temp folder: the real `agent-browser.js signin-list` and
+// `sites` read our own sites file, and the writer reads our own keep-alive,
+// ledger and meter logs. Nothing on this Mac is read or written.
+describe('the robot-signins row', () => {
+  it('reads every source and ranks the newest look, per sign-in, from the real list', async () => {
+    const { mkdtempSync, writeFileSync, rmSync } = await import('fs');
+    const { tmpdir } = await import('os');
+    const dir = mkdtempSync(resolve(tmpdir(), 'od-signins-'));
+    try {
+      const f = (name, body) => { const p = resolve(dir, name); writeFileSync(p, typeof body === 'string' ? body : JSON.stringify(body)); return p; };
+      const sites = f('sites.json', {
+        'my.utilita.co.uk': { label: 'Utilita', login: true, profiles: [
+          { profile: 'utilita-apt1', label: 'Flat 1', loginUrl: 'https://my.utilita.co.uk/energy' },
+          { profile: 'utilita-apt2', label: 'Flat 2', loginUrl: 'https://my.utilita.co.uk/energy' }] },
+        'www.strava.com': { label: 'Strava', login: true },
+      });
+      const keep = f('status.json', { at: '2026-09-25T06:40:05+01:00', sites: {
+        'app.pingen.com': { state: 'signed-in' }, 'www.edfenergy.com': { state: 'signed-out' } } });
+      const ledger = f('runs.jsonl', [
+        '{"at":"2026-09-25T06:56:28Z","cmd":"session","site":"app.pingen.com","signedIn":false,"profile":"default"}',
+        'not json at all',
+        '{"at":"2026-09-25T06:59:37Z","cmd":"login","host":"www.edfenergy.com","profile":"default"}',
+      ].join('\n'));
+      const readings = f('readings.jsonl', [
+        '{"at":"2026-09-25T10:05:25","label":"Apartment 1","ok":true,"problem":null}',
+        '{"at":"2026-09-25T10:05:25","label":"Apartment 2","ok":false,"problem":"SIGN-IN NEEDED"}',
+      ].join('\n'));
+      const accounts = f('accounts.json', { accounts: [{ label: 'Apartment 1', profile: 'utilita-apt1' }, { label: 'Apartment 2', profile: 'utilita-apt2' }] });
+      const py = `
+import importlib.util, json, sys
+from datetime import datetime, timezone
+spec = importlib.util.spec_from_file_location('es', ${JSON.stringify(WRITER)})
+m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m)
+m.KEEPALIVE_STATUS, m.BROWSER_LEDGER, m.UTILITA_READINGS, m.UTILITA_ACCOUNTS = sys.argv[1:5]
+row = m.robot_signins_row(datetime(2026, 9, 25, 10, 10, tzinfo=timezone.utc))
+print(json.dumps(row))`;
+      const row = JSON.parse(execFileSync('python3', ['-c', py, keep, ledger, readings, accounts],
+        { encoding: 'utf8', env: { ...process.env, AGENT_BROWSER_SITES_FILE: sites } }));
+      expect(row.status, row.detail).toBe('Worked');
+      expect(row.key).toBe('robot-signins');
+      const p = JSON.parse(row.payload);
+      const by = Object.fromEntries(p.lines.map((l) => [l.label, l]));
+      // The builtins come through the real list (control: Pingen and HMRC are builtins).
+      expect(by['Pingen (letters)'].state).toBe('signed-out');          // 06:56 robot check beats 06:40 keep-alive
+      expect(by['EDF Energy'].state).toBe('you-signed-in');             // his sign-in came after the last look
+      expect(by.HMRC.state).toBe('on-demand');
+      expect(by['Flat 1']).toMatchObject({ profile: 'utilita-apt1', state: 'signed-in', how: 'hourly read', at: '2026-09-25T09:05:25.000Z' });
+      expect(by['Flat 2']).toMatchObject({ profile: 'utilita-apt2', state: 'signed-out' });
+      expect(p.lines.some((l) => l.host === 'my.utilita.co.uk' && l.profile === 'default')).toBe(false);
+      expect(p.unlisted).toContain('Strava');
+      expect(row.detail).toMatch(/signed out \(/);
+    } finally { rmSync(dir, { recursive: true, force: true }); }
+  });
+
+  it('is written every ten minutes with the rest of the board, and on its own after a sign-in', () => {
+    const src = read('scripts/estate-status.py');
+    const build = src.slice(src.indexOf('def build_rows('), src.indexOf('def cmd_refresh('));
+    expect(build).toMatch(/rows\.append\(robot_signins_row\(now\)\)/);
+    // The single-row command never goes through upsert(), which would mark every other row "No longer scheduled".
+    const one = src.slice(src.indexOf('def cmd_signins('), src.indexOf('def selftest('));
+    expect(one).not.toMatch(/upsert\(/);
+    expect(read('scripts/robot-signin.applescript')).toMatch(/scripts\/estate-status\.py signins/);
+  });
+});

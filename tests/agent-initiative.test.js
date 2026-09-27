@@ -61,6 +61,15 @@ describe('tool policy is shared, not copied', () => {
     expect(out).toContain('Bash(curl:*)');
   });
 
+  it('lets a run wait 40 minutes for its agents, under the hand-back poll\'s own 45-minute limit (25 Sep 2026)', () => {
+    const out = execFileSync('bash', ['-c',
+      `. ${JSON.stringify(resolve(ROOT, 'scripts/agent-tools.sh'))}; echo "$CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS"`,
+    ], { encoding: 'utf8', env: { PATH: process.env.PATH, HOME: process.env.HOME } }).trim();
+    expect(Number(out)).toBe(2400000);
+    const poll = read('scripts/handback-poll-run.sh').match(/HANDBACK_MAX_MINUTES:-(\d+)/);
+    expect(Number(out) / 60000).toBeLessThan(Number(poll[1]));
+  });
+
   it('resolves node by absolute path, because launchd has no nvm on PATH', () => {
     const out = execFileSync('bash', ['-c',
       `. ${JSON.stringify(resolve(ROOT, 'scripts/agent-tools.sh'))}; echo "$AGENT_NODE_BIN"`,
@@ -73,6 +82,21 @@ describe('tool policy is shared, not copied', () => {
     const list = src.match(/AGENT_ALLOWED_TOOLS=\(([\s\S]*?)\n\)/)[1];
     expect(list).not.toMatch(/"Bash\(\*\)"|"Bash"/);
     expect(list).not.toMatch(/"(Edit|Write|NotebookEdit)"/);
+  });
+
+  // Finding 20260925-agent-dispatch-617 (25 Sep 2026): SKILL step 7's verify goes
+  // through ~/tools/run-job.sh (the Estate board record and the alert). Headless it
+  // needed an approval nobody could give. Proved live the same day: a multi-word
+  // absolute-path prefix rule of this shape runs headless, and without it the
+  // engine answers "This command requires approval". The WRAPPER itself must never
+  // be allowed bare: it runs whatever it is handed.
+  it('lets the run record its own verify through run-job.sh, and nothing else through it', () => {
+    const out = execFileSync('bash', ['-c',
+      `. ${JSON.stringify(resolve(ROOT, 'scripts/agent-tools.sh'))}; printf '%s\\n' "\${AGENT_ALLOWED_TOOLS[@]}"`,
+    ], { encoding: 'utf8' }).trim().split('\n');
+    expect(out).toContain('Bash(/Users/kevinbrittain/tools/run-job.sh agent-dispatch python3 /Users/kevinbrittain/Projects/leadership-dashboard/scripts/agent-dispatch.py verify:*)');
+    const wrapper = out.filter((t) => t.includes('run-job.sh'));
+    for (const t of wrapper) expect(t, 'run-job.sh is allowed only for verify').toMatch(/agent-dispatch\.py verify:\*\)$/);
   });
 });
 

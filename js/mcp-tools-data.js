@@ -17,7 +17,7 @@ var MCP_TOOLS = {
   "generatedAt": "2026-09-23T05:10:06Z",
   "generator": "scripts/generate-mcp-inventory.py",
   "healthNote": "claude mcp list returned no servers",
-  "agentAllowlistSize": 9,
+  "agentAllowlistSize": 11,
   "counts": {
     "total": 40,
     "verified": 27,

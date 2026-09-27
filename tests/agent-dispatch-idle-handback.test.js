@@ -75,17 +75,38 @@ describe('idle hand-backs rest for a day', () => {
       .toBeLessThan(fn.indexOf('worklist = select_worklist('));
   });
 
-  it('annotate records a PARKED or BLOCKED note in the ledger, so the rest has evidence', () => {
-    const fn = SRC.slice(SRC.indexOf('def cmd_annotate('), SRC.indexOf('# ─── THE LEARNING LOOP'));
-    expect(fn).toMatch(/PARKED_NOTE_RE\.match\(args\.note or ""\)/);
-    expect(fn).toMatch(/ledger_append\(args\.task, "parked"\)/);
-    const r = py(`print(json.dumps([bool(m.PARKED_NOTE_RE.match(s)) for s in ["PARKED run 2026: portal login", "BLOCKED: robot has no access", "CARRIED OUT (task left open): x", "Sent the email"]]))`);
-    expect(r).toEqual([true, true, false, false]);
+  // 25 Sep 2026: a free-text PARKED note rested the task and did nothing else,
+  // so the wall was never fixed (6 Chedburgh Place, nine parks). The rest's
+  // evidence now comes from `block`, which also routes the fix and wakes the
+  // task; annotate refuses the old form. Driven in tests/agent-dispatch-blockers.test.js.
+  it('the rest has evidence: block records "parked"; annotate refuses a PARKED or BLOCKED note', () => {
+    const r = py(`
+import io, contextlib
+W, L = [], []
+m.get_task = lambda i: {"id": i, "fields": {m.AF["notes"]: "", m.AF["status"]: "Today"}}
+m.patch_task = lambda i, f: W.append(f)
+m.ledger_append = lambda t, e: L.append(e)
+m.load_login_sites = lambda: {}
+class A:
+    def __init__(self, **kw): self.__dict__.update(kw)
+err = None
+try:
+    with contextlib.redirect_stdout(io.StringIO()):
+        m.cmd_annotate(A(task="t1", note="PARKED: TopCashback off the allowlist"))
+except SystemExit as e:
+    err = str(e)
+m.get_task = lambda i: {"id": i, "fields": {m.AF["notes"]: "\\n\\n".join(x.get(m.AF["notes"], "") for x in W), m.AF["status"]: "Today"}}
+with contextlib.redirect_stdout(io.StringIO()):
+    m.cmd_block(A(task="t1", kind="SITE", subject="namecheap.com", why="renewal page", finding=None))
+print(json.dumps({"refused": bool(err and "block t1 --kind" in err), "ledger": L,
+                  "matches": [bool(m.PARKED_NOTE_RE.match(s)) for s in ["PARKED run 2026: portal login", "BLOCKED: robot has no access", "CARRIED OUT (task left open): x", "Sent the email"]]}))`);
+    expect(r).toEqual({ refused: true, ledger: ['parked'], matches: [true, true, false, false] });
   });
 
-  it('the poll prompt tells agents to open a sign-in note with PARKED:, so the convention is written down', () => {
+  it('the poll prompt tells agents to record a wall with block and to finish a task whose wall has cleared', () => {
     const runner = readFileSync(resolve(ROOT, 'scripts/handback-poll-run.sh'), 'utf8');
-    expect(runner).toMatch(/OPENS with 'PARKED:'/);
+    expect(runner).toMatch(/record it with the block subcommand and its kind, never a PARKED note/);
+    expect(runner).toMatch(/BLOCKER CLEARED is to be FINISHED/);
   });
 
   it('the task view carries Approved At (the early-wake signal)', () => {

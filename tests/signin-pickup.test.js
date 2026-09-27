@@ -224,6 +224,90 @@ describe('the Robot sign-in app and its link', () => {
       expect(out).toBe('all|site/app.pingen.com');
     } finally { rmSync(dir, { recursive: true, force: true }); }
   });
+  // 25 Sep 2026: each Duckworth flat is its own Utilita login in its own robot profile, and the
+  // app opened only the main one. Driven through osascript, not read off the source.
+  it('opens each sign-in on its own profile, and a waiting-task line always on the main one', () => {
+    const { mkdtempSync, rmSync } = require('node:fs');
+    const { tmpdir } = require('node:os');
+    const dir = mkdtempSync(join(tmpdir(), 'od-robot-'));
+    try {
+      execFileSync('osacompile', ['-o', join(dir, 'r.scpt'), join(ROOT, 'scripts', 'robot-signin.applescript')]);
+      const run = (expr) => execFileSync('osascript', ['-e',
+        `set s to (load script POSIX file "${join(dir, 'r.scpt')}")\nreturn ${expr}`], { encoding: 'utf8' }).trim();
+      const flat = 'Utilita Apartment 1 (a@b.com) | my.utilita.co.uk | https://my.utilita.co.uk/energy | utilita-apt1';
+      const waiting = 'Pingen (letters) (2 waiting) | app.pingen.com | https://app.pingen.com/';
+      expect(run(`s's profileOf("${flat}")`)).toBe('utilita-apt1');
+      expect(run(`s's profileOf("${waiting}")`)).toBe('default');
+      const flatCmd = run(`s's loginCommand("${flat}")`);
+      expect(flatCmd).toMatch(/agent-browser\.js login --url 'https:\/\/my\.utilita\.co\.uk\/energy' --profile 'utilita-apt1' --label 'Utilita Apartment 1 \(a@b\.com\)'$/);
+      expect(flatCmd).not.toMatch(/--add/);
+      // A waiting line's name carries "(2 waiting)", so it is never offered as the site's name.
+      expect(run(`s's loginCommand("${waiting}")`)).toMatch(/login --url 'https:\/\/app\.pingen\.com\/' --profile 'default'$/);
+      // Add a new site: a bar in the typed name cannot shift the fields, and a blank name is the host.
+      const added = run(`s's newSiteLine("Acme | Portal", "portal.acme.co.uk", "https://portal.acme.co.uk/login")`);
+      expect(added).toBe('Acme - Portal | portal.acme.co.uk | https://portal.acme.co.uk/login | default | new');
+      expect(run(`s's newSiteLine("", "portal.acme.co.uk", "https://portal.acme.co.uk/login")`))
+        .toBe('portal.acme.co.uk | portal.acme.co.uk | https://portal.acme.co.uk/login | default | new');
+      // Only a line Kevin added on purpose carries --add, and it still opens on the main profile.
+      expect(run(`s's loginCommand("${added}")`)).toMatch(/--url 'https:\/\/portal\.acme\.co\.uk\/login' --profile 'default' --label 'Acme - Portal' --add$/);
+      // login's NOTE lines reach Kevin; its other output does not.
+      expect(run(`s's notesIn("Plain Chrome window open" & linefeed & "NOTE: gov.uk is read-only" & linefeed & "Kept 2 session cookie(s)")`))
+        .toBe('gov.uk is read-only');
+      expect(run(`s's addNewItem`)).toBe('+ Add a new site…');
+      // A line break in a typed name is flattened, never a second line in the list.
+      expect(run(`s's newSiteLine("Two" & linefeed & "Lines", "h.example.com", "https://h.example.com/")`))
+        .toBe('Two Lines | h.example.com | https://h.example.com/ | default | new');
+      // signin-list's SKIPPED lines are said aloud and never offered as a site (review: do shell
+      // script drops stderr on success, so they arrive on stdout).
+      expect(run(`((count of (sites of (s's splitSiteList("A | a.com | https://a.com/ | default" & linefeed & "SKIPPED: x: bad" & linefeed)))) as text) & "/" & (item 1 of (skipped of (s's splitSiteList("SKIPPED: x: bad"))))`))
+        .toBe('1/x: bad');
+    } finally { rmSync(dir, { recursive: true, force: true }); }
+  }, 30000);   // osacompile + ten osascript runs: ~7 s when the full suite loads the Mac
+  it('the site list comes from signin-list, a flat hands nothing back, and a site link opens every profile on it', () => {
+    expect(src).toMatch(/scripts\/agent-browser\.js signin-list/);
+    const signIn = src.slice(src.indexOf('on signInTo'), src.indexOf('end signInTo'));
+    expect(signIn.indexOf('if theProfile is not "default"')).toBeGreaterThan(-1);
+    expect(signIn.indexOf('if theProfile is not "default"')).toBeLessThan(signIn.indexOf('signin-done --site'));
+    expect(src).toMatch(/signin-list 2>&1/);
+    // The full list takes several picks at once: the watcher's message asks for both flats.
+    const runH = src.slice(src.indexOf('\non run\n'), src.indexOf('\nend run\n'));
+    expect(runH).toMatch(/choose from list \(\{addNewItem\} & allSites\(\)\)[^\n]*with multiple selections allowed/);
+    // A site already on the list opens on its own lines (a flat's profile), never as a new main-profile line.
+    const ask = src.slice(src.indexOf('on askNewSite'), src.indexOf('end askNewSite'));
+    expect(ask).toMatch(/agent-browser\.js signin-list --for " & quoted form of theUrl/);
+    expect(ask.indexOf('return known')).toBeGreaterThan(-1);
+    expect(ask.indexOf('return known')).toBeLessThan(ask.indexOf('newSiteLine('));
+    const link = src.slice(src.indexOf('on open location'), src.indexOf('end open location'));
+    expect(link).toMatch(/set end of matches to/);
+    expect(link).toMatch(/runChain\(matches, liveN\)/);
+  });
+  // 25 Sep 2026: the AI Agents page's Robot sign-ins panel opens one flat
+  // (robotsignin://profile/<name>) and the add dialog (robotsignin://add), and
+  // after every sign-in the app rewrites the panel's row so it updates in a minute.
+  it('the panel links open one flat or the add dialog, and every chain tells the page', () => {
+    const { mkdtempSync, rmSync } = require('node:fs');
+    const { tmpdir } = require('node:os');
+    const dir = mkdtempSync(join(tmpdir(), 'od-robot-'));
+    try {
+      execFileSync('osacompile', ['-o', join(dir, 'r.scpt'), join(ROOT, 'scripts', 'robot-signin.applescript')]);
+      const run = (expr) => execFileSync('osascript', ['-e',
+        `set s to (load script POSIX file "${join(dir, 'r.scpt')}")\nreturn ${expr}`], { encoding: 'utf8' }).trim();
+      const ls = '{"Pingen | app.pingen.com | https://app.pingen.com/ | default", '
+        + '"Flat 1 | my.utilita.co.uk | https://my.utilita.co.uk/energy | utilita-apt1", '
+        + '"Flat 2 | my.utilita.co.uk | https://my.utilita.co.uk/energy | utilita-apt2"}';
+      expect(run(`s's linesForProfile("utilita-apt2", ${ls})`)).toBe('Flat 2 | my.utilita.co.uk | https://my.utilita.co.uk/energy | utilita-apt2');
+      expect(run(`(count of (s's linesForProfile("utilita-apt9", ${ls}))) as text`)).toBe('0');
+      // A waiting-task line has three fields and means the main profile, never a flat.
+      expect(run(`(count of (s's linesForProfile("default", {"Pingen (2 waiting) | app.pingen.com | https://app.pingen.com/"}))) as text`)).toBe('1');
+    } finally { rmSync(dir, { recursive: true, force: true }); }
+    const link = src.slice(src.indexOf('on open location'), src.indexOf('end open location'));
+    expect(link).toMatch(/if body starts with "add" then\s+set theLines to askNewSite\(\)/);
+    expect(link).toMatch(/if body starts with "profile\/" then\s+set wantProfile to text 9 thru -1 of body/);
+    const chain = src.slice(src.indexOf('on runChain'), src.indexOf('end runChain'));
+    expect(chain.trim().split('\n').pop().trim()).toBe('refreshPanel()');
+    const refresh = src.slice(src.indexOf('on refreshPanel'), src.indexOf('end refreshPanel'));
+    expect(refresh).toMatch(/detach\.py --cwd .* -- \/usr\/bin\/python3 scripts\/estate-status\.py signins > \/dev\/null/);
+  }, 30000);   // osacompile + osascript runs
   it('resolves node the way the runners do, never a bare "node" under launchd', () => {
     const py = readFileSync(join(ROOT, 'scripts', 'agent-dispatch.py'), 'utf8');
     expect(py).toMatch(/AGENT_NODE_BIN/);
@@ -321,7 +405,9 @@ os.unlink(fh.name)
 print('---JSON---'); print(json.dumps({'refused': refused}))`, SITES);
     expect(out.refused).toMatch(/names 'Namecheap', which is not a site the robot can sign into/);
     expect(out.refused).toMatch(/Pingen \(letters\)/);
-    expect(out.refused).toMatch(/The robot has no access to Namecheap/);
+    // 25 Sep 2026: the old "The robot has no access" line was a dead end; the refusal now
+    // points at a SITE wall, which asks Kevin to add the site and wakes the task when he does.
+    expect(out.refused).toMatch(/block TASKID --kind SITE --subject <the site's host>/);
   });
   it('submit parks a SIGN-IN NEEDED output until tomorrow (the queue and digest hide it today)', () => {
     const out = py(`
@@ -426,6 +512,12 @@ print('---JSON---'); print(json.dumps({'refused': refused, 'output': f.get(m.AF[
     expect(out.refused).toMatch(/session --site app\.pingen\.com/);
     expect(out.status).toBeNull();   // nothing was patched
   });
+  it('submit REFUSES the line when the site stops the robot with a bot check, and names the route (25 Sep 2026)', () => {
+    const out = submitWith(`m.session_check = lambda host, **k: {'signedIn': False, 'botCheck': True, 'url': 'https://app.pingen.com/', 'at': '2026-09-25T16:55:37.000Z', 'source': 'walk'}`);
+    expect(out.refused).toMatch(/stops the robot with a bot check/);
+    expect(out.refused).toMatch(/--kind KEVIN --subject credential/);
+    expect(out.status).toBeNull();
+  });
   it('submit keeps the line when the walk says signed out', () => {
     const out = submitWith(`m.session_check = lambda host, **k: {'signedIn': False, 'url': 'https://app.pingen.com/login', 'at': 'x', 'source': 'walk'}`);
     expect(out.refused).toBe(false);
@@ -477,7 +569,7 @@ print('---JSON---'); print(json.dumps([
   m.ledger_session_verdict('www.facebook.com', 30, L + '.missing', datetime(2026, 9, 15, 9, 40, tzinfo=timezone.utc)),
 ]))`);
     // the default profile's verdict, not the later one from another profile
-    expect(out[0]).toEqual({ signedIn: true, url: 'https://www.facebook.com/home.php', at: '2026-09-15T09:23:03.599Z', source: 'ledger' });
+    expect(out[0]).toEqual({ signedIn: true, botCheck: false, url: 'https://www.facebook.com/home.php', at: '2026-09-15T09:23:03.599Z', source: 'ledger' });
     expect(out.slice(1)).toEqual([null, null, null]);
   });
   it('signin-waiting hands a site already signed in straight back (alreadyLive) and lists the rest with its check', () => {
@@ -512,6 +604,45 @@ print('---JSON---'); print(json.dumps({'walked': walked, 'waiting': [(g['host'],
     expect(out.live).toEqual([['app.pingen.com', ['rec3']]]);
     expect(out.patched).toEqual(['rec3']);
     expect(out.status).toBe('Today');
+  });
+  it('signin-waiting never hands back or lists a site that shows the robot a bot check (Cloudflare, 25 Sep 2026)', () => {
+    // At 17:16 on 25 Sep the walk read Cloudflare's "verify you are human" page
+    // as signed in: no window opened, the task went back to the agent, and the
+    // agent hit the same wall. A bot check is its own group: nothing handed back,
+    // no window offered, and the app says so.
+    const out = py(`
+sites = json.loads(sys.argv[1])
+sites['dash.cloudflare.com'] = {'label': 'dash.cloudflare.com', 'login': True, 'loginUrl': 'https://dash.cloudflare.com/'}
+recs = [
+  {'id': 'rec1', 'fields': {m.AF['name']: 'SPF fix', m.AF['agentOutput']: 'SIGN-IN NEEDED: dash.cloudflare.com (https://dash.cloudflare.com/)', m.AF['teamMember']: ['recjh6mmaF8KJW8t3']}},
+  {'id': 'rec3', 'fields': {m.AF['name']: 'HMRC letter', m.AF['agentOutput']: 'SIGN-IN NEEDED: Pingen (https://app.pingen.com/)', m.AF['teamMember']: ['recjh6mmaF8KJW8t3']}},
+]
+m.query_tasks = lambda formula, **kw: recs
+m.get_task = lambda tid: next(r for r in recs if r['id'] == tid)
+m.load_login_sites = lambda: sites
+patched = {}
+m.patch_task = lambda tid, fields: patched.__setitem__(tid, fields)
+def check(host, use_ledger=False, **k):
+    if host == 'dash.cloudflare.com':
+        return {'signedIn': False, 'botCheck': True, 'url': 'https://dash.cloudflare.com/', 'at': 't', 'source': 'walk'}
+    return {'signedIn': False, 'botCheck': False, 'url': 'https://app.pingen.com/login', 'at': 't', 'source': 'walk'}
+m.session_check = check
+import io, contextlib, os
+os.environ.pop('SIGNIN_SKIP_WALK', None)
+buf = io.StringIO()
+with contextlib.redirect_stdout(buf):
+    m.cmd_signin_waiting(types.SimpleNamespace(no_walk=False, dry_run=False))
+d = json.loads(buf.getvalue())
+print('---JSON---'); print(json.dumps({'waiting': [g['host'] for g in d['sites']], 'live': d['alreadyLive'],
+  'bot': [(g['host'], g['sessionCheck']['state'], [t['id'] for t in g['tasks']]) for g in d['botCheck']], 'patched': sorted(patched)}))`, SITES);
+    expect(out.waiting).toEqual(['app.pingen.com']);
+    expect(out.live).toEqual([]);
+    expect(out.bot).toEqual([['dash.cloudflare.com', 'bot-check', ['rec1']]]);
+    expect(out.patched).toEqual([]);
+    // The app tells Kevin in a dialog on every route that checks, and a site link opens no window for it.
+    const app = readFileSync(join(ROOT, 'scripts', 'robot-signin.applescript'), 'utf8');
+    expect(app.match(/\tannounceBotChecks\(\)\n/g).length).toBe(3);
+    expect(app).toMatch(/d\.botCheck\|\|\[\]\)\)console\.log\(g\.host\)"\) contains wantHost then\n\t\t\tannounceBotChecks\(\)\n\t\t\treturn/);
   });
   it('signin-waiting --site checks that one host only and lists the rest unchecked (the per-site link)', () => {
     const out = py(`

@@ -14,7 +14,9 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 const src = readFileSync(join(__dirname, '..', 'scripts', 'agent-browser.js'), 'utf8');
-const withPage = src.slice(src.indexOf('async function withPage'), src.indexOf('async function withPage') + 2500);
+// The whole function, to its closing brace (a fixed 2,500-character cut lost the
+// last checks when the sign-in hold wait was added, 25 Sep 2026).
+const withPage = src.slice(src.indexOf('async function withPage'), src.indexOf('\n}\n', src.indexOf('async function withPage')));
 
 describe('agent-browser launches like a real browser', () => {
   it('prefers the installed Google Chrome, guarded by an existence check', () => {
@@ -35,7 +37,9 @@ describe('agent-browser launches like a real browser', () => {
     const login = src.slice(src.indexOf("if (cmd === 'login')"), src.indexOf("if (cmd === 'read')"));
     expect(login).toMatch(/spawn\('open', \['-na', 'Google Chrome'/);
     expect(login).toMatch(/'--use-mock-keychain'/);
-    expect(login).toMatch(/already open in another Chrome/);
+    // It holds the profile first, so an agent step never takes it between his tries (25 Sep 2026).
+    expect(login).toMatch(/takeSigninHold\(dir\)/);
+    expect(login).toMatch(/releaseSigninHold\(dir\)/);
   });
   it('keeps the bundled build as the fallback (channel is not unconditional)', () => {
     const launchBlock = withPage.slice(withPage.indexOf('const launch = {'), withPage.indexOf('launchPersistentContext'));

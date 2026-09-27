@@ -748,6 +748,41 @@ test.describe('Growth Plan page', () => {
   });
 });
 
+// The tenant-finding chain monitor (Kevin, 25 Sep 2026): his condition for letting Roy take the
+// chain's tasks unasked is that he can SEE it working. A monitor that stopped must never read green,
+// and a missing or unreadable report must never read as a blank block.
+test.describe('Is the tenant chain working?', () => {
+  const ES_TBL = 'tblZVrdzivyBueZVf';
+  const ES = { key: 'fldLO6xJqkokvVR4g', status: 'fldhOUiva3bqPNk1c', lastRun: 'flduxV3TYwp9wQX9O', detail: 'fldLRFP2nJttDVQOa', payload: 'fldiqs9lvyLimoR7i' };
+  const hoursAgo = h => new Date(Date.now() - h * 3600000).toISOString();
+  const payload = (worst, steps) => JSON.stringify({ asAt: '2026-09-25', worst, steps, openings: [{ key: 'lever:x', town: 'Haverhill', property: '5 Dalham Place', rooms: 2, label: '5 Dalham Place: 2 rooms coming up' }], stages: { 'Past applicant': 154, Qualified: 2 }, sources: { SpareRoom: 1 }, referrers: 31, run: [] });
+  const withChain = (lastRun, body) => { const fx = fixtures(); fx[ES_TBL] = [{ id: 'recES1', fields: { [ES.key]: 'tenant-chain', [ES.status]: 'Worked', [ES.lastRun]: lastRun, [ES.detail]: 'report', [ES.payload]: body } }]; return fx; };
+
+  test('before the first run it says so, rather than showing an empty block', async ({ page }) => {
+    await openPage(page, fixtures());
+    await expect(page.locator('#chainBody')).toContainText('The chain has not run yet.');
+  });
+
+  test('a failing step is named, and text from Airtable is shown as text', async ({ page }) => {
+    await openPage(page, withChain(hoursAgo(1), payload('fail', [
+      { key: 'mailout', label: 'Referrer mail-out', last: null, state: 'fail', note: 'Haverhill: none in 16 days <img src=x onerror=window.__pwned=1>' },
+      { key: 'openings', label: 'Openings found', last: '2026-09-25', state: 'ok', note: '4 rooms' },
+    ])));
+    const body = page.locator('#chainBody');
+    await expect(body).toContainText('Referrer mail-out');
+    await expect(body).toContainText('Not happening');
+    await expect(body).toContainText('5 Dalham Place: 2 rooms coming up');
+    await expect(body.locator('img')).toHaveCount(0);
+    expect(await page.evaluate(() => window.__pwned)).toBeUndefined();
+  });
+
+  test('a green report more than 26 hours old turns red: the chain has stopped', async ({ page }) => {
+    await openPage(page, withChain(hoursAgo(30), payload('ok', [{ key: 'openings', label: 'Openings found', last: '2026-09-24', state: 'ok', note: 'fine' }])));
+    await expect(page.locator('#chainBody')).toContainText('has not run since');
+    await expect(page.locator('#chainBody')).not.toContainText('Working: every step on time.');
+  });
+});
+
 test('the shell lists Growth Plan under Leadership and lazy-loads the page into its tab', async ({ page }) => {
   await loadDashboard(page);
   const item = page.locator('.sidebar-item', { hasText: 'Growth Plan' });

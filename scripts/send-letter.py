@@ -89,6 +89,7 @@ from datetime import datetime, timezone
 # path disagreeing about what a valid Correspondence output is, so an approved
 # action could not be carried out.
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from approval_evidence import approval_evidence_problem  # noqa: E402
 from adobe_audit import audit_problem  # noqa: E402
 from agent_email_format import (  # noqa: E402
     EmailFormatError,
@@ -344,6 +345,19 @@ def load_approved(task_id, require_approval=True):
             f"Status = {status or '(empty)'}.\n"
             "         Nothing is posted until Kevin approves it in Airtable "
             "or Slack.")
+    # AN APPROVAL STRING IS NOT AN APPROVAL (finding 20260925-agent-dispatch-616,
+    # 25 Sep 2026). send-email.py and calendar-write.py have checked the marks
+    # only a real approval leaves since 22-24 Sep; this script still trusted
+    # the Approval Outcome text, so a letter on a task an agent had typed
+    # "Approved" onto itself would have been printed and posted. Same shared
+    # check, same refusal.
+    evidence = approval_evidence_problem(f, rec.get("createdTime", ""))
+    if require_approval and evidence:
+        sys.exit(
+            f"REFUSED: task {task_id} ({name}) reads {outcome!r}, but {evidence}.\n"
+            "         Only an approval Kevin gives in an approval surface (the dashboard\n"
+            "         queue, the Tasks drawer or Slack) posts a letter. A task raised\n"
+            "         under an approved parent goes through the gate itself.")
     if require_approval and ttype != "Correspondence":
         sys.exit(f"REFUSED: task {task_id} is Task Type {ttype or '(empty)'}, "
                  "not Correspondence. This script only posts Correspondence.")
@@ -353,7 +367,7 @@ def load_approved(task_id, require_approval=True):
     except EmailFormatError as exc:
         sys.exit(f"ERROR: task {task_id} {exc}. "
                  "See the format in this script's docstring.")
-    parsed.update({"taskName": name, "outcome": outcome})
+    parsed.update({"taskName": name, "outcome": outcome, "approvalProblem": evidence})
     return parsed
 
 
@@ -430,6 +444,7 @@ def cmd_preview(args):
         "task": args.task,
         "taskName": letter["taskName"],
         "approvalOutcome": letter["outcome"] or "(not approved yet)",
+        "approvalProblem": letter.get("approvalProblem") or None,
         "address": letter["address"],
         "document": os.path.basename(real),
         "documentBytes": size,

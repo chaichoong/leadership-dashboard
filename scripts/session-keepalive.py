@@ -80,7 +80,7 @@ def keepalive_sites(sites):
 
 
 def session_state(result):
-    """'signed-in' | 'signed-out' | 'unknown' from an agent-browser `session` result.
+    """'signed-in' | 'signed-out' | 'bot-check' | 'unknown' from an agent-browser `session` result.
 
     Pure, so the selftest can pin it. The verdict is the browser lane's
     (`signedIn`, decided in code by sessionVerdict after the site's walk);
@@ -88,6 +88,10 @@ def session_state(result):
     """
     if not result or result.get("error") or "signedIn" not in result:
         return "unknown"
+    # A bot check is not a lapsed login: a sign-in card for it could never
+    # close (Cloudflare, review 25 Sep 2026). Reported, never filed.
+    if result.get("botCheck"):
+        return "bot-check"
     return "signed-in" if result.get("signedIn") else "signed-out"
 
 
@@ -189,7 +193,7 @@ def cmd_run(dry_run=False):
     with open(tmp, "w") as fh:
         json.dump(report, fh, indent=1)
     os.replace(tmp, STATUS)
-    counts = {k: sum(1 for r in report["sites"].values() if r["state"] == k) for k in ("signed-in", "signed-out", "unknown")}
+    counts = {k: sum(1 for r in report["sites"].values() if r["state"] == k) for k in ("signed-in", "signed-out", "bot-check", "unknown")}
     print(json.dumps({"at": report["at"], "counts": counts,
                       "signedOut": [r["label"] for r in report["sites"].values() if r["state"] == "signed-out"],
                       "unknown": [r["label"] for r in report["sites"].values() if r["state"] == "unknown"]}, indent=1))
@@ -208,6 +212,7 @@ def selftest():
         ({"site": "creators.spotify.com", "signedIn": True, "url": "https://creators.spotify.com/home/show/6hL5", "passwordFields": 0,
           "walked": [{"label": "Continue with Spotify", "found": True}]}, "signed-in"),
         ({"site": "www.edfenergy.com", "signedIn": False, "url": "https://www.edfenergy.com/myaccount/login", "passwordFields": 1}, "signed-out"),
+        ({"site": "dash.cloudflare.com", "signedIn": False, "botCheck": True, "url": "https://dash.cloudflare.com/", "passwordFields": 0}, "bot-check"),
         ({"site": "app.pingen.com", "signedIn": True, "url": "https://app.pingen.com/organisation/x/dashboard", "passwordFields": 0}, "signed-in"),
         ({"error": "timeout"}, "unknown"),
         ({"url": "https://app.pingen.com/login", "passwordFields": 0, "text": "Log in"}, "unknown"),

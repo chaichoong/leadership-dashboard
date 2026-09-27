@@ -782,10 +782,44 @@ async function readContentRow(env, log) {
         return undefined;
     }
 }
-export function buildContentOnlyText(content) {
-    return truncate(`*No approvals wait for you today.*\n${content}\n_This is the only approvals message you get today._`, 2900);
+// THE BLOCKER LOOP (Kevin, 25 Sep 2026): every task an agent could not finish,
+// and what would unblock it. scripts/estate-status.py writes ONE Estate Status
+// row from the half-hourly blocker sweep; its Detail names what only Kevin can
+// clear (a sign-in, a site to add, a step only he may take, a robot fix that
+// needs a build session). Said every morning something is blocked, because the
+// insurance that renewed on 11 Sep had sat blocked for days with nobody told.
+// Silent when nothing is blocked; a row that cannot be read, or has stopped
+// being written, is said in words.
+export const BLOCKERS_KEY = 'agent-blockers';
+const BLOCKERS_STALE_HOURS = 3;
+const ESTATE_URL = 'https://app.operationsdirector.co.uk/os/agents/index.html#tab=estate';
+export function blockersLine(row, now = new Date()) {
+    if (row === undefined) return `\n_The robots-blocked report could not be read this morning._ ${ESTATE_URL}\n`;
+    if (!row) return '';
+    const f = row.fields || {};
+    const detail = String(f.Detail || '').trim();
+    if (!detail || /^No robot is blocked\.$/.test(detail)) return '';
+    const updated = f.Updated ? new Date(f.Updated) : null;
+    const ageH = updated && !isNaN(updated) ? (now - updated) / 3600000 : Infinity;
+    const stale = ageH > BLOCKERS_STALE_HOURS
+        ? ` _(written ${Number.isFinite(ageH) ? Math.floor(ageH) + ' hours ago' : 'at an unknown time'}: the blocker check has stopped)_`
+        : '';
+    return `\n*${esc(detail)}*${stale}\nEach one and what clears it: ${ESTATE_URL}\n`;
 }
-export function buildDigestText(count, names, dashUrl, capped, signIns = [], handled = 0, content = '') {
+async function readEstateRow(env, key, log) {
+    try {
+        const q = `/${ESTATE_STATUS_TBL}?pageSize=1&filterByFormula=${encodeURIComponent(`{Key}='${key}'`)}`;
+        const data = await airtable(env, 'GET', q);
+        return (data.records || [])[0] || null;
+    } catch (e) {
+        log.push(`digest: ${key} row read FAILED (${e && e.message ? e.message : e})`);
+        return undefined;
+    }
+}
+export function buildContentOnlyText(content, blockers = '') {
+    return truncate(`*No approvals wait for you today.*\n${blockers}${content}\n_This is the only approvals message you get today._`, 2900);
+}
+export function buildDigestText(count, names, dashUrl, capped, signIns = [], handled = 0, content = '', blockers = '') {
     const shown = `${count}${capped ? '+' : ''}`;
     const top = names.slice(0, 3).map(n => `• ${n}`).join('\n');
     const more = count > 3 ? `\n…and ${capped ? 'more' : `${count - 3} more`}.` : '';
@@ -796,7 +830,7 @@ export function buildDigestText(count, names, dashUrl, capped, signIns = [], han
           + `.\nOpen the queue and press *Sign in to all*: sites open one after another, sign in, Cmd+Q, and the robots finish the work within minutes.\n`
         : '';
     return truncate(`*${shown} item${count === 1 && !capped ? '' : 's'} waiting for your approval.*\n`
-        + `${top}${more}\n${signInBlock}${handledLine(handled)}${content}\n`
+        + `${top}${more}\n${signInBlock}${blockers}${handledLine(handled)}${content}\n`
         + `Decide them here: ${dashUrl}\n`
         + `_This is the only approvals message you get today. Nothing has been sent or actioned._`, 2900);
 }
@@ -840,6 +874,7 @@ async function postKevinDigest(env, log) {
     }
 
     const content = contentLine(await readContentRow(env, log));
+    const blockers = blockersLine(await readEstateRow(env, BLOCKERS_KEY, log));
     // Claim the day BEFORE posting (review, 15 Sep 2026). The marker used to be written after the post, so a KV write
     // that threw (the account-wide free write limit has starved Workers before) left no marker and the next minute
     // posted again, all hour. A post that fails releases the claim so the next minute retries.
@@ -860,7 +895,7 @@ async function postKevinDigest(env, log) {
             body: JSON.stringify({
                 channel,
                 text: `${mine.length}${capped ? '+' : ''} approvals waiting`,
-                blocks: [{ type: 'section', text: { type: 'mrkdwn', text: buildDigestText(mine.length, mine.map(t => esc(truncate(t.name, 120))), DASHBOARD_QUEUE_URL, capped, signInsWaiting(mine), handled, content) } }],
+                blocks: [{ type: 'section', text: { type: 'mrkdwn', text: buildDigestText(mine.length, mine.map(t => esc(truncate(t.name, 120))), DASHBOARD_QUEUE_URL, capped, signInsWaiting(mine), handled, content, blockers) } }],
             }),
         }); } catch (e) { res = { ok: false, error: `threw: ${e && e.message ? e.message : e}` }; }   // a thrown post releases the claim too
         if (!res.ok) { log.push(`digest post failed: ${res.error}`); await release(); return -1; }
@@ -879,7 +914,7 @@ async function postKevinDigest(env, log) {
         let res;
         try { res = await slack(env, SLACK.post, {
             method: 'POST',
-            body: JSON.stringify({ channel, text: 'No approvals waiting; content report', blocks: [{ type: 'section', text: { type: 'mrkdwn', text: buildContentOnlyText(content) } }] }),
+            body: JSON.stringify({ channel, text: 'No approvals waiting; content report', blocks: [{ type: 'section', text: { type: 'mrkdwn', text: buildContentOnlyText(content, blockers) } }] }),
         }); } catch (e) { res = { ok: false, error: `threw: ${e && e.message ? e.message : e}` }; }
         if (!res.ok) { log.push(`digest post failed: ${res.error}`); await release(); return -1; }
         log.push('digest: nothing pending (control passed), content line sent');

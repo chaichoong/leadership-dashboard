@@ -34,6 +34,13 @@ describe('the coverage check on quote emails', () => {
   it('passes when every property is in the districts the contractor states, with a source', () => {
     expect(check(COV, EMAIL, 'COMPLIANCE: EICR quote request - AC1 - 6 Chedburgh Place')).toBe('');
   });
+  it('an insurer\'s "Quote Ref", or quotes discussed in the briefing and track record, is not a trade quote request (PIB, 25 Sep 2026)', () => {
+    const pib = 'TRACK RECORD: (searched tasks + Gmail)\n- 17 Sep 2026 06:02 — email: Renewal Invitation for your Property Owners Insurance [Quote Ref: 931520229]\n\n'
+      + 'Option B: RightSure via TopCashback, two quotes saved on the site.\n\n'
+      + 'TO: monika.kuzara@pib-insurance.com\nFROM: kevinbrittain@gmail.com\nSUBJECT: RE: Renewal Invitation for your Property Owners Insurance [Quote Ref: 931520229]\n---\n'
+      + 'Hi Monika,\n\nThank you for the renewal invitation for Quote Ref 931520229. I will be in touch before 3 October 2026.\n\nKind regards,\nKevin Brittain';
+    expect(check('', pib, 'COMPLIANCE: Property Owners Insurance renewal due 3 Oct 2026 - PIB Insurance')).toBe('');
+  });
   it('refuses a quote email on a property task with no coverage file', () => {
     expect(check('', EMAIL, 'COMPLIANCE: EICR quote')).toMatch(/needs a coverage file/);
   });

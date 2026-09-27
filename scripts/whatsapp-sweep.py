@@ -45,7 +45,7 @@ import sqlite3
 import sys
 from datetime import datetime, timezone
 
-DB_PATH = os.path.expanduser(
+DB_PATH = os.environ.get("WHATSAPP_DB_PATH") or os.path.expanduser(
     "~/Library/Group Containers/group.net.whatsapp.WhatsApp.shared/ChatStorage.sqlite"
 )
 STATE_DIR = os.path.expanduser("~/knowledge-os/logs/inbound-messages-sweep")
@@ -403,6 +403,89 @@ def selftest():
     return 0
 
 
+# ─── LOOKUP (Kevin, 25 Sep 2026) ─────────────────────────────────────
+# WhatsApp was taken out of agent work on 24 Aug 2026 ("Kevin's own channel").
+# On 25 Sep he allowed a READ-ONLY lookup: an agent working a task may read the
+# recent messages of ONE named contact or number, never a sweep of his chats,
+# and never a send or a draft. A name that matches more than LOOKUP_MAX_CHATS
+# chats is refused, so a vague search cannot turn into reading everything.
+LOOKUP_MAX_CHATS = 3
+LOOKUP_MAX_MESSAGES = 100
+LOOKUP_MAX_DAYS = 365
+
+
+def lookup_digits(who):
+    """A UK or international number as the digits a WhatsApp id starts with."""
+    d = re.sub(r"\D", "", who or "")
+    if d.startswith("00"):
+        d = d[2:]
+    elif d.startswith("0") and len(d) == 11:
+        d = "44" + d[1:]
+    return d
+
+
+def lookup(who, days=60, limit=40):
+    who = " ".join(str(who or "").split())
+    digits = lookup_digits(who)
+    by_number = len(digits) >= 7
+    if not by_number and len(who) < 3:
+        print(json.dumps({"error": "lookup needs a contact name (3+ letters) or a phone number"}))
+        return 2
+    days = max(1, min(int(days), LOOKUP_MAX_DAYS))
+    limit = max(1, min(int(limit), LOOKUP_MAX_MESSAGES))
+    conn = open_db()
+    chats = []
+    sessions = conn.execute("SELECT Z_PK AS pk, ZCONTACTJID AS jid, ZPARTNERNAME AS name FROM ZWACHATSESSION").fetchall()
+    if not sessions:
+        # A blind read (macOS refusing the file, a moved database) returns no
+        # chats at all, which must never read as "nobody by that name".
+        print(json.dumps({"error": "WhatsApp's database opened but holds no chats: the read is broken, not empty"}))
+        return 1
+    for s in sessions:
+        jid, name = s["jid"] or "", s["name"] or ""
+        if not jid or jid_is_broadcast(jid):
+            continue
+        if by_number:
+            hit = jid.split("@")[0].startswith(digits)
+        else:
+            hit = who.lower() in name.lower()
+        if hit:
+            chats.append(s)
+    if len(chats) > LOOKUP_MAX_CHATS:
+        print(json.dumps({"error": f"{len(chats)} chats match {who!r}; give the full name or the number "
+                                   f"(at most {LOOKUP_MAX_CHATS} chats are read at once)",
+                          "matches": [c["name"] for c in chats][:10]}))
+        return 2
+    since = now_apple_ts() - days * 86400
+    out = []
+    for c in chats:
+        rows = conn.execute(
+            """
+            SELECT m.ZTEXT AS text, m.ZISFROMME AS from_me, m.ZMESSAGEDATE AS date,
+                   gm.ZCONTACTNAME AS member_name, gm.ZMEMBERJID AS member_jid,
+                   s.ZCONTACTJID AS chat_jid, s.ZPARTNERNAME AS chat_name
+            FROM ZWAMESSAGE m
+            JOIN ZWACHATSESSION s ON s.Z_PK = m.ZCHATSESSION
+            LEFT JOIN ZWAGROUPMEMBER gm ON gm.Z_PK = m.ZGROUPMEMBER
+            WHERE m.ZCHATSESSION = ? AND m.ZMESSAGEDATE >= ?
+            ORDER BY m.ZMESSAGEDATE DESC LIMIT ?
+            """, (c["pk"], since, limit)).fetchall()
+        msgs = []
+        for r in reversed(rows):
+            if not r["text"]:
+                continue
+            if r["from_me"]:
+                frm = "kevin"
+            else:
+                jid, name = sender_identity(r)
+                frm = name or jid
+            msgs.append({"from": frm, "at": apple_ts_to_iso(r["date"]), "text": r["text"][:1000]})
+        out.append({"chat": c["name"], "jid": c["jid"], "group": jid_is_group(c["jid"]), "messages": msgs})
+    print(json.dumps({"who": who, "days": days, "chatsSearched": len(sessions), "chats": out,
+                      "note": "read-only; nothing was sent, drafted or marked"}, indent=1))
+    return 0
+
+
 def main(argv):
     cmd = argv[1] if len(argv) > 1 else "scan"
     if cmd == "scan":
@@ -429,6 +512,12 @@ def main(argv):
         return sent_check(jid, opt("--contains"), float(opt("--since-hours", "48")))
     if cmd == "selftest":
         return selftest()
+    if cmd == "lookup":
+        who = opt("--who")
+        if not who:
+            print("lookup requires --who <contact name or phone number>", file=sys.stderr)
+            return 2
+        return lookup(who, opt("--days", "60"), opt("--limit", "40"))
     print(f"unknown command {cmd}", file=sys.stderr)
     return 2
 

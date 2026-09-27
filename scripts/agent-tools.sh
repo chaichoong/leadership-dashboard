@@ -46,6 +46,26 @@
 # unattended runs it exists for.
 AGENT_NODE_BIN="$(command -v node || ls -1d /Users/kevinbrittain/.nvm/versions/node/*/bin/node 2>/dev/null | tail -1)"
 export AGENT_NODE_BIN
+# Resolving it was not enough. Agents are allowed `Bash(node:*)` and type
+# `node scripts/agent-browser.js`, which looks node up on PATH, and launchd's
+# PATH is /usr/bin:/bin:/usr/sbin:/sbin. So every unattended browser step died
+# with "command not found: node" while this variable sat unused (6 Chedburgh
+# Place insurance, parked 21-25 Sep 2026 after Kevin had signed in). Put its
+# folder on PATH, which the agent's shell inherits.
+if [ -n "$AGENT_NODE_BIN" ]; then
+  case ":$PATH:" in
+    *":$(dirname "$AGENT_NODE_BIN"):"*) ;;
+    *) PATH="$(dirname "$AGENT_NODE_BIN"):$PATH"; export PATH ;;
+  esac
+fi
+
+# LET THE AGENTS FINISH (25 Sep 2026). `claude -p` waits 600 seconds for the
+# agents a run starts in the background, then terminates them: "Background
+# tasks still running after 600s; terminating." Three hand-back runs hit it that
+# day, the last with both insurance agents "actively working through the
+# TopCashback quote wizards", so a quote could never be finished. Forty
+# minutes: still a ceiling, and under the hand-back poll's own 45-minute limit.
+export CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS="${CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS:-2400000}"
 
 # The shared set. Extra per-runner tools are appended by the caller, never
 # substituted (handback-poll needs osascript for iMessage sends).
@@ -73,6 +93,16 @@ AGENT_ALLOWED_TOOLS=(
   # scripts/agent-browser.js, which is the only route to a browser and which
   # physically cannot submit a form without an approved task id.
   "Bash(node:*)"
+
+  # THE RUN'S OWN CONTROL (finding 20260925-agent-dispatch-617, 25 Sep 2026).
+  # SKILL step 7 runs verify through ~/tools/run-job.sh, which records the run
+  # for the Estate board and alerts on a failure. A headless run had no
+  # permission for it, so the call waited for an approval nobody could give and
+  # the agent fell back to a bare verify: the check ran, the record and the
+  # alert did not. Exactly that command is allowed, never run-job.sh itself,
+  # which would run anything it is handed.
+  "Bash(/Users/kevinbrittain/tools/run-job.sh agent-dispatch python3 /Users/kevinbrittain/Projects/leadership-dashboard/scripts/agent-dispatch.py verify:*)"
+  "Bash(/Users/kevinbrittain/tools/run-job.sh agent-dispatch python3 scripts/agent-dispatch.py verify:*)"
 )
 export AGENT_ALLOWED_TOOLS
 

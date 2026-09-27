@@ -300,8 +300,14 @@ def parse_energy(text):
 AT_DOOR = re.compile(r"oauthSignIn|seclogin|/(?:log-?in|sign-?in|signin|login|auth)(?:/|\?|$)", re.I)
 
 
-def signed_in(url, password_fields):
-    if password_fields is None or int(password_fields) != 0:
+BOT_CHECK_PROBLEM = ("BOT CHECK: Utilita showed the robot a \"verify you are human\" page, so no "
+                     "balance was read. A sign-in will not fix it; the next hourly read tries again")
+
+
+def signed_in(url, password_fields, bot_check=False):
+    # bot_check: agent-browser.js's own isBotCheck on the page (25 Sep 2026);
+    # a "verify you are human" page is never a signed-in dashboard.
+    if bot_check or password_fields is None or int(password_fields) != 0:
         return False
     return not AT_DOOR.search(url or "")
 
@@ -335,7 +341,9 @@ def meter_problem(pinned, seen):
 # and waitForProfile's pgrep then saw that orphan for ever, so every later run
 # also timed out and added another orphan. start_new_session + killpg fixes the
 # orphan; the longer timeout stops the false alarm.
-READ_TIMEOUT_S = 11 * 60
+# Since 25 Sep 2026 a read also waits while Kevin holds the profile for a
+# sign-in (up to 20 minutes) before the 10-minute profile wait, so 32 minutes.
+READ_TIMEOUT_S = 32 * 60
 
 
 def read_account(acct, node=None):
@@ -391,7 +399,11 @@ def read_account(acct, node=None):
         row["problem"] = "the browser returned something unreadable"
         return row
 
-    row["signedIn"] = signed_in(data.get("url") or "", data.get("passwordFields"))
+    row["signedIn"] = signed_in(data.get("url") or "", data.get("passwordFields"), bool(data.get("botCheck")))
+    if data.get("botCheck"):
+        # Not a lapsed login: a sign-in would not help, so the message must not ask for one.
+        row["problem"] = BOT_CHECK_PROBLEM
+        return row
     if not row["signedIn"]:
         row["problem"] = "SIGN-IN NEEDED"
         return row
@@ -501,9 +513,17 @@ def build_message(rows, low_gbp, when=None, alarm_days=ALARM_DAYS_LEFT):
         else:
             attention = True
             body.append("*" + r["label"] + "*: _" + (r["problem"] or "no reading") + "_")
-    if any(r.get("problem") == "SIGN-IN NEEDED" for r in rows):
+    # Name the entries to pick (25 Sep 2026). "Open the Robot sign-in app" was all
+    # this said, and the app could not open either flat until each got its own
+    # line ("Utilita Apartment 1 (...)", from the `profiles` list in sites.json).
+    lapsed = [r["label"] for r in rows if r.get("problem") == "SIGN-IN NEEDED"]
+    if lapsed:
         body.append("")
-        body.append("_Open the Robot sign-in app on the Desktop to put that right._")
+        body.append("_Kevin: open the Robot sign-in app on the Desktop and pick "
+                    + " and ".join("Utilita " + l for l in lapsed)
+                    + (" (Cmd-click to pick both" if len(lapsed) > 1 else " (")
+                    + ("; " if len(lapsed) > 1 else "")
+                    + "if it lists other sites first, press Pick a site instead)._")
     body.append("")
     body.append("_Read at " + when.strftime("%H:%M") + "._")
     return head + "\n" + "\n".join(body), attention, alarm
@@ -1030,8 +1050,19 @@ def selftest():
              days="More than a week left", meter="2409")], 10)
     if "SIGN-IN NEEDED" not in msg or "£0.00" in msg or not att:
         bad.append(("lapsed session message", "SIGN-IN NEEDED + attention", msg[:80]))
-    if "Robot sign-in" not in msg:
-        bad.append(("lapsed session lacks the fix", "Robot sign-in line", "missing"))
+    if "Robot sign-in" not in msg or "pick Utilita Apartment 1 (if it lists" not in msg or "Utilita Apartment 2" in msg:
+        bad.append(("lapsed session names the app entry for that flat only",
+                    "pick Utilita Apartment 1", msg[-160:]))
+    # A bot check is said as one, with attention, and never asks Kevin to sign in (25 Sep 2026).
+    bot, bot_att, _ = build_message([row(ok=False, problem=BOT_CHECK_PROBLEM, meter=None),
+                                     row(label="Apartment 2", bal="£34.37", gbp=34.37,
+                                         days="More than a week left", meter="2409")], 10)
+    if "verify you are human" not in bot or "Robot sign-in" in bot or not bot_att:
+        bad.append(("bot check message", "named, attention, no sign-in ask", bot[-200:]))
+    both, _, _ = build_message([row(ok=False, problem="SIGN-IN NEEDED", meter=None),
+                                row(label="Apartment 2", ok=False, problem="SIGN-IN NEEDED", meter=None)], 10)
+    if "pick Utilita Apartment 1 and Utilita Apartment 2 (Cmd-click to pick both; if it lists" not in both:
+        bad.append(("both flats lapsed: both named, and how to pick both", "Cmd-click to pick both", both[-200:]))
     if "…2409" not in msg:
         bad.append(("the meter is shown so a dropped check is visible", "…2409", "missing"))
 

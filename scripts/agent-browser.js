@@ -43,7 +43,8 @@
  * is auditable after the fact rather than trusted at the time.
  *
  * USAGE
- *   node scripts/agent-browser.js login   --url URL [--profile NAME]
+ *   node scripts/agent-browser.js login   --url URL [--profile NAME] [--label NAME] [--add]   --add: a NEW site, Kevin's choice
+ *   node scripts/agent-browser.js signin-list [--for URL]              every sign-in the Robot sign-in app can open
  *   node scripts/agent-browser.js session --site HOST [--shot PATH]   is the robot signed in there? (walks the door)
  *   node scripts/agent-browser.js read    --url URL [--shot OUT.png] [--wait MS] [--wait-for SELECTOR] [--max-text N]
  *   node scripts/agent-browser.js loom-search --query "..." [--limit 20]
@@ -57,7 +58,7 @@
  *     "steps": [
  *       {"do":"goto",   "url":"https://..."},
  *       {"do":"fill",   "selector":"#ref",  "value":"123456"},
- *       {"do":"select", "selector":"#type", "value":"arrears"},
+ *       {"do":"select", "selector":"#type", "value":"arrears"},   (value code or the label shown; a miss lists the options)
  *       {"do":"check",  "selector":"#agree"},
  *       {"do":"upload", "selector":"#pick", "file":"~/knowledge-os/attachments/ast.pdf"},
  *       {"do":"press",  "selector":"#email", "key":"Enter"},
@@ -252,6 +253,165 @@ function hostAllowed(url) {
   return Object.keys(loadSites()).some(d => h === d || h.endsWith('.' + d));
 }
 
+// sites.json as written, without the builtins merged in. A missing file is an
+// empty list; a file that will not parse THROWS, because rewriting it from one
+// new entry would wipe every site already on it.
+function readSitesFile() {
+  let raw;
+  try { raw = fs.readFileSync(SITES_FILE, 'utf8'); } catch (e) {
+    if (e.code === 'ENOENT') return {};
+    throw e;
+  }
+  return raw.trim() ? JSON.parse(raw) : {};                            // an empty file, as loadSites reads it
+}
+
+// A profile is a folder under PROFILE_ROOT, so a name that could climb out of
+// it (a slash, a dot) is refused wherever a profile is chosen.
+const PROFILE_NAME_RE = /^[a-z0-9][a-z0-9-]*$/i;
+
+// What `login` writes on the allowlist (25 Sep 2026). Until now it wrote
+// {label, login} and no sign-in page, so every site added that way (TopCashback,
+// Evernote, Strava) was missing from the Robot sign-in app and from the daily
+// keep-alive: once its login lapsed, only a Claude session could open it again.
+// It also wrote the whole merged list, builtins included, into sites.json, where
+// the copies then outranked any later change to a builtin.
+//
+// A sign-in on the MAIN profile records its page, so the app lists it for every
+// sign-in after. A sign-in on any other profile never touches the entry's
+// loginUrl: that field is the main profile's door, and the keep-alive tests it
+// on the main profile. Utilita keeps one profile per flat and no top-level
+// loginUrl for exactly that reason (utilita-balance.py), and its flats reach the
+// app through the entry's `profiles` list instead.
+// The registrable domain, by the same rule as agent-dispatch.py signin_domain:
+// app.pingen.com -> pingen.com, www.topcashback.co.uk -> topcashback.co.uk.
+function signinDomain(host) {
+  const parts = String(host || '').toLowerCase().split('.').filter(Boolean);
+  if (parts.length >= 3 && parts[parts.length - 1].length === 2 &&
+      ['co', 'gov', 'org', 'ac', 'net', 'ltd', 'plc', 'me', 'sch', 'nhs'].includes(parts[parts.length - 2])) {
+    return parts.slice(-3).join('.');
+  }
+  return parts.slice(-2).join('.');
+}
+// One platform domain hosts unrelated sign-ins (Gmail, Drive, AI Studio), so a
+// sibling there is never the same site. Same list as agent-dispatch.py.
+const SIGNIN_SHARED_DOMAINS = new Set(['google.com', 'google.co.uk', 'microsoft.com', 'live.com', 'office.com',
+  'apple.com', 'amazon.com', 'amazon.co.uk', 'facebook.com', 'meta.com']);
+
+// The entry a sign-in on HOST belongs to, resolved the way agent-dispatch.py
+// signin_site_for resolves a task's sign-in line, so the app and the task
+// side agree: its own entry or its nearest parent (www.tax.service.gov.uk is
+// HMRC's), else a login site on the same registrable domain (evernote.com is
+// www.evernote.com's), never on a shared platform domain.
+function signinOwner(host, sites = loadSites()) {
+  const parent = Object.keys(sites).filter(k => host === k || host.endsWith('.' + k))
+    .sort((a, b) => b.length - a.length)[0];
+  if (parent) return { key: parent, sibling: false };
+  const dom = signinDomain(host);
+  if (SIGNIN_SHARED_DOMAINS.has(dom)) return null;
+  const sib = Object.keys(sites).find(k => sites[k] && sites[k].login && signinDomain(k) === dom);
+  return sib ? { key: sib, sibling: true } : null;
+}
+
+function recordLoginSite(url, { label, profile, add } = {}) {
+  let u;
+  try { u = new URL(url); } catch { die(`${url} is not a web address.`); }
+  if (u.username || u.password) die('that address carries a name or password in it. A sign-in page address never does.');
+  const host = u.hostname.toLowerCase();
+  const sites = loadSites();
+  // The OWNING entry, not the exact host. Found in review: an exact-host match
+  // made an HMRC or Loom sign-in, whose pages sit on www., write a second entry
+  // without HMRC's shortSession, and the keep-alive would then have raised a
+  // false HMRC task every morning.
+  let found = signinOwner(host, sites);
+  const kept = { host, changed: false };
+  // A sibling is written only when Kevin adds it on purpose ("Add a new site",
+  // `add`): from a task line its page would sit on a host its entry does not
+  // allow, and a new entry would widen the allowlist to a whole domain on the
+  // strength of one line (evernote.com beside www.evernote.com). A site with
+  // flats (my.utilita.co.uk) settles every sibling, on any profile, always.
+  if (found && found.sibling) {
+    if (!add || Array.isArray(sites[found.key].profiles)) return kept;
+    found = null;                                                      // www.youtube.com beside studio.youtube.com is its own site
+  }
+  const ownerKey = found ? found.key : null;
+  const owner = ownerKey ? sites[ownerKey] : null;
+  const onMain = (profile || 'default') === 'default' && !(owner && Array.isArray(owner.profiles));
+  // A profile sign-in only ever adds a stranger, as before; a main-profile
+  // sign-in also gives a login site with no page its page.
+  if (onMain ? !!(owner && owner.login && owner.loginUrl) : !!owner) return kept;
+  // A builtin that holds no login (gov.uk, Companies House search) stays that
+  // way even when its own address is signed in at: it covers every host under
+  // it, and making it a login site would pull strangers' task lines onto it.
+  if (owner && !owner.login && ownerKey === host && BUILTIN_SITES[host]) {
+    return Object.assign(kept, { note: `${host} is on the list as a read-only site, so the sign-in was not recorded.` });
+  }
+  // Only Kevin adds a site (review, a gap older than this change): a task line
+  // naming a host nothing owns used to put that host on the list, and open the
+  // window there, so a misled agent could steer his sign-in to a stranger.
+  // Without `add`, only an existing login site is updated, and `login` REFUSES
+  // to open anything else: the refusal is what the app shows him.
+  if (!add && !(owner && owner.login)) {
+    return Object.assign(kept, { refuse: `${host} is not on the robot's list, so no sign-in window was opened there. If you want the robots to use it, add it yourself with "Add a new site".` });
+  }
+  // An http page still opens (agents' lines take http too), but is never written.
+  if (u.protocol !== 'https:') return Object.assign(kept, { note: `${url} is not https, so it was not recorded on the allowlist.` });
+  // A parent that holds no login (gov.uk) is not turned into one: the new site
+  // gets its own entry, and keeps any ancestor's short session (a GOV.UK service
+  // signs in through One Login, which lapses in an hour; without the flag the
+  // keep-alive raises a sign-in task for it every morning).
+  const key = owner && (ownerKey === host || owner.login) ? ownerKey : host;
+  // A bare platform domain would let the robot into every service under it
+  // (google.com: Gmail, Drive). The service's own address is the site.
+  if (SIGNIN_SHARED_DOMAINS.has(key)) {
+    return Object.assign(kept, { note: `${key} holds many separate sign-ins, so it was not recorded. Add the exact service's address instead of ${key}.` });
+  }
+  // Short session from ANY ancestor: idam.companieshouse.gov.uk sits under
+  // companieshouse.gov.uk, which has no flag, and under gov.uk, which has.
+  const shortAbove = Object.keys(sites).some(k => k !== key && (key === k || key.endsWith('.' + k)) && sites[k].shortSession);
+  const extra = readSitesFile();
+  const entry = Object.assign({}, extra[key] || {});
+  entry.label = entry.label || (key === ownerKey && owner.label) || label || host;
+  entry.login = true;
+  if (onMain) entry.loginUrl = url;
+  if (key !== ownerKey && shortAbove) entry.shortSession = true;
+  extra[key] = entry;
+  fs.mkdirSync(path.dirname(SITES_FILE), { recursive: true });
+  const tmp = SITES_FILE + '.tmp';
+  fs.writeFileSync(tmp, JSON.stringify(extra, null, 2));
+  fs.renameSync(tmp, SITES_FILE);
+  return { host: key, changed: true };
+}
+
+// Every sign-in the Robot sign-in app can open (25 Sep 2026): one per login
+// site with a sign-in page on the main profile, plus one per entry in a site's
+// `profiles` list. Utilita is the case that needed it: each Duckworth flat is a
+// separate Utilita login held in its own profile, the app only ever opened the
+// main one, and the watcher's Slack line sent Kevin to an app that could not
+// sign either flat back in.
+// A profile entry that cannot be used is named in `problems`, never dropped in
+// silence: a flat missing from the list reads exactly like a flat nobody set up.
+function signinTargets(sites = loadSites(), problems = []) {
+  const out = [];
+  // " | " splits the app's fields and a line break splits its lines.
+  const clean = s => String(s).replace(/[\r\n]+/g, ' ').replace(/\s*\|\s*/g, ' - ').trim();
+  for (const [host, v] of Object.entries(sites)) {
+    if (!v || !v.login) continue;
+    if (v.loginUrl) out.push({ label: clean(v.label || host), host, url: v.loginUrl, profile: 'default' });
+    for (const p of Array.isArray(v.profiles) ? v.profiles : []) {
+      const name = String((p && p.profile) || '');
+      if (!PROFILE_NAME_RE.test(name)) { problems.push(`${host}: profile "${name}" is not a plain folder name`); continue; }
+      let h = '';
+      try { h = new URL(p.loginUrl).hostname.toLowerCase(); } catch { /* reported just below */ }
+      if (h !== host && !h.endsWith('.' + host)) {                    // a profile opens its own site only
+        problems.push(`${host}: profile ${name} has no sign-in page on ${host}`);
+        continue;
+      }
+      out.push({ label: clean(p.label || `${v.label || host} (${name})`), host, url: p.loginUrl, profile: name });
+    }
+  }
+  return out;
+}
+
 // A refusal exits the process when run as a command, and THROWS when required
 // as a module, so a test can assert on the refusal instead of having the test
 // runner killed by the guard it is testing. Same message either way.
@@ -400,21 +560,62 @@ function persistSessionCookies(dir, ttlMs = 60 * 60 * 1000) {
 // Signed out: a password box, GOV.UK One Login's own pages, or a URL that is
 // still a door (WebFiling's oauthSignIn/seclogin, any /login-shaped path).
 // Signed in: none of those, on a page of the site itself.
-function sessionVerdict(url, passwordFields) {
+//
+// Nor a bot check (25 Sep 2026). Cloudflare's dashboard shows the robot
+// "Performing security verification / Verify you are human" on its own
+// address, with no password box, so it read as signed in: the Robot sign-in
+// app opened no window, handed the task back, and the agent hit the same wall
+// again. The robot never clicks one of these, and a sign-in does not remove
+// it, so it is its own verdict: botCheck.
+const BOT_CHECK_TITLE_RE = /^\s*just a moment/i;
+const BOT_CHECK_TEXT_RE = /verify you are (?:a )?human|performing security verification|checking if the site connection is secure|checking your browser before accessing|make sure you(?:'|’)re not a robot|press (?:&|and) hold to confirm/i;
+function isBotCheck(text = '', title = '') {
+  return BOT_CHECK_TITLE_RE.test(String(title || '')) || BOT_CHECK_TEXT_RE.test(String(text || '').slice(0, 2000));
+}
+// A challenge that clears on its own ("Just a moment..." for a few seconds)
+// is not a wall. Give it up to maxMs before a verdict is taken (review,
+// 25 Sep 2026); a page with no challenge costs one extra read.
+async function settleBotCheck(page, maxMs = 15000) {
+  const deadline = Date.now() + maxMs;
+  while (Date.now() < deadline) {
+    let challenged;
+    // A check that clears navigates the page, and a read at that instant throws
+    // "Execution context was destroyed": that is the check clearing, never a
+    // failure of the whole command (review, 25 Sep 2026). Look again.
+    try { challenged = isBotCheck(await domText(page, 2000), await page.title()); } catch { challenged = true; }
+    if (!challenged) return;
+    await page.waitForLoadState('domcontentloaded', { timeout: 5000 }).catch(() => {});
+    await page.waitForTimeout(2000);
+  }
+}
+function sessionVerdict(url, passwordFields, text = '', title = '') {
   let host = '';
   try { host = new URL(url).hostname.toLowerCase(); } catch { host = ''; }
   const atDoor = /oauthSignIn|seclogin|\/(?:log-?in|sign-?in|signin|login|auth)(?:\/|\?|$)/i.test(url);
   const atOneLogin = /(^|\.)account\.gov\.uk$/i.test(host);
-  return { signedIn: Number(passwordFields) === 0 && !atOneLogin && !atDoor, atDoor, atOneLogin };
+  const botCheck = isBotCheck(text, title);
+  return { signedIn: Number(passwordFields) === 0 && !atOneLogin && !atDoor && !botCheck, atDoor, atOneLogin, botCheck };
 }
 
 // ── Browser ──────────────────────────────────────────────────────────────────
 // The robot profile can be open in ONE place: a sign-in window or a headless
 // run, never both (Chromium's profile lock, an opaque error). Poll until it is
 // free, for up to maxMs, then die with the caller's message.
-async function waitForProfile(dir, maxMs, message) {
+// Every process holding the profile, as command lines. The plain sign-in window
+// is the one without --headless: an agent's headless Chrome on the same profile
+// must never be mistaken for Kevin's window (review, 25 Sep 2026).
+function profileProcs(dir) {
   const { spawnSync } = require('child_process');
-  const busy = () => spawnSync('pgrep', ['-f', `user-data-dir=${dir}`]).status === 0;
+  const out = spawnSync('ps', ['-axww', '-o', 'command='], { encoding: 'utf8' }).stdout || '';
+  const flag = `--user-data-dir=${dir}`;
+  return out.split('\n').filter(l => l.split(/\s+/).includes(flag) || l.includes(flag + ' '));
+}
+// Only the BROWSER process counts: a headless Chrome's renderer and utility
+// helpers carry the profile but not --headless, so judging every line took an
+// agent's browser for Kevin's window (review, 25 Sep 2026). Helpers carry --type=.
+function plainWindowOpen(dir) { return profileProcs(dir).some(l => !/\s--type=/.test(l) && !/\s--headless\b/.test(l)); }
+async function waitForProfile(dir, maxMs, message) {
+  const busy = () => profileProcs(dir).length > 0;
   if (!busy()) return;
   const deadline = Date.now() + maxMs;
   while (Date.now() < deadline) {
@@ -422,6 +623,41 @@ async function waitForProfile(dir, maxMs, message) {
     if (!busy()) return;
   }
   die(message);
+}
+
+// ── Kevin's sign-in comes first (25 Sep 2026) ────────────────────────────────
+// A sign-in window and an agent share this one profile. While an agent filled
+// the RightSure form, step after step, the profile was almost never free: the
+// sign-in waited, caught a gap, and the agent's next step and Kevin's window
+// fought for the lock (Chrome's icon flicking on and off, nothing opening), or
+// it gave up after three minutes telling him to quit a Chrome he did not have.
+// So a sign-in takes a HOLD: no new agent step starts while it stands, the
+// step in flight finishes, and then his window opens. The hold ends when his
+// window closes, and on its own after HOLD_MAX_MS or when its process is gone.
+const HOLD_MAX_MS = 20 * 60 * 1000;
+const holdPath = (dir) => dir + '.signin-hold';
+function signinHoldActive(dir, now = Date.now()) {
+  let h;
+  try { h = JSON.parse(fs.readFileSync(holdPath(dir), 'utf8')); } catch { return false; }
+  if (!h || !h.at || now - h.at > HOLD_MAX_MS) return false;
+  if (h.pid) { try { process.kill(h.pid, 0); } catch { return false; } }
+  return true;
+}
+function takeSigninHold(dir) { fs.writeFileSync(holdPath(dir), JSON.stringify({ pid: process.pid, at: Date.now() })); }
+// Only the sign-in that took the hold removes it: a second sign-in's hold is
+// never lifted by the first one ending.
+function releaseSigninHold(dir) {
+  try {
+    const h = JSON.parse(fs.readFileSync(holdPath(dir), 'utf8'));
+    if (h && h.pid && h.pid !== process.pid) return;
+    fs.unlinkSync(holdPath(dir));
+  } catch { /* already gone, or unreadable and so already inactive */ }
+}
+async function waitForSigninHold(dir) {
+  if (!signinHoldActive(dir)) return;
+  console.error(`WAITING: Kevin is signing in on the robot profile (${path.basename(dir)}). This step starts when he closes that window (at most ${HOLD_MAX_MS / 60000} minutes).`);
+  const deadline = Date.now() + HOLD_MAX_MS;
+  while (signinHoldActive(dir) && Date.now() < deadline) await new Promise(r => setTimeout(r, 2000));
 }
 
 async function withPage(profile, headed, fn) {
@@ -437,6 +673,10 @@ async function withPage(profile, headed, fn) {
   if (!chromium) die(`playwright not found (tried: ${tried.join(', ')}). Run npm install in ${REPO}.`);
   const dir = path.join(PROFILE_ROOT, profile || 'default');
   fs.mkdirSync(dir, { recursive: true });
+  // Kevin's sign-in first: never start a step while he holds the profile,
+  // checked again after the profile wait, just before the launch.
+  for (;;) {
+    await waitForSigninHold(dir);
   // The `login` window is a plain Chrome holding this same profile. Launching
   // on top of it trips Chromium's profile lock with an opaque error, and the
   // 30-minute hand-back poller can easily fire while Kevin is still signing in
@@ -444,8 +684,10 @@ async function withPage(profile, headed, fn) {
   // Wait for it rather than fail (8 Sep 2026): the Robot sign-in app opens
   // the waiting sites one after another, a chain of a few minutes, and a
   // scheduled slot that dies the instant it meets that window loses its run.
-  await waitForProfile(dir, 10 * 60 * 1000,
-    `the profile at ${dir} is open in a sign-in window. Kevin has not quit it yet (Cmd+Q); try again afterwards.`);
+    await waitForProfile(dir, 10 * 60 * 1000,
+      `the profile at ${dir} is open in a sign-in window. Kevin has not quit it yet (Cmd+Q); try again afterwards.`);
+    if (!signinHoldActive(dir)) break;
+  }
   // Prefer Kevin's installed Google Chrome over Playwright's bundled test build
   // (2 Sep 2026). The bundled Chromium announces itself as automated
   // (navigator.webdriver = true, "controlled by automated test software"),
@@ -546,6 +788,22 @@ function assertConfirmable(plan) {
 // the loop returns before it, it does not skip past it. `confirm` is the
 // declared proof of landing; checked after the final step whenever a submit
 // actually executed.
+// Which <select> option a plan means: exact value, then exact label (case and
+// spacing ignored), then the single option whose label contains the words.
+// Two or more partial matches is a question, never a guess.
+function pickOption(opts, want) {
+  const norm = t => String(t || '').replace(/\s+/g, ' ').trim().toLowerCase();
+  const w = norm(want);
+  if (!w) return { option: null, why: 'no value or label given.' };
+  const byValue = opts.find(o => o.value === String(want));
+  if (byValue) return { option: byValue };
+  const exact = opts.filter(o => norm(o.label) === w);
+  if (exact.length === 1) return { option: exact[0] };
+  const part = opts.filter(o => norm(o.label).includes(w));
+  if (part.length === 1) return { option: part[0] };
+  return { option: null, why: part.length ? `"${want}" matches ${part.length} options; name one exactly.` : `no option matches "${want}".` };
+}
+
 async function runSteps(page, steps, allowSubmit, confirm) {
   const done = [];
   let submitted = false;
@@ -563,9 +821,25 @@ async function runSteps(page, steps, allowSubmit, confirm) {
         await assertNotCredential(page, s.selector, s.value);
         await page.fill(s.selector, String(s.value), { timeout: 20000 });
         break;
-      case 'select':
-        await page.selectOption(s.selector, String(s.value), { timeout: 20000 });
+      case 'select': {
+        // By what the page SHOWS (25 Sep 2026): the agent wrote "Terraced" and
+        // "House" for AXA's property type, Playwright wanted the option's exact
+        // value code or exact label, and the step failed with no clue which
+        // options existed. Now: exact value, then the label ignoring case and
+        // spacing, then the one option whose label contains the words; on a
+        // miss the error lists every option, so the next plan can name one.
+        const want = String(s.label !== undefined ? s.label : s.value);
+        const box = page.locator(s.selector).first();
+        await box.waitFor({ state: 'attached', timeout: 20000 });
+        const opts = await box.evaluate(el => el.tagName === 'SELECT'
+          ? Array.from(el.options).map(o => ({ value: o.value, label: (o.label || o.textContent || '').replace(/\s+/g, ' ').trim() }))
+          : null);
+        if (!opts) throw new Error(`select: ${s.selector} is not a <select> but a styled dropdown. Click it open, then click the option by its text.`);
+        const pick = pickOption(opts, want);
+        if (!pick.option) throw new Error(`select: ${pick.why} Options: ${opts.map(o => `"${o.label}" [${o.value}]`).join(' | ')}`);
+        await box.selectOption({ value: pick.option.value }, { timeout: 20000 });
         break;
+      }
       case 'check':
         await page.check(s.selector, { timeout: 20000 });
         break;
@@ -721,19 +995,47 @@ async function main() {
     return;
   }
 
+  // One "label | host | url | profile" line per sign-in, for the Robot sign-in
+  // app's picker. Unusable profile entries go to stderr by name.
+  // --for URL: only the sign-ins of the site that address belongs to (its
+  // owner, as recordLoginSite resolves it). The app's "Add a new site" asks
+  // this first, so an address already covered opens on its own lines (a
+  // Utilita flat's profile) and is never recorded as a second site.
+  if (cmd === 'signin-list') {
+    const problems = [];
+    const forUrl = arg(rest, 'for', null);
+    let only = null;
+    if (forUrl) {
+      let h;
+      try { h = new URL(forUrl).hostname.toLowerCase(); } catch { die(`${forUrl} is not a web address.`); }
+      const sites = loadSites();
+      const found = signinOwner(h, sites);
+      // A sibling counts only when it holds flats: www.utilita.co.uk IS the two
+      // flats, while www.youtube.com is not YouTube Studio and is added as a site.
+      only = found && (!found.sibling || Array.isArray(sites[found.key].profiles)) ? found.key : '';
+    }
+    for (const t of signinTargets(loadSites(), problems)) {
+      if (only !== null && t.host !== only) continue;
+      console.log([t.label, t.host, t.url, t.profile].join(' | '));
+    }
+    for (const p of problems) console.error('SKIPPED: ' + p);
+    return;
+  }
+
   if (cmd === 'login') {
     // The one-time human step. Headed on purpose: Kevin signs in himself, the
     // profile keeps the cookie, and no password ever reaches an agent.
     const url = arg(rest, 'url');
     if (!url) die('--url is required');
+    if (!PROFILE_NAME_RE.test(profile)) die(`--profile ${profile} is not a plain folder name.`);
+    // --add is a flag of its own, never the value of another (a label "--add").
+    const add = rest.some((a, i) => a === '--add' && !['--url', '--profile', '--label'].includes(rest[i - 1]));
+    const rec = recordLoginSite(url, { label: arg(rest, 'label', null), profile, add });
+    if (rec.refuse) die(rec.refuse);
     const host = new URL(url).hostname.toLowerCase();
-    const sites = loadSites();
-    if (!hostAllowed(url)) {
-      sites[host] = { label: arg(rest, 'label', host), login: true };
-      fs.mkdirSync(path.dirname(SITES_FILE), { recursive: true });
-      fs.writeFileSync(SITES_FILE, JSON.stringify(sites, null, 2));
-      console.log(`Added ${host} to the allowlist.`);
-    }
+    if (rec.changed) console.log(`Recorded ${rec.host} on the allowlist.`);
+    if (rec.note) console.log('NOTE: ' + rec.note);                   // the Robot sign-in app shows NOTE lines
+
     // TWO TRAPS, both paid for on 2 Sep 2026 (Evernote):
     //
     // 1. A login window driven by Playwright is still an automated browser,
@@ -753,21 +1055,36 @@ async function main() {
     const dir = path.join(PROFILE_ROOT, profile || 'default');
     if (fs.existsSync('/Applications/Google Chrome.app')) {
       fs.mkdirSync(dir, { recursive: true });
-      const { spawnSync, spawn } = require('child_process');
-      // A headless robot step on this profile lasts seconds to a minute;
-      // wait it out rather than refuse the window (8 Sep 2026).
-      await waitForProfile(dir, 3 * 60 * 1000,
-        `the profile at ${dir} is already open in another Chrome. Quit it (Cmd+Q) first.`);
-      spawn('open', ['-na', 'Google Chrome', '--args', `--user-data-dir=${dir}`,
-        '--use-mock-keychain', '--no-first-run', url], { stdio: 'ignore' }).unref();
-      console.log(`Plain Chrome window open for ${host} (no automation attached). Log in, then Cmd+Q that window.`);
-      const deadline = Date.now() + 15 * 60 * 1000;
-      let seen = false;
-      while (Date.now() < deadline) {
-        await new Promise(r => setTimeout(r, 2000));
-        const running = spawnSync('pgrep', ['-f', `user-data-dir=${dir}`]).status === 0;
-        if (running) seen = true;
-        else if (seen) break;
+      const { spawn } = require('child_process');
+      // Hold the profile, then let the step in flight finish (25 Sep 2026).
+      takeSigninHold(dir);
+      process.on('exit', () => releaseSigninHold(dir));
+      try {
+        // A step that passed its last hold check a moment ago launches within
+        // a second or two; wait for it to show before looking for a free profile.
+        await new Promise(r => setTimeout(r, 3000));
+        await waitForProfile(dir, 5 * 60 * 1000,
+          'the robot is still finishing a step in its browser. Nothing is wrong: try this sign-in again in a minute.');
+        spawn('open', ['-na', 'Google Chrome', '--args', `--user-data-dir=${dir}`,
+          '--use-mock-keychain', '--no-first-run', url], { stdio: 'ignore' }).unref();
+        console.log(`Plain Chrome window open for ${host} (no automation attached). Log in, then Cmd+Q that window.`);
+        const opened = Date.now();
+        const deadline = opened + 15 * 60 * 1000;
+        let seen = false;
+        while (Date.now() < deadline) {
+          await new Promise(r => setTimeout(r, 2000));
+          const running = plainWindowOpen(dir);
+          if (running) seen = true;
+          else if (seen) break;
+          // No window two minutes on means it never opened: say so, never report a
+          // sign-in that did not happen (the old loop waited 15 minutes, then
+          // handed the tasks back as if it had).
+          else if (Date.now() - opened > (Number(process.env.AGENT_BROWSER_WINDOW_OPEN_MS) || 2 * 60 * 1000)) {
+            die('the sign-in window did not open, so nothing was signed in. Start this sign-in again.');
+          }
+        }
+      } finally {
+        releaseSigninHold(dir);
       }
       const kept = persistSessionCookies(dir);
       console.log(`Kept ${kept} session cookie(s) alive for one hour.`);
@@ -801,6 +1118,8 @@ async function main() {
     const res = await withPage(profile, false, async (page) => {
       await page.goto(start, { waitUntil: 'domcontentloaded', timeout: 45000 });
       await page.waitForTimeout(3000);
+      // A short check on the door itself would stop the walk at its first click.
+      await settleBotCheck(page);
       const clicked = [];
       for (const label of walk) {
         const re = new RegExp('^\\s*' + String(label).replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '\\s*$', 'i');
@@ -819,14 +1138,17 @@ async function main() {
       for (let i = 0; i < 10 && sessionVerdict(page.url(), 0).atOneLogin; i++) {
         await page.waitForTimeout(2000);
       }
+      await settleBotCheck(page);
       const url = page.url();
       const passwordFields = await passwordFieldCount(page);
       const text = await domText(page, 600);
-      const verdict = sessionVerdict(url, passwordFields);
+      const title = await page.title();
+      const verdict = sessionVerdict(url, passwordFields, text, title);
       const png = await shoot(page, shot);
-      return { site, signedIn: verdict.signedIn, url, title: await page.title(), passwordFields, walked: clicked, text, screenshot: png };
+      return { site, signedIn: verdict.signedIn, botCheck: verdict.botCheck, url, title, passwordFields, walked: clicked, text, screenshot: png };
     });
-    ledger({ cmd: 'session', site, url: res.url, signedIn: res.signedIn, profile });
+    ledger({ cmd: 'session', site, url: res.url, signedIn: res.signedIn, botCheck: res.botCheck, profile });
+    if (res.botCheck) console.error(`BOT CHECK: ${site} shows the robot a "verify you are human" page. A sign-in will not remove it and the robot never clicks one. This is not a SIGN-IN wall.`);
     console.log(JSON.stringify(res));
     return;
   }
@@ -847,6 +1169,7 @@ async function main() {
       // Amazon's department menu alone is ~19k characters, so a fixed 20k cap
       // returned nothing but navigation and no order data at all (18 Sep 2026).
       // --max-text lets a caller ask for more when the page is that heavy.
+      await settleBotCheck(page);
       const maxText = Math.min(Number(arg(rest, 'max-text', '20000')) || 20000, 400000);
       const text = await domText(page, maxText);
       const png = await shoot(page, shot);
@@ -857,9 +1180,10 @@ async function main() {
       // --links <text>: also return the page's links whose href contains <text>, with their words.
       const needle = arg(rest, 'links');
       const links = needle ? pickLinks(await page.$$eval('a[href]', as => as.map(a => ({ href: a.href, text: a.textContent || '' }))), needle) : undefined;
-      return { title: await page.title(), url: page.url(), passwordFields, text, screenshot: png, links };
+      const title = await page.title();
+      return { title, url: page.url(), passwordFields, botCheck: isBotCheck(text, title), text, screenshot: png, links };
     });
-    ledger({ cmd: 'read', url, profile, screenshot: res.screenshot });
+    ledger({ cmd: 'read', url, profile, screenshot: res.screenshot, ...(res.botCheck ? { botCheck: true } : {}) });
     console.log(JSON.stringify(res));
     return;
   }
@@ -1028,7 +1352,11 @@ async function main() {
     return;
   }
 
-  console.error(fs.readFileSync(__filename, 'utf8').split('\n').slice(38, 52).join('\n'));
+  // The USAGE block, found by its heading: a fixed line range silently cut
+  // the last command off the moment a new one was added above it.
+  const lines = fs.readFileSync(__filename, 'utf8').split('\n');
+  const from = lines.indexOf(' * USAGE');
+  console.error(lines.slice(from, lines.indexOf(' *', from)).join('\n'));
   process.exit(2);
 }
 
@@ -1041,4 +1369,7 @@ if (require.main === module) {
 }
 
 module.exports = { hostAllowed, pickLinks, runSteps, assertNotCredential, assertApproved, SECRET_NAME_RE, loadSites, sessionVerdict,
-                   assertUploadable, assertConfirmable, UPLOAD_DIR, UPLOAD_EXTENSIONS, persistSessionCookies };
+                   recordLoginSite, signinTargets, signinOwner, signinDomain, readSitesFile,
+                   assertUploadable, assertConfirmable, UPLOAD_DIR, UPLOAD_EXTENSIONS, persistSessionCookies,
+                   signinHoldActive, takeSigninHold, releaseSigninHold, waitForSigninHold, HOLD_MAX_MS, isBotCheck,
+                   profileProcs, plainWindowOpen, pickOption, settleBotCheck };

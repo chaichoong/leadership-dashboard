@@ -122,6 +122,12 @@ describe('an email draft says which address it sends from', () => {
       .toMatchObject({ from: 'kevin@operationsdirector.co.uk', isDefault: false });
   });
 
+  it('a TO-EACH mail-out says each address is sent separately, and counts them', () => {
+    const r = from('TO-EACH: a@b.com, c@d.org\nFROM: info@agilelets.co.uk\nSUBJECT: Rooms\n---\nbody');
+    expect(r.to).toBe('each of 2 separately: a@b.com, c@d.org');
+    expect(r.from).toBe('info@agilelets.co.uk');
+  });
+
   it('does NOT promise the default when the copy speaks as the business', () => {
     // send-email.py REFUSES that exact combination, so naming the personal
     // default would promise Kevin a send that cannot happen.

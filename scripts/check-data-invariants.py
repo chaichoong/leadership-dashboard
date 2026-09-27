@@ -652,6 +652,46 @@ INVARIANTS = [
         "control_means": "cold-email drafts (the population the first-touch rule governs)",
         "fields": ["Name", "Company", "Status", "Contact Route", "Draft Message"],
     },
+    {
+        # The tenant-finding chain (Kevin, 25 Sep 2026). A form sign-up with no stage is on
+        # no list: Roy is never told, and the monitor that should say so is the same job
+        # that failed to screen it. This asks the table directly, so a chain that has
+        # stopped still shows up here. The class of failure is the Payment Run's: 70 days
+        # with every check green because none asked "did the feed actually run".
+        #
+        # NOTE ON THE CONTROL: form sign-ups start at zero (the 248 imported past
+        # applicants carry a Legacy Ref and a stage), so it reports WAITING until the first
+        # real sign-up; field_probe still catches a renamed field. Back-tested read-only on
+        # 25 Sep 2026 with the same shape pointed at the imported rows (Legacy Ref set, stage
+        # 'Past applicant', created before 2 days from now): 154 rows, the imported count, so
+        # the formula fires when a row qualifies. 'New' is NOT a violation: it is the known
+        # state of a sign-up with no date of birth, which the chain's monitor flags itself.
+        "name": "tenant-signups-get-screened",
+        "table": "tbliYKA44VBFeLduP",  # Tenant Leads
+        "incident": "Sep 2026 design: an unscreened sign-up reaches nobody, and the chain's own monitor cannot report a chain that stopped",
+        "asserts": "a form sign-up older than 2 days has a stage (the screen step writes one every run)",
+        "violation": ("AND(LEN({Legacy Ref} & '') = 0, LEN({Stage} & '') = 0, "
+                      "IS_BEFORE(CREATED_TIME(), DATEADD(TODAY(), -2, 'days')))"),
+        "control": "LEN({Legacy Ref} & '') = 0",
+        "control_means": "sign-ups from the form (the only rows the screen step creates a stage for)",
+        "field_probe": "OR(LEN({Legacy Ref} & '') >= 0, LEN({Stage} & '') >= 0, LEN({Name} & '') >= 0)",
+        "fields": ["Name", "Stage", "Legacy Ref"],
+    },
+    {
+        # The tenant-chain row on the Estate Status board is Kevin's proof the chain works
+        # (his condition for letting Roy take its tasks unasked, 25 Sep 2026). A row that
+        # stopped updating looks exactly like a chain with nothing to report, so its age is
+        # checked here, outside the job that writes it. 26 hours: one missed 08:10 run.
+        "name": "tenant-chain-monitor-is-current",
+        "table": "tblZVrdzivyBueZVf",  # Estate Status
+        "incident": "Sep 2026 design: a monitor that stops writing reads as all-clear (the 70-day Payment Run feed)",
+        "asserts": "the tenant-chain status row was written in the last 26 hours",
+        "violation": "AND({Key} = 'tenant-chain', IS_BEFORE({Last Run}, DATEADD(NOW(), -26, 'hours')))",
+        "control": "{Key} = 'tenant-chain'",
+        "control_means": "the one tenant-chain row (written by every run of scripts/tenant-leads.py)",
+        "field_probe": "OR(LEN({Key} & '') >= 0, LEN({Last Run} & '') >= 0)",
+        "fields": ["Key", "Last Run", "Status", "Detail"],
+    },
 ]
 
 
@@ -920,6 +960,56 @@ def check_ceo_brief_complete(pat):
     return violations, control
 
 
+
+INVOICES = "tblkOTKIG2Tyiy9aM"  # Dashboard Invoices (the Payment Run list)
+
+
+def _payment_run():
+    """scripts/payment-run.py as a module. Its file name has a hyphen, so it is
+    loaded by path; importing it runs nothing (its work sits under main())."""
+    import importlib.util
+    spec = importlib.util.spec_from_file_location(
+        "payment_run", os.path.join(os.path.dirname(os.path.abspath(__file__)), "payment-run.py"))
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def check_payments_came_through_the_list(pat):
+    """Money left the business account for a bill that was never on the list.
+
+    One rule and one classifier, both in scripts/payment-run.py, so the Friday
+    report, the daily job and this check can never disagree about what counts
+    as a hand-made payment. The window stops short of today because the bank
+    feed lands late. This job is not queued behind the 06:30 payment-run-daily
+    job, so it does not rely on that job having run: a payment the settle would
+    claim counts as listed, worked out here in memory.
+
+    Samples carry the transaction id and date only, never the payee or amount:
+    this output can travel, and the repo is public."""
+    import datetime
+    pr = _payment_run()
+    start, end = pr.unlisted_window(datetime.date.today(), 7)
+    window = query(pat, TX,
+                   "AND(NOT(IS_BEFORE({**Date}, '%s')), IS_BEFORE({**Date}, '%s'), {**GBP} < 0)"
+                   % (start, end),
+                   pr.OUTFLOW_FIELDS)
+    business = [t for t in window
+                if any(a in pr.BUSINESS_PAYMENT_ACCOUNTS
+                       for a in t["fields"].get("Account Alias (from **Account)") or [])]
+    rows = query(pat, INVOICES, "TRUE()")
+    missing = pr.unlisted_transfers(window, rows)
+    return [{
+        "id": t["id"],
+        "date": (t["fields"].get("**Date") or "")[:10],
+        "problem": "paid from the business account and no Payment Run row claims it. Not a code bug. "
+                   "Either the request reached Kevin some other way than an email to "
+                   "info@agilelets.co.uk (his rule, 25 Sep 2026): find who asked and have them "
+                   "email it. Or its row is on the list but the bank line does not name the payee: "
+                   "link the row to this transaction.",
+    } for t in missing], len(business)
+
+
 SCANS = [
     {
         "name": "ceo-brief-complete",
@@ -948,6 +1038,13 @@ SCANS = [
         "incident": "Jul 2026 — Santander re-linked; 64 duplicates, £2,316 double-counted across Wealth and P&L. Aug 2026 — Fintable moved Santander onto gocardless_v3 ids; 201 duplicates, and the Jul guard reported 0 because it keyed on the provider id the migration changed",
         "control_means": "transactions carrying a bank transaction id in their raw feed payload (the population a re-import duplicates)",
         "run": check_reimport_duplicates,
+    },
+    {
+        "name": "payments-came-through-the-list",
+        "asserts": "a hand-made payment from the business account => a Payment Run row claims it (Matched Transaction)",
+        "incident": "Sep 2026 — 30+ contractor payments (1 Aug to 24 Sep) left the business account with no row on the Payment Run, because the requests never came by email; and a paid 90 pound gas certificate stayed listed as owed for four days",
+        "control_means": "business-account outflows in the window (proves the bank feed and the query both work)",
+        "run": check_payments_came_through_the_list,
     },
 ]
 

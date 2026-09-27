@@ -81,7 +81,7 @@ describe('the 08:00 digest', () => {
         expect(buildDigestText(2, ['A', 'B'], 'u', false, [], 0, line)).toContain('NOTHING went out yesterday');
         expect(buildContentOnlyText(line)).toMatch(/^\*No approvals wait for you today\.\*/);
         const fn = SRC.match(/async function postKevinDigest\(env[\s\S]*?\n\}/)[0];
-        expect(fn).toMatch(/buildContentOnlyText\(content\)/);
+        expect(fn).toMatch(/buildContentOnlyText\(content, blockers\)/);
         expect(fn).not.toMatch(/staying quiet/);
     });
     it('says so when the report is stale, missing or unreadable, never skips it', () => {
