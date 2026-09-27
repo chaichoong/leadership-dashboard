@@ -17,6 +17,7 @@ nothing out says so in words.
 Usage:
   content_report.py build            # print the report JSON (read-only)
   content_report.py write            # build and upsert the Airtable row
+  content_report.py stuck [--hours N]  # sent-back cards with no fix in motion, for daily-ops (exit 2: could not tell)
   content_report.py selftest
 Runs at the end of the hourly publisher and the nightly render job.
 """
@@ -260,6 +261,45 @@ def lift_gap_pause(report, path=None, remove=os.remove, say=print):
     return True
 
 
+IN_MOTION = ("new", "pulling", "pulled", "rendering")
+
+
+def stuck_sent_back(now=None, hours=24, approvals=None, ledger=None, episodes=None, redo_days=None, receipts=None):
+    """Sent-back cards nobody has set a fix in motion for after `hours` (Kevin, 27 Sep 2026: daily-ops works them).
+
+    2072 held every later episode for two days behind a question ("can you confirm the folder that contains the raw
+    footage") that only a Claude session could answer, and none looked. In motion means: a receipt waiting to go back
+    with the card, the day on the Learnings rebuild list, or a clip of the day waiting to render. A rejected card is
+    his no, not a job, and a day already on YouTube holds nothing."""
+    import render
+    now = now or dt.datetime.now()
+    approvals = approval.load_state() if approvals is None else approvals
+    ledger = watch.load_ledger() if ledger is None else ledger
+    episodes = publish.load_state() if episodes is None else episodes
+    if redo_days is None:
+        try: redo_days = {int(m.group(1)) for m in (re.match(r"\s*(\d{3,4})\b", l) for l in open(render.REDO_LFMD_FILE)) if m}
+        except OSError: redo_days = set()
+    if receipts is None:
+        try: receipts = {int(n[:-3]) for n in os.listdir(render.RESUBMIT_DIR) if re.match(r"^\d+\.md$", n)}
+        except OSError: receipts = set()
+    out = []
+    for d, a in sorted(approvals.items()):
+        if not (isinstance(a, dict) and a.get("task") and a.get("verdict") == "changes"): continue
+        day = int(d)
+        if (episodes.get(d) or {}).get("youtube_link"): continue
+        try: since = dt.datetime.fromisoformat(str(a.get("synced") or ""))
+        except ValueError: since = None
+        waited = (now - since).total_seconds() / 3600 if since else None
+        if waited is not None and waited < hours: continue
+        mine = {k: v for k, v in ledger.items() if v.get("episode") == day or (v.get("day") == day and not v.get("episode"))}
+        if day in receipts or day in redo_days or any(v.get("status") in IN_MOTION for v in mine.values()): continue
+        out.append({"day": day, "task": a["task"], "since": a.get("synced") or "", "hoursWaiting": round(waited) if waited is not None else None,
+                    "feedback": (a.get("feedback") or "").strip(),
+                    "clips": [{"name": k, "status": v.get("status"), "role": v.get("role"), "seconds": v.get("duration"),
+                               "path": v.get("path"), "error": v.get("error")} for k, v in sorted(mine.items())]})
+    return out
+
+
 def write(report, dry_run=False):
     now = report["asOf"].replace("Z", ".000Z")
     status = "Worked"
@@ -387,10 +427,16 @@ def _selftest():
 
 
 if __name__ == "__main__":
-    ap = argparse.ArgumentParser(); ap.add_argument("mode")
+    ap = argparse.ArgumentParser(); ap.add_argument("mode"); ap.add_argument("--hours", type=float, default=24)
     a = ap.parse_args()
     if a.mode == "selftest": selftest()
     elif a.mode == "build": print(json.dumps(build(), indent=1))
     elif a.mode == "write":
         rep = build(); lift_gap_pause(rep); write(rep); print("content report: " + rep["headline"])
-    else: raise SystemExit("usage: content_report.py build | write | selftest")
+    elif a.mode == "stuck":
+        # daily-ops reads this (Kevin, 27 Sep 2026). Exit 2 when the state cannot be read: never "nothing stuck".
+        try: rows = stuck_sent_back(hours=a.hours)
+        except Exception as ex:                                   # noqa: BLE001
+            print("content stuck: could not tell (%s)" % str(ex)[:200], file=sys.stderr); sys.exit(2)
+        print(json.dumps({"stuck": rows}, indent=1))
+    else: raise SystemExit("usage: content_report.py build | write | stuck [--hours N] | selftest")

@@ -323,7 +323,7 @@ def title_from_transcript(text):
 # the loose first alternative, because "dive" and "diet" are ordinary words he uses: this very episode says "when you
 # dive deeper into it". Measured 18 Sep 2026 over all 295 stored transcripts: adding "iv" gains exactly 10 matches
 # and every one is a real Learnings line ("learnings from my dive", "learning from a diver"). Zero false positives.
-LFMD_START_RE = re.compile(r"(?:\w+\s+)?(?P<prep>from|for|of|through|in|to)\s+(?P<det>my|the)\s+d(?:ia|ie|ai)\w*\b(?!\s+of\s+(?:a|an|the)\b)"
+LFMD_START_RE = re.compile(r"(?:\w+\s+)?(?P<prep>from|for|of|through|in|to)\s+(?P<det>my|the)\s+d(?:ia|ie|ai)\w*\b(?!\s+of\s+(?:a|an|the)\b(?!\s+day\b))"
                            r"|(?:learn\w*|lesson\w*)(?:\s+\w+){0,2}\s+(?:for|of)\s+(?:today|the day)"
                            # 2060 (17 Sep 2026): he said "the learning from my diary today", whisper wrote "the learning from a diet today"
                            # 2062 (18 Sep 2026): "the learning for my diary is there" -> "the learning for my dive is there". The section
@@ -331,7 +331,7 @@ LFMD_START_RE = re.compile(r"(?:\w+\s+)?(?P<prep>from|for|of|through|in|to)\s+(?
                            # Learnings clip and no warning. The same mis-hearing had already cost 1964, 2032, 2033, 2042 and 2043.
                            # 2073 (27 Sep 2026): "the learnings of my dive today". "of" takes my/the/our only: "learned of a diver" is not it.
                            # The "of a" guard sits on the "of" route only: "the learnings from my diary of the day" is a real line.
-                           r"|learn\w*\s+(?:(?:from|for)\s+(?:a|my|the|our)\s+d(?:ia|ie|ai|iv)\w*|of\s+(?:my|the|our)\s+d(?:ia|ie|ai|iv)\w*\b(?!\s+of\s+(?:a|an|the)\b))", re.I)
+                           r"|learn\w*\s+(?:(?:from|for)\s+(?:a|my|the|our)\s+d(?:ia|ie|ai|iv)\w*|of\s+(?:my|the|our)\s+d(?:ia|ie|ai|iv)\w*\b(?!\s+of\s+(?:a|an|the)\b(?!\s+day\b)))", re.I)
 # The show's own name is "day 2072 of the diary of a Runpreneur". Whisper garbles the tail ("of the diary cover on
 # printer", 2072, 27 Sep 2026), so the "of a" guard above cannot be relied on. "of the diary" straight after a day
 # number (2072, 2,072, 2072th, then any commas, full stops, ellipses or dashes) is what marks it. "of MY diary" or
@@ -349,9 +349,10 @@ def lfmd_start(text, before=""):
     return None
 # A near miss: "learn..." followed within four words by something that sounds like diary. When no section is found but
 # this is, the output gate refuses the card (qa.py), so a mis-heard Learnings line can never ship silently.
-DIARY_NEAR_MISS_RE = re.compile(r"\blearn\w*\W+(?:\w+\W+){0,4}(?:d(?:ia|ie|ai|iv)\w*|dairy|dire)\b(?!\s+of\s+(?:a|an|the|our)\b)", re.I)
+DIARY_NEAR_MISS_RE = re.compile(r"\blearn\w*\W+(?:\w+\W+){0,4}(?:d(?:ia|ie|ai|iv)\w*|dairy|dire)\b(?!\s+of\s+(?:a|an|the|our)\b(?!\s+day\b))", re.I)
 # The \b(?!\s+of a) keeps the show's own name out: "day 2056 of the diary of a Runpreneur" turned 2056's teaser into
-# an episode render on 10 Sep 2026 (Kevin's review, 13 Sep 2026).
+# an episode render on 10 Sep 2026 (Kevin's review, 13 Sep 2026). "of the day" is let through on all three guards:
+# "the learnings of my diary of the day" is his line, and no guard caught it (review, 27 Sep 2026).
 SIGNOFF_RE = re.compile(r"thank you as always|stay positive|see you (?:again )?tomorrow", re.I)
 
 
@@ -974,6 +975,13 @@ def redo_lfmd(day):
             # release_hold, not just the redo line: nothing else would ever lift a hold on this day (review, 21 Sep 2026).
             # Safe, because a sent-back card cannot publish until Kevin approves the resubmitted one.
             if links.get("lfmd") and links.get("lfmd_yt"): release_hold(day)
+    elif not card.get("task"):
+        # 2073 (27 Sep 2026): the output gate held the day before any card went up, which is exactly the case its own
+        # message sends here. There is no card to refresh: the night's `approval.py run --pending` raises it now the
+        # Learnings clip exists. Before, refresh_card raised "no card to refresh", the rebuild counted as FAILED and
+        # stayed on the redo list, to be rebuilt again every night.
+        print("episode %d: no card yet; the night's approval run raises it now the Learnings clip exists" % day)
+        resubmitted = True
     else:
         approval.refresh_card(day); resubmitted = True
     if links.get("lfmd") and links.get("lfmd_yt") and resubmitted: release_hold(day)
@@ -1112,6 +1120,57 @@ def resubmit_ready(root=None):
         os.replace(path, path + ".sent"); sent.append(day)
         print("resubmit: episode %d card back with Kevin, with its receipt" % day)
     return sent
+
+
+RESET_STALE = ("error", "requeued", "role", "episode", "episode_reason", "lfmd_window")   # a failed clip's verdicts, recomputed
+
+
+def receipt_lines(text):
+    """The receipt lines agent-dispatch's submit gate counts, parsed by the gate itself."""
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("agent_dispatch", os.path.join(os.path.dirname(HERE), "agent-dispatch.py"))
+    mod = importlib.util.module_from_spec(spec); spec.loader.exec_module(mod)
+    return mod.receipt_lines(text)
+
+
+def redo_day(day, receipt_path, why, ledger=None, state=None, root=None, today=None):
+    """Set a sent-back day's fix in motion the way 2071 and 2072 were (Kevin, 27 Sep 2026: daily-ops works sent-back
+    cards). Every clip of the day goes back to 'new' with a dated note, so the night re-renders the whole day on the
+    current code and rewrites its copy; the receipt waits in RESUBMIT_DIR until resubmit-ready sends the card back
+    with it. It refuses rather than guesses: the card must be sent back, the receipt must answer every point of his
+    note, nothing of the day may be mid-render, and no receipt may already be waiting. Returns the clips reset."""
+    import approval
+    root = root or RESUBMIT_DIR
+    state = approval.load_state() if state is None else state
+    card = state.get(str(day)) or {}
+    if card.get("verdict") != "changes":
+        raise SystemExit("episode %d: the card is not sent back (verdict %r); redo-day works only a card Kevin sent back" % (day, card.get("verdict")))
+    text = open(receipt_path).read()
+    points, lines = feedback_points(card.get("feedback", "")), receipt_lines(text)
+    if not lines or len(lines) < len(points):
+        raise SystemExit("episode %d: the receipt answers %d point(s) but Kevin made %d; one '- <his point> → <what changed>' line each"
+                         % (day, len(lines), len(points)))
+    dest = os.path.join(root, "%d.md" % day)
+    if os.path.exists(dest): raise SystemExit("episode %d: a receipt already waits (%s); the fix is already in motion" % (day, dest))
+    ledger = watch.load_ledger() if ledger is None else ledger
+    mine = [k for k, v in ledger.items() if v.get("episode") == day or (v.get("day") == day and not v.get("episode"))]
+    if not mine: raise SystemExit("episode %d: no clip of the day in the ledger" % day)
+    busy = [k for k in mine if ledger[k].get("status") in ("pulling", "rendering")]
+    if busy: raise SystemExit("episode %d: %s mid-render; try again after the night's run" % (day, ", ".join(busy)))
+    note = "%s: %s" % ((today or dt.date.today()).strftime("%-d %b %Y"), why)
+    for k in mine:
+        e = ledger[k]
+        if e.get("status") == "failed":
+            for f in RESET_STALE: e.pop(f, None)
+        e["status"] = "new"; e["reset"] = note
+    watch.save_ledger(ledger)
+    os.makedirs(root, exist_ok=True)
+    tmp = dest + ".tmp"
+    with open(tmp, "w") as fh: fh.write(text if text.endswith("\n") else text + "\n")
+    os.replace(tmp, dest)
+    print("episode %d: %d clip(s) back to new (%s); receipt waits at %s; the 22:00 run re-renders the day and sends the card back"
+          % (day, len(mine), ", ".join(mine), dest))
+    return mine
 
 
 def teaser_waits(key, ledger):
@@ -1290,6 +1349,10 @@ def selftest():
     assert lfmd_window([(0, 5, "these are the learnings of the diary of a Runpreneur"), (30, 40, "see you tomorrow")]) is None, "the 'of' route keeps the 'of a' guard"
     assert lfmd_window([(0, 5, "So the learnings from my diary of the day are rest more"), (30, 40, "see you tomorrow")]) == (0, 40), "'from my diary of the day' is a real line"
     assert lfmd_window([(0, 5, "the learnings from my dive of the day are rest"), (30, 40, "see you tomorrow")]) == (0, 40), "'from my dive of the day' too"
+    assert lfmd_window([(0, 5, "So the learnings of my diary of the day are rest more"), (30, 40, "see you tomorrow")]) == (0, 40), "'of my diary of the day' (review, 27 Sep 2026)"
+    assert lfmd_window([(0, 5, "the learnings of my dive of the day are rest"), (30, 40, "see you tomorrow")]) == (0, 40), "'of my dive of the day'"
+    assert DIARY_NEAR_MISS_RE.search("the learnings I took of my dire of the day"), "the near-miss guard lets 'of the day' through too"
+    assert lfmd_window([(0, 5, "welcome to the diary of the Runpreneur"), (30, 40, "see you tomorrow")]) is None, "'of the <anything but day>' stays the show's name"
     assert lfmd_window([(0, 5, "the learnings for day 2073 from the diary are"), (30, 40, "see you tomorrow")]) == (0, 40), "'from the diary' after a number still counts"
     assert lfmd_window([(0, 5, "I started in 2019. From the diary today, rest more"), (30, 40, "see you tomorrow")]) == (0, 40), "a year, then 'From the diary'"
 
@@ -1368,6 +1431,7 @@ if __name__ == "__main__":
     ap.add_argument("mode"); ap.add_argument("clip", nargs="?"); ap.add_argument("--day", type=int, default=0); ap.add_argument("--only", default="")
     ap.add_argument("--out", default=os.path.expanduser("~/knowledge-os/logs/content-engine/manual"))
     ap.add_argument("--limit", type=int, default=1); ap.add_argument("--keep", action="store_true")
+    ap.add_argument("--receipt", default=""); ap.add_argument("--why", default="")
     a = ap.parse_args()
     if a.mode == "selftest": selftest()
     elif a.mode == "run": run(a.limit, a.keep)
@@ -1376,4 +1440,7 @@ if __name__ == "__main__":
     elif a.mode == "redo": redo_full(a.day, keep=a.keep if hasattr(a, "keep") else False)
     elif a.mode == "one": one(a.clip, a.day, a.out)
     elif a.mode == "resubmit-ready": resubmit_ready()
+    elif a.mode == "redo-day":
+        if not (a.day and a.receipt and a.why): raise SystemExit("usage: render.py redo-day --day N --receipt FILE --why \"one line\"")
+        redo_day(a.day, a.receipt, a.why)
     else: raise SystemExit("unknown mode")
