@@ -57,6 +57,7 @@ const ESTATE_SCRIPTS = [
   'scripts/roy-assistant.py',
   'scripts/private-name-guard.py',
   'scripts/host-move.py',
+  'scripts/magic-battery.py',
 ];
 
 describe('estate scripts read no name they never bind', () => {
