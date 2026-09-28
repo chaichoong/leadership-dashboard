@@ -6742,19 +6742,27 @@ def cmd_verify(args):
     # An old alert excuses a re-listed parked task only while its wall is still open
     # in the live Notes: once Kevin clears it (he paid), the task is owed again
     # (review, 27 Sep 2026). Every open parked task on 28 Sep carried a wall.
+    # The wall must also predate the run, as rested_on_wall demands: a wall this run
+    # put back on a task Kevin had just cleared is not an old alert (review, 28 Sep 2026).
     known_parked = set()
+    run_start = _utc(started_at)
     for pid in {p.get("id") for p in (report.get("parkedFlags") or [])} & alerted_before:
         try:
-            if task_blocker(task_view(get_task(pid)).get("notes")):
-                known_parked.add(pid)
+            b = task_blocker(task_view(get_task(pid)).get("notes"))
         except Exception:                                 # noqa: BLE001
-            pass          # unreadable: not excused, so it is owed and alarms if untouched
+            b = None      # unreadable: not excused, so it is owed and alarms if untouched
+        since = _utc(b.get("since")) if b else None
+        if b and since and run_start and since < run_start:
+            known_parked.add(pid)
     owed_override = None
     try:
         with open(os.path.join(rundir, OWED_IDS_MARK)) as fh:
             owed_override = [i for i in re.split(r"[\s,]+", fh.read()) if i]
     except FileNotFoundError:
         pass
+    if owed_override == []:
+        # the runners write it only with ids in hand; an empty one was emptied, never "owes nothing" (review, 28 Sep 2026)
+        problems.append("owed-ids is empty — the run's owed tasks cannot be counted")
     silent = silent_run_problem(report, queue, handback_only, rested, known_parked, owed_override, alerted_before)
     if silent:
         problems.append(silent)

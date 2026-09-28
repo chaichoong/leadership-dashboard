@@ -111,6 +111,12 @@ describe('owed work is checked task by task, from the queue the run was handed',
     expect(r.err).not.toContain('ZERO');
   });
 
+  it('review 28 Sep: an emptied owed-ids file is an error, never "owes nothing"', () => {
+    const r = verify({ report: { queueCounts: COUNTS(2), actions: [] }, queue: Q(['recR', 'new'], ['recX', 'carry_out']), owedIds: [] });
+    expect(r.code).toBe(1);
+    expect(r.err).toContain('owed-ids is empty');
+  });
+
   it("CONTROL: a named task the run never touched still alarms, by name", () => {
     const r = verify({ report: { queueCounts: COUNTS(3), actions: [] }, queue: Q(['recR', 'new'], ['recX', 'carry_out']), owedIds: ['recR'] });
     expect(r.code).toBe(1);
@@ -128,7 +134,7 @@ describe('owed work is checked task by task, from the queue the run was handed',
   });
 
   it('review 2: an already-alerted parked flag does not hide another task it never touched', () => {
-    const r = verify({ report: { queueCounts: COUNTS(2), actions: [], parkedFlags: [{ id: 'recPAY', name: 'invoice' }] }, queue: Q(['recPAY', 'carry_out'], ['recA', 'carry_out']), preAlerted: ['recPAY'], tasks: { recPAY: { notes: WALL(50) } } });
+    const r = verify({ report: { startedAt: '{h:0.2}', queueCounts: COUNTS(2), actions: [], parkedFlags: [{ id: 'recPAY', name: 'invoice' }] }, queue: Q(['recPAY', 'carry_out'], ['recA', 'carry_out']), preAlerted: ['recPAY'], tasks: { recPAY: { notes: WALL(50) } } });
     expect(r.code).toBe(1);
     expect(r.err).toContain('1 eligible tasks and ZERO attempted: recA');
   });
@@ -140,8 +146,14 @@ describe('owed work is checked task by task, from the queue the run was handed',
   });
 
   it('a parked task alerted before and listed again this run is excused (it needs Kevin, not the agent)', () => {
-    const r = verify({ report: { queueCounts: COUNTS(1), actions: [], parkedFlags: [{ id: 'recOLD', name: 'invoice' }] }, queue: Q(['recOLD', 'carry_out']), preAlerted: ['recOLD'], tasks: { recOLD: { notes: WALL(50) } } });
+    const r = verify({ report: { startedAt: '{h:0.2}', queueCounts: COUNTS(1), actions: [], parkedFlags: [{ id: 'recOLD', name: 'invoice' }] }, queue: Q(['recOLD', 'carry_out']), preAlerted: ['recOLD'], tasks: { recOLD: { notes: WALL(50) } } });
     expect(r.code).toBe(0);
+  });
+
+  it('review 28 Sep: a wall this run put back on a task Kevin had just cleared is not an old alert', () => {
+    const r = verify({ report: { startedAt: '{h:0.5}', queueCounts: COUNTS(1), actions: [], parkedFlags: [{ id: 'recOLD', name: 'invoice' }] }, queue: Q(['recOLD', 'carry_out']), preAlerted: ['recOLD'], tasks: { recOLD: { notes: WALL(0.1) } } });
+    expect(r.code).toBe(1);
+    expect(r.err).toContain('ZERO attempted: recOLD');
   });
 
   it('review: an old alert re-listed after Kevin cleared its wall (he paid) is owed again', () => {
