@@ -209,7 +209,9 @@ def pending(limit, state=None):
             if m and not (state.get(m.group(1)) or {}).get("task"): days.add(int(m.group(1)))
         offset = r.get("offset")
         if not offset: break
-    return sorted(days)[:limit]
+    # a day the output gate blocked goes to the back, never out: it is re-checked when a slot is free, and two blocked
+    # days can no longer take both slots from new ones every night (review, 28 Sep 2026)
+    return sorted(days, key=lambda d: (bool((state.get(str(d)) or {}).get("qa_blocked")), d))[:limit]
 
 
 def existing_task(name):
@@ -446,6 +448,11 @@ def selftest():
     finally: watch._airtable = real_air
     assert got == [2073, 2076], got
     assert len(seen) == 2 and "offset=o1" in seen[1], seen
+    seen = []
+    watch._airtable = lambda method, url, *a, **k: (seen.append(url), pages[len(seen) - 1])[1]
+    try: got = pending(2, state={"2072": {"task": "t"}, "2073": {"qa_blocked": {"failures": ["x"]}}})
+    finally: watch._airtable = real_air
+    assert got == [2076, 2080], "a blocked day goes behind the new ones: %r" % got
     name, desc, out = build_card(2225, full, lfmd, short, "RECORD IT ONCE / AI WORKS FOREVER")
     assert name == 'CONTENT: Publish Episode 2225 of Diary of a Runpreneur - RECORD IT ONCE / AI WORKS FOREVER', name
     first = out.split("\n")[0]
