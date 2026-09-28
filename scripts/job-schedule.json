@@ -325,6 +325,13 @@
   "queued": false,
   "note": "Reads the Magic Keyboard, Trackpad and Mouse battery levels hourly and, on the 21:25 run, puts one 'charge it tonight' reminder per device at 20% or below in Kevin's Apple Reminders list (21:30 alert). Outside the queue: it reads the IO registry and writes Apple Reminders, never the repo, Airtable or the queue, and a nudge that waits behind a four-hour render misses the evening it exists for."
  },
+ "home-battery": {
+  "cron": "20 * * * *",
+  "maxLateMinutes": 50,
+  "mode": "wrapped",
+  "queued": false,
+  "note": "Reads every Aqara device's battery and online state from Aqara's developer service hourly and, on the 21:20 run, puts one reminder per problem (a battery at 20% or below, a device offline 2 hours or more, a device gone from Aqara's list for 24 hours, or no good read of Aqara for 12 hours) in Kevin's Apple Reminders list with a 21:30 alert. Outside the queue for the same reason as magic-battery: it writes Apple Reminders only, and a nudge stuck behind a long render misses its evening. Runs at :20 so it never touches Reminders at the same moment as magic-battery at :25."
+ },
  "uk-gigs": {
   "cron": "30 7 * * *",
   "maxLateMinutes": 720,
