@@ -29,6 +29,7 @@ const CLAUSES = [
   ['Do not forward the agreement', 'the tenant already gets the completed agreement from Adobe'],
   ['set Payment Status to CFV Actioned', 'the status move after the UC47'],
   ['stay retired: a missed payment is arrears', 'the limit on the one UC check'],
+  ['Ask Kevin every time whether to include the authority to act', 'the authority question on every pack'],
 ];
 
 describe('tenant-doc-generator reviewed skill', () => {

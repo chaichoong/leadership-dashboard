@@ -38,6 +38,10 @@ node scripts/make-tenancy-pack.js --new --name "<Full Name>" --property "<Proper
 - Templates come from `~/knowledge-os/templates`, PDFs go to `~/knowledge-os/attachments`.
 - The script picks the documents: the agreement, a proof of residency, and an authority to
   act except where Kevin dropped it (5 Dalham Place).
+- **Ask Kevin every time whether to include the authority to act** (Kevin, 28 Sep 2026: it is
+  being introduced gradually). If he says no, leave its PDF out of Adobe.
+- Confirm the property before building. On 28 Sep 2026 a pack went out for the wrong house and
+  had to be cancelled.
 - If `~/knowledge-os` is not readable on this Mac (the host move of 27 to 28 Sep 2026 left a
   stub file on the Air), fill the same templates into the spec shape of `newTenantPack()` in
   that script and render each one with `node scripts/make-document.js --spec <spec.json> --out <folder>/<name>.pdf`.
