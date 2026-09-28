@@ -5198,7 +5198,11 @@ def track_record_problem(output, required):
 
 # ── history: the dated record of everything with a contact or reference ──
 REF_TOKEN_RE = re.compile(r"\b(?=[A-Z0-9-]{5,}\b)(?:[A-Z]*\d[A-Z0-9-]*)\b")
-ISO_DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
+# A timestamp is a date: "2026-01-22T16:27:36Z" reads as 2026-01-22T16 (60
+# live tokens on 28 Sep 2026, mostly Evernote "Recorded:" stamps), and a
+# calendar invite writes 20260122T162736Z. Eight bare digits stay: that is an
+# account number as often as a date.
+ISO_DATE_RE = re.compile(r"^(?:\d{4}-\d{2}-\d{2}(?:[Tt]\d{2,6}[Zz]?)?|\d{8}[Tt]\d{4,6}[Zz]?)$")
 # A command or code word is not a reference (28 Sep 2026). A task whose
 # description said "Run: python3 ~/.claude/skills/model-check/calibrate.py 14"
 # searched for PYTHON3, found 682 lines of unrelated history (EICR checks
@@ -5220,11 +5224,38 @@ CODE_WORD_RE = re.compile(
     r"|(?:U?INT|FLOAT)(?:16|32|64|128)|(?:WIN|ARM|AMD|AARCH)(?:32|64)|WIN1[01]|X86-64|CP125\d"
     r"|(?:PYTHON|NODE|IOS|IPADOS|MACOS|WATCHOS|ANDROID|WINDOWS)\d{2}|INSTA360"
     r"|(?:PYTHON|HTML|OAUTH|DMARC|DKIM|WORDSECTION)\d"
-    r"|\d{1,2}-\d{1,2}-20\d{6}")
+    r"|\d{1,2}-\d{1,2}-20\d{6}|IMAGE\d{3}")
 REF_LABEL_RE = re.compile(
     r"(?:\b(?:REF|REFERENCE|BOOKING|PNR|CONFIRMATION)\b(?:[ \t]*(?:NO|NUMBER|CODE|REF|REFERENCE)\b)?"
     r"|\b(?:POLICY|CLAIM|ACCOUNT|CASE|INVOICE|ORDER|TRACKING)(?:[ \t]*(?:NO|NUMBER|CODE|REF|REFERENCE)\b|[ \t]*#))"
     r"[ \t:#.()-]*(?:\r?\n[ \t]*)?\Z")
+# Pasted email carries machine text that is never a reference (28 Sep 2026,
+# measured on the 8,135 live tasks). Outlook names each inline picture
+# "[cid:image001.png@01AB2345.6789CDEF]": the content id gave 72 tokens and the
+# file name 67 (IMAGE\d{3} above). A style colour ("background: #1a2b3c",
+# link="#467886") gave 69. It goes only where a style property is followed by
+# CSS values, never prose: "Background: tenant says invoice #12345678" and
+# "Order #GM123456" are real (review). A price run into a word (Subtotal80.00,
+# GBP12.34, GBP160, 12500GBP) or a number beside a currency sign or code is an
+# amount, not a reference (146 tasks changed, 171 tokens dropped, none a
+# reference).
+INLINE_IMAGE_RE = re.compile(
+    r"(?i)(?:\bcid:|\bimage\d{3}\.(?:png|jpe?g|gif|bmp)@)[^\s\]>)\"']+|\bOutlook-[0-9a-z]+\.(?:png|jpe?g|gif)\b")
+_CSS_VALUE = (r"(?:-?[\d.]+(?:px|pt|em|rem|%)|0|\d+deg|solid|dashed|dotted|double|groove|ridge|inset|outset"
+              r"|none|transparent|!important|to[ \t]+(?:left|right|top|bottom)|rgba?\([^)\n]{0,40}\))")
+# One line only, no run of blanks two quantifiers can split, and no property
+# name longer than 40 letters: a 20,000-space value took 28 seconds (review).
+STYLE_COLOUR_RE = re.compile(
+    r"(?i)(?:\b(?:[a-z-]{0,40}colou?r|background[a-z-]{0,40}|border[a-z-]{0,40}|outline[a-z-]{0,40}|fill|stroke"
+    r"|[a-z-]{0,40}shadow)[ \t]*[:=]|\b[av]?link[ \t]*=|(?<![\w-])--[a-z0-9-]{1,40}[ \t]*:)"
+    r"[ \t]*(?:[\"'][ \t]*)?(?:(?:linear|radial)-gradient\([ \t]*)?(?:" + _CSS_VALUE + r"[ \t,]+)*#[0-9a-f]{3,8}\b"
+    r"(?:[ \t,]*(?:" + _CSS_VALUE + r"[ \t,]+)*#[0-9a-f]{3,8}\b)*")
+AMOUNT_WORD_RE = re.compile(r"(?:GBP|EUR|USD)\d+|\d+(?:GBP|EUR|USD)")
+AMOUNT_TAIL_RE = re.compile(r"\.\d{2}(?![\d.])")
+CURRENCY_BEFORE_RE = re.compile(r"(?:[£€$]|\b(?:GBP|EUR|USD))[ \t]?\Z")
+# "Order 123456 GBP 49.99": the amount follows the code, so 123456 is the
+# order (review).
+CURRENCY_AFTER_RE = re.compile(r"[ \t]?(?:GBP|EUR|USD)\b(?![\s,:]*[£€$]?\d)")
 # A link is an address, not a reference (25 Sep 2026). An Airtable form link
 # in a tenant-chain task gave the refs APPNQJDPQDNIH3IRL, the base id in
 # nearly every task and email that links to Airtable, and SHRTUDF8S04KP5XGT;
@@ -5266,6 +5297,7 @@ def reference_tokens(text):
     text = TRACK_RECORD_HEADER_RE.sub(" ", str(text or ""))
     text = WRAPPED_ID_RE.sub(lambda m: m.group(1) + m.group(3) if len(m.group(2)) + len(m.group(3)) == 14 else m.group(0), text)
     text = AIRTABLE_ID_RE.sub(" ", REF_URL_RE.sub(" ", text))
+    text = STYLE_COLOUR_RE.sub(" ", INLINE_IMAGE_RE.sub(" ", text))
     # A link wrapped across lines leaves a piece of an id behind (DNIH3IRL
     # from appnqjDpq / DniH3IRl), and the search matches on substrings, so
     # that piece finds every record the base id is in (review, 25 Sep 2026).
@@ -5276,7 +5308,13 @@ def reference_tokens(text):
         t = mt.group(0)
         if t.isalpha() or ISO_DATE_RE.match(t) or t in ours or t in out:
             continue
-        if CODE_WORD_RE.fullmatch(t):
+        if CODE_WORD_RE.fullmatch(t) or AMOUNT_WORD_RE.fullmatch(t):
+            continue
+        if re.fullmatch(r"[A-Z]*\d+", t) and AMOUNT_TAIL_RE.match(upper, mt.end()):
+            continue
+        if re.fullmatch(r"[\d-]+", t) and CURRENCY_BEFORE_RE.search(upper, max(0, mt.start() - 5), mt.start()):
+            continue
+        if t.isdigit() and CURRENCY_AFTER_RE.match(upper, mt.end()):
             continue
         if ONE_DIGIT_WORD_RE.fullmatch(t) and not REF_LABEL_RE.search(upper, max(0, mt.start() - 40), mt.start()):
             continue
