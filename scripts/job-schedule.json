@@ -325,6 +325,13 @@
   "queued": false,
   "note": "Reads the Magic Keyboard, Trackpad and Mouse battery levels hourly and, on the 21:25 run, puts one 'charge it tonight' reminder per device at 20% or below in Kevin's Apple Reminders list (21:30 alert). Outside the queue: it reads the IO registry and writes Apple Reminders, never the repo, Airtable or the queue, and a nudge that waits behind a four-hour render misses the evening it exists for."
  },
+ "home-battery": {
+  "cron": "20 * * * *",
+  "maxLateMinutes": 50,
+  "mode": "wrapped",
+  "queued": false,
+  "note": "Reads every Aqara device's battery and online state from Aqara's developer service hourly and, on the 21:20 run, puts one reminder per problem (a battery at 20% or below, a device offline 2 hours or more, or no good read of Aqara for 24 hours) in Kevin's Apple Reminders list with a 21:30 alert. Outside the queue for the same reason as magic-battery: it writes Apple Reminders only, and a nudge stuck behind a long render misses its evening. Runs at :20 so it never touches Reminders at the same moment as magic-battery at :25."
+ },
  "job-digest": {
   "completedWhen": "ran",
   "completedWhenNote": "job-digest EXITS 1 BY DESIGN whenever the morning message contains anything needing attention \u2014 that is how run-job.sh records a real problem rather than a clean sweep \u2014 and it runs outside the queue, so it never writes a `released` event either. Graded on attendance. Found 19 Sep 2026 by the reachability control added with finding 20260919-daily-ops-phase2-excepti-549, which caught it before it produced its own false outage line; daily-ops and data-invariants had to be read on Kevin's screen first.",
