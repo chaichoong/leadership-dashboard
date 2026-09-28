@@ -34,7 +34,7 @@
         { id: 'coa',        name: 'Chart of Accounts',             icon: '📒', pageVer: '1.3', sopFile: 'sop-coa.html',                sopVer: '1.1', standalone: 'index.html#coa' },
         { id: 'comms',      name: 'Inbound Comms',                 icon: '📨', pageVer: '2.82', sopFile: 'inbound-comms-sop.html',      sopVer: '2.60', standalone: 'follow-up.html' },
         { id: 'growth-plan', name: 'Growth Plan',                    icon: '📈', pageVer: '1.59', sopFile: 'sop-growth-plan.html',        sopVer: '1.58', standalone: 'growth-plan.html' },
-        { id: 'compliance', name: 'Property Compliance',            icon: '✅', pageVer: '1.16', sopFile: 'sop-compliance.html',         sopVer: '1.14', standalone: 'compliance.html' },
+        { id: 'compliance', name: 'Property Compliance',            icon: '✅', pageVer: '1.17', sopFile: 'sop-compliance.html',         sopVer: '1.14', standalone: 'compliance.html' },
         // Property Manager (Operations) — Roy Lavin's single page. Standalone at
         // property-manager/ behind its own passcode; the property-manager Worker
         // holds the Airtable key and strips personal money server-side (8 Sep 2026).
