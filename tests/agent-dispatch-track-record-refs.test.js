@@ -272,11 +272,57 @@ print('---JSON---'); print(json.dumps([m.reference_tokens(t) for t in json.loads
 import time
 worst = 0
 for t in ['color:' + ' ' * 20000 + 'x', 'Background:' + '\\n' * 20000, 'color:"' + ' ' * 20000,
-          'background: linear-gradient(' + ' ' * 20000, 'border:' + ' ,' * 10000 + 'x', '--' + 'a' * 20000 + ':']:
+          'background: linear-gradient(' + ' ' * 20000, 'border:' + ' ,' * 10000 + 'x', '--' + 'a' * 20000 + ':',
+          'a.' * 10000, 'x.' * 10000 + '/']:
     t0 = time.time(); m.reference_tokens(t); worst = max(worst, time.time() - t0)
 print('---JSON---'); print(json.dumps(worst))`);
-    // 28 seconds before the review fix; a few milliseconds after.
+    // 28 seconds before the review fix; a few milliseconds after. The link
+    // reader took 1.2 seconds on 'a.' * 10000 before the 28 Sep 2026 fix.
     expect(out).toBeLessThan(1);
+  });
+
+  it('the faster link reader strips exactly what the old one did', () => {
+    // The 28 Sep 2026 speed fix must not change what counts as a link. The
+    // old pattern is kept here, with a run group that never matches so the
+    // real reader can use it, and random text goes through both.
+    const out = py(`
+import random, re
+OLD = re.compile(r"(?i:https?://|www\\.)\\S+|\\b(?:[a-z0-9-]+\\.)+[a-z]{2,}/\\S*|(?P<run>(?!))")
+NEW = m.REF_URL_RE
+pieces = list('aAbz09.-/ _:\\néÉ²') + ['www.', 'WwW.', 'http://', 'HTTPS://', 'co.uk/', '.com/', '..', 'Acc.', 'no/',
+          'No/', 'Rightmove', 'AB12345', '12345678', 'ttp://', 'ww.', 'x-']
+def both(s):
+    m.REF_URL_RE = NEW
+    new = (NEW.sub(lambda x: x.group('run') or ' ', s), m.reference_tokens(s))
+    m.REF_URL_RE = OLD
+    old = (OLD.sub(' ', s), m.reference_tokens(s))
+    m.REF_URL_RE = NEW
+    return new, old
+random.seed(20260928)
+diffs, linked, bare, with_tokens = [], 0, 0, 0
+for _ in range(20000):
+    s = ''.join(random.choice(pieces) for _ in range(random.randint(0, 14)))
+    new, old = both(s)
+    diffs += [s] if new != old else []
+    linked += old[0] != s
+    bare += old[0] != s and not re.search(r"(?i:http|www)", s)
+    with_tokens += bool(old[1])
+named = {s: both(s)[0][1] for s in ['Acc.no/12345678', 'Rightmove.co.uk/properties/12345678', 'wait..example.com/123456']}
+print('---JSON---'); print(json.dumps({'diffs': diffs[:5], 'linked': linked, 'bare': bare, 'with_tokens': with_tokens, 'named': named}))`);
+    expect(out.diffs).toEqual([]);
+    // Control: the random text really does hold links, links with no
+    // scheme (the ones the fix speeds up) and references.
+    expect(out.linked).toBeGreaterThan(10000);
+    expect(out.bare).toBeGreaterThan(1000);
+    expect(out.with_tokens).toBeGreaterThan(3000);
+    // A host glued to a capital or after a double dot reads as before: the
+    // lowercase tail of a capitalised link is a link, a mixed-case host with
+    // one dot is not.
+    expect(out.named).toEqual({
+      'Acc.no/12345678': ['12345678'],
+      'Rightmove.co.uk/properties/12345678': [],
+      'wait..example.com/123456': [],
+    });
   });
 });
 

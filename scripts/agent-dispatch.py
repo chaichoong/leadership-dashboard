@@ -5267,7 +5267,18 @@ CURRENCY_AFTER_RE = re.compile(r"[ \t]?(?:GBP|EUR|USD)\b(?![\s,:]*[£€$]?\d)")
 # as written, before it is upper-cased: a scheme-less link needs a lowercase
 # host (so "Acc.No/12345678" stays a reference) and an id a lowercase prefix
 # (so RECEIPT1234567890 does too).
-REF_URL_RE = re.compile(r"(?i:https?://|www\.)\S+|\b(?:[a-z0-9-]+\.)+[a-z]{2,}/\S*")
+# A long dotted or hyphened run ("a." * 10000) took 1.2 seconds (28 Sep
+# 2026): the scheme-less link was retried at every word boundary inside it,
+# each try reading to the end of the run. Once a run fails as a link from its
+# first boundary it fails from every later one (a link found from a later
+# boundary would stretch back to the first), so the third branch reads the
+# rest of the run in one step and gives it back
+# unchanged. It stops short of a www. or http(s):// inside the run so the
+# first branch is still tried there. The text out is the same as before.
+_NOT_A_LINK_START = r"(?!(?i:www\.|https?://))[a-z0-9-]"
+REF_URL_RE = re.compile(
+    r"(?i:https?://|www\.)\S+|\b(?:[a-z0-9-]+\.)+[a-z]{2,}/\S*"
+    r"|(?P<run>\b(?:" + _NOT_A_LINK_START + r")+(?:\.(?:" + _NOT_A_LINK_START + r")+)*)")
 AIRTABLE_ID_RE = re.compile(r"\b(?:app|tbl|rec|viw|shr|fld)[A-Za-z0-9]{14}\b")
 # A link wrapped across lines cuts an id in two ("…/shrTuDF8s" then
 # "04Kp5XGT"), and the second half would search every record holding the
@@ -5296,7 +5307,7 @@ def reference_tokens(text):
     Sep 2026)."""
     text = TRACK_RECORD_HEADER_RE.sub(" ", str(text or ""))
     text = WRAPPED_ID_RE.sub(lambda m: m.group(1) + m.group(3) if len(m.group(2)) + len(m.group(3)) == 14 else m.group(0), text)
-    text = AIRTABLE_ID_RE.sub(" ", REF_URL_RE.sub(" ", text))
+    text = AIRTABLE_ID_RE.sub(" ", REF_URL_RE.sub(lambda m: m.group("run") or " ", text))
     text = STYLE_COLOUR_RE.sub(" ", INLINE_IMAGE_RE.sub(" ", text))
     # A link wrapped across lines leaves a piece of an id behind (DNIH3IRL
     # from appnqjDpq / DniH3IRl), and the search matches on substrings, so
