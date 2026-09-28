@@ -15,28 +15,39 @@ WHERE THE NUMBERS COME FROM
 ---------------------------
 Aqara's developer service (open-ger.aqara.com for a UK account):
   query.device.info    every device, with state 0 = offline, 1 = online
-  query.resource.info  a model's resources, so the battery one is FOUND by its
-                       description, never hard-coded per model
-  query.resource.value the current battery reading
+  query.resource.info  a model's resources, so the battery ones are FOUND by
+                       their description, never hard-coded per model
+  query.resource.value the current reading, with Aqara's own timestamp
 Apple Home keeps no battery level on disk (checked 28 Sep 2026: ZLOWBATTERY
 and ZLASTSEENDATE are empty for all 127 accessories), and the Aqara hubs keep
 passing a dead sensor's last reading to Home, so Home cannot be the source.
 
-ABSENCE IS REPORTED, NEVER SILENT
----------------------------------
+A battery is read as a percentage, or failing that as Aqara's own low-battery
+flag. A model that offers neither is still a BATTERY device, listed as "no
+level" by `read` and counted in every run, never treated as mains and never
+given a level guessed from a voltage. A reading is dated by Aqara's timestamp,
+not by when this script asked, so a sensor that stopped reporting cannot keep
+an old level "fresh".
+
+ABSENCE IS REPORTED, NEVER SILENT (review of 28 Sep 2026 found each gap)
+-------------------------------------------------------------------------
 - A device Aqara marks offline for 2 hours gets its own reminder.
-- A failed read, an expired sign-in or an empty device list is not "all
-  clear": 24 hours without a good read gets a "watch cannot see" reminder.
-- A device list that shrinks by more than a fifth against the last good read
-  gets a reminder, so a half-answered read cannot pass as a full one.
-- A battery device whose model offers no percentage is listed by `read` as
-  "no level", never guessed from a voltage.
+- A device that drops out of Aqara's list for 24 hours gets a "missing" one.
+- A read is only good when every page arrived (ids counted against Aqara's
+  totalCount) and the list is at least 80% of the last good count.
+- A failed read, an expired sign-in, or any reply in a shape this script does
+  not expect is recorded as an error, never a crash: 12 hours without a good
+  read gets a "watch cannot see" reminder. A failed evening read still nudges
+  from the last good read if it is under 6 hours old.
+- The hourly clock is allowed 15 minutes of slack, so a job that starts a few
+  seconds late does not push a reminder to the next evening.
 
 ONE NUDGE PER PROBLEM PER EVENING
 ---------------------------------
-Reminders are made on the 21:20 run with a 21:30 alert, an open one is never
-doubled, and a problem is nudged at most once per day. A reminder ticks itself
-off only on a fresh reading that proves the problem is gone.
+Reminders are made from the 21:20 run on, with a 21:30 alert. An open one is
+never doubled, a problem is nudged at most once per day ("missing" only ever
+once), and a reminder ticks itself off only on a fresh read that proves the
+problem is gone.
 
 SECRETS AND PRIVACY
 -------------------
@@ -55,6 +66,7 @@ Usage:
 import datetime as dt
 import getpass
 import hashlib
+import http.client
 import json
 import os
 import re
@@ -67,12 +79,17 @@ import urllib.error
 import urllib.request
 
 THRESHOLD = 20                 # nudge at this level or below (Kevin, 28 Sep 2026, same as Magic devices)
-NUDGE_AT = (21, 20)            # the run that creates reminders (cron :20, clear of magic-battery at :25)
+NUDGE_AT = (21, 20)            # reminders from this run on (cron :20, clear of magic-battery at :25)
 ALERT_AT = (21, 30)            # when the phone and watch ping
-FRESH_HOURS = 24               # a battery reading older than this does not count as current
+SLACK_HOURS = 0.25             # an hourly job starting late must not miss a limit by seconds
+FRESH_HOURS = 24               # a reading older than this (by Aqara's timestamp) is not current
 OFFLINE_HOURS = 2              # offline this long = its own reminder
-BLIND_HOURS = 24               # no good read for this long = "the watch cannot see" reminder
+MISSING_HOURS = 24             # gone from Aqara's list this long = its own reminder
+FORGET_DAYS = 30               # a device gone this long is no longer expected
+BLIND_HOURS = 12               # no good read for this long = "the watch cannot see" reminder
+FALLBACK_HOURS = 6             # a failed evening read nudges from a good read this recent
 SHRINK = 0.8                   # a list under 80% of the last good count is a partial read
+RESOURCE_DAYS = 1              # re-check each model's resource list this often
 LIST_NAME = "Reminders"        # Kevin's default list. Never "Captures": that feeds the brain.
 MARK = "[home-battery"         # every reminder this script owns carries this in its notes
 
@@ -82,6 +99,7 @@ REGIONS = {"europe": "open-ger.aqara.com", "usa": "open-usa.aqara.com",
 TOKEN_VALIDITY = "30d"         # the longest Aqara allows; the refresh token lasts 30 days past it
 REFRESH_DAYS = 7               # renew the token once fewer days than this remain
 PAGE = 50                      # query.device.info page size (Aqara's default)
+MAX_PAGES = 40                 # 2,000 devices: a loop past this is a broken reply, not a house
 CHUNK = 50                     # devices per query.resource.value call
 
 CONFIG = os.path.expanduser("~/.config/od/aqara.json")
@@ -107,7 +125,7 @@ def sign(headers, app_key):
 
 
 def call(cfg, intent, data, token=True):
-    """One request. Returns `result`. Raises AqaraError on any non-zero code."""
+    """One request. Returns `result`. Raises AqaraError on any failure or odd reply."""
     headers = {"Appid": cfg["appId"], "Keyid": cfg["keyId"],
                "Nonce": "".join(secrets.choice(string.ascii_letters + string.digits) for _ in range(16)),
                "Time": str(int(time.time() * 1000)), "Lang": "en"}
@@ -121,11 +139,22 @@ def call(cfg, intent, data, token=True):
     try:
         with urllib.request.urlopen(req, timeout=60) as r:
             body = json.loads(r.read().decode())
-    except (urllib.error.URLError, ValueError, OSError) as e:
-        raise AqaraError("%s: no answer from Aqara (%s)" % (intent, e))
+    except (urllib.error.URLError, http.client.HTTPException, ValueError, OSError) as e:
+        raise AqaraError("%s: no usable answer from Aqara (%s)" % (intent, e))
+    if not isinstance(body, dict):
+        raise AqaraError("%s: Aqara replied with %s, not an object" % (intent, type(body).__name__))
     if body.get("code") != 0:
         raise AqaraError("%s: Aqara said %s %s" % (intent, body.get("code"), body.get("message")))
     return body.get("result")
+
+
+def as_list(result, intent):
+    """Aqara lists come bare or as {"data": [...]}. Anything else is an error, not empty."""
+    if isinstance(result, list):
+        return result
+    if isinstance(result, dict) and isinstance(result.get("data"), list):
+        return result["data"]
+    raise AqaraError("%s: expected a list, got %s" % (intent, type(result).__name__))
 
 
 def load_config(path=CONFIG):
@@ -146,9 +175,12 @@ def save_config(cfg, path=CONFIG):
 
 
 def keep_token(cfg, result, now_ts):
-    cfg["accessToken"] = result["accessToken"]
-    cfg["refreshToken"] = result["refreshToken"]
-    cfg["expiresAt"] = int(now_ts + int(result["expiresIn"]))
+    try:
+        access, refresh, expires = result["accessToken"], result["refreshToken"], int(result["expiresIn"])
+    except (TypeError, KeyError, ValueError):
+        raise AqaraError("sign-in reply had no usable token: run the Aqara sign-in again")
+    cfg["accessToken"], cfg["refreshToken"] = access, refresh
+    cfg["expiresAt"] = int(now_ts + expires)
 
 
 def fresh_token(cfg, now_ts=None):
@@ -156,63 +188,99 @@ def fresh_token(cfg, now_ts=None):
     now_ts = now_ts or time.time()
     if cfg.get("expiresAt", 0) - now_ts > REFRESH_DAYS * 86400:
         return cfg
-    result = call(cfg, "config.auth.refreshToken", {"refreshToken": cfg["refreshToken"]}, token=False)
+    result = call(cfg, "config.auth.refreshToken", {"refreshToken": cfg.get("refreshToken", "")}, token=False)
     keep_token(cfg, result, now_ts)
     save_config(cfg)
     return cfg
 
 
-def pick_battery_resource(resources):
-    """The resource that reports battery as a percentage, or None.
+def classify(resources):
+    """What a model reports about its battery: {"battery", "pct", "flag"}.
 
-    Found by its description so a new model needs no code change. A voltage-only
-    battery resource is NOT picked: a percentage guessed from millivolts would be
-    acted on as if it were read.
+    pct   a resource giving the battery as a percentage (unit % or "percent")
+    flag  Aqara's own low-battery yes/no, used only when there is no percentage
+    battery  True when ANY resource mentions a battery, even voltage only, so a
+          battery device is never mistaken for a mains one
+    Found by description, so a new model needs no code change. Nothing else is
+    ever read as a level: a voltage or an alarm flag is not a percentage.
     """
-    best = None
-    for r in resources or []:
+    out = {"battery": False, "pct": None, "flag": None}
+    for r in resources:
+        if not isinstance(r, dict):
+            continue
         text = " ".join(str(r.get(k) or "") for k in ("name", "description")).lower()
         unit = str(r.get("unit") or "").strip().lower()
-        if "battery" not in text or "volt" in text or unit in ("mv", "v"):
+        if "battery" not in text:
             continue
-        if unit == "%" or "percent" in text or "level" in text:
-            return r.get("resourceId")
-        best = best or r.get("resourceId")
-    return best
+        out["battery"] = True
+        if "volt" in text or unit in ("mv", "v"):
+            continue
+        if out["pct"] is None and (unit == "%" or "percent" in text):
+            out["pct"] = r.get("resourceId")
+        elif out["flag"] is None and "low" in text:
+            out["flag"] = r.get("resourceId")
+    return out
 
 
-def read_aqara(cfg, resource_cache):
-    """Every device Aqara knows: [{"id","name","model","online","level","battery"}].
+def model_info(cfg, model, cache, now):
+    """classify() for a model, from a cache refreshed every RESOURCE_DAYS."""
+    c = cache.get(model)
+    if isinstance(c, dict) and c.get("at"):
+        age = (now - dt.datetime.fromisoformat(c["at"])).total_seconds() / 86400
+        if age < RESOURCE_DAYS:
+            return c
+    info = as_list(call(cfg, "query.resource.info", {"model": model}), "query.resource.info")
+    c = classify(info)
+    c["at"] = now.isoformat(timespec="seconds")
+    cache[model] = c
+    return c
 
-    resource_cache {model: resourceId or ""} is filled in place, so each model's
-    resource list is fetched once. Raises AqaraError on any failed call.
-    """
-    devices, page = [], 1
+
+def read_aqara(cfg, cache, now):
+    """Every device Aqara knows: [{"id","name","model","online","battery",
+    "level","level_at","low_flag","flag_at"}]. Raises AqaraError on any failed
+    call, a missing page, or a row with no id."""
+    rows, page, total = [], 1, 0
     while True:
-        res = call(cfg, "query.device.info", {"pageNum": page, "pageSize": PAGE}) or {}
-        rows = res.get("data") or []
-        devices.extend(rows)
+        res = call(cfg, "query.device.info", {"pageNum": page, "pageSize": PAGE})
+        if not isinstance(res, dict):
+            raise AqaraError("query.device.info: expected an object, got %s" % type(res).__name__)
+        batch = as_list(res.get("data") if res.get("data") is not None else [], "query.device.info")
         total = int(res.get("totalCount") or 0)
-        if not rows or len(devices) >= total:
+        rows.extend(batch)
+        # With a total, page until it is reached; without one, until a short page.
+        done = len(rows) >= total if total else len(batch) < PAGE
+        if not batch or done:
             break
+        if page >= MAX_PAGES:
+            raise AqaraError("query.device.info: still paging after %d pages" % MAX_PAGES)
         page += 1
-    for d in devices:
-        m = d.get("model") or ""
-        if m and m not in resource_cache:
-            info = call(cfg, "query.resource.info", {"model": m}) or []
-            resource_cache[m] = pick_battery_resource(info if isinstance(info, list) else []) or ""
-    wanted = [{"subjectId": d["did"], "resourceIds": [resource_cache[d["model"]]]}
-              for d in devices if resource_cache.get(d.get("model") or "")]
+    if any(not isinstance(d, dict) or not d.get("did") for d in rows):
+        raise AqaraError("query.device.info: a device came back with no id")
+    ids = {d["did"] for d in rows}
+    if total and len(ids) != total:
+        raise AqaraError("query.device.info: %d of %d devices arrived" % (len(ids), total))
+
+    info = {d["did"]: model_info(cfg, d.get("model") or "", cache, now) if d.get("model") else
+            {"battery": False, "pct": None, "flag": None} for d in rows}
+    wanted = [{"subjectId": did, "resourceIds": [r for r in (i["pct"], i["flag"]) if r]}
+              for did, i in info.items() if i["pct"] or i["flag"]]
     values = {}
-    for i in range(0, len(wanted), CHUNK):
-        for v in call(cfg, "query.resource.value", {"resources": wanted[i:i + CHUNK]}) or []:
-            values[v.get("subjectId")] = v.get("value")
+    for n in range(0, len(wanted), CHUNK):
+        for v in as_list(call(cfg, "query.resource.value", {"resources": wanted[n:n + CHUNK]}),
+                         "query.resource.value"):
+            if isinstance(v, dict):
+                values[(v.get("subjectId"), v.get("resourceId"))] = (v.get("value"), v.get("timeStamp"))
     out = []
-    for d in devices:
-        battery = bool(resource_cache.get(d.get("model") or ""))
+    for d in rows:
+        i = info[d["did"]]
+        level, level_at = values.get((d["did"], i["pct"]), (None, None)) if i["pct"] else (None, None)
+        flag, flag_at = values.get((d["did"], i["flag"]), (None, None)) if i["flag"] else (None, None)
         out.append({"id": "aqara:" + d["did"], "name": d.get("deviceName") or d.get("model") or "Aqara device",
                     "model": d.get("model") or "", "online": parse_state(d.get("state")),
-                    "battery": battery, "level": parse_level(values.get(d["did"])) if battery else None})
+                    "battery": bool(i["battery"]),
+                    "level": parse_level(level), "level_at": stamp(level_at, now),
+                    "low_flag": parse_flag(flag), "flag_at": stamp(flag_at, now)})
     return out
 
 
@@ -233,6 +301,20 @@ def parse_level(value):
     return level if 0 <= level <= 100 else None
 
 
+def parse_flag(value):
+    """Aqara's low-battery flag: 1 low, 0 fine, anything else unknown."""
+    return {"1": True, "0": False}.get(str(value).strip()) if value is not None else None
+
+
+def stamp(ms, now):
+    """Aqara's millisecond timestamp as local iso, or None. Never 'now' by default."""
+    try:
+        t = dt.datetime.fromtimestamp(int(ms) / 1000)
+    except (TypeError, ValueError, OverflowError, OSError):
+        return None
+    return min(t, now).isoformat(timespec="seconds")
+
+
 # --------------------------------------------------------------------------
 # History and state (private, outside the repo)
 # --------------------------------------------------------------------------
@@ -240,7 +322,8 @@ def parse_level(value):
 def load_state(path=STATE):
     try:
         with open(path) as f:
-            return json.load(f)
+            s = json.load(f)
+        return s if isinstance(s, dict) else {}
     except (OSError, ValueError):
         return {}
 
@@ -262,25 +345,38 @@ def append_reading(now, devices, error, path=READINGS):
 
 
 def track(now, devices, state):
-    """Fold this read into state: when each device went offline, its last level.
+    """Fold a GOOD read into state. Returns a new state; the input is unchanged.
 
-    state["devices"][id] = {"name", "offline_since", "level", "level_at"}.
-    Returns the updated state (a new dict; the input is not changed).
+    state["devices"][id] = {"name", "battery", "last_seen", "offline_since",
+                            "level", "level_at", "low_flag", "flag_at"}
+    offline_since keeps the FIRST time the device was seen offline.
     """
     st = {k: dict(v) for k, v in (state.get("devices") or {}).items()}
     iso = now.isoformat(timespec="seconds")
     for d in devices:
         s = st.setdefault(d["id"], {})
-        s["name"] = d["name"]
+        s["name"], s["battery"], s["last_seen"] = d["name"], d["battery"], iso
         if d["online"] is False:
             s["offline_since"] = s.get("offline_since") or iso
         elif d["online"] is True:
             s.pop("offline_since", None)
-        if d["level"] is not None:
-            s["level"], s["level_at"] = d["level"], iso
+        if d.get("level") is not None and d.get("level_at"):
+            s["level"], s["level_at"] = d["level"], d["level_at"]
+        if d.get("low_flag") is not None and d.get("flag_at"):
+            s["low_flag"], s["flag_at"] = d["low_flag"], d["flag_at"]
     new = dict(state)
     new["devices"] = st
     return new
+
+
+def from_state(state):
+    """The last good read, rebuilt for a failed evening read to nudge from."""
+    out = []
+    for i, s in (state.get("devices") or {}).items():
+        out.append({"id": i, "name": s.get("name") or "Aqara device", "battery": bool(s.get("battery")),
+                    "online": False if s.get("offline_since") else None,
+                    "level": None, "low_flag": None})
+    return out
 
 
 # --------------------------------------------------------------------------
@@ -295,14 +391,28 @@ def marker(kind, dev_id):
     return "%s %s %s]" % (MARK, kind, short_id(dev_id))
 
 
+def hours(now, iso):
+    return (now - dt.datetime.fromisoformat(iso)).total_seconds() / 3600
+
+
+def is_low(t, now, threshold):
+    """(low?, text) from the tracked state, only on a reading Aqara dated fresh."""
+    if t.get("level") is not None and t.get("level_at") and hours(now, t["level_at"]) <= FRESH_HOURS:
+        return t["level"] <= threshold, "%d%%" % t["level"]
+    if t.get("low_flag") is not None and t.get("flag_at") and hours(now, t["flag_at"]) <= FRESH_HOURS:
+        return t["low_flag"], "low"
+    return False, ""
+
+
 def decide(now, read_ok, devices, state, open_reminders, nudged, threshold=THRESHOLD,
            force_nudge=False):
     """Return this run's actions.
 
     now             local datetime
-    read_ok         True when this run's read succeeded and passed the count check
-    devices         this run's devices (empty when read_ok is False)
-    state           track() output INCLUDING this run's read, plus
+    read_ok         True when this run's read succeeded and passed the count checks
+    devices         this run's devices; when the read failed, from_state() of a
+                    recent good read, or empty
+    state           track() output (including this run's read when good), plus
                     "last_ok" (iso) and "last_error" (text)
     open_reminders  [{"key": "<marker>", "ref": <opaque>}] this script owns
     nudged          {"<kind>:<id>": "YYYY-MM-DD"}
@@ -310,59 +420,70 @@ def decide(now, read_ok, devices, state, open_reminders, nudged, threshold=THRES
              {"do": "complete", "ref", "why"}.
     """
     actions = []
-    open_keys = {r["key"]: r["ref"] for r in open_reminders}
+    open_keys = {r["key"] for r in open_reminders}
     today = now.date().isoformat()
     tracked = state.get("devices") or {}
-    by_sid = {short_id(d["id"]): d for d in devices}
+    seen_now = {short_id(d["id"]): d for d in devices} if read_ok else {}
 
-    # 1. Close what a fresh read proves is no longer true.
+    # 1. Close what a fresh, good read proves is no longer true.
     for r in open_reminders:
-        m = re.match(re.escape(MARK) + r" (low|offline|blind) ([0-9a-f]{6})\]", r["key"])
-        if not m:
+        m = re.match(re.escape(MARK) + r" (low|offline|missing|blind) ([0-9a-f]{6})\]", r["key"])
+        if not m or not read_ok:
             continue
         kind, sid = m.groups()
         if kind == "blind":
-            if read_ok:
-                actions.append({"do": "complete", "ref": r["ref"], "why": "Aqara answering again"})
+            actions.append({"do": "complete", "ref": r["ref"], "why": "Aqara answering again"})
             continue
-        d = by_sid.get(sid) if read_ok else None
+        d = seen_now.get(sid)
         if d is None:
             continue
-        if kind == "offline" and d["online"] is True:
+        t = tracked.get(d["id"]) or {}
+        low, _ = is_low(t, now, threshold)
+        fresh = (t.get("level") is not None and t.get("level_at") and hours(now, t["level_at"]) <= FRESH_HOURS) or \
+                (t.get("low_flag") is not None and t.get("flag_at") and hours(now, t["flag_at"]) <= FRESH_HOURS)
+        if kind == "missing":
+            actions.append({"do": "complete", "ref": r["ref"], "why": "back in Aqara's list"})
+        elif kind == "offline" and d["online"] is True:
             actions.append({"do": "complete", "ref": r["ref"], "why": "back online"})
-        elif kind == "low" and d["level"] is not None and d["level"] > threshold:
-            actions.append({"do": "complete", "ref": r["ref"], "why": "now %d%%" % d["level"]})
+        elif kind == "low" and fresh and not low:
+            actions.append({"do": "complete", "ref": r["ref"], "why": "battery fine again"})
 
-    # 2. Nudge, once per problem per evening, only in the evening window.
+    # 2. Nudge, once per problem per evening, from the evening run on.
     if not force_nudge and (now.hour, now.minute) < NUDGE_AT:
         return actions
     wanted = []
     last_ok = state.get("last_ok")
-    blind_h = None if not last_ok else (now - dt.datetime.fromisoformat(last_ok)).total_seconds() / 3600
-    if not read_ok and (blind_h is None or blind_h >= BLIND_HOURS):
-        since = "it was set up" if blind_h is None else "%d hours" % blind_h
+    if not read_ok and (last_ok is None or hours(now, last_ok) >= BLIND_HOURS - SLACK_HOURS):
+        gap = "since it was set up" if last_ok is None else "for %d hours" % hours(now, last_ok)
         wanted.append(("blind", "watch", "The home battery watch cannot see Aqara",
-                       "No good read for %s. Last error: %s. If it says sign-in, run the Aqara "
-                       "sign-in on the Mac mini desktop. Until this ticks off, no battery or "
-                       "offline device can be flagged." % (since, state.get("last_error") or "none")))
+                       "No good read %s. Last error: %s. If it mentions sign-in, double-click "
+                       "Aqara sign-in on the Mac mini desktop. Until this ticks off, no battery "
+                       "or offline device can be flagged." % (gap, state.get("last_error") or "none")))
     for d in devices:
         t = tracked.get(d["id"]) or {}
-        name = d["name"]
         since = t.get("offline_since")
-        if d["online"] is False and since:
-            gone = dt.datetime.fromisoformat(since)
-            if (now - gone).total_seconds() / 3600 >= OFFLINE_HOURS:
-                wanted.append(("offline", d["id"], "%s is offline" % name,
-                               "Aqara has not heard from it since %s. Check its power, then "
-                               "re-pair it in the Aqara app if it stays off. This ticks itself "
-                               "off once it is back online." % gone.strftime("%a %d %b %H:%M")))
+        if d["online"] is False and since and hours(now, since) >= OFFLINE_HOURS - SLACK_HOURS:
+            wanted.append(("offline", d["id"], "%s is offline" % d["name"],
+                           "Aqara has not heard from it since about %s. Check its power, then "
+                           "re-pair it in the Aqara app if it stays off. This ticks itself off "
+                           "once it is back online." % dt.datetime.fromisoformat(since).strftime("%a %d %b %H:%M")))
+            continue
+        low, text = is_low(t, now, threshold) if d["battery"] else (False, "")
+        if low:
+            wanted.append(("low", d["id"], "Battery low: %s (%s)" % (d["name"], text),
+                           "Change or charge its battery. This ticks itself off once Aqara "
+                           "reports it fine again."))
+    if read_ok:
+        present = {d["id"] for d in devices}
+        for i, t in sorted(tracked.items()):
+            if i in present or not t.get("last_seen"):
                 continue
-        lv, at = t.get("level"), t.get("level_at")
-        if d["battery"] and lv is not None and at and lv <= threshold and \
-                (now - dt.datetime.fromisoformat(at)).total_seconds() / 3600 <= FRESH_HOURS:
-            wanted.append(("low", d["id"], "Battery low: %s (%d%%)" % (name, lv),
-                           "Change or charge its battery. This ticks itself off once it "
-                           "reads above %d%%." % threshold))
+            gone = hours(now, t["last_seen"])
+            if MISSING_HOURS - SLACK_HOURS <= gone <= FORGET_DAYS * 24 and ("missing:%s" % i) not in nudged:
+                wanted.append(("missing", i, "%s has vanished from Aqara" % (t.get("name") or "A device"),
+                               "Aqara stopped listing it %s. If you removed it on purpose, tick this "
+                               "off; it will not come back. If not, re-add it in the Aqara app."
+                               % dt.datetime.fromisoformat(t["last_seen"]).strftime("%a %d %b %H:%M")))
     for kind, dev_id, title, body in wanted:
         key = marker(kind, dev_id)
         if key in open_keys:
@@ -463,38 +584,52 @@ def open_reminders():
 # Commands
 # --------------------------------------------------------------------------
 
-def describe(d):
+def describe(d, now):
     state = {True: "online", False: "OFFLINE", None: "state unknown"}[d["online"]]
     if not d["battery"]:
-        level = "mains or no battery"
+        level = "mains"
+    elif d["level"] is not None:
+        level = "%d%%" % d["level"]
+        if d.get("level_at") and hours(now, d["level_at"]) > FRESH_HOURS:
+            level += " (old reading, %s)" % d["level_at"][:10]
+    elif d.get("low_flag") is not None:
+        level = "battery LOW" if d["low_flag"] else "battery ok"
     else:
-        level = "no level" if d["level"] is None else "%d%%" % d["level"]
+        level = "battery, no level"
     return "%-38s %-14s %s" % (d["name"][:38], state, level)
 
 
-def read_once(state):
-    """(devices, error). Never raises for an Aqara or config problem: it is data."""
+def no_level(devices):
+    return [d for d in devices if d["battery"] and d["level"] is None and d.get("low_flag") is None]
+
+
+def read_once(state, now):
+    """(devices, error). Never raises for an Aqara, config or reply-shape problem:
+    those are data, and a crash would stop the evening 'cannot see' reminder."""
     cfg = load_config()
     if not cfg or not cfg.get("accessToken"):
-        return [], "not set up: run the Aqara sign-in on the Mac mini desktop"
+        return [], "not set up: double-click Aqara sign-in on the Mac mini desktop"
     try:
         cfg = fresh_token(cfg)
         cache = state.setdefault("resources", {})
-        return read_aqara(cfg, cache), ""
+        return read_aqara(cfg, cache, now), ""
     except AqaraError as e:
         return [], str(e)
+    except Exception as e:  # an unexpected reply shape: recorded, reminded about, never a crash
+        return [], "unexpected reply from Aqara (%s: %s)" % (type(e).__name__, e)
 
 
 def cmd_read():
-    devices, error = read_once(load_state())
+    now = dt.datetime.now()
+    devices, error = read_once(load_state(), now)
     if error:
         print("ERROR: %s" % error)
         return 1
     batt = [d for d in devices if d["battery"]]
-    print("%d devices, %d with a battery, %d offline" %
-          (len(devices), len(batt), sum(1 for d in devices if d["online"] is False)))
+    print("%d devices, %d with a battery, %d offline, %d battery devices give no level" %
+          (len(devices), len(batt), sum(1 for d in devices if d["online"] is False), len(no_level(devices))))
     for d in sorted(devices, key=lambda x: (x["online"] is not False, not x["battery"], x["name"])):
-        print(describe(d))
+        print(describe(d, now))
     return 0
 
 
@@ -507,7 +642,7 @@ def cmd_run(argv):
 
     now = dt.datetime.now()
     state = load_state()
-    devices, error = read_once(state)
+    devices, error = read_once(state, now)
     read_ok = not error
     if read_ok:
         read_ok, error = count_ok(devices, state.get("last_count"))
@@ -516,17 +651,21 @@ def cmd_run(argv):
         state["last_ok"] = now.isoformat(timespec="seconds")
         state["last_count"] = len(devices)
         state.pop("last_error", None)
-        print("read  %d devices, %d offline, %d battery readings" %
+        print("read  %d devices, %d offline, %d battery readings, %d battery devices give no level" %
               (len(devices), sum(1 for d in devices if d["online"] is False),
-               sum(1 for d in devices if d["level"] is not None)))
+               sum(1 for d in devices if d["level"] is not None or d.get("low_flag") is not None),
+               len(no_level(devices))))
+        for d in no_level(devices):
+            print("      no level: %s (%s)" % (d["name"], d["model"]))
     else:
         state["last_error"] = error
-        devices = []
         # A failed read is reported, and the job still exits 0 so the evening
         # reminder is what raises it, not a launchd failure nobody reads.
         print("WARN: read failed: %s" % error)
+        recent = state.get("last_ok") and hours(now, state["last_ok"]) < FALLBACK_HOURS
+        devices = from_state(state) if recent else []
     if not dry:
-        append_reading(now, devices, error)
+        append_reading(now, devices if read_ok else [], error)
 
     actions = decide(now, read_ok, devices, state, open_reminders(), state.get("nudged", {}),
                      threshold=threshold, force_nudge=force)
@@ -555,9 +694,7 @@ def cmd_setup():
     """Kevin's one-off sign-in. Asks for the developer keys and the emailed code."""
     print("Aqara sign-in for the home battery watch.\n")
     cfg = load_config() or {}
-    if cfg.get("appId") and input("Keys already saved. Keep them? [Y/n] ").strip().lower() in ("", "y", "yes"):
-        pass
-    else:
+    if not (cfg.get("appId") and input("Keys already saved. Keep them? [Y/n] ").strip().lower() in ("", "y", "yes")):
         cfg["appId"] = input("App ID (from developer.aqara.com, your project): ").strip()
         cfg["keyId"] = input("Key ID: ").strip()
         cfg["appKey"] = getpass.getpass("App Key (hidden as you paste): ").strip()
@@ -574,12 +711,12 @@ def cmd_setup():
         code = input("Type the code here: ").strip()
         result = call(cfg, "config.auth.getToken",
                       {"authCode": code, "account": cfg["account"], "accountType": 0}, token=False)
+        keep_token(cfg, result, time.time())
     except AqaraError as e:
         print("ERROR: %s\nNothing saved. Check the keys and try again." % e)
         return 1
-    keep_token(cfg, result, time.time())
     save_config(cfg)
-    devices, error = read_once(load_state())
+    devices, error = read_once(load_state(), dt.datetime.now())
     if error:
         print("Signed in, but the first read failed: %s" % error)
         return 1
@@ -588,8 +725,47 @@ def cmd_setup():
     return 0
 
 
+def fake_read(now, n, total, bad_row=False, wrap=False, junk=False):
+    """read_aqara() against a fake Aqara, for the selftest and the vitest file.
+
+    Devices cycle through three models: v = voltage-only sensor, p = percentage
+    sensor at 15% read an hour ago, c = camera (no battery, offline).
+    """
+    global call
+    kinds = ["v", "p", "c"]
+    rows = [{"did": "%s%d" % (kinds[i % 3], i), "deviceName": "Device %d" % i, "model": "m." + kinds[i % 3],
+             "state": 0 if kinds[i % 3] == "c" else 1} for i in range(n)]
+    if bad_row:
+        rows[0] = {"deviceName": "no id"}
+    info = {"m.v": [{"resourceId": "8.0.2008", "name": "battery voltage", "unit": "mV"}],
+            "m.p": [{"resourceId": "8.0.2001", "name": "battery", "description": "Battery percentage", "unit": "%"}],
+            "m.c": [{"resourceId": "2.1.1", "name": "video"}]}
+    ts = int((now - dt.timedelta(hours=1)).timestamp() * 1000)
+
+    def fake(cfg, intent, data, token=True):
+        if intent == "query.device.info":
+            start = (data["pageNum"] - 1) * data["pageSize"]
+            page = rows[start:start + data["pageSize"]] if (total is None or start < 50) else []
+            return {"data": page, "totalCount": total} if total is not None else {"data": page}
+        if intent == "query.resource.info":
+            return info[data["model"]]
+        if intent == "query.resource.value":
+            if junk:
+                return "not a list"
+            vals = [{"subjectId": r["subjectId"], "resourceId": rid, "value": "15", "timeStamp": ts}
+                    for r in data["resources"] for rid in r["resourceIds"]]
+            return {"data": vals} if wrap else vals
+        raise AqaraError("unexpected intent %s" % intent)
+
+    real, call = call, fake
+    try:
+        return read_aqara({}, {}, now)
+    finally:
+        call = real
+
+
 def selftest():
-    now = dt.datetime(2026, 9, 28, 21, 25)
+    now = dt.datetime(2026, 9, 28, 21, 20)
     iso = lambda t: t.isoformat(timespec="seconds")
     fails = []
 
@@ -600,8 +776,10 @@ def selftest():
     def creates(actions):
         return sorted((a["kind"], a["id"]) for a in actions if a["do"] == "create")
 
-    def dev(i, online=True, level=None, battery=True, name=None):
-        return {"id": i, "name": name or i, "model": "m", "online": online, "battery": battery, "level": level}
+    def dev(i, online=True, level=None, battery=True, name=None, flag=None, at=None):
+        return {"id": i, "name": name or i, "model": "m", "online": online, "battery": battery,
+                "level": level, "level_at": iso(at or now) if level is not None else None,
+                "low_flag": flag, "flag_at": iso(at or now) if flag is not None else None}
 
     def st(devs, offline_since=None, last_ok=None):
         s = track(now, devs, {})
@@ -622,7 +800,7 @@ def selftest():
     check("no token means no Accesstoken in the signature", sign(no_tok, "k"),
           hashlib.md5(("Appid=%s&Keyid=%s&Nonce=%s&Time=%sk" % (h["Appid"], h["Keyid"], h["Nonce"], h["Time"])).lower().encode()).hexdigest())
 
-    # Low battery.
+    # Low battery, by percentage or by Aqara's flag, only on a fresh Aqara timestamp.
     devs = [dev("a", level=12, name="Utility Motion"), dev("b", level=21), dev("c", level=20)]
     check("20% and below nudges, 21% does not", creates(decide(now, True, devs, st(devs), [], {})),
           [("low", "a"), ("low", "c")])
@@ -634,41 +812,61 @@ def selftest():
           creates(decide(now, True, devs[:1], st(devs[:1]), [{"key": marker("low", "a"), "ref": "r"}], {})), [])
     check("one nudge per problem per evening",
           creates(decide(now, True, devs[:1], st(devs[:1]), [], {"low:a": "2026-09-28"})), [])
-    mains = [dev("cam", level=None, battery=False)]
+    mains = [dev("cam", battery=False)]
     check("a mains device is never 'low'", creates(decide(now, True, mains, st(mains), [], {})), [])
+    flagged = [dev("f", flag=True, name="Door")]
+    check("Aqara's low flag nudges when there is no percentage",
+          [a["title"] for a in decide(now, True, flagged, st(flagged), [], {}) if a["do"] == "create"], ["Battery low: Door (low)"])
+    old = [dev("o", level=5, at=now - dt.timedelta(hours=30))]
+    check("a level Aqara dated 30 hours ago is not current", creates(decide(now, True, old, st(old), [], {})), [])
 
-    # Offline.
+    # Offline, with slack for a late start.
     cam = [dev("cam", online=False, battery=False, name="Office Camera")]
-    check("offline under 2 hours waits", creates(decide(now, True, cam, st(cam, now - dt.timedelta(minutes=90)), [], {})), [])
+    check("offline 90 minutes waits", creates(decide(now, True, cam, st(cam, now - dt.timedelta(minutes=90)), [], {})), [])
+    late = now + dt.timedelta(seconds=5)
+    check("offline 2 hours less a few seconds still counts",
+          creates(decide(late, True, cam, st(cam, now - dt.timedelta(hours=2) + dt.timedelta(seconds=30)), [], {})), [("offline", "cam")])
     acts = decide(now, True, cam, st(cam, now - dt.timedelta(hours=3)), [], {})
-    check("offline 2 hours+ gets its own reminder", creates(acts), [("offline", "cam")])
     check("offline title is plain", [a["title"] for a in acts], ["Office Camera is offline"])
     check("state unknown is not offline", creates(decide(now, True, [dev("x", online=None)], st([dev("x", online=None)]), [], {})), [])
     s = track(now - dt.timedelta(hours=3), cam, {})
     s = track(now, cam, s)
-    check("offline_since keeps the FIRST offline time",
-          s["devices"]["cam"]["offline_since"], iso(now - dt.timedelta(hours=3)))
+    check("offline_since keeps the FIRST offline time", s["devices"]["cam"]["offline_since"], iso(now - dt.timedelta(hours=3)))
     check("coming back online clears offline_since",
           "offline_since" in track(now, [dev("cam", battery=False)], s)["devices"]["cam"], False)
 
+    # A failed evening read nudges from a recent good read, and closes nothing.
+    s = st(cam, now - dt.timedelta(hours=4), last_ok=now - dt.timedelta(hours=1))
+    check("failed evening read still nudges a known-offline device",
+          creates(decide(now, False, from_state(s), s, [], {})), [("offline", "cam")])
+    openr = [{"key": marker("offline", "cam"), "ref": "r1"}]
+    check("a failed read closes nothing", [a for a in decide(now.replace(hour=9), False, from_state(s), s, openr, {}) if a["do"] == "complete"], [])
+
     # Closing only on a fresh read that proves it.
     back = [dev("cam", battery=False)]
-    openr = [{"key": marker("offline", "cam"), "ref": "r1"}]
     check("back online ticks it off", [(a["do"], a["ref"]) for a in decide(now.replace(hour=9), True, back, st(back), openr, {})],
           [("complete", "r1")])
-    check("a failed read closes nothing device-level",
-          [a for a in decide(now.replace(hour=9), False, [], {"last_ok": iso(now)}, openr, {}) if a["do"] == "complete"], [])
     lowr = [{"key": marker("low", "a"), "ref": "r2"}]
     check("a charged battery ticks it off",
           [a["ref"] for a in decide(now.replace(hour=9), True, [dev("a", level=90)], st([dev("a", level=90)]), lowr, {}) if a["do"] == "complete"], ["r2"])
     check("a blank level closes nothing",
           decide(now.replace(hour=9), True, [dev("a", level=None)], st([dev("a", level=None)]), lowr, {}), [])
 
+    # Missing from Aqara's list.
+    s = st([dev("gone", name="Loft Motion")])
+    s["devices"]["gone"]["last_seen"] = iso(now - dt.timedelta(hours=25))
+    check("gone from the list 24 hours+ gets one reminder", creates(decide(now, True, [dev("x")], s, [], {})), [("missing", "gone")])
+    check("'missing' is only ever nudged once", creates(decide(now, True, [dev("x")], s, [], {"missing:gone": "2026-09-01"})), [])
+    check("a failed read never reports missing", [a["kind"] for a in decide(now, False, [], dict(s, last_ok=iso(now)), [], {}) if a["do"] == "create"], [])
+
     # Blind: the watch cannot see.
-    acts = decide(now, False, [], {"last_ok": iso(now - dt.timedelta(hours=25)), "last_error": "x"}, [], {})
-    check("25 hours without a good read raises its own reminder", creates(acts), [("blind", "watch")])
+    acts = decide(now, False, [], {"last_ok": iso(now - dt.timedelta(hours=12) + dt.timedelta(seconds=40)), "last_error": "x"}, [], {})
+    check("12 hours (less a late start) without a good read raises its own reminder", creates(acts), [("blind", "watch")])
+    check("blind text reads plainly", "No good read for 11 hours." in (acts[0]["body"] if acts else ""), True)
     check("a short outage waits", creates(decide(now, False, [], {"last_ok": iso(now - dt.timedelta(hours=3))}, [], {})), [])
-    check("never set up is blind at once", creates(decide(now, False, [], {}, [], {})), [("blind", "watch")])
+    never = decide(now, False, [], {}, [], {})
+    check("never set up is blind at once", creates(never), [("blind", "watch")])
+    check("never-set-up text reads plainly", "No good read since it was set up." in (never[0]["body"] if never else ""), True)
     blindr = [{"key": marker("blind", "watch"), "ref": "r3"}]
     check("a good read ticks the blind reminder off",
           [a["ref"] for a in decide(now.replace(hour=9), True, back, st(back), blindr, {}) if a["do"] == "complete"], ["r3"])
@@ -679,16 +877,50 @@ def selftest():
     check("a normal list passes", count_ok([dev(str(i)) for i in range(59)], 60)[0], True)
     check("first ever read passes", count_ok([dev("a")], None)[0], True)
 
-    # Parsers and the resource picker.
+    # Parsers and the resource classifier.
     check("state 1/0/other", [parse_state(1), parse_state("0"), parse_state(None), parse_state("x")], [True, False, None, None])
     check("level from a string", [parse_level("87"), parse_level(101), parse_level(""), parse_level(None)], [87, None, None, None])
+    check("flag 1/0/other", [parse_flag("1"), parse_flag(0), parse_flag("x"), parse_flag(None)], [True, False, None, None])
     res = [{"resourceId": "8.0.2008", "name": "battery voltage", "unit": "mV"},
            {"resourceId": "8.0.2001", "name": "battery", "description": "Battery level percentage", "unit": "%"},
            {"resourceId": "3.1.85", "name": "motion"}]
-    check("picks the percentage, not the voltage", pick_battery_resource(res), "8.0.2001")
-    check("voltage only means no level, never a guess", pick_battery_resource(res[:1]), None)
-    check("no battery resource at all", pick_battery_resource(res[2:]), None)
+    check("picks the percentage, not the voltage", classify(res), {"battery": True, "pct": "8.0.2001", "flag": None})
+    check("voltage only is still a battery device, with no level",
+          classify(res[:1]), {"battery": True, "pct": None, "flag": None})
+    check("a low-battery alarm is a flag, never a percentage",
+          classify([{"resourceId": "13.1.85", "name": "low battery alarm"}]), {"battery": True, "pct": None, "flag": "13.1.85"})
+    check("no battery resource at all is mains", classify(res[2:]), {"battery": False, "pct": None, "flag": None})
+    check("list replies come bare or wrapped", [as_list([1], "x"), as_list({"data": [2]}, "x")], [[1], [2]])
+    try:
+        as_list("oops", "x")
+        fails.append("a non-list reply must raise")
+    except AqaraError:
+        pass
+    check("Aqara's timestamp dates the reading", stamp(1790640000000, now), iso(min(dt.datetime.fromtimestamp(1790640000), now)))
+    check("no timestamp means no date, not now", stamp(None, now), None)
     check("alert at 21:30 from the evening run", alert_time(now), dt.datetime(2026, 9, 28, 21, 30))
+
+    # The reader against a fake Aqara: every reply shape the 28 Sep review named.
+    for label, want, kw in [
+        ("a missing page is an error, never a short list", "50 of 62 devices arrived", {"n": 50, "total": 62}),
+        ("no totalCount pages until a short page", 60, {"n": 60, "total": None}),
+        ("a device row with no id is an error", "no id", {"n": 3, "total": 3, "bad_row": True}),
+        ("a resource value reply wrapped in data is read", 3, {"n": 3, "total": 3, "wrap": True}),
+        ("a resource value reply that is not a list is an error", "expected a list", {"n": 3, "total": 3, "junk": True}),
+    ]:
+        try:
+            got = len(fake_read(now, **kw))
+        except AqaraError as e:
+            got = str(e)
+        ok = got == want if isinstance(want, int) else isinstance(got, str) and want in got
+        if not ok:
+            fails.append("%s: got %r want %r" % (label, got, want))
+    devs = {d["id"]: d for d in fake_read(now, n=3, total=3)}
+    check("a voltage-only model is a battery device with no level",
+          (devs["aqara:v0"]["battery"], devs["aqara:v0"]["level"]), (True, None))
+    check("a percentage model reads its level and Aqara's date",
+          (devs["aqara:p1"]["level"], devs["aqara:p1"]["level_at"]), (15, iso(now - dt.timedelta(hours=1))))
+    check("a camera is mains and offline", (devs["aqara:c2"]["battery"], devs["aqara:c2"]["online"]), (False, False))
 
     if fails:
         print("selftest FAILED")
