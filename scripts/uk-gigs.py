@@ -110,6 +110,13 @@ NOT_AN_ARTIST = {"various artists", "various", "va", "unknown artist", "soundtra
 FEAT = re.compile(r"\s*[\(\[]?\s*\b(feat\.?|ft\.?|featuring)\s.*$", re.I)
 JOINT = re.compile(r"\s*(?:,|&|\band\b|\bx\b|\+|\bwith\b)\s*", re.I)
 
+# The same show is often listed more than once: the gig plus a "Venue Premium"
+# seat, a hospitality package or a "Share a Suite" box, at the same venue on
+# the same day, sometimes with an earlier door time (Duran Duran, Kasabian and
+# Myles Smith, 28 Sep 2026). A package is not a second gig.
+ADDON = re.compile(r"\b(premium|hospitality|vip|packages?|parking|upgrades?|platinum|suites?|"
+                   r"meet (and|&) greet)\b", re.I)
+
 STATUS_WORDS = {"onsale": "on sale", "offsale": "sold out or off sale",
                 "rescheduled": "rescheduled", "postponed": "postponed"}
 
@@ -339,10 +346,36 @@ def look_up(artists, tm, today, segments=MUSIC_ONLY, aliases=None):
                 if g and g["id"] not in seen and g["date"] >= today.isoformat():
                     seen.add(g["id"])
                     gigs.append(g)
+        gigs = one_per_show(gigs)
         found[artist] = {"ids": [a["id"] for a in matches],
                          "url": next((a.get("url") for a in matches if a.get("url")), ""),
                          "gigs": sorted(gigs, key=lambda g: (g["date"], g["time"]))}
     return found, missing, errors
+
+
+def one_per_show(gigs):
+    """Drop package listings at a venue on a day that has a plain listing, and list
+    each plain show once per start time, so a matinee and an evening both stay."""
+    groups = collections.OrderedDict()
+    for g in gigs:
+        groups.setdefault((g["artist"], g["date"], g["venue"]), []).append(g)
+    out = []
+    for group in groups.values():
+        plain = [g for g in group if not ADDON.search(g.get("name", ""))]
+        if not plain:
+            out.append(group[0])
+            continue
+        times = set()
+        for g in plain:
+            if g["time"] not in times:
+                times.add(g["time"])
+                out.append(g)
+    return out
+
+
+def uk_link(url):
+    """Ticketmaster hands back .com artist pages; the UK site carries the UK dates."""
+    return (url or "").replace("://www.ticketmaster.com/", "://www.ticketmaster.co.uk/")
 
 
 def load_tributes(path=TRIBUTES):
@@ -375,7 +408,7 @@ def tribute_gigs(found, acts):
             if g["id"] in seen:
                 continue
             seen.add(g["id"])
-            out.append(dict(g, tribute_to=acts[act], act_url=v.get("url") or ""))
+            out.append(dict(g, tribute_to=acts[act], act_url=uk_link(v.get("url"))))
     return out
 
 
@@ -391,22 +424,30 @@ def check_due(state, today):
 
 
 def decide(state, gigs, today):
-    """Which email this check sends: {"kind": starting|new|heartbeat|None, "new": [...]}."""
+    """Which email this check sends: {"kind": starting|new|heartbeat|None, "new": [...]}.
+
+    Only a new REAL gig sends the weekly email. Tribute acts add dates most weeks,
+    and an email that comes every week for a tribute act is an email Kevin learns
+    to ignore, so new tribute dates wait and ride along with the next email: the
+    next real news or the monthly one.
+    """
     told = state.get("told") or {}
     new = [g for g in gigs if g["id"] not in told]
     if not state.get("last_good_check"):
         return {"kind": "starting", "new": new}
-    if new:
+    if any(not g.get("tribute_to") for g in new):
         return {"kind": "new", "new": new}
     if state.get("last_email_month") != today.strftime("%Y-%m"):
-        return {"kind": "heartbeat", "new": []}
+        return {"kind": "heartbeat", "new": new}
     return {"kind": None, "new": []}
 
 
 def after_check(state, gigs, today, emailed):
-    """The state to save once a check has worked (and its email, if any, went)."""
+    """The state to save once a check has worked (and its email, if any, went).
+    A gig is marked told only when an email carried it: tribute dates held back
+    this week are still new in the next email."""
     told = dict(state.get("told") or {})
-    for g in gigs:
+    for g in (gigs if emailed else []):
         told.setdefault(g["id"], today.isoformat())
     cutoff = (today - dt.timedelta(days=TOLD_KEEP_DAYS)).isoformat()
     told = {k: v for k, v in told.items() if v >= cutoff}
@@ -485,6 +526,9 @@ def compose(kind, new, gigs, summary, today):
             bands = sorted({g["tribute_to"] for g in new_trib}, key=str.lower)
             subject = "%s %d new tribute show%s (%s)" % (
                 SUBJECT_PREFIX, len(new_trib), "" if len(new_trib) == 1 else "s", ", ".join(bands[:3]))
+    elif new_trib:
+        subject = "%s no new tour dates this month, %d new tribute show%s" % (
+            SUBJECT_PREFIX, len(new_trib), "" if len(new_trib) == 1 else "s")
     else:
         subject = "%s nothing new this month, %d dates still ahead" % (SUBJECT_PREFIX, len(gigs))
 
@@ -493,12 +537,12 @@ def compose(kind, new, gigs, summary, today):
         if new_real:
             body += ["NEW UK GIGS SINCE THE LAST CHECK (%d)" % len(new_real)]
             body += gig_lines(new_real, today) + ["", ""]
-        if new_trib:
-            body += ["NEW TRIBUTE SHOWS (%d)" % len(new_trib)]
-            body += gig_lines(new_trib, today) + ["", ""]
     elif kind == "heartbeat":
-        body += ["No new UK dates since the last check. The job is working: "
+        body += ["No new UK tour dates since the last check. The job is working: "
                  "what it checked is at the bottom.", "", ""]
+    if kind in ("new", "heartbeat") and new_trib:
+        body += ["NEW TRIBUTE SHOWS (%d)" % len(new_trib)]
+        body += gig_lines(new_trib, today, cap=TRIBUTE_SHOWN) + ["", ""]
     if real:
         body += ["ALL UPCOMING UK GIGS (%d dates, %d artists)" % (len(real), len(artists_with))]
         body += gig_lines(real, today)
@@ -517,6 +561,8 @@ def compose(kind, new, gigs, summary, today):
         body.append("Not found on Ticketmaster (%d): %s." % (len(missing), ", ".join(missing)))
     if summary.get("tribute_acts"):
         body.append("Tribute acts checked: %d." % summary["tribute_acts"])
+    if summary.get("tribute_quiet"):
+        body.append("Tribute acts watched, no UK dates yet: %s." % ", ".join(summary["tribute_quiet"]))
     if summary.get("tribute_missing"):
         body.append("Tribute acts not found on Ticketmaster: %s."
                     % ", ".join(summary["tribute_missing"]))
@@ -585,7 +631,8 @@ def do_check(today, dry_run=False):
     t_gigs = tribute_gigs(t_found, acts)
     summary = {"artists": len(artists), "min_songs": MIN_SONGS, "found": len(found),
                "missing": missing, "errors": errors + t_errors,
-               "tribute_acts": len(acts), "tribute_missing": t_missing}
+               "tribute_acts": len(acts), "tribute_missing": t_missing,
+               "tribute_quiet": sorted(a for a, v in t_found.items() if not v["gigs"])}
     state = load_state()
     choice = decide(state, gigs + t_gigs, today)
     print("checked %d artists (%d tracks): %d on Ticketmaster, %d with UK dates, %d dates, "
@@ -600,7 +647,7 @@ def do_check(today, dry_run=False):
         if dry_run:
             print("\nWOULD EMAIL: %s\n\n%s" % (subject, body))
         else:
-            result = send(subject, body, "uk-gigs:%s" % today.isoformat())
+            result = send(subject, body, "uk-gigs:%s:%s" % (today.isoformat(), choice["kind"]))
             print("emailed: %s (%s)" % (subject, result.get("messageId") or result.get("skipped")))
             emailed = True
     else:
@@ -679,6 +726,19 @@ def selftest():
     check("told after a check", sorted(st["told"]), ["e1"])
     later = today + dt.timedelta(days=7)
     check("only the new gig is new", [g["id"] for g in decide(st, [g1, g2], later)["new"]], ["e2"])
+    tg = dict(g1, id="tr1", artist="Rumours of Fleetwood Mac", tribute_to="Fleetwood Mac")
+    check("tribute-only news waits inside the month", decide(st, [g1, tg], dt.date(2026, 9, 30))["kind"], None)
+    check("waiting tribute news rides with the monthly email",
+          [g["id"] for g in decide(st, [g1, tg], dt.date(2026, 10, 5))["new"]], ["tr1"])
+    check("nothing is marked told without an email",
+          sorted(after_check(st, [g1, tg], dt.date(2026, 9, 30), False)["told"]), ["e1"])
+    prem = dict(g1, id="p1", name="Venue Premium - Queen")
+    check("a premium package is not a second gig", [g["id"] for g in one_per_show([prem, dict(g1, name="Queen")])], ["e1"])
+    check("two shows at different times both stay", len(one_per_show([g1, dict(g1, id="m1", time="14:30")])), 2)
+    suite = dict(g1, id="s1", name="Share A Suite - Queen", time="18:30")
+    check("a suite at another time is not a second gig",
+          [g["id"] for g in one_per_show([suite, dict(g1, name="Queen")])], ["e1"])
+    check("UK link", uk_link("https://www.ticketmaster.com/x/artist/1"), "https://www.ticketmaster.co.uk/x/artist/1")
     check("nothing new in the same month sends nothing",
           decide(st, [g1], dt.date(2026, 9, 30))["kind"], None)
     check("nothing new in a new month sends the heartbeat",

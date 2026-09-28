@@ -26,6 +26,18 @@ function py(body) {
 import importlib.util, json, datetime as dt
 spec = importlib.util.spec_from_file_location('ug', ${JSON.stringify(script)})
 ug = importlib.util.module_from_spec(spec); spec.loader.exec_module(ug)
+# A test must never reach Kevin's inbox or his real logs, even when the code it
+# tests is broken. On 28 Sep 2026 a back-test that disabled the 30% control ran
+# on into send() and emailed him a junk "starting list" through the real worker.
+import tempfile, os
+_tmp = tempfile.mkdtemp()
+ug.LOGDIR = _tmp
+ug.STATE, ug.RUNS, ug.LATEST = (os.path.join(_tmp, n) for n in ('state.json', 'runs.jsonl', 'latest.json'))
+def _no_send(*a, **k):
+    raise SystemExit('TEST: a test tried to send a real email')
+ug.send = _no_send
+ug.load_tributes = lambda: {}
+ug.load_aliases = lambda: {}
 today = dt.date(2026, 9, 28)
 MUSIC = [{'segment': {'name': 'Music'}}]
 def ev(i, date, seg='Music', status='onsale'):
@@ -152,6 +164,36 @@ found = {'The Australian Pink Floyd': {'url': 'u1', 'gigs': [{'id': 'e1', 'artis
 acts = {'The Australian Pink Floyd': 'Pink Floyd', 'Australian Pink Floyd Show': 'Pink Floyd'}
 out = sorted(g['id'] for g in ug.tribute_gigs(found, acts))`);
         expect(out).toEqual(['e1', 'e2']);
+    });
+
+    it('lists a show once when Ticketmaster adds a premium package for it', () => {
+        // Live data, 28 Sep 2026: Duran Duran at OVO Hydro came back twice, the gig
+        // and "Venue Premium - Duran Duran". Back-tested: removing one_per_show()
+        // from look_up() fails this.
+        const out = py(`
+e1 = ev('gig', '2026-10-15'); e1['name'] = 'Duran Duran'
+e2 = ev('prem', '2026-10-15'); e2['name'] = 'Venue Premium - Duran Duran'
+tm = FakeTM({'Duran Duran': [{'id': 'd', 'name': 'Duran Duran', 'classifications': MUSIC}]}, {'d': [e2, e1]})
+found, missing, errors = ug.look_up(['Duran Duran'], tm, today)
+out = [g['id'] for g in found['Duran Duran']['gigs']]`);
+        expect(out).toEqual(['gig']);
+    });
+
+    it('holds tribute-only news for the next email instead of emailing weekly', () => {
+        // Back-tested 28 Sep 2026: treating any new gig as news (the first version)
+        // emails a new tribute date on its own and fails this.
+        const out = py(`
+g1 = {'id': 'e1', 'artist': 'Queen', 'date': '2027-03-14', 'time': '', 'venue': 'v', 'city': 'c',
+      'status': 'onsale', 'onsale': '', 'url': ''}
+t1 = dict(g1, id='t1', artist='Rumours of Fleetwood Mac', tribute_to='Fleetwood Mac')
+st = ug.after_check({}, [g1], today, True)
+quiet = ug.decide(st, [g1, t1], dt.date(2026, 9, 30))
+held = ug.after_check(st, [g1, t1], dt.date(2026, 9, 30), False)
+month = ug.decide(held, [g1, t1], dt.date(2026, 10, 5))
+subject, body = ug.compose(month['kind'], month['new'], [g1, t1],
+                           {'artists': 1, 'min_songs': 5, 'found': 1, 'missing': [], 'errors': []}, dt.date(2026, 10, 5))
+out = [quiet['kind'], 't1' in held['told'], month['kind'], subject, 'NEW TRIBUTE SHOWS (1)' in body]`);
+        expect(out).toEqual([null, false, 'heartbeat', 'UK gigs: no new tour dates this month, 1 new tribute show', true]);
     });
 
     it('tells each gig once and sends the monthly heartbeat when nothing is new', () => {
