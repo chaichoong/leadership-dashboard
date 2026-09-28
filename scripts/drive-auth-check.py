@@ -47,6 +47,7 @@ import os
 import sys
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
 
 TEST_URL = 'https://drive-upload.kevinbrittain.workers.dev/test'
@@ -267,6 +268,120 @@ def check_vault():
         f'is broken, and on 24-27 Aug 2026 it was.'), attempts
 
 
+# ── The FRESHNESS half (added 28 Sep 2026) ──────────────────────────────────
+#
+# A readable mount is not a current one. On 27 Sep 2026 the estate moved to the
+# Mac mini, and Migration Assistant copied Google Drive's macOS File Provider
+# records from the Air. Drive noticed on first start ("Cello database inode
+# mismatch ... Recreating WorkingSet database") and carried on. From then on,
+# edits to files the Mac already knew arrived, but NEW files never appeared:
+# episodes 2072 and 2073 showed 1 of 10 files each in Finder while Drive's own
+# database held all 10. Listing worked, downloads worked, and the vault half
+# above said HEALTHY, because every one of those reads a file that already
+# existed. Kevin found it the next morning, trying to review the videos.
+#
+# So this half lists the newest files on the Marketing shared drive (where the
+# Content Engine uploads finished episodes, and where watch.py scans raw clips
+# THROUGH the mount) and checks each one exists under the local mount. Files
+# younger than FRESH_GRACE_MINUTES are skipped, so a normal sync delay is not an
+# alarm. Google-native files (Docs, Sheets, shortcuts) are skipped, because the
+# mount shows them under a different name. The fix for a stale mount is to
+# disconnect and reconnect the account in Drive's settings; a Drive restart did
+# not clear it on 28 Sep.
+#
+# CONTROL: a listing that cannot be fetched, or comes back empty, is UNKNOWN,
+# never HEALTHY. Nothing to compare proves nothing.
+SHARED_MOUNT = os.path.expanduser(
+    '~/Library/CloudStorage/GoogleDrive-kevin@runpreneur.org.uk/Shared drives/Marketing')
+FRESH_SAMPLE = 25
+FRESH_GRACE_MINUTES = 60
+GOOGLE_NATIVE = 'application/vnd.google-apps'
+
+
+def _drive_api():
+    """The Content Engine's service-account client, imported so there is one copy."""
+    import importlib.util
+    spec = importlib.util.spec_from_file_location('drive_api', os.path.join(
+        os.path.dirname(os.path.abspath(__file__)), 'content-engine', 'drive_api.py'))
+    api = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(api)
+    return api
+
+
+def newest_on_google(api=None, now=None):
+    """Paths, relative to the shared drive root, of the newest non-native files
+    uploaded before the grace window. Each file's path is built by walking its parents.
+
+    createdTime, never modifiedTime: an uploaded camera clip keeps the camera's
+    own date as modifiedTime (a clip shot on 6 Sep and uploaded on 11 Sep reads
+    as modified on the 6th), so ordering on it pushes fresh raw uploads out of
+    the sample, and a clip uploaded minutes ago with an old date would skip the
+    grace window and alarm before Drive had time to pull it."""
+    api = api or _drive_api()
+    now = time.time() if now is None else now
+    cutoff = time.strftime('%Y-%m-%dT%H:%M:%S', time.gmtime(now - FRESH_GRACE_MINUTES * 60))
+    root = api.drive_id()
+    files = api.request('GET', api.API + '/files?' + urllib.parse.urlencode({
+        'q': f"trashed = false and createdTime < '{cutoff}' "
+             f"and not mimeType contains '{GOOGLE_NATIVE}'",
+        'corpora': 'drive', 'driveId': root, 'includeItemsFromAllDrives': 'true',
+        'supportsAllDrives': 'true', 'orderBy': 'createdTime desc',
+        'pageSize': FRESH_SAMPLE, 'fields': 'files(id,name,parents)'})).get('files', [])
+    folders = {}                                  # folder id -> (name, parent id), fetched once
+
+    def folder(fid):
+        if fid not in folders:
+            r = api.request('GET', api.API + '/files/' + fid + '?' + urllib.parse.urlencode(
+                {'supportsAllDrives': 'true', 'fields': 'name,parents'}))
+            folders[fid] = (r['name'], (r.get('parents') or [None])[0])
+        return folders[fid]
+
+    out = []
+    for f in files:
+        parts, parent = [f['name']], (f.get('parents') or [None])[0]
+        for _ in range(30):
+            if parent in (None, root):
+                break
+            name, parent = folder(parent)
+            parts.append(name)
+        if any('/' in p for p in parts):
+            continue                              # the mount shows "/" as ":"; not worth a false alarm
+        out.append('/'.join(reversed(parts)))
+    return out
+
+
+def check_fresh():
+    """Judge whether the local mount is CURRENT. Returns (verdict, reason)."""
+    try:
+        paths = newest_on_google()
+    except Exception as e:                                   # noqa: BLE001
+        return UNKNOWN, (f'could not list the newest files on Google '
+                         f'({type(e).__name__}: {str(e)[:160]}), so freshness is unproved')
+    if not paths:
+        return UNKNOWN, 'Google returned no files to compare, so freshness is unproved'
+    # Only "no such file" means missing. Any other error (the EDEADLK a waking
+    # mount returns, a permission refusal) says the mount could not answer, and
+    # calling that "stale" would prescribe the wrong fix.
+    missing, errors = [], []
+    for p in paths:
+        try:
+            os.stat(os.path.join(SHARED_MOUNT, p))
+        except FileNotFoundError:
+            missing.append(p)
+        except OSError as e:
+            errors.append(f'{p} ({type(e).__name__}: {e})')
+    if errors and not missing:
+        return UNKNOWN, f'the mount could not answer for {errors[0]}, so freshness is unproved'
+    if missing:
+        return BROKEN, (
+            f'{len(missing)} of the {len(paths)} newest files on Google are missing from '
+            f"this Mac's Drive folder (first: {missing[0]}). The mount reads but is stale: "
+            f'new uploads are not arriving, so new episodes cannot be opened and the '
+            f'Content Engine cannot see new raw clips. Fix: disconnect and reconnect '
+            f"kevin@runpreneur.org.uk in Google Drive's settings.")
+    return HEALTHY, f"the {len(paths)} newest files on Google are all in this Mac's Drive folder"
+
+
 def fetch():
     req = urllib.request.Request(TEST_URL, headers=HEADERS)
     try:
@@ -297,6 +412,12 @@ def run():
     status_code, body = fetch()
     api_verdict, api_reason = classify(status_code, body)
     vault_verdict, vault_reason, vault_attempts = check_vault()
+    # Freshness is only judged on a mount that reads: an unreadable one would
+    # show every file as "missing", and the vault half already names that outage.
+    if vault_verdict == HEALTHY:
+        fresh_verdict, fresh_reason = check_fresh()
+    else:
+        fresh_verdict, fresh_reason = UNKNOWN, 'not judged: the mount itself is not readable'
 
     state = load_state()
     gate_streak = state.get('consecutive_gate', 0)
@@ -319,29 +440,35 @@ def run():
                 f'hours (since {broken_since}). This is an OUTAGE, not a cold start.')
     state['vault_broken_since'] = broken_since
 
-    # WORST OF THE TWO WINS, and the reason NAMES the half that failed.
+    # WORST OF THE THREE WINS, and the reason NAMES the half that failed.
     # A score graded all-or-nothing across several things, with no record of
     # which one missed, cannot be acted on — the same lesson as the recon
-    # accuracy card. So the verdict is the worse of the two and the reason
-    # always says whether it was the API or the mount.
+    # accuracy card. So the verdict is the worst of the three and the reason
+    # always says whether it was the API, the mount, or the mount's freshness.
+    # A tie goes to the earlier half, so the API still leads when it is as bad.
     RANK = {HEALTHY: 0, GATE: 1, UNKNOWN: 2, BROKEN: 3}
-    if RANK[vault_verdict] > RANK[api_verdict]:
-        verdict, reason = vault_verdict, 'local mount: ' + vault_reason
-    else:
-        verdict, reason = api_verdict, 'Drive API: ' + api_reason
-        if vault_verdict != HEALTHY:
-            reason += f' | local mount: {vault_reason}'
+    halves = [('Drive API', api_verdict, api_reason),
+              ('local mount', vault_verdict, vault_reason),
+              ('mount freshness', fresh_verdict, fresh_reason)]
+    lead = max(halves, key=lambda h: RANK[h[1]])
+    verdict, reason = lead[1], f'{lead[0]}: {lead[2]}'
+    for half in halves:
+        if half is not lead and half[1] != HEALTHY:
+            reason += f' | {half[0]}: {half[2]}'
 
-    if verdict == GATE:
+    # Counted on the API half itself, not the merged verdict: another half
+    # failing on alternate days would otherwise reset the streak for ever.
+    if api_verdict == GATE:
         gate_streak += 1
         if gate_streak >= MAX_CONSECUTIVE_GATE:
             # "Ignore and retry" has stopped being a retry and become a silence.
-            verdict = BROKEN
-            reason = (
+            gate_reason = (
                 f'the origin gate has refused {gate_streak} runs in a row. That is no '
                 f'longer a missing-header retry, it is the worker refusing this check '
                 f'outright, and Drive health is now unknown.'
             )
+            reason = gate_reason if verdict == GATE else f'{reason} | {gate_reason}'
+            verdict = BROKEN
     else:
         gate_streak = 0
 
@@ -360,6 +487,8 @@ def run():
         'vault_reason': vault_reason,
         'vault_attempts': vault_attempts,
         'vault_broken_hours': round(vault_broken_hours, 2),
+        'fresh_verdict': fresh_verdict,
+        'fresh_reason': fresh_reason,
         'alert_kevin': verdict in (BROKEN, UNKNOWN),
         'consecutive_gate': gate_streak,
         'raw': body[:600],
