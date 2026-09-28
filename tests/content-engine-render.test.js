@@ -58,7 +58,7 @@ describe('content-engine render', () => {
     expect(src).toContain('def intro_window(segments, duration=None)');
     expect(src).toContain('def quiet_point(');
     expect(src).toContain('clip_caption_at(open(caps).read(), at)');
-    expect(src).toContain('d(?:ia|ie|ai)\\w*\\b(?!\\s+of\\s+(?:a|an|the)\\b)');  // the show's own name is not a Learnings section (2056 teaser, 13 Sep 2026)
+    expect(src).toContain('d(?:ia|ie|ai)\\w*\\b(?!\\s+of\\s+(?:a|an|the)\\b(?!\\s+day\\b))');  // the show's own name is not a Learnings section (2056 teaser, 13 Sep 2026); 'of the day' is (27 Sep 2026)
     expect(src).toContain('elif role == "episode": fields["Reframed Video URL"] = None');
     expect(src).toContain('paths["podcast"] = podcast_audio(captioned, os.path.join(workdir, names["podcast"]), at, resume)');
     expect(src).toContain('"--subtitle", title.replace("|", " ").strip()');
@@ -99,7 +99,7 @@ describe('content-engine render', () => {
 
   it("builds the LFMD from the 'Learnings from my diary' section, and the Summary from the teaser clip (Kevin, 3 Sep 2026)", () => {
     const src = readFileSync(RENDER, 'utf8');
-    expect(src).toContain('d(?:ia|ie|ai)\\w*\\b(?!\\s+of\\s+(?:a|an|the)\\b)');  // the show's own name is not a Learnings section (2056 teaser, 13 Sep 2026)
+    expect(src).toContain('d(?:ia|ie|ai)\\w*\\b(?!\\s+of\\s+(?:a|an|the)\\b(?!\\s+day\\b))');  // the show's own name is not a Learnings section (2056 teaser, 13 Sep 2026); 'of the day' is (27 Sep 2026)
     expect(src).toContain('def lfmd_window(segments');
     expect(src).toContain('TEASER_MAX_SECONDS = 150');
     expect(src).toContain('if role == "teaser":');
