@@ -5197,7 +5197,11 @@ def track_record_problem(output, required):
 
 
 # ── history: the dated record of everything with a contact or reference ──
-REF_TOKEN_RE = re.compile(r"\b(?=[A-Z0-9-]{5,}\b)(?:[A-Z]*\d[A-Z0-9-]*)\b")
+# The five-or-more check stops at the first boundary five or more characters
+# in, never the last: read to the end of the run at every boundary,
+# "a-" * 30000 took 3.1 seconds (28 Sep 2026). It is a yes/no check, so the
+# answer is the same.
+REF_TOKEN_RE = re.compile(r"\b(?=[A-Z0-9-]{5,}?\b)(?:[A-Z]*\d[A-Z0-9-]*)\b")
 # A timestamp is a date: "2026-01-22T16:27:36Z" reads as 2026-01-22T16 (60
 # live tokens on 28 Sep 2026, mostly Evernote "Recorded:" stamps), and a
 # calendar invite writes 20260122T162736Z. Eight bare digits stay: that is an
@@ -5330,6 +5334,11 @@ def reference_tokens(text):
         if ONE_DIGIT_WORD_RE.fullmatch(t) and not REF_LABEL_RE.search(upper, max(0, mt.start() - 40), mt.start()):
             continue
         out.append(t)
+        # Only the first eight are kept, so stop there: checking each new
+        # token against a list that kept growing took 1.3 seconds on 20,000
+        # of them (28 Sep 2026).
+        if len(out) == HISTORY_MAX_REFS:
+            break
     return out[:HISTORY_MAX_REFS]
 
 
