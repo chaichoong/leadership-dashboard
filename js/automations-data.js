@@ -72,6 +72,8 @@ var AUTOMATIONS = {
           what: 'Kills leftover preview servers that outlived the session that started them. They hold ports forever otherwise. It only touches servers over 4 hours old with nothing connected.' },
         { key: 'uc-notifier-watchdog', name: 'UC Notifier Watchdog', when: '9:00am daily', status: 'off',
           what: 'Proved the Universal Credit list was actually sent, after it failed silently twice. RETIRED 1 Sep 2026 with the whole UC check process (Kevin\u2019s ruling); the script is now a stub.' },
+        { key: 'magic-battery', name: 'Magic Device Batteries', when: 'hourly, reminder at 9:30pm', status: 'on',
+          what: 'Reads the battery level of the Magic Keyboard, Trackpad and Mouse on the Mac mini every hour. When one is at 20% or below, it puts a "charge it tonight" reminder in Kevin’s Apple Reminders at 9:30pm, and ticks it off once the device reads above 20% again. A device not seen for two days gets its own reminder, so a flat or switched-off device never reads as fine.' },
         { key: 'utilita-balance', name: 'Duckworth Electric Watch', when: 'hourly, message once each morning', status: 'on',
           what: 'Reads the pay-as-you-go electric balance on both Duckworth serviced flats and sends Kevin and Roy one Slack message a day with the figures and the days left. It runs hourly because Utilita signs you out after an hour unless something looks in, so most runs only keep the login alive. If a login does lapse it says SIGN-IN NEEDED rather than reporting a blank, and it refuses to report a balance at all if the meter behind a login has changed.' },
         { key: 'handback-poll', agent: true, name: 'Hand-back Poll', when: 'every 30 minutes', status: 'on',
