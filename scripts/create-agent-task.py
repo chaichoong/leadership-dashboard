@@ -942,33 +942,55 @@ def fold_on_address_only(name_a, name_b, shared):
 # and share none of it are never the same matter, in either pass and either
 # mode. Deliberately narrow, because a false "different" loses a fold:
 #   an address is a house number, one or two street words and a street type
-#     ("55 Elmdon Place", "57a West Street", "42 and 32 Elmdon Place"), kept
-#     as number + street words so "23 Viola St" and "23 Viola Street" agree.
-#     A unit number ("Unit 2, 5 Dalham Place") is not a house.
-#   a person is two or three capitalised words before 's ("Jane Smith's").
-#     A single word ("Kevin's", "Paul's room", "Tenant's") is not enough.
-# Mirrored by DUPE_ADDRESS_RE, DUPE_PERSON_RE, dupeIdentity and
-# dupeIdentityConflict in os/agents/index.html; drift-tested in
-# tests/agents-dupe-task-key.test.js.
+#     ("55 Elmdon Place", "57a West Street", "42 and 32" or "42-44 Elmdon
+#     Place", "5 Park Road"), kept as number + street words so "23 Viola St"
+#     and "23 Viola Street" agree. A unit or flat number ("Unit 2, 5 Dalham
+#     Place", "Flat 3 Elmdon Court") is not a house, and neither is an amount
+#     ("£150 Viola Street").
+#   a person is two capitalised words before 's ("Jane Smith's"), so a verb in
+#     front ("Refund Jane Smith's") is never part of the name. A single word
+#     ("Kevin's", "Paul's room") is not enough, and a possessive naming the
+#     team, an organisation or a role ("Roy Lavin's quote", "Universal
+#     Credit's decision", "New Tenant's rent") is nobody's matter.
+# Only the first 1,000 characters are read: the longest live name is 753, and
+# a pasted wall of text would make the house reader slow.
+# Mirrored by DUPE_ADDRESS_RE, DUPE_PERSON_RE, DUPE_UNIT_WORDS,
+# DUPE_NOT_A_PERSON, dupeIdentity and dupeIdentityConflict in
+# os/agents/index.html; drift-tested in tests/agents-dupe-task-key.test.js.
 DUPE_ADDRESS_RE = re.compile(
     r"(?:^|[\s&])(\d{1,4}[a-z]?(?:\s*(?:&|and)\s*\d{1,4}[a-z]?)*)\s+((?:[a-z]+\s+){1,2}?)("
     + "|".join(sorted(DUPE_STREET_TYPES)) + r")(?![a-z0-9])")
-DUPE_PERSON_RE = re.compile(r"\b([A-Z][a-z]+(?:[ -][A-Z][a-z]+){1,2})['’]s\b", re.A)
+DUPE_PERSON_RE = re.compile(r"\b([A-Z][a-z]+[ -][A-Z][a-z]+)['\u2019]s\b", re.A)
+DUPE_UNIT_WORDS = {"unit", "flat", "room", "apartment", "apt", "suite", "studio", "bedsit"}
+DUPE_NOT_A_PERSON = {
+    "kevin", "roy", "mica", "council", "credit", "universal", "revenues", "energy", "gas",
+    "water", "electric", "electrical", "heating", "plumbing", "services", "solutions", "group",
+    "ltd", "limited", "agency", "bank", "insurance", "commissioner", "office", "department",
+    "landlord", "landlords", "tenant", "tenants", "referrer", "contractor", "company",
+    "client", "customer",
+}
 
 
 def dupe_identity(name):
     """{addresses, people}: the houses and the named people in a task name,
     in the order they appear, each once. Mirrored by dupeIdentity."""
-    raw = str(name or "")
+    raw = str(name or "")[:1000]
     noise = DUPE_GENERIC | DUPE_ACTION_WORDS | DUPE_DATE_WORDS
+    text = raw.lower()
+    text = re.sub(r"[£$€]\s*\d[\d,.]*", " ", text, flags=re.A)   # an amount is not a house
+    text = re.sub(r"(\d)[-/](?=\d)", r"\1&", text, flags=re.A)   # 42-44 is two houses
+    text = re.sub(r"[^a-z0-9&\s]", " ", text)
     addresses = []
-    for m in DUPE_ADDRESS_RE.finditer(re.sub(r"[^a-z0-9&\s]", " ", raw.lower())):
+    for m in DUPE_ADDRESS_RE.finditer(text):
+        before = text[:m.start(1)].split()
+        if before and before[-1] in DUPE_UNIT_WORDS:
+            continue                      # "Unit 2 Dalham Place": a unit, not a house
         nums = re.split(r"\s*(?:&|and)\s*", m.group(1))
         words = m.group(2).split()
         # "57 A West Street" is 57a West Street.
         if len(nums) == 1 and len(words) == 2 and len(words[0]) == 1 and nums[0][-1].isdigit():
             nums, words = [nums[0] + words[0]], words[1:]
-        if any(w in noise or w in DUPE_STREET_TYPES for w in words):
+        if any(w in noise for w in words):
             continue
         for n in nums:
             if _is_calendar_year(re.match(r"\d+", n).group(0)):
@@ -979,8 +1001,8 @@ def dupe_identity(name):
     people = []
     for m in DUPE_PERSON_RE.finditer(raw):
         ws = re.split(r"[ -]", m.group(1).lower())
-        if ws[-1] in DUPE_STREET_TYPES:
-            continue                      # "Viola Street's bins" is a place
+        if ws[-1] in DUPE_STREET_TYPES or any(w in DUPE_NOT_A_PERSON for w in ws):
+            continue                      # "Viola Street's bins", "Universal Credit's"
         for w in ws:
             if w not in noise and w not in people:
                 people.append(w)
@@ -1000,6 +1022,8 @@ def identity_conflict(name_a, name_b):
 
 
 def _link_ids(v):
+    if isinstance(v, (str, dict)):
+        v = [v]                           # a bare id is one link, not its letters
     return {x.get("id", "") if isinstance(x, dict) else str(x) for x in (v or []) if x}
 
 

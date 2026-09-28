@@ -382,8 +382,15 @@ print('---JSON---'); print(json.dumps([m.reference_tokens(t) for t in json.loads
       'Folder ~/Projects/kevin-hq then call re ref AB12345 and/or email.',
       // A bare attachment name with no folder is the invoice's own reference.
       'Attachment INV123456.pdf from the council.',
+      // A file name and the words after it never read as a folder running on
+      // to the next path, and a lone /X12345 is not a path (review).
+      'Draft ~/work/reply.md for claim AB12345 in ~/Downloads/dwp.pdf',
+      'See /tmp/a.md re claim AB12345 then Downloads/scan.pdf',
+      'Saved /x.md claim AB12345 sent to roy/kevin.pdf',
+      'Letter (/AB12345) today',
+      'Rent ref: /TEN-12345 paid',
     ]);
     expect(out).toEqual([['AB12345'], ['AB12345'], ['AB12345', 'CD67890'], ['12345678'], ['AB12345'], ['AB12345'],
-      ['INV123456']]);
+      ['INV123456'], ['AB12345'], ['AB12345'], ['AB12345'], ['AB12345'], ['12345']]);
   });
 });

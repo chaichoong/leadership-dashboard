@@ -396,6 +396,10 @@ ${code}`, arg], { encoding: 'utf8' }));
     expect(words(pySrc, 'DUPE_DATE_WORDS')).toEqual(words(jsSrc, 'DUPE_DATE_WORDS'));
     expect(words(pySrc, 'DUPE_GENERIC').length).toBeGreaterThan(10);
     expect(words(pySrc, 'DUPE_GENERIC')).toEqual(words(jsSrc, 'DUPE_GENERIC'));
+    expect(words(pySrc, 'DUPE_UNIT_WORDS').length).toBeGreaterThan(3);
+    expect(words(pySrc, 'DUPE_UNIT_WORDS')).toEqual(words(jsSrc, 'DUPE_UNIT_WORDS'));
+    expect(words(pySrc, 'DUPE_NOT_A_PERSON').length).toBeGreaterThan(10);
+    expect(words(pySrc, 'DUPE_NOT_A_PERSON')).toEqual(words(jsSrc, 'DUPE_NOT_A_PERSON'));
   });
 
   // Matching constants are necessary, not sufficient: the lane derivation is
@@ -418,9 +422,12 @@ ${code}`, arg], { encoding: 'utf8' }));
       grab(/const DUPE_MAINTENANCE_LANE_WORDS = \[[\s\S]*?\];/, 'DUPE_MAINTENANCE_LANE_WORDS'),
       grab(/const DUPE_ADDRESS_RE = [^\n]*;/, 'DUPE_ADDRESS_RE'),
       grab(/const DUPE_PERSON_RE = [^\n]*;/, 'DUPE_PERSON_RE'),
+      grab(/const DUPE_UNIT_WORDS = \[[\s\S]*?\];/, 'DUPE_UNIT_WORDS'),
+      grab(/const DUPE_NOT_A_PERSON = \[[\s\S]*?\];/, 'DUPE_NOT_A_PERSON'),
       grab(/function placeTokens\([\s\S]*?\n\}/, 'placeTokens'),
       grab(/function isCalendarYear\([\s\S]*?\n\}/, 'isCalendarYear'),
       grab(/function dupeIdentity\([\s\S]*?\n\}/, 'dupeIdentity'),
+      grab(/function dupeIdentityClash\([\s\S]*?\n\}/, 'dupeIdentityClash'),
       grab(/function dupeIdentityConflict\([\s\S]*?\n\}/, 'dupeIdentityConflict'),
       grab(/function dupeSignals\([\s\S]*?\n\}/, 'dupeSignals'),
       grab(/function dupeVerdict\([\s\S]*?\n\}/, 'dupeVerdict'),
@@ -543,9 +550,12 @@ print(json.dumps(c.dupe_verdict(sys.argv[1], sys.argv[2], sys.argv[3])))
     grab(/const DUPE_MAINTENANCE_LANE_WORDS = \[[\s\S]*?\];/, 'DUPE_MAINTENANCE_LANE_WORDS'),
     grab(/const DUPE_ADDRESS_RE = [^\n]*;/, 'DUPE_ADDRESS_RE'),
     grab(/const DUPE_PERSON_RE = [^\n]*;/, 'DUPE_PERSON_RE'),
+    grab(/const DUPE_UNIT_WORDS = \[[\s\S]*?\];/, 'DUPE_UNIT_WORDS'),
+    grab(/const DUPE_NOT_A_PERSON = \[[\s\S]*?\];/, 'DUPE_NOT_A_PERSON'),
     grab(/function placeTokens\([\s\S]*?\n\}/, 'placeTokens'),
     grab(/function isCalendarYear\([\s\S]*?\n\}/, 'isCalendarYear'),
     grab(/function dupeIdentity\([\s\S]*?\n\}/, 'dupeIdentity'),
+    grab(/function dupeIdentityClash\([\s\S]*?\n\}/, 'dupeIdentityClash'),
     grab(/function dupeIdentityConflict\([\s\S]*?\n\}/, 'dupeIdentityConflict'),
     grab(/function dupeTaskKey\([\s\S]*?\n\}/, 'dupeTaskKey'),
     grab(/function dupeSignals\([\s\S]*?\n\}/, 'dupeSignals'),
@@ -618,6 +628,61 @@ print(json.dumps(c.dupe_verdict(sys.argv[1], sys.argv[2], sys.argv[3])))
     }
   });
 
+  // The independent review of 28 Sep 2026 found each of these by running the
+  // code; every one returned the wrong answer on the first version.
+  it('a verb in front of the name is not part of it', () => {
+    // HMO rooms: two tenants in one house are two matters.
+    expect(decide([
+      { name: "Refund Jane Smith's deposit - 5 Dalham Place", rows: [{ name: "Refund John Brown's deposit - 5 Dalham Place" }] },
+      { name: "Email Aaron Mitchell's UC47 evidence to DWP", rows: [{ name: "Email Pawel Kowalski's UC47 evidence to DWP" }] },
+    ])).toEqual(['create', 'create']);
+  });
+
+  it('a possessive naming the team, an organisation or a role is nobody\'s matter', () => {
+    expect(decide([
+      { name: "Chase Roy Lavin's boiler quote - 5 Dalham Place", rows: [{ name: "Jane Smith's boiler quote - 5 Dalham Place" }] },
+      { name: "Universal Credit's decision for Jane Smith (55 Elmdon Place) - chase DWP",
+        rows: [{ name: "Check DWP decision on Jane Smith's UC47 (55 Elmdon Place) and chase if none" }] },
+      { name: "Chase New Tenant's first rent - 55 Elmdon Place", rows: [{ name: "Jane Smith's first rent - 55 Elmdon Place" }] },
+    ])).toEqual(['update', 'update', 'update']);
+  });
+
+  it('a unit number, a range of houses and an amount are read right', () => {
+    expect(decide([
+      // "Unit 2 Dalham Place" names the unit, not house 2.
+      { name: "Check DWP decision on Pawel Kowalski's UC47 (Unit 2 Dalham Place) and chase if none", rows: [{ name: TENANT_B }] },
+      { name: 'COMPLIANCE: Fire Alarm Cert renewal due 2026-10-21 - 42-44 Elmdon Place',
+        rows: [{ name: 'COMPLIANCE: Fire Alarm Cert renewal due 2026-10-21 - 42 Elmdon Place' }] },
+      // £150 is the fee, not house 150.
+      { name: 'INBOUND: Sefton Council HMO licence fee \u00a3150 unpaid Viola Street Bootle',
+        rows: [{ name: 'INBOUND: pay Sefton landlord licence fee 150 GBP for 23 Viola Street Bootle' }] },
+    ])).toEqual(['update', 'update', 'update']);
+  });
+
+  it('a street named after a street type still names the house', () => {
+    expect(decide([{ name: 'Gas safety certificate 5 Park Road', rows: [{ name: 'Gas safety certificate 7 Park Road' }] }]))
+      .toEqual(['create']);
+  });
+
+  it('the page never joins two tenants through a third task that matches both', () => {
+    const { apvGroupTasks } = pageGroups();
+    const groups = apvGroupTasks([{ id: 'a', name: TENANT_A }, { id: 'b', name: TENANT_B },
+      { id: 'c', name: 'Check DWP decision on UC47 and chase if none' }]);
+    const together = groups.find((g) => g.rows.some((r) => r.id === 'a') && g.rows.some((r) => r.id === 'b'));
+    expect(together, 'tenant A and tenant B in one group').toBeUndefined();
+    // CONTROL: the third task still groups with one of them, so the lane has
+    // not simply stopped joining.
+    expect(Math.max(...groups.map((g) => g.rows.length))).toBe(2);
+  });
+
+  it('a linked record passed as a bare id is one link, not its letters', () => {
+    const name = 'Check DWP decision on UC47 and chase if none';
+    expect(decide([
+      { name, links: { fldmne4RYJU22ICub: 'recAAAAAAAAAAAAAA' }, rows: [{ name, links: { fldmne4RYJU22ICub: ['recAAAAAAAAAAAAAA'] } }] },
+      { name, links: { fldmne4RYJU22ICub: 'recAAAAAAAAAAAAAA' }, rows: [{ name, links: { fldmne4RYJU22ICub: ['recBBBBBBBBBBBBBB'] } }] },
+    ])).toEqual(['update', 'create']);
+  });
+
   it('the page and the gate read the same house and person from every name', () => {
     const { dupeIdentity } = pageGroups();
     const CORPUS = [
@@ -633,6 +698,10 @@ print(json.dumps(c.dupe_verdict(sys.argv[1], sys.argv[2], sys.argv[3])))
       "Update Runpreneur's YouTube banner", "Viola Street's bins", 'Send 2 quote requests by close of play',
       '3 tenants in court', 'Update SO amount - 13 Chedburgh - £158 per month', 'CONTENT (OD): Fri 11 Sep',
       'Flat 3, 55 Elmdon Place and 6 Chedburgh Place gas checks', "Mary-Jane O'Neil's deposit",
+      "Refund Jane Smith's deposit - 5 Dalham Place", "Chase Roy Lavin's boiler quote - 5 Dalham Place",
+      "Universal Credit's decision for Jane Smith (55 Elmdon Place) - chase DWP", "Chase New Tenant's first rent",
+      '(Unit 2 Dalham Place)', 'Flat 3 Elmdon Court', '42-44 Elmdon Place', '42/44 Elmdon Place',
+      'licence fee \u00a3150 Viola Street Bootle', 'Gas safety certificate 5 Park Road', 'Jane Smith-Jones\u2019s tenancy',
     ];
     const py = JSON.parse(execFileSync('python3', ['-c', `
 import importlib.util, json, sys
