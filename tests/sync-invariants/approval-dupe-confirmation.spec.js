@@ -195,6 +195,34 @@ test.describe('the Duplicates lane sees what the queue sees', () => {
     await expect(lane).toContainText('licence');
   });
 
+  // 28 Sep 2026: two tenants' UC47 chases keyed alike (`decision dwp`) and the
+  // gate folded one into the other. The live pair, tenants' names changed
+  // because this repo is public. The lane's advice on a pair is "fold them",
+  // so listing these would ask Kevin to repeat the fold by hand.
+  test('two tenants\' UC47 chases at two houses are two jobs, not one', async ({ page }) => {
+    const f = defaultFixtures();
+    f.openTasks = [
+      openTask('recU1', "Check DWP decision on Aaron Mitchell's UC47 (55 Elmdon Place) and chase if none", AGENT_A),
+      openTask('recU2', "Check DWP decision on Pawel Kowalski's UC47 (Unit 2, 5 Dalham Place) and chase if none", AGENT_A),
+    ];
+    await mockAgentsPage(page, f);
+    await loadAgentsPage(page);
+    await page.click('#ptab-checks');
+    await expect(page.locator('#checksBody')).toBeVisible();
+    await expect(page.locator('#checksBody')).not.toContainText('UC47');
+    // CONTROL: the same tenant written up twice is still one job, so the lane
+    // has not simply stopped reporting.
+    f.openTasks = [
+      openTask('recU1', "Check DWP decision on Aaron Mitchell's UC47 (55 Elmdon Place) and chase if none", AGENT_A),
+      openTask('recU3', "Chase DWP on Aaron Mitchell's UC47 decision - 55 Elmdon Place", AGENT_A),
+    ];
+    await mockAgentsPage(page, f);
+    await loadAgentsPage(page);
+    await page.click('#ptab-checks');
+    await expect(page.locator('#checksBody')).toContainText('look like the same job');
+    await expect(page.locator('#checksBody')).toContainText('UC47');
+  });
+
   test('a duplicate ACROSS two agents is reported, not hidden', async ({ page }) => {
     const f = defaultFixtures();
     f.openTasks = [
