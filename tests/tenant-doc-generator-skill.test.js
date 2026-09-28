@@ -24,6 +24,11 @@ const CLAUSES = [
   ['type "Roy Lavin"', 'how a Roy Lavin box is signed'],
   ['Nothing is sent without his yes', 'the approval gate before Send'],
   ['Airtable onboarding waits until EVERY document is signed', 'onboarding timing'],
+  ['Then Claude does it, not Kevin', 'who onboards since 28 Sep 2026'],
+  ['Email the signed proof of residency to the tenant', 'the step Adobe does not do for us'],
+  ['Do not forward the agreement', 'the tenant already gets the completed agreement from Adobe'],
+  ['set Payment Status to CFV Actioned', 'the status move after the UC47'],
+  ['stay retired: a missed payment is arrears', 'the limit on the one UC check'],
 ];
 
 describe('tenant-doc-generator reviewed skill', () => {

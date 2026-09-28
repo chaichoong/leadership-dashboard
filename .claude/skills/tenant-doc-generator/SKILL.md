@@ -90,8 +90,24 @@ With order on, the tenant's link goes out only once info@ has signed.
 - Proof: the agreement moves to `agreement_state=waiting_for_others` and reads
   "Out for signature, 1 of 2 completed".
 
-## Step 6: after signing
+## Step 6: the rest of the chain (Kevin, 28 Sep 2026)
 
-- The signed proof of residency goes to the tenant. On 28 Sep 2026 Kevin signed it and
-  forwarded the signed copy himself. He is writing up his steps so this can be handed over.
-- Airtable onboarding waits until EVERY document is signed. Kevin does it himself.
+Claude runs these. Kevin approves at the gates: every email and every form submission.
+
+1. Email the signed proof of residency to the tenant's own address as soon as info@ has
+   signed it. Only we sign it, so Adobe does not send the tenant a copy. Kevin approves the send.
+2. Do not forward the agreement. The tenant signs it, so Adobe emails them the completed copy.
+   They upload both documents to their Universal Credit journal.
+3. Airtable onboarding waits until EVERY document is signed. Then Claude does it, not Kevin
+   (changed 28 Sep 2026): tenant, tenancy, and the right rental unit at the right property
+   (the `airtable-tenant-onboarding` route).
+4. Put the rent and `Due Day of Month` on the tenancy so the cash flow reports and the
+   forecast carry them. Payment Status starts as CFV (cash flow void).
+5. Raise a task to Roy to confirm the housing costs are verified. About a week after the
+   tenant submits the UC application, contact Universal Credit, or have the tenant check their journal.
+6. Once verified, run the UC47 (`uc47-form-automation`). After it is submitted, comment on the
+   tenancy and set Payment Status to CFV Actioned.
+7. DWP approves the UC47 and the payment arrives on the next due date.
+
+This one Universal Credit check is for a new tenancy only. The monthly payment checks
+retired on 1 Sep 2026 stay retired: a missed payment is arrears.
