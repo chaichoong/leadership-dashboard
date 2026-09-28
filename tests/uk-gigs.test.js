@@ -131,6 +131,29 @@ out = ['One Night' in real, 'Oasis' in real, 'Queen, played by One Night of Quee
         expect(out).toEqual([false, true, true, true, true]);
     });
 
+    it('counts a tour under another billing name as the artist\'s own', () => {
+        // Queen tour as "Queen + Adam Lambert". Matching on "Queen" alone would
+        // report 63 Queen songs as not touring while they play the O2.
+        // Back-tested 28 Sep 2026: searching only the artist's own name fails this.
+        const out = py(`
+tm = FakeTM({'Queen': [{'id': 'q', 'name': 'Queen', 'classifications': MUSIC}],
+             'Queen + Adam Lambert': [{'id': 'qal', 'name': 'Queen + Adam Lambert', 'classifications': MUSIC}]},
+            {'qal': [ev('qal1', '2027-06-01')]})
+found, missing, errors = ug.look_up(['Queen'], tm, today, aliases={'Queen': ['Queen + Adam Lambert']})
+out = [[g['id'], g['artist']] for g in found['Queen']['gigs']]`);
+        expect(out).toEqual([['qal1', 'Queen']]);
+    });
+
+    it('lists a tribute show once when the act bills under two names', () => {
+        const out = py(`
+found = {'The Australian Pink Floyd': {'url': 'u1', 'gigs': [{'id': 'e1', 'artist': 'The Australian Pink Floyd'}]},
+         'Australian Pink Floyd Show': {'url': 'u2', 'gigs': [{'id': 'e1', 'artist': 'Australian Pink Floyd Show'},
+                                                              {'id': 'e2', 'artist': 'Australian Pink Floyd Show'}]}}
+acts = {'The Australian Pink Floyd': 'Pink Floyd', 'Australian Pink Floyd Show': 'Pink Floyd'}
+out = sorted(g['id'] for g in ug.tribute_gigs(found, acts))`);
+        expect(out).toEqual(['e1', 'e2']);
+    });
+
     it('tells each gig once and sends the monthly heartbeat when nothing is new', () => {
         const out = py(`
 g1 = {'id': 'e1', 'artist': 'Queen', 'date': '2027-03-14', 'time': '', 'venue': 'v', 'city': 'c',

@@ -29,6 +29,13 @@ appears. An artist with no exact match is listed at the foot of every email as
 "not found on Ticketmaster", so a gap is visible rather than read as "not
 touring".
 
+OTHER BILLING NAMES
+-------------------
+A band can tour under a name that is not the one in the library: Queen tour
+as "Queen + Adam Lambert". The private aliases.json ({artist: [names]}) adds
+those names; each is matched exactly in its own right and its gigs are listed
+under the library artist.
+
 TRIBUTE SHOWS (Kevin, 28 Sep 2026)
 ----------------------------------
 For favourite bands that can no longer tour, the best UK tribute acts, chosen
@@ -36,7 +43,8 @@ once by research, live in the private ~/knowledge-os/logs/uk-gigs/tributes.json
 ({band: [act, ...]}). Each act is matched and looked up exactly like an artist,
 and its gigs go in their own section headed "<band>, played by <act>
 (tribute)", capped at the next TRIBUTE_SHOWN dates plus a link to the rest. A
-tribute show is never listed under the band's own name.
+tribute show is never listed under the band's own name. Tribute lookups also
+accept theatre listings, where shows such as MJ The Musical are filed.
 
 ABSENCE IS REPORTED
 -------------------
@@ -90,6 +98,10 @@ STATE = os.path.join(LOGDIR, "state.json")
 RUNS = os.path.join(LOGDIR, "runs.jsonl")
 LATEST = os.path.join(LOGDIR, "latest.json")
 TRIBUTES = os.path.join(LOGDIR, "tributes.json")
+ALIASES = os.path.join(LOGDIR, "aliases.json")
+MUSIC_ONLY = ("music",)
+# A tribute or musical show (MJ The Musical) is often filed under theatre.
+TRIBUTE_SEGMENTS = ("music", "arts & theatre")
 TRIBUTE_SHOWN = 5              # next dates listed per tribute act; the rest are one link
 SEND_EMAIL = os.path.join(os.path.dirname(os.path.abspath(__file__)), "send-email.py")
 SUBJECT_PREFIX = "UK gigs:"    # registered in send-email.py SELF_NOTE_PREFIXES
@@ -186,22 +198,23 @@ def norm(name):
     return re.sub(r"\s+", " ", s).strip()
 
 
-def is_music(obj):
+def in_segments(obj, segments=MUSIC_ONLY):
     for c in obj.get("classifications") or []:
-        if ((c.get("segment") or {}).get("name") or "").lower() == "music":
+        if ((c.get("segment") or {}).get("name") or "").lower() in segments:
             return True
     return False
 
 
-def exact_attractions(name, attractions):
-    """The attractions that ARE this artist: same normalised name, music segment."""
+def exact_attractions(name, attractions, segments=MUSIC_ONLY):
+    """The attractions that ARE this artist: same normalised name, allowed segment."""
     want = norm(name)
-    return [a for a in attractions if want and norm(a.get("name")) == want and is_music(a)]
+    return [a for a in attractions
+            if want and norm(a.get("name")) == want and in_segments(a, segments)]
 
 
-def gig_from_event(ev, artist):
+def gig_from_event(ev, artist, segments=MUSIC_ONLY):
     """One gig line from a Discovery API event, or None when it is not a gig to show."""
-    if not is_music(ev):
+    if not in_segments(ev, segments):
         return None                       # parking, hotel and other add-on listings
     dates = ev.get("dates") or {}
     status = ((dates.get("status") or {}).get("code") or "").lower()
@@ -289,14 +302,24 @@ class Ticketmaster:
                 raise RuntimeError("more than 1,000 UK events for attraction %s" % attraction_id)
 
 
-def look_up(artists, tm, today):
-    """{artist: {"ids": [...], "gigs": [...]}} plus the artists with no exact match."""
+def look_up(artists, tm, today, segments=MUSIC_ONLY, aliases=None):
+    """{artist: {"ids": [...], "gigs": [...]}} plus the artists with no exact match.
+
+    `aliases` adds the other names an artist tours under ("Queen + Adam Lambert"):
+    each is matched exactly in its own right and its gigs count as the artist's.
+    """
     found, missing, errors = {}, [], []
     for artist in artists:
-        try:
-            matches = exact_attractions(artist, tm.attractions(artist))
-        except RuntimeError as e:
-            errors.append("%s: %s" % (artist, e))
+        matches, failed = [], False
+        for name in [artist] + list((aliases or {}).get(artist, [])):
+            try:
+                for a in exact_attractions(name, tm.attractions(name), segments):
+                    if a["id"] not in {m["id"] for m in matches}:
+                        matches.append(a)
+            except RuntimeError as e:
+                errors.append("%s: %s" % (artist, e))
+                failed = True
+        if failed and not matches:
             continue
         if not matches:
             missing.append(artist)
@@ -312,7 +335,7 @@ def look_up(artists, tm, today):
                 errors.append("%s: %s" % (artist, e))
                 continue
             for ev in events:
-                g = gig_from_event(ev, artist)
+                g = gig_from_event(ev, artist, segments)
                 if g and g["id"] not in seen and g["date"] >= today.isoformat():
                     seen.add(g["id"])
                     gigs.append(g)
@@ -332,11 +355,26 @@ def load_tributes(path=TRIBUTES):
     return {band: [a for a in acts if a] for band, acts in data.items() if not band.startswith("_")}
 
 
+def load_aliases(path=ALIASES):
+    """{library artist: [other names it tours under]}: private (Kevin, 28 Sep 2026)."""
+    try:
+        with open(path) as fh:
+            data = json.load(fh)
+    except FileNotFoundError:
+        return {}
+    return {k: [n for n in v if n] for k, v in data.items() if not k.startswith("_")}
+
+
 def tribute_gigs(found, acts):
-    """Tag each tribute act's gigs with the band it plays, so they never pass as the band."""
-    out = []
-    for act, v in found.items():
+    """Tag each tribute act's gigs with the band it plays, so they never pass as the band.
+    One show can carry two of an act's names (The Australian Pink Floyd bills as
+    both), so an event is listed once."""
+    out, seen = [], set()
+    for act, v in sorted(found.items()):
         for g in v["gigs"]:
+            if g["id"] in seen:
+                continue
+            seen.add(g["id"])
             out.append(dict(g, tribute_to=acts[act], act_url=v.get("url") or ""))
     return out
 
@@ -535,7 +573,7 @@ def do_check(today, dry_run=False):
     if not artists:
         raise SystemExit("ERROR: no artist has %d or more songs; the read is wrong" % MIN_SONGS)
     tm = Ticketmaster(read_key())
-    found, missing, errors = look_up(artists, tm, today)
+    found, missing, errors = look_up(artists, tm, today, aliases=load_aliases())
     checked = len(found) + len(missing)
     if checked == 0 or len(found) < MIN_RESOLVED_SHARE * len(artists):
         raise SystemExit("ERROR: Ticketmaster matched %d of %d artists (%d lookups failed). "
@@ -543,7 +581,7 @@ def do_check(today, dry_run=False):
                          (len(found), len(artists), len(errors)))
     gigs = [g for v in found.values() for g in v["gigs"]]
     acts = {act: band for band, names in load_tributes().items() for act in names}
-    t_found, t_missing, t_errors = look_up(sorted(acts), tm, today) if acts else ({}, [], [])
+    t_found, t_missing, t_errors = look_up(sorted(acts), tm, today, TRIBUTE_SEGMENTS) if acts else ({}, [], [])
     t_gigs = tribute_gigs(t_found, acts)
     summary = {"artists": len(artists), "min_songs": MIN_SONGS, "found": len(found),
                "missing": missing, "errors": errors + t_errors,
@@ -628,6 +666,10 @@ def selftest():
             {"id": "q1", "name": "Queen", "classifications": music},
             {"id": "q2", "name": "Queen", "classifications": [{"segment": {"name": "Film"}}]}]
     check("tribute acts and non-music never match", [a["id"] for a in exact_attractions("Queen", atts)], ["q1"])
+    theatre = [{"id": "mj", "name": "MJ The Musical", "classifications": [{"segment": {"name": "Arts & Theatre"}}]}]
+    check("a theatre-listed show counts only for a tribute lookup",
+          ([a["id"] for a in exact_attractions("MJ The Musical", theatre)],
+           [a["id"] for a in exact_attractions("MJ The Musical", theatre, TRIBUTE_SEGMENTS)]), ([], ["mj"]))
 
     g1 = {"id": "e1", "artist": "Queen", "date": "2027-03-14", "time": "19:30", "venue": "The O2",
           "city": "London", "status": "onsale", "onsale": "", "url": "https://t/e1"}
