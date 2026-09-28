@@ -104,6 +104,33 @@ except SystemExit as e:
         expect(out[1]).toEqual([]);
     });
 
+    it('puts tribute shows in their own section, never under the band', () => {
+        // Kevin, 28 Sep 2026: tribute acts for favourite bands that no longer tour.
+        // Back-tested 28 Sep 2026: dropping tribute_to in tribute_gigs() lists
+        // "One Night of Queen" as an artist in the real list and fails this test.
+        const out = py(`
+import io, contextlib
+ug.read_library = lambda: [('Queen', '')] * 5 + [('Oasis', '')] * 5
+ug.read_key = lambda: 'k'
+ug.load_tributes = lambda: {'Queen': ['One Night of Queen']}
+tm = FakeTM({'Queen': [{'id': 'q', 'name': 'Queen', 'classifications': MUSIC}],
+             'Oasis': [{'id': 'o', 'name': 'Oasis', 'classifications': MUSIC}],
+             'One Night of Queen': [{'id': 'onq', 'name': 'One Night of Queen', 'classifications': MUSIC,
+                                     'url': 'https://t/onq'}]},
+            {'o': [ev('o1', '2027-07-01')], 'onq': [ev('n%d' % i, '2027-01-%02d' % (i + 1)) for i in range(8)]})
+ug.Ticketmaster = lambda key: tm
+ug.load_state = lambda: {}
+buf = io.StringIO()
+with contextlib.redirect_stdout(buf):
+    ug.do_check(today, dry_run=True)
+text = buf.getvalue()
+real = text.split('ALL UPCOMING UK GIGS')[1].split('TRIBUTE SHOWS FOR BANDS')[0]
+trib = text.split('TRIBUTE SHOWS FOR BANDS')[1].split('WHAT WAS CHECKED')[0]
+out = ['One Night' in real, 'Oasis' in real, 'Queen, played by One Night of Queen (tribute)' in trib,
+       'and 3 more UK dates: https://t/onq' in trib, 'Tribute acts checked: 1.' in text]`);
+        expect(out).toEqual([false, true, true, true, true]);
+    });
+
     it('tells each gig once and sends the monthly heartbeat when nothing is new', () => {
         const out = py(`
 g1 = {'id': 'e1', 'artist': 'Queen', 'date': '2027-03-14', 'time': '', 'venue': 'v', 'city': 'c',

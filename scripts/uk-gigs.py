@@ -29,6 +29,15 @@ appears. An artist with no exact match is listed at the foot of every email as
 "not found on Ticketmaster", so a gap is visible rather than read as "not
 touring".
 
+TRIBUTE SHOWS (Kevin, 28 Sep 2026)
+----------------------------------
+For favourite bands that can no longer tour, the best UK tribute acts, chosen
+once by research, live in the private ~/knowledge-os/logs/uk-gigs/tributes.json
+({band: [act, ...]}). Each act is matched and looked up exactly like an artist,
+and its gigs go in their own section headed "<band>, played by <act>
+(tribute)", capped at the next TRIBUTE_SHOWN dates plus a link to the rest. A
+tribute show is never listed under the band's own name.
+
 ABSENCE IS REPORTED
 -------------------
 A job that stops working looks exactly like a quiet month. So a month with no
@@ -80,6 +89,8 @@ LOGDIR = os.path.expanduser("~/knowledge-os/logs/uk-gigs")
 STATE = os.path.join(LOGDIR, "state.json")
 RUNS = os.path.join(LOGDIR, "runs.jsonl")
 LATEST = os.path.join(LOGDIR, "latest.json")
+TRIBUTES = os.path.join(LOGDIR, "tributes.json")
+TRIBUTE_SHOWN = 5              # next dates listed per tribute act; the rest are one link
 SEND_EMAIL = os.path.join(os.path.dirname(os.path.abspath(__file__)), "send-email.py")
 SUBJECT_PREFIX = "UK gigs:"    # registered in send-email.py SELF_NOTE_PREFIXES
 
@@ -306,8 +317,28 @@ def look_up(artists, tm, today):
                     seen.add(g["id"])
                     gigs.append(g)
         found[artist] = {"ids": [a["id"] for a in matches],
+                         "url": next((a.get("url") for a in matches if a.get("url")), ""),
                          "gigs": sorted(gigs, key=lambda g: (g["date"], g["time"]))}
     return found, missing, errors
+
+
+def load_tributes(path=TRIBUTES):
+    """{band: [tribute act, ...]}: private, chosen once by research (Kevin, 28 Sep 2026)."""
+    try:
+        with open(path) as fh:
+            data = json.load(fh)
+    except FileNotFoundError:
+        return {}
+    return {band: [a for a in acts if a] for band, acts in data.items() if not band.startswith("_")}
+
+
+def tribute_gigs(found, acts):
+    """Tag each tribute act's gigs with the band it plays, so they never pass as the band."""
+    out = []
+    for act, v in found.items():
+        for g in v["gigs"]:
+            out.append(dict(g, tribute_to=acts[act], act_url=v.get("url") or ""))
+    return out
 
 
 # --------------------------------------------------------------------------
@@ -362,44 +393,82 @@ def status_words(g, today):
     return STATUS_WORDS.get(g["status"], g["status"] or "status not given")
 
 
-def gig_lines(gigs, today):
-    lines, current = [], None
-    for g in sorted(gigs, key=lambda g: (g["artist"].lower(), g["date"], g["time"])):
-        if g["artist"] != current:
-            current = g["artist"]
-            lines += ["", current]
-        when = nice_date(g["date"]) + (", " + g["time"] if g["time"] else "")
-        place = ", ".join(p for p in (g["venue"], g["city"]) if p)
-        lines.append("  %s - %s - %s" % (when, place, status_words(g, today)))
-        if g["url"]:
-            lines.append("  Book: %s" % g["url"])
+def heading(g):
+    """A tribute show always names the band it plays AND the act, never the band alone."""
+    if g.get("tribute_to"):
+        return "%s, played by %s (tribute)" % (g["tribute_to"], g["artist"])
+    return g["artist"]
+
+
+def gig_lines(gigs, today, cap=None):
+    """Gigs grouped under their heading. With `cap`, each group lists its next `cap`
+    dates and points to the act's own page for the rest."""
+    groups = collections.OrderedDict()
+    for g in sorted(gigs, key=lambda g: (heading(g).lower(), g["date"], g["time"])):
+        groups.setdefault(heading(g), []).append(g)
+    lines = []
+    for head, group in groups.items():
+        lines += ["", head]
+        shown = group[:cap] if cap else group
+        for g in shown:
+            when = nice_date(g["date"]) + (", " + g["time"] if g["time"] else "")
+            place = ", ".join(p for p in (g["venue"], g["city"]) if p)
+            lines.append("  %s - %s - %s" % (when, place, status_words(g, today)))
+            if g["url"]:
+                lines.append("  Book: %s" % g["url"])
+        rest = len(group) - len(shown)
+        if rest:
+            more = group[0].get("act_url")
+            lines.append("  and %d more UK date%s%s" % (rest, "" if rest == 1 else "s",
+                                                        ": " + more if more else ""))
     return lines
 
 
 def compose(kind, new, gigs, summary, today):
     """(subject, body) for one email. Plain text: the worker sends text."""
-    artists_with = sorted({g["artist"] for g in gigs}, key=str.lower)
-    new_artists = sorted({g["artist"] for g in new}, key=str.lower)
+    real = [g for g in gigs if not g.get("tribute_to")]
+    trib = [g for g in gigs if g.get("tribute_to")]
+    new_real = [g for g in new if not g.get("tribute_to")]
+    new_trib = [g for g in new if g.get("tribute_to")]
+    artists_with = sorted({g["artist"] for g in real}, key=str.lower)
     if kind == "starting":
         subject = "%s starting list, %d dates from %d artists" % (
-            SUBJECT_PREFIX, len(gigs), len(artists_with))
+            SUBJECT_PREFIX, len(real), len(artists_with))
+        if trib:
+            subject += ", %d tribute shows" % len(trib)
     elif kind == "new":
-        names = ", ".join(new_artists[:3]) + (" and more" if len(new_artists) > 3 else "")
-        subject = "%s %d new (%s)" % (SUBJECT_PREFIX, len(new), names)
+        if new_real:
+            names = sorted({g["artist"] for g in new_real}, key=str.lower)
+            subject = "%s %d new (%s)" % (SUBJECT_PREFIX, len(new_real),
+                                          ", ".join(names[:3]) + (" and more" if len(names) > 3 else ""))
+            if new_trib:
+                subject += " + %d tribute show%s" % (len(new_trib), "" if len(new_trib) == 1 else "s")
+        else:
+            bands = sorted({g["tribute_to"] for g in new_trib}, key=str.lower)
+            subject = "%s %d new tribute show%s (%s)" % (
+                SUBJECT_PREFIX, len(new_trib), "" if len(new_trib) == 1 else "s", ", ".join(bands[:3]))
     else:
         subject = "%s nothing new this month, %d dates still ahead" % (SUBJECT_PREFIX, len(gigs))
 
     body = []
     if kind == "new":
-        body += ["NEW UK GIGS SINCE THE LAST CHECK (%d)" % len(new)] + gig_lines(new, today) + ["", ""]
+        if new_real:
+            body += ["NEW UK GIGS SINCE THE LAST CHECK (%d)" % len(new_real)]
+            body += gig_lines(new_real, today) + ["", ""]
+        if new_trib:
+            body += ["NEW TRIBUTE SHOWS (%d)" % len(new_trib)]
+            body += gig_lines(new_trib, today) + ["", ""]
     elif kind == "heartbeat":
         body += ["No new UK dates since the last check. The job is working: "
                  "what it checked is at the bottom.", "", ""]
-    if gigs:
-        body += ["ALL UPCOMING UK GIGS (%d dates, %d artists)" % (len(gigs), len(artists_with))]
-        body += gig_lines(gigs, today)
+    if real:
+        body += ["ALL UPCOMING UK GIGS (%d dates, %d artists)" % (len(real), len(artists_with))]
+        body += gig_lines(real, today)
     else:
         body += ["No UK dates found for any of your artists right now."]
+    if trib:
+        body += ["", "", "TRIBUTE SHOWS FOR BANDS THAT NO LONGER TOUR (%d dates)" % len(trib)]
+        body += gig_lines(trib, today, cap=TRIBUTE_SHOWN)
     missing = summary["missing"]
     body += ["", "", "WHAT WAS CHECKED",
              "%d artists with %d or more songs in your Apple Music library."
@@ -408,6 +477,11 @@ def compose(kind, new, gigs, summary, today):
              % (summary["found"], len(artists_with))]
     if missing:
         body.append("Not found on Ticketmaster (%d): %s." % (len(missing), ", ".join(missing)))
+    if summary.get("tribute_acts"):
+        body.append("Tribute acts checked: %d." % summary["tribute_acts"])
+    if summary.get("tribute_missing"):
+        body.append("Tribute acts not found on Ticketmaster: %s."
+                    % ", ".join(summary["tribute_missing"]))
     if summary.get("errors"):
         body.append("Lookup failed for %d, tried again next week: %s."
                     % (len(summary["errors"]), ", ".join(e.split(":")[0] for e in summary["errors"])))
@@ -468,14 +542,20 @@ def do_check(today, dry_run=False):
                          "That is the lookup breaking, not the artists." %
                          (len(found), len(artists), len(errors)))
     gigs = [g for v in found.values() for g in v["gigs"]]
+    acts = {act: band for band, names in load_tributes().items() for act in names}
+    t_found, t_missing, t_errors = look_up(sorted(acts), tm, today) if acts else ({}, [], [])
+    t_gigs = tribute_gigs(t_found, acts)
     summary = {"artists": len(artists), "min_songs": MIN_SONGS, "found": len(found),
-               "missing": missing, "errors": errors}
+               "missing": missing, "errors": errors + t_errors,
+               "tribute_acts": len(acts), "tribute_missing": t_missing}
     state = load_state()
-    choice = decide(state, gigs, today)
+    choice = decide(state, gigs + t_gigs, today)
     print("checked %d artists (%d tracks): %d on Ticketmaster, %d with UK dates, %d dates, "
-          "%d new, %d not found, %d failed, %d API calls"
+          "%d tribute dates from %d acts, %d new, %d not found, %d failed, %d API calls"
           % (len(artists), len(rows), len(found), len({g["artist"] for g in gigs}), len(gigs),
-             len(choice["new"]), len(missing), len(errors), tm.calls))
+             len(t_gigs), len(acts), len(choice["new"]), len(missing), len(errors) + len(t_errors),
+             tm.calls))
+    gigs = gigs + t_gigs
     emailed = False
     if choice["kind"]:
         subject, body = compose(choice["kind"], choice["new"], gigs, summary, today)
@@ -491,14 +571,15 @@ def do_check(today, dry_run=False):
         return 0
     save_json(after_check(state, gigs, today, emailed), STATE)
     save_json({"checked": today.isoformat(), "artists": artists, "found": found,
-               "missing": missing, "errors": errors}, LATEST)
+               "missing": missing, "errors": errors, "tributes": t_found,
+               "tribute_missing": t_missing, "tribute_errors": t_errors}, LATEST)
     os.makedirs(LOGDIR, exist_ok=True)
     with open(RUNS, "a") as fh:
         fh.write(json.dumps({"ts": dt.datetime.now().isoformat(timespec="seconds"),
                              "artists": len(artists), "found": len(found), "gigs": len(gigs),
-                             "new": len(choice["new"]), "email": choice["kind"],
-                             "missing": len(missing), "errors": len(errors),
-                             "calls": tm.calls}) + "\n")
+                             "tribute_gigs": len(t_gigs), "new": len(choice["new"]),
+                             "email": choice["kind"], "missing": len(missing),
+                             "errors": len(errors) + len(t_errors), "calls": tm.calls}) + "\n")
     return 0
 
 
@@ -583,6 +664,18 @@ def selftest():
     check("body says who was not found", "Not found on Ticketmaster (1): Nobody." in body, True)
     check("body carries the booking link", "Book: https://t/e1" in body, True)
     check("subject prefix is the registered one", subject.startswith(SUBJECT_PREFIX), True)
+
+    # Tribute shows: own section, always named as tribute, never in the real list.
+    t = [dict(g1, id="t%d" % i, artist="Rumours of Fleetwood Mac", tribute_to="Fleetwood Mac",
+              date="2027-04-%02d" % (i + 1), act_url="https://t/rofm") for i in range(7)]
+    subject, body = compose("new", t[:1], [g1] + t, summary, later)
+    check("tribute-only subject", subject, "UK gigs: 1 new tribute show (Fleetwood Mac)")
+    real_part = body.split("TRIBUTE SHOWS FOR BANDS")[0].split("ALL UPCOMING UK GIGS")[1]
+    check("tribute never in the real list", "Rumours" in real_part, False)
+    check("tribute heading names band and act",
+          "Fleetwood Mac, played by Rumours of Fleetwood Mac (tribute)" in body, True)
+    check("tribute list capped with a link to the rest",
+          "and 2 more UK dates: https://t/rofm" in body, True)
 
     if fails:
         print("selftest FAILED")
