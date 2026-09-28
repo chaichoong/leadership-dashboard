@@ -131,7 +131,7 @@ nolev = [dev('v1', name='Blind'), dev('v2', name='Switch'), dev('p', level=80)]
 made = [a['title'] for a in hb.decide(now, True, nolev, st(nolev), [], {}) if a['do'] == 'create']
 devs = {d['id']: d for d in hb.fake_read(now, n=3, total=3, refuse='m.c')}
 out = [made, len(devs), devs['aqara:c2']['battery'], devs['aqara:c2']['online']]`);
-        expect(out).toEqual([['Aqara gives no battery level for 2 devices'], 3, null, false]);
+        expect(out).toEqual([['Check 2 battery devices in the Aqara app'], 3, null, false]);
     });
 
     it('a failed read says so after 12 hours, nudges from a recent good read, and closes nothing', () => {

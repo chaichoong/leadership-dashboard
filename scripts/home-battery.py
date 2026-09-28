@@ -36,7 +36,12 @@ ABSENCE IS REPORTED, NEVER SILENT (review of 28 Sep 2026 found each gap)
 - A device Aqara marks offline for 2 hours gets its own reminder.
 - A device that drops out of Aqara's list for 24 hours gets a "missing" one,
   again for each new disappearance.
-- One model Aqara will not describe leaves the rest of the read intact.
+- One model Aqara will not describe leaves the rest of the read intact, and a
+  model described before keeps its last description through a one-off refusal.
+- A battery level Aqara has not updated for over 7 days is still used, but is
+  named in the "check these in the Aqara app" reminder rather than trusted
+  silently. That reminder is made once per list; if a blip changes the list
+  and closes it, the list is forgotten so it can be raised again.
 - A read is only good when every page arrived (ids counted against Aqara's
   totalCount) and the list is at least 80% of the last good count.
 - A failed read, an expired sign-in, or any reply in a shape this script does
@@ -237,9 +242,13 @@ def model_info(cfg, model, cache, now):
     try:
         info = as_list(call(cfg, "query.resource.info", {"model": model}), "query.resource.info")
     except AqaraError as e:
-        # One model Aqara will not describe must not blind the whole watch: its
-        # devices are still watched for offline, and listed as "battery unknown".
-        # Not cached, so the next run asks again.
+        # One model Aqara will not describe must not blind the whole watch. A
+        # model described before keeps its last description (a one-off refusal
+        # must not flip it to unknown for a run); a model never described is
+        # "battery unknown": still watched for offline, and named. Not cached,
+        # so the next run asks again.
+        if isinstance(c, dict) and "battery" in c:
+            return c
         return {"battery": None, "pct": None, "flag": None, "error": str(e)}
     c = classify(info)
     c["at"] = now.isoformat(timespec="seconds")
@@ -443,11 +452,26 @@ def is_low(t, now, threshold):
     return False, False, ""
 
 
-def no_level(devices):
-    """Battery devices, or devices of a model Aqara would not describe, with no
-    readable level or flag. Reported, never passed over as mains."""
+STALE_DAYS = 7                 # a level Aqara has not updated this long is named, not only trusted
+
+
+def no_level(devices, now=None):
+    """Battery devices the watch cannot vouch for: a model Aqara would not
+    describe, no readable level or flag, or (with now) a level Aqara dated over
+    STALE_DAYS ago. Named in one reminder, never passed over as mains."""
+    def stale(d):
+        return now is not None and d.get("level") is not None and d.get("level_at") and \
+            hours(now, d["level_at"]) > STALE_DAYS * 24
     return [d for d in devices if d["battery"] is None or
-            (d["battery"] and d.get("level") is None and d.get("low_flag") is None)]
+            (d["battery"] and ((d.get("level") is None and d.get("low_flag") is None) or stale(d)))]
+
+
+def forget(state, kind, sid):
+    """Drop the 'already reminded' mark for a closed once-only reminder, so the
+    same list can be raised again if it comes back (review of 28 Sep 2026)."""
+    nudged = state.get("nudged") or {}
+    for k in [k for k in nudged if k.startswith(kind + ":") and short_id(k[len(kind) + 1:]) == sid]:
+        del nudged[k]
 
 
 def set_id(devices):
@@ -474,7 +498,7 @@ def decide(now, read_ok, devices, state, open_reminders, nudged, threshold=THRES
     today = now.date().isoformat()
     tracked = state.get("devices") or {}
     seen_now = {short_id(d["id"]): d for d in devices} if read_ok else {}
-    unread = no_level(devices) if read_ok else []
+    unread = no_level(devices, now) if read_ok else []
 
     # 1. Close what a fresh, good read proves is no longer true.
     for r in open_reminders:
@@ -487,7 +511,8 @@ def decide(now, read_ok, devices, state, open_reminders, nudged, threshold=THRES
             continue
         if kind == "nolevel":
             if not unread or sid != short_id(set_id(unread)):
-                actions.append({"do": "complete", "ref": r["ref"], "why": "the no-level list changed"})
+                actions.append({"do": "complete", "ref": r["ref"], "why": "the no-level list changed",
+                                "forget": ("nolevel", sid)})
             continue
         d = seen_now.get(sid)
         if d is None:
@@ -540,10 +565,10 @@ def decide(now, read_ok, devices, state, open_reminders, nudged, threshold=THRES
     if unread:
         names = ", ".join(sorted(d["name"] for d in unread)[:15]) + (" and more" if len(unread) > 15 else "")
         wanted.append(("nolevel", set_id(unread),
-                       "Aqara gives no battery level for %d device%s" % (len(unread), "" if len(unread) == 1 else "s"),
-                       "The watch can still flag them when they go offline, but not when their battery "
-                       "runs low: %s. Check these in the Aqara app now and then. This ticks itself off "
-                       "when the list changes." % names))
+                       "Check %d battery device%s in the Aqara app" % (len(unread), "" if len(unread) == 1 else "s"),
+                       "Aqara gives no current battery level for these, so the watch can flag them "
+                       "going offline but not running low: %s. This ticks itself off when the list "
+                       "changes." % names))
     for kind, dev_id, title, body in wanted:
         key = marker(kind, dev_id)
         if key in open_keys:
@@ -686,7 +711,7 @@ def cmd_read():
         return 1
     batt = [d for d in devices if d["battery"]]
     print("%d devices, %d with a battery, %d offline, %d battery devices give no level" %
-          (len(devices), len(batt), sum(1 for d in devices if d["online"] is False), len(no_level(devices))))
+          (len(devices), len(batt), sum(1 for d in devices if d["online"] is False), len(no_level(devices, now))))
     for d in sorted(devices, key=lambda x: (x["online"] is not False, not x["battery"], x["name"])):
         print(describe(d, now))
     return 0
@@ -713,8 +738,8 @@ def cmd_run(argv):
         print("read  %d devices, %d offline, %d battery readings, %d battery devices give no level" %
               (len(devices), sum(1 for d in devices if d["online"] is False),
                sum(1 for d in devices if d["level"] is not None or d.get("low_flag") is not None),
-               len(no_level(devices))))
-        for d in no_level(devices):
+               len(no_level(devices, now))))
+        for d in no_level(devices, now):
             print("      no level: %s (%s)" % (d["name"], d["model"]))
     else:
         state["last_error"] = error
@@ -728,25 +753,37 @@ def cmd_run(argv):
 
     actions = decide(now, read_ok, devices, state, open_reminders(), state.get("nudged", {}),
                      threshold=threshold, force_nudge=force)
+    apply(actions, state, now, dry, force)
+    if not actions:
+        print("nothing to do")
+    if not dry and not force:
+        save_state(state)
+    return 0
+
+
+def apply(actions, state, now, dry, force, run=None):
+    """Carry out decide()'s actions in Apple Reminders and record them in state.
+
+    run is osa() in production; the selftest passes a fake to prove the state
+    bookkeeping (nudged marks, forgetting a closed list) without Reminders.
+    """
+    run = run or osa
     at = alert_time(now)
     when = [str(at.year), str(at.month), str(at.day), str(at.hour * 3600 + at.minute * 60)]
     for a in actions:
         if a["do"] == "complete":
             print("%s ticked off a reminder (%s)" % ("WOULD" if dry else "DONE ", a["why"]))
             if not dry:
-                osa(COMPLETE, a["ref"])
+                run(COMPLETE, a["ref"])
+                if a.get("forget"):
+                    forget(state, *a["forget"])
             continue
         title = ("TEST: " + a["title"]) if force else a["title"]
         print("%s reminder: %s" % ("WOULD" if dry else "MADE ", title))
         if not dry:
-            osa(CREATE, title, a["body"], LIST_NAME, *when)
+            run(CREATE, title, a["body"], LIST_NAME, *when)
             if not force:
                 state.setdefault("nudged", {})["%s:%s" % (a["kind"], a["id"])] = now.date().isoformat()
-    if not actions:
-        print("nothing to do")
-    if not dry and not force:
-        save_state(state)
-    return 0
 
 
 def cmd_setup():
@@ -784,7 +821,7 @@ def cmd_setup():
     return 0
 
 
-def fake_read(now, n, total, bad_row=False, wrap=False, junk=False, refuse=None):
+def fake_read(now, n, total, bad_row=False, wrap=False, junk=False, refuse=None, cache=None):
     """read_aqara() against a fake Aqara, for the selftest and the vitest file.
 
     Devices cycle through three models: v = voltage-only sensor, p = percentage
@@ -820,7 +857,7 @@ def fake_read(now, n, total, bad_row=False, wrap=False, junk=False, refuse=None)
 
     real, call = call, fake
     try:
-        return read_aqara({}, {}, now)
+        return read_aqara({}, cache if cache is not None else {}, now)
     finally:
         call = real
 
@@ -940,12 +977,27 @@ def selftest():
     nolev = [dev("v1", name="Blind"), dev("v2", name="Switch"), dev("p", level=80)]
     acts = decide(now, True, nolev, st(nolev), [], {})
     check("no-level battery devices get one reminder naming them",
-          [(a["kind"], a["title"]) for a in acts if a["do"] == "create"], [("nolevel", "Aqara gives no battery level for 2 devices")])
+          [(a["kind"], a["title"]) for a in acts if a["do"] == "create"], [("nolevel", "Check 2 battery devices in the Aqara app")])
     check("the no-level reminder is made once per list", creates(decide(now, True, nolev, st(nolev), [], {"nolevel:" + set_id(nolev[:2]): "2026-09-01"})), [])
     nolr = [{"key": marker("nolevel", set_id(nolev[:2])), "ref": "r5"}]
     fixed = [dev("v1", level=70), dev("v2", level=70)]
     check("the no-level reminder ticks off when the list changes",
           [a["ref"] for a in decide(now.replace(hour=9), True, fixed, st(fixed), nolr, {}) if a["do"] == "complete"], ["r5"])
+    blip = [dict(dev("c9", battery=None))] + nolev
+    closed = [a for a in decide(now.replace(hour=3), True, blip, st(blip), nolr, {}) if a["do"] == "complete"]
+    check("a list change closes the reminder and forgets that list", [a.get("forget") for a in closed],
+          [("nolevel", short_id(set_id(nolev[:2])))])
+    calls, bk = [], {"nudged": {"nolevel:" + set_id(nolev[:2]): "2026-09-28"}}
+    apply(closed, bk, now, False, False, run=lambda *a: calls.append(a[1:2]))
+    check("closing a changed list in Reminders also forgets it", (calls, bk["nudged"]), ([("r5",)], {}))
+    stt = {"nudged": {"nolevel:" + set_id(nolev[:2]): "2026-09-28", "low:a": "2026-09-28"}}
+    forget(stt, "nolevel", short_id(set_id(nolev[:2])))
+    check("forget drops only that list's mark", stt["nudged"], {"low:a": "2026-09-28"})
+    check("after a blip the list can be raised again",
+          creates(decide(now, True, nolev, st(nolev), [], stt["nudged"])), [("nolevel", set_id(nolev[:2]))])
+    stale = [dev("s", level=60, at=now - dt.timedelta(days=8))]
+    check("a level Aqara has not updated for a week is named", [d["id"] for d in no_level(stale, now)], ["s"])
+    check("a level from yesterday is not", no_level([dev("s", level=60, at=now - dt.timedelta(days=1))], now), [])
     check("a model Aqara will not describe is listed, not passed as mains",
           [d["id"] for d in no_level([dict(dev("q"), battery=None)])], ["q"])
     check("a failed read never reports missing", [a["kind"] for a in decide(now, False, [], dict(s, last_ok=iso(now)), [], {}) if a["do"] == "create"], [])
@@ -1018,6 +1070,11 @@ def selftest():
     except AqaraError as e:
         got = str(e)
     check("one model Aqara will not describe does not blind the read", got, (3, None, False, 15))
+    cache = {}
+    fake_read(now, n=3, total=3, cache=cache)
+    cache["m.v"]["at"] = iso(now - dt.timedelta(days=2))
+    devs = {d["id"]: d for d in fake_read(now, n=3, total=3, refuse="m.v", cache=cache)}
+    check("a model described before keeps its description when refused once", devs["aqara:v0"]["battery"], True)
 
     if fails:
         print("selftest FAILED")
