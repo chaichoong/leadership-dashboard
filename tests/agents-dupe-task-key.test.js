@@ -416,8 +416,12 @@ ${code}`, arg], { encoding: 'utf8' }));
       grab(/const DUPE_MIN_SHARED = [\d.]+;/, 'DUPE_MIN_SHARED'),
       grab(/const DUPE_MIN_RATIO = [\d.]+;/, 'DUPE_MIN_RATIO'),
       grab(/const DUPE_MAINTENANCE_LANE_WORDS = \[[\s\S]*?\];/, 'DUPE_MAINTENANCE_LANE_WORDS'),
+      grab(/const DUPE_ADDRESS_RE = [^\n]*;/, 'DUPE_ADDRESS_RE'),
+      grab(/const DUPE_PERSON_RE = [^\n]*;/, 'DUPE_PERSON_RE'),
       grab(/function placeTokens\([\s\S]*?\n\}/, 'placeTokens'),
       grab(/function isCalendarYear\([\s\S]*?\n\}/, 'isCalendarYear'),
+      grab(/function dupeIdentity\([\s\S]*?\n\}/, 'dupeIdentity'),
+      grab(/function dupeIdentityConflict\([\s\S]*?\n\}/, 'dupeIdentityConflict'),
       grab(/function dupeSignals\([\s\S]*?\n\}/, 'dupeSignals'),
       grab(/function dupeVerdict\([\s\S]*?\n\}/, 'dupeVerdict'),
       'return dupeVerdict;',
@@ -449,6 +453,12 @@ ${code}`, arg], { encoding: 'utf8' }));
       'CONTENT (OD): Fri 11 Sep, The offer: Five signs your business runs on you',
       'CONTENT (OD): Fri 18 Sep, The offer: Five signs your business runs on you',
       'CONTENT (OD): Fri 11 Sep, Newsletter: The map: how AI agents take 90% of your daily work',
+      // A different tenant or house is a different matter (28 Sep 2026).
+      "Check DWP decision on Aaron Mitchell's UC47 (55 Elmdon Place) and chase if none",
+      "Check DWP decision on Pawel Kowalski's UC47 (Unit 2, 5 Dalham Place) and chase if none",
+      "Chase DWP on Aaron Mitchell's UC47 decision - 55 Elmdon Place",
+      'COMPLIANCE: Fire Alarm Cert renewal due 2026-10-21 - 42 Elmdon Place',
+      'COMPLIANCE: Fire Alarm Cert renewal due 2026-10-21 - 32 Elmdon Place',
       '',
     ];
     const pairs = [];
@@ -467,5 +477,176 @@ print(json.dumps([[c.dupe_verdict(a, b, m)["match"], c.dupe_verdict(a, b, m)["wh
     expect(foldMatches).toBeGreaterThan(3);
     expect(foldMatches).toBeLessThan(pairs.length);
     expect(pyAll).toEqual(jsAll);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 28 Sep 2026: TWO TENANTS, ONE TASK. Creating
+//   "Check DWP decision on <tenant A>'s UC47 (55 Elmdon Place) and chase if none"
+// folded it into the open task
+//   "Check DWP decision on <tenant B>'s UC47 (Unit 2, 5 Dalham Place) and chase if none"
+// ({"action": "updated", "key": "decision dwp"}). The key keeps two words, so
+// both names keyed to `decision dwp`, and the second pass matched them on
+// decision / dwp / none / s / uc47. Nothing asked whether the two tasks named a
+// different house or a different person. Kevin undid it by hand.
+//
+// The names below are the live pair word for word except the tenants' names,
+// which are changed because this repo is public: a tenant's name beside an
+// address and a benefits claim is personal data. The shape, the key and the
+// failure are the same. Back-tested: on the code before this fix the gate
+// returns "update" for the first case below.
+// ─────────────────────────────────────────────────────────────────────────────
+describe('a different tenant or a different house is a different matter (28 Sep 2026)', () => {
+  const TENANT_A = "Check DWP decision on Aaron Mitchell's UC47 (55 Elmdon Place) and chase if none";
+  const TENANT_B = "Check DWP decision on Pawel Kowalski's UC47 (Unit 2, 5 Dalham Place) and chase if none";
+
+  // The gate's own decide(), driven with the create payload and an open board.
+  // Field ids are written out, not read off the module, so a renamed constant
+  // cannot make the test pass by accident.
+  const decide = (cases) => JSON.parse(execFileSync('python3', ['-c', `
+import importlib.util, json, sys
+spec = importlib.util.spec_from_file_location("c", ${JSON.stringify(SCRIPT)})
+c = importlib.util.module_from_spec(spec); spec.loader.exec_module(c)
+out = []
+for case in json.loads(sys.argv[1]):
+    inc = dict(case.get("links") or {}); inc["fldgFjGBw6bTKJFCD"] = case["name"]
+    rows = []
+    for i, r in enumerate(case["rows"]):
+        f = dict(r.get("links") or {})
+        f["fldgFjGBw6bTKJFCD"] = r["name"]; f["fldx4qCw17UfrKpaN"] = {"name": "Upcoming"}
+        rows.append({"id": "recRow%d" % i, "createdTime": "2026-09-23T12:00:00.000Z", "fields": f})
+    out.append(c.decide(inc, rows)["action"])
+print(json.dumps(out))
+`, JSON.stringify(cases)], { encoding: 'utf8' }));
+
+  const verdict = (a, b, mode) => JSON.parse(execFileSync('python3', ['-c', `
+import importlib.util, json, sys
+spec = importlib.util.spec_from_file_location("c", ${JSON.stringify(SCRIPT)})
+c = importlib.util.module_from_spec(spec); spec.loader.exec_module(c)
+print(json.dumps(c.dupe_verdict(sys.argv[1], sys.argv[2], sys.argv[3])))
+`, a, b, mode], { encoding: 'utf8' }));
+
+  const grab = (re, label) => {
+    const m = SRC.match(re);
+    if (!m) throw new Error(`${label} not found in os/agents/index.html`);
+    return m[0];
+  };
+  // The page's OWN grouping (extracted, never copied), with the sign-in check
+  // stubbed: none of these names is a sign-in wait.
+  const pageGroups = () => new Function([
+    grab(/const DUPE_GENERIC = \[[\s\S]*?\];/, 'DUPE_GENERIC'),
+    grab(/const DUPE_DATE_WORDS = \[[\s\S]*?\];/, 'DUPE_DATE_WORDS'),
+    grab(/const DUPE_ACTION_WORDS = \[[\s\S]*?\];/, 'DUPE_ACTION_WORDS'),
+    grab(/const DUPE_STREET_TYPES = \[[\s\S]*?\];/, 'DUPE_STREET_TYPES'),
+    grab(/const DUPE_MIN_SHARED = [\d.]+;/, 'DUPE_MIN_SHARED'),
+    grab(/const DUPE_MIN_RATIO = [\d.]+;/, 'DUPE_MIN_RATIO'),
+    grab(/const DUPE_MAINTENANCE_LANE_WORDS = \[[\s\S]*?\];/, 'DUPE_MAINTENANCE_LANE_WORDS'),
+    grab(/const DUPE_ADDRESS_RE = [^\n]*;/, 'DUPE_ADDRESS_RE'),
+    grab(/const DUPE_PERSON_RE = [^\n]*;/, 'DUPE_PERSON_RE'),
+    grab(/function placeTokens\([\s\S]*?\n\}/, 'placeTokens'),
+    grab(/function isCalendarYear\([\s\S]*?\n\}/, 'isCalendarYear'),
+    grab(/function dupeIdentity\([\s\S]*?\n\}/, 'dupeIdentity'),
+    grab(/function dupeIdentityConflict\([\s\S]*?\n\}/, 'dupeIdentityConflict'),
+    grab(/function dupeTaskKey\([\s\S]*?\n\}/, 'dupeTaskKey'),
+    grab(/function dupeSignals\([\s\S]*?\n\}/, 'dupeSignals'),
+    grab(/function dupeVerdict\([\s\S]*?\n\}/, 'dupeVerdict'),
+    grab(/function apvGroupTasks\([\s\S]*?\n\}/, 'apvGroupTasks'),
+    'const apvSignInNeeded = () => false;',
+    'return { apvGroupTasks, dupeVerdict, dupeIdentity };',
+  ].join('\n'))();
+
+  it('the incident: the gate creates the second tenant\'s task, never folds it into the first', () => {
+    expect(decide([{ name: TENANT_A, rows: [{ name: TENANT_B }] }])).toEqual(['create']);
+    // Both passes refuse, in both modes: the key pass is the one that fired
+    // live, and the word pass alone would have folded them too.
+    expect(verdict(TENANT_A, TENANT_B, 'fold').match).toBe(false);
+    expect(verdict(TENANT_A, TENANT_B, 'group').match).toBe(false);
+  });
+
+  it('the page does not list the two tenants as one job', () => {
+    const { apvGroupTasks } = pageGroups();
+    const groups = apvGroupTasks([{ id: 'a', name: TENANT_A }, { id: 'b', name: TENANT_B }]);
+    expect(groups.map((g) => g.rows.length)).toEqual([1, 1]);
+  });
+
+  it('the same tenant written up twice still folds (control)', () => {
+    expect(decide([
+      { name: "Chase DWP on Aaron Mitchell's UC47 decision - 55 Elmdon Place", rows: [{ name: TENANT_A }] },
+      // "Unit 2, 5 Dalham Place" and "5 Dalham Place" are one house.
+      { name: "Check DWP decision on Pawel Kowalski's UC47 - 5 Dalham Place", rows: [{ name: TENANT_B }] },
+    ])).toEqual(['update', 'update']);
+    const { apvGroupTasks } = pageGroups();
+    const groups = apvGroupTasks([{ id: 'a', name: TENANT_A },
+      { id: 'c', name: "Chase DWP on Aaron Mitchell's UC47 decision - 55 Elmdon Place" }]);
+    expect(groups.map((g) => g.rows.length)).toEqual([2]);
+  });
+
+  it('a different house number on the same street is a different house', () => {
+    const a42 = 'COMPLIANCE: Fire Alarm Cert renewal due 2026-10-21 - 42 Elmdon Place';
+    const a32 = 'COMPLIANCE: Fire Alarm Cert renewal due 2026-10-21 - 32 Elmdon Place';
+    // Live on the board this morning: these two keyed alike and would fold.
+    expect(decide([{ name: a42, rows: [{ name: a32 }] }])).toEqual(['create']);
+    // CONTROL: a task naming both houses still folds with either one.
+    const both = 'COMPLIANCE: fire alarm cert quote declined by G&A - 42 and 32 Elmdon Place, need alt quote before 21 Oct';
+    expect(decide([{ name: a42, rows: [{ name: both }] }, { name: a32, rows: [{ name: both }] }]))
+      .toEqual(['update', 'update']);
+    // CONTROL: the street type is spelt more than one way.
+    expect(decide([{ name: 'INBOUND: gas safety certificate due 23 Viola St Bootle',
+      rows: [{ name: 'INBOUND: gas safety certificate renewal 23 Viola Street Bootle' }] }])).toEqual(['update']);
+  });
+
+  it('a different named person is a different matter, address or not', () => {
+    expect(decide([{ name: "Check DWP decision on Aaron Mitchell's UC47",
+      rows: [{ name: "Check DWP decision on Pawel Kowalski's UC47" }] }])).toEqual(['create']);
+    // CONTROL: a name on one side only decides nothing, so the words decide.
+    expect(decide([{ name: 'Check DWP decision on UC47 and chase if none',
+      rows: [{ name: "Check DWP decision on Pawel Kowalski's UC47" }] }])).toEqual(['update']);
+  });
+
+  it('a linked tenancy, tenant, property or unit that differs never folds', () => {
+    const name = 'Check DWP decision on UC47 and chase if none';
+    for (const fid of ['fldmne4RYJU22ICub', 'fld6ZcfEogJmeQj2c', 'fldZKFvEpJ6NZeFKz', 'fldEW648YtTZ6j01n']) {
+      expect(decide([
+        { name, links: { [fid]: ['recAAAAAAAAAAAAAA'] }, rows: [{ name, links: { [fid]: ['recBBBBBBBBBBBBBB'] } }] },
+      ]), `${fid}: two different linked records`).toEqual(['create']);
+      // CONTROLS: the same record folds, and a link on one side only leaves
+      // the decision to the words (the live keeper had no Tenancies link).
+      expect(decide([
+        { name, links: { [fid]: ['recAAAAAAAAAAAAAA'] }, rows: [{ name, links: { [fid]: ['recAAAAAAAAAAAAAA'] } }] },
+        { name, links: { [fid]: ['recAAAAAAAAAAAAAA'] }, rows: [{ name }] },
+      ]), `${fid}: same record, or one side unlinked`).toEqual(['update', 'update']);
+    }
+  });
+
+  it('the page and the gate read the same house and person from every name', () => {
+    const { dupeIdentity } = pageGroups();
+    const CORPUS = [
+      TENANT_A, TENANT_B, '',
+      'COMPLIANCE: fire alarm cert quote declined by G&A - 42 and 32 Elmdon Place, need alt quote before 21 Oct',
+      'COMPLIANCE: Fire Alarm Cert renewal due 2026-10-21 - 42 Elmdon Place',
+      'INBOUND: Sefton Council HMO licence fee 150 unpaid 23 Viola St Bootle urgent',
+      'INBOUND: pay Sefton landlord licence fee 150 GBP for 23 Viola Street Bootle',
+      '57 A West Street: damp in rear bedroom', '57a West Street: damp in rear bedroom',
+      'MAINTENANCE: 1406 Oldham Road - urgent kitchen ceiling and rat infestation',
+      'INSURANCE: Replacement Property Owners cover before 3 Oct 2026 - 30 Burnbank Gardens (PIB 931520229)',
+      'Reglaze rear window in Paul’s room', "Kevin's approval needed", "Reply to Nick Sheppard's email",
+      "Update Runpreneur's YouTube banner", "Viola Street's bins", 'Send 2 quote requests by close of play',
+      '3 tenants in court', 'Update SO amount - 13 Chedburgh - £158 per month', 'CONTENT (OD): Fri 11 Sep',
+      'Flat 3, 55 Elmdon Place and 6 Chedburgh Place gas checks', "Mary-Jane O'Neil's deposit",
+    ];
+    const py = JSON.parse(execFileSync('python3', ['-c', `
+import importlib.util, json, sys
+spec = importlib.util.spec_from_file_location("c", ${JSON.stringify(SCRIPT)})
+c = importlib.util.module_from_spec(spec); spec.loader.exec_module(c)
+print(json.dumps([c.dupe_identity(n) for n in json.loads(sys.argv[1])]))
+`, JSON.stringify(CORPUS)], { encoding: 'utf8' }));
+    const js = CORPUS.map(dupeIdentity);
+    // CONTROL: the corpus must find houses and people, or two empty readers agree.
+    expect(js.filter((x) => x.addresses.length).length).toBeGreaterThan(8);
+    expect(js.filter((x) => x.people.length).length).toBeGreaterThan(2);
+    expect(py).toEqual(js);
+    expect(js[0]).toEqual({ addresses: ['55 elmdon'], people: ['aaron', 'mitchell'] });
+    // "Unit 2, 5 Dalham Place": the unit number is not a house.
+    expect(js[1]).toEqual({ addresses: ['5 dalham'], people: ['pawel', 'kowalski'] });
   });
 });

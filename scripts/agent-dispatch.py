@@ -5278,6 +5278,29 @@ AIRTABLE_ID_RE = re.compile(r"\b(?:app|tbl|rec|viw|shr|fld)[A-Za-z0-9]{14}\b")
 WRAPPED_ID_RE = re.compile(
     r"((?i:(?:https?://)?(?:www\.)?airtable\.com/)\S*?\b(?:app|tbl|rec|viw|shr|fld)([A-Za-z0-9]{0,13}))"
     r"[ \t]*\r?\n[ \t]*([A-Za-z0-9]{1,14})(?![A-Za-z0-9])")
+# A file name is not a reference (Kevin, 28 Sep 2026). A UC47 chase's TRACK
+# RECORD said "searched tasks + Gmail for ref UC47-ANSWERS": the token came
+# from its working-file line, `~/Projects/kevin-hq/property/2026-09-28 uc47
+# <tenant>/uc47-answers.md`, and the search pulled in another tenant's UC47
+# history. Three shapes, all gone before the tokens are read: a path to a file,
+# whose folders may hold spaces (dated working folders do: "2026-09-21
+# chedburgh gas safety/"); any other path starting ~/ ./ or /; and a relative
+# path to a file ("notes/uc47-answers.md"). A path starts after a space or at
+# the start, never after a letter, so "and/or" and "Acc.No/12345678" stay text.
+# A spaced folder is at most six words, so a sentence between a path and a
+# later file on the same line is not swallowed whole. A bare file name with no
+# folder stays: an attachment named after its invoice carries that invoice's
+# reference ("Invoice INV123456.pdf", tested in the machine-text block).
+_FILE_EXT = (r"(?:md|markdown|txt|py|js|mjs|cjs|ts|json|jsonl|csv|tsv|html?|css|sh|zsh|toml|ya?ml|ini|cfg"
+             r"|log|pdf|docx?|xlsx?|xlsm|pptx?|odt|ods|rtf|pages|numbers|key|png|jpe?g|gif|heic|webp|svg"
+             r"|tiff?|bmp|mov|mp4|m4a|mp3|wav|zip|eml|msg|ics|vcf|plist|sql|xml)")
+_PATH_CH = r"[\w.~@+()-]"
+FILE_PATH_RE = re.compile(
+    r"(?<![\w.~/-])(?:~|\.{1,2})?/(?:" + _PATH_CH + r"+(?:[ \t]" + _PATH_CH + r"+){0,5}/)*"
+    r"[\w~@+()-]" + _PATH_CH + r"*\." + _FILE_EXT + r"\b"
+    r"|(?<![\w.~/-])(?:~|\.{1,2})?/" + _PATH_CH + r"+(?:/" + _PATH_CH + r"*)*"
+    r"|(?<![\w.~@+()/-])[\w~@+()-]" + _PATH_CH + r"*(?:/" + _PATH_CH + r"+)+\." + _FILE_EXT + r"\b",
+    re.I)
 # A pasted TRACK RECORD header lists what was already searched, every ref in
 # capitals, so an id copied from one no longer looks like an id. Its terms
 # are never read again. A header starts its line, after an optional stamp.
@@ -5293,11 +5316,14 @@ def reference_tokens(text):
     thirteen unrelated tasks). Never from a link, never an Airtable id (25 Sep
     2026). A phone number stays: on the SMS lane it is the only thing naming
     the contact. Never a command or code word such as PYTHON3 or SHA256 (28
-    Sep 2026)."""
+    Sep 2026). Never from a file path (28 Sep 2026)."""
     text = TRACK_RECORD_HEADER_RE.sub(" ", str(text or ""))
     text = WRAPPED_ID_RE.sub(lambda m: m.group(1) + m.group(3) if len(m.group(2)) + len(m.group(3)) == 14 else m.group(0), text)
     text = AIRTABLE_ID_RE.sub(" ", REF_URL_RE.sub(" ", text))
     text = STYLE_COLOUR_RE.sub(" ", INLINE_IMAGE_RE.sub(" ", text))
+    # After the inline pictures: "image001.png@01AB2345.6789CDEF" read as a
+    # file name would leave its content id behind as a token.
+    text = FILE_PATH_RE.sub(" ", text)
     # A link wrapped across lines leaves a piece of an id behind (DNIH3IRL
     # from appnqjDpq / DniH3IRl), and the search matches on substrings, so
     # that piece finds every record the base id is in (review, 25 Sep 2026).

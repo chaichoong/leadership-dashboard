@@ -82,6 +82,12 @@ F = {
     # Read only for --parent (25 Sep 2026): is the parent really approved?
     "approvalOutcome": "fldrHBSr6qoUfaKuZ",
     "approvedAt":   "fldr4Mvf2RzKvhZhi",
+    # Links that say WHICH tenancy, tenant, house or room (28 Sep 2026): two
+    # tasks linked to different records are two matters and never fold.
+    "tenancies":    "fldmne4RYJU22ICub",
+    "tenants":      "fld6ZcfEogJmeQj2c",
+    "properties":   "fldZKFvEpJ6NZeFKz",
+    "units":        "fldEW648YtTZ6j01n",
 }
 
 # Roy Lavin's Team Members row (same id as ROY_REC in task-manager.py and
@@ -922,6 +928,92 @@ def fold_on_address_only(name_a, name_b, shared):
     return len([w for w in shared if w not in noise]) < DUPE_MIN_SHARED
 
 
+# ─── A DIFFERENT TENANT OR A DIFFERENT HOUSE IS A DIFFERENT MATTER ───
+#
+# 28 Sep 2026. Creating "Check DWP decision on <tenant A>'s UC47 (55 Elmdon
+# Place) and chase if none" folded it into the open "Check DWP decision on
+# <tenant B>'s UC47 (Unit 2, 5 Dalham Place) and chase if none". The key keeps
+# two words, so both read `decision dwp`, and the word pass matched them on
+# decision / dwp / none / s / uc47. The rules above say an address is never
+# evidence FOR a match; nothing said two DIFFERENT houses, or two different
+# named people, are evidence AGAINST one. Kevin undid the fold by hand.
+#
+# So each name is read for WHO and WHERE, and two names that both carry one
+# and share none of it are never the same matter, in either pass and either
+# mode. Deliberately narrow, because a false "different" loses a fold:
+#   an address is a house number, one or two street words and a street type
+#     ("55 Elmdon Place", "57a West Street", "42 and 32 Elmdon Place"), kept
+#     as number + street words so "23 Viola St" and "23 Viola Street" agree.
+#     A unit number ("Unit 2, 5 Dalham Place") is not a house.
+#   a person is two or three capitalised words before 's ("Jane Smith's").
+#     A single word ("Kevin's", "Paul's room", "Tenant's") is not enough.
+# Mirrored by DUPE_ADDRESS_RE, DUPE_PERSON_RE, dupeIdentity and
+# dupeIdentityConflict in os/agents/index.html; drift-tested in
+# tests/agents-dupe-task-key.test.js.
+DUPE_ADDRESS_RE = re.compile(
+    r"(?:^|[\s&])(\d{1,4}[a-z]?(?:\s*(?:&|and)\s*\d{1,4}[a-z]?)*)\s+((?:[a-z]+\s+){1,2}?)("
+    + "|".join(sorted(DUPE_STREET_TYPES)) + r")(?![a-z0-9])")
+DUPE_PERSON_RE = re.compile(r"\b([A-Z][a-z]+(?:[ -][A-Z][a-z]+){1,2})['’]s\b", re.A)
+
+
+def dupe_identity(name):
+    """{addresses, people}: the houses and the named people in a task name,
+    in the order they appear, each once. Mirrored by dupeIdentity."""
+    raw = str(name or "")
+    noise = DUPE_GENERIC | DUPE_ACTION_WORDS | DUPE_DATE_WORDS
+    addresses = []
+    for m in DUPE_ADDRESS_RE.finditer(re.sub(r"[^a-z0-9&\s]", " ", raw.lower())):
+        nums = re.split(r"\s*(?:&|and)\s*", m.group(1))
+        words = m.group(2).split()
+        # "57 A West Street" is 57a West Street.
+        if len(nums) == 1 and len(words) == 2 and len(words[0]) == 1 and nums[0][-1].isdigit():
+            nums, words = [nums[0] + words[0]], words[1:]
+        if any(w in noise or w in DUPE_STREET_TYPES for w in words):
+            continue
+        for n in nums:
+            if _is_calendar_year(re.match(r"\d+", n).group(0)):
+                continue
+            a = n + " " + " ".join(words)
+            if a not in addresses:
+                addresses.append(a)
+    people = []
+    for m in DUPE_PERSON_RE.finditer(raw):
+        ws = re.split(r"[ -]", m.group(1).lower())
+        if ws[-1] in DUPE_STREET_TYPES:
+            continue                      # "Viola Street's bins" is a place
+        for w in ws:
+            if w not in noise and w not in people:
+                people.append(w)
+    return {"addresses": addresses, "people": people}
+
+
+def identity_conflict(name_a, name_b):
+    """Why these two names are about a different house or person, or ''.
+    Both must carry one: a name that says nothing about who or where leaves
+    the call to the words. Mirrored by dupeIdentityConflict."""
+    a, b = dupe_identity(name_a), dupe_identity(name_b)
+    if a["addresses"] and b["addresses"] and not set(a["addresses"]) & set(b["addresses"]):
+        return "different address: %s / %s" % (", ".join(a["addresses"]), ", ".join(b["addresses"]))
+    if a["people"] and b["people"] and not set(a["people"]) & set(b["people"]):
+        return "different person: %s / %s" % (" ".join(a["people"]), " ".join(b["people"]))
+    return ""
+
+
+def _link_ids(v):
+    return {x.get("id", "") if isinstance(x, dict) else str(x) for x in (v or []) if x}
+
+
+def links_disagree(fields_a, fields_b):
+    """The link field (tenancies, tenants, properties, units) on which two
+    task records name different records, or ''. A link on one side only
+    decides nothing: the live keeper of 28 Sep 2026 had no Tenancies link."""
+    for k in ("tenancies", "tenants", "properties", "units"):
+        a, b = _link_ids(fields_a.get(F[k])), _link_ids(fields_b.get(F[k]))
+        if a and b and not a & b:
+            return k
+    return ""
+
+
 def dupe_signals(name):
     """(lane, strong_ids, distinctive_words, place_words): what identifies
     this matter. `lane` is "maintenance" or "reply", never the raw prefix:
@@ -1011,6 +1103,11 @@ def dupe_verdict(name_a, name_b, mode="group"):
     # are the same lane and fold when the rest of the verdict agrees.
     if mode == "fold" and lane_a != lane_b:
         return {"match": False, "why": "", "shared": []}
+    # A DIFFERENT TENANT OR HOUSE (28 Sep 2026), in both modes and ahead of a
+    # shared reference: two tenants' UC47 chases are two matters however alike
+    # the words, and the lane's advice on a pair is "fold them".
+    if identity_conflict(name_a, name_b):
+        return {"match": False, "why": "", "shared": []}
 
     both = sorted(strong_a & strong_b)
     if both:
@@ -1097,6 +1194,11 @@ def decide(incoming_fields, open_rows):
         # the exact key cannot see the Maintenance Ticket tick or Roy, and an
         # unprefixed ticket keys and words like any other task.
         if fold_lane(other, f.get(F["team"]), bool(f.get(F["maintenance"]))) != incoming_lane:
+            continue
+        # A DIFFERENT TENANCY, TENANT, HOUSE OR PERSON (28 Sep 2026), ahead of
+        # both passes: the key pass is the one that folded one tenant's UC47
+        # chase into another's. Links first, because a record id is certain.
+        if links_disagree(incoming_fields, f) or identity_conflict(incoming_name, other):
             continue
         # TWO PASSES, and a match is either. The key is the fast exact bucket
         # and keeps every catch it already had; the verdict is the second pass
@@ -1251,7 +1353,8 @@ def fetch_open_tasks():
         params = [("pageSize", "100"), ("returnFieldsByFieldId", "true"),
                   ("filterByFormula", "AND({Status}!='Completed', {Status}!='Cancelled')")]
         for fid in (F["name"], F["status"], F["due"], F["priority"],
-                    F["team"], F["inboundSender"], F["maintenance"]):
+                    F["team"], F["inboundSender"], F["maintenance"],
+                    F["tenancies"], F["tenants"], F["properties"], F["units"]):
             params.append(("fields[]", fid))
         if offset:
             params.append(("offset", offset))
@@ -1577,6 +1680,17 @@ def selftest():
     gmail_b = row("rec5", "INBOUND: school fees", sender="b@gmail.com")
     check("public domain never folds on domain alone",
           decide(gmail_a, [gmail_b])["action"] == "create")
+    # 28 Sep 2026: one tenant's UC47 chase folded into another's.
+    check("a different named tenant at a different house never folds",
+          decide({F["name"]: "Check DWP decision on Jane Smith's UC47 (55 Elmdon Place) and chase if none"},
+                 [row("rec6", "Check DWP decision on John Brown's UC47 (Unit 2, 5 Dalham Place) "
+                              "and chase if none")])["action"] == "create")
+    linked = row("rec7", "Weekly cost review")
+    linked["fields"][F["tenancies"]] = ["recB"]
+    check("a different linked tenancy never folds",
+          decide({F["name"]: "Weekly cost review", F["tenancies"]: ["recA"]}, [linked])["action"] == "create")
+    check("the same linked tenancy folds",
+          decide({F["name"]: "Weekly cost review", F["tenancies"]: ["recB"]}, [linked])["action"] == "update")
     oldest = [row("recB", "Chase Acme invoice #9", sender="x@acme.com",
                   created="2026-08-20T00:00:00.000Z"),
               row("recA", "Chase Acme invoice #8", sender="x@acme.com",

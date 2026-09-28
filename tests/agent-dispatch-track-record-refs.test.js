@@ -326,3 +326,64 @@ print(json.dumps({'once': once, 'twice': twice}))`], { encoding: 'utf8' });
     expect(r.twice.length).toBe(r.once.length);
   });
 });
+
+// A file name is not a reference (Kevin, 28 Sep 2026). The TRACK RECORD on a
+// new UC47 chase said "searched tasks + Gmail for ref UC47-ANSWERS": the token
+// came from the working-file line of its description,
+// `.../2026-09-28 uc47 <tenant>/uc47-answers.md`, and the search pulled in a
+// different tenant's UC47 history. The description below is that task's, with
+// the tenant's name and the record id changed (this repo is public).
+// Back-tested: before the fix the first case returns ['UC47-ANSWERS'].
+describe('a file path or file name is never a reference', () => {
+  const UC47_DESC = "Check DWP decision on Aaron Mitchell's UC47 (55 Elmdon Place) and chase if none "
+    + 'UC47 (direct rent payment plus arrears) was submitted online to DWP on 28 Sep 2026 for Aaron Mitchell, '
+    + '55 Elmdon Place, Haverhill (tenancy recT3stTenancy012, now CFV Actioned).\n\nOn 12 Oct:\n'
+    + '1. Search Gmail: (from:dwp.gov.uk OR from:notifications.service.gov.uk) Mitchell after:2026/09/28.\n'
+    + '2. Check Transactions for a DWP credit with reference MITCHELL or MITCHELLRA linked to tenancy recT3stTenancy012.\n\n'
+    + 'Working file: ~/Projects/kevin-hq/property/2026-09-28 uc47 mitchell/uc47-answers.md\n';
+
+  it('the working-file line of the UC47 chase gives no reference', () => {
+    const out = py(`
+print('---JSON---'); print(json.dumps(m.reference_tokens(json.loads(sys.argv[1]))))`, UC47_DESC);
+    expect(out).toEqual([]);
+  });
+
+  it('paths and file names in every shape give nothing', () => {
+    const out = py(`
+print('---JSON---'); print(json.dumps([m.reference_tokens(t) for t in json.loads(sys.argv[1])]))`, [
+      '/Users/kevinbrittain/Projects/kevin-hq/property/2026-09-21 chedburgh gas safety/GSC-2026-4471.pdf',
+      'Saved as ~/Downloads/HMRC-CFS1234567.pdf for the reply.',
+      'Output in ./exports/rent-ledger-Q3-2026.csv today.',
+      'Read notes/case-AB12345/letter-v22.docx first.',
+      'Draft at mitchell/uc47-answers.md',
+    ]);
+    expect(out).toEqual([[], [], [], [], []]);
+  });
+
+  it('a long dotted, slashed or spaced run never makes the path reader slow', () => {
+    const out = py(`
+import time
+worst = 0
+for t in ['a.' * 10000, '/a' * 10000, '~/' + 'a ' * 10000, 'x/' + 'a.' * 10000, ' ~/a b/' * 3000,
+          '~/' + 'a/' * 10000 + 'x', 'a' * 20000 + '.pd']:
+    t0 = time.time(); m.FILE_PATH_RE.sub(' ', t); worst = max(worst, time.time() - t0)
+print('---JSON---'); print(json.dumps(worst))`);
+    expect(out).toBeLessThan(0.5);
+  });
+
+  it('a real reference beside a path, written with a slash, or naming a bare attachment survives', () => {
+    const out = py(`
+print('---JSON---'); print(json.dumps([m.reference_tokens(t) for t in json.loads(sys.argv[1])]))`, [
+      'Working file ~/x/notes.md, claim AB12345.',
+      'Saved to ~/Downloads, ref AB12345, see the letter.',
+      'Policy AB12345 and/or claim CD67890.',
+      'Account Acc.No/12345678 on the statement.',
+      'Letter ref 2026/AB12345 dated today.',
+      'Folder ~/Projects/kevin-hq then call re ref AB12345 and/or email.',
+      // A bare attachment name with no folder is the invoice's own reference.
+      'Attachment INV123456.pdf from the council.',
+    ]);
+    expect(out).toEqual([['AB12345'], ['AB12345'], ['AB12345', 'CD67890'], ['12345678'], ['AB12345'], ['AB12345'],
+      ['INV123456']]);
+  });
+});

@@ -4261,6 +4261,9 @@ function apvGroupTasks(rows){
         for(let j = i + 1; j < rows.length; j++){
             const a = rows[i], b = rows[j];
             if(isWait[a.id] || isWait[b.id]) continue;
+            // Two tenants or two houses are two jobs, whatever the key says:
+            // both UC47 chases of 28 Sep 2026 keyed to `decision dwp`.
+            if(dupeIdentityConflict(a.name || '', b.name || '')) continue;
             // Fall back to the id so two NAMELESS tasks can never collide — an
             // empty key would merge unrelated work into one group.
             const ka = dupeTaskKey(a.name || '') || ('id:' + a.id);
@@ -4406,6 +4409,60 @@ function isCalendarYear(digits){
     return digits.length === 4 && Number(digits) >= 1900 && Number(digits) <= 2099;
 }
 
+// A DIFFERENT TENANT OR A DIFFERENT HOUSE IS A DIFFERENT MATTER (28 Sep 2026).
+// One tenant's "Check DWP decision on ...'s UC47 (55 Elmdon Place)" folded into
+// another tenant's at 5 Dalham Place: both keyed to `decision dwp`, and the word
+// pass matched them too. An address was never evidence FOR a match; now two
+// different houses, or two different named people, are evidence AGAINST one.
+// Narrow on purpose: a house is number + street words + street type, a person
+// is two or three capitalised words before 's. Mirrors DUPE_ADDRESS_RE,
+// DUPE_PERSON_RE, dupe_identity and identity_conflict in
+// scripts/create-agent-task.py; drift-tested in tests/agents-dupe-task-key.test.js.
+const DUPE_ADDRESS_RE = new RegExp('(?:^|[\\s&])(\\d{1,4}[a-z]?(?:\\s*(?:&|and)\\s*\\d{1,4}[a-z]?)*)\\s+((?:[a-z]+\\s+){1,2}?)(' + DUPE_STREET_TYPES.slice().sort().join('|') + ')(?![a-z0-9])', 'g');
+const DUPE_PERSON_RE = /\b([A-Z][a-z]+(?:[ -][A-Z][a-z]+){1,2})['’]s\b/g;
+
+/** {addresses, people}: the houses and named people in a task name, in order,
+ *  each once. A unit number ("Unit 2, 5 Dalham Place") is not a house. */
+function dupeIdentity(name){
+    const raw = String(name||'');
+    const noise = (w)=> DUPE_GENERIC.indexOf(w) !== -1 || DUPE_ACTION_WORDS.indexOf(w) !== -1
+                     || DUPE_DATE_WORDS.indexOf(w) !== -1;
+    const addresses = [];
+    for(const m of raw.toLowerCase().replace(/[^a-z0-9&\s]/g,' ').matchAll(DUPE_ADDRESS_RE)){
+        let nums = m[1].split(/\s*(?:&|and)\s*/);
+        let words = m[2].split(/\s+/).filter(Boolean);
+        // "57 A West Street" is 57a West Street.
+        if(nums.length === 1 && words.length === 2 && words[0].length === 1 && /\d$/.test(nums[0])){
+            nums = [nums[0] + words[0]]; words = words.slice(1);
+        }
+        if(words.some(function(w){ return noise(w) || DUPE_STREET_TYPES.indexOf(w) !== -1; })) continue;
+        nums.forEach(function(n){
+            if(isCalendarYear(n.match(/\d+/)[0])) return;
+            const a = n + ' ' + words.join(' ');
+            if(addresses.indexOf(a) === -1) addresses.push(a);
+        });
+    }
+    const people = [];
+    for(const m of raw.matchAll(DUPE_PERSON_RE)){
+        const ws = m[1].toLowerCase().split(/[ -]/);
+        if(DUPE_STREET_TYPES.indexOf(ws[ws.length-1]) !== -1) continue;   // "Viola Street's bins"
+        ws.forEach(function(w){ if(!noise(w) && people.indexOf(w) === -1) people.push(w); });
+    }
+    return { addresses: addresses, people: people };
+}
+
+/** Why two names are about a different house or person, or ''. Both must carry
+ *  one: a name that says nothing about who or where leaves the call to the words. */
+function dupeIdentityConflict(nameA, nameB){
+    const a = dupeIdentity(nameA), b = dupeIdentity(nameB);
+    const meets = (x, y)=> x.some(function(v){ return y.indexOf(v) !== -1; });
+    if(a.addresses.length && b.addresses.length && !meets(a.addresses, b.addresses))
+        return 'different address: ' + a.addresses.join(', ') + ' / ' + b.addresses.join(', ');
+    if(a.people.length && b.people.length && !meets(a.people, b.people))
+        return 'different person: ' + a.people.join(' ') + ' / ' + b.people.join(' ');
+    return '';
+}
+
 /** {lane, strong, words, places}: what identifies this matter. `lane` is
  *  'maintenance' or 'reply', never the raw prefix: the prefix is split off so
  *  it cannot eat a subject word, but the only lane difference that may block
@@ -4459,6 +4516,9 @@ function dupeVerdict(nameA, nameB, mode){
     // reply-vs-maintenance only (Kevin, 15 Sep 2026): two reply tasks under
     // different agent prefixes are one lane and fold when the rest agrees.
     if(mode === 'fold' && a.lane !== b.lane) return { match:false, why:'' };
+    // A different tenant or house (28 Sep 2026), in both modes and ahead of a
+    // shared reference: this lane's advice on a pair is "fold them".
+    if(dupeIdentityConflict(nameA, nameB)) return { match:false, why:'' };
     const both = a.strong.filter(function(x){ return b.strong.indexOf(x) !== -1; }).sort();
     if(both.length){
         return { match:true, why:'same ' + both.map(function(x){
