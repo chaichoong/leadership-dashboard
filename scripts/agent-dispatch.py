@@ -5199,6 +5199,32 @@ def track_record_problem(output, required):
 # ── history: the dated record of everything with a contact or reference ──
 REF_TOKEN_RE = re.compile(r"\b(?=[A-Z0-9-]{5,}\b)(?:[A-Z]*\d[A-Z0-9-]*)\b")
 ISO_DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
+# A command or code word is not a reference (28 Sep 2026). A task whose
+# description said "Run: python3 ~/.claude/skills/model-check/calibrate.py 14"
+# searched for PYTHON3, found 682 lines of unrelated history (EICR checks
+# among them) and wrote the newest 40, 12,454 characters, into its Notes.
+# Letters then one digit is not a reference: across the 8,135 live tasks it
+# gave 17 tokens, every one noise (PYTHON3, WORDSECTION1 from Outlook HTML,
+# DMARC1, the name part of an email address, run-together text like TAPS3),
+# while real references carry two or more digits (shapes like UCD123, PUD45,
+# AB12345). A booking code can have that shape (PNR XKQJT4), so one straight
+# after a reference label stays. Only a label that means a reference on its
+# own counts bare; an everyday word (case, order, account) needs No, Number,
+# Ref, Code or # after it, or "in case python3" is searched again (review).
+# The named code words come with the widths they come in, so INT123 or
+# X1234567 stays a reference, and no label rescues them; the last is a model
+# id's tail (4-5-20251001 from claude-haiku-4-5-20251001).
+ONE_DIGIT_WORD_RE = re.compile(r"[A-Z]+\d")
+CODE_WORD_RE = re.compile(
+    r"SHA(?:224|256|384|512)|SHA3-(?:224|256|384|512)|BASE(?:32|58|64|85)|UTF(?:16|32)(?:BE|LE)?"
+    r"|(?:U?INT|FLOAT)(?:16|32|64|128)|(?:WIN|ARM|AMD|AARCH)(?:32|64)|WIN1[01]|X86-64|CP125\d"
+    r"|(?:PYTHON|NODE|IOS|IPADOS|MACOS|WATCHOS|ANDROID|WINDOWS)\d{2}|INSTA360"
+    r"|(?:PYTHON|HTML|OAUTH|DMARC|DKIM|WORDSECTION)\d"
+    r"|\d{1,2}-\d{1,2}-20\d{6}")
+REF_LABEL_RE = re.compile(
+    r"(?:\b(?:REF|REFERENCE|BOOKING|PNR|CONFIRMATION)\b(?:[ \t]*(?:NO|NUMBER|CODE|REF|REFERENCE)\b)?"
+    r"|\b(?:POLICY|CLAIM|ACCOUNT|CASE|INVOICE|ORDER|TRACKING)(?:[ \t]*(?:NO|NUMBER|CODE|REF|REFERENCE)\b|[ \t]*#))"
+    r"[ \t:#.()-]*(?:\r?\n[ \t]*)?\Z")
 # A link is an address, not a reference (25 Sep 2026). An Airtable form link
 # in a tenant-chain task gave the refs APPNQJDPQDNIH3IRL, the base id in
 # nearly every task and email that links to Airtable, and SHRTUDF8S04KP5XGT;
@@ -5235,7 +5261,8 @@ def reference_tokens(text):
     yielded 18 tokens, seven of them the same number, and dates matched
     thirteen unrelated tasks). Never from a link, never an Airtable id (25 Sep
     2026). A phone number stays: on the SMS lane it is the only thing naming
-    the contact."""
+    the contact. Never a command or code word such as PYTHON3 or SHA256 (28
+    Sep 2026)."""
     text = TRACK_RECORD_HEADER_RE.sub(" ", str(text or ""))
     text = WRAPPED_ID_RE.sub(lambda m: m.group(1) + m.group(3) if len(m.group(2)) + len(m.group(3)) == 14 else m.group(0), text)
     text = AIRTABLE_ID_RE.sub(" ", REF_URL_RE.sub(" ", text))
@@ -5243,9 +5270,15 @@ def reference_tokens(text):
     # from appnqjDpq / DniH3IRl), and the search matches on substrings, so
     # that piece finds every record the base id is in (review, 25 Sep 2026).
     ours = f"{BASE_ID} {TASKS}".upper()
+    upper = text.upper()
     out = []
-    for t in REF_TOKEN_RE.findall(text.upper()):
+    for mt in REF_TOKEN_RE.finditer(upper):
+        t = mt.group(0)
         if t.isalpha() or ISO_DATE_RE.match(t) or t in ours or t in out:
+            continue
+        if CODE_WORD_RE.fullmatch(t):
+            continue
+        if ONE_DIGIT_WORD_RE.fullmatch(t) and not REF_LABEL_RE.search(upper, max(0, mt.start() - 40), mt.start()):
             continue
         out.append(t)
     return out[:HISTORY_MAX_REFS]

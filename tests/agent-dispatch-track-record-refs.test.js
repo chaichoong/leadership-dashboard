@@ -127,6 +127,80 @@ print(json.dumps(seen['cmd']))`, JSON.stringify(DESC)], { encoding: 'utf8' });
   });
 });
 
+// A command is not a reference (28 Sep 2026). A task whose description said
+// "Run: python3 ~/.claude/skills/model-check/calibrate.py 14" made the create
+// gate search for PYTHON3; 682 lines of unrelated history matched and the
+// newest 40, 12,454 characters, landed in the task's Notes.
+const CALIBRATE = 'Recalibrate the Fable/Opus model check after the week to 4 Oct '
+  + 'Kevin approved on 28 Sep 2026: check the new allowance-aware MODEL CHECK after its first full week.\n\n'
+  + '1. Run: python3 ~/.claude/skills/model-check/calibrate.py 14 (read-only).\n'
+  + '2. Report dollars per point for Opus and for Fable against the 90% target.';
+
+describe('a command or code word is never a reference', () => {
+  it('the calibrate task gives no token, so the create gate searches nothing', () => {
+    const out = py(`
+print('---JSON---'); print(json.dumps(m.reference_tokens(json.loads(sys.argv[1]))))`, CALIBRATE);
+    expect(out).toEqual([]);
+  });
+
+  it('tool, encoding, hash, architecture, version and model words give nothing', () => {
+    // Each of these was a token before the fix.
+    const words = ['python3', 'Python3.12', 'sha256', 'SHA3-256', 'base64', 'x86-64', 'HTML5', 'OAuth2',
+      'int64', 'arm64', 'win10', 'node20', 'iOS18', 'windows11', 'Insta360', 'WordSection1', 'v=DMARC1',
+      'utf16le', 'cp1252', 'claude-haiku-4-5-20251001'];
+    // These never reach the rule (under five characters, or letters then a
+    // hyphen), and must stay that way.
+    const short = ['UTF-8', 'utf-16', 'SHA-256', 'H264', 'MPEG-4', 'MP4'];
+    const out = py(`
+print('---JSON---'); print(json.dumps({w: m.reference_tokens(w) for w in json.loads(sys.argv[1])}))`, [...words, ...short]);
+    for (const w of [...words, ...short]) expect([w, out[w]]).toEqual([w, []]);
+  });
+
+  it('a code of letters then one digit stays when a label names it a reference', () => {
+    const out = py(`
+texts = json.loads(sys.argv[1])
+print('---JSON---'); print(json.dumps([m.reference_tokens(t) for t in texts]))`, [
+      'PNR XKQJT4, booking ref ABCDE1, confirmation code: QWERT7, Invoice No. ABCDE2, Order #ABCDE3.',
+      'Booking reference:\r\nXKQJT4',
+      'The ABCDE1 arrived; run python3 again.',
+      // An everyday word is not a label, and no label rescues a named code word.
+      'Just in case python3 is missing. Run in order: python3 a.py. Close the account\npython3 fix.py',
+      'Ref SHA256 of the file, booking ref base64 string, case HTML5.',
+      'Ref: python3 then ref html5. Quote our ref.\n\nABCDE1 is in the next paragraph.',
+    ]);
+    expect(out).toEqual([['XKQJT4', 'ABCDE1', 'QWERT7', 'ABCDE2', 'ABCDE3'], ['XKQJT4'], [], [], [], []]);
+  });
+
+  it('real references still come through: invoices, case numbers, claim refs, phones, accounts', () => {
+    const text = 'Invoice INV123456 and HMRC case CFS1234567. DWP ref UCD123, our ref PUD45/5, policy AB12345. '
+      + 'Call 07700900747 or 447700900123. Account 12345678, sort code 12-34-56. Codes INT123 and X1234567.';
+    const out = py(`
+print('---JSON---'); print(json.dumps(m.reference_tokens(json.loads(sys.argv[1]))))`, text);
+    expect(out).toEqual(['INV123456', 'CFS1234567', 'UCD123', 'PUD45', 'AB12345', '07700900747',
+      '447700900123', '12345678']);
+    // Past the eight-ref cap, so read on their own.
+    const rest = py(`
+print('---JSON---'); print(json.dumps(m.reference_tokens(json.loads(sys.argv[1]))))`, 'sort code 12-34-56. Codes INT123 and X1234567.');
+    expect(rest).toEqual(['12-34-56', 'INT123', 'X1234567']);
+  });
+
+  it('the history command the create gate shells out to gets no ref from the calibrate task', () => {
+    const out = py(`
+seen = {}
+def spy(emails=(), refs=(), properties=(), **k):
+    seen['terms'] = m.history_terms(emails, refs, properties)
+    return {'terms': [], 'searched': ['tasks'], 'entries': [], 'notes': []}
+m.history = spy
+import io, contextlib
+args = types.SimpleNamespace(from_text=[json.loads(sys.argv[1])], ref=[], email=[], property=[],
+                             days=730, task=None, no_gmail=True, text=True)
+with contextlib.redirect_stdout(io.StringIO()):
+    m.cmd_history(args)
+print('---JSON---'); print(json.dumps(seen['terms']))`, CALIBRATE);
+    expect(out).toEqual([]);
+  });
+});
+
 describe('the TRACK RECORD block has a ceiling', () => {
   it('500 matches print the newest 40 lines and the header says so', () => {
     const out = py(`
