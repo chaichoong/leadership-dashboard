@@ -273,12 +273,37 @@ import time
 worst = 0
 for t in ['color:' + ' ' * 20000 + 'x', 'Background:' + '\\n' * 20000, 'color:"' + ' ' * 20000,
           'background: linear-gradient(' + ' ' * 20000, 'border:' + ' ,' * 10000 + 'x', '--' + 'a' * 20000 + ':',
-          'a.' * 10000, 'x.' * 10000 + '/']:
+          'a.' * 10000, 'x.' * 10000 + '/', 'a-' * 30000, '-a' * 30000,
+          ' '.join(str(10000 + i) for i in range(30000))]:
     t0 = time.time(); m.reference_tokens(t); worst = max(worst, time.time() - t0)
 print('---JSON---'); print(json.dumps(worst))`);
-    // 28 seconds before the review fix; a few milliseconds after. The link
-    // reader took 1.2 seconds on 'a.' * 10000 before the 28 Sep 2026 fix.
+    // 28 seconds before the review fix; a few milliseconds after. Before the
+    // 28 Sep 2026 fixes the link reader took 1.2 seconds on 'a.' * 10000,
+    // the token reader 3.1 seconds on 'a-' * 30000 (0.07 after), and 30,000
+    // different tokens 3.1 seconds (0.04 after).
     expect(out).toBeLessThan(1);
+  });
+
+  it('the faster token reader finds exactly the tokens the old one did', () => {
+    // The 28 Sep 2026 speed fix only makes the five-or-more check stop at
+    // the first boundary. The old pattern is kept here and random text goes
+    // through both, compared on every match's position.
+    const out = py(`
+import random, re
+OLD = re.compile(r"\\b(?=[A-Z0-9-]{5,}\\b)(?:[A-Z]*\\d[A-Z0-9-]*)\\b")
+spans = lambda r, s: [(x.start(), x.end()) for x in r.finditer(s)]
+pieces = list('AZ09-_ .:/\\n\\tÉé²') + ['AB12345', '12-34-56', '--', 'A-', '-1', 'INV', '2026-09-28', 'X1', 'ABCDE', '_A1']
+random.seed(20260928)
+diffs, with_tokens = [], 0
+for _ in range(20000):
+    s = ''.join(random.choice(pieces) for _ in range(random.randint(0, 16)))
+    old = spans(OLD, s)
+    diffs += [s] if spans(m.REF_TOKEN_RE, s) != old else []
+    with_tokens += bool(old)
+print('---JSON---'); print(json.dumps({'diffs': diffs[:5], 'with_tokens': with_tokens}))`);
+    expect(out.diffs).toEqual([]);
+    // Control: the random text really does hold tokens.
+    expect(out.with_tokens).toBeGreaterThan(8000);
   });
 
   it('the faster link reader strips exactly what the old one did', () => {
