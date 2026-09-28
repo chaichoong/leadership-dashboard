@@ -194,15 +194,24 @@ def bundle(day):
     return {ctype: pc.find_by_name(pc.record_name(day, ctype)) for ctype in pc.TYPES}
 
 
-def pending(limit):
+def pending(limit, state=None):
+    """The oldest `limit` ready days that have no card yet. Every page is read and a day that already has a card is
+    skipped BEFORE the limit: a card resent to Kevin stays "Copies in Progress" until he decides, and with the first two
+    rows in table order it held the slots so no new day could get a card (review, 28 Sep 2026)."""
     f = ('AND({Content Type}="Long Form Video", {Responsible}="Content Engine (AI)", {Record Status}="%s", '
          '{Video Edited URL}!="", {Thumbnail URL}!="", {YouTube Copy}!="")' % STATUS_READY)
-    r = watch._airtable("GET", watch.API + "?maxRecords=%d&filterByFormula=%s" % (limit, urllib.parse.quote(f)))
-    days = []
-    for rec in r.get("records", []):
-        m = re.search(r"Episode (\d+)", rec["fields"].get("Content Name", ""))
-        if m: days.append(int(m.group(1)))
-    return days
+    state = load_state() if state is None else state
+    days, offset = set(), None
+    while True:
+        r = watch._airtable("GET", watch.API + "?pageSize=100&filterByFormula=%s%s" % (urllib.parse.quote(f), "&offset=" + urllib.parse.quote(offset) if offset else ""))
+        for rec in r.get("records", []):
+            m = re.search(r"Episode (\d+)", rec["fields"].get("Content Name", ""))
+            if m and not (state.get(m.group(1)) or {}).get("task"): days.add(int(m.group(1)))
+        offset = r.get("offset")
+        if not offset: break
+    # a day the output gate blocked goes to the back, never out: it is re-checked when a slot is free, and two blocked
+    # days can no longer take both slots from new ones every night (review, 28 Sep 2026)
+    return sorted(days, key=lambda d: (bool((state.get(str(d)) or {}).get("qa_blocked")), d))[:limit]
 
 
 def existing_task(name):
@@ -430,6 +439,20 @@ def selftest():
     lfmd = {"id": "recL", "fields": {"LinkedIn Copy": "li words", "Threads Copy": "th words"}}
     short = {"id": "recS", "fields": {"Facebook Reels Copy": "fb words"}}
     assert is_ready(full["fields"]) and not is_ready({**full["fields"], "Thumbnail URL": ""}) and not is_ready({**full["fields"], "Record Status": "New Upload"})
+    # 28 Sep 2026: every page read, carded days skipped before the limit, oldest first
+    pages = [{"records": [{"fields": {"Content Name": "Episode 2080 x"}}, {"fields": {"Content Name": "Episode 2072 x"}}], "offset": "o1"},
+             {"records": [{"fields": {"Content Name": "Episode 2076 x"}}, {"fields": {"Content Name": "Episode 2073 x"}}]}]
+    seen, real_air = [], watch._airtable
+    watch._airtable = lambda method, url, *a, **k: (seen.append(url), pages[len(seen) - 1])[1]
+    try: got = pending(2, state={"2072": {"task": "t"}})
+    finally: watch._airtable = real_air
+    assert got == [2073, 2076], got
+    assert len(seen) == 2 and "offset=o1" in seen[1], seen
+    seen = []
+    watch._airtable = lambda method, url, *a, **k: (seen.append(url), pages[len(seen) - 1])[1]
+    try: got = pending(2, state={"2072": {"task": "t"}, "2073": {"qa_blocked": {"failures": ["x"]}}})
+    finally: watch._airtable = real_air
+    assert got == [2076, 2080], "a blocked day goes behind the new ones: %r" % got
     name, desc, out = build_card(2225, full, lfmd, short, "RECORD IT ONCE / AI WORKS FOREVER")
     assert name == 'CONTENT: Publish Episode 2225 of Diary of a Runpreneur - RECORD IT ONCE / AI WORKS FOREVER', name
     first = out.split("\n")[0]

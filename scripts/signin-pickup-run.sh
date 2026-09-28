@@ -163,6 +163,8 @@ if [ -f "$TOKEN_FILE" ]; then
 else
   fail "claude OAuth token missing at $TOKEN_FILE; tasks are on the board for the next slot"
 fi
+# verify owes exactly these, not the whole worklist (27 Sep 2026). Written here, never by the agent.
+printf '%s\n' $IDS > "$RUNDIR/owed-ids"
 __START_LINE=$( { wc -l < "$LOG"; } 2>/dev/null || echo 0)
 "$CLAUDE" -p "You are a SIGN-IN PICKUP run of the agent dispatch engine. Kevin has just signed the robot browser into these sites: $LABEL. These tasks were waiting on exactly those sign-ins: $IDS. Follow /Users/kevinbrittain/.claude/scheduled-tasks/agent-dispatch/SKILL.md.
 

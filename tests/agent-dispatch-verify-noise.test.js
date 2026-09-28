@@ -24,7 +24,7 @@ const DISPATCH = resolve(ROOT, 'scripts/agent-dispatch.py');
 // {h:N} (N hours ago), so the tests hold on any day.
 const J = (x) => `json.loads(${JSON.stringify(JSON.stringify(x))})`;
 
-function verify({ report, queue = null, handbackOnly = false, tasks = {}, ledger = {}, dryRun = false, preAlerted = null, selfcheck = null }) {
+function verify({ report, queue = null, handbackOnly = false, tasks = {}, ledger = {}, dryRun = false, preAlerted = null, selfcheck = null, owedIds = null }) {
   const script = `
 import importlib.util, json, os, re, sys, io, tempfile, types, contextlib
 from datetime import datetime, timedelta, timezone
@@ -41,6 +41,8 @@ open(os.path.join(rundir, 'report.json'), 'w').write(ago(json.dumps(${J(report)}
 queue = ${J(queue)}
 if queue is not None: open(os.path.join(rundir, 'queue.json'), 'w').write(ago(json.dumps(queue)))
 if ${handbackOnly ? 'True' : 'False'}: open(os.path.join(rundir, m.HANDBACK_ONLY_MARK), 'w').close()
+owed = ${J(owedIds)}
+if owed is not None: open(os.path.join(rundir, m.OWED_IDS_MARK), 'w').write('\\n'.join(owed) + '\\n')
 pre = ${J(preAlerted)}
 if pre is not None: json.dump(pre, open(os.path.join(tmp, 'tier1-alerted.json'), 'w'))
 sc = ${J(selfcheck)}
@@ -104,6 +106,23 @@ describe('owed work is checked task by task, from the queue the run was handed',
     expect(r.err).toContain('has no queue.json');
   });
 
+  it("a run told to work only named tasks (roy-assistant, signin-pickup) owes exactly those, from the runner's owed-ids file", () => {
+    const r = verify({ report: { queueCounts: COUNTS(3), actions: [{ task: 'recR', kind: 'new', ok: true }] }, queue: Q(['recR', 'new'], ['recX', 'carry_out'], ['recY', 'carry_out']), owedIds: ['recR'], tasks: { recR: { notes: '' } } });
+    expect(r.err).not.toContain('ZERO');
+  });
+
+  it('review 28 Sep: an emptied owed-ids file is an error, never "owes nothing"', () => {
+    const r = verify({ report: { queueCounts: COUNTS(2), actions: [] }, queue: Q(['recR', 'new'], ['recX', 'carry_out']), owedIds: [] });
+    expect(r.code).toBe(1);
+    expect(r.err).toContain('owed-ids is empty');
+  });
+
+  it("CONTROL: a named task the run never touched still alarms, by name", () => {
+    const r = verify({ report: { queueCounts: COUNTS(3), actions: [] }, queue: Q(['recR', 'new'], ['recX', 'carry_out']), owedIds: ['recR'] });
+    expect(r.code).toBe(1);
+    expect(r.err).toContain('1 eligible tasks and ZERO attempted: recR');
+  });
+
   it('review 1: a task resting on its wall does not hide another it never touched', () => {
     const r = verify({
       report: { startedAt: '{h:0.2}', queueCounts: COUNTS(2), actions: [onWall] },
@@ -115,9 +134,9 @@ describe('owed work is checked task by task, from the queue the run was handed',
   });
 
   it('review 2: an already-alerted parked flag does not hide another task it never touched', () => {
-    const r = verify({ report: { queueCounts: COUNTS(2), actions: [], parkedFlags: [{ id: 'recPAY', name: 'invoice' }] }, queue: Q(['recPAY', 'carry_out'], ['recA', 'carry_out']), preAlerted: ['recPAY'] });
+    const r = verify({ report: { startedAt: '{h:0.2}', queueCounts: COUNTS(2), actions: [], parkedFlags: [{ id: 'recPAY', name: 'invoice' }] }, queue: Q(['recPAY', 'carry_out'], ['recA', 'carry_out']), preAlerted: ['recPAY'], tasks: { recPAY: { notes: WALL(50) } } });
     expect(r.code).toBe(1);
-    expect(r.err).toContain('ZERO attempted: recA');
+    expect(r.err).toContain('1 eligible tasks and ZERO attempted: recA');
   });
 
   it('review: an id alerted long ago and not listed as parked again this run is still owed', () => {
@@ -127,8 +146,20 @@ describe('owed work is checked task by task, from the queue the run was handed',
   });
 
   it('a parked task alerted before and listed again this run is excused (it needs Kevin, not the agent)', () => {
-    const r = verify({ report: { queueCounts: COUNTS(1), actions: [], parkedFlags: [{ id: 'recOLD', name: 'invoice' }] }, queue: Q(['recOLD', 'carry_out']), preAlerted: ['recOLD'] });
+    const r = verify({ report: { startedAt: '{h:0.2}', queueCounts: COUNTS(1), actions: [], parkedFlags: [{ id: 'recOLD', name: 'invoice' }] }, queue: Q(['recOLD', 'carry_out']), preAlerted: ['recOLD'], tasks: { recOLD: { notes: WALL(50) } } });
     expect(r.code).toBe(0);
+  });
+
+  it('review 28 Sep: a wall this run put back on a task Kevin had just cleared is not an old alert', () => {
+    const r = verify({ report: { startedAt: '{h:0.5}', queueCounts: COUNTS(1), actions: [], parkedFlags: [{ id: 'recOLD', name: 'invoice' }] }, queue: Q(['recOLD', 'carry_out']), preAlerted: ['recOLD'], tasks: { recOLD: { notes: WALL(0.1) } } });
+    expect(r.code).toBe(1);
+    expect(r.err).toContain('ZERO attempted: recOLD');
+  });
+
+  it('review: an old alert re-listed after Kevin cleared its wall (he paid) is owed again', () => {
+    const r = verify({ report: { queueCounts: COUNTS(1), actions: [], parkedFlags: [{ id: 'recOLD', name: 'invoice' }] }, queue: Q(['recOLD', 'carry_out']), preAlerted: ['recOLD'], tasks: { recOLD: { notes: '' } } });
+    expect(r.code).toBe(1);
+    expect(r.err).toContain('ZERO attempted: recOLD');
   });
 
   it('review 4: an action on a task outside the worklist excuses nothing', () => {
@@ -238,6 +269,14 @@ describe('the prompts say it', () => {
 
   it('the skill forbids deleting an action or a parked flag to pass', () => {
     expect(step).toContain('NEVER delete an action or a parked flag');
+  });
+
+  it('the named-task runners write owed-ids before the agent starts', () => {
+    for (const f of ['scripts/roy-assistant-run.sh', 'scripts/signin-pickup-run.sh']) {
+      const sh = readFileSync(resolve(ROOT, f), 'utf8');
+      expect(sh.indexOf('> "$RUNDIR/owed-ids"'), f).toBeGreaterThan(-1);
+      expect(sh.indexOf('> "$RUNDIR/owed-ids"'), f).toBeLessThan(sh.indexOf('"$CLAUDE" -p'));
+    }
   });
 
   it('the hand-back runner writes the marker into its run folder, after the queue', () => {

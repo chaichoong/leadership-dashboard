@@ -895,7 +895,7 @@ def process(key, ledger, keep=False):
     folder, links = publish_to_drive(paths, day, os.path.join(workdir, "transcript.txt"))
     rid, how = find_or_create_record(day, e.get("drive_id"), key, dt.date.fromisoformat(e["date"]))
     upd = record_updates(day, links, text, reason, key, role)
-    if role == "episode" and card_sent_back(day):
+    if role == "episode" and copy_goes_with_render(day):
         # the copy was written from the old transcript: cleared, so tonight's copy step writes it from this one (2071, 24 Sep 2026)
         upd.update({f: None for f in FULL_COPY_FIELDS})
     watch._airtable("PATCH", watch.API + "/" + rid, {"fields": upd})
@@ -1060,6 +1060,20 @@ def redo_full(day, keep=False):
 
 
 FULL_COPY_FIELDS = ("Blog Copy", "Blog Post Description", "YouTube Copy", "Podcast Copy")   # platform_copy.TYPES["Long Form Video"]
+
+
+def copy_goes_with_render(day):
+    """Whether an episode render clears the day's copy so tonight's copy step writes it from the new transcript: for a
+    card Kevin sent back (2071, 24 Sep 2026), and for a day with no card yet (2073, 28 Sep 2026: re-rendered with its
+    Learnings clip, it kept its old copy, stayed at "Optimisation and Design Done" and never reached the card step, which
+    takes only "Copies in Progress"; its old output-gate block never cleared). A card waiting for Kevin or approved keeps
+    its copy: copy rewritten after his yes would reach the world unseen. Unreadable state keeps the copy."""
+    try:
+        import approval
+        e = approval.load_state().get(str(day)) or {}
+    except Exception as ex:
+        print("render: approval state not readable (%s); the copy is left as it is" % str(ex)[:100], file=sys.stderr); return False
+    return e.get("verdict") == "changes" or not e.get("task")
 
 
 def card_sent_back(day):
@@ -1322,7 +1336,26 @@ def _selftest_parts():
     assert not STITCH_RE.search("join me today as I talk about the previous week") and not STITCH_RE.search("I want to add to that the earlier point")
 
 
+def _selftest_copy_goes_with_render():
+    import approval
+    real = approval.load_state
+    try:
+        for state, want, why in (({"2073": {"qa_blocked": {}}}, True, "2073: no card yet"), ({}, True, "a first render"),
+                                 ({"2072": {"task": "t", "verdict": "changes"}}, True, "sent back"),
+                                 ({"2074": {"task": "t", "verdict": "approved"}}, False, "approved keeps its copy"),
+                                 ({"2075": {"task": "t"}}, False, "a card waiting for Kevin keeps its copy")):
+            approval.load_state = lambda s=state: s
+            day = int(next(iter(state))) if state else 2099
+            assert copy_goes_with_render(day) is want, why
+        def boom(): raise OSError("unreadable")
+        approval.load_state = boom
+        assert copy_goes_with_render(2073) is False, "unreadable state keeps the copy"
+    finally:
+        approval.load_state = real
+
+
 def selftest():
+    _selftest_copy_goes_with_render()
     _selftest_parts()
     assert hundreds_folder(2049) == "2001-2100" and hundreds_folder(2100) == "2001-2100" and hundreds_folder(2101) == "2101-2200"
     assert output_names(2225)["full"] == "Episode_2225_Full_Episode.mp4" and output_names(2225)["podcast"] == "Ep2225_Podcast.mp3"
