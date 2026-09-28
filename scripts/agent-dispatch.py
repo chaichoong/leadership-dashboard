@@ -6582,6 +6582,9 @@ def cmd_blockers(args):
 # it owed. Written by the runner, never by the agent, so a run cannot excuse
 # itself (27 Sep 2026).
 HANDBACK_ONLY_MARK = "handback-only"
+# A run told to WORK ONLY named tasks (roy-assistant, signin-pickup) writes them here, one per line, so verify owes
+# exactly those and not the whole worklist it was handed (review, 27 Sep 2026). Written by the runner, never the agent.
+OWED_IDS_MARK = "owed-ids"
 # What the agent's self-check saw failed or parked. The control alarms on any of
 # them missing from the final report: a failure is a result, never a draft error
 # to delete (review, 27 Sep 2026).
@@ -6604,7 +6607,7 @@ def owed_ids(queue, handback_only=False):
                                 or w.get("signinReopened"))]
 
 
-def silent_run_problem(report, queue=None, handback_only=False, rested=(), known_parked=()):
+def silent_run_problem(report, queue=None, handback_only=False, rested=(), known_parked=(), owed=None, alerted_before=None):
     """The rule verify exists for, or '': work existed and the run did none.
 
     27 Sep 2026: seven "ZERO completed actions" alerts in one afternoon, every one
@@ -6612,23 +6615,26 @@ def silent_run_problem(report, queue=None, handback_only=False, rested=(), known
     new work too) or tried a carry-out that met its wall. Counted from the
     queue.json the run was handed, never from what the run says it ignored.
 
-    A task resting on its wall (`rested`) or parked, already alerted AND listed
-    again in this run's parkedFlags (`known_parked` is never pruned, so an id in
-    it alone excuses nothing) is not owed, and neither ever counts as the run's
-    work: only
+    A task resting on its wall (`rested`), or parked, already alerted, listed
+    again in this run's parkedFlags and still carrying an open wall in its live
+    Notes (`known_parked`; the alert list is never pruned, so an id in it alone
+    excuses nothing), is not owed, and neither ever counts as the run's work.
+    A parked flag counts as work only when it is new (not in `alerted_before`): only
     a completed action, a failure that alarms, or a new parked flag on an owed
     task does, and an action on a task outside the worklist counts for nothing
     (review, 27 Sep 2026). A run that did some of its work and left the rest for
     the next tick is not silent: counting per task alarmed on 33 of 34 real runs.
     With no queue.json the old rule stands."""
-    if isinstance(queue, dict):
+    if isinstance(queue, dict) or owed is not None:
         actions = report.get("actions") or []
         parked = {p.get("id") for p in (report.get("parkedFlags") or [])}
         excused = set(rested) | (parked & set(known_parked))
-        owed = [i for i in owed_ids(queue, handback_only) if i not in excused]
+        owed = [i for i in (owed if owed is not None else owed_ids(queue, handback_only)) if i not in excused]
+        # a parked flag is the run's work only when it is NEW: re-listing one alerted before is not doing anything
+        old = set(known_parked) if alerted_before is None else set(alerted_before)
         real = ({a.get("task") for a in actions if a.get("ok")}
                 | {a.get("task") for a in actions if not a.get("ok") and a.get("task") not in excused}
-                | (parked - excused))
+                | (parked - excused - old))
         if owed and not (real & set(owed)):
             return (f"{len(owed)} eligible tasks and ZERO attempted: "
                     f"{', '.join(owed[:8])}")
@@ -6730,10 +6736,26 @@ def cmd_verify(args):
     # parked tasks already alerted before this run, which are not owed either.
     try:
         with open(os.path.join(STATE_DIR, "tier1-alerted.json")) as fh:
-            known_parked = set(json.load(fh))
+            alerted_before = set(json.load(fh))
     except Exception:                                     # noqa: BLE001
-        known_parked = set()      # none known: every parked flag counts as new work
-    silent = silent_run_problem(report, queue, handback_only, rested, known_parked)
+        alerted_before = set()    # none known: every parked flag counts as new work
+    # An old alert excuses a re-listed parked task only while its wall is still open
+    # in the live Notes: once Kevin clears it (he paid), the task is owed again
+    # (review, 27 Sep 2026). Every open parked task on 28 Sep carried a wall.
+    known_parked = set()
+    for pid in {p.get("id") for p in (report.get("parkedFlags") or [])} & alerted_before:
+        try:
+            if task_blocker(task_view(get_task(pid)).get("notes")):
+                known_parked.add(pid)
+        except Exception:                                 # noqa: BLE001
+            pass          # unreadable: not excused, so it is owed and alarms if untouched
+    owed_override = None
+    try:
+        with open(os.path.join(rundir, OWED_IDS_MARK)) as fh:
+            owed_override = [i for i in re.split(r"[\s,]+", fh.read()) if i]
+    except FileNotFoundError:
+        pass
+    silent = silent_run_problem(report, queue, handback_only, rested, known_parked, owed_override, alerted_before)
     if silent:
         problems.append(silent)
 

@@ -119,6 +119,8 @@ if [ -z "$IDS" ]; then
   exit 0
 fi
 echo "===== roy-assistant $(date) tasks=[$IDS] =====" >> "$LOG"
+# verify owes exactly these, not the whole worklist (27 Sep 2026). Written here, never by the agent.
+printf '%s\n' $IDS > "$RUNDIR/owed-ids"
 
 # --- the allowance guard (same as handback-poll and signin-pickup) -----------
 if ! __PAUSE=$(/usr/bin/python3 "$REPO/scripts/allowance.py" check --job roy-assistant); then

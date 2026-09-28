@@ -46,6 +46,10 @@ TF = {"name": "fldgFjGBw6bTKJFCD", "desc": "fldRGhBQViKZKtkQ6", "status": "fldx4
       "priority": "fldS21RwmwOqt71LI", "due": "fld7XP8w8kbxfETV4", "business": "fldLu1Y4GzyWcDoxr", "notes": "fldR7apBzSp3oxFxz",
       "sentBy": "fld30Yw8SWYVp049g", "outcome": "fldrHBSr6qoUfaKuZ", "feedback": "fldtI7SJI4gEohHD1", "approvedAt": "fldr4Mvf2RzKvhZhi"}
 STATUS_READY, STATUS_QC, STATUS_APPROVED = "Copies in Progress", "Quality Control", "Approved for Publishing"
+# render.STATUS_DONE. A re-render sets it and keeps the copy (only a sent-back card has its copy cleared), so a record at
+# this status WITH copy is as ready as one the copy writer just finished. Until 28 Sep 2026 only "Copies in Progress"
+# counted, so 2073, re-rendered with its Learnings clip, never reached the card step and its old block never cleared.
+STATUS_RENDERED = "Optimisation and Design Done"
 APPROVED = ("Approved as-is", "Approved with minor edits")
 SOCIALS = "Facebook, Instagram, LinkedIn, Threads, TikTok and YouTube Shorts"
 CLOSING = "**Carrying this out will involve:**"
@@ -70,7 +74,7 @@ def headline_for(day, ledger):
 def is_ready(full_fields):
     """A card needs the three things Kevin judges: the video, the thumbnail and the copy."""
     f = full_fields
-    return (f.get("Record Status") == STATUS_READY and bool(f.get("Video Edited URL")) and bool(f.get("Thumbnail URL"))
+    return (f.get("Record Status") in (STATUS_READY, STATUS_RENDERED) and bool(f.get("Video Edited URL")) and bool(f.get("Thumbnail URL"))
             and bool((f.get("YouTube Copy") or "").strip()))
 
 
@@ -195,8 +199,8 @@ def bundle(day):
 
 
 def pending(limit):
-    f = ('AND({Content Type}="Long Form Video", {Responsible}="Content Engine (AI)", {Record Status}="%s", '
-         '{Video Edited URL}!="", {Thumbnail URL}!="", {YouTube Copy}!="")' % STATUS_READY)
+    f = ('AND({Content Type}="Long Form Video", {Responsible}="Content Engine (AI)", OR({Record Status}="%s", {Record Status}="%s"), '
+         '{Video Edited URL}!="", {Thumbnail URL}!="", {YouTube Copy}!="")' % (STATUS_READY, STATUS_RENDERED))
     r = watch._airtable("GET", watch.API + "?maxRecords=%d&filterByFormula=%s" % (limit, urllib.parse.quote(f)))
     days = []
     for rec in r.get("records", []):
@@ -430,6 +434,18 @@ def selftest():
     lfmd = {"id": "recL", "fields": {"LinkedIn Copy": "li words", "Threads Copy": "th words"}}
     short = {"id": "recS", "fields": {"Facebook Reels Copy": "fb words"}}
     assert is_ready(full["fields"]) and not is_ready({**full["fields"], "Thumbnail URL": ""}) and not is_ready({**full["fields"], "Record Status": "New Upload"})
+    # 28 Sep 2026: a re-render keeps the copy and sets render.STATUS_DONE; that record is ready, a first render (no copy) is not
+    import render as _r
+    assert STATUS_RENDERED == _r.STATUS_DONE, "the status a render writes"
+    assert is_ready({**full["fields"], "Record Status": STATUS_RENDERED}), "2073: re-rendered, copy kept"
+    assert not is_ready({**full["fields"], "Record Status": STATUS_RENDERED, "YouTube Copy": ""}), "a first render waits for the copy writer"
+    for st in (STATUS_QC, STATUS_APPROVED, "Published"): assert not is_ready({**full["fields"], "Record Status": st}), st
+    seen = []
+    real_air = watch._airtable
+    watch._airtable = lambda method, url, *a, **k: (seen.append(urllib.parse.unquote(url)), {"records": []})[1]
+    try: pending(2)
+    finally: watch._airtable = real_air
+    assert STATUS_READY in seen[0] and STATUS_RENDERED in seen[0] and "OR(" in seen[0], seen
     name, desc, out = build_card(2225, full, lfmd, short, "RECORD IT ONCE / AI WORKS FOREVER")
     assert name == 'CONTENT: Publish Episode 2225 of Diary of a Runpreneur - RECORD IT ONCE / AI WORKS FOREVER', name
     first = out.split("\n")[0]
