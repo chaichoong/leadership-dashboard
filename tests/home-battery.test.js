@@ -75,11 +75,16 @@ out = [hb.parse_state(None), hb.decide(now.replace(hour=9), True, d, st(d), open
         expect(out).toEqual([null, []]);
     });
 
-    it('nudges a battery at 20% and below, not 21%, and only on a fresh Aqara date', () => {
+    it('nudges a battery at 20% and below, not 21%, and trusts an online device\'s old-dated level', () => {
+        // Review round 2 (28 Sep 2026): a level that has not changed keeps its
+        // old Aqara date; skipping it dropped real low batteries with no trace.
         const out = py(`
-d = [dev('a', level=20, name='Utility Motion'), dev('b', level=21), dev('c', level=5, at=now - dt.timedelta(hours=30))]
-out = [a['title'] for a in hb.decide(now, True, d, st(d), [], {}) if a['do'] == 'create']`);
-        expect(out).toEqual(['Battery low: Utility Motion (20%)']);
+d = [dev('a', level=20, name='Utility Motion'), dev('b', level=21), dev('c', level=5, name='Loft', at=now - dt.timedelta(hours=30))]
+unk = [dev('u', online=None, level=5, at=now - dt.timedelta(hours=30))]
+out = [[a['title'] for a in hb.decide(now, True, d, st(d), [], {}) if a['do'] == 'create'],
+       [a['title'] for a in hb.decide(now, True, unk, st(unk), [], {}) if a['do'] == 'create'],
+       hb.stamp(1790640000, now)]`);
+        expect(out).toEqual([['Battery low: Utility Motion (20%)', 'Battery low: Loft (5%)'], [], null]);
     });
 
     it('never treats a voltage-only battery device as mains, and never guesses its level', () => {
@@ -108,14 +113,25 @@ out = [err(n=50, total=62), err(n=60, total=None), err(n=3, total=3, bad_row=Tru
         expect(out[3]).toMatch(/expected a list/);
     });
 
-    it('a device that vanishes from Aqara is reported once, and only after a good read', () => {
+    it('a device that vanishes from Aqara is reported once per disappearance, only after a good read', () => {
         const out = py(`
-s = st([dev('gone', name='Loft Motion')]); s['devices']['gone']['last_seen'] = iso(now - dt.timedelta(hours=25))
-good = [a['title'] for a in hb.decide(now, True, [dev('x')], s, [], {}) if a['do'] == 'create']
-again = hb.decide(now, True, [dev('x')], s, [], {'missing:gone': '2026-09-20'})
+here = [dev('x', level=80)]
+s = st([dev('gone', name='Loft Motion', level=80)]); s['devices']['gone']['last_seen'] = iso(now - dt.timedelta(hours=25))
+good = [a['title'] for a in hb.decide(now, True, here, s, [], {}) if a['do'] == 'create']
+again = hb.decide(now, True, here, s, [], {'missing:gone': '2026-09-20'})
 failed = [a['kind'] for a in hb.decide(now, False, [], s, [], {}) if a['do'] == 'create']
-out = [good, again, failed]`);
-        expect(out).toEqual([['Loft Motion has vanished from Aqara'], [], []]);
+cleared = 'missing:gone' in hb.track(now, [dev('gone', level=80)], dict(s, nudged={'missing:gone': '2026-09-20'}))['nudged']
+out = [good, again, failed, cleared]`);
+        expect(out).toEqual([['Loft Motion has vanished from Aqara'], [], [], false]);
+    });
+
+    it('battery devices with no readable level get one reminder, and one bad model blinds nothing', () => {
+        const out = py(`
+nolev = [dev('v1', name='Blind'), dev('v2', name='Switch'), dev('p', level=80)]
+made = [a['title'] for a in hb.decide(now, True, nolev, st(nolev), [], {}) if a['do'] == 'create']
+devs = {d['id']: d for d in hb.fake_read(now, n=3, total=3, refuse='m.c')}
+out = [made, len(devs), devs['aqara:c2']['battery'], devs['aqara:c2']['online']]`);
+        expect(out).toEqual([['Aqara gives no battery level for 2 devices'], 3, null, false]);
     });
 
     it('a failed read says so after 12 hours, nudges from a recent good read, and closes nothing', () => {
@@ -123,7 +139,8 @@ out = [good, again, failed]`);
 openr = [{'key': hb.marker('offline', 'cam'), 'ref': 'r1'}, {'key': hb.marker('low', 'a'), 'ref': 'r2'}]
 blind = hb.decide(now, False, [], {'last_ok': iso(now - dt.timedelta(hours=12) + dt.timedelta(seconds=40)), 'last_error': 'x'}, openr, {})
 cam = [dev('cam', online=False, battery=False)]
-s = hb.track(now - dt.timedelta(hours=4), cam, {}); s['last_ok'] = iso(now - dt.timedelta(hours=1))
+s = hb.track(now - dt.timedelta(hours=4), cam, {}); s = hb.track(now - dt.timedelta(hours=1), cam, s)
+s['last_ok'] = iso(now - dt.timedelta(hours=1))
 fallback = hb.decide(now, False, hb.from_state(s), s, [], {})
 closes = hb.decide(now.replace(hour=9), False, hb.from_state(s), s, openr, {})
 out = [[(a['do'], a.get('kind')) for a in blind], [(a['do'], a.get('kind')) for a in fallback], closes,
