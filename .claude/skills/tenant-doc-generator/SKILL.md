@@ -98,8 +98,12 @@ With order on, the tenant's link goes out only once info@ has signed.
 
 Claude runs these. Kevin approves at the gates: every email and every form submission.
 
-1. Email the signed proof of residency to the tenant's own address as soon as info@ has
-   signed it. Only we sign it, so Adobe does not send the tenant a copy. Kevin approves the send.
+1. Forward Adobe's "Signed and Filed" email for the proof of residency from
+   info@agilelets.co.uk to the tenant's own address as soon as info@ has signed it. Only we sign
+   it, so Adobe does not send the tenant a copy. This is standing: no approval card (Kevin,
+   28 Sep 2026). The sender must be info@. The Gmail API connector in a Claude session sends as
+   kevin@runpreneur.org.uk, so use Gmail in Kevin's Chrome (that mailbox receives info@ mail):
+   open the Adobe email, Forward, From info@agilelets.co.uk.
 2. Do not forward the agreement. The tenant signs it, so Adobe emails them the completed copy.
    They upload both documents to their Universal Credit journal.
 3. Airtable onboarding waits until EVERY document is signed. Then Claude does it, not Kevin
