@@ -38,7 +38,7 @@ ABSENCE IS REPORTED, NEVER SILENT (review of 28 Sep 2026 found each gap)
   again for each new disappearance.
 - One model Aqara will not describe leaves the rest of the read intact, and a
   model described before keeps its last description through a one-off refusal.
-- A battery level Aqara has not updated for over 7 days is still used, but is
+- A battery level Aqara has not updated for over 7 days, or gave no date for, is still used, but is
   named in the "check these in the Aqara app" reminder rather than trusted
   silently. That reminder is made once per list; if a blip changes the list
   and closes it, the list is forgotten so it can be raised again.
@@ -460,8 +460,10 @@ def no_level(devices, now=None):
     describe, no readable level or flag, or (with now) a level Aqara dated over
     STALE_DAYS ago. Named in one reminder, never passed over as mains."""
     def stale(d):
-        return now is not None and d.get("level") is not None and d.get("level_at") and \
-            hours(now, d["level_at"]) > STALE_DAYS * 24
+        # Undated counts as stale: a level Aqara gives no date for cannot be
+        # shown to be current, so it is named rather than trusted (review 4).
+        return now is not None and d.get("level") is not None and \
+            (not d.get("level_at") or hours(now, d["level_at"]) > STALE_DAYS * 24)
     return [d for d in devices if d["battery"] is None or
             (d["battery"] and ((d.get("level") is None and d.get("low_flag") is None) or stale(d)))]
 
@@ -922,7 +924,8 @@ def selftest():
     check("an old level on a device of unknown state does not count",
           creates(decide(now, True, unknown_old, st(unknown_old), [], {})), [])
     undated = [dict(dev("n", level=9), level_at=None)]
-    check("an undated level on an online device counts", creates(decide(now, True, undated, st(undated), [], {})), [("low", "n")])
+    check("an undated level on an online device counts (and is also named)",
+          creates(decide(now, True, undated, st(undated), [], {})), [("low", "n"), ("nolevel", "set:n")])
     check("a 1970 timestamp is undated, not a date", stamp(1790640000, now), None)
 
     # Offline, with slack for a late start.
@@ -998,6 +1001,8 @@ def selftest():
     stale = [dev("s", level=60, at=now - dt.timedelta(days=8))]
     check("a level Aqara has not updated for a week is named", [d["id"] for d in no_level(stale, now)], ["s"])
     check("a level from yesterday is not", no_level([dev("s", level=60, at=now - dt.timedelta(days=1))], now), [])
+    check("an undated level is named, not trusted silently",
+          [d["id"] for d in no_level([dict(dev("nd", level=35), level_at=None)], now)], ["nd"])
     check("a model Aqara will not describe is listed, not passed as mains",
           [d["id"] for d in no_level([dict(dev("q"), battery=None)])], ["q"])
     check("a failed read never reports missing", [a["kind"] for a in decide(now, False, [], dict(s, last_ok=iso(now)), [], {}) if a["do"] == "create"], [])
