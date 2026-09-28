@@ -289,7 +289,7 @@ print('---JSON---'); print(json.dumps(worst))`);
 import random, re
 OLD = re.compile(r"(?i:https?://|www\\.)\\S+|\\b(?:[a-z0-9-]+\\.)+[a-z]{2,}/\\S*|(?P<run>(?!))")
 NEW = m.REF_URL_RE
-pieces = list('aAbz09.-/ _:\\n') + ['www.', 'WwW.', 'http://', 'HTTPS://', 'co.uk/', '.com/', '..', 'Acc.', 'no/',
+pieces = list('aAbz09.-/ _:\\néÉ²') + ['www.', 'WwW.', 'http://', 'HTTPS://', 'co.uk/', '.com/', '..', 'Acc.', 'no/',
           'No/', 'Rightmove', 'AB12345', '12345678', 'ttp://', 'ww.', 'x-']
 def both(s):
     m.REF_URL_RE = NEW
@@ -311,10 +311,10 @@ named = {s: both(s)[0][1] for s in ['Acc.no/12345678', 'Rightmove.co.uk/properti
 print('---JSON---'); print(json.dumps({'diffs': diffs[:5], 'linked': linked, 'bare': bare, 'with_tokens': with_tokens, 'named': named}))`);
     expect(out.diffs).toEqual([]);
     // Control: the random text really does hold links, links with no
-    // scheme (the branch the fix changed) and references.
+    // scheme (the ones the fix speeds up) and references.
     expect(out.linked).toBeGreaterThan(10000);
     expect(out.bare).toBeGreaterThan(1000);
-    expect(out.with_tokens).toBeGreaterThan(4000);
+    expect(out.with_tokens).toBeGreaterThan(3000);
     // A host glued to a capital or after a double dot reads as before: the
     // lowercase tail of a capitalised link is a link, a mixed-case host with
     // one dot is not.

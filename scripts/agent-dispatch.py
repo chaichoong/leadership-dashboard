@@ -5270,8 +5270,9 @@ CURRENCY_AFTER_RE = re.compile(r"[ \t]?(?:GBP|EUR|USD)\b(?![\s,:]*[£€$]?\d)")
 # A long dotted or hyphened run ("a." * 10000) took 1.2 seconds (28 Sep
 # 2026): the scheme-less link was retried at every word boundary inside it,
 # each try reading to the end of the run. Once a run fails as a link from its
-# first boundary it fails from every later one (same ending, fewer dots), so
-# the third branch reads the rest of the run in one step and gives it back
+# first boundary it fails from every later one (a link found from a later
+# boundary would stretch back to the first), so the third branch reads the
+# rest of the run in one step and gives it back
 # unchanged. It stops short of a www. or http(s):// inside the run so the
 # first branch is still tried there. The text out is the same as before.
 _NOT_A_LINK_START = r"(?!(?i:www\.|https?://))[a-z0-9-]"
