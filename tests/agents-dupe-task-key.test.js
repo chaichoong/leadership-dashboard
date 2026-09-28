@@ -659,6 +659,20 @@ print(json.dumps(c.dupe_verdict(sys.argv[1], sys.argv[2], sys.argv[3])))
     ])).toEqual(['update', 'update', 'update']);
   });
 
+  it('second review: an en dash range, "Flat No." and a capitalised object read right', () => {
+    expect(decide([
+      { name: 'COMPLIANCE: Fire Alarm Cert renewal due 2026-10-21 - 42\u201344 Elmdon Place',
+        rows: [{ name: 'COMPLIANCE: Fire Alarm Cert renewal due 2026-10-21 - 42 Elmdon Place' }] },
+      { name: "Check DWP decision on Pawel Kowalski's UC47 (Flat No. 2 Dalham Place) and chase if none",
+        rows: [{ name: "Check DWP decision on Pawel Kowalski's UC47 (Flat 2, 5 Dalham Place) and chase if none" }] },
+      { name: "Renew Gas Safety Certificate's expiry - Jane Smith, 5 Dalham Place",
+        rows: [{ name: "Jane Smith's gas safety certificate expiry - 5 Dalham Place" }] },
+      // A non-breaking space after the pound sign is still an amount.
+      { name: 'INBOUND: Sefton Council HMO licence fee \u00a3\u00a0150 Viola Street Bootle',
+        rows: [{ name: 'INBOUND: Sefton Council HMO licence fee 23 Viola Street Bootle' }] },
+    ])).toEqual(['update', 'update', 'update', 'update']);
+  });
+
   it('a street named after a street type still names the house', () => {
     expect(decide([{ name: 'Gas safety certificate 5 Park Road', rows: [{ name: 'Gas safety certificate 7 Park Road' }] }]))
       .toEqual(['create']);
@@ -702,6 +716,9 @@ print(json.dumps(c.dupe_verdict(sys.argv[1], sys.argv[2], sys.argv[3])))
       "Universal Credit's decision for Jane Smith (55 Elmdon Place) - chase DWP", "Chase New Tenant's first rent",
       '(Unit 2 Dalham Place)', 'Flat 3 Elmdon Court', '42-44 Elmdon Place', '42/44 Elmdon Place',
       'licence fee \u00a3150 Viola Street Bootle', 'Gas safety certificate 5 Park Road', 'Jane Smith-Jones\u2019s tenancy',
+      'fee \u00a3\u00a0150 Viola Street', 'fee \u00a3\u2009150 Viola Street', 'fee \u00a3\u3000150 Viola Street',
+      '42\u201344 Elmdon Place', '(Flat No. 2 Dalham Place)', 'Units 1-3 Dalham Place',
+      "Renew Gas Safety Certificate's expiry - Jane Smith, 5 Dalham Place",
     ];
     const py = JSON.parse(execFileSync('python3', ['-c', `
 import importlib.util, json, sys

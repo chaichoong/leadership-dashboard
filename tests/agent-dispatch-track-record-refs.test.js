@@ -356,8 +356,9 @@ print('---JSON---'); print(json.dumps([m.reference_tokens(t) for t in json.loads
       'Output in ./exports/rent-ledger-Q3-2026.csv today.',
       'Read notes/case-AB12345/letter-v22.docx first.',
       'Draft at mitchell/uc47-answers.md',
+      'Filed in ~/Library/CloudStorage/GoogleDrive-x/My Drive/00 AI Context/case-AB12345-notes.md',
     ]);
-    expect(out).toEqual([[], [], [], [], []]);
+    expect(out).toEqual([[], [], [], [], [], []]);
   });
 
   it('a long dotted, slashed or spaced run never makes the path reader slow', () => {
@@ -389,8 +390,9 @@ print('---JSON---'); print(json.dumps([m.reference_tokens(t) for t in json.loads
       'Saved /x.md claim AB12345 sent to roy/kevin.pdf',
       'Letter (/AB12345) today',
       'Rent ref: /TEN-12345 paid',
+      'Saved in ~/Downloads for claim AB12345 see notes/x.md',
     ]);
     expect(out).toEqual([['AB12345'], ['AB12345'], ['AB12345', 'CD67890'], ['12345678'], ['AB12345'], ['AB12345'],
-      ['INV123456'], ['AB12345'], ['AB12345'], ['AB12345'], ['AB12345'], ['12345']]);
+      ['INV123456'], ['AB12345'], ['AB12345'], ['AB12345'], ['AB12345'], ['12345'], ['AB12345']]);
   });
 });

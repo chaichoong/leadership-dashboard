@@ -5288,18 +5288,21 @@ WRAPPED_ID_RE = re.compile(
 # two parts; and a relative path to a file ("notes/uc47-answers.md"). A path
 # starts after a space or at the start, never after a letter, so "and/or" and
 # "Acc.No/12345678" stay text, and "(/AB12345)" is one part, not a path. A
-# folder with spaces is at most six words with no dot or ~ in it, so a file
+# folder with spaces has no dot or ~ in it and is short (below), so a file
 # name and the words after it never read as a folder running on to the next
 # path ("~/work/reply.md for claim AB12345 in ~/Downloads/dwp.pdf" keeps
-# AB12345, review). The limit: six plain words between a path and a later
-# file on one line still read as a folder. A bare file name with no folder
+# AB12345, review). The limit: three plain words (six, after a number)
+# between a path and a later file on one line still read as a folder. A bare
+# file name with no folder
 # stays: an attachment named after its invoice carries that invoice's
 # reference ("Invoice INV123456.pdf", tested in the machine-text block).
 _FILE_EXT = (r"(?:md|markdown|txt|py|js|mjs|cjs|ts|json|jsonl|csv|tsv|html?|css|sh|zsh|toml|ya?ml|ini|cfg"
              r"|log|pdf|docx?|xlsx?|xlsm|pptx?|odt|ods|rtf|pages|numbers|key|png|jpe?g|gif|heic|webp|svg"
              r"|tiff?|bmp|mov|mp4|m4a|mp3|wav|zip|eml|msg|ics|vcf|plist|sql|xml)")
 _PATH_CH = r"[\w.~@+()-]"
-_FOLDER_WORDS = r"[\w@+()-]+(?:[ \t][\w@+()-]+){1,5}"
+# A folder with spaces: a dated one ("2026-09-21 chedburgh gas safety") runs to
+# six words, any other ("My Drive", "00 AI Context") to three.
+_FOLDER_WORDS = r"(?:\d[\w@+()-]*(?:[ \t][\w@+()-]+){1,5}|[\w@+()-]+(?:[ \t][\w@+()-]+){1,2})"
 FILE_PATH_RE = re.compile(
     r"(?<![\w.~/-])(?:~|\.{1,2})?/(?:" + _PATH_CH + r"+/|" + _FOLDER_WORDS + r"/)*"
     r"[\w~@+()-]" + _PATH_CH + r"*\." + _FILE_EXT + r"\b"
