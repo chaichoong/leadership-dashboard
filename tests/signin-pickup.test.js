@@ -363,6 +363,81 @@ describe('the Robot sign-in app and its link', () => {
     expect(build).toMatch(/CFBundleURLSchemes:0 string robotsignin/);
     expect(build).toMatch(/lsregister/);
   });
+  // 28 Sep 2026: Kevin pressed Sign in, the app sat on a spinning wheel ("Not Responding") for
+  // 40 seconds while signin-waiting walked a site's door in a hidden Chrome, and he force-quit
+  // it. Every shell step held the app's only thread. The long steps now run detached and the
+  // app waits in short delays. Driven through osascript against a stand-in repo: the stand-in
+  // signin-waiting records its process group, which is the test's own when the app runs it
+  // with a blocking `do shell script` (the bug) and its own group when it runs detached.
+  it('a long step never holds the app: signin-waiting runs detached and its answer still lands (28 Sep 2026 hang)', () => {
+    const { mkdtempSync, rmSync, mkdirSync, copyFileSync, writeFileSync } = require('node:fs');
+    const { tmpdir } = require('node:os');
+    const dir = mkdtempSync(join(tmpdir(), 'od-robot-wait-'));
+    try {
+      const repo = join(dir, 'repo');
+      mkdirSync(join(repo, 'scripts'), { recursive: true });
+      copyFileSync(join(ROOT, 'scripts', 'detach.py'), join(repo, 'scripts', 'detach.py'));
+      writeFileSync(join(repo, 'scripts', 'agent-dispatch.py'),
+        'import json, os, sys, time\n'
+        + `open(${JSON.stringify(join(dir, 'pgid'))}, 'w').write(str(os.getpgrp()))\n`
+        + 'time.sleep(1)\n'
+        + 'print(json.dumps({"sites": [{"label": "Pingen", "host": "app.pingen.com", "loginUrl": "https://app.pingen.com/", "tasks": [{"id": "rec1"}]}], "alreadyLive": [], "botCheck": []}))\n');
+      execFileSync('osacompile', ['-o', join(dir, 'r.scpt'), join(ROOT, 'scripts', 'robot-signin.applescript')]);
+      const run = (body) => execFileSync('osascript', ['-e',
+        `set s to (load script POSIX file "${join(dir, 'r.scpt')}")\n`
+        + `set s's repo to "${repo}"\nset s's waitingFile to "${join(dir, 'logs', 'waiting.json')}"\n${body}`],
+        { encoding: 'utf8', timeout: 20000 }).trim();
+      expect(run('s\'s refreshWaiting("")\nreturn item 1 of s\'s waitingSites()'))
+        .toBe('Pingen (1 waiting) | app.pingen.com | https://app.pingen.com/');
+      const mine = execFileSync('ps', ['-o', 'pgid=', '-p', String(process.pid)], { encoding: 'utf8' }).trim();
+      expect(readFileSync(join(dir, 'pgid'), 'utf8').trim()).not.toBe(mine);
+      // The wait reads the answer as `do shell script` did: stdout, line breaks as return.
+      expect(run('return s\'s shWait("echo one; echo two", "x") is ("one" & return & "two")')).toBe('true');
+      // A failure carries the step's stderr and exit code, even when the step calls exit.
+      expect(run('try\ns\'s shWait("echo nope >&2; exit 3", "x")\non error m number n\nreturn m & "|" & n\nend try')).toBe('nope|3');
+      // A step killed from outside is an error, never a wait for ever.
+      expect(run('try\ns\'s shWait("kill -9 $$", "x")\non error m\nreturn m\nend try')).toMatch(/ended without a result/);
+    } finally { rmSync(dir, { recursive: true, force: true }); }
+  }, 60000);   // osacompile + five osascript runs, one of them a one-second stand-in
+  it('the sign-in window and the hand-back wait the same way, and Stop ends the chain rather than skipping a site', () => {
+    const signIn = src.slice(src.indexOf('on signInTo'), src.indexOf('end signInTo'));
+    expect(signIn).toMatch(/shWait\(loginCommand\(theLine\)/);
+    expect(signIn).toMatch(/shWait\("\/usr\/bin\/python3 scripts\/agent-dispatch\.py signin-done/);
+    expect(signIn).not.toMatch(/\bsh\(/);
+    const refresh = src.slice(src.indexOf('on refreshWaiting'), src.indexOf('end refreshWaiting'));
+    expect(refresh).not.toMatch(/\bsh\("mkdir/);
+    // Each handler that catches a step's failure passes Stop (-128) up instead of carrying on.
+    for (const [h, want] of [[signIn, 2], [refresh, 1]]) {
+      const handlers = [...h.matchAll(/on error errMsg[^\n]*\n\s*([^\n]*)/g)];
+      expect(handlers.length).toBe(want);   // the window and the hand-back; the check
+      for (const m of handlers) {
+        expect(m[0]).toMatch(/number errNum/);
+        expect(m[1].trim()).toBe('if errNum is -128 then error number -128');
+      }
+    }
+  });
+  // 28 Sep 2026: osacompile signs the app ad hoc and the build then edited Info.plist, which
+  // broke the seal. macOS refused every notification from the app (usernoted: "Failed to
+  // validate application ... -67030"), so nothing on screen said the app was working.
+  it('the built app carries a valid signature, so macOS lets its notifications through', () => {
+    const { mkdtempSync, rmSync } = require('node:fs');
+    const { tmpdir } = require('node:os');
+    const dir = mkdtempSync(join(tmpdir(), 'od-robot-build-'));
+    try {
+      const app = join(dir, 'Robot sign-in.app');
+      const build = () => execFileSync('bash', [join(ROOT, 'scripts', 'build-robot-signin.sh'), app],
+        { encoding: 'utf8', env: { ...process.env, ROBOT_SIGNIN_NO_REGISTER: '1' } });
+      build();
+      // A rebuild over the Desktop copy, which carries a Finder attribute codesign refuses
+      // (found in review, 28 Sep 2026: the build stopped at the seal and left it broken).
+      execFileSync('xattr', ['-wx', 'com.apple.FinderInfo', '0000000000000000' + '2000' + '00'.repeat(22), app]);   // the Desktop copy's value
+      build();
+      execFileSync('codesign', ['--verify', '--strict', app]);   // throws on a broken seal
+      const plist = join(app, 'Contents', 'Info.plist');
+      expect(execFileSync('/usr/libexec/PlistBuddy', ['-c', 'Print :CFBundleURLTypes:0:CFBundleURLSchemes:0', plist], { encoding: 'utf8' }).trim()).toBe('robotsignin');
+      expect(execFileSync('/usr/libexec/PlistBuddy', ['-c', 'Print :CFBundleIdentifier', plist], { encoding: 'utf8' }).trim()).toBe('com.kevinbrittain.robot-signin');
+    } finally { rmSync(dir, { recursive: true, force: true }); }
+  }, 30000);
   it('the pickup run works only the handed-back task ids (from pending.jsonl, copied, trimmed after a clean run) and is registered on-demand', () => {
     const run = readFileSync(join(ROOT, 'scripts', 'signin-pickup-run.sh'), 'utf8');
     expect(run).toMatch(/PENDING=.*pending\.jsonl/);
