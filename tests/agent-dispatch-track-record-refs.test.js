@@ -201,6 +201,85 @@ print('---JSON---'); print(json.dumps(seen['terms']))`, CALIBRATE);
   });
 });
 
+// Pasted email carries machine text that is never a reference (28 Sep 2026):
+// Outlook inline-picture ids and names, style colours, timestamps and prices.
+// Measured on the 8,135 live tasks: 146 changed, 171 tokens dropped, none a
+// reference. A colour goes only where a style property names it, because
+// orders are written with a # too.
+describe('machine text in pasted email is never a reference', () => {
+  function tokens(texts) {
+    return py(`
+print('---JSON---'); print(json.dumps([m.reference_tokens(t) for t in json.loads(sys.argv[1])]))`, texts);
+  }
+
+  it('an Outlook inline picture gives nothing: neither its content id nor its file name', () => {
+    expect(tokens([
+      'Kind regards\n\n[cid:image002.jpg@01AB2345.6789CDEF]Jane\n[cid:image001.png@01CD6789.ABCDEF12]<https://example.com>',
+      'Signature image003.png attached.',
+      '<image001.png@01AB2345.6789CDEF> [image: image002.png@01CD6789.ABCDEF12] Outlook-1a2b3c4d.png',
+    ])).toEqual([[], [], []]);
+  });
+
+  it('a style colour gives nothing, every colour in the declaration', () => {
+    expect(tokens([
+      'hr {\n  color: #e5e5e5;\n  background: #1a2b3c;\n  border: 1px solid #22aaee !important }',
+      '<body lang="EN-GB" link="#467886" vlink="#96607D"><span style="color:#1188cc">Overdue</span><FONT color=#000000>',
+      'border-color: #aa1122 #bb3344; background: linear-gradient(to right, #ccdd11, #ee5566)',
+      'outline: 2px dashed #a1b2c3; --brand: #1a2b3c; fill: #123abc; stroke:#456def; box-shadow: 0 0 0 1px #789abc',
+    ])).toEqual([[], [], [], []]);
+  });
+
+  it('a # reference outside a style survives, prose after a Background or Colour label included', () => {
+    expect(tokens([
+      'Order #GM123456 and order #123456789012. Invoice #123456, Order #AB1234. Payment link: #654321.',
+      'Background: tenant says invoice #12345678 is unpaid. Item: Hoodie | Colour: Navy | Order #445566',
+      // Not CSS: a value on the next line, a bare number, a word.
+      'Background:\n#445566 raised by tenant. Border: 1 #998877. Colour: 2, #123456. Background: to chase #778899',
+    ])).toEqual([['GM123456', '123456789012', '123456', 'AB1234', '654321'], ['12345678', '445566'],
+      ['445566', '998877', '123456', '778899']]);
+  });
+
+  it('a timestamp is a date, so it gives nothing; eight bare digits stay', () => {
+    expect(tokens([
+      'Recorded:  2026-01-22T16:27:36.000Z',
+      'outgoing message seen 2026-08-18T13:50:52Z and 2026-08-19t10:22:38+00:00',
+      'DTSTART:20260122T162736Z and 2026-01-22T1627Z',
+      'Account 20260122',
+    ])).toEqual([[], [], [], ['20260122']]);
+  });
+
+  it('a price run into a word, or beside a currency sign or code, gives nothing', () => {
+    expect(tokens([
+      '**Description**Amount80.00**Subtotal80.00**Total VAT16.00**Amount Due** GBP96.00',
+      'Balance GBP12,345.67, quote GBP160 plus VAT, fine EUR45, owed 12345GBP',
+      'Owed £12500 and €99999, cost $10-15/year, GBP 12500 or 12500 GBP',
+    ])).toEqual([[], [], []]);
+  });
+
+  it('a reference beside a price, a full stop or a currency sign survives', () => {
+    expect(tokens([
+      'Paid 12345678.00 on account 87654321. Invoice INV123456.pdf, policy AB12345.',
+      'Attached INV654321.01.pdf. Section CD12345.123 applies. Ref:$EF12345',
+      // A code with the amount after it: the number before is the order.
+      'Order 123456 GBP 49.99. Invoice 12345678 EUR 1,200.00. Sort code 12-34-56 GBP account.',
+      'Order 234567 GBP\n49.99 and ref 345678 USD, 50.00',
+    ])).toEqual([['87654321', 'INV123456', 'AB12345'], ['INV654321', 'CD12345', 'EF12345'],
+      ['123456', '12345678', '12-34-56'], ['234567', '345678']]);
+  });
+
+  it('a long run of blanks or a long word never makes the colour reader slow', () => {
+    const out = py(`
+import time
+worst = 0
+for t in ['color:' + ' ' * 20000 + 'x', 'Background:' + '\\n' * 20000, 'color:"' + ' ' * 20000,
+          'background: linear-gradient(' + ' ' * 20000, 'border:' + ' ,' * 10000 + 'x', '--' + 'a' * 20000 + ':']:
+    t0 = time.time(); m.reference_tokens(t); worst = max(worst, time.time() - t0)
+print('---JSON---'); print(json.dumps(worst))`);
+    // 28 seconds before the review fix; a few milliseconds after.
+    expect(out).toBeLessThan(1);
+  });
+});
+
 describe('the TRACK RECORD block has a ceiling', () => {
   it('500 matches print the newest 40 lines and the header says so', () => {
     const out = py(`
