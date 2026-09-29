@@ -14,5 +14,7 @@ export default defineConfig({
     // at 5 s and the merge gate refused a PR that did not touch them. A hung test
     // still fails, in 30 s instead of 5.
     testTimeout: 30_000,
+    // One event-loop turn after every test: see tests/setup-yield.js.
+    setupFiles: ['tests/setup-yield.js'],
   },
 });
