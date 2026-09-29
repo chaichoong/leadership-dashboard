@@ -863,6 +863,15 @@ async function checkVideoTasks(){
                     const loomUrl = bracketMatch ? bracketMatch[1] : (plainMatch ? plainMatch[0] : null);
                     if(loomUrl){
                         const existingUrl = getWfLoomUrl(wfId);
+                        // Already built: the workflow carries this Loom in Airtable AND has its SOP.
+                        // The 'complete' flag above lives only in this browser, so without this
+                        // check every browser that lacks it (a new device, a cleared cache, the
+                        // weekly prod walk) reran the whole pipeline on load: an AI call, a Drive
+                        // upload and three PATCHes. Auto-run only when the SOP is stale (a new or
+                        // changed Loom) or missing; rebuilding from the same video is the user's
+                        // call, via "Rebuild from video".
+                        const wfRec = allWorkflows.find(w=>w.id===wfId);
+                        if(existingUrl === loomUrl && gf(wfRec,WF.sopDocument)) continue;
                         const isUpdate = !!existingUrl && existingUrl !== loomUrl;
                         await setWfLoomUrl(wfId, loomUrl);
                         const wName = (allWorkflows.find(w=>w.id===wfId)&&gf(allWorkflows.find(w=>w.id===wfId),WF.name))||'workflow';
