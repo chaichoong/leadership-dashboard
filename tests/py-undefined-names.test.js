@@ -26,6 +26,7 @@ const ESTATE_SCRIPTS = [
   'scripts/approval_evidence.py',
   'scripts/calendar-write.py',
   'scripts/send-email.py',
+  'scripts/sync-master-plan.py',
   'scripts/content-engine/publish.py',
   'scripts/content-engine/watch.py',
   'scripts/content-engine/approval.py',
