@@ -53,8 +53,14 @@ function verify(dir, slot, sinceMs) {
 
 // The only honest evidence that the email lane WORKED. cmd_scan stamps it when
 // it reaches the end; writing it here is how a test says "a scan completed at T".
-function stampScan(dir, ms) {
-  writeFileSync(join(dir, 'state.json'), JSON.stringify(ms === null ? {} : { last_scan_ok_ms: ms }));
+// `workMs` is the watermark, which `mark` moves only after the agent has
+// handled mail. From finding 637 (27 Sep 2026) a completed scan alone is no
+// longer enough for a slot to pass: it must also show work. Tests that mean
+// "this slot worked" pass a watermark at or after the slot start.
+function stampScan(dir, ms, workMs = null) {
+  const st = ms === null ? {} : { last_scan_ok_ms: ms };
+  if (workMs !== null) st.watermark_ms = workMs;
+  writeFileSync(join(dir, 'state.json'), JSON.stringify(st));
 }
 
 function rowsOf(dir) {
@@ -190,7 +196,9 @@ describe('a pre-flight ok is superseded when no scan completed', () => {
     const d = box('sep6-good');
     const t0 = Date.now();
     record(d, '13:00', 'ok', 'ok');
-    stampScan(d, t0 + 5000);              // the scan finished after the slot began
+    // The scan finished after the slot began AND the slot did work: the
+    // watermark moved. Finding 637 made the second half load-bearing.
+    stampScan(d, t0 + 5000, t0 + 5000);
     const r = verify(d, '13:00', t0);
     expect(r.code).toBe(0);
     expect(JSON.parse(r.out).changed).toBe(false);
@@ -349,5 +357,93 @@ describe('a broken email lane makes the slot exit non-zero (finding 451)', () =>
 
   it('CONTROL: a clean tail still exits 0, so this is not a blanket failure', () => {
     expect(postrun('Email: 14 scanned / 3 tasked / 9 archived\n')).toBe(0);
+  });
+});
+
+// ─── A COMPLETED SCAN IS NOT A DECIDED INBOX (finding 637) ───────────
+//
+// 26 Sep 2026. The 13:00 slot broke correctly on a Gmail 403 and left the
+// watermark alone, so the backlog fell to 17:00. The 17:00 slot recorded
+// ok:true, slot-verify confirmed "a scan completed at 1790438627348",
+// reported changed:false, and ended 4m33s later having written ZERO digest
+// lines. Seven messages that arrived between 09:12 and 17:00 were never
+// triaged; the next slot was 09:00 the following day.
+//
+// Back-tested against the real slot-results.jsonl and digest files for 6-26
+// Sep, 62 email slots: 55 ok slots wrote 9 to 398 digest lines, and exactly
+// five ok slots wrote zero — 6 Sep 13:00 and 17:00 (the incident finding 487
+// was filed for), 7 Sep 17:00, 25 Sep 13:00 and 26 Sep 17:00. It discriminates.
+describe('a slot that scanned and decided nothing is broken', () => {
+  const START = 1_790_437_200_000;          // 26 Sep 2026, 17:00 local
+  const SCANNED_AT = 1_790_438_627_348;     // the real stamp that slot wrote
+  const MORNING_WATERMARK = 1_790_409_663_014;
+
+  function state(dir, obj) {
+    writeFileSync(join(dir, 'state.json'), JSON.stringify(obj));
+  }
+  function digestLine(dir, iso) {
+    const day = iso.slice(0, 10);
+    writeFileSync(join(dir, `digest-${day}.jsonl`),
+      JSON.stringify({ id: 'm1', do: 'archive', ts: iso }) + '\n');
+  }
+  function last(dir) {
+    const rows = readFileSync(join(dir, 'slot-results.jsonl'), 'utf8')
+      .trim().split('\n').map((l) => JSON.parse(l));
+    return rows[rows.length - 1];
+  }
+
+  it('grades the real 26 Sep 17:00 shape as broken, naming what it measured', () => {
+    const d = box('decided-nothing');
+    state(d, { last_scan_ok_ms: SCANNED_AT, watermark_ms: MORNING_WATERMARK });
+    record(d, '17:00', 'ok');
+    verify(d, '17:00', START);
+    expect(last(d).ok).toBe(false);
+    expect(last(d).reason).toMatch(/scanned-but-decided-nothing/);
+    expect(last(d).reason).toMatch(/0 digest lines/);
+  });
+
+  it('BACK-TEST: under the old scan-stamp-only rule that slot read clean', () => {
+    // The stamp is genuinely newer than the slot start, which is the whole
+    // reason the old check passed it. Proving that here stops anyone reading
+    // the fix as "the stamp was wrong".
+    expect(SCANNED_AT).toBeGreaterThan(START);
+  });
+
+  it('CONTROL: the same slot with one decision written passes', () => {
+    const d = box('decided-something');
+    state(d, { last_scan_ok_ms: SCANNED_AT, watermark_ms: MORNING_WATERMARK });
+    // digest_append writes a LOCAL naive timestamp, and the slot start is read
+    // back as local too, so the fixture is written in local time. A UTC string
+    // here reads an hour early under BST and the line falls outside the window.
+    digestLine(d, '2026-09-26T17:01:00');
+    record(d, '17:00', 'ok');
+    const r = verify(d, '17:00', START);
+    expect(last(d).ok).toBe(true);
+    expect(r.out).toMatch(/decisions were written/);
+  });
+
+  it('CONTROL: a slot that advanced the watermark passes with no digest line', () => {
+    const d = box('watermark-moved');
+    state(d, { last_scan_ok_ms: SCANNED_AT, watermark_ms: START + 60_000 });
+    record(d, '17:00', 'ok');
+    verify(d, '17:00', START);
+    expect(last(d).ok).toBe(true);
+  });
+
+  it('a scan that never completed is still reported as that, not as the new fault', () => {
+    const d = box('scan-still-first');
+    state(d, { last_scan_ok_ms: START - 60_000, watermark_ms: MORNING_WATERMARK });
+    record(d, '17:00', 'ok');
+    verify(d, '17:00', START);
+    expect(last(d).reason).toBe('scan-did-not-complete');
+  });
+
+  it('two silent slots running escalate, exactly as a broken lane does', () => {
+    const d = box('silent-escalates');
+    state(d, { last_scan_ok_ms: SCANNED_AT, watermark_ms: MORNING_WATERMARK });
+    record(d, '13:00', 'ok');
+    verify(d, '13:00', START);
+    record(d, '17:00', 'ok');
+    expect(verify(d, '17:00', START).code).toBe(3);
   });
 });
