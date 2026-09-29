@@ -16,6 +16,18 @@ script_dir = os.path.dirname(os.path.realpath(__file__))
 shared_script = os.path.join(script_dir, 'pre-commit-action.py')
 guard_script = os.path.join(script_dir, 'private-name-guard.py')
 
+# The commit-message half of the name guard lives in its own hook
+# (scripts/commit-msg, 29 Sep 2026). Say so when it is not installed, because a
+# missing hook checks nothing and says nothing. A warning only, never a block.
+try:
+    common = subprocess.run(['git', 'rev-parse', '--git-common-dir'], capture_output=True,
+                            text=True, cwd=os.getcwd()).stdout.strip()
+    if common and not os.path.exists(os.path.join(common, 'hooks', 'commit-msg')):
+        print("⚠️  commit-msg hook not installed, so commit messages are NOT checked for private names. "
+              "Install: ln -sf ../../scripts/commit-msg .git/hooks/commit-msg", file=sys.stderr)
+except OSError as e:
+    print(f"⚠️  pre-commit hook: could not check for the commit-msg hook: {e}", file=sys.stderr)
+
 # The private-name guard runs FIRST and is the only step here allowed to block:
 # this repo is PUBLIC, and a staged line naming someone on the private roster
 # must never reach it. See scripts/private-name-guard.py.
