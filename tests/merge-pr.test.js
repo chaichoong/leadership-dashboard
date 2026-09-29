@@ -29,7 +29,7 @@
 // prod-walk.js / affected-pages.py are fakes inside a real merge tree served on
 // 127.0.0.1.
 
-import { describe, it, expect, afterAll } from 'vitest';
+import { describe, it, expect, afterAll, afterEach } from 'vitest';
 import { spawnSync, execFileSync } from 'node:child_process';
 import { mkdtempSync, mkdirSync, rmSync, writeFileSync, readFileSync, existsSync, chmodSync, realpathSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -40,6 +40,15 @@ const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const SCRIPT = join(ROOT, 'scripts/merge-pr.py');
 const scratch = [];
 afterAll(() => { for (const d of scratch) rmSync(d, { recursive: true, force: true }); });
+
+// Yield to the event loop after every test (29 Sep 2026). Every test here drives
+// the real script with execFileSync, and 55 of them back to back ran 80 to 130 s
+// without the worker ever reading its I/O. vitest's worker RPC then timed out
+// ("[vitest-worker]: Timeout calling onTaskUpdate", 60 s), so a run where every
+// test passed still exited 1, and the merge gate refused itself four times. The
+// full suite without this file was clean. setImmediate runs after the poll phase,
+// so the pending replies are read before the next test starts.
+afterEach(() => new Promise((resolve) => setImmediate(resolve)));
 const tmp = (p) => { const d = mkdtempSync(join(tmpdir(), p)); scratch.push(d); return d; };
 
 const LOAD = `
