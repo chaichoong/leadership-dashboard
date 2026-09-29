@@ -469,6 +469,67 @@ describe('prod-walk.js does not charge an origin-locked Google 403 on a local co
   }, 60000);
 });
 
+// 29 Sep 2026, the same day: with the 403 excused, the merge gate still refused
+// PR #632 (Tasks page) on Inbound Comms. After the local-only 403,
+// follow-up.html's `await gapi.client.init()` rejects with a plain object nobody
+// catches, reported as "pageerror: Object". Main itself, served locally, failed
+// that page on it. Excused only when the same page saw the origin-locked Google
+// 403 on a local origin. Back-test: make settleLockedRejections() always record
+// and the first case fails; make it always excuse and the second case fails.
+describe('prod-walk.js excuses the uncaught Google rejection only after a local Google 403', () => {
+  const GMAIL = 'https://www.googleapis.com/discovery/v1/apis/gmail/v1/rest?key=AIza-test';
+  const run = async (withGoogle403) => {
+    let chromium;
+    try { ({ chromium } = require('playwright-core')); } catch { /* asserted below */ }
+    expect(chromium, 'playwright-core is not installed').toBeTruthy();
+    const server = await new Promise((ok) => {
+      const s = createServer((req, res) => {
+        res.writeHead(200, { 'content-type': 'text/html' });
+        // Like gapi.client.init(): a failed call, then a plain object rejected
+        // and never caught.
+        res.end(`<!doctype html><html><body>comms<script>
+          (async () => {
+            ${withGoogle403 ? `await fetch(${JSON.stringify(GMAIL)}).catch(() => {});` : ''}
+            await Promise.reject({ error: { code: 403 } });
+          })();
+        </script></body></html>`);
+      });
+      s.listen(0, '127.0.0.1', () => ok(s));
+    });
+    const browser = await chromium.launch({ headless: true });
+    try {
+      const origin = `http://127.0.0.1:${server.address().port}`;
+      const rec = { consoleErrors: [], consoleErrorCount: 0, failedRequests: [], outsideNoise: 0 };
+      const page = await browser.newPage();
+      await page.route('https://www.googleapis.com/**', (r) => r.fulfill({ status: 403, contentType: 'application/json', body: '{}', headers: { 'access-control-allow-origin': '*' } }));
+      walk.attachHooks(page, origin, () => rec);
+      await page.goto(origin + '/');
+      await page.waitForTimeout(800);
+      await page.close();
+      walk.settleLockedRejections(rec, origin);
+      return rec;
+    } finally {
+      await browser.close();
+      server.close();
+    }
+  };
+  it('after the Google 403 on a local copy: the rejection is noise (real Playwright)', async () => {
+    const rec = await run(true);
+    expect(rec.consoleErrors).toEqual([]);
+    expect(rec.outsideNoise).toBeGreaterThanOrEqual(2);                    // the 403 and the rejection
+  }, 60000);
+  it('with no Google 403: the same rejection is still the app\'s error (real Playwright)', async () => {
+    const rec = await run(false);
+    expect(rec.consoleErrors).toEqual(['pageerror: Object']);
+  }, 60000);
+  it('on the live origin a held rejection is always recorded, 403 or not', () => {
+    const rec = { consoleErrors: [], consoleErrorCount: 0, outsideNoise: 0, googleLocked403: true, pendingObjectRejections: 1 };
+    walk.settleLockedRejections(rec, 'https://app.operationsdirector.co.uk');
+    expect(rec.consoleErrors).toEqual(['pageerror: Object']);
+    expect(rec.pendingObjectRejections).toBeUndefined();
+  });
+});
+
 // 29 Sep 2026: on the live app 5 of 31 pages stopped at an entry screen, so
 // the walk said WARN and never checked their data. Tasks asked "Who are you?"
 // and Property Manager's own sign-in POST was blocked by the write block. The
