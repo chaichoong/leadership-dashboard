@@ -30,6 +30,15 @@ describe('the robot keeps a session across its own browser restarts', () => {
         { name: 'sid', value: 'dropped', domain: 'www.example.org', path: '/' },
       ]);
     });
+    // The count the fallback `login` logs (review, 29 Sep 2026: it re-counted after withPage and logged 0).
+    expect(b.lastKeptCount()).toBe(1);
+    // What the session line records for the app to trust (review, 29 Sep 2026): a sign-in page is a
+    // password box, a door address or One Login; an error page or a signed-in page is not.
+    expect(b.onSigninPage('https://portal.bwlegal.co.uk/', 1)).toBe(true);
+    expect(b.onSigninPage('https://signin.account.gov.uk/sign-in-or-create', 0)).toBe(true);
+    expect(b.onSigninPage('https://www.topcashback.co.uk/logon/', 1)).toBe(true);
+    expect(b.onSigninPage('chrome-error://chromewebdata/', 0)).toBe(false);
+    expect(b.onSigninPage('https://ewf.companieshouse.gov.uk///runpage?page=savedCompanies', 0)).toBe(false);
     const names = await b.withPage('restart-test', false, async (page, ctx) =>
       (await ctx.cookies(['https://ewf.companieshouse.gov.uk/', 'https://www.example.org/'])).map(c => `${c.domain} ${c.name}`));
     expect(names).toContain('ewf.companieshouse.gov.uk ch_session');

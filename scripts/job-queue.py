@@ -82,6 +82,12 @@ EX_USAGE = 64
 EX_LOSTLOCK = 70
 
 DEFAULT_LEASE_MIN = 45
+# Jobs that go to the head of the waiting line (never ahead of the job holding the
+# lock). signin-pickup works the tasks Kevin just signed the robot in for, and a
+# sign-in lasts about an hour: on 29 Sep 2026 it waited 30 minutes behind two
+# Content Engine jobs, and a long overnight render could outlast the session.
+FRONT_OF_QUEUE = {"signin-pickup"}
+
 # How long a job waits for its turn before giving up.
 #
 # Was 30 minutes, which sounded generous and was not. On 7 Aug 2026 queue-fixer
@@ -1006,8 +1012,10 @@ def acquire(job, mode="cooperative", lease_minutes=DEFAULT_LEASE_MIN,
             print("UNLOCKED %s: read-only check, runs without the queue lock" % job)
         return EX_OK
 
-    # Fixed-width timestamp so plain lexical sort is true arrival order.
-    ticket_name = "%017.6f-%d" % (now(), os.getpid())
+    # Fixed-width timestamp so plain lexical sort is true arrival order. A job in
+    # FRONT_OF_QUEUE gets a "0-" prefix, which sorts ahead of every timestamp: it
+    # waits only for the job holding the lock, never for the line (29 Sep 2026).
+    ticket_name = "%s%017.6f-%d" % ("0-" if job in FRONT_OF_QUEUE else "", now(), os.getpid())
     ticket_path = os.path.join(TICKET_DIR, ticket_name)
     with open(ticket_path, "w") as f:
         json.dump({"job": job, "pid": os.getpid(), "at": iso()}, f)

@@ -423,12 +423,23 @@ end startPickup
 on runChain(theLines, liveHanded)
 	set handed to liveHanded
 	set failed to {}
+	set notOpened to {}
+	set total to count of theLines
+	set i to 0
 	repeat with L in theLines
-		set n to signInTo(L as text)
-		if n is -1 then
-			set end of failed to fieldOf(L as text, 1)
-		else
-			set handed to handed + n
+		set i to i + 1
+		if i > 1 and (count of notOpened) is 0 then
+			if not goOn(fieldOf(L as text, 1), i, total) then set end of notOpened to fieldOf(L as text, 1)
+		else if (count of notOpened) > 0 then
+			set end of notOpened to fieldOf(L as text, 1)
+		end if
+		if (count of notOpened) is 0 then
+			set n to signInTo(L as text)
+			if n is -1 then
+				set end of failed to fieldOf(L as text, 1)
+			else
+				set handed to handed + n
+			end if
 		end if
 	end repeat
 	set tail to ""
@@ -437,17 +448,47 @@ on runChain(theLines, liveHanded)
 		set tail to " Could not open: " & (failed as text) & "."
 		set AppleScript's text item delimiters to ""
 	end if
+	if (count of notOpened) > 0 then
+		set AppleScript's text item delimiters to ", "
+		set tail to tail & " You stopped before: " & (notOpened as text) & ". Those stay waiting."
+		set AppleScript's text item delimiters to ""
+	end if
+	-- The first sentence says what really happened (review, 29 Sep 2026: after "Stop here" it
+	-- read "All signed in" or "Nothing was waiting" while skipped sites still waited).
+	set shortOf to (count of failed) + (count of notOpened)
+	if shortOf > 0 then
+		set lead to "Signed in to " & (total - shortOf) & " of " & total & " site(s)."
+	else if handed > 0 then
+		set lead to "All signed in."
+	else
+		set lead to "All done. Nothing was waiting on a robot."
+	end if
 	if handed > 0 then
 		if startPickup() then
-			sayDone("All signed in. Pickup queued for " & handed & " task(s); the robots start when the queue is free." & tail)
+			sayDone(lead & " Pickup queued for " & handed & " task(s); the robots start when the queue is free." & tail)
 		else
-			sayDone("Signed in; the " & handed & " task(s) are on the board and the 30-minute poll works them (it counts a sign-in as a hand-back)." & tail)
+			sayDone(lead & " The " & handed & " task(s) are on the board and the 30-minute poll works them (it counts a sign-in as a hand-back)." & tail)
 		end if
 	else
-		sayDone("All done. Nothing was waiting on a robot." & tail)
+		sayDone(lead & tail)
 	end if
 	refreshPanel()
 end runChain
+
+-- The one place to stop a chain of several sites (29 Sep 2026). Once the check ends there is no
+-- progress window, and Quit waits for the step in hand, so a chain of four could only be ended by
+-- opening and closing every window (each close hands that site's tasks back). Between sites this
+-- box names the next one and opens it by itself after 3 seconds; "Stop here" ends the chain and
+-- the rest stay waiting. A single-site sign-in never sees it.
+on goOn(theLabel, i, total)
+	hideProgress()
+	try
+		display dialog "Next: " & theLabel & " (" & i & " of " & total & ")." with title "Robot sign-in" buttons {"Stop here", "Open now"} default button "Open now" cancel button "Stop here" giving up after 3
+	on error number -128
+		return false
+	end try
+	return true
+end goOn
 
 -- Tell the AI Agents page (25 Sep 2026). Its Robot sign-ins panel reads one row that the
 -- estate-status job rewrites every ten minutes; this rewrites just that row now, detached,
