@@ -81,7 +81,8 @@ const { execFileSync } = require('child_process');
 // not the code under test. Same shape as the preview-server trap in the
 // project notes: verifying against main while believing you verified a branch.
 const REPO = path.resolve(__dirname, '..');
-const PROFILE_ROOT = path.join(os.homedir(), '.config', 'od', 'agent-browser');
+// AGENT_BROWSER_PROFILE_ROOT points a test at a throwaway folder, never the robot's own profiles.
+const PROFILE_ROOT = process.env.AGENT_BROWSER_PROFILE_ROOT || path.join(os.homedir(), '.config', 'od', 'agent-browser');
 const LEDGER = path.join(os.homedir(), 'knowledge-os', 'logs', 'agent-browser', 'runs.jsonl');
 // Overridable so a test can prove the per-host merge against its own file
 // instead of whatever ~/.config holds on this Mac.
@@ -415,8 +416,18 @@ function signinTargets(sites = loadSites(), problems = []) {
 // A refusal exits the process when run as a command, and THROWS when required
 // as a module, so a test can assert on the refusal instead of having the test
 // runner killed by the guard it is testing. Same message either way.
+// While a browser page is open, a refusal throws instead of exiting, so withPage
+// closes Chrome and keeps the session cookies before the process ends (review,
+// 29 Sep 2026: process.exit skipped that finally, and Playwright then killed
+// Chrome before it wrote them). main() prints the refusal with its exit code.
+let openPages = 0;
 function die(msg, code = 1) {
-  if (require.main !== module) throw new Error('BROWSER REFUSED: ' + msg);
+  if (require.main !== module || openPages > 0) {
+    const e = new Error('BROWSER REFUSED: ' + msg);
+    e.refusal = true;
+    e.exitCode = code;
+    throw e;
+  }
   console.error('BROWSER REFUSED: ' + msg);
   process.exit(code);
 }
@@ -706,14 +717,24 @@ async function withPage(profile, headed, fn) {
     launch.ignoreDefaultArgs = ['--enable-automation'];
   }
   const ctx = await chromium.launchPersistentContext(dir, launch);
-  await ctx.addInitScript(() => {
-    Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
-  });
+  openPages++;
   try {
+    await ctx.addInitScript(() => {
+      Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
+    });
     const page = ctx.pages()[0] || await ctx.newPage();
     return await fn(page, ctx);
   } finally {
+    openPages--;
     await ctx.close().catch(() => {});
+    // A site can replace its session cookie during the step, and the new one is
+    // session-only: Chrome deletes it at the next launch, and the robot is signed
+    // out. Kevin's sign-in window already gives these an hour (persistSessionCookies);
+    // the robot's own runs did not. 29 Sep 2026: WebFiling was signed in on the
+    // pickup's first two looks after Kevin's 00:30 sign-in (a cookie rewritten
+    // during the second) and signed out on the third, three minutes later, with
+    // only browser restarts in between; the same drop on 9 Sep ("one-use session").
+    persistSessionCookies(dir);
   }
 }
 
@@ -1365,11 +1386,14 @@ async function main() {
 // page happens to contain one — the guard is the thing that must not regress,
 // and a guard proved by a single lucky page is proved by nothing.
 if (require.main === module) {
-  main().catch(e => { console.error('BROWSER ERROR: ' + (e && e.stack || e)); process.exit(1); });
+  main().catch(e => {
+    if (e && e.refusal) { console.error(e.message); process.exit(e.exitCode || 1); }
+    console.error('BROWSER ERROR: ' + (e && e.stack || e)); process.exit(1);
+  });
 }
 
 module.exports = { hostAllowed, pickLinks, runSteps, assertNotCredential, assertApproved, SECRET_NAME_RE, loadSites, sessionVerdict,
                    recordLoginSite, signinTargets, signinOwner, signinDomain, readSitesFile,
                    assertUploadable, assertConfirmable, UPLOAD_DIR, UPLOAD_EXTENSIONS, persistSessionCookies,
                    signinHoldActive, takeSigninHold, releaseSigninHold, waitForSigninHold, HOLD_MAX_MS, isBotCheck,
-                   profileProcs, plainWindowOpen, pickOption, settleBotCheck };
+                   profileProcs, plainWindowOpen, pickOption, settleBotCheck, withPage };
