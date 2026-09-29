@@ -1184,6 +1184,7 @@ def run(dry_run=False, limit=3):
             # 29 Sep 2026 review: a clip whose recorded Drive link no longer downloads raised out of here and ended the
             # whole hourly run, so every later episode waited too. One episode failing is one line, and the rest go on.
             print("episode %d: publishing stopped for this episode this run (%s); the other episodes carry on" % (day, str(ex)[-200:]), file=sys.stderr)
+            import traceback; traceback.print_exc()
             failed.append(day); save()
     if failed:
         raise SystemExit("publish: %d episode(s) stopped on an error this run: %s" % (len(failed), ", ".join(map(str, failed))))   # still a failed run

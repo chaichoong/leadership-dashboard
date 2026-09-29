@@ -437,38 +437,48 @@ def allow_drive_placeholders():
         return None
 
 
-# With the placeholder policy ON, opening a cold file downloads it before the
-# first byte comes back (the raw video folder's smallest file is 40 MB), and a
-# Drive that has stopped serving can hold that open for a long time. The old
-# probe failed fast with the wrong answer; this one must not hang instead,
-# because the re-check after a long queue wait runs while the lock is held.
-DRIVE_PROBE_READ_SECONDS = float(os.environ.get("JOB_QUEUE_DRIVE_READ_SECONDS", "90"))
+# With the placeholder policy ON, listing a cold folder and opening a cold file
+# both wait on Drive (a cold file downloads before its first byte comes back;
+# the raw video folder's smallest file is 40 MB), and a Drive that has stopped
+# serving can hold either for a long time. The old probe failed fast with the
+# wrong answer; this one must not hang instead, because the re-check after a
+# long queue wait runs while the lock is held. So the WHOLE probe runs on a
+# daemon thread and a probe that has not answered in time reads "not ready".
+def _probe_seconds():
+    try:
+        return float(os.environ.get("JOB_QUEUE_DRIVE_PROBE_SECONDS", "90"))
+    except ValueError:
+        return 90.0
 
 
-def _read_one_byte(path, seconds):
-    """open + read(1) on a daemon thread. 'ok', or 'timeout' when Drive has not
-    delivered within `seconds`; an OSError from the read is raised here as usual."""
-    import threading
-    box = {}
-
-    def read():
-        try:
-            with open(path, "rb") as f:
-                f.read(1)
-            box["ok"] = True
-        except OSError as e:
-            box["error"] = e
-    t = threading.Thread(target=read, daemon=True)
-    t.start()
-    t.join(seconds)
-    if t.is_alive():
-        return "timeout"
-    if "error" in box:
-        raise box["error"]
-    return "ok"
+DRIVE_PROBE_SECONDS = _probe_seconds()
 
 
 def drive_ready(path, timeout=4):
+    """(ok, reason) for a Google Drive folder, answered within DRIVE_PROBE_SECONDS.
+    The probe itself is _drive_probe below."""
+    import threading
+    # retry-deferred and drive-auth-check import this probe without going
+    # through main(); they must see the folder the way the job itself will.
+    allow_drive_placeholders()
+    box = {}
+
+    def probe():
+        try:
+            box["result"] = _drive_probe(path)
+        except BaseException as e:  # handed back to the caller below, never lost
+            box["error"] = e
+    t = threading.Thread(target=probe, daemon=True)
+    t.start()
+    t.join(DRIVE_PROBE_SECONDS)
+    if t.is_alive():
+        return False, "Drive did not answer for %s within %g s" % (path, DRIVE_PROBE_SECONDS)
+    if "error" in box:
+        raise box["error"]
+    return box["result"]
+
+
+def _drive_probe(path):
     """Is this Google Drive folder actually readable?
 
     The brain vault lives under ~/Library/CloudStorage. When Drive has not
@@ -497,9 +507,6 @@ def drive_ready(path, timeout=4):
     smaller candidate exists) because a yes/no question should never open a
     multi-gigabyte placeholder.
     """
-    # retry-deferred and drive-auth-check import this probe without going
-    # through main(); they must see the folder the way the job itself will.
-    allow_drive_placeholders()
     if not os.path.isdir(path):
         return False, "%s does not exist" % path
     try:
@@ -563,8 +570,8 @@ def drive_ready(path, timeout=4):
     for _size, name, full in candidates:
         tried += 1
         try:
-            if _read_one_byte(full, DRIVE_PROBE_READ_SECONDS) == "timeout":
-                return False, "Drive did not deliver %s within %g s" % (name, DRIVE_PROBE_READ_SECONDS)
+            with open(full, "rb") as f:
+                f.read(1)
             return True, "readable (%s, probe %d of %d)" % (name, tried, len(candidates))
         except PermissionError as e:
             return True, "cannot probe (%s); letting the job run" % e

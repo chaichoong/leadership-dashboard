@@ -1621,26 +1621,32 @@ time.sleep(40)`;
     expect(out).toContain('POLICY 2');
   });
 
-  // With placeholders allowed, opening a cold Drive file downloads it first, and a Drive that has
-  // stopped serving can hold that open. The probe gives up and reads "not ready"; it never hangs.
-  it('the Drive probe gives up on a read that does not come back, instead of hanging the queue', () => {
+  // With placeholders allowed, listing a cold Drive folder and opening a cold file both wait on
+  // Drive, and a Drive that has stopped serving can hold either. The probe gives up and reads
+  // "not ready"; it never hangs the queue (the post-lock re-check runs while the lock is held).
+  it('the Drive probe gives up on a listing or a read that does not come back, instead of hanging the queue', () => {
     const dir = mkdtempSync(join(ROOT, 'drive-'));
     for (const n of ['a.txt', 'b.txt', 'c.txt']) writeFileSync(join(dir, n), 'x');
     const code = `
-import importlib.util, json, sys, time
+import importlib.util, json, os, sys, time
 spec = importlib.util.spec_from_file_location("jq", ${JSON.stringify(QUEUE)})
 jq = importlib.util.module_from_spec(spec); spec.loader.exec_module(jq)
-healthy = jq.drive_ready(sys.argv[1])
-real = open
-jq.DRIVE_PROBE_READ_SECONDS = 0.5
-jq.open = lambda *a, **k: (time.sleep(4), real(*a, **k))[1]
-t = time.time(); stalled = jq.drive_ready(sys.argv[1])
-print(json.dumps({"healthy": healthy[0], "stalled": stalled[0], "why": stalled[1], "seconds": time.time() - t}))`;
+out = {"healthy": jq.drive_ready(sys.argv[1])[0]}
+jq.DRIVE_PROBE_SECONDS = 0.5
+real_open, real_listdir = open, os.listdir
+jq.open = lambda *a, **k: (time.sleep(4), real_open(*a, **k))[1]
+t = time.time(); r = jq.drive_ready(sys.argv[1]); out["read"] = [r[0], r[1], time.time() - t]
+jq.open = real_open
+os.listdir = lambda *a: (time.sleep(4), real_listdir(*a))[1]
+t = time.time(); r = jq.drive_ready(sys.argv[1]); out["listing"] = [r[0], r[1], time.time() - t]
+print(json.dumps(out))`;
     const got = JSON.parse(execFileSync('python3', ['-c', code, dir], { encoding: 'utf8', timeout: 60000 }));
     expect(got.healthy, 'control: a folder that reads is ready').toBe(true);
-    expect(got.stalled).toBe(false);
-    expect(got.why).toMatch(/did not deliver/);
-    expect(got.seconds).toBeLessThan(2);
+    for (const k of ['read', 'listing']) {
+      expect(got[k][0], `${k} stall reads not ready`).toBe(false);
+      expect(got[k][1]).toMatch(/did not answer/);
+      expect(got[k][2], `${k} stall is cut short`).toBeLessThan(2);
+    }
   });
 
   it('a job that finishes inside its ceiling is untouched', () => {
