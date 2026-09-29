@@ -576,14 +576,19 @@ def built_row(now, module_path=BUILT_MODULE):
         spec.loader.exec_module(mod)
         inv = mod.build(now)
     except Exception as exc:  # noqa: BLE001 — the row must say WHY, whatever went wrong
-        return dict(row, status="Failed", payload=json.dumps({"error": str(exc)[:300]}),
+        # No payload key: to_fields() then leaves the last good list in place, so
+        # the tab can show it under the red banner instead of nothing.
+        return dict(row, status="Failed",
                     detail="Could not build the everything-built list: %s" % str(exc)[:300])
     c = inv["counts"]
     detail = ("%d Mac jobs, %d agent files, %d skills, %d workers, %d GitHub timers, %d scheduled tasks"
               % (c["macJobs"], c["agentFiles"], c["skills"], c["workers"], c["githubTimers"], c["scheduledTasks"]))
-    gaps = sum(len(v) for v in inv["missing"].values())
+    gaps = sum(len(inv["missing"].get(k, [])) for k in ("automations", "workers", "skills"))
     if gaps:
         detail += "; %d not yet on the hand-kept lists" % gaps
+    lost = len(inv["missing"].get("notInstalled", [])) + len(inv["missing"].get("listedNotFound", []))
+    if lost:
+        detail += "; %d listed or scheduled but not running" % lost
     return dict(row, status="Worked", lastWorked=stamp, detail=detail,
                 payload=json.dumps(inv, separators=(",", ":")))
 

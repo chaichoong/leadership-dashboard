@@ -34,6 +34,7 @@ const INVENTORY = {
 };
 
 function builtRow(over = {}, payload = INVENTORY) {
+  payload = payload && payload.groups ? Object.assign({}, payload, { generatedAt: payload.generatedAt || ago(4) }) : payload;
   return { id: 'recBuilt', createdTime: ago(4), fields: Object.assign({
     [ES.key]: 'built-inventory', [ES.kind]: 'report', [ES.status]: 'Worked',
     [ES.detail]: '2 Mac jobs, 1 agent files', [ES.payload]: JSON.stringify(payload), [ES.updated]: ago(4) }, over) };
@@ -45,11 +46,17 @@ const PRS = [
   { number: 601, title: 'An older change', merged_at: ago(60 * 24 * 10), html_url: 'javascript:alert(1)' },
 ];
 
-async function open(page, { estate = [builtRow()], github = { status: 200, body: PRS } } = {}) {
+// github: { status, body } for every page, or pages: [[...], [...]] served by ?page=N.
+async function open(page, { estate = [builtRow()], github = { status: 200, body: PRS }, pages = null, before = null } = {}) {
   await mockAgentsPage(page, Object.assign(defaultFixtures(), { estate }));
+  if(before) await before(page);
   let githubCalls = 0;
   await page.route('**/api.github.com/**', async (route) => {
     githubCalls += 1;
+    if(pages){
+      const n = Number(new URL(route.request().url()).searchParams.get('page') || 1);
+      return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(pages[n - 1] || []) });
+    }
     await route.fulfill({ status: github.status, contentType: 'application/json', body: JSON.stringify(github.body) });
   });
   await loadAgentsPage(page);
@@ -62,7 +69,9 @@ test.describe('AI Agents: Track record tab', () => {
     await open(page);
     const log = page.locator('#builtLogBody');
     await expect(log).toContainText('Fix: inbox triage decided no mail for 4 days');
-    await expect(log).toContainText('Today');
+    // The day header is London's calendar day: "Today", or "Yesterday" when the
+    // suite runs in the first half hour after midnight.
+    await expect(log.locator('.built-log-day').first()).toHaveText(/^(Today|Yesterday)$/);
     await expect(log).not.toContainText('Closed without merging');       // unmerged PRs are not builds
     await expect(page.locator('#builtLogCount')).toHaveText('2');
     await expect(log.locator('a[href="https://github.com/chaichoong/leadership-dashboard/pull/613"]')).toHaveText('#613');
@@ -72,7 +81,7 @@ test.describe('AI Agents: Track record tab', () => {
 
     const running = page.locator('#builtRunningBody');
     await expect(running.locator('details.built-group')).toHaveCount(7);   // register + six sources
-    await expect(running).toContainText('Scheduled jobs on the Mac (1 active, 1 off or retired)');
+    await expect(running).toContainText('Scheduled jobs on the Mac (1 in use, 1 off or retired)');
     await expect(running).toContainText('AI agents in the register');
     await expect(page.locator('#builtGaps')).toContainText('Skills Library: close-out');
     // No tab badge: drift on the hand-kept lists is not Kevin's to act on (29 Sep 2026).
@@ -114,15 +123,52 @@ test.describe('AI Agents: Track record tab', () => {
     expect(gh.calls()).toBe(1);
   });
 
-  test('a stale inventory warns that the writer has stopped', async ({ page }) => {
-    await open(page, { estate: [builtRow({ [ES.updated]: ago(120) })] });
-    await expect(page.locator('#builtRunningBody')).toContainText('The estate-status job that rebuilds it every ten minutes has stopped');
+  test('a stale inventory warns that the writer has stopped, judged on when the list was BUILT', async ({ page }) => {
+    // Updated is fresh (the writer's gone-row pass bumps it), the list itself is two hours old.
+    await open(page, { estate: [builtRow({}, Object.assign({}, INVENTORY, { generatedAt: ago(120) }))] });
+    await expect(page.locator('#builtRunningBody')).toContainText('the estate-status job that rebuilds it every ten minutes has stopped');
     await expect(page.locator('#builtRunningBody')).toContainText('Scheduled jobs on the Mac');
+  });
+
+  test('a row the writer no longer rebuilds is red, even with a fresh Updated stamp', async ({ page }) => {
+    await open(page, { estate: [builtRow({ [ES.status]: 'Idle', [ES.detail]: 'No longer scheduled' })] });
+    await expect(page.locator('#builtRunningBody')).toContainText('The status job is no longer rebuilding this list (it reads "Idle")');
+    await expect(page.locator('#builtRunningBody')).toContainText('What follows is the last list it built');
+  });
+
+  test('a failed rebuild keeps showing the last good list under the reason', async ({ page }) => {
+    await open(page, { estate: [builtRow({ [ES.status]: 'Failed', [ES.detail]: 'read 0 Mac jobs (expected 20+)' })] });
+    await expect(page.locator('#builtRunningBody')).toContainText('The last rebuild failed: read 0 Mac jobs (expected 20+)');
+    await expect(page.locator('#builtRunningBody')).toContainText('Scheduled jobs on the Mac');
+  });
+
+  test('a register read error is named, not a spinner for ever', async ({ page }) => {
+    await open(page, { before: (p) => p.route('**/tbl9msVjyQWslLOIZ**', (route) => route.fulfill({ status: 500, contentType: 'application/json', body: '{"error":"boom"}' })) });
+    await expect(page.locator('#builtRunningBody')).toContainText('Could not read the agents register');
+    await expect(page.locator('#builtSummary')).toContainText('register unreadable');
+    await expect(page.locator('#builtRunningBody')).toContainText('Scheduled jobs on the Mac');
+  });
+
+  test('the weekly count reads past one page of GitHub, and says "at least" when three are not enough', async ({ page }) => {
+    const pr = (i, minAgo) => ({ number: 1000 - i, title: 'Change ' + i, merged_at: ago(minAgo), updated_at: ago(minAgo), html_url: 'https://github.com/chaichoong/leadership-dashboard/pull/' + (1000 - i) });
+    const fullPage = (from) => Array.from({ length: 100 }, (_, k) => pr(from + k, 10 + from + k));
+    await open(page, { pages: [fullPage(0), [pr(100, 200), pr(101, 60 * 24 * 9)]] });
+    await expect(page.locator('#builtSummary')).toContainText('101 changes shipped in the last 7 days');
+    await expect(page.locator('#builtSummary')).not.toContainText('at least');
+    await expect(page.locator('#builtLogCount')).toHaveText('50');     // the log shows the newest 50
+  });
+
+  test('three full pages still inside the week show the count as "at least"', async ({ page }) => {
+    const pr = (i) => ({ number: 5000 - i, title: 'Change ' + i, merged_at: ago(5 + i), updated_at: ago(5 + i), html_url: 'https://github.com/chaichoong/leadership-dashboard/pull/' + (5000 - i) });
+    const pg = (n) => Array.from({ length: 100 }, (_, k) => pr(n * 100 + k));
+    const gh = await open(page, { pages: [pg(0), pg(1), pg(2), pg(3)] });
+    await expect(page.locator('#builtSummary')).toContainText('at least 300 changes shipped in the last 7 days');
+    expect(gh.calls()).toBe(3);
   });
 
   test('a failed build shows its reason, and a missing row says the job has not written it', async ({ page }) => {
     await open(page, { estate: [builtRow({ [ES.status]: 'Failed', [ES.detail]: 'read 0 Mac jobs (expected 20+)' }, { error: 'x' })] });
-    await expect(page.locator('#builtRunningBody')).toContainText('read 0 Mac jobs (expected 20+)');
+    await expect(page.locator('#builtRunningBody')).toContainText('The last rebuild failed: read 0 Mac jobs (expected 20+)');
     await expect(page.locator('#builtRunningBody')).toContainText('This list is NOT empty');
     await expect(page.locator('#builtRunningCount')).toHaveText('?');
   });
