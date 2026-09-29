@@ -253,7 +253,7 @@ GOAL CHECK
 Goal met? Yes | No
 ```
 
-The GOAL CHECK is compulsory. It answers every numbered check from the GOAL block. Run any check you have not run yet so its output is on screen first. `Goal met? Yes` only when every check is PASS. An honest FAIL goes out with `Goal met? No` and becomes an Outstanding item in the close-out. It sits above any CLOSE-OUT block.
+The GOAL CHECK is compulsory. It answers every numbered check from the GOAL block. Run any check you have not run yet so its output is on screen first. `Goal met? Yes` only when every check is PASS. An honest FAIL goes out with `Goal met? No` and becomes an Outstanding item in the close-out. The report, the GOAL CHECK and the CLOSE-OUT go in ONE message, in that order, each posted once (Kevin, 29 Sep 2026). Ask the close-out questions before posting it, so no draft goes out first.
 
 Include a screenshot if the fix is visual.
 
