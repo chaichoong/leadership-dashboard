@@ -81,7 +81,8 @@ const { execFileSync } = require('child_process');
 // not the code under test. Same shape as the preview-server trap in the
 // project notes: verifying against main while believing you verified a branch.
 const REPO = path.resolve(__dirname, '..');
-const PROFILE_ROOT = path.join(os.homedir(), '.config', 'od', 'agent-browser');
+// AGENT_BROWSER_PROFILE_ROOT points a test at a throwaway folder, never the robot's own profiles.
+const PROFILE_ROOT = process.env.AGENT_BROWSER_PROFILE_ROOT || path.join(os.homedir(), '.config', 'od', 'agent-browser');
 const LEDGER = path.join(os.homedir(), 'knowledge-os', 'logs', 'agent-browser', 'runs.jsonl');
 // Overridable so a test can prove the per-host merge against its own file
 // instead of whatever ~/.config holds on this Mac.
@@ -714,6 +715,14 @@ async function withPage(profile, headed, fn) {
     return await fn(page, ctx);
   } finally {
     await ctx.close().catch(() => {});
+    // A site can replace its session cookie during the step, and the new one is
+    // session-only: Chrome deletes it at the next launch, and the robot is signed
+    // out. Kevin's sign-in window already gives these an hour (persistSessionCookies);
+    // the robot's own runs did not. 29 Sep 2026: WebFiling was signed in on the
+    // pickup's first two looks after Kevin's 00:30 sign-in (a cookie rewritten
+    // during the second) and signed out on the third, three minutes later, with
+    // only browser restarts in between; the same drop on 9 Sep ("one-use session").
+    persistSessionCookies(dir);
   }
 }
 
@@ -1372,4 +1381,4 @@ module.exports = { hostAllowed, pickLinks, runSteps, assertNotCredential, assert
                    recordLoginSite, signinTargets, signinOwner, signinDomain, readSitesFile,
                    assertUploadable, assertConfirmable, UPLOAD_DIR, UPLOAD_EXTENSIONS, persistSessionCookies,
                    signinHoldActive, takeSigninHold, releaseSigninHold, waitForSigninHold, HOLD_MAX_MS, isBotCheck,
-                   profileProcs, plainWindowOpen, pickOption, settleBotCheck };
+                   profileProcs, plainWindowOpen, pickOption, settleBotCheck, withPage };
