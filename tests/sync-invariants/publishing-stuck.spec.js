@@ -173,25 +173,37 @@ test('a report over 30 minutes old says it has stopped, day or night, and a page
 test('a stopped hourly publisher is named even though the report is fresh', async ({ page }) => {
   await openPublishing(page, [report()]);
   const cases = await page.evaluate(() => [
-    ['14:00 BST, publisher last ran 12:17', '2026-09-30T13:00:00Z', '2026-09-30T11:17:00Z'],
-    ['14:00 BST, publisher last ran 13:17', '2026-09-30T13:00:00Z', '2026-09-30T12:17:00Z'],
-    ['03:00 BST, publisher last ran 20:17', '2026-09-30T02:00:00Z', '2026-09-29T19:17:00Z'],
+    ['15:00 BST, last ran 12:17 (the 13:15 run is overdue)', '2026-09-30T14:00:00Z', '2026-09-30T11:17:00Z'],
+    ['14:00 BST, last ran 12:17 (13:15 still inside its 75 minutes)', '2026-09-30T13:00:00Z', '2026-09-30T11:17:00Z'],
+    ['14:00 BST, last ran 13:17', '2026-09-30T13:00:00Z', '2026-09-30T12:17:00Z'],
+    ['21:00 BST, died after 13:17 (review round 2)', '2026-09-30T20:00:00Z', '2026-09-30T12:17:00Z'],
+    ['01:17 BST, died after 13:17 the day before', '2026-10-01T00:17:00Z', '2026-09-30T12:17:00Z'],
+    ['03:00 BST, last ran 20:17', '2026-10-01T02:00:00Z', '2026-09-30T19:17:00Z'],
+    ['08:00 BST, last ran 20:17 the night before', '2026-10-01T07:00:00Z', '2026-09-30T19:17:00Z'],
+    ['08:31 BST, the 07:15 run never came', '2026-10-01T07:31:00Z', '2026-09-30T19:17:00Z'],
+    ['03:00 BST, the night render stamped 01:05', '2026-10-01T02:00:00Z', '2026-10-01T00:05:00Z'],
+    ['09:00 GMT in December, last ran 08:17', '2026-12-01T09:00:00Z', '2026-12-01T08:17:00Z'],
     ['not stamped yet', '2026-09-30T13:00:00Z', ''],
-  ].map(([label, now, at]) => { const n = publisherNote(Date.parse(now), at); return [label, n.stale, n.text.slice(0, 40)]; }));
+  ].map(([label, now, at]) => [label, publisherNote(Date.parse(now), at).stale]));
   expect(cases).toEqual([
-    ['14:00 BST, publisher last ran 12:17', true, 'The hourly publisher last ran 1 h 43 min'.slice(0, 40)],
-    ['14:00 BST, publisher last ran 13:17', false, ''],
-    ['03:00 BST, publisher last ran 20:17', false, ''],
-    ['not stamped yet', false, 'The hourly publisher has not stamped thi'],
+    ['15:00 BST, last ran 12:17 (the 13:15 run is overdue)', true],
+    ['14:00 BST, last ran 12:17 (13:15 still inside its 75 minutes)', false],
+    ['14:00 BST, last ran 13:17', false],
+    ['21:00 BST, died after 13:17 (review round 2)', true],
+    ['01:17 BST, died after 13:17 the day before', true],
+    ['03:00 BST, last ran 20:17', false],
+    ['08:00 BST, last ran 20:17 the night before', false],
+    ['08:31 BST, the 07:15 run never came', true],
+    ['03:00 BST, the night render stamped 01:05', false],
+    ['09:00 GMT in December, last ran 08:17', false],
+    ['not stamped yet', false],
   ]);
 });
 
 test('the publisher line shows on the page when it has stopped', async ({ page }) => {
-  const twoHoursAgo = new Date(Date.now() - 2 * 3600 * 1000).toISOString().replace(/\.\d+Z$/, 'Z');
-  const h = Number(new Date().toLocaleString('en-GB', { timeZone: 'Europe/London', hour: '2-digit', hourCycle: 'h23' }));
-  await openPublishing(page, [report({ publisherAt: twoHoursAgo })]);
-  if (h >= 9 && h <= 20) await expect(page.locator('#publisherNote')).toContainText('The hourly publisher last ran 2 h');
-  else await expect(page.locator('#publisherNote')).toHaveText('');               // overnight the evening write stands
+  await page.clock.install({ time: new Date('2026-09-30T14:00:00Z') });                           // 15:00 BST
+  await openPublishing(page, [report({ publisherAt: '2026-09-30T11:17:00Z' })]);                    // last ran 12:17
+  await expect(page.locator('#publisherNote')).toContainText('The hourly publisher last ran 2 h 43 min ago');
 });
 
 // A post the live check could not ask GoHighLevel about keeps its last recorded status, and the page says so.

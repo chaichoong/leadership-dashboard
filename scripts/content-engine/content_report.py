@@ -366,7 +366,7 @@ def live_overlay(state, approvals, now=None, read_post=None, read_card=None):
         def read_card(task):
             return watch._airtable("GET", approval.TASKS_API + "/" + task + "?returnFieldsByFieldId=true")["fields"]
     info = {"checkedAt": now.strftime("%Y-%m-%dT%H:%M:%SZ"), "postsRead": 0, "postsChanged": 0, "cardsRead": 0,
-            "cardsDecided": 0, "errors": []}
+            "cardsDecided": 0, "errors": [], "faults": 0}
     stamp = now.strftime("%Y-%m-%dT%H:%M:%SZ")
     for day, entry in st.items():
         if not str(day).isdigit() or not isinstance(entry, dict): continue
@@ -391,7 +391,7 @@ def live_overlay(state, approvals, now=None, read_post=None, read_card=None):
                     p["link"] = link; p.setdefault("published_at", stamp)                 # sync stamps the time it saw the link
                     if p.get("platform") == "youtube" and not entry.get("youtube_link"): entry["youtube_link"] = link
             except Exception as ex:                          # one odd record is listed, never the end of the check
-                info["errors"].append("episode %s post %s: %s" % (day, key, str(ex)[:160]))
+                info["errors"].append("episode %s post %s: %s" % (day, key, str(ex)[:160])); info["faults"] += 1
     for day, a in ap.items():
         if not (isinstance(a, dict) and a.get("task") and not a.get("verdict")): continue
         try:
@@ -408,6 +408,14 @@ def live_overlay(state, approvals, now=None, read_post=None, read_card=None):
     return st, ap, info
 
 
+def say_live_errors(report):
+    """A read that failed is a line in the log; a record the check could not handle at all is a fault, printed with
+    ERROR: so run-job.sh marks the run failed instead of the fault living only on the page (review round 2)."""
+    lv = report.get("live") or {}
+    for e in lv.get("errors") or []: print("content report (live): could not check %s" % e, file=sys.stderr)
+    if lv.get("faults"): print("ERROR: content report (live): %d record(s) could not be handled; see the lines above" % lv["faults"])
+
+
 def build_live(now=None, read_post=None, read_card=None):
     """The report with what is true now read in. Both writers use it (review, 29 Sep 2026): the hourly write built
     without it put an approved card back to 'waiting' until the next ten-minute check."""
@@ -418,17 +426,27 @@ def build_live(now=None, read_post=None, read_card=None):
     return report
 
 
-def stamp_publisher(report, publisher, rows):
-    """publisherAt: when the hourly publisher or the night render last wrote the report. Theirs is now; the live check
-    keeps whatever the row already holds (none if it cannot be read, which the page shows as unknown, never as fine)."""
+PUBLISHER_STAMP = os.path.join(os.path.dirname(watch.LEDGER), "publisher_at.txt")
+
+
+def stamp_publisher(report, publisher, path=None, save=True):
+    """publisherAt: when the hourly publisher or the night render last wrote the report. Theirs is now, kept in a
+    local file (review round 2, 29 Sep 2026: carried over from the row, a live write racing an hourly one could put
+    the old time back and call a running publisher dead). The live check reads the file; a missing or unreadable
+    file leaves the field out, which the page shows as not stamped yet, never as fine."""
+    path = path or PUBLISHER_STAMP
     if publisher:
-        report["publisherAt"] = report["asOf"]; return
-    try: old = json.loads(((rows or [{}])[0].get("fields") or {}).get(ES["payload"]) or "{}")
-    except (ValueError, AttributeError, IndexError): old = {}
-    if old.get("publisherAt"): report["publisherAt"] = old["publisherAt"]
+        report["publisherAt"] = report["asOf"]
+        if save:
+            with open(path + ".tmp", "w") as fh: fh.write(report["asOf"])
+            os.replace(path + ".tmp", path)
+        return
+    try: at = open(path).read().strip()
+    except OSError: at = ""
+    if parse_utc(at): report["publisherAt"] = at
 
 
-def write(report, dry_run=False, publisher=False, existing=None):
+def write(report, dry_run=False, publisher=False, stamp_path=None):
     """Upsert the one report row. publisher=True when the hourly publisher or the night render writes it: that stamps
     publisherAt. The ten-minute check carries the last stamp over from the row, so the page can still say the
     publisher itself has stopped (review, 29 Sep 2026: a fresh live report must never hide a dead publisher)."""
@@ -438,7 +456,7 @@ def write(report, dry_run=False, publisher=False, existing=None):
               ES["detail"]: report["headline"][:900], ES["payload"]: json.dumps(report, separators=(",", ":")),
               ES["lastRun"]: now, ES["lastWorked"]: now, ES["updated"]: now}
     if dry_run:
-        stamp_publisher(report, publisher, existing or [])
+        stamp_publisher(report, publisher, stamp_path, save=False)
         fields[ES["payload"]] = json.dumps(report, separators=(",", ":"))
         return fields
     pat = open(os.path.expanduser("~/.config/od/airtable_pat")).read().strip()
@@ -448,8 +466,8 @@ def write(report, dry_run=False, publisher=False, existing=None):
                                      headers={"Authorization": "Bearer " + pat, "Content-Type": "application/json"})
         with urllib.request.urlopen(req, timeout=60) as resp: return json.loads(resp.read().decode())
     q = urllib.parse.urlencode({"returnFieldsByFieldId": "true", "filterByFormula": '{Key}="%s"' % KEY, "pageSize": "10"})
-    have = call("GET", TABLE + "?" + q).get("records", []) if existing is None else existing
-    stamp_publisher(report, publisher, have)
+    have = call("GET", TABLE + "?" + q).get("records", [])
+    stamp_publisher(report, publisher, stamp_path)
     fields[ES["payload"]] = json.dumps(report, separators=(",", ":"))
     if have: call("PATCH", TABLE, {"records": [{"id": have[0]["id"], "fields": fields}], "typecast": True})
     else: call("POST", TABLE, {"records": [{"fields": fields}], "typecast": True})
@@ -593,12 +611,17 @@ def _selftest_live():
     assert Q("threads|summary|b")["status"] == "scheduled" and any("not a time" in e or "isoformat" in e for e in info2["errors"]), "an unreadable slot is listed, the check carries on"
     _selftest_parity()
     # publisherAt (review, 29 Sep 2026): the hourly write stamps it, the live check carries it over, nothing guesses it
-    row = [{"id": "recR", "fields": {ES["payload"]: json.dumps({"publisherAt": "2026-09-29T19:17:00Z"})}}]
-    r1 = {"asOf": "2026-09-29T22:40:00Z", "headline": "h"}; write(r1, dry_run=True, publisher=False, existing=row)
-    r2 = {"asOf": "2026-09-29T22:40:00Z", "headline": "h"}; write(r2, dry_run=True, publisher=True, existing=row)
-    r3 = {"asOf": "2026-09-29T22:40:00Z", "headline": "h"}; f3 = write(r3, dry_run=True, publisher=False, existing=[])
-    assert r1["publisherAt"] == "2026-09-29T19:17:00Z" and r2["publisherAt"] == "2026-09-29T22:40:00Z" and "publisherAt" not in r3, (r1, r2, r3)
-    assert json.loads(f3[ES["payload"]]) == r3, "the payload written is the report as stamped"
+    import tempfile
+    sp = os.path.join(tempfile.mkdtemp(), "publisher_at.txt")
+    r0 = {"asOf": "2026-09-29T22:40:00Z", "headline": "h"}; write(r0, dry_run=True, publisher=False, stamp_path=sp)
+    assert "publisherAt" not in r0, "no stamp file: the field is left out, never guessed"
+    stamp_publisher({"asOf": "2026-09-29T19:17:00Z"}, True, sp)                  # the 20:15 hourly run
+    r1 = {"asOf": "2026-09-29T22:40:00Z", "headline": "h"}; f1 = write(r1, dry_run=True, publisher=False, stamp_path=sp)
+    r2 = {"asOf": "2026-09-29T22:40:00Z", "headline": "h"}; write(r2, dry_run=True, publisher=True, stamp_path=sp)
+    assert r1["publisherAt"] == "2026-09-29T19:17:00Z" and r2["publisherAt"] == "2026-09-29T22:40:00Z", (r1, r2)
+    assert open(sp).read() == "2026-09-29T19:17:00Z", "a dry run never moves the stamp"
+    assert json.loads(f1[ES["payload"]]) == r1, "the payload written is the report as stamped"
+    open(sp, "w").write("garbage"); r4 = {"asOf": "x", "headline": "h"}; stamp_publisher(r4, False, sp); assert "publisherAt" not in r4
 
 
 def _selftest():
@@ -708,12 +731,13 @@ if __name__ == "__main__":
     elif a.mode == "build": print(json.dumps(build(), indent=1))
     elif a.mode == "write":
         rep = build_live(); lift_gap_pause(rep); write(rep, publisher=True); print("content report: " + rep["headline"])
+        say_live_errors(rep)
     elif a.mode == "live":
         # every 10 minutes, outside the job queue (29 Sep 2026). Read-only against the platforms and the engine's state.
         rep = build_live(); write(rep); lv = rep["live"]
         print("content report (live): %d post(s) read, %d changed, %d card(s) read, %d decided. %s"
               % (lv["postsRead"], lv["postsChanged"], lv["cardsRead"], lv["cardsDecided"], rep["headline"]))
-        for e in lv["errors"]: print("content report (live): could not read %s" % e, file=sys.stderr)
+        say_live_errors(rep)
     elif a.mode == "stuck":
         # daily-ops reads this (Kevin, 27 Sep 2026). Exit 2 when the state cannot be read: never "nothing stuck".
         try: rows = stuck_sent_back(hours=a.hours, why_waiting=resubmit_reason)

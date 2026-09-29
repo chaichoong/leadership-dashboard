@@ -75,16 +75,27 @@ function staleLimitMin() {
     return 30;
 }
 // The live check keeps the report fresh even if the hourly publisher itself has stopped, so the publisher's own last
-// write (publisherAt) is checked separately (review, 29 Sep 2026). It runs hourly 07:15-20:15 London and the night
-// render writes once when it finishes: over 90 minutes in the day means it stopped; overnight the evening write stands.
-function publisherStaleLimitMin(now) {
-    const h = Number(new Date(now).toLocaleString('en-GB', { timeZone: 'Europe/London', hour: '2-digit', hourCycle: 'h23' }));
-    return h >= 9 && h <= 20 ? 90 : 12 * 60;
+// write (publisherAt) is checked separately (review, 29 Sep 2026). It runs hourly at :15 from 07:15 to 20:15 London,
+// and the night render stamps it too. It has stopped when the last hourly run that should have finished by now, allowing
+// 75 minutes for the queue, left no stamp. Asked by slot, not by a flat limit: a flat 12 hours from 21:00 turned a
+// publisher that died at 13:17 green again at 21:00 (review round 2).
+const PUBLISHER_FIRST_SLOT = 7 * 60 + 15, PUBLISHER_LAST_SLOT = 20 * 60 + 15, PUBLISHER_LATE_MIN = 75;
+function londonDayMin(t) {
+    const p = new Intl.DateTimeFormat('en-GB', { timeZone: 'Europe/London', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).formatToParts(new Date(t));
+    const g = k => p.find(x => x.type === k).value;
+    return { date: `${g('year')}-${g('month')}-${g('day')}`, min: Number(g('hour')) * 60 + Number(g('minute')) };
+}
+function publisherDueSlot(now) {
+    const t = now - PUBLISHER_LATE_MIN * 60 * 1000, l = londonDayMin(t);
+    if (l.min < PUBLISHER_FIRST_SLOT) return { date: londonDayMin(t - (l.min + 1) * 60 * 1000).date, min: PUBLISHER_LAST_SLOT };   // yesterday's 20:15
+    return { date: l.date, min: Math.min(PUBLISHER_LAST_SLOT, Math.floor((l.min - 15) / 60) * 60 + 15) };
 }
 function publisherNote(now, publisherAt) {
-    if (!publisherAt) return { stale: false, text: 'The hourly publisher has not stamped this report yet.' };
-    const m = Math.round((now - new Date(publisherAt).getTime()) / 60000);
-    return m > publisherStaleLimitMin(now)
+    const at = publisherAt ? new Date(publisherAt).getTime() : NaN;
+    if (isNaN(at)) return { stale: false, text: 'The hourly publisher has not stamped this report yet.' };
+    const due = publisherDueSlot(now), p = londonDayMin(at);
+    const missed = p.date < due.date || (p.date === due.date && p.min < due.min);
+    return missed
         ? { stale: true, text: `The hourly publisher last ran ${ago(publisherAt, now)}, so nothing new is being posted until it runs again. What is shown here is still checked live.` }
         : { stale: false, text: '' };
 }
