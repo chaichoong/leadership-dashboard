@@ -1587,6 +1587,17 @@ def od_picture_problem(task_name, output):
     if not name.startswith("CONTENT (OD):") or "Newsletter:" in name: return ""
     text = str(output or "")
     if text.lstrip().upper().startswith("THIN SLOT"): return ""
+    # A CLOSE PROPOSAL is ABOUT the card, not the post on it, so demanding the
+    # post's picture is asking for a picture that is the reason the card is being
+    # closed. recZdwbWGIFjMEyG6 (a stale OD post) made task-manager retry the same
+    # refused submit in its 13:00 and 17:00 slots for six days running — two of the
+    # three board passes a day ended VERIFY FAIL and the card never left the board
+    # (findings 20260917-task-manager-board-541, 20260918-task-manager-board-547,
+    # 20260919-task-manager-board-553/554, 20260920-daily-ops-556).
+    # Kevin approves removing a dead card; he is not being shown a post. The alert
+    # lane below this already carries exactly the same exemption for exactly the
+    # same reason, and this gate was written without it.
+    if text.lstrip().upper().startswith("CLOSE PROPOSAL:"): return ""
     if re.search(r"https://assets\.cdn\.filesafe\.space/\S+\.(png|jpg|jpeg)", text, re.I): return ""
     return ("an Operations Director post card must carry its picture as a permanent link (assets.cdn.filesafe.space ...png) so Kevin can open "
             "it; re-run the lane's `cards` step rather than re-submitting the text alone")
@@ -5658,6 +5669,39 @@ def ledger_session_verdict(host, max_age_minutes=SIGNIN_LEDGER_FRESH_MINUTES, pa
             "url": str(newest.get("url") or ""), "at": str(newest["at"]), "source": "ledger"}
 
 
+def ledger_signed_out(host, path=None, profile="default"):
+    """The newest `session` verdict for HOST when it says signed out (no bot
+    check) and no `login` on the same profile has run since; else None.
+
+    A signed-out session cannot sign itself back in: only Kevin's sign-in
+    window (`agent-browser.js login`) can, so until one runs the verdict holds
+    at any age, and walking the door again only makes Kevin wait. Any login on
+    the profile counts, not only this host's, because GOV.UK One Login is one
+    sign-in across services. A signed-IN verdict is never reused here: that
+    session may have lapsed (29 Sep 2026: Kevin pressed Sign in on WebFiling,
+    last seen signed out eight hours earlier, and waited 48 s for the walk)."""
+    newest, login_since = None, False
+    try:
+        with open(path or BROWSER_LEDGER) as fh:
+            for line in fh:
+                try:
+                    rec = json.loads(line)
+                except ValueError:
+                    continue
+                if not isinstance(rec, dict) or (rec.get("profile") or "default") != profile:
+                    continue
+                if rec.get("cmd") == "session" and rec.get("site") == host:
+                    newest, login_since = rec, False
+                elif rec.get("cmd") == "login" and newest is not None:
+                    login_since = True
+    except OSError:
+        return None
+    if not newest or login_since or newest.get("signedIn") or newest.get("botCheck") or not newest.get("at"):
+        return None
+    return {"signedIn": False, "botCheck": False, "url": str(newest.get("url") or ""),
+            "at": str(newest["at"]), "source": "ledger"}
+
+
 def ledger_bot_check(hosts, max_age_minutes=BOT_CHECK_FRESH_MINUTES, path=None, now=None, profile="default"):
     """The newest browser look at any of HOSTS (a `session` line by its site or
     landing, or a `read` line by the page's host), if it showed the robot a bot
@@ -5734,16 +5778,28 @@ def session_walk(host, timeout=SIGNIN_WALK_TIMEOUT, profile=None, url=None):
             "url": str(d.get("url") or ""), "at": now_iso(), "source": "walk"}
 
 
-def session_check(host, use_ledger=False, max_age_minutes=SIGNIN_LEDGER_FRESH_MINUTES):
+def session_check(host, use_ledger=False, max_age_minutes=SIGNIN_LEDGER_FRESH_MINUTES,
+                  trust_signed_out=False):
     """Is the robot signed in to HOST? A ledger verdict under max_age_minutes
     old is reused when use_ledger is set (the keep-alive and the pickup run
     walk every site anyway; walking again would fight them for the one robot
-    profile); otherwise the door is walked now. SIGNIN_SKIP_WALK=1 (tests,
-    and any read that must never open a browser) returns {"skipped": True}."""
+    profile); with trust_signed_out, a signed-out verdict with no sign-in
+    since is reused at any age (ledger_signed_out) unless a bot check has been
+    seen since; otherwise the door is walked now. SIGNIN_SKIP_WALK=1 (tests,
+    and any read that must never open a browser) returns {"skipped": True}.
+
+    trust_signed_out is for the Robot sign-in app's check only. The submit
+    gate keeps walking: the newest line there is usually the agent's own walk
+    of a moment ago, and the gate exists to catch a wrong one (review, 29 Sep
+    2026)."""
     if os.environ.get("SIGNIN_SKIP_WALK"):
         return {"skipped": True}
     if use_ledger:
         v = ledger_session_verdict(host, max_age_minutes)
+        if v:
+            return v
+    if trust_signed_out and not ledger_bot_check([host]):
+        v = ledger_signed_out(host)
         if v:
             return v
     return session_walk(host)
@@ -6036,7 +6092,7 @@ def cmd_signin_waiting(args):
         if not walk or g["host"] == "unknown" or not g["loginUrl"] or (only and g["host"] != only):
             waiting.append(g)
             continue
-        v = session_check(g["host"], use_ledger=not g["shortSession"])
+        v = session_check(g["host"], use_ledger=not g["shortSession"], trust_signed_out=True)
         if v.get("skipped"):
             waiting.append(g)
             continue

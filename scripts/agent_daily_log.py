@@ -11,7 +11,7 @@ that missing step, shared so no runtime grows its own drifting copy:
   * scripts/agent-dispatch.py imports it (write_register_reading publishes a
     row every time a role agent's score is computed, so Creditor Management
     and Inbound Comms Response log on every slot run);
-  * the prospect-daily-run and daily-transaction-reconciler routines call
+  * the prospect-daily-run routine (parked 27 Sep) and the retired daily-transaction-reconciler folder call
     the CLI at the end of a run:
 
       python3 scripts/agent_daily_log.py publish --agent-row recXXX \

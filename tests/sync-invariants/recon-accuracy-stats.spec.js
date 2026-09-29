@@ -152,4 +152,38 @@ test.describe('AI Reconciliation Accuracy stats', () => {
     await page.waitForTimeout(500);
     expect(patches.length).toBe(1);
   });
+
+  // Found 29 Sep 2026 by the read-only prod walk: the "same reading" marker above lives in
+  // localStorage, so every fresh browser (a new device, the weekly walk) rewrote the
+  // register on sign-in even when the row already held that exact reading.
+  test('a fresh browser does not rewrite a reading the register already holds', async ({ page }) => {
+    await page.addInitScript((pat) => localStorage.setItem('_dlr_pat', pat), MOCK_PAT);
+    await loadDashboard(page);
+    const patches = [];
+    let rowReads = 0;
+    await page.route('**/api.airtable.com/v0/**/tbl9msVjyQWslLOIZ/**', async (route) => {
+      const method = route.request().method();
+      if (method === 'PATCH') {
+        patches.push(route.request().postDataJSON());
+        return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ id: 'recyrN5YCQFssAniE' }) });
+      }
+      if (method === 'GET' && route.request().url().includes('recyrN5YCQFssAniE')) {
+        rowReads++;
+        return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({
+          id: 'recyrN5YCQFssAniE', fields: { fldkGxrOlrfuLlH3J: '50% (5/10 checked, last 31 days)' } }) });
+      }
+      await route.fallback();
+    });
+    await routeAuditPages(page, { page0: { records: auditRows('recA', 10) } });
+    await page.evaluate(() => localStorage.removeItem('recon_agent_score_written'));
+
+    await page.evaluate(async () => await refreshReconAccuracyStats());
+
+    // Control: the register row was read, so the skip was a decision, not a no-op.
+    await expect.poll(() => rowReads, { timeout: 5000 }).toBeGreaterThan(0);
+    await page.waitForTimeout(500);
+    expect(patches, 'an identical reading was rewritten to the register').toEqual([]);
+    expect(await page.evaluate(() => localStorage.getItem('recon_agent_score_written')))
+      .toBe('50% (5/10 checked, last 31 days)');
+  });
 });

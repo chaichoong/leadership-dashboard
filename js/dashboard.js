@@ -608,6 +608,16 @@
                             }
                             payload[STRAT_PF.kpiDetailJson]=json;
                         }catch(e){console.warn('[runAutomatedKpis] stringify failed',e)}
+                        // Nothing new to save: the same value and drilldown were already
+                        // saved today. Without this every load, a robot's included,
+                        // rewrote the record and bumped KPI Last Updated. The first
+                        // load of each day still saves, so Last Updated keeps meaning
+                        // "computed today" (the 14-day freshness invariant reads it).
+                        const prevVal=getField(rec,STRAT_PF.kpiCurrent);
+                        const prevSaved=getField(rec,STRAT_PF.kpiLastUpdated);
+                        if(prevVal!=null&&prevVal!==''&&Number(prevVal)===rounded
+                            &&(getField(rec,STRAT_PF.kpiDetailJson)||'')===(payload[STRAT_PF.kpiDetailJson]||'')
+                            &&prevSaved&&new Date(prevSaved).toDateString()===new Date().toDateString())return;
                         const url=`https://api.airtable.com/v0/${BASE_ID}/${STRAT_PROJECTS_TABLE}/${rec.id}?returnFieldsByFieldId=true`;
                         const resp=await fetch(url,{
                             method:'PATCH',

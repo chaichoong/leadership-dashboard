@@ -83,9 +83,13 @@ describe('content-engine publish (GHL)', () => {
     expect(blog).toContain('BLOG_ID = "YvavGIzJ2jDX8gs9CjYZ"');
   });
 
-  it('skips a clip that was never made (no diary section that day) instead of failing the whole stage', () => {
-    const src = readFileSync(PUBLISH, 'utf8');
-    expect(src).toContain('if spec["clip"] != "full" and not os.path.exists(episode_files(day)[spec["clip"]])');
+  // Drives the real schedule_stage (29 Sep 2026): 2074 and 2075 went out with no socials, blog or podcast because
+  // their Drive day folders were placeholders a scheduled job could not open. A clip the render recorded is posted
+  // with nothing in the folder; a clip with neither a recorded link nor a file (no diary section) is skipped.
+  it('posts a clip the render recorded even when the Drive folder shows nothing, and skips a clip never made', () => {
+    const out = execFileSync('python3', ['-c', 'import publish; publish._selftest_placeholder_folder(); print("OK")'],
+      { encoding: 'utf8', cwd: DIR });
+    expect(out.trim().split('\n').pop()).toBe('OK');
   });
 
   it('posts the Learnings clip to YouTube as a Short with the socials, title from the first copy line', () => {

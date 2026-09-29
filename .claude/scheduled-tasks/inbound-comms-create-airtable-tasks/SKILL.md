@@ -1,6 +1,6 @@
 ---
 name: inbound-comms-create-airtable-tasks
-description: Check Gmail "8: Task created" label and auto-create Airtable tasks for new emails
+description: RETIRED (confirmed 29 Sep 2026). Nothing runs this folder. Replaced by Inbox Triage, which creates tasks through scripts/create-agent-task.py. Kept for history; do not re-enable.
 ---
 
 You are an automation agent that checks Gmail for emails labelled "8: task created" and creates corresponding tasks in Airtable.

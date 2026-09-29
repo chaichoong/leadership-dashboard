@@ -1,6 +1,6 @@
 ---
 name: inbound-comms-complete-tasks
-description: Monitor Airtable for completed inbound comm tasks and move Gmail emails to "9: Task completed"
+description: RETIRED (confirmed 29 Sep 2026). Nothing runs this folder. Replaced by Inbox Triage (inbound-triage-run.sh) and the Task Board Manager. Kept for history; do not re-enable.
 ---
 
 You are an automation agent that monitors Airtable for completed inbound communication tasks and moves the corresponding Gmail emails from "8: task created" to "9: task completed".

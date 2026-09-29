@@ -29,6 +29,13 @@
 -- 30 minutes old). A site the robot is already signed into is handed back on the spot and
 -- reported under alreadyLive; this app names it in a notification and never opens it. Kevin
 -- had been opening Facebook and Pingen windows for sessions that were live all along.
+-- AppKit for one thing only: hiding the progress window (hideProgress). Scripting additions
+-- must then be named, or display dialog and do shell script stop working.
+use AppleScript version "2.4"
+use framework "Foundation"
+use framework "AppKit"
+use scripting additions
+
 property repo : "/Users/kevinbrittain/Projects/leadership-dashboard"
 property waitingFile : "/Users/kevinbrittain/knowledge-os/logs/signin-pickup/waiting.json"
 
@@ -39,6 +46,87 @@ end nodeBin
 on sh(cmd)
 	return do shell script "cd " & quoted form of repo & " && " & cmd
 end sh
+
+-- A step that takes longer than a moment: the session check, the sign-in window, the hand-back.
+-- `do shell script` holds the app's only thread until its command ends, so a session check of
+-- up to two minutes left a frozen app, a spinning wheel and "Not Responding" (28 Sep 2026: Kevin
+-- pressed Sign in, saw that for 40 seconds and force-quit it, which ended the chain; the Mac's
+-- hang report showed the app waiting on signin-waiting's hidden Chrome). The command now runs
+-- detached and the app waits in short delays, which keep it answering, behind a progress window
+-- that says what is happening. Stop in that window ends the chain (error -128); the step already
+-- running finishes on its own. Returns stdout and fails with stderr, as sh() does, so callers
+-- read the answer exactly as before. doing "" shows no progress window (the sign-in window step,
+-- where the Chrome window is what Kevin needs to see).
+on shWait(cmd, doing)
+	set tmp to do shell script "mktemp -d /tmp/robot-signin.XXXXXX"
+	set rcFile to tmp & "/rc"
+	-- A subshell, so an `exit` in the step ends the step and never the wrapper. The exit code lands
+	-- last, by rename, so a present rc file means stdout and stderr are complete.
+	set job to "cd " & quoted form of repo & " && ( " & cmd & " ) > " & quoted form of (tmp & "/out") & " 2> " & quoted form of (tmp & "/err") & "; echo $? > " & quoted form of (rcFile & ".part") & " && mv " & quoted form of (rcFile & ".part") & " " & quoted form of rcFile
+	set jobPid to do shell script "/usr/bin/python3 " & quoted form of (repo & "/scripts/detach.py") & " -- /bin/bash -c " & quoted form of job
+	-- "dead": the step ended without writing its exit code (killed), so never wait on it for ever.
+	set poll to "test -e " & quoted form of rcFile & " && echo done || { kill -0 " & jobPid & " 2>/dev/null && echo running || { test -e " & quoted form of rcFile & " && echo done || echo dead; }; }"
+	if doing is not "" then
+		set progress total steps to -1
+		set progress completed steps to 0
+		set progress description to doing
+	end if
+	try
+		repeat
+			set state to do shell script poll
+			if state is not "running" then exit repeat
+			delay 0.25
+		end repeat
+	on error errMsg number errNum
+		if doing is not "" then clearProgress()
+		do shell script "rm -rf " & quoted form of tmp
+		error errMsg number errNum
+	end try
+	if doing is not "" then clearProgress()
+	if state is "dead" then
+		do shell script "rm -rf " & quoted form of tmp
+		error "the step ended without a result (it was stopped from outside)" number 1
+	end if
+	set rc to (do shell script "cat " & quoted form of rcFile) as integer
+	set out to do shell script "cat " & quoted form of (tmp & "/out")
+	set errText to do shell script "cat " & quoted form of (tmp & "/err")
+	do shell script "rm -rf " & quoted form of tmp
+	if rc is not 0 then
+		if errText is "" then set errText to "the step stopped with exit code " & rc
+		error errText number rc
+	end if
+	return out
+end shWait
+
+-- A finished step leaves a full, still bar and no text: a sliding bar with nothing under way
+-- read as "still working" while the next dialog waited on Kevin.
+on clearProgress()
+	set progress total steps to 1
+	set progress completed steps to 1
+	set progress description to ""
+	set progress additional description to ""
+end clearProgress
+
+-- Hide the progress window when the screen passes to Kevin (29 Sep 2026: "windows jump around"
+-- and "the progress box stays"). Once hidden it stays hidden for the rest of the run, whatever
+-- progress is set after; the site list, the Chrome window, the notifications and the closing box
+-- speak from there. Only a VISIBLE window is ordered out: ordering out the applet's hidden helper
+-- window as well stopped the next dialog from ever appearing (found in testing). With nothing on
+-- screen another app can take the front, and a dialog from a background applet then waits unseen
+-- (AEInteractWithUser) until Kevin clicks the Dock icon: 2 of 3 test runs stalled that way. So
+-- the app comes forward, which keeps its hidden windows hidden. Only in the applet: osascript (the
+-- tests) has no windows and must never take the front. Cosmetic, so a failure is ignored.
+on hideProgress()
+	try
+		set ws to current application's NSApplication's sharedApplication()'s |windows|()
+		set n to (ws's |count|()) as integer
+		repeat with i from 0 to (n - 1)
+			set w to (ws's objectAtIndex:i)
+			if (w's isVisible()) as boolean then w's orderOut:(missing value)
+		end repeat
+		if n > 0 then activate
+	end try
+end hideProgress
 
 -- Every sign-in this app can open, as "label | host | url | profile" lines. One line per robot
 -- profile, not per site (25 Sep 2026): each Duckworth flat is its own Utilita login in its own
@@ -151,15 +239,21 @@ end askNewSite
 -- A failed check is a notification and an empty answer, never a raw error dialog.
 on refreshWaiting(onlyHost)
 	set siteArg to ""
-	if onlyHost is not "" then set siteArg to " --site " & quoted form of onlyHost
+	set doing to "Checking which sites really need you to sign in. This can take a minute or two for each site."
+	if onlyHost is not "" then
+		set siteArg to " --site " & quoted form of onlyHost
+		set doing to "Checking whether the robot is already signed in to " & onlyHost & ". This can take up to two minutes."
+	end if
 	try
-		sh("mkdir -p " & quoted form of (do shell script "dirname " & quoted form of waitingFile) & " && /usr/bin/python3 scripts/agent-dispatch.py signin-waiting" & siteArg & " > " & quoted form of waitingFile)
-	on error errMsg
+		shWait("mkdir -p " & quoted form of (do shell script "dirname " & quoted form of waitingFile) & " && /usr/bin/python3 scripts/agent-dispatch.py signin-waiting" & siteArg & " > " & quoted form of waitingFile, doing)
+	on error errMsg number errNum
+		if errNum is -128 then error number -128
 		display notification "Could not check the sites: " & errMsg with title "Robot sign-in"
 		try
 			sh("echo '{\"sites\":[],\"alreadyLive\":[]}' > " & quoted form of waitingFile)
 		end try
 	end try
+	hideProgress()
 end refreshWaiting
 
 -- An unreadable or missing answer reads as nothing waiting, never as an error dialog.
@@ -222,11 +316,13 @@ on announceBotChecks()
 	end try
 end announceBotChecks
 
--- The chain's outcome, always seen: a dialog that closes itself (25 Sep 2026).
+-- The chain's outcome, always seen: a dialog that closes itself (25 Sep 2026), after 5 seconds
+-- since 29 Sep 2026 (15 left the app lingering after the sign-in), with the progress window gone.
 on sayDone(msg)
 	display notification msg with title "Robot sign-in"
+	hideProgress()
 	try
-		display dialog msg with title "Robot sign-in" buttons {"OK"} default button "OK" giving up after 15
+		display dialog msg with title "Robot sign-in" buttons {"OK"} default button "OK" giving up after 5
 	end try
 end sayDone
 
@@ -278,11 +374,12 @@ on signInTo(theLine)
 	set theProfile to profileOf(theLine)
 	display notification "Sign in, then press Cmd+Q on the Chrome window." with title "Robot sign-in: " & theLabel
 	try
-		set said to sh(loginCommand(theLine))
+		set said to shWait(loginCommand(theLine), "")
 		repeat with N in notesIn(said)
 			display notification (N as text) with title "Robot sign-in: " & theLabel
 		end repeat
-	on error errMsg
+	on error errMsg number errNum
+		if errNum is -128 then error number -128
 		display notification "Could not open the window: " & errMsg with title "Robot sign-in: " & theLabel
 		return -1
 	end try
@@ -295,7 +392,7 @@ on signInTo(theLine)
 	-- Hand this site's waiting tasks back to their robots now (Airtable only,
 	-- seconds). The pickup run itself starts once every window has closed.
 	try
-		set n to sh("/usr/bin/python3 scripts/agent-dispatch.py signin-done --site " & quoted form of theHost & " | /usr/bin/python3 -c 'import json,sys; print(len(json.load(sys.stdin).get(\"handedBack\", [])))'")
+		set n to shWait("/usr/bin/python3 scripts/agent-dispatch.py signin-done --site " & quoted form of theHost & " | /usr/bin/python3 -c 'import json,sys; print(len(json.load(sys.stdin).get(\"handedBack\", [])))'", "Handing " & theLabel & "'s waiting tasks back to the robots…")
 		set n to n as integer
 		if n is 0 then
 			display notification "Signed in. Nothing was waiting on this site." with title "Robot sign-in: " & theLabel
@@ -303,7 +400,8 @@ on signInTo(theLine)
 			display notification "Signed in. " & n & " task(s) handed back to the robots." with title "Robot sign-in: " & theLabel
 		end if
 		return n
-	on error errMsg
+	on error errMsg number errNum
+		if errNum is -128 then error number -128
 		display notification "Signed in, but the hand-back failed: " & errMsg with title "Robot sign-in: " & theLabel
 		return 0
 	end try

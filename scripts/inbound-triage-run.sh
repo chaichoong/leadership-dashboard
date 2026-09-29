@@ -222,9 +222,13 @@ fi
 # table. The matters snapshot is every open agent task plus 14 days of
 # completed ones, so a message on a known matter JOINS its task at the gate
 # instead of becoming a sibling for Kevin to reject.
-if /usr/bin/python3 "$REPO/scripts/inbound-triage.py" history-stale >> "$LOG" 2>&1; then
-  /usr/bin/python3 "$REPO/scripts/inbound-triage.py" history-build >> "$LOG" 2>&1 || true
-fi
+#
+# The weekly REBUILD is not here any more: it runs AFTER the agent, below
+# (29 Sep 2026). Run first, it spent the slot's Gmail quota rebuilding the
+# book, so the agent's own scan hit the rate limit, was backgrounded, and the
+# headless session exited before it returned. Slots on 26, 27, 28 and 29 Sep
+# decided no mail at all. The dump below reads the book as it stands; a stale
+# book is advisory, a missed scan is lost mail.
 /usr/bin/python3 "$REPO/scripts/inbound-triage.py" history-dump \
   > "$SCRATCH/history-book.json" 2>&1 || true
 /usr/bin/python3 "$REPO/scripts/inbound-triage.py" matters \
@@ -271,6 +275,12 @@ Rules for the whole run: this is real mail — when unsure between outcomes choo
 # queue's maxRuntimeMinutes ceiling is the backstop if anything else hangs.
 RC=$?
 /usr/bin/python3 "$REPO/scripts/allowance.py" mark --job "inbound-triage" --log "$LOG" --since-line "$__START_LINE" >/dev/null 2>&1 || true
+
+# THE WEEKLY HISTORY-BOOK REBUILD, AFTER THE SCAN (29 Sep 2026; see the note
+# above history-dump). history-stale gates it, as before. The mail comes first.
+if /usr/bin/python3 "$REPO/scripts/inbound-triage.py" history-stale >> "$LOG" 2>&1; then
+  /usr/bin/python3 "$REPO/scripts/inbound-triage.py" history-build >> "$LOG" 2>&1 || true
+fi
 
 # THE OUTCOME, NOT THE FORECAST (finding 20260907-daily-ops-487). If the email
 # lane was recorded ok before the agent started but no scan reached the end of
