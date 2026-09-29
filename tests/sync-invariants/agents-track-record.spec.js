@@ -211,6 +211,21 @@ test.describe('AI Agents: Track record tab', () => {
     await expect(page.locator('#builtSummary')).toContainText('counts from the last good list');
   });
 
+  // 29 Sep 2026: the neighbouring "Estate status fresh" check read the row kind
+  // by name through the page's gf(rec, fieldId), found no job rows and said
+  // "never" on every load since 15 Sep. Back-test: fails on the old line.
+  test('the Estate status fresh check passes on a fresh job row', async ({ page }) => {
+    const job = (updated) => ({ id: 'recJob', createdTime: ago(5), fields: {
+      [ES.key]: 'estate-status', [ES.kind]: 'job', [ES.status]: 'Worked', [ES.detail]: 'ok', [ES.updated]: updated } });
+    await open(page, { estate: [job(ago(3)), builtRow()] });
+    await page.click('[data-sync-bar="agents"] .sync-bar-health');
+    const verdict = () => page.evaluate(() => {
+      const item = [...document.querySelectorAll('.sync-check-item')].find(el => el.textContent.includes('Estate status fresh'));
+      return item ? [...item.classList].find(c => ['pass','warn','fail','pending'].includes(c)) + ' | ' + item.textContent.replace(/\s+/g, ' ') : 'missing';
+    });
+    await expect.poll(verdict).toMatch(/^pass \| .*Updated 3 min ago/);
+  });
+
   test('#tab=track-record opens the tab directly', async ({ page }) => {
     await mockAgentsPage(page, Object.assign(defaultFixtures(), { estate: [builtRow()] }));
     await page.route('**/api.github.com/**', (route) => route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(PRS) }));
