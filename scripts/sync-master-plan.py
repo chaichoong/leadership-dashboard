@@ -21,8 +21,12 @@ REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 PLAN = os.path.join(REPO, "MASTER-PLAN.md")
 BASE = "https://api.airtable.com/v0/appnqjDpqDniH3IRl/tblqB8b22hKBL4PF1"
 PROJECT = "recxiy4IAkGb5YkUW"
-OWNERS = {"KEVIN": "kevin@runpreneur.org.uk", "MICA": "micaa.work@gmail.com",
-          "ERICAMAE": "atentaerica@gmail.com", "OPUS": "kevin@runpreneur.org.uk"}
+OWNERS = {"KEVIN": "kevin@runpreneur.org.uk", "OPUS": "kevin@runpreneur.org.uk"}
+# Lanes that name someone who takes no work. A ref-less open line in one of
+# these is never pushed to Airtable; it is flagged so the line gets re-owned.
+# Mica: no work routed since 25 Aug 2026. Ericamae: left 17 Sep 2026.
+RETIRED_LANES = {"MICA": "no work routed to Mica since 25 Aug 2026",
+                 "ERICAMAE": "Ericamae left on 17 Sep 2026"}
 MONTHS = {m: i + 1 for i, m in enumerate(
     ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"])}
 DRY = "--dry-run" in sys.argv
@@ -93,6 +97,20 @@ def parse_plan(plan_path=None):
             tasks.append({"i": i, "state": m.group(1), "lane": m.group(2),
                           "body": m.group(3), "refs": refs, "due": due})
     return lines, tasks
+
+def creatable_lines(lines, ptasks):
+    """Open, ref-less, dated plan lines the sync may push to Airtable, plus
+    a flag for each one it holds back because its lane names a retired owner."""
+    creatable, flags = [], []
+    for t in ptasks:
+        if t["state"] != " " or AT_RE.search(lines[t["i"]]) or not t["due"]:
+            continue
+        lane = t["lane"].split("+")[0]
+        if lane in RETIRED_LANES:
+            flags.append(f"not pushed, re-own this line ({RETIRED_LANES[lane]}): {t['body'][:60]}")
+        elif lane in OWNERS:
+            creatable.append(t)
+    return creatable, flags
 
 def cmd_map():
     lines, ptasks = parse_plan()
@@ -245,8 +263,8 @@ def _sync_in(wt):
                     flags.append(f"plan says done, Airtable open: {rec['fields'].get('Task Name','')[:60]} ({r})")
 
     # create Airtable tasks for open, ref-less plan lines (guarded)
-    creatable = [t for t in ptasks if t["state"] == " " and not AT_RE.search(lines[t["i"]])
-                 and t["due"] and t["lane"].split("+")[0] in OWNERS]
+    creatable, lane_flags = creatable_lines(lines, ptasks)
+    flags += lane_flags
     for t in creatable[:MAX_CREATES]:
         name = re.sub(r"\((done when:)[^)]*\)", "", t["body"])
         name = re.sub(r"\[AT:[^\]]+\]", "", name).strip().rstrip(".")[:120]
