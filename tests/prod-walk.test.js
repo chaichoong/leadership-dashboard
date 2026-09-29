@@ -6,6 +6,7 @@ import { tmpdir } from 'os';
 import { createServer } from 'http';
 import { resolve, dirname, join } from 'path';
 import { fileURLToPath } from 'url';
+import vm from 'vm';
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const require = createRequire(import.meta.url);
@@ -412,6 +413,171 @@ describe('prod-walk.js reads the same error the same on any origin', () => {
       await browser.close();
       a.close();
       b.close();
+    }
+  }, 60000);
+});
+
+// 29 Sep 2026: on the live app 5 of 31 pages stopped at an entry screen, so
+// the walk said WARN and never checked their data. Tasks asked "Who are you?"
+// and Property Manager's own sign-in POST was blocked by the write block. The
+// walk now remembers Kevin as the Tasks viewer, lets out exactly that one
+// sign-in request, and counts it. Inbound Comms (Google) and CRM (Supabase)
+// have no read-only way through and stay WARN.
+describe('prod-walk.js gets past the Tasks viewer screen as Kevin, and only Kevin', () => {
+  // The page's own code, run on what the walk seeds: its TEAM list and the
+  // initIdentity() that decides between the tasks and "Who are you?".
+  const runTasksIdentity = (seed) => {
+    const src = read('os/tasks/index.html');
+    const team = (src.match(/const TEAM = \[[\s\S]*?\n\];/) || [])[0];
+    const init = (src.match(/function initIdentity\(\)\{[\s\S]*?\n\}/) || [])[0];
+    expect(team, 'os/tasks/index.html no longer declares TEAM as the walk expects').toBeTruthy();
+    expect(init, 'os/tasks/index.html no longer has initIdentity()').toBeTruthy();
+    const store = new Map(seed.map(e => [e.name, e.value]));
+    const box = { localStorage: { getItem: (k) => (store.has(k) ? store.get(k) : null) }, overlay: 0, badge: 0 };
+    vm.runInNewContext(`${team}
+      var currentUser = null;
+      function renderUserBadge(){ badge += 1; }
+      function showIdentityOverlay(){ overlay += 1; }
+      ${init}
+      result = { ok: initIdentity(), user: currentUser, kevin: TEAM.find(m => m.key === 'kevin') };`, box);
+    return { ...box.result, overlay: box.overlay, badge: box.badge };
+  };
+
+  it('seeds the token under both keys and the viewer under the key the page reads', () => {
+    const seed = walk.seedStorage(SECRET);
+    expect(seed.map(e => e.name)).toEqual(['_dlr_pat', 'airtable_pat', '_task_user']);
+    expect(seed[0].value).toBe(SECRET);
+    expect(seed[1].value).toBe(SECRET);
+    expect(JSON.parse(seed[2].value)).toEqual(walk.TASK_VIEWER);
+  });
+
+  it("is let in by the page's own initIdentity(), as Kevin's own TEAM entry (drives os/tasks/index.html)", () => {
+    const r = runTasksIdentity(walk.seedStorage(SECRET));
+    expect(r.ok).toBe(true);
+    expect(r.overlay).toBe(0);               // no "Who are you?"
+    expect(r.badge).toBe(1);
+    // Exactly what selectIdentity('kevin') writes: never an invented person.
+    expect(r.kevin).toBeTruthy();
+    expect(r.kevin.left).toBeUndefined();
+    expect(r.user).toEqual({ key: r.kevin.key, name: r.kevin.name, email: r.kevin.email });
+  });
+
+  it('shows "Who are you?" without the seed, so the test can tell the two apart', () => {
+    const r = runTasksIdentity(walk.seedStorage(SECRET).filter(e => e.name !== '_task_user'));
+    expect(r.ok).toBe(false);
+    expect(r.overlay).toBe(1);
+  });
+});
+
+describe('prod-walk.js waits for a loading frame instead of calling it a gate', () => {
+  const content = 'Property Manager Rent collected this month £12,400 across 26 tenancies';
+  it('settles on stable content, and not while it is still growing', () => {
+    expect(walk.frameSettled(content, content.length)).toBe(true);
+    expect(walk.frameSettled(content, content.length - 5)).toBe(false);
+    expect(walk.frameSettled('tiny', 4)).toBe(false);
+  });
+  it('never settles on a "Loading..." line, however still it holds', () => {
+    const loading = 'Property Manager Loading the property figures… a fresh load reads a year of transactions';
+    expect(walk.frameSettled(loading, loading.length)).toBe(false);
+    const tasks = 'Tasks & Projects Loading tasks from Airtable... please wait for the data to arrive';
+    expect(walk.frameSettled(tasks, tasks.length)).toBe(false);
+  });
+});
+
+describe('prod-walk.js lets out exactly one write: the Property Manager sign-in', () => {
+  const PM = 'https://pm.operationsdirector.co.uk';
+  it('allows POST to /login-airtable on that host, and nothing else', () => {
+    expect(walk.allowedWrite('POST', PM + '/login-airtable')).toBe(true);
+    expect(walk.allowedWrite('post', PM + '/login-airtable')).toBe(true);
+    expect(walk.allowedWrite('POST', 'https://pm.operationsdirector.co.uk:443/login-airtable')).toBe(true);
+    expect(walk.ALLOWED_WRITES).toHaveLength(1);
+    expect(Object.isFrozen(walk.ALLOWED_WRITES)).toBe(true);
+  });
+  it('blocks a POST to any other path on that host, including the passcode sign-in and every data write', () => {
+    for (const p of ['/login', '/task/recAbC123', '/growth-plan/tick', '/growth-plan/task', '/data', '/',
+                     '/login-airtable/', '/login-airtable2', '/Login-Airtable', '/login-airtable/../task/recX',
+                     '/login-airtable?refresh=1', '/login-airtable#x']) {
+      expect(walk.allowedWrite('POST', PM + p), p).toBe(false);
+    }
+  });
+  it('blocks any other method, scheme or host on that path', () => {
+    for (const m of ['PATCH', 'PUT', 'DELETE', '', undefined]) expect(walk.allowedWrite(m, PM + '/login-airtable'), String(m)).toBe(false);
+    for (const u of ['http://pm.operationsdirector.co.uk/login-airtable', 'https://pm.operationsdirector.co.uk.evil.example/login-airtable',
+                     'https://evil.example/login-airtable', 'https://pm.operationsdirector.co.uk@evil.example/login-airtable',
+                     'https://x@pm.operationsdirector.co.uk/login-airtable', 'https://api.airtable.com/login-airtable',
+                     'https://pm.example.workers.dev/login-airtable', 'not a url', '', undefined]) {
+      expect(walk.allowedWrite('POST', u), String(u)).toBe(false);
+    }
+  });
+  it('lists an allowed write on the page that sent it', () => {
+    const out = walk.pageReport({ id: 'property-manager', consoleErrors: [], leaks: [], softLeaks: [],
+                                  writesBlocked: [], writesAllowed: ['POST pm.operationsdirector.co.uk/login-airtable'] });
+    expect(out.writesAllowed).toEqual(['POST pm.operationsdirector.co.uk/login-airtable']);
+    expect(out.writesBlocked).toEqual([]);
+  });
+
+  it('sends that one request, counted, and still blocks every other write to the Worker (real Playwright)', async () => {
+    let chromium;
+    try { ({ chromium } = require('playwright-core')); } catch { /* asserted below */ }
+    expect(chromium, 'playwright-core is not installed').toBeTruthy();
+    const app = await new Promise((ok) => {
+      const s = createServer((req, res) => { res.writeHead(200, { 'content-type': 'text/html' }); res.end('<!doctype html><body>pm</body>'); });
+      s.listen(0, '127.0.0.1', () => ok(s));
+    });
+    const A = `http://127.0.0.1:${app.address().port}`;
+    const browser = await chromium.launch({ headless: true });
+    // Plain-text bodies: no CORS preflight, so nothing here can reach the real Worker.
+    const tryAll = (page) => page.evaluate(async (PM) => {
+      const post = async (path, method = 'POST') => {
+        try { return await (await fetch(PM + path, { method, body: 'x' })).json(); } catch (e) { return { threw: String(e) }; }
+      };
+      return { signIn: await post('/login-airtable'), passcode: await post('/login'), task: await post('/task/recAbC123'),
+               query: await post('/login-airtable?x=1'), patch: await post('/login-airtable', 'PATCH') };
+    }, PM);
+    try {
+      // The walk's route is installed after the stand-in, so it runs first. A
+      // request it lets out falls back to the stand-in instead of the internet.
+      const withCount = async (onAllowed) => {
+        const ctx = await browser.newContext({ serviceWorkers: 'block' });
+        const reached = [];
+        await ctx.route(PM + '/**', (route) => {
+          const u = new URL(route.request().url());
+          reached.push(route.request().method() + ' ' + u.pathname + u.search);
+          return route.fulfill({ status: 200, contentType: 'application/json', headers: { 'access-control-allow-origin': '*' },
+                                 body: JSON.stringify({ ok: true, token: 'session', who: 'Kevin Brittain' }) });
+        });
+        const blocked = [];
+        await walk.blockWrites(ctx, (l) => blocked.push(l), onAllowed);
+        const page = await ctx.newPage();
+        await page.goto(A + '/');
+        const got = await tryAll(page);
+        await ctx.close();
+        return { got, reached, blocked };
+      };
+
+      const allowed = [];
+      const on = await withCount((l) => allowed.push(l));
+      // The sign-in reached the Worker and the page got its session back.
+      expect(on.reached).toEqual(['POST /login-airtable']);
+      expect(on.got.signIn).toMatchObject({ token: 'session' });
+      expect(allowed).toEqual(['POST pm.operationsdirector.co.uk/login-airtable']);
+      // Every other write to that host was answered locally, never sent.
+      for (const k of ['passcode', 'task', 'query', 'patch']) expect(on.got[k], k).toMatchObject({ blockedByWalk: true });
+      expect(on.blocked).toEqual(['POST pm.operationsdirector.co.uk/login', 'POST pm.operationsdirector.co.uk/task/recAbC123',
+                                  'POST pm.operationsdirector.co.uk/login-airtable', 'PATCH pm.operationsdirector.co.uk/login-airtable']);
+
+      // No counter, no exception: the sign-in is blocked like any other write.
+      const off = await withCount(undefined);
+      expect(off.reached).toEqual([]);
+      expect(off.got.signIn).toMatchObject({ blockedByWalk: true });
+      // A counter that fails blocks it too: an exception nobody counted is not taken.
+      const broken = await withCount(() => { throw new Error('count failed'); });
+      expect(broken.reached).toEqual([]);
+      expect(broken.got.signIn).toMatchObject({ blockedByWalk: true });
+      expect(broken.blocked).toContain('POST pm.operationsdirector.co.uk/login-airtable');
+    } finally {
+      await browser.close();
+      app.close();
     }
   }, 60000);
 });

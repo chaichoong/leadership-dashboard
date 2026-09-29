@@ -19,8 +19,27 @@ commit through, because there is nothing to check against.
 
 Run by scripts/pre-commit before the pageVer bump. Standalone:
     python3 scripts/private-name-guard.py      # checks the staged changes; exit 1 on a hit
+
+COMMIT MESSAGES (29 Sep 2026)
+The staged diff is not the only thing a commit publishes. On 29 Sep 2026 commit
+messages on origin/main were found naming tenants and property addresses: the
+guard above never saw them. `--message-file PATH` checks a commit message
+against the same roster, and scripts/commit-msg runs it for every commit:
+    python3 scripts/private-name-guard.py --message-file .git/COMMIT_EDITMSG
+Everything below the scissors line `git commit -v` adds is the diff, not the
+message, so it is not read (a commit that REMOVES a name would otherwise be
+refused for quoting it). A missing roster warns and lets the commit through,
+exactly as the staged-diff check does.
+
+A squash merge on GitHub writes a message no local hook sees: it is built from
+the PR title, body and commit messages. scripts/merge-pr.py checks those with
+fields_naming() below before it merges.
+
+KNOWN LIMIT: full names only, by design. A first name on its own ("rent from
+Jane") is not caught, because single words collide with ordinary text.
 """
 
+import argparse
 import os
 import re
 import subprocess
@@ -82,13 +101,82 @@ def find_hits(diff_text, pattern):
             if pattern.search(text)]
 
 
-def main():
+def roster_pattern():
+    """(compiled pattern, None), or (None, why) when there is no roster to check against."""
     names = load_roster()
     if not names:
-        print(f"⚠️  private-name guard: no roster at {roster_path()}, so private names were "
+        return None, f"no roster at {roster_path()}"
+    return compile_names(names), None
+
+
+# The line `git commit -v` (and --cleanup=scissors) puts above the diff it shows
+# in the editor. The first character is git's comment character, '#' by default.
+SCISSORS = re.compile(r'^\S -{24} >8 -{24}$')
+
+
+def message_text(raw):
+    """The part of a commit message file that can become the message: all of it
+    above the scissors line. Comment lines are KEPT: with `git commit -m` and the
+    default cleanup, a line starting with '#' stays in the message."""
+    lines = raw.splitlines()
+    for i, line in enumerate(lines):
+        if SCISSORS.match(line):
+            return "\n".join(lines[:i])
+    return raw
+
+
+def name_lines(text, pattern):
+    """1-based line numbers on which a roster name starts. The pattern joins a
+    name's words on \\s+, so a name wrapped onto the next line still matches."""
+    return sorted({text.count("\n", 0, m.start()) + 1 for m in pattern.finditer(text)})
+
+
+def fields_naming(fields, pattern):
+    """The LABELS of the (label, text) pairs whose text names someone on the
+    roster, in order. Only labels come back: a caller's output lands in logs and
+    chat, so it can say WHERE a name is without repeating it."""
+    return [label for label, text in fields if text and pattern.search(text)]
+
+
+def check_message_file(path):
+    try:
+        with open(path, encoding="utf-8", errors="replace") as fh:
+            raw = fh.read()
+    except OSError as e:
+        print(f"private-name guard: cannot read the commit message at {path}: {e.strerror}",
+              file=sys.stderr)
+        return 2
+    pattern, missing = roster_pattern()
+    if missing:
+        print(f"⚠️  private-name guard: {missing}, so the commit message was NOT checked "
+              "for private names. Restore the file to turn the guard back on.", file=sys.stderr)
+        return 0
+    lines = name_lines(message_text(raw), pattern)
+    if not lines:
+        return 0
+    where = ("line " if len(lines) == 1 else "lines ") + ", ".join(
+        str(n) for n in lines[:MAX_REPORTED])
+    print("🛑 Commit refused: this repo is PUBLIC and the commit MESSAGE names a person on "
+          f"the private roster ({where}).", file=sys.stderr)
+    print("Reword the message without the name and commit again. Your staged changes are "
+          "untouched.", file=sys.stderr)
+    return 1
+
+
+def main(argv=None):
+    parser = argparse.ArgumentParser(
+        description="Refuse a commit that names someone on the private roster.")
+    parser.add_argument("--message-file", metavar="PATH",
+                        help="check this commit message instead of the staged changes")
+    args = parser.parse_args(argv)
+    if args.message_file:
+        return check_message_file(args.message_file)
+    pattern, missing = roster_pattern()
+    if missing:
+        print(f"⚠️  private-name guard: {missing}, so private names were "
               "NOT checked. Restore the file to turn the guard back on.", file=sys.stderr)
         return 0
-    hits = find_hits(staged_diff(), compile_names(names))
+    hits = find_hits(staged_diff(), pattern)
     if not hits:
         return 0
     print("🛑 Commit refused: this repo is PUBLIC and the staged changes name a person on "

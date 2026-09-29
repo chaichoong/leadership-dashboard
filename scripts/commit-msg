@@ -1,0 +1,33 @@
+#!/usr/bin/env python3
+"""
+Local commit-msg hook: refuses a commit whose MESSAGE names someone on the
+private roster. This repo is PUBLIC, and scripts/pre-commit only reads the
+staged changes, never the message (29 Sep 2026: published commit messages were
+found naming tenants and property addresses).
+Install: ln -sf ../../scripts/commit-msg .git/hooks/commit-msg
+Git passes the path of the message file as the only argument.
+"""
+import os
+import subprocess
+import sys
+
+# realpath, NOT abspath: this file is installed as a symlink in .git/hooks, and
+# abspath would look for the guard in .git/hooks (the 6 Aug 2026 pre-commit bug).
+script_dir = os.path.dirname(os.path.realpath(__file__))
+guard_script = os.path.join(script_dir, 'private-name-guard.py')
+
+if len(sys.argv) < 2:
+    print("commit-msg hook: git passed no message file; refusing rather than letting an "
+          "unchecked message through.", file=sys.stderr)
+    sys.exit(1)
+
+if not os.path.exists(guard_script):
+    # Same as scripts/pre-commit: a broken install warns loudly, it does not
+    # block, and it never passes quietly.
+    print(f"⚠️  commit-msg hook: {guard_script} not found — the commit message was NOT "
+          "checked for private names.", file=sys.stderr)
+    sys.exit(0)
+
+result = subprocess.run([sys.executable, guard_script, '--message-file', sys.argv[1]],
+                        cwd=os.getcwd())
+sys.exit(result.returncode)
