@@ -13,10 +13,11 @@
 // saved, which proves the compute ran before "no save" is read as a pass.
 
 const { test, expect } = require('@playwright/test');
-const { MOCK_PAT, FIELDS } = require('./helpers');
+const { MOCK_PAT, FIELDS, makeFixtures } = require('./helpers');
 
 const PROJECTS_TABLE = 'tblHrpTMd5LNYn8v1';
 const BUSINESSES_TABLE = 'tblpqkvWJJo8Uu25q';
+const TRANSACTIONS_TABLE = 'tbln0gzhCAorFc3zB';
 
 // Field ids from js/dashboard.js → STRAT_PF.
 const PF = {
@@ -125,5 +126,68 @@ test.describe('Strategic KPI save on load', () => {
         ]);
         await expect.poll(() => (saves.recDetail || []).length, { timeout: 30000,
             message: 'a changed drilldown must be saved even when the headline value matches' }).toBe(1);
+    });
+
+    // Found 29 Sep 2026 in review: a load that opened from the dashboard cache (up to
+    // 24h old) released the KPI compute on the CACHED data, saved that number, and never
+    // recomputed once the fresh fetch landed. So a KPI could store yesterday's value.
+    test('a cache hit never computes or saves a KPI from the cached data', async ({ page, context }) => {
+        const tx = makeFixtures().transactions[0];
+        const txs = n => Array.from({ length: n }, (_, i) => ({ ...tx, id: 'recTxK' + i }));
+        const state = { txRecords: txs(2), txDelayMs: 0 };
+        const saves = [];
+        const handler = async (route) => {
+            const req = route.request();
+            const url = req.url();
+            if (req.method() !== 'GET') {
+                if (req.method() === 'PATCH' && url.includes(PROJECTS_TABLE)) saves.push(req.postDataJSON().fields[PF.kpiCurrent]);
+                return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ records: [] }) });
+            }
+            let records = [];
+            if (url.includes(BUSINESSES_TABLE)) records = [{ id: 'recBiz1', fields: { [FIELDS.bizName]: 'Operations Director', [FIELDS.bizActive]: true } }];
+            else if (url.includes(PROJECTS_TABLE)) records = [project('recCount', 0, { [PF.kpiComputeCode]: 'return { value: ctx.transactions.length };' })];
+            else if (url.includes(TRANSACTIONS_TABLE)) {
+                if (state.txDelayMs) await new Promise(r => setTimeout(r, state.txDelayMs));
+                records = state.txRecords;
+            }
+            return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ records }) });
+        };
+        const cacheWritten = () => new Promise(res => {
+            const r = indexedDB.open('_dlr_cache', 1);
+            r.onsuccess = () => {
+                const db = r.result;
+                try {
+                    const g = db.transaction('kv', 'readonly').objectStore('kv').get('_dlr_dashcache_v2');
+                    g.onsuccess = () => { res(!!g.result); db.close(); };
+                    g.onerror = () => { res(false); db.close(); };
+                } catch (e) { res(false); db.close(); }
+            };
+            r.onerror = () => res(false);
+        });
+
+        // Load 1: two transactions, fresh from Airtable. Saves 2 and writes the cache.
+        await page.addInitScript((pat) => {
+            localStorage.setItem('_dlr_pat', pat);
+            try { indexedDB.deleteDatabase('_dlr_cache'); } catch {}
+        }, MOCK_PAT);
+        await page.route('**/v0/**', handler);
+        await page.goto('/');
+        await expect.poll(() => saves.includes(2), { timeout: 30000, message: 'load 1 never saved the KPI' }).toBe(true);
+        await expect.poll(() => page.evaluate(cacheWritten), { timeout: 15000, message: 'load 1 never wrote the cache' }).toBe(true);
+        await page.close();
+
+        // Load 2: the cache still says two; Airtable now says five, and answers late.
+        saves.length = 0;
+        state.txRecords = txs(5);
+        state.txDelayMs = 4000;
+        const next = await context.newPage();
+        await next.route('**/v0/**', handler);
+        await next.goto('/');
+        // Control: the cache hit really happened, with the old data on the page.
+        await next.waitForFunction(() => typeof allTransactions !== 'undefined' && allTransactions.length === 2, null, { timeout: 3500 });
+
+        await expect.poll(() => saves.includes(5), { timeout: 30000,
+            message: 'the KPI was never computed from the fresh data' }).toBe(true);
+        expect(saves, 'a KPI was saved from the day-old cached data').not.toContain(2);
     });
 });

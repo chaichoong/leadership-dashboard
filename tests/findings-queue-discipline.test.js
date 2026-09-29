@@ -153,6 +153,86 @@ describe('fixed means landed', () => {
   });
 });
 
+describe('a defect filed again gets LOUDER, not WIDER (finding 639)', () => {
+  // MEASURED, 27 Sep 2026. One bug — the OD post picture gate refusing a CLOSE
+  // PROPOSAL — was filed SEVEN times in nineteen days (554, 598, 614, 633, 634,
+  // 636, 639) across two routines, because dedupe_key needs the same routine
+  // AND near-identical wording. Seven low-severity ids look like seven small
+  // things; the one thing they were never rose up the queue.
+  //
+  // These drive the REAL `where` strings off those findings, verbatim.
+  const W598 = 'scripts/agent-dispatch.py cmd_submit / od_picture_problem';
+  const W634 = 'scripts/agent-dispatch.py:od_picture_problem (~line 1583)';
+  const W614 = 'scripts/agent-dispatch.py submit, the OD-post picture-link check';
+  const W615 = 'scripts/agent-dispatch.py inbound-triage.py worker_post() slowdown budget';
+  const W623 = 'scripts/agent-dispatch.py duplicate_gate for replacement insurance';
+
+  it('folds a repeat naming the same file AND symbol, even from another routine', () => {
+    const a = add('od_picture_problem blocks closing a stale card', W598, 'low', 'task-manager-board');
+    const b = add('the OD close-proposal guard, filed six times', W634, 'medium', 'daily-ops-phase2');
+    expect(b.stdout.trim()).toBe(a.stdout.trim());
+    expect(b.out).toMatch(/RECURRENCE/);
+    expect(b.out).toMatch(/scripts\/agent-dispatch\.py/);
+    expect(count('open')).toBe(1);
+  });
+
+  it('ratchets severity up on the recurrence, so a repeat rises in the queue', () => {
+    add('od_picture_problem blocks a close', W598, 'low', 'task-manager-board');
+    add('same guard again', W634, 'high', 'daily-ops-phase2');
+    const listed = fnd(['list', '--status', 'open', '--json']).stdout;
+    const rows = JSON.parse(listed);
+    expect(rows).toHaveLength(1);
+    expect(rows[0].severity).toBe('high');
+    expect(rows[0].seen).toBe(2);
+  });
+
+  it('does NOT fold two different defects that merely share a big file', () => {
+    // THE BACK-TEST THAT MATTERS. Matching on the file alone would have folded
+    // 615 (a slowdown budget) into 623 (the duplicate gate) and into 598,
+    // purely because all three name agent-dispatch.py. agent-dispatch.py had
+    // six unrelated open findings against it on the day this was written.
+    add('worker_post shares one slowdown budget', W615, 'high', 'agent-dispatch');
+    add('duplicate gate ignores the policy ref', W623, 'high', 'agent-dispatch');
+    add('od_picture_problem blocks a close', W598, 'low', 'task-manager-board');
+    expect(count('open')).toBe(3);
+  });
+
+  it('reports the file cluster on a finding it will not merge', () => {
+    // 614 names the file but describes the guard in prose, so no symbol
+    // matches and it is correctly filed as its own finding. It must still
+    // arrive carrying the ids already open on that file.
+    const first = add('od_picture_problem blocks a close', W598, 'low', 'task-manager-board');
+    const prose = add('OD post-card gate blocks a CLOSE PROPOSAL', W614, 'low', 'task-manager-board');
+    expect(prose.stdout.trim()).not.toBe(first.stdout.trim());
+    expect(prose.out).toMatch(/already name this file/);
+    const rows = JSON.parse(fnd(['list', '--status', 'open', '--json']).stdout);
+    const p = rows.find((r) => r.id === prose.stdout.trim());
+    expect(p.same_file_as).toContain(first.stdout.trim());
+    expect(fnd(['list', '--status', 'open']).out).toMatch(/also open on this file/);
+  });
+
+  it('stops naming a neighbour once that neighbour is closed', () => {
+    const first = add('od_picture_problem blocks a close', W598, 'low', 'task-manager-board');
+    add('OD post-card gate blocks a CLOSE PROPOSAL', W614, 'low', 'task-manager-board');
+    fnd(['close', first.stdout.trim(), '--outcome', 'deferred', '--note', 'gone']);
+    expect(fnd(['list', '--status', 'open']).out).not.toMatch(/also open on this file/);
+  });
+
+  it('a where with no file path keys nothing, so unrelated findings stay apart', () => {
+    // Finding 554 arrived with an EMPTY where. It must not become a magnet
+    // that swallows every later finding.
+    add('submit gate rejects CLOSE PROPOSAL on OD post cards', '', 'low', 'task-manager-board');
+    add('something else entirely', '', 'low', 'exceptions');
+    expect(count('open')).toBe(2);
+  });
+
+  it('list marks a recurring finding as recurring', () => {
+    add('od_picture_problem blocks a close', W598, 'low', 'task-manager-board');
+    add('same guard again', W634, 'low', 'daily-ops-phase2');
+    expect(fnd(['list', '--status', 'open']).out).toMatch(/SEEN 2 TIMES/);
+  });
+});
+
 function readOverflow() {
   const { readFileSync } = require('node:fs');
   return readFileSync(overflow, 'utf8').trim().split('\n').filter(Boolean).map((l) => JSON.parse(l));

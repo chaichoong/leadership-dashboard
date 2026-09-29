@@ -46,6 +46,14 @@ describe('content-engine OD lane', () => {
       'socket.socket.connect_ex = _no',
       'socket.create_connection = _no',
       'socket.getaddrinfo = _no',
+      // curl runs in a subprocess, out of reach of the socket guard: 2070's podcast went to GoHighLevel from this
+      // selftest on every run until 29 Sep 2026.
+      'import subprocess',
+      '_run = subprocess.run',
+      'def _guarded(cmd, *a, **k):',
+      '    if isinstance(cmd, (list, tuple)) and cmd and cmd[0] == "curl": raise Blocked("a selftest must not run curl")',
+      '    return _run(cmd, *a, **k)',
+      'subprocess.run = _guarded',
       'sys.argv = ["publish.py", "selftest"]',
       'runpy.run_path("publish.py", run_name="__main__")',
     ].join('\n');
