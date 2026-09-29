@@ -453,7 +453,7 @@ const git = (cwd, ...args) => execFileSync('git', args, { cwd, encoding: 'utf8',
 // origin/main + a PR branch, a clone for the script's REPO, and the merge tree
 // built the way build_merge_result builds it: origin/main, then the PR merged.
 // main's js/config.js registers pnl and tasks, so any other page is new.
-function gitFixture({ ff = false } = {}) {
+function gitFixture({ ff = false, pullRef = false } = {}) {
   const root = tmp('merge-pr-git-');
   const origin = join(root, 'origin.git');
   git(root, 'init', '--quiet', '--bare', '--initial-branch=main', origin);
@@ -469,6 +469,8 @@ function gitFixture({ ff = false } = {}) {
   writeFileSync(join(work, 'js/pnl.js'), 'v2 from the PR\n');
   git(work, 'add', '-A'); git(work, 'commit', '--quiet', '-m', 'the PR'); git(work, 'push', '--quiet', 'origin', 'feature/x');
   const head = git(work, 'rev-parse', 'HEAD');
+  // GitHub's refs/pull/5/head, as the gate reads it before building.
+  if (pullRef) git(work, 'push', '--quiet', 'origin', 'feature/x:refs/pull/5/head');
   git(work, 'checkout', '--quiet', 'main');
   if (!ff) {
     writeFileSync(join(work, 'docs/before.md'), 'main moved before the gate\n');
@@ -672,10 +674,11 @@ function killIfAlive(pid) {
 function flow({ view = OPEN, suites = {}, affected = { out: { scope: 'some', pages: ['pnl', 'tasks'], files: [] }, exit: 0 },
                 local = null, local2 = null, live = null, argv = ['--pr', '5'], mergeConfirms = true, mergeExit = 0,
                 ff = false, moveMain = null, build = null, suitesCrash = false, interruptServerPoll = false,
-                patch = null } = {}) {
+                patch = null, pullRef = false, headIsReal = false } = {}) {
   const bin = stubs(view, { mergeConfirms, mergeExit, suites });
   const home = tmp('merge-pr-home-');
-  const g = gitFixture({ ff });
+  const g = gitFixture({ ff, pullRef });
+  if (headIsReal) writeFileSync(join(bin.dir, 'view.json'), JSON.stringify({ ...view, headRefOid: g.head }));
   const tree = g.tree;
   mkdirSync(join(tree, 'scripts'), { recursive: true });
   writeFileSync(join(tree, 'scripts/prod-walk.js'), FAKE_WALK);
@@ -689,7 +692,7 @@ function flow({ view = OPEN, suites = {}, affected = { out: { scope: 'some', pag
   const cfg = { tree, repo: g.repo, scratch: g.root, argv, build, suitesCrash, interruptServerPoll, patch };
   const r = spawnSync('python3', ['-c', LOAD + DRIVER], {
     encoding: 'utf8', timeout: 90000,
-    env: { ...process.env, PATH: `${bin.dir}:${process.env.PATH}`, HOME: home, FAKE_CFG: JSON.stringify(cfg) },
+    env: { ...process.env, PATH: `${bin.dir}:${process.env.PATH}`, HOME: home, FAKE_CFG: JSON.stringify(cfg), MERGE_PR_REF_WAIT: '0' },
   });
   expect(r.status, r.stderr).toBe(0);
   const out = JSON.parse(r.stdout.trim().split('\n').pop());
@@ -753,6 +756,22 @@ describe('merge-pr.py end to end (fakes, real git, no network)', { timeout: 60_0
     expect(r.result.vitest.ok).toBe(false);
     expect(r.npx.map(c => c.kind)).toEqual(['vitest']);
     expect(r.gh).not.toMatch(/pr merge/);
+  });
+
+  it('refuses before building when GitHub\'s PR ref has not caught up with the PR head (29 Sep 2026)', () => {
+    // The gate once built the previous head seconds after a push, ran green for
+    // five minutes, and GitHub refused the merge. Now it stops before building.
+    const r = flow({ affected: NONE, pullRef: true });            // ref = the real head, gh says 'fff...'
+    expect(r.code).toBe(1);
+    expect(r.result.why).toMatch(/^cannot judge: GitHub's refs\/pull\/5\/head is [0-9a-f]{12}, not the PR head f{12}/);
+    expect(r.npx).toEqual([]);
+    expect(r.gh).not.toMatch(/pr merge/);
+  });
+
+  it('builds as normal when the PR ref matches the head gh reports', () => {
+    const r = flow({ affected: NONE, pullRef: true, headIsReal: true });
+    expect(r.code).toBe(0);
+    expect(r.result.merged).toBe(true);
   });
 
   it('vitest red: refused, no Playwright, no retry, no walk, no merge, tree removed', () => {

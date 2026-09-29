@@ -277,6 +277,25 @@ def vitest_runner_flake(text):
     return all(VITEST_RPC_TIMEOUT.search(e) for e in found)
 
 
+REF_WAIT = int(os.environ.get("MERGE_PR_REF_WAIT", "30"))
+
+
+def ref_lag(pr, want, wait=None):
+    """'' when refs/pull/<pr>/head is the head gh reported (or cannot be read,
+    which the build then reports), else the SHA it still shows after waiting."""
+    wait = REF_WAIT if wait is None else wait
+    deadline = time.time() + wait
+    while True:
+        r = subprocess.run(["git", "ls-remote", "origin", "refs/pull/%d/head" % pr],
+                           cwd=REPO, capture_output=True, text=True)
+        got = (r.stdout or "").split("\t")[0].strip() if r.returncode == 0 else ""
+        if not got or not want or got == want:
+            return ""
+        if time.time() >= deadline:
+            return got
+        time.sleep(3)
+
+
 def run_suites(tree):
     """vitest, then the browser suite, both run IN the merge tree (the cwd rule
     fixer-merge.py's run_gate follows), each in its own process group: that
@@ -1020,6 +1039,18 @@ def gate(pr, dry_run):
     if facts.get("baseRefName") != "main":
         return refuse("PR #%d targets %s, not main; this gate tests main + the PR"
                       % (pr, facts.get("baseRefName")))
+
+    # GitHub's refs/pull/N/head lags a push by a few seconds. On 29 Sep 2026 the
+    # gate was started just after a push, built the PREVIOUS head, ran green for
+    # five minutes, and GitHub then refused the merge ("Head branch was
+    # modified") because --match-head-commit named the tested, older commit.
+    # Safe, but a wasted run: wait for the ref to catch up before building.
+    want = facts.get("headRefOid") or ""
+    lag = ref_lag(pr, want)
+    if lag:
+        return refuse("cannot judge: GitHub's refs/pull/%d/head is %s, not the PR head %s. "
+                      "The push has not reached it yet, or someone pushed again; run it again"
+                      % (pr, lag[:12], want[:12]))
 
     fm = fixer()
     tree = server = None
