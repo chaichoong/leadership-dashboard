@@ -859,6 +859,7 @@ DUPE_STREET_TYPES = {
     "street", "st", "road", "rd", "avenue", "ave", "lane", "close", "drive",
     "way", "court", "place", "crescent", "grove", "terrace", "gardens",
     "square", "walk", "hill", "park", "row", "view", "rise", "mews",
+    "pl",   # "55 Elmdon Pl" (28 Sep 2026)
 }
 
 
@@ -1064,7 +1065,9 @@ def identity_conflict(name_a, name_b):
 def _link_ids(v):
     if isinstance(v, (str, dict)):
         v = [v]                           # a bare id is one link, not its letters
-    return {x.get("id", "") if isinstance(x, dict) else str(x) for x in (v or []) if x}
+    if not isinstance(v, (list, tuple)):
+        return set()                      # a malformed value names no record (review)
+    return {x.get("id", "") if isinstance(x, dict) else str(x) for x in v if x}
 
 
 def links_disagree(fields_a, fields_b):

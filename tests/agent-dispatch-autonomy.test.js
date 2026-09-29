@@ -404,3 +404,46 @@ describe('submit wires the level in, and the carry-out leaves its marker', () =>
     expect(apv).toContain(`export const HANDLED_MARK = '${m[1]}'`);
   });
 });
+
+// 28 Sep 2026: the create gate folded one tenant's UC47 chase into another's
+// (#621 made the gate and the page refuse it). The agents' own close path,
+// "CLOSE PROPOSAL: duplicate of <older task>", had no such check: an agent
+// that read the two chases as one could close the second tenant's task at
+// Level A with nobody asked. Tenants' names changed; this repo is public.
+describe('an agent cannot close one tenant\'s task as a duplicate of another\'s', () => {
+  const SETUP = `
+DB['recTENANTB0000001'] = {'id':'recTENANTB0000001','createdTime':'2026-09-01T10:00:00.000Z','fields':{AF['name']:"Check DWP decision on Pawel Kowalski's UC47 (Unit 2, 5 Dalham Place) and chase if none",'fldx4qCw17UfrKpaN':'Upcoming'}}
+DB['recLINKED00000001'] = {'id':'recLINKED00000001','createdTime':'2026-09-01T10:00:00.000Z','fields':{AF['name']:'Check DWP decision on UC47 and chase if none','fldx4qCw17UfrKpaN':'Upcoming','fldmne4RYJU22ICub':['recBBBBBBBBBBBBBB']}}
+TENANT_A = "Check DWP decision on Aaron Mitchell's UC47 (55 Elmdon Place) and chase if none"
+`;
+  it('a different tenant at a different house goes to a card, never a Level A close', () => {
+    const d = py(`${SETUP}
+print(json.dumps(lvl('CLOSE PROPOSAL: duplicate of recTENANTB0000001', 'Admin', TENANT_A)))`);
+    expect(d.category).toBe('close: duplicate');
+    expect(d.level).not.toBe('A');
+    expect(d.text).toMatch(/different address/);
+  });
+  it('a different linked tenancy goes to a card', () => {
+    const d = py(`${SETUP}
+print(json.dumps(lvl('CLOSE PROPOSAL: duplicate of recLINKED00000001', 'Admin', 'Check DWP decision on UC47 and chase if none',
+                     extra={'fldmne4RYJU22ICub': ['recAAAAAAAAAAAAAA']})))`);
+    expect(d.level).not.toBe('A');
+    expect(d.text).toMatch(/tenancies/);
+  });
+  it('a malformed link on the keeper never crashes the check (review)', () => {
+    const d = py(`${SETUP}
+DB['recODDLINK0000001'] = {'id':'recODDLINK0000001','createdTime':'2026-09-01T10:00:00.000Z','fields':{AF['name']:'Check DWP decision on UC47 and chase if none','fldx4qCw17UfrKpaN':'Upcoming','fldmne4RYJU22ICub':5}}
+print(json.dumps(lvl('CLOSE PROPOSAL: duplicate of recODDLINK0000001', 'Admin', 'Check DWP decision on UC47 and chase if none',
+                     extra={'fldmne4RYJU22ICub': ['recAAAAAAAAAAAAAA']})))`);
+    expect(d.level).toBe('A');
+    expect(d.keeper).toBe('recODDLINK0000001');
+  });
+  it('CONTROL: the same tenant, or the same linked tenancy, still closes at Level A', () => {
+    const d = py(`${SETUP}
+print(json.dumps([lvl('CLOSE PROPOSAL: duplicate of recTENANTB0000001', 'Admin', "Chase DWP on Pawel Kowalski's UC47 decision - 5 Dalham Place"),
+                  lvl('CLOSE PROPOSAL: duplicate of recLINKED00000001', 'Admin', 'Check DWP decision on UC47 and chase if none',
+                      extra={'fldmne4RYJU22ICub': ['recBBBBBBBBBBBBBB']})]))`);
+    expect(d.map((x) => x.level)).toEqual(['A', 'A']);
+    expect(d.map((x) => x.keeper)).toEqual(['recTENANTB0000001', 'recLINKED00000001']);
+  });
+});
