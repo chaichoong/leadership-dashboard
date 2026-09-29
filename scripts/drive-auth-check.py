@@ -406,7 +406,17 @@ def check_fresh():
 # job-queue's probe, it runs on a daemon thread, and a walk that has not
 # finished in TWINS_WALK_SECONDS is UNKNOWN. On 29 Sep it took under a second.
 TWINS_NAMED = 10
-TWINS_WALK_SECONDS = float(os.environ.get('DRIVE_TWINS_WALK_SECONDS', '300'))
+
+
+def _walk_seconds():
+    try:
+        v = float(os.environ.get('DRIVE_TWINS_WALK_SECONDS', '300'))
+    except ValueError:
+        return 300.0
+    return v if 0 < v < 3600 else 300.0    # nan, inf, zero or negative: the default
+
+
+TWINS_WALK_SECONDS = _walk_seconds()
 
 
 def _find_twins_timed():

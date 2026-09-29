@@ -542,11 +542,13 @@ describe('drive-auth counts Drive sync twins in the live brain vault', () => {
 
   it('a duplicated FOLDER beside its original is named once, not walked', () => {
     // The readers skip twin files only, so a "Knowledge 2/" must reach a person.
-    const [verdict, reason, twins] = twinsIn(vault(['Knowledge/Note.md', 'Knowledge 2/Note.md',
-      'Knowledge 2/Other.md', 'Meetings 2024/Call.md']));
-    expect(verdict).toBe('BROKEN');
-    expect(twins).toEqual(['Knowledge 2/']);
-    expect(reason).toMatch(/^1 Google Drive sync twin/);
+    // The twin file inside it proves the folder is not walked, and "Meetings 2024/"
+    // beside "Meetings/" proves a year ending is not a copy number for folders either.
+    const r = withModule(`
+print(json.dumps(m.brain_vault.find_twins(${JSON.stringify(vault(['Knowledge/Note.md',
+      'Knowledge 2/Note.md', 'Knowledge 2/Note 2.md', 'Meetings/Call.md', 'Meetings 2024/Call.md']))})[:2]))`);
+    expect(r[0]).toEqual(['Knowledge 2/']);
+    expect(r[1]).toBe(3);                         // Knowledge/Note, Meetings/Call, Meetings 2024/Call
   });
 
   it('prunes Archive/ when the vault arrives as a Path, not a string', () => {
@@ -569,6 +571,18 @@ print(json.dumps([v, reason, twins, time.time() - t0 < 3]))`);
     expect(r[1]).toMatch(/did not finish within 0\.2 s/);
     expect(r[2]).toBeNull();
     expect(r[3]).toBe(true);
+  });
+
+  it('a mis-set walk limit falls back to the default rather than crash or alarm every day', () => {
+    for (const bad of ['abc', '0', '-5', 'nan', 'inf']) {
+      const out = execFileSync('python3', ['-c', `
+import importlib.util
+spec = importlib.util.spec_from_file_location('dac', ${JSON.stringify(CHECK)})
+m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m)
+print(m.TWINS_WALK_SECONDS)`], { encoding: 'utf8',
+        env: { ...process.env, DRIVE_TWINS_WALK_SECONDS: bad, PYTHONDONTWRITEBYTECODE: '1' } });
+      expect(out.trim(), bad).toBe('300.0');
+    }
   });
 
   it('twins are not judged on an unreadable mount, so the vault outage leads', () => {
