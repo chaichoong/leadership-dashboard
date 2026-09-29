@@ -2017,12 +2017,16 @@ function linkIds(v){
 }
 
 // Derive the correct status from a task's due date.
-// Completed and Approval are override states — user has deliberately
-// set them and they trump the due-date rule. Everything else is
-// computed: no date → Upcoming, before today → Overdue, today → Today,
+// Completed, Cancelled and Approval are override states — someone has
+// deliberately set them and they trump the due-date rule. Everything else
+// is computed: no date → Upcoming, before today → Overdue, today → Today,
 // after today → Upcoming.
+// Cancelled joined the list on 29 Sep 2026: without it a cancelled task
+// read as Overdue (30 of the 32 on Kevin's board that day), _isOpen() called
+// it open, and the overdue auto-reschedule moved its date on every load.
 function deriveTaskStatus(dueDate, storedStatus){
   if(storedStatus==='Completed')return 'Completed';
+  if(storedStatus==='Cancelled')return 'Cancelled';
   if(storedStatus==='Approval')return 'Approval';
   const today=todayStr();
   if(!dueDate)return 'Upcoming';
@@ -2078,7 +2082,7 @@ function parseTask(rec){
   // Approval). Prevents stale due dates from showing as Overdue/Today.
   const _isContractorTask=!!gf(rec,F.maintenance);
   const _effectiveStatus=_isContractorTask
-    ? (_storedStatus==='Completed'||_storedStatus==='Approval'?_storedStatus:'Upcoming')
+    ? (_storedStatus==='Completed'||_storedStatus==='Cancelled'||_storedStatus==='Approval'?_storedStatus:'Upcoming')
     : deriveTaskStatus(_dueDate,_storedStatus);
   return {
     id:rec.id,
@@ -5504,7 +5508,12 @@ async function autoRescheduleOverdue(){
   if(!currentUser||currentUser.key!=='kevin')return{count:0};
   const today=todayStr();
   const member=TEAM.find(m=>m.key==='kevin');if(!member)return{count:0};
-  const overdue=allTasks.filter(t=>t.assigneeEmail===member.email&&t.dueDate&&t.dueDate<today&&t.status!=='Completed'&&!t.someDay&&!t.hardDeadline);
+  // Open tasks only (29 Sep 2026). A read-only walk of this page found it moving
+  // 52 tasks on one load: 23 Cancelled and 28 waiting in Kevin's approval queue.
+  // A cancelled task has no date to keep, and an approval card's status does not
+  // follow its date, so moving it only hid how long it had waited (Kevin: stop).
+  const overdue=allTasks.filter(t=>t.assigneeEmail===member.email&&t.dueDate&&t.dueDate<today&&!t.someDay&&!t.hardDeadline
+    &&!['Completed','Cancelled','Approval'].includes(t.status)&&!['Completed','Cancelled','Approval'].includes(t.storedStatus));
   if(overdue.length===0)return{count:0};
   // Check res.ok before mutating, and count only what actually moved.
   //
@@ -5685,8 +5694,8 @@ function getFilteredTasks(){
     if(sf==='Overdue')tasks=tasks.filter(t=>t.status==='Overdue'||isOverdue(t));
     else tasks=tasks.filter(t=>t.status===sf);
   } else if(!sf){
-    // Default: hide Completed tasks from the active list
-    tasks=tasks.filter(t=>t.status!=='Completed');
+    // Default: hide closed tasks (Completed, Cancelled) from the active list
+    tasks=tasks.filter(t=>t.status!=='Completed'&&t.status!=='Cancelled');
   }
   const pf=document.getElementById('filterPriority').value;if(pf)tasks=tasks.filter(t=>t.priority===pf);
   const bf=document.getElementById('filterBusiness').value;if(bf)tasks=tasks.filter(t=>t.business===bf);
@@ -9816,7 +9825,7 @@ async function loadAllData(){
   try{
     await Promise.all([fetchBusinesses(),fetchProperties()]);
     const[rawTasks,rawProjects,cal,rawTeam]=await Promise.all([
-      fetchTable(TASKS_TABLE,TASK_FIELD_IDS,`AND({Status}!="Completed",{Some Day}=FALSE())`),
+      fetchTable(TASKS_TABLE,TASK_FIELD_IDS,`AND({Status}!="Completed",{Status}!="Cancelled",{Some Day}=FALSE())`),
       fetchTable(PROJECTS_TABLE,PROJECT_FIELD_IDS,''),
       fetchCalendarEvents(),
       // Only fetch team members flagged Active — keeps retired / legacy
