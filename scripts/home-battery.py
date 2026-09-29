@@ -434,16 +434,20 @@ def load_names(path=NAMES):
         return {}
 
 
-def read_ha(now):
+def read_ha(now, token_path=None):
     """(devices, error), or None when Home Assistant is not set up (no key file).
     Never raises: a failure is data for the 'cannot see' reminder."""
     try:
-        with open(HA_TOKEN) as f:
+        with open(token_path or HA_TOKEN) as f:
             token = f.read().strip()
     except OSError:
         return None
     if not token:
         return [], "the Home Assistant key file is empty: run Home Assistant key on the desktop again"
+    if not re.fullmatch(r"[A-Za-z0-9._-]+", token):
+        # A key pasted twice or wrapped across lines. Never quote it: the error
+        # text goes to the log, state.json and a reminder (review of 29 Sep 2026).
+        return [], "the Home Assistant key file looks damaged: run Home Assistant key on the desktop again"
     req = urllib.request.Request(HA_URL + "/api/template", data=json.dumps({"template": HA_TEMPLATE}).encode(),
                                  headers={"Authorization": "Bearer " + token, "Content-Type": "application/json"},
                                  method="POST")
@@ -454,12 +458,12 @@ def read_ha(now):
     except urllib.error.HTTPError as e:
         why = "the key was refused: make a new one and run Home Assistant key" if e.code == 401 else "HTTP %s" % e.code
         return [], "Home Assistant: %s" % why
-    except (urllib.error.URLError, http.client.HTTPException, OSError, ValueError) as e:
-        return [], "Home Assistant: no usable answer (%s)" % e
+    except (urllib.error.URLError, http.client.HTTPException, OSError) as e:
+        return [], "Home Assistant: no usable answer (%s)" % getattr(e, "reason", type(e).__name__)
     except HAError as e:
         return [], str(e)
-    except Exception as e:  # an unexpected shape: recorded and reminded about, never a crash
-        return [], "unexpected reply from Home Assistant (%s: %s)" % (type(e).__name__, e)
+    except Exception as e:  # never quote the exception: a header error carries the key
+        return [], "unexpected reply from Home Assistant (%s)" % type(e).__name__
 
 
 # --------------------------------------------------------------------------
@@ -489,7 +493,8 @@ def save_state(state, path=STATE):
     """Temp file then rename, so a reader never sees a half-written file."""
     os.makedirs(os.path.dirname(path), exist_ok=True)
     tmp = path + ".tmp"
-    with open(tmp, "w") as f:
+    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(fd, "w") as f:
         json.dump(state, f, indent=1)
     os.replace(tmp, path)
 
@@ -497,7 +502,9 @@ def save_state(state, path=STATE):
 def append_reading(now, devices, error, src="aq", path=READINGS):
     os.makedirs(os.path.dirname(path), exist_ok=True)
     rec = {"ts": now.isoformat(timespec="seconds"), "source": src, "error": error, "devices": devices}
-    with open(path, "a") as f:
+    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o600)
+    os.chmod(path, 0o600)
+    with os.fdopen(fd, "a") as f:
         f.write(json.dumps(rec) + "\n")
 
 
@@ -587,16 +594,19 @@ STALE_DAYS = 7                 # a level Aqara has not updated this long is name
 
 
 def no_level(devices, now=None):
-    """Battery devices the watch cannot vouch for: a model Aqara would not
-    describe, no readable level or flag, or (with now) a level Aqara dated over
-    STALE_DAYS ago. Named in one reminder, never passed over as mains."""
-    def stale(d):
-        # Undated counts as stale: a level Aqara gives no date for cannot be
-        # shown to be current, so it is named rather than trusted (review 4).
-        return now is not None and d.get("level") is not None and \
+    """Battery devices the watch cannot vouch for, named in one reminder, never
+    passed over as mains: a model the source would not describe, no readable
+    level or flag, and (with now) any reading is_low() cannot use (an old flag
+    or level on a device of unknown state, review of 29 Sep 2026), or a level
+    dated over STALE_DAYS ago or undated (review 4 of 28 Sep)."""
+    def unusable(d):
+        if now is None:
+            return d.get("level") is None and d.get("low_flag") is None
+        known, _, _ = is_low(d, now, THRESHOLD)
+        stale = d.get("level") is not None and \
             (not d.get("level_at") or hours(now, d["level_at"]) > STALE_DAYS * 24)
-    return [d for d in devices if d["battery"] is None or
-            (d["battery"] and ((d.get("level") is None and d.get("low_flag") is None) or stale(d)))]
+        return not known or stale
+    return [d for d in devices if d["battery"] is None or (d["battery"] and unusable(d))]
 
 
 def forget(state, kind, sid):
@@ -842,11 +852,16 @@ def read_once(state, now):
         return [], "unexpected reply from Aqara (%s: %s)" % (type(e).__name__, e)
 
 
-def read_source(tag, sstate, now):
+def read_source(tag, sstate, now, ha_token=None):
     """(devices, error) for one source, or None when that source is not set up."""
     if tag == "aq":
         return read_once(sstate, now)
-    return read_ha(now)
+    got = read_ha(now, ha_token)
+    if got is None and sstate.get("last_ok"):
+        # Read before, key gone now (a restore, a host move, a tidy-up): that is
+        # a blind watch, not a source nobody set up (review of 29 Sep 2026).
+        return [], "the Home Assistant key file is missing: run Home Assistant key on the desktop again"
+    return got
 
 
 def cmd_read():
@@ -1084,8 +1099,8 @@ def selftest():
     check("an ONLINE device's old-dated level still counts (it may not have changed)",
           creates(decide(now, True, old, st(old), [], {})), [("low", "o")])
     unknown_old = [dev("u", online=None, level=5, at=now - dt.timedelta(hours=30))]
-    check("an old level on a device of unknown state does not count",
-          creates(decide(now, True, unknown_old, st(unknown_old), [], {})), [])
+    check("an old level on a device of unknown state is not low, but is named",
+          creates(decide(now, True, unknown_old, st(unknown_old), [], {})), [("nolevel", "set:u")])
     undated = [dict(dev("n", level=9), level_at=None)]
     check("an undated level on an online device counts (and is also named)",
           creates(decide(now, True, undated, st(undated), [], {})), [("low", "n"), ("nolevel", "set:n")])
@@ -1290,6 +1305,26 @@ def selftest():
     check("each source has its own blind reminder", [(a["id"], a["title"]) for a in hb if a["do"] == "create"],
           [("watch:ha", "The home battery watch cannot see Home Assistant")])
     check("markers carry their source", marker("low", "x", "ha").endswith(" ha]"), True)
+
+    # Review of 29 Sep 2026 (Home Assistant source).
+    check("an old low flag on a device of unknown state is named, not dropped",
+          [d["id"] for d in no_level([dict(dev("y", online=None), low_flag=True, flag_at=iso(now - dt.timedelta(days=3)))], now)], ["y"])
+    check("a fresh flag on a device of unknown state is not named",
+          no_level([dict(dev("y", online=None), low_flag=False, flag_at=iso(now))], now), [])
+
+    import tempfile
+    with tempfile.TemporaryDirectory() as tmpd:
+        keyf = os.path.join(tmpd, "k")
+        with open(keyf, "w") as f:
+            f.write("FAKEKEY-abc123\nFAKEKEY-abc123\n")
+        got = read_ha(now, keyf)
+        check("a damaged key is refused before use and never quoted",
+              (got[0], "damaged" in got[1], "FAKEKEY" in got[1]), ([], True, False))
+        gone = os.path.join(tmpd, "missing")
+        check("no key and never read means not set up", read_source("ha", {}, now, gone), None)
+        lost = read_source("ha", {"last_ok": iso(now)}, now, gone) or ([], "skipped")
+        check("a key lost after a good read is an error, not 'not set up'",
+              (lost[0], "missing" in lost[1]), ([], True))
 
     # The 28 Sep one-source state moves under "aq" unchanged.
     old = {"last_ok": "2026-09-28T23:20:10", "resources": {"m": 1}, "nudged": {"low:a": "2026-09-28"}}

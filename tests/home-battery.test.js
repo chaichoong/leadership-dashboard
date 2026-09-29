@@ -84,7 +84,10 @@ unk = [dev('u', online=None, level=5, at=now - dt.timedelta(hours=30))]
 out = [[a['title'] for a in hb.decide(now, True, d, st(d), [], {}) if a['do'] == 'create'],
        [a['title'] for a in hb.decide(now, True, unk, st(unk), [], {}) if a['do'] == 'create'],
        hb.stamp(1790640000, now)]`);
-        expect(out).toEqual([['Battery low: Utility Motion (20%)', 'Battery low: Loft (5%)'], [], null]);
+        // Review of 29 Sep 2026: an old reading on a device of unknown state is
+        // not trusted as low, but it is named, never dropped.
+        expect(out).toEqual([['Battery low: Utility Motion (20%)', 'Battery low: Loft (5%)'],
+            ['Check 1 battery device in the Aqara app'], null]);
     });
 
     it('never treats a voltage-only battery device as mains, and never guesses its level', () => {
@@ -146,6 +149,22 @@ closes = hb.decide(now.replace(hour=9), False, hb.from_state(s), s, openr, {})
 out = [[(a['do'], a.get('kind')) for a in blind], [(a['do'], a.get('kind')) for a in fallback], closes,
        hb.count_ok([], 60)[0], hb.count_ok([dev(str(i)) for i in range(47)], 60)[0]]`);
         expect(out).toEqual([[['create', 'blind']], [['create', 'offline']], [], false, false]);
+    });
+
+    it('reads Home Assistant rows, keeps the two sources apart, and never quotes a damaged key', () => {
+        const out = py(`
+import tempfile, os
+rows = [{'entity': 'binary_sensor.va1_battery', 'device': 'VA1', 'model': 'VA02', 'state': 'on', 'unit': '',
+         'changed': '2026-09-29T07:23:15+00:00', 'conn': ['on']}]
+ha = hb.ha_devices(rows, {'VA1': 'En Suite radiator valve'})
+titles = [a['title'] for a in hb.decide(now, True, ha, st(ha), [], {}, src='ha') if a['do'] == 'create']
+other = [{'key': hb.marker('blind', 'watch:aq', 'aq'), 'ref': 'aq-blind'}]
+crossed = [a for a in hb.decide(now.replace(hour=9), True, ha, st(ha), other, {}, src='ha') if a['do'] == 'complete']
+d = tempfile.mkdtemp(); k = os.path.join(d, 'k'); open(k, 'w').write('FAKEKEY-1\\nFAKEKEY-1')
+bad = hb.read_ha(now, k)
+out = [titles, crossed, 'FAKEKEY' in bad[1], hb.read_source('ha', {'last_ok': iso(now)}, now, os.path.join(d, 'none'))[1][:39]]`);
+        expect(out).toEqual([['Battery low: En Suite radiator valve (low)'], [], false,
+            'the Home Assistant key file is missing:']);
     });
 
     it('closes reminders only on a fresh read that proves the problem is gone', () => {
