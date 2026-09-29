@@ -67,7 +67,7 @@ Limit regression checks to the 1-2 most probable breakages. This is not a full a
 
 ## Step 3: Test in the browser
 
-Use the preview tools (`preview_*`) to verify. If the preview server is not running, start it.
+Use the Browser pane tools (`mcp__Claude_Browser__*`) on the local preview. If the preview server is not running, start it with `mcp__Claude_Browser__preview_start`.
 
 ### 3a. Load the page
 
@@ -78,10 +78,10 @@ Use the preview tools (`preview_*`) to verify. If the preview server is not runn
 
 Test the specific assertion from Step 2. Collect evidence:
 
-- **Visual check**: Use `preview_snapshot` to read the DOM content. Does the element exist? Does it show the right value?
-- **Console check**: Use `preview_console_logs` to look for JavaScript errors. Filter for `error|Error|TypeError|ReferenceError|undefined`.
-- **Interaction check**: If the fix involves a button or action, use `preview_click` or `preview_fill` to trigger it, then `preview_snapshot` again to confirm the result.
-- **Network check**: If the fix involves an API call, use `preview_network` to confirm the request was made and returned successfully.
+- **Visual check**: Use `mcp__Claude_Browser__read_page` to read the DOM content. Does the element exist? Does it show the right value?
+- **Console check**: Use `mcp__Claude_Browser__read_console_messages` to look for JavaScript errors. Filter for `error|Error|TypeError|ReferenceError|undefined`.
+- **Interaction check**: If the fix involves a button or action, use `mcp__Claude_Browser__computer` (click, type) or `mcp__Claude_Browser__form_input` to trigger it, then `mcp__Claude_Browser__read_page` again to confirm the result.
+- **Network check**: If the fix involves an API call, use `mcp__Claude_Browser__read_network_requests` to confirm the request was made and returned successfully.
 
 Record PASS or FAIL for the fix, with the specific evidence.
 
@@ -90,14 +90,14 @@ Record PASS or FAIL for the fix, with the specific evidence.
 For each regression target identified in Step 2:
 
 1. Navigate to the affected area (switch tab, scroll to element)
-2. Use `preview_snapshot` to confirm it still renders correctly
+2. Use `mcp__Claude_Browser__read_page` to confirm it still renders correctly
 3. Check console for new errors that were not there before
 
 Record PASS or FAIL for each regression check.
 
 ### 3d. Console sweep
 
-Run a final `preview_console_logs` check across the page. Look for:
+Run a final `mcp__Claude_Browser__read_console_messages` check across the page. Look for:
 - Any new errors introduced by the change
 - Warnings that indicate a problem (not general deprecation noise)
 
@@ -111,12 +111,12 @@ Every fix must include at least one saved screenshot as proof. Kevin must be abl
 
 ### CRITICAL: Screenshot visibility rules
 
-Screenshots taken via Chrome MCP (`mcp__Claude_in_Chrome__computer screenshot`) and preview tools (`preview_screenshot`) appear in tool results but are **NOT visible to the user in the chat UI**. Only `mcp__computer-use__screenshot` with `save_to_disk: true` produces images that Kevin can actually see.
+Screenshots taken via Kevin's Chrome (`mcp__claude-in-chrome__computer` screenshot) and the Browser pane (`mcp__Claude_Browser__computer` screenshot) appear in tool results but are **NOT visible to the user in the chat UI**. Only `mcp__computer-use__screenshot` with `save_to_disk: true` produces images that Kevin can actually see. A saved screenshot file can also be sent to him with the SendUserFile tool.
 
 **Mandatory process for user-visible screenshots:**
 
-1. Commit and push the changes to GitHub Pages first.
-2. Wait for the deploy to complete (use the deploy monitor or poll GitHub Actions).
+1. Steps 1 to 3 run on the local preview before commit. This step runs on the live site, after the calling workflow (`/fix` or `/build-feature`) has committed and deployed.
+2. Wait for that deploy to complete (use the deploy monitor or poll GitHub Actions).
 3. Use computer-use MCP (`mcp__computer-use__screenshot` with `save_to_disk: true`) to capture the **live deployed site** in Chrome. This is the only method that attaches images visibly in the chat.
 4. Before capturing, ensure the correct page/tab is visible in Chrome: use `request_access` for Chrome, `switch_display` if Chrome is on a secondary monitor, and visually confirm via a non-saved screenshot that the right content is on screen.
 
@@ -176,7 +176,7 @@ Output the report in this exact format:
 Rules for the report:
 - Every PASS or FAIL must have evidence (a specific value seen, a screenshot, a console output, or a DOM element reference)
 - "It looks correct" is not evidence. "Badge shows 3, matching 3 unresolved records in the table below" is evidence.
-- Every visual fix must have at least one saved screenshot attached via `mcp__computer-use__screenshot` (the only method visible to Kevin). If the fix spans multiple views, include one screenshot per view.
+- Every visual fix must have at least one saved screenshot attached via `mcp__computer-use__screenshot`, or a saved file sent with SendUserFile (the only ways Kevin sees it). If the fix spans multiple views, include one screenshot per view.
 - If a fix cannot be shown live due to data conditions, state why and confirm the code is deployed.
 - If FAIL, state exactly what is wrong and which file/function to investigate. Do not attempt to fix it.
 - Keep the report short. No scoring, no readiness percentages, no recommendations beyond the failure description.
@@ -187,5 +187,5 @@ Rules for the report:
 
 - **Does not fix issues.** Reports only. Kevin decides the next step.
 - **Does not audit the whole page.** Use `/audit` for that.
-- **Does not deploy.** This runs before commit/push.
+- **Does not deploy.** Steps 1 to 3 run on the local preview before commit. Step 4 runs on the live site after the calling workflow deploys.
 - **Does not score readiness.** Pass or fail, with evidence. That is all.

@@ -77,7 +77,7 @@ Use throwaway data wherever possible. Never test with production data that canno
 
 Before anything else, connect to Chrome MCP. If the first `tabs_context_mcp` call fails:
 1. Retry up to 3 times with a short pause between attempts
-2. If Chrome MCP still fails, fall back to preview tools (`preview_start`, `preview_eval`, `preview_snapshot`, `preview_screenshot`) to run the tests
+2. If Chrome MCP still fails, fall back to the Browser pane tools (`mcp__Claude_Browser__preview_start` or `mcp__Claude_Browser__navigate`, `mcp__Claude_Browser__javascript_tool`, `mcp__Claude_Browser__read_page`, `mcp__Claude_Browser__computer` for screenshots) to run the tests
 3. Only ask Kevin to check Chrome is open as an absolute last resort after all retries and fallbacks are exhausted
 4. NEVER ask Kevin to test manually or "check it yourself". Testing is always Claude's job. A connection failure is Claude's problem to solve.
 

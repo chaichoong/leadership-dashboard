@@ -68,25 +68,28 @@ For each high-priority gap:
 
 ### Test style for this project
 
-The project uses plain `<script>` tags with global functions. To test these:
+The project uses plain `<script>` tags with global functions. Never copy or recreate the function under test: a copy passes whatever the real code does. Load the real file.
+
+A file that also exports under Node (as `js/growth-plan-model.js` does) is loaded with `require`, as in `tests/growth-plan-model.test.js`:
 
 ```js
-// tests/shared.test.js
 import { describe, it, expect } from 'vitest';
+import { createRequire } from 'node:module';
+import { resolve, dirname } from 'node:path';
+import { fileURLToPath } from 'node:url';
 
-// For global functions, import the source file or recreate the function
-// Since the project uses globals, we may need to extract testable functions
+const require = createRequire(import.meta.url);
+const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
+const M = require(resolve(root, 'js/growth-plan-model.js'));
 
-describe('escHtml', () => {
-  it('escapes angle brackets', () => {
-    // Copy or import the function
-    const escHtml = (s) => { /* from shared.js */ };
-    expect(escHtml('<script>')).toBe('&lt;script&gt;');
+describe('weeklyToMonthly', () => {
+  it('turns a weekly rent into a monthly one', () => {
+    expect(M.weeklyToMonthly(207.12)).toBe(897.52);
   });
 });
 ```
 
-As the project evolves toward modules, tests will import directly. For now, focus on testing pure functions that can be extracted.
+A file with globals only runs in a `vm` sandbox with stubs for what it touches, as in `loadEngine()` in `tests/money-groups.test.js`, which loads the real `js/config.js` and `js/wealth.js`.
 
 ## Step 5: Run tests
 

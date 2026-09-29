@@ -31,21 +31,39 @@
  *      never the `window.` forms, which are undefined on a healthy app).
  *   4. Reads PAGE_REGISTRY live and visits every entry: a tab with a `tab-<id>`
  *      panel through switchTab(), reading the page inside its iframe when it has
- *      one, anything else by opening its standalone page. It clicks nothing, so
- *      it can never create, approve, pay or send.
- *   5. Prints one JSON result: per page PASS / WARN / FAIL. A page that stops at
+ *      one, anything else by opening its standalone page. It clicks nothing.
+ *      `--only id1,id2` walks just those registry ids (sign-in and the data load
+ *      still happen first). An id not in PAGE_REGISTRY is a FAIL named "not in
+ *      PAGE_REGISTRY", so a stale list is loud rather than walking nothing.
+ *   5. BLOCKS EVERY WRITE, MECHANICALLY (29 Sep 2026). Every request from the
+ *      browser context goes through a route: GET, HEAD and OPTIONS are sent,
+ *      any other method (POST, PATCH, PUT, DELETE...) to any host is never sent.
+ *      It is answered locally with a 200 and a harmless Airtable-shaped body, and
+ *      logged as "METHOD host/path" on the page that tried it. Service workers
+ *      are blocked so none can send around the route. Why: the merge gate
+ *      (scripts/merge-pr.py) runs this walk against UNMERGED code with Kevin's
+ *      real token, so "it clicks nothing" is manners, not a guarantee. A blocked
+ *      write is reported, never judged: it does not change PASS / WARN / FAIL.
+ *      Limit: a GET that changes something server-side still goes out (the app
+ *      shell fires the invoice sync as a GET on every load).
+ *   6. Prints one JSON result: per page PASS / WARN / FAIL. A page that stops at
  *      its own entry gate (who is viewing, a Google sign-in, its own token
  *      screen, still loading) is WARN with the gate named, never PASS: it
  *      rendered, but its data went unchecked. Errors from telemetry hosts and
  *      browser extensions are counted as outsideNoise, never as a failure.
- *      Error text and leak snippets are short and scrubbed.
+ *      Error text and leak snippets are short and scrubbed. Every DISTINCT
+ *      console error and leak snippet is kept, up to 50 per list, beside a
+ *      total count, and `truncated` says when a list hit 50. Error text has the
+ *      walked origin stripped before it is cut, so the same error reads the
+ *      same on the live app and on a local copy (29 Sep 2026: the merge gate
+ *      compares the two, and a cap of 3 hid a new 4th error).
  *
- * Usage:  node scripts/prod-walk.js [--base URL] [--settle-ms N]
+ * Usage:  node scripts/prod-walk.js [--base URL] [--settle-ms N] [--only id1,id2]
  *         Run it with a 10-minute command timeout: it stops itself at 8.
  * Exit:   0 no page FAILED, 1 a page FAILED or was not reached, 2 cannot run
- *         (no token file, no Playwright, a --base that is not the app),
- *         3 the walk did not happen (never signed in, site unreachable, empty
- *         page catalogue).
+ *         (an empty --only, no token file, no Playwright, a --base that is not
+ *         the app), 3 the walk did not happen (never signed in, site
+ *         unreachable, empty page catalogue).
  * Guarded by tests/prod-walk.test.js.
  */
 'use strict';
@@ -116,20 +134,86 @@ function clip(text, n, secret = SECRET) {
   return scrub(text, secret).slice(0, n);
 }
 
-/** Short scrubbed context around each match, at most three. */
+// Every list the merge gate compares between two walks (live, then the PR) keeps
+// each DISTINCT entry up to this many, beside a total count. Until 29 Sep 2026 a
+// page kept its first 3 errors, so a PR that added a 4th to a page already
+// showing 3 compared as unchanged.
+const LIST_CAP = 50;
+
+/** Add an entry only when it is new and the list has room. */
+function pushDistinct(list, item, cap = LIST_CAP) {
+  if (list.length < cap && !list.includes(item)) list.push(item);
+}
+
+/** Short scrubbed context around each match: every distinct one up to the
+ *  cap, and the count of every match, repeats included. */
 function snippets(text, re, secret = SECRET) {
   const t = scrub(text, secret);
-  const out = [];
+  const list = [];
+  let count = 0;
   re.lastIndex = 0;
   let m;
-  while ((m = re.exec(t)) && out.length < 3) {
-    out.push(t.slice(Math.max(0, m.index - 20), m.index + m[0].length + 20).replace(/\s+/g, ' ').trim());
+  while ((m = re.exec(t))) {
+    count += 1;
+    pushDistinct(list, t.slice(Math.max(0, m.index - 20), m.index + m[0].length + 20).replace(/\s+/g, ' ').trim());
   }
-  return out;
+  return { list, count };
 }
 
 function findLeaks(text, secret = SECRET) {
-  return { hard: snippets(text, HARD_LEAK_RE, secret), soft: snippets(text, SOFT_LEAK_RE, secret) };
+  const hard = snippets(text, HARD_LEAK_RE, secret);
+  const soft = snippets(text, SOFT_LEAK_RE, secret);
+  return { hard: hard.list, soft: soft.list, hardCount: hard.count, softCount: soft.count };
+}
+
+/** Remove the walked origin, so "/js/x.js" reads the same on the live app and
+ *  on a local copy served from http://127.0.0.1:<port>. */
+function stripOrigin(s, origin) {
+  const t = String(s == null ? '' : s);
+  return origin ? t.split(origin).join('') : t;
+}
+
+/** One console error as "message @ path". The origin is stripped from both
+ *  BEFORE either is cut, and each is cut on its own (message 200, path 120):
+ *  cutting "message @ full URL" at 200 cut the same message at a different
+ *  point on each origin, so an unchanged error read as new. */
+function errorLine(text, url, origin, secret = SECRET) {
+  const msg = clip(stripOrigin(text, origin), 200, secret);
+  const path = clip(stripOrigin(String(url == null ? '' : url).split(/[?#]/)[0], origin), 120, secret);
+  return path ? msg + ' @ ' + path : msg;
+}
+
+/** Charge one error to a page record: counted always, listed once. */
+function recordError(rec, line) {
+  rec.consoleErrorCount = (rec.consoleErrorCount || 0) + 1;
+  pushDistinct(rec.consoleErrors, line);
+}
+
+/** One page as printed. Every field the Sunday slot already reads keeps its
+ *  name and meaning; the counts and `truncated` are additions. `truncated` is
+ *  true when any compared list reached the cap, so a comparison knows it may
+ *  not have seen everything. */
+function pageReport(r) {
+  const errs = r.consoleErrors || [], leaks = r.leaks || [], soft = r.softLeaks || [];
+  return {
+    id: r.id, name: r.name, kind: r.kind, status: r.status, chars: r.chars, frame: r.frame,
+    gate: r.gate || undefined, httpStatus: r.httpStatus, error: r.error,
+    // The merge gate reads this: a hidden panel still has innerText (29 Sep 2026).
+    rendered: r.rendered,
+    consoleErrors: errs.slice(0, LIST_CAP), consoleErrorCount: r.consoleErrorCount || 0,
+    failedRequests: (r.failedRequests || []).slice(0, 3),
+    leaks: leaks.slice(0, LIST_CAP), softLeaks: soft.slice(0, LIST_CAP),
+    leakCount: r.leakCount || 0, softLeakCount: r.softLeakCount || 0,
+    truncated: [errs, leaks, soft].some(l => l.length >= LIST_CAP),
+    writesBlocked: (r.writesBlocked || []).slice(0, 5),
+  };
+}
+
+/** The sign-in's errors, as the top-level fields of the result. */
+function bootReport(boot) {
+  const errs = boot.consoleErrors || [];
+  return { bootErrors: errs.slice(0, LIST_CAP), bootErrorCount: boot.consoleErrorCount || 0,
+           bootTruncated: errs.length >= LIST_CAP };
 }
 
 /** The gate a page stopped at, or '' when it showed its content. Only a short
@@ -193,6 +277,109 @@ function summarise(pages) {
   return counts;
 }
 
+/** The ids named by --only: split on commas, trimmed, blanks and repeats
+ *  dropped. An empty list means --only was given with nothing in it. */
+function parseOnly(raw) {
+  const out = [];
+  for (const id of String(raw == null ? '' : raw).split(',').map(s => s.trim())) {
+    if (id && !out.includes(id)) out.push(id);
+  }
+  return out;
+}
+
+/** The registry entries to walk. With no --only (null), every entry. With
+ *  --only, the named entries in the registry's own order, plus the ids the
+ *  registry does not have, which the walk reports as FAILs. */
+function selectEntries(registry, only) {
+  const reg = Array.isArray(registry) ? registry : [];
+  if (only == null) return { entries: reg.slice(), missing: [] };
+  const want = parseOnly(Array.isArray(only) ? only.join(',') : only);
+  const have = new Set(reg.map(e => e && e.id));
+  return {
+    entries: reg.filter(e => e && want.includes(e.id)),
+    missing: want.filter(id => !have.has(id)),
+  };
+}
+
+// Methods that only read. Everything else is a write and is never sent.
+const READ_METHODS = new Set(['GET', 'HEAD', 'OPTIONS']);
+
+/** True for any method that is not GET, HEAD or OPTIONS, in any case. A
+ *  missing method counts as a write: the block fails closed. */
+function isWrite(method) {
+  return !READ_METHODS.has(String(method == null ? '' : method).trim().toUpperCase());
+}
+
+/** "METHOD host/path" for a blocked write: no query string, no hash, scrubbed. */
+function describeWrite(method, url, secret = SECRET) {
+  const m = String(method == null ? '' : method).toUpperCase() || '?';
+  let where;
+  try {
+    const u = new URL(url);
+    where = u.host + u.pathname;
+  } catch (e) {
+    where = String(url == null ? '' : url).split(/[?#]/)[0];
+  }
+  return clip(m + ' ' + where, 160, secret);
+}
+
+// What a blocked write gets back. It satisfies both Airtable shapes (a batch
+// reads `records`, a single write reads `id` and `fields`), so page code that
+// awaits the write does not throw on the block and charge an error to itself.
+const BLOCKED_BODY = JSON.stringify({ records: [], id: 'recBLOCKEDBYWALK', fields: {}, blockedByWalk: true });
+
+/** Route every request in the context: reads go out, writes never do. Each
+ *  blocked write is answered locally and passed to onBlocked("METHOD host/path").
+ *  Cross-origin callers get CORS headers so the page reads the answer. */
+async function blockWrites(ctx, onBlocked) {
+  await ctx.route('**/*', async (route) => {
+    const req = route.request();
+    if (!isWrite(req.method())) return route.continue();
+    // Reporting must never decide whether a write goes out: log the fault, block anyway.
+    try { onBlocked(describeWrite(req.method(), req.url())); } catch (e) {
+      process.stderr.write('prod-walk: a write was blocked but could not be logged: ' + clip(e && e.message, 120) + '\n');
+    }
+    const origin = (req.headers() || {}).origin;
+    const headers = origin
+      ? { 'access-control-allow-origin': origin, 'access-control-allow-credentials': 'true', vary: 'Origin' }
+      : { 'access-control-allow-origin': '*' };
+    return route.fulfill({ status: 200, contentType: 'application/json', headers, body: BLOCKED_BODY });
+  });
+}
+
+/** Charge a page's console errors, uncaught exceptions and failed requests to
+ *  whichever record getCurrent() returns (none while no record is open). */
+function attachHooks(page, origin, getCurrent) {
+  page.on('console', (m) => {
+    const current = getCurrent();
+    if (m.type() !== 'error' || !current) return;
+    const where = (m.location() || {}).url || '';
+    const text = m.text();
+    // A 429 is Airtable's rate limit, which airtableFetch retries.
+    if (isNoise(where) || /status of 429/.test(text)) { current.outsideNoise += 1; return; }
+    recordError(current, errorLine(text, where, origin));
+  });
+  page.on('pageerror', (e) => {
+    const current = getCurrent();
+    if (!current) return;
+    if (isAppError(e.stack, origin)) recordError(current, errorLine('pageerror: ' + e.message, '', origin));
+    else current.outsideNoise += 1;
+  });
+  page.on('requestfailed', (r) => {
+    const current = getCurrent();
+    if (!current) return;
+    const why = (r.failure() || {}).errorText || '';
+    if (isNoise(r.url()) || /ERR_ABORTED/.test(why)) { current.outsideNoise += 1; return; }
+    current.failedRequests.push(clip(why + ' ' + stripOrigin(r.url().split('?')[0], origin), 140));
+  });
+  page.on('response', (r) => {
+    const current = getCurrent();
+    if (current && r.status() >= 400 && r.status() !== 429 && !isNoise(r.url())) {
+      current.failedRequests.push(clip(r.status() + ' ' + stripOrigin(r.url().split('?')[0], origin), 140));
+    }
+  });
+}
+
 // ─── the walk ────────────────────────────────────────────────────────────
 
 function loadChromium() {
@@ -202,11 +389,15 @@ function loadChromium() {
   return null;
 }
 
+/** `only` is null when --only is absent, else the list of ids it named (which
+ *  can be empty: main() refuses that before it reads the token). */
 function args(argv) {
-  const a = { base: DEFAULT_BASE, settleMs: 3500 };
+  const a = { base: DEFAULT_BASE, settleMs: 3500, only: null };
   for (let i = 0; i < argv.length; i += 1) {
     if (argv[i] === '--base') a.base = argv[++i];
     else if (argv[i] === '--settle-ms') a.settleMs = Number(argv[++i]) || a.settleMs;
+    else if (argv[i] === '--only') a.only = parseOnly(argv[++i]);
+    else if (String(argv[i]).startsWith('--only=')) a.only = parseOnly(String(argv[i]).slice('--only='.length));
   }
   return a;
 }
@@ -226,13 +417,21 @@ function authFormVisible() {
 
 // The pages walked so far, for the hard stop.
 const DONE = [];
+// Every write the route blocked, whichever page (or none) was current.
+const WRITES = { total: 0 };
 
 async function main() {
   const a = args(process.argv.slice(2));
   const started = Date.now();
+  // Before the token is read or a browser starts: an empty --only would walk
+  // nothing and report a pass.
+  if (a.only && !a.only.length) {
+    return finish({ ok: false, ran: false, only: a.only, reason: 'refused --only: it names no page ids, so the walk would check nothing' }, 2);
+  }
   setTimeout(() => finish({ ok: false, ran: true, reason: `HARD STOP: a page hung past ${HARD_STOP_MS / 1000}s; the pages after the last one listed were not walked`,
-                            pagesWalked: DONE.length, counts: summarise(DONE),
-                            pages: DONE.map(({ id, status, gate, error }) => ({ id, status, gate: gate || undefined, error })) }, 1),
+                            only: a.only, pagesWalked: DONE.length, counts: summarise(DONE), writesBlocked: WRITES.total,
+                            pages: DONE.map(({ id, status, gate, error, writesBlocked }) =>
+                              ({ id, status, gate: gate || undefined, error, writesBlocked: (writesBlocked || []).slice(0, 5) })) }, 1),
              HARD_STOP_MS).unref();
   const base = allowedBase(a.base);
   if (!base) return finish({ ok: false, ran: false, reason: 'refused --base: only the live app or a local copy may be walked' }, 2);
@@ -260,37 +459,21 @@ async function main() {
 async function walk(browser, a, base, origin, started) {
   const ctx = await browser.newContext({
     viewport: { width: 1280, height: 900 },
+    // A service worker's own fetches would not pass through the route below.
+    serviceWorkers: 'block',
     storageState: { cookies: [], origins: [{ origin, localStorage: [
       { name: '_dlr_pat', value: SECRET }, { name: 'airtable_pat', value: SECRET }] }] },
   });
 
   let current = null;           // the page record errors are charged to
-  const hook = (page) => {
-    page.on('console', (m) => {
-      if (m.type() !== 'error' || !current) return;
-      const where = (m.location() || {}).url || '';
-      const text = m.text();
-      // A 429 is Airtable's rate limit, which airtableFetch retries.
-      if (isNoise(where) || /status of 429/.test(text)) { current.outsideNoise += 1; return; }
-      current.consoleErrors.push(clip(text + (where ? ' @ ' + where.split('?')[0] : ''), 200));
-    });
-    page.on('pageerror', (e) => {
-      if (!current) return;
-      if (isAppError(e.stack, origin)) current.consoleErrors.push(clip('pageerror: ' + e.message, 200));
-      else current.outsideNoise += 1;
-    });
-    page.on('requestfailed', (r) => {
-      if (!current) return;
-      const why = (r.failure() || {}).errorText || '';
-      if (isNoise(r.url()) || /ERR_ABORTED/.test(why)) { current.outsideNoise += 1; return; }
-      current.failedRequests.push(clip(why + ' ' + r.url().split('?')[0], 140));
-    });
-    page.on('response', (r) => {
-      if (current && r.status() >= 400 && r.status() !== 429 && !isNoise(r.url())) {
-        current.failedRequests.push(clip(r.status() + ' ' + r.url().split('?')[0], 140));
-      }
-    });
-  };
+  const idleWrites = [];        // writes tried while no page record was open
+  // Installed before the first page opens, so nothing is ever sent unrouted.
+  await blockWrites(ctx, (label) => {
+    WRITES.total += 1;
+    const list = current ? current.writesBlocked : idleWrites;
+    if (list.length < 5) list.push(label);
+  });
+  const hook = (page) => attachHooks(page, origin, () => current);
 
   // An iframe panel loads its page only once the tab opens, then fetches its
   // own data. Read the frame (Playwright reaches cross-origin frames too) until
@@ -315,7 +498,7 @@ async function walk(browser, a, base, origin, started) {
 
   const page = await ctx.newPage();
   hook(page);
-  const boot = { id: '(sign-in)', consoleErrors: [], failedRequests: [], outsideNoise: 0 };
+  const boot = { id: '(sign-in)', consoleErrors: [], consoleErrorCount: 0, failedRequests: [], outsideNoise: 0, writesBlocked: [] };
   current = boot;
   let signedIn = null;
   try {
@@ -339,7 +522,8 @@ async function walk(browser, a, base, origin, started) {
   }
   if (!signedIn) {
     return finish({ ok: false, ran: false, reason: `NOT SIGNED IN: no data loaded within ${SIGNIN_BUDGET_MS / 1000}s`,
-                    bootErrors: boot.consoleErrors.slice(0, 5) }, 3);
+                    only: a.only, ...bootReport(boot),
+                    writesBlocked: WRITES.total, bootWritesBlocked: boot.writesBlocked }, 3);
   }
 
   const registry = await page.evaluate(() => {
@@ -350,12 +534,14 @@ async function walk(browser, a, base, origin, started) {
   });
   // CONTROL: an empty catalogue reads as "nothing to walk" for ever.
   if (!registry.length) {
-    return finish({ ok: false, ran: false, reason: 'PAGE_REGISTRY read as empty on a signed-in app: the walk would pass on nothing' }, 3);
+    return finish({ ok: false, ran: false, only: a.only, reason: 'PAGE_REGISTRY read as empty on a signed-in app: the walk would pass on nothing' }, 3);
   }
 
+  const { entries, missing } = selectEntries(registry, a.only);
   const pages = [];
-  for (const entry of registry) {
-    const r = { id: entry.id, name: entry.name, consoleErrors: [], failedRequests: [], leaks: [], softLeaks: [], outsideNoise: 0 };
+  for (const entry of entries) {
+    const r = { id: entry.id, name: entry.name, consoleErrors: [], consoleErrorCount: 0, failedRequests: [], leaks: [], softLeaks: [],
+                leakCount: 0, softLeakCount: 0, outsideNoise: 0, writesBlocked: [] };
     if (Date.now() - started > TOTAL_BUDGET_MS) {
       r.error = `not reached: the ${TOTAL_BUDGET_MS / 60000}-minute budget ran out first`;
       r.status = classify(r);
@@ -405,6 +591,8 @@ async function walk(browser, a, base, origin, started) {
       const leaks = findLeaks(text);
       r.leaks = leaks.hard;
       r.softLeaks = leaks.soft;
+      r.leakCount = leaks.hardCount;
+      r.softLeakCount = leaks.softCount;
       r.gate = findGate(text) || (gated ? 'shows its own sign-in screen' : '');
     } catch (e) {
       r.error = clip(e.message, 200);
@@ -416,29 +604,41 @@ async function walk(browser, a, base, origin, started) {
     pages.push(r);
     DONE.push(r);
   }
+  // A --only id the live registry does not have: a stale map, never a silent skip.
+  for (const id of missing) {
+    const r = { id, name: '', consoleErrors: [], consoleErrorCount: 0, failedRequests: [], leaks: [], softLeaks: [],
+                leakCount: 0, softLeakCount: 0, outsideNoise: 0, writesBlocked: [], error: 'not in PAGE_REGISTRY' };
+    r.status = classify(r);
+    pages.push(r);
+    DONE.push(r);
+  }
 
   const counts = summarise(pages);
   const result = {
     ok: counts.FAIL === 0,
     ran: true,
-    mode: 'FULL (signed in, scripted)',
+    mode: a.only ? 'ONLY (signed in, scripted, named pages)' : 'FULL (signed in, scripted)',
     base,
+    only: a.only,
     signedIn: true,
     records: signedIn,
     pagesWalked: pages.length,
     counts,
-    bootErrors: boot.consoleErrors.slice(0, 5),
+    writesBlocked: WRITES.total,
+    bootWritesBlocked: boot.writesBlocked,
+    idleWritesBlocked: idleWrites,
+    ...bootReport(boot),
     bootFailedRequests: boot.failedRequests.slice(0, 5),
     outsideNoise: pages.reduce((n, p) => n + p.outsideNoise, boot.outsideNoise),
-    pages: pages.map(({ id, name, kind, status, chars, frame, gate, httpStatus, error, consoleErrors, failedRequests, leaks, softLeaks }) =>
-      ({ id, name, kind, status, chars, frame, gate: gate || undefined, httpStatus, error,
-         consoleErrors: consoleErrors.slice(0, 3), failedRequests: failedRequests.slice(0, 3), leaks, softLeaks })),
+    pages: pages.map(pageReport),
     seconds: Math.round((Date.now() - started) / 1000),
   };
   return finish(result, result.ok ? 0 : 1);
 }
 
-module.exports = { scrub, clip, findLeaks, findGate, isNoise, isAppError, allowedBase, routeFor, classify, summarise, MIN_CHARS };
+module.exports = { scrub, clip, findLeaks, findGate, isNoise, isAppError, allowedBase, routeFor, classify, summarise, MIN_CHARS,
+                   args, parseOnly, selectEntries, isWrite, describeWrite, blockWrites, BLOCKED_BODY,
+                   LIST_CAP, stripOrigin, errorLine, recordError, pageReport, bootReport, attachHooks };
 
 if (require.main === module) {
   main().catch((e) => {

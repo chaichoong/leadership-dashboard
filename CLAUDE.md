@@ -259,11 +259,11 @@ Sage Executive tokens, and the rule that every new HTML page links `css/tokens.c
 - **New features, multi-file changes, anything touching shared files (config.js, shared.js, index.html, styles.css):** work on a branch, push, create a PR. This protects against concurrent session conflicts
 - Branch naming: `feature/short-description` or `fix/short-description`
 
-**Decide branch-or-main BEFORE you commit, and use one route per change.** `gh pr merge --squash`
-puts a NEW commit on origin, so a commit made before you branched is stranded as a stale twin
-that nothing cleans up. Going to open a PR? Create the branch first with
-`./scripts/worktree.sh new <topic>`. A commit on `main` AND a PR for the same change is always
-a bug.
+**Decide branch-or-main BEFORE you commit, and use one route per change.** A squash merge (what
+`scripts/merge-pr.py` does) puts a NEW commit on origin, so a commit made before you branched
+is stranded as a stale twin that nothing cleans up. Going to open a PR? Create the branch first
+with `./scripts/worktree.sh new <topic>`. A commit on `main` AND a PR for the same change is
+always a bug.
 
 ### Creating the PR
 
@@ -272,8 +272,11 @@ a bug.
 ```bash
 git push -u origin <branch>
 gh pr create --title "..." --body "..."
-gh pr merge --squash --delete-branch
+python3 scripts/merge-pr.py --pr <N>
 ```
+
+`merge-pr.py` tests main plus the PR, walks the pages it touches read-only, and merges only when
+green. Run it in the background: it takes 5 to 15 minutes. A hook refuses a bare `gh pr merge`.
 
 The `github` MCP server remains **read-only** — `create_pull_request` returns "Authentication Failed". Use `gh`, not the MCP, for any write.
 
@@ -283,12 +286,11 @@ Kevin cannot click a terminal link: always `open` the deployed page and any deli
 
 Do NOT quietly merge to main locally as a fallback when a branch was created for review — that discards the review step the branch existed for.
 
-**If the pre-push gate blocks a push to main on a test that is unrelated to your change:** do not reach for `SKIP_SYNC_TESTS=1`. Only `main` is gated (see `scripts/pre-push`), so push a branch and merge it with `gh` instead. Verify the failure really is unrelated first — run the failing test in isolation, and re-run the suite to see whether a *different* test fails, which indicates flakiness rather than a regression.
+**If the pre-push gate blocks a push to main on a test that is unrelated to your change:** do not reach for `SKIP_SYNC_TESTS=1`. Re-run that test in isolation first: if it passes alone, it is flaky, so push again. If it still fails, main is red, and a branch will not get round it because `merge-pr.py` tests the merge result too. Fix main first in its own PR.
 
-This fallback is the one that has actually stranded commits, so finish the job:
+If a change you committed on local `main` then lands through a PR, finish the job:
 
 ```bash
-gh pr merge --squash --delete-branch
 git reset --keep origin/main   # MANDATORY — drops the stranded local commit
 ```
 

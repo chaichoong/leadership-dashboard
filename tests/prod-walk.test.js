@@ -1,8 +1,10 @@
 import { describe, it, expect } from 'vitest';
 import { createRequire } from 'module';
 import { execFileSync } from 'child_process';
-import { readFileSync } from 'fs';
-import { resolve, dirname } from 'path';
+import { readFileSync, mkdtempSync, rmSync } from 'fs';
+import { tmpdir } from 'os';
+import { createServer } from 'http';
+import { resolve, dirname, join } from 'path';
 import { fileURLToPath } from 'url';
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
@@ -135,6 +137,283 @@ describe('prod-walk.js routeFor', () => {
     expect(walk.routeFor({ standalone: 'os/agents/index.html#ceo-brief' }, false)).toEqual({ kind: 'page', file: 'os/agents/index.html' });
     expect(walk.routeFor({ standalone: '' }, false)).toEqual({ kind: 'none' });
   });
+});
+
+// 29 Sep 2026: the merge gate (scripts/merge-pr.py) runs this walk against
+// UNMERGED code with Kevin's real token, on only the pages a PR touches. Before
+// this, "read-only" meant "clicks nothing": any page code that wrote on load
+// would have written to live Airtable. Now every non-read method is answered
+// locally and never sent, and --only narrows the walk without ever letting a
+// stale id walk nothing.
+describe('prod-walk.js --only', () => {
+  const reg = [{ id: 'overview' }, { id: 'tasks' }, { id: 'growth-plan' }, { id: 'agents' }];
+  it('walks every entry when --only is absent', () => {
+    expect(walk.selectEntries(reg, null)).toEqual({ entries: reg, missing: [] });
+  });
+  it('keeps the named ids, in the registry\'s own order', () => {
+    const { entries, missing } = walk.selectEntries(reg, ['agents', 'overview']);
+    expect(entries.map(e => e.id)).toEqual(['overview', 'agents']);
+    expect(missing).toEqual([]);
+  });
+  it('reports an id the registry does not have, so a stale map is loud', () => {
+    const { entries, missing } = walk.selectEntries(reg, ['growth-plan', 'retired-page', 'growth-plan']);
+    expect(entries.map(e => e.id)).toEqual(['growth-plan']);
+    expect(missing).toEqual(['retired-page']);
+  });
+  it('parses --only in both spellings, drops blanks and repeats, and tells absent from empty', () => {
+    expect(walk.args([]).only).toBeNull();
+    expect(walk.args(['--only', 'growth-plan, tasks,,growth-plan']).only).toEqual(['growth-plan', 'tasks']);
+    expect(walk.args(['--only=agents', '--base', 'http://localhost:8951/']).only).toEqual(['agents']);
+    expect(walk.args(['--only', '']).only).toEqual([]);
+    expect(walk.args(['--only']).only).toEqual([]);
+  });
+  it('exits 2 on an empty --only before it reads the token or starts a browser (drives the real script)', () => {
+    // An empty HOME has no token file: if the token were read first, the
+    // reason would be "no usable token file", not the --only refusal.
+    const home = mkdtempSync(join(tmpdir(), 'prod-walk-home-'));
+    try {
+      for (const argv of [['--only', ''], ['--only', ' , '], ['--only']]) {
+        let out = '', code = 0;
+        try { out = execFileSync('node', [SCRIPT, ...argv], { encoding: 'utf8', env: { ...process.env, HOME: home }, timeout: 20000 }); }
+        catch (e) { out = e.stdout; code = e.status; }
+        expect(code, argv.join(' ')).toBe(2);
+        const res = JSON.parse(out);
+        expect(res.reason).toMatch(/refused --only/);
+        expect(res.ran).toBe(false);
+        expect(res.only).toEqual([]);
+      }
+    } finally {
+      rmSync(home, { recursive: true, force: true });
+    }
+  });
+});
+
+describe('prod-walk.js blocks every write', () => {
+  it('lets only GET, HEAD and OPTIONS out, in any case, and fails closed on a missing method', () => {
+    for (const m of ['GET', 'HEAD', 'OPTIONS', 'get', 'Head', 'options']) expect(walk.isWrite(m), m).toBe(false);
+    for (const m of ['POST', 'PATCH', 'PUT', 'DELETE', 'post', 'Patch', 'put', 'delete', 'PROPFIND', '', undefined]) {
+      expect(walk.isWrite(m), String(m)).toBe(true);
+    }
+  });
+  it('names a blocked write as METHOD host/path, with no query string and no token', () => {
+    expect(walk.describeWrite('patch', `https://api.airtable.com/v0/appX/tblY?api_key=${SECRET}#x`, SECRET))
+      .toBe('PATCH api.airtable.com/v0/appX/tblY');
+    expect(walk.describeWrite('POST', `https://x.workers.dev/${SECRET}/send`, SECRET)).not.toContain(SECRET.slice(0, 10));
+  });
+  it('answers in both Airtable shapes, so page code does not throw on the block', () => {
+    const body = JSON.parse(walk.BLOCKED_BODY);
+    expect(body).toMatchObject({ records: [], id: 'recBLOCKEDBYWALK', fields: {}, blockedByWalk: true });
+  });
+  it('reports a blocked write but never judges on it', () => {
+    const ok = { rendered: true, chars: 500, consoleErrors: [], failedRequests: [], leaks: [], softLeaks: [] };
+    expect(walk.classify({ ...ok, writesBlocked: ['PATCH api.airtable.com/v0/appX/tblY'] })).toBe('PASS');
+  });
+
+  it('never sends a write from a real browser: fetch, XHR and beacon, same-origin and cross-origin (real Playwright)', async () => {
+    let chromium;
+    try { ({ chromium } = require('playwright-core')); } catch { /* asserted below */ }
+    expect(chromium, 'playwright-core is not installed').toBeTruthy();
+
+    // Two local servers that record every request that actually reaches them.
+    const seen = [];
+    const serve = (name, handler) => new Promise((ok) => {
+      const s = createServer((req, res) => { seen.push(`${name} ${req.method} ${req.url}`); handler(req, res); });
+      s.listen(0, '127.0.0.1', () => ok(s));
+    });
+    const api = await serve('api', (req, res) => {
+      res.writeHead(200, { 'access-control-allow-origin': '*', 'access-control-allow-methods': '*',
+                           'access-control-allow-headers': '*', 'content-type': 'application/json' });
+      res.end('{"records":[{"id":"recREAL"}]}');
+    });
+    const app = await serve('app', (req, res) => {
+      if (req.url.startsWith('/read')) { res.writeHead(200, { 'content-type': 'application/json' }); return res.end('{"read":true}'); }
+      res.writeHead(200, { 'content-type': 'text/html' });
+      res.end('<!doctype html><html><body>walk test</body></html>');
+    });
+    const A = `http://127.0.0.1:${app.address().port}`;
+    const B = `http://127.0.0.1:${api.address().port}`;
+
+    const browser = await chromium.launch({ headless: true });
+    try {
+      const ctx = await browser.newContext({ serviceWorkers: 'block' });
+      const blocked = [];
+      await walk.blockWrites(ctx, (label) => blocked.push(label));
+      const page = await ctx.newPage();
+      await page.goto(A + '/');
+      const got = await page.evaluate(async ({ A, B }) => {
+        const out = {};
+        const json = async (p) => { try { return await (await p).json(); } catch (e) { return { threw: String(e) }; } };
+        out.patch = await json(fetch(B + '/v0/appX/tblY?secret=1', { method: 'PATCH',
+          headers: { 'Content-Type': 'application/json', Authorization: 'Bearer x' }, body: '{"records":[]}' }));
+        out.post = await json(fetch(A + '/write', { method: 'POST', body: 'x' }));
+        out.del = await new Promise((ok) => {
+          const x = new XMLHttpRequest();
+          x.open('DELETE', B + '/v0/appX/tblY/rec1');
+          x.onload = () => ok({ status: x.status, body: x.responseText });
+          x.onerror = () => ok({ threw: 'xhr error' });
+          x.send();
+        });
+        out.beacon = navigator.sendBeacon(A + '/beacon', 'x');
+        out.read = await json(fetch(A + '/read?q=1'));
+        out.crossRead = await json(fetch(B + '/v0/appX/tblY'));
+        return out;
+      }, { A, B });
+      await page.waitForTimeout(800);   // let the beacon go, if it were going to
+
+      // The page read the block as a normal answer, including cross-origin.
+      expect(got.patch).toMatchObject({ id: 'recBLOCKEDBYWALK', blockedByWalk: true });
+      expect(got.post).toMatchObject({ blockedByWalk: true });
+      expect(got.del.status).toBe(200);
+      expect(JSON.parse(got.del.body).blockedByWalk).toBe(true);
+      // Reads still go out and come back.
+      expect(got.read).toEqual({ read: true });
+      expect(got.crossRead).toEqual({ records: [{ id: 'recREAL' }] });
+
+      // THE CONTRACT: nothing but reads ever reached either server.
+      const writesThatLeaked = seen.filter(s => !/ (GET|HEAD|OPTIONS) /.test(s));
+      expect(writesThatLeaked).toEqual([]);
+      expect(seen).toContain(`api GET /v0/appX/tblY`);
+
+      // Each block is named, without its query string.
+      expect(blocked).toContain(`PATCH 127.0.0.1:${api.address().port}/v0/appX/tblY`);
+      expect(blocked).toContain(`POST 127.0.0.1:${app.address().port}/write`);
+      expect(blocked).toContain(`DELETE 127.0.0.1:${api.address().port}/v0/appX/tblY/rec1`);
+      expect(blocked).toContain(`POST 127.0.0.1:${app.address().port}/beacon`);
+      expect(blocked.join(' ')).not.toContain('secret=1');
+    } finally {
+      await browser.close();
+      app.close();
+      api.close();
+    }
+  }, 60000);
+});
+
+// 29 Sep 2026, caught in review: the merge gate compares the live walk with the
+// walk of a PR served locally. Two things made that comparison blind:
+// 1. each page kept its first 3 console errors (and the sign-in its first 5,
+//    and each page its first 3 leak snippets), so when live already showed 3
+//    errors, a PR's 4th was cut off and the pages compared as equal;
+// 2. an error was cut at 200 characters as "message @ full URL", and the live
+//    origin (37 characters) and a local one (about 22) cut the same message at
+//    different points, so an unchanged error read as new.
+describe('prod-walk.js keeps every distinct error, and a count, for the merge gate', () => {
+  const base = { id: 'p', name: 'P', status: 'FAIL', consoleErrors: [], failedRequests: [], leaks: [], softLeaks: [], writesBlocked: [] };
+  it('keeps a 4th distinct error, counts repeats, and says when nothing was cut', () => {
+    const r = { ...base, consoleErrors: [] };
+    for (const e of ['E1', 'E2', 'E3', 'E4', 'E2']) walk.recordError(r, e);
+    const out = walk.pageReport(r);
+    expect(out.consoleErrors).toEqual(['E1', 'E2', 'E3', 'E4']);
+    expect(out.consoleErrorCount).toBe(5);
+    expect(out.truncated).toBe(false);
+  });
+  it('stops listing at 50 distinct errors, keeps counting, and flags the cut', () => {
+    const r = { ...base, consoleErrors: [] };
+    for (let i = 0; i < 70; i += 1) walk.recordError(r, 'E' + i);
+    const out = walk.pageReport(r);
+    expect(out.consoleErrors).toHaveLength(walk.LIST_CAP);
+    expect(walk.LIST_CAP).toBe(50);
+    expect(out.consoleErrorCount).toBe(70);
+    expect(out.truncated).toBe(true);
+  });
+  it('keeps every distinct leak snippet up to 50, with a count of every match', () => {
+    // Each leak padded wider than the 20-character context, so a repeat reads the same.
+    const item = (i) => '.'.repeat(25) + `Rent${i}: NaN` + '.'.repeat(25);
+    const text = Array.from({ length: 8 }, (_, i) => item(i)).join('');
+    const l = walk.findLeaks(text + text, SECRET);           // each leak twice
+    expect(l.hard).toHaveLength(8);                          // distinct, not the first 3
+    expect(l.hardCount).toBe(16);                            // repeats counted
+    expect(l.softCount).toBe(16);
+    const many = Array.from({ length: 60 }, (_, i) => item(i)).join('');
+    const lm = walk.findLeaks(many, SECRET);
+    expect(lm.hard).toHaveLength(50);
+    expect(lm.hardCount).toBe(60);
+    const out = walk.pageReport({ ...base, leaks: lm.hard, softLeaks: lm.soft, leakCount: lm.hardCount, softLeakCount: lm.softCount });
+    expect(out.leakCount).toBe(60);
+    expect(out.softLeakCount).toBe(60);
+    expect(out.truncated).toBe(true);
+  });
+  it('keeps every field the Sunday slot already reads', () => {
+    const out = walk.pageReport({ ...base, kind: 'page', chars: 900, httpStatus: 200, gate: '',
+                                  failedRequests: ['a', 'b', 'c', 'd'], writesBlocked: ['1', '2', '3', '4', '5', '6'] });
+    for (const k of ['id', 'name', 'kind', 'status', 'chars', 'consoleErrors', 'failedRequests', 'leaks', 'softLeaks', 'writesBlocked']) {
+      expect(out, k).toHaveProperty(k);
+    }
+    expect(out.gate).toBeUndefined();
+    expect(out.failedRequests).toHaveLength(3);
+    expect(out.writesBlocked).toHaveLength(5);
+  });
+  it('reports every distinct sign-in error, with a count and a cut flag', () => {
+    const boot = { consoleErrors: [], consoleErrorCount: 0 };
+    for (let i = 0; i < 7; i += 1) walk.recordError(boot, 'B' + i);
+    walk.recordError(boot, 'B0');
+    expect(walk.bootReport(boot)).toEqual({ bootErrors: ['B0', 'B1', 'B2', 'B3', 'B4', 'B5', 'B6'], bootErrorCount: 8, bootTruncated: false });
+  });
+});
+
+describe('prod-walk.js reads the same error the same on any origin', () => {
+  const LIVE = 'https://app.operationsdirector.co.uk';
+  const LOCAL = 'http://127.0.0.1:51234';
+  const long = 'TypeError: Cannot read properties of undefined (reading \'fields\') while rendering the rent statement table for the selected tenancy and its linked payments ' + 'x'.repeat(40);
+  it('strips the walked origin before cutting, and cuts message and path on their own', () => {
+    const live = walk.errorLine(long, `${LIVE}/js/cfv.js?v=30`, LIVE, SECRET);
+    const local = walk.errorLine(long, `${LOCAL}/js/cfv.js?v=30`, LOCAL, SECRET);
+    expect(local).toBe(live);
+    expect(live).toBe(long.slice(0, 200) + ' @ /js/cfv.js');
+    // A path is cut at 120 without eating into the message.
+    const deep = walk.errorLine('short', `${LIVE}/` + 'a/'.repeat(100) + 'x.js', LIVE, SECRET);
+    expect(deep.split(' @ ')[0]).toBe('short');
+    expect(deep.split(' @ ')[1]).toHaveLength(120);
+  });
+  it('strips the origin from the message too, and leaves other hosts whole', () => {
+    expect(walk.errorLine(`Failed to load ${LOCAL}/js/x.js`, '', LOCAL, SECRET)).toBe('Failed to load /js/x.js');
+    expect(walk.errorLine('boom', 'https://api.airtable.com/v0/appX/tblY?offset=1', LIVE, SECRET)).toBe('boom @ https://api.airtable.com/v0/appX/tblY');
+  });
+  it('records identical errors from two origins through the real browser hooks (real Playwright)', async () => {
+    let chromium;
+    try { ({ chromium } = require('playwright-core')); } catch { /* asserted below */ }
+    expect(chromium, 'playwright-core is not installed').toBeTruthy();
+    const APP_JS = `
+      const pad = 'y'.repeat(180);
+      for (const m of ['E1 ' + pad, 'E2', 'E3', 'E4', 'E2']) console.error(m);
+      console.error('Failed at ' + location.origin + '/js/thing.js ' + pad);
+      setTimeout(() => { throw new Error('boom at ' + location.origin + '/js/x.js'); }, 0);`;
+    const serve = () => new Promise((ok) => {
+      const s = createServer((req, res) => {
+        if (req.url.startsWith('/app.js')) { res.writeHead(200, { 'content-type': 'text/javascript' }); return res.end(APP_JS); }
+        res.writeHead(200, { 'content-type': 'text/html' });
+        res.end('<!doctype html><html><body>errors<script src="/app.js?v=1"></script></body></html>');
+      });
+      s.listen(0, '127.0.0.1', () => ok(s));
+    });
+    // Two servers, two origins, as the live walk and the merge gate's local walk are.
+    const a = await serve();
+    const b = await serve();
+    const browser = await chromium.launch({ headless: true });
+    try {
+      const walkOne = async (server) => {
+        const origin = `http://127.0.0.1:${server.address().port}`;
+        const rec = { consoleErrors: [], consoleErrorCount: 0, failedRequests: [], outsideNoise: 0 };
+        const page = await browser.newPage();
+        walk.attachHooks(page, origin, () => rec);
+        await page.goto(origin + '/');
+        await page.waitForTimeout(500);
+        await page.close();
+        return rec;
+      };
+      const ra = await walkOne(a);
+      const rb = await walkOne(b);
+      expect(ra.consoleErrors).toEqual(rb.consoleErrors);
+      expect(ra.consoleErrors).toHaveLength(6);          // E1..E4, the origin message, the pageerror
+      expect(ra.consoleErrorCount).toBe(7);              // the repeated E2 is counted
+      expect(ra.consoleErrors).toContain('E2 @ /app.js');
+      expect(ra.consoleErrors).toContain('pageerror: boom at /js/x.js');
+      expect(ra.consoleErrors.join(' ')).not.toContain('127.0.0.1');
+    } finally {
+      await browser.close();
+      a.close();
+      b.close();
+    }
+  }, 60000);
 });
 
 describe('the weekly sweep skill gives the robot routes that work', () => {

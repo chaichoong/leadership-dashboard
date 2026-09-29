@@ -73,9 +73,14 @@ Fork: [the genuine alternative you considered] — recommend [choice], because [
 ## D — Deliverable
 - [What "fixed" looks like]
 - [How to verify]
+
+## Worked example
+[record id]: shows [what it shows now, and where]. After the fix: [what it will show]. Rule: [the rule that produces it]
 ```
 
-For straightforward bugs (clear error message, obvious root cause), skip presenting the BILD prompt and proceed directly to diagnosis. State what you found and what you are fixing. Kevin does not need to approve a plan for a clear bug fix.
+The worked example is the real record that shows the bug, read live. Skip it only for a copy or style-only change. If no record shows the bug, write "None available" and say why. Never invent one.
+
+For straightforward bugs (clear error message, obvious root cause), skip presenting the BILD prompt and proceed directly to diagnosis. State what you found and what you are fixing. The confirmed root cause names the record that shows the bug: its id, what it shows now and what it will show after. Kevin does not need to approve a plan for a clear bug fix.
 
 Include the Fork line only when the fix genuinely has two valid approaches (patch the symptom at the render layer or fix the source data, for example). One sentence, no essay. If Kevin says go ahead, do not raise it again. Omit the line for a bug with one sane fix.
 
@@ -174,7 +179,7 @@ Fix anything found.
 
 If Vitest is set up:
 1. Check if the fixed function has a test
-2. If not, write one that covers the bug scenario (the test should fail without the fix and pass with it)
+2. If not, write one that covers the bug scenario (the test should fail without the fix and pass with it). Shape its fixture from the worked-example record, so the test holds the real data that broke
 3. Run the tests
 
 If no test framework, skip and note it.
@@ -216,7 +221,7 @@ git pull --rebase origin main && git push origin main
 ```
 
 For larger amendments (multi-file, behaviour change):
-Work on a branch, push, create a PR.
+Work on a branch, push, create a PR, then merge it only with `python3 scripts/merge-pr.py --pr <N>`. It tests main plus the PR, walks the pages it touches read-only, and merges only when green. Run it in the background: it takes 5 to 15 minutes. Never a bare `gh pr merge`.
 
 Then verify the deploy is live (hard reload, check the fix in the browser).
 

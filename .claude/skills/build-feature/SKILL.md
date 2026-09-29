@@ -210,6 +210,11 @@ Fork: [alternative considered] — recommend [choice], because [reason].
 - [Output with success criteria]
 - [How to verify it works]
 
+## Worked example
+1. [record id]: [the exact number, label or outcome the build shows or does, and where]. Rule: [the rule that produces it]
+2. [record id]: [...]. Rule: [...]
+3. [record id]: [...]. Rule: [...]
+
 ## Steps
 1. [file] — [change, anchored to what you read]
 2. [file] — [change]
@@ -235,6 +240,8 @@ Three rules for the Steps block:
 - **Each step names a real file you have already read**, with the line you are anchoring to where possible. A step you cannot anchor is a step you have not researched.
 - **"Not touching" is compulsory.** Naming what stays untouched is how Kevin spots a build about to sprawl, and it is the half of scope that constraints alone never capture.
 - **Verification is stated before the build, not invented after it.** If you cannot say how it will be proved, the deliverable is not testable yet, so sharpen D.
+
+**The worked example.** Read 3 real records live, or for a script or robot 3 real inputs (a task, an email, a day). Kevin checks them at the gate, where a wrong rule costs nothing to fix. The Growth Plan took 9 fixes in 3 days because its rent came from a rollup that counted ended tenancies: one unit read £1,800 against a live £500. Skip the block only for a copy or style-only change. If no real record exists, write "None available" and say why. Never invent one. After the build, the 3 examples become the first tests (a fixture shaped from the real records), and the GOAL checks read them back live.
 
 Ask once: "Should I build this as-is, or adjust anything?"
 
@@ -325,6 +332,8 @@ Scan all changed code for:
 Fix anything found. Do not ask for approval on simplification — just do it and note what changed.
 
 ### 8b. Test gaps
+
+The worked examples from the gate are the first tests: a fixture shaped from those real records, asserting the values Kevin approved.
 
 If Vitest is set up in the project:
 1. List functions in changed files with no test coverage
@@ -418,9 +427,13 @@ Add the new file-to-page mapping in `scripts/pre-commit-action.py` so that the a
 
 ### 10b. Deploy
 
+A feature ships as a PR (CLAUDE.md "Branch Strategy"). Merge it only with:
+
 ```bash
-git pull --rebase origin main && git push origin main
+python3 scripts/merge-pr.py --pr <N>
 ```
+
+It tests main plus the PR, walks the pages the PR touches read-only, and merges only when green. Run it in the background: it takes 5 to 15 minutes. Never a bare `gh pr merge`. If main itself is red, fix main first in its own PR.
 
 Then verify the deploy is live (pageVer matches, hard reload).
 
