@@ -1718,9 +1718,16 @@ def selftest():
     assert not day_was_recorded(2080, {"b": {"day": 2080, "status": "broll"}}), "a day of B-roll only is still stepped over"
     assert not day_was_recorded(2072, {"t": {"day": 2072, "episode": 2071, "status": "rendered", "role": "teaser"}}), "a rendered clip counts for its episode only"
     ent_h = {"youtube_link": "y", "blog": {"url": "u"}, "podcast": {"status": "failed", "upload_attempts": 3, "error": "Timeout"}}
-    import io as _io3, contextlib as _cl3
-    with _cl3.redirect_stderr(_io3.StringIO()), _cl3.redirect_stdout(_io3.StringIO()):
-        finish_extras(2070, ent_h, {"Long Form Video": {"id": "recX", "fields": {}}}, False, lambda: None)
+    import io as _io3, contextlib as _cl3, blog as _blog3
+    # 29 Sep 2026: unfaked, this check fetched 2070's real podcast from Drive and uploaded it to GoHighLevel with curl on
+    # every selftest run (5-8 s, over the test limit). The media upload and the blog's reading-time call are faked.
+    real_mf, real_rt = globals()["media_for"], _blog3.ensure_reading_time
+    globals()["media_for"] = lambda day, entry, kinds: {}; _blog3.ensure_reading_time = lambda entry: False
+    try:
+        with _cl3.redirect_stderr(_io3.StringIO()), _cl3.redirect_stdout(_io3.StringIO()):
+            finish_extras(2070, ent_h, {"Long Form Video": {"id": "recX", "fields": {}}}, False, lambda: None)
+    finally:
+        globals()["media_for"], _blog3.ensure_reading_time = real_mf, real_rt
     assert ent_h["podcast"]["status"] == "held" and "Untitled draft" in ent_h["podcast"]["note"], ent_h["podcast"]
     assert slot_iso(dt.date(2026, 9, 4), (6, 0)) == "2026-09-04T05:00:00Z", "BST: 06:00 London is 05:00 UTC"
     assert slot_iso(dt.date(2026, 12, 4), (6, 0)) == "2026-12-04T06:00:00Z", "GMT: the same wall clock"
