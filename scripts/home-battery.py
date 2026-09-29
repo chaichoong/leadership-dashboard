@@ -113,6 +113,18 @@ MAX_PAGES = 40                 # 2,000 devices: a loop past this is a broken rep
 CHUNK = 50                     # devices per query.resource.value call
 
 CONFIG = os.path.expanduser("~/.config/od/aqara.json")
+HA_URL = "http://homeassistant.local"   # Home Assistant OS on the Mac mini serves on port 80
+HA_TOKEN = os.path.expanduser("~/.config/od/homeassistant_token")   # "Home Assistant key.command"
+NAMES = os.path.expanduser("~/.config/od/home-battery-names.json")  # private: serial -> "En Suite radiator valve"
+
+# The two places the watch reads. Each has its own "cannot see" reminder, its own
+# history and count control, and a reminder is only ever closed by its own source.
+SOURCES = {
+    "aq": {"label": "Aqara", "app": "the Aqara app",
+           "fix": "double-click Aqara sign-in on the Mac mini desktop"},
+    "ha": {"label": "Home Assistant", "app": "Home Assistant or the device's own app",
+           "fix": "check Home Assistant is running on the Mac mini (homeassistant.local) and its key is saved"},
+}
 LOGDIR = os.path.expanduser("~/knowledge-os/logs/home-battery")
 READINGS = os.path.join(LOGDIR, "readings.jsonl")
 STATE = os.path.join(LOGDIR, "state.json")
@@ -122,7 +134,11 @@ STATE = os.path.join(LOGDIR, "state.json")
 # Aqara developer service
 # --------------------------------------------------------------------------
 
-class AqaraError(RuntimeError):
+class ReadError(RuntimeError):
+    pass
+
+
+class AqaraError(ReadError):
     pass
 
 
@@ -342,6 +358,110 @@ def stamp(ms, now):
 
 
 # --------------------------------------------------------------------------
+# Home Assistant (local, on the Mac mini): tado, Yale, Bosch, Sonos and the rest
+# --------------------------------------------------------------------------
+
+class HAError(ReadError):
+    pass
+
+
+# One row per entity Home Assistant marks as a battery (device_class battery),
+# with its device's name and every connectivity reading on the same device.
+# Asked through /api/template because the plain REST API has no device links.
+HA_TEMPLATE = r"""[{%- for s in states if s.attributes.device_class == 'battery' -%}
+{%- set d = device_id(s.entity_id) -%}
+{%- set conn = (device_entities(d) if d else []) | select('is_state_attr', 'device_class', 'connectivity') | map('states') | list -%}
+{{ {"entity": s.entity_id, "device": ((device_attr(d, 'name_by_user') or device_attr(d, 'name')) if d else s.name) | default(s.name, true),
+    "model": (device_attr(d, 'model') if d else '') | default('', true), "state": s.state,
+    "unit": s.attributes.get('unit_of_measurement', ''), "changed": s.last_changed.isoformat(), "conn": conn} | to_json }}
+{%- if not loop.last %},{% endif -%}
+{%- endfor -%}]"""
+
+
+def ha_devices(rows, names, now):
+    """HA template rows as watch devices. Pure, so the selftest can drive it.
+
+    A % sensor gives a level, a battery binary sensor gives the low flag
+    (on = low). Online comes from the device's connectivity sensor: any 'on'
+    is online, all 'off' is offline, none is unknown. A reading HA still shows
+    is dated now, because HA marks an entity 'unavailable' the moment it loses
+    it (its last_changed only marks the last CHANGE, so a Sonos sitting at 100%
+    for days would otherwise read as stale, review of 29 Sep 2026). An
+    unavailable battery reading is a battery with no level, never a guess. names maps a device
+    name (tado serial) or entity id to a room name; two devices left with the
+    same name get their entity added so a reminder never points at the wrong one.
+    """
+    if not isinstance(rows, list):
+        raise HAError("Home Assistant: expected a list, got %s" % type(rows).__name__)
+    out = []
+    for r in rows:
+        if not isinstance(r, dict) or not r.get("entity"):
+            raise HAError("Home Assistant: a battery row came back with no entity")
+        conn = [c for c in (r.get("conn") or []) if c in ("on", "off")]
+        online = True if "on" in conn else (False if conn else None)
+        state, entity = str(r.get("state")), r["entity"]
+        level = flag = None
+        if entity.startswith("binary_sensor."):
+            flag = {"on": True, "off": False}.get(state)
+        else:
+            level = parse_level(state)
+        at = now.isoformat(timespec="seconds")
+        name = names.get(entity) or names.get(r.get("device") or "") or r.get("device") or entity
+        out.append({"id": "ha:" + entity, "name": name, "model": r.get("model") or entity.split(".")[0],
+                    "online": online, "battery": True,
+                    "level": level, "level_at": at if level is not None else None,
+                    "low_flag": flag, "flag_at": at if flag is not None else None})
+    counts = {}
+    for d in out:
+        counts[d["name"]] = counts.get(d["name"], 0) + 1
+    for d in out:
+        if counts[d["name"]] > 1:
+            d["name"] = "%s (%s)" % (d["name"], d["id"].split(".", 1)[-1])
+    return out
+
+
+def load_names(path=NAMES):
+    try:
+        with open(path) as f:
+            n = json.load(f)
+        return n if isinstance(n, dict) else {}
+    except (OSError, ValueError):
+        return {}
+
+
+def read_ha(now, token_path=None):
+    """(devices, error), or None when Home Assistant is not set up (no key file).
+    Never raises: a failure is data for the 'cannot see' reminder."""
+    try:
+        with open(token_path or HA_TOKEN) as f:
+            token = f.read().strip()
+    except OSError:
+        return None
+    if not token:
+        return [], "the Home Assistant key file is empty: run Home Assistant key on the desktop again"
+    if not re.fullmatch(r"[A-Za-z0-9._-]+", token):
+        # A key pasted twice or wrapped across lines. Never quote it: the error
+        # text goes to the log, state.json and a reminder (review of 29 Sep 2026).
+        return [], "the Home Assistant key file looks damaged: run Home Assistant key on the desktop again"
+    req = urllib.request.Request(HA_URL + "/api/template", data=json.dumps({"template": HA_TEMPLATE}).encode(),
+                                 headers={"Authorization": "Bearer " + token, "Content-Type": "application/json"},
+                                 method="POST")
+    try:
+        with urllib.request.urlopen(req, timeout=30) as r:
+            rows = json.loads(r.read().decode())
+        return ha_devices(rows, load_names(), now), ""
+    except urllib.error.HTTPError as e:
+        why = "the key was refused: make a new one and run Home Assistant key" if e.code == 401 else "HTTP %s" % e.code
+        return [], "Home Assistant: %s" % why
+    except (urllib.error.URLError, http.client.HTTPException, OSError) as e:
+        return [], "Home Assistant: no usable answer (%s)" % getattr(e, "reason", type(e).__name__)
+    except HAError as e:
+        return [], str(e)
+    except Exception as e:  # never quote the exception: a header error carries the key
+        return [], "unexpected reply from Home Assistant (%s)" % type(e).__name__
+
+
+# --------------------------------------------------------------------------
 # History and state (private, outside the repo)
 # --------------------------------------------------------------------------
 
@@ -349,24 +469,37 @@ def load_state(path=STATE):
     try:
         with open(path) as f:
             s = json.load(f)
-        return s if isinstance(s, dict) else {}
+        return migrate(s if isinstance(s, dict) else {})
     except (OSError, ValueError):
-        return {}
+        return migrate({})
+
+
+def migrate(s):
+    """{"nudged", "sources": {"aq": {...}, "ha": {...}}}. The one-source layout
+    of 28 Sep 2026 (everything at the top) moves under "aq" unchanged."""
+    if "sources" in s:
+        s.setdefault("nudged", {})
+        return s
+    old = {k: v for k, v in s.items() if k != "nudged"}
+    return {"nudged": s.get("nudged") or {}, "sources": {"aq": old} if old else {}}
 
 
 def save_state(state, path=STATE):
     """Temp file then rename, so a reader never sees a half-written file."""
     os.makedirs(os.path.dirname(path), exist_ok=True)
     tmp = path + ".tmp"
-    with open(tmp, "w") as f:
+    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(fd, "w") as f:
         json.dump(state, f, indent=1)
     os.replace(tmp, path)
 
 
-def append_reading(now, devices, error, path=READINGS):
+def append_reading(now, devices, error, src="aq", path=READINGS):
     os.makedirs(os.path.dirname(path), exist_ok=True)
-    rec = {"ts": now.isoformat(timespec="seconds"), "error": error, "devices": devices}
-    with open(path, "a") as f:
+    rec = {"ts": now.isoformat(timespec="seconds"), "source": src, "error": error, "devices": devices}
+    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o600)
+    os.chmod(path, 0o600)
+    with os.fdopen(fd, "a") as f:
         f.write(json.dumps(rec) + "\n")
 
 
@@ -424,8 +557,8 @@ def short_id(dev_id):
     return hashlib.sha1(dev_id.encode()).hexdigest()[:6]
 
 
-def marker(kind, dev_id):
-    return "%s %s %s]" % (MARK, kind, short_id(dev_id))
+def marker(kind, dev_id, tag="aq"):
+    return "%s %s %s %s]" % (MARK, kind, short_id(dev_id), tag)
 
 
 def hours(now, iso):
@@ -456,16 +589,19 @@ STALE_DAYS = 7                 # a level Aqara has not updated this long is name
 
 
 def no_level(devices, now=None):
-    """Battery devices the watch cannot vouch for: a model Aqara would not
-    describe, no readable level or flag, or (with now) a level Aqara dated over
-    STALE_DAYS ago. Named in one reminder, never passed over as mains."""
-    def stale(d):
-        # Undated counts as stale: a level Aqara gives no date for cannot be
-        # shown to be current, so it is named rather than trusted (review 4).
-        return now is not None and d.get("level") is not None and \
+    """Battery devices the watch cannot vouch for, named in one reminder, never
+    passed over as mains: a model the source would not describe, no readable
+    level or flag, and (with now) any reading is_low() cannot use (an old flag
+    or level on a device of unknown state, review of 29 Sep 2026), or a level
+    dated over STALE_DAYS ago or undated (review 4 of 28 Sep)."""
+    def unusable(d):
+        if now is None:
+            return d.get("level") is None and d.get("low_flag") is None
+        known, _, _ = is_low(d, now, THRESHOLD)
+        stale = d.get("level") is not None and \
             (not d.get("level_at") or hours(now, d["level_at"]) > STALE_DAYS * 24)
-    return [d for d in devices if d["battery"] is None or
-            (d["battery"] and ((d.get("level") is None and d.get("low_flag") is None) or stale(d)))]
+        return not known or stale
+    return [d for d in devices if d["battery"] is None or (d["battery"] and unusable(d))]
 
 
 def forget(state, kind, sid):
@@ -481,7 +617,7 @@ def set_id(devices):
 
 
 def decide(now, read_ok, devices, state, open_reminders, nudged, threshold=THRESHOLD,
-           force_nudge=False):
+           force_nudge=False, src="aq"):
     """Return this run's actions.
 
     now             local datetime
@@ -492,10 +628,14 @@ def decide(now, read_ok, devices, state, open_reminders, nudged, threshold=THRES
                     "last_ok" (iso) and "last_error" (text)
     open_reminders  [{"key": "<marker>", "ref": <opaque>}] this script owns
     nudged          {"<kind>:<id>": "YYYY-MM-DD"}
+    src             the source this read came from ("aq" or "ha"): only its own
+                    reminders are ever closed, and its texts name it
     Actions: {"do": "create", "kind", "id", "key", "title", "body"} or
              {"do": "complete", "ref", "why"}.
     """
     actions = []
+    S = SOURCES[src]
+    open_reminders = [r for r in open_reminders if r["key"].endswith(" %s]" % src)]
     open_keys = {r["key"] for r in open_reminders}
     today = now.date().isoformat()
     tracked = state.get("devices") or {}
@@ -504,12 +644,12 @@ def decide(now, read_ok, devices, state, open_reminders, nudged, threshold=THRES
 
     # 1. Close what a fresh, good read proves is no longer true.
     for r in open_reminders:
-        m = re.match(re.escape(MARK) + r" (low|offline|missing|blind|nolevel) ([0-9a-f]{6})\]", r["key"])
+        m = re.match(re.escape(MARK) + r" (low|offline|missing|blind|nolevel) ([0-9a-f]{6}) [a-z]{2}\]", r["key"])
         if not m or not read_ok:
             continue
         kind, sid = m.groups()
         if kind == "blind":
-            actions.append({"do": "complete", "ref": r["ref"], "why": "Aqara answering again"})
+            actions.append({"do": "complete", "ref": r["ref"], "why": "%s answering again" % S["label"]})
             continue
         if kind == "nolevel":
             if not unread or sid != short_id(set_id(unread)):
@@ -522,7 +662,7 @@ def decide(now, read_ok, devices, state, open_reminders, nudged, threshold=THRES
         t = tracked.get(d["id"]) or {}
         known, low, _ = is_low(t, now, threshold)
         if kind == "missing":
-            actions.append({"do": "complete", "ref": r["ref"], "why": "back in Aqara's list"})
+            actions.append({"do": "complete", "ref": r["ref"], "why": "back in %s's list" % S["label"]})
         elif kind == "offline" and d["online"] is True:
             actions.append({"do": "complete", "ref": r["ref"], "why": "back online"})
         elif kind == "low" and known and not low:
@@ -535,24 +675,25 @@ def decide(now, read_ok, devices, state, open_reminders, nudged, threshold=THRES
     last_ok = state.get("last_ok")
     if not read_ok and (last_ok is None or hours(now, last_ok) >= BLIND_HOURS - SLACK_HOURS):
         gap = "since it was set up" if last_ok is None else "for %d hours" % hours(now, last_ok)
-        wanted.append(("blind", "watch", "The home battery watch cannot see Aqara",
-                       "No good read %s. Last error: %s. If it mentions sign-in, double-click "
-                       "Aqara sign-in on the Mac mini desktop. Until this ticks off, no battery "
-                       "or offline device can be flagged." % (gap, state.get("last_error") or "none")))
+        wanted.append(("blind", "watch:" + src, "The home battery watch cannot see %s" % S["label"],
+                       "No good read %s. Last error: %s. To fix: %s. Until this ticks off, no "
+                       "battery or offline device from %s can be flagged."
+                       % (gap, state.get("last_error") or "none", S["fix"], S["label"])))
     for d in devices:
         t = tracked.get(d["id"]) or {}
         since = t.get("offline_since")
         if d["online"] is False and since and hours(now, since) >= OFFLINE_HOURS - SLACK_HOURS:
             wanted.append(("offline", d["id"], "%s is offline" % d["name"],
-                           "Aqara has not heard from it since about %s. Check its power, then "
-                           "re-pair it in the Aqara app if it stays off. This ticks itself off "
-                           "once it is back online." % dt.datetime.fromisoformat(since).strftime("%a %d %b %H:%M")))
+                           "%s has not heard from it since about %s. Check its power, then "
+                           "re-pair it in %s if it stays off. This ticks itself off once it is "
+                           "back online." % (S["label"], dt.datetime.fromisoformat(since).strftime("%a %d %b %H:%M"),
+                                              S["app"])))
             continue
         _, low, text = is_low(t, now, threshold) if d["battery"] else (False, False, "")
         if low:
             wanted.append(("low", d["id"], "Battery low: %s (%s)" % (d["name"], text),
-                           "Change or charge its battery. This ticks itself off once Aqara "
-                           "reports it fine again."))
+                           "Change or charge its battery. This ticks itself off once %s "
+                           "reports it fine again." % S["label"]))
     if read_ok:
         present = {d["id"] for d in devices}
         for i, t in sorted(tracked.items()):
@@ -560,19 +701,20 @@ def decide(now, read_ok, devices, state, open_reminders, nudged, threshold=THRES
                 continue
             gone = hours(now, t["last_seen"])
             if MISSING_HOURS - SLACK_HOURS <= gone <= FORGET_DAYS * 24:
-                wanted.append(("missing", i, "%s has vanished from Aqara" % (t.get("name") or "A device"),
-                               "Aqara stopped listing it %s. If you removed it on purpose, tick this "
-                               "off; it will not come back. If not, re-add it in the Aqara app."
-                               % dt.datetime.fromisoformat(t["last_seen"]).strftime("%a %d %b %H:%M")))
+                wanted.append(("missing", i, "%s has vanished from %s" % (t.get("name") or "A device", S["label"]),
+                               "%s stopped listing it %s. If you removed it on purpose, tick this "
+                               "off; it will not come back. If not, re-add it in %s."
+                               % (S["label"], dt.datetime.fromisoformat(t["last_seen"]).strftime("%a %d %b %H:%M"),
+                                  S["app"])))
     if unread:
         names = ", ".join(sorted(d["name"] for d in unread)[:15]) + (" and more" if len(unread) > 15 else "")
         wanted.append(("nolevel", set_id(unread),
-                       "Check %d battery device%s in the Aqara app" % (len(unread), "" if len(unread) == 1 else "s"),
-                       "Aqara gives no current battery level for these, so the watch can flag them "
+                       "Check %d battery device%s in %s" % (len(unread), "" if len(unread) == 1 else "s", S["app"]),
+                       "%s gives no current battery level for these, so the watch can flag them "
                        "going offline but not running low: %s. This ticks itself off when the list "
-                       "changes." % names))
+                       "changes." % (S["label"], names)))
     for kind, dev_id, title, body in wanted:
-        key = marker(kind, dev_id)
+        key = marker(kind, dev_id, src)
         if key in open_keys:
             continue
         done = nudged.get("%s:%s" % (kind, dev_id))
@@ -583,12 +725,12 @@ def decide(now, read_ok, devices, state, open_reminders, nudged, threshold=THRES
     return actions
 
 
-def count_ok(devices, last_count):
+def count_ok(devices, last_count, label="Aqara"):
     """(ok, why). Zero devices, or under SHRINK of the last good count, is a partial read."""
     if not devices:
-        return False, "Aqara returned no devices"
+        return False, "%s returned no devices" % label
     if last_count and len(devices) < SHRINK * last_count:
-        return False, "Aqara listed %d devices, %d last time" % (len(devices), last_count)
+        return False, "%s listed %d devices, %d last time" % (label, len(devices), last_count)
     return True, ""
 
 
@@ -662,7 +804,7 @@ def open_reminders():
         if "\t" not in line:
             continue
         rid, body = line.split("\t", 1)
-        m = re.search(re.escape(MARK) + r" [a-z]+ [0-9a-f]{6}\]", body)
+        m = re.search(re.escape(MARK) + r" [a-z]+ [0-9a-f]{6} [a-z]{2}\]", body)
         if m:
             rows.append({"key": m.group(0), "ref": rid})
     return rows
@@ -705,18 +847,38 @@ def read_once(state, now):
         return [], "unexpected reply from Aqara (%s: %s)" % (type(e).__name__, e)
 
 
+def read_source(tag, sstate, now, ha_token=None):
+    """(devices, error) for one source, or None when that source is not set up."""
+    if tag == "aq":
+        return read_once(sstate, now)
+    got = read_ha(now, ha_token)
+    if got is None and sstate.get("last_ok"):
+        # Read before, key gone now (a restore, a host move, a tidy-up): that is
+        # a blind watch, not a source nobody set up (review of 29 Sep 2026).
+        return [], "the Home Assistant key file is missing: run Home Assistant key on the desktop again"
+    return got
+
+
 def cmd_read():
     now = dt.datetime.now()
-    devices, error = read_once(load_state(), now)
-    if error:
-        print("ERROR: %s" % error)
-        return 1
-    batt = [d for d in devices if d["battery"]]
-    print("%d devices, %d with a battery, %d offline, %d battery devices give no level" %
-          (len(devices), len(batt), sum(1 for d in devices if d["online"] is False), len(no_level(devices, now))))
-    for d in sorted(devices, key=lambda x: (x["online"] is not False, not x["battery"], x["name"])):
-        print(describe(d, now))
-    return 0
+    state, bad = load_state(), 0
+    for tag, S in SOURCES.items():
+        got = read_source(tag, state["sources"].setdefault(tag, {}), now)
+        if got is None:
+            print("== %s: not set up" % S["label"])
+            continue
+        devices, error = got
+        if error:
+            print("== %s: ERROR: %s" % (S["label"], error))
+            bad += 1
+            continue
+        batt = [d for d in devices if d["battery"]]
+        print("== %s: %d devices, %d with a battery, %d offline, %d battery devices give no level" %
+              (S["label"], len(devices), len(batt), sum(1 for d in devices if d["online"] is False),
+               len(no_level(devices, now))))
+        for d in sorted(devices, key=lambda x: (x["online"] is not False, not x["battery"], x["name"])):
+            print(describe(d, now))
+    return 1 if bad else 0
 
 
 def cmd_run(argv):
@@ -728,35 +890,46 @@ def cmd_run(argv):
 
     now = dt.datetime.now()
     state = load_state()
-    devices, error = read_once(state, now)
-    read_ok = not error
-    if read_ok:
-        read_ok, error = count_ok(devices, state.get("last_count"))
-    if read_ok:
-        state = track(now, devices, state)
-        state["last_ok"] = now.isoformat(timespec="seconds")
-        state["last_count"] = len(devices)
-        state.pop("last_error", None)
-        print("read  %d devices, %d offline, %d battery readings, %d battery devices give no level" %
-              (len(devices), sum(1 for d in devices if d["online"] is False),
-               sum(1 for d in devices if d["level"] is not None or d.get("low_flag") is not None),
-               len(no_level(devices, now))))
-        for d in no_level(devices, now):
-            print("      no level: %s (%s)" % (d["name"], d["model"]))
-    else:
-        state["last_error"] = error
-        # A failed read is reported, and the job still exits 0 so the evening
-        # reminder is what raises it, not a launchd failure nobody reads.
-        print("WARN: read failed: %s" % error)
-        recent = state.get("last_ok") and hours(now, state["last_ok"]) < FALLBACK_HOURS
-        devices = from_state(state) if recent else []
-    if not dry:
-        append_reading(now, devices if read_ok else [], error)
-
-    actions = decide(now, read_ok, devices, state, open_reminders(), state.get("nudged", {}),
-                     threshold=threshold, force_nudge=force)
-    apply(actions, state, now, dry, force)
-    if not actions:
+    reminders = open_reminders()
+    did = 0
+    for tag, S in SOURCES.items():
+        sstate = state["sources"].setdefault(tag, {})
+        got = read_source(tag, sstate, now)
+        if got is None:
+            print("%s: not set up, skipped" % S["label"])
+            continue
+        devices, error = got
+        read_ok = not error
+        if read_ok:
+            read_ok, error = count_ok(devices, sstate.get("last_count"), S["label"])
+        if read_ok:
+            merged = track(now, devices, dict(sstate, nudged=state["nudged"]))
+            state["nudged"] = merged.pop("nudged")
+            sstate = merged
+            sstate["last_ok"] = now.isoformat(timespec="seconds")
+            sstate["last_count"] = len(devices)
+            sstate.pop("last_error", None)
+            print("%s: read %d devices, %d offline, %d battery readings, %d battery devices give no level" %
+                  (S["label"], len(devices), sum(1 for d in devices if d["online"] is False),
+                   sum(1 for d in devices if d["level"] is not None or d.get("low_flag") is not None),
+                   len(no_level(devices, now))))
+            for d in no_level(devices, now):
+                print("      no level: %s (%s)" % (d["name"], d["model"]))
+        else:
+            sstate["last_error"] = error
+            # A failed read is reported, and the job still exits 0 so the evening
+            # reminder is what raises it, not a launchd failure nobody reads.
+            print("WARN: %s read failed: %s" % (S["label"], error))
+            recent = sstate.get("last_ok") and hours(now, sstate["last_ok"]) < FALLBACK_HOURS
+            devices = from_state(sstate) if recent else []
+        state["sources"][tag] = sstate
+        if not dry:
+            append_reading(now, devices if read_ok else [], error, tag)
+        actions = decide(now, read_ok, devices, sstate, reminders, state["nudged"],
+                         threshold=threshold, force_nudge=force, src=tag)
+        apply(actions, state, now, dry, force)
+        did += len(actions)
+    if not did:
         print("nothing to do")
     if not dry and not force:
         save_state(state)
@@ -921,8 +1094,8 @@ def selftest():
     check("an ONLINE device's old-dated level still counts (it may not have changed)",
           creates(decide(now, True, old, st(old), [], {})), [("low", "o")])
     unknown_old = [dev("u", online=None, level=5, at=now - dt.timedelta(hours=30))]
-    check("an old level on a device of unknown state does not count",
-          creates(decide(now, True, unknown_old, st(unknown_old), [], {})), [])
+    check("an old level on a device of unknown state is not low, but is named",
+          creates(decide(now, True, unknown_old, st(unknown_old), [], {})), [("nolevel", "set:u")])
     undated = [dict(dev("n", level=9), level_at=None)]
     check("an undated level on an online device counts (and is also named)",
           creates(decide(now, True, undated, st(undated), [], {})), [("low", "n"), ("nolevel", "set:n")])
@@ -1009,11 +1182,11 @@ def selftest():
 
     # Blind: the watch cannot see.
     acts = decide(now, False, [], {"last_ok": iso(now - dt.timedelta(hours=12) + dt.timedelta(seconds=40)), "last_error": "x"}, [], {})
-    check("12 hours (less a late start) without a good read raises its own reminder", creates(acts), [("blind", "watch")])
+    check("12 hours (less a late start) without a good read raises its own reminder", creates(acts), [("blind", "watch:aq")])
     check("blind text reads plainly", "No good read for 11 hours." in (acts[0]["body"] if acts else ""), True)
     check("a short outage waits", creates(decide(now, False, [], {"last_ok": iso(now - dt.timedelta(hours=3))}, [], {})), [])
     never = decide(now, False, [], {}, [], {})
-    check("never set up is blind at once", creates(never), [("blind", "watch")])
+    check("never set up is blind at once", creates(never), [("blind", "watch:aq")])
     check("never-set-up text reads plainly", "No good read since it was set up." in (never[0]["body"] if never else ""), True)
     blindr = [{"key": marker("blind", "watch"), "ref": "r3"}]
     check("a good read ticks the blind reminder off",
@@ -1080,6 +1253,81 @@ def selftest():
     cache["m.v"]["at"] = iso(now - dt.timedelta(days=2))
     devs = {d["id"]: d for d in fake_read(now, n=3, total=3, refuse="m.v", cache=cache)}
     check("a model described before keeps its description when refused once", devs["aqara:v0"]["battery"], True)
+
+    # Home Assistant rows (shape read live from HA 2026.9.4 on 29 Sep 2026).
+    rows = [
+        {"entity": "binary_sensor.va1_battery", "device": "VA1", "model": "VA02", "state": "on", "unit": "",
+         "changed": "2026-09-29T07:23:15.935505+00:00", "conn": ["on"]},
+        {"entity": "binary_sensor.va2_battery", "device": "VA2", "model": "VA02", "state": "off", "unit": "",
+         "changed": "2026-09-29T07:23:15+00:00", "conn": ["off"]},
+        {"entity": "sensor.sonos_move_battery", "device": "Sonos Move", "model": "Move", "state": "100", "unit": "%",
+         "changed": "2026-09-28T23:15:25+00:00", "conn": []},
+        {"entity": "sensor.sonos_move_battery_2", "device": "Sonos Move", "model": "Move", "state": "unavailable",
+         "unit": "%", "changed": "2026-09-28T23:15:25+00:00", "conn": []},
+    ]
+    ha = {d["id"]: d for d in ha_devices(rows, {"VA1": "En Suite radiator valve"}, now)}
+    check("a tado low flag reads as low, named by the private map, online by its connection",
+          (ha["ha:binary_sensor.va1_battery"]["name"], ha["ha:binary_sensor.va1_battery"]["low_flag"],
+           ha["ha:binary_sensor.va1_battery"]["online"]), ("En Suite radiator valve", True, True))
+    check("a connection sensor reading off is offline", ha["ha:binary_sensor.va2_battery"]["online"], False)
+    check("a percentage sensor reads its level, state unknown with no connection sensor",
+          (ha["ha:sensor.sonos_move_battery"]["level"], ha["ha:sensor.sonos_move_battery"]["online"]), (100, None))
+    check("unavailable is a battery with no level, never a guess",
+          (ha["ha:sensor.sonos_move_battery_2"]["level"], ha["ha:sensor.sonos_move_battery_2"]["battery"]), (None, True))
+    check("two devices with one name are told apart",
+          sorted(d["name"] for d in ha.values() if d["name"].startswith("Sonos")),
+          ["Sonos Move (sonos_move_battery)", "Sonos Move (sonos_move_battery_2)"])
+    check("an HA reading still shown is dated by the read, not by its last change",
+          ha["ha:sensor.sonos_move_battery"]["level_at"], iso(now))
+    check("a Sonos at 100% for days is not named; the unavailable one is",
+          [d["name"] for d in no_level(list(ha.values()), now)], ["Sonos Move (sonos_move_battery_2)"])
+    for label, bad in [("a non-list HA reply is an error", {"message": "x"}), ("an HA row with no entity is an error", [{"state": "on"}])]:
+        try:
+            ha_devices(bad, {}, now)
+            fails.append(label)
+        except HAError:
+            pass
+
+    # Two sources never touch each other's reminders.
+    va1 = [dict(dev("ha:binary_sensor.va1_battery", battery=True), low_flag=False, flag_at=iso(now))]
+    other = [{"key": marker("blind", "watch:aq", "aq"), "ref": "aq-blind"},
+             {"key": marker("low", "ha:binary_sensor.va1_battery", "ha"), "ref": "ha-low"},
+             {"key": marker("blind", "watch:ha", "ha"), "ref": "ha-blind"}]
+    closed = sorted(a["ref"] for a in decide(now.replace(hour=9), True, va1, st(va1), other, {}, src="ha") if a["do"] == "complete")
+    check("an HA read closes only HA reminders", closed, ["ha-blind", "ha-low"])
+    check("an Aqara read closes only Aqara reminders",
+          sorted(a["ref"] for a in decide(now.replace(hour=9), True, back, st(back), other, {}, src="aq") if a["do"] == "complete"),
+          ["aq-blind"])
+    hb = decide(now, False, [], {}, [], {}, src="ha")
+    check("each source has its own blind reminder", [(a["id"], a["title"]) for a in hb if a["do"] == "create"],
+          [("watch:ha", "The home battery watch cannot see Home Assistant")])
+    check("markers carry their source", marker("low", "x", "ha").endswith(" ha]"), True)
+
+    # Review of 29 Sep 2026 (Home Assistant source).
+    check("an old low flag on a device of unknown state is named, not dropped",
+          [d["id"] for d in no_level([dict(dev("y", online=None), low_flag=True, flag_at=iso(now - dt.timedelta(days=3)))], now)], ["y"])
+    check("a fresh flag on a device of unknown state is not named",
+          no_level([dict(dev("y", online=None), low_flag=False, flag_at=iso(now))], now), [])
+
+    import tempfile
+    with tempfile.TemporaryDirectory() as tmpd:
+        keyf = os.path.join(tmpd, "k")
+        with open(keyf, "w") as f:
+            f.write("FAKEKEY-abc123\nFAKEKEY-abc123\n")
+        got = read_ha(now, keyf)
+        check("a damaged key is refused before use and never quoted",
+              (got[0], "damaged" in got[1], "FAKEKEY" in got[1]), ([], True, False))
+        gone = os.path.join(tmpd, "missing")
+        check("no key and never read means not set up", read_source("ha", {}, now, gone), None)
+        lost = read_source("ha", {"last_ok": iso(now)}, now, gone) or ([], "skipped")
+        check("a key lost after a good read is an error, not 'not set up'",
+              (lost[0], "missing" in lost[1]), ([], True))
+
+    # The 28 Sep one-source state moves under "aq" unchanged.
+    old = {"last_ok": "2026-09-28T23:20:10", "resources": {"m": 1}, "nudged": {"low:a": "2026-09-28"}}
+    check("old state migrates under aq", migrate(dict(old)),
+          {"nudged": {"low:a": "2026-09-28"}, "sources": {"aq": {"last_ok": "2026-09-28T23:20:10", "resources": {"m": 1}}}})
+    check("an empty state migrates cleanly", migrate({}), {"nudged": {}, "sources": {}})
 
     if fails:
         print("selftest FAILED")
