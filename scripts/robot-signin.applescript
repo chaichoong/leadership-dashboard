@@ -453,14 +453,24 @@ on runChain(theLines, liveHanded)
 		set tail to tail & " You stopped before: " & (notOpened as text) & ". Those stay waiting."
 		set AppleScript's text item delimiters to ""
 	end if
+	-- The first sentence says what really happened (review, 29 Sep 2026: after "Stop here" it
+	-- read "All signed in" or "Nothing was waiting" while skipped sites still waited).
+	set shortOf to (count of failed) + (count of notOpened)
+	if shortOf > 0 then
+		set lead to "Signed in to " & (total - shortOf) & " of " & total & " site(s)."
+	else if handed > 0 then
+		set lead to "All signed in."
+	else
+		set lead to "All done. Nothing was waiting on a robot."
+	end if
 	if handed > 0 then
 		if startPickup() then
-			sayDone("All signed in. Pickup queued for " & handed & " task(s); the robots start when the queue is free." & tail)
+			sayDone(lead & " Pickup queued for " & handed & " task(s); the robots start when the queue is free." & tail)
 		else
-			sayDone("Signed in; the " & handed & " task(s) are on the board and the 30-minute poll works them (it counts a sign-in as a hand-back)." & tail)
+			sayDone(lead & " The " & handed & " task(s) are on the board and the 30-minute poll works them (it counts a sign-in as a hand-back)." & tail)
 		end if
 	else
-		sayDone("All done. Nothing was waiting on a robot." & tail)
+		sayDone(lead & tail)
 	end if
 	refreshPanel()
 end runChain

@@ -601,6 +601,14 @@ async function settleBotCheck(page, maxMs = 15000) {
     await page.waitForTimeout(2000);
   }
 }
+// A signed-out verdict read off a real sign-in page (a password box, a door address or GOV.UK
+// One Login), not an error page or a slow load. The session line records it, and the Robot
+// sign-in app trusts only these (agent-dispatch.py ledger_signed_out; review, 29 Sep 2026:
+// BW Legal and Adobe show a password box on an ordinary address).
+function onSigninPage(url, passwordFields, text = '', title = '') {
+  const v = sessionVerdict(url, passwordFields, text, title);
+  return !v.signedIn && !v.botCheck && (Number(passwordFields) > 0 || v.atDoor || v.atOneLogin);
+}
 function sessionVerdict(url, passwordFields, text = '', title = '') {
   let host = '';
   try { host = new URL(url).hostname.toLowerCase(); } catch { host = ''; }
@@ -1169,9 +1177,10 @@ async function main() {
       const title = await page.title();
       const verdict = sessionVerdict(url, passwordFields, text, title);
       const png = await shoot(page, shot);
-      return { site, signedIn: verdict.signedIn, botCheck: verdict.botCheck, url, title, passwordFields, walked: clicked, text, screenshot: png };
+      return { site, signedIn: verdict.signedIn, botCheck: verdict.botCheck, url, title, passwordFields, walked: clicked, text, screenshot: png,
+               signinPage: onSigninPage(url, passwordFields, text, title) };
     });
-    ledger({ cmd: 'session', site, url: res.url, signedIn: res.signedIn, botCheck: res.botCheck, profile });
+    ledger({ cmd: 'session', site, url: res.url, signedIn: res.signedIn, botCheck: res.botCheck, signinPage: res.signinPage, profile });
     if (res.botCheck) console.error(`BOT CHECK: ${site} shows the robot a "verify you are human" page. A sign-in will not remove it and the robot never clicks one. This is not a SIGN-IN wall.`);
     console.log(JSON.stringify(res));
     return;
@@ -1399,4 +1408,4 @@ module.exports = { hostAllowed, pickLinks, runSteps, assertNotCredential, assert
                    recordLoginSite, signinTargets, signinOwner, signinDomain, readSitesFile,
                    assertUploadable, assertConfirmable, UPLOAD_DIR, UPLOAD_EXTENSIONS, persistSessionCookies,
                    signinHoldActive, takeSigninHold, releaseSigninHold, waitForSigninHold, HOLD_MAX_MS, isBotCheck,
-                   profileProcs, plainWindowOpen, pickOption, settleBotCheck, withPage, lastKeptCount: () => lastKept };
+                   profileProcs, plainWindowOpen, pickOption, settleBotCheck, withPage, lastKeptCount: () => lastKept, onSigninPage };

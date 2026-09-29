@@ -5701,7 +5701,10 @@ def ledger_signed_out(host, path=None, profile="default"):
     # Only a verdict that landed on a sign-in page (review, 29 Sep 2026): a walk
     # that met an error page or a slow load also reads "signed out", and trusted
     # at any age it would stand until Kevin's next sign-in. Anything else walks.
-    if not signin_page_url(str(newest.get("url") or "")):
+    # The walk records signinPage (a password box counts: BW Legal and Adobe show
+    # one on an ordinary address); a line from before that field is read off its URL.
+    page = newest.get("signinPage")
+    if not (page is True or (page is None and signin_page_url(str(newest.get("url") or "")))):
         return None
     return {"signedIn": False, "botCheck": False, "url": str(newest.get("url") or ""),
             "at": str(newest["at"]), "source": "ledger"}

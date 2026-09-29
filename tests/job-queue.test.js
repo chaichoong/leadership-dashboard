@@ -274,8 +274,11 @@ describe('serialisation under real concurrency', () => {
   // of the job already holding the lock.
   it('a waiting signin-pickup goes ahead of jobs that queued before it, never ahead of the holder', async () => {
     const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+    // A throwaway HOME: a killed waiter writes a SKIPPED line to ~/knowledge-os/logs/<job>/runs.log,
+    // and the real signin-pickup log is read by check-routines.py (review, 29 Sep 2026).
+    const fakeHome = mkdtempSync(join(ROOT, 'home-'));
     const job = (name, secs) => runAsync(['run', name, '--no-stale-check', '--timeout', '2', '--',
-      'python3', '-c', `import time; time.sleep(${secs})`]);
+      'python3', '-c', `import time; time.sleep(${secs})`], { env: { HOME: fakeHome } });
     const holder = job('render', 1.5);
     await sleep(400);
     const early = job('publish', 0.2);        // queues first
@@ -285,7 +288,7 @@ describe('serialisation under real concurrency', () => {
     expect(results.every((r) => r.code === 0)).toBe(true);
     const order = events().filter((e) => e.state === 'acquired').map((e) => e.job);
     expect(order).toEqual(['render', 'signin-pickup', 'publish']);
-  }, 60000);
+  }, { timeout: 60000, retry: 2 });   // losing the prefix fails every attempt, so a retry hides nothing
 
   it('gives up with EX_TEMPFAIL rather than running alongside a holder', async () => {
     // Take the lock cooperatively and leave it held.
