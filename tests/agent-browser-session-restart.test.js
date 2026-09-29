@@ -35,4 +35,19 @@ describe('the robot keeps a session across its own browser restarts', () => {
     expect(names).toContain('ewf.companieshouse.gov.uk ch_session');
     expect(names).not.toContain('www.example.org sid');   // not on the allowlist: Chrome's own rule stands
   }, 60000);
+  // Review, 29 Sep 2026: a refusal mid-step called process.exit, which skipped withPage's finally,
+  // and Playwright then killed Chrome before it wrote the cookies. From the command line, a
+  // refused step must now unwind through the page: the failure screenshot proves it did (the
+  // old exit never reached it), and the refusal still prints with its exit code.
+  it('a refusal inside a step still closes the browser cleanly and exits 1 with the refusal', () => {
+    const { writeFileSync } = require('node:fs');
+    const { spawnSync } = require('node:child_process');
+    const plan = join(root, 'plan.json');
+    writeFileSync(plan, JSON.stringify({ steps: [{ do: 'no-such-step' }] }));   // refused inside the open page
+    const r = spawnSync('node', [join(ROOT, 'scripts', 'agent-browser.js'), 'prepare', '--profile', 'refusal-test',
+      '--plan', plan, '--shot', join(root, 'shot.png')], { encoding: 'utf8', env: process.env, timeout: 60000 });
+    expect(r.status).toBe(1);
+    expect(r.stderr).toMatch(/^BROWSER REFUSED: unknown step "no-such-step" Failure screenshot: /m);
+    expect(r.stderr).not.toMatch(/BROWSER ERROR/);
+  }, 60000);
 });
