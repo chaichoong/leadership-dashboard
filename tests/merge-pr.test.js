@@ -23,6 +23,8 @@
 //     workers and Playwright's detached web server survive a timeout or an
 //     interrupt; or a sweep removes the queue fixer's own worktree.
 //   * THE --delete-branch TRAP (3 and 4 Sep 2026): only the REMOTE branch goes.
+//   * A PRIVATE NAME IN THE SQUASH MESSAGE (29 Sep 2026): the title, body or a
+//     commit message names someone on the roster, or the refusal repeats it.
 //
 // Nothing here contacts GitHub or the network: `gh` and `npx` are stubs first
 // on PATH, "origin" is a bare repo on disk, the fixer module is a fake, and
@@ -429,7 +431,7 @@ printf '%s\\n' "$*" >> "$D/calls.log"
 if [ "$1 $2" = "pr view" ]; then
   case "$*" in
     *state,mergedAt*) if [ -f "$D/merged" ]; then echo '{"state":"MERGED","mergedAt":"2026-09-29T00:00:00Z"}'; else echo '{"state":"OPEN","mergedAt":null}'; fi ;;
-    *) cat "$D/view.json" ;;
+    *) if [ -f "$D/viewed" ] && [ -f "$D/view-late.json" ]; then cat "$D/view-late.json"; else touch "$D/viewed"; cat "$D/view.json"; fi ;;
   esac
   exit 0
 fi
@@ -453,7 +455,7 @@ const git = (cwd, ...args) => execFileSync('git', args, { cwd, encoding: 'utf8',
 // origin/main + a PR branch, a clone for the script's REPO, and the merge tree
 // built the way build_merge_result builds it: origin/main, then the PR merged.
 // main's js/config.js registers pnl and tasks, so any other page is new.
-function gitFixture({ ff = false, pullRef = false } = {}) {
+function gitFixture({ ff = false, pullRef = false, prMessage = null } = {}) {
   const root = tmp('merge-pr-git-');
   const origin = join(root, 'origin.git');
   git(root, 'init', '--quiet', '--bare', '--initial-branch=main', origin);
@@ -467,7 +469,12 @@ function gitFixture({ ff = false, pullRef = false } = {}) {
   git(work, 'add', '-A'); git(work, 'commit', '--quiet', '-m', 'base'); git(work, 'push', '--quiet', 'origin', 'main');
   git(work, 'checkout', '--quiet', '-b', 'feature/x');
   writeFileSync(join(work, 'js/pnl.js'), 'v2 from the PR\n');
-  git(work, 'add', '-A'); git(work, 'commit', '--quiet', '-m', 'the PR'); git(work, 'push', '--quiet', 'origin', 'feature/x');
+  git(work, 'add', '-A'); git(work, 'commit', '--quiet', '-m', 'the PR');
+  if (prMessage) {
+    writeFileSync(join(work, 'docs/pr.md'), 'second PR commit\n');
+    git(work, 'add', '-A'); git(work, 'commit', '--quiet', '-m', prMessage);
+  }
+  git(work, 'push', '--quiet', 'origin', 'feature/x');
   const head = git(work, 'rev-parse', 'HEAD');
   // GitHub's refs/pull/5/head, as the gate reads it before building.
   if (pullRef) git(work, 'push', '--quiet', 'origin', 'feature/x:refs/pull/5/head');
@@ -496,6 +503,8 @@ function gitFixture({ ff = false, pullRef = false } = {}) {
 const OPEN = {
   // Deliberately NOT the tree's head: the head merged must be the head TESTED.
   state: 'OPEN', isDraft: false, headRefOid: 'f'.repeat(40), title: 'Fix: a thing',
+  body: 'Why: the thing was broken.',
+  commits: [{ oid: 'c'.repeat(40), messageHeadline: 'the PR', messageBody: '' }],
   baseRefName: 'main', headRefName: 'feature/x', isCrossRepository: false,
   headRepository: { name: 'leadership-dashboard', nameWithOwner: 'chaichoong/leadership-dashboard' },
 };
@@ -674,11 +683,13 @@ function killIfAlive(pid) {
 function flow({ view = OPEN, suites = {}, affected = { out: { scope: 'some', pages: ['pnl', 'tasks'], files: [] }, exit: 0 },
                 local = null, local2 = null, live = null, argv = ['--pr', '5'], mergeConfirms = true, mergeExit = 0,
                 ff = false, moveMain = null, build = null, suitesCrash = false, interruptServerPoll = false,
-                patch = null, pullRef = false, headIsReal = false } = {}) {
+                patch = null, pullRef = false, headIsReal = false, env = {}, prMessage = null, viewLate = null } = {}) {
   const bin = stubs(view, { mergeConfirms, mergeExit, suites });
   const home = tmp('merge-pr-home-');
-  const g = gitFixture({ ff, pullRef });
+  const g = gitFixture({ ff, pullRef, prMessage });
   if (headIsReal) writeFileSync(join(bin.dir, 'view.json'), JSON.stringify({ ...view, headRefOid: g.head }));
+  // What gh says on the second and later reads (the re-read just before merging).
+  if (viewLate != null) writeFileSync(join(bin.dir, 'view-late.json'), typeof viewLate === 'string' ? viewLate : JSON.stringify(viewLate));
   const tree = g.tree;
   mkdirSync(join(tree, 'scripts'), { recursive: true });
   writeFileSync(join(tree, 'scripts/prod-walk.js'), FAKE_WALK);
@@ -692,13 +703,13 @@ function flow({ view = OPEN, suites = {}, affected = { out: { scope: 'some', pag
   const cfg = { tree, repo: g.repo, scratch: g.root, argv, build, suitesCrash, interruptServerPoll, patch };
   const r = spawnSync('python3', ['-c', LOAD + DRIVER], {
     encoding: 'utf8', timeout: 90000,
-    env: { ...process.env, PATH: `${bin.dir}:${process.env.PATH}`, HOME: home, FAKE_CFG: JSON.stringify(cfg), MERGE_PR_REF_WAIT: '0' },
+    env: { ...process.env, PATH: `${bin.dir}:${process.env.PATH}`, HOME: home, FAKE_CFG: JSON.stringify(cfg), MERGE_PR_REF_WAIT: '0', ...env },
   });
   expect(r.status, r.stderr).toBe(0);
   const out = JSON.parse(r.stdout.trim().split('\n').pop());
   const walkLog = join(tree, 'walk-calls.log');
   return {
-    ...out, stderr: r.stderr, gh: bin.calls(), npx: bin.npx(), events: bin.events(), bin,
+    ...out, stderr: r.stderr, stdout: r.stdout, gh: bin.calls(), npx: bin.npx(), events: bin.events(), bin, home,
     log: gateLog(home).pop().split('\t'), g,
     walks: existsSync(walkLog) ? readFileSync(walkLog, 'utf8').trim().split('\n').map(l => JSON.parse(l)) : [],
     affectedStdin: existsSync(join(tree, 'affected-stdin.txt')) ? readFileSync(join(tree, 'affected-stdin.txt'), 'utf8') : null,
@@ -1080,5 +1091,122 @@ describe('merge-pr.py end to end (fakes, real git, no network)', { timeout: 60_0
     const r = flow({ interruptServerPoll: true });
     expect(r.code).toBe(2);
     expect(r.serverAlive).toEqual([]);
+  });
+});
+
+// ─── private names (29 Sep 2026) ──────────────────────────────────────
+//
+// This repo is PUBLIC. A squash merge writes a commit message no local hook
+// sees: GitHub builds it from the PR title, body and commit messages. On
+// 29 Sep 2026 published messages were found naming tenants and addresses.
+// Fictional names only: this file is public too.
+
+const NAMED = 'Jane Testwood';
+function roster(lines = `# test roster\n${NAMED}\nMartin\n`) {
+  const d = tmp('merge-pr-roster-');
+  writeFileSync(join(d, 'roster.txt'), lines);
+  return { OD_REDACT_NAMES: join(d, 'roster.txt') };
+}
+const WITHHELD = '[withheld: names a person on the private roster]';
+// Nothing the gate prints or logs may repeat the name it is protecting.
+function neverRepeats(r, home) {
+  expect(r.stdout).not.toMatch(/testwood/i);
+  expect(r.stderr).not.toMatch(/testwood/i);
+  expect(readFileSync(join(home, 'knowledge-os/logs/merge-gate.log'), 'utf8')).not.toMatch(/testwood/i);
+}
+
+describe('merge-pr.py refuses a PR whose squash message would name someone on the private roster', { timeout: 60_000 }, () => {
+  // Through flow(), not cli(): if this check ever breaks, the run goes on into
+  // the FAKE fixer and a scratch repo, never a real merge tree.
+  const refusedEarly = (view, field) => {
+    const r = flow({ affected: NONE, env: roster(), view });
+    expect(r.code).toBe(1);
+    expect(r.result.merged).toBe(false);
+    expect(r.result.why).toMatch(new RegExp(`^PR #5 names a person on the private roster in: ${field}\\. This repo is PUBLIC`));
+    // Refused on gh's word alone: one read, nothing built, nothing tested, nothing merged.
+    expect(r.gh.trim().split('\n')).toHaveLength(1);
+    expect(r.npx).toEqual([]);
+    expect(r.destroyed).toEqual([]);
+    expect(r.log[3]).toBe('REFUSED');
+    neverRepeats(r, r.home);
+    return r;
+  };
+
+  it('in the title: refused before anything is built, and the title is withheld from the result', () => {
+    const r = refusedEarly({ ...OPEN, title: `Arrears: chase ${NAMED}` }, 'title');
+    expect(r.result.title).toBe(WITHHELD);
+  });
+
+  it('in the body, in any case and split across a line: refused, the clean title still shown', () => {
+    const r = refusedEarly({ ...OPEN, body: 'Chased JANE\n  testwood for the rent.' }, 'body');
+    expect(r.result.title).toBe('Fix: a thing');
+  });
+
+  it('in a commit message gh lists: refused, naming the commit by its short sha', () => {
+    refusedEarly({ ...OPEN, commits: [...OPEN.commits,
+      { oid: 'd'.repeat(40), messageHeadline: 'Fix rent', messageBody: `Paid by ${NAMED}.` }] }, 'commit dddddddd');
+  });
+
+  it('in several places: every field is listed', () => {
+    refusedEarly({ ...OPEN, title: NAMED, body: NAMED,
+      commits: [{ oid: 'e'.repeat(40), messageHeadline: NAMED, messageBody: '' }] }, 'title, body, commit eeeeeeee');
+  });
+
+  it('a first name alone is NOT caught (full names only, by design) and the PR merges', () => {
+    const r = flow({ affected: NONE, env: roster(), view: { ...OPEN, title: 'Jane paid the rent', body: 'Martin fixed it' } });
+    expect(r.code).toBe(0);
+    expect(r.result.merged).toBe(true);
+    expect(r.result.privateNames).toBe('clean: title, body and 1 commit message(s)');
+  });
+
+  it('with no roster it warns, says NOT checked, and carries on (as the commit hooks do)', () => {
+    const r = flow({ affected: NONE, env: { OD_REDACT_NAMES: '/nonexistent/roster.txt' },
+      view: { ...OPEN, title: `Arrears: ${NAMED}` } });
+    expect(r.code).toBe(0);
+    expect(r.result.merged).toBe(true);
+    expect(r.result.privateNames).toBe('NOT checked: no roster at /nonexistent/roster.txt');
+    expect(r.stderr).toMatch(/private names NOT checked/);
+  });
+
+  for (const ff of [false, true]) {
+    it(`a commit in the TESTED tree that gh never listed names someone: refused before the tests run${ff ? ' (fast-forward)' : ''}`, () => {
+      // gh lists at most 100 commits, and a push during the gate adds commits it
+      // never listed: the tree is what gets merged, so the tree is read too.
+      const r = flow({ affected: NONE, ff, env: roster(), prMessage: `Docs\n\nRent from ${NAMED} is in.` });
+      expect(r.code).toBe(1);
+      expect(r.result.why).toMatch(new RegExp(`^PR #5 names a person on the private roster in: commit ${r.g.head.slice(0, 8)}\\.`));
+      expect(r.npx).toEqual([]);
+      expect(r.gh).not.toMatch(/pr merge/);
+      expect(r.destroyed).toEqual([r.g.tree]);
+      neverRepeats(r, r.home);
+    });
+  }
+
+  it('the title is changed during the gate to name someone: the re-read just before merging refuses', () => {
+    const r = flow({ affected: NONE, env: roster(), viewLate: { ...OPEN, title: `Arrears: ${NAMED}` } });
+    expect(r.code).toBe(1);
+    expect(r.result.merged).toBe(false);
+    expect(r.result.why).toMatch(/^PR #5 changed during the gate and now names a person on the private roster in: title\./);
+    expect(r.result.title).toBe('Fix: a thing');
+    expect(r.gh).toMatch(/^pr view 5 --json title,body,commits$/m);
+    expect(r.gh).not.toMatch(/pr merge/);
+    neverRepeats(r, r.home);
+  });
+
+  it('the re-read before merging cannot be read: cannot judge, not merged', () => {
+    const r = flow({ affected: NONE, env: roster(), viewLate: 'not json' });
+    expect(r.code).toBe(1);
+    expect(r.result.why).toMatch(/^cannot judge: could not re-read the PR before merging: gh gave no JSON/);
+    expect(r.gh).not.toMatch(/pr merge/);
+  });
+
+  it('a clean PR with a roster loaded: checked three ways, then merged', () => {
+    const r = flow({ affected: NONE, env: roster() });
+    expect(r.code).toBe(0);
+    expect(r.result.merged).toBe(true);
+    expect(r.result.privateNames).toBe('clean: title, body and 1 commit message(s)');
+    const views = r.gh.split('\n').filter(l => /^pr view 5 --json /.test(l) && !/state,mergedAt/.test(l));
+    expect(views).toHaveLength(2);     // the first read, and the re-read just before merging
+    expect(views[0]).toMatch(/,body,commits$/);
   });
 });

@@ -64,6 +64,18 @@ WHAT IT DOES
      --force` then deleted local main (3 and 4 Sep 2026). The REMOTE head
      branch is deleted through the API instead; a failed delete is reported and
      never changes "merged".
+  PRIVATE NAMES (29 Sep 2026). This repo is PUBLIC, and a squash merge writes
+  a commit message no local hook sees: GitHub builds it from the PR title, body
+  and commit messages. Published messages were found naming tenants and property
+  addresses. So the gate checks all three against the private roster, with the
+  same code as the commit hooks (scripts/private-name-guard.py): first from
+  `gh pr view` before anything is built, then every commit message IN the tested
+  tree (gh lists at most 100, and a push during the gate adds commits it never
+  listed), and the title and body once more just before merging. A hit is
+  refused with the FIELD named (title, body, commit <sha>), never the name, and
+  a title that names someone is withheld from the JSON result. A missing roster
+  warns, reports privateNames "NOT checked" and lets the gate go on, as the
+  commit hooks do. Full names only, by design: a first name alone is not caught.
   Protected paths (fixer-merge.py's list) do not block here: Kevin approves
   interactive work in session. They are reported as protectedPathsTouched.
   The merge tree, the local server and any worktree an interrupted build left
@@ -131,6 +143,22 @@ def fixer():
         spec.loader.exec_module(mod)
         _FM = mod
     return _FM
+
+
+_NG = None
+
+
+def name_guard():
+    """scripts/private-name-guard.py, loaded by path (its name has a hyphen): the
+    same roster check the pre-commit and commit-msg hooks run."""
+    global _NG
+    if _NG is None:
+        spec = importlib.util.spec_from_file_location(
+            "private_name_guard", os.path.join(HERE, "private-name-guard.py"))
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        _NG = mod
+    return _NG
 
 
 def progress(msg):
@@ -725,9 +753,13 @@ def main_check(base, files):
 
 # ─── THE STAGES ───────────────────────────────────────────────────────
 
-def pr_facts(pr):
-    fields = ("state,isDraft,headRefOid,title,baseRefName,headRefName,"
-              "headRepository,isCrossRepository")
+FACT_FIELDS = ("state,isDraft,headRefOid,title,baseRefName,headRefName,"
+               "headRepository,isCrossRepository,body,commits")
+MESSAGE_FIELDS = "title,body,commits"
+WITHHELD = "[withheld: names a person on the private roster]"
+
+
+def pr_facts(pr, fields=FACT_FIELDS):
     try:
         r = run(["gh", "pr", "view", str(pr), "--json", fields], timeout=60)
     except (OSError, subprocess.TimeoutExpired) as e:
@@ -741,6 +773,51 @@ def pr_facts(pr):
     if not isinstance(facts, dict):
         return None, "gh gave no JSON object for PR #%d" % pr
     return facts, None
+
+
+def pr_message_fields(facts):
+    """(label, text) for everything GitHub can copy into the squash commit: the
+    title (its subject), the body, and each commit's message (its default body)."""
+    fields = [("title", facts.get("title") or ""), ("body", facts.get("body") or "")]
+    for c in facts.get("commits") or []:
+        if isinstance(c, dict):
+            fields.append(("commit %s" % (c.get("oid") or "unknown")[:8], "%s\n\n%s" % (
+                c.get("messageHeadline") or "", c.get("messageBody") or "")))
+    return fields
+
+
+def tree_messages(tree, base, head):
+    """(fields, error): the message of every commit this merge brings in, read
+    from the tested tree, so the check covers exactly what is merged."""
+    r = run(["git", "log", "--format=%H%x00%B%x1e", "%s..%s" % (base, head)],
+            cwd=tree, timeout=60)
+    if r.returncode != 0:
+        return None, "cannot read the PR's commit messages in the merge tree: %s" % tail(r.stderr, 200)
+    out = []
+    for record in (r.stdout or "").split("\x1e"):
+        sha, sep, message = record.strip("\n").partition("\x00")
+        if sep:
+            out.append(("commit %s" % sha[:8], message))
+    return out, None
+
+
+def names_in(fields):
+    """(labels of the fields that name someone on the roster, None), or
+    (None, why) when there is no roster to check against."""
+    guard = name_guard()
+    pattern, missing = guard.roster_pattern()
+    if missing:
+        return None, missing
+    return guard.fields_naming(fields, pattern), None
+
+
+def named_why(pr, labels, when=""):
+    """The refusal. It names the FIELDS, never the name: it lands in logs and chat."""
+    where = ", ".join(labels[:10]) + (" and %d more" % (len(labels) - 10) if len(labels) > 10 else "")
+    return ("PR #%d %snames a person on the private roster in: %s. This repo is PUBLIC and a "
+            "squash merge copies the title and commit messages into main's history. Reword "
+            "them (gh pr edit %d --title / --body; a commit message needs the branch "
+            "rewritten and force-pushed), then run it again." % (pr, when, where, pr))
 
 
 def spec_names(suite, trail=()):
@@ -1029,6 +1106,17 @@ def gate(pr, dry_run):
     facts, err = pr_facts(pr)
     if err:
         return refuse(err)
+    # Before anything else reads or prints the title: a title that names someone
+    # must not reach the JSON result or the log either.
+    named, no_roster = names_in(pr_message_fields(facts))
+    if no_roster:
+        progress("private names NOT checked: %s" % no_roster)
+        res["privateNames"] = "NOT checked: %s" % no_roster
+    elif named:
+        res["title"] = WITHHELD if "title" in named else facts.get("title")
+        return refuse(named_why(pr, named))
+    else:
+        res["privateNames"] = "clean as gh lists it; commit messages not yet read from the tree"
     res["title"] = facts.get("title")
     res["headAtView"] = facts.get("headRefOid")
     res["head"] = facts.get("headRefOid")
@@ -1080,6 +1168,14 @@ def gate(pr, dry_run):
             return refuse("cannot judge: " + err)
         res["files"] = len(files)
         res["protectedPathsTouched"] = fm.protected_hits(files)
+        if not no_roster:
+            messages, err = tree_messages(tree, base, head)
+            if err:
+                return refuse("cannot judge: " + err)
+            named, _ = names_in(messages)
+            if named:
+                return refuse(named_why(pr, named))
+            res["privateNames"] = "clean: title, body and %d commit message(s)" % len(messages)
 
         progress("running vitest, then the browser suite, on the merge result")
         gate_ok, g, first_port = run_suites(tree)
@@ -1154,6 +1250,18 @@ def gate(pr, dry_run):
     if dry_run:
         res["why"] = "DRY RUN, nothing merged: " + why
         return res, 0
+    if not no_roster:
+        # GitHub builds the squash message from the title and body as they are
+        # AT MERGE TIME, and the gate took minutes: read them once more.
+        progress("re-reading the PR's title, body and commits for private names")
+        now, err = pr_facts(pr, MESSAGE_FIELDS)
+        if err:
+            res["why"] = "cannot judge: could not re-read the PR before merging: " + err
+            return res, 1
+        named, _ = names_in(pr_message_fields(now))
+        if named:
+            res["why"] = named_why(pr, named, "changed during the gate and now ")
+            return res, 1
     progress("merging PR #%d" % pr)
     m = do_merge(pr, facts, head)
     res.update(m)

@@ -101,7 +101,7 @@ HQ also holds `learning/` (transcript and book working files) and `_from-repo/20
 
 Enforcement: `~/.claude/hooks/project-check.py` (SessionStart, interactive sessions only) tells a new chat which project it started in; if the first prompt belongs to another, Claude moves it with `mcp__ccd_directory__change_directory` during the model-check reply (`FIRST_PROMPT_ALLOWED` in `~/.claude/skills/model-check/gate.py`). That hook is desktop-only: a session started on the web or in the cloud has no `~/.claude/`, no hook and no `change_directory` tool, so it never moves and the routing is unenforced there (21 Sep 2026). `scripts/private-name-guard.py`, run first by `scripts/pre-commit`, refuses a commit that adds a line naming someone on `~/.config/od/redact-names.txt`.
 
-## 7. Hygiene rules
+## 7. Since 29 Sep 2026 `scripts/commit-msg` runs it on the commit message too (`--message-file`), and `scripts/merge-pr.py` checks the PR title, body and commit messages before merging. It matches full names only, so a first name alone is not caught. Hygiene rules
 
 - After a branch merges, delete the branch and its worktree in the same session.
 - Commit or stash uncommitted edits before context-switching; parallel sessions sweep loose files.
