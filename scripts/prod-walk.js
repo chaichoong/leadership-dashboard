@@ -27,6 +27,9 @@
  *      Playwright's storageState, which reaches that one origin and no frame
  *      from anywhere else. It is never printed, logged or passed on a command
  *      line, and every string is scrubbed of it before it is cut or printed.
+ *      The same storageState remembers Kevin as the Tasks page's viewer
+ *      (`_task_user`, exactly what that page writes when Kevin picks his own
+ *      name), so Tasks shows his data instead of "Who are you?" (29 Sep 2026).
  *   3. Waits until the data has actually loaded (bare `PAT` and `allTransactions`,
  *      never the `window.` forms, which are undefined on a healthy app).
  *   4. Reads PAGE_REGISTRY live and visits every entry: a tab with a `tab-<id>`
@@ -46,10 +49,31 @@
  *      write is reported, never judged: it does not change PASS / WARN / FAIL.
  *      Limit: a GET that changes something server-side still goes out (the app
  *      shell fires the invoice sync as a GET on every load).
+ *      ONE NAMED EXCEPTION (29 Sep 2026), in ALLOWED_WRITES: POST
+ *      https://pm.operationsdirector.co.uk/login-airtable, exactly that, no
+ *      query. It is Property Manager signing Kevin in: the page sends the app's
+ *      Airtable key to Kevin's own Worker, which asks Airtable whose key it is,
+ *      checks it can read one task, and returns a signed session. It writes no
+ *      data (workers/property-manager/worker.js handleLoginAirtable); it ticks
+ *      the Worker's sign-in rate limit, 5 a minute. It goes out only when the
+ *      caller counts it: each one is listed as `writesAllowed` on the page that
+ *      sent it, with a total at the top. Any other method, path or host is
+ *      blocked as before.
  *   6. Prints one JSON result: per page PASS / WARN / FAIL. A page that stops at
  *      its own entry gate (who is viewing, a Google sign-in, its own token
  *      screen, still loading) is WARN with the gate named, never PASS: it
- *      rendered, but its data went unchecked. Errors from telemetry hosts and
+ *      rendered, but its data went unchecked. A frame whose text is still a
+ *      "Loading..." line is read again until it changes or its 30 seconds run
+ *      out. Two gates have no read-only way through and stay WARN:
+ *        - Inbound Comms (follow-up.html) reads Gmail with a Google access token
+ *          it gets from Google's own consent pop-up, kept in sessionStorage. Only
+ *          Kevin's Google session can issue one; the walk has none and never
+ *          signs in to Google.
+ *        - CRM (crm-supabase.html) reads the parked Supabase build and needs a
+ *          Supabase session, which only a Supabase password or email-link
+ *          sign-in issues. The walk holds no such session and never signs in
+ *          with a password.
+ *      Errors from telemetry hosts and
  *      browser extensions are counted as outsideNoise, never as a failure.
  *      Error text and leak snippets are short and scrubbed. Every DISTINCT
  *      console error and leak snippet is kept, up to 50 per list, beside a
@@ -99,7 +123,9 @@ const SOFT_LEAK_RE = /\bundefined\b|\bNaN\b/g;
 // A page that stops at its own entry gate rendered, but its data went unchecked.
 // Measured 27 Sep 2026: Tasks asks "Who are you?", Inbound Comms asks for a
 // Google sign-in, Systemisation sat on "Loading..." for 30 seconds. The walk
-// never picks an identity or signs in to Google.
+// never signs in to Google. Since 29 Sep 2026 it remembers Kevin, and only
+// Kevin, as the Tasks viewer (TASK_VIEWER), so a "Who are you?" now means that
+// remembered identity stopped working.
 const GATES = [
   [/Who are you\?/, 'asks who is viewing'],
   [/Sign in with (your )?Google/i, 'asks for a Google sign-in'],
@@ -206,6 +232,8 @@ function pageReport(r) {
     leakCount: r.leakCount || 0, softLeakCount: r.softLeakCount || 0,
     truncated: [errs, leaks, soft].some(l => l.length >= LIST_CAP),
     writesBlocked: (r.writesBlocked || []).slice(0, 5),
+    // The named exceptions this page sent (ALLOWED_WRITES), listed like blocks.
+    writesAllowed: (r.writesAllowed || []).slice(0, 5),
   };
 }
 
@@ -223,6 +251,32 @@ function findGate(text) {
   if (t.length > 1500) return '';
   for (const [re, label] of GATES) if (re.test(t)) return label;
   return '';
+}
+
+/** A frame has settled when its text is long enough, the same length as on
+ *  the last read, and not a "Loading..." line. A loading line holds still for
+ *  seconds while the page waits for its data (Property Manager's first read
+ *  takes several), and judging it then called a working page a gate. */
+function frameSettled(text, lastLength) {
+  const n = String(text || '').trim().length;
+  return n >= MIN_CHARS && n === lastLength && findGate(text) !== 'still loading';
+}
+
+// Who is viewing, for the Tasks page (os/tasks/index.html). It remembers its
+// viewer in localStorage `_task_user` as selectIdentity() writes it: that TEAM
+// entry's key, name and email. The walk holds Kevin's token, so it views as
+// Kevin and never as anyone else. A test runs the page's own initIdentity() on
+// this value and checks it is Kevin's TEAM entry, so a change there is loud.
+const TASK_VIEWER = Object.freeze({ key: 'kevin', name: 'Kevin Brittain', email: 'kevin@runpreneur.org.uk' });
+
+/** The app origin's localStorage as a returning Kevin has it: the token under
+ *  both keys the app reads, and the Tasks viewer. */
+function seedStorage(secret = SECRET) {
+  return [
+    { name: '_dlr_pat', value: secret },
+    { name: 'airtable_pat', value: secret },
+    { name: '_task_user', value: JSON.stringify(TASK_VIEWER) },
+  ];
 }
 
 function isNoise(url) {
@@ -328,13 +382,47 @@ function describeWrite(method, url, secret = SECRET) {
 // awaits the write does not throw on the block and charge an error to itself.
 const BLOCKED_BODY = JSON.stringify({ records: [], id: 'recBLOCKEDBYWALK', fields: {}, blockedByWalk: true });
 
+// The only writes the walk lets out: each a method, an origin and an exact path.
+// Property Manager's sign-in (29 Sep 2026): the Worker's handleLoginAirtable
+// makes two Airtable GETs (whoami, one task) and signs a session. It stores
+// nothing and writes no record. Its passcode sign-in (/login) and every data
+// write (/task/<id>, /growth-plan/<what>) stay blocked. Add to this list only
+// what has been read end to end and proved to write nothing.
+const ALLOWED_WRITES = Object.freeze([
+  Object.freeze({ method: 'POST', origin: 'https://pm.operationsdirector.co.uk', path: '/login-airtable' }),
+]);
+
+/** True only for a request ALLOWED_WRITES names exactly: same method, same
+ *  origin (https, that host), same path, and no query, hash or user name.
+ *  Anything else, a trailing slash included, is false, so it is blocked. */
+function allowedWrite(method, url) {
+  const m = String(method == null ? '' : method).toUpperCase();
+  let u;
+  try { u = new URL(String(url == null ? '' : url)); } catch (e) { return false; }
+  if (u.username || u.password || u.search || u.hash) return false;
+  return ALLOWED_WRITES.some(w => w.method === m && w.origin === u.origin && w.path === u.pathname);
+}
+
 /** Route every request in the context: reads go out, writes never do. Each
  *  blocked write is answered locally and passed to onBlocked("METHOD host/path").
- *  Cross-origin callers get CORS headers so the page reads the answer. */
-async function blockWrites(ctx, onBlocked) {
+ *  Cross-origin callers get CORS headers so the page reads the answer.
+ *  A write allowedWrite() names goes out only when onAllowed is given and
+ *  counts it without throwing; otherwise it is blocked like any other write.
+ *  Reads and allowed writes use fallback(), which sends them exactly as
+ *  continue() does when no other route matches (the walk has none); a test
+ *  that stands in for a server by routing it first receives them instead. */
+async function blockWrites(ctx, onBlocked, onAllowed) {
   await ctx.route('**/*', async (route) => {
     const req = route.request();
-    if (!isWrite(req.method())) return route.continue();
+    if (!isWrite(req.method())) return route.fallback();
+    if (typeof onAllowed === 'function' && allowedWrite(req.method(), req.url())) {
+      // An exception nobody counted is not taken: a reporting fault blocks it.
+      let counted = false;
+      try { onAllowed(describeWrite(req.method(), req.url())); counted = true; } catch (e) {
+        process.stderr.write('prod-walk: an allowed write could not be counted, so it was blocked: ' + clip(e && e.message, 120) + '\n');
+      }
+      if (counted) return route.fallback();
+    }
     // Reporting must never decide whether a write goes out: log the fault, block anyway.
     try { onBlocked(describeWrite(req.method(), req.url())); } catch (e) {
       process.stderr.write('prod-walk: a write was blocked but could not be logged: ' + clip(e && e.message, 120) + '\n');
@@ -417,8 +505,9 @@ function authFormVisible() {
 
 // The pages walked so far, for the hard stop.
 const DONE = [];
-// Every write the route blocked, whichever page (or none) was current.
-const WRITES = { total: 0 };
+// Every write the route blocked (total) and every named exception it let out
+// (allowed), whichever page (or none) was current.
+const WRITES = { total: 0, allowed: 0 };
 
 async function main() {
   const a = args(process.argv.slice(2));
@@ -430,8 +519,10 @@ async function main() {
   }
   setTimeout(() => finish({ ok: false, ran: true, reason: `HARD STOP: a page hung past ${HARD_STOP_MS / 1000}s; the pages after the last one listed were not walked`,
                             only: a.only, pagesWalked: DONE.length, counts: summarise(DONE), writesBlocked: WRITES.total,
-                            pages: DONE.map(({ id, status, gate, error, writesBlocked }) =>
-                              ({ id, status, gate: gate || undefined, error, writesBlocked: (writesBlocked || []).slice(0, 5) })) }, 1),
+                            writesAllowed: WRITES.allowed,
+                            pages: DONE.map(({ id, status, gate, error, writesBlocked, writesAllowed }) =>
+                              ({ id, status, gate: gate || undefined, error, writesBlocked: (writesBlocked || []).slice(0, 5),
+                                 writesAllowed: (writesAllowed || []).slice(0, 5) })) }, 1),
              HARD_STOP_MS).unref();
   const base = allowedBase(a.base);
   if (!base) return finish({ ok: false, ran: false, reason: 'refused --base: only the live app or a local copy may be walked' }, 2);
@@ -461,16 +552,20 @@ async function walk(browser, a, base, origin, started) {
     viewport: { width: 1280, height: 900 },
     // A service worker's own fetches would not pass through the route below.
     serviceWorkers: 'block',
-    storageState: { cookies: [], origins: [{ origin, localStorage: [
-      { name: '_dlr_pat', value: SECRET }, { name: 'airtable_pat', value: SECRET }] }] },
+    storageState: { cookies: [], origins: [{ origin, localStorage: seedStorage(SECRET) }] },
   });
 
   let current = null;           // the page record errors are charged to
   const idleWrites = [];        // writes tried while no page record was open
+  const idleAllowed = [];       // named exceptions sent while no page record was open
   // Installed before the first page opens, so nothing is ever sent unrouted.
   await blockWrites(ctx, (label) => {
     WRITES.total += 1;
     const list = current ? current.writesBlocked : idleWrites;
+    if (list.length < 5) list.push(label);
+  }, (label) => {
+    WRITES.allowed += 1;
+    const list = current ? current.writesAllowed : idleAllowed;
     if (list.length < 5) list.push(label);
   });
   const hook = (page) => attachHooks(page, origin, () => current);
@@ -487,9 +582,8 @@ async function walk(browser, a, base, origin, started) {
         url = fr.url();
         text = await fr.evaluate(() => (document.body && document.body.innerText) || '').catch(() => '');
         gated = await fr.evaluate(authFormVisible).catch(() => false);
-        const n = text.trim().length;
-        if (n >= MIN_CHARS && n === last) break;
-        last = n;
+        if (frameSettled(text, last)) break;
+        last = text.trim().length;
       }
       await page.waitForTimeout(2500);
     }
@@ -498,7 +592,7 @@ async function walk(browser, a, base, origin, started) {
 
   const page = await ctx.newPage();
   hook(page);
-  const boot = { id: '(sign-in)', consoleErrors: [], consoleErrorCount: 0, failedRequests: [], outsideNoise: 0, writesBlocked: [] };
+  const boot = { id: '(sign-in)', consoleErrors: [], consoleErrorCount: 0, failedRequests: [], outsideNoise: 0, writesBlocked: [], writesAllowed: [] };
   current = boot;
   let signedIn = null;
   try {
@@ -523,7 +617,8 @@ async function walk(browser, a, base, origin, started) {
   if (!signedIn) {
     return finish({ ok: false, ran: false, reason: `NOT SIGNED IN: no data loaded within ${SIGNIN_BUDGET_MS / 1000}s`,
                     only: a.only, ...bootReport(boot),
-                    writesBlocked: WRITES.total, bootWritesBlocked: boot.writesBlocked }, 3);
+                    writesBlocked: WRITES.total, bootWritesBlocked: boot.writesBlocked,
+                    writesAllowed: WRITES.allowed, bootWritesAllowed: boot.writesAllowed }, 3);
   }
 
   const registry = await page.evaluate(() => {
@@ -541,7 +636,7 @@ async function walk(browser, a, base, origin, started) {
   const pages = [];
   for (const entry of entries) {
     const r = { id: entry.id, name: entry.name, consoleErrors: [], consoleErrorCount: 0, failedRequests: [], leaks: [], softLeaks: [],
-                leakCount: 0, softLeakCount: 0, outsideNoise: 0, writesBlocked: [] };
+                leakCount: 0, softLeakCount: 0, outsideNoise: 0, writesBlocked: [], writesAllowed: [] };
     if (Date.now() - started > TOTAL_BUDGET_MS) {
       r.error = `not reached: the ${TOTAL_BUDGET_MS / 60000}-minute budget ran out first`;
       r.status = classify(r);
@@ -607,7 +702,7 @@ async function walk(browser, a, base, origin, started) {
   // A --only id the live registry does not have: a stale map, never a silent skip.
   for (const id of missing) {
     const r = { id, name: '', consoleErrors: [], consoleErrorCount: 0, failedRequests: [], leaks: [], softLeaks: [],
-                leakCount: 0, softLeakCount: 0, outsideNoise: 0, writesBlocked: [], error: 'not in PAGE_REGISTRY' };
+                leakCount: 0, softLeakCount: 0, outsideNoise: 0, writesBlocked: [], writesAllowed: [], error: 'not in PAGE_REGISTRY' };
     r.status = classify(r);
     pages.push(r);
     DONE.push(r);
@@ -627,6 +722,9 @@ async function walk(browser, a, base, origin, started) {
     writesBlocked: WRITES.total,
     bootWritesBlocked: boot.writesBlocked,
     idleWritesBlocked: idleWrites,
+    writesAllowed: WRITES.allowed,
+    bootWritesAllowed: boot.writesAllowed,
+    idleWritesAllowed: idleAllowed,
     ...bootReport(boot),
     bootFailedRequests: boot.failedRequests.slice(0, 5),
     outsideNoise: pages.reduce((n, p) => n + p.outsideNoise, boot.outsideNoise),
@@ -638,7 +736,8 @@ async function walk(browser, a, base, origin, started) {
 
 module.exports = { scrub, clip, findLeaks, findGate, isNoise, isAppError, allowedBase, routeFor, classify, summarise, MIN_CHARS,
                    args, parseOnly, selectEntries, isWrite, describeWrite, blockWrites, BLOCKED_BODY,
-                   LIST_CAP, stripOrigin, errorLine, recordError, pageReport, bootReport, attachHooks };
+                   LIST_CAP, stripOrigin, errorLine, recordError, pageReport, bootReport, attachHooks,
+                   frameSettled, TASK_VIEWER, seedStorage, ALLOWED_WRITES, allowedWrite };
 
 if (require.main === module) {
   main().catch((e) => {
