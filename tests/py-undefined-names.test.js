@@ -62,6 +62,10 @@ const ESTATE_SCRIPTS = [
   'scripts/magic-battery.py',
   'scripts/home-battery.py',
   'scripts/uk-gigs.py',
+  'scripts/merge-pr.py',
+  'scripts/merge-guard.py',
+  'scripts/affected-pages.py',
+  'scripts/rework-rate.py',
 ];
 
 describe('estate scripts read no name they never bind', () => {
