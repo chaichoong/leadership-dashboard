@@ -141,12 +141,13 @@
 
     // Readiness signal for the main dashboard data tables (allTransactions,
     // allTenancies, allCosts, allBusinesses, allCategories, allSubCategories).
-    // loadStrategicKpis now fires at the top of loadDashboard — BEFORE those
-    // globals are populated — so its Projects fetch + initial render can race
-    // against the main 9-table fetch. But runAutomatedKpis needs those globals
-    // to compute values, so it waits on this promise before starting. Resolved
-    // by markMainDataReady() once either the cache-hit path or the fresh-fetch
-    // path has finished populating the globals.
+    // Resolved by markMainDataReady() once either the cache-hit path or the
+    // fresh-fetch path has finished populating the globals.
+    //
+    // runAutomatedKpis does NOT wait on this one: it waits on the per-load fresh
+    // gate below. The cache can be up to 24h old (DASH_CACHE_MAX_AGE_MS) and the
+    // compute runs once per load and SAVES its result, so computing on the cache
+    // stored yesterday's number as today's (found 29 Sep 2026).
     let _mainDataReadyResolve = null;
     const _mainDataReadyPromise = new Promise(r => { _mainDataReadyResolve = r; });
     function markMainDataReady() {
@@ -159,6 +160,15 @@
     // user navigates away and back. Resolves once (first load), which is exactly the
     // deep-link case; later manual refreshes re-render through their own paths.
     window.whenMainDataReady = _mainDataReadyPromise;
+
+    // One gate per loadDashboard() call, opened only by THAT call's fresh Airtable
+    // fetch. If the fetch fails the gate stays shut and nothing is computed or
+    // saved, which is right: the stored values stay on screen.
+    function newFreshDataGate() {
+        let open;
+        const ready = new Promise(r => { open = r; });
+        return { ready, open };
+    }
 
     function _stratSelName(v){if(!v)return '';if(typeof v==='string')return v;if(typeof v==='object'&&v.name)return v.name;return ''}
     function _stratDaysAgo(iso){if(!iso)return null;const ms=Date.now()-new Date(iso).getTime();return Math.floor(ms/86400000)}
@@ -182,7 +192,7 @@
         return 'var(--warning)';
     }
 
-    async function loadStrategicKpis(){
+    async function loadStrategicKpis(freshReady){
         try{
             // Build business ID→name map from already-loaded businesses
             // Business name field ID is fldbbRqVxLxUdHwIR (same as used in pnl.js)
@@ -236,7 +246,7 @@
             // back to Airtable in the background and re-renders on completion.
             renderStrategicKpis();
             try{
-                await runAutomatedKpis(records);
+                await runAutomatedKpis(records, freshReady);
                 renderStrategicKpis();
             }catch(e){console.warn('[runAutomatedKpis] failed',e)}
         }catch(e){console.warn('[loadStrategicKpis] failed',e)}
@@ -511,7 +521,7 @@
             });
         }catch(e){console.warn('[fetchTasksForKpi] failed',e);return []}
     }
-    async function runAutomatedKpis(projectRecords){
+    async function runAutomatedKpis(projectRecords, freshReady){
         if(!Array.isArray(projectRecords))return;
         const withCode=projectRecords.filter(r=>{
             // Skip closed quarters. Recomputing them burns time and lets a closed
@@ -522,10 +532,10 @@
         });
         if(!withCode.length)return;
         // The compute code reads from allTransactions / allTenancies / allCosts
-        // / allBusinesses / allCategories / allSubCategories. Wait for those to
-        // be populated before computing (they're set by either the cache-hit
-        // render or the fresh-fetch success path in loadDashboard).
-        await _mainDataReadyPromise;
+        // / allBusinesses / allCategories / allSubCategories. Wait for THIS load's
+        // fresh fetch to populate them, never the cache hit: the cache can be a
+        // day old and the result below is saved (see newFreshDataGate).
+        await (freshReady || _mainDataReadyPromise);
         // Fetch the task list once for any project KPI that needs it.
         const tasksForKpi=await fetchTasksForKpi();
         const prospectsForKpi=await fetchProspectsForKpi();
@@ -935,8 +945,10 @@
         // alone is ~7k rows paginated) which pushed the KPIs section to ~60s on
         // cold loads, AND it was also firing a second time after cache render,
         // doubling the compute work. Now: one call, as early as possible, racing
-        // against the main fetch instead of queueing behind it.
-        loadStrategicKpis();
+        // against the main fetch instead of queueing behind it. The compute
+        // inside it waits for freshGate, which only the fresh fetch opens.
+        const freshGate = newFreshDataGate();
+        loadStrategicKpis(freshGate.ready);
 
         // Try instant render from cache first
         const cached = await loadDashCache();
@@ -1018,9 +1030,10 @@
             allCategories = categories;
             allSubCategories = subCategories;
             allBusinesses = businesses;
-            // Signal to runAutomatedKpis that the globals it depends on are now
-            // populated. (No-op if cache-hit already resolved it.)
+            // The globals now hold fresh data. (markMainDataReady is a no-op if
+            // the cache hit already resolved it; the KPI gate is this load's own.)
             markMainDataReady();
+            freshGate.open();
             // Businesses are now populated — re-render the strategic KPI section
             // in case its first paint raced ahead of them (filter chips showed
             // only 'All' and rows said 'No business').
