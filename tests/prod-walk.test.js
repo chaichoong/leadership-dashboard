@@ -417,6 +417,58 @@ describe('prod-walk.js reads the same error the same on any origin', () => {
   }, 60000);
 });
 
+// 29 Sep 2026: the merge gate refused PR #624 because Inbound Comms, a page it
+// never changed, logged "403 @ googleapis.com/discovery/.../gmail" on the local
+// copy and nothing live. Google API keys are locked to the live address, so a
+// keyed Google call from 127.0.0.1 always answers 403. Back-test: with the
+// isOriginLocked checks removed from attachHooks, the hooks test below fails.
+describe('prod-walk.js does not charge an origin-locked Google 403 on a local copy', () => {
+  const LOCAL = 'http://127.0.0.1:5173', LIVE = 'https://app.operationsdirector.co.uk';
+  const GMAIL = 'https://www.googleapis.com/discovery/v1/apis/gmail/v1/rest?key=AIza-test';
+  it('only a 403, only from googleapis.com, only on a local origin', () => {
+    expect(walk.isOriginLocked(GMAIL, 403, LOCAL)).toBe(true);
+    expect(walk.isOriginLocked(GMAIL, 403, 'http://localhost:8080')).toBe(true);
+    expect(walk.isOriginLocked(GMAIL, 403, LIVE)).toBe(false);           // live: still the app's error
+    expect(walk.isOriginLocked(GMAIL, 404, LOCAL)).toBe(false);
+    expect(walk.isOriginLocked('https://api.airtable.com/v0/appX/tblY', 403, LOCAL)).toBe(false);
+    expect(walk.isOriginLocked('https://googleapis.com.evil.test/x', 403, LOCAL)).toBe(false);
+  });
+  it('through the real browser hooks: the Google 403 is noise, any other 403 is still charged (real Playwright)', async () => {
+    let chromium;
+    try { ({ chromium } = require('playwright-core')); } catch { /* asserted below */ }
+    expect(chromium, 'playwright-core is not installed').toBeTruthy();
+    const server = await new Promise((ok) => {
+      const s = createServer((req, res) => {
+        res.writeHead(200, { 'content-type': 'text/html' });
+        res.end(`<!doctype html><html><body>comms<script>
+          fetch(${JSON.stringify(GMAIL)}).catch(() => {});
+          fetch('https://api.airtable.com/v0/appX/tblY').catch(() => {});
+        </script></body></html>`);
+      });
+      s.listen(0, '127.0.0.1', () => ok(s));
+    });
+    const browser = await chromium.launch({ headless: true });
+    try {
+      const origin = `http://127.0.0.1:${server.address().port}`;
+      const rec = { consoleErrors: [], consoleErrorCount: 0, failedRequests: [], outsideNoise: 0 };
+      const page = await browser.newPage();
+      await page.route('https://www.googleapis.com/**', (r) => r.fulfill({ status: 403, contentType: 'application/json', body: '{}', headers: { 'access-control-allow-origin': '*' } }));
+      await page.route('https://api.airtable.com/**', (r) => r.fulfill({ status: 403, contentType: 'application/json', body: '{}', headers: { 'access-control-allow-origin': '*' } }));
+      walk.attachHooks(page, origin, () => rec);
+      await page.goto(origin + '/');
+      await page.waitForTimeout(800);
+      await page.close();
+      const all = rec.consoleErrors.concat(rec.failedRequests).join(' | ');
+      expect(all).not.toContain('googleapis');
+      expect(all).toContain('api.airtable.com');                          // a real 403 still counts
+      expect(rec.outsideNoise).toBeGreaterThanOrEqual(1);
+    } finally {
+      await browser.close();
+      server.close();
+    }
+  }, 60000);
+});
+
 // 29 Sep 2026: on the live app 5 of 31 pages stopped at an entry screen, so
 // the walk said WARN and never checked their data. Tasks asked "Who are you?"
 // and Property Manager's own sign-in POST was blocked by the write block. The

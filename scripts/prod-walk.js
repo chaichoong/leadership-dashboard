@@ -283,6 +283,18 @@ function isNoise(url) {
   return NOISE_RE.test(String(url || ''));
 }
 
+// Google API keys are locked to the live app's address, so on a local copy (the
+// merge gate serves one on 127.0.0.1) every keyed Google call answers 403 while
+// the live app gets 200. That differs by WHERE the page is served, not by its
+// code: on 29 Sep 2026 it refused PR #624 on Inbound Comms, a page the PR never
+// changed. On a local origin only, such a 403 is outside noise; on the live app
+// a Google 403 is still charged to the app.
+const LOCAL_ORIGIN_RE = /^https?:\/\/(127\.0\.0\.1|localhost|\[::1\])(:\d+)?$/;
+const GOOGLE_API_RE = /^https:\/\/([^/]+\.)?googleapis\.com\//;
+function isOriginLocked(url, status, origin) {
+  return status === 403 && LOCAL_ORIGIN_RE.test(String(origin || '')) && GOOGLE_API_RE.test(String(url || ''));
+}
+
 /** Charge an uncaught exception to the app only when its stack runs through the
  *  app, or names no URL at all. A Google sign-in frame throwing is not the app. */
 function isAppError(stack, origin) {
@@ -449,7 +461,8 @@ function attachHooks(page, origin, getCurrent) {
     const where = (m.location() || {}).url || '';
     const text = m.text();
     // A 429 is Airtable's rate limit, which airtableFetch retries.
-    if (isNoise(where) || /status of 429/.test(text)) { current.outsideNoise += 1; return; }
+    if (isNoise(where) || /status of 429/.test(text)
+        || (/status of 403/.test(text) && isOriginLocked(where, 403, origin))) { current.outsideNoise += 1; return; }
     recordError(current, errorLine(text, where, origin));
   });
   page.on('pageerror', (e) => {
@@ -467,7 +480,8 @@ function attachHooks(page, origin, getCurrent) {
   });
   page.on('response', (r) => {
     const current = getCurrent();
-    if (current && r.status() >= 400 && r.status() !== 429 && !isNoise(r.url())) {
+    if (current && r.status() >= 400 && r.status() !== 429 && !isNoise(r.url())
+        && !isOriginLocked(r.url(), r.status(), origin)) {
       current.failedRequests.push(clip(r.status() + ' ' + stripOrigin(r.url().split('?')[0], origin), 140));
     }
   });
@@ -739,7 +753,7 @@ async function walk(browser, a, base, origin, started) {
   return finish(result, result.ok ? 0 : 1);
 }
 
-module.exports = { scrub, clip, findLeaks, findGate, isNoise, isAppError, allowedBase, routeFor, classify, summarise, MIN_CHARS,
+module.exports = { scrub, clip, findLeaks, findGate, isNoise, isAppError, isOriginLocked, allowedBase, routeFor, classify, summarise, MIN_CHARS,
                    args, parseOnly, selectEntries, isWrite, describeWrite, blockWrites, BLOCKED_BODY,
                    LIST_CAP, stripOrigin, errorLine, recordError, pageReport, bootReport, attachHooks,
                    frameSettled, TASK_VIEWER, seedStorage, ALLOWED_WRITES, allowedWrite };
