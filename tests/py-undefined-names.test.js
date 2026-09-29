@@ -26,6 +26,7 @@ const ESTATE_SCRIPTS = [
   'scripts/approval_evidence.py',
   'scripts/calendar-write.py',
   'scripts/send-email.py',
+  'scripts/sync-master-plan.py',
   'scripts/content-engine/publish.py',
   'scripts/content-engine/watch.py',
   'scripts/content-engine/approval.py',
@@ -58,6 +59,8 @@ const ESTATE_SCRIPTS = [
   'scripts/private-name-guard.py',
   'scripts/host-move.py',
   'scripts/magic-battery.py',
+  'scripts/home-battery.py',
+  'scripts/uk-gigs.py',
 ];
 
 describe('estate scripts read no name they never bind', () => {

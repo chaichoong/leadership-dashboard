@@ -1587,6 +1587,17 @@ def od_picture_problem(task_name, output):
     if not name.startswith("CONTENT (OD):") or "Newsletter:" in name: return ""
     text = str(output or "")
     if text.lstrip().upper().startswith("THIN SLOT"): return ""
+    # A CLOSE PROPOSAL is ABOUT the card, not the post on it, so demanding the
+    # post's picture is asking for a picture that is the reason the card is being
+    # closed. recZdwbWGIFjMEyG6 (a stale OD post) made task-manager retry the same
+    # refused submit in its 13:00 and 17:00 slots for six days running — two of the
+    # three board passes a day ended VERIFY FAIL and the card never left the board
+    # (findings 20260917-task-manager-board-541, 20260918-task-manager-board-547,
+    # 20260919-task-manager-board-553/554, 20260920-daily-ops-556).
+    # Kevin approves removing a dead card; he is not being shown a post. The alert
+    # lane below this already carries exactly the same exemption for exactly the
+    # same reason, and this gate was written without it.
+    if text.lstrip().upper().startswith("CLOSE PROPOSAL:"): return ""
     if re.search(r"https://assets\.cdn\.filesafe\.space/\S+\.(png|jpg|jpeg)", text, re.I): return ""
     return ("an Operations Director post card must carry its picture as a permanent link (assets.cdn.filesafe.space ...png) so Kevin can open "
             "it; re-run the lane's `cards` step rather than re-submitting the text alone")
@@ -5197,7 +5208,11 @@ def track_record_problem(output, required):
 
 
 # ── history: the dated record of everything with a contact or reference ──
-REF_TOKEN_RE = re.compile(r"\b(?=[A-Z0-9-]{5,}\b)(?:[A-Z]*\d[A-Z0-9-]*)\b")
+# The five-or-more check stops at the first boundary five or more characters
+# in, never the last: read to the end of the run at every boundary,
+# "a-" * 30000 took 3.1 seconds (28 Sep 2026). It is a yes/no check, so the
+# answer is the same.
+REF_TOKEN_RE = re.compile(r"\b(?=[A-Z0-9-]{5,}?\b)(?:[A-Z]*\d[A-Z0-9-]*)\b")
 # A timestamp is a date: "2026-01-22T16:27:36Z" reads as 2026-01-22T16 (60
 # live tokens on 28 Sep 2026, mostly Evernote "Recorded:" stamps), and a
 # calendar invite writes 20260122T162736Z. Eight bare digits stay: that is an
@@ -5267,7 +5282,18 @@ CURRENCY_AFTER_RE = re.compile(r"[ \t]?(?:GBP|EUR|USD)\b(?![\s,:]*[£€$]?\d)")
 # as written, before it is upper-cased: a scheme-less link needs a lowercase
 # host (so "Acc.No/12345678" stays a reference) and an id a lowercase prefix
 # (so RECEIPT1234567890 does too).
-REF_URL_RE = re.compile(r"(?i:https?://|www\.)\S+|\b(?:[a-z0-9-]+\.)+[a-z]{2,}/\S*")
+# A long dotted or hyphened run ("a." * 10000) took 1.2 seconds (28 Sep
+# 2026): the scheme-less link was retried at every word boundary inside it,
+# each try reading to the end of the run. Once a run fails as a link from its
+# first boundary it fails from every later one (a link found from a later
+# boundary would stretch back to the first), so the third branch reads the
+# rest of the run in one step and gives it back
+# unchanged. It stops short of a www. or http(s):// inside the run so the
+# first branch is still tried there. The text out is the same as before.
+_NOT_A_LINK_START = r"(?!(?i:www\.|https?://))[a-z0-9-]"
+REF_URL_RE = re.compile(
+    r"(?i:https?://|www\.)\S+|\b(?:[a-z0-9-]+\.)+[a-z]{2,}/\S*"
+    r"|(?P<run>\b(?:" + _NOT_A_LINK_START + r")+(?:\.(?:" + _NOT_A_LINK_START + r")+)*)")
 AIRTABLE_ID_RE = re.compile(r"\b(?:app|tbl|rec|viw|shr|fld)[A-Za-z0-9]{14}\b")
 # A link wrapped across lines cuts an id in two ("…/shrTuDF8s" then
 # "04Kp5XGT"), and the second half would search every record holding the
@@ -5330,7 +5356,7 @@ def reference_tokens(text):
     Sep 2026). Never from a file path (28 Sep 2026)."""
     text = TRACK_RECORD_HEADER_RE.sub(" ", str(text or ""))
     text = WRAPPED_ID_RE.sub(lambda m: m.group(1) + m.group(3) if len(m.group(2)) + len(m.group(3)) == 14 else m.group(0), text)
-    text = AIRTABLE_ID_RE.sub(" ", REF_URL_RE.sub(" ", text))
+    text = AIRTABLE_ID_RE.sub(" ", REF_URL_RE.sub(lambda m: m.group("run") or " ", text))
     text = STYLE_COLOUR_RE.sub(" ", INLINE_IMAGE_RE.sub(" ", text))
     # After the inline pictures: "image001.png@01AB2345.6789CDEF" read as a
     # file name would leave its content id behind as a token.
@@ -5356,6 +5382,11 @@ def reference_tokens(text):
         if ONE_DIGIT_WORD_RE.fullmatch(t) and not REF_LABEL_RE.search(upper, max(0, mt.start() - 40), mt.start()):
             continue
         out.append(t)
+        # Only the first eight are kept, so stop there: checking each new
+        # token against a list that kept growing took 1.3 seconds on 20,000
+        # of them (28 Sep 2026).
+        if len(out) == HISTORY_MAX_REFS:
+            break
     return out[:HISTORY_MAX_REFS]
 
 
@@ -5675,6 +5706,39 @@ def ledger_session_verdict(host, max_age_minutes=SIGNIN_LEDGER_FRESH_MINUTES, pa
             "url": str(newest.get("url") or ""), "at": str(newest["at"]), "source": "ledger"}
 
 
+def ledger_signed_out(host, path=None, profile="default"):
+    """The newest `session` verdict for HOST when it says signed out (no bot
+    check) and no `login` on the same profile has run since; else None.
+
+    A signed-out session cannot sign itself back in: only Kevin's sign-in
+    window (`agent-browser.js login`) can, so until one runs the verdict holds
+    at any age, and walking the door again only makes Kevin wait. Any login on
+    the profile counts, not only this host's, because GOV.UK One Login is one
+    sign-in across services. A signed-IN verdict is never reused here: that
+    session may have lapsed (29 Sep 2026: Kevin pressed Sign in on WebFiling,
+    last seen signed out eight hours earlier, and waited 48 s for the walk)."""
+    newest, login_since = None, False
+    try:
+        with open(path or BROWSER_LEDGER) as fh:
+            for line in fh:
+                try:
+                    rec = json.loads(line)
+                except ValueError:
+                    continue
+                if not isinstance(rec, dict) or (rec.get("profile") or "default") != profile:
+                    continue
+                if rec.get("cmd") == "session" and rec.get("site") == host:
+                    newest, login_since = rec, False
+                elif rec.get("cmd") == "login" and newest is not None:
+                    login_since = True
+    except OSError:
+        return None
+    if not newest or login_since or newest.get("signedIn") or newest.get("botCheck") or not newest.get("at"):
+        return None
+    return {"signedIn": False, "botCheck": False, "url": str(newest.get("url") or ""),
+            "at": str(newest["at"]), "source": "ledger"}
+
+
 def ledger_bot_check(hosts, max_age_minutes=BOT_CHECK_FRESH_MINUTES, path=None, now=None, profile="default"):
     """The newest browser look at any of HOSTS (a `session` line by its site or
     landing, or a `read` line by the page's host), if it showed the robot a bot
@@ -5751,16 +5815,28 @@ def session_walk(host, timeout=SIGNIN_WALK_TIMEOUT, profile=None, url=None):
             "url": str(d.get("url") or ""), "at": now_iso(), "source": "walk"}
 
 
-def session_check(host, use_ledger=False, max_age_minutes=SIGNIN_LEDGER_FRESH_MINUTES):
+def session_check(host, use_ledger=False, max_age_minutes=SIGNIN_LEDGER_FRESH_MINUTES,
+                  trust_signed_out=False):
     """Is the robot signed in to HOST? A ledger verdict under max_age_minutes
     old is reused when use_ledger is set (the keep-alive and the pickup run
     walk every site anyway; walking again would fight them for the one robot
-    profile); otherwise the door is walked now. SIGNIN_SKIP_WALK=1 (tests,
-    and any read that must never open a browser) returns {"skipped": True}."""
+    profile); with trust_signed_out, a signed-out verdict with no sign-in
+    since is reused at any age (ledger_signed_out) unless a bot check has been
+    seen since; otherwise the door is walked now. SIGNIN_SKIP_WALK=1 (tests,
+    and any read that must never open a browser) returns {"skipped": True}.
+
+    trust_signed_out is for the Robot sign-in app's check only. The submit
+    gate keeps walking: the newest line there is usually the agent's own walk
+    of a moment ago, and the gate exists to catch a wrong one (review, 29 Sep
+    2026)."""
     if os.environ.get("SIGNIN_SKIP_WALK"):
         return {"skipped": True}
     if use_ledger:
         v = ledger_session_verdict(host, max_age_minutes)
+        if v:
+            return v
+    if trust_signed_out and not ledger_bot_check([host]):
+        v = ledger_signed_out(host)
         if v:
             return v
     return session_walk(host)
@@ -6053,7 +6129,7 @@ def cmd_signin_waiting(args):
         if not walk or g["host"] == "unknown" or not g["loginUrl"] or (only and g["host"] != only):
             waiting.append(g)
             continue
-        v = session_check(g["host"], use_ledger=not g["shortSession"])
+        v = session_check(g["host"], use_ledger=not g["shortSession"], trust_signed_out=True)
         if v.get("skipped"):
             waiting.append(g)
             continue

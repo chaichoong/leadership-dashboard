@@ -1,6 +1,6 @@
 ---
 name: daily-transaction-reconciler
-description: Run the transaction reconciler skill to categorise and reconcile unreconciled bank transactions
+description: RETIRED (confirmed 29 Sep 2026). Nothing runs this folder: no schedule entry, no launchd job, no runner. The Bookkeeper is event-driven by design (register recyrN5YCQFssAniE Go Signal: the match runs when the Reconciliation tab opens, or on the Run button). Kept for history; do not re-enable without Kevin.
 ---
 
 Run the /transaction-reconciler skill to reconcile all unreconciled transactions in the Operations Director Airtable base. Process both Santander and TNT Mgt Zempler accounts. After completion, report how many transactions were reconciled.

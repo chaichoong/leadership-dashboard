@@ -73,6 +73,7 @@ Usage:
   python3 scripts/send-email.py preview TASKID     # parse only, never sends
   python3 scripts/send-email.py health             # worker + consent check
   python3 scripts/send-email.py resolve-intent TASKID  # a send that died mid-way
+  python3 scripts/send-email.py self-note --key K --subject S  # to Kevin only, body on STDIN
 """
 
 import importlib.util
@@ -988,6 +989,83 @@ def cmd_roy_note(args):
                                    to=args.to or ROY_INBOX, dry_run=args.dry_run)))
 
 
+# ---------------------------------------------------------------------------
+# SELF-NOTE (Kevin, 28 Sep 2026): a personal job's report to Kevin himself.
+#
+# The UK gigs check (scripts/uk-gigs.py) emails Kevin new UK dates for the
+# artists in his Apple Music library. That is no approved Correspondence task,
+# so `send` cannot carry it, and it must not become a second road to the Gmail
+# worker that could mail anyone. So this mode reaches one address, whatever is
+# asked:
+#   * the recipient is SELF_ADDRESS and nothing else; there is no --to;
+#   * the subject opens with a registered prefix (SELF_NOTE_PREFIXES), so a new
+#     job that wants to email Kevin is a reviewed code change, never a flag;
+#   * one note per --key, in its OWN ledger. A send that died between intent
+#     and sent is refused rather than risk a second copy; a send the worker
+#     refused is marked failed and may be tried again.
+SELF_ADDRESS = PERSONAL_SENDER     # the one definition, in agent_email_format.py
+SELF_NOTE_PREFIXES = ("UK gigs:",)
+SELF_NOTE_LEDGER = os.path.join(STATE_DIR, "self-notes.jsonl")
+
+
+def self_note_state(key):
+    """The last event for this key in the self-note ledger: sent, intent, failed or None."""
+    last = None
+    try:
+        with open(SELF_NOTE_LEDGER) as fh:
+            for line in fh:
+                row = json.loads(line) if line.strip() else {}
+                if row.get("key") == key:
+                    last = row
+    except FileNotFoundError:
+        return None
+    return last
+
+
+def send_self_note(key, subject, body, dry_run=False):
+    subject = (subject or "").replace("\n", " ").strip()
+    if not subject.startswith(SELF_NOTE_PREFIXES):
+        sys.exit(f"REFUSED: a self-note subject opens with one of {SELF_NOTE_PREFIXES}; "
+                 "register a new job's prefix in SELF_NOTE_PREFIXES.")
+    key = (key or "").strip()
+    if not key:
+        sys.exit("REFUSED: a self-note needs a --key, so a rerun cannot send it twice")
+    if not (body or "").strip():
+        sys.exit("REFUSED: empty note")
+    prior = self_note_state(key)
+    if prior and prior.get("event") == "sent":
+        return {"skipped": key, "why": f"already sent at {prior.get('ts')}"}
+    if prior and prior.get("event") == "intent":
+        sys.exit(f"REFUSED: {key} was being sent at {prior.get('ts')} and never finished. "
+                 f"Check {SELF_ADDRESS}'s inbox before sending it again.")
+    if dry_run:
+        return {"dryRun": True, "key": key, "to": SELF_ADDRESS, "subject": subject,
+                "bodyChars": len(body)}
+    os.makedirs(os.path.dirname(SELF_NOTE_LEDGER), exist_ok=True)
+
+    def note(event, **extra):
+        with open(SELF_NOTE_LEDGER, "a") as fh:
+            fh.write(json.dumps({"key": key, "ts": now_iso(), "event": event,
+                                 "to": SELF_ADDRESS, **extra}) + "\n")
+
+    note("intent", subject=subject)
+    try:
+        result = worker_call(SEND_URL, {"to": SELF_ADDRESS, "from": SELF_ADDRESS,
+                                        "subject": subject, "text": body})
+    except SystemExit as e:
+        # worker_call exits only once the worker has answered with a refusal or
+        # could not be reached, so nothing went out: record it and let it retry.
+        note("failed", why=str(e.code)[:300])
+        raise
+    note("sent", messageId=result.get("id"))
+    return {"sent": key, "to": SELF_ADDRESS, "messageId": result.get("id")}
+
+
+def cmd_self_note(args):
+    body = sys.stdin.read()
+    print(json.dumps(send_self_note(args.key, args.subject, body, dry_run=args.dry_run)))
+
+
 def cmd_selftest(args):
     """Offline checks of the parser — the part a bug would turn into a wrong
     recipient. No network, no Airtable, safe anywhere."""
@@ -1314,6 +1392,14 @@ def main():
     r.add_argument("--to", default="")
     r.add_argument("--dry-run", action="store_true")
     r.set_defaults(func=cmd_roy_note)
+
+    sn = sub.add_parser("self-note",
+                        help="a personal job's report to Kevin's own address only "
+                             "(body on STDIN; no recipient can be given)")
+    sn.add_argument("--key", required=True, help="one email per key, e.g. uk-gigs:2026-09-28")
+    sn.add_argument("--subject", required=True)
+    sn.add_argument("--dry-run", action="store_true")
+    sn.set_defaults(func=cmd_self_note)
 
     v = sub.add_parser("preview", help="parse and print, never sends")
     v.add_argument("task")

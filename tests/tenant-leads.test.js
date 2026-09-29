@@ -1038,14 +1038,22 @@ out = {"none": s(m1), "unsent": s(m2), "partial": s(m3), "sent": s(m4), "worst1"
 
 describe('the silent-zero control', () => {
   it('refuses to run on an empty read', () => {
+    // 29 Sep 2026: the control used to run AFTER the live link check and the
+    // compliance-book read, so this test made real network calls, took about
+    // 5.4 s and timed out under load. The control now runs straight after the
+    // reads. Back-test: on the old load() linkCalled is true.
     const r = py(`
 tl.fetch_all = lambda table, params=None: []
+called = []
+tl.link_works = lambda *a, **k: called.append("link") or True
 try:
     tl.load(DAY); out["raised"] = False
 except RuntimeError as e:
     out["raised"] = True; out["msg"] = str(e)
+out["linkCalled"] = bool(called)
 `);
     expect(r.raised).toBe(true);
     expect(r.msg).toMatch(/control failed/);
+    expect(r.linkCalled).toBe(false);
   });
 });

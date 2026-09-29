@@ -153,6 +153,15 @@ def _local_day(rec):
     return datetime.fromtimestamp(t).date()
 
 
+def _local_dt(rec):
+    """The local wall-clock time of a log line (naive, like the crons), or None."""
+    try:
+        return (datetime.fromisoformat(rec["ts"].replace("Z", "+00:00"))
+                .astimezone().replace(tzinfo=None))
+    except (KeyError, ValueError, AttributeError):
+        return None
+
+
 # ─── A COMPLETION TEST A JOB CAN NEVER PASS IS NOT A CHECK ───────────
 #
 # Finding 20260919-daily-ops-phase2-excepti-549. The digest of 19 Sep 2026 led
@@ -452,6 +461,22 @@ def build(now_dt=None):
                 failed.append((job, st.get("reason", "reported a failure")))
             else:
                 ran.append(job)
+        elif completion_rule(cfg_for.get(job)) == "end-mark" and "mark" in states:
+            # A cooperative routine (daily-ops) never takes the lock, so it
+            # writes `mark` events and no `acquired`. Until 29 Sep 2026 this
+            # chain had no branch for it: every morning it fell through to
+            # "was due, no run recorded" on a job that had run, which kept the
+            # digest's alarm on for good. Graded here on its own end mark for
+            # THIS run, the same rule the stalled check already uses.
+            marks = [e for e in by_job[job] if e["state"] == "mark"
+                     and (_local_dt(e) or due) >= due - timedelta(hours=1)]
+            if any((e.get("note") or "").startswith(DAILY_OPS_END_NOTE_PREFIX)
+                   for e in marks):
+                ran.append(job)
+            elif marks:
+                failed.append((job, "started but has left no end mark yet"))
+            else:
+                never.append(job)
         elif st is not None:
             # Ran without touching the queue. Expected for the jobs marked
             # queued:false (they report on or clean up after the queue); a

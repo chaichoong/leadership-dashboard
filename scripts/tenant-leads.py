@@ -427,6 +427,14 @@ def load(day):
         "tasks": fetch_all(T_TASKS, {"filterByFormula": "LEFT({Task Name}, 7)='TENANT '",
                                      "fields[]": list(TK.values())}),
     }
+    # The silent-zero trap, checked straight after the reads and before the network
+    # checks below (29 Sep 2026: a broken read now fails fast, and the unit test of
+    # this control no longer waits on a live link check and compliance-book read).
+    # The numbers: 64 units, 60 tenants and 248 imported leads exist, so zero is a broken read.
+    for k, floor in (("units", 20), ("tenants", 20), ("props", 10), ("leads", 100), ("tenancies", 20)):
+        if len(data[k]) < floor:
+            raise RuntimeError(f"control failed: {k} read returned {len(data[k])} rows (expected {floor}+); "
+                               "the read is broken, not the business empty")
     data["sentThreads"] = sent_threads(data["tasks"])
     data["linkLive"] = link_works()
     # The compliance book (agent-dispatch's reading, the one the Property Compliance page draws) says
@@ -435,11 +443,6 @@ def load(day):
         data["book"] = {pg["id"]: pg for pg in module("ad").compliance_book_pages()}
     except Exception as exc:                          # noqa: BLE001 — shown on the monitor as a blocker
         data["book"], data["bookError"] = None, str(exc)[:300]
-    # The silent-zero trap: 64 units, 60 tenants and 248 imported leads exist, so zero is a broken read.
-    for k, floor in (("units", 20), ("tenants", 20), ("props", 10), ("leads", 100), ("tenancies", 20)):
-        if len(data[k]) < floor:
-            raise RuntimeError(f"control failed: {k} read returned {len(data[k])} rows (expected {floor}+); "
-                               "the read is broken, not the business empty")
     return data
 
 
