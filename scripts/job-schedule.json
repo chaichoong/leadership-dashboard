@@ -547,6 +547,18 @@
   "retryWhenDeferred": false,
   "retryWhenDeferredNote": "Hourly: the next tick covers a deferred one."
  },
+ "content-report-live": {
+  "cron": "*/10 * * * *",
+  "maxLateMinutes": 8,
+  "mode": "wrapped",
+  "lockExempt": true,
+  "needs": [
+   "network"
+  ],
+  "retryWhenDeferred": false,
+  "retryWhenDeferredNote": "fires every ten minutes, so a missed tick is replaced by the next one",
+  "note": "Kevin, 29 Sep 2026: 'when I look at it, I know the actual situation and there's no lag.' Rewrites the Publishing page's report row (Estate Status, key content-publishing) with what is true now: GoHighLevel post statuses past their slot, direct YouTube uploads past their slot, and his verdicts on open episode cards, read-only (content_report.py live, live_overlay). It never writes publishing.json or approvals.json; the hourly publisher stays the only writer of state. LOCK-EXEMPT so a render holding the queue (29 Sep: the 10:15 and 11:15 publisher runs were lost behind one) never freezes the page, and it runs round the clock, so the page is never more than about ten minutes behind. Facebook profile shares and Spotify links need the browser and stay hourly."
+ },
  "content-engine": {
   "cron": "0 22 * * *",
   "maxLateMinutes": 180,

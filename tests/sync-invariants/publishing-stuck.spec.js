@@ -9,7 +9,7 @@
 // its teaser existed. And the page read the report once, so a tab left open showed the morning's picture all day.
 //
 // So: a sent-back card and a day with no full episode show in red under "Needs you", the held line names the day
-// the queue waits on and why, skipped raw files are listed, and the page reads the row again every 5 minutes.
+// the queue waits on and why, skipped raw files are listed, and the page reads the row again every 2 minutes.
 
 const { test, expect } = require('@playwright/test');
 
@@ -65,7 +65,7 @@ test('a sent-back card and a day with no full episode are named, not hidden', as
   await expect(body).toContainText('Episode 2063, 2064 wait behind day 2062 (sent back on 18 Sep, not resubmitted)');
   await expect(body).toContainText('Raw files the engine skips');
   await expect(body).toContainText('2066 Full-Real.insv');
-  await expect(page.locator('#updated')).toContainText('Next update');
+  await expect(page.locator('#updated')).toContainText('Next check');
 });
 
 test('a report with nothing stuck shows no stuck rows (an older report without the new fields still renders)', async ({ page }) => {
@@ -90,14 +90,14 @@ test('a rejected card and an old sent-back day say so, and an old day claims to 
   await expect(body).toContainText('Episode 1841: you sent it back on 15 Sep. It is an older day, so no other episode waits for it.');
 });
 
-test('a page left open reads the report again every 5 minutes', async ({ page }) => {
+test('a page left open reads the report again every 2 minutes', async ({ page }) => {
   await page.clock.install();
   const reads = await openPublishing(page, [report({ headline: 'Content: the first read.' }), report({ headline: 'Content: the second read.' })]);
   await expect(page.locator('#headline')).toHaveText('Content: the first read.');
   expect(reads()).toBe(1);
-  await page.clock.runFor(4 * 60 * 1000);
-  expect(reads(), 'no read before the 5 minutes are up').toBe(1);
-  await page.clock.runFor(76 * 1000);
+  await page.clock.runFor(100 * 1000);
+  expect(reads(), 'no read before the 2 minutes are up').toBe(1);
+  await page.clock.runFor(36 * 1000);
   await expect.poll(reads).toBe(2);
   await expect(page.locator('#headline')).toHaveText('Content: the second read.');
 });
@@ -127,28 +127,96 @@ test('inside the app shell: a hidden frame does not read, and reads as soon as i
   await expect.poll(() => reads).toBe(2);
 });
 
-test('the next update time follows the last write, not the clock', async ({ page }) => {
+// 29 Sep 2026 (Kevin: "when I look at it, I know the actual situation and there's no lag"): the report is rewritten every
+// 10 minutes round the clock by the live check, so the next check is ten minutes after the last write, day or night.
+test('the next check is ten minutes after the last write, day and night', async ({ page }) => {
   await openPublishing(page, [report()]);
   const cases = await page.evaluate(() => [
-    ['07:15 BST, last write 20:17 the night before', '2026-09-21T06:15:00Z', '2026-09-20T19:17:00Z'],
-    ['07:17 BST, the 07:15 write landed', '2026-09-21T06:17:00Z', '2026-09-21T06:16:30Z'],
-    ['15:52 BST, written 15:17', '2026-09-21T14:52:00Z', '2026-09-21T14:17:00Z'],
-    ['20:30 BST, written 20:17', '2026-09-21T19:30:00Z', '2026-09-21T19:17:00Z'],
-    ['23:40 BST, the night render wrote at 23:20', '2026-09-21T22:40:00Z', '2026-09-21T22:20:00Z'],
-    ['00:30 BST, the night render still running', '2026-09-21T23:30:00Z', '2026-09-21T19:17:00Z'],
-    ['03:00 BST, the night render wrote at 00:09', '2026-09-22T02:00:00Z', '2026-09-21T23:09:00Z'],
-    ['07:15 GMT in December, last write 20:17 the night before', '2026-12-01T07:15:00Z', '2026-11-30T20:17:00Z'],
+    ['23:40 BST, written 23:35', '2026-09-29T22:40:00Z', '2026-09-29T22:35:10Z'],
+    ['03:00 BST during the night render, written 02:52', '2026-09-30T02:00:00Z', '2026-09-30T01:52:00Z'],
+    ['a check overdue by 5 minutes', '2026-09-29T22:50:00Z', '2026-09-29T22:35:00Z'],
+    ['07:12 GMT in December, written 07:10', '2026-12-01T07:12:00Z', '2026-12-01T07:10:00Z'],
+    ['no update time on the row', '2026-09-29T22:40:00Z', ''],
   ].map(([label, now, upd]) => [label, nextUpdateText(Date.parse(now), upd)]));
   expect(cases).toEqual([
-    ['07:15 BST, last write 20:17 the night before', 'Next update about 07:15.'],
-    ['07:17 BST, the 07:15 write landed', 'Next update about 08:15.'],
-    ['15:52 BST, written 15:17', 'Next update about 16:15.'],
-    ['20:30 BST, written 20:17', "Next update after tonight's render, then 07:15."],
-    ['23:40 BST, the night render wrote at 23:20', 'Next update about 07:15.'],
-    ['00:30 BST, the night render still running', 'Next update when the night render finishes, or at 07:15.'],
-    ['03:00 BST, the night render wrote at 00:09', 'Next update about 07:15.'],
-    ['07:15 GMT in December, last write 20:17 the night before', 'Next update about 07:15.'],
+    ['23:40 BST, written 23:35', 'Next check about 23:45.'],
+    ['03:00 BST during the night render, written 02:52', 'Next check about 03:02.'],
+    ['a check overdue by 5 minutes', 'Next check due now.'],
+    ['07:12 GMT in December, written 07:10', 'Next check about 07:20.'],
+    ['no update time on the row', 'Checked every 10 minutes.'],
   ]);
+});
+
+// Before the live check the page allowed 90 minutes in the day and 12 hours overnight before saying the report had
+// stopped, so a dead report looked current all night. Now 30 minutes round the clock, and the page reads every 2 minutes.
+test('a report over 30 minutes old says it has stopped, day or night, and a page in view reads every 2 minutes', async ({ page }) => {
+  await page.clock.install({ time: new Date('2026-09-30T01:00:00Z') });                         // 02:00 BST, mid-render
+  let reads = 0, updated = '2026-09-30T00:35:00.000Z';                                         // 25 minutes old
+  await page.addInitScript(() => { try { localStorage.setItem('_dlr_pat', 'patFIXTURE.test'); } catch (e) { /* storage blocked */ } });
+  await page.route('**/api.airtable.com/v0/**', async (route) => {
+    if (!route.request().url().includes(ESTATE_TBL)) { await route.fulfill({ status: 200, contentType: 'application/json', body: '{"records":[]}' }); return; }
+    reads += 1;
+    await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ records: [{
+      id: 'recREPORT', createdTime: updated, fields: { Key: 'content-publishing', Updated: updated, Payload: JSON.stringify(report()) } }] }) });
+  });
+  await page.goto('/publishing.html');
+  await expect(page.locator('#updated')).toContainText('Updated 25 min ago');
+  await expect(page.locator('#updated')).not.toContainText('has stopped');
+  updated = '2026-09-30T00:29:00.000Z';                                                        // the next read finds it 33 minutes old
+  await page.clock.runFor(2 * 60 * 1000 + 16 * 1000);
+  await expect.poll(() => reads).toBe(2);
+  await expect(page.locator('#updated')).toContainText('The ten-minute check has stopped writing this report');
+});
+
+// The live check keeps the report fresh even when the hourly publisher itself has died (review, 29 Sep 2026), so the
+// publisher's own last write is judged separately: 90 minutes in the day, the evening write stands overnight.
+test('a stopped hourly publisher is named even though the report is fresh', async ({ page }) => {
+  await openPublishing(page, [report()]);
+  const cases = await page.evaluate(() => [
+    ['15:00 BST, last ran 12:17 (the 13:15 run is overdue)', '2026-09-30T14:00:00Z', '2026-09-30T11:17:00Z'],
+    ['14:00 BST, last ran 12:17 (13:15 still inside its 75 minutes)', '2026-09-30T13:00:00Z', '2026-09-30T11:17:00Z'],
+    ['14:00 BST, last ran 13:17', '2026-09-30T13:00:00Z', '2026-09-30T12:17:00Z'],
+    ['21:00 BST, died after 13:17 (review round 2)', '2026-09-30T20:00:00Z', '2026-09-30T12:17:00Z'],
+    ['01:17 BST, died after 13:17 the day before', '2026-10-01T00:17:00Z', '2026-09-30T12:17:00Z'],
+    ['03:00 BST, last ran 20:17', '2026-10-01T02:00:00Z', '2026-09-30T19:17:00Z'],
+    ['08:00 BST, last ran 20:17 the night before', '2026-10-01T07:00:00Z', '2026-09-30T19:17:00Z'],
+    ['08:31 BST, the 07:15 run never came', '2026-10-01T07:31:00Z', '2026-09-30T19:17:00Z'],
+    ['03:00 BST, the night render stamped 01:05', '2026-10-01T02:00:00Z', '2026-10-01T00:05:00Z'],
+    ['09:00 GMT in December, last ran 08:17', '2026-12-01T09:00:00Z', '2026-12-01T08:17:00Z'],
+    ['02:20 GMT on 25 Oct, the 25-hour day, last ran 20:17 BST the night before', '2026-10-25T02:20:00Z', '2026-10-24T19:17:00Z'],
+    ['08:29 GMT on 25 Oct, last ran 20:17 BST the night before', '2026-10-25T08:29:00Z', '2026-10-24T19:17:00Z'],
+    ['01:30 GMT on 1 Jan, last ran 20:17 on 31 Dec', '2027-01-01T01:30:00Z', '2026-12-31T20:17:00Z'],
+    ['not stamped yet', '2026-09-30T13:00:00Z', ''],
+  ].map(([label, now, at]) => [label, publisherNote(Date.parse(now), at).stale]));
+  expect(cases).toEqual([
+    ['15:00 BST, last ran 12:17 (the 13:15 run is overdue)', true],
+    ['14:00 BST, last ran 12:17 (13:15 still inside its 75 minutes)', false],
+    ['14:00 BST, last ran 13:17', false],
+    ['21:00 BST, died after 13:17 (review round 2)', true],
+    ['01:17 BST, died after 13:17 the day before', true],
+    ['03:00 BST, last ran 20:17', false],
+    ['08:00 BST, last ran 20:17 the night before', false],
+    ['08:31 BST, the 07:15 run never came', true],
+    ['03:00 BST, the night render stamped 01:05', false],
+    ['09:00 GMT in December, last ran 08:17', false],
+    ['02:20 GMT on 25 Oct, the 25-hour day, last ran 20:17 BST the night before', false],
+    ['08:29 GMT on 25 Oct, last ran 20:17 BST the night before', false],
+    ['01:30 GMT on 1 Jan, last ran 20:17 on 31 Dec', false],
+    ['not stamped yet', false],
+  ]);
+});
+
+test('the publisher line shows on the page when it has stopped', async ({ page }) => {
+  await page.clock.install({ time: new Date('2026-09-30T14:00:00Z') });                           // 15:00 BST
+  await openPublishing(page, [report({ publisherAt: '2026-09-30T11:17:00Z' })]);                    // last ran 12:17
+  await expect(page.locator('#publisherNote')).toContainText('The hourly publisher last ran 2 h 43 min ago');
+});
+
+// A post the live check could not ask GoHighLevel about keeps its last recorded status, and the page says so.
+test('items the live check could not read are named, not shown as done', async ({ page }) => {
+  await openPublishing(page, [report({ live: { checkedAt: new Date().toISOString(), errors: ['episode 2074 linkedin lfmd: GHL GET -> 502: gateway'] } })]);
+  await expect(page.locator('#liveErrors')).toContainText('1 item(s) could not be checked live this time');
+  await expect(page.locator('#liveErrors')).toContainText('episode 2074 linkedin lfmd');
 });
 
 // A read that never answers (the Mac asleep mid-request) used to hold the page's "already loading" flag for ever, so no
@@ -169,7 +237,7 @@ test('a read that never answers gives up after 30 seconds, and the page reads ag
   await expect.poll(() => reads).toBe(1);
   await page.clock.runFor(31 * 1000);
   await expect(page.locator('#error')).toContainText('did not answer within 30 seconds');
-  await page.clock.runFor(5 * 60 * 1000);
-  await expect.poll(() => reads).toBe(2);
+  await page.clock.runFor(2 * 60 * 1000);
+  await expect.poll(() => reads).toBeGreaterThanOrEqual(2);
   await expect(page.locator('#headline')).toHaveText('Content: read after the hang.');
 });

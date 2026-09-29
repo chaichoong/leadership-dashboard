@@ -1909,7 +1909,12 @@ describe('lock-exempt read-only checks', () => {
     // slot. Its new requests are worked ONLY by its own queue read
     // (ROY_ASSISTANT_RUN=1), so no other run drafts them, and the runner keeps
     // its own one-tick-at-a-time lock (tests/roy-assistant.test.js).
-    expect(exempt.sort()).toEqual(['data-invariants', 'drift-scan', 'drive-auth', 'estate-drift', 'estate-status', 'handback-poll', 'job-digest', 'roy-assistant', 'utilita-balance']);
+    // content-report-live (29 Sep 2026): the Publishing page's ten-minute check. It reads the engine's state files
+    // (written atomically), GoHighLevel and Airtable, and writes ONE row, the content-publishing report, which the
+    // hourly publisher also rewrites whole from its own state, so the last writer is always a complete, current
+    // report. It never writes the repo, the queue or the engine's state. Behind the lock it froze whenever a render
+    // ran, which is the lag it exists to end (10:15 and 11:15 lost on 29 Sep).
+    expect(exempt.sort()).toEqual(['content-report-live', 'data-invariants', 'drift-scan', 'drive-auth', 'estate-drift', 'estate-status', 'handback-poll', 'job-digest', 'roy-assistant', 'utilita-balance']);
     // content-engine must never be exempt: it renders and writes.
     expect(real['content-engine'].lockExempt).toBeUndefined();
   });

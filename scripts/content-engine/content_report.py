@@ -17,9 +17,11 @@ nothing out says so in words.
 Usage:
   content_report.py build            # print the report JSON (read-only)
   content_report.py write            # build and upsert the Airtable row
+  content_report.py live             # the same, with what is true NOW read in (every 10 minutes, see live_overlay)
   content_report.py stuck [--hours N]  # sent-back cards with no fix in motion, for daily-ops (exit 2: could not tell)
   content_report.py selftest
-Runs at the end of the hourly publisher and the nightly render job.
+Runs at the end of the hourly publisher and the nightly render job, and every 10 minutes as `live` (launchd
+content-report-live, outside the job queue, so a render holding the queue never freezes the page).
 """
 import argparse, datetime as dt, json, os, re, sys, urllib.parse, urllib.request
 from zoneinfo import ZoneInfo
@@ -337,13 +339,126 @@ def resubmit_reason(day):
         return "could not tell (%s)" % str(ex)[:120]
 
 
-def write(report, dry_run=False):
+def live_overlay(state, approvals, now=None, read_post=None, read_card=None):
+    """What the hourly publisher would record if it ran now, applied to COPIES of its two state files (Kevin, 29 Sep
+    2026: "when I look at it, I know the actual situation and there's no lag"). The hourly job is the one that writes
+    state; between its runs, and all night, and while a render holds the queue (10:15 and 11:15 lost on 29 Sep) the
+    page used to show posts that had gone out as pending and a card he had approved as waiting.
+
+    The same rules as publish.sync and approval.sync, read-only:
+      - a direct YouTube upload with a slot is live once the slot passes (publish.slot_passed);
+      - a GoHighLevel post past its slot is asked for its status: failed is failed, published is published, and
+        'scheduled' an hour past the slot with no failure went out (GHL never flips its own social posts);
+      - an open approval card reads Kevin's verdict off the task, mapped by approval.verdict_patch.
+    A read that fails leaves the stored status and is listed in `errors`, never guessed. Facebook profile shares,
+    Spotify links and GHL-routed YouTube uploads need the browser or the channel listing and stay with the hourly job.
+    Returns (state copy, approvals copy, info)."""
+    import copy
+    now = now or dt.datetime.now(dt.timezone.utc)
+    st, ap = copy.deepcopy(state), copy.deepcopy(approvals)
+    if read_post is None:
+        loc = []                                             # the GHL key is read only when a post needs asking about
+        def read_post(pid):
+            if not loc: loc.append(publish._cfg()[1])
+            g = publish.ghl("GET", "/social-media-posting/%s/posts/%s" % (loc[0], pid))
+            return (g.get("results") or g).get("post") or g
+    if read_card is None:
+        def read_card(task):
+            return watch._airtable("GET", approval.TASKS_API + "/" + task + "?returnFieldsByFieldId=true")["fields"]
+    info = {"checkedAt": now.strftime("%Y-%m-%dT%H:%M:%SZ"), "postsRead": 0, "postsChanged": 0, "cardsRead": 0,
+            "cardsDecided": 0, "errors": [], "faults": 0}
+    stamp = now.strftime("%Y-%m-%dT%H:%M:%SZ")
+    for day, entry in st.items():
+        if not str(day).isdigit() or not isinstance(entry, dict): continue
+        for key, p in (entry.get("posts") or {}).items():
+            try:
+                if p.get("status") != "scheduled" or not publish.slot_passed(p, now): continue   # nothing to learn before the slot
+                if p.get("route") == "api":
+                    p["status"] = "published"; p.setdefault("published_at", p["scheduled"]); info["postsChanged"] += 1
+                    if p.get("clip") == "full" and not entry.get("youtube_link"): entry["youtube_link"] = p.get("link")
+                    continue
+                if not p.get("id"): continue
+                try:
+                    post = read_post(p["id"]); info["postsRead"] += 1
+                except (Exception, SystemExit) as ex:
+                    info["errors"].append("episode %s %s %s: %s" % (day, p.get("platform"), p.get("clip"), str(ex)[:160])); continue
+                got, link = post.get("status"), post.get("previewLink") or ""
+                if got == "scheduled" and not link and p.get("platform") != "youtube" and publish.slot_passed(p, now, publish.GHL_SLOT_GRACE_MIN):
+                    got = "published"; p.setdefault("published_at", p["scheduled"])     # sync's grace rule stamps the slot
+                if got and got != p["status"]:
+                    p["status"] = got; info["postsChanged"] += 1
+                if got == "published" and link:
+                    p["link"] = link; p.setdefault("published_at", stamp)                 # sync stamps the time it saw the link
+                    if p.get("platform") == "youtube" and not entry.get("youtube_link"): entry["youtube_link"] = link
+            except Exception as ex:                          # one odd record is listed, never the end of the check
+                info["errors"].append("episode %s post %s: %s" % (day, key, str(ex)[:160])); info["faults"] += 1
+    for day, a in ap.items():
+        if not (isinstance(a, dict) and a.get("task") and not a.get("verdict")): continue
+        try:
+            t = read_card(a["task"]); info["cardsRead"] += 1
+        except (Exception, SystemExit) as ex:
+            info["errors"].append("card for episode %s: %s" % (day, str(ex)[:160])); continue
+        outcome = t.get(approval.TF["outcome"])
+        if isinstance(outcome, dict): outcome = outcome.get("name")
+        if not outcome: continue
+        _, verdict = approval.verdict_patch(outcome, t.get(approval.TF["feedback"]), t.get(approval.TF["approvedAt"]))
+        a.update({"verdict": verdict, "outcome": outcome, "feedback": (t.get(approval.TF["feedback"]) or ""),
+                  "synced": now.astimezone(LONDON).strftime("%Y-%m-%dT%H:%M:%S")})
+        info["cardsDecided"] += 1
+    return st, ap, info
+
+
+def say_live_errors(report):
+    """A read that failed is a line in the log; a record the check could not handle at all is a fault, printed with
+    ERROR: so run-job.sh marks the run failed instead of the fault living only on the page (review round 2)."""
+    lv = report.get("live") or {}
+    for e in lv.get("errors") or []: print("content report (live): could not check %s" % e, file=sys.stderr)
+    if lv.get("faults"): print("ERROR: content report (live): %d record(s) could not be handled; see the lines above" % lv["faults"])
+
+
+def build_live(now=None, read_post=None, read_card=None):
+    """The report with what is true now read in. Both writers use it (review, 29 Sep 2026): the hourly write built
+    without it put an approved card back to 'waiting' until the next ten-minute check."""
+    now = now or dt.datetime.now(dt.timezone.utc)
+    st, ap, info = live_overlay(publish.load_state(), approval.load_state(), now, read_post, read_card)
+    report = build(now, st, ap)
+    report["live"] = info
+    return report
+
+
+PUBLISHER_STAMP = os.path.join(os.path.dirname(watch.LEDGER), "publisher_at.txt")
+
+
+def stamp_publisher(report, publisher, path=None, save=True):
+    """publisherAt: when the hourly publisher or the night render last wrote the report. Theirs is now, kept in a
+    local file (review round 2, 29 Sep 2026: carried over from the row, a live write racing an hourly one could put
+    the old time back and call a running publisher dead). The live check reads the file; a missing or unreadable
+    file leaves the field out, which the page shows as not stamped yet, never as fine."""
+    path = path or PUBLISHER_STAMP
+    if publisher:
+        report["publisherAt"] = report["asOf"]
+        if save:
+            with open(path + ".tmp", "w") as fh: fh.write(report["asOf"])
+            os.replace(path + ".tmp", path)
+        return
+    try: at = open(path).read().strip()
+    except OSError: at = ""
+    if parse_utc(at): report["publisherAt"] = at
+
+
+def write(report, dry_run=False, publisher=False, stamp_path=None):
+    """Upsert the one report row. publisher=True when the hourly publisher or the night render writes it: that stamps
+    publisherAt. The ten-minute check carries the last stamp over from the row, so the page can still say the
+    publisher itself has stopped (review, 29 Sep 2026: a fresh live report must never hide a dead publisher)."""
     now = report["asOf"].replace("Z", ".000Z")
     status = "Worked"
     fields = {ES["key"]: KEY, ES["kind"]: "report", ES["label"]: "Content publishing", ES["status"]: status,
               ES["detail"]: report["headline"][:900], ES["payload"]: json.dumps(report, separators=(",", ":")),
               ES["lastRun"]: now, ES["lastWorked"]: now, ES["updated"]: now}
-    if dry_run: return fields
+    if dry_run:
+        stamp_publisher(report, publisher, stamp_path, save=False)
+        fields[ES["payload"]] = json.dumps(report, separators=(",", ":"))
+        return fields
     pat = open(os.path.expanduser("~/.config/od/airtable_pat")).read().strip()
     def call(method, path, body=None):
         req = urllib.request.Request("https://api.airtable.com/v0/%s/%s" % (BASE, path), method=method,
@@ -352,15 +467,161 @@ def write(report, dry_run=False):
         with urllib.request.urlopen(req, timeout=60) as resp: return json.loads(resp.read().decode())
     q = urllib.parse.urlencode({"returnFieldsByFieldId": "true", "filterByFormula": '{Key}="%s"' % KEY, "pageSize": "10"})
     have = call("GET", TABLE + "?" + q).get("records", [])
+    stamp_publisher(report, publisher, stamp_path)
+    fields[ES["payload"]] = json.dumps(report, separators=(",", ":"))
     if have: call("PATCH", TABLE, {"records": [{"id": have[0]["id"], "fields": fields}], "typecast": True})
     else: call("POST", TABLE, {"records": [{"fields": fields}], "typecast": True})
     return fields
 
 
+def _selftest_parity():
+    """Parity (review, 29 Sep 2026): the live check must say what the hourly publisher would record. Runs the REAL
+    publish.sync and live_overlay on the same records against the same fake GoHighLevel, and requires the same status
+    for every post and the same YouTube link for every episode. Every outside call is faked: nothing reaches
+    GoHighLevel, YouTube, Drive, Spotify, Facebook or Airtable, and no state file is written."""
+    import copy, io, contextlib
+    now = dt.datetime.now(dt.timezone.utc).replace(microsecond=0)
+    at = lambda minutes: (now + dt.timedelta(minutes=minutes)).strftime("%Y-%m-%dT%H:%M:%SZ")
+    ghl_post = lambda plat, clip, pid, mins, status="scheduled": {"platform": plat, "clip": clip, "status": status, "id": pid, "scheduled": at(mins)}
+    records = {"_cursor": 2077,
+               "2074": {"youtube_link": "https://youtu.be/prXjSYKZ0YE", "posts": {
+                   "youtube|full|y": {"platform": "youtube", "clip": "full", "status": "published", "route": "api", "id": "prXjSYKZ0YE",
+                                      "link": "https://youtu.be/prXjSYKZ0YE", "scheduled": at(-2000), "published_at": at(-2000), "thumb": True},
+                   "tiktok|lfmd|t": ghl_post("tiktok", "lfmd", "PAST_GRACE", -245),
+                   "instagram|summary|i": ghl_post("instagram", "summary", "FAILED1", -155),
+                   "linkedin|lfmd|l": ghl_post("linkedin", "lfmd", "READERR", -215),
+                   "threads|lfmd|h": ghl_post("threads", "lfmd", "INGRACE", -20),
+                   "facebook|lfmd|f": ghl_post("facebook", "lfmd", "LIVELINK", -30),
+                   "tiktok|summary|x": ghl_post("tiktok", "summary", "TOMORROW", 660),
+                   "facebook|summary|d": {"platform": "facebook", "clip": "summary", "status": "draft", "id": "DRAFT"}}},
+               "2075": {"posts": {
+                   "youtube|lfmd|y": {"platform": "youtube", "clip": "lfmd", "status": "scheduled", "route": "api", "id": "hOf30fVYwDA",
+                                      "link": "https://youtu.be/hOf30fVYwDA", "scheduled": at(-35)},
+                   "youtube|full|g": ghl_post("youtube", "full", "GHLYT", -60),
+                   "youtube|lfmd|g": ghl_post("youtube", "lfmd", "GHLYT2", -90)}}}
+    said = {"PAST_GRACE": {"status": "scheduled"}, "FAILED1": {"status": "failed", "error": "token expired"}, "INGRACE": {"status": "scheduled"},
+            "LIVELINK": {"status": "published", "previewLink": "https://facebook.com/p/1"}, "TOMORROW": {"status": "scheduled"},
+            "GHLYT": {"status": "published", "previewLink": "https://youtu.be/ghl"}, "GHLYT2": {"status": "scheduled"}}
+    def fake_ghl(method, path, body=None, brand="Runpreneur"):
+        assert method == "GET", "the parity run only ever reads"
+        pid = path.rsplit("/", 1)[-1]
+        if pid == "READERR": raise SystemExit("GHL GET %s -> 502: gateway" % path)
+        return {"post": dict(said[pid])}
+    saved_disk = {}
+    fakes = {"load_state": lambda: copy.deepcopy(records), "save_state": lambda st: saved_disk.update(state=copy.deepcopy(st)),
+             "_cfg": lambda brand="Runpreneur": ("k", "loc", "user"), "youtube_truth": lambda st: {}, "prune_publish_cache": lambda st, now=None, root=None: [],
+             "monetise_long_video": lambda day, entry: False, "share_to_facebook_profile": lambda day, entry, st, clip="summary": False,
+             "spotify_link_due": lambda pod, now=None: False, "ghl": fake_ghl, "youtube_link_from_channel": lambda *a, **k: None}
+    real = {k: getattr(publish, k) for k in fakes}
+    real_find, real_air = publish.pc.find_by_name, publish.watch._airtable
+    try:
+        for k, v in fakes.items(): setattr(publish, k, v)
+        publish.pc.find_by_name = lambda name: {"id": "recF", "fields": {}}
+        publish.watch._airtable = lambda *a, **k: {}
+        with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
+            publish.sync()
+            live, _, _ = live_overlay(copy.deepcopy(records), {}, now, read_card=lambda t: {})
+    finally:
+        for k, v in real.items(): setattr(publish, k, v)
+        publish.pc.find_by_name, publish.watch._airtable = real_find, real_air
+    synced = saved_disk.get("state") or copy.deepcopy(records)
+    for day in ("2074", "2075"):
+        for key in records[day]["posts"]:
+            a, b = synced[day]["posts"][key].get("status"), live[day]["posts"][key].get("status")
+            assert a == b, "episode %s %s: the hourly sync records %r, the live check says %r" % (day, key, a, b)
+        assert synced[day].get("youtube_link") == live[day].get("youtube_link"), (day, synced[day].get("youtube_link"), live[day].get("youtube_link"))
+    moved = sum(1 for d in ("2074", "2075") for k in records[d]["posts"] if records[d]["posts"][k]["status"] != synced[d]["posts"][k]["status"])
+    assert moved >= 4, "control: the parity run moved %d posts; a run that moves nothing proves nothing" % moved
+
+
 def selftest():
     real_holds = publish.held_days; publish.held_days = lambda path=None: {}   # the real hold file never steers the selftest
-    try: _selftest()
+    try: _selftest_live(); _selftest()
     finally: publish.held_days = real_holds
+
+
+def _selftest_live():
+    """The live check (29 Sep 2026), on the three records Kevin approved at the build gate, read that night at 23:35:
+    2075's YouTube Short (direct upload, slot 23:00), 2074's TikTok Learnings post (GoHighLevel, slot 19:30) and the
+    2077 card he approved at 17:30. Plus a post GoHighLevel failed, a read that errors, a post inside its grace hour
+    and a post not due yet. Nothing reaches GoHighLevel or Airtable; the stored state is never touched."""
+    import copy
+    now = dt.datetime(2026, 9, 29, 22, 35, tzinfo=dt.timezone.utc)
+    yt_full = lambda link, at: {"platform": "youtube", "clip": "full", "status": "published", "route": "api", "link": link, "published_at": at, "scheduled": at}
+    ghl = lambda plat, clip, pid, when, status="scheduled": {"platform": plat, "clip": clip, "status": status, "id": pid, "scheduled": when}
+    state = {"_cursor": 2077,
+             "2074": {"youtube_link": "https://youtu.be/prXjSYKZ0YE", "posts": {
+                 "youtube|full|y": yt_full("https://youtu.be/prXjSYKZ0YE", "2026-09-28T17:00:00Z"),
+                 "tiktok|lfmd|t": ghl("tiktok", "lfmd", "6abb7e802e91602dfd467eec", "2026-09-29T18:30:00Z"),
+                 "instagram|summary|i": ghl("instagram", "summary", "FAILED1", "2026-09-29T20:00:00Z"),
+                 "linkedin|lfmd|l": ghl("linkedin", "lfmd", "READERR", "2026-09-29T19:00:00Z")}},
+             "2075": {"youtube_link": "https://youtu.be/1WdR932ntsc", "posts": {
+                 "youtube|full|y": yt_full("https://youtu.be/1WdR932ntsc", "2026-09-28T10:33:51Z"),
+                 "youtube|lfmd|y": {"platform": "youtube", "clip": "lfmd", "status": "scheduled", "route": "api", "id": "hOf30fVYwDA",
+                                    "link": "https://youtu.be/hOf30fVYwDA", "scheduled": "2026-09-29T22:00:00Z"},
+                 "threads|lfmd|h": ghl("threads", "lfmd", "INGRACE", "2026-09-29T22:15:00Z"),
+                 "facebook|lfmd|f": ghl("facebook", "lfmd", "LIVELINK", "2026-09-29T22:05:00Z"),
+                 "tiktok|summary|t": ghl("tiktok", "summary", "TOMORROW", "2026-09-30T10:00:00Z")}}}
+    approvals = {"2077": {"task": "reccNLyc0kzOzhh4v", "record": "reclxq5r7o6ffaHLi"}, "2078": {"task": "recOPEN", "record": "recX"}}
+    ghl_says = {"6abb7e802e91602dfd467eec": {"status": "scheduled"}, "FAILED1": {"status": "failed", "error": "token expired"},
+                "INGRACE": {"status": "scheduled"}, "LIVELINK": {"status": "published", "previewLink": "https://facebook.com/p/1"}}
+    asked = []
+    def read_post(pid):
+        asked.append(pid)
+        if pid == "READERR": raise SystemExit("GHL GET /posts/READERR -> 502: gateway")
+        return ghl_says[pid]
+    cards = {"reccNLyc0kzOzhh4v": {approval.TF["outcome"]: "Approved as-is", approval.TF["approvedAt"]: "2026-09-29T16:30:51.555Z"}, "recOPEN": {}}
+    before_s, before_a = copy.deepcopy(state), copy.deepcopy(approvals)
+    st, ap, info = live_overlay(state, approvals, now, read_post, cards.__getitem__)
+    assert state == before_s and approvals == before_a, "the stored state is never changed"
+    P = lambda d, k: st[d]["posts"][k]["status"]
+    assert P("2075", "youtube|lfmd|y") == "published", "2075's YouTube Short: a direct upload is live once its slot passes"
+    assert P("2074", "tiktok|lfmd|t") == "published", "2074's TikTok Learnings post: 'scheduled' an hour past its slot with no failure went out"
+    assert P("2074", "instagram|summary|i") == "failed", "a post GoHighLevel failed is shown failed, never out"
+    assert P("2074", "linkedin|lfmd|l") == "scheduled" and any("READERR" in e or "502" in e for e in info["errors"]), "a read that fails is listed, never guessed"
+    assert P("2075", "threads|lfmd|h") == "scheduled", "inside the grace hour a 'scheduled' post is not called out yet"
+    assert P("2075", "facebook|lfmd|f") == "published" and st["2075"]["posts"]["facebook|lfmd|f"]["link"] == "https://facebook.com/p/1"
+    assert P("2075", "tiktok|summary|t") == "scheduled" and "TOMORROW" not in asked, "a post not due yet is not asked about"
+    assert "hOf30fVYwDA" not in asked, "a direct YouTube upload needs no GoHighLevel read"
+    assert ap["2077"]["verdict"] == "approved" and "verdict" not in ap["2078"], "2077: approved on the card counts at once; 2078 still waits"
+    assert info["postsRead"] == 4 and info["cardsRead"] == 2 and info["cardsDecided"] == 1, info
+    assert publish.section_status(st["2075"])["YouTube Short"] == "done" and publish.section_status(state["2075"])["YouTube Short"] == "pending"
+    rep_live, rep_old = build(now, st, ap, {}, {}, plan=[], skipped=[], holds={}), build(now, state, approvals, {}, {}, plan=[], skipped=[], holds={})
+    assert rep_old["waitingForKevin"] == [2077, 2078] and rep_live["waitingForKevin"] == [2078], (rep_old["waitingForKevin"], rep_live["waitingForKevin"])
+    assert publish.slot_passed({"scheduled": "2026-09-29T22:00:00Z"}, now) and not publish.slot_passed({"scheduled": "2026-09-29T22:00:00Z"}, now, 60)
+    assert not publish.slot_passed({}, now)
+    try: publish.slot_passed({"scheduled": "rubbish"}, now); raise AssertionError("an unreadable slot must raise, as sync always has")
+    except ValueError: pass
+    # more records the hourly sync treats its own way (review, 29 Sep 2026)
+    odd = {"2076": {"posts": {
+        "youtube|full|g": {"platform": "youtube", "clip": "full", "status": "scheduled", "id": "GHLYT", "scheduled": "2026-09-29T20:00:00Z"},
+        "youtube|lfmd|g": {"platform": "youtube", "clip": "lfmd", "status": "scheduled", "id": "GHLYT2", "scheduled": "2026-09-29T20:00:00Z"},
+        "facebook|summary|d": {"platform": "facebook", "clip": "summary", "status": "draft", "id": "DRAFT", "scheduled": None},
+        "youtube|lfmd|n": {"platform": "youtube", "clip": "lfmd", "status": "scheduled", "route": "api", "id": "NOSLOT"},
+        "threads|summary|b": {"platform": "threads", "clip": "summary", "status": "scheduled", "id": "BADSLOT", "scheduled": "not a time"}}}}
+    said = {"GHLYT": {"status": "published", "previewLink": "https://youtu.be/ghl"}, "GHLYT2": {"status": "scheduled"}}
+    asked.clear()
+    st2, _, info2 = live_overlay(odd, {}, now, lambda pid: (asked.append(pid), said[pid])[1], cards.__getitem__)
+    Q = lambda k: st2["2076"]["posts"][k]
+    assert Q("youtube|full|g")["status"] == "published" and st2["2076"]["youtube_link"] == "https://youtu.be/ghl" and Q("youtube|full|g")["published_at"] == "2026-09-29T22:35:00Z", \
+        "a GoHighLevel YouTube upload with its link: published when seen, as sync stamps it"
+    assert Q("youtube|lfmd|g")["status"] == "scheduled", "a GoHighLevel YouTube post with no link waits for the hourly channel lookup, never the grace hour"
+    assert Q("facebook|summary|d")["status"] == "draft" and "DRAFT" not in asked, "a test-mode draft never moves"
+    assert Q("youtube|lfmd|n")["status"] == "scheduled", "a direct upload with no slot is left to the hourly sync (it asks YouTube)"
+    assert Q("threads|summary|b")["status"] == "scheduled" and any("not a time" in e or "isoformat" in e for e in info2["errors"]), "an unreadable slot is listed, the check carries on"
+    _selftest_parity()
+    # publisherAt (review, 29 Sep 2026): the hourly write stamps it, the live check carries it over, nothing guesses it
+    import tempfile
+    sp = os.path.join(tempfile.mkdtemp(), "publisher_at.txt")
+    r0 = {"asOf": "2026-09-29T22:40:00Z", "headline": "h"}; write(r0, dry_run=True, publisher=False, stamp_path=sp)
+    assert "publisherAt" not in r0, "no stamp file: the field is left out, never guessed"
+    stamp_publisher({"asOf": "2026-09-29T19:17:00Z"}, True, sp)                  # the 20:15 hourly run
+    r1 = {"asOf": "2026-09-29T22:40:00Z", "headline": "h"}; f1 = write(r1, dry_run=True, publisher=False, stamp_path=sp)
+    r2 = {"asOf": "2026-09-29T22:40:00Z", "headline": "h"}; write(r2, dry_run=True, publisher=True, stamp_path=sp)
+    assert r1["publisherAt"] == "2026-09-29T19:17:00Z" and r2["publisherAt"] == "2026-09-29T22:40:00Z", (r1, r2)
+    assert open(sp).read() == "2026-09-29T19:17:00Z", "a dry run never moves the stamp"
+    assert json.loads(f1[ES["payload"]]) == r1, "the payload written is the report as stamped"
+    open(sp, "w").write("garbage"); r4 = {"asOf": "x", "headline": "h"}; stamp_publisher(r4, False, sp); assert "publisherAt" not in r4
 
 
 def _selftest():
@@ -460,7 +721,7 @@ def _selftest():
                two, {}, plan=[], skipped=[], holds={2059: "x"})
     assert sh["blocker"] == {"day": 2058, "why": "sent back on 14 Sep, not resubmitted"} and sh["heldBehind"] == [2059], (sh["blocker"], sh["heldBehind"])
     assert "day 2058 is not approved yet" in sh["heldWhy"] and "behind day 2058 (sent back on 14 Sep" in sh["headline"], (sh["heldWhy"], sh["headline"])
-    print(json.dumps({"checks": 46, "failed": []}))
+    print(json.dumps({"checks": 61, "failed": []}))
 
 
 if __name__ == "__main__":
@@ -469,11 +730,18 @@ if __name__ == "__main__":
     if a.mode == "selftest": selftest()
     elif a.mode == "build": print(json.dumps(build(), indent=1))
     elif a.mode == "write":
-        rep = build(); lift_gap_pause(rep); write(rep); print("content report: " + rep["headline"])
+        rep = build_live(); lift_gap_pause(rep); write(rep, publisher=True); print("content report: " + rep["headline"])
+        say_live_errors(rep)
+    elif a.mode == "live":
+        # every 10 minutes, outside the job queue (29 Sep 2026). Read-only against the platforms and the engine's state.
+        rep = build_live(); write(rep); lv = rep["live"]
+        print("content report (live): %d post(s) read, %d changed, %d card(s) read, %d decided. %s"
+              % (lv["postsRead"], lv["postsChanged"], lv["cardsRead"], lv["cardsDecided"], rep["headline"]))
+        say_live_errors(rep)
     elif a.mode == "stuck":
         # daily-ops reads this (Kevin, 27 Sep 2026). Exit 2 when the state cannot be read: never "nothing stuck".
         try: rows = stuck_sent_back(hours=a.hours, why_waiting=resubmit_reason)
         except Exception as ex:                                   # noqa: BLE001
             print("content stuck: could not tell (%s)" % str(ex)[:200], file=sys.stderr); sys.exit(2)
         print(json.dumps({"stuck": rows}, indent=1))
-    else: raise SystemExit("usage: content_report.py build | write | stuck [--hours N] | selftest")
+    else: raise SystemExit("usage: content_report.py build | write | live | stuck [--hours N] | selftest")
