@@ -29,6 +29,13 @@
 -- 30 minutes old). A site the robot is already signed into is handed back on the spot and
 -- reported under alreadyLive; this app names it in a notification and never opens it. Kevin
 -- had been opening Facebook and Pingen windows for sessions that were live all along.
+-- AppKit for one thing only: hiding the progress window (hideProgress). Scripting additions
+-- must then be named, or display dialog and do shell script stop working.
+use AppleScript version "2.4"
+use framework "Foundation"
+use framework "AppKit"
+use scripting additions
+
 property repo : "/Users/kevinbrittain/Projects/leadership-dashboard"
 property waitingFile : "/Users/kevinbrittain/knowledge-os/logs/signin-pickup/waiting.json"
 
@@ -48,7 +55,8 @@ end sh
 -- detached and the app waits in short delays, which keep it answering, behind a progress window
 -- that says what is happening. Stop in that window ends the chain (error -128); the step already
 -- running finishes on its own. Returns stdout and fails with stderr, as sh() does, so callers
--- read the answer exactly as before.
+-- read the answer exactly as before. doing "" shows no progress window (the sign-in window step,
+-- where the Chrome window is what Kevin needs to see).
 on shWait(cmd, doing)
 	set tmp to do shell script "mktemp -d /tmp/robot-signin.XXXXXX"
 	set rcFile to tmp & "/rc"
@@ -58,9 +66,11 @@ on shWait(cmd, doing)
 	set jobPid to do shell script "/usr/bin/python3 " & quoted form of (repo & "/scripts/detach.py") & " -- /bin/bash -c " & quoted form of job
 	-- "dead": the step ended without writing its exit code (killed), so never wait on it for ever.
 	set poll to "test -e " & quoted form of rcFile & " && echo done || { kill -0 " & jobPid & " 2>/dev/null && echo running || { test -e " & quoted form of rcFile & " && echo done || echo dead; }; }"
-	set progress total steps to -1
-	set progress completed steps to 0
-	set progress description to doing
+	if doing is not "" then
+		set progress total steps to -1
+		set progress completed steps to 0
+		set progress description to doing
+	end if
 	try
 		repeat
 			set state to do shell script poll
@@ -68,11 +78,11 @@ on shWait(cmd, doing)
 			delay 0.25
 		end repeat
 	on error errMsg number errNum
-		clearProgress()
+		if doing is not "" then clearProgress()
 		do shell script "rm -rf " & quoted form of tmp
 		error errMsg number errNum
 	end try
-	clearProgress()
+	if doing is not "" then clearProgress()
 	if state is "dead" then
 		do shell script "rm -rf " & quoted form of tmp
 		error "the step ended without a result (it was stopped from outside)" number 1
@@ -96,6 +106,27 @@ on clearProgress()
 	set progress description to ""
 	set progress additional description to ""
 end clearProgress
+
+-- Hide the progress window when the screen passes to Kevin (29 Sep 2026: "windows jump around"
+-- and "the progress box stays"). Once hidden it stays hidden for the rest of the run, whatever
+-- progress is set after; the site list, the Chrome window, the notifications and the closing box
+-- speak from there. Only a VISIBLE window is ordered out: ordering out the applet's hidden helper
+-- window as well stopped the next dialog from ever appearing (found in testing). With nothing on
+-- screen another app can take the front, and a dialog from a background applet then waits unseen
+-- (AEInteractWithUser) until Kevin clicks the Dock icon: 2 of 3 test runs stalled that way. So
+-- the app comes forward, which keeps its hidden windows hidden. Only in the applet: osascript (the
+-- tests) has no windows and must never take the front. Cosmetic, so a failure is ignored.
+on hideProgress()
+	try
+		set ws to current application's NSApplication's sharedApplication()'s |windows|()
+		set n to (ws's |count|()) as integer
+		repeat with i from 0 to (n - 1)
+			set w to (ws's objectAtIndex:i)
+			if (w's isVisible()) as boolean then w's orderOut:(missing value)
+		end repeat
+		if n > 0 then activate
+	end try
+end hideProgress
 
 -- Every sign-in this app can open, as "label | host | url | profile" lines. One line per robot
 -- profile, not per site (25 Sep 2026): each Duckworth flat is its own Utilita login in its own
@@ -222,6 +253,7 @@ on refreshWaiting(onlyHost)
 			sh("echo '{\"sites\":[],\"alreadyLive\":[]}' > " & quoted form of waitingFile)
 		end try
 	end try
+	hideProgress()
 end refreshWaiting
 
 -- An unreadable or missing answer reads as nothing waiting, never as an error dialog.
@@ -284,11 +316,13 @@ on announceBotChecks()
 	end try
 end announceBotChecks
 
--- The chain's outcome, always seen: a dialog that closes itself (25 Sep 2026).
+-- The chain's outcome, always seen: a dialog that closes itself (25 Sep 2026), after 5 seconds
+-- since 29 Sep 2026 (15 left the app lingering after the sign-in), with the progress window gone.
 on sayDone(msg)
 	display notification msg with title "Robot sign-in"
+	hideProgress()
 	try
-		display dialog msg with title "Robot sign-in" buttons {"OK"} default button "OK" giving up after 15
+		display dialog msg with title "Robot sign-in" buttons {"OK"} default button "OK" giving up after 5
 	end try
 end sayDone
 
@@ -340,7 +374,7 @@ on signInTo(theLine)
 	set theProfile to profileOf(theLine)
 	display notification "Sign in, then press Cmd+Q on the Chrome window." with title "Robot sign-in: " & theLabel
 	try
-		set said to shWait(loginCommand(theLine), "Opening " & theLabel & ". Sign in in the Chrome window, then press Cmd+Q to close it. If the robot is busy in its browser, the window can take a few minutes to open.")
+		set said to shWait(loginCommand(theLine), "")
 		repeat with N in notesIn(said)
 			display notification (N as text) with title "Robot sign-in: " & theLabel
 		end repeat

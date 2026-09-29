@@ -5658,6 +5658,39 @@ def ledger_session_verdict(host, max_age_minutes=SIGNIN_LEDGER_FRESH_MINUTES, pa
             "url": str(newest.get("url") or ""), "at": str(newest["at"]), "source": "ledger"}
 
 
+def ledger_signed_out(host, path=None, profile="default"):
+    """The newest `session` verdict for HOST when it says signed out (no bot
+    check) and no `login` on the same profile has run since; else None.
+
+    A signed-out session cannot sign itself back in: only Kevin's sign-in
+    window (`agent-browser.js login`) can, so until one runs the verdict holds
+    at any age, and walking the door again only makes Kevin wait. Any login on
+    the profile counts, not only this host's, because GOV.UK One Login is one
+    sign-in across services. A signed-IN verdict is never reused here: that
+    session may have lapsed (29 Sep 2026: Kevin pressed Sign in on WebFiling,
+    last seen signed out eight hours earlier, and waited 48 s for the walk)."""
+    newest, login_since = None, False
+    try:
+        with open(path or BROWSER_LEDGER) as fh:
+            for line in fh:
+                try:
+                    rec = json.loads(line)
+                except ValueError:
+                    continue
+                if not isinstance(rec, dict) or (rec.get("profile") or "default") != profile:
+                    continue
+                if rec.get("cmd") == "session" and rec.get("site") == host:
+                    newest, login_since = rec, False
+                elif rec.get("cmd") == "login" and newest is not None:
+                    login_since = True
+    except OSError:
+        return None
+    if not newest or login_since or newest.get("signedIn") or newest.get("botCheck") or not newest.get("at"):
+        return None
+    return {"signedIn": False, "botCheck": False, "url": str(newest.get("url") or ""),
+            "at": str(newest["at"]), "source": "ledger"}
+
+
 def ledger_bot_check(hosts, max_age_minutes=BOT_CHECK_FRESH_MINUTES, path=None, now=None, profile="default"):
     """The newest browser look at any of HOSTS (a `session` line by its site or
     landing, or a `read` line by the page's host), if it showed the robot a bot
@@ -5738,7 +5771,8 @@ def session_check(host, use_ledger=False, max_age_minutes=SIGNIN_LEDGER_FRESH_MI
     """Is the robot signed in to HOST? A ledger verdict under max_age_minutes
     old is reused when use_ledger is set (the keep-alive and the pickup run
     walk every site anyway; walking again would fight them for the one robot
-    profile); otherwise the door is walked now. SIGNIN_SKIP_WALK=1 (tests,
+    profile); a signed-out verdict with no sign-in since is reused at any
+    age (ledger_signed_out); otherwise the door is walked now. SIGNIN_SKIP_WALK=1 (tests,
     and any read that must never open a browser) returns {"skipped": True}."""
     if os.environ.get("SIGNIN_SKIP_WALK"):
         return {"skipped": True}
@@ -5746,6 +5780,10 @@ def session_check(host, use_ledger=False, max_age_minutes=SIGNIN_LEDGER_FRESH_MI
         v = ledger_session_verdict(host, max_age_minutes)
         if v:
             return v
+    # Signed out with no sign-in since stays signed out, short-session sites included.
+    v = ledger_signed_out(host)
+    if v:
+        return v
     return session_walk(host)
 
 
