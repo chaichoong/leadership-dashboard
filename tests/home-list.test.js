@@ -117,14 +117,15 @@ describe('Home picks exactly what the 09:00 brief picks', () => {
       expect(mine.ticked).toBe(wt.deadlines.ticked);
     });
 
+    // Against the worker's OWN end-to-end output (its mapping from the records, not Home's), so a
+    // Home mapping slip such as dropping Some Day is caught (review, 29 Sep 2026).
     it(`only you, same items and order before the brief's cap of five (${label})`, async () => {
       const { w, wt, tasks } = await bothSides(records);
       const shown = new Set(wt.deadlines.items.map(x => x.id));
       const mine = H.selectOnlyYou(tasks, TODAY, shown);
-      const theirs = w.selectOnlyYou(tasks, TODAY, shown);
       expect(mine.length, 'the set must hold only-you items').toBeGreaterThan(0);
-      expect(mine.slice(0, w.ONLY_YOU_SHOW).map(x => ({ name: x.name, due: x.due }))).toEqual(theirs.items);
-      expect(Math.max(0, mine.length - w.ONLY_YOU_SHOW)).toBe(theirs.more);
+      expect(mine.slice(0, w.ONLY_YOU_SHOW).map(x => ({ name: x.name, due: x.due }))).toEqual(wt.onlyYou.items);
+      expect(Math.max(0, mine.length - w.ONLY_YOU_SHOW)).toBe(wt.onlyYou.more);
     });
   }
 
@@ -159,6 +160,11 @@ describe('Home picks exactly what the 09:00 brief picks', () => {
       const theirs = w.tenantChainText(c, TODAY);
       const mine = H.readTenants(c, TODAY);
       expect(LIGHT[theirs.slice(0, 2)]).toBe(mine.light);
+      // The words too, for a line from today: the brief's text with its light and bold label taken off.
+      // The not-current states are worded for a page ("this morning" suits a 09:00 message, not a page).
+      const current = /TENANTS:\* (?!_)/.test(theirs) && !/has not run today/.test(theirs);
+      expect(mine.current).toBe(current);
+      if (current) expect(theirs.replace(/^\S+ \*TENANTS:\* /, '')).toBe(mine.text);
     }
   });
 });
@@ -222,6 +228,52 @@ describe('the one list (the examples Kevin approved at the gate, 29 Sep 2026)', 
 
   it('every item counted in the summary is a row on the page', () => {
     expect(list.counts.total).toBe(list.groups.reduce((n, g) => n + g.items.length, 0));
+  });
+});
+
+describe('lanes, blockers and honest emptiness (review findings, 29 Sep 2026)', () => {
+  const now = Date.parse(`${TODAY}T20:00:00Z`);
+  it('a card in someone else\'s approval lane is not Kevin\'s to approve, as on the AI Agents page', () => {
+    const recs = [
+      rec('Kevin lane card, empty Approver', { ...queued(), 'Due Date': '2026-09-20' }),
+      rec('Kevin lane card, his address', { ...queued(), 'Due Date': '2026-09-20', Approver: { email: H.APPROVER_EMAIL } }),
+      rec('Another lane card', { ...queued(), 'Due Date': '2026-09-20', Approver: { email: 'someone.else@example.com' } }),
+    ];
+    const list = H.buildHomeList({ tasks: recs.map(H.toTask), today: TODAY, needsRow: null, blockersRow: null, now });
+    const names = list.groups.find(g => g.key === 'approve').items.map(i => i.name);
+    expect(names).toEqual(expect.arrayContaining(['Kevin lane card, empty Approver', 'Kevin lane card, his address']));
+    expect(names).not.toContain('Another lane card');
+    expect(list.counts.queue).toBe(2);
+  });
+
+  it('a blocked task already listed above is not listed again under robots', () => {
+    const tasks = LIVE.map(H.toTask);
+    const row = { fields: { Payload: JSON.stringify({ sweptAt: new Date(now).toISOString(), open: [
+      { task: TOKEN.id, name: 'Rotate the Airtable token', kind: 'KEVIN', subject: 'credential', days: 2 },
+      { task: 'recNotElsewhere', name: 'Some other step', kind: 'KEVIN', subject: 'identity', days: 1 }] }) } };
+    const list = H.buildHomeList({ tasks, today: TODAY, needsRow: null, blockersRow: row, now });
+    const everyId = list.groups.flatMap(g => g.items.map(i => i.id)).filter(Boolean);
+    expect(everyId.filter(id => id === TOKEN.id)).toHaveLength(1);
+    expect(list.groups.find(g => g.key === 'robots').items.map(i => i.id)).toEqual(['recNotElsewhere']);
+  });
+
+  it('a sweep that could not read the board says so, never "no robot stuck"', () => {
+    const r = H.readBlockers({ fields: { Payload: JSON.stringify({ open: [], controlFailed: true, sweptAt: new Date(now).toISOString() }), Detail: 'The blocker check could not read the task board.' } }, now);
+    expect(r.items).toEqual([]);
+    expect(r.note).toMatch(/could not read the task board/);
+  });
+
+  it('an empty list with unreadable parts is flagged as not checked, not as a clear day', () => {
+    const list = H.buildHomeList({ tasks: [], today: TODAY, needsRow: undefined, blockersRow: undefined, now });
+    expect(list.counts.total).toBe(0);
+    expect(list.unchecked.length).toBeGreaterThanOrEqual(3);
+    expect(list.unchecked[0]).toMatch(/Hard Deadline tick/);
+  });
+
+  it('approve items carry the legal flag, so a legal card is marked as urgently as a deadline', () => {
+    const list = H.buildHomeList({ tasks: LIVE.map(H.toTask), today: TODAY, needsRow: null, blockersRow: null, now });
+    const tribunal = list.groups.find(g => g.key === 'approve').items.find(i => /Tribunal/.test(i.name));
+    expect(tribunal.legal).toBe(true);
   });
 });
 

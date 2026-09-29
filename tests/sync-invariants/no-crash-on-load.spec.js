@@ -7,7 +7,7 @@ const { test, expect } = require('@playwright/test');
 const { loadDashboard } = require('./helpers');
 
 // Only tabs that have a matching tab-panel element in index.html
-const TABS = ['overview', 'cfv', 'invoices', 'costs', 'fintable', 'sitemap', 'pnl', 'transactions'];
+const TABS = ['home', 'overview', 'cfv', 'invoices', 'costs', 'fintable', 'sitemap', 'pnl', 'transactions'];
 
 test.describe('No Crash on Load', () => {
 

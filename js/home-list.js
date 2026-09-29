@@ -17,11 +17,14 @@
     const KEVIN_TEAM_MEMBER = 'recHEt2VPYothaqTd';
     const ROY_TEAM_MEMBER = 'reclbdjfVev3bqNHS';
     const HOME_DEADLINE_DAYS = 14;
+    // The approval queue is Kevin's lane only: an empty Approver or his address (os/agents/index.html
+    // loadApprovals, js/shared.js refreshAgentsBadge). A card in anyone else's lane is not his to decide.
+    const APPROVER_EMAIL = 'kevin@runpreneur.org.uk';
 
     // The same read as the brief's gatherTasks: every open task, by field NAME.
     const OPEN_TASKS_FORMULA = "AND({Task Name}!='',NOT({Status}='Completed'),NOT({Status}='Cancelled'))";
     const TASK_FIELDS = ['Task Name', 'Assignee', 'Due Date', 'Status', 'Priority', 'Task Type',
-        'Deferred Until', 'Team Member', 'Hard Deadline', 'Sent For Approval By', 'Some Day'];
+        'Deferred Until', 'Team Member', 'Hard Deadline', 'Sent For Approval By', 'Some Day', 'Approver'];
     const ESTATE_KEYS = { needsYou: 'daily-ops-needs-you', blockers: 'agent-blockers', tenants: 'tenant-chain' };
 
     const LEGAL_RE = /\b(court|charging order|ccj|tribunal|solicitors?|claim form|bailiffs?|enforcement|hmrc|companies ?house|strike ?off|liquidat\w*|insolven\w*|bankrupt\w*|restraint|statutory demand|notice|summons|writ|legal)\b/i;
@@ -38,7 +41,6 @@
                 && Array.isArray(f['Sent For Approval By']) && f['Sent For Approval By'].length > 0,
             someDay: Boolean(f['Some Day']),
             name: String(f['Task Name'] || '').slice(0, 90),
-            fullName: String(f['Task Name'] || ''),
             holders: Array.isArray(f['Team Member']) ? f['Team Member'] : [],
             who: (f['Assignee'] && f['Assignee'].name) || 'unassigned',
             due: (f['Due Date'] || '').slice(0, 10),
@@ -46,6 +48,7 @@
             priority: String(f['Priority'] || ''),
             type: String(f['Task Type'] || ''),
             deferred: String(f['Deferred Until'] || '').slice(0, 10),
+            approverEmail: (f['Approver'] && f['Approver'].email) || '',
         };
     }
 
@@ -112,8 +115,9 @@
 
     // The approval queue exactly as the AI Agents page counts it (os/agents/index.html
     // APV_QUEUE_FORMULA): Approval, raised by the loop, not knocked back to a later date.
+    const isKevinsLane = email => !email || email === APPROVER_EMAIL;
     function queueCards(tasks, today) {
-        return (tasks || []).filter(x => x.inQueue && !(x.deferred && x.deferred > today));
+        return (tasks || []).filter(x => x.inQueue && !(x.deferred && x.deferred > today) && isKevinsLane(x.approverEmail));
     }
 
     function parsePayload(row) {
@@ -132,7 +136,7 @@
         if (!p || !p.date) return { items: [], note: 'The 07:00 check has not reported yet.' };
         if (p.date !== today) return { items: [], note: `The 07:00 check has not reported today. Its last report was ${dayMonth(p.date)}.` };
         if (p.unreadable) return { items: [], note: 'The 07:00 check ran, but its list for you could not be read. It is in the morning report.' };
-        const items = Array.isArray(p.items) ? p.items.map(x => String(x)) : [];
+        const items = Array.isArray(p.items) ? p.items.map(x => String(x).slice(0, 400)) : [];
         return { items, note: '' };
     }
 
@@ -147,6 +151,11 @@
         if (r.state === 'damaged' || !r.p || !Array.isArray(r.p.open)) {
             const why = row && row.fields && row.fields.Detail ? ` It says: ${String(row.fields.Detail).slice(0, 200)}` : '';
             return { items: [], note: `The robot blocker check left no list.${why}` };
+        }
+        // The sweep could not read the task board: an empty list here means "unknown", not "none".
+        if (r.p.controlFailed) {
+            const why = row.fields && row.fields.Detail ? ` It says: ${String(row.fields.Detail).slice(0, 200)}` : '';
+            return { items: [], note: `The robot blocker check could not read the task board, so it cannot say what is stuck.${why}` };
         }
         const walls = r.p.open;
         const items = [];
@@ -177,13 +186,13 @@
     // The brief's tenantChainText, as data.
     function readTenants(row, today) {
         const r = parsePayload(row);
-        if (r.state === 'unread') return { light: 'fail', text: 'The tenant chain could not be read.' };
-        if (r.state === 'damaged') return { light: 'fail', text: 'The tenant chain left a damaged report, so nothing about it is known.' };
+        if (r.state === 'unread') return { light: 'fail', current: false, text: 'The tenant chain could not be read.' };
+        if (r.state === 'damaged') return { light: 'fail', current: false, text: 'The tenant chain left a damaged report, so nothing about it is known.' };
         const p = r.p;
-        if (!p || !p.asAt) return { light: 'fail', text: 'The tenant chain has not reported.' };
-        if (p.asAt !== today) return { light: 'fail', text: `The chain has not run today. Its last run was ${dayMonth(p.asAt)}, so nothing about it is current.` };
+        if (!p || !p.asAt) return { light: 'fail', current: false, text: 'The tenant chain has not reported.' };
+        if (p.asAt !== today) return { light: 'fail', current: false, text: `The chain has not run today. Its last run was ${dayMonth(p.asAt)}, so nothing about it is current.` };
         const line = String(p.briefLine || '').slice(0, 700) || 'ran, but left no summary line.';
-        return { light: ['ok', 'warn', 'fail'].includes(p.worst) ? p.worst : 'unknown', text: line };
+        return { light: ['ok', 'warn', 'fail'].includes(p.worst) ? p.worst : 'unknown', current: true, text: line };
     }
 
     // The one list. Groups in reading order: money and deadlines first. A task shows once, in the
@@ -209,10 +218,14 @@
             { key: 'robots', title: 'Robots stuck on you', note: blockers.note, items: blockers.items.map(x => ({ tag: 'Robot stuck', id: x.id || '', name: x.text, when: x.count > 1 ? `blocking ${x.count} tasks` : (x.days >= 1 ? `stuck ${Math.floor(x.days)} day${Math.floor(x.days) === 1 ? '' : 's'}` : 'stuck today'), who: '' })) },
             { key: 'needs-you', title: 'From the 07:00 check', note: needsYou.note, items: needsYou.items.map(t => ({ tag: '07:00 check', id: '', name: t, when: '', who: '' })) },
             { key: 'deadlines-coming', title: `Deadlines in the next ${HOME_DEADLINE_DAYS} days`, items: coming.map(x => ({ tag: 'Deadline', id: x.id, name: x.name, when: whenText(x.due, today), who: x.who, inQueue: x.inQueue, legal: x.kind === 0 })) },
-            { key: 'approve', title: 'Waiting for your approval', items: approve.map(x => ({ tag: x.kind === 0 ? 'Approve · legal' : x.kind === 1 ? 'Approve · money' : 'Approve', id: x.id, name: x.name, when: x.due ? `waiting since ${dayMonth(x.due)}` : '', who: x.type === 'Correspondence' ? 'approving sends the email' : '', inQueue: true })) },
+            { key: 'approve', title: 'Waiting for your approval', items: approve.map(x => ({ tag: x.kind === 0 ? 'Approve · legal' : x.kind === 1 ? 'Approve · money' : 'Approve', legal: x.kind === 0, id: x.id, name: x.name, when: x.due ? `waiting since ${dayMonth(x.due)}` : '', who: x.type === 'Correspondence' ? 'approving sends the email' : '', inQueue: true })) },
         ];
+        // Parts that could not be checked, so an empty list is never read as "nothing needs you".
+        const unchecked = groups.filter(g => g.note).map(g => g.title);
+        if (!deadlines.ticked) unchecked.unshift('Deadlines (no open task carries the Hard Deadline tick)');
         return {
             groups,
+            unchecked,
             ticked: deadlines.ticked,
             counts: {
                 deadlines: deadlines.all.length, deadlinesDueNow: dueNow.length, onlyYou: onlyYou.length,
@@ -223,7 +236,7 @@
     }
 
     const api = {
-        KEVIN_TEAM_MEMBER, ROY_TEAM_MEMBER, HOME_DEADLINE_DAYS, OPEN_TASKS_FORMULA, TASK_FIELDS, ESTATE_KEYS,
+        KEVIN_TEAM_MEMBER, ROY_TEAM_MEMBER, APPROVER_EMAIL, isKevinsLane, HOME_DEADLINE_DAYS, OPEN_TASKS_FORMULA, TASK_FIELDS, ESTATE_KEYS,
         LEGAL_RE, MONEY_RE, toTask, addDaysISO, dayMonth, whenText, londonToday, deadlineHolder,
         selectDeadlines, isOnlyYouName, selectOnlyYou, queueCards, readNeedsYou, readBlockers, readTenants,
         buildHomeList,

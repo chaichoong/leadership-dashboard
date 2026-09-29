@@ -12,6 +12,7 @@
     const TAB = 'home';
     const READ_TIMEOUT_MS = 30 * 1000;
     const AUTO_RELOAD_MS = 5 * 60 * 1000;
+    // The AI Agents queue's own formula (os/agents/index.html APV_QUEUE_FORMULA); its lane filter is applied below.
     const QUEUE_FORMULA = "AND({Status}='Approval', LEN({Sent For Approval By}&'')>0, NOT(IS_AFTER({Deferred Until}, TODAY())))";
     const recordUrl = (tbl, id) => `https://airtable.com/${BASE_ID}/${tbl}/${id}`;
 
@@ -62,14 +63,15 @@
             const now = Date.now(), today = H.londonToday(new Date(now));
             const [taskRecs, queueRecs, kevinRow, needsRow, blockersRow, tenantsRow] = await Promise.all([
                 readAll(TABLES.tasks, { filterByFormula: H.OPEN_TASKS_FORMULA, 'fields[]': H.TASK_FIELDS, pageSize: '100' }),
-                readAll(TABLES.tasks, { filterByFormula: QUEUE_FORMULA, 'fields[]': ['Task Name'], pageSize: '100' }).catch(e => { console.warn('[home] queue count read failed:', e); return null; }),
+                readAll(TABLES.tasks, { filterByFormula: QUEUE_FORMULA, 'fields[]': ['Task Name', 'Approver'], pageSize: '100' }).catch(e => { console.warn('[home] queue count read failed:', e); return null; }),
                 readAll(TABLES.teamMembers, { filterByFormula: `RECORD_ID()='${H.KEVIN_TEAM_MEMBER}'`, 'fields[]': ['Name'] }).catch(e => { console.warn('[home] team member read failed:', e); return null; }),
                 readEstateRow(H.ESTATE_KEYS.needsYou), readEstateRow(H.ESTATE_KEYS.blockers), readEstateRow(H.ESTATE_KEYS.tenants),
             ]);
             const tasks = taskRecs.map(H.toTask);
+            const mine = queueRecs ? queueRecs.filter(q => H.isKevinsLane(((q.fields || {}).Approver || {}).email)) : null;
             const list = H.buildHomeList({ tasks, today, needsRow, blockersRow, now });
             _state = { phase: 'ready', today, list, openTasks: tasks.length, tasks,
-                queueCount: queueRecs ? queueRecs.length : null, kevinFound: kevinRow ? kevinRow.length === 1 : null,
+                queueCount: mine ? mine.length : null, queueNameless: mine ? mine.filter(q => !String((q.fields || {})['Task Name'] || '').trim()).length : 0, kevinFound: kevinRow ? kevinRow.length === 1 : null,
                 tenants: H.readTenants(tenantsRow, today), at: now };
         } catch (e) {
             console.error('[home] list read failed:', e);
@@ -105,6 +107,9 @@
     function render() {
         const host = document.getElementById('homeList');
         if (!host) return;
+        // Set on every render, so a Home left open past midnight shows the new day.
+        const d = document.getElementById('homeDate');
+        if (d) d.textContent = new Date().toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long', timeZone: 'Europe/London' });
         const s = _state;
         if (s.phase === 'idle' || s.phase === 'loading') {
             host.innerHTML = `<p class="home-loading" role="status">${typeof PAT === 'undefined' || !PAT ? 'Waiting for you to sign in.' : 'Reading what needs you today…'}</p>`;
@@ -116,9 +121,11 @@
         }
         const c = s.list.counts;
         const stale = s.error ? `<div class="home-error" role="alert">The last refresh failed (${escHtml(s.error)}), so this list is from ${escHtml(new Date(s.at).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', timeZone: 'Europe/London' }))}.</div>` : '';
-        const summary = c.total
+        const unchecked = s.list.unchecked.length
+            ? ` Not checked: ${s.list.unchecked.join('; ')}.` : '';
+        const summary = (c.total
             ? `${c.total} thing${c.total === 1 ? '' : 's'} need${c.total === 1 ? 's' : ''} you today: ${c.deadlinesDueNow} deadline${c.deadlinesDueNow === 1 ? '' : 's'} due now, ${c.onlyYou} only-you, ${c.robots} robot${c.robots === 1 ? '' : 's'} stuck, ${c.needsYou} from the 07:00 check, ${c.deadlines - c.deadlinesDueNow} deadline${c.deadlines - c.deadlinesDueNow === 1 ? '' : 's'} coming up, ${c.approve} to approve.`
-            : 'Nothing needs you today. Every list below was read and came back empty.';
+            : (s.list.unchecked.length ? 'Nothing found, but part of this list could not be checked, so do not read it as a clear day.' : 'Nothing needs you today. Every list below was read and came back empty.')) + unchecked;
         const t = s.tenants;
         host.innerHTML = `${stale}<p class="home-summary" aria-live="polite">${escHtml(summary)}</p>
             ${s.list.groups.map(g => groupHtml(g, s.list)).join('')}
@@ -137,12 +144,12 @@
                     ? { status: 'pass', detail: `${s.list.ticked} open task(s) carry the tick` } : { status: 'fail', detail: 'No open task carries the tick, so the deadline list cannot be trusted' }) },
                 { name: 'Approvals match the queue', kind: 'sync', run: ready(s => s.queueCount === null ? { status: 'warn', detail: 'The queue count could not be read' }
                     : s.queueCount === s.list.counts.queue ? { status: 'pass', detail: `${s.queueCount} cards, the same count the AI Agents queue uses` }
-                    : { status: 'warn', detail: `Home found ${s.list.counts.queue}, the queue formula found ${s.queueCount} (they can differ just after midnight)` }) },
+                    : { status: 'warn', detail: `Home found ${s.list.counts.queue}, the AI Agents queue has ${s.queueCount}` + (s.queueNameless ? ` (${s.queueNameless} card(s) have no name, so Home cannot list them)` : ' (they can differ just after midnight, when the queue\'s date is still yesterday\'s)') }) },
                 { name: '07:00 check reported today', kind: 'automation', run: ready(s => { const g = s.list.groups.find(x => x.key === 'needs-you');
                     return g.note ? { status: 'warn', detail: g.note } : { status: 'pass', detail: `${g.items.length} item(s) for you today` }; }) },
                 { name: 'Robot blocker check current', kind: 'automation', run: ready(s => { const g = s.list.groups.find(x => x.key === 'robots');
                     return g.note ? { status: 'warn', detail: g.note } : { status: 'pass', detail: `${g.items.length} item(s) only you can clear` }; }) },
-                { name: 'Tenant chain ran today', kind: 'automation', run: ready(s => s.tenants.light === 'fail' && /not|could|damaged/i.test(s.tenants.text)
+                { name: 'Tenant chain ran today', kind: 'automation', run: ready(s => !s.tenants.current
                     ? { status: 'warn', detail: s.tenants.text } : { status: 'pass', detail: 'Today\'s tenant line is in' }) },
                 { name: 'Every deadline has an owner', kind: 'automation', run: ready(s => { const n = s.list.groups.filter(g => g.key.indexOf('deadlines') === 0)
                     .reduce((k, g) => k + g.items.filter(i => i.who === 'NO OWNER').length, 0);
@@ -184,8 +191,6 @@
 
     function init() {
         if (!H) { console.error('[home] js/home-list.js did not load'); return; }
-        const d = document.getElementById('homeDate');
-        if (d) d.textContent = new Date().toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long', timeZone: 'Europe/London' });
         registerChecks();
         render();
         wire();
