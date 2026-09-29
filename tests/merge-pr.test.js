@@ -806,7 +806,8 @@ describe('merge-pr.py end to end (fakes, real git, no network)', { timeout: 60_0
     expect(r.result.headAtView).toBe('f'.repeat(40));
     // The PR changes js/pnl.js only; docs/before.md came from main, not the PR.
     expect(r.affectedStdin).toBe('js/pnl.js\n');
-    expect(r.gh).toMatch(new RegExp(`^pr merge 5 --squash --match-head-commit ${r.g.head}$`, 'm'));
+    // The subject is the title the name check read last (29 Sep 2026 review).
+    expect(r.gh).toMatch(new RegExp(`^pr merge 5 --squash --match-head-commit ${r.g.head} --subject Fix: a thing \\(#5\\)$`, 'm'));
     expect(r.gh).not.toMatch(/--delete-branch/);
     expect(r.gh).toMatch(/^api -X DELETE repos\/chaichoong\/leadership-dashboard\/git\/refs\/heads\/feature\/x$/m);
     expect(r.result.branchDeleted).toBe(true);
@@ -820,7 +821,7 @@ describe('merge-pr.py end to end (fakes, real git, no network)', { timeout: 60_0
     expect(r.code).toBe(0);
     expect(r.result.base).toBe(r.g.base);
     expect(r.result.head).toBe(r.g.head);
-    expect(r.gh).toMatch(new RegExp(`--match-head-commit ${r.g.head}$`, 'm'));
+    expect(r.gh).toMatch(new RegExp(`--match-head-commit ${r.g.head} --subject `, 'm'));
   });
 
   it('main moved during the gate onto a file the PR changes: refused, run it again', () => {

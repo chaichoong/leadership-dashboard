@@ -1051,10 +1051,15 @@ def delete_remote_branch(facts):
     return False, said or "gh api exited %d" % r.returncode
 
 
-def do_merge(pr, facts, head):
+def do_merge(pr, facts, head, title=None):
     args = ["gh", "pr", "merge", str(pr), "--squash"]
     if head:
         args += ["--match-head-commit", head]
+    # The subject is the title the name check just read, so an edit made in the
+    # seconds before this call cannot reach main. The body stays GitHub's
+    # default, built from the commit messages, which --match-head-commit fixes.
+    if title:
+        args += ["--subject", "%s (#%d)" % (title, pr)]
     try:
         m = run(args, timeout=180)
         said = (m.stdout or "") + (m.stderr or "")
@@ -1250,6 +1255,7 @@ def gate(pr, dry_run):
     if dry_run:
         res["why"] = "DRY RUN, nothing merged: " + why
         return res, 0
+    now = None
     if not no_roster:
         # GitHub builds the squash message from the title and body as they are
         # AT MERGE TIME, and the gate took minutes: read them once more.
@@ -1263,7 +1269,8 @@ def gate(pr, dry_run):
             res["why"] = named_why(pr, named, "changed during the gate and now ")
             return res, 1
     progress("merging PR #%d" % pr)
-    m = do_merge(pr, facts, head)
+    checked = (now if not no_roster else facts) or {}
+    m = do_merge(pr, facts, head, title=checked.get("title"))
     res.update(m)
     if not m["merged"]:
         res["why"] = "the gate was green but GitHub did not merge: %s" % (m.get("mergeOutput") or "no output")

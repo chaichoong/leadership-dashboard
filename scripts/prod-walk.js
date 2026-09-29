@@ -421,6 +421,11 @@ async function blockWrites(ctx, onBlocked, onAllowed) {
       try { onAllowed(describeWrite(req.method(), req.url())); counted = true; } catch (e) {
         process.stderr.write('prod-walk: an allowed write could not be counted, so it was blocked: ' + clip(e && e.message, 120) + '\n');
       }
+      // Known limit (review, 29 Sep 2026): a route handler sees only the first URL of
+      // a redirect, so a 307 or 308 from this Worker would re-send the POST unchecked.
+      // The deployed Worker has no redirect, and code under test cannot redeploy it.
+      // route.fetch({ maxRedirects: 0 }) would close it but bypasses the browser's
+      // host mapping, so the real-browser test could no longer see the request.
       if (counted) return route.fallback();
     }
     // Reporting must never decide whether a write goes out: log the fault, block anyway.
