@@ -156,7 +156,7 @@ out = [[(a['do'], a.get('kind')) for a in blind], [(a['do'], a.get('kind')) for 
 import tempfile, os
 rows = [{'entity': 'binary_sensor.va1_battery', 'device': 'VA1', 'model': 'VA02', 'state': 'on', 'unit': '',
          'changed': '2026-09-29T07:23:15+00:00', 'conn': ['on']}]
-ha = hb.ha_devices(rows, {'VA1': 'En Suite radiator valve'})
+ha = hb.ha_devices(rows, {'VA1': 'En Suite radiator valve'}, now)
 titles = [a['title'] for a in hb.decide(now, True, ha, st(ha), [], {}, src='ha') if a['do'] == 'create']
 other = [{'key': hb.marker('blind', 'watch:aq', 'aq'), 'ref': 'aq-blind'}]
 crossed = [a for a in hb.decide(now.replace(hour=9), True, ha, st(ha), other, {}, src='ha') if a['do'] == 'complete']

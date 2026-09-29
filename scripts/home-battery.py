@@ -378,21 +378,16 @@ HA_TEMPLATE = r"""[{%- for s in states if s.attributes.device_class == 'battery'
 {%- endfor -%}]"""
 
 
-def ha_time(iso):
-    """HA's UTC timestamp as local naive iso, or None."""
-    try:
-        return dt.datetime.fromisoformat(iso).astimezone().replace(tzinfo=None).isoformat(timespec="seconds")
-    except (TypeError, ValueError):
-        return None
-
-
-def ha_devices(rows, names):
+def ha_devices(rows, names, now):
     """HA template rows as watch devices. Pure, so the selftest can drive it.
 
     A % sensor gives a level, a battery binary sensor gives the low flag
     (on = low). Online comes from the device's connectivity sensor: any 'on'
-    is online, all 'off' is offline, none is unknown. An unavailable battery
-    reading is a battery with no level, never a guess. names maps a device
+    is online, all 'off' is offline, none is unknown. A reading HA still shows
+    is dated now, because HA marks an entity 'unavailable' the moment it loses
+    it (its last_changed only marks the last CHANGE, so a Sonos sitting at 100%
+    for days would otherwise read as stale, review of 29 Sep 2026). An
+    unavailable battery reading is a battery with no level, never a guess. names maps a device
     name (tado serial) or entity id to a room name; two devices left with the
     same name get their entity added so a reminder never points at the wrong one.
     """
@@ -410,7 +405,7 @@ def ha_devices(rows, names):
             flag = {"on": True, "off": False}.get(state)
         else:
             level = parse_level(state)
-        at = ha_time(r.get("changed"))
+        at = now.isoformat(timespec="seconds")
         name = names.get(entity) or names.get(r.get("device") or "") or r.get("device") or entity
         out.append({"id": "ha:" + entity, "name": name, "model": r.get("model") or entity.split(".")[0],
                     "online": online, "battery": True,
@@ -454,7 +449,7 @@ def read_ha(now, token_path=None):
     try:
         with urllib.request.urlopen(req, timeout=30) as r:
             rows = json.loads(r.read().decode())
-        return ha_devices(rows, load_names()), ""
+        return ha_devices(rows, load_names(), now), ""
     except urllib.error.HTTPError as e:
         why = "the key was refused: make a new one and run Home Assistant key" if e.code == 401 else "HTTP %s" % e.code
         return [], "Home Assistant: %s" % why
@@ -1270,7 +1265,7 @@ def selftest():
         {"entity": "sensor.sonos_move_battery_2", "device": "Sonos Move", "model": "Move", "state": "unavailable",
          "unit": "%", "changed": "2026-09-28T23:15:25+00:00", "conn": []},
     ]
-    ha = {d["id"]: d for d in ha_devices(rows, {"VA1": "En Suite radiator valve"})}
+    ha = {d["id"]: d for d in ha_devices(rows, {"VA1": "En Suite radiator valve"}, now)}
     check("a tado low flag reads as low, named by the private map, online by its connection",
           (ha["ha:binary_sensor.va1_battery"]["name"], ha["ha:binary_sensor.va1_battery"]["low_flag"],
            ha["ha:binary_sensor.va1_battery"]["online"]), ("En Suite radiator valve", True, True))
@@ -1282,11 +1277,13 @@ def selftest():
     check("two devices with one name are told apart",
           sorted(d["name"] for d in ha.values() if d["name"].startswith("Sonos")),
           ["Sonos Move (sonos_move_battery)", "Sonos Move (sonos_move_battery_2)"])
-    check("HA's UTC time becomes local", ha_time("2026-09-29T07:23:15+00:00"),
-          dt.datetime(2026, 9, 29, 7, 23, 15, tzinfo=dt.timezone.utc).astimezone().replace(tzinfo=None).isoformat(timespec="seconds"))
+    check("an HA reading still shown is dated by the read, not by its last change",
+          ha["ha:sensor.sonos_move_battery"]["level_at"], iso(now))
+    check("a Sonos at 100% for days is not named; the unavailable one is",
+          [d["name"] for d in no_level(list(ha.values()), now)], ["Sonos Move (sonos_move_battery_2)"])
     for label, bad in [("a non-list HA reply is an error", {"message": "x"}), ("an HA row with no entity is an error", [{"state": "on"}])]:
         try:
-            ha_devices(bad, {})
+            ha_devices(bad, {}, now)
             fails.append(label)
         except HAError:
             pass
