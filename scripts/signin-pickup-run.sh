@@ -137,13 +137,28 @@ fi
 # them signinReopened (newest note is SIGNED IN, nothing since).
 # A queue.json WITHOUT the key is a broken read, never an empty list: a
 # missing key that read as "nothing waiting" would trim the hand-backs away.
+HANDED="$IDS"
 IDS=$(/usr/bin/python3 -c 'import json,sys
 q=json.load(open(sys.argv[1]))
 if "signinReopened" not in q: sys.exit(2)
 still=set(q["signinReopened"] or [])
 print(" ".join(i for i in sys.argv[2].split() if i in still))' "$RUNDIR/queue.json" "$IDS") || fail "queue.json carries no signinReopened key — the queue read is from an engine without it, not an empty list"
 if [ -z "$IDS" ]; then
-  echo "signin-pickup: none of the handed-back tasks still waits on the sign-in (already worked, or re-parked since); nothing to pick up" | tee -a "$LOG"
+  # Say WHY for each task (29 Sep 2026): the guess "already worked, or re-parked
+  # since" hid that both WebFiling cards were waiting for Kevin's approval, and the
+  # morning went on keeping a session alive for a pickup that could never act.
+  WHY=""
+  for T in $HANDED; do
+    W=$(/usr/bin/python3 "$REPO/scripts/agent-dispatch.py" outcome "$T" 2>/dev/null | /usr/bin/python3 -c 'import json,sys
+try: t=json.load(sys.stdin)
+except ValueError: print("could not be read"); sys.exit(0)
+st, oc = t.get("status") or "?", t.get("outcome") or ""
+if st == "Approval" and not oc: print("waits for Kevin'"'"'s approval (the robots act once he approves)")
+elif st == "Completed": print("is completed")
+else: print("is %s%s, worked or re-parked since the sign-in" % (st, (", " + oc) if oc else ""))')
+    WHY="$WHY; $T ${W:-could not be read}"
+  done
+  echo "signin-pickup: none of the handed-back tasks still waits on the sign-in; nothing to pick up${WHY}" | tee -a "$LOG"
   trim_pending; exit 0
 fi
 

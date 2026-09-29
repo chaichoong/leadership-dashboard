@@ -925,12 +925,13 @@ describe('the pickup run never loses a hand-back (11 Sep 2026)', () => {
   const { spawnSync } = require('node:child_process');
   const RUN = join(ROOT, 'scripts', 'signin-pickup-run.sh');
   const LINE = JSON.stringify({ at: '2026-09-11T09:22:00Z', host: 'app.pingen.com', label: 'Pingen (letters)', tasks: ['recA', 'recB'] });
-  function stage({ rc = 0, paused = false, reopened = ['recA', 'recB'], midRun = '', noKey = false, pendingText = LINE + '\n' } = {}) {
+  function stage({ rc = 0, paused = false, reopened = ['recA', 'recB'], midRun = '', noKey = false, pendingText = LINE + '\n', outcomes = {} } = {}) {
     const d = md(join(tmpdir(), 'od-pickup-'));
     const repo = join(d, 'repo', 'scripts'); mkdirSync(repo, { recursive: true });
     cpSync(join(ROOT, 'scripts', 'agent-tools.sh'), join(repo, 'agent-tools.sh'));
     wf(join(repo, 'agent-dispatch.py'), noKey ? `import json\nprint(json.dumps({"counts": {"worklist": 1}}))\n`
-      : `import json, sys\nprint(json.dumps({"signinReopened": ${JSON.stringify(reopened)}, "counts": {"worklist": 1}}))\n`);
+      : `import json, sys\nif sys.argv[1:2] == ["outcome"]:\n    print(json.dumps(json.loads(${JSON.stringify(JSON.stringify(outcomes))}).get(sys.argv[2], {"status": "Today", "outcome": None}))); sys.exit(0)\n`
+        + `print(json.dumps({"signinReopened": ${JSON.stringify(reopened)}, "counts": {"worklist": 1}}))\n`);
     wf(join(repo, 'allowance.py'), `import sys, os\nopen(os.environ["STAGE"] + "/allowance-calls", "a").write(" ".join(sys.argv[1:]) + "\\n")\nif sys.argv[1] == "check" and os.environ.get("PAUSED") == "1":\n    print("paused"); sys.exit(3)\nprint("{}")\n`);
     const claude = join(d, 'claude');
     wf(claude, `#!/bin/bash\necho called >> "$STAGE/claude-calls"\nR=$(printf '%s\\n' "$@" | grep -o 'RUNDIR is [^ ]*' | head -1 | cut -d' ' -f3)\necho '{"actions":[]}' > "$R/report.json"\n${midRun ? `echo '${midRun}' >> "$STAGE/pending/pending.jsonl"\n` : ''}exit ${rc}\n`);
@@ -977,6 +978,20 @@ describe('the pickup run never loses a hand-back (11 Sep 2026)', () => {
     expect(r.status).toBe(0);
     expect(r.stdout).toMatch(/worked: recA$/m);
     expect(r.pending).toBe(later + '\n');
+  });
+  // 29 Sep 2026: both WebFiling cards were in Kevin's approval queue, and the run said "already
+  // worked, or re-parked since". It now names the reason per task, read from the task itself.
+  it('when nothing is left to pick up, it says why for each task: waiting for approval, completed, or worked since', () => {
+    const r = stage({ reopened: [], outcomes: {
+      recA: { status: 'Approval', outcome: null },
+      recB: { status: 'Completed', outcome: 'Approved' },
+    } });
+    expect(r.status).toBe(0);
+    expect(r.calls).toBe(0);
+    expect(r.stdout).toMatch(/nothing to pick up; recA waits for Kevin's approval \(the robots act once he approves\); recB is completed$/m);
+    expect(r.log).toMatch(/recA waits for Kevin's approval/);
+    const r2 = stage({ reopened: [], outcomes: { recA: { status: 'Today', outcome: 'Changes requested' } } });
+    expect(r2.stdout).toMatch(/recA is Today, Changes requested, worked or re-parked since the sign-in; recB is Today, worked or re-parked since the sign-in$/m);
   });
   it('a queue.json without the signinReopened key is a broken read: fail, keep pending, no claude call (review, 15 Sep 2026)', () => {
     const r = stage({ noKey: true });
