@@ -263,7 +263,10 @@ print('---JSON---'); print(json.dumps([m.reference_tokens(t) for t in json.loads
       // A code with the amount after it: the number before is the order.
       'Order 123456 GBP 49.99. Invoice 12345678 EUR 1,200.00. Sort code 12-34-56 GBP account.',
       'Order 234567 GBP\n49.99 and ref 345678 USD, 50.00',
-    ])).toEqual([['87654321', 'INV123456', 'AB12345'], ['INV654321', 'CD12345', 'EF12345'],
+    // A file name is not a reference (Kevin, 29 Sep 2026), so INV123456.pdf
+    // and INV654321.01.pdf give nothing; the stop in CD12345.123 still ends a
+    // reference.
+    ])).toEqual([['87654321', 'AB12345'], ['CD12345', 'EF12345'],
       ['123456', '12345678', '12-34-56'], ['234567', '345678']]);
   });
 
@@ -428,8 +431,16 @@ print('---JSON---'); print(json.dumps([m.reference_tokens(t) for t in json.loads
       'Read notes/case-AB12345/letter-v22.docx first.',
       'Draft at mitchell/uc47-answers.md',
       'Filed in ~/Library/CloudStorage/GoogleDrive-x/My Drive/00 AI Context/case-AB12345-notes.md',
+      // Bare attachment names, file names with spaces in a path or in quotes,
+      // and a folder whose second word is lowercase (Kevin, 29 Sep 2026).
+      'Attachment INV123456.pdf from the council.',
+      'Attached: Invoice_INV-20260928.pdf and scan0042.jpg',
+      'Filed in ~/Library/CloudStorage/GoogleDrive-x/My Drive/00 AI Context/Case AB12345 notes.md',
+      'Saved "Case AB12345 notes.md" to the drive.',
+      'Filed in ~/Library/CloudStorage/GoogleDrive-x/Shared drives/Case-AB12345.pdf today.',
+      'SCAN INV123456.PDF attached', "(\u2018Case AB12345 notes.md\u2019)",
     ]);
-    expect(out).toEqual([[], [], [], [], [], []]);
+    expect(out).toEqual([[], [], [], [], [], [], [], [], [], [], [], [], []]);
   });
 
   it('a long dotted, slashed or spaced run never makes the path reader slow', () => {
@@ -439,13 +450,15 @@ worst = 0
 for t in ['a.' * 10000, '/a' * 10000, '~/' + 'a ' * 10000, 'x/' + 'a.' * 10000, ' ~/a b/' * 3000,
           '~/' + 'a/' * 10000 + 'x', 'a' * 20000 + '.pd',
           # A dated folder shape repeated: exponential before the review fix.
-          '~/' + '1 a/' * 40 + 'x', '~/' + '1 a b/' * 40 + 'x', '/' + '2026 x y/' * 60 + 'z']:
+          '~/' + '1 a/' * 40 + 'x', '~/' + '1 a b/' * 40 + 'x', '/' + '2026 x y/' * 60 + 'z',
+          '~/' + 'A B/' * 40 + 'x', '~/x/' + 'A ' * 5000 + 'b.md', '"' + 'a ' * 5000 + '.md',
+          ("'x " * 3000) + '.md']:
     t0 = time.time(); m.FILE_PATH_RE.sub(' ', t); worst = max(worst, time.time() - t0)
 print('---JSON---'); print(json.dumps(worst))`);
     expect(out).toBeLessThan(0.5);
   });
 
-  it('a real reference beside a path, written with a slash, or naming a bare attachment survives', () => {
+  it('a real reference beside a path, or written with a slash, survives', () => {
     const out = py(`
 print('---JSON---'); print(json.dumps([m.reference_tokens(t) for t in json.loads(sys.argv[1])]))`, [
       'Working file ~/x/notes.md, claim AB12345.',
@@ -454,8 +467,6 @@ print('---JSON---'); print(json.dumps([m.reference_tokens(t) for t in json.loads
       'Account Acc.No/12345678 on the statement.',
       'Letter ref 2026/AB12345 dated today.',
       'Folder ~/Projects/kevin-hq then call re ref AB12345 and/or email.',
-      // A bare attachment name with no folder is the invoice's own reference.
-      'Attachment INV123456.pdf from the council.',
       // A file name and the words after it never read as a folder running on
       // to the next path, and a lone /X12345 is not a path (review).
       'Draft ~/work/reply.md for claim AB12345 in ~/Downloads/dwp.pdf',
@@ -464,8 +475,19 @@ print('---JSON---'); print(json.dumps([m.reference_tokens(t) for t in json.loads
       'Letter (/AB12345) today',
       'Rent ref: /TEN-12345 paid',
       'Saved in ~/Downloads for claim AB12345 see notes/x.md',
+      // Lowercase words after a path are a sentence, not a file name.
+      'Put ~/Downloads/scan re AB12345 x.pdf in the letter.',
+      'He said "ref AB12345 is due" and left.',
+      // An apostrophe in prose never opens a quoted file name, and a word
+      // after a missing space is not a file type (review).
+      "Kevin's claim AB12345 is in \u2018scan.pdf\u2019",
+      "It's ref AB12345, scan attached as \u201cletter.pdf\u201d",
+      "Jane's claim AB12345 filed with scan.pdf's copy",
+      'Your claim number is AB12345.Log in to view it.',
+      'Policy PX123456.Key dates below',
     ]);
     expect(out).toEqual([['AB12345'], ['AB12345'], ['AB12345', 'CD67890'], ['12345678'], ['AB12345'], ['AB12345'],
-      ['INV123456'], ['AB12345'], ['AB12345'], ['AB12345'], ['AB12345'], ['12345'], ['AB12345']]);
+      ['AB12345'], ['AB12345'], ['AB12345'], ['AB12345'], ['12345'], ['AB12345'], ['AB12345'], ['AB12345'],
+      ['AB12345'], ['AB12345'], ['AB12345'], ['AB12345'], ['PX123456']]);
   });
 });
