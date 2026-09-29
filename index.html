@@ -11,6 +11,7 @@
     <link rel="stylesheet" href="css/sync-bar.css?v=3">
     <link rel="stylesheet" href="css/quick-task.css?v=2">
     <link rel="stylesheet" href="css/styles.css?v=23">
+    <link rel="stylesheet" href="css/home.css?v=1"><!-- Home tab (29 Sep 2026) -->
 </head>
 <body>
     <!-- Auth Screen -->
@@ -54,13 +55,15 @@
              ────────────────────────────────────────────────────────────────── -->
         <nav class="sidebar-nav" id="sidebarNav">
 
-            <div class="sidebar-section" data-section="leadership" data-tabs="overview,agents,cfv,os-strategy,growth-plan,kpi-library">
+            <div class="sidebar-section" data-section="leadership" data-tabs="home,overview,agents,cfv,os-strategy,growth-plan,kpi-library">
                 <div class="sidebar-section-header" role="button" tabindex="0" aria-expanded="true" onclick="toggleSidebarSection('leadership')" onkeydown="if(event.key==='Enter'||event.key===' ')toggleSidebarSection('leadership')">
                     <span class="sidebar-section-chevron">&#x25BE;</span>
                     <span class="sidebar-section-name">Leadership</span>
                     <span class="sidebar-section-dot unknown" data-section-dot="leadership"></span>
                 </div>
                 <div class="sidebar-section-body">
+                    <!-- Home tab (Kevin, 29 Sep 2026): one list of what needs Kevin today, the real Leadership Dashboard underneath. On trial beside the old screens; the Leadership Dashboard still opens first. -->
+                    <div class="sidebar-item" role="menuitem" tabindex="0" onclick="switchTab('home')" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();switchTab('home')}"><span class="sidebar-icon">&#x1F4CC;</span><span class="sidebar-label">Home</span></div><!-- no health dot on purpose: the Leadership section's dot rolls up its children, and Home's own warnings must not change it (review, 29 Sep 2026). Home's checks show in its own bar. -->
                     <div class="sidebar-item active" role="menuitem" tabindex="0" data-tab-group="dashboard" onclick="switchTab('overview')" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();switchTab('overview')}"><span class="sidebar-icon">&#x1F4CA;</span><span class="sidebar-label">Leadership Dashboard</span><span class="sidebar-health-dot unknown" data-sidebar-health="overview" title="No checks run yet"></span><span id="cfvSidebarBadges" style="margin-left:6px;display:flex;gap:4px"></span></div>
                     <!-- AI Agents (Leadership) — approvals, checks and the workforce register in one place (Kevin's ruling, 24 Aug 2026). The badge counts loop-raised tasks waiting for Kevin's approval: the shell polls the count itself (refreshAgentsBadge in shared.js) so it shows before the tab is ever opened, and the iframe's postMessage keeps it live while open. -->
                     <div class="sidebar-item" role="menuitem" tabindex="0" onclick="switchTab('agents')" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();switchTab('agents')}"><span class="sidebar-icon">&#x1F916;</span><span class="sidebar-label">AI Agents</span><span class="sidebar-health-dot unknown" data-sidebar-health="agents" title="No checks run yet"></span><span id="agentsApprovalBadge" title="Agent work waiting for your approval" style="display:none;margin-left:6px;background:var(--accent);color:var(--accent-on);font-size:var(--fs-xs);font-weight:var(--fw-semibold);border-radius:var(--radius-full);padding:1px 7px;"></span></div>
@@ -193,6 +196,24 @@
         <div class="accounts-subtab-bar" id="dashboardSubtabBar" style="display:none">
             <button class="accounts-subtab active" data-tab="overview" onclick="switchTab('overview')">Overview</button>
             <button class="accounts-subtab" data-tab="cfv" onclick="switchTab('cfv')">Cash Flow Voids</button>
+        </div>
+
+        <!-- Home tab (Kevin, 29 Sep 2026; brain Decisions/2026-09-29 Home screen is one list): one list of what
+             needs Kevin today (js/home.js, rules in js/home-list.js), then the real Leadership Dashboard panel below,
+             shown by body.home-mode in css/home.css. Nothing else in the shell changes. -->
+        <div class="tab-panel" id="tab-home">
+            <div data-sync-bar="home"></div>
+            <div class="home-header">
+                <h1>Home</h1>
+                <p><span id="homeDate"></span> · Everything that needs you today, then your Leadership Dashboard.</p>
+            </div>
+            <nav class="home-links" aria-label="One tap deeper">
+                <button type="button" class="home-link" data-home-tab="agents">Team: AI Agents</button>
+                <button type="button" class="home-link" data-home-tab="tasks">Board: Tasks</button>
+                <button type="button" class="home-link" data-home-tab="ai-brain">Memory: AI Brain</button>
+            </nav>
+            <div class="home-card"><div id="homeList"></div></div>
+            <h2 class="home-dash-divider">Your Leadership Dashboard</h2>
         </div>
 
         <!-- Tab 1: Leadership Dashboard -->
@@ -932,5 +953,7 @@
     <script defer src="js/skills.js?v=12"></script>
     <script defer src="js/ai-assistant.js?v=19"></script>
     <script defer src="js/quick-task.js?v=4"></script>
+    <script defer src="js/home-list.js?v=1"></script><!-- Home tab (29 Sep 2026) -->
+    <script defer src="js/home.js?v=1"></script>
 </body>
 </html>
