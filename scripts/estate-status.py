@@ -555,6 +555,39 @@ def needs_you_row(now, reports=DAILY_OPS_REPORTS):
                 if items else "Nothing needs Kevin today.")
 
 
+# ─── EVERYTHING BUILT (Kevin, 29 Sep 2026) ────────────────────────────
+# "Something that lists everything we've built that stays updated in real
+# time." scripts/built_inventory.py reads the real sources (LaunchAgents, the
+# job schedule, agent files, skills, workers, GitHub workflows); this row
+# carries the result to the AI Agents page's Track record tab. It lives HERE,
+# in a private table, never in the public repo: the descriptions name
+# creditors, tenants and legal work. A source under its floor turns the row
+# red with the reason, never a shorter list.
+BUILT_KEY = "built-inventory"
+BUILT_MODULE = os.path.join(HERE, "built_inventory.py")
+
+
+def built_row(now, module_path=BUILT_MODULE):
+    stamp = now.strftime("%Y-%m-%dT%H:%M:%S.000Z")
+    row = {"key": BUILT_KEY, "kind": "report", "label": "Everything built", "lastRun": stamp}
+    try:
+        spec = importlib.util.spec_from_file_location("built_inventory", module_path)
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        inv = mod.build(now)
+    except Exception as exc:  # noqa: BLE001 — the row must say WHY, whatever went wrong
+        return dict(row, status="Failed", payload=json.dumps({"error": str(exc)[:300]}),
+                    detail="Could not build the everything-built list: %s" % str(exc)[:300])
+    c = inv["counts"]
+    detail = ("%d Mac jobs, %d agent files, %d skills, %d workers, %d GitHub timers, %d scheduled tasks"
+              % (c["macJobs"], c["agentFiles"], c["skills"], c["workers"], c["githubTimers"], c["scheduledTasks"]))
+    gaps = sum(len(v) for v in inv["missing"].values())
+    if gaps:
+        detail += "; %d not yet on the hand-kept lists" % gaps
+    return dict(row, status="Worked", lastWorked=stamp, detail=detail,
+                payload=json.dumps(inv, separators=(",", ":")))
+
+
 # ─── THE BLOCKER LOOP ROW (Kevin, 25 Sep 2026) ────────────────────────
 # Every task an agent could not finish, by who can clear it. Written from the
 # blocker sweep the half-hourly hand-back poll runs (agent-dispatch.py
@@ -954,6 +987,7 @@ def build_rows(now, with_loop_health=True):
     rows.append(needs_you_row(now))
     rows.append(robot_signins_row(now))
     rows.append(blockers_row(now))
+    rows.append(built_row(now))
     if with_loop_health:
         rows.append(loop_health_row(now))
     return rows

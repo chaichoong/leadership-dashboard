@@ -427,6 +427,7 @@ a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}
         <button class="page-tab" id="ptab-approvals" role="tab" aria-selected="false" onclick="switchAgentsView('approvals')">Approvals <span class="page-tab-badge" id="approvalsTabBadge" style="display:none">0</span></button>
         <button class="page-tab" id="ptab-checks" role="tab" aria-selected="false" onclick="switchAgentsView('checks')">Check these <span class="page-tab-badge" id="checksTabBadge" style="display:none">0</span></button>
         <button class="page-tab" id="ptab-estate" role="tab" aria-selected="false" onclick="switchAgentsView('estate')">Estate status <span class="page-tab-badge" id="estateTabBadge" style="display:none">0</span></button>
+        <button class="page-tab" id="ptab-built" role="tab" aria-selected="false" onclick="switchAgentsView('built')">Track record</button>
     </div>
 
     <!-- Dashboard = the CEO brief plus one scorecard per agent (Kevin's
@@ -529,6 +530,29 @@ a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}
             <div id="estateContentBody"><div class="zone-loading"><div class="sop-spinner"></div><span>Reading the content table…</span></div></div>
         </div>
     </div>
+    <!-- Track record (Kevin, 29 Sep 2026): "something that lists everything we've
+         built that stays updated in real time". The log is read live from GitHub;
+         the running list is the built-inventory row scripts/estate-status.py
+         writes every ten minutes from the real files (scripts/built_inventory.py). -->
+    <div class="page-view" id="view-built">
+        <div id="builtSummary" aria-live="polite" style="font-size:var(--fs-sm);color:var(--text-secondary);margin-bottom:12px"></div>
+        <div class="zone" id="zoneBuiltLog">
+            <div class="zone-header">
+                <span class="zone-title">Recently built</span>
+                <span class="zone-count" id="builtLogCount">…</span>
+                <span class="zone-sub">Every change that shipped, newest first, read live from GitHub.</span>
+            </div>
+            <div id="builtLogBody"><div class="zone-loading"><div class="sop-spinner"></div><span>Reading what shipped…</span></div></div>
+        </div>
+        <div class="zone" id="zoneBuiltRunning" style="margin-top:16px">
+            <div class="zone-header">
+                <span class="zone-title">Everything running</span>
+                <span class="zone-count" id="builtRunningCount">…</span>
+                <span class="zone-sub" id="builtRunningSub">Read from the files that run it, every ten minutes. Nobody keeps this list by hand.</span>
+            </div>
+            <div id="builtRunningBody"><div class="zone-loading"><div class="sop-spinner"></div><span>Reading the estate…</span></div></div>
+        </div>
+    </div>
 </div>
 
 <div class="loading" id="loader">Loading...</div>
@@ -541,7 +565,7 @@ a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}
 <!-- Shared accuracy scoring (per agent PER TASK TYPE) — same maths as the
      Leadership Dashboard card. Pure IIFE, safe to load here. -->
 <script src="../../js/agent-accuracy.js?v=4"></script>
-<script src="../../js/automations-data.js?v=8"></script>
+<script src="../../js/automations-data.js?v=9"></script>
 <script src="../../js/mcp-tools-data.js?v=1"></script>
 <script src="../../js/sync-bar.js?v=6"></script>
 <script>
@@ -760,11 +784,11 @@ function stageNaAllowed(def, human){ return !!def.naAllowed[human ? 'human' : 'a
 // State
 // ═══════════════════════════════════════════════════════════════════════
 let PAT = '';
-const AGENT_VIEWS = ['dashboard','approvals','checks','estate'];
+const AGENT_VIEWS = ['dashboard','approvals','checks','estate','built'];
 // The CEO Brief lived as its own tab for a day (25 Aug 2026); it now sits on
 // the Dashboard. Old links, the shell's #ceo-brief forwarder and muscle
 // memory still say 'ceo-brief' — map them home rather than 404 the view.
-const AGENT_VIEW_ALIASES = { 'ceo-brief': 'dashboard', 'status': 'estate', 'jobs': 'estate' };
+const AGENT_VIEW_ALIASES = { 'ceo-brief': 'dashboard', 'status': 'estate', 'jobs': 'estate', 'track-record': 'built' };
 let _agentsView = 'dashboard';  // which page tab is showing
 let allApprovals = [];          // loop-raised tasks at Status Approval
 let _approvalsState = 'idle';   // idle | loading | ready | 'error: <message>'
@@ -873,6 +897,7 @@ function switchAgentsView(view){
     if(view==='approvals' && _approvalsState==='ready') renderApprovals();
     if(view==='checks') loadChecksAndRender();
     if(view==='estate') loadEstateStatus();
+    if(view==='built') loadBuilt();
     window.scrollTo(0,0);
 }
 window.switchAgentsView = switchAgentsView;
@@ -6846,6 +6871,231 @@ async function loadEstateContent(){
     }).join('')}</tbody></table></div>`;
 }
 
+// ── Track record (Kevin, 29 Sep 2026) ─────────────────────────────────
+// "Something that lists everything we've built that stays updated in real
+// time." Two halves, both read, neither kept by hand:
+//   Recently built      merged pull requests, live from GitHub's public API
+//                       (the repo is public, so no key; 60 reads an hour per
+//                       address, hence the five-minute sessionStorage cache)
+//   Everything running  the built-inventory row of the Estate Status table,
+//                       which scripts/estate-status.py rewrites every ten
+//                       minutes from the real files (scripts/built_inventory.py)
+// plus the register agents this page already loads. A read that fails says so
+// in red; it never renders as an empty, reassuring list.
+const BUILT_KEY = 'built-inventory';
+const BUILT_REPO = 'chaichoong/leadership-dashboard';
+const BUILT_LOG_CACHE = 'agents_builtLog_v1';
+const BUILT_LOG_TTL_MS = 5 * 60 * 1000;
+const BUILT_LOG_SHOW = 50;
+const BUILT_ACTIVE = ['on', 'live', 'timer', 'global', 'project', 'inside daily-ops', 'built'];
+const BUILT_DIM = ['off', 'parked', 'retired', 'paused', 'reference'];
+const BUILT_STATE_STYLE = {
+    on: ['var(--success-bg)','var(--success)'], live: ['var(--success-bg)','var(--success)'],
+    timer: ['var(--success-bg)','var(--success)'], global: ['var(--info-bg)','var(--info)'],
+    project: ['var(--info-bg)','var(--info)'], 'inside daily-ops': ['var(--info-bg)','var(--info)'],
+    built: ['var(--info-bg)','var(--info)'],
+    'on push': ['var(--bg-subtle)','var(--text-secondary)'], reference: ['var(--bg-subtle)','var(--text-secondary)'],
+};
+let _builtLog = null, _builtLogState = 'idle';
+
+function builtInventoryRow(){ return _estateRows.find(r => gf(r, ES.key) === BUILT_KEY) || null; }
+function builtInventory(row){
+    try { return row ? JSON.parse(gf(row, ES.payload) || 'null') : null; }
+    catch(e){ return null; } // an unreadable payload is reported by the caller, never shown as empty
+}
+
+async function loadBuilt(force){
+    if(_estateState !== 'ready' || force) await loadEstateStatus();
+    renderBuiltRunning();
+    await loadBuiltLog(force);
+}
+window.loadBuilt = loadBuilt;
+
+function readBuiltCache(){
+    try {
+        const c = JSON.parse(sessionStorage.getItem(BUILT_LOG_CACHE) || 'null');
+        return c && Array.isArray(c.log) && Date.now() - c.savedAt < BUILT_LOG_TTL_MS ? c.log : null;
+    } catch(e){ return null; } // an unreadable cache is a miss: the next read replaces it
+}
+function writeBuiltCache(log){
+    try { sessionStorage.setItem(BUILT_LOG_CACHE, JSON.stringify({ savedAt: Date.now(), log })); }
+    catch(e){ console.warn('Track record: could not cache the GitHub log', e); }
+}
+
+async function loadBuiltLog(force){
+    const cached = force ? null : readBuiltCache();
+    if(cached){ _builtLog = cached; _builtLogState = 'ready'; renderBuiltLog(); return; }
+    _builtLogState = 'loading';
+    renderBuiltLog();
+    try {
+        const res = await fetch(`https://api.github.com/repos/${BUILT_REPO}/pulls?state=closed&sort=updated&direction=desc&per_page=100`,
+            { headers: { Accept: 'application/vnd.github+json' } });
+        if(res.status === 403 || res.status === 429) throw new Error('GitHub refused the read: its limit of 60 reads an hour from this address is used up. It resets within the hour');
+        if(!res.ok) throw new Error('GitHub answered ' + res.status);
+        const prs = await res.json();
+        if(!Array.isArray(prs)) throw new Error('GitHub sent something that is not a list');
+        const merged = prs.filter(p => p && p.merged_at)
+            .sort((a,b) => String(b.merged_at).localeCompare(String(a.merged_at)))
+            .map(p => ({ n: p.number, t: p.title || '', at: p.merged_at, url: p.html_url }));
+        // CONTROL: this repo merges most days. A hundred closed pull requests with
+        // none merged means the read is wrong, not a quiet fortnight.
+        if(!merged.length) throw new Error('GitHub returned no merged changes at all, so the read is wrong, not a quiet week');
+        _builtLog = merged;
+        _builtLogState = 'ready';
+        writeBuiltCache(merged);
+    } catch(e){
+        _builtLogState = 'error: ' + (e.message || e);
+    }
+    renderBuiltLog();
+}
+window.loadBuiltLog = loadBuiltLog;
+
+function builtDayLabel(iso){
+    const d = new Date(iso);
+    const key = x => x.toLocaleDateString('en-GB', { timeZone: 'Europe/London' });
+    if(key(d) === key(new Date())) return 'Today';
+    if(key(d) === key(new Date(Date.now() - 864e5))) return 'Yesterday';
+    return d.toLocaleDateString('en-GB', { timeZone: 'Europe/London', weekday: 'short', day: 'numeric', month: 'short' });
+}
+function builtWeekCount(){
+    if(!_builtLog) return null;
+    const since = Date.now() - 7 * 864e5;
+    return _builtLog.filter(p => new Date(p.at).getTime() >= since).length;
+}
+
+function renderBuiltLog(){
+    const body = document.getElementById('builtLogBody'), count = document.getElementById('builtLogCount');
+    if(!body) return;
+    if(_builtLogState === 'loading' || _builtLogState === 'idle'){
+        body.innerHTML = '<div class="zone-loading"><div class="sop-spinner"></div><span>Reading what shipped…</span></div>';
+        return;
+    }
+    if(String(_builtLogState).indexOf('error') === 0){
+        if(count) count.textContent = '?';
+        body.innerHTML = `<div class="zone-error">Could not read the build log from GitHub (${esc(String(_builtLogState).slice(7))}). This list is NOT empty — it could not be read. <button class="btn-sm" onclick="loadBuiltLog(true)">Try again</button></div>`;
+        renderBuiltSummary();
+        return;
+    }
+    const shown = _builtLog.slice(0, BUILT_LOG_SHOW);
+    if(count) count.textContent = shown.length;
+    let day = '', html = '';
+    shown.forEach(p => {
+        const label = builtDayLabel(p.at);
+        if(label !== day){
+            day = label;
+            html += `<div style="font-size:var(--fs-xs);font-weight:var(--fw-semibold);color:var(--text-muted);text-transform:uppercase;letter-spacing:.04em;margin:12px 0 4px">${esc(label)}</div>`;
+        }
+        const time = new Date(p.at).toLocaleTimeString('en-GB', { timeZone: 'Europe/London', hour: '2-digit', minute: '2-digit' });
+        // Only a github.com link is ever rendered: esc() alone would pass a javascript: URL.
+        const url = /^https:\/\/github\.com\//.test(String(p.url || '')) ? p.url : '';
+        html += `<div class="built-log-row" style="display:flex;gap:10px;align-items:baseline;padding:4px 0;border-bottom:1px solid var(--border-subtle)">
+            <span style="font-size:var(--fs-xs);color:var(--text-muted);min-width:42px">${esc(time)}</span>
+            <span style="flex:1;font-size:var(--fs-sm);color:var(--text-primary)">${esc(p.t)}</span>
+            ${url ? `<a href="${esc(url)}" target="_blank" rel="noopener" style="font-size:var(--fs-xs);color:var(--accent);white-space:nowrap">#${esc(String(p.n))}</a>` : ''}
+        </div>`;
+    });
+    body.innerHTML = html;
+    renderBuiltSummary();
+}
+
+function builtStateChip(s){
+    const st = BUILT_STATE_STYLE[s] || ['var(--bg-subtle)','var(--text-muted)'];
+    return `<span class="agent-pill" style="background:${st[0]};color:${st[1]}">${esc(s || '–')}</span>`;
+}
+function builtGroupHtml(id, title, items, note){
+    const active = items.filter(i => BUILT_ACTIVE.includes(i.s)).length;
+    const rows = items.map(i => `<tr${BUILT_DIM.includes(i.s) ? ' style="opacity:.62"' : ''}>
+            <td style="font-weight:var(--fw-medium);white-space:nowrap">${esc(i.n || i.k)}</td>
+            <td style="white-space:nowrap;color:var(--text-secondary)">${esc(i.w || i.via || '')}</td>
+            <td>${builtStateChip(i.s)}</td>
+            <td style="color:var(--text-secondary);line-height:1.5">${esc(i.d || '')}</td>
+            <td style="white-space:nowrap;color:var(--text-muted);font-size:var(--fs-xs)">${esc(i.m || '')}</td>
+        </tr>`).join('');
+    return `<details class="built-group" data-built-group="${esc(id)}" style="border:1px solid var(--border-subtle);border-radius:var(--radius-md);margin-bottom:8px;background:var(--bg-surface)">
+        <summary style="cursor:pointer;padding:10px 12px;font-size:var(--fs-sm);font-weight:var(--fw-semibold);color:var(--text-primary)">${esc(title)} <span style="color:var(--text-muted);font-weight:var(--fw-regular)">(${active} active${items.length > active ? ', ' + (items.length - active) + ' off or retired' : ''})</span></summary>
+        <div style="padding:0 12px 12px">
+            ${note ? `<div style="font-size:var(--fs-xs);color:var(--text-muted);margin-bottom:6px">${esc(note)}</div>` : ''}
+            <div style="overflow-x:auto"><table class="wf-grid"><thead><tr>
+                <th style="width:200px">Name</th><th style="width:140px">When</th><th style="width:90px">State</th><th>What it does</th><th style="width:90px">Changed</th>
+            </tr></thead><tbody>${rows}</tbody></table></div>
+        </div>
+    </details>`;
+}
+
+function builtRegisterItems(){
+    if(_agentsRegisterState !== 'ready') return null;
+    return allAgents.map(a => ({ n: gf(a, AG.name) || '', s: String(gf(a, AG.status) || '').toLowerCase(),
+        d: gf(a, AG.whatItDoes) || gf(a, AG.goal) || '' }))
+        .sort((a,b) => String(a.n).localeCompare(String(b.n)));
+}
+
+function renderBuiltRunning(){
+    const body = document.getElementById('builtRunningBody'), count = document.getElementById('builtRunningCount');
+    if(!body) return;
+    if(String(_estateState).indexOf('error') === 0){
+        body.innerHTML = `<div class="zone-error">Could not read the Estate Status table (${esc(String(_estateState).slice(7))}). This list is NOT empty — it could not be read.</div>`;
+        if(count) count.textContent = '?';
+        return;
+    }
+    if(_estateState !== 'ready') return;
+    const row = builtInventoryRow();
+    const inv = builtInventory(row);
+    if(!row || gf(row, ES.status) === 'Failed' || !inv || !Array.isArray(inv.groups)){
+        body.innerHTML = !row
+            ? '<div class="zone-error">No everything-built list yet. The estate-status job writes it every ten minutes. If this stays, that job has stopped or is running older code.</div>'
+            : `<div class="zone-error">The everything-built list could not be built: ${esc(gf(row, ES.detail) || 'its saved copy is unreadable')}. This list is NOT empty — the last build failed.</div>`;
+        if(count) count.textContent = '?';
+        renderBuiltSummary();
+        return;
+    }
+    const updated = gf(row, ES.updated);
+    const ageMin = updated ? Math.round((Date.now() - new Date(updated).getTime()) / 60000) : null;
+    const stale = ageMin === null || ageMin > ESTATE_STALE_MIN
+        ? `<div class="zone-error" style="margin-bottom:10px">This list was last rebuilt ${esc(estateAgo(updated))}. The estate-status job that rebuilds it every ten minutes has stopped, so it may be out of date.</div>` : '';
+    const reg = builtRegisterItems();
+    if(count) count.textContent = inv.groups.reduce((n, g) => n + g.items.length, 0) + (reg ? reg.length : 0);
+    const sub = document.getElementById('builtRunningSub');
+    if(sub) sub.textContent = `Read from the files that run it, every ten minutes (last ${estateAgo(updated)}). Nobody keeps this list by hand.`;
+    const gaps = inv.missing || {};
+    const gapLines = [['automations list', gaps.automations], ['workers list', gaps.workers], ['Skills Library', gaps.skills]]
+        .filter(g => Array.isArray(g[1]) && g[1].length);
+    const gapCount = gapLines.reduce((n, g) => n + g[1].length, 0);
+    // Keep open sections open across the ten-minute refresh.
+    const open = new Set([...body.querySelectorAll('details.built-group[open]')].map(d => d.dataset.builtGroup));
+    body.innerHTML = stale
+        + (reg ? builtGroupHtml('register', 'AI agents in the register', reg, 'The agents with a register row, read live. Their scorecards are on the Dashboard tab.')
+               : '<div class="zone-loading" style="margin-bottom:8px"><span>Reading the agents register…</span></div>')
+        + inv.groups.map(g => builtGroupHtml(g.id, g.title, g.items || [],
+            g.id === 'scheduled-tasks' ? 'The written instructions the Claude slots run. "Inside daily-ops" means it runs as one step of the 07:00 routine.' : '')).join('')
+        + (gapLines.length ? `<div id="builtGaps" style="margin-top:12px;padding:10px 12px;border:1px solid var(--warning);border-radius:var(--radius-md);background:var(--warning-bg)">
+            <div style="font-size:var(--fs-sm);font-weight:var(--fw-semibold);color:var(--text-primary);margin-bottom:4px">Running, but not yet on the hand-kept lists (${gapCount})</div>
+            <div style="font-size:var(--fs-xs);color:var(--text-secondary);margin-bottom:6px">Those lists can be retired once this stays empty: this tab already shows everything they list.</div>
+            ${gapLines.map(g => `<div style="font-size:var(--fs-xs);color:var(--text-secondary);line-height:1.7"><strong>${esc(g[0])}:</strong> ${g[1].map(x => esc(x)).join(' &middot; ')}</div>`).join('')}
+        </div>` : '')
+        + (inv.trimmed != null ? '<div style="font-size:var(--fs-xs);color:var(--text-muted);margin-top:8px">Descriptions shortened to fit: the list is large.</div>' : '');
+    body.querySelectorAll('details.built-group').forEach(d => { if(open.has(d.dataset.builtGroup)) d.open = true; });
+    renderBuiltSummary();
+}
+
+function renderBuiltSummary(){
+    const el = document.getElementById('builtSummary');
+    if(!el) return;
+    const inv = _estateState === 'ready' ? builtInventory(builtInventoryRow()) : null;
+    const c = inv && inv.counts;
+    const parts = [];
+    const pl = (n, one, many) => { n = Number(n) || 0; return `${n} ${n === 1 ? one : many}`; };
+    if(c){
+        parts.push(pl(c.macJobs, 'Mac job', 'Mac jobs'), pl(c.agentFiles, 'agent file', 'agent files'));
+        const reg = builtRegisterItems();
+        if(reg) parts.push(pl(reg.length, 'register agent', 'register agents'));
+        parts.push(pl(c.skills, 'skill', 'skills'), pl(c.workers, 'worker', 'workers'),
+            pl(c.githubTimers, 'GitHub timer', 'GitHub timers'), pl(c.scheduledTasks, 'scheduled task', 'scheduled tasks'));
+    }
+    const week = builtWeekCount();
+    if(week !== null) parts.push(`<strong>${pl(week, 'change', 'changes')} shipped in the last 7 days</strong>`);
+    el.innerHTML = parts.join(' &middot; ');
+}
+
 // ═══════════════════════════════════════════════════════════════════════
 // Sync bar + health checks — same conventions as the other iframe pages
 // (registerSyncBar / markTabSynced in js/sync-bar.js; the bar broadcasts its
@@ -6870,6 +7120,19 @@ function registerAgentsSyncBar(){
             },
             {
                 name: 'Robot sign-ins listed', kind: 'automation', run: () => signinsHealth()
+            },
+            {
+                name: 'Track record list fresh', kind: 'automation', run: () => {
+                    if(String(_estateState).indexOf('error') === 0) return { status:'fail', detail:String(_estateState).slice(7) };
+                    if(_estateState !== 'ready') return { status:'warn', detail:'Estate status not loaded yet' };
+                    const row = builtInventoryRow();
+                    if(!row) return { status:'fail', detail:'No built-inventory row: the estate-status job has not written the everything-built list' };
+                    if(gf(row, ES.status) === 'Failed') return { status:'fail', detail:String(gf(row, ES.detail) || 'the last build failed') };
+                    const updated = gf(row, ES.updated);
+                    const ageMin = updated ? Math.round((Date.now() - new Date(updated).getTime())/60000) : null;
+                    if(ageMin === null || ageMin > ESTATE_STALE_MIN) return { status:'fail', detail:`Everything-built list last rebuilt ${estateAgo(updated)}` };
+                    return { status:'pass', detail:String(gf(row, ES.detail) || '') };
+                }
             },
             {
                 name: 'Approvals queue read', kind: 'sync', run: () => {
@@ -7123,6 +7386,7 @@ async function loadEverything(){
 }
 
 function renderAllZones(){
+    renderBuiltRunning();
     renderApprovals();
     loadChecksAndRender();
     renderRegister();
