@@ -1587,6 +1587,17 @@ def od_picture_problem(task_name, output):
     if not name.startswith("CONTENT (OD):") or "Newsletter:" in name: return ""
     text = str(output or "")
     if text.lstrip().upper().startswith("THIN SLOT"): return ""
+    # A CLOSE PROPOSAL is ABOUT the card, not the post on it, so demanding the
+    # post's picture is asking for a picture that is the reason the card is being
+    # closed. recZdwbWGIFjMEyG6 (a stale OD post) made task-manager retry the same
+    # refused submit in its 13:00 and 17:00 slots for six days running — two of the
+    # three board passes a day ended VERIFY FAIL and the card never left the board
+    # (findings 20260917-task-manager-board-541, 20260918-task-manager-board-547,
+    # 20260919-task-manager-board-553/554, 20260920-daily-ops-556).
+    # Kevin approves removing a dead card; he is not being shown a post. The alert
+    # lane below this already carries exactly the same exemption for exactly the
+    # same reason, and this gate was written without it.
+    if text.lstrip().upper().startswith("CLOSE PROPOSAL:"): return ""
     if re.search(r"https://assets\.cdn\.filesafe\.space/\S+\.(png|jpg|jpeg)", text, re.I): return ""
     return ("an Operations Director post card must carry its picture as a permanent link (assets.cdn.filesafe.space ...png) so Kevin can open "
             "it; re-run the lane's `cards` step rather than re-submitting the text alone")
