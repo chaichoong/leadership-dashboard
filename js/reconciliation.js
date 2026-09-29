@@ -1787,7 +1787,18 @@
         }
         try { if (localStorage.getItem(AGENT_SCORE_WRITTEN_KEY) === reading) return; } catch {}
         try {
-            const resp = await fetch(`https://api.airtable.com/v0/${BASE_ID}/${TABLES.aiAgents}/${AGENT_RECON.recordId}`, {
+            const rowUrl = `https://api.airtable.com/v0/${BASE_ID}/${TABLES.aiAgents}/${AGENT_RECON.recordId}`;
+            // The marker above lives in this browser only, so a fresh one (a new device,
+            // the weekly walk) cannot tell a changed reading from one already on the
+            // register. Read the row first and skip a write that would change nothing.
+            const cur = await fetch(`${rowUrl}?returnFieldsByFieldId=true`, {
+                headers: { 'Authorization': 'Bearer ' + PAT },
+            });
+            if (cur.ok && (((await cur.json()).fields || {})[AGENT_RECON.metricScore]) === reading) {
+                try { localStorage.setItem(AGENT_SCORE_WRITTEN_KEY, reading); } catch {}
+                return;
+            }
+            const resp = await fetch(rowUrl, {
                 method: 'PATCH',
                 headers: { 'Authorization': 'Bearer ' + PAT, 'Content-Type': 'application/json' },
                 body: JSON.stringify({ fields: { [AGENT_RECON.metricScore]: reading } }),
