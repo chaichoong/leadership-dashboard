@@ -132,7 +132,15 @@ module.exports = defineConfig({
     // load fires ~20 file requests; with parallel workers all hitting one serialized server
     // those requests queued, page loads stalled, network never settled, and teardown timed out.
     // Threading lets the server answer concurrent workers in parallel.
-    command: `python3 -c "from http.server import ThreadingHTTPServer, SimpleHTTPRequestHandler; ThreadingHTTPServer(('', ${PORT}), SimpleHTTPRequestHandler).serve_forever()"`,
+    //
+    // request_queue_size=128: socketserver's default listen backlog is 5, and macOS RESETS
+    // a connection that arrives while the backlog is full. Measured 29 Sep 2026: 24
+    // simultaneous requests (4 browsers x 6 connections) lost 13-16 to "Connection reset
+    // by peer" at the default and 0 at 128. A reset script tag surfaced as "switchTab /
+    // loadDashboard is not defined" in a different test every full run, worst when a busy
+    // machine slowed the accept loop. 128 is macOS's kern.ipc.somaxconn ceiling.
+    // Guarded by tests/playwright-webserver-backlog.test.js.
+    command: `python3 -c "from http.server import ThreadingHTTPServer, SimpleHTTPRequestHandler; ThreadingHTTPServer.request_queue_size = 128; ThreadingHTTPServer(('', ${PORT}), SimpleHTTPRequestHandler).serve_forever()"`,
     port: PORT,
     // false → Playwright always launches a fresh server bound to THIS repo. If the port is
     // occupied it fails loudly rather than testing whatever else is serving on it.
