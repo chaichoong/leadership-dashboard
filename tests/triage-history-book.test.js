@@ -27,7 +27,7 @@ import { fileURLToPath } from 'node:url';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const TRIAGE = path.join(root, 'scripts/inbound-triage.py');
-const runner = readFileSync(path.join(root, 'scripts/inbound-triage-run.sh'), 'utf8');
+const runner = readFileSync(process.env.TRIAGE_RUNNER || path.join(root, 'scripts/inbound-triage-run.sh'), 'utf8');
 const skill = readFileSync(
   path.join(root, '.claude/scheduled-tasks/inbound-email-triage/SKILL.md'), 'utf8');
 
@@ -137,6 +137,27 @@ describe('the runner and skill carry the pre-reads and their fallbacks', () => {
     expect(runner).toMatch(/history-build/);
     expect(runner).toMatch(/history-dump[\s\S]{0,80}history-book\.json/);
     expect(runner).toMatch(/matters[\s\S]{0,80}open-matters\.json/);
+  });
+
+  // 29 Sep 2026: run BEFORE the agent, the weekly rebuild spent the slot's
+  // Gmail quota, the agent's scan hit the rate limit and was backgrounded, and
+  // the headless session exited first. Slots on 26-29 Sep decided no mail.
+  // The mail comes first; the rebuild follows the agent. Back-test:
+  // TRIAGE_RUNNER=<the pre-fix runner> fails this test.
+  it('the weekly rebuild runs after the agent scans the mail, never before it', () => {
+    const agent = runner.indexOf('"$CLAUDE" -p');
+    const build = runner.search(/inbound-triage\.py" history-build/);
+    const stale = runner.search(/inbound-triage\.py" history-stale/);
+    expect(agent).toBeGreaterThan(0);
+    expect(build).toBeGreaterThan(agent);
+    expect(stale).toBeGreaterThan(agent);
+    // The dump the agent reads still comes first.
+    expect(runner.search(/inbound-triage\.py" history-dump/)).toBeLessThan(agent);
+  });
+
+  it('the skill runs the scan in the foreground, never in the background', () => {
+    expect(skill).toMatch(/scan in the FOREGROUND with a 600000 ms timeout/);
+    expect(skill).toMatch(/Never send it to the background/);
   });
 
   it('the runner prompt names both files with the UNCHECKED fallback', () => {
