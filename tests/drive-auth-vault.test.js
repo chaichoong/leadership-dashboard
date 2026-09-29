@@ -532,6 +532,45 @@ describe('drive-auth counts Drive sync twins in the live brain vault', () => {
     }
   });
 
+  it('BACK-TEST: a note ending in a year beside its namesake is not a twin', () => {
+    // macOS numbers copies from 2; "Tax return 2026.md" is a note, not copy 2026.
+    const [verdict, , twins] = twinsIn(vault(['Knowledge/Tax return.md', 'Knowledge/Tax return 2026.md',
+      'Knowledge/Top.md', 'Knowledge/Top 100.md']));
+    expect(verdict).toBe('HEALTHY');
+    expect(twins).toEqual([]);
+  });
+
+  it('a duplicated FOLDER beside its original is named once, not walked', () => {
+    // The readers skip twin files only, so a "Knowledge 2/" must reach a person.
+    const [verdict, reason, twins] = twinsIn(vault(['Knowledge/Note.md', 'Knowledge 2/Note.md',
+      'Knowledge 2/Other.md', 'Meetings 2024/Call.md']));
+    expect(verdict).toBe('BROKEN');
+    expect(twins).toEqual(['Knowledge 2/']);
+    expect(reason).toMatch(/^1 Google Drive sync twin/);
+  });
+
+  it('prunes Archive/ when the vault arrives as a Path, not a string', () => {
+    const root = vault(CLEAN);
+    const r = withModule(`
+import pathlib
+print(json.dumps(m.brain_vault.find_twins(pathlib.Path(${JSON.stringify(root)}))[:2]))`);
+    expect(r).toEqual([[], 3]);
+  });
+
+  it('a walk that stalls is UNKNOWN within its time limit, never a hang or a clean 0', () => {
+    const r = withModule(`
+import time
+m.TWINS_WALK_SECONDS = 0.2
+m.brain_vault.find_twins = lambda v: time.sleep(5)
+t0 = time.time()
+v, reason, twins = m.check_twins()
+print(json.dumps([v, reason, twins, time.time() - t0 < 3]))`);
+    expect(r[0]).toBe('UNKNOWN');
+    expect(r[1]).toMatch(/did not finish within 0\.2 s/);
+    expect(r[2]).toBeNull();
+    expect(r[3]).toBe(true);
+  });
+
   it('twins are not judged on an unreadable mount, so the vault outage leads', () => {
     const r = verdictFor({ api: 'HEALTHY', vaultOk: false, twins: 'BROKEN' });
     expect(r.twins_verdict).toBe('UNKNOWN');

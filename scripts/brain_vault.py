@@ -7,10 +7,12 @@ Archive/2026-09-29 sync duplicates/ (MOVED.txt there lists them). Every reader
 that globbed the vault would otherwise have indexed them as notes, counted a
 twin in Decisions/ as a second ruling, and indexed the Archive copies as well.
 
-A TWIN is a file "<stem> <N>.md" (N = digits) whose sibling "<stem>.md" exists
-in the same folder. The name alone is not enough: real notes end in a digit,
-e.g. "Decisions/2026-08-24 No caps on agent work, and the triage lane runs at
-9, 1 and 5.md", which has no "... at 9, 1 and.md" beside it.
+A TWIN is a file "<stem> <N>.md" whose sibling "<stem>.md" exists in the same
+folder, N being 2 to 99: macOS numbers copies from 2, and a longer ending is a
+year or a quantity ("Tax return 2026.md" beside "Tax return.md" is a note). The
+name alone is not enough: real notes end in a digit, e.g. "Decisions/2026-08-24
+No caps on agent work, and the triage lane runs at 9, 1 and 5.md", which has no
+"... at 9, 1 and.md" beside it.
 
 ARCHIVE is the vault's top-level Archive/ folder: the record of what was moved
 out of the live vault, never live knowledge.
@@ -23,7 +25,9 @@ import os
 import re
 
 ARCHIVE = "Archive"
-_TWIN = re.compile(r"^(?P<stem>.+) (?P<n>\d+)\.md$")
+_N = r"(?:[2-9]|[1-9][0-9])"
+_TWIN = re.compile(r"^(?P<stem>.+) " + _N + r"\.md$")
+_TWIN_DIR = re.compile(r"^(?P<stem>.+) " + _N + r"$")
 
 
 def twin_original(path):
@@ -52,11 +56,21 @@ def find_twins(vault):
     os.walk drops a listing error silently unless it is handed onerror, and a
     folder it could not list is one it could not check, so the errors come back
     to the caller rather than reading as "no twins there".
+
+    The alarm also names a twin FOLDER ("Knowledge 2/" beside "Knowledge/",
+    reported with a trailing separator) and does not walk into it: the readers
+    skip twin files only, so a duplicated folder must be seen by a person.
     """
+    vault = os.fspath(vault)
     twins, errors, scanned = [], [], 0
     for root, dirs, files in os.walk(vault, onerror=errors.append):
         if root == vault:
             dirs[:] = [d for d in dirs if d != ARCHIVE]
+        for d in list(dirs):
+            m = _TWIN_DIR.match(d)
+            if m and os.path.isdir(os.path.join(root, m.group("stem"))):
+                twins.append(os.path.relpath(os.path.join(root, d), vault) + os.sep)
+                dirs.remove(d)
         for f in files:
             if not f.endswith(".md"):
                 continue

@@ -29,10 +29,12 @@ const BOX = mkdtempSync(join(tmpdir(), 'brain-twins-'));
 afterAll(() => rmSync(BOX, { recursive: true, force: true }));
 let n = 0;
 
-// Real notes, including one whose name ends in a number with no sibling.
+// Real notes, including one whose name ends in a number with no sibling, and one
+// ending in a year beside its namesake (macOS numbers copies 2 to 99, never 2026).
 const LEGIT = 'Decisions/2026-08-24 No caps on agent work, and the triage lane runs at 9, 1 and 5.md';
+const YEAR = 'People/Sam Example 2026.md';
 const NOTES = ['Decisions/2026-09-20 Rule.md', LEGIT, 'Knowledge/Note.md', 'People/Sam Example.md',
-  'founder-profile.md', 'identity/voice.md'];
+  YEAR, 'founder-profile.md', 'identity/voice.md'];
 // Drive sync twins beside their originals, and copies already moved to Archive/.
 const TWINS = ['Decisions/2026-09-20 Rule 2.md', 'Knowledge/Note 2.md', 'founder-profile 2.md',
   'identity/voice 2.md'];
@@ -95,6 +97,7 @@ describe('the brain publisher reads live notes only', () => {
       'Decisions/2026-09-20 Rule',
       'Knowledge/Note',
       'People/Sam Example',
+      'People/Sam Example 2026',
       'identity/voice',
     ]);
   });
@@ -123,6 +126,9 @@ describe('the brain publisher reads live notes only', () => {
     const r = readers(vault());
     expect(r.index).toContain('Decisions/2026-08-24 No caps on agent work, and the triage lane runs at 9, 1 and 5');
     expect(r.notes).toContain(LEGIT);
+    // A year ending is not a copy number, even beside a note of the same stem.
+    expect(r.index).toContain('People/Sam Example 2026');
+    expect(r.notes).toContain(YEAR);
   });
 
   it('fails closed: stops at load when the shared rule cannot be found', () => {

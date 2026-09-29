@@ -400,14 +400,39 @@ def check_fresh():
 #
 # CONTROL: a walk that could not list a folder, or saw no notes at all, is
 # UNKNOWN, never HEALTHY. A count of 0 off a walk that saw nothing proves nothing.
+#
+# The walk lists every vault folder with Drive's download policy on, and a Drive
+# that stalls after the mount probe passed would hold it for ever. So, like
+# job-queue's probe, it runs on a daemon thread, and a walk that has not
+# finished in TWINS_WALK_SECONDS is UNKNOWN. On 29 Sep it took under a second.
 TWINS_NAMED = 10
+TWINS_WALK_SECONDS = float(os.environ.get('DRIVE_TWINS_WALK_SECONDS', '300'))
+
+
+def _find_twins_timed():
+    import threading
+    box = {}
+
+    def walk():
+        try:
+            box['result'] = brain_vault.find_twins(VAULT)
+        except BaseException as e:  # handed back to the caller below, never lost
+            box['error'] = e
+    t = threading.Thread(target=walk, daemon=True)
+    t.start()
+    t.join(TWINS_WALK_SECONDS)
+    if t.is_alive():
+        raise TimeoutError(f'the vault walk did not finish within {TWINS_WALK_SECONDS:g} s')
+    if 'error' in box:
+        raise box['error']
+    return box['result']
 
 
 def check_twins():
     """Count Drive sync twins in the live vault. Returns (verdict, reason, twins),
     twins being None when the count is unproved."""
     try:
-        twins, scanned, errors = brain_vault.find_twins(VAULT)
+        twins, scanned, errors = _find_twins_timed()
     except Exception as e:                                   # noqa: BLE001
         return UNKNOWN, f'could not count sync twins ({type(e).__name__}: {e})', None
     if errors:
