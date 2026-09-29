@@ -825,8 +825,7 @@ def slot_passed(p, now=None, minutes=0):
     """True when post p had a scheduled slot and `now` is at least `minutes` past it. One rule for the hourly sync and
     the ten-minute report check (content_report.live_overlay, 29 Sep 2026), so the two can never disagree."""
     if not p.get("scheduled"): return False
-    try: when = dt.datetime.fromisoformat(p["scheduled"].replace("Z", "+00:00"))
-    except (TypeError, ValueError): return False
+    when = dt.datetime.fromisoformat(p["scheduled"].replace("Z", "+00:00"))   # a slot that is set but unreadable raises, as sync always has
     return (now or dt.datetime.now(dt.timezone.utc)) >= when + dt.timedelta(minutes=minutes)
 
 

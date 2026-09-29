@@ -56,8 +56,8 @@
         <div data-sync-bar="publishing"></div>
         <div class="card">
             <div id="headline" class="headline muted">Loading...</div>
-            <div class="bar"><span id="updated" aria-live="polite"></span></div>
-            <div class="bar"><span id="liveErrors"></span></div>
+            <div class="bar"><span id="updated"></span></div>
+            <div class="bar" aria-live="polite"><span id="publisherNote"></span> <span id="liveErrors"></span></div>
         </div>
         <div id="error"></div>
         <div id="body"></div>
@@ -73,6 +73,20 @@ const REPORT_KEY = 'content-publishing';
 // clock, outside the job queue, since 29 Sep 2026. Three missed checks means it has stopped, day or night.
 function staleLimitMin() {
     return 30;
+}
+// The live check keeps the report fresh even if the hourly publisher itself has stopped, so the publisher's own last
+// write (publisherAt) is checked separately (review, 29 Sep 2026). It runs hourly 07:15-20:15 London and the night
+// render writes once when it finishes: over 90 minutes in the day means it stopped; overnight the evening write stands.
+function publisherStaleLimitMin(now) {
+    const h = Number(new Date(now).toLocaleString('en-GB', { timeZone: 'Europe/London', hour: '2-digit', hourCycle: 'h23' }));
+    return h >= 9 && h <= 20 ? 90 : 12 * 60;
+}
+function publisherNote(now, publisherAt) {
+    if (!publisherAt) return { stale: false, text: 'The hourly publisher has not stamped this report yet.' };
+    const m = Math.round((now - new Date(publisherAt).getTime()) / 60000);
+    return m > publisherStaleLimitMin(now)
+        ? { stale: true, text: `The hourly publisher last ran ${ago(publisherAt, now)}, so nothing new is being posted until it runs again. What is shown here is still checked live.` }
+        : { stale: false, text: '' };
 }
 // A page left open used to show the report it loaded with, for hours (Kevin, 21 Sep 2026: "not staying up to date").
 const AUTO_RELOAD_MS = 2 * 60 * 1000, READ_TIMEOUT_MS = 30 * 1000;
@@ -102,7 +116,7 @@ function dayLabel(dateStr, today) {
     if (Math.round((t - d) / 86400000) === 1) return 'Yesterday';
     return d.toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short', timeZone: 'UTC' });
 }
-function ago(iso) { const m = Math.round((Date.now() - new Date(iso).getTime()) / 60000); return m < 1 ? 'just now' : m < 60 ? `${m} min ago` : `${Math.floor(m / 60)} h ${m % 60} min ago`; }
+function ago(iso, now = Date.now()) { const m = Math.round((now - new Date(iso).getTime()) / 60000); return m < 1 ? 'just now' : m < 60 ? `${m} min ago` : `${Math.floor(m / 60)} h ${m % 60} min ago`; }
 
 function saveAuth() {
     const v = document.getElementById('patInput').value.trim();
@@ -142,6 +156,8 @@ function render(rec) {
     document.getElementById('updated').innerHTML = staleMin !== null && staleMin > staleLimitMin()
         ? `<span class="stale">Last updated ${esc(ago(updated))}. The ten-minute check has stopped writing this report, so everything below may be out of date.</span>`
         : `Updated ${esc(ago(updated))}. ${esc(nextUpdateText(Date.now(), updated))}`;
+    const pn = publisherNote(Date.now(), r.publisherAt);
+    document.getElementById('publisherNote').innerHTML = pn.text ? `<span class="${pn.stale ? 'stale' : 'muted'}">${esc(pn.text)}</span>` : '';
     // What the live check could not read this time is said, never shown as done (29 Sep 2026)
     const liveErrors = (r.live && r.live.errors) || [];
     document.getElementById('liveErrors').innerHTML = liveErrors.length
@@ -244,6 +260,9 @@ function registerChecks() {
                 : _readState !== 'ready' ? { status: 'warn', detail: 'Not loaded yet' } : _row ? { status: 'pass', detail: 'The content-publishing row is in the Estate Status table' } : { status: 'fail', detail: 'No content-publishing row: the publisher has never written the report' } },
             { name: 'Report fresh', kind: 'automation', run: () => { const u = _row && (_row.fields || {}).Updated; if (!u) return { status: 'warn', detail: 'No update time on the row' };
                 const m = Math.round((Date.now() - new Date(u).getTime()) / 60000); return m > staleLimitMin() ? { status: 'fail', detail: `Last written ${ago(u)}; the ten-minute check writes it` } : { status: 'pass', detail: `Written ${ago(u)}` }; } },
+            { name: 'Publisher running', kind: 'automation', run: () => { if (!_report) return { status: 'warn', detail: 'No report loaded' };
+                if (!_report.publisherAt) return { status: 'warn', detail: 'The hourly publisher has not stamped the report yet' };
+                const pn = publisherNote(Date.now(), _report.publisherAt); return pn.stale ? { status: 'fail', detail: pn.text } : { status: 'pass', detail: `Last ran ${ago(_report.publisherAt)}` }; } },
             { name: 'Something went out yesterday', kind: 'automation', run: () => { const h = (_report && _report.history) || []; if (h.length < 2) return { status: 'warn', detail: 'No history in the report' };
                 return h[1].episodes.length ? { status: 'pass', detail: h[1].episodes.map(e => `Episode ${e.day}`).join(', ') } : { status: 'fail', detail: 'Nothing was published yesterday' }; } },
             { name: 'Nothing stuck', kind: 'automation', run: () => { if (!_report) return { status: 'warn', detail: 'No report loaded' };

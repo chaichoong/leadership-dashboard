@@ -168,6 +168,32 @@ test('a report over 30 minutes old says it has stopped, day or night, and a page
   await expect(page.locator('#updated')).toContainText('The ten-minute check has stopped writing this report');
 });
 
+// The live check keeps the report fresh even when the hourly publisher itself has died (review, 29 Sep 2026), so the
+// publisher's own last write is judged separately: 90 minutes in the day, the evening write stands overnight.
+test('a stopped hourly publisher is named even though the report is fresh', async ({ page }) => {
+  await openPublishing(page, [report()]);
+  const cases = await page.evaluate(() => [
+    ['14:00 BST, publisher last ran 12:17', '2026-09-30T13:00:00Z', '2026-09-30T11:17:00Z'],
+    ['14:00 BST, publisher last ran 13:17', '2026-09-30T13:00:00Z', '2026-09-30T12:17:00Z'],
+    ['03:00 BST, publisher last ran 20:17', '2026-09-30T02:00:00Z', '2026-09-29T19:17:00Z'],
+    ['not stamped yet', '2026-09-30T13:00:00Z', ''],
+  ].map(([label, now, at]) => { const n = publisherNote(Date.parse(now), at); return [label, n.stale, n.text.slice(0, 40)]; }));
+  expect(cases).toEqual([
+    ['14:00 BST, publisher last ran 12:17', true, 'The hourly publisher last ran 1 h 43 min'.slice(0, 40)],
+    ['14:00 BST, publisher last ran 13:17', false, ''],
+    ['03:00 BST, publisher last ran 20:17', false, ''],
+    ['not stamped yet', false, 'The hourly publisher has not stamped thi'],
+  ]);
+});
+
+test('the publisher line shows on the page when it has stopped', async ({ page }) => {
+  const twoHoursAgo = new Date(Date.now() - 2 * 3600 * 1000).toISOString().replace(/\.\d+Z$/, 'Z');
+  const h = Number(new Date().toLocaleString('en-GB', { timeZone: 'Europe/London', hour: '2-digit', hourCycle: 'h23' }));
+  await openPublishing(page, [report({ publisherAt: twoHoursAgo })]);
+  if (h >= 9 && h <= 20) await expect(page.locator('#publisherNote')).toContainText('The hourly publisher last ran 2 h');
+  else await expect(page.locator('#publisherNote')).toHaveText('');               // overnight the evening write stands
+});
+
 // A post the live check could not ask GoHighLevel about keeps its last recorded status, and the page says so.
 test('items the live check could not read are named, not shown as done', async ({ page }) => {
   await openPublishing(page, [report({ live: { checkedAt: new Date().toISOString(), errors: ['episode 2074 linkedin lfmd: GHL GET -> 502: gateway'] } })]);
