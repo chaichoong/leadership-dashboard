@@ -66,6 +66,9 @@ const ESTATE_SCRIPTS = [
   'scripts/merge-guard.py',
   'scripts/affected-pages.py',
   'scripts/rework-rate.py',
+  'scripts/brain_vault.py',
+  'scripts/drive-auth-check.py',
+  'scripts/agent-estate-drift.py',
 ];
 
 describe('estate scripts read no name they never bind', () => {

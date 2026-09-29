@@ -60,6 +60,9 @@ import os
 import re
 import sys
 
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import brain_vault  # noqa: E402  the one twin rule, shared with the brain publisher
+
 HOME = os.path.expanduser("~")
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 BRAIN = os.path.join(HOME, "Library/CloudStorage/GoogleDrive-kevin@runpreneur.org.uk",
@@ -226,6 +229,10 @@ def rulings_after(stamp, decisions_dir, estate_text=""):
     ESTATE.md is the proof it was absorbed."""
     out = []
     for p in sorted(glob.glob(os.path.join(decisions_dir, "*.md"))):
+        # A Drive sync twin ("<ruling> 2.md") is a copy, not a second ruling, and
+        # ESTATE.md never names it, so it would fire as unabsorbed (29 Sep 2026).
+        if brain_vault.is_twin(p):
+            continue
         name = os.path.basename(p)
         m = re.match(r"(\d{4}-\d{2}-\d{2})", name)
         if not m or m.group(1) < stamp:

@@ -50,6 +50,9 @@ import urllib.error
 import urllib.parse
 import urllib.request
 
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import brain_vault  # noqa: E402  the one sync-twin rule, shared with the brain readers
+
 TEST_URL = 'https://drive-upload.kevinbrittain.workers.dev/test'
 STATE_FILE = os.path.expanduser(
     '~/.claude/scheduled-tasks/drive-auth-health-check/state.json'
@@ -382,6 +385,83 @@ def check_fresh():
     return HEALTHY, f"the {len(paths)} newest files on Google are all in this Mac's Drive folder"
 
 
+# ── The TWINS half (added 29 Sep 2026) ──────────────────────────────────────
+#
+# After the host move, Google Drive rebuilt its local database on the Mac mini
+# (27 Sep 12:03 UTC) and macOS renamed one of each same-name cloud pair to
+# "<name> 2.md": 89 files in the live vault, found by hand on 29 Sep and moved
+# to Archive/2026-09-29 sync duplicates/. Every brain reader globs the vault, so
+# a twin is indexed as a note, counted as a second ruling, and handed to the
+# nightly compound to merge or link. The readers now skip twins, and this half is
+# the alarm if they come back: it reports the count on every run, and any twin
+# fails the run and names the files.
+#
+# The rule itself lives once, in brain_vault.py, shared with the readers.
+#
+# CONTROL: a walk that could not list a folder, or saw no notes at all, is
+# UNKNOWN, never HEALTHY. A count of 0 off a walk that saw nothing proves nothing.
+#
+# The walk lists every vault folder with Drive's download policy on, and a Drive
+# that stalls after the mount probe passed would hold it for ever. So, like
+# job-queue's probe, it runs on a daemon thread, and a walk that has not
+# finished in TWINS_WALK_SECONDS is UNKNOWN. On 29 Sep it took under a second.
+TWINS_NAMED = 10
+
+
+def _walk_seconds():
+    try:
+        v = float(os.environ.get('DRIVE_TWINS_WALK_SECONDS', '300'))
+    except ValueError:
+        return 300.0
+    return v if 0 < v < 3600 else 300.0    # nan, inf, zero or negative: the default
+
+
+TWINS_WALK_SECONDS = _walk_seconds()
+
+
+def _find_twins_timed():
+    import threading
+    box = {}
+
+    def walk():
+        try:
+            box['result'] = brain_vault.find_twins(VAULT)
+        except BaseException as e:  # handed back to the caller below, never lost
+            box['error'] = e
+    t = threading.Thread(target=walk, daemon=True)
+    t.start()
+    t.join(TWINS_WALK_SECONDS)
+    if t.is_alive():
+        raise TimeoutError(f'the vault walk did not finish within {TWINS_WALK_SECONDS:g} s')
+    if 'error' in box:
+        raise box['error']
+    return box['result']
+
+
+def check_twins():
+    """Count Drive sync twins in the live vault. Returns (verdict, reason, twins),
+    twins being None when the count is unproved."""
+    try:
+        twins, scanned, errors = _find_twins_timed()
+    except Exception as e:                                   # noqa: BLE001
+        return UNKNOWN, f'could not count sync twins ({type(e).__name__}: {e})', None
+    if errors:
+        return UNKNOWN, (f'could not list {len(errors)} vault folder(s) (first: {errors[0]}), '
+                         f'so the sync-twin count is unproved'), None
+    if not scanned:
+        return UNKNOWN, 'the walk saw no notes in the vault, so a twin count of 0 proves nothing', None
+    if twins:
+        named = ', '.join(twins[:TWINS_NAMED])
+        more = f' and {len(twins) - TWINS_NAMED} more' if len(twins) > TWINS_NAMED else ''
+        return BROKEN, (
+            f'{len(twins)} Google Drive sync twin(s) in the live vault: {named}{more}. '
+            f'Drive has renamed copies of notes again. The brain readers skip them, but '
+            f'each one must be compared with its original and moved, path kept, into '
+            f'Archive/<date> sync duplicates/ with a MOVED.txt line. Never delete one. '
+            f'Precedent: Archive/2026-09-29 sync duplicates/MOVED.txt.'), twins
+    return HEALTHY, f'0 sync twins among {scanned} notes in the live vault (Archive/ left out)', twins
+
+
 def fetch():
     req = urllib.request.Request(TEST_URL, headers=HEADERS)
     try:
@@ -416,8 +496,10 @@ def run():
     # show every file as "missing", and the vault half already names that outage.
     if vault_verdict == HEALTHY:
         fresh_verdict, fresh_reason = check_fresh()
+        twins_verdict, twins_reason, twins = check_twins()
     else:
         fresh_verdict, fresh_reason = UNKNOWN, 'not judged: the mount itself is not readable'
+        twins_verdict, twins_reason, twins = UNKNOWN, 'not judged: the mount itself is not readable', None
 
     state = load_state()
     gate_streak = state.get('consecutive_gate', 0)
@@ -440,16 +522,18 @@ def run():
                 f'hours (since {broken_since}). This is an OUTAGE, not a cold start.')
     state['vault_broken_since'] = broken_since
 
-    # WORST OF THE THREE WINS, and the reason NAMES the half that failed.
+    # WORST OF THE FOUR WINS, and the reason NAMES the half that failed.
     # A score graded all-or-nothing across several things, with no record of
     # which one missed, cannot be acted on — the same lesson as the recon
-    # accuracy card. So the verdict is the worst of the three and the reason
-    # always says whether it was the API, the mount, or the mount's freshness.
-    # A tie goes to the earlier half, so the API still leads when it is as bad.
+    # accuracy card. So the verdict is the worst of the four and the reason
+    # always says whether it was the API, the mount, the mount's freshness or
+    # sync twins in the vault. A tie goes to the earlier half, so the API still
+    # leads when it is as bad.
     RANK = {HEALTHY: 0, GATE: 1, UNKNOWN: 2, BROKEN: 3}
     halves = [('Drive API', api_verdict, api_reason),
               ('local mount', vault_verdict, vault_reason),
-              ('mount freshness', fresh_verdict, fresh_reason)]
+              ('mount freshness', fresh_verdict, fresh_reason),
+              ('sync twins', twins_verdict, twins_reason)]
     lead = max(halves, key=lambda h: RANK[h[1]])
     verdict, reason = lead[1], f'{lead[0]}: {lead[2]}'
     for half in halves:
@@ -489,6 +573,11 @@ def run():
         'vault_broken_hours': round(vault_broken_hours, 2),
         'fresh_verdict': fresh_verdict,
         'fresh_reason': fresh_reason,
+        'twins_verdict': twins_verdict,
+        'twins_reason': twins_reason,
+        # Reported every run; null means the count was not proved, never 0.
+        'twins_count': None if twins is None else len(twins),
+        'twins': twins,
         'alert_kevin': verdict in (BROKEN, UNKNOWN),
         'consecutive_gate': gate_streak,
         'raw': body[:600],

@@ -227,6 +227,40 @@ describe('agent-estate-drift', () => {
     expect(run(e).code).toBe(0);
   });
 
+  // 29 Sep 2026. A Google Drive database rebuild on the Mac mini renamed one of
+  // each same-name pair to "<name> 2.md" (89 files, moved to Archive/ by hand).
+  // A twin of an absorbed ruling is a copy, not a second ruling, but ESTATE.md
+  // never names "X 2", so it fired as unabsorbed and would turn the job red.
+  it('BACK-TEST: a Drive sync twin of an absorbed ruling is not a second ruling', () => {
+    const e = estate({ stamp: '2026-09-07' });
+    writeFileSync(join(e.agents, 'ESTATE.md'),
+      '# Estate\n\nAs at: 2026-09-07\nAbsorbed today: 2026-09-07 Agent levels\n');
+    writeFileSync(join(e.brain, 'Decisions', '2026-09-07 Agent levels.md'), '# agents\nlevels\n');
+    writeFileSync(join(e.brain, 'Decisions', '2026-09-07 Agent levels 2.md'), '# agents\nlevels\n');
+    const r = run(e);
+    expect(r.code, JSON.stringify(r.json && r.json.rulings_behind)).toBe(0);
+    expect(r.json.rulings_behind).toEqual([]);
+  });
+
+  it('a twin of a ruling newer than the stamp is listed once, as the ruling itself', () => {
+    const e = estate({ stamp: '2026-09-01' });
+    writeFileSync(join(e.brain, 'Decisions', '2026-09-06 Approval gate change.md'), '# gate\nAgents route.\n');
+    writeFileSync(join(e.brain, 'Decisions', '2026-09-06 Approval gate change 2.md'), '# gate\nAgents route.\n');
+    const r = run(e);
+    expect(r.code).toBe(1);
+    expect(r.json.rulings_behind).toEqual(['2026-09-06 Approval gate change.md']);
+  });
+
+  it('CONTROL: a real ruling whose name ends in a number still fires', () => {
+    // No "... at 9, 1 and.md" sits beside it, so it is a note, not a twin.
+    const e = estate({ stamp: '2026-09-01' });
+    const name = '2026-09-02 No caps on agent work, and the triage lane runs at 9, 1 and 5.md';
+    writeFileSync(join(e.brain, 'Decisions', name), '# caps\nAgents run uncapped.\n');
+    const r = run(e);
+    expect(r.code).toBe(1);
+    expect(r.json.rulings_behind).toEqual([name]);
+  });
+
   it('CONTROL: an absent brain (Drive unmounted) exits 2, never "0 rulings behind"', () => {
     const e = estate();
     rmSync(e.brain, { recursive: true, force: true });
