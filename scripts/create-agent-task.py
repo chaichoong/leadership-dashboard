@@ -950,8 +950,9 @@ def fold_on_address_only(name_a, name_b, shared):
 #   a person is two capitalised words before 's ("Jane Smith's"), so a verb in
 #     front ("Refund Jane Smith's") is never part of the name. A single word
 #     ("Kevin's", "Paul's room") is not enough, and a possessive naming the
-#     team, an organisation or a role ("Roy Lavin's quote", "Universal
-#     Credit's decision", "New Tenant's rent") is nobody's matter.
+#     team, an organisation, a role or an object ("Roy Lavin's quote",
+#     "Universal Credit's decision", "New Tenant's rent", "Safety
+#     Certificate's expiry") is nobody's matter.
 # Only the first 1,000 characters are read: the longest live name is 753, and
 # a pasted wall of text would make the house reader slow.
 # Mirrored by DUPE_ADDRESS_RE, DUPE_PERSON_RE, DUPE_UNIT_WORDS,
@@ -960,9 +961,7 @@ def fold_on_address_only(name_a, name_b, shared):
 DUPE_ADDRESS_RE = re.compile(
     r"(?:^|[\s&])(\d{1,4}[a-z]?(?:\s*(?:&|and)\s*\d{1,4}[a-z]?)*)\s+((?:[a-z]+\s+){1,2}?)("
     + "|".join(sorted(DUPE_STREET_TYPES)) + r")(?![a-z0-9])")
-# Group 1 is the run of capitalised words in front, read only to rule the
-# name out: "Renew Gas Safety Certificate's" is an object, not a person.
-DUPE_PERSON_RE = re.compile(r"\b((?:[A-Z][a-z]+[ -])*)([A-Z][a-z]+[ -][A-Z][a-z]+)['\u2019]s\b", re.A)
+DUPE_PERSON_RE = re.compile(r"\b([A-Z][a-z]+[ -][A-Z][a-z]+)['\u2019]s\b", re.A)
 DUPE_UNIT_WORDS = {"unit", "units", "flat", "flats", "room", "rooms", "apartment", "apt", "suite",
                    "studio", "bedsit"}
 DUPE_NOT_A_PERSON = {
@@ -981,17 +980,19 @@ def dupe_identity(name):
     raw = str(name or "")[:1000]
     noise = DUPE_GENERIC | DUPE_ACTION_WORDS | DUPE_DATE_WORDS
     text = raw.lower()
-    # An amount is not a house. The gap is "not a letter, digit, comma or
-    # stop" rather than \s, which Python and JavaScript read differently for
-    # a non-breaking space (review).
-    text = re.sub(r"[£$€][^a-z0-9,.]{0,2}\d[\d,.]*", " ", text, flags=re.A)
+    # An amount is not a house. The gap is spelt out, never \s, which Python
+    # and JavaScript read differently (review).
+    text = re.sub(r"[£$€][ \t\u00a0\u2000-\u200b\u202f\u205f\u3000]{0,2}\d[\d,.]*", " ", text, flags=re.A)
     text = re.sub(r"(\d)[-/\u2013\u2014](?=\d)", r"\1&", text, flags=re.A)   # 42-44 or 42–44 is two houses
-    text = re.sub(r"[^a-z0-9&\s]", " ", text)
+    text = re.sub(r"\b(no|nr|num)\.", r"\1 ", text, flags=re.A)                # "Flat No. 2"
+    # Other punctuation becomes a "|" break, so "2 rooms, 55 Elmdon Place"
+    # never reads "rooms" as the word in front of 55 (review).
+    text = re.sub(r"[^a-z0-9&\s]", " | ", text)
     addresses = []
     for m in DUPE_ADDRESS_RE.finditer(text):
         before = text[:m.start(1)].split()[-2:]
         if before and (before[-1] in DUPE_UNIT_WORDS
-                       or (before[-1] in ("no", "number") and before[0] in DUPE_UNIT_WORDS)):
+                       or (before[-1] in ("no", "nr", "num", "number") and before[0] in DUPE_UNIT_WORDS)):
             continue                      # "Unit 2 Dalham Place", "Flat No. 2": a unit, not a house
         nums = re.split(r"\s*(?:&|and)\s*", m.group(1))
         words = m.group(2).split()
@@ -1008,9 +1009,8 @@ def dupe_identity(name):
                 addresses.append(a)
     people = []
     for m in DUPE_PERSON_RE.finditer(raw):
-        ws = re.split(r"[ -]", m.group(2).lower())
-        run = re.split(r"[ -]", m.group(1).lower()) + ws
-        if ws[-1] in DUPE_STREET_TYPES or any(w in DUPE_NOT_A_PERSON for w in run):
+        ws = re.split(r"[ -]", m.group(1).lower())
+        if ws[-1] in DUPE_STREET_TYPES or any(w in DUPE_NOT_A_PERSON for w in ws):
             continue                      # "Viola Street's bins", "Universal Credit's"
         for w in ws:
             if w not in noise and w not in people:

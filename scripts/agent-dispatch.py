@@ -5302,7 +5302,9 @@ _FILE_EXT = (r"(?:md|markdown|txt|py|js|mjs|cjs|ts|json|jsonl|csv|tsv|html?|css|
 _PATH_CH = r"[\w.~@+()-]"
 # A folder with spaces: a dated one ("2026-09-21 chedburgh gas safety") runs to
 # six words, any other ("My Drive", "00 AI Context") to three.
-_FOLDER_WORDS = r"(?:\d[\w@+()-]*(?:[ \t][\w@+()-]+){1,5}|[\w@+()-]+(?:[ \t][\w@+()-]+){1,2})"
+# The two shapes never overlap (a digit starts one, never the other), or the
+# reader backtracks exponentially on "1 a/1 a/1 a/..." (review).
+_FOLDER_WORDS = r"(?:\d[\w@+()-]*(?:[ \t][\w@+()-]+){1,5}|(?!\d)[\w@+()-]+(?:[ \t][\w@+()-]+){1,2})"
 FILE_PATH_RE = re.compile(
     r"(?<![\w.~/-])(?:~|\.{1,2})?/(?:" + _PATH_CH + r"+/|" + _FOLDER_WORDS + r"/)*"
     r"[\w~@+()-]" + _PATH_CH + r"*\." + _FILE_EXT + r"\b"

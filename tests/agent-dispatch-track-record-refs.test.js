@@ -366,7 +366,9 @@ print('---JSON---'); print(json.dumps([m.reference_tokens(t) for t in json.loads
 import time
 worst = 0
 for t in ['a.' * 10000, '/a' * 10000, '~/' + 'a ' * 10000, 'x/' + 'a.' * 10000, ' ~/a b/' * 3000,
-          '~/' + 'a/' * 10000 + 'x', 'a' * 20000 + '.pd']:
+          '~/' + 'a/' * 10000 + 'x', 'a' * 20000 + '.pd',
+          # A dated folder shape repeated: exponential before the review fix.
+          '~/' + '1 a/' * 40 + 'x', '~/' + '1 a b/' * 40 + 'x', '/' + '2026 x y/' * 60 + 'z']:
     t0 = time.time(); m.FILE_PATH_RE.sub(' ', t); worst = max(worst, time.time() - t0)
 print('---JSON---'); print(json.dumps(worst))`);
     expect(out).toBeLessThan(0.5);

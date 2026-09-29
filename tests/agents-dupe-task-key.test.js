@@ -673,6 +673,19 @@ print(json.dumps(c.dupe_verdict(sys.argv[1], sys.argv[2], sys.argv[3])))
     ])).toEqual(['update', 'update', 'update', 'update']);
   });
 
+  it('third review: a capitalised word in front never hides a tenant, and punctuation breaks a unit word', () => {
+    expect(decide([
+      { name: "Refund Tenant Jane Smith's deposit - 5 Dalham Place",
+        rows: [{ name: "Refund Tenant John Brown's deposit - 5 Dalham Place" }] },
+      { name: "Chase Rent For Aaron Mitchell's UC47", rows: [{ name: "Chase Rent For Pawel Kowalski's UC47" }] },
+      // "rooms" is what is advertised, not the word in front of house 55.
+      { name: 'Advertise 2 rooms, 55 Elmdon Place', rows: [{ name: 'Advertise 2 rooms, 6 Chedburgh Place' }] },
+      { name: 'Advertise double room - 55 Elmdon Place', rows: [{ name: 'Advertise double room - 6 Chedburgh Place' }] },
+      // "(\u00a3)" is a label; 23 is still the house.
+      { name: 'INBOUND: arrears (\u00a3) 23 Viola Street Bootle', rows: [{ name: 'INBOUND: arrears (\u00a3) 24 Viola Street Bootle' }] },
+    ])).toEqual(['create', 'create', 'create', 'create', 'create']);
+  });
+
   it('a street named after a street type still names the house', () => {
     expect(decide([{ name: 'Gas safety certificate 5 Park Road', rows: [{ name: 'Gas safety certificate 7 Park Road' }] }]))
       .toEqual(['create']);
@@ -719,6 +732,9 @@ print(json.dumps(c.dupe_verdict(sys.argv[1], sys.argv[2], sys.argv[3])))
       'fee \u00a3\u00a0150 Viola Street', 'fee \u00a3\u2009150 Viola Street', 'fee \u00a3\u3000150 Viola Street',
       '42\u201344 Elmdon Place', '(Flat No. 2 Dalham Place)', 'Units 1-3 Dalham Place',
       "Renew Gas Safety Certificate's expiry - Jane Smith, 5 Dalham Place",
+      "Refund Tenant Jane Smith's deposit - 5 Dalham Place", 'Advertise 2 rooms, 55 Elmdon Place',
+      'Advertise double room - 55 Elmdon Place', 'Arrears (\u00a3) 23 Viola Street', '\u00a3\ud83d\ude00\ud83d\ude005 Viola Street',
+      'Flat Nr. 4, 6 Chedburgh Place',
     ];
     const py = JSON.parse(execFileSync('python3', ['-c', `
 import importlib.util, json, sys
