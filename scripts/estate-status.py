@@ -586,7 +586,7 @@ def built_row(now, module_path=BUILT_MODULE):
     gaps = sum(len(inv["missing"].get(k, [])) for k in ("automations", "workers", "skills"))
     if gaps:
         detail += "; %d not yet on the hand-kept lists" % gaps
-    lost = len(inv["missing"].get("notInstalled", [])) + len(inv["missing"].get("listedNotFound", []))
+    lost = sum(len(inv["missing"].get(k, [])) for k in ("notInstalled", "listedNotFound", "notLoaded", "parkedButRunning"))
     if lost:
         detail += "; %d listed or scheduled but not running" % lost
     return dict(row, status="Worked", lastWorked=stamp, detail=detail,

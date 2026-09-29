@@ -19,9 +19,10 @@ So this reads the real sources, never a list someone remembered to edit:
 The plain-English "what it does" line comes from js/automations-data.js where
 one exists, else from the source's own description.
 
-WHAT `missing` CAN AND CANNOT SAY. It checks both ways where a machine source
-exists: running but not on the hand-kept lists, and listed but not found (Mac
-jobs, workers, skills). It CANNOT see Airtable automations, workers whose code
+WHAT `missing` CAN AND CANNOT SAY. For Mac jobs it checks both ways: running
+but not on the automations list, and listed as running but not found, not
+loaded or not installed. For workers and skills it checks one way only
+(running but unlisted). It CANNOT see Airtable automations, workers whose code
 lives outside this repo, or plugin skills, so the hand-kept lists still carry
 things this does not. They are not redundant yet.
 
@@ -132,13 +133,16 @@ _JS_STR = r"""(?:'((?:[^'\\]|\\.)*)'|"((?:[^"\\]|\\.)*)")"""
 
 
 def _js_str(single, double):
-    raw = double if double is not None else single.replace("\\'", "'")
+    original = double if double is not None else single
+    raw = original.replace("\\\n", "")                     # a JS line continuation
+    raw = raw.replace("\\'", "'")                           # \' is JS-only, legal in either quote style
+    raw = re.sub(r"\\x([0-9a-fA-F]{2})", r"\\u00\1", raw)   # \xHH is JS-only too
     if double is None:
-        raw = re.sub(r'(?<!\\)"', r'\\"', raw)
+        raw = re.sub(r'(?<!\\)"', r'\\"', raw)             # a bare " inside '...' must be escaped for JSON
     try:
         return json.loads('"' + raw + '"')
     except ValueError:
-        return raw
+        return original
 
 
 def _field(body, name):
@@ -223,6 +227,21 @@ def mac_jobs(labels, schedule):
     agents = os.path.join(HOME, "Library", "LaunchAgents")
     parked_dir = os.path.join(HOME, "Library", "LaunchAgents.parked")
     loaded = loaded_labels()
+    # A launchd read that recognises (almost) none of our plists read the wrong
+    # domain (a run over SSH or sudo sees none of the GUI session's jobs). Then
+    # "loaded" is unknown, never "nothing is loaded".
+    ours = set()
+    for path in glob.glob(os.path.join(agents, "*.plist")):
+        base = os.path.basename(path)
+        if base.startswith(LABEL_PREFIXES) and ".bak" not in base:
+            ours.add(base[:-6])
+    loaded_note = None
+    if loaded is not None and ours and len(loaded & ours) < max(1, len(ours) // 2):
+        loaded_note = ("could not check what launchd has loaded: it listed %d of the %d jobs here"
+                       % (len(loaded & ours), len(ours)))
+        loaded = None
+    elif loaded is None:
+        loaded_note = "could not check what launchd has loaded"
     found = {}
     for folder, parked in ((agents, False), (parked_dir, True)):
         for path in sorted(glob.glob(os.path.join(folder, "*.plist"))):
@@ -243,7 +262,8 @@ def mac_jobs(labels, schedule):
             if bad:
                 status = "unreadable"
             elif parked:
-                status = "parked"
+                # Moved to .parked without a bootout: launchd still runs it.
+                status = "on" if (loaded is not None and label in loaded) else "parked"
             elif cfg.get("enabled") is False:
                 status = "off"
             elif loaded is not None and label not in loaded:
@@ -254,7 +274,13 @@ def mac_jobs(labels, schedule):
             found[key] = {"k": key, "n": entry.get("name") or key, "w": cfg.get("cron") or _when_plist(pl),
                           "s": status, "d": _short(bad or entry.get("what")), "src": _rel(path),
                           "m": _modified(path), "label": label}
-    live = [j for j in found.values() if j["s"] not in ("parked", "unreadable")]
+            if parked and status == "on":
+                found[key]["via"] = "parked, but launchd still runs it"
+    # The floor is on the main folder only: a parked plist launchd still runs
+    # must not stand in for an unreadable LaunchAgents folder.
+    parked_prefix = _rel(parked_dir) + os.sep
+    live = [j for j in found.values()
+            if j["s"] not in ("parked", "unreadable") and not j["src"].startswith(parked_prefix)]
     if len(live) < FLOORS["macJobs"]:
         raise SourceFailure("read %d Mac jobs in %s (expected %d+): the folder is not readable from here, "
                             "not an empty estate" % (len(live), _rel(agents), FLOORS["macJobs"]))
@@ -278,7 +304,7 @@ def mac_jobs(labels, schedule):
                       "d": _short(entry.get("what")), "src": "scripts/job-schedule.json", "m": None,
                       "via": "Claude scheduler" if coop else "no launchd job found"}
     order = lambda j: (j["s"] in DIM_STATES, j["n"].lower())  # noqa: E731
-    return sorted(found.values(), key=order)
+    return sorted(found.values(), key=order), loaded_note
 
 
 # ─── the other sources ────────────────────────────────────────────────
@@ -405,8 +431,9 @@ def build(now=None):
     now = now or datetime.now(timezone.utc)
     labels, named = automation_entries(automations_text())
     schedule = load_schedule()
+    mac_items, loaded_note = mac_jobs(labels, schedule)
     groups = [
-        {"id": "mac-jobs", "title": "Scheduled jobs on the Mac", "items": mac_jobs(labels, schedule)},
+        {"id": "mac-jobs", "title": "Scheduled jobs on the Mac", "items": mac_items},
         {"id": "agent-files", "title": "AI agent files", "items": agent_files()},
         {"id": "skills", "title": "Skills", "items": skills()},
         {"id": "workers", "title": "Cloudflare workers", "items": workers(named)},
@@ -425,6 +452,10 @@ def build(now=None):
         "listedNotFound": sorted(k for k, e in labels.items() if e["status"] == "on" and k not in mac_keys),
         # in the job schedule, but launchd has no job for it
         "notInstalled": sorted(j["k"] for j in by["mac-jobs"] if j["s"] == "not installed"),
+        # a plist launchd is not running, or cannot read
+        "notLoaded": sorted(j["k"] for j in by["mac-jobs"] if j["s"] in ("not loaded", "unreadable")),
+        # parked on purpose, yet launchd still runs it
+        "parkedButRunning": sorted(j["k"] for j in by["mac-jobs"] if j.get("via") == "parked, but launchd still runs it"),
     }
     counts = {
         "macJobs": sum(1 for j in by["mac-jobs"] if j["s"] == "on"),
@@ -436,6 +467,8 @@ def build(now=None):
     }
     inv = {"v": 1, "generatedAt": now.strftime("%Y-%m-%dT%H:%M:%SZ"), "counts": counts,
            "groups": groups, "missing": missing}
+    if loaded_note:
+        inv["notes"] = [loaded_note]
     return fit(inv)
 
 

@@ -178,6 +178,39 @@ test.describe('AI Agents: Track record tab', () => {
     await expect(page.locator('#builtRunningBody')).toContainText('No everything-built list yet');
   });
 
+  test('a PR that comes back on two pages is one row and one count', async ({ page }) => {
+    const pr = (i, minAgo) => ({ number: 2000 - i, title: 'Change ' + i, merged_at: ago(minAgo), updated_at: ago(minAgo), html_url: 'https://github.com/chaichoong/leadership-dashboard/pull/' + (2000 - i) });
+    const page1 = Array.from({ length: 100 }, (_, k) => pr(k, 10 + k));
+    // Page 2 repeats page 1's last PR (it shifted between the two reads), then goes past the week.
+    await open(page, { pages: [page1, [page1[99], pr(100, 60 * 24 * 9)]] });
+    await expect(page.locator('#builtSummary')).toContainText('100 changes shipped in the last 7 days');
+  });
+
+  test('an empty item in a group does not break the tab or the build log', async ({ page }) => {
+    const broken = JSON.parse(JSON.stringify(INVENTORY));
+    broken.groups[0].items.push(null);
+    await open(page, { estate: [builtRow({}, broken)] });
+    await expect(page.locator('#builtRunningBody')).toContainText('Scheduled jobs on the Mac (1 in use, 1 off or retired)');
+    await expect(page.locator('#builtLogBody')).toContainText('Fix: inbox triage decided no mail for 4 days');
+  });
+
+  test('a job expected to run but not running is red at the top, and a launchd note shows', async ({ page }) => {
+    const inv = JSON.parse(JSON.stringify(INVENTORY));
+    inv.missing = Object.assign({}, inv.missing, { notLoaded: ['drift-scan'], parkedButRunning: ['prospecting'] });
+    inv.notes = ['could not check what launchd has loaded'];
+    await open(page, { estate: [builtRow({}, inv)] });
+    const box = page.locator('#builtNotRunning');
+    await expect(box).toContainText('Expected to run, but not running');
+    await expect(box).toContainText('Its launchd job is not running, or its file cannot be read: drift-scan');
+    await expect(box).toContainText('Parked, but launchd still runs it: prospecting');
+    await expect(page.locator('#builtRunningBody')).toContainText('could not check what launchd has loaded');
+  });
+
+  test('counts from a failed or stale list are marked as such in the summary', async ({ page }) => {
+    await open(page, { estate: [builtRow({ [ES.status]: 'Failed', [ES.detail]: 'boom' })] });
+    await expect(page.locator('#builtSummary')).toContainText('counts from the last good list');
+  });
+
   test('#tab=track-record opens the tab directly', async ({ page }) => {
     await mockAgentsPage(page, Object.assign(defaultFixtures(), { estate: [builtRow()] }));
     await page.route('**/api.github.com/**', (route) => route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(PRS) }));

@@ -7027,8 +7027,18 @@ function builtListHealth(){
 
 async function loadBuilt(force){
     if(_estateState !== 'ready' || force) await loadEstateStatus();
-    renderBuiltRunning();
+    safeRenderBuiltRunning();
     await loadBuiltLog(force);
+}
+// A malformed payload must never stop the build log, the approvals or the
+// register from rendering.
+function safeRenderBuiltRunning(){
+    try { renderBuiltRunning(); }
+    catch(e){
+        console.warn('Track record render failed', e);
+        const b = document.getElementById('builtRunningBody');
+        if(b) b.innerHTML = `<div class="zone-error">The Track record list could not be drawn (${esc(e.message || e)}). This list is NOT empty. It could not be shown.</div>`;
+    }
 }
 window.loadBuilt = loadBuilt;
 
@@ -7077,7 +7087,10 @@ async function loadBuiltLog(force){
             const last = prs[prs.length - 1];
             if(prs.length < 100 || !last || new Date(last.updated_at).getTime() < since){ partial = false; break; }
         }
-        const merged = all.filter(p => p && p.merged_at)
+        // A PR updated between two page reads shifts the pages by one and comes
+        // back twice: one number, one row.
+        const seen = new Set();
+        const merged = all.filter(p => p && p.merged_at && !seen.has(p.number) && seen.add(p.number))
             .sort((a,b) => String(b.merged_at).localeCompare(String(a.merged_at)))
             .map(p => ({ n: p.number, t: p.title || '', at: p.merged_at, url: p.html_url }));
         // CONTROL: this repo merges most days. A page of closed pull requests
@@ -7151,8 +7164,9 @@ function builtStateChip(s){
     const st = BUILT_STATE_STYLE[s] || ['var(--bg-subtle)','var(--text-muted)'];
     return `<span class="agent-pill" style="background:${st[0]};color:${st[1]}">${esc(s || '–')}</span>`;
 }
-function builtInUse(items){ return items.filter(i => !BUILT_DIM.includes(i.s)).length; }
+function builtInUse(items){ return items.filter(i => i && !BUILT_DIM.includes(i.s)).length; }
 function builtGroupHtml(id, title, items, note){
+    items = (items || []).filter(Boolean);
     const inUse = builtInUse(items);
     const rows = items.map(i => `<tr${BUILT_DIM.includes(i.s) ? ' style="opacity:.62"' : ''}>
             <td style="font-weight:var(--fw-medium);white-space:nowrap">${esc(i.n || i.k)}</td>
@@ -7204,7 +7218,9 @@ function renderBuiltRunning(){
     const gaps = inv.missing || {};
     const list = (label, xs) => Array.isArray(xs) && xs.length ? [[label, xs]] : [];
     const notRunning = [...list('On the automations list as running, but nothing on the Mac runs it', gaps.listedNotFound),
-                        ...list('In the job schedule, but launchd has no job for it', gaps.notInstalled)];
+                        ...list('In the job schedule, but launchd has no job for it', gaps.notInstalled),
+                        ...list('Its launchd job is not running, or its file cannot be read', gaps.notLoaded),
+                        ...list('Parked, but launchd still runs it', gaps.parkedButRunning)];
     const unlisted = [...list('automations list', gaps.automations), ...list('workers list', gaps.workers), ...list('Skills Library', gaps.skills)];
     const lines = rows => rows.map(g => `<div style="font-size:var(--fs-xs);color:var(--text-secondary);line-height:1.7"><strong>${esc(g[0])}:</strong> ${g[1].map(x => esc(x)).join(' &middot; ')}</div>`).join('');
     const unlistedCount = unlisted.reduce((n, g) => n + g[1].length, 0);
@@ -7212,7 +7228,9 @@ function renderBuiltRunning(){
     const regHtml = reg === null ? '<div class="zone-loading" style="margin-bottom:8px"><span>Reading the agents register…</span></div>'
         : reg.error ? `<div class="zone-error" style="margin-bottom:8px">Could not read the agents register (${esc(reg.error)}). The register section is NOT empty. It could not be read.</div>`
         : builtGroupHtml('register', 'AI agents in the register', reg, 'The agents with a register row, read live. Their scorecards are on the Dashboard tab.');
-    body.innerHTML = banner
+    const notes = Array.isArray(inv.notes) && inv.notes.length
+        ? `<div style="font-size:var(--fs-xs);color:var(--warning);margin-bottom:8px">${inv.notes.map(n => esc(n)).join('. ')}. Mac jobs show as on unless their file says otherwise.</div>` : '';
+    body.innerHTML = banner + notes
         + (notRunning.length ? `<div id="builtNotRunning" class="zone-error" style="margin-bottom:10px"><div style="font-weight:var(--fw-semibold);margin-bottom:4px">Expected to run, but not running</div>${lines(notRunning)}</div>` : '')
         + regHtml
         + groups.map(g => builtGroupHtml(g.id, g.title, g.items,
@@ -7230,7 +7248,8 @@ function renderBuiltRunning(){
 function renderBuiltSummary(){
     const el = document.getElementById('builtSummary');
     if(!el) return;
-    const inv = builtListHealth().inv;
+    const h = builtListHealth();
+    const inv = h.inv;
     const c = inv && inv.counts;
     const pl = (n, one, many) => { n = Number(n) || 0; return `${n} ${n === 1 ? one : many}`; };
     const parts = [];
@@ -7242,6 +7261,7 @@ function renderBuiltSummary(){
         parts.push(pl(c.skills, 'skill', 'skills'), pl(c.workers, 'worker', 'workers'),
             pl(c.githubTimers, 'GitHub timer', 'GitHub timers'), pl(c.scheduledTasks, 'scheduled task', 'scheduled tasks'));
     }
+    if(c && !h.ok) parts.push(`<span style="color:var(--danger)">counts from the last good list, ${esc(estateAgo(inv.generatedAt))}</span>`);
     const week = builtWeekCount();
     if(week !== null) parts.push(`<strong>${_builtLogPartial ? 'at least ' : ''}${pl(week, 'change', 'changes')} shipped in the last 7 days</strong>`);
     el.innerHTML = parts.join(' &middot; ');
@@ -7537,12 +7557,7 @@ function renderAllZones(){
     renderFifteen();
     // Last and guarded: a malformed Track record payload must never stop the
     // approvals and the register from rendering.
-    try { renderBuiltRunning(); }
-    catch(e){
-        console.warn('Track record render failed', e);
-        const b = document.getElementById('builtRunningBody');
-        if(b) b.innerHTML = `<div class="zone-error">The Track record list could not be drawn (${esc(e.message || e)}). This list is NOT empty. It could not be shown.</div>`;
-    }
+    safeRenderBuiltRunning();
 }
 
 // ═══════════════════════════════════════════════════════════════════════

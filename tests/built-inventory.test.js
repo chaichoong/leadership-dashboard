@@ -58,6 +58,8 @@ loaded += ["com.kevinbrittain.stay-awake", "com.kevinbrittain.elsewhere-job", "c
 with open(os.path.join(la, "com.kevinbrittain.job00.plist.bak-2026"), "wb") as fh:
     plistlib.dump({"Label": "ignored"}, fh)
 plist(os.path.join(HOME, "Library", "LaunchAgents.parked"), "prospecting", {})
+plist(os.path.join(HOME, "Library", "LaunchAgents.parked"), "parked-running", {})
+loaded.append("com.kevinbrittain.parked-running")
 sched["daily-ops"] = {"cron": "0 7 * * *", "mode": "cooperative"}
 sched["wrapped-missing"] = {"cron": "5 5 * * *", "mode": "wrapped"}
 w(os.path.join(REPO, "scripts", "job-schedule.json"), json.dumps(sched))
@@ -131,8 +133,9 @@ out["chars"] = len(json.dumps(inv, separators=(",", ":")))
     expect(r.mac['wrapped-missing'][0]).toBe('not installed');      // scheduled, but no launchd job
     expect(Object.keys(r.mac)).not.toContain('ignored');            // a .bak plist is not a job
     expect(Object.keys(r.mac)).not.toContain('notours');            // someone else's label
-    // 22 plists + stay-awake, minus job01 off and job03 not loaded, plus elsewhere-job and daily-ops
-    expect(r.counts.macJobs).toBe(23);
+    expect(r.mac['parked-running']).toEqual(['on', '', 'parked-running', '', 'parked, but launchd still runs it']);
+    // 22 plists + stay-awake, minus job01 off and job03 not loaded, plus parked-running, elsewhere-job and daily-ops
+    expect(r.counts.macJobs).toBe(24);
   });
 
   it('reads the hand-kept list in either quote style, JS escapes decoded', () => {
@@ -170,6 +173,8 @@ out["chars"] = len(json.dumps(inv, separators=(",", ":")))
     expect(r.missing.automations).not.toContain('job03');           // not running, so not "running but unlisted"
     expect(r.missing.listedNotFound).toEqual(['ghost-job']);        // old-job is listed as off: not a gap
     expect(r.missing.notInstalled).toEqual(['wrapped-missing']);
+    expect(r.missing.notLoaded).toEqual(['job03']);
+    expect(r.missing.parkedButRunning).toEqual(['parked-running']);
     expect(r.missing.workers).toContain('w1');
     // The Skills Library lists sk00 by id and pk00 by command. sk01 is only
     // MENTIONED in another entry's text, which does not count as listed.
@@ -228,6 +233,37 @@ out["msg"] = fails(bi.build)
   });
 });
 
+describe('a launchd read of the wrong domain is "unknown", never "nothing loaded"', () => {
+  it('keeps every plist on and says it could not check', () => {
+    const r = py(`
+os.environ["BUILT_LAUNCHCTL_LIST"] = "com.apple.Finder"
+inv = bi.build()
+g = {x["id"]: x["items"] for x in inv["groups"]}
+out["macJobs"] = inv["counts"]["macJobs"]
+out["notes"] = inv.get("notes")
+out["job03"] = [j["s"] for j in g["mac-jobs"] if j["k"] == "job03"][0]
+`);
+    expect(r.job03).toBe('on');
+    expect(r.macJobs).toBeGreaterThanOrEqual(20);
+    expect(r.notes[0]).toMatch(/could not check what launchd has loaded: it listed 0 of the 23 jobs here/);
+  });
+});
+
+describe('JS string literals in the hand-kept list decode as JS does', () => {
+  it('handles \\\' in double quotes, \\xHH, line continuations and a " inside single quotes', () => {
+    const r = py(`
+src = r"""{ key: 'a', name: "Kevin\\'s", what: 'said "hi" \\x41' },
+{ key: 'b', name: 'B', what: "one \\
+two" }"""
+jobs, _ = bi.automation_entries(src)
+out["a"] = [jobs["a"]["name"], jobs["a"]["what"]]
+out["b"] = jobs["b"]["what"]
+`);
+    expect(r.a).toEqual(["Kevin's", 'said "hi" A']);
+    expect(r.b).toBe('one two');
+  });
+});
+
 describe('the payload is shrunk to fit, and says so', () => {
   it('trims long descriptions under the cap and records it', () => {
     const r = py(`
@@ -275,8 +311,8 @@ out["payloadField"] = es.ES["payload"]
     expect(r.ok.key).toBe('built-inventory');
     expect(r.ok.kind).toBe('report');
     expect(r.ok.status).toBe('Worked');
-    expect(r.ok.detail).toMatch(/^23 Mac jobs, 12 agent files, 16 skills, 6 workers, 1 GitHub timers, 11 scheduled tasks; \d+ not yet on the hand-kept lists; 2 listed or scheduled but not running$/);
-    expect(r.okPayload.macJobs).toBe(23);
+    expect(r.ok.detail).toMatch(/^24 Mac jobs, 12 agent files, 16 skills, 6 workers, 1 GitHub timers, 11 scheduled tasks; \d+ not yet on the hand-kept lists; 4 listed or scheduled but not running$/);
+    expect(r.okPayload.macJobs).toBe(24);
   });
 
   it('is always on the ten-minute board', () => {
