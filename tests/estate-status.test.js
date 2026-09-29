@@ -71,7 +71,7 @@ describe('the Estate status tab', () => {
   it('is a page tab Kevin can open, deep-linkable as #tab=estate (and #tab=status)', () => {
     expect(page).toMatch(/id="ptab-estate"[^>]*onclick="switchAgentsView\('estate'\)"/);
     expect(page).toMatch(/<div class="page-view" id="view-estate">/);
-    expect(page).toMatch(/const AGENT_VIEWS = \['dashboard','approvals','checks','estate'\];/);
+    expect(page).toMatch(/const AGENT_VIEWS = \['dashboard','approvals','checks','estate','built'\];/);
     expect(page).toMatch(/'status': 'estate'/);
     expect(page).toMatch(/if\(view==='estate'\) loadEstateStatus\(\);/);
   });
