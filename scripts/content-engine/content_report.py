@@ -17,9 +17,11 @@ nothing out says so in words.
 Usage:
   content_report.py build            # print the report JSON (read-only)
   content_report.py write            # build and upsert the Airtable row
+  content_report.py live             # the same, with what is true NOW read in (every 10 minutes, see live_overlay)
   content_report.py stuck [--hours N]  # sent-back cards with no fix in motion, for daily-ops (exit 2: could not tell)
   content_report.py selftest
-Runs at the end of the hourly publisher and the nightly render job.
+Runs at the end of the hourly publisher and the nightly render job, and every 10 minutes as `live` (launchd
+content-report-live, outside the job queue, so a render holding the queue never freezes the page).
 """
 import argparse, datetime as dt, json, os, re, sys, urllib.parse, urllib.request
 from zoneinfo import ZoneInfo
@@ -337,6 +339,78 @@ def resubmit_reason(day):
         return "could not tell (%s)" % str(ex)[:120]
 
 
+def live_overlay(state, approvals, now=None, read_post=None, read_card=None):
+    """What the hourly publisher would record if it ran now, applied to COPIES of its two state files (Kevin, 29 Sep
+    2026: "when I look at it, I know the actual situation and there's no lag"). The hourly job is the one that writes
+    state; between its runs, and all night, and while a render holds the queue (10:15 and 11:15 lost on 29 Sep) the
+    page used to show posts that had gone out as pending and a card he had approved as waiting.
+
+    The same rules as publish.sync and approval.sync, read-only:
+      - a direct YouTube upload with a slot is live once the slot passes (publish.slot_passed);
+      - a GoHighLevel post past its slot is asked for its status: failed is failed, published is published, and
+        'scheduled' an hour past the slot with no failure went out (GHL never flips its own social posts);
+      - an open approval card reads Kevin's verdict off the task, mapped by approval.verdict_patch.
+    A read that fails leaves the stored status and is listed in `errors`, never guessed. Facebook profile shares,
+    Spotify links and GHL-routed YouTube uploads need the browser or the channel listing and stay with the hourly job.
+    Returns (state copy, approvals copy, info)."""
+    import copy
+    now = now or dt.datetime.now(dt.timezone.utc)
+    st, ap = copy.deepcopy(state), copy.deepcopy(approvals)
+    if read_post is None:
+        _, loc, _ = publish._cfg()
+        def read_post(pid):
+            g = publish.ghl("GET", "/social-media-posting/%s/posts/%s" % (loc, pid))
+            return (g.get("results") or g).get("post") or g
+    if read_card is None:
+        def read_card(task):
+            return watch._airtable("GET", approval.TASKS_API + "/" + task + "?returnFieldsByFieldId=true")["fields"]
+    info = {"checkedAt": now.strftime("%Y-%m-%dT%H:%M:%SZ"), "postsRead": 0, "postsChanged": 0, "cardsRead": 0,
+            "cardsDecided": 0, "errors": []}
+    for day, entry in st.items():
+        if not str(day).isdigit() or not isinstance(entry, dict): continue
+        for p in (entry.get("posts") or {}).values():
+            if p.get("status") != "scheduled" or not publish.slot_passed(p, now): continue   # nothing to learn before the slot
+            if p.get("route") == "api":
+                p["status"] = "published"; p.setdefault("published_at", p["scheduled"]); info["postsChanged"] += 1
+                if p.get("clip") == "full" and p.get("link") and not entry.get("youtube_link"): entry["youtube_link"] = p["link"]
+                continue
+            if not p.get("id"): continue
+            try:
+                post = read_post(p["id"]); info["postsRead"] += 1
+            except (Exception, SystemExit) as ex:
+                info["errors"].append("episode %s %s %s: %s" % (day, p.get("platform"), p.get("clip"), str(ex)[-120:])); continue
+            got, link = post.get("status"), post.get("previewLink") or ""
+            if got == "scheduled" and not link and p.get("platform") != "youtube" and publish.slot_passed(p, now, publish.GHL_SLOT_GRACE_MIN):
+                got = "published"
+            if got and got != p["status"]:
+                p["status"] = got; info["postsChanged"] += 1
+                if got == "published":
+                    p.setdefault("published_at", p["scheduled"])
+                    if link: p["link"] = link
+    for day, a in ap.items():
+        if not (isinstance(a, dict) and a.get("task") and not a.get("verdict")): continue
+        try:
+            t = read_card(a["task"]); info["cardsRead"] += 1
+        except (Exception, SystemExit) as ex:
+            info["errors"].append("card for episode %s: %s" % (day, str(ex)[-120:])); continue
+        outcome = t.get(approval.TF["outcome"])
+        if isinstance(outcome, dict): outcome = outcome.get("name")
+        if not outcome: continue
+        _, verdict = approval.verdict_patch(outcome, t.get(approval.TF["feedback"]), t.get(approval.TF["approvedAt"]))
+        a.update({"verdict": verdict, "outcome": outcome, "feedback": (t.get(approval.TF["feedback"]) or ""),
+                  "synced": now.astimezone(LONDON).strftime("%Y-%m-%dT%H:%M:%S")})
+        info["cardsDecided"] += 1
+    return st, ap, info
+
+
+def build_live(now=None, read_post=None, read_card=None):
+    now = now or dt.datetime.now(dt.timezone.utc)
+    st, ap, info = live_overlay(publish.load_state(), approval.load_state(), now, read_post, read_card)
+    report = build(now, st, ap)
+    report["live"] = info
+    return report
+
+
 def write(report, dry_run=False):
     now = report["asOf"].replace("Z", ".000Z")
     status = "Worked"
@@ -359,8 +433,60 @@ def write(report, dry_run=False):
 
 def selftest():
     real_holds = publish.held_days; publish.held_days = lambda path=None: {}   # the real hold file never steers the selftest
-    try: _selftest()
+    try: _selftest_live(); _selftest()
     finally: publish.held_days = real_holds
+
+
+def _selftest_live():
+    """The live check (29 Sep 2026), on the three records Kevin approved at the build gate, read that night at 23:35:
+    2075's YouTube Short (direct upload, slot 23:00), 2074's TikTok Learnings post (GoHighLevel, slot 19:30) and the
+    2077 card he approved at 17:30. Plus a post GoHighLevel failed, a read that errors, a post inside its grace hour
+    and a post not due yet. Nothing reaches GoHighLevel or Airtable; the stored state is never touched."""
+    import copy
+    now = dt.datetime(2026, 9, 29, 22, 35, tzinfo=dt.timezone.utc)
+    yt_full = lambda link, at: {"platform": "youtube", "clip": "full", "status": "published", "route": "api", "link": link, "published_at": at, "scheduled": at}
+    ghl = lambda plat, clip, pid, when, status="scheduled": {"platform": plat, "clip": clip, "status": status, "id": pid, "scheduled": when}
+    state = {"_cursor": 2077,
+             "2074": {"youtube_link": "https://youtu.be/prXjSYKZ0YE", "posts": {
+                 "youtube|full|y": yt_full("https://youtu.be/prXjSYKZ0YE", "2026-09-28T17:00:00Z"),
+                 "tiktok|lfmd|t": ghl("tiktok", "lfmd", "6abb7e802e91602dfd467eec", "2026-09-29T18:30:00Z"),
+                 "instagram|summary|i": ghl("instagram", "summary", "FAILED1", "2026-09-29T20:00:00Z"),
+                 "linkedin|lfmd|l": ghl("linkedin", "lfmd", "READERR", "2026-09-29T19:00:00Z")}},
+             "2075": {"youtube_link": "https://youtu.be/1WdR932ntsc", "posts": {
+                 "youtube|full|y": yt_full("https://youtu.be/1WdR932ntsc", "2026-09-28T10:33:51Z"),
+                 "youtube|lfmd|y": {"platform": "youtube", "clip": "lfmd", "status": "scheduled", "route": "api", "id": "hOf30fVYwDA",
+                                    "link": "https://youtu.be/hOf30fVYwDA", "scheduled": "2026-09-29T22:00:00Z"},
+                 "threads|lfmd|h": ghl("threads", "lfmd", "INGRACE", "2026-09-29T22:15:00Z"),
+                 "facebook|lfmd|f": ghl("facebook", "lfmd", "LIVELINK", "2026-09-29T22:05:00Z"),
+                 "tiktok|summary|t": ghl("tiktok", "summary", "TOMORROW", "2026-09-30T10:00:00Z")}}}
+    approvals = {"2077": {"task": "reccNLyc0kzOzhh4v", "record": "reclxq5r7o6ffaHLi"}, "2078": {"task": "recOPEN", "record": "recX"}}
+    ghl_says = {"6abb7e802e91602dfd467eec": {"status": "scheduled"}, "FAILED1": {"status": "failed", "error": "token expired"},
+                "INGRACE": {"status": "scheduled"}, "LIVELINK": {"status": "published", "previewLink": "https://facebook.com/p/1"}}
+    asked = []
+    def read_post(pid):
+        asked.append(pid)
+        if pid == "READERR": raise SystemExit("GHL GET /posts/READERR -> 502: gateway")
+        return ghl_says[pid]
+    cards = {"reccNLyc0kzOzhh4v": {approval.TF["outcome"]: "Approved as-is", approval.TF["approvedAt"]: "2026-09-29T16:30:51.555Z"}, "recOPEN": {}}
+    before_s, before_a = copy.deepcopy(state), copy.deepcopy(approvals)
+    st, ap, info = live_overlay(state, approvals, now, read_post, cards.__getitem__)
+    assert state == before_s and approvals == before_a, "the stored state is never changed"
+    P = lambda d, k: st[d]["posts"][k]["status"]
+    assert P("2075", "youtube|lfmd|y") == "published", "2075's YouTube Short: a direct upload is live once its slot passes"
+    assert P("2074", "tiktok|lfmd|t") == "published", "2074's TikTok Learnings post: 'scheduled' an hour past its slot with no failure went out"
+    assert P("2074", "instagram|summary|i") == "failed", "a post GoHighLevel failed is shown failed, never out"
+    assert P("2074", "linkedin|lfmd|l") == "scheduled" and any("READERR" in e or "502" in e for e in info["errors"]), "a read that fails is listed, never guessed"
+    assert P("2075", "threads|lfmd|h") == "scheduled", "inside the grace hour a 'scheduled' post is not called out yet"
+    assert P("2075", "facebook|lfmd|f") == "published" and st["2075"]["posts"]["facebook|lfmd|f"]["link"] == "https://facebook.com/p/1"
+    assert P("2075", "tiktok|summary|t") == "scheduled" and "TOMORROW" not in asked, "a post not due yet is not asked about"
+    assert "hOf30fVYwDA" not in asked, "a direct YouTube upload needs no GoHighLevel read"
+    assert ap["2077"]["verdict"] == "approved" and "verdict" not in ap["2078"], "2077: approved on the card counts at once; 2078 still waits"
+    assert info["postsRead"] == 4 and info["cardsRead"] == 2 and info["cardsDecided"] == 1, info
+    assert publish.section_status(st["2075"])["YouTube Short"] == "done" and publish.section_status(state["2075"])["YouTube Short"] == "pending"
+    rep_live, rep_old = build(now, st, ap, {}, {}, plan=[], skipped=[], holds={}), build(now, state, approvals, {}, {}, plan=[], skipped=[], holds={})
+    assert rep_old["waitingForKevin"] == [2077, 2078] and rep_live["waitingForKevin"] == [2078], (rep_old["waitingForKevin"], rep_live["waitingForKevin"])
+    assert publish.slot_passed({"scheduled": "2026-09-29T22:00:00Z"}, now) and not publish.slot_passed({"scheduled": "2026-09-29T22:00:00Z"}, now, 60)
+    assert not publish.slot_passed({}, now) and not publish.slot_passed({"scheduled": "rubbish"}, now)
 
 
 def _selftest():
@@ -460,7 +586,7 @@ def _selftest():
                two, {}, plan=[], skipped=[], holds={2059: "x"})
     assert sh["blocker"] == {"day": 2058, "why": "sent back on 14 Sep, not resubmitted"} and sh["heldBehind"] == [2059], (sh["blocker"], sh["heldBehind"])
     assert "day 2058 is not approved yet" in sh["heldWhy"] and "behind day 2058 (sent back on 14 Sep" in sh["headline"], (sh["heldWhy"], sh["headline"])
-    print(json.dumps({"checks": 46, "failed": []}))
+    print(json.dumps({"checks": 61, "failed": []}))
 
 
 if __name__ == "__main__":
@@ -470,10 +596,16 @@ if __name__ == "__main__":
     elif a.mode == "build": print(json.dumps(build(), indent=1))
     elif a.mode == "write":
         rep = build(); lift_gap_pause(rep); write(rep); print("content report: " + rep["headline"])
+    elif a.mode == "live":
+        # every 10 minutes, outside the job queue (29 Sep 2026). Read-only against the platforms and the engine's state.
+        rep = build_live(); write(rep); lv = rep["live"]
+        print("content report (live): %d post(s) read, %d changed, %d card(s) read, %d decided. %s"
+              % (lv["postsRead"], lv["postsChanged"], lv["cardsRead"], lv["cardsDecided"], rep["headline"]))
+        for e in lv["errors"]: print("content report (live): could not read %s" % e, file=sys.stderr)
     elif a.mode == "stuck":
         # daily-ops reads this (Kevin, 27 Sep 2026). Exit 2 when the state cannot be read: never "nothing stuck".
         try: rows = stuck_sent_back(hours=a.hours, why_waiting=resubmit_reason)
         except Exception as ex:                                   # noqa: BLE001
             print("content stuck: could not tell (%s)" % str(ex)[:200], file=sys.stderr); sys.exit(2)
         print(json.dumps({"stuck": rows}, indent=1))
-    else: raise SystemExit("usage: content_report.py build | write | stuck [--hours N] | selftest")
+    else: raise SystemExit("usage: content_report.py build | write | live | stuck [--hours N] | selftest")

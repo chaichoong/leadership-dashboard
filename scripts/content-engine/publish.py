@@ -821,6 +821,15 @@ MONETISE_RECHECK_HOURS = 6
 GHL_SLOT_GRACE_MIN = 60   # a GHL post still 'scheduled' this long after its slot, with no failure, went out
 
 
+def slot_passed(p, now=None, minutes=0):
+    """True when post p had a scheduled slot and `now` is at least `minutes` past it. One rule for the hourly sync and
+    the ten-minute report check (content_report.live_overlay, 29 Sep 2026), so the two can never disagree."""
+    if not p.get("scheduled"): return False
+    try: when = dt.datetime.fromisoformat(p["scheduled"].replace("Z", "+00:00"))
+    except (TypeError, ValueError): return False
+    return (now or dt.datetime.now(dt.timezone.utc)) >= when + dt.timedelta(minutes=minutes)
+
+
 MONETISED = ("On", "Sharing")     # Sharing: ads run, revenue split with a copyright claimant; nothing more to switch
 MIDROLL_SETTLED = ("on", "not-eligible")   # not-eligible is an answer: under 8 minutes YouTube allows no mid-roll
 NO_VIDEO_ID = "no-video-id"
@@ -1339,7 +1348,7 @@ def sync():
                     print("episode %s: thumbnail not set on %s (%s)" % (day, p["id"], str(ex)[-120:]), file=sys.stderr)
             if p.get("status") in ("published", "draft"): continue     # a draft (test mode) never moves on its own
             if p.get("route") == "api":                                # uploaded straight to YouTube: the slot passing is the publish
-                if p.get("scheduled") and dt.datetime.now(dt.timezone.utc) >= dt.datetime.fromisoformat(p["scheduled"].replace("Z", "+00:00")):
+                if slot_passed(p):
                     p["status"] = "published"; p.setdefault("published_at", p["scheduled"]); changed = True
                     for f in LINK_FIELDS.get(("youtube", p["clip"]), ()): links.setdefault(f, p["link"])
                     if p["clip"] == "full" and not entry.get("youtube_link"): entry["youtube_link"] = p["link"]
@@ -1377,8 +1386,7 @@ def sync():
                 # The Short is looked up on the Shorts tab (15 Sep 2026).
                 found = youtube_link_from_channel(int(day), p.get("scheduled"), url=SHORTS_URL if p["clip"] == "lfmd" else CHANNEL_URL)
                 if found: st, link = "published", found; p["status"] = st; p["note"] = "link read from the channel listing; GHL never updated its post"; print("episode %s: YouTube live as %s (GHL post still says scheduled)" % (day, found))
-            if st == "scheduled" and not link and p["platform"] != "youtube" and p.get("scheduled") and dt.datetime.now(dt.timezone.utc) >= \
-                    dt.datetime.fromisoformat(p["scheduled"].replace("Z", "+00:00")) + dt.timedelta(minutes=GHL_SLOT_GRACE_MIN):
+            if st == "scheduled" and not link and p["platform"] != "youtube" and slot_passed(p, minutes=GHL_SLOT_GRACE_MIN):
                 # 14 Sep 2026: GoHighLevel never flips a social post from 'scheduled' (no previewLink, no publishedAt,
                 # no error) — 51 posts from 9-11 Sep still read 'scheduled' three days on while the posts were live.
                 # An hour past its slot with no failure recorded, the post went out; the record and the Estate status

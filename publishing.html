@@ -45,7 +45,7 @@
 <body>
 <div class="wrap">
     <h1>Publishing</h1>
-    <div class="sub">What the Content Engine published each day and what is booked next. Built from what the engine actually did, refreshed every hour from 07:15 to 20:15 and after the nightly render. This page reads it again every 5 minutes.</div>
+    <div class="sub">What the Content Engine published each day and what is booked next. Checked live every 10 minutes, day and night, even while a render runs. Facebook profile shares and Spotify links are confirmed hourly. This page reads the report again every 2 minutes.</div>
 
     <div id="auth" class="card" hidden>
         <h2>Connect</h2>
@@ -56,7 +56,8 @@
         <div data-sync-bar="publishing"></div>
         <div class="card">
             <div id="headline" class="headline muted">Loading...</div>
-            <div class="bar"><span id="updated"></span></div>
+            <div class="bar"><span id="updated" aria-live="polite"></span></div>
+            <div class="bar"><span id="liveErrors"></span></div>
         </div>
         <div id="error"></div>
         <div id="body"></div>
@@ -68,34 +69,22 @@
 const BASE_ID = 'appnqjDpqDniH3IRl';
 const ESTATE_TBL = 'tblZVrdzivyBueZVf';
 const REPORT_KEY = 'content-publishing';
-// The hourly publisher writes it 07:15-20:15 London; the night render writes it once when it finishes. In the day a
-// gap over 90 minutes means it stopped; overnight the last evening write stands until morning (review, 15 Sep 2026).
-function staleLimitMin(now) {
-    const h = Number(new Date(now).toLocaleString('en-GB', { timeZone: 'Europe/London', hour: '2-digit', hourCycle: 'h23' }));
-    return h >= 9 && h <= 20 ? 90 : 12 * 60;   // the last hourly write lands about 20:15; from 21:00 the overnight window applies
+// The live check (launchd content-report-live, content_report.py live) rewrites the report every 10 minutes round the
+// clock, outside the job queue, since 29 Sep 2026. Three missed checks means it has stopped, day or night.
+function staleLimitMin() {
+    return 30;
 }
 // A page left open used to show the report it loaded with, for hours (Kevin, 21 Sep 2026: "not staying up to date").
-const AUTO_RELOAD_MS = 5 * 60 * 1000, READ_TIMEOUT_MS = 30 * 1000;
-// The hourly publisher writes the report 07:15-20:15 London (it lands a minute or two after the slot), the night render
-// once when it finishes. The next write is the first hourly slot after the one the report came from (review, 21 Sep
-// 2026: counting from the clock said 08:15 at 07:15, before the 07:15 write had landed).
-const HOURLY_SLOTS = [...Array(14)].map((_, i) => (7 + i) * 60 + 15);   // 07:15 ... 20:15, minutes after midnight
-function londonParts(t) {
-    const p = new Intl.DateTimeFormat('en-GB', { timeZone: 'Europe/London', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).formatToParts(new Date(t));
-    const g = k => p.find(x => x.type === k).value;
-    return { date: `${g('year')}-${g('month')}-${g('day')}`, min: Number(g('hour')) * 60 + Number(g('minute')) };
+const AUTO_RELOAD_MS = 2 * 60 * 1000, READ_TIMEOUT_MS = 30 * 1000;
+// The hourly publisher and the night render write it too, straight after their own runs.
+const LIVE_EVERY_MIN = 10;
+function londonHHMM(t) {
+    return new Intl.DateTimeFormat('en-GB', { timeZone: 'Europe/London', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).format(new Date(t));
 }
 function nextUpdateText(now, updated) {
-    const n = londonParts(now), u = updated ? londonParts(updated) : null;
-    const doneMin = u && u.date === n.date ? u.min : -1;               // -1: nothing written yet today
-    if (doneMin >= 21 * 60) return 'Next update about 07:15.';         // tonight's render has written already
-    if (doneMin === -1 && n.min < HOURLY_SLOTS[0]) {
-        const renderWrote = u && u.min >= 21 * 60 && now - new Date(updated).getTime() < 12 * 3600 * 1000;
-        return renderWrote ? 'Next update about 07:15.' : 'Next update when the night render finishes, or at 07:15.';
-    }
-    const next = HOURLY_SLOTS.find(slot => slot > doneMin);
-    if (next === undefined) return 'Next update after tonight\'s render, then 07:15.';
-    return `Next update about ${String(Math.floor(next / 60)).padStart(2, '0')}:15.`;
+    const next = updated ? new Date(updated).getTime() + LIVE_EVERY_MIN * 60 * 1000 : NaN;
+    if (isNaN(next)) return 'Checked every 10 minutes.';
+    return now >= next ? 'Next check due now.' : `Next check about ${londonHHMM(next)}.`;
 }
 const QUEUE_URL = 'os/agents/index.html#tab=approvals';
 const SECTIONS = ['YouTube episode', 'YouTube Short', 'Teaser clips', 'Learnings clips', 'Blog', 'Podcast', 'Facebook share'];
@@ -150,9 +139,13 @@ function render(rec) {
     document.getElementById('headline').classList.remove('muted');
     const updated = f.Updated || r.asOf;
     const staleMin = updated ? Math.round((Date.now() - new Date(updated).getTime()) / 60000) : null;
-    document.getElementById('updated').innerHTML = staleMin !== null && staleMin > staleLimitMin(Date.now())
-        ? `<span class="stale">Last updated ${esc(ago(updated))}. The publisher has stopped writing this report, so everything below may be out of date.</span>`
+    document.getElementById('updated').innerHTML = staleMin !== null && staleMin > staleLimitMin()
+        ? `<span class="stale">Last updated ${esc(ago(updated))}. The ten-minute check has stopped writing this report, so everything below may be out of date.</span>`
         : `Updated ${esc(ago(updated))}. ${esc(nextUpdateText(Date.now(), updated))}`;
+    // What the live check could not read this time is said, never shown as done (29 Sep 2026)
+    const liveErrors = (r.live && r.live.errors) || [];
+    document.getElementById('liveErrors').innerHTML = liveErrors.length
+        ? `<span class="stale">${esc(liveErrors.length)} item(s) could not be checked live this time, so they show as last recorded: ${esc(liveErrors.slice(0, 3).join('; '))}</span>` : '';
 
     const hist = (r.history || []).map(h => {
         if (!h.episodes.length) return `<tr class="none"><td style="white-space:nowrap">${esc(dayLabel(h.date, r.today))}</td><td colspan="3"><strong>Nothing went out</strong></td></tr>`;
@@ -225,7 +218,7 @@ async function readAndRender() {
         const rec = await readReport();
         _row = rec; _readState = 'ready';
         if (!rec) {
-            document.getElementById('headline').textContent = 'No report yet. The hourly publisher writes it on its next run.';
+            document.getElementById('headline').textContent = 'No report yet. The ten-minute check writes it on its next run.';
             document.getElementById('body').innerHTML = '';
             _report = null;
             if (typeof markTabSynced === 'function') markTabSynced('publishing');
@@ -250,7 +243,7 @@ function registerChecks() {
             { name: 'Report row read', kind: 'sync', run: () => String(_readState).indexOf('error') === 0 ? { status: 'fail', detail: String(_readState).slice(7) }
                 : _readState !== 'ready' ? { status: 'warn', detail: 'Not loaded yet' } : _row ? { status: 'pass', detail: 'The content-publishing row is in the Estate Status table' } : { status: 'fail', detail: 'No content-publishing row: the publisher has never written the report' } },
             { name: 'Report fresh', kind: 'automation', run: () => { const u = _row && (_row.fields || {}).Updated; if (!u) return { status: 'warn', detail: 'No update time on the row' };
-                const m = Math.round((Date.now() - new Date(u).getTime()) / 60000); return m > staleLimitMin(Date.now()) ? { status: 'fail', detail: `Last written ${ago(u)}; the hourly publisher writes it` } : { status: 'pass', detail: `Written ${ago(u)}` }; } },
+                const m = Math.round((Date.now() - new Date(u).getTime()) / 60000); return m > staleLimitMin() ? { status: 'fail', detail: `Last written ${ago(u)}; the ten-minute check writes it` } : { status: 'pass', detail: `Written ${ago(u)}` }; } },
             { name: 'Something went out yesterday', kind: 'automation', run: () => { const h = (_report && _report.history) || []; if (h.length < 2) return { status: 'warn', detail: 'No history in the report' };
                 return h[1].episodes.length ? { status: 'pass', detail: h[1].episodes.map(e => `Episode ${e.day}`).join(', ') } : { status: 'fail', detail: 'Nothing was published yesterday' }; } },
             { name: 'Nothing stuck', kind: 'automation', run: () => { if (!_report) return { status: 'warn', detail: 'No report loaded' };
@@ -269,7 +262,7 @@ function start() { document.getElementById('auth').hidden = true; document.getEl
     registerChecks();
     if (PAT) start(); else showAuth();
     // Inside the app the page sits in a frame the shell hides on other tabs, and switching back fires no visibilitychange
-    // (review, 21 Sep 2026). So one 15-second tick: a hidden page never reads; a page in view reads every 5 minutes, and
+    // (review, 21 Sep 2026). So one 15-second tick: a hidden page never reads; a page in view reads every 2 minutes, and
     // straight away when it comes back into view with a copy over a minute old.
     const hiddenInShell = () => !!window.frameElement && window.frameElement.offsetParent === null;   // frameElement is null across origins
     const live = () => PAT && !document.getElementById('main').hidden && document.visibilityState === 'visible' && !hiddenInShell();
