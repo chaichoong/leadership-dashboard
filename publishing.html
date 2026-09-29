@@ -87,7 +87,10 @@ function londonDayMin(t) {
 }
 function publisherDueSlot(now) {
     const t = now - PUBLISHER_LATE_MIN * 60 * 1000, l = londonDayMin(t);
-    if (l.min < PUBLISHER_FIRST_SLOT) return { date: londonDayMin(t - (l.min + 1) * 60 * 1000).date, min: PUBLISHER_LAST_SLOT };   // yesterday's 20:15
+    if (l.min < PUBLISHER_FIRST_SLOT) {                                   // yesterday's 20:15, from the date itself: 25 Oct has 25 hours
+        const [y, m, d] = l.date.split('-').map(Number);
+        return { date: new Date(Date.UTC(y, m - 1, d - 1)).toISOString().slice(0, 10), min: PUBLISHER_LAST_SLOT };
+    }
     return { date: l.date, min: Math.min(PUBLISHER_LAST_SLOT, Math.floor((l.min - 15) / 60) * 60 + 15) };
 }
 function publisherNote(now, publisherAt) {

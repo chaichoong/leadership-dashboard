@@ -183,6 +183,9 @@ test('a stopped hourly publisher is named even though the report is fresh', asyn
     ['08:31 BST, the 07:15 run never came', '2026-10-01T07:31:00Z', '2026-09-30T19:17:00Z'],
     ['03:00 BST, the night render stamped 01:05', '2026-10-01T02:00:00Z', '2026-10-01T00:05:00Z'],
     ['09:00 GMT in December, last ran 08:17', '2026-12-01T09:00:00Z', '2026-12-01T08:17:00Z'],
+    ['02:20 GMT on 25 Oct, the 25-hour day, last ran 20:17 BST the night before', '2026-10-25T02:20:00Z', '2026-10-24T19:17:00Z'],
+    ['08:29 GMT on 25 Oct, last ran 20:17 BST the night before', '2026-10-25T08:29:00Z', '2026-10-24T19:17:00Z'],
+    ['01:30 GMT on 1 Jan, last ran 20:17 on 31 Dec', '2027-01-01T01:30:00Z', '2026-12-31T20:17:00Z'],
     ['not stamped yet', '2026-09-30T13:00:00Z', ''],
   ].map(([label, now, at]) => [label, publisherNote(Date.parse(now), at).stale]));
   expect(cases).toEqual([
@@ -196,6 +199,9 @@ test('a stopped hourly publisher is named even though the report is fresh', asyn
     ['08:31 BST, the 07:15 run never came', true],
     ['03:00 BST, the night render stamped 01:05', false],
     ['09:00 GMT in December, last ran 08:17', false],
+    ['02:20 GMT on 25 Oct, the 25-hour day, last ran 20:17 BST the night before', false],
+    ['08:29 GMT on 25 Oct, last ran 20:17 BST the night before', false],
+    ['01:30 GMT on 1 Jan, last ran 20:17 on 31 Dec', false],
     ['not stamped yet', false],
   ]);
 });
