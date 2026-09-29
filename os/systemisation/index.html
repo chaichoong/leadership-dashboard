@@ -1871,7 +1871,11 @@ async function aiDescRow(btn){
         });
         if(!res.ok) throw new Error('AI request failed');
         const data = await res.json();
-        const text = (data.content?.[0]?.text||'').trim();
+        // Keep the video link. The [loom:] stamp is how checkVideoTasks() knows this
+        // workflow's SOP was built from its video; dropping it made the next fresh
+        // browser rebuild the SOP (AI call, Drive upload, PATCHes) on page load.
+        const loomStamp = (descInput.value.match(/\[loom:https:\/\/www\.loom\.com\/share\/[a-zA-Z0-9]+\]/)||[''])[0];
+        const text = [(data.content?.[0]?.text||'').trim(), loomStamp].filter(Boolean).join('\n');
         descInput.value = text;
         descInput.style.height='auto'; descInput.style.height=descInput.scrollHeight+'px';
         const recId = tr.dataset.id;

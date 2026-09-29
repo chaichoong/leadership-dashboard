@@ -28,6 +28,8 @@ const TASKS_TBL = 'tblqB8b22hKBL4PF1';
 const WF_NAME = 'fldsaS0jeoSRuJN28';
 const WF_DESCRIPTION = 'fld1cGXzKp8ab5nBr';
 const WF_SOP_DOCUMENT = 'fldW4qoDv2mrTNvu7';
+const WF_FULFIL_STAGE = 'fldoN7pdUv4CIcKf2';
+const STAGE = 'F - Find & Grab Attention';
 const TF_STATUS = 'fldx4qCw17UfrKpaN';
 const TF_NOTES = 'fldR7apBzSp3oxFxz';
 
@@ -86,6 +88,7 @@ async function loadSystemisation(page, { workflowLoom, hasSop = true }) {
             records = [{ id: WF_ID, fields: {
                 [WF_NAME]: 'Reconciliation',
                 [WF_DESCRIPTION]: desc,
+                [WF_FULFIL_STAGE]: STAGE,
                 ...(hasSop ? { [WF_SOP_DOCUMENT]: SOP_JSON } : {}),
             } }];
         } else if (url.includes(TASKS_TBL)) {
@@ -145,3 +148,26 @@ for (const [label, workflowLoom, hasSop] of [
         expect(JSON.parse(stamp.body).fields[WF_DESCRIPTION]).toContain('[loom:' + TASK_LOOM + ']');
     });
 }
+
+// Follow-up (29 Sep 2026): the AI description button (✨) replaced the whole description,
+// deleting the [loom:] stamp that marks the SOP as built. The next fresh browser then saw
+// "no stamp" and rebuilt the SOP on load, the bug above in a narrower form.
+test('the AI description button keeps the Loom link on the workflow', async ({ page }) => {
+    const { writes } = await loadSystemisation(page, { workflowLoom: TASK_LOOM });
+    await expect(page.locator('#main')).toBeVisible({ timeout: 20000 });
+    expect(writes, 'control: the load itself must write nothing').toEqual([]);
+
+    // Answer the one AI call the button makes (registered last, so it wins).
+    await page.route('**/claude-proxy.kevinbrittain.workers.dev/**', route => route.fulfill({
+        status: 200, contentType: 'application/json',
+        body: JSON.stringify({ content: [{ type: 'text', text: 'Matches every bank line to a cost or a rent.' }] }),
+    }));
+    await page.evaluate((stage) => openDrawer(stage, 'fulfill'), STAGE);
+    await page.locator(`tr[data-id="${WF_ID}"] .btn-ai-inline`).click();
+
+    const isSave = w => w.method === 'PATCH' && w.url.endsWith('/' + WORKFLOWS_TBL + '/' + WF_ID);
+    await expect.poll(() => writes.some(isSave), { timeout: 10000,
+        message: 'the generated description was never saved' }).toBe(true);
+    expect(JSON.parse(writes.find(isSave).body).fields[WF_DESCRIPTION])
+        .toBe('Matches every bank line to a cost or a rent.\n[loom:' + TASK_LOOM + ']');
+});
