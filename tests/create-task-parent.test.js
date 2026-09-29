@@ -20,14 +20,21 @@ F = g.F
 calls = []
 PARENT = json.loads(${JSON.stringify(JSON.stringify(parentFields))})
 TWINS = json.loads(${JSON.stringify(JSON.stringify(twins))})
+CREATED = {}
 def req(method, path, body=None):
     calls.append([method, path.split("?")[0]])
     if method == "GET" and "filterByFormula" in path:
         return {"records": [{"id": t[0], "fields": {F["name"]: t[1] or fields[F["name"]]}} for t in TWINS]}
+    # The read-back of the NEW record (finding 20260925-daily-ops-613): the create
+    # now proves its fields stuck, so the stub has to model a real read-back —
+    # returning the PARENT for every GET made every field look dropped.
+    if method == "GET" and "recNEWCHILD000001" in path:
+        return {"id": "recNEWCHILD000001", "fields": dict(CREATED)}
     if method == "GET":
         return {"id": "recPFxDmGX5pbonD2", "createdTime": "2026-09-20T09:00:00.000Z",
                 "fields": {F[k]: v for k, v in PARENT.items()}}
     if method == "POST":
+        CREATED.update(body["fields"])
         return {"id": "recNEWCHILD000001", "fields": body["fields"]}
     return {}
 g._request = req

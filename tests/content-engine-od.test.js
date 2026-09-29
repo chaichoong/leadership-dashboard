@@ -23,7 +23,11 @@ describe('content-engine OD lane', () => {
   it('od_illustrate selftest: Gemini prompt, required lines, the text check, no-key fallback', () => selftest('od_illustrate.py', 13));
   it('od_board selftest: five boards from the lead magnet components, one hero each, no name, a real render', () => selftest('od_board.py', 10), 180000);
   it('od_compose selftest: the vendored Epic Infographics method, the OD design language, the preflight checker runs', () => selftest('od_compose.py', 18), 180000);
-  it('publish selftest including the brand guard (cross-brand refused by name)', () => selftest('publish.py', 32));
+  // 10s, not the 5s default: the selftest genuinely needs ~3.1s, and it went red once
+  // on the 25 Sep fixer run with 203 test files sharing 8 cores while passing in
+  // isolation (finding 20260925-queue-fixer-612). A flaky red on the pre-push gate is
+  // what teaches people to reach for SKIP_SYNC_TESTS=1.
+  it('publish selftest including the brand guard (cross-brand refused by name)', () => selftest('publish.py', 32), 10000);
 
   // A selftest that reaches the network is not a selftest, it is a flaky gate. publish.py's
   // stubbed blog left the article PUBLISHED with no read_time, which is exactly the state that

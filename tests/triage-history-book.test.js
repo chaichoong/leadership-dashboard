@@ -20,7 +20,8 @@
 
 import { describe, it, expect } from 'vitest';
 import { execFileSync } from 'node:child_process';
-import { readFileSync } from 'node:fs';
+import { readFileSync, writeFileSync, mkdirSync, mkdtempSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -164,5 +165,82 @@ describe('the python selftest covers the new helpers', () => {
   it('selftest passes', () => {
     const out = execFileSync('/usr/bin/python3', [TRIAGE, 'selftest'], { encoding: 'utf8' });
     expect(out).toMatch(/selftest OK/);
+  });
+});
+
+// A DEAD BOOK MUST FAIL THE SLOT (finding 20260926-exceptions-627).
+//
+// The escalation leaves inbound-triage.py as a word — BROKEN — and slot-postrun.sh
+// is what turns that word into a non-zero slot. Three things have to hold together,
+// and none of them is visible from either file alone:
+//   1. the runner's BAD_ERE still matches the word;
+//   2. the runner's TOLERATED_ERE does NOT match the escalation line (it carries
+//      `GMAIL RATE METRIC STILL FULL`, which is exactly the phrase this slot
+//      tolerates — echoing the raw reason onto the line would subtract it);
+//   3. slot-postrun.sh flips rc=0 to exit 1 on it.
+// So this drives the real scripts end to end rather than grepping either of them.
+describe('a dead history book fails the slot instead of narrating', () => {
+  const POSTRUN = path.join(root, 'scripts/slot-postrun.sh');
+
+  // The wrapper's own argument list, read from the file, so a change to the
+  // runner's patterns is caught here rather than discovered in production.
+  const args = runner.match(/slot-postrun\.sh"[\s\S]*?\n\s*'([^']*)' *\\\n\s*'([^']*)' *\\\n\s*'([^']*)'/);
+
+  function escalationLine() {
+    const dir = mkdtempSync(path.join(tmpdir(), 'triage-state-'));
+    const script = `
+import importlib.util, sys, os
+os.environ["INBOUND_TRIAGE_DIR"] = ${JSON.stringify(dir)}
+spec = importlib.util.spec_from_file_location("it", ${JSON.stringify(TRIAGE)})
+it = importlib.util.module_from_spec(spec); spec.loader.exec_module(it)
+it.write_state({"history_built_ms": 1788263430621,
+                "history_build_failed_ms": 1790324137597,
+                "history_build_fail_count": 3,
+                "history_build_fail_kind": "rate",
+                "history_build_fail_reason": "GMAIL RATE METRIC STILL FULL after 585s"})
+sys.exit(it.cmd_history_stale())
+`;
+    let out = '', code = 0;
+    try {
+      out = execFileSync('/usr/bin/python3', ['-c', script], { encoding: 'utf8' });
+    } catch (e) { out = e.stdout || ''; code = e.status; }
+    return { out, code };
+  }
+
+  it('the runner still passes the three patterns this depends on', () => {
+    expect(args).not.toBeNull();
+    expect(args[2]).toMatch(/BROKEN/);                      // BAD_ERE
+    expect(args[3]).toMatch(/GMAIL RATE METRIC STILL FULL/); // TOLERATED_ERE
+  });
+
+  it('the escalation line says BROKEN and never carries the tolerated phrase', () => {
+    const { out, code } = escalationLine();
+    expect(code).toBe(1);                       // no rebuild is attempted
+    const j = JSON.parse(out.trim().split('\n').pop());
+    expect(j.given_up).toBe(true);
+    expect(j.escalate).toMatch(/HISTORY BOOK BROKEN/);
+    expect(j.escalate).toMatch(/history-build --force/);
+    expect(out).not.toMatch(/GMAIL RATE METRIC STILL FULL/);
+    expect(j.cooldown).toBeUndefined();
+  });
+
+  it('slot-postrun turns that line into exit 1 on an rc=0 run', () => {
+    const { out } = escalationLine();
+    const work = mkdtempSync(path.join(tmpdir(), 'postrun-'));
+    const repo = path.join(work, 'repo');
+    mkdirSync(path.join(repo, 'monitoring'), { recursive: true });
+    mkdirSync(path.join(work, 'scratch'), { recursive: true });
+    const log = path.join(work, 'log');
+    writeFileSync(log, out);
+    const marker = path.join(work, 'marker');
+    writeFileSync(marker, '');
+    let status = 0;
+    try {
+      execFileSync('/bin/bash', [POSTRUN, 'inbound-triage', '0', log, '0', marker,
+                                 path.join(work, 'scratch'),
+                                 args[1], args[2], args[3]],
+                   { encoding: 'utf8', env: { ...process.env, SLOT_POSTRUN_REPO: repo } });
+    } catch (e) { status = e.status; }
+    expect(status).toBe(1);
   });
 });
