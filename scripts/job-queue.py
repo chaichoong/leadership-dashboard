@@ -400,7 +400,86 @@ PROBE_MIN_CANDIDATES = 3
 PROBE_MAX_SUBDIRS = 12
 
 
+# ── A SCHEDULED JOB MUST BE ABLE TO OPEN A DRIVE PLACEHOLDER (29 Sep 2026) ───
+#
+# launchd starts every job with macOS's "materialise dataless files" policy
+# OFF: getiopolicy_np reads 1. Google Drive keeps any folder this Mac has not
+# opened lately as a dataless placeholder, and with the policy off a job cannot
+# open one: os.listdir raises `[Errno 11] Resource deadlock avoided` and
+# os.path.exists answers False for every file inside. A Claude session or Finder
+# runs with the policy ON (2), opens the folder as a side effect, and the jobs
+# work again until Drive turns the folder back into a placeholder. That is the
+# "works for a day, then fails" pattern: content-engine skipped the night of
+# 28 Sep (its raw folder), 2074 and 2075 went out with no socials, blog or
+# podcast (their day folders), and the EDEADLK nights before that.
+#
+# Measured 29 Sep 2026 from a launchd probe: policy 1, listdir of day 2070 ->
+# EDEADLK; policy set to 2, day 2071 -> 10 files. The policy is inherited by
+# children (bash -> bash -> python3 read 2), so it is switched on once, first
+# thing in main(), and every wrapped job and everything it starts inherits it.
+IOPOL_TYPE_VFS_MATERIALIZE_DATALESS_FILES = 3
+IOPOL_SCOPE_PROCESS = 0
+IOPOL_MATERIALIZE_DATALESS_FILES_ON = 2
+
+
+def allow_drive_placeholders():
+    """Switch the dataless-file policy ON for this process and its children.
+    Returns the policy now in force, or None where it cannot be read (not macOS)."""
+    try:
+        import ctypes
+        libc = ctypes.CDLL(None)
+        libc.setiopolicy_np(IOPOL_TYPE_VFS_MATERIALIZE_DATALESS_FILES,
+                            IOPOL_SCOPE_PROCESS, IOPOL_MATERIALIZE_DATALESS_FILES_ON)
+        return libc.getiopolicy_np(IOPOL_TYPE_VFS_MATERIALIZE_DATALESS_FILES,
+                                   IOPOL_SCOPE_PROCESS)
+    except (OSError, AttributeError) as e:
+        print("job-queue: cannot set the Drive placeholder policy (%s)" % e, file=sys.stderr)
+        return None
+
+
+# With the placeholder policy ON, listing a cold folder and opening a cold file
+# both wait on Drive (a cold file downloads before its first byte comes back;
+# the raw video folder's smallest file is 40 MB), and a Drive that has stopped
+# serving can hold either for a long time. The old probe failed fast with the
+# wrong answer; this one must not hang instead, because the re-check after a
+# long queue wait runs while the lock is held. So the WHOLE probe runs on a
+# daemon thread and a probe that has not answered in time reads "not ready".
+def _probe_seconds():
+    try:
+        v = float(os.environ.get("JOB_QUEUE_DRIVE_PROBE_SECONDS", "90"))
+    except ValueError:
+        return 90.0
+    return v if 0 < v < 3600 else 90.0    # nan, inf, zero or negative: the default
+
+
+DRIVE_PROBE_SECONDS = _probe_seconds()
+
+
 def drive_ready(path, timeout=4):
+    """(ok, reason) for a Google Drive folder, answered within DRIVE_PROBE_SECONDS.
+    The probe itself is _drive_probe below."""
+    import threading
+    # retry-deferred and drive-auth-check import this probe without going
+    # through main(); they must see the folder the way the job itself will.
+    allow_drive_placeholders()
+    box = {}
+
+    def probe():
+        try:
+            box["result"] = _drive_probe(path)
+        except BaseException as e:  # handed back to the caller below, never lost
+            box["error"] = e
+    t = threading.Thread(target=probe, daemon=True)
+    t.start()
+    t.join(DRIVE_PROBE_SECONDS)
+    if t.is_alive():
+        return False, "Drive did not answer for %s within %g s" % (path, DRIVE_PROBE_SECONDS)
+    if "error" in box:
+        raise box["error"]
+    return box["result"]
+
+
+def _drive_probe(path):
     """Is this Google Drive folder actually readable?
 
     The brain vault lives under ~/Library/CloudStorage. When Drive has not
@@ -1576,6 +1655,11 @@ def sweep():
 
 
 def main(argv=None):
+    policy = allow_drive_placeholders()
+    if sys.platform == "darwin" and policy != IOPOL_MATERIALIZE_DATALESS_FILES_ON:
+        print("job-queue: WARNING the Drive placeholder policy reads %s, not %d: Drive folders this Mac "
+              "has not opened lately will not open for this job" % (policy, IOPOL_MATERIALIZE_DATALESS_FILES_ON),
+              file=sys.stderr)
     p = argparse.ArgumentParser(description="Serialise scheduled jobs.")
     sub = p.add_subparsers(dest="cmd", required=True)
 

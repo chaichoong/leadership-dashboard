@@ -1606,6 +1606,49 @@ time.sleep(40)`;
     expect(got['ceo-agent'], 'control: a job without its own ceiling reads the default').toBe(480);
   });
 
+  // 29 Sep 2026: launchd starts every job with macOS's dataless-file policy OFF (1), so a job
+  // could not open a Drive folder this Mac had not opened lately: content-engine skipped the
+  // night of 28 Sep and 2074/2075 went out with no socials, blog or podcast. The queue turns the
+  // policy ON (2) for the job and everything it starts.
+  it.runIf(process.platform === 'darwin')('a wrapped job and its children can open Drive placeholders (dataless policy ON)', () => {
+    const probe = 'import ctypes; print("POLICY", ctypes.CDLL(None).getiopolicy_np(3, 0))';
+    // Start the way launchd does: policy OFF, then exec the real command.
+    const launch = 'import ctypes, os, sys; ctypes.CDLL(None).setiopolicy_np(3, 0, 1); os.execv(sys.executable, [sys.executable] + sys.argv[1:])';
+    const control = execFileSync('python3', ['-c', launch, '-c', probe], { encoding: 'utf8' });
+    expect(control, 'control: the launch wrapper really starts with the policy OFF').toContain('POLICY 1');
+    const out = execFileSync('python3', ['-c', launch, QUEUE, 'run', 'quick', '--no-stale-check', '--',
+      'bash', '-c', `python3 -c '${probe}'`], { env: env(), encoding: 'utf8', timeout: 60000 });
+    expect(out).toContain('POLICY 2');
+  });
+
+  // With placeholders allowed, listing a cold Drive folder and opening a cold file both wait on
+  // Drive, and a Drive that has stopped serving can hold either. The probe gives up and reads
+  // "not ready"; it never hangs the queue (the post-lock re-check runs while the lock is held).
+  it('the Drive probe gives up on a listing or a read that does not come back, instead of hanging the queue', () => {
+    const dir = mkdtempSync(join(ROOT, 'drive-'));
+    for (const n of ['a.txt', 'b.txt', 'c.txt']) writeFileSync(join(dir, n), 'x');
+    const code = `
+import importlib.util, json, os, sys, time
+spec = importlib.util.spec_from_file_location("jq", ${JSON.stringify(QUEUE)})
+jq = importlib.util.module_from_spec(spec); spec.loader.exec_module(jq)
+out = {"healthy": jq.drive_ready(sys.argv[1])[0]}
+jq.DRIVE_PROBE_SECONDS = 0.5
+real_open, real_listdir = open, os.listdir
+jq.open = lambda *a, **k: (time.sleep(4), real_open(*a, **k))[1]
+t = time.time(); r = jq.drive_ready(sys.argv[1]); out["read"] = [r[0], r[1], time.time() - t]
+jq.open = real_open
+os.listdir = lambda *a: (time.sleep(4), real_listdir(*a))[1]
+t = time.time(); r = jq.drive_ready(sys.argv[1]); out["listing"] = [r[0], r[1], time.time() - t]
+print(json.dumps(out))`;
+    const got = JSON.parse(execFileSync('python3', ['-c', code, dir], { encoding: 'utf8', timeout: 60000 }));
+    expect(got.healthy, 'control: a folder that reads is ready').toBe(true);
+    for (const k of ['read', 'listing']) {
+      expect(got[k][0], `${k} stall reads not ready`).toBe(false);
+      expect(got[k][1]).toMatch(/did not answer/);
+      expect(got[k][2], `${k} stall is cut short`).toBeLessThan(2);
+    }
+  });
+
   it('a job that finishes inside its ceiling is untouched', () => {
     const r = run(['run', 'quick', '--no-stale-check', '--', 'python3', '-c', 'print("ok")'],
       { env: { JOB_QUEUE_MAX_RUNTIME_MIN: '0.5' } });
