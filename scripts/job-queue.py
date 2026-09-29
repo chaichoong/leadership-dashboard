@@ -446,9 +446,10 @@ def allow_drive_placeholders():
 # daemon thread and a probe that has not answered in time reads "not ready".
 def _probe_seconds():
     try:
-        return float(os.environ.get("JOB_QUEUE_DRIVE_PROBE_SECONDS", "90"))
+        v = float(os.environ.get("JOB_QUEUE_DRIVE_PROBE_SECONDS", "90"))
     except ValueError:
         return 90.0
+    return v if 0 < v < 3600 else 90.0    # nan, inf, zero or negative: the default
 
 
 DRIVE_PROBE_SECONDS = _probe_seconds()
