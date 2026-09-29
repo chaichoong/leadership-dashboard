@@ -408,6 +408,14 @@ def bundle(day):
     return {ctype: pc.find_by_name(pc.record_name(day, ctype)) for ctype in pc.TYPES}
 
 
+def clip_rendered(day, clip):
+    """Did the render make this clip? Its recorded Drive link answers; the Drive folder is asked only for episodes
+    rendered before links were recorded. 28 Sep 2026: 2074's and 2075's day folders were Drive placeholders a
+    scheduled job could not open, os.path.exists said False for every clip, and stage 2 booked nothing (no Short,
+    teasers, Learnings, blog, podcast or Facebook share) while the log said only "nothing to schedule"."""
+    return bool(output_link(day, clip)) or os.path.exists(episode_files(day)[clip])
+
+
 def fill_learnings(day, entry, recs, acct_map, stage, ledger, gaps, state, save):
     """A Learnings clip that exists but was never posted (1841 and 2060's rebuilds, 17 Sep 2026: an episode already
     out was "done", so a clip rebuilt afterwards never reached the socials or the YouTube Short). Stage 2 creates only
@@ -460,13 +468,15 @@ def schedule_stage(day, entry, recs, acct_map, stage, dry_run=False, index=0, sa
     _, _, user = _cfg()
     full = recs["Long Form Video"]; ff = full["fields"]
     day_london = dt.datetime.now(LONDON).date()
-    todo = []
+    todo = []; rendered = {}
     for key_name, cfg in CHANNELS.items():
         platform = cfg.get("platform", key_name)
         if cfg["stage"] != stage or platform not in acct_map: continue
         for spec in cfg["posts"]:
-            if spec["clip"] != "full" and not os.path.exists(episode_files(day)[spec["clip"]]):
-                continue                                   # no Learnings clip this episode (no diary section): nothing to post
+            if spec["clip"] != "full":
+                if spec["clip"] not in rendered: rendered[spec["clip"]] = clip_rendered(day, spec["clip"])
+                if not rendered[spec["clip"]]:
+                    continue                               # no Learnings clip this episode (no diary section): nothing to post
             rec = recs.get(spec["record"])
             copy = ((rec or {}).get("fields", {}).get(spec["field"]) or "").strip()
             if not copy:
@@ -1108,66 +1118,75 @@ def run(dry_run=False, limit=3):
     gaps = watch.gap_days()   # Kevin's catch-up days (8 Sep 2026): they fill old holes, so they never wait for, or move, the cursor
     held = [d for d in days if d > cursor(state) + 1 and d not in gaps]
     if held: print("publish: held for order (behind day %d): %s" % (cursor(state) + 1, ", ".join(str(d) for d in held)))
+    failed = []
     for day in days:
-        entry = state.setdefault(str(day), {})
-        recs = bundle(day)
-        full = recs["Long Form Video"]
-        if not full: continue
-        leak = pc.session_leak(recs)
-        if leak:
-            # 24 Sep 2026: a session's close-out block rode on the copy of 2066-2071 onto YouTube and Spotify. The writer now
-            # runs with no hooks and cuts such text; this is the last stop before anything is posted, for every stage.
-            print("episode %d: NOT published: session text in %s (remove it: platform_copy.py clean --day %d)"
-                  % (day, ", ".join("%s %s" % (c, f) for c, f, _ in leak), day), file=sys.stderr)
-            continue
-        test = mode() == "test"
-        stage = stage_for(entry, yt_ok)
-        if full["fields"].get("Record Status") not in PUBLISHABLE:
-            # 15 Sep 2026: 2056 and 1841 were marked Published while their podcast had been refused, and this line
-            # skipped Published records before the retry, so the podcast never went out. Only the extras run here.
-            if full["fields"].get("Record Status") == STATUS_PUBLISHED and stage == "done" and not ahead_of_order(day, gaps, state) and not dry_run:
-                # 21 Sep 2026: 1841's Learnings clip was rebuilt after its record went Published, and this branch
-                # skipped the fill below, so the clip could never reach the socials or the Short. It runs here too.
-                fill_learnings(day, entry, recs, acct_map, stage, ledger, gaps, state, save)
-                if not extras_done(entry): finish_extras(day, entry, recs, test, save)
+        try:
+            entry = state.setdefault(str(day), {})
+            recs = bundle(day)
+            full = recs["Long Form Video"]
+            if not full: continue
+            leak = pc.session_leak(recs)
+            if leak:
+                # 24 Sep 2026: a session's close-out block rode on the copy of 2066-2071 onto YouTube and Spotify. The writer now
+                # runs with no hooks and cuts such text; this is the last stop before anything is posted, for every stage.
+                print("episode %d: NOT published: session text in %s (remove it: platform_copy.py clean --day %d)"
+                      % (day, ", ".join("%s %s" % (c, f) for c, f, _ in leak), day), file=sys.stderr)
+                continue
+            test = mode() == "test"
+            stage = stage_for(entry, yt_ok)
+            if full["fields"].get("Record Status") not in PUBLISHABLE:
+                # 15 Sep 2026: 2056 and 1841 were marked Published while their podcast had been refused, and this line
+                # skipped Published records before the retry, so the podcast never went out. Only the extras run here.
+                if full["fields"].get("Record Status") == STATUS_PUBLISHED and stage == "done" and not ahead_of_order(day, gaps, state) and not dry_run:
+                    # 21 Sep 2026: 1841's Learnings clip was rebuilt after its record went Published, and this branch
+                    # skipped the fill below, so the clip could never reach the socials or the Short. It runs here too.
+                    fill_learnings(day, entry, recs, acct_map, stage, ledger, gaps, state, save)
+                    if not extras_done(entry): finish_extras(day, entry, recs, test, save)
+                    save()
+                continue
+            if stage == "youtube" and not may_go_to_youtube(day, gaps, state, ledger, days):
+                continue
+            if stage != "youtube" and ahead_of_order(day, gaps, state):
+                continue                                   # named once in the 'held for order' line above
+            if stage == "wait-youtube-account":
+                print("episode %d: approved, waiting for a YouTube account in GoHighLevel (Kevin's click: publish.py youtube-link)" % day); continue
+            if stage == "wait-youtube-link":
+                print("episode %d: YouTube post scheduled, waiting for it to publish before the socials go out" % day); continue
+            if not dry_run: fill_learnings(day, entry, recs, acct_map, stage, ledger, gaps, state, save)
+            redo = [b for b in entry.get("broken_uploads", []) if not b.get("replaced") and int(b.get("attempts") or 0) < REPLACE_ATTEMPTS]
+            if redo and not dry_run and entry.get("youtube_link") and not ahead_of_order(day, gaps, state):
+                for st_no in sorted({1 if b["clip"] == "full" else 2 for b in redo}):
+                    schedule_stage(day, entry, recs, acct_map, st_no, dry_run, index=0, save=save)
+                for b in redo:
+                    b["attempts"] = int(b.get("attempts") or 0) + 1
+                    new = [q for k, q in (entry.get("posts") or {}).items() if k.startswith("youtube|") and q.get("clip") == b["clip"] and q.get("id") and q["id"] != b["id"]]
+                    if new: b["replaced"] = now_utc(); b["by"] = new[0]["id"]
+                    else: print("episode %d: replacement YouTube %s not on the channel yet (attempt %d of %d)" % (day, b["clip"], b["attempts"], REPLACE_ATTEMPTS), file=sys.stderr)
                 save()
-            continue
-        if stage == "youtube" and not may_go_to_youtube(day, gaps, state, ledger, days):
-            continue
-        if stage != "youtube" and ahead_of_order(day, gaps, state):
-            continue                                   # named once in the 'held for order' line above
-        if stage == "wait-youtube-account":
-            print("episode %d: approved, waiting for a YouTube account in GoHighLevel (Kevin's click: publish.py youtube-link)" % day); continue
-        if stage == "wait-youtube-link":
-            print("episode %d: YouTube post scheduled, waiting for it to publish before the socials go out" % day); continue
-        if not dry_run: fill_learnings(day, entry, recs, acct_map, stage, ledger, gaps, state, save)
-        redo = [b for b in entry.get("broken_uploads", []) if not b.get("replaced") and int(b.get("attempts") or 0) < REPLACE_ATTEMPTS]
-        if redo and not dry_run and entry.get("youtube_link") and not ahead_of_order(day, gaps, state):
-            for st_no in sorted({1 if b["clip"] == "full" else 2 for b in redo}):
-                schedule_stage(day, entry, recs, acct_map, st_no, dry_run, index=0, save=save)
-            for b in redo:
-                b["attempts"] = int(b.get("attempts") or 0) + 1
-                new = [q for k, q in (entry.get("posts") or {}).items() if k.startswith("youtube|") and q.get("clip") == b["clip"] and q.get("id") and q["id"] != b["id"]]
-                if new: b["replaced"] = now_utc(); b["by"] = new[0]["id"]
-                else: print("episode %d: replacement YouTube %s not on the channel yet (attempt %d of %d)" % (day, b["clip"], b["attempts"], REPLACE_ATTEMPTS), file=sys.stderr)
+            if stage == "done":
+                if not dry_run: finish_extras(day, entry, recs, test, save)     # a blog or Spotify that failed last hour
+                continue
+            if done >= limit: break
+            st_no = 1 if stage == "youtube" else 2
+            n = schedule_stage(day, entry, recs, acct_map, st_no, dry_run, index=per_stage[st_no], save=save)
+            if n: per_stage[st_no] += 1
+            if n and st_no == 1 and not dry_run and moves_cursor(day, gaps): state[CURSOR_KEY] = day; save()
+            done += 1 if n else 0
+            # Same day, not the day after (Kevin, 10 Sep 2026). The direct upload hands back the YouTube link at
+            # once, so the socials, the blog, the podcast and Spotify go out this afternoon instead of tomorrow.
+            if st_no == 1 and n and stage_for(entry, yt_ok) == "socials":
+                if schedule_stage(day, entry, recs, acct_map, 2, dry_run, index=per_stage[2], save=save):
+                    per_stage[2] += 1
+            if stage_for(entry, yt_ok) == "done" and not dry_run:
+                finish_extras(day, entry, recs, test, save)
             save()
-        if stage == "done":
-            if not dry_run: finish_extras(day, entry, recs, test, save)     # a blog or Spotify that failed last hour
-            continue
-        if done >= limit: break
-        st_no = 1 if stage == "youtube" else 2
-        n = schedule_stage(day, entry, recs, acct_map, st_no, dry_run, index=per_stage[st_no], save=save)
-        if n: per_stage[st_no] += 1
-        if n and st_no == 1 and not dry_run and moves_cursor(day, gaps): state[CURSOR_KEY] = day; save()
-        done += 1 if n else 0
-        # Same day, not the day after (Kevin, 10 Sep 2026). The direct upload hands back the YouTube link at
-        # once, so the socials, the blog, the podcast and Spotify go out this afternoon instead of tomorrow.
-        if st_no == 1 and n and stage_for(entry, yt_ok) == "socials":
-            if schedule_stage(day, entry, recs, acct_map, 2, dry_run, index=per_stage[2], save=save):
-                per_stage[2] += 1
-        if stage_for(entry, yt_ok) == "done" and not dry_run:
-            finish_extras(day, entry, recs, test, save)
-        save()
+        except (Exception, SystemExit) as ex:
+            # 29 Sep 2026 review: a clip whose recorded Drive link no longer downloads raised out of here and ended the
+            # whole hourly run, so every later episode waited too. One episode failing is one line, and the rest go on.
+            print("episode %d: publishing stopped for this episode this run (%s); the other episodes carry on" % (day, str(ex)[-200:]), file=sys.stderr)
+            failed.append(day); save()
+    if failed:
+        raise SystemExit("publish: %d episode(s) stopped on an error this run: %s" % (len(failed), ", ".join(map(str, failed))))   # still a failed run
 
 
 YTDLP = os.path.expanduser("~/Library/Python/3.9/bin/yt-dlp")
@@ -1567,6 +1586,66 @@ def _selftest_once_only_body():
     return 1
 
 
+def _selftest_placeholder_folder():
+    """2074 and 2075 (28 Sep 2026): the render recorded every clip's Drive link, the day folder on this Mac was a Drive
+    placeholder, and stage 2 booked nothing. Runs the real schedule_stage with no file in the folder: a clip with a
+    recorded link is posted, a clip with neither link nor file (no diary section) is not."""
+    import tempfile as _tf, contextlib as _cl, io as _io, types as _types, shutil
+    g = globals(); names = ("_cfg", "episode_files", "output_link", "media_for", "mode", "create_post", "approval", "watch")
+    saved = {k: g[k] for k in names}
+    tmp = _tf.mkdtemp(); made = []
+    links = {"summary": "https://drive.google.com/file/d/S/view", "lfmd": "https://drive.google.com/file/d/L/view"}
+    try:
+        g.update({"_cfg": lambda brand="Runpreneur": ("k", "loc", "user"),
+                  "episode_files": lambda day: {k: os.path.join(tmp, name % day) for k, name in CLIP_FILES.items()},   # nothing on disk
+                  "output_link": lambda day, kind, ledger=None: links.get(kind),
+                  "media_for": lambda day, entry, kinds: {k: "https://cdn/%s" % k for k in kinds},
+                  "mode": lambda: "live", "create_post": lambda body, brand="Runpreneur": made.append(body) or "p%d" % len(made),
+                  "approval": _types.SimpleNamespace(append_note=lambda rec, line: line),                   # never the real record
+                  "watch": _types.SimpleNamespace(_airtable=lambda *a, **k: {}, API="x")})
+        accts = {"facebook": [{"id": "fb", "name": "Runpreneur"}]}
+        recs = {"Long Form Video": {"id": "recF", "fields": {}},
+                "Short Form Video": {"id": "recS", "fields": {"Facebook Reels Copy": "fb"}},
+                "Learnings From My Diary": {"id": "recL", "fields": {"Facebook Post Copy": "fb2"}}}
+        entry = {"youtube_link": "https://youtu.be/x"}
+        with _cl.redirect_stdout(_io.StringIO()): n = schedule_stage(2074, entry, recs, accts, 2, index=0)
+        assert n == 2 and sorted(p["clip"] for p in entry["posts"].values()) == ["lfmd", "summary"], \
+            "a clip the render recorded is posted even when the Drive folder shows nothing: %s" % entry.get("posts")
+        del links["lfmd"]; del made[:]; entry = {"youtube_link": "https://youtu.be/x"}
+        with _cl.redirect_stdout(_io.StringIO()): n = schedule_stage(2074, entry, recs, accts, 2, index=0)
+        assert n == 1 and [p["clip"] for p in entry["posts"].values()] == ["summary"], "no link and no file: no Learnings post"
+    finally:
+        g.update(saved); shutil.rmtree(tmp, ignore_errors=True)
+
+
+def _selftest_one_episode_fails():
+    """One episode's error does not stop the others (review, 29 Sep 2026): 2074 raises, 2076 is still worked, and the
+    run still ends as a failure so the job reports it."""
+    import types as _types, io as _io, contextlib as _cl
+    g = globals()
+    names = ("approved_days", "held_days", "accounts", "account_map", "load_state", "save_state", "bundle", "stage_for", "watch",
+             "finish_extras", "extras_done", "mode", "fill_learnings")
+    saved = {k: g[k] for k in names}
+    worked = []
+    def bundle_(day):
+        if day == 2074: raise RuntimeError("Drive download failed: 404")
+        return {"Long Form Video": {"id": "recF", "fields": {"Record Status": STATUS_APPROVED}}, "Short Form Video": None, "Learnings From My Diary": None}
+    try:
+        g.update({"approved_days": lambda: [2074, 2076], "held_days": lambda path=None: {}, "accounts": lambda brand="Runpreneur": [],
+                  "account_map": lambda a: {"youtube": [{"id": "yt"}]}, "load_state": lambda: {"_cursor": 2076}, "save_state": lambda st: None,
+                  "bundle": bundle_, "stage_for": lambda e, yt: "done", "watch": _types.SimpleNamespace(load_ledger=lambda: {}, gap_days=lambda path=None: set()),
+                  "finish_extras": lambda day, *a, **k: worked.append(day), "extras_done": lambda e: False, "mode": lambda: "live",
+                  "fill_learnings": lambda *a, **k: False})
+        try:
+            with _cl.redirect_stdout(_io.StringIO()), _cl.redirect_stderr(_io.StringIO()): run()
+            raise AssertionError("a run with a failed episode must still end as a failure")
+        except SystemExit as ex:
+            assert "2074" in str(ex), ex
+        assert worked == [2076], "the episode after the failed one is still worked: %s" % worked
+    finally:
+        g.update(saved)
+
+
 def _selftest_fill_learnings():
     """A rebuilt Learnings clip reaches the socials and the Short once it exists, for a Published record too (21 Sep
     2026: 1841's record was Published, run() skipped it before the fill, so its rebuilt clip could never go out).
@@ -1873,6 +1952,8 @@ def selftest():
     assert tp["media"] == [{"url": "https://cdn/c.png", "type": "image/png"}] and tp["type"] == "post" and tp["scheduleDate"] == "2026-09-07T07:00:00Z"
     fbp = build_text_post(od_accts[4], "hello", "x", "u1", status="draft"); assert fbp["facebookPostDetails"] == {"type": "post"} and "media" not in fbp and "scheduleDate" not in fbp
     _selftest_once_only()
+    _selftest_placeholder_folder()
+    _selftest_one_episode_fails()
     import inspect as _i5; ss = _i5.getsource(sync); assert ss.index("monetise_long_video(day, entry)") < ss.index("share_to_facebook_profile(day, entry, state, clip=clip)"), "monetisation is checked every sync"
     msrc = _i5.getsource(monetise_long_video)
     # the old filter stepped over every GoHighLevel upload in silence: 2054 episode + Short and 2195 episode (20 Sep 2026)
@@ -1906,7 +1987,7 @@ def selftest():
     assert not spotify_link_due({"title": "t", "status": "failed", "started": "2026-09-21T05:00:00Z"}, t0) and not spotify_link_due({"status": "published"}, t0)
     assert not spotify_link_due({"title": "t", "status": "processing", "started": "2026-09-10T05:00:00Z"}, t0), "an old 'processing' episode is no longer asked every hour for good"
     assert not spotify_link_due({"title": "t", "status": "published"}, t0), "no start time and published: nothing to measure three days from"
-    print(json.dumps({"checks": 54, "failed": []}))
+    print(json.dumps({"checks": 56, "failed": []}))
 
 
 if __name__ == "__main__":

@@ -1606,6 +1606,43 @@ time.sleep(40)`;
     expect(got['ceo-agent'], 'control: a job without its own ceiling reads the default').toBe(480);
   });
 
+  // 29 Sep 2026: launchd starts every job with macOS's dataless-file policy OFF (1), so a job
+  // could not open a Drive folder this Mac had not opened lately: content-engine skipped the
+  // night of 28 Sep and 2074/2075 went out with no socials, blog or podcast. The queue turns the
+  // policy ON (2) for the job and everything it starts.
+  it.runIf(process.platform === 'darwin')('a wrapped job and its children can open Drive placeholders (dataless policy ON)', () => {
+    const probe = 'import ctypes; print("POLICY", ctypes.CDLL(None).getiopolicy_np(3, 0))';
+    // Start the way launchd does: policy OFF, then exec the real command.
+    const launch = 'import ctypes, os, sys; ctypes.CDLL(None).setiopolicy_np(3, 0, 1); os.execv(sys.executable, [sys.executable] + sys.argv[1:])';
+    const control = execFileSync('python3', ['-c', launch, '-c', probe], { encoding: 'utf8' });
+    expect(control, 'control: the launch wrapper really starts with the policy OFF').toContain('POLICY 1');
+    const out = execFileSync('python3', ['-c', launch, QUEUE, 'run', 'quick', '--no-stale-check', '--',
+      'bash', '-c', `python3 -c '${probe}'`], { env: env(), encoding: 'utf8', timeout: 60000 });
+    expect(out).toContain('POLICY 2');
+  });
+
+  // With placeholders allowed, opening a cold Drive file downloads it first, and a Drive that has
+  // stopped serving can hold that open. The probe gives up and reads "not ready"; it never hangs.
+  it('the Drive probe gives up on a read that does not come back, instead of hanging the queue', () => {
+    const dir = mkdtempSync(join(ROOT, 'drive-'));
+    for (const n of ['a.txt', 'b.txt', 'c.txt']) writeFileSync(join(dir, n), 'x');
+    const code = `
+import importlib.util, json, sys, time
+spec = importlib.util.spec_from_file_location("jq", ${JSON.stringify(QUEUE)})
+jq = importlib.util.module_from_spec(spec); spec.loader.exec_module(jq)
+healthy = jq.drive_ready(sys.argv[1])
+real = open
+jq.DRIVE_PROBE_READ_SECONDS = 0.5
+jq.open = lambda *a, **k: (time.sleep(4), real(*a, **k))[1]
+t = time.time(); stalled = jq.drive_ready(sys.argv[1])
+print(json.dumps({"healthy": healthy[0], "stalled": stalled[0], "why": stalled[1], "seconds": time.time() - t}))`;
+    const got = JSON.parse(execFileSync('python3', ['-c', code, dir], { encoding: 'utf8', timeout: 60000 }));
+    expect(got.healthy, 'control: a folder that reads is ready').toBe(true);
+    expect(got.stalled).toBe(false);
+    expect(got.why).toMatch(/did not deliver/);
+    expect(got.seconds).toBeLessThan(2);
+  });
+
   it('a job that finishes inside its ceiling is untouched', () => {
     const r = run(['run', 'quick', '--no-stale-check', '--', 'python3', '-c', 'print("ok")'],
       { env: { JOB_QUEUE_MAX_RUNTIME_MIN: '0.5' } });
