@@ -859,6 +859,7 @@ DUPE_STREET_TYPES = {
     "street", "st", "road", "rd", "avenue", "ave", "lane", "close", "drive",
     "way", "court", "place", "crescent", "grove", "terrace", "gardens",
     "square", "walk", "hill", "park", "row", "view", "rise", "mews",
+    "pl",   # "55 Elmdon Pl" (28 Sep 2026)
 }
 
 

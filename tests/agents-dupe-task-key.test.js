@@ -688,9 +688,13 @@ print(json.dumps(c.dupe_verdict(sys.argv[1], sys.argv[2], sys.argv[3])))
     ])).toEqual(['create', 'create', 'create', 'create', 'create']);
   });
 
-  it('a street named after a street type still names the house', () => {
-    expect(decide([{ name: 'Gas safety certificate 5 Park Road', rows: [{ name: 'Gas safety certificate 7 Park Road' }] }]))
-      .toEqual(['create']);
+  it('a street named after a street type still names the house, and Pl is Place', () => {
+    expect(decide([
+      { name: 'Gas safety certificate 5 Park Road', rows: [{ name: 'Gas safety certificate 7 Park Road' }] },
+      { name: 'Gas safety certificate 55 Elmdon Pl', rows: [{ name: 'Gas safety certificate 5 Dalham Pl' }] },
+      // CONTROL: "Pl" and "Place" name one house.
+      { name: 'Gas safety certificate 55 Elmdon Pl', rows: [{ name: 'Gas safety certificate renewal 55 Elmdon Place' }] },
+    ])).toEqual(['create', 'create', 'update']);
   });
 
   it('the page never joins two tenants through a third task that matches both', () => {
@@ -736,7 +740,7 @@ print(json.dumps(c.dupe_verdict(sys.argv[1], sys.argv[2], sys.argv[3])))
       "Renew Gas Safety Certificate's expiry - Jane Smith, 5 Dalham Place",
       "Refund Tenant Jane Smith's deposit - 5 Dalham Place", 'Advertise 2 rooms, 55 Elmdon Place',
       'Advertise double room - 55 Elmdon Place', 'Arrears (\u00a3) 23 Viola Street', '\u00a3\ud83d\ude00\ud83d\ude005 Viola Street',
-      'Flat Nr. 4, 6 Chedburgh Place',
+      'Flat Nr. 4, 6 Chedburgh Place', 'Gas safety certificate 55 Elmdon Pl', '5 Dalham Pl. Haverhill',
       // Space-like characters the two languages read differently (review).
       '55\ufeffElmdon Place', '55 Elmdon\u0085Place', '55\u001fElmdon Place', 'Flat\u00852 Dalham Place',
       '55\u2028Elmdon\u200bPlace', 'Unit\u00a02, 5\u3000Dalham Place',

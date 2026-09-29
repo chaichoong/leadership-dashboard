@@ -2106,6 +2106,14 @@ def decision_level(output, task_type, task_rec, fetch=None, agent_banner=None,
                         f"this is a {this_lane} task and keeper {keeper_id} is a "
                         f"{keeper_lane} task: a repair ticket and a reply task are two "
                         "obligations, never one, so folding may not cross that lane")
+        # A DIFFERENT TENANT, HOUSE OR LINKED RECORD (28 Sep 2026), whichever
+        # is older: the create gate refuses this fold (#621), so an agent's
+        # close may not make it either. Same checks, imported from the gate.
+        clash = _gate().links_disagree(tf, kf) or _gate().identity_conflict(name, kname_full)
+        if clash:
+            return card("close: duplicate",
+                        f"keeper {keeper_id} is about a different tenant, house or record "
+                        f"({clash}): two tenants or two houses are two matters, never one")
         kept = "kept the older task"
         if this_created and keeper_created and keeper_created > this_created:
             # Either creation order folds when BOTH are open and the fold
@@ -5308,35 +5316,44 @@ WRAPPED_ID_RE = re.compile(
 # RECORD said "searched tasks + Gmail for ref UC47-ANSWERS": the token came
 # from its working-file line, `~/Projects/kevin-hq/property/2026-09-28 uc47
 # <tenant>/uc47-answers.md`, and the search pulled in another tenant's UC47
-# history. Three shapes, all gone before the tokens are read: a path to a file,
+# history. Four shapes, all gone before the tokens are read: a path to a file,
 # whose folders may hold spaces (dated working folders do: "2026-09-21
 # chedburgh gas safety/"); any other path, starting ~/ or ./ or / with at least
-# two parts; and a relative path to a file ("notes/uc47-answers.md"). A path
-# starts after a space or at the start, never after a letter, so "and/or" and
-# "Acc.No/12345678" stay text, and "(/AB12345)" is one part, not a path. A
-# folder with spaces has no dot or ~ in it and is short (below), so a file
-# name and the words after it never read as a folder running on to the next
-# path ("~/work/reply.md for claim AB12345 in ~/Downloads/dwp.pdf" keeps
-# AB12345, review). The limit: three plain words (six, after a number)
-# between a path and a later file on one line still read as a folder. A bare
-# file name with no folder
-# stays: an attachment named after its invoice carries that invoice's
-# reference ("Invoice INV123456.pdf", tested in the machine-text block).
+# two parts; a file name, bare or with a relative folder ("uc47-answers.md",
+# "notes/uc47-answers.md"), because an attachment's name is not the matter's
+# reference either (Kevin, 29 Sep 2026: 3 tokens across 8,139 tasks, all
+# file-name fragments); and a file name with spaces in quotes. A path starts
+# after a space or at the start, never after a letter, so "and/or" and
+# "Acc.No/12345678" stay text, and "(/AB12345)" is one part, not a path.
+# A folder or file name with spaces is short, has no dot or ~ before its last
+# word, and, unless it starts with a date, is written in capitals ("My Drive",
+# "Mobile Documents", "Case AB12345 notes.md"), so ordinary words never read as
+# a folder running on to the next path ("~/Downloads for claim AB12345 see
+# notes/x.md" keeps AB12345, review). The limit: a file name with spaces loose
+# in a sentence, unquoted and outside a path, cannot be told apart from the
+# words around it, so it stays.
 _FILE_EXT = (r"(?:md|markdown|txt|py|js|mjs|cjs|ts|json|jsonl|csv|tsv|html?|css|sh|zsh|toml|ya?ml|ini|cfg"
              r"|log|pdf|docx?|xlsx?|xlsm|pptx?|odt|ods|rtf|pages|numbers|key|png|jpe?g|gif|heic|webp|svg"
              r"|tiff?|bmp|mov|mp4|m4a|mp3|wav|zip|eml|msg|ics|vcf|plist|sql|xml)")
 _PATH_CH = r"[\w.~@+()-]"
 # A folder with spaces: a dated one ("2026-09-21 chedburgh gas safety") runs to
-# six words, any other ("My Drive", "00 AI Context") to three.
-# The two shapes never overlap (a digit starts one, never the other), or the
-# reader backtracks exponentially on "1 a/1 a/1 a/..." (review).
-_FOLDER_WORDS = r"(?:\d[\w@+()-]*(?:[ \t][\w@+()-]+){1,5}|(?!\d)[\w@+()-]+(?:[ \t][\w@+()-]+){1,2})"
+# six words, any other to three, each starting with a capital or a digit ("My
+# Drive", "00 AI Context"). The two shapes never overlap (a digit starts one,
+# never the other), or the reader backtracks exponentially on "1 a/1 a/..."
+# (review). _CAP_WORD is case-sensitive inside a case-blind pattern.
+_CAP_WORD = r"(?:(?-i:[A-Z0-9])[\w@+()-]*|[-_])"
+_FOLDER_WORDS = (r"(?:\d[\w@+()-]*(?:[ \t][\w@+()-]+){1,5}"
+                 r"|(?!\d)(?-i:[A-Z])[\w@+()-]*(?:[ \t]" + _CAP_WORD + r"){1,2})")
+# The last part of a path may hold spaces the same way: up to three capital
+# words, then the file ("Case AB12345 notes.md").
+_FILE_WORDS = r"(?:" + _CAP_WORD + r"[ \t]){0,3}"
 FILE_PATH_RE = re.compile(
     r"(?<![\w.~/-])(?:~|\.{1,2})?/(?:" + _PATH_CH + r"+/|" + _FOLDER_WORDS + r"/)*"
-    r"[\w~@+()-]" + _PATH_CH + r"*\." + _FILE_EXT + r"\b"
+    + _FILE_WORDS + r"[\w~@+()-]" + _PATH_CH + r"*\." + _FILE_EXT + r"\b"
+    r"|[\"'\u201c\u2018][^\"'\u201d\u2019\n]{1,120}?\." + _FILE_EXT + r"[\"'\u201d\u2019]"
     r"|(?<![\w.~/-])(?:(?:~|\.{1,2})/" + _PATH_CH + r"+(?:/" + _PATH_CH + r"*)*"
     r"|/" + _PATH_CH + r"+(?:/" + _PATH_CH + r"*)+)"
-    r"|(?<![\w.~@+()/-])[\w~@+()-]" + _PATH_CH + r"*(?:/" + _PATH_CH + r"+)+\." + _FILE_EXT + r"\b",
+    r"|(?<![\w.~@+()/-])[\w~@+()-]" + _PATH_CH + r"*(?:/" + _PATH_CH + r"+)*\." + _FILE_EXT + r"\b",
     re.I)
 # A pasted TRACK RECORD header lists what was already searched, every ref in
 # capitals, so an id copied from one no longer looks like an id. Its terms
