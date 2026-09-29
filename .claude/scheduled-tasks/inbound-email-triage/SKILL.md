@@ -69,6 +69,10 @@ All commands run from the main checkout
 
     python3 scripts/inbound-triage.py scan
 
+- Run the scan in the FOREGROUND with a 600000 ms timeout, and wait for it.
+  Never send it to the background: this is a headless run, and a backgrounded
+  scan is still running when the session exits, so the slot decides no mail
+  (26 to 29 Sep 2026, finding 20260929-phase-2-659).
 - ANY non-zero exit, traceback, or `error` key = the read is broken (worker
   down, labels missing, or Gmail consent not granted). Report it loudly and
   STOP — do not treat a broken read as a quiet day, and never advance the
