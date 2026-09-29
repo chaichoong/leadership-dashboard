@@ -200,7 +200,7 @@ test.describe('AI Agents: Track record tab', () => {
     inv.notes = ['could not check what launchd has loaded'];
     await open(page, { estate: [builtRow({}, inv)] });
     const box = page.locator('#builtNotRunning');
-    await expect(box).toContainText('Expected to run, but not running');
+    await expect(box).toContainText('Mac jobs not running as expected');
     await expect(box).toContainText('Its launchd job is not running, or its file cannot be read: drift-scan');
     await expect(box).toContainText('Parked, but launchd still runs it: prospecting');
     await expect(page.locator('#builtRunningBody')).toContainText('could not check what launchd has loaded');

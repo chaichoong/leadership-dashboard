@@ -132,17 +132,22 @@ def frontmatter(path):
 _JS_STR = r"""(?:'((?:[^'\\]|\\.)*)'|"((?:[^"\\]|\\.)*)")"""
 
 
+_JS_ESC = re.compile(r"\\(x[0-9A-Fa-f]{2}|u[0-9A-Fa-f]{4}|\n|.)", re.S)
+_JS_SIMPLE = {"n": "\n", "t": "\t", "r": "\r", "b": "\b", "f": "\f", "v": "\v", "0": "\0"}
+
+
 def _js_str(single, double):
-    original = double if double is not None else single
-    raw = original.replace("\\\n", "")                     # a JS line continuation
-    raw = raw.replace("\\'", "'")                           # \' is JS-only, legal in either quote style
-    raw = re.sub(r"\\x([0-9a-fA-F]{2})", r"\\u00\1", raw)   # \xHH is JS-only too
-    if double is None:
-        raw = re.sub(r'(?<!\\)"', r'\\"', raw)             # a bare " inside '...' must be escaped for JSON
-    try:
-        return json.loads('"' + raw + '"')
-    except ValueError:
-        return original
+    """Decode a JS string literal's body in one left-to-right pass, as JS does."""
+    raw = double if double is not None else single
+
+    def one(m):
+        e = m.group(1)
+        if len(e) > 1:                       # \xHH or \uHHHH
+            return chr(int(e[1:], 16))
+        if e == "\n":                        # a line continuation
+            return ""
+        return _JS_SIMPLE.get(e, e)          # \' \" \\ and any other escaped character
+    return _JS_ESC.sub(one, raw)
 
 
 def _field(body, name):
@@ -453,7 +458,8 @@ def build(now=None):
         # in the job schedule, but launchd has no job for it
         "notInstalled": sorted(j["k"] for j in by["mac-jobs"] if j["s"] == "not installed"),
         # a plist launchd is not running, or cannot read
-        "notLoaded": sorted(j["k"] for j in by["mac-jobs"] if j["s"] in ("not loaded", "unreadable")),
+        "notLoaded": sorted(j["k"] for j in by["mac-jobs"] if j["s"] in ("not loaded", "unreadable")
+                            and "LaunchAgents.parked" not in j["src"]),
         # parked on purpose, yet launchd still runs it
         "parkedButRunning": sorted(j["k"] for j in by["mac-jobs"] if j.get("via") == "parked, but launchd still runs it"),
     }

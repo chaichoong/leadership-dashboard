@@ -60,6 +60,7 @@ with open(os.path.join(la, "com.kevinbrittain.job00.plist.bak-2026"), "wb") as f
 plist(os.path.join(HOME, "Library", "LaunchAgents.parked"), "prospecting", {})
 plist(os.path.join(HOME, "Library", "LaunchAgents.parked"), "parked-running", {})
 loaded.append("com.kevinbrittain.parked-running")
+w(os.path.join(HOME, "Library", "LaunchAgents.parked", "com.kevinbrittain.parked-corrupt.plist"), "not a plist")
 sched["daily-ops"] = {"cron": "0 7 * * *", "mode": "cooperative"}
 sched["wrapped-missing"] = {"cron": "5 5 * * *", "mode": "wrapped"}
 w(os.path.join(REPO, "scripts", "job-schedule.json"), json.dumps(sched))
@@ -175,6 +176,8 @@ out["chars"] = len(json.dumps(inv, separators=(",", ":")))
     expect(r.missing.notInstalled).toEqual(['wrapped-missing']);
     expect(r.missing.notLoaded).toEqual(['job03']);
     expect(r.missing.parkedButRunning).toEqual(['parked-running']);
+    expect(r.mac['parked-corrupt'][0]).toBe('unreadable');
+    expect(r.missing.notLoaded).not.toContain('parked-corrupt');   // parked on purpose is not "not running as expected"
     expect(r.missing.workers).toContain('w1');
     // The Skills Library lists sk00 by id and pk00 by command. sk01 is only
     // MENTIONED in another entry's text, which does not count as listed.
@@ -262,6 +265,15 @@ out["b"] = jobs["b"]["what"]
     expect(r.a).toEqual(["Kevin's", 'said "hi" A']);
     expect(r.b).toBe('one two');
   });
+
+  it('an escaped backslash is a backslash, never the start of another escape', () => {
+    const r = py(`
+src = r"""{ key: 'c', name: 'C:\\\\x41', what: "a\\\\'b" }"""
+jobs, _ = bi.automation_entries(src)
+out["c"] = [jobs["c"]["name"], jobs["c"]["what"]]
+`);
+    expect(r.c).toEqual(['C:\\x41', "a\\'b"]);
+  });
 });
 
 describe('the payload is shrunk to fit, and says so', () => {
@@ -311,7 +323,7 @@ out["payloadField"] = es.ES["payload"]
     expect(r.ok.key).toBe('built-inventory');
     expect(r.ok.kind).toBe('report');
     expect(r.ok.status).toBe('Worked');
-    expect(r.ok.detail).toMatch(/^24 Mac jobs, 12 agent files, 16 skills, 6 workers, 1 GitHub timers, 11 scheduled tasks; \d+ not yet on the hand-kept lists; 4 listed or scheduled but not running$/);
+    expect(r.ok.detail).toMatch(/^24 Mac jobs, 12 agent files, 16 skills, 6 workers, 1 GitHub timers, 11 scheduled tasks; \d+ not yet on the hand-kept lists; 4 Mac jobs not running as expected$/);
     expect(r.okPayload.macJobs).toBe(24);
   });
 

@@ -7231,7 +7231,7 @@ function renderBuiltRunning(){
     const notes = Array.isArray(inv.notes) && inv.notes.length
         ? `<div style="font-size:var(--fs-xs);color:var(--warning);margin-bottom:8px">${inv.notes.map(n => esc(n)).join('. ')}. Mac jobs show as on unless their file says otherwise.</div>` : '';
     body.innerHTML = banner + notes
-        + (notRunning.length ? `<div id="builtNotRunning" class="zone-error" style="margin-bottom:10px"><div style="font-weight:var(--fw-semibold);margin-bottom:4px">Expected to run, but not running</div>${lines(notRunning)}</div>` : '')
+        + (notRunning.length ? `<div id="builtNotRunning" class="zone-error" style="margin-bottom:10px"><div style="font-weight:var(--fw-semibold);margin-bottom:4px">Mac jobs not running as expected</div>${lines(notRunning)}</div>` : '')
         + regHtml
         + groups.map(g => builtGroupHtml(g.id, g.title, g.items,
             g.id === 'scheduled-tasks' ? 'The written instructions the Claude slots run. "Inside daily-ops" means it runs as one step of the 07:00 routine.' : '')).join('')

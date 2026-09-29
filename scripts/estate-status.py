@@ -588,7 +588,7 @@ def built_row(now, module_path=BUILT_MODULE):
         detail += "; %d not yet on the hand-kept lists" % gaps
     lost = sum(len(inv["missing"].get(k, [])) for k in ("notInstalled", "listedNotFound", "notLoaded", "parkedButRunning"))
     if lost:
-        detail += "; %d listed or scheduled but not running" % lost
+        detail += "; %d Mac jobs not running as expected" % lost
     return dict(row, status="Worked", lastWorked=stamp, detail=detail,
                 payload=json.dumps(inv, separators=(",", ":")))
 
