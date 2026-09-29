@@ -399,6 +399,33 @@ describe('the Robot sign-in app and its link', () => {
       expect(run('try\ns\'s shWait("kill -9 $$", "x")\non error m\nreturn m\nend try')).toMatch(/ended without a result/);
     } finally { rmSync(dir, { recursive: true, force: true }); }
   }, 60000);   // osacompile + five osascript runs, one of them a one-second stand-in
+  // 29 Sep 2026, Kevin after the first run of the fix: "windows jump around", "the progress box
+  // stays", and the app lingered 22 s after Cmd+Q (15 of them the closing box). The progress
+  // window is hidden once the check ends and never shown for the Chrome step, and the closing box
+  // goes after 5 s. hideProgress is driven through osascript (a no-op outside an applet); the
+  // on-screen behaviour was proved with a scratch applet's window list.
+  it('the progress window leaves once the check ends and during the Chrome step, and the closing box goes after 5 s', () => {
+    const { mkdtempSync, rmSync } = require('node:fs');
+    const { tmpdir } = require('node:os');
+    const dir = mkdtempSync(join(tmpdir(), 'od-robot-hide-'));
+    try {
+      execFileSync('osacompile', ['-o', join(dir, 'r.scpt'), join(ROOT, 'scripts', 'robot-signin.applescript')]);
+      const run = (body) => execFileSync('osascript', ['-e',
+        `set s to (load script POSIX file "${join(dir, 'r.scpt')}")\nset s's repo to "${ROOT}"\n${body}`],
+        { encoding: 'utf8', timeout: 20000 }).trim();
+      expect(run('s\'s hideProgress()\nreturn "ok"')).toBe('ok');
+      // doing "" is a step with no progress window; it still runs detached and answers.
+      expect(run('return s\'s shWait("echo quiet", "")')).toBe('quiet');
+    } finally { rmSync(dir, { recursive: true, force: true }); }
+    const refresh = src.slice(src.indexOf('on refreshWaiting'), src.indexOf('end refreshWaiting'));
+    expect(refresh.trim().split('\n').pop().trim()).toBe('hideProgress()');
+    const signIn = src.slice(src.indexOf('on signInTo'), src.indexOf('end signInTo'));
+    expect(signIn).toMatch(/shWait\(loginCommand\(theLine\), ""\)/);
+    const done = src.slice(src.indexOf('on sayDone'), src.indexOf('end sayDone'));
+    expect(done.indexOf('hideProgress()')).toBeGreaterThan(-1);
+    expect(done.indexOf('hideProgress()')).toBeLessThan(done.indexOf('display dialog'));
+    expect(done).toMatch(/giving up after 5\b/);
+  }, 30000);
   it('the sign-in window and the hand-back wait the same way, and Stop ends the chain rather than skipping a site', () => {
     const signIn = src.slice(src.indexOf('on signInTo'), src.indexOf('end signInTo'));
     expect(signIn).toMatch(/shWait\(loginCommand\(theLine\)/);
@@ -646,6 +673,56 @@ print('---JSON---'); print(json.dumps([
     // the default profile's verdict, not the later one from another profile
     expect(out[0]).toEqual({ signedIn: true, botCheck: false, url: 'https://www.facebook.com/home.php', at: '2026-09-15T09:23:03.599Z', source: 'ledger' });
     expect(out.slice(1)).toEqual([null, null, null]);
+  });
+  // 29 Sep 2026: Kevin pressed Sign in on WebFiling, last seen signed out eight hours earlier with
+  // no sign-in since, and waited 48 s while the app walked the door to learn the same thing. A
+  // signed-out session cannot sign itself in; only a `login` changes it. Driven through the real
+  // session_check with the walk replaced by a recorder.
+  it('the app\'s check does not re-walk a site last seen signed out with no sign-in since; signed in, a bot check, any sign-in since, or the submit gate walks', () => {
+    const { writeFileSync: wf, mkdtempSync: md } = require('node:fs');
+    const dir = md(join(tmpdir(), 'od-ledger-out-'));
+    const OUT = '{"at":"2026-09-28T16:16:31.128Z","cmd":"session","site":"ewf.companieshouse.gov.uk","url":"https://signin.account.gov.uk/sign-in-or-create","signedIn":false,"botCheck":false,"profile":"default"}';
+    const cases = {
+      signedOut: [OUT, '{"at":"2026-09-28T17:16:21.406Z","cmd":"session","site":"www.facebook.com","signedIn":true,"profile":"default"}'],
+      // Any sign-in on the profile since, not only this host's: One Login is one sign-in across GOV.UK.
+      loginSince: [OUT, '{"at":"2026-09-28T18:00:00.000Z","cmd":"login","host":"www.tax.service.gov.uk","profile":"default"}'],
+      otherProfileLogin: [OUT, '{"at":"2026-09-28T18:00:00.000Z","cmd":"login","host":"my.utilita.co.uk","profile":"utilita-apt1"}'],
+      outAgainAfterLogin: ['{"at":"2026-09-27T08:00:00.000Z","cmd":"login","host":"ewf.companieshouse.gov.uk","profile":"default"}', OUT],
+      signedIn: [OUT.replace('"signedIn":false', '"signedIn":true')],
+      botCheck: [OUT.replace('"botCheck":false', '"botCheck":true')],
+      neverLooked: ['{"at":"2026-09-28T17:16:21.406Z","cmd":"session","site":"www.facebook.com","signedIn":false,"profile":"default"}'],
+      // A robot's read met "verify you are human" since: the app must say so, not open a window.
+      botCheckSince: [OUT, `{"at":"${new Date(Date.now() - 60000).toISOString()}","cmd":"read","url":"https://ewf.companieshouse.gov.uk/x","botCheck":true,"profile":"default"}`],
+    };
+    const paths = {};
+    for (const [k, lines] of Object.entries(cases)) { paths[k] = join(dir, `${k}.jsonl`); wf(paths[k], lines.join('\n') + '\n'); }
+    const out = py(`
+import os
+os.environ.pop('SIGNIN_SKIP_WALK', None)   # this test is about when the walk runs
+walked = []
+m.session_walk = lambda host, **k: walked.append(host) or {'signedIn': True, 'url': 'walked', 'at': 'now', 'source': 'walk'}
+res = {}
+for name, path in ${JSON.stringify(paths)}.items():
+    m.BROWSER_LEDGER = path
+    del walked[:]
+    v = m.session_check('ewf.companieshouse.gov.uk', trust_signed_out=True)   # the app's check; short-session, so no fresh-verdict reuse
+    res[name] = [v.get('source'), v.get('signedIn'), len(walked)]
+    # The submit gate (signin_verify_line) calls session_check(host) and must always walk.
+    del walked[:]
+    m.session_check('ewf.companieshouse.gov.uk')
+    res[name + ':gate'] = len(walked)
+print('---JSON---'); print(json.dumps(res))`);
+    expect(out.signedOut).toEqual(['ledger', false, 0]);
+    expect(out.otherProfileLogin).toEqual(['ledger', false, 0]);
+    expect(out.outAgainAfterLogin).toEqual(['ledger', false, 0]);
+    for (const k of ['loginSince', 'signedIn', 'botCheck', 'neverLooked', 'botCheckSince']) expect(out[k]).toEqual(['walk', true, 1]);
+    for (const k of Object.keys(cases)) expect(out[k + ':gate']).toBe(1);
+  });
+  it('signin-waiting is the one caller that trusts a signed-out verdict', () => {
+    const py = readFileSync(join(ROOT, 'scripts', 'agent-dispatch.py'), 'utf8');
+    expect(py.match(/trust_signed_out=True/g) || []).toHaveLength(1);
+    const waiting = py.slice(py.indexOf('def cmd_signin_waiting'), py.indexOf('def cmd_signin_site'));
+    expect(waiting).toMatch(/session_check\(g\["host"\], use_ledger=not g\["shortSession"\], trust_signed_out=True\)/);
   });
   it('signin-waiting hands a site already signed in straight back (alreadyLive) and lists the rest with its check', () => {
     const out = py(`
