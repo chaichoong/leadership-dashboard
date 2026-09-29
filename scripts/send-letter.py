@@ -107,6 +107,7 @@ AF = {
     "approvalOutcome": "fldrHBSr6qoUfaKuZ",
     "agentOutput":     "fldzswp8fx6PqpLQ5",
     "taskType":        "fldZ2moDV2041Sobc",
+    "notes":           "fldR7apBzSp3oxFxz",
 }
 
 APPROVED = ("Approved as-is", "Approved with minor edits")
@@ -472,8 +473,16 @@ def cmd_prepare(args):
 
     # Read the record back rather than trusting the create response: the
     # parsed address is what the printer will actually put on the envelope.
-    rec = pingen("GET", f"/organisations/{org}/letters/{letter_id}", token)
-    attrs = rec["data"]["attributes"]
+    # Pingen processes PDFs asynchronously; "validating" means it has not
+    # finished yet. Poll until the status leaves "validating" (up to 30 s).
+    import time as _time
+    for _attempt in range(10):
+        rec = pingen("GET", f"/organisations/{org}/letters/{letter_id}", token)
+        attrs = rec["data"]["attributes"]
+        if attrs.get("status") != "validating":
+            break
+        print(f"  Pingen still validating ({_attempt + 1}/10) — waiting 3 s...")
+        _time.sleep(3)
     parsed = attrs.get("address") or ""
     mismatch = address_mismatch(letter["address"], parsed)
 

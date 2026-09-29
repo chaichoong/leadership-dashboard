@@ -318,6 +318,32 @@
   "queued": false,
   "note": "reaps preview servers and test browsers that outlived their session. Must run even while a routine holds the queue, since a stuck routine is exactly when strays pile up"
  },
+ "magic-battery": {
+  "cron": "25 * * * *",
+  "maxLateMinutes": 50,
+  "mode": "wrapped",
+  "queued": false,
+  "note": "Reads the Magic Keyboard, Trackpad and Mouse battery levels hourly and, on the 21:25 run, puts one 'charge it tonight' reminder per device at 20% or below in Kevin's Apple Reminders list (21:30 alert). Outside the queue: it reads the IO registry and writes Apple Reminders, never the repo, Airtable or the queue, and a nudge that waits behind a four-hour render misses the evening it exists for."
+ },
+ "home-battery": {
+  "cron": "20 * * * *",
+  "maxLateMinutes": 50,
+  "mode": "wrapped",
+  "queued": false,
+  "note": "Reads every Aqara device's battery and online state from Aqara's developer service hourly and, on the 21:20 run, puts one reminder per problem (a battery at 20% or below, a device offline 2 hours or more, a device gone from Aqara's list for 24 hours, or no good read of Aqara for 12 hours) in Kevin's Apple Reminders list with a 21:30 alert. Outside the queue for the same reason as magic-battery: it writes Apple Reminders only, and a nudge stuck behind a long render misses its evening. Runs at :20 so it never touches Reminders at the same moment as magic-battery at :25."
+ },
+ "uk-gigs": {
+  "cron": "30 7 * * *",
+  "maxLateMinutes": 720,
+  "mode": "wrapped",
+  "queued": false,
+  "needs": [
+   "network"
+  ],
+  "retryWhenDeferred": false,
+  "retryWhenDeferredNote": "Fires daily and checks only once 7 days have passed since the last good check, so a deferred day is picked up by the next day's run; a retry would only repeat that.",
+  "note": "Kevin, 28 Sep 2026: emails him new UK gigs (date, venue, city, booking link) for every Apple Music library artist with 5 or more songs, from Ticketmaster, matched by attraction id so tribute acts never pass as the band; the best tribute acts for favourite bands that no longer tour (private tributes.json) get their own labelled section. Fires daily, checks weekly: scripts/uk-gigs.py run does the Ticketmaster check only once 7 calendar days have passed since the last good one, so a missed day is caught up the next and no weekday sits in the cron. A month with nothing new still gets one email, and the run fails when Ticketmaster matches under 30% of the artists. Outside the queue: it reads Music and Ticketmaster and writes only its private logs and one email through send-email.py self-note, never the repo, Airtable or the queue."
+ },
  "job-digest": {
   "completedWhen": "ran",
   "completedWhenNote": "job-digest EXITS 1 BY DESIGN whenever the morning message contains anything needing attention \u2014 that is how run-job.sh records a real problem rather than a clean sweep \u2014 and it runs outside the queue, so it never writes a `released` event either. Graded on attendance. Found 19 Sep 2026 by the reachability control added with finding 20260919-daily-ops-phase2-excepti-549, which caught it before it produced its own false outage line; daily-ops and data-invariants had to be read on Kevin's screen first.",
@@ -392,11 +418,12 @@
   "cron": "15 9 * * *",
   "maxLateMinutes": 240,
   "mode": "wrapped",
-  "note": "Kevin's restructure of 26 Aug 2026: role-specific work leaves the daily-ops sequence and runs as its own slot. A wrapped shell job, so it takes the lock and heartbeats — a slot, never a second Claude routine. Allowlisted in scripts/check-routines.py. The Prospecting agent (register row: status Built). Runs after the 09:00 slots so a prospect task it creates is picked up by the same morning's board pass.",
+  "note": "PARKED 27 Sep 2026 (Kevin, in-session, bringing forward his 16 Sep ruling that Operations Director is parked to January 2027 with no OD prospecting in Q4). The launchd job is unloaded and its plist removed, the allowlist entry is removed from scripts/check-routines.py, and install-slot-jobs.sh no longer installs it. Revisit at the January 2027 OD decision session. Previously: Kevin's restructure of 26 Aug 2026, a wrapped slot at 09:15 running the Prospecting agent.",
   "needs": [
    "network"
   ],
-  "retryWhenDeferred": true
+  "retryWhenDeferred": true,
+  "enabled": false
  },
  "prod-sweep-weekly": {
   "cron": "0 11 * * *",

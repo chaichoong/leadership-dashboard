@@ -26,7 +26,7 @@ const CHECK = resolve(ROOT, 'scripts/drive-auth-check.py');
 // real patience costs the suite nothing — and the stub COUNTS the sleeps, so a
 // silent removal of the backoff shows up as attempts:1.
 function verdictFor({ api, vaultOk, vaultRaises = false, okOnAttempt = null,
-                      state = {} }) {
+                      state = {}, fresh = 'HEALTHY' }) {
   const probe = vaultRaises
     ? "def _boom(): raise OSError(11, 'Resource deadlock avoided')\nm._drive_ready = _boom"
     : okOnAttempt !== null
@@ -46,6 +46,7 @@ m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m)
 
 m.fetch = lambda: (200, '{}')
 m.classify = lambda sc, b: (${JSON.stringify(api)}, 'stubbed api')
+m.check_fresh = lambda: (${JSON.stringify(fresh)}, 'stubbed freshness')
 ${probe}
 _slept = []
 m._sleep = lambda s: _slept.append(s)
@@ -242,5 +243,178 @@ describe('a cold mount is not a broken mount, and an outage is not a flap', () =
                            state: { vault_broken_since: 'not a date' } });
     expect(r.vault_broken_hours).toBe(0);
     expect(r.vault_verdict).toBe('BROKEN');   // still broken, just not timed
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 28 Sep 2026. The estate moved to the Mac mini on 27 Sep and Migration
+// Assistant copied Google Drive's macOS records from the Air. The mount READ
+// fine, downloads worked and the vault half said HEALTHY, but new uploads never
+// appeared: episodes 2072 and 2073 showed 1 of 10 files each while Google held
+// all 10. Kevin found it trying to review the videos.
+//
+// The control that must never regress: a readable mount that is missing files
+// Google holds is NOT healthy.
+// ─────────────────────────────────────────────────────────────────────────────
+
+// Runs a snippet with the real module loaded. SHARED_MOUNT points at a temp
+// folder built for the case, and newest_on_google is stubbed with Google's side,
+// so check_fresh itself runs for real against real files.
+function withModule(body) {
+  const py = `
+import importlib.util, json, os, tempfile
+spec = importlib.util.spec_from_file_location('dac', ${JSON.stringify(CHECK)})
+m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m)
+def mount(present):
+    root = tempfile.mkdtemp()
+    for p in present:
+        os.makedirs(os.path.join(root, os.path.dirname(p)), exist_ok=True)
+        open(os.path.join(root, p), 'w').close()
+    return root
+${body}
+`;
+  return JSON.parse(execFileSync('python3', ['-c', py], { encoding: 'utf8' }));
+}
+
+const EP = 'Runpreneur/Runpreneur Edited Video/2001-2100/2072/';
+const ON_GOOGLE_2072 = ['Ep2072_transcript.txt', 'Ep2072_Summary.mp4', 'Episode_2072_Thumbnail.png',
+  'Ep2072_LFMD_YT.srt', 'Ep2072_LFMD_YT.mp4', 'Ep2072_LFMD.mp4', 'Episode_2072_Full_Episode_YT.srt',
+  'Episode_2072_Full_Episode_YT.mp4', 'Ep2072_Podcast.mp3', 'Episode_2072_Full_Episode.mp4'].map(n => EP + n);
+
+describe('drive-auth judges whether the mount is CURRENT, not just readable', () => {
+  it('BACK-TEST: the 28 Sep shape (Google has 10, the Mac shows the thumbnail) is BROKEN', () => {
+    const r = withModule(`
+m.SHARED_MOUNT = mount([${JSON.stringify(EP + 'Episode_2072_Thumbnail.png')}])
+m.newest_on_google = lambda: ${JSON.stringify(ON_GOOGLE_2072)}
+print(json.dumps(m.check_fresh()))`);
+    expect(r[0]).toBe('BROKEN');
+    expect(r[1]).toMatch(/9 of the 10 newest files/);
+    expect(r[1]).toMatch(/2072\/Ep2072_transcript\.txt/);
+    expect(r[1]).toMatch(/disconnect and reconnect/);
+  });
+
+  it('CONTROL: every file on Google present on the Mac is HEALTHY, or the back-test proves nothing', () => {
+    const r = withModule(`
+m.SHARED_MOUNT = mount(${JSON.stringify(ON_GOOGLE_2072)})
+m.newest_on_google = lambda: ${JSON.stringify(ON_GOOGLE_2072)}
+print(json.dumps(m.check_fresh()))`);
+    expect(r[0]).toBe('HEALTHY');
+    expect(r[1]).toMatch(/the 10 newest files/);
+  });
+
+  it('an empty listing is UNKNOWN, never HEALTHY: nothing to compare proves nothing', () => {
+    const r = withModule(`
+m.SHARED_MOUNT = mount([])
+m.newest_on_google = lambda: []
+print(json.dumps(m.check_fresh()))`);
+    expect(r[0]).toBe('UNKNOWN');
+  });
+
+  it('a listing that throws (no key, no network) is UNKNOWN, never HEALTHY', () => {
+    const r = withModule(`
+def _boom(): raise RuntimeError('drive GET -> 403: forbidden')
+m.newest_on_google = _boom
+print(json.dumps(m.check_fresh()))`);
+    expect(r[0]).toBe('UNKNOWN');
+    expect(r[1]).toMatch(/403/);
+  });
+
+  it('a stale mount turns a healthy API and a readable vault into BROKEN, and says why', () => {
+    const r = verdictFor({ api: 'HEALTHY', vaultOk: true, fresh: 'BROKEN' });
+    expect(r.verdict).toBe('BROKEN');
+    expect(r.reason).toMatch(/^mount freshness:/);
+    expect(r.fresh_verdict).toBe('BROKEN');
+    expect(r.alert_kevin).toBe(true);
+    expect(r.exit).not.toBe(0);
+  });
+
+  it('an unproved freshness still alerts, so the check cannot go quietly blind', () => {
+    const r = verdictFor({ api: 'HEALTHY', vaultOk: true, fresh: 'UNKNOWN' });
+    expect(r.verdict).toBe('UNKNOWN');
+    expect(r.alert_kevin).toBe(true);
+  });
+
+  it('builds each path from Google\'s parents, fetches each folder once, and asks for the right files', () => {
+    // A fake client standing in for the Content Engine's drive_api: one shared
+    // drive root, a two-level folder chain, and a name with "/" that the mount
+    // would show as ":".
+    const r = withModule(`
+import urllib.parse
+calls = []
+class Api:
+    API = 'https://x/drive/v3'
+    def drive_id(self): return 'ROOT'
+    def request(self, method, url):
+        calls.append(url)
+        if '/files?' in url:
+            return {'files': [
+                {'id': 'a', 'name': 'Ep2073_LFMD.mp4', 'parents': ['F2073']},
+                {'id': 'b', 'name': 'Ep2073_Summary.mp4', 'parents': ['F2073']},
+                {'id': 'c', 'name': 'top.txt', 'parents': ['ROOT']},
+                {'id': 'd', 'name': 'a/b.mp4', 'parents': ['F2073']}]}
+        fid = url.split('/files/')[1].split('?')[0]
+        return {'F2073': {'name': '2073', 'parents': ['FRANGE']},
+                'FRANGE': {'name': '2001-2100', 'parents': ['ROOT']}}[fid]
+paths = m.newest_on_google(api=Api(), now=1790000000)
+q = urllib.parse.parse_qs(calls[0].split('?', 1)[1])
+print(json.dumps({'paths': paths, 'q': q['q'][0], 'order': q['orderBy'][0],
+                  'size': q['pageSize'][0], 'folder_calls': len(calls) - 1}))`);
+    expect(r.paths).toEqual(['2001-2100/2073/Ep2073_LFMD.mp4', '2001-2100/2073/Ep2073_Summary.mp4', 'top.txt']);
+    expect(r.folder_calls).toBe(2);                      // F2073 and FRANGE, once each
+    // Upload time, not the file's own date: a camera clip keeps the date it was
+    // shot, so ordering on modifiedTime pushed fresh raw uploads out of the sample.
+    expect(r.order).toBe('createdTime desc');
+    expect(r.size).toBe('25');
+    expect(r.q).toMatch(/trashed = false/);
+    expect(r.q).toMatch(/not mimeType contains 'application\/vnd\.google-apps'/);
+    // The grace window: 1790000000 minus 60 minutes, so a file still syncing is not an alarm.
+    expect(r.q).toMatch(/createdTime < '2026-09-21T13:13:20'/);
+    expect(r.q).not.toMatch(/modifiedTime/);
+  });
+
+  it('a mount that errors (not "no such file") is UNKNOWN, never a stale verdict', () => {
+    // A waking mount returns EDEADLK and a refused one EPERM. Neither says the
+    // file is missing, and "reconnect the account" would be the wrong fix.
+    const r = withModule(`
+m.SHARED_MOUNT = mount(['Runpreneur'])       # a FILE where a folder should be: stat raises NotADirectoryError
+m.newest_on_google = lambda: ['Runpreneur/Runpreneur Edited Video/x.mp4']
+print(json.dumps(m.check_fresh()))`);
+    expect(r[0]).toBe('UNKNOWN');
+    expect(r[1]).toMatch(/could not answer/);
+  });
+
+  it('freshness is not judged on an unreadable mount, so the vault outage leads', () => {
+    const r = verdictFor({ api: 'HEALTHY', vaultOk: false, fresh: 'BROKEN' });
+    expect(r.fresh_verdict).toBe('UNKNOWN');
+    expect(r.fresh_reason).toMatch(/not judged/);
+    expect(r.verdict).toBe('BROKEN');
+    expect(r.reason).toMatch(/^local mount:/);
+    expect(r.reason).not.toMatch(/reconnect/);
+  });
+
+  it('BACK-TEST: the origin-gate streak still escalates when another half is failing', () => {
+    // Counted on the merged verdict, a freshness UNKNOWN reset the streak to 0,
+    // so a gate refusing every day could never reach its second-run alarm.
+    const r = verdictFor({ api: 'GATE', vaultOk: true, fresh: 'UNKNOWN',
+                           state: { consecutive_gate: 1 } });
+    expect(r.saved_state.consecutive_gate).toBe(2);
+    expect(r.verdict).toBe('BROKEN');
+    expect(r.reason).toMatch(/origin gate has refused 2 runs in a row/);
+  });
+
+  it('CONTROL: a single gate refusal with everything else healthy stays GATE, not BROKEN', () => {
+    const r = verdictFor({ api: 'GATE', vaultOk: true });
+    expect(r.saved_state.consecutive_gate).toBe(1);
+    expect(r.verdict).toBe('GATE');
+  });
+
+  it('a file truly missing still reads as BROKEN when another path also errors', () => {
+    // A stale mount that is also slow on one file must still name the reconnect fix.
+    const r = withModule(`
+m.SHARED_MOUNT = mount(['Runpreneur'])
+m.newest_on_google = lambda: ['Runpreneur/x.mp4', 'Other/missing.mp4']
+print(json.dumps(m.check_fresh()))`);
+    expect(r[0]).toBe('BROKEN');
+    expect(r[1]).toMatch(/1 of the 2 newest files/);
   });
 });

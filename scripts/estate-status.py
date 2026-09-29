@@ -106,8 +106,8 @@ RESET_RE = re.compile(r"resets\s+([^\n(·]+?)(?:\s*\(|\s*$|\s+[A-Z])")
 
 
 # ─── reads ────────────────────────────────────────────────────────────
-def load_schedule():
-    with open(SCHEDULE) as fh:
+def load_schedule(path=None):
+    with open(path or SCHEDULE) as fh:
         d = json.load(fh)
     live = {}
     for k, v in d.items():
@@ -115,6 +115,9 @@ def load_schedule():
             continue
         note = str(v.get("note") or "")
         if "RETIRED" in note or "ABSORBED" in note:
+            continue
+        # a parked job keeps its cron for the day it comes back; check-routines.py skips it the same way (27 Sep 2026)
+        if v.get("enabled") is False:
             continue
         live[k] = v
     return live
@@ -919,8 +922,10 @@ def upsert(rows, now, dry_run=False):
         return {"create": len(creates), "update": len(updates)}
     gone = [k for k in have if k and k not in {r["key"] for r in rows} and k not in REPORT_ROWS_OWNED_ELSEWHERE]
     for k in gone:
+        # nothing rewrites a gone row's counts again, so zero them or its last failure stays red for good
         updates.append({"id": have[k], "fields": {ES["status"]: "Idle", ES["nextDue"]: None,
-                        ES["detail"]: "No longer scheduled: this job has left job-schedule.json (retired or renamed).",
+                        ES["runs24h"]: 0, ES["fails24h"]: 0,
+                        ES["detail"]: "No longer scheduled: this job is retired, parked or renamed in job-schedule.json.",
                         ES["updated"]: now.strftime("%Y-%m-%dT%H:%M:%S.000Z")}})
     for i in range(0, len(updates), 10):
         _request("PATCH", TABLE, {"records": updates[i:i + 10], "typecast": True})
@@ -1097,6 +1102,35 @@ def selftest():
     sched = load_schedule()
     ok("handback-poll" in sched and "ceo-huddle" not in sched and "uc-check" not in sched, "schedule filter")
     ok("estate-status" in sched, "this job is registered in job-schedule.json")
+    # 6b. a parked job (enabled false, cron kept) is off the board; an enabled one stays (27 Sep 2026)
+    with tempfile.NamedTemporaryFile("w", suffix=".json", delete=False) as fh:
+        json.dump({"parked": {"cron": "15 9 * * *", "enabled": False, "note": "PARKED 27 Sep 2026 until January"},
+                   "on": {"cron": "0 7 * * *", "enabled": True}, "plain": {"cron": "0 8 * * *"}}, fh)
+    try:
+        s = load_schedule(fh.name)
+    finally:
+        os.unlink(fh.name)
+    ok("parked" not in s, "a disabled (PARKED) entry is dropped")
+    ok("on" in s and "plain" in s, "an enabled entry is kept")
+    with open(SCHEDULE) as fh:
+        raw = json.load(fh)
+    ok(not [k for k, v in raw.items() if isinstance(v, dict) and v.get("enabled") is False and k in sched],
+       "no disabled job in job-schedule.json is on the board")
+    # 6c. a row that leaves the board is written Idle with no next due and no counts; report rows are left alone
+    sent = []
+    real = (globals()["existing_rows"], globals()["_request"])
+    globals()["existing_rows"] = lambda: {"parked": "recGONE", "allowance": "recALLOW", "on": "recON"}
+    globals()["_request"] = lambda method, path, body=None: sent.append((method, body)) or {}
+    try:
+        upsert([{"key": "on", "kind": "job", "status": "Worked"}], now)
+    finally:
+        globals()["existing_rows"], globals()["_request"] = real
+    patched = {u["id"]: u["fields"] for m, b in sent if m == "PATCH" for u in b["records"]}
+    g = patched.get("recGONE") or {}
+    ok(g.get(ES["status"]) == "Idle" and g.get(ES["nextDue"], "x") is None and g.get(ES["runs24h"]) == 0
+       and g.get(ES["fails24h"]) == 0 and str(g.get(ES["detail"])).startswith("No longer scheduled"),
+       "a gone row reads Idle, no next due, no counts: %r" % g)
+    ok("recALLOW" not in patched and "recON" in patched, "report rows owned elsewhere are not marked gone")
     # 7. plain names come from the automations list Kevin already approved
     labels = load_labels()
     ok(labels.get("estate-drift", "").startswith("CEO and Board"), "labels parsed: %r" % labels.get("estate-drift"))

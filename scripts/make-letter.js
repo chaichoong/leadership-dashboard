@@ -143,8 +143,12 @@ function buildHtml(spec) {
          line-height: ${compact ? '1.32' : '1.45'}; color: #000; }
   /* Absolute, because Pingen reads the recipient out of the envelope window
      and this position is measured against the live API. See the header. */
+  /* Font-size: 8pt for 5+ lines to keep all lines within Pingen's reading
+     window (~83mm from top). 4 lines at 11pt end at ~79mm (valid). 5 lines
+     at 11pt end at ~85mm (action_required). At 8pt, 5 lines end at ~83mm. */
   .to { position: absolute; top: ${ADDRESS_TOP_MM}mm; left: ${ADDRESS_LEFT_MM}mm;
-        white-space: pre-line; line-height: 1.35; }
+        white-space: pre-line; line-height: 1.35;
+        font-size: ${to.length >= 5 ? '8pt' : 'inherit'}; }
   .sender { position: absolute; top: 20mm; right: 25mm; text-align: right;
             font-size: 10pt; }
   .main { padding: 105mm 25mm 30mm 25mm; }

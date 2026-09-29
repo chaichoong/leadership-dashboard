@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, afterEach } from 'vitest';
+import { describe, it, expect, vi, beforeAll, beforeEach, afterAll } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -35,15 +35,50 @@ function extract(name) {
 const certStatus = new Function(
   `${extract('daysUntil')}; ${extract('certStatus')}; return certStatus;`
 )();
-
 const daysUntil = new Function(`${extract('daysUntil')}; return daysUntil;`)();
 
+// Found failing on 28 Sep 2026. Two time-zone faults met at the October clock change:
+//  - the old iso() built local midnight and named it with toISOString(), which is UTC.
+//    In British Summer Time that is 23:00 the day before, so iso(30) named day 29 and
+//    the "30 days is Expiring" case was really testing day 29;
+//  - daysUntil() used Math.ceil, so a gap of 30 days and 1 hour across the change
+//    counted as 31 and a certificate 30 days out read Active.
+// The test only broke once day 30 fell after 25 Oct. Now the clock and the zone are
+// pinned, dates are named in local time, and nothing here reads the real date.
+const NOW = '2026-08-10T09:00:00';   // local time, well clear of either clock change
+const realTz = process.env.TZ;
+
+beforeAll(() => {
+  process.env.TZ = 'Europe/London';  // the zone the page runs in, clock changes included
+  vi.useFakeTimers({ toFake: ['Date'] });
+});
+beforeEach(() => vi.setSystemTime(new Date(NOW)));
+afterAll(() => {
+  vi.useRealTimers();
+  if (realTz === undefined) delete process.env.TZ;
+  else process.env.TZ = realTz;
+});
+
+// The calendar date offsetDays from the pinned today, named in LOCAL time, because
+// daysUntil() reads 'YYYY-MM-DD' back as local midnight. Midday, so no clock change
+// can tip the date.
+const pad = (n) => String(n).padStart(2, '0');
 const iso = (offsetDays) => {
   const d = new Date();
-  d.setHours(0, 0, 0, 0);
+  d.setHours(12, 0, 0, 0);
   d.setDate(d.getDate() + offsetDays);
-  return d.toISOString().slice(0, 10);
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
 };
+
+describe('the pinned clock', () => {
+  it('runs in the UK zone, so the clock-change cases really cross a clock change', () => {
+    // Control. If the zone did not take, those cases would run in UTC, where there is
+    // no change to cross, and pass without testing anything.
+    expect(new Date(2026, 9, 24, 12).getTimezoneOffset()).toBe(-60);  // BST
+    expect(new Date(2026, 9, 26, 12).getTimezoneOffset()).toBe(0);    // GMT
+    expect(iso(0)).toBe('2026-08-10');
+  });
+});
 
 describe('certStatus', () => {
   it('is the real function from compliance.html', () => {
@@ -61,9 +96,29 @@ describe('certStatus', () => {
     // Control. Without these the case above could pass by labelling everything
     // "No date", which would be just as wrong and just as quiet.
     expect(certStatus({ s: 'Active', d: iso(-1) }).label).toBe('Expired');
+    expect(certStatus({ s: 'Active', d: iso(0) }).label).toBe('Expiring');
     expect(certStatus({ s: 'Active', d: iso(10) }).label).toBe('Expiring');
     expect(certStatus({ s: 'Active', d: iso(30) }).label).toBe('Expiring');
+    expect(certStatus({ s: 'Active', d: iso(31) }).label).toBe('Active');
     expect(certStatus({ s: 'Active', d: iso(120) }).label).toBe('Active');
+  });
+
+  it('counts calendar days across the October clock change', () => {
+    // The day it was found. Clocks go back on 25 Oct 2026, so 28 Oct is 30 days and
+    // 1 hour away, and Math.ceil called it 31: Active instead of Expiring.
+    vi.setSystemTime(new Date('2026-09-28T09:58:00'));
+    expect(daysUntil('2026-10-28')).toBe(30);
+    expect(certStatus({ s: 'Active', d: '2026-10-28' }).label).toBe('Expiring');
+    expect(certStatus({ s: 'Active', d: '2026-10-29' }).label).toBe('Active');
+  });
+
+  it('calls a certificate that lapsed across the March clock change Expired', () => {
+    // Clocks go forward on 28 Mar 2027, so that day is 23 hours long. Seen on 29 Mar,
+    // a certificate dated 28 Mar is -23 hours away, and Math.ceil rounded that to 0:
+    // Expiring (amber) instead of Expired (red).
+    vi.setSystemTime(new Date('2027-03-29T09:00:00'));
+    expect(daysUntil('2027-03-28')).toBe(-1);
+    expect(certStatus({ s: 'Active', d: '2027-03-28' }).label).toBe('Expired');
   });
 
   it('honours an explicit Expired status even with a future date', () => {
@@ -163,43 +218,5 @@ describe('a rejected PAT is cleared from every store it was written to', () => {
     // and this test should be revisited rather than quietly still passing.
     const init = src.slice(src.indexOf('(function init('), src.indexOf('async function airtableFetch('));
     expect(init).toMatch(/localStorage\.getItem\('airtable_pat'\)\s*\|\|\s*sessionStorage\.getItem\('_dlr_pat'\)/);
-  });
-});
-
-// THE CLOCK CHANGE MUST NOT MOVE A RENEWAL DATE (finding 20260926-queue-fixer-629).
-//
-// daysUntil used to difference two LOCAL midnights and ceil the result. Across a
-// clock change that difference is 30 days plus (or minus) an hour, so a renewal
-// exactly 30 days out counted as 31 and certStatus's `days <= 30` branch was
-// missed: the cell read Active, with no colour, one month before renewal. It hid
-// for about a month before each change, in both directions, and it took the whole
-// vitest gate going red on 26 Sep 2026 to find it.
-//
-// The dates are PINNED rather than computed from today, so this keeps testing the
-// boundary on every day of the year instead of only in late September.
-describe('daysUntil counts calendar days across a clock change', () => {
-  afterEach(() => { vi.useRealTimers(); });
-
-  const at = (ymd) => { vi.useFakeTimers(); vi.setSystemTime(new Date(`${ymd}T09:00:00`)); };
-
-  it('BST to GMT: 30 days is 30, not 31', () => {
-    at('2026-09-26');                       // BST; +30 days lands after the change
-    expect(daysUntil('2026-10-26')).toBe(30);
-    expect(certStatus({ s: 'Active', d: '2026-10-26' }).label).toBe('Expiring');
-  });
-
-  it('GMT to BST: 30 days is still 30, not 29', () => {
-    at('2026-03-15');                       // GMT; +30 days lands after the change
-    expect(daysUntil('2026-04-14')).toBe(30);
-    expect(certStatus({ s: 'Active', d: '2026-04-14' }).label).toBe('Expiring');
-  });
-
-  it('the ordinary cases are unchanged', () => {
-    at('2026-06-10');
-    expect(daysUntil('2026-06-10')).toBe(0);
-    expect(daysUntil('2026-06-09')).toBe(-1);
-    expect(daysUntil('2026-06-11')).toBe(1);
-    expect(daysUntil('2026-10-08')).toBe(120);
-    expect(daysUntil('')).toBeNull();
   });
 });

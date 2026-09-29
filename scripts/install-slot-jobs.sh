@@ -49,7 +49,7 @@ JOBS=(
   "drive-auth|6:50|/usr/bin/python3 $REPO/scripts/drive-auth-check.py"
   "ceo-agent|6:45|/bin/bash $SLOT ceo-agent $TASKS/ceo-agent/SKILL.md"
   # uc-check RETIRED 1 Sep 2026 by Kevin, Slack cleanup: whole UC process stopped.
-  "prospecting|9:15|/bin/bash $SLOT prospecting $TASKS/prospecting/SKILL.md"
+  # prospecting PARKED 27 Sep 2026 by Kevin: Operations Director parked to January 2027.
   "prod-sweep-weekly|11:00|/bin/bash $SLOT prod-sweep-weekly $TASKS/prod-sweep-weekly/SKILL.md"
   # Hourly, and hourly on purpose: Utilita's login is a rolling ONE HOUR that
   # only a visit renews, so the read is what holds the session open.

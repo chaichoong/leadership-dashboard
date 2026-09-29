@@ -107,7 +107,9 @@ APPROVED_SLOTS = {
     "inbound-triage": "Inbound Comms Triage, 09/13/17 (Kevin, 24 Aug 2026)",
     "task-manager": "Task Manager board pass, 09:20/13:20/17:20 (Kevin, 25 Aug 2026; moved off :00 on 14 Sep 2026)",
     "ceo-agent": "CEO huddle + memory sweep, 06:45 (Kevin, 26 Aug 2026)",
-    "prospecting": "Prospecting agent, 09:15 (Kevin, 26 Aug 2026)",
+    # prospecting REMOVED 27 Sep 2026 (Kevin): Operations Director is parked to
+    # January 2027, so the 09:15 prospecting slot is switched off, and an
+    # allowlist entry would wave through a job that must no longer run.
     # uc-check REMOVED 27 Aug 2026 (Kevin, estate audit): the Universal Credit
     # slot is switched off, so an allowlist entry for it would wave through a
     # job that must no longer run. Its register row is "UC Verification", Paused.

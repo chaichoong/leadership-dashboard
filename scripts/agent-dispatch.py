@@ -1587,6 +1587,17 @@ def od_picture_problem(task_name, output):
     if not name.startswith("CONTENT (OD):") or "Newsletter:" in name: return ""
     text = str(output or "")
     if text.lstrip().upper().startswith("THIN SLOT"): return ""
+    # A CLOSE PROPOSAL is ABOUT the card, not the post on it, so demanding the
+    # post's picture is asking for a picture that is the reason the card is being
+    # closed. recZdwbWGIFjMEyG6 (a stale OD post) made task-manager retry the same
+    # refused submit in its 13:00 and 17:00 slots for six days running — two of the
+    # three board passes a day ended VERIFY FAIL and the card never left the board
+    # (findings 20260917-task-manager-board-541, 20260918-task-manager-board-547,
+    # 20260919-task-manager-board-553/554, 20260920-daily-ops-556).
+    # Kevin approves removing a dead card; he is not being shown a post. The alert
+    # lane below this already carries exactly the same exemption for exactly the
+    # same reason, and this gate was written without it.
+    if text.lstrip().upper().startswith("CLOSE PROPOSAL:"): return ""
     if re.search(r"https://assets\.cdn\.filesafe\.space/\S+\.(png|jpg|jpeg)", text, re.I): return ""
     return ("an Operations Director post card must carry its picture as a permanent link (assets.cdn.filesafe.space ...png) so Kevin can open "
             "it; re-run the lane's `cards` step rather than re-submitting the text alone")
@@ -5197,8 +5208,69 @@ def track_record_problem(output, required):
 
 
 # ── history: the dated record of everything with a contact or reference ──
-REF_TOKEN_RE = re.compile(r"\b(?=[A-Z0-9-]{5,}\b)(?:[A-Z]*\d[A-Z0-9-]*)\b")
-ISO_DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
+# The five-or-more check stops at the first boundary five or more characters
+# in, never the last: read to the end of the run at every boundary,
+# "a-" * 30000 took 3.1 seconds (28 Sep 2026). It is a yes/no check, so the
+# answer is the same.
+REF_TOKEN_RE = re.compile(r"\b(?=[A-Z0-9-]{5,}?\b)(?:[A-Z]*\d[A-Z0-9-]*)\b")
+# A timestamp is a date: "2026-01-22T16:27:36Z" reads as 2026-01-22T16 (60
+# live tokens on 28 Sep 2026, mostly Evernote "Recorded:" stamps), and a
+# calendar invite writes 20260122T162736Z. Eight bare digits stay: that is an
+# account number as often as a date.
+ISO_DATE_RE = re.compile(r"^(?:\d{4}-\d{2}-\d{2}(?:[Tt]\d{2,6}[Zz]?)?|\d{8}[Tt]\d{4,6}[Zz]?)$")
+# A command or code word is not a reference (28 Sep 2026). A task whose
+# description said "Run: python3 ~/.claude/skills/model-check/calibrate.py 14"
+# searched for PYTHON3, found 682 lines of unrelated history (EICR checks
+# among them) and wrote the newest 40, 12,454 characters, into its Notes.
+# Letters then one digit is not a reference: across the 8,135 live tasks it
+# gave 17 tokens, every one noise (PYTHON3, WORDSECTION1 from Outlook HTML,
+# DMARC1, the name part of an email address, run-together text like TAPS3),
+# while real references carry two or more digits (shapes like UCD123, PUD45,
+# AB12345). A booking code can have that shape (PNR XKQJT4), so one straight
+# after a reference label stays. Only a label that means a reference on its
+# own counts bare; an everyday word (case, order, account) needs No, Number,
+# Ref, Code or # after it, or "in case python3" is searched again (review).
+# The named code words come with the widths they come in, so INT123 or
+# X1234567 stays a reference, and no label rescues them; the last is a model
+# id's tail (4-5-20251001 from claude-haiku-4-5-20251001).
+ONE_DIGIT_WORD_RE = re.compile(r"[A-Z]+\d")
+CODE_WORD_RE = re.compile(
+    r"SHA(?:224|256|384|512)|SHA3-(?:224|256|384|512)|BASE(?:32|58|64|85)|UTF(?:16|32)(?:BE|LE)?"
+    r"|(?:U?INT|FLOAT)(?:16|32|64|128)|(?:WIN|ARM|AMD|AARCH)(?:32|64)|WIN1[01]|X86-64|CP125\d"
+    r"|(?:PYTHON|NODE|IOS|IPADOS|MACOS|WATCHOS|ANDROID|WINDOWS)\d{2}|INSTA360"
+    r"|(?:PYTHON|HTML|OAUTH|DMARC|DKIM|WORDSECTION)\d"
+    r"|\d{1,2}-\d{1,2}-20\d{6}|IMAGE\d{3}")
+REF_LABEL_RE = re.compile(
+    r"(?:\b(?:REF|REFERENCE|BOOKING|PNR|CONFIRMATION)\b(?:[ \t]*(?:NO|NUMBER|CODE|REF|REFERENCE)\b)?"
+    r"|\b(?:POLICY|CLAIM|ACCOUNT|CASE|INVOICE|ORDER|TRACKING)(?:[ \t]*(?:NO|NUMBER|CODE|REF|REFERENCE)\b|[ \t]*#))"
+    r"[ \t:#.()-]*(?:\r?\n[ \t]*)?\Z")
+# Pasted email carries machine text that is never a reference (28 Sep 2026,
+# measured on the 8,135 live tasks). Outlook names each inline picture
+# "[cid:image001.png@01AB2345.6789CDEF]": the content id gave 72 tokens and the
+# file name 67 (IMAGE\d{3} above). A style colour ("background: #1a2b3c",
+# link="#467886") gave 69. It goes only where a style property is followed by
+# CSS values, never prose: "Background: tenant says invoice #12345678" and
+# "Order #GM123456" are real (review). A price run into a word (Subtotal80.00,
+# GBP12.34, GBP160, 12500GBP) or a number beside a currency sign or code is an
+# amount, not a reference (146 tasks changed, 171 tokens dropped, none a
+# reference).
+INLINE_IMAGE_RE = re.compile(
+    r"(?i)(?:\bcid:|\bimage\d{3}\.(?:png|jpe?g|gif|bmp)@)[^\s\]>)\"']+|\bOutlook-[0-9a-z]+\.(?:png|jpe?g|gif)\b")
+_CSS_VALUE = (r"(?:-?[\d.]+(?:px|pt|em|rem|%)|0|\d+deg|solid|dashed|dotted|double|groove|ridge|inset|outset"
+              r"|none|transparent|!important|to[ \t]+(?:left|right|top|bottom)|rgba?\([^)\n]{0,40}\))")
+# One line only, no run of blanks two quantifiers can split, and no property
+# name longer than 40 letters: a 20,000-space value took 28 seconds (review).
+STYLE_COLOUR_RE = re.compile(
+    r"(?i)(?:\b(?:[a-z-]{0,40}colou?r|background[a-z-]{0,40}|border[a-z-]{0,40}|outline[a-z-]{0,40}|fill|stroke"
+    r"|[a-z-]{0,40}shadow)[ \t]*[:=]|\b[av]?link[ \t]*=|(?<![\w-])--[a-z0-9-]{1,40}[ \t]*:)"
+    r"[ \t]*(?:[\"'][ \t]*)?(?:(?:linear|radial)-gradient\([ \t]*)?(?:" + _CSS_VALUE + r"[ \t,]+)*#[0-9a-f]{3,8}\b"
+    r"(?:[ \t,]*(?:" + _CSS_VALUE + r"[ \t,]+)*#[0-9a-f]{3,8}\b)*")
+AMOUNT_WORD_RE = re.compile(r"(?:GBP|EUR|USD)\d+|\d+(?:GBP|EUR|USD)")
+AMOUNT_TAIL_RE = re.compile(r"\.\d{2}(?![\d.])")
+CURRENCY_BEFORE_RE = re.compile(r"(?:[£€$]|\b(?:GBP|EUR|USD))[ \t]?\Z")
+# "Order 123456 GBP 49.99": the amount follows the code, so 123456 is the
+# order (review).
+CURRENCY_AFTER_RE = re.compile(r"[ \t]?(?:GBP|EUR|USD)\b(?![\s,:]*[£€$]?\d)")
 # A link is an address, not a reference (25 Sep 2026). An Airtable form link
 # in a tenant-chain task gave the refs APPNQJDPQDNIH3IRL, the base id in
 # nearly every task and email that links to Airtable, and SHRTUDF8S04KP5XGT;
@@ -5210,7 +5282,18 @@ ISO_DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 # as written, before it is upper-cased: a scheme-less link needs a lowercase
 # host (so "Acc.No/12345678" stays a reference) and an id a lowercase prefix
 # (so RECEIPT1234567890 does too).
-REF_URL_RE = re.compile(r"(?i:https?://|www\.)\S+|\b(?:[a-z0-9-]+\.)+[a-z]{2,}/\S*")
+# A long dotted or hyphened run ("a." * 10000) took 1.2 seconds (28 Sep
+# 2026): the scheme-less link was retried at every word boundary inside it,
+# each try reading to the end of the run. Once a run fails as a link from its
+# first boundary it fails from every later one (a link found from a later
+# boundary would stretch back to the first), so the third branch reads the
+# rest of the run in one step and gives it back
+# unchanged. It stops short of a www. or http(s):// inside the run so the
+# first branch is still tried there. The text out is the same as before.
+_NOT_A_LINK_START = r"(?!(?i:www\.|https?://))[a-z0-9-]"
+REF_URL_RE = re.compile(
+    r"(?i:https?://|www\.)\S+|\b(?:[a-z0-9-]+\.)+[a-z]{2,}/\S*"
+    r"|(?P<run>\b(?:" + _NOT_A_LINK_START + r")+(?:\.(?:" + _NOT_A_LINK_START + r")+)*)")
 AIRTABLE_ID_RE = re.compile(r"\b(?:app|tbl|rec|viw|shr|fld)[A-Za-z0-9]{14}\b")
 # A link wrapped across lines cuts an id in two ("…/shrTuDF8s" then
 # "04Kp5XGT"), and the second half would search every record holding the
@@ -5235,19 +5318,38 @@ def reference_tokens(text):
     yielded 18 tokens, seven of them the same number, and dates matched
     thirteen unrelated tasks). Never from a link, never an Airtable id (25 Sep
     2026). A phone number stays: on the SMS lane it is the only thing naming
-    the contact."""
+    the contact. Never a command or code word such as PYTHON3 or SHA256 (28
+    Sep 2026)."""
     text = TRACK_RECORD_HEADER_RE.sub(" ", str(text or ""))
     text = WRAPPED_ID_RE.sub(lambda m: m.group(1) + m.group(3) if len(m.group(2)) + len(m.group(3)) == 14 else m.group(0), text)
-    text = AIRTABLE_ID_RE.sub(" ", REF_URL_RE.sub(" ", text))
+    text = AIRTABLE_ID_RE.sub(" ", REF_URL_RE.sub(lambda m: m.group("run") or " ", text))
+    text = STYLE_COLOUR_RE.sub(" ", INLINE_IMAGE_RE.sub(" ", text))
     # A link wrapped across lines leaves a piece of an id behind (DNIH3IRL
     # from appnqjDpq / DniH3IRl), and the search matches on substrings, so
     # that piece finds every record the base id is in (review, 25 Sep 2026).
     ours = f"{BASE_ID} {TASKS}".upper()
+    upper = text.upper()
     out = []
-    for t in REF_TOKEN_RE.findall(text.upper()):
+    for mt in REF_TOKEN_RE.finditer(upper):
+        t = mt.group(0)
         if t.isalpha() or ISO_DATE_RE.match(t) or t in ours or t in out:
             continue
+        if CODE_WORD_RE.fullmatch(t) or AMOUNT_WORD_RE.fullmatch(t):
+            continue
+        if re.fullmatch(r"[A-Z]*\d+", t) and AMOUNT_TAIL_RE.match(upper, mt.end()):
+            continue
+        if re.fullmatch(r"[\d-]+", t) and CURRENCY_BEFORE_RE.search(upper, max(0, mt.start() - 5), mt.start()):
+            continue
+        if t.isdigit() and CURRENCY_AFTER_RE.match(upper, mt.end()):
+            continue
+        if ONE_DIGIT_WORD_RE.fullmatch(t) and not REF_LABEL_RE.search(upper, max(0, mt.start() - 40), mt.start()):
+            continue
         out.append(t)
+        # Only the first eight are kept, so stop there: checking each new
+        # token against a list that kept growing took 1.3 seconds on 20,000
+        # of them (28 Sep 2026).
+        if len(out) == HISTORY_MAX_REFS:
+            break
     return out[:HISTORY_MAX_REFS]
 
 
@@ -6577,6 +6679,97 @@ def cmd_blockers(args):
 
 # ─── VERIFY (the control run-job.sh wraps) ────────────────────────────
 
+# The hand-back poll's runner drops this file in its run folder. A hand-back-only
+# run is told to IGNORE new work, so the new items in its own queue are not work
+# it owed. Written by the runner, never by the agent, so a run cannot excuse
+# itself (27 Sep 2026).
+HANDBACK_ONLY_MARK = "handback-only"
+# A run told to WORK ONLY named tasks (roy-assistant, signin-pickup) writes them here, one per line, so verify owes
+# exactly those and not the whole worklist it was handed (review, 27 Sep 2026). Written by the runner, never the agent.
+OWED_IDS_MARK = "owed-ids"
+# What the agent's self-check saw failed or parked. The control alarms on any of
+# them missing from the final report: a failure is a result, never a draft error
+# to delete (review, 27 Sep 2026).
+SELFCHECK_FILE = "selfcheck.json"
+
+
+def _utc(ts):
+    try:
+        t = datetime.fromisoformat(str(ts or "").replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    return t if t.tzinfo else t.replace(tzinfo=timezone.utc)
+
+
+def owed_ids(queue, handback_only=False):
+    """The worklist ids a run owed: all of them, or in a hand-back-only run all
+    but plain new work (a sign-in reopened item is owed whatever its kind)."""
+    return [w.get("id") for w in (queue.get("worklist") or [])
+            if w.get("id") and (not handback_only or w.get("kind") != "new"
+                                or w.get("signinReopened"))]
+
+
+def silent_run_problem(report, queue=None, handback_only=False, rested=(), known_parked=(), owed=None, alerted_before=None):
+    """The rule verify exists for, or '': work existed and the run did none.
+
+    27 Sep 2026: seven "ZERO completed actions" alerts in one afternoon, every one
+    a hand-back poll that rightly left new work for the slots (its worklist counts
+    new work too) or tried a carry-out that met its wall. Counted from the
+    queue.json the run was handed, never from what the run says it ignored.
+
+    A task resting on its wall (`rested`), or parked, already alerted, listed
+    again in this run's parkedFlags and still carrying an open wall in its live
+    Notes (`known_parked`; the alert list is never pruned, so an id in it alone
+    excuses nothing), is not owed, and neither ever counts as the run's work.
+    A parked flag counts as work only when it is new (not in `alerted_before`): only
+    a completed action, a failure that alarms, or a new parked flag on an owed
+    task does, and an action on a task outside the worklist counts for nothing
+    (review, 27 Sep 2026). A run that did some of its work and left the rest for
+    the next tick is not silent: counting per task alarmed on 33 of 34 real runs.
+    With no queue.json the old rule stands."""
+    if isinstance(queue, dict) or owed is not None:
+        actions = report.get("actions") or []
+        parked = {p.get("id") for p in (report.get("parkedFlags") or [])}
+        excused = set(rested) | (parked & set(known_parked))
+        owed = [i for i in (owed if owed is not None else owed_ids(queue, handback_only)) if i not in excused]
+        # a parked flag is the run's work only when it is NEW: re-listing one alerted before is not doing anything
+        old = set(known_parked) if alerted_before is None else set(alerted_before)
+        real = ({a.get("task") for a in actions if a.get("ok")}
+                | {a.get("task") for a in actions if not a.get("ok") and a.get("task") not in excused}
+                | (parked - excused - old))
+        if owed and not (real & set(owed)):
+            return (f"{len(owed)} eligible tasks and ZERO attempted: "
+                    f"{', '.join(owed[:8])}")
+        return ""
+    counts = report.get("queueCounts") or {}
+    try:
+        eligible = int(counts.get("worklist", 0) or 0)
+    except (TypeError, ValueError):
+        eligible = 0
+    if eligible > 0 and not any(a.get("ok") for a in (report.get("actions") or [])):
+        return f"{eligible} eligible tasks and ZERO completed actions"
+    return ""
+
+
+def rested_on_wall(live, last_event, started_at, now=None):
+    """True when a failed action met a wall the blocker loop already owns (the
+    Estate "Robots blocked" row, the fix routed to its owner), so alarming again
+    each time the task wakes to re-check it only trains Kevin to ignore the alarm
+    channel (27 Sep 2026: the Meta dispute task). Both must hold (review, 27 Sep
+    2026): the open BLOCKER was on record BEFORE this run started, so a wall met
+    for the first time still alarms once; and the task rests on it NOW (parked
+    within IDLE_HOURS), so a week-old wall never excuses today's unrelated
+    failure."""
+    b = task_blocker(live.get("notes"))
+    if not b or not last_event or last_event[0] != "parked":
+        return False
+    since, parked, start = _utc(b.get("since")), _utc(last_event[1]), _utc(started_at)
+    if not (since and parked and start):
+        return False
+    now = now or datetime.now(timezone.utc)
+    return since < start and now - parked < timedelta(hours=IDLE_HOURS)
+
+
 def cmd_verify(args):
     try:
         with open(args.report) as fh:
@@ -6584,6 +6777,28 @@ def cmd_verify(args):
     except Exception as e:
         print(f"ERROR: run report unreadable ({e}) — the run was blind",
               file=sys.stderr)
+        sys.exit(1)
+    # --dry-run is the agent's own self-check during a run: the same checks, no
+    # alarm state written (only what it saw, for the control), and nothing wraps it, so a draft report that the agent then
+    # corrects never reaches the alarm channel. The runner's wrapped call on the
+    # final report is the one that counts (27 Sep 2026: five of twelve alerts were
+    # drafts the agent fixed a minute later).
+    dry_run = bool(getattr(args, "dry_run", False))
+    rundir = os.path.dirname(os.path.abspath(args.report))
+    handback_only = os.path.exists(os.path.join(rundir, HANDBACK_ONLY_MARK))
+    queue = None
+    try:
+        with open(os.path.join(rundir, "queue.json")) as fh:
+            queue = json.load(fh)
+    except FileNotFoundError:
+        queue = None      # the counts rule below stands in; a hand-back run may not lack it
+    except Exception as e:                                # noqa: BLE001
+        print(f"ERROR: the run's queue.json is unreadable ({e}) — its owed work "
+              "cannot be counted", file=sys.stderr)
+        sys.exit(1)
+    if handback_only and queue is None:
+        print("ERROR: hand-back run has no queue.json — its owed work cannot be "
+              "counted", file=sys.stderr)
         sys.exit(1)
 
     problems = []
@@ -6599,13 +6814,90 @@ def cmd_verify(args):
         problems.append("queueCounts is missing or empty — the queue read "
                         "failed and the run was blind")
 
-    # The rule this control exists for: work existed and the run did none.
-    if counts.get("worklist", 0) > 0 and not ok_actions:
-        problems.append(
-            f"{counts['worklist']} eligible tasks and ZERO completed actions")
+    # When the run began, from the queue the script stamped, never the report's
+    # startedAt: the agent writes that, and half of them carry London time with a
+    # "Z" on the end, an hour late (review, 27 Sep 2026).
+    started_at = (queue or {}).get("generatedAt") or report.get("startedAt")
+    rested = []
+    ledger = ledger_last_events() if failed else {}
     for a in failed:
+        try:
+            live = task_view(get_task(a.get("task")))
+        except Exception:                                 # noqa: BLE001
+            live = None       # unreadable: it cannot be excused, so it alarms below
+        if live and rested_on_wall(live, ledger.get(a.get("task")), started_at):
+            rested.append(a.get("task"))
+            print(f"INFO: {a.get('task')} met its recorded wall again and rests "
+                  f"on it — {str(a.get('error'))[:120]}", file=sys.stderr)
+            continue
         problems.append(f"action failed: {a.get('kind')} {a.get('task')} — "
                         f"{str(a.get('error'))[:120]}")
+
+    # The rule this control exists for: work existed and the run did none. Read
+    # after the walls, because a task resting on one is not owed; and against the
+    # parked tasks already alerted before this run, which are not owed either.
+    try:
+        with open(os.path.join(STATE_DIR, "tier1-alerted.json")) as fh:
+            alerted_before = set(json.load(fh))
+    except Exception:                                     # noqa: BLE001
+        alerted_before = set()    # none known: every parked flag counts as new work
+    # An old alert excuses a re-listed parked task only while its wall is still open
+    # in the live Notes: once Kevin clears it (he paid), the task is owed again
+    # (review, 27 Sep 2026). Every open parked task on 28 Sep carried a wall.
+    # The wall must also predate the run, as rested_on_wall demands: a wall this run
+    # put back on a task Kevin had just cleared is not an old alert (review, 28 Sep 2026).
+    known_parked = set()
+    run_start = _utc(started_at)
+    for pid in {p.get("id") for p in (report.get("parkedFlags") or [])} & alerted_before:
+        try:
+            b = task_blocker(task_view(get_task(pid)).get("notes"))
+        except Exception:                                 # noqa: BLE001
+            b = None      # unreadable: not excused, so it is owed and alarms if untouched
+        since = _utc(b.get("since")) if b else None
+        if b and since and run_start and since < run_start:
+            known_parked.add(pid)
+    owed_override = None
+    try:
+        with open(os.path.join(rundir, OWED_IDS_MARK)) as fh:
+            owed_override = [i for i in re.split(r"[\s,]+", fh.read()) if i]
+    except FileNotFoundError:
+        pass
+    if owed_override == []:
+        # the runners write it only with ids in hand; an empty one was emptied, never "owes nothing" (review, 28 Sep 2026)
+        problems.append("owed-ids is empty — the run's owed tasks cannot be counted")
+    silent = silent_run_problem(report, queue, handback_only, rested, known_parked, owed_override, alerted_before)
+    if silent:
+        problems.append(silent)
+
+    # The self-check records what it saw failed or parked; the control alarms on
+    # any of it missing from the final report. Deleting a failure is the one
+    # "fix" a dry run could otherwise teach (review, 27 Sep 2026).
+    seen_path = os.path.join(rundir, SELFCHECK_FILE)
+    final_ids = ({a.get("task") for a in actions}
+                 | {p.get("id") for p in (report.get("parkedFlags") or [])})
+    try:
+        with open(seen_path) as fh:
+            seen = set(json.load(fh))
+    except FileNotFoundError:
+        seen = set()
+    except Exception as e:                                # noqa: BLE001
+        problems.append(f"self-check record unreadable ({e}) — cannot tell "
+                        "whether a failure was removed from the report")
+        seen = set()
+    if dry_run:
+        now_seen = seen | {a.get("task") for a in failed} | {
+            p.get("id") for p in (report.get("parkedFlags") or [])}
+        tmp = seen_path + ".tmp"
+        with open(tmp, "w") as fh:
+            json.dump(sorted(i for i in now_seen if i), fh)
+        os.replace(tmp, seen_path)
+    else:
+        vanished = sorted(i for i in seen - final_ids if i)
+        if vanished:
+            problems.append(
+                "removed from the report after the self-check saw them failed "
+                f"or parked: {', '.join(vanished)} — a failure or a parked task "
+                "is a result, never a draft error to delete")
 
     # A register roster the queue could not read must never stay a stderr
     # whisper: role agents silently stop receiving routed work and lessons.
@@ -6699,7 +6991,7 @@ def cmd_verify(args):
         if t.get("id") not in alerted:
             problems.append(f"{label}: {t.get('id')} "
                             f"'{str(t.get('name'))[:60]}'")
-    if flags:
+    if flags and not dry_run:       # a self-check must not spend the once-per-task alarm
         os.makedirs(STATE_DIR, exist_ok=True)
         with open(state_path, "w") as fh:
             json.dump(sorted(alerted | {t.get("id") for _, t in flags}), fh)
@@ -6862,7 +7154,10 @@ def cmd_verify(args):
                       "systemAlertsHeldBack": len(alerts),
                       "handedToRoy": len(roy),
                       "systemAlertsBySource": alert_summary,
-                      "worklistAtStart": counts.get("worklist", 0)}))
+                      "worklistAtStart": counts.get("worklist", 0),
+                      # Failed on a wall already on record: listed, never hidden.
+                      "restedOnWall": rested,
+                      "dryRun": dry_run}))
 
 
 # ─── ENTRY ────────────────────────────────────────────────────────────
@@ -8682,6 +8977,9 @@ def main():
 
     v = sub.add_parser("verify")
     v.add_argument("--report", required=True)
+    v.add_argument("--dry-run", action="store_true",
+                   help="the agent's own self-check: same checks, no alarm state written, "
+                        "never wrapped; the runner's wrapped call is the control")
 
     rc = sub.add_parser("reconcile",
                         help="name finished deliverables on disk whose Airtable "
