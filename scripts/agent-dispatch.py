@@ -5698,8 +5698,27 @@ def ledger_signed_out(host, path=None, profile="default"):
         return None
     if not newest or login_since or newest.get("signedIn") or newest.get("botCheck") or not newest.get("at"):
         return None
+    # Only a verdict that landed on a sign-in page (review, 29 Sep 2026): a walk
+    # that met an error page or a slow load also reads "signed out", and trusted
+    # at any age it would stand until Kevin's next sign-in. Anything else walks.
+    if not signin_page_url(str(newest.get("url") or "")):
+        return None
     return {"signedIn": False, "botCheck": False, "url": str(newest.get("url") or ""),
             "at": str(newest["at"]), "source": "ledger"}
+
+
+# The sign-in pages a walk lands on when the robot is signed out: a door path, or
+# GOV.UK One Login itself. Mirrors sessionVerdict's door test in agent-browser.js,
+# plus "logon" (TopCashback's door is /logon/).
+SIGNIN_DOOR_URL_RE = re.compile(r"oauthSignIn|seclogin|/(?:log-?in|log-?on|sign-?in|signin|auth)(?:/|\?|$)", re.I)
+
+
+def signin_page_url(url):
+    try:
+        host = (urllib.parse.urlparse(url).hostname or "").lower()
+    except ValueError:
+        return False
+    return bool(SIGNIN_DOOR_URL_RE.search(url or "")) or host == "account.gov.uk" or host.endswith(".account.gov.uk")
 
 
 def ledger_bot_check(hosts, max_age_minutes=BOT_CHECK_FRESH_MINUTES, path=None, now=None, profile="default"):

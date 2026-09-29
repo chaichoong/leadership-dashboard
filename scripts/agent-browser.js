@@ -421,6 +421,8 @@ function signinTargets(sites = loadSites(), problems = []) {
 // 29 Sep 2026: process.exit skipped that finally, and Playwright then killed
 // Chrome before it wrote them). main() prints the refusal with its exit code.
 let openPages = 0;
+// How many session cookies the last withPage run kept (the fallback `login` logs it).
+let lastKept = 0;
 function die(msg, code = 1) {
   if (require.main !== module || openPages > 0) {
     const e = new Error('BROWSER REFUSED: ' + msg);
@@ -734,7 +736,7 @@ async function withPage(profile, headed, fn) {
     // pickup's first two looks after Kevin's 00:30 sign-in (a cookie rewritten
     // during the second) and signed out on the third, three minutes later, with
     // only browser restarts in between; the same drop on 9 Sep ("one-use session").
-    persistSessionCookies(dir);
+    lastKept = persistSessionCookies(dir);
   }
 }
 
@@ -1117,7 +1119,8 @@ async function main() {
       console.log(`Signed-in window open for ${host}. Log in, then close the window.`);
       await page.waitForEvent('close', { timeout: 15 * 60 * 1000 }).catch(() => {});
     });
-    ledger({ cmd: 'login', host, profile, sessionCookiesKept: persistSessionCookies(dir) });
+    // withPage kept them as it closed; a second pass would find none (review, 29 Sep 2026).
+    ledger({ cmd: 'login', host, profile, sessionCookiesKept: lastKept });
     return;
   }
 
@@ -1396,4 +1399,4 @@ module.exports = { hostAllowed, pickLinks, runSteps, assertNotCredential, assert
                    recordLoginSite, signinTargets, signinOwner, signinDomain, readSitesFile,
                    assertUploadable, assertConfirmable, UPLOAD_DIR, UPLOAD_EXTENSIONS, persistSessionCookies,
                    signinHoldActive, takeSigninHold, releaseSigninHold, waitForSigninHold, HOLD_MAX_MS, isBotCheck,
-                   profileProcs, plainWindowOpen, pickOption, settleBotCheck, withPage };
+                   profileProcs, plainWindowOpen, pickOption, settleBotCheck, withPage, lastKeptCount: () => lastKept };

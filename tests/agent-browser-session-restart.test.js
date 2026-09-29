@@ -30,6 +30,8 @@ describe('the robot keeps a session across its own browser restarts', () => {
         { name: 'sid', value: 'dropped', domain: 'www.example.org', path: '/' },
       ]);
     });
+    // The count the fallback `login` logs (review, 29 Sep 2026: it re-counted after withPage and logged 0).
+    expect(b.lastKeptCount()).toBe(1);
     const names = await b.withPage('restart-test', false, async (page, ctx) =>
       (await ctx.cookies(['https://ewf.companieshouse.gov.uk/', 'https://www.example.org/'])).map(c => `${c.domain} ${c.name}`));
     expect(names).toContain('ewf.companieshouse.gov.uk ch_session');

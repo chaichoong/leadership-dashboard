@@ -691,6 +691,10 @@ print('---JSON---'); print(json.dumps([
       signedIn: [OUT.replace('"signedIn":false', '"signedIn":true')],
       botCheck: [OUT.replace('"botCheck":false', '"botCheck":true')],
       neverLooked: ['{"at":"2026-09-28T17:16:21.406Z","cmd":"session","site":"www.facebook.com","signedIn":false,"profile":"default"}'],
+      // Landed on an error page, not a sign-in page: a "signed out" that may be a network blip.
+      errorLanding: [OUT.replace('https://signin.account.gov.uk/sign-in-or-create', 'chrome-error://chromewebdata/')],
+      // TopCashback's door is /logon/: a real sign-in page, so trusted.
+      logonDoor: [OUT.replace('https://signin.account.gov.uk/sign-in-or-create', 'https://www.topcashback.co.uk/logon/')],
       // A robot's read met "verify you are human" since: the app must say so, not open a window.
       botCheckSince: [OUT, `{"at":"${new Date(Date.now() - 60000).toISOString()}","cmd":"read","url":"https://ewf.companieshouse.gov.uk/x","botCheck":true,"profile":"default"}`],
     };
@@ -715,7 +719,8 @@ print('---JSON---'); print(json.dumps(res))`);
     expect(out.signedOut).toEqual(['ledger', false, 0]);
     expect(out.otherProfileLogin).toEqual(['ledger', false, 0]);
     expect(out.outAgainAfterLogin).toEqual(['ledger', false, 0]);
-    for (const k of ['loginSince', 'signedIn', 'botCheck', 'neverLooked', 'botCheckSince']) expect(out[k]).toEqual(['walk', true, 1]);
+    expect(out.logonDoor).toEqual(['ledger', false, 0]);
+    for (const k of ['loginSince', 'signedIn', 'botCheck', 'neverLooked', 'botCheckSince', 'errorLanding']) expect(out[k]).toEqual(['walk', true, 1]);
     for (const k of Object.keys(cases)) expect(out[k + ':gate']).toBe(1);
   });
   it('signin-waiting is the one caller that trusts a signed-out verdict', () => {
