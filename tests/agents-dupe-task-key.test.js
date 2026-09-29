@@ -422,6 +422,7 @@ ${code}`, arg], { encoding: 'utf8' }));
       grab(/const DUPE_MAINTENANCE_LANE_WORDS = \[[\s\S]*?\];/, 'DUPE_MAINTENANCE_LANE_WORDS'),
       grab(/const DUPE_ADDRESS_RE = [^\n]*;/, 'DUPE_ADDRESS_RE'),
       grab(/const DUPE_PERSON_RE = [^\n]*;/, 'DUPE_PERSON_RE'),
+      grab(/const DUPE_SPACES = [^\n]*;/, 'DUPE_SPACES'),
       grab(/const DUPE_UNIT_WORDS = \[[\s\S]*?\];/, 'DUPE_UNIT_WORDS'),
       grab(/const DUPE_NOT_A_PERSON = \[[\s\S]*?\];/, 'DUPE_NOT_A_PERSON'),
       grab(/function placeTokens\([\s\S]*?\n\}/, 'placeTokens'),
@@ -550,6 +551,7 @@ print(json.dumps(c.dupe_verdict(sys.argv[1], sys.argv[2], sys.argv[3])))
     grab(/const DUPE_MAINTENANCE_LANE_WORDS = \[[\s\S]*?\];/, 'DUPE_MAINTENANCE_LANE_WORDS'),
     grab(/const DUPE_ADDRESS_RE = [^\n]*;/, 'DUPE_ADDRESS_RE'),
     grab(/const DUPE_PERSON_RE = [^\n]*;/, 'DUPE_PERSON_RE'),
+    grab(/const DUPE_SPACES = [^\n]*;/, 'DUPE_SPACES'),
     grab(/const DUPE_UNIT_WORDS = \[[\s\S]*?\];/, 'DUPE_UNIT_WORDS'),
     grab(/const DUPE_NOT_A_PERSON = \[[\s\S]*?\];/, 'DUPE_NOT_A_PERSON'),
     grab(/function placeTokens\([\s\S]*?\n\}/, 'placeTokens'),
@@ -735,6 +737,9 @@ print(json.dumps(c.dupe_verdict(sys.argv[1], sys.argv[2], sys.argv[3])))
       "Refund Tenant Jane Smith's deposit - 5 Dalham Place", 'Advertise 2 rooms, 55 Elmdon Place',
       'Advertise double room - 55 Elmdon Place', 'Arrears (\u00a3) 23 Viola Street', '\u00a3\ud83d\ude00\ud83d\ude005 Viola Street',
       'Flat Nr. 4, 6 Chedburgh Place',
+      // Space-like characters the two languages read differently (review).
+      '55\ufeffElmdon Place', '55 Elmdon\u0085Place', '55\u001fElmdon Place', 'Flat\u00852 Dalham Place',
+      '55\u2028Elmdon\u200bPlace', 'Unit\u00a02, 5\u3000Dalham Place',
     ];
     const py = JSON.parse(execFileSync('python3', ['-c', `
 import importlib.util, json, sys

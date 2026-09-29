@@ -4429,6 +4429,7 @@ function isCalendarYear(digits){
 // tests/agents-dupe-task-key.test.js.
 const DUPE_ADDRESS_RE = new RegExp('(?:^|[\\s&])(\\d{1,4}[a-z]?(?:\\s*(?:&|and)\\s*\\d{1,4}[a-z]?)*)\\s+((?:[a-z]+\\s+){1,2}?)(' + DUPE_STREET_TYPES.slice().sort().join('|') + ')(?![a-z0-9])', 'g');
 const DUPE_PERSON_RE = /\b([A-Z][a-z]+[ -][A-Z][a-z]+)['\u2019]s\b/g;
+const DUPE_SPACES = /[\t\n\x0b\x0c\r\x1c-\x1f\x85\xa0\u1680\u2000-\u200b\u2028\u2029\u202f\u205f\u3000\ufeff]/g;
 const DUPE_UNIT_WORDS = ['unit','units','flat','flats','room','rooms','apartment','apt','suite',
   'studio','bedsit'];
 const DUPE_NOT_A_PERSON = ['kevin','roy','mica','council','credit','universal','revenues','energy','gas',
@@ -4444,11 +4445,15 @@ function dupeIdentity(name){
     const raw = Array.from(String(name||'')).slice(0, 1000).join('');
     const noise = (w)=> DUPE_GENERIC.indexOf(w) !== -1 || DUPE_ACTION_WORDS.indexOf(w) !== -1
                      || DUPE_DATE_WORDS.indexOf(w) !== -1;
+    // Every space-like character becomes a plain space first, from one list
+    // spelt out, never \s: the two languages disagree on U+0085, U+001C-1F and
+    // U+FEFF (review). After this the only space is ' '.
     const text = raw.toLowerCase()
-        .replace(/[\u00a3$\u20ac][ \t\u00a0\u2000-\u200b\u202f\u205f\u3000]{0,2}\d[\d,.]*/g, ' ')   // an amount is not a house
+        .replace(DUPE_SPACES, ' ')
+        .replace(/[\u00a3$\u20ac] {0,2}\d[\d,.]*/g, ' ')              // an amount is not a house
         .replace(/(\d)[-/\u2013\u2014](?=\d)/g, '$1&')              // 42-44 or 42–44 is two houses
         .replace(/\b(no|nr|num)\./g, '$1 ')                          // "Flat No. 2"
-        .replace(/[^a-z0-9&\s]/g, ' | ');                             // punctuation breaks the look-back
+        .replace(/[^a-z0-9& ]/g, ' | ');                              // punctuation breaks the look-back
     const addresses = [];
     for(const m of text.matchAll(DUPE_ADDRESS_RE)){
         const before = text.slice(0, m.index + m[0].indexOf(m[1])).split(/\s+/).filter(Boolean).slice(-2);

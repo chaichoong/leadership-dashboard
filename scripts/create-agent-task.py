@@ -991,6 +991,7 @@ DUPE_ADDRESS_RE = re.compile(
     r"(?:^|[\s&])(\d{1,4}[a-z]?(?:\s*(?:&|and)\s*\d{1,4}[a-z]?)*)\s+((?:[a-z]+\s+){1,2}?)("
     + "|".join(sorted(DUPE_STREET_TYPES)) + r")(?![a-z0-9])")
 DUPE_PERSON_RE = re.compile(r"\b([A-Z][a-z]+[ -][A-Z][a-z]+)['\u2019]s\b", re.A)
+DUPE_SPACES = "[\t\n\x0b\x0c\r\x1c-\x1f\x85\xa0\u1680\u2000-\u200b\u2028\u2029\u202f\u205f\u3000\ufeff]"
 DUPE_UNIT_WORDS = {"unit", "units", "flat", "flats", "room", "rooms", "apartment", "apt", "suite",
                    "studio", "bedsit"}
 DUPE_NOT_A_PERSON = {
@@ -1008,15 +1009,16 @@ def dupe_identity(name):
     in the order they appear, each once. Mirrored by dupeIdentity."""
     raw = str(name or "")[:1000]
     noise = DUPE_GENERIC | DUPE_ACTION_WORDS | DUPE_DATE_WORDS
-    text = raw.lower()
-    # An amount is not a house. The gap is spelt out, never \s, which Python
-    # and JavaScript read differently (review).
-    text = re.sub(r"[£$€][ \t\u00a0\u2000-\u200b\u202f\u205f\u3000]{0,2}\d[\d,.]*", " ", text, flags=re.A)
+    # Every space-like character becomes a plain space first, from one list
+    # spelt out, never \s: Python and JavaScript disagree on U+0085, U+001C-1F
+    # and U+FEFF (review). After this the only space is " ".
+    text = re.sub(DUPE_SPACES, " ", raw.lower())
+    text = re.sub(r"[£$€] {0,2}\d[\d,.]*", " ", text, flags=re.A)   # an amount is not a house
     text = re.sub(r"(\d)[-/\u2013\u2014](?=\d)", r"\1&", text, flags=re.A)   # 42-44 or 42–44 is two houses
     text = re.sub(r"\b(no|nr|num)\.", r"\1 ", text, flags=re.A)                # "Flat No. 2"
     # Other punctuation becomes a "|" break, so "2 rooms, 55 Elmdon Place"
     # never reads "rooms" as the word in front of 55 (review).
-    text = re.sub(r"[^a-z0-9&\s]", " | ", text)
+    text = re.sub(r"[^a-z0-9& ]", " | ", text)
     addresses = []
     for m in DUPE_ADDRESS_RE.finditer(text):
         before = text[:m.start(1)].split()[-2:]
