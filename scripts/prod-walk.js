@@ -215,6 +215,22 @@ function recordError(rec, line) {
   pushDistinct(rec.consoleErrors, line);
 }
 
+/** The uncaught rejection that follows the local-only Google 403 (29 Sep 2026).
+ *  On a local copy Google refuses the live-only API key (403, excused by
+ *  isOriginLocked), and follow-up.html's `await gapi.client.init()` then rejects
+ *  with a plain object nobody catches, which the browser reports as a pageerror
+ *  whose message is "Object". Main itself, served locally, failed Inbound Comms
+ *  on it, so the merge gate refused every PR that walks all pages. Held until
+ *  the page is done, then excused only when that same page saw the origin-locked
+ *  Google 403 on a local origin. Otherwise it is recorded like any other error. */
+function settleLockedRejections(rec, origin) {
+  const n = rec.pendingObjectRejections || 0;
+  delete rec.pendingObjectRejections;
+  if (!n) return;
+  if (rec.googleLocked403 && LOCAL_ORIGIN_RE.test(String(origin || ''))) { rec.outsideNoise += n; return; }
+  for (let i = 0; i < n; i += 1) recordError(rec, errorLine('pageerror: Object', '', origin));
+}
+
 /** One page as printed. Every field the Sunday slot already reads keeps its
  *  name and meaning; the counts and `truncated` are additions. `truncated` is
  *  true when any compared list reached the cap, so a comparison knows it may
@@ -462,14 +478,21 @@ function attachHooks(page, origin, getCurrent) {
     const text = m.text();
     // A 429 is Airtable's rate limit, which airtableFetch retries.
     if (isNoise(where) || /status of 429/.test(text)
-        || (/status of 403/.test(text) && isOriginLocked(where, 403, origin))) { current.outsideNoise += 1; return; }
+        || (/status of 403/.test(text) && isOriginLocked(where, 403, origin))) {
+      if (/status of 403/.test(text) && isOriginLocked(where, 403, origin)) current.googleLocked403 = true;
+      current.outsideNoise += 1; return;
+    }
     recordError(current, errorLine(text, where, origin));
   });
   page.on('pageerror', (e) => {
     const current = getCurrent();
     if (!current) return;
-    if (isAppError(e.stack, origin)) recordError(current, errorLine('pageerror: ' + e.message, '', origin));
-    else current.outsideNoise += 1;
+    if (!isAppError(e.stack, origin)) { current.outsideNoise += 1; return; }
+    // A bare object rejected on a local copy waits for settleLockedRejections().
+    if (e.message === 'Object' && LOCAL_ORIGIN_RE.test(String(origin || ''))) {
+      current.pendingObjectRejections = (current.pendingObjectRejections || 0) + 1; return;
+    }
+    recordError(current, errorLine('pageerror: ' + e.message, '', origin));
   });
   page.on('requestfailed', (r) => {
     const current = getCurrent();
@@ -480,6 +503,7 @@ function attachHooks(page, origin, getCurrent) {
   });
   page.on('response', (r) => {
     const current = getCurrent();
+    if (current && isOriginLocked(r.url(), r.status(), origin)) current.googleLocked403 = true;
     if (current && r.status() >= 400 && r.status() !== 429 && !isNoise(r.url())
         && !isOriginLocked(r.url(), r.status(), origin)) {
       current.failedRequests.push(clip(r.status() + ' ' + stripOrigin(r.url().split('?')[0], origin), 140));
@@ -633,6 +657,7 @@ async function walk(browser, a, base, origin, started) {
   } catch (e) {
     return finish({ ok: false, ran: false, reason: 'could not open ' + base + ': ' + clip(e.message, 200) }, 3);
   }
+  settleLockedRejections(boot, origin);
   if (!signedIn) {
     return finish({ ok: false, ran: false, reason: `NOT SIGNED IN: no data loaded within ${SIGNIN_BUDGET_MS / 1000}s`,
                     only: a.only, ...bootReport(boot),
@@ -714,6 +739,7 @@ async function walk(browser, a, base, origin, started) {
       if (p2) await p2.close().catch(() => {});
     }
     current = null;
+    settleLockedRejections(r, origin);
     r.status = classify(r);
     pages.push(r);
     DONE.push(r);
@@ -756,7 +782,7 @@ async function walk(browser, a, base, origin, started) {
 module.exports = { scrub, clip, findLeaks, findGate, isNoise, isAppError, isOriginLocked, allowedBase, routeFor, classify, summarise, MIN_CHARS,
                    args, parseOnly, selectEntries, isWrite, describeWrite, blockWrites, BLOCKED_BODY,
                    LIST_CAP, stripOrigin, errorLine, recordError, pageReport, bootReport, attachHooks,
-                   frameSettled, TASK_VIEWER, seedStorage, ALLOWED_WRITES, allowedWrite };
+                   frameSettled, TASK_VIEWER, seedStorage, ALLOWED_WRITES, allowedWrite, settleLockedRejections };
 
 if (require.main === module) {
   main().catch((e) => {
