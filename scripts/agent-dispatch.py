@@ -5335,6 +5335,10 @@ WRAPPED_ID_RE = re.compile(
 _FILE_EXT = (r"(?:md|markdown|txt|py|js|mjs|cjs|ts|json|jsonl|csv|tsv|html?|css|sh|zsh|toml|ya?ml|ini|cfg"
              r"|log|pdf|docx?|xlsx?|xlsm|pptx?|odt|ods|rtf|pages|numbers|key|png|jpe?g|gif|heic|webp|svg"
              r"|tiff?|bmp|mov|mp4|m4a|mp3|wav|zip|eml|msg|ics|vcf|plist|sql|xml)")
+# A file type is written all lower case or all capitals ("pdf", "PDF"), never
+# as a word starting a sentence after a missing space: "claim AB12345.Log in"
+# keeps its reference (review). Case-sensitive inside the case-blind pattern.
+_FILE_EXT = "(?-i:" + _FILE_EXT + "|" + _FILE_EXT.upper() + ")"
 _PATH_CH = r"[\w.~@+()-]"
 # A folder with spaces: a dated one ("2026-09-21 chedburgh gas safety") runs to
 # six words, any other to three, each starting with a capital or a digit ("My
@@ -5350,7 +5354,9 @@ _FILE_WORDS = r"(?:" + _CAP_WORD + r"[ \t]){0,3}"
 FILE_PATH_RE = re.compile(
     r"(?<![\w.~/-])(?:~|\.{1,2})?/(?:" + _PATH_CH + r"+/|" + _FOLDER_WORDS + r"/)*"
     + _FILE_WORDS + r"[\w~@+()-]" + _PATH_CH + r"*\." + _FILE_EXT + r"\b"
-    r"|[\"'\u201c\u2018][^\"'\u201d\u2019\n]{1,120}?\." + _FILE_EXT + r"[\"'\u201d\u2019]"
+    # A quoted file name opens after a space, a bracket or the start, never on
+    # the apostrophe in "Kevin's", and holds no quote of any kind (review).
+    r"|(?<![^\s(\[])[\"'\u201c\u2018][^\"'\u201c\u201d\u2018\u2019\n]{1,120}?\." + _FILE_EXT + r"[\"'\u201d\u2019]"
     r"|(?<![\w.~/-])(?:(?:~|\.{1,2})/" + _PATH_CH + r"+(?:/" + _PATH_CH + r"*)*"
     r"|/" + _PATH_CH + r"+(?:/" + _PATH_CH + r"*)+)"
     r"|(?<![\w.~@+()/-])[\w~@+()-]" + _PATH_CH + r"*(?:/" + _PATH_CH + r"+)*\." + _FILE_EXT + r"\b",

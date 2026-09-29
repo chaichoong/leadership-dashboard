@@ -438,8 +438,9 @@ print('---JSON---'); print(json.dumps([m.reference_tokens(t) for t in json.loads
       'Filed in ~/Library/CloudStorage/GoogleDrive-x/My Drive/00 AI Context/Case AB12345 notes.md',
       'Saved "Case AB12345 notes.md" to the drive.',
       'Filed in ~/Library/CloudStorage/GoogleDrive-x/Shared drives/Case-AB12345.pdf today.',
+      'SCAN INV123456.PDF attached', "(\u2018Case AB12345 notes.md\u2019)",
     ]);
-    expect(out).toEqual([[], [], [], [], [], [], [], [], [], [], []]);
+    expect(out).toEqual([[], [], [], [], [], [], [], [], [], [], [], [], []]);
   });
 
   it('a long dotted, slashed or spaced run never makes the path reader slow', () => {
@@ -477,8 +478,16 @@ print('---JSON---'); print(json.dumps([m.reference_tokens(t) for t in json.loads
       // Lowercase words after a path are a sentence, not a file name.
       'Put ~/Downloads/scan re AB12345 x.pdf in the letter.',
       'He said "ref AB12345 is due" and left.',
+      // An apostrophe in prose never opens a quoted file name, and a word
+      // after a missing space is not a file type (review).
+      "Kevin's claim AB12345 is in \u2018scan.pdf\u2019",
+      "It's ref AB12345, scan attached as \u201cletter.pdf\u201d",
+      "Jane's claim AB12345 filed with scan.pdf's copy",
+      'Your claim number is AB12345.Log in to view it.',
+      'Policy PX123456.Key dates below',
     ]);
     expect(out).toEqual([['AB12345'], ['AB12345'], ['AB12345', 'CD67890'], ['12345678'], ['AB12345'], ['AB12345'],
-      ['AB12345'], ['AB12345'], ['AB12345'], ['AB12345'], ['12345'], ['AB12345'], ['AB12345'], ['AB12345']]);
+      ['AB12345'], ['AB12345'], ['AB12345'], ['AB12345'], ['12345'], ['AB12345'], ['AB12345'], ['AB12345'],
+      ['AB12345'], ['AB12345'], ['AB12345'], ['AB12345'], ['PX123456']]);
   });
 });

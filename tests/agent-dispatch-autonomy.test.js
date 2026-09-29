@@ -430,6 +430,14 @@ print(json.dumps(lvl('CLOSE PROPOSAL: duplicate of recLINKED00000001', 'Admin', 
     expect(d.level).not.toBe('A');
     expect(d.text).toMatch(/tenancies/);
   });
+  it('a malformed link on the keeper never crashes the check (review)', () => {
+    const d = py(`${SETUP}
+DB['recODDLINK0000001'] = {'id':'recODDLINK0000001','createdTime':'2026-09-01T10:00:00.000Z','fields':{AF['name']:'Check DWP decision on UC47 and chase if none','fldx4qCw17UfrKpaN':'Upcoming','fldmne4RYJU22ICub':5}}
+print(json.dumps(lvl('CLOSE PROPOSAL: duplicate of recODDLINK0000001', 'Admin', 'Check DWP decision on UC47 and chase if none',
+                     extra={'fldmne4RYJU22ICub': ['recAAAAAAAAAAAAAA']})))`);
+    expect(d.level).toBe('A');
+    expect(d.keeper).toBe('recODDLINK0000001');
+  });
   it('CONTROL: the same tenant, or the same linked tenancy, still closes at Level A', () => {
     const d = py(`${SETUP}
 print(json.dumps([lvl('CLOSE PROPOSAL: duplicate of recTENANTB0000001', 'Admin', "Chase DWP on Pawel Kowalski's UC47 decision - 5 Dalham Place"),
