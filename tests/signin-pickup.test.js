@@ -678,7 +678,7 @@ print('---JSON---'); print(json.dumps([
   // no sign-in since, and waited 48 s while the app walked the door to learn the same thing. A
   // signed-out session cannot sign itself in; only a `login` changes it. Driven through the real
   // session_check with the walk replaced by a recorder.
-  it('a site last seen signed out with no sign-in since is not walked again; signed in, a bot check or any sign-in since is walked', () => {
+  it('the app\'s check does not re-walk a site last seen signed out with no sign-in since; signed in, a bot check, any sign-in since, or the submit gate walks', () => {
     const { writeFileSync: wf, mkdtempSync: md } = require('node:fs');
     const dir = md(join(tmpdir(), 'od-ledger-out-'));
     const OUT = '{"at":"2026-09-28T16:16:31.128Z","cmd":"session","site":"ewf.companieshouse.gov.uk","url":"https://signin.account.gov.uk/sign-in-or-create","signedIn":false,"botCheck":false,"profile":"default"}';
@@ -691,6 +691,8 @@ print('---JSON---'); print(json.dumps([
       signedIn: [OUT.replace('"signedIn":false', '"signedIn":true')],
       botCheck: [OUT.replace('"botCheck":false', '"botCheck":true')],
       neverLooked: ['{"at":"2026-09-28T17:16:21.406Z","cmd":"session","site":"www.facebook.com","signedIn":false,"profile":"default"}'],
+      // A robot's read met "verify you are human" since: the app must say so, not open a window.
+      botCheckSince: [OUT, `{"at":"${new Date(Date.now() - 60000).toISOString()}","cmd":"read","url":"https://ewf.companieshouse.gov.uk/x","botCheck":true,"profile":"default"}`],
     };
     const paths = {};
     for (const [k, lines] of Object.entries(cases)) { paths[k] = join(dir, `${k}.jsonl`); wf(paths[k], lines.join('\n') + '\n'); }
@@ -703,13 +705,24 @@ res = {}
 for name, path in ${JSON.stringify(paths)}.items():
     m.BROWSER_LEDGER = path
     del walked[:]
-    v = m.session_check('ewf.companieshouse.gov.uk')   # WebFiling is short-session: no fresh-verdict reuse
+    v = m.session_check('ewf.companieshouse.gov.uk', trust_signed_out=True)   # the app's check; short-session, so no fresh-verdict reuse
     res[name] = [v.get('source'), v.get('signedIn'), len(walked)]
+    # The submit gate (signin_verify_line) calls session_check(host) and must always walk.
+    del walked[:]
+    m.session_check('ewf.companieshouse.gov.uk')
+    res[name + ':gate'] = len(walked)
 print('---JSON---'); print(json.dumps(res))`);
     expect(out.signedOut).toEqual(['ledger', false, 0]);
     expect(out.otherProfileLogin).toEqual(['ledger', false, 0]);
     expect(out.outAgainAfterLogin).toEqual(['ledger', false, 0]);
-    for (const k of ['loginSince', 'signedIn', 'botCheck', 'neverLooked']) expect(out[k]).toEqual(['walk', true, 1]);
+    for (const k of ['loginSince', 'signedIn', 'botCheck', 'neverLooked', 'botCheckSince']) expect(out[k]).toEqual(['walk', true, 1]);
+    for (const k of Object.keys(cases)) expect(out[k + ':gate']).toBe(1);
+  });
+  it('signin-waiting is the one caller that trusts a signed-out verdict', () => {
+    const py = readFileSync(join(ROOT, 'scripts', 'agent-dispatch.py'), 'utf8');
+    expect(py.match(/trust_signed_out=True/g) || []).toHaveLength(1);
+    const waiting = py.slice(py.indexOf('def cmd_signin_waiting'), py.indexOf('def cmd_signin_site'));
+    expect(waiting).toMatch(/session_check\(g\["host"\], use_ledger=not g\["shortSession"\], trust_signed_out=True\)/);
   });
   it('signin-waiting hands a site already signed in straight back (alreadyLive) and lists the rest with its check', () => {
     const out = py(`

@@ -5767,23 +5767,30 @@ def session_walk(host, timeout=SIGNIN_WALK_TIMEOUT, profile=None, url=None):
             "url": str(d.get("url") or ""), "at": now_iso(), "source": "walk"}
 
 
-def session_check(host, use_ledger=False, max_age_minutes=SIGNIN_LEDGER_FRESH_MINUTES):
+def session_check(host, use_ledger=False, max_age_minutes=SIGNIN_LEDGER_FRESH_MINUTES,
+                  trust_signed_out=False):
     """Is the robot signed in to HOST? A ledger verdict under max_age_minutes
     old is reused when use_ledger is set (the keep-alive and the pickup run
     walk every site anyway; walking again would fight them for the one robot
-    profile); a signed-out verdict with no sign-in since is reused at any
-    age (ledger_signed_out); otherwise the door is walked now. SIGNIN_SKIP_WALK=1 (tests,
-    and any read that must never open a browser) returns {"skipped": True}."""
+    profile); with trust_signed_out, a signed-out verdict with no sign-in
+    since is reused at any age (ledger_signed_out) unless a bot check has been
+    seen since; otherwise the door is walked now. SIGNIN_SKIP_WALK=1 (tests,
+    and any read that must never open a browser) returns {"skipped": True}.
+
+    trust_signed_out is for the Robot sign-in app's check only. The submit
+    gate keeps walking: the newest line there is usually the agent's own walk
+    of a moment ago, and the gate exists to catch a wrong one (review, 29 Sep
+    2026)."""
     if os.environ.get("SIGNIN_SKIP_WALK"):
         return {"skipped": True}
     if use_ledger:
         v = ledger_session_verdict(host, max_age_minutes)
         if v:
             return v
-    # Signed out with no sign-in since stays signed out, short-session sites included.
-    v = ledger_signed_out(host)
-    if v:
-        return v
+    if trust_signed_out and not ledger_bot_check([host]):
+        v = ledger_signed_out(host)
+        if v:
+            return v
     return session_walk(host)
 
 
@@ -6074,7 +6081,7 @@ def cmd_signin_waiting(args):
         if not walk or g["host"] == "unknown" or not g["loginUrl"] or (only and g["host"] != only):
             waiting.append(g)
             continue
-        v = session_check(g["host"], use_ledger=not g["shortSession"])
+        v = session_check(g["host"], use_ledger=not g["shortSession"], trust_signed_out=True)
         if v.get("skipped"):
             waiting.append(g)
             continue
