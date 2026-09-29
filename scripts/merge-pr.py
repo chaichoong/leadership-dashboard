@@ -247,6 +247,36 @@ def sweep_port(port):
             break
 
 
+# vitest's own worker RPC timing out (29 Sep 2026): at load average 20 to 48 the
+# vitest main process was too starved to answer a worker, and a run where every
+# file and every test passed still exited 1 with "Unhandled Error: [vitest-worker]:
+# Timeout calling "onTaskUpdate"". It hit 3 of 5 full runs that day. That is the
+# runner failing, not a test, so it earns ONE re-run, reported. Anything else
+# under Errors (an unhandled rejection from test code) is never excused.
+VITEST_RPC_TIMEOUT = re.compile(r'\[vitest-worker\]: Timeout calling "[A-Za-z]+"')
+ANSI = re.compile(r"\x1b\[[0-9;]*[A-Za-z]")
+
+
+def vitest_runner_flake(text):
+    """True only when every file and test passed and the ONLY errors are vitest's
+    own worker RPC timeouts."""
+    t = ANSI.sub("", text or "")
+    files = re.search(r"Test Files\s+(.*)", t)
+    tests = re.search(r"Tests\s+(.*)", t)
+    errors = re.search(r"Errors\s+(\d+) errors?", t)
+    if not (files and tests and errors) or "failed" in files.group(1) or "failed" in tests.group(1):
+        return False
+    # Only the runner's own section counts: tests print error-looking lines on
+    # purpose (a clean run prints "RuntimeError: no agent file at ..."), so the
+    # first line under each "Unhandled Error/Rejection" header is what is judged.
+    found = re.findall(r"⎯+ Unhandled (?:Error|Rejection) ⎯+\s*\n\s*(.+)", t)
+    caught = re.search(r"Vitest caught (\d+) unhandled errors?", t)
+    n = int(errors.group(1))
+    if not found or len(found) != n or (caught and int(caught.group(1)) != n):
+        return False
+    return all(VITEST_RPC_TIMEOUT.search(e) for e in found)
+
+
 def run_suites(tree):
     """vitest, then the browser suite, both run IN the merge tree (the cwd rule
     fixer-merge.py's run_gate follows), each in its own process group: that
@@ -258,6 +288,13 @@ def run_suites(tree):
     out["vitest"] = {"ok": code == 0, "tail": tail(so or se)}
     if to:
         out["vitest"]["timedOut"] = True
+    elif code != 0 and vitest_runner_flake((so or "") + "\n" + (se or "")):
+        progress("vitest passed every test but its own worker timed out; re-running it once")
+        code, so, se, to = run_group(["npx", "vitest", "run", "--allowOnly=false"], tree,
+                                     SUITE_TIMEOUT, first=signal.SIGINT, grace=PLAYWRIGHT_GRACE)
+        out["vitest"] = {"ok": code == 0, "tail": tail(so or se), "runnerFlakeRetried": True}
+        if to:
+            out["vitest"]["timedOut"] = True
     if not out["vitest"]["ok"]:
         return False, out, None
     # Pinned, so this run's .last-run.json is known to be test-results/run-<port>/

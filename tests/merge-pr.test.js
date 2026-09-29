@@ -396,6 +396,10 @@ if spec.get("hang"):
         os.kill(os.getppid(), signal.SIGTERM)
     time.sleep(60)
     sys.exit(1)
+if kind == "vitest" and spec.get("first") and not os.path.exists(os.path.join(D, "vitest-first-done")):
+    open(os.path.join(D, "vitest-first-done"), "w").close()
+    print(spec["first"]["out"])
+    sys.exit(spec["first"]["exit"])
 if kind == "browser" and spec.get("failed") is not None:
     d = os.path.join(os.getcwd(), "test-results", "run-" + port)
     os.makedirs(d, exist_ok=True)
@@ -717,6 +721,35 @@ describe('merge-pr.py end to end (fakes, real git, no network)', { timeout: 60_0
       ['browser', 'playwright test tests/sync-invariants/ --forbid-only --reporter=dot', tree],
     ]);
     expect(r.npx[1].port).toMatch(/^\d+$/);   // pinned, so its .last-run.json is known
+  });
+
+  // 29 Sep 2026: at load average 20 to 48, three of five full vitest runs passed
+  // every test and still exited 1 on vitest's own worker RPC timeout.
+  const summary = (err) => [
+    ' Test Files  233 passed (233)', '      Tests  3842 passed (3842)', '     Errors  1 error', '',
+    '⎯⎯⎯⎯⎯⎯ Unhandled Errors ⎯⎯⎯⎯⎯⎯', '', 'Vitest caught 1 unhandled error during the test run.', '',
+    '⎯⎯⎯⎯⎯⎯ Unhandled Error ⎯⎯⎯⎯⎯⎯⎯', err, ' ❯ Object.onTimeoutError rpc.js:53:10',
+    // A test prints error-looking lines on purpose; they must not count.
+    'RuntimeError: no agent file at /tmp/x/no-such-agent.md',
+  ].join('\n');
+
+  it('vitest passing every test but losing its own worker RPC: re-run once, reported, then merged', () => {
+    const r = flow({ affected: NONE, suites: { vitest: {
+      first: { exit: 1, out: summary('Error: [vitest-worker]: Timeout calling "onTaskUpdate"') }, exit: 0 } } });
+    expect(r.code).toBe(0);
+    expect(r.result.merged).toBe(true);
+    expect(r.result.vitest.ok).toBe(true);
+    expect(r.result.vitest.runnerFlakeRetried).toBe(true);
+    expect(r.npx.map(c => c.kind)).toEqual(['vitest', 'vitest', 'browser']);
+  });
+
+  it('an unhandled error from test code is never re-run away', () => {
+    const r = flow({ affected: NONE, suites: { vitest: {
+      first: { exit: 1, out: summary('TypeError: Cannot read properties of undefined (reading x)') }, exit: 0 } } });
+    expect(r.code).toBe(1);
+    expect(r.result.vitest.ok).toBe(false);
+    expect(r.npx.map(c => c.kind)).toEqual(['vitest']);
+    expect(r.gh).not.toMatch(/pr merge/);
   });
 
   it('vitest red: refused, no Playwright, no retry, no walk, no merge, tree removed', () => {
