@@ -110,7 +110,10 @@ function londonHHMM(t) {
     return new Intl.DateTimeFormat('en-GB', { timeZone: 'Europe/London', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).format(new Date(t));
 }
 function nextUpdateText(now, updated) {
-    const next = updated ? new Date(updated).getTime() + LIVE_EVERY_MIN * 60 * 1000 : NaN;
+    // the check runs on the ten-minute marks (launchd :00, :10 ... :50), so the next one is the first mark after the
+    // last write, whoever wrote it (the hourly publisher writes at about :17, the next check is :20, not :27)
+    const step = LIVE_EVERY_MIN * 60 * 1000;
+    const next = updated ? (Math.floor(new Date(updated).getTime() / step) + 1) * step : NaN;
     if (isNaN(next)) return 'Checked every 10 minutes.';
     return now >= next ? 'Next check due now.' : `Next check about ${londonHHMM(next)}.`;
 }

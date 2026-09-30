@@ -129,20 +129,22 @@ test('inside the app shell: a hidden frame does not read, and reads as soon as i
 
 // 29 Sep 2026 (Kevin: "when I look at it, I know the actual situation and there's no lag"): the report is rewritten every
 // 10 minutes round the clock by the live check, so the next check is ten minutes after the last write, day or night.
-test('the next check is ten minutes after the last write, day and night', async ({ page }) => {
+test('the next check is the first ten-minute mark after the last write, day and night', async ({ page }) => {
   await openPublishing(page, [report()]);
   const cases = await page.evaluate(() => [
-    ['23:40 BST, written 23:35', '2026-09-29T22:40:00Z', '2026-09-29T22:35:10Z'],
-    ['03:00 BST during the night render, written 02:52', '2026-09-30T02:00:00Z', '2026-09-30T01:52:00Z'],
-    ['a check overdue by 5 minutes', '2026-09-29T22:50:00Z', '2026-09-29T22:35:00Z'],
-    ['07:12 GMT in December, written 07:10', '2026-12-01T07:12:00Z', '2026-12-01T07:10:00Z'],
+    ['23:38 BST, the 23:30 check wrote at 23:30:04', '2026-09-29T22:38:00Z', '2026-09-29T22:30:04Z'],
+    ['00:56 BST, the first check wrote at 00:54 on load', '2026-09-29T23:56:00Z', '2026-09-29T23:54:11Z'],
+    ['14:18 BST, the hourly publisher wrote at 14:17', '2026-09-30T13:18:00Z', '2026-09-30T13:17:30Z'],
+    ['a check overdue by 5 minutes', '2026-09-29T22:45:00Z', '2026-09-29T22:30:04Z'],
+    ['07:12 GMT in December, written 07:10:02', '2026-12-01T07:12:00Z', '2026-12-01T07:10:02Z'],
     ['no update time on the row', '2026-09-29T22:40:00Z', ''],
   ].map(([label, now, upd]) => [label, nextUpdateText(Date.parse(now), upd)]));
   expect(cases).toEqual([
-    ['23:40 BST, written 23:35', 'Next check about 23:45.'],
-    ['03:00 BST during the night render, written 02:52', 'Next check about 03:02.'],
+    ['23:38 BST, the 23:30 check wrote at 23:30:04', 'Next check about 23:40.'],
+    ['00:56 BST, the first check wrote at 00:54 on load', 'Next check about 01:00.'],
+    ['14:18 BST, the hourly publisher wrote at 14:17', 'Next check about 14:20.'],
     ['a check overdue by 5 minutes', 'Next check due now.'],
-    ['07:12 GMT in December, written 07:10', 'Next check about 07:20.'],
+    ['07:12 GMT in December, written 07:10:02', 'Next check about 07:20.'],
     ['no update time on the row', 'Checked every 10 minutes.'],
   ]);
 });
