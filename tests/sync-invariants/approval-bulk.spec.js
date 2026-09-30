@@ -365,6 +365,7 @@ test.describe('the view moves on to the next card', () => {
     const next = await idAt(page, 4);
     await page.locator('[data-apv-bulk-approve]').click();
     await expect.poll(() => patches.length).toBe(2);
+    await expect(page.locator('#toast')).toContainText('Approved all 2');
     await expect(page.locator(`[data-apv-card="${ids[1]}"] [data-apv-state="saved"]`)).toBeVisible();
     await expectCardAtTop(page, ids[1]);
     await expectCardJustBelow(page, ids[1], next);
@@ -392,9 +393,48 @@ test.describe('the view moves on to the next card', () => {
     const next = await idAt(page, 7);
     await page.locator('[data-apv-bulk-approve]').click();
     await expect.poll(() => patches.length).toBe(4);
+    // The toast is set in the same step as the landing scroll. Card 6 is
+    // written FIRST here, so its strip alone does not mean the run is over.
+    await expect(page.locator('#toast')).toContainText('Approved all 2');
     await expect(page.locator(`[data-apv-card="${ids[1]}"] [data-apv-state="saved"]`)).toBeVisible();
     await expectCardAtTop(page, ids[1]);
     await expect(page.locator('.apv-card')).toHaveCount(before - 2, { timeout: 8000 });
+    await expectCardAtTop(page, next);
+  });
+
+  test('a slow bulk run that finishes while the lowest card is folding still lands on the card after it', async ({ page }) => {
+    // After an Undo the lowest card on screen is written FIRST, so it can
+    // start folding before the run ends. Finishing inside that 320ms fold
+    // used to point the view at a card on its way out, and every fold after
+    // fell back to the first card (re-review finding, 30 Sep 2026). Card 4's
+    // save is slowed to land the finish in that window. Outside the window
+    // old and new code agree, so a busy machine cannot make this fail.
+    const patches = await mockAgentsPage(page, withMany());
+    await loadAgentsPage(page);
+    await openApprovals(page);
+    const before = await page.locator('.apv-card').count();
+    const undone = await idAt(page, 4);
+    const next = await idAt(page, 7);
+    await page.locator(`[data-apv-card="${undone}"]`).scrollIntoViewIfNeeded();
+    await page.locator(`[data-apv-card="${undone}"] .apv-actions button`, { hasText: /^Approve$/ }).click();
+    await expect.poll(() => patches.length).toBe(1);
+    await page.locator(`[data-apv-card="${undone}"] [data-apv-undo]`).click();
+    await expect.poll(() => patches.length).toBe(2);
+    await expect(page.locator(`[data-apv-card="${undone}"] [data-apv-state]`)).toHaveCount(0);
+    let slowed = false;
+    await page.route('**/v0/**', async (route) => {
+      const r = route.request();
+      if (!slowed && r.method() === 'PATCH' && r.url().includes(undone)) {
+        slowed = true;
+        await new Promise((res) => setTimeout(res, 5160));
+      }
+      return route.fallback();
+    });
+    await tick(page, [4, 6]);
+    await page.locator('[data-apv-bulk-approve]').click();
+    await expect(page.locator('#toast')).toContainText('Approved all 2', { timeout: 15000 });
+    await expect(page.locator('.apv-card')).toHaveCount(before - 2, { timeout: 12000 });
+    await page.waitForTimeout(400);
     await expectCardAtTop(page, next);
   });
 

@@ -1896,7 +1896,10 @@ async function agBulkDecide(outcome, opts){
     if(failed) parts.push(`${failed} could not be saved and are still in the queue.`);
     toast(parts.join(' '));
     // The lowest ticked card's strip at the top, the card after it below.
-    _apvFocusId = document.querySelector(`[data-apv-card="${lowest}"]`) ? lowest : landing;
+    // If that card has already folded (a slow run), its fold has handed the
+    // focus on and that stands; if a reload took it away, the card after it.
+    if(document.querySelector(`#approvalsBody .apv-card[data-apv-card="${lowest}"]:not(.apv-gone)`)) _apvFocusId = lowest;
+    else if(_apvFocusId === lowest) _apvFocusId = landing;
     apvScrollToFocus();
 }
 
