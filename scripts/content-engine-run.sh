@@ -32,6 +32,7 @@
 #  10. report        : one line each for the morning digest.
 set -uo pipefail
 REPO="$(cd "$(dirname "$0")/.." && pwd)"   # the checkout this script lives in, so a worktree run uses its own code
+SELF="$(cd "$(dirname "$0")" && pwd)/${0##*/}"   # absolute, before the cd below: the runtime update restarts this file
 LOG_DIR="/Users/kevinbrittain/knowledge-os/logs/content-engine"
 mkdir -p "$LOG_DIR"
 cd "$REPO" || exit 1
@@ -59,12 +60,15 @@ command -v node >/dev/null 2>&1 || echo "ERROR: node not found on PATH or under 
 # wanted. And whichever way it goes, the run SAYS so — a checkout running stale
 # code is the failure this whole queue exists to catch, and it must not be quiet.
 # --- runtime-update-block (extracted verbatim by tests/content-engine-runtime-update.test.js) ---
-if [ "$(git -C "$REPO" branch --show-current 2>/dev/null)" = "main" ]; then
+CE_RUNTIME_UPDATED=
+if [ "${CE_RUNTIME_REEXEC:-}" = "$$" ]; then
+  echo "runtime: restarted on the updated script"   # this pass runs what the first pulled; it never pulls again
+elif [ "$(git -C "$REPO" branch --show-current 2>/dev/null)" = "main" ]; then
   git -C "$REPO" fetch -q origin main 2>/dev/null || true
   BEHIND=$(git -C "$REPO" rev-list --count HEAD..origin/main 2>/dev/null || echo 0)
   if [ "${BEHIND:-0}" -gt 0 ]; then
     if git -C "$REPO" pull -q --ff-only origin main 2>/dev/null; then
-      echo "runtime: fast-forwarded $BEHIND commit(s) onto origin/main"
+      echo "runtime: fast-forwarded $BEHIND commit(s) onto origin/main"; CE_RUNTIME_UPDATED=1
     else
       # THE ONE CASE THAT IS SAFE TO CLEAR, AND THE ONE THAT KEEPS HAPPENING.
       # The blocker is almost always a generated file the engine rewrote to
@@ -84,7 +88,7 @@ if [ "$(git -C "$REPO" branch --show-current 2>/dev/null)" = "main" ]; then
 $(git -C "$REPO" diff --name-only 2>/dev/null)
 EOF
       if [ "$RESTORED" -gt 0 ] && git -C "$REPO" pull -q --ff-only origin main 2>/dev/null; then
-        echo "runtime: fast-forwarded $BEHIND commit(s) after restoring $RESTORED generated file(s) already identical to origin"
+        echo "runtime: fast-forwarded $BEHIND commit(s) after restoring $RESTORED generated file(s) already identical to origin"; CE_RUNTIME_UPDATED=1
       else
         echo "RUNTIME CHECKOUT IS $BEHIND COMMIT(S) BEHIND origin/main and could not fast-forward — this run is executing STALE code:" >&2
         git -C "$REPO" status --porcelain 2>/dev/null | head -5 >&2
@@ -95,6 +99,15 @@ EOF
   fi
 else
   echo "RUNTIME CHECKOUT IS NOT ON main ($(git -C "$REPO" branch --show-current 2>/dev/null)) — running whatever is here, unupdated" >&2
+fi
+# BASH KEEPS READING THE FILE IT OPENED (30 Sep 2026). The pull above replaces this script on disk, but bash is still
+# reading its old copy, so every step below ran as it was before the merge: PR #647's new card-close step first ran
+# an hour after it merged. Start once more from the top on the new file. exec keeps this process id, so the guard is
+# this run's own: a value inherited from a parent can never stop a restart, and the second pass never pulls again.
+if [ -n "$CE_RUNTIME_UPDATED" ] && [ "${CE_RUNTIME_REEXEC:-}" != "$$" ]; then
+  export CE_RUNTIME_REEXEC=$$
+  echo "runtime: restarting on the updated script"
+  exec /bin/bash "$SELF" "$@"
 fi
 # --- end runtime-update-block ---
 
