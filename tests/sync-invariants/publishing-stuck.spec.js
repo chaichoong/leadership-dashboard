@@ -214,6 +214,15 @@ test('the publisher line shows on the page when it has stopped', async ({ page }
   await expect(page.locator('#publisherNote')).toContainText('The hourly publisher last ran 2 h 43 min ago');
 });
 
+// 30 Sep 2026: the day-1990 extra take Kevin ruled on (21 Sep) still read as an unsorted skipped file. Files he has
+// ruled on leave the list and are counted, never dropped silently.
+test('skipped files Kevin has ruled on leave the list and are counted', async ({ page }) => {
+  await openPublishing(page, [report({ skippedNames: [], skippedRuled: 2 })]);
+  const body = page.locator('#body');
+  await expect(body).toContainText('None left to sort. 2 you have already ruled on are kept as they are.');
+  await expect(body).not.toContainText('The engine cannot read these file names');
+});
+
 // A post the live check could not ask GoHighLevel about keeps its last recorded status, and the page says so.
 test('items the live check could not read are named, not shown as done', async ({ page }) => {
   await openPublishing(page, [report({ live: { checkedAt: new Date().toISOString(), errors: ['episode 2074 linkedin lfmd: GHL GET -> 502: gateway'] } })]);

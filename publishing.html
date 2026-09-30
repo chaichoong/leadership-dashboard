@@ -218,9 +218,12 @@ function render(rec) {
         ? `<ul class="plain">${r.incomplete.map(i => `<li><strong>Episode ${esc(i.day)}</strong>: ${i.missing.length ? `<span class="chip missing">missing</span> ${i.missing.map(esc).join(', ')}` : ''} ${i.pending.length ? `<span class="chip pending">not confirmed yet</span> ${i.pending.map(esc).join(', ')}` : ''}</li>`).join('')}</ul>`
         : '<div class="muted">Every episode from the last fortnight has all seven sections.</div>';
 
-    const skipped = r.skippedNames || [];
-    const skippedCard = skipped.length ? `<div class="card"><h2>Raw files the engine skips</h2><div class="muted" style="font-size:var(--fs-sm)">The engine cannot read these file names, so it never renders them. A day's recording must be named like "2066 Full.insv" or "2066 Summary.insv".</div><ul class="plain">${skipped.map(n => `<li>${esc(n)}</li>`).join('')}</ul></div>`
-        : r.skippedNames === null ? '<div class="card"><h2>Raw files the engine skips</h2><div class="muted" style="font-size:var(--fs-sm)">No list yet. The nightly scan writes it.</div></div>' : '';
+    const skipped = r.skippedNames || [], ruled = r.skippedRuled || 0;
+    // files Kevin has already ruled on are left out of the list, and counted, so nothing leaves it silently (30 Sep 2026)
+    const ruledLine = ruled ? `<div class="muted" style="font-size:var(--fs-sm)">${esc(ruled)} more you have already ruled on are kept as they are and not listed.</div>` : '';
+    const skippedCard = skipped.length ? `<div class="card"><h2>Raw files the engine skips</h2><div class="muted" style="font-size:var(--fs-sm)">The engine cannot read these file names, so it never renders them. A day's recording must be named like "2066 Full.insv" or "2066 Summary.insv".</div><ul class="plain">${skipped.map(n => `<li>${esc(n)}</li>`).join('')}</ul>${ruledLine}</div>`
+        : r.skippedNames === null ? '<div class="card"><h2>Raw files the engine skips</h2><div class="muted" style="font-size:var(--fs-sm)">No list yet. The nightly scan writes it.</div></div>'
+        : ruled ? `<div class="card"><h2>Raw files the engine skips</h2><div class="muted" style="font-size:var(--fs-sm)">None left to sort. ${esc(ruled)} you have already ruled on ${ruled === 1 ? 'is' : 'are'} kept as ${ruled === 1 ? 'it is' : 'they are'}.</div></div>` : '';
     const st = r.strava || {};
     document.getElementById('body').innerHTML = `
         <div class="card"><div class="stat-row">
