@@ -1841,11 +1841,17 @@ async function agBulkDecide(outcome, opts){
         return;
     }
     const total = ids.length;
-    // Where the view lands afterwards, worked out while every card is still
-    // on the page: the lowest ticked card's strip, or the card after it if a
-    // reload took that card away.
-    const lowest = ids[total - 1];
+    // Where the view lands, worked out while every card is still on the
+    // page: the lowest ticked card ON SCREEN (an Undo puts a card back in
+    // place on the page but at the end of its rank in allApprovals, so ids
+    // can be out of screen order), or the card after it if a reload took
+    // that card away. Held from the start, so a card folding mid-run or a
+    // sign-in stop part way lands in the same place as the finish.
+    const onScreen = Array.from(document.querySelectorAll('#approvalsBody .apv-card'))
+        .map(c => c.getAttribute('data-apv-card')).filter(id => ids.indexOf(id) !== -1);
+    const lowest = onScreen[onScreen.length - 1] || ids[total - 1];
     const landing = apvLandingAfter(ids);
+    _apvFocusId = lowest;
     let done = 0, elsewhere = 0, failed = 0, remembered = false;
     for(let i = 0; i < total; i++){
         const id = ids[i];

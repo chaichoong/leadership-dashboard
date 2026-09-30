@@ -372,6 +372,32 @@ test.describe('the view moves on to the next card', () => {
     await expectCardAtTop(page, next);
   });
 
+  test('after an Undo, a bulk Approve still lands on the lowest ticked card ON SCREEN', async ({ page }) => {
+    // An Undo puts the card back where it was on the page, but at the end of
+    // its rank in the page's list. Taking "lowest" from that list landed on
+    // the undone card instead (review finding, 30 Sep 2026).
+    const patches = await mockAgentsPage(page, withMany());
+    await loadAgentsPage(page);
+    await openApprovals(page);
+    const before = await page.locator('.apv-card').count();
+    const undone = await idAt(page, 4);
+    await page.locator(`[data-apv-card="${undone}"]`).scrollIntoViewIfNeeded();
+    await page.locator(`[data-apv-card="${undone}"] .apv-actions button`, { hasText: /^Approve$/ }).click();
+    await expect.poll(() => patches.length).toBe(1);
+    await page.locator(`[data-apv-card="${undone}"] [data-apv-undo]`).click();
+    await expect.poll(() => patches.length).toBe(2);
+    await expect(page.locator(`[data-apv-card="${undone}"] [data-apv-state]`)).toHaveCount(0);
+    const ids = await tick(page, [4, 6]);
+    expect(ids[0]).toBe(undone);
+    const next = await idAt(page, 7);
+    await page.locator('[data-apv-bulk-approve]').click();
+    await expect.poll(() => patches.length).toBe(4);
+    await expect(page.locator(`[data-apv-card="${ids[1]}"] [data-apv-state="saved"]`)).toBeVisible();
+    await expectCardAtTop(page, ids[1]);
+    await expect(page.locator('.apv-card')).toHaveCount(before - 2, { timeout: 8000 });
+    await expectCardAtTop(page, next);
+  });
+
   test('a bulk knock back lands on the card after the lowest ticked one', async ({ page }) => {
     const patches = await mockAgentsPage(page, withMany());
     await loadAgentsPage(page);
