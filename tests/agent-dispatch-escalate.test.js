@@ -239,3 +239,40 @@ print(m.DUE_UPCOMING_FORMULA)`], { encoding: 'utf8' }).trim();
     expect(runner).toMatch(/task-hygiene-sweep\.py" flip-due/);
   });
 });
+
+// 30 Sep 2026: the Task Manager escalated Content Engine episode 2059 as "approved but unpublished" when it had been
+// live on every channel since 17 Sep. An agent on its own Go Signal carries out and closes its own cards, so its card
+// is never a decision for Kevin. Drives the real cmd_escalate with get_task and patch_task swapped for recorders.
+describe('escalate refuses a card held by an agent on its own Go Signal', () => {
+  function tryEscalate(teamMember) {
+    return JSON.parse(execFileSync('python3', ['-c', `
+import importlib.util, json, io, contextlib
+spec = importlib.util.spec_from_file_location('ad', ${JSON.stringify(DISPATCH)})
+m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m)
+patched = []
+m.get_task = lambda tid: {"id": tid, "fields": {m.AF["status"]: {"name": "Today"}, m.AF["agentOutput"]: "Publish Episode 2059",
+    m.AF["notes"]: "", m.AF["teamMember"]: [{"id": i} for i in ${JSON.stringify(teamMember)}]}}
+m.patch_task = lambda tid, fields: patched.append(tid) or {}
+class A: pass
+a = A(); a.task = 'recmxqJdhLA5mZXpB'; a.reason = '9 episodes approved but unpublished'
+refused = ''
+try:
+    with contextlib.redirect_stdout(io.StringIO()): m.cmd_escalate(a)
+except SystemExit as ex:
+    refused = str(ex)
+print(json.dumps({"refused": refused, "patched": patched}))`], { encoding: 'utf8' }).trim().split('\n').pop());
+  }
+
+  it('refuses a Content Engine episode card and writes nothing', () => {
+    const r = tryEscalate(['recRcy1Edas6rGaaF']);
+    expect(r.refused).toMatch(/^REFUSED: recmxqJdhLA5mZXpB belongs to AI Content Producer/);
+    expect(r.refused).toContain('publish.py published --day N');
+    expect(r.patched).toEqual([]);
+  });
+
+  it('still escalates a card held by a dispatched agent', () => {
+    const r = tryEscalate(['recAGENT']);
+    expect(r.refused).toBe('');
+    expect(r.patched).toEqual(['recmxqJdhLA5mZXpB']);
+  });
+});

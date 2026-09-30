@@ -3467,6 +3467,16 @@ def cmd_escalate(args):
         sys.exit(f"REFUSED: {args.task} is blocked ({wall['kind']} {wall['subject']}), so it is not a "
                  f"decision for Kevin. Its fix is already routed: {blocker_fix_text(wall)} It wakes by "
                  "itself when that is done. Leave it.")
+    # AN AGENT ON ITS OWN GO SIGNAL IS NOT ESCALATED (30 Sep 2026). Its own job carries out and closes its cards.
+    # On 29 Sep the Task Manager escalated Content Engine episode 2059 as "approved but unpublished" when it had been
+    # live on every channel since 17 Sep; the card was only open because nothing closed it. The engine now closes its
+    # own card (publish.py close-cards) and reports what is not out ("content sections not done").
+    own = [h for h in links(tf.get(AF["teamMember"])) if own_go_signal(h)]
+    if own:
+        sys.exit(f"REFUSED: {args.task} belongs to {ROLE_AGENTS[own[0]]['name']}, which runs on its own schedule and "
+                 "carries out and closes its own cards, so it is not a decision for Kevin. For a Content Engine episode, "
+                 "`python3 scripts/content-engine/publish.py published --day N` shows what went out and the card closes "
+                 "itself once every section is out. Leave it.")
     ask = escalate_ask(getattr(args, "reason", ""))
     stamp = datetime.now(LONDON).strftime("%d %b %Y")
     # The holder at escalation is recorded on the stamp: the gate's approve

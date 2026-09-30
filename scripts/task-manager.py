@@ -53,6 +53,11 @@ METRIC_SCORE_FIELD = "fldkGxrOlrfuLlH3J"
 KEVIN_REC = "recHEt2VPYothaqTd"
 KEVIN_EMAIL = "kevin@runpreneur.org.uk"
 ROY_REC = "reclbdjfVev3bqNHS"
+# Role agents on their own Go Signal (agent-dispatch ROLE_AGENTS with dispatch False; tests/task-manager.test.js
+# fails if the two drift). Their own jobs carry out AND close their cards: the Content Engine closes an episode card
+# once the episode is out (publish.py close-cards, 30 Sep 2026). On 29 Sep the board read nine live episodes' open
+# cards as "approved but unpublished", chased them, and put 2059 back in Kevin's queue to approve again.
+OWN_LANE_AGENTS = {"recRcy1Edas6rGaaF": "AI Content Producer", "recCUfsTXzmVZynEI": "AI Inbox Triage"}
 
 # AI Agent Daily Log fields (same map as inbound-triage.py; drift-tested
 # against it in tests/task-manager.test.js)
@@ -233,7 +238,7 @@ def newest_note_stamp(notes, *marks):
 
 def classify(f, activity_ids, now=None):
     """One task's bucket: parked | waitingOnKevin | escalated | withRoy |
-    stuck | moving. Returns (bucket, source, moved_dt) so the caller never
+    ownLane | stuck | moving. Returns (bucket, source, moved_dt) so the caller never
     recomputes."""
     now = now or datetime.now(timezone.utc)
     moved, src = last_movement(f, activity_ids, now)
@@ -264,6 +269,11 @@ def classify(f, activity_ids, now=None):
         if f.get("Approval Outcome"):
             return "decided", "escalateNote", esc
         return "escalated", "escalateNote", esc
+    # Held by an agent on its own Go Signal: its own job moves and closes it, and reports its own gaps (the Content
+    # Engine's "content sections not done" and "content cards not closed"). Never stuck here, so never chased or
+    # escalated: an open card is not proof that nothing happened.
+    if set(OWN_LANE_AGENTS) & (set(f.get("Team Member") or []) | set(f.get("Sent For Approval By") or [])):
+        return "ownLane", src, moved
     if moved is None:
         # No stamp at all should be impossible (Created Time is automatic);
         # treat as stuck so it surfaces rather than hides.
@@ -701,7 +711,7 @@ def cmd_board(dispatch_queue_path=None):
                   "detection disabled this slot" % e, file=sys.stderr)
 
     buckets = {"stuck": [], "waitingOnKevin": [], "parked": [], "moving": [],
-               "inFlight": [], "withRoy": [], "escalated": [], "decided": []}
+               "inFlight": [], "withRoy": [], "escalated": [], "decided": [], "ownLane": []}
     by_status, kevin_count = {}, 0
     for r in recs:
         status = r["fields"].get("Status", "?")
@@ -737,6 +747,7 @@ def cmd_board(dispatch_queue_path=None):
             "royChaseDue": sum(1 for v in buckets["withRoy"] if v.get("chaseDue")),
             "escalated": len(buckets["escalated"]),
             "decided": len(buckets["decided"]),
+            "ownLane": len(buckets["ownLane"]),
             "duplicateGroups": len(dupes),
             "duplicateExtras": sum(len(g["closable"]) for g in dupes),
             "ownerless": len(ownerless),
@@ -756,6 +767,8 @@ def cmd_board(dispatch_queue_path=None):
         # foreman's move this slot is the one he named.
         "decided": buckets["decided"],
         "parked": [v["id"] for v in buckets["parked"]],
+        # Cards an agent on its own Go Signal carries out and closes itself: ids only, never a move for the board.
+        "ownLane": [v["id"] for v in buckets["ownLane"]],
     }
     print(json.dumps(out, indent=1))
 
@@ -1105,6 +1118,14 @@ def cmd_selftest():
     # some day parks
     b, _, _ = classify({"_id": "recP", "Created Time": old, "Some Day": True}, set(), now)
     assert b == "parked", b
+    # an approved Content Engine episode card open for two weeks is the engine's, never stuck (29 Sep 2026: nine live
+    # episodes read as "approved but unpublished"); the same card still waiting on Kevin stays his
+    ep = {"_id": "reczGy1PY7qryXw9b", "Created Time": old, "Status": "Today", "Task Type": "Drafting",
+          "Approval Outcome": "Approved as-is", "Team Member": ["recRcy1Edas6rGaaF"], "Sent For Approval By": ["recRcy1Edas6rGaaF"]}
+    assert classify(ep, set(), now)[0] == "ownLane", classify(ep, set(), now)
+    assert classify(dict(ep, Status="Approval", **{"Approval Outcome": None}), set(), now)[0] == "waitingOnKevin"
+    assert classify(dict(ep, **{"Team Member": ["recAgent1"], "Sent For Approval By": ["recAgent1"]}), set(), now)[0] == "stuck", \
+        "any other agent's old approved task is still stuck"
     # Roy holds it → withRoy, never stuck, however old the stamps (the
     # 34-handovers bug); chaseDue only once a week from the last touch
     roy_old = {"_id": "recR1", "Created Time": old, "Team Member": [ROY_REC],

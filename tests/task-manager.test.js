@@ -85,6 +85,23 @@ describe('movement maths never trusts a re-stamped field', () => {
             { encoding: 'utf8' });
         expect(out).toContain('selftest OK');
     });
+
+    // 30 Sep 2026: the board read nine live Content Engine episodes' open cards as "approved but unpublished". Cards
+    // held by an agent on its own Go Signal are its own job's to close; the board's list of those agents must be
+    // exactly agent-dispatch's, or a new one would be chased again.
+    it("the ownLane agents are exactly agent-dispatch's own-Go-Signal role agents", () => {
+        const out = execFileSync('python3', ['-c', `
+import importlib.util, json
+def load(name, f):
+    spec = importlib.util.spec_from_file_location(name, f); m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m); return m
+ad = load('ad', ${JSON.stringify(path.join(root, 'scripts/agent-dispatch.py'))})
+tm = load('tm', ${JSON.stringify(path.join(root, 'scripts/task-manager.py'))})
+print(json.dumps([sorted(k for k in ad.ROLE_AGENTS if ad.own_go_signal(k)), sorted(tm.OWN_LANE_AGENTS)]))`],
+            { encoding: 'utf8' }).trim().split('\n').pop();
+        const [dispatchOwn, boardOwn] = JSON.parse(out);
+        expect(dispatchOwn).toContain('recRcy1Edas6rGaaF');
+        expect(boardOwn).toEqual(dispatchOwn);
+    });
 });
 
 describe("the Go Signal is the agent's own 9/1/5 slot job (Kevin, 25 Aug 2026)", () => {

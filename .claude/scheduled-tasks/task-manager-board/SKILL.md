@@ -81,7 +81,12 @@ that move; a Rejected card means close it. Two rules: an approval with EMPTY
 approved with no instruction; ask again" rather than inventing one; and the
 gate's approve re-linked the task to you, so if his answer names nobody, put
 it back on `priorHolder` with `route` (an agent) or `handover` (Roy) — that
-route/handover also closes the card in code), `parked` (Some Day) and counts. Upcoming
+route/handover also closes the card in code), `ownLane` (ids held by an agent
+on its own Go Signal, the Content Engine or Inbox Triage: its own job carries
+out and closes them, so never chase, escalate, close or file a finding on one.
+An open episode card is NOT proof an episode is unpublished; `escalate` refuses
+them. On 29 Sep 2026 this board told Kevin nine live episodes were unpublished),
+`parked` (Some Day) and counts. Upcoming
 tasks whose due date has arrived were already flipped to Today by the runner
 (`task-hygiene-sweep.py flip-due`) before this read. Dispatch's queue JSON also gives you every routable agent's Team
 Members rec id and live status (its rosters). If `queue` exits non-zero
