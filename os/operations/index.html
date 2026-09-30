@@ -291,7 +291,8 @@ tr.expand-row:hover td{background:var(--bg-surface-2)!important}
   <button class="view-tab" data-tab="tenancies" onclick="switchSubTab('tenancies')">📄 Tenancies <span class="count" id="cntTenancies">·</span></button>
   <button class="view-tab" data-tab="units" onclick="switchSubTab('units')">🚪 Rental Units <span class="count" id="cntUnits">·</span></button>
   <button class="view-tab" data-tab="properties" onclick="switchSubTab('properties')">🏠 Properties <span class="count" id="cntProperties">·</span></button>
-  <button class="view-tab" data-tab="customers" onclick="switchSubTab('customers')">💼 Customers <span class="count" id="cntCustomers">0</span></button>
+  <!-- Hidden 30 Sep 2026 (MASTER-PLAN §4 Hide, brain Decisions/2026-09-29 Home screen is one list): parked or duplicate, not deleted. Restore: remove the display:none. Fictional demo rows. -->
+  <button class="view-tab" data-tab="customers" style="display:none" onclick="switchSubTab('customers')">💼 Customers <span class="count" id="cntCustomers">0</span></button>
   <button class="view-tab" data-tab="compliance" onclick="switchSubTab('compliance')">✅ Compliance</button>
 </div>
 
