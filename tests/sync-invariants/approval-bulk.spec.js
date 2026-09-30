@@ -15,10 +15,12 @@
 //      tick teaches one rule, not one rule per card).
 //   3. Knock back writes the date on every id and no verdict on any.
 //   4. A sign-in wait is not a decision and cannot be ticked.
-//   5. After a decision or a knock-back the view returns to the first card
-//      (the 600px jump was the audit's headline finding on 7 Sep; the fix
-//      then left the scroll wherever it was, which is the same problem from
-//      the other side).
+//   5. After a decision or a knock-back the view moves on to the card after
+//      the one decided (Kevin, 30 Sep 2026). It used to return to the first
+//      card (15 Sep), which threw him back to the top every time he worked
+//      the queue out of order. The decided card's Saved strip sits under the
+//      top bar with the next card below it; after the fold the next card
+//      takes the top. The last card hands on to the one above it.
 //
 // Airtable is mocked, so these assert on the PATCHes the page actually sends
 // and on where the page actually puts the cards.
@@ -84,12 +86,24 @@ function withAlikeAndSignIn() {
   return fx;
 }
 
-/** Where the first card should land: directly under the sticky top bar. */
-async function expectFirstCardAtTop(page) {
+/** The card with this id sits directly under the sticky top bar. */
+async function expectCardAtTop(page, id) {
   const top = await page.locator('.topbar').boundingBox();
-  const first = await page.locator('.apv-card').first().boundingBox();
-  expect(Math.abs(first.y - (top.y + top.height))).toBeLessThanOrEqual(2);
+  const card = await page.locator(`[data-apv-card="${id}"]`).boundingBox();
+  expect(Math.abs(card.y - (top.y + top.height))).toBeLessThanOrEqual(2);
 }
+
+/** The card with this id starts straight after the one above it, on screen. */
+async function expectCardJustBelow(page, aboveId, id) {
+  const above = await page.locator(`[data-apv-card="${aboveId}"]`).boundingBox();
+  const card = await page.locator(`[data-apv-card="${id}"]`).boundingBox();
+  const gap = card.y - (above.y + above.height);
+  expect(gap).toBeGreaterThanOrEqual(0);
+  expect(gap).toBeLessThanOrEqual(40);
+  expect(card.y).toBeLessThan(page.viewportSize().height);
+}
+
+const idAt = (page, i) => page.locator('.apv-card').nth(i).getAttribute('data-apv-card');
 
 test.describe('the groupings are gone; the tick is what groups', () => {
   test('alike cards render flat with no strip and no incident group, and a sign-in wait has no tick', async ({ page }) => {
@@ -261,23 +275,43 @@ test.describe('every bulk verdict is N single verdicts', () => {
   });
 });
 
-test.describe('the view returns to the first card', () => {
-  test('after Approve on a card far down, the first remaining card sits under the top bar', async ({ page }) => {
+test.describe('the view moves on to the next card', () => {
+  test('after Approve on a card part way down, its strip sits at the top with the next card below, then the next card takes the top', async ({ page }) => {
     const patches = await mockAgentsPage(page, withMany());
     await loadAgentsPage(page);
     await openApprovals(page);
     const before = await page.locator('.apv-card').count();
     expect(before).toBe(11);
-    await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight));
+    const decided = await idAt(page, 4);
+    const next = await idAt(page, 5);
+    await page.locator(`[data-apv-card="${decided}"]`).scrollIntoViewIfNeeded();
+    await page.locator(`[data-apv-card="${decided}"] .apv-actions button`, { hasText: /^Approve$/ }).click();
+    await expect.poll(() => patches.length).toBe(1);
+    await expect(page.locator(`[data-apv-card="${decided}"] [data-apv-state="saved"]`)).toBeVisible();
+    // Straight away, before the fold: the Undo at the top, the next card under it.
+    await expectCardAtTop(page, decided);
+    await expectCardJustBelow(page, decided, next);
+    // And after the decided card folds away, the next card is at the top,
+    // not the first card.
+    await expect(page.locator('.apv-card')).toHaveCount(before - 1, { timeout: 8000 });
+    await expectCardAtTop(page, next);
     expect(await page.evaluate(() => window.pageYOffset)).toBeGreaterThan(300);
+  });
+
+  test('after Approve on the LAST card, the view stays down on the card above it', async ({ page }) => {
+    const patches = await mockAgentsPage(page, withMany());
+    await loadAgentsPage(page);
+    await openApprovals(page);
+    const before = await page.locator('.apv-card').count();
+    const above = await idAt(page, before - 2);
+    await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight));
     await page.locator('.apv-card').last().locator('.apv-actions button', { hasText: /^Approve$/ }).click();
     await expect.poll(() => patches.length).toBe(1);
-    await expect(page.locator('[data-apv-state="saved"]')).toBeVisible();
-    // Straight away, before the fold: the first card is already at the top.
-    await expectFirstCardAtTop(page);
-    // And after the decided card folds away.
     await expect(page.locator('.apv-card')).toHaveCount(before - 1, { timeout: 8000 });
-    await expectFirstCardAtTop(page);
+    // Nothing below it to put at the top, so the page is as far down as it
+    // goes, with the card above in view: never thrown back to the top.
+    expect(await page.evaluate(() => window.pageYOffset)).toBeGreaterThan(300);
+    await expect(page.locator(`[data-apv-card="${above}"]`)).toBeInViewport();
   });
 
   test('if he scrolls away during the Undo window, the fold leaves him there', async ({ page }) => {
@@ -299,39 +333,55 @@ test.describe('the view returns to the first card', () => {
     expect(await page.evaluate(() => window.pageYOffset)).toBeGreaterThan(there - 120);
   });
 
-  test('a one-click Knock back on a card far down saves in place: the first card goes to the top, nothing typed is lost', async ({ page }) => {
+  test('a one-click Knock back part way down saves in place: the next card takes the top, nothing typed is lost', async ({ page }) => {
     const patches = await mockAgentsPage(page, withMany());
     await loadAgentsPage(page);
     await openApprovals(page);
     const before = await page.locator('.apv-card').count();
-    // A half-written note on the second card, then knock back the last card.
-    const second = page.locator('.apv-card').nth(1);
-    const secondId = await second.getAttribute('data-apv-card');
-    await second.locator('#apvNote-' + secondId).fill('Check the dates with Roy first.');
-    await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight));
-    const last = page.locator('.apv-card').last();
-    const lastId = await last.getAttribute('data-apv-card');
-    await last.locator('.apv-defer-btn', { hasText: 'A week' }).first().click();
-    await expect.poll(() => patches.some((p) => p.id === lastId)).toBe(true);
-    await expect(page.locator(`[data-apv-card="${lastId}"] [data-apv-state="saved"]`)).toContainText('Knocked back to');
-    // No rebuild: the note is still there, and the first card is at the top.
+    // A half-written note on the second card, then knock back a card further down.
+    const secondId = await idAt(page, 1);
+    await page.locator('#apvNote-' + secondId).fill('Check the dates with Roy first.');
+    const decided = await idAt(page, 4);
+    const next = await idAt(page, 5);
+    await page.locator(`[data-apv-card="${decided}"]`).scrollIntoViewIfNeeded();
+    await page.locator(`[data-apv-card="${decided}"] .apv-defer-btn`, { hasText: 'A week' }).first().click();
+    await expect.poll(() => patches.some((p) => p.id === decided)).toBe(true);
+    await expect(page.locator(`[data-apv-card="${decided}"] [data-apv-state="saved"]`)).toContainText('Knocked back to');
+    // No rebuild: the note is still there, and the view is on this card and the next.
     await expect(page.locator('#apvNote-' + secondId)).toHaveValue('Check the dates with Roy first.');
-    await expectFirstCardAtTop(page);
+    await expectCardAtTop(page, decided);
+    await expectCardJustBelow(page, decided, next);
     await expect(page.locator('.apv-card')).toHaveCount(before - 1, { timeout: 8000 });
+    await expectCardAtTop(page, next);
     await expect(page.locator('#apvNote-' + secondId)).toHaveValue('Check the dates with Roy first.');
   });
 
-  test('a bulk knock back returns to the first card once, not once per card', async ({ page }) => {
+  test('a bulk Approve lands on the lowest ticked card, then the card after it', async ({ page }) => {
     const patches = await mockAgentsPage(page, withMany());
     await loadAgentsPage(page);
     await openApprovals(page);
-    await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight));
-    const n = await page.locator('.apv-card').count();
-    await tick(page, [n - 2, n - 1]);
+    const before = await page.locator('.apv-card').count();
+    const ids = await tick(page, [2, 3]);
+    const next = await idAt(page, 4);
+    await page.locator('[data-apv-bulk-approve]').click();
+    await expect.poll(() => patches.length).toBe(2);
+    await expect(page.locator(`[data-apv-card="${ids[1]}"] [data-apv-state="saved"]`)).toBeVisible();
+    await expectCardAtTop(page, ids[1]);
+    await expectCardJustBelow(page, ids[1], next);
+    await expect(page.locator('.apv-card')).toHaveCount(before - 2, { timeout: 8000 });
+    await expectCardAtTop(page, next);
+  });
+
+  test('a bulk knock back lands on the card after the lowest ticked one', async ({ page }) => {
+    const patches = await mockAgentsPage(page, withMany());
+    await loadAgentsPage(page);
+    await openApprovals(page);
+    const next = await idAt(page, 4);
+    await tick(page, [2, 3]);
     await page.locator('[data-apv-bulk-open="defer"]').click();
     await page.locator('#apvBulkPanel-defer .apv-defer-btn', { hasText: '3 days' }).click();
     await expect.poll(() => patches.length).toBe(2);
     await expect(page.locator('#toast')).toContainText('Knocked back 2');
-    await expectFirstCardAtTop(page);
+    await expectCardAtTop(page, next);
   });
 });
