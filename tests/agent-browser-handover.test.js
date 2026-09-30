@@ -57,6 +57,7 @@ const PAGE = `<!doctype html><html><body>
   <div><input type="email" aria-label="Email"><input type="checkbox" id="cons"><span>I agree to the terms of business</span></div>
   <div><input type="email" aria-label="Email 2"><span class="cb"><input type="checkbox" id="cons2"></span><span>I agree to the terms of business</span></div>
   <div><select aria-label="Address"></select><input type="checkbox" id="cons3"><span>I agree to the terms of business</span></div>
+  <div><p>I declare that the information given is true and correct</p><div class="opts"><input type="radio" name="dd" id="ddy"><label for="ddy" id="ddyl">Yes</label><input type="radio" name="dd" id="ddn"><label for="ddn">No</label></div><label for="ddx">If no, give details</label><input id="ddx"></div>
   <div><label for="ps">Property status</label><select id="ps"><option value="">Select</option><option>Let</option><option>I agree</option></select></div>
   <div id="out"></div>
   <script>
@@ -191,7 +192,8 @@ describe('the robot does every step up to Kevin, waits for his part, and hands o
       // signature, are his; an ordinary dropdown is the robot's.
       for (const st of [{ do: 'select', selector: '#ds', value: 'Yes' }, { do: 'click', selector: '#tb' }, { do: 'click', selector: '#tb2' }, { do: 'fill', selector: '#sig', value: 'Kevin Brittain' },
                         { do: 'select', selector: '#as', value: 'I agree with all the assumptions' }, { do: 'click', selector: '#h3y' }, { do: 'click', selector: '#spyl' },
-                        { do: 'check', selector: '#cons' }, { do: 'check', selector: '#cons2' }, { do: 'check', selector: '#cons3' }]) {
+                        { do: 'check', selector: '#cons' }, { do: 'check', selector: '#cons2' }, { do: 'check', selector: '#cons3' },
+                        { do: 'click', selector: '#ddyl' }]) {
         const r4 = await b.runHandover(page, { why: 'pay', steps: [st] });
         expect(r4.stuck && r4.stuck.error, st.selector).toMatch(/reads like a declaration|looks like a signature/);
       }
@@ -205,6 +207,7 @@ describe('the robot does every step up to Kevin, waits for his part, and hands o
       expect(await page.locator('#cons').isChecked()).toBe(false);
       expect(await page.locator('#cons2').isChecked()).toBe(false);
       expect(await page.locator('#cons3').isChecked()).toBe(false);
+      expect(await page.locator('#ddy').isChecked()).toBe(false);
       expect(await page.locator('#out').textContent()).not.toBe('H3-YES');
       // Round 6: help text, the next question's declaration and a dropdown's other options are not
       // this answer's question.

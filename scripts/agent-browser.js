@@ -1078,12 +1078,18 @@ async function assertNotFinalAction(page, s) {
       // characters and holds no other question's control (a text box, a dropdown, or a radio of
       // another group; Yes/No buttons belong together), without any dropdown's options (round 6).
       const nearby = c => {
+        // The answers' own words ("Yes No") are not the question: the climb goes on past them (round 8).
+        const own = [];
+        for (const g of (c.name ? Array.from(document.getElementsByName(c.name)) : [c])) {
+          if (g.labels) for (const l of g.labels) own.push(String(l.innerText || l.textContent || '').trim());
+        }
+        const beyond = x => own.reduce((y, l) => (l ? y.split(l).join(' ') : y), x).replace(/\s+/g, '').length > 0;
         let t = '';
         for (let n = c.parentElement; n && n !== document.body; n = n.parentElement) {
           const other = Array.from(n.querySelectorAll('input,select,textarea,[role=radio],[role=checkbox]')).some(o => o !== c
             && !['button', 'submit', 'reset', 'image', 'hidden'].includes(String(o.type || '').toLowerCase())
             && !(c.name && o.name === c.name));
-          if (other && t) break;   // read until there are words: a consent row, or a styled span round the box, can hold an email box too (round 7)
+          if (other && t && beyond(t)) break;   // read until there are words: a consent row, or a styled span round the box, can hold an email box too (round 7)
           let x = String(n.innerText || '');
           for (const sel of n.querySelectorAll('select')) if (sel.innerText) x = x.split(sel.innerText).join(' ');   // an empty one would split every letter
           x = x.replace(/\s+/g, ' ').trim();
