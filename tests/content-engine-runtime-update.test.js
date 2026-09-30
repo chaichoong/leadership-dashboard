@@ -161,3 +161,38 @@ describe('the hourly publisher raises a held card', () => {
     expect(pub.indexOf('approval.py run')).toBeLessThan(pub.indexOf('publish.py run'));
   });
 });
+
+// 30 Sep 2026: PR #647 added a step to content-engine-publish.sh. The 14:18 run pulled it ("fast-forwarded 4
+// commit(s)") and then ran the rest of the OLD script, because bash keeps reading the file it opened and the pull
+// replaced that file on disk. The new step first ran an hour later. The block now starts the script again, once.
+// Real git, the script itself tracked and changed upstream, ONE run: the new code must run in it.
+describe('an update to the script itself runs in the same run', () => {
+  function selfUpdate(name, blockText) {
+    const dir = join(ROOT, name);
+    const up = join(dir, 'upstream');
+    mkdirSync(up, { recursive: true });
+    const script = (v) => `set -uo pipefail\nREPO="$(cd "$(dirname "$0")" && pwd)"\n${blockText}\necho "CODE ${v}"\n`;
+    git(up, 'init', '-q', '-b', 'main');
+    writeFileSync(join(up, 'run.sh'), script('v1'));
+    git(up, 'add', '-A'); git(up, 'commit', '-qm', 'v1');
+    git(dir, 'clone', '-q', up, 'work');
+    writeFileSync(join(up, 'run.sh'), script('v2'));
+    git(up, 'add', '-A'); git(up, 'commit', '-qm', 'v2');
+    const out = execFileSync('bash', ['-c', `/bin/bash ${JSON.stringify(join(dir, 'work', 'run.sh'))} 2>&1`],
+      { encoding: 'utf8', env: { ...process.env, CE_RUNTIME_REEXEC: '' } });
+    return out;
+  }
+
+  it('the pulled script runs once, from the top, and never loops', () => {
+    const out = selfUpdate('self-update', block());
+    expect(out).toMatch(/fast-forwarded 1 commit\(s\)/);
+    expect(out).toMatch(/restarting on the updated script/);
+    expect(out).toMatch(/up to date with origin\/main/);        // the second pass finds nothing to pull
+    expect(out.match(/CODE v\d/g)).toEqual(['CODE v2']);        // the new code ran, the old code never did
+  });
+
+  it('both Content Engine scripts carry the restart', () => {
+    const pub = readFileSync(resolve(__dirname, '../scripts/content-engine-publish.sh'), 'utf8');
+    for (const s of [src, pub]) expect(s).toContain('exec /bin/bash "$0" "$@"');
+  });
+});

@@ -25,7 +25,7 @@ if [ "$(git -C "$REPO" branch --show-current 2>/dev/null)" = "main" ]; then
   BEHIND=$(git -C "$REPO" rev-list --count HEAD..origin/main 2>/dev/null || echo 0)
   if [ "${BEHIND:-0}" -gt 0 ]; then
     if git -C "$REPO" pull -q --ff-only origin main 2>/dev/null; then
-      echo "runtime: fast-forwarded $BEHIND commit(s) onto origin/main"
+      echo "runtime: fast-forwarded $BEHIND commit(s) onto origin/main"; CE_RUNTIME_UPDATED=1
     else
       # THE ONE CASE THAT IS SAFE TO CLEAR, AND THE ONE THAT KEEPS HAPPENING.
       # The blocker is almost always a generated file the engine rewrote to
@@ -45,7 +45,7 @@ if [ "$(git -C "$REPO" branch --show-current 2>/dev/null)" = "main" ]; then
 $(git -C "$REPO" diff --name-only 2>/dev/null)
 EOF
       if [ "$RESTORED" -gt 0 ] && git -C "$REPO" pull -q --ff-only origin main 2>/dev/null; then
-        echo "runtime: fast-forwarded $BEHIND commit(s) after restoring $RESTORED generated file(s) already identical to origin"
+        echo "runtime: fast-forwarded $BEHIND commit(s) after restoring $RESTORED generated file(s) already identical to origin"; CE_RUNTIME_UPDATED=1
       else
         echo "RUNTIME CHECKOUT IS $BEHIND COMMIT(S) BEHIND origin/main and could not fast-forward — this run is executing STALE code:" >&2
         git -C "$REPO" status --porcelain 2>/dev/null | head -5 >&2
@@ -56,6 +56,14 @@ EOF
   fi
 else
   echo "RUNTIME CHECKOUT IS NOT ON main ($(git -C "$REPO" branch --show-current 2>/dev/null)) — running whatever is here, unupdated" >&2
+fi
+# BASH KEEPS READING THE FILE IT OPENED (30 Sep 2026). The pull above replaces this script on disk, but bash is still
+# reading its old copy, so every step below ran as it was before the merge: PR #647's new card-close step first ran
+# an hour after it merged. Start once more from the top on the new file; that pass finds nothing to pull.
+if [ -n "${CE_RUNTIME_UPDATED:-}" ] && [ -z "${CE_RUNTIME_REEXEC:-}" ]; then
+  export CE_RUNTIME_REEXEC=1
+  echo "runtime: restarting on the updated script"
+  exec /bin/bash "$0" "$@"
 fi
 # --- end runtime-update-block ---
 # Strava and the How far I've run numbers, every hour (15 Sep 2026). They lived only in the nightly render job, so the
