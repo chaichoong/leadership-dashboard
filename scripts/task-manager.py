@@ -262,8 +262,10 @@ def classify(f, activity_ids, now=None):
             and f.get("Sent For Approval By")):
         return "waitingOnKevin", src, moved
     # An episode card closes itself (see EPISODE_CARD_PREFIX). Ahead of Roy and the escalation window on purpose:
-    # escalate now refuses these, so an escalated or decided one is a leftover whose answer changes nothing.
-    if episode_card(f):
+    # escalate now refuses these, so an escalated or decided one is a leftover whose answer changes nothing. Not a
+    # legacy row at Approval with no sender: it is outside Kevin's queue, so no verdict ever comes and the engine
+    # never closes it; that is stuck work (review, 30 Sep 2026).
+    if episode_card(f) and not (f.get("Status") == "Approval" and not f.get("Sent For Approval By")):
         return "ownLane", src, moved
     # Roy holds it: never stuck, whatever the stamps say. His lane's only move
     # is a weekly chase (cmd_board says when one is due); re-handing it over
@@ -1139,9 +1141,11 @@ def cmd_selftest():
     assert classify(dict(ep, Status="Approval", **{"Approval Outcome": None}), set(), now)[0] == "waitingOnKevin"
     assert classify(dict(ep, **{"Team Member": ["recAgent1"]}), set(), now)[0] == "ownLane", "a re-routed episode card still closes itself"
     assert classify(dict(ep, **{"Team Member": [ROY_REC]}), set(), now)[0] == "ownLane", "whoever holds it"
-    esc_ep = dict(ep, Notes="[20 Sep 2026 — agent-dispatch] Escalated to Kevin as a decision card (holder recRcy1Edas6rGaaF): DECIDE: x")
+    esc_ep = dict(ep, Notes="[22 Aug 2026 — agent-dispatch] Escalated to Kevin as a decision card (holder recRcy1Edas6rGaaF): DECIDE: x")
     esc_ep["Created Time"] = (now - timedelta(days=30)).isoformat()
     assert classify(esc_ep, set(), now)[0] == "ownLane", "an escalated or answered episode card is still the engine's"
+    legacy = dict(ep, Status="Approval", **{"Approval Outcome": None, "Sent For Approval By": None})
+    assert classify(legacy, set(), now)[0] == "stuck", "an episode card outside Kevin's queue gets no verdict and never closes: stuck"
     perf = dict(ep, **{"Task Name": "CONTENT: Performance read for 9 August to 7 September"})
     assert classify(perf, set(), now)[0] == "stuck", "the engine's other cards do not close themselves: still board work"
     assert lane_view(dict(ep, _id="recE"), now)["episodeCard"] is True

@@ -87,12 +87,18 @@ closes each one itself within the hour of the episode being out on every
 section, whoever holds it. Never chase, escalate or close one; `escalate`
 refuses them. An open episode card is NOT proof an episode is unpublished: on
 29 Sep 2026 this board told Kevin nine live episodes were unpublished. The one
-check is age: for a view with `daysStill` of `ownLaneCheckDays` or more, run
-`python3 scripts/content-engine/publish.py published --day N` (N from the name).
-If every row reads published or shared, leave it and say so. Otherwise file ONE
-finding naming the episode and the sections not out. The engine's OTHER cards,
-such as the monthly performance read, do not close themselves and stay ordinary
-board work),
+check is age: a view with `daysStill` of `ownLaneCheckDays` or more means the
+automatic close has not happened, so run
+`python3 scripts/content-engine/publish.py report` and find day N (from the
+name) on its "content sections not done" and "content cards not closed" lines.
+Either way file ONE finding titled exactly "Episode card N still open after 14
+days" (a repeat adds a recurrence, never a twin): name the sections not out, or,
+if the episode is on neither line, say "episode N is out on every section but
+its card did not close". Never escalate it. An episode card that lands in
+`stuck` instead (a legacy row at Approval with no sender, outside Kevin's queue)
+gets the same finding asking the engine to resubmit it. The engine's OTHER
+cards, such as the monthly performance read, do not close themselves and stay
+ordinary board work),
 `parked` (Some Day) and counts. Upcoming
 tasks whose due date has arrived were already flipped to Today by the runner
 (`task-hygiene-sweep.py flip-due`) before this read. Dispatch's queue JSON also gives you every routable agent's Team
