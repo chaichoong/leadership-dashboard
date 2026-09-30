@@ -128,3 +128,47 @@ describe('the python layers hold (offline selftest, real files)', () => {
     expect(out).toMatch(/selftest OK/);
   });
 });
+
+// 30 Sep 2026: Roy's email of 3 Aug carried the Agile Estates authentication-code letter as two
+// photos pasted into the body (inline JPEGs, ~3.5 MB each). The worker skipped every inline part,
+// so no agent could see or save them, and Kevin asked on the card how to fix it. A small inline
+// image (a logo, a tracking pixel) is still skipped; a real photo and an inline document count.
+describe('extractAttachments keeps photos pasted into the body (real worker source)', () => {
+  // eslint-disable-next-line no-new-func
+  const { extractAttachments } = new Function([
+    extract('INLINE_PHOTO_MIN_BYTES', 'const'),
+    extract('extractAttachments'),
+    'return { extractAttachments };',
+  ].join('\n'))();
+  const part = (filename, mimeType, size, disposition, id) => ({
+    filename, mimeType, body: { attachmentId: id, size },
+    headers: disposition ? [{ name: 'Content-Disposition', value: `${disposition}; filename="${filename}"` }] : [],
+  });
+  // The shape of Roy's message: multipart/related holding the HTML body and the inline photos.
+  const roy = {
+    mimeType: 'multipart/mixed', filename: '', body: { size: 0 }, parts: [
+      { mimeType: 'multipart/related', filename: '', body: { size: 0 }, parts: [
+        { mimeType: 'text/html', filename: '', body: { size: 120, data: 'PGI-' } },
+        part('Image_260803_141144.jpeg', 'image/jpeg', 3600000, 'inline', 'att1'),
+        part('Image_260803_141202.jpeg', 'image/jpeg', 3500000, 'inline', 'att2'),
+        part('logo.png', 'image/png', 8200, 'inline', 'att3'),
+        part('pixel.gif', 'image/gif', 43, 'inline', 'att4'),
+      ] },
+      part('invoice.pdf', 'application/pdf', 250000, 'attachment', 'att5'),
+      part('statement.pdf', 'application/pdf', 90000, 'inline', 'att6'),
+    ],
+  };
+  it('lists the two pasted photos and the inline PDF, flagged inline, and never the logo or the pixel', () => {
+    const got = extractAttachments(roy);
+    expect(got.map((a) => a.filename)).toEqual(['invoice.pdf', 'statement.pdf', 'Image_260803_141144.jpeg', 'Image_260803_141202.jpeg']);
+    expect(got.find((a) => a.filename === 'invoice.pdf').inline).toBeUndefined();
+    for (const f of ['statement.pdf', 'Image_260803_141144.jpeg', 'Image_260803_141202.jpeg']) {
+      expect(got.find((a) => a.filename === f).inline).toBe(true);
+    }
+  });
+  it('an inline image just under the line is a logo; at the line it is a photo', () => {
+    const one = (size) => extractAttachments({ mimeType: 'multipart/related', filename: '', body: {}, parts: [part('x.jpg', 'image/jpeg', size, 'inline', 'a')] });
+    expect(one(100 * 1024 - 1)).toEqual([]);
+    expect(one(100 * 1024)).toHaveLength(1);
+  });
+});

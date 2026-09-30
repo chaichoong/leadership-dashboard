@@ -694,10 +694,17 @@ function b64urlDecodeUtf8(data) {
 // bank details live only in the attachment (Kevin, 18 Sep 2026).
 //
 // A part counts when it has BOTH a filename and an attachmentId. Inline images
-// (a signature logo, a tracking pixel) carry an attachmentId too, so parts whose
-// Content-Disposition is `inline` are skipped: without that filter a typical
-// email footer contributes three "attachments" and the scan spends its
-// attachment budget fetching logos.
+// (a signature logo, a tracking pixel) carry an attachmentId too, so a SMALL
+// inline image is skipped: without that filter a typical email footer
+// contributes three "attachments" and the scan spends its attachment budget
+// fetching logos.
+//
+// A photo pasted into the body is inline too, and it can be the whole message
+// (30 Sep 2026: Roy's photo of the Agile Estates authentication-code letter,
+// two inline JPEGs of about 3.5 MB each, was invisible to every agent). So an
+// inline image of INLINE_PHOTO_MIN_BYTES or more counts, and so does any inline
+// file that is not an image (a PDF shown in the body). Each carries inline: true.
+const INLINE_PHOTO_MIN_BYTES = 100 * 1024;
 function extractAttachments(payload) {
     const out = [];
     if (!payload) return out;
@@ -708,12 +715,16 @@ function extractAttachments(payload) {
         if (!p.filename || !p.body?.attachmentId) continue;
         const disposition = (p.headers || [])
             .find(h => h.name.toLowerCase() === 'content-disposition')?.value || '';
-        if (/^\s*inline/i.test(disposition)) continue;
+        const mimeType = p.mimeType || 'application/octet-stream';
+        const size = Number(p.body.size) || 0;
+        const inline = /^\s*inline/i.test(disposition);
+        if (inline && /^image\//i.test(mimeType) && size < INLINE_PHOTO_MIN_BYTES) continue;
         out.push({
             attachmentId: p.body.attachmentId,
             filename: p.filename,
-            mimeType: p.mimeType || 'application/octet-stream',
-            size: Number(p.body.size) || 0,
+            mimeType,
+            size,
+            ...(inline ? { inline: true } : {}),
         });
     }
     return out;
