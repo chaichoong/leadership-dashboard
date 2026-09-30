@@ -239,3 +239,45 @@ print(m.DUE_UPCOMING_FORMULA)`], { encoding: 'utf8' }).trim();
     expect(runner).toMatch(/task-hygiene-sweep\.py" flip-due/);
   });
 });
+
+// 30 Sep 2026: the Task Manager escalated Content Engine episode 2059 as "approved but unpublished" when it had been
+// live on every channel since 17 Sep. An episode card closes itself once the episode is out, so it is never a decision
+// for Kevin, whoever holds it. Drives the real cmd_escalate with get_task and patch_task swapped for recorders.
+describe('escalate refuses a Content Engine episode card', () => {
+  function tryEscalate(name, teamMember) {
+    return JSON.parse(execFileSync('python3', ['-c', `
+import importlib.util, json, io, contextlib
+spec = importlib.util.spec_from_file_location('ad', ${JSON.stringify(DISPATCH)})
+m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m)
+patched = []
+m.get_task = lambda tid: {"id": tid, "fields": {m.AF["name"]: ${JSON.stringify(name)}, m.AF["status"]: {"name": "Today"},
+    m.AF["agentOutput"]: "Publish Episode 2059", m.AF["notes"]: "", m.AF["teamMember"]: [{"id": i} for i in ${JSON.stringify(teamMember)}]}}
+m.patch_task = lambda tid, fields: patched.append(tid) or {}
+class A: pass
+a = A(); a.task = 'recmxqJdhLA5mZXpB'; a.reason = '9 episodes approved but unpublished'
+refused = ''
+try:
+    with contextlib.redirect_stdout(io.StringIO()): m.cmd_escalate(a)
+except SystemExit as ex:
+    refused = str(ex)
+print(json.dumps({"refused": refused, "patched": patched}))`], { encoding: 'utf8' }).trim().split('\n').pop());
+  }
+  const EP = 'CONTENT: Publish Episode 2059 of Diary of a Runpreneur - STOP OVEREATING / ONE SIMPLE HACK';
+
+  it('refuses an episode card and writes nothing, whoever holds it', () => {
+    for (const holder of [['recRcy1Edas6rGaaF'], ['rec1hYELb4zS8pjjO'], []]) {
+      const r = tryEscalate(EP, holder);
+      expect(r.refused).toMatch(/^REFUSED: recmxqJdhLA5mZXpB is a Content Engine episode card/);
+      expect(r.patched).toEqual([]);
+    }
+  });
+
+  it("still escalates the engine's other cards and any other agent's card", () => {
+    for (const [name, holder] of [['CONTENT: Performance read for 9 August to 7 September', ['recRcy1Edas6rGaaF']],
+                                  ['Renew the EICR at 12 Viola Street', ['recAGENT']]]) {
+      const r = tryEscalate(name, holder);
+      expect(r.refused).toBe('');
+      expect(r.patched).toEqual(['recmxqJdhLA5mZXpB']);
+    }
+  });
+});

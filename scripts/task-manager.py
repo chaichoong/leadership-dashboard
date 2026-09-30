@@ -53,6 +53,18 @@ METRIC_SCORE_FIELD = "fldkGxrOlrfuLlH3J"
 KEVIN_REC = "recHEt2VPYothaqTd"
 KEVIN_EMAIL = "kevin@runpreneur.org.uk"
 ROY_REC = "reclbdjfVev3bqNHS"
+# A Content Engine episode card closes itself once the episode is out on every section (publish.py close-cards, 30
+# Sep 2026). On 29 Sep the board read nine live episodes' open cards as "approved but unpublished", chased them, and
+# put 2059 back in Kevin's queue to approve again. Matched on the name the engine gives the card
+# (content-engine/approval.py task_name), never on who holds it: a route or an escalation re-links the holder, and
+# the engine closes the card by its id whoever holds it. The engine's other cards (the monthly performance read, OD
+# posts, one-off tasks) do NOT close themselves and stay ordinary board work (review, 30 Sep 2026).
+# agent-dispatch.py carries the same prefix; tests/task-manager.test.js fails if they drift.
+EPISODE_CARD_PREFIX = "CONTENT: Publish Episode "
+
+
+def episode_card(f):
+    return str(f.get("Task Name") or "").startswith(EPISODE_CARD_PREFIX)
 
 # AI Agent Daily Log fields (same map as inbound-triage.py; drift-tested
 # against it in tests/task-manager.test.js)
@@ -65,6 +77,7 @@ ALOG = {
 }
 
 STUCK_DAYS = 7
+OWN_LANE_CHECK_DAYS = 14   # an episode card still open this long is checked against the publishing record
 # Statuses that make a task part of the live board. Blank-status legacy rows
 # and Completed are out; Some Day (checkbox) is parked, not stuck.
 OPEN_STATUSES = ("Today", "Upcoming", "Overdue", "Approval")
@@ -233,7 +246,7 @@ def newest_note_stamp(notes, *marks):
 
 def classify(f, activity_ids, now=None):
     """One task's bucket: parked | waitingOnKevin | escalated | withRoy |
-    stuck | moving. Returns (bucket, source, moved_dt) so the caller never
+    ownLane | stuck | moving. Returns (bucket, source, moved_dt) so the caller never
     recomputes."""
     now = now or datetime.now(timezone.utc)
     moved, src = last_movement(f, activity_ids, now)
@@ -248,6 +261,12 @@ def classify(f, activity_ids, now=None):
     if (f.get("Status") == "Approval" and not f.get("Approval Outcome")
             and f.get("Sent For Approval By")):
         return "waitingOnKevin", src, moved
+    # An episode card closes itself (see EPISODE_CARD_PREFIX). Ahead of Roy and the escalation window on purpose:
+    # escalate now refuses these, so an escalated or decided one is a leftover whose answer changes nothing. Not a
+    # legacy row at Approval with no sender: it is outside Kevin's queue, so no verdict ever comes and the engine
+    # never closes it; that is stuck work (review, 30 Sep 2026).
+    if episode_card(f) and not (f.get("Status") == "Approval" and not f.get("Sent For Approval By")):
+        return "ownLane", src, moved
     # Roy holds it: never stuck, whatever the stamps say. His lane's only move
     # is a weekly chase (cmd_board says when one is due); re-handing it over
     # was the 34-handovers bug.
@@ -589,6 +608,9 @@ def lane_view(f, now=None, cache=None, gate=None):
         "inboundSender": f.get("Inbound Sender", "") or "",
         "autoReply": auto_reply_flag(f, cache, gate),
         "outputExcerpt": output[:600] + ("…" if len(output) > 600 else ""),
+        # Never proposed for closing: approving a close proposal on an episode card reads as Kevin approving the
+        # episode (content-engine approval.py sync takes the Approval Outcome as his verdict).
+        "episodeCard": episode_card(f),
     }
 
 
@@ -701,7 +723,7 @@ def cmd_board(dispatch_queue_path=None):
                   "detection disabled this slot" % e, file=sys.stderr)
 
     buckets = {"stuck": [], "waitingOnKevin": [], "parked": [], "moving": [],
-               "inFlight": [], "withRoy": [], "escalated": [], "decided": []}
+               "inFlight": [], "withRoy": [], "escalated": [], "decided": [], "ownLane": []}
     by_status, kevin_count = {}, 0
     for r in recs:
         status = r["fields"].get("Status", "?")
@@ -737,6 +759,7 @@ def cmd_board(dispatch_queue_path=None):
             "royChaseDue": sum(1 for v in buckets["withRoy"] if v.get("chaseDue")),
             "escalated": len(buckets["escalated"]),
             "decided": len(buckets["decided"]),
+            "ownLane": len(buckets["ownLane"]),
             "duplicateGroups": len(dupes),
             "duplicateExtras": sum(len(g["closable"]) for g in dupes),
             "ownerless": len(ownerless),
@@ -756,6 +779,10 @@ def cmd_board(dispatch_queue_path=None):
         # foreman's move this slot is the one he named.
         "decided": buckets["decided"],
         "parked": [v["id"] for v in buckets["parked"]],
+        # Episode cards the Content Engine closes itself once the episode is out: never a move for the board. The age
+        # is the backstop: one still open after OWN_LANE_CHECK_DAYS is checked against the publishing record.
+        "ownLane": [{"id": v["id"], "name": v["name"], "daysStill": v["daysStill"]} for v in buckets["ownLane"]],
+        "ownLaneCheckDays": OWN_LANE_CHECK_DAYS,
     }
     print(json.dumps(out, indent=1))
 
@@ -1105,6 +1132,24 @@ def cmd_selftest():
     # some day parks
     b, _, _ = classify({"_id": "recP", "Created Time": old, "Some Day": True}, set(), now)
     assert b == "parked", b
+    # an approved Content Engine episode card open for two weeks is the engine's, never stuck (29 Sep 2026: nine live
+    # episodes read as "approved but unpublished"); the same card still waiting on Kevin stays his
+    ep = {"_id": "reczGy1PY7qryXw9b", "Created Time": old, "Status": "Today", "Task Type": "Drafting",
+          "Task Name": "CONTENT: Publish Episode 2060 of Diary of a Runpreneur - LOVE YOUR PROBLEMS / GROW FASTER",
+          "Approval Outcome": "Approved as-is", "Team Member": ["recRcy1Edas6rGaaF"], "Sent For Approval By": ["recRcy1Edas6rGaaF"]}
+    assert classify(ep, set(), now)[0] == "ownLane", classify(ep, set(), now)
+    assert classify(dict(ep, Status="Approval", **{"Approval Outcome": None}), set(), now)[0] == "waitingOnKevin"
+    assert classify(dict(ep, **{"Team Member": ["recAgent1"]}), set(), now)[0] == "ownLane", "a re-routed episode card still closes itself"
+    assert classify(dict(ep, **{"Team Member": [ROY_REC]}), set(), now)[0] == "ownLane", "whoever holds it"
+    esc_ep = dict(ep, Notes="[22 Aug 2026 — agent-dispatch] Escalated to Kevin as a decision card (holder recRcy1Edas6rGaaF): DECIDE: x")
+    esc_ep["Created Time"] = (now - timedelta(days=30)).isoformat()
+    assert classify(esc_ep, set(), now)[0] == "ownLane", "an escalated or answered episode card is still the engine's"
+    legacy = dict(ep, Status="Approval", **{"Approval Outcome": None, "Sent For Approval By": None})
+    assert classify(legacy, set(), now)[0] == "stuck", "an episode card outside Kevin's queue gets no verdict and never closes: stuck"
+    perf = dict(ep, **{"Task Name": "CONTENT: Performance read for 9 August to 7 September"})
+    assert classify(perf, set(), now)[0] == "stuck", "the engine's other cards do not close themselves: still board work"
+    assert lane_view(dict(ep, _id="recE"), now)["episodeCard"] is True
+    assert lane_view(dict(perf, _id="recP"), now)["episodeCard"] is False
     # Roy holds it → withRoy, never stuck, however old the stamps (the
     # 34-handovers bug); chaseDue only once a week from the last touch
     roy_old = {"_id": "recR1", "Created Time": old, "Team Member": [ROY_REC],

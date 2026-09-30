@@ -81,7 +81,29 @@ that move; a Rejected card means close it. Two rules: an approval with EMPTY
 approved with no instruction; ask again" rather than inventing one; and the
 gate's approve re-linked the task to you, so if his answer names nobody, put
 it back on `priorHolder` with `route` (an agent) or `handover` (Roy) — that
-route/handover also closes the card in code), `parked` (Some Day) and counts. Upcoming
+route/handover also closes the card in code), `ownLane` (Content Engine episode
+cards, named `CONTENT: Publish Episode ...`, each with `daysStill`: the engine
+closes each one itself within the hour of the episode being out on every
+section, whoever holds it. Never chase, escalate or close one; `escalate`
+refuses them. An open episode card is NOT proof an episode is unpublished: on
+29 Sep 2026 this board told Kevin nine live episodes were unpublished. The one
+check is age: a view with `daysStill` of `ownLaneCheckDays` or more means the
+automatic close has not happened, so run
+`python3 scripts/content-engine/publish.py report` and find day N (from the
+name) on its "content sections not done" and "content cards not closed" lines.
+Either way file ONE finding titled exactly "Episode card N still open after 14
+days" (a repeat adds a recurrence, never a twin) and record the move as `leave`
+with that title. What the finding says comes from the record, never a guess: on
+"content sections not done", name the sections not out; on "content cards not
+closed", quote the refusal; on neither line, run
+`python3 scripts/content-engine/publish.py published --day N`: zero destinations
+means "episode N was never scheduled", destinations present mean "episode N is
+out but its card did not close". Never escalate it. An episode card that lands in
+`stuck` instead (a legacy row at Approval with no sender, outside Kevin's queue)
+gets the same finding asking the engine to resubmit it, recorded as `leave`. The engine's OTHER
+cards, such as the monthly performance read, do not close themselves and stay
+ordinary board work),
+`parked` (Some Day) and counts. Upcoming
 tasks whose due date has arrived were already flipped to Today by the runner
 (`task-hygiene-sweep.py flip-due`) before this read. Dispatch's queue JSON also gives you every routable agent's Team
 Members rec id and live status (its rosters). If `queue` exits non-zero
@@ -294,6 +316,10 @@ It gives you Kevin's lane (empty Approver = Kevin) oldest first with a
 rows without Sent For Approval By are excluded IN THE FORMULA, so they can
 never be swept here (they are stuck work, handled in step 2). A zero lane
 alongside 5+ Approval-status rows fails the read loudly; report it.
+
+Never propose closing a lane item with `episodeCard` true: approving a close
+proposal on an episode card reads as Kevin approving the episode itself. Leave
+those to Kevin.
 
 For each lane item, oldest first, ask five questions — checks with findable
 answers, not vibes:

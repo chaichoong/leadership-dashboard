@@ -85,6 +85,25 @@ describe('movement maths never trusts a re-stamped field', () => {
             { encoding: 'utf8' });
         expect(out).toContain('selftest OK');
     });
+
+    // 30 Sep 2026: the board read nine live Content Engine episodes' open cards as "approved but unpublished". An
+    // episode card closes itself; the board, escalate and the engine must agree on what one is called.
+    it('the episode-card prefix is the same in the board, escalate and the name the engine gives a card', () => {
+        const out = execFileSync('python3', ['-c', `
+import importlib.util, json, sys
+sys.path.insert(0, ${JSON.stringify(path.join(root, 'scripts/content-engine'))})
+def load(name, f):
+    spec = importlib.util.spec_from_file_location(name, f); m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m); return m
+ad = load('ad', ${JSON.stringify(path.join(root, 'scripts/agent-dispatch.py'))})
+tm = load('tm', ${JSON.stringify(path.join(root, 'scripts/task-manager.py'))})
+import approval
+print(json.dumps([tm.EPISODE_CARD_PREFIX, ad.EPISODE_CARD_PREFIX, approval.task_name(2059, "STOP OVEREATING")]))`],
+            { encoding: 'utf8' }).trim().split('\n').pop();
+        const [board, dispatch, engineName] = JSON.parse(out);
+        expect(board).toBe('CONTENT: Publish Episode ');
+        expect(dispatch).toBe(board);
+        expect(engineName.startsWith(board)).toBe(true);
+    });
 });
 
 describe("the Go Signal is the agent's own 9/1/5 slot job (Kevin, 25 Aug 2026)", () => {

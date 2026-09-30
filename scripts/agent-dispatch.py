@@ -2749,6 +2749,9 @@ def tier_match(patterns, *texts):
     return ""
 
 
+EPISODE_CARD_PREFIX = "CONTENT: Publish Episode "   # content-engine/approval.py task_name; see cmd_escalate
+
+
 def own_go_signal(agent_id):
     """True for a role agent that runs on its own schedule (`dispatch: False`): its approved and sent-back cards are
     handled by its own job, never carried out by a dispatched run."""
@@ -3467,6 +3470,15 @@ def cmd_escalate(args):
         sys.exit(f"REFUSED: {args.task} is blocked ({wall['kind']} {wall['subject']}), so it is not a "
                  f"decision for Kevin. Its fix is already routed: {blocker_fix_text(wall)} It wakes by "
                  "itself when that is done. Leave it.")
+    # AN EPISODE CARD IS NOT ESCALATED (30 Sep 2026). On 29 Sep the Task Manager escalated Content Engine episode 2059
+    # as "approved but unpublished" when it had been live on every channel since 17 Sep; the card was only open because
+    # nothing closed it. The engine now closes it once every section is out (publish.py close-cards) and reports what
+    # is not ("content sections not done"). Matched on the card's name, whoever holds it (task-manager.py carries the
+    # same EPISODE_CARD_PREFIX; tests/task-manager.test.js fails if they drift).
+    if str(tf.get(AF["name"]) or "").startswith(EPISODE_CARD_PREFIX):
+        sys.exit(f"REFUSED: {args.task} is a Content Engine episode card. It closes itself once the episode is out on "
+                 "every section, so it is not a decision for Kevin. `python3 scripts/content-engine/publish.py published "
+                 "--day N` shows what went out. Leave it.")
     ask = escalate_ask(getattr(args, "reason", ""))
     stamp = datetime.now(LONDON).strftime("%d %b %Y")
     # The holder at escalation is recorded on the stamp: the gate's approve
