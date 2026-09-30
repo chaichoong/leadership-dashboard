@@ -40,11 +40,16 @@ const PAGE = `<!doctype html><html><body>
   <div id="dv">Confirm order</div>
   <input type="checkbox" id="em"><label for="em">Email</label>
   <label for="mo">How would you like to pay?</label><input type="radio" name="freq" id="mo"><label for="mo" id="mo-opt">Monthly</label>
+  <fieldset><legend>Do you agree with all the assumptions above?</legend><input type="radio" name="asm" id="asm-y"><label for="asm-y" id="asm-yl">Yes</label></fieldset>
+  <label for="dc">I confirm the statements above are true</label><input type="checkbox" id="dc"><label for="dc" id="dc-yes">Yes</label>
+  <span id="terms">I have read and understood the policy terms</span><div role="checkbox" aria-checked="false" aria-labelledby="terms" id="rc" onclick="this.setAttribute('aria-checked','true')"></div><div role="switch" aria-labelledby="terms" id="sw" onclick="this.dataset.on='1'"></div>
+  <main role="main"><p>Pay monthly or yearly</p><span id="plain">Show more</span></main>
   <div id="out"></div>
   <script>
     setTimeout(() => { const d = document.createElement('div'); d.id = 'signed-in'; d.textContent = 'My account'; document.body.appendChild(d); }, 800);
     setTimeout(() => { document.getElementById('pw').remove(); }, 2300);
     document.getElementById('dv').addEventListener('click', () => { document.getElementById('out').textContent = 'DIV-ORDER'; });
+    document.getElementById('plain').addEventListener('click', () => { document.getElementById('out').textContent = 'PLAIN'; });
   </script>
 </body></html>`;
 
@@ -154,6 +159,18 @@ describe('the robot does every step up to Kevin, waits for his part, and hands o
       const mo = await b.runHandover(page, { why: 'pay', steps: [{ do: 'click', selector: '#mo-opt' }] });
       expect(mo.stuck).toBeNull();
       expect(await page.locator('#mo').isChecked()).toBe(true);
+      // Review round 3: a declaration answered by a "Yes" label, a radio in a fieldset whose
+      // legend asks it, or an ARIA tick box is his; a click inside a region is not read as the region.
+      for (const sel of ['#asm-yl', '#asm-y', '#dc-yes', '#rc', '#sw']) {
+        const r3 = await b.runHandover(page, { why: 'pay', steps: [{ do: 'click', selector: sel }] });
+        expect(r3.stuck && r3.stuck.error, sel).toMatch(/reads like a declaration|final action/);
+      }
+      expect(await page.locator('#asm-y').isChecked()).toBe(false);
+      expect(await page.locator('#dc').isChecked()).toBe(false);
+      expect(await page.locator('#rc').getAttribute('aria-checked')).toBe('false');
+      const plain = await b.runHandover(page, { why: 'pay', steps: [{ do: 'click', selector: '#plain' }] });
+      expect(plain.stuck).toBeNull();
+      expect(await page.locator('#out').textContent()).toBe('PLAIN');
       const stuck = await b.runHandover(page, { why: 'pay', steps: [{ do: 'click', selector: '#not-there', timeout: 1000 }] }, {});
       expect(stuck.stuck).toMatchObject({ step: 1, do: 'click' });
       expect(stuck.stuck.error).toMatch(/could not read what/);     // unreadable: not touched, his window
@@ -229,5 +246,24 @@ describe('the handover command', () => {
     expect(ledger).toMatch(/"cmd":"handover","task":"recPYIC5nn7v2bh8e"/);
     expect(existsSync(x.dir + '.signin-hold')).toBe(false);
     expect(readdirSync(join(x.plans, 'shots')).length).toBe(1);
+  }, 60000);
+
+  it("--dry-run proves a plan before the card reaches Kevin: same guard, his steps skipped, no approval read, no hold", async () => {
+    const x = home('Changes requested');
+    writeFileSync(join(x.plans, TASK + '.json'), JSON.stringify({ why: 'pay', steps: [
+      { do: 'kevin', say: 'Sign in', goto: base, untilSelector: '#never' },
+      { do: 'goto', url: base },
+      { do: 'fill', selector: '#date', value: '{{today}}' },
+      { do: 'click', selector: '#buy' },
+    ] }));
+    const shot = join(x.h, 'dry.png');
+    const r = await run(envFor(x), ['handover', '--task', TASK, '--dry-run', '--shot', shot]);
+    expect(r.code, r.err).toBe(3);
+    const last = JSON.parse(r.out.trim().split('\n').pop());
+    expect(last).toMatchObject({ mode: 'handover-dry-run', steps: 2, stuck: { step: 3, do: 'click' } });
+    expect(last.stuck.error).toMatch(/final action/);
+    expect(existsSync(shot)).toBe(true);
+    expect(existsSync(join(x.h, 'asked'))).toBe(false);
+    expect(existsSync(x.dir + '.signin-hold')).toBe(false);
   }, 60000);
 });

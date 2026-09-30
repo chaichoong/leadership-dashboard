@@ -52,6 +52,8 @@
  *   node scripts/agent-browser.js commit  --plan PLAN.json --task recXXX --shot OUT.png
  *   node scripts/agent-browser.js handover --task recXXX [--plan PLAN.json]   Kevin's turn: a VISIBLE window, the robot does
  *       every step up to his, then hands it over (plan in ~/knowledge-os/handover/recXXX.json by default)
+ *   node scripts/agent-browser.js handover --task recXXX --dry-run --shot OUT.png   the agent's proof: same
+ *       guard, no window, Kevin's steps skipped; exit 3 names the step it stopped at
  *   node scripts/agent-browser.js sites
  *
  * PLAN FORMAT (the agent writes this; the script only executes it)
@@ -1066,9 +1068,16 @@ async function assertNotFinalAction(page, s) {
       const entry = ['TEXTAREA', 'SELECT'].includes(el.tagName)
         || (el.tagName === 'INPUT' && !['submit', 'button', 'image', 'reset', 'checkbox', 'radio'].includes(type));
       if (entry) return { words: '', tick: false };
-      const host = el.closest('button,a,label,summary,input,[role],[onclick]') || el;
-      const control = host.tagName === 'LABEL' ? host.control : (host.tagName === 'INPUT' ? host : null);
-      const tick = !!control && String(control.type || '').toLowerCase() === 'checkbox';
+      // A control, never a region: role="main" or "dialog" would read the whole page (review round 3).
+      const host = el.closest('button,a,label,summary,input,[onclick],[role=button],[role=link],[role=checkbox],' +
+        '[role=radio],[role=menuitem],[role=tab],[role=switch],[role=option]') || el;
+      const control = host.tagName === 'LABEL' ? host.control : host;
+      const ctype = control ? String(control.type || '').toLowerCase() : '';
+      const crole = control ? String(control.getAttribute('role') || '').toLowerCase() : '';
+      const tick = !!control && (['checkbox', 'radio'].includes(ctype) || ['checkbox', 'radio', 'switch'].includes(crole)
+        || control.hasAttribute('aria-checked'));
+      const textOf = (n, attr) => String(n.getAttribute(attr) || '').split(/\s+/).filter(Boolean)
+        .map(id => { const t = document.getElementById(id); return t ? t.textContent || '' : ''; });
       const parts = [];
       for (const n of new Set([el, host, control].filter(Boolean))) {
         parts.push(n.innerText || n.textContent || '', n.value || '', n.getAttribute('aria-label') || '', n.getAttribute('title') || '');
@@ -1076,17 +1085,29 @@ async function assertNotFinalAction(page, s) {
         // when the robot clicks one label: the control's other label is the question
         // ("How would you like to pay?"), not the option (found on AXA, 30 Sep 2026).
         if (n.labels && !(host.tagName === 'LABEL' && n === control)) for (const l of n.labels) parts.push(l.textContent || '');
-        for (const id of String(n.getAttribute('aria-labelledby') || '').split(/\s+/).filter(Boolean)) {
-          const t = document.getElementById(id); if (t) parts.push(t.textContent || '');
+        parts.push(...textOf(n, 'aria-labelledby'));
+      }
+      // The question a tick box or radio answers: all its labels, the fieldset legend and the
+      // group's aria text. Read for declarations only, so a "Yes" to "I declare..." is his
+      // however it is clicked (review round 3), while "How would you like to pay?" is not.
+      const q = [];
+      if (tick) {
+        if (control.labels) for (const l of control.labels) q.push(l.textContent || '');
+        const fs = control.closest('fieldset'); const lg = fs && fs.querySelector('legend');
+        if (lg) q.push(lg.textContent || '');
+        for (const n of [control, control.closest('[role=radiogroup],[role=group]')].filter(Boolean)) {
+          q.push(n.getAttribute('aria-label') || '', ...textOf(n, 'aria-labelledby'), ...textOf(n, 'aria-describedby'));
         }
       }
-      return { words: parts.join(' ').replace(/\s+/g, ' ').slice(0, 600), tick };
+      const squash = a => a.join(' ').replace(/\s+/g, ' ').slice(0, 600);
+      return { words: squash(parts), question: squash(q), tick };
     }, null, { timeout: Math.min(Number(s.timeout) || 20000, 60000) });
   } catch (e) {
     throw new Error(`could not read what "${s.selector}" is, so it was not touched: ${String(e.message || e).slice(0, 120)}`);
   }
   if (FINAL_ACTION_RE.test(seen.words)) throw new Error(`refused: "${seen.words.trim().slice(0, 60)}" looks like the final action, which is Kevin's`);
-  if (seen.tick && DECLARATION_RE.test(seen.words)) throw new Error(`refused: the tick box "${seen.words.trim().slice(0, 60)}" reads like a declaration, which is Kevin's`);
+  const asked = (seen.words + ' ' + seen.question).trim();
+  if (seen.tick && DECLARATION_RE.test(asked)) throw new Error(`refused: "${asked.slice(0, 80)}" reads like a declaration, which is Kevin's`);
 }
 
 // A goto to an address worded like the last step (/checkout/confirm) is his too.
@@ -1099,7 +1120,8 @@ function assertNotFinalUrl(u) {
 // A signed-in page can keep a hidden change-password form: only a box he can see counts
 // (review round 2: a hidden one timed the sign-in wait out).
 async function visiblePasswordFieldCount(page) {
-  return page.locator('input[type=password]:visible').count();
+  // A site that blocks scripts falls back to counting every box: slower to move on, never early.
+  try { return await page.locator('input[type=password]:visible').count(); } catch { return passwordFieldCount(page); }
 }
 
 // Waits while Kevin does his own step (a sign-in). Reads only where the page is
@@ -1535,6 +1557,20 @@ async function main() {
     const task = arg(rest, 'task');
     if (!/^rec[A-Za-z0-9]{14}$/.test(task || '')) die(`--task must be an Airtable record id, got "${task}"`);
     const plan = assertHandoverPlan(readPlan(arg(rest, 'plan') || handoverPlanPath(task)));
+    // The agent's proof, before the card reaches Kevin: the same guard, no window, his own
+    // steps skipped, a screenshot for the card, and the browser closed at the end. Nothing is
+    // his yet, so no approval is read; the guard still stops before any final click.
+    if (rest.includes('--dry-run')) {
+      const shot = arg(rest, 'shot');
+      if (!shot) die('--shot is required: the screenshot goes on the card');
+      const res = await withPage(profile, false, async (page) => {
+        const r = await runHandover(page, { ...plan, steps: plan.steps.filter(s => s.do !== 'kevin') });
+        return Object.assign(r, { screenshot: await shoot(page, shot).catch(() => null) });
+      });
+      console.log(JSON.stringify({ mode: 'handover-dry-run', task, stuck: res.stuck, screenshot: res.screenshot, steps: res.done.length }));
+      if (res.stuck) process.exitCode = 3;
+      return;
+    }
     // Checked BEFORE the window opens: Kevin approved the prepared work, or nothing runs.
     assertApproved(task);
     const dir = path.join(PROFILE_ROOT, profile || 'default');
