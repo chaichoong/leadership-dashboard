@@ -6729,15 +6729,42 @@ function signinMarkWalls(walls, lines){
     });
     return walls;
 }
+// YOUR TURN (Kevin, 30 Sep 2026): "Anything that I'm not needed for, you can do behind the
+// scenes. Anything where I'm needed to either make payment or something, we need to do it via
+// this new process." An approved task whose website step needs him (pay, file, sign, declare)
+// and whose robot has a handover plan ready: the button opens the robot's own window on his
+// Mac, filled in up to his step. From the agent-blockers row (KEVIN walls marked turn).
+function signinTurns(){
+    const row = _estateRows.find(r => (r.fields || {})[ES.key] === 'agent-blockers');
+    const p = row ? signinPayload(row) : null;
+    return (p && Array.isArray(p.open) ? p.open : [])
+        .filter(w => w && w.kind === 'KEVIN' && w.turn === true && /^rec[A-Za-z0-9]{14}$/.test(String(w.task || '')));
+}
+function signinTurnsHtml(turns){
+    if(!turns.length) return '';
+    const rows = turns.map(w => {
+        const btn = SIGNIN_ON_MAC
+            ? `<a class="btn btn-success btn-sm" href="robotsignin://turn/${esc(w.task)}" data-rs-turn="${esc(w.task)}" aria-label="Your turn: ${esc(w.name)}" title="Opens the robot's window on your Mac, filled in up to your step">Your turn</a>`
+            : `<span class="rs-mac">On your Mac</span>`;
+        return `<div class="rs-line" data-rs-turn-line="${esc(w.task)}"><div><span class="rs-label">${esc(w.name)}</span>
+            <span class="rs-when">Your step: ${esc(w.subject)}. The robot fills in everything else, then hands you the window.</span></div>${btn}</div>`;
+    }).join('');
+    return `<div class="rs-list" data-rs-turns style="margin:0 0 10px"><div class="rs-note"><strong>Your turn (${turns.length})</strong>: have 10 free minutes before you start one.</div>${rows}</div>`;
+}
 function renderSignins(){
     const body = document.getElementById('signinsBody'); if(!body) return;
     const countEl = document.getElementById('signinsCount');
-    const setCount = (n, hot) => { if(countEl){ countEl.textContent = n; countEl.className = 'zone-count' + (hot ? ' hot' : ''); } };
+    const turns = signinTurns();
+    const setCount = (n, hot) => {
+        if(!countEl) return;
+        const total = typeof n === 'number' ? n + turns.length : n;       // '?' stays '?'
+        countEl.textContent = total; countEl.className = 'zone-count' + ((hot || turns.length) ? ' hot' : '');
+    };
     // The waiting-task strip (4 Sep 2026) leads the panel: work that stopped on a sign-in.
     // Built from allApprovals while the queue re-reads too (every 30 s after a Sign in tap):
     // that list keeps the last good read during a load and every decision edits it, so the
     // strip neither vanishes mid re-read nor keeps a card he has just closed (review).
-    const strip = (_approvalsState === 'ready' || _approvalsState === 'loading') ? apvSignInStripHtml(allApprovals, SIGNIN_ON_MAC) : '';
+    const strip = signinTurnsHtml(turns) + ((_approvalsState === 'ready' || _approvalsState === 'loading') ? apvSignInStripHtml(allApprovals, SIGNIN_ON_MAC) : '');
     const addBtn = SIGNIN_ON_MAC
         ? `<a class="btn btn-sm" href="robotsignin://add" data-rs-add title="Opens the Robot sign-in app on your Mac: paste the site's sign-in page, name it, sign in">+ Add a new site</a>` : '';
     const macNote = SIGNIN_ON_MAC ? '' : `<div class="rs-note">Sign-ins open on your Mac, where the robots' browser lives. This page shows where each one stands.</div>`;
@@ -6810,6 +6837,7 @@ function renderSignins(){
     const had = document.activeElement && body.contains(document.activeElement) ? document.activeElement : null;
     const hadKey = !had ? '' : had.getAttribute('data-rs-signin') ? `[data-rs-signin="${CSS.escape(had.getAttribute('data-rs-signin'))}"]`
         : had.hasAttribute('data-rs-toggle') ? '[data-rs-toggle]' : had.hasAttribute('data-rs-add') ? '[data-rs-add]'
+        : had.getAttribute('data-rs-turn') ? `[data-rs-turn="${CSS.escape(had.getAttribute('data-rs-turn'))}"]`
         : had.getAttribute('data-rs-wall') ? `[data-rs-wall="${CSS.escape(had.getAttribute('data-rs-wall'))}"]`
         : had.getAttribute('data-rs-wall-add') ? `[data-rs-wall-add="${CSS.escape(had.getAttribute('data-rs-wall-add'))}"]`
         : had.getAttribute('href') ? `a[href="${CSS.escape(had.getAttribute('href'))}"]` : '';

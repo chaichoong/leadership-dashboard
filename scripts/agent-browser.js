@@ -50,6 +50,10 @@
  *   node scripts/agent-browser.js loom-search --query "..." [--limit 20]
  *   node scripts/agent-browser.js prepare --plan PLAN.json --shot OUT.png
  *   node scripts/agent-browser.js commit  --plan PLAN.json --task recXXX --shot OUT.png
+ *   node scripts/agent-browser.js handover --task recXXX [--plan PLAN.json]   Kevin's turn: a VISIBLE window, the robot does
+ *       every step up to his, then hands it over (plan in ~/knowledge-os/handover/recXXX.json by default)
+ *   node scripts/agent-browser.js handover --task recXXX --dry-run --shot OUT.png   the agent's proof: same
+ *       guard, no window, Kevin's steps skipped; exit 3 names the step it stopped at
  *   node scripts/agent-browser.js sites
  *
  * PLAN FORMAT (the agent writes this; the script only executes it)
@@ -532,7 +536,7 @@ function assertApproved(taskId) {
   if (!/^rec[A-Za-z0-9]{14}$/.test(taskId || '')) die(`--task must be an Airtable record id, got "${taskId}"`);
   let out;
   try {
-    out = execFileSync('python3', [path.join(REPO, 'scripts', 'agent-dispatch.py'), 'outcome', taskId],
+    out = execFileSync('python3', [process.env.AGENT_OUTCOME_SCRIPT || path.join(REPO, 'scripts', 'agent-dispatch.py'), 'outcome', taskId],
                        { encoding: 'utf8', timeout: 60000 });
   } catch (e) {
     die(`could not read the approval state for ${taskId}: ${(e.stderr || e.message || '').toString().trim()}`);
@@ -674,8 +678,12 @@ function releaseSigninHold(dir) {
     fs.unlinkSync(holdPath(dir));
   } catch { /* already gone, or unreadable and so already inactive */ }
 }
+// A hold this process took (Kevin's turn window) never makes its own launch wait.
+function holdIsMine(dir) {
+  try { return JSON.parse(fs.readFileSync(holdPath(dir), 'utf8')).pid === process.pid; } catch { return false; }
+}
 async function waitForSigninHold(dir) {
-  if (!signinHoldActive(dir)) return;
+  if (!signinHoldActive(dir) || holdIsMine(dir)) return;
   console.error(`WAITING: Kevin is signing in on the robot profile (${path.basename(dir)}). This step starts when he closes that window (at most ${HOLD_MAX_MS / 60000} minutes).`);
   const deadline = Date.now() + HOLD_MAX_MS;
   while (signinHoldActive(dir) && Date.now() < deadline) await new Promise(r => setTimeout(r, 2000));
@@ -707,7 +715,7 @@ async function withPage(profile, headed, fn) {
   // scheduled slot that dies the instant it meets that window loses its run.
     await waitForProfile(dir, 10 * 60 * 1000,
       `the profile at ${dir} is open in a sign-in window. Kevin has not quit it yet (Cmd+Q); try again afterwards.`);
-    if (!signinHoldActive(dir)) break;
+    if (!signinHoldActive(dir) || holdIsMine(dir)) break;
   }
   // Prefer Kevin's installed Google Chrome over Playwright's bundled test build
   // (2 Sep 2026). The bundled Chromium announces itself as automated
@@ -850,7 +858,8 @@ async function runSteps(page, steps, allowSubmit, confirm) {
         break;
       case 'fill':
         await assertNotCredential(page, s.selector, s.value);
-        await page.fill(s.selector, String(s.value), { timeout: 20000 });
+        // {{today}} for every plan, so a prepare proof fills what the handover will.
+        await page.fill(s.selector, String(fillTokens(s.value)), { timeout: 20000 });
         break;
       case 'select': {
         // By what the page SHOWS (25 Sep 2026): the agent wrote "Terraced" and
@@ -891,7 +900,7 @@ async function runSteps(page, steps, allowSubmit, confirm) {
         break;
       case 'click':
       case 'submit':
-        await page.click(s.selector, { timeout: 20000 });
+        await page.click(s.selector, { timeout: Math.min(Number(s.timeout) || 20000, 60000) });
         if (s.do === 'submit') submitted = true;
         break;
       case 'upload': {
@@ -977,6 +986,264 @@ async function runSteps(page, steps, allowSubmit, confirm) {
     done.push({ do: 'confirm', executed: true, selector: confirm.selector });
   }
   return { done, stoppedBeforeSubmit: false };
+}
+
+// ── Kevin's turn (30 Sep 2026) ───────────────────────────────────────────────
+// Kevin: "Anything that I'm not needed for, you can do behind the scenes.
+// Anything where I'm needed to either make payment or something, we need to do
+// it via this new process." An approved task whose website step needs him (pay,
+// file, sign, declare) gets a "Your turn" button on the AI Agents page. It runs
+// this: a VISIBLE window on the robot profile, the robot does every step up to
+// his, pausing where only he can act (typing his own password), then hands him
+// the window and waits until he closes it. It never submits, pays or declares:
+// a plan with a submit or upload step is refused, and nothing runs after the
+// handover. One unbroken session, so a TopCashback click-through tracks.
+const HANDOVER_DIR = process.env.AGENT_HANDOVER_DIR || path.join(os.homedir(), 'knowledge-os', 'handover');
+const HANDOVER_STEPS = new Set(['goto', 'fill', 'select', 'check', 'click', 'press', 'wait', 'kevin']);
+// Enter can submit a form, so a handover presses only keys that move or tick.
+const HANDOVER_KEYS = new Set(['Tab', 'Shift+Tab', 'Space']);
+// The final click is always Kevin's (review, 30 Sep 2026: nothing in code stopped a plan's
+// click landing on "Buy policy"). A click, press or tick on anything worded like this refuses.
+// Review round 2 added the words sites use for the same click ("Confirm order", "Accept and continue").
+const FINAL_ACTION_RE = /\b(buy|purchase|pay|payment|order|submit|check ?out|declare|declaration|confirm|agree|accept|complete|send|file|sign)\b/i;
+// A tick box worded like a declaration is his too, however it is phrased.
+const DECLARATION_RE = /\b(declare|declaration|confirm|agree|accept|true|correct|understand|terms|conditions|read|statement)\b/i;
+// Plain text near an answer carries help ("Not sure? Read our guide."), so it needs a whole
+// declaration phrase, not one word (review round 6).
+const NEARBY_DECLARATION_RE = /\b(i|we) (declare|confirm|agree|accept|understand|have read)\b|\bdeclar(e|ation)\b|\bconfirm that\b|\bagree (to|with)\b|\baccept the\b|\btrue and (correct|accurate|complete)\b|\bstatement of fact\b/i;
+// A text box asking for his name as a signature is his.
+const SIGNATURE_RE = /\b(sign|signature|signed|signing|e-?sign)\b/i;
+
+function handoverPlanPath(task) { return path.join(HANDOVER_DIR, task + '.json'); }
+
+function assertHandoverPlan(plan) {
+  if (!plan || !Array.isArray(plan.steps) || !plan.steps.length) die('the plan has no steps');
+  if (!String(plan.why || '').trim()) die('the plan needs "why": what Kevin does when it is his turn (for example "answer the declarations and pay")');
+  plan.steps.forEach((s, i) => {
+    const d = s && s.do;
+    if (!HANDOVER_STEPS.has(d)) die(`step ${i + 1} is "${d}". A handover plan never submits, pays or uploads: the last click is Kevin's.`);
+    if (d === 'press' && !HANDOVER_KEYS.has(String(s.key || ''))) {
+      die(`step ${i + 1} presses "${s.key}". A handover presses only Tab and Space: Enter can submit a form, and an arrow key picks a radio answer.`);
+    }
+    if (d === 'kevin' && (!String(s.say || '').trim() || !(s.untilUrl || s.untilSelector || s.untilText))) {
+      die(`step ${i + 1} (kevin) needs "say" and one of untilUrl, untilSelector, untilText: what he does and how the robot knows he has.`);
+    }
+  });
+  return plan;
+}
+
+// {{today}} in a value: today's date the way UK forms want it (DD/MM/YYYY, London).
+function fillTokens(v, now = new Date()) {
+  if (typeof v !== 'string') return v;
+  const d = new Intl.DateTimeFormat('en-GB', { timeZone: 'Europe/London', day: '2-digit', month: '2-digit', year: 'numeric' }).format(now);
+  return v.replace(/\{\{today\}\}/g, d);
+}
+
+async function turnBanner(page, text) {
+  await page.evaluate(t => {
+    let b = document.getElementById('od-your-turn');
+    if (!b) {
+      b = document.createElement('div');
+      b.id = 'od-your-turn';
+      // At the bottom and click-through: at the top it sat on a page's own buttons and
+      // swallowed the robot's clicks (found by the test on 30 Sep 2026).
+      b.style.cssText = 'position:fixed;bottom:0;left:0;right:0;z-index:2147483647;pointer-events:none;background:#1f6f43;color:#fff;' +
+        'font:600 15px -apple-system,system-ui,sans-serif;padding:10px 16px;text-align:center;box-shadow:0 -2px 6px rgba(0,0,0,.3)';
+      document.documentElement.appendChild(b);
+    }
+    b.textContent = t;
+  }, text).catch(() => {});   // a page that blocks scripts still gets the window; the terminal says it too
+}
+
+// What a click, press or tick would act on, in words: the element, the control it sits
+// inside (a span inside a Buy button), their labels however attached, and aria-labelledby.
+// Throws (the step is then stuck and the window his) on a final action, a declaration
+// tick box, or a target it cannot read.
+async function assertNotFinalAction(page, s) {
+  // Tab only moves between fields: nothing is pressed. (Arrow keys select in a radio group,
+  // so a handover never presses them: review round 4.)
+  if (s.do === 'press' && s.key !== 'Space') return;
+  const presses = ['click', 'press', 'check'].includes(s.do);
+  if (presses && FINAL_ACTION_RE.test(String(s.selector || ''))) throw new Error(`refused: "${s.selector}" looks like the final action, which is Kevin's`);
+  let seen;
+  try {
+    seen = await page.locator(s.selector).first().evaluate(el => {
+      const textOf = (n, attr) => String(n.getAttribute(attr) || '').split(/\s+/).filter(Boolean)
+        .map(id => { const t = document.getElementById(id); return t ? t.textContent || '' : ''; });
+      // The question a control answers: all its labels, the fieldset legend, the group's aria
+      // text and a placeholder. Read for declarations (and, on a text box, a signature) only,
+      // so a "Yes" to "I declare..." is his however it is given (review rounds 3 and 4).
+      // The words around it, for a question set in plain text beside its answers (an <h3> or
+      // <span> next to Yes and No: review round 5): the largest box round it that is under 300
+      // characters and holds no other question's control (a text box, a dropdown, or a radio of
+      // another group; Yes/No buttons belong together), without any dropdown's options (round 6).
+      const nearby = c => {
+        // The answers' own words ("Yes No") are not the question: the climb goes on past them (round 8).
+        const own = [];
+        for (const g of (c.name ? Array.from(document.getElementsByName(c.name)) : [c])) {
+          if (g.labels) for (const l of g.labels) own.push(String(l.innerText || l.textContent || '').trim());
+        }
+        const beyond = x => own.reduce((y, l) => (l ? y.split(l).join(' ') : y), x).replace(/\s+/g, '').length > 0;
+        let t = '';
+        for (let n = c.parentElement; n && n !== document.body; n = n.parentElement) {
+          const other = Array.from(n.querySelectorAll('input,select,textarea,[role=radio],[role=checkbox]')).some(o => o !== c
+            && !['button', 'submit', 'reset', 'image', 'hidden'].includes(String(o.type || '').toLowerCase())
+            && !(c.name && o.name === c.name));
+          if (other && t && beyond(t)) break;   // read until there are words: a consent row, or a styled span round the box, can hold an email box too (round 7)
+          let x = String(n.innerText || '');
+          for (const sel of n.querySelectorAll('select')) if (sel.innerText) x = x.split(sel.innerText).join(' ');   // an empty one would split every letter
+          x = x.replace(/\s+/g, ' ').trim();
+          if (x.length > 300) break;
+          t = x;
+        }
+        return t;
+      };
+      const question = c => {
+        const q = [];
+        if (c.labels) for (const l of c.labels) q.push(l.textContent || '');
+        const fs = c.closest('fieldset'); const lg = fs && fs.querySelector('legend');
+        if (lg) q.push(lg.textContent || '');
+        for (const n of [c, c.closest('[role=radiogroup],[role=group]')].filter(Boolean)) {
+          q.push(n.getAttribute('aria-label') || '', ...textOf(n, 'aria-labelledby'), ...textOf(n, 'aria-describedby'));
+        }
+        q.push(c.getAttribute('placeholder') || '');
+        return q;
+      };
+      const squash = a => a.join(' ').replace(/\s+/g, ' ').slice(0, 600);
+      // A text box or dropdown is not pressed: its question ("What year did you buy it?") is
+      // not a Buy button (found on AXA, 30 Sep 2026), but it can still answer a declaration.
+      const type = String(el.type || '').toLowerCase();
+      const entry = ['TEXTAREA', 'SELECT'].includes(el.tagName)
+        || (el.tagName === 'INPUT' && !['submit', 'button', 'image', 'reset', 'checkbox', 'radio'].includes(type));
+      if (entry) {
+        const options = el.tagName === 'SELECT'
+          ? Array.from(el.options).map(o => ({ value: o.value, label: (o.label || o.textContent || '').replace(/\s+/g, ' ').trim() })) : null;
+        return { entry: true, words: '', question: squash(question(el)), around: options ? nearby(el) : '', tick: false, options };
+      }
+      // Anything else is read, a plain div with a click listener included (review round 2).
+      // A control, never a region: role="main" or "dialog" would read the whole page (round 3).
+      const host = el.closest('button,a,label,summary,input,[onclick],[role=button],[role=link],[role=checkbox],' +
+        '[role=radio],[role=menuitem],[role=tab],[role=switch],[role=option]') || el;
+      const control = host.tagName === 'LABEL' ? host.control : host;
+      const ctype = control ? String(control.type || '').toLowerCase() : '';
+      const crole = control ? String(control.getAttribute('role') || '').toLowerCase() : '';
+      const parts = [];
+      for (const n of new Set([el, host, control].filter(Boolean))) {
+        parts.push(n.innerText || n.textContent || '', n.value || '', n.getAttribute('aria-label') || '', n.getAttribute('title') || '');
+        // A pressed control's labels, however attached (a label wrapping a tick box). Not
+        // when the robot clicks one label: the control's other label is the question
+        // ("How would you like to pay?"), not the option (found on AXA, 30 Sep 2026).
+        if (n.labels && !(host.tagName === 'LABEL' && n === control)) for (const l of n.labels) parts.push(l.textContent || '');
+        parts.push(...textOf(n, 'aria-labelledby'));
+      }
+      // An answer: a tick box, radio, ARIA toggle, or a short button such as "Yes" (round 4).
+      const own = control ? String(control.innerText || control.textContent || control.value || '').trim() : '';
+      const answer = !!control && (['checkbox', 'radio'].includes(ctype) || ['checkbox', 'radio', 'switch'].includes(crole)
+        || control.hasAttribute('aria-checked') || control.hasAttribute('aria-pressed')
+        || ((control.tagName === 'BUTTON' || crole === 'button') && own.length <= 12));
+      return { entry: false, words: squash(parts), question: answer ? squash(question(control)) : '', around: answer ? nearby(control) : '', tick: answer };
+    }, null, { timeout: Math.min(Number(s.timeout) || 20000, 60000) });
+  } catch (e) {
+    throw new Error(`could not read what "${s.selector}" is, so it was not touched: ${String(e.message || e).slice(0, 120)}`);
+  }
+  if (seen.entry) {
+    if (s.do === 'select') {
+      // The option it picks can be the declaration itself ("I agree with all the assumptions"): round 5.
+      const pick = seen.options ? pickOption(seen.options, String(s.label !== undefined ? s.label : s.value)).option : null;
+      const asked = ((pick ? pick.label : '') + ' ' + seen.question).trim();
+      if (DECLARATION_RE.test(asked) || NEARBY_DECLARATION_RE.test(seen.around)) throw new Error(`refused: "${(asked + ' ' + seen.around).trim().slice(0, 80)}" reads like a declaration, which is Kevin's`);
+    }
+    if (s.do === 'fill' && SIGNATURE_RE.test(seen.question)) throw new Error(`refused: "${seen.question.slice(0, 80)}" looks like a signature, which is Kevin's`);
+    return;
+  }
+  if (!presses) return;
+  if (FINAL_ACTION_RE.test(seen.words)) throw new Error(`refused: "${seen.words.trim().slice(0, 60)}" looks like the final action, which is Kevin's`);
+  const asked = (seen.words + ' ' + seen.question).trim();
+  if (seen.tick && (DECLARATION_RE.test(asked) || NEARBY_DECLARATION_RE.test(seen.around))) {
+    throw new Error(`refused: "${(asked + ' ' + seen.around).trim().slice(0, 80)}" reads like a declaration, which is Kevin's`);
+  }
+}
+
+// A goto to an address worded like the last step (/checkout/confirm) is his too.
+function assertNotFinalUrl(u) {
+  let words;
+  try { const x = new URL(u); words = decodeURIComponent(x.pathname + ' ' + x.search).replace(/[^a-z]+/gi, ' '); } catch { words = String(u); }
+  if (FINAL_ACTION_RE.test(words)) throw new Error(`refused: ${u} looks like the final step, which is Kevin's`);
+}
+
+// A signed-in page can keep a hidden change-password form: only a box he can see counts
+// (review round 2: a hidden one timed the sign-in wait out).
+async function visiblePasswordFieldCount(page) {
+  // A site that blocks scripts falls back to counting every box: slower to move on, never early.
+  try { return await page.locator('input[type=password]:visible').count(); } catch { return passwordFieldCount(page); }
+}
+
+// Waits while Kevin does his own step (a sign-in). Reads only where the page is
+// and whether an element or words are there: never a field's value.
+async function waitForKevin(page, s, maxMs, onTick) {
+  const deadline = Date.now() + maxMs;
+  while (Date.now() < deadline) {
+    if (page.isClosed()) return false;
+    if (onTick) onTick();
+    try {
+      const seen = (s.untilUrl && page.url().includes(s.untilUrl))
+        || (s.untilSelector && await page.locator(s.untilSelector).first().isVisible())
+        || (s.untilText && (await domText(page, 20000)).includes(s.untilText));
+      // Never while a password box is still on the page: a sign-in page can carry the
+      // same words, and the robot must not move on while he is still typing (review).
+      if (seen && Number(await visiblePasswordFieldCount(page)) === 0) return true;
+    } catch { /* mid-navigation: look again */ }
+    await new Promise(r => setTimeout(r, 1000));
+  }
+  return false;
+}
+
+const FILLING = 'The robot is filling this in for you: hands off until this bar says Your turn.';
+
+// Runs the plan up to Kevin's turn. A step that fails does not throw: the window
+// stays his, with the step named, so he can finish by hand.
+async function runHandover(page, plan, opts = {}) {
+  const done = [];
+  for (let i = 0; i < plan.steps.length; i++) {
+    const s = plan.steps[i];
+    try {
+      if (s.do === 'kevin') {
+        if (s.goto) {
+          if (!hostAllowed(s.goto)) throw new Error(`${s.goto} is not on the allowlist`);
+          await page.goto(s.goto, { waitUntil: 'domcontentloaded', timeout: 45000 });
+        }
+        await turnBanner(page, 'Your turn: ' + s.say + ' The robot carries on when you have.');
+        const ok = await waitForKevin(page, s, opts.kevinMs || Math.min(Number(s.minutes) || 10, 20) * 60 * 1000, opts.onTick);
+        if (!ok) throw new Error('not done in time: ' + s.say);
+        done.push({ do: 'kevin', executed: true, say: s.say });
+        await turnBanner(page, FILLING);
+        continue;
+      }
+      if (['click', 'press', 'check', 'select', 'fill'].includes(s.do)) await assertNotFinalAction(page, s);
+      if (s.do === 'goto') assertNotFinalUrl(s.url);
+      const r = await runSteps(page, [s], false, null);
+      done.push(...r.done);
+      if (opts.onTick) opts.onTick();
+      if (!opts.quiet) await turnBanner(page, FILLING);   // a new page drops the bar: put it back (not in a dry run's screenshot)
+    } catch (e) {
+      return { done, stuck: { step: i + 1, do: s.do, error: String((e && e.message) || e).slice(0, 300) } };
+    }
+  }
+  return { done, stuck: null };
+}
+
+// The window is his until he closes it (the tab, the window or Chrome itself).
+// Never closes it on him (review: a 45-minute cut-off could land mid-payment). capMs is
+// for tests only; onTick keeps the robots' hold fresh while the window is his.
+async function waitForWindowClose(ctx, capMs, onTick) {
+  const deadline = capMs ? Date.now() + capMs : Infinity;
+  let closed = false;
+  ctx.once('close', () => { closed = true; });
+  while (!closed && Date.now() < deadline) {
+    if (!ctx.pages().length) break;
+    if (onTick) onTick();
+    await new Promise(r => setTimeout(r, 1500));
+  }
 }
 
 function readPlan(p) {
@@ -1340,6 +1607,57 @@ async function main() {
     return;
   }
 
+  if (cmd === 'handover') {
+    const task = arg(rest, 'task');
+    if (!/^rec[A-Za-z0-9]{14}$/.test(task || '')) die(`--task must be an Airtable record id, got "${task}"`);
+    const plan = assertHandoverPlan(readPlan(arg(rest, 'plan') || handoverPlanPath(task)));
+    // The agent's proof, before the card reaches Kevin: the same guard, no window, his own
+    // steps skipped, a screenshot for the card, and the browser closed at the end. Nothing is
+    // his yet, so no approval is read; the guard still stops before any final click.
+    if (rest.includes('--dry-run')) {
+      const shot = arg(rest, 'shot');
+      if (!shot) die('--shot is required: the screenshot goes on the card');
+      const res = await withPage(profile, false, async (page) => {
+        const r = await runHandover(page, { ...plan, steps: plan.steps.filter(s => s.do !== 'kevin') }, { quiet: true });
+        return Object.assign(r, { screenshot: await shoot(page, shot).catch(() => null) });
+      });
+      console.log(JSON.stringify({ mode: 'handover-dry-run', task, stuck: res.stuck, screenshot: res.screenshot, steps: res.done.length }));
+      if (res.stuck) process.exitCode = 3;
+      return;
+    }
+    // Checked BEFORE the window opens: Kevin approved the prepared work, or nothing runs.
+    assertApproved(task);
+    const dir = path.join(PROFILE_ROOT, profile || 'default');
+    // The robot's own runs wait while the window is his (their launch would fight it).
+    takeSigninHold(dir);
+    process.on('exit', () => releaseSigninHold(dir));
+    // A robot step that passed its last hold check a moment ago launches within a second
+    // or two; let it show before this window looks for the profile (as `login` does).
+    await new Promise(r => setTimeout(r, Number(process.env.AGENT_HANDOVER_PAUSE_MS) || 3000));
+    const tick = () => takeSigninHold(dir);                          // the hold stays fresh while it is his
+    const headed = !process.env.AGENT_HANDOVER_HEADLESS;          // tests only
+    let res;
+    try {
+      res = await withPage(profile, headed, async (page, ctx) => {
+        await turnBanner(page, FILLING);
+        const r = await runHandover(page, plan, { onTick: tick });
+        const png = await shoot(page, path.join(HANDOVER_DIR, 'shots', `${task}-${Date.now()}.png`)).catch(() => null);
+        await turnBanner(page, r.stuck
+          ? `The robot got stuck at step ${r.stuck.step}. You can finish by hand, or close this window.`
+          : `Your turn: ${plan.why}. Close this window when you have finished: the other robots wait while it is open.`);
+        console.log(JSON.stringify({ phase: 'your-turn', task, stuck: r.stuck, screenshot: png }));
+        await waitForWindowClose(ctx, Number(process.env.AGENT_HANDOVER_WAIT_MS) || 0, tick);
+        return Object.assign(r, { screenshot: png });
+      });
+    } finally {
+      releaseSigninHold(dir);
+    }
+    ledger({ cmd: 'handover', task, profile, site: plan.site || null, steps: res.done, stuck: res.stuck, screenshot: res.screenshot });
+    console.log(JSON.stringify({ mode: 'handover', task, handedOver: !res.stuck, stuck: res.stuck, screenshot: res.screenshot, steps: res.done.length }));
+    if (res.stuck) process.exitCode = 3;
+    return;
+  }
+
   if (cmd === 'prepare' || cmd === 'commit') {
     const plan = readPlan(arg(rest, 'plan'));
     const shot = arg(rest, 'shot');
@@ -1408,4 +1726,5 @@ module.exports = { hostAllowed, pickLinks, runSteps, assertNotCredential, assert
                    recordLoginSite, signinTargets, signinOwner, signinDomain, readSitesFile,
                    assertUploadable, assertConfirmable, UPLOAD_DIR, UPLOAD_EXTENSIONS, persistSessionCookies,
                    signinHoldActive, takeSigninHold, releaseSigninHold, waitForSigninHold, HOLD_MAX_MS, isBotCheck,
-                   profileProcs, plainWindowOpen, pickOption, settleBotCheck, withPage, lastKeptCount: () => lastKept, onSigninPage };
+                   profileProcs, plainWindowOpen, pickOption, settleBotCheck, withPage, lastKeptCount: () => lastKept, onSigninPage,
+                   assertHandoverPlan, fillTokens, runHandover, handoverPlanPath, HANDOVER_DIR, waitForWindowClose, FINAL_ACTION_RE };

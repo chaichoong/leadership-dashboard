@@ -632,6 +632,10 @@ def blockers_summary(r):
     if kevin:
         parts.append("%s only you can do (%s)" % (_plural(len(kevin), "step"),
                                                    ", ".join(sorted({w["subject"] for w in kevin}))))
+        turns = [w for w in kevin if w.get("turn")]
+        if turns:
+            # Kevin's turn (30 Sep 2026): the robot has the rest filled in and waits for his button.
+            parts.append("%s ready for Your turn on the AI Agents page (your Mac)" % _plural(len(turns), "step"))
     if build:
         parts.append("%s need a Claude Code session to fix the robot" % _plural(len(build), "task"))
     detail = ("Robots blocked on %s. For you: %s." % (_plural(len(walls), "task"), "; ".join(parts))
@@ -648,7 +652,7 @@ def blockers_summary(r):
     if errors:
         detail += " The sweep could not read: " + "; ".join(e[:120] for e in errors) + "."
     status = "Failed" if (stale or closed or errors) else "Worked"
-    slim = [{k: w.get(k) for k in ("task", "name", "agent", "kind", "subject", "fix", "days", "findingStatus")}
+    slim = [{k: w.get(k) for k in ("task", "name", "agent", "kind", "subject", "fix", "days", "findingStatus", "turn")}
             for w in walls][:40]
     return status, detail, {"open": slim, "stale": len(stale), "closedWhileBlocked": closed[:10],
                             "woken": len(r.get("woken") or [])}

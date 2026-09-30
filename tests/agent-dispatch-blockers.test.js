@@ -266,6 +266,34 @@ print(json.dumps({"open": {w["task"]: [w["clearsNow"], w["days"], w["findingStat
     expect(r.read).toBe(1);
   });
 
+  it("a Kevin step with a handover plan on file is marked 'your turn'; no plan, another kind or a bad id never is (30 Sep 2026)", () => {
+    const dir = mkdtempSync(tmpdir() + '/od-handover-');
+    writeFileSync(dir + '/recPYIC5nn7v2bh8e.json', '{"why": "answer the declarations and pay", "steps": [{"do": "click", "selector": "#x"}]}');
+    writeFileSync(dir + '/recGO5pvoBxY8Iy6p.json', '{}');
+    writeFileSync(dir + '/recxYYOXZ2oxMMcyB.json', '{}');
+    const r = py(setup + `
+m.HANDOVER_DIR = ${JSON.stringify(dir)}
+# The three worked examples: Chedburgh (a Kevin purchase wall with a plan), the PIB
+# replacement (a Kevin wall, no plan yet), Athertons (a Kevin payment wall, no plan).
+rec("recPYIC5nn7v2bh8e", openline("KEVIN", "purchase", "2026-09-25T09:00:00.000Z"), status="Today", name="INSURANCE: 6 Chedburgh Place", outcome="Approved as-is")
+# A plan on file but the card NOT approved yet: the wall opens at submit, so no turn (review).
+rec("recxYYOXZ2oxMMcyB", openline("KEVIN", "purchase", "2026-09-25T09:00:00.000Z"), status="Approval", name="INSURANCE: PIB")
+rec("recbBdOmWJASeTYLs", openline("KEVIN", "identity", "2026-09-25T09:00:00.000Z"), status="Today", name="INSURANCE: PIB replacement")
+rec("recLRHyQ8AG0NUHt0", openline("KEVIN", "payment", "2026-09-25T09:00:00.000Z"), status="Today", name="Athertons")
+rec("recGO5pvoBxY8Iy6p", openline("SIGN-IN", "www.topcashback.co.uk", "2026-09-25T09:00:00.000Z"), status="Today", name="BW Legal")
+res = m.blockers_scan(sweep=False, now=NOW)
+rows = {w["task"]: [w.get("turn", False), w["fix"]] for w in res["open"]}
+print(json.dumps({"rows": rows, "badId": m.handover_ready("../../etc/passwd", {"kind": "KEVIN"}, "Approved as-is")}))`);
+    expect(r.rows.recPYIC5nn7v2bh8e[0]).toBe(true);
+    expect(r.rows.recPYIC5nn7v2bh8e[1]).toMatch(/^Kevin clicks Your turn on the AI Agents page/);
+    expect(r.rows.recbBdOmWJASeTYLs[0]).toBe(false);
+    expect(r.rows.recxYYOXZ2oxMMcyB[0]).toBe(false);         // plan on file, card not approved yet
+    expect(r.rows.recLRHyQ8AG0NUHt0[0]).toBe(false);
+    expect(r.rows.recGO5pvoBxY8Iy6p[0]).toBe(false);        // a plan on file, but a sign-in wall is not Kevin's turn
+    expect(r.rows.kevin[0]).toBe(false);                    // not a record id: never a path
+    expect(r.badId).toBe(false);
+  });
+
   it('--sweep wakes exactly the fixed ones: the approved task keeps its verdict, the unapproved one goes back on today', () => {
     const r = py(setup + `
 res = m.blockers_scan(sweep=True, now=NOW)
@@ -441,6 +469,16 @@ print(json.dumps([e.blockers_summary(fine)[:2], e.blockers_summary(red)[:2], e.b
     expect(r[1][1]).toMatch(/add namecheap\.com to the robot's list \(Add a new site\).*1 task blocked 3 days or more\./);
     expect(r[2]).toEqual(['Worked', 'No robot is blocked.']);
     expect(r[3]).toBe('Failed');   // a blind read is never "nothing blocked"
+  });
+
+  it("a Kevin step with its plan ready says Your turn, and the page gets the flag (30 Sep 2026)", () => {
+    const r = est(`
+s = ${JSON.stringify(sweep)}
+s["open"][2]["turn"] = True
+out = e.blockers_summary(dict(s, open=s["open"][1:], stale=[]))
+print(json.dumps([out[1], [w.get("turn") for w in out[2]["open"]]]))`);
+    expect(r[0]).toMatch(/1 step only you can do \(purchase\); 1 step ready for Your turn on the AI Agents page \(your Mac\)/);
+    expect(r[1]).toEqual([null, true, null, null]);
   });
 
   it('a sweep file that has stopped being written is a Failed row, never an old "all clear"', () => {
