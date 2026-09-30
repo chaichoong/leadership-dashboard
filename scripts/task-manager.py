@@ -78,6 +78,10 @@ OPEN_STATUSES = ("Today", "Upcoming", "Overdue", "Approval")
 NOTE_STAMP_RE = re.compile(r"^\[(\d{1,2} \w{3} \d{4}) — [^\]]+\]\s*(.*)$", re.M)
 ESCALATE_NOTE_MARK = "Escalated to Kevin"
 DECIDED_NOTE_MARK = "Decision carried out"
+# The marker agent-dispatch.py leaves on a Level A carry-out it completed
+# WITHOUT Kevin (its HANDLED_MARK, ruling 7 Sep 2026). That path deliberately
+# clears Sent For Approval By, so verify cannot demand a card on those closes.
+HANDLED_NOTE_MARK = "HANDLED WITHOUT YOU"
 HOLDER_RE = re.compile(r"\(holder ([^)]*)\)")
 ROY_TOUCH_MARKS = ("Handed over to Roy Lavin", "Chase to Roy:")
 ROY_CHASE_DAYS = 7
@@ -937,7 +941,7 @@ def cmd_verify(report_path):
             "RECORD_ID()='%s'" % a["task"] for a in checkable)
         for rec in query_all(TASKS_TABLE, formula,
                              ["Team Member", "Status", "Sent For Approval By",
-                              "Agent Output"],
+                              "Agent Output", "Notes"],
                              "verify read"):
             live[rec["id"]] = rec.get("fields", {})
     checked = 0
@@ -965,12 +969,29 @@ def cmd_verify(report_path):
             problems.append("claimed %s of %s to %s but the link is absent"
                             % (move, a["task"], a.get("to")))
         elif move in GATE_MOVES:
+            # TWO LEGITIMATE CLOSE PATHS, TWO DIFFERENT CHECKS (finding
+            # 20260929-task-manager-board-663). A normal card goes to Kevin, so
+            # Sent For Approval By holds the Task Manager. A Level A carry-out
+            # is completed WITHOUT Kevin by agent-dispatch.py, which sets
+            # Completed, CLEARS Sent For Approval By by design, and stamps the
+            # HANDLED WITHOUT YOU marker into Notes. Demanding the card on both
+            # made verify reject a correct, evidence-cited close and fail the
+            # whole slot.
             if f.get("Status") not in ("Approval", "Completed"):
                 problems.append("claimed %s on %s but status is %s (never "
                                 "reached the gate)" % (move, a["task"], f.get("Status")))
-            elif TASKMGR_TEAM_REC not in (f.get("Sent For Approval By") or []):
-                problems.append("claimed %s on %s but Sent For Approval By is "
-                                "not the Task Manager" % (move, a["task"]))
+            elif TASKMGR_TEAM_REC in (f.get("Sent For Approval By") or []):
+                pass                                  # the card reached Kevin
+            elif (f.get("Status") == "Completed"
+                  and not (f.get("Sent For Approval By") or [])
+                  and HANDLED_NOTE_MARK in str(f.get("Notes") or "")):
+                pass                                  # Level A auto-carry-out
+            else:
+                problems.append(
+                    "claimed %s on %s but neither path is proven: Sent For "
+                    "Approval By is not the Task Manager and there is no "
+                    "completed %s carry-out in Notes"
+                    % (move, a["task"], HANDLED_NOTE_MARK))
 
     if not report.get("scoreWritten"):
         problems.append("score not written — the register reading silently froze")
