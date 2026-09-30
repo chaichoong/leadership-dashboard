@@ -108,14 +108,15 @@ U = {"name": "fldr8sliyu8h2jw9t", "status": "fldBvqysXBm9rIm0E", "letting": "fld
 TY = {"end": "fldwHhhKAq4f1nY9e", "unit": "fld7cjLLEHKAx49OK", "firstPayment": "fldUYUfrOdBLP9nXi"}
 TN = {"name": "fldxBKW7QnujSDWqA", "status": "fldAXzP9SGIHiAhrv", "rentType": "fldZbrk8Xw5Dcwxhi",
       "dob": "fldv7FKsqXYswyCFE", "aged35": "flddQ2HnQEf4HBeRn", "email": "fldybEduFY3DWWTfT",
-      "phone": "fldraHUkWfqo4olLF", "unit": "fldeLsZYqbKS77S2V", "tenancies": "fldWijr5nOIcKJMP4"}
+      "phone": "fldraHUkWfqo4olLF", "unit": "fldeLsZYqbKS77S2V", "tenancies": "fldWijr5nOIcKJMP4",
+      "referralAsk": "fldANyrWx9nG5253i"}
 P = {"name": "fldqMbR329TNY974G", "area": "fldYLRz2GgVojKaq9", "strategy": "fldivZ9UbAACwv7Yh",
      "agent": "fldEUrWVhSp3NY8Hh"}
 G = {"title": "fldbjOfQOnUnpFmkZ", "lever": "fldcpnAHgAxQeHAgT", "status": "fldDKDIgcekYZSFp7",
      "property": "fldYjvuoYHNlumtHd", "adopted": "fldF6bWNVgMAaaXBc"}
 TK = {"name": "fldgFjGBw6bTKJFCD", "status": "fldx4qCw17UfrKpaN", "due": "fld7XP8w8kbxfETV4",
       "team": "flduCtmQGpOA4eWaj", "desc": "fldRGhBQViKZKtkQ6", "notes": "fldR7apBzSp3oxFxz",
-      "outcome": "fldrHBSr6qoUfaKuZ", "approvedAt": "fldr4Mvf2RzKvhZhi"}
+      "outcome": "fldrHBSr6qoUfaKuZ", "approvedAt": "fldr4Mvf2RzKvhZhi", "feedback": "fldtI7SJI4gEohHD1"}
 INV = {"payee": "fldBVAMn9vA1by7MN", "description": "fldT0onwVg9JDJ1sv", "amount": "fldauZCUSWeIfGryG",
        "emailDate": "fldEpaivUV4uXW3DP", "due": "fldrZ0BrweP0VCVyR", "status": "fldJ5InUPlY4t7MgP",
        "msgId": "fldnbLSFMemMuLSzP", "source": "fldQeBwA2nnepf9wv",
@@ -167,8 +168,18 @@ NEAR = {
 # never fold into another kind (review, 25 Sep 2026).
 PREFIXES = {"mailout": "TENANT MAILOUT: ", "adverts": "TENANT ADVERTS: ", "referral": "TENANT REFERRAL: ",
             "viewings": "TENANT VIEWINGS: ", "keepwarm": "TENANT KEEPWARM: ", "movein": "TENANT MOVE-IN: ",
-            "docs": "TENANT DOCS: ", "rooms": "TENANT ROOMS: ", "check": "TENANT DOCS CHECK: "}
+            "docs": "TENANT DOCS: ", "rooms": "TENANT ROOMS: ", "check": "TENANT DOCS CHECK: ",
+            "refcheck": "TENANT REFERRAL CHECK: "}
 ROOMS_TASK_EVERY_DAYS = 14   # a house still not legal gets a fresh task this long after the last one closed
+# Kevin, 30 Sep 2026 (referral card, Changes requested): "Ask Roy which of the tenants we should email
+# and which of those we should not, based on their happiness and willingness to help." So the referral
+# email goes only to tenants Roy has said to ask (Tenants "Referral Ask (Roy)"). A tenant he has not
+# been asked about goes on a TENANT REFERRAL CHECK list for him first; the card waits up to
+# REFCHECK_WAIT_DAYS for his answer, then goes to whoever he has said yes to so far.
+ASK_YES, ASK_NO = "Ask", "Do not ask"
+REFCHECK_WAIT_DAYS = 7
+REFCHECK_REASON = ("Kevin, 30 Sep 2026: ask Roy which tenants to email about the referral bonus, "
+                   "based on their happiness and willingness to help")
 EMAIL_KINDS = ("mailout", "referral", "keepwarm", "docs")
 # Kevin's lettings model (25 Sep 2026): market a room the moment it is void or identified; the tenant
 # SECURES it with the documents done; then the works; then they move in a few days later. So readiness
@@ -217,6 +228,25 @@ ROY_POSITIVE = (
 )
 ROY_NEGATION = re.compile(r"\b(not|no|never|nobody|cancel\w*|called off)\b|n't\b", re.I)
 UNCLEAR = "unclear"
+# Roy's answer on a TENANT REFERRAL CHECK list: ask this tenant, or leave them alone (Kevin, 30 Sep 2026).
+# Read like a viewings reply: the "that's fine" idioms first ("no problem" is a yes), a "not sure" is
+# UNCLEAR, then the refusals are taken out of the text, then the yeses. A yes and a no together is
+# UNCLEAR: nothing is written and a person reads the line. A wrong yes would email a tenant Roy wanted
+# left alone, so every doubt falls to UNCLEAR, never to a guess.
+ASK_IDIOM_YES = re.compile(r"\bno (problems?|issues?|worries)\b", re.I)
+ASK_UNSURE = re.compile(r"\b(not sure|unsure|don'?t know|dunno|maybe|possibly|might|depends|not yet)\b", re.I)
+ASK_NEGATIVE = re.compile(
+    r"\b((please )?(do not|don'?t|dont|never|not|wouldn'?t|won'?t|shouldn'?t) (ask|email|contact|bother|include|message)\w*"
+    r"( (him|her|them))?"
+    r"|leave (him|her|them|it) (alone|out|off)|leave (him|her|them)\b"
+    r"|(\w*n'?t|not) (happy|keen|willing|interested|reliable|suitable|a good (fit|idea|one))"
+    r"|no|nope|nah|skip\w*|avoid|rather not|best not|better not|unhappy|in arrears|arrears|complain\w*"
+    r"|difficult|trouble\w*|problem|not)\b", re.I)
+ASK_POSITIVE = re.compile(r"\b(yes|yeah|yep|yup|ok|okay|fine|sure|ask|go ahead|happy|good|great|definitely"
+                          r"|would help|will help|willing|keen|brilliant|perfect)\b|\U0001F44D|\u2705", re.I)
+ASK_ALL = re.compile(r"\b(all|everyone|everybody|the rest|the others|rest of them|each of them|both)\b", re.I)
+ASK_EXCEPT = re.compile(r"\b(except|apart from|other than|but not|besides|excluding|not including)\b", re.I)
+ASK_SPLIT = re.compile(r"\n+|;|(?<=[.!?])\s+")
 # A first name alone never stands for a person when it is also an everyday word ("Will come
 # Tuesday", "Mark it done"): only the full name counts for these.
 COMMON_WORD_NAMES = {
@@ -930,18 +960,9 @@ def tenant_town(data, tenant_fields):
 
 
 def referral_recipients(data, town, day):
-    stop, out = suppressed(data), []
-    for t in data["tenants"]:
-        f = t["fields"]
-        if sel(f.get(TN["status"])) != "Active" or sel(f.get(TN["rentType"])) != "Universal Credit":
-            continue
-        dob = parse_day(f.get(TN["dob"]))
-        if not (f.get(TN["aged35"]) or (dob and age_on(dob, day) >= 35)):
-            continue
-        email = email_of(f.get(TN["email"]))
-        if email and email not in stop and tenant_town(data, f) == town and email not in out:
-            out.append(email)
-    return out[:TO_EACH_MAX]
+    """The addresses the referral email goes to: only tenants Roy has said to ask (Kevin, 30 Sep 2026)."""
+    return [email_of(t["fields"].get(TN["email"])) for t in referral_candidates(data, town, day)
+            if sel(t["fields"].get(TN["referralAsk"])) == ASK_YES][:TO_EACH_MAX]
 
 
 def referral_card(data, town, opens, day):
@@ -955,14 +976,151 @@ def referral_card(data, town, opens, day):
             f"{form_link('Tenant referral')}\n\nIf they move in, we pay you £{BONUS_AMOUNT} once their first "
             "month's rent has been paid.\n\nIf you would rather not get these emails, reply STOP.")
     return {"kind": "referral", "town": town, "name": f"{PREFIXES['referral']}{town} friends {fmt_day(day)}",
-            "description": f"Tenant-finding chain: ask {len(to)} current tenants in {town} on Universal Credit, aged 35+, to refer a friend for £{BONUS_AMOUNT}.",
+            "description": f"Tenant-finding chain: ask {len(to)} current tenants in {town} on Universal Credit, aged 35+, to refer a friend for £{BONUS_AMOUNT}. "
+                           "Roy said to ask: " + ", ".join(str(t["fields"].get(TN["name"]) or "?") for t in referral_candidates(data, town, day)
+                                                         if email_of(t["fields"].get(TN["email"])) in to) + ".",
             "output": email_block(to, f"£{BONUS_AMOUNT} for you when a friend moves in", body,
                                   track_record(sent_days(chain_tasks(data, "referral", town)),
                                                "tenant referral email (TENANT REFERRAL cards)"),
                                   f"sending this email separately to each of the {len(to)} tenants above from {SENDER}."),
             "ids": [], "emails": to,
-            "plainTask": f"Ask {len(to)} of our tenants in {town} to refer a friend who needs a room.",
+            "plainTask": f"Ask {len(to)} of our tenants in {town}, the ones Roy said to ask, to refer a friend who needs a room.",
             "plainApprove": f"Each tenant gets the same short email separately, offering £{BONUS_AMOUNT} when their friend moves in and pays the first rent."}
+
+
+def referral_candidates(data, town, day):
+    """Tenants the referral email may go to, before Roy's say: active, on Universal Credit, aged 35+,
+    in the town, with an email address nobody has stopped. One tenant per address."""
+    stop, out, seen = suppressed(data), [], set()
+    for t in data["tenants"]:
+        f = t["fields"]
+        if sel(f.get(TN["status"])) != "Active" or sel(f.get(TN["rentType"])) != "Universal Credit":
+            continue
+        dob = parse_day(f.get(TN["dob"]))
+        if not (f.get(TN["aged35"]) or (dob and age_on(dob, day) >= 35)):
+            continue
+        email = email_of(f.get(TN["email"]))
+        if email and email not in stop and tenant_town(data, f) == town and email not in seen:
+            seen.add(email)
+            out.append(t)
+    return out
+
+
+def tenant_place(data, tenant_fields):
+    """'Room 3, 5 Dalham Place': where a tenant lives, so Roy knows who we mean."""
+    units = {u["id"]: u["fields"] for u in data["units"]}
+    props = {p["id"]: p["fields"] for p in data["props"]}
+    for uid in links(tenant_fields.get(TN["unit"])):
+        uf = units.get(uid) or {}
+        house = next((str((props.get(pid) or {}).get(P["name"]) or "") for pid in links(uf.get(U["property"]))), "")
+        unit = str(uf.get(U["name"]) or "")
+        return unit if house and house in unit else ", ".join(x for x in (unit, house) if x)
+    return ""
+
+
+def referral_gate(data, town, day):
+    """Roy's say on the referral email for one town (Kevin, 30 Sep 2026).
+
+    ask:  tenants Roy has not answered for and who are on no check list from the last
+          REFERRAL_EVERY_DAYS; empty while a list is still open (one list at a time).
+    wait: why the card waits for Roy ("" when it may go to the tenants he has said yes to)."""
+    cands = referral_candidates(data, town, day)
+    checks = chain_tasks(data, "refcheck", town)
+    live = [c for c in checks if is_open(c)]
+    recent = {i for c in checks if (day - (created_day(c) or day)).days < REFERRAL_EVERY_DAYS for i in chain_ids(c)}
+    unanswered = [t for t in cands if not sel(t["fields"].get(TN["referralAsk"]))]
+    ask = [] if live else [t for t in unanswered if t["id"] not in recent][:TO_EACH_MAX]
+    young = sorted((c for c in live if (day - (created_day(c) or day)).days < REFCHECK_WAIT_DAYS), key=created_day)
+    wait = ("Roy is being asked which tenants to email" if ask else
+            f"waiting for Roy's answer on the list of {fmt_day(created_day(young[0]))}" if young else "")
+    return {"ask": ask, "wait": wait, "candidates": cands, "unanswered": unanswered, "open": live}
+
+
+def refcheck_task(data, town, tenants, day):
+    """Roy's list: which of these tenants may we email about the £50 referral bonus?"""
+    lines = []
+    for i, t in enumerate(tenants, 1):
+        where = tenant_place(data, t["fields"])
+        lines.append(f"{i}. {t['fields'].get(TN['name']) or 'name not on file'}" + (f", {where}" if where else ""))
+    desc = (f"Kevin wants to ask some of our tenants in {town} to recommend a friend who needs a room. We pay "
+            f"the tenant £{BONUS_AMOUNT} once their friend moves in and pays the first month's rent.\n\n"
+            "Before anything goes out: which of these should we email, and which should we leave alone? "
+            "Go on how happy they are with us and whether they would want to help.\n\n"
+            + "\n".join(lines) + "\n\n"
+            "Reply to this email with each first name and yes or no, one per line or split by commas. "
+            "\"All yes except\" and a name works too. Nothing goes to any tenant until you answer, and Kevin "
+            "approves the email itself.")
+    return {"kind": "refcheck", "town": town, "name": f"{PREFIXES['refcheck']}{town} tenants to ask {fmt_day(day)}",
+            "description": desc, "notes": f"TENANT CHAIN IDS: {','.join(t['id'] for t in tenants)}",
+            "reason": REFCHECK_REASON}
+
+
+def ask_reading(text):
+    """Roy's words about one tenant on a referral check: ASK_YES, ASK_NO, UNCLEAR, or None (nothing said)."""
+    t, found = str(text or "").replace("\u2019", "'"), set()
+    if ASK_IDIOM_YES.search(t):
+        found.add(ASK_YES)
+        t = ASK_IDIOM_YES.sub(" ", t)
+    if ASK_UNSURE.search(t):
+        return UNCLEAR
+    if ASK_NEGATIVE.search(t):
+        found.add(ASK_NO)
+        t = ASK_NEGATIVE.sub(" ", t)
+    if ASK_POSITIVE.search(t):
+        found.add(ASK_YES)
+    return UNCLEAR if len(found) > 1 else next(iter(found), None)
+
+
+def roy_ask_verdicts(words, people):
+    """{tenant id: ASK_YES | ASK_NO | UNCLEAR} for everyone one reply of Roy's settles on a check list.
+
+    `people` are {"id", "fields": {L["name"]: name}} so the viewings name matcher reads them. Each line
+    or sentence is read on its own, and a line naming several people is cut at its commas ("Andy yes,
+    Peter no"). With no commas the verdict sits after each name ("Andy yes Peter no") unless the line
+    opens with one ("Yes Andy no Peter"). "All yes except Peter" is a yes for everyone not named and a
+    no for Peter; a name read two ways, or named with nothing readable, is UNCLEAR."""
+    text = str(words or "").replace("\u2019", "'")
+
+    def named(seg):
+        return [p for p in people if name_spans(seg, p, people)]
+
+    direct, blanket, pieces = {}, [], []
+    for seg in (x for x in ASK_SPLIT.split(text) if x and x.strip()):
+        m = ASK_EXCEPT.search(seg)
+        head = seg[:m.start()] if m else seg
+        if ASK_ALL.search(head) and not named(head) and ask_reading(head):
+            blanket.append((ask_reading(head), named(seg[m.end():]) if m else []))
+            continue
+        pieces += [x for x in seg.split(",") if x.strip()] if len(named(seg)) > 1 else [seg]
+    for seg in pieces:
+        who = named(seg)
+        if len(who) == 1:
+            direct.setdefault(who[0]["id"], set()).add(ask_reading(seg) or UNCLEAR)
+            continue
+        marks = sorted((a, b, p["id"]) for p in who for a, b in name_spans(seg, p, people))
+        before = bool(marks) and bool(ask_reading(seg[:marks[0][0]]))
+        whole = ask_reading(seg)
+        for i, (a, b, pid) in enumerate(marks):
+            part = (seg[(marks[i - 1][1] if i else 0):a] if before
+                    else seg[b:(marks[i + 1][0] if i + 1 < len(marks) else len(seg))])
+            direct.setdefault(pid, set()).add(ask_reading(part) or whole or UNCLEAR)
+    out = {pid: (rs.pop() if len(rs) == 1 else UNCLEAR) for pid, rs in direct.items()}
+    if blanket:
+        readings = {r for r, _ in blanket}
+        rest = readings.pop() if len(readings) == 1 and not readings & {UNCLEAR} else UNCLEAR
+        excepted = {p["id"] for _, ex in blanket for p in ex}
+        for p in people:
+            if p["id"] not in out:
+                out[p["id"]] = ({ASK_YES: ASK_NO, ASK_NO: ASK_YES}.get(rest, UNCLEAR) if p["id"] in excepted else rest)
+    return out
+
+
+def given_away(task):
+    """Kevin's words when he rejected an AI task because someone else has it (30 Sep 2026, TENANT ROOMS:
+    "Roy is dealing with this directly"), or "" for any other task."""
+    if sel(task["fields"].get(TK["outcome"])) != "Rejected":
+        return ""
+    return str(task["fields"].get(TK["feedback"]) or "").strip() or "rejected"
 
 
 def heard_day(lead):
@@ -1390,7 +1548,7 @@ def monitor(data, day, opens, run_notes):
                                ("referral", "Tenant referral email", REFERRAL_EVERY_DAYS)):
         tasks = chain_tasks(data, kind)
         last = max((created_day(t) for t in tasks), default=None)
-        bad, warn = [], []
+        bad, warn, info = [], [], []
         for town in towns:
             if kind == "mailout":
                 # The chain's own clock: is some referrer near this town on a card, or emailed lately?
@@ -1403,8 +1561,21 @@ def monitor(data, day, opens, run_notes):
                 if near and not told:
                     bad.append(f"{town}: no referrer near it emailed in {every + 2} days")
                 continue
+            nothing_to_send = False
+            if kind == "referral":
+                # Roy's say (Kevin, 30 Sep 2026): a list he has not answered is an absence; when he has
+                # said to leave everyone alone there is nothing to send, and that is not a gap.
+                g = referral_gate(data, town, day)
+                quiet = [c for c in g["open"] if (day - (created_day(c) or day)).days > 3
+                         and not roy_lines(c["fields"].get(TK["notes"]))]
+                if quiet:
+                    warn.append(f"{town}: Roy has not said which tenants to email (asked {fmt_day(created_day(quiet[0]))})")
+                says = [sel(t["fields"].get(TN["referralAsk"])) for t in g["candidates"]]
+                info.append(f"{town}: Roy says ask {says.count(ASK_YES)}, leave {says.count(ASK_NO)} alone, "
+                            f"{len(g['unanswered'])} not answered")
+                nothing_to_send = bool(g["open"]) or (not says.count(ASK_YES) and not g["unanswered"])
             newest = max((created_day(t) for t in chain_tasks(data, kind, town)), default=None)
-            if not newest or (day - newest).days > every + 2:
+            if (not newest or (day - newest).days > every + 2) and not nothing_to_send:
                 (warn if kind == "referral" else bad).append(f"{town}: none in {every + 2} days")
         waiting = [t for t in tasks if is_open(t) and (day - created_day(t)).days > 3]
         if waiting:
@@ -1415,7 +1586,7 @@ def monitor(data, day, opens, run_notes):
             if closed:
                 warn.append(f"{len(closed)} closed without sending in the last {every} days")
         state = "fail" if bad else "warn" if warn else ("ok" if last else "idle")
-        step(kind, label, last, state, "; ".join(bad + warn) or (f"last {fmt_day(last)}" if last else "none yet"))
+        step(kind, label, last, state, "; ".join(bad + warn + info) or (f"last {fmt_day(last)}" if last else "none yet"))
 
     unsent, partial = [], []
     for kind in EMAIL_KINDS:
@@ -1473,8 +1644,9 @@ def monitor(data, day, opens, run_notes):
     # Roy's replies: an unreadable line, and a list he has said nothing on for a week, are absences.
     unclear = [v for v in ((data.get("royState") or {}).get("unclear") or {}).values()
                if (day - (parse_day(v.get("first")) or day)).days < ROY_UNCLEAR_SHOW_DAYS]
-    said = [when for t in roy for _, when, _ in roy_lines(t["fields"].get(TK["notes"]))]
-    quiet = [t for t in roy if is_open(t) and (day - (created_day(t) or day)).days > 7
+    lists = roy + chain_tasks(data, "refcheck")
+    said = [when for t in lists for _, when, _ in roy_lines(t["fields"].get(TK["notes"]))]
+    quiet = [t for t in lists if is_open(t) and (day - (created_day(t) or day)).days > 7
              and not roy_lines(t["fields"].get(TK["notes"]))]
     booked = [l for l in data["leads"] if sel(l["fields"].get(L["stage"])) == BOOKED]
     msgs = []
@@ -1499,12 +1671,24 @@ def monitor(data, day, opens, run_notes):
                                                        for r in blocked)
             if blocked else "Every house with an open room holds what it needs." if rb else "No open room to check.")
     rtasks = chain_tasks(data, "rooms")
-    unowned = [r["property"] for pid, r in rb.items() if r["blockers"]
+    # A house whose last AI task Kevin rejected because someone else has it (30 Sep 2026: "Roy is
+    # dealing with this directly") is owned, by that person: named here, never "nobody".
+    elsewhere = {}
+    for pid, r in rb.items():
+        mine = [t for t in rtasks if pid in chain_ids(t)]
+        newest = max(mine, key=lambda t: t.get("createdTime") or "", default=None)
+        if r["blockers"] and newest and not is_open(newest) and given_away(newest):
+            elsewhere[r["property"]] = given_away(newest).rstrip(".")
+    unowned = [r["property"] for pid, r in rb.items() if r["blockers"] and r["property"] not in elsewhere
                and not any(is_open(t) and pid in chain_ids(t) for t in rtasks)]
     if unowned:
         note = f"Nobody is working on {', '.join(unowned)}. " + note
     elif blocked:
-        note += ". AI Property Administration holds a task for each house"
+        ai = [r["property"] for r in blocked if r["property"] not in elsewhere]
+        if ai:
+            note += f". AI Property Administration holds a task for {', '.join(ai)}"
+        if elsewhere:
+            note += ". Not the AI's: " + "; ".join(f"{h} (Kevin: {why})" for h, why in elsewhere.items())
     if stuck:
         note = f"{len(stuck)} securing a room for 14+ days while its house is not legal to move into. " + note
     if renew:
@@ -1730,7 +1914,7 @@ class Writer:
             ad = module("ad")
             out = call_in_process(ad.cmd_handover, argparse.Namespace(
                 task=tid, to=ad.ROY_EMAIL,
-                reason="standing handover: tenant-finding adverts, viewings and move-in checks (Kevin, 25 Sep 2026)"))
+                reason=task.get("reason") or "standing handover: tenant-finding adverts, viewings and move-in checks (Kevin, 25 Sep 2026)"))
             if out.get("NOT EMAILED"):
                 raise RuntimeError(f"{task['name']} is Roy's but was NOT emailed to him: {out}")
         return tid
@@ -1967,12 +2151,44 @@ def run(data, day, w, only=None, replies=None):
                 if not named or doubts:
                     unclear[key] = {"first": day.isoformat(), "task": str(t["fields"].get(TK["name"]) or t["id"]),
                                     "said": words[:200], "people": doubts}
+        # His answers on a referral check list (Kevin, 30 Sep 2026): ask this tenant, or leave them alone.
+        tenants = {x["id"]: x for x in data["tenants"]}
+        said, closed = {}, []
+        for t in chain_tasks(data, "refcheck"):
+            ids = [i for i in sorted(chain_ids(t)) if i in tenants]
+            people = [{"id": i, "fields": {L["name"]: tenants[i]["fields"].get(TN["name"])}} for i in ids]
+            for header, when, words in roy_lines(t["fields"].get(TK["notes"])):
+                key = f"{t['id']}|{header}"
+                if key in read:
+                    continue
+                read[key] = day.isoformat()
+                verdicts = roy_ask_verdicts(words, people)
+                doubts = [str(p["fields"][L["name"]] or p["id"]) for p in people if verdicts.get(p["id"]) == UNCLEAR]
+                clear = {i: v for i, v in verdicts.items() if v in (ASK_YES, ASK_NO)}
+                for i, v in clear.items():
+                    if sel(tenants[i]["fields"].get(TN["referralAsk"])) != v:
+                        said[i] = {TN["referralAsk"]: v}
+                        tenants[i]["fields"][TN["referralAsk"]] = v
+                if not clear or doubts:
+                    unclear[key] = {"first": day.isoformat(), "task": str(t["fields"].get(TK["name"]) or t["id"]),
+                                    "said": words[:200], "people": doubts}
+            answers = [sel(tenants[i]["fields"].get(TN["referralAsk"])) for i in ids]
+            if is_open(t) and ids and all(answers):
+                notes_text = str(t["fields"].get(TK["notes"]) or "").rstrip()
+                done_note = (f"{notes_text}\n\n[{fmt_day(day)} — tenant-leads] Roy has answered for all {len(ids)}: "
+                             f"{answers.count(ASK_YES)} to ask, {answers.count(ASK_NO)} to leave alone.")
+                closed.append({"id": t["id"], "fields": {TK["status"]: "Completed", TK["notes"]: done_note}})
+                t["fields"].update({TK["status"]: "Completed", TK["notes"]: done_note})
         for k in [k for k, v in unclear.items() if (day - (parse_day(v.get("first")) or day)).days > 30]:
             del unclear[k]
         w.save_roy_state(state)
         data["royState"] = state
         w.patch_leads([{"id": i, "fields": f} for i, f in rows.items()])
-        return f"{len(rows)} lead(s) moved by Roy's replies" if rows else ""
+        w.patch(T_TENANTS, [{"id": i, "fields": f} for i, f in said.items()], "tenant(s) Roy answered for")
+        w.patch(T_TASKS, closed, "referral check(s) closed")
+        out = ([f"{len(rows)} lead(s) moved by Roy's replies"] if rows else []) + \
+              ([f"Roy answered for {len(said)} tenant(s)"] if said else [])
+        return ", ".join(out)
 
     def do_screen():
         if not scope_ok:
@@ -2045,11 +2261,23 @@ def run(data, day, w, only=None, replies=None):
             return HELD
         done = []
         for town, os_ in towns.items():
-            if due_again(chain_tasks(data, "referral", town), REFERRAL_EVERY_DAYS, day)[0]:
-                card = referral_card(data, town, os_, day)
-                if card:
-                    w.raise_card(card)
-                    done.append(town)
+            if not due_again(chain_tasks(data, "referral", town), REFERRAL_EVERY_DAYS, day)[0]:
+                continue
+            # Roy says who we may email first (Kevin, 30 Sep 2026); the card waits for his answer.
+            gate = referral_gate(data, town, day)
+            if gate["ask"]:
+                t = refcheck_task(data, town, gate["ask"], day)
+                tid = w.to_roy(t)
+                # The monitor reads this run's data: show it the list just sent, not "none sent".
+                data["tasks"].append({"id": tid, "createdTime": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.000Z"),
+                                      "fields": {TK["name"]: t["name"], TK["status"]: "Today", TK["notes"]: t["notes"]}})
+                done.append(f"{town}: Roy asked about {len(gate['ask'])} tenant(s)")
+            if gate["wait"]:
+                continue
+            card = referral_card(data, town, os_, day)
+            if card:
+                w.raise_card(card)
+                done.append(town)
         return ", ".join(done)
 
     def do_viewings():
@@ -2141,6 +2369,10 @@ def run(data, day, w, only=None, replies=None):
                 continue
             mine = [t for t in chain_tasks(data, "rooms") if pid in chain_ids(t)]
             if any(is_open(t) for t in mine) or any((day - (created_day(t) or day)).days < ROOMS_TASK_EVERY_DAYS for t in mine):
+                continue
+            # Kevin rejected the last one because someone else has the house (30 Sep 2026: "Roy is
+            # dealing with this directly"): no fresh AI task. The blockers stay on the monitor daily.
+            if mine and given_away(max(mine, key=lambda t: t.get("createdTime") or "")):
                 continue
             t = rooms_task(pid, r, day)
             w.create_task(t["name"], t["description"], t["notes"])

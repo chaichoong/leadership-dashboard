@@ -13,6 +13,12 @@
 //   * monitor() without the SENT check     -> "an approved card with no SENT stamp is a failure" fails
 //   * keepwarm_leads() without is_legacy() -> "a past applicant is never on an email list" fails
 //   * bonus_row() stamping Run Date again   -> "never stamps Run Date" fails
+// Back-tested (30 Sep 2026, Roy says which tenants get the referral email; a room Kevin gave to Roy):
+//   * referral_recipients() ignoring Roy     -> "the card goes to his yes only" fails
+//   * do_referrals() not waiting for Roy     -> "the card waits for his answer" fails
+//   * do_rooms() ignoring given_away()       -> "a house Kevin gave to Roy gets no fresh AI task" fails
+//   * ask_reading() not stripping refusals   -> reads "Don't ask Alan..." and "Alan isn't happy" fail
+//   * ask_reading() without ASK_UNSURE       -> reads "Alan might be happy to help" fails
 import { describe, it, expect } from 'vitest';
 import { execFileSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
@@ -194,6 +200,7 @@ import inspect
 ad = load_mod("ad", "agent-dispatch.py")
 from agent_email_format import validate_submission_any
 w = world(); o = tl.openings(w, DAY); towns = tl.by_town(o)
+w["tenants"][0]["fields"][TN["referralAsk"]] = "Ask"      # Roy said to ask Alan (Kevin, 30 Sep 2026)
 w["leads"] = [lead("recL1", stage="Qualified", email="p@example.com", lastContacted="2026-07-01"),
               lead("recL2", stage="Qualified", email="legacy@example.com", lastContacted="2026-07-01", legacyRef="tenant-app:2019-01-01 10:00:00")]
 cards = [tl.mailout_cards(w, towns, DAY)[0], tl.mailout_cards(w, {}, DAY)[0],
@@ -314,9 +321,10 @@ fw3 = FakeWriter()
 tl.run(w, DAY + timedelta(days=1), fw3, replies=lambda: [])
 out["third"] = {"roy": [t["kind"] for t in fw3.roy], "leads": [t.get("leadIds") for t in fw3.roy], "stages": stages(fw3)}
 `);
-  it('raises the mail-out and referral cards and hands adverts and viewings to Roy', () => {
-    expect(r.cards.sort()).toEqual(['mailout', 'referral']);
-    expect(r.roy.sort()).toEqual(['adverts', 'viewings']);
+  it('raises the mail-out card, asks Roy which tenants to email, and hands adverts and viewings to Roy', () => {
+    // No referral card on day one: Roy says which tenants to email first (Kevin, 30 Sep 2026).
+    expect(r.cards.sort()).toEqual(['mailout']);
+    expect(r.roy.sort()).toEqual(['adverts', 'refcheck', 'viewings']);
     expect(r.fails).toEqual([]);
   });
   it('screens new sign-ups to Qualified and sends them to Roy with a past applicant to phone', () => {
@@ -871,6 +879,26 @@ w7 = world(); w7["tasks"] = [task("TENANT DOCS: Sam for a room in Haverhill 25 S
     notes="TENANT CHAIN IDS: recS\\n\\n[25 Sep 2026 10:00 — send-email] SENT: mail-out to 1 of 1")]
 fw7 = FakeWriter(); tl.run(w7, DAY, fw7, only="settle", replies=lambda: [])
 out["settled"] = [(p["id"], p["fields"].get(L["lastContacted"])) for p in fw7.patches if p.get("table") == tl.T_LEADS]
+
+# Kevin rejected the AI's task for the house, "Roy is dealing with this directly." (30 Sep 2026): no fresh
+# AI task once the 14 days are up, and the monitor names who has it instead of "nobody".
+for t in w["tasks"]:
+    if t["fields"][TK["name"]].startswith(tl.PREFIXES["rooms"]):
+        t["fields"].update({TK["status"]: "Completed", TK["outcome"]: "Rejected", TK["feedback"]: "Roy is dealing with this directly."})
+        t["createdTime"] = "2026-09-01T08:00:00.000Z"
+fwg = FakeWriter(); madeg = []
+fwg.create_task = lambda name, desc, notes="": madeg.append(name) or "recGIVEN"
+tl.run(w, DAY, fwg, only="rooms", replies=lambda: [])
+out["givenAway"] = madeg
+out["roomsGiven"] = next(x for x in tl.monitor(w, DAY, tl.openings(w, DAY), [])["steps"] if x["key"] == "rooms")
+# Control: the same old task closed any other way (not rejected) does get a fresh one.
+for t in w["tasks"]:
+    if t["fields"][TK["name"]].startswith(tl.PREFIXES["rooms"]):
+        t["fields"].update({TK["outcome"]: "Approved as-is", TK["feedback"]: ""})
+fwc = FakeWriter(); madec = []
+fwc.create_task = lambda name, desc, notes="": madec.append(name) or "recCTRL"
+tl.run(w, DAY, fwc, only="rooms", replies=lambda: [])
+out["notGiven"] = len(madec)
 `);
   it("Roy's 'wants the room' or 'taking it' moves a person to Securing room; 'wants a room' does not", () => {
     expect(r.secured).toEqual({ recS: 'Securing room', recP: 'Securing room' });
@@ -913,7 +941,7 @@ out["settled"] = [(p["id"], p["fields"].get(L["lastContacted"])) for p in fw7.pa
     expect(r.roomsDesc).toMatch(/gas safety certificate expired 8 Sep 2026/);
     expect(r.roomsDesc).toMatch(/Search every record first/);
     expect(r.roomsAgain).toEqual([]);
-    expect(r.rooms.note).toMatch(/AI Property Administration holds a task for each house/);
+    expect(r.rooms.note).toMatch(/AI Property Administration holds a task for 5 Dalham Place/);
   });
   it('the monitor: amber while a house is not legal, red once someone has waited 14 days on it or has no move-in task', () => {
     expect(r.rooms.state).toBe('warn');
@@ -935,6 +963,130 @@ out["settled"] = [(p["id"], p["fields"].get(L["lastContacted"])) for p in fw7.pa
   });
   it('a sent documents email counts as contact with that person', () => {
     expect(r.settled).toEqual([['recS', '2026-09-25']]);
+  });
+  it("a house Kevin gave to Roy gets no fresh AI task, and the monitor names Roy instead of 'nobody'", () => {
+    expect(r.givenAway).toEqual([]);
+    expect(r.roomsGiven.state).toBe('warn');
+    expect(r.roomsGiven.note).not.toMatch(/Nobody is working/);
+    expect(r.roomsGiven.note).toMatch(/Not the AI's: 5 Dalham Place \(Kevin: Roy is dealing with this directly\)/);
+    expect(r.notGiven).toBe(1);
+  });
+});
+
+describe("Roy says which tenants get the referral email (Kevin, 30 Sep 2026)", () => {
+  const r = py(`
+def world2():
+    w = world()
+    w["tenants"].append(rec("recN5", {TN["name"]: "Peter Brown", TN["status"]: "Active", TN["rentType"]: "Universal Credit",
+                                       TN["dob"]: "1965-01-01", TN["email"]: "peter@example.com", TN["unit"]: ["recU1"]}))
+    return w
+w = world2()
+fw = FakeWriter(); tl.run(w, DAY, fw, only="referral", replies=lambda: [])
+out["first"] = {"cards": [c["kind"] for c in fw.cards], "roy": [(t["kind"], t["notes"], t["reason"]) for t in fw.roy],
+                "desc": fw.roy[0]["description"] if fw.roy else "", "name": fw.roy[0]["name"] if fw.roy else ""}
+chk = task(fw.roy[0]["name"], status="Today", notes=fw.roy[0]["notes"])
+w["tasks"] = [chk]
+fw2 = FakeWriter(); tl.run(w, DAY + timedelta(days=1), fw2, only="referral", replies=lambda: [])
+out["waiting"] = [len(fw2.cards), len(fw2.roy)]
+out["quiet"] = next(x for x in tl.monitor(w, DAY + timedelta(days=5), tl.openings(w, DAY), [])["steps"] if x["key"] == "referral")
+# Roy answers on his list: the tenants are set, the list closes, and the card goes to his yes only.
+chk["fields"][TK["notes"]] += "\\n\\n[26 Sep 2026 10:00 Roy Lavin via his assistant, recREQ5] Alan yes, Peter no"
+fw3 = FakeWriter(); tl.run(w, DAY + timedelta(days=1), fw3, only="roy", replies=lambda: [])
+out["said"] = sorted([p["id"], p["fields"].get(TN["referralAsk"])] for p in fw3.patches if p["table"] == tl.T_TENANTS)
+out["closed"] = [[p["fields"].get(TK["status"]), p["fields"].get(TK["notes"], "").splitlines()[-1]] for p in fw3.patches if p["table"] == tl.T_TASKS]
+fw4 = FakeWriter(); tl.run(w, DAY + timedelta(days=1), fw4, only="referral", replies=lambda: [])
+out["card"] = [[c["kind"], sorted(c["emails"]), c["description"]] for c in fw4.cards]
+out["after"] = next(x for x in tl.monitor(w, DAY + timedelta(days=1), tl.openings(w, DAY), [])["steps"] if x["key"] == "referral")["note"]
+# The same line read again (a reload) changes nothing: each line is read once.
+fw5 = FakeWriter(); fw5.rs = fw3.rs; tl.run(w, DAY + timedelta(days=2), fw5, only="roy", replies=lambda: [])
+out["reread"] = [p for p in fw5.patches if p["table"] == tl.T_TENANTS]
+# An unclear answer moves nobody and shows on the monitor for a person to read.
+w6 = world2(); c6 = task(out["first"]["name"], status="Today", notes=fw.roy[0]["notes"]
+                         + "\\n\\n[26 Sep 2026 10:00 Roy Lavin via his assistant, recREQ6] Not sure about Alan, will check")
+w6["tasks"] = [c6]
+fw6 = FakeWriter(); tl.run(w6, DAY + timedelta(days=1), fw6, only="roy", replies=lambda: [])
+w6["royState"] = fw6.rs
+out["unclearPatches"] = [p for p in fw6.patches if p["table"] in (tl.T_TENANTS, tl.T_TASKS)]
+out["unclearRoy"] = next(x for x in tl.monitor(w6, DAY + timedelta(days=1), tl.openings(w6, DAY), [])["steps"] if x["key"] == "roy")
+# Roy silent past the wait: the card goes to whoever he said yes to so far (nobody here), and the
+# monitor says he has not answered, never "none sent" as if the chain had stalled.
+w7 = world2(); w7["tasks"] = [task(out["first"]["name"], status="Today", notes=fw.roy[0]["notes"])]
+fw7 = FakeWriter(); tl.run(w7, DAY + timedelta(days=8), fw7, only="referral", replies=lambda: [])
+out["silent"] = [len(fw7.cards), len(fw7.roy)]
+out["silentMon"] = next(x for x in tl.monitor(w7, DAY + timedelta(days=8), tl.openings(w7, DAY), [])["steps"] if x["key"] == "referral")
+# One tenant already a yes, a new one never asked: Roy is asked about the new one and the card waits for him.
+w8 = world2(); w8["tenants"][0]["fields"][TN["referralAsk"]] = "Ask"
+fw8 = FakeWriter(); tl.run(w8, DAY, fw8, only="referral", replies=lambda: [])
+out["mixed"] = [len(fw8.cards), [t["notes"] for t in fw8.roy]]
+
+people = [{"id": "a", "fields": {L["name"]: "Alan Tenant"}}, {"id": "p", "fields": {L["name"]: "Peter Brown"}},
+          {"id": "w", "fields": {L["name"]: "Walter Fenwick"}}]
+said = ["Alan yes, Peter no", "Yes Alan, no Peter", "Alan yes Peter no", "All yes except Peter",
+        "All fine apart from Peter, don't ask him", "Don't ask Alan. Peter is happy to help", "Not sure about Alan",
+        "Alan isn't happy with us", "Peter no problem", "Thanks, will get back to you", "Alan yes.\\nAlan no",
+        "Walter - no, he's in arrears", "Alan and Peter yes, Walter no", "Alan might be happy to help"]
+out["reads"] = {k: tl.roy_ask_verdicts(k, people) for k in said}
+`);
+  it('asks Roy first, naming each tenant and where they live, and raises no email card', () => {
+    expect(r.first.cards).toEqual([]);
+    expect(r.first.roy).toHaveLength(1);
+    const [kind, notes, reason] = r.first.roy[0];
+    expect(kind).toBe('refcheck');
+    expect(notes).toBe('TENANT CHAIN IDS: recN1,recN5');
+    expect(reason).toMatch(/Kevin, 30 Sep 2026/);
+    expect(r.first.name).toBe('TENANT REFERRAL CHECK: Haverhill tenants to ask 25 Sep 2026');
+    expect(r.first.desc).toMatch(/1\. Alan Tenant, Room 1, 5 Dalham Place/);
+    expect(r.first.desc).toMatch(/2\. Peter Brown, Room 1, 5 Dalham Place/);
+    // Under 35, not on UC, or opted out: never on Roy's list.
+    expect(r.first.desc).not.toMatch(/Young Tenant|New Person|Stopped Tenant/);
+    expect(r.first.desc).toMatch(/how happy they are with us/);
+  });
+  it('waits while Roy has the list, and says so when he has been quiet 3 days', () => {
+    expect(r.waiting).toEqual([0, 0]);
+    expect(r.quiet.state).toBe('warn');
+    expect(r.quiet.note).toMatch(/Roy has not said which tenants to email \(asked 25 Sep 2026\)/);
+    expect(r.quiet.note).not.toMatch(/none in/);
+  });
+  it("Roy's answer sets each tenant, closes his list, and the card goes to his yes only", () => {
+    expect(r.said).toEqual([['recN1', 'Ask'], ['recN5', 'Do not ask']]);
+    expect(r.closed).toEqual([['Completed', '[26 Sep 2026 — tenant-leads] Roy has answered for all 2: 1 to ask, 1 to leave alone.']]);
+    expect(r.card).toHaveLength(1);
+    expect(r.card[0][0]).toBe('referral');
+    expect(r.card[0][1]).toEqual(['alan@example.com']);
+    expect(r.card[0][2]).toMatch(/Roy said to ask: Alan Tenant\.$/);
+    expect(r.after).toMatch(/Haverhill: Roy says ask 1, leave 1 alone, 0 not answered/);
+    expect(r.reread).toEqual([]);
+  });
+  it('an unclear answer moves nobody, keeps the list open, and shows on the monitor', () => {
+    expect(r.unclearPatches).toEqual([]);
+    expect(r.unclearRoy.state).toBe('warn');
+    expect(r.unclearRoy.note).toMatch(/moved nobody .*TENANT REFERRAL CHECK/);
+  });
+  it('a tenant never asked goes on a new list for Roy, and the card waits for his answer', () => {
+    expect(r.mixed).toEqual([0, ['TENANT CHAIN IDS: recN5']]);
+  });
+  it('Roy silent past a week: no card while he has said yes to nobody, and the monitor names the silence', () => {
+    expect(r.silent).toEqual([0, 0]);
+    expect(r.silentMon.state).toBe('warn');
+    expect(r.silentMon.note).toMatch(/Roy has not said which tenants to email/);
+  });
+  it.each([
+    ['Alan yes, Peter no', { a: 'Ask', p: 'Do not ask' }],
+    ['Yes Alan, no Peter', { a: 'Ask', p: 'Do not ask' }],
+    ['Alan yes Peter no', { a: 'Ask', p: 'Do not ask' }],
+    ['All yes except Peter', { a: 'Ask', p: 'Do not ask', w: 'Ask' }],
+    ["All fine apart from Peter, don't ask him", { a: 'Ask', p: 'Do not ask', w: 'Ask' }],
+    ["Don't ask Alan. Peter is happy to help", { a: 'Do not ask', p: 'Ask' }],
+    ['Not sure about Alan', { a: 'unclear' }],
+    ["Alan isn't happy with us", { a: 'Do not ask' }],
+    ['Peter no problem', { p: 'Ask' }],
+    ['Thanks, will get back to you', {}],
+    ['Alan yes.\nAlan no', { a: 'unclear' }],
+    ["Walter - no, he's in arrears", { w: 'Do not ask' }],
+    ['Alan and Peter yes, Walter no', { a: 'Ask', p: 'Ask', w: 'Do not ask' }],
+    ['Alan might be happy to help', { a: 'unclear' }],
+  ])('reads "%s"', (said, want) => {
+    expect(r.reads[said]).toEqual(want);
   });
 });
 
