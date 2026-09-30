@@ -898,7 +898,7 @@ async function runSteps(page, steps, allowSubmit, confirm) {
         break;
       case 'click':
       case 'submit':
-        await page.click(s.selector, { timeout: 20000 });
+        await page.click(s.selector, { timeout: Math.min(Number(s.timeout) || 20000, 60000) });
         if (s.do === 'submit') submitted = true;
         break;
       case 'upload': {
@@ -997,8 +997,12 @@ async function runSteps(page, steps, allowSubmit, confirm) {
 // a plan with a submit or upload step is refused, and nothing runs after the
 // handover. One unbroken session, so a TopCashback click-through tracks.
 const HANDOVER_DIR = process.env.AGENT_HANDOVER_DIR || path.join(os.homedir(), 'knowledge-os', 'handover');
-const HANDOVER_WAIT_MS = 45 * 60 * 1000;
 const HANDOVER_STEPS = new Set(['goto', 'fill', 'select', 'check', 'click', 'press', 'wait', 'kevin']);
+// Enter can submit a form, so a handover presses only keys that move or tick.
+const HANDOVER_KEYS = new Set(['Tab', 'Shift+Tab', 'Space', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight']);
+// The final click is always Kevin's (review, 30 Sep 2026: nothing in code stopped a plan's
+// click landing on "Buy policy"). A click, press or tick on anything worded like this refuses.
+const FINAL_ACTION_RE = /\b(buy|purchase|pay|payment|place order|submit|check ?out|declare|declaration|i confirm|i agree|i accept|sign)\b/i;
 
 function handoverPlanPath(task) { return path.join(HANDOVER_DIR, task + '.json'); }
 
@@ -1008,6 +1012,9 @@ function assertHandoverPlan(plan) {
   plan.steps.forEach((s, i) => {
     const d = s && s.do;
     if (!HANDOVER_STEPS.has(d)) die(`step ${i + 1} is "${d}". A handover plan never submits, pays or uploads: the last click is Kevin's.`);
+    if (d === 'press' && !HANDOVER_KEYS.has(String(s.key || ''))) {
+      die(`step ${i + 1} presses "${s.key}". A handover presses only Tab, Space and the arrow keys: Enter can submit a form.`);
+    }
     if (d === 'kevin' && (!String(s.say || '').trim() || !(s.untilUrl || s.untilSelector || s.untilText))) {
       die(`step ${i + 1} (kevin) needs "say" and one of untilUrl, untilSelector, untilText: what he does and how the robot knows he has.`);
     }
@@ -1038,21 +1045,55 @@ async function turnBanner(page, text) {
   }, text).catch(() => {});   // a page that blocks scripts still gets the window; the terminal says it too
 }
 
+// What a click, press or tick would act on, in words: its selector, its own text, value
+// and label, and for a form control the label pointing at it. Throws (the step is then
+// stuck and the window his) on a final action or on a target it cannot read.
+async function assertNotFinalAction(page, s) {
+  // Tab and the arrow keys only move between fields: nothing is pressed.
+  if (s.do === 'press' && s.key !== 'Space') return;
+  if (FINAL_ACTION_RE.test(String(s.selector || ''))) throw new Error(`refused: "${s.selector}" looks like the final action, which is Kevin's`);
+  let words;
+  try {
+    words = await page.locator(s.selector).first().evaluate(el => {
+      // Only a target that ACTS when pressed is read. A text box is not: its question
+      // ("What year did you buy it?") is not a Buy button (found on AXA, 30 Sep 2026).
+      const type = String(el.type || '').toLowerCase();
+      const role = String(el.getAttribute('role') || '').toLowerCase();
+      const acts = ['BUTTON', 'A', 'LABEL', 'SUMMARY'].includes(el.tagName)
+        || (el.tagName === 'INPUT' && ['submit', 'button', 'image', 'reset', 'checkbox', 'radio'].includes(type))
+        || ['button', 'link', 'checkbox', 'radio', 'menuitem', 'tab', 'switch'].includes(role)
+        || typeof el.onclick === 'function';
+      if (!acts) return '';
+      const lab = el.id ? Array.from(document.querySelectorAll('label[for="' + CSS.escape(el.id) + '"]')).map(l => l.textContent).join(' ') : '';
+      return [el.innerText || el.textContent || '', el.value || '', el.getAttribute('aria-label') || '', el.getAttribute('title') || '', lab].join(' ').slice(0, 400);
+    }, null, { timeout: Math.min(Number(s.timeout) || 20000, 60000) });
+  } catch (e) {
+    throw new Error(`could not read what "${s.selector}" is, so it was not touched: ${String(e.message || e).slice(0, 120)}`);
+  }
+  if (FINAL_ACTION_RE.test(words)) throw new Error(`refused: "${words.trim().slice(0, 60)}" looks like the final action, which is Kevin's`);
+}
+
 // Waits while Kevin does his own step (a sign-in). Reads only where the page is
 // and whether an element or words are there: never a field's value.
-async function waitForKevin(page, s, maxMs) {
+async function waitForKevin(page, s, maxMs, onTick) {
   const deadline = Date.now() + maxMs;
   while (Date.now() < deadline) {
     if (page.isClosed()) return false;
+    if (onTick) onTick();
     try {
-      if (s.untilUrl && page.url().includes(s.untilUrl)) return true;
-      if (s.untilSelector && await page.locator(s.untilSelector).first().isVisible()) return true;
-      if (s.untilText && (await domText(page, 20000)).includes(s.untilText)) return true;
+      const seen = (s.untilUrl && page.url().includes(s.untilUrl))
+        || (s.untilSelector && await page.locator(s.untilSelector).first().isVisible())
+        || (s.untilText && (await domText(page, 20000)).includes(s.untilText));
+      // Never while a password box is still on the page: a sign-in page can carry the
+      // same words, and the robot must not move on while he is still typing (review).
+      if (seen && Number(await passwordFieldCount(page)) === 0) return true;
     } catch { /* mid-navigation: look again */ }
     await new Promise(r => setTimeout(r, 1000));
   }
   return false;
 }
+
+const FILLING = 'The robot is filling this in for you: hands off until this bar says Your turn.';
 
 // Runs the plan up to Kevin's turn. A step that fails does not throw: the window
 // stays his, with the step named, so he can finish by hand.
@@ -1067,14 +1108,17 @@ async function runHandover(page, plan, opts = {}) {
           await page.goto(s.goto, { waitUntil: 'domcontentloaded', timeout: 45000 });
         }
         await turnBanner(page, 'Your turn: ' + s.say + ' The robot carries on when you have.');
-        const ok = await waitForKevin(page, s, opts.kevinMs || Math.min(Number(s.minutes) || 10, 20) * 60 * 1000);
+        const ok = await waitForKevin(page, s, opts.kevinMs || Math.min(Number(s.minutes) || 10, 20) * 60 * 1000, opts.onTick);
         if (!ok) throw new Error('not done in time: ' + s.say);
-        await turnBanner(page, 'Thanks. The robot is filling the rest in: hands off until it says your turn.');
         done.push({ do: 'kevin', executed: true, say: s.say });
+        await turnBanner(page, FILLING);
         continue;
       }
+      if (s.do === 'click' || s.do === 'press' || s.do === 'check') await assertNotFinalAction(page, s);
       const r = await runSteps(page, [s], false, null);
       done.push(...r.done);
+      if (opts.onTick) opts.onTick();
+      await turnBanner(page, FILLING);                 // a new page drops the bar: put it back
     } catch (e) {
       return { done, stuck: { step: i + 1, do: s.do, error: String((e && e.message) || e).slice(0, 300) } };
     }
@@ -1083,12 +1127,15 @@ async function runHandover(page, plan, opts = {}) {
 }
 
 // The window is his until he closes it (the tab, the window or Chrome itself).
-async function waitForWindowClose(ctx, maxMs) {
-  const deadline = Date.now() + maxMs;
+// Never closes it on him (review: a 45-minute cut-off could land mid-payment). capMs is
+// for tests only; onTick keeps the robots' hold fresh while the window is his.
+async function waitForWindowClose(ctx, capMs, onTick) {
+  const deadline = capMs ? Date.now() + capMs : Infinity;
   let closed = false;
   ctx.once('close', () => { closed = true; });
   while (!closed && Date.now() < deadline) {
     if (!ctx.pages().length) break;
+    if (onTick) onTick();
     await new Promise(r => setTimeout(r, 1500));
   }
 }
@@ -1464,17 +1511,22 @@ async function main() {
     // The robot's own runs wait while the window is his (their launch would fight it).
     takeSigninHold(dir);
     process.on('exit', () => releaseSigninHold(dir));
+    // A robot step that passed its last hold check a moment ago launches within a second
+    // or two; let it show before this window looks for the profile (as `login` does).
+    await new Promise(r => setTimeout(r, Number(process.env.AGENT_HANDOVER_PAUSE_MS) || 3000));
+    const tick = () => takeSigninHold(dir);                          // the hold stays fresh while it is his
     const headed = !process.env.AGENT_HANDOVER_HEADLESS;          // tests only
     let res;
     try {
       res = await withPage(profile, headed, async (page, ctx) => {
-        const r = await runHandover(page, plan);
+        await turnBanner(page, FILLING);
+        const r = await runHandover(page, plan, { onTick: tick });
         const png = await shoot(page, path.join(HANDOVER_DIR, 'shots', `${task}-${Date.now()}.png`)).catch(() => null);
         await turnBanner(page, r.stuck
           ? `The robot got stuck at step ${r.stuck.step}. You can finish by hand, or close this window.`
           : `Your turn: ${plan.why}. Close this window when you have finished.`);
         console.log(JSON.stringify({ phase: 'your-turn', task, stuck: r.stuck, screenshot: png }));
-        await waitForWindowClose(ctx, Number(process.env.AGENT_HANDOVER_WAIT_MS) || HANDOVER_WAIT_MS);
+        await waitForWindowClose(ctx, Number(process.env.AGENT_HANDOVER_WAIT_MS) || 0, tick);
         return Object.assign(r, { screenshot: png });
       });
     } finally {
@@ -1555,4 +1607,4 @@ module.exports = { hostAllowed, pickLinks, runSteps, assertNotCredential, assert
                    assertUploadable, assertConfirmable, UPLOAD_DIR, UPLOAD_EXTENSIONS, persistSessionCookies,
                    signinHoldActive, takeSigninHold, releaseSigninHold, waitForSigninHold, HOLD_MAX_MS, isBotCheck,
                    profileProcs, plainWindowOpen, pickOption, settleBotCheck, withPage, lastKeptCount: () => lastKept, onSigninPage,
-                   assertHandoverPlan, fillTokens, runHandover, handoverPlanPath, HANDOVER_DIR };
+                   assertHandoverPlan, fillTokens, runHandover, handoverPlanPath, HANDOVER_DIR, waitForWindowClose, FINAL_ACTION_RE };

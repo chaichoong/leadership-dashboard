@@ -621,6 +621,8 @@ on runTurn(taskId)
 	try
 		if finished then
 			shWait("/usr/bin/python3 scripts/agent-dispatch.py unblock " & quoted form of taskId & " --evidence " & quoted form of ("Kevin finished his turn in the robot's window (" & theWhy & "), confirmed in the Robot sign-in app."), "Telling the robot you have finished…")
+			-- Retire the plan, so the button goes and a later wall on this task cannot bring it back (review).
+			sh("mkdir -p /Users/kevinbrittain/knowledge-os/handover/done && mv " & quoted form of planFile & " " & quoted form of ("/Users/kevinbrittain/knowledge-os/handover/done/" & taskId & "-" & (do shell script "date +%Y%m%d-%H%M") & ".json"))
 			display notification "Done. The robot checks the receipt and closes the task." with title "Your turn"
 		else
 			shWait("/usr/bin/python3 scripts/agent-dispatch.py annotate " & quoted form of taskId & " --note " & quoted form of "Your turn window closed without Kevin finishing. The task stays his, and the Your turn button stays on the AI Agents page.", "")

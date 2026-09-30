@@ -6454,9 +6454,13 @@ HANDOVER_DIR = os.environ.get("AGENT_HANDOVER_DIR") or os.path.expanduser("~/kno
 TURN_TASK_RE = re.compile(r"^rec[A-Za-z0-9]{14}$")
 
 
-def handover_ready(task_id, b):
-    """True when a KEVIN wall on TASK_ID has its handover plan on file."""
-    return (b.get("kind") == "KEVIN" and bool(TURN_TASK_RE.match(task_id or ""))
+def handover_ready(task_id, b, outcome=""):
+    """True when Kevin has APPROVED the card and its KEVIN wall has a handover plan
+    on file. The wall opens at submit, before he has seen the card, so a plan alone
+    is not a turn (review, 30 Sep 2026): the button would open a window the
+    handover then refuses as unapproved."""
+    return (b.get("kind") == "KEVIN" and str(outcome or "").startswith("Approved")
+            and bool(TURN_TASK_RE.match(task_id or ""))
             and os.path.isfile(os.path.join(HANDOVER_DIR, task_id + ".json")))
 BLOCKER_OPEN_MARK = "BLOCKER OPEN"
 BLOCKER_CLEARED_MARK = "BLOCKER CLEARED"
@@ -6789,7 +6793,7 @@ def blockers_scan(sweep=False, now=None):
                "fix": blocker_fix_text(b), "finding": b["finding"],
                "findingStatus": fstates.get(b["finding"], "") if b["finding"] else "",
                "days": days, "clearsNow": bool(reason)}
-        if handover_ready(t["id"], b):
+        if handover_ready(t["id"], b, t.get("outcome")):
             row["turn"] = True
             row["fix"] = ("Kevin clicks Your turn on the AI Agents page (on his Mac): the robot fills "
                           "everything in and hands him the window for his step.")

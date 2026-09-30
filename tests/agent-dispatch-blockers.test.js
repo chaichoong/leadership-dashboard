@@ -270,20 +270,24 @@ print(json.dumps({"open": {w["task"]: [w["clearsNow"], w["days"], w["findingStat
     const dir = mkdtempSync(tmpdir() + '/od-handover-');
     writeFileSync(dir + '/recPYIC5nn7v2bh8e.json', '{"why": "answer the declarations and pay", "steps": [{"do": "click", "selector": "#x"}]}');
     writeFileSync(dir + '/recGO5pvoBxY8Iy6p.json', '{}');
+    writeFileSync(dir + '/recxYYOXZ2oxMMcyB.json', '{}');
     const r = py(setup + `
 m.HANDOVER_DIR = ${JSON.stringify(dir)}
 # The three worked examples: Chedburgh (a Kevin purchase wall with a plan), the PIB
 # replacement (a Kevin wall, no plan yet), Athertons (a Kevin payment wall, no plan).
-rec("recPYIC5nn7v2bh8e", openline("KEVIN", "purchase", "2026-09-25T09:00:00.000Z"), status="Today", name="INSURANCE: 6 Chedburgh Place")
+rec("recPYIC5nn7v2bh8e", openline("KEVIN", "purchase", "2026-09-25T09:00:00.000Z"), status="Today", name="INSURANCE: 6 Chedburgh Place", outcome="Approved as-is")
+# A plan on file but the card NOT approved yet: the wall opens at submit, so no turn (review).
+rec("recxYYOXZ2oxMMcyB", openline("KEVIN", "purchase", "2026-09-25T09:00:00.000Z"), status="Approval", name="INSURANCE: PIB")
 rec("recbBdOmWJASeTYLs", openline("KEVIN", "identity", "2026-09-25T09:00:00.000Z"), status="Today", name="INSURANCE: PIB replacement")
 rec("recLRHyQ8AG0NUHt0", openline("KEVIN", "payment", "2026-09-25T09:00:00.000Z"), status="Today", name="Athertons")
 rec("recGO5pvoBxY8Iy6p", openline("SIGN-IN", "www.topcashback.co.uk", "2026-09-25T09:00:00.000Z"), status="Today", name="BW Legal")
 res = m.blockers_scan(sweep=False, now=NOW)
 rows = {w["task"]: [w.get("turn", False), w["fix"]] for w in res["open"]}
-print(json.dumps({"rows": rows, "badId": m.handover_ready("../../etc/passwd", {"kind": "KEVIN"})}))`);
+print(json.dumps({"rows": rows, "badId": m.handover_ready("../../etc/passwd", {"kind": "KEVIN"}, "Approved as-is")}))`);
     expect(r.rows.recPYIC5nn7v2bh8e[0]).toBe(true);
     expect(r.rows.recPYIC5nn7v2bh8e[1]).toMatch(/^Kevin clicks Your turn on the AI Agents page/);
     expect(r.rows.recbBdOmWJASeTYLs[0]).toBe(false);
+    expect(r.rows.recxYYOXZ2oxMMcyB[0]).toBe(false);         // plan on file, card not approved yet
     expect(r.rows.recLRHyQ8AG0NUHt0[0]).toBe(false);
     expect(r.rows.recGO5pvoBxY8Iy6p[0]).toBe(false);        // a plan on file, but a sign-in wall is not Kevin's turn
     expect(r.rows.kevin[0]).toBe(false);                    // not a record id: never a path
