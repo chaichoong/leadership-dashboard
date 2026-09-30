@@ -145,10 +145,37 @@ def save_skipped_names(names, path=None):
     os.replace(tmp, path)
 
 
-def skipped_names(path=None):
-    """The last whole-folder scan's unreadable day-numbered clips, or None when no scan has written the list."""
-    try: return json.load(open(path or SKIPPED_NAMES_FILE)).get("names", [])
+# Skipped files Kevin has already ruled on, one per line: "<path as the scan lists it>  # his ruling". Left out of the
+# Publishing page's skipped list (30 Sep 2026: the day-1990 extra take he ruled on 21 Sep still read as unsorted).
+SKIP_RULED_FILE = os.path.expanduser("~/.config/od/content_engine_skip_ruled")
+
+
+def skip_rulings(path=None):
+    """{path: ruling} from SKIP_RULED_FILE; empty when there is none."""
+    out = {}
+    try: lines = open(path or SKIP_RULED_FILE).read().splitlines()
+    except OSError: return out
+    for line in lines:
+        name, _, why = line.partition("#")
+        if name.strip(): out[name.strip()] = why.strip()
+    return out
+
+
+def skipped_names(path=None, ruled=None):
+    """The last whole-folder scan's unreadable day-numbered clips that Kevin has NOT ruled on, or None when no scan has
+    written the list. ruled={} gives the whole list."""
+    try: names = json.load(open(path or SKIPPED_NAMES_FILE)).get("names", [])
     except (OSError, ValueError): return None
+    ruled = skip_rulings() if ruled is None else ruled
+    return [n for n in names if n not in ruled]
+
+
+def skipped_ruled(path=None, ruled=None):
+    """The skipped clips Kevin HAS ruled on (still in the last scan), or None when no scan has written the list."""
+    names = skipped_names(path, ruled={})
+    if names is None: return None
+    ruled = skip_rulings() if ruled is None else ruled
+    return [n for n in names if n in ruled]
 
 
 def parse_clip(name):
@@ -734,7 +761,12 @@ def selftest():
     # 21 Sep 2026: "2066 Full-Real.insv" is listed, not dropped; a second-lens file and a proxy are not day clips
     assert skipped == [os.path.join("2026", "26 Jan 26 - 1 Mar 26", "2066 Full-Real.insv")], skipped
     sf = os.path.join(root, "skipped.json"); save_skipped_names(skipped, sf)
-    assert skipped_names(sf) == skipped and skipped_names(os.path.join(root, "none.json")) is None
+    assert skipped_names(sf, ruled={}) == skipped and skipped_names(os.path.join(root, "none.json")) is None
+    rf = os.path.join(root, "ruled"); open(rf, "w").write("%s  # extra take, Kevin 21 Sep\n\n# a comment line\n" % skipped[0])
+    rl = skip_rulings(rf)
+    assert rl == {skipped[0]: "extra take, Kevin 21 Sep"}, rl
+    assert skipped_names(sf, ruled=rl) == skipped[1:] and skipped_ruled(sf, ruled=rl) == [skipped[0]], "a file Kevin ruled on leaves the list, and is counted"
+    assert skip_rulings(os.path.join(root, "absent")) == {} and skipped_ruled(os.path.join(root, "none.json"), ruled=rl) is None
     _sh.rmtree(root)
     assert parse_clip("notes.txt") is None and parse_clip("2053 Full.insv")[1] < parse_clip("2053 summary.insv")[1], "full sorts before summary"
     _selftest_repair_stale()
