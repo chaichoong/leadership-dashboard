@@ -19,6 +19,11 @@
 //   * do_rooms() ignoring given_away()       -> "a house Kevin gave to Roy gets no fresh AI task" fails
 //   * ask_reading() not stripping refusals   -> reads "Don't ask Alan..." and "Alan isn't happy" fail
 //   * ask_reading() without ASK_UNSURE       -> reads "Alan might be happy to help" fails
+// Back-tested (30 Sep 2026, past applicants emailed; adverts ours):
+//   * pastmail_pool() without the DOB check  -> "emails only past applicants aged 35+ by date of birth" fails
+//   * ... without `e in emailed`             -> "nobody is emailed twice" fails
+//   * ... without `e in held` / `e in ours`  -> "never an opt-out or a tenant" fails
+//   * monitor() not naming a gone advert     -> "gone or unknown is amber and named" fails
 import { describe, it, expect } from 'vitest';
 import { execFileSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
@@ -290,7 +295,7 @@ describe('the daily run', () => {
   const r = py(`
 w = world()
 w["leads"] = [lead("recL1"), lead("recL2", dob="1999-01-01"),
-              lead("recL3", stage="Past applicant", phone="07000000001", legacyRef="tenant-app:2019-05-01 10:00:00"),
+              lead("recL3", stage="Past applicant", phone="07000000001", email="old@example.com", legacyRef="tenant-app:2019-05-01 10:00:00"),
               lead("recL4", stage="Waiting to turn 35", dob="1991-09-20", consent=False, legacyRef="tenant-app:2018-01-01 10:00:00"),
               lead("recL5", stage="With Roy", phone="07111222333", referredTenant=["recN1"], created="2026-09-10T10:00:00.000Z"),
               lead("recL6", stage="Waiting to turn 35", dob="1991-09-21", legacyRef="tenant-app:2018-02-01 10:00:00", consent=True),
@@ -321,20 +326,21 @@ fw3 = FakeWriter()
 tl.run(w, DAY + timedelta(days=1), fw3, replies=lambda: [])
 out["third"] = {"roy": [t["kind"] for t in fw3.roy], "leads": [t.get("leadIds") for t in fw3.roy], "stages": stages(fw3)}
 `);
-  it('raises the mail-out card, asks Roy which tenants to email, and hands adverts and viewings to Roy', () => {
+  it('raises the mail-out and past-applicant cards, asks Roy which tenants to email, and gives Roy viewings only', () => {
     // No referral card on day one: Roy says which tenants to email first (Kevin, 30 Sep 2026).
-    expect(r.cards.sort()).toEqual(['mailout']);
-    expect(r.roy.sort()).toEqual(['adverts', 'refcheck', 'viewings']);
+    // Adverts are ours now, and past applicants are emailed, not phoned by Roy (Kevin, 30 Sep 2026).
+    expect(r.cards.sort()).toEqual(['mailout', 'pastmail']);
+    expect(r.roy.sort()).toEqual(['refcheck', 'viewings']);
     expect(r.fails).toEqual([]);
   });
-  it('screens new sign-ups to Qualified and sends them to Roy with a past applicant to phone', () => {
+  it('screens new sign-ups to Qualified and sends them to Roy; past applicants are no longer on his list', () => {
     expect(r.stages.recL1).toBe('With Roy');
     // Cambridge is no longer "near Haverhill" (Kevin, 25 Sep 2026): qualified, but not on a Haverhill list.
     expect(r.stages.recL7).toBe('Qualified');
     expect(r.stages.recL2).toBe('Waiting to turn 35');
-    expect(r.viewingLeads).toEqual(['recL1', 'recL3']);
+    expect(r.viewingLeads).toEqual(['recL1']);
   });
-  it('a past applicant who turns 35 stays phone-only, even with a consent tick', () => {
+  it('a past applicant who turns 35 stays a past applicant (emailed once, never the keep-warm list), even with a consent tick', () => {
     expect(r.stages.recL4).toBe('Past applicant');
     expect(r.stages.recL6).toBe('Past applicant');
   });
@@ -970,6 +976,109 @@ out["notGiven"] = len(madec)
     expect(r.roomsGiven.note).not.toMatch(/Nobody is working/);
     expect(r.roomsGiven.note).toMatch(/Not the AI's: 5 Dalham Place \(Kevin: Roy is dealing with this directly\)/);
     expect(r.notGiven).toBe(1);
+  });
+});
+
+describe("past applicants are emailed once, 35+ by date of birth (Kevin, 30 Sep 2026)", () => {
+  const r = py(`
+ad = load_mod("ad", "agent-dispatch.py")
+from agent_email_format import validate_submission_any
+def old(i, **kw):
+    kw.setdefault("stage", "Past applicant"); kw.setdefault("legacyRef", "tenant-app:2019-01-01 10:00:00")
+    return lead(i, **kw)
+w = world()
+w["leads"] = [old("pA", email="a@example.com", dob="1970-01-01", uc="Yes", legacyRef="tenant-app:2019-06-01 10:00:00"),
+              old("pB", email="b@example.com", dob="1995-01-01"),            # stage says past applicant, DOB says 31
+              old("pC", email="c@example.com", dob=None),                    # no date of birth
+              old("pD", email="optout@example.com", dob="1970-01-01"),       # opted out (and not a tenant)
+              old("pE", email="alan@example.com", dob="1970-01-01"),         # now our tenant
+              old("pF", email="f@example.com", dob="1970-01-01", stage="Waiting to turn 35"),
+              old("pG", email="g@example.com", dob="1975-01-01", uc="No", legacyRef="tenant-app:2021-03-01 10:00:00"),
+              old("pH", email="A@example.com", dob="1972-01-01", legacyRef="tenant-app:2018-01-01 10:00:00"),  # same address as pA
+              lead("pI", email="i@example.com", stage="Qualified"),         # a form sign-up, not a past applicant
+              old("pJ", email="j@example.com", dob="1970-01-01", areas=["Cambridge"])]
+w["optouts"].append(rec("recO9", {O["email"]: "optout@example.com"}))
+fw = FakeWriter(); tl.run(w, DAY, fw, only="past-mail", replies=lambda: [])
+c = fw.cards[0]
+parsed = validate_submission_any(c["output"])
+out["card"] = {"kind": c["kind"], "name": c["name"], "ids": c["ids"], "to": parsed["toEach"], "from": parsed["from"],
+               "subject": [l for l in c["output"].splitlines() if l.startswith("SUBJECT:")][0], "body": parsed["body"],
+               "gates": [ad.carry_out_problem(c["output"]), ad.track_record_problem(c["output"], True),
+                         ad.plain_summary_problem(c["plainTask"], c["plainApprove"]),
+                         ad.handback_problem(c["output"], "Correspondence") or "",
+                         ad.tier_match(ad.TIER1_PATTERNS, c["name"], c["description"], c["output"]) or ""]}
+w["tasks"] = [task(c["name"], status="Approval", notes="TENANT CHAIN IDS: " + ",".join(c["ids"]))]
+fw2 = FakeWriter(); tl.run(w, DAY, fw2, only="past-mail", replies=lambda: [])
+out["again"] = len(fw2.cards)
+# Sent and settled: each person is contacted once, and a week later nobody is emailed twice.
+w["tasks"][0]["fields"][TK["status"]] = "Completed"
+w["tasks"][0]["fields"][TK["notes"]] += "\\n\\n[25 Sep 2026 10:00 — send-email] SENT: mail-out to 2 of 2"
+fw3 = FakeWriter(); tl.run(w, DAY, fw3, only="settle", replies=lambda: [])
+out["settled"] = sorted([p["id"], p["fields"].get(L["lastContacted"])] for p in fw3.patches if p.get("table") == tl.T_LEADS)
+fw4 = FakeWriter(); tl.run(w, DAY + timedelta(days=8), fw4, only="past-mail", replies=lambda: [])
+out["weekLater"] = len(fw4.cards)
+out["monitor"] = next(x for x in tl.monitor(w, DAY, tl.openings(w, DAY), [])["steps"] if x["key"] == "pastmail")
+# Their replies: STOP opts them out; NO marks them not looking.
+subj = "RE: Rooms in Haverhill: are you still looking?"
+fw5 = FakeWriter(); tl.run(w, DAY, fw5, only="replies", replies=lambda: [
+    {"id": "m1", "headers": {"from": "A <a@example.com>", "subject": subj}, "body": "STOP"},
+    {"id": "m2", "headers": {"from": "G <g@example.com>", "subject": subj}, "body": "No thanks"}])
+out["replies"] = sorted([p["id"], p["fields"].get(L["stage"])] for p in fw5.patches if L["stage"] in p["fields"])
+out["optouts"] = fw5.optouts
+`);
+  it('emails only past applicants aged 35+ by date of birth, once per address, UC first, never an opt-out or a tenant', () => {
+    expect(r.card.kind).toBe('pastmail');
+    expect(r.card.name).toBe('TENANT PAST APPLICANTS: Haverhill 25 Sep 2026');
+    expect(r.card.to).toEqual(['a@example.com', 'g@example.com']);
+    expect(r.card.ids).toEqual(['pA', 'pG']);
+  });
+  it('the email is from info@, links the form, offers STOP, and clears every submit gate', () => {
+    expect(r.card.from).toBe('info@agilelets.co.uk');
+    expect(r.card.subject).toBe('SUBJECT: Rooms in Haverhill: are you still looking?');
+    expect(r.card.body).toMatch(/You applied to Agile Lets for a room a few years ago/);
+    expect(r.card.body).toMatch(/https:\/\/www\.agilelets\.co\.uk/);
+    expect(r.card.body).toMatch(/reply STOP and we will take you off our list/);
+    expect(r.card.body).not.toMatch(/airtable\.com/);
+    expect(r.card.gates).toEqual(['', '', '', '', '']);
+  });
+  it('one card at a time, and nobody is emailed twice', () => {
+    expect(r.again).toBe(0);
+    expect(r.settled).toEqual([['pA', '2026-09-25'], ['pG', '2026-09-25']]);
+    expect(r.weekLater).toBe(0);
+    expect(r.monitor.note).toMatch(/^2 emailed so far, 0 still to email/);
+  });
+  it('a STOP opts them out and a NO marks them not looking', () => {
+    // pH shares pA's address, so pA's STOP covers both rows.
+    expect(r.replies).toEqual([['pA', 'Opted out'], ['pG', 'Not looking'], ['pH', 'Opted out']]);
+    expect(r.optouts.map(x => x[0])).toEqual(['a@example.com']);
+  });
+});
+
+describe('adverts are ours and checked every run (Kevin, 30 Sep 2026)', () => {
+  const r = py(`
+w = world(); o = tl.openings(w, DAY)
+out["none"] = next(x for x in tl.monitor(w, DAY, o, [])["steps"] if x["key"] == "adverts")
+w["tasks"] = [task("TENANT ADVERTS: Haverhill posted 25 Sep 2026", status="Completed",
+                   notes="ADVERT LIVE: SpareRoom https://www.spareroom.co.uk/1\\nADVERT LIVE: OpenRent https://www.openrent.co.uk/2")]
+w["advertChecks"] = {"https://www.spareroom.co.uk/1": True, "https://www.openrent.co.uk/2": True}
+out["live"] = next(x for x in tl.monitor(w, DAY, o, [])["steps"] if x["key"] == "adverts")
+w["advertChecks"] = {"https://www.spareroom.co.uk/1": False, "https://www.openrent.co.uk/2": None}
+out["gone"] = next(x for x in tl.monitor(w, DAY, o, [])["steps"] if x["key"] == "adverts")
+fw = FakeWriter(); tl.run(w, DAY, fw, replies=lambda: [])
+out["royKinds"] = [t["kind"] for t in fw.roy]
+`);
+  it('rooms open and no advert recorded is red', () => {
+    expect(r.none.state).toBe('fail');
+    expect(r.none.note).toMatch(/No advert recorded as live while rooms need tenants/);
+  });
+  it('each recorded advert is checked: live is green, gone or unknown is amber and named', () => {
+    expect(r.live.state).toBe('ok');
+    expect(r.live.note).toBe('Live since 25 Sep 2026: SpareRoom, OpenRent');
+    expect(r.gone.state).toBe('warn');
+    expect(r.gone.note).toBe('Gone: SpareRoom (https://www.spareroom.co.uk/1); Could not check: OpenRent');
+  });
+  it('Roy is never handed adverts', () => {
+    expect(r.royKinds).not.toContain('adverts');
   });
 });
 

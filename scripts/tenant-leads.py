@@ -44,6 +44,7 @@ Usage:
   tenant-leads.py run [--dry-run] [--only STEP]   the daily pass (--only: one step, no status row)
   tenant-leads.py openings                        what counts as an opening today
   tenant-leads.py status                          the chain monitor, computed, not written
+  tenant-leads.py adverts                         the advert copy to post for today's openings
 Auth: ~/.config/od/airtable_pat (never printed).
 """
 
@@ -151,9 +152,16 @@ ROOM_LEVERS = {"Room release", "New room let"}
 LIVE_LEVER_STATUSES = {"Adopted", "In progress"}
 NOTICE_WINDOW_DAYS = 60
 MAILOUT_EVERY_DAYS, MAILOUT_QUIET_EVERY_DAYS = 14, 28
-ADVERTS_EVERY_DAYS, REFERRAL_EVERY_DAYS, KEEPWARM_EVERY_DAYS = 14, 28, 28
+REFERRAL_EVERY_DAYS, KEEPWARM_EVERY_DAYS = 28, 28
 KEEPWARM_AFTER_DAYS, ARCHIVE_AFTER_DAYS = 30, 180
-PAST_APPLICANTS_PER_TASK, PAST_APPLICANT_TASK_EVERY_DAYS = 5, 7
+# Past applicants (2017-2021) are EMAILED, once each, never texted (Kevin, 30 Sep 2026, told the form never
+# asked for consent: "They gave us this information to be a potential tenant", and only those whose date
+# of birth puts them at 35 or over). One card of up to TO_EACH_MAX a week while rooms are open.
+PAST_EMAIL_EVERY_DAYS = 7
+# Adverts are posted in a session from info@'s SpareRoom and OpenRent accounts, not by Roy (Kevin, 30 Sep
+# 2026: "We need to do the adverts"). Each live advert is recorded on a TENANT ADVERTS task as a line
+# "ADVERT LIVE: <site> <url>", and every run checks each page still shows the room.
+ADVERT_RE = re.compile(r"^ADVERT LIVE: (\S+) (https?://\S+)", re.M)
 BONUS_AMOUNT = 50
 # Towns that always get the quiet "register now" mail-out, openings or not: the home cluster.
 HOME_TOWNS = ("Haverhill",)
@@ -169,7 +177,7 @@ NEAR = {
 PREFIXES = {"mailout": "TENANT MAILOUT: ", "adverts": "TENANT ADVERTS: ", "referral": "TENANT REFERRAL: ",
             "viewings": "TENANT VIEWINGS: ", "keepwarm": "TENANT KEEPWARM: ", "movein": "TENANT MOVE-IN: ",
             "docs": "TENANT DOCS: ", "rooms": "TENANT ROOMS: ", "check": "TENANT DOCS CHECK: ",
-            "refcheck": "TENANT REFERRAL CHECK: "}
+            "refcheck": "TENANT REFERRAL CHECK: ", "pastmail": "TENANT PAST APPLICANTS: "}
 ROOMS_TASK_EVERY_DAYS = 14   # a house still not legal gets a fresh task this long after the last one closed
 # Kevin, 30 Sep 2026 (referral card, Changes requested): "Ask Roy which of the tenants we should email
 # and which of those we should not, based on their happiness and willingness to help." So the referral
@@ -180,7 +188,7 @@ ASK_YES, ASK_NO = "Ask", "Do not ask"
 REFCHECK_WAIT_DAYS = 7
 REFCHECK_REASON = ("Kevin, 30 Sep 2026: ask Roy which tenants to email about the referral bonus, "
                    "based on their happiness and willingness to help")
-EMAIL_KINDS = ("mailout", "referral", "keepwarm", "docs")
+EMAIL_KINDS = ("mailout", "referral", "keepwarm", "docs", "pastmail")
 # Kevin's lettings model (25 Sep 2026): market a room the moment it is void or identified; the tenant
 # SECURES it with the documents done; then the works; then they move in a few days later. So readiness
 # never holds the marketing. It gates the MOVE-IN: every certificate the house needs once the new
@@ -392,7 +400,8 @@ def same_person(a, b):
 
 
 def is_legacy(lead):
-    """A past applicant (2017-2021 sheet): phoned only, never emailed or texted."""
+    """A past applicant (2017-2021 sheet): emailed once on a TENANT PAST APPLICANTS card (Kevin, 30 Sep
+    2026), never texted, and never on the keep-warm or documents emails, which need form consent."""
     return bool(lead["fields"].get(L["legacyRef"]))
 
 
@@ -467,6 +476,7 @@ def load(day):
                                "the read is broken, not the business empty")
     data["sentThreads"] = sent_threads(data["tasks"])
     data["linkLive"] = link_works()
+    data["advertChecks"] = {url: advert_up(url) for _, url, _ in adverts_live(data)}
     # The compliance book (agent-dispatch's reading, the one the Property Compliance page draws) says
     # what each house holds. Unreadable is recorded, never taken as "all in order".
     try:
@@ -1194,10 +1204,10 @@ def adverts_task(town, opens, day):
             f"{label.format(town=town)}\nTitle: {title}\n"
             f"Text: Room in a shared house on {where}, {town}, {when}. {who}. Universal Credit welcome: the rent "
             f"matches the one-bedroom housing rate. To apply, fill in our two-minute form: {form_link(channel)}")
-    desc = (f"Rooms to fill: {'; '.join(o['label'] for o in opens)}.\n\nPlease post these adverts. Each has its "
-            "own form link, so we can see which site brings people in. Photos: two of the room and one of the "
-            "kitchen. If an advert from an earlier list is still live, leave it up and only post where it is not. "
-            "Reply to this email with DONE and where you posted them.\n\n" + "\n\n".join(blocks))
+    desc = (f"Rooms to fill: {'; '.join(o['label'] for o in opens)}.\n\nAdvert copy. Each has its own form link, "
+            "so we can see which site brings people in. Photos: two of the room and one of the kitchen. If an advert "
+            "is still live, leave it up and only post where it is not. Record each live advert on a TENANT ADVERTS "
+            "task as a line: ADVERT LIVE: <site> <url>\n\n" + "\n\n".join(blocks))
     return {"kind": "adverts", "town": town, "name": f"{PREFIXES['adverts']}{town} advert copy {fmt_day(day)}",
             "description": desc}
 
@@ -1282,46 +1292,102 @@ def lead_line(lead, day):
     return ", ".join(b for b in bits if b)
 
 
-def past_line(lead, day):
-    f = lead["fields"]
-    dob = parse_day(f.get(L["dob"]))
-    return (f"{f.get(L['name']) or '?'}, aged {age_on(dob, day) if dob else '?'}, "
-            f"{f.get(L['phone']) or 'no phone'}, applied {(f.get(L['legacyRef']) or '')[11:15]}")
-
-
-def viewings_text(town, opens, leads, past, day):
+def viewings_text(town, opens, leads, day):
     desc = f"Rooms open in {town}: {'; '.join(o['label'] for o in opens)}.\n\n"
     if leads:
         desc += ("These people registered and fit (aged 35+, on Universal Credit, living alone). Please call or "
                  "text each one this week to book a viewing:\n"
                  + "\n".join(f"{i}. {lead_line(l, day)}" for i, l in enumerate(leads, 1)) + "\n\n")
-    if past:
-        desc += ("PAST APPLICANTS (2017 to 2021). PHONE ONLY: they have not agreed to texts or emails. Ask if they "
-                 f"still need a room. If yes, ask them to fill in the form: {form_link('Past applicant')}\n"
-                 + "\n".join(f"{i}. {past_line(l, day)}" for i, l in enumerate(past, 1)) + "\n\n")
     return desc + "Reply to this email with what happened to each person: booked, not interested, or no answer."
 
 
-def viewings_task(data, town, opens, leads, past, day):
+def viewings_task(data, town, opens, leads, day):
     # People the benefit cap cannot touch first: their rent is covered in full.
     leads = sorted(leads, key=lambda l: {"exempt": 0, "unknown": 1, "capped": 2}[cap_state(l["fields"])])
-    n = len(leads) + len(past)
     return {"kind": "viewings", "town": town, "name": f"{PREFIXES['viewings']}{town} people to call {fmt_day(day)}",
-            "description": viewings_text(town, opens, leads, past, day), "leadIds": [l["id"] for l in leads + past],
-            "count": n}
+            "description": viewings_text(town, opens, leads, day), "leadIds": [l["id"] for l in leads],
+            "count": len(leads)}
 
 
-def pick_past_applicants(data, town, exclude=frozenset()):
-    """Up to five past applicants for Roy to PHONE: never listed before, a phone number on file,
-    the town they asked for, those who were on Universal Credit first, then the most recent."""
+def pastmail_leads(data, town, day):
+    """The next card's people: the first TO_EACH_MAX of pastmail_pool."""
+    return pastmail_pool(data, town, day)[:TO_EACH_MAX]
+
+
+def pastmail_pool(data, town, day):
+    """Past applicants to email, once each (Kevin, 30 Sep 2026): aged 35 or over TODAY by their date of
+    birth, a usable email, the town they asked for, never on an earlier card, never an opt-out, never
+    someone who is now our tenant. On Universal Credit then first, then the most recent application."""
     held = suppressed(data)
-    pool = [l for l in data["leads"] if sel(l["fields"].get(L["stage"])) == "Past applicant"
-            and l["id"] not in exclude and not links(l["fields"].get(L["royTask"])) and l["fields"].get(L["phone"])
-            and email_of(l["fields"].get(L["email"])) not in held
-            and town in lead_towns(lead_areas(l))]
+    ours = {email_of(t["fields"].get(TN["email"])) for t in data["tenants"]}
+    done = {i for t in chain_tasks(data, "pastmail") for i in chain_ids(t)}
+    # An address already emailed is done too: two old rows can share one address.
+    emailed = {email_of(l["fields"].get(L["email"])) for l in data["leads"] if l["id"] in done}
+    pool = []
+    for l in data["leads"]:
+        f = l["fields"]
+        if not is_legacy(l) or sel(f.get(L["stage"])) != "Past applicant" or l["id"] in done or f.get(L["lastContacted"]):
+            continue
+        dob, e = parse_day(f.get(L["dob"])), email_of(f.get(L["email"]))
+        if not (dob and age_on(dob, day) >= 35) or not (e and ADDR_RE.fullmatch(e)) or e in held or e in ours or e in emailed:
+            continue
+        if town in lead_towns(lead_areas(l)):
+            pool.append(l)
     pool.sort(key=lambda l: str(l["fields"].get(L["legacyRef"]) or ""), reverse=True)
     pool.sort(key=lambda l: sel(l["fields"].get(L["uc"])) != "Yes")
-    return pool[:PAST_APPLICANTS_PER_TASK]
+    out, seen = [], set()
+    for l in pool:                      # one email per address
+        e = email_of(l["fields"].get(L["email"]))
+        if e not in seen:
+            seen.add(e)
+            out.append(l)
+    return out
+
+
+def pastmail_card(data, town, opens, day):
+    leads = pastmail_leads(data, town, day)
+    if not leads:
+        return None
+    to = [email_of(l["fields"].get(L["email"])) for l in leads]
+    n, streets, when = rooms_line(opens)
+    where = " and ".join(streets) or town
+    body = (f"Hello,\n\nYou applied to Agile Lets for a room a few years ago. We have {n} room{'s' if n != 1 else ''} "
+            f"{when} in {town}, in shared houses on {where}, for single adults aged 35 or over. Universal Credit "
+            "welcome: the rent matches the one-bedroom housing rate.\n\n"
+            f"If you still need a room, fill in our two-minute form:\n{form_link('Past applicant')}\n\n"
+            "If you no longer need one, reply STOP and we will take you off our list.")
+    return {"kind": "pastmail", "town": town, "name": f"{PREFIXES['pastmail']}{town} {fmt_day(day)}",
+            "description": f"Tenant-finding chain: email {len(to)} people who applied for a room in 2017 to 2021 and are "
+                           "35 or over by date of birth, once each (Kevin, 30 Sep 2026: email only, never a text).",
+            "output": email_block(to, f"Rooms in {town}: are you still looking?", body,
+                                  track_record(sent_days(chain_tasks(data, "pastmail")),
+                                               "past applicant email (TENANT PAST APPLICANTS cards)"),
+                                  f"sending this email separately to each of the {len(to)} people above from {SENDER}."),
+            "ids": [l["id"] for l in leads], "emails": to,
+            "plainTask": f"Email {len(to)} people who applied for a room with us in 2017 to 2021 and are now 35 or over.",
+            "plainApprove": "Each person gets the same short email separately, with our form link and STOP to opt out."}
+
+
+def adverts_live(data):
+    """[(site, url, day recorded)] from the newest TENANT ADVERTS task that records any live advert."""
+    for t in sorted(chain_tasks(data, "adverts"), key=lambda t: t.get("createdTime") or "", reverse=True):
+        found = ADVERT_RE.findall(str(t["fields"].get(TK["notes"]) or ""))
+        if found:
+            return [(site, url, created_day(t)) for site, url in found]
+    return []
+
+
+def advert_up(url):
+    """True when the advert page opens and still shows Haverhill, False when it is gone (404/410 or the
+    town no longer on the page), None when the site would not say (blocked or down): never a guess."""
+    try:
+        req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0 (Macintosh) tenant-leads advert check"})
+        with urllib.request.urlopen(req, timeout=20) as r:
+            return "Haverhill" in r.read().decode("utf-8", "replace")
+    except urllib.error.HTTPError as exc:
+        return False if exc.code in (404, 410) else None
+    except Exception:                              # noqa: BLE001 — unknown, shown as unknown
+        return None
 
 
 # ─── bonus ───────────────────────────────────────────────────────────
@@ -1543,8 +1609,19 @@ def monitor(data, day, opens, run_notes):
          f"{SHORT_BASE} does not open the sign-up form, so no email or advert is going out"
          + (" while rooms need tenants." if opens else "."))
 
+    # Adverts (Kevin, 30 Sep 2026: we post them, not Roy): each recorded advert's page still shows the room.
+    ads, checks = adverts_live(data), data.get("advertChecks") or {}
+    down = [f"{site} ({url})" for site, url, _ in ads if checks.get(url) is False]
+    unsure = [site for site, url, _ in ads if checks.get(url) is None]
+    if not ads:
+        step("adverts", "Adverts live", None, "fail" if opens else "idle",
+             "No advert recorded as live" + (" while rooms need tenants: post them (copy: tenant-leads.py adverts)" if opens else "."))
+    else:
+        step("adverts", "Adverts live", max(d for _, _, d in ads), "warn" if down or unsure else "ok",
+             "; ".join((["Gone: " + ", ".join(down)] if down else []) + (["Could not check: " + ", ".join(unsure)] if unsure else []))
+             or f"Live since {fmt_day(max(d for _, _, d in ads))}: " + ", ".join(site for site, _, _ in ads))
+
     for kind, label, every in (("mailout", "Referrer mail-out", MAILOUT_EVERY_DAYS),
-                               ("adverts", "Adverts to Roy", ADVERTS_EVERY_DAYS),
                                ("referral", "Tenant referral email", REFERRAL_EVERY_DAYS)):
         tasks = chain_tasks(data, kind)
         last = max((created_day(t) for t in tasks), default=None)
@@ -1587,6 +1664,15 @@ def monitor(data, day, opens, run_notes):
                 warn.append(f"{len(closed)} closed without sending in the last {every} days")
         state = "fail" if bad else "warn" if warn else ("ok" if last else "idle")
         step(kind, label, last, state, "; ".join(bad + warn + info) or (f"last {fmt_day(last)}" if last else "none yet"))
+
+    pm = chain_tasks(data, "pastmail")
+    sent_pm = {i for t in pm if SENT_RE.search(str(t["fields"].get(TK["notes"]) or "")) for i in chain_ids(t)}
+    left = sum(len(pastmail_pool(data, town, day)) for town in towns)
+    slow = [t for t in pm if is_open(t) and (day - created_day(t)).days > 3]
+    step("pastmail", "Past applicants emailed", max((created_day(t) for t in pm), default=None),
+         "warn" if slow else "ok" if pm else "idle",
+         (f"{len(slow)} card(s) waiting more than 3 days; " if slow else "")
+         + f"{len(sent_pm)} emailed so far, {left} still to email, one card a week while rooms are open")
 
     unsent, partial = [], []
     for kind in EMAIL_KINDS:
@@ -1971,7 +2057,7 @@ class Writer:
 
 
 # ─── the daily run ───────────────────────────────────────────────────
-STEPS = ("replies", "roy", "screen", "mail-out", "adverts", "referral", "viewings", "move-in", "docs-in", "rooms",
+STEPS = ("replies", "roy", "screen", "mail-out", "past-mail", "referral", "viewings", "move-in", "docs-in", "rooms",
          "keep-warm", "settle", "convert", "bonus", "archive")
 
 
@@ -2055,13 +2141,12 @@ def run(data, day, w, only=None, replies=None):
                 # A tenant who opts out keeps Became tenant: the bonus owed to whoever referred them stands.
                 lead_rows.extend({"id": l["id"], "fields": {L["stage"]: "Opted out", L["screening"]:
                                   f"{fmt_day(day)}: replied STOP; never contacted again"}} for l in mine)
+            # A past applicant answers the past-applicant email now (Kevin, 30 Sep 2026), so they count too.
             elif verdict == "no":
                 lead_rows.extend({"id": l["id"], "fields": {L["stage"]: "Not looking", L["heardFrom"]: day.isoformat(),
-                                  L["screening"]: f"{fmt_day(day)}: replied NO to the check-in"}}
-                                 for l in mine if not is_legacy(l))
+                                  L["screening"]: f"{fmt_day(day)}: replied NO to our email"}} for l in mine)
             elif verdict == "yes":
-                lead_rows.extend({"id": l["id"], "fields": {L["heardFrom"]: day.isoformat()}}
-                                 for l in mine if not is_legacy(l))
+                lead_rows.extend({"id": l["id"], "fields": {L["heardFrom"]: day.isoformat()}} for l in mine)
             return 1
 
         acted = 0
@@ -2246,14 +2331,17 @@ def run(data, day, w, only=None, replies=None):
             w.raise_card(card)
         return ", ".join(c["name"][len(PREFIXES["mailout"]):] for c in cards)
 
-    def do_adverts():
+    def do_pastmail():
+        """Past applicants by email, one card a week per town while rooms are open (Kevin, 30 Sep 2026)."""
         if not link_ok:
             return HELD
         done = []
         for town, os_ in towns.items():
-            if due_again(chain_tasks(data, "adverts", town), ADVERTS_EVERY_DAYS, day)[0]:
-                w.to_roy(adverts_task(town, os_, day))
-                done.append(town)
+            if due_again(chain_tasks(data, "pastmail", town), PAST_EMAIL_EVERY_DAYS, day)[0]:
+                card = pastmail_card(data, town, os_, day)
+                if card:
+                    w.raise_card(card)
+                    done.append(f"{town}: {len(card['emails'])} past applicant(s)")
         return ", ".join(done)
 
     def do_referrals():
@@ -2290,18 +2378,15 @@ def run(data, day, w, only=None, replies=None):
             fresh = [l for l in data["leads"] if not is_legacy(l) and l["id"] not in handed
                      and email_of(l["fields"].get(L["email"])) not in held
                      and sel(l["fields"].get(L["stage"])) == "Qualified" and town in lead_towns(lead_areas(l))]
-            recent = [t for t in mine if (day - created_day(t)).days < PAST_APPLICANT_TASK_EVERY_DAYS]
-            past = [] if recent else pick_past_applicants(data, town, exclude=handed)
-            if not fresh and not past:
+            # Past applicants are emailed now, not phoned by Roy (Kevin, 30 Sep 2026): sign-ups only.
+            if not fresh:
                 continue
-            tid = w.to_roy(viewings_task(data, town, os_, fresh, past, day))
+            tid = w.to_roy(viewings_task(data, town, os_, fresh, day))
             for l in fresh:
                 rows.append({"id": l["id"], "fields": {L["stage"]: "With Roy", L["royTask"]: [tid],
                                                        L["lastContacted"]: day.isoformat()}})
-            for l in past:
-                rows.append({"id": l["id"], "fields": {L["royTask"]: [tid]}})
-            handed |= {l["id"] for l in fresh + past}
-            done.append(f"{town} ({len(fresh)} new, {len(past)} past)")
+            handed |= {l["id"] for l in fresh}
+            done.append(f"{town} ({len(fresh)} new)")
         w.patch_leads(rows)
         return ", ".join(done)
 
@@ -2403,7 +2488,7 @@ def run(data, day, w, only=None, replies=None):
             name = str(f.get(TK["name"]) or "")
             if name.startswith(PREFIXES["mailout"]):
                 ref_rows += [{"id": x, "fields": {R["lastEmailed"]: sent}} for x in rid]
-            elif name.startswith(PREFIXES["keepwarm"]) or name.startswith(PREFIXES["docs"]):
+            elif any(name.startswith(PREFIXES[k]) for k in ("keepwarm", "docs", "pastmail")):
                 lead_rows += [{"id": x, "fields": {L["lastContacted"]: sent}} for x in rid]
             task_rows.append({"id": t["id"], "fields": {TK["notes"]: notes_text.rstrip() + f"\n\n{SETTLED_MARK} {fmt_day(day)}"}})
         w.patch(T_REFS, ref_rows, "referrer(s)")
@@ -2460,7 +2545,7 @@ def run(data, day, w, only=None, replies=None):
         w.patch_leads(rows)
         return f"{len(rows)} archived" if rows else ""
 
-    fns = dict(zip(STEPS, (do_replies, do_roy, do_screen, do_mailouts, do_adverts, do_referrals, do_viewings,
+    fns = dict(zip(STEPS, (do_replies, do_roy, do_screen, do_mailouts, do_pastmail, do_referrals, do_viewings,
                            do_movein, do_docs_in, do_rooms, do_keepwarm, do_settle, do_convert, do_bonus, do_archive)))
     for label in STEPS:
         if only in (None, label):
@@ -2479,7 +2564,7 @@ def summary(mon, failures):
 
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
-    ap.add_argument("cmd", choices=["run", "openings", "status"])
+    ap.add_argument("cmd", choices=["run", "openings", "status", "adverts"])
     ap.add_argument("--dry-run", action="store_true")
     ap.add_argument("--only", choices=STEPS, help="run one step (a manual re-run or a test); no status row")
     a = ap.parse_args(argv)
@@ -2487,6 +2572,10 @@ def main(argv=None):
     data = load(day)
     if a.cmd == "openings":
         print(json.dumps(openings(data, day), indent=2))
+        return 0
+    if a.cmd == "adverts":           # the copy to post, per town with rooms open (Kevin, 30 Sep 2026: we post them)
+        for town, os_ in by_town(openings(data, day)).items():
+            print(adverts_task(town, os_, day)["description"] + "\n")
         return 0
     if a.cmd == "status":
         print(json.dumps(monitor(data, day, openings(data, day), []), indent=2))
