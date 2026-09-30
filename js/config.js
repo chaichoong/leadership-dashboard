@@ -23,14 +23,14 @@
         { id: 'home',        name: 'Home',                           icon: '📌', pageVer: '1.1', sopFile: '',                           sopVer: '1.0', standalone: 'index.html#home' },
         { id: 'overview',    name: 'Leadership Dashboard',           icon: '📊', pageVer: '2.114', sopFile: 'sop.html',                   sopVer: '2.94', standalone: 'index.html#overview' },
         { id: 'os-strategy', name: 'Objective & Strategy',           icon: '🎯', pageVer: '1.64', sopFile: 'os/strategy/sop.html',       sopVer: '1.1', standalone: 'os/strategy/index.html' },
-        { id: 'tasks',       name: 'Tasks & Projects',   icon: '✅', pageVer: '1.179', sopFile: 'os/tasks/sop.html',             sopVer: '1.4', standalone: 'os/tasks/index.html' },
+        { id: 'tasks',       name: 'Tasks & Projects',   icon: '✅', pageVer: '1.180', sopFile: 'os/tasks/sop.html',             sopVer: '1.4', standalone: 'os/tasks/index.html' },
         { id: 'cfv',        name: 'CFVs',                          icon: '🚨', pageVer: '1.42', sopFile: 'sop-cfvs.html',               sopVer: '1.34', standalone: 'index.html#cfv' },
         { id: 'money',      name: 'Money Confidence',              icon: '🧭', pageVer: '1.1', sopFile: '',                            sopVer: '1.0', standalone: 'index.html#money' },
         { id: 'wealth',     name: 'Wealth',                        icon: '📈', pageVer: '1.21', sopFile: '',                            sopVer: '1.0', standalone: 'index.html#wealth' },
         { id: 'income',     name: 'Accounts Receivable Fixed',     icon: '💷', pageVer: '1.5', sopFile: '',                            sopVer: '1.0', standalone: 'index.html#income' },
         { id: 'ar-variable', name: 'Accounts Receivable Variable', icon: '📤', pageVer: '1.4', sopFile: '',                            sopVer: '1.0', standalone: 'index.html#ar-variable' },
         { id: 'costs',      name: 'Accounts Payable Fixed',        icon: '📋', pageVer: '1.11', sopFile: '',                            sopVer: '1.0', standalone: 'index.html#costs' },
-        { id: 'invoices',   name: 'Payment Run',                   icon: '🧾', pageVer: '3.8', sopFile: 'sop-invoices.html',           sopVer: '3.00', standalone: 'index.html#invoices' },
+        { id: 'invoices',   name: 'Payment Run',                   icon: '🧾', pageVer: '3.9', sopFile: 'sop-invoices.html',           sopVer: '3.00', standalone: 'index.html#invoices' },
         { id: 'pnl',        name: 'Profit & Loss',                 icon: '💰', pageVer: '2.32', sopFile: 'sop-pnl.html',               sopVer: '2.26', standalone: 'index.html#pnl' },
         { id: 'transactions', name: 'Transactions',                icon: '🔍', pageVer: '1.1', sopFile: '',                            sopVer: '1.0', standalone: 'index.html#transactions' },
         { id: 'coa',        name: 'Chart of Accounts',             icon: '📒', pageVer: '1.3', sopFile: 'sop-coa.html',                sopVer: '1.1', standalone: 'index.html#coa' },
@@ -41,7 +41,7 @@
         // property-manager/ behind its own passcode; the property-manager Worker
         // holds the Airtable key and strips personal money server-side (8 Sep 2026).
         { id: 'property-manager', name: 'Property Manager',            icon: '🏠', pageVer: '1.8', sopFile: 'sop-property-manager.html',   sopVer: '1.5', standalone: 'property-manager/index.html' },
-        { id: 'operations',  name: 'Operations',                    icon: '🏢', pageVer: '1.48', sopFile: '',                            sopVer: '1.0', standalone: 'os/operations/index.html' },
+        { id: 'operations',  name: 'Operations',                    icon: '🏢', pageVer: '1.49', sopFile: '',                            sopVer: '1.0', standalone: 'os/operations/index.html' },
         // KPI Library (Leadership section) — ADMIN ONLY. Never rendered in a
         // client tenant's shell; the adminOnly flag is the contract the Supabase
         // migration must honour. Replaced the Plan Builder entry 1 Aug 2026 on
@@ -50,9 +50,9 @@
         // AI Agents (Leadership) — ADMIN ONLY, like KPI Library. Approvals,
         // checks and the workforce register in one place (Kevin's ruling,
         // 24 Aug 2026; moved out of the Systemisation page).
-        { id: 'agents', name: 'AI Agents', icon: '🤖', pageVer: '1.158', sopFile: 'sop-ai-agents.html', sopVer: '1.132', standalone: 'os/agents/index.html', adminOnly: true },
+        { id: 'agents', name: 'AI Agents', icon: '🤖', pageVer: '1.159', sopFile: 'sop-ai-agents.html', sopVer: '1.132', standalone: 'os/agents/index.html', adminOnly: true },
         { id: 'fintable',  name: 'Accounts',                       icon: '🏦', pageVer: '1.19', sopFile: '',                            sopVer: '1.0', standalone: 'index.html#fintable' },
-        { id: 'systemisation', name: 'Systemisation',              icon: '⚙️', pageVer: '1.26', sopFile: 'guides/systemisation.html',    sopVer: '1.11', standalone: 'os/systemisation/index.html' },
+        { id: 'systemisation', name: 'Systemisation',              icon: '⚙️', pageVer: '1.27', sopFile: 'guides/systemisation.html',    sopVer: '1.11', standalone: 'os/systemisation/index.html' },
         { id: 'os-team',    name: 'Team Members',                  icon: '👥', pageVer: '1.41', sopFile: '',                            sopVer: '1.1', standalone: 'os/team/index.html' },
         // pageVer corrected by hand 2026-08-06: the auto-bump never fired for this page
         // (crm-supabase.html was missing from the workflow `paths:` filter), so 1.0 was
