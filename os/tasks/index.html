@@ -523,7 +523,8 @@ body.app-busy,body.app-busy *{cursor:progress!important}
 
   <div class="view-tabs" id="viewTabs">
     <button class="view-tab active" data-view="myday" onclick="switchView('myday')">My Day</button>
-    <button class="view-tab" data-view="approvals" onclick="switchView('approvals')" title="What needs your decision, what the agents finished after you approved it, and what has stopped moving">Approvals <span id="apvTabCount" class="tab-count" hidden></span></button>
+    <!-- Hidden 30 Sep 2026 (MASTER-PLAN §4 Hide, brain Decisions/2026-09-29 Home screen is one list): parked or duplicate, not deleted. Restore: remove the display:none. The Approvals view duplicates the AI Agents page queue. The AI Agents view below stays: its Add agent button is the only in-app way to add an agent to Team Members (review, 30 Sep 2026). -->
+    <button class="view-tab" data-view="approvals" style="display:none" onclick="switchView('approvals')" title="What needs your decision, what the agents finished after you approved it, and what has stopped moving">Approvals <span id="apvTabCount" class="tab-count" hidden></span></button>
     <button class="view-tab" data-view="list" onclick="switchView('list')">Task List</button>
     <button class="view-tab" data-view="kanban" onclick="switchView('kanban')">Kanban</button>
     <button class="view-tab" data-view="projects" onclick="switchView('projects')">Projects</button>

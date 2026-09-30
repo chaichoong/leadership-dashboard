@@ -419,7 +419,8 @@ a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}
     <button class="pipeline-tab" data-tab="all" onclick="switchView('all')">All Workflows <span class="count" id="allCount">0</span></button>
     <button class="pipeline-tab" data-tab="steps" onclick="switchView('steps')">SOPs <span class="count" id="stepsCount">0</span></button>
     <!-- The AI Agents tab moved to Leadership → AI Agents (os/agents/) on 24 Aug 2026. This pane is a pointer only. -->
-    <button class="pipeline-tab" data-tab="automation" onclick="switchView('automation')">AI Agents</button>
+    <!-- Hidden 30 Sep 2026 (MASTER-PLAN §4 Hide, brain Decisions/2026-09-29 Home screen is one list): parked or duplicate, not deleted. Restore: remove the display:none. Pointer only. -->
+    <button class="pipeline-tab" data-tab="automation" style="display:none" onclick="switchView('automation')">AI Agents</button>
 </div>
 
 <div id="main" class="main" style="display:none">
