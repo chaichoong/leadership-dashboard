@@ -1083,9 +1083,9 @@ async function assertNotFinalAction(page, s) {
           const other = Array.from(n.querySelectorAll('input,select,textarea,[role=radio],[role=checkbox]')).some(o => o !== c
             && !['button', 'submit', 'reset', 'image', 'hidden'].includes(String(o.type || '').toLowerCase())
             && !(c.name && o.name === c.name));
-          if (other) break;
+          if (other && t) break;   // read until there are words: a consent row, or a styled span round the box, can hold an email box too (round 7)
           let x = String(n.innerText || '');
-          for (const sel of n.querySelectorAll('select')) x = x.split(sel.innerText).join(' ');
+          for (const sel of n.querySelectorAll('select')) if (sel.innerText) x = x.split(sel.innerText).join(' ');   // an empty one would split every letter
           x = x.replace(/\s+/g, ' ').trim();
           if (x.length > 300) break;
           t = x;

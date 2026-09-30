@@ -54,6 +54,9 @@ const PAGE = `<!doctype html><html><body>
   <div><span>I declare the information I have given is true</span><input type="radio" name="sp" id="spy"><label for="spy" id="spyl">Yes</label><input type="radio" name="sp" id="spn"><label for="spn">No</label></div>
   <div><p>Is the property of standard construction? Not sure? Read our guide.</p><input type="radio" name="sc" id="scy"><label for="scy" id="scyl">Yes</label><input type="radio" name="sc" id="scn"><label for="scn">No</label></div>
   <div><div><p>Has the property flooded in the last 10 years?</p><input type="radio" name="fl" id="fln"><label for="fln" id="flnl">No</label></div><div><p>I declare the above is true</p><input type="radio" name="dt" id="dty"><label for="dty">Yes</label></div></div>
+  <div><input type="email" aria-label="Email"><input type="checkbox" id="cons"><span>I agree to the terms of business</span></div>
+  <div><input type="email" aria-label="Email 2"><span class="cb"><input type="checkbox" id="cons2"></span><span>I agree to the terms of business</span></div>
+  <div><select aria-label="Address"></select><input type="checkbox" id="cons3"><span>I agree to the terms of business</span></div>
   <div><label for="ps">Property status</label><select id="ps"><option value="">Select</option><option>Let</option><option>I agree</option></select></div>
   <div id="out"></div>
   <script>
@@ -187,7 +190,8 @@ describe('the robot does every step up to Kevin, waits for his part, and hands o
       // Review round 4: a dropdown or a Yes button answering a declaration, and a name typed as a
       // signature, are his; an ordinary dropdown is the robot's.
       for (const st of [{ do: 'select', selector: '#ds', value: 'Yes' }, { do: 'click', selector: '#tb' }, { do: 'click', selector: '#tb2' }, { do: 'fill', selector: '#sig', value: 'Kevin Brittain' },
-                        { do: 'select', selector: '#as', value: 'I agree with all the assumptions' }, { do: 'click', selector: '#h3y' }, { do: 'click', selector: '#spyl' }]) {
+                        { do: 'select', selector: '#as', value: 'I agree with all the assumptions' }, { do: 'click', selector: '#h3y' }, { do: 'click', selector: '#spyl' },
+                        { do: 'check', selector: '#cons' }, { do: 'check', selector: '#cons2' }, { do: 'check', selector: '#cons3' }]) {
         const r4 = await b.runHandover(page, { why: 'pay', steps: [st] });
         expect(r4.stuck && r4.stuck.error, st.selector).toMatch(/reads like a declaration|looks like a signature/);
       }
@@ -198,6 +202,9 @@ describe('the robot does every step up to Kevin, waits for his part, and hands o
       // Round 5: the option picked can be the declaration, and a question can sit in plain text.
       expect(await page.locator('#as').inputValue()).toBe('');
       expect(await page.locator('#spy').isChecked()).toBe(false);
+      expect(await page.locator('#cons').isChecked()).toBe(false);
+      expect(await page.locator('#cons2').isChecked()).toBe(false);
+      expect(await page.locator('#cons3').isChecked()).toBe(false);
       expect(await page.locator('#out').textContent()).not.toBe('H3-YES');
       // Round 6: help text, the next question's declaration and a dropdown's other options are not
       // this answer's question.
