@@ -92,6 +92,19 @@ describe('content-engine publish (GHL)', () => {
     expect(out.trim().split('\n').pop()).toBe('OK');
   });
 
+  // Drives the real close_cards (30 Sep 2026): 2059-2077 were live on all seven sections while their approved cards
+  // sat open at "Today" for up to two weeks, and the Task Manager asked Kevin to approve 2059 again. The engine closes
+  // its own card once, only when every section is out, and never touches a card already Completed.
+  it("closes an episode's approval card once it is out on all seven sections, hourly, before the run that can end the job", () => {
+    const out = execFileSync('python3', ['-c', 'import publish; publish._selftest_close_cards(); print("OK")'],
+      { encoding: 'utf8', cwd: DIR });
+    expect(out.trim().split('\n').pop()).toBe('OK');
+    const sh = readFileSync(path.join(ROOT, 'scripts', 'content-engine-publish.sh'), 'utf8');
+    const close = sh.indexOf('publish.py close-cards ||');
+    expect(close).toBeGreaterThan(sh.indexOf('publish.py sync || exit 1'));
+    expect(close).toBeLessThan(sh.indexOf('publish.py run --limit 3'));
+  });
+
   it('posts the Learnings clip to YouTube as a Short with the socials, title from the first copy line', () => {
     const src = readFileSync(PUBLISH, 'utf8');
     expect(src).toContain('"youtube-short": {"platform": "youtube"');

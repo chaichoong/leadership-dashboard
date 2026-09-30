@@ -119,6 +119,12 @@ One line each into the digest, and the Publishing page on the dashboard.
   afterwards; one that cannot be confirmed is shared once more and never a third time.
 - **23e. Spotify.** Once the video podcast has processed, its public link goes on the record.
 
+**23f. Close the card of a finished episode** (`publish.py close-cards`, daytime job only)
+An episode out on every section it owes (a clip never made is not owed) has its card completed through `agent-dispatch.py complete`,
+once, with a note carrying the YouTube link. A Completed or Cancelled card is left alone; a refusal is an ERROR once and a
+report line ("content cards not closed") until it clears. Until 30 Sep 2026
+nothing did this, 2059-2077 sat open for up to two weeks, and the Task Manager read them as unpublished.
+
 **24. Publish the next episode in order** (`publish.py run --limit 3`)
 Approved episodes only, strictly in episode order, two stages:
 
