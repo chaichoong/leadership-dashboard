@@ -44,6 +44,11 @@ const PAGE = `<!doctype html><html><body>
   <label for="dc">I confirm the statements above are true</label><input type="checkbox" id="dc"><label for="dc" id="dc-yes">Yes</label>
   <span id="terms">I have read and understood the policy terms</span><div role="checkbox" aria-checked="false" aria-labelledby="terms" id="rc" onclick="this.setAttribute('aria-checked','true')"></div><div role="switch" aria-labelledby="terms" id="sw" onclick="this.dataset.on='1'"></div>
   <main role="main"><p>Pay monthly or yearly</p><span id="plain">Show more</span></main>
+  <label for="ds">I confirm the assumptions are correct</label><select id="ds"><option value="">Select</option><option>Yes</option></select>
+  <label for="bt">Property built</label><select id="bt"><option value="">Select</option><option>1970 - 1989</option></select>
+  <fieldset><legend>Do you agree with the statements above?</legend><button type="button" id="tb" aria-pressed="false" onclick="this.setAttribute('aria-pressed','true')">Yes, that is right</button></fieldset>
+  <fieldset><legend>I declare the details above are correct</legend><button type="button" id="tb2" onclick="document.getElementById('out').textContent='DECLARED'">Yes</button></fieldset>
+  <label for="sig">Type your full name to sign</label><input id="sig">
   <div id="out"></div>
   <script>
     setTimeout(() => { const d = document.createElement('div'); d.id = 'signed-in'; d.textContent = 'My account'; document.body.appendChild(d); }, 800);
@@ -98,8 +103,10 @@ describe('a handover plan never submits, pays or uploads', () => {
     expect(() => b.assertHandoverPlan({ steps: ok.steps })).toThrow(/needs "why"/);
     expect(() => b.assertHandoverPlan({ ...ok, steps: [{ do: 'kevin', say: 'Sign in' }] })).toThrow(/untilUrl, untilSelector, untilText/);
     expect(() => b.assertHandoverPlan({ ...ok, steps: [{ do: 'kevin', say: 'Sign in', untilText: 'My account' }] })).not.toThrow();
-    // Enter can submit a form: a handover presses only keys that move or tick.
-    expect(() => b.assertHandoverPlan({ ...ok, steps: [{ do: 'press', selector: '#q', key: 'Enter' }] })).toThrow(/only Tab, Space and the arrow keys/);
+    // Enter can submit a form: a handover presses only Tab and Space.
+    expect(() => b.assertHandoverPlan({ ...ok, steps: [{ do: 'press', selector: '#q', key: 'Enter' }] })).toThrow(/only Tab and Space/);
+    // An arrow key picks a radio answer, so a declaration group could be answered by one (review round 4).
+    expect(() => b.assertHandoverPlan({ ...ok, steps: [{ do: 'press', selector: '#q', key: 'ArrowRight' }] })).toThrow(/an arrow key picks a radio answer/);
     expect(() => b.assertHandoverPlan({ ...ok, steps: [{ do: 'press', selector: '#q', key: 'Tab' }] })).not.toThrow();
   });
   it('fills {{today}} with the UK date', () => {
@@ -171,10 +178,27 @@ describe('the robot does every step up to Kevin, waits for his part, and hands o
       const plain = await b.runHandover(page, { why: 'pay', steps: [{ do: 'click', selector: '#plain' }] });
       expect(plain.stuck).toBeNull();
       expect(await page.locator('#out').textContent()).toBe('PLAIN');
+      // Review round 4: a dropdown or a Yes button answering a declaration, and a name typed as a
+      // signature, are his; an ordinary dropdown is the robot's.
+      for (const st of [{ do: 'select', selector: '#ds', value: 'Yes' }, { do: 'click', selector: '#tb' }, { do: 'click', selector: '#tb2' }, { do: 'fill', selector: '#sig', value: 'Kevin Brittain' }]) {
+        const r4 = await b.runHandover(page, { why: 'pay', steps: [st] });
+        expect(r4.stuck && r4.stuck.error, st.selector).toMatch(/reads like a declaration|looks like a signature/);
+      }
+      expect(await page.locator('#ds').inputValue()).toBe('');
+      expect(await page.locator('#tb').getAttribute('aria-pressed')).toBe('false');
+      expect(await page.locator('#out').textContent()).not.toBe('DECLARED');
+      expect(await page.locator('#sig').inputValue()).toBe('');
+      const built = await b.runHandover(page, { why: 'pay', steps: [{ do: 'select', selector: '#bt', value: '1970 - 1989' }] });
+      expect(built.stuck).toBeNull();
       const stuck = await b.runHandover(page, { why: 'pay', steps: [{ do: 'click', selector: '#not-there', timeout: 1000 }] }, {});
       expect(stuck.stuck).toMatchObject({ step: 1, do: 'click' });
       expect(stuck.stuck.error).toMatch(/could not read what/);     // unreadable: not touched, his window
       const late = await b.runHandover(page, { why: 'pay', steps: [{ do: 'kevin', say: 'Sign in', untilSelector: '#never' }] }, { kevinMs: 1500 });
+      // A dry run's screenshot is the page, without the green bar.
+      const fresh = await browser.newPage();
+      await fresh.goto(base);
+      await b.runHandover(fresh, { why: 'pay', steps: [{ do: 'fill', selector: '#date', value: '01/10/2026' }] }, { quiet: true });
+      expect(await fresh.locator('#od-your-turn').count()).toBe(0);
       expect(late.stuck.error).toMatch(/not done in time: Sign in/);
     } finally {
       await browser.close();

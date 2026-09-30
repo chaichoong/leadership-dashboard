@@ -1001,13 +1001,15 @@ async function runSteps(page, steps, allowSubmit, confirm) {
 const HANDOVER_DIR = process.env.AGENT_HANDOVER_DIR || path.join(os.homedir(), 'knowledge-os', 'handover');
 const HANDOVER_STEPS = new Set(['goto', 'fill', 'select', 'check', 'click', 'press', 'wait', 'kevin']);
 // Enter can submit a form, so a handover presses only keys that move or tick.
-const HANDOVER_KEYS = new Set(['Tab', 'Shift+Tab', 'Space', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight']);
+const HANDOVER_KEYS = new Set(['Tab', 'Shift+Tab', 'Space']);
 // The final click is always Kevin's (review, 30 Sep 2026: nothing in code stopped a plan's
 // click landing on "Buy policy"). A click, press or tick on anything worded like this refuses.
 // Review round 2 added the words sites use for the same click ("Confirm order", "Accept and continue").
 const FINAL_ACTION_RE = /\b(buy|purchase|pay|payment|order|submit|check ?out|declare|declaration|confirm|agree|accept|complete|send|file|sign)\b/i;
 // A tick box worded like a declaration is his too, however it is phrased.
 const DECLARATION_RE = /\b(declare|declaration|confirm|agree|accept|true|correct|understand|terms|conditions|read|statement)\b/i;
+// A text box asking for his name as a signature is his.
+const SIGNATURE_RE = /\b(sign|signature|signed|signing|e-?sign)\b/i;
 
 function handoverPlanPath(task) { return path.join(HANDOVER_DIR, task + '.json'); }
 
@@ -1018,7 +1020,7 @@ function assertHandoverPlan(plan) {
     const d = s && s.do;
     if (!HANDOVER_STEPS.has(d)) die(`step ${i + 1} is "${d}". A handover plan never submits, pays or uploads: the last click is Kevin's.`);
     if (d === 'press' && !HANDOVER_KEYS.has(String(s.key || ''))) {
-      die(`step ${i + 1} presses "${s.key}". A handover presses only Tab, Space and the arrow keys: Enter can submit a form.`);
+      die(`step ${i + 1} presses "${s.key}". A handover presses only Tab and Space: Enter can submit a form, and an arrow key picks a radio answer.`);
     }
     if (d === 'kevin' && (!String(s.say || '').trim() || !(s.untilUrl || s.untilSelector || s.untilText))) {
       die(`step ${i + 1} (kevin) needs "say" and one of untilUrl, untilSelector, untilText: what he does and how the robot knows he has.`);
@@ -1055,29 +1057,44 @@ async function turnBanner(page, text) {
 // Throws (the step is then stuck and the window his) on a final action, a declaration
 // tick box, or a target it cannot read.
 async function assertNotFinalAction(page, s) {
-  // Tab and the arrow keys only move between fields: nothing is pressed.
+  // Tab only moves between fields: nothing is pressed. (Arrow keys select in a radio group,
+  // so a handover never presses them: review round 4.)
   if (s.do === 'press' && s.key !== 'Space') return;
-  if (FINAL_ACTION_RE.test(String(s.selector || ''))) throw new Error(`refused: "${s.selector}" looks like the final action, which is Kevin's`);
+  const presses = ['click', 'press', 'check'].includes(s.do);
+  if (presses && FINAL_ACTION_RE.test(String(s.selector || ''))) throw new Error(`refused: "${s.selector}" looks like the final action, which is Kevin's`);
   let seen;
   try {
     seen = await page.locator(s.selector).first().evaluate(el => {
-      // A text box is not pressed: its question ("What year did you buy it?") is not a
-      // Buy button (found on AXA, 30 Sep 2026). Anything else is read, a plain div with
-      // a click listener included (review round 2), since no page says what listens.
+      const textOf = (n, attr) => String(n.getAttribute(attr) || '').split(/\s+/).filter(Boolean)
+        .map(id => { const t = document.getElementById(id); return t ? t.textContent || '' : ''; });
+      // The question a control answers: all its labels, the fieldset legend, the group's aria
+      // text and a placeholder. Read for declarations (and, on a text box, a signature) only,
+      // so a "Yes" to "I declare..." is his however it is given (review rounds 3 and 4).
+      const question = c => {
+        const q = [];
+        if (c.labels) for (const l of c.labels) q.push(l.textContent || '');
+        const fs = c.closest('fieldset'); const lg = fs && fs.querySelector('legend');
+        if (lg) q.push(lg.textContent || '');
+        for (const n of [c, c.closest('[role=radiogroup],[role=group]')].filter(Boolean)) {
+          q.push(n.getAttribute('aria-label') || '', ...textOf(n, 'aria-labelledby'), ...textOf(n, 'aria-describedby'));
+        }
+        q.push(c.getAttribute('placeholder') || '');
+        return q;
+      };
+      const squash = a => a.join(' ').replace(/\s+/g, ' ').slice(0, 600);
+      // A text box or dropdown is not pressed: its question ("What year did you buy it?") is
+      // not a Buy button (found on AXA, 30 Sep 2026), but it can still answer a declaration.
       const type = String(el.type || '').toLowerCase();
       const entry = ['TEXTAREA', 'SELECT'].includes(el.tagName)
         || (el.tagName === 'INPUT' && !['submit', 'button', 'image', 'reset', 'checkbox', 'radio'].includes(type));
-      if (entry) return { words: '', tick: false };
-      // A control, never a region: role="main" or "dialog" would read the whole page (review round 3).
+      if (entry) return { entry: true, words: '', question: squash(question(el)), tick: false };
+      // Anything else is read, a plain div with a click listener included (review round 2).
+      // A control, never a region: role="main" or "dialog" would read the whole page (round 3).
       const host = el.closest('button,a,label,summary,input,[onclick],[role=button],[role=link],[role=checkbox],' +
         '[role=radio],[role=menuitem],[role=tab],[role=switch],[role=option]') || el;
       const control = host.tagName === 'LABEL' ? host.control : host;
       const ctype = control ? String(control.type || '').toLowerCase() : '';
       const crole = control ? String(control.getAttribute('role') || '').toLowerCase() : '';
-      const tick = !!control && (['checkbox', 'radio'].includes(ctype) || ['checkbox', 'radio', 'switch'].includes(crole)
-        || control.hasAttribute('aria-checked'));
-      const textOf = (n, attr) => String(n.getAttribute(attr) || '').split(/\s+/).filter(Boolean)
-        .map(id => { const t = document.getElementById(id); return t ? t.textContent || '' : ''; });
       const parts = [];
       for (const n of new Set([el, host, control].filter(Boolean))) {
         parts.push(n.innerText || n.textContent || '', n.value || '', n.getAttribute('aria-label') || '', n.getAttribute('title') || '');
@@ -1087,24 +1104,22 @@ async function assertNotFinalAction(page, s) {
         if (n.labels && !(host.tagName === 'LABEL' && n === control)) for (const l of n.labels) parts.push(l.textContent || '');
         parts.push(...textOf(n, 'aria-labelledby'));
       }
-      // The question a tick box or radio answers: all its labels, the fieldset legend and the
-      // group's aria text. Read for declarations only, so a "Yes" to "I declare..." is his
-      // however it is clicked (review round 3), while "How would you like to pay?" is not.
-      const q = [];
-      if (tick) {
-        if (control.labels) for (const l of control.labels) q.push(l.textContent || '');
-        const fs = control.closest('fieldset'); const lg = fs && fs.querySelector('legend');
-        if (lg) q.push(lg.textContent || '');
-        for (const n of [control, control.closest('[role=radiogroup],[role=group]')].filter(Boolean)) {
-          q.push(n.getAttribute('aria-label') || '', ...textOf(n, 'aria-labelledby'), ...textOf(n, 'aria-describedby'));
-        }
-      }
-      const squash = a => a.join(' ').replace(/\s+/g, ' ').slice(0, 600);
-      return { words: squash(parts), question: squash(q), tick };
+      // An answer: a tick box, radio, ARIA toggle, or a short button such as "Yes" (round 4).
+      const own = control ? String(control.innerText || control.textContent || control.value || '').trim() : '';
+      const answer = !!control && (['checkbox', 'radio'].includes(ctype) || ['checkbox', 'radio', 'switch'].includes(crole)
+        || control.hasAttribute('aria-checked') || control.hasAttribute('aria-pressed')
+        || ((control.tagName === 'BUTTON' || crole === 'button') && own.length <= 12));
+      return { entry: false, words: squash(parts), question: answer ? squash(question(control)) : '', tick: answer };
     }, null, { timeout: Math.min(Number(s.timeout) || 20000, 60000) });
   } catch (e) {
     throw new Error(`could not read what "${s.selector}" is, so it was not touched: ${String(e.message || e).slice(0, 120)}`);
   }
+  if (seen.entry) {
+    if (s.do === 'select' && DECLARATION_RE.test(seen.question)) throw new Error(`refused: "${seen.question.slice(0, 80)}" reads like a declaration, which is Kevin's`);
+    if (s.do === 'fill' && SIGNATURE_RE.test(seen.question)) throw new Error(`refused: "${seen.question.slice(0, 80)}" looks like a signature, which is Kevin's`);
+    return;
+  }
+  if (!presses) return;
   if (FINAL_ACTION_RE.test(seen.words)) throw new Error(`refused: "${seen.words.trim().slice(0, 60)}" looks like the final action, which is Kevin's`);
   const asked = (seen.words + ' ' + seen.question).trim();
   if (seen.tick && DECLARATION_RE.test(asked)) throw new Error(`refused: "${asked.slice(0, 80)}" reads like a declaration, which is Kevin's`);
@@ -1165,12 +1180,12 @@ async function runHandover(page, plan, opts = {}) {
         await turnBanner(page, FILLING);
         continue;
       }
-      if (s.do === 'click' || s.do === 'press' || s.do === 'check') await assertNotFinalAction(page, s);
+      if (['click', 'press', 'check', 'select', 'fill'].includes(s.do)) await assertNotFinalAction(page, s);
       if (s.do === 'goto') assertNotFinalUrl(s.url);
       const r = await runSteps(page, [s], false, null);
       done.push(...r.done);
       if (opts.onTick) opts.onTick();
-      await turnBanner(page, FILLING);                 // a new page drops the bar: put it back
+      if (!opts.quiet) await turnBanner(page, FILLING);   // a new page drops the bar: put it back (not in a dry run's screenshot)
     } catch (e) {
       return { done, stuck: { step: i + 1, do: s.do, error: String((e && e.message) || e).slice(0, 300) } };
     }
@@ -1564,7 +1579,7 @@ async function main() {
       const shot = arg(rest, 'shot');
       if (!shot) die('--shot is required: the screenshot goes on the card');
       const res = await withPage(profile, false, async (page) => {
-        const r = await runHandover(page, { ...plan, steps: plan.steps.filter(s => s.do !== 'kevin') });
+        const r = await runHandover(page, { ...plan, steps: plan.steps.filter(s => s.do !== 'kevin') }, { quiet: true });
         return Object.assign(r, { screenshot: await shoot(page, shot).catch(() => null) });
       });
       console.log(JSON.stringify({ mode: 'handover-dry-run', task, stuck: res.stuck, screenshot: res.screenshot, steps: res.done.length }));
