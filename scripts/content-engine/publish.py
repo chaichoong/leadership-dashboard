@@ -1468,8 +1468,11 @@ CLIP_SECTIONS = {"YouTube Short": ("lfmd",), "Learnings clips": ("lfmd",), "Teas
 
 
 def episode_finished(entry, made):
-    """Out on every section it owes. `made(clip)` says whether the render made that clip (its recorded Drive link)."""
-    return all(v == "done" or (v == "missing" and section in CLIP_SECTIONS and not any(made(c) for c in CLIP_SECTIONS[section]))
+    """Out on every section it owes. A clip was made when the render recorded its Drive link (`made(clip)`) or any post
+    of it exists: 2054 and 2056 were posted before links were recorded (review, 30 Sep 2026)."""
+    posts = (entry.get("posts") or {}).values()
+    was_made = lambda clip: made(clip) or any(p.get("clip") == clip for p in posts)
+    return all(v == "done" or (v == "missing" and section in CLIP_SECTIONS and not any(was_made(c) for c in CLIP_SECTIONS[section]))
                for section, v in section_status(entry).items())
 
 
@@ -1743,7 +1746,7 @@ def _selftest_one_episode_fails():
 def _selftest_close_cards():
     """30 Sep 2026: 2059-2077 were live on all seven sections and their approved cards sat open at "Today" for up to
     two weeks, so the Task Manager asked Kevin to approve 2059 again. Drives close_cards end to end on fakes."""
-    import types as _types, io as _io, contextlib as _cl
+    import types as _types, io as _io, contextlib as _cl, copy as _copy
     def out_everywhere(diary=True):
         posts = {"youtube|full|yt": {"platform": "youtube", "clip": "full", "status": "published"},
                  "facebook|summary|fb": {"platform": "facebook", "clip": "summary", "status": "published"}}
@@ -1755,17 +1758,20 @@ def _selftest_close_cards():
             e["facebook_share_lfmd"] = {"status": "shared"}
         return e
     part = out_everywhere(); part["posts"]["facebook|lfmd|fb"]["status"] = "scheduled"          # a Learnings post not out yet
+    old = out_everywhere(); del old["posts"]["youtube|lfmd|yt"]                    # 2054's shape: Learnings posted, no link recorded, Short missing
     disk = {"_cursor": 2079, "2059": out_everywhere(), "2060": out_everywhere(), "2061": out_everywhere(), "2078": part,
             "2062": out_everywhere(), "2063": out_everywhere(), "2064": dict(out_everywhere(), card_closed="2026-09-29T10:00:00Z"),
-            "2065": out_everywhere(diary=False), "2066": out_everywhere(diary=False), "2067": out_everywhere(), "2068": out_everywhere()}
+            "2065": out_everywhere(diary=False), "2066": out_everywhere(diary=False), "2067": out_everywhere(), "2068": out_everywhere(),
+            "2054": old}
     cards = {str(d): {"task": "rec%d" % d, "verdict": "approved"} for d in range(2059, 2069)}
-    cards["2078"] = {"task": "rec2078", "verdict": "approved"}; cards["2062"]["verdict"] = "changes"
-    made = lambda day, clip: not (day == 2065 and clip == "lfmd")          # 2065 had no diary section; 2066's clip was made, never posted
+    cards["2078"] = {"task": "rec2078", "verdict": "approved"}; cards["2062"]["verdict"] = "changes"; cards["2054"] = {"task": "rec2054", "verdict": "approved"}
+    made = lambda day, clip: not ((day == 2065 and clip == "lfmd") or day == 2054)   # 2065: no diary section; 2066's clip made, never posted
     assert cards_to_close(disk, cards, made) == [(d, "rec%d" % d) for d in (2059, 2060, 2061, 2063, 2065, 2067, 2068)], cards_to_close(disk, cards, made)
     status = {"rec2059": "Today", "rec2060": "Completed", "rec2061": "Approval", "rec2063": "Today", "rec2065": "Today", "rec2067": "Cancelled", "rec2068": "Today"}
     calls = []
     def run_(*args):
         calls.append(args)
+        if args[:2] == ("complete", "rec2063"): disk["2078"]["fill_attempts"] = 1   # another writer, mid-run
         if args[:2] == ("complete", "rec2061"): return 1, "ERROR: refusing to complete rec2061 - Kevin approved it WITH EDITS and no edit was applied."
         if args[:2] == ("annotate", "rec2068"): return 1, "HTTP 422"
         return 0, "{}"
@@ -1776,7 +1782,9 @@ def _selftest_close_cards():
         with _cl.redirect_stdout(o), _cl.redirect_stderr(e): close_cards(made=made, run=run_, **kw)
         return o.getvalue(), e.getvalue()
     try:
-        g.update({"load_state": lambda: disk, "save_state": lambda st: saves.append(1),
+        # Separate copies, as on disk: a save of the copy read at the start would undo the writer above.
+        def save_(st): saves.append(1); disk.clear(); disk.update(_copy.deepcopy(st))
+        g.update({"load_state": lambda: _copy.deepcopy(disk), "save_state": save_,
                   "approval": _types.SimpleNamespace(load_state=lambda: cards)})
         quiet(dry_run=True, status_of=status.get)
         assert calls == [] and saves == [] and not any("card_closed" in disk[d] for d in ("2059", "2060", "2067")), "a dry run closes nothing and saves nothing"
@@ -1791,12 +1799,16 @@ def _selftest_close_cards():
         assert out.count("ERROR: episode 2061") == 1, "a refusal is flagged as an ERROR the first time: %s" % out
         assert "2068" in err and "note was not written" in err and disk["2068"]["card_closed"].endswith("Z"), "a failed note is said, and the card still counts as closed"
         assert "card_closed" not in disk["2078"] and "card_closed" not in disk["2062"], "an episode not out everywhere, or not approved, stays open"
+        assert "card_closed" not in disk["2054"], "a clip posted before links were recorded is still owed its Short"
+        assert disk["2078"].get("fill_attempts") == 1, "a close never undoes what another writer saved meanwhile"
+        disk["2061"]["card_close_refused"]["since"] = since = "2026-09-29T08:00:00Z"
         notes = [a for a in calls if a[0] == "annotate"]
         assert [a[1] for a in notes] == ["rec2059", "rec2063", "rec2065", "rec2068"] and "https://youtu.be/x" in notes[0][3], notes
         calls.clear()
         out, err = quiet(status_of=status.get)
         assert [a[1] for a in calls if a[0] == "complete"] == ["rec2061"], "a closed card is never completed twice: %s" % calls
         assert "ERROR:" not in out and "still not closed" in err, "a standing refusal is flagged once, then named each hour without a new alarm"
+        assert disk["2061"]["card_close_refused"]["since"] == since, "a standing refusal keeps the time it started"
         def boom_first(task):
             if task == "rec2059": raise RuntimeError("Airtable 503")
             return "Today"
