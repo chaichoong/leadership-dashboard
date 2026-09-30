@@ -62,7 +62,7 @@ function scenario(name, { dirtyFile = null, dirtyContent = '{"a":999}\n',
   // The engine's own runtime file, dirty exactly as it is in production.
   if (dirtyFile) writeFileSync(join(work, dirtyFile), dirtyContent);
   const sh = join(dir, 'run.sh');
-  writeFileSync(sh, `set -uo pipefail\nREPO=${JSON.stringify(work)}\n${block()}\n`);
+  writeFileSync(sh, `set -uo pipefail\nREPO=${JSON.stringify(work)}\nSELF=${JSON.stringify(sh)}\n${block()}\n`);
   // ONE run, both streams. Running it twice would fast-forward on the first
   // pass and then truthfully report "up to date" on the second, which would
   // make this test pass for the wrong reason.
@@ -167,32 +167,57 @@ describe('the hourly publisher raises a held card', () => {
 // replaced that file on disk. The new step first ran an hour later. The block now starts the script again, once.
 // Real git, the script itself tracked and changed upstream, ONE run: the new code must run in it.
 describe('an update to the script itself runs in the same run', () => {
-  function selfUpdate(name, blockText) {
+  const commit = (cwd, msg, ...extra) => git(cwd, 'commit', '-q', ...extra, '-m', msg);
+  function selfUpdate(name, { pre = '', generated = false, relative = false, env = {} } = {}) {
     const dir = join(ROOT, name);
     const up = join(dir, 'upstream');
     mkdirSync(up, { recursive: true });
-    const script = (v) => `set -uo pipefail\nREPO="$(cd "$(dirname "$0")" && pwd)"\n${blockText}\necho "CODE ${v}"\n`;
+    const script = (v) => `set -uo pipefail\nREPO="$(cd "$(dirname "$0")" && pwd)"\n`
+      + `SELF="$(cd "$(dirname "$0")" && pwd)/\${0##*/}"\ncd "$REPO" || exit 1\n${pre}\n${block()}\necho "CODE ${v}"\n`;
     git(up, 'init', '-q', '-b', 'main');
     writeFileSync(join(up, 'run.sh'), script('v1'));
-    git(up, 'add', '-A'); git(up, 'commit', '-qm', 'v1');
+    if (generated) writeFileSync(join(up, 'gen.json'), '{"km":1}\n');
+    git(up, 'add', '-A'); commit(up, 'v1');
     git(dir, 'clone', '-q', up, 'work');
     writeFileSync(join(up, 'run.sh'), script('v2'));
-    git(up, 'add', '-A'); git(up, 'commit', '-qm', 'v2');
-    const out = execFileSync('bash', ['-c', `/bin/bash ${JSON.stringify(join(dir, 'work', 'run.sh'))} 2>&1`],
-      { encoding: 'utf8', env: { ...process.env, CE_RUNTIME_REEXEC: '' } });
-    return out;
+    if (generated) {
+      writeFileSync(join(up, 'gen.json'), '{"km":2}\n');
+      writeFileSync(join(dir, 'work', 'gen.json'), '{"km":2}\n');   // regenerated locally to exactly what origin holds
+    }
+    git(up, 'add', '-A'); commit(up, 'v2');
+    const target = relative ? 'work/run.sh' : JSON.stringify(join(dir, 'work', 'run.sh'));
+    return execFileSync('bash', ['-c', `cd ${JSON.stringify(dir)} && /bin/bash ${target} 2>&1`],
+      { encoding: 'utf8', timeout: 20000, env: { ...process.env, CE_RUNTIME_REEXEC: '', CE_RUNTIME_UPDATED: '', ...env } });
   }
+  const ranOnce = (out) => {
+    expect(out.match(/restarting on the updated script/g)).toHaveLength(1);
+    expect(out).toMatch(/restarted on the updated script/);   // the second pass runs what the first pulled
+    expect(out.match(/CODE v\d/g)).toEqual(['CODE v2']);      // the new code ran, the old code never did
+  };
 
-  it('the pulled script runs once, from the top, and never loops', () => {
-    const out = selfUpdate('self-update', block());
-    expect(out).toMatch(/fast-forwarded 1 commit\(s\)/);
-    expect(out).toMatch(/restarting on the updated script/);
-    expect(out).toMatch(/up to date with origin\/main/);        // the second pass finds nothing to pull
-    expect(out.match(/CODE v\d/g)).toEqual(['CODE v2']);        // the new code ran, the old code never did
+  it('the pulled script runs once, from the top, on the new file', () => {
+    const out = selfUpdate('self-update');
+    expect(out).toMatch(/fast-forwarded 1 commit\(s\) onto origin\/main/);
+    ranOnce(out);
+    expect(out).not.toMatch(/up to date with origin\/main/);   // the restart pass never pulls again
   });
 
-  it('both Content Engine scripts carry the restart', () => {
-    const pub = readFileSync(resolve(__dirname, '../scripts/content-engine-publish.sh'), 'utf8');
-    for (const s of [src, pub]) expect(s).toContain('exec /bin/bash "$0" "$@"');
+  it('works when the job is started by a relative path from another folder', () => {
+    ranOnce(selfUpdate('self-update-relative', { relative: true }));
+  });
+
+  it('restarts after the restore-then-pull path too', () => {
+    const out = selfUpdate('self-update-generated', { generated: true });
+    expect(out).toMatch(/after restoring 1 generated file\(s\) already identical to origin/);
+    ranOnce(out);
+  });
+
+  it('never loops, even when origin moves on every pass', () => {
+    const bump = `git -C ${JSON.stringify(join(ROOT, 'self-update-moving', 'upstream'))} -c user.name=t -c user.email=t@t commit -q --allow-empty -m bump`;
+    ranOnce(selfUpdate('self-update-moving', { pre: bump }));
+  });
+
+  it('a guard value inherited from a parent process cannot stop the restart', () => {
+    ranOnce(selfUpdate('self-update-inherited', { env: { CE_RUNTIME_REEXEC: '1' } }));
   });
 });

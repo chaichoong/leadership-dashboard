@@ -32,6 +32,7 @@
 #  10. report        : one line each for the morning digest.
 set -uo pipefail
 REPO="$(cd "$(dirname "$0")/.." && pwd)"   # the checkout this script lives in, so a worktree run uses its own code
+SELF="$(cd "$(dirname "$0")" && pwd)/${0##*/}"   # absolute, before the cd below: the runtime update restarts this file
 LOG_DIR="/Users/kevinbrittain/knowledge-os/logs/content-engine"
 mkdir -p "$LOG_DIR"
 cd "$REPO" || exit 1
@@ -59,7 +60,10 @@ command -v node >/dev/null 2>&1 || echo "ERROR: node not found on PATH or under 
 # wanted. And whichever way it goes, the run SAYS so — a checkout running stale
 # code is the failure this whole queue exists to catch, and it must not be quiet.
 # --- runtime-update-block (extracted verbatim by tests/content-engine-runtime-update.test.js) ---
-if [ "$(git -C "$REPO" branch --show-current 2>/dev/null)" = "main" ]; then
+CE_RUNTIME_UPDATED=
+if [ "${CE_RUNTIME_REEXEC:-}" = "$$" ]; then
+  echo "runtime: restarted on the updated script"   # this pass runs what the first pulled; it never pulls again
+elif [ "$(git -C "$REPO" branch --show-current 2>/dev/null)" = "main" ]; then
   git -C "$REPO" fetch -q origin main 2>/dev/null || true
   BEHIND=$(git -C "$REPO" rev-list --count HEAD..origin/main 2>/dev/null || echo 0)
   if [ "${BEHIND:-0}" -gt 0 ]; then
@@ -98,11 +102,12 @@ else
 fi
 # BASH KEEPS READING THE FILE IT OPENED (30 Sep 2026). The pull above replaces this script on disk, but bash is still
 # reading its old copy, so every step below ran as it was before the merge: PR #647's new card-close step first ran
-# an hour after it merged. Start once more from the top on the new file; that pass finds nothing to pull.
-if [ -n "${CE_RUNTIME_UPDATED:-}" ] && [ -z "${CE_RUNTIME_REEXEC:-}" ]; then
-  export CE_RUNTIME_REEXEC=1
+# an hour after it merged. Start once more from the top on the new file. exec keeps this process id, so the guard is
+# this run's own: a value inherited from a parent can never stop a restart, and the second pass never pulls again.
+if [ -n "$CE_RUNTIME_UPDATED" ] && [ "${CE_RUNTIME_REEXEC:-}" != "$$" ]; then
+  export CE_RUNTIME_REEXEC=$$
   echo "runtime: restarting on the updated script"
-  exec /bin/bash "$0" "$@"
+  exec /bin/bash "$SELF" "$@"
 fi
 # --- end runtime-update-block ---
 
