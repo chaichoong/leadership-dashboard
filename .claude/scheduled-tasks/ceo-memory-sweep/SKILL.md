@@ -63,6 +63,22 @@ You are the AI CEO's nightly memory. Your job: make sure NOTHING Kevin discussed
 SOURCES (gather both):
 1. Slack CEO conversations: RETIRED 1 Sep 2026 (Kevin's Slack cleanup) — the CEO DM chat no longer answers, so this stream is permanently empty. Skip the fetch; an empty day here is normal, not a fault. (The endpoint still exists for history reads: GET "https://contractor-bot.kevinbrittain.workers.dev/ceo-transcript?key=KEY&oldest=TS", KEY at ~/.config/od/ceo_transcript_key, never print it.)
 2. Deep sessions: any file in "/Users/kevinbrittain/Library/CloudStorage/GoogleDrive-kevin@runpreneur.org.uk/My Drive/00 AI Context/CEO Conversations/" dated today (the /ceo skill writes these; they may already contain distilled decisions — do not duplicate what is already recorded).
+3. Session transcripts. **Select them with the script, never by file date:**
+
+   ```
+   python3 /Users/kevinbrittain/Projects/leadership-dashboard/scripts/transcripts-for-day.py YYYY-MM-DD --json
+   ```
+
+   It returns every transcript holding at least one line dated that day, with
+   the count, and flags any file whose mtime disagrees. Exit 1 means no
+   transcript holds that day: that is a genuinely quiet day, so log it and stop.
+
+   NEVER pick transcripts by `ls -t`, `find -mtime` or file modification time
+   (finding 20260924-ceo-memory-sweep-591). Mtime says when a file was last
+   touched, not what day the conversation in it happened, and it fails both
+   ways: on the 24 Sep run for 23 Sep, three mtime-selected files actually held
+   content from 15, 21-22 and 22 Sep, while any session live on 23 Sep and
+   resumed on 24 Sep fell outside the window and would never have been read.
 
 PROCESS:
 - If Kevin sent no messages today (only the automatic morning brief), write nothing, log "quiet day" and stop.

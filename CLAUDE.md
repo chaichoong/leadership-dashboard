@@ -34,6 +34,7 @@ Never guess an entity attribute — property location, tenancy status, cost stat
 
 - Paginate every read, including the existence check before a bulk create (a missed page writes duplicates): follow `offset`, or use `airtableFetch()`. A hand-rolled fetch once read only the first 100 rows and the card showed a wrong score for a month.
 - A GET by record id ignores the table in the URL. To prove which table a record is in, list that table or attempt a write.
+- A GET returns `fields` keyed by field NAME unless you ask for `returnFieldsByFieldId=true`. Any read-modify-write uses ONE key style on both sides, and a field you are about to append to that reads blank is a STOP, not a starting point: on 28 Sep 2026 a name-keyed GET read by field id, got `""`, and a PATCH wiped three Descriptions.
 - `ARRAYJOIN()` over a link field returns display names, never record ids. Match ids through a lookup of `RECORD_ID()`; a name match needs a control.
 - Date equality needs `DATESTR()` or `IS_SAME()`. `{Date}="2026-08-06"` returns zero.
 - A blank number field passes `!= 0` and fails `> 0`. Use `ABS({field}) > 0` for "set and non-zero", and test every formula change against a blank record.

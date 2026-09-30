@@ -331,6 +331,19 @@ def fail(msg, kind="error"):
     sys.exit(2)
 
 
+def progress(msg):
+    """A line to STDERR, never stdout.
+
+    Finding 20260925-agent-dispatch-615. Waiting out the Gmail per-minute
+    metric was completely silent: the run sat for up to 600 seconds and every
+    surface read it as HUNG rather than as waiting on Gmail. stdout carries
+    this script's JSON and callers parse it, so progress goes to stderr, where
+    the slot wrapper already collects it into runs.log.
+    """
+    sys.stderr.write(msg.rstrip() + "\n")
+    sys.stderr.flush()
+
+
 def read_secret(path, what):
     try:
         return path.read_text().strip()
@@ -487,6 +500,14 @@ def worker_post(path, payload, sleep=time.sleep):
                          "lost — the next slot picks up from here. Detail: %s"
                          % (_slowdown["waited"], why, detail), kind="rate")
                 _slowdown["waited"] += SHORT_WINDOW_WAIT_SECONDS
+                # SAY IT (finding 20260925-agent-dispatch-615). Silence here is
+                # what made a waiting run read as a hung one.
+                progress("GMAIL PER-MINUTE METRIC FULL on %s (attempt %d/%d): "
+                         "waiting %ds for the window to refill — %ds of this "
+                         "run's %ds budget spent. %s"
+                         % (path, attempt, MAX_ATTEMPTS,
+                            SHORT_WINDOW_WAIT_SECONDS, _slowdown["waited"],
+                            MAX_SLOWDOWN_SECONDS, why))
                 sleep(SHORT_WINDOW_WAIT_SECONDS)
                 continue
             if action == "stop":
@@ -509,6 +530,18 @@ def worker_post(path, payload, sleep=time.sleep):
         return json.loads(body)
     except (ValueError, TypeError):
         fail("worker %s returned non-JSON (%s...)" % (path, str(body)[:120]))
+
+
+def seconds_to_next_minute(now=None):
+    """Seconds until the next clock-minute boundary, never 0.
+
+    Gmail's per-minute metric refills on the boundary, not 60 seconds after the
+    call that hit it, so this is what a cycle-2 re-run has to clear. Never
+    returns 0: a run that starts on the boundary itself would otherwise make
+    its first call in the same still-hot window it was told to avoid.
+    """
+    t = time.time() if now is None else now
+    return 60.0 - (t % 60.0)
 
 
 def worker_labels():
@@ -587,10 +620,22 @@ def cmd_labels():
     }, indent=1))
 
 
-def cmd_scan(back_hours):
+def cmd_scan(back_hours, sleep=time.sleep):
+    state = read_state()
+    # CYCLE 2 DOES NOT START INTO A HOT QUOTA WINDOW (finding
+    # 20260925-agent-dispatch-615). A truncated cycle 1 is followed straight
+    # away by another scan, and on 23 and 28 Sep 2026 that second scan hit the
+    # same per-minute metric its predecessor had just filled, then spent the
+    # whole 600-second budget on it and decided zero messages. Clearing the
+    # clock minute first costs under a minute and removes the direct trigger.
+    if state.get("last_scan_truncated"):
+        wait = seconds_to_next_minute()
+        progress("PREVIOUS SCAN WAS TRUNCATED: waiting %.0fs for a fresh Gmail "
+                 "clock minute before this continuation scan's first call."
+                 % wait)
+        sleep(wait)
     labels = worker_labels()
     l8, l12, l13 = resolve_triage_labels(labels)
-    state = read_state()
     now_ms = int(datetime.now().timestamp() * 1000)
     first_run = "watermark_ms" not in state
     wm = state.get("watermark_ms", now_ms - 7 * 86400 * 1000)
