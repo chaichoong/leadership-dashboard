@@ -129,7 +129,10 @@ body {
 @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.4; } }
 
 /* Sidebar Navigation */
-.app-layout { display: flex; min-height: 100vh; }
+/* 100vh less the body's 10px top and bottom padding. A full 100vh here made
+   every page 20px taller than the screen, so even a page that fits scrolled
+   (Kevin, 30 Sep 2026; tests/sync-invariants/shell-frame-fits-screen.spec.js). */
+.app-layout { display: flex; min-height: calc(100vh - 20px); }
 .sidebar {
     width: 220px; min-width: 220px;
     background: var(--bg-sidebar);
@@ -391,12 +394,19 @@ body {
 .cost-insight { padding: 10px 14px; border-left: 3px solid var(--accent); background: var(--bg-surface); border-radius: var(--radius-sm); font-size: 13px; color: var(--text-primary); line-height: 1.5; }
 
 .tab-panel-iframe {
+    /* The frame fills the screen exactly (Kevin, 30 Sep 2026): the body's
+       10px padding top and bottom plus this height make 100vh. A 20px top
+       margin and the inline gap under an inline iframe used to push the page
+       26px past the screen, so the whole app scrolled on top of the page's
+       own scrolling and the frame's bottom was cut off until you did.
+       Guarded by tests/sync-invariants/shell-frame-fits-screen.spec.js. */
+    display: block;
     width: 100%;
     height: calc(100vh - 20px);
     min-height: 600px;
     border: none;
     border-radius: var(--radius-lg);
-    margin-top: 20px;
+    margin-top: 0;
     background: var(--bg-app);
 }
 
@@ -777,7 +787,7 @@ body {
 
     .auth-box { padding: 24px 16px; }
 
-    .tab-panel-iframe { min-height: 400px; height: calc(100vh - 140px); }
+    .tab-panel-iframe { min-height: 400px; height: calc(100vh - 140px); margin-top: 20px; }
 
     .detail-item { font-size: 12px; }
     .detail-item-value { font-size: 12px; }

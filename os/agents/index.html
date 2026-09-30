@@ -16,9 +16,8 @@ a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}
 .auth-bar button{background:var(--accent);color:var(--accent-on);border:none;padding:6px 16px;border-radius:6px;cursor:pointer;font-size:var(--fs-base);font-weight:var(--fw-semibold)}
 .auth-bar button:hover{background:var(--accent-hover)}
 
-.topbar{background:var(--bg-surface);border-bottom:1px solid var(--border-default);padding:12px 24px;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px;position:sticky;top:0;z-index:50;box-shadow:0 1px 0 var(--border-subtle)}
+.topbar{background:var(--bg-surface);border-bottom:1px solid var(--border-default);padding:8px 24px;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px;position:sticky;top:0;z-index:50;box-shadow:0 1px 0 var(--border-subtle)}
 .topbar h1{font-size:20px;font-weight:var(--fw-bold);display:flex;align-items:center;gap:8px}
-.topbar .subtitle{font-size:var(--fs-sm);color:var(--text-secondary)}
 .topbar-right{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
 
 .btn{padding:6px 14px;border-radius:6px;border:1px solid var(--border-default);background:var(--bg-surface);color:var(--text-primary);cursor:pointer;font-size:var(--fs-sm);font-weight:var(--fw-semibold);display:inline-flex;align-items:center;gap:6px}
@@ -409,9 +408,11 @@ a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}
 </div>
 
 <div id="topbar" class="topbar" style="display:none">
+    <!-- One line, no subtitle (Kevin, 30 Sep 2026): this bar stays pinned
+         while you scroll, so every pixel here is a pixel less of the queue.
+         The description is kept as the heading's hover text. -->
     <div>
-        <h1>AI Agents</h1>
-        <div class="subtitle">The CEO brief and your team's stats, your approvals in priority order, and what has not moved</div>
+        <h1 title="The CEO brief and your team's stats, your approvals in priority order, and what has not moved">AI Agents</h1>
     </div>
     <div class="topbar-right">
         <span id="syncStatus" class="sync-status" title="Not synced yet"><span class="sync-dot"></span>Loading…</span>
