@@ -33,11 +33,18 @@ const PAGE = `<!doctype html><html><body>
   <button id="buy" onclick="document.getElementById('out').textContent='BOUGHT'">Buy policy</button>
   <input type="checkbox" id="decl"><label for="decl">I confirm the declarations are true</label>
   <input type="password" id="pw">
+  <input type="password" id="hidden-pw" style="display:none">
   <label for="yr">What year did you buy it?</label><input id="yr">
+  <label><input type="checkbox" id="wrapped"> I have read the statement of fact</label>
+  <button id="b2" onclick="document.getElementById('out').textContent='SPAN-BUY'"><span id="s2">Buy policy</span></button>
+  <div id="dv">Confirm order</div>
+  <input type="checkbox" id="em"><label for="em">Email</label>
+  <label for="mo">How would you like to pay?</label><input type="radio" name="freq" id="mo"><label for="mo" id="mo-opt">Monthly</label>
   <div id="out"></div>
   <script>
     setTimeout(() => { const d = document.createElement('div'); d.id = 'signed-in'; d.textContent = 'My account'; document.body.appendChild(d); }, 800);
     setTimeout(() => { document.getElementById('pw').remove(); }, 2300);
+    document.getElementById('dv').addEventListener('click', () => { document.getElementById('out').textContent = 'DIV-ORDER'; });
   </script>
 </body></html>`;
 
@@ -110,7 +117,8 @@ describe('the robot does every step up to Kevin, waits for his part, and hands o
         { do: 'click', selector: '#next' },
       ] });
       expect(r.stuck).toBeNull();
-      // It waited for the password box to go (2.3 s), not just for the words (0.8 s).
+      // It waited for the password box to go (2.3 s), not just for the words (0.8 s), and a
+      // hidden one (a signed-in page's change-password form) never holds it up.
       expect(Date.now() - t0).toBeGreaterThanOrEqual(2200);
       expect(await page.locator('#pw').count()).toBe(0);
       expect(r.done.map(d => d.do)).toEqual(['kevin', 'fill', 'click']);
@@ -128,6 +136,24 @@ describe('the robot does every step up to Kevin, waits for his part, and hands o
       const year = await b.runHandover(page, { why: 'pay', steps: [
         { do: 'fill', selector: '#yr', value: '2009' }, { do: 'press', selector: '#yr', key: 'Tab' }, { do: 'click', selector: '#yr' } ] });
       expect(year.stuck).toBeNull();
+      // Review round 2: a span inside a Buy button, a plain div with a listener, a tick box
+      // its label wraps, and an address worded like the last step are all his.
+      for (const [sel, what] of [['#s2', 'span'], ['#dv', 'div'], ['#wrapped', 'wrapped']]) {
+        const r2 = await b.runHandover(page, { why: 'pay', steps: [{ do: sel === '#wrapped' ? 'check' : 'click', selector: sel }] });
+        expect(r2.stuck && r2.stuck.error, what).toMatch(/refused/);
+      }
+      expect(await page.locator('#out').textContent()).not.toMatch(/SPAN-BUY|DIV-ORDER/);
+      expect(await page.locator('#wrapped').isChecked()).toBe(false);
+      const url = await b.runHandover(page, { why: 'pay', steps: [{ do: 'goto', url: base + 'checkout/confirm' }] });
+      expect(url.stuck.error).toMatch(/looks like the final step/);
+      // A tick box that is only a contact preference is the robot's to tick.
+      const em = await b.runHandover(page, { why: 'pay', steps: [{ do: 'press', selector: '#em', key: 'Space' }] });
+      expect(em.stuck).toBeNull();
+      expect(await page.locator('#em').isChecked()).toBe(true);
+      // Clicking an option's own label reads the option, not the question AXA also points at it.
+      const mo = await b.runHandover(page, { why: 'pay', steps: [{ do: 'click', selector: '#mo-opt' }] });
+      expect(mo.stuck).toBeNull();
+      expect(await page.locator('#mo').isChecked()).toBe(true);
       const stuck = await b.runHandover(page, { why: 'pay', steps: [{ do: 'click', selector: '#not-there', timeout: 1000 }] }, {});
       expect(stuck.stuck).toMatchObject({ step: 1, do: 'click' });
       expect(stuck.stuck.error).toMatch(/could not read what/);     // unreadable: not touched, his window

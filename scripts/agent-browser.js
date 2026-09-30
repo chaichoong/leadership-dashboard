@@ -1002,7 +1002,10 @@ const HANDOVER_STEPS = new Set(['goto', 'fill', 'select', 'check', 'click', 'pre
 const HANDOVER_KEYS = new Set(['Tab', 'Shift+Tab', 'Space', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight']);
 // The final click is always Kevin's (review, 30 Sep 2026: nothing in code stopped a plan's
 // click landing on "Buy policy"). A click, press or tick on anything worded like this refuses.
-const FINAL_ACTION_RE = /\b(buy|purchase|pay|payment|place order|submit|check ?out|declare|declaration|i confirm|i agree|i accept|sign)\b/i;
+// Review round 2 added the words sites use for the same click ("Confirm order", "Accept and continue").
+const FINAL_ACTION_RE = /\b(buy|purchase|pay|payment|order|submit|check ?out|declare|declaration|confirm|agree|accept|complete|send|file|sign)\b/i;
+// A tick box worded like a declaration is his too, however it is phrased.
+const DECLARATION_RE = /\b(declare|declaration|confirm|agree|accept|true|correct|understand|terms|conditions|read|statement)\b/i;
 
 function handoverPlanPath(task) { return path.join(HANDOVER_DIR, task + '.json'); }
 
@@ -1045,32 +1048,58 @@ async function turnBanner(page, text) {
   }, text).catch(() => {});   // a page that blocks scripts still gets the window; the terminal says it too
 }
 
-// What a click, press or tick would act on, in words: its selector, its own text, value
-// and label, and for a form control the label pointing at it. Throws (the step is then
-// stuck and the window his) on a final action or on a target it cannot read.
+// What a click, press or tick would act on, in words: the element, the control it sits
+// inside (a span inside a Buy button), their labels however attached, and aria-labelledby.
+// Throws (the step is then stuck and the window his) on a final action, a declaration
+// tick box, or a target it cannot read.
 async function assertNotFinalAction(page, s) {
   // Tab and the arrow keys only move between fields: nothing is pressed.
   if (s.do === 'press' && s.key !== 'Space') return;
   if (FINAL_ACTION_RE.test(String(s.selector || ''))) throw new Error(`refused: "${s.selector}" looks like the final action, which is Kevin's`);
-  let words;
+  let seen;
   try {
-    words = await page.locator(s.selector).first().evaluate(el => {
-      // Only a target that ACTS when pressed is read. A text box is not: its question
-      // ("What year did you buy it?") is not a Buy button (found on AXA, 30 Sep 2026).
+    seen = await page.locator(s.selector).first().evaluate(el => {
+      // A text box is not pressed: its question ("What year did you buy it?") is not a
+      // Buy button (found on AXA, 30 Sep 2026). Anything else is read, a plain div with
+      // a click listener included (review round 2), since no page says what listens.
       const type = String(el.type || '').toLowerCase();
-      const role = String(el.getAttribute('role') || '').toLowerCase();
-      const acts = ['BUTTON', 'A', 'LABEL', 'SUMMARY'].includes(el.tagName)
-        || (el.tagName === 'INPUT' && ['submit', 'button', 'image', 'reset', 'checkbox', 'radio'].includes(type))
-        || ['button', 'link', 'checkbox', 'radio', 'menuitem', 'tab', 'switch'].includes(role)
-        || typeof el.onclick === 'function';
-      if (!acts) return '';
-      const lab = el.id ? Array.from(document.querySelectorAll('label[for="' + CSS.escape(el.id) + '"]')).map(l => l.textContent).join(' ') : '';
-      return [el.innerText || el.textContent || '', el.value || '', el.getAttribute('aria-label') || '', el.getAttribute('title') || '', lab].join(' ').slice(0, 400);
+      const entry = ['TEXTAREA', 'SELECT'].includes(el.tagName)
+        || (el.tagName === 'INPUT' && !['submit', 'button', 'image', 'reset', 'checkbox', 'radio'].includes(type));
+      if (entry) return { words: '', tick: false };
+      const host = el.closest('button,a,label,summary,input,[role],[onclick]') || el;
+      const control = host.tagName === 'LABEL' ? host.control : (host.tagName === 'INPUT' ? host : null);
+      const tick = !!control && String(control.type || '').toLowerCase() === 'checkbox';
+      const parts = [];
+      for (const n of new Set([el, host, control].filter(Boolean))) {
+        parts.push(n.innerText || n.textContent || '', n.value || '', n.getAttribute('aria-label') || '', n.getAttribute('title') || '');
+        // A pressed control's labels, however attached (a label wrapping a tick box). Not
+        // when the robot clicks one label: the control's other label is the question
+        // ("How would you like to pay?"), not the option (found on AXA, 30 Sep 2026).
+        if (n.labels && !(host.tagName === 'LABEL' && n === control)) for (const l of n.labels) parts.push(l.textContent || '');
+        for (const id of String(n.getAttribute('aria-labelledby') || '').split(/\s+/).filter(Boolean)) {
+          const t = document.getElementById(id); if (t) parts.push(t.textContent || '');
+        }
+      }
+      return { words: parts.join(' ').replace(/\s+/g, ' ').slice(0, 600), tick };
     }, null, { timeout: Math.min(Number(s.timeout) || 20000, 60000) });
   } catch (e) {
     throw new Error(`could not read what "${s.selector}" is, so it was not touched: ${String(e.message || e).slice(0, 120)}`);
   }
-  if (FINAL_ACTION_RE.test(words)) throw new Error(`refused: "${words.trim().slice(0, 60)}" looks like the final action, which is Kevin's`);
+  if (FINAL_ACTION_RE.test(seen.words)) throw new Error(`refused: "${seen.words.trim().slice(0, 60)}" looks like the final action, which is Kevin's`);
+  if (seen.tick && DECLARATION_RE.test(seen.words)) throw new Error(`refused: the tick box "${seen.words.trim().slice(0, 60)}" reads like a declaration, which is Kevin's`);
+}
+
+// A goto to an address worded like the last step (/checkout/confirm) is his too.
+function assertNotFinalUrl(u) {
+  let words;
+  try { const x = new URL(u); words = decodeURIComponent(x.pathname + ' ' + x.search).replace(/[^a-z]+/gi, ' '); } catch { words = String(u); }
+  if (FINAL_ACTION_RE.test(words)) throw new Error(`refused: ${u} looks like the final step, which is Kevin's`);
+}
+
+// A signed-in page can keep a hidden change-password form: only a box he can see counts
+// (review round 2: a hidden one timed the sign-in wait out).
+async function visiblePasswordFieldCount(page) {
+  return page.locator('input[type=password]:visible').count();
 }
 
 // Waits while Kevin does his own step (a sign-in). Reads only where the page is
@@ -1086,7 +1115,7 @@ async function waitForKevin(page, s, maxMs, onTick) {
         || (s.untilText && (await domText(page, 20000)).includes(s.untilText));
       // Never while a password box is still on the page: a sign-in page can carry the
       // same words, and the robot must not move on while he is still typing (review).
-      if (seen && Number(await passwordFieldCount(page)) === 0) return true;
+      if (seen && Number(await visiblePasswordFieldCount(page)) === 0) return true;
     } catch { /* mid-navigation: look again */ }
     await new Promise(r => setTimeout(r, 1000));
   }
@@ -1115,6 +1144,7 @@ async function runHandover(page, plan, opts = {}) {
         continue;
       }
       if (s.do === 'click' || s.do === 'press' || s.do === 'check') await assertNotFinalAction(page, s);
+      if (s.do === 'goto') assertNotFinalUrl(s.url);
       const r = await runSteps(page, [s], false, null);
       done.push(...r.done);
       if (opts.onTick) opts.onTick();
@@ -1524,7 +1554,7 @@ async function main() {
         const png = await shoot(page, path.join(HANDOVER_DIR, 'shots', `${task}-${Date.now()}.png`)).catch(() => null);
         await turnBanner(page, r.stuck
           ? `The robot got stuck at step ${r.stuck.step}. You can finish by hand, or close this window.`
-          : `Your turn: ${plan.why}. Close this window when you have finished.`);
+          : `Your turn: ${plan.why}. Close this window when you have finished: the other robots wait while it is open.`);
         console.log(JSON.stringify({ phase: 'your-turn', task, stuck: r.stuck, screenshot: png }));
         await waitForWindowClose(ctx, Number(process.env.AGENT_HANDOVER_WAIT_MS) || 0, tick);
         return Object.assign(r, { screenshot: png });
