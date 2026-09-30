@@ -92,11 +92,15 @@ automatic close has not happened, so run
 `python3 scripts/content-engine/publish.py report` and find day N (from the
 name) on its "content sections not done" and "content cards not closed" lines.
 Either way file ONE finding titled exactly "Episode card N still open after 14
-days" (a repeat adds a recurrence, never a twin): name the sections not out, or,
-if the episode is on neither line, say "episode N is out on every section but
-its card did not close". Never escalate it. An episode card that lands in
+days" (a repeat adds a recurrence, never a twin) and record the move as `leave`
+with that title. What the finding says comes from the record, never a guess: on
+"content sections not done", name the sections not out; on "content cards not
+closed", quote the refusal; on neither line, run
+`python3 scripts/content-engine/publish.py published --day N`: zero destinations
+means "episode N was never scheduled", destinations present mean "episode N is
+out but its card did not close". Never escalate it. An episode card that lands in
 `stuck` instead (a legacy row at Approval with no sender, outside Kevin's queue)
-gets the same finding asking the engine to resubmit it. The engine's OTHER
+gets the same finding asking the engine to resubmit it, recorded as `leave`. The engine's OTHER
 cards, such as the monthly performance read, do not close themselves and stay
 ordinary board work),
 `parked` (Some Day) and counts. Upcoming
