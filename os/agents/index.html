@@ -1843,6 +1843,17 @@ async function agBulkDecide(outcome, opts){
         return;
     }
     const total = ids.length;
+    // Where the view lands, worked out while every card is still on the
+    // page: the lowest ticked card ON SCREEN (an Undo puts a card back in
+    // place on the page but at the end of its rank in allApprovals, so ids
+    // can be out of screen order), or the card after it if a reload took
+    // that card away. Held from the start, so a card folding mid-run or a
+    // sign-in stop part way lands in the same place as the finish.
+    const onScreen = Array.from(document.querySelectorAll('#approvalsBody .apv-card'))
+        .map(c => c.getAttribute('data-apv-card')).filter(id => ids.indexOf(id) !== -1);
+    const lowest = onScreen[onScreen.length - 1] || ids[total - 1];
+    const landing = apvLandingAfter(ids);
+    _apvFocusId = lowest;
     let done = 0, elsewhere = 0, failed = 0, remembered = false;
     for(let i = 0; i < total; i++){
         const id = ids[i];
@@ -1886,7 +1897,12 @@ async function agBulkDecide(outcome, opts){
     if(elsewhere) parts.push(`${elsewhere} already decided elsewhere, so not touched.`);
     if(failed) parts.push(`${failed} could not be saved and are still in the queue.`);
     toast(parts.join(' '));
-    apvScrollToFirstCard();
+    // The lowest ticked card's strip at the top, the card after it below.
+    // If that card has already folded (a slow run), its fold has handed the
+    // focus on and that stands; if a reload took it away, the card after it.
+    if(document.querySelector(`#approvalsBody .apv-card[data-apv-card="${lowest}"]:not(.apv-gone)`)) _apvFocusId = lowest;
+    else if(_apvFocusId === lowest) _apvFocusId = landing;
+    apvScrollToFocus();
 }
 
 // Put the remaining ticks and the locked bar back after anything rebuilt the
@@ -1945,6 +1961,8 @@ async function apvBulkDeferTo(until){
     const whyEl = document.getElementById('apvBulkDeferWhy');
     const why = (whyEl && whyEl.value || '').trim();
     const total = ids.length;
+    // Worked out now, while the cards are still on the page to measure.
+    const landing = apvLandingAfter(ids);
     let done = 0, elsewhere = 0, failed = 0;
     for(let i = 0; i < total; i++){
         apvBulkResume(ids.slice(i));
@@ -1959,6 +1977,7 @@ async function apvBulkDeferTo(until){
     }
     apvBulkLock(false);
     _apvSelected.clear();
+    _apvFocusId = landing;
     await refreshApprovalZone(true);
     const parts = [`Knocked back ${done} to ${apvDeferDateLabel(until)}.`];
     if(elsewhere) parts.push(`${elsewhere} already decided elsewhere.`);
@@ -3305,23 +3324,43 @@ function apvShowSaved(taskId, t, text, undoPayload, kind){
     apvStateStrip(taskId, 'saved', `Saved. ${text}`, `<button class="apv-undo" type="button" data-apv-undo onclick="apvUndo('${taskId}')">Undo</button>`);
     const timer = setTimeout(()=>apvFoldAway(taskId), APV_UNDO_MS);
     _apvUndo[taskId] = { t, payload: undoPayload, timer, kind: kind || 'decision' };
-    apvScrollToFirstCard();
+    // A bulk run sets where it lands once, at the end, not once per card.
+    if(!_apvBulkBusy){ _apvFocusId = taskId; apvScrollToFocus(); }
 }
 
-// THE VIEW RETURNS TO THE FIRST CARD (Kevin, 15 Sep 2026). After a decision
-// the page stayed wherever the scroll happened to be: the decided card
-// shrank to a strip, the list shifted, and the next card to read was off the
-// screen above or below. Now the first card still in the list is put at the
-// top, under the sticky top bar (and the bulk bar when it is showing). A
-// decided card still in its five-second Undo window counts as first, so the
-// Undo stays in view when it was the top card.
+// THE VIEW MOVES ON TO THE NEXT CARD (Kevin, 30 Sep 2026). This replaces
+// "the view returns to the first card" (15 Sep 2026): working through the
+// queue out of order, every decision threw him back to the top. Now the
+// decided card's Saved strip is put at the top, under the sticky top bar
+// (and the bulk bar when it is showing), with the card that followed it
+// straight underneath, so the Undo and the next thing to read are both in
+// view. When the strip folds away, that next card takes its place at the
+// top. The last card in the list hands on to the one above it.
 // If Kevin scrolls during the five-second Undo window, the fold that follows
-// leaves him where he went rather than dragging him back to the top.
+// leaves him where he went rather than dragging him back.
 let _apvAutoScrollUntil = 0, _apvUserScrolled = false;
+let _apvFocusId = '';   // the card the view holds on; blank means the first card
 window.addEventListener('scroll', ()=>{ if(Date.now() > _apvAutoScrollUntil) _apvUserScrolled = true; }, { passive: true });
-function apvScrollToFirstCard(){
+
+// Where the view lands once `ids` leave the list: the first card still open
+// below the lowest of them, or the nearest one above when they were at the
+// bottom. Cards already decided and folding away are passed over.
+function apvLandingAfter(ids){
+    const leaving = new Set(ids);
     const body = document.getElementById('approvalsBody');
-    const card = body ? body.querySelector('.apv-card:not(.apv-gone)') : null;
+    const cards = body ? Array.from(body.querySelectorAll('.apv-card')) : [];
+    const idOf = c => c.getAttribute('data-apv-card');
+    const lowest = cards.reduce((m, c, i) => leaving.has(idOf(c)) ? i : m, -1);
+    if(lowest === -1) return '';
+    const open = c => !leaving.has(idOf(c)) && !c.classList.contains('apv-done') && !c.classList.contains('apv-gone');
+    const hit = cards.slice(lowest + 1).find(open) || cards.slice(0, lowest).reverse().find(open);
+    return hit ? idOf(hit) : '';
+}
+
+function apvScrollToFocus(){
+    const body = document.getElementById('approvalsBody');
+    const card = body ? ((_apvFocusId && body.querySelector(`.apv-card[data-apv-card="${_apvFocusId}"]:not(.apv-gone)`))
+        || body.querySelector('.apv-card:not(.apv-gone)')) : null;
     // offsetParent is null while the approvals view is display:none: a fold
     // timer firing after Kevin switched tab must not move the tab he is on.
     if(!card || card.offsetParent === null) return;
@@ -3355,6 +3394,8 @@ function apvFoldAway(taskId){
     delete _apvUndo[taskId];
     const card = document.querySelector(`[data-apv-card="${taskId}"]`);
     if(!card) return;
+    // The view was holding on this card's strip: hand on to the card after it.
+    if(_apvFocusId === taskId) _apvFocusId = apvLandingAfter([taskId]);
     card.style.maxHeight = card.offsetHeight + 'px';
     // The shrink can make the browser clamp the scroll position; that is the
     // page moving, not Kevin, so it must not count as him scrolling away.
@@ -3367,7 +3408,7 @@ function apvFoldAway(taskId){
         // Only when the visible list is empty does the page rebuild: a filter
         // whose agent has nothing left resets to All, and an empty queue says so.
         if(!left && !Object.keys(_apvUndo).length) renderApprovals();
-        else { apvSyncCountsInPlace(null); if(!_apvUserScrolled) apvScrollToFirstCard(); }
+        else { apvSyncCountsInPlace(null); if(!_apvUserScrolled) apvScrollToFocus(); }
     }, 320);
 }
 // Five seconds to take it back: the same fields the decision wrote, put back.
@@ -3557,6 +3598,7 @@ async function apvDeferNow(taskId, until){
         const ok = await apvDeferWrite(taskId, until, why);
         if(!ok){
             toast('Already decided elsewhere (Slack or the Tasks drawer). Reloading the queue.');
+            _apvFocusId = apvLandingAfter([taskId]);
             await refreshApprovalZone(true);
             return;
         }
@@ -3608,6 +3650,7 @@ async function agUndefer(taskId){
     try {
         await atUpdate(TASKS_TBL, taskId, { [TF.deferredUntil]: null });
         await postTaskComment(taskId, 'Brought back to the approval queue by Kevin, ahead of ' + t.until + '.');
+        _apvFocusId = '';
         await refreshApprovalZone(true);
         toast('Back in your queue.');
     } catch(e){
@@ -3620,12 +3663,13 @@ window.agUndefer = agUndefer;
 // Both halves of the queue move together. Reloading only one leaves the badge
 // counting a task the list no longer shows, which is the drift the shell's
 // badge test exists to prevent.
-// `toFirst` is set when a decision or knock-back caused the reload, so the
-// rebuilt list opens on its first card rather than wherever the scroll was.
-async function refreshApprovalZone(toFirst){
+// `land` is set when a decision or knock-back caused the reload, so the
+// rebuilt list opens on the card in _apvFocusId (the first card when that is
+// blank or gone) rather than wherever the scroll was.
+async function refreshApprovalZone(land){
     await Promise.all([loadApprovals(), loadDeferred()]);
     renderApprovals();
-    if(toFirst) apvScrollToFirstCard();
+    if(land) apvScrollToFocus();
     postApprovalBadge();
     loadChecksAndRender();
     renderRegister();
