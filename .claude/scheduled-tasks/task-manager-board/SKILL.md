@@ -81,11 +81,18 @@ that move; a Rejected card means close it. Two rules: an approval with EMPTY
 approved with no instruction; ask again" rather than inventing one; and the
 gate's approve re-linked the task to you, so if his answer names nobody, put
 it back on `priorHolder` with `route` (an agent) or `handover` (Roy) — that
-route/handover also closes the card in code), `ownLane` (ids held by an agent
-on its own Go Signal, the Content Engine or Inbox Triage: its own job carries
-out and closes them, so never chase, escalate, close or file a finding on one.
-An open episode card is NOT proof an episode is unpublished; `escalate` refuses
-them. On 29 Sep 2026 this board told Kevin nine live episodes were unpublished),
+route/handover also closes the card in code), `ownLane` (Content Engine episode
+cards, named `CONTENT: Publish Episode ...`, each with `daysStill`: the engine
+closes each one itself within the hour of the episode being out on every
+section, whoever holds it. Never chase, escalate or close one; `escalate`
+refuses them. An open episode card is NOT proof an episode is unpublished: on
+29 Sep 2026 this board told Kevin nine live episodes were unpublished. The one
+check is age: for a view with `daysStill` of `ownLaneCheckDays` or more, run
+`python3 scripts/content-engine/publish.py published --day N` (N from the name).
+If every row reads published or shared, leave it and say so. Otherwise file ONE
+finding naming the episode and the sections not out. The engine's OTHER cards,
+such as the monthly performance read, do not close themselves and stay ordinary
+board work),
 `parked` (Some Day) and counts. Upcoming
 tasks whose due date has arrived were already flipped to Today by the runner
 (`task-hygiene-sweep.py flip-due`) before this read. Dispatch's queue JSON also gives you every routable agent's Team
@@ -299,6 +306,10 @@ It gives you Kevin's lane (empty Approver = Kevin) oldest first with a
 rows without Sent For Approval By are excluded IN THE FORMULA, so they can
 never be swept here (they are stuck work, handled in step 2). A zero lane
 alongside 5+ Approval-status rows fails the read loudly; report it.
+
+Never propose closing a lane item with `episodeCard` true: approving a close
+proposal on an episode card reads as Kevin approving the episode itself. Leave
+those to Kevin.
 
 For each lane item, oldest first, ask five questions — checks with findable
 answers, not vibes:

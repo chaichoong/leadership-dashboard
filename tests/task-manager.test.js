@@ -86,21 +86,23 @@ describe('movement maths never trusts a re-stamped field', () => {
         expect(out).toContain('selftest OK');
     });
 
-    // 30 Sep 2026: the board read nine live Content Engine episodes' open cards as "approved but unpublished". Cards
-    // held by an agent on its own Go Signal are its own job's to close; the board's list of those agents must be
-    // exactly agent-dispatch's, or a new one would be chased again.
-    it("the ownLane agents are exactly agent-dispatch's own-Go-Signal role agents", () => {
+    // 30 Sep 2026: the board read nine live Content Engine episodes' open cards as "approved but unpublished". An
+    // episode card closes itself; the board, escalate and the engine must agree on what one is called.
+    it('the episode-card prefix is the same in the board, escalate and the name the engine gives a card', () => {
         const out = execFileSync('python3', ['-c', `
-import importlib.util, json
+import importlib.util, json, sys
+sys.path.insert(0, ${JSON.stringify(path.join(root, 'scripts/content-engine'))})
 def load(name, f):
     spec = importlib.util.spec_from_file_location(name, f); m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m); return m
 ad = load('ad', ${JSON.stringify(path.join(root, 'scripts/agent-dispatch.py'))})
 tm = load('tm', ${JSON.stringify(path.join(root, 'scripts/task-manager.py'))})
-print(json.dumps([sorted(k for k in ad.ROLE_AGENTS if ad.own_go_signal(k)), sorted(tm.OWN_LANE_AGENTS)]))`],
+import approval
+print(json.dumps([tm.EPISODE_CARD_PREFIX, ad.EPISODE_CARD_PREFIX, approval.task_name(2059, "STOP OVEREATING")]))`],
             { encoding: 'utf8' }).trim().split('\n').pop();
-        const [dispatchOwn, boardOwn] = JSON.parse(out);
-        expect(dispatchOwn).toContain('recRcy1Edas6rGaaF');
-        expect(boardOwn).toEqual(dispatchOwn);
+        const [board, dispatch, engineName] = JSON.parse(out);
+        expect(board).toBe('CONTENT: Publish Episode ');
+        expect(dispatch).toBe(board);
+        expect(engineName.startsWith(board)).toBe(true);
     });
 });
 
