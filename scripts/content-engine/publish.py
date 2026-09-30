@@ -1455,6 +1455,59 @@ def published(day=0):
             print("  %-28s %-18s %-11s %-20s %s" % (r["channel"][:28], r["account"][:18], r["status"], r["when"], r["link"][:60]))
 
 
+# THE CARD CLOSES WHEN THE EPISODE IS OUT (30 Sep 2026). Until 16 Sep the hand-back poll closed each approved episode
+# card after "carrying it out". It was then stopped from touching episode cards (agent-dispatch own_go_signal: a
+# headless run had broken two uploads) and nothing took over the close. Cards 2059-2077 sat open at "Today" for up to
+# two weeks while every episode was live, and on 29 Sep the Task Manager read them as "approved but unpublished" and
+# put 2059 back in Kevin's queue to approve again. The engine now closes its own card, once, when all seven sections
+# are done, through agent-dispatch's `complete` so its gates (approval, blocker) still apply.
+CARD_DONE_STATUS = "Completed"
+
+
+def cards_to_close(state, cards):
+    """(day, task) for every episode out on all seven sections whose approved card is not closed yet."""
+    out = []
+    for d, e in state.items():
+        if not str(d).isdigit() or not isinstance(e, dict) or e.get("card_closed") or not e.get("posts"): continue
+        c = cards.get(str(d)) or {}
+        if c.get("verdict") != "approved" or not c.get("task"): continue
+        if all(v == "done" for v in section_status(e).values()): out.append((int(d), c["task"]))
+    return sorted(out)
+
+
+def card_status(task):
+    s = watch._airtable("GET", approval.TASKS_API + "/" + task + "?returnFieldsByFieldId=true")["fields"].get(approval.TF["status"])
+    return s.get("name") if isinstance(s, dict) else s
+
+
+def dispatch(*args):
+    r = subprocess.run([sys.executable, approval.DISPATCH] + list(args), capture_output=True, text=True, timeout=120)
+    return r.returncode, (r.stdout + r.stderr).strip()
+
+
+def close_cards(dry_run=False, status_of=card_status, run=dispatch):
+    state = load_state(); closed = 0; changed = False
+    for day, task in cards_to_close(state, approval.load_state()):
+        entry = state[str(day)]
+        try:
+            status = status_of(task)
+            if status == CARD_DONE_STATUS:
+                entry["card_closed"] = "already"; changed = True; continue     # closed by hand or by the old hand-back: its date stays
+            if dry_run:
+                print("episode %d: card %s would close (all seven sections out)" % (day, task)); continue
+            code, out = run("complete", task)
+            if code:
+                print("episode %d: card %s NOT closed (status %s): %s" % (day, task, status, out[-300:]), file=sys.stderr); continue
+            entry["card_closed"] = now_utc(); closed += 1; changed = True
+            run("annotate", task, "--note", "Content Engine: episode %d is out on all seven sections (YouTube %s), so its card is closed."
+                % (day, entry.get("youtube_link") or "link not recorded"))
+            print("episode %d: card %s closed" % (day, task))
+        except (Exception, SystemExit) as ex:
+            print("episode %d: card %s not checked this run (%s)" % (day, task, str(ex)[-200:]), file=sys.stderr)
+    if changed and not dry_run: save_state(state)
+    print("card close: %d closed" % closed)
+
+
 def report():
     days = approved_days()
     state = {k: v for k, v in load_state().items() if str(k).isdigit() and isinstance(v, dict)}   # episodes only: _cursor and held_posts live beside them
@@ -1650,6 +1703,62 @@ def _selftest_one_episode_fails():
         except SystemExit as ex:
             assert "2074" in str(ex), ex
         assert worked == [2076], "the episode after the failed one is still worked: %s" % worked
+    finally:
+        g.update(saved)
+
+
+def _selftest_close_cards():
+    """30 Sep 2026: 2059-2077 were live on all seven sections and their approved cards sat open at "Today" for up to
+    two weeks, so the Task Manager asked Kevin to approve 2059 again. Drives close_cards end to end on fakes."""
+    import types as _types, io as _io, contextlib as _cl
+    def out_everywhere():
+        posts = {"youtube|full|yt": {"platform": "youtube", "clip": "full", "status": "published"},
+                 "youtube|lfmd|yt": {"platform": "youtube", "clip": "lfmd", "status": "published"},
+                 "facebook|summary|fb": {"platform": "facebook", "clip": "summary", "status": "published"},
+                 "facebook|lfmd|fb": {"platform": "facebook", "clip": "lfmd", "status": "published"}}
+        return {"posts": posts, "youtube_link": "https://youtu.be/x", "blog": {"url": "https://b"}, "podcast": {"status": "published"},
+                "facebook_share": {"status": "shared"}, "facebook_share_lfmd": {"status": "shared"}}
+    part = out_everywhere(); part["posts"]["facebook|lfmd|fb"]["status"] = "scheduled"          # a Learnings post not out yet
+    disk = {"_cursor": 2079, "2059": out_everywhere(), "2060": out_everywhere(), "2061": out_everywhere(), "2078": part,
+            "2062": out_everywhere(), "2063": out_everywhere(), "2064": dict(out_everywhere(), card_closed="2026-09-29T10:00:00Z")}
+    cards = {"2059": {"task": "recA", "verdict": "approved"}, "2060": {"task": "recB", "verdict": "approved"},
+             "2061": {"task": "recC", "verdict": "approved"}, "2078": {"task": "recD", "verdict": "approved"},
+             "2062": {"task": "recE", "verdict": "changes"}, "2063": {"task": "recF", "verdict": "approved"},
+             "2064": {"task": "recG", "verdict": "approved"}}
+    assert cards_to_close(disk, cards) == [(2059, "recA"), (2060, "recB"), (2061, "recC"), (2063, "recF")], cards_to_close(disk, cards)
+    status = {"recA": "Today", "recB": "Completed", "recC": "Approval", "recF": "Today"}
+    calls = []
+    def run_(*args):
+        calls.append(args)
+        if args[:2] == ("complete", "recC"): return 1, "ERROR: refusing to complete recC - outcome is 'empty', not an approval."
+        return 0, "{}"
+    g = globals(); saved = {k: g[k] for k in ("load_state", "save_state", "approval")}
+    saves = []
+    try:
+        g.update({"load_state": lambda: disk, "save_state": lambda st: saves.append(dict(st)),
+                  "approval": _types.SimpleNamespace(load_state=lambda: cards)})
+        with _cl.redirect_stdout(_io.StringIO()), _cl.redirect_stderr(_io.StringIO()):
+            close_cards(dry_run=True, status_of=status.get, run=run_)
+        assert calls == [] and saves == [], "a dry run closes nothing and saves nothing: %s" % calls
+        with _cl.redirect_stdout(_io.StringIO()), _cl.redirect_stderr(_io.StringIO()):
+            close_cards(status_of=status.get, run=run_)
+        completes = [a[1] for a in calls if a[0] == "complete"]
+        assert completes == ["recA", "recC", "recF"], "only open cards of finished, approved episodes are completed: %s" % completes
+        assert disk["2060"]["card_closed"] == "already", "a card already Completed keeps its own date"
+        assert "card_closed" not in disk["2061"], "a refused close is tried again next hour, never recorded as closed"
+        assert disk["2059"]["card_closed"].endswith("Z") and disk["2063"]["card_closed"].endswith("Z")
+        assert "card_closed" not in disk["2078"] and "card_closed" not in disk["2062"], "an episode not out everywhere, or not approved, stays open"
+        notes = [a for a in calls if a[0] == "annotate"]
+        assert [a[1] for a in notes] == ["recA", "recF"] and "https://youtu.be/x" in notes[0][3], notes
+        calls.clear()
+        with _cl.redirect_stdout(_io.StringIO()), _cl.redirect_stderr(_io.StringIO()):
+            close_cards(status_of=status.get, run=run_)
+        assert [a[1] for a in calls if a[0] == "complete"] == ["recC"], "a closed card is never completed twice: %s" % calls
+        def boom(task): raise RuntimeError("Airtable 503")
+        disk["2061"].pop("card_closed", None); calls.clear()
+        with _cl.redirect_stdout(_io.StringIO()), _cl.redirect_stderr(_io.StringIO()):
+            close_cards(status_of=boom, run=run_)
+        assert calls == [], "an unreadable card is left for next hour, and the run does not stop"
     finally:
         g.update(saved)
 
@@ -1969,6 +2078,7 @@ def selftest():
     _selftest_once_only()
     _selftest_placeholder_folder()
     _selftest_one_episode_fails()
+    _selftest_close_cards()
     import inspect as _i5; ss = _i5.getsource(sync); assert ss.index("monetise_long_video(day, entry)") < ss.index("share_to_facebook_profile(day, entry, state, clip=clip)"), "monetisation is checked every sync"
     msrc = _i5.getsource(monetise_long_video)
     # the old filter stepped over every GoHighLevel upload in silence: 2054 episode + Short and 2195 episode (20 Sep 2026)
@@ -2002,7 +2112,7 @@ def selftest():
     assert not spotify_link_due({"title": "t", "status": "failed", "started": "2026-09-21T05:00:00Z"}, t0) and not spotify_link_due({"status": "published"}, t0)
     assert not spotify_link_due({"title": "t", "status": "processing", "started": "2026-09-10T05:00:00Z"}, t0), "an old 'processing' episode is no longer asked every hour for good"
     assert not spotify_link_due({"title": "t", "status": "published"}, t0), "no start time and published: nothing to measure three days from"
-    print(json.dumps({"checks": 56, "failed": []}))
+    print(json.dumps({"checks": 57, "failed": []}))
 
 
 if __name__ == "__main__":
@@ -2019,6 +2129,7 @@ if __name__ == "__main__":
             schedule_stage(a.day, e2, recs, am, stage, dry_run=True)
     elif a.mode == "sync": sync()
     elif a.mode == "published": published(a.day)
+    elif a.mode == "close-cards": close_cards(dry_run=a.dry_run)
     elif a.mode == "report": report()
     elif a.mode == "youtube-link": youtube_link()
-    else: raise SystemExit("usage: publish.py run [--dry-run] [--limit N] | plan --day N | sync | report | youtube-link | selftest")
+    else: raise SystemExit("usage: publish.py run [--dry-run] [--limit N] | plan --day N | sync | close-cards [--dry-run] | report | youtube-link | selftest")

@@ -68,6 +68,9 @@ python3 scripts/content-engine/approval.py sync || exit 1
 # the next night's run: 2057 and 2058 rendered fine on 15 Sep 2026 and sat cardless all day, so nothing published.
 python3 scripts/content-engine/approval.py run --pending --limit 2 || echo "approval run: skipped this run (see above)"
 python3 scripts/content-engine/publish.py sync || exit 1
+# An episode out on all seven sections closes its own card (30 Sep 2026: 2059-2077 sat open for up to two weeks and
+# the Task Manager asked Kevin to approve 2059 again). Before `run`, whose failure ends the job.
+python3 scripts/content-engine/publish.py close-cards || echo "card close: skipped this run (see above)"
 python3 scripts/content-engine/publish.py run --limit 3 || exit 1
 python3 scripts/content-engine/approval.py report
 python3 scripts/content-engine/publish.py report
