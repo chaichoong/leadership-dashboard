@@ -224,6 +224,24 @@ describe('the Robot sign-in app and its link', () => {
       expect(out).toBe('all|site/app.pingen.com');
     } finally { rmSync(dir, { recursive: true, force: true }); }
   });
+  // Kevin's turn (30 Sep 2026): robotsignin://turn/<task> opens the robot's window for his step.
+  // Driven through osascript: only an exact record id gets through to a shell command.
+  it('a turn/ link names exactly one Airtable record id, or nothing', () => {
+    const { mkdtempSync, rmSync } = require('node:fs');
+    const { tmpdir } = require('node:os');
+    const dir = mkdtempSync(join(tmpdir(), 'od-robot-'));
+    try {
+      execFileSync('osacompile', ['-o', join(dir, 'r.scpt'), join(ROOT, 'scripts', 'robot-signin.applescript')]);
+      const ask = body => execFileSync('osascript', ['-e',
+        `set s to (load script POSIX file "${join(dir, 'r.scpt')}")\nreturn "[" & (s's turnTaskId(s's bodyOf("robotsignin://${body}"))) & "]"`],
+        { encoding: 'utf8' }).trim();
+      expect(ask('turn/recPYIC5nn7v2bh8e')).toBe('[recPYIC5nn7v2bh8e]');
+      expect(ask('turn/recPYIC5nn7v2bh8e;touch%20x')).toBe('[]');
+      expect(ask("turn/rec1'$(id)")).toBe('[]');
+      expect(ask('site/app.pingen.com')).toBe('[]');
+    } finally { rmSync(dir, { recursive: true, force: true }); }
+    expect(src).toMatch(/starts with "turn\/" then\n\t\trunTurn\(turnTaskId\(body\)\)/);
+  });
   // 25 Sep 2026: each Duckworth flat is its own Utilita login in its own robot profile, and the
   // app opened only the main one. Driven through osascript, not read off the source.
   it('opens each sign-in on its own profile, and a waiting-task line always on the main one', () => {

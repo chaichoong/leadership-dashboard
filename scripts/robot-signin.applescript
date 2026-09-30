@@ -568,8 +568,75 @@ on bodyOf(theURL)
 	return text 15 thru -1 of theURL
 end bodyOf
 
+-- Kevin's turn (30 Sep 2026): robotsignin://turn/<task id>. "Anything where I'm needed to either
+-- make payment or something, we need to do it via this new process." An approved task whose
+-- website step needs him (pay, file, sign, declare): the robot opens its own window, fills in
+-- everything up to his step and hands it over. He does his step, closes the window, and says
+-- whether it is done; a yes clears the wall so the robot checks the receipt and closes the task.
+-- The task a turn/ link names, or "" if it is not exactly an Airtable record id. Nothing
+-- else ever reaches a shell command.
+on turnTaskId(body)
+	if body does not start with "turn/" then return ""
+	set taskId to text 6 thru -1 of body
+	set idOk to do shell script "printf %s " & quoted form of taskId & " | grep -Eq '^rec[A-Za-z0-9]{14}$' && echo yes || echo no"
+	if idOk is "yes" then return taskId
+	return ""
+end turnTaskId
+
+on runTurn(taskId)
+	if taskId is "" then
+		display alert "Your turn" message "That link does not name a task."
+		return
+	end if
+	set planFile to "/Users/kevinbrittain/knowledge-os/handover/" & taskId & ".json"
+	try
+		set info to sh(quoted form of nodeBin() & " -e " & quoted form of "const p=JSON.parse(require('fs').readFileSync(process.argv[1],'utf8'));process.stdout.write(String(p.label||p.site||'this task').replace(/[|]/g,'/')+' | '+String(p.why||'do your step').replace(/[|]/g,'/'))" & " " & quoted form of planFile)
+	on error
+		display alert "Your turn" message "The robot has no plan ready for this task yet. The button appears on the AI Agents page when it has."
+		return
+	end try
+	set theLabel to fieldOf(info, 1)
+	set theWhy to fieldOf(info, 2)
+	try
+		display dialog "Your turn: " & theLabel & return & return & "The robot opens its own window and fills everything in. When the green bar says Your turn, you " & theWhy & ". Close the window when you have finished." & return & return & "Have 10 free minutes?" with title "Your turn" buttons {"Not now", "Start"} default button "Start" cancel button "Not now"
+	on error number -128
+		return
+	end try
+	try
+		shWait(quoted form of nodeBin() & " scripts/agent-browser.js handover --task " & quoted form of taskId, "")
+	on error errMsg number errNum
+		-- 3: the robot got stuck but the window was still his; anything else never opened it.
+		if errNum is not 3 then
+			display alert "Your turn" message "The robot's window could not open: " & errMsg
+			return
+		end if
+	end try
+	set finished to false
+	try
+		display dialog "Did you finish your step for " & theLabel & "?" with title "Your turn" buttons {"Not yet", "Yes, done"} default button "Yes, done" cancel button "Not yet"
+		set finished to true
+	on error number -128
+		set finished to false
+	end try
+	try
+		if finished then
+			shWait("/usr/bin/python3 scripts/agent-dispatch.py unblock " & quoted form of taskId & " --evidence " & quoted form of ("Kevin finished his turn in the robot's window (" & theWhy & "), confirmed in the Robot sign-in app."), "Telling the robot you have finished…")
+			display notification "Done. The robot checks the receipt and closes the task." with title "Your turn"
+		else
+			shWait("/usr/bin/python3 scripts/agent-dispatch.py annotate " & quoted form of taskId & " --note " & quoted form of "Your turn window closed without Kevin finishing. The task stays his, and the Your turn button stays on the AI Agents page.", "")
+		end if
+	on error errMsg
+		display alert "Your turn" message "Your answer could not be recorded on the task: " & errMsg
+	end try
+	refreshPanel()
+end runTurn
+
 on open location theURL
 	set body to bodyOf(theURL)
+	if body starts with "turn/" then
+		runTurn(turnTaskId(body))
+		return
+	end if
 	if body starts with "add" then
 		set theLines to askNewSite()
 		if (count of theLines) > 0 then runChain(theLines, 0)

@@ -325,8 +325,41 @@ test.describe('Robot sign-ins panel and blocked robots', () => {
   });
 });
 
+// Kevin's turn (30 Sep 2026): an approved task whose website step needs him, with the robot's
+// handover plan ready (the sweep marks the wall turn:true). The worked examples: Chedburgh has a
+// plan, the PIB replacement and Athertons do not.
+const TURNS = [
+  { task: 'recPYIC5nn7v2bh8e', name: 'INSURANCE: Landlord buildings insurance via TopCashback - 6 Chedburgh Place', agent: 'Property Administration', kind: 'KEVIN', subject: 'purchase', fix: 'Kevin clicks Your turn', days: 0, turn: true },
+  { task: 'recbBdOmWJASeTYLs', name: 'INSURANCE: Replacement cover - 30 Burnbank Gardens', agent: 'Property Administration', kind: 'KEVIN', subject: 'identity', fix: 'Kevin gives his date of birth', days: 1 },
+  { task: 'recLRHyQ8AG0NUHt0', name: 'Athertons Exterior Cleaning invoice', agent: 'Finance', kind: 'KEVIN', subject: 'payment', fix: 'Kevin pays', days: 1 },
+];
+
+test.describe('Your turn on a Mac', () => {
+  test.use({ userAgent: MAC_UA });
+
+  test('a Kevin step with a plan ready gets a Your turn button that opens the robot on his Mac; the others get none', async ({ page }) => {
+    const panel = await open(page, [signinRow([line('Pingen (letters)', 'app.pingen.com', 'signed-in')]), blockersRow(TURNS)]);
+    const turns = panel.locator('[data-rs-turns]');
+    await expect(turns).toContainText('Your turn (1)');
+    await expect(turns).toContainText('6 Chedburgh Place');
+    await expect(turns).toContainText('Your step: purchase.');
+    await expect(panel.locator('[data-rs-turn="recPYIC5nn7v2bh8e"]')).toHaveAttribute('href', 'robotsignin://turn/recPYIC5nn7v2bh8e');
+    await expect(panel.locator('a[href^="robotsignin://turn/"]')).toHaveCount(1);
+    await expect(panel).not.toContainText('Burnbank');
+    await expect(panel).not.toContainText('Athertons');
+    await expect(page.locator('#signinsCount')).toHaveText('1');       // his turn counts, even with every sign-in fine
+  });
+});
+
 test.describe('Robot sign-ins panel on a phone', () => {
   test.use({ userAgent: PHONE_UA });
+
+  test('Your turn shows on a phone as a Mac step, with no link that cannot work there', async ({ page }) => {
+    const panel = await open(page, [signinRow([line('Pingen (letters)', 'app.pingen.com', 'signed-in')]), blockersRow(TURNS)]);
+    await expect(panel.locator('[data-rs-turns]')).toContainText('6 Chedburgh Place');
+    await expect(panel.locator('[data-rs-turns]')).toContainText('On your Mac');
+    await expect(panel.locator('a[href^="robotsignin://"]')).toHaveCount(0);
+  });
 
   test('shows where each sign-in stands, with no button that cannot work there', async ({ page }) => {
     const fx = defaultFixtures();

@@ -6447,6 +6447,17 @@ def cmd_complete(args):
 # while blocked, which is how a trust surface reports what did NOT happen.
 BLOCK_KINDS = ("SIGN-IN", "SITE", "TOOL", "KEVIN")
 KEVIN_ONLY_REASONS = ("payment", "purchase", "signature", "credential", "identity", "physical")
+# Kevin's turn (30 Sep 2026): a KEVIN wall whose website step has a handover
+# plan here is done from the AI Agents page's "Your turn" button (the robot
+# fills everything, then hands him the window). Private: plans carry his details.
+HANDOVER_DIR = os.environ.get("AGENT_HANDOVER_DIR") or os.path.expanduser("~/knowledge-os/handover")
+TURN_TASK_RE = re.compile(r"^rec[A-Za-z0-9]{14}$")
+
+
+def handover_ready(task_id, b):
+    """True when a KEVIN wall on TASK_ID has its handover plan on file."""
+    return (b.get("kind") == "KEVIN" and bool(TURN_TASK_RE.match(task_id or ""))
+            and os.path.isfile(os.path.join(HANDOVER_DIR, task_id + ".json")))
 BLOCKER_OPEN_MARK = "BLOCKER OPEN"
 BLOCKER_CLEARED_MARK = "BLOCKER CLEARED"
 BLOCKER_STALE_DAYS = 3
@@ -6778,6 +6789,10 @@ def blockers_scan(sweep=False, now=None):
                "fix": blocker_fix_text(b), "finding": b["finding"],
                "findingStatus": fstates.get(b["finding"], "") if b["finding"] else "",
                "days": days, "clearsNow": bool(reason)}
+        if handover_ready(t["id"], b):
+            row["turn"] = True
+            row["fix"] = ("Kevin clicks Your turn on the AI Agents page (on his Mac): the robot fills "
+                          "everything in and hands him the window for his step.")
         open_walls.append(row)
         if days is None or days >= BLOCKER_STALE_DAYS:
             stale.append(row)

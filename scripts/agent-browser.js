@@ -50,6 +50,8 @@
  *   node scripts/agent-browser.js loom-search --query "..." [--limit 20]
  *   node scripts/agent-browser.js prepare --plan PLAN.json --shot OUT.png
  *   node scripts/agent-browser.js commit  --plan PLAN.json --task recXXX --shot OUT.png
+ *   node scripts/agent-browser.js handover --task recXXX [--plan PLAN.json]   Kevin's turn: a VISIBLE window, the robot does
+ *       every step up to his, then hands it over (plan in ~/knowledge-os/handover/recXXX.json by default)
  *   node scripts/agent-browser.js sites
  *
  * PLAN FORMAT (the agent writes this; the script only executes it)
@@ -532,7 +534,7 @@ function assertApproved(taskId) {
   if (!/^rec[A-Za-z0-9]{14}$/.test(taskId || '')) die(`--task must be an Airtable record id, got "${taskId}"`);
   let out;
   try {
-    out = execFileSync('python3', [path.join(REPO, 'scripts', 'agent-dispatch.py'), 'outcome', taskId],
+    out = execFileSync('python3', [process.env.AGENT_OUTCOME_SCRIPT || path.join(REPO, 'scripts', 'agent-dispatch.py'), 'outcome', taskId],
                        { encoding: 'utf8', timeout: 60000 });
   } catch (e) {
     die(`could not read the approval state for ${taskId}: ${(e.stderr || e.message || '').toString().trim()}`);
@@ -674,8 +676,12 @@ function releaseSigninHold(dir) {
     fs.unlinkSync(holdPath(dir));
   } catch { /* already gone, or unreadable and so already inactive */ }
 }
+// A hold this process took (Kevin's turn window) never makes its own launch wait.
+function holdIsMine(dir) {
+  try { return JSON.parse(fs.readFileSync(holdPath(dir), 'utf8')).pid === process.pid; } catch { return false; }
+}
 async function waitForSigninHold(dir) {
-  if (!signinHoldActive(dir)) return;
+  if (!signinHoldActive(dir) || holdIsMine(dir)) return;
   console.error(`WAITING: Kevin is signing in on the robot profile (${path.basename(dir)}). This step starts when he closes that window (at most ${HOLD_MAX_MS / 60000} minutes).`);
   const deadline = Date.now() + HOLD_MAX_MS;
   while (signinHoldActive(dir) && Date.now() < deadline) await new Promise(r => setTimeout(r, 2000));
@@ -707,7 +713,7 @@ async function withPage(profile, headed, fn) {
   // scheduled slot that dies the instant it meets that window loses its run.
     await waitForProfile(dir, 10 * 60 * 1000,
       `the profile at ${dir} is open in a sign-in window. Kevin has not quit it yet (Cmd+Q); try again afterwards.`);
-    if (!signinHoldActive(dir)) break;
+    if (!signinHoldActive(dir) || holdIsMine(dir)) break;
   }
   // Prefer Kevin's installed Google Chrome over Playwright's bundled test build
   // (2 Sep 2026). The bundled Chromium announces itself as automated
@@ -850,7 +856,8 @@ async function runSteps(page, steps, allowSubmit, confirm) {
         break;
       case 'fill':
         await assertNotCredential(page, s.selector, s.value);
-        await page.fill(s.selector, String(s.value), { timeout: 20000 });
+        // {{today}} for every plan, so a prepare proof fills what the handover will.
+        await page.fill(s.selector, String(fillTokens(s.value)), { timeout: 20000 });
         break;
       case 'select': {
         // By what the page SHOWS (25 Sep 2026): the agent wrote "Terraced" and
@@ -977,6 +984,113 @@ async function runSteps(page, steps, allowSubmit, confirm) {
     done.push({ do: 'confirm', executed: true, selector: confirm.selector });
   }
   return { done, stoppedBeforeSubmit: false };
+}
+
+// ── Kevin's turn (30 Sep 2026) ───────────────────────────────────────────────
+// Kevin: "Anything that I'm not needed for, you can do behind the scenes.
+// Anything where I'm needed to either make payment or something, we need to do
+// it via this new process." An approved task whose website step needs him (pay,
+// file, sign, declare) gets a "Your turn" button on the AI Agents page. It runs
+// this: a VISIBLE window on the robot profile, the robot does every step up to
+// his, pausing where only he can act (typing his own password), then hands him
+// the window and waits until he closes it. It never submits, pays or declares:
+// a plan with a submit or upload step is refused, and nothing runs after the
+// handover. One unbroken session, so a TopCashback click-through tracks.
+const HANDOVER_DIR = process.env.AGENT_HANDOVER_DIR || path.join(os.homedir(), 'knowledge-os', 'handover');
+const HANDOVER_WAIT_MS = 45 * 60 * 1000;
+const HANDOVER_STEPS = new Set(['goto', 'fill', 'select', 'check', 'click', 'press', 'wait', 'kevin']);
+
+function handoverPlanPath(task) { return path.join(HANDOVER_DIR, task + '.json'); }
+
+function assertHandoverPlan(plan) {
+  if (!plan || !Array.isArray(plan.steps) || !plan.steps.length) die('the plan has no steps');
+  if (!String(plan.why || '').trim()) die('the plan needs "why": what Kevin does when it is his turn (for example "answer the declarations and pay")');
+  plan.steps.forEach((s, i) => {
+    const d = s && s.do;
+    if (!HANDOVER_STEPS.has(d)) die(`step ${i + 1} is "${d}". A handover plan never submits, pays or uploads: the last click is Kevin's.`);
+    if (d === 'kevin' && (!String(s.say || '').trim() || !(s.untilUrl || s.untilSelector || s.untilText))) {
+      die(`step ${i + 1} (kevin) needs "say" and one of untilUrl, untilSelector, untilText: what he does and how the robot knows he has.`);
+    }
+  });
+  return plan;
+}
+
+// {{today}} in a value: today's date the way UK forms want it (DD/MM/YYYY, London).
+function fillTokens(v, now = new Date()) {
+  if (typeof v !== 'string') return v;
+  const d = new Intl.DateTimeFormat('en-GB', { timeZone: 'Europe/London', day: '2-digit', month: '2-digit', year: 'numeric' }).format(now);
+  return v.replace(/\{\{today\}\}/g, d);
+}
+
+async function turnBanner(page, text) {
+  await page.evaluate(t => {
+    let b = document.getElementById('od-your-turn');
+    if (!b) {
+      b = document.createElement('div');
+      b.id = 'od-your-turn';
+      // At the bottom and click-through: at the top it sat on a page's own buttons and
+      // swallowed the robot's clicks (found by the test on 30 Sep 2026).
+      b.style.cssText = 'position:fixed;bottom:0;left:0;right:0;z-index:2147483647;pointer-events:none;background:#1f6f43;color:#fff;' +
+        'font:600 15px -apple-system,system-ui,sans-serif;padding:10px 16px;text-align:center;box-shadow:0 -2px 6px rgba(0,0,0,.3)';
+      document.documentElement.appendChild(b);
+    }
+    b.textContent = t;
+  }, text).catch(() => {});   // a page that blocks scripts still gets the window; the terminal says it too
+}
+
+// Waits while Kevin does his own step (a sign-in). Reads only where the page is
+// and whether an element or words are there: never a field's value.
+async function waitForKevin(page, s, maxMs) {
+  const deadline = Date.now() + maxMs;
+  while (Date.now() < deadline) {
+    if (page.isClosed()) return false;
+    try {
+      if (s.untilUrl && page.url().includes(s.untilUrl)) return true;
+      if (s.untilSelector && await page.locator(s.untilSelector).first().isVisible()) return true;
+      if (s.untilText && (await domText(page, 20000)).includes(s.untilText)) return true;
+    } catch { /* mid-navigation: look again */ }
+    await new Promise(r => setTimeout(r, 1000));
+  }
+  return false;
+}
+
+// Runs the plan up to Kevin's turn. A step that fails does not throw: the window
+// stays his, with the step named, so he can finish by hand.
+async function runHandover(page, plan, opts = {}) {
+  const done = [];
+  for (let i = 0; i < plan.steps.length; i++) {
+    const s = plan.steps[i];
+    try {
+      if (s.do === 'kevin') {
+        if (s.goto) {
+          if (!hostAllowed(s.goto)) throw new Error(`${s.goto} is not on the allowlist`);
+          await page.goto(s.goto, { waitUntil: 'domcontentloaded', timeout: 45000 });
+        }
+        await turnBanner(page, 'Your turn: ' + s.say + ' The robot carries on when you have.');
+        const ok = await waitForKevin(page, s, opts.kevinMs || Math.min(Number(s.minutes) || 10, 20) * 60 * 1000);
+        if (!ok) throw new Error('not done in time: ' + s.say);
+        await turnBanner(page, 'Thanks. The robot is filling the rest in: hands off until it says your turn.');
+        done.push({ do: 'kevin', executed: true, say: s.say });
+        continue;
+      }
+      const r = await runSteps(page, [s], false, null);
+      done.push(...r.done);
+    } catch (e) {
+      return { done, stuck: { step: i + 1, do: s.do, error: String((e && e.message) || e).slice(0, 300) } };
+    }
+  }
+  return { done, stuck: null };
+}
+
+// The window is his until he closes it (the tab, the window or Chrome itself).
+async function waitForWindowClose(ctx, maxMs) {
+  const deadline = Date.now() + maxMs;
+  let closed = false;
+  ctx.once('close', () => { closed = true; });
+  while (!closed && Date.now() < deadline) {
+    if (!ctx.pages().length) break;
+    await new Promise(r => setTimeout(r, 1500));
+  }
 }
 
 function readPlan(p) {
@@ -1340,6 +1454,38 @@ async function main() {
     return;
   }
 
+  if (cmd === 'handover') {
+    const task = arg(rest, 'task');
+    if (!/^rec[A-Za-z0-9]{14}$/.test(task || '')) die(`--task must be an Airtable record id, got "${task}"`);
+    const plan = assertHandoverPlan(readPlan(arg(rest, 'plan') || handoverPlanPath(task)));
+    // Checked BEFORE the window opens: Kevin approved the prepared work, or nothing runs.
+    assertApproved(task);
+    const dir = path.join(PROFILE_ROOT, profile || 'default');
+    // The robot's own runs wait while the window is his (their launch would fight it).
+    takeSigninHold(dir);
+    process.on('exit', () => releaseSigninHold(dir));
+    const headed = !process.env.AGENT_HANDOVER_HEADLESS;          // tests only
+    let res;
+    try {
+      res = await withPage(profile, headed, async (page, ctx) => {
+        const r = await runHandover(page, plan);
+        const png = await shoot(page, path.join(HANDOVER_DIR, 'shots', `${task}-${Date.now()}.png`)).catch(() => null);
+        await turnBanner(page, r.stuck
+          ? `The robot got stuck at step ${r.stuck.step}. You can finish by hand, or close this window.`
+          : `Your turn: ${plan.why}. Close this window when you have finished.`);
+        console.log(JSON.stringify({ phase: 'your-turn', task, stuck: r.stuck, screenshot: png }));
+        await waitForWindowClose(ctx, Number(process.env.AGENT_HANDOVER_WAIT_MS) || HANDOVER_WAIT_MS);
+        return Object.assign(r, { screenshot: png });
+      });
+    } finally {
+      releaseSigninHold(dir);
+    }
+    ledger({ cmd: 'handover', task, profile, site: plan.site || null, steps: res.done, stuck: res.stuck, screenshot: res.screenshot });
+    console.log(JSON.stringify({ mode: 'handover', task, handedOver: !res.stuck, stuck: res.stuck, screenshot: res.screenshot, steps: res.done.length }));
+    if (res.stuck) process.exitCode = 3;
+    return;
+  }
+
   if (cmd === 'prepare' || cmd === 'commit') {
     const plan = readPlan(arg(rest, 'plan'));
     const shot = arg(rest, 'shot');
@@ -1408,4 +1554,5 @@ module.exports = { hostAllowed, pickLinks, runSteps, assertNotCredential, assert
                    recordLoginSite, signinTargets, signinOwner, signinDomain, readSitesFile,
                    assertUploadable, assertConfirmable, UPLOAD_DIR, UPLOAD_EXTENSIONS, persistSessionCookies,
                    signinHoldActive, takeSigninHold, releaseSigninHold, waitForSigninHold, HOLD_MAX_MS, isBotCheck,
-                   profileProcs, plainWindowOpen, pickOption, settleBotCheck, withPage, lastKeptCount: () => lastKept, onSigninPage };
+                   profileProcs, plainWindowOpen, pickOption, settleBotCheck, withPage, lastKeptCount: () => lastKept, onSigninPage,
+                   assertHandoverPlan, fillTokens, runHandover, handoverPlanPath, HANDOVER_DIR };
