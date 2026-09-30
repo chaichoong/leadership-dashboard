@@ -1008,6 +1008,9 @@ const HANDOVER_KEYS = new Set(['Tab', 'Shift+Tab', 'Space']);
 const FINAL_ACTION_RE = /\b(buy|purchase|pay|payment|order|submit|check ?out|declare|declaration|confirm|agree|accept|complete|send|file|sign)\b/i;
 // A tick box worded like a declaration is his too, however it is phrased.
 const DECLARATION_RE = /\b(declare|declaration|confirm|agree|accept|true|correct|understand|terms|conditions|read|statement)\b/i;
+// Plain text near an answer carries help ("Not sure? Read our guide."), so it needs a whole
+// declaration phrase, not one word (review round 6).
+const NEARBY_DECLARATION_RE = /\b(i|we) (declare|confirm|agree|accept|understand|have read)\b|\bdeclar(e|ation)\b|\bconfirm that\b|\bagree (to|with)\b|\baccept the\b|\btrue and (correct|accurate|complete)\b|\bstatement of fact\b/i;
 // A text box asking for his name as a signature is his.
 const SIGNATURE_RE = /\b(sign|signature|signed|signing|e-?sign)\b/i;
 
@@ -1071,20 +1074,26 @@ async function assertNotFinalAction(page, s) {
       // text and a placeholder. Read for declarations (and, on a text box, a signature) only,
       // so a "Yes" to "I declare..." is his however it is given (review rounds 3 and 4).
       // The words around it, for a question set in plain text beside its answers (an <h3> or
-      // <span> next to Yes and No: review round 5): the largest box round it still under 300
-      // characters, so it reads that one question and never the page.
+      // <span> next to Yes and No: review round 5): the largest box round it that is under 300
+      // characters and holds no other question's control (a text box, a dropdown, or a radio of
+      // another group; Yes/No buttons belong together), without any dropdown's options (round 6).
       const nearby = c => {
         let t = '';
         for (let n = c.parentElement; n && n !== document.body; n = n.parentElement) {
-          const x = String(n.innerText || '').trim();
+          const other = Array.from(n.querySelectorAll('input,select,textarea,[role=radio],[role=checkbox]')).some(o => o !== c
+            && !['button', 'submit', 'reset', 'image', 'hidden'].includes(String(o.type || '').toLowerCase())
+            && !(c.name && o.name === c.name));
+          if (other) break;
+          let x = String(n.innerText || '');
+          for (const sel of n.querySelectorAll('select')) x = x.split(sel.innerText).join(' ');
+          x = x.replace(/\s+/g, ' ').trim();
           if (x.length > 300) break;
           t = x;
         }
         return t;
       };
-      const question = (c, around) => {
+      const question = c => {
         const q = [];
-        if (around) q.push(nearby(c));
         if (c.labels) for (const l of c.labels) q.push(l.textContent || '');
         const fs = c.closest('fieldset'); const lg = fs && fs.querySelector('legend');
         if (lg) q.push(lg.textContent || '');
@@ -1103,7 +1112,7 @@ async function assertNotFinalAction(page, s) {
       if (entry) {
         const options = el.tagName === 'SELECT'
           ? Array.from(el.options).map(o => ({ value: o.value, label: (o.label || o.textContent || '').replace(/\s+/g, ' ').trim() })) : null;
-        return { entry: true, words: '', question: squash(question(el, !!options)), tick: false, options };
+        return { entry: true, words: '', question: squash(question(el)), around: options ? nearby(el) : '', tick: false, options };
       }
       // Anything else is read, a plain div with a click listener included (review round 2).
       // A control, never a region: role="main" or "dialog" would read the whole page (round 3).
@@ -1126,7 +1135,7 @@ async function assertNotFinalAction(page, s) {
       const answer = !!control && (['checkbox', 'radio'].includes(ctype) || ['checkbox', 'radio', 'switch'].includes(crole)
         || control.hasAttribute('aria-checked') || control.hasAttribute('aria-pressed')
         || ((control.tagName === 'BUTTON' || crole === 'button') && own.length <= 12));
-      return { entry: false, words: squash(parts), question: answer ? squash(question(control, true)) : '', tick: answer };
+      return { entry: false, words: squash(parts), question: answer ? squash(question(control)) : '', around: answer ? nearby(control) : '', tick: answer };
     }, null, { timeout: Math.min(Number(s.timeout) || 20000, 60000) });
   } catch (e) {
     throw new Error(`could not read what "${s.selector}" is, so it was not touched: ${String(e.message || e).slice(0, 120)}`);
@@ -1136,7 +1145,7 @@ async function assertNotFinalAction(page, s) {
       // The option it picks can be the declaration itself ("I agree with all the assumptions"): round 5.
       const pick = seen.options ? pickOption(seen.options, String(s.label !== undefined ? s.label : s.value)).option : null;
       const asked = ((pick ? pick.label : '') + ' ' + seen.question).trim();
-      if (DECLARATION_RE.test(asked)) throw new Error(`refused: "${asked.slice(0, 80)}" reads like a declaration, which is Kevin's`);
+      if (DECLARATION_RE.test(asked) || NEARBY_DECLARATION_RE.test(seen.around)) throw new Error(`refused: "${(asked + ' ' + seen.around).trim().slice(0, 80)}" reads like a declaration, which is Kevin's`);
     }
     if (s.do === 'fill' && SIGNATURE_RE.test(seen.question)) throw new Error(`refused: "${seen.question.slice(0, 80)}" looks like a signature, which is Kevin's`);
     return;
@@ -1144,7 +1153,9 @@ async function assertNotFinalAction(page, s) {
   if (!presses) return;
   if (FINAL_ACTION_RE.test(seen.words)) throw new Error(`refused: "${seen.words.trim().slice(0, 60)}" looks like the final action, which is Kevin's`);
   const asked = (seen.words + ' ' + seen.question).trim();
-  if (seen.tick && DECLARATION_RE.test(asked)) throw new Error(`refused: "${asked.slice(0, 80)}" reads like a declaration, which is Kevin's`);
+  if (seen.tick && (DECLARATION_RE.test(asked) || NEARBY_DECLARATION_RE.test(seen.around))) {
+    throw new Error(`refused: "${(asked + ' ' + seen.around).trim().slice(0, 80)}" reads like a declaration, which is Kevin's`);
+  }
 }
 
 // A goto to an address worded like the last step (/checkout/confirm) is his too.

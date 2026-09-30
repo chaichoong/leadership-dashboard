@@ -52,6 +52,9 @@ const PAGE = `<!doctype html><html><body>
   <label for="as">Assumptions</label><select id="as"><option value="">Select</option><option>I agree with all the assumptions</option></select>
   <div><h3>Do you agree with the statements above?</h3><button type="button" id="h3y" onclick="document.getElementById('out').textContent='H3-YES'">Yes</button><button type="button">No</button></div>
   <div><span>I declare the information I have given is true</span><input type="radio" name="sp" id="spy"><label for="spy" id="spyl">Yes</label><input type="radio" name="sp" id="spn"><label for="spn">No</label></div>
+  <div><p>Is the property of standard construction? Not sure? Read our guide.</p><input type="radio" name="sc" id="scy"><label for="scy" id="scyl">Yes</label><input type="radio" name="sc" id="scn"><label for="scn">No</label></div>
+  <div><div><p>Has the property flooded in the last 10 years?</p><input type="radio" name="fl" id="fln"><label for="fln" id="flnl">No</label></div><div><p>I declare the above is true</p><input type="radio" name="dt" id="dty"><label for="dty">Yes</label></div></div>
+  <div><label for="ps">Property status</label><select id="ps"><option value="">Select</option><option>Let</option><option>I agree</option></select></div>
   <div id="out"></div>
   <script>
     setTimeout(() => { const d = document.createElement('div'); d.id = 'signed-in'; d.textContent = 'My account'; document.body.appendChild(d); }, 800);
@@ -196,6 +199,15 @@ describe('the robot does every step up to Kevin, waits for his part, and hands o
       expect(await page.locator('#as').inputValue()).toBe('');
       expect(await page.locator('#spy').isChecked()).toBe(false);
       expect(await page.locator('#out').textContent()).not.toBe('H3-YES');
+      // Round 6: help text, the next question's declaration and a dropdown's other options are not
+      // this answer's question.
+      for (const st of [{ do: 'click', selector: '#scyl' }, { do: 'click', selector: '#flnl' }, { do: 'select', selector: '#ps', value: 'Let' }]) {
+        const r6 = await b.runHandover(page, { why: 'pay', steps: [st] });
+        expect(r6.stuck, st.selector).toBeNull();
+      }
+      expect(await page.locator('#scy').isChecked()).toBe(true);
+      expect(await page.locator('#fln').isChecked()).toBe(true);
+      expect(await page.locator('#ps').inputValue()).toBe('Let');
       const built = await b.runHandover(page, { why: 'pay', steps: [{ do: 'select', selector: '#bt', value: '1970 - 1989' }] });
       expect(built.stuck).toBeNull();
       const stuck = await b.runHandover(page, { why: 'pay', steps: [{ do: 'click', selector: '#not-there', timeout: 1000 }] }, {});
