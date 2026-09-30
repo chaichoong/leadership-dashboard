@@ -20,8 +20,10 @@ WHAT IT DOES
      draft (a draft may still be dry-run).
   2. Builds the merge result with fixer-merge.py's build_merge_result and reads
      from THAT tree what was tested: the origin/main commit it was built on
-     (first parent, or ORIG_HEAD after a fast-forward), the PR head (second
-     parent, or HEAD), and the files the PR changes (git diff base...head).
+     (ORIG_HEAD, which git writes on every merge), the PR head (the second
+     parent of the merge commit git made on it, or HEAD after a fast-forward,
+     which a PR that merged main into itself also gets), and the files the PR
+     changes (git diff base...head).
      refs/fixer/pr-N is not trusted for this: the queue fixer can overwrite it.
   3. Runs vitest, then tests/sync-invariants/, in that tree (the same two
      commands and cwd rule as fixer-merge.py's run_gate, but each in its own
@@ -694,22 +696,32 @@ def walk_summary(walk, live, regate=None, main_ids=None):
 
 def tree_shas(tree):
     """(base, head, error): the origin/main commit the tree was built on and the
-    PR head merged into it. A merge commit's parents say it directly. A PR that
-    fast-forwards main leaves no merge commit: HEAD is the PR head and git kept
-    the pre-merge HEAD (origin/main) as ORIG_HEAD."""
-    r = run(["git", "rev-list", "--parents", "-n", "1", "HEAD"], cwd=tree, timeout=30)
-    parts = (r.stdout or "").split()
-    if r.returncode != 0 or not parts:
-        return None, None, "cannot read the merge tree's HEAD: %s" % tail(r.stderr, 200)
-    if len(parts) == 3:
-        return parts[1], parts[2], None
-    if len(parts) > 3:
-        return None, None, "the merge tree's HEAD has %d parents" % (len(parts) - 1)
+    PR head merged into it. git records the first as ORIG_HEAD on every merge,
+    fast-forward or not, in the tree's own worktree. HEAD is then either the
+    merge commit git made on top of it (second parent = the PR head) or, when
+    the PR already contains origin/main, the PR head itself. HEAD's parents
+    cannot tell those apart: a PR that merged main into itself has a two-parent
+    head of its own, and reading its parents as the gate's refused PRs #636 and
+    #638 (29 Sep 2026) with "main was rewritten during the gate". A PR head
+    whose first parent IS origin/main's tip even has the gate's exact parents,
+    so the tree's own reflog, which records a fast-forward as one, decides."""
     o = run(["git", "rev-parse", "--verify", "-q", "ORIG_HEAD"], cwd=tree, timeout=30)
     base = (o.stdout or "").strip()
     if o.returncode != 0 or not base:
         return None, None, "cannot tell which origin/main commit the tree was built on"
-    return base, parts[0], None
+    r = run(["git", "rev-list", "--parents", "-n", "1", "HEAD"], cwd=tree, timeout=30)
+    parts = (r.stdout or "").split()
+    if r.returncode != 0 or not parts:
+        return None, None, "cannot read the merge tree's HEAD: %s" % tail(r.stderr, 200)
+    if len(parts) == 3 and parts[1] == base:
+        how = run(["git", "reflog", "-1", "--format=%gs", "HEAD"], cwd=tree, timeout=30)
+        if ": Fast-forward" not in (how.stdout or ""):
+            return base, parts[2], None
+    ff = run(["git", "merge-base", "--is-ancestor", base, parts[0]], cwd=tree, timeout=30)
+    if ff.returncode == 0:
+        return base, parts[0], None
+    return None, None, ("the merge tree's HEAD %s is neither a merge onto %s nor a "
+                        "fast-forward from it" % (parts[0][:8], base[:8]))
 
 
 def tree_files(tree, base, head):
