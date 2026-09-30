@@ -438,7 +438,8 @@ a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}
             <div id="ceoBriefBody"><div class="zone-loading"><div class="sop-spinner"></div><span>Loading the CEO brief…</span></div></div>
         </div>
 
-        <div class="zone" id="zoneRecordingBrief">
+        <!-- Hidden 30 Sep 2026 (MASTER-PLAN §4 Hide, brain Decisions/2026-09-29 Home screen is one list): parked or duplicate, not deleted. Restore: remove the display:none. Operations Director content work, parked to January; the Content Engine still writes the rows. Removing display:none here also restores its read (the view switch only loads it while the panel shows). -->
+        <div class="zone" id="zoneRecordingBrief" style="display:none">
             <div class="zone-header">
                 <span class="zone-title">Recording brief for your runs</span>
                 <span class="zone-count" id="briefCount">0</span>
@@ -893,7 +894,8 @@ function switchAgentsView(view){
     // fetch). Without this, a page left open overnight keeps labelling
     // yesterday's brief TODAY, and the approvals waiting-times freeze.
     if(view==='dashboard' && _ceoBriefState==='ready') renderCeoBrief();
-    if(view==='dashboard' && !_briefRows.length) loadRecordingBrief();
+    // Recording brief hidden 30 Sep 2026 (parked to January): no read while its panel is hidden.
+    if(view==='dashboard' && !_briefRows.length && document.getElementById('zoneRecordingBrief')?.style.display!=='none') loadRecordingBrief();
     if(view==='approvals' && _approvalsState==='ready') renderApprovals();
     if(view==='checks') loadChecksAndRender();
     if(view==='estate') loadEstateStatus();

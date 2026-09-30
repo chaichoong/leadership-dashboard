@@ -108,13 +108,14 @@ def blocker_why(day, sent_back, holds, waiting, qa_blocked, qa_waiting, teaser_o
     return "not rendered yet"
 
 
-def build(now=None, state=None, approvals=None, ledger=None, sync_state=None, plan=None, skipped=None, holds=None):
+def build(now=None, state=None, approvals=None, ledger=None, sync_state=None, plan=None, skipped=None, holds=None, skipped_ruled=None):
     now = now or dt.datetime.now(dt.timezone.utc)
     state = publish.load_state() if state is None else state
     approvals = approval.load_state() if approvals is None else approvals
     ledger = watch.load_ledger() if ledger is None else ledger
     sync_state = (runpreneur_sync.load_state() or {}) if sync_state is None else sync_state
     skipped = watch.skipped_names() if skipped is None else skipped
+    skipped_ruled = watch.skipped_ruled() if skipped_ruled is None else skipped_ruled
     holds = publish.held_days() if holds is None else holds
     today = london_day(now)
     episodes = {d: e for d, e in state.items() if str(d).isdigit() and isinstance(e, dict)}
@@ -198,7 +199,7 @@ def build(now=None, state=None, approvals=None, ledger=None, sync_state=None, pl
         "streakDay": streak_today, "lastInOrder": cursor, "daysBehind": streak_today - cursor,
         "history": history, "cleanDaysInRow": clean, "gapDaysPaused": watch.gaps_paused(),
         "scheduled": scheduled[:40], "nextInOrder": next_up, "heldBehind": held, "heldWhy": "" if nxt else why_held, "waitingForKevin": waiting_cards, "qaBlocked": blocked,
-        "sentBack": sent_back, "teaserOnly": teaser_only, "blocker": blocker, "skippedNames": skipped,
+        "sentBack": sent_back, "teaserOnly": teaser_only, "blocker": blocker, "skippedNames": skipped, "skippedRuled": len(skipped_ruled or []),
         "tonight": tonight, "failedRenders": failed, "retryTonight": retrying, "renderedNoCard": no_card, "incomplete": incomplete,
         "strava": {"lastPush": strava_at, "day": sync_state.get("day"), "lastRunKm": (sync_state.get("last_activity") or {}).get("km"),
                    "renamed": bool(lp.get("renamed"))},

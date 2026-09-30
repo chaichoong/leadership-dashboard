@@ -455,7 +455,7 @@ const git = (cwd, ...args) => execFileSync('git', args, { cwd, encoding: 'utf8',
 // origin/main + a PR branch, a clone for the script's REPO, and the merge tree
 // built the way build_merge_result builds it: origin/main, then the PR merged.
 // main's js/config.js registers pnl and tasks, so any other page is new.
-function gitFixture({ ff = false, pullRef = false, prMessage = null } = {}) {
+function gitFixture({ ff = false, pullRef = false, prMessage = null, mainMergedIn = false, mainMovesAgain = false } = {}) {
   const root = tmp('merge-pr-git-');
   const origin = join(root, 'origin.git');
   git(root, 'init', '--quiet', '--bare', '--initial-branch=main', origin);
@@ -475,14 +475,31 @@ function gitFixture({ ff = false, pullRef = false, prMessage = null } = {}) {
     git(work, 'add', '-A'); git(work, 'commit', '--quiet', '-m', prMessage);
   }
   git(work, 'push', '--quiet', 'origin', 'feature/x');
-  const head = git(work, 'rev-parse', 'HEAD');
-  // GitHub's refs/pull/5/head, as the gate reads it before building.
-  if (pullRef) git(work, 'push', '--quiet', 'origin', 'feature/x:refs/pull/5/head');
   git(work, 'checkout', '--quiet', 'main');
   if (!ff) {
     writeFileSync(join(work, 'docs/before.md'), 'main moved before the gate\n');
     git(work, 'add', '-A'); git(work, 'commit', '--quiet', '-m', 'main moves'); git(work, 'push', '--quiet', 'origin', 'main');
   }
+  if (mainMergedIn) {
+    // The PR's head becomes a merge commit of its own. 'into the PR': the PR
+    // merges main in (git merge origin/main, or GitHub's Update branch), first
+    // parent the PR's commit, as on PRs #636 and #638 (29 Sep 2026). 'onto
+    // main': the PR is re-made on main's tip (checkout -B feature/x main, merge
+    // --no-ff), first parent main: the exact parents of the gate's own merge.
+    const pr = git(work, 'rev-parse', 'feature/x');
+    const onto = mainMergedIn === 'onto main';
+    git(work, 'checkout', '--quiet', ...(onto ? ['-B', 'feature/x', 'main'] : ['feature/x']));
+    git(work, 'merge', '--quiet', '--no-edit', '--no-ff', onto ? pr : 'main');
+    git(work, 'push', '--quiet', 'origin', 'feature/x');
+    git(work, 'checkout', '--quiet', 'main');
+    if (mainMovesAgain) {
+      writeFileSync(join(work, 'docs/after.md'), 'main moved after the PR merged it in\n');
+      git(work, 'add', '-A'); git(work, 'commit', '--quiet', '-m', 'main moves again'); git(work, 'push', '--quiet', 'origin', 'main');
+    }
+  }
+  const head = git(work, 'rev-parse', 'feature/x');
+  // GitHub's refs/pull/5/head, as the gate reads it before building.
+  if (pullRef) git(work, 'push', '--quiet', 'origin', 'feature/x:refs/pull/5/head');
   const base = git(work, 'rev-parse', 'main');
   const repo = join(root, 'repo');
   git(root, 'clone', '--quiet', origin, repo);
@@ -683,10 +700,11 @@ function killIfAlive(pid) {
 function flow({ view = OPEN, suites = {}, affected = { out: { scope: 'some', pages: ['pnl', 'tasks'], files: [] }, exit: 0 },
                 local = null, local2 = null, live = null, argv = ['--pr', '5'], mergeConfirms = true, mergeExit = 0,
                 ff = false, moveMain = null, build = null, suitesCrash = false, interruptServerPoll = false,
-                patch = null, pullRef = false, headIsReal = false, env = {}, prMessage = null, viewLate = null } = {}) {
+                patch = null, pullRef = false, headIsReal = false, env = {}, prMessage = null, viewLate = null,
+                mainMergedIn = false, mainMovesAgain = false } = {}) {
   const bin = stubs(view, { mergeConfirms, mergeExit, suites });
   const home = tmp('merge-pr-home-');
-  const g = gitFixture({ ff, pullRef, prMessage });
+  const g = gitFixture({ ff, pullRef, prMessage, mainMergedIn, mainMovesAgain });
   if (headIsReal) writeFileSync(join(bin.dir, 'view.json'), JSON.stringify({ ...view, headRefOid: g.head }));
   // What gh says on the second and later reads (the re-read just before merging).
   if (viewLate != null) writeFileSync(join(bin.dir, 'view-late.json'), typeof viewLate === 'string' ? viewLate : JSON.stringify(viewLate));
@@ -822,6 +840,42 @@ describe('merge-pr.py end to end (fakes, real git, no network)', { timeout: 60_0
     expect(r.result.base).toBe(r.g.base);
     expect(r.result.head).toBe(r.g.head);
     expect(r.gh).toMatch(new RegExp(`--match-head-commit ${r.g.head} --subject `, 'm'));
+  });
+
+  // 29 Sep 2026, PRs #636 and #638: each PR had merged main into itself, so the
+  // merge fast-forwarded and HEAD was the PR's OWN merge commit, with two
+  // parents like the gate's. The gate read the PR's commit as the base and main
+  // as the head, then refused: "main was rewritten during the gate".
+  for (const [mainMergedIn, mainMovesAgain, how] of [
+    ['into the PR', false, 'git fast-forwards to it, as on #638'],
+    ['into the PR', true, 'main moved again, so the gate merges it'],
+    ['onto main', false, 'first parent main\'s tip, the gate\'s own parents; git fast-forwards to it'],
+  ]) {
+    it(`a PR head that is its own merge with main (${how}): base is main, head is the PR's merge commit`, () => {
+      const r = flow({ affected: NONE, mainMergedIn, mainMovesAgain });
+      const [top, ...parents] = git(r.g.tree, 'rev-list', '--parents', '-n', '1', 'HEAD').split(' ');
+      if (mainMovesAgain) expect(parents).toEqual([r.g.base, r.g.head]);   // the gate's own merge commit
+      else expect([top, parents.length]).toEqual([r.g.head, 2]);           // the PR's own merge commit
+      if (!mainMovesAgain) expect(parents[0] === r.g.base).toBe(mainMergedIn === 'onto main');
+      expect(r.code, r.result.why).toBe(0);
+      expect(r.result.merged).toBe(true);
+      expect(r.result.base).toBe(r.g.base);
+      expect(r.result.head).toBe(r.g.head);
+      expect(r.result.mainMovedBy).toBe(null);
+      // The PR's own file only: docs/before.md came from main through the merge.
+      expect(r.affectedStdin).toBe('js/pnl.js\n');
+      expect(r.gh).toMatch(new RegExp(`--match-head-commit ${r.g.head} --subject `, 'm'));
+    });
+  }
+
+  it('a tree git did not build by merging onto origin/main is cannot judge, never a guess', () => {
+    const g = gitFixture();
+    const read = () => py(`print(json.dumps(mp.tree_shas(${JSON.stringify(g.tree)})))`);
+    git(g.tree, 'reset', '--quiet', '--hard', 'refs/fixer/pr-5');   // ORIG_HEAD = the merge, HEAD = the PR under it
+    expect(read()[2]).toMatch(/^the merge tree's HEAD [0-9a-f]{8} is neither a merge onto [0-9a-f]{8} nor a fast-forward from it$/);
+    // worktree add and merge both write ORIG_HEAD; if it is ever missing, refuse.
+    git(g.tree, 'update-ref', '-d', 'ORIG_HEAD');
+    expect(read()).toEqual([null, null, 'cannot tell which origin/main commit the tree was built on']);
   });
 
   it('main moved during the gate onto a file the PR changes: refused, run it again', () => {

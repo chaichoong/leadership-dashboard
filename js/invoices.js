@@ -471,7 +471,7 @@
 
             // Action column — recordId is an Airtable record ID (safe); the
             // Gmail URL is resolved inside the click wrapper, never inlined.
-            const actionHtml = `<button class="inv-mark-paid-btn" onclick="event.stopPropagation(); markInvoicePaidClick('${inv.recordId}',this)" title="Mark as paid — updates Airtable + moves Gmail label">Mark Paid</button>`;
+            const actionHtml = `<button class="inv-mark-paid-btn" onclick="event.stopPropagation(); markInvoicePaidClick('${inv.recordId}',this)" title="Mark as paid — updates Airtable (the Gmail label step is off since 30 Sep 2026: GMAIL_SCRIPT_URL is empty)">Mark Paid</button>`;
 
             // The bank details Kevin actually types into his banking app. Shown
             // in full rather than behind a click: the whole brief was "one place
@@ -991,7 +991,7 @@
 
         const total = targets.reduce((sum, inv) => sum + (Number(inv.amount) || 0), 0);
         const totalLabel = (typeof fmt === 'function') ? fmt(total) : '£' + total.toFixed(2);
-        if (!confirm(`Mark ${targets.length} invoice${targets.length > 1 ? 's' : ''} as Paid?\n\nTotal: ${totalLabel}\n\nThis updates Airtable and moves each Gmail label from "3. to pay" to "4: paid".`)) return;
+        if (!confirm(`Mark ${targets.length} invoice${targets.length > 1 ? 's' : ''} as Paid?\n\nTotal: ${totalLabel}\n\nThis updates Airtable. (The Gmail label move is off since 30 Sep 2026: the label is no longer used.)`)) return;
 
         if (btn) { btn.disabled = true; btn.textContent = 'Processing…'; }
         const today = new Date().toISOString().slice(0, 10);
