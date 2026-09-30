@@ -140,6 +140,8 @@ Before fixing:
 
 Fix the root cause. Do not refactor surrounding code, add features, or "improve while you're in there." The fix should be as small and focused as possible.
 
+Before the first edit, grep every caller of the function you are about to change. Kevin's report names one symptom; its siblings usually share the cause. One fix in the shared function is a smaller diff than a guard in each caller, and a fix in the one caller the report names leaves the others broken. Reuse an existing helper before writing a new one (guide review 30 Sep 2026, khasky/awesome-agents-md).
+
 ### 3b. Check your own fix
 
 Before moving to the quality pipeline:

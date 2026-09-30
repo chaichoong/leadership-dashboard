@@ -237,6 +237,62 @@ describe('merge-guard on the desktop auto-merge tool', () => {
   });
 });
 
+// Regression origin: 30 Sep 2026. A replay of 103,276 past session commands found
+// 97 commits that switched the git hooks off (87 by `git -c core.hooksPath=/dev/null`,
+// 10 by --no-verify). The repo is PUBLIC and the pre-commit hook is the only thing
+// that stops a private name reaching it, so a skip is a leak waiting to happen.
+describe('merge-guard refuses a git command that skips the hooks', () => {
+  it('commit --no-verify, and the reason names the name guard and the way out', () => {
+    const why = expectDeny('git commit -q --amend --no-edit --no-verify');
+    expect(why).toContain('git commit --no-verify');
+    expect(why).toContain('private-name-guard.py');
+    expect(why).toMatch(/ask Kevin/);
+    expect(why).toMatch(/Do not look for another way round it/);
+  });
+  it('the hooksPath switch-off the sessions actually used', () => {
+    const why = expectDeny('git add -A scripts && git -c core.hooksPath=/dev/null commit -q -m "x"');
+    expect(why).toContain('core.hooksPath');
+  });
+  it('commit -n, alone or in a cluster', () => {
+    expectDeny('git commit -n -m x');
+    expectDeny('git commit -anm x');
+  });
+  it('push, merge, pull, am and rebase with --no-verify', () => {
+    for (const c of ['git push --no-verify origin HEAD:main', 'git merge --no-verify origin/main',
+                     'git pull --no-verify', 'git am --no-verify < x.patch',
+                     'git rebase --no-verify origin/main']) {
+      expectDeny(c);
+    }
+  });
+  it('behind cd, git -C, a helper shell or $( )', () => {
+    expectDeny('cd /tmp/wt && git commit --no-verify -m x');
+    expectDeny('git -C /tmp/wt commit --no-verify -m x');
+    expectDeny("bash -c 'git commit --no-verify -m x'");
+    expectDeny('echo "$(git commit --no-verify -m x)"');
+  });
+});
+
+describe('merge-guard lets ordinary git through', () => {
+  it('commits whose message or pathspec only mentions the flag', () => {
+    expectAllow('git commit -m --no-verify');
+    expectAllow('git commit -m "why we never use --no-verify"');
+    expectAllow("git commit -am 'fix -n handling'");
+    expectAllow('git commit -- --no-verify');
+  });
+  it('-n where it means something else', () => {
+    expectAllow('git push -n origin HEAD');
+    expectAllow('git merge -n origin/main');
+    expectAllow('git log -n 5');
+  });
+  it('ordinary commits and pushes, and other tools with a similar flag', () => {
+    expectAllow("git commit -m 'x'");
+    expectAllow('git -c user.name=x commit -m y');
+    expectAllow('git push -u origin chore/x');
+    expectAllow('supabase functions deploy onboarding-submit --no-verify-jwt');
+    expectAllow("grep -rn -- '--no-verify' scripts/");
+  });
+});
+
 describe('merge-guard bookkeeping', () => {
   it('logs each denial to ~/knowledge-os/logs/merge-guard.log, with secrets redacted', () => {
     expectDeny('GH_TOKEN=ghp_abcdefghijklmnop gh pr merge 99');

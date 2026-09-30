@@ -18,6 +18,22 @@ mcp__ccd_pr__set_auto_merge tool and denies turning auto-merge ON: auto-merge
 lands the PR on GitHub when its checks pass, and no check here runs the tests,
 so it is a merge with no gate. Turning auto-merge off is allowed.
 
+ALSO: SKIPPING THE GIT HOOKS (30 Sep 2026)
+The same hook refuses a git commit, push, merge, pull, am or rebase that
+carries `--no-verify` (or `git commit -n`, its short form; on push, merge and
+pull `-n` means something else and passes), or that points core.hooksPath
+somewhere else with `git -c`. This repo is PUBLIC: the pre-commit hook is the
+only thing that stops a line naming someone on the private roster reaching it
+(scripts/private-name-guard.py), the commit-msg hook checks messages for the
+same, and the pre-push hook runs the test gate that SKIP_SYNC_TESTS=1, already
+a deny rule, would skip. A replay of 103,276 past session commands on 30 Sep
+2026 found 97 commits that skipped the hooks, in 14 sessions from 1 Jul to
+29 Sep: 87 by `git -c core.hooksPath=/dev/null`, 10 by `--no-verify`, 5 of
+them by helper agents, 3 after the name guard went live on 21 Sep. None of
+the 194 commits on main since then names anyone on the roster, so no leak
+yet. The same replay drew 0 false refusals. Source: a guide review of
+khasky/awesome-agents-md ("never make a failing check pass by weakening it").
+
 HOW IT DECIDES
 It reads the command the way a shell would, far enough to know which words
 sit in COMMAND POSITION: it splits on newlines, ; & && || | and ( ), follows
@@ -100,6 +116,17 @@ WATCH_VALUE = {"-n", "--interval", "-q", "--equexit"}
 SCRIPT_VALUE = {"-t", "-T", "--log-timing", "-I", "--log-in", "-O", "--log-out",
                 "-B", "--log-io", "-m", "--logging-format", "-E", "--echo"}
 AUTO_MERGE_TOOL = "mcp__ccd_pr__set_auto_merge"
+# git subcommands that run hooks `--no-verify` would skip. Only on commit is -n
+# its short form: on push it is --dry-run, on merge and pull --no-stat.
+HOOKED_GIT = {"commit", "push", "merge", "pull", "am", "rebase"}
+GIT_GLOBAL_VALUE = {"-C", "-c", "--git-dir", "--work-tree", "--namespace",
+                    "--exec-path", "--config-env", "--super-prefix"}
+COMMIT_VALUE = {"-m", "-F", "-C", "-c", "-t", "--message", "--file",
+                "--reuse-message", "--reedit-message", "--template", "--author",
+                "--date", "--cleanup", "--fixup", "--squash", "--trailer",
+                "--pathspec-from-file"}
+NO_VERIFY = "--no-verify"
+SKIP_TAG = "hooks:"          # judge() result for a hook skip, e.g. "hooks:commit --no-verify"
 CURL_DATA = {"-d", "--data", "--data-raw", "--data-binary", "--data-urlencode",
              "--data-ascii", "--json", "-F", "--form", "--form-string"}
 # Redirection operators, longest first. `<(` and `>(` are process substitution.
@@ -542,11 +569,66 @@ def http_merge(tool, args):
     return number if number and verb not in ("GET", "HEAD") else None
 
 
+def is_no_verify(word):
+    """--no-verify, or an abbreviation git would accept for it (--no-veri...)."""
+    return len(word) >= len("--no-veri") and NO_VERIFY.startswith(word)
+
+
+def git_skip(args):
+    """"hooks:<sub> <flag>" when these git arguments skip the hooks, else None."""
+    i, hooks_path = 0, False
+    while i < len(args) and args[i].startswith("-"):
+        a = args[i]
+        value = None
+        if a in GIT_GLOBAL_VALUE:
+            value = args[i + 1] if i + 1 < len(args) else ""
+            i += 2
+        else:
+            if a.startswith("-c") and len(a) > 2:
+                value = a[2:]
+            i += 1
+        if a.startswith("-c") and value and value.lower().startswith("core.hookspath="):
+            hooks_path = True
+    if i >= len(args) or args[i] not in HOOKED_GIT:
+        return None
+    sub, rest = args[i], args[i + 1:]
+    if hooks_path:
+        return "%s%s -c core.hooksPath" % (SKIP_TAG, sub)
+    k = 0
+    while k < len(rest):
+        a = rest[k]
+        k += 1
+        if a == "--":
+            break
+        if is_no_verify(a):
+            return "%s%s %s" % (SKIP_TAG, sub, NO_VERIFY)
+        if sub != "commit" or not a.startswith("-") or a == "-":
+            continue
+        if a.startswith("--"):
+            if "=" not in a and a in COMMIT_VALUE:
+                k += 1                                   # --message "text"
+            continue
+        # A short cluster: -anm "msg" is -a -n -m. After m, F, C, c or t the
+        # rest of the cluster (or the next word) is that option's value.
+        for pos, ch in enumerate(a[1:]):
+            if ch == "n":
+                return "%s%s -n" % (SKIP_TAG, sub)
+            if ch in "mFCct":
+                if pos == len(a) - 2:
+                    k += 1
+                break
+            if ch in "Su":                               # -S<keyid>, -u<mode>
+                break
+    return None
+
+
 def inspect(words, depth):
     words = strip_wrappers(words)
     if not words:
         return None
     base = os.path.basename(words[0])
+    if base == "git":
+        return git_skip(words[1:])
     if base in SHELLS:
         inner = shell_c_arg(words)
         return scan_or_fallback(inner, depth + 1) if inner is not None else None
@@ -635,6 +717,18 @@ def auto_merge_reason(pr):
         "auto-merge OFF is allowed." % n)
 
 
+def skip_reason(what):
+    return (
+        "Blocked: `git %s` skips this repo's git hooks. The repo is PUBLIC, and "
+        "the pre-commit hook (scripts/private-name-guard.py) is the only thing "
+        "that stops a private name reaching it; the commit-msg hook checks the "
+        "message for the same; the pre-push hook runs the test gate, which "
+        "SKIP_SYNC_TESTS=1 is already denied for skipping. Run the command "
+        "without it. If a hook refuses, read what it says and fix the cause. If "
+        "you believe the hook itself is wrong, stop: name the hook, say why, and "
+        "ask Kevin. Do not look for another way round it." % what)
+
+
 def log_denial(command):
     try:
         path = os.path.join(os.path.expanduser("~"), "knowledge-os", "logs", "merge-guard.log")
@@ -675,7 +769,7 @@ def main():
     pr = judge(command)
     if pr:
         log_denial(command)
-        deny(reason(pr))
+        deny(skip_reason(pr[len(SKIP_TAG):]) if pr.startswith(SKIP_TAG) else reason(pr))
     return 0
 
 
@@ -785,6 +879,48 @@ CASES = [
     ("watch -n 5 'gh pr view 5'", False),
     ("script -q /dev/null ls", False),
     ("echo 'gh pr merge 5' | bash", False),   # deliberate evasion: left alone (header)
+    # skipping the git hooks: denied
+    ("git commit --no-verify -m 'x'", True),
+    ("git commit -q --amend --no-edit --no-verify", True),
+    ("cd /tmp/wt && git commit --no-verify -F msg.txt", True),
+    ("git commit -n -m 'x'", True),
+    ("git commit -anm 'x'", True),
+    ("git commit --no-veri -m x", True),
+    ("git -C /tmp/wt commit --no-verify -m x", True),
+    ("git -c user.name=x commit --no-verify", True),
+    ("git -c core.hooksPath=/dev/null commit -m x", True),
+    ("git -c core.hookspath=/dev/null push", True),
+    ("git push --no-verify origin HEAD:main", True),
+    ("git push -u origin fix/x --no-verify", True),
+    ("git merge --no-verify origin/main", True),
+    ("git pull --no-verify", True),
+    ("git am --no-verify < x.patch", True),
+    ("git rebase --no-verify origin/main", True),
+    ("bash -c 'git commit --no-verify -m x'", True),
+    ('echo "$(git commit --no-verify -m x)"', True),
+    # skipping the git hooks: allowed
+    ("git commit -m 'x'", False),
+    ("git commit -am 'fix -n handling'", False),
+    ("git commit -m --no-verify", False),
+    ('git commit -m "why we never use --no-verify"', False),
+    ("git commit -m -n", False),
+    ("git commit -F notes.txt", False),
+    ("git commit -S -m x", False),
+    ("git commit --amend --no-edit", False),
+    ("git commit --author 'n <e>' -m x", False),
+    ("git commit -- --no-verify", False),
+    ("git push -n origin HEAD", False),
+    ("git push -u origin chore/x", False),
+    ("git merge -n origin/main", False),
+    ("git pull -n", False),
+    ("git log -n 5", False),
+    ("git log --oneline -- --no-verify", False),
+    ("git -c user.name=x commit -m y", False),
+    ("git config core.hooksPath", False),
+    ("grep -rn -- '--no-verify' scripts/", False),
+    ("echo git commit --no-verify", False),
+    ("supabase functions deploy onboarding-submit --no-verify-jwt", False),
+    ("python3 scripts/sync-master-plan.py", False),
 ]
 
 

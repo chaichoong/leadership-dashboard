@@ -157,6 +157,13 @@ Before writing anything, read the files you'll modify end-to-end:
 - `index.html` (sidebar structure, tab panel containers — especially OS-INTEGRATION sections)
 - The most similar existing feature's JS file (copy proven patterns, not reinvent)
 
+Then, for each piece the feature needs, climb the less-code ladder and stop at the first rung that holds (guide review 30 Sep 2026, khasky/awesome-agents-md, adapted from Ponytail):
+1. Does it need to exist? A speculative need is dropped and named in one line in the brief.
+2. Is it already here? Search `js/shared.js`, `js/config.js` and the nearest similar feature before writing a helper.
+3. Does the browser, Airtable or an installed package already cover it?
+4. Can it be one line?
+5. Only then, the minimum code that works. Anything Kevin did not ask for goes in the brief as a one-line question, not into the build.
+
 ### 2b. Map out every code change
 
 List every change needed, grouped by file:
