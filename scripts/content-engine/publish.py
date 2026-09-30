@@ -1461,17 +1461,28 @@ def published(day=0):
 # two weeks while every episode was live, and on 29 Sep the Task Manager read them as "approved but unpublished" and
 # put 2059 back in Kevin's queue to approve again. The engine now closes its own card, once, when all seven sections
 # are done, through agent-dispatch's `complete` so its gates (approval, blocker) still apply.
-CARD_DONE_STATUS = "Completed"
+CARD_CLOSED_STATUSES = ("Completed", "Cancelled")     # agent-dispatch's two closed statuses (CLOSED_KEEPER_STATUSES)
+# A clip section with nothing in it is owed only when that clip was made: an episode with no diary section has no
+# Learnings clip, so its Learnings, Short and share sections read "missing" for good (review, 30 Sep 2026).
+CLIP_SECTIONS = {"YouTube Short": ("lfmd",), "Learnings clips": ("lfmd",), "Teaser clips": ("summary",), "Facebook share": ("summary", "lfmd")}
 
 
-def cards_to_close(state, cards):
-    """(day, task) for every episode out on all seven sections whose approved card is not closed yet."""
+def episode_finished(entry, made):
+    """Out on every section it owes. `made(clip)` says whether the render made that clip (its recorded Drive link)."""
+    return all(v == "done" or (v == "missing" and section in CLIP_SECTIONS and not any(made(c) for c in CLIP_SECTIONS[section]))
+               for section, v in section_status(entry).items())
+
+
+def cards_to_close(state, cards, made=None):
+    """(day, task) for every finished episode whose approved card is not closed yet."""
+    if made is None:
+        ledger = watch.load_ledger(); made = lambda day, clip: bool(output_link(day, clip, ledger))
     out = []
     for d, e in state.items():
         if not str(d).isdigit() or not isinstance(e, dict) or e.get("card_closed") or not e.get("posts"): continue
         c = cards.get(str(d)) or {}
         if c.get("verdict") != "approved" or not c.get("task"): continue
-        if all(v == "done" for v in section_status(e).values()): out.append((int(d), c["task"]))
+        if episode_finished(e, lambda clip, day=int(d): made(day, clip)): out.append((int(d), c["task"]))
     return sorted(out)
 
 
@@ -1485,28 +1496,47 @@ def dispatch(*args):
     return r.returncode, (r.stdout + r.stderr).strip()
 
 
-def close_cards(dry_run=False, status_of=card_status, run=dispatch):
-    state = load_state(); closed = 0; changed = False
-    for day, task in cards_to_close(state, approval.load_state()):
+def mark_card(day, **keys):
+    """Re-read the state, set only these keys on one episode, save. The loop is slow (two dispatch calls a card), so
+    saving the copy read at the start could undo whatever another writer saved meanwhile (review, 30 Sep 2026)."""
+    st = load_state(); e = st.setdefault(str(day), {})
+    for k, v in keys.items():
+        if v is None: e.pop(k, None)
+        else: e[k] = v
+    save_state(st)
+
+
+def close_cards(dry_run=False, status_of=card_status, run=dispatch, made=None):
+    state = load_state(); closed = 0
+    for day, task in cards_to_close(state, approval.load_state(), made):
         entry = state[str(day)]
         try:
             status = status_of(task)
-            if status == CARD_DONE_STATUS:
-                entry["card_closed"] = "already"; changed = True; continue     # closed by hand or by the old hand-back: its date stays
+            if status in CARD_CLOSED_STATUSES:
+                if not dry_run: mark_card(day, card_closed="already", card_close_refused=None)   # closed by hand: its date stays
+                continue
             if dry_run:
-                print("episode %d: card %s would close (all seven sections out)" % (day, task)); continue
+                print("episode %d: card %s would close (out on every section it owes)" % (day, task)); continue
             code, out = run("complete", task)
             if code:
-                print("episode %d: card %s NOT closed (status %s): %s" % (day, task, status, out[-300:]), file=sys.stderr); continue
-            entry["card_closed"] = now_utc(); closed += 1; changed = True
-            run("annotate", task, "--note", "Content Engine: episode %d is out on all seven sections (YouTube %s), so its card is closed."
-                % (day, entry.get("youtube_link") or "link not recorded"))
+                # A refusal (approved with edits and no EDITS APPLIED mark, an open blocker, an escalation that wiped
+                # the verdict) is tried every hour, flagged as an ERROR once, and named in the report until it clears.
+                first = not entry.get("card_close_refused")
+                mark_card(day, card_close_refused={"since": (entry.get("card_close_refused") or {}).get("since") or now_utc(), "why": out[-300:]})
+                if first: print("ERROR: episode %d: card %s not closed (status %s): %s" % (day, task, status, out[-300:]))
+                else: print("episode %d: card %s still not closed: %s" % (day, task, out[-200:]), file=sys.stderr)
+                continue
+            mark_card(day, card_closed=now_utc(), card_close_refused=None); closed += 1
             print("episode %d: card %s closed" % (day, task))
         except (Exception, SystemExit) as ex:
-            print("episode %d: card %s not checked this run (%s)" % (day, task, str(ex)[-200:]), file=sys.stderr)
-    if changed and not dry_run: save_state(state)
+            print("episode %d: card %s not checked this run (%s)" % (day, task, str(ex)[-200:]), file=sys.stderr); continue
+        try:
+            code, out = run("annotate", task, "--note", "Content Engine: episode %d is out on every section it owes (YouTube %s), so its card is closed."
+                            % (day, entry.get("youtube_link") or "link not recorded"))
+            if code: print("episode %d: card %s closed, but its note was not written: %s" % (day, task, out[-200:]), file=sys.stderr)
+        except (Exception, SystemExit) as ex:
+            print("episode %d: card %s closed, but its note was not written (%s)" % (day, task, str(ex)[-200:]), file=sys.stderr)
     print("card close: %d closed" % closed)
-
 
 def report():
     days = approved_days()
@@ -1537,6 +1567,9 @@ def report():
                    for p in (e.get("posts") or {}).values() if p.get("status") in ("creating", "unconfirmed")]
     print("content monetisation: %s" % ("every YouTube episode and Short On" if not waiting else "NOT On yet for " + ", ".join(sorted(waiting))))
     print("content posts to check once: %s" % ("none" if not unconfirmed else ", ".join(unconfirmed)))
+    refused = ["%s (since %s: %s)" % (d, (e.get("card_close_refused") or {}).get("since", "")[:10], (e.get("card_close_refused") or {}).get("why", "")[-120:])
+               for d, e in sorted(state.items(), key=lambda x: int(x[0])) if e.get("card_close_refused") and not e.get("card_closed")]
+    print("content cards not closed: %s" % ("none" if not refused else "; ".join(refused)))
 
 
 def youtube_link():
@@ -1711,54 +1744,66 @@ def _selftest_close_cards():
     """30 Sep 2026: 2059-2077 were live on all seven sections and their approved cards sat open at "Today" for up to
     two weeks, so the Task Manager asked Kevin to approve 2059 again. Drives close_cards end to end on fakes."""
     import types as _types, io as _io, contextlib as _cl
-    def out_everywhere():
+    def out_everywhere(diary=True):
         posts = {"youtube|full|yt": {"platform": "youtube", "clip": "full", "status": "published"},
-                 "youtube|lfmd|yt": {"platform": "youtube", "clip": "lfmd", "status": "published"},
-                 "facebook|summary|fb": {"platform": "facebook", "clip": "summary", "status": "published"},
-                 "facebook|lfmd|fb": {"platform": "facebook", "clip": "lfmd", "status": "published"}}
-        return {"posts": posts, "youtube_link": "https://youtu.be/x", "blog": {"url": "https://b"}, "podcast": {"status": "published"},
-                "facebook_share": {"status": "shared"}, "facebook_share_lfmd": {"status": "shared"}}
+                 "facebook|summary|fb": {"platform": "facebook", "clip": "summary", "status": "published"}}
+        e = {"posts": posts, "youtube_link": "https://youtu.be/x", "blog": {"url": "https://b"}, "podcast": {"status": "published"},
+             "facebook_share": {"status": "shared"}}
+        if diary:
+            posts.update({"youtube|lfmd|yt": {"platform": "youtube", "clip": "lfmd", "status": "published"},
+                          "facebook|lfmd|fb": {"platform": "facebook", "clip": "lfmd", "status": "published"}})
+            e["facebook_share_lfmd"] = {"status": "shared"}
+        return e
     part = out_everywhere(); part["posts"]["facebook|lfmd|fb"]["status"] = "scheduled"          # a Learnings post not out yet
     disk = {"_cursor": 2079, "2059": out_everywhere(), "2060": out_everywhere(), "2061": out_everywhere(), "2078": part,
-            "2062": out_everywhere(), "2063": out_everywhere(), "2064": dict(out_everywhere(), card_closed="2026-09-29T10:00:00Z")}
-    cards = {"2059": {"task": "recA", "verdict": "approved"}, "2060": {"task": "recB", "verdict": "approved"},
-             "2061": {"task": "recC", "verdict": "approved"}, "2078": {"task": "recD", "verdict": "approved"},
-             "2062": {"task": "recE", "verdict": "changes"}, "2063": {"task": "recF", "verdict": "approved"},
-             "2064": {"task": "recG", "verdict": "approved"}}
-    assert cards_to_close(disk, cards) == [(2059, "recA"), (2060, "recB"), (2061, "recC"), (2063, "recF")], cards_to_close(disk, cards)
-    status = {"recA": "Today", "recB": "Completed", "recC": "Approval", "recF": "Today"}
+            "2062": out_everywhere(), "2063": out_everywhere(), "2064": dict(out_everywhere(), card_closed="2026-09-29T10:00:00Z"),
+            "2065": out_everywhere(diary=False), "2066": out_everywhere(diary=False), "2067": out_everywhere(), "2068": out_everywhere()}
+    cards = {str(d): {"task": "rec%d" % d, "verdict": "approved"} for d in range(2059, 2069)}
+    cards["2078"] = {"task": "rec2078", "verdict": "approved"}; cards["2062"]["verdict"] = "changes"
+    made = lambda day, clip: not (day == 2065 and clip == "lfmd")          # 2065 had no diary section; 2066's clip was made, never posted
+    assert cards_to_close(disk, cards, made) == [(d, "rec%d" % d) for d in (2059, 2060, 2061, 2063, 2065, 2067, 2068)], cards_to_close(disk, cards, made)
+    status = {"rec2059": "Today", "rec2060": "Completed", "rec2061": "Approval", "rec2063": "Today", "rec2065": "Today", "rec2067": "Cancelled", "rec2068": "Today"}
     calls = []
     def run_(*args):
         calls.append(args)
-        if args[:2] == ("complete", "recC"): return 1, "ERROR: refusing to complete recC - outcome is 'empty', not an approval."
+        if args[:2] == ("complete", "rec2061"): return 1, "ERROR: refusing to complete rec2061 - Kevin approved it WITH EDITS and no edit was applied."
+        if args[:2] == ("annotate", "rec2068"): return 1, "HTTP 422"
         return 0, "{}"
     g = globals(); saved = {k: g[k] for k in ("load_state", "save_state", "approval")}
     saves = []
+    def quiet(**kw):
+        o, e = _io.StringIO(), _io.StringIO()
+        with _cl.redirect_stdout(o), _cl.redirect_stderr(e): close_cards(made=made, run=run_, **kw)
+        return o.getvalue(), e.getvalue()
     try:
-        g.update({"load_state": lambda: disk, "save_state": lambda st: saves.append(dict(st)),
+        g.update({"load_state": lambda: disk, "save_state": lambda st: saves.append(1),
                   "approval": _types.SimpleNamespace(load_state=lambda: cards)})
-        with _cl.redirect_stdout(_io.StringIO()), _cl.redirect_stderr(_io.StringIO()):
-            close_cards(dry_run=True, status_of=status.get, run=run_)
-        assert calls == [] and saves == [], "a dry run closes nothing and saves nothing: %s" % calls
-        with _cl.redirect_stdout(_io.StringIO()), _cl.redirect_stderr(_io.StringIO()):
-            close_cards(status_of=status.get, run=run_)
+        quiet(dry_run=True, status_of=status.get)
+        assert calls == [] and saves == [] and not any("card_closed" in disk[d] for d in ("2059", "2060", "2067")), "a dry run closes nothing and saves nothing"
+        out, err = quiet(status_of=status.get)
         completes = [a[1] for a in calls if a[0] == "complete"]
-        assert completes == ["recA", "recC", "recF"], "only open cards of finished, approved episodes are completed: %s" % completes
-        assert disk["2060"]["card_closed"] == "already", "a card already Completed keeps its own date"
-        assert "card_closed" not in disk["2061"], "a refused close is tried again next hour, never recorded as closed"
-        assert disk["2059"]["card_closed"].endswith("Z") and disk["2063"]["card_closed"].endswith("Z")
+        assert completes == ["rec2059", "rec2061", "rec2063", "rec2065", "rec2068"], "only open cards of finished, approved episodes are completed: %s" % completes
+        assert saves, "each close is saved"
+        assert disk["2060"]["card_closed"] == "already" and disk["2067"]["card_closed"] == "already", "a Completed or Cancelled card keeps its own status and date"
+        assert disk["2065"]["card_closed"].endswith("Z"), "an episode with no diary section closes on the sections it has"
+        assert "card_closed" not in disk["2066"], "a Learnings clip that was made but never posted keeps the card open"
+        assert "card_closed" not in disk["2061"] and "WITH EDITS" in disk["2061"]["card_close_refused"]["why"], "a refused close is recorded, never as closed"
+        assert out.count("ERROR: episode 2061") == 1, "a refusal is flagged as an ERROR the first time: %s" % out
+        assert "2068" in err and "note was not written" in err and disk["2068"]["card_closed"].endswith("Z"), "a failed note is said, and the card still counts as closed"
         assert "card_closed" not in disk["2078"] and "card_closed" not in disk["2062"], "an episode not out everywhere, or not approved, stays open"
         notes = [a for a in calls if a[0] == "annotate"]
-        assert [a[1] for a in notes] == ["recA", "recF"] and "https://youtu.be/x" in notes[0][3], notes
+        assert [a[1] for a in notes] == ["rec2059", "rec2063", "rec2065", "rec2068"] and "https://youtu.be/x" in notes[0][3], notes
         calls.clear()
-        with _cl.redirect_stdout(_io.StringIO()), _cl.redirect_stderr(_io.StringIO()):
-            close_cards(status_of=status.get, run=run_)
-        assert [a[1] for a in calls if a[0] == "complete"] == ["recC"], "a closed card is never completed twice: %s" % calls
-        def boom(task): raise RuntimeError("Airtable 503")
-        disk["2061"].pop("card_closed", None); calls.clear()
-        with _cl.redirect_stdout(_io.StringIO()), _cl.redirect_stderr(_io.StringIO()):
-            close_cards(status_of=boom, run=run_)
-        assert calls == [], "an unreadable card is left for next hour, and the run does not stop"
+        out, err = quiet(status_of=status.get)
+        assert [a[1] for a in calls if a[0] == "complete"] == ["rec2061"], "a closed card is never completed twice: %s" % calls
+        assert "ERROR:" not in out and "still not closed" in err, "a standing refusal is flagged once, then named each hour without a new alarm"
+        def boom_first(task):
+            if task == "rec2059": raise RuntimeError("Airtable 503")
+            return "Today"
+        disk["2059"].pop("card_closed"); calls.clear()
+        out, err = quiet(status_of=boom_first)
+        assert "card_closed" not in disk["2059"] and "not checked this run" in err, "an unreadable card is left for next hour"
+        assert [a[1] for a in calls if a[0] == "complete"] == ["rec2061"], "the card after an unreadable one is still worked: %s" % calls
     finally:
         g.update(saved)
 
