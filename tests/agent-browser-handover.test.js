@@ -49,6 +49,9 @@ const PAGE = `<!doctype html><html><body>
   <fieldset><legend>Do you agree with the statements above?</legend><button type="button" id="tb" aria-pressed="false" onclick="this.setAttribute('aria-pressed','true')">Yes, that is right</button></fieldset>
   <fieldset><legend>I declare the details above are correct</legend><button type="button" id="tb2" onclick="document.getElementById('out').textContent='DECLARED'">Yes</button></fieldset>
   <label for="sig">Type your full name to sign</label><input id="sig">
+  <label for="as">Assumptions</label><select id="as"><option value="">Select</option><option>I agree with all the assumptions</option></select>
+  <div><h3>Do you agree with the statements above?</h3><button type="button" id="h3y" onclick="document.getElementById('out').textContent='H3-YES'">Yes</button><button type="button">No</button></div>
+  <div><span>I declare the information I have given is true</span><input type="radio" name="sp" id="spy"><label for="spy" id="spyl">Yes</label><input type="radio" name="sp" id="spn"><label for="spn">No</label></div>
   <div id="out"></div>
   <script>
     setTimeout(() => { const d = document.createElement('div'); d.id = 'signed-in'; d.textContent = 'My account'; document.body.appendChild(d); }, 800);
@@ -180,7 +183,8 @@ describe('the robot does every step up to Kevin, waits for his part, and hands o
       expect(await page.locator('#out').textContent()).toBe('PLAIN');
       // Review round 4: a dropdown or a Yes button answering a declaration, and a name typed as a
       // signature, are his; an ordinary dropdown is the robot's.
-      for (const st of [{ do: 'select', selector: '#ds', value: 'Yes' }, { do: 'click', selector: '#tb' }, { do: 'click', selector: '#tb2' }, { do: 'fill', selector: '#sig', value: 'Kevin Brittain' }]) {
+      for (const st of [{ do: 'select', selector: '#ds', value: 'Yes' }, { do: 'click', selector: '#tb' }, { do: 'click', selector: '#tb2' }, { do: 'fill', selector: '#sig', value: 'Kevin Brittain' },
+                        { do: 'select', selector: '#as', value: 'I agree with all the assumptions' }, { do: 'click', selector: '#h3y' }, { do: 'click', selector: '#spyl' }]) {
         const r4 = await b.runHandover(page, { why: 'pay', steps: [st] });
         expect(r4.stuck && r4.stuck.error, st.selector).toMatch(/reads like a declaration|looks like a signature/);
       }
@@ -188,6 +192,10 @@ describe('the robot does every step up to Kevin, waits for his part, and hands o
       expect(await page.locator('#tb').getAttribute('aria-pressed')).toBe('false');
       expect(await page.locator('#out').textContent()).not.toBe('DECLARED');
       expect(await page.locator('#sig').inputValue()).toBe('');
+      // Round 5: the option picked can be the declaration, and a question can sit in plain text.
+      expect(await page.locator('#as').inputValue()).toBe('');
+      expect(await page.locator('#spy').isChecked()).toBe(false);
+      expect(await page.locator('#out').textContent()).not.toBe('H3-YES');
       const built = await b.runHandover(page, { why: 'pay', steps: [{ do: 'select', selector: '#bt', value: '1970 - 1989' }] });
       expect(built.stuck).toBeNull();
       const stuck = await b.runHandover(page, { why: 'pay', steps: [{ do: 'click', selector: '#not-there', timeout: 1000 }] }, {});

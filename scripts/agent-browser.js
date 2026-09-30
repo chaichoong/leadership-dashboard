@@ -1070,8 +1070,21 @@ async function assertNotFinalAction(page, s) {
       // The question a control answers: all its labels, the fieldset legend, the group's aria
       // text and a placeholder. Read for declarations (and, on a text box, a signature) only,
       // so a "Yes" to "I declare..." is his however it is given (review rounds 3 and 4).
-      const question = c => {
+      // The words around it, for a question set in plain text beside its answers (an <h3> or
+      // <span> next to Yes and No: review round 5): the largest box round it still under 300
+      // characters, so it reads that one question and never the page.
+      const nearby = c => {
+        let t = '';
+        for (let n = c.parentElement; n && n !== document.body; n = n.parentElement) {
+          const x = String(n.innerText || '').trim();
+          if (x.length > 300) break;
+          t = x;
+        }
+        return t;
+      };
+      const question = (c, around) => {
         const q = [];
+        if (around) q.push(nearby(c));
         if (c.labels) for (const l of c.labels) q.push(l.textContent || '');
         const fs = c.closest('fieldset'); const lg = fs && fs.querySelector('legend');
         if (lg) q.push(lg.textContent || '');
@@ -1087,7 +1100,11 @@ async function assertNotFinalAction(page, s) {
       const type = String(el.type || '').toLowerCase();
       const entry = ['TEXTAREA', 'SELECT'].includes(el.tagName)
         || (el.tagName === 'INPUT' && !['submit', 'button', 'image', 'reset', 'checkbox', 'radio'].includes(type));
-      if (entry) return { entry: true, words: '', question: squash(question(el)), tick: false };
+      if (entry) {
+        const options = el.tagName === 'SELECT'
+          ? Array.from(el.options).map(o => ({ value: o.value, label: (o.label || o.textContent || '').replace(/\s+/g, ' ').trim() })) : null;
+        return { entry: true, words: '', question: squash(question(el, !!options)), tick: false, options };
+      }
       // Anything else is read, a plain div with a click listener included (review round 2).
       // A control, never a region: role="main" or "dialog" would read the whole page (round 3).
       const host = el.closest('button,a,label,summary,input,[onclick],[role=button],[role=link],[role=checkbox],' +
@@ -1109,13 +1126,18 @@ async function assertNotFinalAction(page, s) {
       const answer = !!control && (['checkbox', 'radio'].includes(ctype) || ['checkbox', 'radio', 'switch'].includes(crole)
         || control.hasAttribute('aria-checked') || control.hasAttribute('aria-pressed')
         || ((control.tagName === 'BUTTON' || crole === 'button') && own.length <= 12));
-      return { entry: false, words: squash(parts), question: answer ? squash(question(control)) : '', tick: answer };
+      return { entry: false, words: squash(parts), question: answer ? squash(question(control, true)) : '', tick: answer };
     }, null, { timeout: Math.min(Number(s.timeout) || 20000, 60000) });
   } catch (e) {
     throw new Error(`could not read what "${s.selector}" is, so it was not touched: ${String(e.message || e).slice(0, 120)}`);
   }
   if (seen.entry) {
-    if (s.do === 'select' && DECLARATION_RE.test(seen.question)) throw new Error(`refused: "${seen.question.slice(0, 80)}" reads like a declaration, which is Kevin's`);
+    if (s.do === 'select') {
+      // The option it picks can be the declaration itself ("I agree with all the assumptions"): round 5.
+      const pick = seen.options ? pickOption(seen.options, String(s.label !== undefined ? s.label : s.value)).option : null;
+      const asked = ((pick ? pick.label : '') + ' ' + seen.question).trim();
+      if (DECLARATION_RE.test(asked)) throw new Error(`refused: "${asked.slice(0, 80)}" reads like a declaration, which is Kevin's`);
+    }
     if (s.do === 'fill' && SIGNATURE_RE.test(seen.question)) throw new Error(`refused: "${seen.question.slice(0, 80)}" looks like a signature, which is Kevin's`);
     return;
   }
