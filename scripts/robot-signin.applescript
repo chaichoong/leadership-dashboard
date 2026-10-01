@@ -38,6 +38,35 @@ use scripting additions
 
 property repo : "/Users/kevinbrittain/Projects/leadership-dashboard"
 property waitingFile : "/Users/kevinbrittain/knowledge-os/logs/signin-pickup/waiting.json"
+-- The robots live on ONE Mac: the one holding the job queue's state folder. This app sits on the
+-- iCloud Desktop, so the same copy appears on Kevin's other Mac, where ~/knowledge-os is a
+-- read-only placeholder file (1 Oct 2026: he pressed Your turn on the MacBook Air; that copy
+-- looked for the robot's plan on the Air's disk and said "The robot has no plan ready"). Worse,
+-- a double-click there would have run the robots' sign-in check from the wrong Mac. Every
+-- entry point asks onRobotsMac() first and does nothing else when the answer is no.
+property estateMarker : "/Users/kevinbrittain/knowledge-os/logs/queue"
+property robotsMacScreen : "vnc://Mac-mini.local"
+
+on onRobotsMac()
+	return (do shell script "test -d " & quoted form of estateMarker & " && echo yes || echo no") is "yes"
+end onRobotsMac
+
+-- Said on any other Mac: where the robots are, and one button to their screen. Nothing else runs.
+on notOnRobotsMac()
+	try
+		activate
+		display dialog "The robots live on the Mac mini, and this is a different Mac." & return & return & "Robot sign-ins and Your turn open the robot's own browser window on the mini's screen, so press the button there. At home, the button below opens the mini's screen from here. Away from home, connect Teleport first." with title "Robot sign-in" buttons {"Close", "Open the Mac mini's screen"} default button "Open the Mac mini's screen" cancel button "Close"
+	on error number -128
+		return
+	end try
+	-- The shell's `open`, never `open location`: this script has its own open location handler,
+	-- which would catch the command and show this same box again.
+	try
+		do shell script "open " & quoted form of robotsMacScreen
+	on error errMsg
+		display alert "Robot sign-in" message "The mini's screen could not be opened from here: " & errMsg & return & return & "Open Screen Sharing yourself and connect to Mac-mini.local."
+	end try
+end notOnRobotsMac
 
 on nodeBin()
 	return do shell script "ls -d /Users/kevinbrittain/.nvm/versions/node/*/bin/node | sort -V | tail -1"
@@ -524,6 +553,10 @@ on sayChecking()
 end sayChecking
 
 on run
+	if not onRobotsMac() then
+		notOnRobotsMac()
+		return
+	end if
 	sayChecking()
 	refreshWaiting("")
 	set liveN to announceLive()
@@ -639,6 +672,10 @@ on runTurn(taskId)
 end runTurn
 
 on open location theURL
+	if not onRobotsMac() then
+		notOnRobotsMac()
+		return
+	end if
 	set body to bodyOf(theURL)
 	if body starts with "turn/" then
 		runTurn(turnTaskId(body))

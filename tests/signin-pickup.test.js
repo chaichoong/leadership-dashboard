@@ -377,6 +377,35 @@ describe('the Robot sign-in app and its link', () => {
     const out = execFileSync('python3', [join(ROOT, 'scripts', 'detach.py'), 'selftest'], { encoding: 'utf8' });
     expect(out).toMatch(/selftest OK/);
   });
+  // 1 Oct 2026: the app sits on the iCloud Desktop, so Kevin's MacBook Air holds the same copy.
+  // He pressed Your turn there; that copy looked for the robot's plan on the Air's disk (where
+  // ~/knowledge-os is a read-only placeholder FILE) and said "The robot has no plan ready". A
+  // double-click there would have run the robots' sign-in check from the wrong Mac. Every entry
+  // point now asks onRobotsMac() first. Driven through osascript with the marker moved.
+  it('the app works only on the Mac that holds the job queue, and every entry point asks first', () => {
+    const { mkdtempSync, rmSync, mkdirSync, writeFileSync } = require('node:fs');
+    const { tmpdir } = require('node:os');
+    const dir = mkdtempSync(join(tmpdir(), 'od-robot-host-'));
+    try {
+      execFileSync('osacompile', ['-o', join(dir, 'r.scpt'), join(ROOT, 'scripts', 'robot-signin.applescript')]);
+      const on = (marker) => execFileSync('osascript', ['-e',
+        `set s to (load script POSIX file "${join(dir, 'r.scpt')}")\nset s's estateMarker to "${marker}"\nreturn s's onRobotsMac() as text`],
+        { encoding: 'utf8' }).trim();
+      mkdirSync(join(dir, 'mini', 'knowledge-os', 'logs', 'queue'), { recursive: true });
+      mkdirSync(join(dir, 'air'));
+      writeFileSync(join(dir, 'air', 'knowledge-os'), 'placeholder: the estate runs on the Mac mini\n');   // the Air's shape
+      expect(on(join(dir, 'mini', 'knowledge-os', 'logs', 'queue'))).toBe('true');
+      expect(on(join(dir, 'air', 'knowledge-os', 'logs', 'queue'))).toBe('false');
+      expect(on(join(dir, 'nowhere', 'logs', 'queue'))).toBe('false');
+    } finally { rmSync(dir, { recursive: true, force: true }); }
+    // The first thing each entry point does: nothing else may run on another Mac.
+    for (const [start, end] of [['\non run\n', '\nend run\n'], ['\non open location theURL\n', '\nend open location']]) {
+      const body = src.slice(src.indexOf(start) + start.length, src.indexOf(end));
+      expect(body.trim().split('\n').slice(0, 4).map((l) => l.trim())).toEqual(
+        ['if not onRobotsMac() then', 'notOnRobotsMac()', 'return', 'end if']);
+    }
+    expect(src).toMatch(/property estateMarker : "\/Users\/kevinbrittain\/knowledge-os\/logs\/queue"/);
+  }, 30000);
   it('the build registers the URL scheme in the app bundle', () => {
     expect(build).toMatch(/CFBundleURLSchemes:0 string robotsignin/);
     expect(build).toMatch(/lsregister/);
