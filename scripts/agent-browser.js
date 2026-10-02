@@ -548,6 +548,12 @@ function assertApproved(taskId) {
     die(`task ${taskId} is not approved (Approval Outcome: ${outcome || 'not set'}). ` +
         `A form is submitted only after Kevin has seen the screenshot and tapped approve.`);
   }
+  // A trial task is checked by Kevin and never carried out (2 Oct 2026): `outcome` names the
+  // reason, from the same one list (TRIAL_AGENTS in scripts/agent_email_format.py) every other
+  // door reads. `approved` is false for it too, and is checked so the two can never disagree.
+  if (state.trial || state.approved === false) {
+    die(`task ${taskId} is a trial task and no form is submitted for it: ${state.trial || 'the approval read says not approved'}.`);
+  }
   return state;
 }
 

@@ -101,6 +101,7 @@ from agent_email_format import (  # noqa: E402
     PROPERTY_SENDER,
     PERSONAL_SENDER,
     rule_send_problem,
+    trial_problem,
 )
 
 BASE_ID = "appnqjDpqDniH3IRl"
@@ -123,6 +124,8 @@ AF = {
     # The two marks only a real approval leaves (finding 20260922-agent-dispatch-572).
     "sentForApprovalBy": "fld30Yw8SWYVp049g",
     "approvedAt":        "fldr4Mvf2RzKvhZhi",
+    # Read by the trial refusal: whose card this is.
+    "teamMember":        "flduCtmQGpOA4eWaj",
 }
 
 APPROVED = ("Approved as-is", "Approved with minor edits")
@@ -370,6 +373,13 @@ def parse_output(output, task_id):
 def load_approved(task_id, require_approval=True, rule=None):
     rec = get_task(task_id)
     f = rec.get("fields", {})
+    # A TRIAL AGENT'S CARD IS NEVER SENT (2 Oct 2026), approved or not, by rule or not. First,
+    # because every send, preview and rule send reads the task through here.
+    trial = trial_problem(list(f.get(AF["sentForApprovalBy"]) or []) + list(f.get(AF["teamMember"]) or []),
+                          f.get(AF["name"], ""), f.get(AF["notes"], ""))
+    if trial:
+        sys.exit(f"REFUSED: task {task_id} is a trial card and is never sent: {trial}.\n"
+                 "         Kevin's verdict is the result. Close it with: agent-dispatch.py trial-settle")
     if rule:
         # THE RULE SEND (Kevin, 17 Sep 2026). Not approved by Kevin, so the
         # email must pass the rule itself, re-checked HERE from the stored task
@@ -829,6 +839,10 @@ def cmd_notify(args):
     desc = (f.get(AF["description"], "") or "").strip()
     notes = (f.get(AF["notes"], "") or "").strip()
     output = (f.get(AF["agentOutput"], "") or "").strip()
+    # A trial task's draft is for Kevin alone: this mail carries the Agent Output to a colleague.
+    trial = trial_problem(list(f.get(AF["sentForApprovalBy"]) or []) + list(f.get(AF["teamMember"]) or []), name, notes)
+    if trial:
+        sys.exit(f"REFUSED: task {args.task} is a trial task and is not mailed to anyone: {trial}.")
 
     hit = tier_match(tier1_patterns, name, desc, notes)
     if hit:

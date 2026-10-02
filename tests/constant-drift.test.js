@@ -522,7 +522,7 @@ describe('the money rule does not drift between the dispatcher, the page and the
   });
   it('every role-agent prompt has its decision criteria', () => {
     const dir = resolve(process.env.HOME, '.claude/agents');
-    for (const f of ['inbound-comms-response.md', 'creditor-management.md', 'task-manager.md', 'property-administration.md', 'inbound-comms-triage.md', 'content-engine.md']) {
+    for (const f of ['inbound-comms-response.md', 'creditor-management.md', 'task-manager.md', 'property-administration.md', 'inbound-comms-triage.md', 'content-engine.md', 'cash-flow-voids.md']) {
       expect(readFileSync(resolve(dir, f), 'utf8'), f).toMatch(/## Decision criteria \(Kevin's ruling, 7 Sep 2026\)/);
     }
   });

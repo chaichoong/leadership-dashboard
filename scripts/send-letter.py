@@ -95,6 +95,7 @@ from agent_email_format import (  # noqa: E402
     EmailFormatError,
     parse_post_output,
     DELIVERY_PRODUCTS,
+    trial_problem,
 )
 
 BASE_ID = "appnqjDpqDniH3IRl"
@@ -108,6 +109,9 @@ AF = {
     "agentOutput":     "fldzswp8fx6PqpLQ5",
     "taskType":        "fldZ2moDV2041Sobc",
     "notes":           "fldR7apBzSp3oxFxz",
+    # Read by the trial refusal: whose task this is.
+    "sentForApprovalBy": "fld30Yw8SWYVp049g",
+    "teamMember":        "flduCtmQGpOA4eWaj",
 }
 
 APPROVED = ("Approved as-is", "Approved with minor edits")
@@ -334,6 +338,11 @@ def load_approved(task_id, require_approval=True):
     rec = get_task(task_id)
     f = rec.get("fields", {})
     name = f.get(AF["name"], "(Untitled)")
+    # A trial task is never posted (2 Oct 2026): the same rule as send-email.py, at this door too.
+    trial = trial_problem(list(f.get(AF["sentForApprovalBy"]) or []) + list(f.get(AF["teamMember"]) or []),
+                          name, f.get(AF["notes"], ""))
+    if trial:
+        sys.exit(f"REFUSED: task {task_id} is a trial task and no letter is posted for it: {trial}.")
     outcome = sel(f.get(AF["approvalOutcome"]))
     status = sel(f.get(AF["status"]))
     ttype = sel(f.get(AF["taskType"]))
