@@ -157,3 +157,180 @@ test.describe('an earlier draft quoted under a decision card', () => {
     await expect(trail.locator('.apv-trail-row', { hasText: '>' })).toHaveCount(0);
   });
 });
+
+// 2 Oct 2026: the history lists a file held on ANOTHER task, and its Open button carried Airtable's signed file
+// link, which dies within hours. Five such buttons sat dead on three waiting cards (the first: a servicing PDF on
+// the Mears invoice card, HTTP 410). The row now links the task that holds the file and the button re-reads that
+// task for a live link. Rows written before the fix still carry the dead link: their task is found from the
+// "task opened" row of the same name and day, and a row whose task cannot be found gets no button rather than a
+// dead one. The independent review added: a name shared by two tasks, a name cut at 90 characters that ends in a
+// space, a block quoted under a decision card, a step listed twice, and the dead link in the agent's full work.
+test.describe('a file on another task, listed in the history', () => {
+  const HOLDER = 'recHOLDSTHEFILE01';
+  const OLD_HOLDER = 'recWATERBILL00001';
+  const WEEKLY_HOLDER = 'recWEEKLYCHECK002';
+  const CUT_HOLDER = 'recCUTNAMEHOLDER1';
+  const REPEAT_HOLDER = 'recREPEATHOLDER01';
+  const QUOTED_HOLDER = 'recQUOTEDHOLDER01';
+  const JOB_B = 'recJOBBHOLDER0001';
+  const FRESH = 'https://v5.airtableusercontent.com/v3/u/fresh/';
+  const DEAD = 'https://v5.airtableusercontent.com/v3/u/dead/';
+
+  function withHeldFiles() {
+    const fx = defaultFixtures();
+    const r = fx.approvals[1];
+    r.createdTime = '2026-10-01T08:00:00.000Z';
+    r.fields[TF.feedbackHistory] = '';
+    r.fields[TF.attachments] = [];
+    r.fields[TF.agentOutput] = [
+      'Draft reply.',
+      // the agent pasted a newer block: this row has its task link, the copy in Notes below has only the dead one
+      `TRACK RECORD: (searched tasks for ref S772844)\n- 15 Sep 2026 — file: file on that task: repeat.pdf (12 KB) — from "A task whose opening line was cut" (https://airtable.com/appX/tblY/${REPEAT_HOLDER})`,
+      // an earlier draft kept under a decision card is quoted line by line
+      'Earlier output:\n> TRACK RECORD: (searched tasks for ref S772844)\n'
+        + `> - 16 Sep 2026 — task: task opened: Quoted holder (Completed) (https://airtable.com/appX/tblY/${QUOTED_HOLDER})\n`
+        + `> - 16 Sep 2026 — file: file on that task: quoted.pdf (40 KB) — from "Quoted holder" (${DEAD}quoted.pdf)`,
+      '**Carrying this out will involve:** sending the reply.',
+    ].join('\n\n');
+    r.fields[TF.notes] = '[01 Oct 2026 — create-agent-task] TRACK RECORD: (searched tasks for ref S772844)\n' + [
+      // written since the fix: the row links the task that holds the file
+      `- 30 Jul 2026 — file: file on that task: Servicing_1024091608.pdf (706 KB) — from "INBOUND: New Servicing Job Raised (S772844)" (https://airtable.com/appX/tblY/${HOLDER})`,
+      // written before it: the dead signed link, and the "task opened" row that names its task
+      // (the name ends in brackets, like the servicing job that showed the bug)
+      `- 11 Sep 2026 — task: task opened: INBOUND: Water bill forwarded for review (WB-1024) (Completed) (https://airtable.com/appX/tblY/${OLD_HOLDER})`,
+      `- 11 Sep 2026 — file: file on that task: tenancy.pdf (170 KB) — from "INBOUND: Water bill forwarded for review (WB-1024)" (${DEAD}tenancy.pdf)`,
+      // its "task opened" row was cut from the block
+      `- 12 Sep 2026 — file: file on that task: orphan.png (2191 KB) — from "CONTENT: the opening line was cut" (${DEAD}orphan.png)`,
+      // one name, two tasks opened the same day: nothing says which one holds the file
+      '- 14 Sep 2026 — task: task opened: Monthly round (Completed) (https://airtable.com/appX/tblY/recROUNDAUGUST001)',
+      '- 14 Sep 2026 — task: task opened: Monthly round (Today) (https://airtable.com/appX/tblY/recROUNDSEPTEMBR1)',
+      `- 14 Sep 2026 — file: file on that task: statement.pdf (88 KB) — from "Monthly round" (${DEAD}statement.pdf)`,
+      // one name, two tasks opened on different days: the file row carries its own task's day
+      '- 20 Sep 2026 — task: task opened: Weekly check (Completed) (https://airtable.com/appX/tblY/recWEEKLYCHECK001)',
+      `- 27 Sep 2026 — task: task opened: Weekly check (Today) (https://airtable.com/appX/tblY/${WEEKLY_HOLDER})`,
+      `- 27 Sep 2026 — file: file on that task: check.pdf (9 KB) — from "Weekly check" (${DEAD}check.pdf)`,
+      // a name cut at 90 characters ends in a space; the "task opened" row has lost the double space
+      `- 28 Sep 2026 — task: task opened: CONTENT: Five signs your business runs on you. Score three or (Completed) (https://airtable.com/appX/tblY/${CUT_HOLDER})`,
+      `- 28 Sep 2026 — file: file on that task: od.png (2191 KB) — from "CONTENT: Five signs your business runs on you. Score three or " (${DEAD}od.png)`,
+      // the same step as in the agent's work above, written here with the dead link and no "task opened" row
+      `- 15 Sep 2026 — file: file on that task: repeat.pdf (12 KB) — from "A task whose opening line was cut" (${DEAD}repeat.pdf)`,
+      // a note on another task that quoted a file link: not a file row, and never a button
+      `- 29 Sep 2026 — agent: saved the scan (${DEAD}scan.pdf)`,
+      // a note that quotes a file row is a note: its button opens the task, not a file
+      `- 30 Sep 2026 — agent: copied from the history: file on that task: quoted-in-a-note.pdf (https://airtable.com/appX/tblY/${HOLDER})`,
+      // two files of one name the same day, from tasks whose names share their first words: only the second
+      // task's opening line is here, and its link must never land on the first file's row
+      `- 02 Sep 2026 — task: task opened: INBOUND: Notification about your property - Job B (Completed) (https://airtable.com/appX/tblY/${JOB_B})`,
+      `- 02 Sep 2026 — file: file on that task: image001.png (3 KB) — from "INBOUND: Notification about your property - Job A" (${DEAD}a.png)`,
+      `- 02 Sep 2026 — file: file on that task: image001.png (3 KB) — from "INBOUND: Notification about your property - Job B" (${DEAD}b.png)`,
+    ].join('\n');
+    return fx;
+  }
+
+  // The task that holds a file, as a re-read returns it: a freshly signed link.
+  async function mockHolders(page, context, files) {
+    await context.route('**v5.airtableusercontent.com/**', (route) =>
+      route.fulfill({ status: 200, contentType: 'text/html', body: '<title>the file</title>' }));
+    await context.route('https://airtable.com/**', (route) =>
+      route.fulfill({ status: 200, contentType: 'text/html', body: '<title>the task</title>' }));
+    await page.route('**/api.airtable.com/**', async (route) => {
+      const hit = /\/(rec[A-Za-z0-9]{14})\?/.exec(route.request().url());
+      if (route.request().method() === 'GET' && hit && files[hit[1]]) {
+        return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({
+          id: hit[1], createdTime: '2026-07-30T08:00:00.000Z',
+          fields: { [TF.attachments]: files[hit[1]].map((filename, i) => ({ id: 'att' + i, filename, size: 1024, url: FRESH + filename.trim() })) },
+        }) });
+      }
+      return route.fallback();
+    });
+  }
+
+  async function openTrail(page) {
+    await loadAgentsPage(page);
+    await page.click('#ptab-approvals');
+    return page.locator('[data-apv-card="recApvA2"] [data-apv-trail]');
+  }
+
+  test('Open re-reads the task that holds the file and lands on a live link', async ({ page, context }) => {
+    await mockAgentsPage(page, withHeldFiles());
+    // Airtable holds the name with a stray space; the history prints it stripped, and it must still be found.
+    await mockHolders(page, context, { [HOLDER]: ['Servicing_1024091608.pdf '] });
+    const trail = await openTrail(page);
+    const open = trail.locator('.apv-trail-row', { hasText: 'Servicing_1024091608.pdf' }).locator('.apv-trail-open');
+    await expect(open).toHaveAttribute('data-apv-file-task', HOLDER);
+    await expect(open).toHaveAttribute('href', `https://airtable.com/appX/tblY/${HOLDER}`);
+    const [popup] = await Promise.all([context.waitForEvent('page'), open.click()]);
+    await expect.poll(() => popup.url(), { timeout: 10000 }).toBe(FRESH + 'Servicing_1024091608.pdf');
+    await popup.close();
+  });
+
+  test('a row written with the dead link finds its task by name, and no history button points at a signed file link', async ({ page, context }) => {
+    await mockAgentsPage(page, withHeldFiles());
+    await mockHolders(page, context, { [OLD_HOLDER]: ['tenancy.pdf'] });
+    const trail = await openTrail(page);
+    const open = trail.locator('.apv-trail-row', { hasText: 'tenancy.pdf' }).locator('.apv-trail-open');
+    await expect(open).toHaveAttribute('data-apv-file-task', OLD_HOLDER);
+    const hrefs = await trail.locator('[data-apv-trail-kind="record"] .apv-trail-open').evaluateAll((as) => as.map((a) => a.href));
+    expect(hrefs.length).toBeGreaterThan(0);
+    expect(hrefs.filter((h) => /airtableusercontent/.test(h))).toEqual([]);
+    const [popup] = await Promise.all([context.waitForEvent('page'), open.click()]);
+    await expect.poll(() => popup.url(), { timeout: 10000 }).toBe(FRESH + 'tenancy.pdf');
+    await popup.close();
+  });
+
+  test('a row whose task cannot be told gets no button, never a dead one', async ({ page, context }) => {
+    await mockAgentsPage(page, withHeldFiles());
+    await mockHolders(page, context, {});
+    const trail = await openTrail(page);
+    for (const name of ['orphan.png', 'statement.pdf', 'saved the scan']) {
+      const row = trail.locator('.apv-trail-row', { hasText: name });
+      await expect(row).toHaveCount(1);
+      await expect(row.locator('.apv-trail-open')).toHaveCount(0);
+    }
+  });
+
+  test('the right task is found when a name is shared, cut short, quoted, or the step is listed twice', async ({ page, context }) => {
+    await mockAgentsPage(page, withHeldFiles());
+    await mockHolders(page, context, {});
+    const trail = await openTrail(page);
+    const holder = { 'check.pdf': WEEKLY_HOLDER, 'od.png': CUT_HOLDER, 'quoted.pdf': QUOTED_HOLDER, 'repeat.pdf': REPEAT_HOLDER, 'tenancy.pdf': OLD_HOLDER };
+    for (const [name, task] of Object.entries(holder)) {
+      const row = trail.locator('.apv-trail-row', { hasText: `file on that task: ${name}` });
+      await expect(row, name).toHaveCount(1);
+      await expect(row.locator('.apv-trail-open'), name).toHaveAttribute('data-apv-file-task', task);
+      await expect(row.locator('.apv-trail-open'), name).toHaveAttribute('data-apv-file', name);
+    }
+    // One row, Job A's, with no button. Job B's row is dropped by the 80-character step key (old behaviour); what
+    // matters here is that B's link never lands on A's row.
+    const twins = trail.locator('.apv-trail-row', { hasText: 'file on that task: image001.png' });
+    await expect(twins).toHaveCount(1);
+    await expect(twins).toContainText('Job A');
+    await expect(twins.locator('.apv-trail-open')).toHaveCount(0);
+    // A note that quotes a file row keeps a plain link to the task.
+    const note = trail.locator('.apv-trail-row', { hasText: 'copied from the history' }).locator('.apv-trail-open');
+    await expect(note).toHaveAttribute('href', `https://airtable.com/appX/tblY/${HOLDER}`);
+    expect(await note.getAttribute('data-apv-file')).toBeNull();
+  });
+
+  test('nothing on the card links to a signed file link, the agent\'s full work included', async ({ page, context }) => {
+    await mockAgentsPage(page, withHeldFiles());
+    await mockHolders(page, context, {});
+    await openTrail(page);
+    const card = page.locator('[data-apv-card="recApvA2"]');
+    // the work is on the card (open or not), with its dead link left as text
+    await expect(card.locator('[data-apv-work]')).toContainText(DEAD + 'quoted.pdf');
+    const hrefs = await card.locator('a[href]').evaluateAll((as) => as.map((a) => a.getAttribute('href')));
+    expect(hrefs.length).toBeGreaterThan(5);
+    expect(hrefs.filter((h) => /airtableusercontent/.test(h))).toEqual([]);
+  });
+
+  test('a file that has since left its task opens the task instead', async ({ page, context }) => {
+    await mockAgentsPage(page, withHeldFiles());
+    await mockHolders(page, context, { [HOLDER]: ['something-else.pdf'] });
+    const trail = await openTrail(page);
+    const open = trail.locator('.apv-trail-row', { hasText: 'Servicing_1024091608.pdf' }).locator('.apv-trail-open');
+    const [popup] = await Promise.all([context.waitForEvent('page'), open.click()]);
+    await expect.poll(() => popup.url(), { timeout: 10000 }).toBe(`https://airtable.com/appX/tblY/${HOLDER}`);
+    await popup.close();
+  });
+});

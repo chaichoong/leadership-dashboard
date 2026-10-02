@@ -34,6 +34,19 @@ Any other day-numbered name (`2066 Full-Real.insv`, `2006 Full (1).insv`) is ski
 `skipped_names.json` and shown on the Publishing page under "Raw files the engine skips". Until
 21 Sep 2026 it was skipped without a word, and 2066's full episode sat on Drive unseen.
 
+**The night's order** (`watch.py plan`): three days a night (Kevin, 2 Oct 2026; the number is in
+`~/.config/od/content_engine_episodes_per_night`). New days first, oldest first, and never fewer than two of them.
+A day Kevin sent back, which `render.py redo-day` set to re-render, comes after the new days and takes the spare
+third slot: two new days and the redo. With no redo waiting, three new days. So a day he sends one episode back
+still leaves two to publish, and the redo lands the next night (Kevin, 2 Oct 2026: "anything that is sent back for
+editing goes to the back of the queue"). Until then the sent-back day was the oldest waiting day, took slot 1, and a
+new episode lost its place. One redo a night at two or three slots, oldest first; a redo whose footage would not
+download steps behind a younger one. A second sent-back day waits for the next night and the plan says so.
+No day starts rendering from 04:00: a day begun late would be killed at the 07:00 stop and the copy, cards and
+publishing steps after the loop would never run. The copy step (`platform_copy.py run --pending`) follows the same
+order: new days first, and the oldest sent-back day always gets its copy. The night raises a card for every episode
+it planned.
+
 **2. Pull one clip** (`watch.py next`)
 The oldest waiting clip comes down to the local work folder. One per run, never more than two waiting
 locally. Disk is about 60 GB, clips are 0.3 to 5 GB, and Drive streams cold files at roughly 1 GB per
@@ -125,8 +138,11 @@ once, with a note carrying the YouTube link. A Completed or Cancelled card is le
 report line ("content cards not closed") until it clears. Until 30 Sep 2026
 nothing did this, 2059-2077 sat open for up to two weeks, and the Task Manager read them as unpublished.
 
-**24. Publish the next episode in order** (`publish.py run --limit 3`)
-Approved episodes only, strictly in episode order, two stages:
+**24. Publish every approved episode** (`publish.py run --limit 3`)
+Approved episodes only, lowest day number first, two stages. An approved episode never waits for another day
+(Kevin, 2 Oct 2026): a day that was sent back, failed to render or has no card yet steps aside, and goes out late,
+out of number order, once its own card is approved. Until then one such day held every approved day behind it
+(2081 held 2082 and 2083 on 2 Oct). The Publishing page names any day the run has gone past under "Not out yet".
 
 | Stage | What goes out | When |
 |---|---|---|

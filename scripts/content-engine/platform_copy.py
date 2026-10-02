@@ -413,17 +413,39 @@ def unfilled_work(fulls, approved, find=None):
     return sorted(set(out), key=lambda w: (-w[0], w[1]))
 
 
+def pending_order(recs, sent_back, limit):
+    """Which episodes get tonight's copy: new days first, oldest first, a day Kevin sent back after them (Kevin, 2 Oct
+    2026: "anything that is sent back for editing goes to the back of the queue"). Until then the first `limit`
+    records came back in the table's own order, so on a night with one more render than the limit a new episode
+    could be the one left without copy, and with no copy it gets no card (review, 2 Oct 2026). The oldest sent-back
+    day always gets its copy, on top of the limit when new days fill it: last in the order every night, it would
+    otherwise wait for ever behind a backlog, and its card could never go back to him (second review)."""
+    def day(rec):
+        m = re.search(r"Episode (\d+)", rec["fields"].get("Content Name", ""))
+        return int(m.group(1)) if m else None
+    order = sorted((r for r in recs if day(r) is not None), key=lambda r: (day(r) in sent_back, day(r)))
+    take = order[:limit]
+    redo = [r for r in order if day(r) in sent_back]
+    if redo and not any(day(r) in sent_back for r in take): take.append(redo[0])
+    return take
+
+
 def run_pending(limit=3):
     f = 'AND({Content Type}="Long Form Video", {Responsible}="Content Engine (AI)", {Transcription}!="", {YouTube Copy}="")'
-    r = watch._airtable("GET", watch.API + "?maxRecords=%d&filterByFormula=%s" % (limit, urllib.parse.quote(f)))
-    recs = r.get("records", [])
+    recs, off = [], None
+    while True:                                   # every page, then the order, then the limit
+        r = watch._airtable("GET", watch.API + "?pageSize=100&filterByFormula=%s%s" % (urllib.parse.quote(f), "&offset=" + urllib.parse.quote(off) if off else ""))
+        recs += r.get("records", []); off = r.get("offset")
+        if not off: break
+    import approval
+    cards = approval.load_state()
+    recs = pending_order(recs, {int(d) for d, e in cards.items() if str(d).isdigit() and e.get("verdict") == "changes"}, limit)
     fulls, off = [], None
     while True:                                   # every page (CLAUDE.md: a missed page is a silent miss)
         u = watch._airtable("GET", watch.API + "?pageSize=100&filterByFormula=%s%s" % (urllib.parse.quote(WRITTEN), "&offset=" + off if off else ""))
         fulls += u.get("records", []); off = u.get("offset")
         if not off: break
-    import approval
-    approved = {int(d) for d, e in approval.load_state().items() if str(d).isdigit() and e.get("verdict") == "approved"}
+    approved = {int(d) for d, e in cards.items() if str(d).isdigit() and e.get("verdict") == "approved"}
     later = unfilled_work(fulls, approved)
     if not recs and not later: print("copy: nothing pending"); return
     failed = []
@@ -461,6 +483,18 @@ def clean_day(day, dry_run=False):
 
 def selftest():
     assert record_name(2195, "Short Form Video") == "Episode 2195 Short"
+    # 2 Oct 2026, the table's own order that night: 2081 (sent back) came before 2085 and 2084, so with a limit of two
+    # the new episode 2084 got no copy and no card
+    rows = [{"fields": {"Content Name": "Episode %d Full Episode" % d}} for d in (2081, 2085, 2084)]
+    names = lambda rs: [int(re.search(r"\d+", r["fields"]["Content Name"]).group(0)) for r in rs]
+    assert names(pending_order(rows, {2081}, 2)) == [2084, 2085, 2081], "new days first, oldest first; the sent-back day on top of the limit, never left out"
+    assert names(pending_order(rows, {2081}, 3)) == [2084, 2085, 2081], "and inside the limit when there is room"
+    assert names(pending_order(rows, {2081}, 1)) == [2084, 2081]
+    # a backlog (a night whose copy all failed): the sent-back day still gets its copy the next night
+    more = rows + [{"fields": {"Content Name": "Episode %d Full Episode" % d}} for d in (2086, 2087, 2079)]
+    assert names(pending_order(more, {2081, 2079}, 2)) == [2084, 2085, 2079], "one sent-back day a night, the oldest"
+    assert names(pending_order(rows, set(), 2)) == [2081, 2084], "nothing sent back: the limit as it was, oldest first"
+    assert names(pending_order(rows + [{"fields": {"Content Name": "no number"}}], set(), 9)) == [2081, 2084, 2085]
     p = build_prompt("Short Form Video", "hello", "Episode 2195 Short", 2195)
     assert "hello" in p and "STREAK DAY: 2195" in p and "[ADD YOUTUBE LINK]" in p and "${" not in p
     assert total_from_run("Day #2,195/5,000 #runpreneurchallenge", "Total raised so far £76,840/£1,000,000\nTotal distance so far 16,838.17km/40,075km") == 16838.17
@@ -510,7 +544,7 @@ def selftest():
     assert unfilled_work(fulls, {2069}, find=recs.get) == [(2071, "Learnings From My Diary"), (2071, "Short Form Video")], \
         "an approved day is never rewritten; a missing record counts; a record with copy does not"
     _selftest_run_day_isolation()
-    print(json.dumps({"checks": 19, "failed": []}))
+    print(json.dumps({"checks": 23, "failed": []}))
 
 
 def _selftest_run_day_isolation():

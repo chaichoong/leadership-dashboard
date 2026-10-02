@@ -331,12 +331,25 @@ LFMD_START_RE = re.compile(r"(?:\w+\s+)?(?P<prep>from|for|of|through|in|to)\s+(?
                            # Learnings clip and no warning. The same mis-hearing had already cost 1964, 2032, 2033, 2042 and 2043.
                            # 2073 (27 Sep 2026): "the learnings of my dive today". "of" takes my/the/our only: "learned of a diver" is not it.
                            # The "of a" guard sits on the "of" route only: "the learnings from my diary of the day" is a real line.
-                           r"|learn\w*\s+(?:(?:from|for)\s+(?:a|my|the|our)\s+d(?:ia|ie|ai|iv)\w*|of\s+(?:my|the|our)\s+d(?:ia|ie|ai|iv)\w*\b(?!\s+of\s+(?:a|an|the)\b(?!\s+day\b)))", re.I)
+                           r"|learn\w*\s+(?:(?:from|for)\s+(?:a|my|the|our)\s+d(?:ia|ie|ai|iv)\w*|of\s+(?:my|the|our)\s+d(?:ia|ie|ai|iv)\w*\b(?!\s+of\s+(?:a|an|the)\b(?!\s+day\b)))"
+                           # 2081 (1 Oct 2026): "So the next thing for my dive for today is": no "learn" in front, so the tight
+                           # route above missed it, and the clip was cut from "kind of my diary, so to speak" at 1:23 instead
+                           # (Kevin: "you've clipped the wrong section"). "dive" also counts between from/for + my and "today".
+                           # Only dive/diver/dives: "for my dividends today" is not it. Measured 2 Oct 2026 over the 306
+                           # episode transcripts on the records: the clip start moves on one episode, 2081.
+                           r"|(?:from|for)\s+my\s+dive[rs]?\s+(?:for\s+)?today", re.I)
 # The show's own name is "day 2072 of the diary of a Runpreneur". Whisper garbles the tail ("of the diary cover on
 # printer", 2072, 27 Sep 2026), so the "of a" guard above cannot be relied on. "of the diary" straight after a day
 # number (2072, 2,072, 2072th, then any commas, full stops, ellipses or dashes) is what marks it. "of MY diary" or
 # "FROM the diary" is never the show's name, so "the learnings from day 2073 of my diary" still counts (review, 27 Sep 2026).
 SHOW_NAME_DAY_RE = re.compile(r"\d,?\d{3}(?:st|nd|rd|th)?[\s.,;:…–—-]*$")
+# "this vlog is kind of my diary, so to speak" describes the show; it is not the Learnings line (2081, 1 Oct 2026: it
+# was the only match, so it hid the missing section from the output gate). The one case in the stored transcripts.
+# "kind" can end the caption before ("...for those kind" | "of my diary so to"), and a real line can carry the same
+# filler ("the learnings kind of from my diary"), which still counts (review, 2 Oct 2026).
+ASIDE_RE = re.compile(r"(?:kind|sort)\s+of\s", re.I)
+ASIDE_LEAD_RE = re.compile(r"\b(?:kind|sort)\W*$", re.I)
+LEARN_LEAD_RE = re.compile(r"\b(?:learn\w*|lesson\w*)\W+(?:\w+\W+){0,2}$", re.I)
 
 
 def lfmd_start(text, before=""):
@@ -345,6 +358,9 @@ def lfmd_start(text, before=""):
     for m in LFMD_START_RE.finditer(text):
         show = (m.group("prep") or "").lower() == "of" and (m.group("det") or "").lower() == "the"
         if show and SHOW_NAME_DAY_RE.search(before + " " + text[:m.start("prep")]): continue
+        lead = before + " " + text[:m.start()]
+        aside = ASIDE_RE.match(m.group(0)) or (re.match(r"of\s", m.group(0), re.I) and ASIDE_LEAD_RE.search(lead))
+        if aside and not LEARN_LEAD_RE.search(lead): continue
         return m
     return None
 # A near miss: "learn..." followed within four words by something that sounds like diary. When no section is found but
@@ -1402,6 +1418,18 @@ def selftest():
     assert DIARY_NEAR_MISS_RE.search("the learning for my dive is there"), "a mis-heard diary must still reach the output gate"
     # "dive" on its own is an ordinary word (2062 also says "when you dive deeper into it"): only the tight context counts
     assert lfmd_window([(0, 5, "when you dive deeper into it"), (40, 50, "stay positive")]) is None, "a dive on its own is not the section"
+    # 2081 (1 Oct 2026), its own captions: the clip was cut from the aside at 1:23; his line is at 6:37 and whisper heard "dive"
+    s2081 = [(82.8, 83.9, "So there's always this vlog"), (83.9, 85.0, "for those, kind of my"), (85.0, 86.1, "diary, so to speak, so"), (86.1, 87.2, "I should call"),
+             (87.2, 89.7, "a diary of a run-preneur."), (396.5, 397.8, "goals and objectives."), (397.8, 399.5, "So the next thing for"), (399.5, 401.2, "my dive for today is"),
+             (401.2, 402.8, "when you are facing entrepreneur"), (524.8, 525.8, "Thank you as always."), (525.8, 526.5, "Stay positive, stay happy,")]
+    assert lfmd_window(s2081) == (397.8, 525.8), "2081: the Learnings line, not the aside at 1:23: %s" % (lfmd_window(s2081),)
+    assert lfmd_window(s2081[:5] + s2081[-2:]) is None, "'kind of my diary, so to speak' alone is not the section"
+    assert lfmd_window([(0, 5, "I went for my dive this morning"), (40, 50, "stay positive")]) is None, "'for my dive' without 'today' is not the section"
+    assert lfmd_window([(0, 5, "that paid for my dividends today"), (40, 50, "stay positive")]) is None, "only dive, diver, dives"
+    assert lfmd_window([(0, 3, "this vlog for those kind"), (3, 6, "of my diary so to"), (40, 50, "stay positive")]) is None, "the aside split after 'kind' is still the aside"
+    assert lfmd_start("of\nmy diary so", "those kind,") is None, "a line break or a comma in the join changes nothing"
+    assert lfmd_window([(0, 5, "the learnings kind of my diary today are"), (40, 50, "stay positive")]) == (0, 50), "a real line with the same filler still counts"
+    assert lfmd_window([(0, 3, "so the learnings sort"), (3, 6, "of my diary today are"), (40, 50, "stay positive")]) == (3, 50), "and split over two captions (the last caption that starts it, as before)"
     assert lfmd_window([(0, 5, "I want to dive into the numbers"), (40, 50, "stay positive")]) is None
     assert not DIARY_NEAR_MISS_RE.search("we learn a lot when we all go and dive deeper into the numbers together"), "too far from learn to be the section"
     # 2073 (27 Sep 2026): whisper wrote "the learnings of my dive today". "of" + a mis-heard diary was not covered, so no
@@ -1502,7 +1530,7 @@ def selftest():
             except RuntimeError as exc: assert "test" in str(exc), str(exc)
         good = os.path.join(td, "ok.srt"); open(good, "w").write(srt)
         assert check_captions(good, "test") == 2
-    print(json.dumps({"checks": 47, "failed": []}))
+    print(json.dumps({"checks": 55, "failed": []}))
 
 
 if __name__ == "__main__":
