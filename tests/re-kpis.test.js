@@ -8,7 +8,7 @@ import { fileURLToPath } from 'node:url';
 //
 // The fixtures follow the three worked examples Kevin approved at the build gate on
 // 2 Oct 2026 (cost split by business, one tenant moving between units, one house's
-// certificates). Names, dates and rents are invented on purpose: this repo is public.
+// certificates). Every name, date and amount is invented on purpose: this repo is public.
 const require = createRequire(import.meta.url);
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const K = require(resolve(root, 'js/re-kpis.js'));
@@ -19,39 +19,39 @@ const levels = r => r.alarms.map(a => a.level);
 
 describe('plan cushion: property costs only', () => {
     const tenancies = [
-        { rent: 34469.08, payStatus: 'In Payment', tenantActive: true },
+        { rent: 31250.40, payStatus: 'In Payment', tenantActive: true },
         { rent: 900, payStatus: 'CFV Actioned', tenantActive: true },
         { rent: 500, payStatus: 'In Payment', tenantActive: false }, // ended: never rent now
-        { rent: 900, payStatus: 'CFV', tenantActive: true },
+        { rent: 850, payStatus: 'CFV', tenantActive: true },
     ];
     const costs = [
-        { name: 'Mortgages', expected: 18916.78, active: true, businessIds: [RE] },
-        { name: 'Household', expected: 3856.43, active: true, businessIds: [PERSONAL] },
-        { name: 'Software', expected: 14.39, active: true, businessIds: ['recOD'] },
+        { name: 'Mortgages', expected: 17120.85, active: true, businessIds: [RE] },
+        { name: 'Household', expected: 3410.27, active: true, businessIds: [PERSONAL] },
+        { name: 'Software', expected: 14.75, active: true, businessIds: ['recOD'] },
         { name: 'Paused', expected: 999, active: false, businessIds: [RE] },
     ];
-    const r = K.planCushion({ tenancies, costs, businessId: RE, budget: 4300 });
+    const r = K.planCushion({ tenancies, costs, businessId: RE, budget: 4000 });
 
     it('subtracts Real Estate costs and nothing else (worked example 1)', () => {
-        expect(r.propertyCosts).toBe(18916.78);
-        expect(r.excludedCosts).toBe(3870.82);
-        expect(r.cushion).toBe(15552.3);
+        expect(r.propertyCosts).toBe(17120.85);
+        expect(r.excludedCosts).toBe(3425.02);
+        expect(r.cushion).toBe(14129.55);
     });
     it("Kevin's income is the cushion less the variable budget", () => {
-        expect(r.income).toBe(11252.3);
-        expect(r.incomeWithActioned).toBe(12152.3);
+        expect(r.income).toBe(10129.55);
+        expect(r.incomeWithActioned).toBe(11029.55);
     });
-    it('the old mixed basis would have read 11,681.48: prove the test can tell them apart', () => {
-        const mixed = K.planCushion({ tenancies, costs: costs.map(c => ({ ...c, businessIds: [RE] })), businessId: RE, budget: 4300 });
-        expect(mixed.cushion).toBe(11681.48);
+    it('the old mixed basis would have read 10,704.53: prove the test can tell them apart', () => {
+        const mixed = K.planCushion({ tenancies, costs: costs.map(c => ({ ...c, businessIds: [RE] })), businessId: RE, budget: 4000 });
+        expect(mixed.cushion).toBe(10704.53);
     });
     it('goes red when the tenancies or the costs did not load', () => {
-        expect(K.alarmLevel(K.planCushion({ tenancies: [], costs, businessId: RE, budget: 4300 }))).toBe('red');
-        expect(K.alarmLevel(K.planCushion({ tenancies, costs: [], businessId: RE, budget: 4300 }))).toBe('red');
+        expect(K.alarmLevel(K.planCushion({ tenancies: [], costs, businessId: RE, budget: 4000 }))).toBe('red');
+        expect(K.alarmLevel(K.planCushion({ tenancies, costs: [], businessId: RE, budget: 4000 }))).toBe('red');
         expect(K.alarmLevel(r)).toBe('');
     });
     it('names an active cost with no business instead of silently dropping it', () => {
-        const x = K.planCushion({ tenancies, costs: [...costs, { name: 'Orphan', expected: 10, active: true, businessIds: [] }], businessId: RE, budget: 4300 });
+        const x = K.planCushion({ tenancies, costs: [...costs, { name: 'Orphan', expected: 10, active: true, businessIds: [] }], businessId: RE, budget: 4000 });
         expect(levels(x)).toEqual(['amber']);
         expect(x.alarms[0].msg).toContain('Orphan');
     });
@@ -134,11 +134,11 @@ describe('cash cushion', () => {
     });
     // Found on the live page, 2 Oct 2026: four rent receipts arrived unfiled, tagged to the
     // property business with no sub-category. The income line read them as money in
-    // (£11,591) while the cushion ignored them, so the two cards disagreed by £2,977.
+    // while the cushion ignored them, so the two cards disagreed.
     it('an unfiled receipt counts in neither figure and raises amber', () => {
         const base = transactions.filter(t => !t.costIds.includes('c3'));
         const before = K.cashCushion({ transactions: base, costBusinessNames, businessName: 'Real Estate', today: TODAY });
-        const withReceipt = [...base, tx('2026-10-01', 2449.09, '', { reconciled: false, subCategories: [] })];
+        const withReceipt = [...base, tx('2026-10-01', 2400.50, '', { reconciled: false, subCategories: [] })];
         const after = K.cashCushion({ transactions: withReceipt, costBusinessNames, businessName: 'Real Estate', today: TODAY });
         expect(after.rolling.income).toBe(before.rolling.income);
         expect(after.rolling.cushion).toBe(before.rolling.cushion);
@@ -246,12 +246,12 @@ describe('compliance', () => {
         { id: 'p4', name: 'Agent house', agent: 'Some Lettings Ltd', noGas: false },
     ];
     const certs = [
-        cert('p1', 'EICR', '2030-09-11'), cert('p1', 'Landlord Insurance', '2027-03-02'),
-        cert('p2', 'EICR', '2031-01-01'), cert('p2', 'Landlord Insurance', '2027-03-02'),
-        cert('p3', 'GSC', '2026-09-08'),                                   // lapsed last month
+        cert('p1', 'EICR', '2030-09-15'), cert('p1', 'Landlord Insurance', '2027-03-10'),
+        cert('p2', 'EICR', '2031-01-01'), cert('p2', 'Landlord Insurance', '2027-03-10'),
+        cert('p3', 'GSC', '2026-09-12'),                                   // lapsed last month
         cert('p3', 'EICR', '2031-01-01', { hasFile: false }),              // in date but no document on file
-        cert('p3', 'Landlord Insurance', '2027-03-02', { status: 'Expired' }),
-        cert('p4', 'GSC', '2027-01-01'), cert('p4', 'EICR', '2031-01-01'), cert('p4', 'Landlord Insurance', '2027-03-02'),
+        cert('p3', 'Landlord Insurance', '2027-03-10', { status: 'Expired' }),
+        cert('p4', 'GSC', '2027-01-01'), cert('p4', 'EICR', '2031-01-01'), cert('p4', 'Landlord Insurance', '2027-03-10'),
     ];
     const run = extra => K.compliance({ properties, certs, selfManagedAgent: 'Property Portfolio', expected: 3, today: TODAY, ...extra });
 
@@ -286,12 +286,12 @@ describe('compliance', () => {
 });
 
 describe('personal net cash flow', () => {
-    const months = [{ key: '2026-07', net: 6609.82, totalIncome: 35000 }, { key: '2026-08', net: 4534.69, totalIncome: 34000 }, { key: '2026-09', net: 6008.35, totalIncome: 35900 }];
+    const months = [{ key: '2026-07', net: 6200.40, totalIncome: 32000 }, { key: '2026-08', net: 4410.15, totalIncome: 31000 }, { key: '2026-09', net: 5890.25, totalIncome: 32500 }];
     it('headline is the last full month; the average is beside it', () => {
         const r = K.personalNet({ months });
-        expect(r.value).toBe(6008.35);
+        expect(r.value).toBe(5890.25);
         expect(r.lastMonthKey).toBe('2026-09');
-        expect(r.average).toBe(5717.62);
+        expect(r.average).toBe(5500.27);
     });
     it('goes red when the Wealth cash flow is empty', () => {
         expect(K.alarmLevel(K.personalNet({ months: [] }))).toBe('red');

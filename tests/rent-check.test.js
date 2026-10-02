@@ -121,10 +121,10 @@ print(json.dumps({"light": res["lights"]["recEX2"], "listed": list(rows), "worst
 
   it('3. cash flow voids that existed on the slate date: shown, counted, left alone', () => {
     const r = py(`
-ts = [tenancy("recEX3", 17, 900.00, status="CFV", start="2026-03-11", unit="Unit 9 – 2 Example Road"),
-      tenancy("recEX4", 15, 900.00, status="CFV Actioned", start="2026-04-09", unit="Unit 9 – 3 Example Road")]
-res, rows = run(ts, [paid("recEX3", "2026-08-17", 42.49)], pre=["recEX3", "recEX4"])
-other, orows = run(ts, [paid("recEX3", "2026-08-17", 42.49)])
+ts = [tenancy("recEX3", 11, 900.00, status="CFV", start="2026-03-11", unit="Unit 9 – 2 Example Road"),
+      tenancy("recEX4", 7, 900.00, status="CFV Actioned", start="2026-04-09", unit="Unit 9 – 3 Example Road")]
+res, rows = run(ts, [paid("recEX3", "2026-08-11", 40.00)], pre=["recEX3", "recEX4"])
+other, orows = run(ts, [paid("recEX3", "2026-08-11", 40.00)])
 print(json.dumps({"a": rows["recEX3"], "b": rows["recEX4"], "line": res["briefLine"], "worst": res["worst"],
                   "notListed": [orows["recEX3"]["lane"], orows["recEX4"]["lane"], other["worst"]]}))`);
     expect([r.a.light, r.a.lane, r.a.note]).toEqual(['red', 'existing', 'cash flow void, existing, left alone']);
@@ -237,10 +237,10 @@ print(json.dumps({"row": rows["recBack"], "paying": res["paying"]}))`);
 
   it('a part payment does not clear a cash flow void', () => {
     const r = py(`
-res, rows = run([tenancy("recPart", 17, 900.00, status="CFV")], [paid("recPart", "2026-09-17", 42.49)])
+res, rows = run([tenancy("recPart", 11, 900.00, status="CFV")], [paid("recPart", "2026-09-11", 40.00)])
 print(json.dumps({"row": rows["recPart"], "paying": res["paying"]}))`);
     expect([r.row.light, r.row.lane]).toEqual(['red', 'late']);
-    expect(r.row.note).toBe('cash flow void, last matched payment 17 Sep, part payment £42.49 of £900.00');
+    expect(r.row.note).toBe('cash flow void, last matched payment 11 Sep, part payment £40.00 of £900.00');
     expect(r.paying).toBe(0);
   });
 
