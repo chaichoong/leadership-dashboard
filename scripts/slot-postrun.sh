@@ -144,7 +144,21 @@ BAD=$(printf '%s\n' "$TAIL_TEXT" | grep -E "$BAD_ERE" || true)
 if [ -n "$TOLERATED_ERE" ] && [ -n "$BAD" ]; then
   BAD=$(printf '%s\n' "$BAD" | grep -Ev "$TOLERATED_ERE" || true)
 fi
-echo "===== done rc=$RC $(date) =====" >> "$LOG"
+# The done line records the code this wrapper actually EXITS with, not the raw
+# code of the wrapped script (finding 20261001-exceptions-676). It used to
+# print rc=$RC before the BAD verdict below was acted on, so a run that failed
+# on log markers wrote "done rc=0" and then exited 1: runs.log said the slot
+# succeeded while the queue recorded it as died, and every reader that parses
+# this line (check-routines.py death_causes, estate-status.py) believed the log.
+# The first marker goes on the line too, so the cause is in the log, not only
+# on a stderr stream nothing keeps.
+EXIT_RC="$RC"
+EXIT_WHY=""
+if [ "$RC" -eq 0 ] && [ -n "$BAD" ]; then
+  EXIT_RC=1
+  EXIT_WHY=" (rc=0 but log tail carried failure markers: $(printf '%s\n' "$BAD" | head -1 | cut -c1-120))"
+fi
+echo "===== done rc=${EXIT_RC}${EXIT_WHY} $(date) =====" >> "$LOG"
 
 if [ -n "$LEAKED" ]; then
   echo "PRIVACY: content-bearing files quarantined from monitoring/ to $SCRATCH:$LEAKED" >&2

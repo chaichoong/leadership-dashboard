@@ -530,7 +530,27 @@ def parse_needs_you(text):
     return [x for x in items if not _STRUCK.match(x) and not re.search(r"\bWITHDRAWN\b", x)]
 
 
-def needs_you_row(now, reports=DAILY_OPS_REPORTS):
+def daily_ops_still_running(now, events, job="daily-ops"):
+    """True when daily-ops has stamped a START mark today and no END mark after it.
+
+    Finding 20260930-phase-5-668: on 30 Sep the routine ran 07:04-09:20, so the
+    report did not exist when the 09:00 brief rendered and the row said only
+    'No 07:00 report for today yet'. Kevin read that as nothing needing him.
+    Missing-because-not-started and missing-because-still-running are different
+    facts and the row now distinguishes them. daily-ops never takes the queue
+    lock, so marks (`state: mark`, note '' then 'end') are the only signal.
+    """
+    today = now.astimezone(LONDON).strftime("%Y-%m-%d")
+    marks = [e for e in (events or [])
+             if e.get("job") == job and e.get("state") == "mark"
+             and str(e.get("ts") or "").startswith(today)]
+    if not marks:
+        return False
+    marks.sort(key=lambda e: str(e.get("ts") or ""))
+    return (marks[-1].get("note") or "") != "end"
+
+
+def needs_you_row(now, reports=DAILY_OPS_REPORTS, events=None):
     """One REPORT row carrying today's NEEDS YOU items; a Failed row says why, never a blank."""
     today = now.astimezone(LONDON).strftime("%Y-%m-%d")
     stamp = now.strftime("%Y-%m-%dT%H:%M:%S.000Z")
@@ -539,6 +559,11 @@ def needs_you_row(now, reports=DAILY_OPS_REPORTS):
         dates = sorted(m.group(1) for m in (_REPORT_NAME.match(f) for f in os.listdir(reports)) if m)
         if today not in dates:
             last = dates[-1] if dates else None
+            running = daily_ops_still_running(now, events)
+            if running:
+                return dict(row, status="Idle",
+                            payload=json.dumps({"date": last, "items": None, "running": True}),
+                            detail="The 07:00 check is still running; its list for you will follow.")
             return dict(row, status="Idle", payload=json.dumps({"date": last, "items": None}),
                         detail="No 07:00 report for today yet%s." % ((". The last one is from %s" % last) if last else ""))
         with open(os.path.join(reports, "daily-ops-%s.md" % today), encoding="utf-8") as fh:
@@ -993,7 +1018,7 @@ def build_rows(now, with_loop_health=True):
         row["label"] = labels.get(job, job)
         rows.append(row)
     rows.append(allowance_row(now))
-    rows.append(needs_you_row(now))
+    rows.append(needs_you_row(now, events=events))
     rows.append(robot_signins_row(now))
     rows.append(blockers_row(now))
     rows.append(built_row(now))
@@ -1239,6 +1264,25 @@ def selftest():
        "today's report -> Worked with its items: %r" % row)
     ok(needs_you_row(datetime(2026, 9, 23, 23, 30, tzinfo=timezone.utc), reports=tmp3)["status"] == "Idle",
        "00:30 London on the 24th reads the 24th, not the 23rd")
+    # ── STILL RUNNING is not NOTHING TO REPORT (finding 20260930-phase-5-668) ──
+    # Replays 30 Sep 2026: start mark 07:04, no end mark, brief renders at 09:00.
+    tmp4 = tempfile.mkdtemp()
+    at30 = datetime(2026, 9, 30, 8, 0, tzinfo=timezone.utc)      # 09:00 London
+    started = [{"ts": "2026-09-30T06:04:53.095Z", "job": "daily-ops", "state": "mark", "note": ""}]
+    ended = started + [{"ts": "2026-09-30T08:20:54.643Z", "job": "daily-ops", "state": "mark", "note": "end"}]
+    row = needs_you_row(at30, reports=tmp4, events=started)
+    ok(json.loads(row["payload"]).get("running") is True and "still running" in row["detail"],
+       "a start mark with no end mark says the check is still running: %r" % row)
+    row = needs_you_row(at30, reports=tmp4, events=ended)
+    ok("running" not in json.loads(row["payload"]) and "No 07:00 report" in row["detail"],
+       "an ENDED run with no report is still the old silent-miss message: %r" % row)
+    row = needs_you_row(at30, reports=tmp4, events=[])
+    ok("running" not in json.loads(row["payload"]),
+       "no marks at all is not 'still running': %r" % row)
+    ok(daily_ops_still_running(at30, [dict(started[0], ts="2026-09-29T06:04:53.095Z")]) is False,
+       "yesterday's unfinished run never reads as today's")
+    ok(daily_ops_still_running(at30, ended) is False and daily_ops_still_running(at30, started) is True,
+       "the newest mark of the day decides")
     ok(needs_you_row(at, reports=os.path.join(tmp3, "missing"))["status"] == "Failed", "unreadable folder -> Failed")
     # The report names Kevin's legal and financial matters and the repo is public (24 Sep 2026).
     ok(not (os.path.realpath(DAILY_OPS_REPORTS) + os.sep).startswith(os.path.realpath(REPO) + os.sep),

@@ -308,7 +308,7 @@ es.read_jsonl = lambda *a, **k: []
 es.load_labels = lambda: {}
 es.classify = lambda job, *a, **k: {"key": job, "kind": "job", "status": "Idle"}
 for name in ("allowance_row", "needs_you_row", "robot_signins_row", "blockers_row"):
-    setattr(es, name, (lambda n: lambda now: {"key": n, "kind": "report", "status": "Worked"})(name))
+    setattr(es, name, (lambda n: lambda now, **k: {"key": n, "kind": "report", "status": "Worked"})(name))
 es.BUILT_MODULE = ${JSON.stringify(MODULE)}
 out["boardKeys"] = [row["key"] for row in es.build_rows(now, with_loop_health=False)]
 os.environ["BUILT_HOME"] = "/nonexistent-home"

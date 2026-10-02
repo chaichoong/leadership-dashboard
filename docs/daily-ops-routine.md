@@ -397,6 +397,22 @@ green work, so an open fixer PR now means one of two things and the report must 
 gate went RED, or it touched a protected path and is waiting for Kevin. If three or more are
 open, do NOT open a fourth — that is the drain failing again, and only he can clear it.
 
+**Phase 4 has a 60-minute wall-clock budget** (findings 20260930-phase-5-668 and
+20261001-daily-ops-680). On 30 Sep the run reached 2h12m and on 1 Oct the fix phase stalled with
+no output at all, so the report, and with it the NEEDS YOU list, landed after the 09:00 CEO brief
+had already gone out. The 07:00 report must always be written before 09:00, so the fix queue is
+the phase that gives way, never the report.
+
+- At 60 minutes from the start of the phase, **stop claiming new findings**. Land what is already
+  written — commit, PR, gate — and name the cap as the reason in the PR body and the report.
+- A finding claimed and then abandoned is reopened as stale by the next run, so an unworked claim
+  costs nothing. An unwritten report costs the whole morning.
+- **Emit one line per finding as you claim it.** A silent transcript cannot be diagnosed: on
+  1 Oct the only evidence the phase had stalled was the absence of output, which is why nobody
+  could say where. One line per claim locates a stall instead of inferring it.
+- Phase 5 reports "the fix queue did not run" on the BROKEN line and still writes the report
+  whenever phase 4 left no PR and no closed findings.
+
 Cap at **25** findings and one pull request, then **merge it through the gate**:
 
 ```
