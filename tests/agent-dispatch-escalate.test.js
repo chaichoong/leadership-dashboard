@@ -514,8 +514,9 @@ describe('a decision card carries a brief, its history, its links and its files'
     expect(escalate({ name: 'Boiler repair', reason: 'Which quote do you want?', brief: noFigure.replace('an amount', '94 pounds') }).refused).toBe('');
     expect(escalate({ name: 'Boiler repair', reason: 'Which quote do you want?', brief: noFigure.replace('an amount', 'GBP 94.00') }).refused).toBe('');
     expect(escalate({ name: 'Boiler repair', reason: 'Which quote do you want?', brief: noFigure.replace('an amount', '$20') }).refused).toBe('');
-    // a person called Bill is not a bill
+    // a person called Bill is not a bill, and a gas bill is
     expect(escalate({ name: 'Reply to Bill Turner about the boundary fence', reason: 'Agree to the new fence line or not?', brief: noFigure }).refused).toBe('');
+    expect(escalate({ name: 'Gas bill for the flat', reason: 'Settle the gas bill or dispute it?', brief: noFigure }).refused).toContain('gives no figure');
   });
 
   it('a brief file that cannot be read is a refusal the agent can act on, not a traceback', () => {
@@ -651,18 +652,18 @@ print(m.card_recommended(sys.stdin.read()))`], { encoding: 'utf8', input: out })
 // work; nothing closed one when the answer was to wait, so the verdict sat on the task until the board forgot it.
 describe('decided: an answer to wait, or to do nothing, is recorded as carried out', () => {
   function decided({ until = null, outcome = 'Approved with minor edits', feedback = 'Leave it until the 5th.',
-                     agentOutput = 'DECIDE: pay now or wait?\n\n' + BRIEF, holder = 'recAGENT', realHolder = false }) {
+                     agentOutput = 'DECIDE: pay now or wait?\n\n' + BRIEF, holder = 'recAGENT', realHolder = false, status = 'Today' }) {
     const script = `
 import importlib.util, json, io, contextlib, datetime
-cfg = json.loads(${JSON.stringify(JSON.stringify({ until, outcome, feedback, agentOutput, holder, realHolder }))})
+cfg = json.loads(${JSON.stringify(JSON.stringify({ until, outcome, feedback, agentOutput, holder, realHolder, status }))})
 spec = importlib.util.spec_from_file_location('ad', ${JSON.stringify(DISPATCH)})
 m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m)
-holder = sorted(m.AGENTS)[0] if cfg["realHolder"] else cfg["holder"]
+holder = {"agent": sorted(m.AGENTS)[0], "roy": m.HUMANS[m.ROY_EMAIL]["rec"], "taskmgr": m.TASKMGR_REC_ID}.get(cfg["realHolder"], cfg["holder"])
 future = (datetime.datetime.now(m.LONDON) + datetime.timedelta(days=30)).strftime("%Y-%m-%d")
 until = future if cfg["until"] == "FUTURE" else cfg["until"]
 captured = {}
 m.get_task = lambda tid: {"id": tid, "fields": {
-    m.AF["status"]: {"name": "Today"}, m.AF["agentOutput"]: cfg["agentOutput"],
+    m.AF["status"]: {"name": cfg["status"]}, m.AF["agentOutput"]: cfg["agentOutput"],
     m.AF["approvalOutcome"]: {"name": cfg["outcome"]} if cfg["outcome"] else None,
     m.AF["approvalFeedback"]: cfg["feedback"],
     m.AF["teamMember"]: [{"id": m.TASKMGR_REC_ID}], m.AF["sentForApprovalBy"]: [{"id": m.TASKMGR_REC_ID}],
@@ -705,16 +706,20 @@ print('@@@' + json.dumps({"captured": captured, "refused": refused, "AF": m.AF, 
     expect(r.captured[r.AF.agentOutput]).toMatch(/^DECIDED \(Kevin/);
   });
 
-  it('puts the task back with the agent that held it when it was escalated, and only a real agent', () => {
-    const real = decided({ realHolder: true });
-    expect(real.captured[real.AF.teamMember]).toEqual([real.holder]);
-    const unknown = decided({ holder: 'none' });
-    expect(Object.keys(unknown.captured)).not.toContain(unknown.AF.teamMember);
+  it('puts the task back with whoever held it when it was escalated: an agent or Roy, never the Task Manager', () => {
+    for (const who of ['agent', 'roy']) {
+      const r = decided({ realHolder: who });
+      expect(r.captured[r.AF.teamMember], who).toEqual([r.holder]);
+    }
+    for (const r of [decided({ holder: 'none' }), decided({ holder: 'recNOBODY0000001' }), decided({ realHolder: 'taskmgr' })])
+      expect(Object.keys(r.captured)).not.toContain(r.AF.teamMember);
   });
 
   it('refuses a card with no verdict, a card that is not a decision, a past date and a non-date, writing nothing', () => {
     for (const r of [decided({ outcome: '' }), decided({ agentOutput: 'Draft reply to the council' }),
-                     decided({ until: '2026-01-01' }), decided({ until: 'next week' })]) {
+                     decided({ until: '2026-01-01' }), decided({ until: 'next week' }),
+                     // a rejected card closed its task: parking it would reopen work Kevin closed
+                     decided({ until: 'FUTURE', outcome: 'Rejected', status: 'Completed' })]) {
       expect(r.refused).toMatch(/^REFUSED:/);
       expect(r.captured).toEqual({});
     }

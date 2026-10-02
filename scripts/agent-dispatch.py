@@ -31,7 +31,7 @@ Subcommands:
                               where no agent can usefully prepare anything.
   decided  TASKID [--until YYYY-MM-DD]
                               close an ANSWERED decision card whose answer is
-                              to wait or to do nothing; --until parks it.
+                              to wait; --until parks it until that date.
   submit   TASKID --agent RECID --type TYPE --output-file PATH [--tier1]
                               --tier1 stamps the banner on the Agent Output so
                               the label travels with the work, not in a log.
@@ -3472,7 +3472,8 @@ BRIEF_OPTION_RE = re.compile(r"^[ \t]*(?:[A-Z][.)]|\d{1,2}[.)]|[-*])[ \t]+\S", r
 # A question about money with no figure in it is the card he sent back. The
 # way out names where the figure was looked for, so "unknown" is a finding.
 MONEY_ASK_RE = re.compile(
-    r"£|\b(?:pay|pays|paying|paid|payments?|amounts?|arrears|debts?|owed|owing|invoices?|refunds?|costs?|quotes?|fees?|price)\b", re.I)
+    r"£|\b(?:pay|pays|paying|paid|payments?|amounts?|arrears|debts?|owed|owing|invoices?|refunds?|costs?|quotes?|fees?|price"
+    r"|(?-i:bills?))\b", re.I)   # lower-case only: a gas bill is money, Bill Turner is a person
 MONEY_FIGURE_RE = re.compile(r"[£$€]\s?\d|\bGBP\s?\d|\b\d[\d,.]*\s?(?:pounds|GBP)\b", re.I)
 # The recommendation as the board reads it (RECOMMENDED_RE in task-manager.py;
 # tests/agent-dispatch-escalate.test.js fails if the two drift): the first
@@ -3678,7 +3679,7 @@ def cmd_escalate(args):
                   (f"no note, so he took the card's recommendation: {' '.join(rec.group(1).split())[:300]}"
                    if rec else "no note, and the card named no recommendation"))
         sys.exit(f"REFUSED: Kevin has ANSWERED the decision card on {args.task} ({outcome}: {answer}). Carry out "
-                 "his answer first: route, handover, complete, or, when it is to wait or to do nothing,\n"
+                 "his answer first: route, handover, complete (nothing needs doing), or, when it is to wait,\n"
                  f"         python3 scripts/agent-dispatch.py decided {args.task} [--until YYYY-MM-DD]\n"
                  "       Never ask the same thing again. A NEW question after that needs a "
                  f"'{SINCE_HEADING}:' section in its brief.")
@@ -3790,22 +3791,27 @@ def cmd_escalate(args):
 
 
 def cmd_decided(args):
-    """Close an ANSWERED decision card whose answer is to wait or to do nothing.
+    """Close an ANSWERED decision card whose answer is to wait.
 
     `route` and `handover` close a card when Kevin's answer moves the work.
     Nothing closed it when his answer was "leave it until the 5th" or "raise a
     reminder in November" (2 Oct 2026): the verdict stayed on the task, the
     board had no move that recorded it, and after seven days the task was
     raised again as "no recorded answer". This records the answer as carried
-    out, puts the task back with the agent that held it when it was escalated
-    (the gate's approve re-linked it to the Task Manager), and with --until
-    parks it until the date he gave."""
+    out, puts the task back with whoever held it when it was escalated (the
+    gate's approve re-linked it to the Task Manager), and with --until parks
+    it until the date he gave. Without --until the card closes and the task
+    stays live for its holder: that is for a card that must be asked again
+    properly, never for "nothing needs doing", which is a `complete`."""
     tf = (get_task(args.task).get("fields", {}) or {})
     stamp = datetime.now(LONDON).strftime("%d %b %Y")
     fields = decision_carry_out_fields(tf, stamp)
     if not fields:
         sys.exit(f"REFUSED: {args.task} is not an answered decision card (a DECIDE: card with Kevin's verdict "
                  "on it), so there is no answer to record.")
+    if sel(tf.get(AF["status"])) == "Completed":
+        sys.exit(f"REFUSED: {args.task} is Completed (a rejected card closes its task). Parking it would "
+                 "reopen work Kevin closed.")
     note = fields.pop("_note")
     until = (getattr(args, "until", None) or "").strip()
     if until:
@@ -3824,7 +3830,10 @@ def cmd_decided(args):
         note += f"\n\n[{stamp} — agent-dispatch] Parked until {due} on Kevin's answer; it comes back on the board that day."
     existing = str(tf.get(AF["notes"]) or "").rstrip()
     holders = re.findall(r"Escalated to Kevin as a decision card \(holder ([^)]*)\)", existing)
-    back_to = [h for h in (holders[-1] if holders else "").split(",") if h in ALL_AGENTS and h != TASKMGR_REC_ID]
+    # An agent or a person on the team (a card Roy held goes back to Roy), never the Task Manager itself.
+    people = {h["rec"] for h in HUMANS.values()}
+    back_to = [h for h in (holders[-1] if holders else "").split(",")
+               if (h in ALL_AGENTS or h in people) and h != TASKMGR_REC_ID]
     if back_to:
         fields[AF["teamMember"]] = back_to
     fields[AF["notes"]] = (existing + "\n\n" + note).strip()[-90000:]
@@ -9380,8 +9389,8 @@ def main():
                         "(added by itself when the task's name or description says so)")
 
     dd = sub.add_parser("decided",
-                        help="close an ANSWERED decision card whose answer needs no route or handover: "
-                             "wait until a date, or nothing to do")
+                        help="close an ANSWERED decision card whose answer is to wait until a date "
+                             "(or, with no date, a thin card that must be asked again properly)")
     dd.add_argument("task")
     dd.add_argument("--until", metavar="YYYY-MM-DD",
                     help="park the task until this date; it comes back on the board that day")

@@ -83,12 +83,13 @@ the view's `recommended` (every card since 2 Oct 2026 carries one). Only when
 `recommended` is empty too (a card from before the brief) is there no move:
 close the old card with `python3 scripts/agent-dispatch.py decided TASKID`,
 then escalate again with a proper brief rather than inventing an answer. When
-his answer is to WAIT ("leave it until the 5th", "remind me in November") or
-that nothing needs doing, record it with
-`python3 scripts/agent-dispatch.py decided TASKID --until YYYY-MM-DD` (leave
-`--until` off when there is no date): it closes the card, keeps his words on
-the task, puts it back with the agent that held it and parks it until that
-date. Record the move as `leave`. Never leave an answered card sitting: a
+his answer is to WAIT ("leave it until the 5th", "remind me in November"),
+record it with
+`python3 scripts/agent-dispatch.py decided TASKID --until YYYY-MM-DD`: it
+closes the card, keeps his words on the task, puts it back with whoever held
+it and parks it until that date. Record the move as `leave`. When his answer
+is that nothing needs doing, that is a `close`: complete the task, do not
+park it. Never leave an answered card sitting: a
 verdict nobody carried out is how he was asked the same thing twice. And the
 gate's approve re-linked the task to you, so if his answer names nobody, put
 it back on `priorHolder` with `route` (an agent) or `handover` (Roy) — that
@@ -479,8 +480,8 @@ exit codes):
   `REFUSED:` exit says what the brief is missing: fix it and run it again, or
   route the task to be prepared per Step 2 rule 4. A refused escalate is not a
   move — never record it `ok: true`)
-- leave, on a `decided` card whose answer is to wait or to do nothing:
-  `python3 scripts/agent-dispatch.py decided TASKID [--until YYYY-MM-DD]`
+- leave, on a `decided` card whose answer is to wait:
+  `python3 scripts/agent-dispatch.py decided TASKID --until YYYY-MM-DD`
 - close / pass-to-Roy / in-house finish:
   `python3 scripts/agent-dispatch.py submit TASKID --agent rec1hYELb4zS8pjjO --type Admin --output-file <path> --plain-task "<what the task is, one short sentence a 13-year-old understands>" --plain-approve "<what happens the moment Kevin taps Approve, one short plain sentence>"`
   (output ends with the mandatory closing line
