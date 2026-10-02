@@ -130,14 +130,15 @@ describe('agent-dispatch escalate makes a decision card', () => {
   it('a task at Approval WITHOUT a DECIDE: ask is still escalated (an old draft card is not a decision)', () => {
     const r = escalate({ status: 'Approval', agentOutput: 'Draft reply to the council', reason: 'Pay the £1,234.56 or dispute it?' });
     expect(r.captured.fields[r.AF.agentOutput]).toMatch(/^DECIDE: Pay the £1,234.56 or dispute it\?/);
-    expect(r.captured.fields[r.AF.agentOutput]).toContain('Earlier output:\nDraft reply to the council');
+    expect(r.captured.fields[r.AF.agentOutput]).toContain('Earlier output:\n> Draft reply to the council');
   });
 
-  it('never doubles the prefix, and an empty reason still yields a line Kevin can answer', () => {
+  it('never doubles the prefix, and an empty reason is refused: it is the thinnest ask of all', () => {
     const doubled = escalate({ reason: 'DECIDE: keep or sell?' });
     expect(doubled.captured.fields[doubled.AF.agentOutput].split('\n')[0]).toBe('DECIDE: keep or sell?');
-    const empty = escalate({ reason: '' });
-    expect(empty.captured.fields[empty.AF.agentOutput]).toMatch(/^DECIDE: \S/);
+    const empty = escalate({ reason: '  \n ' });
+    expect(empty.refused).toContain('has no ask');
+    expect(empty.captured).toEqual({});
   });
 
   it('writes no Assignee: the card is the surface, and Assignee fires the assignment DM', () => {
@@ -441,18 +442,133 @@ describe('a decision card carries a brief, its history, its links and its files'
     expect(out).not.toContain('confirm which cards and amounts');   // the thin asks are not carried under the new card
     expect(out).not.toContain('Earlier output:');
     const written = r.captured.fields[r.AF.notes];
-    expect(written).toContain('Decision card rebuilt with a full brief: DECIDE: ' + CARDS.reason);
-    expect(written.match(/Escalated to Kevin as a decision card/g)).toHaveLength(1);   // the holder on record stands
+    // stamped as an escalation, so the board dates his answer from it, with the holder the FIRST one recorded
+    // (the gate re-links the task to the Task Manager, so today's holder is the wrong one to restore)
+    expect(written).toContain('Escalated to Kevin as a decision card (holder recHOLDER), rebuilt with a full brief: DECIDE: ' + CARDS.reason);
     // ...and the rebuilt card is then left alone
     const again = escalate({ ...CARDS, status: 'Approval', agentOutput: out, notes: written });
     expect(again.captured).toEqual({});
     expect(again.printed.alreadyEscalated).toBe('recTEST');
   });
 
-  it('never rewrites a thin card Kevin has already answered: the rewrite would clear his verdict', () => {
-    const r = escalate({ ...CARDS, status: 'Approval', agentOutput: THIN, outcome: 'Approved as-is' });
-    expect(r.captured).toEqual({});
-    expect(r.printed.alreadyEscalated).toBe('recTEST');
+  it('never rewrites a card Kevin has answered, at any status, and tells the caller to carry his answer out', () => {
+    // The page moves a task to Today the moment he decides, so that is the state an answered card is really in.
+    for (const status of ['Today', 'Approval', 'Overdue']) {
+      const thin = escalate({ ...CARDS, status, agentOutput: THIN, outcome: 'Approved as-is', approvalFeedback: 'Leave it to the payment run.' });
+      expect(thin.captured).toEqual({});
+      expect(thin.refused).toMatch(/^REFUSED: Kevin has ANSWERED the decision card on recTEST \(Approved as-is: "Leave it to the payment run\."\)/);
+    }
+    // a briefed card approved with an empty box: his answer is the recommendation, and the refusal says which
+    const briefed = escalate({ ...CARDS, status: 'Today', outcome: 'Approved as-is',
+      agentOutput: 'DECIDE: x?\n\n' + BRIEF + '\n\nLINKS AND FILES:\n- y' });
+    expect(briefed.captured).toEqual({});
+    expect(briefed.refused).toContain("he took the card's recommendation: B, because the weekly payment run already lists all five cards.");
+  });
+
+  it('archives an earlier answer and clears it, so an approval with an empty box is not read as the old words', () => {
+    const r = escalate({ ...CARDS, approvalFeedback: 'Leave it until November.',
+      feedbackHistory: '[2026-09-01 09:00] An older note.',
+      brief: BRIEF + '\n\nSINCE YOU LAST ANSWERED: it is now November, the month you said to bring it back.' });
+    expect(r.refused).toBe('');
+    expect(r.captured.fields).toHaveProperty(r.AF.approvalFeedback, null);
+    expect(r.captured.fields[r.AF.feedbackHistory]).toMatch(/^\[2026-09-01 09:00\] An older note\.\n\n\[\d{4}-\d\d-\d\d \d\d:\d\d\] Leave it until November\.$/);
+    expect(r.captured.fields[r.AF.agentOutput]).toContain('- latest: Leave it until November.');
+    // already archived by the page: cleared, never written twice
+    const again = escalate({ ...CARDS, approvalFeedback: 'Leave it until November.',
+      feedbackHistory: '[2026-09-23 14:06] Leave it until November.',
+      brief: BRIEF + '\n\nSINCE YOU LAST ANSWERED: it is now November, the month you said to bring it back.' });
+    expect(again.captured.fields).toHaveProperty(again.AF.approvalFeedback, null);
+    expect(Object.keys(again.captured.fields)).not.toContain(again.AF.feedbackHistory);
+  });
+
+  it('refuses a brief line the page or a sign-in command would read as something else', () => {
+    for (const line of ['SIGN-IN NEEDED: the bank site (https://bank.example/login)', 'TO: bank@example.com', 'SUBJECT: Payment',
+                        '**Carrying this out will involve:** paying £94.00', 'CHECKED: handled=no; trigger=money', 'TRACK RECORD: none found (searched nothing)']) {
+      const r = escalate({ ...CARDS, brief: BRIEF.replace('OPTIONS:', line + '\n\nOPTIONS:') });
+      expect(r.refused, line).toContain('a line the card reads as something else');
+      expect(r.captured).toEqual({});
+    }
+  });
+
+  it('measures the recommendation as the board reads it: its first paragraph', () => {
+    const r = escalate({ ...CARDS, brief: BRIEF.replace(/RECOMMENDED:.*$/, 'RECOMMENDED: B.\n\nBecause the weekly payment run already lists all five cards.') });
+    expect(r.refused).toContain("'RECOMMENDED:' section is 2 characters");
+    // an AMOUNT NOT KNOWN line inside a section does not cut that section short
+    const amount = escalate({ ...CARDS, brief: BRIEF.replace(/£[\d.,]+/g, 'an amount')
+      .replace('OPTIONS:', 'AMOUNT NOT KNOWN: the statements are behind a bank sign-in the robot does not hold.\n\nOPTIONS:') });
+    expect(amount.refused).toBe('');
+  });
+
+  it('a money question worded as a quote or a cost needs a figure too, and pounds or GBP count as one', () => {
+    const noFigure = BRIEF.replace(/£[\d.,]+/g, 'an amount');
+    expect(escalate({ name: 'Boiler repair', reason: 'Which quote do you want?', brief: noFigure }).refused).toContain('gives no figure');
+    expect(escalate({ name: 'Boiler repair', reason: 'Which quote do you want?', brief: noFigure.replace('an amount', '94 pounds') }).refused).toBe('');
+    expect(escalate({ name: 'Boiler repair', reason: 'Which quote do you want?', brief: noFigure.replace('an amount', 'GBP 94.00') }).refused).toBe('');
+  });
+
+  it('a brief file that cannot be read is a refusal the agent can act on, not a traceback', () => {
+    const script = `
+import importlib.util, json
+spec = importlib.util.spec_from_file_location('ad', ${JSON.stringify(DISPATCH)})
+m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m)
+m.get_task = lambda tid: {"id": tid, "fields": {m.AF["name"]: "Review the lease", m.AF["status"]: {"name": "Today"}}}
+written = []
+m.patch_task = lambda tid, fields: written.append(tid) or {}
+class A: pass
+out = []
+for path in ('/nonexistent/od-test-brief.txt', '/tmp'):
+    a = A(); a.task = 'recTEST'; a.reason = 'Renew or not?'; a.brief_file = path
+    try: m.cmd_escalate(a); out.append('accepted')
+    except SystemExit as ex: out.append(str(ex)[:80])
+    except Exception as ex: out.append('TRACEBACK ' + type(ex).__name__)
+print(json.dumps({"out": out, "written": written}))`;
+    const r = JSON.parse(execFileSync('python3', ['-c', script], { encoding: 'utf8' }).trim().split('\n').pop());
+    for (const line of r.out) expect(line).toMatch(/^REFUSED: the brief file for recTEST could not be read/);
+    expect(r.written).toEqual([]);
+  });
+
+  it('marks a decision on the private matter the way every other card on it is marked, under the ask', () => {
+    const r = escalate({ name: 'Statutory demand received: reply due', reason: 'Send the reply as drafted, or hold it?' });
+    const out = r.captured.fields[r.AF.agentOutput];
+    expect(out.split('\n')[0]).toBe('DECIDE: Send the reply as drafted, or hold it?');   // still a decision card
+    expect(out).toMatch(/TIER 1\./);
+    expect(out.indexOf('TIER 1.')).toBeLessThan(out.indexOf('WHAT THIS IS:'));
+    expect(escalate({ ...CARDS }).captured.fields[r.AF.agentOutput]).not.toMatch(/TIER 1\./);
+  });
+
+  it('keeps the whole card when a long earlier draft pushes the output past the field limit', () => {
+    const r = escalate({ ...CARDS, agentOutput: 'An old report line that goes on.\n'.repeat(4000) });
+    const out = r.captured.fields[r.AF.agentOutput];
+    expect(out.length).toBe(95000);
+    for (const block of ['DECIDE:', 'RECOMMENDED:', 'LINKS AND FILES:', 'TRACK RECORD:']) {
+      expect(out.indexOf(block)).toBeGreaterThan(-1);
+      expect(out.indexOf(block)).toBeLessThan(out.indexOf('Earlier output:'));
+    }
+  });
+
+  it('the command line carries every flag the manuals tell an agent to pass', () => {
+    const help = execFileSync('python3', [DISPATCH, 'escalate', '--help'], { encoding: 'utf8' });
+    const manuals = ['task-manager-board', 'agent-dispatch'].map((n) =>
+      require('node:fs').readFileSync(resolve(ROOT, `.claude/scheduled-tasks/${n}/SKILL.md`), 'utf8'));
+    for (const flag of ['--reason', '--brief-file', '--plain-task', '--plain-approve', '--email', '--ref', '--property']) {
+      expect(help).toContain(flag);
+      expect(manuals[0]).toContain(flag);
+    }
+    for (const flag of ['--brief-file', '--plain-task', '--plain-approve']) expect(manuals[1]).toContain(flag);
+  });
+
+  it('the page reads the new card the right way: the ask is the DECIDE line, nothing in it is an action or a sign-in', () => {
+    const page = require('node:fs').readFileSync(resolve(ROOT, 'os/agents/index.html'), 'utf8');
+    const apvSummary = new Function(page.match(/const APV_SUMMARY_IS_ACTION[\s\S]*?\n\}/)[0] + '; return apvSummary;')();
+    const draft = 'TO: bank@example.com\nSUBJECT: Payment plan\n\nDear Sir\n\nSIGN-IN NEEDED: Pingen (https://app.pingen.com/)\n\n'
+      + 'CHECKED: handled=no; trigger=money\n\n**Carrying this out will involve:** emailing the bank.';
+    const r = escalate({ ...CARDS, agentOutput: draft, feedbackHistory: '[2026-09-30 22:24] Knocked back to 2026-10-05' });
+    const out = r.captured.fields[r.AF.agentOutput];
+    expect(out.length).toBeGreaterThan(280);                       // long enough for the page to summarise
+    expect(apvSummary(out)).toBe('DECIDE: ' + CARDS.reason);       // not "Send an email to bank@...", not an action
+    expect(out).not.toMatch(/^\s*SIGN-IN NEEDED:/m);               // SIGNIN_LINE_RE and the page both anchor on the line start
+    expect(out).not.toMatch(/^(TO|SUBJECT|CHECKED):/m);
+    expect(out).toContain('> SIGN-IN NEEDED: Pingen');             // still there to read, quoted
   });
 
   // Both live cards had been answered on 23 Sep and came back on 30 Sep as "prior escalation had no recorded answer".
@@ -489,7 +605,8 @@ describe('a decision card carries a brief, its history, its links and its files'
     const draft = 'Draft reply to the bank.\n\nRECOMMENDED: an old line\n\n**Carrying this out will involve:** emailing the bank.';
     const r = escalate({ ...CARDS, agentOutput: draft });
     const out = r.captured.fields[r.AF.agentOutput];
-    expect(out).toContain('Earlier output:\nDraft reply to the bank.');
+    expect(out).toContain('Earlier output:\n> Draft reply to the bank.');
+    expect(out).toContain('> RECOMMENDED: an old line');           // quoted, so it is not a section of this card
     // the page reads the LAST carry-out line in the output as what approving does
     expect(out).not.toMatch(/carrying this out will involve/i);
     expect(out).toContain('The earlier draft would have involved: emailing the bank.');

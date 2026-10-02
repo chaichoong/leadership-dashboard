@@ -294,10 +294,16 @@ def classify(f, activity_ids, now=None):
     done = newest_note_stamp(f.get("Notes"), DECIDED_NOTE_MARK)
     # A carried-out decision (route/handover after Kevin's answer) closes the
     # card; the task is ordinary work again from that stamp on.
-    if esc and (now - esc) < timedelta(days=STUCK_DAYS) and not (done and done >= esc):
-        if f.get("Approval Outcome"):
-            return "decided", "escalateNote", esc
-        return "escalated", "escalateNote", esc
+    if esc and not (done and done >= esc):
+        # HIS ANSWER DOES NOT EXPIRE (2 Oct 2026). An answer given more than
+        # seven days after the card went up fell through to stuck, and the
+        # card was raised again as "no recorded answer": two cards escalated
+        # on 15 Sep were answered on 23 Sep and re-asked on 30 Sep.
+        answered = f.get("Approval Outcome") and str(f.get("Agent Output") or "").lstrip().upper().startswith("DECIDE:")
+        if (now - esc) < timedelta(days=STUCK_DAYS) or answered:
+            if f.get("Approval Outcome"):
+                return "decided", "escalateNote", esc
+            return "escalated", "escalateNote", esc
     if moved is None:
         # No stamp at all should be impossible (Created Time is automatic);
         # treat as stuck so it surfaces rather than hides.
@@ -1008,6 +1014,11 @@ def cmd_verify(report_path):
             elif "DECIDE:" not in str(f.get("Agent Output") or ""):
                 problems.append("claimed escalate on %s but Agent Output carries no "
                                 "DECIDE: ask" % a["task"])
+            elif not card_recommended(f.get("Agent Output")):
+                # A refused escalate recorded ok: true leaves the old thin
+                # card, or none, behind (2 Oct 2026: no brief, no card).
+                problems.append("claimed escalate on %s but the card carries no brief "
+                                "(no RECOMMENDED: section): the escalate was refused" % a["task"])
         elif move in ("route", "chase") and a.get("to") not in team:
             problems.append("claimed %s of %s to %s but the link is absent"
                             % (move, a["task"], a.get("to")))
@@ -1205,6 +1216,14 @@ def cmd_selftest():
     _, _, view = task_view({"id": "recE4", "fields": briefed}, set(), set(), now)
     assert view["recommended"] == "B, keep it: the rent covers the mortgage.", view
     assert card_recommended("RECOMMENDED: B, keep it.\nSINCE YOU LAST ANSWERED: the buyer withdrew.") == "B, keep it."
+    # a thin card names no move, even when an earlier draft under it used the word
+    assert card_recommended("DECIDE: x\n\nEarlier output:\nRECOMMENDED: an old draft's line") == ""
+    # his answer does not expire: answered eight days after the card went up, it is still decided
+    late = dict(esc_done, _id="recE6", Notes=esc_done["Notes"].replace("20 Aug", "01 Aug"))
+    assert classify(late, set(), now)[0] == "decided", classify(late, set(), now)
+    # ...but an old escalation nobody answered is stuck again, and a carried-out one is ordinary work
+    assert classify(dict(late, **{"Approval Outcome": None}), set(), now)[0] == "stuck"
+    assert classify(dict(late, Notes=late["Notes"] + "\n\n[02 Aug 2026 — agent-dispatch] Decision carried out: x"), set(), now)[0] == "stuck"
     # once the decision is carried out (a newer stamp), the card is closed:
     # the task is ordinary work again, not decided and not escalated
     carried = dict(esc_done, _id="recE5", **{"Approval Outcome": None,

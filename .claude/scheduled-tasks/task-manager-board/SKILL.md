@@ -74,7 +74,8 @@ dispatch's in-flight tasks), `inFlight` (dispatch's this slot — not yours),
 it — never stuck; its ONLY move is a chase, and only when its `chaseDue` is
 true, one per seven days), `escalated` (a decision card went to Kevin inside
 seven days — not yours to touch), `decided` (Kevin has ANSWERED a decision
-card: each view carries `ask`, `approvalOutcome` and `approvalFeedback`; your
+card, however long ago he was asked: his answer never expires. Each view
+carries `ask`, `approvalOutcome`, `approvalFeedback` and `recommended`; your
 move this slot is whatever he said — route, roy, close, leave — recorded as
 that move; a Rejected card means close it. Two rules: an approval with EMPTY
 `approvalFeedback` means he took the card's own recommendation, so the move is
@@ -269,10 +270,14 @@ out of your list — the board subtracted dispatch's tasks in code):
    - **Put the documents on the task.** A letter, statement or form that
      matters and is not attached goes on first:
      `python3 scripts/agent-dispatch.py attach TASKID --file PATH --purpose "<what it is>"`.
-   The command adds the dated history, the original email link and the list
-   of files itself. A task already carrying a briefed card prints
-   `alreadyEscalated` and is left alone; a card from before the brief is
-   rebuilt by the same command.
+   The command adds his earlier answers, the dated history, the original
+   email link and the list of files itself. A task already carrying a
+   briefed card prints `alreadyEscalated` and is left alone; a card from
+   before the brief is rebuilt by the same command; and a card he has
+   ANSWERED is refused with his answer quoted: carry that answer out, never
+   ask again. Write the brief in plain sentences: a line starting `TO:`,
+   `SUBJECT:`, `SIGN-IN NEEDED:` or `CHECKED:`, or the words "carrying this
+   out will involve", is refused because the card would misread it.
 5. **A domain agent owns it** (inbound reply → Inbox Response; anything
    a live role agent's goal covers, per the roster) → `route` to that agent.
    Waiting-on-someone-external tasks are a route too: route to the domain agent

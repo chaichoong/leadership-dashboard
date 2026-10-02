@@ -792,7 +792,7 @@ rec("t2", "")
 import tempfile
 m.history = lambda **kw: {"terms": [], "searched": ["tasks"], "entries": [], "notes": []}
 bf = tempfile.NamedTemporaryFile("w", suffix=".txt", delete=False)
-bf.write("WHAT THIS IS:\\nTwo insurers have quoted for the landlord cover.\\n\\nWHAT HAS HAPPENED:\\nQuote one came on 20 Sep 2026 and quote two on 22 Sep 2026, both for the same cover.\\n\\nOPTIONS:\\nA. Take quote one.\\nB. Take quote two.\\n\\nRECOMMENDED: A, because it starts on the renewal date.")
+bf.write("WHAT THIS IS:\\nTwo insurers have quoted for the landlord cover.\\n\\nWHAT HAS HAPPENED:\\nQuote one came on 20 Sep 2026 at £310.00 and quote two on 22 Sep 2026 at £295.00, both for the same cover.\\n\\nOPTIONS:\\nA. Take quote one.\\nB. Take quote two.\\n\\nRECOMMENDED: A, because it starts on the renewal date.")
 bf.close()
 b = run(m.cmd_escalate, {"task": "t2", "reason": "which quote do you want?", "brief_file": bf.name,
                          "plain_task": "Two insurers have quoted for the landlord cover.",

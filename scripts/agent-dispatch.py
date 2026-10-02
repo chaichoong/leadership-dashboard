@@ -3441,13 +3441,11 @@ DECIDE_LINE_RE = re.compile(r"^\s*DECIDE:\s*\S", re.I | re.M)
 def escalate_ask(reason):
     """One ask line, starting DECIDE:, from the escalate reason. The reason's
     first non-blank line is the ask; an existing DECIDE: prefix is kept, never
-    doubled; an empty reason still yields a line Kevin can answer."""
+    doubled. '' when the reason holds no ask (cmd_escalate refuses that)."""
     first = next((ln.strip() for ln in str(reason or "").splitlines() if ln.strip()), "")
-    if not first:
-        first = "what should happen with this task? The agents cannot take it further."
     if first.upper().startswith(DECIDE_PREFIX):
         first = first[len(DECIDE_PREFIX):].strip()
-    return f"{DECIDE_PREFIX} {first}"
+    return f"{DECIDE_PREFIX} {first}" if first else ""
 
 
 # THE DECISION BRIEF (Kevin, 2 Oct 2026). A decision card was one DECIDE: line
@@ -3466,12 +3464,24 @@ def escalate_ask(reason):
 # is_decide_card all read.
 BRIEF_MIN_CHARS = (("WHAT THIS IS", 40), ("WHAT HAS HAPPENED", 60), ("OPTIONS", 30), ("RECOMMENDED", 20))
 BRIEF_HEADING_RE = re.compile(
-    r"^[ \t]*(WHAT THIS IS|WHAT HAS HAPPENED|OPTIONS|RECOMMENDED|SINCE YOU LAST ANSWERED|AMOUNT NOT KNOWN)[ \t]*:[ \t]*", re.M)
+    r"^[ \t]*(WHAT THIS IS|WHAT HAS HAPPENED|OPTIONS|RECOMMENDED|SINCE YOU LAST ANSWERED)[ \t]*:[ \t]*", re.M)
 BRIEF_OPTION_RE = re.compile(r"^[ \t]*(?:[A-Z][.)]|\d{1,2}[.)]|[-*])[ \t]+\S", re.M)
 # A question about money with no figure in it is the card he sent back. The
 # way out names where the figure was looked for, so "unknown" is a finding.
-MONEY_ASK_RE = re.compile(r"£|\b(?:pay|pays|paying|paid|payments?|amounts?|arrears|debts?|owed|owing|invoices?|refunds?)\b", re.I)
-MONEY_FIGURE_RE = re.compile(r"£\s?\d")
+MONEY_ASK_RE = re.compile(
+    r"£|\b(?:pay|pays|paying|paid|payments?|amounts?|arrears|debts?|owed|owing|invoices?|refunds?|costs?|quotes?|fees?|bills?|price)\b", re.I)
+MONEY_FIGURE_RE = re.compile(r"£\s?\d|\bGBP\s?\d|\b\d[\d,.]*\s?(?:pounds|GBP)\b", re.I)
+# The recommendation as the board reads it (RECOMMENDED_RE in task-manager.py,
+# drift-tested): the first paragraph only, so the gate measures what an
+# approval with an empty box will be taken to mean.
+RECOMMENDED_RE = re.compile(
+    r"^[ \t]*RECOMMENDED[ \t]*:[ \t]*(.+?)(?=\n[ \t]*\n|\n[ \t]*[A-Z][A-Z ]{3,}:|\Z)", re.M | re.S)
+# Lines the page or another command reads as something else: a sign-in wait,
+# an email to send, what approving does, the reason a card is Kevin's, or one
+# of the blocks this command writes itself. In a brief they would be misread.
+BRIEF_RESERVED_RE = re.compile(
+    r"^[ \t>*_]*(SIGN-IN NEEDED|TO|FROM|SUBJECT|CHECKED|DECIDE|TRACK RECORD|LINKS AND FILES|WHAT YOU HAVE ALREADY SAID"
+    r"|CLOSE PROPOSAL|PASS TO ROY|KEVIN ONLY)[ \t]*:|carrying this out will involve", re.I | re.M)
 AMOUNT_UNKNOWN_RE = re.compile(r"^[ \t]*AMOUNT NOT KNOWN:[ \t]*\S.{20,}", re.I | re.M)
 # ASKING TWICE IS THE FAILURE (found building this, 2 Oct 2026). Two of the
 # three thin cards re-asked a question Kevin had answered a week before: on 23
@@ -3563,12 +3573,20 @@ def decision_brief_problem(brief, ask, name, said=()):
                 "       If his answer covers it, carry that out (route, handover, close, or leave until the date "
                 "he gave) and do not ask again. If something has changed, add a section "
                 f"'{SINCE_HEADING}: <what changed and why it needs him again>'")
+    reserved = BRIEF_RESERVED_RE.search(str(brief))
+    if reserved:
+        return (f"the brief has a line the card reads as something else ('{reserved.group(0).strip()[:40]}'). "
+                "Say it in plain words inside one of the four sections")
+    rec = RECOMMENDED_RE.search(str(brief))
     for heading, least in BRIEF_MIN_CHARS:
         if heading not in parts:
             return f"the brief has no '{heading}:' section"
-        if len(parts[heading]) < least:
-            return (f"its '{heading}:' section is {len(parts[heading])} characters, too short to "
-                    f"decide from (at least {least})")
+        # RECOMMENDED is measured as the board reads it: its first paragraph.
+        body = " ".join(rec.group(1).split()) if heading == "RECOMMENDED" and rec else parts[heading]
+        if len(body) < least:
+            return (f"its '{heading}:' section is {len(body)} characters, too short to "
+                    f"decide from (at least {least}" + ("; the option and why go in its first paragraph)"
+                                                         if heading == "RECOMMENDED" else ")"))
     if len(BRIEF_OPTION_RE.findall(parts["OPTIONS"])) < 2:
         return ("its OPTIONS section lists fewer than two choices. One per line, starting A. B. "
                 "(or 1. 2. or a dash). One choice is not a decision")
@@ -3580,15 +3598,18 @@ def decision_brief_problem(brief, ask, name, said=()):
 
 
 def earlier_work(prior_output):
-    """The earlier draft worth keeping under a new card. Never an earlier
-    DECIDE: ask (a rebuilt card would carry its own thin question twice), and
-    never a live carry-out line: the page reads the LAST one in the output as
-    what approving does, which would be the old draft's action."""
+    """The earlier draft worth keeping under a new card, quoted line by line.
+    Never an earlier DECIDE: ask (a rebuilt card would carry its own thin
+    question twice). Quoted because the page and the sign-in commands read
+    the whole output: an old draft's TO: and SUBJECT: became the ask line, its
+    SIGN-IN NEEDED line turned Approve into "Sign in now", and the LAST
+    carry-out line in the output is what the page says approving does."""
     text = str(prior_output or "").strip()
     while is_decide_card(text):
         text = text.partition(EARLIER_OUTPUT_MARK)[2].strip()
-    return re.sub(r"\*{0,2}carrying this out will involve:?\*{0,2}", "The earlier draft would have involved:",
+    text = re.sub(r"\*{0,2}carrying this out will involve:?\*{0,2}", "The earlier draft would have involved:",
                   text, flags=re.I)
+    return "\n".join("> " + line for line in text.splitlines()) if text else ""
 
 
 def decision_links(task_id, tf):
@@ -3639,8 +3660,19 @@ def cmd_escalate(args):
     status = sel(tf.get(AF["status"]))
     prior_output = str(tf.get(AF["agentOutput"]) or "")
     on_gate = status == "Approval" and is_decide_card(prior_output)
-    # An answered card is never rewritten: the rewrite clears the verdict.
-    if on_gate and (has_decision_brief(prior_output) or sel(tf.get(AF["approvalOutcome"]))):
+    # AN ANSWERED CARD IS NEVER REWRITTEN, whatever its status: the page moves
+    # the task to Today the moment Kevin decides, and the rewrite clears his
+    # verdict. Refused loudly, because the caller's next move is his answer.
+    outcome = sel(tf.get(AF["approvalOutcome"]))
+    if is_decide_card(prior_output) and outcome:
+        feedback = " ".join(str(tf.get(AF["approvalFeedback"]) or "").split())
+        rec = RECOMMENDED_RE.search(prior_output.partition(EARLIER_OUTPUT_MARK)[0])
+        answer = (f'"{feedback[:400]}"' if feedback else
+                  (f"no note, so he took the card's recommendation: {' '.join(rec.group(1).split())[:300]}"
+                   if rec else "no note, and the card named no recommendation"))
+        sys.exit(f"REFUSED: Kevin has ANSWERED the decision card on {args.task} ({outcome}: {answer}). Carry out "
+                 "his answer (route, handover, close, or leave until the date he gave). Never ask him again.")
+    if on_gate and has_decision_brief(prior_output):
         print(json.dumps({"alreadyEscalated": args.task, "status": status,
                           "ask": prior_output.strip().splitlines()[0][:200]}))
         return
@@ -3668,8 +3700,13 @@ def cmd_escalate(args):
     brief_path = getattr(args, "brief_file", None)
     if not brief_path:
         sys.exit(f"REFUSED: {args.task} was escalated with one line and no brief.\n" + BRIEF_FORMAT_HELP)
-    with open(brief_path) as fh:
-        brief = fh.read().strip()
+    if not ask:
+        sys.exit(f"REFUSED: {args.task} has no ask. --reason is the one thing Kevin must decide.\n" + BRIEF_FORMAT_HELP)
+    try:
+        with open(brief_path, encoding="utf-8") as fh:
+            brief = fh.read().strip()
+    except (OSError, UnicodeDecodeError) as e:
+        sys.exit(f"REFUSED: the brief file for {args.task} could not be read ({str(e)[:160]}).\n" + BRIEF_FORMAT_HELP)
     said = kevin_said(tf)
     problem = (decision_brief_problem(brief, ask, tf.get(AF["name"]) or "", said)
                or plain_summary_problem(getattr(args, "plain_task", None), getattr(args, "plain_approve", None)))
@@ -3679,19 +3716,26 @@ def cmd_escalate(args):
                                    refs=getattr(args, "ref", None), properties=getattr(args, "property", None),
                                    gmail=not getattr(args, "no_gmail", False))
     stamp = datetime.now(LONDON).strftime("%d %b %Y")
-    if on_gate:
-        # A rebuild is the same question to the same person: no second
-        # escalation stamp, so the holder the first one recorded still stands.
-        note = f"[{stamp} — agent-dispatch] Decision card rebuilt with a full brief: {ask}"
-    else:
-        # The holder at escalation is recorded on the stamp: the gate's approve
-        # path re-links the task to the sender (the Task Manager), so the board
-        # needs it to restore the prior holder when Kevin's answer names nobody.
-        holder = ",".join(links(tf.get(AF["teamMember"]))) or "none"
-        note = (f"[{stamp} — agent-dispatch] Escalated to Kevin as a decision card "
-                f"(holder {holder}): {ask}")
     existing = str(tf.get(AF["notes"]) or "").rstrip()
+    # The holder at escalation is recorded on the stamp: the gate's approve
+    # path re-links the task to the sender (the Task Manager), so the board
+    # needs it to restore the prior holder when Kevin's answer names nobody.
+    holder = ",".join(links(tf.get(AF["teamMember"]))) or "none"
+    if on_gate:
+        # A rebuild is the same question to the same person, so the holder the
+        # first escalation recorded still stands. It is stamped as an
+        # escalation all the same: the board dates its seven days, and files
+        # his answer as decided, from the newest such stamp.
+        holders = re.findall(r"Escalated to Kevin as a decision card \(holder ([^)]*)\)", existing)
+        holder = holders[-1] if holders else holder
+    note = (f"[{stamp} — agent-dispatch] Escalated to Kevin as a decision card "
+            f"(holder {holder}){', rebuilt with a full brief' if on_gate else ''}: {ask}")
     blocks = [ask]
+    # 8. A decision on his private matter says so, as every other card on it does
+    # (cmd_submit --tier1). Name and description only, never the Notes agents
+    # write on. Under the ask: the first line must stay DECIDE:.
+    if tier_match(TIER1_PATTERNS, tf.get(AF["name"]), tf.get(AF["description"])):
+        blocks.append(TIER1_BANNER)
     if said:
         blocks.append("WHAT YOU HAVE ALREADY SAID:\n" + "\n".join(kevin_said_lines(said)))
     output = "\n\n".join(blocks + [brief, decision_links(args.task, tf), record])
@@ -3699,7 +3743,19 @@ def cmd_escalate(args):
     if earlier:
         # The earlier draft stays under the card: Kevin decides with it in view.
         output += EARLIER_OUTPUT_MARK + earlier
+    # ARCHIVE BEFORE THE WIPE, the rule cmd_submit follows. A note left on the
+    # field would be read as his answer to THIS card when he approves with an
+    # empty box, so the board would never reach the card's recommendation.
+    archive = {}
+    prior_feedback = str(tf.get(AF["approvalFeedback"]) or "").strip()
+    if prior_feedback:
+        hist = str(tf.get(AF["feedbackHistory"]) or "")
+        if not feedback_archived(hist, prior_feedback):
+            archive[AF["feedbackHistory"]] = (
+                hist.rstrip() + f"\n\n[{datetime.now(LONDON).strftime('%Y-%m-%d %H:%M')}] {prior_feedback}").strip()
     patch_task(args.task, {
+        **archive,
+        AF["approvalFeedback"]: None,
         AF["status"]: "Approval",
         # The Task Manager's Team Members row — read live from Team Members
         # tblco0p2OnlLQVAX7 on 15 Sep 2026 ("AI Task Board Manager"), and the
