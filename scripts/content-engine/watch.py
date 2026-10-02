@@ -102,6 +102,9 @@ def day_fits(ledger, day, free):
     return bool(clips) and all(pull_needs(v.get("size", 0)) <= free for v in clips)
 
 
+MIN_NEW = 2   # new days a night that a redo never displaces (Kevin, 2 Oct 2026: "at least two episodes every single day")
+
+
 def plan(ledger, slots, gaps=None, free=None, start=None):
     """The night's order (Kevin, 8 Sep 2026): "the first one is the one that continues the continuity, and then
     the second two are the two oldest ones that are missing". Slot 1 is the oldest waiting day from the takeover
@@ -118,7 +121,12 @@ def plan(ledger, slots, gaps=None, free=None, start=None):
     # new day, so it took slot 1 and a new episode lost its place. It now renders AFTER the night's new days, on top
     # of the slots, never instead of one. A sent-back gap day stays on the gap route (its clip must fit the disk, and
     # it waits while the gap list is paused).
-    redo = sorted(d for d in {v["day"] for v in ledger.values() if v.get("status") == "new" and v.get("reset")} - gap_list if not start or d >= start)
+    # Oldest first, but a day whose footage would not come down goes behind the others, least recently failed first
+    # (Kevin, 2 Oct 2026): with one redo a night, an older day whose pull was refused every night would keep a younger
+    # redo waiting for ever. `pull_failed` is stamped by pull() on every refusal and cleared when the clip arrives.
+    failed_at = lambda d: max((v.get("pull_failed") or "") for v in ledger.values() if v.get("day") == d and v.get("status") == "new")
+    redo = sorted((d for d in {v["day"] for v in ledger.values() if v.get("status") == "new" and v.get("reset")} - gap_list if not start or d >= start),
+                  key=lambda d: (failed_at(d), d))
     cont = [d for d in waiting if d not in gaps and d not in redo and (not start or d >= start)]
     gap_ok, notes = [], []
     for d in sorted(d for d in waiting if d in gaps):
@@ -126,8 +134,14 @@ def plan(ledger, slots, gaps=None, free=None, start=None):
         else:
             biggest = max(v.get("size", 0) for v in ledger.values() if v.get("day") == d and v.get("status") == "new")
             notes.append("gap day %d skipped: its %.0f GB clip needs %.0f GB free, %.0f GB free" % (d, biggest / 1e9, pull_needs(biggest) / 1e9, free / 1e9))
+    # The night never renders fewer than MIN_NEW new days. Past that, a waiting redo takes the spare slot rather than
+    # going on top (Kevin, 2 Oct 2026: three a night, so a day he sends back still leaves two to publish). At three
+    # slots the night is two new days and the redo: three renders, about six to seven hours, inside the nine-hour stop.
+    # Four renders (three new and a redo) ran to the stop on a slow night, and the redo is the one that gets killed.
+    n_redo = min(len(redo), max(1, slots // 2)) if slots > 0 else 0
+    new_slots = max(min(slots, MIN_NEW), slots - n_redo)
     days = []
-    for slot in range(slots):
+    for slot in range(new_slots):
         if slot == 0 and cont: days.append(cont.pop(0)); notes.append("slot 1: day %d continues the run" % days[-1]); continue
         if gap_ok: days.append(gap_ok.pop(0)); notes.append("slot %d: gap day %d (oldest missing)" % (slot + 1, days[-1])); continue
         if cont: days.append(cont.pop(0)); notes.append("slot %d: day %d %s" % (slot + 1, days[-1], "continues the run (gap days paused)" if paused else "(no gap day fits, so the run moves on)")); continue
@@ -137,7 +151,7 @@ def plan(ledger, slots, gaps=None, free=None, start=None):
     # redo is last, so it would be the one killed mid-render, with the copy, cards and publishing steps after it.
     # A slot no new day filled goes to a waiting redo as well (second review).
     if slots > 0:
-        room = max(1, slots // 2) + (slots - len(days))
+        room = n_redo + (new_slots - len(days))
         for d in redo[:room]: days.append(d); notes.append("redo: day %d (sent back) re-renders after the night's new episodes" % d)
         for d in redo[room:]: notes.append("redo: day %d (sent back) waits for another night: one redo for every two new episodes" % d)
     return days, notes
@@ -581,6 +595,7 @@ def pull(ledger, key, work=WORK):
         if gone: print("pull: cleared %d leftover working copies (%.1f GB) to make room" % (len(gone), sum(n for _, n in gone) / 1e9))
         free = shutil.disk_usage(work).free
     if free < pull_needs(e["size"]):
+        e["pull_failed"] = dt.datetime.now().isoformat(timespec="seconds"); save_ledger(ledger)
         raise SystemExit("pull: only %.1f GB free, need %.1f GB for %s" % (free / 1e9, pull_needs(e["size"]) / 1e9, key))
     t0 = time.time()
     e["status"] = "pulling"; save_ledger(ledger)
@@ -593,14 +608,15 @@ def pull(ledger, key, work=WORK):
     except OSError as ex:
         # Drive never delivered it within the window: leave it for the next night, keep the run alive
         if os.path.exists(dest + ".part"): os.remove(dest + ".part")
-        e["status"] = "new"; e["pull_error"] = "%s (%s)" % (ex.strerror or ex, dt.datetime.now().isoformat(timespec="seconds")); save_ledger(ledger)
+        e["status"] = "new"; e["pull_error"] = "%s (%s)" % (ex.strerror or ex, dt.datetime.now().isoformat(timespec="seconds"))
+        e["pull_failed"] = dt.datetime.now().isoformat(timespec="seconds"); save_ledger(ledger)
         print("pull: Drive would not deliver %s within %d min (%s) - left as new for the next run" % (key, window, ex.strerror or ex)); return None
     got = os.path.getsize(dest + ".part")
     if got != e["size"]:
-        os.remove(dest + ".part"); e["status"] = "new"; save_ledger(ledger)
+        os.remove(dest + ".part"); e["status"] = "new"; e["pull_failed"] = dt.datetime.now().isoformat(timespec="seconds"); save_ledger(ledger)
         raise SystemExit("pull: %s arrived with %d bytes, expected %d - left as new for the next run" % (key, got, e["size"]))
     os.replace(dest + ".part", dest)
-    e["status"] = "pulled"; e["local"] = dest; e["pulled"] = dt.datetime.now().isoformat(timespec="seconds")
+    e["status"] = "pulled"; e["local"] = dest; e["pulled"] = dt.datetime.now().isoformat(timespec="seconds"); e.pop("pull_failed", None)
     e["pull_seconds"] = round(time.time() - t0)
     save_ledger(ledger)
     print("pull: %s (%.2f GB) in %d s -> %s" % (key, e["size"] / 1e9, e["pull_seconds"], dest))
@@ -811,7 +827,7 @@ def selftest():
     assert pull_window_minutes(2 * gb) == 40 and pull_window_minutes(4 * gb) == 40 and pull_window_minutes(18 * gb) == 180, "40 min per 4 GB, floor 40"
     led = {"g": {"day": 1799, "size": 18 * gb, "status": "new"}, "c": {"day": 2054, "size": 4 * gb, "status": "new"}}
     assert "SHORT by" in disk_line(led, 30 * gb) and "day 1799" in disk_line(led, 30 * gb) and "fits" in disk_line(led, 60 * gb) and "nothing waiting" in disk_line({}, 60 * gb)
-    print(json.dumps({"checks": 44, "failed": []}))
+    print(json.dumps({"checks": 51, "failed": []}))
 
 
 def _selftest_gap_order():
@@ -856,6 +872,31 @@ def _selftest_gap_order():
     assert set(plan(five, 10 ** 6, gaps=set(), free=100 * gb, start=2054)[0]) >= {2075, 2077, 2079, 2080, 2081}, "every redo day is still reachable"
     only_redo = {k: v for k, v in five.items() if v.get("reset")}
     assert plan(only_redo, 2, gaps=set(), free=100 * gb, start=2054)[0] == [2075, 2077, 2079], "slots no new day filled go to waiting redo days"
+    # Kevin, 2 Oct 2026: three a night. With a redo waiting it takes the spare slot (two new and the redo, three renders);
+    # with none, three new days. Never fewer than two new.
+    assert plan(rd, 3, gaps=set(), free=100 * gb, start=2054)[0] == [2084, 2085, 2081], "at three slots the redo takes the spare: %s" % plan(rd, 3, gaps=set(), free=100 * gb, start=2054)[0]
+    assert plan({k: v for k, v in rd.items() if k[0] == "n"}, 3, gaps=set(), free=100 * gb, start=2054)[0] == [2084, 2085, 2086], "no redo waiting: three new days"
+    assert plan(five, 3, gaps=set(), free=100 * gb, start=2054)[0] == [2084, 2085, 2075] and plan(five, 4, gaps=set(), free=100 * gb, start=2054)[0] == [2084, 2085, 2075, 2077]
+    assert plan(rd, 1, gaps=set(), free=100 * gb, start=2054)[0] == [2084, 2081]
+    # an older redo whose footage would not come down goes behind a younger one; two that both failed take turns
+    stuck = dict(five, x2075=dict(five["x2075"], pull_failed="2026-10-01T23:10:00"))
+    assert plan(stuck, 2, gaps=set(), free=100 * gb, start=2054)[0] == [2084, 2085, 2077], "the younger redo passes the one whose pull failed"
+    both = dict(stuck, x2077=dict(five["x2077"], pull_failed="2026-10-02T23:10:00"), x2079=dict(five["x2079"], pull_failed="2026-09-30T23:10:00"),
+                x2080=dict(five["x2080"], pull_failed="2026-10-02T23:20:00"), r1=dict(rd["r1"], pull_failed="2026-10-02T23:30:00"))
+    assert plan(both, 2, gaps=set(), free=100 * gb, start=2054)[0] == [2084, 2085, 2079], "all failed: the least recently failed goes first"
+    import tempfile as _tf
+    wk = _tf.mkdtemp(); lp = {"c": {"day": 2081, "size": 10 ** 15, "status": "new", "reset": "x"}}
+    # save_ledger and clear_leftovers are faked: unfaked, a short disk makes pull() run the REAL clean-up, which empties
+    # the lane's staged-upload folder (2 Oct 2026: this check did exactly that on its first run, 25 files, 7.3 GB)
+    real_save, real_clear = globals()["save_ledger"], globals()["clear_leftovers"]
+    cleared = []
+    globals()["save_ledger"] = lambda led: None; globals()["clear_leftovers"] = lambda ledger, work=None, **k: cleared.append(work) or []
+    try:
+        try: pull(lp, "c", wk); raise AssertionError("a clip bigger than the disk must be refused")
+        except SystemExit: pass
+        assert lp["c"].get("pull_failed") and lp["c"]["status"] == "new", "a refused pull is stamped, so the plan can let another redo pass: %s" % lp["c"]
+        assert cleared == [wk], "the clean-up ran on the test's own folder only: %s" % cleared
+    finally: globals()["save_ledger"], globals()["clear_leftovers"] = real_save, real_clear
     gapredo = dict(rd, g={"day": 1808, "date": "2025-05-13", "seq": 1, "size": 18 * gb, "status": "new", "reset": "x"})
     assert plan(gapredo, 2, gaps={1799, 1808}, free=100 * gb, start=2054)[0] == [2084, 1808, 2081], "a sent-back gap day takes its gap slot, as any gap day"
     assert plan(gapredo, 2, gaps={1799, 1808}, free=20 * gb, start=2054)[0] == [2084, 2085, 2081], "and still waits whole when its clip does not fit the disk"

@@ -137,7 +137,21 @@ EPISODES="${CE_EPISODES_PER_NIGHT:-$(cat "$HOME/.config/od/content_engine_episod
 # and rendered before the next slot starts, so the episode, its summary and its Learnings clip all exist together.
 DAYS="$(python3 scripts/content-engine/watch.py plan --slots "$EPISODES")" || DAYS=""
 [ -z "$DAYS" ] && echo "plan: nothing waiting to render"
+# --- last-start-block (extracted verbatim by tests/content-engine-watch.test.js) ---
+# No day starts rendering from 04:00 (Kevin, 2 Oct 2026: three a night). A day takes about two hours, up to four, and
+# the job is stopped at 07:00. A day begun late is killed mid-render, and the steps after this loop (copy, cards,
+# publishing, the report) never run: no cards in the morning, nothing to publish. The days listed last are the ones
+# left for the next night, and that is the redo, never a new episode. CE_ALLOW_DAYTIME=1 lifts it with the daytime rule.
+ce_may_start_day() {   # $1 = the hour now, 0-23
+  [ "${CE_ALLOW_DAYTIME:-0}" = "1" ] && return 0
+  [ "$1" -ge 22 ] || [ "$1" -lt "${CE_LAST_START_HOUR:-4}" ]
+}
+# --- end last-start-block ---
 for day in $DAYS; do
+  if ! ce_may_start_day "$(date +%-H)"; then
+    echo "plan: day $day NOT started at $(date +%H:%M): no day starts from 0${CE_LAST_START_HOUR:-4}:00, so the copy, cards and publishing steps run before the job's stop. It waits for the next night."
+    continue
+  fi
   echo "== day $day"
   for i in 1 2 3 4 5 6; do
     python3 scripts/content-engine/watch.py next --day "$day" || break    # exit 3: the day is done; anything else: the pull was refused, move on
@@ -163,7 +177,9 @@ python3 scripts/content-engine/approval.py sync || exit 1
 python3 scripts/content-engine/performance.py sync || echo "performance sync: skipped this run (see above)"
 [ "$(date +%u)" = "1" ] && { python3 scripts/content-engine/performance.py snapshot || echo "performance snapshot: skipped (see above)"; }
 [ "$(date +%d)" = "01" ] && { python3 scripts/content-engine/performance.py run || echo "performance read: skipped (see above)"; }
-python3 scripts/content-engine/approval.py run --pending --limit 2 || exit 1
+# As many cards as the night planned episodes, never fewer than two (2 Oct 2026: at a fixed two, the third episode of a
+# three-a-night run waited for the 07:15 job to get its card).
+python3 scripts/content-engine/approval.py run --pending --limit "$COPY_LIMIT" || exit 1
 python3 scripts/content-engine/publish.py sync || exit 1
 python3 scripts/content-engine/publish.py run --limit 2 || exit 1
 # 8b. runpreneur sync: latest Strava run -> running total, Stripe donations -> total raised, the four
