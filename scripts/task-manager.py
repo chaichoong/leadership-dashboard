@@ -96,6 +96,21 @@ DECIDED_NOTE_MARK = "Decision carried out"
 # clears Sent For Approval By, so verify cannot demand a card on those closes.
 HANDLED_NOTE_MARK = "HANDLED WITHOUT YOU"
 HOLDER_RE = re.compile(r"\(holder ([^)]*)\)")
+# A decision card's own recommendation (agent-dispatch.py escalate, 2 Oct 2026:
+# every card carries a brief ending RECOMMENDED:). Kevin approving with an
+# empty box means he took it, so the decided view carries it as the move. The
+# section ends at a blank line or the next heading (SINCE YOU LAST ANSWERED,
+# LINKS AND FILES, TRACK RECORD).
+RECOMMENDED_RE = re.compile(
+    r"^[ \t]*RECOMMENDED[ \t]*:[ \t]*(.+?)(?=\n[ \t]*\n|\n[ \t]*[A-Z][A-Z ]{3,}:|\Z)", re.M | re.S)
+EARLIER_OUTPUT_MARK = "\n\nEarlier output:\n"
+
+
+def card_recommended(agent_output):
+    """The recommendation on a decision card, '' on a card from before the
+    brief. Only the card is read, never an earlier draft kept under it."""
+    m = RECOMMENDED_RE.search(str(agent_output or "").partition(EARLIER_OUTPUT_MARK)[0])
+    return " ".join(m.group(1).split()) if m else ""
 ROY_TOUCH_MARKS = ("Handed over to Roy Lavin", "Chase to Roy:")
 ROY_CHASE_DAYS = 7
 
@@ -530,6 +545,7 @@ def task_view(rec, activity_ids, dispatch_ids, now):
         view["approvalOutcome"] = f.get("Approval Outcome")
         view["approvalFeedback"] = f.get("Approval Feedback") or ""
         view["ask"] = (str(f.get("Agent Output") or "").strip().splitlines() or [""])[0]
+        view["recommended"] = card_recommended(f.get("Agent Output"))
         # Who held it when it was escalated: the gate's approve path re-links
         # the task to the sender, so the board restores this holder unless
         # Kevin named another.
@@ -1181,6 +1197,14 @@ def cmd_selftest():
     bucket, _, view = task_view({"id": "recE4", "fields": esc_done}, set(), set(), now)
     assert bucket == "decided" and view["approvalFeedback"] == "Sell it.", (bucket, view)
     assert view["ask"] == "DECIDE: sell or keep?" and view["priorHolder"] == ["recAgentX"], view
+    assert view["recommended"] == "", view   # a card from before the brief names no move
+    briefed = dict(esc_done, **{"Approval Feedback": "", "Agent Output": (
+        "DECIDE: sell or keep?\n\nWHAT THIS IS:\nA house.\n\nOPTIONS:\nA. Sell\nB. Keep\n\n"
+        "RECOMMENDED: B, keep it:\nthe rent covers the mortgage.\n\nLINKS AND FILES:\n- x\n\n"
+        "Earlier output:\nRECOMMENDED: an old draft's line")})
+    _, _, view = task_view({"id": "recE4", "fields": briefed}, set(), set(), now)
+    assert view["recommended"] == "B, keep it: the rent covers the mortgage.", view
+    assert card_recommended("RECOMMENDED: B, keep it.\nSINCE YOU LAST ANSWERED: the buyer withdrew.") == "B, keep it."
     # once the decision is carried out (a newer stamp), the card is closed:
     # the task is ordinary work again, not decided and not escalated
     carried = dict(esc_done, _id="recE5", **{"Approval Outcome": None,

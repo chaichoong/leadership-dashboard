@@ -21,9 +21,11 @@ approvals.js AF. tests/constant-drift.test.js fails if they ever disagree.
 Subcommands:
   queue                       read-only. JSON of eligible work, capped.
   route    TASKID --to RECID  CEO reassigns Team Member.
-  escalate TASKID             hand a task OFF the AI agents to Kevin. Team
-                              Member and Assignee become Kevin, so the queue
-                              stops seeing it as agent work. NOT the tier-1
+  escalate TASKID --reason ASK --brief-file PATH --plain-task S --plain-approve S
+                              put a decision card in Kevin's gate: the ask,
+                              the brief he decides from, and the history,
+                              links and files the code adds (2 Oct 2026; a
+                              bare one-line ask is refused). NOT the tier-1
                               exit any more — tier 1 is prepared and labelled
                               like anything else. This is for the rarer case
                               where no agent can usefully prepare anything.
@@ -3382,9 +3384,9 @@ def cmd_reassign(args):
         sys.exit(
             f"ERROR: {args.task} has already gone back to the CEO "
             f"{bounces} times. Escalate it to Kevin instead:\n"
-            f"         python3 scripts/agent-dispatch.py escalate {args.task}\n"
-            "       A task nobody can place is a decision for him, not "
-            "another lap of the routing loop.")
+            f"         python3 scripts/agent-dispatch.py escalate {args.task} --reason ... --brief-file ...\n"
+            "       (run it bare to see the brief it needs). A task nobody can place "
+            "is a decision for him, not another lap of the routing loop.")
     stamp = datetime.now(LONDON).strftime("%Y-%m-%d %H:%M")
     # One line, whatever the reason contains: a newline in free text would
     # otherwise fake a second stamped line for the counter above.
@@ -3430,8 +3432,8 @@ def cmd_reassign(args):
 # escalated it again: recZMDlT4l2lcwMhB was escalated seven times and
 # rec4cpT9R5Ld538C2 ran 33 times. The card is what Kevin actually sees, so the
 # escalation IS a card: Status Approval, sent by the Task Manager's own Team
-# Members row, with one ask line. Team Member is left alone — the escalation
-# is a question about the work, not a change of who holds it.
+# Members row, opening with one ask line. Team Member is left alone — the
+# escalation is a question about the work, not a change of who holds it.
 DECIDE_PREFIX = "DECIDE:"
 DECIDE_LINE_RE = re.compile(r"^\s*DECIDE:\s*\S", re.I | re.M)
 
@@ -3448,14 +3450,197 @@ def escalate_ask(reason):
     return f"{DECIDE_PREFIX} {first}"
 
 
+# THE DECISION BRIEF (Kevin, 2 Oct 2026). A decision card was one DECIDE: line
+# and nothing else: the plain lines were cleared, the TRACK RECORD gate sat
+# only in cmd_submit, and no figure was ever asked for. Three sat in his queue
+# at 250 to 285 characters while every other agent's card carried 1,000 to
+# 23,000 with its history, and he had already sent two back ("I don't
+# understand what you're asking here", "nothing in this task which gives me
+# information"). One asked him to "confirm which cards and amounts to
+# authorise" and named no amount. So a card is refused without a brief the
+# agent writes (what this is, what has happened, the options, the one it
+# recommends) and the two plain lines every other card opens with, and the
+# code adds what must never depend on an agent remembering: the dated record
+# of past dealings, the original email and the files already on the task. The
+# first line is still DECIDE: <ask>, which the board, the page and
+# is_decide_card all read.
+BRIEF_MIN_CHARS = (("WHAT THIS IS", 40), ("WHAT HAS HAPPENED", 60), ("OPTIONS", 30), ("RECOMMENDED", 20))
+BRIEF_HEADING_RE = re.compile(
+    r"^[ \t]*(WHAT THIS IS|WHAT HAS HAPPENED|OPTIONS|RECOMMENDED|SINCE YOU LAST ANSWERED|AMOUNT NOT KNOWN)[ \t]*:[ \t]*", re.M)
+BRIEF_OPTION_RE = re.compile(r"^[ \t]*(?:[A-Z][.)]|\d{1,2}[.)]|[-*])[ \t]+\S", re.M)
+# A question about money with no figure in it is the card he sent back. The
+# way out names where the figure was looked for, so "unknown" is a finding.
+MONEY_ASK_RE = re.compile(r"£|\b(?:pay|pays|paying|paid|payments?|amounts?|arrears|debts?|owed|owing|invoices?|refunds?)\b", re.I)
+MONEY_FIGURE_RE = re.compile(r"£\s?\d")
+AMOUNT_UNKNOWN_RE = re.compile(r"^[ \t]*AMOUNT NOT KNOWN:[ \t]*\S.{20,}", re.I | re.M)
+# ASKING TWICE IS THE FAILURE (found building this, 2 Oct 2026). Two of the
+# three thin cards re-asked a question Kevin had answered a week before: on 23
+# Sep he wrote what to do with one and why the other was early, both answers
+# sat in Feedback History, and on 30 Sep each went back to him as "prior
+# escalation had no recorded answer". So his own dated words go on every card,
+# straight under the ask, and a task he has already answered is refused unless
+# the brief says what has changed since.
+SAID_STAMP_RE = re.compile(r"^\[(\d{4}-\d{2}-\d{2})[ T]\d{2}:\d{2}[^\]]*\][ \t]*", re.M)
+KNOCK_BACK_RE = re.compile(r"^Knocked back to \d{4}-\d{2}-\d{2}\b", re.I)
+SINCE_HEADING = "SINCE YOU LAST ANSWERED"
+SINCE_MIN_CHARS = 20
+# The task's own email link. Not in AF: every AF id is asked for on every
+# queue read. Same id as TF.inboundUrl on the page and F["inboundUrl"] in
+# create-agent-task.py (tests/agent-dispatch-escalate.test.js fails on drift).
+INBOUND_URL_FIELD = "fldXf1p0vtHqOZcKl"
+EARLIER_OUTPUT_MARK = "\n\nEarlier output:\n"
+BRIEF_FORMAT_HELP = (
+    "       A decision card needs a brief Kevin can decide from (2 Oct 2026). Write a file:\n"
+    "         WHAT THIS IS: <what the task is, in plain words>\n"
+    "         WHAT HAS HAPPENED: <the facts, dates and figures so far, and what is still unknown>\n"
+    "         OPTIONS:\n"
+    "         A. <first choice and what it leads to>\n"
+    "         B. <second choice and what it leads to>\n"
+    "         RECOMMENDED: <the option you would take and why>\n"
+    "         SINCE YOU LAST ANSWERED: <only when he has answered before: what has changed>\n"
+    "       then run\n"
+    "         python3 scripts/agent-dispatch.py escalate TASKID --reason \"<the one ask>\" --brief-file <path> \\\n"
+    "           --plain-task \"<what the task is, one short sentence>\" \\\n"
+    "           --plain-approve \"<what happens if he approves with no note: the recommended option>\" \\\n"
+    "           [--email <contact>] [--ref <reference or name>] [--property <address>]\n"
+    "       The history, the email link and the files on the task are added for you. If the facts are\n"
+    "       not on the task, it is not ready for Kevin: route it to the agent who can find them.")
+
+
+def brief_sections(text):
+    """{heading: body} for the four brief headings, first occurrence of each."""
+    text = str(text or "")
+    marks = list(BRIEF_HEADING_RE.finditer(text))
+    out = {}
+    for i, m in enumerate(marks):
+        body = text[m.end():marks[i + 1].start() if i + 1 < len(marks) else len(text)]
+        out.setdefault(m.group(1), body.strip())
+    return out
+
+
+def kevin_said(tf):
+    """Kevin's own dated words on this task, oldest first: every Feedback
+    History entry, plus an Approval Feedback not archived there yet."""
+    hist = str(tf.get(AF["feedbackHistory"]) or "")
+    marks = list(SAID_STAMP_RE.finditer(hist))
+    out = []
+    for i, m in enumerate(marks):
+        text = " ".join(hist[m.end():marks[i + 1].start() if i + 1 < len(marks) else len(hist)].split())
+        if text:
+            out.append({"day": m.group(1), "text": text})
+    live = " ".join(str(tf.get(AF["approvalFeedback"]) or "").split())
+    if live and not any(live == e["text"] for e in out):
+        out.append({"day": "", "text": live})
+    return out
+
+
+def kevin_said_lines(said):
+    lines = []
+    for e in said:
+        try:
+            day = datetime.strptime(e["day"], "%Y-%m-%d").strftime("%d %b %Y")
+        except ValueError:
+            day = "latest"
+        lines.append(f"- {day}: {e['text'][:600]}")
+    return lines
+
+
+def has_decision_brief(agent_output):
+    """Was this card built with a brief? A card from before 2 Oct 2026 was not,
+    and is rebuilt rather than reported as already escalated. Only the card
+    itself is read, never an earlier draft kept under it."""
+    parts = brief_sections(str(agent_output or "").partition(EARLIER_OUTPUT_MARK)[0])
+    return all(heading in parts for heading, _least in BRIEF_MIN_CHARS)
+
+
+def decision_brief_problem(brief, ask, name, said=()):
+    """Why this brief cannot go on Kevin's card; '' when it can."""
+    parts = brief_sections(brief)
+    answers = [e for e in said if not KNOCK_BACK_RE.match(e["text"])]
+    if answers and len(parts.get(SINCE_HEADING, "")) < SINCE_MIN_CHARS:
+        return ("Kevin has already answered on this task, and the brief does not say what has changed:\n         "
+                + "\n         ".join(kevin_said_lines(answers)) + "\n"
+                "       If his answer covers it, carry that out (route, handover, close, or leave until the date "
+                "he gave) and do not ask again. If something has changed, add a section "
+                f"'{SINCE_HEADING}: <what changed and why it needs him again>'")
+    for heading, least in BRIEF_MIN_CHARS:
+        if heading not in parts:
+            return f"the brief has no '{heading}:' section"
+        if len(parts[heading]) < least:
+            return (f"its '{heading}:' section is {len(parts[heading])} characters, too short to "
+                    f"decide from (at least {least})")
+    if len(BRIEF_OPTION_RE.findall(parts["OPTIONS"])) < 2:
+        return ("its OPTIONS section lists fewer than two choices. One per line, starting A. B. "
+                "(or 1. 2. or a dash). One choice is not a decision")
+    if (MONEY_ASK_RE.search(f"{ask} {name}") and not MONEY_FIGURE_RE.search(str(brief))
+            and not AMOUNT_UNKNOWN_RE.search(str(brief))):
+        return ("the ask is about money and the brief gives no figure. State each amount with a £ sign, "
+                "or add a line 'AMOUNT NOT KNOWN: <where you looked and why it is not there>'")
+    return ""
+
+
+def earlier_work(prior_output):
+    """The earlier draft worth keeping under a new card. Never an earlier
+    DECIDE: ask (a rebuilt card would carry its own thin question twice), and
+    never a live carry-out line: the page reads the LAST one in the output as
+    what approving does, which would be the old draft's action."""
+    text = str(prior_output or "").strip()
+    while is_decide_card(text):
+        text = text.partition(EARLIER_OUTPUT_MARK)[2].strip()
+    return re.sub(r"\*{0,2}carrying this out will involve:?\*{0,2}", "The earlier draft would have involved:",
+                  text, flags=re.I)
+
+
+def decision_links(task_id, tf):
+    """The LINKS AND FILES block: the email this task came from, every file on
+    it by name (the card's story opens each one; an Airtable file link dies
+    within hours, so it is never written into the text) and the task itself."""
+    lines, seen = [], set()
+    for u in str(tf.get(INBOUND_URL_FIELD) or "").split():
+        if re.match(r"https?://", u, re.I) and u not in seen:
+            seen.add(u)
+            lines.append(f"- The original email: {u}")
+    for a in (tf.get(AF["attachments"]) or []):
+        fname = str(a.get("filename") or "").strip()
+        if fname:
+            lines.append(f"- File on this task: {fname} (opens from the story so far, below)")
+    lines.append(f"- This task in Airtable: https://airtable.com/{BASE_ID}/{TASKS}/{task_id}")
+    return "LINKS AND FILES:\n" + "\n".join(lines)
+
+
+def decision_track_record(task_id, tf, emails=(), refs=(), properties=(), gmail=True):
+    """The TRACK RECORD block for a decision card: the same search the create
+    gate runs (the sender, and every reference in the name and description)
+    plus whatever the agent names. A failed search says so on the card."""
+    sender = re.search(r"[\w.+-]+@[\w-]+(?:\.[\w-]+)+", str(tf.get(AF["inboundSender"]) or ""))
+    text = f"{tf.get(AF['name']) or ''} {str(tf.get(AF['description']) or '')[:2000]}"
+    try:
+        result = history(emails=list(emails or []) + ([sender.group(0)] if sender else []),
+                         refs=list(refs or []) + reference_tokens(text),
+                         properties=list(properties or []), exclude_task=task_id, gmail=gmail)
+        for e in result.get("entries") or []:
+            # A signed file link dies within hours and a card can wait for
+            # days: point at the task that holds the file instead.
+            if e.get("source") == "file" and e.get("task"):
+                e["link"] = f"https://airtable.com/{BASE_ID}/{TASKS}/{e['task']}"
+        return history_text(result)
+    except SystemExit as e:
+        return f"{TRACK_RECORD_MARK} not built ({str(e)[:120]})"
+    except Exception as e:                                   # noqa: BLE001
+        return f"{TRACK_RECORD_MARK} not built ({str(e)[:120]})"
+
+
 def cmd_escalate(args):
-    """Submit the task to Kevin's gate as a decision card. Idempotent: a task
-    already at Approval carrying a DECIDE: ask is reported, not rewritten."""
+    """Submit the task to Kevin's gate as a decision card with its brief.
+    Idempotent: a task already at Approval carrying a briefed DECIDE: card is
+    reported, not rewritten. A card from before the brief is rebuilt once."""
     t = get_task(args.task)
     tf = t.get("fields", {}) or {}
     status = sel(tf.get(AF["status"]))
     prior_output = str(tf.get(AF["agentOutput"]) or "")
-    if status == "Approval" and is_decide_card(prior_output):
+    on_gate = status == "Approval" and is_decide_card(prior_output)
+    # An answered card is never rewritten: the rewrite clears the verdict.
+    if on_gate and (has_decision_brief(prior_output) or sel(tf.get(AF["approvalOutcome"]))):
         print(json.dumps({"alreadyEscalated": args.task, "status": status,
                           "ask": prior_output.strip().splitlines()[0][:200]}))
         return
@@ -3480,18 +3665,40 @@ def cmd_escalate(args):
                  "every section, so it is not a decision for Kevin. `python3 scripts/content-engine/publish.py published "
                  "--day N` shows what went out. Leave it.")
     ask = escalate_ask(getattr(args, "reason", ""))
+    brief_path = getattr(args, "brief_file", None)
+    if not brief_path:
+        sys.exit(f"REFUSED: {args.task} was escalated with one line and no brief.\n" + BRIEF_FORMAT_HELP)
+    with open(brief_path) as fh:
+        brief = fh.read().strip()
+    said = kevin_said(tf)
+    problem = (decision_brief_problem(brief, ask, tf.get(AF["name"]) or "", said)
+               or plain_summary_problem(getattr(args, "plain_task", None), getattr(args, "plain_approve", None)))
+    if problem:
+        sys.exit(f"REFUSED: {args.task} is not ready for Kevin: {problem}.\n" + BRIEF_FORMAT_HELP)
+    record = decision_track_record(args.task, tf, emails=getattr(args, "email", None),
+                                   refs=getattr(args, "ref", None), properties=getattr(args, "property", None),
+                                   gmail=not getattr(args, "no_gmail", False))
     stamp = datetime.now(LONDON).strftime("%d %b %Y")
-    # The holder at escalation is recorded on the stamp: the gate's approve
-    # path re-links the task to the sender (the Task Manager), so the board
-    # needs it to restore the prior holder when Kevin's answer names nobody.
-    holder = ",".join(links(tf.get(AF["teamMember"]))) or "none"
-    note = (f"[{stamp} — agent-dispatch] Escalated to Kevin as a decision card "
-            f"(holder {holder}): {ask}")
+    if on_gate:
+        # A rebuild is the same question to the same person: no second
+        # escalation stamp, so the holder the first one recorded still stands.
+        note = f"[{stamp} — agent-dispatch] Decision card rebuilt with a full brief: {ask}"
+    else:
+        # The holder at escalation is recorded on the stamp: the gate's approve
+        # path re-links the task to the sender (the Task Manager), so the board
+        # needs it to restore the prior holder when Kevin's answer names nobody.
+        holder = ",".join(links(tf.get(AF["teamMember"]))) or "none"
+        note = (f"[{stamp} — agent-dispatch] Escalated to Kevin as a decision card "
+                f"(holder {holder}): {ask}")
     existing = str(tf.get(AF["notes"]) or "").rstrip()
-    output = ask
-    if prior_output.strip():
-        # The earlier draft stays under the ask: Kevin decides with it in view.
-        output = ask + "\n\nEarlier output:\n" + prior_output.strip()
+    blocks = [ask]
+    if said:
+        blocks.append("WHAT YOU HAVE ALREADY SAID:\n" + "\n".join(kevin_said_lines(said)))
+    output = "\n\n".join(blocks + [brief, decision_links(args.task, tf), record])
+    earlier = earlier_work(prior_output)
+    if earlier:
+        # The earlier draft stays under the card: Kevin decides with it in view.
+        output += EARLIER_OUTPUT_MARK + earlier
     patch_task(args.task, {
         AF["status"]: "Approval",
         # The Task Manager's Team Members row — read live from Team Members
@@ -3506,14 +3713,14 @@ def cmd_escalate(args):
         # decided; the card is a fresh question.
         AF["approvalOutcome"]: None,
         AF["approvedAt"]: None,
-        # The card is a new question, so an earlier submit's plain lines would
-        # describe the wrong proposal (review, 22 Sep 2026). Cleared: the page
-        # then shows the task name and the DECIDE line.
-        AF["plainSummary"]: None,
+        # The card's own two lines, never an earlier submit's: those describe
+        # a different proposal (review, 22 Sep 2026).
+        AF["plainSummary"]: plain_summary_text(args.plain_task, args.plain_approve),
         AF["notes"]: (existing + "\n\n" + note).strip()[-90000:],
     })
     print(json.dumps({"escalated": args.task, "to": "Kevin Brittain", "card": True,
-                      "ask": ask, "sentForApprovalBy": TASKMGR_REC_ID}))
+                      "ask": ask, "sentForApprovalBy": TASKMGR_REC_ID, "rebuilt": on_gate,
+                      "trackRecord": record.splitlines()[0][:200]}))
 
 
 def cmd_handover(args):
@@ -9038,10 +9245,26 @@ def main():
 
     e = sub.add_parser("escalate",
                        help="put a decision card in Kevin's gate (Status Approval, "
-                            "sent by the Task Manager, one DECIDE: ask line)")
+                            "sent by the Task Manager: a DECIDE: ask line, the brief, "
+                            "the history, links and files)")
     e.add_argument("task")
     e.add_argument("--reason", default="",
                    help="the one thing Kevin must decide; becomes the DECIDE: line")
+    e.add_argument("--brief-file", metavar="PATH",
+                   help="the brief Kevin decides from: WHAT THIS IS / WHAT HAS HAPPENED / "
+                        "OPTIONS / RECOMMENDED sections; refused without it (2 Oct 2026)")
+    e.add_argument("--plain-task", metavar="SENTENCE",
+                   help="what the task is, one short plain sentence; first line of the card")
+    e.add_argument("--plain-approve", metavar="SENTENCE",
+                   help="what happens if Kevin approves with no note (the recommended option), "
+                        "one short plain sentence; second line of the card")
+    e.add_argument("--email", action="append", metavar="ADDRESS",
+                   help="a contact whose past tasks and emails belong in the card's history")
+    e.add_argument("--ref", action="append", metavar="TEXT",
+                   help="a reference, account or name to search the history for")
+    e.add_argument("--property", action="append", metavar="ADDRESS",
+                   help="a property whose past tasks belong in the card's history")
+    e.add_argument("--no-gmail", action="store_true", help="history from tasks only")
 
     h = sub.add_parser("handover",
                        help="hand an approved task to a named human team member")

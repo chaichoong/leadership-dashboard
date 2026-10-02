@@ -788,7 +788,15 @@ rec("t1", "[x — agent] BLOCKER OPEN (SIGN-IN ewf.companieshouse.gov.uk): signe
 a = run(m.cmd_escalate, {"task": "t1", "reason": "blocked by a code defect"})
 w1 = len(WRITES)
 rec("t2", "")
-b = run(m.cmd_escalate, {"task": "t2", "reason": "which quote do you want?"})
+# A decision card needs a brief since 2 Oct 2026 (tests/agent-dispatch-escalate.test.js covers that gate).
+import tempfile
+m.history = lambda **kw: {"terms": [], "searched": ["tasks"], "entries": [], "notes": []}
+bf = tempfile.NamedTemporaryFile("w", suffix=".txt", delete=False)
+bf.write("WHAT THIS IS:\\nTwo insurers have quoted for the landlord cover.\\n\\nWHAT HAS HAPPENED:\\nQuote one came on 20 Sep 2026 and quote two on 22 Sep 2026, both for the same cover.\\n\\nOPTIONS:\\nA. Take quote one.\\nB. Take quote two.\\n\\nRECOMMENDED: A, because it starts on the renewal date.")
+bf.close()
+b = run(m.cmd_escalate, {"task": "t2", "reason": "which quote do you want?", "brief_file": bf.name,
+                         "plain_task": "Two insurers have quoted for the landlord cover.",
+                         "plain_approve": "The agent takes the first quote and tells the second insurer no."})
 print(json.dumps({"a": a["err"], "writesAfterA": w1, "b": b["err"], "t2": TASKS["t2"]["fields"][AF["status"]]}))`);
     expect(r.a).toMatch(/is blocked \(SIGN-IN ewf\.companieshouse\.gov\.uk\), so it is not a decision for Kevin/);
     expect(r.writesAfterA).toBe(0);
