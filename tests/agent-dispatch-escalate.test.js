@@ -692,7 +692,8 @@ print('@@@' + json.dumps({"captured": captured, "refused": refused, "AF": m.AF, 
     expect(f[r.AF.status]).toBe('Upcoming');
     expect(f[r.AF.dueDate]).toBe(r.future);
     expect(f[r.AF.notes]).toContain('Decision carried out: Approved with minor edits — Leave it until the 5th.');
-    expect(f[r.AF.notes]).toContain(`Parked until ${r.future}`);
+    // its own stamped line, which is what the board reads to file the task as parked rather than stuck
+    expect(f[r.AF.notes]).toMatch(new RegExp(`\\n\\n\\[\\d{2} \\w{3} \\d{4} — agent-dispatch\\] Parked until ${r.future} on Kevin's answer`));
     expect(f[r.AF.notes]).toContain('Escalated to Kevin as a decision card');   // appended, never overwritten
   });
 

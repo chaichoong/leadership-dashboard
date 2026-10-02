@@ -91,6 +91,8 @@ OPEN_STATUSES = ("Today", "Upcoming", "Overdue", "Approval")
 NOTE_STAMP_RE = re.compile(r"^\[(\d{1,2} \w{3} \d{4}) — [^\]]+\]\s*(.*)$", re.M)
 ESCALATE_NOTE_MARK = "Escalated to Kevin"
 DECIDED_NOTE_MARK = "Decision carried out"
+# Written by `agent-dispatch.py decided --until` when Kevin's answer is to wait.
+PARKED_NOTE_MARK = "Parked until"
 # The marker agent-dispatch.py leaves on a Level A carry-out it completed
 # WITHOUT Kevin (its HANDLED_MARK, ruling 7 Sep 2026). That path deliberately
 # clears Sent For Approval By, so verify cannot demand a card on those closes.
@@ -306,6 +308,15 @@ def classify(f, activity_ids, now=None):
             if f.get("Approval Outcome"):
                 return "decided", "escalateNote", esc
             return "escalated", "escalateNote", esc
+    # PARKED ON HIS ANSWER (2 Oct 2026). `decided --until` records "leave it
+    # until <date>" and parks the task at Upcoming with that Due Date. Before
+    # the date it is not stuck: he said wait, and forcing a move on it three
+    # times a day is the re-read his answer was meant to end. The live Due
+    # Date decides, so a date he moves by hand is honoured; flip-due turns it
+    # to Today on the day and it is ordinary board work again.
+    if (f.get("Status") == "Upcoming" and str(f.get("Due Date") or "")[:10] > now.date().isoformat()
+            and newest_note_stamp(f.get("Notes"), PARKED_NOTE_MARK)):
+        return "parked", "decidedUntil", moved
     if moved is None:
         # No stamp at all should be impossible (Created Time is automatic);
         # treat as stuck so it surfaces rather than hides.
@@ -1226,6 +1237,15 @@ def cmd_selftest():
     # carried out and asked again on the same day, then answered: still decided (the stamps have no time)
     same_day = dict(late, Notes=late["Notes"] + "\n\n[01 Aug 2026 — agent-dispatch] Decision carried out: x")
     assert classify(same_day, set(), now)[0] == "decided", classify(same_day, set(), now)
+    # parked on his answer: not stuck before the date, ordinary work again once the date arrives
+    held = dict(late, _id="recE7", Status="Upcoming", **{"Approval Outcome": None, "Due Date": "2026-12-01",
+                "Agent Output": "DECIDED (Kevin, 02 Aug 2026): Approved as-is — Leave it.\n\nDECIDE: sell or keep?"},
+                Notes=late["Notes"] + "\n\n[02 Aug 2026 — agent-dispatch] Decision carried out: Approved as-is — Leave it.\nsecond line"
+                                      "\n\n[02 Aug 2026 — agent-dispatch] Parked until 2026-12-01 on Kevin's answer; it comes back on the board that day.")
+    assert classify(held, set(), now) [:2] == ("parked", "decidedUntil"), classify(held, set(), now)
+    assert classify(dict(held, **{"Due Date": now.date().isoformat()}), set(), now)[0] == "stuck"   # the date has come
+    assert classify(dict(held, Status="Today"), set(), now)[0] == "stuck"                            # flip-due moved it
+    assert classify(dict(held, Notes=late["Notes"]), set(), now)[0] != "parked"                      # future-dated, but not on his answer
     # ...but an old escalation nobody answered is stuck again, and a carried-out one is ordinary work
     assert classify(dict(late, **{"Approval Outcome": None}), set(), now)[0] == "stuck"
     carried_late = dict(late, **{"Approval Outcome": None, "Agent Output": "DECIDED (Kevin, 02 Aug 2026): Approved as-is\n\nDECIDE: sell or keep?"},

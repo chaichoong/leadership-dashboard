@@ -114,7 +114,8 @@ out but its card did not close". Never escalate it. An episode card that lands i
 gets the same finding asking the engine to resubmit it, recorded as `leave`. The engine's OTHER
 cards, such as the monthly performance read, do not close themselves and stay
 ordinary board work),
-`parked` (Some Day) and counts. Upcoming
+`parked` (Some Day, or held until a date on Kevin's own answer by
+`decided --until`: not yours to touch before that date) and counts. Upcoming
 tasks whose due date has arrived were already flipped to Today by the runner
 (`task-hygiene-sweep.py flip-due`) before this read. Dispatch's queue JSON also gives you every routable agent's Team
 Members rec id and live status (its rosters). If `queue` exits non-zero

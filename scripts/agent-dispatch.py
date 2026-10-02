@@ -3818,7 +3818,10 @@ def cmd_decided(args):
                      "with nothing to wait for.")
         fields[AF["status"]] = "Upcoming"
         fields[AF["dueDate"]] = due
-        note += f" Parked until {due}; it comes back on the board that day."
+        # Its own stamped line: his feedback can run over several lines, and
+        # the board reads a stamp's first line (PARKED_NOTE_MARK in
+        # task-manager.py files the task as parked, not stuck, until the date).
+        note += f"\n\n[{stamp} — agent-dispatch] Parked until {due} on Kevin's answer; it comes back on the board that day."
     existing = str(tf.get(AF["notes"]) or "").rstrip()
     holders = re.findall(r"Escalated to Kevin as a decision card \(holder ([^)]*)\)", existing)
     back_to = [h for h in (holders[-1] if holders else "").split(",") if h in ALL_AGENTS and h != TASKMGR_REC_ID]
