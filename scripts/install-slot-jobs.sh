@@ -68,6 +68,11 @@ JOBS=(
   # The tenant-finding chain (Kevin, 25 Sep 2026). Rules only, no model: it raises
   # cards for Kevin's queue and tasks for Roy, and writes the tenant-chain status row.
   "tenant-leads|8:10|/usr/bin/python3 $REPO/scripts/tenant-leads.py run"
+  # The daily rent check (Kevin, 2 Oct 2026), phase 1 of the Cash Flow Voids agent.
+  # Rules only, no model: it reads, judges and writes the rent-position status row.
+  # It sends nothing and changes no tenancy. Twice a day: the bank feed lands near
+  # 12:00, so 07:30 gives the morning line and 12:30 picks up the day's payments.
+  "rent-check|7:30,12:30|/usr/bin/python3 $REPO/scripts/rent-check.py run"
 )
 
 # launchd's own numbering: Sunday = 0. Mapped here once so no caller ever writes

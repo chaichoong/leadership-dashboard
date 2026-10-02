@@ -41,18 +41,19 @@ async function routeHome(page, fx) {
         'daily-ops-needs-you': { date: fx.today, items: ['Example note from the 07:00 check'] },
         'agent-blockers': { open: [], sweptAt: new Date().toISOString() },
         'tenant-chain': { asAt: fx.today, worst: 'ok', briefLine: 'working, nothing to watch' },
+        'rent-position': { asAt: fx.today, worst: 'warn', briefLine: '63 of 64 tenants paying (98.4%, floor 97.5%). Late: Unit 9 – 1 Example Road (2 days).' },
       };
-      const records = payloads[key] ? [{ id: 'recEstateSpec0001', fields: { Key: key, Payload: JSON.stringify(payloads[key]) } }] : [];
+      const records = payloads[key] && !(fx.omit || []).includes(key) ? [{ id: 'recEstateSpec0001', fields: { Key: key, Payload: JSON.stringify(payloads[key]) } }] : [];
       return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ records }) });
     }
     return route.fallback();
   });
 }
 
-async function open(page, hash) {
+async function open(page, hash, omit) {
   await page.addInitScript((pat) => { localStorage.setItem('_dlr_pat', pat); try { indexedDB.deleteDatabase('_dlr_cache'); } catch {} }, MOCK_PAT);
   await setupMockAirtable(page);
-  const fx = homeFixtures();
+  const fx = { ...homeFixtures(), omit };
   await routeHome(page, fx);   // registered last, so it is asked first
   await page.goto('/' + (hash ? '#' + hash : ''));
   await page.waitForFunction(() => {
@@ -65,6 +66,19 @@ async function open(page, hash) {
 const shown = (page, id) => page.evaluate(i => getComputedStyle(document.getElementById(i)).display !== 'none', id);
 
 test.describe('Home tab sits beside the old screens', () => {
+  test('before the rent check has ever run, the Rent line is red and says so, and the rest of Home is unchanged', async ({ page }) => {
+    const errors = [];
+    page.on('pageerror', e => errors.push(e.message));
+    await open(page, 'home', ['rent-position']);
+    await page.waitForFunction(() => document.querySelectorAll('#homeList .home-row').length > 0, { timeout: 20000 });
+    await expect(page.locator('#homeList .home-rent')).toHaveText('Rent: The rent check has not reported.');
+    await expect(page.locator('#homeList .home-rent .home-light-fail')).toHaveCount(1);
+    await expect(page.locator('#homeList .home-tenants').first()).toContainText('working, nothing to watch');
+    await expect(page.locator('#homeList .home-summary')).toContainText('4 things need you today');
+    if (process.env.HOME_SHOT) await page.locator('#homeList').screenshot({ path: process.env.HOME_SHOT });
+    expect(errors.filter(e => !/net::ERR|Failed to fetch|NetworkError/.test(e))).toEqual([]);
+  });
+
   test('the app still opens on the Leadership Dashboard, with Home closed', async ({ page }) => {
     await open(page, '');
     await page.waitForTimeout(1000);
@@ -91,7 +105,9 @@ test.describe('Home tab sits beside the old screens', () => {
     // The court notice is a deadline AND a queue card: shown once, with the queue button.
     expect(rows.filter(r => /court notice/.test(r))).toHaveLength(1);
     await expect(page.locator('#homeList .home-summary')).toContainText('4 things need you today');
-    await expect(page.locator('#homeList .home-tenants')).toContainText('working, nothing to watch');
+    await expect(page.locator('#homeList .home-tenants').first()).toContainText('working, nothing to watch');
+    await expect(page.locator('#homeList .home-rent')).toContainText('Rent: 63 of 64 tenants paying (98.4%, floor 97.5%). Late: Unit 9 – 1 Example Road (2 days).');
+    await expect(page.locator('#homeList .home-rent .home-light-warn')).toHaveCount(1);
     expect(errors.filter(e => !/net::ERR|Failed to fetch|NetworkError/.test(e))).toEqual([]);
   });
 
