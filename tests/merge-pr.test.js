@@ -160,6 +160,25 @@ describe('verdict: what the gate decides from what it saw', () => {
     'a page at its sign-in screen on both sites': { gate: true,
       walk: walked([page('agents', 'WARN', { gate: 'asks who is viewing' })]),
       live: liveRun([page('agents', 'WARN', { gate: 'asks who is viewing' })]) },
+    // The two sign-ins the walk can never pass (2 Oct 2026): "not checked", never "problems".
+    'two pages behind a sign-in the walk cannot pass, live too': { gate: true,
+      walk: walked([page('comms', 'WARN', { gate: 'asks for a Google sign-in' }), page('crm', 'WARN', { gate: 'shows its own sign-in screen' })]),
+      live: liveRun([page('comms', 'WARN', { gate: 'asks for a Google sign-in' }), page('crm', 'WARN', { gate: 'shows its own sign-in screen' })]) },
+    'a sign-in page beside a page that is really broken live': { gate: true,
+      walk: walked([page('comms', 'WARN', { gate: 'asks for a Google sign-in' }), page('pnl', 'FAIL', { consoleErrors: ['TypeError: x is undefined @ /js/pnl.js'] })]),
+      live: liveRun([page('comms', 'WARN', { gate: 'asks for a Google sign-in' }), page('pnl', 'FAIL', { consoleErrors: ['TypeError: x is undefined @ /js/pnl.js'] })]) },
+    // Property Manager is a page the walk IS built to sign in to: the same gate there means a sign-in broke.
+    'a page the walk should sign in to shows its sign-in screen, live too': { gate: true,
+      walk: walked([page('property-manager', 'WARN', { gate: 'shows its own sign-in screen' })]),
+      live: liveRun([page('property-manager', 'WARN', { gate: 'shows its own sign-in screen' })]) },
+    'comms shows the gate that belongs to crm, live too': { gate: true,
+      walk: walked([page('comms', 'WARN', { gate: 'shows its own sign-in screen' })]),
+      live: liveRun([page('comms', 'WARN', { gate: 'shows its own sign-in screen' })]) },
+    'comms still loading on both sites': { gate: true,
+      walk: walked([loading('comms')]), live: liveRun([loading('comms')]) },
+    'a sign-in page that also throws an error, live too': { gate: true,
+      walk: walked([page('comms', 'WARN', { gate: 'asks for a Google sign-in', consoleErrors: ['TypeError: y is undefined @ /js/follow-up.js'] })]),
+      live: liveRun([page('comms', 'WARN', { gate: 'asks for a Google sign-in', consoleErrors: ['TypeError: y is undefined @ /js/follow-up.js'] })]) },
     'a new bare NaN (soft leak), PASS live': { gate: true,
       walk: walked([page('pnl', 'WARN', { softLeaks: ['Rent this month NaN total'] })]),
       live: liveRun([page('pnl', 'PASS')]) },
@@ -297,6 +316,46 @@ describe('verdict: what the gate decides from what it saw', () => {
     const v = got['a page at its sign-in screen on both sites'];
     expect(v.merge).toBe(true);
     expect(v.findings.alreadyBrokenLive).toEqual(['agents']);
+  });
+  // 2 Oct 2026: "2 page(s) show the same problems on the live site: comms, crm" printed on
+  // every page-walking merge and was raised with Kevin as two broken pages. Both were healthy:
+  // the walk holds no Google session and no page passcode, so it stops at their sign-in.
+  it('a page behind a sign-in the walk cannot pass is "not checked", never "problems"', () => {
+    const v = got['two pages behind a sign-in the walk cannot pass, live too'];
+    expect(v.merge).toBe(true);
+    expect(v.findings.alreadyBrokenLive).toEqual(['comms', 'crm']);
+    expect(v.findings.signInOnly).toEqual(['comms', 'crm']);
+    expect(v.why).toBe('tests green and nothing new; 2 page(s) stop at a sign-in the walk cannot pass, '
+      + 'on the live site too, so they were not checked: comms, crm');
+  });
+  it('a really broken page beside a sign-in page is still called a problem, and each is named once', () => {
+    const v = got['a sign-in page beside a page that is really broken live'];
+    expect(v.merge).toBe(true);
+    expect(v.why).toBe('tests green and nothing new; 1 page(s) show the same problems on the live site, so main '
+      + 'already has them: pnl; 1 page(s) stop at a sign-in the walk cannot pass, on the live site too, so they were not checked: comms');
+  });
+  it('an error behind the sign-in, or a gate the walk is meant to pass, stays a problem', () => {
+    const errored = got['a sign-in page that also throws an error, live too'];
+    expect(errored.findings.signInOnly).toEqual([]);
+    expect(errored.why).toContain('1 page(s) show the same problems on the live site, so main already has them: comms');
+    const viewer = got['a page at its sign-in screen on both sites'];
+    expect(viewer.findings.signInOnly).toEqual([]);
+    expect(viewer.why).toContain('show the same problems on the live site, so main already has them: agents');
+    const stuck = got['comms still loading on both sites'];
+    expect(stuck.findings.signInOnly).toEqual([]);
+    expect(stuck.why).toContain('show the same problems on the live site, so main already has them: comms');
+  });
+  // Found in review, 2 Oct 2026: keyed on the gate alone, a broken Property Manager or Tasks
+  // sign-in on main would have read "cannot pass, not checked". The page decides, not the label.
+  it('the quiet note is for comms and crm only, each with its own gate', () => {
+    const pm = got['a page the walk should sign in to shows its sign-in screen, live too'];
+    expect(pm.merge).toBe(true);
+    expect(pm.findings.signInOnly).toEqual([]);
+    expect(pm.why).toBe('tests green and nothing new; 1 page(s) show the same problems on the live site, so main '
+      + 'already has them: property-manager');
+    const wrongGate = got['comms shows the gate that belongs to crm, live too'];
+    expect(wrongGate.findings.signInOnly).toEqual([]);
+    expect(wrongGate.why).toContain('show the same problems on the live site, so main already has them: comms');
   });
   it('failed requests are reported, never blocking', () => {
     const v = got['WARN only for a failed request, PASS live'];
@@ -913,6 +972,8 @@ describe('merge-pr.py end to end (fakes, real git, no network)', { timeout: 60_0
     expect(r.code).toBe(0);
     expect(r.result.merged).toBe(true);
     expect(r.result.walk.alreadyBrokenLive).toEqual(['pnl', 'tasks']);
+    expect(r.result.walk.notCheckedSignIn).toEqual([]);
+    expect(r.result.why).toBe('merged: tests green and nothing new; 2 page(s) show the same problems on the live site, so main already has them: pnl, tasks');
     expect(r.result.walk.writesBlocked).toBe(2);
     expect(r.result.walk.mainRegistryRead).toBe(true);
     expect(r.walks).toHaveLength(2);
