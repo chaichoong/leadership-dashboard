@@ -32,7 +32,10 @@ const CLAUSES = [
   ['Read every create back by its id', 'the task read-back'],
   ['node scripts/sync-project-status.mjs', 'the status set from the shared health rule'],
   ['Send every draft to Kevin as a file, never just a path', 'drafts delivered as files'],
-  ['Read every field back against\nthe approved draft', 'the read-back on the Objective & Strategy page'],
+  ['Nothing on the plan carries forward unread', 'every section is reviewed every quarter'],
+  ['Phase 5 does not start until all ten have one', 'no write before every section has a ruling'],
+  ['Send Kevin the PDF with SendUserFile', 'Kevin sees the finished plan'],
+  ['node scripts/render-strategy-plan.cjs --record', 'the plan PDF comes from the page\'s own export'],
   ['A mid-quarter review date', 'the review date in the write-back'],
   ['Never in this repo', 'private working files stay out of the public repo'],
   ['is NOT built inside this skill', 'dashboard KPI code goes through /build-feature'],
@@ -49,7 +52,7 @@ describe('strategy-session skill', () => {
   });
 
   it('names only files that exist', () => {
-    const named = [...new Set(skill.match(/(?:scripts|js|os\/strategy)\/[\w./-]+\.(?:js|mjs|py|html)/g))];
+    const named = [...new Set(skill.match(/(?:scripts|js|os\/strategy)\/[\w./-]+\.(?:js|mjs|cjs|py|html)/g))];
     expect(named.length).toBeGreaterThan(5);
     for (const f of named) expect(existsSync(resolve(ROOT, f)), `${f} is named but missing`).toBe(true);
   });
@@ -94,5 +97,36 @@ describe('strategy-session skill', () => {
     expect(computeProjectHealth(
       { start: '2026-10-01', end: '2026-12-31', kpiTarget: 4, kpiCurrent: 0 }, '2026-10-02T12:00:00',
     )).toBe('Not Started');
+  });
+
+  // Drives the page's real export through the render script. The first run's PDF left out
+  // each project's target and owner, and Kevin never saw the finished plan at all.
+  describe('the plan PDF', () => {
+    const { renderPlanHtml } = require('../scripts/render-strategy-plan.cjs');
+    const src = readFileSync(resolve(ROOT, 'js/config.js'), 'utf8');
+    const ids = key => src.slice(src.indexOf(key)).match(/fld\w{14}/g);
+    const [kpiName, kpiUnit, kpiTarget, owner, tracking, dod] = ids('qpDetails: [');
+    const [objective] = ids("objective:      '");
+    const [qp1] = ids('quarterlyProjects');
+    const fields = {
+      [objective]: 'Optimise the portfolio.', [qp1]: 'Fill the named units.',
+      [kpiName]: 'Named units let', [kpiUnit]: 'units', [kpiTarget]: 4,
+      [owner]: { id: 'usrX', email: 'owner@example.com', name: 'Test Owner' },
+      [tracking]: 'Counted by hand.', [dod]: 'Four units let.',
+    };
+
+    it('prints each project\'s KPI target and owner', () => {
+      const html = renderPlanHtml(fields, 'Test Business', 'Q4', 2026);
+      expect(html).toContain('Test Business');
+      expect(html).toContain('<strong>Target:</strong> 4 units');
+      expect(html).toContain('<strong>Owner:</strong> Test Owner');
+      expect(html).toContain('Optimise the portfolio.');
+    });
+
+    it('writes a money target as pounds first, and omits a blank owner', () => {
+      const html = renderPlanHtml({ ...fields, [kpiUnit]: '£ a month', [kpiTarget]: 2693, [owner]: null }, 'Test Business', 'Q4', 2026);
+      expect(html).toContain('<strong>Target:</strong> £2,693 a month');
+      expect(html).not.toContain('<strong>Owner:</strong>');
+    });
   });
 });

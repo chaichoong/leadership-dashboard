@@ -4065,10 +4065,20 @@ ${(() => {
         const d = OBJSTRAT.qpDetails[q.i];
         const stones = OBJSTRAT.monthlyStones[q.i];
         const unit = readSel(f[d.kpiUnit]);
+        // Owner is a collaborator: { email } off the form, { name, email } off
+        // the record. An AI agent has no Airtable login, so its project has no
+        // owner here and is named in the tracking method instead.
+        // A money unit ("£ a month") reads as "£2,693 a month", not "2,693 £ a month".
+        const targetNum = Number(f[d.kpiTarget]).toLocaleString('en-GB');
+        const targetText = unit.startsWith('£') ? `£${targetNum}${unit.slice(1)}` : `${targetNum}${unit ? ' ' + unit : ''}`;
+        const ownerVal = f[d.owner];
+        const owner = ownerVal && typeof ownerVal === 'object' ? (ownerVal.name || ownerVal.email || '') : (ownerVal || '');
         return `<div class="pdf-qp">
             <h3>⭐ Project ${q.i + 1}</h3>
             <div class="qp-body">${mdToHtml(q.text)}</div>
             ${nonEmpty(f[d.kpiName]) ? `<div class="qp-meta"><strong>KPI:</strong> ${esc(f[d.kpiName])}${unit ? ' (' + esc(unit) + ')' : ''}</div>` : ''}
+            ${nonEmpty(f[d.kpiTarget]) ? `<div class="qp-meta"><strong>Target:</strong> ${esc(targetText)}</div>` : ''}
+            ${owner ? `<div class="qp-meta"><strong>Owner:</strong> ${esc(owner)}</div>` : ''}
             ${nonEmpty(f[d.tracking]) ? `<div class="qp-meta"><strong>Tracking:</strong> ${esc(f[d.tracking])}</div>` : ''}
             ${nonEmpty(f[d.dod]) ? `<div class="qp-meta"><strong>Definition of Done:</strong> ${esc(f[d.dod])}</div>` : ''}
             <div class="qp-stones">
