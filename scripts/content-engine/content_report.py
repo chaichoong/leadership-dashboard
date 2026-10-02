@@ -112,7 +112,7 @@ def blocker_why(day, sent_back, holds, waiting, qa_blocked, qa_waiting, teaser_o
     return NOT_RENDERED
 
 
-def left_behind(ledger, approvals, out, cursor, gaps, ready, named, why, start=0):
+def left_behind(ledger, approvals, out, cursor, gaps, ready, named, why, start=0, dead=()):
     """Days with footage or a card that are not out and not about to go, each with its reason (2 Oct 2026). The
     publisher no longer waits for such a day, so the stalled queue that used to give it away is gone and the report
     must name it: a day passed in silence is a day that never publishes. Listed: a day the run has gone past, and any
@@ -120,17 +120,19 @@ def left_behind(ledger, approvals, out, cursor, gaps, ready, named, why, start=0
     days that are on YouTube or properly booked to be. A day whose every clip is 'new' is only waiting its turn to
     render and is left out: the night takes the oldest waiting day first and tonight's plan shows it (review, 2 Oct
     2026: one approved day far ahead would list the whole backlog). A clip stuck mid-pull or mid-render is not in that
-    queue, so its day is listed. B-roll alone is not an episode."""
+    queue, so its day is listed. A gap day fills an old hole on its own list and is not behind the run, unless its
+    upload died (`dead`): the publisher never retries that, on any day. B-roll alone is not an episode."""
     days, clips = {int(d) for d in approvals if str(d).isdigit()}, {}
     for v in ledger.values():
         d = v.get("episode") or (v.get("day") if v.get("status") != "broll" else None)
         if d: days.add(d); clips.setdefault(d, []).append(v.get("status"))
-    queued = {d for d, sts in clips.items() if all(s == "new" for s in sts)}
+    settled = ("new", "rendered", "broll")                   # waiting its turn, or already done: neither is stuck
+    queued = {d for d, sts in clips.items() if "new" in sts and all(s in settled for s in sts)}
     rows = [{"day": d, "why": why(d)} for d in sorted(days)
-            if d >= start and (d < cursor or d in named) and d not in gaps and d not in out and d not in ready]
+            if d >= start and (d < cursor or d in named) and (d not in gaps or d in dead) and d not in out and d not in ready]
     for r in rows:
         if r["why"] == NOT_RENDERED and r["day"] not in queued:
-            r["why"] = "not rendered: a clip sits at %s, outside the night's queue" % ", ".join(sorted({str(s) for s in clips.get(r["day"], []) if s != "new"}) or ["no status"])
+            r["why"] = "not rendered: a clip sits at %s, outside the night's queue" % ", ".join(sorted({str(s) for s in clips.get(r["day"], []) if s not in settled}) or ["no status"])
     return [r for r in rows if r["why"] != NOT_RENDERED]
 
 
@@ -211,7 +213,8 @@ def build(now=None, state=None, approvals=None, ledger=None, sync_state=None, pl
         return blocker_why(d, sent_back, holds, waiting_cards, {int(x) for x in blocked},
                            {int(x) for x, a in approvals.items() if isinstance(a, dict) and a.get("qa_waiting")},
                            teaser_only, no_card, set(failed) | set(retrying))
-    behind = left_behind(ledger, approvals, linked | booked, cursor, gaps, ready, set(holds) | set(refused) | dead, why_not_out, watch.start_day() or 0)
+    behind = left_behind(ledger, approvals, linked | booked, cursor, gaps, ready, set(holds) | set(refused) | dead, why_not_out,
+                         min([watch.start_day() or 0] + sorted(dead)), dead)
     try:
         # plan the night the way the night will: its scan puts a failed clip back first (watch.requeue_failed)
         tonight = plan if plan is not None else watch.plan(requeued_copy(ledger), nightly_slots())[0]
@@ -785,6 +788,12 @@ def _selftest():
     # a clip stuck mid-render is not in the night's queue (the plan takes 'new' only): its day is named, not dropped as backlog
     assert why58({}, {"x": {"day": 2058, "status": "rendering"}, "y": {"episode": 2059}}) == {"day": 2058, "why": "not rendered: a clip sits at rendering, outside the night's queue"}
     assert why58({}, {"x": {"day": 2058, "status": "new"}, "x2": {"day": 2058, "status": "pulled"}, "y": {"episode": 2059}}) == {"day": 2058, "why": "not rendered: a clip sits at pulled, outside the night's queue"}
+    assert why58({}, {"x": {"day": 2058, "status": "new"}, "x2": {"day": 2058, "status": "rendered", "role": "teaser"}, "y": {"episode": 2059}}) == {}, "a rendered teaser beside a waiting full clip is still the queue"
+    import watch as _w3; real_g3 = _w3.gap_days; _w3.gap_days = lambda path=None: {1808}
+    try:
+        gd = build(now, {"_cursor": 2059, "1808": dead, "2059": on_yt()}, {"1808": {"verdict": "approved", "task": "t"}, "2059": {"verdict": "approved", "task": "t2"}}, two, {}, plan=[], skipped=[])
+        assert gd["leftBehind"] == [{"day": 1808, "why": "its YouTube post is creating, with no link yet"}], "a dead upload on a gap day is named too: %s" % gd["leftBehind"]
+    finally: _w3.gap_days = real_g3
     # a noted day later put on hold reads as held, not as the old refusal
     hn = build(now, {"_cursor": 2057, "2058": {"not_published": {"why": "session text is in its copy", "since": "x"}}}, {"2058": {"verdict": "approved", "task": "t"}}, two, {}, plan=[], skipped=[], holds={2058: "Kevin: wait"})
     assert hn["leftBehind"] == [{"day": 2058, "why": "held: Kevin: wait"}], hn["leftBehind"]
@@ -798,7 +807,7 @@ def _selftest():
     import watch as _w2; real_g = _w2.gap_days; _w2.gap_days = lambda path=None: {2058}
     try: assert why58({"2058": {"task": "t"}}) == {}, "a gap day fills an old hole on its own list; it is not behind the run"
     finally: _w2.gap_days = real_g
-    print(json.dumps({"checks": 88, "failed": []}))
+    print(json.dumps({"checks": 90, "failed": []}))
 
 
 if __name__ == "__main__":
