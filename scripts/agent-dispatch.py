@@ -89,6 +89,7 @@ from agent_email_format import (  # noqa: E402
     REDIRECT_BODY,
     RULE_STAMP,
     rule_send_problem,
+    TRIAL_ACTING_SHAPE_RE,
     TRIAL_STAMP,
     trial_problem,
 )
@@ -1699,9 +1700,6 @@ CHECK_KEYS = ("handled", "roy", "machine", "open-task", "trigger")
 CHECK_TRIGGERS = ("money", "data-request", "legal", "deadline", "obligation",
                   "unknown-sender", "kevin-asked", "none")
 REPORT_TYPES = ("Analysis", "Research", "Admin", "Drafting", "Audit", "Build")
-# What a trial agent may not submit: the shapes that act without send-email.py (see cmd_submit).
-TRIAL_ACTING_SHAPE_RE = re.compile(
-    r"^\s*(PASS TO ROY:|CALENDAR:|MARK FOR PAYMENT|DOCUMENT:|POST:|SIGNERS:)", re.I | re.M)
 CHECK_EXEMPT_RE = re.compile(
     r"^\s*(CLOSE PROPOSAL:|PASS TO ROY:|CALENDAR:|MARK FOR PAYMENT|DOCUMENT:|POST:)", re.I)
 
@@ -3058,7 +3056,7 @@ def build_queue(args=None):
         # A TRIAL AGENT'S APPROVED CARD IS CHECKED, NEVER CARRIED OUT (2 Oct 2026). Handing it to a carry-out run
         # would have an agent try a send that send-email.py refuses, every 30 minutes, for ever. `trial-settle`
         # closes it in code with Kevin's verdict on the task. Listed under trialChecked, never hidden.
-        if t["outcome"] in APPROVED and trial_problem([t["agentId"]]):
+        if t["outcome"] in APPROVED and trial_problem([t["agentId"]], t["name"], t["notes"]):
             trial_checked.append(t)
             continue
         if t["outcome"] in APPROVED and t["agentId"]:
@@ -3889,6 +3887,12 @@ def cmd_handover(args):
     stamp = datetime.now(LONDON).strftime("%d %b %Y")
     reason = (args.reason or "").strip() or "approved reassignment"
     t = get_task(args.task)
+    # A handover emails the task and its draft to a colleague. A trial task goes to nobody (2 Oct 2026).
+    _tf = t.get("fields", {}) or {}
+    trial = trial_problem(links(_tf.get(AF["sentForApprovalBy"])) + links(_tf.get(AF["teamMember"])),
+                          _tf.get(AF["name"], ""), _tf.get(AF["notes"], ""))
+    if trial:
+        sys.exit(f"ERROR: refusing to hand over {args.task}: {trial}.")
     # Tier-1 gate (25 Aug 2026, Task Manager build review): a handover to
     # anyone but Kevin moves the task OUT of the agent queue and DMs the new
     # owner, so tier-1 content (creditor, legal, courts, HMRC, the live legal
@@ -4429,6 +4433,13 @@ def cmd_submit(args):
     # Read early so a report with nothing to decide can file itself below.
     tf_early = (get_task(args.task).get("fields", {}) or {})
     is_inbound = bool(tf_early.get(AF["inboundTask"]))
+    # THE TASK IS ON TRIAL TOO (2 Oct 2026): a trial lane's task submitted under another agent's id
+    # is held to the same rule as the trial agent's own submit, checked above.
+    trial = trial or trial_problem([], tf_early.get(AF["name"], ""), tf_early.get(AF["notes"], ""))
+    if trial and TRIAL_ACTING_SHAPE_RE.search(output):
+        sys.exit(f"ERROR: refusing to submit {args.task}: {trial}.\n"
+                 "       This task belongs to a lane on trial, whoever submits it: only a draft email\n"
+                 "       or a plain report may go to Kevin's queue for it.")
 
     # THE WITHDRAWN GATE (25 Sep 2026). A person can cancel a task while an agent is still working
     # on it: the tenant chain withdrew a mail-out card whose change needed code, but the hand-back
@@ -5231,12 +5242,15 @@ def cmd_outcome(args):
     "not approved yet" and quietly stall a form Kevin already approved.
     """
     t = task_view(get_task(args.task))
+    # A trial task is never "approved" as far as the browser's submit gate goes (2 Oct 2026).
+    trial = trial_problem([t["agentId"]] + t["teamMemberIds"], t["name"], t["notes"])
     print(json.dumps({
         "id": t["id"],
         "name": t["name"],
         "status": t["status"],
         "outcome": t["outcome"],
-        "approved": t["outcome"] in APPROVED,
+        "approved": t["outcome"] in APPROVED and not trial,
+        "trial": trial,
         "feedback": t["feedback"],
     }))
 
@@ -6775,7 +6789,7 @@ def trial_approved_tasks():
     out = []
     for rec in rows:
         t = task_view(rec)
-        if t["outcome"] in APPROVED and trial_problem([t["agentId"]]):
+        if t["outcome"] in APPROVED and trial_problem([t["agentId"]], t["name"], t["notes"]):
             out.append(t)
     return out
 
@@ -6784,7 +6798,7 @@ def cmd_trial_settle(args):
     settled = []
     for t in trial_approved_tasks():
         stamp = note_line("trial-settle", f"{TRIAL_STAMP}: Kevin's verdict was '{t['outcome']}'. Nothing was sent: "
-                                          f"{trial_problem([t['agentId']])}.")
+                                          f"{trial_problem([t['agentId']], t['name'], t['notes'])}.")
         patch_task(t["id"], {AF["status"]: "Completed", AF["completion"]: now_iso(),
                              AF["notes"]: append_notes(t["notes"], stamp)})
         ledger_append(t["id"], "done")

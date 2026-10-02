@@ -21,9 +21,10 @@ Status row, and (lane A, 2 Oct 2026) one RENT LATE task per late tenancy per sta
 Flow Voids agent, only while that agent's register row is Built or Live.
 
 LANE A, IN TRIAL (Kevin, 2 Oct 2026)
-A tenancy that reads late on trusted bank data becomes a task for the Cash Flow Voids agent: a
-reminder when it turns late, a follow-up 3 days on, a firmer message 7 days on (the stages in
-js/cfv.js CFV_CHASE_STAGES). The agent drafts the email, the card goes to Kevin's queue, and
+A tenancy that reads late on trusted bank data becomes a task for the Cash Flow Voids agent. The
+first task for an owed payment is always the reminder, whenever it is first seen. The follow-up is
+raised 3 days after the reminder's task, the firmer message 4 days after the follow-up's (day 0, 3
+and 7: the stages in js/cfv.js CFV_CHASE_STAGES). The agent drafts the email, the card goes to Kevin's queue, and
 nothing is sent: the agent is a TRIAL agent (scripts/agent_email_format.py TRIAL_AGENTS). No task
 is raised for an agent-managed tenancy, an existing void, a void already actioned with the DWP, a
 short payment, or anything this check "cannot tell".
@@ -136,9 +137,10 @@ PRE_SLATE_PATH = os.path.expanduser("~/.config/od/rent-check-pre-slate.json")
 AGENT_TEAM_MEMBER, REGISTER_ROW, REGISTER_STATUS = "rec7aHLK1Q8fMLRXH", "reclaAzGLA4utssxx", "fld71vXWqcxhdljac"
 # No "void" in the name: scripts/agent-dispatch.py reads that word as Roy's lane.
 TASK_PREFIX, KEY_MARK = "RENT LATE: ", "RENT CHECK KEY: "
-# Days late today -> the stage that is due. A first message when the rent turns late, a follow-up 3
-# days on, a firmer one 7 days on (js/cfv.js CFV_CHASE_STAGES: day 0, day 3, day 7).
-STAGES = ((TOLERANCE_DAYS + 7, 3, "firmer message"), (TOLERANCE_DAYS + 3, 2, "follow-up"), (TOLERANCE_DAYS, 1, "reminder"))
+# The stages of one chase (js/cfv.js CFV_CHASE_STAGES: day 0, day 3, day 7), and the days that must
+# pass after a stage's task was raised before the next one is.
+STAGES = {1: "reminder", 2: "follow-up", 3: "firmer message"}
+STAGE_GAP_DAYS = {1: 3, 2: 4}
 IN_PAYMENT, CFV, CFV_ACTIONED = "In Payment", "CFV", "CFV Actioned"
 AGENT_MANAGED = "Agent-Managed"
 # Zero rows from any of these is a broken read, not an empty business (64 live tenancies, 35 active
@@ -484,7 +486,7 @@ def judge(rec, tenants, payments, day, feed, pre_slate, late_before):
         if cannot_tell():
             return dict(row, light="grey", lane="unknown", bank=True, note=cannot_tell())
         if beyond:
-            return dict(row, light="red", lane="late", owed=owed.isoformat(), note=last)
+            return dict(row, light="red", lane="late", owed=owed.isoformat(), beyond=True, note=last)
         return dict(row, light="red" if days_late >= RED_AFTER_DAYS else "amber", lane="late", daysLate=days_late,
                     owed=owed.isoformat(),
                     fresh=since_owed <= TOLERANCE_DAYS + 1 and rec["id"] not in late_before,
@@ -586,37 +588,45 @@ def detail(res):
 
 
 # ─── lane A: one task per late tenancy per stage ─────────────────────
-def stage_for(days_late):
-    """(stage number, its plain name) for a tenancy this many days late, or None before it is late."""
-    for floor, number, word in STAGES:
-        if days_late >= floor:
-            return number, word
-    return None
+def next_stage(cycle, existing, day):
+    """The stage to raise today for one owed payment, or None. `existing` maps a key already raised
+    to the day its task was created. First contact is always the reminder, however late it is first
+    seen; each later stage waits its gap after the one before."""
+    raised = [n for n in STAGES if f"{cycle}:{n}" in existing]
+    if not raised:
+        return 1
+    last = max(raised)
+    if last >= max(STAGES) or (day - existing[f"{cycle}:{last}"]).days < STAGE_GAP_DAYS[last]:
+        return None
+    return last + 1
 
 
-def task_plan(res, tenancies, existing_keys, day):
+def task_plan(res, tenancies, existing, day):
     """The RENT LATE tasks today's result calls for. Pure: no reads, no writes.
 
-    Only a tenancy the check itself calls late, on trusted bank data, that we chase ourselves. A void
-    already actioned is with the DWP, an existing void is left alone, and grey means cannot tell."""
+    Only a tenancy the check itself calls late TODAY, on trusted bank data, that we chase ourselves.
+    A void already actioned is with the DWP, an existing void is left alone, a short payment is not
+    late, and grey means cannot tell."""
     by_id = {r["id"]: r.get("fields") or {} for r in tenancies}
     plan = []
     for r in res["tenancies"]:
         if r["lane"] != "late" or r["status"] not in (IN_PAYMENT, CFV) or r["type"] == AGENT_MANAGED:
             continue
-        # Nothing matched in the whole window carries no day count: it goes straight to the last stage.
-        stage = stage_for(r["daysLate"]) if "daysLate" in r else STAGES[0][1:]
-        if not stage:
+        # A void with a part payment sits in the late lane before its next rent is due: not late yet.
+        if "daysLate" not in r and not r.get("beyond"):
             continue
-        number, word = stage
         cycle = f"{r['id']}:{r['owed']}"
-        if any(f"{cycle}:{n}" in existing_keys for n in range(number, len(STAGES) + 1)):
-            continue          # this stage, or a later one, was already raised for this cycle
+        number = next_stage(cycle, existing, day)
+        if not number:
+            continue
+        word = STAGES[number]
         owed = parse_day(r["owed"])
-        late = f"{r['daysLate']} days late today" if "daysLate" in r else "no payment matched in the last 80 days"
+        late = (f"{r['daysLate']} days late today" if "daysLate" in r
+                else f"no payment matched in the last {TX_LOOKBACK_DAYS} days")
+        key = f"{cycle}:{number}"
         f = by_id.get(r["id"]) or {}
         plan.append({
-            "key": f"{cycle}:{number}", "tenancy": r["id"], "tenants": list(f.get(TY["tenants"]) or []),
+            "key": key, "tenancy": r["id"], "tenants": list(f.get(TY["tenants"]) or []),
             "name": f"{TASK_PREFIX}{r['unit']}, rent due {owed.strftime('%-d %b')} ({word})",
             "description": "\n".join([
                 f"Late rent found by the daily rent check on {day.strftime('%-d %b %Y')}.",
@@ -632,24 +642,32 @@ def task_plan(res, tenancies, existing_keys, day):
                 f"Bank data as at {res['feed']['asAt'] or 'unknown'}.",
                 "",
                 "Draft the message for this stage, following your agent file.",
+                "",
+                # The key is in Notes too. Either copy stops a second task for the same stage.
+                KEY_MARK + key,
             ])})
     return plan
 
 
 def read_task_state():
     """Is the agent switched on (Kevin's pause lever: register Status Built or Live), and which
-    cycle-and-stage keys already carry a task. Formulas use field NAMES: a rename is an error."""
+    cycle-and-stage keys already carry a task, with the day each was raised. Formulas use field
+    NAMES: a rename is an error."""
     row = api("GET", T_REGISTER, params={"filterByFormula": f"RECORD_ID()='{REGISTER_ROW}'",
                                          "returnFieldsByFieldId": "true", "pageSize": 1}).get("records") or []
     if len(row) != 1:
         raise RuntimeError("control failed: the Cash Flow Voids register row could not be read")
     status = sel((row[0].get("fields") or {}).get(REGISTER_STATUS))
-    keys = set()
-    for rec in fetch_all(T_TASKS, {"fields[]": [TK["notes"]],
+    keys = {}
+    for rec in fetch_all(T_TASKS, {"fields[]": [TK["notes"], TK["description"]],
                                    "filterByFormula": f"LEFT({{Task Name}}, {len(TASK_PREFIX)})='{TASK_PREFIX}'"}):
-        for line in str((rec.get("fields") or {}).get(TK["notes"]) or "").splitlines():
-            if line.startswith(KEY_MARK):
-                keys.add(line[len(KEY_MARK):].strip())
+        f = rec.get("fields") or {}
+        made = parse_stamp(rec.get("createdTime"))
+        made = made.astimezone(LONDON).date() if made else today_london()
+        for line in (str(f.get(TK["notes"]) or "") + "\n" + str(f.get(TK["description"]) or "")).splitlines():
+            if line.strip().startswith(KEY_MARK):
+                key = line.strip()[len(KEY_MARK):].strip()
+                keys[key] = min(made, keys.get(key, made))
     return {"on": status in ("Built", "Live"), "status": status, "keys": keys}
 
 

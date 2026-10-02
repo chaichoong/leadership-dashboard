@@ -13,6 +13,9 @@
 //      nothing else.
 //   6. `submit` refuses the shapes that act without send-email.py (Roy handover, diary, payment
 //      list, signing, post) from a trial agent.
+//   8. The TASK is on trial whoever holds it: a RENT LATE task re-routed or resubmitted under
+//      another agent's id is refused at every door (send, notify, handover, letters, diary, the
+//      browser's submit gate), and is settled as checked like any other trial card.
 //   7. The card the agent file tells it to write passes the real submit gates.
 // Each check imports or executes the real module, never a copy.
 //
@@ -89,6 +92,20 @@ print(json.dumps({"listed": sorted(TRIAL_AGENTS), "rent": bool(trial_problem(["$
                   "property": trial_problem(["${PROPERTY_TM}"]), "none": trial_problem([]), "blank": trial_problem(None)}))`);
     expect(r).toEqual({ listed: [RENT_TM], rent: true, mixed: true, property: '', none: '', blank: '' });
   });
+
+  it('its TASKS are on trial whoever holds them: by name or by the key line, and the marks are the rent check\'s own', () => {
+    const r = py(`
+from agent_email_format import TRIAL_TASK_MARKS, trial_problem
+rc = load_mod("rc", "rent-check.py")
+other = ["${PROPERTY_TM}"]
+print(json.dumps({"byName": bool(trial_problem(other, "RENT LATE: Unit 9, rent due 30 Sep (reminder)", "")),
+                  "byKey": bool(trial_problem(other, "Renamed by someone", "note\\nRENT CHECK KEY: recT:2026-09-30:1")),
+                  "neither": trial_problem(other, "COMPLIANCE: EICR renewal", "RENT in the notes"),
+                  "midName": trial_problem(other, "Re: RENT LATE: Unit 9", ""),
+                  "marks": TRIAL_TASK_MARKS["${RENT_TM}"], "rentCheck": {"prefix": rc.TASK_PREFIX, "note": rc.KEY_MARK}}))`);
+    expect([r.byName, r.byKey, r.neither, r.midName]).toEqual([true, true, '', '']);
+    expect(r.marks).toEqual(r.rentCheck);
+  });
 });
 
 describe('3. send-email.py never sends a trial card', () => {
@@ -117,8 +134,12 @@ except SystemExit as e:
     expect(load({ ...approved, sentForApprovalBy: [RENT_TM] }, { rule: 'quote-request' }).refused).toMatch(/trial card/);
     expect(load({ ...approved, sentForApprovalBy: [RENT_TM] }, { requireApproval: false }).refused).toMatch(/trial card/);
   });
-  it('the same card from an agent that is not on trial still sends', () => {
-    expect(load({ ...approved, sentForApprovalBy: [PROPERTY_TM] }).refused).toBe('');
+  it('an ordinary card from an agent that is not on trial still sends', () => {
+    expect(load({ ...approved, name: 'COMPLIANCE: EICR quote', sentForApprovalBy: [PROPERTY_TM] }).refused).toBe('');
+  });
+  it('a RENT LATE task resubmitted or re-routed under another agent is still refused, by its name or its key line', () => {
+    expect(load({ ...approved, sentForApprovalBy: [PROPERTY_TM], teamMember: [PROPERTY_TM] }).refused).toMatch(/trial card/);
+    expect(load({ ...approved, name: 'Renamed', notes: 'RENT CHECK KEY: recT:2026-09-30:1', sentForApprovalBy: [PROPERTY_TM] }).refused).toMatch(/trial card/);
   });
 });
 
@@ -159,9 +180,11 @@ print(json.dumps({"trialChecked": [x["id"] for x in q["trialChecked"]], "worklis
       { id: 'recTrialRedo', name: 'RENT LATE: Unit 7, rent due 30 Sep (reminder)', agent: RENT_TM, outcome: 'Changes requested' },
       { id: 'recTrialNew', name: 'RENT LATE: Unit 6, rent due 30 Sep (reminder)', agent: RENT_TM },
       { id: 'recOtherYes', name: 'COMPLIANCE: EICR renewal', agent: PROPERTY_TM, outcome: 'Approved as-is' },
+      // Re-routed: another agent submitted the card for a RENT LATE task. Still a trial card.
+      { id: 'recRerouted', name: 'RENT LATE: Unit 5, rent due 30 Sep (reminder)', agent: PROPERTY_TM, outcome: 'Approved as-is' },
     ]);
-    expect(r.trialChecked).toEqual(['recTrialYes', 'recTrialEdit']);
-    expect(r.counts).toEqual({ trialChecked: 2, approvedHandbacks: 1, changesRequested: 1, newWork: 1 });
+    expect(r.trialChecked).toEqual(['recTrialYes', 'recTrialEdit', 'recRerouted']);
+    expect(r.counts).toEqual({ trialChecked: 3, approvedHandbacks: 1, changesRequested: 1, newWork: 1 });
     // The worklist is what a dispatch run works: the two approved trial cards are not on it.
     expect(Object.keys(r.worklist).sort()).toEqual(['recOtherYes', 'recTrialNew', 'recTrialRedo']);
     expect(r.worklist.recOtherYes).toBe('carry_out');
@@ -200,10 +223,21 @@ print(json.dumps({"out": json.loads(buf.getvalue()), "patched": [[tid, f.get(ad.
     expect(r.out.trialSettled).toEqual([]);
     expect(r.patched).toEqual([]);
   });
+  it('settles a RENT LATE card another agent submitted', () => {
+    const r = settle([{ id: 'recE', name: 'RENT LATE: Unit 5, rent due 30 Sep (reminder)', outcome: 'Approved as-is', agent: PROPERTY_TM }]);
+    expect(r.out.trialSettled.map(x => x.task)).toEqual(['recE']);
+  });
   it('is a real command', () => {
     expect(SRC).toMatch(/"trial-settle": cmd_trial_settle/);
     expect(SRC).toMatch(/sub\.add_parser\("trial-settle"/);
-    expect(readFileSync(resolve(ROOT, 'scripts/handback-poll-run.sh'), 'utf8')).toMatch(/agent-dispatch\.py" trial-settle/);
+    const poll = readFileSync(resolve(ROOT, 'scripts/handback-poll-run.sh'), 'utf8');
+    expect(poll).toMatch(/agent-dispatch\.py" trial-settle/);
+    // After `lessons`, so a note Kevin ticked Remember on is stored before the card is closed,
+    // and before the queue is read, so a settled card is never offered to a carry-out run.
+    const at = (needle) => poll.indexOf(needle);
+    expect(at('agent-dispatch.py" lessons')).toBeGreaterThan(-1);
+    expect(at('agent-dispatch.py" lessons')).toBeLessThan(at('agent-dispatch.py" trial-settle'));
+    expect(at('agent-dispatch.py" trial-settle')).toBeLessThan(at('agent-dispatch.py" queue'));
   });
 });
 
@@ -227,6 +261,25 @@ except SystemExit as e:
       expect(r.refused).toMatch(/A trial agent's card is a draft for Kevin to check/);
       expect(r.reached).toEqual([]);
     });
+  it('a decorated heading does not slip past: bold, bulleted, numbered or quoted', () => {
+    for (const output of ['**MARK FOR PAYMENT**: rent refund', '- PASS TO ROY: chase the agent', '1. CALENDAR: 2026-10-05', '> POST:\nA Tenant']) {
+      expect(submit(RENT_TM, output).refused, output).toMatch(/A trial agent's card is a draft/);
+    }
+  });
+  it('a RENT LATE task submitted under another agent\'s id is held to the same rule', () => {
+    const r = py(`
+ad.require_role_agent_live = lambda rec, verb: None
+ad.get_task = lambda tid: {"id": tid, "fields": {ad.AF["name"]: "RENT LATE: Unit 9, rent due 30 Sep (reminder)", ad.AF["notes"]: "RENT CHECK KEY: recT:2026-09-30:1"}}
+path = os.path.join(tempfile.mkdtemp(), "out.md"); open(path, "w").write("PASS TO ROY: ask the tenant to pay\\n\\n**Carrying this out will involve:** Roy is told.")
+ad.plain_summary_problem = lambda *x: ""
+try:
+    ad.cmd_submit(argparse.Namespace(task="recTEST", agent="${PROPERTY_TM}", type="Admin", output_file=path, plain_task="x", plain_approve="y",
+                                     tier1=False, siblings=None, coverage=None, receipt=None, attach=None))
+    print(json.dumps({"refused": ""}))
+except SystemExit as e:
+    print(json.dumps({"refused": str(e)}))`);
+    expect(r.refused).toMatch(/This task belongs to a lane on trial, whoever submits it/);
+  });
   it('the same shape from another agent goes on to the ordinary gates, and so does a trial agent\'s email', () => {
     expect(submit(PROPERTY_TM, 'PASS TO ROY: book the visit').reached).toEqual(['past the trial guard']);
     expect(submit(RENT_TM, 'TO: tenant@example.com\nFROM: info@agilelets.co.uk\nSUBJECT: Your rent\n---\nHello').reached).toEqual(['past the trial guard']);
@@ -278,5 +331,90 @@ print(json.dumps({"from": parsed["from"], "to": parsed["to"], "body": parsed["bo
     expect(f).toMatch(/Never mention court, eviction, notice/);
     expect(f).toContain("## Decision criteria (Kevin's ruling, 7 Sep 2026)");
     expect(f).toContain('## Lessons from Kevin');
+  });
+});
+
+describe('8. every other door refuses a trial task', () => {
+  const TASK = { name: 'RENT LATE: Unit 9, rent due 30 Sep (reminder)', notes: 'RENT CHECK KEY: recT:2026-09-30:1' };
+
+  it('notify: the task and its draft are never mailed to a colleague', () => {
+    const r = py(`
+se = load_mod("se", "send-email.py")
+se.team_roster = lambda: ({"roy.lavin1978@gmail.com": {"name": "Roy Lavin"}}, [], lambda *x: "")
+def run(fields):
+    se.get_task = lambda tid: {"id": tid, "createdTime": "2026-10-02T09:00:00.000Z", "fields": {se.AF[k]: v for k, v in fields.items()}}
+    try:
+        se.cmd_notify(argparse.Namespace(task="recTEST", to="roy.lavin1978@gmail.com", reason="x", dry_run=True, note=None, by=None))
+        return ""
+    except SystemExit as e:
+        return str(e)
+    except Exception as e:
+        return "past the trial stop: " + type(e).__name__
+print(json.dumps({"byAgent": run({"name": "A task", "teamMember": ["${RENT_TM}"]}), "byTask": run({"name": a["name"], "teamMember": ["${PROPERTY_TM}"]}),
+                  "ordinary": run({"name": "COMPLIANCE: EICR", "teamMember": ["${PROPERTY_TM}"]})}))`, TASK);
+    expect(r.byAgent).toMatch(/REFUSED: task recTEST is a trial task and is not mailed to anyone/);
+    expect(r.byTask).toMatch(/REFUSED: task recTEST is a trial task/);
+    expect(r.ordinary).not.toMatch(/trial/);
+  });
+
+  it('handover: a trial task is never handed to a person', () => {
+    const r = py(`
+def run(fields):
+    ad.get_task = lambda tid: {"id": tid, "fields": {ad.AF[k]: v for k, v in fields.items()}}
+    ad.patch_task = lambda *x: (_ for _ in ()).throw(RuntimeError("a write was reached"))
+    try:
+        ad.cmd_handover(argparse.Namespace(task="recTEST", to=ad.ROY_EMAIL, reason="x"))
+        return ""
+    except SystemExit as e:
+        return str(e)
+    except RuntimeError as e:
+        return str(e)
+print(json.dumps({"byAgent": run({"name": "A task", "teamMember": ["${RENT_TM}"]}), "byKey": run({"name": "Renamed", "notes": a["notes"], "teamMember": ["${PROPERTY_TM}"]}),
+                  "ordinary": run({"name": "Fix the boiler at 1 Example Road", "teamMember": ["${PROPERTY_TM}"]})}))`, TASK);
+    expect(r.byAgent).toMatch(/refusing to hand over recTEST/);
+    expect(r.byKey).toMatch(/refusing to hand over recTEST/);
+    expect(r.ordinary).toBe('a write was reached');
+  });
+
+  it('the browser\'s submit gate reads a trial task as not approved', () => {
+    const r = py(`
+def run(fields):
+    f = {ad.AF[k]: v for k, v in fields.items()}
+    f[ad.AF["approvalOutcome"]] = {"name": "Approved as-is"}
+    ad.get_task = lambda tid: {"id": tid, "fields": f}
+    buf = io.StringIO()
+    with contextlib.redirect_stdout(buf):
+        ad.cmd_outcome(argparse.Namespace(task="recTEST"))
+    o = json.loads(buf.getvalue()); return [o["approved"], bool(o["trial"])]
+print(json.dumps({"trial": run({"name": a["name"], "teamMember": ["${PROPERTY_TM}"]}), "ordinary": run({"name": "COMPLIANCE: licence form", "teamMember": ["${PROPERTY_TM}"]})}))`, TASK);
+    expect(r).toEqual({ trial: [false, true], ordinary: [true, false] });
+  });
+
+  it('letters and the diary refuse it at their own doors', () => {
+    const r = py(`
+sl = load_mod("sl", "send-letter.py")
+cw = load_mod("cw", "calendar-write.py")
+def letter(fields):
+    sl.get_task = lambda tid: {"id": tid, "createdTime": "2026-10-02T09:00:00.000Z", "fields": {sl.AF[k]: v for k, v in fields.items()}}
+    try:
+        sl.load_approved("recTEST"); return ""
+    except SystemExit as e:
+        return str(e)
+def diary(name, tm):
+    cw.get_task = lambda tid: {"id": tid, "createdTime": "2026-10-02T09:00:00.000Z", "fields": {cw.AF["name"]: name, cw.TEAM_MEMBER: [tm]}}
+    try:
+        cw.cmd_create(argparse.Namespace(task="recTEST", handled=False, dry_run=True)); return ""
+    except SystemExit as e:
+        return str(e)
+    except Exception as e:
+        return "past the trial stop"
+print(json.dumps({"letter": letter({"name": a["name"], "teamMember": ["${PROPERTY_TM}"]}), "letterAgent": letter({"name": "x", "sentForApprovalBy": ["${RENT_TM}"]}),
+                  "letterOrdinary": letter({"name": "COMPLIANCE: notice"}),
+                  "diary": diary(a["name"], "${PROPERTY_TM}"), "diaryOrdinary": diary("Inspection at 1 Example Road", "${PROPERTY_TM}")}))`, TASK);
+    expect(r.letter).toMatch(/is a trial task and no letter is posted/);
+    expect(r.letterAgent).toMatch(/is a trial task and no letter is posted/);
+    expect(r.letterOrdinary).not.toMatch(/trial/);
+    expect(r.diary).toMatch(/is a trial task and no diary entry is made/);
+    expect(r.diaryOrdinary).not.toMatch(/trial/);
   });
 });

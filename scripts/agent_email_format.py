@@ -398,12 +398,32 @@ TRIAL_AGENTS = {
                          "drafts and nothing is sent to a tenant",
 }
 TRIAL_STAMP = "TRIAL CHECKED"
+# THE TASK IS ON TRIAL TOO, WHOEVER HOLDS IT (independent review, 2 Oct 2026). A trial lane's task
+# that is re-routed, reassigned or resubmitted under another agent's id would otherwise become an
+# ordinary card that sends on approval. So a task carrying the lane's own marks stays on trial for
+# as long as its agent is listed above. Either mark is enough: a name can be edited and a Notes
+# line can be lost. Kept identical to TASK_PREFIX and KEY_MARK in scripts/rent-check.py
+# (tests/cash-flow-voids-agent.test.js).
+TRIAL_TASK_MARKS = {
+    "rec7aHLK1Q8fMLRXH": {"prefix": "RENT LATE: ", "note": "RENT CHECK KEY: "},
+}
+# The output shapes that act without send-email.py: Roy's handover email, the diary, the Friday
+# payment list, signing and the post. The lead-in is what scripts/payment-run.py also accepts, so
+# a bold, quoted, bulleted or numbered heading cannot slip through.
+TRIAL_ACTING_SHAPE_RE = re.compile(
+    r"^[ \t>*_#\-•]*(?:\d+[.)][ \t]*)?[*_]*"
+    r"(PASS TO ROY:|CALENDAR:|MARK FOR PAYMENT|DOCUMENT:|POST:|SIGNERS:)", re.I | re.M)
 
 
-def trial_problem(agent_ids):
-    """Why a card raised by any of these Team Members rows may NOT be carried out, or ""."""
+def trial_problem(agent_ids, name="", notes=""):
+    """Why this task may NOT be carried out, or "": it was raised by a trial agent, or it is a
+    trial lane's own task whoever holds it now."""
     for agent_id in agent_ids or []:
         if agent_id in TRIAL_AGENTS:
+            return TRIAL_AGENTS[agent_id]
+    for agent_id, marks in TRIAL_TASK_MARKS.items():
+        if agent_id in TRIAL_AGENTS and (str(name or "").startswith(marks["prefix"])
+                                         or marks["note"] in str(notes or "")):
             return TRIAL_AGENTS[agent_id]
     return ""
 
