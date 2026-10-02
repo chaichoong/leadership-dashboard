@@ -112,7 +112,12 @@ def plan(ledger, slots, gaps=None, free=None, start=None):
     free = shutil.disk_usage(WORK if os.path.isdir(WORK) else os.path.expanduser("~")).free if free is None else free
     start = start_day() if start is None else start
     waiting = sorted({v["day"] for v in ledger.values() if v.get("status") == "new"})
-    cont = [d for d in waiting if d not in gaps and (not start or d >= start)]
+    # Kevin, 2 Oct 2026: "anything that is sent back for editing goes to the back of the queue... it doesn't block any
+    # new episodes going out". A day render.redo_day put back to 'new' carries a `reset` note. It is older than every
+    # new day, so it took slot 1 and a new episode lost its place. It now renders AFTER the night's new days, on top
+    # of the slots, never instead of one.
+    redo = sorted({v["day"] for v in ledger.values() if v.get("status") == "new" and v.get("reset")} - set(gaps))
+    cont = [d for d in waiting if d not in gaps and d not in redo and (not start or d >= start)]
     gap_ok, notes = [], []
     for d in sorted(d for d in waiting if d in gaps):
         if day_fits(ledger, d, free): gap_ok.append(d)
@@ -125,6 +130,8 @@ def plan(ledger, slots, gaps=None, free=None, start=None):
         if gap_ok: days.append(gap_ok.pop(0)); notes.append("slot %d: gap day %d (oldest missing)" % (slot + 1, days[-1])); continue
         if cont: days.append(cont.pop(0)); notes.append("slot %d: day %d %s" % (slot + 1, days[-1], "continues the run (gap days paused)" if paused else "(no gap day fits, so the run moves on)")); continue
         break
+    if slots > 0:
+        for d in redo: days.append(d); notes.append("redo: day %d (sent back) re-renders after the night's new episodes" % d)
     return days, notes
 
 
@@ -796,7 +803,7 @@ def selftest():
     assert pull_window_minutes(2 * gb) == 40 and pull_window_minutes(4 * gb) == 40 and pull_window_minutes(18 * gb) == 180, "40 min per 4 GB, floor 40"
     led = {"g": {"day": 1799, "size": 18 * gb, "status": "new"}, "c": {"day": 2054, "size": 4 * gb, "status": "new"}}
     assert "SHORT by" in disk_line(led, 30 * gb) and "day 1799" in disk_line(led, 30 * gb) and "fits" in disk_line(led, 60 * gb) and "nothing waiting" in disk_line({}, 60 * gb)
-    print(json.dumps({"checks": 34, "failed": []}))
+    print(json.dumps({"checks": 38, "failed": []}))
 
 
 def _selftest_gap_order():
@@ -821,6 +828,18 @@ def _selftest_gap_order():
     days, _ = plan(led, 3, gaps=set(), free=100 * gb, start=2054)
     assert days == [2054, 2055, 2056], "no gap list: three continuity days"
     assert 2053 not in plan(led, 9, gaps=gaps, free=100 * gb, start=2054)[0], "nothing older than the takeover day is a continuity day"
+    # 2 Oct 2026, the real night: 2081 sent back and set to re-render (render.redo_day stamps `reset`), 2084 and 2085 new.
+    # It was the oldest waiting day, so it took slot 1 and 2085 lost its place. It goes after the new days, on top of them.
+    rd = {"r1": {"day": 2081, "date": "2026-02-10", "seq": 1, "size": 1 * gb, "status": "new", "reset": "2 Oct 2026: Learnings cut from the wrong section"},
+          "r2": {"day": 2081, "date": "2026-02-10", "seq": 2, "size": 1 * gb, "status": "new", "reset": "2 Oct 2026: Learnings cut from the wrong section"},
+          "n1": {"day": 2084, "date": "2026-02-13", "seq": 1, "size": 1 * gb, "status": "new"}, "n2": {"day": 2085, "date": "2026-02-14", "seq": 1, "size": 1 * gb, "status": "new"},
+          "n3": {"day": 2086, "date": "2026-02-15", "seq": 1, "size": 1 * gb, "status": "new"}}
+    days, notes = plan(rd, 2, gaps=set(), free=100 * gb, start=2054)
+    assert days == [2084, 2085, 2081], "a sent-back day renders after the night's new episodes, never instead of one: %s" % days
+    assert any("redo: day 2081" in n for n in notes), notes
+    assert plan({k: v for k, v in rd.items() if k[0] == "r"}, 2, gaps=set(), free=100 * gb, start=2054)[0] == [2081], "with nothing new waiting the redo still renders"
+    assert 2081 in plan(rd, 10 ** 6, gaps=set(), free=100 * gb, start=2054)[0], "the night still reaches it (content_report.stuck_sent_back asks this way)"
+    assert plan(dict(rd, r1=dict(rd["r1"], status="rendered"), r2=dict(rd["r2"], status="rendered")), 2, gaps=set(), free=100 * gb, start=2054)[0] == [2084, 2085], "once re-rendered it is no longer waiting"
     assert choose_next(led, day=2054) == "b" and choose_next(led, day=1808) == "g2" and choose_next(led, day=1900) is None
     pf = os.path.join(tempfile.gettempdir(), "od-gap-pause-%d" % os.getpid())
     assert not gaps_paused(pf); open(pf, "w").write("Kevin 15 Sep 2026\n"); assert gaps_paused(pf); os.remove(pf)
