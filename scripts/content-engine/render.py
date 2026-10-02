@@ -348,7 +348,7 @@ SHOW_NAME_DAY_RE = re.compile(r"\d,?\d{3}(?:st|nd|rd|th)?[\s.,;:…–—-]*$")
 # "kind" can end the caption before ("...for those kind" | "of my diary so to"), and a real line can carry the same
 # filler ("the learnings kind of from my diary"), which still counts (review, 2 Oct 2026).
 ASIDE_RE = re.compile(r"(?:kind|sort)\s+of\s", re.I)
-ASIDE_LEAD_RE = re.compile(r"\b(?:kind|sort)\s*$", re.I)
+ASIDE_LEAD_RE = re.compile(r"\b(?:kind|sort)\W*$", re.I)
 LEARN_LEAD_RE = re.compile(r"\b(?:learn\w*|lesson\w*)\W+(?:\w+\W+){0,2}$", re.I)
 
 
@@ -359,7 +359,7 @@ def lfmd_start(text, before=""):
         show = (m.group("prep") or "").lower() == "of" and (m.group("det") or "").lower() == "the"
         if show and SHOW_NAME_DAY_RE.search(before + " " + text[:m.start("prep")]): continue
         lead = before + " " + text[:m.start()]
-        aside = ASIDE_RE.match(m.group(0)) or (m.group(0).lower().startswith("of ") and ASIDE_LEAD_RE.search(lead))
+        aside = ASIDE_RE.match(m.group(0)) or (re.match(r"of\s", m.group(0), re.I) and ASIDE_LEAD_RE.search(lead))
         if aside and not LEARN_LEAD_RE.search(lead): continue
         return m
     return None
@@ -1427,6 +1427,7 @@ def selftest():
     assert lfmd_window([(0, 5, "I went for my dive this morning"), (40, 50, "stay positive")]) is None, "'for my dive' without 'today' is not the section"
     assert lfmd_window([(0, 5, "that paid for my dividends today"), (40, 50, "stay positive")]) is None, "only dive, diver, dives"
     assert lfmd_window([(0, 3, "this vlog for those kind"), (3, 6, "of my diary so to"), (40, 50, "stay positive")]) is None, "the aside split after 'kind' is still the aside"
+    assert lfmd_start("of\nmy diary so", "those kind,") is None, "a line break or a comma in the join changes nothing"
     assert lfmd_window([(0, 5, "the learnings kind of my diary today are"), (40, 50, "stay positive")]) == (0, 50), "a real line with the same filler still counts"
     assert lfmd_window([(0, 3, "so the learnings sort"), (3, 6, "of my diary today are"), (40, 50, "stay positive")]) == (3, 50), "and split over two captions (the last caption that starts it, as before)"
     assert lfmd_window([(0, 5, "I want to dive into the numbers"), (40, 50, "stay positive")]) is None
@@ -1529,7 +1530,7 @@ def selftest():
             except RuntimeError as exc: assert "test" in str(exc), str(exc)
         good = os.path.join(td, "ok.srt"); open(good, "w").write(srt)
         assert check_captions(good, "test") == 2
-    print(json.dumps({"checks": 54, "failed": []}))
+    print(json.dumps({"checks": 55, "failed": []}))
 
 
 if __name__ == "__main__":

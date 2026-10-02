@@ -135,9 +135,11 @@ def plan(ledger, slots, gaps=None, free=None, start=None):
     # One redo for every two new slots, at least one, oldest first (review, 2 Oct 2026): a day takes about two hours
     # to pull and render and the job is stopped at nine, so two new days and one redo fit and five redos do not. The
     # redo is last, so it would be the one killed mid-render, with the copy, cards and publishing steps after it.
+    # A slot no new day filled goes to a waiting redo as well (second review).
     if slots > 0:
-        for d in redo[:max(1, slots // 2)]: days.append(d); notes.append("redo: day %d (sent back) re-renders after the night's new episodes" % d)
-        for d in redo[max(1, slots // 2):]: notes.append("redo: day %d (sent back) waits for another night: one redo for every two new episodes" % d)
+        room = max(1, slots // 2) + (slots - len(days))
+        for d in redo[:room]: days.append(d); notes.append("redo: day %d (sent back) re-renders after the night's new episodes" % d)
+        for d in redo[room:]: notes.append("redo: day %d (sent back) waits for another night: one redo for every two new episodes" % d)
     return days, notes
 
 
@@ -809,7 +811,7 @@ def selftest():
     assert pull_window_minutes(2 * gb) == 40 and pull_window_minutes(4 * gb) == 40 and pull_window_minutes(18 * gb) == 180, "40 min per 4 GB, floor 40"
     led = {"g": {"day": 1799, "size": 18 * gb, "status": "new"}, "c": {"day": 2054, "size": 4 * gb, "status": "new"}}
     assert "SHORT by" in disk_line(led, 30 * gb) and "day 1799" in disk_line(led, 30 * gb) and "fits" in disk_line(led, 60 * gb) and "nothing waiting" in disk_line({}, 60 * gb)
-    print(json.dumps({"checks": 43, "failed": []}))
+    print(json.dumps({"checks": 44, "failed": []}))
 
 
 def _selftest_gap_order():
@@ -852,6 +854,8 @@ def _selftest_gap_order():
     assert days == [2084, 2085, 2075], "one redo a night at two slots, the oldest first: %s" % days
     assert sum("waits for another night" in n for n in notes) == 4, notes
     assert set(plan(five, 10 ** 6, gaps=set(), free=100 * gb, start=2054)[0]) >= {2075, 2077, 2079, 2080, 2081}, "every redo day is still reachable"
+    only_redo = {k: v for k, v in five.items() if v.get("reset")}
+    assert plan(only_redo, 2, gaps=set(), free=100 * gb, start=2054)[0] == [2075, 2077, 2079], "slots no new day filled go to waiting redo days"
     gapredo = dict(rd, g={"day": 1808, "date": "2025-05-13", "seq": 1, "size": 18 * gb, "status": "new", "reset": "x"})
     assert plan(gapredo, 2, gaps={1799, 1808}, free=100 * gb, start=2054)[0] == [2084, 1808, 2081], "a sent-back gap day takes its gap slot, as any gap day"
     assert plan(gapredo, 2, gaps={1799, 1808}, free=20 * gb, start=2054)[0] == [2084, 2085, 2081], "and still waits whole when its clip does not fit the disk"

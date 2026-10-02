@@ -37,7 +37,10 @@ Any other day-numbered name (`2066 Full-Real.insv`, `2006 Full (1).insv`) is ski
 **The night's order** (`watch.py plan`): the configured number of new days first, oldest first. A day Kevin sent
 back and `render.py redo-day` set to re-render goes after them, on top of the night's slots, never instead of one
 (Kevin, 2 Oct 2026: "anything that is sent back for editing goes to the back of the queue"). Until then the
-sent-back day was the oldest waiting day, took slot 1, and a new episode lost its place.
+sent-back day was the oldest waiting day, took slot 1, and a new episode lost its place. One redo for every two
+new slots, at least one, oldest first (a day takes about two hours and the job stops at nine); a second
+sent-back day waits for the next night and the plan says so. The copy step (`platform_copy.py run --pending`)
+follows the same order: new days first, and the oldest sent-back day always gets its copy.
 
 **2. Pull one clip** (`watch.py next`)
 The oldest waiting clip comes down to the local work folder. One per run, never more than two waiting

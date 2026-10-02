@@ -417,11 +417,17 @@ def pending_order(recs, sent_back, limit):
     """Which episodes get tonight's copy: new days first, oldest first, a day Kevin sent back after them (Kevin, 2 Oct
     2026: "anything that is sent back for editing goes to the back of the queue"). Until then the first `limit`
     records came back in the table's own order, so on a night with one more render than the limit a new episode
-    could be the one left without copy, and with no copy it gets no card (review, 2 Oct 2026)."""
+    could be the one left without copy, and with no copy it gets no card (review, 2 Oct 2026). The oldest sent-back
+    day always gets its copy, on top of the limit when new days fill it: last in the order every night, it would
+    otherwise wait for ever behind a backlog, and its card could never go back to him (second review)."""
     def day(rec):
         m = re.search(r"Episode (\d+)", rec["fields"].get("Content Name", ""))
         return int(m.group(1)) if m else None
-    return sorted((r for r in recs if day(r) is not None), key=lambda r: (day(r) in sent_back, day(r)))[:limit]
+    order = sorted((r for r in recs if day(r) is not None), key=lambda r: (day(r) in sent_back, day(r)))
+    take = order[:limit]
+    redo = [r for r in order if day(r) in sent_back]
+    if redo and not any(day(r) in sent_back for r in take): take.append(redo[0])
+    return take
 
 
 def run_pending(limit=3):
@@ -481,8 +487,13 @@ def selftest():
     # the new episode 2084 got no copy and no card
     rows = [{"fields": {"Content Name": "Episode %d Full Episode" % d}} for d in (2081, 2085, 2084)]
     names = lambda rs: [int(re.search(r"\d+", r["fields"]["Content Name"]).group(0)) for r in rs]
-    assert names(pending_order(rows, {2081}, 2)) == [2084, 2085], "new days get the night's copy first, oldest first"
-    assert names(pending_order(rows, {2081}, 3)) == [2084, 2085, 2081], "the sent-back day gets its copy when there is room"
+    assert names(pending_order(rows, {2081}, 2)) == [2084, 2085, 2081], "new days first, oldest first; the sent-back day on top of the limit, never left out"
+    assert names(pending_order(rows, {2081}, 3)) == [2084, 2085, 2081], "and inside the limit when there is room"
+    assert names(pending_order(rows, {2081}, 1)) == [2084, 2081]
+    # a backlog (a night whose copy all failed): the sent-back day still gets its copy the next night
+    more = rows + [{"fields": {"Content Name": "Episode %d Full Episode" % d}} for d in (2086, 2087, 2079)]
+    assert names(pending_order(more, {2081, 2079}, 2)) == [2084, 2085, 2079], "one sent-back day a night, the oldest"
+    assert names(pending_order(rows, set(), 2)) == [2081, 2084], "nothing sent back: the limit as it was, oldest first"
     assert names(pending_order(rows + [{"fields": {"Content Name": "no number"}}], set(), 9)) == [2081, 2084, 2085]
     p = build_prompt("Short Form Video", "hello", "Episode 2195 Short", 2195)
     assert "hello" in p and "STREAK DAY: 2195" in p and "[ADD YOUTUBE LINK]" in p and "${" not in p
@@ -533,7 +544,7 @@ def selftest():
     assert unfilled_work(fulls, {2069}, find=recs.get) == [(2071, "Learnings From My Diary"), (2071, "Short Form Video")], \
         "an approved day is never rewritten; a missing record counts; a record with copy does not"
     _selftest_run_day_isolation()
-    print(json.dumps({"checks": 19, "failed": []}))
+    print(json.dumps({"checks": 23, "failed": []}))
 
 
 def _selftest_run_day_isolation():
