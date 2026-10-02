@@ -758,11 +758,27 @@ def cmd_scan(back_hours, sleep=time.sleep):
     }))
 
 
-def cmd_act(msg_id, action, reason, label_num=None, override=None):
+def cmd_act(msg_id, action, reason, label_num=None, override=None, task_id=None):
     ctx = read_scan_cache().get(msg_id, {})
     blocked = act_block_reason(ctx, action, override)
     if blocked:
         fail(blocked)
+    if action == "file":
+        blocked = file_block_reason(label_num, task_id)
+        if blocked:
+            fail(blocked)
+        if str(label_num or "") == CERTIFICATE_LABEL:
+            # The id must be a real TASK. A GET by record id ignores the table in the
+            # URL (CLAUDE.md), so a property or certificate id would pass one; listing
+            # the Tasks table for that id proves which table it lives in.
+            found = _airtable_get_all(TASKS_TABLE, [
+                ("filterByFormula", "RECORD_ID()='%s'" % task_id.strip()),
+                ("maxRecords", "1"), ("fields[]", "fldgFjGBw6bTKJFCD")])
+            if not found:
+                fail("file --label-num 10 refused: %s is not a record in the Tasks table. "
+                     "Pass the rec id of the task that will file this certificate."
+                     % task_id.strip())
+            reason = "certificate filing task %s — %s" % (task_id.strip(), reason)
     if override and override.strip() and ctx.get("auto_reply"):
         reason = "OVERRIDE auto-reply flag (%s): %s — %s" % (
             ctx.get("auto_reply"), override.strip(), reason)
@@ -1452,6 +1468,29 @@ def act_block_reason(ctx, action, override):
             % (action, ctx.get("auto_reply")))
 
 
+# Certificates are never filed without a task (Kevin, 2 Oct 2026). On 24 Aug an
+# electrical report was filed under label 10 and archived with no task, by a rule
+# written while "its own agent is being built". The Property Administration agent
+# went live on 2 Sep and the rule was never changed, so the report sat in a label
+# and the compliance book got a placeholder. Label 10 is still where the mail
+# lives; it now needs the id of the task that will file the document.
+CERTIFICATE_LABEL = "10"
+TASK_ID_RE = re.compile(r"^rec[A-Za-z0-9]{14}$")
+
+
+def file_block_reason(label_num, task_id):
+    """Why `act --do file` must refuse, or None."""
+    if str(label_num or "") != CERTIFICATE_LABEL:
+        return None
+    if task_id and TASK_ID_RE.match(str(task_id).strip()):
+        return None
+    return ("file --label-num 10 refused: certificate and compliance mail is never filed "
+            "without a task (Kevin, 2 Oct 2026). Create the Property Administration task "
+            "first (Step 4c), then repeat with --task <the task's rec id>. A certificate "
+            "that sits in a label is one the compliance book never hears about, and the "
+            "visit gets bought twice.")
+
+
 def _airtable_get_all(path_base, params):
     records, offset = [], None
     while True:
@@ -1973,6 +2012,10 @@ def selftest():
     check("act refuses label13 on a flagged message", act_block_reason(flagged, "label13", "") is not None)
     check("act still archives a flagged message", act_block_reason(flagged, "archive", None) is None)
     check("act still files a flagged message", act_block_reason(flagged, "file", None) is None)
+    check("certificate mail is not filed without a task", file_block_reason("10", None) is not None)
+    check("a task NAME is not a task id", file_block_reason("10", "COMPLIANCE: file certificate") is not None)
+    check("certificate mail files once its task is named", file_block_reason("10", "recAbCdEfGhIjKlMn") is None)
+    check("the other file lanes need no task", file_block_reason("6", None) is None and file_block_reason(11, None) is None)
     check("an override with a reason lifts the refusal",
           act_block_reason(flagged, "label12", "a person wrote this") is None)
     check("unflagged mail is unaffected", act_block_reason({"auto_reply": None}, "label12", None) is None)
@@ -2875,7 +2918,7 @@ def main(argv):
         if not msg_id or not action:
             fail("act needs --id and --do")
         cmd_act(msg_id, action, opt("--reason", ""), opt("--label-num"),
-                opt("--override"))
+                opt("--override"), opt("--task"))
     elif cmd == "note":
         msg_id = opt("--id")
         action = opt("--do")

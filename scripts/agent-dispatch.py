@@ -75,6 +75,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 # Standing holds (24 Sep 2026): Kevin's rulings that stay true only until an
 # event, written once for the whole team. The queue never hands one to an agent.
 import standing_holds  # noqa: E402
+import certificate_watch  # noqa: E402
 from agent_email_format import (  # noqa: E402
     CARRY_OUT_MARKER,
     CARRY_OUT_RE,
@@ -4468,6 +4469,30 @@ def cmd_submit(args):
             "       you saw first:\n"
             f"         python3 scripts/agent-dispatch.py unblock {args.task} --evidence \"<what you saw>\"")
 
+    # THE BOUGHT-TWICE GATE (Kevin, 2 Oct 2026). A quote request or a booking
+    # for a certificate the book already holds, or that a paid bank line says
+    # was already done, is refused before it can reach a contractor. It reads
+    # the task already fetched above, and only touches Airtable again when the
+    # output IS a purchase step on a COMPLIANCE task. A check that cannot run
+    # warns and lets the card through: Kevin still sees it, and the daily
+    # paid-but-not-filed check is the backstop.
+    try:
+        try:
+            _subject = (parse_email_output(output) or {}).get("subject") or ""
+        except EmailFormatError:
+            _subject = ""
+        bought = certificate_purchase_problem(tf_early.get(AF["name"], "") or "", output, _subject,
+                                              tf_early.get(AF["description"], "") or "")
+    except (SystemExit, Exception) as exc:                # noqa: BLE001
+        bought = ""
+        print(f"WARNING: bought-twice check could not run for {args.task}: {str(exc)[:160]}",
+              file=sys.stderr)
+    if bought:
+        sys.exit(
+            f"ERROR: refusing to submit {args.task}: {bought}\n"
+            "       Check with: python3 scripts/agent-dispatch.py certificate-gaps "
+            "--property <rec> --type <type>")
+
     # THE FILE GATE (Kevin, 8 Sep 2026): the document the action uses is on
     # the card, from this round, or the submit is refused.
     attach_names = {os.path.basename(p) for p in (getattr(args, "attach", None) or [])}
@@ -4710,6 +4735,13 @@ def cmd_submit(args):
     if kevin_step or cur_wall:
         # A step Kevin still owes is not information, and not a close.
         files_itself = False
+    # A task that received a certificate is not "nothing to decide" until the
+    # certificate is in the book (2 Oct 2026): the 16 Sep invoice task reported
+    # "payment verified" and closed itself with the gas record unfiled. It goes
+    # to the queue as a card instead, where the unfiled certificate is visible.
+    cert_owed = task_fields_owe_certificate(args.task, tf)
+    if cert_owed:
+        files_itself = False
     if files_itself:
         stamp = datetime.now(LONDON).strftime("%d %b %Y %H:%M")
         note = (f"[{stamp} — agent-dispatch] FILED, not queued: "
@@ -4747,6 +4779,12 @@ def cmd_submit(args):
     # tierChecked: the two verifiable closes ran their own tier check inside
     # decision_level (name, description, banner — never the Notes, which hold
     # every agent's run log), so is_tier1 from the Notes must not re-veto them.
+    if cert_owed and level["level"] == AUTONOMY_ACT and level.get("carry") != "roy" \
+            and level.get("rule") != "quote-request":
+        # Level A would end this task Completed (a close, a diary entry, a fixed
+        # redirect) with the certificate unfiled. It goes to the queue as a card.
+        level = dict(level, level=AUTONOMY_APPROVE,
+                     why="a certificate arrived on this task and is not filed yet")
     if level["level"] == AUTONOMY_ACT and (not is_tier1 or level.get("tierChecked")) and not (kevin_step or cur_wall):
         return handle_without_kevin(args, output, trec, level, to_attach)
     if level["level"] == AUTONOMY_APPROVE and level["category"] not in ("other",):
@@ -6684,6 +6722,28 @@ def signin_done(host, sites, groups=None):
     return {"site": host, "label": sites[host].get("label"), "handedBack": handed}
 
 
+def task_owes_certificate(task_id, task):
+    """Why a task may not close yet, or "". `task` carries name, description,
+    notes and attachments (a task_view, or the same four keys). The compliance
+    book is read only when the task could owe a filing at all, so an ordinary
+    close costs nothing; an unreadable book reads as owed, never as clear."""
+    if not certificate_watch.certificate_owed(task, []):
+        return ""
+    try:
+        linked = [c for c in fetch_certificates(refresh=True) if task_id in c["taskIds"]]
+    except Exception as exc:                              # noqa: BLE001
+        return ("this task names a certificate and a file arrived on it, and the compliance "
+                f"book could not be read to check it was filed ({str(exc)[:120]})")
+    return certificate_watch.certificate_owed(task, linked)
+
+
+def task_fields_owe_certificate(task_id, tf):
+    """task_owes_certificate for a raw Airtable fields dict."""
+    return task_owes_certificate(task_id, {
+        "name": tf.get(AF["name"]), "description": tf.get(AF["description"]),
+        "notes": tf.get(AF["notes"]), "attachments": tf.get(AF["attachments"]) or []})
+
+
 def cmd_complete(args):
     t = task_view(get_task(args.task))
     if t["outcome"] not in APPROVED:
@@ -6744,6 +6804,9 @@ def cmd_complete(args):
     # change, so this cannot be blocked on a base edit. CARRIED_OUT_MARK is the
     # machine-readable half — verify re-reads the LIVE record for it, never
     # trusting what the run claimed.
+    if args.keep_open and (getattr(args, "no_certificate", "") or "").strip():
+        sys.exit(f"ERROR: refusing to complete {args.task}: --no-certificate closes a task, "
+                 "and --keep-open leaves it open. Use one. The reason would be dropped.")
     if args.keep_open:
         stamp = datetime.now(LONDON).strftime("%d %b %Y")
         detail = (args.note or "the approved action").strip()
@@ -6755,6 +6818,35 @@ def cmd_complete(args):
         print(json.dumps({"carriedOut": args.task, "keptOpen": True,
                           "status": t["status"]}))
         return
+
+    # THE CERTIFICATE-OWED GATE (Kevin, 2 Oct 2026). A gas safety record came
+    # in on 16 Sep on a task named for its INVOICE. The agent checked the
+    # payment three times, wrote "no certificate filed" in its own output, and
+    # closed the task; the filing gate in verify only covers engine-raised
+    # renewals. The book read "missing" for 18 days after a paid visit. Any
+    # task that names a certificate and received a file now closes only when
+    # the certificate is filed, or the agent says on the record what the file
+    # actually is. Refused HERE because verify runs after the close.
+    no_cert = (getattr(args, "no_certificate", "") or "").strip()
+    no_cert_note = ""
+    if no_cert:
+        stamp = datetime.now(LONDON).strftime("%d %b %Y")
+        no_cert_note = (f"[{stamp} — agent] {certificate_watch.NO_CERTIFICATE_MARK} "
+                        f"{no_cert}")
+    else:
+        owed = task_owes_certificate(args.task, t)
+        if owed:
+            sys.exit(
+                f"ERROR: refusing to complete {args.task}: {owed}.\n"
+                "       A paid visit with no certificate in the book gets bought twice.\n"
+                "       File it first:\n"
+                f"         python3 scripts/agent-dispatch.py certificate {args.task} "
+                "--property <rec> --type <type> --renewal YYYY-MM-DD --file <path>\n"
+                "       (save the email's attachment with scripts/inbound-triage.py "
+                "attachments --q ...).\n"
+                "       If the file that arrived is NOT a certificate, say what it is:\n"
+                f"         python3 scripts/agent-dispatch.py complete {args.task} "
+                "--no-certificate \"<it is a quote / an invoice only / a photo>\"")
 
     # THE BLOCKER GATE (Kevin, 25 Sep 2026). A task whose agent hit a wall is
     # not done because the wall was reported. Only the fix, or proof that the
@@ -6770,9 +6862,14 @@ def cmd_complete(args):
             f"         python3 scripts/agent-dispatch.py unblock {args.task} "
             "--evidence \"<what you saw that proves it>\"")
 
+    # Written with the close, never before it: a refused close leaves no mark.
+    declared = ({AF["notes"]: ((t["notes"] or "") + "\n\n" + no_cert_note).strip()[-90000:]}
+                if no_cert_note else {})
+
     patch_task(args.task, {
         AF["status"]: "Completed",
         AF["completion"]: now_iso(),
+        **declared,
     })
     ledger_append(args.task, "done")
     print(json.dumps({"completed": args.task}))
@@ -7584,7 +7681,12 @@ def cmd_verify(args):
         if (kind == "carry_out" and not a.get("keepOpen")
                 and PROPERTY_REC_ID in (live["teamMemberIds"]
                                         + live["sentForApprovalByIds"])
-                and ENGINE_RENEWAL_MARK in str(live["description"] or "")):
+                and (ENGINE_RENEWAL_MARK in str(live["description"] or "")
+                     or ENGINE_FILING_MARK in str(live["description"] or ""))
+                # A filing task the agent closed by saying, on the record, what
+                # the payment was really for is closed correctly.
+                and not (ENGINE_FILING_MARK in str(live["description"] or "")
+                         and certificate_watch.NO_CERTIFICATE_MARK in str(live["notes"] or ""))):
             compliance_closes.append((a["task"], str(live["name"])[:60]))
         if kind == "carry_out":
             # Two legitimate end states, and each is verified against the field
@@ -8626,6 +8728,9 @@ COMPLIANCE_TASK_PREFIX = "COMPLIANCE:"
 # name inbound compliance mail with the same prefix, and an inspection reply
 # has no certificate to file.
 ENGINE_RENEWAL_MARK = "renewal raised automatically by agent-dispatch"
+# The same contract for a filing the engine raises because a certificate was
+# PAID FOR and never filed (2 Oct 2026): it closes only with the document.
+ENGINE_FILING_MARK = certificate_watch.FILING_TASK_MARK
 
 
 def property_view(rec):
@@ -8667,8 +8772,11 @@ def cert_view(rec):
         "unitIds": links(f.get(CERT_FIELDS["unit"])),
         "status": sel(f.get(CERT_FIELDS["status"])),
         "renewalDate": (f.get(CERT_FIELDS["renewal"]) or "")[:10],
-        "hasFile": bool(f.get(CERT_FIELDS["attachments"])),
+        # A stand-in file is not a document (2 Oct 2026: four rows held a
+        # 700-byte ...PLACEHOLDER.pdf and read as filed).
+        "hasFile": certificate_watch.has_real_file(f.get(CERT_FIELDS["attachments"])),
         "taskIds": links(f.get(CERT_FIELDS["tasks"])),
+        "created": str(rec.get("createdTime") or "")[:10],
     }
 
 
@@ -8953,6 +9061,196 @@ def ensure_renewal_tasks():
                       "renewalTasksCreated": created}))
 
 
+# PAID FOR BUT NEVER FILED (Kevin, 2 Oct 2026). The renewal trigger above only
+# sees certificates the book already holds. A visit that was booked, done and
+# paid for leaves a bank line and, if nobody files the document, nothing else:
+# the book says "missing" and the next run buys it again. This reads the paid
+# compliance lines straight from the bank and raises a filing task for each one
+# with no certificate filed around it. Rules: scripts/certificate_watch.py.
+TRANSACTIONS_TABLE = "tbln0gzhCAorFc3zB"
+TX_FIELDS = {"date": "fldoyQ6Rr9cHp3bgQ", "amount": "fldot7iisZeL3WrdR",
+             "name": "fldsbuAJCTsXHug4C", "costs": "fldGkpkVqSeiGvUGL",
+             "property": "fldvp44VfF8uTTthp"}
+COMPLIANCE_SUBCATEGORY = "COGS Property Compliance"
+# Book type for each task-name certificate label (certificate_type()).
+BOOK_TYPE_FOR = {"GSC": "GSC", "EICR": "EICR", "EPC": "EPC",
+                 "INSURANCE": "Landlord Insurance"}
+
+
+def fetch_compliance_payments():
+    """Paid compliance lines from the bank, newest lookback window only.
+
+    The sub-category is matched by its display name through ARRAYJOIN, which is
+    what ARRAYJOIN over a link returns. A renamed sub-category would return zero
+    and read as "nothing paid", so the caller checks an all-time control."""
+    days = certificate_watch.PAYMENT_LOOKBACK_DAYS + 1
+    rows = query_records(
+        TRANSACTIONS_TABLE,
+        formula=("AND(FIND('" + COMPLIANCE_SUBCATEGORY + "', ARRAYJOIN({Chart of Accounts - "
+                 "Sub Category})), IS_AFTER({**Date}, DATEADD(TODAY(), -" + str(days) + ", 'days')))"),
+        fields=list(TX_FIELDS.values()))
+    out = []
+    for r in rows:
+        f = r.get("fields", {}) or {}
+        out.append({"id": r.get("id"), "date": str(f.get(TX_FIELDS["date"]) or "")[:10],
+                    "amount": float(f.get(TX_FIELDS["amount"]) or 0),
+                    "name": str(f.get(TX_FIELDS["name"]) or ""),
+                    "costIds": links(f.get(TX_FIELDS["costs"])),
+                    "propertyIds": links(f.get(TX_FIELDS["property"]))})
+    return out
+
+
+FILING_TX_RE = re.compile(r"\(transaction (rec[A-Za-z0-9]{14})\)")
+
+
+def filing_tasks_by_transaction():
+    """{transaction id: "resolved" | "raised"} from the filing tasks themselves.
+
+    Airtable is the record, not a state file: a file lost in a host move would
+    re-raise every payment, and a payment an agent answered on the record ("it
+    was a repair") would block that house's purchases for months. A task is
+    "resolved" when it carries the no-certificate mark, OR a certificate row
+    with a real file is linked to it. The link is what answers the payment:
+    judged by date and type alone, a certificate attached to an older row, or
+    one whose type the bank text does not name, would leave the payment
+    "unfiled" after a correct close and block the house for months. Any other
+    filing task for the transaction, open or closed, means it was raised."""
+    rows = query_records(
+        TASKS, formula="FIND('" + ENGINE_FILING_MARK + "', {Description})",
+        fields=[AF["description"], AF["notes"]])
+    filed_tasks = {tid for c in fetch_certificates() if c["hasFile"] for tid in c["taskIds"]}
+    out = {}
+    for r in rows:
+        f = r.get("fields", {}) or {}
+        m = FILING_TX_RE.search(str(f.get(AF["description"]) or ""))
+        if not m:
+            continue
+        resolved = (certificate_watch.NO_CERTIFICATE_MARK in str(f.get(AF["notes"]) or "")
+                    or r.get("id") in filed_tasks)
+        if resolved or m.group(1) not in out:
+            out[m.group(1)] = "resolved" if resolved else "raised"
+    return out
+
+
+def paid_certificate_gaps(filing_tasks=None):
+    """(unfiled, unplaced, payments_read): see certificate_watch.paid_without_certificate."""
+    payments = fetch_compliance_payments()
+    if not payments and not query_records(
+            TRANSACTIONS_TABLE, max_records=1, fields=[TX_FIELDS["date"]],
+            formula="FIND('" + COMPLIANCE_SUBCATEGORY + "', ARRAYJOIN({Chart of Accounts - Sub Category}))"):
+        sys.exit("ERROR: control failed: no transaction has ever carried the sub-category "
+                 f"'{COMPLIANCE_SUBCATEGORY}'. It was renamed or the read is broken; the "
+                 "paid-but-not-filed check cannot run.")
+    certs = fetch_certificates()
+    if not certs:
+        sys.exit("ERROR: control failed: the compliance book read returned no "
+                 "certificates, so every payment would read as unfiled.")
+    if filing_tasks is None:
+        filing_tasks = filing_tasks_by_transaction()
+    unfiled, unplaced = certificate_watch.paid_without_certificate(
+        payments, certs, today_london(),
+        resolved_ids=[tx for tx, state in filing_tasks.items() if state == "resolved"])
+    return unfiled, unplaced, len(payments)
+
+
+def ensure_paid_certificates_filed():
+    """One filing task per compliance payment with no certificate in the book.
+    A payment fires once (its filing task is the record), and a payment with no
+    property on it gets a task too: a check that skips what it cannot place
+    reads as all clear."""
+    if property_agent_paused():
+        print(json.dumps({"agent": "property", "paused": True, "paidFilingTasksCreated": []}))
+        return
+    already = filing_tasks_by_transaction()
+    unfiled, unplaced, read = paid_certificate_gaps(already)
+    names = {p["id"]: p["short"] for p in fetch_properties()}
+    created = []
+    for p, placed in [(x, True) for x in unfiled] + [(x, False) for x in unplaced]:
+        if p["id"] in already:
+            continue
+        where = ", ".join(names.get(i, i) for i in p["propertyIds"]) if placed else "property not recorded"
+        name = (f"{COMPLIANCE_TASK_PREFIX} file the certificate paid for on "
+                f"{p['date']} - {where}")[:100]
+        raise_engine_task(
+            name, PROPERTY_REC_ID, "30 min",
+            f"PROPERTY COMPLIANCE — {ENGINE_FILING_MARK}. A compliance payment left the "
+            f"bank on {p['date']}: £{abs(p['amount']):,.2f}, \"{p['name'][:120]}\" "
+            f"(transaction {p['id']}), property: {where}. The compliance book holds no "
+            "certificate with a real document filed for that property around that date. "
+            "A paid visit with nothing filed gets bought a second time. "
+            + ("Find the certificate (the engineer's or Roy's email and its attachment, "
+               "the invoice email, both Drives) and file it with agent-dispatch.py "
+               "certificate. If the payment was not for a certificate, close with "
+               "complete --no-certificate \"<what it was for>\"."
+               if placed else
+               "The payment has no property on it, so it cannot be checked. Work out which "
+               "property it was for from the bank text and the invoice, then file the "
+               "certificate with agent-dispatch.py certificate, or close with complete "
+               "--no-certificate \"<what it was for>\"."))
+        created.append({"transaction": p["id"], "date": p["date"], "property": where})
+        already[p["id"]] = "raised"
+    print(json.dumps({"agent": "property", "compliancePaymentsRead": read,
+                      "paidWithNoCertificate": len(unfiled), "paymentsWithNoProperty": len(unplaced),
+                      "paidFilingTasksCreated": created}))
+
+
+def task_property_id(name, properties):
+    """The one property a task name is about, or "" when none or several."""
+    hits = [p["id"] for p in properties or []
+            if str(p.get("short") or "").strip()
+            and re.search(r"(?<![0-9A-Za-z])" + re.escape(str(p["short"]).strip()), str(name or ""), re.I)]
+    return hits[0] if len(hits) == 1 else ""
+
+
+def certificate_purchase_problem(name, output, mail_subject="", description=""):
+    """Why a COMPLIANCE quote request or booking must not go out, or "".
+
+    Only judged when the output IS a purchase step: a PASS TO ROY booking, or an
+    email whose subject asks for a quote. Anything it cannot place (no single
+    property in the name) is let through: the daily paid-but-not-filed check is
+    the backstop, and refusing unrelated work would teach agents to rename tasks."""
+    if not str(name or "").startswith(COMPLIANCE_TASK_PREFIX):
+        return ""
+    # The engine's own filing task exists BECAUSE of an unfiled payment: asking Roy
+    # or the engineer for the copy is the job, not a second purchase.
+    if ENGINE_FILING_MARK in str(description or ""):
+        return ""
+    # search with MULTILINE, not match: a tier-1 banner is prepended above it.
+    booking = re.search(r"^\s*PASS TO ROY:", output or "", re.I | re.M)
+    if not (booking or "quote" in str(mail_subject or "").lower()):
+        return ""
+    prop = task_property_id(name, fetch_properties())
+    if not prop:
+        return ""
+    unfiled, _unplaced, _read = paid_certificate_gaps()
+    return certificate_watch.purchase_block(
+        prop, BOOK_TYPE_FOR.get(certificate_type(name), ""), fetch_certificates(),
+        unfiled, today_london())
+
+
+def cmd_certificate_gaps(args):
+    """Read-only: what has been paid for and not filed, and whether a purchase
+    for one property and type is blocked. The agent runs this BEFORE sourcing a
+    quote. Exit 3 when --property/--type is blocked."""
+    unfiled, unplaced, read = paid_certificate_gaps()
+    names = {p["id"]: p["short"] for p in fetch_properties()}
+    show = lambda p: {"transaction": p["id"], "date": p["date"], "amount": p["amount"],  # noqa: E731
+                      "name": p["name"][:80],
+                      "property": [names.get(i, i) for i in p["propertyIds"]]}
+    out = {"compliancePaymentsRead": read, "paidWithNoCertificate": [show(p) for p in unfiled],
+           "paymentsWithNoProperty": [show(p) for p in unplaced]}
+    blocked = ""
+    if args.property:
+        if args.property not in names:
+            sys.exit(f"ERROR: {args.property} is not a Properties record")
+        blocked = certificate_watch.purchase_block(
+            args.property, args.type or "", fetch_certificates(), unfiled, today_london())
+        out["purchaseBlocked"] = blocked or False
+    print(json.dumps(out, indent=1))
+    if blocked:
+        sys.exit(3)
+
+
 # ONE WEEKLY CHASE FOR ROY'S STALE REPAIRS (Kevin, 17 Sep 2026). The Property
 # Administration file has promised since 2 Sep to follow up any repair task of
 # Roy's with no movement in 7 days, but nothing ever raised that follow-up: it
@@ -9108,6 +9406,11 @@ def cmd_certificate(args):
                  "certificate or policy runs out")
     if not os.path.isfile(args.file):
         sys.exit(f"ERROR: no such document to file: {args.file}")
+    if certificate_watch.is_placeholder({"filename": os.path.basename(args.file),
+                                         "size": os.path.getsize(args.file)}):
+        sys.exit(f"ERROR: {args.file} is a placeholder, not a document (named as one, or "
+                 f"under {certificate_watch.PLACEHOLDER_MAX_BYTES} bytes). File the real "
+                 "certificate, or leave the task open until it arrives.")
     # Every link is checked before anything is written: with typecast on,
     # Airtable resolves an unmatched string against the linked table's
     # primary field and MINTS a record for it, so a task name in place of a
@@ -9305,6 +9608,7 @@ SCORE_STEPS = (
     ("chase", ensure_chase_tasks),
     ("property", property_score),
     ("renewals", ensure_renewal_tasks),
+    ("paid-filings", ensure_paid_certificates_filed),
     ("roy-followups", ensure_roy_followups),
     ("quarterly-review", ensure_quarterly_review),
 )
@@ -9563,6 +9867,9 @@ def main():
                    help="record the carry-out but leave Status untouched")
     c.add_argument("--note", default="",
                    help="what was carried out (goes into Notes with --keep-open)")
+    c.add_argument("--no-certificate", default="", metavar="REASON",
+                   help="the file that arrived on this task is not a certificate "
+                        "(say what it is); recorded in Notes")
 
     v = sub.add_parser("verify")
     v.add_argument("--report", required=True)
@@ -9676,6 +9983,12 @@ def main():
     sg.add_argument("--pdf", required=True, help="the signed PDF on disk")
     sg.add_argument("--then", required=True, help="post | email")
 
+    cg = sub.add_parser("certificate-gaps",
+                        help="read-only: compliance payments with no certificate "
+                             "filed; with --property/--type, whether buying is blocked")
+    cg.add_argument("--property", default="", help="Properties record id")
+    cg.add_argument("--type", default="", help="book type: GSC, EICR, EPC, Landlord Insurance")
+
     ct = sub.add_parser("certificate",
                         help="file a certificate, licence or insurance policy "
                              "on the Property Certificates table — the ONE "
@@ -9709,7 +10022,7 @@ def main():
             "block": cmd_block, "unblock": cmd_unblock, "blockers": cmd_blockers,
             "attach": cmd_attach, "outcome": cmd_outcome,
             "reassign": cmd_reassign, "ledger": cmd_ledger,
-            "signed": cmd_signed, "signin-waiting": cmd_signin_waiting, "signin-done": cmd_signin_done, "signin-site": cmd_signin_site, "history": cmd_history, "certificate": cmd_certificate,
+            "signed": cmd_signed, "signin-waiting": cmd_signin_waiting, "signin-done": cmd_signin_done, "signin-site": cmd_signin_site, "history": cmd_history, "certificate": cmd_certificate, "certificate-gaps": cmd_certificate_gaps,
             "handover-property": cmd_handover_property,
             "clear-alerts": cmd_clear_alerts}[args.cmd](args) or 0
 
