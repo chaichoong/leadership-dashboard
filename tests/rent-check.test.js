@@ -121,8 +121,8 @@ print(json.dumps({"light": res["lights"]["recEX2"], "listed": list(rows), "worst
 
   it('3. cash flow voids that existed on the slate date: shown, counted, left alone', () => {
     const r = py(`
-ts = [tenancy("recEX3", 17, 900.00, status="CFV", start="2026-03-17", unit="Unit 9 – 2 Example Road"),
-      tenancy("recEX4", 15, 900.00, status="CFV Actioned", start="2026-04-17", unit="Unit 9 – 3 Example Road")]
+ts = [tenancy("recEX3", 17, 900.00, status="CFV", start="2026-03-11", unit="Unit 9 – 2 Example Road"),
+      tenancy("recEX4", 15, 900.00, status="CFV Actioned", start="2026-04-09", unit="Unit 9 – 3 Example Road")]
 res, rows = run(ts, [paid("recEX3", "2026-08-17", 42.49)], pre=["recEX3", "recEX4"])
 other, orows = run(ts, [paid("recEX3", "2026-08-17", 42.49)])
 print(json.dumps({"a": rows["recEX3"], "b": rows["recEX4"], "line": res["briefLine"], "worst": res["worst"],
