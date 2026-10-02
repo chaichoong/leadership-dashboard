@@ -1161,10 +1161,11 @@ function todayStr(){const d=new Date();const y=d.getFullYear();const m=String(d.
 function teamKey(email){const m=TEAM.find(t=>t.email===email);return m?m.key:'other'}
 function escHtml(s){const d=document.createElement('div');d.textContent=s||'';return d.innerHTML}
 // A signed Airtable file link dies within hours, so it stays as text: a link that looks live and is dead is worse
-// than no link (2 Oct 2026). Same rule as apvLinkify in os/agents/index.html.
+// than no link (2 Oct 2026). Same rule as apvLinkify in os/agents/index.html. A double quote ends the link:
+// escHtml here leaves quotes as they are, and one inside the href would close it.
 function linkifyUrls(text){
     if(!text) return '';
-    return escHtml(text).replace(/(https?:\/\/[^\s<]+)/g, (u)=> /^https?:\/\/[^/\s]*airtableusercontent\.com\//i.test(u) ? u :
+    return escHtml(text).replace(/(https?:\/\/[^\s<"]+)/g, (u)=> /^https?:\/\/[^/\s]*airtableusercontent\.com\//i.test(u) ? u :
         `<a href="${u}" target="_blank" rel="noopener" style="color:var(--accent);text-decoration:underline;word-break:break-all">${u}</a>`).replace(/\n/g,'<br>');
 }
 function toast(msg, err){const el=document.getElementById('toast');if(!el)return;try{el.textContent=msg;el.className='toast show'+(err?' err':'');clearTimeout(el._t);el._t=setTimeout(()=>{if(el&&el.classList)el.classList.remove('show')},err?6000:1800)}catch(e){console.warn('toast failed',e)}}

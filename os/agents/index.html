@@ -2130,16 +2130,22 @@ function apvPlainEvent(text){
 }
 function apvTrailEvents(t){
     const ev = [];
-    // A step listed twice shows once. If the copy kept has nowhere to go and the repeat has (a file row written
-    // with a dead link in Notes, and again with its task link in the agent's work), the repeat's link is kept,
-    // but only for the very same words. The key is the first 80 characters, except for a file row, which is keyed
-    // on all of its words: two files of one name from tasks whose names start alike are two steps, not one.
+    // A step listed twice shows once. The key is the first 80 characters, except for a file row, which is keyed on
+    // ALL of its words (its size and its task's name included; only the space a name cut at 90 characters can end
+    // in is ignored): two files of one name from tasks whose names start alike are two steps, and so are two
+    // files that differ only in size.
+    // If a copy kept has nowhere to go and the repeat has (a file row written with a dead link in Notes, and again
+    // with its task link in the agent's work), the repeat's link is kept, for the very same words only.
+    // Two file rows with the very same words held on two DIFFERENT tasks are two files, so both show.
     const seen = new Map();
     const push = (e)=>{
-        const k = e.day+'|'+e.time+'|'+(APV_HELD_FILE_RE.test(e.text) ? e.text : e.text.slice(0,80));
-        const kept = seen.get(k);
-        if(kept){ if(!kept.link && e.link && kept.text === e.text){ kept.link = e.link; kept.file = e.file||''; kept.fileTask = e.fileTask||''; } return; }
-        seen.set(k, e); ev.push(e);
+        const held = APV_HELD_FILE_RE.test(e.text);
+        const k = e.day+'|'+e.time+'|'+(held ? 'file|'+e.text.replace(/\s+"$/, '"') : e.text.slice(0,80));
+        const group = seen.get(k);
+        if(!group){ seen.set(k, [e]); ev.push(e); return; }
+        const bare = group.find(x=>!x.link);
+        if(bare){ if(e.link && (held || bare.text === e.text)){ bare.link = e.link; bare.file = e.file||''; bare.fileTask = e.fileTask||''; } return; }
+        if(e.fileTask && group.every(x=>x.fileTask && x.fileTask !== e.fileTask)){ group.push(e); ev.push(e); }
     };
     const fileUrl = {};
     (t.files||[]).forEach(f=>{ fileUrl[f.filename] = f.url; });
@@ -2263,9 +2269,10 @@ function apvTrailHtml(t){
     const all = apvTrailEvents(t);
     if(!all.length) return '';
     // The newest APV_TRAIL_MAX steps, plus every older step that opens a file: a document the card may turn on is
-    // never cut with the old history (2 Oct 2026: a card of 135 steps did not draw its three file rows).
+    // never cut with the old history (2 Oct 2026: a card of 135 steps did not draw its three file rows). A file
+    // that has left the task has no button, so its old row is cut like any other.
     const cut = Math.max(0, all.length - APV_TRAIL_MAX);
-    const ev = all.filter((e, i) => i >= cut || e.file);
+    const ev = all.filter((e, i) => i >= cut || (e.file && e.link));
     const hidden = all.length - ev.length;
     const lastDay = ev[ev.length-1].day;
     const last = ev[ev.length-1];
@@ -2278,7 +2285,7 @@ function apvTrailHtml(t){
     });
     return `<details class="apv-trail" data-apv-trail${_apvOpen.trailShut.has(t.id)?'':' open'} ontoggle="if(this.open)_apvOpen.trailShut.delete('${t.id}');else _apvOpen.trailShut.add('${t.id}')">
         <summary>The story so far · ${all.length} ${all.length===1?'step':'steps'}, each with a link <span class="apv-trail-last">· latest: ${esc(apvDayLabel(last.day))}, ${esc(last.who)}: ${esc(last.text.slice(0,70))}${last.text.length>70?'…':''}</span></summary>
-        ${hidden ? `<div class="apv-trail-more">${hidden} earlier ${hidden===1?'event':'events'} not shown (open the agent’s full work and the task in Airtable for all of it).</div>` : ''}
+        ${hidden ? `<div class="apv-trail-more">${hidden} older ${hidden===1?'step':'steps'} not shown; every file that opens is kept (open the agent’s full work and the task in Airtable for the rest).</div>` : ''}
         <div class="apv-trail-list"><div>${out}</div></div>
     </details>`;
 }

@@ -201,13 +201,20 @@ test.describe('Agent approval loop', () => {
     await waitForTasks(page);
     const signed = 'https://v5.airtableusercontent.com/v3/u/dead/tenancy.pdf';
     await page.evaluate(({ id, signed }) => {
-      allTasks.find(t => t.id === id).agentOutput = 'Draft.\n- 11 Sep 2026 — file: file on that task: tenancy.pdf (' + signed + ')\nWatch: https://drive.google.com/file/d/abc/view';
+      allTasks.find(t => t.id === id).agentOutput = 'Draft.\n- 11 Sep 2026 — file: file on that task: tenancy.pdf (' + signed + ')\nWatch: https://drive.google.com/file/d/abc/view\nOdd: https://a.example/"onmouseover="window.__hit=1';
       openTaskDrawer(id);
     }, { id: WAITING_ID, signed });
     const work = page.locator('.approval-box .apv-work-body');
     await expect(work).toContainText(signed);
     const hrefs = await work.locator('a[href]').evaluateAll((as) => as.map((a) => a.getAttribute('href')));
-    expect(hrefs).toEqual(['https://drive.google.com/file/d/abc/view']);
+    // A double quote ends the link, so nothing after it becomes an attribute of the anchor.
+    expect(hrefs).toEqual(['https://drive.google.com/file/d/abc/view', 'https://a.example/']);
+    await expect(work.locator('[onmouseover]')).toHaveCount(0);
+    // Every other link is as it was: a new tab, no opener, and line breaks kept.
+    const drive = work.locator('a[href*="drive.google.com"]');
+    await expect(drive).toHaveAttribute('target', '_blank');
+    await expect(drive).toHaveAttribute('rel', 'noopener');
+    expect(await work.evaluate((el) => el.querySelectorAll('br').length)).toBe(3);
   });
 
   test('an agent cannot move a task from Approval straight to Completed', async ({ page }) => {
