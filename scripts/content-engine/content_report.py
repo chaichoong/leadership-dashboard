@@ -65,13 +65,16 @@ def london_day(t):
     return t.astimezone(LONDON).date()
 
 
-def episode_row(day, entry):
-    s = publish.section_status(entry)
+def episode_row(day, entry, made=None):
+    """One episode's sections. `made(clip)` says whether the render made that clip; a clip section the episode never
+    had reads 'none' and is not counted against it (2082, 2 Oct 2026: no diary section, so no Learnings clip and no
+    Short, and the page said "3 of 7, missing"). Without `made`, every clip counts as made: unknown is never hidden."""
+    s = publish.owed_sections(entry, made or (lambda clip: True))
     p = youtube_post(entry) or {}
     return {"day": int(day), "youtube": p.get("link") or entry.get("youtube_link") or "", "blog": (entry.get("blog") or {}).get("url", ""),
             "podcast": (entry.get("podcast") or {}).get("link", ""), "sections": s,
-            "done": sum(1 for v in s.values() if v == "done"), "missing": [k for k, v in s.items() if v == "missing"],
-            "pending": [k for k, v in s.items() if v == "pending"]}
+            "done": sum(1 for v in s.values() if v == "done"), "owed": sum(1 for v in s.values() if v != "none"),
+            "missing": [k for k, v in s.items() if v == "missing"], "pending": [k for k, v in s.items() if v == "pending"]}
 
 
 def short_date(iso):
@@ -149,12 +152,13 @@ def build(now=None, state=None, approvals=None, ledger=None, sync_state=None, pl
     episodes = {d: e for d, e in state.items() if str(d).isdigit() and isinstance(e, dict)}
     gaps = watch.gap_days()
     cursor = publish.cursor(state)
+    row = lambda k, e: episode_row(k, e, lambda clip: publish.clip_made(int(k), clip, ledger))
 
     # every one of the last seven days, newest first, including the empty ones
     history = []
     for i in range(HISTORY_DAYS):
         d = today - dt.timedelta(days=i)
-        out = sorted((episode_row(k, e) for k, e in episodes.items() if out_at(e) and london_day(out_at(e)) == d), key=lambda r: r["day"])
+        out = sorted((row(k, e) for k, e in episodes.items() if out_at(e) and london_day(out_at(e)) == d), key=lambda r: r["day"])
         history.append({"date": d.isoformat(), "episodes": out})
     clean = 0
     for i in range(1, 31):                                   # yesterday backwards, beyond the seven-day table (review, 15 Sep 2026: the table capped it at 6)
@@ -221,7 +225,7 @@ def build(now=None, state=None, approvals=None, ledger=None, sync_state=None, pl
     except Exception as ex:                                  # a plan that cannot be read is said, never shown as empty
         tonight = None; print("report: tonight's plan could not be read (%s)" % ex, file=sys.stderr)
 
-    recent = sorted((episode_row(k, e) for k, e in episodes.items() if out_at(e) and (today - london_day(out_at(e))).days < 14),
+    recent = sorted((row(k, e) for k, e in episodes.items() if out_at(e) and (today - london_day(out_at(e))).days < 14),
                     key=lambda r: -r["day"])
     incomplete = [{"day": r["day"], "missing": r["missing"], "pending": r["pending"]} for r in recent if r["missing"] or r["pending"]]
 
@@ -263,7 +267,7 @@ def headline(r):
     """One line for the 08:00 DM. It names yesterday even when nothing went out: absence is the news."""
     y = r["history"][1] if len(r["history"]) > 1 else {"episodes": []}
     if y["episodes"]:
-        out = "; ".join("Episode %d out, %d of 7 sections%s" % (e["day"], e["done"], (" (missing: " + ", ".join(e["missing"]) + ")") if e["missing"] else "")
+        out = "; ".join("Episode %d out, %d of %d sections%s" % (e["day"], e["done"], e.get("owed", 7), (" (missing: " + ", ".join(e["missing"]) + ")") if e["missing"] else "")
                         for e in y["episodes"])
     else:
         out = "NOTHING went out yesterday"

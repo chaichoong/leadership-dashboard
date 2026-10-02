@@ -283,3 +283,27 @@ test('a read that never answers gives up after 30 seconds, and the page reads ag
   await expect.poll(() => reads).toBeGreaterThanOrEqual(2);
   await expect(page.locator('#headline')).toHaveText('Content: read after the hang.');
 });
+
+// 2 Oct 2026, episode 2082: no diary section, so no Learnings clip and no Short, and the page read "3 of 7 sections" with
+// both in red. A section the episode never had is greyed out, struck through, said in words, and not counted.
+test('a clip the episode never had is struck out and not counted against it; a made clip still shows red', async ({ page }) => {
+  const r = report();
+  const sections = { 'YouTube episode': 'done', 'YouTube Short': 'none', 'Teaser clips': 'done', 'Learnings clips': 'none',
+                     Blog: 'done', Podcast: 'pending', 'Facebook share': 'pending' };
+  r.history[1].episodes = [
+    { day: 2190, youtube: 'https://youtu.be/q', blog: '', podcast: '', sections, done: 3, owed: 5, missing: [], pending: ['Podcast', 'Facebook share'] },
+    { day: 2191, youtube: 'https://youtu.be/w', blog: '', podcast: '', done: 5, owed: 7, missing: ['YouTube Short', 'Learnings clips'], pending: [],
+      sections: Object.assign({}, sections, { 'YouTube Short': 'missing', 'Learnings clips': 'missing', Podcast: 'done', 'Facebook share': 'done' }) },
+  ];
+  await openPublishing(page, [r]);
+  const rows = page.locator('#body tr', { hasText: 'Episode 219' });
+  const none = rows.filter({ hasText: 'Episode 2190' });
+  await expect(none).toContainText('3 of 5 sections');
+  await expect(none.locator('.chip.notmade')).toHaveText(['YouTube Short', 'Learnings clips']);
+  await expect(none.locator('.chip.missing')).toHaveCount(0);
+  await expect(none).toContainText('Struck out: not in this episode');
+  const made = rows.filter({ hasText: 'Episode 2191' });
+  await expect(made).toContainText('5 of 7 sections');
+  await expect(made.locator('.chip.missing')).toHaveText(['YouTube Short', 'Learnings clips']);
+  await expect(made).not.toContainText('Struck out');
+});

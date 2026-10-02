@@ -930,6 +930,22 @@ def is_catchup(post, now=None):
     return mins is not None and mins > FB_CATCHUP_AFTER_HOURS * 60
 
 
+def reels_already_shared(state, day, clip):
+    """The post ids of every page reel a profile share has already taken, this share excepted. A reel goes to Kevin's
+    profile once. 2 Oct 2026: both of 2083's captions opened "Three months after breaking my foot," and the finder
+    matches on six words; both clips went up at the same moment, so the Learnings share matched the Summary reel and
+    shared it a second time (2056 the same way, 22 Sep). Nothing asked whether that reel had been shared already."""
+    import facebook_share
+    used = set()
+    for d, e in state.items():
+        if not str(d).isdigit() or not isinstance(e, dict): continue
+        for c, spec in FB_SHARES.items():
+            if str(d) == str(day) and c == clip: continue
+            pid = facebook_share.post_id((e.get(spec["key"]) or {}).get("post_url"))
+            if pid: used.add(pid)
+    return used
+
+
 def share_to_facebook_profile(day, entry, state, clip="summary"):
     """Kevin's own profile gets the PAGE's post, shared (Kevin, 10 Sep 2026: "it should just be shared from the
     Facebook page to the Facebook profile"), once that page post is live. The page post URL is read off the page
@@ -973,7 +989,15 @@ def share_to_facebook_profile(day, entry, state, clip="summary"):
     # a catch-up looks further down the reels list: 2054, 2055, 2056 and 2195 sat beyond a week of
     # two-posts-a-day and read "not on the page yet" every run (20 Sep 2026)
     depth = facebook_share.SCAN_POSTS_CATCHUP if is_catchup(post) else facebook_share.SCAN_POSTS
-    url = fb.get("post_url") or facebook_share.find_page_post(copy, day=int(day), scan=depth)
+    used = reels_already_shared(state, day, clip)
+    url = fb.get("post_url")
+    if url and facebook_share.post_id(url) in used:
+        print("episode %s: the %s share held a reel already shared to Kevin's profile (%s); looking for its own post" % (day, clip, url), file=sys.stderr)
+        fb.pop("post_url", None); url = None
+    url = url or facebook_share.find_page_post(copy, day=int(day), scan=depth, skip=used)
+    if url and facebook_share.post_id(url) in used:      # the hard stop: Share is never pressed on a reel the profile already has
+        print("episode %s: the %s page post matched a reel already shared (%s); it is never shared twice" % (day, clip, url), file=sys.stderr)
+        url = None
     if not url:
         fb["status"] = "page-post-not-found"
         print("episode %s: the %s page post is not on the Facebook page yet; looking again next run" % (day, clip))
@@ -1469,13 +1493,31 @@ CARD_CLOSED_STATUSES = ("Completed", "Cancelled")     # agent-dispatch's two clo
 CLIP_SECTIONS = {"YouTube Short": ("lfmd",), "Learnings clips": ("lfmd",), "Teaser clips": ("summary",), "Facebook share": ("summary", "lfmd")}
 
 
-def episode_finished(entry, made):
-    """Out on every section it owes. A clip was made when the render recorded its Drive link (`made(clip)`) or any post
-    of it exists: 2054 and 2056 were posted before links were recorded (review, 30 Sep 2026)."""
+def owed_sections(entry, made):
+    """section_status, with a clip section the episode never had read 'none' (not in this episode) instead of 'missing'.
+    A clip was made when the render recorded its Drive link (`made(clip)`) or any post of it exists: 2054 and 2056
+    were posted before links were recorded (review, 30 Sep 2026). One rule for the card closer, the hourly line and the
+    Publishing page: on 2 Oct 2026 day 2082 had no diary section, the output gate said "no diary phrase spoken in this
+    recording, so no clip (by design)", the card closer counted it finished, and the page still read "3 of 7
+    sections, missing: YouTube Short, Learnings clips"."""
     posts = (entry.get("posts") or {}).values()
     was_made = lambda clip: made(clip) or any(p.get("clip") == clip for p in posts)
-    return all(v == "done" or (v == "missing" and section in CLIP_SECTIONS and not any(was_made(c) for c in CLIP_SECTIONS[section]))
-               for section, v in section_status(entry).items())
+    s = section_status(entry)
+    for section, clips in CLIP_SECTIONS.items():
+        if s.get(section) == "missing" and not any(was_made(c) for c in clips): s[section] = "none"
+    return s
+
+
+def clip_made(day, clip, ledger):
+    """Did the render make this clip, for the report's 'not in this episode'? A day the render ledger holds nothing
+    for (or no ledger at all) is unknown, and unknown counts as made: a gap is never hidden (review, 3 Oct 2026)."""
+    if not any(v.get("episode") == day for v in ledger.values()): return True
+    return bool(output_link(day, clip, ledger))
+
+
+def episode_finished(entry, made):
+    """Out on every section it owes."""
+    return all(v in ("done", "none") for v in owed_sections(entry, made).values())
 
 
 def cards_to_close(state, cards, made=None):
@@ -1550,11 +1592,12 @@ def report():
     waiting = [d for d in days if not state.get(str(d), {}).get("posts")]
     scheduled = sum(1 for e in state.values() for p in e.get("posts", {}).values() if p.get("status") == "scheduled")
     failed = sum(1 for e in state.values() for p in e.get("posts", {}).values() if p.get("status") == "failed")
-    sections = {d: section_status(e) for d, e in state.items() if e.get("posts")}
-    complete = [d for d, s in sections.items() if all(v == "done" for v in s.values())]
-    print("content publishing: %d approved episode%s not yet scheduled, %d posts scheduled, %d failed, %d of %d episodes complete (all seven sections)" % (
+    ledger = watch.load_ledger()
+    sections = {d: owed_sections(e, lambda clip, day=int(d): clip_made(day, clip, ledger)) for d, e in state.items() if e.get("posts")}
+    complete = [d for d, s in sections.items() if all(v in ("done", "none") for v in s.values())]
+    print("content publishing: %d approved episode%s not yet scheduled, %d posts scheduled, %d failed, %d of %d episodes complete (every section the episode has)" % (
         len(waiting), "" if len(waiting) == 1 else "s", scheduled, failed, len(complete), len(sections)))
-    gaps = ["%s: %s" % (d, ", ".join("%s %s" % (k, v) for k, v in s.items() if v != "done")) for d, s in sorted(sections.items(), key=lambda x: int(x[0])) if d not in complete]
+    gaps = ["%s: %s" % (d, ", ".join("%s %s" % (k, v) for k, v in s.items() if v not in ("done", "none"))) for d, s in sorted(sections.items(), key=lambda x: int(x[0])) if d not in complete]
     print("content sections not done: %s" % ("none" if not gaps else "; ".join(gaps)))
     # No route filter here either: the old one hid every GoHighLevel upload from this line as well, so the
     # report read "every YouTube episode and Short On" while three of them had never been looked at (20 Sep 2026).
