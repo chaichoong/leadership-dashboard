@@ -25,7 +25,7 @@
     const OPEN_TASKS_FORMULA = "AND({Task Name}!='',NOT({Status}='Completed'),NOT({Status}='Cancelled'))";
     const TASK_FIELDS = ['Task Name', 'Assignee', 'Due Date', 'Status', 'Priority', 'Task Type',
         'Deferred Until', 'Team Member', 'Hard Deadline', 'Sent For Approval By', 'Some Day', 'Approver'];
-    const ESTATE_KEYS = { needsYou: 'daily-ops-needs-you', blockers: 'agent-blockers', tenants: 'tenant-chain' };
+    const ESTATE_KEYS = { needsYou: 'daily-ops-needs-you', blockers: 'agent-blockers', tenants: 'tenant-chain', rent: 'rent-position' };
 
     const LEGAL_RE = /\b(court|charging order|ccj|tribunal|solicitors?|claim form|bailiffs?|enforcement|hmrc|companies ?house|strike ?off|liquidat\w*|insolven\w*|bankrupt\w*|restraint|statutory demand|notice|summons|writ|legal)\b/i;
     const MONEY_RE = /\b(pay|payments?|arrears|minimum|debt|invoice|direct debit|standing order|mortgage|loan|fine|refund|gbp)\b|£/i;
@@ -195,6 +195,20 @@
         return { light: ['ok', 'warn', 'fail'].includes(p.worst) ? p.worst : 'unknown', current: true, text: line };
     }
 
+    // The daily rent check's line (scripts/rent-check.py, 2 Oct 2026): how many rents are up to date
+    // and who is late. Same payload shape as the tenants line (asAt, worst, briefLine). Kept apart
+    // from readTenants because that one is the brief's twin and must keep the brief's exact words.
+    function readRent(row, today) {
+        const r = parsePayload(row);
+        if (r.state === 'unread') return { light: 'fail', current: false, text: 'The rent check could not be read.' };
+        if (r.state === 'damaged') return { light: 'fail', current: false, text: 'The rent check left a damaged report, so nothing about rent is known.' };
+        const p = r.p;
+        if (!p || !p.asAt) return { light: 'fail', current: false, text: 'The rent check has not reported.' };
+        if (p.asAt !== today) return { light: 'fail', current: false, text: `The rent check has not run today. Its last run was ${dayMonth(p.asAt)}, so nothing about rent is current.` };
+        const line = String(p.briefLine || '').slice(0, 700) || 'ran, but left no summary line.';
+        return { light: ['ok', 'warn', 'fail'].includes(p.worst) ? p.worst : 'unknown', current: true, text: line };
+    }
+
     // The one list. Groups in reading order: money and deadlines first. A task shows once, in the
     // first group that holds it.
     function buildHomeList({ tasks, today, needsRow, blockersRow, now }) {
@@ -238,7 +252,7 @@
     const api = {
         KEVIN_TEAM_MEMBER, ROY_TEAM_MEMBER, APPROVER_EMAIL, isKevinsLane, HOME_DEADLINE_DAYS, OPEN_TASKS_FORMULA, TASK_FIELDS, ESTATE_KEYS,
         LEGAL_RE, MONEY_RE, toTask, addDaysISO, dayMonth, whenText, londonToday, deadlineHolder,
-        selectDeadlines, isOnlyYouName, selectOnlyYou, queueCards, readNeedsYou, readBlockers, readTenants,
+        selectDeadlines, isOnlyYouName, selectOnlyYou, queueCards, readNeedsYou, readBlockers, readTenants, readRent,
         buildHomeList,
     };
     if (typeof module !== 'undefined' && module.exports) module.exports = api;

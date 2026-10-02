@@ -649,5 +649,15 @@
   ],
   "retryWhenDeferred": true,
   "note": "The tenant-finding chain (Kevin, 25 Sep 2026): scripts/tenant-leads.py. Once a day it finds openings (a UC void, a notice inside 60 days, an adopted Growth Plan room move), raises the referrer mail-out, tenant referral and keep-warm cards for Kevin's queue under AI Property Administration, hands adverts, viewings and move-in checks to Roy (Kevin's standing handover, 25 Sep 2026), screens form sign-ups, raises one documents card per person securing a room, checks each house with an open room against the compliance book (a move-in gate, never a marketing one: Kevin's model), puts a 50 pound referral bonus on the Payment Run, and writes the tenant-chain row on the Estate Status board with the results, what did NOT happen, and the line the 09:00 brief prints. 08:10 so its cards are in the queue before the 09:00 brief. Lateness is generous: a day-late opening is still worth telling referrers about. It exits 1 when a step failed, so a red run here means a real gap in the chain."
+ },
+ "rent-check": {
+  "cron": "30 7,12 * * *",
+  "maxLateMinutes": 240,
+  "mode": "wrapped",
+  "needs": [
+   "network"
+  ],
+  "retryWhenDeferred": true,
+  "note": "The daily rent check (Kevin, 2 Oct 2026): scripts/rent-check.py, phase 1 of the Cash Flow Voids agent (register row reclaAzGLA4utssxx). Rules only, no model, so no Claude allowance. Each run reads every live tenancy, the matched rent payments, the rent accounts' bank feeds and any money-in still waiting to be matched, and says for each tenancy: paying, paid short, late (due day plus 2 days, a payment up to 5 days early counts: the app's rule, with the refinements listed in the script's header) or cannot tell. It writes ONE Estate Status row (key rent-position) with the line the Home screen prints and a line in its history log. It sends nothing and changes no tenancy. A stale bank feed, unmatched money-in or many tenancies turning late at once is reported as cannot tell, never as late. Twice a day: 07:30 so the line is on Home before Kevin looks, and 12:30 because the bank feed lands near 12:00. Lateness is judged as at the bank feed, never ahead of it. A run up to four hours late is still worth having; later than that the next slot replaces it. It exits 1 when a read is broken, so a red run means the check told Kevin nothing."
  }
 }
