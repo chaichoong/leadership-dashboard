@@ -772,7 +772,14 @@ def clean_short(ov, piece, lcaps, paths, names, workdir, day, title):
     paths["lfmd_srt"] = os.path.join(workdir, names["lfmd_srt"]); shutil.copyfile(lcaps, paths["lfmd_srt"])
 
 
-def publish_via_api(paths, day, transcript_txt):
+def transcript_name(day, role="episode"):
+    """The day folder's transcript file for a clip. The teaser has its own: until 2 Oct 2026 every clip wrote
+    Ep<day>_transcript.txt, the teaser renders after the episode, and 26 of the 36 stored files held the teaser's
+    words. The output gate (qa.py) reads the episode's to ask whether the diary line was said, so it heard nothing."""
+    return ("Ep%d_Summary_transcript.txt" if role == "teaser" else "Ep%d_transcript.txt") % day
+
+
+def publish_via_api(paths, day, transcript_txt, role="episode"):
     """Finished videos straight up to the shared drive through the API (Kevin, 9 Sep 2026): the Mac's Drive cache
     never holds a copy. Returns links by kind, or None when the API is not set up or fails (the mount copy then runs)."""
     try:
@@ -783,16 +790,16 @@ def publish_via_api(paths, day, transcript_txt):
         for kind, p in paths.items():
             mime = "video/mp4" if p.endswith(".mp4") else "audio/mpeg" if p.endswith(".mp3") else "image/png" if p.endswith(".png") else "application/x-subrip" if p.endswith(".srt") else "application/octet-stream"
             links[kind] = drive_api.link(drive_api.upload(p, fid, mime=mime))
-        drive_api.upload(transcript_txt, fid, name="Ep%d_transcript.txt" % day, mime="text/plain")
+        drive_api.upload(transcript_txt, fid, name=transcript_name(day, role), mime="text/plain")
         return links
     except Exception as ex:
         print("publish: Drive API upload failed for episode %d (%s); using the mounted folder" % (day, str(ex)[:120]), file=sys.stderr)
         return None
 
 
-def publish_to_drive(paths, day, transcript_txt):
+def publish_to_drive(paths, day, transcript_txt, role="episode"):
     folder = os.path.join(EDITED_ROOT, hundreds_folder(day), str(day))
-    links = publish_via_api(paths, day, transcript_txt)
+    links = publish_via_api(paths, day, transcript_txt, role)
     if links: return folder, links
     os.makedirs(folder, exist_ok=True)
     links = {}
@@ -800,7 +807,7 @@ def publish_to_drive(paths, day, transcript_txt):
         dest = os.path.join(folder, os.path.basename(p))
         shutil.copyfile(p, dest)
         links[kind] = dest
-    shutil.copyfile(transcript_txt, os.path.join(folder, "Ep%d_transcript.txt" % day))
+    shutil.copyfile(transcript_txt, os.path.join(folder, transcript_name(day, role)))
     # Drive ids appear once the desktop client has synced the file; wait a little, then read them
     for kind, dest in list(links.items()):
         fid = None
@@ -908,7 +915,7 @@ def process(key, ledger, keep=False):
     if role == "episode":
         e["intro_at"] = LAST_CUT.get("at"); e["podcast_resume"] = LAST_CUT.get("resume")
         paths["thumb"], e["thumb_lines"] = make_thumbnail(masters["9:16"], duration, text, day, workdir, lines=lines)
-    folder, links = publish_to_drive(paths, day, os.path.join(workdir, "transcript.txt"))
+    folder, links = publish_to_drive(paths, day, os.path.join(workdir, "transcript.txt"), role)
     rid, how = find_or_create_record(day, e.get("drive_id"), key, dt.date.fromisoformat(e["date"]))
     upd = record_updates(day, links, text, reason, key, role)
     if role == "episode" and copy_goes_with_render(day):
@@ -1376,6 +1383,7 @@ def selftest():
     assert hundreds_folder(2049) == "2001-2100" and hundreds_folder(2100) == "2001-2100" and hundreds_folder(2101) == "2101-2200"
     assert output_names(2225)["full"] == "Episode_2225_Full_Episode.mp4" and output_names(2225)["podcast"] == "Ep2225_Podcast.mp3"
     assert output_names(2225)["full_yt"] == "Episode_2225_Full_Episode_YT.mp4" and output_names(2225)["lfmd_srt"] == "Ep2225_LFMD_YT.srt"
+    assert transcript_name(2081) == "Ep2081_transcript.txt" and transcript_name(2081, "teaser") == "Ep2081_Summary_transcript.txt", "the teaser must never write the episode's transcript file"
     s3 = "1\n00:00:01,000 --> 00:00:03,000\nbefore\n\n2\n00:00:10,000 --> 00:00:12,500\nafter\n"
     sh = shift_after(s3, 5.0, 7.0)
     assert "00:00:01,000 --> 00:00:03,000" in sh and "00:00:17,000 --> 00:00:19,500" in sh, sh

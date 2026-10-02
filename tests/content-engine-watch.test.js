@@ -132,7 +132,7 @@ describe('content-engine watch: nightly wiring', () => {
     expect(w).toContain('if e.get("drive_id") and pull_via_api(e, dest + ".part"):');
     expect(w).toContain('copy_streaming(e["path"], dest + ".part", max_minutes=window)'); // the fallback stays
     const r = readFileSync(path.join(ROOT, 'scripts', 'content-engine', 'render.py'), 'utf8');
-    expect(r).toContain('links = publish_via_api(paths, day, transcript_txt)');
+    expect(r).toContain('links = publish_via_api(paths, day, transcript_txt, role)');
     expect(r).toContain('drive_api.folder_id(drive_api.EDITED_PATH + [hundreds_folder(day), str(day)], create=True)');
   });
 });

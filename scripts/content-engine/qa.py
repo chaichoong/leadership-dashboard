@@ -64,6 +64,15 @@ def diary_phrase_in(transcript_path):
     except Exception: return False
 
 
+def caption_text(srt_path):
+    """The episode's words from its own caption file, '' when it cannot be read. Only the long clip writes that file
+    and it reaches the gate through the Drive API copy, so it is the episode's text on the days whose stored
+    transcript is the teaser's (26 of 36 on 2 Oct 2026) and when the Drive folder has not caught up with an upload."""
+    import render
+    try: return " ".join(t for _, _, t in render.srt_segments(open(srt_path).read()))
+    except Exception: return ""
+
+
 def ledger_entries(day, ledger):
     ep = [v for v in ledger.values() if v.get("episode") == day and v.get("role") == "episode"]
     te = [v for v in ledger.values() if v.get("episode") == day and v.get("role") == "teaser"]
@@ -72,14 +81,14 @@ def ledger_entries(day, ledger):
 
 def checks(day, ledger=None, files=None):
     """[(name, ok, hard, detail)] for one day. `files` = publish.episode_files(day) (+ 'transcript'); hard = blocks the card."""
-    import publish
+    import publish, render
     ledger = ledger if ledger is not None else watch.load_ledger()
     if not files:
         # 17 Sep 2026: the scheduled job read "0 s" for 2059 and 2060 through the Drive folder at 01:25 and 08:16, while
         # the same files measured 575 s from a session at 08:25. The measured files come through publish.fetch_readable
         # (the Drive API copy when the folder does not read), which the publisher then uses as they are.
         base = publish.episode_files(day)
-        files = dict(base, transcript=os.path.join(os.path.dirname(base["full"]), "Ep%d_transcript.txt" % day))
+        files = dict(base, transcript=os.path.join(os.path.dirname(base["full"]), render.transcript_name(day)))
         for k in ("full", "full_yt", "podcast", "lfmd", "lfmd_yt", "full_srt", "lfmd_srt", "thumb", "summary"):
             try: files[k] = publish.fetch_readable(day, k, ledger)
             except (Exception, SystemExit) as ex: print("qa: %s for day %d not fetched (%s)" % (k, day, str(ex)[-100:]), file=sys.stderr)
@@ -108,24 +117,24 @@ def checks(day, ledger=None, files=None):
     add("podcast audio", d_pod > 30, True, "%.0f s" % d_pod)
     cues = cue_count(files.get("full_srt", ""))
     add("caption file for YouTube", cues >= MIN_CUES_PER_MINUTE * max(d_full, 60) / 60, True, "%d cues" % cues)
-    said = diary_phrase_in(files.get("transcript", ""))
+    # "Did he say the diary line?" is asked of the episode's transcript AND its captions (2 Oct 2026): the transcript
+    # alone was the teaser's on 26 stored days and is read through the Drive folder, which lags an upload.
+    cap_text = caption_text(files.get("full_srt", ""))
+    in_transcript = diary_phrase_in(files.get("transcript", ""))
+    said = in_transcript or bool(render.lfmd_start(cap_text))
     window = ep.get("lfmd_window")
     d_l, d_ly = d_l0, d_ly0
     near_miss = None
-    if not (said or window):
+    if not (in_transcript or window):
         # 2060 (17 Sep 2026): the Learnings line was mis-heard, no clip was cut, and the card went up saying "no diary
         # phrase spoken (by design)". A near miss now REFUSES the card, so a Learnings section is never lost silently.
-        try:
-            import render
-            cap_text = " ".join(t for _, _, t in render.srt_segments(open(files.get("full_srt", "")).read()))
-            m = render.DIARY_NEAR_MISS_RE.search(cap_text)
-            if m: near_miss = cap_text[max(0, m.start() - 30):m.end() + 30]
-        except Exception:
-            pass
+        m = render.DIARY_NEAR_MISS_RE.search(cap_text)
+        if m: near_miss = cap_text[max(0, m.start() - 30):m.end() + 30]
     if near_miss:
         add("Learnings section", False, True, "no clip was cut, but the captions say '...%s...': that sounds like the diary section. Rebuild it (render.py redo --day %d --only lfmd) before this card goes up" % (near_miss.strip(), day))
     elif said or window:
-        add("Learnings clip (captions)", d_l > 15, True, "%.0f s; diary phrase %s in the transcript" % (d_l, "found" if said else "not found"))
+        heard = "found in the transcript" if in_transcript else "found in the captions" if said else "not found in the transcript or the captions"
+        add("Learnings clip (captions)", d_l > 15, True, "%.0f s; diary phrase %s" % (d_l, heard))
         add("Learnings clip (clean, for Shorts)", d_ly > 15 and abs(d_ly - d_l) < 1.5, True, "%.0f s" % d_ly)
         add("Learnings caption file", cue_count(files.get("lfmd_srt", "")) >= 3, True, "%d cues" % cue_count(files.get("lfmd_srt", "")))
     else:
