@@ -6673,7 +6673,10 @@ function signinButton(ln){
 function signinNeedsYou(ln){ return ln.state === 'signed-out' || ln.state === 'unchecked' || !SIGNIN_STATE[ln.state]; }
 function signinLineHtml(ln){
     const st = SIGNIN_STATE[ln.state] || SIGNIN_STATE.unchecked;
-    const when = ln.state === 'on-demand' ? 'Short login: sign in when a task asks for it'
+    // "did not stay signed in" is signin_hold.py's WHY: the daily check stopped asking for this site.
+    const when = ln.state === 'on-demand' ? (ln.how === 'did not stay signed in'
+            ? 'Keeps signing out after you sign in: sign in when a task asks for it'
+            : 'Short login: sign in when a task asks for it')
         : ln.state === 'you-signed-in' ? `You signed in ${estateAgo(ln.at)}. The robot confirms it at its next check.`
         : ln.state === 'bot-check' ? `Stops the robot with a "verify you are human" check (seen ${estateAgo(ln.at)}). Signing in will not help.`
         : ln.at ? `Checked ${estateAgo(ln.at)} by the ${ln.how || 'robot'}` : 'Not checked yet';

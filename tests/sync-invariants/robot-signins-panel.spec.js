@@ -92,6 +92,19 @@ test.describe('Robot sign-ins panel on a Mac', () => {
     await expect(panel.locator('[data-rs-signin="tax.service.gov.uk"]')).toHaveAttribute('aria-label', 'Sign in to HMRC');
   });
 
+  test('a site that keeps signing out after his sign-ins is not asked for, and says why (2 Oct 2026)', async ({ page }) => {
+    // The real case: BW Legal's portal, which has no account yet, asked for every morning.
+    const panel = await open(page, [signinRow([line('Pingen (letters)', 'app.pingen.com', 'signed-in'),
+      line('portal.bwlegal.co.uk', 'portal.bwlegal.co.uk', 'on-demand', { how: 'did not stay signed in' })])]);
+    await expect(panel).toContainText('All good. 1 signed in, 1 sign in when a task needs them.');
+    await expect(page.locator('#signinsCount')).toHaveText('0');
+    await panel.locator('[data-rs-toggle]').click();
+    const ln = panel.locator('[data-rs-line="on-demand"]');
+    await expect(ln).toContainText('Keeps signing out after you sign in: sign in when a task asks for it');
+    await expect(ln).not.toContainText('Short login');
+    await expect(panel.locator('[data-rs-signin="portal.bwlegal.co.uk"]')).toHaveAttribute('href', 'robotsignin://site/portal.bwlegal.co.uk');
+  });
+
   test('the keyboard stays on a Sign in button through a redraw, and the change is said once', async ({ page }) => {
     const panel = await open(page, [signinRow(MIXED)]);
     await panel.locator('[data-rs-signin="utilita-apt1"]').focus();
