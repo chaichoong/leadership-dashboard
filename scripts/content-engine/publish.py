@@ -1013,50 +1013,36 @@ CURSOR_KEY = "_cursor"
 
 
 def cursor(state):
-    """The last day put on YouTube, in order. Starts one below Kevin's takeover day (2053 when start_day is 2054)."""
+    """The highest day number the publisher has put on YouTube. Starts one below Kevin's takeover day (2053 when
+    start_day is 2054). Since 2 Oct 2026 a lower day can still be waiting: see ready_to_publish."""
     if CURSOR_KEY in state: return int(state[CURSOR_KEY])
     sd = watch.start_day()
     return (sd - 1) if sd else 0
 
 
-def day_was_recorded(day, ledger):
-    """A clip of the day exists, rendered (its episode) or still waiting (its ledger day). 24 Sep 2026: 2071 was set back to
-    new for a re-render, lost its episode number, and the order check read it, and every unrendered day after it up to
-    2193, as never recorded and stepped over them all. A day with footage is held, never skipped."""
-    # a clip's day counts only while it has no episode yet: a rendered clip belongs to its episode (a teaser dated 2072 that
-    # says "day 2,071" must not hold 2072 for ever, review 24 Sep 2026); B-roll alone is not an episode
-    return any(v.get("episode") == day or (v.get("day") == day and not v.get("episode") and v.get("status") != "broll") for v in ledger.values())
+def ready_to_publish(state, approved):
+    """Approved days with nothing on YouTube yet, lowest day first: the order the publisher takes them in.
 
-
-def next_publishable(state, ledger, approved):
-    """Strict order (Kevin, 8 Sep 2026: keep the day numbers in order): only cursor+1 may go to YouTube. A day
-    that was never recorded (no clip in the ledger while later days exist) is stepped over and noted; a day
-    that exists but is not yet approved holds everything behind it. Returns (day or None, reason)."""
-    c = cursor(state)
-    later = max((v.get("episode") or 0 for v in ledger.values()), default=0)
-    while True:
-        nxt = c + 1
-        if (state.get(str(nxt)) or {}).get("youtube_link"):
-            # already live (2194-2196 went out early on 10 and 14 Sep 2026): the order steps over it, or the day after
-            # it would wait for a YouTube upload that never happens again
-            state[CURSOR_KEY] = nxt; c = nxt; continue
-        if nxt in approved: return nxt, "in order"
-        if not day_was_recorded(nxt, ledger) and later > nxt:
-            state.setdefault("_skipped_days", []).append(nxt); state[CURSOR_KEY] = nxt; c = nxt
-            print("publish: day %d has no recording; stepping over it" % nxt, file=sys.stderr); continue
-        return None, ("day %d is not approved yet, so %s wait behind it" % (nxt, ", ".join(str(d) for d in approved if d > nxt) or "nothing else")) if approved else "nothing approved"
-
-
-def may_go_to_youtube(day, gaps, state, ledger, approved):
-    """A gap day (Kevin's catch-up list) goes the moment it is approved: it fills an old hole and never queues
-    behind the cursor. Every other day goes only when it is the cursor's next, in strict order."""
-    if day in gaps: return True
-    nxt, _ = next_publishable(state, ledger, set(approved) - set(gaps))
-    return nxt == day
+    Kevin, 2 Oct 2026: "Anything that is sent back for editing goes to the back of the queue... it doesn't block any
+    new episodes going out." From 8 Sep 2026 only the day after the cursor could go, so ONE day that was not ready
+    held every approved day behind it: 2081 was sent back on 1 Oct and 2082 and 2083, approved the next morning, sat
+    unpublished. The same rule had held the queue behind a failed render (2057, 2061), a re-render (2071) and a
+    question nobody owned (2072: 25 episodes, two days). An approved episode never waits for another day now. The
+    day left behind goes out when its own card is approved, late and out of number order; the Publishing report
+    names it (content_report.left_behind)."""
+    return sorted(d for d in approved if stage_for(state.get(str(d)) or {}, True) == "youtube")
 
 
 def moves_cursor(day, gaps):
     return day not in gaps
+
+
+def note_refusal(entry, why, save):
+    """An approved day the run could not put on YouTube says why on its own entry. Nothing waits behind such a day
+    any more, so the stalled queue that used to give it away is gone: the report reads this instead of promising the
+    day every hour (review, 2 Oct 2026). Cleared the moment its YouTube post exists."""
+    if (entry.get("not_published") or {}).get("why") != why:
+        entry["not_published"] = {"why": why, "since": now_utc()}; save()
 
 
 HOLD_FILE = os.path.expanduser("~/.config/od/content_engine_hold_days")
@@ -1064,8 +1050,8 @@ HOLD_FILE = os.path.expanduser("~/.config/od/content_engine_hold_days")
 
 def held_days(path=None):
     """Approved days that must not publish yet, one day number per line with an optional reason after it (Kevin, 17 Sep
-    2026: 2060 approved but its Learnings clip was missed; "reinstate that prior to publishing"). A held day holds the
-    order behind it too. The Learnings rebuild removes the day when the clip exists."""
+    2026: 2060 approved but its Learnings clip was missed; "reinstate that prior to publishing"). A held day holds
+    only itself (2 Oct 2026). The Learnings rebuild removes the day when the clip exists."""
     out = {}
     try:
         for line in open(path or HOLD_FILE):
@@ -1077,9 +1063,10 @@ def held_days(path=None):
 
 
 def ahead_of_order(day, gaps, state):
-    """Every stage after YouTube waits for the order too (15 Sep 2026). 2194 and 2196 were held for order, but their
-    YouTube posts had been booked before the order rule existed; GoHighLevel published them on its own, and the
-    socials, blog and podcast followed because only the YouTube stage checked the cursor."""
+    """A day on YouTube that this publisher did not put there (15 Sep 2026: 2194 and 2196 had YouTube posts booked
+    before the takeover reached them; GoHighLevel published them on its own and the socials, blog and podcast
+    followed). Its later stages wait until the run reaches it. A day the publisher itself puts on YouTube is never
+    ahead: the cursor moves to it as it goes."""
     return day not in gaps and day > cursor(state)
 
 
@@ -1123,26 +1110,31 @@ def run(dry_run=False, limit=3):
     ledger = watch.load_ledger()
     done = 0; per_stage = {1: 0, 2: 0}
     save = (lambda: None) if dry_run else (lambda: save_state(state))
-    gaps = watch.gap_days()   # Kevin's catch-up days (8 Sep 2026): they fill old holes, so they never wait for, or move, the cursor
-    held = [d for d in days if d > cursor(state) + 1 and d not in gaps]
-    if held: print("publish: held for order (behind day %d): %s" % (cursor(state) + 1, ", ".join(str(d) for d in held)))
+    gaps = watch.gap_days()   # Kevin's catch-up days (8 Sep 2026): they fill old holes, so they never move the cursor
+    ahead = [d for d in days if ahead_of_order(d, gaps, state) and stage_for(state.get(str(d)) or {}, yt_ok) != "youtube"]
+    if ahead: print("publish: on YouTube ahead of the run, later stages wait until it reaches them: %s" % ", ".join(str(d) for d in ahead))
     failed = []
     for day in days:
         try:
             entry = state.setdefault(str(day), {})
             recs = bundle(day)
             full = recs["Long Form Video"]
-            if not full: continue
+            stage = stage_for(entry, yt_ok)
+            unposted = stage in ("youtube", "wait-youtube-account") and not dry_run   # approved, nothing on YouTube: a skip is said
+            if not full:
+                if unposted: note_refusal(entry, "it has no Long Form Video record", save)
+                continue
             leak = pc.session_leak(recs)
             if leak:
                 # 24 Sep 2026: a session's close-out block rode on the copy of 2066-2071 onto YouTube and Spotify. The writer now
                 # runs with no hooks and cuts such text; this is the last stop before anything is posted, for every stage.
                 print("episode %d: NOT published: session text in %s (remove it: platform_copy.py clean --day %d)"
                       % (day, ", ".join("%s %s" % (c, f) for c, f, _ in leak), day), file=sys.stderr)
+                if unposted: note_refusal(entry, "session text is in its copy", save)
                 continue
             test = mode() == "test"
-            stage = stage_for(entry, yt_ok)
             if full["fields"].get("Record Status") not in PUBLISHABLE:
+                if unposted: note_refusal(entry, "its record status is %r, not one the publisher takes" % full["fields"].get("Record Status"), save)
                 # 15 Sep 2026: 2056 and 1841 were marked Published while their podcast had been refused, and this line
                 # skipped Published records before the retry, so the podcast never went out. Only the extras run here.
                 if full["fields"].get("Record Status") == STATUS_PUBLISHED and stage == "done" and not ahead_of_order(day, gaps, state) and not dry_run:
@@ -1152,12 +1144,13 @@ def run(dry_run=False, limit=3):
                     if not extras_done(entry): finish_extras(day, entry, recs, test, save)
                     save()
                 continue
-            if stage == "youtube" and not may_go_to_youtube(day, gaps, state, ledger, days):
-                continue
-            if stage != "youtube" and ahead_of_order(day, gaps, state):
-                continue                                   # named once in the 'held for order' line above
-            if stage == "wait-youtube-account":
+            # No order check at the YouTube stage (Kevin, 2 Oct 2026): an approved day goes, lowest first, whatever
+            # the days before it are doing. See ready_to_publish.
+            if stage == "wait-youtube-account":            # before the order check, or a day above the cursor is skipped unsaid
+                if unposted: note_refusal(entry, "no YouTube account is connected", save)
                 print("episode %d: approved, waiting for a YouTube account in GoHighLevel (Kevin's click: publish.py youtube-link)" % day); continue
+            if stage != "youtube" and ahead_of_order(day, gaps, state):
+                continue                                   # named once in the 'ahead of the run' line above
             if stage == "wait-youtube-link":
                 print("episode %d: YouTube post scheduled, waiting for it to publish before the socials go out" % day); continue
             if not dry_run: fill_learnings(day, entry, recs, acct_map, stage, ledger, gaps, state, save)
@@ -1177,8 +1170,15 @@ def run(dry_run=False, limit=3):
             if done >= limit: break
             st_no = 1 if stage == "youtube" else 2
             n = schedule_stage(day, entry, recs, acct_map, st_no, dry_run, index=per_stage[st_no], save=save)
+            if st_no == 1 and not dry_run:
+                # Stage 1 can come back truthy with nothing posted (a placeholder refused, an upload GoHighLevel turned
+                # down). Such a day is tried again every run now, so it must not use up the run's limit or move the
+                # cursor: three refused days would keep every later episode off YouTube (review, 2 Oct 2026).
+                if stage_for(entry, yt_ok) == "youtube":
+                    note_refusal(entry, "its YouTube post was refused or had nothing to post (the publisher's log says which)", save); n = 0
+                elif entry.pop("not_published", None): save()
             if n: per_stage[st_no] += 1
-            if n and st_no == 1 and not dry_run and moves_cursor(day, gaps): state[CURSOR_KEY] = day; save()
+            if n and st_no == 1 and not dry_run and moves_cursor(day, gaps): state[CURSOR_KEY] = max(cursor(state), day); save()   # a late day never pulls it back
             done += 1 if n else 0
             # Same day, not the day after (Kevin, 10 Sep 2026). The direct upload hands back the YouTube link at
             # once, so the socials, the blog, the podcast and Spotify go out this afternoon instead of tomorrow.
@@ -1193,6 +1193,8 @@ def run(dry_run=False, limit=3):
             # whole hourly run, so every later episode waited too. One episode failing is one line, and the rest go on.
             print("episode %d: publishing stopped for this episode this run (%s); the other episodes carry on" % (day, str(ex)[-200:]), file=sys.stderr)
             import traceback; traceback.print_exc()
+            ent = state.setdefault(str(day), {})
+            if not dry_run and stage_for(ent, yt_ok) == "youtube": note_refusal(ent, "it stopped on an error: %s" % str(ex)[-160:], lambda: None)
             failed.append(day); save()
     if failed:
         raise SystemExit("publish: %d episode(s) stopped on an error this run: %s" % (len(failed), ", ".join(map(str, failed))))   # still a failed run
@@ -1743,6 +1745,68 @@ def _selftest_one_episode_fails():
         g.update(saved)
 
 
+def _selftest_never_waits():
+    """2 Oct 2026, the real records: the cursor at 2080, 2081 sent back on 1 Oct, 2082 and 2083 approved the next
+    morning and held behind it all day. Drives the real run() against fakes and proves both go to YouTube in number
+    order, that 2081 goes once its own card is approved without pulling the cursor back, that an episode whose
+    upload fails does not hold the one after it, and that a held day holds only itself. Nothing reaches Airtable,
+    Drive, YouTube or GoHighLevel."""
+    import types as _types, io as _io, contextlib as _cl
+    g = globals()
+    names = ("approved_days", "held_days", "accounts", "account_map", "load_state", "save_state", "bundle", "watch",
+             "schedule_stage", "finish_extras", "mode", "fill_learnings")
+    saved = {k: g[k] for k in names}
+    booked, state = [], {CURSOR_KEY: 2080, "2080": {"youtube_link": "https://youtu.be/2080", "posts": {"youtube|full|yt": {}, "tiktok|summary|tt": {}}}}
+    fails = set()
+    def schedule_(day, entry, recs, am, st_no, dry_run=False, index=0, save=None):
+        if day in fails and st_no == 1: raise RuntimeError("Drive download failed: 404")
+        booked.append((day, st_no))
+        if st_no == 1: entry.setdefault("posts", {})["youtube|full|yt"] = {"platform": "youtube", "clip": "full"}; entry["youtube_link"] = "https://youtu.be/%d" % day
+        else: entry["posts"]["tiktok|summary|tt"] = {"platform": "tiktok", "clip": "summary"}
+        return 1
+    def go(approved, hold=None):
+        del booked[:]
+        g.update({"approved_days": lambda: sorted(approved), "held_days": lambda path=None: hold or {}})
+        try:
+            with _cl.redirect_stdout(_io.StringIO()), _cl.redirect_stderr(_io.StringIO()): run()
+        except SystemExit:
+            pass                                             # a run with a failed episode still ends as a failure
+        return [d for d, st_no in booked if st_no == 1]
+    try:
+        g.update({"accounts": lambda brand="Runpreneur": [], "account_map": lambda a: {"youtube": [{"id": "yt"}]},
+                  "load_state": lambda: state, "save_state": lambda st: None, "mode": lambda: "live",
+                  "bundle": lambda day: {"Long Form Video": {"id": "recF", "fields": {"Record Status": STATUS_APPROVED}}, "Short Form Video": None, "Learnings From My Diary": None},
+                  "watch": _types.SimpleNamespace(load_ledger=lambda: {"a": {"episode": 2081, "status": "rendered"}}, gap_days=lambda path=None: set()),
+                  "schedule_stage": schedule_, "finish_extras": lambda *a, **k: [], "fill_learnings": lambda *a, **k: False})
+        assert go({2080, 2082, 2083}) == [2082, 2083], "2082 and 2083 go while 2081 is sent back: %s" % booked
+        assert booked == [(2082, 1), (2082, 2), (2083, 1), (2083, 2)] and state[CURSOR_KEY] == 2083, (booked, state[CURSOR_KEY])
+        assert go({2080, 2081, 2082, 2083}) == [2081] and state[CURSOR_KEY] == 2083, "2081 goes once approved; a late day never pulls the cursor back: %s" % booked
+        assert go({2080, 2081, 2082, 2083}) == [], "nothing goes to YouTube twice"
+        fails.add(2084)
+        assert go({2084, 2085}) == [2085] and state[CURSOR_KEY] == 2085, "an episode that fails to upload does not hold the next: %s" % booked
+        assert "Drive download failed" in state["2084"]["not_published"]["why"], "the day that stopped says why on its own entry: %s" % state["2084"]
+        fails.clear()
+        assert go({2084, 2086, 2087}, hold={2086: "reinstate the clip"}) == [2084, 2087], "a held day holds only itself: %s" % booked
+        assert "not_published" not in state["2084"], "the note goes the moment the day is on YouTube"
+        # a gap day (Kevin's catch-up list) goes and never moves the cursor; a day already on YouTube above the cursor
+        # (2194: posted before the run reached it) is neither uploaded again nor worked ahead of the run
+        g["watch"] = _types.SimpleNamespace(load_ledger=lambda: {}, gap_days=lambda path=None: {1799})
+        state["2194"] = {"youtube_link": "https://youtu.be/2194", "posts": {"youtube|full|yt": {}}}
+        assert go({1799, 2194}) == [1799] and booked == [(1799, 1), (1799, 2)] and state[CURSOR_KEY] == 2087, (booked, state[CURSOR_KEY])
+        # three days whose YouTube post is refused each run (stage 1 comes back truthy, nothing posted) must not use up
+        # the run's limit: the day after them still goes, and each refused day says why
+        g["watch"] = _types.SimpleNamespace(load_ledger=lambda: {}, gap_days=lambda path=None: set())
+        real_schedule = g["schedule_stage"]
+        g["schedule_stage"] = lambda day, entry, recs, am, st_no, dry_run=False, index=0, save=None: 1 if day in (2088, 2089, 2090) else real_schedule(day, entry, recs, am, st_no, dry_run, index, save)
+        assert go({2088, 2089, 2090, 2091}) == [2091] and state[CURSOR_KEY] == 2091, "refused days do not starve the limit or move the cursor: %s %s" % (booked, state[CURSOR_KEY])
+        assert all("refused" in state[str(d)]["not_published"]["why"] for d in (2088, 2089, 2090)), "each refused day says why"
+        # with no YouTube account connected, a day above the cursor says so too (second review: it was skipped unsaid)
+        g["schedule_stage"] = real_schedule; g["account_map"] = lambda a: {}
+        assert go({2092}) == [] and state["2092"]["not_published"]["why"] == "no YouTube account is connected", state.get("2092")
+    finally:
+        g.update(saved)
+
+
 def _selftest_close_cards():
     """30 Sep 2026: 2059-2077 were live on all seven sections and their approved cards sat open at "Today" for up to
     two weeks, so the Task Manager asked Kevin to approve 2059 again. Drives close_cards end to end on fakes."""
@@ -1884,12 +1948,6 @@ def _selftest_fill_learnings():
 
 
 def selftest():
-    led_r = {"p1": {"day": 2071, "status": "new"}, "x": {"episode": 2196, "day": 2196, "status": "rendered"}}
-    st_r = {"_cursor": 2070}
-    assert next_publishable(st_r, led_r, {2196}) == (None, "day 2071 is not approved yet, so 2196 wait behind it") and st_r["_cursor"] == 2070, \
-        "a day waiting to re-render is held, never stepped over (24 Sep 2026)"
-    assert not day_was_recorded(2080, {"b": {"day": 2080, "status": "broll"}}), "a day of B-roll only is still stepped over"
-    assert not day_was_recorded(2072, {"t": {"day": 2072, "episode": 2071, "status": "rendered", "role": "teaser"}}), "a rendered clip counts for its episode only"
     ent_h = {"youtube_link": "y", "blog": {"url": "u"}, "podcast": {"status": "failed", "upload_attempts": 3, "error": "Timeout"}}
     import io as _io3, contextlib as _cl3, blog as _blog3
     # 29 Sep 2026: unfaked, this check fetched 2070's real podcast from Drive and uploaded it to GoHighLevel with curl on
@@ -1936,23 +1994,19 @@ def selftest():
     assert when_for("youtube", "full", 0, t) == "2026-09-09T07:45:00Z", "06:00 has passed at 08:30: fifteen minutes from now, same day"
     assert when_for("linkedin", "summary", 0, t) == "2026-09-09T11:00:00Z" and when_for("tiktok", "lfmd", 0, t) == "2026-09-09T18:30:00Z"
     assert when_for("facebook", "summary", 1, t) == "2026-09-09T13:30:00Z", "second episode of the day two hours later"
-    led = {"a": {"episode": 2054}, "b": {"episode": 2056}}
-    st = {}; assert next_publishable(st, led, {2054, 2056}) == (2054, "in order") or watch.start_day() != 2054
-    st = {CURSOR_KEY: 2054}; assert next_publishable(st, led, {2056}) == (2056, "in order") and st["_skipped_days"] == [2055], "an unrecorded day is stepped over"
-    st = {CURSOR_KEY: 2054}; assert next_publishable(st, {"a": {"episode": 2054}, "c": {"episode": 2055}, "b": {"episode": 2056}}, {2056})[0] is None, "a recorded, unapproved day holds the line"
-    # Kevin's catch-up days (8 Sep 2026): a gap day publishes when approved and never moves the cursor; the continuity day still waits its turn
-    led = {"a": {"episode": 2054}, "b": {"episode": 2055}, "g": {"episode": 1799}}; gaps = {1799, 1808, 1841}
-    st = {CURSOR_KEY: 2053}; assert may_go_to_youtube(1799, gaps, st, led, {1799, 2055}) and not may_go_to_youtube(2055, gaps, st, led, {1799, 2055})
+    # 2 Oct 2026: an approved day never waits for another. 2081 sent back (so not in the approved set), 2082 and 2083
+    # approved: both are ready, lowest first. A day with a YouTube post already is not ready again.
+    booked = {"posts": {"youtube|full|yt": {"status": "scheduled"}}}
+    assert ready_to_publish({CURSOR_KEY: 2080, "2080": booked}, {2083, 2082, 2080}) == [2082, 2083], "approved days go in number order, past a day that is not ready"
+    assert ready_to_publish({CURSOR_KEY: 2083, "2082": booked, "2083": booked}, {2081, 2082, 2083}) == [2081], "the day left behind goes when its own card is approved"
+    assert ready_to_publish({CURSOR_KEY: 2080}, set()) == []
+    gaps = {1799, 1808, 1841}
     # 15 Sep 2026: 2194/2196 were held for order but their socials went out, because only the YouTube stage checked it
     so = {CURSOR_KEY: 2056, "2194": {"youtube_link": "https://youtu.be/x"}}
     assert ahead_of_order(2194, gaps, so) and not ahead_of_order(2056, gaps, so) and not ahead_of_order(2055, gaps, so) and not ahead_of_order(1841, gaps, so)
     import inspect; rsrc = inspect.getsource(run)
     assert 'if stage != "youtube" and ahead_of_order(day, gaps, state)' in rsrc, "the socials, blog and podcast wait for the order too"
     assert rsrc.index("ahead_of_order(day, gaps, state)") < rsrc.index("schedule_stage("), "the order check comes before anything is booked"
-    # a day already live is stepped over, or the next day waits for a YouTube upload that never happens again
-    sl = {CURSOR_KEY: 2193, "2194": {"youtube_link": "https://youtu.be/a"}, "2195": {"youtube_link": "https://youtu.be/b"}}
-    led2 = {k: {"episode": d} for k, d in (("a", 2193), ("b", 2194), ("c", 2195), ("e", 2196), ("d", 2197))}
-    assert next_publishable(sl, led2, {2194, 2195, 2197}) == (None, "day 2196 is not approved yet, so 2197 wait behind it") and sl[CURSOR_KEY] == 2195
     # the seven sections: 2056 on 15 Sep 2026 had every post out, no podcast and no confirmed share
     e2056 = {"posts": {"youtube|full|y": {"platform": "youtube", "clip": "full", "status": "published"},
                        "youtube|lfmd|y": {"platform": "youtube", "clip": "lfmd", "status": "published"},
@@ -2032,7 +2086,6 @@ def selftest():
         globals()["fetch_readable"], globals()["run_spotify"] = real_fetch, real_run_spotify
     src = inspect.getsource(sync); assert "import platform_copy" not in src, "sync must use the module-level pc: an import inside the function made pc a local and crashed every sync (10 Sep 2026, 07:15)"
     assert 'if not str(day).isdigit() or not isinstance(entry, dict): continue' in src, "sync skips the cursor and the held posts"
-    assert may_go_to_youtube(2054, gaps, st, led, {1799, 2054}) and st[CURSOR_KEY] == 2053, "a gap day in the approved set does not disturb the order"
     assert not moves_cursor(1799, gaps) and moves_cursor(2054, gaps)
     assert "twitter" not in CHANNELS
     assert "YouTube Link" in LINK_FIELDS[("youtube", "full")] and "TikTok Link" in LINK_FIELDS[("tiktok", "summary")] and "Facebook Post Link" in LINK_FIELDS[("facebook", "summary")]
@@ -2135,6 +2188,7 @@ def selftest():
     _selftest_once_only()
     _selftest_placeholder_folder()
     _selftest_one_episode_fails()
+    _selftest_never_waits()
     _selftest_close_cards()
     import inspect as _i5; ss = _i5.getsource(sync); assert ss.index("monetise_long_video(day, entry)") < ss.index("share_to_facebook_profile(day, entry, state, clip=clip)"), "monetisation is checked every sync"
     msrc = _i5.getsource(monetise_long_video)
@@ -2169,7 +2223,7 @@ def selftest():
     assert not spotify_link_due({"title": "t", "status": "failed", "started": "2026-09-21T05:00:00Z"}, t0) and not spotify_link_due({"status": "published"}, t0)
     assert not spotify_link_due({"title": "t", "status": "processing", "started": "2026-09-10T05:00:00Z"}, t0), "an old 'processing' episode is no longer asked every hour for good"
     assert not spotify_link_due({"title": "t", "status": "published"}, t0), "no start time and published: nothing to measure three days from"
-    print(json.dumps({"checks": 57, "failed": []}))
+    print(json.dumps({"checks": 58, "failed": []}))
 
 
 if __name__ == "__main__":

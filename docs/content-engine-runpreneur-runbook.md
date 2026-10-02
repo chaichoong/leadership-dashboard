@@ -125,8 +125,11 @@ once, with a note carrying the YouTube link. A Completed or Cancelled card is le
 report line ("content cards not closed") until it clears. Until 30 Sep 2026
 nothing did this, 2059-2077 sat open for up to two weeks, and the Task Manager read them as unpublished.
 
-**24. Publish the next episode in order** (`publish.py run --limit 3`)
-Approved episodes only, strictly in episode order, two stages:
+**24. Publish every approved episode** (`publish.py run --limit 3`)
+Approved episodes only, lowest day number first, two stages. An approved episode never waits for another day
+(Kevin, 2 Oct 2026): a day that was sent back, failed to render or has no card yet steps aside, and goes out late,
+out of number order, once its own card is approved. Until then one such day held every approved day behind it
+(2081 held 2082 and 2083 on 2 Oct). The Publishing page names any day the run has gone past under "Not out yet".
 
 | Stage | What goes out | When |
 |---|---|---|
