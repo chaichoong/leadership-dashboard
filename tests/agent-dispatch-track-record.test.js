@@ -183,6 +183,44 @@ print('---JSON---'); print(json.dumps(m.history_text(r)))`);
     expect(linked.split('\n')[1]).toBe('- 03 Jul 2026 — email: Kevin: Re: arrears (https://mail.google.com/mail/u/0/#all/1a02)');
     expect(out[1]).toBe('TRACK RECORD: none found (searched tasks for ref 12345; Gmail not searched (no key))');
   });
+  // 2 Oct 2026: a file's own link is signed by Airtable and dies within hours.
+  // The printed block sits on a card for days, so five "Open" buttons on three
+  // waiting cards were dead (the first: this servicing PDF on the Mears
+  // invoice card, HTTP 410). The text links the task that holds the file; the
+  // JSON keeps the file link, which an agent downloads within its own run.
+  it('a file row in the printed block links the task that holds it; the JSON keeps the file link for the agent', () => {
+    const out = py(`
+import contextlib, io
+SIGNED = 'https://v5.airtableusercontent.com/v3/u/45/45/1759420800000/signed/Servicing_1024091608.pdf'
+rec = {'id': 'recORQDQtwvht7j0C', 'createdTime': '2026-07-30T08:14:00.000Z', 'fields': {
+  m.AF['name']: 'INBOUND: Notification about your property - New Servicing Job Raised (S772844)',
+  m.AF['status']: {'name': 'Completed'}, m.AF['completion']: '2026-08-02',
+  m.AF['attachments']: [{'id': 'att1', 'filename': 'Servicing_1024091608.pdf', 'size': 723000, 'url': SIGNED}]}}
+m.query_tasks = lambda formula, max_records=None, minimal=False: [rec]
+def run(text):
+    buf = io.StringIO()
+    with contextlib.redirect_stdout(buf):
+        m.cmd_history(types.SimpleNamespace(ref=['S772844'], from_text=None, email=None, property=None,
+                                            days=730, task='recCARD0000000001', no_gmail=True, text=text))
+    return buf.getvalue()
+print('---JSON---'); print(json.dumps({'text': run(True), 'json': json.loads(run(False)), 'signed': SIGNED}))`);
+    const row = out.text.split('\n').find((l) => l.includes('file on that task'));
+    expect(row).toBe('- 30 Jul 2026 — file: file on that task: Servicing_1024091608.pdf (706 KB) — from '
+      + '"INBOUND: Notification about your property - New Servicing Job Raised (S772844)" '
+      + '(https://airtable.com/appnqjDpqDniH3IRl/tblqB8b22hKBL4PF1/recORQDQtwvht7j0C)');
+    expect(out.text).not.toContain('airtableusercontent');
+    // every other row keeps its own link
+    expect(out.text.split('\n').filter((l) => l.endsWith('/recORQDQtwvht7j0C)'))).toHaveLength(3);
+    const file = out.json.entries.find((e) => e.source === 'file');
+    expect(file.link).toBe(out.signed);
+    expect(file.task).toBe('recORQDQtwvht7j0C');
+    // a file entry that names no task prints no link at all, never the signed one
+    const bare = py(`
+r = {'terms': ['ref S772844'], 'searched': ['tasks'], 'notes': [], 'entries': [
+  {'date': '2026-07-30', 'source': 'file', 'text': 'file on that task: a.pdf (88 KB)', 'link': 'https://v5.airtableusercontent.com/v3/u/signed/a.pdf'}]}
+print('---JSON---'); print(json.dumps(m.history_text(r)))`);
+    expect(bare.split('\n')[1]).toBe('- 30 Jul 2026 — file: file on that task: a.pdf (88 KB)');
+  });
   it('the printed block passes the gate it was built for', () => {
     const out = py(`
 r = {'terms': ['email a@b.com'], 'searched': ['tasks'], 'notes': [], 'entries': [{'date': '2026-07-03', 'source': 'task', 'text': 'completed: X'}]}
