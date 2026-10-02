@@ -116,3 +116,44 @@ test.describe('the file this round uses, and the dated trail', () => {
     await expect(card.locator('[data-apv-trail] [data-apv-file="bill.pdf"]')).toBeVisible();
   });
 });
+
+// Kevin, 2 Oct 2026 (close-out of the decision-card fix): "Do it now". An earlier draft kept under a decision card
+// is quoted line by line so nothing in it reads as the card's own line. The quoting also hid that draft's history
+// from the story: its TRACK RECORD lines start "> - 03 Sep 2026", which the parser stopped at.
+test.describe('an earlier draft quoted under a decision card', () => {
+  function withQuotedDraft() {
+    const fx = defaultFixtures();
+    const r = fx.approvals[1];
+    r.createdTime = '2026-09-01T08:00:00.000Z';
+    r.fields[TF.notes] = '';
+    r.fields[TF.feedbackHistory] = '';
+    r.fields[TF.attachments] = [];
+    r.fields[TF.agentOutput] = [
+      'DECIDE: Pay the round now, or wait?',
+      'WHAT THIS IS:\nThe monthly round.',
+      'TRACK RECORD: (searched tasks for ref round)\n- 20 Sep 2026 — task: completed: September round (https://airtable.com/appX/tblY/recNEWHISTORY0001)',
+      'Earlier output:\n> Draft reply to the bank.\n>\n> TRACK RECORD: (searched tasks + Gmail for email bank@example.com)\n'
+        + '> - 03 Sep 2026 08:47 — Kevin: This will be done on the 6th. (https://airtable.com/appX/tblY/recOLDHISTORY0001)\n'
+        + '> - 04 Sep 2026 — email: Bank: Your statement is ready\n>\n> Kind regards\n> - 05 Sep 2026 — not history: this line sits after the draft\'s sign-off',
+    ].join('\n\n');
+    return fx;
+  }
+
+  test('its dated history lines show in the story with their links, and the story stops where the history stops', async ({ page }) => {
+    await mockAgentsPage(page, withQuotedDraft());
+    await loadAgentsPage(page);
+    await page.click('#ptab-approvals');
+    const trail = page.locator('[data-apv-card="recApvA2"] [data-apv-trail]');
+    // the card's own history, as before
+    await expect(trail.locator('.apv-trail-row', { hasText: 'completed: September round' })).toHaveCount(1);
+    // the quoted draft's history: both lines, the first with its Open link
+    const old = trail.locator('.apv-trail-row', { hasText: 'Kevin: This will be done on the 6th.' });
+    await expect(old).toHaveCount(1);
+    await expect(old.locator('.apv-trail-open')).toHaveAttribute('href', 'https://airtable.com/appX/tblY/recOLDHISTORY0001');
+    await expect(trail.locator('.apv-trail-row', { hasText: 'Bank: Your statement is ready' })).toHaveCount(1);
+    // a dated bullet after the block has ended is not history
+    await expect(trail.locator('.apv-trail-row', { hasText: 'not history' })).toHaveCount(0);
+    // and the quote marks never reach the story
+    await expect(trail.locator('.apv-trail-row', { hasText: '>' })).toHaveCount(0);
+  });
+});
