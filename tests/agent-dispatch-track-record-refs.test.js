@@ -277,7 +277,8 @@ print('---JSON---'); print(json.dumps([m.reference_tokens(t) for t in json.loads
     // about 4. The old check was "under 1 second", and on 2 Oct 2026 a busy
     // Mac took 1.22 seconds on sound code and blocked three merges. The time
     // counted is processor time this process used, never the clock on the
-    // wall, so waiting behind other work adds nothing. Best of three runs.
+    // wall, so waiting behind other work adds nothing. Best of five rounds,
+    // small then big in turn, so a spell on a slow core hits both sizes.
     const out = py(`
 import time
 cases = {
@@ -293,21 +294,22 @@ cases = {
     'hyphen run -a': lambda k: '-a' * (7500 * k),
     'many different tokens': lambda k: ' '.join(str(10000 + i) for i in range(7500 * k)),
 }
-def best(t):
-    times = []
-    for _ in range(3):
-        t0 = time.process_time(); m.reference_tokens(t); times.append(time.process_time() - t0)
-    return min(times)
-res = {name: [best(make(1)), best(make(4))] for name, make in cases.items()}
+def cpu(t):
+    t0 = time.process_time(); m.reference_tokens(t); return time.process_time() - t0
+res = {}
+for name, make in cases.items():
+    small, big = make(1), make(4)
+    rounds = [(cpu(small), cpu(big)) for _ in range(5)]
+    res[name] = [min(r[0] for r in rounds), min(r[1] for r in rounds)]
 print('---JSON---'); print(json.dumps(res))`);
     expect(Object.keys(out).length).toBe(11);
     for (const [name, [small, big]] of Object.entries(out)) {
-      // Under 20 milliseconds at full size the reading is too small for a
-      // steady ratio, and nothing that fast is the bug. Every slow pattern this
+      // Under 50 milliseconds at full size the small reading is too short
+      // for a steady ratio, and nothing that fast is the bug. Every slow pattern this
       // guards took over a second there: 28 seconds on the blanks before the
       // review fix, 1.2 on 'a.' * 10000, 3.1 on 'a-' * 30000 and on 30,000
       // different tokens before the 28 Sep 2026 fixes (0.07 and 0.04 after).
-      const ratio = big < 0.02 ? 0 : big / small;
+      const ratio = big < 0.05 ? 0 : big / small;
       expect(ratio, `${name}: ${small.toFixed(4)}s, then ${big.toFixed(4)}s on four times the text`).toBeLessThan(8);
       // Backstop only: a hang on any machine, however loaded.
       expect(big, `${name} at full size`).toBeLessThan(10);
