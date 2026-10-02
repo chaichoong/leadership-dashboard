@@ -4435,7 +4435,8 @@ def cmd_submit(args):
             _subject = (parse_email_output(output) or {}).get("subject") or ""
         except EmailFormatError:
             _subject = ""
-        bought = certificate_purchase_problem(tf_early.get(AF["name"], "") or "", output, _subject)
+        bought = certificate_purchase_problem(tf_early.get(AF["name"], "") or "", output, _subject,
+                                              tf_early.get(AF["description"], "") or "")
     except (SystemExit, Exception) as exc:                # noqa: BLE001
         bought = ""
         print(f"WARNING: bought-twice check could not run for {args.task}: {str(exc)[:160]}",
@@ -9122,7 +9123,7 @@ def task_property_id(name, properties):
     return hits[0] if len(hits) == 1 else ""
 
 
-def certificate_purchase_problem(name, output, mail_subject=""):
+def certificate_purchase_problem(name, output, mail_subject="", description=""):
     """Why a COMPLIANCE quote request or booking must not go out, or "".
 
     Only judged when the output IS a purchase step: a PASS TO ROY booking, or an
@@ -9130,6 +9131,10 @@ def certificate_purchase_problem(name, output, mail_subject=""):
     property in the name) is let through: the daily paid-but-not-filed check is
     the backstop, and refusing unrelated work would teach agents to rename tasks."""
     if not str(name or "").startswith(COMPLIANCE_TASK_PREFIX):
+        return ""
+    # The engine's own filing task exists BECAUSE of an unfiled payment: asking Roy
+    # or the engineer for the copy is the job, not a second purchase.
+    if ENGINE_FILING_MARK in str(description or ""):
         return ""
     # search with MULTILINE, not match: a tier-1 banner is prepended above it.
     booking = re.search(r"^\s*PASS TO ROY:", output or "", re.I | re.M)

@@ -324,7 +324,8 @@ print(json.dumps({'err': err, 'bookReads': len(calls)}))`);
     expect(submit).toMatch(/if cert_owed and level\["level"\] == AUTONOMY_ACT and level\.get\("carry"\) != "roy"[\s\S]{0,400}level = dict\(level, level=AUTONOMY_APPROVE/);
     // Roy's word does not close a task that owes a filing either.
     const roy = execFileSync('cat', [resolve(ROOT, 'scripts/roy-assistant.py')], { encoding: 'utf8' });
-    expect(roy).toMatch(/owed = ad\.task_fields_owe_certificate\(args\.target, tf\)\s+if owed:\s+sys\.exit/);
+    expect(roy).toMatch(/owed = ad\.task_fields_owe_certificate\(args\.target, tf\)\s+if owed:[\s\S]{0,200}sys\.exit/);
+    expect(roy).toMatch(/"maintenanceTicket",\s+"attachments"\)/); // the gate must see the file on Roy's task
     // And triage's own "Kevin replied himself" close skips a certificate task.
     const skill = execFileSync('cat', [resolve(ROOT, '.claude/scheduled-tasks/inbound-email-triage/SKILL.md')], { encoding: 'utf8' });
     expect(skill).toMatch(/NEVER close a task whose Description carries `CERTIFICATE ATTACHED`/);
@@ -363,6 +364,17 @@ print(json.dumps({'why': m.certificate_purchase_problem(${JSON.stringify(name)},
     const r = judge('[dict(CERT, type="EICR", unitIds=["u1"]), dict(CERT, type="EICR", unitIds=["u2"], renewalDate="2026-10-10")]', '[]',
       'COMPLIANCE: EICR renewal - 9 Test Place (Unit 2)', 'PASS TO ROY: book the EICR');
     expect(r.why).toBe('');
+  });
+  it("the engine's own filing task can be handed to Roy to ask for the copy", () => {
+    // Third review: its own unfiled payment blocked the hand-over that resolves it.
+    const r = py(`${BOOK}
+m.fetch_compliance_payments = lambda: [PAY]
+m.fetch_certificates = lambda refresh=False: [dict(CERT, propertyIds=['pB'])]
+name = 'COMPLIANCE: file the certificate paid for on 2026-09-21 - 9 Test Place'
+print(json.dumps({'own': m.certificate_purchase_problem(name, 'PASS TO ROY: ask the engineer for the copy', '', 'x ' + m.ENGINE_FILING_MARK + ' (transaction recTX000000000009)'),
+                  'other': m.certificate_purchase_problem('COMPLIANCE: EICR quote - 9 Test Place', 'PASS TO ROY: book it', '', 'an ordinary renewal')}))`);
+    expect(r.own).toBe('');
+    expect(r.other).toContain('has no certificate filed against it');
   });
   it('control: inside the renewal window a booking goes through', () => {
     const r = judge('[dict(CERT, renewalDate="2026-10-20")]', '[]', 'COMPLIANCE: GSC renewal - 9 Test Place', 'PASS TO ROY: book the gas safety check');

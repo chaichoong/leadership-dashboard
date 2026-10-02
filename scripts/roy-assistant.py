@@ -805,7 +805,8 @@ def cmd_task_update(args):
     # A GET by id ignores the table, so prove the target is a TASK by listing Tasks.
     rows = airtable_all(TASKS, "RECORD_ID()='%s'" % args.target,
                         fields=[AF[k] for k in ("name", "description", "notes", "status",
-                                                "teamMember", "assignee", "maintenanceTicket")])
+                                                "teamMember", "assignee", "maintenanceTicket",
+                                                "attachments")])
     if len(rows) != 1:
         sys.exit(f"REFUSED: {args.target} is not in the Tasks table")
     tf = rows[0].get("fields", {}) or {}
@@ -830,8 +831,10 @@ def cmd_task_update(args):
         # book (2 Oct 2026). His "done" is noted; the close waits for the filing.
         owed = ad.task_fields_owe_certificate(args.target, tf)
         if owed:
+            # Roy's update is kept; only the close is refused.
+            airtable("PATCH", f"{TASKS}/{args.target}", {"fields": fields})
             sys.exit(f"REFUSED: {args.target} cannot be completed yet: {owed}. "
-                     "Note Roy's update without --complete, and file the certificate "
+                     "Roy's update is noted on the task. File the certificate "
                      "(agent-dispatch.py certificate) so the task can close.")
         fields[AF["status"]] = "Completed"
         fields[AF["completion"]] = now_utc().strftime("%Y-%m-%dT%H:%M:%S.000Z")
