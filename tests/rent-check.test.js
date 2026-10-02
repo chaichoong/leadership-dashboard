@@ -3,7 +3,8 @@
 // These drive the REAL rule with fixture records shaped exactly as Airtable returns them
 // (returnFieldsByFieldId, selects as strings, links as id arrays). The first three cases are the
 // worked examples Kevin approved at the build gate, shaped from live rows read on 2 Oct 2026 with
-// every id, address and rent replaced: this repo is public and a real address beside "late" is not.
+// every id, address, rent and start date replaced (and, for the cash flow voids, the due days and part
+// payment too): this repo is public and a real address beside "late" is not.
 //
 // Back-tested (2 Oct 2026) by breaking the rule under test and watching its case fail:
 //   * TOLERANCE_DAYS = 0                          -> "the due day itself, and the day after, are not late" fails
@@ -58,7 +59,7 @@ rc.read_task_state = lambda: {"on": False, "status": "Building", "keys": {}}
 TY, TN, TX, AC = rc.TY, rc.TN, rc.TX, rc.AC
 DAY = date(2026, 10, 2)
 def rec(i, f): return {"id": i, "fields": f}
-def tenancy(i, due, rent, status="In Payment", start="2025-04-04", tenant="recT_uc", unit=None, **extra):
+def tenancy(i, due, rent, status="In Payment", start="2025-04-10", tenant="recT_uc", unit=None, **extra):
     f = {TY["dueDay"]: str(due), TY["rent"]: rent, TY["payStatus"]: status, TY["start"]: start,
          TY["tenants"]: [tenant], TY["tenantStatus"]: ["Active"], TY["unitRef"]: [unit or ("Unit " + i)]}
     f.update(extra)
@@ -111,7 +112,7 @@ print(json.dumps({"light": res["lights"]["recEX1"], "line": res["briefLine"]}))`
 
   it('2. due day 2, paid 2 Sep, checked on the due day: green', () => {
     const r = py(`
-res, rows = run([tenancy("recEX2", 2, 500.00, start="2021-11-01")], [paid("recEX2", "2026-09-02", 500.00)])
+res, rows = run([tenancy("recEX2", 2, 500.00, start="2021-10-20")], [paid("recEX2", "2026-09-02", 500.00)])
 print(json.dumps({"light": res["lights"]["recEX2"], "listed": list(rows), "worst": res["worst"], "line": res["briefLine"]}))`);
     expect(r.light).toBe('green');
     expect(r.listed).toEqual([]);
