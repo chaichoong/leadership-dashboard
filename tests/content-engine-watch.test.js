@@ -62,6 +62,23 @@ describe('content-engine watch: nightly wiring', () => {
     expect(run).not.toContain('stab.py');   // rendering goes through render.py, never a bare stab call
   });
 
+  // Kevin, 2 Oct 2026: three a night. A day begun late is killed at the job's stop and the copy, cards and publishing
+  // steps after the loop never run. Drives the script's own function, extracted verbatim.
+  it('starts no day from 04:00, so the night always reaches its cards and publishing steps', () => {
+    const run = readFileSync(RUN, 'utf8');
+    const block = run.match(/# --- last-start-block[\s\S]*?# --- end last-start-block ---/)[0];
+    const may = (hour, env = {}) => {
+      try { execFileSync('bash', ['-c', `${block}\nce_may_start_day ${hour}`], { env: { PATH: process.env.PATH, ...env } }); return true; }
+      catch (e) { return false; }
+    };
+    expect([22, 23, 0, 1, 3].map(h => may(h))).toEqual([true, true, true, true, true]);
+    expect([4, 5, 6, 7, 12, 21].map(h => may(h))).toEqual([false, false, false, false, false, false]);
+    expect(may(5, { CE_ALLOW_DAYTIME: '1' })).toBe(true);          // a deliberate daytime run is not cut short
+    expect(may(3, { CE_LAST_START_HOUR: '3' })).toBe(false);
+    expect(run).toMatch(/if ! ce_may_start_day "\$\(date \+%-H\)"; then[\s\S]{0,400}continue/);
+    expect(run).toContain('approval.py run --pending --limit "$COPY_LIMIT"');   // a card for every episode the night planned
+  });
+
   it('streams the raw clip with retries while Drive hydrates it, and a failed pull never kills the run (4 Sep 2026)', () => {
     const w = readFileSync(path.join(ROOT, 'scripts', 'content-engine', 'watch.py'), 'utf8');
     expect(w).toContain('DRIVE_RETRY_ERRNOS = (11, 35)');
