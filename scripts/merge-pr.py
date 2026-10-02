@@ -455,6 +455,29 @@ def is_gate(reason):
     return reason.startswith("gate: ")
 
 
+# The pages that sit behind a sign-in the walk does not hold, and the one gate
+# each shows: Inbound Comms wants a Google session, the CRM its own login. Such
+# a page rendered and went no further, on the live site too. That is "not
+# checked", not "a problem main already has": worded as a problem it was raised
+# with Kevin as two broken pages on 2 Oct 2026, and both were healthy.
+# Keyed on the PAGE, never on the gate alone: prod-walk.js gives the same
+# "shows its own sign-in screen" to Property Manager and Tasks, which the walk
+# IS built to sign in to, so there it means a sign-in broke. A new page behind
+# a sign-in reads as a problem until it is added here, which is the loud way
+# round.
+SIGN_IN_PAGES = {
+    "comms": "gate: asks for a Google sign-in",
+    "crm": "gate: shows its own sign-in screen",
+}
+
+
+def sign_in_only(p):
+    """True when the page is one the walk cannot sign in to and that sign-in is
+    the ONLY reason it shows."""
+    expected = SIGN_IN_PAGES.get(p.get("id"))
+    return expected is not None and page_reasons(p) == {expected}
+
+
 # ─── THE DECISION (pure: no git, no GitHub, no browser) ───────────────
 #
 # walk is None when the walk stage was never reached, else a dict:
@@ -530,7 +553,7 @@ def recheck_ids(walk, main_ids=None):
 def walk_findings(walk, live, regate=None, main_ids=None):
     out = {"recheck": [], "newFailures": [], "newReasons": {}, "alreadyBrokenLive": [],
            "requestFailures": [], "newPages": [], "newPagesWarn": [], "gateOnly": [],
-           "cannot": None}
+           "signInOnly": [], "cannot": None}
     if walk is None:
         out["cannot"] = "the page walk did not run"
         return out
@@ -612,6 +635,8 @@ def walk_findings(walk, live, regate=None, main_ids=None):
             out["newReasons"][pid] = sorted(new)
         elif page_reasons(here):
             out["alreadyBrokenLive"].append(pid)
+            if sign_in_only(here):
+                out["signInOnly"].append(pid)
         reqs = request_reasons(here) - request_reasons(there)
         if reqs:
             out["requestFailures"].append({"id": pid, "onlyInMergeResult": sorted(reqs)})
@@ -641,9 +666,13 @@ def verdict(gate_ok, walk, live, regate=None, main_ids=None):
     if walk.get("scope") == "none":
         return True, "tests green on the merge result; the PR touches no page, so no walk"
     notes = []
-    if f["alreadyBrokenLive"]:
+    broken = [pid for pid in f["alreadyBrokenLive"] if pid not in f["signInOnly"]]
+    if broken:
         notes.append("%d page(s) show the same problems on the live site, so main already "
-                     "has them: %s" % (len(f["alreadyBrokenLive"]), ", ".join(f["alreadyBrokenLive"])))
+                     "has them: %s" % (len(broken), ", ".join(broken)))
+    if f["signInOnly"]:
+        notes.append("%d page(s) stop at a sign-in the walk cannot pass, on the live site too, "
+                     "so they were not checked: %s" % (len(f["signInOnly"]), ", ".join(f["signInOnly"])))
     if f["newPagesWarn"]:
         notes.append("new page(s) WARN, reported: %s" % ", ".join(f["newPagesWarn"]))
     if notes:
@@ -679,6 +708,7 @@ def walk_summary(walk, live, regate=None, main_ids=None):
         "newFailures": f["newFailures"],
         "newReasons": f["newReasons"],
         "alreadyBrokenLive": f["alreadyBrokenLive"],
+        "notCheckedSignIn": f["signInOnly"],
         "newPages": f["newPages"],
         "newPagesWarn": f["newPagesWarn"],
         "gateOnlyRewalked": f["gateOnly"] if regate is not None else [],
