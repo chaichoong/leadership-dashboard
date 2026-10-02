@@ -352,17 +352,38 @@ ASIDE_LEAD_RE = re.compile(r"\b(?:kind|sort)\W*$", re.I)
 LEARN_LEAD_RE = re.compile(r"\b(?:learn\w*|lesson\w*)\W+(?:\w+\W+){0,2}$", re.I)
 
 
-def lfmd_start(text, before=""):
-    """The first 'Learnings from my diary' phrase in text that is not the show's name. before is the caption chunk in
-    front of text, because the day number and "of the diary" can fall in different chunks."""
+def lfmd_matches(text, before=""):
+    """Every 'Learnings from my diary' phrase in text that is not the show's name or an aside, in order. before is
+    the text in front of it, because the day number and "of the diary" can fall in different caption chunks."""
     for m in LFMD_START_RE.finditer(text):
         show = (m.group("prep") or "").lower() == "of" and (m.group("det") or "").lower() == "the"
         if show and SHOW_NAME_DAY_RE.search(before + " " + text[:m.start("prep")]): continue
         lead = before + " " + text[:m.start()]
         aside = ASIDE_RE.match(m.group(0)) or (re.match(r"of\s", m.group(0), re.I) and ASIDE_LEAD_RE.search(lead))
         if aside and not LEARN_LEAD_RE.search(lead): continue
-        return m
-    return None
+        yield m
+
+
+def lfmd_start(text, before=""):
+    """The first such phrase, or None."""
+    return next(lfmd_matches(text, before), None)
+
+
+# Between two spoken words: any run of space and of whisper's own notes, which are never his words
+# ([BLANK_AUDIO], [inaudible], (wind blowing), (laughing)).
+GAP_RE = re.compile(r"(?:\s|\[[^\]]*\]|\([^)]*\))+")
+
+
+def spoken(text):
+    """Text with whisper's noise notes taken out and one space between words. The cutter (lfmd_window) and the output
+    gate (qa.py) both read the talk this way, so a note sitting inside the diary line, or inside the show's name,
+    cannot make one find a section the other does not (review, 2 Oct 2026)."""
+    return GAP_RE.sub(" ", text).strip()
+
+
+def lfmd_said(text):
+    """Whether the diary line is in this text: the output gate's question, asked the way the cutter reads it."""
+    return bool(lfmd_start(spoken(text)))
 # A near miss: "learn..." followed within four words by something that sounds like diary. When no section is found but
 # this is, the output gate refuses the card (qa.py), so a mis-heard Learnings line can never ship silently.
 DIARY_NEAR_MISS_RE = re.compile(r"\blearn\w*\W+(?:\w+\W+){0,4}(?:d(?:ia|ie|ai|iv)\w*|dairy|dire)\b(?!\s+of\s+(?:a|an|the|our)\b(?!\s+day\b))", re.I)
@@ -395,12 +416,23 @@ def watch_ts(s):
 def lfmd_window(segments, min_len=20.0, max_len=180.0):
     """(start, end) of the 'Learnings from my diary' section: from the sentence that names it (the
     LAST such mention, since he may trail it earlier) to the sign-off that follows, or None."""
-    # Each segment is read together with the next, and the phrase must START in this one: the caption files split
-    # speech into five-word chunks, and "the learning from | a diet today" was missed that way (2060, 17 Sep 2026).
-    starts = []
+    # The talk is read as ONE text, the way spoken() reads it, and each phrase is put back on the segment it starts in.
+    # Reading a segment with only its neighbour missed "the learning from | a diet today" in one-segment days
+    # (2060, 17 Sep 2026) and still missed any line whisper spread over three ("the latest in my | [BLANK_AUDIO] |
+    # diary is"), which the output gate, reading the whole text, then refused with nothing to rebuild (2 Oct 2026).
+    # The clip starts where it always did: at the LAST word of the phrase from which it still reads as the phrase
+    # ("So the learnings | from my diary today" starts on "from"), so no stored episode's clip moves.
+    raw, owner = "", []                         # owner[k]: the segment that character k of the talk came from
     for i, (_, _, t) in enumerate(segments):
-        m = lfmd_start(t + (" " + segments[i + 1][2] if i + 1 < len(segments) else ""), segments[i - 1][2] if i else "")
-        if m and m.start() < len(t): starts.append(i)
+        raw += t + " "; owner += [i] * (len(t) + 1)
+    text, own, last = "", [], 0                 # the same talk with every gap down to one space, each character still owned
+    for g in GAP_RE.finditer(raw):
+        text += raw[last:g.start()] + " "; own += owner[last:g.start()] + [owner[g.start()]]; last = g.end()
+    text += raw[last:]; own += owner[last:]
+    starts = []
+    for m in lfmd_matches(text):
+        pos = max(p for p in (m.start() + w.start() for w in re.finditer(r"\b\w", m.group(0))) if LFMD_START_RE.match(text, p))
+        starts.append(own[pos])
     if not starts: return None
     i = starts[-1]
     start = segments[i][0]
@@ -853,6 +885,7 @@ def process(key, ledger, keep=False):
     else:
         day, reason = watch.resolve_episode(date_day, spoken, prev_day_has_talk=prev_has_talk)
     e["episode"] = day; e["episode_reason"] = reason; e["status"] = "rendering"; watch.save_ledger(ledger)
+    e.pop("lfmd_early_ok", None)      # a clip cut again is watched again before an early start is accepted (qa.py accept-early)
     e["lfmd_window"] = window; e["role"] = role; e["duration"] = round(duration, 1); watch.save_ledger(ledger)
     base = None
     if role == "episode":
@@ -960,6 +993,8 @@ def redo_lfmd(day):
     text, srt = transcribe(clip, workdir)
     window = lfmd_window(srt_segments(open(srt).read()))
     if not window: raise SystemExit("episode %d has no diary section in its transcript" % day)
+    # Saved BEFORE the new clip is filed: a rebuild that dies half way must not leave the new clip under the old yes
+    if e.pop("lfmd_early_ok", None) is not None: watch.save_ledger(ledger)      # a clip cut again is watched again (qa.py accept-early)
     masters = render_masters(clip, workdir, only="9:16")
     title = title_from_transcript(text)
     paths = build_outputs(masters, srt, day, title, workdir, lfmd=window, role="lfmd-only")

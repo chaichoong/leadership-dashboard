@@ -41,7 +41,7 @@ def fake_run(cmd, *a, **k):
 subprocess.run = fake_run
 
 
-def two_clip_day(ep_text, ep_captions, te_text, api=False):
+def two_clip_day(ep_text, ep_captions, te_text, api=False, seed=None):
     """Render a day's long clip and its teaser through render.run. Returns the ledger, the day folder and the upload names."""
     tmp = tempfile.mkdtemp(); root = os.path.join(tmp, "edited")
     render.EDITED_ROOT = publish.EDITED_ROOT = root
@@ -50,6 +50,7 @@ def two_clip_day(ep_text, ep_captions, te_text, api=False):
     # the teaser is listed first and is the smaller clip: run() still renders the episode first
     led = {TE_KEY: {"status": "pulled", "local": clips[TE_KEY], "date": "2026-02-19", "day": DAY, "size": 1000, "drive_id": "t"},
            EP_KEY: {"status": "pulled", "local": clips[EP_KEY], "date": "2026-02-19", "day": DAY, "size": 9000, "drive_id": "e"}}
+    led[EP_KEY].update(seed or {})
     text = {EP_KEY: ep_text, TE_KEY: te_text}
 
     def transcribe(clip, workdir):
@@ -143,6 +144,15 @@ res = {"uploads": uploads}`);
     const names = r.res.uploads.filter((n) => n.endsWith('.txt'));
     expect(names).toEqual(['Ep2090_transcript.txt', 'Ep2090_Summary_transcript.txt']);
     expect(r.res.uploads.indexOf('Ep2090_transcript.txt')).toBeLessThan(r.res.uploads.indexOf('Ep2090_Summary.mp4'));
+  });
+});
+
+describe('a render starts the episode\'s Learnings acceptance afresh', () => {
+  it('BACK-TEST: an early start accepted by hand does not survive the episode being rendered again', () => {
+    const r = py(`
+led, folder, uploads = two_clip_day(${J(EP_SAID)}, ${J(PLAIN)}, ${J(TEASER)}, seed={"lfmd_early_ok": [75.8, 254.8]})
+res = {"status": led[EP_KEY]["status"], "accepted": led[EP_KEY].get("lfmd_early_ok", "dropped")}`);
+    expect(r.res).toEqual({ status: 'rendered', accepted: 'dropped' });
   });
 });
 

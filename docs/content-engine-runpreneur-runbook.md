@@ -66,6 +66,18 @@ One clip, about 10 minutes of work for a 40 second clip:
 - Upload to the edited Drive folder and write the links, transcript and status onto the record.
 - Delete the local copy.
 
+The day folder holds two transcripts (2 Oct 2026): `Ep<day>_transcript.txt` is the episode's and
+`Ep<day>_Summary_transcript.txt` is the teaser's. Until then every clip wrote the first name, the teaser
+rendered last, and 26 of the 36 stored files held the teaser's words, which is what the output gate read.
+
+The Learnings clip runs from the last diary line to the sign-off. The cutter (`render.lfmd_window`) and the
+output gate (`qa.py`) read the talk the same way, as one text with whisper's noise notes left out
+(`render.spoken`), so a line split across captions is cut and the two never disagree. The gate also refuses a
+clip that starts in the first 40% of the episode: 2081's was cut from an aside at 14% and reached the card,
+while every other clip on the ledger starts 54% in or later. The refusal names both ways out: rebuild it with
+`render.py redo --day N --only lfmd`, or, once someone has watched the clip and it is the diary section,
+`qa.py accept-early --day N`. Any re-render or rebuild drops that acceptance.
+
 **4. Rebuild anything Kevin asked to be redone** (`render.py redo-requested`)
 
 **5. Write the platform copy** (`platform_copy.py run --pending --limit 2`)
