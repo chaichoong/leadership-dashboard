@@ -3,7 +3,8 @@
 // These drive the REAL rule with fixture records shaped exactly as Airtable returns them
 // (returnFieldsByFieldId, selects as strings, links as id arrays). The first three cases are the
 // worked examples Kevin approved at the build gate, shaped from live rows read on 2 Oct 2026 with
-// every id, address and rent replaced: this repo is public and a real address beside "late" is not.
+// every id, address, rent and start date replaced (and, for the cash flow voids, the due days and part
+// payment too): this repo is public and a real address beside "late" is not.
 //
 // Back-tested (2 Oct 2026) by breaking the rule under test and watching its case fail:
 //   * TOLERANCE_DAYS = 0                          -> "the due day itself, and the day after, are not late" fails
@@ -58,7 +59,7 @@ rc.read_task_state = lambda: {"on": False, "status": "Building", "keys": {}}
 TY, TN, TX, AC = rc.TY, rc.TN, rc.TX, rc.AC
 DAY = date(2026, 10, 2)
 def rec(i, f): return {"id": i, "fields": f}
-def tenancy(i, due, rent, status="In Payment", start="2025-04-04", tenant="recT_uc", unit=None, **extra):
+def tenancy(i, due, rent, status="In Payment", start="2025-04-10", tenant="recT_uc", unit=None, **extra):
     f = {TY["dueDay"]: str(due), TY["rent"]: rent, TY["payStatus"]: status, TY["start"]: start,
          TY["tenants"]: [tenant], TY["tenantStatus"]: ["Active"], TY["unitRef"]: [unit or ("Unit " + i)]}
     f.update(extra)
@@ -111,7 +112,7 @@ print(json.dumps({"light": res["lights"]["recEX1"], "line": res["briefLine"]}))`
 
   it('2. due day 2, paid 2 Sep, checked on the due day: green', () => {
     const r = py(`
-res, rows = run([tenancy("recEX2", 2, 500.00, start="2021-11-01")], [paid("recEX2", "2026-09-02", 500.00)])
+res, rows = run([tenancy("recEX2", 2, 500.00, start="2021-10-20")], [paid("recEX2", "2026-09-02", 500.00)])
 print(json.dumps({"light": res["lights"]["recEX2"], "listed": list(rows), "worst": res["worst"], "line": res["briefLine"]}))`);
     expect(r.light).toBe('green');
     expect(r.listed).toEqual([]);
@@ -121,10 +122,10 @@ print(json.dumps({"light": res["lights"]["recEX2"], "listed": list(rows), "worst
 
   it('3. cash flow voids that existed on the slate date: shown, counted, left alone', () => {
     const r = py(`
-ts = [tenancy("recEX3", 17, 900.00, status="CFV", start="2026-03-17", unit="Unit 9 – 2 Example Road"),
-      tenancy("recEX4", 15, 900.00, status="CFV Actioned", start="2026-04-17", unit="Unit 9 – 3 Example Road")]
-res, rows = run(ts, [paid("recEX3", "2026-08-17", 42.49)], pre=["recEX3", "recEX4"])
-other, orows = run(ts, [paid("recEX3", "2026-08-17", 42.49)])
+ts = [tenancy("recEX3", 11, 900.00, status="CFV", start="2026-03-11", unit="Unit 9 – 2 Example Road"),
+      tenancy("recEX4", 7, 900.00, status="CFV Actioned", start="2026-04-09", unit="Unit 9 – 3 Example Road")]
+res, rows = run(ts, [paid("recEX3", "2026-08-11", 40.00)], pre=["recEX3", "recEX4"])
+other, orows = run(ts, [paid("recEX3", "2026-08-11", 40.00)])
 print(json.dumps({"a": rows["recEX3"], "b": rows["recEX4"], "line": res["briefLine"], "worst": res["worst"],
                   "notListed": [orows["recEX3"]["lane"], orows["recEX4"]["lane"], other["worst"]]}))`);
     expect([r.a.light, r.a.lane, r.a.note]).toEqual(['red', 'existing', 'cash flow void, existing, left alone']);
@@ -237,10 +238,10 @@ print(json.dumps({"row": rows["recBack"], "paying": res["paying"]}))`);
 
   it('a part payment does not clear a cash flow void', () => {
     const r = py(`
-res, rows = run([tenancy("recPart", 17, 900.00, status="CFV")], [paid("recPart", "2026-09-17", 42.49)])
+res, rows = run([tenancy("recPart", 11, 900.00, status="CFV")], [paid("recPart", "2026-09-11", 40.00)])
 print(json.dumps({"row": rows["recPart"], "paying": res["paying"]}))`);
     expect([r.row.light, r.row.lane]).toEqual(['red', 'late']);
-    expect(r.row.note).toBe('cash flow void, last matched payment 17 Sep, part payment £42.49 of £900.00');
+    expect(r.row.note).toBe('cash flow void, last matched payment 11 Sep, part payment £40.00 of £900.00');
     expect(r.paying).toBe(0);
   });
 
