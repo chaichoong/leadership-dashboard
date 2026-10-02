@@ -20,8 +20,8 @@
     // ── Page & SOP Version Registry ──
     const PAGE_REGISTRY = [
         // Home tab (Kevin, 29 Sep 2026): one list of what needs Kevin today, the real Leadership Dashboard underneath. On trial beside the old screens.
-        { id: 'home',        name: 'Home',                           icon: '📌', pageVer: '1.1', sopFile: '',                           sopVer: '1.0', standalone: 'index.html#home' },
-        { id: 'overview',    name: 'Leadership Dashboard',           icon: '📊', pageVer: '2.116', sopFile: 'sop.html',                   sopVer: '2.115', standalone: 'index.html#overview' },
+        { id: 'home',        name: 'Home',                           icon: '📌', pageVer: '1.4', sopFile: '',                           sopVer: '1.0', standalone: 'index.html#home' },
+        { id: 'overview',    name: 'Leadership Dashboard',           icon: '📊', pageVer: '2.117', sopFile: 'sop.html',                   sopVer: '2.115', standalone: 'index.html#overview' },
         { id: 'os-strategy', name: 'Objective & Strategy',           icon: '🎯', pageVer: '1.68', sopFile: 'os/strategy/sop.html',       sopVer: '1.1', standalone: 'os/strategy/index.html' },
         { id: 'tasks',       name: 'Tasks & Projects',   icon: '✅', pageVer: '1.180', sopFile: 'os/tasks/sop.html',             sopVer: '1.4', standalone: 'os/tasks/index.html' },
         { id: 'cfv',        name: 'CFVs',                          icon: '🚨', pageVer: '1.42', sopFile: 'sop-cfvs.html',               sopVer: '1.34', standalone: 'index.html#cfv' },
@@ -31,11 +31,11 @@
         { id: 'ar-variable', name: 'Accounts Receivable Variable', icon: '📤', pageVer: '1.4', sopFile: '',                            sopVer: '1.0', standalone: 'index.html#ar-variable' },
         { id: 'costs',      name: 'Accounts Payable Fixed',        icon: '📋', pageVer: '1.11', sopFile: '',                            sopVer: '1.0', standalone: 'index.html#costs' },
         { id: 'invoices',   name: 'Payment Run',                   icon: '🧾', pageVer: '3.9', sopFile: 'sop-invoices.html',           sopVer: '3.00', standalone: 'index.html#invoices' },
-        { id: 'pnl',        name: 'Profit & Loss',                 icon: '💰', pageVer: '2.34', sopFile: 'sop-pnl.html',               sopVer: '2.26', standalone: 'index.html#pnl' },
+        { id: 'pnl',        name: 'Profit & Loss',                 icon: '💰', pageVer: '2.35', sopFile: 'sop-pnl.html',               sopVer: '2.26', standalone: 'index.html#pnl' },
         { id: 'transactions', name: 'Transactions',                icon: '🔍', pageVer: '1.1', sopFile: '',                            sopVer: '1.0', standalone: 'index.html#transactions' },
         { id: 'coa',        name: 'Chart of Accounts',             icon: '📒', pageVer: '1.3', sopFile: 'sop-coa.html',                sopVer: '1.1', standalone: 'index.html#coa' },
         { id: 'comms',      name: 'Inbound Comms',                 icon: '📨', pageVer: '2.82', sopFile: 'inbound-comms-sop.html',      sopVer: '2.60', standalone: 'follow-up.html' },
-        { id: 'growth-plan', name: 'Growth Plan',                    icon: '📈', pageVer: '1.61', sopFile: 'sop-growth-plan.html',        sopVer: '1.58', standalone: 'growth-plan.html' },
+        { id: 'growth-plan', name: 'Growth Plan',                    icon: '📈', pageVer: '1.62', sopFile: 'sop-growth-plan.html',        sopVer: '1.58', standalone: 'growth-plan.html' },
         { id: 'compliance', name: 'Property Compliance',            icon: '✅', pageVer: '1.18', sopFile: 'sop-compliance.html',         sopVer: '1.14', standalone: 'compliance.html' },
         // Property Manager (Operations) — Roy Lavin's single page. Standalone at
         // property-manager/ behind its own passcode; the property-manager Worker
@@ -46,14 +46,14 @@
         // client tenant's shell; the adminOnly flag is the contract the Supabase
         // migration must honour. Replaced the Plan Builder entry 1 Aug 2026 on
         // Kevin's direction (os/business-plan-builder/ files remain on disk).
-        { id: 'kpi-library', name: 'KPI Library', icon: '📚', pageVer: '1.11', sopFile: '', sopVer: '1.0', standalone: 'index.html#kpi-library', adminOnly: true },
+        { id: 'kpi-library', name: 'KPI Library', icon: '📚', pageVer: '1.12', sopFile: '', sopVer: '1.0', standalone: 'index.html#kpi-library', adminOnly: true },
         // AI Agents (Leadership) — ADMIN ONLY, like KPI Library. Approvals,
         // checks and the workforce register in one place (Kevin's ruling,
         // 24 Aug 2026; moved out of the Systemisation page).
-        { id: 'agents', name: 'AI Agents', icon: '🤖', pageVer: '1.170', sopFile: 'sop-ai-agents.html', sopVer: '1.170', standalone: 'os/agents/index.html', adminOnly: true },
+        { id: 'agents', name: 'AI Agents', icon: '🤖', pageVer: '1.173', sopFile: 'sop-ai-agents.html', sopVer: '1.170', standalone: 'os/agents/index.html', adminOnly: true },
         { id: 'fintable',  name: 'Accounts',                       icon: '🏦', pageVer: '1.19', sopFile: '',                            sopVer: '1.0', standalone: 'index.html#fintable' },
         { id: 'systemisation', name: 'Systemisation',              icon: '⚙️', pageVer: '1.27', sopFile: 'guides/systemisation.html',    sopVer: '1.11', standalone: 'os/systemisation/index.html' },
-        { id: 'os-team',    name: 'Team Members',                  icon: '👥', pageVer: '1.43', sopFile: '',                            sopVer: '1.1', standalone: 'os/team/index.html' },
+        { id: 'os-team',    name: 'Team Members',                  icon: '👥', pageVer: '1.44', sopFile: '',                            sopVer: '1.1', standalone: 'os/team/index.html' },
         // pageVer corrected by hand 2026-08-06: the auto-bump never fired for this page
         // (crm-supabase.html was missing from the workflow `paths:` filter), so 1.0 was
         // stale — the CRM gained a 14-step interactive walkthrough on 2026-08-04 (319b438).

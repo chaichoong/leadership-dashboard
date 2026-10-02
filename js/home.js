@@ -61,18 +61,19 @@
         if (_state.phase !== 'ready') { _state = { phase: 'loading' }; render(); }
         try {
             const now = Date.now(), today = H.londonToday(new Date(now));
-            const [taskRecs, queueRecs, kevinRow, needsRow, blockersRow, tenantsRow] = await Promise.all([
+            const [taskRecs, queueRecs, kevinRow, needsRow, blockersRow, tenantsRow, rentRow] = await Promise.all([
                 readAll(TABLES.tasks, { filterByFormula: H.OPEN_TASKS_FORMULA, 'fields[]': H.TASK_FIELDS, pageSize: '100' }),
                 readAll(TABLES.tasks, { filterByFormula: QUEUE_FORMULA, 'fields[]': ['Task Name', 'Approver'], pageSize: '100' }).catch(e => { console.warn('[home] queue count read failed:', e); return null; }),
                 readAll(TABLES.teamMembers, { filterByFormula: `RECORD_ID()='${H.KEVIN_TEAM_MEMBER}'`, 'fields[]': ['Name'] }).catch(e => { console.warn('[home] team member read failed:', e); return null; }),
                 readEstateRow(H.ESTATE_KEYS.needsYou), readEstateRow(H.ESTATE_KEYS.blockers), readEstateRow(H.ESTATE_KEYS.tenants),
+                readEstateRow(H.ESTATE_KEYS.rent),
             ]);
             const tasks = taskRecs.map(H.toTask);
             const mine = queueRecs ? queueRecs.filter(q => H.isKevinsLane(((q.fields || {}).Approver || {}).email)) : null;
             const list = H.buildHomeList({ tasks, today, needsRow, blockersRow, now });
             _state = { phase: 'ready', today, list, openTasks: tasks.length, tasks,
                 queueCount: mine ? mine.length : null, queueNameless: mine ? mine.filter(q => !String((q.fields || {})['Task Name'] || '').trim()).length : 0, kevinFound: kevinRow ? kevinRow.length === 1 : null,
-                tenants: H.readTenants(tenantsRow, today), at: now };
+                tenants: H.readTenants(tenantsRow, today), rent: H.readRent(rentRow, today), at: now };
         } catch (e) {
             console.error('[home] list read failed:', e);
             _state = Object.assign({}, _state, { phase: _state.list ? 'ready' : 'error', error: String(e.message || e) });
@@ -126,10 +127,11 @@
         const summary = (c.total
             ? `${c.total} thing${c.total === 1 ? '' : 's'} need${c.total === 1 ? 's' : ''} you today: ${c.deadlinesDueNow} deadline${c.deadlinesDueNow === 1 ? '' : 's'} due now, ${c.onlyYou} only-you, ${c.robots} robot${c.robots === 1 ? '' : 's'} stuck, ${c.needsYou} from the 07:00 check, ${c.deadlines - c.deadlinesDueNow} deadline${c.deadlines - c.deadlinesDueNow === 1 ? '' : 's'} coming up, ${c.approve} to approve.`
             : (s.list.unchecked.length ? 'Nothing found, but part of this list could not be checked, so do not read it as a clear day.' : 'Nothing needs you today. Every list below was read and came back empty.')) + unchecked;
-        const t = s.tenants;
+        const t = s.tenants, rent = s.rent;
         host.innerHTML = `${stale}<p class="home-summary" aria-live="polite">${escHtml(summary)}</p>
             ${s.list.groups.map(g => groupHtml(g, s.list)).join('')}
-            <p class="home-tenants"><span class="home-light home-light-${escHtml(t.light)}" aria-hidden="true"></span><strong>Tenants:</strong> ${escHtml(t.text)}</p>`;
+            <p class="home-tenants"><span class="home-light home-light-${escHtml(t.light)}" aria-hidden="true"></span><strong>Tenants:</strong> ${escHtml(t.text)}</p>
+            <p class="home-tenants home-rent"><span class="home-light home-light-${escHtml(rent.light)}" aria-hidden="true"></span><strong>Rent:</strong> ${escHtml(rent.text)}</p>`;
     }
 
     function registerChecks() {
@@ -151,6 +153,8 @@
                     return g.note ? { status: 'warn', detail: g.note } : { status: 'pass', detail: `${g.items.length} item(s) only you can clear` }; }) },
                 { name: 'Tenant chain ran today', kind: 'automation', run: ready(s => !s.tenants.current
                     ? { status: 'warn', detail: s.tenants.text } : { status: 'pass', detail: 'Today\'s tenant line is in' }) },
+                { name: 'Rent check ran today', kind: 'automation', run: ready(s => !s.rent.current
+                    ? { status: 'warn', detail: s.rent.text } : { status: 'pass', detail: 'Today\'s rent line is in' }) },
                 { name: 'Every deadline has an owner', kind: 'automation', run: ready(s => { const n = s.list.groups.filter(g => g.key.indexOf('deadlines') === 0)
                     .reduce((k, g) => k + g.items.filter(i => i.who === 'NO OWNER').length, 0);
                     return n ? { status: 'warn', detail: `${n} deadline(s) with NO OWNER` } : { status: 'pass', detail: 'Every deadline has a holder' }; }) },

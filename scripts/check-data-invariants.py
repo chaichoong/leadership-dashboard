@@ -727,6 +727,21 @@ INVARIANTS = [
         "fields": ["Key", "Last Run", "Status", "Detail"],
     },
     {
+        # The rent-position row is the Rent line on Kevin's Home screen (2 Oct 2026, phase 1 of
+        # the Cash Flow Voids agent). Home says "has not run today" when the row is old, but only
+        # to someone looking at Home; this check finds a stopped rent check whoever is looking.
+        # It runs at 07:30 and 12:30, so 26 hours is a whole day of missed runs.
+        "name": "rent-position-is-current",
+        "table": "tblZVrdzivyBueZVf",  # Estate Status
+        "incident": "Oct 2026 design: a rent check that stops writing reads as nobody late",
+        "asserts": "the rent-position status row was written in the last 26 hours",
+        "violation": "AND({Key} = 'rent-position', IS_BEFORE({Last Run}, DATEADD(NOW(), -26, 'hours')))",
+        "control": "{Key} = 'rent-position'",
+        "control_means": "the one rent-position row (written by every run of scripts/rent-check.py)",
+        "field_probe": "OR(LEN({Key} & '') >= 0, LEN({Last Run} & '') >= 0)",
+        "fields": ["Key", "Last Run", "Status", "Detail"],
+    },
+    {
         # The triage history book is WHERE HUMANS FILED each sender's mail, and it is
         # the only thing stopping the agent filing from its own guesses. It is rebuilt
         # weekly. It stopped rebuilding on 1 Sep 2026 and nobody found out for 24 days
