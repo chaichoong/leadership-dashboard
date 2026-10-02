@@ -9,10 +9,11 @@ card and shows in the morning report; the card itself lists the checks that pass
 not a promise.
 
   qa.py check --day N      # print the checks for one rendered day
+  qa.py accept-early --day N   # an early Learnings clip has been watched and IS the diary section
   qa.py selftest
 """
-import argparse, json, os, re, subprocess, sys, time
-HERE = os.path.dirname(os.path.abspath(__file__)); sys.path.insert(0, HERE)
+import argparse, json, math, os, re, subprocess, sys, time
+HERE =os.path.dirname(os.path.abspath(__file__)); sys.path.insert(0, HERE)
 import watch  # noqa: E402
 
 HORIZON_MAX_DEG = 8.0        # the horizon lock must be within this of gravity by 10 s and stay there (2056 opened at 26-51 deg)
@@ -20,6 +21,10 @@ JINGLE_MIN_S = 5.5           # the jingle is 7.0 s after its trim; the full must
 GENERIC_TITLE = "DIARY OF A|RUNPRENEUR"
 WAIT_CHECK = "files readable"      # the one check whose failure means "try again", never "this episode is bad"
 MIN_CUES_PER_MINUTE = 4
+# The diary section closes the episode. Across the 33 episodes on the ledger with a clip (2 Oct 2026) it starts between
+# 54% and 81% of the way in, except 2081: cut from an aside at 14%, it reached Kevin's card ("you've clipped the wrong
+# section"). A clip starting before this share of the episode is refused until someone has looked (accept-early).
+LFMD_EARLIEST_START = 0.40
 
 
 UNREADABLE_TRIES, UNREADABLE_WAIT = 5, 15
@@ -60,7 +65,7 @@ def cue_count(srt_path):
 
 def diary_phrase_in(transcript_path):
     import render
-    try: return bool(render.lfmd_start(open(transcript_path).read()))     # the show's name never counts (2072, 27 Sep 2026)
+    try: return render.lfmd_said(open(transcript_path).read())     # the show's name never counts (2072, 27 Sep 2026)
     except Exception: return False
 
 
@@ -77,6 +82,41 @@ def ledger_entries(day, ledger):
     ep = [v for v in ledger.values() if v.get("episode") == day and v.get("role") == "episode"]
     te = [v for v in ledger.values() if v.get("episode") == day and v.get("role") == "teaser"]
     return (ep[0] if ep else None), (te[0] if te else None)
+
+
+def mmss(seconds_in):
+    return "%d:%02d" % divmod(int(round(seconds_in)), 60)
+
+
+def accept_early(day, ledger=None, save=None):
+    """Someone has watched it: this day's early Learnings clip IS the diary section. What is accepted is the window
+    itself, and every render or Learnings rebuild drops the acceptance (render.py), so a clip cut again is watched again."""
+    ledger = ledger if ledger is not None else watch.load_ledger()
+    ep, _ = ledger_entries(day, ledger)
+    window = ep.get("lfmd_window") if ep else None
+    if not (isinstance(window, (list, tuple)) and len(window) == 2): raise SystemExit("episode %d has no Learnings clip to accept" % day)
+    if ep.get("status") != "rendered": raise SystemExit("episode %d is waiting to render again (%s): accept its clip once that has run" % (day, ep.get("status")))
+    ep["lfmd_early_ok"] = list(window)
+    (save or watch.save_ledger)(ledger)
+    return ep["lfmd_early_ok"]
+
+
+def lfmd_position(ep, podcast_seconds, day):
+    """(ok, hard, detail) for where the Learnings clip starts. Measured against the clip length the render recorded;
+    the podcast (the episode without its jingle) stands in when a render recorded none, so the check is never skipped
+    for want of a number. Ledger values that cannot be read refuse the card: they never stop the night's other cards."""
+    window, by_hand = ep.get("lfmd_window"), ep.get("lfmd_early_ok")
+    try:
+        if not (isinstance(window, (list, tuple)) and len(window) == 2) or isinstance(ep.get("duration"), bool): raise ValueError
+        start, length = float(window[0]), float(ep.get("duration") or 0) or float(podcast_seconds or 0)
+        if not (math.isfinite(start) and math.isfinite(length) and 0 <= start <= length and length > 0): raise ValueError
+    except (TypeError, ValueError, OverflowError):
+        return False, True, "cannot be checked: the ledger holds window %r and length %r for this episode. Put the entry right, or rebuild the clip: render.py redo --day %d --only lfmd" % (window, ep.get("duration"), day)
+    share = start / length
+    where = "starts at %s of the %s episode (%d%%)" % (mmss(start), mmss(length), int(share * 100 + 1e-9))
+    if share >= LFMD_EARLIEST_START: return True, True, where
+    if isinstance(by_hand, (list, tuple)) and list(by_hand) == list(window): return True, True, where + ", accepted by hand as the diary section"
+    return False, True, "%s. The diary section closes the episode, so this is probably the wrong part (2081, 1 Oct 2026). Rebuild it: render.py redo --day %d --only lfmd. If the clip is right: qa.py accept-early --day %d" % (where, day, day)
 
 
 def checks(day, ledger=None, files=None):
@@ -121,7 +161,7 @@ def checks(day, ledger=None, files=None):
     # alone was the teaser's on 26 stored days and is read through the Drive folder, which lags an upload.
     cap_text = caption_text(files.get("full_srt", ""))
     in_transcript = diary_phrase_in(files.get("transcript", ""))
-    said = in_transcript or bool(render.lfmd_start(cap_text))
+    said = in_transcript or render.lfmd_said(cap_text)
     window = ep.get("lfmd_window")
     d_l, d_ly = d_l0, d_ly0
     near_miss = None
@@ -137,6 +177,7 @@ def checks(day, ledger=None, files=None):
         add("Learnings clip (captions)", d_l > 15, True, "%.0f s; diary phrase %s" % (d_l, heard))
         add("Learnings clip (clean, for Shorts)", d_ly > 15 and abs(d_ly - d_l) < 1.5, True, "%.0f s" % d_ly)
         add("Learnings caption file", cue_count(files.get("lfmd_srt", "")) >= 3, True, "%d cues" % cue_count(files.get("lfmd_srt", "")))
+        if window: add("Learnings clip position", *lfmd_position(ep, d_pod, day))
     else:
         add("Learnings section", True, False, "no diary phrase spoken in this recording, so no clip (by design)")
     th = files.get("thumb", "")
@@ -227,7 +268,7 @@ def selftest():
     open(files["lfmd_srt"], "w").write("1\n00:00:01,000 --> 00:00:02,000\na\n\n2\n00:00:02,000 --> 00:00:03,000\nb\n\n3\n00:00:03,000 --> 00:00:04,000\nc\n")
     open(files["thumb"], "wb").write(b"\x89PNG" + b"0" * 30000)
     open(files["transcript"], "w").write("So the latest in my diary is that you should rest.")
-    led = {"a full.insv": {"episode": 9, "role": "episode", "lfmd_window": [10, 30], "horizon": {"1": 3.0, "5": 2.0, "10": 1.5, "60": 1.0}, "source_fps": 23.976},
+    led = {"a full.insv": {"episode": 9, "role": "episode", "lfmd_window": [20, 40], "duration": 40.0, "horizon": {"1": 3.0, "5": 2.0, "10": 1.5, "60": 1.0}, "source_fps": 23.976},
            "a sum.insv": {"episode": 9, "role": "teaser", "title": "GET YOUR|TEAM"}}
     ok, fails, passed = gate(9, led, files); assert ok and not fails, fails
     names = [n for n, _ in passed]; assert "jingle in the full episode" in names and "Learnings clip (clean, for Shorts)" in names and "teaser title" in names and "horizon level" in names
@@ -249,8 +290,12 @@ def selftest():
     ok, fails, _ = gate(9, led4, files); assert not ok and {n for n, _ in fails} >= {"horizon level", "teaser title"}, fails
     # old render without a horizon report: soft, does not block
     led5 = {"a full.insv": dict(led["a full.insv"], horizon=None)}; ok, fails, passed = gate(9, led5, files); assert ok, fails
+    # 2081 (1 Oct 2026): a Learnings clip cut from the first part of the episode is refused until someone has watched it
+    led6 = {"a full.insv": dict(led["a full.insv"], lfmd_window=[5, 25])}; ok, fails, _ = gate(9, led6, files)
+    assert not ok and [n for n, _ in fails] == ["Learnings clip position"] and "(12%)" in fails[0][1], fails
+    led6["a full.insv"]["lfmd_early_ok"] = [5, 25]; ok, fails, _ = gate(9, led6, files); assert ok, fails
     assert card_lines([("a", "b")], [("c", "d")])[1:] == ["- a: b", "- FAILED c: d"]
-    shutil.rmtree(tmp); print(json.dumps({"checks": 10, "failed": []}))
+    shutil.rmtree(tmp); print(json.dumps({"checks": 11, "failed": []}))
 
 
 if __name__ == "__main__":
@@ -261,4 +306,6 @@ if __name__ == "__main__":
         ok, fails, passed = gate(a.day)
         for n, okk, hard, d in checks(a.day): print("%s %s%s: %s" % ("PASS" if okk else ("FAIL" if hard else "note"), n, "" if hard else " (soft)", d))
         print("GATE:", "open" if ok else "BLOCKED")
-    else: raise SystemExit("usage: qa.py check --day N | selftest")
+    elif a.mode == "accept-early":
+        print("episode %d: Learnings clip at %s accepted as the diary section; the next approval run reads the gate again" % (a.day, accept_early(a.day)))
+    else: raise SystemExit("usage: qa.py check --day N | accept-early --day N | selftest")
