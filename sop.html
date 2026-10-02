@@ -382,8 +382,8 @@ li { margin-bottom:0.2rem; font-size:0.9rem; } hr { border:none; border-top:1px 
     <table class="label-table">
       <thead><tr><th>Card</th><th>How it is worked out</th></tr></thead>
       <tbody>
-        <tr><td><strong>Kevin's income from property (plan)</strong></td><td>Property cushion (plan) less the &pound;4,300 variable budget.</td></tr>
-        <tr><td><strong>Kevin's income from property (cash)</strong></td><td>Property cushion (cash) less every other property payment in the window (payments tagged Real Estate with no cost record: wages, maintenance, utilities, compliance, other).</td></tr>
+        <tr><td><strong>Income from property (plan)</strong></td><td>Property cushion (plan) less the &pound;4,300 variable budget.</td></tr>
+        <tr><td><strong>Income from property (cash)</strong></td><td>Property cushion (cash) less every other property payment in the window (payments tagged Real Estate with no cost record: wages, maintenance, utilities, compliance, other).</td></tr>
         <tr><td><strong>Property cushion (plan)</strong></td><td>Rent of tenancies that read In Payment, less active costs whose Business is Real Estate.</td></tr>
         <tr><td><strong>Property cushion (cash)</strong></td><td>Rental Income received, less payments tagged Real Estate that are linked to a cost record. Rolling 31 days, with the last full month and the Q3 average beside it. Both cash cards are held to the same 31 December marker as their plan card: the gap between plan and cash is the leak.</td></tr>
         <tr><td><strong>Named units with a signed tenant in</strong></td><td>Each named unit counts when a tenancy that has started and not ended is linked to it. One unit is set to count only once someone other than the tenant moving out of it lives there.</td></tr>
@@ -392,7 +392,7 @@ li { margin-bottom:0.2rem; font-size:0.9rem; } hr { border:none; border-top:1px 
         <tr><td><strong>Self-managed properties fully compliant</strong></td><td>A property counts when gas (or the <em>No Gas</em> tick box on the property), the electrical inspection and the insurance are each in date and have a file attached.</td></tr>
       </tbody>
     </table>
-    <p><strong>When a card stops updating.</strong> A card shows a red <em>Not updating</em> badge and the reason when its data did not load, the bank feed is more than 4 days old, no rent is in the window, or a named unit or tenant is missing. An amber <em>Check</em> badge means the figure will move (payments not yet filed) or needs a look. The health bar check <em>Q4 real estate KPIs updating</em> turns red with it. The three project KPIs are also saved to their projects; the daily data check <code>q4-real-estate-kpis-are-current</code> fails if any of them has not been saved for 2 days.</p>
+    <p><strong>When a card stops updating.</strong> A card shows a red <em>Not updating</em> badge and the reason when its data did not load, the bank feed is more than 4 days old, no rent is in the window, or a named unit or tenant is missing. An amber <em>Check</em> badge means the figure will move (payments not yet filed) or needs a look; the reason is written beside the badge. The bar on a card always measures progress to the <strong>committed</strong> target, and the card says so. The health bar check <em>Q4 real estate KPIs updating</em> turns red with it. The three project KPIs are also saved to their projects; the daily data check <code>q4-real-estate-kpis-are-current</code> fails if any of them has not been saved for 2 days.</p>
   </div>
 </div>
 
