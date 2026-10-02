@@ -63,6 +63,16 @@ if ! /usr/bin/python3 "$REPO/scripts/agent-dispatch.py" lessons > "$SCRATCH/less
   tail -c 500 "$SCRATCH/lessons.json" >&2
 fi
 
+# --- free half: settle trial cards (2 Oct 2026) -----------------------------
+# A trial agent's card is checked by Kevin and never sent (TRIAL_AGENTS in
+# scripts/agent_email_format.py). An approved one needs no agent and no carry-out:
+# this closes it with his verdict in Notes. After `lessons`, so a note he ticked
+# Remember on is stored first. No model tokens. Loud on failure, never blocking.
+if ! /usr/bin/python3 "$REPO/scripts/agent-dispatch.py" trial-settle > "$SCRATCH/trial.json" 2>"$SCRATCH/trial.err"; then
+  echo "WARNING: trial-settle failed: approved trial cards are still open" >&2
+  tail -c 500 "$SCRATCH/trial.err" >&2
+fi
+
 # --- free half: standing holds (Kevin, 24 Sep 2026) ------------------------
 # A ruling that stays true only until an event ("nothing on that council's tax
 # until the officer replies") is written ONCE in ~/.config/od/standing-holds.json.

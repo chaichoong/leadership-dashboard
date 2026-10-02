@@ -43,6 +43,7 @@ from zoneinfo import ZoneInfo
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from approval_evidence import SENT_FOR_APPROVAL_BY, approval_evidence_problem  # noqa: E402
+from agent_email_format import trial_problem  # noqa: E402
 from agent_calendar_format import (  # noqa: E402
     TIMEZONE,
     CalendarFormatError,
@@ -64,6 +65,7 @@ AF = {
 HANDLED_MARK = "HANDLED WITHOUT YOU"
 
 APPROVED = ("Approved as-is", "Approved with minor edits")
+TEAM_MEMBER = "flduCtmQGpOA4eWaj"      # Tasks: Team Member (read by the trial refusal)
 
 STATE_DIR = os.path.expanduser("~/knowledge-os/logs/agent-dispatch")
 LEDGER = os.path.join(STATE_DIR, "calendar-created.jsonl")
@@ -184,6 +186,11 @@ def cmd_create(args):
     rec = get_task(task_id)
     f = rec.get("fields", {})
     name = f.get(AF["name"], "(Untitled)")
+    # A trial task writes nothing to the diary (2 Oct 2026): the same rule as send-email.py.
+    trial = trial_problem(list(f.get(SENT_FOR_APPROVAL_BY) or []) + list(f.get(TEAM_MEMBER) or []),
+                          name, f.get(AF["notes"], ""))
+    if trial:
+        sys.exit(f"REFUSED: task {task_id} is a trial task and no diary entry is made for it: {trial}.")
     outcome = sel(f.get(AF["approvalOutcome"]))
     ttype = sel(f.get(AF["taskType"]))
     output = f.get(AF["agentOutput"], "") or ""

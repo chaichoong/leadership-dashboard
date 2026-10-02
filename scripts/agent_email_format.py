@@ -380,6 +380,62 @@ def rule_send_problem(rule, mail, task, require_stamp=True):
         return ""
     return "unknown rule %r" % rule
 
+# ─── TRIAL AGENTS: Kevin checks the drafts, nothing reaches anyone (2 Oct 2026) ──
+#
+# GUARDRAILS has said since 25 Aug 2026 that a new agent replacing a live process
+# runs in parallel first, "with the new outputs going to a validation queue, never
+# to the real recipient". Until now that was words: an approved card from any
+# dispatchable agent was sent. An agent listed here raises cards exactly like the
+# others, Kevin's verdict and notes teach it exactly like the others, and NOTHING
+# it raises can be sent: send-email.py refuses at the one door every send passes
+# through, and the dispatch queue closes an approved card as checked instead of
+# handing it to a carry-out run. Ending a trial is removing the entry, in a PR
+# Kevin approves: the cut-over is a decision, never a side effect.
+TRIAL_AGENTS = {
+    # Cash Flow Voids (register row reclaAzGLA4utssxx): late-rent drafts to tenants.
+    # Kevin approved lane A in trial mode on 2 Oct 2026; cut-over target 24 Nov 2026.
+    "rec7aHLK1Q8fMLRXH": "the Cash Flow Voids agent is on its trial run, so Kevin checks its "
+                         "drafts and nothing is sent to a tenant",
+}
+TRIAL_STAMP = "TRIAL CHECKED"
+# THE TASK IS ON TRIAL TOO, WHOEVER HOLDS IT (independent review, 2 Oct 2026). A trial lane's task
+# that is re-routed, reassigned or resubmitted under another agent's id would otherwise become an
+# ordinary card that sends on approval. So a task carrying the lane's own marks stays on trial for
+# as long as its agent is listed above. Either mark is enough: a name can be edited and a Notes
+# line can be lost. Kept identical to TASK_PREFIX and KEY_MARK in scripts/rent-check.py
+# (tests/cash-flow-voids-agent.test.js).
+TRIAL_TASK_MARKS = {
+    "rec7aHLK1Q8fMLRXH": {"prefix": "RENT LATE: ", "note": "RENT CHECK KEY: "},
+}
+# The output shapes that act without send-email.py: Roy's handover email, the diary, the Friday
+# payment list, signing and the post. The lead-in is what scripts/payment-run.py also accepts, so
+# a bold, quoted, bulleted or numbered heading cannot slip through.
+TRIAL_ACTING_SHAPE_RE = re.compile(
+    r"^[ \t>*_#\-•]*(?:\d+[.)][ \t]*)?[*_]*"
+    r"(PASS TO ROY:|CALENDAR:|MARK FOR PAYMENT|DOCUMENT:|POST:|SIGNERS:)", re.I | re.M)
+
+
+def strip_trial_marks(text):
+    """`text` without any line that carries a trial lane's key mark. A trial task's words are
+    sometimes copied onto ANOTHER task's Notes (a duplicate folded into its keeper): the copy must
+    not turn the keeper into a trial task, or its own approved reply would never be sent."""
+    marks = [m["note"] for m in TRIAL_TASK_MARKS.values()]
+    return "\n".join(line for line in str(text or "").splitlines() if not any(m in line for m in marks))
+
+
+def trial_problem(agent_ids, name="", notes=""):
+    """Why this task may NOT be carried out, or "": it was raised by a trial agent, or it is a
+    trial lane's own task whoever holds it now."""
+    for agent_id in agent_ids or []:
+        if agent_id in TRIAL_AGENTS:
+            return TRIAL_AGENTS[agent_id]
+    for agent_id, marks in TRIAL_TASK_MARKS.items():
+        if agent_id in TRIAL_AGENTS and (str(name or "").startswith(marks["prefix"])
+                                         or marks["note"] in str(notes or "")):
+            return TRIAL_AGENTS[agent_id]
+    return ""
+
+
 # Kevin's ruling, 27 Aug 2026, in his own words on task recV3nCmp3ivQeXTN:
 # "Send from kevinbrittain@gmail.com. Never send from kevin@runpreneur.org.uk
 # unless it's to do with Runpreneur. Revert to sending from
