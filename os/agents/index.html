@@ -1287,7 +1287,9 @@ function apvSummary(raw){
 // Airtable's attachment URLs are short-lived signed links, but this page can
 // sit open for hours (the queue exists BECAUSE things wait). Re-read the task
 // on click so Kevin always opens a live link rather than an expired one.
-function apvOpenAttachment(ev, taskId, filename){
+// `fallback` is for a file listed from ANOTHER task's history: if the file has
+// since left that task, the tab shows the task itself instead of closing.
+function apvOpenAttachment(ev, taskId, filename, fallback){
     ev.preventDefault();
     // Opened synchronously so the click still counts as the gesture that
     // permits it — the re-read below is async and would lose it.
@@ -1306,8 +1308,9 @@ function apvOpenAttachment(ev, taskId, filename){
     }
     try { tab.opener = null; } catch(e) { /* cross-origin already; nothing to sever */ }
     atFetchOne(TASKS_TBL, taskId).then(rec=>{
-        const hit = (gf(rec,TF.attachments)||[]).find(a=>a.filename===filename);
+        const hit = (gf(rec,TF.attachments)||[]).find(a=>String(a.filename||'').trim()===String(filename||'').trim());
         if(hit && /^https?:\/\//i.test(hit.url||'')){ tab.location = hit.url; return; }
+        if(fallback){ tab.location = fallback; return; }
         tab.close();
         toast(filename + ' is no longer on this task. Refresh to see what is.');
     }).catch(e=>{
@@ -2072,6 +2075,39 @@ function apvSplitLink(text){
     const m = APV_TRAIL_LINK_RE.exec(text||'');
     return m ? { text: text.slice(0, m.index).trim(), link: m[1] } : { text: text||'', link: '' };
 }
+// A file on ANOTHER task, listed by the track record: 'file on that task: a.pdf (12 KB) — from "<task name>"'.
+// Its Open button re-reads the task that holds it for a live link, like every file on this page: a signed Airtable
+// file link dies within hours and a card waits for days (2 Oct 2026: five dead buttons on three cards). Rows written
+// before that day carry the dead link, so their task is found from the "task opened" row of the same name; a row
+// whose task cannot be found, or whose name fits two tasks, gets no button rather than a dead one.
+const APV_HELD_FILE_RE = /^file: file on that task: (.+?)(?: \(\d+ KB\))?(?: — from "(.*)")?$/;
+const APV_TASK_OPENED_RE = /^task: task opened: (.+) \([^()]*\)$/;
+const APV_TASK_LINK_RE = /^https:\/\/airtable\.com\/[A-Za-z0-9]+\/[A-Za-z0-9]+\/(rec[A-Za-z0-9]{14})(?:[/?#]|$)/;
+// (apvLinkify carries its own copy of this pattern: a test evaluates that function on its own.)
+const APV_SIGNED_FILE_RE = /^https?:\/\/[^/\s]*airtableusercontent\.com\//i;
+function apvTrackDay(m){ return m[4] ? `${m[4]}-${m[5]}-${m[6]}` : apvIsoDay(m[1], m[2], m[3]); }
+// Keyed on the day as well as the name: a file row carries the day its task was opened, so a second task of the
+// same name opened on another day is never mistaken for the one that holds the file.
+function apvTaskLinksByName(text){
+    const byName = new Map();
+    String(text||'').split('\n').forEach(quoted=>{
+        const m = APV_TRACK_LINE_RE.exec(quoted.replace(/^\s*(?:>\s?)+/, ''));
+        if(!m) return;
+        const split = apvSplitLink(m[8].trim());
+        const opened = APV_TASK_OPENED_RE.exec(split.text);
+        if(!opened || !APV_TASK_LINK_RE.test(split.link)) return;
+        const k = apvTrackDay(m) + '|' + opened[1].trim();
+        byName.set(k, byName.has(k) && byName.get(k) !== split.link ? '' : split.link);
+    });
+    return byName;
+}
+function apvHeldFile(split, day, taskLinks){
+    const m = APV_HELD_FILE_RE.exec(split.text);
+    let link = split.link;
+    if(APV_SIGNED_FILE_RE.test(link)) link = (m && taskLinks.get(day + '|' + String(m[2]||'').trim())) || '';
+    const rec = m && APV_TASK_LINK_RE.exec(link);
+    return rec ? { link, file: m[1], task: rec[1] } : { link, file: '', task: '' };
+}
 // Plain words for a 13-year-old (Kevin, 8 Sep 2026): the stamps are written
 // for machines; the rows are read by him.
 const APV_WHO_WORDS = { 'agent-dispatch':'system', 'send-email':'sent', 'send-letter':'posted', 'create-agent-task':'triage', 'track record':'history', 'robot sign-in':'sign-in', 'fix, claude':'Claude', 'claude':'Claude' };
@@ -2094,8 +2130,16 @@ function apvPlainEvent(text){
 }
 function apvTrailEvents(t){
     const ev = [];
-    const seen = new Set();
-    const push = (e)=>{ const k = e.day+'|'+e.time+'|'+e.text.slice(0,80); if(seen.has(k)) return; seen.add(k); ev.push(e); };
+    // A step listed twice shows once. If the copy kept has nowhere to go and the repeat has (a file row written
+    // with a dead link in Notes, and again with its task link in the agent's work), the repeat's link is kept,
+    // but only for the very same words: the key is the first 80 characters, and two files can share those.
+    const seen = new Map();
+    const push = (e)=>{
+        const k = e.day+'|'+e.time+'|'+e.text.slice(0,80);
+        const kept = seen.get(k);
+        if(kept){ if(!kept.link && e.link && kept.text === e.text){ kept.link = e.link; kept.file = e.file||''; kept.fileTask = e.fileTask||''; } return; }
+        seen.set(k, e); ev.push(e);
+    };
     const fileUrl = {};
     (t.files||[]).forEach(f=>{ fileUrl[f.filename] = f.url; });
     const meta = apvFileMeta(t);
@@ -2131,6 +2175,7 @@ function apvTrailEvents(t){
         if(!m) return;
         push({ day: `${m[1]}-${m[2]}-${m[3]}`, time: m[4], who: 'you', text: m[5].trim(), kind: 'kevin' });
     });
+    const taskLinks = apvTaskLinksByName(String(t.notes||'') + '\n' + String(t.agentOutput||''));
     [t.notes, t.agentOutput].forEach(src=>{
         const text = String(src||'');
         let at = text.indexOf('TRACK RECORD:');
@@ -2143,10 +2188,11 @@ function apvTrailEvents(t){
                 const raw = quoted.replace(/^\s*(?:>\s?)+/, '');
                 const m = APV_TRACK_LINE_RE.exec(raw);
                 if(!m){ if(raw.trim()==='' ) continue; if(!/^\s*[-*]/.test(raw)) break; continue; }
-                const day = m[4] ? `${m[4]}-${m[5]}-${m[6]}` : apvIsoDay(m[1], m[2], m[3]);
+                const day = apvTrackDay(m);
                 if(!day) continue;
                 const split = apvSplitLink(m[8].trim());
-                push({ day, time: m[7]||'', who: 'history', text: split.text, link: split.link, kind: 'record' });
+                const held = apvHeldFile(split, day, taskLinks);
+                push({ day, time: m[7]||'', who: 'history', text: split.text, link: held.link, file: held.file, fileTask: held.task, kind: 'record' });
             }
             at = text.indexOf('TRACK RECORD:', at + 13);
         }
@@ -2223,7 +2269,7 @@ function apvTrailHtml(t){
     ev.forEach(e=>{
         if(e.day !== day){ day = e.day; out += `<div class="apv-trail-day${day===lastDay?' latest':''}">${esc(apvDayLabel(day))}${day===lastDay?' · latest':''}</div>`; }
         const whoClass = e.kind==='kevin' ? ' kevin' : (e.kind==='sent' ? ' sent' : '');
-        const open = e.link ? ` <a class="apv-trail-open" href="${esc(e.link)}" target="_blank" rel="noopener noreferrer"${e.file ? ` data-apv-file="${esc(e.file)}" onclick="return apvOpenAttachment(event,'${t.id}',this.dataset.apvFile)"` : ''} title="Opens in a new tab">Open &#8599;</a>` : '';
+        const open = e.link ? ` <a class="apv-trail-open" href="${esc(e.link)}" target="_blank" rel="noopener noreferrer"${e.file ? ` data-apv-file="${esc(e.file)}"${e.fileTask ? ` data-apv-file-task="${esc(e.fileTask)}"` : ''} onclick="return apvOpenAttachment(event,'${esc(e.fileTask || t.id)}',this.dataset.apvFile${e.fileTask ? ',this.href' : ''})"` : ''} title="Opens in a new tab">Open &#8599;</a>` : '';
         out += `<div class="apv-trail-row${day===lastDay?' latest':''}" data-apv-trail-kind="${e.kind}"><span class="apv-trail-time">${esc(e.time||'')}</span><span class="apv-trail-who${whoClass}" title="${esc(e.who)}">${esc(e.who)}</span><span>${apvLinkify(e.text)}${open}</span></div>`;
     });
     return `<details class="apv-trail" data-apv-trail${_apvOpen.trailShut.has(t.id)?'':' open'} ontoggle="if(this.open)_apvOpen.trailShut.delete('${t.id}');else _apvOpen.trailShut.add('${t.id}')">
@@ -2235,10 +2281,12 @@ function apvTrailHtml(t){
 
 // Links in the agent's work must open: a video the Content Engine asks Kevin to watch is a
 // Drive URL, and esc() alone left it as dead text. Escape first, then anchor. The body is
-// pre-wrap, so newlines stay as they are. Mirrors linkifyUrls in os/tasks/index.html.
+// pre-wrap, so newlines stay as they are. Mirrors linkifyUrls in os/tasks/index.html, except for the signed file link below.
 function apvLinkify(text){
-    return esc(String(text||'')).replace(/(https?:\/\/[^\s<]+)/g,
-        '<a href="$1" target="_blank" rel="noopener noreferrer" style="color:var(--accent);text-decoration:underline;word-break:break-all">$1</a>');
+    // A signed Airtable file link dies within hours, so it stays as text: a link that looks live and is dead is
+    // worse than no link (2 Oct 2026). Files open from the story, which re-reads the task for a live one.
+    return esc(String(text||'')).replace(/(https?:\/\/[^\s<]+)/g, (u)=> /^https?:\/\/[^/\s]*airtableusercontent\.com\//i.test(u) ? u :
+        `<a href="${u}" target="_blank" rel="noopener noreferrer" style="color:var(--accent);text-decoration:underline;word-break:break-all">${u}</a>`);
 }
 // A task blocked on a site sign-in is a wait, not a decision (Kevin's ruling,
 // 4 Sep 2026). The robot leaves ONE line, "SIGN-IN NEEDED: <site> (<url>)".
