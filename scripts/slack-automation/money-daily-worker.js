@@ -28,7 +28,7 @@
 
 const BASE_ID = 'appnqjDpqDniH3IRl';
 const DEFAULT_RECIPIENT = 'kevin@runpreneur.org.uk';
-const WAGES_TARGET_GBP = 1500;
+const WAGES_TARGET_GBP = 650;
 
 const TBL = {
     accounts:     'tbl1nr0EcX2T62KME',

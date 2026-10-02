@@ -358,8 +358,8 @@
         let lowestDay = '';
         const rows = [];
 
-        // Daily variable cost reserve: £1k maint + £1.5k wages + £1.5k CFV = £4,000 / 31
-        const dailyVarCostReserve = (MAINT_TARGET_GBP + WAGES_TARGET_GBP + CFV_TARGET_GBP) / 31;
+        // Daily variable cost reserve: the whole property variable budget (config.js) / 31
+        const dailyVarCostReserve = RE_VARIABLE_BUDGET_GBP / 31;
 
         days.forEach((key, idx) => {
             const day = dayMap[key];

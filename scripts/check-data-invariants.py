@@ -600,6 +600,40 @@ INVARIANTS = [
         "fields": ["Project Name", "KPI Name", "KPI Automated", "KPI Last Updated"],
     },
     {
+        # Kevin's Q4 2026 real estate projects are steered by three KPIs that nobody types
+        # in: named units let, named rent in payment, properties compliant. The dashboard
+        # works each one out on load and saves it to its project. The general check above
+        # allows 14 days, which is too slow for numbers Roy and the agents are worked
+        # against weekly. These three must have been saved in the last 2 days.
+        #
+        # The compute refuses to save when its inputs did not load (ctx.reKpis throws on a
+        # red alarm), so a dead compliance fetch or a missing named unit stops the stamp
+        # moving and lands here, rather than saving a calm-looking 0.
+        "name": "q4-real-estate-kpis-are-current",
+        "table": PROJECTS,
+        "incident": "Q3 2026 — the real estate project KPI was read off a mixed personal-and-property basis all quarter; the Q4 KPIs are automated on the condition that they say so when they stop",
+        "asserts": "each of the three Q4 2026 real estate projects, while open => KPI Automated, compute code present, KPI Last Updated within 2 days",
+        "violation": (
+            "AND(OR(RECORD_ID() = 'recYhSC4pQTWAjD1o', RECORD_ID() = 'reczzyVGR4Ci8CFob', "
+            "RECORD_ID() = 'recpaMGugoVrwTJde'), "
+            "LEN({Closed On} & '') = 0, "
+            "OR(NOT({KPI Automated} = 1), "
+            "LEN({KPI Compute Code} & '') = 0, "
+            "LEN({KPI Last Updated} & '') = 0, "
+            "IS_BEFORE({KPI Last Updated}, DATEADD(NOW(), -2, 'days'))))"
+        ),
+        # The three records themselves. If an id is mistyped or a record is deleted the
+        # control matches fewer than it should; zero fails the run outright.
+        "control": ("OR(RECORD_ID() = 'recYhSC4pQTWAjD1o', RECORD_ID() = 'reczzyVGR4Ci8CFob', "
+                    "RECORD_ID() = 'recpaMGugoVrwTJde')"),
+        "control_means": "the three Q4 2026 real estate project records (retire this check when the quarter is closed)",
+        # All three or the check is asserting on fewer projects than it claims to.
+        "control_expected": 3,
+        "field_probe": ("OR({KPI Automated} >= 0, LEN({KPI Compute Code} & '') >= 0, "
+                        "LEN({KPI Last Updated} & '') >= 0, LEN({Closed On} & '') >= 0)"),
+        "fields": ["Project Name", "KPI Name", "KPI Automated", "KPI Last Updated"],
+    },
+    {
         # The Site Map's "Update All Out-of-Sync SOPs" button writes a Pending row here
         # and then told Kevin the work was "Processing". Nothing processes it: the SOP
         # phase was absorbed into daily-ops and never wired back, so a request could sit
@@ -1181,6 +1215,17 @@ def main():
                                + (f"; field probe also failed: {probe_err}" if probe_err else ""),
                     )
                     failed = True
+                results.append(entry)
+                continue
+
+            expected = inv.get("control_expected")
+            if expected is not None and len(control) != expected:
+                entry.update(
+                    status="CONTROL_FAILED",
+                    detail=f"control matched {len(control)} records, expected exactly {expected} "
+                           f"({inv['control_means']}) — a record is missing, so this check is asserting on less than it claims",
+                )
+                failed = True
                 results.append(entry)
                 continue
 
