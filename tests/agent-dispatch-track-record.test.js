@@ -184,7 +184,7 @@ print('---JSON---'); print(json.dumps(m.history_text(r)))`);
     expect(out[1]).toBe('TRACK RECORD: none found (searched tasks for ref 12345; Gmail not searched (no key))');
   });
   // 2 Oct 2026: a file's own link is signed by Airtable and dies within hours.
-  // The printed block sits on a card for days, so five "Open" buttons on three
+  // The printed block sits on a card for days, so five file links on three
   // waiting cards were dead (the first: this servicing PDF on the Mears
   // invoice card, HTTP 410). The text links the task that holds the file; the
   // JSON keeps the file link, which an agent downloads within its own run.
