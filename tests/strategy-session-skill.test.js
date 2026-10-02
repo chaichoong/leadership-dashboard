@@ -39,6 +39,7 @@ const CLAUSES = [
   ['never in\nthe Objective plan', 'quarter-only content stays out of the Objective plan'],
   ['Why a customer chooses this business over anyone else', 'selling points are written from the customer\'s side'],
   ['Starting a business from scratch', 'a new business is taken through the wizard\'s questions'],
+  ['Every target shows its measurables', 'measurables under the one, three and nine-year targets'],
   ['start from what this quarter will deliver, then set one year, then three, then\nnine', 'targets are worked back from the quarter'],
   ['Does the plan fund itself after Kevin is paid?', 'the cash check against his minimum take-home'],
   ['nothing improves on today', 'the cash check shows the case where nothing lands'],

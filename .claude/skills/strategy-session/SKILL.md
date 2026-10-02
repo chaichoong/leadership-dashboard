@@ -127,7 +127,7 @@ owner's side; Kevin sent both back.
 | Original selling points | Why a customer chooses this business over anyone else. A bold claim and what backs it. Up to 5 | Why the owner likes the model |
 | Main method | The step-by-step process the business follows, in order. A step name and one sentence. Up to 10 | |
 | Enticement | The offer that is hard to say no to, from the customer's side | |
-| Nine-year target | The long vision: income, size, founder involvement, exit or succession | |
+| Nine-year target | The long vision: income, size, founder involvement, exit or succession. The record has no nine-year measurable fields, so its three measurables are written as lines at the end of its text | |
 | Three-year target | The mid-range vision: income, units or clients, what is automated, what the founder still does. Up to three measurables, each a different dimension | |
 | One-year target | What the business looks like in 12 months, as a stepping stone to three years. Up to three measurables, one number each, tracked monthly, each a different dimension | |
 | Quarterly projects | The three most important 90-day projects, each a different dimension: a brief, one KPI, tracking method, definition of done, three monthly stepping stones | |
@@ -204,7 +204,10 @@ nine. The first run offered wording for these sections and was sent back for num
 7. **Growth by gates, not dates.** Kevin's standing rule is that nothing scales until it is
    optimised. Write the conditions that must hold before the next unit of growth is added
    into the target itself.
-8. **Keep the measurables the dashboard reads.** When a target is rewritten, the measurables
+8. **Every target shows its measurables.** One-year and three-year each fill their three
+   measurable fields. The nine-year target carries three as lines in its own text. Kevin
+   asked to see them under all three.
+9. **Keep the measurables the dashboard reads.** When a target is rewritten, the measurables
    that this quarter's KPIs are built on stay, with the new figures added to them.
 
 Save the ladder and the cash check as `growth-cash-check.md` in the session folder, number
