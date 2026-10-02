@@ -79,21 +79,21 @@ def short_date(iso):
     return "%d %s" % (d.day, d.strftime("%b"))
 
 
-def teaser_only_days(ledger, cursor, gaps, carded):
-    """Days ahead of the run whose every clip is rendered and none of them is the full episode. The order rule holds
-    every later day behind such a day, and no card can come for it (21 Sep 2026: 2066's full clip was on Drive under a
-    name the scan cannot read, so the day looked like a teaser and nothing else)."""
+def teaser_only_days(ledger, out, gaps, carded):
+    """Days not on YouTube whose every clip is rendered and none of them is the full episode. No card can come for
+    such a day (21 Sep 2026: 2066's full clip was on Drive under a name the scan cannot read, so the day looked like
+    a teaser and nothing else). `out` is the days already on YouTube."""
     by_day = {}
     for v in ledger.values():
         d = v.get("episode") or v.get("day")
         if d: by_day.setdefault(d, []).append(v)
-    return sorted(d for d, vs in by_day.items() if d > cursor and d not in gaps and d not in carded
+    return sorted(d for d, vs in by_day.items() if d not in out and d not in gaps and d not in carded
                   and all(v.get("status") == "rendered" for v in vs) and not any(v.get("role") == "episode" for v in vs))
 
 
 def blocker_why(day, sent_back, holds, waiting, qa_blocked, qa_waiting, teaser_only, no_card, failed):
-    """In plain words, why the first day in the order is not going out. Every state a day can sit in is named: a
-    reason that falls through to a wrong one is how 2062 hid for three days."""
+    """In plain words, why a day is not going out. Every state a day can sit in is named: a reason that falls through
+    to a wrong one is how 2062 hid for three days."""
     sb = {s["day"]: s for s in sent_back}
     if day in sb:
         s = sb[day]; what = "rejected" if s.get("rejected") else "sent back"
@@ -106,6 +106,18 @@ def blocker_why(day, sent_back, holds, waiting, qa_blocked, qa_waiting, teaser_o
     if day in no_card: return "rendered, its card is not raised yet"
     if day in failed: return "its render failed"
     return "not rendered yet"
+
+
+def left_behind(ledger, approvals, out, cursor, gaps, ready, holds, why, start=0):
+    """Days with footage or a card that the run has gone past, or that are on hold, and that are not on YouTube and
+    not about to go (2 Oct 2026). The publisher no longer waits for such a day, so the report names every one with
+    its reason: a day passed in silence is a day that never publishes. B-roll alone is not an episode."""
+    days = {int(d) for d in approvals if str(d).isdigit()}
+    for v in ledger.values():
+        d = v.get("episode") or (v.get("day") if v.get("status") != "broll" else None)
+        if d: days.add(d)
+    return [{"day": d, "why": why(d)} for d in sorted(days)
+            if d >= start and (d < cursor or d in holds) and d not in gaps and d not in out and d not in ready]
 
 
 def build(now=None, state=None, approvals=None, ledger=None, sync_state=None, plan=None, skipped=None, holds=None, skipped_ruled=None):
@@ -146,40 +158,28 @@ def build(now=None, state=None, approvals=None, ledger=None, sync_state=None, pl
 
     approved = sorted(int(d) for d, a in approvals.items() if a.get("verdict") == "approved")
     waiting_cards = sorted(int(d) for d, a in approvals.items() if a.get("task") and not a.get("verdict"))
-    import copy
-    # the publisher's own order rule, fed the way publish.run feeds it: a held day is not publishable
-    nxt, why_held = publish.next_publishable(copy.deepcopy(state), ledger, set(approved) - set(gaps) - set(holds))
-    next_up = [nxt] if nxt else []
-    held = [d for d in approved if d not in gaps and d > cursor and d != nxt and not (episodes.get(str(d)) or {}).get("youtube_link")]
+    # the publisher's own rule, fed the way publish.run feeds it (2 Oct 2026): every approved day with nothing on
+    # YouTube goes, lowest first, and waits for no other day; a held day is not publishable
+    ready = publish.ready_to_publish(state, set(approved) - set(holds))
+    on_youtube = {int(k) for k, e in episodes.items() if publish.stage_for(e, True) != "youtube"}
     blocked = {d: "; ".join(a["qa_blocked"].get("failures") or [])[:200] for d, a in approvals.items() if isinstance(a, dict) and a.get("qa_blocked")}
     # A card Kevin sent back (or rejected) is neither waiting for him nor approved. Until 21 Sep 2026 it fell out of the
     # report, and 2062 held every later day for three days while the page said "No episode cards wait for you".
     sent_back = sorted(({"day": int(d), "since": short_date(a.get("synced")), "feedback": (a.get("feedback") or "").strip()[:200],
-                         "rejected": a.get("verdict") == "rejected", "holdsOrder": int(d) > cursor and int(d) not in gaps}
+                         "rejected": a.get("verdict") == "rejected"}
                         for d, a in approvals.items() if a.get("task") and a.get("verdict") in ("changes", "rejected")
                         and not (episodes.get(str(d)) or {}).get("youtube_link")), key=lambda s: s["day"])
-    teaser_only = teaser_only_days(ledger, cursor, gaps, {int(d) for d in approvals})
+    teaser_only = teaser_only_days(ledger, on_youtube, gaps, {int(d) for d in approvals})
     # the render pipeline
     failed = sorted({v.get("day") for v in ledger.values() if v.get("status") == "failed" and v.get("day") and v.get("requeued")})
     retrying = sorted({v.get("day") for v in ledger.values() if v.get("status") == "failed" and v.get("day") and not v.get("requeued")})
     rendered_days = {v.get("episode") for v in ledger.values() if v.get("status") == "rendered" and v.get("role") == "episode" and v.get("episode")}   # the long clip, not a teaser
     carded = {int(d) for d in approvals}
-    no_card = sorted(d for d in rendered_days if d not in carded and d > cursor and d not in gaps)
-    blocker = None
-    m = re.match(r"day (\d+) ", why_held or "")
-    bd = int(m.group(1)) if m else None
-    if bd is None and held and not nxt:
-        # every approved day ahead is held, so the order rule saw nothing approved (review, 21 Sep 2026: 2060's case):
-        # ask it again without the holds to find the first day in order, which is then held
-        first, why_first = publish.next_publishable(copy.deepcopy(state), ledger, set(approved) - set(gaps))
-        m = re.match(r"day (\d+) ", why_first or "")
-        if first in holds: bd = first
-        elif m: bd, why_held = int(m.group(1)), why_first   # an unapproved day comes first: that day is the one to name (third review)
-    if held and not nxt and bd is not None:
-        blocker = {"day": bd, "why": blocker_why(bd, sent_back, holds, waiting_cards, {int(d) for d in blocked},
-                                                 {int(d) for d, a in approvals.items() if isinstance(a, dict) and a.get("qa_waiting")},
-                                                 teaser_only, no_card, set(failed) | set(retrying))}
-        held = [d for d in held if d != bd]                  # the day the queue waits on is not waiting behind itself
+    no_card = sorted(d for d in rendered_days if d not in carded and d not in on_youtube and d not in gaps)
+    behind = left_behind(ledger, approvals, on_youtube, cursor, gaps, ready, holds,
+                         lambda d: blocker_why(d, sent_back, holds, waiting_cards, {int(x) for x in blocked},
+                                               {int(x) for x, a in approvals.items() if isinstance(a, dict) and a.get("qa_waiting")},
+                                               teaser_only, no_card, set(failed) | set(retrying)), watch.start_day() or 0)
     try:
         # plan the night the way the night will: its scan puts a failed clip back first (watch.requeue_failed)
         tonight = plan if plan is not None else watch.plan(requeued_copy(ledger), nightly_slots())[0]
@@ -198,8 +198,8 @@ def build(now=None, state=None, approvals=None, ledger=None, sync_state=None, pl
         "asOf": now.strftime("%Y-%m-%dT%H:%M:%SZ"), "today": today.isoformat(), "mode": publish.mode(),
         "streakDay": streak_today, "lastInOrder": cursor, "daysBehind": streak_today - cursor,
         "history": history, "cleanDaysInRow": clean, "gapDaysPaused": watch.gaps_paused(),
-        "scheduled": scheduled[:40], "nextInOrder": next_up, "heldBehind": held, "heldWhy": "" if nxt else why_held, "waitingForKevin": waiting_cards, "qaBlocked": blocked,
-        "sentBack": sent_back, "teaserOnly": teaser_only, "blocker": blocker, "skippedNames": skipped, "skippedRuled": len(skipped_ruled or []),
+        "scheduled": scheduled[:40], "nextInOrder": ready, "leftBehind": behind, "waitingForKevin": waiting_cards, "qaBlocked": blocked,
+        "sentBack": sent_back, "teaserOnly": teaser_only, "skippedNames": skipped, "skippedRuled": len(skipped_ruled or []),
         "tonight": tonight, "failedRenders": failed, "retryTonight": retrying, "renderedNoCard": no_card, "incomplete": incomplete,
         "strava": {"lastPush": strava_at, "day": sync_state.get("day"), "lastRunKm": (sync_state.get("last_activity") or {}).get("km"),
                    "renamed": bool(lp.get("renamed"))},
@@ -234,19 +234,16 @@ def headline(r):
         out = "NOTHING went out yesterday"
     yt_today = [s for s in r["scheduled"] if s["channel"] == "YouTube full episode" and s["when"][:10] == r["today"]]
     if yt_today: nxt = "Today: " + ", ".join("Episode %d on YouTube %s" % (s["day"], fmt_when(s["when"])) for s in yt_today)
-    elif r["nextInOrder"]: nxt = "Today: Episode %d goes out once the publisher picks it up" % r["nextInOrder"][0]
-    elif r.get("blocker") and not r.get("heldBehind"):
-        nxt = "Today: nothing can go out; day %d (%s)" % (r["blocker"]["day"], r["blocker"]["why"])
-    elif r.get("heldBehind"):
-        b = r.get("blocker")
-        nxt = "Today: nothing can go out; Episode %s wait%s behind %s" % (
-            ", ".join(str(d) for d in r["heldBehind"]), "s" if len(r["heldBehind"]) == 1 else "",
-            "day %d (%s)" % (b["day"], b["why"]) if b else "an earlier day that is not approved")
+    elif len(r["nextInOrder"]) == 1: nxt = "Today: Episode %d goes out once the publisher picks it up" % r["nextInOrder"][0]
+    elif r["nextInOrder"]: nxt = "Today: Episodes %s go out once the publisher picks them up" % ", ".join(str(d) for d in r["nextInOrder"])
     else: nxt = "Today: nothing approved to publish"
     cards = len(r["waitingForKevin"])
     ask = ("%d episode card%s wait%s for you" % (cards, "" if cards == 1 else "s", "s" if cards == 1 else "")) if cards else "No episode cards wait for you"
-    others = [s for s in r.get("sentBack") or [] if not r.get("blocker") or s["day"] != r["blocker"]["day"]]
-    if others: ask += "; " + "; ".join("Episode %d %s, not resubmitted" % (s["day"], "rejected" if s.get("rejected") else "sent back") for s in others)
+    sent = r.get("sentBack") or []
+    if sent: ask += "; " + "; ".join("Episode %d %s, not resubmitted" % (s["day"], "rejected" if s.get("rejected") else "sent back") for s in sent)
+    # a day the run has gone past for any other reason is said too: nothing waits for it now, so nothing else will say it
+    others = [b for b in r.get("leftBehind") or [] if b["day"] not in {s["day"] for s in sent}]
+    if others: ask += "; " + "; ".join("Episode %d not out yet (%s)" % (b["day"], b["why"]) for b in others)
     return "Content: %s. %s. %s." % (out, nxt, ask)
 
 
@@ -656,31 +653,46 @@ def _selftest():
     r2 = build(now, state, {}, {}, {}, plan=[])
     assert r2["headline"].startswith("Content: NOTHING went out yesterday."), "absence is said, never left blank"
     assert r2["cleanDaysInRow"] == 0 and all(not h["episodes"] for h in r2["history"])
-    # 2058 is recorded and not approved, so approved 2059 is held behind it: never promised for today (review, 15 Sep 2026)
+    # 2 Oct 2026, the real records: 2081 sent back on 1 Oct, 2082 and 2083 approved the next morning. Until then the
+    # report read "nothing can go out; Episode 2082, 2083 wait behind day 2081". An approved day waits for no other day.
+    on_yt = lambda link="l": {"youtube_link": link, "posts": {"youtube|full|y": {"platform": "youtube", "clip": "full", "status": "scheduled"}}}
+    cards81 = {"2081": {"task": "rec9xni7vjiBDIyD5", "verdict": "changes", "synced": "2026-10-01T11:15:57", "feedback": "redo the learnings for my diary"},
+               "2082": {"task": "rec5HLbg1dMG3JF4x", "verdict": "approved"}, "2083": {"task": "recPI2X4HAT8EAMmk", "verdict": "approved"}}
+    led81 = {"a": {"episode": 2081, "role": "episode", "status": "rendered"}, "b": {"episode": 2082, "role": "episode", "status": "rendered"},
+             "c": {"episode": 2083, "role": "episode", "status": "rendered"}}
+    nw = build(now, {"_cursor": 2080, "2080": on_yt()}, cards81, led81, {}, plan=[], skipped=[])
+    assert nw["nextInOrder"] == [2082, 2083] and nw["leftBehind"] == [], (nw["nextInOrder"], nw["leftBehind"])
+    assert "Today: Episodes 2082, 2083 go out once the publisher picks them up. No episode cards wait for you; Episode 2081 sent back, not resubmitted." in nw["headline"], nw["headline"]
+    assert nw["sentBack"] == [{"day": 2081, "since": "1 Oct", "feedback": "redo the learnings for my diary", "rejected": False}], nw["sentBack"]
+    assert not any(k in nw for k in ("heldBehind", "blocker", "heldWhy")), "nothing is held for order any more"
+    # once they are out the run has gone past 2081: it is named as left behind, with its reason, until it is on YouTube
+    past = build(now, {"_cursor": 2083, "2080": on_yt(), "2082": on_yt(), "2083": on_yt()}, cards81, led81, {}, plan=[], skipped=[])
+    assert past["nextInOrder"] == [] and past["leftBehind"] == [{"day": 2081, "why": "sent back on 1 Oct, not resubmitted"}], past["leftBehind"]
+    back = dict(cards81, **{"2081": {"task": "rec9xni7vjiBDIyD5", "verdict": "approved"}})          # the fixed card, approved
+    late = build(now, {"_cursor": 2083, "2080": on_yt(), "2082": on_yt(), "2083": on_yt()}, back, led81, {}, plan=[], skipped=[])
+    assert late["nextInOrder"] == [2081] and late["leftBehind"] == [] and late["sentBack"] == [], "the late day goes when its own card is approved"
+    assert "Today: Episode 2081 goes out once the publisher picks it up" in late["headline"], late["headline"]
+    done = build(now, {"_cursor": 2083, "2080": on_yt(), "2081": on_yt(), "2082": on_yt(), "2083": on_yt()}, back, led81, {}, plan=[], skipped=[])
+    assert done["leftBehind"] == [] and done["nextInOrder"] == [], "a day on YouTube is no longer behind"
+    # a card still waiting for Kevin holds nothing: 2059 goes, 2058 stays in his list (it is ahead of the run, not behind it)
     held_state = {"_cursor": 2057}
     rh = build(now, held_state, {"2058": {"task": "t"}, "2059": {"verdict": "approved", "task": "t2"}}, {"x": {"episode": 2058}, "y": {"episode": 2059}}, {}, plan=[])
-    assert rh["nextInOrder"] == [] and rh["heldBehind"] == [2059] and "2058" in rh["heldWhy"], rh
-    assert "Episode 2059 waits behind day 2058 (its card waits for your approval)" in rh["headline"], rh["headline"]
-    assert rh["blocker"] == {"day": 2058, "why": "its card waits for your approval"} and rh["sentBack"] == [] and rh["teaserOnly"] == []
-    # 21 Sep 2026: 2062 was sent back, rebuilt, never resubmitted, and held every later day for three days while the page
-    # said "No episode cards wait for you". A sent-back card is named, as the blocker and in its own list.
-    sb = build(now, held_state, {"2058": {"task": "t", "verdict": "changes", "synced": "2026-09-14T09:57:59", "feedback": "the diary part is missing"},
-                                 "2059": {"verdict": "approved", "task": "t2"}}, {"x": {"episode": 2058}, "y": {"episode": 2059}}, {}, plan=[], skipped=[])
-    assert sb["waitingForKevin"] == [] and sb["sentBack"] == [{"day": 2058, "since": "14 Sep", "feedback": "the diary part is missing", "rejected": False, "holdsOrder": True}], sb["sentBack"]
-    assert sb["blocker"] == {"day": 2058, "why": "sent back on 14 Sep, not resubmitted"}, sb["blocker"]
-    assert "behind day 2058 (sent back on 14 Sep, not resubmitted). No episode cards wait for you." in sb["headline"], sb["headline"]
+    assert rh["nextInOrder"] == [2059] and rh["waitingForKevin"] == [2058] and rh["leftBehind"] == [], rh
+    assert "Today: Episode 2059 goes out once the publisher picks it up. 1 episode card waits for you." in rh["headline"], rh["headline"]
     later = build(now, held_state, {"2058": {"task": "t"}, "2059": {"verdict": "approved", "task": "t2"}, "2060": {"task": "t3", "verdict": "changes", "synced": "2026-09-15T10:00:00"}},
                   {"x": {"episode": 2058}, "y": {"episode": 2059}}, {}, plan=[], skipped=[])
     assert later["headline"].endswith("1 episode card waits for you; Episode 2060 sent back, not resubmitted."), later["headline"]
-    # 2066 on 21 Sep 2026: only the teaser rendered, the full clip unseen. The day holds the order and no card can come.
+    # 2066 on 21 Sep 2026: only the teaser rendered, the full clip unseen. No card can come for it; the days after it go.
     tl = {"t": {"episode": 2059, "role": "teaser", "status": "rendered"}, "f": {"day": 2060, "status": "new"},
           "u": {"episode": 2061, "role": "teaser", "status": "rendered"}, "v": {"episode": 2061, "role": "episode", "status": "rendered"}}
     to = build(now, held_state, {"2058": {"verdict": "approved", "task": "t"}, "2060": {"verdict": "approved", "task": "t2"}}, tl, {}, plan=[], skipped=["2026/x/2059 Full-Real.insv"])
     assert to["teaserOnly"] == [2059], to["teaserOnly"]
     assert to["skippedNames"] == ["2026/x/2059 Full-Real.insv"]
-    assert to["nextInOrder"] == [2058], "2058 is next in order; 2059 only holds the days after it"
-    to2 = build(now, {"_cursor": 2058}, {"2060": {"verdict": "approved", "task": "t2"}}, tl, {}, plan=[], skipped=[])
-    assert to2["blocker"] == {"day": 2059, "why": "the engine has found only its teaser, no full episode"}, to2["blocker"]
+    assert to["nextInOrder"] == [2058, 2060], "both approved days go; the teaser-only day between them holds neither"
+    to2 = build(now, {"_cursor": 2060, "2058": on_yt(), "2060": on_yt()}, {"2058": {"verdict": "approved", "task": "t"}, "2060": {"verdict": "approved", "task": "t2"}}, tl, {}, plan=[], skipped=[])
+    assert to2["teaserOnly"] == [2059] and to2["leftBehind"] == [{"day": 2059, "why": "the engine has found only its teaser, no full episode"}], \
+        "a teaser-only day the run has gone past is still named: %s" % to2["leftBehind"]
+    assert "Episode 2059 not out yet (the engine has found only its teaser, no full episode)" in to2["headline"], to2["headline"]
     # a gap day filling an old hole does not count as the run moving on
     gap_only = {"1799": {"youtube_link": "l", "posts": {"youtube|full|y": yt("l", "2026-09-15T05:00:00Z")}}}
     import watch as _w; real = _w.gap_days; _w.gap_days = lambda path=None: {1799}
@@ -696,33 +708,32 @@ def _selftest():
     assert build(now, ten, {}, {}, {}, plan=[])["cleanDaysInRow"] == 10, "the count runs past the seven-day table"
     f = write(r, dry_run=True)
     assert f[ES["key"]] == KEY and f[ES["kind"]] == "report" and json.loads(f[ES["payload"]])["headline"] == r["headline"]
-    # review, 21 Sep 2026: every state the first day can sit in is named, the way publish.run sees it
+    # every state a day the run has gone past can sit in is named (review, 21 Sep 2026; left behind, 2 Oct 2026)
     two = {"x": {"episode": 2058}, "y": {"episode": 2059}}
+    gone = {"_cursor": 2059, "2059": on_yt()}                       # 2059 is out; 2058 is the day behind it
+    why58 = lambda cards, led=two, **kw: (build(now, gone, dict({"2059": {"verdict": "approved", "task": "t2"}}, **cards), led, {}, plan=[], skipped=[], **kw)["leftBehind"] or [{}])[0]
     hd = build(now, held_state, {"2058": {"verdict": "approved", "task": "t"}, "2059": {"verdict": "approved", "task": "t2"}}, two, {}, plan=[], skipped=[],
                holds={2058: "Kevin 17 Sep: reinstate the Learnings clip"})
-    assert hd["nextInOrder"] == [] and hd["blocker"] == {"day": 2058, "why": "held: Kevin 17 Sep: reinstate the Learnings clip"}, (hd["nextInOrder"], hd["blocker"])
-    rj = build(now, held_state, {"2058": {"task": "t", "verdict": "rejected", "synced": "2026-09-14T10:00:00"}, "2059": {"verdict": "approved", "task": "t2"}}, two, {}, plan=[], skipped=[])
-    assert rj["sentBack"][0]["rejected"] and rj["blocker"]["why"] == "rejected on 14 Sep, not resubmitted", rj["blocker"]
+    assert hd["nextInOrder"] == [2059], "a held day holds only itself: %s" % hd["nextInOrder"]
+    assert hd["leftBehind"] == [{"day": 2058, "why": "held: Kevin 17 Sep: reinstate the Learnings clip"}], "a held day is named even while it is ahead of the run: %s" % hd["leftBehind"]
+    assert "Episode 2058 not out yet (held: Kevin 17 Sep: reinstate the Learnings clip)" in hd["headline"], hd["headline"]
+    rj = build(now, gone, {"2058": {"task": "t", "verdict": "rejected", "synced": "2026-09-14T10:00:00"}, "2059": {"verdict": "approved", "task": "t2"}}, two, {}, plan=[], skipped=[])
+    assert rj["sentBack"][0]["rejected"] and rj["leftBehind"] == [{"day": 2058, "why": "rejected on 14 Sep, not resubmitted"}], rj["leftBehind"]
+    assert rj["headline"].endswith("No episode cards wait for you; Episode 2058 rejected, not resubmitted."), rj["headline"]
     gp = build(now, {"_cursor": 2057, "2057": {"youtube_link": "l"}}, {"1841": {"task": "t", "verdict": "changes"}, "2057": {"task": "t0", "verdict": "changes"}}, {}, {}, plan=[], skipped=[])
-    assert [s["day"] for s in gp["sentBack"]] == [1841] and gp["sentBack"][0]["holdsOrder"] is False, "a published day drops out; an old day holds no order"
-    nc = build(now, held_state, {"2059": {"verdict": "approved", "task": "t2"}}, {"x": {"episode": 2058, "role": "episode", "status": "rendered"}, "y": {"episode": 2059}}, {}, plan=[], skipped=[])
-    assert nc["blocker"]["why"] == "rendered, its card is not raised yet", nc["blocker"]
-    qw = build(now, held_state, {"2058": {"qa_waiting": {"at": "x"}}, "2059": {"verdict": "approved", "task": "t2"}}, two, {}, plan=[], skipped=[])
-    assert qw["blocker"]["why"] == "its card waits for the files to be readable", qw["blocker"]
-    # second review, 21 Sep 2026: only held days approved; a held day with a later one; a held day whose card still waits
-    only = build(now, held_state, {"2058": {"verdict": "approved", "task": "t"}}, two, {}, plan=[], skipped=[], holds={2058: "reinstate the clip"})
-    assert only["blocker"] == {"day": 2058, "why": "held: reinstate the clip"} and only["heldBehind"] == [], (only["blocker"], only["heldBehind"])
-    assert "Today: nothing can go out; day 2058 (held: reinstate the clip)." in only["headline"], only["headline"]
-    assert hd["heldBehind"] == [2059], "the day the queue waits on is not listed behind itself"
-    wt = build(now, held_state, {"2058": {"task": "t"}, "2059": {"verdict": "approved", "task": "t2"}}, two, {}, plan=[], skipped=[], holds={2058: "x"})
-    assert wt["blocker"]["why"] == "its card waits for your approval", wt["blocker"]
-    # third review, 21 Sep 2026: 2058 sent back, 2059 approved and held. The first ask sees nothing approved; the day to
-    # name is still 2058, sent back, never "an earlier day that is not approved"
-    sh = build(now, held_state, {"2058": {"task": "t", "verdict": "changes", "synced": "2026-09-14T09:00:00"}, "2059": {"verdict": "approved", "task": "t2"}},
-               two, {}, plan=[], skipped=[], holds={2059: "x"})
-    assert sh["blocker"] == {"day": 2058, "why": "sent back on 14 Sep, not resubmitted"} and sh["heldBehind"] == [2059], (sh["blocker"], sh["heldBehind"])
-    assert "day 2058 is not approved yet" in sh["heldWhy"] and "behind day 2058 (sent back on 14 Sep" in sh["headline"], (sh["heldWhy"], sh["headline"])
-    print(json.dumps({"checks": 61, "failed": []}))
+    assert [s["day"] for s in gp["sentBack"]] == [1841], "a published day drops out of the sent-back list"
+    assert why58({"2058": {"task": "t"}}) == {"day": 2058, "why": "its card waits for your approval"}
+    assert why58({}, {"x": {"episode": 2058, "role": "episode", "status": "rendered"}, "y": {"episode": 2059}}) == {"day": 2058, "why": "rendered, its card is not raised yet"}
+    assert why58({"2058": {"qa_waiting": {"at": "x"}}}) == {"day": 2058, "why": "its card waits for the files to be readable"}
+    assert why58({"2058": {"qa_blocked": {"failures": ["no Learnings clip"]}}}) == {"day": 2058, "why": "it failed its output check"}
+    assert why58({}, {"x": {"day": 2058, "status": "failed"}, "y": {"episode": 2059}}) == {"day": 2058, "why": "its render failed"}
+    assert why58({}, {"x": {"day": 2058, "status": "new"}, "y": {"episode": 2059}}) == {"day": 2058, "why": "not rendered yet"}
+    assert why58({}, {"x": {"day": 2058, "status": "broll"}, "y": {"episode": 2059}}) == {}, "a day of B-roll only is not an episode left behind"
+    assert why58({}, {"y": {"episode": 2059}}) == {}, "a day never recorded is not behind"
+    import watch as _w2; real_g = _w2.gap_days; _w2.gap_days = lambda path=None: {2058}
+    try: assert why58({"2058": {"task": "t"}}) == {}, "a gap day fills an old hole on its own list; it is not behind the run"
+    finally: _w2.gap_days = real_g
+    print(json.dumps({"checks": 74, "failed": []}))
 
 
 if __name__ == "__main__":

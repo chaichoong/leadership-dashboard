@@ -96,9 +96,7 @@ describe('content-engine watch: nightly wiring', () => {
     const sh = readFileSync(path.join(ROOT, 'scripts', 'content-engine-run.sh'), 'utf8');
     expect(sh).toMatch(/for day in \$DAYS; do/);
     const p = readFileSync(path.join(ROOT, 'scripts', 'content-engine', 'publish.py'), 'utf8');
-    expect(p).toContain('def may_go_to_youtube(day, gaps, state, ledger, approved)');
-    expect(p).toContain('moves_cursor(day, gaps): state[CURSOR_KEY] = day');
-    expect(p).toContain('d > cursor(state) + 1 and d not in gaps');
+    expect(p).toContain('moves_cursor(day, gaps): state[CURSOR_KEY] = max(cursor(state), day)');   // a gap day never moves it; a late day never pulls it back
   });
 
   it("starts at Kevin's takeover day and renders the configured number of episodes a night (8 Sep 2026)", () => {
