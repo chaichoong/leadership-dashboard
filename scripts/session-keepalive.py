@@ -27,6 +27,13 @@ moment he has signed in. Never a second task while one is open (the create
 gate and signin-waiting both check). GOV.UK and HMRC are skipped on purpose:
 their sessions cannot be held and need his code every time.
 
+No task for a site that did not stay signed in after his last two sign-ins,
+or his last four for a site that has held one before (2 Oct 2026,
+signin_hold.py): EDF had 15 of these cards, Amazon 7 and BW Legal's portal,
+which has no account yet, one every morning. The site is still visited, so the
+first sign-in that holds puts it back on the daily list, and a job that needs
+it asks for the sign-in when it needs it.
+
 Usage:  session-keepalive.py run [--dry-run]     |  session-keepalive.py selftest
 State:  ~/knowledge-os/logs/session-keepalive/status.json (latest verdict per site)
 """
@@ -36,7 +43,11 @@ import os
 import shutil
 import subprocess
 import sys
+import urllib.parse
 from datetime import datetime, timedelta
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import signin_hold  # noqa: E402
 
 try:
     from zoneinfo import ZoneInfo
@@ -109,6 +120,19 @@ def read_site(host, entry):
         return {"error": "unreadable output"}
 
 
+def not_holding_note(host, entry, events=None):
+    """Why no task is raised for a signed-out HOST, or '' when one should be.
+
+    `events` is the browser ledger read AFTER this run's own check of the
+    site, so that check counts toward the newest sign-in."""
+    url_host = urllib.parse.urlsplit(entry.get("loginUrl") or "").hostname
+    unheld = signin_hold.unheld_signins(signin_hold.load_events() if events is None else events, host, url_host)
+    if not unheld:
+        return ""
+    days = [(d.astimezone(LONDON) if LONDON else d).strftime("%d %b").lstrip("0") for d in unheld]
+    return "not raised: signed out again after the sign-ins of %s" % " and ".join([", ".join(days[:-1]), days[-1]])
+
+
 def already_waiting(host):
     """Is there an open SIGN-IN NEEDED task for this site already?"""
     # --no-walk: this run has just walked the site itself; a second walk would
@@ -178,8 +202,15 @@ def cmd_run(dry_run=False):
         state = session_state(res)
         row = {"label": entry.get("label"), "state": state, "landedOn": str(res.get("url") or "")[:120]}
         if state == "signed-out":
+            # A rule that cannot be worked out never silences the ask: the task is raised as before.
             try:
-                if already_waiting(host):
+                note = not_holding_note(host, entry)
+            except Exception as e:                          # noqa: BLE001
+                note, row["notHoldingError"] = "", str(e)[:200]
+            try:
+                if note:
+                    row["notHolding"], row["task"] = True, note
+                elif already_waiting(host):
                     row["task"] = "already waiting"
                 else:
                     row["task"] = create_task(signin_task_fields(host, entry, when), dry_run)
@@ -196,6 +227,7 @@ def cmd_run(dry_run=False):
     counts = {k: sum(1 for r in report["sites"].values() if r["state"] == k) for k in ("signed-in", "signed-out", "bot-check", "unknown")}
     print(json.dumps({"at": report["at"], "counts": counts,
                       "signedOut": [r["label"] for r in report["sites"].values() if r["state"] == "signed-out"],
+                      "signInWhenNeeded": [r["label"] for r in report["sites"].values() if r.get("notHolding")],
                       "unknown": [r["label"] for r in report["sites"].values() if r["state"] == "unknown"]}, indent=1))
     # An all-unknown run means the browser lane is broken, not that everything is fine.
     if report["sites"] and counts["unknown"] == len(report["sites"]):
@@ -233,11 +265,21 @@ def selftest():
                               datetime(2026, 9, 4, 15, 50))
     if late[F["deferredUntil"]] != "2026-09-05":
         bad.append(("task parking (afternoon run -> tomorrow's 08:00)", "2026-09-05", late[F["deferredUntil"]]))
+    # EDF's real ledger lines, 30 Sep to 2 Oct 2026: signed out the morning after each sign-in.
+    edf = {"loginUrl": "https://www.edfenergy.com/myaccount/login"}
+    lines = [{"at": "2026-09-30T08:24:12Z", "cmd": "login", "host": "www.edfenergy.com", "profile": "default"},
+             {"at": "2026-10-01T05:40:30Z", "cmd": "session", "site": "www.edfenergy.com", "signedIn": False, "signinPage": True, "profile": "default"},
+             {"at": "2026-10-01T08:48:10Z", "cmd": "login", "host": "www.edfenergy.com", "profile": "default"},
+             {"at": "2026-10-02T05:40:30Z", "cmd": "session", "site": "www.edfenergy.com", "signedIn": False, "signinPage": True, "profile": "default"}]
+    if not_holding_note("www.edfenergy.com", edf, lines) != "not raised: signed out again after the sign-ins of 30 Sep and 1 Oct":
+        bad.append(("two sign-ins that did not hold", "no task, with the reason", not_holding_note("www.edfenergy.com", edf, lines)))
+    if not_holding_note("www.edfenergy.com", edf, lines[2:]) != "":
+        bad.append(("one sign-in that did not hold", "a task as before", not_holding_note("www.edfenergy.com", edf, lines[2:])))
     if bad:
         for b in bad:
             print("FAIL", b, file=sys.stderr)
         return 1
-    print(f"selftest OK ({len(cases) + 4} checks)")
+    print(f"selftest OK ({len(cases) + 6} checks)")
     return 0
 
 

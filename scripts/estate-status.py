@@ -48,6 +48,8 @@ from zoneinfo import ZoneInfo
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 REPO = os.path.dirname(HERE)
+sys.path.insert(0, HERE)
+import signin_hold  # noqa: E402
 LOGS = os.path.expanduser("~/knowledge-os/logs")
 STATUS_LOG = os.path.join(LOGS, "job-status.jsonl")
 QUEUE_LOG = os.path.join(LOGS, "queue", "queue-events.jsonl")
@@ -750,6 +752,9 @@ def loop_health_row(now):
 #   held in its own profile (the Utilita flats) the hourly meter read.
 # A sign-in window Kevin closed after the last look reads "you-signed-in": he
 # did the step, but no robot has confirmed it yet, and green would claim more.
+# A site that keeps reading signed out after his sign-ins reads "on-demand", as
+# a short login does (2 Oct 2026, the rule is signin_hold.py's): the daily check
+# has stopped asking for it, so a red "Signed out" here would keep asking.
 SIGNIN_KEY = "robot-signins"
 KEEPALIVE_STATUS = os.path.join(LOGS, "session-keepalive", "status.json")
 BROWSER_LEDGER = os.path.join(LOGS, "agent-browser", "runs.jsonl")
@@ -821,7 +826,8 @@ def load_signin_sources():
     except FileNotFoundError:
         accounts = []
     return {"targets": targets, "skipped": skipped, "sites": sites, "keepalive": keepalive,
-            "ledger": _tail_jsonl(BROWSER_LEDGER), "readings": _tail_jsonl(UTILITA_READINGS, 400_000),
+            "ledger": _tail_jsonl(BROWSER_LEDGER), "signinHistory": signin_hold.load_events(BROWSER_LEDGER),
+            "readings": _tail_jsonl(UTILITA_READINGS, 400_000),
             "accounts": [{"label": a.get("label"), "profile": a.get("profile")} for a in accounts]}
 
 
@@ -849,6 +855,8 @@ def signin_payload(now, src):
     keep_at = _utc(keep.get("at"))
     keep_sites = keep.get("sites") or {}
     ledger = src.get("ledger") or []
+    # The whole ledger's sign-ins and checks (signin_hold.load_events), never the tail above.
+    history = src.get("signinHistory") or []
     profile_of = {a["label"]: a["profile"] for a in (src.get("accounts") or []) if a.get("label") and a.get("profile")}
     last_read = {}
     for rd in src.get("readings") or []:
@@ -897,6 +905,9 @@ def signin_payload(now, src):
             state, at, how = "on-demand", (last[0] if last else None), "short login"
         elif mine and (not last or mine > last[0]):
             state, at, how = "you-signed-in", mine, "you signed in"
+        elif last and last[1] == "signed-out" and profile == "default" \
+                and signin_hold.unheld_signins(history, host, url_host):
+            state, at, how = "on-demand", last[0], signin_hold.WHY
         elif last:
             state, at, how = last[1], last[0], last[2]
         else:
@@ -1302,6 +1313,7 @@ def selftest():
             {"label": "Utilita Apartment 2", "host": "my.utilita.co.uk", "url": "https://my.utilita.co.uk/energy", "profile": "utilita-apt2"},
             {"label": "New", "host": "new.example.com", "url": "https://new.example.com/", "profile": "default"},
             {"label": "Cloudflare", "host": "dash.cloudflare.com", "url": "https://dash.cloudflare.com/", "profile": "default"},
+            {"label": "BW Legal", "host": "portal.bwlegal.co.uk", "url": "https://portal.bwlegal.co.uk/", "profile": "default"},
         ],
         "sites": {"tax.service.gov.uk": {"login": True, "shortSession": True, "loginUrl": "x"},
                   "www.topcashback.co.uk": {"label": "TopCashback", "login": True},
@@ -1316,6 +1328,11 @@ def selftest():
             {"at": "2026-09-25T08:24:07Z", "cmd": "login", "host": "my.utilita.co.uk", "profile": "utilita-apt1"},
             {"at": "2026-09-25T06:00:00Z", "cmd": "login", "host": "dash.cloudflare.com", "profile": "default"},
             {"at": "2026-09-25T08:00:00Z", "cmd": "session", "site": "dash.cloudflare.com", "signedIn": False, "botCheck": True, "profile": "default"},
+            # BW Legal's portal has no account yet: two windows closed still signed out.
+            {"at": "2026-09-23T08:23:04Z", "cmd": "login", "host": "portal.bwlegal.co.uk", "profile": "default"},
+            {"at": "2026-09-23T09:00:57Z", "cmd": "session", "site": "portal.bwlegal.co.uk", "signedIn": False, "signinPage": True, "profile": "default"},
+            {"at": "2026-09-24T08:47:23Z", "cmd": "login", "host": "portal.bwlegal.co.uk", "profile": "default"},
+            {"at": "2026-09-24T08:49:13Z", "cmd": "session", "site": "portal.bwlegal.co.uk", "signedIn": False, "signinPage": True, "profile": "default"},
         ],
         "readings": [
             {"at": "2026-09-25T08:05:22", "label": "Apartment 1", "ok": False, "problem": "SIGN-IN NEEDED"},
@@ -1328,6 +1345,7 @@ def selftest():
         ],
         "accounts": [{"label": "Apartment 1", "profile": "utilita-apt1"}, {"label": "Apartment 2", "profile": "utilita-apt2"}],
     }
+    src["signinHistory"] = src["ledger"]
     got = {ln["label"]: ln for ln in signin_payload(t0, src)["lines"]}
     ok(got["Pingen"]["state"] == "signed-out" and got["Pingen"]["how"] == "robot check",
        "a robot check at 06:56 outranks the 06:40 keep-alive: %r" % got["Pingen"])
@@ -1345,6 +1363,15 @@ def selftest():
        "a flat's hourly read that met a bot check is a bot check, not a Sign in button: %r" % bot_flat["Utilita Apartment 2"])
     ok(got["Cloudflare"]["state"] == "bot-check" and got["Cloudflare"]["how"] == "robot check",
        "a bot check is its own state, never 'signed out' with a Sign in button (25 Sep 2026): %r" % got["Cloudflare"])
+    ok(got["BW Legal"]["state"] == "on-demand" and got["BW Legal"]["how"] == signin_hold.WHY
+       and got["BW Legal"]["at"] == "2026-09-24T08:49:13.000Z",
+       "signed out again after the last two sign-ins: sign in when needed, never a red Signed out (2 Oct 2026): %r" % got["BW Legal"])
+    one = {ln["label"]: ln for ln in signin_payload(t0, dict(src, signinHistory=src["ledger"][:-2]))["lines"]}
+    ok(one["BW Legal"]["state"] == "signed-out", "ONE sign-in that did not hold is still Signed out: %r" % one["BW Legal"])
+    whole = {ln["label"]: ln for ln in signin_payload(t0, dict(src, ledger=src["ledger"][-1:]))["lines"]}
+    ok(whole["BW Legal"]["state"] == "on-demand", "the rule reads the whole ledger, not the tail the looks come from: %r" % whole["BW Legal"])
+    none = {ln["label"]: ln for ln in signin_payload(t0, dict(src, signinHistory=None))["lines"]}
+    ok(none["BW Legal"]["state"] == "signed-out", "no history read: Signed out, never a quiet 'when needed': %r" % none["BW Legal"])
     ok("1 stops the robot with a bot check (Cloudflare)" in robot_signins_row(t0, src)["detail"],
        "the row names the site a bot check stops: %r" % robot_signins_row(t0, src)["detail"])
     ok(signin_payload(t0, src)["unlisted"] == ["Evernote", "TopCashback"], "login sites with no page are named once each")
