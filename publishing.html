@@ -30,6 +30,7 @@
     .done { background: var(--success-bg); color: var(--success); }
     .pending { background: var(--info-bg); color: var(--info); }
     .missing { background: var(--danger-bg); color: var(--danger); }
+    .notmade { background: var(--bg-subtle); color: var(--text-muted); text-decoration: line-through; }
     .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: var(--space-4); }
     .stat { font-size: var(--fs-2xl); font-weight: var(--fw-semibold); }
     .stat-row { display: flex; flex-wrap: wrap; gap: var(--space-6); }
@@ -157,8 +158,13 @@ async function readReport() {
     finally { clearTimeout(timer); }
 }
 
+// 'none' is a clip this episode never had (2082, 2 Oct 2026: no diary section, so no Learnings clip and no Short). It is
+// greyed out and not counted against the episode, the same rule the engine uses to close the episode's card.
 function sectionChips(sections) {
-    return `<div class="chips">${SECTIONS.map(k => { const v = (sections || {})[k] || 'missing'; return `<span class="chip ${esc(v)}" title="${esc(k)}: ${esc(v)}">${esc(k)}</span>`; }).join('')}</div>`;
+    return `<div class="chips">${SECTIONS.map(k => { const v = (sections || {})[k] || 'missing';
+        return v === 'none' ? `<span class="chip notmade" title="${esc(k)}: not in this episode">${esc(k)}</span>`
+            : `<span class="chip ${esc(v)}" title="${esc(k)}: ${esc(v)}">${esc(k)}</span>`; }).join('')}</div>`
+        + (SECTIONS.some(k => (sections || {})[k] === 'none') ? '<div class="muted" style="font-size:var(--fs-xs)">Struck out: not in this episode</div>' : '');
 }
 
 // Days that are not out and that no other line on the page names (2 Oct 2026). Nothing waits for such a day any
@@ -191,7 +197,7 @@ function render(rec) {
     const hist = (r.history || []).map(h => {
         if (!h.episodes.length) return `<tr class="none"><td style="white-space:nowrap">${esc(dayLabel(h.date, r.today))}</td><td colspan="3"><strong>Nothing went out</strong></td></tr>`;
         return h.episodes.map((e, i) => `<tr><td style="white-space:nowrap">${i ? '' : esc(dayLabel(h.date, r.today))}</td>
-            <td style="white-space:nowrap"><strong>Episode ${esc(e.day)}</strong><br><span class="muted">${esc(e.done)} of 7 sections</span></td>
+            <td style="white-space:nowrap"><strong>Episode ${esc(e.day)}</strong><br><span class="muted">${esc(e.done)} of ${esc(e.owed ?? 7)} sections</span></td>
             <td>${sectionChips(e.sections)}</td>
             <td style="white-space:nowrap">${[link(e.youtube, 'YouTube'), link(e.blog, 'Blog'), link(e.podcast, 'Spotify')].filter(Boolean).join(' · ') || '<span class="muted">no links</span>'}</td></tr>`).join('');
     }).join('');

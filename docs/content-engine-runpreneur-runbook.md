@@ -147,6 +147,11 @@ One line each into the digest, and the Publishing page on the dashboard.
   the page itself (GoHighLevel never hands back a post URL), shared as Kevin, to Feed, Public, with the
   first line of the copy and the YouTube link above it. Every share is checked on his profile
   afterwards; one that cannot be confirmed is shared once more and never a third time.
+  **A reel goes to his profile once** *(2 Oct 2026)*. The finder matches a caption's first six words, and
+  both of 2083's captions opened "Three months after breaking my foot,". Both clips went up at the same
+  moment, so the Learnings share found the Summary reel and shared it a second time (2056 the same way).
+  Now every reel a share has already taken is skipped by the finder, and Share is never pressed on one
+  (`publish.reels_already_shared`). Guarded by `tests/content-engine-fb-share-once.test.js`.
 - **23e. Spotify.** Once the video podcast has processed, its public link goes on the record.
 
 **23f. Close the card of a finished episode** (`publish.py close-cards`, daytime job only)
@@ -187,8 +192,11 @@ as header image, and the **podcast** uploaded to Spotify as a video podcast.
 
 ## The seven sections — how "done" is decided
 
-An episode is only complete when all seven are done. Anything short shows in the morning report and on
-the Publishing page.
+An episode is only complete when every section it has is done. Anything short shows in the morning report
+and on the Publishing page. A clip the render never made is not owed (2 Oct 2026): an episode with no diary
+section has no Learnings clip and no Short, the output gate says so, and the page shows those two struck out
+as "not in this episode" and counts the episode against five (`publish.owed_sections`, one rule for the card
+closer, the hourly line and the page). A clip that was made and not posted still shows as missing.
 
 1. YouTube episode
 2. YouTube Short
