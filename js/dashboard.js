@@ -984,6 +984,7 @@
                 // When this data was actually true. The P&L header reads it so cached
                 // data is visibly cached rather than silently old.
                 window.dashDataAsOf = Date.now() - (cached.ageMs || 0);
+                window.dashDataFromCache = true;
                 renderDashboard(d.accounts, d.costs, d.tenancies, d.transactions, d.rentalUnits, d.tenants);
                 // The P&L renders off allTransactions but only on tab switch, so a
                 // refresh replaced the data underneath an open P&L and left the old
@@ -1060,6 +1061,7 @@
             });
             // Fresh from Airtable: as-of is now.
             window.dashDataAsOf = Date.now();
+            window.dashDataFromCache = false;
             renderDashboard(accounts, costs, tenancies, transactions, rentalUnits, tenants);
             // Same reason as the cache path above: an open P&L must follow the data.
             try { if (typeof refreshPnLIfActive === 'function') refreshPnLIfActive(); } catch (e) { console.warn('[loadDashboard] P&L re-render failed:', e); }
@@ -1611,7 +1613,7 @@
         // need it red, not throw out of the render.
         const rows = safe(() => ({ tenancies: reTenancyRows(), named: reNamedConfig(), unitIds: (allRentalUnits || []).map(u => u.id) }));
         const need = () => { if (!rows.tenancies) throw new Error('the tenancy data could not be read'); return rows; };
-        const out = { at: new Date(), today, cached: !window.dashDataAsOf || Date.now() - window.dashDataAsOf > 60000 };
+        const out = { at: new Date(), today, cached: window.dashDataFromCache !== false };
         out.plan = safe(() => ReKpis.planCushion({ tenancies: need().tenancies, costs: reCostRows(), businessId: RE_Q4.businessId, budget: RE_VARIABLE_BUDGET_GBP }));
         out.cash = safe(() => {
             if (!kpiCtx.transactions) throw new Error('transactions did not load');
@@ -1683,7 +1685,7 @@
         if (!host) return;
         const q = _reQ4 = computeReQ4();
         const T = RE_Q4.targets;
-        const gbpTarget = t => t && { committed: reGbp(t.committed), stretch: t.stretch ? reGbp(t.stretch) : '' };
+        const gbpTarget = t => t ? { committed: reGbp(t.committed), stretch: t.stretch ? reGbp(t.stretch) : '' } : null;
         const pctOf = (v, t) => (t && t.committed && typeof v === 'number') ? (v / t.committed) * 100 : null;
         const { plan, cash, units, rent, personal, compliance } = q;
         const roll = cash.rolling || {}, last = cash.lastMonth || {}, base = cash.baseline || {};
@@ -1702,6 +1704,7 @@
             + Object.keys(roll.variableLines).sort().map(k => reRow(`${k} paid`, '− ' + fmt(roll.variableLines[k]))).join('')
             + reRow("Kevin's income from property (cash)", fmt(roll.income))
             + reRow('Window', `${reDay(roll.start)} to ${reDay(roll.end)}`)
+            + reRow('Target', 'Same 31 Dec marker as the plan card. The gap between plan and cash is the leak.')
             + reRow('Newest bank transaction', reDay(cash.newestTransaction))
             + roll.mismatches.map(m => reRow(`Check: ${reDay(m.date)} ${m.description} (cost record is ${m.costBusiness})`, fmt(m.amount), 'text-amber')).join('')
             + roll.untagged.map(m => reRow(`Left out, not tagged to property: ${reDay(m.date)} ${m.description}`, fmt(m.amount), 'text-amber')).join('')
@@ -1718,7 +1721,7 @@
             }),
             reCard({
                 title: "Kevin's income from property (cash)", result: cash,
-                value: cashValue('income'), target: T.incomeCash, sub: cashSub('income'), rows: cashRows,
+                value: cashValue('income'), target: gbpTarget(T.incomeCash), pct: pctOf(roll.income, T.incomeCash), sub: cashSub('income'), rows: cashRows,
             }),
             reCard({
                 title: 'Property cushion (plan)', result: plan,
@@ -1731,7 +1734,7 @@
             }),
             reCard({
                 title: 'Property cushion (cash)', result: cash,
-                value: cashValue('cushion'), target: T.cushionCash, sub: cashSub('cushion'), rows: cashRows,
+                value: cashValue('cushion'), target: gbpTarget(T.cushionCash), pct: pctOf(roll.cushion, T.cushionCash), sub: cashSub('cushion'), rows: cashRows,
             }),
             reCard({
                 title: 'Named units with a signed tenant in', result: units,
