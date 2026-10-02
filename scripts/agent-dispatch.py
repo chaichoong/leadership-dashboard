@@ -6004,7 +6004,7 @@ def history_text(result):
         # "Open" button, and the raw text still reads (Kevin, 8 Sep 2026:
         # "a clickable link so it opens, so I can see the full audit trail").
         # A file's own link is signed and dies within hours, while this text
-        # waits on a card for days (2 Oct 2026: five dead Open buttons on
+        # waits on a card for days (2 Oct 2026: five dead file links on
         # three cards). The text names the task that holds the file, which the
         # card re-reads for a live link; the JSON keeps the file link for an
         # agent to download within its run.
