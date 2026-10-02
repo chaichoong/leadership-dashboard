@@ -43,10 +43,14 @@ accordingly). The numbered labels and what you may do with each:
   Roy Lavin, Head of Property (Kevin's ruling, 25 Aug 2026 — before that the
   label carried no task and maintenance mail relied on someone reading the
   Gmail label; that was the one lane where something could sit unseen).
+- **10 "property compliance"** — certificates and compliance paperwork. Label
+  10 PLUS a task for the Property Administration agent (Step 4c). NEVER
+  file-only (Kevin, 2 Oct 2026): a certificate that sat in this label with no
+  task was never filed in the compliance book, and the visit nearly got bought
+  twice. `act --do file --label-num 10` refuses without `--task <rec id>`.
 - **File-only lanes** (label + archive, no task, via `act --do file`):
   **6 newsletter** (instead of a bare archive when it fits),
-  **10 property compliance** (certificates and compliance paperwork; its own
-  agent is being built), **11 tenancy docs**, **17 OD Prospects** (inbound
+  **11 tenancy docs**, **17 OD Prospects** (inbound
   interest in Operations Director), **18 creditor** (apply IN ADDITION to
   lane 12 — creditor mail is always tier-1 and always gets a task).
 - **8 "task created"** — Mica's manual lane. You NEVER file into it (the
@@ -169,17 +173,23 @@ the `list-unsubscribe` header (its presence = machine mail).
 2. **Label 13 — maintenance:** repair reports, contractor quotes, trade
    scheduling for a property job. Label 13 AND a task for Roy (Step 4b) —
    Kevin's standing approval covers the pass, so no per-task ask.
-3. **File lanes — taxonomy homes without a task:** newsletters →
-   `file --label-num 6`; compliance certificates and paperwork → `file
-   --label-num 10`; tenancy documents → `file --label-num 11`; inbound
+3. **Compliance certificates and paperwork — label 10 AND a task (Step 4c).**
+   Any message that carries or mentions a gas safety record (LGSR, CP12), an
+   electrical report (EICR), an EPC, a fire or emergency lighting certificate,
+   an HMO licence or an insurance schedule, whoever sent it and whatever else
+   it is about. An INVOICE that comes with its certificate is BOTH: it keeps
+   its lane-12 task for the money, and its description must say
+   `CERTIFICATE ATTACHED` so the task cannot close until the document is filed.
+4. **File lanes — taxonomy homes without a task:** newsletters →
+   `file --label-num 6`; tenancy documents → `file --label-num 11`; inbound
    Operations Director interest → `file --label-num 17`. Creditor mail gets
    lane 12 AND `file --label-num 18` on top (always tier-1, always a task).
-4. **Archive — machine noise with no taxonomy home:** marketing, promotions,
+5. **Archive — machine noise with no taxonomy home:** marketing, promotions,
    automated notifications, receipts and order confirmations with no ask
    (transactions reach the books through the bank feeds, not the inbox).
    Machine-generated AND no ask = archive. NEVER archive an email written by
    a human being without creating a task for it — this is the hard guardrail.
-5. **Leave in inbox:** an email a human wrote that Kevin should read himself
+6. **Leave in inbox:** an email a human wrote that Kevin should read himself
    but needs no reply or action. Leaving it is a decision — log it. It will
    resurface in the stale flag after 48 hours, which is correct: his reading
    backlog must stay visible.
@@ -442,6 +452,38 @@ reply tasks — the two lanes stay separate by name.
 Log each with `note --id <id> --do task-created` (or `--do updated --reason
 "joined open matter: <matchedName>"` when the gate answered `updated`). The
 label move itself is still `act --do label13` exactly as before.
+
+### Step 4c — Certificate tasks for Property Administration (lane 10; Kevin's ruling, 2 Oct 2026)
+
+Every lane-10 THREAD that survives the Step 3 dedupe gets one task for the
+Property Administration agent. The label move happens AFTER the task exists,
+because `act --do file --label-num 10` refuses without the task's id. Fields:
+
+- `fldgFjGBw6bTKJFCD` Task Name: "COMPLIANCE: file certificate - <type> - <property>"
+  (type in plain words: gas safety record, EICR, EPC, insurance schedule)
+- `fldx4qCw17UfrKpaN` Status: `Today`
+- `fld7XP8w8kbxfETV4` Due Date: today (YYYY-MM-DD)
+- `flduCtmQGpOA4eWaj` Team Member: `["recwWvBju2ycB63i4"]` (Property Administration)
+- Assignee: leave BLANK (a blank Assignee means an AI agent owns it)
+- `fldZ2moDV2041Sobc` Task Type: `Admin`
+- `fldRGhBQViKZKtkQ6` Description: start with `CERTIFICATE ATTACHED` when the
+  message has an attachment (or `CERTIFICATE MENTIONED, NO ATTACHMENT` when it
+  only says one exists), then which property, what the certificate is, who sent
+  it and the date on it if the email states one. Save the attachment first
+  (`python3 scripts/inbound-triage.py attachments --q "<query>" --id <id>`) and
+  put the saved path in the description.
+- `fldXf1p0vtHqOZcKl` Inbound Note URL Link: the `#all/{threadId}` URL
+- Do NOT set Inbound Communication Task: this is a filing, not a reply.
+
+Create through the SAME gate (`python3 scripts/create-agent-task.py create
+--fields-json '<fields>'`). Then move the mail:
+
+    python3 scripts/inbound-triage.py act --id <id> --do file --label-num 10 \
+      --task <taskId> --reason "<one line>"
+
+The task cannot be completed until the certificate is in the compliance book
+with its document (`agent-dispatch.py complete` refuses), so nothing here
+depends on anyone remembering.
 
 ## Step 5 — The stranded check (the safety net)
 

@@ -44,6 +44,7 @@ const ESTATE_SCRIPTS = [
   'scripts/content-engine/thumbnail.py',
   'scripts/agent-dispatch.py',
   'scripts/standing_holds.py',
+  'scripts/certificate_watch.py',
   'scripts/handback-poll.py',
   'scripts/session-keepalive.py',
   'scripts/create-agent-task.py',
