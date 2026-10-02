@@ -21,7 +21,8 @@ THE RULE, read off the ledger for one site:
                   reading signed in after a signed-out read with no window in
                   between (his own password in a Your turn window, a sister
                   site's sign-in on the same login, a wrong read put right);
-                  that one REPLACES the sign-in before it
+                  that one REPLACES the sign-in before it, unless that one
+                  had held, which keeps its place on the record
   it HELD         the robot read signed in HOLD_HOURS or more after it
   it did NOT hold the robot read signed out before that, within HOLD_HOURS of
                   the sign-in or of its last signed-in read
