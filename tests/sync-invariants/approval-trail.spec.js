@@ -159,8 +159,8 @@ test.describe('an earlier draft quoted under a decision card', () => {
 });
 
 // 2 Oct 2026: the history lists a file held on ANOTHER task, and its Open button carried Airtable's signed file
-// link, which dies within hours. Five such buttons sat dead on three waiting cards (the first: a servicing PDF on
-// the Mears invoice card, HTTP 410). The row now links the task that holds the file and the button re-reads that
+// link, which dies within hours. Five such links sat dead on three waiting cards (the first: a servicing PDF on
+// the Mears invoice card, HTTP 410; two of the five were buttons in view, three sat in history the card had cut). The row now links the task that holds the file and the button re-reads that
 // task for a live link. Rows written before the fix still carry the dead link: their task is found from the
 // "task opened" row of the same name and day, and a row whose task cannot be found gets no button rather than a
 // dead one. The independent review added: a name shared by two tasks, a name cut at 90 characters that ends in a

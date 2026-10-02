@@ -15,6 +15,7 @@ export default defineConfig({
     // still fails, in 30 s instead of 5.
     testTimeout: 30_000,
     // One event-loop turn after every test: see tests/setup-yield.js.
-    setupFiles: ['tests/setup-yield.js'],
+    // Git's repository variables never reach a test: see tests/setup-git-env.js.
+    setupFiles: ['tests/setup-git-env.js', 'tests/setup-yield.js'],
   },
 });
