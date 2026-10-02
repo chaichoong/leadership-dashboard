@@ -9,7 +9,7 @@ One business, one quarter, per run. Kevin invokes it. It is a skill, not a stand
 The Objective & Strategy page (`os/strategy/index.html`, code `os/strategy/strategy.js`) owns
 the record this session writes. This skill mirrors that page's rules. It does not replace the
 page and it does not run the page's wizard: the conversation happens here, the result lands on
-the same record, and the page is where Kevin reads the finished plan.
+the same record, and Kevin gets the finished plan as a PDF in the page's own export layout.
 
 ## Rules that hold in every phase
 
@@ -78,18 +78,45 @@ only when the pack shows a problem in another lane. Never all eleven. Put the fo
 `board.md`, with a three-line summary on top: where they agree, where they split, the one
 change most of them ask for.
 
-## Phase 3: the direction conversation with Kevin
+## Phase 3: the conversation with Kevin (direction, then every section of the plan)
 
-High level only. One question at a time, in this order, stopping when he has answered:
+One question at a time. Record his words as he says them. Every ruling goes to memory the
+moment it is made, dated. A ruling made once is not asked again.
+
+### 3a. Direction
 
 1. Here is last quarter in five lines and the board's one change. Does that match what you saw?
 2. Has the overall direction changed, or is there anything new?
 3. Which projects, in which order? (Offer the board's list. He picks. Three at most.)
-4. The Objective half of the plan (objective, customer profile, undertakings, what makes you
-   different, main method) carries forward unchanged. Has anything there changed?
 
-Record his words as he says them. Every ruling goes to memory the moment it is made, dated.
-A ruling made once is not asked again.
+### 3b. Every section of the plan, every quarter
+
+Nothing on the plan carries forward unread. The first run copied the Objective half across
+without review, and Kevin sent it back: things had changed, and the plan must stay fully up
+to date. Walk the sections in the page's order, one section per message:
+
+1. Objective
+2. Target statement: what we do, who we do it for, how we do it
+3. Customer profile
+4. Undertakings
+5. Original selling points
+6. Main method
+7. Enticement
+8. Nine-year target
+9. Three-year target and its measurables
+10. One-year target and its measurables
+
+For each section, in this shape:
+
+- Show the current wording in full (a long list as a numbered list).
+- Say what in it no longer matches: check it against the numbers pack, this quarter's
+  rulings, the team roster in the brain, and the other sections. Name the line and the fact.
+  If nothing conflicts, say so in one line.
+- Offer the new wording, ready to approve.
+- Ask one question: keep, use the new wording, or change it.
+
+Log each section's ruling (keep or the agreed wording) in `plan-review.md` in the session
+folder. A section with no ruling is not done: Phase 5 does not start until all ten have one.
 
 ## Phase 4: build the pack
 
@@ -114,7 +141,7 @@ Each of the three quarterly projects carries:
 - One KPI (name, unit, target), a tracking method, a definition of done with a date, and
   three monthly stepping stones.
 
-Also in the draft: the objective, the one-year target and up to three measurables, the
+Also in the draft: every section as ruled in Phase 3b, the
 targets table (today, committed, stretch), the KPI list for the dashboard, the close proposal
 for each of last quarter's projects (outcome, KPI at close, and for every open task: close,
 carry or leave), and the open questions for whoever must answer them.
@@ -231,13 +258,22 @@ python3 scripts/create-agent-task.py create --force --fields-json '<json keyed b
    carrying the spec's path, and read back by id. The write-back names which.
 6. Never say a KPI updates on its own until you have watched the dashboard show it.
 
-## Phase 7: read it back on the page
+## Phase 7: read it back and send Kevin the finished plan
 
-Open the Objective & Strategy page for the business and the new quarter, in Kevin's browser:
-`https://app.operationsdirector.co.uk/os/strategy/index.html`. Read every field back against
-the approved draft: objective, one-year target and measurables, the three projects with KPI,
-owner, tracking method and definition of done, and all nine monthly stepping stones. Fix any
-field that did not land, then tell Kevin the page is ready to read.
+1. Read the new record back against the approved draft, field by field: the ten sections from
+   Phase 3b, and the three projects with KPI, target, owner, tracking method, definition of
+   done and all nine monthly stepping stones. Fix any field that did not land.
+2. Render the plan in the page's own export layout:
+
+```bash
+node scripts/render-strategy-plan.cjs --record <plan record id> --out "<the session folder>"
+```
+
+   It runs `buildPrintableDocument` from `os/strategy/strategy.js`, so it matches the page's
+   "Export PDF" button, and it refuses to write inside this repo.
+3. **Send Kevin the PDF with SendUserFile. The session is not finished until he has the
+   finished plan in front of him.** Tell him where the same plan lives in the app: Objective &
+   Strategy, his business, the quarter (`https://app.operationsdirector.co.uk/os/strategy/index.html`).
 
 ## Phase 8: the write-back (the session is not finished without it)
 
