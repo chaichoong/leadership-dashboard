@@ -149,7 +149,11 @@ done
 python3 scripts/content-engine/render.py redo-requested || echo "redo: Learnings rebuilds skipped this run (see above)"
 # A failed copy run is said and retried next night; it never ends the night (24 Sep 2026: 2071's Learnings copy failed
 # and nothing after this line ran: no card sync, no cards, no publish, no report until the hourly job came round).
-python3 scripts/content-engine/platform_copy.py run --pending --limit 2 || echo "copy: some copy NOT written this run, retried next run (see above)"
+# The night renders its new days plus, after them, a day Kevin sent back (2 Oct 2026), so the copy step takes as many
+# episodes as the plan held, never fewer than two: at a fixed two, a three-render night left one episode with no copy
+# and so no card, every night after.
+COPY_LIMIT=$(echo $DAYS | wc -w | tr -d ' '); [ "${COPY_LIMIT:-0}" -lt 2 ] && COPY_LIMIT=2
+python3 scripts/content-engine/platform_copy.py run --pending --limit "$COPY_LIMIT" || echo "copy: some copy NOT written this run, retried next run (see above)"
 # A card Kevin sent back goes back to him once its fix has rendered and its copy is rewritten (receipt in content_engine_resubmit/)
 python3 scripts/content-engine/render.py resubmit-ready || echo "resubmit: skipped this run (see above)"
 python3 scripts/content-engine/approval.py sync || exit 1
