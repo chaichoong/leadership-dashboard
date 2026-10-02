@@ -21,8 +21,8 @@
     const PAGE_REGISTRY = [
         // Home tab (Kevin, 29 Sep 2026): one list of what needs Kevin today, the real Leadership Dashboard underneath. On trial beside the old screens.
         { id: 'home',        name: 'Home',                           icon: '📌', pageVer: '1.2', sopFile: '',                           sopVer: '1.0', standalone: 'index.html#home' },
-        { id: 'overview',    name: 'Leadership Dashboard',           icon: '📊', pageVer: '2.114', sopFile: 'sop.html',                   sopVer: '2.94', standalone: 'index.html#overview' },
-        { id: 'os-strategy', name: 'Objective & Strategy',           icon: '🎯', pageVer: '1.64', sopFile: 'os/strategy/sop.html',       sopVer: '1.1', standalone: 'os/strategy/index.html' },
+        { id: 'overview',    name: 'Leadership Dashboard',           icon: '📊', pageVer: '2.117', sopFile: 'sop.html',                   sopVer: '2.115', standalone: 'index.html#overview' },
+        { id: 'os-strategy', name: 'Objective & Strategy',           icon: '🎯', pageVer: '1.67', sopFile: 'os/strategy/sop.html',       sopVer: '1.1', standalone: 'os/strategy/index.html' },
         { id: 'tasks',       name: 'Tasks & Projects',   icon: '✅', pageVer: '1.180', sopFile: 'os/tasks/sop.html',             sopVer: '1.4', standalone: 'os/tasks/index.html' },
         { id: 'cfv',        name: 'CFVs',                          icon: '🚨', pageVer: '1.42', sopFile: 'sop-cfvs.html',               sopVer: '1.34', standalone: 'index.html#cfv' },
         { id: 'money',      name: 'Money Confidence',              icon: '🧭', pageVer: '1.1', sopFile: '',                            sopVer: '1.0', standalone: 'index.html#money' },
@@ -31,11 +31,11 @@
         { id: 'ar-variable', name: 'Accounts Receivable Variable', icon: '📤', pageVer: '1.4', sopFile: '',                            sopVer: '1.0', standalone: 'index.html#ar-variable' },
         { id: 'costs',      name: 'Accounts Payable Fixed',        icon: '📋', pageVer: '1.11', sopFile: '',                            sopVer: '1.0', standalone: 'index.html#costs' },
         { id: 'invoices',   name: 'Payment Run',                   icon: '🧾', pageVer: '3.9', sopFile: 'sop-invoices.html',           sopVer: '3.00', standalone: 'index.html#invoices' },
-        { id: 'pnl',        name: 'Profit & Loss',                 icon: '💰', pageVer: '2.32', sopFile: 'sop-pnl.html',               sopVer: '2.26', standalone: 'index.html#pnl' },
+        { id: 'pnl',        name: 'Profit & Loss',                 icon: '💰', pageVer: '2.35', sopFile: 'sop-pnl.html',               sopVer: '2.26', standalone: 'index.html#pnl' },
         { id: 'transactions', name: 'Transactions',                icon: '🔍', pageVer: '1.1', sopFile: '',                            sopVer: '1.0', standalone: 'index.html#transactions' },
         { id: 'coa',        name: 'Chart of Accounts',             icon: '📒', pageVer: '1.3', sopFile: 'sop-coa.html',                sopVer: '1.1', standalone: 'index.html#coa' },
         { id: 'comms',      name: 'Inbound Comms',                 icon: '📨', pageVer: '2.82', sopFile: 'inbound-comms-sop.html',      sopVer: '2.60', standalone: 'follow-up.html' },
-        { id: 'growth-plan', name: 'Growth Plan',                    icon: '📈', pageVer: '1.59', sopFile: 'sop-growth-plan.html',        sopVer: '1.58', standalone: 'growth-plan.html' },
+        { id: 'growth-plan', name: 'Growth Plan',                    icon: '📈', pageVer: '1.62', sopFile: 'sop-growth-plan.html',        sopVer: '1.58', standalone: 'growth-plan.html' },
         { id: 'compliance', name: 'Property Compliance',            icon: '✅', pageVer: '1.18', sopFile: 'sop-compliance.html',         sopVer: '1.14', standalone: 'compliance.html' },
         // Property Manager (Operations) — Roy Lavin's single page. Standalone at
         // property-manager/ behind its own passcode; the property-manager Worker
@@ -46,14 +46,14 @@
         // client tenant's shell; the adminOnly flag is the contract the Supabase
         // migration must honour. Replaced the Plan Builder entry 1 Aug 2026 on
         // Kevin's direction (os/business-plan-builder/ files remain on disk).
-        { id: 'kpi-library', name: 'KPI Library', icon: '📚', pageVer: '1.9', sopFile: '', sopVer: '1.0', standalone: 'index.html#kpi-library', adminOnly: true },
+        { id: 'kpi-library', name: 'KPI Library', icon: '📚', pageVer: '1.12', sopFile: '', sopVer: '1.0', standalone: 'index.html#kpi-library', adminOnly: true },
         // AI Agents (Leadership) — ADMIN ONLY, like KPI Library. Approvals,
         // checks and the workforce register in one place (Kevin's ruling,
         // 24 Aug 2026; moved out of the Systemisation page).
         { id: 'agents', name: 'AI Agents', icon: '🤖', pageVer: '1.171', sopFile: 'sop-ai-agents.html', sopVer: '1.170', standalone: 'os/agents/index.html', adminOnly: true },
         { id: 'fintable',  name: 'Accounts',                       icon: '🏦', pageVer: '1.19', sopFile: '',                            sopVer: '1.0', standalone: 'index.html#fintable' },
         { id: 'systemisation', name: 'Systemisation',              icon: '⚙️', pageVer: '1.27', sopFile: 'guides/systemisation.html',    sopVer: '1.11', standalone: 'os/systemisation/index.html' },
-        { id: 'os-team',    name: 'Team Members',                  icon: '👥', pageVer: '1.41', sopFile: '',                            sopVer: '1.1', standalone: 'os/team/index.html' },
+        { id: 'os-team',    name: 'Team Members',                  icon: '👥', pageVer: '1.44', sopFile: '',                            sopVer: '1.1', standalone: 'os/team/index.html' },
         // pageVer corrected by hand 2026-08-06: the auto-bump never fired for this page
         // (crm-supabase.html was missing from the workflow `paths:` filter), so 1.0 was
         // stale — the CRM gained a 14-step interactive walkthrough on 2026-08-04 (319b438).
@@ -1110,11 +1110,68 @@
         sopType:        'fldzhsJD96JFDRho6',   // singleSelect
     };
 
-    // Budget targets
-    const MAINT_TARGET_GBP = 1000;     // £1,000/month maintenance budget
-    const WAGES_TARGET_GBP = 1500;     // £1,500/month wages budget
-    const CFV_TARGET_GBP = 1500;       // £1,500/month CFV allowance
-    const CLEAR_PROFIT_TARGET = 10000; // £10,000/month clear profit after all variable costs
+    // Budget targets — the property variable budget (Kevin, Q4 2026 strategy session, 2 Oct 2026).
+    // Kevin's income from property = property cushion less this budget.
+    const MAINT_TARGET_GBP = 1700;     // £1,700/month maintenance budget
+    const WAGES_TARGET_GBP = 650;      // £650/month wages budget (Roy, £150 a week)
+    const UTILITIES_TARGET_GBP = 200;  // £200/month utilities budget
+    // Compliance runs high while the Q4 certificates are bought, then drops back.
+    const COMPLIANCE_TARGET_GBP = new Date() < new Date(2027, 0, 1) ? 1000 : 250;
+    const CFV_TARGET_GBP = 750;        // £750/month non-payment allowance
+    const RE_VARIABLE_BUDGET_GBP = MAINT_TARGET_GBP + WAGES_TARGET_GBP + UTILITIES_TARGET_GBP + COMPLIANCE_TARGET_GBP + CFV_TARGET_GBP;
+    const CLEAR_PROFIT_TARGET = 10000; // £10,000/month income floor after all variable costs
+
+    // ── Q4 2026 Real Estate KPIs (Leadership Dashboard) ──
+    // The rules live in js/re-kpis.js; this is only WHAT they are pointed at. Units and
+    // tenants are named by record id on purpose: Q3 missed because "the four tenancies"
+    // had no list. A replacement tenant in any unit not listed here is never counted.
+    const RE_Q4 = {
+        businessId: 'recoGcXRXCniyJsTz', businessName: 'Real Estate',
+        selfManagedAgent: 'Property Portfolio', expectedSelfManaged: 13,
+        // The quarter the cash KPIs are compared against until Kevin sets a cash target.
+        baselineLabel: 'Q3 average', baselineMonths: ['2026-07', '2026-08', '2026-09'],
+        feedStaleDays: 4,
+        // The three Q4 projects whose KPI Compute Code calls ctx.reKpis (units, rent, compliance).
+        projectIds: ['recYhSC4pQTWAjD1o', 'reczzyVGR4Ci8CFob', 'recpaMGugoVrwTJde'],
+        // THIS REPO IS PUBLIC: no tenant name and no address is written here. Every label on
+        // screen is read live from the Rental Units and Tenants tables by record id; the
+        // `label` below is only the fallback shown if that record cannot be found.
+        // KPI 5. excludeTenantIds: a unit only counts once someone OTHER than these lives there.
+        units: [
+            { id: 'recVn4FyhelmnPH9A', label: 'Named unit 1' },
+            { id: 'rec7gTnbleOFIi9He', label: 'Named unit 2' },
+            { id: 'rec8apVRovevdBKr1', label: 'Named unit 3' },
+            { id: 'recb0itBQ6Ut9wpYI', label: 'Named unit 4', excludeTenantIds: ['recqDuUeGX1mfJQtV'] },
+            { id: 'rechrhiqU3vmDOjC9', label: 'Stretch unit', stretch: true },
+        ],
+        // KPI 6. A line is a named tenant (wherever they live) or whoever is in a named unit.
+        rent: [
+            { label: 'Tenant for named unit 1', unitId: 'recVn4FyhelmnPH9A' },
+            { label: 'Named tenant 1', tenantId: 'recqDuUeGX1mfJQtV' },
+            { label: 'Named tenant 2', tenantId: 'rec6RBL5GVqcXIPTL' },
+            { label: 'New tenant for named unit 4', unitId: 'recb0itBQ6Ut9wpYI', excludeTenantIds: ['recqDuUeGX1mfJQtV'], stretch: true },
+            { label: 'Tenant for named unit 2', unitId: 'rec7gTnbleOFIi9He', stretch: true },
+            { label: 'Tenant for the stretch unit', unitId: 'rechrhiqU3vmDOjC9', stretch: true },
+        ],
+        // 31 Dec 2026 targets. null = Kevin sets it once the KPI has run live.
+        targets: {
+            incomePlan:   { committed: 13945, stretch: 16887 },
+            incomeCash:   null,
+            cushionPlan:  { committed: 18245, stretch: 21187 },
+            cushionCash:  null,
+            namedUnits:   { committed: 4, stretch: 5 },
+            namedRent:    { committed: 2693, stretch: 5318 },
+            personalNet:  { committed: 8300, stretch: 11250 },
+            compliance:   { committed: 13, stretch: null },
+        },
+    };
+    // Property Certificates (tbl35rf9qtmq0P87r) and the Properties fields the compliance KPI reads.
+    const RE_CERT = {
+        table: 'tbl35rf9qtmq0P87r',
+        type: 'fld00ZuxT8uKagM0b', property: 'fldXdDStBL7xrytgT', status: 'fldcSmrEQxoqpEQYF',
+        renewalDate: 'fldhZw8IrmgLt1hLY', attachments: 'fld8dwyOKs4AA0L9v',
+        propName: 'fldqMbR329TNY974G', propAgent: 'fldEUrWVhSp3NY8Hh', propNoGas: 'fld0nfqquZXCvGqJs',
+    };
 
     // AI labour saved (north-star card on the Leadership Dashboard).
     // Rate: fully-loaded hourly cost of the office/admin work agents replace —

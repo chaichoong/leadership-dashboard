@@ -112,8 +112,8 @@ export const ROY_EMAIL = 'roy.lavin1978@gmail.com';
 export const REAL_ESTATE_NAME = 'Real Estate';
 
 // Budgets — mirror js/config.js (MAINT_TARGET_GBP, WAGES_TARGET_GBP).
-export const MAINT_TARGET_GBP = 1000;
-export const WAGES_TARGET_GBP = 1500;
+export const MAINT_TARGET_GBP = 1700;
+export const WAGES_TARGET_GBP = 650;
 
 // P&L allow-list — mirrors PNL_SECTIONS in js/pnl.js. Anything outside it is
 // dropped, exactly as the P&L tab drops it, so the two totals tie.

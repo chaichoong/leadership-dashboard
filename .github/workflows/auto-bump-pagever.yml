@@ -41,6 +41,7 @@ on:
       - 'js/costs.js'
       - 'js/crm-walkthrough.js'
       - 'js/dashboard.js'
+      - 'js/re-kpis.js'
       - 'js/fintable.js'
       - 'js/growth-plan-model.js'
       - 'js/income.js'
