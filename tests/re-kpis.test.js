@@ -132,6 +132,19 @@ describe('cash cushion', () => {
         expect(x.rolling.untagged).toHaveLength(1);
         expect(K.alarmLevel(x)).toBe('amber');
     });
+    // Found on the live page, 2 Oct 2026: four rent receipts arrived unfiled, tagged to the
+    // property business with no sub-category. The income line read them as money in
+    // (£11,591) while the cushion ignored them, so the two cards disagreed by £2,977.
+    it('an unfiled receipt counts in neither figure and raises amber', () => {
+        const base = transactions.filter(t => !t.costIds.includes('c3'));
+        const before = K.cashCushion({ transactions: base, costBusinessNames, businessName: 'Real Estate', today: TODAY });
+        const withReceipt = [...base, tx('2026-10-01', 2449.09, '', { reconciled: false, subCategories: [] })];
+        const after = K.cashCushion({ transactions: withReceipt, costBusinessNames, businessName: 'Real Estate', today: TODAY });
+        expect(after.rolling.income).toBe(before.rolling.income);
+        expect(after.rolling.cushion).toBe(before.rolling.cushion);
+        expect(after.rolling.unreconciled).toBe(1);
+        expect(K.alarmLevel(after)).toBe('amber');
+    });
     it('goes amber, not red, while payments in the window are unfiled', () => {
         const unfiled = [...transactions.filter(t => !t.costIds.includes('c3')), tx('2026-09-30', -10, '', { reconciled: false, businesses: [] })];
         const x = K.cashCushion({ transactions: unfiled, costBusinessNames, businessName: 'Real Estate', today: TODAY });
