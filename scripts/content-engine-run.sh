@@ -149,7 +149,7 @@ ce_may_start_day() {   # $1 = the hour now, 0-23
 # --- end last-start-block ---
 for day in $DAYS; do
   if ! ce_may_start_day "$(date +%-H)"; then
-    echo "plan: day $day NOT started at $(date +%H:%M): no day starts from $(printf '%02d' "${CE_LAST_START_HOUR:-4}"):00, so the copy, cards and publishing steps run before the job's stop. It waits for the next night."
+    echo "plan: day $day NOT started at $(date +%H:%M): no day starts from $(printf '%02d' "$((10#${CE_LAST_START_HOUR:-4}))"):00, so the copy, cards and publishing steps run before the job's stop. It waits for the next night."
     continue
   fi
   echo "== day $day"
