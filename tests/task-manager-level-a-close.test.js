@@ -128,3 +128,20 @@ describe('it still refuses a close that proves neither path', () => {
     expect(r.text).toMatch(/never reached the gate/);
   });
 });
+
+// 2 Oct 2026: a decision card needs a brief, and `escalate` refuses without one. A refused escalate recorded
+// `ok: true` leaves the old thin card (or none) behind, so verify reads the card, not the claim.
+describe('cmd_verify reads the decision card, not the claim', () => {
+  const BRIEFED = 'DECIDE: sell or keep?\n\nWHAT THIS IS:\nA house.\n\nOPTIONS:\nA. Sell\nB. Keep\n\nRECOMMENDED: B, keep it.\n\nLINKS AND FILES:\n- x';
+  it('fails a claimed escalate whose card is still the one-line ask', () => {
+    const r = verifyClose('escalate', { Status: 'Approval', 'Sent For Approval By': [TASKMGR], 'Agent Output': 'DECIDE: sell or keep?' });
+    expect(r.code).not.toBe(0);
+    expect(r.text).toContain('carries no brief');
+  });
+  it('accepts a briefed card, and one Kevin answered that was carried out in the same slot', () => {
+    expect(verifyClose('escalate', { Status: 'Approval', 'Sent For Approval By': [TASKMGR], 'Agent Output': BRIEFED }).code).toBe(0);
+    const carried = verifyClose('escalate', { Status: 'Today', 'Sent For Approval By': [TASKMGR],
+      'Agent Output': 'DECIDED (Kevin, 02 Oct 2026): Approved as-is\n\n' + BRIEFED });
+    expect(carried.text).not.toContain('carries no brief');
+  });
+});

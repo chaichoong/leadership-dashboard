@@ -43,10 +43,10 @@ const HISTORY = { terms: ['ref AMEX'], searched: ['tasks', 'Gmail'], notes: [], 
 function escalate({ reason = '', status = 'Today', agentOutput = '', notes = '', teamMember = ['recAGENT'], brief,
                     plainTask = PLAIN_TASK, plainApprove = PLAIN_APPROVE, name = 'Review the lease', description = '',
                     sender = '', inboundUrl = '', files = [], outcome = '', email = null, ref = null, property = null,
-                    history = HISTORY, historyFails = '', feedbackHistory = '', approvalFeedback = '' }) {
+                    history = HISTORY, historyFails = '', feedbackHistory = '', approvalFeedback = '', tier1 = false }) {
   const cfg = { reason, status, agentOutput, notes, teamMember, brief: brief === undefined ? BRIEF : brief, plainTask,
                 plainApprove, name, description, sender, inboundUrl, files, outcome, email, ref, property, history,
-                historyFails, feedbackHistory, approvalFeedback };
+                historyFails, feedbackHistory, approvalFeedback, tier1 };
   const script = `
 import importlib.util, json, sys, io, contextlib, os, tempfile
 cfg = json.loads(${JSON.stringify(JSON.stringify(cfg))})
@@ -83,6 +83,7 @@ class A: pass
 a = A(); a.task = 'recTEST'; a.reason = cfg["reason"]
 a.plain_task, a.plain_approve = cfg["plainTask"], cfg["plainApprove"]
 a.email, a.ref, a.property = cfg["email"], cfg["ref"], cfg["property"]
+a.tier1 = cfg["tier1"]
 if cfg["brief"] is not None:
     fd, a.brief_file = tempfile.mkstemp(suffix='.txt')
     with os.fdopen(fd, 'w') as fh: fh.write(cfg["brief"])
@@ -457,6 +458,7 @@ describe('a decision card carries a brief, its history, its links and its files'
       const thin = escalate({ ...CARDS, status, agentOutput: THIN, outcome: 'Approved as-is', approvalFeedback: 'Leave it to the payment run.' });
       expect(thin.captured).toEqual({});
       expect(thin.refused).toMatch(/^REFUSED: Kevin has ANSWERED the decision card on recTEST \(Approved as-is: "Leave it to the payment run\."\)/);
+      expect(thin.refused).toContain('agent-dispatch.py decided recTEST [--until YYYY-MM-DD]');
     }
     // a briefed card approved with an empty box: his answer is the recommendation, and the refusal says which
     const briefed = escalate({ ...CARDS, status: 'Today', outcome: 'Approved as-is',
@@ -488,6 +490,12 @@ describe('a decision card carries a brief, its history, its links and its files'
       expect(r.refused, line).toContain('a line the card reads as something else');
       expect(r.captured).toEqual({});
     }
+    // To: and Subject: are read in any case (the page matches them that way)...
+    for (const line of ['To: the bank', 'subject: the payment plan', 'Sign-in needed: the bank site'])
+      expect(escalate({ ...CARDS, brief: BRIEF.replace('OPTIONS:', line + '\n\nOPTIONS:') }).refused, line).toContain('reads as something else');
+    // ...but an ordinary sentence that happens to open with one of the other words is fine
+    for (const line of ['Checked: the Santander statement for September.', 'Decide: by 5 Oct at the latest.', 'From: 1 November the rent rises.', 'Track record: this contractor has done two jobs for us.'])
+      expect(escalate({ ...CARDS, brief: BRIEF.replace('OPTIONS:', line + '\n\nOPTIONS:') }).refused, line).toBe('');
   });
 
   it('measures the recommendation as the board reads it: its first paragraph', () => {
@@ -495,8 +503,9 @@ describe('a decision card carries a brief, its history, its links and its files'
     expect(r.refused).toContain("'RECOMMENDED:' section is 2 characters");
     // an AMOUNT NOT KNOWN line inside a section does not cut that section short
     const amount = escalate({ ...CARDS, brief: BRIEF.replace(/£[\d.,]+/g, 'an amount')
-      .replace('OPTIONS:', 'AMOUNT NOT KNOWN: the statements are behind a bank sign-in the robot does not hold.\n\nOPTIONS:') });
+      .replace('WHAT HAS HAPPENED:\n', 'WHAT HAS HAPPENED:\nThe cards fall due.\nAMOUNT NOT KNOWN: the statements are behind a bank sign-in the robot does not hold.\n') });
     expect(amount.refused).toBe('');
+    expect(amount.captured.fields[amount.AF.agentOutput]).toContain('Nothing has been paid for October yet.');
   });
 
   it('a money question worded as a quote or a cost needs a figure too, and pounds or GBP count as one', () => {
@@ -504,6 +513,9 @@ describe('a decision card carries a brief, its history, its links and its files'
     expect(escalate({ name: 'Boiler repair', reason: 'Which quote do you want?', brief: noFigure }).refused).toContain('gives no figure');
     expect(escalate({ name: 'Boiler repair', reason: 'Which quote do you want?', brief: noFigure.replace('an amount', '94 pounds') }).refused).toBe('');
     expect(escalate({ name: 'Boiler repair', reason: 'Which quote do you want?', brief: noFigure.replace('an amount', 'GBP 94.00') }).refused).toBe('');
+    expect(escalate({ name: 'Boiler repair', reason: 'Which quote do you want?', brief: noFigure.replace('an amount', '$20') }).refused).toBe('');
+    // a person called Bill is not a bill
+    expect(escalate({ name: 'Reply to Bill Turner about the boundary fence', reason: 'Agree to the new fence line or not?', brief: noFigure }).refused).toBe('');
   });
 
   it('a brief file that cannot be read is a refusal the agent can act on, not a traceback', () => {
@@ -534,6 +546,8 @@ print(json.dumps({"out": out, "written": written}))`;
     expect(out).toMatch(/TIER 1\./);
     expect(out.indexOf('TIER 1.')).toBeLessThan(out.indexOf('WHAT THIS IS:'));
     expect(escalate({ ...CARDS }).captured.fields[r.AF.agentOutput]).not.toMatch(/TIER 1\./);
+    // a link the agent found while working: the flag stamps it when the name does not say so
+    expect(escalate({ ...CARDS, tier1: true }).captured.fields[r.AF.agentOutput]).toMatch(/TIER 1\./);
   });
 
   it('keeps the whole card when a long earlier draft pushes the output past the field limit', () => {
@@ -629,5 +643,109 @@ print(m.card_recommended(sys.stdin.read()))`], { encoding: 'utf8', input: out })
     const r = escalate({ ...CARDS });
     expect(r.inboundUrlField).toBe(page.match(/inboundUrl:\s*'(fld\w+)'/)[1]);
     expect(r.inboundUrlField).toBe(gate.match(/"inboundUrl":\s*"(fld\w+)"/)[1]);
+  });
+});
+
+// Round 2 of the review, 2 Oct 2026. Kevin's real 23 Sep answers were "raise a reminder at the beginning of November"
+// and "not due until the 5th": answers that mean WAIT. `route` and `handover` close a card when his answer moves the
+// work; nothing closed one when the answer was to wait, so the verdict sat on the task until the board forgot it.
+describe('decided: an answer to wait, or to do nothing, is recorded as carried out', () => {
+  function decided({ until = null, outcome = 'Approved with minor edits', feedback = 'Leave it until the 5th.',
+                     agentOutput = 'DECIDE: pay now or wait?\n\n' + BRIEF, holder = 'recAGENT', realHolder = false }) {
+    const script = `
+import importlib.util, json, io, contextlib, datetime
+cfg = json.loads(${JSON.stringify(JSON.stringify({ until, outcome, feedback, agentOutput, holder, realHolder }))})
+spec = importlib.util.spec_from_file_location('ad', ${JSON.stringify(DISPATCH)})
+m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m)
+holder = sorted(m.AGENTS)[0] if cfg["realHolder"] else cfg["holder"]
+future = (datetime.datetime.now(m.LONDON) + datetime.timedelta(days=30)).strftime("%Y-%m-%d")
+until = future if cfg["until"] == "FUTURE" else cfg["until"]
+captured = {}
+m.get_task = lambda tid: {"id": tid, "fields": {
+    m.AF["status"]: {"name": "Today"}, m.AF["agentOutput"]: cfg["agentOutput"],
+    m.AF["approvalOutcome"]: {"name": cfg["outcome"]} if cfg["outcome"] else None,
+    m.AF["approvalFeedback"]: cfg["feedback"],
+    m.AF["teamMember"]: [{"id": m.TASKMGR_REC_ID}], m.AF["sentForApprovalBy"]: [{"id": m.TASKMGR_REC_ID}],
+    m.AF["notes"]: "[25 Sep 2026 — agent-dispatch] Escalated to Kevin as a decision card (holder %s): DECIDE: pay now or wait?" % holder,
+}}
+m.patch_task = lambda tid, fields: captured.update(fields) or {}
+class A: pass
+a = A(); a.task = 'recTEST'; a.until = until
+buf, refused = io.StringIO(), ''
+try:
+    with contextlib.redirect_stdout(buf): m.cmd_decided(a)
+except SystemExit as ex:
+    refused = str(ex)
+print('@@@' + json.dumps({"captured": captured, "refused": refused, "AF": m.AF, "future": future, "holder": holder,
+                          "printed": buf.getvalue().strip()}))`;
+    const out = execFileSync('python3', ['-c', script], { encoding: 'utf8' });
+    return JSON.parse(out.slice(out.indexOf('@@@') + 3));
+  }
+
+  it('closes the card, keeps his words on the task and parks it until the date he gave', () => {
+    const r = decided({ until: 'FUTURE' });
+    expect(r.refused).toBe('');
+    const f = r.captured;
+    expect(f).toHaveProperty(r.AF.approvalOutcome, null);
+    expect(f[r.AF.sentForApprovalBy]).toEqual([]);
+    expect(f[r.AF.agentOutput]).toMatch(/^DECIDED \(Kevin, [^)]+\): Approved with minor edits — Leave it until the 5th\./);
+    expect(f[r.AF.status]).toBe('Upcoming');
+    expect(f[r.AF.dueDate]).toBe(r.future);
+    expect(f[r.AF.notes]).toContain('Decision carried out: Approved with minor edits — Leave it until the 5th.');
+    expect(f[r.AF.notes]).toContain(`Parked until ${r.future}`);
+    expect(f[r.AF.notes]).toContain('Escalated to Kevin as a decision card');   // appended, never overwritten
+  });
+
+  it('with no date it closes the card and leaves the status alone', () => {
+    const r = decided({});
+    expect(r.refused).toBe('');
+    expect(Object.keys(r.captured)).not.toContain(r.AF.status);
+    expect(Object.keys(r.captured)).not.toContain(r.AF.dueDate);
+    expect(r.captured[r.AF.agentOutput]).toMatch(/^DECIDED \(Kevin/);
+  });
+
+  it('puts the task back with the agent that held it when it was escalated, and only a real agent', () => {
+    const real = decided({ realHolder: true });
+    expect(real.captured[real.AF.teamMember]).toEqual([real.holder]);
+    const unknown = decided({ holder: 'none' });
+    expect(Object.keys(unknown.captured)).not.toContain(unknown.AF.teamMember);
+  });
+
+  it('refuses a card with no verdict, a card that is not a decision, a past date and a non-date, writing nothing', () => {
+    for (const r of [decided({ outcome: '' }), decided({ agentOutput: 'Draft reply to the council' }),
+                     decided({ until: '2026-01-01' }), decided({ until: 'next week' })]) {
+      expect(r.refused).toMatch(/^REFUSED:/);
+      expect(r.captured).toEqual({});
+    }
+  });
+
+  it('after that, a new question goes through once its brief says what has changed, and not before', () => {
+    const closed = decided({ until: 'FUTURE' }).captured;
+    const AFid = decided({}).AF;
+    const state = { name: 'Credit Card Payments - payments due 5th of the month', reason: 'Pay the round now?', status: 'Upcoming',
+      agentOutput: closed[AFid.agentOutput], notes: closed[AFid.notes], feedbackHistory: '[2026-09-30 09:00] Leave it until the 5th.' };
+    expect(escalate({ ...state }).refused).toContain('Kevin has already answered on this task');
+    const asked = escalate({ ...state, brief: BRIEF + '\n\nSINCE YOU LAST ANSWERED: it is now the 5th, the date you gave.' });
+    expect(asked.refused).toBe('');
+    expect(asked.captured.fields[asked.AF.agentOutput]).toMatch(/^DECIDE: Pay the round now\?/);
+    expect(asked.captured.fields[asked.AF.agentOutput]).toContain('> DECIDED (Kevin');   // his earlier verdict stays in view, quoted
+  });
+});
+
+describe('the board and the escalate command read a card the same way', () => {
+  it('the recommendation pattern and the earlier-output mark are identical in both scripts', () => {
+    const out = execFileSync('python3', ['-c', `
+import importlib.util, json
+def load(name, path):
+    spec = importlib.util.spec_from_file_location(name, path); m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m); return m
+ad = load('ad', ${JSON.stringify(DISPATCH)}); tm = load('tm', ${JSON.stringify(resolve(ROOT, 'scripts/task-manager.py'))})
+print(json.dumps({"re": [ad.RECOMMENDED_RE.pattern, tm.RECOMMENDED_RE.pattern], "flags": [ad.RECOMMENDED_RE.flags, tm.RECOMMENDED_RE.flags],
+                  "mark": [ad.EARLIER_OUTPUT_MARK, tm.EARLIER_OUTPUT_MARK], "esc": [tm.ESCALATE_NOTE_MARK in "Escalated to Kevin as a decision card", tm.DECIDED_NOTE_MARK == ad.DECIDED_NOTE_MARK]}))`],
+      { encoding: 'utf8' });
+    const r = JSON.parse(out.trim().split('\n').pop());
+    expect(r.re[0]).toBe(r.re[1]);
+    expect(r.flags[0]).toBe(r.flags[1]);
+    expect(r.mark[0]).toBe(r.mark[1]);
+    expect(r.esc).toEqual([true, true]);
   });
 });

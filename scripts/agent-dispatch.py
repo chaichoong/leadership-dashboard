@@ -29,6 +29,9 @@ Subcommands:
                               exit any more — tier 1 is prepared and labelled
                               like anything else. This is for the rarer case
                               where no agent can usefully prepare anything.
+  decided  TASKID [--until YYYY-MM-DD]
+                              close an ANSWERED decision card whose answer is
+                              to wait or to do nothing; --until parks it.
   submit   TASKID --agent RECID --type TYPE --output-file PATH [--tier1]
                               --tier1 stamps the banner on the Agent Output so
                               the label travels with the work, not in a log.
@@ -3469,19 +3472,23 @@ BRIEF_OPTION_RE = re.compile(r"^[ \t]*(?:[A-Z][.)]|\d{1,2}[.)]|[-*])[ \t]+\S", r
 # A question about money with no figure in it is the card he sent back. The
 # way out names where the figure was looked for, so "unknown" is a finding.
 MONEY_ASK_RE = re.compile(
-    r"£|\b(?:pay|pays|paying|paid|payments?|amounts?|arrears|debts?|owed|owing|invoices?|refunds?|costs?|quotes?|fees?|bills?|price)\b", re.I)
-MONEY_FIGURE_RE = re.compile(r"£\s?\d|\bGBP\s?\d|\b\d[\d,.]*\s?(?:pounds|GBP)\b", re.I)
-# The recommendation as the board reads it (RECOMMENDED_RE in task-manager.py,
-# drift-tested): the first paragraph only, so the gate measures what an
+    r"£|\b(?:pay|pays|paying|paid|payments?|amounts?|arrears|debts?|owed|owing|invoices?|refunds?|costs?|quotes?|fees?|price)\b", re.I)
+MONEY_FIGURE_RE = re.compile(r"[£$€]\s?\d|\bGBP\s?\d|\b\d[\d,.]*\s?(?:pounds|GBP)\b", re.I)
+# The recommendation as the board reads it (RECOMMENDED_RE in task-manager.py;
+# tests/agent-dispatch-escalate.test.js fails if the two drift): the first
+# paragraph only, so the gate measures what an
 # approval with an empty box will be taken to mean.
 RECOMMENDED_RE = re.compile(
     r"^[ \t]*RECOMMENDED[ \t]*:[ \t]*(.+?)(?=\n[ \t]*\n|\n[ \t]*[A-Z][A-Z ]{3,}:|\Z)", re.M | re.S)
 # Lines the page or another command reads as something else: a sign-in wait,
 # an email to send, what approving does, the reason a card is Kevin's, or one
 # of the blocks this command writes itself. In a brief they would be misread.
+# TO, SUBJECT, the sign-in line and the carry-out words are matched in any
+# case because their readers are; the rest only in capitals, so "Checked: the
+# statement" and "Decide: by 5 Oct" stay ordinary sentences (review).
 BRIEF_RESERVED_RE = re.compile(
-    r"^[ \t>*_]*(SIGN-IN NEEDED|TO|FROM|SUBJECT|CHECKED|DECIDE|TRACK RECORD|LINKS AND FILES|WHAT YOU HAVE ALREADY SAID"
-    r"|CLOSE PROPOSAL|PASS TO ROY|KEVIN ONLY)[ \t]*:|carrying this out will involve", re.I | re.M)
+    r"^[ \t>*_]*(?:(?i:SIGN-IN NEEDED|TO|SUBJECT)|CHECKED|DECIDE|TRACK RECORD|LINKS AND FILES"
+    r"|WHAT YOU HAVE ALREADY SAID|CLOSE PROPOSAL|PASS TO ROY|KEVIN ONLY)[ \t]*:|(?i:carrying this out will involve)", re.M)
 AMOUNT_UNKNOWN_RE = re.compile(r"^[ \t]*AMOUNT NOT KNOWN:[ \t]*\S.{20,}", re.I | re.M)
 # ASKING TWICE IS THE FAILURE (found building this, 2 Oct 2026). Two of the
 # three thin cards re-asked a question Kevin had answered a week before: on 23
@@ -3671,7 +3678,10 @@ def cmd_escalate(args):
                   (f"no note, so he took the card's recommendation: {' '.join(rec.group(1).split())[:300]}"
                    if rec else "no note, and the card named no recommendation"))
         sys.exit(f"REFUSED: Kevin has ANSWERED the decision card on {args.task} ({outcome}: {answer}). Carry out "
-                 "his answer (route, handover, close, or leave until the date he gave). Never ask him again.")
+                 "his answer first: route, handover, complete, or, when it is to wait or to do nothing,\n"
+                 f"         python3 scripts/agent-dispatch.py decided {args.task} [--until YYYY-MM-DD]\n"
+                 "       Never ask the same thing again. A NEW question after that needs a "
+                 f"'{SINCE_HEADING}:' section in its brief.")
     if on_gate and has_decision_brief(prior_output):
         print(json.dumps({"alreadyEscalated": args.task, "status": status,
                           "ask": prior_output.strip().splitlines()[0][:200]}))
@@ -3734,7 +3744,7 @@ def cmd_escalate(args):
     # 8. A decision on his private matter says so, as every other card on it does
     # (cmd_submit --tier1). Name and description only, never the Notes agents
     # write on. Under the ask: the first line must stay DECIDE:.
-    if tier_match(TIER1_PATTERNS, tf.get(AF["name"]), tf.get(AF["description"])):
+    if getattr(args, "tier1", False) or tier_match(TIER1_PATTERNS, tf.get(AF["name"]), tf.get(AF["description"])):
         blocks.append(TIER1_BANNER)
     if said:
         blocks.append("WHAT YOU HAVE ALREADY SAID:\n" + "\n".join(kevin_said_lines(said)))
@@ -3777,6 +3787,47 @@ def cmd_escalate(args):
     print(json.dumps({"escalated": args.task, "to": "Kevin Brittain", "card": True,
                       "ask": ask, "sentForApprovalBy": TASKMGR_REC_ID, "rebuilt": on_gate,
                       "trackRecord": record.splitlines()[0][:200]}))
+
+
+def cmd_decided(args):
+    """Close an ANSWERED decision card whose answer is to wait or to do nothing.
+
+    `route` and `handover` close a card when Kevin's answer moves the work.
+    Nothing closed it when his answer was "leave it until the 5th" or "raise a
+    reminder in November" (2 Oct 2026): the verdict stayed on the task, the
+    board had no move that recorded it, and after seven days the task was
+    raised again as "no recorded answer". This records the answer as carried
+    out, puts the task back with the agent that held it when it was escalated
+    (the gate's approve re-linked it to the Task Manager), and with --until
+    parks it until the date he gave."""
+    tf = (get_task(args.task).get("fields", {}) or {})
+    stamp = datetime.now(LONDON).strftime("%d %b %Y")
+    fields = decision_carry_out_fields(tf, stamp)
+    if not fields:
+        sys.exit(f"REFUSED: {args.task} is not an answered decision card (a DECIDE: card with Kevin's verdict "
+                 "on it), so there is no answer to record.")
+    note = fields.pop("_note")
+    until = (getattr(args, "until", None) or "").strip()
+    if until:
+        try:
+            due = datetime.strptime(until, "%Y-%m-%d").strftime("%Y-%m-%d")
+        except ValueError:
+            sys.exit(f"REFUSED: --until {until} is not a date. Use YYYY-MM-DD.")
+        if due <= today_london():
+            sys.exit(f"REFUSED: --until {until} is not in the future. Leave --until off to close the card "
+                     "with nothing to wait for.")
+        fields[AF["status"]] = "Upcoming"
+        fields[AF["dueDate"]] = due
+        note += f" Parked until {due}; it comes back on the board that day."
+    existing = str(tf.get(AF["notes"]) or "").rstrip()
+    holders = re.findall(r"Escalated to Kevin as a decision card \(holder ([^)]*)\)", existing)
+    back_to = [h for h in (holders[-1] if holders else "").split(",") if h in ALL_AGENTS and h != TASKMGR_REC_ID]
+    if back_to:
+        fields[AF["teamMember"]] = back_to
+    fields[AF["notes"]] = (existing + "\n\n" + note).strip()[-90000:]
+    patch_task(args.task, fields)
+    print(json.dumps({"decisionCarriedOut": args.task, "until": until or None,
+                      "holder": back_to or "unchanged"}))
 
 
 def cmd_handover(args):
@@ -9321,6 +9372,16 @@ def main():
     e.add_argument("--property", action="append", metavar="ADDRESS",
                    help="a property whose past tasks belong in the card's history")
     e.add_argument("--no-gmail", action="store_true", help="history from tasks only")
+    e.add_argument("--tier1", action="store_true",
+                   help="the decision touches Kevin's private matter: stamps the banner under the ask "
+                        "(added by itself when the task's name or description says so)")
+
+    dd = sub.add_parser("decided",
+                        help="close an ANSWERED decision card whose answer needs no route or handover: "
+                             "wait until a date, or nothing to do")
+    dd.add_argument("task")
+    dd.add_argument("--until", metavar="YYYY-MM-DD",
+                    help="park the task until this date; it comes back on the board that day")
 
     h = sub.add_parser("handover",
                        help="hand an approved task to a named human team member")
@@ -9544,7 +9605,7 @@ def main():
     # as success. Nothing looked wrong because the handlers that refuse do it by
     # calling sys.exit() — but `reconcile` and `lessons` report by RETURNING, so
     # discarding the result here would make both checks ornamental.
-    return {"queue": cmd_queue, "route": cmd_route, "escalate": cmd_escalate,
+    return {"queue": cmd_queue, "route": cmd_route, "escalate": cmd_escalate, "decided": cmd_decided,
             "handover": cmd_handover, "submit": cmd_submit_group, "roy-followups": cmd_roy_followups,
             "annotate": cmd_annotate, "intent": cmd_intent,
             "complete": cmd_complete, "verify": cmd_verify,

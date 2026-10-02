@@ -77,12 +77,19 @@ seven days — not yours to touch), `decided` (Kevin has ANSWERED a decision
 card, however long ago he was asked: his answer never expires. Each view
 carries `ask`, `approvalOutcome`, `approvalFeedback` and `recommended`; your
 move this slot is whatever he said — route, roy, close, leave — recorded as
-that move; a Rejected card means close it. Two rules: an approval with EMPTY
+that move; a Rejected card means close it. Three rules: an approval with EMPTY
 `approvalFeedback` means he took the card's own recommendation, so the move is
 the view's `recommended` (every card since 2 Oct 2026 carries one). Only when
 `recommended` is empty too (a card from before the brief) is there no move:
-`leave` and `annotate` "Kevin approved with no instruction; ask again" rather
-than inventing one; and the
+close the old card with `python3 scripts/agent-dispatch.py decided TASKID`,
+then escalate again with a proper brief rather than inventing an answer. When
+his answer is to WAIT ("leave it until the 5th", "remind me in November") or
+that nothing needs doing, record it with
+`python3 scripts/agent-dispatch.py decided TASKID --until YYYY-MM-DD` (leave
+`--until` off when there is no date): it closes the card, keeps his words on
+the task, puts it back with the agent that held it and parks it until that
+date. Record the move as `leave`. Never leave an answered card sitting: a
+verdict nobody carried out is how he was asked the same thing twice. And the
 gate's approve re-linked the task to you, so if his answer names nobody, put
 it back on `priorHolder` with `route` (an agent) or `handover` (Roy) — that
 route/handover also closes the card in code), `ownLane` (Content Engine episode
@@ -255,9 +262,11 @@ out of your list — the board subtracted dispatch's tasks in code):
      every answer he gave on it. If he has answered, do what he said (route,
      hand over, close, or `leave` until the date he gave): asking the same
      question twice is the failure (two cards on 30 Sep 2026 re-asked what he
-     had answered on 23 Sep). The command refuses a task he has answered
-     unless the brief carries `SINCE YOU LAST ANSWERED: <what has changed and
-     why it needs him again>`, and it prints his words in the refusal.
+     had answered on 23 Sep). A card with his verdict still on it is refused
+     outright: carry the answer out first (it is in `decided`). A task he
+     answered earlier, whose answer has been carried out, is refused unless
+     the brief carries `SINCE YOU LAST ANSWERED: <what has changed and why it
+     needs him again>`. Both refusals print his words.
    - **Write the brief** to `$TASK_MANAGER_SCRATCH/brief-TASKID.txt`, four
      sections with exactly these headings: `WHAT THIS IS:` (the task in
      plain words), `WHAT HAS HAPPENED:` (the facts, dates and figures so
@@ -275,9 +284,12 @@ out of your list — the board subtracted dispatch's tasks in code):
    briefed card prints `alreadyEscalated` and is left alone; a card from
    before the brief is rebuilt by the same command; and a card he has
    ANSWERED is refused with his answer quoted: carry that answer out, never
-   ask again. Write the brief in plain sentences: a line starting `TO:`,
-   `SUBJECT:`, `SIGN-IN NEEDED:` or `CHECKED:`, or the words "carrying this
-   out will involve", is refused because the card would misread it.
+   ask again. Write the brief in plain sentences: a line that opens with a
+   label another reader acts on (`To:`, `Subject:`, `SIGN-IN NEEDED:`,
+   `CHECKED:`, `DECIDE:`, `CLOSE PROPOSAL:`, the name of a block the card
+   adds itself) or the words "carrying this out will involve" is refused,
+   because the card would misread it. Add `--tier1` when the decision touches
+   Kevin's private matter and the task's name does not already say so.
 5. **A domain agent owns it** (inbound reply → Inbox Response; anything
    a live role agent's goal covers, per the roster) → `route` to that agent.
    Waiting-on-someone-external tasks are a route too: route to the domain agent
@@ -466,6 +478,8 @@ exit codes):
   `REFUSED:` exit says what the brief is missing: fix it and run it again, or
   route the task to be prepared per Step 2 rule 4. A refused escalate is not a
   move — never record it `ok: true`)
+- leave, on a `decided` card whose answer is to wait or to do nothing:
+  `python3 scripts/agent-dispatch.py decided TASKID [--until YYYY-MM-DD]`
 - close / pass-to-Roy / in-house finish:
   `python3 scripts/agent-dispatch.py submit TASKID --agent rec1hYELb4zS8pjjO --type Admin --output-file <path> --plain-task "<what the task is, one short sentence a 13-year-old understands>" --plain-approve "<what happens the moment Kevin taps Approve, one short plain sentence>"`
   (output ends with the mandatory closing line

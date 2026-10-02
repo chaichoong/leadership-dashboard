@@ -294,12 +294,14 @@ def classify(f, activity_ids, now=None):
     done = newest_note_stamp(f.get("Notes"), DECIDED_NOTE_MARK)
     # A carried-out decision (route/handover after Kevin's answer) closes the
     # card; the task is ordinary work again from that stamp on.
-    if esc and not (done and done >= esc):
-        # HIS ANSWER DOES NOT EXPIRE (2 Oct 2026). An answer given more than
-        # seven days after the card went up fell through to stuck, and the
-        # card was raised again as "no recorded answer": two cards escalated
-        # on 15 Sep were answered on 23 Sep and re-asked on 30 Sep.
-        answered = f.get("Approval Outcome") and str(f.get("Agent Output") or "").lstrip().upper().startswith("DECIDE:")
+    # HIS ANSWER DOES NOT EXPIRE (2 Oct 2026). An answer given more than seven
+    # days after the card went up fell through to stuck, and the card was
+    # raised again as "no recorded answer": two cards escalated on 15 Sep were
+    # answered on 23 Sep and re-asked on 30 Sep. A live verdict on a DECIDE:
+    # card is decided whatever the stamps say; the stamps carry a day and no
+    # time, so a card carried out and asked again on one day reads as closed.
+    answered = f.get("Approval Outcome") and str(f.get("Agent Output") or "").lstrip().upper().startswith("DECIDE:")
+    if esc and (answered or not (done and done >= esc)):
         if (now - esc) < timedelta(days=STUCK_DAYS) or answered:
             if f.get("Approval Outcome"):
                 return "decided", "escalateNote", esc
@@ -1221,9 +1223,14 @@ def cmd_selftest():
     # his answer does not expire: answered eight days after the card went up, it is still decided
     late = dict(esc_done, _id="recE6", Notes=esc_done["Notes"].replace("20 Aug", "01 Aug"))
     assert classify(late, set(), now)[0] == "decided", classify(late, set(), now)
+    # carried out and asked again on the same day, then answered: still decided (the stamps have no time)
+    same_day = dict(late, Notes=late["Notes"] + "\n\n[01 Aug 2026 — agent-dispatch] Decision carried out: x")
+    assert classify(same_day, set(), now)[0] == "decided", classify(same_day, set(), now)
     # ...but an old escalation nobody answered is stuck again, and a carried-out one is ordinary work
     assert classify(dict(late, **{"Approval Outcome": None}), set(), now)[0] == "stuck"
-    assert classify(dict(late, Notes=late["Notes"] + "\n\n[02 Aug 2026 — agent-dispatch] Decision carried out: x"), set(), now)[0] == "stuck"
+    carried_late = dict(late, **{"Approval Outcome": None, "Agent Output": "DECIDED (Kevin, 02 Aug 2026): Approved as-is\n\nDECIDE: sell or keep?"},
+                        Notes=late["Notes"] + "\n\n[02 Aug 2026 — agent-dispatch] Decision carried out: x")
+    assert classify(carried_late, set(), now)[0] == "stuck", classify(carried_late, set(), now)
     # once the decision is carried out (a newer stamp), the card is closed:
     # the task is ordinary work again, not decided and not escalated
     carried = dict(esc_done, _id="recE5", **{"Approval Outcome": None,
