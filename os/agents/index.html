@@ -2136,7 +2136,11 @@ function apvTrailEvents(t){
         let at = text.indexOf('TRACK RECORD:');
         while(at !== -1){
             const lines = text.slice(at).split('\n').slice(1);
-            for(const raw of lines){
+            for(const quoted of lines){
+                // An earlier draft kept under a decision card is quoted line by line
+                // ("> - 03 Sep 2026 …", agent-dispatch.py earlier_work, 2 Oct 2026). Its
+                // history still belongs in the story, so the quote mark comes off first.
+                const raw = quoted.replace(/^\s*(?:>\s?)+/, '');
                 const m = APV_TRACK_LINE_RE.exec(raw);
                 if(!m){ if(raw.trim()==='' ) continue; if(!/^\s*[-*]/.test(raw)) break; continue; }
                 const day = m[4] ? `${m[4]}-${m[5]}-${m[6]}` : apvIsoDay(m[1], m[2], m[3]);

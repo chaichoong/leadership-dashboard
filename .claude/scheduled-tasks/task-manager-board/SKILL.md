@@ -89,7 +89,14 @@ record it with
 closes the card, keeps his words on the task, puts it back with whoever held
 it and parks it until that date. Record the move as `leave`. When his answer
 is that nothing needs doing, that is a `close`: complete the task, do not
-park it. Never leave an answered card sitting: a
+park it. When his answer asks for MORE ON THE CARD (the amounts, a file, the
+history: "I need to see all the relevant information"), that is a redo, not
+a new question: `route` the task to the agent who can find it (the route
+closes the old card) and `annotate` "Prepare the decision: <what he asked
+for>", so that agent submits a full card through the gate. Only when you
+hold every fact yourself, close the old card with `decided TASKID` and
+`escalate` again with a `SINCE YOU LAST ANSWERED:` section saying what you
+added. Never leave an answered card sitting: a
 verdict nobody carried out is how he was asked the same thing twice. And the
 gate's approve re-linked the task to you, so if his answer names nobody, put
 it back on `priorHolder` with `route` (an agent) or `handover` (Roy) — that
