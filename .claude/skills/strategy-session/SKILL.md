@@ -216,10 +216,20 @@ python3 scripts/create-agent-task.py create --force --fields-json '<json keyed b
    - **Needs code**: the project fields `KPI Automated` and `KPI Compute Code`, or a new
      dashboard card.
 3. Anything that needs code is NOT built inside this skill. Write `kpi-spec.md` in the session
-   folder (KPI, formula, source fields, a sample record, expected reading today) and hand it
-   to `/build-feature` in the Operations Director project. New KPI compute code ships with its
-   KPI Library entry in the same commit (`js/kpi-library.js`).
-4. Never say a KPI updates on its own until you have watched the dashboard show it.
+   folder and hand it to `/build-feature` in the Operations Director project. New KPI compute
+   code ships with its KPI Library entry in the same commit (`js/kpi-library.js`).
+4. The spec has two lists, so the changeover is one job and nothing is missed:
+   - **Coming off:** every KPI the dashboard showed for this business last quarter, each
+     marked retire, keep or change. A closed project's KPI leaves the dashboard's strategic
+     KPI list on its own once `Closed On` is set (`js/dashboard.js`), so check 5a did that.
+     A KPI card that is not tied to a project does not leave on its own: list it.
+   - **Going on:** every agreed KPI, with its formula, source fields, a sample record, the
+     reading expected today, and committed and stretch.
+5. **The handover is a task, never a remembered promise.** Before the session ends, either
+   name the open build that is already doing the dashboard work (its session title or PR) or
+   raise one task for it through `scripts/create-agent-task.py`, linked to the business,
+   carrying the spec's path, and read back by id. The write-back names which.
+6. Never say a KPI updates on its own until you have watched the dashboard show it.
 
 ## Phase 7: read it back on the page
 
@@ -236,7 +246,9 @@ field that did not land, then tell Kevin the page is ready to read.
 2. `current-priorities.md` in the brain: the three projects, in his order.
 3. Memory: one dated project memory for the session, linked from `MEMORY.md`.
 4. A mid-quarter review date, about week 6, as a task for Kevin through
-   `scripts/create-agent-task.py`, read back by id.
+   `scripts/create-agent-task.py`, read back by id. Its description lists the first check of
+   that review: open the leadership dashboard and confirm every "going on" KPI shows a live
+   value and every "coming off" KPI has gone. A miss is fixed that day.
 5. Anything committed to in the session that has no task gets one, or is named as dropped.
 
 ## What this skill does not do
