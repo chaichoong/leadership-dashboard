@@ -104,16 +104,20 @@ def accept_early(day, ledger=None, save=None):
 def lfmd_position(ep, podcast_seconds, day):
     """(ok, hard, detail) for where the Learnings clip starts. Measured against the clip length the render recorded;
     the podcast (the episode without its jingle) stands in when a render recorded none, so the check is never skipped
-    for want of a number. Ledger values that cannot be read refuse the card: they never stop the night's other cards."""
+    for want of a number. When the render recorded that the clip runs to his sign-off with nothing said after it
+    (render.lfmd_closes_talk), the sign-off is the measure: a recording left running is not more episode. Ledger
+    values that cannot be read refuse the card: they never stop the night's other cards."""
     window, by_hand = ep.get("lfmd_window"), ep.get("lfmd_early_ok")
     try:
         if not (isinstance(window, (list, tuple)) and len(window) == 2) or isinstance(ep.get("duration"), bool): raise ValueError
-        start, length = float(window[0]), float(ep.get("duration") or 0) or float(podcast_seconds or 0)
-        if not (math.isfinite(start) and math.isfinite(length) and 0 <= start <= length and length > 0): raise ValueError
+        start, end, length = float(window[0]), float(window[1]), float(ep.get("duration") or 0) or float(podcast_seconds or 0)
+        if not (math.isfinite(start) and math.isfinite(end) and math.isfinite(length) and 0 <= start <= length and length > 0): raise ValueError
     except (TypeError, ValueError, OverflowError):
         return False, True, "cannot be checked: the ledger holds window %r and length %r for this episode. Put the entry right, or rebuild the clip: render.py redo --day %d --only lfmd" % (window, ep.get("duration"), day)
+    noun = "episode"
+    if ep.get("lfmd_closes_talk") is True and start < end < length: length, noun = end, "talk"
     share = start / length
-    where = "starts at %s of the %s episode (%d%%)" % (mmss(start), mmss(length), int(share * 100 + 1e-9))
+    where = "starts at %s of the %s %s (%d%%)" % (mmss(start), mmss(length), noun, int(share * 100 + 1e-9))
     if share >= LFMD_EARLIEST_START: return True, True, where
     if isinstance(by_hand, (list, tuple)) and list(by_hand) == list(window): return True, True, where + ", accepted by hand as the diary section"
     return False, True, "%s. The diary section closes the episode, so this is probably the wrong part (2081, 1 Oct 2026). Rebuild it: render.py redo --day %d --only lfmd. If the clip is right: qa.py accept-early --day %d" % (where, day, day)

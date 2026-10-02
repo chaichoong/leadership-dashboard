@@ -40,7 +40,8 @@ def gate_for(window, length, accepted=None, recorded=True, transcript="", entry=
     tmp = tempfile.mkdtemp()
     def mk(name, body="media", mode="w"):
         p = os.path.join(tmp, name); open(p, mode).write(body); return p
-    cues = "".join("%d\n00:%02d:%02d,000 --> 00:%02d:%02d,900\njust some words here now\n\n" % (i + 1, i // 60, i % 60, i // 60, i % 60) for i in range(60))
+    last = length + 7          # the captions carry the 7 s jingle
+    cues = "".join("%d\n%s --> %s\njust some words here now\n\n" % (i + 1, render.srt_ts(a), render.srt_ts(min(a + 5, last))) for i, a in enumerate(range(0, int(last), 5)))
     clip = bool(window)
     files = {"full": mk("full.mp4"), "full_yt": mk("full_yt.mp4"), "podcast": mk("pod.mp3"), "lfmd": mk("lfmd.mp4") if clip else "", "lfmd_yt": mk("lfmd_yt.mp4") if clip else "",
              "summary": "", "full_srt": mk("full.srt", cues), "lfmd_srt": mk("lfmd.srt", cues), "thumb": mk("t.png", b"0" * 30000, "wb"), "transcript": mk("tr.txt", transcript)}
@@ -96,6 +97,8 @@ describe('the Learnings cutter reads the whole talk, not two captions at a time'
     expect(window(['so the learnings', 'from my diary today'])[0]).toBe(40);
     expect(window(['So the learnings', 'from my dive for today are'])[0]).toBe(40);   // 1964 and 2032, as stored
     expect(window(['the learning from', 'a diet today is that'])[0]).toBe(30);   // 2060: starts at "learning"
+    // "of my diary" straight after "kind" is an aside on its own, so the clip starts where the line does (review, 2 Oct 2026)
+    expect(window(['the learnings that I kind', 'of my diary today are'])[0]).toBe(30);
   });
 
   it('CONTROL: no diary line, no window; and the last mention wins', () => {
@@ -132,6 +135,42 @@ res = {"tried": 150 * len(said + not_said), "said": yes, "wrong": len(wrong), "f
   });
 });
 
+describe('the cutter records whether the Learnings clip closes the talk', () => {
+  const closes = (lines) => py(`
+s = segs(${J(lines)})
+w = render.lfmd_window(s)
+res = {"window": w, "closes": render.lfmd_closes_talk(s, w)}`).res;
+  const TALK = ['Welcome back to the run', 'today I talk about rest', 'so the learnings from my diary today', 'are that you should rest more'];
+
+  it('a clip that runs to the sign-off, with silence and a stray word after it, closes the talk', () => {
+    const r = closes([...TALK, 'thank you as always', ...Array(10).fill('[BLANK_AUDIO]'), '(wind blowing)', 'Thank you.', '(wind blowing)', '[BLANK_AUDIO]']);
+    expect(r.window).toEqual([20, 50]);
+    expect(r.closes).toBe(true);
+  });
+
+  it('a sign-off phrase said in the middle, with the talk carrying on after it, does not', () => {
+    const more = Array(8).fill('and here is some more of the talk that follows');
+    const r = closes([...TALK, 'so stay positive whatever happens', ...more]);
+    expect(r.window).toEqual([20, 50]);
+    expect(r.closes).toBe(false);
+  });
+
+  it('a clip with no sign-off after it, or no clip at all, does not', () => {
+    expect(closes([...TALK, 'and that is all for now']).closes).toBe(false);
+    expect(closes(['Welcome back to the run', 'thank you as always'])).toEqual({ window: null, closes: false });
+  });
+});
+
+describe('an aside stays an aside, however the captions split it', () => {
+  it('CONTROL: "kind of for my diary" and "kind of in my diary" are not the diary line, for the gate or the cutter', () => {
+    const r = py(`
+texts = ["this vlog is kind of for my diary so to speak", "it is kind of in my diary really", "this vlog is kind of my diary so to speak",
+         "welcome back to day 2072 of the diary cover on printer", "consecutive day 2,072 of the diary of a Runpreneur"]
+res = [[render.lfmd_said(t), render.lfmd_window(segs(["welcome back", "some talk"] + t.split(" of ", 1)[0:1] + ["of " + t.split(" of ", 1)[1], "thank you as always"]))] for t in texts]`).res;
+    expect(r).toEqual(Array(5).fill([false, null]));
+  });
+});
+
 describe('the output gate reads the talk the way the cutter does', () => {
   it('BACK-TEST: the show name with a noise note in the transcript is not "he said the diary line"', () => {
     const r = py(`res = gate_for(None, 520.8, transcript="So consecutive day 2090\\n[BLANK_AUDIO]\\nof the diary cover on printer, and today I talk about rest.")`).res;
@@ -160,6 +199,32 @@ describe('the output gate refuses a Learnings clip that starts in the wrong part
     const r = py('res = gate_for([238.88, 415.08], 438.0)').res;
     expect(r.failures).toEqual([]);
     expect(r.passed.find(([n]) => n === 'Learnings clip position')[1]).toBe('starts at 3:59 of the 7:18 episode (54%)');
+  });
+
+  it('BACK-TEST: a recording left running after the sign-off does not refuse a good clip (4:30 of a 16:00 clip, sign-off at 6:40)', () => {
+    const r = py('res = gate_for([270.0, 400.0], 960.0, entry={"lfmd_closes_talk": True})').res;
+    expect(r.failures).toEqual([]);
+    expect(r.passed.find(([n]) => n === 'Learnings clip position')[1]).toBe('starts at 4:30 of the 6:40 talk (67%)');
+  });
+
+  it('CONTROL: the same clip is refused when the render did not record that it closes the talk', () => {
+    for (const flag of ['False', '1', '"yes"', 'None']) {
+      const r = py(`res = gate_for([270.0, 400.0], 960.0, entry={"lfmd_closes_talk": ${flag}})`).res;
+      expect(r.failures.map(([n]) => n)).toEqual(['Learnings clip position']);
+      expect(r.failures[0][1]).toContain('starts at 4:30 of the 16:00 episode (28%)');
+    }
+  });
+
+  it('CONTROL: a window that ends past the clip is not a talk length, so the clip length stays the measure', () => {
+    const r = py('res = gate_for([75.8, 600.0], 520.8, entry={"lfmd_closes_talk": True})').res;
+    expect(r.failures.map(([n]) => n)).toEqual(['Learnings clip position']);
+    expect(r.failures[0][1]).toContain('starts at 1:16 of the 8:41 episode (14%)');
+  });
+
+  it('CONTROL: measured against its own end, 2081 is still refused', () => {
+    const r = py('res = gate_for([75.8, 254.8], 520.8, entry={"lfmd_closes_talk": True})').res;
+    expect(r.failures.map(([n]) => n)).toEqual(['Learnings clip position']);
+    expect(r.failures[0][1]).toContain('starts at 1:16 of the 4:15 talk (29%)');
   });
 
   it('a clip just under the line is refused and says 39%, never a rounded-up 40%', () => {
@@ -251,8 +316,9 @@ watch._airtable = lambda *a, **k: {}
 render.release_hold = lambda d: None
 approval.load_state = lambda: {}
 render.redo_lfmd(2081)
-res = {"window": list(led["c.insv"]["lfmd_window"]), "accepted": led["c.insv"].get("lfmd_early_ok"), "on_disk_when_filed": filed}`).res;
+res = {"window": list(led["c.insv"]["lfmd_window"]), "accepted": led["c.insv"].get("lfmd_early_ok"), "on_disk_when_filed": filed, "closes": led["c.insv"].get("lfmd_closes_talk")}`).res;
     expect(r.window).toEqual([0, 40]);
+    expect(r.closes).toBe(true);                        // it runs to "see you tomorrow" and nothing follows
     expect(r.accepted).toBe(null);
     expect(r.on_disk_when_filed).toEqual([false]);      // the saved ledger had already lost the acceptance
   });
