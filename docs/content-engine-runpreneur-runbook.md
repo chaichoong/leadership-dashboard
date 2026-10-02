@@ -78,6 +78,11 @@ while every other clip on the ledger starts 54% in or later. The refusal names b
 `render.py redo --day N --only lfmd`, or, once someone has watched the clip and it is the diary section,
 `qa.py accept-early --day N`. Any re-render or rebuild drops that acceptance.
 
+The 40% is measured against the clip length. When the render recorded that the clip runs to his sign-off with
+no more than a few words after it (`lfmd_closes_talk` on the ledger), it is measured against the sign-off
+instead, so a recording left running after he has finished does not refuse a good clip. A measure taken from
+the caption file was tried and dropped the same day: a caption file cut short would have let 2081 through.
+
 **4. Rebuild anything Kevin asked to be redone** (`render.py redo-requested`)
 
 **5. Write the platform copy** (`platform_copy.py run --pending --limit 2`)

@@ -352,16 +352,19 @@ ASIDE_LEAD_RE = re.compile(r"\b(?:kind|sort)\W*$", re.I)
 LEARN_LEAD_RE = re.compile(r"\b(?:learn\w*|lesson\w*)\W+(?:\w+\W+){0,2}$", re.I)
 
 
+def is_diary_line(m, text, before=""):
+    """Whether this LFMD_START_RE match in text is the diary line: not the show's name, not an aside. before is the
+    text in front of text, because the day number and "of the diary" can fall in different caption chunks."""
+    show = (m.group("prep") or "").lower() == "of" and (m.group("det") or "").lower() == "the"
+    if show and SHOW_NAME_DAY_RE.search(before + " " + text[:m.start("prep")]): return False
+    lead = before + " " + text[:m.start()]
+    aside = ASIDE_RE.match(m.group(0)) or (re.match(r"of\s", m.group(0), re.I) and ASIDE_LEAD_RE.search(lead))
+    return not (aside and not LEARN_LEAD_RE.search(lead))
+
+
 def lfmd_matches(text, before=""):
-    """Every 'Learnings from my diary' phrase in text that is not the show's name or an aside, in order. before is
-    the text in front of it, because the day number and "of the diary" can fall in different caption chunks."""
-    for m in LFMD_START_RE.finditer(text):
-        show = (m.group("prep") or "").lower() == "of" and (m.group("det") or "").lower() == "the"
-        if show and SHOW_NAME_DAY_RE.search(before + " " + text[:m.start("prep")]): continue
-        lead = before + " " + text[:m.start()]
-        aside = ASIDE_RE.match(m.group(0)) or (re.match(r"of\s", m.group(0), re.I) and ASIDE_LEAD_RE.search(lead))
-        if aside and not LEARN_LEAD_RE.search(lead): continue
-        yield m
+    """Every 'Learnings from my diary' phrase in text, in order."""
+    return (m for m in LFMD_START_RE.finditer(text) if is_diary_line(m, text, before))
 
 
 def lfmd_start(text, before=""):
@@ -421,7 +424,9 @@ def lfmd_window(segments, min_len=20.0, max_len=180.0):
     # (2060, 17 Sep 2026) and still missed any line whisper spread over three ("the latest in my | [BLANK_AUDIO] |
     # diary is"), which the output gate, reading the whole text, then refused with nothing to rebuild (2 Oct 2026).
     # The clip starts where it always did: at the LAST word of the phrase from which it still reads as the phrase
-    # ("So the learnings | from my diary today" starts on "from"), so no stored episode's clip moves.
+    # ("So the learnings | from my diary today" starts on "from"), so no stored episode's clip moves. A later word
+    # only counts when the phrase from there is the diary line in its own right: "of my diary" straight after "kind"
+    # is an aside, so "the learnings that I kind | of my diary" starts where the line does.
     raw, owner = "", []                         # owner[k]: the segment that character k of the talk came from
     for i, (_, _, t) in enumerate(segments):
         raw += t + " "; owner += [i] * (len(t) + 1)
@@ -430,9 +435,12 @@ def lfmd_window(segments, min_len=20.0, max_len=180.0):
         text += raw[last:g.start()] + " "; own += owner[last:g.start()] + [owner[g.start()]]; last = g.end()
     text += raw[last:]; own += owner[last:]
     starts = []
+    def starts_at(p):
+        m = LFMD_START_RE.match(text, p)
+        return bool(m) and is_diary_line(m, text)
     for m in lfmd_matches(text):
-        pos = max(p for p in (m.start() + w.start() for w in re.finditer(r"\b\w", m.group(0))) if LFMD_START_RE.match(text, p))
-        starts.append(own[pos])
+        words = [m.start() + w.start() for w in re.finditer(r"\b\w", m.group(0))]
+        starts.append(own[max(p for p in words if p == m.start() or starts_at(p))])
     if not starts: return None
     i = starts[-1]
     start = segments[i][0]
@@ -445,6 +453,18 @@ def lfmd_window(segments, min_len=20.0, max_len=180.0):
         ends = [b for _, b, _ in segments if start + min_len <= b <= start + max_len]
         end = ends[-1] if ends else start + max_len
     return (round(start, 2), round(end, 2))
+
+
+def lfmd_closes_talk(segments, window, tail_words=12):
+    """True when the Learnings window runs to his sign-off and no more than a few words follow it in the recording.
+    The diary section then closes the TALK, however long the recording runs on, and the output gate measures the
+    clip's start against the sign-off instead of the clip length (qa.lfmd_position). A sign-off phrase said in the
+    middle of the talk has the rest of the talk after it, so it never counts."""
+    if not window: return False
+    for i, (_, b, t) in enumerate(segments):
+        if round(b, 2) == window[1] and SIGNOFF_RE.search(t):
+            return len(spoken(" ".join(x[2] for x in segments[i + 1:])).split()) <= tail_words
+    return False
 
 
 def clip_role(duration, has_lfmd):
@@ -875,7 +895,7 @@ def process(key, ledger, keep=False):
     same_day = [v for k2, v in ledger.items() if v["date"] == e["date"] and k2 != key]
     prev = [v for v in ledger.values() if v["date"] == (dt.date.fromisoformat(e["date"]) - dt.timedelta(days=1)).isoformat()]
     prev_has_talk = any(v.get("status") in ("rendered",) for v in prev) or (bool(prev) and not same_day)
-    window = lfmd_window(srt_segments(open(srt).read()))
+    segs = srt_segments(open(srt).read()); window = lfmd_window(segs)
     duration = float(subprocess.run([os.path.expanduser("~/tools/bin/ffprobe"), "-v", "error", "-show_entries", "format=duration",
                                      "-of", "csv=p=0", clip], capture_output=True, text=True).stdout or 0)
     role = clip_role(duration, bool(window))
@@ -886,7 +906,7 @@ def process(key, ledger, keep=False):
         day, reason = watch.resolve_episode(date_day, spoken, prev_day_has_talk=prev_has_talk)
     e["episode"] = day; e["episode_reason"] = reason; e["status"] = "rendering"; watch.save_ledger(ledger)
     e.pop("lfmd_early_ok", None)      # a clip cut again is watched again before an early start is accepted (qa.py accept-early)
-    e["lfmd_window"] = window; e["role"] = role; e["duration"] = round(duration, 1); watch.save_ledger(ledger)
+    e["lfmd_window"] = window; e["lfmd_closes_talk"] = lfmd_closes_talk(segs, window); e["role"] = role; e["duration"] = round(duration, 1); watch.save_ledger(ledger)
     base = None
     if role == "episode":
         earlier = [k2 for k2, v in ledger.items() if k2 != key and v.get("episode") == day and v.get("role") == "episode" and v.get("status") == "rendered"]
@@ -921,9 +941,9 @@ def process(key, ledger, keep=False):
         srt = os.path.join(workdir, "joined.srt"); open(srt, "w").write(joined)
         text = " ".join(t for _, _, t in srt_segments(joined))
         open(os.path.join(workdir, "transcript.txt"), "w").write(text)
-        window = lfmd_window(srt_segments(joined)); duration = media_seconds(masters["16:9"])
+        segs = srt_segments(joined); window = lfmd_window(segs); duration = media_seconds(masters["16:9"])
         e.update({"joined_from": base, "join": {"part1_end": p1_end, "part1_why": why1, "part2_start": p2_start, "part2_why": why2},
-                  "lfmd_window": window, "duration": round(duration, 1), "pans": [], "horizon_part1": b.get("horizon")})
+                  "lfmd_window": window, "lfmd_closes_talk": lfmd_closes_talk(segs, window), "duration": round(duration, 1), "pans": [], "horizon_part1": b.get("horizon")})
         watch.save_ledger(ledger)
         print("join: %s 0-%.1f s (%s) + %s from %.1f s (%s) -> %.0f s" % (base, p1_end, why1, key, p2_start, why2, duration))
     elif role == "episode":
@@ -991,7 +1011,7 @@ def redo_lfmd(day):
     workdir = os.path.join(os.path.dirname(clip), "render_" + key.replace(".insv", ""))
     os.makedirs(workdir, exist_ok=True)
     text, srt = transcribe(clip, workdir)
-    window = lfmd_window(srt_segments(open(srt).read()))
+    segs = srt_segments(open(srt).read()); window = lfmd_window(segs)
     if not window: raise SystemExit("episode %d has no diary section in its transcript" % day)
     # Saved BEFORE the new clip is filed: a rebuild that dies half way must not leave the new clip under the old yes
     if e.pop("lfmd_early_ok", None) is not None: watch.save_ledger(ledger)      # a clip cut again is watched again (qa.py accept-early)
@@ -1003,7 +1023,8 @@ def redo_lfmd(day):
     folder, links = publish_to_drive({k: paths[k] for k in ("lfmd", "lfmd_yt", "lfmd_srt") if paths.get(k)}, day, os.path.join(workdir, "transcript.txt"))
     rid, how = find_or_create_record(day, e.get("drive_id"), key, dt.date.fromisoformat(e["date"]))
     if links.get("lfmd"): watch._airtable("PATCH", watch.API + "/" + rid, {"fields": {"Reframed Video URL": links["lfmd"]}})
-    e["lfmd_window"] = window; e["lfmd_redone"] = dt.datetime.now().isoformat(timespec="seconds"); e["status"] = "rendered"; e["local"] = clip
+    e["lfmd_window"] = window; e["lfmd_closes_talk"] = lfmd_closes_talk(segs, window)
+    e["lfmd_redone"] = dt.datetime.now().isoformat(timespec="seconds"); e["status"] = "rendered"; e["local"] = clip
     e.setdefault("outputs", {}).update({k: v for k, v in links.items() if v})      # the publisher fetches by these links
     watch.save_ledger(ledger)
     print("episode %d: Learnings clip rebuilt -> %s (record %s)" % (day, "ok" if links.get("lfmd") else "NO DRIVE ID YET", rid))

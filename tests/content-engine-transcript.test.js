@@ -41,7 +41,7 @@ def fake_run(cmd, *a, **k):
 subprocess.run = fake_run
 
 
-def two_clip_day(ep_text, ep_captions, te_text, api=False, seed=None):
+def two_clip_day(ep_text, ep_captions, te_text, api=False, seed=None, ep_srt=None):
     """Render a day's long clip and its teaser through render.run. Returns the ledger, the day folder and the upload names."""
     tmp = tempfile.mkdtemp(); root = os.path.join(tmp, "edited")
     render.EDITED_ROOT = publish.EDITED_ROOT = root
@@ -56,7 +56,8 @@ def two_clip_day(ep_text, ep_captions, te_text, api=False, seed=None):
     def transcribe(clip, workdir):
         t = text[os.path.basename(clip)]
         open(os.path.join(workdir, "transcript.txt"), "w").write(t)
-        srt = os.path.join(workdir, "transcript.srt"); open(srt, "w").write(cues(["nothing here names the section"] * 3))
+        said = ep_srt if ep_srt and os.path.basename(clip) == EP_KEY else ["nothing here names the section"] * 3
+        srt = os.path.join(workdir, "transcript.srt"); open(srt, "w").write(cues(said))
         return t, srt
 
     def build_outputs(masters, srt, day, title, workdir, lfmd=None, role="episode"):
@@ -151,8 +152,18 @@ describe('a render starts the episode\'s Learnings acceptance afresh', () => {
   it('BACK-TEST: an early start accepted by hand does not survive the episode being rendered again', () => {
     const r = py(`
 led, folder, uploads = two_clip_day(${J(EP_SAID)}, ${J(PLAIN)}, ${J(TEASER)}, seed={"lfmd_early_ok": [75.8, 254.8]})
-res = {"status": led[EP_KEY]["status"], "accepted": led[EP_KEY].get("lfmd_early_ok", "dropped")}`);
-    expect(r.res).toEqual({ status: 'rendered', accepted: 'dropped' });
+res = {"status": led[EP_KEY]["status"], "accepted": led[EP_KEY].get("lfmd_early_ok", "dropped"), "closes": led[EP_KEY].get("lfmd_closes_talk", "not recorded")}`);
+    expect(r.res).toEqual({ status: 'rendered', accepted: 'dropped', closes: false });      // no clip was cut, so nothing closes the talk
+  });
+});
+
+describe('a render records whether the Learnings clip closes the talk', () => {
+  it('BACK-TEST: the diary line near the end, then the sign-off and nothing after: recorded True with the window', () => {
+    const talk = [...Array(30).fill('some of the talk goes here'), 'so the learnings from my diary today are', ...Array(25).fill('that you should rest more'), 'thank you as always', '[BLANK_AUDIO]'];
+    const r = py(`
+led, folder, uploads = two_clip_day(${J(EP_SAID)}, ${J(PLAIN)}, ${J(TEASER)}, ep_srt=${J(talk)})
+res = {"window": list(led[EP_KEY]["lfmd_window"]), "closes": led[EP_KEY].get("lfmd_closes_talk"), "teaser": led[TE_KEY].get("lfmd_closes_talk")}`);
+    expect(r.res).toEqual({ window: [30, 56.9], closes: true, teaser: false });
   });
 });
 
