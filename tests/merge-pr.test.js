@@ -347,6 +347,18 @@ describe('verdict: what the gate decides from what it saw', () => {
   });
   // Found in review, 2 Oct 2026: keyed on the gate alone, a broken Property Manager or Tasks
   // sign-in on main would have read "cannot pass, not checked". The page decides, not the label.
+  // Found in review: the result JSON's list was asserted only as [], which a hard-coded [] passes.
+  it('the result JSON lists each not-checked sign-in page by id', () => {
+    const both = [page('comms', 'WARN', { gate: 'asks for a Google sign-in' }), page('crm', 'WARN', { gate: 'shows its own sign-in screen' }),
+                  page('tasks', 'WARN', { gate: 'asks who is viewing' })];
+    const summary = py(`
+c = json.load(sys.stdin)
+s = mp.walk_summary(c["walk"], c["live"], None, {"comms", "crm", "tasks"})
+print(json.dumps({"notChecked": s["notCheckedSignIn"], "already": s["alreadyBrokenLive"]}))
+`, { walk: walked(both), live: liveRun(both) });
+    expect(summary.notChecked).toEqual(['comms', 'crm']);
+    expect(summary.already).toEqual(['comms', 'crm', 'tasks']);
+  });
   it('the quiet note is for comms and crm only, each with its own gate', () => {
     const pm = got['a page the walk should sign in to shows its sign-in screen, live too'];
     expect(pm.merge).toBe(true);
