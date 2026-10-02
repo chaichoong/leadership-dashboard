@@ -1659,22 +1659,28 @@
     function reCard({ title, value, sub, target, pct, rows, result }) {
         const level = result && result.loading ? '' : ReKpis.alarmLevel(result);
         const alarms = (result && result.alarms) || [];
-        const chip = level === 'red'
-            ? `<span class="od-status-badge danger">Not updating</span> `
-            : level === 'amber' ? `<span class="od-status-badge warning">Check</span> ` : '';
+        // The reason sits on the card face, next to the badge: a "Check" that only explains
+        // itself when the card is opened reads as a fault with no cause (Kevin, 2 Oct 2026).
+        const firstRed = alarms.find(a => a.level === 'red');
+        const failed = level === 'red' && (!result || result.value === null); // the rule itself threw
+        const badge = level === 'red'
+            ? `<span class="od-status-badge danger">Not updating</span> <span class="text-red">${escHtml(firstRed ? firstRed.msg : 'Could not be worked out.')}</span><br>`
+            : level === 'amber'
+                ? `<span class="od-status-badge warning">Check</span> <span class="text-amber">${escHtml(alarms.map(a => a.msg).join(' '))}</span><br>`
+                : '';
         const alarmHtml = alarms.map(a => `<div class="od-breakdown-row"><span class="${a.level === 'red' ? 'text-red' : 'text-amber'}" style="word-break:break-word">${escHtml(a.msg)}</span></div>`).join('');
         const targetLine = target === null
             ? 'Target: set once this has run live'
             : `Target 31 Dec: ${escHtml(target.committed)}${target.stretch ? ` committed, ${escHtml(target.stretch)} stretch` : ''}`;
-        const failed = level === 'red' && (!result || result.value === null); // the rule itself threw
-        const firstRed = alarms.find(a => a.level === 'red');
-        const redSub = level === 'red' ? `<span class="text-red">${escHtml(firstRed ? firstRed.msg : 'Could not be worked out.')}</span>` : (sub || '');
-        const bar = (pct == null || level === 'red') ? '' : `<div class="progress-bar"><div class="progress-bar-fill ${pct >= 100 ? 'green' : 'amber'}" style="width:${Math.max(0, Math.min(100, pct))}%"></div></div>`;
+        // The bar always measures progress to the COMMITTED target, and says so.
+        const showBar = pct != null && level !== 'red';
+        const barLine = showBar ? `<br>Bar: ${Math.max(0, Math.round(pct))}% of the committed target` : '';
+        const bar = showBar ? `<div class="progress-bar" title="Progress to the committed target"><div class="progress-bar-fill ${pct >= 100 ? 'green' : 'amber'}" style="width:${Math.max(0, Math.min(100, pct))}%"></div></div>` : '';
         return expandableCard(title,
             // Red means the inputs cannot be trusted, so no number is shown at all: a
             // −£4,300 worked out from tenancies that never loaded is worse than a dash.
             level === 'red' ? '—' : value,
-            `${chip}${redSub}<br>${targetLine}`,
+            `${badge}${level === 'red' ? '' : (sub || '') + '<br>'}${targetLine}${barLine}`,
             `<div>${alarmHtml}${failed ? '' : (rows || '')}</div>`,
             level === 'red' ? 'text-red' : '',
             bar);
@@ -1702,7 +1708,7 @@
             + reRow(`Property fixed costs paid (${roll.fixedCount} payments)`, '− ' + fmt(roll.fixed))
             + reRow('Property cushion (cash)', fmt(roll.cushion))
             + Object.keys(roll.variableLines).sort().map(k => reRow(`${k} paid`, '− ' + fmt(roll.variableLines[k]))).join('')
-            + reRow("Kevin's income from property (cash)", fmt(roll.income))
+            + reRow('Income from property (cash)', fmt(roll.income))
             + reRow('Window', `${reDay(roll.start)} to ${reDay(roll.end)}`)
             + reRow('Target', 'Same 31 Dec marker as the plan card. The gap between plan and cash is the leak.')
             + reRow('Newest bank transaction', reDay(cash.newestTransaction))
@@ -1713,14 +1719,14 @@
         const open = [...host.querySelectorAll('.kpi-card')].map(c => c.classList.contains('expanded'));
         host.innerHTML = [
             reCard({
-                title: "Kevin's income from property (plan)", result: plan,
+                title: 'Income from property (plan)', result: plan,
                 value: reGbp(plan.income), target: gbpTarget(T.incomePlan), pct: pctOf(plan.income, T.incomePlan),
                 sub: `Property cushion ${reGbp(plan.cushion)} less the ${reGbp(plan.budget)} variable budget | income floor ${reGbp(CLEAR_PROFIT_TARGET)}`,
-                rows: reRow('Property cushion (plan)', fmt(plan.cushion)) + budgetRows + reRow("Kevin's income from property", fmt(plan.income))
+                rows: reRow('Property cushion (plan)', fmt(plan.cushion)) + budgetRows + reRow('Income from property', fmt(plan.income))
                     + reRow('If the CFV Actioned tenancies pay too', fmt(plan.incomeWithActioned)),
             }),
             reCard({
-                title: "Kevin's income from property (cash)", result: cash,
+                title: 'Income from property (cash)', result: cash,
                 value: cashValue('income'), target: gbpTarget(T.incomeCash), pct: pctOf(roll.income, T.incomeCash), sub: cashSub('income'), rows: cashRows,
             }),
             reCard({
