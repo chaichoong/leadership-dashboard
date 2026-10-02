@@ -37,7 +37,17 @@ args = types.SimpleNamespace(task='recTESTTESTTEST01', agent=sorted(m.AGENTS)[0]
 out = {'fieldMap': m.AF}
 try:
     if p['escalate']:
-        m.cmd_escalate(types.SimpleNamespace(task='recTESTTESTTEST01', reason='Keep the lease or end it?'))
+        # A decision card needs a brief since 2 Oct 2026 (tests/agent-dispatch-escalate.test.js covers the gate).
+        m.history = lambda **kw: {'terms': [], 'searched': ['tasks'], 'entries': [], 'notes': []}
+        bh = tempfile.NamedTemporaryFile('w', suffix='.txt', delete=False)
+        bh.write('WHAT THIS IS:\\nThe lease on the office runs out at the end of the year.\\n\\n'
+                 'WHAT HAS HAPPENED:\\nThe landlord wrote on 1 Sep 2026 offering a renewal on the same terms as before.\\n\\n'
+                 'OPTIONS:\\nA. Renew it for another year.\\nB. Let it end and hand the keys back.\\n\\n'
+                 'RECOMMENDED: A, because nothing else is lined up.')
+        bh.close()
+        m.cmd_escalate(types.SimpleNamespace(task='recTESTTESTTEST01', reason='Keep the lease or end it?',
+                                             brief_file=bh.name, plain_task=p['plainTask'], plain_approve=p['plainApprove']))
+        os.unlink(bh.name)
     else:
         m.cmd_submit(args)
     out['refused'] = False
@@ -104,13 +114,13 @@ describe('agent-dispatch submit: the plain summary', () => {
     expect(r.captured.fields[r.fieldMap.plainSummary]).toContain(TASK);
   });
 
-  it('an escalation clears an earlier summary, because the card is a new question', () => {
+  it("an escalation writes its own two lines, never an earlier round's, because the card is a new question", () => {
     const r = submit({ plainTask: TASK, plainApprove: APPROVE, escalate: true,
       stored: { status: 'This Week', plainSummary: 'TASK: an older round\nIF YOU APPROVE: an older proposal' } });
     expect(r.refused, r.error).toBe(false);
     expect(r.captured.fields[r.fieldMap.status]).toBe('Approval');
-    expect(Object.prototype.hasOwnProperty.call(r.captured.fields, r.fieldMap.plainSummary)).toBe(true);
-    expect(r.captured.fields[r.fieldMap.plainSummary]).toBeNull();
+    expect(r.captured.fields[r.fieldMap.plainSummary]).toBe(`TASK: ${TASK}\nIF YOU APPROVE: ${APPROVE}`);
+    expect(r.captured.fields[r.fieldMap.plainSummary]).not.toContain('an older');
   });
 });
 

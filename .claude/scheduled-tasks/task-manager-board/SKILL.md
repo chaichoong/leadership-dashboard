@@ -74,11 +74,23 @@ dispatch's in-flight tasks), `inFlight` (dispatch's this slot — not yours),
 it — never stuck; its ONLY move is a chase, and only when its `chaseDue` is
 true, one per seven days), `escalated` (a decision card went to Kevin inside
 seven days — not yours to touch), `decided` (Kevin has ANSWERED a decision
-card: each view carries `ask`, `approvalOutcome` and `approvalFeedback`; your
+card, however long ago he was asked: his answer never expires. Each view
+carries `ask`, `approvalOutcome`, `approvalFeedback` and `recommended`; your
 move this slot is whatever he said — route, roy, close, leave — recorded as
-that move; a Rejected card means close it. Two rules: an approval with EMPTY
-`approvalFeedback` gives you no move, so `leave` and `annotate` "Kevin
-approved with no instruction; ask again" rather than inventing one; and the
+that move; a Rejected card means close it. Three rules: an approval with EMPTY
+`approvalFeedback` means he took the card's own recommendation, so the move is
+the view's `recommended` (every card since 2 Oct 2026 carries one). Only when
+`recommended` is empty too (a card from before the brief) is there no move:
+close the old card with `python3 scripts/agent-dispatch.py decided TASKID`,
+then escalate again with a proper brief rather than inventing an answer. When
+his answer is to WAIT ("leave it until the 5th", "remind me in November"),
+record it with
+`python3 scripts/agent-dispatch.py decided TASKID --until YYYY-MM-DD`: it
+closes the card, keeps his words on the task, puts it back with whoever held
+it and parks it until that date. Record the move as `leave`. When his answer
+is that nothing needs doing, that is a `close`: complete the task, do not
+park it. Never leave an answered card sitting: a
+verdict nobody carried out is how he was asked the same thing twice. And the
 gate's approve re-linked the task to you, so if his answer names nobody, put
 it back on `priorHolder` with `route` (an agent) or `handover` (Roy) — that
 route/handover also closes the card in code), `ownLane` (Content Engine episode
@@ -103,7 +115,8 @@ out but its card did not close". Never escalate it. An episode card that lands i
 gets the same finding asking the engine to resubmit it, recorded as `leave`. The engine's OTHER
 cards, such as the monthly performance read, do not close themselves and stay
 ordinary board work),
-`parked` (Some Day) and counts. Upcoming
+`parked` (Some Day, or held until a date on Kevin's own answer by
+`decided --until`: not yours to touch before that date) and counts. Upcoming
 tasks whose due date has arrived were already flipped to Today by the runner
 (`task-hygiene-sweep.py flip-due`) before this read. Dispatch's queue JSON also gives you every routable agent's Team
 Members rec id and live status (its rosters). If `queue` exits non-zero
@@ -232,10 +245,53 @@ out of your list — the board subtracted dispatch's tasks in code):
    own home); otherwise it is a card and Kevin's yes = you hand it over next
    slot.
 4. **Kevin-only** (a decision, signature, credential, payment authorisation) →
-   `escalate --reason "<ONE clear ask>"` ("Decide X between A and B"). Since
-   15 Sep 2026 that IS a decision card in his gate (Status Approval, sent by
-   you, Agent Output `DECIDE: <ask>`); a task already carrying one prints
-   `alreadyEscalated` and is left alone.
+   `escalate` with ONE clear ask ("Decide X between A and B") AND a brief.
+   Since 15 Sep 2026 an escalation IS a decision card in his gate (Status
+   Approval, sent by you, opening `DECIDE: <ask>`). Since 2 Oct 2026 the
+   command refuses a bare one-line ask (Kevin: the cards "don't include all
+   the required information to be able to make decisions"; one asked him to
+   "confirm which cards and amounts" and named no amount). Before you run it:
+   - **Check the task is ready for him.** Read it end to end (name,
+     description, Notes, every file on it) and run
+     `python3 scripts/agent-dispatch.py history --task TASKID --text` with
+     `--email`, `--ref` or `--property` for the contact, reference or
+     property it is about. He can only decide with the facts in front of
+     him: every amount, date, name and deadline. If they are not on the task
+     and its history, it is NOT ready: `route` it to the agent who can find
+     them, `annotate` "prepare the decision: <what is missing>", and record
+     the move as `route`. Never ask Kevin for a fact an agent could look up.
+   - **Read what Kevin has already said.** The task's Feedback History holds
+     every answer he gave on it. If he has answered, do what he said (route,
+     hand over, close, or `leave` until the date he gave): asking the same
+     question twice is the failure (two cards on 30 Sep 2026 re-asked what he
+     had answered on 23 Sep). A card with his verdict still on it is refused
+     outright: carry the answer out first (it is in `decided`). A task he
+     answered earlier, whose answer has been carried out, is refused unless
+     the brief carries `SINCE YOU LAST ANSWERED: <what has changed and why it
+     needs him again>`. Both refusals print his words.
+   - **Write the brief** to `$TASK_MANAGER_SCRATCH/brief-TASKID.txt`, four
+     sections with exactly these headings: `WHAT THIS IS:` (the task in
+     plain words), `WHAT HAS HAPPENED:` (the facts, dates and figures so
+     far, and what is still unknown), `OPTIONS:` (two or more, one per line,
+     `A.` `B.`, each with what it leads to), `RECOMMENDED:` (the option you
+     would take and why, worded as a move you can make on his yes: route to
+     an agent to do X, hand to Roy, close, leave until a date). A money
+     question states each amount with a £ sign, or carries the line
+     `AMOUNT NOT KNOWN: <where you looked and why it is not there>`.
+   - **Put the documents on the task.** A letter, statement or form that
+     matters and is not attached goes on first:
+     `python3 scripts/agent-dispatch.py attach TASKID --file PATH --purpose "<what it is>"`.
+   The command adds his earlier answers, the dated history, the original
+   email link and the list of files itself. A task already carrying a
+   briefed card prints `alreadyEscalated` and is left alone; a card from
+   before the brief is rebuilt by the same command; and a card he has
+   ANSWERED is refused with his answer quoted: carry that answer out, never
+   ask again. Write the brief in plain sentences: a line that opens with a
+   label another reader acts on (`To:`, `Subject:`, `SIGN-IN NEEDED:`,
+   `CHECKED:`, `DECIDE:`, `CLOSE PROPOSAL:`, the name of a block the card
+   adds itself) or the words "carrying this out will involve" is refused,
+   because the card would misread it. Add `--tier1` when the decision touches
+   Kevin's private matter and the task's name does not already say so.
 5. **A domain agent owns it** (inbound reply → Inbox Response; anything
    a live role agent's goal covers, per the roster) → `route` to that agent.
    Waiting-on-someone-external tasks are a route too: route to the domain agent
@@ -298,10 +354,11 @@ wrong route. Never invent an owner: the roster is the truth of who exists.
 
 Backlog rule: there are ~200 stuck tasks at launch. Decide a move for AT LEAST
 25 per slot, oldest and riskiest first, and report the remaining backlog count
-honestly. Internal moves (route, escalate, roy, leave) are cheap — do as many
-as the slot allows. Gate submissions (close, pass-to-Roy, in-house finish) need
-real judgement — quality beats volume; never submit a proposal you have not
-checked against the task's own content.
+honestly. Internal moves (route, roy, leave) are cheap — do as many
+as the slot allows. Gate submissions (close, pass-to-Roy, in-house finish) and
+escalations need real judgement — each is a card Kevin reads, so quality beats
+volume; never submit a proposal or a brief you have not checked against the
+task's own content.
 
 ## Step 2b — Approval-gate cleanse (Kevin's approved extension, 1 Sep 2026)
 
@@ -418,8 +475,13 @@ exit codes):
   `python3 scripts/agent-dispatch.py annotate TASKID --note "Chase to Roy: <what is outstanding>"`
   recorded as `chase` with `"to"` = Roy's rec id. Never more than one per
   task per seven days — `chaseDue` is the clock, not your judgement.
-- escalate: `python3 scripts/agent-dispatch.py escalate TASKID --reason "<the one clear ask>"`
-  (the reason becomes the card's `DECIDE:` line; no separate annotate)
+- escalate: `python3 scripts/agent-dispatch.py escalate TASKID --reason "<the one clear ask>" --brief-file "$TASK_MANAGER_SCRATCH/brief-TASKID.txt" --plain-task "<what the task is, one short sentence a 13-year-old understands>" --plain-approve "<what happens if Kevin approves with no note: the recommended option, one short plain sentence>" [--email <contact>] [--ref <reference or name>] [--property <address>]`
+  (the reason becomes the card's `DECIDE:` line; no separate annotate. A
+  `REFUSED:` exit says what the brief is missing: fix it and run it again, or
+  route the task to be prepared per Step 2 rule 4. A refused escalate is not a
+  move — never record it `ok: true`)
+- leave, on a `decided` card whose answer is to wait:
+  `python3 scripts/agent-dispatch.py decided TASKID --until YYYY-MM-DD`
 - close / pass-to-Roy / in-house finish:
   `python3 scripts/agent-dispatch.py submit TASKID --agent rec1hYELb4zS8pjjO --type Admin --output-file <path> --plain-task "<what the task is, one short sentence a 13-year-old understands>" --plain-approve "<what happens the moment Kevin taps Approve, one short plain sentence>"`
   (output ends with the mandatory closing line
