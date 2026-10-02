@@ -193,6 +193,23 @@ test.describe('Agent approval loop', () => {
     expect(f[F.completion], 'approving must clear any stale completion stamp').toBeNull();
   });
 
+  // 2 Oct 2026: a signed Airtable file link dies within hours. In the agent's work it stays as text here too,
+  // the same rule as the AI Agents page; every other link still opens.
+  test('an expired-by-design file link in the agent\'s work is text, never a link; other links still open', async ({ page }) => {
+    await mockAirtable(page);
+    await page.goto(PAGE);
+    await waitForTasks(page);
+    const signed = 'https://v5.airtableusercontent.com/v3/u/dead/tenancy.pdf';
+    await page.evaluate(({ id, signed }) => {
+      allTasks.find(t => t.id === id).agentOutput = 'Draft.\n- 11 Sep 2026 — file: file on that task: tenancy.pdf (' + signed + ')\nWatch: https://drive.google.com/file/d/abc/view';
+      openTaskDrawer(id);
+    }, { id: WAITING_ID, signed });
+    const work = page.locator('.approval-box .apv-work-body');
+    await expect(work).toContainText(signed);
+    const hrefs = await work.locator('a[href]').evaluateAll((as) => as.map((a) => a.getAttribute('href')));
+    expect(hrefs).toEqual(['https://drive.google.com/file/d/abc/view']);
+  });
+
   test('an agent cannot move a task from Approval straight to Completed', async ({ page }) => {
     const patches = await mockAirtable(page);
     await page.goto(PAGE);

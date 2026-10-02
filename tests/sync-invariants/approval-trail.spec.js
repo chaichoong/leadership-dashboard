@@ -300,16 +300,49 @@ test.describe('a file on another task, listed in the history', () => {
       await expect(row.locator('.apv-trail-open'), name).toHaveAttribute('data-apv-file-task', task);
       await expect(row.locator('.apv-trail-open'), name).toHaveAttribute('data-apv-file', name);
     }
-    // One row, Job A's, with no button. Job B's row is dropped by the 80-character step key (old behaviour); what
-    // matters here is that B's link never lands on A's row.
+    // Two files of one name from tasks whose names start alike are two rows (a file row is keyed on all of its
+    // words, not its first 80 characters). Job A's has no button, Job B's opens Job B's task, never the other way.
     const twins = trail.locator('.apv-trail-row', { hasText: 'file on that task: image001.png' });
-    await expect(twins).toHaveCount(1);
-    await expect(twins).toContainText('Job A');
-    await expect(twins.locator('.apv-trail-open')).toHaveCount(0);
+    await expect(twins).toHaveCount(2);
+    await expect(twins.filter({ hasText: 'Job A' }).locator('.apv-trail-open')).toHaveCount(0);
+    await expect(twins.filter({ hasText: 'Job B' }).locator('.apv-trail-open')).toHaveAttribute('data-apv-file-task', JOB_B);
     // A note that quotes a file row keeps a plain link to the task.
     const note = trail.locator('.apv-trail-row', { hasText: 'copied from the history' }).locator('.apv-trail-open');
     await expect(note).toHaveAttribute('href', `https://airtable.com/appX/tblY/${HOLDER}`);
     expect(await note.getAttribute('data-apv-file')).toBeNull();
+  });
+
+  // Kevin, 2 Oct 2026 ("Do it now"): a card draws its newest 80 steps, and the servicing PDF card had 135, so its
+  // three file rows were not drawn at all. A step that opens a file is never cut with the old history.
+  test('a file row is shown however old it is, and the count of what is not shown stays true', async ({ page, context }) => {
+    const fx = withHeldFiles();
+    const r = fx.approvals[1];
+    // 100 dated notes after the history above: the newest 80 of them fill the story on their own.
+    const notes = Array.from({ length: 100 }, (_, i) =>
+      `[${String(1 + (i % 28)).padStart(2, '0')} Nov 2026 ${String(8 + Math.floor(i / 28)).padStart(2, '0')}:${String(i % 60).padStart(2, '0')} — agent] routine note ${i + 1}`);
+    r.fields[TF.notes] += '\n\n' + notes.join('\n\n');
+    await mockAgentsPage(page, fx);
+    await mockHolders(page, context, { [HOLDER]: ['Servicing_1024091608.pdf'] });
+    const trail = await openTrail(page);
+    // control: the story really is cut, so the rows below are old ones kept, not rows inside the newest 80
+    await expect(trail.locator('.apv-trail-more')).toBeVisible();
+    await expect(trail.locator('.apv-trail-row', { hasText: 'task opened: Monthly round' })).toHaveCount(0);
+    // every row that opens a file is still there, with its button
+    for (const [name, task] of Object.entries({ 'Servicing_1024091608.pdf': HOLDER, 'tenancy.pdf': OLD_HOLDER, 'check.pdf': WEEKLY_HOLDER })) {
+      const open = trail.locator('.apv-trail-row', { hasText: `file on that task: ${name}` }).locator('.apv-trail-open');
+      await expect(open, name).toHaveAttribute('data-apv-file-task', task);
+    }
+    // and the arithmetic holds: steps in the summary = rows drawn + the number the notice says are not shown
+    const total = Number((await trail.locator('summary').innerText()).match(/· (\d+) steps/)[1]);
+    const drawn = await trail.locator('.apv-trail-row').count();
+    const notShown = Number((await trail.locator('.apv-trail-more').innerText()).match(/^(\d+) earlier/)[1]);
+    expect(drawn).toBeGreaterThan(80);
+    expect(drawn + notShown).toBe(total);
+    // the old file still opens
+    const [popup] = await Promise.all([context.waitForEvent('page'),
+      trail.locator('.apv-trail-row', { hasText: 'Servicing_1024091608.pdf' }).locator('.apv-trail-open').click()]);
+    await expect.poll(() => popup.url(), { timeout: 10000 }).toBe(FRESH + 'Servicing_1024091608.pdf');
+    await popup.close();
   });
 
   test('nothing on the card links to a signed file link, the agent\'s full work included', async ({ page, context }) => {

@@ -2132,10 +2132,11 @@ function apvTrailEvents(t){
     const ev = [];
     // A step listed twice shows once. If the copy kept has nowhere to go and the repeat has (a file row written
     // with a dead link in Notes, and again with its task link in the agent's work), the repeat's link is kept,
-    // but only for the very same words: the key is the first 80 characters, and two files can share those.
+    // but only for the very same words. The key is the first 80 characters, except for a file row, which is keyed
+    // on all of its words: two files of one name from tasks whose names start alike are two steps, not one.
     const seen = new Map();
     const push = (e)=>{
-        const k = e.day+'|'+e.time+'|'+e.text.slice(0,80);
+        const k = e.day+'|'+e.time+'|'+(APV_HELD_FILE_RE.test(e.text) ? e.text : e.text.slice(0,80));
         const kept = seen.get(k);
         if(kept){ if(!kept.link && e.link && kept.text === e.text){ kept.link = e.link; kept.file = e.file||''; kept.fileTask = e.fileTask||''; } return; }
         seen.set(k, e); ev.push(e);
@@ -2261,8 +2262,11 @@ const APV_TRAIL_MAX = 80;
 function apvTrailHtml(t){
     const all = apvTrailEvents(t);
     if(!all.length) return '';
-    const hidden = Math.max(0, all.length - APV_TRAIL_MAX);
-    const ev = all.slice(hidden);
+    // The newest APV_TRAIL_MAX steps, plus every older step that opens a file: a document the card may turn on is
+    // never cut with the old history (2 Oct 2026: a card of 135 steps did not draw its three file rows).
+    const cut = Math.max(0, all.length - APV_TRAIL_MAX);
+    const ev = all.filter((e, i) => i >= cut || e.file);
+    const hidden = all.length - ev.length;
     const lastDay = ev[ev.length-1].day;
     const last = ev[ev.length-1];
     let out = '', day = '';
@@ -2281,7 +2285,7 @@ function apvTrailHtml(t){
 
 // Links in the agent's work must open: a video the Content Engine asks Kevin to watch is a
 // Drive URL, and esc() alone left it as dead text. Escape first, then anchor. The body is
-// pre-wrap, so newlines stay as they are. Mirrors linkifyUrls in os/tasks/index.html, except for the signed file link below.
+// pre-wrap, so newlines stay as they are. Mirrors linkifyUrls in os/tasks/index.html.
 function apvLinkify(text){
     // A signed Airtable file link dies within hours, so it stays as text: a link that looks live and is dead is
     // worse than no link (2 Oct 2026). Files open from the story, which re-reads the task for a live one.
