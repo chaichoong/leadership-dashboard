@@ -40,6 +40,7 @@ ES = {"key": "fldLO6xJqkokvVR4g", "kind": "fldfjQOn76VpgKEfZ", "label": "fldlnvv
       "payload": "fldiqs9lvyLimoR7i", "updated": "fld3q8WN5XqrER92Z"}
 SECTIONS = ("YouTube episode", "YouTube Short", "Teaser clips", "Learnings clips", "Blog", "Podcast", "Facebook share")
 HISTORY_DAYS = 7
+BOOKED_GRACE = dt.timedelta(hours=2)   # a post still 'scheduled' this long after its slot is no longer shown as coming up
 
 
 def parse_utc(s):
@@ -115,16 +116,21 @@ def left_behind(ledger, approvals, out, cursor, gaps, ready, named, why, start=0
     """Days with footage or a card that are not out and not about to go, each with its reason (2 Oct 2026). The
     publisher no longer waits for such a day, so the stalled queue that used to give it away is gone and the report
     must name it: a day passed in silence is a day that never publishes. Listed: a day the run has gone past, and any
-    day in `named` (on hold, or one the publisher could not publish) wherever the run is. `out` is the days with a
-    YouTube link. A day simply waiting its turn to render is left out: the night takes the oldest waiting day first
-    and tonight's plan shows it (review, 2 Oct 2026: one approved day far ahead would list the whole backlog).
-    B-roll alone is not an episode."""
-    days = {int(d) for d in approvals if str(d).isdigit()}
+    day in `named` (on hold, a dead upload, or one the publisher could not publish) wherever the run is. `out` is the
+    days that are on YouTube or properly booked to be. A day whose every clip is 'new' is only waiting its turn to
+    render and is left out: the night takes the oldest waiting day first and tonight's plan shows it (review, 2 Oct
+    2026: one approved day far ahead would list the whole backlog). A clip stuck mid-pull or mid-render is not in that
+    queue, so its day is listed. B-roll alone is not an episode."""
+    days, clips = {int(d) for d in approvals if str(d).isdigit()}, {}
     for v in ledger.values():
         d = v.get("episode") or (v.get("day") if v.get("status") != "broll" else None)
-        if d: days.add(d)
+        if d: days.add(d); clips.setdefault(d, []).append(v.get("status"))
+    queued = {d for d, sts in clips.items() if all(s == "new" for s in sts)}
     rows = [{"day": d, "why": why(d)} for d in sorted(days)
             if d >= start and (d < cursor or d in named) and d not in gaps and d not in out and d not in ready]
+    for r in rows:
+        if r["why"] == NOT_RENDERED and r["day"] not in queued:
+            r["why"] = "not rendered: a clip sits at %s, outside the night's queue" % ", ".join(sorted({str(s) for s in clips.get(r["day"], []) if s != "new"}) or ["no status"])
     return [r for r in rows if r["why"] != NOT_RENDERED]
 
 
@@ -159,7 +165,7 @@ def build(now=None, state=None, approvals=None, ledger=None, sync_state=None, pl
     for k, e in episodes.items():
         for key, p in (e.get("posts") or {}).items():
             when = parse_utc(p.get("scheduled"))
-            if p.get("status") == "scheduled" and when and when >= now - dt.timedelta(hours=2):
+            if p.get("status") == "scheduled" and when and when >= now - BOOKED_GRACE:
                 scheduled.append({"day": int(k), "channel": publish.CHANNEL_NAMES.get((p.get("platform"), p.get("clip")), p.get("platform", "")),
                                   "when": p["scheduled"]})
     scheduled.sort(key=lambda r: (r["when"], r["day"]))
@@ -173,7 +179,16 @@ def build(now=None, state=None, approvals=None, ledger=None, sync_state=None, pl
     # an approved day the publisher tried and could not put on YouTube says why on its entry (publish.note_refusal):
     # it is named as not out, never promised as going out
     refused = {int(k): (e["not_published"].get("why") or "no reason recorded") for k, e in episodes.items()
-               if isinstance(e.get("not_published"), dict) and int(k) in approved and int(k) not in on_youtube}
+               if isinstance(e.get("not_published"), dict) and int(k) in approved and int(k) not in on_youtube and int(k) not in holds}
+    # A YouTube post with no link yet. Booked, and not more than BOOKED_GRACE past its slot, is normal: GoHighLevel
+    # carries the upload and the link follows (the same window the "booked and not out yet" list above uses).
+    # Anything else (creating, unconfirmed, failed, a slot long gone) is an upload that died: the publisher waits on
+    # it for ever, so it is named wherever the run is (review, 2 Oct 2026).
+    booked, dead = set(), set()
+    for d in on_youtube - linked:
+        p = youtube_post(episodes[str(d)]) or {}
+        when = parse_utc(p.get("scheduled"))                 # an unreadable slot is not a booking
+        (booked if p.get("status") == "scheduled" and when and when >= now - BOOKED_GRACE else dead).add(d)
     ready = [d for d in publish.ready_to_publish(state, set(approved) - set(holds)) if d not in refused]
     blocked = {d: "; ".join(a["qa_blocked"].get("failures") or [])[:200] for d, a in approvals.items() if isinstance(a, dict) and a.get("qa_blocked")}
     # A card Kevin sent back (or rejected) is neither waiting for him nor approved. Until 21 Sep 2026 it fell out of the
@@ -191,12 +206,12 @@ def build(now=None, state=None, approvals=None, ledger=None, sync_state=None, pl
     no_card = sorted(d for d in rendered_days if d not in carded and d not in on_youtube and d not in gaps)
     def why_not_out(d):
         if d in refused: return "the publisher could not publish it: " + refused[d]
-        if d in on_youtube:                                  # a post record with no link: an upload that died, or one GoHighLevel failed
+        if d in dead:
             return "its YouTube post is %s, with no link yet" % ((youtube_post(episodes[str(d)]) or {}).get("status") or "not confirmed")
         return blocker_why(d, sent_back, holds, waiting_cards, {int(x) for x in blocked},
                            {int(x) for x, a in approvals.items() if isinstance(a, dict) and a.get("qa_waiting")},
                            teaser_only, no_card, set(failed) | set(retrying))
-    behind = left_behind(ledger, approvals, linked, cursor, gaps, ready, set(holds) | set(refused), why_not_out, watch.start_day() or 0)
+    behind = left_behind(ledger, approvals, linked | booked, cursor, gaps, ready, set(holds) | set(refused) | dead, why_not_out, watch.start_day() or 0)
     try:
         # plan the night the way the night will: its scan puts a failed clip back first (watch.requeue_failed)
         tonight = plan if plan is not None else watch.plan(requeued_copy(ledger), nightly_slots())[0]
@@ -758,6 +773,21 @@ def _selftest():
     dead = {"posts": {"youtube|full|y": {"platform": "youtube", "clip": "full", "status": "creating"}}}
     dd = build(now, {"_cursor": 2059, "2058": dead, "2059": on_yt()}, {"2058": {"verdict": "approved", "task": "t"}, "2059": {"verdict": "approved", "task": "t2"}}, two, {}, plan=[], skipped=[])
     assert dd["nextInOrder"] == [] and dd["leftBehind"] == [{"day": 2058, "why": "its YouTube post is creating, with no link yet"}], dd["leftBehind"]
+    # second review, 2 Oct 2026: a dead upload ABOVE the run is named too (nothing later may ever publish to pass it)
+    da = build(now, {"_cursor": 2057, "2058": dead}, {"2058": {"verdict": "approved", "task": "t"}}, two, {}, plan=[], skipped=[])
+    assert da["leftBehind"] == [{"day": 2058, "why": "its YouTube post is creating, with no link yet"}], da["leftBehind"]
+    # a GoHighLevel-carried upload booked for later today has no link yet and is fine; an hour past its slot it is not
+    ghl_yt = lambda when: {"posts": {"youtube|full|y": {"platform": "youtube", "clip": "full", "status": "scheduled", "id": "g", "scheduled": when}}}
+    bk = build(now, {"_cursor": 2059, "2058": ghl_yt("2026-09-16T18:00:00Z"), "2059": on_yt()}, {"2058": {"verdict": "approved", "task": "t"}, "2059": {"verdict": "approved", "task": "t2"}}, two, {}, plan=[], skipped=[])
+    assert bk["leftBehind"] == [], "a booked upload inside its slot is not a day left behind: %s" % bk["leftBehind"]
+    lt = build(now, {"_cursor": 2059, "2058": ghl_yt("2026-09-16T04:00:00Z"), "2059": on_yt()}, {"2058": {"verdict": "approved", "task": "t"}, "2059": {"verdict": "approved", "task": "t2"}}, two, {}, plan=[], skipped=[])
+    assert lt["leftBehind"] == [{"day": 2058, "why": "its YouTube post is scheduled, with no link yet"}], "three hours past its slot with no link, it is named: %s" % lt["leftBehind"]
+    # a clip stuck mid-render is not in the night's queue (the plan takes 'new' only): its day is named, not dropped as backlog
+    assert why58({}, {"x": {"day": 2058, "status": "rendering"}, "y": {"episode": 2059}}) == {"day": 2058, "why": "not rendered: a clip sits at rendering, outside the night's queue"}
+    assert why58({}, {"x": {"day": 2058, "status": "new"}, "x2": {"day": 2058, "status": "pulled"}, "y": {"episode": 2059}}) == {"day": 2058, "why": "not rendered: a clip sits at pulled, outside the night's queue"}
+    # a noted day later put on hold reads as held, not as the old refusal
+    hn = build(now, {"_cursor": 2057, "2058": {"not_published": {"why": "session text is in its copy", "since": "x"}}}, {"2058": {"verdict": "approved", "task": "t"}}, two, {}, plan=[], skipped=[], holds={2058: "Kevin: wait"})
+    assert hn["leftBehind"] == [{"day": 2058, "why": "held: Kevin: wait"}], hn["leftBehind"]
     # an approved day the publisher tried and could not publish is never promised as going out, wherever the run is
     rf = build(now, {"_cursor": 2057, "2058": {"not_published": {"why": "session text is in its copy", "since": "x"}}},
                {"2058": {"verdict": "approved", "task": "t"}, "2059": {"verdict": "approved", "task": "t2"}}, two, {}, plan=[], skipped=[])
@@ -768,7 +798,7 @@ def _selftest():
     import watch as _w2; real_g = _w2.gap_days; _w2.gap_days = lambda path=None: {2058}
     try: assert why58({"2058": {"task": "t"}}) == {}, "a gap day fills an old hole on its own list; it is not behind the run"
     finally: _w2.gap_days = real_g
-    print(json.dumps({"checks": 82, "failed": []}))
+    print(json.dumps({"checks": 88, "failed": []}))
 
 
 if __name__ == "__main__":

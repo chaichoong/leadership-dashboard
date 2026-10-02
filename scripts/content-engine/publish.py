@@ -1146,11 +1146,11 @@ def run(dry_run=False, limit=3):
                 continue
             # No order check at the YouTube stage (Kevin, 2 Oct 2026): an approved day goes, lowest first, whatever
             # the days before it are doing. See ready_to_publish.
-            if stage != "youtube" and ahead_of_order(day, gaps, state):
-                continue                                   # named once in the 'ahead of the run' line above
-            if stage == "wait-youtube-account":
+            if stage == "wait-youtube-account":            # before the order check, or a day above the cursor is skipped unsaid
                 if unposted: note_refusal(entry, "no YouTube account is connected", save)
                 print("episode %d: approved, waiting for a YouTube account in GoHighLevel (Kevin's click: publish.py youtube-link)" % day); continue
+            if stage != "youtube" and ahead_of_order(day, gaps, state):
+                continue                                   # named once in the 'ahead of the run' line above
             if stage == "wait-youtube-link":
                 print("episode %d: YouTube post scheduled, waiting for it to publish before the socials go out" % day); continue
             if not dry_run: fill_learnings(day, entry, recs, acct_map, stage, ledger, gaps, state, save)
@@ -1800,6 +1800,9 @@ def _selftest_never_waits():
         g["schedule_stage"] = lambda day, entry, recs, am, st_no, dry_run=False, index=0, save=None: 1 if day in (2088, 2089, 2090) else real_schedule(day, entry, recs, am, st_no, dry_run, index, save)
         assert go({2088, 2089, 2090, 2091}) == [2091] and state[CURSOR_KEY] == 2091, "refused days do not starve the limit or move the cursor: %s %s" % (booked, state[CURSOR_KEY])
         assert all("refused" in state[str(d)]["not_published"]["why"] for d in (2088, 2089, 2090)), "each refused day says why"
+        # with no YouTube account connected, a day above the cursor says so too (second review: it was skipped unsaid)
+        g["schedule_stage"] = real_schedule; g["account_map"] = lambda a: {}
+        assert go({2092}) == [] and state["2092"]["not_published"]["why"] == "no YouTube account is connected", state.get("2092")
     finally:
         g.update(saved)
 
