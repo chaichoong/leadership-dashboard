@@ -107,6 +107,7 @@
     //                  costIds, reconciled, description }]  (the compute-context shape)
     // costBusinessNames: { costId: [business names] } — only used to flag mismatches.
     //
+    // Only FILED (reconciled) transactions are counted at all.
     // Fixed  = a payment linked to a cost record, tagged to the property business.
     // Variable = any other property payment (no cost record). Both are SIGNED sums, so
     // a bounced direct debit coming back cancels the payment it reverses.
@@ -116,7 +117,11 @@
         (transactions || []).forEach(tx => {
             const d = iso(tx.date);
             if (!d || d < start || d > end) return;
-            if (!tx.reconciled) unreconciled++;
+            // A payment that has not been filed yet counts in NEITHER figure. Fresh bank
+            // receipts arrive tagged to the property business with no sub-category: counted,
+            // a rent receipt read as money in on the income line while the cushion ignored
+            // it (2 Oct 2026: income £11,591 against a true £8,614). It raises amber instead.
+            if (!tx.reconciled) { unreconciled++; return; }
             const amt = Number(tx.amount) || 0;
             const subs = tx.subCategories || [];
             if (subs.includes(RENT_SUB)) { rent += amt; rentCount++; return; }
