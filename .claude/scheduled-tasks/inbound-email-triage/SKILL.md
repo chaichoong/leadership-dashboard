@@ -226,6 +226,10 @@ the board — an open task for a done reply is noise (Kevin's ruling, 25 Aug
    the inbox and the watermark moves past it, so the scan window proves
    nothing about who spoke last; the task's own stamps do. A date-only stamp
    (no time) counts as end-of-day: same-day means NOT later, do not close.
+   NEVER close a task whose Description carries `CERTIFICATE ATTACHED`
+   (Kevin, 2 Oct 2026): his reply settles the conversation, not the filing.
+   The certificate still has to reach the compliance book, and only
+   `agent-dispatch.py complete` may close that task.
 3. Closing means exactly: Status `Completed`, Completion Date
    `fldFOi1SwEKuJRmdN` = now (ISO), and append to the Description:
    "Closed by inbound-email-triage <date>: Kevin replied himself (sent message
@@ -481,9 +485,10 @@ Create through the SAME gate (`python3 scripts/create-agent-task.py create
     python3 scripts/inbound-triage.py act --id <id> --do file --label-num 10 \
       --task <taskId> --reason "<one line>"
 
-The task cannot be completed until the certificate is in the compliance book
-with its document (`agent-dispatch.py complete` refuses), so nothing here
-depends on anyone remembering.
+A `CERTIFICATE ATTACHED` task cannot be completed until the certificate is in
+the compliance book with its document, or the agent has said on the record what
+the file really is (`agent-dispatch.py complete` refuses otherwise), so nothing
+here depends on anyone remembering.
 
 ## Step 5 — The stranded check (the safety net)
 

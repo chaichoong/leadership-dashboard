@@ -258,6 +258,51 @@ print(json.dumps({'owed': m.task_fields_owe_certificate('recT', tf), 'mentioned'
     expect(r.mentioned).toBe('');
   });
 
+  it('a filing task the engine raised cannot close as "nothing to decide"', () => {
+    // Second review, 2 Oct 2026: its own wording names no document type, so it slipped the gate,
+    // stayed "raised" for ever, and the payment went on blocking purchases for that house.
+    const r = py(`
+ENGINE = task('COMPLIANCE: file the certificate paid for on 2026-09-21 - 9 Test Place', 'PROPERTY COMPLIANCE — ' + m.ENGINE_FILING_MARK + '. A payment left the bank (transaction recTX000000000009).')
+m.get_task = lambda tid: ENGINE
+m.fetch_certificates = lambda refresh=False: []
+err, patches = run(lambda: m.cmd_complete(complete_args()))
+m.fetch_certificates = lambda refresh=False: [{'taskIds': ['recTASK0000000001'], 'hasFile': True}]
+err2, patches2 = run(lambda: m.cmd_complete(complete_args()))
+print(json.dumps({'err': err, 'err2': err2, 'owedOnSubmit': m.task_fields_owe_certificate('recTASK0000000001', ENGINE['fields']) == ''}))`);
+    expect(r.err).toContain('no certificate');
+    expect(r.err2).toBe(null);
+    expect(r.owedOnSubmit).toBe(true); // settled once the certificate is linked
+  });
+
+  it('--no-certificate with --keep-open is refused, never silently dropped', () => {
+    const r = py(`
+m.get_task = lambda tid: ${INVOICE_TASK}
+args = types.SimpleNamespace(task='recTASK0000000001', keep_open=True, note='x', no_certificate='it is a quote')
+err, patches = run(lambda: m.cmd_complete(args))
+print(json.dumps({'err': err, 'patches': len(patches)}))`);
+    expect(r.err).toContain('Use one');
+    expect(r.patches).toBe(0);
+  });
+
+  it('a filing task closed WITH its certificate resolves the payment, whatever the row is dated or typed', () => {
+    const r = py(`${BOOK}
+rows = [{'id': 'recFILINGTASK00001', 'fields': {AF['description']: m.ENGINE_FILING_MARK + ' (transaction recTX000000000009)', AF['notes']: ''}}]
+import importlib
+spec2 = importlib.util.spec_from_file_location('d2', ${JSON.stringify(DISPATCH)})
+real = importlib.util.module_from_spec(spec2); spec2.loader.exec_module(real)
+real.query_records = lambda *a, **k: rows
+# An OLD twin row of another type, which date-and-type matching alone would never accept.
+old_row = dict(CERT, type='Fire Alarm Cert', created='2025-01-01', taskIds=['recFILINGTASK00001'])
+real.fetch_certificates = lambda refresh=False: [old_row]
+by_tx = real.filing_tasks_by_transaction()
+m.fetch_compliance_payments = lambda: [dict(PAY, name='ABC Gas and Fire')]
+m.fetch_certificates = lambda refresh=False: [old_row]
+unfiled, _u, _r = m.paid_certificate_gaps(by_tx)
+print(json.dumps({'by_tx': by_tx, 'unfiled': len(unfiled)}))`);
+    expect(r.by_tx).toEqual({ recTX000000000009: 'resolved' });
+    expect(r.unfiled).toBe(0);
+  });
+
   it('an ordinary close never reads the compliance book', () => {
     const r = py(`
 calls = []
@@ -275,7 +320,14 @@ print(json.dumps({'err': err, 'bookReads': len(calls)}))`);
     const src = execFileSync('cat', [DISPATCH], { encoding: 'utf8' });
     const submit = src.slice(src.indexOf('def cmd_submit(args):'), src.indexOf('def cmd_complete(args):'));
     expect(submit).toMatch(/cert_owed = task_fields_owe_certificate\(args\.task, tf\)\s+if cert_owed:\s+files_itself = False/);
-    expect(submit).toMatch(/not \(cert_owed and level\.get\("carry"\) == "close"\)/);
+    // Any Level A carry-out that would end the task Completed is demoted to a card.
+    expect(submit).toMatch(/if cert_owed and level\["level"\] == AUTONOMY_ACT and level\.get\("carry"\) != "roy"[\s\S]{0,400}level = dict\(level, level=AUTONOMY_APPROVE/);
+    // Roy's word does not close a task that owes a filing either.
+    const roy = execFileSync('cat', [resolve(ROOT, 'scripts/roy-assistant.py')], { encoding: 'utf8' });
+    expect(roy).toMatch(/owed = ad\.task_fields_owe_certificate\(args\.target, tf\)\s+if owed:\s+sys\.exit/);
+    // And triage's own "Kevin replied himself" close skips a certificate task.
+    const skill = execFileSync('cat', [resolve(ROOT, '.claude/scheduled-tasks/inbound-email-triage/SKILL.md')], { encoding: 'utf8' });
+    expect(skill).toMatch(/NEVER close a task whose Description carries `CERTIFICATE ATTACHED`/);
   });
 
   it('the write path refuses a placeholder file', () => {

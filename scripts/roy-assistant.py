@@ -826,6 +826,13 @@ def cmd_task_update(args):
     fields = {AF["notes"]: (str(tf.get(AF["notes"]) or "").rstrip() + "\n\n"
                             + f"[{stamp} {ROY_TASK_NOTE_TAG}{args.task}] {text}").strip()[-90000:]}
     if args.complete and status != "Completed":
+        # A certificate that arrived on Roy's task still has to reach the compliance
+        # book (2 Oct 2026). His "done" is noted; the close waits for the filing.
+        owed = ad.task_fields_owe_certificate(args.target, tf)
+        if owed:
+            sys.exit(f"REFUSED: {args.target} cannot be completed yet: {owed}. "
+                     "Note Roy's update without --complete, and file the certificate "
+                     "(agent-dispatch.py certificate) so the task can close.")
         fields[AF["status"]] = "Completed"
         fields[AF["completion"]] = now_utc().strftime("%Y-%m-%dT%H:%M:%S.000Z")
     airtable("PATCH", f"{TASKS}/{args.target}", {"fields": fields})

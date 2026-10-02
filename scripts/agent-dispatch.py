@@ -4732,8 +4732,13 @@ def cmd_submit(args):
     # tierChecked: the two verifiable closes ran their own tier check inside
     # decision_level (name, description, banner — never the Notes, which hold
     # every agent's run log), so is_tier1 from the Notes must not re-veto them.
-    if level["level"] == AUTONOMY_ACT and (not is_tier1 or level.get("tierChecked")) and not (kevin_step or cur_wall) \
-            and not (cert_owed and level.get("carry") == "close"):
+    if cert_owed and level["level"] == AUTONOMY_ACT and level.get("carry") != "roy" \
+            and level.get("rule") != "quote-request":
+        # Level A would end this task Completed (a close, a diary entry, a fixed
+        # redirect) with the certificate unfiled. It goes to the queue as a card.
+        level = dict(level, level=AUTONOMY_APPROVE,
+                     why="a certificate arrived on this task and is not filed yet")
+    if level["level"] == AUTONOMY_ACT and (not is_tier1 or level.get("tierChecked")) and not (kevin_step or cur_wall):
         return handle_without_kevin(args, output, trec, level, to_attach)
     if level["level"] == AUTONOMY_APPROVE and level["category"] not in ("other",):
         # Say WHY a shaped output still became a card, so a Task Manager that
@@ -6749,6 +6754,9 @@ def cmd_complete(args):
     # change, so this cannot be blocked on a base edit. CARRIED_OUT_MARK is the
     # machine-readable half — verify re-reads the LIVE record for it, never
     # trusting what the run claimed.
+    if args.keep_open and (getattr(args, "no_certificate", "") or "").strip():
+        sys.exit(f"ERROR: refusing to complete {args.task}: --no-certificate closes a task, "
+                 "and --keep-open leaves it open. Use one. The reason would be dropped.")
     if args.keep_open:
         stamp = datetime.now(LONDON).strftime("%d %b %Y")
         detail = (args.note or "the approved action").strip()
@@ -6804,14 +6812,15 @@ def cmd_complete(args):
             f"         python3 scripts/agent-dispatch.py unblock {args.task} "
             "--evidence \"<what you saw that proves it>\"")
 
-    closing = {
+    # Written with the close, never before it: a refused close leaves no mark.
+    declared = ({AF["notes"]: ((t["notes"] or "") + "\n\n" + no_cert_note).strip()[-90000:]}
+                if no_cert_note else {})
+
+    patch_task(args.task, {
         AF["status"]: "Completed",
         AF["completion"]: now_iso(),
-    }
-    if no_cert_note:
-        # Written with the close, never before it: a refused close leaves no mark.
-        closing[AF["notes"]] = ((t["notes"] or "") + "\n\n" + no_cert_note).strip()
-    patch_task(args.task, closing)
+        **declared,
+    })
     ledger_append(args.task, "done")
     print(json.dumps({"completed": args.task}))
 
@@ -8641,7 +8650,7 @@ COMPLIANCE_TASK_PREFIX = "COMPLIANCE:"
 ENGINE_RENEWAL_MARK = "renewal raised automatically by agent-dispatch"
 # The same contract for a filing the engine raises because a certificate was
 # PAID FOR and never filed (2 Oct 2026): it closes only with the document.
-ENGINE_FILING_MARK = "filing raised automatically by agent-dispatch"
+ENGINE_FILING_MARK = certificate_watch.FILING_TASK_MARK
 
 
 def property_view(rec):
@@ -9020,20 +9029,24 @@ def filing_tasks_by_transaction():
     Airtable is the record, not a state file: a file lost in a host move would
     re-raise every payment, and a payment an agent answered on the record ("it
     was a repair") would block that house's purchases for months. A task is
-    "resolved" when it carries the no-certificate mark; any other filing task
-    for the transaction, open or closed, means it has been raised already (a
-    task closed WITH its certificate drops out by itself: the certificate
-    answers the payment)."""
+    "resolved" when it carries the no-certificate mark, OR a certificate row
+    with a real file is linked to it. The link is what answers the payment:
+    judged by date and type alone, a certificate attached to an older row, or
+    one whose type the bank text does not name, would leave the payment
+    "unfiled" after a correct close and block the house for months. Any other
+    filing task for the transaction, open or closed, means it was raised."""
     rows = query_records(
         TASKS, formula="FIND('" + ENGINE_FILING_MARK + "', {Description})",
         fields=[AF["description"], AF["notes"]])
+    filed_tasks = {tid for c in fetch_certificates() if c["hasFile"] for tid in c["taskIds"]}
     out = {}
     for r in rows:
         f = r.get("fields", {}) or {}
         m = FILING_TX_RE.search(str(f.get(AF["description"]) or ""))
         if not m:
             continue
-        resolved = certificate_watch.NO_CERTIFICATE_MARK in str(f.get(AF["notes"]) or "")
+        resolved = (certificate_watch.NO_CERTIFICATE_MARK in str(f.get(AF["notes"]) or "")
+                    or r.get("id") in filed_tasks)
         if resolved or m.group(1) not in out:
             out[m.group(1)] = "resolved" if resolved else "raised"
     return out

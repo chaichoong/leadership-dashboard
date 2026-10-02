@@ -148,21 +148,32 @@ def certificate_owed(task, linked_certificates):
     decision is on record rather than silent.
     """
     text = "%s\n%s" % (task.get("name") or "", task.get("description") or "")
-    if not names_certificate(text):
-        return ""
-    everything = "%s\n%s" % (text, task.get("notes") or "")
-    arrived = (bool(ARRIVED_MARK_RE.search(text))
-               or bool(INBOUND_FILE_RE.search(everything))
-               or (bool(task.get("attachments")) and names_certificate(task.get("name"))))
-    if not arrived:
-        return ""
+    if FILING_TASK_MARK not in text:
+        if not names_certificate(text):
+            return ""
+        everything = "%s\n%s" % (text, task.get("notes") or "")
+        arrived = (bool(ARRIVED_MARK_RE.search(text))
+                   or bool(INBOUND_FILE_RE.search(everything))
+                   or (bool(task.get("attachments")) and names_certificate(task.get("name"))))
+        if not arrived:
+            return ""
     if any(c.get("hasFile") for c in (linked_certificates or [])):
         return ""
     if NO_CERTIFICATE_MARK in str(task.get("notes") or ""):
         return ""
+    if FILING_TASK_MARK in text:
+        return ("this task was raised because a compliance payment has no certificate in the "
+                "book, and no certificate (with its document) is filed against it")
     return ("this task names a certificate and a file arrived on it, but no certificate "
             "(with its document) is filed against it")
 
+
+# Stamped into the description of every filing task the engine raises for a paid
+# compliance line. Such a task always owes its filing: its own wording ("file the
+# certificate paid for on ...") names no document type, and without this it could
+# close as "nothing to decide", leaving the payment raised for ever and held against
+# the house (second review, 2 Oct 2026).
+FILING_TASK_MARK = "filing raised automatically by agent-dispatch"
 
 # Written into a task's Notes by `complete --no-certificate "<reason>"`.
 NO_CERTIFICATE_MARK = "NO CERTIFICATE TO FILE:"
@@ -306,6 +317,13 @@ def selftest():
           certificate_owed({"name": "INBOUND: Roy forwarded paperwork", "description": "EICR report.",
                             "notes": "saved to ~/knowledge-os/attachments/inbound/abc/report.pdf",
                             "attachments": []}, []) != "")
+    engine = {"name": "COMPLIANCE: file the certificate paid for on 2026-09-21 - house",
+              "description": "PROPERTY COMPLIANCE — %s. A compliance payment left the bank." % FILING_TASK_MARK,
+              "attachments": [], "notes": ""}
+    check("an engine filing task always owes its filing", certificate_owed(engine, []) != "")
+    check("an engine filing task is settled by its certificate", certificate_owed(engine, [{"hasFile": True}]) == "")
+    check("an engine filing task is settled by a declared reason",
+          certificate_owed(dict(engine, notes="%s it was a repair" % NO_CERTIFICATE_MARK), []) == "")
     check("a task that names no certificate owes nothing",
           certificate_owed({"name": "Boiler repair", "description": "Photo attached.",
                             "attachments": [{"filename": "p.jpg", "size": 90000}]}, []) == "")
