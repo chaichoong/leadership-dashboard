@@ -623,6 +623,21 @@ def pull(ledger, key, work=WORK):
     return dest
 
 
+NEXT_DAY_DONE, NEXT_NOT_DELIVERED = 3, 4
+
+
+def next_exit(ledger, day, work, pull_fn=None):
+    """The exit code of `watch.py next`: 0 a clip is down and ready to render; 3 nothing of that day is waiting (the
+    day is done); 4 the pull did not deliver (Drive timed out, or two clips already wait). The night's loop moves to
+    the next day on anything but 0. Until 2 Oct 2026 an undelivered pull also exited 0, so the loop asked for the same
+    clip up to six times: a 5 GB clip Drive would not serve held the night for five hours, to the 07:00 stop, and the
+    copy, cards and publishing steps after the loop never ran (review, 2 Oct 2026)."""
+    key = choose_next(ledger, day)
+    if not key:
+        print("next: nothing waiting" + (" for day %d" % day if day else "")); return NEXT_DAY_DONE if day else 0
+    return 0 if (pull_fn or pull)(ledger, key, work) else NEXT_NOT_DELIVERED
+
+
 def report():
     ledger = load_ledger()
     counts = {}
@@ -827,7 +842,7 @@ def selftest():
     assert pull_window_minutes(2 * gb) == 40 and pull_window_minutes(4 * gb) == 40 and pull_window_minutes(18 * gb) == 180, "40 min per 4 GB, floor 40"
     led = {"g": {"day": 1799, "size": 18 * gb, "status": "new"}, "c": {"day": 2054, "size": 4 * gb, "status": "new"}}
     assert "SHORT by" in disk_line(led, 30 * gb) and "day 1799" in disk_line(led, 30 * gb) and "fits" in disk_line(led, 60 * gb) and "nothing waiting" in disk_line({}, 60 * gb)
-    print(json.dumps({"checks": 51, "failed": []}))
+    print(json.dumps({"checks": 54, "failed": []}))
 
 
 def _selftest_gap_order():
@@ -897,6 +912,12 @@ def _selftest_gap_order():
         assert lp["c"].get("pull_failed") and lp["c"]["status"] == "new", "a refused pull is stamped, so the plan can let another redo pass: %s" % lp["c"]
         assert cleared == [wk], "the clean-up ran on the test's own folder only: %s" % cleared
     finally: globals()["save_ledger"], globals()["clear_leftovers"] = real_save, real_clear
+    # the night's loop moves on when a clip does not come down, instead of asking for it six times (review, 2 Oct 2026)
+    assert next_exit(rd, 2081, wk, pull_fn=lambda led, key, work: None) == NEXT_NOT_DELIVERED == 4, "an undelivered pull is not a success"
+    assert next_exit(rd, 2081, wk, pull_fn=lambda led, key, work: "/tmp/clip") == 0
+    import io as _io, contextlib as _cl
+    with _cl.redirect_stdout(_io.StringIO()):                # "next: nothing waiting" is the command's own line, not the selftest's
+        assert next_exit(rd, 1900, wk, pull_fn=lambda led, key, work: "/tmp/clip") == NEXT_DAY_DONE == 3 and next_exit({}, 0, wk) == 0
     gapredo = dict(rd, g={"day": 1808, "date": "2025-05-13", "seq": 1, "size": 18 * gb, "status": "new", "reset": "x"})
     assert plan(gapredo, 2, gaps={1799, 1808}, free=100 * gb, start=2054)[0] == [2084, 1808, 2081], "a sent-back gap day takes its gap slot, as any gap day"
     assert plan(gapredo, 2, gaps={1799, 1808}, free=20 * gb, start=2054)[0] == [2084, 2085, 2081], "and still waits whole when its clip does not fit the disk"
@@ -933,8 +954,6 @@ if __name__ == "__main__":
         for n in notes: print("plan: " + n, file=sys.stderr)
         print(" ".join(str(d) for d in days))
     elif a.mode == "next":
-        ledger = load_ledger(); key = choose_next(ledger, a.day)
-        if not key: print("next: nothing waiting" + (" for day %d" % a.day if a.day else "")); sys.exit(3 if a.day else 0)
-        pull(ledger, key, a.work)
+        sys.exit(next_exit(load_ledger(), a.day, a.work))
     elif a.mode == "report": report()
     else: raise SystemExit("unknown mode")
