@@ -380,6 +380,34 @@ def rule_send_problem(rule, mail, task, require_stamp=True):
         return ""
     return "unknown rule %r" % rule
 
+# ─── TRIAL AGENTS: Kevin checks the drafts, nothing reaches anyone (2 Oct 2026) ──
+#
+# GUARDRAILS has said since 25 Aug 2026 that a new agent replacing a live process
+# runs in parallel first, "with the new outputs going to a validation queue, never
+# to the real recipient". Until now that was words: an approved card from any
+# dispatchable agent was sent. An agent listed here raises cards exactly like the
+# others, Kevin's verdict and notes teach it exactly like the others, and NOTHING
+# it raises can be sent: send-email.py refuses at the one door every send passes
+# through, and the dispatch queue closes an approved card as checked instead of
+# handing it to a carry-out run. Ending a trial is removing the entry, in a PR
+# Kevin approves: the cut-over is a decision, never a side effect.
+TRIAL_AGENTS = {
+    # Cash Flow Voids (register row reclaAzGLA4utssxx): late-rent drafts to tenants.
+    # Kevin approved lane A in trial mode on 2 Oct 2026; cut-over target 24 Nov 2026.
+    "rec7aHLK1Q8fMLRXH": "the Cash Flow Voids agent is on its trial run, so Kevin checks its "
+                         "drafts and nothing is sent to a tenant",
+}
+TRIAL_STAMP = "TRIAL CHECKED"
+
+
+def trial_problem(agent_ids):
+    """Why a card raised by any of these Team Members rows may NOT be carried out, or ""."""
+    for agent_id in agent_ids or []:
+        if agent_id in TRIAL_AGENTS:
+            return TRIAL_AGENTS[agent_id]
+    return ""
+
+
 # Kevin's ruling, 27 Aug 2026, in his own words on task recV3nCmp3ivQeXTN:
 # "Send from kevinbrittain@gmail.com. Never send from kevin@runpreneur.org.uk
 # unless it's to do with Runpreneur. Revert to sending from

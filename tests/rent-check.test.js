@@ -53,6 +53,8 @@ import tempfile
 SCRATCH = tempfile.mkdtemp()
 rc.HISTORY = os.path.join(SCRATCH, "history.jsonl")
 rc.PRE_SLATE_PATH = os.path.join(SCRATCH, "pre-slate.json")
+# No test may reach Airtable either: the task state is read through this, replaced per test.
+rc.read_task_state = lambda: {"on": False, "status": "Building", "keys": set()}
 TY, TN, TX, AC = rc.TY, rc.TN, rc.TX, rc.AC
 DAY = date(2026, 10, 2)
 def rec(i, f): return {"id": i, "fields": f}
@@ -392,7 +394,7 @@ print(json.dumps({"asAt": res["asAt"], "paying": res["paying"], "total": res["to
     expect([r.asAt, r.paying, r.total, r.pct, r.marked, r.below]).toEqual(['2026-10-02', 39, 40, 97.5, 40, false]);
     expect(r.worst).toBe('warn');
     expect(r.type).toBe('Working');
-    expect(r.keys).toEqual(['daysLate', 'id', 'lane', 'light', 'note', 'rent', 'status', 'type', 'unit']);
+    expect(r.keys).toEqual(['daysLate', 'id', 'lane', 'light', 'note', 'owed', 'rent', 'status', 'type', 'unit']);
     expect(r.detail).toContain('Marked In Payment in Airtable: 40 of 40.');
     expect(r.detail).toContain('AMBER Unit recLate (Working, £500.00): late 2 days, due 30 Sep, last matched payment 30 Aug');
     expect(r.detail).toContain('Bank feeds: Main Bank 1 hours old.');
@@ -736,5 +738,168 @@ res, rows = run([tenancy("recX", 1, 500)], [paid("recX", "2026-09-01", 500)], fe
 print(json.dumps({"light": res["lights"]["recX"]}))`);
     // Due 1 Oct, checked 2 Oct: one day, not late, whatever the feed's stamp says.
     expect(r.light).toBe('green');
+  });
+});
+
+describe('rent-check: lane A, one task per late tenancy per stage (2 Oct 2026)', () => {
+  it('a reminder when the rent turns late, a follow-up 3 days on, a firmer message 7 days on', () => {
+    const r = py(`
+print(json.dumps({str(d): rc.stage_for(d) for d in (0, 1, 2, 4, 5, 8, 9, 40)}))`);
+    expect(r).toEqual({ 0: null, 1: null, 2: [1, 'reminder'], 4: [1, 'reminder'], 5: [2, 'follow-up'], 8: [2, 'follow-up'], 9: [3, 'firmer message'], 40: [3, 'firmer message'] });
+  });
+
+  it('raises for a late tenancy we chase ourselves, and for nobody else', () => {
+    const r = py(`
+ts = [tenancy("recLate", 30, 500, unit="Unit 9 – 1 Example Road"),
+      tenancy("recAgent", 30, 500, tenant="recT_agent"),
+      tenancy("recExisting", 30, 500, status="CFV"),
+      tenancy("recActioned", 30, 500, status="CFV Actioned"),
+      tenancy("recVoid", 30, 500, status="CFV", unit="Unit 9 – 2 Example Road"),
+      tenancy("recShort", 23, 900), tenancy("recFine", 1, 500),
+      tenancy("recGap", 1, 500)]
+ts[-1]["fields"][TY["dueDay"]] = None
+tx = [paid(i, "2026-08-30", 500) for i in ("recLate", "recAgent", "recExisting", "recActioned", "recVoid")] + [paid("recShort", "2026-09-23", 400), paid("recFine", "2026-10-01", 500)]
+res, rows = run(ts, tx, pre=["recExisting"])
+plan = rc.task_plan(res, ts, set(), DAY)
+print(json.dumps({"lanes": {k: v["lane"] for k, v in rows.items()}, "plan": [[p["tenancy"], p["key"], p["name"], p["tenants"]] for p in plan], "desc": plan[0]["description"]}))`);
+    expect(r.lanes).toMatchObject({ recLate: 'late', recAgent: 'late', recExisting: 'existing', recActioned: 'late', recVoid: 'late', recShort: 'short', recGap: 'unknown' });
+    expect(r.plan).toEqual([
+      ['recVoid', 'recVoid:2026-09-30:1', 'RENT LATE: Unit 9 – 2 Example Road, rent due 30 Sep (reminder)', ['recT_uc']],
+      ['recLate', 'recLate:2026-09-30:1', 'RENT LATE: Unit 9 – 1 Example Road, rent due 30 Sep (reminder)', ['recT_uc']],
+    ]);
+    expect(r.desc).toContain('TRIAL: you draft, Kevin checks, nothing is sent to the tenant.');
+    expect(r.desc).toContain('Rent owed: the payment due 30 Sep 2026, 2 days late today');
+    expect(r.desc).toContain('Stage: 1 of 3, the reminder');
+    expect(r.desc).toContain('Bank data as at 2 Oct 12:03.');
+  });
+
+  it('nothing is raised when the check cannot tell', () => {
+    const r = py(`
+ts = [tenancy("recLate", 30, 500)]
+res, rows = run(ts, [paid("recLate", "2026-08-30", 500)], hour=6, feed="2026-09-30T05:00:00.000Z")
+print(json.dumps({"light": rows["recLate"]["light"], "plan": rc.task_plan(res, ts, set(), DAY)}))`);
+    expect(r).toEqual({ light: 'grey', plan: [] });
+  });
+
+  it('one task per cycle per stage: a repeat run raises nothing, the next stage does, an earlier stage never follows a later one', () => {
+    const r = py(`
+ts = [tenancy("recLate", 30, 500)]
+tx = [paid("recLate", "2026-08-30", 500)]
+def keys(day, existing):
+    res, rows = run(ts, tx, day=day)
+    return [p["key"] for p in rc.task_plan(res, ts, set(existing), day)]
+print(json.dumps({
+  "first": keys(date(2026, 10, 2), []),
+  "again": keys(date(2026, 10, 2), ["recLate:2026-09-30:1"]),
+  "day4": keys(date(2026, 10, 4), ["recLate:2026-09-30:1"]),
+  "day5": keys(date(2026, 10, 5), ["recLate:2026-09-30:1"]),
+  "day9": keys(date(2026, 10, 9), ["recLate:2026-09-30:1", "recLate:2026-09-30:2"]),
+  "missedTwoStages": keys(date(2026, 10, 9), []),
+  "laterOnly": keys(date(2026, 10, 5), ["recLate:2026-09-30:3"]),
+  "nextCycle": keys(date(2026, 11, 1), ["recLate:2026-09-30:3"]),
+}))`);
+    expect(r.first).toEqual(['recLate:2026-09-30:1']);
+    expect(r.again).toEqual([]);
+    expect(r.day4).toEqual([]);
+    expect(r.day5).toEqual(['recLate:2026-09-30:2']);
+    expect(r.day9).toEqual(['recLate:2026-09-30:3']);
+    // A run that missed days raises the stage due now, once, never three at a time.
+    expect(r.missedTwoStages).toEqual(['recLate:2026-09-30:3']);
+    expect(r.laterOnly).toEqual([]);
+    // Still unpaid a month on: the same owed payment, already at its last stage, raises nothing new.
+    expect(r.nextCycle).toEqual([]);
+  });
+
+  it('nothing matched in 80 days goes straight to the firmer message, saying so', () => {
+    const r = py(`
+ts = [tenancy("recX", 15, 500)]
+res, rows = run(ts, [])
+plan = rc.task_plan(res, ts, set(), DAY)
+print(json.dumps({"key": plan[0]["key"].split(":")[-1], "desc": plan[0]["description"]}))`);
+    expect(r.key).toBe('3');
+    expect(r.desc).toContain('no payment matched in the last 80 days');
+  });
+
+  it('the pause lever: nothing is planned or raised while the agent is switched off, and the row says so', () => {
+    const r = py(`
+ts = [tenancy("recLate", 30, 500)]
+res, rows = run(ts, [paid("recLate", "2026-08-30", 500)])
+made = []
+rc.raise_task = lambda item, day: made.append(item["key"]) or "recNEW"
+off = rc.lane_a(res, ts, DAY, True)
+rc.read_task_state = lambda: {"on": True, "status": "Built", "keys": set()}
+dry = rc.lane_a(res, ts, DAY, False)
+on = rc.lane_a(res, ts, DAY, True)
+rc.read_task_state = lambda: {"on": True, "status": "Built", "keys": {"recLate:2026-09-30:1"}}
+done = rc.lane_a(res, ts, DAY, True)
+print(json.dumps({"off": off, "offLine": rc.lane_a_line(off), "dryRaised": dry["raised"], "dryPlanned": len(dry["planned"]), "dryLine": rc.lane_a_line(dry),
+                  "on": on["raised"], "made": made, "onLine": rc.lane_a_line(on), "doneLine": rc.lane_a_line(done)}))`);
+    expect(r.off).toEqual({ on: false, status: 'Building', raised: [], planned: [], failed: '' });
+    expect(r.offLine).toBe('Late-rent tasks: none raised, the Cash Flow Voids agent is switched off (register status Building).');
+    expect([r.dryRaised, r.dryPlanned]).toEqual([[], 1]);
+    expect(r.dryLine).toMatch(/^Late-rent tasks a real run would raise: RENT LATE: Unit recLate/);
+    expect(r.on).toEqual(['RENT LATE: Unit recLate, rent due 30 Sep (reminder)']);
+    expect(r.made).toEqual(['recLate:2026-09-30:1']);
+    expect(r.onLine).toMatch(/^Late-rent tasks raised for the agent \(trial, nothing is sent\): RENT LATE/);
+    expect(r.doneLine).toBe('Late-rent tasks: none needed today.');
+  });
+
+  it('a task is created for the agent with its key, its links and no "void" in the name', () => {
+    const r = py(`
+posts = []
+rc.api = lambda method, path, payload=None, params=None: posts.append([method, path, payload]) or {"records": [{"id": "recNEW"}]}
+rid = rc.raise_task({"key": "recLate:2026-09-30:1", "tenancy": "recLate", "tenants": ["recT_uc"], "name": "RENT LATE: Unit 9, rent due 30 Sep (reminder)", "description": "d"}, DAY)
+f = posts[0][2]["records"][0]["fields"]
+print(json.dumps({"rid": rid, "method": posts[0][0], "table": posts[0][1], "name": f[rc.TK["name"]], "status": f[rc.TK["status"]], "due": f[rc.TK["due"]],
+                  "tm": f[rc.TK["teamMember"]], "notes": f[rc.TK["notes"]], "tenancies": f[rc.TK["tenancies"]], "tenants": f[rc.TK["tenants"]], "count": len(posts)}))`);
+    expect(r).toEqual({ rid: 'recNEW', method: 'POST', table: 'tblqB8b22hKBL4PF1', name: 'RENT LATE: Unit 9, rent due 30 Sep (reminder)', status: 'Today', due: '2026-10-02',
+      tm: ['rec7aHLK1Q8fMLRXH'], notes: 'RENT CHECK KEY: recLate:2026-09-30:1', tenancies: ['recLate'], tenants: ['recT_uc'], count: 1 });
+  });
+
+  it('the task state reads the pause lever and the keys already raised, by field name', () => {
+    const r = py(`
+import importlib
+calls = []
+def fake_api(method, path, payload=None, params=None):
+    calls.append([method, path, (params or {}).get("filterByFormula", "")])
+    if path == rc.T_REGISTER:
+        return {"records": [{"id": rc.REGISTER_ROW, "fields": {rc.REGISTER_STATUS: "Live"}}]}
+    return {"records": [{"id": "recT1", "fields": {rc.TK["notes"]: "RENT CHECK KEY: recLate:2026-09-30:1\\n\\n[note] TRIAL CHECKED: ..."}},
+                        {"id": "recT2", "fields": {}}]}
+spec = importlib.util.spec_from_file_location("rc2", os.path.join(${JSON.stringify(SCRIPTS)}, "rent-check.py"))
+rc2 = importlib.util.module_from_spec(spec); spec.loader.exec_module(rc2)
+rc2.api = fake_api
+state = rc2.read_task_state()
+def broken(method, path, payload=None, params=None): return {"records": []}
+rc2.api = broken
+try:
+    rc2.read_task_state(); unread = "passed"
+except RuntimeError as e:
+    unread = str(e)
+print(json.dumps({"on": state["on"], "status": state["status"], "keys": sorted(state["keys"]), "formulas": [c[2] for c in calls], "unread": unread}))`);
+    expect([r.on, r.status, r.keys]).toEqual([true, 'Live', ['recLate:2026-09-30:1']]);
+    expect(r.formulas).toEqual(["RECORD_ID()='reclaAzGLA4utssxx'", "LEFT({Task Name}, 11)='RENT LATE: '"]);
+    expect(r.unread).toContain('control failed: the Cash Flow Voids register row could not be read');
+  });
+
+  it('a failed raise is said on the row, turns the run red, and the rent line is still written', () => {
+    const r = py(`
+rows = []
+today = rc.today_london()
+due = (today - timedelta(days=3)).day
+ts = [tenancy("recLate", due, 500)] + [tenancy("recG%02d" % i, due, 500) for i in range(20)]
+tx = [paid("recLate", (today - timedelta(days=34)).isoformat(), 500)] + [paid("recG%02d" % i, (today - timedelta(days=3)).isoformat(), 500) for i in range(20)]
+rc.load = lambda day: world(ts, tx, day=today, feed=datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.000Z"))
+rc.read_task_state = lambda: {"on": True, "status": "Built", "keys": set()}
+def boom(item, day): raise RuntimeError("Airtable POST tasks 422: nope")
+rc.raise_task = boom
+rc.write_row = lambda status, text, payload, now: rows.append([status, text])
+with contextlib.redirect_stdout(io.StringIO()):
+    code = rc.main(["run"])
+print(json.dumps({"code": code, "status": rows[0][0], "lastLine": rows[0][1].splitlines()[-1], "firstLine": rows[0][1].splitlines()[0][:22]}))`);
+    expect(r.code).toBe(1);
+    expect(r.status).toBe('Failed');
+    expect(r.lastLine).toBe('Late-rent tasks FAILED: Airtable POST tasks 422: nope');
+    expect(r.firstLine).toBe('20 of 21 tenants payin');
   });
 });

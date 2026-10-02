@@ -84,6 +84,8 @@ from agent_email_format import (  # noqa: E402
     REDIRECT_BODY,
     RULE_STAMP,
     rule_send_problem,
+    TRIAL_STAMP,
+    trial_problem,
 )
 # The CALENDAR contract lives in one place too, shared with
 # scripts/calendar-write.py — same one-parser rule, same reason.
@@ -389,6 +391,14 @@ ROLE_AGENTS = {
                           "agent": "content-engine", "role": "worker",
                           "registerRow": "recNaC0N5KiTGBPNy",
                           "dispatch": False},
+    # Cash Flow Voids, lane A (build 2 Oct 2026; chain map approved by Kevin the
+    # same day, on the register row). scripts/rent-check.py raises one RENT LATE
+    # task per late tenancy per stage and this agent drafts the email to the
+    # tenant. It is a TRIAL agent (TRIAL_AGENTS in agent_email_format.py): its
+    # cards reach Kevin's queue like any other and nothing it raises is sent.
+    "rec7aHLK1Q8fMLRXH": {"name": "AI Cash Flow Voids",
+                          "agent": "cash-flow-voids", "role": "worker",
+                          "registerRow": "reclaAzGLA4utssxx"},
 }
 ALL_AGENTS = {**AGENTS, **ROLE_AGENTS}
 
@@ -397,10 +407,12 @@ RESPONSE_REC_ID = "recJ8J8idWE8d97tH"          # Team Members row
 CREDITOR_REC_ID = "recjh6mmaF8KJW8t3"          # Team Members row
 TASKMGR_REC_ID = "rec1hYELb4zS8pjjO"           # Team Members row
 PROPERTY_REC_ID = "recwWvBju2ycB63i4"          # Team Members row
+RENT_REC_ID = "rec7aHLK1Q8fMLRXH"              # Team Members row (Cash Flow Voids)
 RESPONSE_REGISTER_ROW = ROLE_AGENTS[RESPONSE_REC_ID]["registerRow"]
 CREDITOR_REGISTER_ROW = ROLE_AGENTS[CREDITOR_REC_ID]["registerRow"]
 TASKMGR_REGISTER_ROW = ROLE_AGENTS[TASKMGR_REC_ID]["registerRow"]
 PROPERTY_REGISTER_ROW = ROLE_AGENTS[PROPERTY_REC_ID]["registerRow"]
+RENT_REGISTER_ROW = ROLE_AGENTS[RENT_REC_ID]["registerRow"]
 
 # ─── Deterministic routing lanes (ordered, first match wins) ─────────
 #
@@ -1682,6 +1694,9 @@ CHECK_KEYS = ("handled", "roy", "machine", "open-task", "trigger")
 CHECK_TRIGGERS = ("money", "data-request", "legal", "deadline", "obligation",
                   "unknown-sender", "kevin-asked", "none")
 REPORT_TYPES = ("Analysis", "Research", "Admin", "Drafting", "Audit", "Build")
+# What a trial agent may not submit: the shapes that act without send-email.py (see cmd_submit).
+TRIAL_ACTING_SHAPE_RE = re.compile(
+    r"^\s*(PASS TO ROY:|CALENDAR:|MARK FOR PAYMENT|DOCUMENT:|POST:|SIGNERS:)", re.I | re.M)
 CHECK_EXEMPT_RE = re.compile(
     r"^\s*(CLOSE PROPOSAL:|PASS TO ROY:|CALENDAR:|MARK FOR PAYMENT|DOCUMENT:|POST:)", re.I)
 
@@ -2872,6 +2887,7 @@ def build_queue(args=None):
     approved_hb, changes_hb, new_work, routing = [], [], [], []
     decided = []
     own_signal = []
+    trial_checked = []
     creditor_ok = bool(role_roster.get(CREDITOR_REC_ID, {}).get("dispatchable"))
     creditor_count = 0
     # The property lane needs BOTH the register lever and a readable book:
@@ -3033,6 +3049,12 @@ def build_queue(args=None):
         # time, and 2058's Short was left stuck processing on the channel. Listed under ownGoSignal, never hidden.
         if t["outcome"] and own_go_signal(t["agentId"]):
             own_signal.append(t)
+            continue
+        # A TRIAL AGENT'S APPROVED CARD IS CHECKED, NEVER CARRIED OUT (2 Oct 2026). Handing it to a carry-out run
+        # would have an agent try a send that send-email.py refuses, every 30 minutes, for ever. `trial-settle`
+        # closes it in code with Kevin's verdict on the task. Listed under trialChecked, never hidden.
+        if t["outcome"] in APPROVED and trial_problem([t["agentId"]]):
+            trial_checked.append(t)
             continue
         if t["outcome"] in APPROVED and t["agentId"]:
             approved_hb.append(t)
@@ -3199,6 +3221,7 @@ def build_queue(args=None):
         # or parked on a sign-in. Listed with the reason, never dropped.
         "idleHandbacks": idle_hb,
         "ownGoSignal": own_signal,
+        "trialChecked": trial_checked,
         # Tasks a sign-in just reopened (ids): the pickup run and the 30-minute
         # poll work these first, whichever lane classified them.
         "signinReopened": signin_reopened,
@@ -3232,6 +3255,7 @@ def build_queue(args=None):
             "approvedHandbacks": len(approved_hb),
             "idleHandbacks": len(idle_hb),
             "ownGoSignal": len(own_signal),
+            "trialChecked": len(trial_checked),
             "changesRequested": len(changes_hb),
             # Redos Kevin asked to delay. Demoted behind new work rather than
             # dropped, and counted here so one sitting for weeks stays visible.
@@ -3964,6 +3988,15 @@ def cmd_submit(args):
     if not output:
         # An empty Agent Output makes the Slack post say "nothing to judge".
         sys.exit("ERROR: refusing to submit an empty Agent Output")
+    # A TRIAL AGENT SUBMITS DRAFTS, NOTHING THAT ACTS (2 Oct 2026). Every shape below is carried
+    # out by something other than send-email.py (Roy's handover email, the diary, the payment
+    # list, Adobe, the post), so the send refusal alone would not hold it.
+    trial = trial_problem([args.agent])
+    if trial and TRIAL_ACTING_SHAPE_RE.search(output):
+        sys.exit(f"ERROR: refusing to submit {args.task}: {trial}.\n"
+                 "       A trial agent's card is a draft for Kevin to check: an email (TO / FROM /\n"
+                 "       SUBJECT) or a plain report. PASS TO ROY, CALENDAR, MARK FOR PAYMENT,\n"
+                 "       DOCUMENT and POST shapes act on approval and are not open to it.")
     # Read before EITHER prepend: --tier1 is set by the dispatch queue from a
     # Notes match too, so only a banner the agent wrote into its own file
     # counts as the agent's word for decision_level's close categories.
@@ -6401,6 +6434,36 @@ def cmd_complete(args):
     })
     ledger_append(args.task, "done")
     print(json.dumps({"completed": args.task}))
+
+
+# ─── TRIAL CARDS ARE SETTLED IN CODE (2 Oct 2026) ─────────────────────
+#
+# A trial agent's card is the parallel run GUARDRAILS asks for: Kevin's verdict
+# is the whole result and nothing is sent. So an approved one needs no agent and
+# no carry-out, only its mark. This runs in the half-hourly poll, after `lessons`
+# (so a note Kevin ticked Remember on is stored first), and closes every approved
+# trial card with the verdict in Notes. A rejected card is closed by the queue
+# page already; a sent-back one goes round the redo loop like any other card.
+def trial_approved_tasks():
+    rows = query_tasks("AND(LEN({Approval Outcome}&'')>0, NOT({Status}='Completed'), NOT({Status}='Cancelled'))")
+    out = []
+    for rec in rows:
+        t = task_view(rec)
+        if t["outcome"] in APPROVED and trial_problem([t["agentId"]]):
+            out.append(t)
+    return out
+
+
+def cmd_trial_settle(args):
+    settled = []
+    for t in trial_approved_tasks():
+        stamp = note_line("trial-settle", f"{TRIAL_STAMP}: Kevin's verdict was '{t['outcome']}'. Nothing was sent: "
+                                          f"{trial_problem([t['agentId']])}.")
+        patch_task(t["id"], {AF["status"]: "Completed", AF["completion"]: now_iso(),
+                             AF["notes"]: append_notes(t["notes"], stamp)})
+        ledger_append(t["id"], "done")
+        settled.append({"task": t["id"], "name": t["name"], "outcome": t["outcome"]})
+    print(json.dumps({"trialSettled": settled}))
 
 
 # ─── THE BLOCKER LOOP (Kevin, 25 Sep 2026) ────────────────────────────
@@ -9182,6 +9245,10 @@ def main():
     rt.add_argument("--type", required=True)
     rt.add_argument("--reason", required=True)
 
+    sub.add_parser("trial-settle",
+                   help="close every approved card of a trial agent as checked: "
+                        "Kevin's verdict goes in Notes and nothing is sent")
+
     sub.add_parser("lessons",
                    help="write every lesson Kevin asked to be remembered into "
                         "the agent files. Deterministic, idempotent, safe to "
@@ -9270,7 +9337,7 @@ def main():
             "annotate": cmd_annotate, "intent": cmd_intent,
             "complete": cmd_complete, "verify": cmd_verify,
             "score": cmd_score, "reconcile": cmd_reconcile,
-            "lessons": cmd_lessons, "revise": cmd_revise, "retype": cmd_retype,
+            "lessons": cmd_lessons, "trial-settle": cmd_trial_settle, "revise": cmd_revise, "retype": cmd_retype,
             "block": cmd_block, "unblock": cmd_unblock, "blockers": cmd_blockers,
             "attach": cmd_attach, "outcome": cmd_outcome,
             "reassign": cmd_reassign, "ledger": cmd_ledger,
