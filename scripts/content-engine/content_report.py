@@ -91,6 +91,9 @@ def teaser_only_days(ledger, out, gaps, carded):
                   and all(v.get("status") == "rendered" for v in vs) and not any(v.get("role") == "episode" for v in vs))
 
 
+NOT_RENDERED = "not rendered yet"
+
+
 def blocker_why(day, sent_back, holds, waiting, qa_blocked, qa_waiting, teaser_only, no_card, failed):
     """In plain words, why a day is not going out. Every state a day can sit in is named: a reason that falls through
     to a wrong one is how 2062 hid for three days."""
@@ -105,19 +108,24 @@ def blocker_why(day, sent_back, holds, waiting, qa_blocked, qa_waiting, teaser_o
     if day in teaser_only: return "the engine has found only its teaser, no full episode"
     if day in no_card: return "rendered, its card is not raised yet"
     if day in failed: return "its render failed"
-    return "not rendered yet"
+    return NOT_RENDERED
 
 
-def left_behind(ledger, approvals, out, cursor, gaps, ready, holds, why, start=0):
-    """Days with footage or a card that the run has gone past, or that are on hold, and that are not on YouTube and
-    not about to go (2 Oct 2026). The publisher no longer waits for such a day, so the report names every one with
-    its reason: a day passed in silence is a day that never publishes. B-roll alone is not an episode."""
+def left_behind(ledger, approvals, out, cursor, gaps, ready, named, why, start=0):
+    """Days with footage or a card that are not out and not about to go, each with its reason (2 Oct 2026). The
+    publisher no longer waits for such a day, so the stalled queue that used to give it away is gone and the report
+    must name it: a day passed in silence is a day that never publishes. Listed: a day the run has gone past, and any
+    day in `named` (on hold, or one the publisher could not publish) wherever the run is. `out` is the days with a
+    YouTube link. A day simply waiting its turn to render is left out: the night takes the oldest waiting day first
+    and tonight's plan shows it (review, 2 Oct 2026: one approved day far ahead would list the whole backlog).
+    B-roll alone is not an episode."""
     days = {int(d) for d in approvals if str(d).isdigit()}
     for v in ledger.values():
         d = v.get("episode") or (v.get("day") if v.get("status") != "broll" else None)
         if d: days.add(d)
-    return [{"day": d, "why": why(d)} for d in sorted(days)
-            if d >= start and (d < cursor or d in holds) and d not in gaps and d not in out and d not in ready]
+    rows = [{"day": d, "why": why(d)} for d in sorted(days)
+            if d >= start and (d < cursor or d in named) and d not in gaps and d not in out and d not in ready]
+    return [r for r in rows if r["why"] != NOT_RENDERED]
 
 
 def build(now=None, state=None, approvals=None, ledger=None, sync_state=None, plan=None, skipped=None, holds=None, skipped_ruled=None):
@@ -160,8 +168,13 @@ def build(now=None, state=None, approvals=None, ledger=None, sync_state=None, pl
     waiting_cards = sorted(int(d) for d, a in approvals.items() if a.get("task") and not a.get("verdict"))
     # the publisher's own rule, fed the way publish.run feeds it (2 Oct 2026): every approved day with nothing on
     # YouTube goes, lowest first, and waits for no other day; a held day is not publishable
-    ready = publish.ready_to_publish(state, set(approved) - set(holds))
-    on_youtube = {int(k) for k, e in episodes.items() if publish.stage_for(e, True) != "youtube"}
+    on_youtube = {int(k) for k, e in episodes.items() if publish.stage_for(e, True) != "youtube"}   # a YouTube post exists, out or not
+    linked = {int(k) for k, e in episodes.items() if e.get("youtube_link")}
+    # an approved day the publisher tried and could not put on YouTube says why on its entry (publish.note_refusal):
+    # it is named as not out, never promised as going out
+    refused = {int(k): (e["not_published"].get("why") or "no reason recorded") for k, e in episodes.items()
+               if isinstance(e.get("not_published"), dict) and int(k) in approved and int(k) not in on_youtube}
+    ready = [d for d in publish.ready_to_publish(state, set(approved) - set(holds)) if d not in refused]
     blocked = {d: "; ".join(a["qa_blocked"].get("failures") or [])[:200] for d, a in approvals.items() if isinstance(a, dict) and a.get("qa_blocked")}
     # A card Kevin sent back (or rejected) is neither waiting for him nor approved. Until 21 Sep 2026 it fell out of the
     # report, and 2062 held every later day for three days while the page said "No episode cards wait for you".
@@ -176,10 +189,14 @@ def build(now=None, state=None, approvals=None, ledger=None, sync_state=None, pl
     rendered_days = {v.get("episode") for v in ledger.values() if v.get("status") == "rendered" and v.get("role") == "episode" and v.get("episode")}   # the long clip, not a teaser
     carded = {int(d) for d in approvals}
     no_card = sorted(d for d in rendered_days if d not in carded and d not in on_youtube and d not in gaps)
-    behind = left_behind(ledger, approvals, on_youtube, cursor, gaps, ready, holds,
-                         lambda d: blocker_why(d, sent_back, holds, waiting_cards, {int(x) for x in blocked},
-                                               {int(x) for x, a in approvals.items() if isinstance(a, dict) and a.get("qa_waiting")},
-                                               teaser_only, no_card, set(failed) | set(retrying)), watch.start_day() or 0)
+    def why_not_out(d):
+        if d in refused: return "the publisher could not publish it: " + refused[d]
+        if d in on_youtube:                                  # a post record with no link: an upload that died, or one GoHighLevel failed
+            return "its YouTube post is %s, with no link yet" % ((youtube_post(episodes[str(d)]) or {}).get("status") or "not confirmed")
+        return blocker_why(d, sent_back, holds, waiting_cards, {int(x) for x in blocked},
+                           {int(x) for x, a in approvals.items() if isinstance(a, dict) and a.get("qa_waiting")},
+                           teaser_only, no_card, set(failed) | set(retrying))
+    behind = left_behind(ledger, approvals, linked, cursor, gaps, ready, set(holds) | set(refused), why_not_out, watch.start_day() or 0)
     try:
         # plan the night the way the night will: its scan puts a failed clip back first (watch.requeue_failed)
         tonight = plan if plan is not None else watch.plan(requeued_copy(ledger), nightly_slots())[0]
@@ -243,10 +260,12 @@ def headline(r):
     if sent: ask += "; " + "; ".join("Episode %d %s, not resubmitted" % (s["day"], "rejected" if s.get("rejected") else "sent back") for s in sent)
     # a day the run has gone past for any other reason is said too: nothing waits for it now, so nothing else will say it
     others = [b for b in r.get("leftBehind") or [] if b["day"] not in {s["day"] for s in sent}]
-    if others: ask += "; " + "; ".join("Episode %d not out yet (%s)" % (b["day"], b["why"]) for b in others)
+    if others: ask += "; " + "; ".join("Episode %d not out yet (%s)" % (b["day"], b["why"]) for b in others[:HEADLINE_BEHIND])
+    if len(others) > HEADLINE_BEHIND: ask += "; and %d more not out yet (the Publishing page lists them)" % (len(others) - HEADLINE_BEHIND)
     return "Content: %s. %s. %s." % (out, nxt, ask)
 
 
+HEADLINE_BEHIND = 4          # the 08:00 line is cut at 900 characters; the page carries the whole list
 UNPAUSE_AFTER_DAYS = 7
 
 
@@ -727,13 +746,29 @@ def _selftest():
     assert why58({"2058": {"qa_waiting": {"at": "x"}}}) == {"day": 2058, "why": "its card waits for the files to be readable"}
     assert why58({"2058": {"qa_blocked": {"failures": ["no Learnings clip"]}}}) == {"day": 2058, "why": "it failed its output check"}
     assert why58({}, {"x": {"day": 2058, "status": "failed"}, "y": {"episode": 2059}}) == {"day": 2058, "why": "its render failed"}
-    assert why58({}, {"x": {"day": 2058, "status": "new"}, "y": {"episode": 2059}}) == {"day": 2058, "why": "not rendered yet"}
+    assert why58({}, {"x": {"day": 2058, "status": "new"}, "y": {"episode": 2059}}) == {}, "a day waiting its turn to render is the backlog, not a day left behind"
+    # review, 2 Oct 2026: one approved day far ahead of the run publishes, as ruled. The backlog between is not listed day by day
+    far_led = dict({"d%d" % d: {"day": d, "status": "new"} for d in range(2060, 2200)}, s={"day": 2058, "status": "failed"})
+    far = build(now, {"_cursor": 2210, "2210": on_yt()}, {"2210": {"verdict": "approved", "task": "t"}}, far_led, {}, plan=[], skipped=[])
+    assert far["leftBehind"] == [{"day": 2058, "why": "its render failed"}], "the backlog is not a list of 140 days: %s" % far["leftBehind"][:3]
+    many = build(now, {"_cursor": 2210, "2210": on_yt()}, {"2210": {"verdict": "approved", "task": "t"}}, {"f%d" % d: {"day": d, "status": "failed"} for d in range(2060, 2070)}, {}, plan=[], skipped=[])
+    assert len(many["leftBehind"]) == 10 and many["headline"].endswith("; and 6 more not out yet (the Publishing page lists them)."), many["headline"][-160:]
+    assert len(many["headline"]) < 900, "the 08:00 line fits: %d" % len(many["headline"])
+    # an upload that died leaves a post record with no link: the publisher waits on it for ever, so the report names it
+    dead = {"posts": {"youtube|full|y": {"platform": "youtube", "clip": "full", "status": "creating"}}}
+    dd = build(now, {"_cursor": 2059, "2058": dead, "2059": on_yt()}, {"2058": {"verdict": "approved", "task": "t"}, "2059": {"verdict": "approved", "task": "t2"}}, two, {}, plan=[], skipped=[])
+    assert dd["nextInOrder"] == [] and dd["leftBehind"] == [{"day": 2058, "why": "its YouTube post is creating, with no link yet"}], dd["leftBehind"]
+    # an approved day the publisher tried and could not publish is never promised as going out, wherever the run is
+    rf = build(now, {"_cursor": 2057, "2058": {"not_published": {"why": "session text is in its copy", "since": "x"}}},
+               {"2058": {"verdict": "approved", "task": "t"}, "2059": {"verdict": "approved", "task": "t2"}}, two, {}, plan=[], skipped=[])
+    assert rf["nextInOrder"] == [2059] and rf["leftBehind"] == [{"day": 2058, "why": "the publisher could not publish it: session text is in its copy"}], (rf["nextInOrder"], rf["leftBehind"])
+    assert "Episode 2058 not out yet (the publisher could not publish it: session text is in its copy)" in rf["headline"], rf["headline"]
     assert why58({}, {"x": {"day": 2058, "status": "broll"}, "y": {"episode": 2059}}) == {}, "a day of B-roll only is not an episode left behind"
     assert why58({}, {"y": {"episode": 2059}}) == {}, "a day never recorded is not behind"
     import watch as _w2; real_g = _w2.gap_days; _w2.gap_days = lambda path=None: {2058}
     try: assert why58({"2058": {"task": "t"}}) == {}, "a gap day fills an old hole on its own list; it is not behind the run"
     finally: _w2.gap_days = real_g
-    print(json.dumps({"checks": 74, "failed": []}))
+    print(json.dumps({"checks": 82, "failed": []}))
 
 
 if __name__ == "__main__":

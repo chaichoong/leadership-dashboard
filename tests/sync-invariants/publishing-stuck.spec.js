@@ -94,6 +94,22 @@ test('a report with nothing stuck shows no stuck rows (an older report without t
   await expect(body).toContainText('No approved episode is waiting to go out.');
 });
 
+// Review, 2 Oct 2026: a day the page already treats as normal (a card waiting for Kevin, a render retrying tonight)
+// must not turn the "Nothing stuck" check red or show twice; a day nothing else names must do both.
+test('a day left behind shows once, and only a day nothing else names counts as stuck', async ({ page }) => {
+  await openPublishing(page, [report({ sentBack: [], teaserOnly: [], waitingForKevin: [2081], retryTonight: [2084], leftBehind: [
+    { day: 2081, why: 'its card waits for your approval' }, { day: 2084, why: 'its render failed' },
+    { day: 2079, why: 'its YouTube post is creating, with no link yet' }] })]);
+  const body = page.locator('#body');
+  await expect(body).toContainText('Episode 2079: its YouTube post is creating, with no link yet. Later episodes have gone out without it.');
+  await expect(body).not.toContainText('Episode 2081: its card waits for your approval');
+  await expect(body).not.toContainText('Episode 2084: its render failed');
+  const unnamed = await page.evaluate(() => behindUnnamed({ sentBack: [{ day: 2062 }], teaserOnly: [2066], waitingForKevin: [2081], qaBlocked: { 2070: 'x' },
+    failedRenders: [2071], retryTonight: [2084], renderedNoCard: [2085],
+    leftBehind: [2062, 2066, 2070, 2071, 2079, 2081, 2084, 2085].map(day => ({ day, why: 'w' })) }).map(b => b.day));
+  expect(unnamed).toEqual([2079]);
+});
+
 test('a rejected card and a sent-back day say so, and neither claims to hold another episode', async ({ page }) => {
   await openPublishing(page, [report({ leftBehind: [], sentBack: [
     { day: 2063, since: '19 Sep', feedback: '', rejected: true },

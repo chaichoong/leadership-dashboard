@@ -1037,6 +1037,14 @@ def moves_cursor(day, gaps):
     return day not in gaps
 
 
+def note_refusal(entry, why, save):
+    """An approved day the run could not put on YouTube says why on its own entry. Nothing waits behind such a day
+    any more, so the stalled queue that used to give it away is gone: the report reads this instead of promising the
+    day every hour (review, 2 Oct 2026). Cleared the moment its YouTube post exists."""
+    if (entry.get("not_published") or {}).get("why") != why:
+        entry["not_published"] = {"why": why, "since": now_utc()}; save()
+
+
 HOLD_FILE = os.path.expanduser("~/.config/od/content_engine_hold_days")
 
 
@@ -1111,17 +1119,22 @@ def run(dry_run=False, limit=3):
             entry = state.setdefault(str(day), {})
             recs = bundle(day)
             full = recs["Long Form Video"]
-            if not full: continue
+            stage = stage_for(entry, yt_ok)
+            unposted = stage in ("youtube", "wait-youtube-account") and not dry_run   # approved, nothing on YouTube: a skip is said
+            if not full:
+                if unposted: note_refusal(entry, "it has no Long Form Video record", save)
+                continue
             leak = pc.session_leak(recs)
             if leak:
                 # 24 Sep 2026: a session's close-out block rode on the copy of 2066-2071 onto YouTube and Spotify. The writer now
                 # runs with no hooks and cuts such text; this is the last stop before anything is posted, for every stage.
                 print("episode %d: NOT published: session text in %s (remove it: platform_copy.py clean --day %d)"
                       % (day, ", ".join("%s %s" % (c, f) for c, f, _ in leak), day), file=sys.stderr)
+                if unposted: note_refusal(entry, "session text is in its copy", save)
                 continue
             test = mode() == "test"
-            stage = stage_for(entry, yt_ok)
             if full["fields"].get("Record Status") not in PUBLISHABLE:
+                if unposted: note_refusal(entry, "its record status is %r, not one the publisher takes" % full["fields"].get("Record Status"), save)
                 # 15 Sep 2026: 2056 and 1841 were marked Published while their podcast had been refused, and this line
                 # skipped Published records before the retry, so the podcast never went out. Only the extras run here.
                 if full["fields"].get("Record Status") == STATUS_PUBLISHED and stage == "done" and not ahead_of_order(day, gaps, state) and not dry_run:
@@ -1136,6 +1149,7 @@ def run(dry_run=False, limit=3):
             if stage != "youtube" and ahead_of_order(day, gaps, state):
                 continue                                   # named once in the 'ahead of the run' line above
             if stage == "wait-youtube-account":
+                if unposted: note_refusal(entry, "no YouTube account is connected", save)
                 print("episode %d: approved, waiting for a YouTube account in GoHighLevel (Kevin's click: publish.py youtube-link)" % day); continue
             if stage == "wait-youtube-link":
                 print("episode %d: YouTube post scheduled, waiting for it to publish before the socials go out" % day); continue
@@ -1156,6 +1170,13 @@ def run(dry_run=False, limit=3):
             if done >= limit: break
             st_no = 1 if stage == "youtube" else 2
             n = schedule_stage(day, entry, recs, acct_map, st_no, dry_run, index=per_stage[st_no], save=save)
+            if st_no == 1 and not dry_run:
+                # Stage 1 can come back truthy with nothing posted (a placeholder refused, an upload GoHighLevel turned
+                # down). Such a day is tried again every run now, so it must not use up the run's limit or move the
+                # cursor: three refused days would keep every later episode off YouTube (review, 2 Oct 2026).
+                if stage_for(entry, yt_ok) == "youtube":
+                    note_refusal(entry, "its YouTube post was refused or had nothing to post (the publisher's log says which)", save); n = 0
+                elif entry.pop("not_published", None): save()
             if n: per_stage[st_no] += 1
             if n and st_no == 1 and not dry_run and moves_cursor(day, gaps): state[CURSOR_KEY] = max(cursor(state), day); save()   # a late day never pulls it back
             done += 1 if n else 0
@@ -1172,6 +1193,8 @@ def run(dry_run=False, limit=3):
             # whole hourly run, so every later episode waited too. One episode failing is one line, and the rest go on.
             print("episode %d: publishing stopped for this episode this run (%s); the other episodes carry on" % (day, str(ex)[-200:]), file=sys.stderr)
             import traceback; traceback.print_exc()
+            ent = state.setdefault(str(day), {})
+            if not dry_run and stage_for(ent, yt_ok) == "youtube": note_refusal(ent, "it stopped on an error: %s" % str(ex)[-160:], lambda: None)
             failed.append(day); save()
     if failed:
         raise SystemExit("publish: %d episode(s) stopped on an error this run: %s" % (len(failed), ", ".join(map(str, failed))))   # still a failed run
@@ -1761,8 +1784,22 @@ def _selftest_never_waits():
         assert go({2080, 2081, 2082, 2083}) == [], "nothing goes to YouTube twice"
         fails.add(2084)
         assert go({2084, 2085}) == [2085] and state[CURSOR_KEY] == 2085, "an episode that fails to upload does not hold the next: %s" % booked
+        assert "Drive download failed" in state["2084"]["not_published"]["why"], "the day that stopped says why on its own entry: %s" % state["2084"]
         fails.clear()
         assert go({2084, 2086, 2087}, hold={2086: "reinstate the clip"}) == [2084, 2087], "a held day holds only itself: %s" % booked
+        assert "not_published" not in state["2084"], "the note goes the moment the day is on YouTube"
+        # a gap day (Kevin's catch-up list) goes and never moves the cursor; a day already on YouTube above the cursor
+        # (2194: posted before the run reached it) is neither uploaded again nor worked ahead of the run
+        g["watch"] = _types.SimpleNamespace(load_ledger=lambda: {}, gap_days=lambda path=None: {1799})
+        state["2194"] = {"youtube_link": "https://youtu.be/2194", "posts": {"youtube|full|yt": {}}}
+        assert go({1799, 2194}) == [1799] and booked == [(1799, 1), (1799, 2)] and state[CURSOR_KEY] == 2087, (booked, state[CURSOR_KEY])
+        # three days whose YouTube post is refused each run (stage 1 comes back truthy, nothing posted) must not use up
+        # the run's limit: the day after them still goes, and each refused day says why
+        g["watch"] = _types.SimpleNamespace(load_ledger=lambda: {}, gap_days=lambda path=None: set())
+        real_schedule = g["schedule_stage"]
+        g["schedule_stage"] = lambda day, entry, recs, am, st_no, dry_run=False, index=0, save=None: 1 if day in (2088, 2089, 2090) else real_schedule(day, entry, recs, am, st_no, dry_run, index, save)
+        assert go({2088, 2089, 2090, 2091}) == [2091] and state[CURSOR_KEY] == 2091, "refused days do not starve the limit or move the cursor: %s %s" % (booked, state[CURSOR_KEY])
+        assert all("refused" in state[str(d)]["not_published"]["why"] for d in (2088, 2089, 2090)), "each refused day says why"
     finally:
         g.update(saved)
 
