@@ -57,6 +57,7 @@ const ESTATE_SCRIPTS = [
   'scripts/utilita-balance.py',
   'scripts/payment-run.py',
   'scripts/tenant-leads.py',
+  'scripts/rent-check.py',
   'scripts/roy-assistant.py',
   'scripts/private-name-guard.py',
   'scripts/host-move.py',

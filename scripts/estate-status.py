@@ -81,7 +81,10 @@ STATUSES = ("Worked", "Failed", "Blocked", "Skipped", "Idle", "Running")
 # 10-minute refresh would overwrite the report's headline with an Idle line.
 REPORT_ROWS_OWNED_ELSEWHERE = ("loop-health", "allowance", "content-publishing",
                                # scripts/tenant-leads.py, the tenant-finding chain's monitor (25 Sep 2026)
-                               "tenant-chain")
+                               "tenant-chain",
+                               # scripts/rent-check.py, the daily rent check's report (2 Oct 2026). Its
+                               # key differs from the job's (rent-check), whose own row this writer keeps.
+                               "rent-position")
 
 # Why a run did not work, in Kevin's words. Matched against the wrapper's
 # reason and the last 600 characters the job printed. Order matters: the first

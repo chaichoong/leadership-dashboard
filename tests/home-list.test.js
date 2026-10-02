@@ -169,6 +169,32 @@ describe('Home picks exactly what the 09:00 brief picks', () => {
   });
 });
 
+describe('the rent line (scripts/rent-check.py, 2 Oct 2026)', () => {
+  const row = p => ({ fields: { Payload: JSON.stringify(p) } });
+  const LINE = '63 of 64 tenants paying (98.4%, floor 97.5%). Late: Unit 9 – 1 Example Road (2 days). Bank data as at 2 Oct 12:03.';
+
+  it('prints today\'s line with its light', () => {
+    expect(H.readRent(row({ asAt: TODAY, worst: 'fail', briefLine: LINE }), TODAY)).toEqual({ light: 'fail', current: true, text: LINE });
+    expect(H.readRent(row({ asAt: TODAY, worst: 'ok', briefLine: 'x' }), TODAY).light).toBe('ok');
+    expect(H.readRent(row({ asAt: TODAY, worst: 'purple', briefLine: 'x' }), TODAY).light).toBe('unknown');
+  });
+
+  it('a row that is missing, unread, damaged or from another day is red and says so, never a stale figure', () => {
+    const stale = H.readRent(row({ asAt: '2026-09-28', worst: 'ok', briefLine: LINE }), TODAY);
+    expect(stale.current).toBe(false);
+    expect(stale.light).toBe('fail');
+    expect(stale.text).not.toContain('63 of 64');
+    expect(stale.text).toContain('has not run today');
+    expect(H.readRent(undefined, TODAY)).toEqual({ light: 'fail', current: false, text: 'The rent check could not be read.' });
+    expect(H.readRent(null, TODAY).text).toBe('The rent check has not reported.');
+    expect(H.readRent({ fields: { Payload: '{broken' } }, TODAY).text).toContain('damaged report');
+  });
+
+  it('reads the row the rent check writes', () => {
+    expect(H.ESTATE_KEYS.rent).toBe('rent-position');
+  });
+});
+
 describe('the one list (the examples Kevin approved at the gate, 29 Sep 2026)', () => {
   const tasks = LIVE.map(H.toTask);
   const list = H.buildHomeList({ tasks, today: TODAY, needsRow: null, blockersRow: null, now: Date.parse(`${TODAY}T20:00:00Z`) });

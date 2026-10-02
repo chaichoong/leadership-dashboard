@@ -378,6 +378,14 @@
             },
             sumBy(arr,fn){return (arr||[]).reduce((s,x)=>s+(+fn(x)||0),0)},
             countWhere(arr,fn){return (arr||[]).filter(fn).length},
+            // Real Estate quarterly KPIs (js/re-kpis.js). The Q4 projects' compute code is
+            // one line each — return ctx.reKpis.namedUnits() — so the project and the
+            // dashboard card run the same rule.
+            reKpis:{
+                namedUnits:()=>reKpiForProject('units'),
+                namedRent:()=>reKpiForProject('rent'),
+                compliance:()=>reKpiForProject('compliance'),
+            },
         };
     }
 
@@ -536,6 +544,9 @@
         // fresh fetch to populate them, never the cache hit: the cache can be a
         // day old and the result below is saved (see newFreshDataGate).
         await (freshReady || _mainDataReadyPromise);
+        // The compliance KPI reads the certificate book, which is not in the main load.
+        // Never rejects: a failed fetch makes that one compute fail loudly instead.
+        await loadReCompliance();
         // Fetch the task list once for any project KPI that needs it.
         const tasksForKpi=await fetchTasksForKpi();
         const prospectsForKpi=await fetchProspectsForKpi();
@@ -634,8 +645,9 @@
                             headers:{'Authorization':`Bearer ${PAT}`,'Content-Type':'application/json'},
                             body:JSON.stringify({fields:payload,typecast:true}),
                         });
+                        local.kpiSaveError=resp.ok?null:'Airtable returned '+resp.status;
                         if(!resp.ok)console.warn('[runAutomatedKpis] PATCH',rec.id,'returned',resp.status);
-                    }catch(e){console.warn('[runAutomatedKpis] PATCH failed for',rec.id,e)}
+                    }catch(e){local.kpiSaveError='the save did not reach Airtable';console.warn('[runAutomatedKpis] PATCH failed for',rec.id,e)}
                 })();
             }catch(e){console.warn('[runAutomatedKpis] per-project error',e)}
         }
@@ -972,6 +984,7 @@
                 // When this data was actually true. The P&L header reads it so cached
                 // data is visibly cached rather than silently old.
                 window.dashDataAsOf = Date.now() - (cached.ageMs || 0);
+                window.dashDataFromCache = true;
                 renderDashboard(d.accounts, d.costs, d.tenancies, d.transactions, d.rentalUnits, d.tenants);
                 // The P&L renders off allTransactions but only on tab switch, so a
                 // refresh replaced the data underneath an open P&L and left the old
@@ -1048,6 +1061,7 @@
             });
             // Fresh from Airtable: as-of is now.
             window.dashDataAsOf = Date.now();
+            window.dashDataFromCache = false;
             renderDashboard(accounts, costs, tenancies, transactions, rentalUnits, tenants);
             // Same reason as the cache path above: an open P&L must follow the data.
             try { if (typeof refreshPnLIfActive === 'function') refreshPnLIfActive(); } catch (e) { console.warn('[loadDashboard] P&L re-render failed:', e); }
@@ -1502,6 +1516,267 @@
         }
     }
 
+    // ─── Q4 2026 Real Estate KPIs ────────────────────────────────────────
+    // Eight cards, worked out on every load from data already on the page plus the
+    // compliance book. The rules are in js/re-kpis.js; this section only turns
+    // Airtable records into the plain shapes those rules take, and draws the result.
+    // Every card carries its own alarms: a figure that cannot be trusted is shown
+    // as NOT UPDATING rather than as a number that looks fine.
+    let _reQ4 = null;               // last computed results (health bar + AI context read this)
+    let _reCompliance = null;       // { properties, certs, at } or { error }
+    let _reCompliancePromise = null;
+    let _reComplianceLoading = false;
+    const RE_COMPLIANCE_TTL_MS = 60000;
+
+    const reLinkIds = v => (Array.isArray(v) ? v : []).map(x => (x && typeof x === 'object') ? x.id : x).filter(Boolean);
+    const reSelName = v => (v && typeof v === 'object' && !Array.isArray(v)) ? (v.name || '') : String(Array.isArray(v) ? (v[0] || '') : (v || ''));
+    function reTodayIso() {
+        const n = new Date();
+        return `${n.getFullYear()}-${String(n.getMonth() + 1).padStart(2, '0')}-${String(n.getDate()).padStart(2, '0')}`;
+    }
+    function reTenancyRows() {
+        return (allTenancies || []).map(r => ({
+            id: r.id,
+            unitIds: reLinkIds(getField(r, F.tenUnit)),
+            tenantIds: reLinkIds(getField(r, F.tenLinkedTenant)),
+            surname: reSelName(getField(r, F.tenSurname)),
+            start: getField(r, F.tenStartDate) || '',
+            end: getField(r, F.tenEndDate) || '',
+            payStatus: getPaymentStatusName(getField(r, F.tenPayStatus)),
+            rent: Number(getField(r, F.tenRent)) || 0,
+            tenantActive: isTenantStatusActive(r),
+        }));
+    }
+    function reCostRows() {
+        return (allCosts || []).map(r => ({
+            name: String(getField(r, F.costName) || ''),
+            expected: Number(getField(r, F.costExpected)) || 0,
+            active: isCostActive(r),
+            businessIds: reLinkIds(getField(r, F.costBusiness)),
+        }));
+    }
+
+    // The named units and tenants, with their labels read live from Airtable. js/config.js
+    // holds record ids only: this repo is public, so no tenant name or address is in code.
+    function reNamedConfig() {
+        const unitName = {}, tenantName = {};
+        (allRentalUnits || []).forEach(u => { const n = reSelName(getField(u, F.unitName)); if (n) unitName[u.id] = n; });
+        (allTenants || []).forEach(t => { const n = reSelName(getField(t, F.tenantName)); if (n) tenantName[t.id] = n; });
+        const units = RE_Q4.units.map(u => ({ ...u, label: unitName[u.id] || u.label }));
+        const lines = RE_Q4.rent.map(l => ({
+            ...l,
+            label: l.tenantId ? (tenantName[l.tenantId] || l.label)
+                : (unitName[l.unitId] ? `${l.excludeTenantIds ? 'New tenant' : 'Tenant'}, ${unitName[l.unitId]}` : l.label),
+        }));
+        return { units, lines };
+    }
+
+    // The compliance book is not part of the main dashboard load. Fetched once per
+    // load (and reused for a minute, because the dashboard renders twice: cache, then
+    // fresh). A failed fetch is recorded, never swallowed: KPI 8 then shows red.
+    function loadReCompliance() {
+        const fresh = _reCompliance && !_reCompliance.error && Date.now() - _reCompliance.at < RE_COMPLIANCE_TTL_MS;
+        if (_reCompliancePromise && (_reComplianceLoading || fresh)) return _reCompliancePromise;
+        _reComplianceLoading = true;
+        _reCompliancePromise = (async () => {
+            try {
+                const [props, certs] = await Promise.all([
+                    airtableFetch(TABLES.properties, { 'fields[]': [RE_CERT.propName, RE_CERT.propAgent, RE_CERT.propNoGas] }),
+                    airtableFetch(RE_CERT.table, { 'fields[]': [RE_CERT.type, RE_CERT.property, RE_CERT.status, RE_CERT.renewalDate, RE_CERT.attachments] }),
+                ]);
+                _reCompliance = {
+                    at: Date.now(),
+                    properties: props.map(r => ({ id: r.id, name: reSelName(getField(r, RE_CERT.propName)), agent: reSelName(getField(r, RE_CERT.propAgent)), noGas: !!getField(r, RE_CERT.propNoGas) })),
+                    certs: certs.flatMap(r => reLinkIds(getField(r, RE_CERT.property)).map(propertyId => ({
+                        propertyId, type: reSelName(getField(r, RE_CERT.type)), status: reSelName(getField(r, RE_CERT.status)),
+                        renewal: getField(r, RE_CERT.renewalDate) || '', hasFile: (getField(r, RE_CERT.attachments) || []).length > 0,
+                    }))),
+                };
+            } catch (e) {
+                console.warn('[loadReCompliance] failed:', e);
+                _reCompliance = { error: true };
+            }
+            _reComplianceLoading = false;
+            return _reCompliance;
+        })();
+        return _reCompliancePromise;
+    }
+
+    // One rule per result, each in its own try: a rule that throws turns ITS card
+    // red and leaves the other seven standing.
+    function computeReQ4() {
+        const today = reTodayIso();
+        const failed = e => ({ value: null, alarms: [{ level: 'red', msg: 'Could not be worked out: ' + (e && e.message ? e.message : String(e)) }] });
+        const safe = fn => { try { return fn(); } catch (e) { console.error('[computeReQ4]', e); return failed(e); } };
+        const kpiCtx = safe(() => buildAutomatedKpiContext({ id: 're-q4' }));
+        // Normalised inside the guard too: one malformed row must turn the cards that
+        // need it red, not throw out of the render.
+        const rows = safe(() => ({ tenancies: reTenancyRows(), named: reNamedConfig(), unitIds: (allRentalUnits || []).map(u => u.id) }));
+        const need = () => { if (!rows.tenancies) throw new Error('the tenancy data could not be read'); return rows; };
+        const out = { at: new Date(), today, cached: window.dashDataFromCache !== false };
+        out.plan = safe(() => ReKpis.planCushion({ tenancies: need().tenancies, costs: reCostRows(), businessId: RE_Q4.businessId, budget: RE_VARIABLE_BUDGET_GBP }));
+        out.cash = safe(() => {
+            if (!kpiCtx.transactions) throw new Error('transactions did not load');
+            const costBusinessNames = {};
+            kpiCtx.costs.forEach(c => { costBusinessNames[c.id] = c.businesses; });
+            return ReKpis.cashCushion({ transactions: kpiCtx.transactions, costBusinessNames, businessName: RE_Q4.businessName, today, baselineMonths: RE_Q4.baselineMonths, feedStaleDays: RE_Q4.feedStaleDays });
+        });
+        out.units = safe(() => ReKpis.namedUnits({ units: need().named.units, tenancies: rows.tenancies, knownUnitIds: rows.unitIds, today }));
+        out.rent = safe(() => ReKpis.namedRent({ lines: need().named.lines, tenancies: rows.tenancies, knownTenantIds: rows.tenancies.flatMap(t => t.tenantIds), knownUnitIds: rows.unitIds, today }));
+        out.personal = safe(() => {
+            if (typeof buildMonthlyCashflow !== 'function' || typeof wealthMonthKeys !== 'function') throw new Error('the Wealth page rules are not loaded');
+            return ReKpis.personalNet({ months: buildMonthlyCashflow(wealthMonthKeys(3, 1)) });
+        });
+        out.compliance = safe(() => {
+            if (!_reCompliance) return { value: null, loading: true, alarms: [] };
+            if (_reCompliance.error) throw new Error('the compliance book did not load');
+            return ReKpis.compliance({ properties: _reCompliance.properties, certs: _reCompliance.certs, selfManagedAgent: RE_Q4.selfManagedAgent, expected: RE_Q4.expectedSelfManaged, today });
+        });
+        return out;
+    }
+
+    // What the three Q4 projects' KPI Compute Code calls (ctx.reKpis.*). A red alarm
+    // THROWS: the project then shows "Compute failed" and its KPI Last Updated stops
+    // moving, which is what the daily freshness invariant watches. Saving a number
+    // worked out from data that did not load would defeat that alarm.
+    let _reQ4ForCompute = null;     // one computeReQ4() shared by the projects in a single pass
+    function reKpiForProject(key) {
+        if (!_reQ4ForCompute || Date.now() - _reQ4ForCompute.at.getTime() > 2000) _reQ4ForCompute = computeReQ4();
+        const r = _reQ4ForCompute[key];
+        if (ReKpis.alarmLevel(r) === 'red') throw new Error(r.alarms.filter(a => a.level === 'red').map(a => a.msg).join(' '));
+        if (r.loading || typeof r.value !== 'number') throw new Error('not loaded yet');
+        const { alarms, ...detail } = r;
+        return { ...detail, notes: alarms.map(a => a.msg) };
+    }
+
+    const reGbp = n => (n == null || isNaN(n)) ? '—' : (n < 0 ? '−' : '') + '£' + Math.abs(Math.round(n)).toLocaleString('en-GB');
+    const reMonthName = key => key ? new Date(Number(key.slice(0, 4)), Number(key.slice(5, 7)) - 1, 1).toLocaleDateString('en-GB', { month: 'long' }) : '';
+    const reDay = isoDate => isoDate ? new Date(isoDate + 'T00:00:00').toLocaleDateString('en-GB', { day: 'numeric', month: 'short' }) : 'none';
+    const reRow = (label, value, cls = '') => `<div class="od-breakdown-row"><span${cls ? ` class="${cls}"` : ''}>${escHtml(label)}</span><span>${escHtml(String(value))}</span></div>`;
+
+    // One card. `result` carries the alarms; red replaces the reassuring sub-line with
+    // the reason, so a broken figure cannot be read as a quiet one.
+    function reCard({ title, value, sub, target, pct, rows, result }) {
+        const level = result && result.loading ? '' : ReKpis.alarmLevel(result);
+        const alarms = (result && result.alarms) || [];
+        const chip = level === 'red'
+            ? `<span class="od-status-badge danger">Not updating</span> `
+            : level === 'amber' ? `<span class="od-status-badge warning">Check</span> ` : '';
+        const alarmHtml = alarms.map(a => `<div class="od-breakdown-row"><span class="${a.level === 'red' ? 'text-red' : 'text-amber'}" style="word-break:break-word">${escHtml(a.msg)}</span></div>`).join('');
+        const targetLine = target === null
+            ? 'Target: set once this has run live'
+            : `Target 31 Dec: ${escHtml(target.committed)}${target.stretch ? ` committed, ${escHtml(target.stretch)} stretch` : ''}`;
+        const failed = level === 'red' && (!result || result.value === null); // the rule itself threw
+        const firstRed = alarms.find(a => a.level === 'red');
+        const redSub = level === 'red' ? `<span class="text-red">${escHtml(firstRed ? firstRed.msg : 'Could not be worked out.')}</span>` : (sub || '');
+        const bar = (pct == null || level === 'red') ? '' : `<div class="progress-bar"><div class="progress-bar-fill ${pct >= 100 ? 'green' : 'amber'}" style="width:${Math.max(0, Math.min(100, pct))}%"></div></div>`;
+        return expandableCard(title,
+            // Red means the inputs cannot be trusted, so no number is shown at all: a
+            // −£4,300 worked out from tenancies that never loaded is worse than a dash.
+            level === 'red' ? '—' : value,
+            `${chip}${redSub}<br>${targetLine}`,
+            `<div>${alarmHtml}${failed ? '' : (rows || '')}</div>`,
+            level === 'red' ? 'text-red' : '',
+            bar);
+    }
+
+    function renderReQ4() {
+        const host = document.getElementById('reQ4Cards');
+        if (!host) return;
+        const q = _reQ4 = computeReQ4();
+        const T = RE_Q4.targets;
+        const gbpTarget = t => t ? { committed: reGbp(t.committed), stretch: t.stretch ? reGbp(t.stretch) : '' } : null;
+        const pctOf = (v, t) => (t && t.committed && typeof v === 'number') ? (v / t.committed) * 100 : null;
+        const { plan, cash, units, rent, personal, compliance } = q;
+        const roll = cash.rolling || {}, last = cash.lastMonth || {}, base = cash.baseline || {};
+        const lastName = reMonthName(cash.lastMonthKey);
+        const cashValue = key => cash.rolling ? reGbp(roll[key]) : '—';
+        const cashSub = key => cash.rolling
+            ? `Rolling 31 days to ${escHtml(reDay(roll.end))} | ${escHtml(lastName)} ${reGbp(last[key])} | ${escHtml(RE_Q4.baselineLabel)} ${reGbp(base[key])}`
+            : '';
+        const budgetRows = reRow('Wages budget', reGbp(WAGES_TARGET_GBP)) + reRow('Maintenance budget', reGbp(MAINT_TARGET_GBP))
+            + reRow('Utilities budget', reGbp(UTILITIES_TARGET_GBP)) + reRow('Compliance budget', reGbp(COMPLIANCE_TARGET_GBP))
+            + reRow('Non-payment allowance', reGbp(CFV_TARGET_GBP));
+        const cashRows = cash.rolling ? (
+            reRow(`Rent received (${roll.rentCount} payments)`, fmt(roll.rent))
+            + reRow(`Property fixed costs paid (${roll.fixedCount} payments)`, '− ' + fmt(roll.fixed))
+            + reRow('Property cushion (cash)', fmt(roll.cushion))
+            + Object.keys(roll.variableLines).sort().map(k => reRow(`${k} paid`, '− ' + fmt(roll.variableLines[k]))).join('')
+            + reRow("Kevin's income from property (cash)", fmt(roll.income))
+            + reRow('Window', `${reDay(roll.start)} to ${reDay(roll.end)}`)
+            + reRow('Target', 'Same 31 Dec marker as the plan card. The gap between plan and cash is the leak.')
+            + reRow('Newest bank transaction', reDay(cash.newestTransaction))
+            + roll.mismatches.map(m => reRow(`Check: ${reDay(m.date)} ${m.description} (cost record is ${m.costBusiness})`, fmt(m.amount), 'text-amber')).join('')
+            + roll.untagged.map(m => reRow(`Left out, not tagged to property: ${reDay(m.date)} ${m.description}`, fmt(m.amount), 'text-amber')).join('')
+        ) : '';
+
+        const open = [...host.querySelectorAll('.kpi-card')].map(c => c.classList.contains('expanded'));
+        host.innerHTML = [
+            reCard({
+                title: "Kevin's income from property (plan)", result: plan,
+                value: reGbp(plan.income), target: gbpTarget(T.incomePlan), pct: pctOf(plan.income, T.incomePlan),
+                sub: `Property cushion ${reGbp(plan.cushion)} less the ${reGbp(plan.budget)} variable budget | income floor ${reGbp(CLEAR_PROFIT_TARGET)}`,
+                rows: reRow('Property cushion (plan)', fmt(plan.cushion)) + budgetRows + reRow("Kevin's income from property", fmt(plan.income))
+                    + reRow('If the CFV Actioned tenancies pay too', fmt(plan.incomeWithActioned)),
+            }),
+            reCard({
+                title: "Kevin's income from property (cash)", result: cash,
+                value: cashValue('income'), target: gbpTarget(T.incomeCash), pct: pctOf(roll.income, T.incomeCash), sub: cashSub('income'), rows: cashRows,
+            }),
+            reCard({
+                title: 'Property cushion (plan)', result: plan,
+                value: reGbp(plan.cushion), target: gbpTarget(T.cushionPlan), pct: pctOf(plan.cushion, T.cushionPlan),
+                sub: `${plan.inPaymentCount} ${plan.inPaymentCount === 1 ? 'tenancy' : 'tenancies'} In Payment ${reGbp(plan.inPaymentRent)} less ${plan.propertyCostCount} property costs ${reGbp(plan.propertyCosts)} | with CFV Actioned ${reGbp(plan.cushionWithActioned)}`,
+                rows: reRow(`Rent, In Payment (${plan.inPaymentCount} tenancies)`, fmt(plan.inPaymentRent))
+                    + reRow(`Property fixed costs (${plan.propertyCostCount})`, '− ' + fmt(plan.propertyCosts))
+                    + reRow('Property cushion (plan)', fmt(plan.cushion))
+                    + reRow(`Not counted: personal and other businesses (${plan.excludedCostCount} costs)`, fmt(plan.excludedCosts)),
+            }),
+            reCard({
+                title: 'Property cushion (cash)', result: cash,
+                value: cashValue('cushion'), target: gbpTarget(T.cushionCash), pct: pctOf(roll.cushion, T.cushionCash), sub: cashSub('cushion'), rows: cashRows,
+            }),
+            reCard({
+                title: 'Named units with a signed tenant in', result: units,
+                value: `${units.filled} of ${units.of}`, target: { committed: `${T.namedUnits.committed} of ${T.namedUnits.committed}`, stretch: `${T.namedUnits.stretch} of ${T.namedUnits.stretch}` },
+                pct: pctOf(units.filled, T.namedUnits),
+                sub: `With the stretch unit: ${units.value} of ${units.stretchOf}`,
+                rows: (units.rows || []).map(r => reRow(r.label + (r.stretch ? ' (stretch)' : ''), r.filled ? `In: ${r.tenant || 'tenant'}` : 'Empty', r.filled ? 'text-green' : '')).join(''),
+            }),
+            reCard({
+                title: 'New rent in payment from the named tenants', result: rent,
+                value: reGbp(rent.value), target: gbpTarget(T.namedRent), pct: pctOf(rent.value, T.namedRent),
+                sub: `Committed tenants ${reGbp(rent.committed)} | stretch ${reGbp(rent.stretch)} | a month`,
+                rows: (rent.rows || []).map(r => reRow(`${r.label}${r.stretch ? ' (stretch)' : ''}: ${r.status}`, fmt(r.rent), r.rent ? 'text-green' : '')).join(''),
+            }),
+            reCard({
+                title: 'Personal net cash flow', result: personal,
+                value: reGbp(personal.value), target: gbpTarget(T.personalNet), pct: pctOf(personal.value, T.personalNet),
+                sub: `${escHtml(reMonthName(personal.lastMonthKey))}, the last full month | 3-month average ${reGbp(personal.average)} | Wealth page rules`,
+                rows: (personal.months || []).map(m => reRow(`${reMonthName(m.key)} ${m.key.slice(0, 4)}`, fmt(m.net))).join('') + reRow('3-month average', fmt(personal.average || 0)),
+            }),
+            reCard({
+                title: 'Self-managed properties fully compliant', result: compliance,
+                value: compliance.loading ? '…' : `${compliance.value} of ${compliance.of}`,
+                target: { committed: `${T.compliance.committed} of ${T.compliance.committed}`, stretch: '' },
+                pct: compliance.loading ? null : pctOf(compliance.value, T.compliance),
+                sub: compliance.loading ? 'Loading the compliance book' : 'Gas or no gas, electrical inspection and insurance, each in date and on file',
+                rows: (compliance.rows || []).map(r => reRow(r.name, `Gas ${r.gas} | Electrical ${r.electrical} | Insurance ${r.insurance}`, r.compliant ? 'text-green' : '')).join(''),
+            }),
+        ].join('');
+        host.querySelectorAll('.kpi-card').forEach((c, i) => { if (open[i]) c.classList.add('expanded'); });
+
+        const results = [plan, cash, units, rent, personal, compliance];
+        const reds = results.filter(r => !r.loading && ReKpis.alarmLevel(r) === 'red').length;
+        const status = document.getElementById('reQ4Status');
+        if (status) {
+            const time = q.at.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' });
+            status.innerHTML = reds
+                ? `<span class="text-red">· worked out ${escHtml(time)} · ${reds} of 6 sources not updating</span>`
+                : `· worked out ${escHtml(time)} from ${q.cached ? 'saved data, refreshing' : 'live data'}`;
+        }
+    }
+
     function renderDashboard(accounts, costs, tenancies, transactions, rentalUnits, tenants) {
         const now = new Date();
         const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
@@ -1547,11 +1822,26 @@
         const activeCosts = costs.filter(r => isCostActive(r));
         const monthlyCosts = activeCosts.reduce((s, r) => s + (Number(getField(r, F.costExpected)) || 0), 0);
 
-        // Operating cushion = revenue − fixed costs. (Distinct from gross profit = revenue − COGS,
-        // and from operating profit = revenue − fixed − variable costs, which we'll compute elsewhere.)
+        // Operating cushion = rent − PROPERTY fixed costs (Kevin, 1 Oct 2026). Rent is Real Estate
+        // only, so subtracting Personal and Operations Director costs from it mixed his living
+        // costs into the property figure. Those costs stay on the Monthly Costs card above; the
+        // cushion ignores them. Rule and controls: ReKpis.planCushion in js/re-kpis.js.
         // Low = In Payment only minus costs; High = (In Payment + CFV Actioned) income minus costs.
-        const operatingCushionLow = inPaymentIncome - monthlyCosts;
-        const operatingCushionHigh = monthlyIncome - monthlyCosts;
+        // If the rule cannot run, the cushion shows as not-a-number rather than quietly
+        // falling back to the old mixed figure, and the rest of the dashboard still draws.
+        let rePlan;
+        try {
+            rePlan = ReKpis.planCushion({
+                tenancies: reTenancyRows(), costs: reCostRows(),
+                businessId: RE_Q4.businessId, budget: RE_VARIABLE_BUDGET_GBP,
+            });
+        } catch (e) {
+            console.error('[renderDashboard] property cushion could not be worked out:', e);
+            rePlan = { propertyCosts: NaN, propertyCostCount: 0, excludedCosts: NaN, excludedCostCount: 0, cushion: NaN, income: NaN };
+        }
+        const propertyCosts = rePlan.propertyCosts;
+        const operatingCushionLow = inPaymentIncome - propertyCosts;
+        const operatingCushionHigh = monthlyIncome - propertyCosts;
         const operatingCushionMarginLow = inPaymentIncome > 0 ? (operatingCushionLow / inPaymentIncome * 100).toFixed(2) : '0.00';
         const operatingCushionMarginHigh = monthlyIncome > 0 ? (operatingCushionHigh / monthlyIncome * 100).toFixed(2) : '0.00';
 
@@ -1639,7 +1929,7 @@
                 `<div class="detail-total"><span>Full Total (incl. CFV Actioned)</span><span>${fmt(monthlyIncome)}</span></div>` : ''),
                 ''
             )}
-            ${expandableCard('Monthly Costs', fmt(monthlyCosts), `${activeCosts.length} active costs`,
+            ${expandableCard('Monthly Costs', fmt(monthlyCosts), `${activeCosts.length} active costs | property ${fmt(propertyCosts)} (${rePlan.propertyCostCount}), personal and other ${fmt(rePlan.excludedCosts)} (${rePlan.excludedCostCount})`,
                 costSorted.map(r => {
                     const dueDay = getNumVal(r, F.costDueDay, null);
                     const dueDayStr = dueDay ? `Day ${dueDay}` : '—';
@@ -1651,7 +1941,7 @@
             <div class="kpi-card">
                 <div class="kpi-card-label">Monthly Operating Cushion (plan)</div>
                 <div class="kpi-card-value"><span style="color:var(--warning)">£${Math.floor(operatingCushionLow).toLocaleString('en-GB')}</span><span style="color:var(--text-muted);font-size:20px;margin:0 4px">–</span><span style="color:var(--success)">£${Math.floor(operatingCushionHigh).toLocaleString('en-GB')}</span></div>
-                <div class="kpi-card-sub">Contracted rent minus expected fixed costs — In Payment only → incl. CFV Actioned. This is the PLAN figure; the cash figure is the project KPI "Monthly operating cushion (cash)" and runs about £3,400 lower.</div>
+                <div class="kpi-card-sub">Contracted rent minus expected PROPERTY fixed costs — In Payment only → incl. CFV Actioned. Personal costs are not in it. This is the PLAN figure; the cash figure is on the "Property cushion (cash)" card below.</div>
             </div>
             <div class="kpi-card">
                 <div class="kpi-card-label">Operating Cushion Margin</div>
@@ -1659,6 +1949,19 @@
                 <div class="kpi-card-sub">Operating Cushion ÷ Monthly Income — In Payment only → incl. CFV Actioned</div>
             </div>
         `;
+
+        // Q4 Real Estate KPIs: drawn now from what is loaded, redrawn once the
+        // compliance book arrives.
+        const drawReQ4 = () => {
+            try { renderReQ4(); } catch (e) {
+                console.error('[renderDashboard] Q4 KPI cards failed:', e);
+                _reQ4 = null; // the health bar check reads this and fails
+                const host = document.getElementById('reQ4Cards');
+                if (host) host.innerHTML = '<div class="kpi-card"><div class="kpi-card-label">Q4 Real Estate KPIs</div><div class="kpi-card-sub text-red">Not updating. The cards could not be drawn. Refresh, and if it stays, the build needs a fix.</div></div>';
+            }
+        };
+        drawReQ4();
+        loadReCompliance().then(drawReQ4);
 
         // ── SECTION 2: Portfolio Overview ──
         const totalUnits = rentalUnits.length;
@@ -1864,11 +2167,11 @@
         // Defined at module level — see below
 
         // Variable cost reserve (sum of budgets)
-        const variableCostReserve = MAINT_TARGET_GBP + WAGES_TARGET_GBP + CFV_TARGET_GBP; // £4,000
+        const variableCostReserve = RE_VARIABLE_BUDGET_GBP;
         // Required operating cushion = clear profit target + variable cost budgets.
         // The operating cushion must be big enough to absorb variable costs AND still leave the
         // clear profit target behind — anything less means we're eating into the profit target.
-        const requiredOperatingCushion = CLEAR_PROFIT_TARGET + variableCostReserve; // £14,000
+        const requiredOperatingCushion = CLEAR_PROFIT_TARGET + variableCostReserve;
 
         // Traffic light uses £ targets now (actual vs budget)
         const maintNum = maintSpend;
@@ -1928,9 +2231,11 @@
                 </div>
                 <div class="kpi-card-detail">
                     <div>
-                        <div class="od-breakdown-row"><span>Maintenance budget</span><span>${fmt(MAINT_TARGET_GBP)}</span></div>
                         <div class="od-breakdown-row"><span>Wages budget</span><span>${fmt(WAGES_TARGET_GBP)}</span></div>
-                        <div class="od-breakdown-row"><span>CFV allowance</span><span>${fmt(CFV_TARGET_GBP)}</span></div>
+                        <div class="od-breakdown-row"><span>Maintenance budget</span><span>${fmt(MAINT_TARGET_GBP)}</span></div>
+                        <div class="od-breakdown-row"><span>Utilities budget</span><span>${fmt(UTILITIES_TARGET_GBP)}</span></div>
+                        <div class="od-breakdown-row"><span>Compliance budget</span><span>${fmt(COMPLIANCE_TARGET_GBP)}</span></div>
+                        <div class="od-breakdown-row"><span>Non-payment allowance</span><span>${fmt(CFV_TARGET_GBP)}</span></div>
                         <div class="od-breakdown-row" style="border-top:1px solid var(--border-default);margin-top:4px;padding-top:4px"><span>Variable cost reserve</span><span style="font-weight:600">${fmt(variableCostReserve)}</span></div>
                         <div class="od-breakdown-row"><span>Clear profit target</span><span style="font-weight:600">${fmt(CLEAR_PROFIT_TARGET)}</span></div>
                         <div class="od-breakdown-row" style="border-top:1px solid var(--border-default);margin-top:4px;padding-top:4px;font-weight:600;color:var(--text-primary)"><span>Required operating cushion</span><span>${fmt(requiredOperatingCushion)}</span></div>
@@ -2030,10 +2335,10 @@
 
         document.getElementById('aiCommentary').innerHTML = `
             <h3 class="od-section-header">Financial Health</h3>
-            <p>The portfolio generates ${fmt(inPaymentIncome)} confirmed monthly income (In Payment) with a further ${fmt(cfvActionedIncome)} from ${cfvActionedCount} CFV Actioned tenancies, giving a best-case total of ${fmt(monthlyIncome)}. Against ${fmt(monthlyCosts)} in fixed costs, the operating cushion margin ranges from ${operatingCushionMarginLow}% to ${operatingCushionMarginHigh}%. ${Number(operatingCushionMarginHigh) >= 40 ? 'The upper range is healthy.' : 'Margins are tight — cost reduction or occupancy gains are needed.'}</p>
+            <p>The portfolio generates ${fmt(inPaymentIncome)} confirmed monthly income (In Payment) with a further ${fmt(cfvActionedIncome)} from ${cfvActionedCount} CFV Actioned tenancies, giving a best-case total of ${fmt(monthlyIncome)}. Against ${fmt(propertyCosts)} in property fixed costs, the operating cushion margin ranges from ${operatingCushionMarginLow}% to ${operatingCushionMarginHigh}%. ${Number(operatingCushionMarginHigh) >= 40 ? 'The upper range is healthy.' : 'Margins are tight — cost reduction or occupancy gains are needed.'}</p>
 
             <h3 class="od-section-header" style="margin:16px 0 8px">Operating Cushion Target</h3>
-            <p>Target operating cushion: ${fmt(requiredOperatingCushion)}/month (${fmt(CLEAR_PROFIT_TARGET)} clear profit + ${fmt(variableCostReserve)} variable costs: ${fmt(MAINT_TARGET_GBP)} maintenance, ${fmt(WAGES_TARGET_GBP)} wages, ${fmt(CFV_TARGET_GBP)} CFV allowance). Current best-case operating cushion is ${fmt(operatingCushionHigh)} — ${ocOnTrack ? `a surplus of ${fmt(operatingCushionHigh - requiredOperatingCushion)} above target. You are on track.` : `a shortfall of ${fmt(requiredOperatingCushion - operatingCushionHigh)} (${ocProgressPct}% of target). Focus on filling voids and converting CFVs to close the gap.`}</p>
+            <p>Target operating cushion: ${fmt(requiredOperatingCushion)}/month (${fmt(CLEAR_PROFIT_TARGET)} clear profit + ${fmt(variableCostReserve)} variable costs: ${fmt(WAGES_TARGET_GBP)} wages, ${fmt(MAINT_TARGET_GBP)} maintenance, ${fmt(UTILITIES_TARGET_GBP)} utilities, ${fmt(COMPLIANCE_TARGET_GBP)} compliance, ${fmt(CFV_TARGET_GBP)} non-payment allowance). Current best-case operating cushion is ${fmt(operatingCushionHigh)} — ${ocOnTrack ? `a surplus of ${fmt(operatingCushionHigh - requiredOperatingCushion)} above target. You are on track.` : `a shortfall of ${fmt(requiredOperatingCushion - operatingCushionHigh)} (${ocProgressPct}% of target). Focus on filling voids and converting CFVs to close the gap.`}</p>
 
             <h3 class="od-section-header" style="margin:16px 0 8px">Operational Performance (31-Day)</h3>
             <p>Actual rental income over 31 days: ${fmt(rentalInc30)}. Maintenance spend of ${fmt(maintSpend)} is ${maintStatus === 'green' ? 'under' : maintStatus === 'amber' ? 'on' : 'over'} the ${fmt(MAINT_TARGET_GBP)} budget${maintStatus === 'red' ? ' — investigate whether reactive costs can shift to planned maintenance' : ''}. Wages at ${fmt(wagesSpend)} are ${wagesStatus === 'green' ? 'under' : wagesStatus === 'amber' ? 'on' : 'over'} the ${fmt(WAGES_TARGET_GBP)} budget.</p>
@@ -2131,6 +2436,10 @@
                 cfvExposure, rentalInc30, maintSpend, wagesSpend,
                 occupancyRate,
                 unreconciledCount: unreconciledTx.length,
+                propertyCosts,
+                propertyCushionPlan: rePlan.cushion,
+                kevinIncomeFromPropertyPlan: rePlan.income,
+                variableBudget: RE_VARIABLE_BUDGET_GBP,
             });
         }
 
@@ -2216,6 +2525,38 @@
                             const computed = auto.filter(p => p.kpiCurrent != null && p.kpiCurrent !== 0);
                             if (auto.length === 0) return { status: 'pass', detail: 'No automated-KPI projects — nothing to compute' };
                             return { status: 'pass', detail: `${computed.length}/${auto.length} automated KPIs have a current value` };
+                        }
+                    },
+                    {
+                        name: 'Q4 real estate KPIs updating', kind: 'automation', run: () => {
+                            if (!_reQ4) return { status: 'fail', detail: 'The Q4 KPI cards have not been worked out' };
+                            const names = { plan: 'plan cushion and income', cash: 'cash cushion and income', units: 'named units', rent: 'named rent', personal: 'personal net cash flow', compliance: 'compliance' };
+                            const keys = Object.keys(names);
+                            const red = keys.filter(k => !_reQ4[k].loading && ReKpis.alarmLevel(_reQ4[k]) === 'red');
+                            const amber = keys.filter(k => ReKpis.alarmLevel(_reQ4[k]) === 'amber');
+                            if (red.length) return { status: 'fail', detail: `Not updating: ${red.map(k => names[k]).join(', ')}. ${_reQ4[red[0]].alarms.find(a => a.level === 'red').msg}` };
+                            if (_reQ4.compliance.loading) return { status: 'warn', detail: 'Compliance book still loading' };
+                            if (amber.length) return { status: 'warn', detail: `Check: ${amber.map(k => names[k]).join(', ')}. ${_reQ4[amber[0]].alarms[0].msg}` };
+                            return { status: 'pass', detail: `All eight worked out at ${_reQ4.at.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })} · newest bank transaction ${reDay(_reQ4.cash.newestTransaction)}` };
+                        }
+                    },
+                    {
+                        name: 'Q4 project KPIs saved to their projects', kind: 'automation', run: () => {
+                            const ids = RE_Q4.projectIds;
+                            const projects = (typeof _strategicKpiProjects !== 'undefined' ? _strategicKpiProjects : []) || [];
+                            if (!projects.length) return { status: 'warn', detail: 'Projects table not yet loaded (loads in background)' };
+                            const found = projects.filter(p => ids.includes(p.id));
+                            if (found.length !== ids.length) return { status: 'fail', detail: `${found.length} of ${ids.length} Q4 real estate projects found` };
+                            // A closed project is history: it is no longer computed, by design.
+                            const mine = found.filter(p => !p.closedOn);
+                            if (!mine.length) return { status: 'pass', detail: 'All three projects are closed' };
+                            const broken = mine.filter(p => p.kpiComputeError);
+                            if (broken.length) return { status: 'fail', detail: `Compute failed: ${broken.map(p => p.name).join(', ')}. ${broken[0].kpiComputeError}` };
+                            const stale = mine.filter(p => !p.kpiLastUpdated || (Date.now() - new Date(p.kpiLastUpdated).getTime()) > 2 * 864e5);
+                            const unsaved = mine.filter(p => p.kpiSaveError);
+                            if (unsaved.length) return { status: 'fail', detail: `Worked out but not saved: ${unsaved.map(p => p.name).join(', ')}. ${unsaved[0].kpiSaveError}` };
+                            if (stale.length) return { status: 'warn', detail: `Not saved in the last 2 days: ${stale.map(p => p.name).join(', ')}` };
+                            return { status: 'pass', detail: `${mine.length} of ${mine.length} worked out in the last 2 days, no save refused` };
                         }
                     },
                     {

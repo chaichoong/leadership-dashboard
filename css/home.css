@@ -40,6 +40,7 @@ body.home-mode #tab-overview { display: block; }
 #tab-home .home-act:hover { background: var(--accent-soft); }
 
 #tab-home .home-tenants { margin: var(--space-4) 0 0; padding-top: var(--space-3); border-top: 1px solid var(--border-subtle); font-size: var(--fs-base); color: var(--text-primary); }
+#tab-home .home-rent { margin-top: var(--space-2); padding-top: 0; border-top: 0; }
 #tab-home .home-light { display: inline-block; width: 10px; height: 10px; border-radius: 50%; margin-right: var(--space-2); background: var(--text-muted); vertical-align: middle; }
 #tab-home .home-light-ok { background: var(--success); }
 #tab-home .home-light-warn { background: var(--accent-gold); }

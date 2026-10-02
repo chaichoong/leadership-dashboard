@@ -19,6 +19,7 @@ import sys
 # os/launch-plan.html (Launch Plan deleted, duplicated Strategy OS).
 FILE_TO_PAGE = {
     'js/dashboard.js':      'overview',
+    'js/re-kpis.js':        'overview',
     'js/cfv.js':            'cfv',
     'js/income.js':         'income',
     'js/costs.js':          'costs',

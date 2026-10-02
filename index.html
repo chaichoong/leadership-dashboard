@@ -11,7 +11,7 @@
     <link rel="stylesheet" href="css/sync-bar.css?v=3">
     <link rel="stylesheet" href="css/quick-task.css?v=2">
     <link rel="stylesheet" href="css/styles.css?v=23">
-    <link rel="stylesheet" href="css/home.css?v=1"><!-- Home tab (29 Sep 2026) -->
+    <link rel="stylesheet" href="css/home.css?v=2"><!-- Home tab (29 Sep 2026) -->
 </head>
 <body>
     <!-- Auth Screen -->
@@ -245,6 +245,12 @@
         <div class="section">
             <h2 class="section-title">Financial Overview</h2>
             <div class="cards-grid" id="financialCards"></div>
+        </div>
+
+        <!-- Q4 2026 Real Estate KPIs (js/re-kpis.js rules, rendered by dashboard.js) -->
+        <div class="section" id="reQ4Section">
+            <h2 class="section-title">Q4 2026 Real Estate KPIs <span id="reQ4Status" aria-live="polite" style="font-size:var(--fs-sm);color:var(--text-secondary);font-weight:var(--fw-regular);margin-left:6px"></span></h2>
+            <div class="cards-grid" id="reQ4Cards"></div>
         </div>
 
         <!-- Strategic KPIs (from Projects) -->
@@ -929,13 +935,14 @@
     <!-- Agent accuracy scoring + the autonomy threshold. Shared with the
          Task OS so both surfaces score identically. -->
     <script defer src="js/agent-accuracy.js?v=4"></script>
-    <script defer src="js/config.js?v=67"></script>
+    <script defer src="js/config.js?v=69"></script>
     <script defer src="js/prompts/boardroom-mentor.js?v=3"></script>
     <script defer src="js/shared.js?v=39"></script>
     <script defer src="js/sync-bar.js?v=6"></script>
     <script defer src="js/project-health.js?v=1"></script>
-    <script defer src="js/dashboard.js?v=29"></script>
-    <script defer src="js/cashflow.js?v=22"></script>
+    <script defer src="js/re-kpis.js?v=2"></script>
+    <script defer src="js/dashboard.js?v=31"></script>
+    <script defer src="js/cashflow.js?v=23"></script>
     <script defer src="js/money.js?v=4"></script>
     <script defer src="js/kpi-library.js?v=2"></script>
     <script defer src="js/wealth.js?v=66"></script>
@@ -945,7 +952,7 @@
     <script defer src="js/costs.js?v=17"></script>
     <script defer src="js/ar-variable.js?v=3"></script>
     <script defer src="js/invoices.js?v=16"></script>
-    <script defer src="js/pnl.js?v=24"></script>
+    <script defer src="js/pnl.js?v=25"></script>
     <script defer src="js/transactions.js?v=7"></script>
     <script defer src="js/coa.js?v=1"></script>
     <script defer src="js/reconciliation.js?v=38"></script>
@@ -957,7 +964,7 @@
     <script defer src="js/skills.js?v=12"></script>
     <script defer src="js/ai-assistant.js?v=19"></script>
     <script defer src="js/quick-task.js?v=4"></script>
-    <script defer src="js/home-list.js?v=1"></script><!-- Home tab (29 Sep 2026) -->
-    <script defer src="js/home.js?v=1"></script>
+    <script defer src="js/home-list.js?v=2"></script><!-- Home tab (29 Sep 2026) -->
+    <script defer src="js/home.js?v=2"></script>
 </body>
 </html>

@@ -83,6 +83,25 @@ compliance certificate counts (expired / expiring 30d / active / missing) · pay
 buffer days · UC checks due. All already computed on the Operations, CFV, Compliance and
 cashflow surfaces.
 
+Added 2 Oct 2026 (Real Estate Q4 projects, rules in `js/re-kpis.js`, tests in
+`tests/re-kpis.test.js`):
+
+- **Named units with a signed tenant in.** A quarterly lettings target is a list of named
+  units, not a count. Q3 2026 missed because "the four tenancies" had no list and two agents
+  picked different sets. The template takes unit record ids, counts a unit when a live tenancy
+  is linked, and lets a unit exclude the tenant who is leaving it.
+- **New monthly rent in payment from named tenants.** Measures the plan, not general lettings:
+  only the named tenants and units count, only while In Payment, each tenancy once. A
+  replacement tenant elsewhere is deliberately invisible to it.
+- **Self-managed properties fully compliant.** Certificate counts say how many documents are
+  missing; this says how many properties are safe. In date AND on file for all three, with a
+  "no gas" mark standing in for the gas certificate. It declares the number of properties it
+  expects, so a property quietly handed to an agent shows as a warning, not a better score.
+
+All three are one-line compute code (`return ctx.reKpis.namedUnits();`) calling the tested
+rule, and all three refuse to save a value when their input data did not load: the project
+shows "Compute failed" and the daily freshness invariant fires.
+
 ## 4. Tier 3 — OD-internal (never in the client library)
 
 Kevin's personal wealth layer (net worth, Kiyosaki ratios, buckets, personal budgets — a
