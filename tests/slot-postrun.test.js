@@ -113,6 +113,50 @@ describe('slot-postrun.sh exit-code semantics (finding 20260827-phase-2-381)', (
   });
 });
 
+// Finding 20261001-exceptions-676. The 1 Oct inbound-triage slot wrote
+// "===== done rc=0 =====" into runs.log and then exited 1 on its log markers,
+// so runs.log said the slot finished fine while queue-events.jsonl recorded it
+// as died. Every reader that parses the done line (check-routines.py
+// death_causes, estate-status.py paused_skip) trusted the log over the queue.
+// Back-tested by reverting the EXIT_RC block: both assertions below fail.
+describe('the done line records the code the wrapper EXITS with (finding 20261001-exceptions-676)', () => {
+  it('writes done rc=1 with the first marker when rc=0 but the tail carries a failure', () => {
+    writeFileSync(log, '===== test-job run =====\nOAuth access token has expired\n');
+    const r = runPostrun({ rc: 0 });
+    expect(r.status).toBe(1);
+    const text = readFileSync(log, 'utf8');
+    // The log and the exit code now agree.
+    expect(text).toMatch(/===== done rc=1 \(rc=0 but log tail carried failure markers: /);
+    expect(text).not.toMatch(/===== done rc=0 /);
+    // The cause is IN the log, not only on a stderr stream nothing keeps.
+    expect(text).toContain('OAuth access token has expired');
+  });
+
+  it('leaves the done line parseable: it still starts "===== done rc=" and carries the number', () => {
+    writeFileSync(log, '===== test-job run =====\nBROKEN: history book\n');
+    runPostrun({ rc: 0 });
+    const done = readFileSync(log, 'utf8').split('\n').filter(l => l.startsWith('===== done rc='));
+    expect(done).toHaveLength(1);
+    // check-routines.py reads the integer straight after "rc=".
+    expect(done[0].slice('===== done rc='.length).match(/^\d+/)[0]).toBe('1');
+  });
+
+  it('a tolerated marker is not a failure, so the done line stays rc=0', () => {
+    writeFileSync(log, '===== test-job run =====\nBROKEN: expected and survivable\n');
+    const r = runPostrun({ rc: 0, tolerated: 'expected and survivable' });
+    expect(r.status).toBe(0);
+    expect(readFileSync(log, 'utf8')).toMatch(/===== done rc=0 /);
+  });
+
+  it('a real non-zero rc is reported as itself, never relabelled', () => {
+    writeFileSync(log, '===== test-job run =====\nBROKEN: history book\n');
+    const r = runPostrun({ rc: 7 });
+    expect(r.status).toBe(7);
+    expect(readFileSync(log, 'utf8')).toMatch(/===== done rc=7 /);
+    expect(readFileSync(log, 'utf8')).not.toContain('rc=0 but log tail');
+  });
+});
+
 describe('slot-postrun.sh privacy sweep exemptions', () => {
   it('never quarantines a drift schema snapshot (schema-YYYY-MM-DD.json)', () => {
     // Schema snapshots carry '"description":' (field descriptions) and

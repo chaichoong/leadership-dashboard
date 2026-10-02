@@ -44,6 +44,23 @@ cd /Users/kevinbrittain/Projects/leadership-dashboard
 
 Work only inside `.claude/worktrees/queue-fixes-{date}` from here on.
 
+## STEP 3b — The 60-minute budget
+
+Phase 4 has a **60-minute wall-clock budget** (findings 20260930-phase-5-668 and
+20261001-daily-ops-680). On 30 Sep 2026 daily-ops reached 2h12m and on 1 Oct the fix phase
+stalled with no output at all, so the report — and the NEEDS YOU list the 09:00 CEO brief
+lifts out of it — landed after the brief had gone. The report must always be written before
+09:00, so the fix queue is what gives way, never the report.
+
+- At 60 minutes from the start of this phase, **stop claiming new findings.** Land what is
+  already written: commit, PR, gate, close. Name the cap as the reason in the PR body and in
+  the report.
+- A claim you abandon is reopened as stale by tomorrow's run, so an unworked claim costs
+  nothing. An unwritten report costs the whole morning.
+- **Print one line per finding as you claim it.** On 1 Oct the only evidence of the stall was
+  the absence of output, so nobody could say where it stopped. One line per claim locates a
+  stall rather than inferring it.
+
 ## STEP 4 — Work the findings
 
 Take them in the order `findings.py list` gives you, worst severity first. Cap at **10 findings per run**. If more are open, do the ten and say in the PR body exactly how many you left, with their IDs. Never truncate silently.

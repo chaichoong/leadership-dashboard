@@ -150,10 +150,41 @@ describe('a history rebuild that failed on quota does not retry next slot', () =
   it('the failure is recorded by the build itself, not by the caller', () => {
     // The whole mechanism rests on cmd_history_build remembering its own
     // death; a wrapper that only the shell sets would be lost on a SIGKILL.
-    const src = readFileSync(TRIAGE, 'utf8');
-    expect(src).toMatch(/def cmd_history_build\(pages\):[\s\S]*?except BaseException:[\s\S]*?history_build_failed_ms/);
-    // And a success must clear it.
-    expect(src).toMatch(/state\.pop\("history_build_failed_ms", None\)/);
+    // DRIVEN, not grepped (the source grep this replaced went green on 29 days
+    // of a counter that never moved — finding 20260930-phase-2-667).
+    const d = box('records-its-own-death');
+    writeFileSync(join(d, 'state.json'), JSON.stringify({ history_built_ms: 1 }));
+    // The real cmd_history_build, with only the Gmail work replaced by the
+    // quota death it actually died of on 1 Oct 2026.
+    const code = `
+import importlib.util, os, sys
+spec = importlib.util.spec_from_file_location("it", ${JSON.stringify(TRIAGE)})
+it = importlib.util.module_from_spec(spec); spec.loader.exec_module(it)
+it._history_build = lambda pages: it.fail("GMAIL RATE METRIC STILL FULL", kind="rate")
+it._fail_quiet["on"] = True
+try:
+    it.cmd_history_build(1)
+except SystemExit:
+    pass
+`;
+    const j = (() => {
+      try {
+        execFileSync('python3', ['-c', code], {
+          encoding: 'utf8', env: { ...process.env, INBOUND_TRIAGE_DIR: d },
+        });
+        return { code: 0 };
+      } catch (e) { return { code: e.status, out: (e.stdout || '') + (e.stderr || '') }; }
+    })();
+    expect(j.code, j.out).toBe(0);
+    const rec = JSON.parse(readFileSync(join(d, 'history-build-fails.json'), 'utf8'));
+    // It remembered its own death, by count and by kind.
+    expect(rec.history_build_fail_count).toBe(1);
+    expect(rec.history_build_fail_kind).toBe('rate');
+    expect(typeof rec.history_build_failed_ms).toBe('number');
+    // And it is NOT in the shared blob any more, which is what let a
+    // concurrent whole-blob write roll it back.
+    const blob = JSON.parse(readFileSync(join(d, 'state.json'), 'utf8'));
+    expect(blob.history_build_fail_count).toBeUndefined();
   });
 
   it("the python selftest (which replays 9 Sep) passes", () => {

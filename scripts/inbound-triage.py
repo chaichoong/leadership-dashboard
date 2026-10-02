@@ -1503,6 +1503,50 @@ def history_book_dead(built, now_ms, dead_days=None):
     return (now_ms - built) > limit * 86400 * 1000
 
 
+# ─── THE GIVE-UP COUNTER LIVES IN ITS OWN FILE ───────────────────────
+#
+# Finding 20260930-phase-2-667. state.json is written as ONE whole blob, so a
+# process that read it before the rebuild failed and wrote it afterwards put
+# every history_build_* key back to the value it had before the increment. The
+# counter sat at 1 for 29 days of consecutive daily failures while the book was
+# dead, history_build_given_up never reached HISTORY_MAX_BUILD_FAILS, and every
+# slot reported ok. Re-reading state immediately before the increment does NOT
+# fix it: the clobbering write happens AFTER the increment, not before.
+#
+# So the counter is no longer a key in a shared blob. It is its own small file,
+# written atomically, holding nothing else — nothing any other command writes,
+# so nothing any other command can roll back.
+FAILS_FILE = "history-build-fails.json"
+_FAIL_KEYS = ("history_build_fail_count", "history_build_failed_ms",
+              "history_build_fail_kind", "history_build_fail_reason")
+
+
+def read_fail_state():
+    """The rebuild's own failure record. Falls back to the legacy state.json
+    keys so an in-flight give-up count survives this change rather than
+    resetting the escalation clock to zero on deploy."""
+    p = base_dir() / FAILS_FILE
+    if p.exists():
+        try:
+            d = json.loads(p.read_text())
+            if isinstance(d, dict):
+                return d
+        except (ValueError, OSError) as e:
+            # Loud, never silent: a counter that reads as empty is exactly the
+            # failure mode this file exists to end.
+            fail("history fail-counter file unreadable at %s: %s" % (p, e))
+    legacy = read_state()
+    return {k: legacy[k] for k in _FAIL_KEYS if k in legacy}
+
+
+def write_fail_state(d):
+    base = base_dir()
+    base.mkdir(parents=True, exist_ok=True)
+    tmp = base / (FAILS_FILE + ".tmp")
+    tmp.write_text(json.dumps(d, indent=1, sort_keys=True))
+    tmp.rename(base / FAILS_FILE)
+
+
 def history_build_given_up(built, fail_count, now_ms,
                           max_fails=None, dead_days=None):
     """True when the rebuild must STOP being retried and the run must say so.
@@ -1524,19 +1568,25 @@ def history_force_clear():
     The unblock has to clear the COUNTER and the cooldown stamp together: a
     force that left either behind would refuse or defer the very attempt it
     was asked to make."""
+    fs = read_fail_state()
+    dropped = [k for k in _FAIL_KEYS if fs.pop(k, None) is not None]
+    write_fail_state(fs)
+    # Legacy copies in state.json go too, or read_fail_state's fallback would
+    # resurrect the count the force was asked to clear.
     st = read_state()
-    dropped = [k for k in ("history_build_fail_count", "history_build_failed_ms",
-                           "history_build_fail_kind", "history_build_fail_reason")
-               if st.pop(k, None) is not None]
-    if dropped:
+    legacy = [k for k in _FAIL_KEYS if st.pop(k, None) is not None]
+    if legacy:
         write_state(st)
-    return dropped
+    return sorted(set(dropped) | set(legacy))
 
 
 def cmd_history_stale():
     state = read_state()
+    # The failure record is its own file now (finding 20260930-phase-2-667);
+    # only history_built_ms still lives in the shared blob.
+    fails = read_fail_state()
     built = state.get("history_built_ms")
-    failed = state.get("history_build_failed_ms")
+    failed = fails.get("history_build_failed_ms")
     now_ms = int(datetime.now().timestamp() * 1000)
     stale, cooling, remaining = history_rebuild_decision(built, failed, now_ms)
     out = {"stale": stale, "built_ms": built}
@@ -1551,7 +1601,7 @@ def cmd_history_stale():
     age_days = history_book_age_days(built, now_ms)
     if age_days is not None:
         out["age_days"] = age_days
-    fail_count = int(state.get("history_build_fail_count") or 0)
+    fail_count = int(fails.get("history_build_fail_count") or 0)
     if history_book_dead(built, now_ms):
         out["dead"] = True
         out["escalate"] = (
@@ -1569,7 +1619,7 @@ def cmd_history_stale():
     if given_up:
         out["given_up"] = True
         out["fail_count"] = fail_count
-        out["fail_kind"] = state.get("history_build_fail_kind") or "unknown"
+        out["fail_kind"] = fails.get("history_build_fail_kind") or "unknown"
         for k in ("cooldown", "retry_in_seconds", "reason"):
             out.pop(k, None)
         out["escalate"] = (
@@ -1578,7 +1628,7 @@ def cmd_history_stale():
             "attempt spent about ten minutes of this slot's Gmail quota and the "
             "scan that actually triages mail was truncated behind it. The agent "
             "is filing against sender knowledge that far out of date. Cause is "
-            "in state.json (history_build_fail_reason) and in this log above. "
+            "in history-build-fails.json (history_build_fail_reason) and in this log above. "
             "Unblock with: inbound-triage.py history-build --force"
             % (fail_count, out["fail_kind"],
                "ever" if age_days is None else age_days))
@@ -1604,7 +1654,7 @@ def cmd_history_build(pages):
         return _history_build(pages)
     except BaseException:
         try:
-            st = read_state()
+            st = read_fail_state()
             st["history_build_failed_ms"] = int(datetime.now().timestamp() * 1000)
             st["history_build_fail_count"] = int(
                 st.get("history_build_fail_count") or 0) + 1
@@ -1616,7 +1666,7 @@ def cmd_history_build(pages):
                 _last_fail.get("message")
                 or "%s" % (sys.exc_info()[0].__name__ if sys.exc_info()[0]
                            else "unknown"))[:500]
-            write_state(st)
+            write_fail_state(st)
         except Exception:
             pass          # never let the bookkeeping mask the real failure
         raise
@@ -1679,12 +1729,13 @@ def _history_build(pages):
     state["history_built_ms"] = int(datetime.now().timestamp() * 1000)
     # A success clears the cooldown, so a transient quota blip never costs a
     # whole day of rebuilds once the quota is back. It clears the give-up
-    # counter with it: a book that has just been rebuilt is not broken.
-    state.pop("history_build_failed_ms", None)
-    state.pop("history_build_fail_count", None)
-    state.pop("history_build_fail_kind", None)
-    state.pop("history_build_fail_reason", None)
+    # counter with it: a book that has just been rebuilt is not broken. The
+    # record lives in its OWN file now, and the legacy copies in state.json go
+    # with it (finding 20260930-phase-2-667).
+    for k in _FAIL_KEYS:
+        state.pop(k, None)
     write_state(state)
+    write_fail_state({})
     # Counts only — runs.log must never carry sender addresses.
     print(json.dumps({"built": now_iso, "senders": len(stats),
                       "agentMovesExcluded": excluded_agent,
@@ -2083,18 +2134,47 @@ def selftest():
             finally:
                 globals()["_history_build"] = _real
                 _fail_quiet["on"] = False
-            check("a failed rebuild is remembered in state",
-                  isinstance(read_state().get("history_build_failed_ms"), int))
+            check("a failed rebuild is remembered in its own file",
+                  isinstance(read_fail_state().get("history_build_failed_ms"), int))
             check("the next slot refuses the rebuild (exit 1), not exit 0",
                   cmd_history_stale() == 1)
+            # THE 29-DAY BUG (finding 20260930-phase-2-667). A whole-blob write
+            # of state.json AFTER the increment used to put the counter back.
+            # Replayed here: five consecutive failures with a concurrent scan
+            # write between each, and the count must still reach five.
+            _real2, globals()["_history_build"] = _history_build, _boom
+            _fail_quiet["on"] = True
+            try:
+                for _i in range(4):
+                    # A scan that read state BEFORE this failure and writes it
+                    # after — exactly the clobber that hid 29 days of failures.
+                    _stale_blob = read_state()
+                    try:
+                        cmd_history_build(1)
+                    except SystemExit:
+                        pass
+                    _stale_blob["last_scan_ok_ms"] = 1 + _i
+                    write_state(_stale_blob)
+            finally:
+                globals()["_history_build"] = _real2
+                _fail_quiet["on"] = False
+            check("five consecutive failures reach a count of five, not one",
+                  int(read_fail_state().get("history_build_fail_count") or 0) == 5)
+            check("and the slot gives up rather than reporting ok",
+                  history_build_given_up(
+                      _sep9_built,
+                      read_fail_state().get("history_build_fail_count"),
+                      _sep9_built + 30 * 86400 * 1000) is True)
+            check("the concurrent scan's own key survived too",
+                  read_state().get("last_scan_ok_ms") == 4)
             # And a success must clear it, so one bad hour is not a lost day.
+            write_fail_state({})
             _st = read_state()
-            _st.pop("history_build_failed_ms")
             _st["history_built_ms"] = int(datetime.now().timestamp() * 1000)
             write_state(_st)
             check("a fresh book stops asking for a rebuild at all",
                   cmd_history_stale() == 1
-                  and read_state().get("history_build_failed_ms") is None)
+                  and read_fail_state().get("history_build_failed_ms") is None)
 
             # ── a dead book STOPS retrying and says BROKEN ───────────────
             # Back-tested against 25 Sep 2026, when all three slots printed
@@ -2110,12 +2190,12 @@ def selftest():
                   history_build_given_up(_sep25, 9, _sep25 + 1000) is False)
             check("a book dead only through disuse does not give up",
                   history_build_given_up(_sep9_built, 0, _sep25) is False)
-            write_state({"history_built_ms": _sep9_built,
-                         "history_build_failed_ms": _sep25 - 3600 * 1000,
-                         "history_build_fail_count": 3,
-                         "history_build_fail_kind": "rate",
-                         "history_build_fail_reason":
-                             "GMAIL RATE METRIC STILL FULL after 585s"})
+            write_state({"history_built_ms": _sep9_built})
+            write_fail_state({"history_build_failed_ms": _sep25 - 3600 * 1000,
+                              "history_build_fail_count": 3,
+                              "history_build_fail_kind": "rate",
+                              "history_build_fail_reason":
+                                  "GMAIL RATE METRIC STILL FULL after 585s"})
             import io as _io, contextlib as _ctx
             _buf = _io.StringIO()
             with _ctx.redirect_stdout(_buf):
@@ -2135,7 +2215,7 @@ def selftest():
             # echoed here would delete the only line that fails the slot.
             check("the raw reason never reaches the printed line",
                   "GMAIL RATE METRIC STILL FULL" not in _line
-                  and read_state().get("history_build_fail_reason"))
+                  and read_fail_state().get("history_build_fail_reason"))
             check("the soothing cooldown keys are gone once it has given up",
                   "cooldown" not in _out and "retry_in_seconds" not in _out)
             check("--force clears every key that would refuse or defer it",
@@ -2144,8 +2224,20 @@ def selftest():
                       "history_build_fail_kind", "history_build_fail_reason"])
                   and history_build_given_up(
                       _sep9_built,
-                      read_state().get("history_build_fail_count"),
+                      read_fail_state().get("history_build_fail_count"),
                       _sep25) is False)
+            # The legacy state.json copies are the fallback read_fail_state uses
+            # on first run after this change, so --force must clear those too or
+            # the count it just dropped comes straight back.
+            (base_dir() / FAILS_FILE).unlink(missing_ok=True)   # first run after deploy
+            write_state({"history_built_ms": _sep9_built,
+                         "history_build_fail_count": 4,
+                         "history_build_fail_kind": "rate"})
+            check("a legacy count in state.json is still read",
+                  int(read_fail_state().get("history_build_fail_count") or 0) == 4)
+            history_force_clear()
+            check("and --force clears the legacy copies as well",
+                  int(read_fail_state().get("history_build_fail_count") or 0) == 0)
         finally:
             if _prev is None:
                 os.environ.pop("INBOUND_TRIAGE_DIR", None)
