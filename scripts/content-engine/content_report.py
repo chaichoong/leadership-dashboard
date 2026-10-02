@@ -791,7 +791,7 @@ def _selftest():
     assert why58({}, {"x": {"day": 2058, "status": "new"}, "x2": {"day": 2058, "status": "rendered", "role": "teaser"}, "y": {"episode": 2059}}) == {}, "a rendered teaser beside a waiting full clip is still the queue"
     import watch as _w3; real_g3 = _w3.gap_days; _w3.gap_days = lambda path=None: {1808}
     try:
-        gd = build(now, {"_cursor": 2059, "1808": dead, "2059": on_yt()}, {"1808": {"verdict": "approved", "task": "t"}, "2059": {"verdict": "approved", "task": "t2"}}, two, {}, plan=[], skipped=[])
+        gd = build(now, {"_cursor": 2059, "1808": dead, "2059": on_yt()}, {"1808": {"verdict": "approved", "task": "t"}, "2059": {"verdict": "approved", "task": "t2"}}, {"y": {"episode": 2059}}, {}, plan=[], skipped=[])
         assert gd["leftBehind"] == [{"day": 1808, "why": "its YouTube post is creating, with no link yet"}], "a dead upload on a gap day is named too: %s" % gd["leftBehind"]
     finally: _w3.gap_days = real_g3
     # a noted day later put on hold reads as held, not as the old refusal
