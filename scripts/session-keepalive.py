@@ -103,13 +103,19 @@ def session_state(result):
     # close (Cloudflare, review 25 Sep 2026). Reported, never filed.
     if result.get("botCheck"):
         return "bot-check"
+    # The robot's own refresh (Amazon) could not run, or its second read failed:
+    # nobody learned whether the site would have let it back in. Unknown, never a card.
+    refresh = str(result.get("selfRefresh") or "")
+    if not result.get("signedIn") and (refresh.startswith("not run") or "second read failed" in refresh):
+        return "unknown"
     return "signed-in" if result.get("signedIn") else "signed-out"
 
 
 def read_site(host, entry):
     cmd = [node_bin(), os.path.join(REPO, "scripts", "agent-browser.js"), "session", "--site", host]
     try:
-        r = subprocess.run(cmd, capture_output=True, text=True, timeout=180)
+        # 300: a site the robot signs itself back in to (Amazon) walks twice around a 20-second window.
+        r = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
     except subprocess.TimeoutExpired:
         return {"error": "timeout"}
     if r.returncode != 0:
@@ -249,6 +255,9 @@ def selftest():
         ({"error": "timeout"}, "unknown"),
         ({"url": "https://app.pingen.com/login", "passwordFields": 0, "text": "Log in"}, "unknown"),
         ({}, "unknown"),
+        # Amazon's own refresh could not run (2 Oct 2026): unknown, not a lapsed login.
+        ({"site": "www.amazon.co.uk", "signedIn": False, "url": "https://www.amazon.co.uk/ap/signin", "selfRefresh": "not run: the profile is in use"}, "unknown"),
+        ({"site": "www.amazon.co.uk", "signedIn": False, "url": "https://www.amazon.co.uk/ap/signin", "selfRefresh": "ran, still signed out"}, "signed-out"),
     ]
     bad = [(c, want, session_state(c)) for c, want in cases if session_state(c) != want]
     sites = {"a": {"login": True, "loginUrl": "https://a/", "shortSession": True},

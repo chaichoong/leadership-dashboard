@@ -181,6 +181,15 @@ describe('a site that does not stay signed in (signin_hold.unheld_signins)', () 
     expect(unheld(slow, EDF)).toEqual([]);
   });
 
+  it("a signed-out read where the robot's own refresh could not run, or its second read failed, is not a strike", () => {
+    const A = 'www.amazon.co.uk';
+    const lines = (refresh) => [login('2026-10-01T08:47:44Z', A), check('2026-10-02T05:40:40Z', A, false, { signinPage: true, selfRefresh: refresh }),
+      login('2026-10-02T16:45:03Z', A), check('2026-10-03T05:40:40Z', A, false, { signinPage: true, selfRefresh: refresh })];
+    expect(unheld(lines('not run: the profile is in use'), A)).toEqual([]);
+    expect(unheld(lines('ran, then the second read failed: page.goto: Timeout 45000ms exceeded'), A)).toEqual([]);
+    expect(unheld(lines('ran, still signed out'), A)).toEqual(['2026-10-01', '2026-10-02']);
+  });
+
   it('a line from before signinPage was recorded is a signed-out read only on a sign-in address', () => {
     const old = (url) => [login('2026-09-22T07:14:16Z', EDF), check('2026-09-23T05:40:37Z', EDF, false, { url }),
       login('2026-09-23T07:14:50Z', EDF), check('2026-09-24T05:40:29Z', EDF, false, { url })];

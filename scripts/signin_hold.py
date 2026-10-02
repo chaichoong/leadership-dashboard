@@ -110,6 +110,11 @@ def _read(e):
     land on a sign-in page (an error page, a slow load)."""
     if not isinstance(e.get("signedIn"), bool) or e.get("botCheck"):
         return None
+    # The robot's own refresh could not run, or its second read failed: the read
+    # says nothing about whether the site would have let it back in (2 Oct 2026).
+    refresh = str(e.get("selfRefresh") or "")
+    if refresh.startswith("not run") or "second read failed" in refresh:
+        return None
     if e["signedIn"]:
         return "in"
     page = e.get("signinPage")
