@@ -415,6 +415,14 @@ TRIAL_ACTING_SHAPE_RE = re.compile(
     r"(PASS TO ROY:|CALENDAR:|MARK FOR PAYMENT|DOCUMENT:|POST:|SIGNERS:)", re.I | re.M)
 
 
+def strip_trial_marks(text):
+    """`text` without any line that carries a trial lane's key mark. A trial task's words are
+    sometimes copied onto ANOTHER task's Notes (a duplicate folded into its keeper): the copy must
+    not turn the keeper into a trial task, or its own approved reply would never be sent."""
+    marks = [m["note"] for m in TRIAL_TASK_MARKS.values()]
+    return "\n".join(line for line in str(text or "").splitlines() if not any(m in line for m in marks))
+
+
 def trial_problem(agent_ids, name="", notes=""):
     """Why this task may NOT be carried out, or "": it was raised by a trial agent, or it is a
     trial lane's own task whoever holds it now."""

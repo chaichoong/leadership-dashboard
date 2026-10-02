@@ -26,8 +26,12 @@
 //   * the trialChecked branch removed           -> "never becomes a hand-back" fails (it drives the real build_queue)
 //   * trial-settle ignoring the outcome         -> "leaves an unapproved trial card alone" fails
 //   * TRIAL_ACTING_SHAPE_RE emptied             -> "submit refuses a shape that acts" fails
+//   * the task marks ignored at any one door    -> that door's case in block 3, 4, 5, 6 or 8 fails
+//   * assertApproved() ignoring `trial`          -> "the robot browser itself refuses" fails
+//   * the carry keeping the key line            -> "does not turn the keeper into a trial task" fails
 import { describe, it, expect } from 'vitest';
-import { readFileSync, existsSync } from 'fs';
+import { readFileSync, existsSync, writeFileSync, mkdtempSync } from 'fs';
+import { tmpdir } from 'os';
 import { resolve } from 'path';
 import { homedir } from 'os';
 import { execFileSync } from 'child_process';
@@ -388,6 +392,39 @@ def run(fields):
     o = json.loads(buf.getvalue()); return [o["approved"], bool(o["trial"])]
 print(json.dumps({"trial": run({"name": a["name"], "teamMember": ["${PROPERTY_TM}"]}), "ordinary": run({"name": "COMPLIANCE: licence form", "teamMember": ["${PROPERTY_TM}"]})}))`, TASK);
     expect(r).toEqual({ trial: [false, true], ordinary: [true, false] });
+  });
+
+  it('the robot browser itself refuses to press submit for a trial task, whatever the outcome reads', () => {
+    const gate = (state) => {
+      const dir = mkdtempSync(resolve(tmpdir(), 'outcome-'));
+      const fake = resolve(dir, 'outcome.py');
+      writeFileSync(fake, `import json\nprint(json.dumps(${JSON.stringify(state)}))\n`.replace(/\btrue\b/g, 'True').replace(/\bfalse\b/g, 'False'));
+      return execFileSync('node', ['-e', `
+const b = require(${JSON.stringify(resolve(ROOT, 'scripts/agent-browser.js'))});
+try { b.assertApproved('recAAAAAAAAAAAAAA'); console.log('passed'); } catch (e) { console.log(e.message); }`],
+        { encoding: 'utf8', env: { ...process.env, AGENT_OUTCOME_SCRIPT: fake } }).trim();
+    };
+    expect(gate({ outcome: 'Approved as-is', approved: false, trial: 'the Cash Flow Voids agent is on its trial run' }))
+      .toMatch(/is a trial task and no form is submitted for it: the Cash Flow Voids agent is on its trial run/);
+    expect(gate({ outcome: 'Approved as-is', approved: false, trial: '' })).toMatch(/is a trial task and no form is submitted/);
+    expect(gate({ outcome: 'Approved as-is', approved: true, trial: '' })).toBe('passed');
+    expect(gate({ outcome: '', approved: false, trial: '' })).toMatch(/is not approved/);
+  });
+
+  it('a RENT LATE task folded into another task does not turn the keeper into a trial task', () => {
+    const r = py(`
+from agent_email_format import trial_problem, strip_trial_marks
+written = {}
+ad.get_task = lambda tid: {"id": tid, "fields": {ad.AF["name"]: "INBOUND: tenant asks about the rent", ad.AF["notes"]: "earlier note"}}
+ad.patch_task = lambda tid, fields: written.update(fields)
+twin = {ad.AF["name"]: "RENT LATE: Unit 9, rent due 30 Sep (reminder)",
+        ad.AF["description"]: "Late rent found by the daily rent check.\\nRent: 500 a month\\n\\nRENT CHECK KEY: recT:2026-09-30:1"}
+block = ad.carry_output_to_keeper("recTWIN", twin, "recKEEPER", "02 Oct 2026 14:00")
+notes = written[ad.AF["notes"]]
+print(json.dumps({"hasKey": "RENT CHECK KEY" in notes, "carried": "Rent: 500 a month" in notes, "kept": notes.startswith("earlier note"),
+                  "keeperTrial": trial_problem(["${PROPERTY_TM}"], "INBOUND: tenant asks about the rent", notes),
+                  "strip": strip_trial_marks("a\\nRENT CHECK KEY: x:1\\nb")}))`);
+    expect(r).toEqual({ hasKey: false, carried: true, kept: true, keeperTrial: '', strip: 'a\nb' });
   });
 
   it('letters and the diary refuse it at their own doors', () => {

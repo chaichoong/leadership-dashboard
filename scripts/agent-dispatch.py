@@ -91,6 +91,7 @@ from agent_email_format import (  # noqa: E402
     rule_send_problem,
     TRIAL_ACTING_SHAPE_RE,
     TRIAL_STAMP,
+    strip_trial_marks,
     trial_problem,
 )
 # The CALENDAR contract lives in one place too, shared with
@@ -2296,7 +2297,8 @@ def carry_output_to_keeper(twin_id, twin_fields, keeper_id, stamp):
     stored = str(twin_fields.get(AF["agentOutput"]) or "").strip()
     desc = str(twin_fields.get(AF["description"]) or "").strip()
     twin_name = str(twin_fields.get(AF["name"]) or "")[:80]
-    carried = stored or desc
+    # Without the trial key line: the keeper is another matter and must not become a trial task.
+    carried = strip_trial_marks(stored or desc).strip()
     label = "Its Agent Output" if stored else ("Its description" if desc else "It had no output")
     if len(carried) > FOLD_CARRY_MAX:
         carried = carried[:FOLD_CARRY_MAX] + "\n[… cut at %d characters]" % FOLD_CARRY_MAX
