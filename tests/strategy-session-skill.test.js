@@ -36,6 +36,9 @@ const CLAUSES = [
   ['A mid-quarter review date', 'the review date in the write-back'],
   ['Never in this repo', 'private working files stay out of the public repo'],
   ['is NOT built inside this skill', 'dashboard KPI code goes through /build-feature'],
+  ['**Coming off:**', 'last quarter\'s KPIs are closed off the dashboard, not left behind'],
+  ['The handover is a task, never a remembered promise', 'the dashboard KPI work is tracked'],
+  ['every "coming off" KPI has gone', 'the mid-quarter check that the changeover happened'],
 ];
 
 describe('strategy-session skill', () => {
@@ -68,6 +71,8 @@ describe('strategy-session skill', () => {
     const config = readFileSync(resolve(ROOT, 'js/config.js'), 'utf8');
     for (const name of ['qpDetails', 'monthlyStones', 'objStrat']) expect(config).toContain(name);
     expect(readFileSync(resolve(ROOT, 'js/wealth.js'), 'utf8')).toContain('buildMonthlyCashflow');
+    // The skill says a closed project's KPI leaves the dashboard on its own. Keep that true.
+    expect(readFileSync(resolve(ROOT, 'js/dashboard.js'), 'utf8')).toMatch(/p\.status!=='Completed'&&!p\.closedOn/);
     const gate = readFileSync(resolve(ROOT, 'scripts/create-agent-task.py'), 'utf8');
     expect(gate).toContain('"--force"');
     // The skill tells plan tasks to pass Upcoming; the gate must still accept it.
