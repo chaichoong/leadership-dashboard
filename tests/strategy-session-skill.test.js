@@ -35,6 +35,10 @@ const CLAUSES = [
   ['Nothing on the plan carries forward unread', 'every section is reviewed every quarter'],
   ['Phase 5 does not start until all ten have one', 'no write before every section has a ruling'],
   ['Send Kevin the PDF with SendUserFile', 'Kevin sees the finished plan'],
+  ['The overarching reason the business exists', 'the Objective is not the quarter\'s goal'],
+  ['never in\nthe Objective plan', 'quarter-only content stays out of the Objective plan'],
+  ['Why a customer chooses this business over anyone else', 'selling points are written from the customer\'s side'],
+  ['Starting a business from scratch', 'a new business is taken through the wizard\'s questions'],
   ['start from what this quarter will deliver, then set one year, then three, then\nnine', 'targets are worked back from the quarter'],
   ['Does the plan fund itself after Kevin is paid?', 'the cash check against his minimum take-home'],
   ['nothing improves on today', 'the cash check shows the case where nothing lands'],
@@ -107,6 +111,24 @@ describe('strategy-session skill', () => {
     expect(computeProjectHealth(
       { start: '2026-10-01', end: '2026-12-31', kpiTarget: 4, kpiCurrent: 0 }, '2026-10-02T12:00:00',
     )).toBe('Not Started');
+  });
+
+  // The skill's section meanings are taken from the page's wizard. If the wizard gains,
+  // loses or renames a section, the skill's table must change with it.
+  it('defines every section the page\'s wizard asks about', () => {
+    const strategy = readFileSync(resolve(ROOT, 'os/strategy/strategy.js'), 'utf8');
+    const block = strategy.slice(strategy.indexOf('const WIZARD_STEPS'), strategy.indexOf('\n];', strategy.indexOf('const WIZARD_STEPS')));
+    const labels = [...block.matchAll(/label: '([^']+)'/g)].map(m => m[1]);
+    expect(labels.length).toBeGreaterThan(30);
+    const sections = new Set(labels
+      .filter(l => !/^QP\d|Measurable|reflection/i.test(l))
+      .map(l => l.replace(/ \(.*\)$/, '').replace(/^Quarterly Project \d$/, 'Quarterly projects').replace('—', ':').replace('Target : ', 'Target: ')));
+    const table = skill.slice(skill.indexOf('| Section | What it holds'), skill.indexOf('The first seven sections'));
+    for (const name of sections) {
+      expect(table.toLowerCase(), `the skill has no meaning for the wizard section "${name}"`).toContain(name.toLowerCase());
+    }
+    // And the wizard still describes the Objective the way the skill says it does.
+    expect(block).toContain('the overarching reason the business exists');
   });
 
   // Drives the page's real export through the render script. The first run's PDF left out

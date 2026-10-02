@@ -111,9 +111,43 @@ to date. Walk the sections in the page's order, one section per message:
 Sections 8 to 10 are built in Phase 3c, working up from the quarter. Do not walk them as
 wording alone.
 
+**What each section is for.** These meanings come from the page's own wizard (`WIZARD_STEPS`
+in `os/strategy/strategy.js`). Read them before proposing a word. On the first run the
+Objective was rewritten as the quarter's goal, and two selling points were written from the
+owner's side; Kevin sent both back.
+
+| Section | What it holds | What does NOT belong in it |
+|---|---|---|
+| Objective | The overarching reason the business exists: what it ultimately produces, and for whom. One or two sentences. It changes rarely | This quarter's goal, named units, targets, dates, how a KPI is measured |
+| Target: what we do | The product or service, in one line | Strategy or numbers |
+| Target: who we do it for | The customer type: size, stage, anything distinctive | The owner's margin |
+| Target: how we do it | The delivery method and what is different about the approach | This quarter's rules or timings |
+| Customer profile | Who the business targets and who it does not: stage, size, budget, mindset, deal-breakers | |
+| Undertakings | The team's non-negotiable rules. A short title and two or three supporting lines each. Up to 20 | |
+| Original selling points | Why a customer chooses this business over anyone else. A bold claim and what backs it. Up to 5 | Why the owner likes the model |
+| Main method | The step-by-step process the business follows, in order. A step name and one sentence. Up to 10 | |
+| Enticement | The offer that is hard to say no to, from the customer's side | |
+| Nine-year target | The long vision: income, size, founder involvement, exit or succession | |
+| Three-year target | The mid-range vision: income, units or clients, what is automated, what the founder still does. Up to three measurables, each a different dimension | |
+| One-year target | What the business looks like in 12 months, as a stepping stone to three years. Up to three measurables, one number each, tracked monthly, each a different dimension | |
+| Quarterly projects | The three most important 90-day projects, each a different dimension: a brief, one KPI, tracking method, definition of done, three monthly stepping stones | |
+
+The first seven sections are the Objective plan: why the business exists, reviewed every
+quarter, changed rarely. The rest is the Strategy plan: how it wins the next 90 days and
+beyond. **Anything that is true only for this quarter goes in the Strategy plan, never in
+the Objective plan.** How a measure is read (plan and cash, what a cushion subtracts) sits
+with the one-year measurables.
+
+**Starting a business from scratch** (no earlier record): there is nothing to review, so ask
+the wizard's own question for each section, in the page's order, one per message. Take his
+rough notes and write the proper wording for him to approve. Offer a first draft from the
+brain where it already holds the answer (founder profile, the business's own notes).
+
 For each section, in this shape:
 
 - Show the current wording in full (a long list as a numbered list).
+- Check the wording still fits what the section is for (the table above). Wording in the
+  wrong section is moved, not kept.
 - Say what in it no longer matches: check it against the numbers pack, this quarter's
   rulings, the team roster in the brain, and the other sections. Name the line and the fact.
   If nothing conflicts, say so in one line.
