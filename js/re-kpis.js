@@ -120,7 +120,7 @@
             // A payment that has not been filed yet counts in NEITHER figure. Fresh bank
             // receipts arrive tagged to the property business with no sub-category: counted,
             // a rent receipt read as money in on the income line while the cushion ignored
-            // it (2 Oct 2026: income £11,591 against a true £8,614). It raises amber instead.
+            // it (found on the live page, 2 Oct 2026). It raises amber instead.
             if (!tx.reconciled) { unreconciled++; return; }
             const amt = Number(tx.amount) || 0;
             const subs = tx.subCategories || [];
