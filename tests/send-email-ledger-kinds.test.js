@@ -68,6 +68,16 @@ try:
         m.cmd_resolve_intent(argparse.Namespace(task="recKho3l7jJKk9T0t"))
     elif cmd == "sent?":
         res["prior"] = m.already_sent("recKho3l7jJKk9T0t", a.get("kind", "send"))
+    elif cmd == "notify":
+        import io, contextlib
+        F[m.AF["name"]] = "NEW TENANT RENT: journal upload: Unit 9 – 1 Example Road"
+        roy = next(e for e, h in m.team_roster()[0].items() if h.get("name") == "Roy Lavin")
+        buf = io.StringIO()
+        try:
+            with contextlib.redirect_stdout(buf):
+                m.cmd_notify(argparse.Namespace(task="recKho3l7jJKk9T0t", to=roy, reason="standing handover", dry_run=False))
+        finally:
+            res["printed"] = [json.loads(l) for l in buf.getvalue().splitlines() if l.strip().startswith("{")]
     res["exit"] = 0
 except SystemExit as e:
     res["exit"] = e.code if isinstance(e.code, int) else 1
@@ -252,5 +262,41 @@ fcntl.flock(fh, fcntl.LOCK_EX); print("held", flush=True); time.sleep(3)`;
     const r = run({ cmd: 'resolve', rows, control: [] });
     expect(r.message).toMatch(/this read is blind/);
     expect(r.ledger).toHaveLength(1);
+  });
+});
+
+// 2 Oct 2026 (independent review of the rent check's lane B): `notify` wrote its intent row and,
+// when the worker failed, nothing else. Every later call then read that lone intent as "already
+// emailed", exited 0, and the colleague was never told. Back-tested: with the failed/uncertain
+// row removed from cmd_notify the first case fails (the second run makes no worker call).
+describe('a notify that dies is recorded, as a send is', () => {
+  it('a worker refusal before anything left is `failed`, and the next call emails the task', () => {
+    const a = run({ cmd: 'notify', failWith: 'ERROR: worker 500: Gmail send failed: quota' });
+    expect(a.exit).not.toBe(0);
+    expect(a.ledger.map((x) => [x.kind, x.event])).toEqual([['notify', 'intent'], ['notify', 'failed']]);
+    const b = run({ cmd: 'notify', rows: a.ledger });
+    expect(b.exit).toBe(0);
+    expect(b.calls).toHaveLength(1);
+    expect(b.printed[0].notified).toBe('recKho3l7jJKk9T0t');
+    expect(b.ledger.slice(-1)[0]).toMatchObject({ kind: 'notify', event: 'sent' });
+  });
+
+  it('an unknown failure is `uncertain`: never sent twice, and the skip says so instead of "sent"', () => {
+    const a = run({ cmd: 'notify', failWith: 'ERROR: worker call failed: TimeoutError: timed out' });
+    expect(a.ledger.map((x) => x.event)).toEqual(['intent', 'uncertain']);
+    const b = run({ cmd: 'notify', rows: a.ledger });
+    expect(b.exit).toBe(0);
+    expect(b.calls).toHaveLength(0);
+    expect(b.printed[0]).toMatchObject({ skipped: 'recKho3l7jJKk9T0t', event: 'uncertain' });
+  });
+
+  it('a notify that went is skipped as sent, and a run that died before the worker answered as intent', () => {
+    const sent = run({ cmd: 'notify' });
+    expect(sent.printed[0].notified).toBe('recKho3l7jJKk9T0t');
+    const again = run({ cmd: 'notify', rows: sent.ledger });
+    expect(again.calls).toHaveLength(0);
+    expect(again.printed[0]).toMatchObject({ skipped: 'recKho3l7jJKk9T0t', event: 'sent' });
+    const died = run({ cmd: 'notify', rows: [sent.ledger[0]] });
+    expect(died.printed[0]).toMatchObject({ skipped: 'recKho3l7jJKk9T0t', event: 'intent' });
   });
 });

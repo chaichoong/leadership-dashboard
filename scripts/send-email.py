@@ -890,13 +890,29 @@ def cmd_notify(args):
     # Same ledger as `send`, so one task cannot be notified twice by two runs.
     prior = already_sent(args.task, "notify")
     if prior and prior.get("event") != "notify-superseded":
-        print(json.dumps({"skipped": args.task,
-                          "why": "already emailed at %s" % prior.get("ts")}))
+        # `event` says which: `sent` went; `intent` or `uncertain` is a send that was cut off and
+        # may never have left, which the caller must be able to tell from "already emailed".
+        went = prior.get("event") == "sent"
+        print(json.dumps({"skipped": args.task, "event": prior.get("event"),
+                          "why": ("already emailed at %s" if went else
+                                  "an earlier send was cut off at %s and may not have gone; never sent twice")
+                                 % prior.get("ts")}))
         return
 
     ledger_append({"task": args.task, "ts": now_iso(), "event": "intent", "kind": "notify",
                    "to": [deliver["to"]], "cc": [], "subject": deliver["subject"]})
-    result = worker_call(SEND_URL, {**deliver, "text": body})
+    try:
+        result = worker_call(SEND_URL, {**deliver, "text": body})
+    except SystemExit as exc:
+        # As `send` does (rec9IufIUW7DpxHZy, 23 Sep 2026): a refusal before anything left is
+        # `failed` and the next call may try again; anything else is `uncertain` and never is.
+        # Without this row the intent stood alone, every later call said "already emailed" and
+        # the colleague was never told (independent review, 2 Oct 2026).
+        error = str(exc)[:300]
+        ledger_append({"task": args.task, "ts": now_iso(), "kind": "notify",
+                       "event": "failed" if NOT_SENT_RE.search(error) else "uncertain",
+                       "error": error})
+        raise
     ledger_append({"task": args.task, "ts": now_iso(), "event": "sent", "kind": "notify",
                    "from": deliver.get("from", "(default)"), "to": [deliver["to"]], "cc": [],
                    "subject": deliver["subject"], "taskName": name,

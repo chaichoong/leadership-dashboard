@@ -402,10 +402,11 @@ TRIAL_STAMP = "TRIAL CHECKED"
 # that is re-routed, reassigned or resubmitted under another agent's id would otherwise become an
 # ordinary card that sends on approval. So a task carrying the lane's own marks stays on trial for
 # as long as its agent is listed above. Either mark is enough: a name can be edited and a Notes
-# line can be lost. Kept identical to TASK_PREFIX and KEY_MARK in scripts/rent-check.py
-# (tests/cash-flow-voids-agent.test.js).
+# line can be lost. Kept identical to TASK_PREFIX and KEY_MARK in scripts/rent-check.py, and to
+# ASK_PREFIX in scripts/rent_new_tenant.py (lane B's tenant drafts carry the same key mark)
+# (tests/cash-flow-voids-agent.test.js, tests/rent-new-tenant.test.js).
 TRIAL_TASK_MARKS = {
-    "rec7aHLK1Q8fMLRXH": {"prefix": "RENT LATE: ", "note": "RENT CHECK KEY: "},
+    "rec7aHLK1Q8fMLRXH": {"prefix": ("RENT LATE: ", "RENT ASK: "), "note": "RENT CHECK KEY: "},
 }
 # The output shapes that act without send-email.py: Roy's handover email, the diary, the Friday
 # payment list, signing and the post. The lead-in is what scripts/payment-run.py also accepts, so

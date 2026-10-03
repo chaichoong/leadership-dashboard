@@ -55,6 +55,14 @@ rc.HISTORY = os.path.join(SCRATCH, "history.jsonl")
 rc.PRE_SLATE_PATH = os.path.join(SCRATCH, "pre-slate.json")
 # No test may reach Airtable either: the task state is read through this, replaced per test.
 rc.read_task_state = lambda: {"on": False, "status": "Building", "keys": {}}
+# Lane B (scripts/rent_new_tenant.py) reads and writes through these. No test here may reach
+# Airtable or email Roy; its own cases are in tests/rent-new-tenant.test.js.
+rc.lane_b_rules.read_tasks = lambda _rc: []
+rc.lane_b_rules.read_names = lambda _rc, ids: {}
+def _no_lane_b_write(*a, **k): raise RuntimeError("a rent-check test tried a real lane B write")
+rc.lane_b_rules.raise_one = _no_lane_b_write
+rc.lane_b_rules.finish_one = _no_lane_b_write
+rc.lane_b_rules.notify_roy = _no_lane_b_write
 TY, TN, TX, AC = rc.TY, rc.TN, rc.TX, rc.AC
 DAY = date(2026, 10, 2)
 def rec(i, f): return {"id": i, "fields": f}
@@ -67,7 +75,7 @@ def paid(tid, day, amount, account="recA_main"):
     return rec("tx_" + tid + day, {TX["date"]: day, TX["tenancy"]: [tid], TX["amount"]: amount, TX["account"]: [account]})
 def waiting(day, amount, account="recA_main"):
     return rec("txU" + day, {TX["date"]: day, TX["amount"]: amount, TX["account"]: [account]})
-def world(tenancies, tx, unmatched=(), feed=None, pre=(), day=DAY, accounts=None, lateBefore=()):
+def world(tenancies, tx, unmatched=(), feed=None, pre=(), day=DAY, accounts=None, lateBefore=(), noChase=()):
     # The bank feed defaults to noon (London) on the day checked. A matched payment on a tenancy
     # outside the test keeps Main Bank a known rent account.
     feed = feed or (day.isoformat() + "T11:03:29.000Z")
@@ -76,7 +84,7 @@ def world(tenancies, tx, unmatched=(), feed=None, pre=(), day=DAY, accounts=None
                         rec("recT_agent", {TN["payType"]: "Agent-Managed"})],
             "tx": [paid("recOTHER", (day - timedelta(days=4)).isoformat(), 500)] + list(tx), "unmatched": list(unmatched),
             "accounts": accounts if accounts is not None else [rec("recA_main", {AC["alias"]: "Main Bank", AC["updated"]: feed})],
-            "preSlate": set(pre), "lateBefore": set(lateBefore)}
+            "preSlate": set(pre), "lateBefore": set(lateBefore), "noChase": set(noChase)}
 def run(tenancies, tx, day=DAY, hour=12, **kw):
     now = datetime(day.year, day.month, day.day, hour, 30, tzinfo=timezone.utc)
     res = rc.assess(world(tenancies, tx, day=day, **kw), day, now)
@@ -111,7 +119,7 @@ print(json.dumps({"light": res["lights"]["recEX1"], "line": res["briefLine"]}))`
 
   it('2. due day 2, paid 2 Sep, checked on the due day: green', () => {
     const r = py(`
-res, rows = run([tenancy("recEX2", 2, 500.00, start="2021-11-01")], [paid("recEX2", "2026-09-02", 500.00)])
+res, rows = run([tenancy("recEX2", 2, 500.00, start="2022-02-16")], [paid("recEX2", "2026-09-02", 500.00)])
 print(json.dumps({"light": res["lights"]["recEX2"], "listed": list(rows), "worst": res["worst"], "line": res["briefLine"]}))`);
     expect(r.light).toBe('green');
     expect(r.listed).toEqual([]);
@@ -121,10 +129,10 @@ print(json.dumps({"light": res["lights"]["recEX2"], "listed": list(rows), "worst
 
   it('3. cash flow voids that existed on the slate date: shown, counted, left alone', () => {
     const r = py(`
-ts = [tenancy("recEX3", 17, 900.00, status="CFV", start="2026-03-17", unit="Unit 9 – 2 Example Road"),
-      tenancy("recEX4", 15, 900.00, status="CFV Actioned", start="2026-04-17", unit="Unit 9 – 3 Example Road")]
-res, rows = run(ts, [paid("recEX3", "2026-08-17", 42.49)], pre=["recEX3", "recEX4"])
-other, orows = run(ts, [paid("recEX3", "2026-08-17", 42.49)])
+ts = [tenancy("recEX3", 11, 900.00, status="CFV", start="2026-02-11", unit="Unit 9 – 2 Example Road"),
+      tenancy("recEX4", 9, 900.00, status="CFV Actioned", start="2026-05-09", unit="Unit 9 – 3 Example Road")]
+res, rows = run(ts, [paid("recEX3", "2026-08-11", 40.00)], pre=["recEX3", "recEX4"])
+other, orows = run(ts, [paid("recEX3", "2026-08-11", 40.00)])
 print(json.dumps({"a": rows["recEX3"], "b": rows["recEX4"], "line": res["briefLine"], "worst": res["worst"],
                   "notListed": [orows["recEX3"]["lane"], orows["recEX4"]["lane"], other["worst"]]}))`);
     expect([r.a.light, r.a.lane, r.a.note]).toEqual(['red', 'existing', 'cash flow void, existing, left alone']);
@@ -237,10 +245,10 @@ print(json.dumps({"row": rows["recBack"], "paying": res["paying"]}))`);
 
   it('a part payment does not clear a cash flow void', () => {
     const r = py(`
-res, rows = run([tenancy("recPart", 17, 900.00, status="CFV")], [paid("recPart", "2026-09-17", 42.49)])
+res, rows = run([tenancy("recPart", 17, 900.00, status="CFV")], [paid("recPart", "2026-09-17", 40.00)])
 print(json.dumps({"row": rows["recPart"], "paying": res["paying"]}))`);
     expect([r.row.light, r.row.lane]).toEqual(['red', 'late']);
-    expect(r.row.note).toBe('cash flow void, last matched payment 17 Sep, part payment £42.49 of £900.00');
+    expect(r.row.note).toBe('cash flow void, last matched payment 17 Sep, part payment £40.00 of £900.00');
     expect(r.paying).toBe(0);
   });
 
@@ -618,12 +626,24 @@ print(json.dumps(out))`);
 calls = []
 def fake(table, params=None):
     calls.append([table, (params or {}).get("filterByFormula", "")])
-    return [0] * 200
+    return [{"id": "recN", "fields": {}}] * 200
 rc.fetch_all = fake
 rc.read_pre_slate = lambda path=None: {"recP"}
+rc.read_no_chase = lambda path=None: {"recN"}
 rc.read_late_before = lambda day, path=None: {"recL"}
 data = rc.load(date(2026, 10, 2))
-print(json.dumps({"calls": calls, "pre": sorted(data["preSlate"]), "late": sorted(data["lateBefore"])}))`);
+print(json.dumps({"calls": calls, "pre": sorted(data["preSlate"]), "late": sorted(data["lateBefore"]), "noChase": sorted(data["noChase"])}))`);
+    expect(r.noChase).toEqual(['recN']);
+    // And load() itself refuses a list naming an id it did not read as a tenant.
+    const bad = py(`
+rc.fetch_all = lambda table, params=None: [{"id": "recN", "fields": {}}] * 200
+rc.read_pre_slate = lambda path=None: set()
+rc.read_no_chase = lambda path=None: {"recZ"}
+rc.read_late_before = lambda day, path=None: set()
+try: rc.load(date(2026, 10, 2)); out = "passed"
+except RuntimeError as e: out = str(e)[:48]
+print(json.dumps(out))`);
+    expect(bad).toBe('control failed: 1 id on the do-not-chase list (n');
     const formulas = r.calls.map(c => c[1]).filter(Boolean);
     expect(formulas).toEqual([
       "AND({Reconciled}, {Tenancy}!='', IS_AFTER({**Date}, '2026-07-14'))",
@@ -913,6 +933,24 @@ print(json.dumps({"on": [live["on"], built["on"], building["on"], paused["on"]],
     expect(r.unread).toContain('control failed: the Cash Flow Voids register row could not be read');
   });
 
+  it('when the agent\'s switch cannot be read, lane B is told so and never reports it as switched off', () => {
+    const r = py(`
+rows = []
+today = rc.today_london()
+ts = [tenancy("recG%02d" % i, 1, 500) for i in range(20)]
+rc.load = lambda day: world(ts, [paid("recG%02d" % i, today.isoformat(), 500) for i in range(20)], day=today, feed=datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.000Z"))
+def unread(): raise RuntimeError("control failed: the Cash Flow Voids register row could not be read")
+rc.read_task_state = unread
+rc.write_row = lambda status, text, payload, now: rows.append([status, text])
+rc.append_history = lambda res, now: None
+with contextlib.redirect_stdout(io.StringIO()):
+    code = rc.main(["run"])
+print(json.dumps({"code": code, "status": rows[0][0], "laneB": rows[0][1].splitlines()[-1]}))`);
+    expect(r.code).toBe(1);
+    expect(r.status).toBe('Failed');
+    expect(r.laneB).toBe("New-tenant tasks: not run, the Cash Flow Voids agent's switch could not be read.");
+  });
+
   it('a failed raise is said on the row, turns the run red, and the rent line is still written', () => {
     const r = py(`
 rows = []
@@ -927,10 +965,12 @@ rc.raise_task = boom
 rc.write_row = lambda status, text, payload, now: rows.append([status, text])
 with contextlib.redirect_stdout(io.StringIO()):
     code = rc.main(["run"])
-print(json.dumps({"code": code, "status": rows[0][0], "lastLine": rows[0][1].splitlines()[-1], "firstLine": rows[0][1].splitlines()[0][:22]}))`);
+print(json.dumps({"code": code, "status": rows[0][0], "lastLine": rows[0][1].splitlines()[-2], "laneB": rows[0][1].splitlines()[-1], "firstLine": rows[0][1].splitlines()[0][:22]}))`);
     expect(r.code).toBe(1);
     expect(r.status).toBe('Failed');
     expect(r.lastLine).toBe('Late-rent tasks FAILED: Airtable POST tasks 422: nope');
+    // Lane B still runs and has its own line, after lane A's.
+    expect(r.laneB).toBe('New-tenant tasks: none needed today.');
     expect(r.firstLine).toBe('20 of 21 tenants payin');
   });
 });

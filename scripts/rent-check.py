@@ -16,9 +16,10 @@ WHAT ONE RUN DOES
               and one line in the history log so the trial can be checked day by day
 
 WHAT IT NEVER DOES
-It sends nothing and changes no tenancy, tenant or payment status. It writes its own Estate
-Status row, and (lane A, 2 Oct 2026) one RENT LATE task per late tenancy per stage for the Cash
-Flow Voids agent, only while that agent's register row is Built or Live.
+It sends nothing to a tenant and changes no tenancy, tenant or payment status. It writes its own
+Estate Status row, (lane A, 2 Oct 2026) one RENT LATE task per late tenancy per stage for the Cash
+Flow Voids agent, and (lane B) the tasks that walk a new tenant into payment, only while that
+agent's register row is Built or Live.
 
 LANE A, IN TRIAL (Kevin, 2 Oct 2026)
 A tenancy that reads late on trusted bank data becomes a task for the Cash Flow Voids agent. The
@@ -28,6 +29,15 @@ and 7: the stages in js/cfv.js CFV_CHASE_STAGES). The agent drafts the email, th
 nothing is sent: the agent is a TRIAL agent (scripts/agent_email_format.py TRIAL_AGENTS). No task
 is raised for an agent-managed tenancy, an existing void, a void already actioned with the DWP, a
 short payment, or anything this check "cannot tell".
+
+LANE B, A NEW TENANT INTO PAYMENT (Kevin, 2 Oct 2026)
+scripts/rent_new_tenant.py holds the clock: Roy's journal task, the housing costs check 7 days on,
+the form, and a check every 14 days until rent lands. This file calls it after lane A and prints
+each tenancy's stage on its row.
+
+NOT CHASED (Kevin's standing instruction)
+A tenant on the private "noChaseTenants" list (PRE_SLATE_PATH, ids only) is judged and shown like
+anyone else, and no task of either lane is ever raised for their tenancy.
 
 THE RULE (the app's, js/arrears.js isCurrentlyInArrears, so the robot and the page agree)
 A rent cycle is covered when a matched payment linked to the tenancy is dated no more than
@@ -87,6 +97,9 @@ import urllib.parse
 import urllib.request
 from datetime import date, datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import rent_new_tenant as lane_b_rules  # noqa: E402
 
 LONDON = ZoneInfo("Europe/London")
 BASE = "appnqjDpqDniH3IRl"
@@ -271,6 +284,30 @@ def read_pre_slate(path=None):
     return set(ids)
 
 
+def read_no_chase(path=None):
+    """The tenants no task is ever raised for (Kevin's standing instruction), from the same private
+    file. The key is optional: a file without it is an empty list. The wrong shape stops the run,
+    because reading it as empty would chase someone Kevin said to leave alone."""
+    try:
+        with open(path or PRE_SLATE_PATH) as fh:
+            ids = json.load(fh).get("noChaseTenants", [])
+        if not isinstance(ids, list) or not all(isinstance(i, str) and i.startswith("rec") for i in ids):
+            raise ValueError("'noChaseTenants' must be a list of record ids")
+    except (OSError, ValueError, AttributeError, TypeError) as exc:
+        raise RuntimeError(f"control failed: the list of tenants not to chase could not be read ({exc})")
+    return set(ids)
+
+
+def check_no_chase(data):
+    """Every id on the do-not-chase list must be a tenant this run read. A tenancy id pasted in, or
+    a tenant since deleted, matches nobody and would let that tenant be chased in silence."""
+    known = {r["id"] for r in data.get("tenants") or [] if isinstance(r, dict)}
+    stray = sorted(set(data.get("noChase") or ()) - known)
+    if stray:
+        raise RuntimeError(f"control failed: {len(stray)} id{'' if len(stray) == 1 else 's'} on the do-not-chase "
+                           "list (noChaseTenants) matched no tenant; it takes tenant ids, not tenancy ids")
+
+
 def read_late_before(day, path=None):
     """The tenancies the last recorded run called late, so a surge never swallows them. No log, a
     damaged one, or a last run more than LATE_BEFORE_DAYS old is an empty set: the surge may then
@@ -299,9 +336,11 @@ def load(day):
                                       "filterByFormula": f"AND(NOT({{Reconciled}}), {{Report Amount}}>0, IS_AFTER({{**Date}}, '{since}'))"}),
         "accounts": fetch_all(T_ACCOUNTS, {"fields[]": list(AC.values())}),
         "preSlate": read_pre_slate(),
+        "noChase": read_no_chase(),
         "lateBefore": read_late_before(day),
     }
     check_controls(data)
+    check_no_chase(data)
     return data
 
 
@@ -504,13 +543,19 @@ def assess(data, day, now):
     pay = payments_by_tenancy(data["tx"])
     feed = feed_state(data, pay, now)
     pre_slate, late_before = set(data.get("preSlate") or ()), set(data.get("lateBefore") or ())
+    no_chase = set(data.get("noChase") or ())
     rows = []
     for rec in data["tenancies"]:
         f = rec.get("fields") or {}
         start = parse_day(f.get(TY["start"]))
         if not is_live(f, day) or (start and start > day):
             continue
-        rows.append(judge(rec, tenants, pay.get(rec["id"], []), day, feed, pre_slate, late_before))
+        row = judge(rec, tenants, pay.get(rec["id"], []), day, feed, pre_slate, late_before)
+        if no_chase & set(f.get(TY["tenants"]) or []):
+            row["noChase"] = True
+            if not row["paying"]:
+                row["note"] += "; not chased: standing instruction"
+        rows.append(row)
     surge = [r for r in rows if r.get("fresh")]
     if len(surge) >= max(MASS_LATE_MIN, MASS_LATE_SHARE * len(rows)):
         why = (f"{len(surge)} tenancies turned late at once, which usually means payments are not in "
@@ -554,16 +599,23 @@ def brief_line(res):
         shown = "; ".join(text(r) for r in rows[:BRIEF_NAMES_MAX])
         return shown + (f"; and {len(rows) - BRIEF_NAMES_MAX} more" if len(rows) > BRIEF_NAMES_MAX else "") + "."
 
+    def staged(r):
+        # Lane B's few words for the stage. The whole of it is in the row's note, not here: Home
+        # prints only the first 700 characters of this line (js/home-list.js readRent).
+        return f"{r['unit']} ({r['stage']})" if r.get("stage") else r["unit"]
+
     if group("late"):
         parts.append("Late: " + names(group("late"), lambda r: (
-            f"{r['unit']} ({r['daysLate']} day{'s' if r['daysLate'] != 1 else ''})" if "daysLate" in r
-            else f"{r['unit']} ({r['note']})")))
+            f"{r['unit']} ({r['daysLate']} day{'s' if r['daysLate'] != 1 else ''}"
+            + (f", {r['stage']}" if r.get("stage") else ", marked actioned so not chased" if r["status"] == CFV_ACTIONED else "")
+            + ")" if "daysLate" in r
+            else staged(r) if r.get("stage") else f"{r['unit']} ({r['note']})")))
     if group("new"):
-        parts.append("New tenants not in payment yet: " + names(group("new"), lambda r: r["unit"]))
+        parts.append("New tenants not in payment yet: " + names(group("new"), staged))
     if group("short"):
         parts.append("Paid short: " + names(group("short"), lambda r: f"{r['unit']} ({money(r['got'])} of {money(r['rent'])})"))
     if group("existing"):
-        parts.append("Existing cash flow voids, left alone: " + names(group("existing"), lambda r: r["unit"]))
+        parts.append("Existing cash flow voids, left alone: " + names(group("existing"), staged))
     grey = [r for r in res["tenancies"] if r["light"] == "grey"]
     if grey:
         why = sorted({r["note"].replace("cannot tell: ", "") for r in grey})
@@ -611,6 +663,8 @@ def task_plan(res, tenancies, existing, day):
     plan = []
     for r in res["tenancies"]:
         if r["lane"] != "late" or r["status"] not in (IN_PAYMENT, CFV) or r["type"] == AGENT_MANAGED:
+            continue
+        if r.get("noChase"):
             continue
         # A void with a part payment sits in the late lane before its next rent is due: not late yet.
         if "daysLate" not in r and not r.get("beyond"):
@@ -740,6 +794,17 @@ def append_history(res, now):
                              "lights": res["lights"], "lanes": res["lanes"]}) + "\n")
 
 
+class _Here:
+    """This module, handed to lane B so it reads and writes through the same helpers (and a test's
+    stand-ins for them)."""
+
+    def __getattr__(self, name):
+        try:
+            return globals()[name]
+        except KeyError:
+            raise AttributeError(name)
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     ap.add_argument("cmd", choices=["run", "status"])
@@ -760,16 +825,22 @@ def main(argv=None):
         print(json.dumps({"failed": why}, indent=2))
         return 1
     res["tasks"] = lane_a(res, data["tenancies"], day, writes)
+    # The agent's switch is lane A's read. With no status read back, lane B is told so, not "off".
+    switch = res["tasks"]["on"] if res["tasks"]["status"] else None
+    res["setup"] = lane_b_rules.lane_b(_Here(), res, data, day, writes, switch)
+    res["briefLine"] = brief_line(res)              # lane B has put each new tenant's stage on its row
+    failed = res["tasks"]["failed"] or res["setup"]["failed"]
     if writes:
         public = {k: v for k, v in res.items() if k not in ("lights", "lanes")}
         # Blocked only when the bank data hid a verdict: a stale feed with every rent already seen hides nothing.
-        status = "Failed" if res["tasks"]["failed"] else ("Blocked" if res["bankBlocked"] else "Worked")
-        write_row(status, detail(res) + "\n" + lane_a_line(res["tasks"]), public, now)
+        status = "Failed" if failed else ("Blocked" if res["bankBlocked"] else "Worked")
+        write_row(status, "\n".join([detail(res), lane_a_line(res["tasks"]), lane_b_rules.lane_b_line(res["setup"])]),
+                  public, now)
         append_history(res, now)
     print(json.dumps({"written": writes, "briefLine": res["briefLine"], "worst": res["worst"],
                       "counts": res["counts"], "tenancies": res["tenancies"], "feed": res["feed"],
-                      "tasks": res["tasks"]}, indent=2))
-    return 1 if res["tasks"]["failed"] else 0
+                      "tasks": res["tasks"], "setup": res["setup"]}, indent=2))
+    return 1 if failed else 0
 
 
 if __name__ == "__main__":
