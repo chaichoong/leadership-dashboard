@@ -73,6 +73,7 @@ DESCRIPTIONS = {
     "claude.ai Slack": "Reads channels and sends messages.",
     "claude.ai Zoom for Claude": "Reads Zoom recordings, transcripts and meeting notes.",
     "claude.ai Claude Code Remote": "Lets you drive a Claude Code session from another device.",
+    "claude.ai Claude Docs": "Creates and edits living documents on claude.ai that you and the team can comment on.",
     "claude.ai Make": "Make.com automations. Never authorised, so nothing uses it.",
     "claude.ai Stripe": "Payments and subscriptions. Never authorised. Will matter at the Supabase cutover when clients start paying.",
     # Built into the Claude apps
