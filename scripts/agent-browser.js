@@ -452,10 +452,12 @@ function ledger(entry) {
   try {
     fs.mkdirSync(path.dirname(LEDGER), { recursive: true });
     fs.appendFileSync(LEDGER, JSON.stringify(Object.assign({ at: new Date().toISOString() }, entry)) + '\n');
+    return true;
   } catch (e) {
     // A ledger that cannot be written is a real problem, not a nicety: it is
     // the only record of what a browser did with Kevin's sessions.
     console.error('WARNING: browser ledger not written: ' + e.message);
+    return false;
   }
 }
 
@@ -1860,7 +1862,9 @@ async function main() {
         // Logged as it OPENS (once the browser is up) as well as when it closes: a window still open
         // (Kevin waiting overnight for an emailed code) must read as in use, never as unused, and a
         // launch that failed is no window at all (scripts/rent_new_tenant.py read_windows).
-        ledger({ cmd: 'handover-open', task, profile, site: plan.site || null });
+        const logged = ledger({ cmd: 'handover-open', task, profile, site: plan.site || null });
+        // For a robot form card the log IS the guard against a second government form: no log, no window.
+        if (!logged && approval.formCard) throw new Error('the robot log could not be written, so this form window does not open');
         await turnBanner(page, FILLING);
         const r = await runHandover(page, plan, { onTick: tick });
         const png = await shoot(page, path.join(HANDOVER_DIR, 'shots', `${task}-${Date.now()}.png`)).catch(() => null);

@@ -5317,7 +5317,8 @@ def cmd_outcome(args):
         "window": (t["outcome"] in APPROVED and t["status"] not in ("Completed", "Cancelled")
                    and form_card(t["name"], t["notes"], holders=holders)),
         # Kevin's step is open: the window command opens only then (a closed step is never run again).
-        "turn": bool((task_blocker(t["notes"]) or {}).get("kind") == "KEVIN"),
+        "turn": bool((task_blocker(t["notes"]) or {}).get("kind") == "KEVIN")
+                and not form_turn_unanswered(t["id"], t["name"], t["notes"]),
         "feedback": t["feedback"],
     }))
 
@@ -7024,7 +7025,36 @@ HANDOVER_DIR = os.environ.get("AGENT_HANDOVER_DIR") or os.path.expanduser("~/kno
 TURN_TASK_RE = re.compile(r"^rec[A-Za-z0-9]{14}$")
 
 
-def handover_ready(task_id, b, outcome=""):
+ROBOT_LOG = os.environ.get("AGENT_BROWSER_LEDGER") or os.path.expanduser("~/knowledge-os/logs/agent-browser/runs.jsonl")
+TURN_NOT_FINISHED = "Your turn window closed without Kevin finishing"   # the Robot sign-in app's "Not yet" note
+
+
+def form_turn_unanswered(task_id, name="", notes=""):
+    """True for a robot form card whose window has closed more times than the Robot sign-in app recorded
+    Kevin saying he had not finished: his answer never arrived (the app failed, or was quit with the
+    question up). He may have sent the government form, so neither the button nor the window offers it
+    again (scripts/rent_new_tenant.py may_have_sent closes the step once his answer has had time).
+    A log that cannot be read counts as unanswered: the window is refused, never offered blind."""
+    if not form_card(name, notes):
+        return False
+    closes = 0
+    try:
+        with open(ROBOT_LOG, encoding="utf-8", errors="replace") as fh:
+            for line in fh:
+                try:
+                    row = json.loads(line)
+                except ValueError:
+                    continue
+                if isinstance(row, dict) and row.get("task") == task_id and row.get("cmd") == "handover":
+                    closes += 1
+    except FileNotFoundError:
+        return False
+    except OSError:
+        return True
+    return closes > str(notes or "").count(TURN_NOT_FINISHED)
+
+
+def handover_ready(task_id, b, outcome="", task=None):
     """True when Kevin has APPROVED the card and its KEVIN wall has a handover plan
     on file. The wall opens at submit, before he has seen the card, so a plan alone
     is not a turn (review, 30 Sep 2026): the button would open a window the
@@ -7032,6 +7062,8 @@ def handover_ready(task_id, b, outcome=""):
     if not (b.get("kind") == "KEVIN" and str(outcome or "").startswith("Approved")
             and bool(TURN_TASK_RE.match(task_id or ""))
             and os.path.isfile(os.path.join(HANDOVER_DIR, task_id + ".json"))):
+        return False
+    if task and form_turn_unanswered(task_id, task.get("name"), task.get("notes")):
         return False
     # A plan whose answers hold only until a day (the DWP form's arrears answer, scripts/rent_form_plan.py)
     # shows no button after it: agent-browser.js would refuse it, and the rent check raises a fresh card.
@@ -7390,7 +7422,7 @@ def blockers_scan(sweep=False, now=None):
                "fix": blocker_fix_text(b), "finding": b["finding"],
                "findingStatus": fstates.get(b["finding"], "") if b["finding"] else "",
                "days": days, "clearsNow": bool(reason)}
-        if handover_ready(t["id"], b, t.get("outcome")):
+        if handover_ready(t["id"], b, t.get("outcome"), t):
             row["turn"] = True
             row["fix"] = ("Kevin clicks Your turn on the AI Agents page (on his Mac): the robot fills "
                           "everything in and hands him the window for his step.")

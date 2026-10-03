@@ -645,6 +645,26 @@ print(json.dumps({
     expect(r.markOnly).toEqual([[], [], 'form card to check', [], []]);
   });
 
+  it('after the clock has ended, or on a do-not-chase tenancy, its open form cards are still settled', () => {
+    const r = py(`
+OPEN = "[02 Oct 2026 10:00 — agent-dispatch] BLOCKER OPEN (KEVIN credential): type the code Fix: f [since 2026-10-02T09:00:00.000Z]"
+ended = task("recROYTASK000012", NEW + ":paid:1", status="Completed", extra="RENT SETUP ENDED: rent reached the bank, seen 2 Oct 2026.")
+def card(status="Today"):
+    t = task("recFORMTASK00001", NEW + ":form:1", status=status, created=date(2026, 9, 28), name="RENT FORM: a form", extra=OPEN)
+    return dict(t, outcome="Approved as-is", notes="RENT FORM KEY: " + NEW + ":form:1\\n" + t["notes"])
+def go(windows, tenancies=None, extra=None, **kw):
+    _, out = plan(tenancies or [new_void(status="CFV Actioned")], [ended, card()] if extra is None else extra, windows=windows, **kw)
+    return [withdrawn(out), [c["id"] for c in out["complete"]]]
+W = lambda **k: {"recFORMTASK00001": dict({"used": 0, "openNow": False, "recentClose": False}, **k)}
+print(json.dumps({"endedOpen": go({}), "endedMaybe": go(W(used=1)), "endedBusy": go(W(openNow=True)),
+                  "noChaseMaybe": go(W(used=1), [new_void(status="CFV Actioned")], [card()], noChase=["recT_uc"])}))`);
+    expect(r.endedOpen).toEqual([[['recFORMTASK00001', 'rent has reached the bank, nothing more to do']], []]);
+    expect(r.endedMaybe).toEqual([[], ['recFORMTASK00001']]);
+    // In his turn right now: left for a later run.
+    expect(r.endedBusy).toEqual([[], []]);
+    expect(r.noChaseMaybe).toEqual([[], ['recFORMTASK00001']]);
+  });
+
   it('the robot log is read for each card\'s windows; a missing log is none, a bad line is skipped', () => {
     const r = py(`
 path = os.path.join(SCRATCH, "runs.jsonl")

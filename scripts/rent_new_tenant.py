@@ -963,6 +963,9 @@ def plan(res, tasks, tenants_of, names, day, starts=None, paid=None, bank=None, 
             pos = position(steps, day, status or "", plans, windows)
             if pos["stage"] == "form" and pos["withdraw"]:
                 withdraw(pos["last"], pos["withdraw"], tenancy)
+            if pos["stage"] == "form" and pos["complete"] and pos["last"]["id"] not in {c["id"] for c in complete_out}:
+                complete_out.append({"id": pos["last"]["id"], "tenancy": tenancy, "why": pos["complete"],
+                                     "label": f"form card closed: {pos['last']['id']}"})
 
     def finish_sent(tenancy, steps):
         """Only the cards Kevin sent and that still lack their comment: his word is never lost."""
@@ -1109,9 +1112,11 @@ def plan(res, tasks, tenants_of, names, day, starts=None, paid=None, bank=None, 
                     close(t, "a later check has taken over from this one", r["id"])
     for tenancy, steps in grouped.items():
         if tenancy in ended:
-            # A card Kevin sent still gets its comment after the clock has ended (its finish may have
-            # failed in the run that wrote the end line), and nothing else of the tenancy's is touched.
-            finish_sent(tenancy, steps)
+            # After the clock has ended its form cards are still settled: a card Kevin sent gets its
+            # comment (its finish may have failed in the run that wrote the end line), one still open
+            # leaves his queue (or is closed if he may have sent it), and one in his turn right now is
+            # settled on a later run. Nothing else of the tenancy's is touched.
+            settle_cards(tenancy, steps, None, "rent has reached the bank, nothing more to do")
             continue
         if tenancy in seen or tenancy in stopped:
             continue
@@ -1490,7 +1495,8 @@ def close_card(rc, item, day):
     wall = ad.task_blocker(notes)
     if wall:
         stamp = datetime.now(LONDON).strftime("%d %b %Y %H:%M")
-        lines.append(ad.blocker_note(stamp, "rent-check", ad.BLOCKER_CLEARED_MARK, wall, f"closed: {item['why']}"))
+        lines.append(ad.blocker_note(stamp, "rent-check", ad.BLOCKER_CLEARED_MARK, wall,
+                                     f"closed: {item['why']}, and {UNRECORDED}"))
     lines.append(f"{FORM_CLOSED_MARK}{day.isoformat()} {item['why']}")
     rc.api("PATCH", rc.T_TASKS, {"records": [{"id": item["id"], "fields": {
         rc.TK["status"]: "Completed", COMPLETION_FIELD: datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.000Z"),

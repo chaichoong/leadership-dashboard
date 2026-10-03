@@ -452,8 +452,8 @@ ad.cmd_outcome(argparse.Namespace(task=rec["id"]))
     const script = join(h, 'outcome.py');
     writeFileSync(script, PY + AD + `
 TURN = CARD_NOTES + "\\n\\n[02 Oct 2026 10:00 — agent-dispatch] BLOCKER OPEN (KEVIN credential): type the code Fix: f [since 2026-10-02T09:00:00.000Z]"
-rows = {"recCARD0000000001": view(CARD, TURN), "recCARD0000000002": view(CARD, TURN, outcome="Changes requested"),
-        "recCARD0000000003": view(CARD, TURN, outcome="Approved with minor edits")}
+rows = {"recCARD0000000001": view(CARD, TURN), "recCARD0000000002": view(CARD, TURN, outcome="Changes requested", tid="recCARD0000000002"),
+        "recCARD0000000003": view(CARD, TURN, outcome="Approved with minor edits", tid="recCARD0000000003")}
 rows["recCARD0000000003"]["fields"][ad.AF["approvalFeedback"]] = "The rent is 850"
 rec = rows[sys.argv[2]]
 ad.get_task = lambda tid: rec
@@ -484,6 +484,42 @@ ad.cmd_outcome(argparse.Namespace(task=rec["id"]))
       expect(edited.code, edited.err).toBe(0);
       const turn = edited.out.split('\n').filter(l => l.includes('"phase":"your-turn"')).map(l => JSON.parse(l))[0];
       expect(turn.edit).toBe('The rent is 850');
+      // No log, no form window: the log is what stops a second government form.
+      const { mkdirSync: mk } = await import('node:fs');
+      const h2 = mkdtempSync(join(tmpdir(), 'od-card-nolog-'));
+      mk(join(h2, '.config', 'od', 'agent-browser', 'default'), { recursive: true });
+      mk(join(h2, 'knowledge-os'), { recursive: true });
+      writeFileSync(join(h2, 'knowledge-os', 'logs'), 'a file where the log folder should be');
+      const nolog = await new Promise(res => {
+        const c = spawn(process.execPath, [join(SCRIPTS, 'agent-browser.js'), 'handover', '--task', 'recCARD0000000001'], { env: { ...env, HOME: h2 }, stdio: ['ignore', 'pipe', 'pipe'] });
+        let out = '', err = '';
+        c.stdout.on('data', d => { out += d; }); c.stderr.on('data', d => { err += d; });
+        c.on('exit', code => res({ code, out, err }));
+      });
+      rmSync(h2, { recursive: true, force: true });
+      // Refused before any window: the log cannot be read (so the turn is not offered) or written.
+      expect(nolog.code).not.toBe(0);
+      expect(nolog.err).toMatch(/does not open/);
+      expect(nolog.out).not.toMatch(/"phase":"your-turn"/);
+      // A log that can be read but not written: the window would launch, and is refused at once.
+      const h3 = mkdtempSync(join(tmpdir(), 'od-card-rolog-'));
+      mk(join(h3, '.config', 'od', 'agent-browser', 'default'), { recursive: true });
+      mk(join(h3, 'knowledge-os', 'logs', 'agent-browser'), { recursive: true });
+      const roLog = join(h3, 'knowledge-os', 'logs', 'agent-browser', 'runs.jsonl');
+      writeFileSync(roLog, '');
+      const { chmodSync } = await import('node:fs');
+      chmodSync(roLog, 0o444);
+      const rolog = await new Promise(res => {
+        const c = spawn(process.execPath, [join(SCRIPTS, 'agent-browser.js'), 'handover', '--task', 'recCARD0000000001'], { env: { ...env, HOME: h3 }, stdio: ['ignore', 'pipe', 'pipe'] });
+        let out = '', err = '';
+        c.stdout.on('data', d => { out += d; }); c.stderr.on('data', d => { err += d; });
+        c.on('exit', code => res({ code, out, err }));
+      });
+      chmodSync(roLog, 0o644);
+      rmSync(h3, { recursive: true, force: true });
+      expect(rolog.code).not.toBe(0);
+      expect(rolog.out + rolog.err).toMatch(/robot log could not be written, so this form window does not open/);
+      expect(rolog.out).not.toMatch(/"phase":"your-turn"/);
       // The robot logs each window as it opens and as it closes (lane B reads both).
       const log = readFileSync(join(h, 'knowledge-os', 'logs', 'agent-browser', 'runs.jsonl'), 'utf8').trim().split('\n').map(l => JSON.parse(l));
       expect(log.filter(x => x.task === 'recCARD0000000001').map(x => x.cmd)).toEqual(['handover-open', 'handover']);
@@ -524,8 +560,9 @@ lb = load_mod("rnt4", "rent_new_tenant.py")
 OPEN = "[02 Oct 2026 10:00 — agent-dispatch] BLOCKER OPEN (KEVIN credential): type the code Fix: f [since 2026-10-02T09:00:00.000Z]"
 CLOSED = "[03 Oct 2026 07:30 — rent-check] BLOCKER CLEARED (KEVIN credential): the window was used but " + lb.UNRECORDED + ", so this step is closed"
 OTHER = "[03 Oct 2026 07:30 — rent-check] BLOCKER CLEARED (KEVIN credential): the card was closed on 3 Oct 2026, so this step is no longer Kevin's"
+ACTIONED = "[03 Oct 2026 07:30 — rent-check] BLOCKER CLEARED (KEVIN credential): closed: the tenancy is marked CFV Actioned, and " + lb.UNRECORDED
 out = {}
-for key, last in (("unrecorded", CLOSED), ("closedCard", OTHER)):
+for key, last in (("unrecorded", CLOSED), ("closedCard", OTHER), ("closedActioned", ACTIONED)):
     rec = view(CARD, CARD_NOTES + "\\n\\n" + OPEN + "\\n" + last)
     written = []
     ad.get_task = lambda tid, _r=rec: _r
@@ -540,6 +577,8 @@ for key, last in (("unrecorded", CLOSED), ("closedCard", OTHER)):
 out["same"] = lb.UNRECORDED == ad.UNRECORDED_TURN
 print(json.dumps(out))`);
     expect(r.unrecorded).toBe(true);
+    // A card closed because the tenancy was marked actioned still takes his late answer (his comment).
+    expect(r.closedActioned).toBe(true);
     // Any other closed step still has no blocker to clear: only his unrecorded answer is taken late.
     expect(r.closedCard).toMatch(/has no open blocker/);
     expect(r.same).toBe(true);
@@ -604,6 +643,33 @@ print(json.dumps({"names": [d["outcome"] for d in got], "clause": ar.FORM_KEY_CL
     expect(r.names).toEqual(['Approved as-is']);
     // The query leaves out a card known only by its key line (the Notes are not fetched for every task).
     expect(r.clause).toBe(", NOT(FIND('RENT FORM KEY: ', {Notes}&''))");
+  });
+
+  it('a form card whose last window closed with no answer recorded offers neither the button nor the window again', () => {
+    const r = py(AD + `
+ad.ROBOT_LOG = os.path.join(tempfile.mkdtemp(), "runs.jsonl")
+OPEN = "[02 Oct 2026 10:00 — agent-dispatch] BLOCKER OPEN (KEVIN credential): type the code Fix: f [since 2026-10-02T09:00:00.000Z]"
+NOT_YET = "[02 Oct 2026 15:00 — agent] Your turn window closed without Kevin finishing. The task stays his."
+ad.HANDOVER_DIR = tempfile.mkdtemp()
+json.dump({"why": "x"}, open(os.path.join(ad.HANDOVER_DIR, "recCARD0000000001.json"), "w"))
+def state(notes, closes, name=CARD):
+    open(ad.ROBOT_LOG, "w").write("".join(json.dumps({"cmd": c, "task": "recCARD0000000001"}) + "\\n" for c in ["handover-open", "handover"] * closes))
+    rec = view(name, notes)
+    ad.get_task = lambda tid: rec
+    buf = io.StringIO()
+    with contextlib.redirect_stdout(buf):
+        ad.cmd_outcome(argparse.Namespace(task=rec["id"]))
+    t = ad.task_view(rec)
+    return [json.loads(buf.getvalue())["turn"], ad.handover_ready(rec["id"], ad.task_blocker(notes), "Approved as-is", t)]
+TURN = CARD_NOTES + "\\n\\n" + OPEN
+print(json.dumps({"fresh": state(TURN, 0), "unanswered": state(TURN, 1), "notYet": state(TURN + "\\n" + NOT_YET, 1),
+                  "twiceOneNotYet": state(TURN + "\\n" + NOT_YET, 2), "ordinary": state("plain task\\n\\n" + OPEN, 1, "Book the boiler service")}))`);
+    expect(r.fresh).toEqual([true, true]);
+    expect(r.unanswered).toEqual([false, false]);
+    expect(r.notYet).toEqual([true, true]);
+    expect(r.twiceOneNotYet).toEqual([false, false]);
+    // Any other task's Your turn is as before.
+    expect(r.ordinary[0]).toBe(true);
   });
 
   it('the queue lists every form card apart, whatever its outcome, and trial-settle never closes one', () => {
