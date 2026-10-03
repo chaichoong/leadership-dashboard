@@ -562,7 +562,10 @@ function assertApproved(taskId, { window = false } = {}) {
   }
   // A robot form card (3 Oct 2026, FORM_CARDS in scripts/agent_email_format.py) opens the window
   // and nothing else: the form is Kevin's to send, so `commit`, which presses submit, refuses it.
-  if (window && state.window === true) return state;
+  if (window && state.window === true) {
+    if (state.turn !== true) die(`task ${taskId} has no open Your turn step, so its window does not open.`);
+    return state;
+  }
   if (state.formCard) {
     die(`task ${taskId} is a robot form card: only the Your turn window opens it, and Kevin sends the form himself.`);
   }
@@ -1851,12 +1854,13 @@ async function main() {
     await new Promise(r => setTimeout(r, Number(process.env.AGENT_HANDOVER_PAUSE_MS) || 3000));
     const tick = () => takeSigninHold(dir);                          // the hold stays fresh while it is his
     const headed = !process.env.AGENT_HANDOVER_HEADLESS;          // tests only
-    // Logged as it OPENS as well as when it closes: a window still open (Kevin waiting overnight for an
-    // emailed code) must read as in use, never as unused (scripts/rent_new_tenant.py read_windows).
-    ledger({ cmd: 'handover-open', task, profile, site: plan.site || null });
     let res;
     try {
       res = await withPage(profile, headed, async (page, ctx) => {
+        // Logged as it OPENS (once the browser is up) as well as when it closes: a window still open
+        // (Kevin waiting overnight for an emailed code) must read as in use, never as unused, and a
+        // launch that failed is no window at all (scripts/rent_new_tenant.py read_windows).
+        ledger({ cmd: 'handover-open', task, profile, site: plan.site || null });
         await turnBanner(page, FILLING);
         const r = await runHandover(page, plan, { onTick: tick });
         const png = await shoot(page, path.join(HANDOVER_DIR, 'shots', `${task}-${Date.now()}.png`)).catch(() => null);

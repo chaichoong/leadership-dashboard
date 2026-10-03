@@ -616,22 +616,33 @@ def card(extra="", outcome="Approved as-is", status="Today"):
     return dict(t, outcome=outcome, notes="RENT FORM KEY: " + NEW + ":form:1\\n" + t["notes"])
 def go(c, windows, status="CFV"):
     res, out = plan([new_void(status=status)], [c], windows=windows)
-    return [keys(out), withdrawn(out), short(res), [x["id"] for x in out["closeSteps"]]]
+    return [keys(out), withdrawn(out), short(res), [x["id"] for x in out["closeSteps"]], [x["id"] for x in out["complete"]]]
 EXPIRED = "\\nRENT FORM GOOD UNTIL: 2026-10-01"
 print(json.dumps({
   "openNowExpired": go(card(OPEN + EXPIRED), {"recFORMTASK00001": {"used": 0, "openNow": True}}),
   "unrecorded": go(card(OPEN), {"recFORMTASK00001": {"used": 1, "openNow": False}}),
   "cancelledAfter": go(card(OPEN, status="Cancelled"), {"recFORMTASK00001": {"used": 1, "openNow": False}}),
   "actionedUnrecorded": go(card(OPEN), {"recFORMTASK00001": {"used": 1, "openNow": False}}, status="CFV Actioned"),
+  "passedOver": (lambda o: [keys(o), withdrawn(o), [x["id"] for x in o["complete"]], o["problems"]])(plan([new_void(status="CFV Actioned")],
+      [card(OPEN), task("recROYTASK000012", NEW + ":paid:1", created=date(2026, 9, 30))], windows={"recFORMTASK00001": {"used": 1, "openNow": False}})[1]),
+  "justClosed": go(card(OPEN + EXPIRED), {"recFORMTASK00001": {"used": 1, "openNow": False, "recentClose": True}}),
+  "markOnly": go(card(OPEN + "\\n[03 Oct 2026 07:30 — rent-check] BLOCKER CLEARED (KEVIN credential): the window was used but "
+                      "the app never recorded whether Kevin sent the form, so this step is closed" + EXPIRED), {}),
 }))`);
     // His window is open (he may be waiting for the emailed code): nothing is withdrawn, even past its day.
-    expect(r.openNowExpired).toEqual([[], [], 'form window open', []]);
+    expect(r.openNowExpired).toEqual([[], [], 'form window open', [], []]);
     // A window used with no answer recorded: said, and its Your turn step closed so it is never run twice.
-    expect(r.unrecorded).toEqual([[], [], 'form card to check', ['recFORMTASK00001']]);
+    expect(r.unrecorded).toEqual([[], [], 'form card to check', ['recFORMTASK00001'], []]);
     // He then cancels it: his answer is "not sent", and a fresh card is raised.
-    expect(r.cancelledAfter).toEqual([[['form', 'recLaneBTest00001:form:2']], [], 'form card raised again', []]);
-    // On a tenancy marked actioned the payment checks follow, and the card's step is still closed.
-    expect(r.actionedUnrecorded).toEqual([[['roy', 'recLaneBTest00001:paid:1']], [], 'form sent, awaiting rent', ['recFORMTASK00001']]);
+    expect(r.cancelledAfter).toEqual([[['form', 'recLaneBTest00001:form:2']], [], 'form card raised again', [], []]);
+    // On a tenancy marked actioned the payment checks follow, and the card is closed (never withdrawn).
+    expect(r.actionedUnrecorded).toEqual([[['roy', 'recLaneBTest00001:paid:1']], [], 'form sent, awaiting rent', [], ['recFORMTASK00001']]);
+    // Roy's payment checks already under way: the old card is closed once, never reported on every run.
+    expect(r.passedOver.slice(1)).toEqual([[], ['recFORMTASK00001'], []]);
+    // Just closed, the app may still be asking him: nothing is touched, its step stays open.
+    expect(r.justClosed).toEqual([[], [], 'form window open', [], []]);
+    // The step-close line is its own lasting mark: with no robot log at all it is still "may have sent".
+    expect(r.markOnly).toEqual([[], [], 'form card to check', [], []]);
   });
 
   it('the robot log is read for each card\'s windows; a missing log is none, a bad line is skipped', () => {
@@ -641,14 +652,16 @@ NOW = datetime(2026, 10, 2, 12, 0, tzinfo=timezone.utc)
 op = lambda t, at: json.dumps({"cmd": "handover-open", "task": t, "at": at})
 rows = [op("recA", "2026-10-01T09:00:00Z"), json.dumps({"cmd": "handover", "task": "recA"}), "not json", json.dumps({"cmd": "commit", "task": "recA"}),
         op("recA", "2026-10-01T10:00:00Z"), json.dumps({"cmd": "handover", "task": "recA"}), "[1, 2]", json.dumps({"task": 5}),
-        op("recOpen", "2026-10-02T07:00:00Z"), op("recCrash", "2026-09-30T07:00:00Z"), json.dumps({"cmd": "handover", "task": "recOld"})]
+        op("recOpen", "2026-10-02T07:00:00Z"), op("recCrash", "2026-09-30T07:00:00Z"), json.dumps({"cmd": "handover", "task": "recOld"}),
+        op("recJust", "2026-10-02T09:00:00Z"), json.dumps({"cmd": "handover", "task": "recJust", "at": "2026-10-02T10:00:00Z"})]
 open(path, "wb").write(("\\n".join(rows) + "\\n").encode() + b'{"cmd": "handover", "task": "recTorn\\xff\\xfe')
 print(json.dumps({"counts": lb.read_windows(path, NOW), "missing": lb.read_windows(os.path.join(SCRATCH, "none.jsonl"), NOW),
                   "same": lb.ROBOT_LOG.endswith("knowledge-os/logs/agent-browser/runs.jsonl")}))`);
     // Opened and closed twice; one open now (under a day); one opened two days ago and never closed (a
     // crash: read as used); a close with no open logged (an older robot): used. A torn last line is skipped.
-    expect(r.counts).toEqual({ recA: { used: 2, openNow: false }, recOpen: { used: 0, openNow: true },
-      recCrash: { used: 1, openNow: false }, recOld: { used: 1, openNow: false } });
+    expect(r.counts).toEqual({ recA: { used: 2, openNow: false, recentClose: false }, recOpen: { used: 0, openNow: true, recentClose: false },
+      recCrash: { used: 1, openNow: false, recentClose: false }, recOld: { used: 1, openNow: false, recentClose: false },
+      recJust: { used: 1, openNow: false, recentClose: true } });
     expect(r.missing).toEqual({});
     // The same file scripts/agent-browser.js writes (its LEDGER).
     expect(r.same).toBe(true);

@@ -405,8 +405,10 @@ print(json.dumps(out))`);
     // The robot calls `python3 <script> outcome <task>`: this script answers with the real cmd_outcome.
     const script = join(h, 'outcome.py');
     writeFileSync(script, PY + AD + `
-rows = {"recCARD0000000001": view(CARD, CARD_NOTES), "recCARD0000000002": view(CARD, CARD_NOTES, outcome="Changes requested"),
-        "recCARD0000000003": view("RENT LATE: Unit 9, rent due 1 Oct (reminder)", "RENT CHECK KEY: x:1")}
+TURN = CARD_NOTES + "\\n\\n[02 Oct 2026 10:00 — agent-dispatch] BLOCKER OPEN (KEVIN credential): type the code Fix: f [since 2026-10-02T09:00:00.000Z]"
+rows = {"recCARD0000000001": view(CARD, TURN), "recCARD0000000002": view(CARD, TURN, outcome="Changes requested"),
+        "recCARD0000000003": view("RENT LATE: Unit 9, rent due 1 Oct (reminder)", "RENT CHECK KEY: x:1"),
+        "recCARD0000000004": view(CARD, CARD_NOTES)}
 rec = rows[sys.argv[2]]
 ad.get_task = lambda tid: rec
 ad.cmd_outcome(argparse.Namespace(task=rec["id"]))
@@ -432,6 +434,8 @@ ad.cmd_outcome(argparse.Namespace(task=rec["id"]))
       expect(window('recCARD0000000001')).toMatch(/robot form card/);
       expect(window('recCARD0000000002', { window: true })).toMatch(/not approved/);
       expect(window('recCARD0000000003', { window: true })).toMatch(/trial task/);
+      // No open Your turn step (closed by the rent check, or never opened): the window does not open.
+      expect(window('recCARD0000000004', { window: true })).toMatch(/has no open Your turn step/);
     } finally {
       rmSync(h, { recursive: true, force: true });
     }
@@ -447,8 +451,9 @@ ad.cmd_outcome(argparse.Namespace(task=rec["id"]))
     mkdirSync(plans, { recursive: true });
     const script = join(h, 'outcome.py');
     writeFileSync(script, PY + AD + `
-rows = {"recCARD0000000001": view(CARD, CARD_NOTES), "recCARD0000000002": view(CARD, CARD_NOTES, outcome="Changes requested"),
-        "recCARD0000000003": view(CARD, CARD_NOTES, outcome="Approved with minor edits")}
+TURN = CARD_NOTES + "\\n\\n[02 Oct 2026 10:00 — agent-dispatch] BLOCKER OPEN (KEVIN credential): type the code Fix: f [since 2026-10-02T09:00:00.000Z]"
+rows = {"recCARD0000000001": view(CARD, TURN), "recCARD0000000002": view(CARD, TURN, outcome="Changes requested"),
+        "recCARD0000000003": view(CARD, TURN, outcome="Approved with minor edits")}
 rows["recCARD0000000003"]["fields"][ad.AF["approvalFeedback"]] = "The rent is 850"
 rec = rows[sys.argv[2]]
 ad.get_task = lambda tid: rec
@@ -508,6 +513,36 @@ print(json.dumps({"sent": lb.kevin_sent(written[-1]), "open": lb.open_kevin_wall
     // And the app's "Not yet" note, read by lane B to tell a window he left from one he may have used.
     const lb = py(`print(json.dumps(load_mod("rnt3", "rent_new_tenant.py").KEVIN_NOT_DONE))`);
     expect(src).toContain(`--note " & quoted form of "${lb}.`);
+  });
+
+  it('his late "Yes, done" on a step the rent check closed for want of an answer is still recorded, through the real unblock', () => {
+    const src = readFileSync(join(SCRIPTS, 'robot-signin.applescript'), 'utf8');
+    const m = src.match(/agent-dispatch\.py unblock " & quoted form of taskId & " --evidence " & quoted form of \("([^"]*)" & theWhy & "([^"]*)"\)/);
+    const evidence = m[1] + 'send the form' + m[2];
+    const r = py(AD + `
+lb = load_mod("rnt4", "rent_new_tenant.py")
+OPEN = "[02 Oct 2026 10:00 — agent-dispatch] BLOCKER OPEN (KEVIN credential): type the code Fix: f [since 2026-10-02T09:00:00.000Z]"
+CLOSED = "[03 Oct 2026 07:30 — rent-check] BLOCKER CLEARED (KEVIN credential): the window was used but " + lb.UNRECORDED + ", so this step is closed"
+OTHER = "[03 Oct 2026 07:30 — rent-check] BLOCKER CLEARED (KEVIN credential): the card was closed on 3 Oct 2026, so this step is no longer Kevin's"
+out = {}
+for key, last in (("unrecorded", CLOSED), ("closedCard", OTHER)):
+    rec = view(CARD, CARD_NOTES + "\\n\\n" + OPEN + "\\n" + last)
+    written = []
+    ad.get_task = lambda tid, _r=rec: _r
+    ad.patch_task = lambda tid, fields: written.append(fields[ad.AF["notes"]])
+    ad.ledger_append = lambda *a, **k: None
+    try:
+        with contextlib.redirect_stdout(io.StringIO()):
+            ad.cmd_unblock(argparse.Namespace(task=rec["id"], evidence=${JSON.stringify(evidence)}))
+        out[key] = lb.kevin_sent(written[-1])
+    except SystemExit as e:
+        out[key] = str(e.code)
+out["same"] = lb.UNRECORDED == ad.UNRECORDED_TURN
+print(json.dumps(out))`);
+    expect(r.unrecorded).toBe(true);
+    // Any other closed step still has no blocker to clear: only his unrecorded answer is taken late.
+    expect(r.closedCard).toMatch(/has no open blocker/);
+    expect(r.same).toBe(true);
   });
 
   it('the lessons job never turns a form card verdict into an agent rule, and never leaves it pending', () => {
@@ -864,6 +899,37 @@ print(json.dumps({"written": [first, again, live, live_why], "liveStatus": RECOR
     expect(r.wall).toBeNull();
     expect(r.sent).toBe(false);
     expect(r.fields).toEqual(['fldR7apBzSp3oxFxz']);
+  });
+
+  it('a card he may have sent is closed (never withdrawn) once the form went in another way: its step cleared in the same write', () => {
+    const r = py(RC + `
+ad = load_mod("ad", "agent-dispatch.py")
+ad.HANDOVER_DIR = HANDOVER
+lb.module = lambda key: ad
+OPEN = "[02 Oct 2026 10:00 — agent-dispatch] BLOCKER OPEN (KEVIN credential): type the code Fix: f [since 2026-10-02T09:00:00.000Z]"
+DONE = "[02 Oct 2026 14:00 — agent] BLOCKER CLEARED (KEVIN credential): x. evidence: Kevin finished his turn in the robot's window (send it), confirmed in the Robot sign-in app.. Carry on"
+KEY = "RENT FORM KEY: recFormTest000001:form:1"
+RECORDS["recCARD0000000001"] = {rc.TK["notes"]: KEY + "\\n\\n" + OPEN, rc.TK["status"]: "Today"}
+RECORDS["recCARD0000000002"] = {rc.TK["notes"]: KEY + "\\n\\n" + OPEN + "\\n" + DONE, rc.TK["status"]: "Today"}
+open(os.path.join(HANDOVER, "recCARD0000000001.json"), "w").write("{}")
+item = {"id": "recCARD0000000001", "tenancy": "recFormTest000001", "why": "the tenancy is marked CFV Actioned"}
+first = lb.close_card(rc._Here(), item, DAY)
+again = lb.close_card(rc._Here(), item, DAY)
+sent = lb.close_card(rc._Here(), dict(item, id="recCARD0000000002"), DAY)
+notes = RECORDS["recCARD0000000001"][rc.TK["notes"]]
+print(json.dumps({"written": [first, again, sent], "status": RECORDS["recCARD0000000001"][rc.TK["status"]],
+                  "wall": ad.task_blocker(notes), "closed": "RENT FORM CLOSED: 2026-10-03 the tenancy is marked CFV Actioned" in notes,
+                  "withdrawn": lb.withdrawal(notes), "plan": os.path.exists(os.path.join(HANDOVER, "recCARD0000000001.json")),
+                  "sentStatus": RECORDS["recCARD0000000002"][rc.TK["status"]]}))`);
+    expect(r.written).toEqual([true, false, false]);
+    expect(r.status).toBe('Completed');
+    expect(r.wall).toBeNull();
+    expect(r.closed).toBe(true);
+    // Never a WITHDRAWN line: nothing can raise it again.
+    expect(r.withdrawn).toBeNull();
+    expect(r.plan).toBe(false);
+    // A card he said he sent is finish_form's, never closed here.
+    expect(r.sentStatus).toBe('Today');
   });
 
   it('once Kevin says he sent it: the card is marked and completed, the tenancy gets one comment, then goes CFV to CFV Actioned; each step once, and a failed step is retried without a second comment', () => {

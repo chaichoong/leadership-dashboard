@@ -5316,6 +5316,8 @@ def cmd_outcome(args):
         "formCard": card,
         "window": (t["outcome"] in APPROVED and t["status"] not in ("Completed", "Cancelled")
                    and form_card(t["name"], t["notes"], holders=holders)),
+        # Kevin's step is open: the window command opens only then (a closed step is never run again).
+        "turn": bool((task_blocker(t["notes"]) or {}).get("kind") == "KEVIN"),
         "feedback": t["feedback"],
     }))
 
@@ -7319,10 +7321,28 @@ def cmd_unblock(args):
         sys.exit("ERROR: --evidence must say what you SAW that proves the job can go on or is "
                  "done (the email, the record, the page), not that you believe it.")
     t = task_view(get_task(args.task))
-    b = task_blocker(t["notes"])
+    b = task_blocker(t["notes"]) or unrecorded_turn(t["notes"])
     if not b:
         sys.exit(f"ERROR: {args.task} has no open blocker.")
     print(json.dumps({"unblocked": wake_blocked(args.task, b, f"evidence: {evidence[:400]}", by="agent")}))
+
+
+# The words the rent check closes a form card's Your turn step with when the app never recorded whether
+# Kevin sent the form (scripts/rent_new_tenant.py UNRECORDED). Kept identical there.
+UNRECORDED_TURN = "the app never recorded whether Kevin sent the form"
+
+
+def unrecorded_turn(notes):
+    """The KEVIN step the rent check closed because his answer never arrived, or None. His late answer
+    through the Robot sign-in app is still recorded against it: losing it could ask him to send the
+    government form twice."""
+    last = None
+    for m in BLOCKER_LINE_RE.finditer(str(notes or "")):
+        last = m
+    if not last or last.group("mark") != BLOCKER_CLEARED_MARK or last.group("kind") != "KEVIN" \
+            or UNRECORDED_TURN not in last.group("rest"):
+        return None
+    return {"kind": "KEVIN", "subject": last.group("subject").strip(), "why": "", "since": "", "finding": "", "profile": ""}
 
 
 def blockers_scan(sweep=False, now=None):
