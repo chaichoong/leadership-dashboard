@@ -36,6 +36,29 @@
 
 set -e
 
+# GIT'S OWN ENVIRONMENT STOPS HERE (2 Oct 2026)
+# ---------------------------------------------
+# Git hands a hook its own variables so the hook's git commands find the
+# repository: for a push from a linked worktree that is GIT_DIR, as a full path
+# (from the main checkout there is no GIT_DIR, which is why this stayed hidden).
+# Everything the hook starts inherits them, and the unit tests
+# build throwaway repositories in temp folders with `git init`, `git config`,
+# `git commit` and `git push`. With GIT_DIR set, every one of those ran against
+# THIS repository instead. On 2 Oct 2026 a push to main from a worktree left the
+# shared config reading `bare = true` with hooks switched off and a test identity,
+# moved the branch and HEAD on to fixture commits, and pushed a fixture branch
+# (`feature/x`) to GitHub. 110 tests failed, which is the only reason the push
+# stopped; every worktree and robot had no working git until it was repaired.
+# Cleared here, so nothing below can inherit them. Git finds the repository from
+# the working directory, which is where git starts a hook. tests/setup-git-env.js
+# clears the same variables inside vitest, for a run started from any other hook.
+# Guarded by tests/push-gate-git-env.test.js.
+# Fails closed: if git cannot list them, the gate does not run with them still set.
+git_local_env=$(git rev-parse --local-env-vars) || { echo "❌ Could not list git's own environment variables, so the test gate will not run with them set. Push blocked."; exit 1; }
+unset $git_local_env
+# The numbered pairs GIT_CONFIG_COUNT announces are not on git's list; they go too.
+unset $(compgen -v | grep -E '^GIT_CONFIG_(KEY|VALUE)_[0-9]+$' || true)
+
 GATE_LOG="${GATE_LOG:-$HOME/knowledge-os/logs/pre-push-gate.log}"
 mkdir -p "$(dirname "$GATE_LOG")" 2>/dev/null || true
 

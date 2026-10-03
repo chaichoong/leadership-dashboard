@@ -181,7 +181,7 @@ Fix anything found.
 
 If Vitest is set up:
 1. Check if the fixed function has a test
-2. If not, write one that covers the bug scenario (the test should fail without the fix and pass with it). Shape its fixture from the worked-example record, so the test holds the real data that broke
+2. If not, write one that covers the bug scenario (the test should fail without the fix and pass with it). Shape its fixture from the worked-example record, so the test holds the shape of the data that broke, then replace every name, date and amount with an invented one before you commit: this repo is PUBLIC and the live site serves `tests/` too. The name guard matches full names only, so a lone surname passes it. Prove it: an invented start date matches zero rows in the live table
 3. Run the tests
 
 If no test framework, skip and note it.

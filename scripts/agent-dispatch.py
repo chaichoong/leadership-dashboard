@@ -3672,11 +3672,6 @@ def decision_track_record(task_id, tf, emails=(), refs=(), properties=(), gmail=
         result = history(emails=list(emails or []) + ([sender.group(0)] if sender else []),
                          refs=list(refs or []) + reference_tokens(text),
                          properties=list(properties or []), exclude_task=task_id, gmail=gmail)
-        for e in result.get("entries") or []:
-            # A signed file link dies within hours and a card can wait for
-            # days: point at the task that holds the file instead.
-            if e.get("source") == "file" and e.get("task"):
-                e["link"] = f"https://airtable.com/{BASE_ID}/{TASKS}/{e['task']}"
         return history_text(result)
     except SystemExit as e:
         return f"{TRACK_RECORD_MARK} not built ({str(e)[:120]})"
@@ -5895,6 +5890,8 @@ def history_entries_from_task(rec, exclude_id=None):
     # (a restraint order, a signed LOA) is fetched from here and re-attached,
     # never asked of Kevin (8 Sep 2026: an agent could not find the restraint
     # order PDF and asked him to attach it, while it sat on another task).
+    # This link is signed and dies within hours: it is for the agent's own
+    # run (the JSON output). history_text never prints it.
     for a in (f.get(AF["attachments"]) or []):
         fname = str(a.get("filename") or "").strip()
         if not fname:
@@ -6006,7 +6003,15 @@ def history_text(result):
         # The link rides at the end in brackets: the card turns it into an
         # "Open" button, and the raw text still reads (Kevin, 8 Sep 2026:
         # "a clickable link so it opens, so I can see the full audit trail").
-        tail = f" ({e['link']})" if e.get("link") else ""
+        # A file's own link is signed and dies within hours, while this text
+        # waits on a card for days (2 Oct 2026: five dead file links on
+        # three cards). The text names the task that holds the file, which the
+        # card re-reads for a live link; the JSON keeps the file link for an
+        # agent to download within its run.
+        link = e.get("link")
+        if e.get("source") == "file":
+            link = f"https://airtable.com/{BASE_ID}/{TASKS}/{e['task']}" if e.get("task") else ""
+        tail = f" ({link})" if link else ""
         lines.append(f"- {day} — {e.get('source', '')}: {e.get('text', '')}{tail}")
     return "\n".join(lines)
 

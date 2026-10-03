@@ -1,6 +1,6 @@
 ---
 name: strategy-session
-description: The quarterly objective and strategy session for ONE of Kevin's businesses (Real Estate, Operations Director, Runpreneur), run once a quarter per business. Measures last quarter against its plan, puts it to the fitting board seats, holds the direction conversation with Kevin, builds next quarter's pack from last quarter's baseline, closes the old quarter, writes the plan, projects, monthly stepping stones and tasks to Airtable, agrees the KPIs for the leadership dashboard and ends with the write-back. Use when Kevin says "strategy session", "quarterly session", "plan next quarter", "Q1/Q2/Q3/Q4 plan for <business>", "objective and strategy session" or "/strategy-session".
+description: The quarterly objective and strategy session for ONE of Kevin's businesses (Real Estate, Operations Director, Runpreneur), run once a quarter per business. Measures last quarter against its plan, puts it to the fitting board seats, holds the direction conversation with Kevin, builds next quarter's pack from last quarter's baseline, closes the old quarter, writes the plan, projects, monthly stepping stones and tasks to Airtable, agrees the KPIs for the leadership dashboard, asks whether to update the dashboard and builds the KPIs in the same session on his yes, and ends with the write-back. Use when Kevin says "strategy session", "quarterly session", "plan next quarter", "Q1/Q2/Q3/Q4 plan for <business>", "objective and strategy session" or "/strategy-session".
 ---
 
 # Strategy session (built from the first live run, Q4 2026 Real Estate, 1-2 Oct 2026)
@@ -338,21 +338,82 @@ python3 scripts/create-agent-task.py create --force --fields-json '<json keyed b
      project's tracking method, with the named list, and say who counts and when.
    - **Needs code**: the project fields `KPI Automated` and `KPI Compute Code`, or a new
      dashboard card.
-3. Anything that needs code is NOT built inside this skill. Write `kpi-spec.md` in the session
-   folder and hand it to `/build-feature` in the Operations Director project. New KPI compute
-   code ships with its KPI Library entry in the same commit (`js/kpi-library.js`).
-4. The spec has two lists, so the changeover is one job and nothing is missed:
+3. **Ask Kevin once whether to update the dashboard now** (Kevin, 2 Oct 2026: "the objective
+   and strategy session should prompt whether we want to update with metrics, and if we say
+   yes... I want it all included in one process"). Use AskUserQuestion, with what would change
+   in the description:
+   - **Yes, build it now** (recommend this when any KPI needs code, a target or a named list
+     changed, or a project KPI would otherwise be counted by hand).
+   - **No, keep this quarter's KPIs as they are** (right when nothing on the dashboard
+     changes; hand-counted project KPIs stay hand-counted).
+   On **yes**, run Phase 6b in this session after steps 4 and 5. On **no**, still write the
+   spec (step 4) and raise the task (step 6).
+4. Write `kpi-spec.md` in the session folder either way. It has two lists, so the changeover
+   is one job and nothing is missed:
    - **Coming off:** every KPI the dashboard showed for this business last quarter, each
      marked retire, keep or change. A closed project's KPI leaves the dashboard's strategic
      KPI list on its own once `Closed On` is set (`js/dashboard.js`), so check 5a did that.
      A KPI card that is not tied to a project does not leave on its own: list it.
    - **Going on:** every agreed KPI, with its formula, source fields, a sample record, the
      reading expected today, and committed and stretch.
-5. **The handover is a task, never a remembered promise.** Before the session ends, either
-   name the open build that is already doing the dashboard work (its session title or PR) or
-   raise one task for it through `scripts/create-agent-task.py`, linked to the business,
-   carrying the spec's path, and read back by id. The write-back names which.
-6. Never say a KPI updates on its own until you have watched the dashboard show it.
+5. **Reproduce every "today" figure from live data before any code is written.** A rule that
+   cannot reproduce the figure Kevin signed off is the wrong rule. On 2 Oct 2026 the cash
+   cushion only matched his figure once the rule read the TRANSACTION's business tag, not the
+   cost record's.
+6. **A KPI that is not built is a task, never a remembered promise.** If Kevin said no, or the
+   build could not finish in this session, raise one task through
+   `scripts/create-agent-task.py`, linked to the business, carrying the spec's path, and read
+   back by id. The write-back names it.
+7. Never say a KPI updates on its own until you have watched the dashboard show it.
+
+### Phase 6b: build the KPIs in this session (only on Kevin's yes)
+
+The KPI list Kevin agreed in step 1 is the approved brief, so there is no second approval
+stop. Stop and ask only if the build would change something he did not approve: a figure, a
+target, a definition or a card he has not seen.
+
+**Where the work happens.** Code is only ever edited in the Operations Director repo
+(`~/Projects/leadership-dashboard`), in its own workspace: `./scripts/worktree.sh new
+q<N>-<business>-kpis feature`. The session folder stays private. Nothing from the numbers
+pack goes into the repo except targets and record ids: no tenant name, no address (the repo
+is public; card labels are read live from Airtable).
+
+**Reuse before building.** Real Estate already has the whole frame from Q4 2026
+(memory `project_q4_re_kpis_dashboard`): the rules in `js/re-kpis.js`, the cards in
+`js/dashboard.js`, the quarter's settings in `RE_Q4` in `js/config.js`. A new quarter for
+Real Estate is mostly a settings change. Another business has no cards yet, so its first
+build is a full `/build-feature`.
+
+Work through this list, in order, following `/build-feature` from its Phase 2 (read the code,
+build in one pass, self-audit, verify, independent review, merge with `scripts/merge-pr.py`):
+
+1. **The quarter's settings** (`js/config.js`): named units and tenants by record id, the
+   project ids, the targets, and the variable budget if it changed. Budget constants are
+   mirrored in `workers/property-manager/fields.mjs` and
+   `scripts/slack-automation/money-daily-worker.js`: change all three, and redeploy both
+   Workers after the merge (a merge does not deploy a Worker).
+2. **The rules** (`js/re-kpis.js`): reuse the existing functions. A genuinely new rule gets a
+   test in `tests/re-kpis.test.js`, shaped from three real records and back-tested by breaking
+   the rule.
+3. **The project KPIs:** one-line compute code per project that calls the tested rule
+   (`return ctx.reKpis.<rule>();`), saved to `KPI Compute Code` with `KPI Automated` ticked.
+   Check the text against the safety filter first: it blocks words such as `document`, `self`
+   and `top`, even in a comment.
+4. **The alarm:** every card shows a red "Not updating" state when its data cannot be trusted,
+   and the daily check in `scripts/check-data-invariants.py` names this quarter's three project
+   records (replace last quarter's ids; do not add a second check).
+5. **The KPI Library:** any new rule ships with its template in `js/kpi-library.js` and its
+   rationale in `docs/kpi-library-spec.md`, in the same commit.
+6. **Card wording Kevin has ruled on** (2 Oct 2026): never put his name in a card title; every
+   progress bar says it measures the committed target; a "Check" badge shows its reason on the
+   card face; plan and cash are always two labelled figures held to the same marker.
+7. **Prove it on the live page.** After the deploy, read every card off the live dashboard and
+   compare it with the approved "today" figure. Send Kevin a screenshot with SendUserFile.
+   Read each project record back by id for its saved value and today's date.
+8. **The coming-off list:** confirm each retired KPI has gone from the live page.
+
+If the build cannot finish in this session, say exactly which cards are live and which are
+not, and raise the task in step 6 above for the rest.
 
 ## Phase 7: read it back and send Kevin the finished plan
 
@@ -388,7 +449,8 @@ node scripts/render-strategy-plan.cjs --record <plan record id> --out "<the sess
 ## What this skill does not do
 
 - It does not run for two businesses in one session.
-- It does not build dashboard code, change `strategy.js` or edit the task script.
+- It builds dashboard KPI code only through Phase 6b, on Kevin's yes, in a workspace of this
+  repo. It does not change `strategy.js` or edit the task script.
 - It does not send anything to a tenant, a contractor or anyone outside. Work for Roy becomes
   tasks; messages go through the approval queue.
 - If Kevin asks for this to run on a clock without him, stop and run `/agent-gate` first.

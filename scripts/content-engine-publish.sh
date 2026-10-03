@@ -1,7 +1,7 @@
 #!/bin/bash
 # Content Engine, the DAYTIME publisher (Kevin, 8 Sep 2026: an episode approved in the morning goes out the same
 # day). Light API work only, no rendering, so it may run in working hours: Kevin's verdicts -> the record,
-# GHL post statuses -> links, the next episode in order -> YouTube now, its clips -> the socials, blog and
+# GHL post statuses -> links, every approved episode (lowest day first) -> YouTube now, its clips -> the socials, blog and
 # podcast later the same day. Hourly 07:15-20:15 as the wrapped job `content-engine-publish`.
 set -uo pipefail
 REPO="$(cd "$(dirname "$0")/.." && pwd)"

@@ -53,9 +53,15 @@ const CLAUSES = [
   ['node scripts/render-strategy-plan.cjs --record', 'the plan PDF comes from the page\'s own export'],
   ['A mid-quarter review date', 'the review date in the write-back'],
   ['Never in this repo', 'private working files stay out of the public repo'],
-  ['is NOT built inside this skill', 'dashboard KPI code goes through /build-feature'],
+  // Kevin, 2 Oct 2026: one process. The session asks, and on his yes builds the KPIs itself.
+  ['Ask Kevin once whether to update the dashboard now', 'the session asks before any dashboard build'],
+  ['Phase 6b: build the KPIs in this session (only on Kevin\'s yes)', 'the KPI build runs inside the session'],
+  ['following `/build-feature` from its Phase 2', 'dashboard KPI code still goes through the build workflow and its merge gate'],
+  ['Reproduce every "today" figure from live data before any code is written', 'a rule is proven against the signed-off figure first'],
+  ['no tenant name, no address', 'private names stay out of the public repo'],
+  ['Prove it on the live page', 'the cards are checked live against the approved figures'],
   ['**Coming off:**', 'last quarter\'s KPIs are closed off the dashboard, not left behind'],
-  ['The handover is a task, never a remembered promise', 'the dashboard KPI work is tracked'],
+  ['A KPI that is not built is a task, never a remembered promise', 'unbuilt dashboard KPI work is tracked'],
   ['every "coming off" KPI has gone', 'the mid-quarter check that the changeover happened'],
 ];
 

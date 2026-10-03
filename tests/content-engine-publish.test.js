@@ -120,10 +120,15 @@ describe('content-engine publish (GHL)', () => {
     expect(readFileSync(path.join(DIR, 'blog.py'), 'utf8')).toContain('blog REFUSED, placeholder');
   });
 
-  it('publishes in strict day order behind a cursor, same day, with per-platform slots, and a light hourly daytime job (8 Sep 2026)', () => {
+  it('an approved episode never waits for another day (Kevin, 2 Oct 2026: 2081 sent back held 2082 and 2083)', () => {
+    // drives the real run() on the real records' shape; back-tested against the strict-order publisher, where it fails
+    const out = execFileSync('python3', ['-c', 'import publish; publish._selftest_never_waits(); print("OK")'],
+      { encoding: 'utf8', cwd: DIR });
+    expect(out.trim().split('\n').pop()).toBe('OK');
+  });
+
+  it('publishes the same day, with per-platform slots, and a light hourly daytime job (8 Sep 2026)', () => {
     const src = readFileSync(PUBLISH, 'utf8');
-    expect(src).toContain('def next_publishable(state, ledger, approved)');
-    expect(src).toContain('state[CURSOR_KEY] = day');
     expect(src).toContain('def when_for(platform, clip, index, now=None, youtube_at=None)');   // same-day, and never before the video is public (10 Sep 2026)
     expect(src).toContain('"tiktok": {"summary": (13, 0), "lfmd": (19, 30)}');
     const sh = readFileSync(path.join(ROOT, 'scripts', 'content-engine-publish.sh'), 'utf8');

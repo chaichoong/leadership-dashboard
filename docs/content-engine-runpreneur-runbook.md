@@ -34,6 +34,19 @@ Any other day-numbered name (`2066 Full-Real.insv`, `2006 Full (1).insv`) is ski
 `skipped_names.json` and shown on the Publishing page under "Raw files the engine skips". Until
 21 Sep 2026 it was skipped without a word, and 2066's full episode sat on Drive unseen.
 
+**The night's order** (`watch.py plan`): three days a night (Kevin, 2 Oct 2026; the number is in
+`~/.config/od/content_engine_episodes_per_night`). New days first, oldest first, and never fewer than two of them.
+A day Kevin sent back, which `render.py redo-day` set to re-render, comes after the new days and takes the spare
+third slot: two new days and the redo. With no redo waiting, three new days. So a day he sends one episode back
+still leaves two to publish, and the redo lands the next night (Kevin, 2 Oct 2026: "anything that is sent back for
+editing goes to the back of the queue"). Until then the sent-back day was the oldest waiting day, took slot 1, and a
+new episode lost its place. One redo a night at two or three slots, oldest first; a redo whose footage would not
+download steps behind a younger one. A second sent-back day waits for the next night and the plan says so.
+No day starts rendering from 04:00: a day begun late would be killed at the 07:00 stop and the copy, cards and
+publishing steps after the loop would never run. The copy step (`platform_copy.py run --pending`) follows the same
+order: new days first, and the oldest sent-back day always gets its copy. The night raises a card for every episode
+it planned.
+
 **2. Pull one clip** (`watch.py next`)
 The oldest waiting clip comes down to the local work folder. One per run, never more than two waiting
 locally. Disk is about 60 GB, clips are 0.3 to 5 GB, and Drive streams cold files at roughly 1 GB per
@@ -52,6 +65,23 @@ One clip, about 10 minutes of work for a 40 second clip:
 - Write the podcast MP3.
 - Upload to the edited Drive folder and write the links, transcript and status onto the record.
 - Delete the local copy.
+
+The day folder holds two transcripts (2 Oct 2026): `Ep<day>_transcript.txt` is the episode's and
+`Ep<day>_Summary_transcript.txt` is the teaser's. Until then every clip wrote the first name, the teaser
+rendered last, and 26 of the 36 stored files held the teaser's words, which is what the output gate read.
+
+The Learnings clip runs from the last diary line to the sign-off. The cutter (`render.lfmd_window`) and the
+output gate (`qa.py`) read the talk the same way, as one text with whisper's noise notes left out
+(`render.spoken`), so a line split across captions is cut and the two never disagree. The gate also refuses a
+clip that starts in the first 40% of the episode: 2081's was cut from an aside at 14% and reached the card,
+while every other clip on the ledger starts 54% in or later. The refusal names both ways out: rebuild it with
+`render.py redo --day N --only lfmd`, or, once someone has watched the clip and it is the diary section,
+`qa.py accept-early --day N`. Any re-render or rebuild drops that acceptance.
+
+The 40% is measured against the clip length. When the render recorded that the clip runs to his sign-off with
+no more than a few words after it (`lfmd_closes_talk` on the ledger), it is measured against the sign-off
+instead, so a recording left running after he has finished does not refuse a good clip. A measure taken from
+the caption file was tried and dropped the same day: a caption file cut short would have let 2081 through.
 
 **4. Rebuild anything Kevin asked to be redone** (`render.py redo-requested`)
 
@@ -117,6 +147,11 @@ One line each into the digest, and the Publishing page on the dashboard.
   the page itself (GoHighLevel never hands back a post URL), shared as Kevin, to Feed, Public, with the
   first line of the copy and the YouTube link above it. Every share is checked on his profile
   afterwards; one that cannot be confirmed is shared once more and never a third time.
+  **A reel goes to his profile once** *(2 Oct 2026)*. The finder matches a caption's first six words, and
+  both of 2083's captions opened "Three months after breaking my foot,". Both clips went up at the same
+  moment, so the Learnings share found the Summary reel and shared it a second time (2056 the same way).
+  Now every reel a share has already taken is skipped by the finder, and Share is never pressed on one
+  (`publish.reels_already_shared`). Guarded by `tests/content-engine-fb-share-once.test.js`.
 - **23e. Spotify.** Once the video podcast has processed, its public link goes on the record.
 
 **23f. Close the card of a finished episode** (`publish.py close-cards`, daytime job only)
@@ -125,8 +160,11 @@ once, with a note carrying the YouTube link. A Completed or Cancelled card is le
 report line ("content cards not closed") until it clears. Until 30 Sep 2026
 nothing did this, 2059-2077 sat open for up to two weeks, and the Task Manager read them as unpublished.
 
-**24. Publish the next episode in order** (`publish.py run --limit 3`)
-Approved episodes only, strictly in episode order, two stages:
+**24. Publish every approved episode** (`publish.py run --limit 3`)
+Approved episodes only, lowest day number first, two stages. An approved episode never waits for another day
+(Kevin, 2 Oct 2026): a day that was sent back, failed to render or has no card yet steps aside, and goes out late,
+out of number order, once its own card is approved. Until then one such day held every approved day behind it
+(2081 held 2082 and 2083 on 2 Oct). The Publishing page names any day the run has gone past under "Not out yet".
 
 | Stage | What goes out | When |
 |---|---|---|
@@ -154,8 +192,11 @@ as header image, and the **podcast** uploaded to Spotify as a video podcast.
 
 ## The seven sections — how "done" is decided
 
-An episode is only complete when all seven are done. Anything short shows in the morning report and on
-the Publishing page.
+An episode is only complete when every section it has is done. Anything short shows in the morning report
+and on the Publishing page. A clip the render never made is not owed (2 Oct 2026): an episode with no diary
+section has no Learnings clip and no Short, the output gate says so, and the page shows those two struck out
+as "not in this episode" and counts the episode against five (`publish.owed_sections`, one rule for the card
+closer, the hourly line and the page). A clip that was made and not posted still shows as missing.
 
 1. YouTube episode
 2. YouTube Short

@@ -6,9 +6,9 @@ import { fileURLToPath } from 'node:url';
 // The dashboard loads js/re-kpis.js as a plain <script>; the same file exports under
 // Node, so this suite runs the shipped rules, not a copy of them.
 //
-// The fixtures are shaped from the three real records Kevin approved at the build gate
-// on 2 Oct 2026 (cost split by business, the Piotrowski tenancy, 14 Wentworth Terrace).
-// Names are generic on purpose: this repo is public.
+// The fixtures follow the three worked examples Kevin approved at the build gate on
+// 2 Oct 2026 (cost split by business, one tenant moving between units, one house's
+// certificates). Every name, date and amount is invented on purpose: this repo is public.
 const require = createRequire(import.meta.url);
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const K = require(resolve(root, 'js/re-kpis.js'));
@@ -19,39 +19,39 @@ const levels = r => r.alarms.map(a => a.level);
 
 describe('plan cushion: property costs only', () => {
     const tenancies = [
-        { rent: 34469.08, payStatus: 'In Payment', tenantActive: true },
-        { rent: 897.52, payStatus: 'CFV Actioned', tenantActive: true },
+        { rent: 31250.40, payStatus: 'In Payment', tenantActive: true },
+        { rent: 900, payStatus: 'CFV Actioned', tenantActive: true },
         { rent: 500, payStatus: 'In Payment', tenantActive: false }, // ended: never rent now
-        { rent: 897.52, payStatus: 'CFV', tenantActive: true },
+        { rent: 850, payStatus: 'CFV', tenantActive: true },
     ];
     const costs = [
-        { name: 'Mortgages', expected: 18916.78, active: true, businessIds: [RE] },
-        { name: 'Household', expected: 3856.43, active: true, businessIds: [PERSONAL] },
-        { name: 'Software', expected: 14.39, active: true, businessIds: ['recOD'] },
+        { name: 'Mortgages', expected: 17120.85, active: true, businessIds: [RE] },
+        { name: 'Household', expected: 3410.27, active: true, businessIds: [PERSONAL] },
+        { name: 'Software', expected: 14.75, active: true, businessIds: ['recOD'] },
         { name: 'Paused', expected: 999, active: false, businessIds: [RE] },
     ];
-    const r = K.planCushion({ tenancies, costs, businessId: RE, budget: 4300 });
+    const r = K.planCushion({ tenancies, costs, businessId: RE, budget: 4000 });
 
     it('subtracts Real Estate costs and nothing else (worked example 1)', () => {
-        expect(r.propertyCosts).toBe(18916.78);
-        expect(r.excludedCosts).toBe(3870.82);
-        expect(r.cushion).toBe(15552.3);
+        expect(r.propertyCosts).toBe(17120.85);
+        expect(r.excludedCosts).toBe(3425.02);
+        expect(r.cushion).toBe(14129.55);
     });
     it("Kevin's income is the cushion less the variable budget", () => {
-        expect(r.income).toBe(11252.3);
-        expect(r.incomeWithActioned).toBe(12149.82);
+        expect(r.income).toBe(10129.55);
+        expect(r.incomeWithActioned).toBe(11029.55);
     });
-    it('the old mixed basis would have read 11,681.48: prove the test can tell them apart', () => {
-        const mixed = K.planCushion({ tenancies, costs: costs.map(c => ({ ...c, businessIds: [RE] })), businessId: RE, budget: 4300 });
-        expect(mixed.cushion).toBe(11681.48);
+    it('the old mixed basis would have read 10,704.53: prove the test can tell them apart', () => {
+        const mixed = K.planCushion({ tenancies, costs: costs.map(c => ({ ...c, businessIds: [RE] })), businessId: RE, budget: 4000 });
+        expect(mixed.cushion).toBe(10704.53);
     });
     it('goes red when the tenancies or the costs did not load', () => {
-        expect(K.alarmLevel(K.planCushion({ tenancies: [], costs, businessId: RE, budget: 4300 }))).toBe('red');
-        expect(K.alarmLevel(K.planCushion({ tenancies, costs: [], businessId: RE, budget: 4300 }))).toBe('red');
+        expect(K.alarmLevel(K.planCushion({ tenancies: [], costs, businessId: RE, budget: 4000 }))).toBe('red');
+        expect(K.alarmLevel(K.planCushion({ tenancies, costs: [], businessId: RE, budget: 4000 }))).toBe('red');
         expect(K.alarmLevel(r)).toBe('');
     });
     it('names an active cost with no business instead of silently dropping it', () => {
-        const x = K.planCushion({ tenancies, costs: [...costs, { name: 'Orphan', expected: 10, active: true, businessIds: [] }], businessId: RE, budget: 4300 });
+        const x = K.planCushion({ tenancies, costs: [...costs, { name: 'Orphan', expected: 10, active: true, businessIds: [] }], businessId: RE, budget: 4000 });
         expect(levels(x)).toEqual(['amber']);
         expect(x.alarms[0].msg).toContain('Orphan');
     });
@@ -134,11 +134,11 @@ describe('cash cushion', () => {
     });
     // Found on the live page, 2 Oct 2026: four rent receipts arrived unfiled, tagged to the
     // property business with no sub-category. The income line read them as money in
-    // (£11,591) while the cushion ignored them, so the two cards disagreed by £2,977.
+    // while the cushion ignored them, so the two cards disagreed.
     it('an unfiled receipt counts in neither figure and raises amber', () => {
         const base = transactions.filter(t => !t.costIds.includes('c3'));
         const before = K.cashCushion({ transactions: base, costBusinessNames, businessName: 'Real Estate', today: TODAY });
-        const withReceipt = [...base, tx('2026-10-01', 2449.09, '', { reconciled: false, subCategories: [] })];
+        const withReceipt = [...base, tx('2026-10-01', 2400.50, '', { reconciled: false, subCategories: [] })];
         const after = K.cashCushion({ transactions: withReceipt, costBusinessNames, businessName: 'Real Estate', today: TODAY });
         expect(after.rolling.income).toBe(before.rolling.income);
         expect(after.rolling.cushion).toBe(before.rolling.cushion);
@@ -156,10 +156,10 @@ describe('cash cushion', () => {
     });
 });
 
-// Worked example 2: one tenant (CFV Actioned, £897.52) living in a named unit that only
+// Worked example 2: one tenant (CFV Actioned, £900) living in a named unit that only
 // counts once somebody ELSE lives there.
 describe('named units and named rent', () => {
-    const MOVER = 'tenMover', MARTIN = 'tenMartin';
+    const MOVER = 'tenMover', SAMPLE = 'tenSample';
     const units = [
         { id: 'uA', label: 'House A Unit 3' },
         { id: 'uB', label: 'House A Unit 4' },
@@ -170,17 +170,17 @@ describe('named units and named rent', () => {
     const lines = [
         { label: 'New tenant A3', unitId: 'uA' },
         { label: 'Mover', tenantId: MOVER },
-        { label: 'Martin', tenantId: MARTIN },
+        { label: 'Sample', tenantId: SAMPLE },
         { label: 'New tenant C2', unitId: 'uD', excludeTenantIds: [MOVER], stretch: true },
         { label: 'New tenant A4', unitId: 'uB', stretch: true },
         { label: 'New tenant D1', unitId: 'uE', stretch: true },
     ];
     const today = [
-        { id: 't1', unitIds: ['uD'], tenantIds: [MOVER], surname: 'Mover', start: '2026-04-17', end: '', payStatus: 'CFV Actioned', rent: 897.52 },
-        { id: 't2', unitIds: ['uZ'], tenantIds: [MARTIN], surname: 'Martin', start: '2026-03-17', end: '', payStatus: 'CFV', rent: 897.52 },
-        { id: 't3', unitIds: ['uE'], tenantIds: ['tenOld'], surname: 'Old', start: '2022-03-02', end: '2026-05-08', payStatus: 'In Payment', rent: 499.7 },
+        { id: 't1', unitIds: ['uD'], tenantIds: [MOVER], surname: 'Mover', start: '2026-04-09', end: '', payStatus: 'CFV Actioned', rent: 900 },
+        { id: 't2', unitIds: ['uZ'], tenantIds: [SAMPLE], surname: 'Sample', start: '2026-03-11', end: '', payStatus: 'CFV', rent: 900 },
+        { id: 't3', unitIds: ['uE'], tenantIds: ['tenOld'], surname: 'Old', start: '2022-02-10', end: '2026-05-14', payStatus: 'In Payment', rent: 500 },
     ];
-    const known = { knownUnitIds: ['uA', 'uB', 'uC', 'uD', 'uE'], knownTenantIds: [MOVER, MARTIN, 'tenOld'], today: TODAY };
+    const known = { knownUnitIds: ['uA', 'uB', 'uC', 'uD', 'uE'], knownTenantIds: [MOVER, SAMPLE, 'tenOld'], today: TODAY };
 
     it('today: 0 of 4 and £0 (worked example 2)', () => {
         const u = K.namedUnits({ units, tenancies: today, ...known });
@@ -195,12 +195,12 @@ describe('named units and named rent', () => {
     });
 
     const later = [
-        { id: 't1', unitIds: ['uD'], tenantIds: [MOVER], surname: 'Mover', start: '2026-04-17', end: '2026-09-20', payStatus: 'CFV Actioned', rent: 897.52 },
-        { id: 't1b', unitIds: ['uC'], tenantIds: [MOVER], surname: 'Mover', start: '2026-09-21', end: '', payStatus: 'In Payment', rent: 897.52 },
-        { id: 't2', unitIds: ['uZ'], tenantIds: [MARTIN], surname: 'Martin', start: '2026-03-17', end: '', payStatus: 'In Payment', rent: 897.52 },
-        { id: 't4', unitIds: ['uA'], tenantIds: ['tenNewA'], surname: 'NewA', start: '2026-10-01', end: '', payStatus: 'In Payment', rent: 897.52 },
-        { id: 't5', unitIds: ['uD'], tenantIds: ['tenNewD'], surname: 'NewD', start: '2026-09-25', end: '', payStatus: 'CFV', rent: 897.52 },
-        { id: 't6', unitIds: ['uB'], tenantIds: ['tenFuture'], surname: 'Future', start: '2026-11-01', end: '', payStatus: '', rent: 897.52 },
+        { id: 't1', unitIds: ['uD'], tenantIds: [MOVER], surname: 'Mover', start: '2026-04-09', end: '2026-09-20', payStatus: 'CFV Actioned', rent: 900 },
+        { id: 't1b', unitIds: ['uC'], tenantIds: [MOVER], surname: 'Mover', start: '2026-09-21', end: '', payStatus: 'In Payment', rent: 900 },
+        { id: 't2', unitIds: ['uZ'], tenantIds: [SAMPLE], surname: 'Sample', start: '2026-03-11', end: '', payStatus: 'In Payment', rent: 900 },
+        { id: 't4', unitIds: ['uA'], tenantIds: ['tenNewA'], surname: 'NewA', start: '2026-10-01', end: '', payStatus: 'In Payment', rent: 900 },
+        { id: 't5', unitIds: ['uD'], tenantIds: ['tenNewD'], surname: 'NewD', start: '2026-09-25', end: '', payStatus: 'CFV', rent: 900 },
+        { id: 't6', unitIds: ['uB'], tenantIds: ['tenFuture'], surname: 'Future', start: '2026-11-01', end: '', payStatus: '', rent: 900 },
         { id: 't7', unitIds: ['uQ'], tenantIds: ['tenReplacement'], surname: 'Replacement', start: '2026-09-01', end: '', payStatus: 'In Payment', rent: 600 },
     ];
     it('counts a unit when a live tenancy is linked, and the excluded unit once someone else is in', () => {
@@ -208,22 +208,22 @@ describe('named units and named rent', () => {
         expect(u.filled).toBe(3);                                   // A3, B3 (the mover), C2 (the new tenant)
         expect(u.rows.find(r => r.id === 'uB').filled).toBe(false); // starts next month: not in yet
     });
-    it('committed rent is the three named tenants in payment (£2,692.56); a replacement elsewhere never counts', () => {
+    it('committed rent is the three named tenants in payment (£2,700); a replacement elsewhere never counts', () => {
         const r = K.namedRent({ lines, tenancies: later, ...known });
-        expect(r.committed).toBe(2692.56);
+        expect(r.committed).toBe(2700);
         expect(r.stretch).toBe(0);                                  // the new C2 tenant is not paying yet
-        expect(r.value).toBe(2692.56);
+        expect(r.value).toBe(2700);
     });
     it('a tenancy is counted once even when two lines could claim it', () => {
         const both = [{ label: 'By unit', unitId: 'uA' }, { label: 'By tenant', tenantId: 'tenNewA' }];
-        expect(K.namedRent({ lines: both, tenancies: later, today: TODAY }).value).toBe(897.52);
+        expect(K.namedRent({ lines: both, tenancies: later, today: TODAY }).value).toBe(900);
     });
     it('goes red when a rent line points at a unit that does not exist', () => {
         const typo = [{ label: 'Typo', unitId: 'uTYPO' }];
         expect(K.alarmLevel(K.namedRent({ lines: typo, tenancies: today, knownUnitIds: known.knownUnitIds, today: TODAY }))).toBe('red');
     });
     it('says so when a let unit reads empty only because the tenancy has no start date', () => {
-        const undated = [{ id: 't9', unitIds: ['uA'], tenantIds: ['tenNew'], surname: 'New', start: '', end: '', payStatus: 'In Payment', rent: 897.52 }];
+        const undated = [{ id: 't9', unitIds: ['uA'], tenantIds: ['tenNew'], surname: 'New', start: '', end: '', payStatus: 'In Payment', rent: 900 }];
         const u = K.namedUnits({ units, tenancies: undated, ...known });
         expect(u.filled).toBe(0);
         expect(K.alarmLevel(u)).toBe('amber');
@@ -246,12 +246,12 @@ describe('compliance', () => {
         { id: 'p4', name: 'Agent house', agent: 'Some Lettings Ltd', noGas: false },
     ];
     const certs = [
-        cert('p1', 'EICR', '2030-09-11'), cert('p1', 'Landlord Insurance', '2027-03-02'),
-        cert('p2', 'EICR', '2031-01-01'), cert('p2', 'Landlord Insurance', '2027-03-02'),
-        cert('p3', 'GSC', '2026-09-08'),                                   // lapsed last month
+        cert('p1', 'EICR', '2030-09-15'), cert('p1', 'Landlord Insurance', '2027-03-10'),
+        cert('p2', 'EICR', '2031-01-01'), cert('p2', 'Landlord Insurance', '2027-03-10'),
+        cert('p3', 'GSC', '2026-09-12'),                                   // lapsed last month
         cert('p3', 'EICR', '2031-01-01', { hasFile: false }),              // in date but no document on file
-        cert('p3', 'Landlord Insurance', '2027-03-02', { status: 'Expired' }),
-        cert('p4', 'GSC', '2027-01-01'), cert('p4', 'EICR', '2031-01-01'), cert('p4', 'Landlord Insurance', '2027-03-02'),
+        cert('p3', 'Landlord Insurance', '2027-03-10', { status: 'Expired' }),
+        cert('p4', 'GSC', '2027-01-01'), cert('p4', 'EICR', '2031-01-01'), cert('p4', 'Landlord Insurance', '2027-03-10'),
     ];
     const run = extra => K.compliance({ properties, certs, selfManagedAgent: 'Property Portfolio', expected: 3, today: TODAY, ...extra });
 
@@ -286,12 +286,12 @@ describe('compliance', () => {
 });
 
 describe('personal net cash flow', () => {
-    const months = [{ key: '2026-07', net: 6609.82, totalIncome: 35000 }, { key: '2026-08', net: 4534.69, totalIncome: 34000 }, { key: '2026-09', net: 6008.35, totalIncome: 35900 }];
+    const months = [{ key: '2026-07', net: 6200.40, totalIncome: 32000 }, { key: '2026-08', net: 4410.15, totalIncome: 31000 }, { key: '2026-09', net: 5890.25, totalIncome: 32500 }];
     it('headline is the last full month; the average is beside it', () => {
         const r = K.personalNet({ months });
-        expect(r.value).toBe(6008.35);
+        expect(r.value).toBe(5890.25);
         expect(r.lastMonthKey).toBe('2026-09');
-        expect(r.average).toBe(5717.62);
+        expect(r.average).toBe(5500.27);
     });
     it('goes red when the Wealth cash flow is empty', () => {
         expect(K.alarmLevel(K.personalNet({ months: [] }))).toBe('red');

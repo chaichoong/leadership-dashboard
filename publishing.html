@@ -30,6 +30,7 @@
     .done { background: var(--success-bg); color: var(--success); }
     .pending { background: var(--info-bg); color: var(--info); }
     .missing { background: var(--danger-bg); color: var(--danger); }
+    .notmade { background: var(--bg-subtle); color: var(--text-muted); text-decoration: line-through; }
     .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: var(--space-4); }
     .stat { font-size: var(--fs-2xl); font-weight: var(--fw-semibold); }
     .stat-row { display: flex; flex-wrap: wrap; gap: var(--space-6); }
@@ -157,8 +158,21 @@ async function readReport() {
     finally { clearTimeout(timer); }
 }
 
+// 'none' is a clip this episode never had (2082, 2 Oct 2026: no diary section, so no Learnings clip and no Short). It is
+// greyed out and not counted against the episode, the same rule the engine uses to close the episode's card.
 function sectionChips(sections) {
-    return `<div class="chips">${SECTIONS.map(k => { const v = (sections || {})[k] || 'missing'; return `<span class="chip ${esc(v)}" title="${esc(k)}: ${esc(v)}">${esc(k)}</span>`; }).join('')}</div>`;
+    return `<div class="chips">${SECTIONS.map(k => { const v = (sections || {})[k] || 'missing';
+        return v === 'none' ? `<span class="chip notmade" title="${esc(k)}: not in this episode">${esc(k)}</span>`
+            : `<span class="chip ${esc(v)}" title="${esc(k)}: ${esc(v)}">${esc(k)}</span>`; }).join('')}</div>`
+        + (SECTIONS.some(k => (sections || {})[k] === 'none') ? '<div class="muted" style="font-size:var(--fs-xs)">Struck out: not in this episode</div>' : '');
+}
+
+// Days that are not out and that no other line on the page names (2 Oct 2026). Nothing waits for such a day any
+// more, so this list is the only place it shows. One rule for the "Needs you" list and the "Nothing stuck" check.
+function behindUnnamed(r) {
+    const named = new Set([...(r.sentBack || []).map(x => x.day), ...(r.teaserOnly || []), ...(r.waitingForKevin || []), ...Object.keys(r.qaBlocked || {}),
+        ...(r.failedRenders || []), ...(r.retryTonight || []), ...(r.renderedNoCard || [])].map(Number));
+    return (r.leftBehind || []).filter(b => !named.has(Number(b.day)));
 }
 
 function render(rec) {
@@ -183,7 +197,7 @@ function render(rec) {
     const hist = (r.history || []).map(h => {
         if (!h.episodes.length) return `<tr class="none"><td style="white-space:nowrap">${esc(dayLabel(h.date, r.today))}</td><td colspan="3"><strong>Nothing went out</strong></td></tr>`;
         return h.episodes.map((e, i) => `<tr><td style="white-space:nowrap">${i ? '' : esc(dayLabel(h.date, r.today))}</td>
-            <td style="white-space:nowrap"><strong>Episode ${esc(e.day)}</strong><br><span class="muted">${esc(e.done)} of 7 sections</span></td>
+            <td style="white-space:nowrap"><strong>Episode ${esc(e.day)}</strong><br><span class="muted">${esc(e.done)} of ${esc(e.owed ?? 7)} sections</span></td>
             <td>${sectionChips(e.sections)}</td>
             <td style="white-space:nowrap">${[link(e.youtube, 'YouTube'), link(e.blog, 'Blog'), link(e.podcast, 'Spotify')].filter(Boolean).join(' · ') || '<span class="muted">no links</span>'}</td></tr>`).join('');
     }).join('');
@@ -191,11 +205,8 @@ function render(rec) {
     const sched = (r.scheduled || []).length
         ? `<ul class="plain">${r.scheduled.map(s => `<li><strong>${esc(london(s.when, { weekday: 'short', hour: '2-digit', minute: '2-digit' }))}</strong> · Episode ${esc(s.day)} · ${esc(s.channel)}</li>`).join('')}</ul>`
         : '<div class="muted">Nothing booked.</div>';
-    const nextUp = (r.nextInOrder || []).length ? `Approved and next in order: Episode ${r.nextInOrder.map(esc).join(', ')}.`
-        : (r.heldBehind || []).length ? (r.blocker
-            ? `<span class="stale">Approved but held for order: Episode ${r.heldBehind.map(esc).join(', ')} wait behind day ${esc(r.blocker.day)} (${esc(r.blocker.why)}).</span>`
-            : `Approved but held for order: Episode ${r.heldBehind.map(esc).join(', ')} (${esc(r.heldWhy)}).`)
-        : r.blocker ? `<span class="stale">Nothing can go out: day ${esc(r.blocker.day)} (${esc(r.blocker.why)}).</span>` : 'No approved episode is waiting to go out.';
+    // 2 Oct 2026: an approved episode waits for no other day, so every approved one is listed as going out
+    const nextUp = (r.nextInOrder || []).length ? `Approved and going out next: Episode ${r.nextInOrder.map(esc).join(', ')}.` : 'No approved episode is waiting to go out.';
     const tonight = r.tonight === null || r.tonight === undefined ? '<span class="stale">Tonight\'s render plan could not be read.</span>'
         : r.tonight.length ? `Tonight's render: Episode ${r.tonight.map(esc).join(' and ')}.` : 'Tonight\'s render: nothing waiting.';
 
@@ -205,14 +216,15 @@ function render(rec) {
     // A sent-back card is neither waiting for you nor approved: until 21 Sep 2026 it vanished from this page while 2062 held every later day.
     (r.sentBack || []).forEach(s => {
         const since = s.since ? ' on ' + esc(s.since) : '', said = s.feedback ? ` ("${esc(s.feedback)}")` : '';
-        const tail = s.holdsOrder === false ? 'It is an older day, so no other episode waits for it.' : 'Every later episode waits until the fixed card comes back to you.';
+        const tail = 'No other episode waits for it. It goes out once the fixed card comes back and you approve it.';
         needs.push(`<li><span class="chip missing">${s.rejected ? 'Rejected' : 'Sent back'}, not resubmitted</span> Episode ${esc(s.day)}: you ${s.rejected ? 'rejected it' : 'sent it back'}${since}${said}. ${tail}</li>`);
     });
-    (r.teaserOnly || []).forEach(d => needs.push(`<li><span class="chip missing">No full episode</span> Day ${esc(d)}: the engine has found only its teaser. Every later day waits behind it once the run reaches it.</li>`));
+    (r.teaserOnly || []).forEach(d => needs.push(`<li><span class="chip missing">No full episode</span> Day ${esc(d)}: the engine has found only its teaser, so it cannot go out. Later days go out without it.</li>`));
     Object.entries(r.qaBlocked || {}).forEach(([d, why]) => needs.push(`<li><span class="chip missing">Blocked</span> Episode ${esc(d)} failed its output check: ${esc(why)}</li>`));
     (r.failedRenders || []).forEach(d => needs.push(`<li><span class="chip missing">Render failed twice</span> Episode ${esc(d)} needs a look.</li>`));
     (r.retryTonight || []).forEach(d => needs.push(`<li><span class="chip pending">Render failed once</span> Episode ${esc(d)} gets one more try tonight. Nothing for you to do.</li>`));
     (r.renderedNoCard || []).forEach(d => needs.push(`<li><span class="chip pending">No card yet</span> Episode ${esc(d)} is rendered and waits for its copy and card.</li>`));
+    behindUnnamed(r).forEach(b => needs.push(`<li><span class="chip missing">Not out yet</span> Episode ${esc(b.day)}: ${esc(b.why)}. Later episodes have gone out without it.</li>`));
 
     const incomplete = (r.incomplete || []).length
         ? `<ul class="plain">${r.incomplete.map(i => `<li><strong>Episode ${esc(i.day)}</strong>: ${i.missing.length ? `<span class="chip missing">missing</span> ${i.missing.map(esc).join(', ')}` : ''} ${i.pending.length ? `<span class="chip pending">not confirmed yet</span> ${i.pending.map(esc).join(', ')}` : ''}</li>`).join('')}</ul>`
@@ -228,7 +240,7 @@ function render(rec) {
     document.getElementById('body').innerHTML = `
         <div class="card"><div class="stat-row">
             <div><div class="stat">${esc(r.cleanDaysInRow)}</div><span>days in a row with an episode out</span></div>
-            <div><div class="stat">${esc(r.lastInOrder)}</div><span>last episode out in order</span></div>
+            <div><div class="stat">${esc(r.lastInOrder)}</div><span>latest episode out</span></div>
             <div><div class="stat">${esc(r.daysBehind)}</div><span>days behind today's run (day ${esc(r.streakDay)})</span></div>
         </div>${r.gapDaysPaused ? '<div class="bar">Missing older days (the gap list) are paused until seven days in a row go out.</div>' : ''}${r.mode !== 'live' ? `<div class="bar"><span class="stale">Mode: ${esc(r.mode)}. Nothing reaches the public.</span></div>` : ''}</div>
         <div class="card"><h2>Last 7 days</h2><div class="scroll"><table><thead><tr><th>Day</th><th>Episode</th><th>Sections</th><th>Links</th></tr></thead><tbody>${hist}</tbody></table></div></div>
@@ -286,9 +298,9 @@ function registerChecks() {
             { name: 'Something went out yesterday', kind: 'automation', run: () => { const h = (_report && _report.history) || []; if (h.length < 2) return { status: 'warn', detail: 'No history in the report' };
                 return h[1].episodes.length ? { status: 'pass', detail: h[1].episodes.map(e => `Episode ${e.day}`).join(', ') } : { status: 'fail', detail: 'Nothing was published yesterday' }; } },
             { name: 'Nothing stuck', kind: 'automation', run: () => { if (!_report) return { status: 'warn', detail: 'No report loaded' };
-                const s = _report.sentBack || [], t = _report.teaserOnly || [];
-                const why = [...s.map(x => `Episode ${x.day} sent back, not resubmitted`), ...t.map(d => `Day ${d} has no full episode`)];
-                return why.length ? { status: 'fail', detail: why.join('; ') } : { status: 'pass', detail: 'No sent-back card or missing full episode' }; } },
+                const s = _report.sentBack || [], t = _report.teaserOnly || [], b = behindUnnamed(_report);
+                const why = [...s.map(x => `Episode ${x.day} sent back, not resubmitted`), ...t.map(d => `Day ${d} has no full episode`), ...b.map(x => `Episode ${x.day} not out yet (${x.why})`)];
+                return why.length ? { status: 'fail', detail: why.join('; ') } : { status: 'pass', detail: 'No sent-back card, missing full episode or day left behind' }; } },
         ],
     });
 }

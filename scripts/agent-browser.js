@@ -188,7 +188,10 @@ const BUILTIN_SITES = {
   // The account is SHARED (orders dispatch to Kevin and two other people),
   // so an order is only Kevin's when its total matches one of his
   // card charges. Never assume every order on the account is his.
-  'www.amazon.co.uk':           { label: 'Amazon (order history)', login: true,
+  // selfRefresh (2 Oct 2026): Amazon keeps this login for a year but stops
+  // answering the robot's own browser with it within hours, and a plain
+  // window nobody touches puts it back. See plainRefresh.
+  'www.amazon.co.uk':           { label: 'Amazon (order history)', login: true, selfRefresh: true,
                                   loginUrl: 'https://www.amazon.co.uk/gp/css/order-history' },
   // Airbnb trip history, to tell a business stay from a personal one.
   'www.airbnb.co.uk':           { label: 'Airbnb',             login: true,
@@ -674,7 +677,9 @@ function signinHoldActive(dir, now = Date.now()) {
   if (h.pid) { try { process.kill(h.pid, 0); } catch { return false; } }
   return true;
 }
-function takeSigninHold(dir) { fs.writeFileSync(holdPath(dir), JSON.stringify({ pid: process.pid, at: Date.now() })); }
+// `by` names a hold that is not Kevin's (the robot's own refresh window), so a waiting step says so.
+function takeSigninHold(dir, by) { fs.writeFileSync(holdPath(dir), JSON.stringify(Object.assign({ pid: process.pid, at: Date.now() }, by ? { by } : {}))); }
+function holdBy(dir) { try { return JSON.parse(fs.readFileSync(holdPath(dir), 'utf8')).by || null; } catch { return null; } }
 // Only the sign-in that took the hold removes it: a second sign-in's hold is
 // never lifted by the first one ending.
 function releaseSigninHold(dir) {
@@ -690,9 +695,159 @@ function holdIsMine(dir) {
 }
 async function waitForSigninHold(dir) {
   if (!signinHoldActive(dir) || holdIsMine(dir)) return;
-  console.error(`WAITING: Kevin is signing in on the robot profile (${path.basename(dir)}). This step starts when he closes that window (at most ${HOLD_MAX_MS / 60000} minutes).`);
+  console.error(holdBy(dir) === 'refresh'
+    ? `WAITING: the robot has a site open in a sign-in window on its profile (${path.basename(dir)}) for about a minute. This step starts when it closes.`
+    : `WAITING: Kevin is signing in on the robot profile (${path.basename(dir)}). This step starts when he closes that window (at most ${HOLD_MAX_MS / 60000} minutes).`);
   const deadline = Date.now() + HOLD_MAX_MS;
   while (signinHoldActive(dir) && Date.now() < deadline) await new Promise(r => setTimeout(r, 2000));
+}
+
+// ── A site the robot signs itself back in to (2 Oct 2026) ───────────────────
+// Kevin: "When I click on the link for Amazon, it's already logged in." Amazon
+// sent the robot's own browser to /ap/signin on 7 mornings of 7, while the
+// plain window the Robot sign-in app opened showed order history every time
+// with no password asked, and for a few hours afterwards the robot's browser
+// was let in too. Proved 2 Oct 2026, 20:13Z: signed out in the robot's
+// browser; the same plain window opened for 20 seconds with nobody touching
+// it; signed in again. So for a site marked selfRefresh the robot opens that
+// window itself. It types nothing and clicks nothing: a site that wants a
+// password stays signed out and is asked for in the usual way.
+const SELF_REFRESH_MS = 20000;
+// Every process with its parent and command line.
+function processTable() {
+  const { spawnSync } = require('child_process');
+  return (spawnSync('ps', ['-axww', '-o', 'pid=,ppid=,command='], { encoding: 'utf8' }).stdout || '').split('\n')
+    .map(l => l.trim().match(/^(\d+)\s+(\d+)\s+(.*)$/)).filter(Boolean)
+    .map(m => ({ pid: Number(m[1]), ppid: Number(m[2]), line: m[3] }));
+}
+// The window plainRefresh opened, and only that one: its browser process carries
+// the refresh's own marker switch. The `open` launcher carries the same words
+// for a moment and is not the window; Chrome's helpers carry --type=. Review,
+// 2 Oct 2026: counting every process on the profile killed a robot that
+// launched in the same second, and called the launcher "the window opened".
+function isRefreshWindowLine(line, marker) {
+  const words = String(line).split(/\s+/);
+  return words.includes(marker) && !/^(\/usr\/bin\/)?open$/.test(words[0]) && !words.some(w => w.startsWith('--type='));
+}
+function refreshWindowPids(marker, table = processTable()) {
+  return table.filter(p => isRefreshWindowLine(p.line, marker)).map(p => p.pid);
+}
+function alive(pid) { try { process.kill(pid, 0); return true; } catch (e) { return e.code === 'EPERM'; } }
+function openPlainWindow(dir, url, marker) {
+  const { spawn } = require('child_process');
+  // -g: in the background, so it never takes the screen from whoever is at the Mac.
+  // The marker is a switch Chrome ignores; it is how this window, and no other, is found and closed.
+  spawn('open', ['-g', '-na', 'Google Chrome', '--args', `--user-data-dir=${dir}`,
+    '--use-mock-keychain', '--no-first-run', marker, url], { stdio: 'ignore' }).unref();
+}
+// Closes the window whatever happens to this process (review, 2 Oct 2026: a
+// caller's timeout landing in the 20 seconds left the window open, and every
+// robot step on the profile then waited ten minutes and died). The shell forks
+// the real watchdog and exits, so it belongs to launchd and survives anything
+// that kills node with its children, as Chrome (started by `open`) does. It is
+// never cancelled: on every normal path the window is already gone and it
+// finds nothing; on a path where the window opens late, it is what closes it.
+// The marker reaches it through the environment, so no shell's own command
+// line matches it, and the pattern ends at a word boundary.
+function startWatchdog(marker, afterMs) {
+  const { spawn } = require('child_process');
+  spawn('/bin/sh', ['-c', '( sleep "$OD_WAIT"; pkill -TERM -f -- "$OD_MARK( |$)"; sleep 10; pkill -KILL -f -- "$OD_MARK( |$)" ) >/dev/null 2>&1 &'],
+    { detached: true, stdio: 'ignore', env: Object.assign({}, process.env, { OD_WAIT: String(Math.ceil(afterMs / 1000)), OD_MARK: marker }) }).unref();
+}
+// Opens URL in a plain Chrome window on the profile, leaves it for lingerMs and
+// closes it. { ok } when the window opened and closed; { ok: false, why } when
+// it did not run. Whether the site let the robot back in is the caller's next
+// read, never this function's claim.
+async function plainRefresh(dir, url, opts = {}) {
+  const sleep = (ms) => new Promise(r => setTimeout(r, ms));
+  const ms = (k, dflt) => (opts[k] != null ? opts[k] : dflt);
+  const open = opts.open || openPlainWindow;
+  const lingerMs = ms('lingerMs', Number(process.env.AGENT_BROWSER_REFRESH_MS) || SELF_REFRESH_MS);
+  if (!opts.open && !fs.existsSync('/Applications/Google Chrome.app')) return { ok: false, why: 'Google Chrome is not installed' };
+  const theirs = () => signinHoldActive(dir) && !holdIsMine(dir);
+  const SIGNING_IN = 'a sign-in window is already open on this profile';
+  // Kevin's own sign-in comes first, and his window is never this function's to close.
+  if (theirs()) return { ok: false, why: SIGNING_IN };
+  const marker = `--od-refresh=${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+  // The hold first, then a pause and a wait, as `login` does: no new robot step
+  // starts, and a step that passed its last check a moment ago shows itself.
+  takeSigninHold(dir, 'refresh');
+  const release = () => { if (holdIsMine(dir)) releaseSigninHold(dir); };
+  process.on('exit', release);
+  try {
+    await sleep(ms('settleMs', 3000));
+    const free = Date.now() + ms('freeMs', 20000);
+    for (;;) {
+      // A sign-in Kevin starts while this waits takes the hold over: his comes first.
+      if (!holdIsMine(dir)) return { ok: false, why: SIGNING_IN };
+      if (!profileProcs(dir).length) break;
+      if (Date.now() > free) return { ok: false, why: 'the profile is in use' };
+      await sleep(250);
+    }
+    const openMs = ms('openMs', 10000), closeMs = ms('closeMs', 15000);
+    startWatchdog(marker, ms('watchdogMs', openMs + lingerMs + closeMs + 10000));
+    open(dir, url, marker);
+    const opened = Date.now() + openMs;
+    let pids = [];
+    while (!(pids = refreshWindowPids(marker)).length && Date.now() < opened) await sleep(250);
+    if (!pids.length) return { ok: false, why: 'the window did not open' };
+    await sleep(lingerMs);
+    // Ask it to quit, so it writes its cookies; only a window that will not go is killed.
+    pids = refreshWindowPids(marker);
+    for (const pid of pids) { try { process.kill(pid, 'SIGTERM'); } catch { /* already gone */ } }
+    const closed = Date.now() + closeMs;
+    while (pids.some(alive) && Date.now() < closed) await sleep(250);
+    let forced = false;
+    if (pids.some(alive)) {
+      // A window left open blocks every robot step on the profile for ten minutes each.
+      forced = true;
+      const mine = new Set(pids);
+      for (const p of processTable()) if (mine.has(p.pid) || mine.has(p.ppid)) { try { process.kill(p.pid, 'SIGKILL'); } catch { /* already gone */ } }
+      const dead = Date.now() + 5000;
+      while (pids.some(alive) && Date.now() < dead) await sleep(250);
+    }
+    if (pids.some(alive)) return { ok: false, why: 'the window would not close' };
+    persistSessionCookies(dir);
+    return forced ? { ok: true, forced: true } : { ok: true };
+  } finally {
+    release();
+    process.removeListener('exit', release);
+  }
+}
+// The allowlist entry that owns URL when it is one the robot can sign itself back in to.
+function selfRefreshEntry(url, sites = loadSites()) {
+  let h;
+  try { h = new URL(url).hostname.toLowerCase(); } catch { return null; }
+  const key = Object.keys(sites).filter(d => h === d || h.endsWith('.' + d)).sort((a, b) => b.length - a.length)[0];
+  const entry = key ? sites[key] : null;
+  return entry && entry.selfRefresh && entry.loginUrl ? entry : null;
+}
+// run() reads a page and returns { url, passwordFields, text, title, ... }. When
+// that read is a sign-in page and the site is marked selfRefresh, the plain
+// window is opened once and the read is taken again. One retry, never a loop.
+// noted(result) is told what the refresh did the moment it is known, so the
+// ledger has it even if the second read then fails.
+async function withSelfRefresh(entry, dir, run, refresh = plainRefresh, noted = () => {}) {
+  const first = await run();
+  if (!entry || !entry.selfRefresh || !entry.loginUrl) return first;
+  if (!onSigninPage(first.url, first.passwordFields, first.text, first.title)) return first;
+  const r = await refresh(dir, entry.loginUrl);
+  if (!r.ok) { noted('not run: ' + r.why); return Object.assign(first, { selfRefresh: 'not run: ' + r.why }); }
+  noted('ran');
+  let res;
+  try {
+    res = await run();
+  } catch (e) {
+    // The first read stands, and says why there is no second one: never a silent loss.
+    return Object.assign(first, { selfRefresh: 'ran, then the second read failed: ' + String(e && e.message || e).slice(0, 200) });
+  }
+  const v = sessionVerdict(res.url, res.passwordFields, res.text, res.title);
+  // Signed back in means a page of the site itself; an error page has no password box either.
+  let onSite = false;
+  try { onSite = signinDomain(new URL(res.url).hostname) === signinDomain(new URL(entry.loginUrl).hostname); } catch { onSite = false; }
+  const outcome = v.signedIn && onSite ? 'signed back in' : v.botCheck ? 'ran, then met a bot check'
+    : onSigninPage(res.url, res.passwordFields, res.text, res.title) ? 'ran, still signed out' : 'ran, the page did not settle';
+  return Object.assign(res, { selfRefresh: outcome });
 }
 
 async function withPage(profile, headed, fn) {
@@ -1420,7 +1575,7 @@ async function main() {
     if (!hostAllowed(start)) die(`${start} is not on the allowlist.`);
     const shot = arg(rest, 'shot');
     const walk = Array.isArray(entry.sessionWalk) ? entry.sessionWalk : [];
-    const res = await withPage(profile, false, async (page) => {
+    const walkOnce = () => withPage(profile, false, async (page) => {
       await page.goto(start, { waitUntil: 'domcontentloaded', timeout: 45000 });
       await page.waitForTimeout(3000);
       // A short check on the door itself would stop the walk at its first click.
@@ -1453,7 +1608,11 @@ async function main() {
       return { site, signedIn: verdict.signedIn, botCheck: verdict.botCheck, url, title, passwordFields, walked: clicked, text, screenshot: png,
                signinPage: onSigninPage(url, passwordFields, text, title) };
     });
-    ledger({ cmd: 'session', site, url: res.url, signedIn: res.signedIn, botCheck: res.botCheck, signinPage: res.signinPage, profile });
+    // The verdict on the ledger is the one AFTER the robot's own refresh, when the site has one.
+    const res = await withSelfRefresh(entry, path.join(PROFILE_ROOT, profile || 'default'), walkOnce, plainRefresh,
+      (result) => ledger({ cmd: 'refresh', site, profile, result }));
+    ledger({ cmd: 'session', site, url: res.url, signedIn: res.signedIn, botCheck: res.botCheck, signinPage: res.signinPage, profile,
+             ...(res.selfRefresh ? { selfRefresh: res.selfRefresh } : {}) });
     if (res.botCheck) console.error(`BOT CHECK: ${site} shows the robot a "verify you are human" page. A sign-in will not remove it and the robot never clicks one. This is not a SIGN-IN wall.`);
     console.log(JSON.stringify(res));
     return;
@@ -1464,7 +1623,7 @@ async function main() {
     if (!url) die('--url is required');
     if (!hostAllowed(url)) die(`${url} is not on the allowlist.`);
     const shot = arg(rest, 'shot');
-    const res = await withPage(profile, false, async (page) => {
+    const readOnce = () => withPage(profile, false, async (page) => {
       await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 45000 });
       // Single-page apps (Spotify for Creators, Strava's dashboard) paint nothing at
       // domcontentloaded; --wait gives them time and --wait-for waits for a selector.
@@ -1489,6 +1648,9 @@ async function main() {
       const title = await page.title();
       return { title, url: page.url(), passwordFields, botCheck: isBotCheck(text, title), text, screenshot: png, links };
     });
+    // A read that lands on the sign-in page of a site the robot can sign itself back in to is taken again.
+    const res = await withSelfRefresh(selfRefreshEntry(url), path.join(PROFILE_ROOT, profile || 'default'), readOnce, plainRefresh,
+      (result) => ledger({ cmd: 'refresh', site: new URL(url).hostname.toLowerCase(), profile, result }));
     ledger({ cmd: 'read', url, profile, screenshot: res.screenshot, ...(res.botCheck ? { botCheck: true } : {}) });
     console.log(JSON.stringify(res));
     return;
@@ -1733,4 +1895,5 @@ module.exports = { hostAllowed, pickLinks, runSteps, assertNotCredential, assert
                    assertUploadable, assertConfirmable, UPLOAD_DIR, UPLOAD_EXTENSIONS, persistSessionCookies,
                    signinHoldActive, takeSigninHold, releaseSigninHold, waitForSigninHold, HOLD_MAX_MS, isBotCheck,
                    profileProcs, plainWindowOpen, pickOption, settleBotCheck, withPage, lastKeptCount: () => lastKept, onSigninPage,
-                   assertHandoverPlan, fillTokens, runHandover, handoverPlanPath, HANDOVER_DIR, waitForWindowClose, FINAL_ACTION_RE };
+                   assertHandoverPlan, fillTokens, runHandover, handoverPlanPath, HANDOVER_DIR, waitForWindowClose, FINAL_ACTION_RE,
+                   plainRefresh, withSelfRefresh, selfRefreshEntry, isRefreshWindowLine, holdBy };
