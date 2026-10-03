@@ -119,9 +119,14 @@ Claude runs these. Kevin approves at the gates: every email and every form submi
    its Notes so the rent check adopts it instead of raising a twin:
    `RENT SETUP KEY: <tenancy id>:journal:1` for a journal-upload task, or
    `RENT SETUP KEY: <tenancy id>:costs:1` for a housing-costs task.
-6. Once verified (the Rent line on Home says "form due" beside the unit; the rent check's
-   detail quotes Roy's words, so read them first), run the
-   UC47 (`uc47-form-automation`). After it is submitted, comment on the tenancy and
+6. Once Roy says the housing costs are verified, the rent check raises the direct rent
+   payment form card in Kevin's queue by itself (Kevin, 3 Oct 2026: "Robot fills, you pick
+   reason"). Kevin approves, taps Your turn, chooses the reason, types the code and bank
+   numbers and sends; the rent check then marks the tenancy CFV Actioned with a comment.
+   To change an answer, fix the record it is read from: Request changes on the card brings
+   it back once an answer changes.
+   Only if that route is down: run the UC47 by hand (`uc47-form-automation`), comment on the
+   tenancy and
    set Payment Status to CFV Actioned. Do NOT raise a follow-up task: the rent check sees
    CFV Actioned and raises Roy's first check (emailed to him, telling him to check with
    Universal Credit 14 days on) at its next run, or as soon after as the bank data is

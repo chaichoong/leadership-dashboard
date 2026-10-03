@@ -93,6 +93,7 @@ from agent_email_format import (  # noqa: E402
     TRIAL_ACTING_SHAPE_RE,
     TRIAL_STAMP,
     strip_trial_marks,
+    form_card,
     trial_problem,
 )
 # The CALENDAR contract lives in one place too, shared with
@@ -2893,7 +2894,7 @@ def build_queue(args=None):
     approved_hb, changes_hb, new_work, routing = [], [], [], []
     decided = []
     own_signal = []
-    trial_checked = []
+    trial_checked, form_cards = [], []
     creditor_ok = bool(role_roster.get(CREDITOR_REC_ID, {}).get("dispatchable"))
     creditor_count = 0
     # The property lane needs BOTH the register lever and a readable book:
@@ -2933,6 +2934,15 @@ def build_queue(args=None):
         if hold:
             standing_held.append({**t, "holdId": hold["id"],
                                   "holdTitle": hold.get("title", "")})
+            continue
+        # A ROBOT FORM CARD IS NEVER AN AGENT'S WORK (3 Oct 2026). The rent check raises it, reads
+        # Kevin's verdict and finishes it in code; approving it opens the robot's window and
+        # nothing else. Pulled out here, before every lane, whatever its outcome or none: a
+        # changed, rejected or stranded card handed to an agent would be redone or "carried out"
+        # by a run that has no business with it (independent review, 3 Oct 2026). Listed under
+        # formCards, never hidden.
+        if form_card(t["name"], t["notes"]):
+            form_cards.append(t)
             continue
         # ROY IS HANDLING THIS (24 Sep 2026): Roy forwarded this same matter to
         # his assistant. While his request is open this twin waits, listed
@@ -3228,6 +3238,7 @@ def build_queue(args=None):
         "idleHandbacks": idle_hb,
         "ownGoSignal": own_signal,
         "trialChecked": trial_checked,
+        "formCards": form_cards,
         # Tasks a sign-in just reopened (ids): the pickup run and the 30-minute
         # poll work these first, whichever lane classified them.
         "signinReopened": signin_reopened,
@@ -3262,6 +3273,7 @@ def build_queue(args=None):
             "idleHandbacks": len(idle_hb),
             "ownGoSignal": len(own_signal),
             "trialChecked": len(trial_checked),
+            "formCards": len(form_cards),
             "changesRequested": len(changes_hb),
             # Redos Kevin asked to delay. Demoted behind new work rather than
             # dropped, and counted here so one sitting for weeks stays visible.
@@ -5187,11 +5199,21 @@ def cmd_lessons(args):
             "been renamed or the formula no longer sees it — every lesson "
             "Kevin stores from now on would be silently dropped.")
 
-    written, problems = [], []
+    written, problems, not_agents = [], [], []
     for rec in pending_lessons():
         f = rec.get("fields", {})
         task_id = rec["id"]
         name = f.get(AF["name"], "")
+        # A robot form card is the rent check's rules, drafted by no agent: Kevin's words stay on the
+        # card (his request for changes is quoted on the next one) and never become an agent's rule.
+        # Stamped as handled, so it is never pending and never an overdue lesson for verify.
+        if form_card(name, f.get(AF["notes"])):
+            try:
+                patch_task(task_id, {AF["lessonWrittenAt"]: now_iso()})
+                not_agents.append(task_id)
+            except Exception as e:                    # noqa: BLE001
+                problems.append({"task": task_id, "name": name, "error": str(e)})
+            continue
         words = lesson_source_text(f)
         if not words:
             problems.append({"task": task_id, "name": name,
@@ -5233,7 +5255,7 @@ def cmd_lessons(args):
         except Exception as e:                        # noqa: BLE001
             problems.append({"task": task_id, "name": name, "error": str(e)})
 
-    out = {"written": written, "problems": problems,
+    out = {"written": written, "problems": problems, "formCards": not_agents,
            "pendingAfter": len(problems),
            "rememberedTotal": len(remembered)}
     print(json.dumps(out, indent=2))
@@ -5278,14 +5300,22 @@ def cmd_outcome(args):
     """
     t = task_view(get_task(args.task))
     # A trial task is never "approved" as far as the browser's submit gate goes (2 Oct 2026).
-    trial = trial_problem([t["agentId"]] + t["teamMemberIds"], t["name"], t["notes"])
+    # Nor is a robot form card, on trial or not (3 Oct 2026): `commit` presses submit, and the
+    # form is Kevin's to send. Its one door is `window`, which only `handover` reads: the robot
+    # fills the form in a window he finishes. Read from agent_email_format.FORM_CARDS.
+    holders = [t["agentId"]] + t["teamMemberIds"]
+    trial = trial_problem(holders, t["name"], t["notes"])
+    card = form_card(t["name"], t["notes"])
     print(json.dumps({
         "id": t["id"],
         "name": t["name"],
         "status": t["status"],
         "outcome": t["outcome"],
-        "approved": t["outcome"] in APPROVED and not trial,
+        "approved": t["outcome"] in APPROVED and not trial and not card,
         "trial": trial,
+        "formCard": card,
+        "window": (t["outcome"] in APPROVED and t["status"] not in ("Completed", "Cancelled")
+                   and form_card(t["name"], t["notes"], holders=holders)),
         "feedback": t["feedback"],
     }))
 
@@ -6916,12 +6946,15 @@ def cmd_complete(args):
 # (so a note Kevin ticked Remember on is stored first), and closes every approved
 # trial card with the verdict in Notes. A rejected card is closed by the queue
 # page already; a sent-back one goes round the redo loop like any other card.
+# A robot form card is never settled here: the rent check reads its verdict and
+# finishes it once Kevin has sent the form (agent_email_format.FORM_CARDS).
 def trial_approved_tasks():
     rows = query_tasks("AND(LEN({Approval Outcome}&'')>0, NOT({Status}='Completed'), NOT({Status}='Cancelled'))")
     out = []
     for rec in rows:
         t = task_view(rec)
-        if t["outcome"] in APPROVED and trial_problem([t["agentId"]], t["name"], t["notes"]):
+        if t["outcome"] in APPROVED and trial_problem([t["agentId"]], t["name"], t["notes"]) \
+                and not form_card(t["name"], t["notes"]):
             out.append(t)
     return out
 

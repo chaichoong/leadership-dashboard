@@ -61,10 +61,19 @@ ROY_REC = "reclbdjfVev3bqNHS"
 # posts, one-off tasks) do NOT close themselves and stay ordinary board work (review, 30 Sep 2026).
 # agent-dispatch.py carries the same prefix; tests/task-manager.test.js fails if they drift.
 EPISODE_CARD_PREFIX = "CONTENT: Publish Episode "
+FORM_CARD_MARKS = {"rec7aHLK1Q8fMLRXH": {"prefix": "RENT FORM: ", "note": "RENT FORM KEY: "}}
 
 
 def episode_card(f):
     return str(f.get("Task Name") or "").startswith(EPISODE_CARD_PREFIX)
+
+
+def form_card_task(f):
+    """A robot form card (Cash Flow Voids lane B, 3 Oct 2026): the rent check withdraws, re-raises and
+    finishes it in code, and only Kevin's turn in the robot window moves it. Kept identical to
+    FORM_CARDS in scripts/agent_email_format.py (tests/task-manager.test.js)."""
+    name, notes = str(f.get("Task Name") or ""), str(f.get("Notes") or "")
+    return any(name.startswith(m["prefix"]) or m["note"] in notes for m in FORM_CARD_MARKS.values())
 
 # AI Agent Daily Log fields (same map as inbound-triage.py; drift-tested
 # against it in tests/task-manager.test.js)
@@ -283,6 +292,9 @@ def classify(f, activity_ids, now=None):
     # legacy row at Approval with no sender: it is outside Kevin's queue, so no verdict ever comes and the engine
     # never closes it; that is stuck work (review, 30 Sep 2026).
     if episode_card(f) and not (f.get("Status") == "Approval" and not f.get("Sent For Approval By")):
+        return "ownLane", src, moved
+    # A robot form card waiting for Kevin's turn, or sent back: the rent check's lane, never the foreman's.
+    if form_card_task(f):
         return "ownLane", src, moved
     # Roy holds it: never stuck, whatever the stamps say. His lane's only move
     # is a weekly chase (cmd_board says when one is due); re-handing it over
@@ -1184,6 +1196,12 @@ def cmd_selftest():
     esc_ep = dict(ep, Notes="[22 Aug 2026 — agent-dispatch] Escalated to Kevin as a decision card (holder recRcy1Edas6rGaaF): DECIDE: x")
     esc_ep["Created Time"] = (now - timedelta(days=30)).isoformat()
     assert classify(esc_ep, set(), now)[0] == "ownLane", "an escalated or answered episode card is still the engine's"
+    old_card = {"Task Name": "RENT FORM: direct rent payment form: Unit 9", "Status": "Today", "Approval Outcome": "Approved as-is",
+                "Notes": "RENT FORM KEY: recX:form:1", "Created Time": old}
+    assert classify(old_card, set(), now)[0] == "ownLane", "an approved form card waits for Kevin's turn, never stuck"
+    assert classify(dict(old_card, **{"Task Name": "Renamed"}), set(), now)[0] == "ownLane", "either mark"
+    assert classify(dict(old_card, **{"Status": "Approval", "Approval Outcome": None, "Sent For Approval By": ["rec7aHLK1Q8fMLRXH"]}),
+                    set(), now)[0] == "waitingOnKevin", "a live card in his queue is his"
     legacy = dict(ep, Status="Approval", **{"Approval Outcome": None, "Sent For Approval By": None})
     assert classify(legacy, set(), now)[0] == "stuck", "an episode card outside Kevin's queue gets no verdict and never closes: stuck"
     perf = dict(ep, **{"Task Name": "CONTENT: Performance read for 9 August to 7 September"})
