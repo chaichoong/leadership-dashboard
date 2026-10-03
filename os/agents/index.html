@@ -4859,11 +4859,13 @@ function computeAgentTaskStats(recs){
     const day = 86400000;
     const localDay = d => { const x=new Date(d); return x.getFullYear()+'-'+String(x.getMonth()+1).padStart(2,'0')+'-'+String(x.getDate()).padStart(2,'0'); };
     const today = localDay(Date.now());
+    const isFormCard = f => !!(window.AgentAccuracy && window.AgentAccuracy.isFormCard && window.AgentAccuracy.isFormCard(f[TF.name], f[TF.notes]));
     recs.forEach(r=>{
         const f = r.fields||{};
         const status = selName(f[TF.status]);
         const comp = f[TF.completionDate];
-        (f[TF.teamMember]||[]).forEach(id=>{
+        // A robot form card is the rent check's, not the agent's work: left out of its counts too.
+        (isFormCard(f) ? [] : (f[TF.teamMember]||[])).forEach(id=>{
             const st = statsMap[id] = statsMap[id]||{open:0,doneToday:0,done7:0,done30:0,through30:0,handled30:0};
             if(status==='Completed'){
                 // The approval-history branch of the formula has NO date bound,
@@ -4885,7 +4887,7 @@ function computeAgentTaskStats(recs){
         const outcome = selName(f[TF.approvalOutcome]);
         const agentId = (f[TF.sentForApprovalBy]||[])[0] || (f[TF.teamMember]||[])[0];
         // A robot form card is nobody's draft: it never counts in an agent's score (AgentAccuracy.isFormCard).
-        const formCard = !!(window.AgentAccuracy && window.AgentAccuracy.isFormCard && window.AgentAccuracy.isFormCard(f[TF.name], f[TF.notes]));
+        const formCard = isFormCard(f);
         if(outcome && agentId && !formCard) hist.push({ agentId, taskType:selName(f[TF.taskType])||'Unclassified', outcome, at:String(f[TF.approvedAt]||'') });
     });
     _agentTaskStats = statsMap;

@@ -61,6 +61,10 @@ test.describe('AI Agents page tabs', () => {
     await loadAgentsPage(page);
     const creditor = page.locator('.sc-card', { hasText: 'Creditor Management' });
     await expect(creditor).toContainText('Correspondence 100% (1)');
+    // Nor its done and went-through-Kevin counts: the 15-Minute Dashboard reads one finished task for this agent.
+    // eslint-disable-next-line no-undef
+    const stats = await page.evaluate((id) => _agentTaskStats[id], AGENT_A);
+    expect([stats.done30, stats.through30]).toEqual([1, 1]);
   });
 
   test('the approvals queue is most-important-first and the chips filter it', async ({ page }) => {

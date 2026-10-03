@@ -138,7 +138,8 @@ FORM_GOOD_UNTIL_MARK = "RENT FORM GOOD UNTIL: "  # the robot's arrears answer ho
 CHANGES_WORDS = "Kevin asked for changes: "
 CHANGES_WAIT_DAYS = 7       # a card sent back for changes comes again once an answer changes, or this much later
 SUBMIT_FAILED = "it could not be submitted to Kevin's queue"   # the withdrawal of a card the gates refused
-SUBMIT_FAILS_STOP = 3       # cards refused at submit in a row: then it stops and says so
+SUBMIT_FAILS_STOP = 3       # cards refused at submit in a row: then it waits a week before the next try
+SUBMIT_RETRY_DAYS = 7
 OUTCOME_FIELD = "fldrHBSr6qoUfaKuZ"         # Tasks: Approval Outcome (AF["approvalOutcome"] in scripts/agent-dispatch.py)
 FEEDBACK_FIELD = "fldtI7SJI4gEohHD1"        # Tasks: Approval Feedback (AF["approvalFeedback"] in scripts/agent-dispatch.py)
 SOME_DAY_FIELD = "fldmhkeRaDkiL3Ga4"        # Tasks: Some Day (scripts/task-hygiene-sweep.py): parked by Kevin, Status wiped
@@ -146,8 +147,13 @@ LANDLORD_PATH = os.path.expanduser("~/.config/od/direct-payment-landlord.json")
 # A wall line in a task's Notes, kept identical to BLOCKER_LINE_RE in scripts/agent-dispatch.py.
 _WALL_RE = re.compile(r"^\[[^\]\n]*\]\s*(?P<mark>BLOCKER OPEN|BLOCKER CLEARED)\s*"
                       r"\((?P<kind>SIGN-IN|SITE|TOOL|KEVIN) (?P<subject>[^)\n]+)\):\s*(?P<rest>[^\n]*)$", re.M)
-# What the Robot sign-in app writes when Kevin says he finished his turn (scripts/robot-signin.applescript).
+# What the Robot sign-in app writes when Kevin says he finished his turn, and when he says he did not
+# (scripts/robot-signin.applescript; tests/rent-form.test.js reads both from the app itself).
 KEVIN_DONE = "Kevin finished his turn"
+KEVIN_NOT_DONE = "Your turn window closed without Kevin finishing"
+# The robot's own log of every window it opened (scripts/agent-browser.js LEDGER, `handover` lines).
+ROBOT_LOG = os.path.expanduser("~/knowledge-os/logs/agent-browser/runs.jsonl")
+OWN_CLEAR = "— rent-check] "       # the stamp on a wall line this file clears (withdraw_form, clear_wall)
 # The tenant draft is the trial agent's. Both marks are trial marks in scripts/agent_email_format.py
 # TRIAL_TASK_MARKS, kept identical there (tests/cash-flow-voids-agent.test.js).
 ASK_PREFIX, TRIAL_KEY_MARK = "RENT ASK: ", "RENT CHECK KEY: "
@@ -440,8 +446,24 @@ def wall_closed_not_by_kevin(notes):
     """True when the newest wall line is a cleared KEVIN wall that does not carry the app's words that
     Kevin finished his turn. He may have sent the form: it is never raised again on a guess."""
     walls = list(_WALL_RE.finditer(str(notes or "")))
+    # The rent check's own clear (a withdrawal, a closed card) is not a step Kevin may have used.
     return (bool(walls) and walls[-1].group("mark") == "BLOCKER CLEARED" and walls[-1].group("kind") == "KEVIN"
-            and KEVIN_DONE not in walls[-1].group("rest"))
+            and KEVIN_DONE not in walls[-1].group("rest") and OWN_CLEAR not in walls[-1].group(0))
+
+
+def may_have_sent(task, windows=None):
+    """True when Kevin may have sent this card's form though the app never recorded it: his Your turn
+    step was closed without the app's "finished" words, or the robot opened its window more times than
+    the app recorded him saying he had not finished (the app's call failed, or the dialog was never
+    answered). Such a card is never withdrawn or raised again: a second card could send the government
+    form twice. `windows` maps a card to how many times its window opened (None: not read)."""
+    notes = str(task.get("notes") or "")
+    if kevin_sent(notes):
+        return False
+    if wall_closed_not_by_kevin(notes):
+        return True
+    opened = (windows or {}).get(task.get("id"), 0)
+    return opened > notes.count(KEVIN_NOT_DONE)
 
 
 def card_print(notes):
@@ -519,7 +541,7 @@ def costs_yes(steps):
     return (said_words, said_on) if said == YES else None
 
 
-def position(steps, day, status="", plans=None):
+def position(steps, day, status="", plans=None, windows=None):
     """Where one tenancy is, from its keyed tasks. Pure.
 
     Returns {"stage", "note", "short", "raise": (step, n) or None, "first", "close": task or None,
@@ -527,7 +549,8 @@ def position(steps, day, status="", plans=None):
     create today. `close` is the newest task when it is finished and still open. `short` is the
     few words the Home line carries. `withdraw` is why the newest form card is to be withdrawn, and
     `prior` Kevin's request for changes the next card answers. `plans` holds the ids of the cards
-    with a robot plan on file (None: not checked). The furthest step with a task decides, so an
+    with a robot plan on file (None: not checked), and `windows` how many times the robot opened each
+    card's window (None: not read). The furthest step with a task decides, so an
     adopted `paid` task skips the earlier ones."""
     def out(stage, note, short, raise_=None, close=None, why=ANSWERED, last=None, first=False, ask_from=None,
             finish=False, roy=None, withdraw=None, prior=None):
@@ -587,12 +610,13 @@ def position(steps, day, status="", plans=None):
         notes = str(last.get("notes") or "")
         kevin, commented = kevin_sent(notes), FORM_COMMENTED_MARK in notes
         live = last["status"] not in ("Completed", "Cancelled")
+        maybe = may_have_sent(last, windows)
         if actioned:
             return out("form", "form sent (the tenancy is marked actioned), so the first check on the direct "
                                "payment is next", "form sent, awaiting rent", ("paid", 1), last=last, first=True,
                        finish=kevin and not commented,
                        withdraw="the tenancy is marked CFV Actioned, so the form went in another way"
-                       if live and not kevin else None)
+                       if live and not kevin and not maybe else None)
         if kevin and FORM_ACTIONED_MARK in notes:
             # The rent check marked it CFV Actioned once; somebody has set it back since. Theirs to decide.
             return out("form", "form sent by Kevin, and the tenancy was marked CFV Actioned, but it reads CFV again; "
@@ -602,6 +626,11 @@ def position(steps, day, status="", plans=None):
                        finish=True)
         roy, n = costs_yes(steps), last["n"] + 1
         gone = withdrawal(notes) if last["status"] == "Cancelled" else None
+        if maybe and not gone:
+            # He may have sent it: never withdrawn, never raised again on a guess. Said every run.
+            return out("form", "the form card's window was used but the app never recorded whether Kevin sent the "
+                               "form; if it went in, marking the tenancy CFV Actioned starts the payment checks",
+                       "form card to check", last=last)
         outcome = str(last.get("outcome") or "")
         if outcome.startswith("Rejected"):
             return out("form", "Kevin sent the form card back, so no form is being sent; marking the tenancy CFV "
@@ -623,9 +652,12 @@ def position(steps, day, status="", plans=None):
                     if not (w and w["why"].startswith(SUBMIT_FAILED)):
                         break
                     refused += 1
-                if refused >= SUBMIT_FAILS_STOP:
-                    return out("form", f"the form card was refused at submit {refused} times in a row ({gone['why'][:120]}), "
-                                       "so it is not raised again until the cause is fixed", "form card to check", last=last)
+                retry = gone["day"] + timedelta(days=SUBMIT_RETRY_DAYS)
+                if refused >= SUBMIT_FAILS_STOP and day < retry:
+                    return out("form", f"the form card was refused at submit {refused} times in a row ({gone['why'][:120]}); "
+                                       f"it is tried again on {retry.strftime('%-d %b')}, or marking the tenancy CFV "
+                                       "Actioned by hand moves on if the form goes in another way", "form card to check",
+                               last=last)
                 if day <= gone["day"]:
                     return out("form", f"the form card could not be submitted ({gone['why'][:90]}); it is raised again "
                                        "tomorrow", "form card raised again tomorrow", last=last)
@@ -646,7 +678,7 @@ def position(steps, day, status="", plans=None):
                        roy=roy, withdraw=f'{CHANGES_WORDS}"{said}"',
                        prior={"on": day, "feedback": said, "print": card_print(notes)})
         until = good_until(notes)
-        if live and until and day > until and outcome.startswith("Approved"):
+        if live and until and day > until and outcome.startswith("Approved") and last["status"] != "Upcoming":
             # The robot's "has not missed two months" was counted before a rent fell due. The plan the
             # window would run says so too (agent-browser.js refuses it): a fresh count, a fresh card.
             # Only once approved: a card still waiting on Kevin (in his queue, deferred or parked) is his,
@@ -658,12 +690,6 @@ def position(steps, day, status="", plans=None):
             if open_kevin_wall(notes) and (plans is None or last["id"] in plans):
                 return out("form", "your turn: tap Your turn on the AI Agents page and the robot fills the form",
                            "your turn", last=last)
-            if wall_closed_not_by_kevin(notes):
-                # His Your turn step was closed, but not with the app's words that he finished. He may have
-                # sent it: a second card could send the government form twice. Said, never guessed.
-                return out("form", "the form card's Your turn step was closed without the app's word that Kevin sent the "
-                                   "form; if it went in, marking the tenancy CFV Actioned starts the payment checks",
-                           "form card to check", last=last)
             # Without an open KEVIN wall and a plan on file the Your turn button never shows: a
             # "your turn" here would be a dead end nobody could see.
             return out("form", "the form card is approved but its Your turn step is closed or its plan is missing, and "
@@ -843,7 +869,7 @@ def ask_task(row, step, n, day):
             "notes": TRIAL_KEY_MARK + key + ":ask\n" + SETUP_KEY_MARK + key}
 
 
-def plan(res, tasks, tenants_of, names, day, starts=None, paid=None, bank=None, plans=None, dues=None):
+def plan(res, tasks, tenants_of, names, day, starts=None, paid=None, bank=None, plans=None, dues=None, windows=None):
     """Today's lane B moves. Pure: no reads, no writes.
 
     `res` is the rent check's result. `tasks` are the keyed tasks ({id, name, notes, description,
@@ -852,7 +878,8 @@ def plan(res, tasks, tenants_of, names, day, starts=None, paid=None, bank=None, 
     tenancy to its matched rent payments ([{day, amount}], rent-check.py payments_by_tenancy).
     `bank` is what the bank data can support today ({"blocked": [why], "waiting": [{day, amount}]},
     rent-check.py feed_state). `plans` holds the ids of the form cards with a robot plan on file, and
-    `dues` maps a tenancy to its rent due day (the form asks about arrears).
+    `dues` maps a tenancy to its rent due day (the form asks about arrears), and `windows` a form card to
+    how many times the robot opened its window (ROBOT_LOG).
     Returns {"rows": {tenancy: {note, short}}, "raise": [task], "close": [{id, why, complete, end,
     tenancy}], "withdraw": [{id, why, tenancy}], "finish": [{id, tenancy}], "problems": [text]}."""
     starts, paid, bank, dues = starts or {}, dict(paid or {}), bank or {}, dues or {}
@@ -864,7 +891,7 @@ def plan(res, tasks, tenants_of, names, day, starts=None, paid=None, bank=None, 
     rows_out, raise_out, close_out, finish_out, withdraw_out = {}, [], [], [], []
     seen = set()
     stopped = {tenancy for tenancy, steps in grouped.items()
-               if position(steps, day, status_of.get(tenancy) or "")["short"] == "stopped by hand"}
+               if position(steps, day, status_of.get(tenancy) or "", None, windows)["short"] == "stopped by hand"}
 
     def close(task, why, tenancy):
         if task["status"] not in LEAVE_ALONE and task["id"] not in {c["id"] for c in close_out}:
@@ -888,7 +915,7 @@ def plan(res, tasks, tenants_of, names, day, starts=None, paid=None, bank=None, 
         sent-back or stranded card leaves Kevin's queue."""
         finish_sent(tenancy, steps)
         if steps.get("form"):
-            pos = position(steps, day, status or "", plans)
+            pos = position(steps, day, status or "", plans, windows)
             if pos["stage"] == "form" and pos["withdraw"]:
                 withdraw(pos["last"], pos["withdraw"], tenancy)
 
@@ -907,8 +934,11 @@ def plan(res, tasks, tenants_of, names, day, starts=None, paid=None, bank=None, 
             if kevin_sent(t.get("notes")):
                 if FORM_COMMENTED_MARK not in str(t.get("notes") or ""):
                     finish(t, tenancy)
-            elif t["status"] not in ("Completed", "Cancelled"):
+            elif t["status"] not in ("Completed", "Cancelled") and not may_have_sent(t, windows):
                 withdraw(t, why, tenancy)
+            elif t["status"] not in ("Completed", "Cancelled"):
+                problems.append(f"form card {t['id']}: its window was used but the app never recorded whether Kevin "
+                                "sent the form, so it is left as it is")
 
     def end_clock(tenancy, steps, why):
         """Close Roy's open tasks, settle every form card and put the end line on the newest keyed task."""
@@ -962,7 +992,7 @@ def plan(res, tasks, tenants_of, names, day, starts=None, paid=None, bank=None, 
             continue
         seen.add(r["id"])
         tenant_ids = list(tenants_of.get(r["id"]) or [])
-        pos = position(steps, day, r.get("status") or "", plans)
+        pos = position(steps, day, r.get("status") or "", plans, windows)
         if r["id"] in stopped:
             rows_out[r["id"]] = {"note": pos["note"], "short": pos["short"]}
             continue                                  # stopped by hand: nothing of the tenancy's is touched
@@ -1140,6 +1170,24 @@ def read_tasks(rc):
     return out
 
 
+def read_windows(path=None):
+    """How many times the robot opened each task's window, from its own log (one JSON line per run).
+    A missing log is no windows; a line that cannot be read is skipped."""
+    counts = {}
+    try:
+        with open(path or ROBOT_LOG) as fh:
+            for line in fh:
+                try:
+                    row = json.loads(line)
+                except ValueError:
+                    continue
+                if row.get("cmd") == "handover" and row.get("task"):
+                    counts[row["task"]] = counts.get(row["task"], 0) + 1
+    except FileNotFoundError:
+        pass
+    return counts
+
+
 def read_names(rc, tenant_ids):
     if not tenant_ids:
         return {}
@@ -1304,6 +1352,9 @@ def withdraw_form(rc, item, day):
     if status == "Cancelled" and withdrawal(notes):
         drop_plan(ad, item["id"])
         return False
+    if may_have_sent({"id": item["id"], "notes": notes}, read_windows()):
+        raise RuntimeError(f"{item['id']}: its window was used but the app never recorded whether Kevin sent the "
+                           "form, so it is not withdrawn")
     lines = []
     wall = ad.task_blocker(notes)
     if wall:
@@ -1445,7 +1496,10 @@ def lane_b(rc, res, data, day, writes, on):
     """Plan and (on a real run) make today's lane B moves, and put each stage on its row. Never
     stops the rent check: a failure is said on the row and in the exit code, and one failed write
     does not stop the others. `on` is the Cash Flow Voids register switch the rent check already
-    read: False raises nothing, None means it could not be read."""
+    read: False raises nothing, None means it could not be read. The switch stops what is NEW (a
+    raise, an email to Roy, a close or an end line): what Kevin has already done is recorded either
+    way (his sent form is finished, a card he sent back or let lapse leaves his queue, a closed card's
+    step is cleared), so pausing the agent never loses his own work."""
     out = {"on": on, "raised": [], "planned": [], "closed": [], "problems": [], "failed": ""}
     fails = []
     try:
@@ -1460,11 +1514,12 @@ def lane_b(rc, res, data, day, writes, on):
         held_plans = ({f[:-5] for f in os.listdir(ad.HANDOVER_DIR) if f.endswith(".json")}
                       if os.path.isdir(ad.HANDOVER_DIR) else set())
         todo = plan(res, tasks, tenants_of, read_names(rc, wanted), day, starts, pays,
-                    rc.feed_state(data, pays, datetime.now(timezone.utc)), held_plans, dues)
+                    rc.feed_state(data, pays, datetime.now(timezone.utc)), held_plans, dues, read_windows())
         annotate(res, todo["rows"])
         out["problems"] = list(todo["problems"])
         if not on:
-            return out
+            # Switched off, or the switch could not be read: nothing new. Kevin's own work still counts.
+            todo = dict(todo, close=[], **{"raise": []})
         out["planned"] = ([w["label"] for w in todo["withdraw"]] + [t["label"] for t in todo["raise"]]
                           + [("end: " if c["end"] and not c["complete"] else "close: ") + c["id"] for c in todo["close"]]
                           + [f["label"] for f in todo["finish"]])
@@ -1475,7 +1530,7 @@ def lane_b(rc, res, data, day, writes, on):
         # the do-not-chase list, or a task this run is about to close.
         active = set(todo["rows"]) - todo["stopped"]
         closing = {c["id"] for c in todo["close"]}      # a clock that ends now closes every open task of Roy's
-        unsent = [t for t in tasks if t["name"].startswith(ROY_PREFIX) and t["status"] not in LEAVE_ALONE
+        unsent = [t for t in tasks if on and t["name"].startswith(ROY_PREFIX) and t["status"] not in LEAVE_ALONE
                   and t["id"] not in closing
                   and any(k[0] in active for k in task_keys(t["notes"], t["description"]))]
         if unsent:
@@ -1558,10 +1613,11 @@ def lane_b_line(setup):
     check = (" Check: " + "; ".join(setup["problems"]) + ".") if setup.get("problems") else ""
     if setup["failed"]:
         return f"New-tenant tasks FAILED: {setup['failed']}{check}"
+    kept = (f" Form cards recorded or tidied: {'; '.join(setup['closed'])}." if setup.get("closed") else "")
     if setup["on"] is None:
-        return f"New-tenant tasks: not run, the Cash Flow Voids agent's switch could not be read.{check}"
+        return f"New-tenant tasks: none raised, the Cash Flow Voids agent's switch could not be read.{kept}{check}"
     if not setup["on"]:
-        return f"New-tenant tasks: none raised, the Cash Flow Voids agent is switched off.{check}"
+        return f"New-tenant tasks: none raised, the Cash Flow Voids agent is switched off.{kept}{check}"
     done = ["raised: " + "; ".join(setup["raised"])] if setup["raised"] else []
     done += ["closed or ended: " + "; ".join(setup["closed"])] if setup["closed"] else []
     if done:

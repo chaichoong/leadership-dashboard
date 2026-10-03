@@ -482,6 +482,9 @@ with contextlib.redirect_stdout(io.StringIO()):
     ad.cmd_unblock(argparse.Namespace(task=rec["id"], evidence=${JSON.stringify(evidence)}))
 print(json.dumps({"sent": lb.kevin_sent(written[-1]), "open": lb.open_kevin_wall(written[-1])}))`);
     expect(r).toEqual({ sent: true, open: false });
+    // And the app's "Not yet" note, read by lane B to tell a window he left from one he may have used.
+    const lb = py(`print(json.dumps(load_mod("rnt3", "rent_new_tenant.py").KEVIN_NOT_DONE))`);
+    expect(src).toContain(`--note " & quoted form of "${lb}.`);
   });
 
   it('the lessons job never turns a form card verdict into an agent rule, and never leaves it pending', () => {
@@ -612,6 +615,7 @@ class FakeAd:
         submitted.append({"task": args.task, "agent": args.agent, "type": args.type, "kevin": "KEVIN ONLY: credential:" in text, "plain": args.plain_task})
         print(json.dumps({"submitted": args.task}))
 lb.module = lambda key: FakeAd()
+lb.ROBOT_LOG = os.path.join(HANDOVER, "runs.jsonl")        # never the real robot log
 LANDLORD_FILE = os.path.join(HANDOVER, "landlord.json")
 json.dump(LANDLORD, open(LANDLORD_FILE, "w"))
 lb.LANDLORD_PATH = LANDLORD_FILE
@@ -783,12 +787,16 @@ again = lb.withdraw_form(rc._Here(), item, DAY)
 RECORDS["recCARD0000000002"] = {rc.TK["notes"]: KEY + "\\n\\n" + OPEN + "\\n" + DONE, rc.TK["status"]: "Today"}
 try: lb.withdraw_form(rc._Here(), dict(item, id="recCARD0000000002"), DAY); sent = "withdrawn"
 except RuntimeError as e: sent = str(e)
+SUPERSEDED = "[02 Oct 2026 14:00 — agent-dispatch] BLOCKER CLEARED (KEVIN credential): x. superseded: a new submission replaced the work that met this wall."
+RECORDS["recCARD0000000004"] = {rc.TK["notes"]: KEY + "\\n\\n" + OPEN + "\\n" + SUPERSEDED, rc.TK["status"]: "Today"}
+try: lb.withdraw_form(rc._Here(), dict(item, id="recCARD0000000004"), DAY); maybe = "withdrawn"
+except RuntimeError as e: maybe = str(e)
 RECORDS["recCARD0000000003"] = {rc.TK["notes"]: "", rc.TK["status"]: "Today"}
 try: lb.withdraw_form(rc._Here(), dict(item, id="recCARD0000000003"), DAY); blank = "withdrawn"
 except RuntimeError as e: blank = str(e)
 print(json.dumps({"first": first, "writes": writes, "again": [again, len(patches)], "status": RECORDS["recCARD0000000001"][rc.TK["status"]],
                   "wallOpen": ad.task_blocker(notes), "turn": lb.open_kevin_wall(notes), "withdrawal": lb.withdrawal(notes)["why"],
-                  "plan": os.path.exists(os.path.join(HANDOVER, "recCARD0000000001.json")), "sent": sent, "blank": blank,
+                  "plan": os.path.exists(os.path.join(HANDOVER, "recCARD0000000001.json")), "sent": sent, "blank": blank, "maybe": maybe,
                   "filed": sorted(os.listdir(os.path.join(HANDOVER, "done"))), "shots": sorted(os.listdir(os.path.join(HANDOVER, "shots")))}))`);
     expect([r.first, r.writes]).toEqual([true, 1]);
     expect(r.again).toEqual([false, 1]);
@@ -803,6 +811,8 @@ print(json.dumps({"first": first, "writes": writes, "again": [again, len(patches
     // So do the window's screenshots.
     expect(r.shots).toEqual(['recOTHER000000001-1759490000000.png']);
     expect(r.sent).toMatch(/carries Kevin's word that he sent the form, so it is not withdrawn/);
+    // Nor a card he may have sent (its step closed without the app's words).
+    expect(r.maybe).toMatch(/never recorded whether Kevin sent the form, so it is not withdrawn/);
     expect(r.blank).toMatch(/blank Notes or no form key; nothing written/);
   });
 

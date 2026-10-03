@@ -480,8 +480,8 @@ print(json.dumps({"queue": go(card()), "turn": go(card(outcome="Approved as-is",
     // A Your turn step closed without the app's words that Kevin sent it: he may have sent it, so it is
     // never raised again on a guess (a second card could send the government form twice). Said instead.
     expect(r.superseded).toEqual([[], [], 'form card to check', []]);
-    expect(r.checkProblem).toEqual(["Unit 9 – 1 Example Road: the form card's Your turn step was closed without the app's word "
-      + 'that Kevin sent the form; if it went in, marking the tenancy CFV Actioned starts the payment checks']);
+    expect(r.checkProblem).toEqual(["Unit 9 – 1 Example Road: the form card's window was used but the app never recorded whether "
+      + 'Kevin sent the form; if it went in, marking the tenancy CFV Actioned starts the payment checks']);
     // No Your turn step ever opened: nothing can have been sent through it.
     expect(r.noWall).toEqual([[['form', 'recLaneBTest00001:form:2']], [], 'form card raised again', [again]]);
     // The robot's arrears answer holds only until the day before the next rent: after that a fresh count, a fresh card.
@@ -539,22 +539,85 @@ def card(i, n, extra, status="Cancelled", outcome=""):
     t = task("recFORMTASK0000%d" % i, NEW + ":form:%d" % n, status=status, created=date(2026, 9, 20 + n), name="RENT FORM: a form", extra=extra)
     return dict(t, outcome=outcome, notes="RENT FORM KEY: " + NEW + ":form:%d\\n" % n + t["notes"])
 REF = "RENT FORM WITHDRAWN: 2026-09-2%d it could not be submitted to Kevin's queue: ERROR"
-three = [card(1, 1, REF % 1), card(2, 2, REF % 2), card(3, 3, REF % 3)]
+three = [card(1, 1, REF % 7), card(2, 2, REF % 8), card(3, 3, REF % 9)]
 res, out = plan([new_void()], three)
+_, week = plan([new_void()], three, day=date(2026, 10, 6))
 two = [card(1, 1, 'RENT FORM WITHDRAWN: 2026-09-21 Kevin asked for changes: "Wrong rent"'), card(2, 2, REF % 2), card(3, 3, REF % 3)]
 _, out2 = plan([new_void()], two)
 expired = [card(1, 1, 'RENT FORM WITHDRAWN: 2026-09-21 Kevin asked for changes: "Wrong rent"'),
            card(2, 2, "RENT FORM WITHDRAWN: 2026-09-30 its arrears answer was counted before the rent due after 29 Sep 2026")]
 _, out3 = plan([new_void()], expired)
 p3 = out3["raise"][0]["prior"]
-print(json.dumps({"stop": [keys(out), short(res), out["problems"]], "notThree": keys(out2),
+print(json.dumps({"stop": [keys(out), short(res), out["problems"]], "notThree": keys(out2), "week": keys(week),
                   "quoted": [keys(out3), p3["on"].isoformat(), p3["feedback"], p3["print"]]}))`);
     expect(r.stop[0]).toEqual([]);
     expect(r.stop[1]).toBe('form card to check');
-    expect(r.stop[2][0]).toMatch(/refused at submit 3 times in a row/);
+    expect(r.stop[2][0]).toMatch(/refused at submit 3 times in a row .*it is tried again on 6 Oct/);
+    // A week after the last refusal it is tried again: the stop is never for good.
+    expect(r.week).toEqual([['form', 'recLaneBTest00001:form:4']]);
     // A request for changes in between breaks the run of refusals.
     expect(r.notThree).toEqual([['form', 'recLaneBTest00001:form:4']]);
     expect(r.quoted).toEqual([[['form', 'recLaneBTest00001:form:3']], '2026-09-21', 'Wrong rent', null]);
+  });
+
+  it('a card Kevin may have sent is never withdrawn or raised again, whatever else is true; it is said instead', () => {
+    const r = py(`
+OPEN = "[02 Oct 2026 10:00 — agent-dispatch] BLOCKER OPEN (KEVIN credential): type the code Fix: f [since 2026-10-02T09:00:00.000Z]"
+SUPERSEDED = "[02 Oct 2026 14:00 — agent-dispatch] BLOCKER CLEARED (KEVIN credential): x. superseded: a new submission replaced the work that met this wall."
+NOT_YET = "[02 Oct 2026 15:00 — agent] Your turn window closed without Kevin finishing. The task stays his, and the Your turn button stays on the AI Agents page."
+def card(extra="", outcome="Approved as-is", status="Today"):
+    t = task("recFORMTASK00001", NEW + ":form:1", status=status, created=date(2026, 9, 28), name="RENT FORM: a form", extra=extra)
+    return dict(t, outcome=outcome, notes="RENT FORM KEY: " + NEW + ":form:1\\n" + t["notes"])
+EXPIRED = "\\nRENT FORM GOOD UNTIL: 2026-10-01"
+def go(c, windows=None, tenancies=None):
+    res, out = lb_plan(tenancies or [new_void()], [c], windows)
+    return [keys(out), withdrawn(out), short(res) if tenancies is None else None]
+def lb_plan(tenancies, tasks, windows):
+    data, res = assess(tenancies)
+    tenants_of = {r["id"]: list(r["fields"].get(TY["tenants"]) or []) for r in data["tenancies"]}
+    starts = {r["id"]: rc.parse_day(r["fields"].get(TY["start"])) for r in data["tenancies"]}
+    pays = rc.payments_by_tenancy(data["tx"])
+    out = lb.plan(res, tasks, tenants_of, NAMES, DAY, starts, pays, rc.feed_state(data, pays, datetime(2026, 10, 2, 12, 30, tzinfo=timezone.utc)), None, {}, windows)
+    lb.annotate(res, out["rows"])
+    return res, out
+print(json.dumps({
+  "closedAndExpired": go(card(OPEN + "\\n" + SUPERSEDED + EXPIRED)),
+  "windowNoAnswerExpired": go(card(OPEN + EXPIRED), windows={"recFORMTASK00001": 1}),
+  "windowNotYetExpired": go(card(OPEN + "\\n" + NOT_YET + EXPIRED), windows={"recFORMTASK00001": 1}),
+  "twoWindowsOneNotYet": go(card(OPEN + "\\n" + NOT_YET + EXPIRED), windows={"recFORMTASK00001": 2}),
+  "movedOn": go(card(OPEN + "\\n" + SUPERSEDED), tenancies=[new_void(status="In Payment")]),
+  "upcomingExpired": go(card(OPEN + EXPIRED, status="Upcoming")),
+  "actioned": go(card(OPEN + "\\n" + SUPERSEDED), tenancies=[new_void(status="CFV Actioned")]),
+  "ownClear": lb.may_have_sent({"id": "x", "notes": OPEN + "\\n[03 Oct 2026 10:00 — rent-check] BLOCKER CLEARED (KEVIN credential): withdrawn: x"}),
+}))`);
+    // Closed oddly and past its good-until day: still never raised again (it may have been sent).
+    expect(r.closedAndExpired).toEqual([[], [], 'form card to check']);
+    // The robot opened its window and the app never recorded an answer: may have been sent.
+    expect(r.windowNoAnswerExpired).toEqual([[], [], 'form card to check']);
+    // He said "Not yet" for the one window: not sent, so the out-of-date card is raised afresh.
+    expect(r.windowNotYetExpired[0]).toEqual([['form', 'recLaneBTest00001:form:2']]);
+    expect(r.twoWindowsOneNotYet).toEqual([[], [], 'form card to check']);
+    // A tenancy that has moved on keeps a maybe-sent card, said, never withdrawn.
+    expect(r.movedOn.slice(0, 2)).toEqual([[], []]);
+    // Approved, then parked as Upcoming: past its good-until day it waits for him to move it back.
+    expect(r.upcomingExpired).toEqual([[], [], 'your turn']);
+    // Marked actioned: Roy's first check follows, and the maybe-sent card is left as it is (never withdrawn).
+    expect(r.actioned.slice(0, 2)).toEqual([[['roy', 'recLaneBTest00001:paid:1']], []]);
+    // The rent check's own clear (a withdrawal or a closed card) is never read as Kevin's step.
+    expect(r.ownClear).toBe(false);
+  });
+
+  it('the robot log is read for each card\'s windows; a missing log is none, a bad line is skipped', () => {
+    const r = py(`
+path = os.path.join(SCRATCH, "runs.jsonl")
+open(path, "w").write("\\n".join([json.dumps({"cmd": "handover", "task": "recA"}), "not json", json.dumps({"cmd": "commit", "task": "recA"}),
+                                   json.dumps({"cmd": "handover", "task": "recA"}), json.dumps({"cmd": "handover", "task": "recB"})]))
+print(json.dumps({"counts": lb.read_windows(path), "missing": lb.read_windows(os.path.join(SCRATCH, "none.jsonl")),
+                  "same": lb.ROBOT_LOG.endswith("knowledge-os/logs/agent-browser/runs.jsonl")}))`);
+    expect(r.counts).toEqual({ recA: 2, recB: 1 });
+    expect(r.missing).toEqual({});
+    // The same file scripts/agent-browser.js writes (its LEDGER).
+    expect(r.same).toBe(true);
   });
 
   it('an older form card: finished if Kevin sent it, withdrawn if still open, left if closed', () => {
@@ -1389,7 +1452,31 @@ print(json.dumps({"dry": dry, "off": off, "posts": posts, "mailed": mailed, "not
     expect(r.note).toBe('new, the journal upload is next');
     expect(r.lines[0]).toBe('New-tenant tasks a real run would make: Roy, journal check 1: Unit 9 – 1 Example Road.');
     expect(r.lines[1]).toBe('New-tenant tasks: none raised, the Cash Flow Voids agent is switched off.');
-    expect(r.lines[2]).toBe("New-tenant tasks: not run, the Cash Flow Voids agent's switch could not be read.");
+    expect(r.lines[2]).toBe("New-tenant tasks: none raised, the Cash Flow Voids agent's switch could not be read.");
+  });
+
+  it('paused or unread, Kevin\'s own sends are still recorded and his sent-back card still leaves his queue; nothing new is raised', () => {
+    const r = py(FAKE + `
+DONE = "[02 Oct 2026 14:00 — agent] BLOCKER CLEARED (KEVIN credential): x. evidence: Kevin finished his turn in the robot's window (send it), confirmed in the Robot sign-in app.. Carry on"
+finished, withdrawn_ids = [], []
+lb.finish_form = lambda _rc, item, day: finished.append(item["id"]) or "CFV Actioned"
+lb.withdraw_form = lambda _rc, item, day: withdrawn_ids.append(item["id"]) or True
+def card(i, extra="", outcome="", status="Today", tenancy=NEW, feedback=""):
+    t = task(i, tenancy + ":form:1", status=status, created=date(2026, 9, 28), name="RENT FORM: a form", extra=extra)
+    return dict(t, outcome=outcome, feedback=feedback, notes="RENT FORM KEY: " + tenancy + ":form:1\\n" + t["notes"])
+OTHER = rid(7)
+tasks = [card("recFORMTASK00001", extra=DONE, outcome="Approved as-is", status="Completed"),
+         card("recFORMTASK00002", outcome="Changes requested", feedback="Wrong rent", tenancy=OTHER)]
+out = {}
+for on in (False, None):
+    finished.clear(); withdrawn_ids.clear(); posts.clear()
+    res, o = run_lane_b([new_void(), new_void(i=OTHER, unit="Unit 8 – 1 Example Road")], tasks, on=on)
+    out[str(on)] = [list(finished), list(withdrawn_ids), len(posts), o["failed"], lb.lane_b_line(o)]
+print(json.dumps(out))`);
+    for (const k of ['False', 'None']) {
+      expect(r[k].slice(0, 4)).toEqual([['recFORMTASK00001'], ['recFORMTASK00002'], 0, '']);
+      expect(r[k][4]).toContain('Form cards recorded or tidied: recFORMTASK00002; recFORMTASK00001.');
+    }
   });
 
   it('closing keeps the Notes and adds a line; the end line is written once; a blank read is a stop; a task at Approval keeps its status', () => {
