@@ -1250,7 +1250,8 @@
                 // LEN(field&'') rather than != '' — a blank Airtable field is not
                 // reliably unequal to an empty string, and that trap has emptied
                 // a whole query in this base before.
-                fetch(url(`${flds}&filterByFormula=${encodeURIComponent(`LEN({Approval Outcome}&'')>0`)}`), { headers: { Authorization: `Bearer ${PAT}` } }),
+                // A robot form card is nobody's draft (AgentAccuracy.isFormCard): left out here, by name below.
+                fetch(url(`${flds}&filterByFormula=${encodeURIComponent(`AND(LEN({Approval Outcome}&'')>0, ${AgentAccuracy.FORM_CARD_CLAUSE})`)}`), { headers: { Authorization: `Bearer ${PAT}` } }),
                 fetch(`https://api.airtable.com/v0/${BASE_ID}/${TABLES.teamMembers}?returnFieldsByFieldId=true&pageSize=100&fields%5B%5D=${TEAM_MEMBER_FIELDS.name}&filterByFormula=${encodeURIComponent(`{Active}=TRUE()`)}`, { headers: { Authorization: `Bearer ${PAT}` } }),
             ]);
             if (!waitRes.ok || !histRes.ok) return;
@@ -1261,7 +1262,7 @@
 
             const linkId = (v) => Array.isArray(v) && v.length ? (typeof v[0] === 'object' ? (v[0].id || '') : String(v[0])) : '';
             const selName = (v) => !v ? '' : (typeof v === 'string' ? v : (v.name || ''));
-            const decisions = history.map(r => {
+            const decisions = history.filter(r => !AgentAccuracy.isFormCard((r.fields || {})[TASK_FIELDS.name], '')).map(r => {
                 const f = r.fields || {};
                 return {
                     agentId: linkId(f[TASK_FIELDS.sentForApprovalBy]) || linkId(f[TASK_FIELDS.teamMember]),

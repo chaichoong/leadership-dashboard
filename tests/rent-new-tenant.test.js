@@ -453,6 +453,10 @@ print(json.dumps({"queue": go(card()), "turn": go(card(outcome="Approved as-is",
                                                   extra='RENT FORM WITHDRAWN: 2026-09-30 Kevin asked for changes: "Wrong rent"')),
                   "parked": go(dict(card(status="", extra=OPEN + "\\nRENT FORM GOOD UNTIL: 2026-10-01"), someDay=True)),
                   "setBack": go(card(status="Completed", outcome="Approved as-is", extra=OPEN + "\\n" + DONE + "\\nRENT FORM SENT: x\\nRENT FORM COMMENTED: y\\nRENT FORM ACTIONED: z")),
+                  "upcomingPark": go(card(status="Upcoming", extra=OPEN)),
+                  "parkedChanges": go(dict(card(status="", outcome="Changes requested", feedback="x", extra=OPEN), someDay=True)),
+                  "refusedToday": go(card(status="Cancelled", extra="RENT FORM WITHDRAWN: 2026-10-02 it could not be submitted to Kevin's queue: ERROR")),
+                  "refusedYesterday": go(card(status="Cancelled", extra="RENT FORM WITHDRAWN: 2026-10-01 it could not be submitted to Kevin's queue: ERROR")),
                   "rejected": go(card(status="Completed", outcome="Rejected")), "rejectedOpen": go(card(status="Today", outcome="Rejected")),
                   "changes": go(changes), "changesPrior": prior(changes),
                   "stranded": go(card(status="Today")), "strandedToDo": go(card(status="To do")),
@@ -483,7 +487,8 @@ print(json.dumps({"queue": go(card()), "turn": go(card(outcome="Approved as-is",
     // The robot's arrears answer holds only until the day before the next rent: after that a fresh count, a fresh card.
     const stale = 'its arrears answer was counted before the rent due after 1 Oct 2026';
     expect(r.stale).toEqual([[['form', 'recLaneBTest00001:form:2']], [], 'form card raised again', [stale]]);
-    expect(r.staleInQueue).toEqual([[['form', 'recLaneBTest00001:form:2']], [], 'form card raised again', [stale]]);
+    // Still waiting on Kevin (in his queue, deferred or parked): his card, however old its count.
+    expect(r.staleInQueue).toEqual([[], [], 'form card with Kevin', []]);
     expect(r.fresh).toEqual([[], [], 'your turn', []]);
     // Sent is sent: neither a stale count nor a hand cancel undoes Kevin's word.
     expect(r.sentStale).toEqual([[], ['recFORMTASK00001'], 'form sent', []]);
@@ -519,6 +524,37 @@ print(json.dumps({"queue": go(card()), "turn": go(card(outcome="Approved as-is",
     expect(r.parked).toEqual([[], [], 'form card parked', []]);
     // Marked CFV Actioned once by the rent check, then set back to CFV by somebody: left as it is.
     expect(r.setBack).toEqual([[], [], 'form sent, set back by hand', []]);
+    // Submitted (its step is open), then moved out of his queue by him: parked, never "stranded".
+    expect(r.upcomingPark).toEqual([[], [], 'form card parked', []]);
+    // Parked with Some Day after asking for changes: the park is his newer word.
+    expect(r.parkedChanges).toEqual([[], [], 'form card parked', []]);
+    // Refused at submit: raised again the next day, not at the 12:30 run.
+    expect(r.refusedToday).toEqual([[], [], 'form card raised again tomorrow', []]);
+    expect(r.refusedYesterday).toEqual([[['form', 'recLaneBTest00001:form:2']], [], 'form card raised again', []]);
+  });
+
+  it('three refusals at submit in a row stop and say so; Kevin\'s request for changes is quoted on every later card', () => {
+    const r = py(`
+def card(i, n, extra, status="Cancelled", outcome=""):
+    t = task("recFORMTASK0000%d" % i, NEW + ":form:%d" % n, status=status, created=date(2026, 9, 20 + n), name="RENT FORM: a form", extra=extra)
+    return dict(t, outcome=outcome, notes="RENT FORM KEY: " + NEW + ":form:%d\\n" % n + t["notes"])
+REF = "RENT FORM WITHDRAWN: 2026-09-2%d it could not be submitted to Kevin's queue: ERROR"
+three = [card(1, 1, REF % 1), card(2, 2, REF % 2), card(3, 3, REF % 3)]
+res, out = plan([new_void()], three)
+two = [card(1, 1, 'RENT FORM WITHDRAWN: 2026-09-21 Kevin asked for changes: "Wrong rent"'), card(2, 2, REF % 2), card(3, 3, REF % 3)]
+_, out2 = plan([new_void()], two)
+expired = [card(1, 1, 'RENT FORM WITHDRAWN: 2026-09-21 Kevin asked for changes: "Wrong rent"'),
+           card(2, 2, "RENT FORM WITHDRAWN: 2026-09-30 its arrears answer was counted before the rent due after 29 Sep 2026")]
+_, out3 = plan([new_void()], expired)
+p3 = out3["raise"][0]["prior"]
+print(json.dumps({"stop": [keys(out), short(res), out["problems"]], "notThree": keys(out2),
+                  "quoted": [keys(out3), p3["on"].isoformat(), p3["feedback"], p3["print"]]}))`);
+    expect(r.stop[0]).toEqual([]);
+    expect(r.stop[1]).toBe('form card to check');
+    expect(r.stop[2][0]).toMatch(/refused at submit 3 times in a row/);
+    // A request for changes in between breaks the run of refusals.
+    expect(r.notThree).toEqual([['form', 'recLaneBTest00001:form:4']]);
+    expect(r.quoted).toEqual([[['form', 'recLaneBTest00001:form:3']], '2026-09-21', 'Wrong rent', null]);
   });
 
   it('an older form card: finished if Kevin sent it, withdrawn if still open, left if closed', () => {
@@ -594,11 +630,13 @@ print(json.dumps({
   "expired": go(card(outcome="Approved as-is", status="Today", extra="RENT FORM GOOD UNTIL: 2026-10-01")),
   "waiting": go(card()),
   "noChaseSent": go(card(outcome="Approved as-is", status="Completed", extra=DONE), [new_void()], noChase=["recT_uc"]),
+  "noChaseChanges": go(card(outcome="Changes requested", feedback="Wrong rent", status="Today"), [new_void()], noChase=["recT_uc"]),
 }))`);
     expect(r.changes).toEqual([[['recFORMTASK00001', 'Kevin asked for changes: "Wrong rent"']], [], []]);
     expect(r.expired).toEqual([[['recFORMTASK00001', 'its arrears answer was counted before the rent due after 1 Oct 2026']], [], []]);
     expect(r.waiting).toEqual([[], [], []]);
     expect(r.noChaseSent).toEqual([[], ['recFORMTASK00001'], []]);
+    expect(r.noChaseChanges).toEqual([[['recFORMTASK00001', 'Kevin asked for changes: "Wrong rent"']], [], []]);
   });
 
   it('after the clock has ended, a card Kevin sent still gets its comment, and nothing else is touched', () => {
@@ -1255,12 +1293,16 @@ card = dict(task("recFORMTASK00001", NEW + ":form:1", created=date(2026, 9, 28),
 done = dict(task("recFORMTASK00009", NEW + ":form:0", status="Completed", created=date(2026, 9, 26), name="RENT FORM: an old form"), outcome="Rejected")
 for tid in ("recFORMTASK00001", "recFORMTASK00009"):
     open(os.path.join(FakeAd.HANDOVER_DIR, tid + ".json"), "w").write("{}")
+cleared = []
+lb.clear_wall = lambda _rc, tid, day: cleared.append(tid) or True
+OPEN = "[02 Oct 2026 10:00 — agent-dispatch] BLOCKER OPEN (KEVIN credential): type the code Fix: f [since 2026-10-02T09:00:00.000Z]"
+done = dict(done, notes=done["notes"] + "\\n\\n" + OPEN)
 res, out = run_lane_b([new_void()], [costs, done, card])
 first = [list(calls), out["failed"], out["raised"]]
 plans_left = sorted(f for f in os.listdir(FakeAd.HANDOVER_DIR) if f.endswith(".json"))
 calls.clear(); FAIL_WITHDRAW.append(1)
 res2, out2 = run_lane_b([new_void()], [costs, card])
-print(json.dumps({"first": first, "plans": plans_left, "failed": [list(calls), out2["failed"], out2["raised"]]}))`);
+print(json.dumps({"first": first, "plans": plans_left, "failed": [list(calls), out2["failed"], out2["raised"]], "cleared": cleared}))`);
     expect(r.first[0]).toEqual(['withdraw recFORMTASK00001', 'raise recLaneBTest00001:form:2 prior']);
     expect(r.first[1]).toBe('');
     // The rejected card's plan holds the tenant's details and opens nothing: removed. The open one is withdraw_form's.
@@ -1268,6 +1310,8 @@ print(json.dumps({"first": first, "plans": plans_left, "failed": [list(calls), o
     expect(r.failed[0]).toEqual(['withdraw recFORMTASK00001']);
     expect(r.failed[1]).toMatch(/form card recFORMTASK00001 could not be withdrawn: Airtable PATCH 503/);
     expect(r.failed[2]).toEqual([]);
+    // The rejected (closed) card's open Your turn step is cleared, so it never asks Kevin for a turn.
+    expect(r.cleared).toEqual(['recFORMTASK00009']);
   });
 
   it('a sent card whose finish fails holds the tenancy: no end line is written over it that run', () => {

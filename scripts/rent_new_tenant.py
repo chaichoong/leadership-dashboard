@@ -137,6 +137,8 @@ FORM_ANSWERS_MARK = "RENT FORM ANSWERS: "       # the print of the card's answer
 FORM_GOOD_UNTIL_MARK = "RENT FORM GOOD UNTIL: "  # the robot's arrears answer holds until this day (rent_form_plan)
 CHANGES_WORDS = "Kevin asked for changes: "
 CHANGES_WAIT_DAYS = 7       # a card sent back for changes comes again once an answer changes, or this much later
+SUBMIT_FAILED = "it could not be submitted to Kevin's queue"   # the withdrawal of a card the gates refused
+SUBMIT_FAILS_STOP = 3       # cards refused at submit in a row: then it stops and says so
 OUTCOME_FIELD = "fldrHBSr6qoUfaKuZ"         # Tasks: Approval Outcome (AF["approvalOutcome"] in scripts/agent-dispatch.py)
 FEEDBACK_FIELD = "fldtI7SJI4gEohHD1"        # Tasks: Approval Feedback (AF["approvalFeedback"] in scripts/agent-dispatch.py)
 SOME_DAY_FIELD = "fldmhkeRaDkiL3Ga4"        # Tasks: Some Day (scripts/task-hygiene-sweep.py): parked by Kevin, Status wiped
@@ -498,6 +500,16 @@ def first_check(task):
     return None
 
 
+def asked_before(steps, day):
+    """Kevin's newest request for changes on this tenancy's form cards, quoted on any later card (with no
+    wait: print None), or None. His words are never lost because a card went for another reason."""
+    for t in reversed(steps.get("form") or []):
+        w = withdrawal(t.get("notes")) if t["status"] == "Cancelled" else None
+        if w and w["why"].startswith(CHANGES_WORDS):
+            return {"on": w["day"], "feedback": w["why"][len(CHANGES_WORDS):].strip().strip('"'), "print": None}
+    return None
+
+
 def costs_yes(steps):
     """(Roy's words, the day) of his yes to the housing costs check, or None."""
     rows = steps.get("costs")
@@ -604,28 +616,43 @@ def position(steps, day, status="", plans=None):
                                    f"(\"{said[:80]}\"): it is raised again once an answer changes, or on "
                                    f"{until.strftime('%-d %b')}", "form card changes", ("form", n), last=last, roy=roy,
                            prior={"on": gone["day"], "feedback": said, "print": card_print(notes)})
+            if gone["why"].startswith(SUBMIT_FAILED):
+                refused = 0
+                for t in reversed(steps.get("form") or []):
+                    w = withdrawal(t.get("notes")) if t["status"] == "Cancelled" else None
+                    if not (w and w["why"].startswith(SUBMIT_FAILED)):
+                        break
+                    refused += 1
+                if refused >= SUBMIT_FAILS_STOP:
+                    return out("form", f"the form card was refused at submit {refused} times in a row ({gone['why'][:120]}), "
+                                       "so it is not raised again until the cause is fixed", "form card to check", last=last)
+                if day <= gone["day"]:
+                    return out("form", f"the form card could not be submitted ({gone['why'][:90]}); it is raised again "
+                                       "tomorrow", "form card raised again tomorrow", last=last)
             return out("form", f"the form card was withdrawn ({gone['why'][:90]}), so it is raised again",
-                       "form card raised again", ("form", n), last=last, roy=roy)
+                       "form card raised again", ("form", n), last=last, roy=roy, prior=asked_before(steps, day))
         if last["status"] == "Completed":
             return out("form", "the form card was closed without Kevin saying he sent the form, so nothing more is "
                                "raised; marking the tenancy CFV Actioned by hand starts the payment checks if it went in",
                        "form card closed", last=last)
+        if last.get("someDay"):
+            # Kevin parked it with the Some Day tick (which blanks its Status): his park stands.
+            return out("form", "Kevin parked the form card for some day, so it is left as it is", "form card parked",
+                       last=last)
         if outcome == "Changes requested":
             said = " ".join(str(last.get("feedback") or "").split())[:300]
             return out("form", f"Kevin asked for changes to the form card (\"{said[:80]}\"), so it is withdrawn and "
                                "raised again once an answer changes", "form card changes", ("form", n), last=last,
                        roy=roy, withdraw=f'{CHANGES_WORDS}"{said}"',
                        prior={"on": day, "feedback": said, "print": card_print(notes)})
-        if last.get("someDay"):
-            # Kevin parked it with the Some Day tick (which blanks its Status): his park stands.
-            return out("form", "Kevin parked the form card for some day, so it is left as it is", "form card parked",
-                       last=last)
         until = good_until(notes)
-        if live and until and day > until:
+        if live and until and day > until and outcome.startswith("Approved"):
             # The robot's "has not missed two months" was counted before a rent fell due. The plan the
             # window would run says so too (agent-browser.js refuses it): a fresh count, a fresh card.
+            # Only once approved: a card still waiting on Kevin (in his queue, deferred or parked) is his,
+            # and if he approves it late, this raises the fresh one then.
             return out("form", f"the form card's arrears answer was good until {until.strftime('%-d %b')}, so it is raised "
-                               "again with a fresh count", "form card raised again", ("form", n), last=last, roy=roy,
+                               "again with a fresh count", "form card raised again", ("form", n), last=last, roy=roy, prior=asked_before(steps, day),
                        withdraw=f"its arrears answer was counted before the rent due after {until.strftime('%-d %b %Y')}")
         if outcome.startswith("Approved"):
             if open_kevin_wall(notes) and (plans is None or last["id"] in plans):
@@ -641,15 +668,20 @@ def position(steps, day, status="", plans=None):
             # "your turn" here would be a dead end nobody could see.
             return out("form", "the form card is approved but its Your turn step is closed or its plan is missing, and "
                                "Kevin has not said he sent the form, so it is raised again", "form card raised again",
-                       ("form", n), last=last, roy=roy,
+                       ("form", n), last=last, roy=roy, prior=asked_before(steps, day),
                        withdraw="approved, but its Your turn step was closed or its plan was missing, and Kevin had "
                                 "not said he sent the form")
         if not outcome and last["status"] == "Approval":
             return out("form", "the direct rent payment form card is in Kevin's queue", "form card with Kevin", last=last)
+        if not outcome and open_kevin_wall(notes):
+            # Submitted (its Your turn step opened at submit), then moved out of his queue by him: parked.
+            return out("form", f"Kevin moved the form card out of his queue (it reads {last['status'] or 'blank'}), so it "
+                               "is left as it is", "form card parked", last=last)
         if not outcome:
-            # Created, but its submit and its cancel both failed: nobody would ever see it.
+            # Created, but its submit and its cancel both failed (no Your turn step ever opened): nobody would
+            # ever see it.
             return out("form", "the form card never reached Kevin's queue, so it is raised again",
-                       "form card raised again", ("form", n), last=last, roy=roy,
+                       "form card raised again", ("form", n), last=last, roy=roy, prior=asked_before(steps, day),
                        withdraw="it never reached Kevin's queue")
         return out("form", f"the form card's outcome '{outcome[:40]}' is not one the rent check knows, so it is left "
                            "as it is", "form card to check", last=last)
@@ -851,6 +883,15 @@ def plan(res, tasks, tenants_of, names, day, starts=None, paid=None, bank=None, 
         if task["id"] not in {f["id"] for f in finish_out}:
             finish_out.append({"id": task["id"], "tenancy": tenancy, "label": f"form sent: {task['id']}"})
 
+    def keep_straight(tenancy, steps, status):
+        """Nothing is raised for this tenancy today, but a sent card gets its comment and an out-of-date,
+        sent-back or stranded card leaves Kevin's queue."""
+        finish_sent(tenancy, steps)
+        if steps.get("form"):
+            pos = position(steps, day, status or "", plans)
+            if pos["stage"] == "form" and pos["withdraw"]:
+                withdraw(pos["last"], pos["withdraw"], tenancy)
+
     def finish_sent(tenancy, steps):
         """Only the cards Kevin sent and that still lack their comment: his word is never lost."""
         for t in steps.get("form") or []:
@@ -901,7 +942,7 @@ def plan(res, tasks, tenants_of, names, day, starts=None, paid=None, bank=None, 
         new = void and not steps and young and not had_rent and r["lane"] in ("new", "late")
         if r.get("noChase") and (new or (void and steps)):
             seen.add(r["id"])
-            finish_sent(r["id"], steps)               # a form Kevin sent still gets its comment
+            keep_straight(r["id"], steps, r.get("status"))
             continue                                  # the rent check has already said so on the row
         if (new or (void and steps)) and r["id"] in stuck:
             # A task for this tenancy carries a key that cannot be used. Anything raised now could
@@ -910,7 +951,7 @@ def plan(res, tasks, tenants_of, names, day, starts=None, paid=None, bank=None, 
             rows_out[r["id"]] = {"note": "a task carries a key for this tenancy that cannot be used, so nothing is raised "
                                          "until it is fixed", "short": "key to fix"}
             seen.add(r["id"])
-            finish_sent(r["id"], steps)               # a form Kevin sent still gets its comment
+            keep_straight(r["id"], steps, r.get("status"))
             continue
         if new and not r.get("type") and not r.get("noChase"):
             problems.append(f"{place_name(r['unit'])} is a new cash flow void whose tenant has no rent payment type, "
@@ -1010,11 +1051,7 @@ def plan(res, tasks, tenants_of, names, day, starts=None, paid=None, bank=None, 
         else:
             # Still a cash flow void the rent check cannot judge today: nothing is raised, but its form
             # card is still kept straight (an out-of-date or sent-back card leaves his queue).
-            finish_sent(tenancy, steps)
-            if steps.get("form"):
-                pos = position(steps, day, status or "", plans)
-                if pos["stage"] == "form" and pos["withdraw"]:
-                    withdraw(pos["last"], pos["withdraw"], tenancy)
+            keep_straight(tenancy, steps, status)
         leaving = {w["id"] for w in withdraw_out}
         live = [t for rows in steps.values() for t in rows if t["status"] not in LEAVE_ALONE and t["id"] not in leaving]
         count = f"{len(live)} open task{' carries' if len(live) == 1 else 's carry'} a key for {tenancy}"
@@ -1243,7 +1280,7 @@ def raise_form(rc, item, day):
         try:
             # Read back and appended to, never overwritten: a wall the submit opened is cleared with it.
             withdraw_form(rc, {"id": tid, "tenancy": item["tenancy"],
-                               "why": f"it could not be submitted to Kevin's queue: {' '.join(str(exc).split())[:300]}"}, day)
+                               "why": f"{SUBMIT_FAILED}: {' '.join(str(exc).split())[:300]}"}, day)
             gone = "withdrawn, the next run raises it again"
         except Exception:                                 # noqa: BLE001 — said in the error below
             gone = "and could not be withdrawn; the next run withdraws it and raises it again"
@@ -1280,6 +1317,26 @@ def withdraw_form(rc, item, day):
     return True
 
 
+def clear_wall(rc, task_id, day):
+    """A closed form card (cancelled or closed by hand, or rejected) whose Your turn step is still open:
+    the step is cleared and nothing else changes. agent-dispatch.py blockers_scan reads every task that
+    is not Completed, so an open step on a cancelled card would ask Kevin for a turn that no longer
+    exists, red after three days, for ever. True when something was written."""
+    ad = module("ad")
+    card = _one(rc, rc.T_TASKS, task_id, [rc.TK["notes"], rc.TK["description"], rc.TK["status"]])
+    notes = str(card.get(rc.TK["notes"]) or "")
+    if not notes.strip() or FORM_KEY_MARK not in notes + str(card.get(rc.TK["description"]) or ""):
+        raise RuntimeError(f"{task_id} read back with blank Notes or no form key; nothing written")
+    if rc.sel(card.get(rc.TK["status"])) not in ("Completed", "Cancelled") or not open_kevin_wall(notes):
+        return False
+    stamp = datetime.now(LONDON).strftime("%d %b %Y %H:%M")
+    line = ad.blocker_note(stamp, "rent-check", ad.BLOCKER_CLEARED_MARK, ad.task_blocker(notes),
+                           f"the card was closed on {day.strftime('%-d %b %Y')}, so this step is no longer Kevin's")
+    rc.api("PATCH", rc.T_TASKS, {"records": [{"id": task_id, "fields": {
+        rc.TK["notes"]: (notes.rstrip() + "\n\n" + line)[-90000:]}}]})
+    return True
+
+
 def finish_form(rc, item, day):
     """Kevin said he sent the form. In this order, each step once: mark the card sent and complete
     it; comment on the tenancy and mark the card COMMENTED; then, if the tenancy is still a cash
@@ -1297,9 +1354,11 @@ def finish_form(rc, item, day):
     if FORM_SENT_MARK not in notes:
         notes = (notes.rstrip() + "\n\n" + f"{FORM_SENT_MARK}Kevin confirmed in the Robot sign-in app that he sent the "
                  f"form (seen {day.strftime('%-d %b %Y')}).")[-90000:]
-        rc.api("PATCH", rc.T_TASKS, {"records": [{"id": item["id"], "fields": {
-            rc.TK["notes"]: notes, rc.TK["status"]: "Completed",
-            COMPLETION_FIELD: datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.000Z")}}]})
+        fields = {rc.TK["notes"]: notes}
+        if rc.sel(card.get(rc.TK["status"])) != "Cancelled":      # a card he cancelled by hand stays cancelled
+            fields.update({rc.TK["status"]: "Completed",
+                           COMPLETION_FIELD: datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.000Z")})
+        rc.api("PATCH", rc.T_TASKS, {"records": [{"id": item["id"], "fields": fields}]})
     ty = _one(rc, rc.T_TENANCIES, item["tenancy"], [rc.TY["payStatus"]])
     status = rc.sel(ty.get(rc.TY["payStatus"]))
     if FORM_COMMENTED_MARK not in notes:
@@ -1476,13 +1535,19 @@ def lane_b(rc, res, data, day, writes, on):
             except Exception as exc:                  # noqa: BLE001
                 held.add(item["tenancy"])
                 fails.append(str(exc)[:240])
-        # A finished, withdrawn or rejected card's plan holds the tenant's details and opens nothing.
+        # A finished, withdrawn or rejected card's plan holds the tenant's details and opens nothing, and a
+        # card closed by hand must not keep asking Kevin for his turn.
         for t in tasks:
             if is_form_card(t) and (t["status"] in ("Completed", "Cancelled") or str(t.get("outcome") or "").startswith("Rejected")):
                 try:
                     drop_plan(ad, t["id"])
                 except OSError as exc:
                     fails.append(f"the robot plan of form card {t['id']} could not be removed: {str(exc)[:120]}")
+            if is_form_card(t) and t["status"] in ("Completed", "Cancelled") and open_kevin_wall(t.get("notes")):
+                try:
+                    clear_wall(rc, t["id"], day)
+                except Exception as exc:              # noqa: BLE001
+                    fails.append(f"the Your turn step of closed form card {t['id']} could not be cleared: {str(exc)[:120]}")
     except Exception as exc:                          # noqa: BLE001 — said on the row, never swallowed
         fails.append(str(exc)[:300])
     out["failed"] = "; ".join(fails)[:600]

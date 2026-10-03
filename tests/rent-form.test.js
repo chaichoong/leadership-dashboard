@@ -517,6 +517,19 @@ print(json.dumps([ready({"why": "x", "validUntil": "2026-10-24"}, "2026-10-24"),
     expect(r).toEqual([true, false, true]);
   });
 
+  it('the pages score with the same rule: the shared module knows a form card by either mark, and its query clause matches the report\'s', () => {
+    const A = require_(join(ROOT, 'js', 'agent-accuracy.js'));
+    expect(A.isFormCard('RENT FORM: direct rent payment form: Unit 9', '')).toBe(true);
+    expect(A.isFormCard('Renamed', 'x\nRENT FORM KEY: recX:form:1')).toBe(true);
+    expect(A.isFormCard('RENT LATE: Unit 9, rent due 1 Oct (reminder)', 'RENT CHECK KEY: x')).toBe(false);
+    const r = py(`
+import agent_email_format as aef
+ar = load_mod("ar2", "agent-accuracy-report.py")
+print(json.dumps({"marks": aef.FORM_CARDS, "clause": ar.FORM_KEY_CLAUSE}))`);
+    expect(A.FORM_CARD_MARKS).toEqual(r.marks);
+    expect(', ' + A.FORM_CARD_CLAUSE).toBe(r.clause);
+  });
+
   it('the accuracy report never scores a form card as the agent\'s draft', () => {
     const r = py(`
 ar = load_mod("ar", "agent-accuracy-report.py")
@@ -688,6 +701,42 @@ print(json.dumps({"real": real, "again": again, "control": control}))`);
     expect(r.control).toMatch(/hands the job to Kevin/);
   });
 
+  it('the card goes all the way through the real submit, opens its Your turn step, and lane B then reads it as his, then as his turn', () => {
+    const r = py(RC + `
+ad = load_mod("ad", "agent-dispatch.py")
+ad.HANDOVER_DIR = HANDOVER
+lb.module = lambda key: ad
+store = {}
+# Both scripts key a task's fields by the same field ids, so one record serves both.
+assert all(ad.AF[k] == rc.TK[k] for k in ("name", "notes", "status", "description"))
+def get_task(tid): return {"id": tid, "fields": dict(RECORDS[tid])}
+def patch_task(tid, fields): RECORDS[tid].update(fields)
+ad.get_task = get_task; ad.patch_task = patch_task
+ad.require_role_agent_live = lambda *a, **k: None
+ad.supersede_attachments = lambda *a, **k: []
+ad.upload_attachment = lambda *a, **k: None
+ad.task_fields_owe_certificate = lambda *a, **k: False
+def nope(*a, **k): raise RuntimeError("a test reached a real query")
+ad.query_tasks = nope
+tid = lb.raise_one(rc._Here(), dict(ITEM, arrears=LOW), DAY)
+card = RECORDS[tid]
+t = {"id": tid, "name": card[rc.TK["name"]], "notes": card[rc.TK["notes"]], "description": card[rc.TK["description"]],
+     "status": card[rc.TK["status"]], "outcome": "", "n": 1, "step": "form", "made": datetime(2026, 10, 3, 9, tzinfo=timezone.utc),
+     "created": DAY, "completed": None}
+costs = {"id": "recROY", "name": "x", "notes": "", "description": "", "status": "Completed", "n": 1, "step": "costs",
+         "made": datetime(2026, 9, 25, 9, tzinfo=timezone.utc), "created": date(2026, 9, 25), "completed": None}
+before = lb.position({"costs": [costs], "form": [t]}, DAY, "CFV", {tid})
+after = lb.position({"costs": [costs], "form": [dict(t, outcome="Approved as-is", status="Today")]}, DAY, "CFV", {tid})
+print(json.dumps({"status": card[rc.TK["status"]], "wall": ad.task_blocker(card[rc.TK["notes"]]), "turn": lb.open_kevin_wall(card[rc.TK["notes"]]),
+                  "before": before["short"], "after": after["short"], "ready": ad.handover_ready(tid, ad.task_blocker(card[rc.TK["notes"]]), "Approved as-is")}))`);
+    expect(r.status).toBe('Approval');
+    expect(r.wall.kind).toBe('KEVIN');
+    expect(r.turn).toBe(true);
+    expect([r.before, r.after]).toEqual(['form card with Kevin', 'your turn']);
+    // And the Your turn button shows for it, its plan being on file and in date.
+    expect(r.ready).toBe(true);
+  });
+
   it('a card Kevin sent back for changes comes again only once an answer changes, or a week later, and quotes him', () => {
     const r = py(RC + `
 import rent_form_plan
@@ -757,6 +806,27 @@ print(json.dumps({"first": first, "writes": writes, "again": [again, len(patches
     expect(r.blank).toMatch(/blank Notes or no form key; nothing written/);
   });
 
+  it('a closed card whose Your turn step is still open has the step cleared (as the dispatcher reads walls), and nothing else', () => {
+    const r = py(RC + `
+ad = load_mod("ad", "agent-dispatch.py")
+lb.module = lambda key: ad
+OPEN = "[02 Oct 2026 10:00 — agent-dispatch] BLOCKER OPEN (KEVIN credential): type the code Fix: f [since 2026-10-02T09:00:00.000Z]"
+KEY = "RENT FORM KEY: recFormTest000001:form:1"
+RECORDS["recCARD0000000001"] = {rc.TK["notes"]: KEY + "\\n\\n" + OPEN, rc.TK["status"]: "Cancelled"}
+RECORDS["recCARD0000000002"] = {rc.TK["notes"]: KEY + "\\n\\n" + OPEN, rc.TK["status"]: "Today"}
+first = lb.clear_wall(rc._Here(), "recCARD0000000001", DAY)
+again = lb.clear_wall(rc._Here(), "recCARD0000000001", DAY)
+live = lb.clear_wall(rc._Here(), "recCARD0000000002", DAY)
+notes = RECORDS["recCARD0000000001"][rc.TK["notes"]]
+print(json.dumps({"written": [first, again, live, len(patches)], "status": RECORDS["recCARD0000000001"][rc.TK["status"]],
+                  "wall": ad.task_blocker(notes), "sent": lb.kevin_sent(notes), "fields": sorted(patches[0]["fields"])}))`);
+    expect(r.written).toEqual([true, false, false, 1]);
+    expect(r.status).toBe('Cancelled');
+    expect(r.wall).toBeNull();
+    expect(r.sent).toBe(false);
+    expect(r.fields).toEqual(['fldR7apBzSp3oxFxz']);
+  });
+
   it('once Kevin says he sent it: the card is marked and completed, the tenancy gets one comment, then goes CFV to CFV Actioned; each step once, and a failed step is retried without a second comment', () => {
     const r = py(RC + `
 DONE = "[02 Oct 2026 14:00 — agent] BLOCKER CLEARED (KEVIN credential): x. evidence: Kevin finished his turn in the robot's window (send it), confirmed in the Robot sign-in app.. Carry on"
@@ -795,6 +865,9 @@ set_back = [set_back, len(patches) - before_back]
 RECORDS["recFormTest000001"][rc.TY["payStatus"]] = "In Payment"
 RECORDS["recCARD0000000002"] = {rc.TK["notes"]: KEY + "\\n\\n" + DONE, rc.TK["status"]: "Today"}
 moved = lb.finish_form(rc._Here(), dict(ITEM1, id="recCARD0000000002"), DAY)
+RECORDS["recCARD0000000007"] = {rc.TK["notes"]: KEY + "\\n\\n" + DONE, rc.TK["status"]: "Cancelled"}
+lb.finish_form(rc._Here(), dict(ITEM1, id="recCARD0000000007"), DAY)
+kept_cancelled = [RECORDS["recCARD0000000007"][rc.TK["status"]], "RENT FORM SENT:" in RECORDS["recCARD0000000007"][rc.TK["notes"]]]
 RECORDS["recCARD0000000003"] = {rc.TK["notes"]: KEY, rc.TK["status"]: "Today"}
 try: lb.finish_form(rc._Here(), dict(ITEM1, id="recCARD0000000003"), DAY); unsent = "wrote"
 except RuntimeError as e: unsent = str(e)
@@ -804,7 +877,7 @@ except RuntimeError as e: blank = str(e)
 print(json.dumps({"first": first, "order": order, "once": once, "again": again, "afterAgain": after_again,
                   "card": RECORDS["recCARD0000000001"], "comment": comments[0], "plan": os.path.exists(os.path.join(HANDOVER, "recCARD0000000001.json")),
                   "failed": failed, "mid": mid, "retry": retry, "retryComments": retry_comments, "flip": flip, "flipped": flipped,
-                  "moved": moved, "movedComment": comments[-1][1], "unsent": unsent, "blank": blank, "setBack": set_back}))`);
+                  "moved": moved, "movedComment": comments[-1][1], "unsent": unsent, "blank": blank, "setBack": set_back, "keptCancelled": kept_cancelled}))`);
     expect(r.first).toBe('CFV Actioned');
     // Card marked, comment, card marked COMMENTED, the tenancy, then card marked ACTIONED: the comment
     // always comes before the status, and the status is changed once.
@@ -825,6 +898,8 @@ print(json.dumps({"first": first, "order": order, "once": once, "again": again, 
     expect(r.flip).toMatch(/tenancy 422/);
     expect(r.flipped).toEqual(['CFV Actioned', 0]);
     expect(r.setBack).toEqual(['CFV', 0]);
+    // Kevin cancelled the card by hand after sending: it records the send and stays cancelled.
+    expect(r.keptCancelled).toEqual(['Cancelled', true]);
     expect(r.moved).toBe('In Payment');
     expect(r.movedComment).toMatch(/The tenancy reads 'In Payment', so the rent check left its status as it is\.$/);
     // Only Kevin's own word that he sent it finishes a card.
