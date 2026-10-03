@@ -447,6 +447,12 @@ print(json.dumps({"queue": go(card()), "turn": go(card(outcome="Approved as-is",
                   "sentStale": go(card(outcome="Approved as-is", extra=OPEN + "\\nRENT FORM GOOD UNTIL: 2026-10-01\\n" + DONE)),
                   "sentThenCancelled": go(card(status="Cancelled", outcome="Approved as-is", extra=OPEN + "\\n" + DONE)),
                   "checkProblem": plan([new_void()], [card(outcome="Approved as-is", extra=OPEN + "\\n" + SUPERSEDED)])[1]["problems"],
+                  "cancelledActioned": go(card(status="Cancelled"), status="CFV Actioned"),
+                  "changesWhenStale": go(card(outcome="Changes requested", feedback="Wrong rent", extra=OPEN + "\\nRENT FORM GOOD UNTIL: 2026-10-01")),
+                  "withdrawnKeepsDay": prior(card(status="Cancelled", outcome="Changes requested",
+                                                  extra='RENT FORM WITHDRAWN: 2026-09-30 Kevin asked for changes: "Wrong rent"')),
+                  "parked": go(dict(card(status="", extra=OPEN + "\\nRENT FORM GOOD UNTIL: 2026-10-01"), someDay=True)),
+                  "setBack": go(card(status="Completed", outcome="Approved as-is", extra=OPEN + "\\n" + DONE + "\\nRENT FORM SENT: x\\nRENT FORM COMMENTED: y\\nRENT FORM ACTIONED: z")),
                   "rejected": go(card(status="Completed", outcome="Rejected")), "rejectedOpen": go(card(status="Today", outcome="Rejected")),
                   "changes": go(changes), "changesPrior": prior(changes),
                   "stranded": go(card(status="Today")), "strandedToDo": go(card(status="To do")),
@@ -503,6 +509,16 @@ print(json.dumps({"queue": go(card()), "turn": go(card(outcome="Approved as-is",
     expect(r.actionedAndMarked).toEqual([[['roy', 'recLaneBTest00001:paid:1']], ['recFORMTASK00001'], 'form sent, awaiting rent', []]);
     expect(r.actionedAndCommented).toEqual([[['roy', 'recLaneBTest00001:paid:1']], [], 'form sent, awaiting rent', []]);
     expect(r.sameWall).toBe(true);
+    // Cancelled by hand on a tenancy marked actioned: the form was done another way, so Roy's checks follow.
+    expect(r.cancelledActioned).toEqual([[['roy', 'recLaneBTest00001:paid:1']], [], 'form sent, awaiting rent', []]);
+    // Kevin's request for changes beats the expiry: his words are quoted and his wait applies.
+    expect(r.changesWhenStale).toEqual([[['form', 'recLaneBTest00001:form:2']], [], 'form card changes', ['Kevin asked for changes: "Wrong rent"']]);
+    // A card already withdrawn for changes keeps the day it was withdrawn, whatever its old verdict says.
+    expect(r.withdrawnKeepsDay).toEqual({ on: '2026-09-30', feedback: 'Wrong rent', print: 'abc123' });
+    // Parked with the Some Day tick (Status blanked): his park stands, even past the good-until day.
+    expect(r.parked).toEqual([[], [], 'form card parked', []]);
+    // Marked CFV Actioned once by the rent check, then set back to CFV by somebody: left as it is.
+    expect(r.setBack).toEqual([[], [], 'form sent, set back by hand', []]);
   });
 
   it('an older form card: finished if Kevin sent it, withdrawn if still open, left if closed', () => {
@@ -561,6 +577,28 @@ print(json.dumps({
     expect(r.notLive).toEqual([[['recFORMTASK00001', 'the tenancy is not a live tenancy today, so no form is needed']], []]);
     expect(r.unknownCFV).toEqual([[], []]);
     expect(r.unknownActioned).toEqual([[['recFORMTASK00001', 'the tenancy is marked CFV Actioned, so no form is needed']], []]);
+  });
+
+  it('a tenancy the rent check cannot judge, or one on the do-not-chase list, still has its form cards kept straight', () => {
+    const r = py(`
+DONE = "[02 Oct 2026 14:00 — agent] BLOCKER CLEARED (KEVIN credential): x. evidence: Kevin finished his turn in the robot's window (send it), confirmed in the Robot sign-in app.. Carry on"
+def card(outcome="", extra="", status="Approval", feedback=""):
+    t = task("recFORMTASK00001", NEW + ":form:1", status=status, created=date(2026, 9, 28), name="RENT FORM: a form", extra=extra)
+    return dict(t, outcome=outcome, feedback=feedback, notes="RENT FORM KEY: " + NEW + ":form:1\\n" + t["notes"])
+unknown = tenancy(NEW, 0, 900.00, status="CFV", start="2026-09-25", unit="Unit 9 – 1 Example Road")
+def go(c, tenancies=None, **kw):
+    _, out = plan(tenancies or [unknown], [c], **kw)
+    return [withdrawn(out), [f["id"] for f in out["finish"]], keys(out)]
+print(json.dumps({
+  "changes": go(card(outcome="Changes requested", feedback="Wrong rent", status="Today")),
+  "expired": go(card(outcome="Approved as-is", status="Today", extra="RENT FORM GOOD UNTIL: 2026-10-01")),
+  "waiting": go(card()),
+  "noChaseSent": go(card(outcome="Approved as-is", status="Completed", extra=DONE), [new_void()], noChase=["recT_uc"]),
+}))`);
+    expect(r.changes).toEqual([[['recFORMTASK00001', 'Kevin asked for changes: "Wrong rent"']], [], []]);
+    expect(r.expired).toEqual([[['recFORMTASK00001', 'its arrears answer was counted before the rent due after 1 Oct 2026']], [], []]);
+    expect(r.waiting).toEqual([[], [], []]);
+    expect(r.noChaseSent).toEqual([[], ['recFORMTASK00001'], []]);
   });
 
   it('after the clock has ended, a card Kevin sent still gets its comment, and nothing else is touched', () => {

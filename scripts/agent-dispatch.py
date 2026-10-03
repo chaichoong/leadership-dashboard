@@ -7027,9 +7027,18 @@ def handover_ready(task_id, b, outcome=""):
     on file. The wall opens at submit, before he has seen the card, so a plan alone
     is not a turn (review, 30 Sep 2026): the button would open a window the
     handover then refuses as unapproved."""
-    return (b.get("kind") == "KEVIN" and str(outcome or "").startswith("Approved")
+    if not (b.get("kind") == "KEVIN" and str(outcome or "").startswith("Approved")
             and bool(TURN_TASK_RE.match(task_id or ""))
-            and os.path.isfile(os.path.join(HANDOVER_DIR, task_id + ".json")))
+            and os.path.isfile(os.path.join(HANDOVER_DIR, task_id + ".json"))):
+        return False
+    # A plan whose answers hold only until a day (the DWP form's arrears answer, scripts/rent_form_plan.py)
+    # shows no button after it: agent-browser.js would refuse it, and the rent check raises a fresh card.
+    try:
+        with open(os.path.join(HANDOVER_DIR, task_id + ".json")) as fh:
+            until = str((json.load(fh) or {}).get("validUntil") or "")
+    except (OSError, ValueError, AttributeError):
+        return True                                  # the window itself checks the plan, and says why
+    return not until or today_london() <= until
 BLOCKER_OPEN_MARK = "BLOCKER OPEN"
 BLOCKER_CLEARED_MARK = "BLOCKER CLEARED"
 BLOCKER_STALE_DAYS = 3

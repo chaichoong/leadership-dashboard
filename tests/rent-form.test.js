@@ -504,6 +504,34 @@ print(json.dumps({"code": code, "formCards": out["formCards"], "written": out["w
     expect(r).toEqual({ code: 0, formCards: ['recCARD0000000001'], written: [], wrote: 0, stamped: true });
   });
 
+  it('the Your turn button goes once the plan\'s answers have expired, as the window would refuse it', () => {
+    const r = py(AD + `
+ad.HANDOVER_DIR = tempfile.mkdtemp()
+b = {"kind": "KEVIN"}
+def ready(plan, today):
+    json.dump(plan, open(os.path.join(ad.HANDOVER_DIR, "recCARD0000000001.json"), "w"))
+    ad.today_london = lambda: today
+    return ad.handover_ready("recCARD0000000001", b, "Approved as-is")
+print(json.dumps([ready({"why": "x", "validUntil": "2026-10-24"}, "2026-10-24"), ready({"why": "x", "validUntil": "2026-10-24"}, "2026-10-25"),
+                  ready({"why": "x"}, "2027-01-01")]))`);
+    expect(r).toEqual([true, false, true]);
+  });
+
+  it('the accuracy report never scores a form card as the agent\'s draft', () => {
+    const r = py(`
+ar = load_mod("ar", "agent-accuracy-report.py")
+def row(name, notes=None, outcome="Approved as-is"):
+    f = {"Task Name": name, "Approval Outcome": outcome, "Sent For Approval By": ["rec7aHLK1Q8fMLRXH"], "Task Type": "Admin"}
+    if notes is not None: f["Notes"] = notes
+    return {"id": "recX", "fields": f}
+got = ar.decisions_from([row("RENT FORM: direct rent payment form: Unit 9"), row("Renamed", "RENT FORM KEY: x:form:1", "Rejected"),
+                         row("RENT LATE: Unit 9, rent due 1 Oct (reminder)")])
+print(json.dumps({"names": [d["outcome"] for d in got], "clause": ar.FORM_KEY_CLAUSE}))`);
+    expect(r.names).toEqual(['Approved as-is']);
+    // The query leaves out a card known only by its key line (the Notes are not fetched for every task).
+    expect(r.clause).toBe(", NOT(FIND('RENT FORM KEY: ', {Notes}&''))");
+  });
+
   it('the queue lists every form card apart, whatever its outcome, and trial-settle never closes one', () => {
     const r = py(AD + `
 cards = [view(CARD, CARD_NOTES, tid="recCARD000000000A"), view(CARD, CARD_NOTES, outcome="Changes requested", tid="recCARD000000000B"),
@@ -695,6 +723,9 @@ open(os.path.join(HANDOVER, "recCARD0000000001.json"), "w").write("{}")
 os.makedirs(os.path.join(HANDOVER, "done"), exist_ok=True)
 for name in ("recCARD0000000001-20261003-1200.json", "recOTHER000000001-20261003-1200.json"):
     open(os.path.join(HANDOVER, "done", name), "w").write("{}")
+os.makedirs(os.path.join(HANDOVER, "shots"), exist_ok=True)
+for name in ("recCARD0000000001-1759490000000.png", "recOTHER000000001-1759490000000.png"):
+    open(os.path.join(HANDOVER, "shots", name), "w").write("x")
 item = {"id": "recCARD0000000001", "tenancy": "recFormTest000001", "why": 'Kevin asked for changes: "The rent is wrong"'}
 first = lb.withdraw_form(rc._Here(), item, DAY)
 notes = RECORDS["recCARD0000000001"][rc.TK["notes"]]
@@ -709,7 +740,7 @@ except RuntimeError as e: blank = str(e)
 print(json.dumps({"first": first, "writes": writes, "again": [again, len(patches)], "status": RECORDS["recCARD0000000001"][rc.TK["status"]],
                   "wallOpen": ad.task_blocker(notes), "turn": lb.open_kevin_wall(notes), "withdrawal": lb.withdrawal(notes)["why"],
                   "plan": os.path.exists(os.path.join(HANDOVER, "recCARD0000000001.json")), "sent": sent, "blank": blank,
-                  "filed": sorted(os.listdir(os.path.join(HANDOVER, "done")))}))`);
+                  "filed": sorted(os.listdir(os.path.join(HANDOVER, "done"))), "shots": sorted(os.listdir(os.path.join(HANDOVER, "shots")))}))`);
     expect([r.first, r.writes]).toEqual([true, 1]);
     expect(r.again).toEqual([false, 1]);
     expect(r.status).toBe('Cancelled');
@@ -720,6 +751,8 @@ print(json.dumps({"first": first, "writes": writes, "again": [again, len(patches
     expect(r.plan).toBe(false);
     // The copy the sign-in app files under done/ holds the tenant's details too: gone, and only this card's.
     expect(r.filed).toEqual(['recOTHER000000001-20261003-1200.json']);
+    // So do the window's screenshots.
+    expect(r.shots).toEqual(['recOTHER000000001-1759490000000.png']);
     expect(r.sent).toMatch(/carries Kevin's word that he sent the form, so it is not withdrawn/);
     expect(r.blank).toMatch(/blank Notes or no form key; nothing written/);
   });
@@ -753,6 +786,11 @@ try: lb.finish_form(rc._Here(), dict(ITEM1, id="recCARD0000000005"), DAY); flip 
 except RuntimeError as e: flip = str(e)
 before = len(comments)
 flipped = [lb.finish_form(rc._Here(), dict(ITEM1, id="recCARD0000000005"), DAY), len(comments) - before]
+# Set back to CFV by somebody after the rent check marked it: finish_form never flips it again.
+RECORDS["recFormTest000001"][rc.TY["payStatus"]] = "CFV"
+before_back = len(patches)
+set_back = lb.finish_form(rc._Here(), ITEM1, DAY)
+set_back = [set_back, len(patches) - before_back]
 # Somebody already moved the tenancy on: the comment says so, and its status is left alone.
 RECORDS["recFormTest000001"][rc.TY["payStatus"]] = "In Payment"
 RECORDS["recCARD0000000002"] = {rc.TK["notes"]: KEY + "\\n\\n" + DONE, rc.TK["status"]: "Today"}
@@ -766,17 +804,18 @@ except RuntimeError as e: blank = str(e)
 print(json.dumps({"first": first, "order": order, "once": once, "again": again, "afterAgain": after_again,
                   "card": RECORDS["recCARD0000000001"], "comment": comments[0], "plan": os.path.exists(os.path.join(HANDOVER, "recCARD0000000001.json")),
                   "failed": failed, "mid": mid, "retry": retry, "retryComments": retry_comments, "flip": flip, "flipped": flipped,
-                  "moved": moved, "movedComment": comments[-1][1], "unsent": unsent, "blank": blank}))`);
+                  "moved": moved, "movedComment": comments[-1][1], "unsent": unsent, "blank": blank, "setBack": set_back}))`);
     expect(r.first).toBe('CFV Actioned');
-    // Card marked, comment, card marked COMMENTED, then the tenancy: the comment always comes before the status.
-    expect(r.order).toEqual(['card', 'card', 'tenancy']);
-    expect(r.once).toEqual([3, 1]);
+    // Card marked, comment, card marked COMMENTED, the tenancy, then card marked ACTIONED: the comment
+    // always comes before the status, and the status is changed once.
+    expect(r.order).toEqual(['card', 'card', 'tenancy', 'card']);
+    expect(r.once).toEqual([4, 1]);
     // Done twice: nothing more is written.
     expect(r.again).toBe('CFV Actioned');
-    expect(r.afterAgain).toEqual([3, 1]);
+    expect(r.afterAgain).toEqual([4, 1]);
     expect(r.card.fldx4qCw17UfrKpaN).toBe('Completed');
     expect(r.card.fldR7apBzSp3oxFxz).toMatch(/RENT FORM SENT: Kevin confirmed in the Robot sign-in app that he sent the form/);
-    expect(r.card.fldR7apBzSp3oxFxz).toMatch(/RENT FORM COMMENTED: tenancy recFormTest000001, 3 Oct 2026$/);
+    expect(r.card.fldR7apBzSp3oxFxz).toMatch(/RENT FORM COMMENTED: tenancy recFormTest000001, 3 Oct 2026\nRENT FORM ACTIONED: tenancy recFormTest000001, 3 Oct 2026$/);
     expect(r.plan).toBe(false);
     expect(r.comment[0]).toBe('tblN51a88qTDB6iMH/recFormTest000001/comments');
     expect(r.comment[1]).toMatch(/^Direct rent payment form sent to the DWP by Kevin \(3 Oct 2026, form card recCARD0000000001\)\. Marked CFV Actioned/);
@@ -785,6 +824,7 @@ print(json.dumps({"first": first, "order": order, "once": once, "again": again, 
     expect([r.retry, r.retryComments]).toEqual(['CFV Actioned', 2]);
     expect(r.flip).toMatch(/tenancy 422/);
     expect(r.flipped).toEqual(['CFV Actioned', 0]);
+    expect(r.setBack).toEqual(['CFV', 0]);
     expect(r.moved).toBe('In Payment');
     expect(r.movedComment).toMatch(/The tenancy reads 'In Payment', so the rent check left its status as it is\.$/);
     // Only Kevin's own word that he sent it finishes a card.
