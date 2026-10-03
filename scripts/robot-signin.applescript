@@ -657,7 +657,8 @@ on runTurn(taskId)
 			-- Retire the plan, so the button goes and a later wall on this task cannot bring it back (review).
 			-- Its own try: the task is already recorded, so a failed move must not say it was not (review round 2).
 			try
-				sh("mkdir -p /Users/kevinbrittain/knowledge-os/handover/done && mv " & quoted form of planFile & " " & quoted form of ("/Users/kevinbrittain/knowledge-os/handover/done/" & taskId & "-" & (do shell script "date +%Y%m%d-%H%M") & ".json"))
+				-- A plan the rent check already removed (a step it closed while his answer was outstanding) is not a failure.
+				sh("mkdir -p /Users/kevinbrittain/knowledge-os/handover/done && if [ -f " & quoted form of planFile & " ]; then mv " & quoted form of planFile & " " & quoted form of ("/Users/kevinbrittain/knowledge-os/handover/done/" & taskId & "-" & (do shell script "date +%Y%m%d-%H%M") & ".json") & "; fi")
 			on error errMsg
 				display alert "Your turn" message "Recorded as done. The plan file could not be tidied away, so the button may show again until the next sweep: " & errMsg
 			end try

@@ -16,10 +16,11 @@ WHAT ONE RUN DOES
               and one line in the history log so the trial can be checked day by day
 
 WHAT IT NEVER DOES
-It sends nothing to a tenant and changes no tenancy, tenant or payment status. It writes its own
-Estate Status row, (lane A, 2 Oct 2026) one RENT LATE task per late tenancy per stage for the Cash
-Flow Voids agent, and (lane B) the tasks that walk a new tenant into payment, only while that
-agent's register row is Built or Live.
+It sends nothing to a tenant. It writes its own Estate Status row, (lane A, 2 Oct 2026) one RENT
+LATE task per late tenancy per stage for the Cash Flow Voids agent, and (lane B) the tasks that walk
+a new tenant into payment, only while that agent's register row is Built or Live. Its one tenancy
+write is lane B's: CFV to CFV Actioned with a comment, after Kevin confirms he sent the direct rent
+payment form.
 
 LANE A, IN TRIAL (Kevin, 2 Oct 2026)
 A tenancy that reads late on trusted bank data becomes a task for the Cash Flow Voids agent. The

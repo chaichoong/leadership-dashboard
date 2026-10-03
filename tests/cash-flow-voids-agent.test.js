@@ -165,7 +165,7 @@ m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m)
 AF = m.AF
 recs = []
 for t in json.loads(sys.stdin.read()):
-    f = {AF["name"]: t["name"], AF["status"]: {"name": "Today"}, AF["teamMember"]: [t["agent"]]}
+    f = {AF["name"]: t["name"], AF["status"]: {"name": "Today"}, AF["teamMember"]: [t["agent"]], AF["notes"]: t.get("notes", "")}
     if t.get("outcome"):
         f[AF["approvalOutcome"]] = {"name": t["outcome"]}
         f[AF["approvedAt"]] = "2026-10-02T10:00:00.000Z"
@@ -176,7 +176,8 @@ m.fetch_role_roster = lambda: {}
 q = m.build_queue()
 c = q["counts"]
 print(json.dumps({"trialChecked": [x["id"] for x in q["trialChecked"]], "worklist": {x["id"]: x.get("kind") for x in q["worklist"]},
-                  "counts": {k: c[k] for k in ("trialChecked", "approvedHandbacks", "changesRequested", "newWork")}}))`],
+                  "formCards": [x["id"] for x in q["formCards"]],
+                  "counts": {k: c[k] for k in ("trialChecked", "approvedHandbacks", "changesRequested", "newWork", "formCards")}}))`],
       { input: JSON.stringify(tasks), encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'],
         env: { ...process.env, OD_HOLDS_FILE: resolve(ROOT, 'tests/does-not-exist-holds.json') } });
     return JSON.parse(out.trim().split('\n').pop());
@@ -193,10 +194,28 @@ print(json.dumps({"trialChecked": [x["id"] for x in q["trialChecked"]], "worklis
       { id: 'recRerouted', name: 'RENT LATE: Unit 5, rent due 30 Sep (reminder)', agent: PROPERTY_TM, outcome: 'Approved as-is' },
     ]);
     expect(r.trialChecked).toEqual(['recTrialYes', 'recTrialEdit', 'recRerouted']);
-    expect(r.counts).toEqual({ trialChecked: 3, approvedHandbacks: 1, changesRequested: 1, newWork: 1 });
+    expect(r.counts).toEqual({ trialChecked: 3, approvedHandbacks: 1, changesRequested: 1, newWork: 1, formCards: 0 });
     // The worklist is what a dispatch run works: the two approved trial cards are not on it.
     expect(Object.keys(r.worklist).sort()).toEqual(['recOtherYes', 'recTrialNew', 'recTrialRedo']);
     expect(r.worklist.recOtherYes).toBe('carry_out');
+  });
+
+  it('a form card is never an agent\'s work: listed as a form card whatever its outcome, by either mark, never carried out or trial-checked', () => {
+    const KEY = 'RENT FORM KEY: recFormTest000001:form:1';
+    const r = queue([
+      { id: 'recFormYes', name: 'RENT FORM: direct rent payment form: Unit 9', agent: RENT_TM, outcome: 'Approved as-is', notes: KEY },
+      // A renamed card, or one whose Notes lost the key, is still a form card: either mark keeps every door shut.
+      { id: 'recFormNoKey', name: 'RENT FORM: direct rent payment form: Unit 8', agent: RENT_TM, outcome: 'Approved as-is' },
+      { id: 'recFormRenamed', name: 'Unit 7 form', agent: RENT_TM, outcome: 'Approved as-is', notes: KEY },
+      // Sent back for changes, or stranded with no outcome: the rent check works these, never a redo run.
+      { id: 'recFormRedo', name: 'RENT FORM: direct rent payment form: Unit 6', agent: RENT_TM, outcome: 'Changes requested', notes: KEY },
+      { id: 'recFormStranded', name: 'RENT FORM: direct rent payment form: Unit 5', agent: RENT_TM, notes: KEY },
+      { id: 'recOtherYes', name: 'COMPLIANCE: EICR renewal', agent: PROPERTY_TM, outcome: 'Approved as-is' },
+    ]);
+    expect(r.formCards).toEqual(['recFormYes', 'recFormNoKey', 'recFormRenamed', 'recFormRedo', 'recFormStranded']);
+    expect(r.trialChecked).toEqual([]);
+    expect(Object.keys(r.worklist)).toEqual(['recOtherYes']);
+    expect(r.counts.formCards).toBe(5);
   });
 });
 

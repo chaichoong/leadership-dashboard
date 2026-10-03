@@ -949,7 +949,7 @@ with contextlib.redirect_stdout(io.StringIO()):
 print(json.dumps({"code": code, "status": rows[0][0], "laneB": rows[0][1].splitlines()[-1]}))`);
     expect(r.code).toBe(1);
     expect(r.status).toBe('Failed');
-    expect(r.laneB).toBe("New-tenant tasks: not run, the Cash Flow Voids agent's switch could not be read.");
+    expect(r.laneB).toBe("New-tenant tasks: none raised, the Cash Flow Voids agent's switch could not be read.");
   });
 
   it('a failed raise is said on the row, turns the run red, and the rent line is still written', () => {

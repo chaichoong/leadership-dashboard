@@ -350,7 +350,30 @@
         }).sort(function (a, c) { return c.total - a.total; });
     }
 
+    // ─── A ROBOT FORM CARD IS NOBODY'S DRAFT (3 Oct 2026) ────────────
+    //
+    // The daily rent check raises the direct rent payment form card under the
+    // Cash Flow Voids agent's id, but no agent writes a word of it: it is rules,
+    // and Kevin's verdict on it is a business call on a government form. So it
+    // never counts in an agent's score, on any surface. Either mark is enough.
+    // Kept identical to FORM_CARDS in scripts/agent_email_format.py
+    // (tests/rent-form.test.js). FORM_CARD_CLAUSE leaves out a card known only by
+    // its key line, for a query that does not fetch the Notes.
+    var FORM_CARD_MARKS = { rec7aHLK1Q8fMLRXH: { prefix: 'RENT FORM: ', note: 'RENT FORM KEY: ' } };
+    function isFormCard(name, notes) {
+        return Object.keys(FORM_CARD_MARKS).some(function (k) {
+            var m = FORM_CARD_MARKS[k];
+            return String(name || '').indexOf(m.prefix) === 0 || String(notes || '').indexOf(m.note) !== -1;
+        });
+    }
+    var FORM_CARD_CLAUSE = Object.keys(FORM_CARD_MARKS).map(function (k) {
+        return "NOT(FIND('" + FORM_CARD_MARKS[k].note + "', {Notes}&''))";
+    }).join(', ');
+
     var api = {
+        FORM_CARD_MARKS: FORM_CARD_MARKS,
+        FORM_CARD_CLAUSE: FORM_CARD_CLAUSE,
+        isFormCard: isFormCard,
         AUTONOMY_LEVELS: AUTONOMY_LEVELS,
         DECISION_MONEY: DECISION_MONEY,
         HANDLED_MARK: HANDLED_MARK,

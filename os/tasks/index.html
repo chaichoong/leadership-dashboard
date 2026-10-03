@@ -712,7 +712,7 @@ body.app-busy,body.app-busy *{cursor:progress!important}
 <script src="../../js/ai-models.js?v=1"></script>
 <!-- Agent accuracy scoring + the autonomy threshold. Shared with the
      Leadership Dashboard so both surfaces score identically. -->
-<script src="../../js/agent-accuracy.js?v=4"></script>
+<script src="../../js/agent-accuracy.js?v=5"></script>
 <script>
 // CONFIG
 const BASE_ID = 'appnqjDpqDniH3IRl';
@@ -9302,9 +9302,10 @@ async function loadAgentApprovalHistory(force){
   try{
     // LEN(field&'') rather than != '' — the blank-vs-empty-string trap has
     // silently emptied a whole query in this base before.
+    // A robot form card is nobody's draft (AgentAccuracy.isFormCard): left out by its key line here, by name below.
     const recs=await fetchTable(TASKS_TABLE,
       [F.name,F.approvalOutcome,F.approvedAt,F.taskType,F.sentForApprovalBy,F.teamMember,F.status],
-      `LEN({Approval Outcome}&'')>0`);
+      `AND(LEN({Approval Outcome}&'')>0, ${AgentAccuracy.FORM_CARD_CLAUSE||'TRUE()'})`);
     agentApprovalHistory=(recs||[]).map(r=>({
       id:r.id,
       name:gf(r,F.name)||'(Untitled)',
@@ -9312,7 +9313,7 @@ async function loadAgentApprovalHistory(force){
       at:gf(r,F.approvedAt)||'',
       taskType:selectName(gf(r,F.taskType))||'Unclassified',
       agentId:(linkIds(gf(r,F.sentForApprovalBy))[0]||linkIds(gf(r,F.teamMember))[0]||''),
-    })).filter(x=>x.outcome&&x.agentId);
+    })).filter(x=>x.outcome&&x.agentId&&!(AgentAccuracy.isFormCard&&AgentAccuracy.isFormCard(x.name,'')));
     agentHistoryError='';
     agentHistoryLoaded=true;
   }catch(e){

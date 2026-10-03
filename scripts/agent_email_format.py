@@ -408,6 +408,34 @@ TRIAL_STAMP = "TRIAL CHECKED"
 TRIAL_TASK_MARKS = {
     "rec7aHLK1Q8fMLRXH": {"prefix": ("RENT LATE: ", "RENT ASK: "), "note": "RENT CHECK KEY: "},
 }
+# A ROBOT FORM CARD (Cash Flow Voids lane B, 3 Oct 2026; Kevin's ruling "Robot fills, you pick
+# reason"). The rent check raises the direct rent payment form card. Approving it opens ONE door:
+# the robot's window (agent-browser.js `handover`, through agent-dispatch.py `outcome`), where the
+# robot fills the form and Kevin checks every answer and sends it himself. Every other door stays
+# shut for it, on trial or not: `outcome` never reads it as approved, so the robot's `commit`
+# (which presses submit) refuses it, and the queue never hands it to an agent, whatever its
+# outcome; the rent check works it in code. That holds after the trial ends too: this list is
+# separate from TRIAL_AGENTS on purpose (independent review, 3 Oct 2026).
+# EITHER mark makes a task a form card, so a renamed card or a lost Notes line still keeps the
+# doors shut. The window opens only with BOTH marks and the lane's own agent holding the card.
+# Kept identical to FORM_PREFIX and FORM_KEY_MARK in scripts/rent_new_tenant.py.
+FORM_CARDS = {
+    "rec7aHLK1Q8fMLRXH": {"prefix": "RENT FORM: ", "note": "RENT FORM KEY: "},
+}
+
+
+def form_card(name="", notes="", holders=None):
+    """True for a robot form card. With `holders` (the task's agent ids), only a card carrying
+    BOTH marks and held by the lane's own agent: the test for opening the robot's window."""
+    for agent_id, marks in FORM_CARDS.items():
+        has = (str(name or "").startswith(marks["prefix"]), marks["note"] in str(notes or ""))
+        if holders is None and any(has):
+            return True
+        if holders is not None and all(has) and agent_id in holders:
+            return True
+    return False
+
+
 # The output shapes that act without send-email.py: Roy's handover email, the diary, the Friday
 # payment list, signing and the post. The lead-in is what scripts/payment-run.py also accepts, so
 # a bold, quoted, bulleted or numbered heading cannot slip through.

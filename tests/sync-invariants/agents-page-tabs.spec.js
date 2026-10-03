@@ -45,6 +45,28 @@ test.describe('AI Agents page tabs', () => {
     await expect(page.locator('#approvalsTabBadge')).toHaveText('3');
   });
 
+  test('a robot form card is nobody\'s draft: it never moves an agent\'s accuracy, known by either mark', async ({ page }) => {
+    // Cash Flow Voids lane B (3 Oct 2026): the rent check raises the direct rent payment form card under an
+    // agent's id, but no agent writes it. Two rejected form cards against AGENT_A would read 33% (3) unfiltered.
+    const now = new Date().toISOString();
+    const base = defaultFixtures();
+    const card = (id, name, notes) => ({ id, createdTime: now, fields: {
+      [TF.name]: name, [TF.notes]: notes, [TF.teamMember]: [AGENT_A], [TF.sentForApprovalBy]: [AGENT_A],
+      [TF.approvalOutcome]: 'Rejected', [TF.approvedAt]: now, [TF.taskType]: 'Correspondence', [TF.status]: 'Completed',
+      [TF.completionDate]: now,
+    } });
+    await mockAgentsPage(page, { taskHistory: [...base.taskHistory,
+      card('recForm1', 'RENT FORM: direct rent payment form: Unit 9', 'RENT FORM KEY: recX:form:1'),
+      card('recForm2', 'Renamed by hand', 'RENT FORM KEY: recX:form:2')] });
+    await loadAgentsPage(page);
+    const creditor = page.locator('.sc-card', { hasText: 'Creditor Management' });
+    await expect(creditor).toContainText('Correspondence 100% (1)');
+    // Nor its done and went-through-Kevin counts: the 15-Minute Dashboard reads one finished task for this agent.
+    // eslint-disable-next-line no-undef
+    const stats = await page.evaluate((id) => _agentTaskStats[id], AGENT_A);
+    expect([stats.done30, stats.through30]).toEqual([1, 1]);
+  });
+
   test('the approvals queue is most-important-first and the chips filter it', async ({ page }) => {
     await mockAgentsPage(page);
     await loadAgentsPage(page);
