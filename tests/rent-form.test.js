@@ -652,8 +652,9 @@ OPEN = "[02 Oct 2026 10:00 — agent-dispatch] BLOCKER OPEN (KEVIN credential): 
 NOT_YET = "[02 Oct 2026 15:00 — agent] Your turn window closed without Kevin finishing. The task stays his."
 ad.HANDOVER_DIR = tempfile.mkdtemp()
 json.dump({"why": "x"}, open(os.path.join(ad.HANDOVER_DIR, "recCARD0000000001.json"), "w"))
-def state(notes, closes, name=CARD):
-    open(ad.ROBOT_LOG, "w").write("".join(json.dumps({"cmd": c, "task": "recCARD0000000001"}) + "\\n" for c in ["handover-open", "handover"] * closes))
+def state(notes, closes, name=CARD, crashed=0):
+    cmds = ["handover-open", "handover"] * closes + ["handover-open"] * crashed
+    open(ad.ROBOT_LOG, "w").write("".join(json.dumps({"cmd": c, "task": "recCARD0000000001"}) + "\\n" for c in cmds))
     rec = view(name, notes)
     ad.get_task = lambda tid: rec
     buf = io.StringIO()
@@ -663,11 +664,14 @@ def state(notes, closes, name=CARD):
     return [json.loads(buf.getvalue())["turn"], ad.handover_ready(rec["id"], ad.task_blocker(notes), "Approved as-is", t)]
 TURN = CARD_NOTES + "\\n\\n" + OPEN
 print(json.dumps({"fresh": state(TURN, 0), "unanswered": state(TURN, 1), "notYet": state(TURN + "\\n" + NOT_YET, 1),
-                  "twiceOneNotYet": state(TURN + "\\n" + NOT_YET, 2), "ordinary": state("plain task\\n\\n" + OPEN, 1, "Book the boiler service")}))`);
+                  "twiceOneNotYet": state(TURN + "\\n" + NOT_YET, 2), "ordinary": state("plain task\\n\\n" + OPEN, 1, "Book the boiler service"),
+                  "crashed": state(TURN, 0, crashed=1)}))`);
     expect(r.fresh).toEqual([true, true]);
     expect(r.unanswered).toEqual([false, false]);
     expect(r.notYet).toEqual([true, true]);
     expect(r.twiceOneNotYet).toEqual([false, false]);
+    // A window that crashed after he sent it never logs its close and the app never asks: still refused.
+    expect(r.crashed).toEqual([false, false]);
     // Any other task's Your turn is as before.
     expect(r.ordinary[0]).toBe(true);
   });

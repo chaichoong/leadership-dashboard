@@ -657,12 +657,19 @@ def go(windows, tenancies=None, extra=None, **kw):
     return [withdrawn(out), [c["id"] for c in out["complete"]]]
 W = lambda **k: {"recFORMTASK00001": dict({"used": 0, "openNow": False, "recentClose": False}, **k)}
 print(json.dumps({"endedOpen": go({}), "endedMaybe": go(W(used=1)), "endedBusy": go(W(openNow=True)),
-                  "noChaseMaybe": go(W(used=1), [new_void(status="CFV Actioned")], [card()], noChase=["recT_uc"])}))`);
+                  "noChaseMaybe": go(W(used=1), [new_void(status="CFV Actioned")], [card()], noChase=["recT_uc"]),
+  "noChaseCheck": plan([new_void()], [card()], windows=W(used=1), noChase=["recT_uc"])[1]["problems"],
+  "stoppedSent": [f["id"] for f in plan([new_void(status="CFV Actioned")], [task("recROYTASK000012", NEW + ":paid:1", status="Cancelled"),
+      dict(card(status="Completed"), notes=card()["notes"] + "\\n[02 Oct 2026 14:00 — agent] BLOCKER CLEARED (KEVIN credential): x. evidence: Kevin finished his turn in the robot's window (send it).")])[1]["finish"]]}))`);
     expect(r.endedOpen).toEqual([[['recFORMTASK00001', 'rent has reached the bank, nothing more to do']], []]);
     expect(r.endedMaybe).toEqual([[], ['recFORMTASK00001']]);
     // In his turn right now: left for a later run.
     expect(r.endedBusy).toEqual([[], []]);
     expect(r.noChaseMaybe).toEqual([[], ['recFORMTASK00001']]);
+    // A clock stopped by hand still records his own word that he sent a form.
+    expect(r.stoppedSent).toEqual(['recFORMTASK00001']);
+    // Still a CFV on the do-not-chase list: the card that needs his word is said, never silent.
+    expect(r.noChaseCheck).toEqual([expect.stringMatching(/^Unit 9 – 1 Example Road: the form card's window was used but the app never recorded/)]);
   });
 
   it('the robot log is read for each card\'s windows; a missing log is none, a bad line is skipped', () => {
@@ -1424,7 +1431,11 @@ done = dict(task("recFORMTASK00009", NEW + ":form:0", status="Completed", create
 for tid in ("recFORMTASK00001", "recFORMTASK00009"):
     open(os.path.join(FakeAd.HANDOVER_DIR, tid + ".json"), "w").write("{}")
 cleared = []
-lb.clear_wall = lambda _rc, tid, day: cleared.append(tid) or True
+lb.clear_wall = lambda _rc, tid, day, why=None: cleared.append([tid, bool(why and lb.UNRECORDED in why)]) or True
+# The rejected card's window was used and no answer was recorded: he may have sent it.
+lb.ROBOT_LOG = os.path.join(SCRATCH, "runs.jsonl")
+open(lb.ROBOT_LOG, "w").write(json.dumps({"cmd": "handover-open", "task": "recFORMTASK00009", "at": "2026-09-27T09:00:00Z"}) + "\\n"
+                             + json.dumps({"cmd": "handover", "task": "recFORMTASK00009", "at": "2026-09-27T10:00:00Z"}) + "\\n")
 OPEN = "[02 Oct 2026 10:00 — agent-dispatch] BLOCKER OPEN (KEVIN credential): type the code Fix: f [since 2026-10-02T09:00:00.000Z]"
 done = dict(done, notes=done["notes"] + "\\n\\n" + OPEN)
 res, out = run_lane_b([new_void()], [costs, done, card])
@@ -1440,8 +1451,9 @@ print(json.dumps({"first": first, "plans": plans_left, "failed": [list(calls), o
     expect(r.failed[0]).toEqual(['withdraw recFORMTASK00001']);
     expect(r.failed[1]).toMatch(/form card recFORMTASK00001 could not be withdrawn: Airtable PATCH 503/);
     expect(r.failed[2]).toEqual([]);
-    // The rejected (closed) card's open Your turn step is cleared, so it never asks Kevin for a turn.
-    expect(r.cleared).toEqual(['recFORMTASK00009']);
+    // The rejected (closed) card's open Your turn step is cleared, so it never asks Kevin for a turn; as he
+    // may have sent it, the line keeps his late "Yes, done" receivable.
+    expect(r.cleared).toEqual([['recFORMTASK00009', true]]);
   });
 
   it('a sent card whose finish fails holds the tenancy: no end line is written over it that run', () => {

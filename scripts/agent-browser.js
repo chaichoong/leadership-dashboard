@@ -1862,6 +1862,9 @@ async function main() {
         // Logged as it OPENS (once the browser is up) as well as when it closes: a window still open
         // (Kevin waiting overnight for an emailed code) must read as in use, never as unused, and a
         // launch that failed is no window at all (scripts/rent_new_tenant.py read_windows).
+        // Read again now the browser is up: the wait for the profile can be minutes, and the card may have
+        // been withdrawn or answered meanwhile.
+        assertApproved(task, { window: true });
         const logged = ledger({ cmd: 'handover-open', task, profile, site: plan.site || null });
         // For a robot form card the log IS the guard against a second government form: no log, no window.
         if (!logged && approval.formCard) throw new Error('the robot log could not be written, so this form window does not open');

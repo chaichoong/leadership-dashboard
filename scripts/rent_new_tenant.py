@@ -152,7 +152,7 @@ _WALL_RE = re.compile(r"^\[[^\]\n]*\]\s*(?P<mark>BLOCKER OPEN|BLOCKER CLEARED)\s
 KEVIN_DONE = "Kevin finished his turn"
 KEVIN_NOT_DONE = "Your turn window closed without Kevin finishing"
 # The robot's own log of every window it opened (scripts/agent-browser.js LEDGER, `handover` lines).
-ROBOT_LOG = os.path.expanduser("~/knowledge-os/logs/agent-browser/runs.jsonl")
+ROBOT_LOG = os.environ.get("AGENT_BROWSER_LEDGER") or os.path.expanduser("~/knowledge-os/logs/agent-browser/runs.jsonl")
 OWN_CLEAR = "— rent-check] "       # the stamp on a wall line this file clears (withdraw_form, clear_wall)
 WINDOW_OPEN_HOURS = 24      # a window logged open with no close for longer than this is read as used, not open
 ANSWER_WAIT_HOURS = 6       # after a window closes, the app's "did you finish?" waits this long for his answer
@@ -955,12 +955,14 @@ def plan(res, tasks, tenants_of, names, day, starts=None, paid=None, bank=None, 
         if task["id"] not in {f["id"] for f in finish_out}:
             finish_out.append({"id": task["id"], "tenancy": tenancy, "label": f"form sent: {task['id']}"})
 
-    def keep_straight(tenancy, steps, status):
-        """Nothing is raised for this tenancy today, but a sent card gets its comment and an out-of-date,
-        sent-back or stranded card leaves Kevin's queue."""
+    def keep_straight(tenancy, steps, status, label):
+        """Nothing is raised for this tenancy today, but a sent card gets its comment, an out-of-date,
+        sent-back or stranded card leaves Kevin's queue, and a card that needs his word is said."""
         finish_sent(tenancy, steps)
         if steps.get("form"):
             pos = position(steps, day, status or "", plans, windows)
+            if pos["stage"] == "form" and pos["short"] == "form card to check":
+                problems.append(f"{label}: {pos['note']}")
             if pos["stage"] == "form" and pos["withdraw"]:
                 withdraw(pos["last"], pos["withdraw"], tenancy)
             if pos["stage"] == "form" and pos["complete"] and pos["last"]["id"] not in {c["id"] for c in complete_out}:
@@ -1023,7 +1025,7 @@ def plan(res, tasks, tenants_of, names, day, starts=None, paid=None, bank=None, 
         new = void and not steps and young and not had_rent and r["lane"] in ("new", "late")
         if r.get("noChase") and (new or (void and steps)):
             seen.add(r["id"])
-            keep_straight(r["id"], steps, r.get("status"))
+            keep_straight(r["id"], steps, r.get("status"), place_name(r["unit"]))
             continue                                  # the rent check has already said so on the row
         if (new or (void and steps)) and r["id"] in stuck:
             # A task for this tenancy carries a key that cannot be used. Anything raised now could
@@ -1032,7 +1034,7 @@ def plan(res, tasks, tenants_of, names, day, starts=None, paid=None, bank=None, 
             rows_out[r["id"]] = {"note": "a task carries a key for this tenancy that cannot be used, so nothing is raised "
                                          "until it is fixed", "short": "key to fix"}
             seen.add(r["id"])
-            keep_straight(r["id"], steps, r.get("status"))
+            keep_straight(r["id"], steps, r.get("status"), place_name(r["unit"]))
             continue
         if new and not r.get("type") and not r.get("noChase"):
             problems.append(f"{place_name(r['unit'])} is a new cash flow void whose tenant has no rent payment type, "
@@ -1046,7 +1048,8 @@ def plan(res, tasks, tenants_of, names, day, starts=None, paid=None, bank=None, 
         pos = position(steps, day, r.get("status") or "", plans, windows)
         if r["id"] in stopped:
             rows_out[r["id"]] = {"note": pos["note"], "short": pos["short"]}
-            continue                                  # stopped by hand: nothing of the tenancy's is touched
+            finish_sent(r["id"], steps)               # his own word that he sent a form is still recorded
+            continue                                  # stopped by hand: nothing else of the tenancy's is touched
         # The form cards first, before anything below can hold the tenancy back: a card Kevin sent is
         # finished, and one that is no longer wanted leaves his queue, whatever the bank data says.
         if pos["finish"]:
@@ -1118,7 +1121,10 @@ def plan(res, tasks, tenants_of, names, day, starts=None, paid=None, bank=None, 
             # settled on a later run. Nothing else of the tenancy's is touched.
             settle_cards(tenancy, steps, None, "rent has reached the bank, nothing more to do")
             continue
-        if tenancy in seen or tenancy in stopped:
+        if tenancy in stopped:
+            finish_sent(tenancy, steps)               # his own word that he sent a form is still recorded
+            continue
+        if tenancy in seen:
             continue
         lane = lanes.get(tenancy)
         status = status_of.get(tenancy)
@@ -1137,7 +1143,7 @@ def plan(res, tasks, tenants_of, names, day, starts=None, paid=None, bank=None, 
         else:
             # Still a cash flow void the rent check cannot judge today: nothing is raised, but its form
             # card is still kept straight (an out-of-date or sent-back card leaves his queue).
-            keep_straight(tenancy, steps, status)
+            keep_straight(tenancy, steps, status, f"tenancy {tenancy}")
         leaving = {w["id"] for w in withdraw_out}
         live = [t for rows in steps.values() for t in rows if t["status"] not in LEAVE_ALONE and t["id"] not in leaving]
         count = f"{len(live)} open task{' carries' if len(live) == 1 else 's carry'} a key for {tenancy}"
@@ -1635,8 +1641,9 @@ def lane_b(rc, res, data, day, writes, on):
         # The form cards whose robot plan is on file: an approved card without one has no Your turn button.
         held_plans = ({f[:-5] for f in os.listdir(ad.HANDOVER_DIR) if f.endswith(".json")}
                       if os.path.isdir(ad.HANDOVER_DIR) else set())
+        windows = read_windows()
         todo = plan(res, tasks, tenants_of, read_names(rc, wanted), day, starts, pays,
-                    rc.feed_state(data, pays, datetime.now(timezone.utc)), held_plans, dues, read_windows())
+                    rc.feed_state(data, pays, datetime.now(timezone.utc)), held_plans, dues, windows)
         annotate(res, todo["rows"])
         out["problems"] = list(todo["problems"])
         if not on:
@@ -1737,9 +1744,16 @@ def lane_b(rc, res, data, day, writes, on):
                     drop_plan(ad, t["id"])
                 except OSError as exc:
                     fails.append(f"the robot plan of form card {t['id']} could not be removed: {str(exc)[:120]}")
+            if is_form_card(t) and t["status"] not in ("Completed", "Cancelled") and unrecorded_mark(t.get("notes")):
+                try:
+                    drop_plan(ad, t["id"])                # its step is closed: no window is ever opened on it again
+                except OSError as exc:
+                    fails.append(f"the robot plan of form card {t['id']} could not be removed: {str(exc)[:120]}")
             if is_form_card(t) and t["status"] in ("Completed", "Cancelled") and open_kevin_wall(t.get("notes")):
                 try:
-                    clear_wall(rc, t["id"], day)
+                    # If he may have sent it, the line keeps his late "Yes, done" receivable (agent-dispatch.py unblock).
+                    clear_wall(rc, t["id"], day, f"the card was closed on {day.strftime('%-d %b %Y')}, and {UNRECORDED}"
+                               if may_have_sent(t, windows) else None)
                 except Exception as exc:              # noqa: BLE001
                     fails.append(f"the Your turn step of closed form card {t['id']} could not be cleared: {str(exc)[:120]}")
     except Exception as exc:                          # noqa: BLE001 — said on the row, never swallowed

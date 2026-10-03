@@ -7037,7 +7037,7 @@ def form_turn_unanswered(task_id, name="", notes=""):
     A log that cannot be read counts as unanswered: the window is refused, never offered blind."""
     if not form_card(name, notes):
         return False
-    closes = 0
+    opens = closes = 0
     try:
         with open(ROBOT_LOG, encoding="utf-8", errors="replace") as fh:
             for line in fh:
@@ -7045,13 +7045,16 @@ def form_turn_unanswered(task_id, name="", notes=""):
                     row = json.loads(line)
                 except ValueError:
                     continue
-                if isinstance(row, dict) and row.get("task") == task_id and row.get("cmd") == "handover":
-                    closes += 1
+                if isinstance(row, dict) and row.get("task") == task_id:
+                    opens += row.get("cmd") == "handover-open"
+                    closes += row.get("cmd") == "handover"
     except FileNotFoundError:
         return False
     except OSError:
         return True
-    return closes > str(notes or "").count(TURN_NOT_FINISHED)
+    # Every window that OPENED counts, closed or not: one that crashed after he sent the form never logs
+    # its close, and the app never asks him.
+    return max(opens, closes) > str(notes or "").count(TURN_NOT_FINISHED)
 
 
 def handover_ready(task_id, b, outcome="", task=None):
