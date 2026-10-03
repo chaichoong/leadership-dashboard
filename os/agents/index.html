@@ -567,7 +567,7 @@ a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}
 <!-- Shared accuracy scoring (per agent PER TASK TYPE) — same maths as the
      Leadership Dashboard card. Pure IIFE, safe to load here. -->
 <script src="../../js/agent-accuracy.js?v=5"></script>
-<script src="../../js/automations-data.js?v=15"></script>
+<script src="../../js/automations-data.js?v=16"></script>
 <script src="../../js/mcp-tools-data.js?v=1"></script>
 <script src="../../js/sync-bar.js?v=6"></script>
 <script>
@@ -2397,7 +2397,7 @@ function apvAskLine(t){
         if(m && m[1].trim()){ line = m[1].trim().slice(0,400); }
         else if(signIn) line = `Waiting on a sign-in: ${signIn.site}. Not a decision.`;
         else if(/^\s*CLOSE PROPOSAL:/i.test(work)) line = `Close this task. ${work.replace(/^\s*CLOSE PROPOSAL:\s*/i,'').split('\n')[0].slice(0,160)}`;
-        else if(work) line = `${t.taskType ? t.taskType + ': ' : ''}${work.split('\n').map(l=>l.trim()).filter(l=>l && !/^(TO|FROM|CC|SUBJECT|CHECKED):/i.test(l) && !/(:rotating_light:|\u{1F6A8})/u.test(l) && !/^\W*tier 1\b/i.test(l))[0]||t.name}`.slice(0,220);
+        else if(work) line = `${t.taskType ? t.taskType + ': ' : ''}${work.split('\n').map(l=>l.trim()).filter(l=>l && !/^(TO|FROM|CC|SUBJECT|CHECKED|TEXT TO|TEXT):/i.test(l) && !/(:rotating_light:|\u{1F6A8})/u.test(l) && !/^\W*tier 1\b/i.test(l))[0]||t.name}`.slice(0,220);
         else line = t.name;
     }
     return { askLine: line, isAction: isAction || (!summary && /carrying this out will involve/i.test(work)), summary, signIn, work };

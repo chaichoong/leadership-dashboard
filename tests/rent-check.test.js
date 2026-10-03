@@ -64,6 +64,8 @@ def _no_lane_b_write(*a, **k): raise RuntimeError("a rent-check test tried a rea
 rc.lane_b_rules.raise_one = _no_lane_b_write
 rc.lane_b_rules.finish_one = _no_lane_b_write
 rc.lane_b_rules.notify_roy = _no_lane_b_write
+# Roy's agent-managed late notice reads its tasks through this: never Airtable in a test.
+rc.read_agent_late = lambda: {}
 TY, TN, TX, AC = rc.TY, rc.TN, rc.TX, rc.AC
 DAY = date(2026, 10, 2)
 def rec(i, f): return {"id": i, "fields": f}
@@ -864,6 +866,74 @@ print(json.dumps({"beyond": rows["recX"].get("beyond"), "key": plan[0]["key"].sp
     expect(r.desc).toContain('no payment matched in the last 80 days');
   });
 
+  it('a late agent-managed tenancy gives Roy one task per owed payment, emailed, and nobody else; never a tenant message', () => {
+    const r = py(`
+ts = [tenancy("recAgent", 30, 500, tenant="recT_agent", unit="Unit 9 – 1 Example Road"),
+      tenancy("recAgentFine", 1, 500, tenant="recT_agent"),
+      tenancy("recAgentVoid", 30, 500, tenant="recT_agent", status="CFV"),
+      tenancy("recLate", 30, 500),
+      tenancy("recAgentNoUnit", 30, 500, tenant="recT_agent", unitRef=None)]
+ts[-1]["fields"][TY["unitRef"]] = []
+ts[-1]["fields"][TY["surname"]] = "Sample"
+tx = [paid(i, "2026-08-30", 500) for i in ("recAgent", "recAgentVoid", "recLate", "recAgentNoUnit")] + [paid("recAgentFine", "2026-10-01", 500)]
+res, rows = run(ts, tx)
+plan = rc.agent_late_plan(res, ts, {}, DAY)
+again = rc.agent_late_plan(res, ts, {"recAgent:2026-09-30": {"id": "recOLD", "status": "Completed"}}, DAY)
+lane_a = [p["tenancy"] for p in rc.task_plan(res, ts, {}, DAY)]
+res2, _ = run(ts, tx, noChase=["recT_agent"])
+quiet = rc.agent_late_plan(res2, ts, {}, DAY)
+print(json.dumps({"plan": sorted([p["tenancy"], p["key"], p["name"]] for p in plan), "again": [p["tenancy"] for p in again],
+                  "laneA": lane_a, "quiet": quiet, "desc": [p for p in plan if p["tenancy"] == "recAgent"][0]["description"],
+                  "noUnitDesc": [p for p in plan if p["tenancy"] == "recAgentNoUnit"][0]["description"]}))`);
+    expect(r.plan).toEqual([
+      ['recAgent', 'recAgent:2026-09-30', 'AGENT RENT LATE: Unit 9 – 1 Example Road, rent due 30 Sep'],
+      // No unit linked: the surname never reaches a task name.
+      ['recAgentNoUnit', 'recAgentNoUnit:2026-09-30', 'AGENT RENT LATE: a tenancy with no unit linked, rent due 30 Sep'],
+    ]);
+    // One task per owed payment: a task for it already exists (even closed), so none again.
+    expect(r.again).toEqual(['recAgentNoUnit']);
+    // Lane A still never chases an agent-managed tenant.
+    expect(r.laneA).toEqual(['recLate']);
+    expect(r.quiet).toEqual([]);
+    expect(r.desc).toContain('the letting agent collects this rent');
+    expect(r.desc).toContain('RENT AGENT KEY: recAgent:2026-09-30');
+    expect(r.noUnitDesc).not.toMatch(/Sample/);
+  });
+
+  it('Roy\'s task is created already his and emailed; an open one is offered to his email again; switched off or dry, nothing is written', () => {
+    const r = py(`
+ts = [tenancy("recAgent", 30, 500, tenant="recT_agent", unit="Unit 9 – 1 Example Road")]
+res, rows = run(ts, [paid("recAgent", "2026-08-30", 500)])
+posts, mailed = [], []
+rc.api = lambda method, path, payload=None, params=None: posts.append(payload["records"][0]["fields"]) or {"records": [{"id": "recNEWROY0000001"}]}
+class FakeAd:
+    ROY_EMAIL = "roy@example.test"
+    HUMANS = {"roy@example.test": {"rec": "recROYROW0000001"}}
+    AF = {"assignee": "fldASSIGNEE000001"}
+rc.lane_b_rules.module = lambda key: FakeAd
+rc.lane_b_rules.notify_roy = lambda tid, to: mailed.append([tid, to]) or {"notified": tid}
+off = rc.agent_late(res, ts, DAY, True, False)
+dry = rc.agent_late(res, ts, DAY, False, True)
+written_dry = [len(posts), len(mailed)]
+rc.read_agent_late = lambda: {"recOther:2026-09-01": {"id": "recOPENROY000001", "status": "Today"}}
+on = rc.agent_late(res, ts, DAY, True, True)
+print(json.dumps({"off": [off["raised"], rc.agent_late_line(off)], "dry": [dry["planned"], written_dry, rc.agent_late_line(dry)],
+                  "on": on["raised"], "owner": posts[0][rc.TK["teamMember"]], "assignee": posts[0]["fldASSIGNEE000001"],
+                  "key": posts[0][rc.TK["notes"]], "mailed": mailed, "line": rc.agent_late_line(on)}))`);
+    expect(r.off[0]).toEqual([]);
+    expect(r.off[1]).toMatch(/switched off/);
+    expect(r.dry[0]).toEqual(['AGENT RENT LATE: Unit 9 – 1 Example Road, rent due 30 Sep']);
+    expect(r.dry[1]).toEqual([0, 0]);
+    expect(r.dry[2]).toMatch(/^Agent-managed late rent a real run would send to Roy/);
+    expect(r.on).toEqual(['AGENT RENT LATE: Unit 9 – 1 Example Road, rent due 30 Sep']);
+    expect(r.owner).toEqual(['recROYROW0000001']);
+    expect(r.assignee).toEqual({ email: 'roy@example.test' });
+    expect(r.key).toBe('RENT AGENT KEY: recAgent:2026-09-30');
+    // The open one is offered again (notify's own ledger never sends a second copy), then the new one.
+    expect(r.mailed).toEqual([['recOPENROY000001', 'roy@example.test'], ['recNEWROY0000001', 'roy@example.test']]);
+    expect(r.line).toMatch(/^Agent-managed late rent sent to Roy: AGENT RENT LATE: Unit 9/);
+  });
+
   it('the pause lever: nothing is planned or raised while the agent is switched off, and the row says so', () => {
     const r = py(`
 ts = [tenancy("recLate", 30, 500)]
@@ -946,10 +1016,12 @@ rc.write_row = lambda status, text, payload, now: rows.append([status, text])
 rc.append_history = lambda res, now: None
 with contextlib.redirect_stdout(io.StringIO()):
     code = rc.main(["run"])
-print(json.dumps({"code": code, "status": rows[0][0], "laneB": rows[0][1].splitlines()[-1]}))`);
+print(json.dumps({"code": code, "status": rows[0][0], "laneB": rows[0][1].splitlines()[-2], "agentLate": rows[0][1].splitlines()[-1]}))`);
     expect(r.code).toBe(1);
     expect(r.status).toBe('Failed');
     expect(r.laneB).toBe("New-tenant tasks: none raised, the Cash Flow Voids agent's switch could not be read.");
+    // Roy's notice is gated on the same switch: unread raises nothing either.
+    expect(r.agentLate).toMatch(/^Agent-managed late rent to Roy: none raised/);
   });
 
   it('a failed raise is said on the row, turns the run red, and the rent line is still written', () => {
@@ -966,7 +1038,7 @@ rc.raise_task = boom
 rc.write_row = lambda status, text, payload, now: rows.append([status, text])
 with contextlib.redirect_stdout(io.StringIO()):
     code = rc.main(["run"])
-print(json.dumps({"code": code, "status": rows[0][0], "lastLine": rows[0][1].splitlines()[-2], "laneB": rows[0][1].splitlines()[-1], "firstLine": rows[0][1].splitlines()[0][:22]}))`);
+print(json.dumps({"code": code, "status": rows[0][0], "lastLine": rows[0][1].splitlines()[-3], "laneB": rows[0][1].splitlines()[-2], "firstLine": rows[0][1].splitlines()[0][:22]}))`);
     expect(r.code).toBe(1);
     expect(r.status).toBe('Failed');
     expect(r.lastLine).toBe('Late-rent tasks FAILED: Airtable POST tasks 422: nope');

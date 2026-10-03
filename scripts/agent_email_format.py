@@ -71,6 +71,12 @@ import re
 EMAIL_RE = re.compile(r"^[^@\s,]+@[^@\s,]+\.[^@\s,]+$")
 
 ALLOWED_HEADERS = {"TO", "TO-EACH", "CC", "SUBJECT", "FROM", "ATTACH"}
+# A TEXT TO SEND WITH THE EMAIL (Cash Flow Voids cut-over build, 3 Oct 2026). Two lines above the email's
+# headers, so Kevin approves the text's exact words on the same card. They are the TEXT's, never the
+# email's: parse_output skips them, and scripts/send-text.py is the only reader (parse_text). One line of
+# message, at most TEXT_MAX characters.
+TEXT_HEADERS = {"TEXT TO", "TEXT"}
+TEXT_MAX = 300
 
 # A mail-out card lists every address; past this many the card stops being
 # something Kevin can read before approving, so the sender splits the list.
@@ -179,6 +185,28 @@ def strip_track_record(text):
     return TRACK_RECORD_RE.sub("", text or "")
 
 
+def parse_text(output):
+    """(number, message) of the TEXT TO and TEXT lines above an email's headers, or None when the card
+    carries no text. Raises EmailFormatError on a half block, a second one, or a message over TEXT_MAX."""
+    text = strip_track_record(strip_tier1_banner(output or ""))
+    head = text.partition("---")[0] if "---" in text else ""
+    found = {}
+    for line in head.splitlines():
+        key, sep, val = line.partition(":")
+        name = key.strip().upper()
+        if sep and name in TEXT_HEADERS:
+            if name in found:
+                raise EmailFormatError(f"the card has more than one {name} line")
+            found[name] = val.strip()
+    if not found:
+        return None
+    if not found.get("TEXT TO") or not found.get("TEXT"):
+        raise EmailFormatError("a text needs both a TEXT TO line and a TEXT line")
+    if len(found["TEXT"]) > TEXT_MAX:
+        raise EmailFormatError(f"the TEXT is {len(found['TEXT'])} characters; the most is {TEXT_MAX}")
+    return found["TEXT TO"], found["TEXT"]
+
+
 def parse_output(output):
     """Turn a Correspondence Agent Output into headers plus body.
 
@@ -201,6 +229,8 @@ def parse_output(output):
             raise EmailFormatError(
                 f"header line is not `KEY: value`: {line.strip()!r}"
             )
+        if key.strip().upper() in TEXT_HEADERS:
+            continue                                   # the text's lines: never part of the email
         headers[key.strip().upper()] = val.strip()
 
     unknown = set(headers) - ALLOWED_HEADERS
