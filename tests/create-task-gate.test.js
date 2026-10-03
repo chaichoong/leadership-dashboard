@@ -37,6 +37,31 @@ describe('the gate script', () => {
     expect(F.name).toBe('fldgFjGBw6bTKJFCD'); // write-side id sanity
   });
 
+  // REGRESSION, finding 20261001-inbound-triage-693: a supplier's follow-up arrived from
+  // a different sending subdomain of the same company domain, so the gate read it as a
+  // different counterparty and would have created a twin card. Folded on the registrable
+  // domain now. Back-tested by comparing the full host again: the first case flips to
+  // create and the whole block fails.
+  it('folds one company across two sending subdomains, and still never folds two companies or free mail', () => {
+    const agree = (a, b) => runPy(`mod.senders_agree(${JSON.stringify(a)}, ${JSON.stringify(b)})`);
+    // THE BUG: same company, two sending subdomains.
+    expect(agree('billing@mail.supplier.co.uk', 'noreply@email.supplier.co.uk')).toBe(true);
+    expect(agree('a@mail.supplier.com', 'b@supplier.com')).toBe(true);
+    // CONTROL 1: the .co.uk suffix must not fold two unrelated UK companies.
+    expect(agree('a@mail.creditor-one.co.uk', 'b@mail.creditor-two.co.uk')).toBe(false);
+    expect(agree('a@creditor-one.co.uk', 'b@creditor-two.co.uk')).toBe(false);
+    // CONTROL 2: free mail never folds, whole domain or subdomain.
+    expect(agree('a@gmail.com', 'b@gmail.com')).toBe(false);
+    expect(agree('a@mail.gmail.com', 'b@smtp.gmail.com')).toBe(false);
+    // CONTROL 3: the existing rules still hold.
+    expect(agree('', '')).toBe(true);
+    expect(agree('a@supplier.co.uk', '')).toBe(false);
+    // The registrable-domain helper itself.
+    expect(runPy(`mod.registrable_domain("mail.supplier.co.uk")`)).toBe('supplier.co.uk');
+    expect(runPy(`mod.registrable_domain("supplier.co.uk")`)).toBe('supplier.co.uk');
+    expect(runPy(`mod.registrable_domain("a.b.supplier.com")`)).toBe('supplier.com');
+  });
+
   it('a task sitting at Approval keeps its status and soft due — the fold never pulls it out of the queue', () => {
     // The PATCH itself bumps Last Modified Time, so the Slack stale-approval
     // guard will make Kevin re-read before approving — intended: new material

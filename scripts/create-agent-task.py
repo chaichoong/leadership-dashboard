@@ -1217,6 +1217,35 @@ def _bare_addr(s):
     return m.group(1) if m else s
 
 
+# Public suffixes that are two labels long, so the registrable domain is the
+# THIRD label from the right. Without this list "last two labels" would fold
+# every .co.uk sender into every other one, which is the opposite of the bug
+# being fixed. Kept short and explicit rather than pulling a full public-suffix
+# library into a script the robots run.
+TWO_LABEL_SUFFIXES = {
+    "co.uk", "org.uk", "ac.uk", "gov.uk", "net.uk", "sch.uk", "nhs.uk",
+    "ltd.uk", "plc.uk", "me.uk", "police.uk", "mod.uk",
+    "com.au", "net.au", "org.au", "co.nz", "co.za", "com.br", "co.jp",
+    "co.in", "com.sg", "com.mx", "co.il", "com.tr",
+}
+
+
+def registrable_domain(host):
+    """The company's domain, with any sending subdomain stripped.
+
+    mail.example.co.uk and email.example.co.uk both return example.co.uk, so a
+    supplier who sends its first mail from one and its chaser from the other is
+    recognised as the same counterparty (finding 20261001-inbound-triage-693).
+    A host with nothing left to strip returns itself unchanged.
+    """
+    labels = [x for x in str(host or "").strip().lower().strip(".").split(".") if x]
+    if len(labels) < 3:
+        return ".".join(labels)
+    if ".".join(labels[-2:]) in TWO_LABEL_SUFFIXES:
+        return ".".join(labels[-3:]) if len(labels) >= 3 else ".".join(labels)
+    return ".".join(labels[-2:])
+
+
 def senders_agree(incoming, existing):
     """True when the two items are safely the SAME counterparty.
     Missing on both sides counts as agreement (agent-generated tasks carry
@@ -1232,7 +1261,15 @@ def senders_agree(incoming, existing):
         return True
     if "@" in a and "@" in b:
         da, db = a.rsplit("@", 1)[1], b.rsplit("@", 1)[1]
-        return da == db and da not in PUBLIC_MAIL_DOMAINS
+        if da == db:
+            return da not in PUBLIC_MAIL_DOMAINS
+        # Same company, different sending subdomain. Compared on the
+        # registrable domain, never on the full host (finding
+        # 20261001-inbound-triage-693). The free-mail exception still applies,
+        # and is checked on the registrable domain so a subdomain of a free
+        # provider cannot slip past it.
+        ra, rb = registrable_domain(da), registrable_domain(db)
+        return bool(ra) and ra == rb and ra not in PUBLIC_MAIL_DOMAINS
     return False
 
 

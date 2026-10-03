@@ -133,6 +133,12 @@
         if (r.state === 'unread') return { items: [], note: 'The 07:00 check could not be read.' };
         if (r.state === 'damaged') return { items: [], note: 'The 07:00 check left a damaged row, so its list for you could not be read. It is in the morning report.' };
         const p = r.p;
+        // A run still in progress is not a run that failed to report. estate-status.py
+        // needs_you_row() sets running:true while daily-ops is mid-flight, and Home read
+        // straight past it, so the 07:00 check read as absent at 07:05 every morning
+        // (finding 20261002-queue-fixer-707). Checked BEFORE the date tests, because a
+        // running row carries yesterday's date, or none at all.
+        if (p && p.running) return { items: [], note: 'The 07:00 check is still running. Its list for you will follow.' };
         if (!p || !p.date) return { items: [], note: 'The 07:00 check has not reported yet.' };
         if (p.date !== today) return { items: [], note: `The 07:00 check has not reported today. Its last report was ${dayMonth(p.date)}.` };
         if (p.unreadable) return { items: [], note: 'The 07:00 check ran, but its list for you could not be read. It is in the morning report.' };
