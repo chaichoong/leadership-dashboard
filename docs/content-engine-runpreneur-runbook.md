@@ -151,7 +151,10 @@ One line each into the digest, and the Publishing page on the dashboard.
   both of 2083's captions opened "Three months after breaking my foot,". Both clips went up at the same
   moment, so the Learnings share found the Summary reel and shared it a second time (2056 the same way).
   Now every reel a share has already taken is skipped by the finder, and Share is never pressed on one
-  (`publish.reels_already_shared`). Guarded by `tests/content-engine-fb-share-once.test.js`.
+  (`publish.reels_already_shared`). Each reel is scored by how many words of our caption it shows in a
+  row (twelve is our post, six is the least that counts, the list order breaks a tie), so the two posts
+  of a day go to the right shares even when Facebook cuts captions at "See more" after word 7 (3 Oct).
+  Guarded by `tests/content-engine-fb-share-once.test.js`.
 - **23e. Spotify.** Once the video podcast has processed, its public link goes on the record.
 
 **23f. Close the card of a finished episode** (`publish.py close-cards`, daytime job only)

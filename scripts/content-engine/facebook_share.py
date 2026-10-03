@@ -28,9 +28,12 @@ SHARE_BOX = "[role='dialog'] [contenteditable='true'], [role='dialog'] [role='te
 SHARE_NOW = "[role='dialog'] [aria-label='Share now'], [role='dialog'] div[role='button']:has-text('Share now')"
 SHARE_MAX = 400
 MATCH_WORDS = 6                           # words of the caption that identify our post
-# Tried first, so a day whose two captions open with the same six words still finds each its own reel, whichever
-# Facebook lists first (2083, 2 Oct 2026). Facebook cuts a caption at "See more", so six words stays the fallback.
+# Each reel is scored by how many words of our caption, from the first, its page shows in a row. Twelve in a row is our
+# post; fewer, down to MATCH_WORDS, is kept in case nothing scores higher. So a day whose two captions open with the
+# same six words finds each its own reel whichever Facebook lists first, even when Facebook cuts the caption at
+# "See more" after word 7 or 8 (2083, 2 Oct 2026; Kevin asked for the cut-short case too, 3 Oct).
 MATCH_WORDS_LONG = 12
+CAPTION_WORDS = 40                        # how much of the caption is scored
 # How far back down the reels list to look. The page publishes TWO posts a day (the Summary and the
 # Learnings clip), and from 20 Sep 2026 both are shared to Kevin's profile, so a six-post window only
 # reached three days back and would miss a share the moment a run was skipped. Fourteen covers a week.
@@ -114,7 +117,11 @@ const { chromium } = require('%(pw)s');
   const dir = path.join(os.homedir(), '.config', 'od', 'agent-browser', '%(profile)s');
   const ctx = await chromium.launchPersistentContext(dir, { headless: true, viewport: { width: 1280, height: 1000 }, channel: 'chrome', ignoreDefaultArgs: ['--enable-automation'] });
   const page = ctx.pages()[0] || await ctx.newPage();
-  const keys = %(keys)s.map(k => k.toLowerCase());     // longest first
+  const words = %(words)s.map(w => w.toLowerCase());
+  const need = %(need)s;                                   // fewer words in a row than this is not our post
+  const enough = Math.min(words.length, %(enough)s);      // this many in a row is our post: stop looking
+  // How many words of the caption, from its first, the page shows in a row.
+  const score = (txt) => { let k = 0; while (k < words.length && txt.includes(words.slice(0, k + 1).join(' '))) k++; return k; };
   await page.goto(%(list_url)s, { waitUntil: 'domcontentloaded' });
   await page.waitForTimeout(8000);
   // Keep scrolling until the list holds as many posts as we mean to search. One fixed scroll loaded
@@ -134,15 +141,15 @@ const { chromium } = require('%(pw)s');
   const skip = %(skip)s;
   const shared = (u) => { const m = u.match(/\\/(?:reel|posts|videos)\\/(\\d+)/); return !!m && skip.includes(m[1]); };
   const urls = all.filter(u => !shared(u)).slice(0, %(scan)s);
-  // The reel matching the LONGEST key wins; a reel matching only a shorter one is kept in case nothing better turns up.
-  let hit = null, best = null, bestRank = keys.length, after = 0;
+  // The reel showing the most of our caption wins; the list order breaks a tie.
+  let hit = null, best = null, bestScore = need - 1, after = 0;
   for (const u of urls) {
     await page.goto(u, { waitUntil: 'domcontentloaded' });
     await page.waitForTimeout(6000);
     const txt = (await page.evaluate(() => document.body.innerText || '')).toLowerCase().replace(/\\s+/g, ' ');
-    const rank = keys.findIndex(k => txt.includes(k));
-    if (rank === 0) { hit = u; break; }
-    if (rank > 0 && rank < bestRank) { best = u; bestRank = rank; }
+    const s = score(txt);
+    if (s >= enough) { hit = u; break; }
+    if (s > bestScore) { best = u; bestScore = s; }
     // A shorter match ends the scan two reels later: a day's two posts sit side by side on the list, and a catch-up
     // must not open every reel when Facebook cuts captions before the twelfth word (review, 3 Oct 2026: 44 reels at
     // about 8 seconds each pass the 300-second page-read limit).
@@ -163,11 +170,12 @@ def find_page_post(copy, url=None, day=None, scan=None, skip=()):
     Day 2056 of running every day." while the record's Facebook copy began "Day 2056. I'm still catching...").
     `skip` holds the post ids of reels already shared to Kevin's profile: they are never returned, so a day whose two
     captions open with the same words still finds its second post (2083, 2 Oct 2026; 2056 the same way)."""
-    passes = [[match_key(copy, MATCH_WORDS_LONG), match_key(copy)], ["Day %d" % day] if day else []]
-    for keys in passes:
-        keys = [k for i, k in enumerate(keys) if k and k not in keys[:i]]
-        if not keys: continue
-        js = FIND_JS % {"pw": PW, "profile": PROFILE, "list_url": json.dumps(url or POSTS_URL), "keys": json.dumps(keys), "scan": int(scan or SCAN_POSTS),
+    caption = [w for w in match_key(copy, CAPTION_WORDS).split(" ") if w]
+    passes = [(caption, min(MATCH_WORDS, len(caption))), (["Day", str(day)] if day else [], 2)]
+    for words, need in passes:
+        if not words: continue
+        js = FIND_JS % {"pw": PW, "profile": PROFILE, "list_url": json.dumps(url or POSTS_URL), "words": json.dumps(words), "need": int(need),
+                        "enough": MATCH_WORDS_LONG, "scan": int(scan or SCAN_POSTS),
                         "skip": json.dumps(sorted(str(x) for x in skip if x))}
         try: r = _browser(js)
         except SystemExit as ex: print("facebook: page read failed (%s)" % str(ex)[:160], file=sys.stderr); return None
@@ -248,10 +256,10 @@ def selftest():
     assert [s["do"] for s in live["steps"]][:4] == ["goto", "wait", "click", "wait"], "open the post, wait for Share, click it, wait for the dialog"
     assert post_id("https://www.facebook.com/reel/2551081102055515") == "2551081102055515" and post_id("https://x/") == ""
     assert PAGE_ID in PAGE_URL and POSTS_URL.endswith("/reels") and "aria-label='Share now'" in SHARE_NOW
-    assert "for (const u of urls)" in FIND_JS and "txt.includes(k)" in FIND_JS, "each recent post is opened and matched on its caption"
-    js14 = FIND_JS % {"pw": "", "profile": "", "list_url": '""', "keys": '[""]', "scan": SCAN_POSTS, "skip": "[]"}
+    assert "for (const u of urls)" in FIND_JS and "const s = score(txt)" in FIND_JS, "each recent post is opened and matched on its caption"
+    js14 = FIND_JS % {"pw": "", "profile": "", "list_url": '""', "words": '[""]', "need": 1, "enough": 12, "scan": SCAN_POSTS, "skip": "[]"}
     assert SCAN_POSTS >= 14 and "slice(0, 14)" in js14, "a week of two-posts-a-day is in reach"
-    assert SCAN_POSTS_CATCHUP >= 44 and "slice(0, 44)" in (FIND_JS % {"pw": "", "profile": "", "list_url": '""', "keys": '[""]', "scan": SCAN_POSTS_CATCHUP, "skip": "[]"}), "a catch-up reaches three weeks back"
+    assert SCAN_POSTS_CATCHUP >= 44 and "slice(0, 44)" in (FIND_JS % {"pw": "", "profile": "", "list_url": '""', "words": '[""]', "need": 1, "enough": 12, "scan": SCAN_POSTS_CATCHUP, "skip": "[]"}), "a catch-up reaches three weeks back"
     assert "all.length >= 14" in js14 and "for (let i = 0; i < 12; i++)" in js14, "it scrolls until the list holds what it means to search"
     print(json.dumps({"checks": 9, "failed": []}))
 
