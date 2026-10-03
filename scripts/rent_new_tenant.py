@@ -1048,8 +1048,7 @@ def plan(res, tasks, tenants_of, names, day, starts=None, paid=None, bank=None, 
         pos = position(steps, day, r.get("status") or "", plans, windows)
         if r["id"] in stopped:
             rows_out[r["id"]] = {"note": pos["note"], "short": pos["short"]}
-            finish_sent(r["id"], steps)               # his own word that he sent a form is still recorded
-            continue                                  # stopped by hand: nothing else of the tenancy's is touched
+            continue                                  # stopped by hand: only his own sends are recorded (below)
         # The form cards first, before anything below can hold the tenancy back: a card Kevin sent is
         # finished, and one that is no longer wanted leaves his queue, whatever the bank data says.
         if pos["finish"]:

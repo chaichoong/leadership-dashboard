@@ -990,6 +990,7 @@ notes = RECORDS["recCARD0000000001"][rc.TK["notes"]]
 print(json.dumps({"written": [first, again, sent], "status": RECORDS["recCARD0000000001"][rc.TK["status"]],
                   "wall": ad.task_blocker(notes), "closed": "RENT FORM CLOSED: 2026-10-03 the tenancy is marked CFV Actioned" in notes,
                   "withdrawn": lb.withdrawal(notes), "plan": os.path.exists(os.path.join(HANDOVER, "recCARD0000000001.json")),
+                  "lateAnswer": ad.unrecorded_turn(notes) is not None,
                   "sentStatus": RECORDS["recCARD0000000002"][rc.TK["status"]]}))`);
     expect(r.written).toEqual([true, false, false]);
     expect(r.status).toBe('Completed');
@@ -997,6 +998,8 @@ print(json.dumps({"written": [first, again, sent], "status": RECORDS["recCARD000
     expect(r.closed).toBe(true);
     // Never a WITHDRAWN line: nothing can raise it again.
     expect(r.withdrawn).toBeNull();
+    // And the dispatcher still takes his late "Yes, done" against the closed step (his comment is written).
+    expect(r.lateAnswer).toBe(true);
     expect(r.plan).toBe(false);
     // A card he said he sent is finish_form's, never closed here.
     expect(r.sentStatus).toBe('Today');
