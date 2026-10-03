@@ -82,10 +82,16 @@ def address_lines(address, postcode, area):
     return building, town
 
 
+# The answers that change with the calendar alone (a rent falling due moves the count): left out of the
+# print, so a card Kevin sent back is not raised early with nothing he asked for fixed.
+COUNTED = ("Type of payment", "Has the tenant missed 2 months or more of rent?")
+
+
 def fingerprint(answers):
-    """A short print of the answers, kept on the card, so a card Kevin sent back for changes is only
-    raised again once an answer has changed (scripts/rent_new_tenant.py)."""
-    return hashlib.sha1(json.dumps(answers, sort_keys=True).encode()).hexdigest()[:12]
+    """A short print of the answers read from the records, kept on the card, so a card Kevin sent back
+    for changes is only raised again once one of them has changed (scripts/rent_new_tenant.py)."""
+    kept = [a for a in answers if a[0] not in COUNTED]
+    return hashlib.sha1(json.dumps(kept, sort_keys=True).encode()).hexdigest()[:12]
 
 
 def owes_two(arrears):
@@ -235,11 +241,12 @@ def card_text(answers, tenant_name, place, roy_words, roy_day, prior=None):
     the Your turn button clears (scripts/agent-dispatch.py). `prior` is his last request for
     changes on this tenant's form card ({"on": day, "feedback": words}), quoted so he can see
     whether it was dealt with."""
+    said = " ".join(str(roy_words or "").split())[:300]
     lines = [
-        f"THE ASK: approve the direct rent payment form for {tenant_name} at {place}. Roy says the housing costs are verified.",
+        f"THE ASK: approve the direct rent payment form for {tenant_name} at {place}."
+        + (" Roy says the housing costs are verified." if said else ""),
         "",
     ]
-    said = " ".join(str(roy_words or "").split())[:300]
     if said:
         lines += [f"Roy's words ({roy_day}): \"{said}\"", ""]
     if prior:

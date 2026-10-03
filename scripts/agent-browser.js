@@ -1838,7 +1838,10 @@ async function main() {
       return;
     }
     // Checked BEFORE the window opens: Kevin approved the prepared work, or nothing runs.
-    assertApproved(task, { window: true });
+    const approval = assertApproved(task, { window: true });
+    // His minor edit, typed when he approved, is shown in the window: the robot fills the prepared
+    // answers, and the edit is his to make before he sends (Approved with minor edits).
+    const edit = String(approval.outcome || '') === 'Approved with minor edits' ? String(approval.feedback || '').trim().slice(0, 300) : '';
     const dir = path.join(PROFILE_ROOT, profile || 'default');
     // The robot's own runs wait while the window is his (their launch would fight it).
     takeSigninHold(dir);
@@ -1848,6 +1851,9 @@ async function main() {
     await new Promise(r => setTimeout(r, Number(process.env.AGENT_HANDOVER_PAUSE_MS) || 3000));
     const tick = () => takeSigninHold(dir);                          // the hold stays fresh while it is his
     const headed = !process.env.AGENT_HANDOVER_HEADLESS;          // tests only
+    // Logged as it OPENS as well as when it closes: a window still open (Kevin waiting overnight for an
+    // emailed code) must read as in use, never as unused (scripts/rent_new_tenant.py read_windows).
+    ledger({ cmd: 'handover-open', task, profile, site: plan.site || null });
     let res;
     try {
       res = await withPage(profile, headed, async (page, ctx) => {
@@ -1856,8 +1862,8 @@ async function main() {
         const png = await shoot(page, path.join(HANDOVER_DIR, 'shots', `${task}-${Date.now()}.png`)).catch(() => null);
         await turnBanner(page, r.stuck
           ? `The robot got stuck at step ${r.stuck.step}. You can finish by hand, or close this window.`
-          : `Your turn: ${plan.why}. Close this window when you have finished: the other robots wait while it is open.`);
-        console.log(JSON.stringify({ phase: 'your-turn', task, stuck: r.stuck, screenshot: png }));
+          : `Your turn: ${plan.why}.${edit ? ` Your edit: ${edit}.` : ''} Close this window when you have finished: the other robots wait while it is open.`);
+        console.log(JSON.stringify({ phase: 'your-turn', task, stuck: r.stuck, screenshot: png, edit: edit || null }));
         await waitForWindowClose(ctx, Number(process.env.AGENT_HANDOVER_WAIT_MS) || 0, tick);
         return Object.assign(r, { screenshot: png });
       });

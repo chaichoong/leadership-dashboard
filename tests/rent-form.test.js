@@ -104,6 +104,18 @@ print(json.dumps(out))`);
     expect(r.unknown.answers['Type of payment']).toContain('the rent check could not count the arrears');
   });
 
+  it('the print ignores the answers that move with the calendar; the card claims Roy\'s word only when it has it', () => {
+    const r = py(`
+a = fp.build(TENANCY, TENANT, PROP, LANDLORD, arrears=LOW)["answers"]
+b = fp.build(TENANCY, TENANT, PROP, LANDLORD, arrears=dict(LOW, months=1.5, owed=1350.0, falls=2))["answers"]
+c = fp.build(dict(TENANCY, rent=850.0), TENANT, PROP, LANDLORD, arrears=LOW)["answers"]
+print(json.dumps({"calendar": fp.fingerprint(a) == fp.fingerprint(b), "record": fp.fingerprint(a) == fp.fingerprint(c),
+                  "noRoy": fp.card_text(a, "Sam Sample", "Unit 9", "", "").splitlines()[0]}))`);
+    expect(r.calendar).toBe(true);
+    expect(r.record).toBe(false);
+    expect(r.noRoy).toBe('THE ASK: approve the direct rent payment form for Sam Sample at Unit 9.');
+  });
+
   it('a blank record raises no plan and says which record is blank; the landlord email must be info@', () => {
     const r = py(`
 no_dob = fp.build(TENANCY, dict(TENANT, dob=""), PROP, LANDLORD)
@@ -435,12 +447,14 @@ ad.cmd_outcome(argparse.Namespace(task=rec["id"]))
     mkdirSync(plans, { recursive: true });
     const script = join(h, 'outcome.py');
     writeFileSync(script, PY + AD + `
-rows = {"recCARD0000000001": view(CARD, CARD_NOTES), "recCARD0000000002": view(CARD, CARD_NOTES, outcome="Changes requested")}
+rows = {"recCARD0000000001": view(CARD, CARD_NOTES), "recCARD0000000002": view(CARD, CARD_NOTES, outcome="Changes requested"),
+        "recCARD0000000003": view(CARD, CARD_NOTES, outcome="Approved with minor edits")}
+rows["recCARD0000000003"]["fields"][ad.AF["approvalFeedback"]] = "The rent is 850"
 rec = rows[sys.argv[2]]
 ad.get_task = lambda tid: rec
 ad.cmd_outcome(argparse.Namespace(task=rec["id"]))
 `);
-    for (const t of ['recCARD0000000001', 'recCARD0000000002']) {
+    for (const t of ['recCARD0000000001', 'recCARD0000000002', 'recCARD0000000003']) {
       writeFileSync(join(plans, t + '.json'), JSON.stringify({ why: 'send the form', site: 'test', steps: [{ do: 'goto', url: base }] }));
     }
     const env = { ...process.env, HOME: h, AGENT_BROWSER_SITES_FILE: SITES, AGENT_HANDOVER_DIR: plans, AGENT_OUTCOME_SCRIPT: script,
@@ -460,6 +474,15 @@ ad.cmd_outcome(argparse.Namespace(task=rec["id"]))
       const back = await run('recCARD0000000002');
       expect(back.code).not.toBe(0);
       expect(back.err).toMatch(/not approved \(Approval Outcome: Changes requested\)/);
+      // His minor edit is shown in the window; the robot types the prepared answers.
+      const edited = await run('recCARD0000000003');
+      expect(edited.code, edited.err).toBe(0);
+      const turn = edited.out.split('\n').filter(l => l.includes('"phase":"your-turn"')).map(l => JSON.parse(l))[0];
+      expect(turn.edit).toBe('The rent is 850');
+      // The robot logs each window as it opens and as it closes (lane B reads both).
+      const log = readFileSync(join(h, 'knowledge-os', 'logs', 'agent-browser', 'runs.jsonl'), 'utf8').trim().split('\n').map(l => JSON.parse(l));
+      expect(log.filter(x => x.task === 'recCARD0000000001').map(x => x.cmd)).toEqual(['handover-open', 'handover']);
+      expect(log.filter(x => x.task === 'recCARD0000000002').map(x => x.cmd)).toEqual([]);
     } finally {
       rmSync(h, { recursive: true, force: true });
     }
@@ -827,10 +850,16 @@ RECORDS["recCARD0000000002"] = {rc.TK["notes"]: KEY + "\\n\\n" + OPEN, rc.TK["st
 first = lb.clear_wall(rc._Here(), "recCARD0000000001", DAY)
 again = lb.clear_wall(rc._Here(), "recCARD0000000001", DAY)
 live = lb.clear_wall(rc._Here(), "recCARD0000000002", DAY)
+live_why = lb.clear_wall(rc._Here(), "recCARD0000000002", DAY, "the window was used")
+live_notes = RECORDS["recCARD0000000002"][rc.TK["notes"]]
 notes = RECORDS["recCARD0000000001"][rc.TK["notes"]]
-print(json.dumps({"written": [first, again, live, len(patches)], "status": RECORDS["recCARD0000000001"][rc.TK["status"]],
+print(json.dumps({"written": [first, again, live, live_why], "liveStatus": RECORDS["recCARD0000000002"][rc.TK["status"]],
+                  "liveWall": ad.task_blocker(live_notes), "liveOwn": lb.wall_closed_not_by_kevin(live_notes),
+                  "status": RECORDS["recCARD0000000001"][rc.TK["status"]],
                   "wall": ad.task_blocker(notes), "sent": lb.kevin_sent(notes), "fields": sorted(patches[0]["fields"])}))`);
-    expect(r.written).toEqual([true, false, false, 1]);
+    // A closed card is cleared; a live one only when told why (a card Kevin may have sent), and stays live.
+    expect(r.written).toEqual([true, false, false, true]);
+    expect([r.liveStatus, r.liveWall, r.liveOwn]).toEqual(['Today', null, false]);
     expect(r.status).toBe('Cancelled');
     expect(r.wall).toBeNull();
     expect(r.sent).toBe(false);
@@ -866,6 +895,19 @@ try: lb.finish_form(rc._Here(), dict(ITEM1, id="recCARD0000000005"), DAY); flip 
 except RuntimeError as e: flip = str(e)
 before = len(comments)
 flipped = [lb.finish_form(rc._Here(), dict(ITEM1, id="recCARD0000000005"), DAY), len(comments) - before]
+# The status write answers 200 but does not stick: never marked done, tried again next run.
+RECORDS["recFormTest000001"][rc.TY["payStatus"]] = "CFV"
+RECORDS["recCARD0000000008"] = {rc.TK["notes"]: KEY + "\\n\\n" + DONE, rc.TK["status"]: "Today"}
+real_api = rc.api
+def sticky(method, path, payload=None, params=None):
+    if method == "PATCH" and path == rc.T_TENANCIES: return {}
+    return real_api(method, path, payload, params)
+rc.api = sticky
+try: lb.finish_form(rc._Here(), dict(ITEM1, id="recCARD0000000008"), DAY); unstuck = "ok"
+except RuntimeError as e: unstuck = str(e)
+rc.api = real_api
+unstuck = [unstuck, "RENT FORM ACTIONED:" in RECORDS["recCARD0000000008"][rc.TK["notes"]]]
+RECORDS["recFormTest000001"][rc.TY["payStatus"]] = "CFV Actioned"
 # Set back to CFV by somebody after the rent check marked it: finish_form never flips it again.
 RECORDS["recFormTest000001"][rc.TY["payStatus"]] = "CFV"
 before_back = len(patches)
@@ -887,7 +929,7 @@ except RuntimeError as e: blank = str(e)
 print(json.dumps({"first": first, "order": order, "once": once, "again": again, "afterAgain": after_again,
                   "card": RECORDS["recCARD0000000001"], "comment": comments[0], "plan": os.path.exists(os.path.join(HANDOVER, "recCARD0000000001.json")),
                   "failed": failed, "mid": mid, "retry": retry, "retryComments": retry_comments, "flip": flip, "flipped": flipped,
-                  "moved": moved, "movedComment": comments[-1][1], "unsent": unsent, "blank": blank, "setBack": set_back, "keptCancelled": kept_cancelled}))`);
+                  "moved": moved, "movedComment": comments[-1][1], "unsent": unsent, "blank": blank, "setBack": set_back, "keptCancelled": kept_cancelled, "unstuck": unstuck}))`);
     expect(r.first).toBe('CFV Actioned');
     // Card marked, comment, card marked COMMENTED, the tenancy, then card marked ACTIONED: the comment
     // always comes before the status, and the status is changed once.
@@ -908,6 +950,8 @@ print(json.dumps({"first": first, "order": order, "once": once, "again": again, 
     expect(r.flip).toMatch(/tenancy 422/);
     expect(r.flipped).toEqual(['CFV Actioned', 0]);
     expect(r.setBack).toEqual(['CFV', 0]);
+    expect(r.unstuck[0]).toMatch(/still reads 'CFV' after it was set to CFV Actioned; it is tried again next run/);
+    expect(r.unstuck[1]).toBe(false);
     // Kevin cancelled the card by hand after sending: it records the send and stays cancelled.
     expect(r.keptCancelled).toEqual(['Cancelled', true]);
     expect(r.moved).toBe('In Payment');

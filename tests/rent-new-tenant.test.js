@@ -66,14 +66,14 @@ def task(i, key, status="Today", created=DAY, completed=None, said=(), name=None
             "completed": completed, "tenancies": [key.split(":")[0]] if tenancies is None else tenancies}
 def draft(i, key, **kw): return task(i, key, name="RENT ASK: a draft", **kw)
 NAMES = {"recT_uc": "Sam Sample", "recT_work": "Wendy Worker", "recT_quietuc": "Quentin Quiet"}
-def plan(tenancies, tasks, tx=(), day=DAY, plans=None, **kw):
+def plan(tenancies, tasks, tx=(), day=DAY, plans=None, windows=None, **kw):
     data, res = assess(tenancies, tx, day=day, **kw)
     tenants_of = {r["id"]: list(r["fields"].get(TY["tenants"]) or []) for r in data["tenancies"]}
     starts = {r["id"]: rc.parse_day(r["fields"].get(TY["start"])) for r in data["tenancies"]}
     dues = {r["id"]: rc.sel(r["fields"].get(TY["dueDay"])) for r in data["tenancies"]}
     pays = rc.payments_by_tenancy(data["tx"])
     bank = rc.feed_state(data, pays, datetime(day.year, day.month, day.day, 12, 30, tzinfo=timezone.utc))
-    out = lb.plan(res, tasks, tenants_of, NAMES, day, starts, pays, bank, plans, dues)
+    out = lb.plan(res, tasks, tenants_of, NAMES, day, starts, pays, bank, plans, dues, windows)
     lb.annotate(res, out["rows"])
     res["briefLine"] = rc.brief_line(res)
     return res, out
@@ -481,7 +481,8 @@ print(json.dumps({"queue": go(card()), "turn": go(card(outcome="Approved as-is",
     // never raised again on a guess (a second card could send the government form twice). Said instead.
     expect(r.superseded).toEqual([[], [], 'form card to check', []]);
     expect(r.checkProblem).toEqual(["Unit 9 – 1 Example Road: the form card's window was used but the app never recorded whether "
-      + 'Kevin sent the form; if it went in, marking the tenancy CFV Actioned starts the payment checks']);
+      + 'Kevin sent the form: if it went in, marking the tenancy CFV Actioned starts the payment checks; if it did not, '
+      + 'cancelling the card raises a fresh one']);
     // No Your turn step ever opened: nothing can have been sent through it.
     expect(r.noWall).toEqual([[['form', 'recLaneBTest00001:form:2']], [], 'form card raised again', [again]]);
     // The robot's arrears answer holds only until the day before the next rent: after that a fresh count, a fresh card.
@@ -600,21 +601,54 @@ print(json.dumps({
     // A tenancy that has moved on keeps a maybe-sent card, said, never withdrawn.
     expect(r.movedOn.slice(0, 2)).toEqual([[], []]);
     // Approved, then parked as Upcoming: past its good-until day it waits for him to move it back.
-    expect(r.upcomingExpired).toEqual([[], [], 'your turn']);
+    expect(r.upcomingExpired).toEqual([[], [], 'form card parked']);
     // Marked actioned: Roy's first check follows, and the maybe-sent card is left as it is (never withdrawn).
     expect(r.actioned.slice(0, 2)).toEqual([[['roy', 'recLaneBTest00001:paid:1']], []]);
     // The rent check's own clear (a withdrawal or a closed card) is never read as Kevin's step.
     expect(r.ownClear).toBe(false);
   });
 
+  it('a window open now leaves the card alone; a card he cancels after an unrecorded window is his "not sent"; its step is closed, never run twice', () => {
+    const r = py(`
+OPEN = "[02 Oct 2026 10:00 — agent-dispatch] BLOCKER OPEN (KEVIN credential): type the code Fix: f [since 2026-10-02T09:00:00.000Z]"
+def card(extra="", outcome="Approved as-is", status="Today"):
+    t = task("recFORMTASK00001", NEW + ":form:1", status=status, created=date(2026, 9, 28), name="RENT FORM: a form", extra=extra)
+    return dict(t, outcome=outcome, notes="RENT FORM KEY: " + NEW + ":form:1\\n" + t["notes"])
+def go(c, windows, status="CFV"):
+    res, out = plan([new_void(status=status)], [c], windows=windows)
+    return [keys(out), withdrawn(out), short(res), [x["id"] for x in out["closeSteps"]]]
+EXPIRED = "\\nRENT FORM GOOD UNTIL: 2026-10-01"
+print(json.dumps({
+  "openNowExpired": go(card(OPEN + EXPIRED), {"recFORMTASK00001": {"used": 0, "openNow": True}}),
+  "unrecorded": go(card(OPEN), {"recFORMTASK00001": {"used": 1, "openNow": False}}),
+  "cancelledAfter": go(card(OPEN, status="Cancelled"), {"recFORMTASK00001": {"used": 1, "openNow": False}}),
+  "actionedUnrecorded": go(card(OPEN), {"recFORMTASK00001": {"used": 1, "openNow": False}}, status="CFV Actioned"),
+}))`);
+    // His window is open (he may be waiting for the emailed code): nothing is withdrawn, even past its day.
+    expect(r.openNowExpired).toEqual([[], [], 'form window open', []]);
+    // A window used with no answer recorded: said, and its Your turn step closed so it is never run twice.
+    expect(r.unrecorded).toEqual([[], [], 'form card to check', ['recFORMTASK00001']]);
+    // He then cancels it: his answer is "not sent", and a fresh card is raised.
+    expect(r.cancelledAfter).toEqual([[['form', 'recLaneBTest00001:form:2']], [], 'form card raised again', []]);
+    // On a tenancy marked actioned the payment checks follow, and the card's step is still closed.
+    expect(r.actionedUnrecorded).toEqual([[['roy', 'recLaneBTest00001:paid:1']], [], 'form sent, awaiting rent', ['recFORMTASK00001']]);
+  });
+
   it('the robot log is read for each card\'s windows; a missing log is none, a bad line is skipped', () => {
     const r = py(`
 path = os.path.join(SCRATCH, "runs.jsonl")
-open(path, "w").write("\\n".join([json.dumps({"cmd": "handover", "task": "recA"}), "not json", json.dumps({"cmd": "commit", "task": "recA"}),
-                                   json.dumps({"cmd": "handover", "task": "recA"}), json.dumps({"cmd": "handover", "task": "recB"})]))
-print(json.dumps({"counts": lb.read_windows(path), "missing": lb.read_windows(os.path.join(SCRATCH, "none.jsonl")),
+NOW = datetime(2026, 10, 2, 12, 0, tzinfo=timezone.utc)
+op = lambda t, at: json.dumps({"cmd": "handover-open", "task": t, "at": at})
+rows = [op("recA", "2026-10-01T09:00:00Z"), json.dumps({"cmd": "handover", "task": "recA"}), "not json", json.dumps({"cmd": "commit", "task": "recA"}),
+        op("recA", "2026-10-01T10:00:00Z"), json.dumps({"cmd": "handover", "task": "recA"}), "[1, 2]", json.dumps({"task": 5}),
+        op("recOpen", "2026-10-02T07:00:00Z"), op("recCrash", "2026-09-30T07:00:00Z"), json.dumps({"cmd": "handover", "task": "recOld"})]
+open(path, "wb").write(("\\n".join(rows) + "\\n").encode() + b'{"cmd": "handover", "task": "recTorn\\xff\\xfe')
+print(json.dumps({"counts": lb.read_windows(path, NOW), "missing": lb.read_windows(os.path.join(SCRATCH, "none.jsonl"), NOW),
                   "same": lb.ROBOT_LOG.endswith("knowledge-os/logs/agent-browser/runs.jsonl")}))`);
-    expect(r.counts).toEqual({ recA: 2, recB: 1 });
+    // Opened and closed twice; one open now (under a day); one opened two days ago and never closed (a
+    // crash: read as used); a close with no open logged (an older robot): used. A torn last line is skipped.
+    expect(r.counts).toEqual({ recA: { used: 2, openNow: false }, recOpen: { used: 0, openNow: true },
+      recCrash: { used: 1, openNow: false }, recOld: { used: 1, openNow: false } });
     expect(r.missing).toEqual({});
     // The same file scripts/agent-browser.js writes (its LEDGER).
     expect(r.same).toBe(true);
