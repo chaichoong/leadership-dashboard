@@ -106,9 +106,14 @@ print(json.dumps({"byName": bool(trial_problem(other, "RENT LATE: Unit 9, rent d
                   "byKey": bool(trial_problem(other, "Renamed by someone", "note\\nRENT CHECK KEY: recT:2026-09-30:1")),
                   "neither": trial_problem(other, "COMPLIANCE: EICR renewal", "RENT in the notes"),
                   "midName": trial_problem(other, "Re: RENT LATE: Unit 9", ""),
-                  "marks": TRIAL_TASK_MARKS["${RENT_TM}"], "rentCheck": {"prefix": rc.TASK_PREFIX, "note": rc.KEY_MARK}}))`);
-    expect([r.byName, r.byKey, r.neither, r.midName]).toEqual([true, true, '', '']);
+                  "byAsk": bool(trial_problem(other, "RENT ASK: Unit 9, ask for a Universal Credit screenshot", "")),
+                  "marks": TRIAL_TASK_MARKS["${RENT_TM}"],
+                  "rentCheck": {"prefix": [rc.TASK_PREFIX, rc.lane_b_rules.ASK_PREFIX], "note": rc.KEY_MARK},
+                  "askKey": rc.lane_b_rules.TRIAL_KEY_MARK}))`);
+    expect([r.byName, r.byKey, r.neither, r.midName, r.byAsk]).toEqual([true, true, '', '', true]);
     expect(r.marks).toEqual(r.rentCheck);
+    // Lane B's tenant drafts carry the same key mark, so they are trial tasks by either mark too.
+    expect(r.askKey).toBe(r.rentCheck.note);
   });
 });
 

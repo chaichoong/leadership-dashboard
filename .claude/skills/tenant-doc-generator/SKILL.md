@@ -111,10 +111,21 @@ Claude runs these. Kevin approves at the gates: every email and every form submi
    (the `airtable-tenant-onboarding` route).
 4. Put the rent and `Due Day of Month` on the tenancy so the cash flow reports and the
    forecast carry them. Payment Status starts as CFV (cash flow void).
-5. Raise a task to Roy to confirm the housing costs are verified. About a week after the
-   tenant submits the UC application, contact Universal Credit, or have the tenant check their journal.
-6. Once verified, run the UC47 (`uc47-form-automation`). After it is submitted, comment on the
-   tenancy and set Payment Status to CFV Actioned.
+5. Do NOT raise Roy's Universal Credit tasks by hand (changed 2 Oct 2026). Once the tenancy
+   exists as a CFV and the tenant's Rent Payment Type is Universal Credit (and the Cash Flow
+   Voids agent is switched on), the daily rent check raises them and emails Roy: the journal upload first,
+   then the housing costs check 7 days after he replies (`scripts/rent_new_tenant.py`). If a
+   Roy task for this tenant was already raised by hand, link the tenancy and add one line to
+   its Notes so the rent check adopts it instead of raising a twin:
+   `RENT SETUP KEY: <tenancy id>:journal:1` for a journal-upload task, or
+   `RENT SETUP KEY: <tenancy id>:costs:1` for a housing-costs task.
+6. Once verified (the Rent line on Home says "form due" beside the unit; the rent check's
+   detail quotes Roy's words, so read them first), run the
+   UC47 (`uc47-form-automation`). After it is submitted, comment on the tenancy and
+   set Payment Status to CFV Actioned. Do NOT raise a follow-up task: the rent check sees
+   CFV Actioned and raises Roy's first check (emailed to him, telling him to check with
+   Universal Credit 14 days on) at its next run, or as soon after as the bank data is
+   matched and fresh, then asks again every 14 days until the first rent is matched.
 7. DWP approves the UC47 and the payment arrives on the next due date.
 
 This one Universal Credit check is for a new tenancy only. The monthly payment checks

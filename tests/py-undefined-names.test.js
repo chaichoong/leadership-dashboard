@@ -60,6 +60,7 @@ const ESTATE_SCRIPTS = [
   'scripts/payment-run.py',
   'scripts/tenant-leads.py',
   'scripts/rent-check.py',
+  'scripts/rent_new_tenant.py',
   'scripts/roy-assistant.py',
   'scripts/private-name-guard.py',
   'scripts/host-move.py',
