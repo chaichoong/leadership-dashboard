@@ -6052,7 +6052,9 @@ SIGNIN_PICKUP_DIR = os.environ.get("SIGNIN_PICKUP_DIR") or os.path.expanduser("~
 #   SIGN-IN NEEDED: Pingen (https://app.pingen.com/) — (unverified: profile busy)
 SIGNIN_UNVERIFIED_MARK = "(unverified"
 SIGNIN_UNVERIFIED_RE = re.compile(r"\s*(?:[—–-]\s*)?\(unverified(?::[^)]*)?\)\s*$", re.I)
-SIGNIN_WALK_TIMEOUT = 180                # seconds: the walk's own worst case is ~125 s (door 48 s, two clicks 56 s each, One Login settle 20 s)
+SIGNIN_WALK_TIMEOUT = 300                # seconds: the walk's own worst case is ~125 s (door 48 s, two clicks 56 s each, One Login settle 20 s);
+                                         # a site the robot signs itself back in to (Amazon, 2 Oct 2026) walks twice around a
+                                         # 20-second plain window, worst case ~270 s. A timeout reads "unverified", never signed out.
 SIGNIN_LEDGER_FRESH_MINUTES = 30         # a verdict newer than this is reused, not re-walked
 BOT_CHECK_FRESH_MINUTES = 24 * 60        # a bot check seen today still stands (block refuses SIGN-IN)
 BROWSER_LEDGER = (os.environ.get("AGENT_BROWSER_LEDGER")
@@ -6127,6 +6129,16 @@ def load_login_sites():
     return json.loads(r.stdout)
 
 
+def refresh_inconclusive(rec):
+    """A `session` line whose own refresh could not run, or whose second read
+    failed (agent-browser.js selfRefresh, Amazon, 2 Oct 2026). It says nothing
+    settled about the login: walking again runs the refresh, so it is never
+    reused as a verdict. The same test as session-keepalive.py session_state
+    and signin_hold.py _read."""
+    r = str((rec or {}).get("selfRefresh") or "")
+    return r.startswith("not run") or "second read failed" in r
+
+
 def ledger_session_verdict(host, max_age_minutes=SIGNIN_LEDGER_FRESH_MINUTES, path=None, now=None,
                            profile="default"):
     """The newest `session` verdict agent-browser.js logged for HOST, if it is
@@ -6146,7 +6158,7 @@ def ledger_session_verdict(host, max_age_minutes=SIGNIN_LEDGER_FRESH_MINUTES, pa
                     newest = rec
     except OSError:
         return None
-    if not newest or not newest.get("at"):
+    if not newest or not newest.get("at") or refresh_inconclusive(newest):
         return None
     try:
         at = datetime.fromisoformat(str(newest["at"]).replace("Z", "+00:00"))
@@ -6187,6 +6199,9 @@ def ledger_signed_out(host, path=None, profile="default"):
     except OSError:
         return None
     if not newest or login_since or newest.get("signedIn") or newest.get("botCheck") or not newest.get("at"):
+        return None
+    # The robot's own refresh could not run: a fresh walk runs it, and may need no sign-in at all.
+    if refresh_inconclusive(newest):
         return None
     # Only a verdict that landed on a sign-in page (review, 29 Sep 2026): a walk
     # that met an error page or a slow load also reads "signed out", and trusted
@@ -6286,6 +6301,12 @@ def session_walk(host, timeout=SIGNIN_WALK_TIMEOUT, profile=None, url=None):
         d = json.loads(r.stdout)
     except ValueError:
         return {"error": "session walk printed no JSON"}
+    # Signed out only because the robot's own refresh could not run (Amazon,
+    # 2 Oct 2026): not a verdict. The app marks it unverified; the submit gate
+    # sends the agent back to read again rather than hand Kevin a sign-in.
+    if not d.get("signedIn") and refresh_inconclusive(d):
+        return {"error": "the robot's own refresh did not finish (" + str(d.get("selfRefresh"))[:150] + ")",
+                "refreshNotRun": True}
     return {"signedIn": bool(d.get("signedIn")), "botCheck": bool(d.get("botCheck")),
             "url": str(d.get("url") or ""), "at": now_iso(), "source": "walk"}
 
@@ -6348,6 +6369,13 @@ def signin_verify_line(output, sites=None, check=None):
     v = (check or session_check)(host)
     if v.get("skipped"):
         return "", output
+    if v.get("refreshNotRun"):
+        return (f"its SIGN-IN NEEDED line names {m['site']!r}, but {host} is a site the robot signs itself "
+                f"back in to, and its refresh did not finish just now ({v['error'][:120]}). Nothing needs "
+                f"Kevin: run `node scripts/agent-browser.js session --site {host}` again, which refreshes it, "
+                "then do the work. If it still cannot finish, record the wall instead of a sign-in: "
+                f"`python3 scripts/agent-dispatch.py block TASKID --kind SIGN-IN --subject {host} --why \"own refresh did not finish\"`. "
+                "It clears itself when the next check signs the robot back in.", output)
     if v.get("error"):
         print(f"NOTE: sign-in line for {host} kept unverified — {v['error'][:160]}", file=sys.stderr)
         return "", mark_signin_unverified(output, v["error"])
