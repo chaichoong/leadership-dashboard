@@ -4447,7 +4447,8 @@ def cmd_submit(args):
     is_inbound = bool(tf_early.get(AF["inboundTask"]))
     # THE TASK IS ON TRIAL TOO (2 Oct 2026): a trial lane's task submitted under another agent's id
     # is held to the same rule as the trial agent's own submit, checked above. So is a task the trial
-    # agent holds as Team Member (review, 4 Oct 2026), as every send door reads it.
+    # agent holds as Team Member when it is submitted (review, 4 Oct 2026). Submit then writes the
+    # submitting agent into both fields, so an email draft on such a task becomes that agent's card.
     trial = trial or trial_problem(links(tf_early.get(AF["teamMember"])),
                                    tf_early.get(AF["name"], ""), tf_early.get(AF["notes"], ""))
     if trial and TRIAL_ACTING_SHAPE_RE.search(output):
