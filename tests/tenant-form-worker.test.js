@@ -258,6 +258,13 @@ describe('saving the answers', () => {
     env.TENANT_ALL = { limit: async () => { shared++; return { success: true }; } };
     expect((await open(code)).status).toBe(429);
     expect(shared).toBe(0);
+    // Nor does a made-up code from a caller still within his own limit.
+    env.TENANT_LIMIT = { limit: async () => ({ success: true }) };
+    expect((await open('A'.repeat(32))).status).toBe(404);
+    expect(shared).toBe(0);
+    expect((await open(code)).status).toBe(200);
+    expect(shared).toBe(1);
+    reads = 0;
     // And the limit on all callers together, whoever is asking.
     const asked = [];
     env.TENANT_LIMIT = { limit: async ({ key }) => { asked.push(key); return { success: true }; } };

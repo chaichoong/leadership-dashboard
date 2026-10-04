@@ -760,7 +760,7 @@
     form.hidden = !t; $('docsBox').hidden = !t;
     // The link box belongs to one tenant: whatever brought another into the form hides it, so
     // "Switch this tenant's form link off" can never look as if it acted on the link shown.
-    if (state.ui.linkTenant !== state.ui.formTenant) { $('linkBox').hidden = true; $('linkUrl').value = ''; state.ui.linkTenant = ''; }
+    if (!t || state.ui.linkTenant !== state.ui.formTenant) { $('linkBox').hidden = true; $('linkUrl').value = ''; state.ui.linkTenant = ''; }
     if (!t) return;
     const map = Object.assign(storedForm(t), { meetingDate: t.meetingDate || todayISO() });
     FORM_FIELDS.forEach(k => { const el = form.elements[k]; if (!el) return; if (el.type === 'checkbox') el.checked = !!map[k]; else el.value = map[k] == null ? '' : map[k]; });
@@ -783,7 +783,7 @@
     // Only what changed is checked and sent: an old value nobody touched never blocks a save.
     const ni = v('ni').replace(/\s+/g, '').toUpperCase();
     if (!same('ni') && ni && !/^[A-Z]{2}\d{6}[A-D]$/.test(ni)) { toast('National Insurance number should look like AA 12 34 56 A', true); return; }
-    const dob = v('dob'); if (!same('dob') && dob) { const y = Number(dob.slice(0, 4)); if (y < 1920 || y > 2010) { toast('That date does not look like a tenant\'s date of birth', true); return; } }
+    const dob = v('dob'); if (!same('dob') && dob) { const y = Number(dob.slice(0, 4)); if (!/^\d{4}-\d{2}-\d{2}$/.test(dob) || y < 1920 || y > 2010) { toast('That date does not look like a tenant\'s date of birth', true); return; } }
     const fields = {
       [T.dob]: dob || null, [T.ni]: ni || null, [T.phone]: v('phone') || null, [T.email]: v('email') || null, [T.idSeen]: v('idSeen') || null, [T.over35]: v('over35'),
       [T.ucPayDay]: v('ucPayDay') ? Number(v('ucPayDay')) : null, [T.dueDay]: v('dueDay') || null, [T.household]: v('household') || null, [T.capExemption]: v('capExemption') || 'Unknown', [T.ucStatementSeen]: v('ucStatementSeen'), [T.otherBenefits]: v('otherBenefits') || null,
@@ -1620,7 +1620,7 @@ BEFORE THE FIRST ONE IS SIGNED (all in writing)
     const holder = btn && btn.closest('.inl');
     const input = (holder && holder.querySelector('input[data-dob]')) || document.querySelector(`input[data-dob="${tenantId}"]`); const v = input && input.value;
     if (!v) { toast('Enter a date of birth first', true); return; }
-    const y = Number(v.slice(0, 4)); if (y < 1920 || y > 2010) { toast('That date does not look like a tenant\'s date of birth', true); return; }
+    const y = Number(v.slice(0, 4)); if (!/^\d{4}-\d{2}-\d{2}$/.test(v) || y < 1920 || y > 2010) { toast('That date does not look like a tenant\'s date of birth', true); return; }
     await withBusy('dob:' + tenantId, async () => {
       const t = state.data.tenants.find(x => x.id === tenantId);
       // Notes read fresh: a line added since the page loaded (a tenant's own form save) is kept.

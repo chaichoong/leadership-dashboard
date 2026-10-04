@@ -486,6 +486,15 @@ test.describe('Growth Plan page', () => {
     expect(w.records[0].fields[T.notes]).toMatch(/^old line\n\[2026-10-04 14:02 tenant link\] Tenant details form saved\nDOB 1980-06-01 entered on the Growth Plan page/);
   });
 
+  test('a date of birth with a five-digit year is refused, not read as its first four digits', async ({ page }) => {
+    const writes = await openPage(page, fixtures());
+    const open = await openSelf(page, '18 Test Park');
+    await open.locator('input[data-dob="recT3"]').fill('20001-05-01');
+    await open.locator('button[data-act="save-dob"][data-tenant="recT3"]').click();
+    await expect(page.locator('#toast')).toContainText('does not look like a tenant');
+    expect(writes.filter(x => x.tableId === TBL.tenants)).toEqual([]);
+  });
+
   test('Notes that read back empty when the page had some stop the date of birth save', async ({ page }) => {
     const fx = fixtures();
     fx[TBL.tenants][2].fields[T.notes] = 'old line';

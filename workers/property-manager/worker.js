@@ -474,11 +474,14 @@ export function callerKey(ip) {
   if (groups.length !== 8 || groups.some(g => !/^[0-9a-f]{1,4}$/.test(g))) return s;
   return groups.slice(0, 4).map(g => parseInt(g, 16).toString(16)).join(':') + '::/64';
 }
-// The caller's own limit first, so a caller already refused never uses up a slot everyone shares.
-async function tenantLimited(request, env) {
-  if (env.TENANT_LIMIT && !(await env.TENANT_LIMIT.limit({ key: callerKey(request.headers.get('CF-Connecting-IP')) })).success) return true;
-  if (env.TENANT_ALL && !(await env.TENANT_ALL.limit({ key: 'tenant-form' })).success) return true;
-  return false;
+// Two limits, in this order inside handleTenantForm: the caller's own first; then the code's tag;
+// then the limit everyone shares. So neither a refused caller nor a made-up code ever uses up a
+// slot a real tenant needs (reviews, 4 Oct 2026).
+async function callerLimited(request, env) {
+  return !!env.TENANT_LIMIT && !(await env.TENANT_LIMIT.limit({ key: callerKey(request.headers.get('CF-Connecting-IP')) })).success;
+}
+async function allLimited(env) {
+  return !!env.TENANT_ALL && !(await env.TENANT_ALL.limit({ key: 'tenant-form' })).success;
 }
 
 const firstNameOf = (name) => String(name || '').trim().split(/\s+/)[0] || '';
@@ -487,12 +490,15 @@ const hhmm = (d) => `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinu
 const SAVED_NOTE = "Tenant details form saved from the tenant's own link";
 async function handleTenantForm(request, env, origin, path) {
   if (request.method !== 'POST') return err('Not found', 404, origin);
-  if (await tenantLimited(request, env)) return err('Too many tries. Wait a minute and try again.', 429, origin);
+  const busy = 'Too many tries. Wait a minute and try again.';
+  if (await callerLimited(request, env)) return err(busy, 429, origin);
   const declared = Number(request.headers.get('Content-Length') || 0);
   if (declared > 6 * 1024 * 1024) return err('That file is too big. The most is 3.7MB.', 413, origin);
   let body;
   try { body = await request.json(); } catch { return err('Bad request', 400, origin); }
-  const row = await tenantForCode(env, body && body.code);
+  if (!(await codeIsOurs(env, body && body.code))) return err(LINK_GONE, 404, origin);
+  if (await allLimited(env)) return err(busy, 429, origin);
+  const row = await tenantForCode(env, body.code);
   if (!row) return err(LINK_GONE, 404, origin);
   if (path === '/tenant-form/open') {
     return json({ ok: true, firstName: firstNameOf(row.fields[GP.tenant.name]) }, 200, origin);
