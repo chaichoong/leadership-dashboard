@@ -40,6 +40,8 @@ GRACE_DAYS = 2                    # the rent check's own TOLERANCE_DAYS: a payme
 EARLY_PAY_DAYS = 5                # the rent check's own: a payment this early counts for the day it was promised
 PLAN_MAX_DAYS = 70                # inside the rent check's 80-day look-back at matched payments
 SENT_RE = re.compile(r"^\[(\d{1,2} \w{3} \d{4})(?: \d{2}:\d{2})? — send-email\] SENT: email to", re.M)
+# The day the agent last wrote or edited the card's text: agent-dispatch.py's submit stamp, or its revise mark.
+DRAFTED_RE = re.compile(r"^\[(\d{1,2} \w{3} \d{4})(?: \d{2}:\d{2})? — (?:agent-dispatch\] SUBMITTED|agent\] EDITS APPLIED:)", re.M)
 MISSED_MARK = "RENT PLAN MISSED: "
 KEPT_MARK = "RENT PLAN KEPT: "
 SUPERSEDED_MARK = "RENT PLAN SUPERSEDED: "
@@ -72,6 +74,18 @@ def sent_on(notes):
         except ValueError:
             continue
     return min(days) if days else None
+
+
+def drafted_on(notes):
+    """The last day the agent submitted or edited the card's text (the day the promises were written against
+    what was owed), or None."""
+    days = []
+    for m in DRAFTED_RE.finditer(str(notes or "")):
+        try:
+            days.append(datetime.strptime(m.group(1), "%d %b %Y").date())
+        except ValueError:
+            continue
+    return max(days) if days else None
 
 
 def created_on(rec):
@@ -141,7 +155,10 @@ def state(rec, payments, day, tenancy=None, doubt=False, asof=None):
     if not sent:
         out.update(state="unsent", why="approved, but its email has not gone, so nothing is agreed yet")
         return out
-    out["sent"], made = sent.isoformat(), created_on(rec)
+    # The drafting day: the last submit or edit of the card's text. A tenant's reply card is created when his
+    # message arrives, often days before the agent writes the plan, or a redo rewrites it later (review,
+    # 5 Oct 2026): the record's creation time is only the fallback.
+    out["sent"], made = sent.isoformat(), drafted_on(notes) or created_on(rec)
     out["madeAt"] = str(rec.get("createdTime") or "")        # the exact moment: two cards a day are told apart
     if MISSED_MARK in notes or KEPT_MARK in notes or SUPERSEDED_MARK in notes:
         out["state"] = "over"
@@ -149,8 +166,8 @@ def state(rec, payments, day, tenancy=None, doubt=False, asof=None):
     # Money counts from the day AFTER the card was drafted: the agent wrote the promises against what he owed
     # then, having read that day's payments (and every promise falls after it), so money from the drafting day
     # or before is already netted off, and money after it (before the email went, or on his word while Kevin
-    # was approving) is the plan's (reviews, 4-5 Oct 2026). A card with no creation time (an old record) counts
-    # from its email, or a few days before its first promise.
+    # was approving) is the plan's (reviews, 4-5 Oct 2026). A card with no drafting stamp and no creation time
+    # (an old record) counts from its email, or a few days before its first promise.
     fallback = min(sent, promises[0][0] - timedelta(days=EARLY_PAY_DAYS))
     start = (made + timedelta(days=1)) if made else fallback
     # Rent falling due ON the drafting day is still the plan's to hold (the promises include it); money paid
@@ -188,12 +205,12 @@ def state(rec, payments, day, tenancy=None, doubt=False, asof=None):
     if nxt and nxt[0] - early <= end + grace:
         checks[-1] = (nxt[0], checks[-1][1] + rent)
 
-    def waiting(check):
+    def waiting(check, reason="the rent check cannot tell about this tenancy's money"):
         late = (day - (check - grace)).days
         stuck = late > WAIT_LOUD_DAYS
         out.update(state="waiting", stuck=stuck,
-                   why=(f"still cannot be judged {late} days after a payment it was owed, because the rent check cannot tell "
-                        "about this tenancy's money" if stuck else "the rent check cannot tell about this tenancy's money today"))
+                   why=(f"still cannot be judged {late} days after a payment it was owed, because {reason}" if stuck
+                        else f"{reason} today"))
         return out
 
     for when, owed in checks:
@@ -210,6 +227,13 @@ def state(rec, payments, day, tenancy=None, doubt=False, asof=None):
             return out
         if doubt:
             return waiting(check)
+        # Money paid on the drafting day cannot be told apart from money the agent already netted off. When it
+        # alone would meet the check, the plan is never called missed on it: it waits, and turns loud (review,
+        # 5 Oct 2026).
+        on_day = sum(p["amount"] for p in payments if made and p["day"] == made)
+        if on_day and paid + on_day + PLAN_SLACK >= owed:
+            return waiting(check, f"£{on_day:,.2f} paid on the day the plan was drafted may be part of it, and the "
+                                  "rent check cannot tell")
         out.update(state="missed", missedOn=when.isoformat(), owed=round(owed, 2), paid=round(paid, 2))
         return out
     # Every check met. KEPT only once the last one's day has passed: a plan paid ahead stays open (and lane A
