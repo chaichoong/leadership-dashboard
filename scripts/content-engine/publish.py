@@ -721,7 +721,9 @@ def fetch_readable(day, kind, ledger=None, download=None):
     path = episode_files(day)[kind]
     m = re.search(r"/d/([\w-]+)", output_link(day, kind, ledger) or "")   # output_link stays the way in: selftests stub it
     if not m: return path
+    if ledger is None: ledger = watch.load_ledger()                        # one read, so the id and the stamp agree
     ent = output_entry(day, kind, ledger) or {}
+    m = re.search(r"/d/([\w-]+)", (ent.get("outputs") or {}).get(kind) or "") or m
     dest = os.path.join(PUBLISH_CACHE, str(day), os.path.basename(path))
     # THE COPY IS KEYED ON THE RENDER THAT MADE IT, NOT THE NAME (findings 20261003-agent-dispatch-735 and -737). A
     # re-render uploads a NEW Drive file and records its new link, but the copy kept the same name, so it was never
