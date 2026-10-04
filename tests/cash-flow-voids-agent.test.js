@@ -146,6 +146,25 @@ except SystemExit as e:
   it('an ordinary card from an agent that is not on trial still sends', () => {
     expect(load({ ...approved, name: 'COMPLIANCE: EICR quote', sentForApprovalBy: [PROPERTY_TM] }).refused).toBe('');
   });
+  it('after the trial ends, a card the trial settled (TRIAL CHECKED) is history and is never emailed', () => {
+    const r = py(`
+import agent_email_format as aef
+aef.TRIAL_AGENTS.clear()
+se = load_mod("se", "send-email.py")
+def go(notes):
+    F = {se.AF["name"]: "RENT LATE: Unit 9", se.AF["approvalOutcome"]: {"name": "Approved as-is"}, se.AF["taskType"]: {"name": "Correspondence"},
+         se.AF["agentOutput"]: ${JSON.stringify(OUTPUT)}, se.AF["approvedAt"]: "2026-10-02T10:00:00.000Z",
+         se.AF["sentForApprovalBy"]: ["${RENT_TM}"], se.AF["notes"]: notes}
+    se.get_task = lambda task_id: {"id": task_id, "createdTime": "2026-10-02T09:00:00.000Z", "fields": F}
+    try:
+        se.load_approved("recTEST"); return ""
+    except SystemExit as e:
+        return str(e)
+print(json.dumps({"settled": go("RENT CHECK KEY: x\\n[03 Oct 2026] TRIAL CHECKED: Kevin's verdict was 'Approved as-is'"), "fresh": go("RENT CHECK KEY: x")}))`);
+    expect(r.settled).toMatch(/was settled on the trial \(TRIAL CHECKED\); it is history/);
+    // A card approved after the trial ends sends as any other.
+    expect(r.fresh).toBe('');
+  });
   it('a RENT LATE task resubmitted or re-routed under another agent is still refused, by its name or its key line', () => {
     expect(load({ ...approved, sentForApprovalBy: [PROPERTY_TM], teamMember: [PROPERTY_TM] }).refused).toMatch(/trial card/);
     expect(load({ ...approved, name: 'Renamed', notes: 'RENT CHECK KEY: recT:2026-09-30:1', sentForApprovalBy: [PROPERTY_TM] }).refused).toMatch(/trial card/);

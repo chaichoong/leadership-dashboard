@@ -889,15 +889,44 @@ print(json.dumps({"plan": sorted([p["tenancy"], p["key"], p["name"]] for p in pl
       ['recAgent', 'recAgent:2026-09-30', 'AGENT RENT LATE: Unit 9 – 1 Example Road, rent due 30 Sep'],
       // No unit linked: the surname never reaches a task name.
       ['recAgentNoUnit', 'recAgentNoUnit:2026-09-30', 'AGENT RENT LATE: a tenancy with no unit linked, rent due 30 Sep'],
+      // A late agent-managed cash flow void: the agent holds this rent too.
+      ['recAgentVoid', 'recAgentVoid:2026-09-30', 'AGENT RENT LATE: Unit recAgentVoid, rent due 30 Sep'],
     ]);
     // One task per owed payment: a task for it already exists (even closed), so none again.
-    expect(r.again).toEqual(['recAgentNoUnit']);
+    expect(r.again.sort()).toEqual(['recAgentNoUnit', 'recAgentVoid']);
     // Lane A still never chases an agent-managed tenant.
     expect(r.laneA).toEqual(['recLate']);
     expect(r.quiet).toEqual([]);
     expect(r.desc).toContain('the letting agent collects this rent');
     expect(r.desc).toContain('RENT AGENT KEY: recAgent:2026-09-30');
     expect(r.noUnitDesc).not.toMatch(/Sample/);
+  });
+
+  it('Roy\'s tasks are found by name or by their key line (a task renamed by hand is still found), never by an empty read', () => {
+    const r = py(`
+seen = []
+def fetch_all(table, params):
+    seen.append(params["filterByFormula"])
+    return [{"id": "recRENAMED000001", "fields": {rc.TK["name"]: "Ask the agent about Unit 9", rc.TK["status"]: "Today",
+             rc.TK["notes"]: "x\\nRENT AGENT KEY: recAgent:2026-09-30", rc.TK["description"]: ""}}]
+rc.fetch_all = fetch_all
+spec2 = importlib.util.spec_from_file_location("rc2", os.path.join(${JSON.stringify(SCRIPTS)}, "rent-check.py"))
+rc2 = importlib.util.module_from_spec(spec2); spec2.loader.exec_module(rc2)
+rc2.fetch_all = fetch_all
+print(json.dumps({"found": rc2.read_agent_late(), "formula": seen[-1]}))`);
+    expect(r.found).toEqual({ 'recAgent:2026-09-30': { id: 'recRENAMED000001', status: 'Today' } });
+    expect(r.formula).toContain("FIND('RENT AGENT KEY: ', {Notes}&'')");
+    expect(r.formula).toContain("LEFT({Task Name}, 17)='AGENT RENT LATE: '");
+  });
+
+  it('a lane A task for a tenancy with no unit linked never carries the surname in its name', () => {
+    const r = py(`
+ts = [tenancy("recNoUnit", 30, 500)]
+ts[0]["fields"][TY["unitRef"]] = []
+ts[0]["fields"][TY["surname"]] = "Sample"
+res, rows = run(ts, [paid("recNoUnit", "2026-08-30", 500)])
+print(json.dumps([p["name"] for p in rc.task_plan(res, ts, {}, DAY)]))`);
+    expect(r).toEqual(['RENT LATE: a tenancy with no unit linked, rent due 30 Sep (reminder)']);
   });
 
   it('Roy\'s task is created already his and emailed; an open one is offered to his email again; switched off or dry, nothing is written', () => {

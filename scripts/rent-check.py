@@ -687,7 +687,8 @@ def task_plan(res, tenancies, existing, day):
         f = by_id.get(r["id"]) or {}
         plan.append({
             "key": key, "tenancy": r["id"], "tenants": list(f.get(TY["tenants"]) or []),
-            "name": f"{TASK_PREFIX}{r['unit']}, rent due {owed.strftime('%-d %b')} ({word})",
+            # The tenant's surname stands in for a missing unit: never in a task name (lane B's rule).
+            "name": f"{TASK_PREFIX}{lane_b_rules.place_name(r['unit'])}, rent due {owed.strftime('%-d %b')} ({word})",
             "description": "\n".join([
                 f"Late rent found by the daily rent check on {day.strftime('%-d %b %Y')}.",
                 "TRIAL: you draft, Kevin checks, nothing is sent to the tenant.",
@@ -769,7 +770,8 @@ def agent_late_plan(res, tenancies, existing, day):
     by_id = {r["id"]: r.get("fields") or {} for r in tenancies}
     plan = []
     for r in res["tenancies"]:
-        if r["lane"] != "late" or r["status"] != IN_PAYMENT or r["type"] != AGENT_MANAGED or r.get("noChase"):
+        # In Payment or a cash flow void: either way the letting agent holds the rent (review, 4 Oct 2026).
+        if r["lane"] != "late" or r["status"] not in (IN_PAYMENT, CFV) or r["type"] != AGENT_MANAGED or r.get("noChase"):
             continue
         if "daysLate" not in r and not r.get("beyond"):
             continue
@@ -803,10 +805,13 @@ def agent_late_plan(res, tenancies, existing, day):
 
 def read_agent_late():
     """{key: task} for every AGENT RENT LATE task, whatever its status (a closed one still counts: one
-    task per owed payment). The formula uses the field NAME: a rename is an error, never an empty read."""
+    task per owed payment). Found by its name OR its key line, so a task renamed by hand is still found
+    (review, 4 Oct 2026). The formula uses field NAMES: a rename is an error, never an empty read."""
     out = {}
+    formula = (f"OR(LEFT({{Task Name}}, {len(AGENT_LATE_PREFIX)})='{AGENT_LATE_PREFIX}', "
+               f"FIND('{AGENT_LATE_MARK}', {{Notes}}&''), FIND('{AGENT_LATE_MARK}', {{Description}}&''))")
     for rec in fetch_all(T_TASKS, {"fields[]": [TK["name"], TK["status"], TK["notes"], TK["description"]],
-                                   "filterByFormula": f"LEFT({{Task Name}}, {len(AGENT_LATE_PREFIX)})='{AGENT_LATE_PREFIX}'"}):
+                                   "filterByFormula": formula}):
         f = rec.get("fields") or {}
         for line in (str(f.get(TK["notes"]) or "") + "\n" + str(f.get(TK["description"]) or "")).splitlines():
             if line.strip().startswith(AGENT_LATE_MARK):

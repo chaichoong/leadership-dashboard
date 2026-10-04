@@ -26,20 +26,22 @@ for name, value in (("GHL_KEY_PATH", "k"), ("GHL_LOCATION_PATH", "locTest")):
     open(path, "w").write(value)
     setattr(st, name, path)
 AF = st.AF
+import agent_email_format as aef
+def trial_ended(): aef.TRIAL_AGENTS.clear()          # what Kevin's cut-over PR does
 CFV = "rec7aHLK1Q8fMLRXH"
 OTHER = "recOtherAgent0001"
 OUTPUT = ("TEXT TO: 07700 900123\\nTEXT: Hello Sam, your rent due 1 Oct has not reached us. Please pay or reply. Roy, Agile Lets\\n"
           "TO: sam@example.com\\nFROM: info@agilelets.co.uk\\nSUBJECT: Your rent at 1 Example Road\\n---\\nHello Sam,\\n\\nBody.\\n\\n"
           "Kind regards\\nRoy Lavin\\nAgile Lets\\n\\n**Carrying this out will involve:** an email and a text.")
-def card(output=OUTPUT, outcome="Approved as-is", agent=OTHER, name="Rent reminder: Unit 9", ttype="Correspondence",
-         approved_at="2026-10-03T10:00:00.000Z", tenants=("recTenantTest0001",)):
+def card(output=OUTPUT, outcome="Approved as-is", agent=CFV, name="RENT LATE: Unit 9, rent due 1 Oct (reminder)", ttype="Correspondence",
+         approved_at="2026-10-03T10:00:00.000Z", tenants=("recTenantTest0001",), status="Today", notes="RENT CHECK KEY: recT:2026-10-01:1"):
     return {"id": "recCARDTEXT000001", "createdTime": "2026-10-03T09:00:00.000Z", "fields": {
         AF["name"]: name, AF["agentOutput"]: output, AF["approvalOutcome"]: outcome, AF["taskType"]: ttype,
         AF["sentForApprovalBy"]: [agent], AF["teamMember"]: [agent], AF["approvedAt"]: approved_at,
-        AF["notes"]: "", AF["tenants"]: list(tenants)}}
+        AF["notes"]: notes, AF["tenants"]: list(tenants), AF["status"]: status}}
 TENANT_NUMBER = {"recTenantTest0001": "+44 7700 900123"}
 CALLS = []
-def run(rec, dry=False, contact="ghlContact1", ghl_fail=None):
+def run(rec, dry=False, contact="ghlContact1", ghl_fail=None, contact_phone="+447700900123"):
     CALLS.clear()
     def airtable(method, path, payload=None):
         CALLS.append(["airtable", method, path.split("?")[0]])
@@ -52,9 +54,9 @@ def run(rec, dry=False, contact="ghlContact1", ghl_fail=None):
     def ghl(method, path, payload=None):
         CALLS.append(["ghl", method, path.split("?")[0], payload])
         if path.startswith("/contacts/search/duplicate"):
-            return {"contact": {"id": contact} if contact else None}
+            return {"contact": {"id": contact, "phone": contact_phone} if contact else None}
         if path == "/contacts/upsert":
-            return {"contact": {"id": "ghlNew"}}
+            return {"contact": {"id": "ghlNew", "phone": contact_phone}}
         if ghl_fail:
             raise SystemExit(ghl_fail)
         return {"messageId": "msg1"}
@@ -88,8 +90,15 @@ print(json.dumps({"refused": res.get("refused"), "sends": len(sends(res)), "airt
     const r = py(`
 open(st.SWITCH, "w").write("on")
 out = {}
-for key, rec in (("trial", card(agent=CFV)), ("trialByName", card(name="RENT LATE: Unit 9, rent due 1 Oct (reminder)")),
+res = run(card()); out["trial"] = [res.get("refused", "")[:80], len(sends(res))]
+res = run(card(agent=OTHER)); out["trialByName"] = [res.get("refused", "")[:80], len(sends(res))]
+trial_ended()
+for key, rec in (
                  ("unapproved", card(outcome="")), ("changes", card(outcome="Changes requested")),
+                 ("minorEdits", card(outcome="Approved with minor edits")), ("notRentCard", card(name="Book the boiler", notes="")),
+                 ("completed", card(status="Completed")), ("cancelled", card(status="Cancelled")),
+                 ("trialSettled", card(notes="RENT CHECK KEY: recT:2026-10-01:1\\n[03 Oct 2026] TRIAL CHECKED: Kevin's verdict")),
+                 ("stamped", card(notes="RENT CHECK KEY: recT:2026-10-01:1\\n[03 Oct 2026 10:00 — send-text] SENT: text to the number ending 123")),
                  ("noMarks", card(approved_at=None)), ("admin", card(ttype="Admin")),
                  ("noText", card(output=OUTPUT.split("TO: sam")[0].replace("TEXT TO: 07700 900123\\n", "").replace(
                       "TEXT: Hello Sam, your rent due 1 Oct has not reached us. Please pay or reply. Roy, Agile Lets\\n", "") + "TO: sam" + OUTPUT.split("TO: sam")[1]))):
@@ -100,6 +109,15 @@ print(json.dumps(out))`);
     expect(r.trialByName[0]).toMatch(/trial card and is never texted/);
     expect(r.unapproved[0]).toMatch(/is not approved/);
     expect(r.changes[0]).toMatch(/is not approved/);
+    // An edit he asked for cannot be checked against a text: only a plain approval is texted.
+    expect(r.minorEdits[0]).toMatch(/is not approved as-is/);
+    expect(r.notRentCard[0]).toMatch(/not a rent lane's tenant card/);
+    expect(r.completed[0]).toMatch(/closed or was settled on the trial/);
+    expect(r.cancelled[0]).toMatch(/closed or was settled on the trial/);
+    // At the cut-over, the cards approved during the trial are history.
+    expect(r.trialSettled[0]).toMatch(/closed or was settled on the trial/);
+    // The task's own SENT stamp stops a second text even with no ledger on this Mac.
+    expect(r.stamped[0]).toMatch(/carries a SENT stamp/);
     expect(r.noMarks[0]).toMatch(/reads 'Approved as-is', but/);
     expect(r.admin[0]).toMatch(/not Correspondence/);
     expect(r.noText[0]).toMatch(/carries no TEXT TO and TEXT lines/);
@@ -109,6 +127,7 @@ print(json.dumps(out))`);
   it('the number must be a UK mobile and the Contact Number of a tenant linked to the task', () => {
     const r = py(`
 open(st.SWITCH, "w").write("on")
+trial_ended()
 landline = OUTPUT.replace("TEXT TO: 07700 900123", "TEXT TO: 01234 567890")
 other = OUTPUT.replace("TEXT TO: 07700 900123", "TEXT TO: 07700 900999")
 long = OUTPUT.replace("Please pay or reply.", "x" * 300)
@@ -124,6 +143,7 @@ print(json.dumps(out))`);
   it('an approved, matching card is texted verbatim, once; a second send, or one that may have gone, is refused', () => {
     const r = py(`
 open(st.SWITCH, "w").write("on")
+trial_ended()
 first = run(card())
 again = run(card())
 ledger = [json.loads(l)["event"] for l in open(st.LEDGER)]
@@ -135,7 +155,11 @@ retry = run(card())
 os.remove(st.LEDGER)
 fail5 = run(card(), ghl_fail="ERROR: GoHighLevel 502: bad gateway")
 after5 = run(card())
-print(json.dumps({"sent": sends(first), "ok": first["ok"], "again": again.get("refused", ""), "ledger": ledger,
+os.remove(st.LEDGER)
+wrongPhone = run(card(), contact_phone="+447700900999")
+madeWrong = run(card(), contact="", contact_phone="+447700900999")
+print(json.dumps({"wrongPhone": wrongPhone.get("refused", ""), "wrongPhoneSends": len(sends(wrongPhone)),
+                  "madeWrong": madeWrong.get("refused", ""), "madeWrongSends": len(sends(madeWrong)),"sent": sends(first), "ok": first["ok"], "again": again.get("refused", ""), "ledger": ledger,
                   "upsert": [c[2] for c in new["calls"] if c[0] == "ghl"], "retry": len(sends(retry)), "after5": after5.get("refused", "")}))`);
     expect(r.sent).toHaveLength(1);
     expect(r.sent[0][3]).toEqual({ type: 'SMS', contactId: 'ghlContact1',
@@ -149,11 +173,14 @@ print(json.dumps({"sent": sends(first), "ok": first["ok"], "again": again.get("r
     expect(r.retry).toBe(1);
     // Anything else may have gone: never sent twice.
     expect(r.after5).toMatch(/may have gone \(uncertain/);
+    // The text goes to the contact's own phone: a contact holding another number is refused.
+    expect([r.wrongPhone, r.wrongPhoneSends]).toEqual([expect.stringMatching(/holds a different phone/), 0]);
+    expect([r.madeWrong, r.madeWrongSends]).toEqual([expect.stringMatching(/holds a different phone/), 0]);
   });
 
   it('a dry run checks the card, finds the contact read only, and sends nothing (even switched off, even on trial)', () => {
     const r = py(`
-res = run(card(agent=CFV, outcome=""), dry=True)
+res = run(card(outcome=""), dry=True)
 print(json.dumps({"out": json.loads(res["ok"]), "ghl": [[c[1], c[2]] for c in res["calls"] if c[0] == "ghl"]}))`);
     expect(r.out).toMatchObject({ dryRun: true, switchedOn: false, contactFound: true, numberEnds: '123' });
     expect(r.out.trial).toMatch(/trial run/);
@@ -175,6 +202,28 @@ mail = aef.parse_output(OUTPUT)
 print(json.dumps({"to": mail["to"], "body": mail["body"], "text": list(aef.parse_text(OUTPUT)),
                   "none": aef.parse_text(OUTPUT.split("TEXT: ")[0].replace("TEXT TO: 07700 900123\\n", "") + OUTPUT.split("Roy, Agile Lets\\n", 1)[1]),
                   "sameMap": all(se.AF[k] == v for k, v in st.AF.items() if k in se.AF), "half": None}))`);
+    const bad = py(`
+import agent_email_format as aef
+below = OUTPUT.replace("TEXT TO: 07700 900123\\nTEXT: Hello Sam, your rent due 1 Oct has not reached us. Please pay or reply. Roy, Agile Lets\\n", "") + "\\nTEXT TO: 07700 900123\\nTEXT: hi"
+dash = OUTPUT.replace("Hello Sam, your rent", "Hello --- Sam, your rent")
+prose = OUTPUT.replace("Body.", "Text: reply STOP to opt out.")
+out = {}
+for key, o in (("below", below), ("dash", dash), ("prose", prose)):
+    try:
+        aef.parse_text(o); out[key] = "ok"
+    except aef.EmailFormatError as e:
+        out[key] = str(e)
+try:
+    aef.validate_submission(dash); out["submit"] = "accepted"
+except aef.EmailFormatError as e:
+    out["submit"] = str(e)
+print(json.dumps(out))`);
+    expect(bad.below).toMatch(/sits below the email's headers/);
+    expect(bad.dash).toMatch(/may not contain "---"/);
+    // An email that merely says "Text: ..." is untouched.
+    expect(bad.prose).toBe('ok');
+    // And a bad text is refused at submit, before Kevin ever sees the card.
+    expect(bad.submit).toMatch(/may not contain "---"/);
     expect(r.to).toEqual(['sam@example.com']);
     expect(r.body).not.toMatch(/TEXT|07700/);
     expect(r.text).toEqual(['07700 900123', 'Hello Sam, your rent due 1 Oct has not reached us. Please pay or reply. Roy, Agile Lets']);

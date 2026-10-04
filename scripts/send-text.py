@@ -14,10 +14,16 @@ Agent Output of an approved Correspondence task. It refuses, in this order:
   * while text sending is switched off: until ~/.config/od/text-sending-on exists (Kevin's switch,
     only at the cut-over), nothing is ever sent, whatever else is true;
   * a trial agent's card (TRIAL_AGENTS, scripts/agent_email_format.py): never sent, approved or not;
-  * a card Kevin has not approved in an approval surface (scripts/approval_evidence.py);
+  * any card but a rent lane's own tenant card (text_card: RENT LATE / RENT ASK, or their key line);
+  * a closed card (Completed or Cancelled), or one the trial settled (TRIAL CHECKED): at the cut-over,
+    the cards Kevin approved during the trial are history, never a queue of texts;
+  * a card Kevin has not approved AS-IS in an approval surface (scripts/approval_evidence.py): an edit he
+    asked for cannot be checked against a text, so "Approved with minor edits" sends no text;
   * a card with no TEXT lines, or a text over 300 characters;
   * a number that is not a UK mobile, or is not the Contact Number of a tenant linked to the task;
-  * a card already texted, or one whose send may have gone (the ledger: never twice).
+  * a card already texted, or one whose send may have gone: the ledger on this Mac AND the SENT stamp on
+    the task itself (a lost ledger or another Mac never sends twice);
+  * a GoHighLevel contact whose own phone is not the approved number.
 
 `send TASKID --dry-run` checks everything but the switch and the approval, finds the tenant's contact
 in GoHighLevel (read only) and sends nothing. `lookup --tenant TENANTID` finds one tenant's contact,
@@ -40,7 +46,7 @@ from datetime import datetime, timezone
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from approval_evidence import approval_evidence_problem  # noqa: E402
-from agent_email_format import EmailFormatError, parse_text, trial_problem  # noqa: E402
+from agent_email_format import TRIAL_STAMP, EmailFormatError, parse_text, text_card, trial_problem  # noqa: E402
 
 BASE_ID, TASKS, TENANTS = "appnqjDpqDniH3IRl", "tblqB8b22hKBL4PF1", "tblX4elTuu01gwBYh"
 AF = {  # kept identical to scripts/send-email.py AF (tests/send-text.test.js)
@@ -50,7 +56,8 @@ AF = {  # kept identical to scripts/send-email.py AF (tests/send-text.test.js)
     "tenants": "fld6ZcfEogJmeQj2c",
 }
 TENANT_PHONE = "fldraHUkWfqo4olLF"          # Tenants: Contact Number
-APPROVED = ("Approved as-is", "Approved with minor edits")
+APPROVED_AS_IS = "Approved as-is"
+SENT_STAMP = "— send-text] SENT:"
 CONFIG = os.path.expanduser("~/.config/od")
 SWITCH = os.path.join(CONFIG, "text-sending-on")
 PAT_PATH, GHL_KEY_PATH, GHL_LOCATION_PATH = (os.path.join(CONFIG, f) for f in ("airtable_pat", "ghl_api_key", "ghl_location_id"))
@@ -149,25 +156,40 @@ def ledger_append(row):
 
 
 def find_contact(number):
-    """The GoHighLevel contact id for a number in the Agile Lets location, or "" (read only)."""
+    """The GoHighLevel contact id for a number in the Agile Lets location, or "" (read only). A contact
+    whose own phone is not that number is refused: the text goes to the contact's phone."""
     location = read_secret(GHL_LOCATION_PATH, "GoHighLevel location id")
     found = ghl("GET", "/contacts/search/duplicate?" + urllib.parse.urlencode({"locationId": location, "number": number}))
-    return str(((found or {}).get("contact") or {}).get("id") or "")
+    contact = (found or {}).get("contact") or {}
+    if contact and uk_mobile(contact.get("phone")) != number:
+        sys.exit("REFUSED: the GoHighLevel contact found for the number holds a different phone; nothing sent.")
+    return str(contact.get("id") or "")
 
 
 def load_card(task_id, dry_run):
     """(task fields, number, message) of a card that passes every gate but the switch, or exits."""
     rec = airtable("GET", f"{TASKS}/{task_id}?returnFieldsByFieldId=true")
     f = rec.get("fields") or {}
+    notes = str(f.get(AF["notes"]) or "")
     trial = trial_problem(list(f.get(AF["sentForApprovalBy"]) or []) + list(f.get(AF["teamMember"]) or []),
-                          f.get(AF["name"], ""), f.get(AF["notes"], ""))
+                          f.get(AF["name"], ""), notes)
     if trial and not dry_run:
         sys.exit(f"REFUSED: task {task_id} is a trial card and is never texted: {trial}.")
+    if not text_card(f.get(AF["name"], ""), notes):
+        sys.exit(f"REFUSED: task {task_id} is not a rent lane's tenant card, and only those are texted.")
+    if SENT_STAMP in notes:
+        sys.exit(f"REFUSED: task {task_id} carries a SENT stamp from send-text: it was texted. Never sent twice.")
+    status = f.get(AF["status"]) or ""
+    status = status.get("name", "") if isinstance(status, dict) else status
+    if status in ("Completed", "Cancelled") or TRIAL_STAMP in notes:
+        sys.exit(f"REFUSED: task {task_id} is closed or was settled on the trial ({status or 'no status'}); "
+                 "it is history, never texted.")
     outcome = (f.get(AF["approvalOutcome"]) or {}).get("name") if isinstance(f.get(AF["approvalOutcome"]), dict) \
         else (f.get(AF["approvalOutcome"]) or "")
     if not dry_run:
-        if outcome not in APPROVED:
-            sys.exit(f"REFUSED: task {task_id} is not approved (Approval Outcome: {outcome or 'empty'}).")
+        if outcome != APPROVED_AS_IS:
+            sys.exit(f"REFUSED: task {task_id} is not approved as-is (Approval Outcome: {outcome or 'empty'}): "
+                     "a text is sent only as Kevin read it.")
         evidence = approval_evidence_problem(f, rec.get("createdTime", ""))
         if evidence:
             sys.exit(f"REFUSED: task {task_id} reads {outcome!r}, but {evidence}.")
@@ -215,7 +237,11 @@ def _cmd_send(args):
     if not contact:
         location = read_secret(GHL_LOCATION_PATH, "GoHighLevel location id")
         made = ghl("POST", "/contacts/upsert", {"locationId": location, "phone": number})
-        contact = str(((made or {}).get("contact") or {}).get("id") or "")
+        made = (made or {}).get("contact") or {}
+        if uk_mobile(made.get("phone")) != number:
+            sys.exit(f"ERROR: task {args.task}: the GoHighLevel contact made for the number holds a different phone; "
+                     "nothing sent.")
+        contact = str(made.get("id") or "")
         if not contact:
             sys.exit(f"ERROR: task {args.task}: GoHighLevel did not return a contact for the number; nothing sent.")
     ledger_append({"task": args.task, "ts": now_iso(), "event": "intent", "numberEnds": number[-3:], "chars": len(message)})
@@ -224,7 +250,7 @@ def _cmd_send(args):
     except SystemExit as exc:
         # A refusal GoHighLevel answers with (4xx) left nothing; anything else may have gone.
         error = str(exc)[:300]
-        ledger_append({"task": args.task, "ts": now_iso(), "event": "failed" if re.search(r"GoHighLevel 4\d\d", error)
+        ledger_append({"task": args.task, "ts": now_iso(), "event": "failed" if re.match(r"ERROR: GoHighLevel 4\d\d:", error)
                        else "uncertain", "error": error})
         raise
     ledger_append({"task": args.task, "ts": now_iso(), "event": "sent", "numberEnds": number[-3:],

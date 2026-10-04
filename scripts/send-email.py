@@ -93,7 +93,8 @@ from datetime import datetime, timedelta, timezone
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from adobe_audit import audit_problem  # noqa: E402
 from approval_evidence import approval_evidence_problem  # noqa: E402
-from agent_email_format import (  # noqa: E402
+from agent_email_format import (
+    TRIAL_STAMP,  # noqa: E402
     EmailFormatError,
     parse_output as parse_email_output,
     BUSINESS_SENDER,
@@ -380,6 +381,10 @@ def load_approved(task_id, require_approval=True, rule=None):
     if trial:
         sys.exit(f"REFUSED: task {task_id} is a trial card and is never sent: {trial}.\n"
                  "         Kevin's verdict is the result. Close it with: agent-dispatch.py trial-settle")
+    # A card the trial settled stays history after the trial ends (review, 4 Oct 2026): at the cut-over,
+    # the cards Kevin approved during the trial must never become a queue of emails.
+    if TRIAL_STAMP in str(f.get(AF["notes"], "") or ""):
+        sys.exit(f"REFUSED: task {task_id} was settled on the trial ({TRIAL_STAMP}); it is history and is never sent.")
     if rule:
         # THE RULE SEND (Kevin, 17 Sep 2026). Not approved by Kevin, so the
         # email must pass the rule itself, re-checked HERE from the stored task

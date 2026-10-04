@@ -185,25 +185,47 @@ def strip_track_record(text):
     return TRACK_RECORD_RE.sub("", text or "")
 
 
+# Who may send a text at all (review, 4 Oct 2026): only the rent lanes' own tenant cards, known by
+# their name or their key line (TRIAL_TASK_MARKS below). Any other card's TEXT lines are never sent.
+TEXT_CARD_MARKS = {"prefix": ("RENT LATE: ", "RENT ASK: "), "note": "RENT CHECK KEY: "}
+
+
+def text_card(name="", notes=""):
+    """True for a card scripts/send-text.py may text from: a rent lane's own tenant card."""
+    return (str(name or "").startswith(TEXT_CARD_MARKS["prefix"])
+            or TEXT_CARD_MARKS["note"] in str(notes or ""))
+
+
 def parse_text(output):
     """(number, message) of the TEXT TO and TEXT lines above an email's headers, or None when the card
-    carries no text. Raises EmailFormatError on a half block, a second one, or a message over TEXT_MAX."""
-    text = strip_track_record(strip_tier1_banner(output or ""))
-    head = text.partition("---")[0] if "---" in text else ""
+    carries no text. Raises EmailFormatError on a half block, a second one, a message over TEXT_MAX,
+    TEXT lines below the headers (they would go out in the email), or a "---" in the message (the email
+    parser would cut the headers there)."""
+    lines = strip_track_record(strip_tier1_banner(output or "")).splitlines()
+    # The headers end at the first line that is exactly "---", so a "---" inside the TEXT line is seen.
+    cut = next((i for i, line in enumerate(lines) if line.strip() == "---"), None)
+    head, body = (lines[:cut], lines[cut + 1:]) if cut is not None else ([], lines)
     found = {}
-    for line in head.splitlines():
+    for line in head:
         key, sep, val = line.partition(":")
         name = key.strip().upper()
         if sep and name in TEXT_HEADERS:
             if name in found:
                 raise EmailFormatError(f"the card has more than one {name} line")
             found[name] = val.strip()
+    for line in body:
+        # The exact block's spelling only, so an email that says "Text: ..." in passing is untouched.
+        if line.strip().startswith(("TEXT TO:", "TEXT:")):
+            raise EmailFormatError("a TEXT line sits below the email's headers, so it would go out in the email; "
+                                   "the TEXT TO and TEXT lines go above them")
     if not found:
         return None
     if not found.get("TEXT TO") or not found.get("TEXT"):
         raise EmailFormatError("a text needs both a TEXT TO line and a TEXT line")
     if len(found["TEXT"]) > TEXT_MAX:
         raise EmailFormatError(f"the TEXT is {len(found['TEXT'])} characters; the most is {TEXT_MAX}")
+    if "---" in found["TEXT"] or "---" in found["TEXT TO"]:
+        raise EmailFormatError('the TEXT may not contain "---", which ends the email\'s headers')
     return found["TEXT TO"], found["TEXT"]
 
 
@@ -581,6 +603,7 @@ def validate_submission(output):
     Returns the parsed email so the caller does not parse twice. Never called
     on the send path — see the note above.
     """
+    parse_text(output)                                 # a bad text is refused before Kevin sees the card, by name
     parsed = parse_output(output)
     sender = parsed["from"]
     if not sender:
