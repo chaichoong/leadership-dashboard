@@ -277,6 +277,17 @@ describe('saving the answers', () => {
     expect(asked).toEqual(['unknown', '2001:db8:aa:bb::/64']);
   });
 
+  it('a broken body or a missing code uses no shared slot and reads nothing', async () => {
+    let shared = 0;
+    env.TENANT_LIMIT = { limit: async () => ({ success: true }) };
+    env.TENANT_ALL = { limit: async () => { shared++; return { success: true }; } };
+    reads = 0;
+    const raw = (body) => worker.fetch(new Request('https://pm.test/tenant-form/open', { method: 'POST', body, headers: { Origin: ORIGIN, 'Content-Type': 'application/json' } }), env, ctx);
+    expect((await raw('not json')).status).toBe(400);
+    for (const body of ['null', '7', '{}', '{"code":null}', '{"code":["x"]}']) expect((await raw(body)).status, body).toBe(404);
+    expect([shared, reads]).toEqual([0, 0]);
+  });
+
   it('a public route never retries a refused Airtable call', async () => {
     const { code } = await makeLink();
     let hits = 0;
