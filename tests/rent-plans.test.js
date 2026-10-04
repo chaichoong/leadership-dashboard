@@ -210,9 +210,8 @@ class RC:
         notes_written[tid] = payload["fields"][F["notes"]]
         return {}
 def data_with(tx, rent=None, due=None):
-    f = {rc.TY["unitRef"]: ["Unit 9 – 1 Example Road"], rc.TY["tenants"]: ["recTENANTPLAN001"], rc.TY["payStatus"]: "In Payment"}
-    if rent:
-        f.update({rc.TY["rent"]: rent, rc.TY["dueDay"]: str(due)})
+    f = {rc.TY["unitRef"]: ["Unit 9 – 1 Example Road"], rc.TY["tenants"]: ["recTENANTPLAN001"], rc.TY["payStatus"]: "In Payment",
+         rc.TY["rent"]: rent or 500, rc.TY["dueDay"]: str(due if due is not None else 3)}
     return {"tenancies": [{"id": TEN, "fields": f}],
             "tx": [{"fields": {rc.TX["date"]: d, rc.TX["tenancy"]: [TEN], rc.TX["amount"]: a}} for d, a in tx]}
 RES = {"lanes": {TEN: "late"}, "feed": {"blocked": []}, "tenancies": []}
@@ -305,9 +304,8 @@ class RC:
     def fetch_all(self, table, params=None):
         return [{"id": k, "fields": v} for k, v in CONTACTS.items()] if table == rc.T_TENANTS else self.cards
 def data_with(tx, rent=None, due=None):
-    f = {rc.TY["unitRef"]: ["Unit 9 – 1 Example Road"], rc.TY["tenants"]: ["recTENANTPLAN001"], rc.TY["payStatus"]: "In Payment"}
-    if rent:
-        f.update({rc.TY["rent"]: rent, rc.TY["dueDay"]: str(due)})
+    f = {rc.TY["unitRef"]: ["Unit 9 – 1 Example Road"], rc.TY["tenants"]: ["recTENANTPLAN001"], rc.TY["payStatus"]: "In Payment",
+         rc.TY["rent"]: rent or 500, rc.TY["dueDay"]: str(due if due is not None else 3)}
     return {"tenancies": [{"id": TEN, "fields": f}],
             "tx": [{"fields": {rc.TX["date"]: d, rc.TX["tenancy"]: [TEN], rc.TX["amount"]: a}} for d, a in tx]}
 def st(cards, data, day, res=None):
@@ -462,9 +460,8 @@ class RC:
         written[tid] = payload["fields"][F["notes"]]
         return {}
 def data_with(tx, rent=None, due=None, status="In Payment", payType=None, noChase=()):
-    f = {rc.TY["unitRef"]: ["Unit 9 – 1 Example Road"], rc.TY["tenants"]: ["recTENANTPLAN001"], rc.TY["payStatus"]: status}
-    if rent:
-        f.update({rc.TY["rent"]: rent, rc.TY["dueDay"]: due})
+    f = {rc.TY["unitRef"]: ["Unit 9 – 1 Example Road"], rc.TY["tenants"]: ["recTENANTPLAN001"], rc.TY["payStatus"]: status,
+         rc.TY["rent"]: rent or 500, rc.TY["dueDay"]: due if due is not None else "3"}
     d = {"tenancies": [{"id": TEN, "fields": f}], "noChase": list(noChase),
          "tx": [{"fields": {rc.TX["date"]: dd, rc.TX["tenancy"]: [TEN], rc.TX["amount"]: a}} for dd, a in tx]}
     if payType:
@@ -585,10 +582,10 @@ class RC:
         return [{"id": k, "fields": v} for k, v in CONTACTS.items()] if table == rc.T_TENANTS else self.cards
 TEN2 = "recTENANCYPLAN002"
 def data_with(tx, rent=None, due=None):
-    f = {rc.TY["unitRef"]: ["Unit 9 – 1 Example Road"], rc.TY["tenants"]: ["recTENANTPLAN001"], rc.TY["payStatus"]: "In Payment"}
-    if rent:
-        f.update({rc.TY["rent"]: rent, rc.TY["dueDay"]: str(due)})
-    return {"tenancies": [{"id": TEN, "fields": f}, {"id": TEN2, "fields": {rc.TY["tenants"]: ["recOTHERTENANT01"], rc.TY["payStatus"]: "In Payment"}}],
+    f = {rc.TY["unitRef"]: ["Unit 9 – 1 Example Road"], rc.TY["tenants"]: ["recTENANTPLAN001"], rc.TY["payStatus"]: "In Payment",
+         rc.TY["rent"]: rent or 500, rc.TY["dueDay"]: str(due if due is not None else 3)}
+    return {"tenancies": [{"id": TEN, "fields": f}, {"id": TEN2, "fields": {rc.TY["tenants"]: ["recOTHERTENANT01"], rc.TY["payStatus"]: "In Payment",
+                                                                         rc.TY["rent"]: 500, rc.TY["dueDay"]: "3"}}],
             "tx": [{"fields": {rc.TX["date"]: d, rc.TX["tenancy"]: [TEN], rc.TX["amount"]: a}} for d, a in tx]}
 RES = {"lanes": {TEN: "late", TEN2: "late"}, "feed": {"blocked": []}, "tenancies": []}
 def sent(day): return f"[{day} 10:00 — send-email] SENT: email to sam@example.com"
@@ -676,8 +673,39 @@ def sent(day): return f"[{day} 10:00 — send-email] SENT: email to sam@example.
 # Rent £500 on the 1st; card made and sent 5 Oct; promises 15 Oct £150 and 30 Oct £150; Universal Credit's
 # November rent lands 28 Oct.
 c = card(out=output(plan=(("2026-10-15", 150), ("2026-10-30", 150))), notes=sent("05 Oct 2026"), created="2026-10-05T09:00:00.000Z")
-print(json.dumps(rp.state(c, pays(("2026-10-15", 150), ("2026-10-28", 500)), date(2026, 11, 1), {"rent": 500, "dueDay": "1"})))`);
-    expect(r).toMatchObject({ state: 'missed', missedOn: '2026-10-30', owed: 300, paid: 150 });
+t = {"rent": 500, "dueDay": "1"}
+print(json.dumps({"before": rp.state(c, pays(("2026-10-15", 150), ("2026-10-28", 500)), date(2026, 11, 1), t)["state"],
+                  "after": rp.state(c, pays(("2026-10-15", 150), ("2026-10-28", 500)), date(2026, 11, 3), t)}))`);
+    // The last promise's window meets November's: the last check moves to 1 Nov and holds both, £300 + £500.
+    expect(r.before).toBe('open');
+    expect(r.after).toMatchObject({ state: 'missed', missedOn: '2026-11-01', owed: 800, paid: 650 });
+  });
+
+  it('a month-end plan kept to the letter, with the next rent paid, is kept (review, 5 Oct 2026)', () => {
+    const r = py(H5 + `
+t = {"rent": 500, "dueDay": "1"}
+c = card(out=output(plan=(("2026-10-15", 150), ("2026-10-30", 150))), notes=sent("05 Oct 2026"), created="2026-10-05T09:00:00.000Z")
+one = card(out=output(plan=(("2026-10-28", 300),)), notes=sent("26 Oct 2026"), created="2026-10-26T09:00:00.000Z")
+print(json.dumps({
+  "kept": rp.state(c, pays(("2026-10-15", 150), ("2026-10-30", 150), ("2026-11-01", 500)), date(2026, 11, 3), t)["state"],
+  "noRent": rp.state(c, pays(("2026-10-15", 150), ("2026-10-30", 150)), date(2026, 11, 3), t)["state"],
+  "onePromise": rp.state(one, pays(("2026-10-28", 300), ("2026-11-01", 500)), date(2026, 11, 3), t)["state"],
+  "noDueDay": rp.state(c, [], date(2026, 10, 8), {"rent": 500, "dueDay": ""})["state"],
+  "noRentSet": rp.state(c, [], date(2026, 10, 8), {"rent": 0, "dueDay": "1"})["state"],
+}))`);
+    expect(r.kept).toBe('kept');
+    // Kept his promises but not November's rent by 3 Nov: he is late on November, so the chase is right.
+    expect(r.noRent).toBe('missed');
+    expect(r.onePromise).toBe('kept');
+    expect([r.noDueDay, r.noRentSet]).toEqual(['bad', 'bad']);
+  });
+
+  it('money paid on the drafting day was already netted off, and is never counted again', () => {
+    const r = py(H5 + `
+# He owed £1,000; £500 landed and was matched on 5 Oct before the draft; promises 15 Oct £250 and 25 Oct £250.
+c = card(out=output(plan=(("2026-10-15", 250), ("2026-10-25", 250))), notes=sent("05 Oct 2026"), created="2026-10-05T11:00:00.000Z")
+print(json.dumps(rp.state(c, pays(("2026-10-05", 500)), date(2026, 10, 27), {"rent": 500, "dueDay": "3"})))`);
+    expect(r).toMatchObject({ state: 'missed', missedOn: '2026-10-15' });
   });
 
   it('money already in meets a promise even while the feed is stale: the plan is open, not waiting', () => {
