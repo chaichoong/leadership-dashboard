@@ -27,7 +27,9 @@ for name, value in (("GHL_KEY_PATH", "k"), ("GHL_LOCATION_PATH", "locTest"), ("F
     setattr(st, name, path)
 AF = st.AF
 import agent_email_format as aef
-def trial_ended(): aef.TRIAL_AGENTS.clear()          # what Kevin's cut-over PR does
+def trial_ended():                                  # what Kevin's cut-over PR does: the entry moves to TRIAL_ENDED
+    aef.TRIAL_ENDED["rec7aHLK1Q8fMLRXH"] = "2026-10-03T08:00:00Z"
+    aef.TRIAL_AGENTS.clear()
 CFV = "rec7aHLK1Q8fMLRXH"
 OTHER = "recOtherAgent0001"
 OUTPUT = ("TEXT TO: 07700 900123\\nTEXT: Hello Sam, your rent due 1 Oct has not reached us. Please pay or reply. Roy, Agile Lets\\n"
@@ -75,6 +77,49 @@ function py(body) {
   return JSON.parse(out.trim().split('\n').pop());
 }
 
+describe('an edit after approval cannot move the text into the email', () => {
+  it('revise, retype and the email send door all refuse TEXT lines below the headers', () => {
+    const r = py(`
+se = load_mod("se", "send-email.py")
+ad = load_mod("ad", "agent-dispatch.py")
+TEXT_BLOCK = "TEXT TO: 07700 900123\\nTEXT: Hello Sam, your rent due 1 Oct has not reached us. Please pay or reply. Roy, Agile Lets\\n"
+moved = OUTPUT.replace(TEXT_BLOCK, "").replace("Body.", "Body, edited.\\n" + TEXT_BLOCK.strip())
+out = {}
+try:
+    se.parse_output(moved, "recX"); out["send"] = "parsed"
+except SystemExit as e:
+    out["send"] = str(e.code)
+out["sendGood"] = bool(se.parse_output(OUTPUT, "recX")["to"])
+patched = []
+ad.patch_task = lambda tid, fields: patched.append(tid)
+def view(outcome, ttype, output):
+    return {"id": "recX", "outcome": outcome, "feedback": "say edited", "agentOutput": output, "taskType": ttype, "notes": "", "name": "RENT LATE: Unit 9"}
+ad.get_task = lambda tid: {}
+path = os.path.join(SCRATCH, "rev.md")
+for key, revised in (("revise", moved), ("reviseGood", OUTPUT.replace("Body.", "Body, edited."))):
+    open(path, "w").write(revised)
+    ad.task_view = lambda rec: view("Approved with minor edits", "Correspondence", OUTPUT)
+    try:
+        ad.cmd_revise(argparse.Namespace(task="recX", output_file=path)); out[key] = "stored"
+    except SystemExit as e:
+        out[key] = str(e.code)
+ad.task_view = lambda rec: view("Approved as-is", "Admin", moved)
+try:
+    ad.cmd_retype(argparse.Namespace(task="recX", type="Correspondence", reason="it is an email")); out["retype"] = "retyped"
+except SystemExit as e:
+    out["retype"] = str(e.code)
+out["patched"] = patched
+print(json.dumps(out))`);
+    expect(r.send).toMatch(/TEXT line sits below the email's headers/);
+    expect(r.sendGood).toBe(true);
+    expect(r.revise).toMatch(/refusing to revise recX .*TEXT line sits below/);
+    expect(r.reviseGood).toBe('stored');
+    expect(r.retype).toMatch(/refusing to retype recX to Correspondence: .*TEXT line sits below/);
+    // Only the good revision was written.
+    expect(r.patched).toEqual(['recX']);
+  });
+});
+
 describe('the text route refuses everything but an approved, matching card, and only once switched on', () => {
   it('switched off: nothing is sent, whatever the card', () => {
     const r = py(`
@@ -99,11 +144,12 @@ for key, rec in (
                  ("completed", card(status="Completed")), ("cancelled", card(status="Cancelled")),
                  ("trialSettled", card(notes="RENT CHECK KEY: recT:2026-10-01:1\\n[03 Oct 2026] TRIAL CHECKED: Kevin's verdict")),
                  ("stamped", card(notes="RENT CHECK KEY: recT:2026-10-01:1\\n[03 Oct 2026 10:00 — send-text] SENT: text to the number ending 123")),
-                 ("noMarks", card(approved_at=None)), ("admin", card(ttype="Admin")),
+                 ("copied", card(approved_at="2026-10-03T08:30:00.000Z")), ("blankApproval", card(approved_at=None)),
+                 ("inTrial", card(approved_at="2026-10-03T07:00:00.000Z")), ("admin", card(ttype="Admin")),
                  ("noText", card(output=OUTPUT.split("TO: sam")[0].replace("TEXT TO: 07700 900123\\n", "").replace(
                       "TEXT: Hello Sam, your rent due 1 Oct has not reached us. Please pay or reply. Roy, Agile Lets\\n", "") + "TO: sam" + OUTPUT.split("TO: sam")[1]))):
     res = run(rec)
-    out[key] = [res.get("refused", "")[:80], len(sends(res))]
+    out[key] = [res.get("refused", "")[:160], len(sends(res))]
 print(json.dumps(out))`);
     expect(r.trial[0]).toMatch(/trial card and is never texted/);
     expect(r.trialByName[0]).toMatch(/trial card and is never texted/);
@@ -118,7 +164,11 @@ print(json.dumps(out))`);
     expect(r.trialSettled[0]).toMatch(/closed or was settled on the trial/);
     // The task's own SENT stamp stops a second text even with no ledger on this Mac.
     expect(r.stamped[0]).toMatch(/carries a SENT stamp/);
-    expect(r.noMarks[0]).toMatch(/reads 'Approved as-is', but/);
+    // After the trial ended, but before the task existed: copied, not given.
+    expect(r.copied[0]).toMatch(/reads 'Approved as-is', but its Approved At is earlier/);
+    expect(r.blankApproval[0]).toMatch(/trial card and is never texted: it carries no readable approval time/);
+    // Approved during the trial and not yet settled when the cut-over merged: never texted.
+    expect(r.inTrial[0]).toMatch(/trial card and is never texted: it was approved during the trial run/);
     expect(r.admin[0]).toMatch(/not Correspondence/);
     expect(r.noText[0]).toMatch(/carries no TEXT TO and TEXT lines/);
     for (const k of Object.keys(r)) expect(r[k][1]).toBe(0);

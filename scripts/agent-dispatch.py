@@ -83,6 +83,7 @@ from agent_email_format import (  # noqa: E402
     TIER1_BANNER,
     EmailFormatError,
     parse_output as parse_email_output,
+    parse_text,
     strip_track_record,
     validate_submission as validate_email_submission,
     validate_submission_any as validate_any_submission,
@@ -3069,7 +3070,7 @@ def build_queue(args=None):
         # A TRIAL AGENT'S APPROVED CARD IS CHECKED, NEVER CARRIED OUT (2 Oct 2026). Handing it to a carry-out run
         # would have an agent try a send that send-email.py refuses, every 30 minutes, for ever. `trial-settle`
         # closes it in code with Kevin's verdict on the task. Listed under trialChecked, never hidden.
-        if t["outcome"] in APPROVED and trial_problem([t["agentId"]], t["name"], t["notes"]):
+        if t["outcome"] in APPROVED and trial_problem([t["agentId"]], t["name"], t["notes"], t["approvedAt"]):
             trial_checked.append(t)
             continue
         if t["outcome"] in APPROVED and t["agentId"]:
@@ -5367,6 +5368,7 @@ def cmd_revise(args):
         sys.exit(f"ERROR: refusing to revise {args.task} — {promise}")
     if t["taskType"] == "Correspondence":
         try:
+            parse_text(revised)                        # the TEXT lines too: an edit must not move them into the email
             parse_email_output(revised)
         except EmailFormatError as exc:
             sys.exit(f"ERROR: refusing to revise {args.task} — the edited "
@@ -5420,6 +5422,7 @@ def cmd_retype(args):
                 "path can carry out the email Kevin already read. Anything else is a "
                 "change of substance: send it back to him as a redo.")
         try:
+            parse_text(t["agentOutput"] or "")
             parse_email_output(t["agentOutput"] or "")
         except EmailFormatError as exc:
             sys.exit(
@@ -6956,7 +6959,7 @@ def trial_approved_tasks():
     out = []
     for rec in rows:
         t = task_view(rec)
-        if t["outcome"] in APPROVED and trial_problem([t["agentId"]], t["name"], t["notes"]) \
+        if t["outcome"] in APPROVED and trial_problem([t["agentId"]], t["name"], t["notes"], t["approvedAt"]) \
                 and not form_card(t["name"], t["notes"]):
             out.append(t)
     return out
@@ -6966,7 +6969,7 @@ def cmd_trial_settle(args):
     settled = []
     for t in trial_approved_tasks():
         stamp = note_line("trial-settle", f"{TRIAL_STAMP}: Kevin's verdict was '{t['outcome']}'. Nothing was sent: "
-                                          f"{trial_problem([t['agentId']], t['name'], t['notes'])}.")
+                                          f"{trial_problem([t['agentId']], t['name'], t['notes'], t['approvedAt'])}.")
         patch_task(t["id"], {AF["status"]: "Completed", AF["completion"]: now_iso(),
                              AF["notes"]: append_notes(t["notes"], stamp)})
         ledger_append(t["id"], "done")

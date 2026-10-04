@@ -980,11 +980,18 @@ def refused(tid, to): raise RuntimeError("REFUSED: a word in the task")
 rc.lane_b_rules.notify_roy = refused
 rc.read_agent_late = lambda: {"recAgent:2026-09-30": {"id": "recOPENROY000001", "status": "Today"}}
 noted = rc.agent_late(res, ts, DAY, True, True)
-print(json.dumps({"failed": failed["failed"], "line": rc.agent_late_line(failed), "noted": [noted["failed"], noted["problems"]]}))`);
+rc.read_agent_late = lambda: {}
+fresh = rc.agent_late(res, ts, DAY, True, True)
+print(json.dumps({"failed": failed["failed"], "line": rc.agent_late_line(failed), "noted": [noted["failed"], noted["problems"]],
+                  "fresh": [fresh["failed"], fresh["problems"], fresh["raised"]]}))`);
     expect(r.failed).toMatch(/was created but its email to Roy failed \(offered again next run\): worker 500/);
     expect(r.line).toMatch(/^Agent-managed late rent to Roy FAILED/);
     expect(r.noted[0]).toBe('');
     expect(r.noted[1][0]).toMatch(/refused by the email gate/);
+    // A refusal on the day the task is raised reads the same: a note, never red, and the task stands.
+    expect(r.fresh[0]).toBe('');
+    expect(r.fresh[1]).toEqual([expect.stringMatching(/task recNEWROY0000001 was refused by the email gate/)]);
+    expect(r.fresh[2]).toHaveLength(1);
   });
 
   it('the pause lever: nothing is planned or raised while the agent is switched off, and the row says so', () => {

@@ -856,7 +856,12 @@ def agent_late(res, tenancies, day, writes, on):
             try:
                 lane_b_rules.notify_roy(tid, ad.ROY_EMAIL)
             except Exception as exc:                  # noqa: BLE001 — the task stands; the next run offers it again
-                fails.append(f"task {tid} was created but its email to Roy failed (offered again next run): {str(exc)[:120]}")
+                # A refusal reads the same on the day it is raised as on every run after (review, 4 Oct 2026):
+                # a check on the row, since the task already sits on Roy's list. Anything else turns the run red.
+                if "REFUSED" in str(exc):
+                    out["problems"].append(f"task {tid} was refused by the email gate: {str(exc)[:120]}")
+                else:
+                    fails.append(f"task {tid} was created but its email to Roy failed (offered again next run): {str(exc)[:120]}")
     except Exception as exc:                          # noqa: BLE001
         fails.append(str(exc)[:300])
     out["failed"] = "; ".join(fails)[:600]

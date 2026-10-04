@@ -177,7 +177,7 @@ def load_card(task_id, dry_run):
     f = rec.get("fields") or {}
     notes = str(f.get(AF["notes"]) or "")
     trial = trial_problem(list(f.get(AF["sentForApprovalBy"]) or []) + list(f.get(AF["teamMember"]) or []),
-                          f.get(AF["name"], ""), notes)
+                          f.get(AF["name"], ""), notes, f.get(AF["approvedAt"]) or "")
     if trial and not dry_run:
         sys.exit(f"REFUSED: task {task_id} is a trial card and is never texted: {trial}.")
     if not text_card(f.get(AF["name"], ""), notes):
@@ -232,7 +232,10 @@ def _cmd_send(args):
     if not on and not args.dry_run:
         sys.exit("REFUSED: text sending is switched off. It is switched on only at the cut-over, by Kevin's decision "
                  f"({SWITCH}).")
-    from_number = uk_mobile(open(FROM_NUMBER_PATH).read()) if os.path.exists(FROM_NUMBER_PATH) else ""
+    from_number = ""
+    if os.path.exists(FROM_NUMBER_PATH):
+        with open(FROM_NUMBER_PATH) as fh:
+            from_number = uk_mobile(fh.read())
     if not from_number and not args.dry_run:
         sys.exit(f"REFUSED: no Agile Lets sending number is on file ({FROM_NUMBER_PATH}), so nothing is sent.")
     f, number, message, trial, outcome = load_card(args.task, args.dry_run)
