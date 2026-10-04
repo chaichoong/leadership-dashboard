@@ -17,6 +17,9 @@
 //      another agent's id is refused at every door (send, notify, handover, letters, diary, the
 //      browser's submit gate), and is settled as checked like any other trial card.
 //   7. The card the agent file tells it to write passes the real submit gates.
+//   9. The cut-over MOVES the agent to TRIAL_ENDED with the moment it ended: a card Kevin approved
+//      before then stays a check at every door (queue, settle, email, text); one approved after is
+//      an ordinary card (independent review, 4 Oct 2026).
 // Each check imports or executes the real module, never a copy.
 //
 // Back-tested (2 Oct 2026) by breaking each rule and watching its case fail:
@@ -29,6 +32,7 @@
 //   * the task marks ignored at any one door    -> that door's case in block 3, 4, 5, 6 or 8 fails
 //   * assertApproved() ignoring `trial`          -> "the robot browser itself refuses" fails
 //   * the carry keeping the key line            -> "does not turn the keeper into a trial task" fails
+//   * TRIAL_ENDED ignored, or the time compared the wrong way -> block 9 and the "after the trial ends" case fail
 import { describe, it, expect } from 'vitest';
 import { readFileSync, existsSync, writeFileSync, mkdtempSync } from 'fs';
 import { tmpdir } from 'os';
@@ -45,6 +49,12 @@ const AGENT_FILE = resolve(homedir(), '.claude/agents/cash-flow-voids.md');
 const RENT_TM = 'rec7aHLK1Q8fMLRXH';
 const RENT_ROW = 'reclaAzGLA4utssxx';
 const PROPERTY_TM = 'recwWvBju2ycB63i4';
+// What Kevin's cut-over PR does: the entry moves from TRIAL_AGENTS to TRIAL_ENDED with the moment it ended.
+const CUTOVER = (at) => `
+import agent_email_format as aef
+aef.TRIAL_ENDED["${RENT_TM}"] = "${at}"
+aef.TRIAL_AGENTS.clear()
+`;
 
 function py(snippet, input) {
   const script = `
@@ -117,6 +127,35 @@ print(json.dumps({"byName": bool(trial_problem(other, "RENT LATE: Unit 9, rent d
   });
 });
 
+describe('9. a trial ends by MOVING its entry to TRIAL_ENDED', () => {
+  it('every trial lane\'s marks sit in exactly one list, and every end time reads as a time', () => {
+    const r = py(`
+from agent_email_format import TRIAL_AGENTS, TRIAL_ENDED, TRIAL_TASK_MARKS, _utc
+print(json.dumps({"orphans": [x for x in TRIAL_TASK_MARKS if x not in TRIAL_AGENTS and x not in TRIAL_ENDED],
+                  "both": [x for x in TRIAL_ENDED if x in TRIAL_AGENTS], "unreadable": [x for x, v in TRIAL_ENDED.items() if _utc(v) is None]}))`);
+    expect(r).toEqual({ orphans: [], both: [], unreadable: [] });
+  });
+
+  it('a card approved before the end is still a trial card wherever it is acted on; after the end it is ordinary', () => {
+    const r = py(`${CUTOVER('2026-11-24T09:00:00Z')}
+tp = aef.trial_problem
+print(json.dumps({"before": tp(["${RENT_TM}"], "", "", "2026-11-24T08:59:00.000Z"), "after": tp(["${RENT_TM}"], "", "", "2026-11-24T09:01:00.000Z"),
+                  "blank": tp(["${RENT_TM}"], "", "", ""), "junk": tp(["${RENT_TM}"], "", "", "soon"), "notActing": tp(["${RENT_TM}"]),
+                  "byName": tp(["${PROPERTY_TM}"], "RENT LATE: Unit 9", "", "2026-11-23T10:00:00.000Z"),
+                  "byKey": tp(["${PROPERTY_TM}"], "Renamed", "RENT CHECK KEY: recT:1", "2026-11-23T10:00:00.000Z"),
+                  "other": tp(["${PROPERTY_TM}"], "COMPLIANCE: EICR", "", "2026-11-23T10:00:00.000Z")}))`);
+    expect(r.before).toMatch(/approved during the trial run, which ended 2026-11-24T09:00:00Z/);
+    expect(r.after).toBe('');
+    expect(r.blank).toMatch(/no readable approval time/);
+    expect(r.junk).toMatch(/no readable approval time/);
+    // A caller not acting on an approval (submit, handover) treats it as an ordinary agent again.
+    expect(r.notActing).toBe('');
+    expect(r.byName).toMatch(/approved during the trial run/);
+    expect(r.byKey).toMatch(/approved during the trial run/);
+    expect(r.other).toBe('');
+  });
+});
+
 describe('3. send-email.py never sends a trial card', () => {
   const OUTPUT = 'TO: tenant@example.com\nFROM: info@agilelets.co.uk\nSUBJECT: Your rent\n---\nHello.\n\nKind regards\nRoy Lavin\nAgile Lets';
   const load = (fields, opts = {}) => py(`
@@ -146,6 +185,28 @@ except SystemExit as e:
   it('an ordinary card from an agent that is not on trial still sends', () => {
     expect(load({ ...approved, name: 'COMPLIANCE: EICR quote', sentForApprovalBy: [PROPERTY_TM] }).refused).toBe('');
   });
+  it('after the trial ends, a card the trial settled (TRIAL CHECKED) is history and is never emailed', () => {
+    const r = py(`
+${CUTOVER('2026-10-02T09:30:00Z')}
+se = load_mod("se", "send-email.py")
+def go(notes, approved="2026-10-02T10:00:00.000Z"):
+    F = {se.AF["name"]: "RENT LATE: Unit 9", se.AF["approvalOutcome"]: {"name": "Approved as-is"}, se.AF["taskType"]: {"name": "Correspondence"},
+         se.AF["agentOutput"]: ${JSON.stringify(OUTPUT)}, se.AF["approvedAt"]: approved,
+         se.AF["sentForApprovalBy"]: ["${RENT_TM}"], se.AF["notes"]: notes}
+    se.get_task = lambda task_id: {"id": task_id, "createdTime": "2026-10-02T09:00:00.000Z", "fields": F}
+    try:
+        se.load_approved("recTEST"); return ""
+    except SystemExit as e:
+        return str(e)
+print(json.dumps({"settled": go("RENT CHECK KEY: x\\n[03 Oct 2026] TRIAL CHECKED: Kevin's verdict was 'Approved as-is'"), "fresh": go("RENT CHECK KEY: x"),
+                  "inTrial": go("RENT CHECK KEY: x", "2026-10-02T09:15:00.000Z"), "blank": go("RENT CHECK KEY: x", "")}))`);
+    expect(r.settled).toMatch(/was settled on the trial \(TRIAL CHECKED\); it is history/);
+    // A card approved after the trial ends sends as any other.
+    expect(r.fresh).toBe('');
+    // One approved before the end, but not yet settled when the PR merged, is never emailed.
+    expect(r.inTrial).toMatch(/trial card and is never sent: it was approved during the trial run, which ended 2026-10-02T09:30:00Z/);
+    expect(r.blank).toMatch(/trial card and is never sent: it carries no readable approval time/);
+  });
   it('a RENT LATE task resubmitted or re-routed under another agent is still refused, by its name or its key line', () => {
     expect(load({ ...approved, sentForApprovalBy: [PROPERTY_TM], teamMember: [PROPERTY_TM] }).refused).toMatch(/trial card/);
     expect(load({ ...approved, name: 'Renamed', notes: 'RENT CHECK KEY: recT:2026-09-30:1', sentForApprovalBy: [PROPERTY_TM] }).refused).toMatch(/trial card/);
@@ -155,21 +216,22 @@ except SystemExit as e:
 describe('4. the queue never hands an approved trial card to a carry-out run', () => {
   // The real build_queue, offline: the board read and the register read are faked, and any other
   // network call fails the test rather than reaching Airtable (the tests/standing-holds.test.js harness).
-  const queue = (tasks) => {
+  const queue = (tasks, prelude = '') => {
     const out = execFileSync('python3', ['-c', `
 import importlib.util, json, sys, urllib.request
 def boom(*a, **k): raise RuntimeError("network call in a test")
 urllib.request.urlopen = boom
 spec = importlib.util.spec_from_file_location('d', ${JSON.stringify(DISPATCH)})
 m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m)
+${prelude}
 AF = m.AF
 recs = []
 for t in json.loads(sys.stdin.read()):
-    f = {AF["name"]: t["name"], AF["status"]: {"name": "Today"}, AF["teamMember"]: [t["agent"]], AF["notes"]: t.get("notes", "")}
+    f = {AF["name"]: t["name"], AF["status"]: {"name": "Today"}, AF["teamMember"]: t.get("teamMember", [t["agent"]]), AF["notes"]: t.get("notes", "")}
     if t.get("outcome"):
         f[AF["approvalOutcome"]] = {"name": t["outcome"]}
-        f[AF["approvedAt"]] = "2026-10-02T10:00:00.000Z"
-        f[AF["sentForApprovalBy"]] = [t["agent"]]
+        f[AF["approvedAt"]] = t.get("approvedAt", "2026-10-02T10:00:00.000Z")
+        f[AF["sentForApprovalBy"]] = t.get("sentBy", [t["agent"]])
     recs.append({"id": t["id"], "fields": f})
 m.query_tasks = lambda formula, **kw: recs
 m.fetch_role_roster = lambda: {}
@@ -200,6 +262,31 @@ print(json.dumps({"trialChecked": [x["id"] for x in q["trialChecked"]], "worklis
     expect(r.worklist.recOtherYes).toBe('carry_out');
   });
 
+  it('reads the Team Member as send-email does: a card held by the trial agent but sent by another is checked, never handed out', () => {
+    const r = queue([
+      { id: 'recHeld', name: 'Draft with no lane marks', agent: PROPERTY_TM, teamMember: [RENT_TM], outcome: 'Approved as-is' },
+      // Every Sent For Approval By link, not only the first, as send-email.py reads them.
+      { id: 'recSecond', name: 'Another unmarked draft', agent: PROPERTY_TM, sentBy: [PROPERTY_TM, RENT_TM], teamMember: [PROPERTY_TM], outcome: 'Approved as-is' },
+      { id: 'recOtherYes', name: 'COMPLIANCE: EICR renewal', agent: PROPERTY_TM, outcome: 'Approved as-is' },
+    ]);
+    // Handed out, it would be refused by send-email.py every 30 minutes for ever (review, 4 Oct 2026).
+    expect(r.trialChecked).toEqual(['recHeld', 'recSecond']);
+    expect(Object.keys(r.worklist)).toEqual(['recOtherYes']);
+  });
+
+  it('after the cut-over, a card approved during the trial is still only checked; one approved after it is carried out', () => {
+    const r = queue([
+      { id: 'recInTrial', name: 'RENT LATE: Unit 9, rent due 30 Sep (reminder)', agent: RENT_TM, outcome: 'Approved as-is', approvedAt: '2026-10-02T10:00:00.000Z' },
+      { id: 'recAfter', name: 'RENT LATE: Unit 8, rent due 30 Sep (reminder)', agent: RENT_TM, outcome: 'Approved as-is', approvedAt: '2026-10-02T12:00:00.000Z' },
+      { id: 'recRerouted', name: 'RENT LATE: Unit 7, rent due 30 Sep (reminder)', agent: PROPERTY_TM, outcome: 'Approved as-is', approvedAt: '2026-10-02T10:00:00.000Z' },
+      { id: 'recOtherYes', name: 'COMPLIANCE: EICR renewal', agent: PROPERTY_TM, outcome: 'Approved as-is', approvedAt: '2026-10-02T10:00:00.000Z' },
+    ], CUTOVER('2026-10-02T11:00:00Z'));
+    expect(r.trialChecked).toEqual(['recInTrial', 'recRerouted']);
+    expect(r.worklist.recAfter).toBe('carry_out');
+    expect(r.worklist.recOtherYes).toBe('carry_out');
+    expect(r.worklist.recInTrial).toBeUndefined();
+  });
+
   it('a form card is never an agent\'s work: listed as a form card whatever its outcome, by either mark, never carried out or trial-checked', () => {
     const KEY = 'RENT FORM KEY: recFormTest000001:form:1';
     const r = queue([
@@ -220,9 +307,10 @@ print(json.dumps({"trialChecked": [x["id"] for x in q["trialChecked"]], "worklis
 });
 
 describe('5. trial-settle closes an approved trial card with the verdict, and nothing else', () => {
-  const settle = (tasks) => py(`
+  const settle = (tasks, prelude = '') => py(`${prelude}
 recs = [{"id": t["id"], "fields": {ad.AF["name"]: t["name"], ad.AF["approvalOutcome"]: t["outcome"], ad.AF["notes"]: t.get("notes", ""),
-                                    ad.AF["sentForApprovalBy"]: [t["agent"]], ad.AF["teamMember"]: [t["agent"]]}} for t in a]
+                                    ad.AF["approvedAt"]: t.get("approvedAt", ""), ad.AF["agentOutput"]: t.get("output", ""),
+                                    ad.AF["sentForApprovalBy"]: [t["agent"]], ad.AF["teamMember"]: t.get("teamMember", [t["agent"]])}} for t in a]
 patched, ledger = [], []
 ad.query_tasks = lambda formula, **k: recs
 ad.patch_task = lambda tid, fields: patched.append([tid, {k: v for k, v in fields.items()}])
@@ -250,6 +338,30 @@ print(json.dumps({"out": json.loads(buf.getvalue()), "patched": [[tid, f.get(ad.
     ]);
     expect(r.out.trialSettled).toEqual([]);
     expect(r.patched).toEqual([]);
+  });
+  it('after the cut-over, settles a card approved during the trial and leaves one approved after it to be sent', () => {
+    const r = settle([
+      { id: 'recInTrial', name: 'RENT LATE: Unit 9', outcome: 'Approved as-is', agent: RENT_TM, approvedAt: '2026-10-02T10:00:00.000Z' },
+      { id: 'recAfter', name: 'RENT LATE: Unit 8', outcome: 'Approved as-is', agent: RENT_TM, approvedAt: '2026-10-02T12:00:00.000Z' },
+    ], CUTOVER('2026-10-02T11:00:00Z'));
+    expect(r.out.trialSettled.map(x => x.task)).toEqual(['recInTrial']);
+    expect(r.patched).toHaveLength(1);
+    expect(r.patched[0][3]).toMatch(/TRIAL CHECKED: .*Nothing was sent: it was approved during the trial run, which ended 2026-10-02T11:00:00Z/);
+  });
+  it('settles a card the trial agent holds as Team Member, whoever sent it', () => {
+    const r = settle([{ id: 'recHeld', name: 'Draft with no lane marks', outcome: 'Approved as-is', agent: PROPERTY_TM, teamMember: [RENT_TM] }]);
+    expect(r.out.trialSettled.map(x => x.task)).toEqual(['recHeld']);
+  });
+  it('never settles what the queue sends elsewhere first: Kevin\'s answer to a DECIDE card, or a card of an agent on its own go signal', () => {
+    const TASK_MANAGER = 'recAGENTTASKMGR01';
+    const CONTENT = 'recRcy1Edas6rGaaF';
+    const r = settle([
+      { id: 'recDecide', name: 'RENT LATE: Unit 9', outcome: 'Approved as-is', agent: TASK_MANAGER, teamMember: [RENT_TM],
+        output: 'DECIDE: keep chasing or write it off?\n\nOption A ...' },
+      { id: 'recOwnSignal', name: 'Episode 12', outcome: 'Approved as-is', agent: CONTENT, teamMember: [RENT_TM] },
+      { id: 'recPlain', name: 'RENT LATE: Unit 8', outcome: 'Approved as-is', agent: RENT_TM },
+    ]);
+    expect(r.out.trialSettled.map(x => x.task)).toEqual(['recPlain']);
   });
   it('settles a RENT LATE card another agent submitted', () => {
     const r = settle([{ id: 'recE', name: 'RENT LATE: Unit 5, rent due 30 Sep (reminder)', outcome: 'Approved as-is', agent: PROPERTY_TM }]);
@@ -298,6 +410,20 @@ except SystemExit as e:
     const r = py(`
 ad.require_role_agent_live = lambda rec, verb: None
 ad.get_task = lambda tid: {"id": tid, "fields": {ad.AF["name"]: "RENT LATE: Unit 9, rent due 30 Sep (reminder)", ad.AF["notes"]: "RENT CHECK KEY: recT:2026-09-30:1"}}
+path = os.path.join(tempfile.mkdtemp(), "out.md"); open(path, "w").write("PASS TO ROY: ask the tenant to pay\\n\\n**Carrying this out will involve:** Roy is told.")
+ad.plain_summary_problem = lambda *x: ""
+try:
+    ad.cmd_submit(argparse.Namespace(task="recTEST", agent="${PROPERTY_TM}", type="Admin", output_file=path, plain_task="x", plain_approve="y",
+                                     tier1=False, siblings=None, coverage=None, receipt=None, attach=None))
+    print(json.dumps({"refused": ""}))
+except SystemExit as e:
+    print(json.dumps({"refused": str(e)}))`);
+    expect(r.refused).toMatch(/This task belongs to a lane on trial, whoever submits it/);
+  });
+  it('a task the trial agent holds as Team Member is held to the same rule, whoever submits it', () => {
+    const r = py(`
+ad.require_role_agent_live = lambda rec, verb: None
+ad.get_task = lambda tid: {"id": tid, "fields": {ad.AF["name"]: "Unmarked task", ad.AF["notes"]: "", ad.AF["teamMember"]: ["${RENT_TM}"]}}
 path = os.path.join(tempfile.mkdtemp(), "out.md"); open(path, "w").write("PASS TO ROY: ask the tenant to pay\\n\\n**Carrying this out will involve:** Roy is told.")
 ad.plain_summary_problem = lambda *x: ""
 try:
