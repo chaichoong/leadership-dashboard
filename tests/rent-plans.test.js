@@ -518,7 +518,7 @@ out = rp.act(RC([]), w, data, date(2026, 11, 8), False, True, RES)
 old = rp.read(RC([c], bank=(date(2027, 1, 1), [])), data, date(2027, 1, 1), RES, NOW)["plans"][0]
 print(json.dumps({"stuck": out["stuck"], "line": rp.line(out), "old": [old["state"], old["why"]]}))`);
     expect(r.stuck).toBe(true);
-    expect(r.line).toMatch(/Check: card recPLANCARD00001: still waiting on bank data 15 days after its last promise/);
+    expect(r.line).toMatch(/Check: card recPLANCARD00001: still cannot be judged 29 days after a payment it was owed/);
     expect(r.old[0]).toBe('bad');
     expect(r.old[1]).toMatch(/before the payments the rent check reads/);
   });
@@ -566,3 +566,65 @@ print(json.dumps([str(rp.created_on({"createdTime": "2026-10-04T23:30:00.000Z"})
     expect(r).toEqual(['2026-10-05', '2026-12-04']);
   });
 });
+
+describe('the third review\'s cases (5 Oct 2026)', () => {
+  const H3 = `
+trial_ended()
+CONTACTS = {"recTENANTPLAN001": {rp.TENANT_CONTACT["email"]: "Sam@Example.com"}}
+class RC:
+    T_TASKS, T_TENANTS, TY = rc.T_TASKS, rc.T_TENANTS, rc.TY
+    first = staticmethod(rc.first)
+    payments_by_tenancy = staticmethod(rc.payments_by_tenancy)
+    lane_b_rules = rc.lane_b_rules
+    sel, tenant_type = staticmethod(rc.sel), staticmethod(rc.tenant_type)
+    IN_PAYMENT, CFV, AGENT_MANAGED, STAGES = rc.IN_PAYMENT, rc.CFV, rc.AGENT_MANAGED, rc.STAGES
+    feed_state = staticmethod(lambda data, pay, now: "feed")
+    def __init__(self, cards, bank=(None, [])): self.cards, self.bank = cards, bank
+    def bank_view(self, feed, payments): return self.bank
+    def fetch_all(self, table, params=None):
+        return [{"id": k, "fields": v} for k, v in CONTACTS.items()] if table == rc.T_TENANTS else self.cards
+TEN2 = "recTENANCYPLAN002"
+def data_with(tx, rent=None, due=None):
+    f = {rc.TY["unitRef"]: ["Unit 9 – 1 Example Road"], rc.TY["tenants"]: ["recTENANTPLAN001"], rc.TY["payStatus"]: "In Payment"}
+    if rent:
+        f.update({rc.TY["rent"]: rent, rc.TY["dueDay"]: str(due)})
+    return {"tenancies": [{"id": TEN, "fields": f}, {"id": TEN2, "fields": {rc.TY["tenants"]: ["recOTHERTENANT01"], rc.TY["payStatus"]: "In Payment"}}],
+            "tx": [{"fields": {rc.TX["date"]: d, rc.TX["tenancy"]: [TEN], rc.TX["amount"]: a}} for d, a in tx]}
+RES = {"lanes": {TEN: "late", TEN2: "late"}, "feed": {"blocked": []}, "tenancies": []}
+def sent(day): return f"[{day} 10:00 — send-email] SENT: email to sam@example.com"
+`;
+  it('a card the ownership check rejects never outranks a good plan', () => {
+    const r = py(H3 + `
+good = card(i="recPLANGOOD00001", notes=sent("05 Oct 2026"))
+wrong = card(i="recPLANWRONG0001", notes=sent("06 Oct 2026"), tenancies=(TEN2,), sender="someone@example.com")
+plans = rp.read(RC([good, wrong], bank=(date(2026, 10, 8), [])), data_with([]), date(2026, 10, 8), RES, "now")
+print(json.dumps({"states": {p["id"]: p["state"] for p in plans["plans"]}, "onTrack": sorted(plans["onTrack"])}))`);
+    expect(r.states).toEqual({ recPLANGOOD00001: 'open', recPLANWRONG0001: 'bad' });
+    expect(r.onTrack).toEqual(['recTENANCYPLAN001']);
+  });
+
+  it('a stale feed past a checkpoint is waiting, not on track, and grows loud a week after the payment it waits on', () => {
+    const r = py(H3 + `
+c = card()          # 10 Oct £100, 24 Oct £300
+stale = lambda d: rp.read(RC([c], bank=(date(2026, 10, 1), ["Santander bank feed last updated 300 hours ago"])), data_with([]), d, RES, "now")["plans"][0]
+early, later = stale(date(2026, 10, 13)), stale(date(2026, 10, 20))
+# Unknown lane from 12 Oct with a far second promise: loud a week after the first payment, not the last.
+far = card(out=output(plan=(("2026-10-10", 100), ("2026-12-10", 400))))
+grey = rp.read(RC([far], bank=(date(2026, 11, 1), [])), data_with([]), date(2026, 11, 1), dict(RES, lanes={TEN: "unknown"}), "now")["plans"][0]
+print(json.dumps({"early": [early["state"], early.get("stuck")], "later": [later["state"], later.get("stuck")], "grey": [grey["state"], grey.get("stuck")]}))`);
+    expect(r.early).toEqual(['waiting', false]);
+    expect(r.later).toEqual(['waiting', true]);
+    expect(r.grey).toEqual(['waiting', true]);
+  });
+
+  it('a rent paid early, before the plan began, is not the plan\'s to hold', () => {
+    const r = py(H3 + `
+# Due on the 1st; card made and sent 30 Oct; promise of £1,000 on 10 Nov; November's £500 landed 28 Oct.
+c = card(out=output(plan=(("2026-11-10", 1000),)), notes=sent("30 Oct 2026"), created="2026-10-30T09:00:00.000Z")
+paidEarly = rp.read(RC([c], bank=(date(2026, 11, 3), [])), data_with([("2026-10-28", 500)], rent=500, due=1), date(2026, 11, 3), RES, "now")["plans"][0]["state"]
+notPaid = rp.read(RC([c], bank=(date(2026, 11, 3), [])), data_with([], rent=500, due=1), date(2026, 11, 3), RES, "now")["plans"][0]["state"]
+print(json.dumps([paidEarly, notPaid]))`);
+    expect(r).toEqual(['open', 'missed']);
+  });
+});
+

@@ -154,10 +154,27 @@ def state(rec, payments, day, tenancy=None, doubt=False, asof=None):
         return out
     seen = min(asof, day) if asof else day
     rent = float((tenancy or {}).get("rent") or 0)
-    dues = rent_dues(start, end, (tenancy or {}).get("dueDay")) if rent else []
+    early = timedelta(days=EARLY_PAY_DAYS)
+    # A rent already paid early, before the plan began (Universal Credit often lands days ahead), is not the
+    # plan's to hold: the agent drafted the plan knowing it had come.
+    dues = [d for d in (rent_dues(start, end, (tenancy or {}).get("dueDay")) if rent else [])
+            if sum(p["amount"] for p in payments if d - early <= p["day"] < start) + 0.005 < rent]
     grace = timedelta(days=GRACE_DAYS)
+
+    def waiting(check):
+        late = (day - (check - grace)).days
+        stuck = late > WAIT_LOUD_DAYS
+        out.update(state="waiting", stuck=stuck,
+                   why=(f"still cannot be judged {late} days after a payment it was owed, because the rent check cannot tell "
+                        "about this tenancy's money" if stuck else "the rent check cannot tell about this tenancy's money today"))
+        return out
+
     for check in sorted({d + grace for d, _ in promises} | {d + grace for d in dues}):
         if seen < check:
+            # The bank has not reached this checkpoint. With doubt about the feed and the day already past it,
+            # that is waiting, and it grows loud: a stale feed must never read as "on track" for weeks.
+            if doubt and check <= day:
+                return waiting(check)
             out["state"] = "open"
             return out
         promised = sum(a for d, a in promises if d + grace <= check)
@@ -166,11 +183,7 @@ def state(rec, payments, day, tenancy=None, doubt=False, asof=None):
         paid = sum(p["amount"] for p in payments if start <= p["day"] <= check)
         if paid + 0.005 < owed:
             if doubt:
-                stuck = (day - end).days > WAIT_LOUD_DAYS
-                out.update(state="waiting", stuck=stuck,
-                           why=("still waiting on bank data " + str((day - end).days) + " days after its last promise"
-                                if stuck else "the rent check cannot tell about this tenancy's money today"))
-                return out
+                return waiting(check)
             out.update(state="missed", missedOn=(check - grace).isoformat(), owed=round(owed, 2), paid=round(paid, 2))
             return out
     out["state"] = "kept"
@@ -228,6 +241,7 @@ def read(rc, data, day, res, now=None):
                 continue
             if tid not in lanes:                      # the rent check judged only live tenancies
                 st.update(state="bad", why=f"PLAN FOR names {tid}, which is not a live tenancy")
+                st.pop("sent", None)                  # a card this check rejects never outranks a good plan
                 out["plans"].append(st)
                 continue
             f = rec.get("fields") or {}
@@ -235,6 +249,7 @@ def read(rc, data, day, res, now=None):
             senders = {k for t in (tys[tid].get(rc.TY["tenants"]) or []) for k in contacts.get(t, set())}
             if not own and aef.sender_key(f.get(F["sender"])) not in senders:
                 st.update(state="bad", why=f"PLAN FOR names {tid}, but the card is not that tenancy's and was not sent by its tenant")
+                st.pop("sent", None)
                 out["plans"].append(st)
                 continue
             ty = tys[tid]
