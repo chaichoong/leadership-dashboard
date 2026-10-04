@@ -336,14 +336,14 @@ print(json.dumps({"grey": grey["plans"][0]["state"], "stale": stale["plans"][0][
 # Rent £500 due on the 15th. Plan sent 5 Oct: £250 on 20 Oct and £250 on 3 Nov (arrears only, against the agent file).
 c = card(out=output(plan=(("2026-10-20", 250), ("2026-11-03", 250))))
 rentOnly = st([c], data_with([("2026-10-15", 500)], rent=500, due=15), date(2026, 11, 6))
-planOnly = st([c], data_with([("2026-10-20", 250), ("2026-11-03", 250)], rent=500, due=15), date(2026, 10, 18))
+planOnly = st([c], data_with([("2026-10-20", 250), ("2026-11-03", 250)], rent=500, due=15), date(2026, 10, 22))
 both = st([c], data_with([("2026-10-15", 500), ("2026-10-20", 250), ("2026-11-03", 250)], rent=500, due=15), date(2026, 11, 6))
 print(json.dumps({"rentOnly": rentOnly, "planOnly": planOnly, "both": both}))`);
     // Paid the rent but no arrears: by 5 Nov £500 was promised and £500 of rent fell due; £500 paid. Promises
     // are £500 in all, so it holds; the arrears were never in the plan. The agent file says each PLAN amount
     // includes the rent, so the rent check holds him to whichever is more.
     expect(r.rentOnly[0][1]).toBe('kept');
-    // Skipped the 15 Oct rent and paid nothing by 17 Oct: missed at the rent's own checkpoint.
+    // Skipped the 15 Oct rent: by the 20 Oct promise (+2) £500 of rent was owed and only £250 paid.
     expect(r.planOnly[0][1]).toBe('missed');
     expect(r.both[0][1]).toBe('kept');
   });
@@ -479,8 +479,8 @@ def sent(day): return f"[{day} 10:00 — send-email] SENT: email to sam@example.
 A = card(i="recPLANCARDAAAA1", notes=sent("05 Oct 2026"), out=output(plan=(("2026-10-10", 100),)))
 B = card(i="recPLANCARDBBBB1", notes=sent("09 Oct 2026"), out=output(plan=(("2026-10-20", 200),)))
 data = data_with([("2026-10-20", 200)])
-mid = rp.read(RC([A, B]), data, date(2026, 10, 15), RES, NOW)
-rp.act(RC([A, B]), mid, data, date(2026, 10, 15), True, True, RES)
+mid = rp.read(RC([A, B]), data_with([]), date(2026, 10, 15), RES, NOW)
+rp.act(RC([A, B]), mid, data_with([]), date(2026, 10, 15), True, True, RES)
 B_kept = card(i="recPLANCARDBBBB1", notes=sent("09 Oct 2026") + "\\nRENT PLAN KEPT: every promise kept", out=output(plan=(("2026-10-20", 200),)))
 A_marked = card(i="recPLANCARDAAAA1", notes=written.get("recPLANCARDAAAA1", ""), out=output(plan=(("2026-10-10", 100),)))
 A_unmarked = A
@@ -621,10 +621,46 @@ print(json.dumps({"early": [early["state"], early.get("stuck")], "later": [later
     const r = py(H3 + `
 # Due on the 1st; card made and sent 30 Oct; promise of £1,000 on 10 Nov; November's £500 landed 28 Oct.
 c = card(out=output(plan=(("2026-11-10", 1000),)), notes=sent("30 Oct 2026"), created="2026-10-30T09:00:00.000Z")
-paidEarly = rp.read(RC([c], bank=(date(2026, 11, 3), [])), data_with([("2026-10-28", 500)], rent=500, due=1), date(2026, 11, 3), RES, "now")["plans"][0]["state"]
-notPaid = rp.read(RC([c], bank=(date(2026, 11, 3), [])), data_with([], rent=500, due=1), date(2026, 11, 3), RES, "now")["plans"][0]["state"]
-print(json.dumps([paidEarly, notPaid]))`);
-    expect(r).toEqual(['open', 'missed']);
+# The promise of £1,000 is the arrears; the November rent came early, so he owes the £1,000 and no more.
+paidEarly = rp.read(RC([c], bank=(date(2026, 11, 12), [])), data_with([("2026-10-28", 500), ("2026-11-10", 1000)], rent=500, due=1), date(2026, 11, 12), RES, "now")["plans"][0]["state"]
+notPaid = rp.read(RC([c], bank=(date(2026, 11, 12), [])), data_with([("2026-11-10", 1000)], rent=500, due=1), date(2026, 11, 12), RES, "now")["plans"][0]
+# £480 of November's rent came early: the £20 still owed is all the promise has to cover.
+short = card(out=output(plan=(("2026-11-10", 20),)), notes=sent("30 Oct 2026"), created="2026-10-30T09:00:00.000Z")
+part = rp.read(RC([short], bank=(date(2026, 11, 12), [])), data_with([("2026-10-28", 480), ("2026-11-10", 20)], rent=500, due=1), date(2026, 11, 12), RES, "now")["plans"][0]["state"]
+print(json.dumps([paidEarly, notPaid["state"], part]))`);
+    // With nothing early, the £1,000 promise must hold the November rent too: £1,000 paid is enough
+    // (owed is the larger of the two, never their sum).
+    expect(r).toEqual(['kept', 'kept', 'kept']);
+  });
+});
+
+describe('the fourth review\'s cases (5 Oct 2026)', () => {
+  const H4 = `
+trial_ended()
+def sent(day): return f"[{day} 10:00 — send-email] SENT: email to sam@example.com"
+`;
+  it('a tenant who keeps every promise is never missed: a rent between promises is held at the next promise', () => {
+    const r = py(H4 + `
+# Rent £500 on the 15th. Plan sent 5 Oct: 10 Oct £250, 20 Oct £750 (which includes the 15 Oct rent).
+c = card(out=output(plan=(("2026-10-10", 250), ("2026-10-20", 750))))
+t = {"rent": 500, "dueDay": "15"}
+P = lambda *p: pays(*p)
+print(json.dumps({
+  "day17": rp.state(c, P(("2026-10-10", 250)), date(2026, 10, 17), t)["state"],
+  "kept": rp.state(c, P(("2026-10-10", 250), ("2026-10-20", 750)), date(2026, 10, 22), t)["state"],
+  "short": rp.state(c, P(("2026-10-10", 250), ("2026-10-20", 500)), date(2026, 10, 22), t),
+  "slack": rp.state(c, P(("2026-10-10", 249.50), ("2026-10-20", 750)), date(2026, 10, 22), t)["state"],
+  "prepaid": rp.state(c, P(("2026-10-06", 1000)), date(2026, 10, 8), t)["state"],
+  "slackSame": rp.PLAN_SLACK == rc.SHORT_SLACK,
+}))`);
+    expect(r.day17).toBe('open');
+    expect(r.kept).toBe('kept');
+    expect(r.short).toMatchObject({ state: 'missed', missedOn: '2026-10-20', owed: 1000, paid: 750 });
+    // Within the rent check's own £1 slack: paid.
+    expect(r.slack).toBe('kept');
+    // Everything paid ahead: kept at once.
+    expect(r.prepaid).toBe('kept');
+    expect(r.slackSame).toBe(true);
   });
 });
 

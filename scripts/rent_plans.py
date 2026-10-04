@@ -11,9 +11,10 @@ a plan is agreed the card carries it above the email's headers:
 Kevin approves the card and the carry-out sends the email. From the moment send-email.py stamps the card
 SENT, the plan is AGREED, and this file checks it once a day inside scripts/rent-check.py:
 
-  * At each checkpoint (a promise's date, or a rent due date inside the plan, plus GRACE_DAYS) what is owed
-    is the larger of everything promised by then and all the rent that fell due since the plan began; what
-    is paid is the money matched to the tenancy since the plan began. Behind = MISSED: one RENT LATE task
+  * At each promise's date plus GRACE_DAYS what is owed is the larger of everything promised by then and all
+    the rent that fell due by that promise since the plan began (what the agent tells the tenant: each
+    promise includes the rent due by its date), less any of that rent he had already paid early; what is
+    paid is the money matched to the tenancy since the plan began, within PLAN_SLACK. Behind = MISSED: one RENT LATE task
     for the agent (back to the chase, carrying lane A's own stage key so lane A raises no twin) and a
     dated line on the card. The plan is over.
   * Every checkpoint met by the last promise + GRACE_DAYS = KEPT: a dated line on the card. Over.
@@ -42,7 +43,8 @@ SENT_RE = re.compile(r"^\[(\d{1,2} \w{3} \d{4})(?: \d{2}:\d{2})? — send-email\
 MISSED_MARK = "RENT PLAN MISSED: "
 KEPT_MARK = "RENT PLAN KEPT: "
 SUPERSEDED_MARK = "RENT PLAN SUPERSEDED: "
-WAIT_LOUD_DAYS = 7                # a plan still waiting on bank data this long after its last promise is a problem
+WAIT_LOUD_DAYS = 7                # a plan still waiting on bank data this long after the payment it waits on is a problem
+PLAN_SLACK = 1.00                 # the rent check's own SHORT_SLACK: pounds under that still count as paid
 LOOK_BACK_DAYS = 78               # the rent check reads matched payments 80 days back: older than this cannot be judged
 LONDON = ZoneInfo("Europe/London")
 APPROVED = ("Approved as-is", "Approved with minor edits")
@@ -155,10 +157,10 @@ def state(rec, payments, day, tenancy=None, doubt=False, asof=None):
     seen = min(asof, day) if asof else day
     rent = float((tenancy or {}).get("rent") or 0)
     early = timedelta(days=EARLY_PAY_DAYS)
-    # A rent already paid early, before the plan began (Universal Credit often lands days ahead), is not the
-    # plan's to hold: the agent drafted the plan knowing it had come.
-    dues = [d for d in (rent_dues(start, end, (tenancy or {}).get("dueDay")) if rent else [])
-            if sum(p["amount"] for p in payments if d - early <= p["day"] < start) + 0.005 < rent]
+    # What each rent inside the plan still needs: the rent, less whatever of it landed early, before the plan
+    # began (Universal Credit often lands days ahead, and sometimes a little short).
+    dues = {d: max(0.0, rent - sum(p["amount"] for p in payments if d - early <= p["day"] < start))
+            for d in (rent_dues(start, end, (tenancy or {}).get("dueDay")) if rent else [])}
     grace = timedelta(days=GRACE_DAYS)
 
     def waiting(check):
@@ -169,7 +171,14 @@ def state(rec, payments, day, tenancy=None, doubt=False, asof=None):
                         "about this tenancy's money" if stuck else "the rent check cannot tell about this tenancy's money today"))
         return out
 
-    for check in sorted({d + grace for d, _ in promises} | {d + grace for d in dues}):
+    for when, _ in promises:
+        check = when + grace
+        promised = sum(a for d, a in promises if d <= when)
+        rent_owed = sum(need for d, need in dues.items() if d <= when)
+        owed = max(promised, rent_owed)
+        paid = sum(p["amount"] for p in payments if start <= p["day"] <= check)
+        if paid + PLAN_SLACK >= owed:
+            continue                               # met, whatever the feed: money seen is money in
         if seen < check:
             # The bank has not reached this checkpoint. With doubt about the feed and the day already past it,
             # that is waiting, and it grows loud: a stale feed must never read as "on track" for weeks.
@@ -177,15 +186,10 @@ def state(rec, payments, day, tenancy=None, doubt=False, asof=None):
                 return waiting(check)
             out["state"] = "open"
             return out
-        promised = sum(a for d, a in promises if d + grace <= check)
-        rent_owed = rent * sum(1 for d in dues if d + grace <= check)
-        owed = max(promised, rent_owed)
-        paid = sum(p["amount"] for p in payments if start <= p["day"] <= check)
-        if paid + 0.005 < owed:
-            if doubt:
-                return waiting(check)
-            out.update(state="missed", missedOn=(check - grace).isoformat(), owed=round(owed, 2), paid=round(paid, 2))
-            return out
+        if doubt:
+            return waiting(check)
+        out.update(state="missed", missedOn=when.isoformat(), owed=round(owed, 2), paid=round(paid, 2))
+        return out
     out["state"] = "kept"
     return out
 
