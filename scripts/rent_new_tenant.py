@@ -1619,7 +1619,7 @@ def finish_one(rc, item, day):
     return True
 
 
-def lane_b(rc, res, data, day, writes, on):
+def lane_b(rc, res, data, day, writes, on, now=None):
     """Plan and (on a real run) make today's lane B moves, and put each stage on its row. Never
     stops the rent check: a failure is said on the row and in the exit code, and one failed write
     does not stop the others. `on` is the Cash Flow Voids register switch the rent check already
@@ -1642,7 +1642,9 @@ def lane_b(rc, res, data, day, writes, on):
                       if os.path.isdir(ad.HANDOVER_DIR) else set())
         windows = read_windows()
         todo = plan(res, tasks, tenants_of, read_names(rc, wanted), day, starts, pays,
-                    rc.feed_state(data, pays, datetime.now(timezone.utc)), held_plans, dues, windows)
+                    # the run's own clock, passed in (4 Oct 2026: reading datetime.now() here made the test's
+                    # fixed bank-feed stamp go stale 36 hours after it was written, and main went red)
+                    rc.feed_state(data, pays, now or datetime.now(timezone.utc)), held_plans, dues, windows)
         annotate(res, todo["rows"])
         out["problems"] = list(todo["problems"])
         if not on:

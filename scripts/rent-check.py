@@ -828,7 +828,7 @@ def main(argv=None):
     res["tasks"] = lane_a(res, data["tenancies"], day, writes)
     # The agent's switch is lane A's read. With no status read back, lane B is told so, not "off".
     switch = res["tasks"]["on"] if res["tasks"]["status"] else None
-    res["setup"] = lane_b_rules.lane_b(_Here(), res, data, day, writes, switch)
+    res["setup"] = lane_b_rules.lane_b(_Here(), res, data, day, writes, switch, now)
     res["briefLine"] = brief_line(res)              # lane B has put each new tenant's stage on its row
     failed = res["tasks"]["failed"] or res["setup"]["failed"]
     if writes:

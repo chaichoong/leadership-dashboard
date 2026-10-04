@@ -33,6 +33,7 @@ def _no(*a, **k): raise RuntimeError("a test reached a real read, write or email
 rc.api = _no; rc.fetch_all = _no; lb.module = _no; lb.notify_roy = _no
 TY, TN, TX, AC, TK = rc.TY, rc.TN, rc.TX, rc.AC, rc.TK
 DAY = date(2026, 10, 2)
+NOW = datetime(2026, 10, 2, 12, 0, tzinfo=timezone.utc)   # lane B's clock: an hour after the fixture's feed stamp, on any real date
 def rid(n): return "recLaneBTest%05d" % n
 NEW, OLD1, OLD2, PAYER = rid(1), rid(2), rid(3), rid(4)
 def rec(i, f): return {"id": i, "fields": f}
@@ -1316,7 +1317,7 @@ lb.read_names = lambda _rc, ids: NAMES
 def run_lane_b(tenancies, tasks, writes=True, on=True, tx=(), **kw):
     data, res = assess(tenancies, tx, **kw)
     lb.read_tasks = lambda _rc: tasks
-    return res, lb.lane_b(rc._Here(), res, data, DAY, writes, on)
+    return res, lb.lane_b(rc._Here(), res, data, DAY, writes, on, NOW)
 JOURNAL_DONE = task("recROYTASK000010", NEW + ":journal:1", status="Completed", created=date(2026, 9, 20), completed=date(2026, 9, 25))
 `;
 
@@ -1374,7 +1375,7 @@ def offered(tenancies, tasks, tx=(), **kw):
     del mailed[:]
     data, res = assess(tenancies, tx, **kw)
     lb.read_tasks = lambda _rc: tasks
-    lb.lane_b(rc._Here(), res, data, DAY, True, True)
+    lb.lane_b(rc._Here(), res, data, DAY, True, True, NOW)
     return [m[0] for m in mailed]
 live = task("recROYTASK000010", NEW + ":costs:1", name="NEW TENANT RENT: housing costs check: Unit 9 – 1 Example Road")
 hand = task("recROYTASK000019", NEW + ":journal:1", name="Raised by hand, already emailed by its own handover", status="Completed", created=date(2026, 9, 20), completed=date(2026, 9, 25))
