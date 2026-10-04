@@ -321,9 +321,12 @@ async function handleTaskWrite(request, env, origin, taskId, who) {
 // ── The tenant details form (Kevin approved the plan on 1 Oct 2026, task recrmZTcOHg8vPlZk) ──
 // A public page writing a date of birth and a National Insurance number to a live record with no
 // login: the code in the tenant's link is the only key, so everything here is about that code.
-//   * 24 random bytes, base64url (32 characters). The record keeps only its SHA-256, so reading
-//     the base never gives anyone a working link. A new link replaces the hash (the old one dies);
-//     "off" blanks it. A blank expiry is off too. The link lives LINK_DAYS days.
+//   * 16 random bytes and an 8-byte HMAC tag over them (PM_SESSION_SECRET), base64url: 32
+//     characters. The tag is checked first, with no read at all, so a made-up code never reaches
+//     Airtable, from any number of addresses or locations (review, 4 Oct 2026). The record keeps
+//     only the code's SHA-256, so reading the base never gives anyone a working link. A new link
+//     replaces the hash (the old one dies); "off" blanks it. A blank expiry is off too. The link
+//     lives LINK_DAYS days. Changing PM_SESSION_SECRET ends every link, as it ends every session.
 //   * Bad shape, no match, two matches, expired, switched off: one answer, the same words, so a
 //     guesser learns nothing. The code is checked against CODE_RE and HASHED before it goes near a
 //     formula, so nothing a visitor typed is ever placed in a filterByFormula.
@@ -413,9 +416,30 @@ async function sha256Hex(s) {
   return Array.from(new Uint8Array(buf)).map(b => b.toString(16).padStart(2, '0')).join('');
 }
 
+// The tag a link code carries: the first 8 bytes of an HMAC over its 16 random bytes.
+async function linkTag(env, nonce) {
+  const msg = new Uint8Array([...enc.encode('tenant-link:'), ...nonce]);
+  return new Uint8Array(await crypto.subtle.sign('HMAC', await hmacKey(env.PM_SESSION_SECRET), msg)).slice(0, 8);
+}
+async function makeLinkCode(env) {
+  const nonce = crypto.getRandomValues(new Uint8Array(16));
+  return b64u(new Uint8Array([...nonce, ...(await linkTag(env, nonce))]));
+}
+// True only for a code this Worker made: checked with no read, so a guess costs nothing.
+export async function codeIsOurs(env, code) {
+  if (!CODE_RE.test(String(code || '')) || !env.PM_SESSION_SECRET) return false;
+  let raw;
+  try { raw = unb64u(String(code)); } catch { return false; }
+  if (raw.length !== 24) return false;
+  const tag = await linkTag(env, raw.slice(0, 16));
+  let diff = 0;
+  for (let i = 0; i < 8; i++) diff |= tag[i] ^ raw[16 + i];
+  return diff === 0;
+}
+
 // The one tenant this code belongs to, or null for every way it can fail.
 async function tenantForCode(env, code) {
-  if (!CODE_RE.test(String(code || ''))) return null;
+  if (!(await codeIsOurs(env, code))) return null;
   const hash = await sha256Hex(code);                       // hex only: safe inside the formula
   const p = new URLSearchParams();
   p.set('returnFieldsByFieldId', 'true');
@@ -433,14 +457,27 @@ async function tenantForCode(env, code) {
   return row;
 }
 
-// IPv6 hands out whole blocks, so a caller is counted by its /64, not by one address.
+// IPv6 hands out whole blocks, so a caller is counted by its /64, not by one address. The address
+// is expanded first ("2001:db8::1" and "2001:db8::2" are one /64), and an IPv4 address written as
+// IPv6 ("::ffff:1.2.3.4") counts as that IPv4 address.
 export function callerKey(ip) {
-  const s = String(ip || 'unknown');
-  return s.includes(':') ? s.split(':').slice(0, 4).join(':') + '::/64' : s;
+  const s = String(ip || '').trim().toLowerCase();
+  if (!s) return 'unknown';
+  if (!s.includes(':')) return s;
+  const v4 = s.match(/^::ffff:(\d{1,3}(?:\.\d{1,3}){3})$/);
+  if (v4) return v4[1];
+  const halves = s.split('::');
+  if (halves.length > 2) return s;
+  const head = halves[0] ? halves[0].split(':') : [];
+  const tail = halves.length === 2 && halves[1] ? halves[1].split(':') : [];
+  const groups = halves.length === 2 ? [...head, ...Array(Math.max(0, 8 - head.length - tail.length)).fill('0'), ...tail] : head;
+  if (groups.length !== 8 || groups.some(g => !/^[0-9a-f]{1,4}$/.test(g))) return s;
+  return groups.slice(0, 4).map(g => parseInt(g, 16).toString(16)).join(':') + '::/64';
 }
+// The caller's own limit first, so a caller already refused never uses up a slot everyone shares.
 async function tenantLimited(request, env) {
-  if (env.TENANT_ALL && !(await env.TENANT_ALL.limit({ key: 'tenant-form' })).success) return true;
   if (env.TENANT_LIMIT && !(await env.TENANT_LIMIT.limit({ key: callerKey(request.headers.get('CF-Connecting-IP')) })).success) return true;
+  if (env.TENANT_ALL && !(await env.TENANT_ALL.limit({ key: 'tenant-form' })).success) return true;
   return false;
 }
 
@@ -529,7 +566,7 @@ async function handleTenantLink(request, env, origin, off, who) {
     console.log(JSON.stringify({ event: 'tenant-link-off', tenantId: row.id, who }));
     return json({ ok: true }, 200, origin);
   }
-  const code = b64u(crypto.getRandomValues(new Uint8Array(24)));
+  const code = await makeLinkCode(env);
   const until = londonNow();
   until.setDate(until.getDate() + LINK_DAYS);
   const expires = dateKey(until);

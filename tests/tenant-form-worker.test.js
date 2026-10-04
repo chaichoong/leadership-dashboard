@@ -138,6 +138,22 @@ describe('the public read gives a first name and nothing else', () => {
       expect((await r.json()).error, k).toMatch(GONE);
     }
   });
+  it('a code of the right shape that this Worker did not make costs no read, from anywhere', async () => {
+    const real = (await makeLink()).code;
+    // A code made with another secret: right shape, a hash that would even be on a record.
+    env.PM_SESSION_SECRET = 'some-other-secret';
+    const forged = (await makeLink(OTHER)).code;
+    env.PM_SESSION_SECRET = baseEnv.PM_SESSION_SECRET;
+    reads = 0;
+    expect((await open(forged)).status).toBe(404);
+    expect((await open('A'.repeat(32))).status).toBe(404);
+    // One character changed in a real code breaks its tag.
+    const flipped = real.slice(0, 5) + (real[5] === 'A' ? 'B' : 'A') + real.slice(6);
+    expect((await open(flipped)).status).toBe(404);
+    expect(reads).toBe(0);
+    expect((await open(real)).status).toBe(200);
+    expect(reads).toBe(1);
+  });
   it('a code of the wrong shape is refused before anything is read', async () => {
     reads = 0;
     for (const code of ['', 'short', "abc'def" + 'x'.repeat(25), 'A'.repeat(33), 'A'.repeat(31) + '.']) {
@@ -237,6 +253,11 @@ describe('saving the answers', () => {
     const r = await call('/tenant-form', { code, body: { answers: GOOD } });
     expect(r.status).toBe(429);
     expect([reads, writes.length]).toEqual([0, 0]);
+    // A caller already refused uses up no slot everyone shares.
+    let shared = 0;
+    env.TENANT_ALL = { limit: async () => { shared++; return { success: true }; } };
+    expect((await open(code)).status).toBe(429);
+    expect(shared).toBe(0);
     // And the limit on all callers together, whoever is asking.
     const asked = [];
     env.TENANT_LIMIT = { limit: async ({ key }) => { asked.push(key); return { success: true }; } };
@@ -245,7 +266,8 @@ describe('saving the answers', () => {
     expect([reads, writes.length]).toEqual([0, 0]);
     env.TENANT_ALL = { limit: async () => ({ success: true }) };
     await worker.fetch(new Request('https://pm.test/tenant-form/open', { method: 'POST', body: JSON.stringify({ code }), headers: { Origin: ORIGIN, 'CF-Connecting-IP': '2001:db8:aa:bb:1:2:3:4' } }), env, ctx);
-    expect(asked).toEqual(['2001:db8:aa:bb::/64']);
+    // The caller's own limit is asked first, by its /64.
+    expect(asked).toEqual(['unknown', '2001:db8:aa:bb::/64']);
   });
 
   it('a public route never retries a refused Airtable call', async () => {
@@ -293,10 +315,17 @@ describe('saving the answers', () => {
 });
 
 describe('who counts as one caller', () => {
-  it('an IPv4 address is itself; an IPv6 address counts by its /64', () => {
+  it('an IPv4 address is itself; an IPv6 address counts by its /64, however it is written', () => {
     expect(callerKey('203.0.113.9')).toBe('203.0.113.9');
     expect(callerKey('2001:db8:aa:bb:1:2:3:4')).toBe('2001:db8:aa:bb::/64');
     expect(callerKey('2001:db8:aa:bb:9:9:9:9')).toBe(callerKey('2001:db8:aa:bb:1:2:3:4'));
+    // Shortened forms are expanded first, so one /64 is one caller.
+    expect(callerKey('2001:db8::1')).toBe(callerKey('2001:db8::2'));
+    expect(callerKey('2001:db8::1')).toBe('2001:db8:0:0::/64');
+    expect(callerKey('2001:db8:1::5')).toBe(callerKey('2001:db8:1:0:5:6:7:8'));
+    expect(callerKey('2001:0DB8:0000:0001::9')).toBe('2001:db8:0:1::/64');
+    // IPv4 written as IPv6 is that IPv4 address.
+    expect(callerKey('::ffff:203.0.113.9')).toBe('203.0.113.9');
     expect(callerKey('')).toBe('unknown');
   });
 });

@@ -511,11 +511,34 @@ test.describe('Growth Plan page', () => {
     await page.locator('#linkOff').click();
     await expect(page.locator('#toast')).toContainText('switched off');
     expect(writes.pm.find(x => x.path === '/tenant-form/link/off').body).toEqual({ tenantId: 'recT1' });
-    // Choosing another tenant hides the box: it belonged to the one before.
+    // Bringing another tenant into the form, by the picker or by their own form button, hides the
+    // box: it belonged to the one before.
     await open.locator('button[data-act="copy-link"][data-tenant="recT1"]').click();
     await expect(page.locator('#linkBox')).toBeVisible();
     await page.locator('#formTenant').selectOption('recT2');
     await expect(page.locator('#linkBox')).toBeHidden();
+    await open.locator('button[data-act="copy-link"][data-tenant="recT1"]').click();
+    await expect(page.locator('#linkBox')).toBeVisible();
+    await page.locator('#selfList .pack.open button[data-act="open-form"][data-tenant="recT2"]').click();
+    await expect(page.locator('#linkBox')).toBeHidden();
+    await expect(page.locator('#linkUrl')).toHaveValue('');
+  });
+
+  test('an old badly written value nobody touched never blocks a save', async ({ page }) => {
+    const fx = fixtures();
+    fx[TBL.tenants][0].fields[T.ni] = 'not an NI number';
+    const writes = await openPage(page, fx);
+    const open = await openSelf(page, '18 Test Park');
+    await open.locator('button[data-act="open-form"]').first().click();
+    await page.locator('#meetingForm textarea[name="meetingNotes"]').fill('Talked about the cap');
+    await page.locator('#meetingSave').click();
+    await expect(page.locator('#toast')).toContainText('Meeting saved');
+    const w = writes.filter(x => x.tableId === TBL.tenants).pop();
+    expect(Object.keys(w.records[0].fields)).not.toContain(T.ni);
+    // Changing it to another bad value is still refused.
+    await page.locator('#meetingForm input[name="ni"]').fill('still not one');
+    await page.locator('#meetingSave').click();
+    await expect(page.locator('#toast')).toContainText('National Insurance number should look like');
   });
 
   test('Copy tenant link makes the link through the Worker on Kevin\'s own key, shows it once, and can switch it off', async ({ page }) => {

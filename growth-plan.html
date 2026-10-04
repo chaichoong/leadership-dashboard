@@ -758,6 +758,9 @@
     const form = $('meetingForm');
     const t = state.data.tenants.find(x => x.id === state.ui.formTenant);
     form.hidden = !t; $('docsBox').hidden = !t;
+    // The link box belongs to one tenant: whatever brought another into the form hides it, so
+    // "Switch this tenant's form link off" can never look as if it acted on the link shown.
+    if (state.ui.linkTenant !== state.ui.formTenant) { $('linkBox').hidden = true; $('linkUrl').value = ''; state.ui.linkTenant = ''; }
     if (!t) return;
     const map = Object.assign(storedForm(t), { meetingDate: t.meetingDate || todayISO() });
     FORM_FIELDS.forEach(k => { const el = form.elements[k]; if (!el) return; if (el.type === 'checkbox') el.checked = !!map[k]; else el.value = map[k] == null ? '' : map[k]; });
@@ -775,17 +778,18 @@
     const t = state.data.tenants.find(x => x.id === state.ui.formTenant); if (!t) return;
     const form = $('meetingForm'); const T = GP.tenant;
     const v = k => { const el = form.elements[k]; return el.type === 'checkbox' ? el.checked : el.value.trim(); };
+    const was = storedForm(t);
+    const same = k => typeof was[k] === 'boolean' ? was[k] === v(k) : String(was[k] == null ? '' : was[k]).trim() === String(v(k));
+    // Only what changed is checked and sent: an old value nobody touched never blocks a save.
     const ni = v('ni').replace(/\s+/g, '').toUpperCase();
-    if (ni && !/^[A-Z]{2}\d{6}[A-D]$/.test(ni)) { toast('National Insurance number should look like AA 12 34 56 A', true); return; }
-    const dob = v('dob'); if (dob) { const y = Number(dob.slice(0, 4)); if (y < 1920 || y > 2010) { toast('That date does not look like a tenant\'s date of birth', true); return; } }
+    if (!same('ni') && ni && !/^[A-Z]{2}\d{6}[A-D]$/.test(ni)) { toast('National Insurance number should look like AA 12 34 56 A', true); return; }
+    const dob = v('dob'); if (!same('dob') && dob) { const y = Number(dob.slice(0, 4)); if (y < 1920 || y > 2010) { toast('That date does not look like a tenant\'s date of birth', true); return; } }
     const fields = {
       [T.dob]: dob || null, [T.ni]: ni || null, [T.phone]: v('phone') || null, [T.email]: v('email') || null, [T.idSeen]: v('idSeen') || null, [T.over35]: v('over35'),
       [T.ucPayDay]: v('ucPayDay') ? Number(v('ucPayDay')) : null, [T.dueDay]: v('dueDay') || null, [T.household]: v('household') || null, [T.capExemption]: v('capExemption') || 'Unknown', [T.ucStatementSeen]: v('ucStatementSeen'), [T.otherBenefits]: v('otherBenefits') || null,
       [T.otherAdults]: v('otherAdults') || null, [T.ctAccount]: v('ctAccount') || null, [T.weeklyIncome]: v('weeklyIncome') ? Number(v('weeklyIncome')) : null, [T.weeklySpending]: v('weeklySpending') ? Number(v('weeklySpending')) : null,
       [T.bankStatements]: v('bankStatements'), [T.authoritySigned]: v('authoritySigned'), [T.meetingDate]: v('meetingDate') || null, [T.meetingNotes]: v('meetingNotes') || null,
     };
-    const was = storedForm(t);
-    const same = k => typeof was[k] === 'boolean' ? was[k] === v(k) : String(was[k] == null ? '' : was[k]).trim() === String(v(k));
     FORM_FIELDS.forEach(k => { if (same(k)) delete fields[T[k]]; });
     if (!Object.keys(fields).length) { toast('Nothing on the form has changed', true); return; }
     await withBusy('meeting:' + t.id, async () => {
@@ -828,7 +832,7 @@
         let copied = false;
         try { await navigator.clipboard.writeText(r.url); copied = true; } catch (e) { copied = false; }
         // The form now shows this tenant, so "Switch this tenant's form link off" acts on this link.
-        state.ui.formTenant = id; renderDocs();
+        state.ui.formTenant = id; state.ui.linkTenant = id; renderDocs();
         $('linkText').textContent = `Form link for ${name}, works until ${r.expires}. ${copied ? 'Copied.' : 'Copy it from the box.'} A new link switches this one off.`;
         $('linkUrl').value = r.url;
         $('linkWarn').hidden = !PM;
@@ -845,7 +849,7 @@
     await withBusy('linkoff:' + t.id, async () => {
       try {
         await tenantLinkCall('/tenant-form/link/off', t.id);
-        $('linkBox').hidden = true; $('linkUrl').value = '';
+        $('linkBox').hidden = true; $('linkUrl').value = ''; state.ui.linkTenant = '';
         toast(`${t.name}'s form link is switched off`);
       } catch (e) {
         toast(`Not switched off: ${e.message}`, true);
@@ -1726,7 +1730,7 @@ BEFORE THE FIRST ONE IS SIGNED (all in writing)
     if (t.closest('#calcForm')) renderCalc();
   });
   document.addEventListener('input', e => { if (e.target.closest('#calcForm')) renderCalc(); });
-  $('formTenant').addEventListener('change', e => { state.ui.formTenant = e.target.value; $('linkBox').hidden = true; $('linkUrl').value = ''; renderMeetingForm(); renderDocs(); });
+  $('formTenant').addEventListener('change', e => { state.ui.formTenant = e.target.value; renderMeetingForm(); renderDocs(); });
   $('docUpload').addEventListener('click', uploadDocs);
   $('meetingForm').addEventListener('submit', e => { e.preventDefault(); saveMeetingForm(); });
   $('linkOff').addEventListener('click', switchLinkOff);
