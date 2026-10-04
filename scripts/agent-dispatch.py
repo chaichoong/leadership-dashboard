@@ -93,6 +93,8 @@ from agent_email_format import (  # noqa: E402
     rule_send_problem,
     TRIAL_ACTING_SHAPE_RE,
     TRIAL_STAMP,
+    TRIAL_AGENTS,
+    TRIAL_ENDED,
     strip_trial_marks,
     form_card,
     trial_problem,
@@ -455,6 +457,15 @@ RENT_REGISTER_ROW = ROLE_AGENTS[RENT_REC_ID]["registerRow"]
 # and the specialist for that owns it. Repairs never enter this lane — they
 # keep Roy's same-hour handover (Kevin's ruling, 2 Sep 2026).
 AUTO_ROUTES = (
+    # A TENANT'S REPLY TO THE RENT CHASE (Kevin, 4 Oct 2026, "Build as-is"): an inbound message from a tenant
+    # who has an open RENT LATE or RENT PLAN task goes to the Cash Flow Voids agent, which drafts the answer
+    # and any payment plan. OFF until the agent's trial has ended: rent_reply_senders() reads nothing while
+    # it is on trial, so no tenant's message waits on a draft that cannot be sent; Inbox Response answers
+    # him meanwhile. First, because the sender is a known tenant mid-chase; Roy's repair lane diverts
+    # before AUTO_ROUTES, so a repair from the same tenant still goes to Roy.
+    {"rec": RENT_REC_ID,
+     "fresh": lambda t: bool(t.get("rentReply")) and t["inboundTask"],
+     "steal": lambda t, tm: bool(t.get("rentReply")) and tm == RESPONSE_REC_ID},
     {"rec": CREDITOR_REC_ID,
      "fresh": lambda t: t["creditor"] and t["inboundTask"],
      "steal": lambda t, tm: t["creditor"] and (
@@ -474,6 +485,52 @@ AUTO_ROUTES = (
      "fresh": lambda t: t["inboundTask"],
      "steal": None},
 )
+
+
+# The tenants a reply could come from: those with an open RENT LATE or RENT PLAN task.
+RENT_REPLY_FORMULA = ("AND(OR(LEFT({Task Name}, 11)='RENT LATE: ', LEFT({Task Name}, 11)='RENT PLAN: '), "
+                      "NOT({Status}='Completed'), NOT({Status}='Cancelled'))")
+TASK_TENANTS = "fld6ZcfEogJmeQj2c"        # Tasks: Tenants link (scripts/rent-check.py TK["tenants"])
+TENANTS_TABLE = "tblX4elTuu01gwBYh"
+TENANT_EMAIL, TENANT_PHONE = "fldybEduFY3DWWTfT", "fldraHUkWfqo4olLF"
+
+
+def sender_key(s):
+    """One spelling for a sender: an email in lower case, a UK number as +44…, anything else as typed."""
+    s = str(s or "").strip()
+    m = re.search(r"[\w.+-]+@[\w-]+(?:\.[\w-]+)+", s)
+    if m:
+        return m.group(0).lower()
+    digits = re.sub(r"\D", "", s)
+    if digits.startswith("0044"):
+        digits = digits[2:]
+    if digits.startswith("44") and len(digits) == 12:
+        return "+" + digits
+    if digits.startswith("0") and len(digits) == 11:
+        return "+44" + digits[1:]
+    return s.lower()
+
+
+def rent_reply_senders():
+    """The emails and mobiles of tenants with an open RENT LATE or RENT PLAN task, as sender_key spells
+    them. Empty, reading nothing, while the Cash Flow Voids agent is on trial or its trial has not ended."""
+    if RENT_REC_ID in TRIAL_AGENTS or RENT_REC_ID not in TRIAL_ENDED:
+        return set()
+    tenant_ids = set()
+    for rec in query_records(TASKS, RENT_REPLY_FORMULA, [AF["name"], TASK_TENANTS]):
+        tenant_ids |= set(links((rec.get("fields") or {}).get(TASK_TENANTS)))
+    if not tenant_ids:
+        return set()
+    keys = set()
+    ids = sorted(tenant_ids)
+    for i in range(0, len(ids), 50):
+        formula = "OR(" + ",".join(f"RECORD_ID()='{t}'" for t in ids[i:i + 50] if re.fullmatch(r"rec\w+", t)) + ")"
+        for rec in query_records(TENANTS_TABLE, formula, [TENANT_EMAIL, TENANT_PHONE]):
+            f = rec.get("fields") or {}
+            for v in (f.get(TENANT_EMAIL), f.get(TENANT_PHONE)):
+                if v:
+                    keys.add(sender_key(v))
+    return keys
 
 
 def auto_route_fresh(t, role_roster):
@@ -2898,6 +2955,14 @@ def build_queue(args=None):
     trial_checked, form_cards = [], []
     creditor_ok = bool(role_roster.get(CREDITOR_REC_ID, {}).get("dispatchable"))
     creditor_count = 0
+    # Tenants mid-chase, for the rent reply lane. A failed read leaves the lane empty and says so: the
+    # message then goes to Inbox Response as before, never nowhere.
+    rent_senders, rent_senders_error = set(), ""
+    try:
+        rent_senders = rent_reply_senders()
+    except Exception as exc:  # noqa: BLE001 — said in the queue JSON and on stderr
+        rent_senders_error = str(exc)[:300]
+        print(f"WARNING: rent reply senders unavailable: {rent_senders_error}", file=sys.stderr)
     # The property lane needs BOTH the register lever and a readable book:
     # a task marked for the agent while the book cannot be read would be
     # withheld from Roy and from dispatch alike, with nobody holding it
@@ -2962,6 +3027,7 @@ def build_queue(args=None):
         t["matchedPattern"] = hit1 or ""
         if hit1:
             tier1.append(t)
+        t["rentReply"] = bool(t["inboundTask"] and rent_senders and sender_key(t["inboundSender"]) in rent_senders)
         t["creditor"] = creditor_match(t["name"], t["description"], t["notes"])
         creditor_count += t["creditor"]
         # Creditor work is ALWAYS tier-1 (Kevin's triage ruling, 24 Aug 2026)
@@ -3268,6 +3334,7 @@ def build_queue(args=None):
         # never routes to them yet.
         "roleAgents": role_roster,
         "roleAgentsError": role_roster_error,
+        "rentReplyError": rent_senders_error,
         "counts": {
             "openTasksRead": len(open_tasks),
             "agentLinkedOpen": len(agent_linked),

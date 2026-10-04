@@ -66,6 +66,8 @@ rc.lane_b_rules.finish_one = _no_lane_b_write
 rc.lane_b_rules.notify_roy = _no_lane_b_write
 # Roy's agent-managed late notice reads its tasks through this: never Airtable in a test.
 rc.read_agent_late = lambda: {}
+# Payment plans read their cards through this; their own cases are in tests/rent-plans.test.js.
+rc.rent_plans.read_cards = lambda _rc: []
 TY, TN, TX, AC = rc.TY, rc.TN, rc.TX, rc.AC
 DAY = date(2026, 10, 2)
 def rec(i, f): return {"id": i, "fields": f}
@@ -1076,7 +1078,9 @@ rc.write_row = lambda status, text, payload, now: rows.append([status, text])
 rc.append_history = lambda res, now: None
 with contextlib.redirect_stdout(io.StringIO()):
     code = rc.main(["run"])
-print(json.dumps({"code": code, "status": rows[0][0], "laneB": rows[0][1].splitlines()[-2], "agentLate": rows[0][1].splitlines()[-1]}))`);
+# Each lane's line found by its own words, so a lane added after it never moves them.
+line = lambda start: next(l for l in rows[0][1].splitlines() if l.startswith(start))
+print(json.dumps({"code": code, "status": rows[0][0], "laneB": line("New-tenant tasks"), "agentLate": line("Agent-managed late rent")}))`);
     expect(r.code).toBe(1);
     expect(r.status).toBe('Failed');
     expect(r.laneB).toBe("New-tenant tasks: none raised, the Cash Flow Voids agent's switch could not be read.");
@@ -1098,7 +1102,8 @@ rc.raise_task = boom
 rc.write_row = lambda status, text, payload, now: rows.append([status, text])
 with contextlib.redirect_stdout(io.StringIO()):
     code = rc.main(["run"])
-print(json.dumps({"code": code, "status": rows[0][0], "lastLine": rows[0][1].splitlines()[-3], "laneB": rows[0][1].splitlines()[-2], "firstLine": rows[0][1].splitlines()[0][:22]}))`);
+line = lambda start: next(l for l in rows[0][1].splitlines() if l.startswith(start))
+print(json.dumps({"code": code, "status": rows[0][0], "lastLine": line("Late-rent tasks"), "laneB": line("New-tenant tasks"), "firstLine": rows[0][1].splitlines()[0][:22]}))`);
     expect(r.code).toBe(1);
     expect(r.status).toBe('Failed');
     expect(r.lastLine).toBe('Late-rent tasks FAILED: Airtable POST tasks 422: nope');
