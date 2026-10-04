@@ -26,9 +26,14 @@ def output(plan=(("2026-10-10", 100), ("2026-10-24", 300)), tenancy=TEN):
     head = ([f"PLAN FOR: {tenancy}"] if tenancy else []) + [f"PLAN: {d} £{a:.2f}" for d, a in plan]
     return "\\n".join(head) + "\\n" + EMAIL
 SENT = "[05 Oct 2026 10:00 — send-email] SENT: email to sam@example.com (Gmail id x)"
-def card(i="recPLANCARD00001", outcome="Approved as-is", notes=SENT, out=None, agent=CFV, approved="2026-10-05T09:00:00.000Z", name="INBOUND: reply from Sam"):
-    return {"id": i, "fields": {F["name"]: name, F["status"]: "Completed", F["notes"]: notes, F["output"]: out if out is not None else output(),
-                               F["outcome"]: outcome, F["approvedAt"]: approved, F["sentBy"]: [agent], F["teamMember"]: [agent]}}
+def card(i="recPLANCARD00001", outcome="Approved as-is", notes=SENT, out=None, agent=CFV, approved="2026-10-05T09:00:00.000Z", name="INBOUND: reply from Sam",
+         tenancies=(TEN,), sender="", created=None):
+    rec = {"id": i, "fields": {F["name"]: name, F["status"]: "Completed", F["notes"]: notes, F["output"]: out if out is not None else output(),
+                              F["outcome"]: outcome, F["approvedAt"]: approved, F["sentBy"]: [agent], F["teamMember"]: [agent],
+                              F["tenancies"]: list(tenancies), F["sender"]: sender}}
+    if created:
+        rec["createdTime"] = created
+    return rec
 def pays(*pairs): return [{"day": date.fromisoformat(d), "amount": a} for d, a in pairs]
 def trial_ended(at="2026-10-05T00:00:00Z"):
     aef.TRIAL_ENDED[CFV] = at
@@ -84,7 +89,8 @@ print(json.dumps(out))`);
     for (const k of ['noFor', 'forOnly', 'twoFor']) expect(r[k], k).toMatch(/one PLAN FOR line/);
     expect(r.badFor).toMatch(/PLAN FOR: rec/);
     expect(r.badDay).toMatch(/not a real day/);
-    for (const k of ['ukDate', 'noPound', 'lower']) expect(r[k], k).toMatch(/written exactly as "PLAN: 2026-10-10 £100.00"/);
+    for (const k of ['ukDate', 'noPound']) expect(r[k], k).toMatch(/written exactly as "PLAN: 2026-10-10 £100.00"/);
+    expect(r.lower).toMatch(/exactly as "PLAN FOR:" and "PLAN:", in capitals/);
     expect(r.zero).toMatch(/not one the rent check can track/);
     expect(r.huge).toMatch(/not one the rent check can track/);
     expect(r.sameDay).toMatch(/two promises on one day/);
@@ -181,36 +187,45 @@ describe('the daily tracking, inside the rent check', () => {
 trial_ended()
 notes_written, raised = {}, []
 CARDS = {"recPLANCARD00001": SENT}
+CONTACTS = {"recTENANTPLAN001": {rp.TENANT_CONTACT["email"]: "Sam@Example.com", rp.TENANT_CONTACT["phone"]: "07700 900123"}}
 class RC:
-    T_TASKS, TY = rc.T_TASKS, rc.TY
+    T_TASKS, T_TENANTS, TY = rc.T_TASKS, rc.T_TENANTS, rc.TY
     first = staticmethod(rc.first)
     payments_by_tenancy = staticmethod(rc.payments_by_tenancy)
+    next_stage = staticmethod(rc.next_stage)
     lane_b_rules = rc.lane_b_rules
     def __init__(self, cards, keys=None): self.cards, self.keys = cards, keys or {}
-    def fetch_all(self, table, params=None): return self.cards
+    def fetch_all(self, table, params=None):
+        if table == rc.T_TENANTS:
+            return [{"id": k, "fields": v} for k, v in CONTACTS.items()]
+        return self.cards
     def read_task_state(self): return {"on": True, "status": "Built", "keys": self.keys}
-    def raise_task(self, item, day): raised.append({"key": item["key"], "name": item["name"], "tenants": item["tenants"]}); return "recNEW"
+    def raise_task(self, item, day): raised.append({"key": item["key"], "name": item["name"], "tenants": item["tenants"], "also": item.get("alsoKeys")}); return "recNEW"
     def api(self, method, path, payload=None, params=None):
         tid = path.split("/")[-1]
         if method == "GET":
             return {"id": tid, "fields": {F["notes"]: CARDS.get(tid, "")}}
         notes_written[tid] = payload["fields"][F["notes"]]
         return {}
-def data_with(tx):
-    return {"tenancies": [{"id": TEN, "fields": {rc.TY["unitRef"]: ["Unit 9 – 1 Example Road"], rc.TY["tenants"]: ["recTENANTPLAN001"]}}],
+def data_with(tx, rent=None, due=None):
+    f = {rc.TY["unitRef"]: ["Unit 9 – 1 Example Road"], rc.TY["tenants"]: ["recTENANTPLAN001"]}
+    if rent:
+        f.update({rc.TY["rent"]: rent, rc.TY["dueDay"]: str(due)})
+    return {"tenancies": [{"id": TEN, "fields": f}],
             "tx": [{"fields": {rc.TX["date"]: d, rc.TX["tenancy"]: [TEN], rc.TX["amount"]: a}} for d, a in tx]}
+RES = {"lanes": {TEN: "late"}, "feed": {"blocked": []}, "tenancies": []}
 `;
   it('a missed promise raises one RENT LATE task back to the chase, with the tenants linked, and marks the card', () => {
     const r = py(RUN + `
 fake = RC([card()])
 data = data_with([("2026-10-10", 40)])
-plans = rp.read(fake, data, date(2026, 10, 12))
-out = rp.act(fake, plans, data, date(2026, 10, 12), True, True)
-again = rp.act(RC([card()], keys={raised[0]["key"]: date(2026, 10, 12)}), rp.read(RC([card()]), data, date(2026, 10, 13)), data, date(2026, 10, 13), True, True)
+plans = rp.read(fake, data, date(2026, 10, 12), RES)
+out = rp.act(fake, plans, data, date(2026, 10, 12), True, True, RES)
+again = rp.act(RC([card()], keys={raised[0]["key"]: date(2026, 10, 12)}), rp.read(RC([card()]), data, date(2026, 10, 13), RES), data, date(2026, 10, 13), True, True, RES)
 print(json.dumps({"out": out, "raised": raised, "note": notes_written.get("recPLANCARD00001", ""), "againRaised": len(raised), "line": rp.line(out)}))`);
     expect(r.out.missed).toEqual(['recPLANCARD00001']);
-    expect(r.raised[0]).toEqual({ key: 'recTENANCYPLAN001:plan:recPLANCARD00001:2026-10-10', name: 'RENT LATE: Unit 9 – 1 Example Road, payment plan promise of 10 Oct missed', tenants: ['recTENANTPLAN001'] });
-    expect(r.note).toMatch(/RENT PLAN MISSED: 2026-10-10: £100.00 promised by then, £40.00 received; the chase starts again/);
+    expect(r.raised[0]).toEqual({ key: 'recTENANCYPLAN001:plan:recPLANCARD00001:2026-10-10', name: 'RENT LATE: Unit 9 – 1 Example Road, payment plan promise of 10 Oct missed', tenants: ['recTENANTPLAN001'], also: [] });
+    expect(r.note).toMatch(/RENT PLAN MISSED: 2026-10-10: £100.00 owed by then, £40.00 received; the chase starts again/);
     // A second run with the task already raised raises no second one.
     expect(r.againRaised).toBe(1);
     expect(r.line).toBe('Payment plans: 1 missed a promise.');
@@ -219,14 +234,14 @@ print(json.dumps({"out": out, "raised": raised, "note": notes_written.get("recPL
   it('a kept plan is marked kept; an open plan is on track and lane A does not chase that tenancy', () => {
     const r = py(RUN + `
 data = data_with([("2026-10-10", 100), ("2026-10-24", 300)])
-kept = rp.act(RC([card()]), rp.read(RC([card()]), data, date(2026, 10, 26)), data, date(2026, 10, 26), True, True)
-opened = rp.read(RC([card()]), data_with([("2026-10-10", 100)]), date(2026, 10, 20))
+kept = rp.act(RC([card()]), rp.read(RC([card()]), data, date(2026, 10, 26), RES), data, date(2026, 10, 26), True, True, RES)
+opened = rp.read(RC([card()]), data_with([("2026-10-10", 100)]), date(2026, 10, 20), RES)
 res = {"tenancies": [{"id": TEN, "lane": "late", "status": "In Payment", "type": "Universal Credit", "unit": "Unit 9 – 1 Example Road",
                       "rent": 500, "owed": "2026-10-01", "daysLate": 19, "note": "late"}], "feed": {"asAt": "x"}}
 chased = rc.task_plan(res, [], {}, date(2026, 10, 20))
 paused = rc.task_plan(res, [], {}, date(2026, 10, 20), opened["onTrack"])
 print(json.dumps({"kept": kept["kept"], "note": notes_written.get("recPLANCARD00001", ""), "onTrack": sorted(opened["onTrack"]),
-                  "chased": len(chased), "paused": len(paused), "line": rp.line(rp.act(RC([card()]), opened, data, date(2026, 10, 20), True, True))}))`);
+                  "chased": len(chased), "paused": len(paused), "line": rp.line(rp.act(RC([card()]), opened, data, date(2026, 10, 20), True, True, RES))}))`);
     expect(r.kept).toEqual(['recPLANCARD00001']);
     expect(r.note).toMatch(/RENT PLAN KEPT: every promise kept/);
     expect(r.onTrack).toEqual(['recTENANCYPLAN001']);
@@ -238,11 +253,11 @@ print(json.dumps({"kept": kept["kept"], "note": notes_written.get("recPLANCARD00
   it('switched off or a dry run: said, never acted on; a card naming a tenancy that is not live is said on the row', () => {
     const r = py(RUN + `
 data = data_with([])
-plans = rp.read(RC([card()]), data, date(2026, 10, 12))
-off = rp.act(RC([card()]), plans, data, date(2026, 10, 12), True, False)
-dry = rp.act(RC([card()]), plans, data, date(2026, 10, 12), False, True)
-stranger = rp.read(RC([card(out=output(tenancy="recNOTLIVETENANCY"))]), data, date(2026, 10, 12))
-bad = rp.act(RC([]), stranger, data, date(2026, 10, 12), True, True)
+plans = rp.read(RC([card()]), data, date(2026, 10, 12), RES)
+off = rp.act(RC([card()]), plans, data, date(2026, 10, 12), True, False, RES)
+dry = rp.act(RC([card()]), plans, data, date(2026, 10, 12), False, True, RES)
+stranger = rp.read(RC([card(out=output(tenancy="recNOTLIVETENANCY"), tenancies=())]), data, date(2026, 10, 12), RES)
+bad = rp.act(RC([]), stranger, data, date(2026, 10, 12), True, True, RES)
 print(json.dumps({"raised": len(raised), "notes": len(notes_written), "off": rp.line(off), "dry": dry["missed"], "bad": rp.line(bad), "badState": stranger["plans"][0]["state"]}))`);
     expect([r.raised, r.notes]).toEqual([0, 0]);
     expect(r.off).toBe('Payment plans: 1 missed a promise (not acted on: the agent is switched off).');
@@ -255,16 +270,157 @@ print(json.dumps({"raised": len(raised), "notes": len(notes_written), "off": rp.
     const r = py(RUN + `
 class Broken(RC):
     def fetch_all(self, table, params=None): raise RuntimeError("Airtable 500")
-failed = rp.read(Broken([]), data_with([]), date(2026, 10, 12))
+failed = rp.read(Broken([]), data_with([]), date(2026, 10, 12), RES)
 CARDS["recPLANCARD00001"] = ""
 data = data_with([])
-out = rp.act(RC([card()]), rp.read(RC([card()]), data, date(2026, 10, 12)), data, date(2026, 10, 12), True, True)
+out = rp.act(RC([card()]), rp.read(RC([card()]), data, date(2026, 10, 12), RES), data, date(2026, 10, 12), True, True, RES)
 print(json.dumps({"failed": failed["failed"], "onTrack": sorted(failed["onTrack"]), "actFailed": out["failed"], "written": len(notes_written),
-                  "line": rp.line(rp.act(RC([]), failed, data, date(2026, 10, 12), True, True))}))`);
+                  "line": rp.line(rp.act(RC([]), failed, data, date(2026, 10, 12), True, True, RES))}))`);
     expect(r.failed).toMatch(/payment plans could not be read: Airtable 500/);
     expect(r.onTrack).toEqual([]);
     expect(r.line).toMatch(/^Payment plans FAILED/);
     expect(r.actFailed).toMatch(/read back empty/);
     expect(r.written).toBe(0);
+  });
+});
+
+describe('the review\'s cases (4 Oct 2026): what a plan must also hold to', () => {
+  const RUN2 = `
+trial_ended()
+CONTACTS = {"recTENANTPLAN001": {rp.TENANT_CONTACT["email"]: "Sam@Example.com", rp.TENANT_CONTACT["phone"]: "07700 900123"}}
+class RC:
+    T_TASKS, T_TENANTS, TY = rc.T_TASKS, rc.T_TENANTS, rc.TY
+    first = staticmethod(rc.first)
+    payments_by_tenancy = staticmethod(rc.payments_by_tenancy)
+    next_stage = staticmethod(rc.next_stage)
+    lane_b_rules = rc.lane_b_rules
+    def __init__(self, cards): self.cards = cards
+    def fetch_all(self, table, params=None):
+        return [{"id": k, "fields": v} for k, v in CONTACTS.items()] if table == rc.T_TENANTS else self.cards
+def data_with(tx, rent=None, due=None):
+    f = {rc.TY["unitRef"]: ["Unit 9 – 1 Example Road"], rc.TY["tenants"]: ["recTENANTPLAN001"]}
+    if rent:
+        f.update({rc.TY["rent"]: rent, rc.TY["dueDay"]: str(due)})
+    return {"tenancies": [{"id": TEN, "fields": f}],
+            "tx": [{"fields": {rc.TX["date"]: d, rc.TX["tenancy"]: [TEN], rc.TX["amount"]: a}} for d, a in tx]}
+def st(cards, data, day, res=None):
+    return [(p["id"], p["state"], p.get("why", "")) for p in rp.read(RC(cards), data, day, res or {"lanes": {TEN: "late"}, "feed": {"blocked": []}})["plans"]]
+`;
+  it('a miss is never judged on doubtful bank data: the plan waits, still paused, nothing raised', () => {
+    const r = py(RUN2 + `
+data = data_with([])
+grey = rp.read(RC([card()]), data, date(2026, 10, 12), {"lanes": {TEN: "unknown"}, "feed": {"blocked": []}})
+stale = rp.read(RC([card()]), data, date(2026, 10, 12), {"lanes": {TEN: "late"}, "feed": {"blocked": ["Santander 40 hours old"]}})
+clear = rp.read(RC([card()]), data, date(2026, 10, 12), {"lanes": {TEN: "late"}, "feed": {"blocked": []}})
+# Doubt never blocks a plan that was kept.
+kept = rp.read(RC([card()]), data_with([("2026-10-09", 400)]), date(2026, 10, 26), {"lanes": {TEN: "unknown"}, "feed": {"blocked": ["x"]}})
+print(json.dumps({"grey": grey["plans"][0]["state"], "stale": stale["plans"][0]["state"], "paused": sorted(grey["onTrack"]),
+                  "clear": clear["plans"][0]["state"], "kept": kept["plans"][0]["state"],
+                  "line": rp.line(rp.act(RC([]), grey, data, date(2026, 10, 12), True, True, {}))}))`);
+    expect([r.grey, r.stale, r.clear, r.kept]).toEqual(['waiting', 'waiting', 'missed', 'kept']);
+    expect(r.paused).toEqual(['recTENANCYPLAN001']);
+    expect(r.line).toBe('Payment plans: 1 waiting on bank data before a promise can be judged.');
+  });
+
+  it('the plan is held to the rent that falls due as well as the promises, whichever is more', () => {
+    const r = py(RUN2 + `
+# Rent £500 due on the 15th. Plan sent 5 Oct: £250 on 20 Oct and £250 on 3 Nov (arrears only, against the agent file).
+c = card(out=output(plan=(("2026-10-20", 250), ("2026-11-03", 250))))
+rentOnly = st([c], data_with([("2026-10-15", 500)], rent=500, due=15), date(2026, 11, 6))
+planOnly = st([c], data_with([("2026-10-20", 250), ("2026-11-03", 250)], rent=500, due=15), date(2026, 10, 18))
+both = st([c], data_with([("2026-10-15", 500), ("2026-10-20", 250), ("2026-11-03", 250)], rent=500, due=15), date(2026, 11, 6))
+print(json.dumps({"rentOnly": rentOnly, "planOnly": planOnly, "both": both}))`);
+    // Paid the rent but no arrears: by 5 Nov £500 was promised and £500 of rent fell due; £500 paid. Promises
+    // are £500 in all, so it holds; the arrears were never in the plan. The agent file says each PLAN amount
+    // includes the rent, so the rent check holds him to whichever is more.
+    expect(r.rentOnly[0][1]).toBe('kept');
+    // Skipped the 15 Oct rent and paid nothing by 17 Oct: missed at the rent's own checkpoint.
+    expect(r.planOnly[0][1]).toBe('missed');
+    expect(r.both[0][1]).toBe('kept');
+  });
+
+  it('money from before the card existed is never the plan\'s', () => {
+    const r = py(RUN2 + `
+# £200 paid 3 Dec, the card made 5 Dec, the email the same day, promise of £200 on 7 Dec.
+c = card(out=output(plan=(("2026-12-07", 200),)), notes="[05 Dec 2026 10:00 — send-email] SENT: email to sam@example.com",
+         created="2026-12-05T09:00:00.000Z")
+print(json.dumps(st([c], data_with([("2026-12-03", 200)]), date(2026, 12, 9))))`);
+    expect(r[0][1]).toBe('missed');
+  });
+
+  it('a PLAN FOR must belong to the card: its own tenancy link, or the tenancy of the tenant who sent it', () => {
+    const r = py(RUN2 + `
+data = data_with([])
+own = st([card()], data, date(2026, 10, 8))
+bySender = st([card(tenancies=(), sender="Sam Example <sam@example.com>")], data, date(2026, 10, 8))
+byText = st([card(tenancies=(), sender="+44 (0)7700 900123")], data, date(2026, 10, 8))
+stranger = st([card(tenancies=(), sender="someone@example.com")], data, date(2026, 10, 8))
+print(json.dumps({"own": own[0][1], "bySender": bySender[0][1], "byText": byText[0][1], "stranger": stranger[0]}))`);
+    expect([r.own, r.bySender, r.byText]).toEqual(['open', 'open', 'open']);
+    expect(r.stranger[1]).toBe('bad');
+    expect(r.stranger[2]).toMatch(/not that tenancy's and was not sent by its tenant/);
+  });
+
+  it('two plans for one tenancy: the newer counts, the older is said on the row', () => {
+    const r = py(RUN2 + `
+old = card(i="recPLANCARDOLD01", notes="[03 Oct 2026 10:00 — send-email] SENT: email to sam@example.com", out=output(plan=(("2026-10-09", 100),)))
+new = card(i="recPLANCARDNEW01", notes="[06 Oct 2026 10:00 — send-email] SENT: email to sam@example.com", out=output(plan=(("2026-10-20", 100),)))
+plans = rp.read(RC([old, new]), data_with([]), date(2026, 10, 8), {"lanes": {TEN: "late"}, "feed": {"blocked": []}})
+print(json.dumps({"states": {p["id"]: p["state"] for p in plans["plans"]}, "line": rp.line(rp.act(RC([]), plans, data_with([]), date(2026, 10, 8), False, True, {}))}))`);
+    expect(r.states).toEqual({ recPLANCARDOLD01: 'superseded', recPLANCARDNEW01: 'open' });
+    expect(r.line).toMatch(/Check: card recPLANCARDOLD01: card recPLANCARDNEW01 is the newer plan/);
+  });
+
+  it('an approved plan whose email has not gone is said, and pauses nothing', () => {
+    const r = py(RUN2 + `
+plans = rp.read(RC([card(notes="RENT CHECK KEY: x")]), data_with([]), date(2026, 10, 8), {"lanes": {TEN: "late"}, "feed": {"blocked": []}})
+print(json.dumps({"state": plans["plans"][0]["state"], "paused": sorted(plans["onTrack"]), "line": rp.line(rp.act(RC([]), plans, data_with([]), date(2026, 10, 8), False, True, {}))}))`);
+    expect(r.state).toBe('unsent');
+    expect(r.paused).toEqual([]);
+    expect(r.line).toBe('Payment plans: 1 approved with the email not gone yet.');
+  });
+
+  it('a missed promise carries lane A\'s own stage key, so lane A never raises a twin; that run lane A is paused too', () => {
+    const r = py(RUN2 + `
+raised = []
+class W(RC):
+    def read_task_state(self): return {"on": True, "status": "Built", "keys": {}}
+    def raise_task(self, item, day): raised.append(item); return "recNEW"
+    def api(self, method, path, payload=None, params=None):
+        return {"id": "x", "fields": {F["notes"]: SENT}} if method == "GET" else {}
+res = {"lanes": {TEN: "late"}, "feed": {"blocked": []},
+       "tenancies": [{"id": TEN, "lane": "late", "status": "In Payment", "type": "Universal Credit", "unit": "Unit 9 – 1 Example Road",
+                      "rent": 500, "owed": "2026-10-01", "daysLate": 11, "note": "late"}]}
+plans = rp.read(W([card()]), data_with([]), date(2026, 10, 12), res)
+out = rp.act(W([card()]), plans, data_with([]), date(2026, 10, 12), True, True, res)
+paused = rc.task_plan(res, [], {}, date(2026, 10, 12), plans["onTrack"])
+# The next day lane A reads the keys the missed task carried.
+keys = {k: date(2026, 10, 12) for k in [raised[0]["key"]] + raised[0]["alsoKeys"]}
+nextDay = rc.task_plan(res, [], keys, date(2026, 10, 13))
+print(json.dumps({"also": raised[0]["alsoKeys"], "paused": len(paused), "nextDay": len(nextDay)}))`);
+    expect(r.also).toEqual(['recTENANCYPLAN001:2026-10-01:1']);
+    expect(r.paused).toBe(0);
+    // Lane A's reminder stage is taken; its follow-up waits its own gap, so no twin the next day.
+    expect(r.nextDay).toBe(0);
+  });
+
+  it('an email that says "Plan: £25 a month" in passing is untouched; a plan card may text', () => {
+    const r = py(RUN2 + `
+prose = EMAIL.replace("Agreed.", "Plan: £25 a month from 1 November, as we discussed.")
+aef.validate_submission(prose)
+print(json.dumps({"prose": "ok", "text": aef.text_card("INBOUND: reply from Sam", "", output()), "noPlan": aef.text_card("INBOUND: reply from Sam", "", EMAIL),
+                  "key": aef.sender_key("+44 (0)7700 900123")}))`);
+    expect(r).toEqual({ prose: 'ok', text: true, noPlan: false, key: '+447700900123' });
+  });
+});
+
+describe('the rent check writes every key a task carries', () => {
+  it('a missed-promise task keeps both its own key and lane A\'s stage key in Notes', () => {
+    const r = py(`
+sent = []
+rc.api = lambda method, path, payload=None, params=None: sent.append(payload) or {"records": [{"id": "recNEW"}]}
+rc.raise_task({"key": "recT:plan:recC:2026-10-10", "alsoKeys": ["recT:2026-10-01:1"], "tenancy": "recT", "tenants": [], "name": "n", "description": "d"}, date(2026, 10, 12))
+print(json.dumps(sent[0]["records"][0]["fields"][rc.TK["notes"]]))`);
+    expect(r).toBe('RENT CHECK KEY: recT:plan:recC:2026-10-10\nRENT CHECK KEY: recT:2026-10-01:1');
   });
 });

@@ -95,6 +95,8 @@ from agent_email_format import (  # noqa: E402
     TRIAL_STAMP,
     TRIAL_AGENTS,
     TRIAL_ENDED,
+    parse_plan,
+    sender_key,
     strip_trial_marks,
     form_card,
     trial_problem,
@@ -487,28 +489,18 @@ AUTO_ROUTES = (
 )
 
 
-# The tenants a reply could come from: those with an open RENT LATE or RENT PLAN task.
+# The tenants a reply could come from: those with an open RENT LATE or RENT PLAN task, and those whose
+# payment plan is agreed and still running (the plan card is his own reply, with no tenant linked:
+# its PLAN FOR line names the tenancy).
 RENT_REPLY_FORMULA = ("AND(OR(LEFT({Task Name}, 11)='RENT LATE: ', LEFT({Task Name}, 11)='RENT PLAN: '), "
                       "NOT({Status}='Completed'), NOT({Status}='Cancelled'))")
+RUNNING_PLAN_FORMULA = ("AND(FIND('PLAN FOR: rec', {Agent Output}&''), LEN({Approval Outcome}&'')>0, "
+                        "FIND('— send-email] SENT: email to', {Notes}&''), NOT(FIND('RENT PLAN MISSED: ', {Notes}&'')), "
+                        "NOT(FIND('RENT PLAN KEPT: ', {Notes}&'')))")
 TASK_TENANTS = "fld6ZcfEogJmeQj2c"        # Tasks: Tenants link (scripts/rent-check.py TK["tenants"])
 TENANTS_TABLE = "tblX4elTuu01gwBYh"
+TENANCIES_TABLE, TENANCY_TENANTS = "tblN51a88qTDB6iMH", "fld1i5bDoHL3B6rUf"
 TENANT_EMAIL, TENANT_PHONE = "fldybEduFY3DWWTfT", "fldraHUkWfqo4olLF"
-
-
-def sender_key(s):
-    """One spelling for a sender: an email in lower case, a UK number as +44…, anything else as typed."""
-    s = str(s or "").strip()
-    m = re.search(r"[\w.+-]+@[\w-]+(?:\.[\w-]+)+", s)
-    if m:
-        return m.group(0).lower()
-    digits = re.sub(r"\D", "", s)
-    if digits.startswith("0044"):
-        digits = digits[2:]
-    if digits.startswith("44") and len(digits) == 12:
-        return "+" + digits
-    if digits.startswith("0") and len(digits) == 11:
-        return "+44" + digits[1:]
-    return s.lower()
 
 
 def rent_reply_senders():
@@ -519,6 +511,19 @@ def rent_reply_senders():
     tenant_ids = set()
     for rec in query_records(TASKS, RENT_REPLY_FORMULA, [AF["name"], TASK_TENANTS]):
         tenant_ids |= set(links((rec.get("fields") or {}).get(TASK_TENANTS)))
+    # A running plan: its card names the tenancy, whose tenants are read from the tenancy itself.
+    tenancies = set()
+    for rec in query_records(TASKS, RUNNING_PLAN_FORMULA, [AF["agentOutput"]]):
+        try:
+            plan = parse_plan((rec.get("fields") or {}).get(AF["agentOutput"]) or "")
+        except EmailFormatError:
+            plan = None
+        if plan:
+            tenancies.add(plan["tenancy"])
+    if tenancies:
+        formula = "OR(" + ",".join(f"RECORD_ID()='{t}'" for t in sorted(tenancies)) + ")"
+        for rec in query_records(TENANCIES_TABLE, formula, [TENANCY_TENANTS]):
+            tenant_ids |= set(links((rec.get("fields") or {}).get(TENANCY_TENANTS)))
     if not tenant_ids:
         return set()
     keys = set()

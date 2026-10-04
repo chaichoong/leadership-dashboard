@@ -213,6 +213,8 @@ def parse_plan(output):
     found, owners = [], []
     for line in head:
         key, sep, _ = line.partition(":")
+        if sep and key.strip().upper() in (PLAN_HEADER, PLAN_FOR_HEADER) and not line.strip().startswith(("PLAN:", "PLAN FOR:")):
+            raise EmailFormatError(f'write the plan\'s lines exactly as "PLAN FOR:" and "PLAN:", in capitals, not {key.lstrip() + ":"!r}')
         if sep and key.strip().upper() == PLAN_FOR_HEADER:
             m = PLAN_FOR_RE.match(line.strip())
             if not m:
@@ -233,8 +235,8 @@ def parse_plan(output):
             raise EmailFormatError(f"a promise of £{m.group(2)} is not one the rent check can track")
         found.append((day, amount))
     for line in body:
-        key, sep, _ = line.partition(":")
-        if sep and key.strip().upper() in (PLAN_HEADER, PLAN_FOR_HEADER):
+        # The block's own spelling only: an email that says "Plan: £25 a month" in passing is untouched.
+        if line.strip().startswith(("PLAN:", "PLAN FOR:")):
             raise EmailFormatError("a PLAN line sits below the email's headers, so it would go out in the email; "
                                    "the PLAN lines go above them")
     if not found and not owners:
@@ -248,10 +250,34 @@ def parse_plan(output):
     return {"tenancy": owners[0], "promises": sorted(found)}
 
 
-def text_card(name="", notes=""):
-    """True for a card scripts/send-text.py may text from: a rent lane's own tenant card."""
-    return (str(name or "").startswith(TEXT_CARD_MARKS["prefix"])
-            or TEXT_CARD_MARKS["note"] in str(notes or ""))
+def text_card(name="", notes="", output=""):
+    """True for a card scripts/send-text.py may text from: a rent lane's own tenant card, by its name or
+    its key line, or a reply card that carries a payment plan (a tenant's reply has neither)."""
+    if str(name or "").startswith(TEXT_CARD_MARKS["prefix"]) or TEXT_CARD_MARKS["note"] in str(notes or ""):
+        return True
+    try:
+        return bool(parse_plan(output))
+    except EmailFormatError:
+        return False
+
+
+def sender_key(s):
+    """One spelling for a person: an email in lower case, a UK number as +44…, anything else as typed.
+    Shared by the reply routing (agent-dispatch.py) and the plan check (rent_plans.py)."""
+    s = str(s or "").strip()
+    m = re.search(r"[\w.+-]+@[\w-]+(?:\.[\w-]+)+", s)
+    if m:
+        return m.group(0).lower()
+    digits = re.sub(r"\D", "", s)
+    if digits.startswith("00"):
+        digits = digits[2:]
+    if digits.startswith("440") and len(digits) == 13:     # +44 (0)7700 900123
+        digits = "44" + digits[3:]
+    if digits.startswith("44") and len(digits) == 12:
+        return "+" + digits
+    if digits.startswith("0") and len(digits) == 11:
+        return "+44" + digits[1:]
+    return s.lower()
 
 
 def parse_text(output):

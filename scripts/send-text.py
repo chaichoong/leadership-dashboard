@@ -180,7 +180,7 @@ def load_card(task_id, dry_run):
                           f.get(AF["name"], ""), notes, f.get(AF["approvedAt"]) or "")
     if trial and not dry_run:
         sys.exit(f"REFUSED: task {task_id} is a trial card and is never texted: {trial}.")
-    if not text_card(f.get(AF["name"], ""), notes):
+    if not text_card(f.get(AF["name"], ""), notes, f.get(AF["agentOutput"], "")):
         sys.exit(f"REFUSED: task {task_id} is not a rent lane's tenant card, and only those are texted.")
     if SENT_STAMP in notes:
         sys.exit(f"REFUSED: task {task_id} carries a SENT stamp from send-text: it was texted. Never sent twice.")

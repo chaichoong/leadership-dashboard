@@ -12,7 +12,7 @@ const CFV = 'rec7aHLK1Q8fMLRXH';
 const RESPONSE = 'recJ8J8idWE8d97tH';
 const CEO = 'reciHUAEcEkbctnZ6';
 
-function queue({ ended = false, tasks, chased = [{ tenants: ['recTENANTREPLY01'] }], tenants = { recTENANTREPLY01: { email: 'Sam@Example.com', phone: '07700 900123' } }, fail = false }) {
+function queue({ ended = false, tasks, chased = [{ tenants: ['recTENANTREPLY01'] }], tenants = { recTENANTREPLY01: { email: 'Sam@Example.com', phone: '07700 900123' } }, fail = false, plans = [] }) {
   const out = execFileSync('python3', ['-c', `
 import importlib.util, json, sys, urllib.request
 def boom(*a, **k): raise RuntimeError("network call in a test")
@@ -34,6 +34,13 @@ m.query_tasks = lambda formula, **kw: recs
 reads = []
 def records(table, formula=None, fields=None, max_records=None):
     # Only the reply lane's own two reads are answered here; any other lane's read is not this test's.
+    if formula == m.RUNNING_PLAN_FORMULA:
+        reads.append("plans")
+        return [{"id": "recPC%02d" % i, "fields": {m.AF["agentOutput"]: "PLAN FOR: " + p["tenancy"] + "\\nPLAN: 2026-12-10 £100.00\\nTO: a@b.com\\n---\\nx"}}
+                for i, p in enumerate(a["plans"])]
+    if table == m.TENANCIES_TABLE:
+        reads.append("tenancies")
+        return [{"id": p["tenancy"], "fields": {m.TENANCY_TENANTS: p["tenants"]}} for p in a["plans"]]
     if not (formula == m.RENT_REPLY_FORMULA or table == m.TENANTS_TABLE):
         return []
     reads.append(table)
@@ -50,7 +57,7 @@ with contextlib.redirect_stderr(err):
     q = m.build_queue()
 targets = {x["id"]: x.get("autoTarget") for x in q["routingNeeded"]}
 print(json.dumps({"targets": targets, "reads": reads, "error": q.get("rentReplyError", "")}))`],
-    { input: JSON.stringify({ ended, tasks, chased, tenants, fail }), encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'],
+    { input: JSON.stringify({ ended, tasks, chased, tenants, fail, plans }), encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'],
       env: { ...process.env, OD_HOLDS_FILE: resolve(ROOT, 'tests/does-not-exist-holds.json') } });
   return JSON.parse(out.trim().split('\n').pop());
 }
@@ -97,13 +104,22 @@ describe('a tenant\'s reply to the rent chase', () => {
   });
 });
 
+describe('a tenant on a running payment plan', () => {
+  it('his messages reach the Cash Flow Voids agent too, though no late-rent task is open (the plan pauses the chase)', () => {
+    const r = queue({ ended: true, chased: [], plans: [{ tenancy: 'recTENANCYREPLY01', tenants: ['recTENANTREPLY01'] }],
+      tasks: [INBOX('recPlanReply0001', 'sam@example.com')] });
+    expect(r.targets).toEqual({ recPlanReply0001: CFV });
+    expect(r.reads).toEqual(expect.arrayContaining(['plans', 'tenancies']));
+  });
+});
+
 describe('one spelling for a sender', () => {
   it('emails in lower case, UK numbers as +44', () => {
     const out = execFileSync('python3', ['-c', `
 import importlib.util, json
 spec = importlib.util.spec_from_file_location('d', ${JSON.stringify(DISPATCH)})
 m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m)
-print(json.dumps([m.sender_key(x) for x in ("Sam <Sam@Example.COM>", "07700 900123", "+44 7700 900123", "447700900123", "0044 7700 900123", "", None)]))`], { encoding: 'utf8' });
-    expect(JSON.parse(out.trim().split('\n').pop())).toEqual(['sam@example.com', '+447700900123', '+447700900123', '+447700900123', '+447700900123', '', '']);
+print(json.dumps([m.sender_key(x) for x in ("Sam <Sam@Example.COM>", "07700 900123", "+44 7700 900123", "447700900123", "0044 7700 900123", "+44 (0)7700 900123", "", None)]))`], { encoding: 'utf8' });
+    expect(JSON.parse(out.trim().split('\n').pop())).toEqual(['sam@example.com', '+447700900123', '+447700900123', '+447700900123', '+447700900123', '+447700900123', '', '']);
   });
 });

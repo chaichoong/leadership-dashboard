@@ -739,7 +739,8 @@ def raise_task(item, day):
     words and cannot tell one rent cycle from the next."""
     fields = {TK["name"]: item["name"], TK["status"]: "Today", TK["due"]: day.isoformat(),
               TK["teamMember"]: [AGENT_TEAM_MEMBER], TK["description"]: item["description"],
-              TK["notes"]: KEY_MARK + item["key"], TK["tenancies"]: [item["tenancy"]]}
+              TK["notes"]: "\n".join(KEY_MARK + k for k in [item["key"]] + list(item.get("alsoKeys") or [])),
+              TK["tenancies"]: [item["tenancy"]]}
     if item["tenants"]:
         fields[TK["tenants"]] = item["tenants"]
     out = api("POST", T_TASKS, {"records": [{"fields": fields}]})
@@ -951,13 +952,13 @@ def main(argv=None):
         print(json.dumps({"failed": why}, indent=2))
         return 1
     # Payment plans first, read only: a tenancy on an agreed plan that is on track is not chased by lane A.
-    plans = rent_plans.read(_Here(), data, day)
+    plans = rent_plans.read(_Here(), data, day, res)
     res["tasks"] = lane_a(res, data["tenancies"], day, writes, plans["onTrack"])
     # The agent's switch is lane A's read. With no status read back, lane B is told so, not "off".
     switch = res["tasks"]["on"] if res["tasks"]["status"] else None
     res["setup"] = lane_b_rules.lane_b(_Here(), res, data, day, writes, switch, now)
     res["agentLate"] = agent_late(res, data["tenancies"], day, writes, switch)
-    res["plans"] = rent_plans.act(_Here(), plans, data, day, writes, switch)
+    res["plans"] = rent_plans.act(_Here(), plans, data, day, writes, switch, res)
     res["briefLine"] = brief_line(res)              # lane B has put each new tenant's stage on its row
     failed = res["tasks"]["failed"] or res["setup"]["failed"] or res["agentLate"]["failed"] or res["plans"]["failed"]
     if writes:
