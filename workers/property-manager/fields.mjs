@@ -173,6 +173,8 @@ export const GP = {
     bankStatements: 'fldZeN4OxwDstqZhy', authoritySigned: 'fldHPe9YQ6GmlrKBt', ctAccount: 'fldlquVIzyesTrI1d',
     meetingNotes: 'fld9IbA3CNxa2KBBE', correctAgreement: 'fldCqe5vCXSPDbGev', proofOfAddress: 'fldfTl5QcGxfIzQ8W',
     rentUplift: 'fld4cGcQbuV2xh2rQ', documents: 'flduPLQdNRKBmsSmr',
+    // The tenant details form (4 Oct 2026, task recrmZTcOHg8vPlZk): his own answer, and when he last saved.
+    otherBenefits: 'fldwCMFvYqbFXXzOO', formLastSaved: 'fldc7XMcQcYY6C2Xa',
   },
   tenancy: { tenants: 'fld1i5bDoHL3B6rUf', unit: 'fld7cjLLEHKAx49OK', rent: 'fldDMyfZLFMeONPq8', actual: 'fldzrqp2fHRaBBnnc', status: 'fldlh5JAeYW2Ei2e6', endDate: 'fldwHhhKAq4f1nY9e' },
   cost: { name: 'fldS6FYfpkhu6tJG0', expected: 'fld9JibXkMpTeMcxw', payStatus: 'fldXZNI96v8HgjuSh', property: 'fld7nikJBPz3BoZJG', frequency: 'fldvozTHvs5VH3lNi' },
@@ -197,10 +199,38 @@ export const GP_PM_TENANT_OMIT = [GP.tenant.documents];
 export const GP_TENANT_FORM_FIELDS = [
   GP.tenant.dob, GP.tenant.ni, GP.tenant.phone, GP.tenant.email, GP.tenant.idSeen, GP.tenant.over35,
   GP.tenant.ucPayDay, GP.tenant.dueDay, GP.tenant.household, GP.tenant.capExemption, GP.tenant.ucStatementSeen,
-  GP.tenant.otherAdults, GP.tenant.ctAccount, GP.tenant.weeklyIncome, GP.tenant.weeklySpending,
+  GP.tenant.otherAdults, GP.tenant.ctAccount, GP.tenant.weeklyIncome, GP.tenant.weeklySpending, GP.tenant.otherBenefits,
   GP.tenant.bankStatements, GP.tenant.authoritySigned, GP.tenant.meetingDate, GP.tenant.meetingNotes,
   GP.tenant.notes,   // the dated line the page stamps when a date of birth is entered
 ];
+
+// ── The tenant details form (Kevin approved the plan on 1 Oct 2026, task recrmZTcOHg8vPlZk) ──
+// A sitting tenant opens his own link and fills in his own details; Save writes them to his own
+// tenant record. These two fields are the link: a SHA-256 of its code, and the day it stops
+// working. Worker-only on purpose: they are not in GP.tenant, so no page ever reads them
+// (Kevin's Growth Plan reads every GP.tenant field). Blank hash or blank expiry = link off.
+export const TENANT_LINK = {
+  codeHash: 'fldMzA0MCPUYOCklP', codeHashName: 'Tenant Form Code Hash',
+  codeExpires: 'fldsgGmWIUX48t4I7',
+};
+// What a tenant may write, and nothing else. The eleven answers already on the Growth Plan form,
+// plus other benefits. Field types and choices read live on 4 Oct 2026. "Unknown" is left off
+// the cap list: a tenant must never replace a known answer with Unknown.
+export const TENANT_ANSWERS = {
+  phone:          { id: GP.tenant.phone,          kind: 'phone' },
+  email:          { id: GP.tenant.email,          kind: 'email', max: 120 },
+  dob:            { id: GP.tenant.dob,            kind: 'dob' },
+  ni:             { id: GP.tenant.ni,             kind: 'ni' },
+  ucPayDay:       { id: GP.tenant.ucPayDay,       kind: 'day' },
+  household:      { id: GP.tenant.household,      kind: 'choice', choices: ['Single', 'Couple', 'With children'] },
+  otherAdults:    { id: GP.tenant.otherAdults,    kind: 'text', max: 300 },
+  capExemption:   { id: GP.tenant.capExemption,   kind: 'choice', choices: ['None (capped)', 'LCWRA', 'PIP or DLA', 'Carer', 'Earnings over threshold', 'Not on UC'] },
+  ctAccount:      { id: GP.tenant.ctAccount,      kind: 'text', max: 40 },
+  weeklyIncome:   { id: GP.tenant.weeklyIncome,   kind: 'money' },
+  weeklySpending: { id: GP.tenant.weeklySpending, kind: 'money' },
+  otherBenefits:  { id: GP.tenant.otherBenefits,  kind: 'text', max: 1000 },
+};
+
 export const GP_ROW_STATUS = ['Candidate', 'Adopted', 'In progress', 'Done', 'Dropped'];
 export const GP_ROW_FIELDS = Object.values(GP.plan);
 export const GP_TASK_FIELDS = [F.taskName, F.taskStatus, F.taskDescription, F.taskDueDate, F.taskPriority, F.taskAssignee, F.taskTeamMember];

@@ -38,3 +38,11 @@ name = "LOGIN_LIMIT"
 type = "ratelimit"
 namespace_id = "2101"
 simple = { limit = 5, period = 60 }
+
+# The tenant details form's public routes (4 Oct 2026): 20 requests per minute per client IP,
+# separate from the login limit so a tenant cannot lock Roy out, or the other way round.
+[[unsafe.bindings]]
+name = "TENANT_LIMIT"
+type = "ratelimit"
+namespace_id = "2102"
+simple = { limit = 20, period = 60 }

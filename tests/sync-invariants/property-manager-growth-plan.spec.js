@@ -50,6 +50,11 @@ async function openRoysGrowthPlan(page, { onWrite, payload } = {}) {
       if (onWrite) onWrite({ path, body: req.postDataJSON() });
       return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ ok: true, records: [{ id: 'recNew1', fields: {} }] }) });
     }
+    if (path === '/health') return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ ok: true, version: '1.1' }) });
+    if (path.startsWith('/tenant-form/link')) {
+      if (onWrite) onWrite({ path, body: req.postDataJSON(), auth: req.headers()['authorization'] || '' });
+      return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ ok: true, url: 'https://app.operationsdirector.co.uk/tenant-details.html#c=' + 'r'.repeat(32), expires: '2026-10-18', firstName: 'Adam' }) });
+    }
     return route.fulfill({ status: 404, body: '{}' });
   });
   await page.goto('/growth-plan.html?via=pm');
@@ -129,6 +134,21 @@ test.describe('Roy\'s Growth Plan tab', () => {
     expect(w).toBeTruthy();
     expect(w.body.tenantId).toMatch(/^recT/);
     expect(w.body.fields['fld1rHf1qZ60qK95l']).toBe('AB123456A');   // National Insurance
+  });
+
+  test('he can make a tenant\'s form link on his own session, and is told tenant messages go through Kevin\'s queue', async ({ page }) => {
+    const writes = [];
+    const airtableCalls = await openRoysGrowthPlan(page, { onWrite: w => writes.push(w) });
+    await page.locator('#selfList .pack', { hasText: '18 Test Park' }).locator('.pack-head').click();
+    await page.locator('#selfList .pack.open button[data-act="copy-link"][data-tenant="recT1"]').click();
+    await expect(page.locator('#linkBox')).toBeVisible();
+    await expect(page.locator('#linkUrl')).toHaveValue(/tenant-details\.html#c=r{32}$/);
+    await expect(page.locator('#linkWarn')).toBeVisible();
+    const made = writes.find(x => x.path === '/tenant-form/link');
+    expect(made.body).toEqual({ tenantId: 'recT1' });
+    expect(made.auth).toBe('Bearer roy-session-token');
+    expect(writes.find(x => x.path === '/login-airtable')).toBeUndefined();
+    expect(airtableCalls).toEqual([]);
   });
 
   test('a date of birth can be fixed from his tab, and it saves through the Worker', async ({ page }) => {

@@ -358,6 +358,11 @@
   <section class="card" id="gp-form">
     <h2>Tenant meeting form</h2>
     <p class="hint">Fill this in with the tenant. Save writes every field to their record in Airtable, so the rent change and the council forms can be done from one place. Bank account numbers are not stored here.</p>
+    <div id="linkBox" class="note" hidden role="status" aria-live="polite">
+      <div class="small" id="linkText"></div>
+      <input type="text" id="linkUrl" readonly aria-label="The tenant's form link" style="width:100%;margin-top:6px">
+      <div class="small muted" id="linkWarn" hidden>Messages to tenants go out from Kevin's queue: put this link on a card there rather than texting or emailing it yourself.</div>
+    </div>
     <div class="filters"><label class="chk">Tenant <select class="sm" id="formTenant" style="max-width:320px"><option value="">Choose a tenant…</option></select></label></div>
     <form id="meetingForm" class="mform" hidden autocomplete="off">
       <fieldset><legend>Identity and contact</legend>
@@ -374,6 +379,7 @@
         <label>Household<select name="household"><option value="">—</option><option>Single</option><option>Couple</option><option>With children</option></select></label>
         <label>Benefit cap position<select name="capExemption"><option>Unknown</option><option>None (capped)</option><option>LCWRA</option><option>PIP or DLA</option><option>Carer</option><option>Earnings over threshold</option><option>Not on UC</option></select></label>
         <label class="chk"><input type="checkbox" name="ucStatementSeen"> UC statement seen</label>
+        <label class="wide">Other benefits<textarea name="otherBenefits" rows="2" maxlength="1000"></textarea></label>
       </fieldset>
       <fieldset><legend>Council Tax Reduction and CRF Housing Payment</legend>
         <label>Other adults in the home<input type="text" name="otherAdults"></label>
@@ -388,6 +394,7 @@
         <label class="wide">Notes<textarea name="meetingNotes" rows="3"></textarea></label>
       </fieldset>
       <div class="row-actions"><button type="submit" class="btn btn-primary" id="meetingSave">Save to the tenant's record</button><span class="small muted" id="meetingStatus"></span></div>
+      <div class="row-actions"><button type="button" class="btn btn-sm" id="linkOff">Switch this tenant's form link off</button><span class="small muted" id="formSaved"></span></div>
     </form>
     <div id="docsBox" class="kevinonly" hidden>
       <h4 class="small muted" style="margin-top:var(--space-4)">Scanned documents on this tenant's record</h4>
@@ -551,7 +558,7 @@
 <div id="toast" role="status" aria-live="polite"></div>
 
 <script src="js/ai-models.js?v=1"></script>
-<script src="js/config.js?v=69"></script>
+<script src="js/config.js?v=70"></script>
 <script src="js/sync-bar.js?v=6"></script>
 <script src="js/growth-plan-model.js?v=14"></script>
 <script>
@@ -675,6 +682,7 @@
     // The tenant chain row loads on its own, alongside the portfolio: a failure there shows in
     // its own box and never blocks the page. Roy's tab has no access to it, so it never asks.
     if (!PM) loadChain();
+    state.linkPing = pingLinkService();
     $('loadingText').textContent = 'Loading the portfolio…';
     const slow = setTimeout(() => { $('loadingText').textContent = 'Still loading: seven tables, one moment…'; }, 3000);
     try {
@@ -696,6 +704,8 @@
       recompute();
       $('loadingOverlay').style.display = 'none'; $('dashboard').style.display = 'block';
       renderAll();
+      // The link service check reads its answer: wait for it, but never more than 4 seconds.
+      await Promise.race([state.linkPing, new Promise(r => setTimeout(r, 4000))]);
       registerChecks();
       if (typeof markTabSynced === 'function') markTabSynced('growth-plan');
     } catch (e) {
@@ -725,6 +735,7 @@
         over35Confirmed: !!r.fields[T.over35], dueDay: sel(r.fields[T.dueDay]) || '', meetingDate: r.fields[T.meetingDate] || '', ucPayDay: r.fields[T.ucPayDay] || '', household: sel(r.fields[T.household]) || '', otherAdults: r.fields[T.otherAdults] || '',
         idSeen: sel(r.fields[T.idSeen]) || '', ucStatementSeen: !!r.fields[T.ucStatementSeen],
         correctAgreement: !!r.fields[T.correctAgreement], proofOfAddress: !!r.fields[T.proofOfAddress], rentUplift: sel(r.fields[T.rentUplift]) || '', weeklyIncome: r.fields[T.weeklyIncome] || '', weeklySpending: r.fields[T.weeklySpending] || '', bankStatements: !!r.fields[T.bankStatements], authoritySigned: !!r.fields[T.authoritySigned], ctAccount: r.fields[T.ctAccount] || '', meetingNotes: r.fields[T.meetingNotes] || '',
+        otherBenefits: r.fields[T.otherBenefits] || '', formLastSaved: r.fields[T.formLastSaved] || '',
         documents: (r.fields[T.documents] || []).map(a => ({ id: a.id, filename: a.filename, url: a.url, size: a.size })) })),
       tenancies: raw.tenancies.map(r => ({ id: r.id, tenantIds: link(r.fields[C.tenants]), unitId: link(r.fields[C.unit])[0], rent: r.fields[C.rent], actual: r.fields[C.actual], status: sel(r.fields[C.status]) })),
       costs: raw.costs.filter(r => link(r.fields[K.property]).length).map(r => ({ propertyId: link(r.fields[K.property])[0], shared: link(r.fields[K.property]).length > 1, name: r.fields[K.name] || '', monthly: M.monthlyFromFrequency(r.fields[K.expected], sel(r.fields[K.frequency])) })),
@@ -737,7 +748,7 @@
   function renderAll() { renderHeadline(); renderCountStrip(); renderStatusSeg(); renderProperties(); renderSetupAll(); renderCalc(); renderCt(); renderMeetingForm(); renderMarketing(); renderSettings(); renderGlossary(); renderPaperwork(); }
 
   // ── Tenant meeting form ──
-  const FORM_FIELDS = ['dob', 'ni', 'phone', 'email', 'idSeen', 'over35', 'ucPayDay', 'dueDay', 'household', 'capExemption', 'ucStatementSeen', 'otherAdults', 'ctAccount', 'weeklyIncome', 'weeklySpending', 'bankStatements', 'authoritySigned', 'meetingDate', 'meetingNotes'];
+  const FORM_FIELDS = ['dob', 'ni', 'phone', 'email', 'idSeen', 'over35', 'ucPayDay', 'dueDay', 'household', 'capExemption', 'ucStatementSeen', 'otherBenefits', 'otherAdults', 'ctAccount', 'weeklyIncome', 'weeklySpending', 'bankStatements', 'authoritySigned', 'meetingDate', 'meetingNotes'];
   function renderMeetingForm() {
     const sel = $('formTenant');
     const tenants = [];
@@ -748,10 +759,12 @@
     const t = state.data.tenants.find(x => x.id === state.ui.formTenant);
     form.hidden = !t; $('docsBox').hidden = !t;
     if (!t) return;
-    const map = { dob: t.dob, ni: t.ni, phone: t.phone, email: t.email, idSeen: t.idSeen, over35: t.over35Confirmed, ucPayDay: t.ucPayDay, dueDay: t.dueDay, household: t.household, capExemption: t.capExemption || 'Unknown', ucStatementSeen: t.ucStatementSeen, otherAdults: t.otherAdults, ctAccount: t.ctAccount, weeklyIncome: t.weeklyIncome, weeklySpending: t.weeklySpending, bankStatements: t.bankStatements, authoritySigned: t.authoritySigned, meetingDate: t.meetingDate || todayISO(), meetingNotes: t.meetingNotes };
+    const map = { dob: t.dob, ni: t.ni, phone: t.phone, email: t.email, idSeen: t.idSeen, over35: t.over35Confirmed, ucPayDay: t.ucPayDay, dueDay: t.dueDay, household: t.household, capExemption: t.capExemption || 'Unknown', ucStatementSeen: t.ucStatementSeen, otherBenefits: t.otherBenefits, otherAdults: t.otherAdults, ctAccount: t.ctAccount, weeklyIncome: t.weeklyIncome, weeklySpending: t.weeklySpending, bankStatements: t.bankStatements, authoritySigned: t.authoritySigned, meetingDate: t.meetingDate || todayISO(), meetingNotes: t.meetingNotes };
     FORM_FIELDS.forEach(k => { const el = form.elements[k]; if (!el) return; if (el.type === 'checkbox') el.checked = !!map[k]; else el.value = map[k] == null ? '' : map[k]; });
     $('meetingStatus').textContent = t.meetingDate ? `Last saved meeting: ${t.meetingDate}` : 'No meeting saved yet';
+    $('formSaved').textContent = t.formLastSaved ? `The tenant last saved their own form ${formWhen(t.formLastSaved)}` : 'The tenant has not saved their own form';
   }
+  const formWhen = iso => { const d = new Date(iso); return isNaN(d) ? iso : d.toLocaleString('en-GB', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit', timeZone: 'Europe/London' }); };
   async function saveMeetingForm() {
     const t = state.data.tenants.find(x => x.id === state.ui.formTenant); if (!t) return;
     const form = $('meetingForm'); const T = GP.tenant;
@@ -761,17 +774,81 @@
     const dob = v('dob'); if (dob) { const y = Number(dob.slice(0, 4)); if (y < 1920 || y > 2010) { toast('That date does not look like a tenant\'s date of birth', true); return; } }
     const fields = {
       [T.dob]: dob || null, [T.ni]: ni || null, [T.phone]: v('phone') || null, [T.email]: v('email') || null, [T.idSeen]: v('idSeen') || null, [T.over35]: v('over35'),
-      [T.ucPayDay]: v('ucPayDay') ? Number(v('ucPayDay')) : null, [T.dueDay]: v('dueDay') || null, [T.household]: v('household') || null, [T.capExemption]: v('capExemption') || 'Unknown', [T.ucStatementSeen]: v('ucStatementSeen'),
+      [T.ucPayDay]: v('ucPayDay') ? Number(v('ucPayDay')) : null, [T.dueDay]: v('dueDay') || null, [T.household]: v('household') || null, [T.capExemption]: v('capExemption') || 'Unknown', [T.ucStatementSeen]: v('ucStatementSeen'), [T.otherBenefits]: v('otherBenefits') || null,
       [T.otherAdults]: v('otherAdults') || null, [T.ctAccount]: v('ctAccount') || null, [T.weeklyIncome]: v('weeklyIncome') ? Number(v('weeklyIncome')) : null, [T.weeklySpending]: v('weeklySpending') ? Number(v('weeklySpending')) : null,
       [T.bankStatements]: v('bankStatements'), [T.authoritySigned]: v('authoritySigned'), [T.meetingDate]: v('meetingDate') || null, [T.meetingNotes]: v('meetingNotes') || null,
     };
     await withBusy('meeting:' + t.id, async () => {
       $('meetingSave').disabled = true;
       await airtableWrite('PATCH', TABLES.tenants, { records: [{ id: t.id, fields }] });
-      Object.assign(t, { dob: dob, ni, phone: v('phone'), email: v('email'), idSeen: v('idSeen'), over35Confirmed: v('over35'), ucPayDay: v('ucPayDay'), dueDay: v('dueDay'), household: v('household'), capExemption: v('capExemption') || 'Unknown', ucStatementSeen: v('ucStatementSeen'), otherAdults: v('otherAdults'), ctAccount: v('ctAccount'), weeklyIncome: v('weeklyIncome'), weeklySpending: v('weeklySpending'), bankStatements: v('bankStatements'), authoritySigned: v('authoritySigned'), meetingDate: v('meetingDate'), meetingNotes: v('meetingNotes') });
+      Object.assign(t, { dob: dob, ni, phone: v('phone'), email: v('email'), idSeen: v('idSeen'), over35Confirmed: v('over35'), ucPayDay: v('ucPayDay'), dueDay: v('dueDay'), household: v('household'), capExemption: v('capExemption') || 'Unknown', ucStatementSeen: v('ucStatementSeen'), otherBenefits: v('otherBenefits'), otherAdults: v('otherAdults'), ctAccount: v('ctAccount'), weeklyIncome: v('weeklyIncome'), weeklySpending: v('weeklySpending'), bankStatements: v('bankStatements'), authoritySigned: v('authoritySigned'), meetingDate: v('meetingDate'), meetingNotes: v('meetingNotes') });
       toast(`Meeting saved to ${t.name}'s record`);
     });
     $('meetingSave').disabled = false;
+  }
+
+  // ── The tenant's own form link (4 Oct 2026, task recrmZTcOHg8vPlZk) ──
+  // The Worker makes the link and keeps only a hash of its code, so a link is shown once, here.
+  // Kevin's page signs in to the Worker with his own key (/login-airtable); Roy's tab already has
+  // a session. A new link switches the old one off; it works for 14 days.
+  async function workerToken() {
+    if (PM) return pmToken();
+    if (state.workerToken && state.workerTokenExp * 1000 > Date.now() + 60000) return state.workerToken;
+    const res = await fetch(PM_API + '/login-airtable', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ pat: PAT }) });
+    let body = {}; try { body = await res.json(); } catch (e) { body = {}; }
+    if (!res.ok || !body.token) throw new Error(body.error || `the link service did not sign in (${res.status})`);
+    state.workerToken = body.token; state.workerTokenExp = body.exp;
+    return body.token;
+  }
+  async function tenantLinkCall(path, tenantId) {
+    const res = await fetch(PM_API + path, { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + await workerToken() }, body: JSON.stringify({ tenantId }) });
+    let body = {}; try { body = await res.json(); } catch (e) { body = {}; }
+    if (res.status === 401 && PM) { showPmSignIn(); throw new Error('your dashboard session has ended'); }
+    if (res.status === 401) state.workerToken = '';
+    if (!res.ok || !body.ok) throw new Error(body.error || `request failed (${res.status})`);
+    return body;
+  }
+  async function copyTenantLink(id) {
+    const t = (state.data.tenants || []).find(x => x.id === id);
+    const name = t ? t.name : 'this tenant';
+    await withBusy('link:' + id, async () => {
+      try {
+        const r = await tenantLinkCall('/tenant-form/link', id);
+        let copied = false;
+        try { await navigator.clipboard.writeText(r.url); copied = true; } catch (e) { copied = false; }
+        $('linkText').textContent = `Form link for ${name}, works until ${r.expires}. ${copied ? 'Copied.' : 'Copy it from the box.'} A new link switches this one off.`;
+        $('linkUrl').value = r.url;
+        $('linkWarn').hidden = !PM;
+        $('linkBox').hidden = false;
+        $('gp-form').scrollIntoView({ behavior: 'smooth', block: 'start' });
+        toast(copied ? `Link for ${name} copied` : `Link for ${name} made: copy it from the box`);
+      } catch (e) {
+        toast(`No link made for ${name}: ${e.message}`, true);
+      }
+    });
+  }
+  async function switchLinkOff() {
+    const t = (state.data.tenants || []).find(x => x.id === state.ui.formTenant); if (!t) return;
+    await withBusy('linkoff:' + t.id, async () => {
+      try {
+        await tenantLinkCall('/tenant-form/link/off', t.id);
+        $('linkBox').hidden = true; $('linkUrl').value = '';
+        toast(`${t.name}'s form link is switched off`);
+      } catch (e) {
+        toast(`Not switched off: ${e.message}`, true);
+      }
+    });
+  }
+  // The health bar's one check on the link service: does the Worker answer?
+  async function pingLinkService() {
+    state.linkHealth = { loading: true };
+    try {
+      const res = await fetch(PM_API + '/health');
+      const body = await res.json();
+      state.linkHealth = res.ok && body.ok ? { version: body.version } : { error: `answered ${res.status}` };
+    } catch (e) {
+      state.linkHealth = { error: e.message || 'no answer' };
+    }
   }
 
   // The grid (Kevin, 16 Sep 2026): rent, council tax and what is left, read left to right
@@ -1088,7 +1165,7 @@ BEFORE THE FIRST ONE IS SIGNED (all in writing)
         ${t.note ? `<div class="small note">${esc(t.note)}</div>` : ''}
         ${ageUnknown ? `<div class="pt-fix"><span class="inl">Date of birth: <input class="sm" type="date" data-dob="${esc(t.id)}" aria-label="Date of birth for ${esc(t.name)}"><button class="btn btn-sm" data-act="save-dob" data-tenant="${esc(t.id)}">Save</button></span> <span class="muted">or</span> <button class="btn btn-sm" data-act="confirm-35" data-tenant="${esc(t.id)}">Confirm 35 or over</button></div>` : ''}
         ${miss.length ? `<div class="small muted">Still to collect: ${esc(miss.join(', '))}</div>` : '<div class="small muted">All their details are on file</div>'}
-        <div class="row-actions"><button class="btn btn-sm" data-act="open-form" data-tenant="${esc(t.id)}">Tenant data capture form</button></div></li>`;
+        <div class="row-actions"><button class="btn btn-sm" data-act="open-form" data-tenant="${esc(t.id)}">Tenant data capture form</button><button class="btn btn-sm" data-act="copy-link" data-tenant="${esc(t.id)}">Copy tenant link</button></div></li>`;
     }).join('');
     const extra = v.unitsExtra > 0
       ? `<li class="note">${v.unitsExtra} more place${v.unitsExtra === 1 ? '' : 's'} to fill once the work is done. ${v.unitsExtra === 1 ? 'It is' : 'They are'} not in the database yet: we add ${v.unitsExtra === 1 ? 'it' : 'them'} the day a tenant signs.</li>`
@@ -1596,6 +1673,7 @@ BEFORE THE FIRST ONE IS SIGNED (all in writing)
       if (act === 'drop-row') return dropStrandedRow(b.dataset.row);
       if (act === 'freeze-started') return freezeStarted();
       if (act === 'open-form') { state.ui.formTenant = b.dataset.tenant; renderMeetingForm(); renderDocs(); $('gp-form').scrollIntoView({ behavior: 'smooth', block: 'start' }); return; }
+      if (act === 'copy-link') { copyTenantLink(b.dataset.tenant); return; }
     }
     const ph = e.target.closest('.pack-head');
     if (ph && !e.target.closest('button')) { state.ui.openPack = state.ui.openPack === ph.dataset.pack ? null : ph.dataset.pack; renderProperties(); const nh = document.querySelector(`.pack-head[data-pack="${ph.dataset.pack}"]`); if (nh) nh.focus(); return; }
@@ -1620,6 +1698,7 @@ BEFORE THE FIRST ONE IS SIGNED (all in writing)
   $('formTenant').addEventListener('change', e => { state.ui.formTenant = e.target.value; renderMeetingForm(); renderDocs(); });
   $('docUpload').addEventListener('click', uploadDocs);
   $('meetingForm').addEventListener('submit', e => { e.preventDefault(); saveMeetingForm(); });
+  $('linkOff').addEventListener('click', switchLinkOff);
 
   // ── Health checks ──
   function registerChecks() {
@@ -1644,6 +1723,7 @@ BEFORE THE FIRST ONE IS SIGNED (all in writing)
         { name: 'Where we started is frozen', kind: 'sync', run: () => { const t = (g().plan || {}).totals || {}; const p = (g().plan || {}).properties || []; const miss = p.filter(v => v.baselineRent == null || v.baselineCt == null); return miss.length ? { status: 'warn', detail: `${miss.length} of ${p.length} properties have no frozen starting figure, so "where we started" reads today's record for them: ${miss.map(v => v.name).join(', ')}` } : { status: 'pass', detail: `All ${p.length} properties carry a frozen starting rent and council tax` }; } },
         { name: 'Grid adds up', kind: 'automation', run: () => { const g2 = (((g().plan || {}).totals || {}).grid) || {}; const bad = ['started', 'now', 'plan', 'best'].filter(k => !g2[k] || Math.abs(g2[k].rent - g2[k].ct - g2[k].left) > 0.01); return bad.length ? { status: 'fail', detail: `Left for us does not equal rent less council tax in: ${bad.join(', ')}` } : { status: 'pass', detail: `Every column: left for us = rent − council tax` }; } },
         { name: 'Rent uplift set on every tenant we run', kind: 'sync', run: () => { const p = ((g().plan || {}).properties || []).filter(v => v.selfManaged); const blank = []; p.forEach(v => v.tenants.forEach(t => { const raw = ((g().data || {}).tenants || []).find(x => x.id === t.id); if (raw && !raw.rentUplift) blank.push(t.name); })); return blank.length ? { status: 'warn', detail: `${blank.length} tenant${blank.length > 1 ? 's' : ''} with no Rent Uplift set, read as To do: ${blank.join(', ')}` } : { status: 'pass', detail: 'Every tenant in a property we run has Rent Uplift set' }; } },
+        { name: 'Tenant form link service answers', kind: 'sync', run: () => { const h = state.linkHealth; if (!h || h.loading) return { status: 'pending', detail: 'Still asking the link service' }; if (h.error) return { status: 'fail', detail: `pm.operationsdirector.co.uk did not answer (${h.error}): tenant links cannot be made and tenants cannot save their form` }; return { status: 'pass', detail: `The link service answers (version ${h.version})` }; } },
         { name: 'Self-managed and agent-run split', kind: 'sync', run: () => { const pl = g().plan || {}; const s = (pl.selfManaged || []).length, a = (pl.agentManaged || []).length; if (!s) return { status: 'fail', detail: 'No self-managed properties: the split has broken' }; return { status: 'pass', detail: `${s} run by us (Collins houses included), ${a} run by an agent` }; } },
         // Kevin only: Roy's tab cannot read Estate Status, so the check would be red there for ever.
         ...(PM ? [] : [

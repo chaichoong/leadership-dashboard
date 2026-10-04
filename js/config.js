@@ -22,7 +22,7 @@
         // Home tab (Kevin, 29 Sep 2026): one list of what needs Kevin today, the real Leadership Dashboard underneath. On trial beside the old screens.
         { id: 'home',        name: 'Home',                           icon: '📌', pageVer: '1.4', sopFile: '',                           sopVer: '1.0', standalone: 'index.html#home' },
         { id: 'overview',    name: 'Leadership Dashboard',           icon: '📊', pageVer: '2.130', sopFile: 'sop.html',                   sopVer: '2.118', standalone: 'index.html#overview' },
-        { id: 'os-strategy', name: 'Objective & Strategy',           icon: '🎯', pageVer: '1.72', sopFile: 'os/strategy/sop.html',       sopVer: '1.1', standalone: 'os/strategy/index.html' },
+        { id: 'os-strategy', name: 'Objective & Strategy',           icon: '🎯', pageVer: '1.73', sopFile: 'os/strategy/sop.html',       sopVer: '1.1', standalone: 'os/strategy/index.html' },
         { id: 'tasks',       name: 'Tasks & Projects',   icon: '✅', pageVer: '1.187', sopFile: 'os/tasks/sop.html',             sopVer: '1.4', standalone: 'os/tasks/index.html' },
         { id: 'cfv',        name: 'CFVs',                          icon: '🚨', pageVer: '1.42', sopFile: 'sop-cfvs.html',               sopVer: '1.34', standalone: 'index.html#cfv' },
         { id: 'money',      name: 'Money Confidence',              icon: '🧭', pageVer: '1.1', sopFile: '',                            sopVer: '1.0', standalone: 'index.html#money' },
@@ -35,12 +35,12 @@
         { id: 'transactions', name: 'Transactions',                icon: '🔍', pageVer: '1.1', sopFile: '',                            sopVer: '1.0', standalone: 'index.html#transactions' },
         { id: 'coa',        name: 'Chart of Accounts',             icon: '📒', pageVer: '1.3', sopFile: 'sop-coa.html',                sopVer: '1.1', standalone: 'index.html#coa' },
         { id: 'comms',      name: 'Inbound Comms',                 icon: '📨', pageVer: '2.84', sopFile: 'inbound-comms-sop.html',      sopVer: '2.60', standalone: 'follow-up.html' },
-        { id: 'growth-plan', name: 'Growth Plan',                    icon: '📈', pageVer: '1.64', sopFile: 'sop-growth-plan.html',        sopVer: '1.58', standalone: 'growth-plan.html' },
+        { id: 'growth-plan', name: 'Growth Plan',                    icon: '📈', pageVer: '1.65', sopFile: 'sop-growth-plan.html',        sopVer: '1.65', standalone: 'growth-plan.html' },
         { id: 'compliance', name: 'Property Compliance',            icon: '✅', pageVer: '1.18', sopFile: 'sop-compliance.html',         sopVer: '1.14', standalone: 'compliance.html' },
         // Property Manager (Operations) — Roy Lavin's single page. Standalone at
         // property-manager/ behind its own passcode; the property-manager Worker
         // holds the Airtable key and strips personal money server-side (8 Sep 2026).
-        { id: 'property-manager', name: 'Property Manager',            icon: '🏠', pageVer: '1.8', sopFile: 'sop-property-manager.html',   sopVer: '1.5', standalone: 'property-manager/index.html' },
+        { id: 'property-manager', name: 'Property Manager',            icon: '🏠', pageVer: '1.8', sopFile: 'sop-property-manager.html',   sopVer: '1.8', standalone: 'property-manager/index.html' },
         { id: 'operations',  name: 'Operations',                    icon: '🏢', pageVer: '1.49', sopFile: '',                            sopVer: '1.0', standalone: 'os/operations/index.html' },
         // KPI Library (Leadership section) — ADMIN ONLY. Never rendered in a
         // client tenant's shell; the adminOnly flag is the contract the Supabase
@@ -53,7 +53,7 @@
         { id: 'agents', name: 'AI Agents', icon: '🤖', pageVer: '1.192', sopFile: 'sop-ai-agents.html', sopVer: '1.170', standalone: 'os/agents/index.html', adminOnly: true },
         { id: 'fintable',  name: 'Accounts',                       icon: '🏦', pageVer: '1.19', sopFile: '',                            sopVer: '1.0', standalone: 'index.html#fintable' },
         { id: 'systemisation', name: 'Systemisation',              icon: '⚙️', pageVer: '1.27', sopFile: 'guides/systemisation.html',    sopVer: '1.11', standalone: 'os/systemisation/index.html' },
-        { id: 'os-team',    name: 'Team Members',                  icon: '👥', pageVer: '1.46', sopFile: '',                            sopVer: '1.1', standalone: 'os/team/index.html' },
+        { id: 'os-team',    name: 'Team Members',                  icon: '👥', pageVer: '1.47', sopFile: '',                            sopVer: '1.1', standalone: 'os/team/index.html' },
         // pageVer corrected by hand 2026-08-06: the auto-bump never fired for this page
         // (crm-supabase.html was missing from the workflow `paths:` filter), so 1.0 was
         // stale — the CRM gained a 14-step interactive walkthrough on 2026-08-04 (319b438).
@@ -163,7 +163,11 @@
                   weeklySpending: 'fldlZr8tUocCYzGPT', bankStatements: 'fldZeN4OxwDstqZhy', authoritySigned: 'fldHPe9YQ6GmlrKBt', ctAccount: 'fldlquVIzyesTrI1d', meetingNotes: 'fld9IbA3CNxa2KBBE',
                   // The four tenant ticks (16 Sep 2026). authoritySigned above is the letter of authority.
                   correctAgreement: 'fldCqe5vCXSPDbGev', proofOfAddress: 'fldfTl5QcGxfIzQ8W', rentUplift: 'fld4cGcQbuV2xh2rQ' /* single select: To do / Done / Not needed */,
-                  documents: 'flduPLQdNRKBmsSmr' /* Documents (attachments) — scanned ID, statements, signed pages; added 10 Sep 2026 */ },
+                  documents: 'flduPLQdNRKBmsSmr' /* Documents (attachments) — scanned ID, statements, signed pages; added 10 Sep 2026 */,
+                  // The tenant details form (4 Oct 2026): Other Benefits, and Tenant Form Last Saved. The link's own
+                  // two fields (Tenant Form Code Hash fldMzA0MCPUYOCklP, Tenant Form Code Expires fldsgGmWIUX48t4I7)
+                  // are the Worker's alone and are deliberately NOT here, so no page reads them.
+                  otherBenefits: 'fldwCMFvYqbFXXzOO', formLastSaved: 'fldc7XMcQcYY6C2Xa' },
         tenancy: { tenants: 'fld1i5bDoHL3B6rUf', unit: 'fld7cjLLEHKAx49OK', rent: 'fldDMyfZLFMeONPq8', actual: 'fldzrqp2fHRaBBnnc' /* Actual Rent rollup */, status: 'fldlh5JAeYW2Ei2e6', endDate: 'fldwHhhKAq4f1nY9e' },
         cost: { name: 'fldS6FYfpkhu6tJG0', expected: 'fld9JibXkMpTeMcxw', payStatus: 'fldXZNI96v8HgjuSh', property: 'fld7nikJBPz3BoZJG', frequency: 'fldvozTHvs5VH3lNi' },
         realEstateBusinessId: 'recoGcXRXCniyJsTz', // Businesses → "Real Estate" (read 9 Sep 2026)
