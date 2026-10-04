@@ -18,6 +18,16 @@
 //                      way the Tasks page does; reopen = undo a Complete within 15 min
 //   GET  /health                               → { ok, version }
 //
+// The tenant details form (4 Oct 2026, task recrmZTcOHg8vPlZk). A tenant's link code, sent as
+// `code` in the JSON body (never a header or the URL, so no request log holds it), is his pass for
+// his own record and nothing else; no session needed:
+//   POST /tenant-form/open   { code }          → { ok, firstName }   (never his saved answers)
+//   POST /tenant-form        { code, answers } → { ok, savedAt, saved }
+//   POST /tenant-form/upload { code, filename, contentType, file } → { ok }
+// And, signed in (Kevin or Roy), the link itself:
+//   POST /tenant-form/link     { tenantId }    → { ok, url, expires, firstName }
+//   POST /tenant-form/link/off { tenantId }    → { ok }
+//
 // Secrets (wrangler secret put):
 //   AIRTABLE_PAT        - read on the property tables + write on Tasks
 //   PM_PASSCODE         - Roy's passcode
@@ -25,11 +35,13 @@
 //   PM_SESSION_SECRET   - HMAC key for session tokens
 //   PM_KEVIN_AIRTABLE_ID - Kevin's Airtable user id (usr…), the only owner /login-airtable accepts
 // Bindings: LOGIN_LIMIT (ratelimit, optional) — 5 attempts per minute per IP.
+//           TENANT_LIMIT (ratelimit, optional) — the tenant form's public routes, per IP.
+//           TENANT_ALL (ratelimit, optional) — the same routes, all callers together.
 
 import { computeAll, shapeTasks, isRoyScope, isTaskOpen, appendNote, buildNameMap, statusForDue, dateKey, txWindowStart } from './compute.mjs';
-import { BASE, TABLES, F, NAMES, REC, REAL_ESTATE_NAME, ROY_STATUS_ALLOW, GP, GP_TABLES, GP_TICKS, GP_UPLIFT_VALUES, GP_ROW_STATUS, GP_ROW_FIELDS, GP_TASK_FIELDS, GP_LIVE_TENANCIES, GP_COST_FILTER, GP_PM_TENANT_OMIT, GP_TENANT_FORM_FIELDS } from './fields.mjs';
+import { BASE, TABLES, F, NAMES, REC, REAL_ESTATE_NAME, ROY_STATUS_ALLOW, GP, GP_TABLES, GP_TICKS, GP_UPLIFT_VALUES, GP_ROW_STATUS, GP_ROW_FIELDS, GP_TASK_FIELDS, GP_LIVE_TENANCIES, GP_COST_FILTER, GP_PM_TENANT_OMIT, GP_TENANT_FORM_FIELDS, TENANT_LINK, TENANT_ANSWERS } from './fields.mjs';
 
-const VERSION = '1.0';
+const VERSION = '1.1';
 const TOKEN_TTL_S = 12 * 60 * 60;
 const DATA_TTL_MS = 10 * 60 * 1000;
 // In-isolate memo. caches.default is a no-op on *.workers.dev, so the Cache API
@@ -98,14 +110,14 @@ function timingSafeEqual(a, b) {
 }
 
 // ── Airtable ──
-async function airtableRequest(env, path, init = {}, attempt = 0) {
+async function airtableRequest(env, path, init = {}, attempt = 0, retries = 5) {
   const res = await fetch(`https://api.airtable.com/v0/${BASE}/${path}`, {
     ...init,
     headers: { 'Authorization': `Bearer ${env.AIRTABLE_PAT}`, 'Content-Type': 'application/json', ...(init.headers || {}) },
   });
-  if (res.status === 429 && attempt < 5) {
+  if (res.status === 429 && attempt < retries) {
     await new Promise(r => setTimeout(r, 500 * 2 ** attempt));
-    return airtableRequest(env, path, init, attempt + 1);
+    return airtableRequest(env, path, init, attempt + 1, retries);
   }
   if (!res.ok) {
     const text = await res.text().catch(() => '');
@@ -306,6 +318,270 @@ async function handleTaskWrite(request, env, origin, taskId, who) {
   return json({ ok: true, task: { id: taskId, status: status || stored, due: hasDue ? due : String(task.fields[F.taskDueDate] || '').slice(0, 10), notes: fields[F.taskNotes] != null ? fields[F.taskNotes] : String(task.fields[F.taskNotes] || '') } }, 200, origin);
 }
 
+// ── The tenant details form (Kevin approved the plan on 1 Oct 2026, task recrmZTcOHg8vPlZk) ──
+// A public page writing a date of birth and a National Insurance number to a live record with no
+// login: the code in the tenant's link is the only key, so everything here is about that code.
+//   * 16 random bytes and an 8-byte HMAC tag over them (PM_SESSION_SECRET), base64url: 32
+//     characters. The tag is checked first, with no read at all, so a made-up code never reaches
+//     Airtable, from any number of addresses or locations (review, 4 Oct 2026). The record keeps
+//     only the code's SHA-256, so reading the base never gives anyone a working link. A new link
+//     replaces the hash (the old one dies); "off" blanks it. A blank expiry is off too. The link
+//     lives LINK_DAYS days. Changing PM_SESSION_SECRET ends every link, as it ends every session.
+//   * Bad shape, no match, two matches, expired, switched off: one answer, the same words, so a
+//     guesser learns nothing. The code is checked against CODE_RE and HASHED before it goes near a
+//     formula, so nothing a visitor typed is ever placed in a filterByFormula.
+//   * He may write TENANT_ANSWERS and nothing else: one unknown key refuses the whole save. A
+//     blank answer is dropped, never written, so the form cannot wipe what is on the record.
+//     typecast is OFF, so a stranger cannot add a choice to a dropdown.
+//   * The page gets his first name and never his saved answers: a leaked link shows a first name
+//     and an empty form. Logs carry the record id and counts, never a value; the code travels in the
+//     JSON body, so no request log keeps it either.
+//   * Every public request costs one Airtable read, and the base allows 5 a second for the whole
+//     estate. So two rate limits sit in front of it (per caller, IPv6 by its /64, and all callers
+//     together), and a public route never retries a refused Airtable call (review, 4 Oct 2026).
+const LINK_DAYS = 14;
+const CODE_RE = /^[A-Za-z0-9_-]{32}$/;
+const UPLOAD_TYPES = ['image/jpeg', 'image/png', 'image/heic', 'image/heif', 'application/pdf'];
+// Airtable's upload takes 5MB a request, and base64 grows a file by a third: the same ceiling
+// as growth-plan.html's own upload.
+const UPLOAD_LIMIT = Math.floor(3.7 * 1024 * 1024);
+const UPLOAD_MAX_FILES = 10;     // on the record in total, so one link cannot fill it
+const TENANT_PAGE = 'https://app.operationsdirector.co.uk/tenant-details.html';
+const PUBLIC_RETRIES = 0;
+// What the first bytes of each allowed type look like, so a file is what it says it is.
+const MAGIC = {
+  'image/jpeg': b => b[0] === 0xFF && b[1] === 0xD8 && b[2] === 0xFF,
+  'image/png': b => b[0] === 0x89 && b[1] === 0x50 && b[2] === 0x4E && b[3] === 0x47,
+  'application/pdf': b => b[0] === 0x25 && b[1] === 0x50 && b[2] === 0x44 && b[3] === 0x46,
+  // HEIC and HEIF are ISO boxes: "ftyp" at byte 4.
+  'image/heic': b => b[4] === 0x66 && b[5] === 0x74 && b[6] === 0x79 && b[7] === 0x70,
+  'image/heif': b => b[4] === 0x66 && b[5] === 0x74 && b[6] === 0x79 && b[7] === 0x70,
+};
+const EXT = { 'image/jpeg': 'jpg', 'image/png': 'png', 'application/pdf': 'pdf', 'image/heic': 'heic', 'image/heif': 'heif' };
+const LINK_GONE = 'This link is not working. Reply to the email or text we sent you and we will send you a new one.';
+
+function validDay(s) {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(s)) return false;
+  const d = new Date(s + 'T00:00:00Z');
+  return !Number.isNaN(d.getTime()) && d.toISOString().slice(0, 10) === s;
+}
+
+// Pure, so the tests drive it. { fields } keyed by field id, or { error } in words for the tenant.
+export function cleanTenantAnswers(input) {
+  if (!input || typeof input !== 'object' || Array.isArray(input)) return { error: 'Nothing was filled in.' };
+  const fields = {};
+  for (const [key, raw] of Object.entries(input)) {
+    const spec = Object.prototype.hasOwnProperty.call(TENANT_ANSWERS, key) ? TENANT_ANSWERS[key] : null;
+    // Refused, not trimmed: a form sending a field it does not show has been tampered with.
+    if (!spec) return { error: 'That form has a question we do not recognise. Reload the page and try again.' };
+    if (raw != null && typeof raw === 'object') return { error: 'One answer is not in a form we can save.' };
+    const s = String(raw == null ? '' : raw).trim();
+    if (!s) continue;
+    if (spec.kind === 'text') {
+      if (s.length > spec.max) return { error: 'One answer is too long.' };
+      fields[spec.id] = s;
+    } else if (spec.kind === 'phone') {
+      if (!/^[\d\s()+-]{7,25}$/.test(s) || s.replace(/\D/g, '').length < 10) return { error: 'That mobile number does not look right.' };
+      fields[spec.id] = s;
+    } else if (spec.kind === 'email') {
+      if (s.length > spec.max || !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(s)) return { error: 'That email address does not look right.' };
+      fields[spec.id] = s;
+    } else if (spec.kind === 'dob') {
+      const y = Number(s.slice(0, 4));
+      if (!validDay(s) || y < 1920 || y > 2010) return { error: 'That date of birth does not look right.' };
+      fields[spec.id] = s;
+    } else if (spec.kind === 'ni') {
+      const ni = s.replace(/\s+/g, '').toUpperCase();
+      if (!/^[A-Z]{2}\d{6}[A-D]$/.test(ni)) return { error: 'A National Insurance number looks like AB 12 34 56 C.' };
+      fields[spec.id] = ni;
+    } else if (spec.kind === 'day') {
+      const n = Number(s);
+      if (!Number.isInteger(n) || n < 1 || n > 31) return { error: 'The payment day is a number from 1 to 31.' };
+      fields[spec.id] = n;
+    } else if (spec.kind === 'money') {
+      const n = Number(s.replace(/[£,\s]/g, ''));
+      if (!Number.isFinite(n) || n < 0 || n > 5000) return { error: 'A weekly amount is a number of pounds from 0 to 5,000.' };
+      fields[spec.id] = Math.round(n * 100) / 100;
+    } else if (spec.kind === 'choice') {
+      if (!spec.choices.includes(s)) return { error: 'Pick one of the choices on the form.' };
+      fields[spec.id] = s;
+    }
+  }
+  if (!Object.keys(fields).length) return { error: 'Nothing was filled in.' };
+  return { fields };
+}
+
+async function sha256Hex(s) {
+  const buf = await crypto.subtle.digest('SHA-256', enc.encode(String(s)));
+  return Array.from(new Uint8Array(buf)).map(b => b.toString(16).padStart(2, '0')).join('');
+}
+
+// The tag a link code carries: the first 8 bytes of an HMAC over its 16 random bytes.
+async function linkTag(env, nonce) {
+  const msg = new Uint8Array([...enc.encode('tenant-link:'), ...nonce]);
+  return new Uint8Array(await crypto.subtle.sign('HMAC', await hmacKey(env.PM_SESSION_SECRET), msg)).slice(0, 8);
+}
+async function makeLinkCode(env) {
+  const nonce = crypto.getRandomValues(new Uint8Array(16));
+  return b64u(new Uint8Array([...nonce, ...(await linkTag(env, nonce))]));
+}
+// True only for a code this Worker made: checked with no read, so a guess costs nothing.
+export async function codeIsOurs(env, code) {
+  if (!CODE_RE.test(String(code || '')) || !env.PM_SESSION_SECRET) return false;
+  let raw;
+  try { raw = unb64u(String(code)); } catch { return false; }
+  if (raw.length !== 24) return false;
+  const tag = await linkTag(env, raw.slice(0, 16));
+  let diff = 0;
+  for (let i = 0; i < 8; i++) diff |= tag[i] ^ raw[16 + i];
+  return diff === 0;
+}
+
+// The one tenant this code belongs to, or null for every way it can fail.
+async function tenantForCode(env, code) {
+  if (!(await codeIsOurs(env, code))) return null;
+  const hash = await sha256Hex(code);                       // hex only: safe inside the formula
+  const p = new URLSearchParams();
+  p.set('returnFieldsByFieldId', 'true');
+  p.set('maxRecords', '2');
+  p.set('filterByFormula', `{${TENANT_LINK.codeHashName}}='${hash}'`);
+  for (const f of [GP.tenant.name, GP.tenant.notes, GP.tenant.documents, TENANT_LINK.codeHash, TENANT_LINK.codeExpires]) p.append('fields[]', f);
+  const rows = (await airtableRequest(env, `${TABLES.tenants}?${p.toString()}`, {}, 0, PUBLIC_RETRIES)).records || [];
+  if (rows.length !== 1) return null;                       // exactly one, or refuse
+  const row = rows[0];
+  // The formula matched by NAME; the hash is proved again by field ID, so a renamed field can never
+  // let a row through that does not carry this code.
+  if (!timingSafeEqual(String(row.fields[TENANT_LINK.codeHash] || ''), hash)) return null;
+  const exp = String(row.fields[TENANT_LINK.codeExpires] || '').slice(0, 10);
+  if (!exp || exp < dateKey(londonNow())) return null;      // no expiry = switched off
+  return row;
+}
+
+// IPv6 hands out whole blocks, so a caller is counted by its /64, not by one address. The address
+// is expanded first ("2001:db8::1" and "2001:db8::2" are one /64), and an IPv4 address written as
+// IPv6 ("::ffff:1.2.3.4") counts as that IPv4 address.
+export function callerKey(ip) {
+  const s = String(ip || '').trim().toLowerCase();
+  if (!s) return 'unknown';
+  if (!s.includes(':')) return s;
+  const v4 = s.match(/^::ffff:(\d{1,3}(?:\.\d{1,3}){3})$/);
+  if (v4) return v4[1];
+  const halves = s.split('::');
+  if (halves.length > 2) return s;
+  const head = halves[0] ? halves[0].split(':') : [];
+  const tail = halves.length === 2 && halves[1] ? halves[1].split(':') : [];
+  const groups = halves.length === 2 ? [...head, ...Array(Math.max(0, 8 - head.length - tail.length)).fill('0'), ...tail] : head;
+  if (groups.length !== 8 || groups.some(g => !/^[0-9a-f]{1,4}$/.test(g))) return s;
+  return groups.slice(0, 4).map(g => parseInt(g, 16).toString(16)).join(':') + '::/64';
+}
+// Two limits, in this order inside handleTenantForm: the caller's own first; then the code's tag;
+// then the limit everyone shares. So neither a refused caller nor a made-up code ever uses up a
+// slot a real tenant needs (reviews, 4 Oct 2026).
+async function callerLimited(request, env) {
+  return !!env.TENANT_LIMIT && !(await env.TENANT_LIMIT.limit({ key: callerKey(request.headers.get('CF-Connecting-IP')) })).success;
+}
+async function allLimited(env) {
+  return !!env.TENANT_ALL && !(await env.TENANT_ALL.limit({ key: 'tenant-form' })).success;
+}
+
+const firstNameOf = (name) => String(name || '').trim().split(/\s+/)[0] || '';
+const hhmm = (d) => `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+
+const SAVED_NOTE = "Tenant details form saved from the tenant's own link";
+async function handleTenantForm(request, env, origin, path) {
+  if (request.method !== 'POST') return err('Not found', 404, origin);
+  const busy = 'Too many tries. Wait a minute and try again.';
+  if (await callerLimited(request, env)) return err(busy, 429, origin);
+  const declared = Number(request.headers.get('Content-Length') || 0);
+  if (declared > 6 * 1024 * 1024) return err('That file is too big. The most is 3.7MB.', 413, origin);
+  let body;
+  try { body = await request.json(); } catch { return err('Bad request', 400, origin); }
+  if (!(await codeIsOurs(env, body && body.code))) return err(LINK_GONE, 404, origin);
+  if (await allLimited(env)) return err(busy, 429, origin);
+  const row = await tenantForCode(env, body.code);
+  if (!row) return err(LINK_GONE, 404, origin);
+  if (path === '/tenant-form/open') {
+    return json({ ok: true, firstName: firstNameOf(row.fields[GP.tenant.name]) }, 200, origin);
+  }
+  const now = londonNow();
+  if (path === '/tenant-form') {
+    const clean = cleanTenantAnswers(body.answers);
+    if (clean.error) return err(clean.error, 400, origin);
+    const n = Object.keys(clean.fields).length;
+    const fields = { ...clean.fields, [GP.tenant.formLastSaved]: new Date().toISOString() };
+    // One Notes line a day, naming the answers (never their values), so repeated saves cannot fill
+    // the field; Tenant Form Last Saved carries the latest time. Notes is read and written by field
+    // id in the same request (CLAUDE.md, 28 Sep 2026).
+    const notes = String(row.fields[GP.tenant.notes] || '');
+    const today = `[${dateKey(now)} `;
+    if (!notes.split('\n').some(l => l.startsWith(today) && l.includes(SAVED_NOTE))) {
+      const names = Object.keys(body.answers).filter(k => clean.fields[TENANT_ANSWERS[k].id] !== undefined).map(k => TENANT_ANSWERS[k].label);
+      fields[GP.tenant.notes] = appendNote(notes, `${SAVED_NOTE}: ${names.join(', ')}.`, 'tenant link', now);
+    }
+    await airtableRequest(env, `${TABLES.tenants}/${row.id}`, { method: 'PATCH', body: JSON.stringify({ fields, typecast: false }) }, 0, PUBLIC_RETRIES);
+    console.log(JSON.stringify({ event: 'tenant-form-save', tenantId: row.id, answers: n }));
+    return json({ ok: true, saved: n, savedAt: hhmm(now) }, 200, origin);
+  }
+  if (path === '/tenant-form/upload') {
+    const type = String(body.contentType || '').toLowerCase();
+    const file = String(body.file || '');
+    if (!UPLOAD_TYPES.includes(type)) return err('Send a photo (JPEG, PNG or HEIC) or a PDF.', 400, origin);
+    if (!file || !/^[A-Za-z0-9+/]+={0,2}$/.test(file)) return err('That file could not be read. Try again.', 400, origin);
+    // The bytes must be what the type says: a page cannot be stored by calling it a photo.
+    let head;
+    try { head = Uint8Array.from(atob(file.slice(0, 16)), c => c.charCodeAt(0)); } catch { head = new Uint8Array(0); }
+    if (!MAGIC[type](head)) return err('That file is not a photo or a PDF we can read. Try another.', 400, origin);
+    const bytes = Math.floor(file.length * 3 / 4) - (file.endsWith('==') ? 2 : file.endsWith('=') ? 1 : 0);
+    if (bytes > UPLOAD_LIMIT) return err('That file is too big. The most is 3.7MB: take the photo again a little further away.', 413, origin);
+    const held = Array.isArray(row.fields[GP.tenant.documents]) ? row.fields[GP.tenant.documents].length : 0;
+    if (held >= UPLOAD_MAX_FILES) return err('We have enough files for now. Reply to our message if you need to send more.', 409, origin);
+    const base = String(body.filename || '').split(/[\\/]/).pop().replace(/\.[^.]*$/, '').replace(/[^\w\- ]+/g, '').trim().slice(0, 60) || 'statement';
+    const filename = `Tenant upload ${dateKey(now)} ${base}.${EXT[type]}`;
+    const res = await fetch(`https://content.airtable.com/v0/${BASE}/${row.id}/${GP.tenant.documents}/uploadAttachment`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${env.AIRTABLE_PAT}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ contentType: type, file, filename }),
+    });
+    if (!res.ok) throw new Error(`Airtable upload ${res.status}`);
+    console.log(JSON.stringify({ event: 'tenant-form-upload', tenantId: row.id, bytes, type }));
+    return json({ ok: true }, 200, origin);
+  }
+  return err('Not found', 404, origin);
+}
+
+// Signed in: Kevin or Roy makes a tenant's link, or switches it off. The record is found by
+// LISTING the tenants table (a GET by id would answer for a record in any table).
+async function tenantById(env, id) {
+  if (!/^rec[A-Za-z0-9]{14}$/.test(String(id || ''))) return null;
+  const p = new URLSearchParams();
+  p.set('returnFieldsByFieldId', 'true');
+  p.set('maxRecords', '1');
+  p.set('filterByFormula', `RECORD_ID()='${id}'`);
+  p.append('fields[]', GP.tenant.name);
+  const rows = (await airtableRequest(env, `${TABLES.tenants}?${p.toString()}`)).records || [];
+  return rows.length === 1 && rows[0].id === id ? rows[0] : null;
+}
+
+async function handleTenantLink(request, env, origin, off, who) {
+  let body;
+  try { body = await request.json(); } catch { return err('Bad request', 400, origin); }
+  const row = await tenantById(env, body && body.tenantId);
+  if (!row) return err('That is not a tenant', 400, origin);
+  if (off) {
+    await airtableRequest(env, `${TABLES.tenants}/${row.id}`, { method: 'PATCH', body: JSON.stringify({ fields: { [TENANT_LINK.codeHash]: null, [TENANT_LINK.codeExpires]: null }, typecast: false }) });
+    console.log(JSON.stringify({ event: 'tenant-link-off', tenantId: row.id, who }));
+    return json({ ok: true }, 200, origin);
+  }
+  const code = await makeLinkCode(env);
+  const until = londonNow();
+  until.setDate(until.getDate() + LINK_DAYS);
+  const expires = dateKey(until);
+  await airtableRequest(env, `${TABLES.tenants}/${row.id}`, { method: 'PATCH', body: JSON.stringify({ fields: { [TENANT_LINK.codeHash]: await sha256Hex(code), [TENANT_LINK.codeExpires]: expires }, typecast: false }) });
+  console.log(JSON.stringify({ event: 'tenant-link', tenantId: row.id, who, expires }));
+  // After the #, the code is never sent to the web host or kept in its logs.
+  return json({ ok: true, url: `${TENANT_PAGE}#c=${code}`, expires, firstName: firstNameOf(row.fields[GP.tenant.name]) }, 200, origin);
+}
+
 // ── Growth Plan (Kevin, 18 Sep 2026) ────────────────────────────────────────
 // Roy's Growth Plan tab runs the SAME page as Kevin's. This hands back the same seven
 // table reads, raw and by field ID, so the page normalises and prices them with
@@ -391,6 +667,8 @@ export default {
       if (path === '/health' && request.method === 'GET') return json({ ok: true, version: VERSION }, 200, origin);
       if (path === '/login' && request.method === 'POST') return await handleLogin(request, env, origin);
       if (path === '/login-airtable' && request.method === 'POST') return await handleLoginAirtable(request, env, origin);
+      // The tenant's own routes: his link code is his pass, so they sit before the sign-in.
+      if (path === '/tenant-form' || path === '/tenant-form/open' || path === '/tenant-form/upload') return await handleTenantForm(request, env, origin, path);
 
       const session = await requireAuth(request, env);
       if (!session) return err('Sign in needed', 401, origin);
@@ -400,6 +678,7 @@ export default {
       if (path === '/growth-plan' && request.method === 'GET') return json({ ok: true, who: session.who, generatedAt: new Date().toISOString(), ...(await loadGrowthPlan(env)) }, 200, origin);
       const g = path.match(/^\/growth-plan\/(tick|tenant|row|task)$/);
       if (g && request.method === 'POST') return await handleGrowthPlanWrite(request, env, origin, g[1], session.who);
+      if ((path === '/tenant-form/link' || path === '/tenant-form/link/off') && request.method === 'POST') return await handleTenantLink(request, env, origin, path.endsWith('/off'), session.who);
       const m = path.match(/^\/task\/(rec[A-Za-z0-9]+)$/);
       if (m && request.method === 'POST') return await handleTaskWrite(request, env, origin, m[1], session.who);
       return err('Not found', 404, origin);
