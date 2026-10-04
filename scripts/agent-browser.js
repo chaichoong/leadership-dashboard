@@ -103,6 +103,13 @@ const BUILTIN_SITES = {
   'find-and-update.company-information.service.gov.uk':
                                 { label: 'Companies House',    login: false },
   'gov.uk':                     { label: 'GOV.UK',             login: false, shortSession: true },
+  // The DWP's "Apply for direct rent payments" form (Cash Flow Voids lane B, 3 Oct 2026). Its
+  // first question's answers carry the word "payment", which the final-action guard refuses.
+  // This one exact radio label, on this host only, is an answer and never the final click: the
+  // robot still never presses "Accept and send", and the reason Kevin states is his. The robot
+  // only ever picks this answer (scripts/rent_form_plan.py); the arrears routes are Kevin's.
+  'directpayment.universal-credit.service.gov.uk': { label: 'DWP direct rent payments', login: false,
+    answers: ['Direct rent payment'] },
   // GOV.UK One Login + Companies House WebFiling (4 Sep 2026). WebFiling has
   // signed in through One Login since October 2025, so a confirmation
   // statement (CS01) or any other WebFiling form starts at
@@ -445,10 +452,12 @@ function ledger(entry) {
   try {
     fs.mkdirSync(path.dirname(LEDGER), { recursive: true });
     fs.appendFileSync(LEDGER, JSON.stringify(Object.assign({ at: new Date().toISOString() }, entry)) + '\n');
+    return true;
   } catch (e) {
     // A ledger that cannot be written is a real problem, not a nicety: it is
     // the only record of what a browser did with Kevin's sessions.
     console.error('WARNING: browser ledger not written: ' + e.message);
+    return false;
   }
 }
 
@@ -535,7 +544,9 @@ function assertUploadable(files) {
 // ── Approval gate ────────────────────────────────────────────────────────────
 // Asks the same script every other Airtable read goes through, so this gate and
 // the approval loop can never disagree about what "Approved" means.
-function assertApproved(taskId) {
+// `window` is set by `handover` alone: the one command that may open an approved robot form
+// card, because it fills the form in a window Kevin finishes and never presses the final click.
+function assertApproved(taskId, { window = false } = {}) {
   if (!/^rec[A-Za-z0-9]{14}$/.test(taskId || '')) die(`--task must be an Airtable record id, got "${taskId}"`);
   let out;
   try {
@@ -550,6 +561,15 @@ function assertApproved(taskId) {
   if (!/^Approved/.test(outcome)) {
     die(`task ${taskId} is not approved (Approval Outcome: ${outcome || 'not set'}). ` +
         `A form is submitted only after Kevin has seen the screenshot and tapped approve.`);
+  }
+  // A robot form card (3 Oct 2026, FORM_CARDS in scripts/agent_email_format.py) opens the window
+  // and nothing else: the form is Kevin's to send, so `commit`, which presses submit, refuses it.
+  if (window && state.window === true) {
+    if (state.turn !== true) die(`task ${taskId} has no open Your turn step, so its window does not open.`);
+    return state;
+  }
+  if (state.formCard) {
+    die(`task ${taskId} is a robot form card: only the Your turn window opens it, and Kevin sends the form himself.`);
   }
   // A trial task is checked by Kevin and never carried out (2 Oct 2026): `outcome` names the
   // reason, from the same one list (TRIAL_AGENTS in scripts/agent_email_format.py) every other
@@ -1177,9 +1197,16 @@ const SIGNATURE_RE = /\b(sign|signature|signed|signing|e-?sign)\b/i;
 
 function handoverPlanPath(task) { return path.join(HANDOVER_DIR, task + '.json'); }
 
-function assertHandoverPlan(plan) {
+function assertHandoverPlan(plan, now = new Date()) {
   if (!plan || !Array.isArray(plan.steps) || !plan.steps.length) die('the plan has no steps');
   if (!String(plan.why || '').trim()) die('the plan needs "why": what Kevin does when it is his turn (for example "answer the declarations and pay")');
+  // An answer that holds only until a day (the DWP form's arrears answer, scripts/rent_form_plan.py):
+  // after that day, London time, the window does not open on it. Its card is raised again with a fresh count.
+  if (plan.validUntil !== undefined) {
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(String(plan.validUntil))) die(`the plan's "validUntil" must be a date (YYYY-MM-DD), got "${plan.validUntil}"`);
+    const today = new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/London' }).format(now);
+    if (today > plan.validUntil) die(`this plan's answers were good until ${plan.validUntil}, and a rent has fallen due since. The rent check raises a fresh card.`);
+  }
   plan.steps.forEach((s, i) => {
     const d = s && s.do;
     if (!HANDOVER_STEPS.has(d)) die(`step ${i + 1} is "${d}". A handover plan never submits, pays or uploads: the last click is Kevin's.`);
@@ -1299,10 +1326,14 @@ async function assertNotFinalAction(page, s) {
       }
       // An answer: a tick box, radio, ARIA toggle, or a short button such as "Yes" (round 4).
       const own = control ? String(control.innerText || control.textContent || control.value || '').trim() : '';
+      // A radio's own option text, read from its labels only, for a site's named answers.
+      const option = control && ctype === 'radio' && control.labels
+        ? Array.from(control.labels).map(l => String(l.textContent || '')).join(' ').replace(/\s+/g, ' ').trim() : '';
       const answer = !!control && (['checkbox', 'radio'].includes(ctype) || ['checkbox', 'radio', 'switch'].includes(crole)
         || control.hasAttribute('aria-checked') || control.hasAttribute('aria-pressed')
         || ((control.tagName === 'BUTTON' || crole === 'button') && own.length <= 12));
-      return { entry: false, words: squash(parts), question: answer ? squash(question(control)) : '', around: answer ? nearby(control) : '', tick: answer };
+      return { entry: false, words: squash(parts), question: answer ? squash(question(control)) : '', around: answer ? nearby(control) : '', tick: answer, option,
+               value: control ? String(control.value || '') : '' };
     }, null, { timeout: Math.min(Number(s.timeout) || 20000, 60000) });
   } catch (e) {
     throw new Error(`could not read what "${s.selector}" is, so it was not touched: ${String(e.message || e).slice(0, 120)}`);
@@ -1318,11 +1349,29 @@ async function assertNotFinalAction(page, s) {
     return;
   }
   if (!presses) return;
-  if (FINAL_ACTION_RE.test(seen.words)) throw new Error(`refused: "${seen.words.trim().slice(0, 60)}" looks like the final action, which is Kevin's`);
+  if (FINAL_ACTION_RE.test(seen.words) && !namedAnswer(page.url(), seen)) throw new Error(`refused: "${seen.words.trim().slice(0, 60)}" looks like the final action, which is Kevin's`);
   const asked = (seen.words + ' ' + seen.question).trim();
   if (seen.tick && (DECLARATION_RE.test(asked) || NEARBY_DECLARATION_RE.test(seen.around))) {
     throw new Error(`refused: "${(asked + ' ' + seen.around).trim().slice(0, 80)}" reads like a declaration, which is Kevin's`);
   }
+}
+
+// A radio whose own option text is one of the site's named `answers`, exactly, and whose words
+// say nothing else the guard refuses. Only a radio, only on that site, only those words.
+function namedAnswer(url, seen) {
+  if (!seen || !seen.tick || !seen.option) return false;
+  let h;
+  try { h = new URL(url).hostname.toLowerCase(); } catch { return false; }
+  // The exact host only: a sub-domain of the named site is not the named form.
+  const site = loadSites()[h];
+  if (!site || !Array.isArray(site.answers) || !site.answers.includes(seen.option)) return false;
+  // Only the option's own words are set aside, and its value when that is the same words in another
+  // spelling ("direct-rent-payment"): anything else the guard reads still counts.
+  const wordsOf = t => String(t || '').replace(/([a-z])([A-Z])/g, '$1 $2').toLowerCase().split(/[^a-z0-9]+/).filter(Boolean);
+  const own = new Set(wordsOf(seen.option));
+  let rest = seen.words.split(seen.option).join(' ');
+  if (seen.value && wordsOf(seen.value).every(w => own.has(w))) rest = rest.split(seen.value).join(' ');
+  return !FINAL_ACTION_RE.test(rest);
 }
 
 // A goto to an address worded like the last step (/checkout/confirm) is his too.
@@ -1794,7 +1843,10 @@ async function main() {
       return;
     }
     // Checked BEFORE the window opens: Kevin approved the prepared work, or nothing runs.
-    assertApproved(task);
+    const approval = assertApproved(task, { window: true });
+    // His minor edit, typed when he approved, is shown in the window: the robot fills the prepared
+    // answers, and the edit is his to make before he sends (Approved with minor edits).
+    const edit = String(approval.outcome || '') === 'Approved with minor edits' ? String(approval.feedback || '').trim().slice(0, 300) : '';
     const dir = path.join(PROFILE_ROOT, profile || 'default');
     // The robot's own runs wait while the window is his (their launch would fight it).
     takeSigninHold(dir);
@@ -1807,13 +1859,22 @@ async function main() {
     let res;
     try {
       res = await withPage(profile, headed, async (page, ctx) => {
+        // Logged as it OPENS (once the browser is up) as well as when it closes: a window still open
+        // (Kevin waiting overnight for an emailed code) must read as in use, never as unused, and a
+        // launch that failed is no window at all (scripts/rent_new_tenant.py read_windows).
+        // Read again now the browser is up: the wait for the profile can be minutes, and the card may have
+        // been withdrawn or answered meanwhile.
+        assertApproved(task, { window: true });
+        const logged = ledger({ cmd: 'handover-open', task, profile, site: plan.site || null });
+        // For a robot form card the log IS the guard against a second government form: no log, no window.
+        if (!logged && approval.formCard) throw new Error('the robot log could not be written, so this form window does not open');
         await turnBanner(page, FILLING);
         const r = await runHandover(page, plan, { onTick: tick });
         const png = await shoot(page, path.join(HANDOVER_DIR, 'shots', `${task}-${Date.now()}.png`)).catch(() => null);
         await turnBanner(page, r.stuck
           ? `The robot got stuck at step ${r.stuck.step}. You can finish by hand, or close this window.`
-          : `Your turn: ${plan.why}. Close this window when you have finished: the other robots wait while it is open.`);
-        console.log(JSON.stringify({ phase: 'your-turn', task, stuck: r.stuck, screenshot: png }));
+          : `Your turn: ${plan.why}.${edit ? ` Your edit: ${edit}.` : ''} Close this window when you have finished: the other robots wait while it is open.`);
+        console.log(JSON.stringify({ phase: 'your-turn', task, stuck: r.stuck, screenshot: png, edit: edit || null }));
         await waitForWindowClose(ctx, Number(process.env.AGENT_HANDOVER_WAIT_MS) || 0, tick);
         return Object.assign(r, { screenshot: png });
       });
@@ -1890,7 +1951,7 @@ if (require.main === module) {
   });
 }
 
-module.exports = { hostAllowed, pickLinks, runSteps, assertNotCredential, assertApproved, SECRET_NAME_RE, loadSites, sessionVerdict,
+module.exports = { namedAnswer, hostAllowed, pickLinks, runSteps, assertNotCredential, assertApproved, SECRET_NAME_RE, loadSites, sessionVerdict,
                    recordLoginSite, signinTargets, signinOwner, signinDomain, readSitesFile,
                    assertUploadable, assertConfirmable, UPLOAD_DIR, UPLOAD_EXTENSIONS, persistSessionCookies,
                    signinHoldActive, takeSigninHold, releaseSigninHold, waitForSigninHold, HOLD_MAX_MS, isBotCheck,

@@ -35,6 +35,34 @@ import urllib.error
 import urllib.parse
 import urllib.request
 
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from agent_email_format import FORM_CARDS, form_card  # noqa: E402
+
+# A robot form card (Cash Flow Voids lane B, 3 Oct 2026) is raised by the rent check's rules under the
+# agent's id; the agent drafts none of it. Its verdicts are Kevin's business calls on a government
+# form, never a score of the agent's drafting, so they are left out: by name here, and by the key
+# line in the query (the Notes are not fetched for every decided task).
+FORM_KEY_CLAUSE = "".join(f", NOT(FIND('{m['note']}', {{Notes}}&''))" for m in FORM_CARDS.values())
+
+
+def decisions_from(decided):
+    """The scored verdicts: one per decided task with an agent and an outcome, form cards left out."""
+    out = []
+    for r in decided:
+        f = r["fields"]
+        agent = first_link(f.get("Sent For Approval By")) or first_link(f.get("Team Member"))
+        outcome = select_name(f.get("Approval Outcome"))
+        if not agent or not outcome or form_card(f.get("Task Name"), f.get("Notes")):
+            continue
+        out.append({
+            "agent": agent,
+            "type": select_name(f.get("Task Type")) or "Unclassified",
+            "outcome": outcome,
+            "at": f.get("Approved At") or "",
+            "reason": select_name(f.get("Verdict Reason")),
+        })
+    return out
+
 BASE_ID = "appnqjDpqDniH3IRl"
 TASKS = "tblqB8b22hKBL4PF1"
 TEAM = "tblco0p2OnlLQVAX7"
@@ -670,9 +698,9 @@ def main():
     token = pat()
     # LEN(field & '') rather than != '' — a blank Airtable field is not reliably
     # unequal to an empty string, and that trap has emptied a whole query here.
-    decided = query(token, TASKS, "LEN({Approval Outcome} & '') > 0",
+    decided = query(token, TASKS, "AND(LEN({Approval Outcome} & '') > 0" + FORM_KEY_CLAUSE + ")",
                     ["Approval Outcome", "Approved At", "Task Type", "Sent For Approval By",
-                     "Team Member", "Verdict Reason"])
+                     "Team Member", "Verdict Reason", "Task Name"])
     # HONOUR THE KNOCK-BACK (28 Aug 2026). Kevin can defer an approval to a
     # date instead of deciding it, and five surfaces were built to respect that.
     # This was a SIXTH nobody counted, because it reports a number rather than
@@ -691,20 +719,7 @@ def main():
     team = query(token, TEAM, None, ["Name"])
     names = {r["id"]: r["fields"].get("Name", r["id"]) for r in team}
 
-    decisions = []
-    for r in decided:
-        f = r["fields"]
-        agent = first_link(f.get("Sent For Approval By")) or first_link(f.get("Team Member"))
-        outcome = select_name(f.get("Approval Outcome"))
-        if not agent or not outcome:
-            continue
-        decisions.append({
-            "agent": agent,
-            "type": select_name(f.get("Task Type")) or "Unclassified",
-            "outcome": outcome,
-            "at": f.get("Approved At") or "",
-            "reason": select_name(f.get("Verdict Reason")),
-        })
+    decisions = decisions_from(decided)
 
     if "--weekly" in sys.argv:
         now = datetime.datetime.now(datetime.timezone.utc)

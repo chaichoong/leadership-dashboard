@@ -566,8 +566,8 @@ a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}
 <script src="../../js/ai-models.js?v=1"></script>
 <!-- Shared accuracy scoring (per agent PER TASK TYPE) — same maths as the
      Leadership Dashboard card. Pure IIFE, safe to load here. -->
-<script src="../../js/agent-accuracy.js?v=4"></script>
-<script src="../../js/automations-data.js?v=14"></script>
+<script src="../../js/agent-accuracy.js?v=5"></script>
+<script src="../../js/automations-data.js?v=15"></script>
 <script src="../../js/mcp-tools-data.js?v=1"></script>
 <script src="../../js/sync-bar.js?v=6"></script>
 <script>
@@ -4859,11 +4859,13 @@ function computeAgentTaskStats(recs){
     const day = 86400000;
     const localDay = d => { const x=new Date(d); return x.getFullYear()+'-'+String(x.getMonth()+1).padStart(2,'0')+'-'+String(x.getDate()).padStart(2,'0'); };
     const today = localDay(Date.now());
+    const isFormCard = f => !!(window.AgentAccuracy && window.AgentAccuracy.isFormCard && window.AgentAccuracy.isFormCard(f[TF.name], f[TF.notes]));
     recs.forEach(r=>{
         const f = r.fields||{};
         const status = selName(f[TF.status]);
         const comp = f[TF.completionDate];
-        (f[TF.teamMember]||[]).forEach(id=>{
+        // A robot form card is the rent check's, not the agent's work: left out of its counts too.
+        (isFormCard(f) ? [] : (f[TF.teamMember]||[])).forEach(id=>{
             const st = statsMap[id] = statsMap[id]||{open:0,doneToday:0,done7:0,done30:0,through30:0,handled30:0};
             if(status==='Completed'){
                 // The approval-history branch of the formula has NO date bound,
@@ -4884,7 +4886,9 @@ function computeAgentTaskStats(recs){
         // two surfaces disagree on the same agent's score.
         const outcome = selName(f[TF.approvalOutcome]);
         const agentId = (f[TF.sentForApprovalBy]||[])[0] || (f[TF.teamMember]||[])[0];
-        if(outcome && agentId) hist.push({ agentId, taskType:selName(f[TF.taskType])||'Unclassified', outcome, at:String(f[TF.approvedAt]||'') });
+        // A robot form card is nobody's draft: it never counts in an agent's score (AgentAccuracy.isFormCard).
+        const formCard = isFormCard(f);
+        if(outcome && agentId && !formCard) hist.push({ agentId, taskType:selName(f[TF.taskType])||'Unclassified', outcome, at:String(f[TF.approvedAt]||'') });
     });
     _agentTaskStats = statsMap;
     _agentAccuracyOk = hist.length > 0;
@@ -7734,7 +7738,7 @@ function fifteenStats(){
         const f = r.fields||{};
         const outcome = selName(f[TF.approvalOutcome]);
         const agentId = (f[TF.sentForApprovalBy]||[])[0] || (f[TF.teamMember]||[])[0];
-        if(!outcome || !agentId) return;
+        if(!outcome || !agentId || (A.isFormCard && A.isFormCard(f[TF.name], f[TF.notes]))) return;
         const at = String(f[TF.approvedAt]||'');
         hist.push({ agentId, taskType: selName(f[TF.taskType])||'Unclassified', outcome, at,
                     reason: selName(f[TF.verdictReason])||'',

@@ -93,6 +93,7 @@ from agent_email_format import (  # noqa: E402
     TRIAL_ACTING_SHAPE_RE,
     TRIAL_STAMP,
     strip_trial_marks,
+    form_card,
     trial_problem,
 )
 # The CALENDAR contract lives in one place too, shared with
@@ -2893,7 +2894,7 @@ def build_queue(args=None):
     approved_hb, changes_hb, new_work, routing = [], [], [], []
     decided = []
     own_signal = []
-    trial_checked = []
+    trial_checked, form_cards = [], []
     creditor_ok = bool(role_roster.get(CREDITOR_REC_ID, {}).get("dispatchable"))
     creditor_count = 0
     # The property lane needs BOTH the register lever and a readable book:
@@ -2933,6 +2934,15 @@ def build_queue(args=None):
         if hold:
             standing_held.append({**t, "holdId": hold["id"],
                                   "holdTitle": hold.get("title", "")})
+            continue
+        # A ROBOT FORM CARD IS NEVER AN AGENT'S WORK (3 Oct 2026). The rent check raises it, reads
+        # Kevin's verdict and finishes it in code; approving it opens the robot's window and
+        # nothing else. Pulled out here, before every lane, whatever its outcome or none: a
+        # changed, rejected or stranded card handed to an agent would be redone or "carried out"
+        # by a run that has no business with it (independent review, 3 Oct 2026). Listed under
+        # formCards, never hidden.
+        if form_card(t["name"], t["notes"]):
+            form_cards.append(t)
             continue
         # ROY IS HANDLING THIS (24 Sep 2026): Roy forwarded this same matter to
         # his assistant. While his request is open this twin waits, listed
@@ -3228,6 +3238,7 @@ def build_queue(args=None):
         "idleHandbacks": idle_hb,
         "ownGoSignal": own_signal,
         "trialChecked": trial_checked,
+        "formCards": form_cards,
         # Tasks a sign-in just reopened (ids): the pickup run and the 30-minute
         # poll work these first, whichever lane classified them.
         "signinReopened": signin_reopened,
@@ -3262,6 +3273,7 @@ def build_queue(args=None):
             "idleHandbacks": len(idle_hb),
             "ownGoSignal": len(own_signal),
             "trialChecked": len(trial_checked),
+            "formCards": len(form_cards),
             "changesRequested": len(changes_hb),
             # Redos Kevin asked to delay. Demoted behind new work rather than
             # dropped, and counted here so one sitting for weeks stays visible.
@@ -5187,11 +5199,21 @@ def cmd_lessons(args):
             "been renamed or the formula no longer sees it — every lesson "
             "Kevin stores from now on would be silently dropped.")
 
-    written, problems = [], []
+    written, problems, not_agents = [], [], []
     for rec in pending_lessons():
         f = rec.get("fields", {})
         task_id = rec["id"]
         name = f.get(AF["name"], "")
+        # A robot form card is the rent check's rules, drafted by no agent: Kevin's words stay on the
+        # card (his request for changes is quoted on the next one) and never become an agent's rule.
+        # Stamped as handled, so it is never pending and never an overdue lesson for verify.
+        if form_card(name, f.get(AF["notes"])):
+            try:
+                patch_task(task_id, {AF["lessonWrittenAt"]: now_iso()})
+                not_agents.append(task_id)
+            except Exception as e:                    # noqa: BLE001
+                problems.append({"task": task_id, "name": name, "error": str(e)})
+            continue
         words = lesson_source_text(f)
         if not words:
             problems.append({"task": task_id, "name": name,
@@ -5233,7 +5255,7 @@ def cmd_lessons(args):
         except Exception as e:                        # noqa: BLE001
             problems.append({"task": task_id, "name": name, "error": str(e)})
 
-    out = {"written": written, "problems": problems,
+    out = {"written": written, "problems": problems, "formCards": not_agents,
            "pendingAfter": len(problems),
            "rememberedTotal": len(remembered)}
     print(json.dumps(out, indent=2))
@@ -5278,14 +5300,25 @@ def cmd_outcome(args):
     """
     t = task_view(get_task(args.task))
     # A trial task is never "approved" as far as the browser's submit gate goes (2 Oct 2026).
-    trial = trial_problem([t["agentId"]] + t["teamMemberIds"], t["name"], t["notes"])
+    # Nor is a robot form card, on trial or not (3 Oct 2026): `commit` presses submit, and the
+    # form is Kevin's to send. Its one door is `window`, which only `handover` reads: the robot
+    # fills the form in a window he finishes. Read from agent_email_format.FORM_CARDS.
+    holders = [t["agentId"]] + t["teamMemberIds"]
+    trial = trial_problem(holders, t["name"], t["notes"])
+    card = form_card(t["name"], t["notes"])
     print(json.dumps({
         "id": t["id"],
         "name": t["name"],
         "status": t["status"],
         "outcome": t["outcome"],
-        "approved": t["outcome"] in APPROVED and not trial,
+        "approved": t["outcome"] in APPROVED and not trial and not card,
         "trial": trial,
+        "formCard": card,
+        "window": (t["outcome"] in APPROVED and t["status"] not in ("Completed", "Cancelled")
+                   and form_card(t["name"], t["notes"], holders=holders)),
+        # Kevin's step is open: the window command opens only then (a closed step is never run again).
+        "turn": bool((task_blocker(t["notes"]) or {}).get("kind") == "KEVIN")
+                and not form_turn_unanswered(t["id"], t["name"], t["notes"]),
         "feedback": t["feedback"],
     }))
 
@@ -6052,7 +6085,9 @@ SIGNIN_PICKUP_DIR = os.environ.get("SIGNIN_PICKUP_DIR") or os.path.expanduser("~
 #   SIGN-IN NEEDED: Pingen (https://app.pingen.com/) — (unverified: profile busy)
 SIGNIN_UNVERIFIED_MARK = "(unverified"
 SIGNIN_UNVERIFIED_RE = re.compile(r"\s*(?:[—–-]\s*)?\(unverified(?::[^)]*)?\)\s*$", re.I)
-SIGNIN_WALK_TIMEOUT = 180                # seconds: the walk's own worst case is ~125 s (door 48 s, two clicks 56 s each, One Login settle 20 s)
+SIGNIN_WALK_TIMEOUT = 300                # seconds: the walk's own worst case is ~125 s (door 48 s, two clicks 56 s each, One Login settle 20 s);
+                                         # a site the robot signs itself back in to (Amazon, 2 Oct 2026) walks twice around a
+                                         # 20-second plain window, worst case ~270 s. A timeout reads "unverified", never signed out.
 SIGNIN_LEDGER_FRESH_MINUTES = 30         # a verdict newer than this is reused, not re-walked
 BOT_CHECK_FRESH_MINUTES = 24 * 60        # a bot check seen today still stands (block refuses SIGN-IN)
 BROWSER_LEDGER = (os.environ.get("AGENT_BROWSER_LEDGER")
@@ -6127,6 +6162,16 @@ def load_login_sites():
     return json.loads(r.stdout)
 
 
+def refresh_inconclusive(rec):
+    """A `session` line whose own refresh could not run, or whose second read
+    failed (agent-browser.js selfRefresh, Amazon, 2 Oct 2026). It says nothing
+    settled about the login: walking again runs the refresh, so it is never
+    reused as a verdict. The same test as session-keepalive.py session_state
+    and signin_hold.py _read."""
+    r = str((rec or {}).get("selfRefresh") or "")
+    return r.startswith("not run") or "second read failed" in r
+
+
 def ledger_session_verdict(host, max_age_minutes=SIGNIN_LEDGER_FRESH_MINUTES, path=None, now=None,
                            profile="default"):
     """The newest `session` verdict agent-browser.js logged for HOST, if it is
@@ -6146,7 +6191,7 @@ def ledger_session_verdict(host, max_age_minutes=SIGNIN_LEDGER_FRESH_MINUTES, pa
                     newest = rec
     except OSError:
         return None
-    if not newest or not newest.get("at"):
+    if not newest or not newest.get("at") or refresh_inconclusive(newest):
         return None
     try:
         at = datetime.fromisoformat(str(newest["at"]).replace("Z", "+00:00"))
@@ -6187,6 +6232,9 @@ def ledger_signed_out(host, path=None, profile="default"):
     except OSError:
         return None
     if not newest or login_since or newest.get("signedIn") or newest.get("botCheck") or not newest.get("at"):
+        return None
+    # The robot's own refresh could not run: a fresh walk runs it, and may need no sign-in at all.
+    if refresh_inconclusive(newest):
         return None
     # Only a verdict that landed on a sign-in page (review, 29 Sep 2026): a walk
     # that met an error page or a slow load also reads "signed out", and trusted
@@ -6286,6 +6334,12 @@ def session_walk(host, timeout=SIGNIN_WALK_TIMEOUT, profile=None, url=None):
         d = json.loads(r.stdout)
     except ValueError:
         return {"error": "session walk printed no JSON"}
+    # Signed out only because the robot's own refresh could not run (Amazon,
+    # 2 Oct 2026): not a verdict. The app marks it unverified; the submit gate
+    # sends the agent back to read again rather than hand Kevin a sign-in.
+    if not d.get("signedIn") and refresh_inconclusive(d):
+        return {"error": "the robot's own refresh did not finish (" + str(d.get("selfRefresh"))[:150] + ")",
+                "refreshNotRun": True}
     return {"signedIn": bool(d.get("signedIn")), "botCheck": bool(d.get("botCheck")),
             "url": str(d.get("url") or ""), "at": now_iso(), "source": "walk"}
 
@@ -6348,6 +6402,13 @@ def signin_verify_line(output, sites=None, check=None):
     v = (check or session_check)(host)
     if v.get("skipped"):
         return "", output
+    if v.get("refreshNotRun"):
+        return (f"its SIGN-IN NEEDED line names {m['site']!r}, but {host} is a site the robot signs itself "
+                f"back in to, and its refresh did not finish just now ({v['error'][:120]}). Nothing needs "
+                f"Kevin: run `node scripts/agent-browser.js session --site {host}` again, which refreshes it, "
+                "then do the work. If it still cannot finish, record the wall instead of a sign-in: "
+                f"`python3 scripts/agent-dispatch.py block TASKID --kind SIGN-IN --subject {host} --why \"own refresh did not finish\"`. "
+                "It clears itself when the next check signs the robot back in.", output)
     if v.get("error"):
         print(f"NOTE: sign-in line for {host} kept unverified — {v['error'][:160]}", file=sys.stderr)
         return "", mark_signin_unverified(output, v["error"])
@@ -6888,12 +6949,15 @@ def cmd_complete(args):
 # (so a note Kevin ticked Remember on is stored first), and closes every approved
 # trial card with the verdict in Notes. A rejected card is closed by the queue
 # page already; a sent-back one goes round the redo loop like any other card.
+# A robot form card is never settled here: the rent check reads its verdict and
+# finishes it once Kevin has sent the form (agent_email_format.FORM_CARDS).
 def trial_approved_tasks():
     rows = query_tasks("AND(LEN({Approval Outcome}&'')>0, NOT({Status}='Completed'), NOT({Status}='Cancelled'))")
     out = []
     for rec in rows:
         t = task_view(rec)
-        if t["outcome"] in APPROVED and trial_problem([t["agentId"]], t["name"], t["notes"]):
+        if t["outcome"] in APPROVED and trial_problem([t["agentId"]], t["name"], t["notes"]) \
+                and not form_card(t["name"], t["notes"]):
             out.append(t)
     return out
 
@@ -6961,14 +7025,57 @@ HANDOVER_DIR = os.environ.get("AGENT_HANDOVER_DIR") or os.path.expanduser("~/kno
 TURN_TASK_RE = re.compile(r"^rec[A-Za-z0-9]{14}$")
 
 
-def handover_ready(task_id, b, outcome=""):
+ROBOT_LOG = os.environ.get("AGENT_BROWSER_LEDGER") or os.path.expanduser("~/knowledge-os/logs/agent-browser/runs.jsonl")
+TURN_NOT_FINISHED = "Your turn window closed without Kevin finishing"   # the Robot sign-in app's "Not yet" note
+
+
+def form_turn_unanswered(task_id, name="", notes=""):
+    """True for a robot form card whose window has closed more times than the Robot sign-in app recorded
+    Kevin saying he had not finished: his answer never arrived (the app failed, or was quit with the
+    question up). He may have sent the government form, so neither the button nor the window offers it
+    again (scripts/rent_new_tenant.py may_have_sent closes the step once his answer has had time).
+    A log that cannot be read counts as unanswered: the window is refused, never offered blind."""
+    if not form_card(name, notes):
+        return False
+    opens = closes = 0
+    try:
+        with open(ROBOT_LOG, encoding="utf-8", errors="replace") as fh:
+            for line in fh:
+                try:
+                    row = json.loads(line)
+                except ValueError:
+                    continue
+                if isinstance(row, dict) and row.get("task") == task_id:
+                    opens += row.get("cmd") == "handover-open"
+                    closes += row.get("cmd") == "handover"
+    except FileNotFoundError:
+        return False
+    except OSError:
+        return True
+    # Every window that OPENED counts, closed or not: one that crashed after he sent the form never logs
+    # its close, and the app never asks him.
+    return max(opens, closes) > str(notes or "").count(TURN_NOT_FINISHED)
+
+
+def handover_ready(task_id, b, outcome="", task=None):
     """True when Kevin has APPROVED the card and its KEVIN wall has a handover plan
     on file. The wall opens at submit, before he has seen the card, so a plan alone
     is not a turn (review, 30 Sep 2026): the button would open a window the
     handover then refuses as unapproved."""
-    return (b.get("kind") == "KEVIN" and str(outcome or "").startswith("Approved")
+    if not (b.get("kind") == "KEVIN" and str(outcome or "").startswith("Approved")
             and bool(TURN_TASK_RE.match(task_id or ""))
-            and os.path.isfile(os.path.join(HANDOVER_DIR, task_id + ".json")))
+            and os.path.isfile(os.path.join(HANDOVER_DIR, task_id + ".json"))):
+        return False
+    if task and form_turn_unanswered(task_id, task.get("name"), task.get("notes")):
+        return False
+    # A plan whose answers hold only until a day (the DWP form's arrears answer, scripts/rent_form_plan.py)
+    # shows no button after it: agent-browser.js would refuse it, and the rent check raises a fresh card.
+    try:
+        with open(os.path.join(HANDOVER_DIR, task_id + ".json")) as fh:
+            until = str((json.load(fh) or {}).get("validUntil") or "")
+    except (OSError, ValueError, AttributeError):
+        return True                                  # the window itself checks the plan, and says why
+    return not until or today_london() <= until
 BLOCKER_OPEN_MARK = "BLOCKER OPEN"
 BLOCKER_CLEARED_MARK = "BLOCKER CLEARED"
 BLOCKER_STALE_DAYS = 3
@@ -7249,10 +7356,28 @@ def cmd_unblock(args):
         sys.exit("ERROR: --evidence must say what you SAW that proves the job can go on or is "
                  "done (the email, the record, the page), not that you believe it.")
     t = task_view(get_task(args.task))
-    b = task_blocker(t["notes"])
+    b = task_blocker(t["notes"]) or unrecorded_turn(t["notes"])
     if not b:
         sys.exit(f"ERROR: {args.task} has no open blocker.")
     print(json.dumps({"unblocked": wake_blocked(args.task, b, f"evidence: {evidence[:400]}", by="agent")}))
+
+
+# The words the rent check closes a form card's Your turn step with when the app never recorded whether
+# Kevin sent the form (scripts/rent_new_tenant.py UNRECORDED). Kept identical there.
+UNRECORDED_TURN = "the app never recorded whether Kevin sent the form"
+
+
+def unrecorded_turn(notes):
+    """The KEVIN step the rent check closed because his answer never arrived, or None. His late answer
+    through the Robot sign-in app is still recorded against it: losing it could ask him to send the
+    government form twice."""
+    last = None
+    for m in BLOCKER_LINE_RE.finditer(str(notes or "")):
+        last = m
+    if not last or last.group("mark") != BLOCKER_CLEARED_MARK or last.group("kind") != "KEVIN" \
+            or UNRECORDED_TURN not in last.group("rest"):
+        return None
+    return {"kind": "KEVIN", "subject": last.group("subject").strip(), "why": "", "since": "", "finding": "", "profile": ""}
 
 
 def blockers_scan(sweep=False, now=None):
@@ -7300,7 +7425,7 @@ def blockers_scan(sweep=False, now=None):
                "fix": blocker_fix_text(b), "finding": b["finding"],
                "findingStatus": fstates.get(b["finding"], "") if b["finding"] else "",
                "days": days, "clearsNow": bool(reason)}
-        if handover_ready(t["id"], b, t.get("outcome")):
+        if handover_ready(t["id"], b, t.get("outcome"), t):
             row["turn"] = True
             row["fix"] = ("Kevin clicks Your turn on the AI Agents page (on his Mac): the robot fills "
                           "everything in and hands him the window for his step.")

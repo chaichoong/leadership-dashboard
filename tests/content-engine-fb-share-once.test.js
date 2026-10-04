@@ -142,6 +142,25 @@ describe('a page reel reaches Kevin\'s Facebook profile once (2083, 2 Oct 2026)'
     expect(r.opened).toEqual(list.slice(0, 4));
   });
 
+  it('captions cut at "See more" after word 8 still give each share its own reel, whichever is listed first', () => {
+    // Kevin, 3 Oct 2026: fix the cut-short case too. Both reels show the shared six words plus one or two of their own.
+    const page = { list: [LEARNINGS_REEL, SUMMARY_REEL, OLDER_REEL], captions: {
+      [LEARNINGS_REEL]: 'Runpreneur · Follow Six weeks after the hill race, my calves taught… See more',
+      [SUMMARY_REEL]: 'Runpreneur · Follow Six weeks after the hill race, my calves still… See more',
+      [OLDER_REEL]: 'Runpreneur · Follow Rain all morning. Day 2189.' } };
+    const r = harness(page, 'fresh');
+    expect(r.pressed).toEqual([SUMMARY_REEL, LEARNINGS_REEL]);
+    expect([r.summary.post_url, r.lfmd.post_url]).toEqual([SUMMARY_REEL, LEARNINGS_REEL]);
+  });
+
+  it('a true tie (both cut inside the shared words) still shares each reel once, never one twice', () => {
+    const page = { list: [LEARNINGS_REEL, SUMMARY_REEL], captions: {
+      [LEARNINGS_REEL]: 'Runpreneur Six weeks after the hill race,… See more',
+      [SUMMARY_REEL]: 'Runpreneur Six weeks after the hill race,… See more' } };
+    const r = harness(page, 'fresh');
+    expect([...r.pressed].sort()).toEqual([LEARNINGS_REEL, SUMMARY_REEL].sort());
+  });
+
   it('the "Day NNNN" fallback skips the reel already shared too', () => {
     // neither caption is on the page in the words the record holds, only the day number: 2056 on 22 Sep
     const page = { list: SAME_OPENING.list, captions: {
