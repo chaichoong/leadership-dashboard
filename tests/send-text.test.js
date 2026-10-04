@@ -108,6 +108,18 @@ try:
     ad.cmd_retype(argparse.Namespace(task="recX", type="Correspondence", reason="it is an email")); out["retype"] = "retyped"
 except SystemExit as e:
     out["retype"] = str(e.code)
+mixed = OUTPUT.replace("TEXT TO:", "Text to:").replace("TEXT:", "Text:")
+for key, o in (("mixedAbove", mixed),
+               ("mixedBelow", OUTPUT.replace(TEXT_BLOCK, "").replace("Body.", "Body.\\nText to: 07700 900123\\nText: Hello Sam")),
+               ("spacedAbove", OUTPUT.replace("TEXT TO:", "TEXT TO :"))):
+    try:
+        se.parse_output(o, "recX"); out[key] = "parsed"
+    except SystemExit as e:
+        out[key] = str(e.code)
+try:
+    aef.validate_submission(mixed); out["mixedSubmit"] = "accepted"
+except aef.EmailFormatError as e:
+    out["mixedSubmit"] = str(e)
 out["patched"] = patched
 print(json.dumps(out))`);
     expect(r.send).toMatch(/TEXT line sits below the email's headers/);
@@ -117,6 +129,12 @@ print(json.dumps(out))`);
     expect(r.retype).toMatch(/refusing to retype recX to Correspondence: .*TEXT line sits below/);
     // Only the good revision was written.
     expect(r.patched).toEqual(['recX']);
+    // One spelling, in capitals: "Text to:" is refused above the headers, at submit and at the send door ...
+    expect(r.mixedAbove).toMatch(/exactly as "TEXT TO:" and "TEXT:", in capitals, not 'Text to'/);
+    expect(r.mixedSubmit).toMatch(/in capitals/);
+    expect(r.spacedAbove).toMatch(/in capitals, not 'TEXT TO'/);
+    // ... and a "text to:" line below them, in any case, is refused rather than emailed with its number.
+    expect(r.mixedBelow).toMatch(/TEXT line sits below the email's headers/);
   });
 });
 

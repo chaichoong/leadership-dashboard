@@ -227,7 +227,7 @@ ${prelude}
 AF = m.AF
 recs = []
 for t in json.loads(sys.stdin.read()):
-    f = {AF["name"]: t["name"], AF["status"]: {"name": "Today"}, AF["teamMember"]: [t["agent"]], AF["notes"]: t.get("notes", "")}
+    f = {AF["name"]: t["name"], AF["status"]: {"name": "Today"}, AF["teamMember"]: t.get("teamMember", [t["agent"]]), AF["notes"]: t.get("notes", "")}
     if t.get("outcome"):
         f[AF["approvalOutcome"]] = {"name": t["outcome"]}
         f[AF["approvedAt"]] = t.get("approvedAt", "2026-10-02T10:00:00.000Z")
@@ -260,6 +260,16 @@ print(json.dumps({"trialChecked": [x["id"] for x in q["trialChecked"]], "worklis
     // The worklist is what a dispatch run works: the two approved trial cards are not on it.
     expect(Object.keys(r.worklist).sort()).toEqual(['recOtherYes', 'recTrialNew', 'recTrialRedo']);
     expect(r.worklist.recOtherYes).toBe('carry_out');
+  });
+
+  it('reads the Team Member as send-email does: a card held by the trial agent but sent by another is checked, never handed out', () => {
+    const r = queue([
+      { id: 'recHeld', name: 'Draft with no lane marks', agent: PROPERTY_TM, teamMember: [RENT_TM], outcome: 'Approved as-is' },
+      { id: 'recOtherYes', name: 'COMPLIANCE: EICR renewal', agent: PROPERTY_TM, outcome: 'Approved as-is' },
+    ]);
+    // Handed out, it would be refused by send-email.py every 30 minutes for ever (review, 4 Oct 2026).
+    expect(r.trialChecked).toEqual(['recHeld']);
+    expect(Object.keys(r.worklist)).toEqual(['recOtherYes']);
   });
 
   it('after the cut-over, a card approved during the trial is still only checked; one approved after it is carried out', () => {
@@ -298,7 +308,7 @@ describe('5. trial-settle closes an approved trial card with the verdict, and no
   const settle = (tasks, prelude = '') => py(`${prelude}
 recs = [{"id": t["id"], "fields": {ad.AF["name"]: t["name"], ad.AF["approvalOutcome"]: t["outcome"], ad.AF["notes"]: t.get("notes", ""),
                                     ad.AF["approvedAt"]: t.get("approvedAt", ""),
-                                    ad.AF["sentForApprovalBy"]: [t["agent"]], ad.AF["teamMember"]: [t["agent"]]}} for t in a]
+                                    ad.AF["sentForApprovalBy"]: [t["agent"]], ad.AF["teamMember"]: t.get("teamMember", [t["agent"]])}} for t in a]
 patched, ledger = [], []
 ad.query_tasks = lambda formula, **k: recs
 ad.patch_task = lambda tid, fields: patched.append([tid, {k: v for k, v in fields.items()}])
@@ -335,6 +345,10 @@ print(json.dumps({"out": json.loads(buf.getvalue()), "patched": [[tid, f.get(ad.
     expect(r.out.trialSettled.map(x => x.task)).toEqual(['recInTrial']);
     expect(r.patched).toHaveLength(1);
     expect(r.patched[0][3]).toMatch(/TRIAL CHECKED: .*Nothing was sent: it was approved during the trial run, which ended 2026-10-02T11:00:00Z/);
+  });
+  it('settles a card the trial agent holds as Team Member, whoever sent it', () => {
+    const r = settle([{ id: 'recHeld', name: 'Draft with no lane marks', outcome: 'Approved as-is', agent: PROPERTY_TM, teamMember: [RENT_TM] }]);
+    expect(r.out.trialSettled.map(x => x.task)).toEqual(['recHeld']);
   });
   it('settles a RENT LATE card another agent submitted', () => {
     const r = settle([{ id: 'recE', name: 'RENT LATE: Unit 5, rent due 30 Sep (reminder)', outcome: 'Approved as-is', agent: PROPERTY_TM }]);

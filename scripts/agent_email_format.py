@@ -216,12 +216,19 @@ def parse_text(output):
         key, sep, val = line.partition(":")
         name = key.strip().upper()
         if sep and name in TEXT_HEADERS:
+            # One spelling, in capitals (review, 4 Oct 2026): the check below the headers looks for exactly
+            # this, so a "Text to:" accepted here could be moved into the email by an edit and not be seen.
+            if not line.strip().startswith(name + ":"):
+                raise EmailFormatError(f'write the text\'s lines exactly as "TEXT TO:" and "TEXT:", in capitals, '
+                                       f'not {key.strip()!r}')
             if name in found:
                 raise EmailFormatError(f"the card has more than one {name} line")
             found[name] = val.strip()
     for line in body:
-        # The exact block's spelling only, so an email that says "Text: ..." in passing is untouched.
-        if line.strip().startswith(("TEXT TO:", "TEXT:")):
+        # The block's own spelling, and a "text to:" line in any case (it carries the number). An email
+        # that says "Text: ..." in passing is untouched.
+        key, sep, _ = line.partition(":")
+        if line.strip().startswith(("TEXT TO:", "TEXT:")) or (sep and key.strip().upper() == "TEXT TO"):
             raise EmailFormatError("a TEXT line sits below the email's headers, so it would go out in the email; "
                                    "the TEXT TO and TEXT lines go above them")
     if not found:
@@ -457,7 +464,8 @@ TRIAL_STAMP = "TRIAL CHECKED"
 # THE TASK IS ON TRIAL TOO, WHOEVER HOLDS IT (independent review, 2 Oct 2026). A trial lane's task
 # that is re-routed, reassigned or resubmitted under another agent's id would otherwise become an
 # ordinary card that sends on approval. So a task carrying the lane's own marks stays on trial for
-# as long as its agent is listed above. Either mark is enough: a name can be edited and a Notes
+# as long as its agent is listed above. KEEP THE ENTRY AFTER THE CUT-OVER: TRIAL_ENDED reads these
+# marks to hold back a card approved during the trial (review, 4 Oct 2026). Either mark is enough: a name can be edited and a Notes
 # line can be lost. Kept identical to TASK_PREFIX and KEY_MARK in scripts/rent-check.py, and to
 # ASK_PREFIX in scripts/rent_new_tenant.py (lane B's tenant drafts carry the same key mark)
 # (tests/cash-flow-voids-agent.test.js, tests/rent-new-tenant.test.js).
@@ -515,6 +523,8 @@ def strip_trial_marks(text):
 # check, not a send, and stays one: the queue holds it back, `trial-settle` closes it as checked, and
 # the send doors refuse it. A card approved after the end is an ordinary card. A trial lane's marks
 # left in neither list fail tests/cash-flow-voids-agent.test.js, so the move cannot be half done.
+# The diary and the post pass no approval time on purpose: a trial card can never carry those shapes
+# (TRIAL_ACTING_SHAPE_RE refuses them at submit), and a Level A diary entry has no approval to date.
 TRIAL_ENDED = {}
 
 
