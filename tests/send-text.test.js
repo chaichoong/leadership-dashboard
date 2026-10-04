@@ -130,9 +130,9 @@ print(json.dumps(out))`);
     // Only the good revision was written.
     expect(r.patched).toEqual(['recX']);
     // One spelling, in capitals: "Text to:" is refused above the headers, at submit and at the send door ...
-    expect(r.mixedAbove).toMatch(/exactly as "TEXT TO:" and "TEXT:", in capitals, not 'Text to'/);
+    expect(r.mixedAbove).toMatch(/exactly as "TEXT TO:" and "TEXT:", in capitals, not 'Text to:'/);
     expect(r.mixedSubmit).toMatch(/in capitals/);
-    expect(r.spacedAbove).toMatch(/in capitals, not 'TEXT TO'/);
+    expect(r.spacedAbove).toMatch(/in capitals, not 'TEXT TO :'/);
     // ... and a "text to:" line below them, in any case, is refused rather than emailed with its number.
     expect(r.mixedBelow).toMatch(/TEXT line sits below the email's headers/);
   });

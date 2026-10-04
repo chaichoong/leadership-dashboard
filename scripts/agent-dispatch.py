@@ -3070,7 +3070,7 @@ def build_queue(args=None):
         # A TRIAL AGENT'S APPROVED CARD IS CHECKED, NEVER CARRIED OUT (2 Oct 2026). Handing it to a carry-out run
         # would have an agent try a send that send-email.py refuses, every 30 minutes, for ever. `trial-settle`
         # closes it in code with Kevin's verdict on the task. Listed under trialChecked, never hidden.
-        if t["outcome"] in APPROVED and trial_problem([t["agentId"]] + t["teamMemberIds"], t["name"], t["notes"],
+        if t["outcome"] in APPROVED and trial_problem(t["sentForApprovalByIds"] + t["teamMemberIds"], t["name"], t["notes"],
                                                       t["approvedAt"]):
             trial_checked.append(t)
             continue
@@ -4446,8 +4446,10 @@ def cmd_submit(args):
     tf_early = (get_task(args.task).get("fields", {}) or {})
     is_inbound = bool(tf_early.get(AF["inboundTask"]))
     # THE TASK IS ON TRIAL TOO (2 Oct 2026): a trial lane's task submitted under another agent's id
-    # is held to the same rule as the trial agent's own submit, checked above.
-    trial = trial or trial_problem([], tf_early.get(AF["name"], ""), tf_early.get(AF["notes"], ""))
+    # is held to the same rule as the trial agent's own submit, checked above. So is a task the trial
+    # agent holds as Team Member (review, 4 Oct 2026), as every send door reads it.
+    trial = trial or trial_problem(links(tf_early.get(AF["teamMember"])),
+                                   tf_early.get(AF["name"], ""), tf_early.get(AF["notes"], ""))
     if trial and TRIAL_ACTING_SHAPE_RE.search(output):
         sys.exit(f"ERROR: refusing to submit {args.task}: {trial}.\n"
                  "       This task belongs to a lane on trial, whoever submits it: only a draft email\n"
@@ -5306,7 +5308,7 @@ def cmd_outcome(args):
     # form is Kevin's to send. Its one door is `window`, which only `handover` reads: the robot
     # fills the form in a window he finishes. Read from agent_email_format.FORM_CARDS.
     holders = [t["agentId"]] + t["teamMemberIds"]
-    trial = trial_problem(holders, t["name"], t["notes"], t["approvedAt"])
+    trial = trial_problem(t["sentForApprovalByIds"] + holders, t["name"], t["notes"], t["approvedAt"])
     card = form_card(t["name"], t["notes"])
     print(json.dumps({
         "id": t["id"],
@@ -6960,7 +6962,11 @@ def trial_approved_tasks():
     out = []
     for rec in rows:
         t = task_view(rec)
-        if t["outcome"] in APPROVED and trial_problem([t["agentId"]] + t["teamMemberIds"], t["name"], t["notes"],
+        # The queue's own order (review, 4 Oct 2026): Kevin's answer to a DECIDE: card goes to the Task
+        # Manager, and an agent on its own go signal carries out its own cards, before any trial check.
+        if is_decide_card(t["agentOutput"]) or own_go_signal(t["agentId"]):
+            continue
+        if t["outcome"] in APPROVED and trial_problem(t["sentForApprovalByIds"] + t["teamMemberIds"], t["name"], t["notes"],
                                                       t["approvedAt"]) \
                 and not form_card(t["name"], t["notes"]):
             out.append(t)
@@ -6971,7 +6977,7 @@ def cmd_trial_settle(args):
     settled = []
     for t in trial_approved_tasks():
         stamp = note_line("trial-settle", f"{TRIAL_STAMP}: Kevin's verdict was '{t['outcome']}'. Nothing was sent: "
-                                          f"{trial_problem([t['agentId']] + t['teamMemberIds'], t['name'], t['notes'], t['approvedAt'])}.")
+                                          f"{trial_problem(t['sentForApprovalByIds'] + t['teamMemberIds'], t['name'], t['notes'], t['approvedAt'])}.")
         patch_task(t["id"], {AF["status"]: "Completed", AF["completion"]: now_iso(),
                              AF["notes"]: append_notes(t["notes"], stamp)})
         ledger_append(t["id"], "done")

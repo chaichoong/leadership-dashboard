@@ -231,7 +231,7 @@ for t in json.loads(sys.stdin.read()):
     if t.get("outcome"):
         f[AF["approvalOutcome"]] = {"name": t["outcome"]}
         f[AF["approvedAt"]] = t.get("approvedAt", "2026-10-02T10:00:00.000Z")
-        f[AF["sentForApprovalBy"]] = [t["agent"]]
+        f[AF["sentForApprovalBy"]] = t.get("sentBy", [t["agent"]])
     recs.append({"id": t["id"], "fields": f})
 m.query_tasks = lambda formula, **kw: recs
 m.fetch_role_roster = lambda: {}
@@ -265,10 +265,12 @@ print(json.dumps({"trialChecked": [x["id"] for x in q["trialChecked"]], "worklis
   it('reads the Team Member as send-email does: a card held by the trial agent but sent by another is checked, never handed out', () => {
     const r = queue([
       { id: 'recHeld', name: 'Draft with no lane marks', agent: PROPERTY_TM, teamMember: [RENT_TM], outcome: 'Approved as-is' },
+      // Every Sent For Approval By link, not only the first, as send-email.py reads them.
+      { id: 'recSecond', name: 'Another unmarked draft', agent: PROPERTY_TM, sentBy: [PROPERTY_TM, RENT_TM], teamMember: [PROPERTY_TM], outcome: 'Approved as-is' },
       { id: 'recOtherYes', name: 'COMPLIANCE: EICR renewal', agent: PROPERTY_TM, outcome: 'Approved as-is' },
     ]);
     // Handed out, it would be refused by send-email.py every 30 minutes for ever (review, 4 Oct 2026).
-    expect(r.trialChecked).toEqual(['recHeld']);
+    expect(r.trialChecked).toEqual(['recHeld', 'recSecond']);
     expect(Object.keys(r.worklist)).toEqual(['recOtherYes']);
   });
 
@@ -307,7 +309,7 @@ print(json.dumps({"trialChecked": [x["id"] for x in q["trialChecked"]], "worklis
 describe('5. trial-settle closes an approved trial card with the verdict, and nothing else', () => {
   const settle = (tasks, prelude = '') => py(`${prelude}
 recs = [{"id": t["id"], "fields": {ad.AF["name"]: t["name"], ad.AF["approvalOutcome"]: t["outcome"], ad.AF["notes"]: t.get("notes", ""),
-                                    ad.AF["approvedAt"]: t.get("approvedAt", ""),
+                                    ad.AF["approvedAt"]: t.get("approvedAt", ""), ad.AF["agentOutput"]: t.get("output", ""),
                                     ad.AF["sentForApprovalBy"]: [t["agent"]], ad.AF["teamMember"]: t.get("teamMember", [t["agent"]])}} for t in a]
 patched, ledger = [], []
 ad.query_tasks = lambda formula, **k: recs
@@ -349,6 +351,17 @@ print(json.dumps({"out": json.loads(buf.getvalue()), "patched": [[tid, f.get(ad.
   it('settles a card the trial agent holds as Team Member, whoever sent it', () => {
     const r = settle([{ id: 'recHeld', name: 'Draft with no lane marks', outcome: 'Approved as-is', agent: PROPERTY_TM, teamMember: [RENT_TM] }]);
     expect(r.out.trialSettled.map(x => x.task)).toEqual(['recHeld']);
+  });
+  it('never settles what the queue sends elsewhere first: Kevin\'s answer to a DECIDE card, or a card of an agent on its own go signal', () => {
+    const TASK_MANAGER = 'recAGENTTASKMGR01';
+    const CONTENT = 'recRcy1Edas6rGaaF';
+    const r = settle([
+      { id: 'recDecide', name: 'RENT LATE: Unit 9', outcome: 'Approved as-is', agent: TASK_MANAGER, teamMember: [RENT_TM],
+        output: 'DECIDE: keep chasing or write it off?\n\nOption A ...' },
+      { id: 'recOwnSignal', name: 'Episode 12', outcome: 'Approved as-is', agent: CONTENT, teamMember: [RENT_TM] },
+      { id: 'recPlain', name: 'RENT LATE: Unit 8', outcome: 'Approved as-is', agent: RENT_TM },
+    ]);
+    expect(r.out.trialSettled.map(x => x.task)).toEqual(['recPlain']);
   });
   it('settles a RENT LATE card another agent submitted', () => {
     const r = settle([{ id: 'recE', name: 'RENT LATE: Unit 5, rent due 30 Sep (reminder)', outcome: 'Approved as-is', agent: PROPERTY_TM }]);
@@ -397,6 +410,20 @@ except SystemExit as e:
     const r = py(`
 ad.require_role_agent_live = lambda rec, verb: None
 ad.get_task = lambda tid: {"id": tid, "fields": {ad.AF["name"]: "RENT LATE: Unit 9, rent due 30 Sep (reminder)", ad.AF["notes"]: "RENT CHECK KEY: recT:2026-09-30:1"}}
+path = os.path.join(tempfile.mkdtemp(), "out.md"); open(path, "w").write("PASS TO ROY: ask the tenant to pay\\n\\n**Carrying this out will involve:** Roy is told.")
+ad.plain_summary_problem = lambda *x: ""
+try:
+    ad.cmd_submit(argparse.Namespace(task="recTEST", agent="${PROPERTY_TM}", type="Admin", output_file=path, plain_task="x", plain_approve="y",
+                                     tier1=False, siblings=None, coverage=None, receipt=None, attach=None))
+    print(json.dumps({"refused": ""}))
+except SystemExit as e:
+    print(json.dumps({"refused": str(e)}))`);
+    expect(r.refused).toMatch(/This task belongs to a lane on trial, whoever submits it/);
+  });
+  it('a task the trial agent holds as Team Member is held to the same rule, whoever submits it', () => {
+    const r = py(`
+ad.require_role_agent_live = lambda rec, verb: None
+ad.get_task = lambda tid: {"id": tid, "fields": {ad.AF["name"]: "Unmarked task", ad.AF["notes"]: "", ad.AF["teamMember"]: ["${RENT_TM}"]}}
 path = os.path.join(tempfile.mkdtemp(), "out.md"); open(path, "w").write("PASS TO ROY: ask the tenant to pay\\n\\n**Carrying this out will involve:** Roy is told.")
 ad.plain_summary_problem = lambda *x: ""
 try:

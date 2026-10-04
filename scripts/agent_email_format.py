@@ -220,7 +220,7 @@ def parse_text(output):
             # this, so a "Text to:" accepted here could be moved into the email by an edit and not be seen.
             if not line.strip().startswith(name + ":"):
                 raise EmailFormatError(f'write the text\'s lines exactly as "TEXT TO:" and "TEXT:", in capitals, '
-                                       f'not {key.strip()!r}')
+                                       f'not {key.lstrip() + ":"!r}')
             if name in found:
                 raise EmailFormatError(f"the card has more than one {name} line")
             found[name] = val.strip()
