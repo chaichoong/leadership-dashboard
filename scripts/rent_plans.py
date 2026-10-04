@@ -30,6 +30,7 @@ row, never guessed: "unsent" is an approved plan whose email has not gone yet.
 import calendar
 import re
 from datetime import date, datetime, timedelta
+from zoneinfo import ZoneInfo
 
 import agent_email_format as aef
 
@@ -40,6 +41,10 @@ PLAN_MAX_DAYS = 70                # inside the rent check's 80-day look-back at 
 SENT_RE = re.compile(r"^\[(\d{1,2} \w{3} \d{4})(?: \d{2}:\d{2})? — send-email\] SENT: email to", re.M)
 MISSED_MARK = "RENT PLAN MISSED: "
 KEPT_MARK = "RENT PLAN KEPT: "
+SUPERSEDED_MARK = "RENT PLAN SUPERSEDED: "
+WAIT_LOUD_DAYS = 7                # a plan still waiting on bank data this long after its last promise is a problem
+LOOK_BACK_DAYS = 78               # the rent check reads matched payments 80 days back: older than this cannot be judged
+LONDON = ZoneInfo("Europe/London")
 APPROVED = ("Approved as-is", "Approved with minor edits")
 LIVE_STATES = ("open", "waiting", "missed", "kept")
 # Tasks fields by id (scripts/agent-dispatch.py AF; Tenancies and Inbound Sender as there).
@@ -68,14 +73,18 @@ def sent_on(notes):
 
 
 def created_on(rec):
+    """The London day the card was made (Airtable keeps UTC: 00:30 BST is the day before in UTC)."""
     try:
-        return datetime.fromisoformat(str(rec.get("createdTime") or "").replace("Z", "+00:00")).date()
+        made = datetime.fromisoformat(str(rec.get("createdTime") or "").replace("Z", "+00:00"))
     except ValueError:
         return None
+    return made.astimezone(LONDON).date() if made.tzinfo else made.date()
 
 
 def rent_dues(start, until, due_day):
     """The rent due dates after `start`, up to and including `until` (a day the month lacks is its last)."""
+    if isinstance(due_day, dict):                 # a single select arrives as {"name": "15"}
+        due_day = due_day.get("name")
     try:
         due_day = int(str(due_day or "0").strip() or 0)
     except ValueError:
@@ -87,14 +96,15 @@ def rent_dues(start, until, due_day):
         d = date(y, m, min(due_day, calendar.monthrange(y, m)[1]))
         if d > until:
             return out
-        if d > start:
+        if d >= start:                             # rent due on the plan's first day is the plan's too
             out.append(d)
         y, m = (y, m + 1) if m < 12 else (y + 1, 1)
 
 
-def state(rec, payments, day, tenancy=None, doubt=False):
+def state(rec, payments, day, tenancy=None, doubt=False, asof=None):
     """Where one plan card stands today. Pure: no reads, no writes. `tenancy` is {"rent", "dueDay"} when the
-    rent check knows it; `doubt` is True while the rent check cannot tell about the tenancy's money.
+    rent check knows it; `doubt` is True while the rent check cannot tell about the tenancy's money; `asof`
+    is the day this tenancy's bank feed runs to (a promise is judged as at that day, never the calendar's).
 
     {"id", "name", "tenancy", "state": "not-a-plan" | "unsent" | "bad" | "open" | "waiting" | "missed" |
     "kept" | "over", "why", ...}"""
@@ -123,14 +133,15 @@ def state(rec, payments, day, tenancy=None, doubt=False):
     if not sent:
         out.update(state="unsent", why="approved, but its email has not gone, so nothing is agreed yet")
         return out
-    if MISSED_MARK in notes or KEPT_MARK in notes:
+    out["sent"], made = sent.isoformat(), created_on(rec)
+    out["madeAt"] = str(rec.get("createdTime") or "")        # the exact moment: two cards a day are told apart
+    if MISSED_MARK in notes or KEPT_MARK in notes or SUPERSEDED_MARK in notes:
         out["state"] = "over"
         return out
     # Money counts from the plan's email, or from a few days before the first promise when Kevin approved it
     # late (a tenant who paid on his word before the email went has kept it), never from before the card
     # itself existed: money already counted when the plan was drafted is not the plan's.
     start = min(sent, promises[0][0] - timedelta(days=EARLY_PAY_DAYS))
-    made = created_on(rec)
     if made:
         start = max(start, made)
     out["start"] = start.isoformat()
@@ -138,11 +149,15 @@ def state(rec, payments, day, tenancy=None, doubt=False):
     if (end - start).days > PLAN_MAX_DAYS:
         out.update(state="bad", why=f"it runs past {PLAN_MAX_DAYS} days from {start.isoformat()}, longer than the rent check can see")
         return out
+    if (day - start).days > LOOK_BACK_DAYS:
+        out.update(state="bad", why=f"it began {start.isoformat()}, before the payments the rent check reads, so it cannot be judged")
+        return out
+    seen = min(asof, day) if asof else day
     rent = float((tenancy or {}).get("rent") or 0)
     dues = rent_dues(start, end, (tenancy or {}).get("dueDay")) if rent else []
     grace = timedelta(days=GRACE_DAYS)
     for check in sorted({d + grace for d, _ in promises} | {d + grace for d in dues}):
-        if day < check:
+        if seen < check:
             out["state"] = "open"
             return out
         promised = sum(a for d, a in promises if d + grace <= check)
@@ -151,7 +166,10 @@ def state(rec, payments, day, tenancy=None, doubt=False):
         paid = sum(p["amount"] for p in payments if start <= p["day"] <= check)
         if paid + 0.005 < owed:
             if doubt:
-                out.update(state="waiting", why="the rent check cannot tell about this tenancy's money today")
+                stuck = (day - end).days > WAIT_LOUD_DAYS
+                out.update(state="waiting", stuck=stuck,
+                           why=("still waiting on bank data " + str((day - end).days) + " days after its last promise"
+                                if stuck else "the rent check cannot tell about this tenancy's money today"))
                 return out
             out.update(state="missed", missedOn=(check - grace).isoformat(), owed=round(owed, 2), paid=round(paid, 2))
             return out
@@ -176,15 +194,29 @@ def read_contacts(rc, tenant_ids):
     return out
 
 
-def read(rc, data, day, res):
-    """Every plan card's state today, from one read of the cards, the payments the rent check already holds,
-    and its verdict per tenancy. Returns {"plans": [...], "onTrack": {tenancy ids}, "failed": ""}."""
+def chase_stop(rc, data, tid):
+    """Why lane A would never chase this tenancy (and so neither does a missed promise), or ""."""
+    f = next((r.get("fields") or {} for r in data["tenancies"] if r["id"] == tid), {})
+    tenants = {r["id"]: r.get("fields") or {} for r in data.get("tenants") or []}
+    if rc.sel(f.get(rc.TY["payStatus"])) not in (rc.IN_PAYMENT, rc.CFV):
+        return "its payment status is not one the rent check chases"
+    if rc.tenant_type(f, tenants) == rc.AGENT_MANAGED:
+        return "it is agent-managed"
+    if set(data.get("noChase") or ()) & set(f.get(rc.TY["tenants"]) or []):
+        return "the tenant is on the do-not-chase list"
+    return ""
+
+
+def read(rc, data, day, res, now=None):
+    """Every plan card's state today, from one read of the cards, the payments and bank feeds the rent check
+    already holds, and its verdict per tenancy. Returns {"plans": [...], "onTrack": {tenancy ids}, "failed": ""}."""
     out = {"plans": [], "onTrack": set(), "failed": ""}
     try:
         cards = read_cards(rc)
         pay = rc.payments_by_tenancy(data["tx"])
         lanes = res.get("lanes") or {}
-        feed_doubt = bool((res.get("feed") or {}).get("blocked"))
+        # Each tenancy's own bank feed, as the rent check judges it: the day it runs to, and its faults.
+        feed = rc.feed_state(data, pay, now) if now is not None else None
         tys = {r["id"]: r.get("fields") or {} for r in data["tenancies"]}
         first = [(rec, state(rec, [], day)) for rec in cards]
         wanted = {st["tenancy"] for _, st in first if st["tenancy"] in tys}
@@ -206,17 +238,24 @@ def read(rc, data, day, res):
                 out["plans"].append(st)
                 continue
             ty = tys[tid]
-            out["plans"].append(state(rec, pay.get(tid, []), day,
-                                      {"rent": ty.get(rc.TY["rent"]), "dueDay": ty.get(rc.TY["dueDay"])},
-                                      doubt=feed_doubt or lanes.get(tid) == "unknown"))
-        # Two plans for one tenancy: the newest counts.
+            asof, faults = rc.bank_view(feed, pay.get(tid, [])) if feed else (None, [])
+            st = state(rec, pay.get(tid, []), day,
+                       {"rent": ty.get(rc.TY["rent"]), "dueDay": ty.get(rc.TY["dueDay"])},
+                       doubt=bool(faults) or (feed is not None and asof is None) or lanes.get(tid) == "unknown",
+                       asof=asof)
+            if st["state"] == "missed":
+                st["noChase"] = chase_stop(rc, data, tid)
+            out["plans"].append(st)
+        # Two plans for one tenancy: the newest SENT counts, for good. One already over still outranks an older
+        # card, so an older plan never wakes when the newer one ends (review, 4 Oct 2026).
         newest = {}
         for p in out["plans"]:
-            if p["state"] in LIVE_STATES and (p.get("start", ""), p["id"]) >= newest.get(p["tenancy"], ("", "")):
-                newest[p["tenancy"]] = (p.get("start", ""), p["id"])
+            if p.get("sent") and (p["sent"], p.get("madeAt", ""), p["id"]) >= newest.get(p["tenancy"], ("", "", "")):
+                newest[p["tenancy"]] = (p["sent"], p.get("madeAt", ""), p["id"])
         for p in out["plans"]:
-            if p["state"] in LIVE_STATES and newest[p["tenancy"]][1] != p["id"]:
-                p.update(state="superseded", why=f"card {newest[p['tenancy']][1]} is the newer plan for this tenancy")
+            if p["state"] in LIVE_STATES and newest[p["tenancy"]][2] != p["id"]:
+                p.update(state="superseded", by=newest[p["tenancy"]][2],
+                         why=f"card {newest[p['tenancy']][2]} is the newer plan for this tenancy")
         out["onTrack"] = {p["tenancy"] for p in out["plans"] if p["state"] in ("open", "waiting", "missed")}
     except Exception as exc:                          # noqa: BLE001 — said on the row; lane A still runs
         out["failed"] = f"payment plans could not be read: {str(exc)[:200]}"
@@ -264,11 +303,12 @@ def act(rc, plans, data, day, writes, on, res):
     """Raise a RENT LATE task for each newly missed promise and mark each kept plan, on a real run with the
     agent switched on. Never stops the rent check: a failure is said on the row and in the exit code."""
     out = {"on": bool(on), "agreed": [], "waiting": [], "unsent": [], "missed": [], "kept": [], "problems": [],
-           "failed": plans.get("failed", "")}
+           "stuck": False, "failed": plans.get("failed", "")}
     for p in plans.get("plans", []):
-        if p["state"] in ("bad", "superseded"):
+        if p["state"] == "bad" or (p["state"] == "waiting" and p.get("stuck")):
             out["problems"].append(f"card {p['id']}: {p['why']}")
-        elif p["state"] in ("open", "waiting", "unsent"):
+            out["stuck"] = out["stuck"] or p["state"] == "waiting"
+        if p["state"] in ("open", "waiting", "unsent"):
             out[{"open": "agreed", "waiting": "waiting", "unsent": "unsent"}[p["state"]]].append(p["id"])
     if out["failed"] or not on or not writes:
         out["missed"] = [p["id"] for p in plans.get("plans", []) if p["state"] == "missed"]
@@ -278,7 +318,13 @@ def act(rc, plans, data, day, writes, on, res):
     existing = None
     for p in plans["plans"]:
         try:
-            if p["state"] == "missed":
+            if p["state"] == "superseded":
+                append_note(rc, p["id"], f"{SUPERSEDED_MARK}card {p['by']} replaced this plan ({day.isoformat()})")
+            elif p["state"] == "missed" and p.get("noChase"):
+                append_note(rc, p["id"], f"{MISSED_MARK}{p['missedOn']}: £{p['owed']:,.2f} owed by then, £{p['paid']:,.2f} "
+                                         f"received; not chased, because {p['noChase']} ({day.isoformat()})")
+                out["missed"].append(p["id"])
+            elif p["state"] == "missed":
                 if existing is None:
                     existing = rc.read_task_state()["keys"]
                 place, tenants = place_and_tenants(rc, data, p["tenancy"])
@@ -288,9 +334,11 @@ def act(rc, plans, data, day, writes, on, res):
                 # sees that stage raised and never adds a twin chase for the same money.
                 row = next((r for r in res.get("tenancies") or [] if r["id"] == p["tenancy"] and r.get("owed")), None)
                 if row:
+                    # The next stage up, whatever its gap: this task IS that stage, so lane A never raises a twin.
                     cycle = f"{row['id']}:{row['owed']}"
-                    stage = rc.next_stage(cycle, existing, day)
-                    if stage:
+                    raised = [n for n in rc.STAGES if f"{cycle}:{n}" in existing]
+                    stage = max(raised) + 1 if raised else 1
+                    if stage <= max(rc.STAGES):
                         item["alsoKeys"].append(f"{cycle}:{stage}")
                 if item["key"] not in existing:
                     rc.raise_task(item, day)

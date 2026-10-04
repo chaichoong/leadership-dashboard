@@ -458,6 +458,25 @@ print(json.dumps({"code": code, "rows": len(rows), "hasLights": "lights" in rows
     expect(r).toEqual({ code: 0, rows: 1, hasLights: false, payloadKeys: ['asAt', 'briefLine', 'worst'], hist: 20 });
   });
 
+  it('a payment plan stuck waiting on bank data turns the row Blocked, and says why', () => {
+    const r = py(`
+rows = []
+today = rc.today_london()
+rc.load = lambda day: world([tenancy("rec%02d" % i, 1, 500) for i in range(20)], [paid("rec%02d" % i, today.isoformat(), 500) for i in range(20)],
+                            day=today, feed=datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.000Z"))
+rc.write_row = lambda status, text, payload, now: rows.append([status, text])
+rc.append_history = lambda *a, **k: None
+rc.read_task_state = lambda: {"on": True, "status": "Built", "keys": {}}
+rc.rent_plans.read = lambda *a, **k: {"plans": [{"id": "recPLANSTUCK0001", "tenancy": "rec00", "state": "waiting", "stuck": True,
+                                                 "why": "still waiting on bank data 9 days after its last promise"}], "onTrack": {"rec00"}, "failed": ""}
+with contextlib.redirect_stdout(io.StringIO()):
+    code = rc.main(["run"])
+print(json.dumps({"code": code, "status": rows[0][0], "line": next(l for l in rows[0][1].splitlines() if l.startswith("Payment plans"))}))`);
+    expect(r.code).toBe(0);
+    expect(r.status).toBe('Blocked');
+    expect(r.line).toMatch(/Check: card recPLANSTUCK0001: still waiting on bank data 9 days after its last promise/);
+  });
+
   it('a broken read writes a Failed row that Home reads as today, and exits 1', () => {
     const r = py(`
 rows = []

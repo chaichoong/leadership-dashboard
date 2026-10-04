@@ -952,7 +952,7 @@ def main(argv=None):
         print(json.dumps({"failed": why}, indent=2))
         return 1
     # Payment plans first, read only: a tenancy on an agreed plan that is on track is not chased by lane A.
-    plans = rent_plans.read(_Here(), data, day, res)
+    plans = rent_plans.read(_Here(), data, day, res, now)
     res["tasks"] = lane_a(res, data["tenancies"], day, writes, plans["onTrack"])
     # The agent's switch is lane A's read. With no status read back, lane B is told so, not "off".
     switch = res["tasks"]["on"] if res["tasks"]["status"] else None
@@ -964,7 +964,7 @@ def main(argv=None):
     if writes:
         public = {k: v for k, v in res.items() if k not in ("lights", "lanes")}
         # Blocked only when the bank data hid a verdict: a stale feed with every rent already seen hides nothing.
-        status = "Failed" if failed else ("Blocked" if res["bankBlocked"] else "Worked")
+        status = "Failed" if failed else ("Blocked" if res["bankBlocked"] or res["plans"].get("stuck") else "Worked")
         write_row(status, "\n".join([detail(res), lane_a_line(res["tasks"]), lane_b_rules.lane_b_line(res["setup"]),
                                       agent_late_line(res["agentLate"]), rent_plans.line(res["plans"])]), public, now)
         append_history(res, now)

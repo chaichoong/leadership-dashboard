@@ -250,11 +250,14 @@ def parse_plan(output):
     return {"tenancy": owners[0], "promises": sorted(found)}
 
 
-def text_card(name="", notes="", output=""):
+def text_card(name="", notes="", output="", holders=()):
     """True for a card scripts/send-text.py may text from: a rent lane's own tenant card, by its name or
-    its key line, or a reply card that carries a payment plan (a tenant's reply has neither)."""
+    its key line, or a reply card that carries a payment plan held by the rent lane's own agent (a tenant's
+    reply has neither mark)."""
     if str(name or "").startswith(TEXT_CARD_MARKS["prefix"]) or TEXT_CARD_MARKS["note"] in str(notes or ""):
         return True
+    if not any(h in TRIAL_TASK_MARKS for h in holders or ()):
+        return False
     try:
         return bool(parse_plan(output))
     except EmailFormatError:

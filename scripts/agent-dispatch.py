@@ -496,7 +496,7 @@ RENT_REPLY_FORMULA = ("AND(OR(LEFT({Task Name}, 11)='RENT LATE: ', LEFT({Task Na
                       "NOT({Status}='Completed'), NOT({Status}='Cancelled'))")
 RUNNING_PLAN_FORMULA = ("AND(FIND('PLAN FOR: rec', {Agent Output}&''), LEN({Approval Outcome}&'')>0, "
                         "FIND('— send-email] SENT: email to', {Notes}&''), NOT(FIND('RENT PLAN MISSED: ', {Notes}&'')), "
-                        "NOT(FIND('RENT PLAN KEPT: ', {Notes}&'')))")
+                        "NOT(FIND('RENT PLAN KEPT: ', {Notes}&'')), NOT(FIND('RENT PLAN SUPERSEDED: ', {Notes}&'')))")
 TASK_TENANTS = "fld6ZcfEogJmeQj2c"        # Tasks: Tenants link (scripts/rent-check.py TK["tenants"])
 TENANTS_TABLE = "tblX4elTuu01gwBYh"
 TENANCIES_TABLE, TENANCY_TENANTS = "tblN51a88qTDB6iMH", "fld1i5bDoHL3B6rUf"
