@@ -59,6 +59,7 @@ Exit:   0 clean · 1 violation · 2 cannot verify (treat as a violation)
 import argparse
 import json
 import os
+import re
 import sys
 from datetime import datetime, timedelta
 
@@ -300,7 +301,10 @@ def slot_attendance(ran, schedule, window_hours, ref=None, finished=None):
 # the report says the allowance ran out rather than that the job broke.
 SLOT_LOG_DIR = os.environ.get(
     "SLOT_RUNS_LOG_DIR", os.path.join(HOME, "knowledge-os/logs"))
-USAGE_CAP_MARKERS = ("You've hit your limit", "You\u2019ve hit your limit")
+# allowance.LIMIT_PATTERN, word for word: "hit your limit" and, from Oct 2026, "hit your weekly
+# limit", only where the CLI prints it (line start, or after "result":" in its JSON), never prose.
+USAGE_CAP_RE = re.compile(r"(?:^|\"result\":\")[ \t]*You['\u2019]ve hit your "
+                          r"(?:(?!(?:credit|spending|card|overdraft|borrowing)\b)[\w-]+[ \t]+){0,2}limit\b", re.I | re.M)
 # Since PR #405 (14 Sep 2026) a slot runner that finds the allowance already out
 # writes `===== done rc=0 (PAUSED: ...)` and exits 0 without starting Claude.
 # Exit 0 is not work (finding 20260914-fix-session-529): estate-status.py reads
@@ -339,7 +343,7 @@ def death_causes(job, exits):
     tail = _run_tail(job, exits)
     for i in failed:
         block = tail[i] if tail else ""
-        if any(m in block for m in USAGE_CAP_MARKERS):
+        if USAGE_CAP_RE.search(block):
             cause = "usage-cap"
         elif tail is None:
             cause = "exit %s (runs.log unreadable)" % exits[i]

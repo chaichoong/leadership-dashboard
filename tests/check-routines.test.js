@@ -540,6 +540,20 @@ describe('a slot that died is not a slot that ran', () => {
     expect(res.missed_slot_runs).toMatch(/2 died: the AI allowance ran out x2/);
   });
 
+  // 4 Oct 2026: from Saturday 16:30 to Sunday 19:00 the CLI printed "You've hit your
+  // WEEKLY limit". The old exact-phrase marker missed it, so every death read as a
+  // plain "exit 1" and the report never said the allowance ran out.
+  it("BACK-TEST: the weekly wording is counted as the allowance too", () => {
+    slotSchedule();
+    const WEEKLY = CAP.replace("hit your limit", 'hit your weekly limit').replace('resets 7pm', 'resets Oct 4 at 7pm');
+    runsLog(['old history', OK, WEEKLY, WEEKLY.replace("You've", 'You’ve')]);
+    writeEvents(runs([0, 1, 1]));
+    const { code, res } = guard();
+    expect(code).toBe(0);
+    expect(res.slot_attendance['task-manager'].causes).toEqual({ 'usage-cap': 2 });
+    expect(res.missed_slot_runs).toMatch(/2 died: the AI allowance ran out x2/);
+  });
+
   // Finding 20260914-fix-session-529: since PR #405 a runner that finds the
   // allowance out writes `done rc=0 (PAUSED: ...)` and exits 0 without Claude.
   const PAUSED = '===== task-manager run [15:00 slot] =====\nPAUSED: allowance out\n===== done rc=0 (PAUSED: the Claude allowance is out; queued to re-run at reset) Mon =====';
