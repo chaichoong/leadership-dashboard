@@ -651,6 +651,7 @@ print(json.dumps({
   "short": rp.state(c, P(("2026-10-10", 250), ("2026-10-20", 500)), date(2026, 10, 22), t),
   "slack": rp.state(c, P(("2026-10-10", 249.50), ("2026-10-20", 750)), date(2026, 10, 22), t)["state"],
   "prepaid": rp.state(c, P(("2026-10-06", 1000)), date(2026, 10, 8), t)["state"],
+  "prepaidEnd": rp.state(c, P(("2026-10-06", 1000)), date(2026, 10, 22), t)["state"],
   "slackSame": rp.PLAN_SLACK == rc.SHORT_SLACK,
 }))`);
     expect(r.day17).toBe('open');
@@ -658,9 +659,43 @@ print(json.dumps({
     expect(r.short).toMatchObject({ state: 'missed', missedOn: '2026-10-20', owed: 1000, paid: 750 });
     // Within the rent check's own £1 slack: paid.
     expect(r.slack).toBe('kept');
-    // Everything paid ahead: kept at once.
-    expect(r.prepaid).toBe('kept');
+    // Everything paid ahead: on track for the plan's whole length (lane A stays paused), kept at its end.
+    expect(r.prepaid).toBe('open');
+    expect(r.prepaidEnd).toBe('kept');
     expect(r.slackSame).toBe(true);
+  });
+});
+
+describe('the fifth review\'s cases (5 Oct 2026)', () => {
+  const H5 = `
+trial_ended()
+def sent(day): return f"[{day} 10:00 — send-email] SENT: email to sam@example.com"
+`;
+  it('next month\'s rent paid early inside the last window is never plan money', () => {
+    const r = py(H5 + `
+# Rent £500 on the 1st; card made and sent 5 Oct; promises 15 Oct £150 and 30 Oct £150; Universal Credit's
+# November rent lands 28 Oct.
+c = card(out=output(plan=(("2026-10-15", 150), ("2026-10-30", 150))), notes=sent("05 Oct 2026"), created="2026-10-05T09:00:00.000Z")
+print(json.dumps(rp.state(c, pays(("2026-10-15", 150), ("2026-10-28", 500)), date(2026, 11, 1), {"rent": 500, "dueDay": "1"})))`);
+    expect(r).toMatchObject({ state: 'missed', missedOn: '2026-10-30', owed: 300, paid: 150 });
+  });
+
+  it('money already in meets a promise even while the feed is stale: the plan is open, not waiting', () => {
+    const r = py(H5 + `
+# 10 Oct £100 and 24 Oct £300; he paid the £100 on 10 Oct; the feed has been stale since 11 Oct; today 20 Oct.
+c = card(notes=sent("05 Oct 2026"), created="2026-10-05T09:00:00.000Z")
+print(json.dumps(rp.state(c, pays(("2026-10-10", 100)), date(2026, 10, 20), None, doubt=True, asof=date(2026, 10, 11))["state"]))`);
+    expect(r).toBe('open');
+  });
+
+  it('money paid after the card was drafted, before its email went, is the plan\'s', () => {
+    const r = py(H5 + `
+# Rent £500 on the 6th; card made 2 Oct, sent 5 Oct; promises 12 Oct £650 (with the rent) and 26 Oct £150.
+c = card(out=output(plan=(("2026-10-12", 650), ("2026-10-26", 150))), notes=sent("05 Oct 2026"), created="2026-10-02T09:00:00.000Z")
+t = {"rent": 500, "dueDay": "6"}
+P = pays(("2026-10-03", 500), ("2026-10-12", 150), ("2026-10-26", 150))
+print(json.dumps([rp.state(c, P, date(2026, 10, 14), t)["state"], rp.state(c, P, date(2026, 10, 28), t)["state"]]))`);
+    expect(r).toEqual(['open', 'kept']);
   });
 });
 

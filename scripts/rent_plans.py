@@ -140,12 +140,11 @@ def state(rec, payments, day, tenancy=None, doubt=False, asof=None):
     if MISSED_MARK in notes or KEPT_MARK in notes or SUPERSEDED_MARK in notes:
         out["state"] = "over"
         return out
-    # Money counts from the plan's email, or from a few days before the first promise when Kevin approved it
-    # late (a tenant who paid on his word before the email went has kept it), never from before the card
-    # itself existed: money already counted when the plan was drafted is not the plan's.
-    start = min(sent, promises[0][0] - timedelta(days=EARLY_PAY_DAYS))
-    if made:
-        start = max(start, made)
+    # Money counts from the day the card was drafted: the agent wrote the promises against what he owed then,
+    # so anything paid after it (before the email went, or on his word while Kevin was approving) is the
+    # plan's, and anything before it was already netted off (reviews, 4-5 Oct 2026). A card with no creation
+    # time (an old record) counts from its email, or a few days before its first promise.
+    start = made or min(sent, promises[0][0] - timedelta(days=EARLY_PAY_DAYS))
     out["start"] = start.isoformat()
     end = promises[-1][0]
     if (end - start).days > PLAN_MAX_DAYS:
@@ -162,6 +161,13 @@ def state(rec, payments, day, tenancy=None, doubt=False, asof=None):
     dues = {d: max(0.0, rent - sum(p["amount"] for p in payments if d - early <= p["day"] < start))
             for d in (rent_dues(start, end, (tenancy or {}).get("dueDay")) if rent else [])}
     grace = timedelta(days=GRACE_DAYS)
+    # Money the rent check gives to the first rent AFTER the plan (paid in its early window, often Universal
+    # Credit landing days ahead) is that rent's, never the plan's: counted twice, it would mark unpaid arrears
+    # KEPT while lane A credits the same money to next month (review, 5 Oct 2026).
+    after = rent_dues(end, end + timedelta(days=62), (tenancy or {}).get("dueDay")) if rent else []
+    after = [d for d in after if d > end][:1]
+    cut = (after[0] - early) if after else None
+    payments = [p for p in payments if cut is None or p["day"] < cut]
 
     def waiting(check):
         late = (day - (check - grace)).days
@@ -190,7 +196,9 @@ def state(rec, payments, day, tenancy=None, doubt=False, asof=None):
             return waiting(check)
         out.update(state="missed", missedOn=when.isoformat(), owed=round(owed, 2), paid=round(paid, 2))
         return out
-    out["state"] = "kept"
+    # Every promise met. KEPT only once the last promise's date has passed: a plan paid ahead stays open (and
+    # lane A stays paused) for its whole length, so rent he prepaid inside it is never chased mid-plan.
+    out["state"] = "kept" if day >= end + grace else "open"
     return out
 
 
