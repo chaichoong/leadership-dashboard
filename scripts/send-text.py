@@ -23,7 +23,9 @@ Agent Output of an approved Correspondence task. It refuses, in this order:
   * a number that is not a UK mobile, or is not the Contact Number of a tenant linked to the task;
   * a card already texted, or one whose send may have gone: the ledger on this Mac AND the SENT stamp on
     the task itself (a lost ledger or another Mac never sends twice);
-  * a GoHighLevel contact whose own phone is not the approved number.
+  * a GoHighLevel contact whose own phone is not the approved number;
+  * no Agile Lets sending number on file (~/.config/od/agile_lets_sms_number): the text never goes from
+    whatever number GoHighLevel would pick by default.
 
 `send TASKID --dry-run` checks everything but the switch and the approval, finds the tenant's contact
 in GoHighLevel (read only) and sends nothing. `lookup --tenant TENANTID` finds one tenant's contact,
@@ -61,6 +63,9 @@ SENT_STAMP = "— send-text] SENT:"
 CONFIG = os.path.expanduser("~/.config/od")
 SWITCH = os.path.join(CONFIG, "text-sending-on")
 PAT_PATH, GHL_KEY_PATH, GHL_LOCATION_PATH = (os.path.join(CONFIG, f) for f in ("airtable_pat", "ghl_api_key", "ghl_location_id"))
+# The Agile Lets number every text goes from, named, never left to the location's default (review, 4 Oct
+# 2026): a cut-over prerequisite, read from the location's own numbers and written here then.
+FROM_NUMBER_PATH = os.path.join(CONFIG, "agile_lets_sms_number")
 STATE_DIR = os.path.expanduser("~/knowledge-os/logs/agent-dispatch")
 LEDGER = os.path.join(STATE_DIR, "sent-text.jsonl")
 GHL = "https://services.leadconnectorhq.com"
@@ -227,10 +232,14 @@ def _cmd_send(args):
     if not on and not args.dry_run:
         sys.exit("REFUSED: text sending is switched off. It is switched on only at the cut-over, by Kevin's decision "
                  f"({SWITCH}).")
+    from_number = uk_mobile(open(FROM_NUMBER_PATH).read()) if os.path.exists(FROM_NUMBER_PATH) else ""
+    if not from_number and not args.dry_run:
+        sys.exit(f"REFUSED: no Agile Lets sending number is on file ({FROM_NUMBER_PATH}), so nothing is sent.")
     f, number, message, trial, outcome = load_card(args.task, args.dry_run)
     contact = find_contact(number)
     if args.dry_run:
         print(json.dumps({"dryRun": True, "task": args.task, "switchedOn": on, "trial": trial or None,
+                          "fromNumberSet": bool(from_number),
                           "approvalOutcome": outcome or "(not yet approved)", "contactFound": bool(contact),
                           "numberEnds": number[-3:], "chars": len(message)}, indent=2))
         return 0
@@ -246,7 +255,8 @@ def _cmd_send(args):
             sys.exit(f"ERROR: task {args.task}: GoHighLevel did not return a contact for the number; nothing sent.")
     ledger_append({"task": args.task, "ts": now_iso(), "event": "intent", "numberEnds": number[-3:], "chars": len(message)})
     try:
-        sent = ghl("POST", "/conversations/messages", {"type": "SMS", "contactId": contact, "message": message})
+        sent = ghl("POST", "/conversations/messages", {"type": "SMS", "contactId": contact, "message": message,
+                                                       "fromNumber": from_number})
     except SystemExit as exc:
         # A refusal GoHighLevel answers with (4xx) left nothing; anything else may have gone.
         error = str(exc)[:300]

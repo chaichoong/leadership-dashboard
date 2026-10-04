@@ -93,8 +93,8 @@ from datetime import datetime, timedelta, timezone
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from adobe_audit import audit_problem  # noqa: E402
 from approval_evidence import approval_evidence_problem  # noqa: E402
-from agent_email_format import (
-    TRIAL_STAMP,  # noqa: E402
+from agent_email_format import (  # noqa: E402
+    TRIAL_STAMP,
     EmailFormatError,
     parse_output as parse_email_output,
     BUSINESS_SENDER,

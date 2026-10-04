@@ -826,6 +826,7 @@ def agent_late(res, tenancies, day, writes, on):
     out = {"on": on, "raised": [], "planned": [], "problems": [], "failed": ""}
     if not on:
         return out
+    fails = []
     try:
         existing = read_agent_late()
         plan = agent_late_plan(res, tenancies, existing, day)
@@ -838,8 +839,11 @@ def agent_late(res, tenancies, day, writes, on):
                 try:
                     if lane_b_rules.cut_off(lane_b_rules.notify_roy(t["id"], ad.ROY_EMAIL)):
                         out["problems"].append(f"the email of task {t['id']} to Roy was cut off part way and is not sent twice")
-                except Exception as exc:              # noqa: BLE001 — said on the row
-                    out["problems"].append(f"task {t['id']} could not be emailed to Roy: {str(exc)[:120]}")
+                except Exception as exc:              # noqa: BLE001 — said on the row; a failed email turns the run red
+                    if "REFUSED" in str(exc):
+                        out["problems"].append(f"task {t['id']} was refused by the email gate: {str(exc)[:120]}")
+                    else:
+                        fails.append(f"task {t['id']} could not be emailed to Roy: {str(exc)[:120]}")
         for item in plan:
             fields = {TK["name"]: item["name"], TK["status"]: "Today", TK["due"]: day.isoformat(),
                       TK["description"]: item["description"], TK["notes"]: AGENT_LATE_MARK + item["key"],
@@ -852,9 +856,10 @@ def agent_late(res, tenancies, day, writes, on):
             try:
                 lane_b_rules.notify_roy(tid, ad.ROY_EMAIL)
             except Exception as exc:                  # noqa: BLE001 — the task stands; the next run offers it again
-                out["problems"].append(f"task {tid} was created but its email to Roy failed: {str(exc)[:120]}")
+                fails.append(f"task {tid} was created but its email to Roy failed (offered again next run): {str(exc)[:120]}")
     except Exception as exc:                          # noqa: BLE001
-        out["failed"] = str(exc)[:300]
+        fails.append(str(exc)[:300])
+    out["failed"] = "; ".join(fails)[:600]
     return out
 
 

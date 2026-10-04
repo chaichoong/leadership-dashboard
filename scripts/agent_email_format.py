@@ -205,6 +205,11 @@ def parse_text(output):
     # The headers end at the first line that is exactly "---", so a "---" inside the TEXT line is seen.
     cut = next((i for i, line in enumerate(lines) if line.strip() == "---"), None)
     head, body = (lines[:cut], lines[cut + 1:]) if cut is not None else ([], lines)
+    # The email parser ends the headers at the first "---" ANYWHERE: a header holding one would cut the
+    # email there and push the lines after it, the text included, into the body (review, 4 Oct 2026).
+    for line in head:
+        if "---" in line:
+            raise EmailFormatError(f'a header line contains "---", which would cut the email\'s headers there: {line.strip()[:60]!r}')
     found = {}
     for line in head:
         key, sep, val = line.partition(":")
@@ -224,8 +229,6 @@ def parse_text(output):
         raise EmailFormatError("a text needs both a TEXT TO line and a TEXT line")
     if len(found["TEXT"]) > TEXT_MAX:
         raise EmailFormatError(f"the TEXT is {len(found['TEXT'])} characters; the most is {TEXT_MAX}")
-    if "---" in found["TEXT"] or "---" in found["TEXT TO"]:
-        raise EmailFormatError('the TEXT may not contain "---", which ends the email\'s headers')
     return found["TEXT TO"], found["TEXT"]
 
 

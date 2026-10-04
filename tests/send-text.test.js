@@ -21,7 +21,7 @@ SCRATCH = tempfile.mkdtemp()
 st.STATE_DIR = SCRATCH
 st.LEDGER = os.path.join(SCRATCH, "sent-text.jsonl")
 st.SWITCH = os.path.join(SCRATCH, "text-sending-on")
-for name, value in (("GHL_KEY_PATH", "k"), ("GHL_LOCATION_PATH", "locTest")):
+for name, value in (("GHL_KEY_PATH", "k"), ("GHL_LOCATION_PATH", "locTest"), ("FROM_NUMBER_PATH", "07700 900555")):
     path = os.path.join(SCRATCH, name)
     open(path, "w").write(value)
     setattr(st, name, path)
@@ -158,11 +158,14 @@ after5 = run(card())
 os.remove(st.LEDGER)
 wrongPhone = run(card(), contact_phone="+447700900999")
 madeWrong = run(card(), contact="", contact_phone="+447700900999")
-print(json.dumps({"wrongPhone": wrongPhone.get("refused", ""), "wrongPhoneSends": len(sends(wrongPhone)),
+os.remove(st.FROM_NUMBER_PATH)
+noFrom = run(card())
+print(json.dumps({"noFrom": [noFrom.get("refused", ""), len(sends(noFrom))], "wrongPhone": wrongPhone.get("refused", ""), "wrongPhoneSends": len(sends(wrongPhone)),
                   "madeWrong": madeWrong.get("refused", ""), "madeWrongSends": len(sends(madeWrong)),"sent": sends(first), "ok": first["ok"], "again": again.get("refused", ""), "ledger": ledger,
                   "upsert": [c[2] for c in new["calls"] if c[0] == "ghl"], "retry": len(sends(retry)), "after5": after5.get("refused", "")}))`);
     expect(r.sent).toHaveLength(1);
-    expect(r.sent[0][3]).toEqual({ type: 'SMS', contactId: 'ghlContact1',
+    // From the Agile Lets number on file, never the location's default.
+    expect(r.sent[0][3]).toEqual({ type: 'SMS', contactId: 'ghlContact1', fromNumber: '+447700900555',
       message: 'Hello Sam, your rent due 1 Oct has not reached us. Please pay or reply. Roy, Agile Lets' });
     expect(JSON.parse(r.ok)).toEqual({ sent: 'recCARDTEXT000001', numberEnds: '123' });
     expect(r.again).toMatch(/already texted, or its text may have gone \(sent/);
@@ -176,6 +179,8 @@ print(json.dumps({"wrongPhone": wrongPhone.get("refused", ""), "wrongPhoneSends"
     // The text goes to the contact's own phone: a contact holding another number is refused.
     expect([r.wrongPhone, r.wrongPhoneSends]).toEqual([expect.stringMatching(/holds a different phone/), 0]);
     expect([r.madeWrong, r.madeWrongSends]).toEqual([expect.stringMatching(/holds a different phone/), 0]);
+    // No Agile Lets sending number on file: nothing goes from a default number.
+    expect(r.noFrom).toEqual([expect.stringMatching(/no Agile Lets sending number is on file/), 0]);
   });
 
   it('a dry run checks the card, finds the contact read only, and sends nothing (even switched off, even on trial)', () => {
@@ -207,8 +212,9 @@ import agent_email_format as aef
 below = OUTPUT.replace("TEXT TO: 07700 900123\\nTEXT: Hello Sam, your rent due 1 Oct has not reached us. Please pay or reply. Roy, Agile Lets\\n", "") + "\\nTEXT TO: 07700 900123\\nTEXT: hi"
 dash = OUTPUT.replace("Hello Sam, your rent", "Hello --- Sam, your rent")
 prose = OUTPUT.replace("Body.", "Text: reply STOP to opt out.")
+subject = OUTPUT.replace("SUBJECT: Your rent at 1 Example Road", "SUBJECT: Rent --- October")
 out = {}
-for key, o in (("below", below), ("dash", dash), ("prose", prose)):
+for key, o in (("below", below), ("dash", dash), ("prose", prose), ("subject", subject)):
     try:
         aef.parse_text(o); out[key] = "ok"
     except aef.EmailFormatError as e:
@@ -219,11 +225,13 @@ except aef.EmailFormatError as e:
     out["submit"] = str(e)
 print(json.dumps(out))`);
     expect(bad.below).toMatch(/sits below the email's headers/);
-    expect(bad.dash).toMatch(/may not contain "---"/);
+    expect(bad.dash).toMatch(/a header line contains "---"/);
     // An email that merely says "Text: ..." is untouched.
     expect(bad.prose).toBe('ok');
+    // A "---" in any header would cut the email there and push the text into its body: refused.
+    expect(bad.subject).toMatch(/a header line contains "---"/);
     // And a bad text is refused at submit, before Kevin ever sees the card.
-    expect(bad.submit).toMatch(/may not contain "---"/);
+    expect(bad.submit).toMatch(/a header line contains "---"/);
     expect(r.to).toEqual(['sam@example.com']);
     expect(r.body).not.toMatch(/TEXT|07700/);
     expect(r.text).toEqual(['07700 900123', 'Hello Sam, your rent due 1 Oct has not reached us. Please pay or reply. Roy, Agile Lets']);

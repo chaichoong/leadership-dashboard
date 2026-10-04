@@ -963,6 +963,30 @@ print(json.dumps({"off": [off["raised"], rc.agent_late_line(off)], "dry": [dry["
     expect(r.line).toMatch(/^Agent-managed late rent sent to Roy: AGENT RENT LATE: Unit 9/);
   });
 
+  it('an email to Roy that fails turns the run red (the task stands and is offered again); a refusal by the email gate is a note', () => {
+    const r = py(`
+ts = [tenancy("recAgent", 30, 500, tenant="recT_agent", unit="Unit 9 – 1 Example Road")]
+res, rows = run(ts, [paid("recAgent", "2026-08-30", 500)])
+rc.api = lambda method, path, payload=None, params=None: {"records": [{"id": "recNEWROY0000001"}]}
+class FakeAd:
+    ROY_EMAIL = "roy@example.test"
+    HUMANS = {"roy@example.test": {"rec": "recROYROW0000001"}}
+    AF = {"assignee": "fldASSIGNEE000001"}
+rc.lane_b_rules.module = lambda key: FakeAd
+def broken(tid, to): raise RuntimeError("worker 500")
+rc.lane_b_rules.notify_roy = broken
+failed = rc.agent_late(res, ts, DAY, True, True)
+def refused(tid, to): raise RuntimeError("REFUSED: a word in the task")
+rc.lane_b_rules.notify_roy = refused
+rc.read_agent_late = lambda: {"recAgent:2026-09-30": {"id": "recOPENROY000001", "status": "Today"}}
+noted = rc.agent_late(res, ts, DAY, True, True)
+print(json.dumps({"failed": failed["failed"], "line": rc.agent_late_line(failed), "noted": [noted["failed"], noted["problems"]]}))`);
+    expect(r.failed).toMatch(/was created but its email to Roy failed \(offered again next run\): worker 500/);
+    expect(r.line).toMatch(/^Agent-managed late rent to Roy FAILED/);
+    expect(r.noted[0]).toBe('');
+    expect(r.noted[1][0]).toMatch(/refused by the email gate/);
+  });
+
   it('the pause lever: nothing is planned or raised while the agent is switched off, and the row says so', () => {
     const r = py(`
 ts = [tenancy("recLate", 30, 500)]
