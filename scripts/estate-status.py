@@ -92,8 +92,10 @@ REPORT_ROWS_OWNED_ELSEWHERE = ("loop-health", "allowance", "content-publishing",
 # reason and the last 600 characters the job printed. Order matters: the first
 # match wins, and the allowance line is the one that explained the weekend.
 BLOCKED_MARKERS = (
-    # same rule as allowance.LIMIT_RE: "hit your limit" and, from Oct 2026, "hit your weekly limit"
-    (re.compile(r"hit your (?:[\w-]+\s+){0,2}limit", re.I),
+    # allowance.LIMIT_PATTERN, word for word: "hit your limit" and, from Oct 2026, "hit your weekly
+    # limit", only where the CLI prints it (line start, or after "result":" in its JSON), never prose
+    (re.compile(r"(?:^|\"result\":\")[ \t]*You['’]ve hit your "
+                r"(?:(?!(?:credit|spending|card|overdraft|borrowing)\b)[\w-]+[ \t]+){0,2}limit\b", re.I | re.M),
      "The Claude allowance ran out{reset}. The job did no work; it runs again at its next slot."),
     (re.compile(r"DNS cannot resolve|nodename nor servname|Network is unreachable|Temporary failure in name resolution", re.I),
      "No network when it ran."),
@@ -1080,11 +1082,23 @@ def selftest():
         checks += 1
         if not cond:
             raise AssertionError(what)
-    # 1. the allowance line is Blocked, with the reset time in plain words
+    # 1. the allowance line is Blocked, with the reset time in plain words. run-job.sh flattens the tail onto one
+    #    line, so only the CLI's JSON form ("result":"You've hit ...", the Content Engine's copy step) is read from
+    #    it; a slot's own line is read from its runs.log (1b). An empty logs_dir keeps this off the live logs.
+    import tempfile
+    r = classify("content-engine", {"cron": "0 22 * * *"},
+                 [{"ts": "2026-10-04T00:51:00Z", "job": "content-engine", "ok": False, "exit": 1, "reason": "exit code 1",
+                   "tail": 'copy NOT written: status":429,"result":"You\'ve hit your weekly limit · resets 7pm (Europe/London)","type":"result"'}],
+                 [], now, logs_dir=tempfile.mkdtemp())
+    ok(r["status"] == "Blocked" and "allowance ran out" in r["detail"] and "7pm" in r["detail"], "allowance -> Blocked: %r" % r)
+    r_prose = classify("creditor-run", {"cron": "0 9 * * *"},
+                       [{"ts": "2026-10-04T08:00:08Z", "job": "creditor-run", "ok": False, "exit": 1, "reason": "exit code 1",
+                         "tail": "Barclaycard email: You've hit your credit limit, resets on your statement date. VERIFY FAIL"}],
+                       [], now, logs_dir=tempfile.mkdtemp())
+    ok(r_prose["status"] == "Failed" and "allowance" not in r_prose["detail"], "a quoted credit limit is not the allowance: %r" % r_prose)
     r = classify("task-manager", {"cron": "0 9,13,17 * * *"},
                  [{"ts": "2026-09-13T16:00:08Z", "job": "task-manager", "ok": False, "exit": 1, "reason": "exit code 1",
-                   "tail": "You've hit your limit · resets 7pm (Europe/London) TASK-MANAGER VERIFY FAIL"}], [], now)
-    ok(r["status"] == "Blocked" and "allowance ran out" in r["detail"] and "7pm" in r["detail"], "allowance -> Blocked: %r" % r)
+                   "tail": "TASK-MANAGER VERIFY FAIL"}], [], now)
     ok(r["nextDue"] == "2026-09-14T08:00:00.000Z", "next due 09:00 London = 08:00Z: %r" % r["nextDue"])
     ok(next_due("0 22 * * *", now) == "2026-09-14T21:00:00.000Z", "22:00 London in BST = 21:00Z")
     ok(next_due("0 11 * * *", now, runs_on_days=[7]) == "2026-09-20T10:00:00.000Z", "Sundays-only job is next due on Sunday 20 Sep: %r" % next_due("0 11 * * *", now, runs_on_days=[7]))

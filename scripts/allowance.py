@@ -52,9 +52,14 @@ LONDON = ZoneInfo("Europe/London")
 # "You've hit your limit" (Sep 2026) and "You've hit your weekly limit" (Oct 2026): the CLI now names
 # the window, so up to two words may sit between "your" and "limit". The narrow pattern matched none
 # of the 3-4 Oct outage's lines: no pause, no missed list, nothing re-ran at the 19:00 reset (4 Oct
-# 2026). estate-status.py BLOCKED_MARKERS and check-routines.py USAGE_CAP_RE carry the same rule;
+# 2026). The CLI's own line always starts a line, or follows "result":" in its JSON output; an agent
+# summary that QUOTES it, or a creditor email's "credit limit", sits mid-line, and a false match
+# would pause every robot (review, 4 Oct 2026: 238 real lines kept, 22 quotes dropped across the logs).
+# estate-status.py BLOCKED_MARKERS and check-routines.py USAGE_CAP_RE carry the same pattern;
 # tests/allowance.test.js drives all three with every wording seen.
-LIMIT_RE = re.compile(r"You['’]ve hit your (?:[\w-]+\s+){0,2}limit", re.I)
+LIMIT_PATTERN = (r"(?:^|\"result\":\")[ \t]*You['’]ve hit your "
+                 r"(?:(?!(?:credit|spending|card|overdraft|borrowing)\b)[\w-]+[ \t]+){0,2}limit\b")
+LIMIT_RE = re.compile(LIMIT_PATTERN, re.I | re.M)
 # "resets Sep 13 at 7pm (Europe/London)" · "resets 7pm (Europe/London)" · "resets 6:40pm"
 RESET_RE = re.compile(
     r"resets\s+(?:(?P<mon>[A-Z][a-z]{2})\s+(?P<day>\d{1,2})\s+at\s+)?"
@@ -334,7 +339,15 @@ def selftest():
                        ("You've hit your 5-hour limit · resets 6:40pm (Europe/London)", "2026-10-03T17:40:00Z")):
         hit, r = find_limit(line, sat)
         ok(hit and r and iso(r) == want, "weekly wording %r -> %r" % (line[:50], r and iso(r)))
-    ok(find_limit("the API rate limit was fine; the counter resets 9pm", sat) == (False, None), "a limit word alone is not the line")
+    # 1c. review, 4 Oct 2026: agent prose never pauses the estate
+    for prose in ("the API rate limit was fine; the counter resets 9pm",
+                  "Barclaycard email: You've hit your credit limit, resets on your statement date",
+                  "You've hit your credit limit on this card",
+                  'every run printed "You\'ve hit your weekly limit · resets 7pm (Europe/London)" and died',
+                  "- You've hit your weekly limit · resets Oct 3 at 7pm (quoted in a summary)",
+                  "You've hit your weekly\nlimit · resets 7pm",
+                  "You've hit your weekly limits page"):
+        ok(find_limit(prose, sat) == (False, None), "prose is not the limit line: %r" % prose[:60])
     # 2. mark pauses the estate and records the missed job; the latest reset wins
     res = cmd_mark("task-manager", None, now=now, text="===== run =====\nYou've hit your limit · resets 7pm (Europe/London)\nVERIFY FAIL\n")
     ok(res["marked"] and res["paused_until"] == "2026-09-12T18:00:00Z", "mark: %r" % res)
