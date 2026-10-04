@@ -21,6 +21,39 @@ describe('allowance.py', () => {
     expect(out.checks).toBeGreaterThanOrEqual(16);
   });
 
+  // 4 Oct 2026: from Saturday 16:30 to Sunday 19:00 every run printed "You've hit your
+  // WEEKLY limit". The guard looked for the exact phrase "hit your limit", so it never
+  // paused, kept no missed list and re-ran nothing at the reset, and the Estate board
+  // showed plain red. This drives the real matchers in all three scripts.
+  it('the guard and the Estate board both read every limit wording seen', () => {
+    const lines = [
+      "You've hit your limit · resets 7pm (Europe/London)",
+      "You've hit your weekly limit · resets Oct 4 at 7pm (Europe/London)",
+      'You’ve hit your weekly limit · resets 7pm (Europe/London)',
+      '"api_error_status":429,"result":"You\'ve hit your weekly limit · resets 7pm (Europe/London)","type":"result"',
+    ];
+    const py = [
+      'import importlib.util, json, sys',
+      'from datetime import datetime, timezone',
+      'def load(n, p):',
+      '    s = importlib.util.spec_from_file_location(n, p); m = importlib.util.module_from_spec(s); s.loader.exec_module(m); return m',
+      `a = load('allowance', ${JSON.stringify(GUARD)})`,
+      `e = load('estate_status', ${JSON.stringify(resolve(ROOT, 'scripts/estate-status.py'))})`,
+      'now = datetime(2026, 10, 3, 15, 30, tzinfo=timezone.utc)',
+      'out = []',
+      'for line in json.loads(sys.argv[1]):',
+      '    hit, reset = a.find_limit(line, now)',
+      '    out.append({"guard": hit, "reset": reset and a.iso(reset), "board": e.blocked_reason(line)})',
+      'print(json.dumps(out))',
+    ].join('\n');
+    const res = JSON.parse(execFileSync('python3', ['-c', py, JSON.stringify(lines)], { encoding: 'utf8' }));
+    res.forEach((r, i) => {
+      expect(r.guard, `guard reads: ${lines[i]}`).toBe(true);
+      expect(r.reset, `reset read: ${lines[i]}`).toBe(i === 1 ? '2026-10-04T18:00:00Z' : '2026-10-03T18:00:00Z');
+      expect(r.board, `board reads: ${lines[i]}`).toMatch(/Claude allowance ran out/);
+    });
+  });
+
   it('every Claude runner checks before the call and marks after it', () => {
     // the two slots the weekend outage lost most of have their OWN runners (review, 14 Sep 2026)
     for (const f of ['scripts/agent-slot-run.sh', 'scripts/handback-poll-run.sh', 'scripts/task-manager-run.sh', 'scripts/inbound-triage-run.sh']) {

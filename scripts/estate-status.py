@@ -92,7 +92,8 @@ REPORT_ROWS_OWNED_ELSEWHERE = ("loop-health", "allowance", "content-publishing",
 # reason and the last 600 characters the job printed. Order matters: the first
 # match wins, and the allowance line is the one that explained the weekend.
 BLOCKED_MARKERS = (
-    (re.compile(r"hit your limit", re.I),
+    # same rule as allowance.LIMIT_RE: "hit your limit" and, from Oct 2026, "hit your weekly limit"
+    (re.compile(r"hit your (?:[\w-]+\s+){0,2}limit", re.I),
      "The Claude allowance ran out{reset}. The job did no work; it runs again at its next slot."),
     (re.compile(r"DNS cannot resolve|nodename nor servname|Network is unreachable|Temporary failure in name resolution", re.I),
      "No network when it ran."),

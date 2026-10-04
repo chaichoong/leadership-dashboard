@@ -49,7 +49,12 @@ SCHEDULE = os.path.join(HERE, "job-schedule.json")
 LAUNCHD_PREFIX = "com.kevinbrittain."
 LONDON = ZoneInfo("Europe/London")
 
-LIMIT_RE = re.compile(r"You['’]ve hit your limit", re.I)
+# "You've hit your limit" (Sep 2026) and "You've hit your weekly limit" (Oct 2026): the CLI now names
+# the window, so up to two words may sit between "your" and "limit". The narrow pattern matched none
+# of the 3-4 Oct outage's lines: no pause, no missed list, nothing re-ran at the 19:00 reset (4 Oct
+# 2026). estate-status.py BLOCKED_MARKERS and check-routines.py USAGE_CAP_RE carry the same rule;
+# tests/allowance.test.js drives all three with every wording seen.
+LIMIT_RE = re.compile(r"You['’]ve hit your (?:[\w-]+\s+){0,2}limit", re.I)
 # "resets Sep 13 at 7pm (Europe/London)" · "resets 7pm (Europe/London)" · "resets 6:40pm"
 RESET_RE = re.compile(
     r"resets\s+(?:(?P<mon>[A-Z][a-z]{2})\s+(?P<day>\d{1,2})\s+at\s+)?"
@@ -321,6 +326,15 @@ def selftest():
     r = parse_reset("You've hit your limit · resets 6:40pm (Europe/London)", datetime(2026, 9, 12, 18, 0, tzinfo=timezone.utc))  # 19:00 London
     ok(iso(r) == "2026-09-13T17:40:00Z", "bare time already past -> tomorrow: %s" % iso(r))
     ok(parse_reset("all fine", now) is None, "no reset phrase")
+    # 1b. 4 Oct 2026: the CLI says "weekly limit" now, and the Content Engine's copy step reads it inside JSON
+    sat = datetime(2026, 10, 3, 15, 30, tzinfo=timezone.utc)   # Sat 16:30 London, when the outage began
+    for line, want in (("You've hit your weekly limit · resets Oct 4 at 7pm (Europe/London)", "2026-10-04T18:00:00Z"),
+                       ("You’ve hit your weekly limit · resets Oct 4 at 7pm (Europe/London)", "2026-10-04T18:00:00Z"),
+                       ('"api_error_status":429,"result":"You\'ve hit your weekly limit · resets Oct 4 at 7pm (Europe/London)","type":"result"', "2026-10-04T18:00:00Z"),
+                       ("You've hit your 5-hour limit · resets 6:40pm (Europe/London)", "2026-10-03T17:40:00Z")):
+        hit, r = find_limit(line, sat)
+        ok(hit and r and iso(r) == want, "weekly wording %r -> %r" % (line[:50], r and iso(r)))
+    ok(find_limit("the API rate limit was fine; the counter resets 9pm", sat) == (False, None), "a limit word alone is not the line")
     # 2. mark pauses the estate and records the missed job; the latest reset wins
     res = cmd_mark("task-manager", None, now=now, text="===== run =====\nYou've hit your limit · resets 7pm (Europe/London)\nVERIFY FAIL\n")
     ok(res["marked"] and res["paused_until"] == "2026-09-12T18:00:00Z", "mark: %r" % res)
