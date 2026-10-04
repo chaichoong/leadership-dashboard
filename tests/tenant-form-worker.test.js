@@ -4,7 +4,7 @@
 // drive the REAL handler end to end with Airtable stubbed: every name, number and id is invented.
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { createHash } from 'node:crypto';
-import worker, { cleanTenantAnswers, londonNow } from '../workers/property-manager/worker.js';
+import worker, { cleanTenantAnswers, londonNow, callerKey } from '../workers/property-manager/worker.js';
 import { GP, TENANT_LINK, TENANT_ANSWERS } from '../workers/property-manager/fields.mjs';
 import { dateKey } from '../workers/property-manager/compute.mjs';
 
@@ -63,12 +63,17 @@ beforeEach(() => {
   });
 });
 
-const call = (path, { method = 'GET', body, code, token, origin = ORIGIN, headers = {} } = {}) => worker.fetch(new Request('https://pm.test' + path, {
-  method, body: body === undefined ? undefined : JSON.stringify(body),
-  headers: { Origin: origin, 'Content-Type': 'application/json', ...(code !== undefined ? { 'X-Tenant-Code': code } : {}), ...(token ? { Authorization: 'Bearer ' + token } : {}), ...headers },
-}), env, ctx);
+// The tenant's code travels in the JSON body (never a header or the URL, so no request log keeps it).
+const call = (path, { method = 'POST', body, code, token, origin = ORIGIN, headers = {} } = {}) => {
+  const payload = code !== undefined ? { code, ...(body || {}) } : body;
+  return worker.fetch(new Request('https://pm.test' + path, {
+    method, body: method === 'GET' || payload === undefined ? undefined : JSON.stringify(payload),
+    headers: { Origin: origin, 'Content-Type': 'application/json', ...(token ? { Authorization: 'Bearer ' + token } : {}), ...headers },
+  }), env, ctx);
+};
+const open = (code) => call('/tenant-form/open', { code });
 async function signIn(pass = 'roy-pass') {
-  return (await (await call('/login', { method: 'POST', body: { passcode: pass } })).json()).token;
+  return (await (await call('/login', { body: { passcode: pass } })).json()).token;
 }
 async function makeLink(id = ID) {
   const r = await call('/tenant-form/link', { method: 'POST', body: { tenantId: id }, token: await signIn() });
@@ -102,7 +107,7 @@ describe('making a link (signed in only)', () => {
     const { code } = await makeLink();
     writes = [];
     expect((await call('/tenant-form/link', { method: 'POST', body: { tenantId: OTHER }, token: code })).status).toBe(401);
-    expect((await call('/growth-plan', { token: code })).status).toBe(401);
+    expect((await call('/growth-plan', { method: 'GET', token: code })).status).toBe(401);
     expect(writes).toEqual([]);
   });
 });
@@ -110,24 +115,24 @@ describe('making a link (signed in only)', () => {
 describe('the public read gives a first name and nothing else', () => {
   it('a good code: the first name only, never a saved answer', async () => {
     const { code } = await makeLink();
-    const r = await call('/tenant-form', { code });
+    const r = await open(code);
     expect(r.status).toBe(200);
     expect(await r.json()).toEqual({ ok: true, firstName: 'Sam' });
   });
   it('a bad shape, an unknown code, an expired link, a switched-off link and a code two records share all get the same words', async () => {
     const { code } = await makeLink();
     const cases = {};
-    cases.none = await call('/tenant-form', {});
-    cases.shape = await call('/tenant-form', { code: code.slice(0, 31) });
-    cases.quote = await call('/tenant-form', { code: "abc'def" + 'x'.repeat(25) });
-    cases.unknown = await call('/tenant-form', { code: 'A'.repeat(32) });
+    cases.none = await call('/tenant-form/open', { body: {} });
+    cases.shape = await open(code.slice(0, 31));
+    cases.quote = await open("abc'def" + 'x'.repeat(25));
+    cases.unknown = await open('A'.repeat(32));
     store[ID].expires = plusDays(-1);
-    cases.expired = await call('/tenant-form', { code });
+    cases.expired = await open(code);
     store[ID].expires = '';
-    cases.noExpiry = await call('/tenant-form', { code });
+    cases.noExpiry = await open(code);
     store[ID].expires = plusDays(3);
     store[OTHER].hash = store[ID].hash; store[OTHER].expires = plusDays(3);
-    cases.twoMatch = await call('/tenant-form', { code });
+    cases.twoMatch = await open(code);
     for (const [k, r] of Object.entries(cases)) {
       expect(r.status, k).toBe(404);
       expect((await r.json()).error, k).toMatch(GONE);
@@ -136,14 +141,14 @@ describe('the public read gives a first name and nothing else', () => {
   it('a code of the wrong shape is refused before anything is read', async () => {
     reads = 0;
     for (const code of ['', 'short', "abc'def" + 'x'.repeat(25), 'A'.repeat(33), 'A'.repeat(31) + '.']) {
-      expect((await call('/tenant-form', { code })).status, code).toBe(404);
+      expect((await open(code)).status, code).toBe(404);
     }
     expect(reads).toBe(0);
   });
   it('the link still works on its last day', async () => {
     const { code } = await makeLink();
     store[ID].expires = dateKey(londonNow());
-    expect((await call('/tenant-form', { code })).status).toBe(200);
+    expect((await open(code)).status).toBe(200);
   });
   it('a record the name formula matched but whose hash, read by id, is different is refused', async () => {
     const { code } = await makeLink();
@@ -156,17 +161,17 @@ describe('the public read gives a first name and nothing else', () => {
       }
       return realFetch(url, init);
     });
-    expect((await call('/tenant-form', { code })).status).toBe(404);
+    expect((await open(code)).status).toBe(404);
   });
   it('a new link switches the old one off, and "off" switches the new one off', async () => {
     const first = (await makeLink()).code;
     const second = (await makeLink()).code;
-    expect((await call('/tenant-form', { code: first })).status).toBe(404);
-    expect((await call('/tenant-form', { code: second })).status).toBe(200);
+    expect((await open(first)).status).toBe(404);
+    expect((await open(second)).status).toBe(200);
     const off = await call('/tenant-form/link/off', { method: 'POST', body: { tenantId: ID }, token: await signIn('kev-pass') });
     expect(off.status).toBe(200);
     expect(writes.at(-1).body).toEqual({ fields: { [TENANT_LINK.codeHash]: null, [TENANT_LINK.codeExpires]: null }, typecast: false });
-    expect((await call('/tenant-form', { code: second })).status).toBe(404);
+    expect((await open(second)).status).toBe(404);
     expect((await call('/tenant-form/link/off', { method: 'POST', body: { tenantId: ID } })).status).toBe(401);
   });
 });
@@ -193,12 +198,17 @@ describe('saving the answers', () => {
     // A blank answer never reaches the record, so the form cannot wipe what is there.
     expect(Object.prototype.hasOwnProperty.call(body.fields, T.otherAdults)).toBe(false);
     expect(body.fields[T.formLastSaved]).toMatch(/^\d{4}-\d{2}-\d{2}T/);
-    expect(body.fields[T.notes]).toMatch(/^\[2026-09-01 09:00 Kevin Brittain\] earlier note\n\[\d{4}-\d{2}-\d{2} \d{2}:\d{2} tenant link\] Tenant details form saved from the tenant's own link: 11 answers\.$/);
+    expect(body.fields[T.notes]).toMatch(/^\[2026-09-01 09:00 Kevin Brittain\] earlier note\n\[\d{4}-\d{2}-\d{2} \d{2}:\d{2} tenant link\] Tenant details form saved from the tenant's own link: mobile, email, date of birth, National Insurance number, UC payment day, household, benefit cap, council tax account, weekly income, weekly spending, other benefits\.$/);
     // Exactly the allowed answers, the saved time and the note: nothing else.
     const allowed = new Set([...Object.values(TENANT_ANSWERS).map(s => s.id), T.formLastSaved, T.notes]);
     expect(Object.keys(body.fields).filter(k => !allowed.has(k))).toEqual([]);
     // The note carries no value.
     expect(body.fields[T.notes]).not.toMatch(/AB123456C|sam@example/);
+    // A second save the same day adds no second line: Tenant Form Last Saved carries the time.
+    writes = [];
+    expect((await call('/tenant-form', { code, body: { answers: { phone: '07700 900999' } } })).status).toBe(200);
+    expect(Object.prototype.hasOwnProperty.call(writes[0].body.fields, T.notes)).toBe(false);
+    expect(writes[0].body.fields[T.formLastSaved]).toMatch(/^\d{4}-/);
   });
 
   it('one question the form does not ask refuses the whole save; nothing is written', async () => {
@@ -224,14 +234,70 @@ describe('saving the answers', () => {
     const { code } = await makeLink();
     writes = []; reads = 0;
     env.TENANT_LIMIT = { limit: async () => ({ success: false }) };
-    const r = await call('/tenant-form', { method: 'POST', code, body: { answers: GOOD } });
+    const r = await call('/tenant-form', { code, body: { answers: GOOD } });
     expect(r.status).toBe(429);
     expect([reads, writes.length]).toEqual([0, 0]);
+    // And the limit on all callers together, whoever is asking.
+    const asked = [];
+    env.TENANT_LIMIT = { limit: async ({ key }) => { asked.push(key); return { success: true }; } };
+    env.TENANT_ALL = { limit: async () => ({ success: false }) };
+    expect((await open(code)).status).toBe(429);
+    expect([reads, writes.length]).toEqual([0, 0]);
+    env.TENANT_ALL = { limit: async () => ({ success: true }) };
+    await worker.fetch(new Request('https://pm.test/tenant-form/open', { method: 'POST', body: JSON.stringify({ code }), headers: { Origin: ORIGIN, 'CF-Connecting-IP': '2001:db8:aa:bb:1:2:3:4' } }), env, ctx);
+    expect(asked).toEqual(['2001:db8:aa:bb::/64']);
   });
 
-  it('lets the page send the tenant code header', async () => {
-    const r = await worker.fetch(new Request('https://pm.test/tenant-form', { method: 'OPTIONS', headers: { Origin: ORIGIN } }), env, ctx);
-    expect(r.headers.get('Access-Control-Allow-Headers')).toMatch(/X-Tenant-Code/);
+  it('a public route never retries a refused Airtable call', async () => {
+    const { code } = await makeLink();
+    let hits = 0;
+    globalThis.fetch = vi.fn(async () => { hits++; return new Response('{}', { status: 429 }); });
+    const r = await open(code);
+    expect(r.status).toBe(502);
+    expect(hits).toBe(1);
+  });
+
+  it('an oversize request is refused before anything is read', async () => {
+    const { code } = await makeLink();
+    reads = 0;
+    const r = await call('/tenant-form/upload', { code, body: { file: 'x' }, headers: { 'Content-Length': String(6 * 1024 * 1024 + 1) } });
+    expect(r.status).toBe(413);
+    expect(reads).toBe(0);
+  });
+
+  it('the link\'s days are London days, whatever the clock', async () => {
+    vi.useFakeTimers();
+    try {
+      // 23:30 UTC on 4 Oct is 00:30 on 5 Oct in London (summer time).
+      vi.setSystemTime(new Date('2026-10-04T23:30:00Z'));
+      const { code, body } = await makeLink();
+      expect(body.expires).toBe('2026-10-19');
+      store[ID].expires = '2026-10-04';
+      expect((await open(code)).status).toBe(404);
+      store[ID].expires = '2026-10-05';
+      expect((await open(code)).status).toBe(200);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('takes the code from the body and nowhere else', async () => {
+    // The code is read from the body only: in a header, in the URL or by GET it opens nothing.
+    const { code } = await makeLink();
+    const viaHeader = await worker.fetch(new Request('https://pm.test/tenant-form/open', { method: 'POST', body: '{}', headers: { Origin: ORIGIN, 'Content-Type': 'application/json', 'X-Tenant-Code': code } }), env, ctx);
+    expect(viaHeader.status).toBe(404);
+    const viaUrl = await worker.fetch(new Request('https://pm.test/tenant-form/open?code=' + code, { method: 'POST', body: '{}', headers: { Origin: ORIGIN, 'Content-Type': 'application/json' } }), env, ctx);
+    expect(viaUrl.status).toBe(404);
+    expect((await call('/tenant-form', { method: 'GET' })).status).toBe(404);
+  });
+});
+
+describe('who counts as one caller', () => {
+  it('an IPv4 address is itself; an IPv6 address counts by its /64', () => {
+    expect(callerKey('203.0.113.9')).toBe('203.0.113.9');
+    expect(callerKey('2001:db8:aa:bb:1:2:3:4')).toBe('2001:db8:aa:bb::/64');
+    expect(callerKey('2001:db8:aa:bb:9:9:9:9')).toBe(callerKey('2001:db8:aa:bb:1:2:3:4'));
+    expect(callerKey('')).toBe('unknown');
   });
 });
 
@@ -272,7 +338,8 @@ describe('the answer rules', () => {
 });
 
 describe('the statement photo', () => {
-  const b64 = (n) => Buffer.alloc(n, 7).toString('base64');
+  const JPEG = [0xFF, 0xD8, 0xFF, 0xE0];
+  const b64 = (n, head = JPEG) => Buffer.concat([Buffer.from(head), Buffer.alloc(Math.max(0, n - head.length), 7)]).toString('base64');
   it('goes to his own documents field only, named as a tenant upload', async () => {
     const { code } = await makeLink();
     writes = [];
@@ -282,6 +349,9 @@ describe('the statement photo', () => {
     expect(uploads[0].path).toBe(`/v0/appnqjDpqDniH3IRl/${ID}/${GP.tenant.documents}/uploadAttachment`);
     expect(uploads[0].body.contentType).toBe('image/jpeg');
     expect(uploads[0].body.filename).toMatch(/^Tenant upload \d{4}-\d{2}-\d{2} IMG_0001\.jpg$/);
+    // The stored name always ends in the type's own extension.
+    expect((await call('/tenant-form/upload', { code, body: { filename: 'page.html', contentType: 'image/jpeg', file: b64(100) } })).status).toBe(200);
+    expect(uploads[1].body.filename).toMatch(/^Tenant upload \d{4}-\d{2}-\d{2} page\.jpg$/);
     expect(writes).toEqual([]);
   });
   it('refuses another type, a file over 3.7MB, junk, and an eleventh file', async () => {
@@ -291,6 +361,14 @@ describe('the statement photo', () => {
     expect((await up({ filename: 'a.svg', contentType: 'image/svg+xml', file: b64(10) })).status).toBe(400);
     expect((await up({ filename: 'a.jpg', contentType: 'image/jpeg', file: b64(Math.floor(3.7 * 1024 * 1024) + 1) })).status).toBe(413);
     expect((await up({ filename: 'a.jpg', contentType: 'image/jpeg', file: 'not base64!' })).status).toBe(400);
+    // A page called a photo: the bytes are not what the type says.
+    expect((await up({ filename: 'x.png', contentType: 'image/png', file: Buffer.from('<html><script>x</script></html>').toString('base64') })).status).toBe(400);
+    expect((await up({ filename: 'x.pdf', contentType: 'application/pdf', file: b64(100) })).status).toBe(400);
+    // Each allowed type with its own first bytes goes through.
+    expect((await up({ filename: 'x.png', contentType: 'image/png', file: b64(100, [0x89, 0x50, 0x4E, 0x47]) })).status).toBe(200);
+    expect((await up({ filename: 'x.pdf', contentType: 'application/pdf', file: b64(100, [0x25, 0x50, 0x44, 0x46]) })).status).toBe(200);
+    expect((await up({ filename: 'x.heic', contentType: 'image/heic', file: b64(100, [0, 0, 0, 0x18, 0x66, 0x74, 0x79, 0x70]) })).status).toBe(200);
+    uploads.length = 0;
     store[ID].documents = Array.from({ length: 10 }, (_, i) => ({ id: 'att' + i }));
     expect((await up({ filename: 'a.jpg', contentType: 'image/jpeg', file: b64(10) })).status).toBe(409);
     expect(uploads).toEqual([]);

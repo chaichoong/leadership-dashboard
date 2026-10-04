@@ -120,7 +120,7 @@
   'use strict';
   // The tenant details form (task recrmZTcOHg8vPlZk; Kevin approved the plan on 1 Oct 2026).
   // The code after #c= is this tenant's pass for his own record. It never leaves the page except
-  // in the X-Tenant-Code header to our Worker, and nothing on this page holds a database key.
+  // in the body of a request to our Worker, and nothing on this page holds a database key.
   const API = 'https://pm.operationsdirector.co.uk';
   const FIELDS = ['phone', 'email', 'dob', 'ni', 'ucPayDay', 'household', 'capExemption', 'otherBenefits', 'otherAdults', 'ctAccount', 'weeklyIncome', 'weeklySpending'];
   const LIMIT = Math.floor(3.7 * 1024 * 1024);
@@ -136,8 +136,8 @@
     el.textContent = text;
     el.className = 'status' + (kind ? ' ' + kind : '');
   }
-  async function api(path, opts) {
-    const res = await fetch(API + path, Object.assign({}, opts, { headers: { 'Content-Type': 'application/json', 'X-Tenant-Code': code } }));
+  async function api(path, payload) {
+    const res = await fetch(API + path, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(Object.assign({ code }, payload)) });
     let body = null;
     try { body = await res.json(); } catch (e) { body = null; }
     return { status: res.status, body: body || {} };
@@ -147,7 +147,7 @@
     if (!code) return show('gone');
     show('loading');
     try {
-      const r = await api('/tenant-form', { method: 'GET' });
+      const r = await api('/tenant-form/open', {});
       if (r.status === 404) return show('gone');
       if (r.status !== 200 || !r.body.ok) {
         $('failedText').textContent = r.body.error || 'We could not reach our system just now.';
@@ -170,7 +170,7 @@
     $('save').disabled = true;
     status('saveStatus', 'Saving…');
     try {
-      const r = await api('/tenant-form', { method: 'POST', body: JSON.stringify({ answers }) });
+      const r = await api('/tenant-form', { answers });
       if (r.status === 404) return show('gone');
       if (r.status !== 200 || !r.body.ok) return status('saveStatus', r.body.error || 'That did not save. Try again in a minute.', 'bad');
       status('saveStatus', `Saved at ${r.body.savedAt}. Thank you.`, 'ok');
@@ -199,7 +199,7 @@
         rd.onerror = () => reject(new Error('read'));
         rd.readAsDataURL(f);
       });
-      const r = await api('/tenant-form/upload', { method: 'POST', body: JSON.stringify({ filename: f.name, contentType: typeOf(f), file }) });
+      const r = await api('/tenant-form/upload', { filename: f.name, contentType: typeOf(f), file });
       if (r.status === 404) return show('gone');
       if (r.status !== 200 || !r.body.ok) return status('fileStatus', r.body.error || 'That did not send. Try again in a minute.', 'bad');
       status('fileStatus', 'Sent. Thank you.', 'ok');

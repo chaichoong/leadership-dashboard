@@ -759,10 +759,16 @@
     const t = state.data.tenants.find(x => x.id === state.ui.formTenant);
     form.hidden = !t; $('docsBox').hidden = !t;
     if (!t) return;
-    const map = { dob: t.dob, ni: t.ni, phone: t.phone, email: t.email, idSeen: t.idSeen, over35: t.over35Confirmed, ucPayDay: t.ucPayDay, dueDay: t.dueDay, household: t.household, capExemption: t.capExemption || 'Unknown', ucStatementSeen: t.ucStatementSeen, otherBenefits: t.otherBenefits, otherAdults: t.otherAdults, ctAccount: t.ctAccount, weeklyIncome: t.weeklyIncome, weeklySpending: t.weeklySpending, bankStatements: t.bankStatements, authoritySigned: t.authoritySigned, meetingDate: t.meetingDate || todayISO(), meetingNotes: t.meetingNotes };
+    const map = Object.assign(storedForm(t), { meetingDate: t.meetingDate || todayISO() });
     FORM_FIELDS.forEach(k => { const el = form.elements[k]; if (!el) return; if (el.type === 'checkbox') el.checked = !!map[k]; else el.value = map[k] == null ? '' : map[k]; });
     $('meetingStatus').textContent = t.meetingDate ? `Last saved meeting: ${t.meetingDate}` : 'No meeting saved yet';
-    $('formSaved').textContent = t.formLastSaved ? `The tenant last saved their own form ${formWhen(t.formLastSaved)}` : 'The tenant has not saved their own form';
+    $('formSaved').textContent = (t.formLastSaved ? `The tenant last saved their own form ${formWhen(t.formLastSaved)}` : 'The tenant had not saved their own form') + ' when this page loaded';
+  }
+  // What the record held when the page loaded, in the form's own terms. A save sends only what
+  // differs from it, so a tenant's own answers saved since (from his link) are never overwritten
+  // by a form nobody touched (review, 4 Oct 2026).
+  function storedForm(t) {
+    return { dob: t.dob, ni: t.ni, phone: t.phone, email: t.email, idSeen: t.idSeen, over35: t.over35Confirmed, ucPayDay: t.ucPayDay, dueDay: t.dueDay, household: t.household, capExemption: t.capExemption || 'Unknown', ucStatementSeen: t.ucStatementSeen, otherBenefits: t.otherBenefits, otherAdults: t.otherAdults, ctAccount: t.ctAccount, weeklyIncome: t.weeklyIncome, weeklySpending: t.weeklySpending, bankStatements: t.bankStatements, authoritySigned: t.authoritySigned, meetingDate: t.meetingDate, meetingNotes: t.meetingNotes };
   }
   const formWhen = iso => { const d = new Date(iso); return isNaN(d) ? iso : d.toLocaleString('en-GB', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit', timeZone: 'Europe/London' }); };
   async function saveMeetingForm() {
@@ -778,6 +784,10 @@
       [T.otherAdults]: v('otherAdults') || null, [T.ctAccount]: v('ctAccount') || null, [T.weeklyIncome]: v('weeklyIncome') ? Number(v('weeklyIncome')) : null, [T.weeklySpending]: v('weeklySpending') ? Number(v('weeklySpending')) : null,
       [T.bankStatements]: v('bankStatements'), [T.authoritySigned]: v('authoritySigned'), [T.meetingDate]: v('meetingDate') || null, [T.meetingNotes]: v('meetingNotes') || null,
     };
+    const was = storedForm(t);
+    const same = k => typeof was[k] === 'boolean' ? was[k] === v(k) : String(was[k] == null ? '' : was[k]).trim() === String(v(k));
+    FORM_FIELDS.forEach(k => { if (same(k)) delete fields[T[k]]; });
+    if (!Object.keys(fields).length) { toast('Nothing on the form has changed', true); return; }
     await withBusy('meeting:' + t.id, async () => {
       $('meetingSave').disabled = true;
       await airtableWrite('PATCH', TABLES.tenants, { records: [{ id: t.id, fields }] });
@@ -800,11 +810,12 @@
     state.workerToken = body.token; state.workerTokenExp = body.exp;
     return body.token;
   }
-  async function tenantLinkCall(path, tenantId) {
+  async function tenantLinkCall(path, tenantId, again = true) {
     const res = await fetch(PM_API + path, { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + await workerToken() }, body: JSON.stringify({ tenantId }) });
     let body = {}; try { body = await res.json(); } catch (e) { body = {}; }
     if (res.status === 401 && PM) { showPmSignIn(); throw new Error('your dashboard session has ended'); }
-    if (res.status === 401) state.workerToken = '';
+    // Kevin's Worker session ran out: sign in again with his key, once.
+    if (res.status === 401 && again) { state.workerToken = ''; return tenantLinkCall(path, tenantId, false); }
     if (!res.ok || !body.ok) throw new Error(body.error || `request failed (${res.status})`);
     return body;
   }
@@ -816,6 +827,8 @@
         const r = await tenantLinkCall('/tenant-form/link', id);
         let copied = false;
         try { await navigator.clipboard.writeText(r.url); copied = true; } catch (e) { copied = false; }
+        // The form now shows this tenant, so "Switch this tenant's form link off" acts on this link.
+        state.ui.formTenant = id; renderDocs();
         $('linkText').textContent = `Form link for ${name}, works until ${r.expires}. ${copied ? 'Copied.' : 'Copy it from the box.'} A new link switches this one off.`;
         $('linkUrl').value = r.url;
         $('linkWarn').hidden = !PM;
@@ -1606,11 +1619,29 @@ BEFORE THE FIRST ONE IS SIGNED (all in writing)
     const y = Number(v.slice(0, 4)); if (y < 1920 || y > 2010) { toast('That date does not look like a tenant\'s date of birth', true); return; }
     await withBusy('dob:' + tenantId, async () => {
       const t = state.data.tenants.find(x => x.id === tenantId);
-      const note = ((t && t.notes) || '').trim(); const stamp = `DOB ${v} entered on the Growth Plan page, ${todayISO()}.`;
+      // Notes read fresh: a line added since the page loaded (a tenant's own form save) is kept.
+      const note = (await freshNotes(tenantId, t)).trim(); const stamp = `DOB ${v} entered on the Growth Plan page, ${todayISO()}.`;
       await airtableWrite('PATCH', TABLES.tenants, { records: [{ id: tenantId, fields: { [GP.tenant.dob]: v, [GP.tenant.notes]: note ? note + '\n' + stamp : stamp } }] });
       if (t) { t.dob = v; t.notes = note ? note + '\n' + stamp : stamp; }
       toast(`Date of birth saved for ${t ? t.name : 'tenant'}`);
     });
+  }
+  async function freshNotes(tenantId, t) {
+    if (!/^rec[A-Za-z0-9]+$/.test(String(tenantId))) throw new Error('that is not a tenant record');   // letters and digits only: safe in the formula
+    let notes;
+    if (PM) {
+      state.pmPromise = null;
+      const row = (await pmRead(TABLES.tenants)).find(r => r.id === tenantId);
+      if (!row) throw new Error('the tenant record could not be read again');
+      notes = String(row.fields[GP.tenant.notes] || '');
+    } else {
+      const rows = await airtableFetch(TABLES.tenants, { filterByFormula: `RECORD_ID()='${tenantId}'`, 'fields[]': [GP.tenant.notes] });
+      if (rows.length !== 1) throw new Error('the tenant record could not be read again');
+      notes = String(rows[0].fields[GP.tenant.notes] || '');
+    }
+    // Blank now but not when the page loaded is a failed read, never a cleared field: stop.
+    if (!notes.trim() && ((t && t.notes) || '').trim()) throw new Error('the tenant\'s Notes read back empty, so nothing was saved');
+    return notes;
   }
   async function confirm35(tenantId) {
     await withBusy('c35:' + tenantId, async () => {
@@ -1695,7 +1726,7 @@ BEFORE THE FIRST ONE IS SIGNED (all in writing)
     if (t.closest('#calcForm')) renderCalc();
   });
   document.addEventListener('input', e => { if (e.target.closest('#calcForm')) renderCalc(); });
-  $('formTenant').addEventListener('change', e => { state.ui.formTenant = e.target.value; renderMeetingForm(); renderDocs(); });
+  $('formTenant').addEventListener('change', e => { state.ui.formTenant = e.target.value; $('linkBox').hidden = true; $('linkUrl').value = ''; renderMeetingForm(); renderDocs(); });
   $('docUpload').addEventListener('click', uploadDocs);
   $('meetingForm').addEventListener('submit', e => { e.preventDefault(); saveMeetingForm(); });
   $('linkOff').addEventListener('click', switchLinkOff);

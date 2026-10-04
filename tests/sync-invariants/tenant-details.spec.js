@@ -1,6 +1,6 @@
 // The tenant details form (tenant-details.html, task recrmZTcOHg8vPlZk). A tenant opens it on a
-// phone from his own link; it talks only to the property-manager Worker, with his code in a
-// header, and never to Airtable. The Worker is mocked here: nothing reaches a real service.
+// phone from his own link; it talks only to the property-manager Worker, with his code in the
+// request body, and never to Airtable. The Worker is mocked here: nothing reaches a real service.
 const { test, expect } = require('@playwright/test');
 const { stubExternalHosts } = require('./helpers');
 
@@ -16,10 +16,12 @@ async function openForm(page, { hash = '#c=' + CODE, get, save, upload } = {}) {
   await page.route(PM + '/**', async route => {
     const req = route.request(); const path = new URL(req.url()).pathname;
     let body = null; try { body = req.postDataJSON(); } catch (e) { body = null; }
-    calls.push({ path, method: req.method(), body, code: req.headers()['x-tenant-code'] || '' });
+    const code = body && body.code;
+    if (body) delete body.code;
+    calls.push({ path, method: req.method(), body, code: code || '', headers: req.headers() });
     const reply = (r) => r === 'abort' ? route.abort() : route.fulfill({ status: r.status || 200, contentType: 'application/json', body: JSON.stringify(r.body) });
-    if (path === '/tenant-form' && req.method() === 'GET') return reply(get ? get(calls) : { body: { ok: true, firstName: 'Sam' } });
-    if (path === '/tenant-form' && req.method() === 'POST') return reply(save ? save(body) : { body: { ok: true, saved: Object.keys(body.answers).length, savedAt: '14:02' } });
+    if (path === '/tenant-form/open') return reply(get ? get(calls) : { body: { ok: true, firstName: 'Sam' } });
+    if (path === '/tenant-form') return reply(save ? save(body) : { body: { ok: true, saved: Object.keys(body.answers).length, savedAt: '14:02' } });
     if (path === '/tenant-form/upload') return reply(upload ? upload(body) : { body: { ok: true } });
     return reply({ status: 404, body: { ok: false } });
   });
@@ -40,10 +42,12 @@ test.describe('the tenant details form', () => {
     await page.locator('textarea[name="otherBenefits"]').fill('PIP');
     await page.locator('#save').click();
     await expect(page.locator('#saveStatus')).toHaveText('Saved at 14:02. Thank you.');
-    const save = calls.find(c => c.path === '/tenant-form' && c.method === 'POST');
+    const save = calls.find(c => c.path === '/tenant-form');
     expect(save.body).toEqual({ answers: { phone: '07700 900123', ni: 'ab 12 34 56 c', capExemption: 'None (capped)', otherBenefits: 'PIP' } });
     expect(save.code).toBe(CODE);
-    expect(calls.find(c => c.method === 'GET').code).toBe(CODE);
+    expect(calls.find(c => c.path === '/tenant-form/open').code).toBe(CODE);
+    // The code is never in a header or the request URL.
+    for (const c of calls) expect(JSON.stringify(c.headers) + c.path).not.toContain(CODE);
     // It never talks to Airtable and holds no key.
     expect(airtable).toEqual([]);
     const html = await page.content();
@@ -66,7 +70,14 @@ test.describe('the tenant details form', () => {
     await expect(page.locator('#gone')).toBeVisible();
     await expect(page.locator('#gone')).toContainText('This link is not working. Reply to the email or text we sent you');
     await expect(page.locator('#form')).toBeHidden();
-    expect(calls.filter(c => c.method === 'POST')).toEqual([]);
+    expect(calls.filter(c => c.path !== '/tenant-form/open')).toEqual([]);
+  });
+
+  test('a first name holding markup shows as plain text', async ({ page }) => {
+    await openForm(page, { get: () => ({ body: { ok: true, firstName: '<img src=x onerror="window.hit=1">' } }) });
+    await expect(page.locator('#hello')).toContainText('Hello <img src=x');
+    expect(await page.evaluate(() => window.hit)).toBeUndefined();
+    await expect(page.locator('#hello img')).toHaveCount(0);
   });
 
   test('no code in the link: the message, and no call at all', async ({ page }) => {
@@ -91,7 +102,7 @@ test.describe('the tenant details form', () => {
     await expect(page.locator('#form')).toBeVisible();
     await page.locator('#save').click();
     await expect(page.locator('#saveStatus')).toHaveText('Fill in at least one answer first.');
-    expect(calls.filter(c => c.method === 'POST')).toEqual([]);
+    expect(calls.filter(c => c.path === '/tenant-form')).toEqual([]);
     await page.locator('input[name="dob"]').fill('2015-01-01');
     await page.locator('#save').click();
     await expect(page.locator('#saveStatus')).toHaveText('That date of birth does not look right.');

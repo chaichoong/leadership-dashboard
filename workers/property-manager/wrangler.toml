@@ -46,3 +46,11 @@ name = "TENANT_LIMIT"
 type = "ratelimit"
 namespace_id = "2102"
 simple = { limit = 20, period = 60 }
+
+# And all callers together (review, 4 Oct 2026): every public request costs one Airtable read, and the
+# base allows 5 a second for the whole estate, so many addresses at once must not starve it.
+[[unsafe.bindings]]
+name = "TENANT_ALL"
+type = "ratelimit"
+namespace_id = "2103"
+simple = { limit = 60, period = 60 }

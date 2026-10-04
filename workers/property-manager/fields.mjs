@@ -217,18 +217,18 @@ export const TENANT_LINK = {
 // plus other benefits. Field types and choices read live on 4 Oct 2026. "Unknown" is left off
 // the cap list: a tenant must never replace a known answer with Unknown.
 export const TENANT_ANSWERS = {
-  phone:          { id: GP.tenant.phone,          kind: 'phone' },
-  email:          { id: GP.tenant.email,          kind: 'email', max: 120 },
-  dob:            { id: GP.tenant.dob,            kind: 'dob' },
-  ni:             { id: GP.tenant.ni,             kind: 'ni' },
-  ucPayDay:       { id: GP.tenant.ucPayDay,       kind: 'day' },
-  household:      { id: GP.tenant.household,      kind: 'choice', choices: ['Single', 'Couple', 'With children'] },
-  otherAdults:    { id: GP.tenant.otherAdults,    kind: 'text', max: 300 },
-  capExemption:   { id: GP.tenant.capExemption,   kind: 'choice', choices: ['None (capped)', 'LCWRA', 'PIP or DLA', 'Carer', 'Earnings over threshold', 'Not on UC'] },
-  ctAccount:      { id: GP.tenant.ctAccount,      kind: 'text', max: 40 },
-  weeklyIncome:   { id: GP.tenant.weeklyIncome,   kind: 'money' },
-  weeklySpending: { id: GP.tenant.weeklySpending, kind: 'money' },
-  otherBenefits:  { id: GP.tenant.otherBenefits,  kind: 'text', max: 1000 },
+  phone:          { label: 'mobile', id: GP.tenant.phone,          kind: 'phone' },
+  email:          { label: 'email', id: GP.tenant.email,          kind: 'email', max: 120 },
+  dob:            { label: 'date of birth', id: GP.tenant.dob,            kind: 'dob' },
+  ni:             { label: 'National Insurance number', id: GP.tenant.ni,             kind: 'ni' },
+  ucPayDay:       { label: 'UC payment day', id: GP.tenant.ucPayDay,       kind: 'day' },
+  household:      { label: 'household', id: GP.tenant.household,      kind: 'choice', choices: ['Single', 'Couple', 'With children'] },
+  otherAdults:    { label: 'other adults', id: GP.tenant.otherAdults,    kind: 'text', max: 300 },
+  capExemption:   { label: 'benefit cap', id: GP.tenant.capExemption,   kind: 'choice', choices: ['None (capped)', 'LCWRA', 'PIP or DLA', 'Carer', 'Earnings over threshold', 'Not on UC'] },
+  ctAccount:      { label: 'council tax account', id: GP.tenant.ctAccount,      kind: 'text', max: 40 },
+  weeklyIncome:   { label: 'weekly income', id: GP.tenant.weeklyIncome,   kind: 'money' },
+  weeklySpending: { label: 'weekly spending', id: GP.tenant.weeklySpending, kind: 'money' },
+  otherBenefits:  { label: 'other benefits', id: GP.tenant.otherBenefits,  kind: 'text', max: 1000 },
 };
 
 export const GP_ROW_STATUS = ['Candidate', 'Adopted', 'In progress', 'Done', 'Dropped'];

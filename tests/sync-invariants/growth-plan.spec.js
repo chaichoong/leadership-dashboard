@@ -84,7 +84,10 @@ async function openPage(page, fx) {
       await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ records }) });
       return;
     }
-    await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ records: fx[tableId] || [] }) });
+    // A read of one record by id (the Notes re-read before the date of birth line).
+    const one = (new URL(url).searchParams.get('filterByFormula') || '').match(/^RECORD_ID\(\)='(rec\w+)'$/);
+    const rows = one ? (fx.fresh && fx.fresh[one[1]] ? [fx.fresh[one[1]]] : (fx[tableId] || []).filter(r => r.id === one[1])) : (fx[tableId] || []);
+    await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ records: rows }) });
   });
   // The link service (the property-manager Worker): never the real one from a test.
   const pm = [];
@@ -95,6 +98,7 @@ async function openPage(page, fx) {
     const reply = (obj, status = 200) => route.fulfill({ status, contentType: 'application/json', body: JSON.stringify(obj) });
     if (path === '/health') return reply({ ok: true, version: '1.1' });
     if (path === '/login-airtable') return reply({ ok: true, token: 'kev-session', exp: Math.floor(Date.now() / 1000) + 3600, who: 'Kevin Brittain' });
+    if (path === '/tenant-form/link' && fx.linkFails && fx.linkFails-- > 0) return reply({ ok: false, error: 'Sign in needed' }, 401);
     if (path === '/tenant-form/link') return reply({ ok: true, url: 'https://app.operationsdirector.co.uk/tenant-details.html#c=' + 'k'.repeat(32), expires: '2026-10-18', firstName: 'Adam' });
     if (path === '/tenant-form/link/off') return reply({ ok: true });
     return reply({ ok: false, error: 'not stubbed' }, 404);
@@ -449,7 +453,69 @@ test.describe('Growth Plan page', () => {
     expect(w.records[0].fields[T.ni]).toBe('QQ123456C');
     expect(w.records[0].fields[T.capExemption]).toBe('PIP or DLA');
     expect(w.records[0].fields['fldwCMFvYqbFXXzOO']).toBe('PIP daily living');   // Other Benefits (4 Oct 2026)
-    await expect(page.locator('#formSaved')).toHaveText('The tenant has not saved their own form');
+    await expect(page.locator('#formSaved')).toHaveText('The tenant had not saved their own form when this page loaded');
+  });
+
+  test('a save sends only what was changed, so the tenant\'s own answers saved since are never overwritten', async ({ page }) => {
+    const fx = fixtures();
+    Object.assign(fx[TBL.tenants][0].fields, { [T.phone]: '07700 900123', [T.ni]: 'AB123456C', [T.email]: 'adam@example.com', [T.meetingDate]: '2026-09-01' });
+    const writes = await openPage(page, fx);
+    const open = await openSelf(page, '18 Test Park');
+    await open.locator('button[data-act="open-form"]').first().click();
+    await expect(page.locator('#meetingForm')).toBeVisible();
+    await page.locator('#meetingSave').click();
+    await expect(page.locator('#toast')).toContainText('Nothing on the form has changed');
+    expect(writes.filter(x => x.tableId === TBL.tenants)).toEqual([]);
+    await page.locator('#meetingForm textarea[name="meetingNotes"]').fill('Talked about the cap');
+    await page.locator('#meetingSave').click();
+    await expect(page.locator('#toast')).toContainText('Meeting saved');
+    const w = writes.filter(x => x.tableId === TBL.tenants).pop();
+    expect(Object.keys(w.records[0].fields)).toEqual(['fld9IbA3CNxa2KBBE']);   // Meeting Notes only
+  });
+
+  test('the date of birth line re-reads Notes first, so a line added since the page loaded is kept', async ({ page }) => {
+    const fx = fixtures();
+    fx[TBL.tenants][2].fields[T.notes] = 'old line';
+    fx.fresh = { recT3: { id: 'recT3', fields: { [T.notes]: 'old line\n[2026-10-04 14:02 tenant link] Tenant details form saved' } } };
+    const writes = await openPage(page, fx);
+    const open = await openSelf(page, '18 Test Park');
+    await open.locator('input[data-dob="recT3"]').fill('1980-06-01');
+    await open.locator('button[data-act="save-dob"][data-tenant="recT3"]').click();
+    await expect(page.locator('#toast')).toContainText('Date of birth saved');
+    const w = writes.filter(x => x.tableId === TBL.tenants).pop();
+    expect(w.records[0].fields[T.notes]).toMatch(/^old line\n\[2026-10-04 14:02 tenant link\] Tenant details form saved\nDOB 1980-06-01 entered on the Growth Plan page/);
+  });
+
+  test('Notes that read back empty when the page had some stop the date of birth save', async ({ page }) => {
+    const fx = fixtures();
+    fx[TBL.tenants][2].fields[T.notes] = 'old line';
+    fx.fresh = { recT3: { id: 'recT3', fields: {} } };
+    const writes = await openPage(page, fx);
+    const open = await openSelf(page, '18 Test Park');
+    await open.locator('input[data-dob="recT3"]').fill('1980-06-01');
+    await open.locator('button[data-act="save-dob"][data-tenant="recT3"]').click();
+    await expect(page.locator('#toast')).toContainText('read back empty');
+    expect(writes.filter(x => x.tableId === TBL.tenants)).toEqual([]);
+  });
+
+  test('Copy tenant link shows that tenant in the form, so switching off acts on the link just made; an expired sign-in is redone once', async ({ page }) => {
+    const fx = fixtures();
+    fx.linkFails = 1;
+    const writes = await openPage(page, fx);
+    await page.locator('#formTenant').selectOption('recT2');
+    const open = await openSelf(page, '18 Test Park');
+    await open.locator('button[data-act="copy-link"][data-tenant="recT1"]').click();
+    await expect(page.locator('#linkBox')).toBeVisible();
+    await expect(page.locator('#formTenant')).toHaveValue('recT1');
+    expect(writes.pm.filter(x => x.path === '/login-airtable')).toHaveLength(2);
+    await page.locator('#linkOff').click();
+    await expect(page.locator('#toast')).toContainText('switched off');
+    expect(writes.pm.find(x => x.path === '/tenant-form/link/off').body).toEqual({ tenantId: 'recT1' });
+    // Choosing another tenant hides the box: it belonged to the one before.
+    await open.locator('button[data-act="copy-link"][data-tenant="recT1"]').click();
+    await expect(page.locator('#linkBox')).toBeVisible();
+    await page.locator('#formTenant').selectOption('recT2');
+    await expect(page.locator('#linkBox')).toBeHidden();
   });
 
   test('Copy tenant link makes the link through the Worker on Kevin\'s own key, shows it once, and can switch it off', async ({ page }) => {
