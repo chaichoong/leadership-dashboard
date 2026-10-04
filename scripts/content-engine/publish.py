@@ -697,13 +697,19 @@ def readable(path, timeout=30):
         return False
 
 
-def output_link(day, kind, ledger=None):
+def output_entry(day, kind, ledger=None):
+    """The ledger entry whose render made this episode's `kind` output, or None."""
     ledger = ledger if ledger is not None else watch.load_ledger()
     role = "teaser" if kind == "summary" else "episode"
     for v in ledger.values():
         if v.get("episode") == day and v.get("role") == role and (v.get("outputs") or {}).get(kind):
-            return v["outputs"][kind]
+            return v
     return None
+
+
+def output_link(day, kind, ledger=None):
+    v = output_entry(day, kind, ledger)
+    return v["outputs"][kind] if v else None
 
 
 def fetch_readable(day, kind, ledger=None, download=None):
@@ -713,31 +719,40 @@ def fetch_readable(day, kind, ledger=None, download=None):
     not enough (2057's full read its first 64 KB and then failed to copy, hourly, all day). Episodes rendered before
     the render recorded links still use the folder."""
     path = episode_files(day)[kind]
-    m = re.search(r"/d/([\w-]+)", output_link(day, kind, ledger) or "")
+    m = re.search(r"/d/([\w-]+)", output_link(day, kind, ledger) or "")   # output_link stays the way in: selftests stub it
     if not m: return path
+    ent = output_entry(day, kind, ledger) or {}
     dest = os.path.join(PUBLISH_CACHE, str(day), os.path.basename(path))
-    # THE COPY IS KEYED ON THE DRIVE FILE, NOT THE NAME (findings 20261003-agent-dispatch-735 and -737). A re-render
-    # uploads a NEW Drive file (drive_api.upload trashes the old one) and records its new link, but the copy kept the
-    # same name, so it was never fetched again: on 3 Oct 2026 episode 2081 published the 179 s Learnings clip Kevin had
-    # sent back instead of the 128 s re-cut. The id of the file each copy came from sits beside it; a copy with no id
-    # on record is from before this rule and is fetched again once.
-    fid, src = m.group(1), dest + ".driveid"
-    try:
-        with open(src) as fh: had = fh.read().strip()
-    except OSError:
-        had = None
-    if not (os.path.exists(dest) and os.path.getsize(dest) > 0 and had == fid):
+    # THE COPY IS KEYED ON THE RENDER THAT MADE IT, NOT THE NAME (findings 20261003-agent-dispatch-735 and -737). A
+    # re-render uploads a NEW Drive file and records its new link, but the copy kept the same name, so it was never
+    # fetched again: on 3 Oct 2026 episode 2081 published the 179 s Learnings clip Kevin had sent back instead of the
+    # 128 s re-cut. The key is the Drive file id plus the render's stamp (a render that fell back to the mounted folder
+    # may keep the id; a Learnings-only redo stamps lfmd_redone and refreshes only the Learnings files). The key of the
+    # copy sits beside it, and of a half copy beside that; a copy with no key on record is fetched again once.
+    fid = m.group(1)
+    made = max(ent.get("rendered") or "", ent.get("lfmd_redone") or "") if kind.startswith("lfmd") else (ent.get("rendered") or "")
+    key, src, part = (fid + " " + made).strip(), dest + ".driveid", dest + ".part"
+    def _read(p):
+        try:
+            with open(p) as fh: return fh.read().strip()
+        except OSError:
+            return None
+    def _write(p, text):
+        with open(p + ".tmp", "w") as fh: fh.write(text)
+        os.replace(p + ".tmp", p)
+    had = _read(src)
+    if not (os.path.exists(dest) and os.path.getsize(dest) > 0 and had == key):
         os.makedirs(os.path.dirname(dest), exist_ok=True)
         if download is None:
             import drive_api; download = drive_api.download
-        if os.path.exists(dest + ".part") and had != fid:
-            os.remove(dest + ".part")                     # a half copy of the OLD file must not be resumed into the new one
-        download(fid, dest + ".part")
-        os.replace(dest + ".part", dest)                  # only a whole file gets the real name
-        with open(src + ".tmp", "w") as fh: fh.write(fid)
-        os.replace(src + ".tmp", src)
+        if os.path.exists(part) and _read(part + ".driveid") != key:
+            os.remove(part)                               # a half copy of another render must never be resumed into this one
+        _write(part + ".driveid", key)                    # an interrupted fetch of THIS render resumes next time
+        download(fid, part)
+        os.replace(part, dest)                            # only a whole file gets the real name
+        os.replace(part + ".driveid", src)
         print("episode %d: %s fetched from Drive (%.0f MB)%s" % (day, kind, os.path.getsize(dest) / 1e6,
-              "; replaces the copy of an earlier render" if had and had != fid else ""))
+              "; replaces the copy of an earlier render" if had and had != key else ""))
     return dest
 
 
@@ -2114,6 +2129,21 @@ def selftest():
         os.remove(got + ".driveid")                                       # a copy cached before this rule: no id on record
         with _cl.redirect_stdout(_io.StringIO()): fetch_readable(2058, "full", led2, download=dl_new)
         assert len(fetched) == 3 and open(got + ".driveid").read() == "2NeW_re-cut", "a copy with no id on record is fetched once more"
+        # review, 4 Oct 2026: a render that fell back to the mounted folder may keep the Drive id; its new stamp still refetches
+        led3 = {"e": dict(led2["e"], rendered="2026-10-04T01:00:00")}
+        with _cl.redirect_stdout(_io.StringIO()): fetch_readable(2058, "full", led3, download=dl_new)
+        assert len(fetched) == 4 and open(got + ".driveid").read() == "2NeW_re-cut 2026-10-04T01:00:00", "same id, newer render: refetched"
+        # a half copy of THIS render resumes; a half copy of another render is thrown away first
+        led4 = {"e": dict(led3["e"], rendered="2026-10-05T01:00:00")}
+        seen = []
+        def dl_part(fid, dest): seen.append(os.path.exists(dest)); open(dest, "ab").write(b"z")
+        open(got + ".part", "wb").write(b"half"); open(got + ".part.driveid", "w").write("2NeW_re-cut 2026-10-05T01:00:00")
+        with _cl.redirect_stdout(_io.StringIO()): fetch_readable(2058, "full", led4, download=dl_part)
+        assert seen == [True] and open(got, "rb").read() == b"halfz", "this render's half copy is resumed"
+        led5 = {"e": dict(led3["e"], rendered="2026-10-06T01:00:00")}
+        open(got + ".part", "wb").write(b"old"); open(got + ".part.driveid", "w").write("2NeW_re-cut 2026-10-05T01:00:00")
+        with _cl.redirect_stdout(_io.StringIO()): fetch_readable(2058, "full", led5, download=dl_part)
+        assert seen == [True, False] and open(got, "rb").read() == b"z", "another render's half copy is thrown away"
     finally:
         globals()["episode_files"], globals()["PUBLISH_CACHE"] = real_files, real_cache; _shu.rmtree(tdir)
     asrc = inspect.getsource(adopt_youtube); assert "broken_uploads" in asrc, "a video judged broken is never adopted again"
