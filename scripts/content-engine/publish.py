@@ -716,13 +716,28 @@ def fetch_readable(day, kind, ledger=None, download=None):
     m = re.search(r"/d/([\w-]+)", output_link(day, kind, ledger) or "")
     if not m: return path
     dest = os.path.join(PUBLISH_CACHE, str(day), os.path.basename(path))
-    if not (os.path.exists(dest) and os.path.getsize(dest) > 0):
+    # THE COPY IS KEYED ON THE DRIVE FILE, NOT THE NAME (findings 20261003-agent-dispatch-735 and -737). A re-render
+    # uploads a NEW Drive file (drive_api.upload trashes the old one) and records its new link, but the copy kept the
+    # same name, so it was never fetched again: on 3 Oct 2026 episode 2081 published the 179 s Learnings clip Kevin had
+    # sent back instead of the 128 s re-cut. The id of the file each copy came from sits beside it; a copy with no id
+    # on record is from before this rule and is fetched again once.
+    fid, src = m.group(1), dest + ".driveid"
+    try:
+        with open(src) as fh: had = fh.read().strip()
+    except OSError:
+        had = None
+    if not (os.path.exists(dest) and os.path.getsize(dest) > 0 and had == fid):
         os.makedirs(os.path.dirname(dest), exist_ok=True)
         if download is None:
             import drive_api; download = drive_api.download
-        download(m.group(1), dest + ".part")
+        if os.path.exists(dest + ".part") and had != fid:
+            os.remove(dest + ".part")                     # a half copy of the OLD file must not be resumed into the new one
+        download(fid, dest + ".part")
         os.replace(dest + ".part", dest)                  # only a whole file gets the real name
-        print("episode %d: %s fetched from Drive (%.0f MB)" % (day, kind, os.path.getsize(dest) / 1e6))
+        with open(src + ".tmp", "w") as fh: fh.write(fid)
+        os.replace(src + ".tmp", src)
+        print("episode %d: %s fetched from Drive (%.0f MB)%s" % (day, kind, os.path.getsize(dest) / 1e6,
+              "; replaces the copy of an earlier render" if had and had != fid else ""))
     return dest
 
 
@@ -2089,6 +2104,16 @@ def selftest():
         assert fetched == ["1AbC_x-9"] and got.startswith(globals()["PUBLISH_CACHE"]) and os.path.getsize(got) == 10, (fetched, got)
         assert fetch_readable(2058, "full", led, download=dl) == got and fetched == ["1AbC_x-9"], "fetched once, then the local copy"
         assert fetch_readable(2058, "full", {}, download=dl).endswith("absent_full.mp4"), "no Drive link: the caller's own check decides"
+        # 735/737 (3 Oct 2026): a re-render records a NEW Drive file; the copy of the old render must not be used
+        def dl_new(fid, dest): fetched.append(fid); open(dest, "wb").write(b"y" * 7)
+        led2 = {"e": {"episode": 2058, "role": "episode", "outputs": {"full": "https://drive.google.com/file/d/2NeW_re-cut/view"}}}
+        with _cl.redirect_stdout(_io.StringIO()) as said: again = fetch_readable(2058, "full", led2, download=dl_new)
+        assert again == got and fetched == ["1AbC_x-9", "2NeW_re-cut"] and os.path.getsize(again) == 7, ("re-render refetched", fetched)
+        assert "replaces the copy of an earlier render" in said.getvalue(), said.getvalue()
+        assert fetch_readable(2058, "full", led2, download=dl_new) == got and fetched[-1] == "2NeW_re-cut" and len(fetched) == 2, "the new copy is reused"
+        os.remove(got + ".driveid")                                       # a copy cached before this rule: no id on record
+        with _cl.redirect_stdout(_io.StringIO()): fetch_readable(2058, "full", led2, download=dl_new)
+        assert len(fetched) == 3 and open(got + ".driveid").read() == "2NeW_re-cut", "a copy with no id on record is fetched once more"
     finally:
         globals()["episode_files"], globals()["PUBLISH_CACHE"] = real_files, real_cache; _shu.rmtree(tdir)
     asrc = inspect.getsource(adopt_youtube); assert "broken_uploads" in asrc, "a video judged broken is never adopted again"
