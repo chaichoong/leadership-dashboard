@@ -10,10 +10,11 @@ engagement." He approved the plan as-is the same day:
   day 7                               reminder 2, the same
   day 10                              a task for Roy to reach the tenant in person or by phone
 
-counted from the day the email carrying the link went: the first card linked to the tenant that the send door
-stamped SENT on or after the link was made (review, 5 Oct 2026: a link is made when the card is drafted, days
-before Kevin may approve it). While a card to the tenant waits for Kevin's approval, the chase waits; a link no card
-ever carried to them is never chased. One step at a time: a step waits while the one before it is with Kevin, and
+counted from the day the email carrying the link went: the first card linked to the tenant whose Agent Output holds
+the form link (LINK_MARK) and that the send door stamped SENT on or after the link was made (reviews, 5 Oct 2026: a
+link is made when the card is drafted, days before Kevin may approve it, and a tenant's other cards, a late-rent email
+or a reply, never carried it). While such a card waits for Kevin's approval, the chase waits; a link no card ever
+carried to them is never chased. One step at a time: a step waits while the one before it is with Kevin, and
 never comes within GAP_DAYS of the last thing that went. A reminder counts as done only once it went (its SENT
 stamp): one closed without going (Kevin's "Reject and close" sets Completed, review 5 Oct 2026) ends the chase, as
 Cancelled does. The chase also stops on a save made after the link, or after Roy's step. A tenant on the
@@ -31,7 +32,8 @@ LINK_DAYS = 14                      # workers/property-manager/worker.js LINK_DA
 STEPS = (("1", 3), ("2", 7), ("roy", 10))
 GAP_DAYS = 3                        # never a step within three days of the last thing that went to the tenant
 WINDOW_DAYS = 30                    # a chase is started only inside this; one under way runs to its end
-CARD_DAYS = 45                      # how far back the cards linked to a tenant are read
+LINK_MARK = "tenant-details.html"   # the form's page: in the Agent Output of every card that carries a link
+AGENT_OUTPUT = "fldzswp8fx6PqpLQ5"  # Tasks: Agent Output (send-email.py AF["agentOutput"])
 PREFIX = "RENT DETAILS: "           # never "RENT FORM: ": the robot's direct rent payment form card
 KEY_MARK = "RENT CHECK KEY: details:"
 TN = {"name": "fldxBKW7QnujSDWqA", "saved": "fldc7XMcQcYY6C2Xa", "expires": "fldsgGmWIUX48t4I7",
@@ -72,13 +74,13 @@ def read_links(rc):
 
 def read_cards(rc, day):
     """(chases, cards). chases: {key: {id, status, sent}} for every form-chase task, whatever its status (a closed
-    one is a step done or ended). cards: {tenant id: [{id, status, sent}]} for every OTHER task created in the last
-    CARD_DAYS that links the tenant: the card that carried the link, and any card still waiting for Kevin."""
-    since = (day - timedelta(days=CARD_DAYS)).isoformat()
+    one is a step done or ended). cards: {tenant id: [{id, status, sent}]} for every OTHER task whose Agent Output
+    carries the form link (LINK_MARK) and that links the tenant, however old: the card that carried a link, or one
+    still waiting for Kevin. Field NAMES in the formula: a rename is an error, never zero rows."""
     chases, cards = {}, {}
     for rec in rc.fetch_all(rc.T_TASKS, {"fields[]": [rc.TK["status"], rc.TK["notes"], rc.TK["description"],
-                                                      rc.TK["tenants"]],
-                                         "filterByFormula": f"OR(IS_AFTER(CREATED_TIME(), '{since}'), "
+                                                      rc.TK["tenants"], AGENT_OUTPUT],
+                                         "filterByFormula": f"OR(FIND('{LINK_MARK}', {{Agent Output}}&''), "
                                                             f"FIND('{KEY_MARK}', {{Notes}}&''))"}):
         f = rec.get("fields") or {}
         notes = str(f.get(rc.TK["notes"]) or "")
@@ -88,7 +90,7 @@ def read_cards(rc, day):
                 if ln.strip().startswith(KEY_MARK)]
         for key in keys:
             chases[key] = view
-        if not keys:
+        if not keys and LINK_MARK in str(f.get(AGENT_OUTPUT) or ""):
             for t in f.get(rc.TK["tenants"]) or []:
                 cards.setdefault(t, []).append(view)
     return chases, cards
@@ -121,7 +123,7 @@ def plan(tid, f, chases, cards, day, live, busy=False, no_chase=False):
         if waiting:
             return None, "the form link's email is with Kevin, so no reminder yet"
         return None, ("" if (day - anchor).days > WINDOW_DAYS
-                      else "a form link was made, but no card has carried it to the tenant, so nobody is chased")
+                      else "a form link was made, but no card has emailed it to the tenant, so nobody is chased")
     carried = went[0]
     if not steps["1"] and (day - carried).days > WINDOW_DAYS:
         return None, ""                               # never started inside the window: history
@@ -133,7 +135,7 @@ def plan(tid, f, chases, cards, day, live, busy=False, no_chase=False):
     if busy:
         return None, "the form is not filled in; a late-rent chase is talking to the tenant, so this one waits"
     if waiting:
-        return None, "the form is not filled in; a card to the tenant is with Kevin, so this one waits"
+        return None, "the form is not filled in; a new form link email to the tenant is with Kevin, so this one waits"
     last = max(went)                                  # the last thing that went to the tenant, chase steps included
     for step, at in STEPS:
         task = steps[step]

@@ -79,12 +79,12 @@ print(json.dumps({
 }))`);
     expect(r.withKevin).toEqual([null, "the form link's email is with Kevin, so no reminder yet"]);
     // Kevin's "Reject and close" (Completed, nothing sent): the link never reached them.
-    expect(r.rejected).toEqual([null, 'a form link was made, but no card has carried it to the tenant, so nobody is chased']);
-    expect(r.none).toEqual([null, 'a form link was made, but no card has carried it to the tenant, so nobody is chased']);
-    expect(r.older).toEqual([null, 'a form link was made, but no card has carried it to the tenant, so nobody is chased']);
+    expect(r.rejected).toEqual([null, 'a form link was made, but no card has emailed it to the tenant, so nobody is chased']);
+    expect(r.none).toEqual([null, 'a form link was made, but no card has emailed it to the tenant, so nobody is chased']);
+    expect(r.older).toEqual([null, 'a form link was made, but no card has emailed it to the tenant, so nobody is chased']);
     // Emailed 8 Oct (Kevin approved late): reminder 1 on 11 Oct, not 8 Oct.
     expect(r.lateApproval).toEqual([null, 'the form is not filled in; reminder 1 on 11 Oct']);
-    expect(r.otherCardWaits).toEqual([null, 'the form is not filled in; a card to the tenant is with Kevin, so this one waits']);
+    expect(r.otherCardWaits).toEqual([null, 'the form is not filled in; a new form link email to the tenant is with Kevin, so this one waits']);
   });
 
   it('saved since the link was made (in London time): nothing; saved before it: still chased', () => {
@@ -240,7 +240,11 @@ def fetch_all(table, params):
     if table == "tblqB8b22hKBL4PF1":
         return [{"id": "recCHASE00000001", "fields": {"fS": "Completed", "fNo": "RENT CHECK KEY: details:recTENANTFORM0001:2026-10-05:1\\n\\n[08 Oct 2026 10:15 — send-email] SENT: email to sam@example.com", "fTe": [SAM]}},
                 {"id": "recCHASE00000002", "fields": {"fS": "Today", "fDe": "x\\nRENT CHECK KEY: details:recTENANTFORM0001:2026-10-05:2", "fTe": [SAM]}},
-                {"id": "recCARRIER000001", "fields": {"fS": "Completed", "fNo": "[05 Oct 2026 14:31 — send-email] SENT: email to sam@example.com", "fTe": [SAM]}}]
+                {"id": "recCARRIER000001", "fields": {"fS": "Completed", "fNo": "[05 Oct 2026 14:31 — send-email] SENT: email to sam@example.com", "fTe": [SAM],
+                 fc.AGENT_OUTPUT: "TO: sam@example.com\\n---\\nPlease fill in https://pm.example.test/tenant-details.html#x"}},
+                # A late-rent email linked to the tenant, sent later: it never carried the link (review, 5 Oct 2026).
+                {"id": "recLATERENT00001", "fields": {"fS": "Completed", "fNo": "[06 Oct 2026 09:00 — send-email] SENT: email to sam@example.com", "fTe": [SAM],
+                 fc.AGENT_OUTPUT: "TO: sam@example.com\\n---\\nYour rent has not reached us."}}]
     return [{"id": SAM, "fields": tenant("Sam", "2026-10-19")}]
 rc = types.SimpleNamespace(T_TENANTS="tblX4elTuu01gwBYh", T_TASKS="tblqB8b22hKBL4PF1",
                            TK={"status": "fS", "notes": "fNo", "description": "fDe", "tenants": "fTe"},
@@ -251,10 +255,10 @@ print(json.dumps({"chases": {k: [v["id"], v["status"], str(v["sent"])] for k, v 
                   "cards": {k: [[c["id"], str(c["sent"])] for c in v] for k, v in cards.items()}, "links": list(links), "seen": seen}))`);
     expect(r.chases).toEqual({ 'recTENANTFORM0001:2026-10-05:1': ['recCHASE00000001', 'Completed', '2026-10-08'],
       'recTENANTFORM0001:2026-10-05:2': ['recCHASE00000002', 'Today', 'None'] });
-    // A chase step is never the card that carried the link.
+    // A chase step, or a card that never held the link, is never the card that carried it.
     expect(r.cards).toEqual({ recTENANTFORM0001: [['recCARRIER000001', '2026-10-05']] });
     expect(r.links).toEqual(['recTENANTFORM0001']);
-    expect(r.seen).toEqual([['tblqB8b22hKBL4PF1', "OR(IS_AFTER(CREATED_TIME(), '2026-09-05'), FIND('RENT CHECK KEY: details:', {Notes}&''))"],
+    expect(r.seen).toEqual([['tblqB8b22hKBL4PF1', "OR(FIND('tenant-details.html', {Agent Output}&''), FIND('RENT CHECK KEY: details:', {Notes}&''))"],
       ['tblX4elTuu01gwBYh', "LEN({Tenant Form Code Expires}&'')>0"]]);
   });
 });
