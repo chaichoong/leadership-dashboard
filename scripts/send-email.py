@@ -94,8 +94,10 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from adobe_audit import audit_problem  # noqa: E402
 from approval_evidence import approval_evidence_problem  # noqa: E402
 from agent_email_format import (  # noqa: E402
+    TRIAL_STAMP,
     EmailFormatError,
     parse_output as parse_email_output,
+    parse_text,
     BUSINESS_SENDER,
     BUSINESS_BRAND_RE,
     PROPERTY_SENDER,
@@ -358,6 +360,9 @@ def parse_output(output, task_id):
     guessing here means guessing a recipient.
     """
     try:
+        # The TEXT lines first (review, 4 Oct 2026): an edit after approval could move them below the
+        # headers, and they would go out in the tenant's email with the number in it.
+        parse_text(output)
         return parse_email_output(output)
     except EmailFormatError as exc:
         sys.exit(f"ERROR: task {task_id} {exc} "
@@ -375,11 +380,17 @@ def load_approved(task_id, require_approval=True, rule=None):
     f = rec.get("fields", {})
     # A TRIAL AGENT'S CARD IS NEVER SENT (2 Oct 2026), approved or not, by rule or not. First,
     # because every send, preview and rule send reads the task through here.
+    # An approval is dated against an ended trial (review, 4 Oct 2026); a rule send or a preview has none.
     trial = trial_problem(list(f.get(AF["sentForApprovalBy"]) or []) + list(f.get(AF["teamMember"]) or []),
-                          f.get(AF["name"], ""), f.get(AF["notes"], ""))
+                          f.get(AF["name"], ""), f.get(AF["notes"], ""),
+                          (f.get(AF["approvedAt"]) or "") if require_approval and not rule else None)
     if trial:
         sys.exit(f"REFUSED: task {task_id} is a trial card and is never sent: {trial}.\n"
                  "         Kevin's verdict is the result. Close it with: agent-dispatch.py trial-settle")
+    # A card the trial settled stays history after the trial ends (review, 4 Oct 2026): at the cut-over,
+    # the cards Kevin approved during the trial must never become a queue of emails.
+    if TRIAL_STAMP in str(f.get(AF["notes"], "") or ""):
+        sys.exit(f"REFUSED: task {task_id} was settled on the trial ({TRIAL_STAMP}); it is history and is never sent.")
     if rule:
         # THE RULE SEND (Kevin, 17 Sep 2026). Not approved by Kevin, so the
         # email must pass the rule itself, re-checked HERE from the stored task

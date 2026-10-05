@@ -84,8 +84,26 @@ async function openPage(page, fx) {
       await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ records }) });
       return;
     }
-    await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ records: fx[tableId] || [] }) });
+    // A read of one record by id (the Notes re-read before the date of birth line).
+    const one = (new URL(url).searchParams.get('filterByFormula') || '').match(/^RECORD_ID\(\)='(rec\w+)'$/);
+    const rows = one ? (fx.fresh && fx.fresh[one[1]] ? [fx.fresh[one[1]]] : (fx[tableId] || []).filter(r => r.id === one[1])) : (fx[tableId] || []);
+    await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ records: rows }) });
   });
+  // The link service (the property-manager Worker): never the real one from a test.
+  const pm = [];
+  await page.route('https://pm.operationsdirector.co.uk/**', async route => {
+    const req = route.request(); const path = new URL(req.url()).pathname;
+    let body = null; try { body = req.postDataJSON(); } catch (e) { body = null; }
+    pm.push({ path, method: req.method(), body, auth: req.headers()['authorization'] || '' });
+    const reply = (obj, status = 200) => route.fulfill({ status, contentType: 'application/json', body: JSON.stringify(obj) });
+    if (path === '/health') return reply({ ok: true, version: '1.1' });
+    if (path === '/login-airtable') return reply({ ok: true, token: 'kev-session', exp: Math.floor(Date.now() / 1000) + 3600, who: 'Kevin Brittain' });
+    if (path === '/tenant-form/link' && fx.linkFails && fx.linkFails-- > 0) return reply({ ok: false, error: 'Sign in needed' }, 401);
+    if (path === '/tenant-form/link') return reply({ ok: true, url: 'https://app.operationsdirector.co.uk/tenant-details.html#c=' + 'k'.repeat(32), expires: '2026-10-18', firstName: 'Adam' });
+    if (path === '/tenant-form/link/off') return reply({ ok: true });
+    return reply({ ok: false, error: 'not stubbed' }, 404);
+  });
+  writes.pm = pm;
   await page.goto('/growth-plan.html');
   await expect(page.locator('#dashboard')).toBeVisible({ timeout: 20000 });
   await expect(page.locator('#selfList .pack').first()).toBeVisible();
@@ -427,12 +445,136 @@ test.describe('Growth Plan page', () => {
     await page.locator('#meetingForm input[name="ni"]').fill('QQ 12 34 56 C');
     await page.locator('#meetingForm select[name="capExemption"]').selectOption('PIP or DLA');
     await page.locator('#meetingForm input[name="meetingDate"]').fill('2026-09-16');
+    await page.locator('#meetingForm textarea[name="otherBenefits"]').fill('PIP daily living');
     await page.locator('#meetingSave').click();
     await expect(page.locator('#toast')).toContainText('Meeting saved');
     const w = writes.filter(x => x.tableId === TBL.tenants).pop();
     expect(w.records[0].id).toBe('recT1');
     expect(w.records[0].fields[T.ni]).toBe('QQ123456C');
     expect(w.records[0].fields[T.capExemption]).toBe('PIP or DLA');
+    expect(w.records[0].fields['fldwCMFvYqbFXXzOO']).toBe('PIP daily living');   // Other Benefits (4 Oct 2026)
+    await expect(page.locator('#formSaved')).toHaveText('The tenant had not saved their own form when this page loaded');
+  });
+
+  test('a save sends only what was changed, so the tenant\'s own answers saved since are never overwritten', async ({ page }) => {
+    const fx = fixtures();
+    Object.assign(fx[TBL.tenants][0].fields, { [T.phone]: '07700 900123', [T.ni]: 'AB123456C', [T.email]: 'adam@example.com', [T.meetingDate]: '2026-09-01' });
+    const writes = await openPage(page, fx);
+    const open = await openSelf(page, '18 Test Park');
+    await open.locator('button[data-act="open-form"]').first().click();
+    await expect(page.locator('#meetingForm')).toBeVisible();
+    await page.locator('#meetingSave').click();
+    await expect(page.locator('#toast')).toContainText('Nothing on the form has changed');
+    expect(writes.filter(x => x.tableId === TBL.tenants)).toEqual([]);
+    await page.locator('#meetingForm textarea[name="meetingNotes"]').fill('Talked about the cap');
+    await page.locator('#meetingSave').click();
+    await expect(page.locator('#toast')).toContainText('Meeting saved');
+    const w = writes.filter(x => x.tableId === TBL.tenants).pop();
+    expect(Object.keys(w.records[0].fields)).toEqual(['fld9IbA3CNxa2KBBE']);   // Meeting Notes only
+  });
+
+  test('the date of birth line re-reads Notes first, so a line added since the page loaded is kept', async ({ page }) => {
+    const fx = fixtures();
+    fx[TBL.tenants][2].fields[T.notes] = 'old line';
+    fx.fresh = { recT3: { id: 'recT3', fields: { [T.notes]: 'old line\n[2026-10-04 14:02 tenant link] Tenant details form saved' } } };
+    const writes = await openPage(page, fx);
+    const open = await openSelf(page, '18 Test Park');
+    await open.locator('input[data-dob="recT3"]').fill('1980-06-01');
+    await open.locator('button[data-act="save-dob"][data-tenant="recT3"]').click();
+    await expect(page.locator('#toast')).toContainText('Date of birth saved');
+    const w = writes.filter(x => x.tableId === TBL.tenants).pop();
+    expect(w.records[0].fields[T.notes]).toMatch(/^old line\n\[2026-10-04 14:02 tenant link\] Tenant details form saved\nDOB 1980-06-01 entered on the Growth Plan page/);
+  });
+
+  test('a date of birth with a five-digit year is refused, not read as its first four digits', async ({ page }) => {
+    const writes = await openPage(page, fixtures());
+    const open = await openSelf(page, '18 Test Park');
+    await open.locator('input[data-dob="recT3"]').fill('20001-05-01');
+    await open.locator('button[data-act="save-dob"][data-tenant="recT3"]').click();
+    await expect(page.locator('#toast')).toContainText('does not look like a tenant');
+    expect(writes.filter(x => x.tableId === TBL.tenants)).toEqual([]);
+  });
+
+  test('Notes that read back empty when the page had some stop the date of birth save', async ({ page }) => {
+    const fx = fixtures();
+    fx[TBL.tenants][2].fields[T.notes] = 'old line';
+    fx.fresh = { recT3: { id: 'recT3', fields: {} } };
+    const writes = await openPage(page, fx);
+    const open = await openSelf(page, '18 Test Park');
+    await open.locator('input[data-dob="recT3"]').fill('1980-06-01');
+    await open.locator('button[data-act="save-dob"][data-tenant="recT3"]').click();
+    await expect(page.locator('#toast')).toContainText('read back empty');
+    expect(writes.filter(x => x.tableId === TBL.tenants)).toEqual([]);
+  });
+
+  test('Copy tenant link shows that tenant in the form, so switching off acts on the link just made; an expired sign-in is redone once', async ({ page }) => {
+    const fx = fixtures();
+    fx.linkFails = 1;
+    const writes = await openPage(page, fx);
+    await page.locator('#formTenant').selectOption('recT2');
+    const open = await openSelf(page, '18 Test Park');
+    await open.locator('button[data-act="copy-link"][data-tenant="recT1"]').click();
+    await expect(page.locator('#linkBox')).toBeVisible();
+    await expect(page.locator('#formTenant')).toHaveValue('recT1');
+    expect(writes.pm.filter(x => x.path === '/login-airtable')).toHaveLength(2);
+    await page.locator('#linkOff').click();
+    await expect(page.locator('#toast')).toContainText('switched off');
+    expect(writes.pm.find(x => x.path === '/tenant-form/link/off').body).toEqual({ tenantId: 'recT1' });
+    // Bringing another tenant into the form, by the picker or by their own form button, hides the
+    // box: it belonged to the one before.
+    await open.locator('button[data-act="copy-link"][data-tenant="recT1"]').click();
+    await expect(page.locator('#linkBox')).toBeVisible();
+    await page.locator('#formTenant').selectOption('recT2');
+    await expect(page.locator('#linkBox')).toBeHidden();
+    await open.locator('button[data-act="copy-link"][data-tenant="recT1"]').click();
+    await expect(page.locator('#linkBox')).toBeVisible();
+    await page.locator('#selfList .pack.open button[data-act="open-form"][data-tenant="recT2"]').click();
+    await expect(page.locator('#linkBox')).toBeHidden();
+    await expect(page.locator('#linkUrl')).toHaveValue('');
+  });
+
+  test('an old badly written value nobody touched never blocks a save', async ({ page }) => {
+    const fx = fixtures();
+    fx[TBL.tenants][0].fields[T.ni] = 'not an NI number';
+    const writes = await openPage(page, fx);
+    const open = await openSelf(page, '18 Test Park');
+    await open.locator('button[data-act="open-form"]').first().click();
+    await page.locator('#meetingForm textarea[name="meetingNotes"]').fill('Talked about the cap');
+    await page.locator('#meetingSave').click();
+    await expect(page.locator('#toast')).toContainText('Meeting saved');
+    const w = writes.filter(x => x.tableId === TBL.tenants).pop();
+    expect(Object.keys(w.records[0].fields)).not.toContain(T.ni);
+    // Changing it to another bad value is still refused.
+    await page.locator('#meetingForm input[name="ni"]').fill('still not one');
+    await page.locator('#meetingSave').click();
+    await expect(page.locator('#toast')).toContainText('National Insurance number should look like');
+  });
+
+  test('Copy tenant link makes the link through the Worker on Kevin\'s own key, shows it once, and can switch it off', async ({ page }) => {
+    const fx = fixtures();
+    fx[TBL.tenants][0].fields['fldc7XMcQcYY6C2Xa'] = '2026-10-04T13:02:00.000Z';   // Tenant Form Last Saved
+    const writes = await openPage(page, fx);
+    // The health bar's link service check reads the Worker's answer.
+    await expect.poll(() => page.evaluate(() => (window._growthPlan.linkHealth || {}).version)).toBe('1.1');
+    const open = await openSelf(page, '18 Test Park');
+    await open.locator('button[data-act="copy-link"][data-tenant="recT1"]').click();
+    await expect(page.locator('#linkBox')).toBeVisible();
+    await expect(page.locator('#linkUrl')).toHaveValue('https://app.operationsdirector.co.uk/tenant-details.html#c=' + 'k'.repeat(32));
+    await expect(page.locator('#linkText')).toContainText('Form link for Adam Older, works until 2026-10-18');
+    await expect(page.locator('#linkWarn')).toBeHidden();
+    // Signed in to the Worker with Kevin's own key, then the link made on that session.
+    expect(writes.pm.find(x => x.path === '/login-airtable').body).toEqual({ pat: MOCK_PAT });
+    const made = writes.pm.find(x => x.path === '/tenant-form/link');
+    expect(made.body).toEqual({ tenantId: 'recT1' });
+    expect(made.auth).toBe('Bearer kev-session');
+    // A link writes nothing to Airtable from the page: the Worker holds the code's hash.
+    expect(writes.filter(x => x.tableId === TBL.tenants)).toEqual([]);
+    await page.locator('#selfList .pack.open button[data-act="open-form"]').first().click();
+    await expect(page.locator('#formSaved')).toContainText('The tenant last saved their own form 4 Oct');
+    await page.locator('#linkOff').click();
+    await expect(page.locator('#toast')).toContainText("Adam Older's form link is switched off");
+    expect(writes.pm.find(x => x.path === '/tenant-form/link/off').body).toEqual({ tenantId: 'recT1' });
+    await expect(page.locator('#linkBox')).toBeHidden();
   });
 
   test('review fix 2: unknown council tax is marked on the grid and named', async ({ page }) => {

@@ -1,0 +1,223 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="robots" content="noindex, nofollow">
+  <meta name="referrer" content="no-referrer">
+  <title>Your details | Agile Lets</title>
+  <link rel="stylesheet" href="css/tokens.css?v=1">
+  <style>
+    *{box-sizing:border-box;}
+    body{margin:0;background:var(--bg-app);color:var(--text-primary);
+         font-family:var(--font-family-base,'DM Sans',system-ui,sans-serif);line-height:1.5;}
+    .page{max-width:560px;margin:0 auto;padding:var(--space-6) var(--space-4) 64px;}
+    .head{padding:var(--space-6) 0 var(--space-4);}
+    .head .mark{font-size:13px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:var(--accent);}
+    .head h1{font-size:26px;margin:var(--space-2) 0 var(--space-2);font-weight:700;}
+    .head p{color:var(--text-secondary);font-size:15px;margin:0;}
+    .card{background:var(--bg-surface);border:1px solid var(--border-default);border-radius:var(--radius-lg);
+          padding:var(--space-5) var(--space-4) var(--space-4);margin-bottom:var(--space-4);}
+    .card h2{font-size:16px;margin:0 0 4px;font-weight:700;}
+    .card .desc{color:var(--text-muted);font-size:13px;margin:0 0 var(--space-4);}
+    label{display:block;font-size:13px;font-weight:600;margin-bottom:var(--space-4);color:var(--text-secondary);}
+    label .hint{display:block;font-weight:400;color:var(--text-muted);font-size:12px;}
+    input,select,textarea{display:block;width:100%;margin-top:6px;padding:11px 12px;border:1px solid var(--border-default);
+      border-radius:var(--radius-md);font-size:16px;font-family:inherit;background:var(--bg-app);color:var(--text-primary);}
+    input:focus,select:focus,textarea:focus{outline:none;border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-soft);}
+    textarea{resize:vertical;min-height:64px;}
+    .btn{background:var(--accent);color:var(--accent-on);border:0;padding:13px 20px;border-radius:var(--radius-md);
+         font-size:15px;font-weight:600;font-family:inherit;cursor:pointer;}
+    .btn:hover{background:var(--accent-hover);}
+    .btn:disabled{opacity:.6;cursor:default;}
+    .btn.ghost{background:var(--bg-surface);color:var(--text-primary);border:1px solid var(--border-default);}
+    .row{display:flex;align-items:center;gap:var(--space-3);flex-wrap:wrap;}
+    .status{font-size:14px;color:var(--text-secondary);}
+    .status.ok{color:var(--success);font-weight:600;}
+    .status.bad{color:var(--danger);font-weight:600;}
+    .notice{background:var(--bg-surface);border:1px solid var(--border-default);border-radius:var(--radius-lg);
+            padding:var(--space-6) var(--space-5);text-align:center;color:var(--text-secondary);font-size:15px;}
+    .notice.bad{border-color:var(--danger);}
+    .privacy{color:var(--text-muted);font-size:12px;margin:var(--space-4) 0 0;}
+    [hidden]{display:none !important;}
+  </style>
+</head>
+<body>
+<main class="page">
+  <div class="head">
+    <div class="mark">Agile Lets</div>
+    <h1>Your details</h1>
+    <p id="hello">Checking your link…</p>
+  </div>
+
+  <div id="loading" class="notice" role="status">Checking your link…</div>
+  <div id="gone" class="notice bad" role="alert" hidden>This link is not working. Reply to the email or text we sent you and we will send you a new one.</div>
+  <div id="failed" class="notice bad" role="alert" hidden>
+    <p id="failedText">We could not reach our system just now.</p>
+    <button class="btn ghost" id="retry" type="button">Try again</button>
+  </div>
+
+  <form id="form" autocomplete="on" novalidate hidden>
+    <section class="card">
+      <h2>You</h2>
+      <p class="desc">Fill in what you can. Anything you leave blank stays as it is on your record.</p>
+      <label>Mobile number<input type="tel" name="phone" autocomplete="tel" maxlength="25"></label>
+      <label>Email address<span class="hint">The one on your Universal Credit account</span><input type="email" name="email" autocomplete="email" maxlength="120"></label>
+      <label>Date of birth<input type="date" name="dob" min="1920-01-01" max="2010-12-31"></label>
+      <label>National Insurance number<span class="hint">It looks like AB 12 34 56 C</span><input type="text" name="ni" maxlength="13" autocapitalize="characters" autocomplete="off"></label>
+    </section>
+
+    <section class="card">
+      <h2>Universal Credit</h2>
+      <label>Day of the month your Universal Credit is paid<input type="number" name="ucPayDay" min="1" max="31" inputmode="numeric"></label>
+      <label>Who lives with you
+        <select name="household"><option value="">Choose…</option><option>Single</option><option>Couple</option><option>With children</option></select></label>
+      <label>The benefit cap<span class="hint">If you are not sure, leave it blank</span>
+        <select name="capExemption">
+          <option value="">Choose…</option>
+          <option value="None (capped)">My Universal Credit is capped</option>
+          <option value="LCWRA">Not capped: I have limited capability for work (LCWRA)</option>
+          <option value="PIP or DLA">Not capped: someone in my home gets PIP or DLA</option>
+          <option value="Carer">Not capped: I get Carer's Allowance or the carer element</option>
+          <option value="Earnings over threshold">Not capped: I earn enough from work</option>
+          <option value="Not on UC">I do not get Universal Credit</option>
+        </select></label>
+      <label>Other benefits you get<span class="hint">For example PIP, Carer's Allowance or Child Benefit</span><textarea name="otherBenefits" maxlength="1000" rows="2"></textarea></label>
+    </section>
+
+    <section class="card">
+      <h2>Council tax and money</h2>
+      <p class="desc">We use these to ask the council for help with your rent and council tax.</p>
+      <label>Other adults who live with you<span class="hint">Names, or "none"</span><input type="text" name="otherAdults" maxlength="300"></label>
+      <label>Council tax account number<input type="text" name="ctAccount" maxlength="40" autocomplete="off"></label>
+      <label>Money coming in each week (£)<input type="number" name="weeklyIncome" min="0" max="5000" step="0.01" inputmode="decimal"></label>
+      <label>Money going out each week (£)<input type="number" name="weeklySpending" min="0" max="5000" step="0.01" inputmode="decimal"></label>
+    </section>
+
+    <section class="card">
+      <div class="row">
+        <button class="btn" id="save" type="submit">Save my details</button>
+        <span class="status" id="saveStatus" role="status" aria-live="polite"></span>
+      </div>
+    </section>
+
+    <section class="card">
+      <h2>Your Universal Credit statement</h2>
+      <p class="desc">A photo of your latest statement from your Universal Credit account. A screenshot is fine.</p>
+      <label>Photo or PDF<input type="file" id="file" accept="image/jpeg,image/png,image/heic,image/heif,.heic,.heif,application/pdf"></label>
+      <div class="row">
+        <button class="btn ghost" id="send" type="button">Send the photo</button>
+        <span class="status" id="fileStatus" role="status" aria-live="polite"></span>
+      </div>
+    </section>
+
+    <p class="privacy" id="privacy">Agile Lets asks for these details to set up your rent payments and to apply for help with your housing costs. Only the Agile Lets team sees them, and we share them only where you have signed to let us.</p>
+  </form>
+</main>
+
+<script>
+(function () {
+  'use strict';
+  // The tenant details form (task recrmZTcOHg8vPlZk; Kevin approved the plan on 1 Oct 2026).
+  // The code after #c= is this tenant's pass for his own record. It never leaves the page except
+  // in the body of a request to our Worker, and nothing on this page holds a database key.
+  const API = 'https://pm.operationsdirector.co.uk';
+  const FIELDS = ['phone', 'email', 'dob', 'ni', 'ucPayDay', 'household', 'capExemption', 'otherBenefits', 'otherAdults', 'ctAccount', 'weeklyIncome', 'weeklySpending'];
+  const LIMIT = Math.floor(3.7 * 1024 * 1024);
+  const $ = id => document.getElementById(id);
+  const code = (String(location.hash).match(/[#&]c=([A-Za-z0-9_-]{32})(?:&|$)/) || [])[1] || '';
+
+  function show(which) {
+    ['loading', 'gone', 'failed', 'form'].forEach(id => { $(id).hidden = id !== which; });
+    if (which !== 'form') $('hello').textContent = which === 'loading' ? 'Checking your link…' : '';
+  }
+  function status(id, text, kind) {
+    const el = $(id);
+    el.textContent = text;
+    el.className = 'status' + (kind ? ' ' + kind : '');
+  }
+  async function api(path, payload) {
+    const res = await fetch(API + path, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(Object.assign({ code }, payload)) });
+    let body = null;
+    try { body = await res.json(); } catch (e) { body = null; }
+    return { status: res.status, body: body || {} };
+  }
+
+  async function open() {
+    if (!code) return show('gone');
+    show('loading');
+    try {
+      const r = await api('/tenant-form/open', {});
+      if (r.status === 404) return show('gone');
+      if (r.status !== 200 || !r.body.ok) {
+        $('failedText').textContent = r.body.error || 'We could not reach our system just now.';
+        return show('failed');
+      }
+      $('hello').textContent = r.body.firstName ? `Hello ${r.body.firstName}. Fill in what you can and press Save. It goes straight onto your record with us.` : 'Fill in what you can and press Save. It goes straight onto your record with us.';
+      show('form');
+    } catch (e) {
+      $('failedText').textContent = 'We could not reach our system just now. Check your signal and try again.';
+      show('failed');
+    }
+  }
+
+  async function save(ev) {
+    ev.preventDefault();
+    const form = $('form');
+    const answers = {};
+    FIELDS.forEach(k => { const v = String(form.elements[k].value || '').trim(); if (v) answers[k] = v; });
+    if (!Object.keys(answers).length) return status('saveStatus', 'Fill in at least one answer first.', 'bad');
+    $('save').disabled = true;
+    status('saveStatus', 'Saving…');
+    try {
+      const r = await api('/tenant-form', { answers });
+      if (r.status === 404) return show('gone');
+      if (r.status !== 200 || !r.body.ok) return status('saveStatus', r.body.error || 'That did not save. Try again in a minute.', 'bad');
+      status('saveStatus', `Saved at ${r.body.savedAt}. Thank you.`, 'ok');
+    } catch (e) {
+      status('saveStatus', 'That did not save: check your signal and press Save again.', 'bad');
+    } finally {
+      $('save').disabled = false;
+    }
+  }
+
+  function typeOf(f) {
+    if (f.type) return f.type.toLowerCase();
+    const ext = (String(f.name).split('.').pop() || '').toLowerCase();
+    return { heic: 'image/heic', heif: 'image/heif', jpg: 'image/jpeg', jpeg: 'image/jpeg', png: 'image/png', pdf: 'application/pdf' }[ext] || '';
+  }
+  async function send() {
+    const f = ($('file').files || [])[0];
+    if (!f) return status('fileStatus', 'Choose the photo first.', 'bad');
+    if (f.size > LIMIT) return status('fileStatus', 'That file is over 3.7MB. Take the photo again a little further away.', 'bad');
+    $('send').disabled = true;
+    status('fileStatus', 'Sending…');
+    try {
+      const file = await new Promise((resolve, reject) => {
+        const rd = new FileReader();
+        rd.onload = () => resolve(String(rd.result).split(',')[1] || '');
+        rd.onerror = () => reject(new Error('read'));
+        rd.readAsDataURL(f);
+      });
+      const r = await api('/tenant-form/upload', { filename: f.name, contentType: typeOf(f), file });
+      if (r.status === 404) return show('gone');
+      if (r.status !== 200 || !r.body.ok) return status('fileStatus', r.body.error || 'That did not send. Try again in a minute.', 'bad');
+      status('fileStatus', 'Sent. Thank you.', 'ok');
+      $('file').value = '';
+    } catch (e) {
+      status('fileStatus', 'That did not send: check your signal and try again.', 'bad');
+    } finally {
+      $('send').disabled = false;
+    }
+  }
+
+  $('form').addEventListener('submit', save);
+  $('send').addEventListener('click', send);
+  $('retry').addEventListener('click', open);
+  // A new link pasted into the same tab changes only the #: start again with its code.
+  window.addEventListener('hashchange', () => location.reload());
+  open();
+})();
+</script>
+</body>
+</html>

@@ -2,4 +2,5 @@ User-agent: *
 Allow: /
 Disallow: /onboarding.html
 Disallow: /onboarding
+Disallow: /tenant-details.html
 Sitemap: https://app.operationsdirector.co.uk/sitemap.xml

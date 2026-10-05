@@ -67,10 +67,27 @@ guessing a recipient.
 """
 
 import re
+from datetime import datetime, timezone
 
 EMAIL_RE = re.compile(r"^[^@\s,]+@[^@\s,]+\.[^@\s,]+$")
 
 ALLOWED_HEADERS = {"TO", "TO-EACH", "CC", "SUBJECT", "FROM", "ATTACH"}
+# A TEXT TO SEND WITH THE EMAIL (Cash Flow Voids cut-over build, 3 Oct 2026). Two lines above the email's
+# headers, so Kevin approves the text's exact words on the same card. They are the TEXT's, never the
+# email's: parse_output skips them, and scripts/send-text.py is the only reader (parse_text). One line of
+# message, at most TEXT_MAX characters.
+TEXT_HEADERS = {"TEXT TO", "TEXT"}
+TEXT_MAX = 300
+# A PAYMENT PLAN (Cash Flow Voids step 3b, Kevin approved "Build as-is" on 4 Oct 2026). One line per promise
+# above the headers, beside the TEXT lines: "PLAN: 2026-10-10 £100.00", and one line naming the tenancy the
+# agent read: "PLAN FOR: rec…" (a tenant's reply arrives as its own task, with no tenancy link). Kevin approves
+# the dates and amounts on the card; once the email has gone, scripts/rent_plans.py checks each promise against
+# the bank. Never part of the email: parse_output skips them, parse_plan is the only reader.
+PLAN_HEADER = "PLAN"
+PLAN_FOR_HEADER = "PLAN FOR"
+PLAN_MAX = 12
+PLAN_LINE_RE = re.compile(r"^PLAN: (\d{4}-\d{2}-\d{2}) £(\d{1,5}(?:\.\d{2})?)$")
+PLAN_FOR_RE = re.compile(r"^PLAN FOR: (rec[A-Za-z0-9]{14})$")
 
 # A mail-out card lists every address; past this many the card stops being
 # something Kevin can read before approving, so the sender splits the list.
@@ -179,6 +196,137 @@ def strip_track_record(text):
     return TRACK_RECORD_RE.sub("", text or "")
 
 
+# Who may send a text at all (review, 4 Oct 2026): only the rent lanes' own tenant cards, known by
+# their name or their key line (TRIAL_TASK_MARKS below). Any other card's TEXT lines are never sent.
+TEXT_CARD_MARKS = {"prefix": ("RENT LATE: ", "RENT ASK: ", "RENT PLAN: "), "note": "RENT CHECK KEY: "}
+
+
+def parse_plan(output):
+    """{"tenancy": rec…, "promises": [(date, amount)] in date order} from the PLAN FOR and PLAN lines above an
+    email's headers, or None when the card carries no plan. Raises EmailFormatError on a line not in the exact
+    form, a date that is not a real day, an amount of nothing or over £10,000, two promises on one day, more
+    than PLAN_MAX promises, promises with no PLAN FOR line (or a PLAN FOR with no promises, or two of them),
+    or a PLAN or PLAN FOR line below the headers (it would go out in the email)."""
+    lines = strip_track_record(strip_tier1_banner(output or "")).splitlines()
+    cut = next((i for i, line in enumerate(lines) if line.strip() == "---"), None)
+    head, body = (lines[:cut], lines[cut + 1:]) if cut is not None else ([], lines)
+    found, owners = [], []
+    for line in head:
+        key, sep, _ = line.partition(":")
+        if sep and key.strip().upper() in (PLAN_HEADER, PLAN_FOR_HEADER) and not line.strip().startswith(("PLAN:", "PLAN FOR:")):
+            raise EmailFormatError(f'write the plan\'s lines exactly as "PLAN FOR:" and "PLAN:", in capitals, not {key.lstrip() + ":"!r}')
+        if sep and key.strip().upper() == PLAN_FOR_HEADER:
+            m = PLAN_FOR_RE.match(line.strip())
+            if not m:
+                raise EmailFormatError(f'the plan\'s tenancy is written exactly as "PLAN FOR: rec…", the tenancy record id, not {line.strip()[:40]!r}')
+            owners.append(m.group(1))
+            continue
+        if not sep or key.strip().upper() != PLAN_HEADER:
+            continue
+        m = PLAN_LINE_RE.match(line.strip())
+        if not m:
+            raise EmailFormatError(f'a plan line is written exactly as "PLAN: 2026-10-10 £100.00", not {line.strip()[:40]!r}')
+        try:
+            day = datetime.strptime(m.group(1), "%Y-%m-%d").date().isoformat()
+        except ValueError:
+            raise EmailFormatError(f"the plan date {m.group(1)} is not a real day")
+        amount = float(m.group(2))
+        if amount <= 0 or amount > 10000:
+            raise EmailFormatError(f"a promise of £{m.group(2)} is not one the rent check can track")
+        found.append((day, amount))
+    for line in body:
+        # The block's own spelling only: an email that says "Plan: £25 a month" in passing is untouched.
+        if line.strip().startswith(("PLAN:", "PLAN FOR:")):
+            raise EmailFormatError("a PLAN line sits below the email's headers, so it would go out in the email; "
+                                   "the PLAN lines go above them")
+    if not found and not owners:
+        return None
+    if len(owners) != 1 or not found:
+        raise EmailFormatError("a plan needs one PLAN FOR line naming the tenancy and at least one PLAN line")
+    if len(found) > PLAN_MAX:
+        raise EmailFormatError(f"the plan has {len(found)} promises; the most is {PLAN_MAX}")
+    if len({d for d, _ in found}) != len(found):
+        raise EmailFormatError("the plan has two promises on one day: put them in one line")
+    return {"tenancy": owners[0], "promises": sorted(found)}
+
+
+def text_card(name="", notes="", output="", holders=()):
+    """True for a card scripts/send-text.py may text from: a rent lane's own tenant card, by its name or
+    its key line, or a reply card that carries a payment plan held by the rent lane's own agent (a tenant's
+    reply has neither mark)."""
+    if str(name or "").startswith(TEXT_CARD_MARKS["prefix"]) or TEXT_CARD_MARKS["note"] in str(notes or ""):
+        return True
+    if not any(h in TRIAL_TASK_MARKS for h in holders or ()):
+        return False
+    try:
+        return bool(parse_plan(output))
+    except EmailFormatError:
+        return False
+
+
+def sender_key(s):
+    """One spelling for a person: an email in lower case, a UK number as +44…, anything else as typed.
+    Shared by the reply routing (agent-dispatch.py) and the plan check (rent_plans.py)."""
+    s = str(s or "").strip()
+    m = re.search(r"[\w.+-]+@[\w-]+(?:\.[\w-]+)+", s)
+    if m:
+        return m.group(0).lower()
+    digits = re.sub(r"\D", "", s)
+    if digits.startswith("00"):
+        digits = digits[2:]
+    if digits.startswith("440") and len(digits) == 13:     # +44 (0)7700 900123
+        digits = "44" + digits[3:]
+    if digits.startswith("44") and len(digits) == 12:
+        return "+" + digits
+    if digits.startswith("0") and len(digits) == 11:
+        return "+44" + digits[1:]
+    return s.lower()
+
+
+def parse_text(output):
+    """(number, message) of the TEXT TO and TEXT lines above an email's headers, or None when the card
+    carries no text. Raises EmailFormatError on a half block, a second one, a message over TEXT_MAX,
+    TEXT lines below the headers (they would go out in the email), or a "---" in the message (the email
+    parser would cut the headers there)."""
+    lines = strip_track_record(strip_tier1_banner(output or "")).splitlines()
+    # The headers end at the first line that is exactly "---", so a "---" inside the TEXT line is seen.
+    cut = next((i for i, line in enumerate(lines) if line.strip() == "---"), None)
+    head, body = (lines[:cut], lines[cut + 1:]) if cut is not None else ([], lines)
+    # The email parser ends the headers at the first "---" ANYWHERE: a header holding one would cut the
+    # email there and push the lines after it, the text included, into the body (review, 4 Oct 2026).
+    for line in head:
+        if "---" in line:
+            raise EmailFormatError(f'a header line contains "---", which would cut the email\'s headers there: {line.strip()[:60]!r}')
+    found = {}
+    for line in head:
+        key, sep, val = line.partition(":")
+        name = key.strip().upper()
+        if sep and name in TEXT_HEADERS:
+            # One spelling, in capitals (review, 4 Oct 2026): the check below the headers looks for exactly
+            # this, so a "Text to:" accepted here could be moved into the email by an edit and not be seen.
+            if not line.strip().startswith(name + ":"):
+                raise EmailFormatError(f'write the text\'s lines exactly as "TEXT TO:" and "TEXT:", in capitals, '
+                                       f'not {key.lstrip() + ":"!r}')
+            if name in found:
+                raise EmailFormatError(f"the card has more than one {name} line")
+            found[name] = val.strip()
+    for line in body:
+        # The block's own spelling, and a "text to:" line in any case (it carries the number). An email
+        # that says "Text: ..." in passing is untouched.
+        key, sep, _ = line.partition(":")
+        if line.strip().startswith(("TEXT TO:", "TEXT:")) or (sep and key.strip().upper() == "TEXT TO"):
+            raise EmailFormatError("a TEXT line sits below the email's headers, so it would go out in the email; "
+                                   "the TEXT TO and TEXT lines go above them")
+    parse_plan(output)                                 # the plan lines are checked at every door the text is
+    if not found:
+        return None
+    if not found.get("TEXT TO") or not found.get("TEXT"):
+        raise EmailFormatError("a text needs both a TEXT TO line and a TEXT line")
+    if len(found["TEXT"]) > TEXT_MAX:
+        raise EmailFormatError(f"the TEXT is {len(found['TEXT'])} characters; the most is {TEXT_MAX}")
+    return found["TEXT TO"], found["TEXT"]
+
+
 def parse_output(output):
     """Turn a Correspondence Agent Output into headers plus body.
 
@@ -201,6 +349,8 @@ def parse_output(output):
             raise EmailFormatError(
                 f"header line is not `KEY: value`: {line.strip()!r}"
             )
+        if key.strip().upper() in TEXT_HEADERS or key.strip().upper() in (PLAN_HEADER, PLAN_FOR_HEADER):
+            continue                                   # the text's and the plan's lines: never part of the email
         headers[key.strip().upper()] = val.strip()
 
     unknown = set(headers) - ALLOWED_HEADERS
@@ -389,8 +539,8 @@ def rule_send_problem(rule, mail, task, require_stamp=True):
 # others, Kevin's verdict and notes teach it exactly like the others, and NOTHING
 # it raises can be sent: send-email.py refuses at the one door every send passes
 # through, and the dispatch queue closes an approved card as checked instead of
-# handing it to a carry-out run. Ending a trial is removing the entry, in a PR
-# Kevin approves: the cut-over is a decision, never a side effect.
+# handing it to a carry-out run. Ending a trial is MOVING the entry to TRIAL_ENDED
+# below, in a PR Kevin approves: the cut-over is a decision, never a side effect.
 TRIAL_AGENTS = {
     # Cash Flow Voids (register row reclaAzGLA4utssxx): late-rent drafts to tenants.
     # Kevin approved lane A in trial mode on 2 Oct 2026; cut-over target 24 Nov 2026.
@@ -401,12 +551,14 @@ TRIAL_STAMP = "TRIAL CHECKED"
 # THE TASK IS ON TRIAL TOO, WHOEVER HOLDS IT (independent review, 2 Oct 2026). A trial lane's task
 # that is re-routed, reassigned or resubmitted under another agent's id would otherwise become an
 # ordinary card that sends on approval. So a task carrying the lane's own marks stays on trial for
-# as long as its agent is listed above. Either mark is enough: a name can be edited and a Notes
+# as long as its agent is listed above. KEEP THE ENTRY AFTER THE CUT-OVER: TRIAL_ENDED reads these
+# marks to hold back a card approved during the trial (review, 4 Oct 2026). Either mark is enough: a name can be edited and a Notes
 # line can be lost. Kept identical to TASK_PREFIX and KEY_MARK in scripts/rent-check.py, and to
 # ASK_PREFIX in scripts/rent_new_tenant.py (lane B's tenant drafts carry the same key mark)
 # (tests/cash-flow-voids-agent.test.js, tests/rent-new-tenant.test.js).
 TRIAL_TASK_MARKS = {
-    "rec7aHLK1Q8fMLRXH": {"prefix": ("RENT LATE: ", "RENT ASK: "), "note": "RENT CHECK KEY: "},
+    # RENT PLAN (4 Oct 2026): a payment plan card is the lane's own tenant card too.
+    "rec7aHLK1Q8fMLRXH": {"prefix": ("RENT LATE: ", "RENT ASK: ", "RENT PLAN: "), "note": "RENT CHECK KEY: "},
 }
 # A ROBOT FORM CARD (Cash Flow Voids lane B, 3 Oct 2026; Kevin's ruling "Robot fills, you pick
 # reason"). The rent check raises the direct rent payment form card. Approving it opens ONE door:
@@ -452,16 +604,53 @@ def strip_trial_marks(text):
     return "\n".join(line for line in str(text or "").splitlines() if not any(m in line for m in marks))
 
 
-def trial_problem(agent_ids, name="", notes=""):
+# A TRIAL THAT HAS ENDED (independent review, 4 Oct 2026). Ending a trial is moving the agent's entry
+# from TRIAL_AGENTS to here, with the moment it ended in UTC, e.g. "2026-11-24T09:00:00Z". Deleting the
+# entry alone would turn every card Kevin approved during the trial, but the half-hourly settle had not
+# yet closed, into an email and a text the moment the PR merged. A card approved before the end was a
+# check, not a send, and stays one: the queue holds it back, `trial-settle` closes it as checked, and
+# the send doors refuse it. A card approved after the end is an ordinary card. A trial lane's marks
+# left in neither list fail tests/cash-flow-voids-agent.test.js, so the move cannot be half done.
+# The diary and the post pass no approval time on purpose: a trial card can never carry those shapes
+# (TRIAL_ACTING_SHAPE_RE refuses them at submit), and a Level A diary entry has no approval to date.
+TRIAL_ENDED = {}
+
+
+def _utc(value):
+    """An Airtable time as an aware UTC datetime, or None when blank or unreadable."""
+    try:
+        t = datetime.fromisoformat(str(value or "").replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    return t if t.tzinfo else t.replace(tzinfo=timezone.utc)
+
+
+def trial_problem(agent_ids, name="", notes="", approved_at=None):
     """Why this task may NOT be carried out, or "": it was raised by a trial agent, or it is a
-    trial lane's own task whoever holds it now."""
+    trial lane's own task whoever holds it now. A caller acting on an approval passes the task's
+    Approved At: a card of an ENDED trial approved before the end, or with no readable approval
+    time, is still a trial card."""
+    def marked(marks):
+        return str(name or "").startswith(marks["prefix"]) or marks["note"] in str(notes or "")
     for agent_id in agent_ids or []:
         if agent_id in TRIAL_AGENTS:
             return TRIAL_AGENTS[agent_id]
     for agent_id, marks in TRIAL_TASK_MARKS.items():
-        if agent_id in TRIAL_AGENTS and (str(name or "").startswith(marks["prefix"])
-                                         or marks["note"] in str(notes or "")):
+        if agent_id in TRIAL_AGENTS and marked(marks):
             return TRIAL_AGENTS[agent_id]
+    if approved_at is None:
+        return ""
+    ended = [a for a in agent_ids or [] if a in TRIAL_ENDED]
+    ended += [a for a, marks in TRIAL_TASK_MARKS.items() if a in TRIAL_ENDED and marked(marks)]
+    when = _utc(approved_at)
+    for agent_id in ended:
+        end = _utc(TRIAL_ENDED[agent_id])
+        if when is None or end is None:
+            return (f"it carries no readable approval time, so it cannot be shown to have been approved after the "
+                    f"trial run ended ({TRIAL_ENDED[agent_id]})")
+        if when < end:
+            return (f"it was approved during the trial run, which ended {TRIAL_ENDED[agent_id]}, so Kevin's "
+                    "verdict was a check and nothing it raised then is sent")
     return ""
 
 
@@ -551,6 +740,7 @@ def validate_submission(output):
     Returns the parsed email so the caller does not parse twice. Never called
     on the send path — see the note above.
     """
+    parse_text(output)                                 # a bad text is refused before Kevin sees the card, by name
     parsed = parse_output(output)
     sender = parsed["from"]
     if not sender:

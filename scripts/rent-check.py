@@ -17,10 +17,11 @@ WHAT ONE RUN DOES
 
 WHAT IT NEVER DOES
 It sends nothing to a tenant. It writes its own Estate Status row, (lane A, 2 Oct 2026) one RENT
-LATE task per late tenancy per stage for the Cash Flow Voids agent, and (lane B) the tasks that walk
-a new tenant into payment, only while that agent's register row is Built or Live. Its one tenancy
-write is lane B's: CFV to CFV Actioned with a comment, after Kevin confirms he sent the direct rent
-payment form.
+LATE task per late tenancy per stage for the Cash Flow Voids agent, (lane B) the tasks that walk
+a new tenant into payment, and (3 Oct 2026) one AGENT RENT LATE task for Roy per late agent-managed
+rent (the letting agent collects it, so Roy asks the agent; no tenant is contacted), only while that
+agent's register row is Built or Live. Its one tenancy write is lane B's: CFV to CFV Actioned with a
+comment, after Kevin confirms he sent the direct rent payment form.
 
 LANE A, IN TRIAL (Kevin, 2 Oct 2026)
 A tenancy that reads late on trusted bank data becomes a task for the Cash Flow Voids agent. The
@@ -101,6 +102,7 @@ from zoneinfo import ZoneInfo
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import rent_new_tenant as lane_b_rules  # noqa: E402
+import rent_plans  # noqa: E402
 
 LONDON = ZoneInfo("Europe/London")
 BASE = "appnqjDpqDniH3IRl"
@@ -157,6 +159,10 @@ STAGES = {1: "reminder", 2: "follow-up", 3: "firmer message"}
 STAGE_GAP_DAYS = {1: 3, 2: 4}
 IN_PAYMENT, CFV, CFV_ACTIONED = "In Payment", "CFV", "CFV Actioned"
 AGENT_MANAGED = "Agent-Managed"
+# A LATE AGENT-MANAGED RENT GOES TO ROY (Kevin, 3 Oct 2026: "Live now"). The letting agent collects it,
+# so no tenant is contacted: Roy gets one task per owed payment, created already his and emailed to him,
+# and asks the agent. Rules, not the trial agent: nothing goes to a tenant.
+AGENT_LATE_PREFIX, AGENT_LATE_MARK = "AGENT RENT LATE: ", "RENT AGENT KEY: "
 # Zero rows from any of these is a broken read, not an empty business (64 live tenancies, 35 active
 # tenants, 150 matched rent payments in 80 days and 2 rent accounts were read on 2 Oct 2026).
 FLOORS = (("tenancies", 20), ("tenants", 20), ("tx", 20), ("accounts", 1))
@@ -654,18 +660,19 @@ def next_stage(cycle, existing, day):
     return last + 1
 
 
-def task_plan(res, tenancies, existing, day):
+def task_plan(res, tenancies, existing, day, on_plan=frozenset()):
     """The RENT LATE tasks today's result calls for. Pure: no reads, no writes.
 
     Only a tenancy the check itself calls late TODAY, on trusted bank data, that we chase ourselves.
     A void already actioned is with the DWP, an existing void is left alone, a short payment is not
-    late, and grey means cannot tell."""
+    late, and grey means cannot tell. A tenancy with an agreed payment plan on track is not chased:
+    the plan is the chase (scripts/rent_plans.py)."""
     by_id = {r["id"]: r.get("fields") or {} for r in tenancies}
     plan = []
     for r in res["tenancies"]:
         if r["lane"] != "late" or r["status"] not in (IN_PAYMENT, CFV) or r["type"] == AGENT_MANAGED:
             continue
-        if r.get("noChase"):
+        if r.get("noChase") or r["id"] in on_plan:
             continue
         # A void with a part payment sits in the late lane before its next rent is due: not late yet.
         if "daysLate" not in r and not r.get("beyond"):
@@ -682,7 +689,8 @@ def task_plan(res, tenancies, existing, day):
         f = by_id.get(r["id"]) or {}
         plan.append({
             "key": key, "tenancy": r["id"], "tenants": list(f.get(TY["tenants"]) or []),
-            "name": f"{TASK_PREFIX}{r['unit']}, rent due {owed.strftime('%-d %b')} ({word})",
+            # The tenant's surname stands in for a missing unit: never in a task name (lane B's rule).
+            "name": f"{TASK_PREFIX}{lane_b_rules.place_name(r['unit'])}, rent due {owed.strftime('%-d %b')} ({word})",
             "description": "\n".join([
                 f"Late rent found by the daily rent check on {day.strftime('%-d %b %Y')}.",
                 "TRIAL: you draft, Kevin checks, nothing is sent to the tenant.",
@@ -731,14 +739,15 @@ def raise_task(item, day):
     words and cannot tell one rent cycle from the next."""
     fields = {TK["name"]: item["name"], TK["status"]: "Today", TK["due"]: day.isoformat(),
               TK["teamMember"]: [AGENT_TEAM_MEMBER], TK["description"]: item["description"],
-              TK["notes"]: KEY_MARK + item["key"], TK["tenancies"]: [item["tenancy"]]}
+              TK["notes"]: "\n".join(KEY_MARK + k for k in [item["key"]] + list(item.get("alsoKeys") or [])),
+              TK["tenancies"]: [item["tenancy"]]}
     if item["tenants"]:
         fields[TK["tenants"]] = item["tenants"]
     out = api("POST", T_TASKS, {"records": [{"fields": fields}]})
     return out["records"][0]["id"]
 
 
-def lane_a(res, tenancies, day, writes):
+def lane_a(res, tenancies, day, writes, on_plan=frozenset()):
     """Plan and (on a real run) raise today's RENT LATE tasks. Never stops the rent check itself: a
     failure here is reported on the row and in the exit code."""
     out = {"on": False, "status": "", "raised": [], "planned": [], "failed": ""}
@@ -747,7 +756,7 @@ def lane_a(res, tenancies, day, writes):
         out.update(on=state["on"], status=state["status"])
         if not state["on"]:
             return out
-        plan = task_plan(res, tenancies, state["keys"], day)
+        plan = task_plan(res, tenancies, state["keys"], day, on_plan)
         out["planned"] = [p["name"] for p in plan]
         if writes:
             for item in plan:
@@ -756,6 +765,123 @@ def lane_a(res, tenancies, day, writes):
     except Exception as exc:                          # noqa: BLE001 — said on the row, never swallowed
         out["failed"] = str(exc)[:300]
     return out
+
+
+def agent_late_plan(res, tenancies, existing, day):
+    """The AGENT RENT LATE tasks for Roy today's result calls for: one per late agent-managed tenancy per
+    owed payment, on trusted bank data, never for a tenant on the do-not-chase list. Pure."""
+    by_id = {r["id"]: r.get("fields") or {} for r in tenancies}
+    plan = []
+    for r in res["tenancies"]:
+        # In Payment or a cash flow void: either way the letting agent holds the rent (review, 4 Oct 2026).
+        if r["lane"] != "late" or r["status"] not in (IN_PAYMENT, CFV) or r["type"] != AGENT_MANAGED or r.get("noChase"):
+            continue
+        if "daysLate" not in r and not r.get("beyond"):
+            continue
+        key = f"{r['id']}:{r['owed']}"
+        if key in existing:
+            continue
+        owed = parse_day(r["owed"])
+        place = lane_b_rules.place_name(r["unit"])
+        late = (f"{r['daysLate']} days late today" if "daysLate" in r
+                else f"no payment matched in the last {TX_LOOKBACK_DAYS} days")
+        f = by_id.get(r["id"]) or {}
+        plan.append({
+            "key": key, "tenancy": r["id"], "tenants": list(f.get(TY["tenants"]) or []),
+            "name": f"{AGENT_LATE_PREFIX}{place}, rent due {owed.strftime('%-d %b')}",
+            "description": "\n".join([
+                f"Raised by the daily rent check on {day.strftime('%-d %b %Y')}.",
+                "",
+                f"{place}: the letting agent collects this rent and pays it to us. The payment due "
+                f"{owed.strftime('%-d %b %Y')} has not reached us ({late}).",
+                f"What the check saw: {r['note']}",
+                f"Bank data as at {res['feed']['asAt'] or 'unknown'}.",
+                "",
+                "Please ask the agent what has happened and when it will be paid, and reply to this email with "
+                "what they say. Nothing has been sent to the tenant.",
+                "",
+                "Reference for the rent check, please leave it in:",
+                AGENT_LATE_MARK + key,
+            ])})
+    return plan
+
+
+def read_agent_late():
+    """{key: task} for every AGENT RENT LATE task, whatever its status (a closed one still counts: one
+    task per owed payment). Found by its name OR its key line, so a task renamed by hand is still found
+    (review, 4 Oct 2026). The formula uses field NAMES: a rename is an error, never an empty read."""
+    out = {}
+    formula = (f"OR(LEFT({{Task Name}}, {len(AGENT_LATE_PREFIX)})='{AGENT_LATE_PREFIX}', "
+               f"FIND('{AGENT_LATE_MARK}', {{Notes}}&''), FIND('{AGENT_LATE_MARK}', {{Description}}&''))")
+    for rec in fetch_all(T_TASKS, {"fields[]": [TK["name"], TK["status"], TK["notes"], TK["description"]],
+                                   "filterByFormula": formula}):
+        f = rec.get("fields") or {}
+        for line in (str(f.get(TK["notes"]) or "") + "\n" + str(f.get(TK["description"]) or "")).splitlines():
+            if line.strip().startswith(AGENT_LATE_MARK):
+                out[line.strip()[len(AGENT_LATE_MARK):].strip()] = {"id": rec["id"], "status": sel(f.get(TK["status"]))}
+    return out
+
+
+def agent_late(res, tenancies, day, writes, on):
+    """Plan and (on a real run) raise Roy's AGENT RENT LATE tasks and email them; offer any still-open one
+    to notify again (its ledger never sends a second copy). Gated on the same agent switch as lanes A and
+    B. Never stops the rent check: a failure is said on the row and in the exit code."""
+    out = {"on": on, "raised": [], "planned": [], "problems": [], "failed": ""}
+    if not on:
+        return out
+    fails = []
+    try:
+        existing = read_agent_late()
+        plan = agent_late_plan(res, tenancies, existing, day)
+        out["planned"] = [p["name"] for p in plan]
+        if not writes:
+            return out
+        ad = lane_b_rules.module("ad")
+        for t in existing.values():
+            if t["status"] not in ("Completed", "Cancelled"):
+                try:
+                    if lane_b_rules.cut_off(lane_b_rules.notify_roy(t["id"], ad.ROY_EMAIL)):
+                        out["problems"].append(f"the email of task {t['id']} to Roy was cut off part way and is not sent twice")
+                except Exception as exc:              # noqa: BLE001 — said on the row; a failed email turns the run red
+                    if "REFUSED" in str(exc):
+                        out["problems"].append(f"task {t['id']} was refused by the email gate: {str(exc)[:120]}")
+                    else:
+                        fails.append(f"task {t['id']} could not be emailed to Roy: {str(exc)[:120]}")
+        for item in plan:
+            fields = {TK["name"]: item["name"], TK["status"]: "Today", TK["due"]: day.isoformat(),
+                      TK["description"]: item["description"], TK["notes"]: AGENT_LATE_MARK + item["key"],
+                      TK["tenancies"]: [item["tenancy"]], TK["teamMember"]: [ad.HUMANS[ad.ROY_EMAIL]["rec"]],
+                      ad.AF["assignee"]: {"email": ad.ROY_EMAIL}}
+            if item["tenants"]:
+                fields[TK["tenants"]] = item["tenants"]
+            tid = api("POST", T_TASKS, {"records": [{"fields": fields}]})["records"][0]["id"]
+            out["raised"].append(item["name"])
+            try:
+                lane_b_rules.notify_roy(tid, ad.ROY_EMAIL)
+            except Exception as exc:                  # noqa: BLE001 — the task stands; the next run offers it again
+                # A refusal reads the same on the day it is raised as on every run after (review, 4 Oct 2026):
+                # a check on the row, since the task already sits on Roy's list. Anything else turns the run red.
+                if "REFUSED" in str(exc):
+                    out["problems"].append(f"task {tid} was refused by the email gate: {str(exc)[:120]}")
+                else:
+                    fails.append(f"task {tid} was created but its email to Roy failed (offered again next run): {str(exc)[:120]}")
+    except Exception as exc:                          # noqa: BLE001
+        fails.append(str(exc)[:300])
+    out["failed"] = "; ".join(fails)[:600]
+    return out
+
+
+def agent_late_line(late):
+    check = (" Check: " + "; ".join(late["problems"]) + ".") if late.get("problems") else ""
+    if late["failed"]:
+        return f"Agent-managed late rent to Roy FAILED: {late['failed']}{check}"
+    if not late["on"]:
+        return f"Agent-managed late rent to Roy: none raised, the Cash Flow Voids agent is switched off or unread.{check}"
+    if late["raised"]:
+        return "Agent-managed late rent sent to Roy: " + "; ".join(late["raised"]) + "." + check
+    if late["planned"]:
+        return "Agent-managed late rent a real run would send to Roy: " + "; ".join(late["planned"]) + "." + check
+    return "Agent-managed late rent to Roy: none needed today." + check
 
 
 def lane_a_line(tasks):
@@ -825,22 +951,26 @@ def main(argv=None):
             write_row("Failed", why, {"asAt": day.isoformat(), "worst": "fail", "briefLine": why}, now)
         print(json.dumps({"failed": why}, indent=2))
         return 1
-    res["tasks"] = lane_a(res, data["tenancies"], day, writes)
+    # Payment plans first, read only: a tenancy on an agreed plan that is on track is not chased by lane A.
+    plans = rent_plans.read(_Here(), data, day, res, now)
+    res["tasks"] = lane_a(res, data["tenancies"], day, writes, plans["onTrack"])
     # The agent's switch is lane A's read. With no status read back, lane B is told so, not "off".
     switch = res["tasks"]["on"] if res["tasks"]["status"] else None
-    res["setup"] = lane_b_rules.lane_b(_Here(), res, data, day, writes, switch)
+    res["setup"] = lane_b_rules.lane_b(_Here(), res, data, day, writes, switch, now)
+    res["agentLate"] = agent_late(res, data["tenancies"], day, writes, switch)
+    res["plans"] = rent_plans.act(_Here(), plans, data, day, writes, switch, res)
     res["briefLine"] = brief_line(res)              # lane B has put each new tenant's stage on its row
-    failed = res["tasks"]["failed"] or res["setup"]["failed"]
+    failed = res["tasks"]["failed"] or res["setup"]["failed"] or res["agentLate"]["failed"] or res["plans"]["failed"]
     if writes:
         public = {k: v for k, v in res.items() if k not in ("lights", "lanes")}
         # Blocked only when the bank data hid a verdict: a stale feed with every rent already seen hides nothing.
-        status = "Failed" if failed else ("Blocked" if res["bankBlocked"] else "Worked")
-        write_row(status, "\n".join([detail(res), lane_a_line(res["tasks"]), lane_b_rules.lane_b_line(res["setup"])]),
-                  public, now)
+        status = "Failed" if failed else ("Blocked" if res["bankBlocked"] or res["plans"].get("stuck") else "Worked")
+        write_row(status, "\n".join([detail(res), lane_a_line(res["tasks"]), lane_b_rules.lane_b_line(res["setup"]),
+                                      agent_late_line(res["agentLate"]), rent_plans.line(res["plans"])]), public, now)
         append_history(res, now)
     print(json.dumps({"written": writes, "briefLine": res["briefLine"], "worst": res["worst"],
                       "counts": res["counts"], "tenancies": res["tenancies"], "feed": res["feed"],
-                      "tasks": res["tasks"], "setup": res["setup"]}, indent=2))
+                      "tasks": res["tasks"], "setup": res["setup"], "agentLate": res["agentLate"], "plans": res["plans"]}, indent=2))
     return 1 if failed else 0
 
 

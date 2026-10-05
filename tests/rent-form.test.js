@@ -362,8 +362,8 @@ import agent_email_format as aef
 CFV = "rec7aHLK1Q8fMLRXH"
 CARD = "RENT FORM: direct rent payment form: Unit 9"
 CARD_NOTES = "RENT FORM KEY: recFormTest000001:form:1\\nRENT SETUP KEY: recFormTest000001:form:1"
-def view(name, notes, outcome="Approved as-is", agent=CFV, status="Today", tid="recCARD0000000001"):
-    return {"fields": {ad.AF["name"]: name, ad.AF["notes"]: notes, ad.AF["approvalOutcome"]: outcome,
+def view(name, notes, outcome="Approved as-is", agent=CFV, status="Today", tid="recCARD0000000001", approved="2026-10-03T10:00:00.000Z"):
+    return {"fields": {ad.AF["name"]: name, ad.AF["notes"]: notes, ad.AF["approvalOutcome"]: outcome, ad.AF["approvedAt"]: approved,
                        ad.AF["sentForApprovalBy"]: [agent], ad.AF["teamMember"]: [agent], ad.AF["status"]: status}, "id": tid}
 def outcome_of(rec):
     ad.get_task = lambda tid: rec
@@ -386,17 +386,19 @@ rows = {
   "ordinary": view("Book the boiler service", "notes", agent=OTHER),
 }
 out = {k: outcome_of(v) for k, v in rows.items()}
-# The trial ends when Kevin removes the agent from TRIAL_AGENTS: the form card's doors must not move.
-aef.TRIAL_AGENTS.pop(CFV); ad.TRIAL_AGENTS = aef.TRIAL_AGENTS
+# The trial ends when Kevin moves the agent to TRIAL_ENDED: the form card's doors must not move.
+aef.TRIAL_ENDED[CFV] = "2026-10-03T09:00:00Z"; aef.TRIAL_AGENTS.pop(CFV)
 out["cardAfterTrial"] = outcome_of(rows["card"])
 out["lateAfterTrial"] = outcome_of(rows["late"])
+# A late card Kevin approved during the trial is still not approved for the robot's submit gate.
+out["lateInTrial"] = outcome_of(view("RENT LATE: Unit 9, rent due 1 Oct (reminder)", "RENT CHECK KEY: x:1", approved="2026-10-03T08:00:00.000Z"))
 print(json.dumps(out))`);
     expect(r).toEqual({
       card: [false, true, true], edits: [false, true, true], changes: [false, true, false], none: [false, true, false],
       renamed: [false, true, false], noKey: [false, true, false], otherAgent: [false, true, false],
       closed: [false, true, false], cancelled: [false, true, false],
       late: [false, false, false], ordinary: [true, false, false],
-      cardAfterTrial: [false, true, true], lateAfterTrial: [true, false, false],
+      cardAfterTrial: [false, true, true], lateAfterTrial: [true, false, false], lateInTrial: [false, false, false],
     });
   });
 

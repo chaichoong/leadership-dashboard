@@ -83,6 +83,7 @@ from agent_email_format import (  # noqa: E402
     TIER1_BANNER,
     EmailFormatError,
     parse_output as parse_email_output,
+    parse_text,
     strip_track_record,
     validate_submission as validate_email_submission,
     validate_submission_any as validate_any_submission,
@@ -92,6 +93,10 @@ from agent_email_format import (  # noqa: E402
     rule_send_problem,
     TRIAL_ACTING_SHAPE_RE,
     TRIAL_STAMP,
+    TRIAL_AGENTS,
+    TRIAL_ENDED,
+    parse_plan,
+    sender_key,
     strip_trial_marks,
     form_card,
     trial_problem,
@@ -454,6 +459,15 @@ RENT_REGISTER_ROW = ROLE_AGENTS[RENT_REC_ID]["registerRow"]
 # and the specialist for that owns it. Repairs never enter this lane — they
 # keep Roy's same-hour handover (Kevin's ruling, 2 Sep 2026).
 AUTO_ROUTES = (
+    # A TENANT'S REPLY TO THE RENT CHASE (Kevin, 4 Oct 2026, "Build as-is"): an inbound message from a tenant
+    # who has an open RENT LATE or RENT PLAN task goes to the Cash Flow Voids agent, which drafts the answer
+    # and any payment plan. OFF until the agent's trial has ended: rent_reply_senders() reads nothing while
+    # it is on trial, so no tenant's message waits on a draft that cannot be sent; Inbox Response answers
+    # him meanwhile. First, because the sender is a known tenant mid-chase; Roy's repair lane diverts
+    # before AUTO_ROUTES, so a repair from the same tenant still goes to Roy.
+    {"rec": RENT_REC_ID,
+     "fresh": lambda t: bool(t.get("rentReply")) and t["inboundTask"],
+     "steal": lambda t, tm: bool(t.get("rentReply")) and tm == RESPONSE_REC_ID},
     {"rec": CREDITOR_REC_ID,
      "fresh": lambda t: t["creditor"] and t["inboundTask"],
      "steal": lambda t, tm: t["creditor"] and (
@@ -473,6 +487,55 @@ AUTO_ROUTES = (
      "fresh": lambda t: t["inboundTask"],
      "steal": None},
 )
+
+
+# The tenants a reply could come from: those with an open RENT LATE or RENT PLAN task, and those whose
+# payment plan is agreed and still running (the plan card is his own reply, with no tenant linked:
+# its PLAN FOR line names the tenancy).
+RENT_REPLY_FORMULA = ("AND(OR(LEFT({Task Name}, 11)='RENT LATE: ', LEFT({Task Name}, 11)='RENT PLAN: '), "
+                      "NOT({Status}='Completed'), NOT({Status}='Cancelled'))")
+RUNNING_PLAN_FORMULA = ("AND(FIND('PLAN FOR: rec', {Agent Output}&''), LEN({Approval Outcome}&'')>0, "
+                        "FIND('— send-email] SENT: email to', {Notes}&''), NOT(FIND('RENT PLAN MISSED: ', {Notes}&'')), "
+                        "NOT(FIND('RENT PLAN KEPT: ', {Notes}&'')), NOT(FIND('RENT PLAN SUPERSEDED: ', {Notes}&'')))")
+TASK_TENANTS = "fld6ZcfEogJmeQj2c"        # Tasks: Tenants link (scripts/rent-check.py TK["tenants"])
+TENANTS_TABLE = "tblX4elTuu01gwBYh"
+TENANCIES_TABLE, TENANCY_TENANTS = "tblN51a88qTDB6iMH", "fld1i5bDoHL3B6rUf"
+TENANT_EMAIL, TENANT_PHONE = "fldybEduFY3DWWTfT", "fldraHUkWfqo4olLF"
+
+
+def rent_reply_senders():
+    """The emails and mobiles of tenants with an open RENT LATE or RENT PLAN task, as sender_key spells
+    them. Empty, reading nothing, while the Cash Flow Voids agent is on trial or its trial has not ended."""
+    if RENT_REC_ID in TRIAL_AGENTS or RENT_REC_ID not in TRIAL_ENDED:
+        return set()
+    tenant_ids = set()
+    for rec in query_records(TASKS, RENT_REPLY_FORMULA, [AF["name"], TASK_TENANTS]):
+        tenant_ids |= set(links((rec.get("fields") or {}).get(TASK_TENANTS)))
+    # A running plan: its card names the tenancy, whose tenants are read from the tenancy itself.
+    tenancies = set()
+    for rec in query_records(TASKS, RUNNING_PLAN_FORMULA, [AF["agentOutput"]]):
+        try:
+            plan = parse_plan((rec.get("fields") or {}).get(AF["agentOutput"]) or "")
+        except EmailFormatError:
+            plan = None
+        if plan:
+            tenancies.add(plan["tenancy"])
+    if tenancies:
+        formula = "OR(" + ",".join(f"RECORD_ID()='{t}'" for t in sorted(tenancies)) + ")"
+        for rec in query_records(TENANCIES_TABLE, formula, [TENANCY_TENANTS]):
+            tenant_ids |= set(links((rec.get("fields") or {}).get(TENANCY_TENANTS)))
+    if not tenant_ids:
+        return set()
+    keys = set()
+    ids = sorted(tenant_ids)
+    for i in range(0, len(ids), 50):
+        formula = "OR(" + ",".join(f"RECORD_ID()='{t}'" for t in ids[i:i + 50] if re.fullmatch(r"rec\w+", t)) + ")"
+        for rec in query_records(TENANTS_TABLE, formula, [TENANT_EMAIL, TENANT_PHONE]):
+            f = rec.get("fields") or {}
+            for v in (f.get(TENANT_EMAIL), f.get(TENANT_PHONE)):
+                if v:
+                    keys.add(sender_key(v))
+    return keys
 
 
 def auto_route_fresh(t, role_roster):
@@ -2897,6 +2960,14 @@ def build_queue(args=None):
     trial_checked, form_cards = [], []
     creditor_ok = bool(role_roster.get(CREDITOR_REC_ID, {}).get("dispatchable"))
     creditor_count = 0
+    # Tenants mid-chase, for the rent reply lane. A failed read leaves the lane empty and says so: the
+    # message then goes to Inbox Response as before, never nowhere.
+    rent_senders, rent_senders_error = set(), ""
+    try:
+        rent_senders = rent_reply_senders()
+    except Exception as exc:  # noqa: BLE001 — said in the queue JSON and on stderr
+        rent_senders_error = str(exc)[:300]
+        print(f"WARNING: rent reply senders unavailable: {rent_senders_error}", file=sys.stderr)
     # The property lane needs BOTH the register lever and a readable book:
     # a task marked for the agent while the book cannot be read would be
     # withheld from Roy and from dispatch alike, with nobody holding it
@@ -2961,6 +3032,7 @@ def build_queue(args=None):
         t["matchedPattern"] = hit1 or ""
         if hit1:
             tier1.append(t)
+        t["rentReply"] = bool(t["inboundTask"] and rent_senders and sender_key(t["inboundSender"]) in rent_senders)
         t["creditor"] = creditor_match(t["name"], t["description"], t["notes"])
         creditor_count += t["creditor"]
         # Creditor work is ALWAYS tier-1 (Kevin's triage ruling, 24 Aug 2026)
@@ -3069,7 +3141,8 @@ def build_queue(args=None):
         # A TRIAL AGENT'S APPROVED CARD IS CHECKED, NEVER CARRIED OUT (2 Oct 2026). Handing it to a carry-out run
         # would have an agent try a send that send-email.py refuses, every 30 minutes, for ever. `trial-settle`
         # closes it in code with Kevin's verdict on the task. Listed under trialChecked, never hidden.
-        if t["outcome"] in APPROVED and trial_problem([t["agentId"]], t["name"], t["notes"]):
+        if t["outcome"] in APPROVED and trial_problem(t["sentForApprovalByIds"] + t["teamMemberIds"], t["name"], t["notes"],
+                                                      t["approvedAt"]):
             trial_checked.append(t)
             continue
         if t["outcome"] in APPROVED and t["agentId"]:
@@ -3266,6 +3339,7 @@ def build_queue(args=None):
         # never routes to them yet.
         "roleAgents": role_roster,
         "roleAgentsError": role_roster_error,
+        "rentReplyError": rent_senders_error,
         "counts": {
             "openTasksRead": len(open_tasks),
             "agentLinkedOpen": len(agent_linked),
@@ -4444,8 +4518,11 @@ def cmd_submit(args):
     tf_early = (get_task(args.task).get("fields", {}) or {})
     is_inbound = bool(tf_early.get(AF["inboundTask"]))
     # THE TASK IS ON TRIAL TOO (2 Oct 2026): a trial lane's task submitted under another agent's id
-    # is held to the same rule as the trial agent's own submit, checked above.
-    trial = trial or trial_problem([], tf_early.get(AF["name"], ""), tf_early.get(AF["notes"], ""))
+    # is held to the same rule as the trial agent's own submit, checked above. So is a task the trial
+    # agent holds as Team Member when it is submitted (review, 4 Oct 2026). Submit then writes the
+    # submitting agent into both fields, so an email draft on such a task becomes that agent's card.
+    trial = trial or trial_problem(links(tf_early.get(AF["teamMember"])),
+                                   tf_early.get(AF["name"], ""), tf_early.get(AF["notes"], ""))
     if trial and TRIAL_ACTING_SHAPE_RE.search(output):
         sys.exit(f"ERROR: refusing to submit {args.task}: {trial}.\n"
                  "       This task belongs to a lane on trial, whoever submits it: only a draft email\n"
@@ -5304,7 +5381,7 @@ def cmd_outcome(args):
     # form is Kevin's to send. Its one door is `window`, which only `handover` reads: the robot
     # fills the form in a window he finishes. Read from agent_email_format.FORM_CARDS.
     holders = [t["agentId"]] + t["teamMemberIds"]
-    trial = trial_problem(holders, t["name"], t["notes"])
+    trial = trial_problem(t["sentForApprovalByIds"] + holders, t["name"], t["notes"], t["approvedAt"])
     card = form_card(t["name"], t["notes"])
     print(json.dumps({
         "id": t["id"],
@@ -5367,6 +5444,7 @@ def cmd_revise(args):
         sys.exit(f"ERROR: refusing to revise {args.task} — {promise}")
     if t["taskType"] == "Correspondence":
         try:
+            parse_text(revised)                        # the TEXT lines too: an edit must not move them into the email
             parse_email_output(revised)
         except EmailFormatError as exc:
             sys.exit(f"ERROR: refusing to revise {args.task} — the edited "
@@ -5420,6 +5498,7 @@ def cmd_retype(args):
                 "path can carry out the email Kevin already read. Anything else is a "
                 "change of substance: send it back to him as a redo.")
         try:
+            parse_text(t["agentOutput"] or "")
             parse_email_output(t["agentOutput"] or "")
         except EmailFormatError as exc:
             sys.exit(
@@ -6956,7 +7035,12 @@ def trial_approved_tasks():
     out = []
     for rec in rows:
         t = task_view(rec)
-        if t["outcome"] in APPROVED and trial_problem([t["agentId"]], t["name"], t["notes"]) \
+        # The queue's own order (review, 4 Oct 2026): Kevin's answer to a DECIDE: card goes to the Task
+        # Manager, and an agent on its own go signal carries out its own cards, before any trial check.
+        if is_decide_card(t["agentOutput"]) or own_go_signal(t["agentId"]):
+            continue
+        if t["outcome"] in APPROVED and trial_problem(t["sentForApprovalByIds"] + t["teamMemberIds"], t["name"], t["notes"],
+                                                      t["approvedAt"]) \
                 and not form_card(t["name"], t["notes"]):
             out.append(t)
     return out
@@ -6966,7 +7050,7 @@ def cmd_trial_settle(args):
     settled = []
     for t in trial_approved_tasks():
         stamp = note_line("trial-settle", f"{TRIAL_STAMP}: Kevin's verdict was '{t['outcome']}'. Nothing was sent: "
-                                          f"{trial_problem([t['agentId']], t['name'], t['notes'])}.")
+                                          f"{trial_problem(t['sentForApprovalByIds'] + t['teamMemberIds'], t['name'], t['notes'], t['approvedAt'])}.")
         patch_task(t["id"], {AF["status"]: "Completed", AF["completion"]: now_iso(),
                              AF["notes"]: append_notes(t["notes"], stamp)})
         ledger_append(t["id"], "done")
