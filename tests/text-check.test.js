@@ -15,25 +15,36 @@ from datetime import datetime, timedelta, timezone
 sys.path.insert(0, ${JSON.stringify(SCRIPTS)})
 import text_check as tc
 NOW = datetime(2026, 10, 7, 9, 0, tzinfo=timezone.utc)
-def ledger(*rows):
+CFV = "rec7aHLK1Q8fMLRXH"
+def ledger(*rows, torn=False):
     p = os.path.join(tempfile.mkdtemp(), "sent-text.jsonl")
     with open(p, "w") as fh:
         for task, hours_ago, ends, event in rows:
             fh.write(json.dumps({"task": task, "ts": (NOW - timedelta(hours=hours_ago)).strftime("%Y-%m-%dT%H:%M:%S.000Z"),
-                                 "event": event, "numberEnds": ends}) + "\\n")
+                                 "event": event, "numberEnds": ends, "messageId": "g" + task[-5:]}) + "\\n")
+        if torn:
+            fh.write('{"task": "recHALF\\n')
     return p
-def mail(i, hours_ago, sender="noreply@clicksend.com", subject="Message failed", snippet=""):
-    return {"id": i, "internalDate": str(int((NOW - timedelta(hours=hours_ago)).timestamp() * 1000)),
-            "headers": {"from": sender, "subject": subject}, "snippet": snippet, "body": ""}
+def gm(*tasks): return [{"id": "g" + t[-5:]} for t in tasks]
+def mail(i, hours_ago, sender="noreply@clicksend.com", subject="Message failed", snippet="", date=True):
+    m = {"id": i, "headers": {"from": sender, "subject": subject}, "snippet": snippet, "body": ""}
+    if date:
+        m["internalDate"] = str(int((NOW - timedelta(hours=hours_ago)).timestamp() * 1000))
+    return m
 class RC:
-    def __init__(self, notes="RENT CHECK KEY: x", tenancies=("recTENANCYTXT001",)):
-        self.notes, self.tenancies, self.calls = notes, list(tenancies), []
+    """Airtable as it answers: fields keyed by id ONLY when asked for ids, else by name."""
+    def __init__(self, notes="RENT CHECK KEY: x\\n[05 Oct] SENT: text", tenancies=("recTENANCYTEXT001",), output="", holder=CFV):
+        self.fields = {tc.TK["notes"]: notes, tc.TK["tenancies"]: list(tenancies), tc.TK["output"]: output,
+                       tc.TK["sentBy"]: [holder], tc.TK["name"]: "RENT LATE: Unit 9, rent due 1 Oct"}
+        self.calls = []
     def api(self, method, path, payload=None, params=None):
         self.calls.append([method, path])
         if method == "GET":
-            return {"id": path.split("/")[-1], "fields": {tc.TASK_NOTES: self.notes, tc.TASK_TENANCIES: self.tenancies}}
+            if (params or {}).get("returnFieldsByFieldId") != "true":
+                return {"id": path.split("/")[-1], "fields": {"Notes": self.fields[tc.TK["notes"]]}}
+            return {"id": path.split("/")[-1], "fields": dict(self.fields)}
         if method == "PATCH":
-            self.notes = payload["records"][0]["fields"][tc.TASK_NOTES]
+            self.fields[tc.TK["notes"]] = payload["records"][0]["fields"][tc.TK["notes"]]
         return {}
 def inbox(sent, back, truncated=False):
     asked = []
@@ -41,6 +52,7 @@ def inbox(sent, back, truncated=False):
         asked.append(q)
         return (sent, False) if q.startswith("in:sent") else (back, truncated)
     return list_mail, asked
+A, B = "recTEXTCARD00001", "recTEXTCARD00002"
 `;
 function py(body) {
   const out = execFileSync('python3', ['-c', HARNESS + body], { encoding: 'utf8' });
@@ -51,7 +63,7 @@ describe('the text alarm reads info@ after every rent text and never reads blind
   it('no text in the last three days: the mailbox is not even read', () => {
     const r = py(`
 lm, asked = inbox([], [])
-out = tc.run(RC(), NOW, True, ledger=ledger(("recOLD", 80, "123", "sent"), ("recFAIL", 2, "123", "failed")), list_mail=lm)
+out = tc.run(RC(), NOW, True, ledger=ledger(("recOLD00000OLD01", 80, "123", "sent"), ("recFAILED0000001", 2, "123", "failed")), list_mail=lm)
 print(json.dumps({"out": out, "asked": asked, "line": tc.line(out), "brief": tc.brief(out)}))`);
     expect(r.out).toEqual({ checked: 0, flagged: [], noted: [], failed: '' });
     expect(r.asked).toEqual([]);
@@ -59,80 +71,136 @@ print(json.dumps({"out": out, "asked": asked, "line": tc.line(out), "brief": tc.
     expect(r.brief).toBe('');
   });
 
-  it('CONTROL: a text the ledger says went but info@ Sent cannot show is a loud failure, never "nothing came back"', () => {
+  it('CONTROL: a logged text info@ Sent does not hold BY ITS ID is a loud failure, even when the counts agree', () => {
     const r = py(`
-p = ledger(("recA", 5, "123", "sent"), ("recB", 4, "456", "sent"))
-lm, asked = inbox([mail("s1", 5)], [])
+p = ledger((A, 5, "123", "sent"), (B, 4, "456", "sent"))
+lm, asked = inbox(gm(A) + [{"id": "aManualTestEmail"}], [])
 blind = tc.run(RC(), NOW, True, ledger=p, list_mail=lm)
-fresh = tc.run(RC(), NOW, True, ledger=ledger(("recA", 5, "123", "sent"), ("recNEW", 0.05, "456", "sent")), list_mail=inbox([mail("s1", 5)], [])[0])
-print(json.dumps({"blind": blind, "brief": tc.brief(blind), "asked": asked, "fresh": fresh["failed"], "freshLine": tc.line(fresh)}))`);
-    expect(r.blind.failed).toMatch(/^control failed: the ledger says 2 text\(s\) went in the last 3 days but info@agilelets\.co\.uk's Sent shows 1/);
+fresh = tc.run(RC(), NOW, True, ledger=ledger((A, 5, "123", "sent"), (B, 0.05, "456", "sent")), list_mail=inbox(gm(A), [])[0])
+print(json.dumps({"blind": blind, "brief": tc.brief(blind), "line": tc.line(blind), "asked": asked, "fresh": fresh["failed"], "freshLine": tc.line(fresh)}))`);
+    // Two emails in Sent, two texts logged: a count would pass. The ids do not.
+    expect(r.blind.failed).toBe("control failed: 1 of 2 logged text(s) are not in info@agilelets.co.uk's Sent by their mail id (task recTEXTCARD00002): the mailbox read is blind, so no text can be called fine");
     expect(r.blind.flagged).toEqual([]);
-    expect(r.brief).toMatch(/^Text check FAILED: control failed/);
-    // The two reads: info@'s Sent, then ClickSend's emails back (a tenant's reply from sms.clicksend.com is not one).
+    // Home gets the short form; the row gets the whole story.
+    expect(r.brief).toBe('Text check FAILED: see the rent check row.');
+    expect(r.line).toMatch(/^Text check FAILED: control failed: 1 of 2/);
     expect(r.asked).toEqual(['in:sent to:sms.clicksend.com newer_than:4d',
-      '((from:clicksend.com -from:sms.clicksend.com) OR (from:mailer-daemon sms.clicksend.com)) newer_than:4d']);
+      '(from:clicksend.com OR (from:mailer-daemon sms.clicksend.com)) newer_than:4d']);
     // A text sent three minutes ago may not be indexed yet: not a blind read.
     expect(r.fresh).toBe('');
     expect(r.freshLine).toBe('Text check: 2 rent text(s) in the last 3 days, nothing came back from ClickSend.');
   });
 
-  it('ClickSend writes back after a text: the card and its tenancy say so once, Home says so every run', () => {
+  it('ClickSend writes back naming one text: that card and its tenancy say so once, Home says so every run', () => {
     const r = py(`
-p = ledger(("recTEXTCARD00001", 6, "123", "sent"), ("recTEXTCARD00002", 5, "999", "sent"))
-lm, _ = inbox([mail("s1", 6), mail("s2", 5)], [mail("m1", 4, snippet="Your message from 447984393339 to 447700900123 could not be delivered")])
+p = ledger((A, 6, "123", "sent"), (B, 5, "999", "sent"))
+lm, _ = inbox(gm(A, B), [mail("m1", 4, snippet="Your message from 447984393339 to 447700900123 could not be delivered")])
 rc = RC()
 first = tc.run(rc, NOW, True, ledger=p, list_mail=lm)
 again = tc.run(rc, NOW, True, ledger=p, list_mail=lm)
 dry = tc.run(RC(), NOW, False, ledger=p, list_mail=lm)
-print(json.dumps({"first": first, "again": again, "dry": dry, "calls": rc.calls, "notes": rc.notes, "brief": tc.brief(first)}))`);
-    // It names the number ending 123, so only that text is flagged.
+print(json.dumps({"first": first, "again": again, "dry": dry, "calls": rc.calls, "notes": rc.fields[tc.TK["notes"]], "brief": tc.brief(first)}))`);
     expect(r.first).toEqual({ checked: 2, flagged: ['recTEXTCARD00001'], noted: ['recTEXTCARD00001'], failed: '' });
     expect(r.notes).toMatch(/TEXT CHECK: ClickSend wrote back to info@agilelets\.co\.uk after this text \("Message failed", 07 Oct 05:00 UTC, mail m1\)\. The text may not have arrived: look in ClickSend's SMS history\.$/);
     expect(r.calls).toEqual([['GET', 'tblqB8b22hKBL4PF1/recTEXTCARD00001'], ['PATCH', 'tblqB8b22hKBL4PF1'],
-      ['POST', 'tblN51a88qTDB6iMH/recTENANCYTXT001/comments'], ['GET', 'tblqB8b22hKBL4PF1/recTEXTCARD00001']]);
-    // Written once; still flagged on Home while it is inside the window.
+      ['POST', 'tblN51a88qTDB6iMH/recTENANCYTEXT001/comments'], ['GET', 'tblqB8b22hKBL4PF1/recTEXTCARD00001']]);
     expect(r.again).toEqual({ checked: 2, flagged: ['recTEXTCARD00001'], noted: [], failed: '' });
-    // A dry run flags and writes nothing.
     expect(r.dry).toEqual({ checked: 2, flagged: ['recTEXTCARD00001'], noted: [], failed: '' });
     expect(r.brief).toBe("Text check: ClickSend wrote back after 1 rent text (task recTEXTCARD00001): it may not have arrived, look in ClickSend's SMS history.");
   });
 
-  it('an email back that names no number flags every text before it, and says it cannot tell which', () => {
+  it('an email that does not name exactly one of our texts flags every text before it, as "cannot tell which"', () => {
     const r = py(`
-p = ledger(("recTEXTCARD00001", 6, "123", "sent"), ("recTEXTCARD00002", 5, "999", "sent"))
-lm, _ = inbox([mail("s1", 6), mail("s2", 5)], [mail("b1", 4, sender="Mail Delivery Subsystem <mailer-daemon@googlemail.com>",
-                                                     subject="Delivery Status Notification (Failure)", snippet="sms.clicksend.com rejected")])
+p = ledger((A, 6, "123", "sent"), (B, 5, "999", "sent"))
+cases = {
+  "bounce": mail("b1", 4, sender="Mail Delivery Subsystem <mailer-daemon@googlemail.com>", subject="Delivery Status Notification (Failure)", snippet="sms.clicksend.com rejected"),
+  "ownOnly": mail("o1", 4, snippet="Email to SMS from +44 7984 393339 failed: no credit"),
+  "otherNumber": mail("x1", 4, snippet="Message to 07700 900456 failed"),
+  "longId": mail("l1", 4, snippet="Insufficient credit. Message ID: 9907123456123001"),
+  "noDate": mail("d1", 0, snippet="failed", date=False),
+  "fromSmsDomain": mail("s1", 4, sender="447700900123@sms.clicksend.com", subject="Undelivered message", snippet="failed"),
+}
+out = {}
+for k, m in cases.items():
+    rc = RC()
+    res = tc.run(rc, NOW, True, ledger=p, list_mail=inbox(gm(A, B), [m])[0])
+    out[k] = res["flagged"]
+    out[k + "Note"] = "does not name exactly one of our texts" in rc.fields[tc.TK["notes"]]
+print(json.dumps(out))`);
+    for (const k of ['bounce', 'ownOnly', 'otherNumber', 'longId', 'noDate']) {
+      expect(r[k], k).toEqual(['recTEXTCARD00001', 'recTEXTCARD00002']);
+      expect(r[k + 'Note'], k).toBe(true);
+    }
+    // A long id holding 07123456123 inside it is not a mobile (it would have named only the first text).
+    // ClickSend's sms subdomain is read too: only a tenant's own text is skipped. This one names our first text.
+    expect(r.fromSmsDomain).toEqual(['recTEXTCARD00001']);
+    expect(r.fromSmsDomainNote).toBe(false);
+  });
+
+  it('two texts sharing the named ending: those two are flagged, as "cannot tell which", and the third is not', () => {
+    const r = py(`
+C = "recTEXTCARD00003"
+p = ledger((A, 6, "123", "sent"), (B, 5, "123", "sent"), (C, 5, "999", "sent"))
 rc = RC()
-out = tc.run(rc, NOW, True, ledger=p, list_mail=lm)
-ours = tc.run(RC(), NOW, True, ledger=p, list_mail=inbox([mail("s1", 6), mail("s2", 5)],
-                                                          [mail("o1", 4, snippet="Email to SMS from +44 7984 393339 failed: no credit")])[0])
-print(json.dumps({"out": out, "notes": rc.notes, "ours": ours["flagged"]}))`);
-    expect(r.out.flagged).toEqual(['recTEXTCARD00001', 'recTEXTCARD00002']);
-    expect(r.notes).toMatch(/It names no number, so every text sent before it is flagged; check which\.$/);
-    // Our own sending number is never a tenant's: an email naming only it still flags every text before it.
-    expect(r.ours).toEqual(['recTEXTCARD00001', 'recTEXTCARD00002']);
+out = tc.run(rc, NOW, True, ledger=p, list_mail=inbox(gm(A, B, C), [mail("m1", 4, snippet="to 07700 900123 failed")])[0])
+print(json.dumps({"flagged": out["flagged"], "unsure": "does not name exactly one of our texts" in rc.fields[tc.TK["notes"]]}))`);
+    expect(r.flagged).toEqual(['recTEXTCARD00001', 'recTEXTCARD00002']);
+    expect(r.unsure).toBe(true);
   });
 
-  it('an email back from before the text, or naming another number, is not held against it', () => {
+  it('a tenant text, or an email from before the text, is not held against it; a bounce a second early still is', () => {
     const r = py(`
-p = ledger(("recTEXTCARD00001", 30, "123", "sent"))
-lm, _ = inbox([mail("s1", 30)], [mail("early", 31, snippet="07700 900123"), mail("other", 1, snippet="07700 900456")])
-out = tc.run(RC(), NOW, True, ledger=p, list_mail=lm)
-print(json.dumps({"out": out["flagged"], "checked": out["checked"]}))`);
-    // Before it: not about it. After it but naming another number: not about it.
-    expect(r.out).toEqual([]);
-    expect(r.checked).toBe(1);
+p = ledger((A, 30, "123", "sent"))
+early = mail("e1", 31, snippet="Message to 07700 900123 failed")
+replies = [mail("r1", 2, sender="447700900123@sms.clicksend.com", subject="SMS reply from +447700900123", snippet="ok thanks"),
+           mail("r2", 2, sender="447700900123@sms.clicksend.com", subject="Incoming SMS from +447700900123", snippet="paid")]
+quiet = tc.run(RC(), NOW, True, ledger=p, list_mail=inbox(gm(A), [early] + replies)[0])
+second = mail("g1", 30 + 1 / 3600, snippet="Message to 07700 900123 failed")
+grace = tc.run(RC(), NOW, True, ledger=p, list_mail=inbox(gm(A), [second])[0])
+print(json.dumps({"quiet": quiet["flagged"], "grace": grace["flagged"]}))`);
+    expect(r.quiet).toEqual([]);
+    expect(r.grace).toEqual(['recTEXTCARD00001']);
   });
 
-  it('a mailbox that cannot be read, or reads cut short, is a failure said on the row, never a raise', () => {
+  it('the Notes write keeps ids on both sides, and a card whose Notes read blank is a STOP, never a wipe', () => {
     const r = py(`
-p = ledger(("recTEXTCARD00001", 6, "123", "sent"))
+p = ledger((A, 6, "123", "sent"))
+lm = inbox(gm(A), [mail("m1", 4, snippet="to 07700 900123 failed")])[0]
+blank = RC(notes="")
+stopped = tc.run(blank, NOW, True, ledger=p, list_mail=lm)
+named = RC()
+real_api = named.api
+named.api = lambda method, path, payload=None, params=None: real_api(method, path, payload, None if method == "GET" else params)
+byName = tc.run(named, NOW, True, ledger=p, list_mail=lm)
+print(json.dumps({"stopped": stopped, "blankCalls": blank.calls, "byName": byName["failed"], "byNameCalls": named.calls}))`);
+    expect(r.stopped.failed).toBe("STOP: task recTEXTCARD00001's Notes read blank, so the text-check note was not written");
+    expect(r.stopped.flagged).toEqual(['recTEXTCARD00001']);
+    expect(r.blankCalls).toEqual([['GET', 'tblqB8b22hKBL4PF1/recTEXTCARD00001']]);
+    // A read that came back keyed by name reads blank by id: stopped, nothing patched.
+    expect(r.byName).toMatch(/^STOP: /);
+    expect(r.byNameCalls.map((c) => c[0])).toEqual(['GET']);
+  });
+
+  it('a plan card with no tenancy link is noted on its PLAN FOR tenancy', () => {
+    const r = py(`
+p = ledger((A, 6, "123", "sent"))
+rc = RC(tenancies=(), output="PLAN FOR: recTENANCYPLAN001\\nPLAN: 2026-10-10 £100.00\\nTO: a@b.com\\n---\\nx")
+tc.run(rc, NOW, True, ledger=p, list_mail=inbox(gm(A), [mail("m1", 4, snippet="to 07700 900123 failed")])[0])
+print(json.dumps([c for c in rc.calls if c[0] == "POST"]))`);
+    expect(r).toEqual([['POST', 'tblN51a88qTDB6iMH/recTENANCYPLAN001/comments']]);
+  });
+
+  it('a mailbox that cannot be read, reads cut short, or a torn ledger line is said on the row, never a raise', () => {
+    const r = py(`
+p = ledger((A, 6, "123", "sent"))
 def down(q): raise SystemExit("worker 502")
 broken = tc.run(RC(), NOW, True, ledger=p, list_mail=down)
-cut = tc.run(RC(), NOW, True, ledger=p, list_mail=inbox([mail("s1", 6)], [], truncated=True)[0])
-print(json.dumps({"broken": broken["failed"], "cut": cut["failed"]}))`);
+cut = tc.run(RC(), NOW, True, ledger=p, list_mail=inbox(gm(A), [], truncated=True)[0])
+torn = tc.run(RC(), NOW, True, ledger=ledger((A, 6, "123", "sent"), torn=True), list_mail=inbox(gm(A), [])[0])
+print(json.dumps({"broken": broken["failed"], "cut": cut["failed"], "torn": [torn["failed"], torn["checked"]]}))`);
     expect(r.broken).toMatch(/^the text check could not run: /);
     expect(r.cut).toBe("the read of ClickSend's emails to info@ was cut short, so the check is incomplete");
+    // The good lines are still checked.
+    expect(r.torn).toEqual(['1 line(s) of the text ledger could not be read', 1]);
   });
 });
