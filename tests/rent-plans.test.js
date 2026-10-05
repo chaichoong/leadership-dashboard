@@ -815,3 +815,31 @@ print(json.dumps([w["state"], w.get("stuck")]))`);
   });
 });
 
+describe('the tenth review\'s case (5 Oct 2026)', () => {
+  it('a last promise with nothing paid is called on time, even when the next rent adds a later check', () => {
+    const r = py(`
+trial_ended()
+notes = "[20 Oct 2026 10:00 — agent-dispatch] SUBMITTED (round 1) as Correspondence with no new file\\n[20 Oct 2026 10:00 — send-email] SENT: email to sam@example.com"
+c = card(out=output(plan=(("2026-10-25", 300),)), notes=notes, created="2026-10-20T08:00:00.000Z")
+t = {"rent": 500, "dueDay": "1"}
+print(json.dumps({"day28": rp.state(c, [], date(2026, 10, 28), t, asof=date(2026, 10, 27)),
+                  "keptOnTime": rp.state(c, pays(("2026-10-25", 300), ("2026-11-01", 500)), date(2026, 11, 3), t)["state"],
+                  "earlyUcOnly": rp.state(c, pays(("2026-10-27", 500)), date(2026, 11, 3), t)}))`);
+    expect(r.day28).toMatchObject({ state: 'missed', missedOn: '2026-10-25', owed: 300, paid: 0 });
+    expect(r.keptOnTime).toBe('kept');
+    // November's Universal Credit landing early passes the 25 Oct check, never the added 1 Nov one.
+    expect(r.earlyUcOnly).toMatchObject({ state: 'missed', missedOn: '2026-11-01', owed: 800, paid: 500 });
+  });
+  it('an unsure added check keeps the promise\'s own clock', () => {
+    const r = py(`
+trial_ended()
+notes = "[01 Oct 2026 10:00 — agent-dispatch] SUBMITTED (round 1) as Correspondence with no new file\\n[01 Oct 2026 10:00 — send-email] SENT: email to sam@example.com"
+# £300 on the drafting day (unsure); the 15 Oct £300 paid on time; rent £500 due the 18th, only £200 of it paid.
+c = card(out=output(plan=(("2026-10-15", 300),)), notes=notes, created="2026-10-01T08:00:00.000Z")
+P = pays(("2026-10-01", 300), ("2026-10-15", 300), ("2026-10-18", 200))
+print(json.dumps(rp.state(c, P, date(2026, 10, 23), {"rent": 500, "dueDay": "18"})["state"]))`);
+    // The added 18 Oct check is met only with the drafting day's money; its clock runs from the 15 Oct promise.
+    expect(r).toBe('missed');
+  });
+});
+

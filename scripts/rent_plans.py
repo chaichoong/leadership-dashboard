@@ -224,11 +224,13 @@ def state(rec, payments, day, tenancy=None, doubt=False, asof=None):
     # The first rent after the plan. The rent check credits money paid from 5 days before it to that rent, so
     # when that window reaches into the last promise's, one payment could count for both: the plan would read
     # KEPT on next month's money while lane A reads next month as paid with the plan's (reviews, 5 Oct 2026).
-    # So the plan's last check moves to that rent's own date and holds the promises AND that rent: a tenant who
-    # keeps his plan and pays his rent is kept; one who misses either is chased, which is right.
+    # So one more check is added on that rent's own date, holding the promises AND that rent: a tenant who keeps
+    # his plan and pays his rent is kept; one who misses either is chased. The last promise keeps its own check
+    # too, so a promise with nothing paid is called on time (review, 5 Oct 2026); next month's early money can
+    # only pass that one, never the added check.
     nxt = [d for d in (rent_dues(end, end + timedelta(days=62), (tenancy or {}).get("dueDay")) if rent else []) if d > end][:1]
     if nxt and nxt[0] - early <= end + grace:
-        checks[-1] = (nxt[0], checks[-1][1] + rent, checks[-1][2])
+        checks.append((nxt[0], checks[-1][1] + rent, checks[-1][2]))
 
     def waiting(check, reason="the rent check cannot tell about this tenancy's money"):
         late = (day - (check - grace)).days
