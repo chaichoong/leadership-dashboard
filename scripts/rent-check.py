@@ -104,6 +104,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import rent_cap  # noqa: E402
 import rent_new_tenant as lane_b_rules  # noqa: E402
 import rent_plans  # noqa: E402
+import text_check  # noqa: E402
 
 LONDON = ZoneInfo("Europe/London")
 BASE = "appnqjDpqDniH3IRl"
@@ -618,6 +619,10 @@ def brief_line(res):
     if not res["total"]:
         return "No live tenancy could be judged, so the rent check tells you nothing today."
     parts = [f"{res['paying']} of {res['total']} tenants paying ({res['pct']}%, floor {res['floor']}%)."]
+    # A rent text ClickSend may not have sent goes first after the figure: Home prints only 700 characters.
+    texts = text_check.brief(res.get("texts") or {})
+    if texts:
+        parts.append(texts)
 
     def group(lane):
         return [r for r in res["tenancies"] if r["lane"] == lane and r["light"] != "green"]
@@ -980,21 +985,22 @@ def main(argv=None):
     res["agentLate"] = agent_late(res, data["tenancies"], day, writes, switch)
     res["plans"] = rent_plans.act(_Here(), plans, data, day, writes, switch, res)
     res["cap"] = rent_cap.run(_Here(), data, day, res, writes, switch, plans["onTrack"])
+    res["texts"] = text_check.run(_Here(), now, writes)
     res["briefLine"] = brief_line(res)              # lane B has put each new tenant's stage on its row
     failed = (res["tasks"]["failed"] or res["setup"]["failed"] or res["agentLate"]["failed"] or res["plans"]["failed"]
-              or res["cap"]["failed"])
+              or res["cap"]["failed"] or res["texts"]["failed"])
     if writes:
         public = {k: v for k, v in res.items() if k not in ("lights", "lanes", "paidFull")}
         # Blocked only when the bank data hid a verdict: a stale feed with every rent already seen hides nothing.
         status = "Failed" if failed else ("Blocked" if res["bankBlocked"] or res["plans"].get("stuck") else "Worked")
         write_row(status, "\n".join([detail(res), lane_a_line(res["tasks"]), lane_b_rules.lane_b_line(res["setup"]),
                                       agent_late_line(res["agentLate"]), rent_plans.line(res["plans"]),
-                                      rent_cap.line(res["cap"])]), public, now)
+                                      rent_cap.line(res["cap"]), text_check.line(res["texts"])]), public, now)
         append_history(res, now)
     print(json.dumps({"written": writes, "briefLine": res["briefLine"], "worst": res["worst"],
                       "counts": res["counts"], "tenancies": res["tenancies"], "feed": res["feed"],
                       "tasks": res["tasks"], "setup": res["setup"], "agentLate": res["agentLate"], "plans": res["plans"],
-                      "cap": res["cap"]}, indent=2, default=str))
+                      "cap": res["cap"], "texts": res["texts"]}, indent=2, default=str))
     return 1 if failed else 0
 
 

@@ -70,6 +70,11 @@ rc.read_agent_late = lambda: {}
 rc.rent_plans.read_cards = lambda _rc: []
 # Benefit-cap claims read and raise through these; their own cases are in tests/rent-cap.test.js.
 rc.rent_cap.read = lambda _rc: ({}, [])
+# The text alarm reads a ledger on this Mac and info@'s mailbox: never in a test.
+rc.text_check.LEDGER = os.path.join(tempfile.mkdtemp(), "no-texts.jsonl")
+def _no_mail(q):
+    raise AssertionError("a rent-check test reached for info@'s mailbox")
+rc.text_check.default_list_mail = _no_mail
 rc.rent_cap.read_tenants = lambda _rc, ids: {}
 rc.rent_cap.read_busy = lambda _rc: set()
 rc.rent_cap.read_capped = lambda _rc, day: set()
@@ -1182,6 +1187,36 @@ print(json.dumps({"codes": [calm, broken], "status": [rows[0][0], rows[1][0]], "
     expect(r.status).toEqual(['Worked', 'Failed']);
     expect(r.calm).toBe('Benefit-cap claims: none needed today.');
     expect(r.broken).toBe('Benefit-cap claims FAILED: benefit-cap claims could not be read: Airtable 503');
+  });
+
+  it('the text alarm (5 Oct 2026): its line is on the row, a flagged text leads the Home line, and a blind check turns the run red', () => {
+    const r = py(`
+rows, prints = [], []
+today = rc.today_london()
+ts = [tenancy("recG%02d" % i, 1, 500) for i in range(20)]
+rc.load = lambda day: world(ts, [paid("recG%02d" % i, today.isoformat(), 500) for i in range(20)], day=today, feed=datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.000Z"))
+rc.read_task_state = lambda: {"on": True, "status": "Built", "keys": {}}
+rc.write_row = lambda status, text, payload, now: rows.append([status, text, payload.get("briefLine", "")])
+line = lambda n: next(l for l in rows[n][1].splitlines() if l.startswith("Text check"))
+real = rc.text_check.run
+with contextlib.redirect_stdout(io.StringIO()):
+    quiet = rc.main(["run"])
+rc.text_check.run = lambda *a, **k: {"checked": 1, "flagged": ["recTEXTCARD00001"], "noted": [], "failed": ""}
+with contextlib.redirect_stdout(io.StringIO()):
+    flagged = rc.main(["run"])
+rc.text_check.run = lambda *a, **k: {"checked": 2, "flagged": [], "noted": [], "failed": "control failed: blind"}
+with contextlib.redirect_stdout(io.StringIO()):
+    blind = rc.main(["run"])
+rc.text_check.run = real
+print(json.dumps({"codes": [quiet, flagged, blind], "status": [x[0] for x in rows], "quiet": line(0), "flagged": line(1),
+                  "brief": rows[1][2], "blind": line(2)}))`);
+    expect(r.codes).toEqual([0, 0, 1]);
+    expect(r.status).toEqual(['Worked', 'Worked', 'Failed']);
+    expect(r.quiet).toBe('Text check: no rent text sent in the last 3 days.');
+    expect(r.flagged).toMatch(/^Text check: ClickSend wrote back after 1 rent text \(task recTEXTCARD00001\)/);
+    // Straight after the paying figure: Home prints only the first 700 characters.
+    expect(r.brief).toMatch(/^20 of 20 tenants paying \(100\.0%, floor [\d.]+%\)\. Text check: ClickSend wrote back after 1 rent text/);
+    expect(r.blind).toBe('Text check FAILED: control failed: blind.');
   });
 
   it('a failed raise is said on the row, turns the run red, and the rent line is still written', () => {
