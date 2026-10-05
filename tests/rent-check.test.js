@@ -1077,6 +1077,35 @@ print(json.dumps({"rid": rid, "method": posts[0][0], "table": posts[0][1], "name
       tm: ['rec7aHLK1Q8fMLRXH'], notes: 'RENT CHECK KEY: recLate:2026-09-30:1', tenancies: ['recLate'], tenants: ['recT_uc'], count: 1 });
   });
 
+  it('the select-field control reads the base schema through the same retrying call, and fails loudly on a missing field', () => {
+    const r = py(`
+import io, urllib.error
+seen, sleeps = [], []
+class Resp(io.BytesIO):
+    def __enter__(self): return self
+    def __exit__(self, *a): return False
+SCHEMA = {"tables": [{"id": "tblX4elTuu01gwBYh", "fields": [{"id": "fldOOi3d1P4vDedm6", "options": {"choices": [{"name": "LCWRA"}, {"name": "None (capped)"}]}}]}]}
+def fake_open(req, timeout=None):
+    seen.append(req.full_url)
+    if len(seen) == 1:
+        raise urllib.error.HTTPError(req.full_url, 429, "slow down", {}, io.BytesIO(b"{}"))
+    return Resp(json.dumps(SCHEMA).encode())
+rc.urllib.request.urlopen = fake_open
+rc._pat = lambda: "x"
+rc.time.sleep = lambda s: sleeps.append(s)
+got = rc.field_choices("tblX4elTuu01gwBYh", "fldOOi3d1P4vDedm6")
+try:
+    rc.field_choices("tblX4elTuu01gwBYh", "fldMISSING00000")
+    missing = "passed"
+except RuntimeError as e:
+    missing = str(e)
+print(json.dumps({"got": got, "urls": sorted(set(seen)), "retried": len(sleeps), "missing": missing}))`);
+    expect(r.got).toEqual(['LCWRA', 'None (capped)']);
+    expect(r.urls).toEqual(['https://api.airtable.com/v0/meta/bases/appnqjDpqDniH3IRl/tables']);
+    expect(r.retried).toBe(1);
+    expect(r.missing).toMatch(/control failed: field fldMISSING00000 is not in table tblX4elTuu01gwBYh/);
+  });
+
   it('the task state reads the pause lever, and each key with the day it was raised, from Notes or the description', () => {
     const r = py(`
 import importlib
