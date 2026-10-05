@@ -134,6 +134,9 @@ RETIRED = [
      "a site the robot cannot reach is a SITE wall: agent-dispatch.py block --kind SITE, and the task wakes when Kevin adds it"),
     (r"OPENS with 'PARKED:'", "2026-09-25",
      "a wall is recorded with agent-dispatch.py block and its kind; annotate refuses a PARKED note"),
+    # Texts to tenants (Kevin, 5 Oct 2026: "Email-to-text"): GoHighLevel holds no Agile Lets location.
+    (r"(?i)GoHighLevel number|texts? (go|goes|sent) (through|via|by) GoHighLevel", "2026-10-05",
+     "texts go by ClickSend email-to-text from info@agilelets.co.uk, from the Agile Lets number +447984393339"),
 ]
 
 # A line that is describing the old rule, not stating it.
@@ -319,6 +322,10 @@ def selftest():
     assert not scan_text("Route to the Supplier and Creditor Manager agent.", "x")
     assert scan_text("Use for the teardown call.", "x")
     assert scan_text("The Teardown Call runs first.", "x")
+    # Texts to tenants (5 Oct 2026): the GoHighLevel route fires; GoHighLevel itself, for OD sales, does not.
+    assert scan_text("Texts go from the Agile Lets GoHighLevel number.", "x")
+    assert scan_text("Each text goes through GoHighLevel to the tenant.", "x")
+    assert not scan_text("Sales follow-ups run in GoHighLevel workflows for Operations Director.", "x")
     assert stamp_of(os.devnull) is None
     assert rulings_after("2026-09-07", os.devnull) == []
     memory_selftest()
