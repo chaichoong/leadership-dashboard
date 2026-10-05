@@ -396,7 +396,7 @@ def plan(tid, view, row, tenancy, tenants, day, no_chase=False, busy=False, unli
         saver = claimant(list(tenancy.get("fld1i5bDoHL3B6rUf") or []), tenants)
         if saver and _sel(saver["fields"].get(TN["cap"])) == CAPPED and (day - saver["saved"]).days <= FULL_FRESH_DAYS:
             case = {"case": f"full:{saver['saved'].isoformat()}", "created": saver["saved"], "description": ""}
-        elif saver and any(_sel((tenants.get(t) or {}).get(TN["cap"])) == CAPPED
+        elif saver and _sel(saver["fields"].get(TN["cap"])) != CAPPED and any(_sel((tenants.get(t) or {}).get(TN["cap"])) == CAPPED
                            for t in tenancy.get("fld1i5bDoHL3B6rUf") or [] if t != saver["id"]):
             # A joint tenancy: the household's latest answer stands, and it does not say capped. Said, never silent.
             full_note = (f"no claim: the latest details form answers the benefit cap as "
@@ -479,19 +479,20 @@ def plan(tid, view, row, tenancy, tenants, day, no_chase=False, busy=False, unli
 
     # A claim that asks for the award to go to the tenant while the rent now arrives short: Kevin is told on the row,
     # every run, so he sends the card back (or tells the council) rather than paying a tenant who is short.
-    # Short, or late long enough to be red (a few days late is often bank timing). Only while the claim can still
-    # pay the tenant: waiting with Kevin, or sent with no answer yet, or under an award still in force.
+    # Short, or late and red on the rent check (a few days late is often bank timing; a tenancy with no payment
+    # for months is red with no day count). Only while the claim can still pay the tenant: waiting with Kevin, or
+    # sent with no answer yet, or under an award still in force.
     behind = None
     if row is not None and row.get("lane") == "short":
         behind = "short"
-    elif row is not None and row.get("lane") == "late" and (row.get("daysLate") or 0) >= 7:
+    elif row is not None and row.get("lane") == "late" and row.get("light") == "red":
         behind = "late"
     if newest and behind and (card_line(newest, PAYEE_MARK) or "").startswith("tenant") \
             and newest["do"] in ("wait", "parked", "done", "sent") \
             and not has(newest, WITHDRAWN_MARK) and not has(newest, ENDED_MARK):
         answers = [d for d in decisions if d["case"] == newest["case"]]
-        settled = any(has(d, STOPPED_MARK) for d in answers) or any(
-            has(d, AWARD_MARK) for d in answers) and not (in_force and award_case == newest["case"])
+        settled = any(has(d, STOPPED_MARK) for d in answers) or (
+            any(has(d, AWARD_MARK) for d in answers) and not (in_force and award_case == newest["case"]))
         if newest["do"] in ("wait", "parked"):
             out["problems"].append(f"a claim asks for the award to go to the tenant, but the rent is now {behind}: "
                                    "press Request changes on the card")
@@ -566,11 +567,20 @@ def plan(tid, view, row, tenancy, tenants, day, no_chase=False, busy=False, unli
                 stage = "; ".join(x for x in (stage, "claim not raised yet: " + "; ".join(why)) if x)
             else:
                 prior = None
-                # Kevin's change note carries to the next card, even when the tenant's re-save starts a new case.
-                source = last or (claims[-1] if claims and has(claims[-1], WITHDRAWN_MARK) else None)
-                said_ = (mark_line(source["notes"], WITHDRAWN_MARK) or "") if source else ""
-                if "asked for changes: " in said_:
-                    prior = said_.split("asked for changes: ", 1)[1].strip().strip('"')
+                # Kevin's change note carries to the next card, even when the tenant's re-save starts a new case:
+                # from the latest claim he sent back (today, or written down before), for the same tenant, recently.
+                source = last
+                if source is None and claims and (claims[-1]["do"] == "withdraw" or has(claims[-1], WITHDRAWN_MARK)):
+                    old = claims[-1]
+                    if card_line(old, CLAIM_FOR_MARK) in (None, who["id"]) \
+                            and (day - marked_on(old, WITHDRAWN_MARK, day)).days <= FULL_FRESH_DAYS:
+                        source = old
+                if source and source["do"] == "withdraw":
+                    prior = source["detail"] or None  # sent back today: its line is written later in this run
+                else:
+                    said_ = (mark_line(source["notes"], WITHDRAWN_MARK) or "") if source else ""
+                    if "asked for changes: " in said_:
+                        prior = said_.split("asked for changes: ", 1)[1].strip().strip('"')
                 m = SHORT_RE.search(case["description"])
                 short = (float(m.group(1).replace(",", "")), float(m.group(2).replace(",", ""))) if m else None
                 # Who is paid: the tenant for a full payer's case, or the renewal of an award a claim paid to the

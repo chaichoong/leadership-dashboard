@@ -950,10 +950,12 @@ print(json.dumps({"late": [kinds(late), late["stage"]], "unknown": kinds(unknown
     const r = py(`
 FULL = "full:2026-09-28"
 sent = claim(case=FULL, status="Completed", notes_extra="\\nRENT CLAIM PAYEE: tenant\\nRENT CLAIM SENT: 2026-10-02 x")
-late7 = dict(SHORT, lane="late", daysLate=7)
-late3 = dict(SHORT, lane="late", daysLate=3)
+late7 = dict(SHORT, lane="late", light="red", daysLate=7)
+late3 = dict(SHORT, lane="late", light="amber", daysLate=3)
+beyond = dict(SHORT, lane="late", light="red", beyond=True)
 red = cap.plan(TEN, view([], [sent]), late7, TENANCY, {TENANT: GOOD}, date(2026, 10, 26), uc=True)
 amber = cap.plan(TEN, view([], [sent]), late3, TENANCY, {TENANT: GOOD}, date(2026, 10, 26), uc=True)
+long_gone = cap.plan(TEN, view([], [sent]), beyond, TENANCY, {TENANT: GOOD}, date(2026, 10, 26), uc=True)
 refused = decision(case=FULL, status="Completed", outcome="Approved as-is", approved="2026-10-25T09:00:00.000Z", notes_extra="\\nRENT CLAIM AWARD: REFUSED (read)")
 after_no = cap.plan(TEN, view([], [sent, refused]), dict(SHORT, cycle="2026-10-23"), TENANCY, {TENANT: GOOD}, date(2026, 10, 26), uc=True)
 awarded = decision(case=FULL, status="Completed", outcome="Approved as-is", approved="2026-10-25T09:00:00.000Z", notes_extra="\\nRENT CLAIM AWARD: 2027-03-31 (read)")
@@ -970,17 +972,61 @@ d1 = decision(case=FULL, status="Completed", outcome="Approved as-is", notes_ext
 cap1 = cap_task(case="renew:2027-03-31", created="2027-03-01T09:00:00.000Z", i="recCAPTASK0000003")
 renew = cap.plan(TEN, view([cap1], [trimmed, d1]), {"id": TEN, "lane": "fine", "paidFull": True}, TENANCY,
                  {TENANT: dict(GOOD, **{TN["saved"]: "2027-03-02T08:00:00.000Z"})}, date(2027, 3, 3), uc=True)
-print(json.dumps({"red": red["problems"], "amber": amber["problems"], "afterNo": after_no["problems"], "inForce": in_force["problems"],
+print(json.dumps({"red": red["problems"], "amber": amber["problems"], "beyond": long_gone["problems"], "afterNo": after_no["problems"], "inForce": in_force["problems"],
                   "joint": [kinds(joint), joint["stage"]], "prior": resave["raise"][0]["prior"] if resave["raise"] else None,
                   "trimmedPayee": renew["raise"][0]["payee"] if renew["raise"] else None}))`);
     expect(r.red).toEqual(['a claim asks for the award to go to the tenant, but the rent is now late: tell the council']);
     expect(r.amber).toEqual([]);
+    // No payment for months: red with no day count, still warned (review 2, 5 Oct 2026).
+    expect(r.beyond).toEqual(['a claim asks for the award to go to the tenant, but the rent is now late: tell the council']);
     // A refused claim pays nobody: no more warnings. An award still in force does warn.
     expect(r.afterNo).toEqual([]);
     expect(r.inForce).toEqual(['a claim asks for the award to go to the tenant, but the rent is now short: tell the council']);
     expect(r.joint).toEqual([[], 'no claim: the latest details form answers the benefit cap as "LCWRA", not capped']);
     expect(r.prior).toBe('Use her other bank');
     expect(r.trimmedPayee).toBe('tenant');
+  });
+
+  it('polish review 2: a change note sent back TODAY reaches the new case, an old or other-tenant note does not, a stale capped saver is not called "not capped"', () => {
+    const r = py(`
+fine = {"id": TEN, "lane": "fine", "paidFull": True}
+resaved = dict(GOOD, **{TN["saved"]: "2026-10-05T08:00:00.000Z"})
+today_back = claim(case="full:2026-09-28", status="Approval", outcome="Changes requested", feedback="Use her  other bank")
+same_run = cap.plan(TEN, view([], [today_back]), fine, TENANCY, {TENANT: resaved}, date(2026, 10, 6), uc=True)
+old = claim(case="full:2026-05-01", status="Cancelled", outcome="Changes requested", created="2026-05-02T09:00:00.000Z",
+            notes_extra='\\nRENT CLAIM WITHDRAWN: 2026-05-03 Kevin asked for changes: "Use her other bank"')
+stale = cap.plan(TEN, view([], [old]), fine, TENANCY, {TENANT: resaved}, date(2026, 10, 6), uc=True)
+other = claim(case="full:2026-09-01", status="Cancelled", outcome="Changes requested", created="2026-09-05T09:00:00.000Z",
+              notes_extra='\\nRENT CLAIM FOR: recTENANTCAP00002\\nRENT CLAIM WITHDRAWN: 2026-09-06 Kevin asked for changes: "Use her other bank"')
+not_them = cap.plan(TEN, view([], [other]), fine, TENANCY, {TENANT: resaved}, date(2026, 10, 6), uc=True)
+TWO = {"fld1i5bDoHL3B6rUf": [TENANT, "recTENANTCAP00002"]}
+old_saver = dict(GOOD, **{TN["saved"]: "2026-07-01T08:00:00.000Z"})
+partner = dict(GOOD, **{TN["saved"]: "2026-06-01T08:00:00.000Z"})
+both_stale = cap.plan(TEN, view(), fine, TWO, {TENANT: old_saver, "recTENANTCAP00002": partner}, date(2026, 10, 6), uc=True)
+print(json.dumps({"sameRun": [kinds(same_run), [x["prior"] for x in same_run["raise"]]],
+                  "stale": [x["prior"] for x in stale["raise"]], "notThem": [x["prior"] for x in not_them["raise"]],
+                  "bothStale": [kinds(both_stale), both_stale["stage"]]}))`);
+    expect(r.sameRun).toEqual([[['claim', 'full:2026-10-05', 1]], ['Use her other bank']]);
+    expect(r.stale).toEqual([null]);
+    expect(r.notThem).toEqual([null]);
+    expect(r.bothStale[0]).toEqual([]);
+    expect(r.bothStale[1]).not.toMatch(/not capped/);
+  });
+
+  it('polish review 2: the claimant and the payee are read from the Description once Notes lose them', () => {
+    const r = py(`
+FULL = "full:2026-09-28"
+sent = claim(case=FULL, status="Completed", notes_extra="\\nRENT CLAIM SENT: 2026-10-02 x")
+sent["fields"][F["description"]] = "Raised...\\nRENT CLAIM KEY: claim:x\\nRENT CLAIM FOR: recTENANTCAP00002\\nRENT CLAIM PAYEE: tenant"
+TWO = {"fld1i5bDoHL3B6rUf": [TENANT, "recTENANTCAP00002"]}
+partner = dict(GOOD, **{TN["name"]: "Alex Example", TN["saved"]: "2026-09-20T08:00:00.000Z"})
+asked = cap.plan(TEN, view([], [sent]), {"id": TEN, "lane": "fine", "paidFull": True}, TWO, {TENANT: GOOD, "recTENANTCAP00002": partner},
+                 date(2026, 10, 24), uc=True)
+dec = [x for x in asked["raise"] if x["kind"] == "decision"]
+warned = cap.plan(TEN, view([], [sent]), SHORT, TENANCY, {TENANT: GOOD}, date(2026, 10, 26), uc=True)
+print(json.dumps({"who": dec[0]["who"] if dec else None, "warn": warned["problems"]}))`);
+    expect(r.who).toBe('Alex Example');
+    expect(r.warn).toEqual(['a claim asks for the award to go to the tenant, but the rent is now short: tell the council']);
   });
 
   it('polish, 5 Oct 2026: a renamed capped choice stops the run loudly instead of reading as nobody', () => {

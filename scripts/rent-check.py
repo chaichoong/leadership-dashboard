@@ -240,10 +240,7 @@ def _pat():
 def field_choices(table, field_id):
     """The choice names of a select field, read from the base's schema: the control on a formula that matches a
     choice by name (a renamed choice would match nothing and read as "nobody", never as an error)."""
-    req = urllib.request.Request(f"https://api.airtable.com/v0/meta/bases/{BASE}/tables",
-                                 headers={"Authorization": f"Bearer {_pat()}"})
-    with urllib.request.urlopen(req, timeout=60) as r:
-        tables = json.load(r).get("tables") or []
+    tables = (api("GET", f"meta/bases/{BASE}/tables") or {}).get("tables") or []
     for t in tables:
         if t.get("id") == table:
             for f in t.get("fields") or []:
@@ -253,7 +250,8 @@ def field_choices(table, field_id):
 
 
 def api(method, path, payload=None, params=None):
-    url = f"https://api.airtable.com/v0/{BASE}/{path}"
+    # A schema read ("meta/...") sits outside the base's own path.
+    url = f"https://api.airtable.com/v0/{path if path.startswith('meta/') else BASE + '/' + path}"
     if params:
         url += "?" + urllib.parse.urlencode(params, doseq=True)
     data = json.dumps(payload).encode() if payload is not None else None
