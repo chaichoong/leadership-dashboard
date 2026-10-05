@@ -237,6 +237,21 @@ def _pat():
         return fh.read().strip()
 
 
+def field_choices(table, field_id):
+    """The choice names of a select field, read from the base's schema: the control on a formula that matches a
+    choice by name (a renamed choice would match nothing and read as "nobody", never as an error)."""
+    req = urllib.request.Request(f"https://api.airtable.com/v0/meta/bases/{BASE}/tables",
+                                 headers={"Authorization": f"Bearer {_pat()}"})
+    with urllib.request.urlopen(req, timeout=60) as r:
+        tables = json.load(r).get("tables") or []
+    for t in tables:
+        if t.get("id") == table:
+            for f in t.get("fields") or []:
+                if f.get("id") == field_id:
+                    return [c.get("name") for c in (f.get("options") or {}).get("choices") or []]
+    raise RuntimeError(f"control failed: field {field_id} is not in table {table}")
+
+
 def api(method, path, payload=None, params=None):
     url = f"https://api.airtable.com/v0/{BASE}/{path}"
     if params:

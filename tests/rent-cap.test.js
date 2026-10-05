@@ -424,6 +424,9 @@ class RC:
     T_TASKS, T_TENANTS, T_TENANCIES = "tblqB8b22hKBL4PF1", "tblX4elTuu01gwBYh", "tblN51a88qTDB6iMH"
     TK, TY, AGENT_TEAM_MEMBER = rc.TK, rc.TY, rc.AGENT_TEAM_MEMBER
     first, lane_b_rules, tenant_type = staticmethod(rc.first), rc.lane_b_rules, staticmethod(rc.tenant_type)
+    CHOICES = ["Unknown", "None (capped)", "LCWRA", "PIP or DLA", "Carer", "Earnings over threshold", "Not on UC"]
+    def field_choices(self, table, field):
+        return list(self.CHOICES)
     def __init__(self, caps=(), cards=(), tenants=None, late=(), capped=()):
         self.fake = Fake(caps, cards, tenants or {TENANT: dict(GOOD)}, late, capped)
         self.raised, self.posts, self.patches, self.reads = [], [], [], []
@@ -493,7 +496,7 @@ gates = {"carry": ad.carry_out_problem(text), "send": ad.send_promise_problem(te
          "kevinOnly": ad.kevin_only_step(text)}
 post = live.posts[0]
 print(json.dumps({"claims": out["claims"], "name": post[rc.TK["name"]], "owner": post[rc.TK["teamMember"]], "notes": post[rc.TK["notes"]],
-                  "desc": post[rc.TK["description"]][-60:], "submit": [s["agent"], s["type"]], "mode": MODES, "left": os.path.exists(s["file"]),
+                  "desc": post[rc.TK["description"]][-160:], "submit": [s["agent"], s["type"]], "mode": MODES, "left": os.path.exists(s["file"]),
                   "gates": gates, "text": text, "line": cap.line(out), "failed": out["failed"]}))`);
     expect(r.failed).toBe('');
     expect(r.claims).toEqual(['Unit 9 – 4 Example Road (claim 1)']);
@@ -502,6 +505,8 @@ print(json.dumps({"claims": out["claims"], "name": post[rc.TK["name"]], "owner":
     // The claimant rides on the card, so the question about the council's answer names the right tenant.
     expect(r.notes).toBe('RENT CLAIM KEY: claim:recTENANCYCAP0001:2026-09-23:1\nRENT CLAIM FOR: recTENANTCAP00001\nRENT CLAIM PAYEE: landlord');
     expect(r.desc).toContain('RENT CLAIM KEY: claim:recTENANCYCAP0001:2026-09-23:1');
+    // The claimant and the payee ride in the Description too: Notes are trimmed from the front once very long.
+    expect(r.desc).toContain('RENT CLAIM FOR: recTENANTCAP00001\nRENT CLAIM PAYEE: landlord');
     expect(r.submit).toEqual(['rec7aHLK1Q8fMLRXH', 'Admin']);
     // The card's words name the tenant: its file is the owner's alone, and gone once submitted.
     expect([r.mode, r.left]).toEqual([['600'], false]);
@@ -936,9 +941,55 @@ print(json.dumps({"late": [kinds(late), late["stage"]], "unknown": kinds(unknown
     expect(r.late[0]).toEqual([]);
     expect(r.late[1]).toMatch(/claim waits: the rent is not seen paid in full yet$/);
     expect([r.unknown, r.doubtful]).toEqual([[], []]);
-    expect(r.flag).toEqual(['a claim asks for the award to go to the tenant, but the rent now arrives short: press Request changes on the card']);
-    expect(r.sentFlag).toEqual(['a claim asks for the award to go to the tenant, but the rent now arrives short: tell the council the rent is short']);
+    expect(r.flag).toEqual(['a claim asks for the award to go to the tenant, but the rent is now short: press Request changes on the card']);
+    expect(r.sentFlag).toEqual(['a claim asks for the award to go to the tenant, but the rent is now short: tell the council']);
     expect(r.ours).toEqual([]);
+  });
+
+  it('polish, 5 Oct 2026: red-late warns too, a settled claim stops warning, a joint household is said, a change note survives a re-save', () => {
+    const r = py(`
+FULL = "full:2026-09-28"
+sent = claim(case=FULL, status="Completed", notes_extra="\\nRENT CLAIM PAYEE: tenant\\nRENT CLAIM SENT: 2026-10-02 x")
+late7 = dict(SHORT, lane="late", daysLate=7)
+late3 = dict(SHORT, lane="late", daysLate=3)
+red = cap.plan(TEN, view([], [sent]), late7, TENANCY, {TENANT: GOOD}, date(2026, 10, 26), uc=True)
+amber = cap.plan(TEN, view([], [sent]), late3, TENANCY, {TENANT: GOOD}, date(2026, 10, 26), uc=True)
+refused = decision(case=FULL, status="Completed", outcome="Approved as-is", approved="2026-10-25T09:00:00.000Z", notes_extra="\\nRENT CLAIM AWARD: REFUSED (read)")
+after_no = cap.plan(TEN, view([], [sent, refused]), dict(SHORT, cycle="2026-10-23"), TENANCY, {TENANT: GOOD}, date(2026, 10, 26), uc=True)
+awarded = decision(case=FULL, status="Completed", outcome="Approved as-is", approved="2026-10-25T09:00:00.000Z", notes_extra="\\nRENT CLAIM AWARD: 2027-03-31 (read)")
+in_force = cap.plan(TEN, view([], [sent, awarded]), dict(SHORT, cycle="2026-10-23"), TENANCY, {TENANT: GOOD}, date(2026, 10, 26), uc=True)
+TWO = {"fld1i5bDoHL3B6rUf": [TENANT, "recTENANTCAP00002"]}
+couple = {TENANT: GOOD, "recTENANTCAP00002": dict(GOOD, **{TN["cap"]: {"name": "LCWRA"}, TN["saved"]: "2026-10-01T08:00:00.000Z"})}
+joint = cap.plan(TEN, view(), {"id": TEN, "lane": "fine", "paidFull": True}, TWO, couple, date(2026, 10, 6), uc=True)
+gone = claim(case="full:2026-09-01", status="Cancelled", outcome="Changes requested", created="2026-09-05T09:00:00.000Z",
+             notes_extra='\\nRENT CLAIM WITHDRAWN: 2026-09-06 Kevin asked for changes: "Use her other bank"')
+resave = cap.plan(TEN, view([], [gone]), {"id": TEN, "lane": "fine", "paidFull": True}, TENANCY, {TENANT: GOOD}, date(2026, 10, 6), uc=True)
+trimmed = claim(case=FULL, status="Completed", notes_extra="\\nRENT CLAIM SENT: 2026-10-02 x")
+trimmed["fields"][F["description"]] = "RENT CLAIM KEY: claim:x\\nRENT CLAIM PAYEE: tenant"
+d1 = decision(case=FULL, status="Completed", outcome="Approved as-is", notes_extra="\\nRENT CLAIM AWARD: 2027-03-31 (read)")
+cap1 = cap_task(case="renew:2027-03-31", created="2027-03-01T09:00:00.000Z", i="recCAPTASK0000003")
+renew = cap.plan(TEN, view([cap1], [trimmed, d1]), {"id": TEN, "lane": "fine", "paidFull": True}, TENANCY,
+                 {TENANT: dict(GOOD, **{TN["saved"]: "2027-03-02T08:00:00.000Z"})}, date(2027, 3, 3), uc=True)
+print(json.dumps({"red": red["problems"], "amber": amber["problems"], "afterNo": after_no["problems"], "inForce": in_force["problems"],
+                  "joint": [kinds(joint), joint["stage"]], "prior": resave["raise"][0]["prior"] if resave["raise"] else None,
+                  "trimmedPayee": renew["raise"][0]["payee"] if renew["raise"] else None}))`);
+    expect(r.red).toEqual(['a claim asks for the award to go to the tenant, but the rent is now late: tell the council']);
+    expect(r.amber).toEqual([]);
+    // A refused claim pays nobody: no more warnings. An award still in force does warn.
+    expect(r.afterNo).toEqual([]);
+    expect(r.inForce).toEqual(['a claim asks for the award to go to the tenant, but the rent is now short: tell the council']);
+    expect(r.joint).toEqual([[], 'no claim: the latest details form answers the benefit cap as "LCWRA", not capped']);
+    expect(r.prior).toBe('Use her other bank');
+    expect(r.trimmedPayee).toBe('tenant');
+  });
+
+  it('polish, 5 Oct 2026: a renamed capped choice stops the run loudly instead of reading as nobody', () => {
+    const r = py(RUN + `
+live = RC(); live.CHOICES = ["Unknown", "Capped"]
+out = cap.run(live, DATA, date(2026, 10, 1), res(), True, True)
+print(json.dumps({"failed": out["failed"], "raised": len(live.raised)}))`);
+    expect(r.failed).toMatch(/control failed: the Benefit Cap Exemption field has no "None \(capped\)" choice/);
+    expect(r.raised).toBe(0);
   });
 
   it('a postcode with no form on file says so instead of guessing', () => {
