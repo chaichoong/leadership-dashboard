@@ -83,6 +83,7 @@ from agent_email_format import (  # noqa: E402
     TIER1_BANNER,
     EmailFormatError,
     parse_output as parse_email_output,
+    RULE_OWN_ADDRESSES,
     parse_text,
     strip_track_record,
     validate_submission as validate_email_submission,
@@ -459,8 +460,9 @@ RENT_REGISTER_ROW = ROLE_AGENTS[RENT_REC_ID]["registerRow"]
 # and the specialist for that owns it. Repairs never enter this lane — they
 # keep Roy's same-hour handover (Kevin's ruling, 2 Sep 2026).
 AUTO_ROUTES = (
-    # A TENANT'S REPLY TO THE RENT CHASE (Kevin, 4 Oct 2026, "Build as-is"): an inbound message from a tenant
-    # who has an open RENT LATE or RENT PLAN task goes to the Cash Flow Voids agent, which drafts the answer
+    # A TENANT'S REPLY TO THE RENT CHASE (Kevin, 4 Oct 2026, "Build as-is"; widened 5 Oct 2026): an inbound message
+    # from anyone a rent card wrote to (open, or SENT in the last REPLY_WINDOW_DAYS; RENT LATE, PLAN, CAP, DETAILS,
+    # and the letting agent of an AGENT RENT LATE card) goes to the Cash Flow Voids agent, which drafts the answer
     # and any payment plan. OFF until the agent's trial has ended: rent_reply_senders() reads nothing while
     # it is on trial, so no tenant's message waits on a draft that cannot be sent; Inbox Response answers
     # him meanwhile. First, because the sender is a known tenant mid-chase; Roy's repair lane diverts
@@ -493,8 +495,16 @@ AUTO_ROUTES = (
 # payment plan is agreed and still running (the plan card is his own reply, with no tenant linked:
 # its PLAN FOR line names the tenancy).
 # RENT CAP (lane C, 5 Oct 2026): a capped tenant answering the benefit-cap email is the lane's too.
-RENT_REPLY_FORMULA = ("AND(OR(LEFT({Task Name}, 11)='RENT LATE: ', LEFT({Task Name}, 11)='RENT PLAN: ', "
-                      "LEFT({Task Name}, 10)='RENT CAP: '), NOT({Status}='Completed'), NOT({Status}='Cancelled'))")
+# Since 5 Oct 2026 (Kevin: "Do it now"): also RENT DETAILS (the form reminders) and AGENT RENT LATE (the letting agent's
+# email), and a card SENT in the last REPLY_WINDOW_DAYS as well as an open one: a card closes the moment its email
+# goes, so "open only" missed the replies it was for. The formula is the superset (modified in the window); the
+# SENT stamp decides (rent_reply_senders).
+REPLY_WINDOW_DAYS = 14
+RENT_REPLY_PREFIXES = ("RENT LATE: ", "RENT PLAN: ", "RENT CAP: ", "RENT DETAILS: ", "AGENT RENT LATE: ")
+RENT_REPLY_FORMULA = ("AND(OR(" + ", ".join(f"LEFT({{Task Name}}, {len(p)})='{p}'" for p in RENT_REPLY_PREFIXES) + "), "
+                      "OR(AND(NOT({Status}='Completed'), NOT({Status}='Cancelled')), "
+                      f"IS_AFTER(LAST_MODIFIED_TIME(), DATEADD(TODAY(), -{REPLY_WINDOW_DAYS}, 'days'))))")
+REPLY_SENT_RE = re.compile(r"\[(\d{2} \w{3} \d{4}) \d{2}:\d{2} — send-email\] SENT:")
 RUNNING_PLAN_FORMULA = ("AND(FIND('PLAN FOR: rec', {Agent Output}&''), LEN({Approval Outcome}&'')>0, "
                         "FIND('— send-email] SENT: email to', {Notes}&''), NOT(FIND('RENT PLAN MISSED: ', {Notes}&'')), "
                         "NOT(FIND('RENT PLAN KEPT: ', {Notes}&'')), NOT(FIND('RENT PLAN SUPERSEDED: ', {Notes}&'')))")
@@ -504,14 +514,35 @@ TENANCIES_TABLE, TENANCY_TENANTS = "tblN51a88qTDB6iMH", "fld1i5bDoHL3B6rUf"
 TENANT_EMAIL, TENANT_PHONE = "fldybEduFY3DWWTfT", "fldraHUkWfqo4olLF"
 
 
-def rent_reply_senders():
-    """The emails and mobiles of tenants with an open RENT LATE or RENT PLAN task, as sender_key spells
-    them. Empty, reading nothing, while the Cash Flow Voids agent is on trial or its trial has not ended."""
+def rent_reply_senders(today=None):
+    """The emails and mobiles a reply to the rent lane could come from, as sender_key spells them: the tenants on an
+    open rent card or one SENT in the last REPLY_WINDOW_DAYS, and, for a letting agent's card (AGENT RENT LATE), the
+    address it went to, never the tenant, who was not written to. Empty, reading nothing, while the Cash Flow Voids
+    agent is on trial or its trial has not ended."""
     if RENT_REC_ID in TRIAL_AGENTS or RENT_REC_ID not in TRIAL_ENDED:
         return set()
-    tenant_ids = set()
-    for rec in query_records(TASKS, RENT_REPLY_FORMULA, [AF["name"], TASK_TENANTS]):
-        tenant_ids |= set(links((rec.get("fields") or {}).get(TASK_TENANTS)))
+    today = today or datetime.now().date()
+    tenant_ids, keys = set(), set()
+    for rec in query_records(TASKS, RENT_REPLY_FORMULA, [AF["name"], AF["status"], AF["notes"], AF["agentOutput"],
+                                                         TASK_TENANTS]):
+        f = rec.get("fields") or {}
+        status = f.get(AF["status"])
+        status = status.get("name", "") if isinstance(status, dict) else (status or "")
+        if status in ("Completed", "Cancelled"):
+            m = REPLY_SENT_RE.search(str(f.get(AF["notes"]) or ""))
+            sent = datetime.strptime(m.group(1), "%d %b %Y").date() if m else None
+            if not sent or (today - sent).days > REPLY_WINDOW_DAYS:
+                continue                              # closed with nothing sent, or sent too long ago
+        if str(f.get(AF["name"]) or "").startswith("AGENT RENT LATE: "):
+            try:
+                to = parse_email_output(f.get(AF["agentOutput"]) or "").get("to") or []
+            except (EmailFormatError, SystemExit):
+                to = []
+            # Our own addresses are never a letting agent's: one in a TO line must not send our own mail to the lane.
+            own = {sender_key(a) for a in RULE_OWN_ADDRESSES}
+            keys |= {k for k in (sender_key(x) for x in to if x) if k and k not in own}
+            continue
+        tenant_ids |= set(links(f.get(TASK_TENANTS)))
     # A running plan: its card names the tenancy, whose tenants are read from the tenancy itself.
     tenancies = set()
     for rec in query_records(TASKS, RUNNING_PLAN_FORMULA, [AF["agentOutput"]]):
@@ -526,8 +557,7 @@ def rent_reply_senders():
         for rec in query_records(TENANCIES_TABLE, formula, [TENANCY_TENANTS]):
             tenant_ids |= set(links((rec.get("fields") or {}).get(TENANCY_TENANTS)))
     if not tenant_ids:
-        return set()
-    keys = set()
+        return keys
     ids = sorted(tenant_ids)
     for i in range(0, len(ids), 50):
         formula = "OR(" + ",".join(f"RECORD_ID()='{t}'" for t in ids[i:i + 50] if re.fullmatch(r"rec\w+", t)) + ")"
@@ -3033,7 +3063,10 @@ def build_queue(args=None):
         t["matchedPattern"] = hit1 or ""
         if hit1:
             tier1.append(t)
-        t["rentReply"] = bool(t["inboundTask"] and rent_senders and sender_key(t["inboundSender"]) in rent_senders)
+        # A message the rent agent sent back with `reassign` (not about rent: keys, papers, a repair) is the CEO's
+        # to place, never the rent lane's again: otherwise the lane would take it straight back (review, 5 Oct 2026).
+        t["rentReply"] = bool(t["inboundTask"] and rent_senders and sender_key(t["inboundSender"]) in rent_senders
+                              and not REASSIGN_LINE_RE.search(str(t.get("notes") or "")))
         t["creditor"] = creditor_match(t["name"], t["description"], t["notes"])
         creditor_count += t["creditor"]
         # Creditor work is ALWAYS tier-1 (Kevin's triage ruling, 24 Aug 2026)

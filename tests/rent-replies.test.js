@@ -31,7 +31,8 @@ else:
 AF = m.AF
 recs = []
 for t in a["tasks"]:
-    f = {AF["name"]: t["name"], AF["status"]: {"name": "Today"}, AF["teamMember"]: [t["holder"]], AF["notes"]: "",
+    notes = ("[2026-10-06 10:00] %s by the Cash Flow Voids agent: not about rent" % m.REASSIGN_MARK) if t.get("reassigned") else ""
+    f = {AF["name"]: t["name"], AF["status"]: {"name": "Today"}, AF["teamMember"]: [t["holder"]], AF["notes"]: notes,
          AF["inboundTask"]: t.get("inbound", True), AF["inboundSender"]: t["sender"]}
     recs.append({"id": t["id"], "fields": f})
 m.query_tasks = lambda formula, **kw: recs
@@ -51,7 +52,23 @@ def records(table, formula=None, fields=None, max_records=None):
     if a["fail"]:
         raise RuntimeError("Airtable 500")
     if table == m.TASKS:
-        return [{"id": "recRL%02d" % i, "fields": {m.TASK_TENANTS: c["tenants"]}} for i, c in enumerate(a["chased"])]
+        from datetime import datetime, timedelta
+        import re as _re
+        # Airtable as it filters: only the names the formula's LEFT() prefixes match, each with its true length.
+        pairs = _re.findall(r"LEFT\\(\\{Task Name\\}, (\\d+)\\)='([^']*)'", formula)
+        assert pairs and all(int(n) == len(p) for n, p in pairs), pairs
+        out = []
+        for i, c in enumerate(a["chased"]):
+            if not any(c.get("name", "RENT LATE: Unit 9, rent due 1 Oct (reminder)").startswith(p) for _, p in pairs):
+                continue
+            f = {m.TASK_TENANTS: c.get("tenants", []), m.AF["name"]: c.get("name", "RENT LATE: Unit 9, rent due 1 Oct (reminder)"),
+                 m.AF["agentOutput"]: c.get("output", ""), m.AF["notes"]: c.get("notes", "")}
+            if "status" in c:
+                f[m.AF["status"]] = {"name": c["status"]}
+            if c.get("sentDaysAgo") is not None:
+                f[m.AF["notes"]] += "\\n[%s 10:00 — send-email] SENT: email to x" % (datetime.now() - timedelta(days=c["sentDaysAgo"])).strftime("%d %b %Y")
+            out.append({"id": "recRL%02d" % i, "fields": f})
+        return out
     return [{"id": k, "fields": {m.TENANT_EMAIL: v.get("email"), m.TENANT_PHONE: v.get("phone")}} for k, v in a["tenants"].items()]
 m.query_records = records
 m.fetch_role_roster = lambda: {k: {"dispatchable": True} for k in ("${CFV}", "${RESPONSE}", m.CREDITOR_REC_ID, m.PROPERTY_REC_ID)}
@@ -105,6 +122,51 @@ describe('a tenant\'s reply to the rent chase', () => {
     const broken = queue({ ended: true, fail: true, tasks: [INBOX('recReplyEmail001', 'sam@example.com')] });
     expect(broken.targets).toEqual({ recReplyEmail001: RESPONSE });
     expect(broken.error).toMatch(/Airtable 500/);
+  });
+});
+
+describe('a reply after the card went (Kevin, 5 Oct 2026: "Do it now"): a card closes when its email goes', () => {
+  it('a card sent in the last 14 days still routes the reply; one closed unsent, or sent 15 days ago, does not', () => {
+    const sent = queue({ ended: true, chased: [{ tenants: ['recTENANTREPLY01'], status: 'Completed', sentDaysAgo: 3 }],
+      tasks: [INBOX('recReplyEmail001', 'sam@example.com')] });
+    expect(sent.targets).toEqual({ recReplyEmail001: CFV });
+    const unsent = queue({ ended: true, chased: [{ tenants: ['recTENANTREPLY01'], status: 'Completed' }],
+      tasks: [INBOX('recReplyEmail001', 'sam@example.com')] });
+    expect(unsent.targets).toEqual({ recReplyEmail001: RESPONSE });
+    const old = queue({ ended: true, chased: [{ tenants: ['recTENANTREPLY01'], status: 'Completed', sentDaysAgo: 15 }],
+      tasks: [INBOX('recReplyEmail001', 'sam@example.com')] });
+    expect(old.targets).toEqual({ recReplyEmail001: RESPONSE });
+  });
+
+  it('a details-form reminder routes its tenant\'s reply too', () => {
+    const r = queue({ ended: true, chased: [{ tenants: ['recTENANTREPLY01'], name: 'RENT DETAILS: Unit 9, reminder 1 to fill in the details form',
+      status: 'Completed', sentDaysAgo: 1 }], tasks: [INBOX('recReplyEmail001', 'sam@example.com')] });
+    expect(r.targets).toEqual({ recReplyEmail001: CFV });
+  });
+
+  it('the letting agent\'s reply to an AGENT RENT LATE email reaches the agent; the tenant there, never written to, is not routed', () => {
+    const r = queue({ ended: true,
+      chased: [{ tenants: ['recTENANTREPLY01'], name: 'AGENT RENT LATE: Unit 1 – 1 Example Road, rent due 1 Oct', status: 'Completed', sentDaysAgo: 2,
+        output: 'TO: Accounts@Letting.example\nFROM: kevinbrittain@gmail.com\nSUBJECT: Re: 1 Example Road\n---\nHello,\n\nWhen will the rent be paid?\n\nKevin Brittain' }],
+      tasks: [INBOX('recAgentReply001', 'Accounts Payable <accounts@letting.example>'), INBOX('recTenantMsg0001', 'sam@example.com')] });
+    expect(r.targets.recAgentReply001).toBe(CFV);
+    expect(r.targets.recTenantMsg0001).toBe(RESPONSE);
+  });
+});
+
+describe('the reply lane gives back what is not rent, and never takes our own mail (review, 5 Oct 2026)', () => {
+  it('a message the rent agent sent back with reassign stays with the CEO, even from a tenant mid-chase', () => {
+    const r = queue({ ended: true, tasks: [{ ...INBOX('recKeysQuestion1', 'sam@example.com'), reassigned: true }] });
+    expect(r.targets.recKeysQuestion1 === CFV).toBe(false);
+  });
+
+  it('our own address in a letting agent card\'s TO line is never routed; the agent\'s is', () => {
+    const r = queue({ ended: true,
+      chased: [{ tenants: [], name: 'AGENT RENT LATE: Unit 1 – 1 Example Road, rent due 1 Oct', status: 'Today',
+        output: 'TO: accounts@letting.example, <info@agilelets.co.uk>\nFROM: kevinbrittain@gmail.com\nSUBJECT: Rent\n---\nHello,\n\nWhen will the rent be paid?\n\nKevin Brittain' }],
+      tasks: [INBOX('recFromInfo00001', 'info@agilelets.co.uk'), INBOX('recFromAgent0001', 'accounts@letting.example')] });
+    expect(r.targets.recFromInfo00001 === CFV).toBe(false);
+    expect(r.targets.recFromAgent0001).toBe(CFV);
   });
 });
 
