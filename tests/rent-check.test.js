@@ -72,6 +72,7 @@ rc.rent_plans.read_cards = lambda _rc: []
 rc.rent_cap.read = lambda _rc: ({}, [])
 rc.rent_cap.read_tenants = lambda _rc, ids: {}
 rc.rent_cap.read_busy = lambda _rc: set()
+rc.rent_cap.read_capped = lambda _rc, day: set()
 def _no_cap_write(*a, **k): raise RuntimeError("a rent-check test tried a real benefit-cap card")
 rc.rent_cap.raise_card = _no_cap_write
 rc.rent_cap.write_mark = _no_cap_write
@@ -282,6 +283,22 @@ print(json.dumps({"short": rows["recShort"], "lights": res["lights"], "paying": 
     expect([r.paying, r.total]).toEqual([4, 4]);
     expect(r.line).toBe('4 of 4 tenants paying (100.0%, floor 97.5%). Paid short: Unit 9 – 4 Example Road (£839.00 of £900.00). Bank data as at 2 Oct 12:03.');
     expect(r.worst).toBe('warn');
+  });
+
+  it('paid in full is said only of a rent weighed on trusted bank data: lane C\'s full-payer claim reads it', () => {
+    const r = py(`
+ts = [tenancy("recFull", 23, 900.00), tenancy("recShortP", 23, 900.00), tenancy("recNew", 23, 900.00, start="2026-09-28"),
+      tenancy("recVoidPaid", 23, 900.00, status="CFV")]
+tx = [paid("recFull", "2026-09-23", 900.00), paid("recShortP", "2026-09-23", 700.00), paid("recVoidPaid", "2026-09-23", 900.00)]
+res, rows = run(ts, tx)
+stale, _ = run(ts, tx, feed="2026-09-20T11:00:00.000Z")
+print(json.dumps({"full": res["paidFull"], "stale": stale["paidFull"], "rowKeys": sorted(set(k for t in res["tenancies"] for k in t))}))`);
+    // The full payer only: not the one paid short, not the new tenant with no rent due yet, not a cash flow void that paid.
+    expect(r.full).toEqual(['recFull']);
+    // Old bank data proves nothing: nobody is said to have paid in full.
+    expect(r.stale).toEqual([]);
+    // The flag never reaches the rows written to the status board.
+    expect(r.rowKeys).not.toContain('full');
   });
 
   it('a tenancy with no due day, rent or tenant is cannot tell, never late and never fine', () => {
