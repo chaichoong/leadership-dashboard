@@ -681,7 +681,9 @@ def _cmd_send(args):
             {"fields": {AF["notes"]: notes}})
     except (SystemExit, Exception) as e:                     # noqa: BLE001
         print(f"WARNING: sent, but the SENT stamp could not be written: {e}", file=sys.stderr)
-    noted, problem = note_tenancies(args.task, f"emailed the tenant ({', '.join(mail['to'])}): \"{mail['subject']}\"",
+    # A late agent-managed rent's email goes to the letting agent, never the tenant (Kevin, 5 Oct 2026): said so.
+    whom = "the letting agent" if str(mail.get("taskName") or "").startswith("AGENT RENT LATE: ") else "the tenant"
+    noted, problem = note_tenancies(args.task, f"emailed {whom} ({', '.join(mail['to'])}): \"{mail['subject']}\"",
                                     mail["to"])
     if problem:
         print(f"WARNING: sent, but {problem}", file=sys.stderr)
