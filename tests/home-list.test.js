@@ -151,6 +151,23 @@ describe('Home picks exactly what the 09:00 brief picks', () => {
     }
   });
 
+  // REGRESSION, finding 20261002-queue-fixer-707: at 07:05, while daily-ops is still
+  // running, estate-status.py writes running:true with LAST night's date (or none). Home
+  // read past it and told Kevin the 07:00 check "has not reported today", which is a
+  // failure sentence for a job that is working. Back-tested by removing the running
+  // branch from readNeedsYou: both assertions below fail.
+  it('the 07:00 check: a run still in progress says so, not "has not reported"', () => {
+    const row = p => ({ fields: { Payload: JSON.stringify(p) } });
+    for (const p of [{ date: '2026-09-28', items: null, running: true }, { date: null, items: null, running: true }]) {
+      const mine = H.readNeedsYou(row(p), TODAY);
+      expect(mine.items).toEqual([]);
+      expect(mine.note).toMatch(/still running/);
+      expect(mine.note, 'a running job must never be reported as not having reported').not.toMatch(/has not reported/);
+    }
+    // CONTROL: without running, the same stale date still reads as not reported today.
+    expect(H.readNeedsYou(row({ date: '2026-09-28', items: ['old'] }), TODAY).note).toMatch(/has not reported today/);
+  });
+
   it('the tenants line: same light and words as the brief', () => {
     const w = worker([], TODAY);
     const LIGHT = { '🟢': 'ok', '🟡': 'warn', '🔴': 'fail' };
