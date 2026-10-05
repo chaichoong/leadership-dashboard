@@ -66,6 +66,8 @@ rc.lane_b_rules.finish_one = _no_lane_b_write
 rc.lane_b_rules.notify_roy = _no_lane_b_write
 # Roy's agent-managed late notice reads its tasks through this: never Airtable in a test.
 rc.read_agent_late = lambda: {}
+# Payment plans read their cards through this; their own cases are in tests/rent-plans.test.js.
+rc.rent_plans.read_cards = lambda _rc: []
 TY, TN, TX, AC = rc.TY, rc.TN, rc.TX, rc.AC
 DAY = date(2026, 10, 2)
 def rec(i, f): return {"id": i, "fields": f}
@@ -454,6 +456,25 @@ with contextlib.redirect_stdout(io.StringIO()):
 print(json.dumps({"code": code, "rows": len(rows), "hasLights": "lights" in rows[0][1],
                   "payloadKeys": sorted(k for k in rows[0][1] if k in ("asAt", "worst", "briefLine")), "hist": len(hist[0])}))`);
     expect(r).toEqual({ code: 0, rows: 1, hasLights: false, payloadKeys: ['asAt', 'briefLine', 'worst'], hist: 20 });
+  });
+
+  it('a payment plan stuck waiting on bank data turns the row Blocked, and says why', () => {
+    const r = py(`
+rows = []
+today = rc.today_london()
+rc.load = lambda day: world([tenancy("rec%02d" % i, 1, 500) for i in range(20)], [paid("rec%02d" % i, today.isoformat(), 500) for i in range(20)],
+                            day=today, feed=datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.000Z"))
+rc.write_row = lambda status, text, payload, now: rows.append([status, text])
+rc.append_history = lambda *a, **k: None
+rc.read_task_state = lambda: {"on": True, "status": "Built", "keys": {}}
+rc.rent_plans.read = lambda *a, **k: {"plans": [{"id": "recPLANSTUCK0001", "tenancy": "rec00", "state": "waiting", "stuck": True,
+                                                 "why": "still waiting on bank data 9 days after its last promise"}], "onTrack": {"rec00"}, "failed": ""}
+with contextlib.redirect_stdout(io.StringIO()):
+    code = rc.main(["run"])
+print(json.dumps({"code": code, "status": rows[0][0], "line": next(l for l in rows[0][1].splitlines() if l.startswith("Payment plans"))}))`);
+    expect(r.code).toBe(0);
+    expect(r.status).toBe('Blocked');
+    expect(r.line).toMatch(/Check: card recPLANSTUCK0001: still waiting on bank data 9 days after its last promise/);
   });
 
   it('a broken read writes a Failed row that Home reads as today, and exits 1', () => {
@@ -1076,7 +1097,9 @@ rc.write_row = lambda status, text, payload, now: rows.append([status, text])
 rc.append_history = lambda res, now: None
 with contextlib.redirect_stdout(io.StringIO()):
     code = rc.main(["run"])
-print(json.dumps({"code": code, "status": rows[0][0], "laneB": rows[0][1].splitlines()[-2], "agentLate": rows[0][1].splitlines()[-1]}))`);
+# Each lane's line found by its own words, so a lane added after it never moves them.
+line = lambda start: next(l for l in rows[0][1].splitlines() if l.startswith(start))
+print(json.dumps({"code": code, "status": rows[0][0], "laneB": line("New-tenant tasks"), "agentLate": line("Agent-managed late rent")}))`);
     expect(r.code).toBe(1);
     expect(r.status).toBe('Failed');
     expect(r.laneB).toBe("New-tenant tasks: none raised, the Cash Flow Voids agent's switch could not be read.");
@@ -1098,7 +1121,8 @@ rc.raise_task = boom
 rc.write_row = lambda status, text, payload, now: rows.append([status, text])
 with contextlib.redirect_stdout(io.StringIO()):
     code = rc.main(["run"])
-print(json.dumps({"code": code, "status": rows[0][0], "lastLine": rows[0][1].splitlines()[-3], "laneB": rows[0][1].splitlines()[-2], "firstLine": rows[0][1].splitlines()[0][:22]}))`);
+line = lambda start: next(l for l in rows[0][1].splitlines() if l.startswith(start))
+print(json.dumps({"code": code, "status": rows[0][0], "lastLine": line("Late-rent tasks"), "laneB": line("New-tenant tasks"), "firstLine": rows[0][1].splitlines()[0][:22]}))`);
     expect(r.code).toBe(1);
     expect(r.status).toBe('Failed');
     expect(r.lastLine).toBe('Late-rent tasks FAILED: Airtable POST tasks 422: nope');

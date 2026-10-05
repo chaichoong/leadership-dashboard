@@ -102,6 +102,7 @@ from zoneinfo import ZoneInfo
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import rent_new_tenant as lane_b_rules  # noqa: E402
+import rent_plans  # noqa: E402
 
 LONDON = ZoneInfo("Europe/London")
 BASE = "appnqjDpqDniH3IRl"
@@ -659,18 +660,19 @@ def next_stage(cycle, existing, day):
     return last + 1
 
 
-def task_plan(res, tenancies, existing, day):
+def task_plan(res, tenancies, existing, day, on_plan=frozenset()):
     """The RENT LATE tasks today's result calls for. Pure: no reads, no writes.
 
     Only a tenancy the check itself calls late TODAY, on trusted bank data, that we chase ourselves.
     A void already actioned is with the DWP, an existing void is left alone, a short payment is not
-    late, and grey means cannot tell."""
+    late, and grey means cannot tell. A tenancy with an agreed payment plan on track is not chased:
+    the plan is the chase (scripts/rent_plans.py)."""
     by_id = {r["id"]: r.get("fields") or {} for r in tenancies}
     plan = []
     for r in res["tenancies"]:
         if r["lane"] != "late" or r["status"] not in (IN_PAYMENT, CFV) or r["type"] == AGENT_MANAGED:
             continue
-        if r.get("noChase"):
+        if r.get("noChase") or r["id"] in on_plan:
             continue
         # A void with a part payment sits in the late lane before its next rent is due: not late yet.
         if "daysLate" not in r and not r.get("beyond"):
@@ -737,14 +739,15 @@ def raise_task(item, day):
     words and cannot tell one rent cycle from the next."""
     fields = {TK["name"]: item["name"], TK["status"]: "Today", TK["due"]: day.isoformat(),
               TK["teamMember"]: [AGENT_TEAM_MEMBER], TK["description"]: item["description"],
-              TK["notes"]: KEY_MARK + item["key"], TK["tenancies"]: [item["tenancy"]]}
+              TK["notes"]: "\n".join(KEY_MARK + k for k in [item["key"]] + list(item.get("alsoKeys") or [])),
+              TK["tenancies"]: [item["tenancy"]]}
     if item["tenants"]:
         fields[TK["tenants"]] = item["tenants"]
     out = api("POST", T_TASKS, {"records": [{"fields": fields}]})
     return out["records"][0]["id"]
 
 
-def lane_a(res, tenancies, day, writes):
+def lane_a(res, tenancies, day, writes, on_plan=frozenset()):
     """Plan and (on a real run) raise today's RENT LATE tasks. Never stops the rent check itself: a
     failure here is reported on the row and in the exit code."""
     out = {"on": False, "status": "", "raised": [], "planned": [], "failed": ""}
@@ -753,7 +756,7 @@ def lane_a(res, tenancies, day, writes):
         out.update(on=state["on"], status=state["status"])
         if not state["on"]:
             return out
-        plan = task_plan(res, tenancies, state["keys"], day)
+        plan = task_plan(res, tenancies, state["keys"], day, on_plan)
         out["planned"] = [p["name"] for p in plan]
         if writes:
             for item in plan:
@@ -948,23 +951,26 @@ def main(argv=None):
             write_row("Failed", why, {"asAt": day.isoformat(), "worst": "fail", "briefLine": why}, now)
         print(json.dumps({"failed": why}, indent=2))
         return 1
-    res["tasks"] = lane_a(res, data["tenancies"], day, writes)
+    # Payment plans first, read only: a tenancy on an agreed plan that is on track is not chased by lane A.
+    plans = rent_plans.read(_Here(), data, day, res, now)
+    res["tasks"] = lane_a(res, data["tenancies"], day, writes, plans["onTrack"])
     # The agent's switch is lane A's read. With no status read back, lane B is told so, not "off".
     switch = res["tasks"]["on"] if res["tasks"]["status"] else None
     res["setup"] = lane_b_rules.lane_b(_Here(), res, data, day, writes, switch, now)
     res["agentLate"] = agent_late(res, data["tenancies"], day, writes, switch)
+    res["plans"] = rent_plans.act(_Here(), plans, data, day, writes, switch, res)
     res["briefLine"] = brief_line(res)              # lane B has put each new tenant's stage on its row
-    failed = res["tasks"]["failed"] or res["setup"]["failed"] or res["agentLate"]["failed"]
+    failed = res["tasks"]["failed"] or res["setup"]["failed"] or res["agentLate"]["failed"] or res["plans"]["failed"]
     if writes:
         public = {k: v for k, v in res.items() if k not in ("lights", "lanes")}
         # Blocked only when the bank data hid a verdict: a stale feed with every rent already seen hides nothing.
-        status = "Failed" if failed else ("Blocked" if res["bankBlocked"] else "Worked")
+        status = "Failed" if failed else ("Blocked" if res["bankBlocked"] or res["plans"].get("stuck") else "Worked")
         write_row(status, "\n".join([detail(res), lane_a_line(res["tasks"]), lane_b_rules.lane_b_line(res["setup"]),
-                                      agent_late_line(res["agentLate"])]), public, now)
+                                      agent_late_line(res["agentLate"]), rent_plans.line(res["plans"])]), public, now)
         append_history(res, now)
     print(json.dumps({"written": writes, "briefLine": res["briefLine"], "worst": res["worst"],
                       "counts": res["counts"], "tenancies": res["tenancies"], "feed": res["feed"],
-                      "tasks": res["tasks"], "setup": res["setup"], "agentLate": res["agentLate"]}, indent=2))
+                      "tasks": res["tasks"], "setup": res["setup"], "agentLate": res["agentLate"], "plans": res["plans"]}, indent=2))
     return 1 if failed else 0
 
 
