@@ -35,7 +35,7 @@ LEDGER = os.path.expanduser("~/knowledge-os/logs/agent-dispatch/sent-text.jsonl"
 CHECK_MARK = "TEXT CHECK:"
 BACK_QUERY = "(from:clicksend.com OR (from:mailer-daemon sms.clicksend.com)) newer_than:%dd"
 SENT_QUERY = "in:sent to:sms.clicksend.com newer_than:%dd"
-TENANT_TEXT = re.compile(r"^\s*(SMS reply from|Incoming SMS from)\s", re.I)   # ClickSend's subject for a tenant's text
+TENANT_TEXT = re.compile(r"^\s*(?:(?:SMS|MMS) reply from|Incoming (?:SMS|MMS) from)\s", re.I)   # a tenant's own text or picture
 MOBILE = re.compile(r"(?<!\d)(?:\+?44|0)7\d{9}(?!\d)")
 TASKS = "tblqB8b22hKBL4PF1"
 TK = {"name": "fldgFjGBw6bTKJFCD", "notes": "fldR7apBzSp3oxFxz", "tenancies": "fldmne4RYJU22ICub",
@@ -122,12 +122,10 @@ def assess(rows, back, sent_mail, now):
 
 def run(rc, now, writes, ledger=None, list_mail=None):
     """The rent check's text alarm. `rc` is rent-check (its api). Never raises."""
-    out = {"checked": 0, "flagged": [], "noted": [], "failed": ""}
+    out = {"checked": 0, "flagged": [], "noted": [], "failed": "", "torn": 0}
     try:
         rows, torn = sent_rows(ledger or LEDGER, now)
-        out["checked"] = len(rows)
-        if torn:
-            out["failed"] = f"{torn} line(s) of the text ledger could not be read"
+        out["checked"], out["torn"] = len(rows), torn   # a torn line has no date to age out by: said, never red
         if not rows:
             return out
         list_mail = list_mail or default_list_mail      # looked up now, so a test's stand-in is used
@@ -199,8 +197,12 @@ def line(out):
         bits.append(brief(out))
     if out.get("failed"):
         bits.append(f"Text check FAILED: {out['failed']}.")
-    if bits:
+    if out.get("torn"):
+        bits.append(f"{out['torn']} unreadable line(s) in the text ledger were skipped.")
+    if bits and (out.get("flagged") or out.get("failed")):
         return " ".join(bits)
+    tail = (" " + " ".join(bits)) if bits else ""
     if not out.get("checked"):
-        return f"Text check: no rent text sent in the last {CHECK_DAYS} days."
-    return f"Text check: {out['checked']} rent text(s) in the last {CHECK_DAYS} days, nothing came back from ClickSend."
+        return f"Text check: no rent text sent in the last {CHECK_DAYS} days.{tail}"
+    return (f"Text check: {out['checked']} rent text(s) in the last {CHECK_DAYS} days, nothing came back from ClickSend."
+            f"{tail}")

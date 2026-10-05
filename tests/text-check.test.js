@@ -65,7 +65,7 @@ describe('the text alarm reads info@ after every rent text and never reads blind
 lm, asked = inbox([], [])
 out = tc.run(RC(), NOW, True, ledger=ledger(("recOLD00000OLD01", 80, "123", "sent"), ("recFAILED0000001", 2, "123", "failed")), list_mail=lm)
 print(json.dumps({"out": out, "asked": asked, "line": tc.line(out), "brief": tc.brief(out)}))`);
-    expect(r.out).toEqual({ checked: 0, flagged: [], noted: [], failed: '' });
+    expect(r.out).toEqual({ checked: 0, flagged: [], noted: [], failed: '', torn: 0 });
     expect(r.asked).toEqual([]);
     expect(r.line).toBe('Text check: no rent text sent in the last 3 days.');
     expect(r.brief).toBe('');
@@ -100,12 +100,12 @@ first = tc.run(rc, NOW, True, ledger=p, list_mail=lm)
 again = tc.run(rc, NOW, True, ledger=p, list_mail=lm)
 dry = tc.run(RC(), NOW, False, ledger=p, list_mail=lm)
 print(json.dumps({"first": first, "again": again, "dry": dry, "calls": rc.calls, "notes": rc.fields[tc.TK["notes"]], "brief": tc.brief(first)}))`);
-    expect(r.first).toEqual({ checked: 2, flagged: ['recTEXTCARD00001'], noted: ['recTEXTCARD00001'], failed: '' });
+    expect(r.first).toEqual({ checked: 2, flagged: ['recTEXTCARD00001'], noted: ['recTEXTCARD00001'], failed: '', torn: 0 });
     expect(r.notes).toMatch(/TEXT CHECK: ClickSend wrote back to info@agilelets\.co\.uk after this text \("Message failed", 07 Oct 05:00 UTC, mail m1\)\. The text may not have arrived: look in ClickSend's SMS history\.$/);
     expect(r.calls).toEqual([['GET', 'tblqB8b22hKBL4PF1/recTEXTCARD00001'], ['PATCH', 'tblqB8b22hKBL4PF1'],
       ['POST', 'tblN51a88qTDB6iMH/recTENANCYTEXT001/comments'], ['GET', 'tblqB8b22hKBL4PF1/recTEXTCARD00001']]);
-    expect(r.again).toEqual({ checked: 2, flagged: ['recTEXTCARD00001'], noted: [], failed: '' });
-    expect(r.dry).toEqual({ checked: 2, flagged: ['recTEXTCARD00001'], noted: [], failed: '' });
+    expect(r.again).toEqual({ checked: 2, flagged: ['recTEXTCARD00001'], noted: [], failed: '', torn: 0 });
+    expect(r.dry).toEqual({ checked: 2, flagged: ['recTEXTCARD00001'], noted: [], failed: '', torn: 0 });
     expect(r.brief).toBe("Text check: ClickSend wrote back after 1 rent text (task recTEXTCARD00001): it may not have arrived, look in ClickSend's SMS history.");
   });
 
@@ -148,12 +148,14 @@ print(json.dumps({"flagged": out["flagged"], "unsure": "does not name exactly on
     expect(r.unsure).toBe(true);
   });
 
-  it('a tenant text, or an email from before the text, is not held against it; a bounce a second early still is', () => {
+  it('a tenant text or picture, or an email from before the text, is not held against it; a bounce a second early still is', () => {
     const r = py(`
 p = ledger((A, 30, "123", "sent"))
 early = mail("e1", 31, snippet="Message to 07700 900123 failed")
 replies = [mail("r1", 2, sender="447700900123@sms.clicksend.com", subject="SMS reply from +447700900123", snippet="ok thanks"),
-           mail("r2", 2, sender="447700900123@sms.clicksend.com", subject="Incoming SMS from +447700900123", snippet="paid")]
+           mail("r2", 2, sender="447700900123@sms.clicksend.com", subject="Incoming SMS from +447700900123", snippet="paid"),
+           mail("r3", 2, sender="447700900123@sms.clicksend.com", subject="MMS reply from +447700900123", snippet="photo"),
+           mail("r4", 2, sender="447700900123@sms.clicksend.com", subject="Incoming MMS from +447700900123", snippet="photo")]
 quiet = tc.run(RC(), NOW, True, ledger=p, list_mail=inbox(gm(A), [early] + replies)[0])
 second = mail("g1", 30 + 1 / 3600, snippet="Message to 07700 900123 failed")
 grace = tc.run(RC(), NOW, True, ledger=p, list_mail=inbox(gm(A), [second])[0])
@@ -190,17 +192,17 @@ print(json.dumps([c for c in rc.calls if c[0] == "POST"]))`);
     expect(r).toEqual([['POST', 'tblN51a88qTDB6iMH/recTENANCYPLAN001/comments']]);
   });
 
-  it('a mailbox that cannot be read, reads cut short, or a torn ledger line is said on the row, never a raise', () => {
+  it('a mailbox that cannot be read or reads cut short is a failure on the row; a torn ledger line is a note; never a raise', () => {
     const r = py(`
 p = ledger((A, 6, "123", "sent"))
 def down(q): raise SystemExit("worker 502")
 broken = tc.run(RC(), NOW, True, ledger=p, list_mail=down)
 cut = tc.run(RC(), NOW, True, ledger=p, list_mail=inbox(gm(A), [], truncated=True)[0])
 torn = tc.run(RC(), NOW, True, ledger=ledger((A, 6, "123", "sent"), torn=True), list_mail=inbox(gm(A), [])[0])
-print(json.dumps({"broken": broken["failed"], "cut": cut["failed"], "torn": [torn["failed"], torn["checked"]]}))`);
+print(json.dumps({"broken": broken["failed"], "cut": cut["failed"], "torn": [torn["failed"], torn["checked"], tc.line(torn), tc.brief(torn)]}))`);
     expect(r.broken).toMatch(/^the text check could not run: /);
     expect(r.cut).toBe("the read of ClickSend's emails to info@ was cut short, so the check is incomplete");
-    // The good lines are still checked.
-    expect(r.torn).toEqual(['1 line(s) of the text ledger could not be read', 1]);
+    // A torn line has no date to age out by, so it is said on the row, never red; the good lines are still checked.
+    expect(r.torn).toEqual(['', 1, 'Text check: 1 rent text(s) in the last 3 days, nothing came back from ClickSend. 1 unreadable line(s) in the text ledger were skipped.', '']);
   });
 });
