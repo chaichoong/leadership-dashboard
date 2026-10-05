@@ -675,6 +675,37 @@ def trial_problem(agent_ids, name="", notes="", approved_at=None):
     return ""
 
 
+# THE TENANCY SHOWS EVERY ACTION (Kevin, 5 Oct 2026, on the Connaught Road card: "ensure the tenancy record is
+# updated with all the actions"). A rent lane's tenant card that was sent leaves one dated comment on each tenancy
+# it names, written by the send door itself (scripts/send-email.py, scripts/send-text.py), never left to an agent
+# to remember. The send has already happened when the comment is written, so a failure is said, never undone.
+TASK_TENANCIES = "fldmne4RYJU22ICub"      # Tasks: Tenancies link (scripts/rent-check.py TK["tenancies"])
+TENANCIES_TABLE = "tblN51a88qTDB6iMH"
+
+
+def tenancies_to_note(name="", notes="", holders=(), linked=None, output=""):
+    """The tenancy ids a sent card's comment goes on: None when the card is not a rent lane's tenant card (by its
+    lane marks, which outlive a trial, or held by a rent lane agent); else the tenancies it links, or the one its
+    PLAN FOR line names when it links none; [] when it names no tenancy at all."""
+    lane = any(agent_id in (holders or ()) or str(name or "").startswith(marks["prefix"])
+               or marks["note"] in str(notes or "") for agent_id, marks in TRIAL_TASK_MARKS.items())
+    if not lane:
+        return None
+    ids = [t for t in (linked or []) if re.fullmatch(r"rec[A-Za-z0-9]{14}", str(t))]
+    if ids:
+        return ids
+    try:
+        plan = parse_plan(output)
+    except EmailFormatError:
+        plan = None
+    return [plan["tenancy"]] if plan else []
+
+
+def tenancy_comment(when, what, task_id):
+    """The one comment a send leaves on a tenancy."""
+    return f"{when}: Agile Lets {what} (rent task {task_id})."
+
+
 # Kevin's ruling, 27 Aug 2026, in his own words on task recV3nCmp3ivQeXTN:
 # "Send from kevinbrittain@gmail.com. Never send from kevin@runpreneur.org.uk
 # unless it's to do with Runpreneur. Revert to sending from

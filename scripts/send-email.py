@@ -84,6 +84,7 @@ import re
 import sys
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
 from datetime import datetime, timedelta, timezone
 
@@ -98,6 +99,10 @@ from agent_email_format import (  # noqa: E402
     EmailFormatError,
     parse_output as parse_email_output,
     parse_text,
+    TASK_TENANCIES,
+    TENANCIES_TABLE,
+    tenancies_to_note,
+    tenancy_comment,
     BUSINESS_SENDER,
     BUSINESS_BRAND_RE,
     PROPERTY_SENDER,
@@ -206,7 +211,8 @@ def api(method, url, payload=None):
     req.add_header("Authorization", f"Bearer {pat}")
     req.add_header("Content-Type", "application/json")
     try:
-        with urllib.request.urlopen(req) as r:
+        # A timeout, so a hung Airtable call can never hold the send lock for ever (review, 5 Oct 2026).
+        with urllib.request.urlopen(req, timeout=60) as r:
             return json.loads(r.read())
     except urllib.error.HTTPError as e:
         # Never echo the request headers here: they carry the PAT.
@@ -675,9 +681,89 @@ def _cmd_send(args):
             {"fields": {AF["notes"]: notes}})
     except (SystemExit, Exception) as e:                     # noqa: BLE001
         print(f"WARNING: sent, but the SENT stamp could not be written: {e}", file=sys.stderr)
+    noted, problem = note_tenancies(args.task, f"emailed the tenant ({', '.join(mail['to'])}): \"{mail['subject']}\"",
+                                    mail["to"])
+    if problem:
+        print(f"WARNING: sent, but {problem}", file=sys.stderr)
     print(json.dumps({"sent": args.task, "to": mail["to"], "cc": mail["cc"],
                       "subject": mail["subject"],
-                      "messageId": result.get("id")}))
+                      "messageId": result.get("id"), "tenancyNoted": noted, "tenancyNoteProblem": problem or None}))
+
+
+TENANT_EMAIL_NAME = "Email Address"        # Tenants: Email Address (fldybEduFY3DWWTfT), by NAME in a formula
+TENANT_TENANCIES = "fldWijr5nOIcKJMP4"      # Tenants: Tenancies link
+TENANCY_STATUS = "fldlh5JAeYW2Ei2e6"        # Tenancies: Tenancy Status (Live, Ended, ...)
+
+
+def _all_rows(table, params):
+    """Every row of a filtered read, following offset (a first page alone has cost this estate a month of a wrong score)."""
+    rows, offset = [], None
+    while True:
+        q = dict(params, pageSize=100, returnFieldsByFieldId="true", **({"offset": offset} if offset else {}))
+        page = api("GET", f"https://api.airtable.com/v0/{BASE_ID}/{table}?" + urllib.parse.urlencode(q, doseq=True))
+        rows += page.get("records") or []
+        offset = page.get("offset")
+        if not offset:
+            return rows
+
+
+# The tenancies a reply may belong to: those an open rent lane task is chasing (agent-dispatch.py RENT_REPLY_FORMULA).
+OPEN_RENT_TASKS = ("AND(OR(LEFT({Task Name}, 11)='RENT LATE: ', LEFT({Task Name}, 11)='RENT PLAN: ', "
+                   "LEFT({Task Name}, 10)='RENT CAP: '), NOT({Status}='Completed'), NOT({Status}='Cancelled'))")
+
+
+def reply_tenancy(addresses):
+    """(the one tenancy a reply to `addresses` belongs to, or None; why not). A tenant's reply card is routed to the
+    rent agent with no Tenancies link. Its tenancy is a LIVE tenancy of a tenant with that Email Address that an open
+    rent lane task is chasing, and it must be exactly one: an address several tenants share, or a tenant with several
+    chased tenancies, notes nothing rather than putting "we emailed you" on tenancies nobody chased (review, 5 Oct 2026)."""
+    emails = sorted({str(a).strip().lower() for a in addresses or [] if "@" in str(a)})
+    usable = [e for e in emails if "'" not in e and "\\" not in e]
+    if not usable:
+        return None, "its address cannot be looked up"
+    tenants = _all_rows("tblX4elTuu01gwBYh", {"filterByFormula": "OR(" + ",".join(
+        f"LOWER({{{TENANT_EMAIL_NAME}}})='{e}'" for e in usable) + ")", "fields[]": [TENANT_TENANCIES]})
+    theirs = {t for r in tenants for t in ((r.get("fields") or {}).get(TENANT_TENANCIES) or [])
+              if re.fullmatch(r"rec[A-Za-z0-9]{14}", t)}
+    if not theirs:
+        return None, "its address matches no tenant with a tenancy"
+    chased = {t for r in _all_rows(TASKS, {"filterByFormula": OPEN_RENT_TASKS, "fields[]": [TASK_TENANCIES]})
+              for t in ((r.get("fields") or {}).get(TASK_TENANCIES) or [])}
+    candidates = sorted(theirs & chased)
+    live = [r["id"] for r in _all_rows(TENANCIES_TABLE, {"filterByFormula": "OR(" + ",".join(
+        f"RECORD_ID()='{t}'" for t in candidates) + ")", "fields[]": [TENANCY_STATUS]})
+            if str((r.get("fields") or {}).get(TENANCY_STATUS) or "") == "Live"] if candidates else []
+    if len(live) != 1:
+        return None, f"its address matches {len(live)} live tenancies with an open rent task, not one"
+    return live[0], ""
+
+
+def note_tenancies(task_id, what, recipients=()):
+    """One dated comment on each tenancy a sent rent lane card names (Kevin, 5 Oct 2026: "ensure the tenancy record
+    is updated with all the actions"). A card that names none (a reply to a tenant) is matched by the address it
+    went to. ([tenancy ids noted], problem or ""); any other card notes nothing. Each id is listed as its comment
+    posts, so a partial failure says exactly which were written."""
+    noted = []
+    try:
+        f = get_task(task_id).get("fields", {}) or {}
+        holders = list(f.get(AF["sentForApprovalBy"]) or []) + list(f.get(AF["teamMember"]) or [])
+        ids = tenancies_to_note(f.get(AF["name"]), f.get(AF["notes"]), holders, f.get(TASK_TENANCIES),
+                                f.get(AF["agentOutput"]))
+        if ids is None:
+            return [], ""
+        if not ids:
+            found, why = reply_tenancy(recipients)
+            if not found:
+                return [], f"the card names no tenancy and {why}, so no tenancy comment was written"
+            ids = [found]
+        when = datetime.now().strftime("%d %b %Y %H:%M")
+        for t in ids:
+            api("POST", f"https://api.airtable.com/v0/{BASE_ID}/{TENANCIES_TABLE}/{t}/comments",
+                {"text": tenancy_comment(when, what, task_id)})
+            noted.append(t)
+        return noted, ""
+    except (SystemExit, Exception) as e:                     # noqa: BLE001 — the email went; said, never undone
+        return noted, f"the tenancy comment could not be written: {str(e)[:200]}"
 
 
 # ─── A MAIL-OUT: ONE CARD, ONE SEPARATE EMAIL PER ADDRESS (25 Sep 2026) ─
