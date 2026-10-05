@@ -25,7 +25,11 @@ WHAT IT DOES
      which a PR that merged main into itself also gets), and the files the PR
      changes (git diff base...head).
      refs/fixer/pr-N is not trusted for this: the queue fixer can overwrite it.
-  3. Runs vitest, then tests/sync-invariants/, in that tree (the same two
+  3. First asks fixer-merge.py's tests_cannot_run whether the tree's
+     node_modules holds vitest and Playwright. When it does not, it refuses
+     with "tests could not run: <reason>" (testsRan false, logged NOT-RUN),
+     never RED: no test ran (5 Oct 2026, PR #709).
+     Runs vitest, then tests/sync-invariants/, in that tree (the same two
      commands and cwd rule as fixer-merge.py's run_gate, but each in its own
      process group, stopped with SIGINT then SIGKILL, so a timeout or an
      interrupt leaves no workers, browsers or Playwright web server behind).
@@ -89,11 +93,11 @@ Usage:
     Run it with run_in_background: a run takes 5 to 15 minutes. Progress lines
     go to stderr; ONE JSON result goes to stdout.
 Exit: 0 merged, or --dry-run green
-      1 refused: a red gate, or the gate cannot judge
+      1 refused: a red gate, the gate cannot judge, or tests could not run
       2 the gate itself broke, or bad arguments
 Each run appends a line to ~/knowledge-os/logs/merge-gate.log (outside the
 repo, which is PUBLIC): UTC time, PR, head, MERGED|REFUSED|DRYRUN-GREEN|
-DRYRUN-RED|BROKE, why, flaky tests retried. Never reads or prints the Airtable
+DRYRUN-RED|NOT-RUN|BROKE, why, flaky tests retried. Never reads or prints the Airtable
 token: prod-walk.js reads it itself. Guarded by tests/merge-pr.test.js.
 """
 
@@ -1224,6 +1228,15 @@ def gate(pr, dry_run):
                 return refuse(named_why(pr, named))
             res["privateNames"] = "clean: title, body and %d commit message(s)" % len(messages)
 
+        # A tree that cannot start vitest is not a red gate: no test ran.
+        # 5 Oct 2026, PR #709: run from a worktree with no node_modules, the
+        # tree's link dangled, vitest died before one test ran, and the gate
+        # said RED. Say what stopped it instead.
+        cannot = fm.tests_cannot_run(tree)
+        if cannot:
+            res["testsRan"] = False
+            return refuse("tests could not run: " + cannot)
+
         progress("running vitest, then the browser suite, on the merge result")
         gate_ok, g, first_port = run_suites(tree)
         res["vitest"] = g.get("vitest")
@@ -1361,6 +1374,8 @@ def main(argv=None):
     print(json.dumps(res, indent=2))
     if code == 2:
         status = "BROKE"
+    elif res.get("testsRan") is False:
+        status = "NOT-RUN"
     elif a.dry_run:
         status = "DRYRUN-GREEN" if code == 0 else "DRYRUN-RED"
     else:
