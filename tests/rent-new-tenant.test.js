@@ -24,6 +24,11 @@ def load_mod(name, file):
     m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m); return m
 rc = load_mod("rc", "rent-check.py")
 lb = rc.lane_b_rules
+# The Cash Flow Voids trial ended on 5 Oct 2026; these cases were written for the trial, so each run puts the
+# agent back on trial in its own process (tests/cash-flow-voids-agent.test.js block 10 reads the real lists).
+import agent_email_format as _aef_trial
+_aef_trial.TRIAL_AGENTS["rec7aHLK1Q8fMLRXH"] = "the Cash Flow Voids agent is on its trial run, so Kevin checks its drafts and nothing is sent to a tenant"
+_aef_trial.TRIAL_ENDED.pop("rec7aHLK1Q8fMLRXH", None)
 SCRATCH = tempfile.mkdtemp()
 rc.HISTORY = os.path.join(SCRATCH, "history.jsonl")
 rc.PRE_SLATE_PATH = os.path.join(SCRATCH, "pre-slate.json")

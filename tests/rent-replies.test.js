@@ -24,6 +24,10 @@ a = json.loads(sys.stdin.read())
 if a["ended"]:
     aef.TRIAL_ENDED["${CFV}"] = "2026-11-24T09:00:00Z"
     aef.TRIAL_AGENTS.clear()
+else:
+    # The trial ended on 5 Oct 2026; "during the trial" puts the agent back on trial in this process.
+    aef.TRIAL_AGENTS["${CFV}"] = "the Cash Flow Voids agent is on its trial run"
+    aef.TRIAL_ENDED.pop("${CFV}", None)
 AF = m.AF
 recs = []
 for t in a["tasks"]:
