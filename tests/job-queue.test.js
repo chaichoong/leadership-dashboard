@@ -839,9 +839,17 @@ describe('digest noise control', () => {
 
   it('does not flag a job that was only just due and may still be queued', () => {
     // Due every minute, so its last occurrence is inside the grace period.
+    //
+    // 'long-ago' is picked from the clock, not fixed (5 Oct 2026). It used to be
+    // '0 2 * * *', so between 02:00 and 02:45 its last run sat INSIDE the 45
+    // minute grace, went unflagged, and the test failed at 02:25 that morning,
+    // blocking the pre-push gate and merge-pr.py for that window. 18:00 before
+    // noon and 06:00 after it puts the last occurrence 6 to 18 hours back, well
+    // outside the grace and inside the digest's 26 hour window, at any hour.
+    const longAgoHour = new Date().getHours() < 12 ? 18 : 6;
     writeFileSync(schedulePath, JSON.stringify({
       'just-due': { cron: '* * * * *', maxLateMinutes: 600 },
-      'long-ago': { cron: '0 2 * * *', maxLateMinutes: 600 },
+      'long-ago': { cron: `0 ${longAgoHour} * * *`, maxLateMinutes: 600 },
     }));
     run(['acquire', 'other', '--no-stale-check']);
     run(['release', 'other']);
