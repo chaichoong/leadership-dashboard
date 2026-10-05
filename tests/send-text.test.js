@@ -23,6 +23,7 @@ st.STATE_DIR = SCRATCH
 st.LEDGER = os.path.join(SCRATCH, "sent-text.jsonl")
 st.SWITCH = os.path.join(SCRATCH, "text-sending-on")
 SE = load_mod("se_for_text", "send-email.py")      # the real worker reading, with only the call stubbed
+REAL_LOADER = st.send_email_module
 st.send_email_module = lambda: SE
 AF = st.AF
 import agent_email_format as aef
@@ -42,15 +43,16 @@ def card(output=OUTPUT, outcome="Approved as-is", agent=CFV, name="RENT LATE: Un
         AF["sentForApprovalBy"]: [agent], AF["teamMember"]: [agent], AF["approvedAt"]: approved_at,
         AF["notes"]: notes, AF["tenants"]: list(tenants), AF["status"]: status, aef.TASK_TENANCIES: list(tenancies)}}
 TENANT_NUMBER = {"recTenantTest0001": "+44 7700 900123"}
-CALLS = []
+CALLS, STAMPS = [], []
 def run(rec, dry=False, worker_fail=None):
-    CALLS.clear()
+    CALLS.clear(); STAMPS.clear()
     def airtable(method, path, payload=None):
         CALLS.append(["airtable", method, path.split("?")[0]])
         if path.startswith(st.TENANTS + "/"):
             tid = path.split("/")[1].split("?")[0]
             return {"id": tid, "fields": {st.TENANT_PHONE: TENANT_NUMBER.get(tid, "")}}
         if method == "PATCH":
+            STAMPS.append(((payload or {}).get("fields") or {}).get(AF["notes"], ""))
             return {}
         return rec
     def worker_call(url, payload=None):
@@ -209,6 +211,7 @@ print(json.dumps(out))`);
 open(st.SWITCH, "w").write("on")
 trial_ended()
 first = run(card())
+firstStamp = list(STAMPS)
 again = run(card())
 ledger = [json.loads(l)["event"] for l in open(st.LEDGER)]
 os.remove(st.LEDGER)
@@ -221,7 +224,7 @@ after5 = run(card())
 os.remove(st.LEDGER)
 gone = run(card(), worker_fail="ERROR: worker call failed: TimeoutError: timed out")
 afterGone = run(card())
-print(json.dumps({"sent": sends(first), "ok": first["ok"], "again": again.get("refused", ""), "ledger": ledger,
+print(json.dumps({"stampText": firstStamp[0] if firstStamp else "", "sent": sends(first), "ok": first["ok"], "again": again.get("refused", ""), "ledger": ledger,
                   "stamped": len(stampPatch), "retry": len(sends(retry)), "after5": after5.get("refused", ""),
                   "afterGone": afterGone.get("refused", "")}))`);
     expect(r.sent).toHaveLength(1);
@@ -231,6 +234,8 @@ print(json.dumps({"sent": sends(first), "ok": first["ok"], "again": again.get("r
     expect(r.sent[0][2]).toEqual({ to: '447700900123@sms.clicksend.com', from: 'info@agilelets.co.uk', subject: 'Agile Lets',
       text: 'Hello Sam, your rent due 1 Oct has not reached us. Please pay or reply. Roy, Agile Lets' });
     expect(r.stamped).toBe(1);
+    // The stamp says what was seen: handed to ClickSend by email, with the message id, and where delivery is recorded.
+    expect(r.stampText).toMatch(/SENT: text to the number ending 123 \(\d+ characters\), emailed to ClickSend \(message gmailMsg1\) to go from the number it sets for info@agilelets\.co\.uk \(\+447984393339\); ClickSend's SMS history is the delivery record/);
     // The card links no tenancy, so no tenancy comment can be written: said, and the text still stands.
     expect(JSON.parse(r.ok)).toEqual({ sent: 'recCARDTEXT000001', numberEnds: '123', tenancyNoted: [],
       tenancyNoteProblem: 'the card names no tenancy, so no tenancy comment was written' });
@@ -260,6 +265,19 @@ print(json.dumps({"out": json.loads(res["ok"]), "worker": len(sends(res))}))`);
     expect(r.out).toMatchObject({ dryRun: true, switchedOn: false, numberEnds: '123', route: 'info@agilelets.co.uk by ClickSend email-to-text' });
     expect(r.out.trial).toMatch(/trial run/);
     expect(r.worker).toBe(0);
+  });
+
+  it('the real loader reaches send-email.py: its worker call, its address and its reading of a refusal', () => {
+    const r = py(`
+m = REAL_LOADER()
+print(json.dumps({"call": callable(m.worker_call), "url": m.SEND_URL,
+                  "blankSubject": bool(m.NOT_SENT_RE.search('ERROR: worker 400: {"error":"to, subject and text are required"}')),
+                  "noConsent": bool(m.NOT_SENT_RE.search("REFUSED: the worker has no Gmail consent yet.")),
+                  "gateway": bool(m.NOT_SENT_RE.search("ERROR: worker 502: bad gateway")),
+                  "timeout": bool(m.NOT_SENT_RE.search("ERROR: worker call failed: TimeoutError: timed out"))}))`);
+    // A refusal before anything left may be retried; a gateway error or a timeout may have gone, and never is.
+    expect(r).toEqual({ call: true, url: 'https://drive-upload.kevinbrittain.workers.dev/send-email', blankSubject: true,
+      noConsent: true, gateway: false, timeout: false });
   });
 
   it('the ClickSend address is the number in 44 form, and nothing but a +447 mobile reaches it', () => {

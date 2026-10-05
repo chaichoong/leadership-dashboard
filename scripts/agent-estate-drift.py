@@ -322,6 +322,10 @@ def selftest():
     assert not scan_text("Route to the Supplier and Creditor Manager agent.", "x")
     assert scan_text("Use for the teardown call.", "x")
     assert scan_text("The Teardown Call runs first.", "x")
+    # Texts to tenants (5 Oct 2026): the GoHighLevel route fires; GoHighLevel itself, for OD sales, does not.
+    assert scan_text("Texts go from the Agile Lets GoHighLevel number.", "x")
+    assert scan_text("Each text goes through GoHighLevel to the tenant.", "x")
+    assert not scan_text("Sales follow-ups run in GoHighLevel workflows for Operations Director.", "x")
     assert stamp_of(os.devnull) is None
     assert rulings_after("2026-09-07", os.devnull) == []
     memory_selftest()

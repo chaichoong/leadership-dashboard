@@ -255,7 +255,8 @@ def _cmd_send(args):
         live = (airtable("GET", f"{TASKS}/{args.task}?returnFieldsByFieldId=true").get("fields") or {})
         notes = (str(live.get(AF["notes"]) or "").rstrip() + "\n\n"
                  + f"[{stamp} — send-text] SENT: text to the number ending {number[-3:]} ({len(message)} characters), "
-                 f"by ClickSend from {AGILE_LETS_NUMBER}").strip()
+                 f"emailed to ClickSend (message {(sent or {}).get('id') or '?'}) to go from the number it sets for "
+                 f"{TEXT_FROM} ({AGILE_LETS_NUMBER}); ClickSend's SMS history is the delivery record").strip()
         airtable("PATCH", f"{TASKS}/{args.task}", {"fields": {AF["notes"]: notes[-90000:]}})
     except (SystemExit, Exception) as exc:                   # noqa: BLE001 — the text went; said, never undone
         print(f"WARNING: sent, but the SENT stamp could not be written: {exc}", file=sys.stderr)
