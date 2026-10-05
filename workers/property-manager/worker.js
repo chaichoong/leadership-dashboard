@@ -27,6 +27,10 @@
 // And, signed in (Kevin or Roy), the link itself:
 //   POST /tenant-form/link     { tenantId }    → { ok, url, expires, firstName }
 //   POST /tenant-form/link/off { tenantId }    → { ok }
+// And the robots' own key (Cash Flow Voids lane C, 5 Oct 2026), which opens this one route and nothing else:
+//   POST /tenant-form/robot-link { tenantId }  Authorization: Robot <PM_ROBOT_KEY>
+//                      → { ok, url, expires, firstName }, or 409 { error, expires } while a live link stands
+//                      (a robot never cuts off a link a tenant may be using; a person's button still can)
 //
 // Secrets (wrangler secret put):
 //   AIRTABLE_PAT        - read on the property tables + write on Tasks
@@ -34,6 +38,7 @@
 //   PM_PASSCODE_KEVIN   - Kevin's passcode for the same page (notes sign as him)
 //   PM_SESSION_SECRET   - HMAC key for session tokens
 //   PM_KEVIN_AIRTABLE_ID - Kevin's Airtable user id (usr…), the only owner /login-airtable accepts
+//   PM_ROBOT_KEY        - the robots' key for /tenant-form/robot-link only (~/.config/od/pm_robot_key on the Mac)
 // Bindings: LOGIN_LIMIT (ratelimit, optional) — 5 attempts per minute per IP.
 //           TENANT_LIMIT (ratelimit, optional) — the tenant form's public routes, per IP.
 //           TENANT_ALL (ratelimit, optional) — the same routes, all callers together.
@@ -41,7 +46,7 @@
 import { computeAll, shapeTasks, isRoyScope, isTaskOpen, appendNote, buildNameMap, statusForDue, dateKey, txWindowStart } from './compute.mjs';
 import { BASE, TABLES, F, NAMES, REC, REAL_ESTATE_NAME, ROY_STATUS_ALLOW, GP, GP_TABLES, GP_TICKS, GP_UPLIFT_VALUES, GP_ROW_STATUS, GP_ROW_FIELDS, GP_TASK_FIELDS, GP_LIVE_TENANCIES, GP_COST_FILTER, GP_PM_TENANT_OMIT, GP_TENANT_FORM_FIELDS, TENANT_LINK, TENANT_ANSWERS } from './fields.mjs';
 
-const VERSION = '1.1';
+const VERSION = '1.2';
 const TOKEN_TTL_S = 12 * 60 * 60;
 const DATA_TTL_MS = 10 * 60 * 1000;
 // In-isolate memo. caches.default is a no-op on *.workers.dev, so the Cache API
@@ -557,16 +562,27 @@ async function tenantById(env, id) {
   p.set('returnFieldsByFieldId', 'true');
   p.set('maxRecords', '1');
   p.set('filterByFormula', `RECORD_ID()='${id}'`);
-  p.append('fields[]', GP.tenant.name);
+  for (const f of [GP.tenant.name, TENANT_LINK.codeHash, TENANT_LINK.codeExpires]) p.append('fields[]', f);
   const rows = (await airtableRequest(env, `${TABLES.tenants}?${p.toString()}`)).records || [];
   return rows.length === 1 && rows[0].id === id ? rows[0] : null;
 }
 
-async function handleTenantLink(request, env, origin, off, who) {
+// The robots' key: one route, compared in constant time, and nothing at all while the secret is unset.
+export function isRobot(request, env) {
+  const auth = request.headers.get('Authorization') || '';
+  return !!env.PM_ROBOT_KEY && auth.startsWith('Robot ') && timingSafeEqual(auth.slice(6), env.PM_ROBOT_KEY);
+}
+
+async function handleTenantLink(request, env, origin, off, who, robot = false) {
   let body;
   try { body = await request.json(); } catch { return err('Bad request', 400, origin); }
   const row = await tenantById(env, body && body.tenantId);
   if (!row) return err('That is not a tenant', 400, origin);
+  const live = String(row.fields[TENANT_LINK.codeExpires] || '').slice(0, 10);
+  if (robot && row.fields[TENANT_LINK.codeHash] && live && live >= dateKey(londonNow())) {
+    // A new link ends the old one. A robot never does that to a tenant who may be using it.
+    return json({ ok: false, error: 'This tenant already has a live form link', expires: live }, 409, origin);
+  }
   if (off) {
     await airtableRequest(env, `${TABLES.tenants}/${row.id}`, { method: 'PATCH', body: JSON.stringify({ fields: { [TENANT_LINK.codeHash]: null, [TENANT_LINK.codeExpires]: null }, typecast: false }) });
     console.log(JSON.stringify({ event: 'tenant-link-off', tenantId: row.id, who }));
@@ -669,6 +685,13 @@ export default {
       if (path === '/login-airtable' && request.method === 'POST') return await handleLoginAirtable(request, env, origin);
       // The tenant's own routes: his link code is his pass, so they sit before the sign-in.
       if (path === '/tenant-form' || path === '/tenant-form/open' || path === '/tenant-form/upload') return await handleTenantForm(request, env, origin, path);
+      // The robots' key opens this route and no other: it is not a session token, so every route below refuses it.
+      if (path === '/tenant-form/robot-link' && request.method === 'POST') {
+        // The limit first, so wrong keys are counted too: a guess costs a slot like any other try.
+        if (await callerLimited(request, env)) return err('Too many tries. Wait a minute and try again.', 429, origin);
+        if (!isRobot(request, env)) return err('Sign in needed', 401, origin);
+        return await handleTenantLink(request, env, origin, false, 'robot', true);
+      }
 
       const session = await requireAuth(request, env);
       if (!session) return err('Sign in needed', 401, origin);

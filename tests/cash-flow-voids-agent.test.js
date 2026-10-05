@@ -118,7 +118,8 @@ print(json.dumps({"byName": bool(trial_problem(other, "RENT LATE: Unit 9, rent d
                   "midName": trial_problem(other, "Re: RENT LATE: Unit 9", ""),
                   "byAsk": bool(trial_problem(other, "RENT ASK: Unit 9, ask for a Universal Credit screenshot", "")),
                   "marks": TRIAL_TASK_MARKS["${RENT_TM}"],
-                  "rentCheck": {"prefix": [rc.TASK_PREFIX, rc.lane_b_rules.ASK_PREFIX, rc.rent_plans.PLAN_PREFIX], "note": rc.KEY_MARK},
+                  "rentCheck": {"prefix": [rc.TASK_PREFIX, rc.lane_b_rules.ASK_PREFIX, rc.rent_plans.PLAN_PREFIX, rc.rent_cap.CAP_PREFIX],
+                                "note": rc.KEY_MARK},
                   "askKey": rc.lane_b_rules.TRIAL_KEY_MARK}))`);
     expect([r.byName, r.byKey, r.neither, r.midName, r.byAsk]).toEqual([true, true, '', '', true]);
     expect(r.marks).toEqual(r.rentCheck);

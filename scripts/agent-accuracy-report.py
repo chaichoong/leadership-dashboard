@@ -36,13 +36,15 @@ import urllib.parse
 import urllib.request
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from agent_email_format import FORM_CARDS, form_card  # noqa: E402
+from agent_email_format import FORM_CARDS, KEVIN_CARDS, form_card  # noqa: E402
 
 # A robot form card (Cash Flow Voids lane B, 3 Oct 2026) is raised by the rent check's rules under the
 # agent's id; the agent drafts none of it. Its verdicts are Kevin's business calls on a government
 # form, never a score of the agent's drafting, so they are left out: by name here, and by the key
 # line in the query (the Notes are not fetched for every decided task).
-FORM_KEY_CLAUSE = "".join(f", NOT(FIND('{m['note']}', {{Notes}}&''))" for m in FORM_CARDS.values())
+# Kevin's own claim cards (lane C, 5 Oct 2026) are left out the same way: the agent drafts none of them.
+FORM_KEY_CLAUSE = "".join(f", NOT(FIND('{m['note']}', {{Notes}}&''))"
+                          for m in list(FORM_CARDS.values()) + list(KEVIN_CARDS.values()))
 
 
 def decisions_from(decided):

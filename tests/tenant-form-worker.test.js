@@ -112,6 +112,96 @@ describe('making a link (signed in only)', () => {
   });
 });
 
+// The robots' key (Cash Flow Voids lane C, 5 Oct 2026): it makes a tenant's link and opens nothing else.
+describe("the robots' key", () => {
+  const ROBOT = 'robot-key-test-0123456789';
+  const robot = (body, key = ROBOT, path = '/tenant-form/robot-link', method = 'POST', origin) =>
+    worker.fetch(new Request('https://pm.test' + path, {
+      method, body: method === 'GET' ? undefined : JSON.stringify(body),
+      headers: { 'Content-Type': 'application/json', Authorization: 'Robot ' + key, ...(origin ? { Origin: origin } : {}) },
+    }), env, ctx);
+
+  it('makes a link with the key, with no browser origin, and writes only the hash and the expiry', async () => {
+    env.PM_ROBOT_KEY = ROBOT;
+    const r = await robot({ tenantId: ID });
+    const body = await r.json();
+    expect(r.status).toBe(200);
+    expect(body.url).toMatch(/^https:\/\/app\.operationsdirector\.co\.uk\/tenant-details\.html#c=[A-Za-z0-9_-]{32}$/);
+    expect(body.firstName).toBe('Sam');
+    expect(writes).toHaveLength(1);
+    expect(Object.keys(writes[0].body.fields).sort()).toEqual([TENANT_LINK.codeHash, TENANT_LINK.codeExpires].sort());
+    expect((await open(body.url.split('#c=')[1])).status).toBe(200);
+  });
+
+  it('a wrong key, another scheme, no key set, or a GET make nothing', async () => {
+    env.PM_ROBOT_KEY = ROBOT;
+    expect((await robot({ tenantId: ID }, 'robot-key-test-0123456788')).status).toBe(401);
+    expect((await robot({ tenantId: ID }, ROBOT + 'x')).status).toBe(401);
+    expect((await worker.fetch(new Request('https://pm.test/tenant-form/robot-link', { method: 'POST', body: JSON.stringify({ tenantId: ID }),
+      headers: { Authorization: 'Bearer ' + ROBOT } }), env, ctx)).status).toBe(401);
+    expect((await robot(undefined, ROBOT, '/tenant-form/robot-link', 'GET')).status).toBe(401);
+    delete env.PM_ROBOT_KEY;
+    expect((await robot({ tenantId: ID })).status).toBe(401);
+    expect((await robot({ tenantId: ID }, '')).status).toBe(401);
+    expect((await robot({ tenantId: ID }, 'undefined')).status).toBe(401);
+    env.PM_ROBOT_KEY = '';
+    expect((await robot({ tenantId: ID }, '')).status).toBe(401);
+    expect(writes).toEqual([]);
+  });
+
+  it('opens no other route: not the signed-in link, link off, the data, the tasks, a task write or the Growth Plan', async () => {
+    env.PM_ROBOT_KEY = ROBOT;
+    for (const [path, method] of [['/tenant-form/link', 'POST'], ['/tenant-form/link/off', 'POST'], ['/data', 'GET'],
+      ['/tasks', 'GET'], ['/task/recTASKTEST000001', 'POST'], ['/growth-plan', 'GET'], ['/growth-plan/tick', 'POST'],
+      ['/growth-plan/tenant', 'POST']]) {
+      expect((await robot({ tenantId: ID }, ROBOT, path, method)).status, path).toBe(401);
+    }
+    // Nor as a session token: it is not one.
+    expect((await call('/tenant-form/link', { method: 'POST', body: { tenantId: ID }, token: ROBOT })).status).toBe(401);
+    expect(writes).toEqual([]);
+  });
+
+  it('never replaces a live link (a tenant may be using it); a lapsed or switched-off one it replaces', async () => {
+    env.PM_ROBOT_KEY = ROBOT;
+    const { code } = await makeLink();
+    writes = [];
+    const r = await robot({ tenantId: ID });
+    expect(r.status).toBe(409);
+    expect((await r.json()).expires).toBe(store[ID].expires);
+    expect(writes).toEqual([]);
+    expect((await open(code)).status).toBe(200);
+    // Lapsed yesterday: a fresh link is made.
+    store[ID].expires = plusDays(-1);
+    expect((await robot({ tenantId: ID })).status).toBe(200);
+    // Switched off by a person: no expiry, so a fresh link is made.
+    await call('/tenant-form/link/off', { method: 'POST', body: { tenantId: ID }, token: await signIn() });
+    expect((await robot({ tenantId: ID })).status).toBe(200);
+    // A person's button still replaces a live link, as before.
+    expect((await makeLink()).status).toBe(200);
+  });
+
+  it('refuses an id that is not a tenant, and answers the rate limit before any read', async () => {
+    env.PM_ROBOT_KEY = ROBOT;
+    expect((await robot({ tenantId: 'recNOTATENANT0001' })).status).toBe(400);
+    expect((await robot({ tenantId: "recX') OR TRUE()" })).status).toBe(400);
+    reads = 0;
+    env.TENANT_LIMIT = { limit: async () => ({ success: false }) };
+    expect((await robot({ tenantId: ID })).status).toBe(429);
+    expect([reads, writes.length]).toEqual([0, 0]);
+    // A wrong key is counted too: guessing costs a slot like any other try.
+    let counted = 0;
+    env.TENANT_LIMIT = { limit: async () => { counted++; return { success: true }; } };
+    expect((await robot({ tenantId: ID }, 'wrong-key')).status).toBe(401);
+    expect(counted).toBe(1);
+  });
+
+  it('a browser page on the allow-list cannot use it from another origin', async () => {
+    env.PM_ROBOT_KEY = ROBOT;
+    expect((await robot({ tenantId: ID }, ROBOT, '/tenant-form/robot-link', 'POST', 'https://evil.example')).status).toBe(403);
+    expect(writes).toEqual([]);
+  });
+});
+
 describe('the public read gives a first name and nothing else', () => {
   it('a good code: the first name only, never a saved answer', async () => {
     const { code } = await makeLink();

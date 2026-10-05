@@ -644,7 +644,8 @@ got = ar.decisions_from([row("RENT FORM: direct rent payment form: Unit 9"), row
 print(json.dumps({"names": [d["outcome"] for d in got], "clause": ar.FORM_KEY_CLAUSE}))`);
     expect(r.names).toEqual(['Approved as-is']);
     // The query leaves out a card known only by its key line (the Notes are not fetched for every task).
-    expect(r.clause).toBe(", NOT(FIND('RENT FORM KEY: ', {Notes}&''))");
+    // Kevin's own claim cards (lane C) are left out the same way (tests/rent-cap.test.js).
+    expect(r.clause).toBe(", NOT(FIND('RENT FORM KEY: ', {Notes}&'')), NOT(FIND('RENT CLAIM KEY: ', {Notes}&''))");
   });
 
   it('a form card whose last window closed with no answer recorded offers neither the button nor the window again', () => {

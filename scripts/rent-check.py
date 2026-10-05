@@ -101,6 +101,7 @@ from datetime import date, datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import rent_cap  # noqa: E402
 import rent_new_tenant as lane_b_rules  # noqa: E402
 import rent_plans  # noqa: E402
 
@@ -539,7 +540,9 @@ def judge(rec, tenants, payments, day, feed, pre_slate, late_before):
                     note=f"late {days_late} day{'s' if days_late != 1 else ''}, due {owed.strftime('%-d %b')}, {last}")
     # Paid short is only said on a trusted feed.
     if got is not None and trusted:
-        return dict(row, light="amber", lane="short", paying=True, got=got, note=f"paid short: {part}, {last}")
+        # The cycle rides on the row: lane C raises one benefit-cap task per short cycle (scripts/rent_cap.py).
+        return dict(row, light="amber", lane="short", paying=True, got=got, cycle=cycle.isoformat(),
+                    note=f"paid short: {part}, {last}")
     return dict(row, light="green", lane="fine", paying=True,
                 note=last if newest else f"first rent due {owed.strftime('%-d %b')}")
 
@@ -959,18 +962,22 @@ def main(argv=None):
     res["setup"] = lane_b_rules.lane_b(_Here(), res, data, day, writes, switch, now)
     res["agentLate"] = agent_late(res, data["tenancies"], day, writes, switch)
     res["plans"] = rent_plans.act(_Here(), plans, data, day, writes, switch, res)
+    res["cap"] = rent_cap.run(_Here(), data, day, res, writes, switch, plans["onTrack"])
     res["briefLine"] = brief_line(res)              # lane B has put each new tenant's stage on its row
-    failed = res["tasks"]["failed"] or res["setup"]["failed"] or res["agentLate"]["failed"] or res["plans"]["failed"]
+    failed = (res["tasks"]["failed"] or res["setup"]["failed"] or res["agentLate"]["failed"] or res["plans"]["failed"]
+              or res["cap"]["failed"])
     if writes:
         public = {k: v for k, v in res.items() if k not in ("lights", "lanes")}
         # Blocked only when the bank data hid a verdict: a stale feed with every rent already seen hides nothing.
         status = "Failed" if failed else ("Blocked" if res["bankBlocked"] or res["plans"].get("stuck") else "Worked")
         write_row(status, "\n".join([detail(res), lane_a_line(res["tasks"]), lane_b_rules.lane_b_line(res["setup"]),
-                                      agent_late_line(res["agentLate"]), rent_plans.line(res["plans"])]), public, now)
+                                      agent_late_line(res["agentLate"]), rent_plans.line(res["plans"]),
+                                      rent_cap.line(res["cap"])]), public, now)
         append_history(res, now)
     print(json.dumps({"written": writes, "briefLine": res["briefLine"], "worst": res["worst"],
                       "counts": res["counts"], "tenancies": res["tenancies"], "feed": res["feed"],
-                      "tasks": res["tasks"], "setup": res["setup"], "agentLate": res["agentLate"], "plans": res["plans"]}, indent=2))
+                      "tasks": res["tasks"], "setup": res["setup"], "agentLate": res["agentLate"], "plans": res["plans"],
+                      "cap": res["cap"]}, indent=2, default=str))
     return 1 if failed else 0
 
 
