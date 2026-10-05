@@ -705,13 +705,13 @@ print(json.dumps({
 # He owed £1,000; £500 landed and was matched on 5 Oct before the draft; promises 15 Oct £250 and 25 Oct £250.
 c = card(out=output(plan=(("2026-10-15", 250), ("2026-10-25", 250))), notes=sent("05 Oct 2026"), created="2026-10-05T11:00:00.000Z")
 print(json.dumps(rp.state(c, pays(("2026-10-05", 500)), date(2026, 10, 27), {"rent": 500, "dueDay": "3"})))`);
-    // Never KEPT on it. And since drafting-day money cannot be told apart, never called missed on it either:
-    // it waits, and is loud a week on, on the row (review, 5 Oct 2026).
-    expect(r).toMatchObject({ state: 'waiting', stuck: true });
-    expect(r.why).toMatch(/£500.00 paid on the day the plan was drafted may be part of it/);
+    // Never KEPT on it. Met only if the drafting day's money counted, so it waited a week, then reads MISSED:
+    // the cheap direction, a card Kevin sees after the agent has read the payments (reviews, 5 Oct 2026).
+    expect(r).toMatchObject({ state: 'missed', missedOn: '2026-10-15', owed: 250, paid: 0 });
+    expect(r.why).toMatch(/met only if £500.00 paid on the day the plan was drafted was part of it/);
   });
 
-  it('the drafting day is the last submit or edit of the card, not when the tenant\'s message arrived', () => {
+  it('the drafting day is the card\'s last submit, not when the tenant\'s message arrived, and not an edit of its wording', () => {
     const r = py(H5 + `
 # His message made the card on 5 Oct; he paid £200 on 7 Oct; Kevin asked for changes; the agent redrafted on 8 Oct
 # (netting off the £200): 15 Oct £300 and 24 Oct £300; the email went on 9 Oct. He paid £300, then only £100.
@@ -725,7 +725,31 @@ edited = card(out=output(plan=(("2026-10-15", 300),)), notes=("[05 Oct 2026 17:0
               "[07 Oct 2026 09:00 — agent] EDITS APPLIED: say the 15th\\n" + sent("07 Oct 2026")), created="2026-10-05T16:00:00.000Z")
 print(json.dumps({"redo": [redo["state"], redo["start"], redo.get("owed"), redo.get("paid")], "edited": rp.state(edited, [], date(2026, 10, 8), t)["start"]}))`);
     expect(r.redo).toEqual(['missed', '2026-10-09', 600, 400]);
-    expect(r.edited).toBe('2026-10-08');
+    // Kevin's edit changed wording only and re-read no payments: the 5 Oct submit is still the drafting day.
+    expect(r.edited).toBe('2026-10-06');
+  });
+
+  it('an edit after approval never moves the drafting day: money paid before the edit is the plan\'s', () => {
+    const r = py(H5 + `
+notes = ("[01 Oct 2026 10:00 — agent-dispatch] SUBMITTED (round 1) as Correspondence with no new file\\n"
+         "[04 Oct 2026 09:00 — agent] EDITS APPLIED: friendlier opening\\n" + sent("04 Oct 2026"))
+c = card(out=output(plan=(("2026-10-08", 300), ("2026-10-22", 300))), notes=notes, created="2026-09-30T16:00:00.000Z")
+print(json.dumps(rp.state(c, pays(("2026-10-03", 300)), date(2026, 10, 11), {"rent": 500, "dueDay": "15"})["state"]))`);
+    expect(r).toBe('open');
+  });
+
+  it('a check met only with drafting-day money waits a week, then reads missed; a short check is missed at once', () => {
+    const r = py(H5 + `
+notes = "[01 Oct 2026 10:00 — agent-dispatch] SUBMITTED (round 1) as Correspondence with no new file\\n" + sent("01 Oct 2026")
+c = card(out=output(plan=(("2026-10-08", 300), ("2026-10-22", 300))), notes=notes, created="2026-10-01T08:00:00.000Z")
+t = {"rent": 500, "dueDay": "1"}
+day0 = pays(("2026-10-01", 300))
+print(json.dumps({"soon": rp.state(c, day0, date(2026, 10, 12), t)["state"], "later": rp.state(c, day0, date(2026, 10, 20), t)["state"],
+                  "laterShort": rp.state(c, day0, date(2026, 10, 25), t)}))`);
+    expect(r.soon).toBe('waiting');
+    expect(r.later).toBe('missed');
+    // The 22 Oct check is short even with the drafting day's £300 counted: missed at once on it.
+    expect(r.laterShort).toMatchObject({ state: 'missed' });
   });
 
   it('an instalment paid the same day the plan was drafted is never called missed', () => {

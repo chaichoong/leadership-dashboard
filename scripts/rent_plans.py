@@ -40,8 +40,9 @@ GRACE_DAYS = 2                    # the rent check's own TOLERANCE_DAYS: a payme
 EARLY_PAY_DAYS = 5                # the rent check's own: a payment this early counts for the day it was promised
 PLAN_MAX_DAYS = 70                # inside the rent check's 80-day look-back at matched payments
 SENT_RE = re.compile(r"^\[(\d{1,2} \w{3} \d{4})(?: \d{2}:\d{2})? — send-email\] SENT: email to", re.M)
-# The day the agent last wrote or edited the card's text: agent-dispatch.py's submit stamp, or its revise mark.
-DRAFTED_RE = re.compile(r"^\[(\d{1,2} \w{3} \d{4})(?: \d{2}:\d{2})? — (?:agent-dispatch\] SUBMITTED|agent\] EDITS APPLIED:)", re.M)
+# The day the agent last wrote the card's text: agent-dispatch.py's submit stamp. An edit Kevin asked for
+# (EDITS APPLIED) changes wording only and re-reads no payments, so it never moves the drafting day.
+DRAFTED_RE = re.compile(r"^\[(\d{1,2} \w{3} \d{4})(?: \d{2}:\d{2})? — agent-dispatch\] SUBMITTED", re.M)
 MISSED_MARK = "RENT PLAN MISSED: "
 KEPT_MARK = "RENT PLAN KEPT: "
 SUPERSEDED_MARK = "RENT PLAN SUPERSEDED: "
@@ -77,8 +78,8 @@ def sent_on(notes):
 
 
 def drafted_on(notes):
-    """The last day the agent submitted or edited the card's text (the day the promises were written against
-    what was owed), or None."""
+    """The last day the agent submitted the card's text (the day the promises were written against what was
+    owed), or None."""
     days = []
     for m in DRAFTED_RE.finditer(str(notes or "")):
         try:
@@ -213,29 +214,44 @@ def state(rec, payments, day, tenancy=None, doubt=False, asof=None):
                         else f"{reason} today"))
         return out
 
+    # Money paid on the drafting day cannot be told apart from money the agent already netted off. A check met
+    # only with it is UNSURE: never KEPT on it, judged on as if it counted, and called MISSED a week on (the
+    # cheap direction: a card Kevin sees, after the agent has read the payments) (reviews, 5 Oct 2026).
+    on_day = sum(p["amount"] for p in payments if made and p["day"] == made)
+    unsure = None
+
+    def unsure_verdict():
+        when, owed, paid = unsure
+        if (day - when).days > WAIT_LOUD_DAYS:
+            out.update(state="missed", missedOn=when.isoformat(), owed=round(owed, 2), paid=round(paid, 2),
+                       why=f"met only if £{on_day:,.2f} paid on the day the plan was drafted was part of it")
+            return out
+        return waiting(when + grace, f"£{on_day:,.2f} paid on the day the plan was drafted may be part of it, and the "
+                                     "rent check cannot tell")
+
     for when, owed in checks:
         check = when + grace
         paid = sum(p["amount"] for p in payments if start <= p["day"] <= check)
         if paid + PLAN_SLACK >= owed:
             continue                               # met, whatever the feed: money seen is money in
+        if on_day and paid + on_day + PLAN_SLACK >= owed:
+            unsure = unsure or (when, owed, paid)
+            continue                               # met only with the drafting day's money: judge on, never kept
         if seen < check:
             # The bank has not reached this checkpoint. With doubt about the feed and the day already past it,
             # that is waiting, and it grows loud: a stale feed must never read as "on track" for weeks.
             if doubt and check <= day:
                 return waiting(check)
+            if unsure:
+                return unsure_verdict()
             out["state"] = "open"
             return out
         if doubt:
             return waiting(check)
-        # Money paid on the drafting day cannot be told apart from money the agent already netted off. When it
-        # alone would meet the check, the plan is never called missed on it: it waits, and turns loud (review,
-        # 5 Oct 2026).
-        on_day = sum(p["amount"] for p in payments if made and p["day"] == made)
-        if on_day and paid + on_day + PLAN_SLACK >= owed:
-            return waiting(check, f"£{on_day:,.2f} paid on the day the plan was drafted may be part of it, and the "
-                                  "rent check cannot tell")
         out.update(state="missed", missedOn=when.isoformat(), owed=round(owed, 2), paid=round(paid, 2))
         return out
+    if unsure:
+        return unsure_verdict()
     # Every check met. KEPT only once the last one's day has passed: a plan paid ahead stays open (and lane A
     # stays paused) for its whole length, so rent he prepaid inside it is never chased mid-plan.
     out["state"] = "kept" if day >= checks[-1][0] + grace else "open"
