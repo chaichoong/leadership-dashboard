@@ -51,6 +51,7 @@ AWARD_MARK = "RENT CLAIM AWARD: "          # the council's answer from his note:
 NO_ANSWER_MARK = "RENT CLAIM NO ANSWER: "  # no answer yet (Request changes, or a note with no readable answer)
 STOPPED_MARK = "RENT CLAIM STOPPED: "      # Reject on a decision card, or closed by hand: no more asking
 CLAIM_FOR_MARK = "RENT CLAIM FOR: "        # the claimant's tenant record, on the claim card (never a mark of a verdict)
+PAYEE_MARK = "RENT CLAIM PAYEE: "          # who the claim asked the council to pay: tenant or landlord (read by renewals)
 DONE_MARKS = (SENT_MARK, WITHDRAWN_MARK, ENDED_MARK, AWARD_MARK, NO_ANSWER_MARK, STOPPED_MARK)
 REFUSED, ONE_OFF = "REFUSED", "ONE-OFF"
 SUBMITTED_RE = re.compile(r"^\[[^\]\n]*— agent-dispatch\] SUBMITTED", re.M)
@@ -62,6 +63,12 @@ DECISION_WAIT_DAYS = 21     # Hyndburn aims for two weeks, Fylde "several weeks"
 REASK_DAYS = 14             # no answer yet: asked again this much later
 DECISION_ASKS = 6           # then asking stops, said on the row
 RENEW_DAYS = 30             # Kevin's ruling: a renewal reminder a month before the award ends
+# A CAPPED TENANT WHO PAYS IN FULL (Kevin, 5 Oct 2026): "If the tenant has had a reduction and it's come off their
+# money, then we put the application in place for them so they get the top-up." No short payment raises the case:
+# the tenant's own details form does, when it answers the benefit cap question "None (capped)" and was saved in the
+# last FULL_FRESH_DAYS. The award is paid to the tenant ("full:<day saved>" case); a short payer's comes to us.
+CAPPED = "None (capped)"
+FULL_FRESH_DAYS = 60
 AWARD_MAX_DAYS = 800        # an end date further off than this is read as a typing slip, not an award
 APPROVED = ("Approved as-is", "Approved with minor edits")
 CLOSED = ("Completed", "Cancelled")
@@ -92,7 +99,7 @@ COUNCILS = {
             "Hyndburn asks a helper to sign its own declaration that the tenant gave permission."),
 }
 _CAP_KEY_RE = re.compile(r"^cap:(rec[A-Za-z0-9]{14}):(\d{4}-\d{2}-\d{2}|renew:\d{4}-\d{2}-\d{2})$")
-_CARD_KEY_RE = re.compile(r"^(claim|decision):(rec[A-Za-z0-9]{14}):(\d{4}-\d{2}-\d{2}|renew:\d{4}-\d{2}-\d{2}):(\d+)$")
+_CARD_KEY_RE = re.compile(r"^(claim|decision):(rec[A-Za-z0-9]{14}):(\d{4}-\d{2}-\d{2}|renew:\d{4}-\d{2}-\d{2}|full:\d{4}-\d{2}-\d{2}):(\d+)$")
 SHORT_RE = re.compile(r"arrived short: £([\d,]+\.\d{2}) of £([\d,]+\.\d{2})")
 _MONTHS = {m: i for i, m in enumerate(("jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov",
                                        "dec"), 1)}
@@ -266,6 +273,17 @@ def read_busy(rc):
     return {t for r in rows for t in ((r.get("fields") or {}).get(F["tenancies"]) or [])}
 
 
+def read_capped(rc, day):
+    """The tenants whose own details form, saved in the last FULL_FRESH_DAYS, answers the benefit cap question
+    "None (capped)": their tenancies are planned even with no short payment. Field NAMES in the formula: a rename
+    is an Airtable error, never zero rows."""
+    since = (day - timedelta(days=FULL_FRESH_DAYS)).isoformat()
+    rows = rc.fetch_all(rc.T_TENANTS, {"fields[]": [TN["saved"]], "filterByFormula":
+                                       f"AND(IS_AFTER({{Tenant Form Last Saved}}, '{since}'), "
+                                       f"{{Benefit Cap Exemption}}='{CAPPED}')"})
+    return {r["id"] for r in rows}
+
+
 def read_tenants(rc, ids):
     """{tenant id: fields} for the claim's answers, by field id."""
     ids = sorted(i for i in ids if re.fullmatch(r"rec[A-Za-z0-9]{14}", i))
@@ -311,7 +329,7 @@ def marked_on(c, mark, day):
     return (_day(line[:10]) if line else None) or day
 
 
-def plan(tid, view, row, tenancy, tenants, day, no_chase=False, busy=False, unlinked=False):
+def plan(tid, view, row, tenancy, tenants, day, no_chase=False, busy=False, unlinked=False, uc=False):
     """What lane C does today for one tenancy. Pure. `view` is read()'s entry for it (or empty lists), `row` the
     rent check's verdict on it (None when it is not live), `tenancy` its Tenancies fields by id (rent-check TY),
     `tenants` {tenant id: fields}. Returns {"stage": words, "acts": [cards to write], "raise": [...],
@@ -333,8 +351,11 @@ def plan(tid, view, row, tenancy, tenants, day, no_chase=False, busy=False, unli
                                                  "made once is ONE-OFF)")
 
     # The award: the newest answer recorded on a decision card (an end day, or a refusal).
-    award, award_on = None, None                     # the end day, and the day Kevin recorded it
+    award, award_on, award_case = None, None, ""     # the end day, the day Kevin recorded it, the claim's case
+    one_off_on = None                                # the last one-off award: no fresh full-payer case for CASE_DAYS
     for d in decisions:
+        if d["do"] == "one-off" or (mark_line(d["notes"], AWARD_MARK) or "").startswith(ONE_OFF):
+            one_off_on = max(x for x in (one_off_on, d["approvedOn"] or d["created"] or day) if x)
         if d["do"] == "award":
             award = d["detail"]
         elif d["do"] in ("refused", "one-off"):
@@ -343,7 +364,7 @@ def plan(tid, view, row, tenancy, tenants, day, no_chase=False, busy=False, unli
             award = _day(mark_line(d["notes"], AWARD_MARK)[:10])
         else:
             continue
-        award_on = d["approvedOn"] or d["created"] or day
+        award_on, award_case = d["approvedOn"] or d["created"] or day, d["case"]
     in_force = award is not None and award >= day
 
     # The current case: the newest cap task raised in the last CASE_DAYS, or older with a claim card raised in
@@ -354,6 +375,17 @@ def plan(tid, view, row, tenancy, tenants, day, no_chase=False, busy=False, unli
             has(k, WITHDRAWN_MARK) and fresh(marked_on(k, WITHDRAWN_MARK, day)))) for k in claims)
     recent = [c for c in caps if current(c)]
     case = recent[-1] if recent else None
+    # No short payment, but the tenant's own form says the cap took their money: a case of its own, paid to them.
+    # Only for rent PAID IN FULL on trusted bank data (never late, new, doubtful or short), with nobody else talking
+    # to the tenant, and never while an award or its renewal window is live or within CASE_DAYS of a one-off: those
+    # carry on through their own case (reviews, 5 Oct 2026).
+    award_live = award is not None and day <= award + timedelta(days=CASE_DAYS)
+    one_off_recent = one_off_on is not None and (day - one_off_on).days <= CASE_DAYS
+    if case is None and uc and row is not None and row.get("paidFull") and not busy and not unlinked and not no_chase \
+            and not award_live and not one_off_recent:
+        saver = claimant(list(tenancy.get("fld1i5bDoHL3B6rUf") or []), tenants)
+        if saver and _sel(saver["fields"].get(TN["cap"])) == CAPPED and (day - saver["saved"]).days <= FULL_FRESH_DAYS:
+            case = {"case": f"full:{saver['saved'].isoformat()}", "created": saver["saved"], "description": ""}
 
     # A claim that ended without an award (Kevin's Reject, the council's refusal, his stop on the questions, or six
     # asks with no answer) is never followed by another claim until the tenant saves the form again: the first
@@ -430,6 +462,14 @@ def plan(tid, view, row, tenancy, tenants, day, no_chase=False, busy=False, unli
         said = mark_line(newest["notes"], ENDED_MARK) or f"{day.isoformat()} {newest['detail']}"
         stage = f"claim ended ({said[11:]})"
 
+    # A claim that asks for the award to go to the tenant while the rent now arrives short: Kevin is told on the row,
+    # every run, so he sends the card back (or tells the council) rather than paying a tenant who is short.
+    if newest and (mark_line(newest["notes"], PAYEE_MARK) or "").startswith("tenant") and row is not None \
+            and row.get("lane") == "short" and newest["do"] in ("wait", "parked", "done", "sent") \
+            and not has(newest, WITHDRAWN_MARK) and not has(newest, ENDED_MARK):
+        out["problems"].append("a claim asks for the award to go to the tenant, but the rent now arrives short: "
+                               + ("press Request changes on the card" if newest["do"] in ("wait", "parked")
+                                  else "tell the council the rent is short"))
     claim_stage = stage                              # where the claim stands, before anything new is raised
     # 1. RENT CAP: a renewal a month before an award ends, or a Universal Credit tenancy paid short.
     # From a month before the award ends until its case would lapse: a renewal held back (a late-rent chase or a
@@ -503,9 +543,21 @@ def plan(tid, view, row, tenancy, tenants, day, no_chase=False, busy=False, unli
                     prior = said_.split("asked for changes: ", 1)[1].strip().strip('"')
                 m = SHORT_RE.search(case["description"])
                 short = (float(m.group(1).replace(",", "")), float(m.group(2).replace(",", ""))) if m else None
-                out["raise"].append({"kind": "claim", "case": case["case"], "n": (last["n"] + 1) if last else 1,
-                                     "claimant": who, "prior": prior, "short": short})
-                stage = "claim card raised for Kevin"
+                # Who is paid: the tenant for a full payer's case, or the renewal of an award a claim paid to the
+                # tenant (read off that claim card); never while the rent is short, which is always ours.
+                paid_tenant = [c for c in claims if c["case"] == award_case and has(c, SENT_MARK)
+                               and (mark_line(c["notes"], PAYEE_MARK) or "").startswith("tenant")]
+                full = case["case"].startswith("full:") or (renewal and bool(paid_tenant))
+                if full and row.get("lane") == "short":
+                    full = False                     # the rent is short: the top-up is ours
+                if full and not row.get("paidFull"):
+                    # Paid to the tenant only on a rent seen paid in full; on a doubtful day, wait (review, 5 Oct 2026).
+                    stage = "; ".join(x for x in (stage, "claim waits: the rent is not seen paid in full yet") if x)
+                else:
+                    out["raise"].append({"kind": "claim", "case": case["case"], "n": (last["n"] + 1) if last else 1,
+                                         "claimant": who, "prior": prior, "short": short,
+                                         "payee": "tenant" if full else "landlord"})
+                    stage = "claim card raised for Kevin"
     if unlinked:
         # A tenancy left with no unit on purpose (Kevin, 5 Oct 2026): the tenant may have gone without the tenancy
         # being ended, so it is left to stop by itself or be relocated. No new ask goes to it and no new claim is
@@ -571,10 +623,17 @@ def claim_text(item, rec, landlord, place, screen=lambda v: False):
     where = landlord.get("address")
     if isinstance(where, dict):
         where = ", ".join(str(where.get(k)) for k in ("line1", "line2", "town_city", "postcode") if where.get(k))
-    lines += [why,
-              f"WHO GETS THE MONEY: ask for it to be paid to the landlord, {landlord.get('full_name')}, "
-              f"{where}. Their signed letter of authority lets us act for them.", "",
-              "THE ANSWERS, AND WHERE EACH CAME FROM"]
+    if item.get("payee") == "tenant":
+        # Kevin, 5 Oct 2026: a tenant who pays the full rent gets the top-up back themselves.
+        why += " They pay the full rent, so the top-up is paid to them."
+        pay = (f"WHO GETS THE MONEY: ask for it to be paid to {name}, the tenant (Kevin's ruling, 5 Oct 2026: they pay "
+               "the full rent and the cap came off their own money). The council will ask for their bank details, which "
+               "are not on our records: ask them for these, never guess. Their signed letter of authority lets us apply "
+               "for them.")
+    else:
+        pay = (f"WHO GETS THE MONEY: ask for it to be paid to the landlord, {landlord.get('full_name')}, "
+               f"{where}. Their signed letter of authority lets us act for them.")
+    lines += [why, pay, "", "THE ANSWERS, AND WHERE EACH CAME FROM"]
     answers = [
         ("Name", f.get(TN["name"]), "tenant record"),
         ("Date of birth", f.get(TN["dob"]), "tenant record"),
@@ -592,7 +651,8 @@ def claim_text(item, rec, landlord, place, screen=lambda v: False):
         ("Weekly spending", _money(f.get(TN["weeklySpending"])), "their details form"),
         ("Other benefits", " ".join(str(f.get(TN["otherBenefits"]) or "none given").split()), "their details form"),
         ("Rent", f"{_money(rent)} ({str(rec['tenancy'].get('frequency') or 'Monthly').lower()})", "tenancy record"),
-        ("Shortfall", _money(gap) if gap and not item["case"].startswith("renew:") else "see the rent statement",
+        ("Shortfall", "none: the tenant pays the full rent" if item.get("payee") == "tenant"
+         else _money(gap) if gap and not item["case"].startswith("renew:") else "see the rent statement",
          "the daily rent check"),
     ]
     lines += [f"- {q}: {one(a)} ({src})" for q, a, src in answers]
@@ -673,7 +733,8 @@ def raise_card(rc, kind, tid, it, place, tenants, day):
               rc.TK["description"]: (f"Raised by the daily rent check on {day.strftime('%-d %b %Y')}. Kevin's own card: "
                                      "no agent works it.\n\nReference for the rent check, please leave it in:\n"
                                      + CLAIM_KEY_MARK + key),
-              rc.TK["notes"]: CLAIM_KEY_MARK + key + (f"\n{CLAIM_FOR_MARK}{it['claimant']['id']}" if kind == "claim" else ""),
+              rc.TK["notes"]: CLAIM_KEY_MARK + key + (f"\n{CLAIM_FOR_MARK}{it['claimant']['id']}\n{PAYEE_MARK}{it.get('payee', 'landlord')}"
+                                                     if kind == "claim" else ""),
               rc.TK["tenancies"]: [tid], rc.TK["teamMember"]: [rc.AGENT_TEAM_MEMBER]}
     if tenants:
         fields[rc.TK["tenants"]] = tenants
@@ -761,7 +822,11 @@ def run(rc, data, day, res, writes, on, on_plan=frozenset()):
         lanes = res.get("lanes") or {}
         no_chase = set(data.get("noChase") or ())
         shorts = {r["id"] for r in rows.values() if r.get("lane") == "short"}
-        wanted = set(views) | shorts
+        capped = read_capped(rc, day)
+        full = {tid for tid, ty in tys.items() if capped & set(ty.get(rc.TY["tenants"]) or [])}
+        types = {r["id"]: r.get("fields") or {} for r in data.get("tenants") or []}
+        paid_full = set(res.get("paidFull") or ())
+        wanted = set(views) | shorts | full
         tenant_ids = {t for tid in wanted for t in (tys.get(tid, {}).get(rc.TY["tenants"]) or [])}
         tenants = read_tenants(rc, tenant_ids) if tenant_ids else {}
         for tid in sorted(wanted):
@@ -769,11 +834,14 @@ def run(rc, data, day, res, writes, on, on_plan=frozenset()):
             row = rows.get(tid) if tid in lanes else None
             if row is None and tid in lanes:
                 row = {"lane": lanes[tid]}           # a green tenancy carries no row of its own
+            if row is not None:
+                row = dict(row, paidFull=tid in paid_full)
             unit = rc.first(ty.get(rc.TY["unitRef"])) or "(no unit linked)"
             place = rc.lane_b_rules.place_name(unit)
             p = plan(tid, views.get(tid, {}), row, ty, tenants, day,
                      no_chase=bool(no_chase & set(ty.get(rc.TY["tenants"]) or [])), busy=tid in busy,
-                     unlinked=not rc.first(ty.get(rc.TY["unitRef"])))
+                     unlinked=not rc.first(ty.get(rc.TY["unitRef"])),
+                     uc=rc.tenant_type(ty, types) == "Universal Credit")
             out["problems"] += [f"{place}: {x}" for x in p["problems"]]
             if p["stage"]:
                 out["stages"].append(f"{place}: {p['stage']}")

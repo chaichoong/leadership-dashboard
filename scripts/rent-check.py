@@ -510,6 +510,7 @@ def judge(rec, tenants, payments, day, feed, pre_slate, late_before):
     if status in (CFV, CFV_ACTIONED):
         word = "cash flow void actioned" if status == CFV_ACTIONED else "cash flow void"
         if judged and got is None:
+            # Never "paid in full" for lane C while the tenancy is still marked a cash flow void (review, 5 Oct 2026).
             return dict(row, light="green", lane="fine", paying=True, listed=True,
                         note=f"paid in full ({last}), still marked {word}")
         light = "amber" if status == CFV_ACTIONED else "red"
@@ -543,7 +544,8 @@ def judge(rec, tenants, payments, day, feed, pre_slate, late_before):
         # The cycle rides on the row: lane C raises one benefit-cap task per short cycle (scripts/rent_cap.py).
         return dict(row, light="amber", lane="short", paying=True, got=got, cycle=cycle.isoformat(),
                     note=f"paid short: {part}, {last}")
-    return dict(row, light="green", lane="fine", paying=True,
+    # Paid in full is said only of a rent cycle weighed on a trusted feed (lane C's full-payer claim reads it).
+    return dict(row, light="green", lane="fine", paying=True, full=bool(judged and got is None and trusted),
                 note=last if newest else f"first rent due {owed.strftime('%-d %b')}")
 
 
@@ -589,9 +591,11 @@ def assess(data, day, now):
            "markedInPayment": sum(1 for r in rows if r["status"] == IN_PAYMENT), "counts": counts,
            "bankBlocked": any(r.get("bank") for r in rows),
            "feed": {"asAt": feed["asAt"], "feeds": feed["feeds"], "waiting": len(feed["waiting"]), "blocked": feed["blocked"]},
-           "tenancies": [{k: v for k, v in r.items() if k not in ("fresh", "bank", "listed", "paying")}
+           "tenancies": [{k: v for k, v in r.items() if k not in ("fresh", "bank", "listed", "paying", "full")}
                          for r in rows if r["light"] != "green" or r.get("listed")],
-           "lights": {r["id"]: r["light"] for r in rows}, "lanes": {r["id"]: r["lane"] for r in rows}}
+           "lights": {r["id"]: r["light"] for r in rows}, "lanes": {r["id"]: r["lane"] for r in rows},
+           # Tenancies whose last rent cycle was paid in full on trusted bank data (scripts/rent_cap.py).
+           "paidFull": sorted(r["id"] for r in rows if r.get("full"))}
     res["briefLine"] = brief_line(res)
     return res
 
@@ -967,7 +971,7 @@ def main(argv=None):
     failed = (res["tasks"]["failed"] or res["setup"]["failed"] or res["agentLate"]["failed"] or res["plans"]["failed"]
               or res["cap"]["failed"])
     if writes:
-        public = {k: v for k, v in res.items() if k not in ("lights", "lanes")}
+        public = {k: v for k, v in res.items() if k not in ("lights", "lanes", "paidFull")}
         # Blocked only when the bank data hid a verdict: a stale feed with every rent already seen hides nothing.
         status = "Failed" if failed else ("Blocked" if res["bankBlocked"] or res["plans"].get("stuck") else "Worked")
         write_row(status, "\n".join([detail(res), lane_a_line(res["tasks"]), lane_b_rules.lane_b_line(res["setup"]),

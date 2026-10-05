@@ -55,10 +55,12 @@ def decision(n=1, case=CYCLE, status="Approval", outcome="", feedback="", approv
                 "RENT CLAIM KEY: decision:%s:%s:%d\\n%s%s" % (TEN, case, n, SUBMITTED, notes_extra), status, outcome, feedback, approved, created)
 class Fake:
     T_TASKS, T_TENANTS = "tblqB8b22hKBL4PF1", "tblX4elTuu01gwBYh"
-    def __init__(self, caps=(), cards=(), tenants=None, late=()):
-        self.caps, self.cards, self.tenants, self.late = list(caps), list(cards), tenants or {}, list(late)
+    def __init__(self, caps=(), cards=(), tenants=None, late=(), capped=()):
+        self.caps, self.cards, self.tenants, self.late, self.capped = list(caps), list(cards), tenants or {}, list(late), list(capped)
     def fetch_all(self, table, params):
         f = params.get("filterByFormula", "")
+        if table == self.T_TENANTS and "Benefit Cap Exemption" in f:
+            return [{"id": k, "fields": {}} for k in self.capped]
         if table == self.T_TENANTS:
             return [{"id": k, "fields": v} for k, v in self.tenants.items() if k in f]
         if "RENT LATE" in f:
@@ -333,7 +335,8 @@ new_save = plan(caps=[cap_task(), rcap], cards=[sent, d2], day=date(2027, 3, 3),
                 tenant=dict(GOOD, **{TN["saved"]: "2027-03-02T08:00:00.000Z"}))
 item = cap.cap_item(rc, TEN, renew["raise"][0], "Unit 9", [], date(2027, 3, 1))
 print(json.dumps({"now": [acts(now), kinds(now), now["stage"]], "before": kinds(before), "renew": kinds(renew), "name": item["name"],
-                  "oldSave": [kinds(old_save), old_save["stage"]], "newSave": kinds(new_save)}, default=str))`);
+                  "oldSave": [kinds(old_save), old_save["stage"]], "newSave": kinds(new_save),
+                  "newSavePayee": new_save["raise"][0]["payee"] if new_save["raise"] else None}, default=str))`);
     expect(r.now).toEqual([[['recDECISION000001', 'award']], [], 'award until 31 Mar 2027']);
     expect(r.before).toEqual([]);
     expect(r.renew).toEqual([['cap', 'renew:2027-03-31', null]]);
@@ -343,6 +346,8 @@ print(json.dumps({"now": [acts(now), kinds(now), now["stage"]], "before": kinds(
     // Saved two weeks before the renewal began: a short case would take it, a renewal does not.
     expect(r.oldSave[1]).toMatch(/^award until 31 Mar 2027; claim not raised yet: the details form was last saved 15 Feb, before this case$/);
     expect(r.newSave).toEqual([['claim', 'renew:2027-03-31', 1]]);
+    // The award came from a short payer's claim (no tenant payee on its card): its renewal is paid to us too.
+    expect(r.newSavePayee).toBe('landlord');
   });
 
   it('no answer yet asks again two weeks on; a note it cannot read asks the next day; six asks then it stops and says so', () => {
@@ -418,9 +423,9 @@ describe('the run: what it writes, and the cards Kevin sees', () => {
 class RC:
     T_TASKS, T_TENANTS, T_TENANCIES = "tblqB8b22hKBL4PF1", "tblX4elTuu01gwBYh", "tblN51a88qTDB6iMH"
     TK, TY, AGENT_TEAM_MEMBER = rc.TK, rc.TY, rc.AGENT_TEAM_MEMBER
-    first, lane_b_rules = staticmethod(rc.first), rc.lane_b_rules
-    def __init__(self, caps=(), cards=(), tenants=None, late=()):
-        self.fake = Fake(caps, cards, tenants or {TENANT: dict(GOOD)}, late)
+    first, lane_b_rules, tenant_type = staticmethod(rc.first), rc.lane_b_rules, staticmethod(rc.tenant_type)
+    def __init__(self, caps=(), cards=(), tenants=None, late=(), capped=()):
+        self.fake = Fake(caps, cards, tenants or {TENANT: dict(GOOD)}, late, capped)
         self.raised, self.posts, self.patches, self.reads = [], [], [], []
         self.store = {r["id"]: dict(r["fields"]) for r in list(caps) + list(cards)}
     def fetch_all(self, table, params):
@@ -495,7 +500,7 @@ print(json.dumps({"claims": out["claims"], "name": post[rc.TK["name"]], "owner":
     expect(r.name).toBe('RENT CLAIM: Unit 9 – 4 Example Road, council housing payment');
     expect(r.owner).toEqual(['rec7aHLK1Q8fMLRXH']);
     // The claimant rides on the card, so the question about the council's answer names the right tenant.
-    expect(r.notes).toBe('RENT CLAIM KEY: claim:recTENANCYCAP0001:2026-09-23:1\nRENT CLAIM FOR: recTENANTCAP00001');
+    expect(r.notes).toBe('RENT CLAIM KEY: claim:recTENANCYCAP0001:2026-09-23:1\nRENT CLAIM FOR: recTENANTCAP00001\nRENT CLAIM PAYEE: landlord');
     expect(r.desc).toContain('RENT CLAIM KEY: claim:recTENANCYCAP0001:2026-09-23:1');
     expect(r.submit).toEqual(['rec7aHLK1Q8fMLRXH', 'Admin']);
     // The card's words name the tenant: its file is the owner's alone, and gone once submitted.
@@ -802,6 +807,138 @@ print(json.dumps({"ask": [kinds(ask), ask["stage"]], "again": kinds(again), "ren
     expect(r.ask).toEqual([[['decision', '2026-09-23', 1]], "asking Kevin for the council's answer; left unlinked on purpose, so no new benefit-cap task or claim"]);
     expect(r.again).toEqual([['decision', '2026-09-23', 2]]);
     expect(r.renew).toEqual([[], 'award until 31 Mar 2027; left unlinked on purpose, so no new benefit-cap task or claim']);
+  });
+
+  it('Kevin, 5 Oct 2026: a capped tenant who pays in full gets a claim from their own form, with the award paid to them', () => {
+    const r = py(RUN + `
+fine = {"id": TEN, "lane": "fine", "paidFull": True}
+day = date(2026, 10, 6)
+p = cap.plan(TEN, view(), fine, TENANCY, {TENANT: GOOD}, day, uc=True)
+others = {
+  "notUC": cap.plan(TEN, view(), fine, TENANCY, {TENANT: GOOD}, day),
+  "notCapped": cap.plan(TEN, view(), fine, TENANCY, {TENANT: dict(GOOD, **{TN["cap"]: {"name": "PIP or DLA"}})}, day, uc=True),
+  "stale": cap.plan(TEN, view(), fine, TENANCY, {TENANT: dict(GOOD, **{TN["saved"]: "2026-07-01T08:00:00.000Z"})}, day, uc=True),
+  "unlinked": cap.plan(TEN, view(), fine, TENANCY, {TENANT: GOOD}, day, uc=True, unlinked=True),
+  "noChase": cap.plan(TEN, view(), fine, TENANCY, {TENANT: GOOD}, day, uc=True, no_chase=True),
+  "noAuthority": cap.plan(TEN, view(), fine, TENANCY, {TENANT: dict(GOOD, **{TN["authority"]: False})}, day, uc=True),
+}
+short_case = plan(caps=[cap_task()], row={"id": TEN, "lane": "fine"})
+live = RC(capped=[TENANT])
+data = {"tenancies": TYS, "noChase": [], "tenants": [{"id": TENANT, "fields": {rc.TN["payType"]: {"name": "Universal Credit"}}}]}
+out = cap.run(live, data, day, {"tenancies": [], "lanes": {TEN: "fine"}, "paidFull": [TEN]}, True, True)
+text = SUBMITS[0]["text"] if SUBMITS else ""
+print(json.dumps({"raise": kinds(p), "payee": p["raise"][0]["payee"], "others": {k: kinds(v) for k, v in others.items()},
+                  "authorityStage": others["noAuthority"]["stage"], "shortPayee": short_case["raise"][0]["payee"],
+                  "claims": out["claims"], "failed": out["failed"], "key": live.posts[0][rc.TK["notes"]].splitlines()[0] if live.posts else "",
+                  "payeeLine": live.posts[0][rc.TK["notes"]].splitlines()[-1] if live.posts else "",
+                  "lines": [l for l in text.splitlines() if l.startswith(("WHY", "WHO GETS", "- Shortfall"))]}))`);
+    expect(r.raise).toEqual([['claim', 'full:2026-09-28', 1]]);
+    expect(r.payee).toBe('tenant');
+    expect(r.others).toEqual({ notUC: [], notCapped: [], stale: [], unlinked: [], noChase: [], noAuthority: [] });
+    expect(r.authorityStage).toBe('claim not raised yet: the letter of authority is not ticked as signed');
+    // A short payer's claim still asks for the award to come to us.
+    expect(r.shortPayee).toBe('landlord');
+    // The daily run finds the capped tenant with no short payment, and the card pays the tenant.
+    expect([r.claims, r.failed]).toEqual([['Unit 9 – 4 Example Road (claim 1)'], '']);
+    expect(r.key).toBe('RENT CLAIM KEY: claim:recTENANCYCAP0001:full:2026-09-28:1');
+    expect(r.payeeLine).toBe('RENT CLAIM PAYEE: tenant');
+    expect(r.lines[0]).toBe('WHY: Sam Example is on Universal Credit and the benefit cap cuts their housing money. They pay the full rent, so the top-up is paid to them.');
+    expect(r.lines[1]).toMatch(/^WHO GETS THE MONEY: ask for it to be paid to Sam Example, the tenant \(Kevin's ruling, 5 Oct 2026/);
+    expect(r.lines[1]).toMatch(/bank details, which are not on our records: ask them for these, never guess/);
+    expect(r.lines[2]).toBe('- Shortfall: none: the tenant pays the full rent (the daily rent check)');
+  });
+
+  it('Kevin, 5 Oct 2026: the full payer\'s award is renewed to the tenant too, and a sent claim is not raised again', () => {
+    const r = py(`
+FULL = "full:2026-09-28"
+sent = claim(case=FULL, status="Completed", notes_extra="\\nRENT CLAIM PAYEE: tenant\\nRENT CLAIM SENT: 2026-10-02 x")
+d2 = decision(case=FULL, status="Completed", outcome="Approved as-is", notes_extra="\\nRENT CLAIM AWARD: 2027-03-31 (read)")
+fine = {"id": TEN, "lane": "fine", "paidFull": True}
+waiting = cap.plan(TEN, view([], [sent]), fine, TENANCY, {TENANT: GOOD}, date(2026, 10, 10), uc=True)
+renew = cap.plan(TEN, view([], [sent, d2]), fine, TENANCY, {TENANT: GOOD}, date(2027, 3, 1), uc=True)
+rcap = cap_task(case="renew:2027-03-31", created="2027-03-01T09:00:00.000Z", i="recCAPTASK0000003")
+again = cap.plan(TEN, view([rcap], [sent, d2]), fine, TENANCY, {TENANT: dict(GOOD, **{TN["saved"]: "2027-03-02T08:00:00.000Z"})},
+                 date(2027, 3, 3), uc=True)
+print(json.dumps({"waiting": [kinds(waiting), waiting["stage"]], "renew": kinds(renew), "again": kinds(again),
+                  "payee": again["raise"][0]["payee"] if again["raise"] else None}))`);
+    expect(r.waiting[0]).toEqual([]);
+    expect(r.waiting[1]).toMatch(/^claim sent 2 Oct/);
+    expect(r.renew).toEqual([['cap', 'renew:2027-03-31', null]]);
+    expect(r.again).toEqual([['claim', 'renew:2027-03-31', 1]]);
+    expect(r.payee).toBe('tenant');
+  });
+
+  it('review, 5 Oct 2026: only rent paid in full on trusted bank data, with nobody chasing, starts a full payer\'s claim', () => {
+    const r = py(`
+day = date(2026, 10, 6)
+def k(row, **kw): return kinds(cap.plan(TEN, view(), row, TENANCY, {TENANT: GOOD}, day, uc=True, **kw))
+print(json.dumps({"full": k({"id": TEN, "lane": "fine", "paidFull": True}),
+                  "fineDoubtful": k({"id": TEN, "lane": "fine"}), "late": k({"id": TEN, "lane": "late"}), "new": k({"id": TEN, "lane": "new"}),
+                  "unknown": k({"id": TEN, "lane": "unknown"}), "existing": k({"id": TEN, "lane": "existing"}),
+                  "busy": k({"id": TEN, "lane": "fine", "paidFull": True}, busy=True),
+                  "saved60": kinds(cap.plan(TEN, view(), {"id": TEN, "lane": "fine", "paidFull": True}, TENANCY,
+                                            {TENANT: dict(GOOD, **{TN["saved"]: "2026-08-07T08:00:00.000Z"})}, day, uc=True)),
+                  "saved61": kinds(cap.plan(TEN, view(), {"id": TEN, "lane": "fine", "paidFull": True}, TENANCY,
+                                            {TENANT: dict(GOOD, **{TN["saved"]: "2026-08-06T08:00:00.000Z"})}, day, uc=True))}))`);
+    expect(r.full).toEqual([['claim', 'full:2026-09-28', 1]]);
+    for (const k of ['fineDoubtful', 'late', 'new', 'unknown', 'existing', 'busy']) expect(r[k], k).toEqual([]);
+    expect(r.saved60).toEqual([['claim', 'full:2026-08-07', 1]]);
+    expect(r.saved61).toEqual([]);
+  });
+
+  it('review, 5 Oct 2026: the payee holds through every renewal, turns to us when the rent is short, and no twin case starts', () => {
+    const r = py(`
+FULL = "full:2026-09-28"
+full = {"id": TEN, "lane": "fine", "paidFull": True}
+c1 = claim(case=FULL, status="Completed", notes_extra="\\nRENT CLAIM PAYEE: tenant\\nRENT CLAIM SENT: 2026-10-02 x")
+d1 = decision(case=FULL, status="Completed", outcome="Approved as-is", notes_extra="\\nRENT CLAIM AWARD: 2027-03-31 (read)")
+cap1 = cap_task(case="renew:2027-03-31", created="2027-03-01T09:00:00.000Z", i="recCAPTASK0000003")
+c2 = claim(n=1, case="renew:2027-03-31", status="Completed", created="2027-03-05T09:00:00.000Z", i="recCLAIMRENEW0001",
+           notes_extra="\\nRENT CLAIM PAYEE: tenant\\nRENT CLAIM SENT: 2027-03-06 x")
+d2 = decision(n=1, case="renew:2027-03-31", status="Completed", outcome="Approved as-is", created="2027-03-28T09:00:00.000Z",
+              notes_extra="\\nRENT CLAIM AWARD: 2027-09-30 (read)")
+d2["id"] = "recDECISIONRENEW1"
+cap2 = cap_task(case="renew:2027-09-30", created="2027-09-01T09:00:00.000Z", i="recCAPTASK0000004")
+saved = {TENANT: dict(GOOD, **{TN["saved"]: "2027-09-02T08:00:00.000Z"})}
+second = cap.plan(TEN, view([cap1, cap2], [c1, d1, c2, d2]), full, TENANCY, saved, date(2027, 9, 3), uc=True)
+short_now = cap.plan(TEN, view([cap1, cap2], [c1, d1, c2, d2]), dict(SHORT, cycle="2027-08-23"), TENANCY, saved, date(2027, 9, 3), uc=True)
+in_award = cap.plan(TEN, view([], [c1, d1]), full, TENANCY, {TENANT: dict(GOOD, **{TN["saved"]: "2027-03-10T08:00:00.000Z"})},
+                    date(2027, 3, 12), uc=True, busy=True)
+oneoff = decision(case=FULL, status="Completed", outcome="Approved as-is", approved="2026-10-07T09:00:00.000Z",
+                  notes_extra="\\nRENT CLAIM AWARD: ONE-OFF (read)")
+resaved = cap.plan(TEN, view([], [c1, oneoff]), full, TENANCY, {TENANT: dict(GOOD, **{TN["saved"]: "2026-10-08T08:00:00.000Z"})},
+                   date(2026, 10, 9), uc=True)
+print(json.dumps({"second": [kinds(second), second["raise"][0]["payee"] if second["raise"] else None],
+                  "shortNow": [x["payee"] for x in short_now["raise"] if x["kind"] == "claim"],
+                  "inAward": kinds(in_award), "oneOff": kinds(resaved)}))`);
+    expect(r.second).toEqual([[['claim', 'renew:2027-09-30', 1]], 'tenant']);
+    expect(r.shortNow).toEqual(['landlord']);
+    expect(r.inAward).toEqual([]);
+    expect(r.oneOff).toEqual([]);
+  });
+
+  it('second review, 5 Oct 2026: a tenant-paid renewal waits unless the rent is seen paid in full; a tenant-paid card is flagged when the rent turns short', () => {
+    const r = py(`
+FULL = "full:2026-09-28"
+c1 = claim(case=FULL, status="Completed", notes_extra="\\nRENT CLAIM PAYEE: tenant\\nRENT CLAIM SENT: 2026-10-02 x")
+d1 = decision(case=FULL, status="Completed", outcome="Approved as-is", notes_extra="\\nRENT CLAIM AWARD: 2027-03-31 (read)")
+cap1 = cap_task(case="renew:2027-03-31", created="2027-03-01T09:00:00.000Z", i="recCAPTASK0000003")
+saved = {TENANT: dict(GOOD, **{TN["saved"]: "2027-03-02T08:00:00.000Z"})}
+def renew(row, **kw): return cap.plan(TEN, view([cap1], [c1, d1]), row, TENANCY, saved, date(2027, 3, 3), uc=True, **kw)
+late, unknown, doubtful = renew({"id": TEN, "lane": "late"}), renew({"id": TEN, "lane": "unknown"}), renew({"id": TEN, "lane": "fine"})
+waiting = claim(case=FULL, notes_extra="\\nRENT CLAIM PAYEE: tenant")
+flag = cap.plan(TEN, view([], [waiting]), dict(SHORT, cycle="2026-10-23"), TENANCY, {TENANT: GOOD}, date(2026, 10, 26), uc=True)
+sent_flag = cap.plan(TEN, view([], [c1]), dict(SHORT, cycle="2026-10-23"), TENANCY, {TENANT: GOOD}, date(2026, 10, 26), uc=True)
+ours = cap.plan(TEN, view([], [claim(notes_extra="\\nRENT CLAIM PAYEE: landlord")]), dict(SHORT, cycle="2026-10-23"), TENANCY, {TENANT: GOOD},
+                date(2026, 10, 26))
+print(json.dumps({"late": [kinds(late), late["stage"]], "unknown": kinds(unknown), "doubtful": kinds(doubtful),
+                  "flag": flag["problems"], "sentFlag": sent_flag["problems"], "ours": ours["problems"]}))`);
+    expect(r.late[0]).toEqual([]);
+    expect(r.late[1]).toMatch(/claim waits: the rent is not seen paid in full yet$/);
+    expect([r.unknown, r.doubtful]).toEqual([[], []]);
+    expect(r.flag).toEqual(['a claim asks for the award to go to the tenant, but the rent now arrives short: press Request changes on the card']);
+    expect(r.sentFlag).toEqual(['a claim asks for the award to go to the tenant, but the rent now arrives short: tell the council the rent is short']);
+    expect(r.ours).toEqual([]);
   });
 
   it('a postcode with no form on file says so instead of guessing', () => {
