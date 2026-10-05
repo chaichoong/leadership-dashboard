@@ -33,7 +33,7 @@
 
 import { describe, it, expect, afterAll } from 'vitest';
 import { spawnSync, execFileSync } from 'node:child_process';
-import { mkdtempSync, mkdirSync, rmSync, writeFileSync, readFileSync, existsSync, chmodSync, realpathSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, rmSync, writeFileSync, readFileSync, existsSync, chmodSync, realpathSync, symlinkSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -722,6 +722,13 @@ class FakeFixer:
             shutil.rmtree(path, ignore_errors=True)
             git("worktree", "prune")
 
+    def tests_cannot_run(self, tree):
+        # The REAL check, run on the fixture tree: whether its node_modules
+        # can start vitest and Playwright is exactly what is under test.
+        return real_fm.tests_cannot_run(tree)
+
+real_fm = mp.fixer()
+real_fm.REPO = cfg["repo"]
 mp._FM = FakeFixer()
 mp.REPO = cfg["repo"]
 for k, v in (cfg.get("patch") or {}).items():
@@ -772,7 +779,7 @@ function flow({ view = OPEN, suites = {}, affected = { out: { scope: 'some', pag
                 local = null, local2 = null, live = null, argv = ['--pr', '5'], mergeConfirms = true, mergeExit = 0,
                 ff = false, moveMain = null, build = null, suitesCrash = false, interruptServerPoll = false,
                 patch = null, pullRef = false, headIsReal = false, env = {}, prMessage = null, viewLate = null,
-                mainMergedIn = false, mainMovesAgain = false } = {}) {
+                mainMergedIn = false, mainMovesAgain = false, nodeModules = 'usable' } = {}) {
   const bin = stubs(view, { mergeConfirms, mergeExit, suites });
   const home = tmp('merge-pr-home-');
   const g = gitFixture({ ff, pullRef, prMessage, mainMergedIn, mainMovesAgain });
@@ -780,6 +787,20 @@ function flow({ view = OPEN, suites = {}, affected = { out: { scope: 'some', pag
   // What gh says on the second and later reads (the re-read just before merging).
   if (viewLate != null) writeFileSync(join(bin.dir, 'view-late.json'), typeof viewLate === 'string' ? viewLate : JSON.stringify(viewLate));
   const tree = g.tree;
+  // What build_merge_result links in: a node_modules holding both runners.
+  // 'dangling' is the 5 Oct 2026 tree (a link to a session worktree's
+  // node_modules that does not exist); 'empty' is a node_modules without them.
+  if (nodeModules === 'usable' || nodeModules === 'empty') {
+    mkdirSync(join(tree, 'node_modules'));
+    writeFileSync(join(tree, 'node_modules', '.package-lock.json'), '{}\n');
+  }
+  if (nodeModules === 'usable') {
+    for (const p of ['vitest', '@playwright/test']) {
+      mkdirSync(join(tree, 'node_modules', p), { recursive: true });
+      writeFileSync(join(tree, 'node_modules', p, 'package.json'), JSON.stringify({ name: p }));
+    }
+  }
+  if (nodeModules === 'dangling') symlinkSync(join(g.root, 'session-worktree', 'node_modules'), join(tree, 'node_modules'));
   mkdirSync(join(tree, 'scripts'), { recursive: true });
   writeFileSync(join(tree, 'scripts/prod-walk.js'), FAKE_WALK);
   writeFileSync(join(tree, 'scripts/affected-pages.py'), FAKE_AFFECTED);
@@ -885,6 +906,32 @@ describe('merge-pr.py end to end (fakes, real git, no network)', { timeout: 60_0
     expect(r.destroyed).toEqual([r.g.tree]);
     expect(r.log[3]).toBe('REFUSED');
   });
+
+  // 5 Oct 2026, PR #709: started from a session worktree with no node_modules,
+  // the merge tree's link dangled, vitest died before one test ran, and the
+  // gate said "the test gate is RED". A gate that never ran its tests is not a
+  // red gate, and must never read like one.
+  for (const [state, reason] of [
+    ['dangling', /node_modules links to .*\/session-worktree\/node_modules, which does not exist/],
+    ['empty', /node_modules has no vitest and no @playwright\/test/],
+  ]) {
+    it(`a merge tree whose node_modules cannot start vitest (${state}): "tests could not run", never RED, nothing run or merged`, () => {
+      for (const argv of [['--pr', '5'], ['--pr', '5', '--dry-run']]) {
+        const r = flow({ affected: NONE, nodeModules: state, argv });
+        expect(r.code, argv.join(' ')).toBe(1);
+        expect(r.result.merged).toBe(false);
+        expect(r.result.why).toMatch(/^tests could not run: /);
+        expect(r.result.why).toMatch(reason);
+        expect(r.result.why).not.toMatch(/RED/);
+        expect(r.result.testsRan).toBe(false);
+        expect(r.npx, 'a suite was started in a tree that cannot run it').toEqual([]);
+        expect(r.gh).not.toMatch(/pr merge/);
+        expect(r.destroyed).toEqual([r.g.tree]);
+        expect(r.log[3]).toBe('NOT-RUN');
+        expect(r.log[4]).toMatch(/^tests could not run: /);
+      }
+    });
+  }
 
   it('reads base, head and files from the tree; merges the TESTED head; deletes only the remote branch', () => {
     const r = flow({ affected: NONE });

@@ -130,6 +130,77 @@ def _git(args, cwd=None):
     return sh(["git"] + args, cwd=cwd)
 
 
+# ─── WHERE THE MERGE TREE'S node_modules COMES FROM ──────────────────
+#
+# Regression origin: 5 Oct 2026, PR #709. merge-pr.py was started from a
+# session worktree (.claude/worktrees/texts-clicksend) that the desktop app
+# made, not worktree.sh, so it had no node_modules. The merge tree's link
+# pointed at REPO/node_modules, REPO being whichever checkout the script was
+# started from, and nothing checked the target existed. The link dangled, npx
+# fetched a throwaway vitest, vitest.config.js could not resolve
+# 'vitest/config', and vitest died in 11 seconds before one test ran. The gate
+# then said "RED". The same PR merged green from the main checkout minutes
+# later.
+#
+# So the link now goes to the MAIN checkout's node_modules first (the parent
+# of git's common dir, which every worktree shares), the invoking checkout's
+# only as a fallback, and only to one that really holds both runners. When
+# none does, the tree gets no link and tests_cannot_run() says why: a gate
+# that never ran its tests must not read like a failed test.
+
+RUNNERS = ("vitest", "@playwright/test")  # what the two suites start
+
+
+def node_modules_problem(checkout):
+    """None when <checkout>/node_modules holds both runners, else why not."""
+    nm = os.path.join(checkout, "node_modules")
+    if os.path.islink(nm) and not os.path.exists(nm):
+        return "%s links to %s, which does not exist" % (nm, os.readlink(nm))
+    if not os.path.isdir(nm):
+        return "%s does not exist" % nm
+    missing = [p for p in RUNNERS
+               if not os.path.isfile(os.path.join(nm, p, "package.json"))]
+    if missing:
+        return "%s has no %s" % (nm, " and no ".join(missing))
+    return None
+
+
+def primary_checkout():
+    """The repo's main working tree: the parent of git's common dir, which
+    every worktree shares. None when git cannot say."""
+    r = _git(["rev-parse", "--path-format=absolute", "--git-common-dir"])
+    common = (r.stdout or "").strip()
+    if r.returncode != 0 or not common:
+        return None
+    return os.path.dirname(os.path.normpath(common))
+
+
+def node_modules_source():
+    """(node_modules dir, None) from the first checkout that can run both
+    suites, the main checkout first, then the invoking one. (None, why) when
+    neither can."""
+    seen, why = set(), []
+    for checkout in (primary_checkout(), REPO):
+        if not checkout or os.path.realpath(checkout) in seen:
+            continue
+        seen.add(os.path.realpath(checkout))
+        problem = node_modules_problem(checkout)
+        if problem is None:
+            return os.path.realpath(os.path.join(checkout, "node_modules")), None
+        why.append(problem)
+    return None, "no usable node_modules: " + "; ".join(why)
+
+
+def tests_cannot_run(tree):
+    """None when both suites can start in this merge tree, else the plain
+    reason they cannot. Asked before any suite runs."""
+    problem = node_modules_problem(tree)
+    if problem is None:
+        return None
+    _, why = node_modules_source()
+    return "%s (%s)" % (problem, why) if why else problem
+
+
 def build_merge_result(pr, base="origin/main"):
     """The tree that would be on main if this PR merged. (path, error)."""
     _git(["fetch", "origin", "main", "--quiet"])
@@ -153,14 +224,18 @@ def build_merge_result(pr, base="origin/main"):
 
     # A fresh worktree has no node_modules and both suites need them. Link
     # rather than install: 90 seconds of npm ci per gate run is how a gate
-    # becomes something people skip.
+    # becomes something people skip. Link only one that can run them (see
+    # node_modules_source); with none, link nothing and let the gate's
+    # tests_cannot_run() report why.
     link = os.path.join(path, "node_modules")
-    if not os.path.exists(link):
-        try:
-            os.symlink(os.path.join(REPO, "node_modules"), link)
-        except OSError as e:
-            destroy_merge_result(path)
-            return None, "cannot link node_modules: %s" % e
+    if not os.path.lexists(link):
+        src, _ = node_modules_source()
+        if src:
+            try:
+                os.symlink(src, link)
+            except OSError as e:
+                destroy_merge_result(path)
+                return None, "cannot link node_modules: %s" % e
     return path, None
 
 
@@ -222,9 +297,20 @@ def cmd_merge(args):
                                  "left open, nothing merged"}, indent=2))
         return 0
     try:
-        ok, gate = run_gate(tree)
+        cannot = tests_cannot_run(tree)
+        if cannot:
+            ok, gate = False, {"testedTree": tree, "testsRan": False}
+        else:
+            ok, gate = run_gate(tree)
     finally:
         destroy_merge_result(tree)
+    if cannot:
+        # Not a red gate: no test ran. Saying RED here is how a broken
+        # workspace gets mistaken for a broken PR (5 Oct 2026, PR #709).
+        print(json.dumps({**d, "merged": False, "gate": gate,
+                          "why": "tests could not run: %s. Left open, nothing merged"
+                                 % cannot}, indent=2))
+        return 0
     if not ok:
         print(json.dumps({**d, "merged": False, "gate": gate,
                           "why": "the gate is RED — left open, nothing merged"},
