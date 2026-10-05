@@ -29,6 +29,7 @@ const ESTATE_SCRIPTS = [
   'scripts/rent_plans.py',
   'scripts/rent_cap.py',
   'scripts/text_check.py',
+  'scripts/rent_form_chase.py',
   'scripts/tenant-link.py',
   'scripts/built_inventory.py',
   'scripts/sync-master-plan.py',

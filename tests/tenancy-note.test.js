@@ -124,6 +124,12 @@ describe('send-email.py notes the tenancy after a rent card goes', () => {
     expect(r.out.tenancyNoteProblem).toBeNull();
   });
 
+  it('a late agent-managed rent card says it emailed the letting agent, never the tenant (Kevin, 5 Oct 2026)', () => {
+    const r = send({ name: 'AGENT RENT LATE: Unit 9 – 1 Example Road, rent due 30 Sep' });
+    expect(r.comments).toHaveLength(1);
+    expect(r.comments[0][1]).toMatch(/: Agile Lets emailed the letting agent \(sam@example\.com\): "Your rent at 1 Example Road"/);
+  });
+
   it('any other card notes nothing; a rent card naming no tenancy, or a failed comment, is said and the email still stands', () => {
     const other = send({ name: 'INBOUND: council letter', notes: '', holders: ['recOtherAgent0001'] });
     expect([other.sent, other.comments, other.out.tenancyNoted, other.out.tenancyNoteProblem]).toEqual([['sam@example.com'], [], [], null]);

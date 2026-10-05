@@ -199,7 +199,7 @@ def strip_track_record(text):
 # Who may send a text at all (review, 4 Oct 2026): only the rent lanes' own tenant cards, known by
 # their name or their key line (TRIAL_TASK_MARKS below). Any other card's TEXT lines are never sent.
 # RENT CAP (lane C, 5 Oct 2026): the benefit-cap email to a tenant is the lane's own tenant card too.
-TEXT_CARD_MARKS = {"prefix": ("RENT LATE: ", "RENT ASK: ", "RENT PLAN: ", "RENT CAP: "), "note": "RENT CHECK KEY: "}
+TEXT_CARD_MARKS = {"prefix": ("RENT LATE: ", "RENT ASK: ", "RENT PLAN: ", "RENT CAP: ", "RENT DETAILS: "), "note": "RENT CHECK KEY: "}
 
 
 def parse_plan(output):
@@ -556,8 +556,10 @@ TRIAL_STAMP = "TRIAL CHECKED"
 # (tests/cash-flow-voids-agent.test.js, tests/rent-new-tenant.test.js).
 TRIAL_TASK_MARKS = {
     # RENT PLAN (4 Oct 2026): a payment plan card is the lane's own tenant card too. So is RENT CAP
-    # (lane C, 5 Oct 2026): the email asking a capped tenant for his details (scripts/rent_cap.py).
-    "rec7aHLK1Q8fMLRXH": {"prefix": ("RENT LATE: ", "RENT ASK: ", "RENT PLAN: ", "RENT CAP: "), "note": "RENT CHECK KEY: "},
+    # (lane C, 5 Oct 2026): the email asking a capped tenant for his details (scripts/rent_cap.py). So is RENT DETAILS
+    # (5 Oct 2026): a reminder to fill in the details form (scripts/rent_form_chase.py). Never "RENT FORM: ":
+    # that prefix is the robot's direct rent payment form card (ROBOT FORM CARD below), which opens its window.
+    "rec7aHLK1Q8fMLRXH": {"prefix": ("RENT LATE: ", "RENT ASK: ", "RENT PLAN: ", "RENT CAP: ", "RENT DETAILS: "), "note": "RENT CHECK KEY: "},
 }
 # A ROBOT FORM CARD (Cash Flow Voids lane B, 3 Oct 2026; Kevin's ruling "Robot fills, you pick
 # reason"). The rent check raises the direct rent payment form card. Approving it opens ONE door:
