@@ -543,10 +543,7 @@ def rule_send_problem(rule, mail, task, require_stamp=True):
 # handing it to a carry-out run. Ending a trial is MOVING the entry to TRIAL_ENDED
 # below, in a PR Kevin approves: the cut-over is a decision, never a side effect.
 TRIAL_AGENTS = {
-    # Cash Flow Voids (register row reclaAzGLA4utssxx): late-rent drafts to tenants.
-    # Kevin approved lane A in trial mode on 2 Oct 2026; cut-over target 24 Nov 2026.
-    "rec7aHLK1Q8fMLRXH": "the Cash Flow Voids agent is on its trial run, so Kevin checks its "
-                         "drafts and nothing is sent to a tenant",
+    # Empty: no agent is on trial. The Cash Flow Voids agent's trial ended on 5 Oct 2026 (TRIAL_ENDED below).
 }
 TRIAL_STAMP = "TRIAL CHECKED"
 # THE TASK IS ON TRIAL TOO, WHOEVER HOLDS IT (independent review, 2 Oct 2026). A trial lane's task
@@ -632,7 +629,12 @@ def strip_trial_marks(text):
 # left in neither list fail tests/cash-flow-voids-agent.test.js, so the move cannot be half done.
 # The diary and the post pass no approval time on purpose: a trial card can never carry those shapes
 # (TRIAL_ACTING_SHAPE_RE refuses them at submit), and a Level A diary entry has no approval to date.
-TRIAL_ENDED = {}
+TRIAL_ENDED = {
+    # Cash Flow Voids (register row reclaAzGLA4utssxx). Kevin, 5 Oct 2026: "Let's take it off trial ... As long as
+    # the guardrails are in place with the approval cards, I can check things as we go." Every card still waits for
+    # his approval; a card he approved before this moment was a check and is never sent.
+    "rec7aHLK1Q8fMLRXH": "2026-10-05T11:44:00Z",
+}
 
 
 def _utc(value):

@@ -6,7 +6,8 @@
 // reach anyone. That only holds if all of these stay true at once:
 //   1. It is a dispatchable role agent, and scripts/rent-check.py (which raises its tasks) names
 //      the same Team Members row and register row as scripts/agent-dispatch.py.
-//   2. It is a TRIAL agent (TRIAL_AGENTS in scripts/agent_email_format.py).
+//   2. The trial machinery holds a trial agent back (its trial ENDED 5 Oct 2026; each run here puts it back on
+//      trial in its own process, see ON_TRIAL, so the doors stay proved for the next agent on trial).
 //   3. send-email.py refuses a trial agent's card: approved, by rule, or on a preview.
 //   4. The dispatch queue never hands an approved trial card to a carry-out run.
 //   5. `trial-settle` closes an approved trial card with Kevin's verdict in Notes, and touches
@@ -17,6 +18,7 @@
 //      another agent's id is refused at every door (send, notify, handover, letters, diary, the
 //      browser's submit gate), and is settled as checked like any other trial card.
 //   7. The card the agent file tells it to write passes the real submit gates.
+//  10. The real state (5 Oct 2026): the agent is off trial, and Kevin's approval still guards every send.
 //   9. The cut-over MOVES the agent to TRIAL_ENDED with the moment it ended: a card Kevin approved
 //      before then stays a check at every door (queue, settle, email, text); one approved after is
 //      an ordinary card (independent review, 4 Oct 2026).
@@ -56,7 +58,17 @@ aef.TRIAL_ENDED["${RENT_TM}"] = "${at}"
 aef.TRIAL_AGENTS.clear()
 `;
 
-function py(snippet, input) {
+// The trial ENDED on 5 Oct 2026 (Kevin: "Let's take it off trial"). The doors that hold a trial agent back stay
+// in the code for the next agent on trial, so this file still proves every one of them: each run puts the Cash
+// Flow Voids agent back on trial inside its own Python process, unless it is the real-state check (pyReal), which
+// reads the lists as they ship.
+const ON_TRIAL = `
+import agent_email_format as _aef
+_aef.TRIAL_AGENTS["${RENT_TM}"] = "the Cash Flow Voids agent is on its trial run, so Kevin checks its drafts and nothing is sent to a tenant"
+_aef.TRIAL_ENDED.pop("${RENT_TM}", None)
+`;
+const pyReal = (snippet, input) => py(snippet, input, true);
+function py(snippet, input, real = false) {
   const script = `
 import importlib.util, json, sys, os, io, contextlib, argparse, tempfile
 sys.path.insert(0, ${JSON.stringify(SCRIPTS)})
@@ -65,6 +77,7 @@ def load_mod(name, file):
     spec = importlib.util.spec_from_file_location(name, os.path.join(${JSON.stringify(SCRIPTS)}, file))
     m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m); return m
 ad = load_mod("ad", "agent-dispatch.py")
+${real ? '' : ON_TRIAL}
 a = json.loads(sys.stdin.read() or "null")
 ${snippet}
 `;
@@ -130,7 +143,7 @@ print(json.dumps({"byName": bool(trial_problem(other, "RENT LATE: Unit 9, rent d
 
 describe('9. a trial ends by MOVING its entry to TRIAL_ENDED', () => {
   it('every trial lane\'s marks sit in exactly one list, and every end time reads as a time', () => {
-    const r = py(`
+    const r = pyReal(`
 from agent_email_format import TRIAL_AGENTS, TRIAL_ENDED, TRIAL_TASK_MARKS, _utc
 print(json.dumps({"orphans": [x for x in TRIAL_TASK_MARKS if x not in TRIAL_AGENTS and x not in TRIAL_ENDED],
                   "both": [x for x in TRIAL_ENDED if x in TRIAL_AGENTS], "unreadable": [x for x, v in TRIAL_ENDED.items() if _utc(v) is None]}))`);
@@ -154,6 +167,46 @@ print(json.dumps({"before": tp(["${RENT_TM}"], "", "", "2026-11-24T08:59:00.000Z
     expect(r.byName).toMatch(/approved during the trial run/);
     expect(r.byKey).toMatch(/approved during the trial run/);
     expect(r.other).toBe('');
+  });
+});
+
+describe('10. the trial ended on 5 Oct 2026, and Kevin still approves every send', () => {
+  it('the agent is off trial: in TRIAL_ENDED with a readable time, its task marks kept, nobody on trial', () => {
+    const r = pyReal(`
+from agent_email_format import TRIAL_AGENTS, TRIAL_ENDED, TRIAL_TASK_MARKS, _utc, trial_problem
+print(json.dumps({"onTrial": sorted(TRIAL_AGENTS), "ended": TRIAL_ENDED.get("${RENT_TM}"), "readable": bool(_utc(TRIAL_ENDED.get("${RENT_TM}"))),
+                  "marksKept": "${RENT_TM}" in TRIAL_TASK_MARKS, "submit": trial_problem(["${RENT_TM}"]),
+                  "duringTrial": trial_problem(["${RENT_TM}"], "RENT LATE: Unit 9", "", "2026-10-05T07:00:00.000Z"),
+                  "after": trial_problem(["${RENT_TM}"], "RENT LATE: Unit 9", "", "2026-10-05T13:00:00.000Z")}))`);
+    expect(r.onTrial).toEqual([]);
+    expect(r.ended).toMatch(/^2026-10-05T\d\d:\d\d:00Z$/);
+    expect([r.readable, r.marksKept]).toEqual([true, true]);
+    expect(r.submit).toBe('');
+    // This morning's cards Kevin approved as checks are never sent; one he approves after the cut-over is.
+    expect(r.duringTrial).toMatch(/approved during the trial run/);
+    expect(r.after).toBe('');
+  });
+
+  it('the approval card still guards every send: no approval, no email; an approval after the cut-over sends', () => {
+    const OUT = 'TO: tenant@example.com\nFROM: info@agilelets.co.uk\nSUBJECT: Your rent\n---\nHello.\n\nKind regards\nRoy Lavin\nAgile Lets';
+    const r = pyReal(`
+se = load_mod("se", "send-email.py")
+se.rule_send_problem = lambda *x, **y: ""
+def load(outcome, approved):
+    F = {se.AF["name"]: "RENT LATE: Unit 9", se.AF["approvalOutcome"]: {"name": outcome} if outcome else None,
+         se.AF["taskType"]: {"name": "Correspondence"}, se.AF["agentOutput"]: a["out"], se.AF["approvedAt"]: approved,
+         se.AF["sentForApprovalBy"]: ["${RENT_TM}"], se.AF["teamMember"]: ["${RENT_TM}"]}
+    se.get_task = lambda task_id: {"id": task_id, "createdTime": "2026-10-05T12:00:00.000Z", "fields": F}
+    try:
+        se.load_approved("recTEST", require_approval=True, rule=None); return ""
+    except SystemExit as e:
+        return str(e)
+print(json.dumps({"none": load(None, None), "changes": load("Changes requested", None),
+                  "morning": load("Approved as-is", "2026-10-05T07:00:00.000Z"), "after": load("Approved as-is", "2026-10-05T13:00:00.000Z")}))`, { out: OUT });
+    expect(r.none).not.toBe('');
+    expect(r.changes).not.toBe('');
+    expect(r.morning).toMatch(/approved during the trial run/);
+    expect(r.after).toBe('');
   });
 });
 
