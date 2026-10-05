@@ -83,6 +83,7 @@ from agent_email_format import (  # noqa: E402
     TIER1_BANNER,
     EmailFormatError,
     parse_output as parse_email_output,
+    RULE_OWN_ADDRESSES,
     parse_text,
     strip_track_record,
     validate_submission as validate_email_submission,
@@ -459,8 +460,9 @@ RENT_REGISTER_ROW = ROLE_AGENTS[RENT_REC_ID]["registerRow"]
 # and the specialist for that owns it. Repairs never enter this lane — they
 # keep Roy's same-hour handover (Kevin's ruling, 2 Sep 2026).
 AUTO_ROUTES = (
-    # A TENANT'S REPLY TO THE RENT CHASE (Kevin, 4 Oct 2026, "Build as-is"): an inbound message from a tenant
-    # who has an open RENT LATE or RENT PLAN task goes to the Cash Flow Voids agent, which drafts the answer
+    # A TENANT'S REPLY TO THE RENT CHASE (Kevin, 4 Oct 2026, "Build as-is"; widened 5 Oct 2026): an inbound message
+    # from anyone a rent card wrote to (open, or SENT in the last REPLY_WINDOW_DAYS; RENT LATE, PLAN, CAP, DETAILS,
+    # and the letting agent of an AGENT RENT LATE card) goes to the Cash Flow Voids agent, which drafts the answer
     # and any payment plan. OFF until the agent's trial has ended: rent_reply_senders() reads nothing while
     # it is on trial, so no tenant's message waits on a draft that cannot be sent; Inbox Response answers
     # him meanwhile. First, because the sender is a known tenant mid-chase; Roy's repair lane diverts
@@ -498,10 +500,10 @@ AUTO_ROUTES = (
 # goes, so "open only" missed the replies it was for. The formula is the superset (modified in the window); the
 # SENT stamp decides (rent_reply_senders).
 REPLY_WINDOW_DAYS = 14
-RENT_REPLY_FORMULA = ("AND(OR(LEFT({Task Name}, 11)='RENT LATE: ', LEFT({Task Name}, 11)='RENT PLAN: ', "
-                      "LEFT({Task Name}, 10)='RENT CAP: ', LEFT({Task Name}, 14)='RENT DETAILS: ', "
-                      "LEFT({Task Name}, 17)='AGENT RENT LATE: '), OR(AND(NOT({Status}='Completed'), "
-                      "NOT({Status}='Cancelled')), IS_AFTER(LAST_MODIFIED_TIME(), DATEADD(TODAY(), -14, 'days'))))")
+RENT_REPLY_PREFIXES = ("RENT LATE: ", "RENT PLAN: ", "RENT CAP: ", "RENT DETAILS: ", "AGENT RENT LATE: ")
+RENT_REPLY_FORMULA = ("AND(OR(" + ", ".join(f"LEFT({{Task Name}}, {len(p)})='{p}'" for p in RENT_REPLY_PREFIXES) + "), "
+                      "OR(AND(NOT({Status}='Completed'), NOT({Status}='Cancelled')), "
+                      f"IS_AFTER(LAST_MODIFIED_TIME(), DATEADD(TODAY(), -{REPLY_WINDOW_DAYS}, 'days'))))")
 REPLY_SENT_RE = re.compile(r"\[(\d{2} \w{3} \d{4}) \d{2}:\d{2} — send-email\] SENT:")
 RUNNING_PLAN_FORMULA = ("AND(FIND('PLAN FOR: rec', {Agent Output}&''), LEN({Approval Outcome}&'')>0, "
                         "FIND('— send-email] SENT: email to', {Notes}&''), NOT(FIND('RENT PLAN MISSED: ', {Notes}&'')), "
@@ -536,7 +538,8 @@ def rent_reply_senders(today=None):
                 to = parse_email_output(f.get(AF["agentOutput"]) or "").get("to") or []
             except (EmailFormatError, SystemExit):
                 to = []
-            keys |= {sender_key(x) for x in to if x}
+            # Our own addresses are never a letting agent's: one in a TO line must not send our own mail to the lane.
+            keys |= {sender_key(x) for x in to if x and str(x).strip().lower() not in RULE_OWN_ADDRESSES}
             continue
         tenant_ids |= set(links(f.get(TASK_TENANTS)))
     # A running plan: its card names the tenancy, whose tenants are read from the tenancy itself.
@@ -3059,7 +3062,10 @@ def build_queue(args=None):
         t["matchedPattern"] = hit1 or ""
         if hit1:
             tier1.append(t)
-        t["rentReply"] = bool(t["inboundTask"] and rent_senders and sender_key(t["inboundSender"]) in rent_senders)
+        # A message the rent agent sent back with `reassign` (not about rent: keys, papers, a repair) is the CEO's
+        # to place, never the rent lane's again: otherwise the lane would take it straight back (review, 5 Oct 2026).
+        t["rentReply"] = bool(t["inboundTask"] and rent_senders and sender_key(t["inboundSender"]) in rent_senders
+                              and not REASSIGN_LINE_RE.search(str(t.get("notes") or "")))
         t["creditor"] = creditor_match(t["name"], t["description"], t["notes"])
         creditor_count += t["creditor"]
         # Creditor work is ALWAYS tier-1 (Kevin's triage ruling, 24 Aug 2026)

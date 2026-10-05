@@ -126,7 +126,7 @@ describe('send-email.py notes the tenancy after a rent card goes', () => {
     expect(r.out.tenancyNoteProblem).toBeNull();
   });
 
-  it('the SENT stamp send-email.py really writes is the one both chases read (rent-check and the form chase)', () => {
+  it('the SENT stamp send-email.py really writes is the one every reader reads (rent-check, the form chase, the reply lane)', () => {
     const r = send({});
     const stamp = JSON.parse(r.patches.find((p) => p.includes('send-email] SENT:'))).fields;
     const notes = Object.values(stamp)[0];
@@ -137,12 +137,17 @@ sys.path.insert(0, ${JSON.stringify(SCRIPTS)})
 spec = importlib.util.spec_from_file_location("rc", ${JSON.stringify(path.join(SCRIPTS, 'rent-check.py'))})
 rc = importlib.util.module_from_spec(spec); spec.loader.exec_module(rc)
 import rent_form_chase as fc
+spec = importlib.util.spec_from_file_location("ad", ${JSON.stringify(path.join(SCRIPTS, 'agent-dispatch.py'))})
+ad = importlib.util.module_from_spec(spec); spec.loader.exec_module(ad)
 notes = sys.stdin.read()
 m = rc.SENT_STAMP_RE.search(notes)
+d = ad.REPLY_SENT_RE.search(notes)
 print(json.dumps({"rc": m and datetime.strptime(m.group(1), "%d %b %Y").date().isoformat(), "fc": str(fc.sent_on(notes)),
+                  "ad": d and datetime.strptime(d.group(1), "%d %b %Y").date().isoformat(),
                   "today": datetime.now().date().isoformat()}))`], { input: notes, encoding: 'utf8' }).trim().split('\n').pop());
     expect(read.rc).toBe(read.today);
     expect(read.fc).toBe(read.today);
+    expect(read.ad).toBe(read.today);
   });
 
   it('a late agent-managed rent card says it emailed the letting agent, never the tenant (Kevin, 5 Oct 2026)', () => {

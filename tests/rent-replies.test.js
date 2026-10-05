@@ -31,7 +31,8 @@ else:
 AF = m.AF
 recs = []
 for t in a["tasks"]:
-    f = {AF["name"]: t["name"], AF["status"]: {"name": "Today"}, AF["teamMember"]: [t["holder"]], AF["notes"]: "",
+    notes = ("[2026-10-06 10:00] %s by the Cash Flow Voids agent: not about rent" % m.REASSIGN_MARK) if t.get("reassigned") else ""
+    f = {AF["name"]: t["name"], AF["status"]: {"name": "Today"}, AF["teamMember"]: [t["holder"]], AF["notes"]: notes,
          AF["inboundTask"]: t.get("inbound", True), AF["inboundSender"]: t["sender"]}
     recs.append({"id": t["id"], "fields": f})
 m.query_tasks = lambda formula, **kw: recs
@@ -52,8 +53,14 @@ def records(table, formula=None, fields=None, max_records=None):
         raise RuntimeError("Airtable 500")
     if table == m.TASKS:
         from datetime import datetime, timedelta
+        import re as _re
+        # Airtable as it filters: only the names the formula's LEFT() prefixes match, each with its true length.
+        pairs = _re.findall(r"LEFT\\(\\{Task Name\\}, (\\d+)\\)='([^']*)'", formula)
+        assert pairs and all(int(n) == len(p) for n, p in pairs), pairs
         out = []
         for i, c in enumerate(a["chased"]):
+            if not any(c.get("name", "RENT LATE: Unit 9, rent due 1 Oct (reminder)").startswith(p) for _, p in pairs):
+                continue
             f = {m.TASK_TENANTS: c.get("tenants", []), m.AF["name"]: c.get("name", "RENT LATE: Unit 9, rent due 1 Oct (reminder)"),
                  m.AF["agentOutput"]: c.get("output", ""), m.AF["notes"]: c.get("notes", "")}
             if "status" in c:
@@ -144,6 +151,22 @@ describe('a reply after the card went (Kevin, 5 Oct 2026: "Do it now"): a card c
       tasks: [INBOX('recAgentReply001', 'Accounts Payable <accounts@letting.example>'), INBOX('recTenantMsg0001', 'sam@example.com')] });
     expect(r.targets.recAgentReply001).toBe(CFV);
     expect(r.targets.recTenantMsg0001).toBe(RESPONSE);
+  });
+});
+
+describe('the reply lane gives back what is not rent, and never takes our own mail (review, 5 Oct 2026)', () => {
+  it('a message the rent agent sent back with reassign stays with the CEO, even from a tenant mid-chase', () => {
+    const r = queue({ ended: true, tasks: [{ ...INBOX('recKeysQuestion1', 'sam@example.com'), reassigned: true }] });
+    expect(r.targets.recKeysQuestion1 === CFV).toBe(false);
+  });
+
+  it('our own address in a letting agent card\'s TO line is never routed; the agent\'s is', () => {
+    const r = queue({ ended: true,
+      chased: [{ tenants: [], name: 'AGENT RENT LATE: Unit 1 – 1 Example Road, rent due 1 Oct', status: 'Today',
+        output: 'TO: accounts@letting.example, info@agilelets.co.uk\nFROM: kevinbrittain@gmail.com\nSUBJECT: Rent\n---\nHello,\n\nWhen will the rent be paid?\n\nKevin Brittain' }],
+      tasks: [INBOX('recFromInfo00001', 'info@agilelets.co.uk'), INBOX('recFromAgent0001', 'accounts@letting.example')] });
+    expect(r.targets.recFromInfo00001 === CFV).toBe(false);
+    expect(r.targets.recFromAgent0001).toBe(CFV);
   });
 });
 
