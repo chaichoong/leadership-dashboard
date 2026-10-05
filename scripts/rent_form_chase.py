@@ -6,32 +6,41 @@ A capped tenant is sent a link to the tenant details form (Property Manager Work
 follow-up process for those and get Roy's involvement when we get to a certain stage where we're not getting
 engagement." He approved the plan as-is the same day:
 
-  day 3 after the link was made   reminder 1, drafted by the Cash Flow Voids agent (email + text, his approval)
-  day 7                           reminder 2, the same
-  day 10                          a task for Roy to reach the tenant in person or by phone
+  day 3 after the link reached them   reminder 1, drafted by the Cash Flow Voids agent (email + text, his approval)
+  day 7                               reminder 2, the same
+  day 10                              a task for Roy to reach the tenant in person or by phone
 
-counted from the day the link was made (its expiry less LINK_DAYS: the Worker's own constant). One step at a
-time: a step waits while the one before it is still with Kevin, and never comes within GAP_DAYS of the one before
-it went. The chase stops when the form is saved after the link was made, when Kevin rejects a reminder (his call),
-or after Roy's step. A tenant on the do-not-chase list, one a late-rent chase is talking to, or one with no live
-tenancy linked is left alone. Only rent-check keys write here: `RENT CHECK KEY: details:<tenant>:<day made>:<step>`,
-so a link made again inside the chase carries on the same chase instead of starting it over.
+counted from the day the email carrying the link went: the first card linked to the tenant that the send door
+stamped SENT on or after the link was made (review, 5 Oct 2026: a link is made when the card is drafted, days
+before Kevin may approve it). While a card to the tenant waits for Kevin's approval, the chase waits; a link no card
+ever carried to them is never chased. One step at a time: a step waits while the one before it is with Kevin, and
+never comes within GAP_DAYS of the last thing that went. A reminder counts as done only once it went (its SENT
+stamp): one closed without going (Kevin's "Reject and close" sets Completed, review 5 Oct 2026) ends the chase, as
+Cancelled does. The chase also stops on a save made after the link, or after Roy's step. A tenant on the
+do-not-chase list, one a late-rent chase is talking to, or one with no live tenancy linked is left alone. Keys are
+`RENT CHECK KEY: details:<tenant>:<day the link was made>:<step>`, so a link made again inside the chase carries on
+the same chase instead of starting it over. Never "RENT FORM: ": that prefix is the robot's direct rent payment form
+card, whose approval opens the robot's window (agent_email_format.FORM_CARDS).
 """
 
 import re
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, timedelta, timezone
+from zoneinfo import ZoneInfo
 
 LINK_DAYS = 14                      # workers/property-manager/worker.js LINK_DAYS: a link is made `expires - 14`
 STEPS = (("1", 3), ("2", 7), ("roy", 10))
-GAP_DAYS = 3                        # never two steps within three days, however late Kevin approved the first
-WINDOW_DAYS = 30                    # a chase older than this is history
-PREFIX = "RENT DETAILS: "  # never "RENT FORM: ": the robot's direct rent payment form card
+GAP_DAYS = 3                        # never a step within three days of the last thing that went to the tenant
+WINDOW_DAYS = 30                    # a chase is started only inside this; one under way runs to its end
+CARD_DAYS = 45                      # how far back the cards linked to a tenant are read
+PREFIX = "RENT DETAILS: "           # never "RENT FORM: ": the robot's direct rent payment form card
 KEY_MARK = "RENT CHECK KEY: details:"
 TN = {"name": "fldxBKW7QnujSDWqA", "saved": "fldc7XMcQcYY6C2Xa", "expires": "fldsgGmWIUX48t4I7",
       "tenancies": "fldWijr5nOIcKJMP4"}
 LINKS_FORMULA = "LEN({Tenant Form Code Expires}&'')>0"     # field NAME: a rename is an error, never zero rows
 SENT_RE = re.compile(r"\[(\d{2} \w{3} \d{4}) \d{2}:\d{2} — send-email\] SENT:")
 CLOSED = ("Completed", "Cancelled")
+WAITING = "Approval"                # a card waiting for Kevin's verdict
+LONDON = ZoneInfo("Europe/London")
 
 
 def _day(v):
@@ -41,8 +50,16 @@ def _day(v):
         return None
 
 
+def london_day(v):
+    """The London day of an Airtable dateTime (the Worker stamps saves in UTC): a save at 00:30 BST is that day."""
+    try:
+        return datetime.strptime(str(v)[:19], "%Y-%m-%dT%H:%M:%S").replace(tzinfo=timezone.utc).astimezone(LONDON).date()
+    except ValueError:
+        return _day(v)
+
+
 def sent_on(notes):
-    """The day the send door stamped a card SENT, or None."""
+    """The day the send door stamped a card SENT, or None. The stamp is written in London time."""
     m = SENT_RE.search(str(notes or ""))
     return datetime.strptime(m.group(1), "%d %b %Y").date() if m else None
 
@@ -53,28 +70,38 @@ def read_links(rc):
     return {r["id"]: r.get("fields") or {} for r in rows}
 
 
-def read_chases(rc):
-    """{key: {id, status, sent}} for every form-chase task, whatever its status (a closed one is a step done)."""
-    out = {}
-    for rec in rc.fetch_all(rc.T_TASKS, {"fields[]": [rc.TK["status"], rc.TK["notes"]],
-                                         "filterByFormula": f"FIND('{KEY_MARK}', {{Notes}}&'')"}):
+def read_cards(rc, day):
+    """(chases, cards). chases: {key: {id, status, sent}} for every form-chase task, whatever its status (a closed
+    one is a step done or ended). cards: {tenant id: [{id, status, sent}]} for every OTHER task created in the last
+    CARD_DAYS that links the tenant: the card that carried the link, and any card still waiting for Kevin."""
+    since = (day - timedelta(days=CARD_DAYS)).isoformat()
+    chases, cards = {}, {}
+    for rec in rc.fetch_all(rc.T_TASKS, {"fields[]": [rc.TK["status"], rc.TK["notes"], rc.TK["description"],
+                                                      rc.TK["tenants"]],
+                                         "filterByFormula": f"OR(IS_AFTER(CREATED_TIME(), '{since}'), "
+                                                            f"FIND('{KEY_MARK}', {{Notes}}&''))"}):
         f = rec.get("fields") or {}
         notes = str(f.get(rc.TK["notes"]) or "")
-        for line in notes.splitlines():
-            if line.strip().startswith(KEY_MARK):
-                out[line.strip()[len(KEY_MARK):].strip()] = {"id": rec["id"], "status": rc.sel(f.get(rc.TK["status"])),
-                                                              "sent": sent_on(notes)}
-    return out
+        view = {"id": rec["id"], "status": rc.sel(f.get(rc.TK["status"])), "sent": sent_on(notes)}
+        keys = [ln.strip()[len(KEY_MARK):].strip()
+                for ln in (notes + "\n" + str(f.get(rc.TK["description"]) or "")).splitlines()
+                if ln.strip().startswith(KEY_MARK)]
+        for key in keys:
+            chases[key] = view
+        if not keys:
+            for t in f.get(rc.TK["tenants"]) or []:
+                cards.setdefault(t, []).append(view)
+    return chases, cards
 
 
-def plan(tid, f, chases, day, live, busy=False, no_chase=False):
-    """Pure. ({step, key, anchor, tenancy} to raise today or None, the stage in words or ""). `live` is the set of
-    tenancies the rent check judged live today."""
+def plan(tid, f, chases, cards, day, live, busy=False, no_chase=False):
+    """Pure. ({step, key, anchor, tenancy, made, expires, carried} to raise today or None, the stage in words or "").
+    `cards` is this tenant's other cards ([{status, sent}]); `live` the tenancies the rent check judged live today."""
     expires = _day(f.get(TN["expires"]))
     if expires is None:
         return None, ""
     made = expires - timedelta(days=LINK_DAYS)
-    saved = _day(f.get(TN["saved"]))
+    saved = london_day(f.get(TN["saved"])) if f.get(TN["saved"]) else None
     if saved and saved >= made:
         return None, ""                               # filled in since the link was made: nothing to chase
     # The chase this link belongs to: an earlier chase still inside the window that the tenant has not answered
@@ -87,9 +114,17 @@ def plan(tid, f, chases, day, live, busy=False, no_chase=False):
             if a and a <= made and (made - a).days <= WINDOW_DAYS and not (saved and saved >= a):
                 anchors.append(a)
     anchor = min(anchors)
-    days = (day - anchor).days
-    if days > WINDOW_DAYS or days < 0:
-        return None, ""
+    steps = {step: chases.get(f"{tid}:{anchor.isoformat()}:{step}") for step, _ in STEPS}
+    went = sorted(c["sent"] for c in cards if c["sent"] and c["sent"] >= anchor)
+    waiting = any(c["status"] == WAITING for c in cards)
+    if not went:
+        if waiting:
+            return None, "the form link's email is with Kevin, so no reminder yet"
+        return None, ("" if (day - anchor).days > WINDOW_DAYS
+                      else "a form link was made, but no card has carried it to the tenant, so nobody is chased")
+    carried = went[0]
+    if not steps["1"] and (day - carried).days > WINDOW_DAYS:
+        return None, ""                               # never started inside the window: history
     tenancy = next((t for t in f.get(TN["tenancies"]) or [] if t in live), None)
     if tenancy is None:
         return None, "the form is not filled in, but the tenant has no live tenancy linked, so nobody is chased"
@@ -97,48 +132,56 @@ def plan(tid, f, chases, day, live, busy=False, no_chase=False):
         return None, "the form is not filled in; the tenant is on the do-not-chase list"
     if busy:
         return None, "the form is not filled in; a late-rent chase is talking to the tenant, so this one waits"
-    before = None
+    if waiting:
+        return None, "the form is not filled in; a card to the tenant is with Kevin, so this one waits"
+    last = max(went)                                  # the last thing that went to the tenant, chase steps included
     for step, at in STEPS:
-        key = f"{tid}:{anchor.isoformat()}:{step}"
-        task = chases.get(key)
+        task = steps[step]
         if task:
-            if task["status"] == "Cancelled":
-                return None, f"the form chase stopped: Kevin turned down step {step}"
+            if step == "roy":
+                return None, ("Roy is reaching the tenant" if task["status"] not in CLOSED
+                              else "the form chase is done: Roy has had it")
             if task["status"] not in CLOSED:
-                return None, f"form chase step {step} is with Kevin" if step != "roy" else "Roy is reaching the tenant"
-            before = task["sent"] or before
+                return None, f"form chase reminder {step} is with Kevin"
+            if not task["sent"]:
+                return None, f"the form chase stopped: reminder {step} was closed without going (turned down or refused)"
+            last = max(last, task["sent"])
             continue
-        due = anchor + timedelta(days=at)
-        if before:
-            due = max(due, before + timedelta(days=GAP_DAYS))
+        due = max(carried + timedelta(days=at), last + timedelta(days=GAP_DAYS))
         if day < due:
             what = f"reminder {step}" if step != "roy" else "Roy"
             return None, f"the form is not filled in; {what} on {due.strftime('%-d %b')}"
-        return {"step": step, "key": key, "anchor": anchor, "tenancy": tenancy, "made": made, "expires": expires}, ""
-    return None, "the form chase is done: Roy has it"
+        return {"step": step, "key": f"{tid}:{anchor.isoformat()}:{step}", "anchor": anchor, "tenancy": tenancy,
+                "made": made, "expires": expires, "carried": carried}, ""
+    return None, ""
 
 
 def describe(item, first, place, chases, tid, day):
     """The name and description of the task a step raises."""
-    made, expires = item["made"].strftime("%-d %b %Y"), item["expires"].strftime("%-d %b %Y")
+    carried, expires = item["carried"].strftime("%-d %b %Y"), item["expires"].strftime("%-d %b %Y")
     ref = f"\n\nReference for the rent check, please leave it in:\n{KEY_MARK}{item['key']}"
     if item["step"] != "roy":
         lapsed = (" The link has lapsed: make a new one with `python3 scripts/tenant-link.py make --tenant "
                   f"{tid}` and put it in the email.") if item["expires"] < day else ""
         return (f"{PREFIX}{place}, reminder {item['step']} to fill in the details form",
                 f"Raised by the daily rent check on {day.strftime('%-d %b %Y')}.\n\n"
-                f"{first} was sent the tenant details form link on {made} (it works until {expires}) and has not "
-                f"filled it in. Draft reminder {item['step']}: a short, friendly email from info@agilelets.co.uk, signed "
-                "Roy Lavin, Agile Lets, with the TEXT TO and TEXT lines, asking them to fill in the form with the link "
-                f"in our earlier email and to reply if they need any help.{lapsed} Never mention arrears, court or "
-                "notice." + ref)
+                f"{first} was emailed the tenant details form link on {carried} (it works until {expires}) and has "
+                f"not filled it in. Draft reminder {item['step']}: a short, friendly email from info@agilelets.co.uk, "
+                "signed Roy Lavin, Agile Lets, with the TEXT TO and TEXT lines, asking them to fill in the form with the "
+                f"link in our earlier email and to reply if they need any help.{lapsed} Never mention arrears, court "
+                "or notice." + ref)
     went = [str(chases.get(f"{tid}:{item['anchor'].isoformat()}:{s}", {}).get("sent") or "?") for s in ("1", "2")]
     return (f"{PREFIX}{place}, reach {first} in person: details form not filled in",
             f"Raised by the daily rent check on {day.strftime('%-d %b %Y')}.\n\n"
-            f"{first} was sent the tenant details form link on {made}, and reminders went on {went[0]} and {went[1]}, "
-            "but the form is still not filled in, so the council claim cannot start. Please reach them by phone or in "
-            "person and help them fill it in. You can make a fresh link with the Tenant form button on your Property "
-            "Manager page. Reply to this email with what they say." + ref)
+            f"{first} was emailed the tenant details form link on {carried}, and reminders went on {went[0]} and "
+            f"{went[1]}, but the form is still not filled in, so the council claim cannot start. Please reach them by "
+            "phone or in person and help them fill it in. You can make a fresh link with the Tenant form button on "
+            "your Property Manager page. Reply to this email with what they say." + ref)
+
+
+def first_name(name):
+    words = str(name or "").split()
+    return words[0] if words else "the tenant"
 
 
 def run(rc, data, day, res, writes, on):
@@ -150,15 +193,26 @@ def run(rc, data, day, res, writes, on):
     fails = []
     try:
         links = read_links(rc)
-        chases = read_chases(rc)
+        chases, cards = read_cards(rc, day)
         busy = rc.rent_cap.read_busy(rc)
         # Every tenancy judged live today: a green one carries no row of its own, only its lane (rent_cap.run).
         live = set(res.get("lanes") or {}) | {r["id"] for r in res.get("tenancies") or []}
         tys = {r["id"]: r.get("fields") or {} for r in data.get("tenancies") or []}
         no_chase = set(data.get("noChase") or ())
         ad = None
+        if writes:
+            # Roy's step is emailed to him; one still open is offered again (notify's ledger never sends twice).
+            for key, task in chases.items():
+                if key.endswith(":roy") and task["status"] not in CLOSED:
+                    ad = ad or rc.lane_b_rules.module("ad")
+                    try:
+                        if rc.lane_b_rules.cut_off(rc.lane_b_rules.notify_roy(task["id"], ad.ROY_EMAIL)):
+                            out["problems"].append(f"the email of task {task['id']} to Roy was cut off part way and is not sent twice")
+                    except Exception as exc:      # noqa: BLE001 — said on the row
+                        (out["problems"] if "REFUSED" in str(exc) else fails).append(
+                            f"task {task['id']} could not be emailed to Roy: {str(exc)[:120]}")
         for tid, f in sorted(links.items()):
-            item, stage = plan(tid, f, chases, day, live,
+            item, stage = plan(tid, f, chases, cards.get(tid, []), day, live,
                                busy=bool(busy & set(f.get(TN["tenancies"]) or [])), no_chase=tid in no_chase)
             tenancy = item["tenancy"] if item else next((t for t in f.get(TN["tenancies"]) or [] if t in live), None)
             place = rc.lane_b_rules.place_name(rc.first((tys.get(tenancy) or {}).get(rc.TY["unitRef"]))
@@ -167,8 +221,7 @@ def run(rc, data, day, res, writes, on):
                 out["stages"].append(f"{place}: {stage}")
             if not item:
                 continue
-            first = (str(f.get(TN["name"]) or "the tenant").split() or ["the tenant"])[0]
-            name, description = describe(item, first, place, chases, tid, day)
+            name, description = describe(item, first_name(f.get(TN["name"])), place, chases, tid, day)
             out["planned"].append(name)
             if not writes:
                 continue
@@ -187,9 +240,9 @@ def run(rc, data, day, res, writes, on):
                 try:
                     if rc.lane_b_rules.cut_off(rc.lane_b_rules.notify_roy(new, ad.ROY_EMAIL)):
                         out["problems"].append(f"the email of task {new} to Roy was cut off part way and is not sent twice")
-                except Exception as exc:          # noqa: BLE001 — the task stands on Roy's list; said on the row
+                except Exception as exc:          # noqa: BLE001 — the task stands on Roy's list; offered again next run
                     (out["problems"] if "REFUSED" in str(exc) else fails).append(
-                        f"task {new} was raised but its email to Roy failed: {str(exc)[:120]}")
+                        f"task {new} was raised but its email to Roy failed (offered again next run): {str(exc)[:120]}")
     except Exception as exc:                          # noqa: BLE001 — the row is the monitor; said, never swallowed
         fails.append(f"the form chase could not run: {str(exc)[:200]}")
     out["failed"] = "; ".join(fails)[:600]

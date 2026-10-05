@@ -38,8 +38,10 @@ sent, comments = [], []
 def worker(url, payload=None):
     sent.append(payload["to"]); return {"id": "msg-1"}
 m.worker_call = worker
-LOOKUPS = []
+LOOKUPS, PATCHES = [], []
 def api(method, url, payload=None):
+    if method == "PATCH":
+        PATCHES.append(json.dumps(payload))
     if url.endswith("/comments"):
         if a.get("commentFails") and (a["commentFails"] is True or len(comments) >= a["commentFails"]):
             if a.get("failAsExit"):
@@ -68,7 +70,7 @@ with contextlib.redirect_stdout(buf):
     m.cmd_send(argparse.Namespace(task="recRENTCARD000001", dry_run=False, rule=None))
 ledger = [json.loads(l)["event"] for l in open(m.SENT_LEDGER)]
 print(json.dumps({"out": json.loads(buf.getvalue().strip().splitlines()[-1]), "sent": sent, "comments": comments, "ledger": ledger,
-                  "lookups": LOOKUPS}))
+                  "lookups": LOOKUPS, "patches": PATCHES}))
 `], { input: JSON.stringify({ dir, output: EMAIL, name: 'RENT LATE: Unit 9 – 1 Example Road, rent due 30 Sep (reminder)',
     notes: 'RENT CHECK KEY: recTENANCYNOTE001:2026-09-30:1', holders: ['rec7aHLK1Q8fMLRXH'], tenancies: ['recTENANCYNOTE001'], ...opts }),
   encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'] });
@@ -122,6 +124,25 @@ describe('send-email.py notes the tenancy after a rent card goes', () => {
     expect(r.comments[0][1]).toMatch(/^\d\d \w{3} \d{4} \d\d:\d\d: Agile Lets emailed the tenant \(sam@example\.com\): "Your rent at 1 Example Road" \(rent task recRENTCARD000001\)\.$/);
     expect(r.out.tenancyNoted).toEqual(['recTENANCYNOTE001']);
     expect(r.out.tenancyNoteProblem).toBeNull();
+  });
+
+  it('the SENT stamp send-email.py really writes is the one both chases read (rent-check and the form chase)', () => {
+    const r = send({});
+    const stamp = JSON.parse(r.patches.find((p) => p.includes('send-email] SENT:'))).fields;
+    const notes = Object.values(stamp)[0];
+    const read = JSON.parse(execFileSync('python3', ['-c', `
+import importlib.util, json, sys
+from datetime import datetime
+sys.path.insert(0, ${JSON.stringify(SCRIPTS)})
+spec = importlib.util.spec_from_file_location("rc", ${JSON.stringify(path.join(SCRIPTS, 'rent-check.py'))})
+rc = importlib.util.module_from_spec(spec); spec.loader.exec_module(rc)
+import rent_form_chase as fc
+notes = sys.stdin.read()
+m = rc.SENT_STAMP_RE.search(notes)
+print(json.dumps({"rc": m and datetime.strptime(m.group(1), "%d %b %Y").date().isoformat(), "fc": str(fc.sent_on(notes)),
+                  "today": datetime.now().date().isoformat()}))`], { input: notes, encoding: 'utf8' }).trim().split('\n').pop());
+    expect(read.rc).toBe(read.today);
+    expect(read.fc).toBe(read.today);
   });
 
   it('a late agent-managed rent card says it emailed the letting agent, never the tenant (Kevin, 5 Oct 2026)', () => {
