@@ -764,6 +764,40 @@ print(json.dumps({"raise": kinds(p), "stage": p["stage"], "problems": p["problem
     expect(r.problems).toEqual([]);
   });
 
+  it('Kevin, 5 Oct 2026: a tenancy left with no unit on purpose gets no benefit-cap task or claim, but his verdicts are still read', () => {
+    const r = py(RUN + `
+rogue = [{"id": TEN, "fields": {rc.TY["tenants"]: [TENANT]}}]
+live = RC(); out = cap.run(live, {"tenancies": rogue, "noChase": []}, date(2026, 10, 1), res(), True, True)
+ready = RC(caps=[cap_task()]); rout = cap.run(ready, {"tenancies": rogue, "noChase": []}, date(2026, 10, 1), res({"id": TEN, "lane": "fine"}), True, True)
+verdict = RC(caps=[cap_task()], cards=[claim(outcome="Approved as-is", approved="2026-10-02T09:00:00.000Z")])
+vout = cap.run(verdict, {"tenancies": rogue, "noChase": []}, date(2026, 10, 2), res({"id": TEN, "lane": "fine"}), True, True)
+linked = RC(); lout = cap.run(linked, DATA, date(2026, 10, 1), res(), True, True)
+print(json.dumps({"raised": [len(live.raised), len(ready.posts)], "stages": out["stages"] + rout["stages"], "acted": vout["acted"],
+                  "patched": len(verdict.patches), "linked": len(linked.raised)}))`);
+    expect(r.raised).toEqual([0, 0]);
+    expect(r.stages).toEqual([
+      'a tenancy with no unit linked: left unlinked on purpose, so no new benefit-cap task or claim',
+      'a tenancy with no unit linked: left unlinked on purpose, so no new benefit-cap task or claim',
+    ]);
+    expect(r.acted).toEqual(['RENT CLAIM: Unit 9, council housing payment: sent']);
+    expect(r.patched).toBe(1);
+    expect(r.linked).toBe(1);
+  });
+
+  it('review, 5 Oct 2026: an unlinked tenancy still gets the question about a claim already sent, and keeps its award on the row', () => {
+    const r = py(`
+sent = claim(status="Completed", notes_extra="\\nRENT CLAIM SENT: 2026-10-02 x")
+ask = cap.plan(TEN, view([cap_task()], [sent]), {"id": TEN, "lane": "fine"}, TENANCY, {TENANT: GOOD}, date(2026, 10, 23), unlinked=True)
+waited = decision(status="Cancelled", outcome="Changes requested", notes_extra="\\nRENT CLAIM NO ANSWER: 2026-10-25 no answer yet")
+again = cap.plan(TEN, view([cap_task()], [sent, waited]), {"id": TEN, "lane": "fine"}, TENANCY, {TENANT: GOOD}, date(2026, 11, 8), unlinked=True)
+d2 = decision(status="Completed", outcome="Approved as-is", notes_extra="\\nRENT CLAIM AWARD: 2027-03-31 (read)")
+renew = cap.plan(TEN, view([cap_task()], [sent, d2]), {"id": TEN, "lane": "fine"}, TENANCY, {TENANT: GOOD}, date(2027, 3, 1), unlinked=True)
+print(json.dumps({"ask": [kinds(ask), ask["stage"]], "again": kinds(again), "renew": [kinds(renew), renew["stage"]]}))`);
+    expect(r.ask).toEqual([[['decision', '2026-09-23', 1]], "asking Kevin for the council's answer; left unlinked on purpose, so no new benefit-cap task or claim"]);
+    expect(r.again).toEqual([['decision', '2026-09-23', 2]]);
+    expect(r.renew).toEqual([[], 'award until 31 Mar 2027; left unlinked on purpose, so no new benefit-cap task or claim']);
+  });
+
   it('a postcode with no form on file says so instead of guessing', () => {
     const r = py(`print(json.dumps([cap.council_for("CB9 0AJ")[0], cap.council_for("fy8 1aa")[0], cap.council_for("BB5 2ZZ")[0], cap.council_for("ML3 0AA"), cap.council_for("")]))`);
     expect(r).toEqual(['West Suffolk Council, through Anglia Revenues Partnership', 'Fylde Council', 'Hyndburn Borough Council', null, null]);

@@ -311,7 +311,7 @@ def marked_on(c, mark, day):
     return (_day(line[:10]) if line else None) or day
 
 
-def plan(tid, view, row, tenancy, tenants, day, no_chase=False, busy=False):
+def plan(tid, view, row, tenancy, tenants, day, no_chase=False, busy=False, unlinked=False):
     """What lane C does today for one tenancy. Pure. `view` is read()'s entry for it (or empty lists), `row` the
     rent check's verdict on it (None when it is not live), `tenancy` its Tenancies fields by id (rent-check TY),
     `tenants` {tenant id: fields}. Returns {"stage": words, "acts": [cards to write], "raise": [...],
@@ -430,6 +430,7 @@ def plan(tid, view, row, tenancy, tenants, day, no_chase=False, busy=False):
         said = mark_line(newest["notes"], ENDED_MARK) or f"{day.isoformat()} {newest['detail']}"
         stage = f"claim ended ({said[11:]})"
 
+    claim_stage = stage                              # where the claim stands, before anything new is raised
     # 1. RENT CAP: a renewal a month before an award ends, or a Universal Credit tenancy paid short.
     # From a month before the award ends until its case would lapse: a renewal held back (a late-rent chase or a
     # plan open, the agent switched off) still comes once it can, unless a newer case has started meanwhile.
@@ -505,6 +506,14 @@ def plan(tid, view, row, tenancy, tenants, day, no_chase=False, busy=False):
                 out["raise"].append({"kind": "claim", "case": case["case"], "n": (last["n"] + 1) if last else 1,
                                      "claimant": who, "prior": prior, "short": short})
                 stage = "claim card raised for Kevin"
+    if unlinked:
+        # A tenancy left with no unit on purpose (Kevin, 5 Oct 2026): the tenant may have gone without the tenancy
+        # being ended, so it is left to stop by itself or be relocated. No new ask goes to it and no new claim is
+        # made for it. A claim already sent is still followed up (the council's answer matters most if the tenant
+        # has gone), Kevin's verdicts are still read, and the stage keeps what the claim was doing.
+        out["raise"] = [x for x in out["raise"] if x["kind"] == "decision"]
+        claim_stage = claim_stage.replace("claim card withdrawn, raised again when ready", "claim card withdrawn")
+        stage = "; ".join(x for x in (claim_stage, "left unlinked on purpose, so no new benefit-cap task or claim") if x)
     out["stage"] = stage
     return out
 
@@ -763,7 +772,8 @@ def run(rc, data, day, res, writes, on, on_plan=frozenset()):
             unit = rc.first(ty.get(rc.TY["unitRef"])) or "(no unit linked)"
             place = rc.lane_b_rules.place_name(unit)
             p = plan(tid, views.get(tid, {}), row, ty, tenants, day,
-                     no_chase=bool(no_chase & set(ty.get(rc.TY["tenants"]) or [])), busy=tid in busy)
+                     no_chase=bool(no_chase & set(ty.get(rc.TY["tenants"]) or [])), busy=tid in busy,
+                     unlinked=not rc.first(ty.get(rc.TY["unitRef"])))
             out["problems"] += [f"{place}: {x}" for x in p["problems"]]
             if p["stage"]:
                 out["stages"].append(f"{place}: {p['stage']}")
