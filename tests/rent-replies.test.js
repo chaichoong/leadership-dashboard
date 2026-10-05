@@ -163,7 +163,7 @@ describe('the reply lane gives back what is not rent, and never takes our own ma
   it('our own address in a letting agent card\'s TO line is never routed; the agent\'s is', () => {
     const r = queue({ ended: true,
       chased: [{ tenants: [], name: 'AGENT RENT LATE: Unit 1 – 1 Example Road, rent due 1 Oct', status: 'Today',
-        output: 'TO: accounts@letting.example, info@agilelets.co.uk\nFROM: kevinbrittain@gmail.com\nSUBJECT: Rent\n---\nHello,\n\nWhen will the rent be paid?\n\nKevin Brittain' }],
+        output: 'TO: accounts@letting.example, <info@agilelets.co.uk>\nFROM: kevinbrittain@gmail.com\nSUBJECT: Rent\n---\nHello,\n\nWhen will the rent be paid?\n\nKevin Brittain' }],
       tasks: [INBOX('recFromInfo00001', 'info@agilelets.co.uk'), INBOX('recFromAgent0001', 'accounts@letting.example')] });
     expect(r.targets.recFromInfo00001 === CFV).toBe(false);
     expect(r.targets.recFromAgent0001).toBe(CFV);

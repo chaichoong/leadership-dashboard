@@ -539,7 +539,8 @@ def rent_reply_senders(today=None):
             except (EmailFormatError, SystemExit):
                 to = []
             # Our own addresses are never a letting agent's: one in a TO line must not send our own mail to the lane.
-            keys |= {sender_key(x) for x in to if x and str(x).strip().lower() not in RULE_OWN_ADDRESSES}
+            own = {sender_key(a) for a in RULE_OWN_ADDRESSES}
+            keys |= {k for k in (sender_key(x) for x in to if x) if k and k not in own}
             continue
         tenant_ids |= set(links(f.get(TASK_TENANTS)))
     # A running plan: its card names the tenancy, whose tenants are read from the tenancy itself.
