@@ -79,6 +79,7 @@ distinct from the send key by design), Airtable PAT at
 """
 
 import base64
+import hashlib
 import io
 import json
 import os
@@ -2822,10 +2823,19 @@ ATTACH_ALLOWED = {".pdf", ".doc", ".docx", ".xls", ".xlsx", ".csv", ".txt", ".rt
                   ".png", ".jpg", ".jpeg", ".gif", ".heic", ".tif", ".tiff", ".eml"}
 
 
-def safe_attachment_name(name):
-    """A plain file name: no folders, no leading dot, nothing odd."""
+def safe_attachment_name(name, max_len=120):
+    """A plain file name: no folders, no leading dot, nothing odd. A long name
+    is cut in its stem, never its extension (5 Oct 2026: a 130-character
+    screencapture PDF lost ".pdf" to the cut and was skipped as not a document),
+    and carries a fingerprint of the full name, so two long names that differ
+    only past the cut (a screencapture's timestamp) never overwrite each other."""
     base = os.path.basename(str(name or "").replace("\\", "/")).strip()
-    base = re.sub(r"[^\w .,()&+-]", "_", base).lstrip(". ")[:120]
+    base = re.sub(r"[^\w .,()&+-]", "_", base).lstrip(". ")
+    if len(base) > max_len:
+        stem, ext = os.path.splitext(base)
+        tag = "-" + hashlib.sha1(base.encode("utf-8")).hexdigest()[:8]
+        keep = max_len - len(ext) - len(tag)
+        base = (stem[:keep] + tag + ext) if keep > 0 else base[:max_len]
     return base or "attachment"
 
 
