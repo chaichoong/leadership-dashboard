@@ -711,7 +711,9 @@ def _all_rows(table, params):
 
 # The tenancies a reply may belong to: those an open rent lane task is chasing (agent-dispatch.py RENT_REPLY_FORMULA).
 OPEN_RENT_TASKS = ("AND(OR(LEFT({Task Name}, 11)='RENT LATE: ', LEFT({Task Name}, 11)='RENT PLAN: ', "
-                   "LEFT({Task Name}, 10)='RENT CAP: '), NOT({Status}='Completed'), NOT({Status}='Cancelled'))")
+                   "LEFT({Task Name}, 10)='RENT CAP: ', LEFT({Task Name}, 14)='RENT DETAILS: ', "
+                   "LEFT({Task Name}, 17)='AGENT RENT LATE: '), OR(AND(NOT({Status}='Completed'), "
+                   "NOT({Status}='Cancelled')), IS_AFTER(LAST_MODIFIED_TIME(), DATEADD(TODAY(), -14, 'days'))))")
 
 
 def reply_tenancy(addresses):
