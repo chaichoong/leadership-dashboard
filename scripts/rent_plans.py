@@ -43,6 +43,9 @@ SENT_RE = re.compile(r"^\[(\d{1,2} \w{3} \d{4})(?: \d{2}:\d{2})? — send-email\
 # The day the agent last wrote the card's text: agent-dispatch.py's submit stamp. An edit Kevin asked for
 # (EDITS APPLIED) changes wording only and re-reads no payments, so it never moves the drafting day.
 DRAFTED_RE = re.compile(r"^\[(\d{1,2} \w{3} \d{4})(?: \d{2}:\d{2})? — agent-dispatch\] SUBMITTED", re.M)
+# An edit Kevin asked for may still change the amounts (netting off money paid since the draft), so money paid
+# between the draft and the last edit is UNSURE: it may already be taken off the promises (review, 5 Oct 2026).
+EDITED_RE = re.compile(r"^\[(\d{1,2} \w{3} \d{4})(?: \d{2}:\d{2})? — agent\] EDITS APPLIED:", re.M)
 MISSED_MARK = "RENT PLAN MISSED: "
 KEPT_MARK = "RENT PLAN KEPT: "
 SUPERSEDED_MARK = "RENT PLAN SUPERSEDED: "
@@ -75,6 +78,22 @@ def sent_on(notes):
         except ValueError:
             continue
     return min(days) if days else None
+
+
+def _stamp_days(rx, notes):
+    days = []
+    for m in rx.finditer(str(notes or "")):
+        try:
+            days.append(datetime.strptime(m.group(1), "%d %b %Y").date())
+        except ValueError:
+            continue
+    return days
+
+
+def edited_on(notes):
+    """The last day Kevin's edit was applied to the card's text, or None."""
+    days = _stamp_days(EDITED_RE, notes)
+    return max(days) if days else None
 
 
 def drafted_on(notes):
@@ -170,7 +189,10 @@ def state(rec, payments, day, tenancy=None, doubt=False, asof=None):
     # was approving) is the plan's (reviews, 4-5 Oct 2026). A card with no drafting stamp and no creation time
     # (an old record) counts from its email, or a few days before its first promise.
     fallback = min(sent, promises[0][0] - timedelta(days=EARLY_PAY_DAYS))
-    start = (made + timedelta(days=1)) if made else fallback
+    # The unsure window: the drafting day through the last edit Kevin asked for. Money paid inside it may
+    # already be netted off the promises, so it is never counted as sure plan money (below).
+    window_end = max(made, edited_on(notes) or made) if made else None
+    start = (window_end + timedelta(days=1)) if made else fallback
     # Rent falling due ON the drafting day is still the plan's to hold (the promises include it); money paid
     # that day or just before is credited to it below, never counted as plan money.
     rent_start = made or fallback
@@ -191,11 +213,13 @@ def state(rec, payments, day, tenancy=None, doubt=False, asof=None):
     grace = timedelta(days=GRACE_DAYS)
     # What each rent inside the plan still needs: the rent, less whatever of it landed early, before the plan
     # began (Universal Credit often lands days ahead, and sometimes a little short).
-    dues = {d: max(0.0, rent - sum(p["amount"] for p in payments if d - early <= p["day"] < start))
+    credit_before = (made + timedelta(days=1)) if made else start
+    dues = {d: max(0.0, rent - sum(p["amount"] for p in payments if d - early <= p["day"] < credit_before))
             for d in (rent_dues(rent_start, end, (tenancy or {}).get("dueDay")) if rent else [])}
     # The checkpoints: (the day it falls, what is owed by then). Each promise holds the promises and the rent
     # due by its date.
-    checks = [(when, max(sum(a for d, a in promises if d <= when), sum(n for d, n in dues.items() if d <= when)))
+    # (the day it is judged at, what is owed by then, the promise it belongs to)
+    checks = [(when, max(sum(a for d, a in promises if d <= when), sum(n for d, n in dues.items() if d <= when)), when)
               for when, _ in promises]
     # The first rent after the plan. The rent check credits money paid from 5 days before it to that rent, so
     # when that window reaches into the last promise's, one payment could count for both: the plan would read
@@ -204,7 +228,7 @@ def state(rec, payments, day, tenancy=None, doubt=False, asof=None):
     # keeps his plan and pays his rent is kept; one who misses either is chased, which is right.
     nxt = [d for d in (rent_dues(end, end + timedelta(days=62), (tenancy or {}).get("dueDay")) if rent else []) if d > end][:1]
     if nxt and nxt[0] - early <= end + grace:
-        checks[-1] = (nxt[0], checks[-1][1] + rent)
+        checks[-1] = (nxt[0], checks[-1][1] + rent, checks[-1][2])
 
     def waiting(check, reason="the rent check cannot tell about this tenancy's money"):
         late = (day - (check - grace)).days
@@ -217,37 +241,37 @@ def state(rec, payments, day, tenancy=None, doubt=False, asof=None):
     # Money paid on the drafting day cannot be told apart from money the agent already netted off. A check met
     # only with it is UNSURE: never KEPT on it, judged on as if it counted, and called MISSED a week on (the
     # cheap direction: a card Kevin sees, after the agent has read the payments) (reviews, 5 Oct 2026).
-    on_day = sum(p["amount"] for p in payments if made and p["day"] == made)
+    on_day = sum(p["amount"] for p in payments if made and made <= p["day"] <= window_end)
     unsure = None
 
     def unsure_verdict():
         when, owed, paid = unsure
         if (day - when).days > WAIT_LOUD_DAYS:
             out.update(state="missed", missedOn=when.isoformat(), owed=round(owed, 2), paid=round(paid, 2),
-                       why=f"met only if £{on_day:,.2f} paid on the day the plan was drafted was part of it")
+                       why=f"met only if £{on_day:,.2f} paid between drafting the plan and its last edit was part of it")
             return out
-        return waiting(when + grace, f"£{on_day:,.2f} paid on the day the plan was drafted may be part of it, and the "
-                                     "rent check cannot tell")
+        return waiting(when + grace, f"£{on_day:,.2f} paid between drafting the plan and its last edit may be part of "
+                                     "it, and the rent check cannot tell")
 
-    for when, owed in checks:
+    for when, owed, promised_on in checks:
         check = when + grace
         paid = sum(p["amount"] for p in payments if start <= p["day"] <= check)
         if paid + PLAN_SLACK >= owed:
             continue                               # met, whatever the feed: money seen is money in
         if on_day and paid + on_day + PLAN_SLACK >= owed:
-            unsure = unsure or (when, owed, paid)
+            unsure = unsure or (promised_on, owed, paid)     # its clock runs from the promise itself
             continue                               # met only with the drafting day's money: judge on, never kept
         if seen < check:
             # The bank has not reached this checkpoint. With doubt about the feed and the day already past it,
             # that is waiting, and it grows loud: a stale feed must never read as "on track" for weeks.
             if doubt and check <= day:
-                return waiting(check)
+                return waiting(min(check, unsure[0] + grace) if unsure else check)
             if unsure:
                 return unsure_verdict()
             out["state"] = "open"
             return out
         if doubt:
-            return waiting(check)
+            return waiting(min(check, unsure[0] + grace) if unsure else check)
         out.update(state="missed", missedOn=when.isoformat(), owed=round(owed, 2), paid=round(paid, 2))
         return out
     if unsure:
