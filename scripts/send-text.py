@@ -7,8 +7,14 @@ A late-rent card carries the email AND the text Kevin approves, as two lines abo
     TEXT TO: 07700 900123
     TEXT: Hello Sam, your rent of £900 due 1 Oct has not reached us yet. ... Roy, Agile Lets
 
-This script sends that text, verbatim, through GoHighLevel (the Agile Lets location the SMS bridge
-reads). There is no way to pass a number or a message on the command line: the ONLY source is the
+This script sends that text, verbatim, from the Agile Lets ClickSend number (+44 7984 393339, the
+number tenants already text: read off ClickSend's own inbound emails of 13 Aug and 1 Oct 2026). It goes
+by ClickSend's email-to-text: one email from info@agilelets.co.uk to <number>@sms.clicksend.com,
+through the same Gmail worker send-email.py uses, so no new key exists (Kevin, 5 Oct 2026: "Email-to-text",
+over GoHighLevel, whose agency holds no Agile Lets location, and over a ClickSend API key). ClickSend
+texts only from an address on its allowed list, from the number set there for it: that one setting is
+the route, and the switch below goes on only once a test text has arrived from that number.
+There is no way to pass a number or a message on the command line: the ONLY source is the
 Agent Output of an approved Correspondence task. It refuses, in this order:
 
   * while text sending is switched off: until ~/.config/od/text-sending-on exists (Kevin's switch,
@@ -22,34 +28,31 @@ Agent Output of an approved Correspondence task. It refuses, in this order:
   * a card with no TEXT lines, or a text over 300 characters;
   * a number that is not a UK mobile, or is not the Contact Number of a tenant linked to the task;
   * a card already texted, or one whose send may have gone: the ledger on this Mac AND the SENT stamp on
-    the task itself (a lost ledger or another Mac never sends twice);
-  * a GoHighLevel contact whose own phone is not the approved number;
-  * no Agile Lets sending number on file (~/.config/od/agile_lets_sms_number): the text never goes from
-    whatever number GoHighLevel would pick by default.
+    the task itself (a lost ledger or another Mac never sends twice).
 
-`send TASKID --dry-run` checks everything but the switch and the approval, finds the tenant's contact
-in GoHighLevel (read only) and sends nothing. `lookup --tenant TENANTID` finds one tenant's contact,
-read only, to prove the route. Nothing prints a name or a full number.
+`send TASKID --dry-run` checks everything but the switch and the approval and sends nothing. Nothing
+prints a name or a full number.
 
-AUTH: ~/.config/od/ghl_api_key and ~/.config/od/ghl_location_id (one copy each, never printed, never
-an argument); the Airtable PAT at ~/.config/od/airtable_pat.
+AUTH: the Gmail worker key send-email.py reads (~/.config/od/gmail_send_key) and the Airtable PAT at
+~/.config/od/airtable_pat: one copy each, never printed, never an argument.
 """
 
 import argparse
 import fcntl
+import importlib.util
 import json
 import os
 import re
 import sys
 import urllib.error
-import urllib.parse
 import urllib.request
 from datetime import datetime, timezone
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from approval_evidence import approval_evidence_problem  # noqa: E402
-from agent_email_format import (TASK_TENANCIES, TENANCIES_TABLE, TRIAL_STAMP, EmailFormatError, parse_text,  # noqa: E402
-                                tenancies_to_note, tenancy_comment, text_card, trial_problem)
+from agent_email_format import (PROPERTY_SENDER, TASK_TENANCIES, TENANCIES_TABLE, TRIAL_STAMP,  # noqa: E402
+                                EmailFormatError, parse_text, tenancies_to_note, tenancy_comment, text_card,
+                                trial_problem)
 
 BASE_ID, TASKS, TENANTS = "appnqjDpqDniH3IRl", "tblqB8b22hKBL4PF1", "tblX4elTuu01gwBYh"
 AF = {  # kept identical to scripts/send-email.py AF (tests/send-text.test.js)
@@ -63,14 +66,19 @@ APPROVED_AS_IS = "Approved as-is"
 SENT_STAMP = "— send-text] SENT:"
 CONFIG = os.path.expanduser("~/.config/od")
 SWITCH = os.path.join(CONFIG, "text-sending-on")
-PAT_PATH, GHL_KEY_PATH, GHL_LOCATION_PATH = (os.path.join(CONFIG, f) for f in ("airtable_pat", "ghl_api_key", "ghl_location_id"))
-# The Agile Lets number every text goes from, named, never left to the location's default (review, 4 Oct
-# 2026): a cut-over prerequisite, read from the location's own numbers and written here then.
-FROM_NUMBER_PATH = os.path.join(CONFIG, "agile_lets_sms_number")
+PAT_PATH = os.path.join(CONFIG, "airtable_pat")
 STATE_DIR = os.path.expanduser("~/knowledge-os/logs/agent-dispatch")
 LEDGER = os.path.join(STATE_DIR, "sent-text.jsonl")
-GHL = "https://services.leadconnectorhq.com"
 UK_MOBILE = re.compile(r"^\+447\d{9}$")
+# ClickSend's email-to-text: an email from an allowed address to <number in 44 form>@sms.clicksend.com is
+# texted from the number ClickSend sets for that address (Messaging Settings > Email SMS, set 5 Oct 2026).
+# ClickSend texts the email's BODY only (its "Select Message Content" setting, changed from "subject and body"
+# with Kevin's yes on 5 Oct 2026), so the text is exactly the words Kevin approved. The subject is never
+# texted; the Gmail worker refuses a blank one.
+CLICKSEND_DOMAIN = "sms.clicksend.com"
+TEXT_FROM = PROPERTY_SENDER                  # info@agilelets.co.uk: on ClickSend's allowed list
+AGILE_LETS_NUMBER = "+447984393339"          # ClickSend's number for it: the one tenants already text
+TEXT_SUBJECT = "Agile Lets"
 
 
 def now_iso():
@@ -96,19 +104,18 @@ def airtable(method, path, payload=None):
         sys.exit(f"ERROR: Airtable {method} {e.code}: {e.read().decode()[:300]}")
 
 
-def ghl(method, path, payload=None):
-    req = urllib.request.Request(f"{GHL}{path}", method=method,
-                                 data=json.dumps(payload).encode() if payload is not None else None)
-    req.add_header("Authorization", f"Bearer {read_secret(GHL_KEY_PATH, 'GoHighLevel key')}")
-    req.add_header("Version", "2021-07-28")
-    req.add_header("Accept", "application/json")
-    req.add_header("Content-Type", "application/json")
-    req.add_header("User-Agent", "od-send-text/1.0")
-    try:
-        with urllib.request.urlopen(req, timeout=45) as r:
-            return json.loads(r.read() or b"{}")
-    except urllib.error.HTTPError as e:
-        sys.exit(f"ERROR: GoHighLevel {e.code}: {e.read().decode()[:300]}")
+def send_email_module():
+    """scripts/send-email.py, for its Gmail worker call and its reading of a refusal: one road to the worker."""
+    spec = importlib.util.spec_from_file_location("send_email", os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                                                                             "send-email.py"))
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+def clicksend_address(number):
+    """The email-to-text address for a +447 mobile: its digits in 44 form, at ClickSend's domain."""
+    return f"{number.lstrip('+')}@{CLICKSEND_DOMAIN}"
 
 
 def uk_mobile(raw):
@@ -159,17 +166,6 @@ def ledger_append(row):
     os.makedirs(STATE_DIR, exist_ok=True)
     with open(LEDGER, "a") as fh:
         fh.write(json.dumps(row) + "\n")
-
-
-def find_contact(number):
-    """The GoHighLevel contact id for a number in the Agile Lets location, or "" (read only). A contact
-    whose own phone is not that number is refused: the text goes to the contact's phone."""
-    location = read_secret(GHL_LOCATION_PATH, "GoHighLevel location id")
-    found = ghl("GET", "/contacts/search/duplicate?" + urllib.parse.urlencode({"locationId": location, "number": number}))
-    contact = (found or {}).get("contact") or {}
-    if contact and uk_mobile(contact.get("phone")) != number:
-        sys.exit("REFUSED: the GoHighLevel contact found for the number holds a different phone; nothing sent.")
-    return str(contact.get("id") or "")
 
 
 def load_card(task_id, dry_run):
@@ -234,47 +230,32 @@ def _cmd_send(args):
     if not on and not args.dry_run:
         sys.exit("REFUSED: text sending is switched off. It is switched on only at the cut-over, by Kevin's decision "
                  f"({SWITCH}).")
-    from_number = ""
-    if os.path.exists(FROM_NUMBER_PATH):
-        with open(FROM_NUMBER_PATH) as fh:
-            from_number = uk_mobile(fh.read())
-    if not from_number and not args.dry_run:
-        sys.exit(f"REFUSED: no Agile Lets sending number is on file ({FROM_NUMBER_PATH}), so nothing is sent.")
     f, number, message, trial, outcome = load_card(args.task, args.dry_run)
-    contact = find_contact(number)
     if args.dry_run:
         print(json.dumps({"dryRun": True, "task": args.task, "switchedOn": on, "trial": trial or None,
-                          "fromNumberSet": bool(from_number),
-                          "approvalOutcome": outcome or "(not yet approved)", "contactFound": bool(contact),
+                          "approvalOutcome": outcome or "(not yet approved)", "route": f"{TEXT_FROM} by ClickSend email-to-text",
                           "numberEnds": number[-3:], "chars": len(message)}, indent=2))
         return 0
-    if not contact:
-        location = read_secret(GHL_LOCATION_PATH, "GoHighLevel location id")
-        made = ghl("POST", "/contacts/upsert", {"locationId": location, "phone": number})
-        made = (made or {}).get("contact") or {}
-        if uk_mobile(made.get("phone")) != number:
-            sys.exit(f"ERROR: task {args.task}: the GoHighLevel contact made for the number holds a different phone; "
-                     "nothing sent.")
-        contact = str(made.get("id") or "")
-        if not contact:
-            sys.exit(f"ERROR: task {args.task}: GoHighLevel did not return a contact for the number; nothing sent.")
+    se = send_email_module()
     ledger_append({"task": args.task, "ts": now_iso(), "event": "intent", "numberEnds": number[-3:], "chars": len(message)})
     try:
-        sent = ghl("POST", "/conversations/messages", {"type": "SMS", "contactId": contact, "message": message,
-                                                       "fromNumber": from_number})
+        sent = se.worker_call(se.SEND_URL, {"to": clicksend_address(number), "from": TEXT_FROM,
+                                            "subject": TEXT_SUBJECT, "text": message})
     except SystemExit as exc:
-        # A refusal GoHighLevel answers with (4xx) left nothing; anything else may have gone.
+        # The worker's refusal before anything left (send-email.py's own reading) may be retried; anything
+        # else may have gone, and is never sent twice.
         error = str(exc)[:300]
-        ledger_append({"task": args.task, "ts": now_iso(), "event": "failed" if re.match(r"ERROR: GoHighLevel 4\d\d:", error)
+        ledger_append({"task": args.task, "ts": now_iso(), "event": "failed" if se.NOT_SENT_RE.search(error)
                        else "uncertain", "error": error})
         raise
     ledger_append({"task": args.task, "ts": now_iso(), "event": "sent", "numberEnds": number[-3:],
-                   "messageId": str((sent or {}).get("messageId") or (sent or {}).get("id") or "")})
+                   "messageId": str((sent or {}).get("id") or "")})
     stamp = datetime.now().strftime("%d %b %Y %H:%M")
     try:
         live = (airtable("GET", f"{TASKS}/{args.task}?returnFieldsByFieldId=true").get("fields") or {})
         notes = (str(live.get(AF["notes"]) or "").rstrip() + "\n\n"
-                 + f"[{stamp} — send-text] SENT: text to the number ending {number[-3:]} ({len(message)} characters)").strip()
+                 + f"[{stamp} — send-text] SENT: text to the number ending {number[-3:]} ({len(message)} characters), "
+                 f"by ClickSend from {AGILE_LETS_NUMBER}").strip()
         airtable("PATCH", f"{TASKS}/{args.task}", {"fields": {AF["notes"]: notes[-90000:]}})
     except (SystemExit, Exception) as exc:                   # noqa: BLE001 — the text went; said, never undone
         print(f"WARNING: sent, but the SENT stamp could not be written: {exc}", file=sys.stderr)
@@ -300,17 +281,6 @@ def _cmd_send(args):
     return 0
 
 
-def cmd_lookup(args):
-    rec = airtable("GET", f"{TENANTS}/{args.tenant}?returnFieldsByFieldId=true")
-    number = uk_mobile((rec.get("fields") or {}).get(TENANT_PHONE))
-    if not number:
-        print(json.dumps({"tenant": args.tenant, "mobile": False}))
-        return 0
-    contact = find_contact(number)
-    print(json.dumps({"tenant": args.tenant, "mobile": True, "numberEnds": number[-3:], "contactFound": bool(contact)}))
-    return 0
-
-
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     sub = ap.add_subparsers(dest="cmd", required=True)
@@ -318,11 +288,8 @@ def main(argv=None):
     s.add_argument("task")
     s.add_argument("--dry-run", action="store_true")
     s.set_defaults(fn=cmd_send)
-    lk = sub.add_parser("lookup")
-    lk.add_argument("--tenant", required=True)
-    lk.set_defaults(fn=cmd_lookup)
     a = ap.parse_args(argv)
-    if not re.fullmatch(r"rec[A-Za-z0-9]{14}", getattr(a, "task", None) or getattr(a, "tenant", "") or ""):
+    if not re.fullmatch(r"rec[A-Za-z0-9]{14}", a.task or ""):
         sys.exit("ERROR: an Airtable record id is needed")
     return a.fn(a)
 

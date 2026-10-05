@@ -1,7 +1,8 @@
 // The text route (Cash Flow Voids cut-over build, 3 Oct 2026; Kevin approved "Build as-is"):
-// scripts/send-text.py sends an approved card's TEXT line from the Agile Lets number through
-// GoHighLevel, and refuses everything else. These drive the REAL script with Airtable and GoHighLevel
-// stubbed: no test reaches either, and no test can send a text. Every id, name and number is invented.
+// scripts/send-text.py sends an approved card's TEXT line from the Agile Lets ClickSend number, by
+// ClickSend's email-to-text through the Gmail worker (Kevin, 5 Oct 2026), and refuses everything else.
+// These drive the REAL script with Airtable and the worker stubbed: no test reaches either, and no test
+// can send a text. Every id, name and number is invented.
 import { describe, it, expect } from 'vitest';
 import { execFileSync } from 'node:child_process';
 import path from 'node:path';
@@ -21,10 +22,8 @@ SCRATCH = tempfile.mkdtemp()
 st.STATE_DIR = SCRATCH
 st.LEDGER = os.path.join(SCRATCH, "sent-text.jsonl")
 st.SWITCH = os.path.join(SCRATCH, "text-sending-on")
-for name, value in (("GHL_KEY_PATH", "k"), ("GHL_LOCATION_PATH", "locTest"), ("FROM_NUMBER_PATH", "07700 900555")):
-    path = os.path.join(SCRATCH, name)
-    open(path, "w").write(value)
-    setattr(st, name, path)
+SE = load_mod("se_for_text", "send-email.py")      # the real worker reading, with only the call stubbed
+st.send_email_module = lambda: SE
 AF = st.AF
 import agent_email_format as aef
 def trial_ended():                                  # what Kevin's cut-over PR does: the entry moves to TRIAL_ENDED
@@ -44,7 +43,7 @@ def card(output=OUTPUT, outcome="Approved as-is", agent=CFV, name="RENT LATE: Un
         AF["notes"]: notes, AF["tenants"]: list(tenants), AF["status"]: status, aef.TASK_TENANCIES: list(tenancies)}}
 TENANT_NUMBER = {"recTenantTest0001": "+44 7700 900123"}
 CALLS = []
-def run(rec, dry=False, contact="ghlContact1", ghl_fail=None, contact_phone="+447700900123"):
+def run(rec, dry=False, worker_fail=None):
     CALLS.clear()
     def airtable(method, path, payload=None):
         CALLS.append(["airtable", method, path.split("?")[0]])
@@ -54,16 +53,12 @@ def run(rec, dry=False, contact="ghlContact1", ghl_fail=None, contact_phone="+44
         if method == "PATCH":
             return {}
         return rec
-    def ghl(method, path, payload=None):
-        CALLS.append(["ghl", method, path.split("?")[0], payload])
-        if path.startswith("/contacts/search/duplicate"):
-            return {"contact": {"id": contact, "phone": contact_phone} if contact else None}
-        if path == "/contacts/upsert":
-            return {"contact": {"id": "ghlNew", "phone": contact_phone}}
-        if ghl_fail:
-            raise SystemExit(ghl_fail)
-        return {"messageId": "msg1"}
-    st.airtable, st.ghl = airtable, ghl
+    def worker_call(url, payload=None):
+        CALLS.append(["worker", url, payload])
+        if worker_fail:
+            raise SystemExit(worker_fail)
+        return {"id": "gmailMsg1", "threadId": "gmailThread1"}
+    st.airtable, SE.worker_call = airtable, worker_call
     buf = io.StringIO()
     try:
         with contextlib.redirect_stdout(buf):
@@ -71,7 +66,7 @@ def run(rec, dry=False, contact="ghlContact1", ghl_fail=None, contact_phone="+44
         return {"ok": buf.getvalue().strip(), "calls": list(CALLS)}
     except SystemExit as e:
         return {"refused": str(e.code), "calls": list(CALLS)}
-def sends(result): return [c for c in result["calls"] if c[0] == "ghl" and c[2] == "/conversations/messages"]
+def sends(result): return [c for c in result["calls"] if c[0] == "worker"]
 `;
 function py(body) {
   const out = execFileSync('python3', ['-c', HARNESS + body], { encoding: 'utf8' });
@@ -217,41 +212,35 @@ first = run(card())
 again = run(card())
 ledger = [json.loads(l)["event"] for l in open(st.LEDGER)]
 os.remove(st.LEDGER)
-new = run(card(), contact="")
-os.remove(st.LEDGER)
-fail4 = run(card(), ghl_fail="ERROR: GoHighLevel 422: invalid")
+stampPatch = [c for c in first["calls"] if c[0] == "airtable" and c[1] == "PATCH"]
+fail4 = run(card(), worker_fail="ERROR: worker 422: bad address")
 retry = run(card())
 os.remove(st.LEDGER)
-fail5 = run(card(), ghl_fail="ERROR: GoHighLevel 502: bad gateway")
+fail5 = run(card(), worker_fail="ERROR: worker 502: bad gateway")
 after5 = run(card())
 os.remove(st.LEDGER)
-wrongPhone = run(card(), contact_phone="+447700900999")
-madeWrong = run(card(), contact="", contact_phone="+447700900999")
-os.remove(st.FROM_NUMBER_PATH)
-noFrom = run(card())
-print(json.dumps({"noFrom": [noFrom.get("refused", ""), len(sends(noFrom))], "wrongPhone": wrongPhone.get("refused", ""), "wrongPhoneSends": len(sends(wrongPhone)),
-                  "madeWrong": madeWrong.get("refused", ""), "madeWrongSends": len(sends(madeWrong)),"sent": sends(first), "ok": first["ok"], "again": again.get("refused", ""), "ledger": ledger,
-                  "upsert": [c[2] for c in new["calls"] if c[0] == "ghl"], "retry": len(sends(retry)), "after5": after5.get("refused", "")}))`);
+gone = run(card(), worker_fail="ERROR: worker call failed: TimeoutError: timed out")
+afterGone = run(card())
+print(json.dumps({"sent": sends(first), "ok": first["ok"], "again": again.get("refused", ""), "ledger": ledger,
+                  "stamped": len(stampPatch), "retry": len(sends(retry)), "after5": after5.get("refused", ""),
+                  "afterGone": afterGone.get("refused", "")}))`);
     expect(r.sent).toHaveLength(1);
-    // From the Agile Lets number on file, never the location's default.
-    expect(r.sent[0][3]).toEqual({ type: 'SMS', contactId: 'ghlContact1', fromNumber: '+447700900555',
-      message: 'Hello Sam, your rent due 1 Oct has not reached us. Please pay or reply. Roy, Agile Lets' });
+    // One email from info@agilelets.co.uk to the tenant's number at ClickSend: its body is the text, verbatim.
+    expect(r.sent[0][1]).toBe('https://drive-upload.kevinbrittain.workers.dev/send-email');
+    // ClickSend texts the body only (its setting since 5 Oct 2026); the worker needs a subject, never texted.
+    expect(r.sent[0][2]).toEqual({ to: '447700900123@sms.clicksend.com', from: 'info@agilelets.co.uk', subject: 'Agile Lets',
+      text: 'Hello Sam, your rent due 1 Oct has not reached us. Please pay or reply. Roy, Agile Lets' });
+    expect(r.stamped).toBe(1);
     // The card links no tenancy, so no tenancy comment can be written: said, and the text still stands.
     expect(JSON.parse(r.ok)).toEqual({ sent: 'recCARDTEXT000001', numberEnds: '123', tenancyNoted: [],
       tenancyNoteProblem: 'the card names no tenancy, so no tenancy comment was written' });
     expect(r.again).toMatch(/already texted, or its text may have gone \(sent/);
     expect(r.ledger).toEqual(['intent', 'sent']);
-    // Not yet a contact in GoHighLevel: made one, then sent.
-    expect(r.upsert).toEqual(['/contacts/search/duplicate', '/contacts/upsert', '/conversations/messages']);
-    // Refused by GoHighLevel (4xx): nothing left, so it may be sent again.
+    // Refused by the worker before anything left (send-email.py's own reading): it may be sent again.
     expect(r.retry).toBe(1);
     // Anything else may have gone: never sent twice.
     expect(r.after5).toMatch(/may have gone \(uncertain/);
-    // The text goes to the contact's own phone: a contact holding another number is refused.
-    expect([r.wrongPhone, r.wrongPhoneSends]).toEqual([expect.stringMatching(/holds a different phone/), 0]);
-    expect([r.madeWrong, r.madeWrongSends]).toEqual([expect.stringMatching(/holds a different phone/), 0]);
-    // No Agile Lets sending number on file: nothing goes from a default number.
-    expect(r.noFrom).toEqual([expect.stringMatching(/no Agile Lets sending number is on file/), 0]);
+    expect(r.afterGone).toMatch(/may have gone \(uncertain/);
   });
 
   it('the tenancy shows the text: one dated comment on the tenancy the card links (Kevin, 5 Oct 2026)', () => {
@@ -264,13 +253,20 @@ print(json.dumps({"ok": json.loads(done["ok"]), "posts": [c for c in done["calls
     expect(r.posts).toEqual([['airtable', 'POST', 'tblN51a88qTDB6iMH/recTenancyText001/comments']]);
   });
 
-  it('a dry run checks the card, finds the contact read only, and sends nothing (even switched off, even on trial)', () => {
+  it('a dry run checks the card and sends nothing (even switched off, even on trial)', () => {
     const r = py(`
 res = run(card(outcome=""), dry=True)
-print(json.dumps({"out": json.loads(res["ok"]), "ghl": [[c[1], c[2]] for c in res["calls"] if c[0] == "ghl"]}))`);
-    expect(r.out).toMatchObject({ dryRun: true, switchedOn: false, contactFound: true, numberEnds: '123' });
+print(json.dumps({"out": json.loads(res["ok"]), "worker": len(sends(res))}))`);
+    expect(r.out).toMatchObject({ dryRun: true, switchedOn: false, numberEnds: '123', route: 'info@agilelets.co.uk by ClickSend email-to-text' });
     expect(r.out.trial).toMatch(/trial run/);
-    expect(r.ghl).toEqual([['GET', '/contacts/search/duplicate']]);
+    expect(r.worker).toBe(0);
+  });
+
+  it('the ClickSend address is the number in 44 form, and nothing but a +447 mobile reaches it', () => {
+    const r = py(`
+print(json.dumps({"addr": st.clicksend_address(st.uk_mobile("07700 900123")), "own": st.AGILE_LETS_NUMBER == st.uk_mobile("07984 393339"),
+                  "from": st.TEXT_FROM}))`);
+    expect(r).toEqual({ addr: '447700900123@sms.clicksend.com', own: true, from: 'info@agilelets.co.uk' });
   });
 
   it('UK mobiles in every common spelling; anything else is not one', () => {
