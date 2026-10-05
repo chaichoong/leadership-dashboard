@@ -48,7 +48,8 @@ from datetime import datetime, timezone
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from approval_evidence import approval_evidence_problem  # noqa: E402
-from agent_email_format import TRIAL_STAMP, EmailFormatError, parse_text, text_card, trial_problem  # noqa: E402
+from agent_email_format import (TASK_TENANCIES, TENANCIES_TABLE, TRIAL_STAMP, EmailFormatError, parse_text,  # noqa: E402
+                                tenancies_to_note, tenancy_comment, text_card, trial_problem)
 
 BASE_ID, TASKS, TENANTS = "appnqjDpqDniH3IRl", "tblqB8b22hKBL4PF1", "tblX4elTuu01gwBYh"
 AF = {  # kept identical to scripts/send-email.py AF (tests/send-text.test.js)
@@ -275,9 +276,27 @@ def _cmd_send(args):
         notes = (str(live.get(AF["notes"]) or "").rstrip() + "\n\n"
                  + f"[{stamp} — send-text] SENT: text to the number ending {number[-3:]} ({len(message)} characters)").strip()
         airtable("PATCH", f"{TASKS}/{args.task}", {"fields": {AF["notes"]: notes[-90000:]}})
-    except SystemExit as exc:
+    except (SystemExit, Exception) as exc:                   # noqa: BLE001 — the text went; said, never undone
         print(f"WARNING: sent, but the SENT stamp could not be written: {exc}", file=sys.stderr)
-    print(json.dumps({"sent": args.task, "numberEnds": number[-3:]}))
+    # The tenancy shows every action (Kevin, 5 Oct 2026). The text went: a failure here is said, never undone.
+    noted, problem = [], ""
+    try:
+        f = airtable("GET", f"{TASKS}/{args.task}?returnFieldsByFieldId=true").get("fields") or {}
+        ids = tenancies_to_note(f.get(AF["name"]), f.get(AF["notes"]),
+                                list(f.get(AF["sentForApprovalBy"]) or []) + list(f.get(AF["teamMember"]) or []),
+                                f.get(TASK_TENANCIES), f.get(AF["agentOutput"]))
+        if ids == []:
+            problem = "the card names no tenancy, so no tenancy comment was written"
+        for t in ids or []:
+            airtable("POST", f"{TENANCIES_TABLE}/{t}/comments",
+                     {"text": tenancy_comment(stamp, f"texted the tenant on the number ending {number[-3:]}", args.task)})
+            noted.append(t)
+    except (SystemExit, Exception) as exc:                   # noqa: BLE001
+        problem = f"the tenancy comment could not be written: {str(exc)[:200]}"
+    if problem:
+        print(f"WARNING: sent, but {problem}", file=sys.stderr)
+    print(json.dumps({"sent": args.task, "numberEnds": number[-3:], "tenancyNoted": noted,
+                      "tenancyNoteProblem": problem or None}))
     return 0
 
 

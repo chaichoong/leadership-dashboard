@@ -528,13 +528,16 @@ print(json.dumps({"from": parsed["from"], "to": parsed["to"], "body": parsed["bo
     expect(r.body).not.toMatch(/Carrying this out|TRACK RECORD/);
   });
 
-  it.skipIf(!existsSync(AGENT_FILE))('the agent file says trial, the sender, the sign-off and the two things it never does', () => {
+  it.skipIf(!existsSync(AGENT_FILE))('the agent file says the trial ended and approval still sends, the sender, the sign-off and the two things it never does', () => {
     const f = readFileSync(AGENT_FILE, 'utf8');
     expect(f).toMatch(/^name: cash-flow-voids$/m);
     expect(f).toContain('FROM: info@agilelets.co.uk');
     expect(f).toContain('Roy Lavin\n   Agile Lets');
     expect(f).toContain('--agent rec7aHLK1Q8fMLRXH');
-    expect(f).toMatch(/You are on trial/);
+    // The trial ended on 5 Oct 2026: the file says so, and that every card still waits for Kevin's approval.
+    expect(f).toMatch(/Your trial ended \(Kevin, 5 Oct 2026/);
+    expect(f).toMatch(/Every card still waits for\s+Kevin's approval/);
+    expect(f).not.toMatch(/You are on trial/);
     expect(f).toMatch(/Never contact the DWP/);
     expect(f).toMatch(/Never mention court, eviction, notice/);
     expect(f).toContain("## Decision criteria (Kevin's ruling, 7 Sep 2026)");

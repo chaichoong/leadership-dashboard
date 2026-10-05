@@ -36,11 +36,12 @@ OUTPUT = ("TEXT TO: 07700 900123\\nTEXT: Hello Sam, your rent due 1 Oct has not 
           "TO: sam@example.com\\nFROM: info@agilelets.co.uk\\nSUBJECT: Your rent at 1 Example Road\\n---\\nHello Sam,\\n\\nBody.\\n\\n"
           "Kind regards\\nRoy Lavin\\nAgile Lets\\n\\n**Carrying this out will involve:** an email and a text.")
 def card(output=OUTPUT, outcome="Approved as-is", agent=CFV, name="RENT LATE: Unit 9, rent due 1 Oct (reminder)", ttype="Correspondence",
-         approved_at="2026-10-03T10:00:00.000Z", tenants=("recTenantTest0001",), status="Today", notes="RENT CHECK KEY: recT:2026-10-01:1"):
+         approved_at="2026-10-03T10:00:00.000Z", tenants=("recTenantTest0001",), status="Today", notes="RENT CHECK KEY: recT:2026-10-01:1",
+         tenancies=()):
     return {"id": "recCARDTEXT000001", "createdTime": "2026-10-03T09:00:00.000Z", "fields": {
         AF["name"]: name, AF["agentOutput"]: output, AF["approvalOutcome"]: outcome, AF["taskType"]: ttype,
         AF["sentForApprovalBy"]: [agent], AF["teamMember"]: [agent], AF["approvedAt"]: approved_at,
-        AF["notes"]: notes, AF["tenants"]: list(tenants), AF["status"]: status}}
+        AF["notes"]: notes, AF["tenants"]: list(tenants), AF["status"]: status, aef.TASK_TENANCIES: list(tenancies)}}
 TENANT_NUMBER = {"recTenantTest0001": "+44 7700 900123"}
 CALLS = []
 def run(rec, dry=False, contact="ghlContact1", ghl_fail=None, contact_phone="+447700900123"):
@@ -235,7 +236,9 @@ print(json.dumps({"noFrom": [noFrom.get("refused", ""), len(sends(noFrom))], "wr
     // From the Agile Lets number on file, never the location's default.
     expect(r.sent[0][3]).toEqual({ type: 'SMS', contactId: 'ghlContact1', fromNumber: '+447700900555',
       message: 'Hello Sam, your rent due 1 Oct has not reached us. Please pay or reply. Roy, Agile Lets' });
-    expect(JSON.parse(r.ok)).toEqual({ sent: 'recCARDTEXT000001', numberEnds: '123' });
+    // The card links no tenancy, so no tenancy comment can be written: said, and the text still stands.
+    expect(JSON.parse(r.ok)).toEqual({ sent: 'recCARDTEXT000001', numberEnds: '123', tenancyNoted: [],
+      tenancyNoteProblem: 'the card names no tenancy, so no tenancy comment was written' });
     expect(r.again).toMatch(/already texted, or its text may have gone \(sent/);
     expect(r.ledger).toEqual(['intent', 'sent']);
     // Not yet a contact in GoHighLevel: made one, then sent.
@@ -249,6 +252,16 @@ print(json.dumps({"noFrom": [noFrom.get("refused", ""), len(sends(noFrom))], "wr
     expect([r.madeWrong, r.madeWrongSends]).toEqual([expect.stringMatching(/holds a different phone/), 0]);
     // No Agile Lets sending number on file: nothing goes from a default number.
     expect(r.noFrom).toEqual([expect.stringMatching(/no Agile Lets sending number is on file/), 0]);
+  });
+
+  it('the tenancy shows the text: one dated comment on the tenancy the card links (Kevin, 5 Oct 2026)', () => {
+    const r = py(`
+open(st.SWITCH, "w").write("on")
+trial_ended()
+done = run(card(tenancies=("recTenancyText001",)))
+print(json.dumps({"ok": json.loads(done["ok"]), "posts": [c for c in done["calls"] if c[0] == "airtable" and c[1] == "POST"]}))`);
+    expect(r.ok).toEqual({ sent: 'recCARDTEXT000001', numberEnds: '123', tenancyNoted: ['recTenancyText001'], tenancyNoteProblem: null });
+    expect(r.posts).toEqual([['airtable', 'POST', 'tblN51a88qTDB6iMH/recTenancyText001/comments']]);
   });
 
   it('a dry run checks the card, finds the contact read only, and sends nothing (even switched off, even on trial)', () => {
