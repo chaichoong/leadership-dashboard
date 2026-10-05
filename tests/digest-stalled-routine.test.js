@@ -67,6 +67,12 @@ function runDigest() {
       JOB_QUEUE_DIR: queueDir,
       JOB_QUEUE_SCHEDULE: schedulePath,
       FINDINGS_FILE: join(logDir, 'no-findings.jsonl'),
+      // Off here, as in job-queue.test.js (5 Oct 2026). With the real 45 minute
+      // grace, today's 02:30 run is not yet expected from 02:30 to 03:15, so the
+      // halted-release back-test saw "0 ran" and failed every night in that
+      // window, blocking the pre-push gate and merge-pr.py. The run-of-days count
+      // starts yesterday and never reads the grace, so nothing else moves.
+      DIGEST_GRACE_MINUTES: '0',
     },
   };
   try {
