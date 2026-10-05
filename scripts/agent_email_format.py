@@ -198,7 +198,8 @@ def strip_track_record(text):
 
 # Who may send a text at all (review, 4 Oct 2026): only the rent lanes' own tenant cards, known by
 # their name or their key line (TRIAL_TASK_MARKS below). Any other card's TEXT lines are never sent.
-TEXT_CARD_MARKS = {"prefix": ("RENT LATE: ", "RENT ASK: ", "RENT PLAN: "), "note": "RENT CHECK KEY: "}
+# RENT CAP (lane C, 5 Oct 2026): the benefit-cap email to a tenant is the lane's own tenant card too.
+TEXT_CARD_MARKS = {"prefix": ("RENT LATE: ", "RENT ASK: ", "RENT PLAN: ", "RENT CAP: "), "note": "RENT CHECK KEY: "}
 
 
 def parse_plan(output):
@@ -557,8 +558,9 @@ TRIAL_STAMP = "TRIAL CHECKED"
 # ASK_PREFIX in scripts/rent_new_tenant.py (lane B's tenant drafts carry the same key mark)
 # (tests/cash-flow-voids-agent.test.js, tests/rent-new-tenant.test.js).
 TRIAL_TASK_MARKS = {
-    # RENT PLAN (4 Oct 2026): a payment plan card is the lane's own tenant card too.
-    "rec7aHLK1Q8fMLRXH": {"prefix": ("RENT LATE: ", "RENT ASK: ", "RENT PLAN: "), "note": "RENT CHECK KEY: "},
+    # RENT PLAN (4 Oct 2026): a payment plan card is the lane's own tenant card too. So is RENT CAP
+    # (lane C, 5 Oct 2026): the email asking a capped tenant for his details (scripts/rent_cap.py).
+    "rec7aHLK1Q8fMLRXH": {"prefix": ("RENT LATE: ", "RENT ASK: ", "RENT PLAN: ", "RENT CAP: "), "note": "RENT CHECK KEY: "},
 }
 # A ROBOT FORM CARD (Cash Flow Voids lane B, 3 Oct 2026; Kevin's ruling "Robot fills, you pick
 # reason"). The rent check raises the direct rent payment form card. Approving it opens ONE door:
@@ -576,9 +578,26 @@ FORM_CARDS = {
 }
 
 
+# A CARD KEVIN WORKS HIMSELF (Cash Flow Voids lane C, 5 Oct 2026; Kevin's ruling on 4 Oct 2026 "Yes, runs
+# for real"). The rent check raises the council housing payment claim card (RENT CLAIM) and the card asking
+# for the council's answer (RENT CLAIM DECISION). Kevin fills in the council's form himself and records its
+# answer. Every door is shut for them exactly as for a robot form card: never an agent's work, never sent,
+# never settled as a trial check, never a lesson, never scored as a draft. But no robot window ever opens
+# for them: form_card() with `holders` never names one. "RENT CLAIM" covers both names. Kept identical to
+# CLAIM_PREFIX and CLAIM_KEY_MARK in scripts/rent_cap.py, KEVIN_CARD_MARKS in scripts/task-manager.py and
+# js/agent-accuracy.js (tests/rent-cap.test.js).
+KEVIN_CARDS = {
+    "rec7aHLK1Q8fMLRXH": {"prefix": "RENT CLAIM", "note": "RENT CLAIM KEY: "},
+}
+
+
 def form_card(name="", notes="", holders=None):
-    """True for a robot form card. With `holders` (the task's agent ids), only a card carrying
+    """True for a robot form card, or a card Kevin works himself (KEVIN_CARDS): every door but the
+    window is shut for both. With `holders` (the task's agent ids), only a robot form card carrying
     BOTH marks and held by the lane's own agent: the test for opening the robot's window."""
+    if holders is None and any(str(name or "").startswith(m["prefix"]) or m["note"] in str(notes or "")
+                               for m in KEVIN_CARDS.values()):
+        return True
     for agent_id, marks in FORM_CARDS.items():
         has = (str(name or "").startswith(marks["prefix"]), marks["note"] in str(notes or ""))
         if holders is None and any(has):

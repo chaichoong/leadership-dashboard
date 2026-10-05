@@ -492,8 +492,9 @@ AUTO_ROUTES = (
 # The tenants a reply could come from: those with an open RENT LATE or RENT PLAN task, and those whose
 # payment plan is agreed and still running (the plan card is his own reply, with no tenant linked:
 # its PLAN FOR line names the tenancy).
-RENT_REPLY_FORMULA = ("AND(OR(LEFT({Task Name}, 11)='RENT LATE: ', LEFT({Task Name}, 11)='RENT PLAN: '), "
-                      "NOT({Status}='Completed'), NOT({Status}='Cancelled'))")
+# RENT CAP (lane C, 5 Oct 2026): a capped tenant answering the benefit-cap email is the lane's too.
+RENT_REPLY_FORMULA = ("AND(OR(LEFT({Task Name}, 11)='RENT LATE: ', LEFT({Task Name}, 11)='RENT PLAN: ', "
+                      "LEFT({Task Name}, 10)='RENT CAP: '), NOT({Status}='Completed'), NOT({Status}='Cancelled'))")
 RUNNING_PLAN_FORMULA = ("AND(FIND('PLAN FOR: rec', {Agent Output}&''), LEN({Approval Outcome}&'')>0, "
                         "FIND('— send-email] SENT: email to', {Notes}&''), NOT(FIND('RENT PLAN MISSED: ', {Notes}&'')), "
                         "NOT(FIND('RENT PLAN KEPT: ', {Notes}&'')), NOT(FIND('RENT PLAN SUPERSEDED: ', {Notes}&'')))")
@@ -5571,6 +5572,59 @@ def signed_handoff_note(stamp, agreement, pdf, then):
             f"submit for Kevin's approval; the signed PDF must be the attachment.")
 
 
+AUTHORITY_SIGNED = "fldHPe9YQ6GmlrKBt"     # Tenants: Authority Signed (checkbox; workers/property-manager/fields.mjs)
+# A tenant's letter of authority is named this way in Adobe (the Cash Flow Voids agent file says so). A
+# document that only mentions an authority ("Local Authority ...") never ticks anything.
+AUTHORITY_RE = re.compile(r"^\s*letters? of (?:authority|authori[sz]ation)\b", re.I)
+SIGNERS_LINE_RE = re.compile(r"^\s*SIGNERS:\s*(.+)$", re.I | re.M)
+# The signers, kept in Notes by the hand-off: by the next poll the agent has usually replaced the card's text
+# with its report, so a retried tick reads them here (second review, 5 Oct 2026).
+AUTHORITY_SIGNERS_MARK = "AUTHORITY SIGNERS:"
+AUTHORITY_SIGNERS_RE = re.compile(r"^\s*AUTHORITY SIGNERS:\s*(.+)$", re.M)
+EMAIL_IN_RE = re.compile(r"[^@\s,<>;]+@[^@\s,<>;]+\.[^@\s,<>;]+")
+
+
+def authority_signers(task_fields):
+    """The signers' emails, lower case: from the card's SIGNERS line, and from the hand-off's own Notes line."""
+    lines = [m.group(1) for m in SIGNERS_LINE_RE.finditer(str(task_fields.get(AF["agentOutput"]) or ""))]
+    lines += [m.group(1) for m in AUTHORITY_SIGNERS_RE.finditer(str(task_fields.get(AF["notes"]) or ""))]
+    return {e.lower().strip(".") for line in lines for e in EMAIL_IN_RE.findall(line)}
+
+
+def tick_authority(task_fields, agreement):
+    """Tick Authority Signed on each tenant the task links who SIGNED the document, when it is a tenant's letter of
+    authority (its Adobe agreement name opens "Letter of authority"). A signer is matched by email: the card's
+    SIGNERS line against the tenant's record, so a joint tenant who did not sign is never ticked. Returns
+    (tenant ids ticked now, why nothing was ticked or ""); one already ticked is left alone. A read that misses
+    a tenant raises."""
+    if not AUTHORITY_RE.search(str(agreement or "")):
+        return [], ""
+    ids = [t for t in links(task_fields.get(TASK_TENANTS)) if re.fullmatch(r"rec[A-Za-z0-9]{14}", t)]
+    if not ids:
+        return [], "the task links no tenant"
+    signers = authority_signers(task_fields)
+    if not signers:
+        return [], "the task's card names no SIGNERS"
+    formula = "OR(" + ",".join(f"RECORD_ID()='{t}'" for t in ids) + ")"
+    rows = {r["id"]: r.get("fields") or {} for r in query_records(TENANTS_TABLE, formula, [AUTHORITY_SIGNED, TENANT_EMAIL])}
+    if set(rows) != set(ids):
+        raise RuntimeError(f"tenants {sorted(set(ids) - set(rows))} could not be read, so Authority Signed was not ticked")
+    # One of our own addresses on a tenant record is a placeholder, never the tenant's signature; and an email two
+    # linked tenants share cannot say which of them signed (review, 5 Oct 2026): neither ticks anyone.
+    email = {t: str(rows[t].get(TENANT_EMAIL) or "").strip().lower() for t in ids}
+    shared = {e for e in email.values() if e and list(email.values()).count(e) > 1}
+    signed = [t for t in ids if email[t] in signers and email[t] not in OWN_ADDRESSES and email[t] not in shared]
+    if not signed:
+        why = ("the signer's email is shared by more than one linked tenant, so who signed is not known"
+               if signers & shared else "no tenant the task links signed it (matched by email)")
+        return [], why
+    todo = [t for t in signed if not rows[t].get(AUTHORITY_SIGNED)]
+    for i in range(0, len(todo), 10):                 # Airtable writes ten records at a time
+        _request("PATCH", f"/{TENANTS_TABLE}", {"records": [{"id": t, "fields": {AUTHORITY_SIGNED: True}} for t in todo[i:i + 10]],
+                                                "typecast": False})
+    return todo, ""
+
+
 def cmd_signed(args):
     """Gate 2 begins here. Called by signature-watch.js the moment a
     registered document comes back signed (4 Sep 2026: three letters of
@@ -5583,10 +5637,18 @@ def cmd_signed(args):
     rec = get_task(args.task)
     tf = rec.get("fields", {}) or {}
     notes = str(tf.get(AF["notes"]) or "")
+    # A LETTER OF AUTHORITY ticks Authority Signed on the tenants who signed it (Cash Flow Voids lane C, 5 Oct
+    # 2026): the benefit-cap claim card waits on that tick. It never holds up the hand-off: a failed tick is said
+    # and exits 1, so signature-watch offers the row again and the next poll ticks it ("already handed off").
+    tick = {"authorityTicked": [], "authorityNote": "", "authorityError": ""}
+    try:
+        tick["authorityTicked"], tick["authorityNote"] = tick_authority(tf, args.agreement)
+    except Exception as exc:                          # noqa: BLE001 — said in the JSON and the exit code
+        tick["authorityError"] = f"Authority Signed could not be ticked: {str(exc)[:200]}"
     if SIGNED_MARK in notes and args.agreement in notes:
-        print(json.dumps({"task": args.task, "reopened": False,
+        print(json.dumps({"task": args.task, "reopened": False, **tick,
                           "reason": "already handed off"}))
-        return 0
+        return 1 if tick["authorityError"] else 0
     if not os.path.exists(args.pdf):
         sys.exit(f"ERROR: signed PDF not found at {args.pdf}; refusing to "
                  "hand off a document that is not on disk.")
@@ -5596,6 +5658,9 @@ def cmd_signed(args):
                  "with nobody to carry it is exactly the miss this exists to stop.")
     stamp = datetime.now(LONDON).strftime("%d %b %Y %H:%M")
     note = signed_handoff_note(stamp, args.agreement, args.pdf, args.then)
+    signers = authority_signers(tf) if AUTHORITY_RE.search(str(args.agreement or "")) else set()
+    if signers:
+        note += f"\n{AUTHORITY_SIGNERS_MARK} {', '.join(sorted(signers))}"
     patch_task(args.task, {
         AF["status"]: "Today",
         AF["dueDate"]: today_london(),
@@ -5607,10 +5672,10 @@ def cmd_signed(args):
         AF["approvedAt"]: None,
         AF["notes"]: (notes.rstrip() + "\n\n" + note).strip()[-90000:],
     })
-    print(json.dumps({"task": args.task, "reopened": True,
+    print(json.dumps({"task": args.task, "reopened": True, **tick,
                       "agent": ALL_AGENTS.get(team[0], {}).get("agent", team[0]),
                       "then": args.then, "pdf": args.pdf}))
-    return 0
+    return 1 if tick["authorityError"] else 0
 
 
 # ── The dated trail (Kevin, 8 Sep 2026) ─────────────────────────────────────

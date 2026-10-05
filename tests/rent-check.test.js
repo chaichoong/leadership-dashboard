@@ -68,6 +68,13 @@ rc.lane_b_rules.notify_roy = _no_lane_b_write
 rc.read_agent_late = lambda: {}
 # Payment plans read their cards through this; their own cases are in tests/rent-plans.test.js.
 rc.rent_plans.read_cards = lambda _rc: []
+# Benefit-cap claims read and raise through these; their own cases are in tests/rent-cap.test.js.
+rc.rent_cap.read = lambda _rc: ({}, [])
+rc.rent_cap.read_tenants = lambda _rc, ids: {}
+rc.rent_cap.read_busy = lambda _rc: set()
+def _no_cap_write(*a, **k): raise RuntimeError("a rent-check test tried a real benefit-cap card")
+rc.rent_cap.raise_card = _no_cap_write
+rc.rent_cap.write_mark = _no_cap_write
 TY, TN, TX, AC = rc.TY, rc.TN, rc.TX, rc.AC
 DAY = date(2026, 10, 2)
 def rec(i, f): return {"id": i, "fields": f}
@@ -268,6 +275,8 @@ print(json.dumps({"short": rows["recShort"], "lights": res["lights"], "paying": 
                   "line": res["briefLine"], "worst": res["worst"]}))`);
     expect([r.short.light, r.short.lane]).toEqual(['amber', 'short']);
     expect(r.short.note).toBe('paid short: £839.00 of £900.00, last matched payment 23 Sep');
+    // The cycle weighed rides on the row: lane C raises one benefit-cap task per short cycle (scripts/rent_cap.py).
+    expect(r.short.cycle).toBe('2026-09-23');
     // Agent-managed rent arrives net of fees, two part payments make the rent, and 50p under is the rent.
     expect([r.lights.recAgent, r.lights.recSplit, r.lights.recPenny]).toEqual(['green', 'green', 'green']);
     expect([r.paying, r.total]).toEqual([4, 4]);
@@ -1105,6 +1114,28 @@ print(json.dumps({"code": code, "status": rows[0][0], "laneB": line("New-tenant 
     expect(r.laneB).toBe("New-tenant tasks: none raised, the Cash Flow Voids agent's switch could not be read.");
     // Roy's notice is gated on the same switch: unread raises nothing either.
     expect(r.agentLate).toMatch(/^Agent-managed late rent to Roy: none raised/);
+  });
+
+  it('benefit-cap claims have their own line on the row, and a failed read of them turns the run red', () => {
+    const r = py(`
+rows = []
+today = rc.today_london()
+ts = [tenancy("recG%02d" % i, 1, 500) for i in range(20)]
+rc.load = lambda day: world(ts, [paid("recG%02d" % i, today.isoformat(), 500) for i in range(20)], day=today, feed=datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.000Z"))
+rc.read_task_state = lambda: {"on": True, "status": "Built", "keys": {}}
+rc.write_row = lambda status, text, payload, now: rows.append([status, text])
+line = lambda n, start: next(l for l in rows[n][1].splitlines() if l.startswith(start))
+with contextlib.redirect_stdout(io.StringIO()):
+    calm = rc.main(["run"])
+def boom(_rc): raise RuntimeError("Airtable 503")
+rc.rent_cap.read = boom
+with contextlib.redirect_stdout(io.StringIO()):
+    broken = rc.main(["run"])
+print(json.dumps({"codes": [calm, broken], "status": [rows[0][0], rows[1][0]], "calm": line(0, "Benefit-cap claims"), "broken": line(1, "Benefit-cap claims")}))`);
+    expect(r.codes).toEqual([0, 1]);
+    expect(r.status).toEqual(['Worked', 'Failed']);
+    expect(r.calm).toBe('Benefit-cap claims: none needed today.');
+    expect(r.broken).toBe('Benefit-cap claims FAILED: benefit-cap claims could not be read: Airtable 503');
   });
 
   it('a failed raise is said on the row, turns the run red, and the rent line is still written', () => {

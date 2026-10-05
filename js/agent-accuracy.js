@@ -360,18 +360,24 @@
     // (tests/rent-form.test.js). FORM_CARD_CLAUSE leaves out a card known only by
     // its key line, for a query that does not fetch the Notes.
     var FORM_CARD_MARKS = { rec7aHLK1Q8fMLRXH: { prefix: 'RENT FORM: ', note: 'RENT FORM KEY: ' } };
+    // Kevin's own benefit-cap claim cards (lane C, 5 Oct 2026) are nobody's draft either. Kept identical
+    // to KEVIN_CARDS in scripts/agent_email_format.py (tests/rent-cap.test.js).
+    var KEVIN_CARD_MARKS = { rec7aHLK1Q8fMLRXH: { prefix: 'RENT CLAIM', note: 'RENT CLAIM KEY: ' } };
+    var ALL_CARD_MARKS = [FORM_CARD_MARKS, KEVIN_CARD_MARKS].reduce(function (all, set) {
+        return all.concat(Object.keys(set).map(function (k) { return set[k]; }));
+    }, []);
     function isFormCard(name, notes) {
-        return Object.keys(FORM_CARD_MARKS).some(function (k) {
-            var m = FORM_CARD_MARKS[k];
+        return ALL_CARD_MARKS.some(function (m) {
             return String(name || '').indexOf(m.prefix) === 0 || String(notes || '').indexOf(m.note) !== -1;
         });
     }
-    var FORM_CARD_CLAUSE = Object.keys(FORM_CARD_MARKS).map(function (k) {
-        return "NOT(FIND('" + FORM_CARD_MARKS[k].note + "', {Notes}&''))";
+    var FORM_CARD_CLAUSE = ALL_CARD_MARKS.map(function (m) {
+        return "NOT(FIND('" + m.note + "', {Notes}&''))";
     }).join(', ');
 
     var api = {
         FORM_CARD_MARKS: FORM_CARD_MARKS,
+        KEVIN_CARD_MARKS: KEVIN_CARD_MARKS,
         FORM_CARD_CLAUSE: FORM_CARD_CLAUSE,
         isFormCard: isFormCard,
         AUTONOMY_LEVELS: AUTONOMY_LEVELS,

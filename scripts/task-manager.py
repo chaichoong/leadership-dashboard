@@ -62,6 +62,9 @@ ROY_REC = "reclbdjfVev3bqNHS"
 # agent-dispatch.py carries the same prefix; tests/task-manager.test.js fails if they drift.
 EPISODE_CARD_PREFIX = "CONTENT: Publish Episode "
 FORM_CARD_MARKS = {"rec7aHLK1Q8fMLRXH": {"prefix": "RENT FORM: ", "note": "RENT FORM KEY: "}}
+# Kevin's own claim cards (Cash Flow Voids lane C, 5 Oct 2026): the rent check works them in code too.
+# Kept identical to KEVIN_CARDS in scripts/agent_email_format.py (tests/rent-cap.test.js).
+KEVIN_CARD_MARKS = {"rec7aHLK1Q8fMLRXH": {"prefix": "RENT CLAIM", "note": "RENT CLAIM KEY: "}}
 
 
 def episode_card(f):
@@ -71,9 +74,11 @@ def episode_card(f):
 def form_card_task(f):
     """A robot form card (Cash Flow Voids lane B, 3 Oct 2026): the rent check withdraws, re-raises and
     finishes it in code, and only Kevin's turn in the robot window moves it. Kept identical to
-    FORM_CARDS in scripts/agent_email_format.py (tests/task-manager.test.js)."""
+    FORM_CARDS in scripts/agent_email_format.py (tests/task-manager.test.js). Kevin's own claim cards
+    (lane C) are the rent check's lane in the same way."""
     name, notes = str(f.get("Task Name") or ""), str(f.get("Notes") or "")
-    return any(name.startswith(m["prefix"]) or m["note"] in notes for m in FORM_CARD_MARKS.values())
+    return any(name.startswith(m["prefix"]) or m["note"] in notes
+               for m in list(FORM_CARD_MARKS.values()) + list(KEVIN_CARD_MARKS.values()))
 
 # AI Agent Daily Log fields (same map as inbound-triage.py; drift-tested
 # against it in tests/task-manager.test.js)
