@@ -72,7 +72,7 @@ rc.rent_plans.read_cards = lambda _rc: []
 rc.rent_cap.read = lambda _rc: ({}, [])
 # The form chase reads tenants' form links and its own tasks through these; its cases are in tests/rent-form-chase.test.js.
 rc.rent_form_chase.read_links = lambda _rc: {}
-rc.rent_form_chase.read_chases = lambda _rc: {}
+rc.rent_form_chase.read_cards = lambda _rc, day: ({}, {})
 # The text alarm reads a ledger on this Mac and info@'s mailbox: never in a test.
 rc.text_check.LEDGER = os.path.join(tempfile.mkdtemp(), "no-texts.jsonl")
 def _no_mail(q):
