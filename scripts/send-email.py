@@ -954,8 +954,9 @@ def cmd_notify(args):
     # ROY WORKS IN info@ (Kevin, 24 Sep 2026). His task emails went to his
     # personal Gmail and promised "reply and it will be logged"; nothing read
     # the replies, and 46 of his tasks sat untouched. Now they go to info@ as
-    # one of his assistant's notes, and a reply to one is a request that
-    # roy-assistant.py turns into an update on this task (task-update).
+    # one of his assistant's notes. Since 6 Oct 2026 his reply comes from his
+    # own Gmail (he cannot send as info@) and Inbox Triage works it; the
+    # task-update path waits behind roy-assistant.py's paused request door.
     roy_addr = next((e for e, h in humans.items() if h.get("name") == "Roy Lavin"), "")
     to_roy = bool(roy_addr) and to == roy_addr
     # The point of the email is that Roy can ACT without the app. So it carries
@@ -972,7 +973,8 @@ def cmd_notify(args):
         parts += ["", f"WHY IT IS YOURS: {args.reason}"]
     if to_roy:
         parts += ["", "Reply to this email with what you have done, or \"done\" when it "
-                  "is finished. Your assistant records it on the task.", "",
+                  "is finished. The agents read your reply, and Kevin approves anything "
+                  "that goes out.", "",
                   f"Ref: {args.task}", "Kevin"]
         deliver = {"to": ROY_INBOX, "from": ROY_INBOX,
                    "subject": f"{ROY_NOTE_PREFIX} a task is yours - {name}"[:150]}
@@ -1030,8 +1032,9 @@ def cmd_notify(args):
 # by roy-assistant.py, so this path takes a body — and is safe to, because it
 # can only ever reach OUR OWN mailboxes:
 #
-#   * the recipient is info@agilelets.co.uk, or Roy's roster address for the
-#     one "forward from info@ please" nudge — nothing else, whatever is asked;
+#   * the recipient is info@agilelets.co.uk — nothing else, whatever is asked
+#     (the "forward from info@" nudge to his own Gmail was retired on 6 Oct
+#     2026: he cannot send as info@, and triage already works his Gmail mail);
 #   * the task must be a Roy request (ROY: name + the roy-assistant stamp);
 #   * tier-1 content never travels: a tier-1 request gets the fixed private
 #     line and nothing from the task;
@@ -1042,7 +1045,7 @@ def cmd_notify(args):
 ROY_INBOX = PROPERTY_SENDER
 ROY_NOTE_PREFIX = "Assistant:"
 ROY_NOTE_KINDS = ("got-it", "answer", "with-kevin", "sent", "not-sent", "closed",
-                  "private", "nudge")
+                  "private")
 ROY_NOTE_LEDGER = os.path.join(STATE_DIR, "roy-notes.jsonl")
 ROY_PRIVATE_SUBJECT = ROY_NOTE_PREFIX + " with Kevin"
 ROY_PRIVATE_BODY = ("Roy,\n\nKevin is dealing with this one himself. Nothing more is "
@@ -1065,28 +1068,22 @@ def roy_note_sent(task_id, kind):
 def send_roy_note(task_id, kind, subject, body, to=ROY_INBOX, dry_run=False):
     """Send one note to Roy about his own request. Returns a result dict; a
     refusal raises SystemExit with the reason, like every gate here."""
-    humans, tier1_patterns, tier_match = team_roster()
-    roy_addr = next((e for e, h in humans.items() if h.get("name") == "Roy Lavin"), "")
+    _, tier1_patterns, tier_match = team_roster()
     to = (to or "").strip().lower()
-    if to not in {ROY_INBOX, roy_addr}:
-        sys.exit(f"REFUSED: a note to Roy goes to {ROY_INBOX} (or his own address for "
-                 f"the nudge), never {to or '(nobody)'}.")
+    if to != ROY_INBOX:
+        sys.exit(f"REFUSED: a note to Roy goes to {ROY_INBOX}, never {to or '(nobody)'}.")
     if kind not in ROY_NOTE_KINDS:
         sys.exit(f"REFUSED: unknown note kind {kind!r}")
-    if kind == "nudge":
-        if to != roy_addr:
-            sys.exit("REFUSED: the nudge goes to Roy's own address only.")
-    else:
-        rec = get_task(task_id)
-        f = rec.get("fields", {}) or {}
-        name = f.get(AF["name"], "") or ""
-        notes = f.get(AF["notes"], "") or ""
-        if not dispatch_module().is_roy_request(name, notes):
-            sys.exit(f"REFUSED: {task_id} is not a request Roy sent through info@.")
-        hit = tier_match(tier1_patterns, name, f.get(AF["description"], "") or "", notes)
-        if hit and kind != "private":
-            sys.exit(f"REFUSED: {task_id} matches tier-1 ({hit!r}); only the fixed "
-                     "private line may go to Roy.")
+    rec = get_task(task_id)
+    f = rec.get("fields", {}) or {}
+    name = f.get(AF["name"], "") or ""
+    notes = f.get(AF["notes"], "") or ""
+    if not dispatch_module().is_roy_request(name, notes):
+        sys.exit(f"REFUSED: {task_id} is not a request Roy sent through info@.")
+    hit = tier_match(tier1_patterns, name, f.get(AF["description"], "") or "", notes)
+    if hit and kind != "private":
+        sys.exit(f"REFUSED: {task_id} matches tier-1 ({hit!r}); only the fixed "
+                 "private line may go to Roy.")
     if kind == "private":
         subject, body = ROY_PRIVATE_SUBJECT, ROY_PRIVATE_BODY
     subject = (subject or "").replace("\n", " ").strip()
@@ -1095,7 +1092,7 @@ def send_roy_note(task_id, kind, subject, body, to=ROY_INBOX, dry_run=False):
                  "roy-assistant.py never mistakes it for a new request.")
     if not (body or "").strip():
         sys.exit("REFUSED: empty note")
-    key = task_id or "nudge"
+    key = task_id
     prior = roy_note_sent(key, kind)
     if prior:
         return {"skipped": key, "kind": kind, "why": f"already sent at {prior.get('ts')}"}
@@ -1517,7 +1514,7 @@ def main():
     r = sub.add_parser("roy-note",
                        help="tell Roy, at info@, what became of his own request "
                             "(body on STDIN; never a third party)")
-    r.add_argument("task", nargs="?", default="")
+    r.add_argument("task")
     r.add_argument("--kind", required=True, choices=ROY_NOTE_KINDS)
     r.add_argument("--subject", default="")
     r.add_argument("--to", default="")
