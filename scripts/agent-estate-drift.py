@@ -137,6 +137,10 @@ RETIRED = [
     # Texts to tenants (Kevin, 5 Oct 2026: "Email-to-text"): GoHighLevel holds no Agile Lets location.
     (r"(?i)GoHighLevel number|texts? (go|goes|sent) (through|via|by) GoHighLevel", "2026-10-05",
      "texts go by ClickSend email-to-text from info@agilelets.co.uk, from the Agile Lets number +447984393339"),
+    # Roy cannot send as info@ (Decisions/2026-10-06 Roy asks for help from his own Gmail, the
+    # info@ assistant is paused): a line telling anyone Roy works by forwarding FROM info@.
+    (r"(?i)Roy forwards? (a message |the message |a tenant'?s? \w+ |it )?FROM info@", "2026-10-06",
+     "Roy emails info@ from his own Gmail and Inbox Triage works it; the info@-to-info@ door is paused"),
 ]
 
 # A line that is describing the old rule, not stating it.
@@ -326,6 +330,10 @@ def selftest():
     assert scan_text("Texts go from the Agile Lets GoHighLevel number.", "x")
     assert scan_text("Each text goes through GoHighLevel to the tenant.", "x")
     assert not scan_text("Sales follow-ups run in GoHighLevel workflows for Operations Director.", "x")
+    # Roy's requests (6 Oct 2026): the old front door fires; his Gmail route does not.
+    assert scan_text("Roy forwards a message FROM info@agilelets.co.uk TO itself.", "x")
+    assert scan_text("Roy forwards from info@ to info@ with one line.", "x")
+    assert not scan_text("Roy emails info@ from his own Gmail and Inbox Triage works it.", "x")
     assert stamp_of(os.devnull) is None
     assert rulings_after("2026-09-07", os.devnull) == []
     memory_selftest()

@@ -13,6 +13,12 @@ import { fileURLToPath } from 'url';
 // every email to the outside world is a card in Kevin's one queue, and Roy is
 // told what became of every request.
 //
+// PAUSED (Kevin, 6 Oct 2026): Roy cannot send as info@, so his requests come
+// from his own Gmail and Inbox Triage works them like any other mail. The poll
+// makes no new ROY: task while REQUESTS_PAUSED is set, and nothing here reads or
+// answers his Gmail. The request-path tests below switch the door back on, so
+// it stays proven for the day Kevin reopens it.
+//
 // The failure to fear most is a message from OUTSIDE becoming an instruction:
 // anyone can put info@ in a From header, but only mail sent by someone signed
 // in to info@ carries the SENT label. These tests drive the REAL code with a
@@ -70,7 +76,13 @@ def fake_all(table, formula, fields=None):
 ra.airtable = fake_airtable
 ra.airtable_all = fake_all
 ra.list_sent = lambda since_s: (list(SENT), False)
-ra.list_personal_forwards = lambda since_s, g: list(PERSONAL)
+# Any Gmail listing beyond the two above is a read of Roy's own mail; this
+# script must never make one (6 Oct 2026). Fake it so a test can catch one.
+GMAIL_READS = []
+def fake_worker_list(q=None, label_ids=None, max_pages=None, account=None):
+    GMAIL_READS.append(q)
+    return ([m for m in PERSONAL if "roy.lavin1978" in (q or "")], False)
+ra.mod("tri").worker_list = fake_worker_list
 ra.related_open_tasks = lambda req, AF: list(RELATED)
 HUB, ARCHIVED = [], []
 ra.list_hub_inbox = lambda since_s: list(HUB)
@@ -86,6 +98,7 @@ def poll():
         rc = ra.cmd_poll(argparse.Namespace(dry_run=False))
     return rc, json.loads(buf.getvalue())
 st = ra.read_state(); st["sinceMs"] = 1000; st["processed"] = {}; ra.write_state(st)
+ra.REQUESTS_PAUSED = False   # the request path, as it runs when Kevin reopens the door
 `;
 
 describe('only a message sent BY info@ TO info@ is a request', () => {
@@ -243,15 +256,79 @@ print(json.dumps({"archived": ARCHIVED, "count": out["hubArchived"]}))`);
     expect(r.archived).toEqual(['h1', 'h2']);
     expect(r.count).toBe(2);
   });
-  it('a forward from his personal Gmail is not worked; he is asked once to forward from info@', () => {
+  it("a forward from his personal Gmail is triage's: no task, no note, his Gmail never read (6 Oct 2026)", () => {
+    // 24 Sep to 5 Oct: four forwards each got "Nothing was done, forward from
+    // info@" while triage had worked every one, and he cannot send as info@.
     const r = py(`${WORLD}
 PERSONAL.append({"id": "p1", "internalDate": "5000", "labelIds": ["INBOX"], "headers": {"from": "Roy Lavin <roy.lavin1978@gmail.com>", "to": "info@agilelets.co.uk", "subject": "Fwd: Boiler"}, "body": FWD})
-poll(); poll()
-print(json.dumps({"posts": len(posts), "notes": notes_sent}))`);
+rc, out = poll(); poll()
+print(json.dumps({"posts": len(posts), "notes": notes_sent, "reads": GMAIL_READS, "out": out, "rc": rc}))`);
     expect(r.posts).toBe(0);
-    expect(r.notes).toHaveLength(1);
-    expect(r.notes[0].kind).toBe('nudge');
-    expect(r.notes[0].to).toBe('roy.lavin1978@gmail.com');
+    expect(r.notes).toEqual([]);
+    expect(r.reads).toEqual([]);
+    expect(r.out).not.toHaveProperty('nudged');
+    expect(r.rc).toBe(0);
+  });
+  it('PAUSED: a request info@ sends itself makes no task and no note, is recorded once, and the tidy-up still runs', () => {
+    const r = py(`${WORLD}
+ra.REQUESTS_PAUSED = True
+SENT.append(msg("m1", FWD))
+HUB.append(msg("h1", "x", subject="Assistant: a task is yours - Boiler"))
+HUB.append(msg("h2", FWD))
+HUB.append(msg("h3", "ok\\n> SMS_BRIDGE_ID:conv98765", subject="Re: [SMS] Stacey: boiler"))
+rc, out = poll()
+rc2, out2 = poll()
+st = ra.read_state()
+print(json.dumps({"posts": len(posts), "notes": notes_sent, "out": out, "out2": out2,
+                  "seen": st["processed"].get("m1"), "archived": ARCHIVED}))`);
+    expect(r.posts).toBe(0);
+    expect(r.notes).toEqual([]);
+    expect(r.out.skipped).toEqual([{ id: 'm1', kind: 'paused' }]);
+    expect(r.out2.skipped).toEqual([]);
+    expect(r.seen.skip).toBe('paused');
+    // our notes and bridge replies are tidied; the unworked request stays where Kevin sees it
+    expect(r.archived).toContain('h1');
+    expect(r.archived).toContain('h3');
+    expect(r.archived).not.toContain('h2');
+  });
+  it('PAUSED, dry run: listed as paused, nothing recorded, nothing written', () => {
+    const r = py(`${WORLD}
+ra.REQUESTS_PAUSED = True
+SENT.append(msg("m1", FWD))
+buf = io.StringIO()
+with contextlib.redirect_stdout(buf):
+    rc = ra.cmd_poll(argparse.Namespace(dry_run=True))
+out = json.loads(buf.getvalue())
+print(json.dumps({"rc": rc, "out": out, "posts": len(posts), "notes": len(notes_sent),
+                  "seen": "m1" in (ra.read_state().get("processed") or {})}))`);
+    expect(r.rc).toBe(0);
+    expect(r.out.skipped).toEqual([{ id: 'm1', kind: 'paused' }]);
+    expect(r.posts).toBe(0);
+    expect(r.notes).toBe(0);
+    expect(r.seen).toBe(false);
+  });
+  it('the door ships paused', () => {
+    const r = py(`print(json.dumps(ra.REQUESTS_PAUSED))`);
+    expect(r).toBe(true);
+  });
+  it("a note to Roy goes to info@ only: his Gmail and the old nudge kind are refused", () => {
+    const r = py(`
+se = ra.mod("se")
+se.get_task = lambda tid: {"id": tid, "fields": {AF["name"]: "INBOUND: something else", AF["notes"]: ""}}
+out = {}
+for label, kw in (("gmail", {"kind": "got-it", "to": "roy.lavin1978@gmail.com"}),
+                  ("nudge", {"kind": "nudge", "to": "info@agilelets.co.uk"}),
+                  ("info", {"kind": "got-it", "to": "info@agilelets.co.uk"})):
+    try:
+        se.send_roy_note("recX0000000000001", kw["kind"], "Assistant: x", "body", to=kw["to"], dry_run=True)
+        out[label] = "SENT"
+    except SystemExit as e:
+        out[label] = str(e)
+print(json.dumps(out))`);
+    expect(r.gmail).toContain('goes to info@agilelets.co.uk');
+    expect(r.nudge).toContain('unknown note kind');
+    // control: info@ passes the recipient gate and stops at the next one
+    expect(r.info).toContain('is not a request Roy sent through info@');
   });
 });
 
@@ -568,7 +645,9 @@ print(json.dumps(sent[0]))`);
     expect(m.from).toBe('info@agilelets.co.uk');
     expect(m.subject).toBe('Assistant: a task is yours - MAINTENANCE: boiler - 5 Dalham Place');
     expect(m.text).toContain('Ref: recBOILER00000001');
-    expect(m.text).toContain('Your assistant records it on the task');
+    // 6 Oct 2026: no promise the paused request door would have kept
+    expect(m.text).not.toContain('Your assistant records it');
+    expect(m.text).toContain('The agents read your reply');
   });
   it('control: another team member is still emailed at their own address', () => {
     const m = notify('micaa.work@gmail.com');

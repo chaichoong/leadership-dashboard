@@ -38,8 +38,16 @@ Mail that is NOT a request, and why it is skipped:
   * anything addressed to someone other than info@ alone: that is Roy
     writing to the world, not to his assistant;
   * anything older than this assistant's first run (state `sinceMs`).
-A forward from Roy's personal Gmail cannot be proved to be him, so it is not
-worked; he gets one reply asking him to forward from info@ instead.
+PAUSED (Kevin, 6 Oct 2026): no new requests become ROY: tasks
+(REQUESTS_PAUSED). Roy cannot send as info@ (Kevin dropped the app password on
+2 Oct 2026, task recHCNDDQb0jeX2iq), so this door had no real request after
+24 Sep. Roy emails info@ from his own Gmail instead, and Inbox Triage works
+that mail like any other: a task for the right agent, and every send or payment
+a card in Kevin's queue. Nothing here reads or answers his Gmail mail: from
+24 Sep to 5 Oct a reply told him "Nothing was done, forward from info@" four
+times, while triage had worked every one of them. The poll still runs, to
+archive the triage-inbox copies of info@-to-info@ notes and to finish the
+requests already open.
 
 USAGE
   roy-assistant.py poll [--dry-run]          new requests -> tasks + "Got it"
@@ -88,6 +96,7 @@ PROCESSED_KEEP_DAYS = 30
 TELL_WINDOW_DAYS = 30       # a request older than this is never written about again
 TOLD_MARK = "ROY TOLD"
 INSTRUCTION_MAX = 1500
+REQUESTS_PAUSED = True      # Kevin, 6 Oct 2026: Roy's requests go through Inbox Triage
 FORWARD_BODY_MAX = 6000
 
 
@@ -130,6 +139,16 @@ def addresses(value):
     return [a.lower() for a in EMAIL_RE.findall(str(value or ""))]
 
 
+def own_kind(subject, body):
+    """'ours' for the assistant's own note, 'sms-reply' for a reply the SMS
+    bridge texts back, None for anything else info@ sends itself."""
+    if subject.strip().startswith(NOTE_PREFIX):
+        return "ours"
+    if re.match(r"^\s*re\s*:", subject, re.I) and BRIDGE_MARK_RE.search(body):
+        return "sms-reply"
+    return None
+
+
 def classify(msg, since_ms):
     """(kind, why) for one message listed from info@'s Sent folder."""
     h = msg.get("headers") or {}
@@ -143,9 +162,10 @@ def classify(msg, since_ms):
         return "not-from-info", "sent as another address"
     if rcpts != {ROY_INBOX}:
         return "not-to-self", "addressed to someone other than info@ alone"
-    if subject.strip().startswith(NOTE_PREFIX):
+    own = own_kind(subject, body)
+    if own == "ours":
         return "ours", "one of the assistant's own notes"
-    if re.match(r"^\s*re\s*:", subject, re.I) and BRIDGE_MARK_RE.search(body):
+    if own == "sms-reply":
         return "sms-reply", "a reply to a tenant text: the SMS bridge texts it back"
     if int(msg.get("internalDate") or 0) < int(since_ms or 0):
         return "old", "sent before the assistant started"
@@ -388,19 +408,6 @@ def got_it_body(req):
     return "\n".join(lines)
 
 
-def is_personal_forward(msg, roy_gmail):
-    h = msg.get("headers") or {}
-    return (addresses(h.get("from")) == [roy_gmail]
-            and re.match(r"^\s*(?:fwd?|fw)\s*:", str(h.get("subject") or ""), re.I) is not None)
-
-
-NUDGE_BODY = ("Roy,\n\nYou forwarded something to info@ from your own Gmail. The assistant "
-              "only works on messages forwarded FROM info@agilelets.co.uk, because that is how "
-              "it knows the request is really from you.\n\nPlease open info@, press Forward "
-              "(not Reply) on the message, send it to info@agilelets.co.uk, and add one line "
-              "on top saying what you want.\n\nNothing was done with this one.\n\nRoy's assistant")
-
-
 def pending_ids(queue, AF_is_roy):
     """Roy requests the queue says are waiting for an agent (kind new)."""
     out = []
@@ -431,9 +438,9 @@ def write_state(state):
 
 def trim(state, now_ms):
     cut = now_ms - PROCESSED_KEEP_DAYS * 86400 * 1000
-    for key in ("processed", "nudged"):
-        state[key] = {k: v for k, v in (state.get(key) or {}).items()
-                      if int((v or {}).get("at", now_ms)) >= cut}
+    state.pop("nudged", None)               # the retired Gmail nudge's ledger (6 Oct 2026)
+    state["processed"] = {k: v for k, v in (state.get("processed") or {}).items()
+                          if int((v or {}).get("at", now_ms)) >= cut}
 
 
 # ─── AIRTABLE ────────────────────────────────────────────────────────────
@@ -516,12 +523,6 @@ def archive_hub(ids):
                                           "account": tri.TRIAGE_ACCOUNT})
 
 
-def list_personal_forwards(since_s, roy_gmail):
-    tri = mod("tri")
-    msgs, _ = tri.worker_list(q=f"in:inbox from:{roy_gmail} after:{since_s}", account=ROY_INBOX)
-    return msgs
-
-
 def related_open_tasks(req, AF):
     """Open tasks already on the board about the same sender or text thread."""
     sms = req.get("sms")
@@ -567,9 +568,11 @@ def cmd_poll(args):
         if not mid or mid in processed:
             continue
         kind, why = classify(msg, state["sinceMs"])
+        if kind == "request" and REQUESTS_PAUSED:
+            kind = "paused"
         if kind != "request":
             skipped.append({"id": mid, "kind": kind})
-            if kind in ("ours", "sms-reply", "old", "not-to-self") and not args.dry_run:
+            if kind in ("ours", "sms-reply", "old", "not-to-self", "paused") and not args.dry_run:
                 processed[mid] = {"at": now_ms, "skip": kind}
             continue
         # Airtable is the record: a crash between create and the state write
@@ -634,28 +637,13 @@ def cmd_poll(args):
                                     f"Gmail {res.get('messageId') or res.get('why')}")
         except (SystemExit, RuntimeError) as e:
             errors.append(f"Got it note failed for {tid}: {e}")
-    # A forward from his own Gmail: tell him once how to send it instead.
-    nudged = []
-    roy_gmail = ad.ROY_EMAIL
-    for msg in list_personal_forwards(since_s, roy_gmail):
-        mid = msg.get("id")
-        if (not mid or mid in (state.get("nudged") or {})
-                or int(msg.get("internalDate") or 0) < int(state["sinceMs"])
-                or not is_personal_forward(msg, roy_gmail)):
-            continue
-        if args.dry_run:
-            nudged.append(mid)
-            continue
-        try:
-            se.send_roy_note("nudge-" + mid, "nudge", f"{NOTE_PREFIX} please forward from info@",
-                             NUDGE_BODY, to=roy_gmail)
-            state.setdefault("nudged", {})[mid] = {"at": now_ms}
-            nudged.append(mid)
-        except SystemExit as e:
-            errors.append(f"nudge failed for {mid}: {e}")
     hub = []
     try:
-        hub = [m["id"] for m in list_hub_inbox(since_s) if mod("tri").roy_assistant_copy(m)]
+        # While paused, only our own mail is tidied away: a request nobody
+        # works stays in the triage inbox, where Kevin sees it.
+        hub = [m["id"] for m in list_hub_inbox(since_s) if mod("tri").roy_assistant_copy(m)
+               and (not REQUESTS_PAUSED or own_kind(str((m.get("headers") or {}).get("subject") or ""),
+                                                    str(m.get("body") or "")))]
         if hub and not args.dry_run:
             archive_hub(hub)
     except SystemExit as e:                  # the triage transport exits on a worker error
@@ -663,7 +651,7 @@ def cmd_poll(args):
     if not args.dry_run:
         trim(state, now_ms)
         write_state(state)
-    print(json.dumps({"created": created, "skipped": skipped, "nudged": nudged,
+    print(json.dumps({"created": created, "skipped": skipped,
                       "hubArchived": len(hub), "errors": errors}))
     return 1 if errors else 0
 
