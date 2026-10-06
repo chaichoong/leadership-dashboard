@@ -14,15 +14,15 @@
 // Guarded by tests/mcp-inventory.test.js.
 
 var MCP_TOOLS = {
-  "generatedAt": "2026-09-23T05:10:06Z",
+  "generatedAt": "2026-10-06T05:10:08Z",
   "generator": "scripts/generate-mcp-inventory.py",
-  "healthNote": "claude mcp list returned no servers",
+  "healthNote": "",
   "agentAllowlistSize": 11,
   "counts": {
-    "total": 40,
-    "verified": 27,
+    "total": 41,
+    "verified": 28,
     "declared": 13,
-    "kevin": 20,
+    "kevin": 21,
     "agents": 0,
     "needsAuth": 20
   },
@@ -50,6 +50,15 @@ var MCP_TOOLS = {
         {
           "name": "Claude Code Remote",
           "what": "Lets you drive a Claude Code session from another device.",
+          "auth": "authorised",
+          "kevin": true,
+          "agents": false,
+          "source": "verified",
+          "scope": ""
+        },
+        {
+          "name": "Claude Docs",
+          "what": "Creates and edits living documents on claude.ai that you and the team can comment on.",
           "auth": "authorised",
           "kevin": true,
           "agents": false,
@@ -248,7 +257,7 @@ var MCP_TOOLS = {
     {
       "key": "plugins",
       "title": "Plugin bundles",
-      "blurb": "10 bundles are installed (agents-md, anthropic-skills, cowork-plugin-management, customer-support, data, finance, legal, operations, productivity, telemetry). Every connector inside them is unauthorised, so none of them does anything today. Either authorise the ones you want or remove the bundles.",
+      "blurb": "12 bundles are installed (agents-md, anthropic-skills, cc-plugin-plugin-authoring, cowork-plugin-management, cowork-plugin-management, customer-support, data, finance, legal, operations, productivity, telemetry). Every connector inside them is unauthorised, so none of them does anything today. Either authorise the ones you want or remove the bundles.",
       "tools": [
         {
           "name": "atlassian",
