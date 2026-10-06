@@ -196,7 +196,16 @@
             // let unit reads "Empty" for ever because one date was left blank.
             const undated = (tenancies || []).filter(t => (t.unitIds || []).includes(u.id) && !t.start && !(t.end && iso(t.end) < iso(today)));
             if (!live.length && undated.length) alarms.push(amber(`${u.label} has a tenancy with no start date, so it is not counted yet.`));
-            return { id: u.id, label: u.label, stretch: !!u.stretch, filled: live.length > 0, tenant: live.map(t => t.surname).filter(Boolean).join(', ') };
+            // Not counted yet, but not "Empty" either: a new tenant signed to move in later, or
+            // a replacement room still holding only the leaving tenant.
+            const skip = u.excludeTenantIds || [];
+            const incoming = live.length ? null : (tenancies || []).filter(t => (t.unitIds || []).includes(u.id) && t.start && iso(t.start) > iso(today)
+                && !(t.end && iso(t.end) < iso(t.start)) && !(t.tenantIds || []).some(id => skip.includes(id)))
+                .sort((a, b) => iso(a.start).localeCompare(iso(b.start)))[0] || null;
+            const outgoing = live.length ? [] : liveInUnit(tenancies, u.id, [], today);
+            return { id: u.id, label: u.label, stretch: !!u.stretch, filled: live.length > 0, tenant: live.map(t => t.surname).filter(Boolean).join(', '),
+                incoming: incoming ? { tenant: incoming.surname || '', start: iso(incoming.start) } : null,
+                outgoing: outgoing.map(t => t.surname).filter(Boolean).join(', ') };
         });
         if (!(tenancies || []).length) alarms.push(red('No tenancies loaded.'));
         const committed = rows.filter(r => !r.stretch);
@@ -206,8 +215,12 @@
     }
 
     // ── KPI 6: new monthly rent in payment from the named tenants ────────
-    // lines cfg: [{ label, tenantId | unitId, excludeTenantIds, stretch }]
+    // lines cfg: [{ label, tenantId | unitId, excludeTenantIds, replacesRent, stretch }]
     // A tenancy is counted once, on the first line that claims it.
+    // replacesRent: the unit replaces a tenant whose rent is already in the cushion, so only
+    // the rise over that rent is new money (Kevin, 6 Oct 2026). It is the fixed figure the
+    // targets were built on, not a live read: the leaver may move, renew or drop out of
+    // payment, and none of that changes what the plan already counted.
     function namedRent({ lines, tenancies, knownTenantIds, knownUnitIds, today }) {
         const alarms = [];
         const claimed = new Set();
@@ -223,7 +236,12 @@
             const paying = matches.filter(t => inPayment(t) && !claimed.has(t.id));
             paying.forEach(t => claimed.add(t.id));
             const status = paying.length ? 'In Payment' : (matches.length ? (matches[0].payStatus || 'No status') : 'No tenancy yet');
-            return { label: l.label, stretch: !!l.stretch, rent: round2(paying.reduce((s, t) => s + (Number(t.rent) || 0), 0)), status };
+            const gross = paying.reduce((s, t) => s + (Number(t.rent) || 0), 0);
+            const replaces = Number(l.replacesRent) > 0 ? Number(l.replacesRent) : null;
+            if (l.unitId && replaces !== null && matches.some(t => inPayment(t) && claimed.has(t.id) && !paying.includes(t))) {
+                alarms.push(amber(`${l.label}: the tenant here is counted on another line at full rent, so the leaving tenant's rent is not taken off. Check it.`));
+            }
+            return { label: l.label, stretch: !!l.stretch, rent: round2(gross - (paying.length && replaces !== null ? replaces : 0)), status, replaces };
         });
         if (!(tenancies || []).length) alarms.push(red('No tenancies loaded.'));
         const committed = round2(rows.filter(r => !r.stretch).reduce((s, r) => s + r.rent, 0));

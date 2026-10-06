@@ -129,6 +129,8 @@
         totalTasks:      'fldtw6NQZ8CSF3RXi',
         completedTasks:  'fld7IDjY0xB4JGBfn',
         closedOn:        'fldzGI0ywBTpOK2dy',  // quarter-close date — set = project is history
+        defOfDone:       'fldgjzVEnfnZowrBD',  // shown when a row is opened
+        kpiTracking:     'fld2wYB5ZEn9WRcjN',  // "KPI Tracking Method", shown when a row is opened
     };
     const STRAT_TEAM_KEYS = {
         'kevin@runpreneur.org.uk':'kevin',
@@ -172,6 +174,16 @@
 
     function _stratSelName(v){if(!v)return '';if(typeof v==='string')return v;if(typeof v==='object'&&v.name)return v.name;return ''}
     function _stratDaysAgo(iso){if(!iso)return null;const ms=Date.now()-new Date(iso).getTime();return Math.floor(ms/86400000)}
+    // Rows the user has opened. Kept across renders: the list draws twice per load
+    // (stored values, then after compute), which would otherwise snap an open row shut.
+    const _stratKpiOpen=new Set();
+    // The breakdown last saved to "KPI Detail JSON", so an opened row has it before the
+    // compute pass finishes. A blank or cut-off value gives null, never a throw.
+    function _stratParseDetail(raw){
+        if(!raw)return null;
+        try{const v=JSON.parse(raw);return v&&typeof v==='object'?v:null}
+        catch(e){console.warn('[loadStrategicKpis] KPI Detail JSON did not parse',e);return null}
+    }
     // Health is DERIVED (js/project-health.js), never read from the stored
     // Project Status. That field is left at Airtable's "Not Started" default
     // when the Strategy push creates a project, and this function used to
@@ -239,6 +251,9 @@
                     totalTasks:Number(getField(r,STRAT_PF.totalTasks))||0,
                     completedTasks:Number(getField(r,STRAT_PF.completedTasks))||0,
                     closedOn:getField(r,STRAT_PF.closedOn)||'',
+                    defOfDone:getField(r,STRAT_PF.defOfDone)||'',
+                    kpiTracking:getField(r,STRAT_PF.kpiTracking)||'',
+                    kpiStored:_stratParseDetail(getField(r,STRAT_PF.kpiDetailJson)),
                 };
             });
             // Render immediately with the values already on each project so
@@ -771,9 +786,13 @@
             // Drilldown container (hidden until toggled)
             const drillId=`stratKpiDrill-${p.id}`;
             const drillRow=`<div id="${drillId}" data-expanded="" style="display:none;grid-column:1/-1;padding:14px;background:var(--bg-surface-2);border:1px solid var(--border-subtle);border-top:none;border-bottom:none;font-size:var(--fs-sm)"></div>`;
-            return `<div class="strat-kpi-row" data-project-id="${p.id}" style="display:grid;grid-template-columns:2.2fr 32px 2fr 1.3fr 110px 96px 96px;gap:12px;align-items:start;padding:12px 14px;background:var(--bg-surface);border:1px solid var(--border-subtle);border-bottom:none;font-size:var(--fs-base);${hasDetail?'cursor:pointer':''};transition:background var(--dur-fast) var(--ease)" ${hasDetail?`onclick="toggleStratKpiDrill('${p.id}','rolling')"`:''} onmouseover="this.style.background='var(--bg-surface-2)'" onmouseout="this.style.background='var(--bg-surface)'">
+            // Every row opens to show where the KPI is up to (Kevin, 6 Oct 2026). A row with
+            // transactions behind it reaches them from a button inside the opened panel.
+            const isOpen=_stratKpiOpen.has(p.id);
+            const infoRow=`<div id="stratKpiInfo-${p.id}" class="strat-kpi-info" style="display:${isOpen?'block':'none'};grid-column:1/-1;padding:14px;background:var(--bg-surface-2);border:1px solid var(--border-subtle);border-top:none;border-bottom:none;font-size:var(--fs-sm)">${isOpen?stratKpiInfoHtml(p):''}</div>`;
+            return `<div class="strat-kpi-row" data-project-id="${p.id}" role="button" tabindex="0" aria-expanded="${isOpen}" title="Open to see where this KPI is up to" style="display:grid;grid-template-columns:2.2fr 32px 2fr 1.3fr 110px 96px 96px;gap:12px;align-items:start;padding:12px 14px;background:var(--bg-surface);border:1px solid var(--border-subtle);border-bottom:none;font-size:var(--fs-base);cursor:pointer;transition:background var(--dur-fast) var(--ease)" onclick="toggleStratKpiInfo('${p.id}')" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();toggleStratKpiInfo('${p.id}')}" onmouseover="this.style.background='var(--bg-surface-2)'" onmouseout="this.style.background='var(--bg-surface)'">
                 <div style="display:flex;flex-direction:column;gap:4px;min-width:0">
-                    <div style="font-weight:var(--fw-semibold);color:var(--text-primary);line-height:1.35;word-break:break-word">${escHtml(p.name)}</div>
+                    <div style="font-weight:var(--fw-semibold);color:var(--text-primary);line-height:1.35;word-break:break-word"><span class="strat-kpi-chevron" style="display:inline-block;width:14px;color:var(--text-muted)">${isOpen?'▾':'▸'}</span>${escHtml(p.name)}</div>
                     ${businessPill}
                 </div>
                 <div style="text-align:center;padding-top:2px">${ownerChip}</div>
@@ -782,7 +801,7 @@
                 <div class="od-progress" style="margin-top:6px"><div class="od-progress-fill" style="width:${pct}%;background:${healthColor}"></div></div>
                 <div style="font-size:var(--fs-xs);font-weight:var(--fw-semibold);color:${healthColor};text-align:center;padding-top:2px">${escHtml(health)}</div>
                 <div style="text-align:right;padding-top:2px">${stamp}</div>
-            </div>${monthsRow}${drillRow}`;
+            </div>${infoRow}${monthsRow}${drillRow}`;
         }).join('')+`<div style="height:1px;background:var(--border-subtle)"></div>`;
         // Rounded wrapper around the whole stack.
         list.style.cssText='border-radius:var(--radius-lg);overflow:hidden;border:1px solid var(--border-default);box-shadow:var(--shadow-sm)';
@@ -790,6 +809,61 @@
 
     function setStrategicKpiFilter(f){strategicKpiFilter=f;renderStrategicKpis()}
     window.setStrategicKpiFilter=setStrategicKpiFilter;
+
+    // What an opened Strategic KPIs row shows: where the number is up to and what is behind
+    // it. The Q4 real estate breakdowns reuse the Q4 cards' wording (reUnitStatus,
+    // reRentLabel), so a unit reads the same in both places.
+    function stratKpiInfoHtml(p){
+        const d=p.kpiReturn||p.kpiDetail||p.kpiStored||null;
+        const day=iso=>iso?new Date(iso).toLocaleDateString('en-GB',{day:'numeric',month:'short',year:'numeric'}):'';
+        const heading=t=>`<div style="font-weight:var(--fw-semibold);color:var(--text-primary);margin:12px 0 4px">${escHtml(t)}</div>`;
+        const para=t=>`<div style="color:var(--text-secondary);white-space:pre-wrap;word-break:break-word">${escHtml(String(t).trim())}</div>`;
+        const money=String(p.kpiUnit||'').startsWith('£');
+        const unitPrefix=money?'£':'';
+        const unitSuffix=p.kpiUnit&&!money?' '+p.kpiUnit:'';
+        const pct=p.kpiTarget>0?Math.round((p.kpiCurrent/p.kpiTarget)*100):null;
+        const rows=(d&&Array.isArray(d.rows))?d.rows.filter(r=>r&&typeof r==='object'):[];
+        const first=rows[0]||{};
+        let where=`${unitPrefix}${p.kpiCurrent.toLocaleString('en-GB')}${unitSuffix} of ${unitPrefix}${p.kpiTarget.toLocaleString('en-GB')}${unitSuffix}${pct!=null?` (${pct}% of the target)`:''}.`;
+        let breakdown='';
+        if('filled' in first){
+            where=`${d.filled} of ${d.of} committed units have a tenant in. With the stretch unit: ${d.value} of ${d.stretchOf}.`;
+            breakdown=rows.map(r=>reRow(r.label+(r.stretch?' (stretch)':''),reUnitStatus(r),r.filled?'text-green':'')).join('');
+        }else if('status' in first&&'rent' in first){
+            where=`${reSignedGbp(d.value||0)} a month in payment: committed ${reSignedGbp(d.committed||0)}, stretch ${reSignedGbp(d.stretch||0)}.`;
+            breakdown=rows.map(r=>reRow(reRentLabel(r),reSignedGbp(r.rent),r.rent>0?'text-green':(r.rent<0?'text-red':''))).join('');
+        }else if('gas' in first){
+            where=`${d.value} of ${d.of} properties are fully compliant.`;
+            breakdown=rows.map(r=>reRow(r.name,`Gas ${r.gas} | Electrical ${r.electrical} | Insurance ${r.insurance}`,r.compliant?'text-green':'')).join('');
+        }
+        const notes=(d&&Array.isArray(d.notes)?d.notes:[]).map(n=>`<div class="od-breakdown-row"><span class="text-amber" style="word-break:break-word">${escHtml(n)}</span></div>`).join('');
+        const owner=p.owner&&p.owner.name?p.owner.name:'No owner';
+        const updated=p.kpiLastUpdated?`${day(p.kpiLastUpdated)}${p.kpiLastUpdatedBy?' by '+p.kpiLastUpdatedBy:''}`:'never';
+        const live=p.kpiReturn||p.kpiDetail;
+        const drill=(live&&live.detail)?`<button onclick="toggleStratKpiDrill('${p.id}','rolling');event.stopPropagation()" class="od-btn od-btn-secondary od-btn-sm" style="margin-top:10px">Show the transactions ▾</button>`:'';
+        return `<div style="font-weight:var(--fw-semibold);color:var(--text-primary)">Where it is up to</div>${para(where)}
+            ${p.kpiComputeError?`<div class="text-red" style="margin-top:4px">${escHtml(p.kpiComputeError)}</div>`:''}
+            ${breakdown||notes?`<div style="margin-top:8px">${breakdown}${notes}</div>`:''}
+            ${p.defOfDone?heading('Definition of done')+para(p.defOfDone):''}
+            ${p.kpiTracking?heading('How it is counted')+para(p.kpiTracking):''}
+            ${heading('Project')}${para(`${p.completedTasks} of ${p.totalTasks} tasks done | ${day(p.start)} to ${day(p.end)} | Owner: ${owner} | KPI last worked out ${updated}`)}
+            ${drill}`;
+    }
+
+    function toggleStratKpiInfo(pid){
+        const p=_strategicKpiProjects.find(x=>x.id===pid);
+        const el=document.getElementById(`stratKpiInfo-${pid}`);
+        if(!p||!el)return;
+        const open=!_stratKpiOpen.has(pid);
+        if(open){el.innerHTML=stratKpiInfoHtml(p);_stratKpiOpen.add(pid)}else _stratKpiOpen.delete(pid);
+        el.style.display=open?'block':'none';
+        const row=el.previousElementSibling;
+        if(row){
+            row.setAttribute('aria-expanded',String(open));
+            const chev=row.querySelector('.strat-kpi-chevron');if(chev)chev.textContent=open?'▾':'▸';
+        }
+    }
+    window.toggleStratKpiInfo=toggleStratKpiInfo;
 
     // Expand/collapse a project's KPI drilldown showing the transactions
     // that made up the calculation. bucket = 'rolling' | 'YYYY-MM'
@@ -1655,6 +1729,16 @@
     const reGbp = n => (n == null || isNaN(n)) ? '—' : (n < 0 ? '−' : '') + '£' + Math.abs(Math.round(n)).toLocaleString('en-GB');
     const reMonthName = key => key ? new Date(Number(key.slice(0, 4)), Number(key.slice(5, 7)) - 1, 1).toLocaleDateString('en-GB', { month: 'long' }) : '';
     const reDay = isoDate => isoDate ? new Date(isoDate + 'T00:00:00').toLocaleDateString('en-GB', { day: 'numeric', month: 'short' }) : 'none';
+    // One wording for a named unit and a rent line, shared by the Q4 cards and the Strategic
+    // KPIs rows, so the two places never describe the same unit differently.
+    const reUnitStatus = r => r.filled ? `In: ${r.tenant || 'tenant'}`
+        : r.incoming ? `Signed: ${r.incoming.tenant || 'new tenant'}, moves in ${reDay(r.incoming.start)}`
+        : r.outgoing ? `To re-let: ${r.outgoing} still on record` : 'Empty';
+    // A replacement re-let below the leaving tenant's rent is a LOSS: fmt() drops the sign,
+    // so it is put back here and the row is only green when it adds money.
+    const reSignedGbp = n => (Number(n) < 0 ? '− ' : '') + fmt(n);
+    const reRentLabel = r => `${r.label}${r.stretch ? ' (stretch)' : ''}: ${r.status}`
+        + (r.replaces != null ? ` (counts the rise over the outgoing ${fmt(r.replaces)})` : '');
     const reRow = (label, value, cls = '') => `<div class="od-breakdown-row"><span${cls ? ` class="${cls}"` : ''}>${escHtml(label)}</span><span>${escHtml(String(value))}</span></div>`;
 
     // One card. `result` carries the alarms; red replaces the reassuring sub-line with
@@ -1750,13 +1834,13 @@
                 value: `${units.filled} of ${units.of}`, target: { committed: `${T.namedUnits.committed} of ${T.namedUnits.committed}`, stretch: `${T.namedUnits.stretch} of ${T.namedUnits.stretch}` },
                 pct: pctOf(units.filled, T.namedUnits),
                 sub: `With the stretch unit: ${units.value} of ${units.stretchOf}`,
-                rows: (units.rows || []).map(r => reRow(r.label + (r.stretch ? ' (stretch)' : ''), r.filled ? `In: ${r.tenant || 'tenant'}` : 'Empty', r.filled ? 'text-green' : '')).join(''),
+                rows: (units.rows || []).map(r => reRow(r.label + (r.stretch ? ' (stretch)' : ''), reUnitStatus(r), r.filled ? 'text-green' : '')).join(''),
             }),
             reCard({
                 title: 'New rent in payment from the named tenants', result: rent,
                 value: reGbp(rent.value), target: gbpTarget(T.namedRent), pct: pctOf(rent.value, T.namedRent),
                 sub: `Committed tenants ${reGbp(rent.committed)} | stretch ${reGbp(rent.stretch)} | a month`,
-                rows: (rent.rows || []).map(r => reRow(`${r.label}${r.stretch ? ' (stretch)' : ''}: ${r.status}`, fmt(r.rent), r.rent ? 'text-green' : '')).join(''),
+                rows: (rent.rows || []).map(r => reRow(reRentLabel(r), reSignedGbp(r.rent), r.rent > 0 ? 'text-green' : (r.rent < 0 ? 'text-red' : ''))).join(''),
             }),
             reCard({
                 title: 'Personal net cash flow', result: personal,
