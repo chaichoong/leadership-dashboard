@@ -1,5 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { createRequire } from 'node:module';
+import { readFileSync } from 'node:fs';
+import vm from 'node:vm';
 import { resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -232,6 +234,95 @@ describe('named units and named rent', () => {
         expect(K.alarmLevel(K.namedUnits({ units, tenancies: today, knownUnitIds: ['uA'], today: TODAY }))).toBe('red');
         expect(K.alarmLevel(K.namedRent({ lines, tenancies: today, knownTenantIds: [MOVER], today: TODAY }))).toBe('red');
         expect(K.alarmLevel(K.namedUnits({ units, tenancies: [], knownUnitIds: known.knownUnitIds, today: TODAY }))).toBe('red');
+    });
+});
+
+// Kevin, 6 Oct 2026: a room that replaces a leaving tenant is a named unit too. Shaped on
+// the live case (a tenant still paying the old rate while a new tenant at the newer rate
+// is found), with every name and amount invented.
+describe('replacement rooms', () => {
+    const LEAVER = 'tenLeaver';
+    const units = [
+        { id: 'uR', label: 'House F Unit 3', excludeTenantIds: [LEAVER] },
+        { id: 'uS', label: 'House G Unit 1', stretch: true },
+    ];
+    const lines = [{ label: 'New tenant F3', unitId: 'uR', excludeTenantIds: [LEAVER], replacesRent: 510.40, stretch: true }];
+    const known = { knownUnitIds: ['uR', 'uS'], today: TODAY };
+    const leaver = { id: 'tL', unitIds: ['uR'], tenantIds: [LEAVER], surname: 'Leaver', start: '2025-05-21', end: '', payStatus: 'In Payment', rent: 510.40 };
+    const incoming = { id: 'tN', unitIds: ['uR'], tenantIds: ['tenIncoming'], surname: 'Incoming', start: '2026-09-28', end: '', payStatus: 'In Payment', rent: 880.25 };
+
+    it('a room holding only the leaving tenant is not filled, and says who is still on record', () => {
+        const u = K.namedUnits({ units, tenancies: [leaver], ...known });
+        expect([u.filled, u.of]).toEqual([0, 1]);
+        expect(u.rows[0]).toMatchObject({ filled: false, outgoing: 'Leaver', incoming: null });
+        expect(u.rows[1]).toMatchObject({ filled: false, outgoing: '', incoming: null });   // a truly empty room stays "Empty"
+    });
+    it('the new tenant fills the room even while the leaver is still linked', () => {
+        const u = K.namedUnits({ units, tenancies: [leaver, incoming], ...known });
+        expect(u.filled).toBe(1);
+        expect(u.rows[0]).toMatchObject({ filled: true, tenant: 'Incoming', outgoing: '' });
+    });
+    it('a new tenant signed to move in later is shown, but not counted', () => {
+        const u = K.namedUnits({ units, tenancies: [leaver, { ...incoming, start: '2026-11-01', payStatus: '' }], ...known });
+        expect(u.filled).toBe(0);
+        expect(u.rows[0].incoming).toEqual({ tenant: 'Incoming', start: '2026-11-01' });
+    });
+    it('only the rise over the leaving tenant\'s rent counts as new rent', () => {
+        const r = K.namedRent({ lines, tenancies: [leaver, incoming], ...known });
+        expect(r.rows[0]).toMatchObject({ rent: 369.85, replaces: 510.4, status: 'In Payment' });
+        expect(r.stretch).toBe(369.85);
+        expect(K.alarmLevel(r)).toBe('');
+    });
+    it('nets the fixed figure the plan counted, even when the leaver moves on at another rent', () => {
+        const moved = [{ ...leaver, end: '2026-09-30' }, { id: 'tL2', unitIds: ['uX'], tenantIds: [LEAVER], surname: 'Leaver', start: '2026-10-01', end: '', payStatus: 'In Payment', rent: 650 }];
+        expect(K.namedRent({ lines, tenancies: [...moved, incoming], ...known }).value).toBe(369.85);
+    });
+    it('a re-let below the old rent is a loss, not a gain', () => {
+        expect(K.namedRent({ lines, tenancies: [leaver, { ...incoming, rent: 450 }], ...known }).value).toBe(-60.4);
+    });
+    it('counts nothing before the new tenant is paying', () => {
+        expect(K.namedRent({ lines, tenancies: [leaver, { ...incoming, payStatus: 'CFV' }], ...known }).value).toBe(0);
+    });
+    it('goes amber when another line has already counted the room\'s tenant at full rent', () => {
+        const both = [{ label: 'Named tenant', tenantId: 'tenIncoming' }, ...lines];
+        const r = K.namedRent({ lines: both, tenancies: [leaver, incoming], ...known });
+        expect(r.value).toBe(880.25);
+        expect(K.alarmLevel(r)).toBe('amber');
+    });
+});
+
+// The live list in js/config.js. The 2 Oct build counted four units while the plan named
+// five tenants to find (Kevin, 6 Oct 2026): the target and the list must agree.
+describe('the Q4 named units in js/config.js', () => {
+    const sandbox = { window: {}, console };
+    vm.createContext(sandbox);
+    vm.runInContext(readFileSync(resolve(root, 'js/config.js'), 'utf8') + '\nglobalThis.__RE_Q4 = RE_Q4;', sandbox);
+    const Q = sandbox.__RE_Q4;
+
+    it('the unit target matches the units listed: five committed, six with the stretch', () => {
+        expect(Q.units.filter(u => !u.stretch).length).toBe(Q.targets.namedUnits.committed);
+        expect(Q.units.length).toBe(Q.targets.namedUnits.stretch);
+        expect([Q.targets.namedUnits.committed, Q.targets.namedUnits.stretch]).toEqual([5, 6]);
+    });
+    it('every replacement rent line names the leaving tenant, and matches its unit', () => {
+        const repl = Q.rent.filter(l => l.replacesRent);
+        expect(repl.length).toBe(2);
+        repl.forEach(l => {
+            expect(l.excludeTenantIds && l.excludeTenantIds.length).toBeTruthy();
+            expect(Q.units.find(u => u.id === l.unitId).excludeTenantIds).toEqual(l.excludeTenantIds);
+        });
+    });
+    it('the stretch targets rose by exactly the two re-lets at £897.52 over the leaving rents', () => {
+        const rise = Q.rent.filter(l => l.replacesRent).reduce((s, l) => s + (897.52 - l.replacesRent), 0);
+        expect(Math.round(rise * 100) / 100).toBe(745.62);
+        expect(Q.targets.namedRent.stretch - 5318).toBe(Math.round(rise));
+        expect(Q.targets.cushionPlan.stretch - 21187).toBe(Math.round(rise));
+        expect(Q.targets.incomePlan.stretch - 16887).toBe(Math.round(rise));
+        expect(Q.targets.personalNet.stretch - 11250).toBe(Math.round(rise));
+        expect([Q.targets.namedRent.committed, Q.targets.cushionPlan.committed, Q.targets.incomePlan.committed]).toEqual([2693, 18245, 13945]);
+    });
+    it('every named unit has a rent line, so a unit cannot be counted without its rent', () => {
+        Q.units.forEach(u => expect(Q.rent.some(l => l.unitId === u.id)).toBe(true));
     });
 });
 

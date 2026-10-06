@@ -21,8 +21,8 @@
     const PAGE_REGISTRY = [
         // Home tab (Kevin, 29 Sep 2026): one list of what needs Kevin today, the real Leadership Dashboard underneath. On trial beside the old screens.
         { id: 'home',        name: 'Home',                           icon: '📌', pageVer: '1.5', sopFile: '',                           sopVer: '1.0', standalone: 'index.html#home' },
-        { id: 'overview',    name: 'Leadership Dashboard',           icon: '📊', pageVer: '2.132', sopFile: 'sop.html',                   sopVer: '2.118', standalone: 'index.html#overview' },
-        { id: 'os-strategy', name: 'Objective & Strategy',           icon: '🎯', pageVer: '1.74', sopFile: 'os/strategy/sop.html',       sopVer: '1.1', standalone: 'os/strategy/index.html' },
+        { id: 'overview',    name: 'Leadership Dashboard',           icon: '📊', pageVer: '2.133', sopFile: 'sop.html',                   sopVer: '2.118', standalone: 'index.html#overview' },
+        { id: 'os-strategy', name: 'Objective & Strategy',           icon: '🎯', pageVer: '1.75', sopFile: 'os/strategy/sop.html',       sopVer: '1.1', standalone: 'os/strategy/index.html' },
         { id: 'tasks',       name: 'Tasks & Projects',   icon: '✅', pageVer: '1.189', sopFile: 'os/tasks/sop.html',             sopVer: '1.4', standalone: 'os/tasks/index.html' },
         { id: 'cfv',        name: 'CFVs',                          icon: '🚨', pageVer: '1.42', sopFile: 'sop-cfvs.html',               sopVer: '1.34', standalone: 'index.html#cfv' },
         { id: 'money',      name: 'Money Confidence',              icon: '🧭', pageVer: '1.1', sopFile: '',                            sopVer: '1.0', standalone: 'index.html#money' },
@@ -35,7 +35,7 @@
         { id: 'transactions', name: 'Transactions',                icon: '🔍', pageVer: '1.1', sopFile: '',                            sopVer: '1.0', standalone: 'index.html#transactions' },
         { id: 'coa',        name: 'Chart of Accounts',             icon: '📒', pageVer: '1.3', sopFile: 'sop-coa.html',                sopVer: '1.1', standalone: 'index.html#coa' },
         { id: 'comms',      name: 'Inbound Comms',                 icon: '📨', pageVer: '2.84', sopFile: 'inbound-comms-sop.html',      sopVer: '2.60', standalone: 'follow-up.html' },
-        { id: 'growth-plan', name: 'Growth Plan',                    icon: '📈', pageVer: '1.69', sopFile: 'sop-growth-plan.html',        sopVer: '1.68', standalone: 'growth-plan.html' },
+        { id: 'growth-plan', name: 'Growth Plan',                    icon: '📈', pageVer: '1.70', sopFile: 'sop-growth-plan.html',        sopVer: '1.68', standalone: 'growth-plan.html' },
         { id: 'compliance', name: 'Property Compliance',            icon: '✅', pageVer: '1.18', sopFile: 'sop-compliance.html',         sopVer: '1.14', standalone: 'compliance.html' },
         // Property Manager (Operations) — Roy Lavin's single page. Standalone at
         // property-manager/ behind its own passcode; the property-manager Worker
@@ -53,7 +53,7 @@
         { id: 'agents', name: 'AI Agents', icon: '🤖', pageVer: '1.196', sopFile: 'sop-ai-agents.html', sopVer: '1.170', standalone: 'os/agents/index.html', adminOnly: true },
         { id: 'fintable',  name: 'Accounts',                       icon: '🏦', pageVer: '1.19', sopFile: '',                            sopVer: '1.0', standalone: 'index.html#fintable' },
         { id: 'systemisation', name: 'Systemisation',              icon: '⚙️', pageVer: '1.27', sopFile: 'guides/systemisation.html',    sopVer: '1.11', standalone: 'os/systemisation/index.html' },
-        { id: 'os-team',    name: 'Team Members',                  icon: '👥', pageVer: '1.48', sopFile: '',                            sopVer: '1.1', standalone: 'os/team/index.html' },
+        { id: 'os-team',    name: 'Team Members',                  icon: '👥', pageVer: '1.49', sopFile: '',                            sopVer: '1.1', standalone: 'os/team/index.html' },
         // pageVer corrected by hand 2026-08-06: the auto-bump never fired for this page
         // (crm-supabase.html was missing from the workflow `paths:` filter), so 1.0 was
         // stale — the CRM gained a 14-step interactive walkthrough on 2026-08-04 (319b438).
@@ -1141,35 +1141,46 @@
         // screen is read live from the Rental Units and Tenants tables by record id; the
         // `label` below is only the fallback shown if that record cannot be found.
         // KPI 5. excludeTenantIds: a unit only counts once someone OTHER than these lives there.
+        // Five units each need a new tenant, plus one stretch (Kevin, 6 Oct 2026). Units 3 to 5
+        // replace a tenant who is leaving. The unit the first named tenant moves INTO is not
+        // here: a move is not a new tenant.
         units: [
             { id: 'recVn4FyhelmnPH9A', label: 'Named unit 1' },
             { id: 'rec7gTnbleOFIi9He', label: 'Named unit 2' },
-            { id: 'rec8apVRovevdBKr1', label: 'Named unit 3' },
-            { id: 'recb0itBQ6Ut9wpYI', label: 'Named unit 4', excludeTenantIds: ['recqDuUeGX1mfJQtV'] },
+            { id: 'recb0itBQ6Ut9wpYI', label: 'Named unit 3', excludeTenantIds: ['recqDuUeGX1mfJQtV'] },
+            { id: 'rec7JVaDF8wnG5Ll8', label: 'Named unit 4', excludeTenantIds: ['rechJnYfAhdyBhHTS'] },
+            { id: 'recvahP38WwLqzFwa', label: 'Named unit 5', excludeTenantIds: ['recmsWk43HQI2vHrv'] },
             { id: 'rechrhiqU3vmDOjC9', label: 'Stretch unit', stretch: true },
         ],
         // KPI 6. A line is a named tenant (wherever they live) or whoever is in a named unit.
+        // replacesRent: the leaving tenant's rent, already in the cushion, so only the rise over
+        // it counts as new rent. The figures the stretch targets below were built on.
         rent: [
             { label: 'Tenant for named unit 1', unitId: 'recVn4FyhelmnPH9A' },
             { label: 'Named tenant 1', tenantId: 'recqDuUeGX1mfJQtV' },
             { label: 'Named tenant 2', tenantId: 'rec6RBL5GVqcXIPTL' },
-            { label: 'New tenant for named unit 4', unitId: 'recb0itBQ6Ut9wpYI', excludeTenantIds: ['recqDuUeGX1mfJQtV'], stretch: true },
+            { label: 'New tenant for named unit 3', unitId: 'recb0itBQ6Ut9wpYI', excludeTenantIds: ['recqDuUeGX1mfJQtV'], stretch: true },
             { label: 'Tenant for named unit 2', unitId: 'rec7gTnbleOFIi9He', stretch: true },
             { label: 'Tenant for the stretch unit', unitId: 'rechrhiqU3vmDOjC9', stretch: true },
+            { label: 'New tenant for named unit 4', unitId: 'rec7JVaDF8wnG5Ll8', excludeTenantIds: ['rechJnYfAhdyBhHTS'], replacesRent: 524.90, stretch: true },
+            { label: 'New tenant for named unit 5', unitId: 'recvahP38WwLqzFwa', excludeTenantIds: ['recmsWk43HQI2vHrv'], replacesRent: 524.52, stretch: true },
         ],
         // 31 Dec 2026 targets, from the Q4 objective and strategy plan. The plan sets ONE
         // marker for the cushion and one for Kevin's income, and says "the plan figure
         // steers, the cash figure is the truth". So the cash cards are held to the same
         // marker as the plan cards (Kevin, 2 Oct 2026: the dashboard must marry up with the
         // plan). The gap between a plan card and its cash card is the leak.
+        // 6 Oct 2026 (Kevin): two replacement rooms joined the units, re-let at £897.52 against
+        // £524.90 and £524.52 today. The £745.62 rise is added to every STRETCH figure only;
+        // committed figures are as signed off on 2 Oct.
         targets: {
-            incomePlan:   { committed: 13945, stretch: 16887 },
-            incomeCash:   { committed: 13945, stretch: 16887 },
-            cushionPlan:  { committed: 18245, stretch: 21187 },
-            cushionCash:  { committed: 18245, stretch: 21187 },
-            namedUnits:   { committed: 4, stretch: 5 },
-            namedRent:    { committed: 2693, stretch: 5318 },
-            personalNet:  { committed: 8300, stretch: 11250 },
+            incomePlan:   { committed: 13945, stretch: 17633 },
+            incomeCash:   { committed: 13945, stretch: 17633 },
+            cushionPlan:  { committed: 18245, stretch: 21933 },
+            cushionCash:  { committed: 18245, stretch: 21933 },
+            namedUnits:   { committed: 5, stretch: 6 },
+            namedRent:    { committed: 2693, stretch: 6064 },
+            personalNet:  { committed: 8300, stretch: 11996 },
             compliance:   { committed: 13, stretch: null },
         },
     };
