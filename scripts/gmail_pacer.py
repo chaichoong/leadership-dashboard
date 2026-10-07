@@ -47,16 +47,27 @@ GMAIL_UNITS_MODIFY = 5          # messages.modify, per id
 GMAIL_UNITS_ATTACHMENT = 5      # messages.attachments.get
 GMAIL_UNITS_LABELS = 1          # labels.list
 GMAIL_LIST_PAGE_MAX = 25        # the worker's own cap, and its default
-# 1,000 units of the minute are left alone, for anything that reaches Gmail
-# without coming through here (a hand-run command, the send path, a worker
-# retry inside Cloudflare). A pacer that spends the whole minute is a pacer
-# that still produces 403s.
-GMAIL_PACE_CEILING = 5000
-# A rebuild never takes more than half the minute, so a slot's scan — the work
-# that actually triages mail — always has its share. This is the rule whose
-# absence let nine rebuilds a day starve the 09:00 scan (8-10 Sep 2026).
-GMAIL_REBUILD_CEILING = 3000
-GMAIL_PACE_DIR = Path.home() / ".config/od/gmail_pace"
+# THE STARTING CEILINGS ARE WHAT WAS MEASURED, NOT WHAT IS DOCUMENTED (7 Oct 2026).
+# The first live run was refused after 2,525 units in a minute, with Gmail naming
+# the metric itself: "Quota exceeded for quota metric 'Total Query Cost' and limit
+# 'Units per minute per user'". So the documented 6,000 is not what this project
+# gets. Starting at 5,000 guaranteed a refusal in the first minute of every fresh
+# ledger, which is a wasted page and a wasted wait every time.
+#
+# These are starting points only — gmail_note_refusal learns the real rate from
+# the first refusal and _pace_recovered edges it back up over clean stretches, so
+# the pacer settles near the truth whatever these say. They are set under the
+# observed figure so the common case needs no refusal to find it.
+GMAIL_PACE_CEILING = 2000
+# A rebuild never takes more than about half, so a slot's scan — the work that
+# actually triages mail — always has its share. This is the rule whose absence let
+# nine rebuilds a day starve the 09:00 scan (8-10 Sep 2026).
+GMAIL_REBUILD_CEILING = 1200
+# OD_GMAIL_PACE_DIR exists so a test can never write to the live ledger. Before
+# 7 Oct 2026 a test that drove worker_post taught the REAL pacer a ceiling from
+# its own fake refusals, which would have throttled production from a fixture.
+GMAIL_PACE_DIR = Path(os.environ.get("OD_GMAIL_PACE_DIR")
+                      or (Path.home() / ".config/od/gmail_pace"))
 # MEASURED, NOT ASSUMED (7 Oct 2026). The first real run of this pacer took a
 # short-window refusal after 2,526 units in a minute — less than half the 6,000
 # the documentation describes, and below even the 3,000 rebuild ceiling. The
@@ -71,9 +82,24 @@ GMAIL_PACE_DIR = Path.home() / ".config/od/gmail_pace"
 GMAIL_OBSERVED_MARGIN = 0.8     # pace to 80% of whatever Gmail last refused at
 # Never learn a ceiling so low that a single page cannot get through, or the
 # rebuild would wait for ever on a limit of its own making.
-GMAIL_OBSERVED_FLOOR = 1100     # two pages plus change
+GMAIL_OBSERVED_FLOOR = 1010     # two pages plus change
+# A LIMIT THAT ONLY FALLS ENDS AT THE FLOOR FOR EVER. Each refusal ratchets the
+# ceiling down, so without recovery a few bad minutes would throttle the mailbox
+# permanently — the live rebuild went 1,617 then 1,215 within minutes. So after a
+# clean stretch the ceiling edges back up: slow additive recovery against fast
+# multiplicative backoff, which is how every well-behaved rate limiter settles
+# near the true rate instead of oscillating or collapsing.
+GMAIL_OBSERVED_RECOVER_AFTER = 600     # ten clean minutes
+GMAIL_OBSERVED_RECOVER_STEP = 250      # then half a page at a time
 # One wait is never longer than the window it is waiting for, plus skew.
 GMAIL_PACE_MAX_WAIT = 70
+# Enough attempts for a genuinely busy mailbox to clear several windows, few enough that a stopped
+# clock surfaces in seconds rather than hanging the run.
+GMAIL_PACE_MAX_HOLDS = 60
+
+
+class GmailPaceStuck(RuntimeError):
+    """The pacer could not find room and the clock is not advancing."""
 
 
 def gmail_units(path, payload=None):
@@ -100,9 +126,14 @@ def gmail_units(path, payload=None):
     return GMAIL_UNITS_LIST + GMAIL_LIST_PAGE_MAX * GMAIL_UNITS_GET
 
 
+def _pace_dir():
+    """Read the override each time: a test may set it after import."""
+    return Path(os.environ.get("OD_GMAIL_PACE_DIR") or GMAIL_PACE_DIR)
+
+
 def _pace_file(account):
     safe = re.sub(r"[^a-z0-9._-]", "_", (account or "default").lower())
-    return GMAIL_PACE_DIR / ("%s.json" % safe)
+    return _pace_dir() / ("%s.json" % safe)
 
 
 class _pace_lock:
@@ -121,7 +152,7 @@ class _pace_lock:
         self.fh = None
 
     def __enter__(self):
-        GMAIL_PACE_DIR.mkdir(parents=True, exist_ok=True)
+        _pace_dir().mkdir(parents=True, exist_ok=True)
         try:
             import fcntl
             self.fh = open(self.path, "a+")
@@ -157,6 +188,36 @@ def _pace_observed(account):
         return None
 
 
+def _pace_recovered(account, now):
+    """The learned ceiling, edged back up for every clean stretch since the last
+    refusal. Never above GMAIL_PACE_CEILING, never below the floor.
+
+    Recovery is computed on read rather than written on a timer: there is no
+    daemon here, and a pure function of (ceiling, last refusal, now) cannot drift
+    from whatever the file says.
+    """
+    p = _pace_file(account)
+    if not p.exists():
+        return None
+    try:
+        data = json.loads(p.read_text())
+    except (ValueError, OSError):
+        return None
+    try:
+        ceiling = int(data.get("observedCeiling") or 0)
+        at = float(data.get("observedAt") or 0)
+    except (TypeError, ValueError):
+        return None
+    if not ceiling or not at:
+        return None
+    clean = max(0.0, now - at)
+    steps = int(clean // GMAIL_OBSERVED_RECOVER_AFTER)
+    if steps <= 0:
+        return ceiling
+    return min(GMAIL_PACE_CEILING,
+               max(GMAIL_OBSERVED_FLOOR, ceiling + steps * GMAIL_OBSERVED_RECOVER_STEP))
+
+
 def gmail_note_refusal(account, now=None):
     """Gmail just refused a call on a short-window metric. Record what was in
     flight so every later call on this mailbox is paced under it.
@@ -168,7 +229,7 @@ def gmail_note_refusal(account, now=None):
     with _pace_lock(account):
         rows = _pace_read(account, t)
         in_flight = sum(u for _, u in rows)
-        prev = _pace_observed(account)
+        prev = _pace_recovered(account, t)
         learned = max(GMAIL_OBSERVED_FLOOR, int(in_flight * GMAIL_OBSERVED_MARGIN))
         ceiling = min(prev, learned) if prev else learned
         p = _pace_file(account)
@@ -210,11 +271,11 @@ def _pace_read(account, now):
 
 
 def _pace_write_raw(account, data):
-    GMAIL_PACE_DIR.mkdir(parents=True, exist_ok=True)
+    _pace_dir().mkdir(parents=True, exist_ok=True)
     p = _pace_file(account)
     data = dict(data)
     data["spent"] = (data.get("spent") or [])[-400:]
-    fd, tmp = tempfile.mkstemp(dir=str(GMAIL_PACE_DIR), suffix=".tmp")
+    fd, tmp = tempfile.mkstemp(dir=str(_pace_dir()), suffix=".tmp")
     try:
         with os.fdopen(fd, "w") as f:
             json.dump(data, f)
@@ -247,13 +308,18 @@ def gmail_pace(path, payload=None, account=None, ceiling=None,
     cost = gmail_units(path, payload)
     ceiling = ceiling or _pace["ceiling"]
     # Whatever Gmail last refused at beats whatever is written here.
-    observed = _pace_observed(account)
+    observed = _pace_recovered(account, clock())
     if observed:
         ceiling = min(ceiling, observed)
     # A single call dearer than the whole ceiling would wait for ever.
     room = max(ceiling, cost)
     waited = 0.0
-    while True:
+    # A WAIT THAT NEVER ENDS IS WORSE THAN A REFUSAL. If the clock does not move — a stopped
+    # monotonic source, a caller whose sleep is a no-op, a ledger whose stamps are in the future —
+    # the room test can never become true and this would spin for ever holding nothing but the
+    # agent's run. Bounded at a few windows' worth of attempts, then it gives up and says why, so
+    # the caller's own quota handling takes over instead of the process hanging silently.
+    for _ in range(GMAIL_PACE_MAX_HOLDS):
         t = clock()
         with _pace_lock(account):
             rows = _pace_read(account, t)
@@ -271,6 +337,9 @@ def gmail_pace(path, payload=None, account=None, ceiling=None,
             on_wait(cost, spent, ceiling, wait)
         sleep(wait)
         waited += wait
+    raise GmailPaceStuck(
+        "waited %.0fs over %d attempts and never found room for a %d-unit call under a ceiling of "
+        "%d; the clock or the ledger is not moving" % (waited, GMAIL_PACE_MAX_HOLDS, cost, ceiling))
 
 
 _pace = {"ceiling": GMAIL_PACE_CEILING, "units": 0, "waited": 0.0}

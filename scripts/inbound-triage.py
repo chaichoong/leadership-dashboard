@@ -474,11 +474,14 @@ def _pace_wait_note(path):
     """One line per wait, so a paced run never looks like a hung one — the same
     lesson as finding 20260925-agent-dispatch-615."""
     def note(cost, spent, ceiling, wait):
-        progress("GMAIL PACER: holding %s for %.1fs — this call costs %d units and "
-                 "%d of the %d allowed this minute are already spent (Gmail allows "
-                 "%d a minute; a page of 25 messages costs %d)."
-                 % (path, wait, cost, spent, ceiling, GMAIL_UNITS_PER_MINUTE,
-                    GMAIL_UNITS_LIST + GMAIL_LIST_PAGE_MAX * GMAIL_UNITS_GET))
+        # The ceiling named here is the one in force, which after the first refusal is what Gmail
+        # was MEASURED to allow, not the documented 6,000. Quoting the documented figure while
+        # pacing to a third of it is how a reader concludes the pacer is broken (7 Oct 2026).
+        progress("GMAIL PACER: holding %s for %.1fs — this call costs %d units and %d of the %d "
+                 "allowed this minute are already spent. A page of 25 messages costs %d, and %d "
+                 "a minute is what this mailbox is paced to."
+                 % (path, wait, cost, spent, ceiling,
+                    GMAIL_UNITS_LIST + GMAIL_LIST_PAGE_MAX * GMAIL_UNITS_GET, ceiling))
     return note
 
 
@@ -1817,6 +1820,34 @@ def cmd_history_build(pages, budget=None):
                                   "the next run carries on. Nothing written to the book yet."}))
         return None
     except BaseException:
+        # A RATE OR QUOTA REFUSAL IS CAPACITY, NOT A FAULT (7 Oct 2026). The first live run of the
+        # paced rebuild walked 55 pages across 5 of 10 lanes, saved its place, and then spent its
+        # slowdown budget and exited through fail(kind="rate") — which recorded a FAILURE and moved
+        # the give-up counter. Two of those and the retry stops again, which is the exact loop this
+        # whole build exists to break. The time wall was handled; the quota wall was not.
+        #
+        # Gmail named the metric itself on that run: "Quota exceeded for quota metric 'Total Query
+        # Cost' and limit 'Units per minute per user'". Nothing is wrong with the rebuild when that
+        # happens, and the work already done is on disk.
+        #
+        # It is a pause whether or not a page got through. Requiring progress would put the old loop
+        # back for an account out of allowance from its first call, and that account is not broken
+        # either — the daily `triage-history-book-is-current` check reports the staleness, which is
+        # the right surface. The give-up counter existed to stop wasted retries; the pacing stops
+        # those now, and the counter is kept for GENUINE faults.
+        #
+        # ONE handler, deliberately: an `except SystemExit` beside an `except BaseException` looks
+        # equivalent and is not. Once the first matches, a bare `raise` leaves the try statement
+        # and the sibling never runs — so genuine faults silently stopped being recorded when this
+        # was written as two handlers.
+        if _last_fail.get("kind") in ("rate", "quota"):
+            done = sum(1 for v in (history_progress_read().get("lanes") or {}).values()
+                       if v.get("done"))
+            print(json.dumps({"paused": True, "reason": _last_fail.get("kind"),
+                              "lanesDone": done, "lanesTotal": len(HISTORY_LANE_MAP),
+                              "note": "out of Gmail allowance for this run, not broken; the place "
+                                      "is saved and the next run carries on from it."}))
+            return None
         try:
             st = read_fail_state()
             st["history_build_failed_ms"] = int(datetime.now().timestamp() * 1000)
@@ -2360,9 +2391,30 @@ def selftest():
             write_state({"history_built_ms": _sep9_built})
             check("stale with no prior failure exits 0 (rebuild now)",
                   cmd_history_stale() == 0)
-            # Exactly what a quota death must leave behind.
-            def _boom(_pages, budget=None, now=None):
+            # A RATE REFUSAL IS A PAUSE, NOT A FAULT (7 Oct 2026). The 9 Sep replay below used to
+            # drive the give-up counter with kind="rate", because back then every refusal counted.
+            # That is what retired a working rebuild at 35 days stale. The counter still exists and
+            # is still tested — it is now driven by a GENUINE fault, which is what it is for.
+            def _rate(_pages, budget=None, now=None):
                 fail("GMAIL RATE METRIC STILL FULL", kind="rate")
+
+            def _boom(_pages, budget=None, now=None):
+                fail("the listing came back malformed", kind="error")
+
+            _real_r, globals()["_history_build"] = _history_build, _rate
+            _fail_quiet["on"] = True
+            try:
+                check("a rate refusal returns cleanly instead of raising",
+                      cmd_history_build(1) is None)
+            except SystemExit:
+                check("a rate refusal returns cleanly instead of raising", False)
+            finally:
+                globals()["_history_build"] = _real_r
+                _fail_quiet["on"] = False
+            check("and a rate refusal does NOT move the give-up counter",
+                  not read_fail_state().get("history_build_fail_count"))
+            check("and the next slot is still willing to try (exit 0, not 1)",
+                  cmd_history_stale() == 0)
             _real, globals()["_history_build"] = _history_build, _boom
             _fail_quiet["on"] = True
             try:
@@ -2372,7 +2424,7 @@ def selftest():
             finally:
                 globals()["_history_build"] = _real
                 _fail_quiet["on"] = False
-            check("a failed rebuild is remembered in its own file",
+            check("a GENUINE failure is still remembered in its own file",
                   isinstance(read_fail_state().get("history_build_failed_ms"), int))
             check("the next slot refuses the rebuild (exit 1), not exit 0",
                   cmd_history_stale() == 1)
@@ -2396,7 +2448,7 @@ def selftest():
             finally:
                 globals()["_history_build"] = _real2
                 _fail_quiet["on"] = False
-            check("five consecutive failures reach a count of five, not one",
+            check("five consecutive GENUINE failures reach a count of five, not one",
                   int(read_fail_state().get("history_build_fail_count") or 0) == 5)
             check("and the slot gives up rather than reporting ok",
                   history_build_given_up(

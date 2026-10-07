@@ -65,8 +65,8 @@ print(json.dumps({
     expect(u.attachment).toBe(5);
     expect(u.labels).toBe(1);
     expect(u.unknown).toBe(505);              // a new endpoint makes it cautious, not blind
-    expect(u.ceiling).toBe(5000);             // 1,000 left for anything unpaced
-    expect(u.rebuild).toBe(3000);             // a rebuild never takes more than half
+    expect(u.ceiling).toBe(2000);             // MEASURED: Gmail refused at 2,525 on 7 Oct 2026
+    expect(u.rebuild).toBe(1200);             // a rebuild never takes more than about half
   });
 
   // ── 1. two processes, one budget ───────────────────────────────────────────
@@ -86,7 +86,9 @@ def sleeper(_s):
     sys.stdout.flush()
     os._exit(0)
 for _ in range(20):
-    gp.gmail_pace("/gmail/list", {}, account="a@b.com", sleep=sleeper, now=lambda: FROZEN)
+    # An explicit ceiling: this test is about the SHARED LEDGER, not about whatever the measured
+    # starting ceiling happens to be this week.
+    gp.gmail_pace("/gmail/list", {}, account="a@b.com", ceiling=5000, sleep=sleeper, now=lambda: FROZEN)
     granted.append(1)
 print(json.dumps({"tag": "${tag}", "granted": len(granted), "refused": False}))
 `;
@@ -119,7 +121,9 @@ granted = []
 def sleeper(_s):
     print(json.dumps({"granted": len(granted)})); sys.stdout.flush(); os._exit(0)
 for _ in range(20):
-    gp.gmail_pace("/gmail/list", {}, account="a@b.com", sleep=sleeper, now=lambda: FROZEN)
+    # An explicit ceiling: this test is about the SHARED LEDGER, not about whatever the measured
+    # starting ceiling happens to be this week.
+    gp.gmail_pace("/gmail/list", {}, account="a@b.com", ceiling=5000, sleep=sleeper, now=lambda: FROZEN)
     granted.append(1)
 print(json.dumps({"granted": len(granted)}))
 `;
@@ -140,7 +144,7 @@ p = gp._pace_file("a@b.com"); p.parent.mkdir(parents=True, exist_ok=True)
 p.write_text("{not json")
 def sleeper(_s):
     print(json.dumps({"refused": True})); sys.stdout.flush(); os._exit(0)
-gp.gmail_pace("/gmail/list", {}, account="a@b.com", sleep=sleeper, now=lambda: 1_000_000.0)
+gp.gmail_pace("/gmail/list", {}, account="a@b.com", ceiling=5000, sleep=sleeper, now=lambda: 1_000_000.0)
 print(json.dumps({"refused": False}))
 `, { HOME: home });
     expect(JSON.parse(out.trim().split('\n').pop()).refused).toBe(true);
@@ -156,7 +160,7 @@ t = [1_000_000.0]
 waits = []
 def sleeper(s): waits.append(s); t[0] += s
 for _ in range(11):
-    gp.gmail_pace("/gmail/list", {}, account="a@b.com", sleep=sleeper, now=lambda: t[0])
+    gp.gmail_pace("/gmail/list", {}, account="a@b.com", ceiling=5000, sleep=sleeper, now=lambda: t[0])
 print(json.dumps({"calls": 11, "waits": len(waits), "longest": max(waits), "elapsed": t[0] - 1_000_000.0}))
 `, { HOME: home });
     const r = JSON.parse(out);
@@ -183,7 +187,7 @@ gp = importlib.util.module_from_spec(spec); spec.loader.exec_module(gp)
 t = [1_000_000.0]
 # Five pages get through on an empty ledger: 2,525 units, which is what the real run spent.
 for _ in range(5):
-    gp.gmail_pace("/gmail/list", {}, account="a@b.com", sleep=lambda s: None, now=lambda: t[0])
+    gp.gmail_pace("/gmail/list", {}, account="a@b.com", ceiling=5000, sleep=lambda s: None, now=lambda: t[0])
 before = gp._pace_observed("a@b.com")
 learned = gp.gmail_note_refusal("a@b.com", now=lambda: t[0])
 # A later minute: the ledger has rolled over, but the LEARNED ceiling must not.
@@ -193,7 +197,7 @@ def stop(_s):
     raise SystemExit(0)
 try:
     for _ in range(10):
-        gp.gmail_pace("/gmail/list", {}, account="a@b.com", sleep=stop, now=lambda: t[0])
+        gp.gmail_pace("/gmail/list", {}, account="a@b.com", ceiling=5000, sleep=stop, now=lambda: t[0])
         granted.append(1)
 except SystemExit:
     pass
@@ -218,7 +222,7 @@ gp.gmail_pace("/gmail/labels", {}, account="a@b.com", sleep=lambda s: None, now=
 learned = gp.gmail_note_refusal("a@b.com", now=lambda: 1_000_000.0)
 # A page must still be able to get through, or the rebuild waits for ever on its own limit.
 ok = []
-gp.gmail_pace("/gmail/list", {}, account="a@b.com", sleep=lambda s: ok.append("waited"), now=lambda: 1_000_100.0)
+gp.gmail_pace("/gmail/list", {}, account="a@b.com", ceiling=5000, sleep=lambda s: ok.append("waited"), now=lambda: 1_000_100.0)
 print(json.dumps({"learned": learned, "floor": gp.GMAIL_OBSERVED_FLOOR, "hadToWait": ok}))
 `, { HOME: home });
     const r = JSON.parse(out);
@@ -235,16 +239,132 @@ spec = importlib.util.spec_from_file_location("gp", "scripts/gmail_pacer.py")
 gp = importlib.util.module_from_spec(spec); spec.loader.exec_module(gp)
 t = [1_000_000.0]
 for _ in range(5):
-    gp.gmail_pace("/gmail/list", {}, account="a@b.com", sleep=lambda s: None, now=lambda: t[0])
+    gp.gmail_pace("/gmail/list", {}, account="a@b.com", ceiling=5000, sleep=lambda s: None, now=lambda: t[0])
 low = gp.gmail_note_refusal("a@b.com", now=lambda: t[0])
 t[0] += 120
 # A second refusal with MORE in flight must not raise the ceiling back up.
 for _ in range(3):
-    gp.gmail_pace("/gmail/list", {}, account="a@b.com", sleep=lambda s: None, now=lambda: t[0])
+    gp.gmail_pace("/gmail/list", {}, account="a@b.com", ceiling=5000, sleep=lambda s: None, now=lambda: t[0])
 again = gp.gmail_note_refusal("a@b.com", now=lambda: t[0])
 print(json.dumps({"first": low, "second": again}))
 `, { HOME: home });
     const r = JSON.parse(out);
     expect(r.second).toBeLessThanOrEqual(r.first);
+  });
+});
+
+// A LIMIT THAT ONLY FALLS ENDS AT THE FLOOR FOR EVER (7 Oct 2026). The live rebuild ratcheted
+// 1,617 then 1,215 within minutes. Without recovery a few bad minutes would throttle the mailbox
+// permanently, so the ceiling edges back up over clean stretches: slow additive recovery against
+// fast multiplicative backoff.
+describe('the learned ceiling recovers over a clean stretch', () => {
+  const learn = (extraPy) => {
+    const home = mkdtempSync(path.join(tmpdir(), 'pacer-rec-'));
+    return JSON.parse(PY(`
+import importlib.util, json
+spec = importlib.util.spec_from_file_location("gp", "scripts/gmail_pacer.py")
+gp = importlib.util.module_from_spec(spec); spec.loader.exec_module(gp)
+T0 = 1_000_000.0
+t = [T0]
+# THREE pages, deliberately: 1,515 units in flight learns 1,212, which sits between the floor
+# (1,010) and the real starting ceiling (2,000). That is the only band where recovery is
+# observable at all, and it exercises the shipped configuration rather than an invented one.
+for _ in range(3):
+    gp.gmail_pace("/gmail/list", {}, account="a@b.com", sleep=lambda s: None, now=lambda: t[0])
+learned = gp.gmail_note_refusal("a@b.com", now=lambda: t[0])
+${extraPy}
+`, { HOME: home }));
+  };
+
+  it('stays put while the stretch is short, and edges up once it is long', () => {
+    const r = learn(`
+print(json.dumps({
+    "learned":  learned,
+    "after1m":  gp._pace_recovered("a@b.com", T0 + 60),
+    "after10m": gp._pace_recovered("a@b.com", T0 + 600),
+    "after30m": gp._pace_recovered("a@b.com", T0 + 1800),
+    "step":     gp.GMAIL_OBSERVED_RECOVER_STEP,
+}))
+`);
+    expect(r.learned).toBe(1212);                            // 80% of the 1,515 in flight
+    expect(r.after1m).toBe(r.learned);                       // one minute is not a clean stretch
+    expect(r.after10m).toBe(r.learned + r.step);             // ten minutes earns one step
+    expect(r.after30m).toBe(r.learned + 3 * r.step);         // 1,962, still under the ceiling
+  });
+
+  it('never recovers past the configured ceiling', () => {
+    const r = learn(`
+print(json.dumps({
+    "afterAWeek": gp._pace_recovered("a@b.com", T0 + 7 * 86400),
+    "ceiling":    gp.GMAIL_PACE_CEILING,
+}))
+`);
+    expect(r.afterAWeek).toBe(r.ceiling);
+  });
+
+  it('measures a fresh refusal against the RECOVERED ceiling, not the stale stored one', () => {
+    const r = learn(`
+# Ten clean minutes, so the stored ceiling has earned a step. A refusal now must ratchet down
+# from the recovered figure, not jump back to the older, lower one.
+recovered = gp._pace_recovered("a@b.com", T0 + 600)
+t[0] = T0 + 600
+gp.gmail_pace("/gmail/list", {}, account="a@b.com", sleep=lambda s: None, now=lambda: t[0])
+again = gp.gmail_note_refusal("a@b.com", now=lambda: t[0])
+print(json.dumps({"learned": learned, "recovered": recovered, "again": again}))
+`);
+    expect(r.recovered).toBeGreaterThan(r.learned);
+    expect(r.again).toBeLessThanOrEqual(r.recovered);   // still a ratchet, from the right number
+    expect(r.again).toBeGreaterThanOrEqual(1010);       // and never under the floor
+  });
+});
+
+// A WAIT THAT NEVER ENDS IS WORSE THAN A REFUSAL (7 Oct 2026, found while lowering the ceilings).
+// If the clock does not move — a stopped monotonic source, a caller whose sleep is a no-op, a
+// ledger whose stamps are in the future — the room test can never become true. The first version
+// of this pacer spun for ever in exactly that case, holding nothing but the agent's whole run, and
+// it surfaced as two test runs hanging past their timeout rather than as any error.
+describe('the pacer gives up rather than waiting for ever', () => {
+  it('raises instead of spinning when the clock does not advance', () => {
+    const home = mkdtempSync(path.join(tmpdir(), 'pacer-stuck-'));
+    const out = PY(`
+import importlib.util, json
+spec = importlib.util.spec_from_file_location("gp", "scripts/gmail_pacer.py")
+gp = importlib.util.module_from_spec(spec); spec.loader.exec_module(gp)
+FROZEN = 1_000_000.0
+# A sleep that does nothing, against a clock that never moves: the exact shape of the hang.
+granted = 0
+try:
+    for _ in range(50):
+        gp.gmail_pace("/gmail/list", {}, account="a@b.com", sleep=lambda s: None, now=lambda: FROZEN)
+        granted += 1
+    print(json.dumps({"raised": False, "granted": granted}))
+except gp.GmailPaceStuck as e:
+    print(json.dumps({"raised": True, "granted": granted, "why": str(e), "holds": gp.GMAIL_PACE_MAX_HOLDS}))
+`, { HOME: home });
+    const r = JSON.parse(out);
+    expect(r.raised).toBe(true);
+    expect(r.granted).toBeGreaterThan(0);          // it did real work before it got stuck
+    expect(r.why).toMatch(/never found room/);
+    expect(r.why).toMatch(/clock or the ledger is not moving/);
+    expect(r.holds).toBeGreaterThan(10);           // a busy mailbox still gets many real attempts
+  });
+
+  it('a moving clock still gets through, so the guard costs a working run nothing', () => {
+    const home = mkdtempSync(path.join(tmpdir(), 'pacer-moving-'));
+    const out = PY(`
+import importlib.util, json
+spec = importlib.util.spec_from_file_location("gp", "scripts/gmail_pacer.py")
+gp = importlib.util.module_from_spec(spec); spec.loader.exec_module(gp)
+t = [1_000_000.0]
+def sleeper(s): t[0] += s
+granted = 0
+for _ in range(40):
+    gp.gmail_pace("/gmail/list", {}, account="a@b.com", sleep=sleeper, now=lambda: t[0])
+    granted += 1
+print(json.dumps({"granted": granted, "minutes": round((t[0] - 1_000_000.0) / 60, 1)}))
+`, { HOME: home });
+    const r = JSON.parse(out);
+    expect(r.granted).toBe(40);                    // 40 pages, none lost to the guard
+    expect(r.minutes).toBeGreaterThan(5);          // paced across real time, as intended
   });
 });

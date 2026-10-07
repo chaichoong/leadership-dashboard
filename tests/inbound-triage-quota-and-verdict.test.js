@@ -147,39 +147,69 @@ describe('a history rebuild that failed on quota does not retry next slot', () =
     expect(j.escalate).toMatch(/ever days|HISTORY BOOK DEAD/);
   });
 
-  it('the failure is recorded by the build itself, not by the caller', () => {
-    // The whole mechanism rests on cmd_history_build remembering its own
-    // death; a wrapper that only the shell sets would be lost on a SIGKILL.
-    // DRIVEN, not grepped (the source grep this replaced went green on 29 days
-    // of a counter that never moved — finding 20260930-phase-2-667).
-    const d = box('records-its-own-death');
-    writeFileSync(join(d, 'state.json'), JSON.stringify({ history_built_ms: 1 }));
-    // The real cmd_history_build, with only the Gmail work replaced by the
-    // quota death it actually died of on 1 Oct 2026.
+  // THE RULE CHANGED ON 7 OCT 2026, AND THIS IS WHY IT IS SAFE.
+  //
+  // This case used to drive the counter with kind="rate" and assert the refusal was recorded,
+  // because back then every refusal counted. That is what retired a working rebuild: by 7 Oct the
+  // book was 35 days stale, the counter had reached its limit on two `kind=rate` failures, and the
+  // retry had stopped for good while the inbox sorter filed mail against 1 Sep sender knowledge.
+  //
+  // The cooldown existed for a real reason — nine failed rebuilds a day burned the slot's quota
+  // (8-10 Sep 2026) — so removing it for capacity refusals is only safe because the waste it
+  // guarded against is gone: the rebuild is now PACED (it never takes more than its share of the
+  // minute) and RESUMABLE (it saves its place after every page), so a retry next slot does fresh
+  // work instead of repeating what it already paid for. Retrying is now productive, which it was
+  // not when this guard was written.
+  //
+  // The counter itself still matters, and is still driven here — by a GENUINE fault, which is
+  // what it is for.
+  const driveBuild = (dir, kind) => {
     const code = `
 import importlib.util, os, sys
 spec = importlib.util.spec_from_file_location("it", ${JSON.stringify(TRIAGE)})
 it = importlib.util.module_from_spec(spec); spec.loader.exec_module(it)
-it._history_build = lambda pages, budget=None, now=None: it.fail("GMAIL RATE METRIC STILL FULL", kind="rate")
+it._history_build = lambda pages, budget=None, now=None: it.fail("stubbed ${kind} failure", kind=${JSON.stringify('KIND')})
 it._fail_quiet["on"] = True
 try:
     it.cmd_history_build(1)
 except SystemExit:
     pass
-`;
-    const j = (() => {
-      try {
-        execFileSync('python3', ['-c', code], {
-          encoding: 'utf8', env: { ...process.env, INBOUND_TRIAGE_DIR: d },
-        });
-        return { code: 0 };
-      } catch (e) { return { code: e.status, out: (e.stdout || '') + (e.stderr || '') }; }
-    })();
+`.replace(JSON.stringify('KIND'), JSON.stringify(kind));
+    try {
+      execFileSync('python3', ['-c', code], {
+        encoding: 'utf8', env: { ...process.env, INBOUND_TRIAGE_DIR: dir },
+      });
+      return { code: 0 };
+    } catch (e) { return { code: e.status, out: (e.stdout || '') + (e.stderr || '') }; }
+  };
+
+  it('a rate or quota refusal is a PAUSE: nothing recorded, next slot still willing', () => {
+    for (const kind of ['rate', 'quota']) {
+      const d = box(`pause-on-${kind}`);
+      writeFileSync(join(d, 'state.json'), JSON.stringify({ history_built_ms: 1 }));
+      const j = driveBuild(d, kind);
+      expect(j.code, j.out).toBe(0);
+      // No failure file at all, or one with no count: either way the counter has not moved.
+      let rec = {};
+      try { rec = JSON.parse(readFileSync(join(d, 'history-build-fails.json'), 'utf8')); } catch { rec = {}; }
+      expect(rec.history_build_fail_count).toBeFalsy();
+      // And the next slot is still willing to try, rather than refusing on a cooldown.
+      expect(JSON.parse(py(['history-stale'], { INBOUND_TRIAGE_DIR: d }).out).cooldown).toBeFalsy();
+    }
+  });
+
+  it('a GENUINE failure is still recorded by the build itself, not by the caller', () => {
+    // The mechanism still rests on cmd_history_build remembering its own death; a wrapper that
+    // only the shell sets would be lost on a SIGKILL. DRIVEN, not grepped (the source grep this
+    // replaced went green on 29 days of a counter that never moved — 20260930-phase-2-667).
+    const d = box('records-its-own-death');
+    writeFileSync(join(d, 'state.json'), JSON.stringify({ history_built_ms: 1 }));
+    const j = driveBuild(d, 'error');
     expect(j.code, j.out).toBe(0);
     const rec = JSON.parse(readFileSync(join(d, 'history-build-fails.json'), 'utf8'));
     // It remembered its own death, by count and by kind.
     expect(rec.history_build_fail_count).toBe(1);
-    expect(rec.history_build_fail_kind).toBe('rate');
+    expect(rec.history_build_fail_kind).toBe('error');
     expect(typeof rec.history_build_failed_ms).toBe('number');
     // And it is NOT in the shared blob any more, which is what let a
     // concurrent whole-blob write roll it back.
