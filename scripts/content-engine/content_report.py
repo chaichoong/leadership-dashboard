@@ -340,12 +340,17 @@ def stuck_sent_back(now=None, hours=24, approvals=None, ledger=None, episodes=No
     out = []
     for d, a in sorted(approvals.items()):
         if not (isinstance(a, dict) and a.get("task") and a.get("verdict") == "changes"): continue
+        if not str(d).isdigit(): continue                         # not a day: one bad key never fails the whole pass (review, 7 Oct 2026)
         day = int(d)
         if (episodes.get(d) or {}).get("youtube_link"): continue
         try: since = dt.datetime.fromisoformat(str(a.get("synced") or ""))
         except ValueError: since = None
         waited = (now - since).total_seconds() / 3600 if since else None
-        if waited is not None and waited < hours: continue
+        # Since 7 Oct 2026 the hourly sync queues every sent-back card itself (render.queue_sent_back). What it could
+        # not queue, or blocked for the fixer lane, it records against this verdict: named now, not after 24 hours.
+        sync_said = next((r.get("why") for r in (a.get("redo_not_queued"), a.get("redo_blocked"))
+                          if isinstance(r, dict) and r.get("why") and r.get("for") == a.get("synced")), "")
+        if waited is not None and waited < hours and not sync_said: continue
         mine = {k: v for k, v in ledger.items() if v.get("episode") == day or (v.get("day") == day and not v.get("episode"))}
         if (running and any(v.get("status") in RENDERING for v in mine.values())) or day in redo_days: continue
         if any(v.get("status") in WAITING and v.get("day") in reachable for v in mine.values()): continue
@@ -358,6 +363,10 @@ def stuck_sent_back(now=None, hours=24, approvals=None, ledger=None, episodes=No
             why = "a clip was left mid-render by a night that did not finish, and no render is running"
         elif any(v.get("status") in WAITING for v in mine.values()):
             why = "clips wait to render, but the night never reaches day %d (a catch-up day while gap days are paused, or no room on disk)" % day
+        elif isinstance(a.get("redo_blocked"), dict) and a["redo_blocked"].get("for") == a.get("synced") and a["redo_blocked"].get("why"):
+            why = "blocked for the fixer lane (TOOL clip-finder): " + a["redo_blocked"]["why"]
+        elif sync_said:
+            why = "the hourly sync could not queue it: " + sync_said
         else:
             why = "nothing in motion: no receipt, not on the Learnings rebuild list, no clip waiting"
         out.append({"day": day, "task": a["task"], "since": a.get("synced") or "", "hoursWaiting": round(waited) if waited is not None else None,

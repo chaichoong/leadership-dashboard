@@ -1060,16 +1060,21 @@ def redo_lfmd(day, window=None):
         print("episode %d: output gate %s" % (day, "passes on the rebuilt files" if approval.recheck_gate(day) else "still BLOCKED on the rebuilt files"))
     elif card.get("verdict") == "changes":
         # 2060 (17 Sep 2026): Kevin sent the card back with "There are no learnings from my diary on this, which need to be
-        # added." A sent-back card needs one receipt line per point. When every point is about the missing Learnings
-        # clip, the rebuild answers them; anything else is left for a person, never answered with a stock line.
+        # added." A sent-back card needs one receipt line per point. Every point gets one: the rebuild for a point about
+        # the clip, and for any other point what the rebuild did and that nothing else changed (7 Oct 2026). Only a
+        # card sent back with no note at all has nothing to answer.
         receipt = lfmd_receipt(card.get("feedback", ""), window)
+        if receipt and not clear_block(day, card, "the Learnings clip of episode %d was rebuilt from %.1f to %.1f s (%s)"
+                                       % (day, window[0], window[1], "window read off the captions by hand" if by_hand else "found by the detector")):
+            # submit refuses a walled card: the day stays on the rebuild list and the next night tries again
+            raise SystemExit("episode %d: the Learnings clip is rebuilt but the card's TOOL wall could not be lifted" % day)
         if receipt:
             with tempfile.NamedTemporaryFile("w", suffix=".txt", delete=False) as fh:
                 fh.write(receipt); rpath = fh.name
             try: approval.refresh_card(day, receipt=rpath); resubmitted = True
             finally: os.remove(rpath)
         else:
-            print("episode %d: Kevin's feedback asks for more than the Learnings clip; the card is left for a person to resubmit" % day, file=sys.stderr)
+            print("episode %d: Kevin sent the card back with no note, so there is nothing to answer; the card is left for a person to resubmit" % day, file=sys.stderr)
             # The clip is built; only the resubmission is left, and the Publishing page shows the card as sent back.
             # Kept listed, 2062 was rebuilt every night from 18 to 20 Sep 2026 while nobody resubmitted it.
             # release_hold, not just the redo line: nothing else would ever lift a hold on this day (review, 21 Sep 2026).
@@ -1088,20 +1093,76 @@ def redo_lfmd(day, window=None):
     return paths["lfmd"]
 
 
+DISPATCH = os.path.join(os.path.dirname(HERE), "agent-dispatch.py")
+_DISPATCH_MOD = []
+
+
+def _dispatch_mod():
+    """agent-dispatch.py loaded once, so the receipt rules here are the submit gate's own."""
+    if not _DISPATCH_MOD:
+        import importlib.util
+        spec = importlib.util.spec_from_file_location("agent_dispatch", DISPATCH)
+        mod = importlib.util.module_from_spec(spec); spec.loader.exec_module(mod)
+        _DISPATCH_MOD.append(mod)
+    return _DISPATCH_MOD[0]
+
+
 def feedback_points(feedback):
     """Kevin's feedback split into points exactly as agent-dispatch's submit gate splits it."""
-    import importlib.util
-    spec = importlib.util.spec_from_file_location("agent_dispatch", os.path.join(os.path.dirname(HERE), "agent-dispatch.py"))
-    mod = importlib.util.module_from_spec(spec); spec.loader.exec_module(mod)
-    return mod.feedback_points(feedback)
+    return _dispatch_mod().feedback_points(feedback)
+
+
+LEARN_RE = re.compile(r"learn|diary|dairy|lfmd", re.I)       # a point about the Learnings from my diary clip (2060, 17 Sep 2026)
+SHOW_NAME_RE = re.compile(r"diary of (?:a |the )?r\w*(?:\s+p\w*)?", re.I)   # "Diary of a Runpreneur" (whisper: "Ron Prenner") is the show, not the clip
+BULLET_RE = re.compile(r"^\s*(?:[-*•]+|\d+[.)])\s+")
+
+
+def about_learnings(point):
+    """Whether one point of Kevin's note is about the Learnings from my diary clip. The show's own name does not count:
+    "the title should say Diary of a Runpreneur" is about the title (review, 7 Oct 2026)."""
+    return bool(LEARN_RE.search(SHOW_NAME_RE.sub(" ", point or "")))
+
+
+def receipt_points(feedback):
+    """Kevin's note as the points a receipt answers, one line each. Split where agent-dispatch's gate splits it
+    (sentence ends and new lines, his [date] stamps dropped), so there is a line for every point the gate counts. A
+    piece too short to be a point on its own ("Thanks." or "- fix the title") rides with the point after it, the last
+    with the one before, so no word of his note goes without a line. Bullet marks are dropped from the words shown.
+    [] only when there is no note at all."""
+    ad = _dispatch_mod()
+    text = re.sub(r"^\[\d{4}-\d{2}-\d{2} \d{2}:\d{2}\]\s*", "", str(feedback or ""), flags=re.M)
+    parts = [p.strip() for p in re.split(r"(?<=[.!?])\s+|\n+", text) if p.strip()]
+    groups, short = [], []
+    for p in parts:
+        if len(p.split()) >= ad.RECEIPT_MIN_WORDS: groups.append(short + [p]); short = []
+        else: short.append(p)
+    if short:
+        if groups: groups[-1] += short
+        else: groups = [short]
+    show = lambda p: " ".join(BULLET_RE.sub("", p).replace("→", "to").replace("->", "to").split())
+    out = [" ".join(w for w in (show(x) for x in g) if w) or " ".join(" ".join(g).split()) for g in groups]
+    gate = feedback_points(feedback)
+    return out if len(out) >= len(gate) else [show(p) or p for p in gate]     # never fewer lines than the gate asks for
+
+
+def answer_points(points, learnings_change, other_change):
+    """'- <his point> → <what changed>' for each point: the Learnings answer for a point about that clip, the other
+    answer for anything else. Never refuses a point for want of a keyword (Kevin, 7 Oct 2026: 2062's rebuilt card sat
+    61.7 h unsent because one sentence carried its topic in a pronoun)."""
+    return "".join("- %s → %s\n" % (p, learnings_change if about_learnings(p) else other_change) for p in points)
 
 
 def lfmd_receipt(feedback, window, points=None):
-    """One '- <his point> -> <what changed>' line per point, or '' unless every point is about the Learnings clip."""
-    pts = points if points is not None else feedback_points(feedback)
-    if not pts or not all(re.search(r"learn|diary|dairy|lfmd", p, re.I) for p in pts): return ""
+    """One '- <his point> → <what changed>' line per point after a Learnings rebuild. A point about the clip is answered
+    with the rebuild; any other point says what the rebuild did and that nothing else on the episode changed, so he can
+    see at once if a point needed more. '' only when he left no note (7 Oct 2026; before, '' whenever any point lacked
+    a Learnings word, and 2062 and 2086 were left for a person)."""
+    pts = points if points is not None else receipt_points(feedback)
+    if not pts: return ""
     fmt = lambda s: "%d:%02d" % (int(s) // 60, int(s) % 60)
-    return "\n".join("- %s → the Learnings from my diary clip is rebuilt from %s to %s and goes to the socials and the YouTube Short with this episode" % (p.strip(), fmt(window[0]), fmt(window[1])) for p in pts) + "\n"
+    clip = "the Learnings from my diary clip is rebuilt from %s to %s" % (fmt(window[0]), fmt(window[1]))
+    return answer_points([p.strip() for p in pts], clip + " and goes to the socials and the YouTube Short with this episode",
+                         "rebuilt to this note: " + clip + "; nothing else on the episode changed")
 
 
 def check_lfmd_window(window, duration, day):
@@ -1161,7 +1222,18 @@ def redo_requested(path=None):
     if not asked: print("redo: no Learnings rebuilds requested"); return
     for day, window in asked:
         try: redo_lfmd(day, window)
-        except (Exception, SystemExit) as ex: print("redo: episode %d Learnings rebuild FAILED, kept for the next night (%s)" % (day, str(ex)[-200:]), file=sys.stderr)
+        except (Exception, SystemExit) as ex:
+            print("redo: episode %d Learnings rebuild FAILED, kept for the next night (%s)" % (day, str(ex)[-200:]), file=sys.stderr)
+            if "no diary section" in str(ex):
+                # the finder found nothing Kevin says is there: the fixer lane's job, never a person's to stumble on (7 Oct 2026)
+                try:
+                    import approval
+                    card = approval.load_state().get(str(day)) or {}
+                    if card.get("verdict") == "changes":
+                        block_sent_back(day, card, "Kevin sent episode %d back for its Learnings from my diary section. The Learnings rebuild looked through "
+                                        "the episode's captions for the spoken 'learnings from my diary' line (render.lfmd_window) and found none." % day, code=finder_code())
+                except (Exception, SystemExit) as bx:
+                    print("redo: episode %d not blocked for the fixer lane (%s)" % (day, str(bx)[-200:]), file=sys.stderr)
 
 
 def redo_full(day, keep=False):
@@ -1256,11 +1328,28 @@ def resubmit_ready(root=None):
         full = approval.bundle(day)["Long Form Video"] or {"fields": {}}
         why = resubmit_due(day, ledger, os.path.getmtime(path), state.get(str(day)), full["fields"])
         if why: print("resubmit: episode %d waits: %s" % (day, why)); continue
+        card, text = state.get(str(day)) or {}, open(path).read()
         try:
-            approval.refresh_card(day, receipt=path)
+            missing = learnings_missing(day, ledger, text)
+            if missing:
+                # the receipt would tell him the clip is back when the finder found none: the fixer lane takes it (7 Oct 2026)
+                block_sent_back(day, card, missing, receipt=path, code=finder_code()); continue
+            w = _episode_window(day, ledger)
+            if not clear_block(day, card, "the re-render of episode %d found its Learnings section%s (render ledger), so the clip "
+                               "the wall was for now exists" % (day, " at %.1f to %.1f s" % (w[0], w[1]) if w else "")): continue
+            text = concrete_receipt(text, day, ledger, card)
+        except Exception as ex:                                   # noqa: BLE001 — one day never stops the others
+            print("resubmit: episode %d NOT resubmitted: %s" % (day, str(ex)[-300:]), file=sys.stderr); continue
+        with tempfile.NamedTemporaryFile("w", suffix=".md", delete=False) as fh:
+            fh.write(text); concrete = fh.name                    # the parked file keeps its time: resubmit_due reads it
+        try:
+            approval.refresh_card(day, receipt=concrete)
         except SystemExit as ex:
             print("resubmit: episode %d NOT resubmitted: %s" % (day, str(ex)[-300:]), file=sys.stderr); continue
+        finally:
+            os.remove(concrete)
         os.replace(path, path + ".sent"); sent.append(day)
+        with open(path + ".sent", "w") as fh: fh.write(text)      # the record holds what he was sent
         print("resubmit: episode %d card back with Kevin, with its receipt" % day)
     return sent
 
@@ -1360,6 +1449,217 @@ def redo_day(day, receipt_path, why, ledger=None, state=None, root=None, today=N
     print("episode %d: %d clip(s) back to new (%s); receipt waits at %s; the 22:00 run re-renders the day and sends the card back"
           % (day, len(mine), ", ".join(mine), dest))
     return mine
+
+
+# ---------- a sent-back card is queued within the hour, not left for a person (Kevin, 7 Oct 2026) ----------
+# 7 Sep to 7 Oct 2026, nine send-backs: a median 44 h passed between Kevin's "Changes requested" and anyone running
+# redo-day, because no scheduled job ran it. approval.py sync (hourly, and in the night run) now calls queue_sent_back
+# straight after it reads his verdicts. The fix still has to render and Kevin still decides on the card it sends back.
+# Nothing in the render or the copy step reads his note: a point that is not about the Learnings clip is answered by
+# a re-render on the current code, and its receipt line says exactly that, so he can see when a point needed more.
+
+REDO_LEARNINGS = ("the episode is re-rendered at the front of the night's queue and its Learnings from my diary clip is "
+                  "found again in the new captions; it goes to the socials and the YouTube Short with this episode")
+REDO_OTHER = ("rebuilt to this note: the whole day is re-rendered at the front of the night's queue on the current code "
+              "and its copy is written again; nothing else is changed for this point")
+CLIP_FINDER = "clip-finder"       # the TOOL wall's subject: the fixer lane's finding is titled "Agent blocked: clip-finder"
+
+
+def sent_back_receipt(feedback):
+    """The receipt the hourly sync parks with a redo: one line per point of Kevin's note, '' when he left none."""
+    pts = receipt_points(feedback)
+    return answer_points(pts, REDO_LEARNINGS, REDO_OTHER) if pts else ""
+
+
+def finder_code():
+    """A fingerprint of the clip finder's own code (LFMD_START_RE up to lfmd_closes_talk in this file). A day blocked
+    because the finder found nothing is queued again once it changes, which is the fixer's change landing in the
+    runtime checkout. Only the finder: an edit anywhere else in the file would re-render every blocked day for nothing."""
+    import hashlib
+    with open(os.path.abspath(__file__), encoding="utf-8") as fh: src = fh.read()
+    i, j = src.find("\nLFMD_START_RE = "), src.find("\ndef lfmd_closes_talk(")
+    return hashlib.sha1((src[i:j] if 0 <= i < j else src).encode("utf-8")).hexdigest()[:12]
+
+
+def _episode_window(day, ledger):
+    ep = [v for v in ledger.values() if v.get("episode") == day and v.get("role") == "episode"]
+    return next((v.get("lfmd_window") for v in ep if v.get("lfmd_window")), None)
+
+
+def learnings_missing(day, ledger, receipt_text):
+    """Why a re-rendered day may not go back to Kevin on the hourly sync's receipt, or ''. That receipt promises the
+    Learnings clip for a point about it (REDO_LEARNINGS); when the re-render's finder found no Learnings section,
+    sending the card back would tell him it is fixed when it is not. A receipt a person wrote is theirs: not checked."""
+    if REDO_LEARNINGS not in (receipt_text or ""): return ""
+    ep = [v for v in ledger.values() if v.get("episode") == day and v.get("role") == "episode" and v.get("status") == "rendered"]
+    if not ep or any(v.get("lfmd_window") for v in ep): return ""
+    return ("Kevin sent episode %d back for its Learnings from my diary section. The re-render looked through the episode's "
+            "captions for the spoken 'learnings from my diary' line (render.lfmd_window) and found none, so there is no "
+            "Learnings clip to send back to him." % day)
+
+
+def concrete_receipt(text, day, ledger, card):
+    """The parked receipt with its Learnings promise replaced by what the re-render found: the clip's times, and
+    whether it is the section he sent back, so a wrong section found again reads as exactly that."""
+    if REDO_LEARNINGS not in (text or ""): return text
+    w = _episode_window(day, ledger)
+    if not w: return text
+    fmt = lambda s: "%d:%02d" % (int(s) // 60, int(s) % 60)
+    known, before = "redo_lfmd_before" in (card or {}), ((card or {}).get("redo_lfmd_before") or {}).get("window")
+    was = ("" if not known else " (there was none before)" if not before
+           else " (the same section as before)" if [round(float(x), 1) for x in before] == [round(float(x), 1) for x in w]
+           else " (it ran from %s to %s before)" % (fmt(before[0]), fmt(before[1])))
+    return text.replace(REDO_LEARNINGS, "the episode was re-rendered and its Learnings from my diary clip now runs from %s to %s%s; "
+                        "it goes to the socials and the YouTube Short with this episode" % (fmt(w[0]), fmt(w[1]), was))
+
+
+def dispatch_run(*args):
+    """agent-dispatch.py, as (exit code, output). Never raises: a hung or missing dispatcher is a failed call, said by
+    the caller, and never ends the loop it runs in (review, 7 Oct 2026)."""
+    try:
+        r = subprocess.run([sys.executable, DISPATCH] + list(args), capture_output=True, text=True, timeout=300)
+        return r.returncode, (r.stdout + r.stderr).strip()
+    except Exception as ex:                                       # noqa: BLE001
+        return 1, "agent-dispatch did not run: %s" % str(ex)[-200:]
+
+
+def block_sent_back(day, card, why, receipt=None, code=None, run=None, mark=None, now=None):
+    """Block the card with a TOOL wall on the clip finder (agent-dispatch.py block, which writes the wall into the
+    card's notes and files the finding the fixer lane works), instead of leaving the day for a person to stumble on
+    (Kevin, 7 Oct 2026). A receipt promising the clip is set aside, kept beside it. `code` is finder_code() when only
+    a change to the finder can help: queue_sent_back then waits for that change. Returns True when the wall is written."""
+    import approval
+    run, mark, now = run or dispatch_run, mark or approval.mark, now or dt.datetime.now()
+    task, synced, stamp = (card or {}).get("task"), (card or {}).get("synced"), now.isoformat(timespec="seconds")
+    if not task:
+        print("ERROR: episode %d: no card to block for the fixer lane (%s)" % (day, why[:160])); return False
+    rc, out = run("block", task, "--kind", "TOOL", "--subject", CLIP_FINDER, "--why", why)
+    if rc:
+        print("ERROR: episode %d: card %s NOT blocked for the fixer lane: %s" % (day, task, out[-300:]))
+        mark(day, redo_not_queued={"for": synced, "at": stamp, "why": "the clip finder found nothing and the TOOL wall could not be written: " + why[:240]})
+        return False
+    if receipt and os.path.exists(receipt):
+        os.replace(receipt, receipt + ".blocked-" + now.strftime("%Y%m%d-%H%M%S"))
+    mark(day, redo_blocked={"for": synced, "at": stamp, "why": why[:400], "code": code}, redo_not_queued=None)
+    print("episode %d: card %s blocked for the fixer lane (TOOL %s): %s" % (day, task, CLIP_FINDER, why[:200]))
+    return True
+
+
+def clear_block(day, card, evidence, run=None, mark=None):
+    """Lift the TOOL wall this engine put on a card, with what it saw, before the card goes back to Kevin: submit
+    refuses a card while a wall stands (agent-dispatch.py, the wall gate), so without this a blocked day could never
+    be resent (review, 7 Oct 2026). A card with no wall of ours is left alone. Returns True when the card may go."""
+    if not (card or {}).get("redo_blocked"): return True
+    import approval
+    run, mark = run or dispatch_run, mark or approval.mark
+    rc, out = run("unblock", card["task"], "--evidence", evidence)
+    if rc and "no open blocker" not in out:
+        print("ERROR: episode %d: card %s still blocked, NOT sent back: %s" % (day, card["task"], out[-300:])); return False
+    mark(day, redo_blocked=None)
+    print("episode %d: card %s unblocked: %s" % (day, card["task"], evidence[:160]))
+    return True
+
+
+def queue_sent_back(state=None, ledger=None, root=None, redo_file=None, episodes=None, live=None, run=None, mark=None,
+                    running=None, last_night=None, code=None, now=None, reach=None):
+    """Set every card Kevin sent back in motion within the hour of his verdict (Kevin, 7 Oct 2026). For each one whose
+    day is not already in motion it reads the card live, writes the receipt from his note and runs redo_day: the day's
+    clips go back to new, watch.plan renders it first that night, and resubmit-ready sends the card back to him with
+    the receipt. In motion means a receipt waits for it, it is on the Learnings rebuild list, or a clip of it is
+    mid-render, so a second run queues nothing twice. What it cannot queue is recorded on the card's state as
+    redo_not_queued, which the morning stuck pass names at once. `reach(ledger)` is the set of recording days the night
+    plan would ever render. Returns {"queued": [...], "waiting": {...}, "notQueued": {...}}."""
+    import approval
+    now = now or dt.datetime.now()
+    state = approval.load_state() if state is None else state
+    ledger = watch.load_ledger() if ledger is None else ledger
+    root, redo_file = root or RESUBMIT_DIR, redo_file or REDO_LFMD_FILE
+    live, mark, code = live or approval.live_verdict, mark or approval.mark, code or finder_code()
+    reach = reach or (lambda led: set(watch.plan(led, 10 ** 6)[0]))
+    if episodes is None:
+        import publish
+        episodes = publish.load_state()
+    try: listed = {r[0] for r in (redo_line(l) for l in open(redo_file)) if r}
+    except OSError: listed = set()
+    try: receipts = {int(n[:-3]) for n in os.listdir(root) if re.match(r"^\d+\.md$", n)}
+    except OSError: receipts = set()
+    out, stamp = {"queued": [], "waiting": {}, "notQueued": {}}, now.isoformat(timespec="seconds")
+
+    def wait(day, why):
+        out["waiting"][day] = why; print("episode %d: sent back; already in motion or waiting: %s" % (day, why))
+
+    def not_queued(day, e, why):
+        out["notQueued"][day] = why; print("episode %d: sent back, NOT queued for its redo: %s" % (day, why))
+        was = e.get("redo_not_queued") or {}
+        if was.get("why") != why or was.get("for") != e.get("synced"):
+            mark(day, redo_not_queued={"for": e.get("synced"), "at": stamp, "why": why})
+
+    def one(day, e):
+        nonlocal running
+        if not e.get("task"): return not_queued(day, e, "no card is recorded for it")
+        if day in receipts: return wait(day, "a receipt waits for it in content_engine_resubmit")
+        if day in listed: return wait(day, "it is on the Learnings rebuild list")
+        mine = {k: v for k, v in ledger.items() if v.get("episode") == day or (v.get("day") == day and not v.get("episode"))}
+        blocked = e.get("redo_blocked") or {}
+        if blocked.get("for") == e.get("synced") and blocked.get("code") and blocked["code"] == code:
+            return wait(day, "blocked for the fixer lane (TOOL %s) until the clip finder changes" % CLIP_FINDER)
+        no_clip = ("Looked in the render ledger for the clips of day %d (its episode, its summary and anything recorded for it) to "
+                   "re-render the episode Kevin sent back, and found none." % day)
+        if not mine and blocked.get("for") == e.get("synced") and blocked.get("why") == no_clip:
+            return wait(day, "blocked for the fixer lane: no clip of the day in the ledger")
+        busy = [k for k, v in mine.items() if v.get("status") in ("pulling", "rendering")]
+        if busy:
+            if running is None: running = render_running()
+            if running: return wait(day, "%s mid-render; it is queued after the run" % ", ".join(sorted(busy)))
+        if (episodes.get(str(day)) or {}).get("youtube_link"):
+            return not_queued(day, e, "it is already on YouTube, which a re-render would not reach")
+        if not receipt_points(e.get("feedback")):
+            return not_queued(day, e, "sent back with no note, so a re-render has nothing to answer and would come back unchanged")
+        if any(v.get("lfmd_window_by") == "operator" for v in mine.values()):
+            return not_queued(day, e, "its Learnings clip was placed by hand from the captions and a full re-render would lose it: a "
+                                      "person answers his note, or lists the day for a Learnings rebuild with its window")
+        if mine:
+            trial = json.loads(json.dumps(ledger))
+            for k in mine: trial[k]["status"] = "new"; trial[k]["reset"] = "trial"
+            missed = sorted({v.get("day") for v in mine.values()} - reach(trial), key=str)
+            if missed:
+                return not_queued(day, e, "the night plan would never render recording day(s) %s: older than the takeover day and not on "
+                                          "the gap list, or a gap day while gap days are paused or too big for the disk. A person "
+                                          "re-renders it (render.py redo --day %d)" % (", ".join(map(str, missed)), day))
+        try: outcome, feedback = live(e["task"])
+        except (Exception, SystemExit) as ex:
+            return not_queued(day, e, "NOT CHECKED: the card could not be read (%s)" % str(ex)[-160:])
+        if outcome != "Changes requested" or " ".join(str(feedback or "").split()) != " ".join(str(e.get("feedback") or "").split()):
+            # The engine's record is older than the card (1841, 10 Sep 2026: a resubmit made by hand left the old verdict
+            # here, and his approval went unread for 58.6 h). Cleared, so the next sync reads his answer afresh.
+            mark(day, verdict=None, outcome=None, synced=None, feedback=None)
+            return wait(day, "the card reads %r now%s; the next sync reads his answer afresh" % (outcome or "waiting for Kevin", " with a different note" if outcome == "Changes requested" else ""))
+        before = _episode_window(day, mine)
+        with tempfile.NamedTemporaryFile("w", suffix=".md", delete=False) as fh:
+            fh.write(sent_back_receipt(e["feedback"])); rpath = fh.name
+        try:
+            redo_day(day, rpath, "Kevin sent it back: " + " ".join(e["feedback"].split())[:140], ledger=ledger, state=state, root=root,
+                     today=now.date(), last_night=last_night, running=running)
+        except SystemExit as ex:
+            if "no clip of the day" in str(ex): block_sent_back(day, e, no_clip, run=run, mark=mark, now=now)
+            else: not_queued(day, e, str(ex)[-300:])
+            return
+        finally:
+            os.remove(rpath)
+        # a wall from an earlier try stays until the card goes back: resubmit lifts it with what the re-render found
+        mark(day, redo_queued=stamp, redo_lfmd_before={"window": before}, redo_not_queued=None)
+        receipts.add(day); out["queued"].append(day)
+        print("episode %d: sent back; queued for its redo, first in the night's plan" % day)
+
+    for d, e in sorted(state.items(), key=lambda x: str(x[0])):
+        if not (isinstance(e, dict) and e.get("verdict") == "changes"): continue
+        if not str(d).isdigit():
+            print("approval state: %r is not a day number; its sent-back card is not queued" % (d,)); continue
+        try: one(int(d), e)
+        except Exception as ex:                                   # noqa: BLE001 — one card never stops the others
+            out["notQueued"][int(d)] = "could not be queued this run: %s" % str(ex)[-200:]
+            print("ERROR: episode %s: sent back, NOT queued this run: %s" % (d, str(ex)[-200:]))
+    return out
 
 
 def teaser_waits(key, ledger):
@@ -1579,7 +1879,10 @@ def selftest():
 
     r = lfmd_receipt("", (295.52, 403.35), points=["There are no learnings from my diary on this, which need to be added."])
     assert r.startswith("- There are no learnings from my diary on this") and "4:55 to 6:43" in r and r.count("\n") == 1, r
-    assert lfmd_receipt("", (1, 30), points=["No learnings clip", "The title is wrong"]) == "", "a point about something else is never answered by the rebuild"
+    r2 = lfmd_receipt("", (1, 30), points=["No learnings clip", "The title is wrong"])
+    assert r2.count("\n") == 2 and "- The title is wrong → rebuilt to this note: " in r2 and "nothing else on the episode changed" in r2, \
+        "a point about something else gets its line, saying what the rebuild did and that nothing else changed (7 Oct 2026): %s" % r2
+    assert lfmd_receipt("", (1, 30)) == "", "no note, nothing to answer"
     import inspect as _ins; rs = _ins.getsource(redo_lfmd); assert "receipt=rpath" in rs and "and resubmitted: release_hold(day)" in rs
     assert lfmd_window([(0, 5, "So I think the learning story for today is"), (30, 40, "see you tomorrow")]) == (0, 40), "1841 (2025): he says 'the learning story for today'"
     assert lfmd_window([(0, 5, "So consecutive day, 2056th of the diary of a Ron Prenner, and today's"), (30, 40, "see you tomorrow")]) is None, "the show's name is not a Learnings section (2056 teaser)"
@@ -1692,6 +1995,7 @@ if __name__ == "__main__":
     elif a.mode == "redo": redo_full(a.day, keep=a.keep if hasattr(a, "keep") else False)
     elif a.mode == "one": one(a.clip, a.day, a.out)
     elif a.mode == "resubmit-ready": resubmit_ready()
+    elif a.mode == "queue-sent-back": print(json.dumps(queue_sent_back()))
     elif a.mode == "redo-day":
         if not (a.day and a.receipt and a.why): raise SystemExit("usage: render.py redo-day --day N --receipt FILE --why \"one line\"")
         redo_day(a.day, a.receipt, a.why)
