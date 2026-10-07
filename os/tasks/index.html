@@ -3879,6 +3879,15 @@ function apvSummary(raw){
   }
   return '';
 }
+const TASKS_STEP_MARK='YOUR STEP:';
+const TASKS_STEP_DIVIDER="----- The agent's work, as you approved it -----";
+function tasksYourStep(t){
+  if(!t||['Approved as-is','Approved with minor edits'].indexOf(t.approvalOutcome)===-1)return null;
+  const s=String(t.agentOutput||'').replace(/^\s+/,'');
+  const cut=s.indexOf(TASKS_STEP_DIVIDER);
+  if(!s.startsWith(TASKS_STEP_MARK)||cut===-1)return null;
+  return {step:s.slice(TASKS_STEP_MARK.length,cut).trim(),work:s.slice(cut+TASKS_STEP_DIVIDER.length).replace(/^\n+/,'')};
+}
 function renderApprovalBlock(t){
   if(!t)return '';
   if(t.status!=='Approval'){
@@ -3895,6 +3904,21 @@ function renderApprovalBlock(t){
   const mine=!t.assigneeEmail||(t.assigneeEmail||'').toLowerCase()===myEmail;
   if(!mine){
     return `<div class="approval-decided">Waiting for approval from ${escHtml(t.assignee||t.assigneeEmail)}. Reassign it to yourself to decide it here.</div>`;
+  }
+  // YOUR STEP (7 Oct 2026). An approved task the robots put back in his queue because the next
+  // step is his alone (a payment, a signature, an identity check). It is approved already, so a
+  // verdict here would only re-dispatch the agent to the same wall or close it unfinished: the
+  // drawer shows the step and sends him to the AI Agents queue, where "Done, here is the proof"
+  // lives. Marks mirrored from scripts/agent-dispatch.py YOUR_STEP_MARK / YOUR_STEP_DIVIDER.
+  const ys=tasksYourStep(t);
+  if(ys){
+    return `<div class="approval-box" data-your-step>
+      <h3>Your step</h3>
+      <div class="apv-sub">You approved this already. Only you can do this part:</div>
+      <div class="apv-summary"><div class="apv-summary-body">${escHtml(ys.step)}</div></div>
+      <div class="apv-sub">When it is done, open the AI Agents approval queue and use "Done, here is the proof". The robot checks it, then the agent finishes the job.</div>
+      <div class="apv-work"><div class="apv-work-label">The agent’s work, as you approved it</div><div class="apv-work-body">${linkifyUrls(ys.work)}</div></div>
+    </div>`;
   }
   // A one-glance SUMMARY of what the agent is proposing leads the box
   // (Kevin's request, 11 Aug 2026). Putting the full work first was not
@@ -3968,6 +3992,8 @@ window.apvRejectWithReason=apvRejectWithReason;
 async function apvDecide(taskId,outcome,remember){
   const t=findTaskAnywhere(taskId);if(!t)return;
   if(APPROVAL_OUTCOMES.indexOf(outcome)===-1)return;
+  // Approved already and waiting on his own step: no verdict route may write one (7 Oct 2026).
+  if(tasksYourStep(t)){toast('Already approved. This is your step: use "Done, here is the proof" in the AI Agents queue.',true);return;}
   const noteEl=document.getElementById('apvNote');
   const note=(noteEl&&noteEl.value||'').trim();
   // The tickbox is the "remember" route for the other three verdicts; the

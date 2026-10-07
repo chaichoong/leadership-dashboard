@@ -21,7 +21,10 @@ nothing — it is this script, and it is stricter than a glance:
      itself, the outbound send path, the shared files every page loads, and
      (21 Sep 2026) the robots' permissions (deny list, tool list, runners). A
      wrong fix in any of those is not a bug, it is an incident, and those still
-     stop at Kevin as a PR.
+     stop at Kevin. Since 7 Oct 2026 they stop at him as ONE MERGE card in his
+     approval queue (scripts/merge_card.py), raised only when the gate is green,
+     and scripts/merge-approved.py merges it through merge-pr.py once he
+     approves. Before that they stopped as an open PR that told nobody.
   3. A RED GATE LEAVES THE PR OPEN. It never merges "probably fine".
   4. IT TESTS THE MERGE RESULT, not the main checkout. Added 1 Sep 2026 after
      finding 414: the gate used to run wherever it happened to be standing, so
@@ -35,6 +38,7 @@ Exit: 0 merged or safely refused-and-reported, 1 the gate itself broke.
 """
 
 import argparse
+import datetime
 import json
 import os
 import shutil
@@ -78,6 +82,10 @@ PROTECTED = (
     "scripts/agent-slot-run.sh", "scripts/task-manager-run.sh",
     "scripts/inbound-triage-run.sh", "scripts/handback-poll-run.sh",
     "scripts/signin-pickup-run.sh", "scripts/roy-assistant-run.sh",
+    # The MERGE card and the merger (7 Oct 2026). A fix that weakened either would let a
+    # protected PR merge without Kevin, and it would merge itself through this very gate.
+    "scripts/merge_card.py", "scripts/merge-approved.py", "scripts/merge-pr.py",
+    "scripts/approval_evidence.py",
 )
 
 
@@ -278,16 +286,93 @@ def cmd_check(args):
     return 0
 
 
+def pr_facts(pr):
+    """(title, url, every file the PR touches, head sha). gh is asked once; a failure raises."""
+    r = sh(["gh", "pr", "view", str(pr), "--json", "title,url,files,headRefOid"])
+    if r.returncode != 0:
+        raise RuntimeError("cannot read PR #%d: %s" % (pr, (r.stderr or "").strip()[:200]))
+    v = json.loads(r.stdout or "{}")
+    return (v.get("title") or "", v.get("url") or "",
+            [f.get("path") for f in v.get("files") or [] if isinstance(f, dict) and f.get("path")],
+            v.get("headRefOid") or "")
+
+
+def tested_head(pr):
+    """The PR head build_merge_result fetched and the gate tested (refs/fixer/pr-N), or ''."""
+    r = _git(["rev-parse", "--verify", "--quiet", "refs/fixer/pr-%d" % pr])
+    sha = (r.stdout or "").strip()
+    return sha if r.returncode == 0 and len(sha) == 40 else ""
+
+
+def merge_cards():
+    sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+    import merge_card
+    return merge_card
+
+
+def raise_merge_card(pr, d, gate):
+    """ONE card in Kevin's queue for a green protected PR (Kevin, 7 Oct 2026), never two:
+    a card already raised for this PR, at any status, is returned instead. Returns a dict
+    saying which, or {"error": ...}; it never raises, because the PR is still open and safe
+    whether or not the card was written, and the result must say so either way."""
+    try:
+        merge_card = merge_cards()
+        import findings
+        old = merge_card.existing_card(pr)
+        title, url, files, gh_head = pr_facts(pr)
+        # The head the gate tested. gh's head is only a fallback, and merge-pr.py --expect-head
+        # re-gates whatever is approved, so a stale fallback can never merge untested code.
+        head = gate.get("head") or gh_head
+        if not head:
+            # His approval must name the code it approves: no tested head, no card (review).
+            raise RuntimeError("no tested head for PR #%d (refs/fixer and gh both failed)" % pr)
+        if old and (old["status"] == "Completed" or old.get("head") == head):
+            # A rejected or merged card is never raised again, and an open one for this very
+            # head is already the card: approved twice, refused twice, still ONE card.
+            return {"task": old.get("id"), "already": True}
+        pending = [(r["id"], r.get("title", "")) for r in findings.current_state().values()
+                   if r.get("status") == "pending" and str(r.get("pr", "")) == str(pr)]
+        fields = merge_card.card_fields(pr, title, url, sorted(pending), files,
+                                        [h["file"] for h in d["protected"]], gate,
+                                        datetime.date.today().isoformat(), head)
+        if old:
+            # The PR changed after its card was raised. His approval was of the old head, so the
+            # same card is refreshed in place with the new result and asked again (review, 7 Oct).
+            stamp = datetime.datetime.now().strftime("%d %b %Y %H:%M")
+            note = ("[%s — fixer-merge] MERGE CARD REFRESHED: PR #%d changed (tested head %s, was %s). "
+                    "Any earlier approval was of the old code, so it is asked again." % (
+                        stamp, pr, head[:12] or "?", (old.get("head") or "?")[:12]))
+            merge_card.patch_card(old["id"], {
+                merge_card.F["agentOutput"]: fields[merge_card.F["agentOutput"]],
+                merge_card.PLAIN_SUMMARY: fields[merge_card.PLAIN_SUMMARY],
+                merge_card.F["approvalOutcome"]: None, merge_card.F["status"]: "Approval",
+                merge_card.F["notes"]: (str(old.get("notes") or "").rstrip() + "\n\n" + note).strip()[-90000:]})
+            return {"task": old["id"], "already": False, "refreshed": True, "findings": [p[0] for p in pending]}
+        return {"task": merge_card.create_card(fields), "already": False, "findings": [p[0] for p in pending]}
+    except Exception as e:  # noqa: BLE001 — reported in the JSON, never swallowed
+        print("MERGE CARD NOT RAISED for PR #%d: %s" % (pr, e), file=sys.stderr)
+        return {"error": str(e)[:300]}
+
+
 def cmd_merge(args):
     d = decide(args.pr)
+    # A protected PR is never merged here (the refusal below comes before the merge call). Its
+    # gate still runs, because Kevin's MERGE card carries the test result, and a red protected
+    # PR must not reach his queue at all (7 Oct 2026; until then it went nowhere either way).
+    # A card that already stands for this PR's current head needs no second gate (review).
     if not d["mayAutoMerge"]:
-        # Not a failure. The PR is fine; it just needs eyes, and saying so is
-        # the whole point of having a protected list.
-        print(json.dumps({**d, "merged": False,
-                          "why": "touches a protected path — left open for Kevin",
-                          "tell Kevin": [h["file"] for h in d["protected"]]},
-                         indent=2))
-        return 0
+        try:
+            old = merge_cards().existing_card(args.pr)
+            now_head = pr_facts(args.pr)[3] if old else ""
+        except Exception as e:  # noqa: BLE001 — cannot tell: run the gate, which says so too
+            print("MERGE CARD CHECK FAILED for PR #%d: %s" % (args.pr, e), file=sys.stderr)
+            old, now_head = None, ""
+        if old and (old["status"] == "Completed" or (now_head and old.get("head") == now_head)):
+            print(json.dumps({**d, "merged": False, "mergeCard": {"task": old["id"], "already": True},
+                              "why": "touches a protected path; its MERGE card already stands (%s)"
+                                     % (old["status"] or "open"),
+                              "tell Kevin": [h["file"] for h in d["protected"]]}, indent=2))
+            return 0
     tree, err = build_merge_result(args.pr)
     if err:
         # Cannot build the merge result = cannot judge it. That is a red gate,
@@ -296,6 +381,7 @@ def cmd_merge(args):
                           "why": "could not build the merge result — "
                                  "left open, nothing merged"}, indent=2))
         return 0
+    head = tested_head(args.pr)
     try:
         cannot = tests_cannot_run(tree)
         if cannot:
@@ -304,6 +390,7 @@ def cmd_merge(args):
             ok, gate = run_gate(tree)
     finally:
         destroy_merge_result(tree)
+    gate["head"] = head
     if cannot:
         # Not a red gate: no test ran. Saying RED here is how a broken
         # workspace gets mistaken for a broken PR (5 Oct 2026, PR #709).
@@ -316,6 +403,20 @@ def cmd_merge(args):
                           "why": "the gate is RED — left open, nothing merged"},
                          indent=2))
         return 0
+    if not d["mayAutoMerge"]:
+        # Not a failure. The PR is green and fine; it touches a protected path, so the
+        # merge is Kevin's: ONE MERGE card goes to his queue, and scripts/merge-approved.py
+        # runs merge-pr.py once he approves (7 Oct 2026). Before this the PR sat open and
+        # "left open for Kevin" reached nobody.
+        card = raise_merge_card(args.pr, d, gate)
+        print(json.dumps({**d, "merged": False, "gate": gate, "mergeCard": card,
+                          "why": ("touches a protected path; the gate is green, so a MERGE card "
+                                  "is in Kevin's queue" if not card.get("error") else
+                                  "touches a protected path; the gate is green but the MERGE card "
+                                  "could not be raised: " + card["error"]),
+                          "tell Kevin": [h["file"] for h in d["protected"]]},
+                         indent=2))
+        return 0 if not card.get("error") else 1
     m = sh(["gh", "pr", "merge", str(args.pr), "--squash", "--delete-branch"])
     # gh exits non-zero when it cannot check out main locally (a worktree holds
     # it), even though the merge itself succeeded. Confirm against the API

@@ -882,13 +882,16 @@ describe('the real job-schedule.json', () => {
   // An on-demand job (signin-pickup, 7 Oct 2026: started by the Robot sign-in app) has no clock to be
   // late against. It says so with mode "on-demand", and it is the only kind allowed no cron.
   const clocked = jobs.filter(([, c]) => c.mode !== 'on-demand');
-  it('lists on-demand jobs only by name, with no cron, and they never queue for the lock', () => {
+  it('lists on-demand jobs only by name, with no cron; the sign-in pickup never queues for the lock, the merge always does', () => {
     const onDemand = jobs.filter(([, c]) => c.mode === 'on-demand');
-    expect(onDemand.map(([n]) => n)).toEqual(['signin-pickup']);
+    expect(onDemand.map(([n]) => n).sort()).toEqual(['merge-approved', 'signin-pickup']);
     for (const [name, cfg] of onDemand) {
       expect(cfg.cron, `${name} is on demand: a cron would grade it on attendance`).toBeUndefined();
-      expect(cfg.lockExempt, `${name} is on demand`).toBe(true);
     }
+    // Kevin's night sign-ins must not wait behind the render (PR 1); a merge must (PR 2, review, 7 Oct 2026).
+    expect(REAL['signin-pickup'].lockExempt).toBe(true);
+    expect(REAL['merge-approved'].lockExempt).toBeUndefined();
+    expect(REAL['merge-approved'].queueTimeoutMinutes).toBeGreaterThanOrEqual(300);
   });
 
   it('gives every job a parseable cron and a lateness limit', () => {

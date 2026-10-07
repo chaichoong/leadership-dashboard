@@ -180,8 +180,14 @@
             text: `Add ${subject} to the robot's list (Add a new site)`, days: Math.max(...ws.map(w => Number(w.days) || 0)) }));
         walls.filter(w => w.kind === 'KEVIN').forEach(w => items.push({ kind: 'kevin', id: w.task, count: 1,
             text: `${String(w.name || 'A task')}: a step only you can do (${String(w.subject || 'unknown')})`, days: Number(w.days) || 0 }));
-        walls.filter(w => w.kind === 'TOOL' && w.findingStatus === 'deferred').forEach(w => items.push({ kind: 'tool', id: w.task, count: 1,
-            text: `${String(w.name || 'A task')}: needs a Claude Code session to fix the robot`, days: Number(w.days) || 0 }));
+        // A TOOL wall no fixer can reach (7 Oct 2026): its fix needs a protected file. The fixer
+        // opens the PR and a MERGE card comes to Kevin; until the card exists, he is told why it
+        // is stuck. A report written before then has no toolState: a deferred finding is that case.
+        const NO_FIXER = ['no-fixer', 'no-finding', 'deferred', 'merge-rejected', 'merge-closed'];
+        walls.filter(w => w.kind === 'TOOL' && (NO_FIXER.includes(w.toolState) || (!w.toolState && w.findingStatus === 'deferred')))
+            .forEach(w => items.push({ kind: 'tool', id: w.task, count: 1,
+                text: `${String(w.name || 'A task')}: ${String(w.tool || 'no fixer can reach it; the fixer opens the PR and a MERGE card comes to you')}`,
+                days: Number(w.days) || 0 }));
         items.sort((a, b) => b.days - a.days || a.text.localeCompare(b.text));
         const swept = r.p.sweptAt ? new Date(r.p.sweptAt).getTime() : NaN;
         const note = isNaN(swept) ? '' : (now - swept > BLOCKER_STALE_MS

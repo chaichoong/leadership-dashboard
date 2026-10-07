@@ -810,7 +810,8 @@ function flow({ view = OPEN, suites = {}, affected = { out: { scope: 'some', pag
   if (local2) writeFileSync(join(tree, 'walk-local-2.json'), JSON.stringify(local2));
   if (live) writeFileSync(join(tree, 'walk-live.json'), JSON.stringify(live));
   if (moveMain) g.moveMain(moveMain);           // main moves AFTER the tree was built
-  const cfg = { tree, repo: g.repo, scratch: g.root, argv, build, suitesCrash, interruptServerPoll, patch };
+  // argv may be built from the fixture (a test that names the fixture's own head).
+  const cfg = { tree, repo: g.repo, scratch: g.root, argv: typeof argv === 'function' ? argv(g) : argv, build, suitesCrash, interruptServerPoll, patch };
   const r = spawnSync('python3', ['-c', LOAD + DRIVER], {
     encoding: 'utf8', timeout: 90000,
     env: { ...process.env, PATH: `${bin.dir}:${process.env.PATH}`, HOME: home, FAKE_CFG: JSON.stringify(cfg), MERGE_PR_REF_WAIT: '0', ...env },
@@ -891,6 +892,23 @@ describe('merge-pr.py end to end (fakes, real git, no network)', { timeout: 60_0
 
   it('builds as normal when the PR ref matches the head gh reports', () => {
     const r = flow({ affected: NONE, pullRef: true, headIsReal: true });
+    expect(r.code).toBe(0);
+    expect(r.result.merged).toBe(true);
+  });
+
+  // MERGE cards (7 Oct 2026): Kevin approves ONE head. scripts/merge-approved.py passes it as
+  // --expect-head, and a push after the card was raised must never merge on his "yes".
+  it('--expect-head: a different head is refused before any test runs, and nothing merges', () => {
+    const r = flow({ affected: NONE, argv: ['--pr', '5', '--expect-head', 'deadbeef'.repeat(5)] });
+    expect(r.code).toBe(1);
+    expect(r.result.why).toMatch(/^the PR head is [0-9a-f]{12}, not deadbeefdead, the head Kevin approved on its MERGE card; nothing merged$/);
+    expect(r.npx).toEqual([]);
+    expect(r.gh).not.toMatch(/pr merge/);
+  });
+
+  it('--expect-head: the very head the gate tested merges as normal', () => {
+    const r = flow({ affected: NONE, argv: (g) => ['--pr', '5', '--expect-head', g.head] });
+    expect(r.result.head).toBe(r.g.head);
     expect(r.code).toBe(0);
     expect(r.result.merged).toBe(true);
   });

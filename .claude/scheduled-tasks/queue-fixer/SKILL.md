@@ -78,6 +78,19 @@ For each finding:
 
 Anything you will not fix, close as `deferred` with the reason. Every finding ends the run in a terminal state, so tomorrow's queue starts clean.
 
+**A protected file is never a reason to defer (Kevin, 7 Oct 2026).** 19 tasks sat on TOOL walls for up
+to twelve days because their fixes needed `scripts/agent-dispatch.py`, a runner or
+`agent-settings.json`, and the fixer deferred them "for Kevin" with nothing telling him. Write the
+fix. Put protected-path fixes in a PR of their own, so the unprotected fixes still merge themselves
+(at most two PRs a run), and close those findings `--outcome pending --pr <n>` on the protected PR.
+`fixer-merge.py merge` runs the full gate on it and, when green, raises ONE MERGE card in Kevin's
+approval queue: "MERGE: PR #N — <title>", with the PR link, the findings it closes, the files and the
+test result. His approval merges it through `merge-pr.py` (scripts/merge-approved.py, every 30
+minutes, no model) and lands the findings, which wakes every task blocked on them. A finding filed by
+`merge-approved` that names a PR (Kevin asked for a change on its MERGE card) is fixed as a new
+commit on THAT PR's branch (`gh pr checkout <n>`), never in a new PR: then run
+`fixer-merge.py merge --pr <n>`, which re-tests it and refreshes the same card for the new head.
+
 Also commit any report files the read-only routines left in `monitoring/` overnight. They no longer commit their own.
 
 You cannot see them from here. The routines run in the MAIN checkout and you are in a
@@ -130,8 +143,10 @@ drain rate of zero and everything you write today is theatre."
 - It runs the FULL gate — vitest AND the browser suite. `npm test` is vitest only, and both of
   this platform's worst incidents would have walked straight through a vitest-only check.
 - It REFUSES to auto-merge anything touching a protected path: money, auth, the approval loop
-  itself, the outbound send path, the shared files every page loads, and the workers. Those stay
-  open as a PR and go on the NEEDS YOU line. A wrong fix there is not a bug, it is an incident.
+  itself, the outbound send path, the shared files every page loads, and the workers. A wrong fix
+  there is not a bug, it is an incident. Those stay open as a PR, and when the gate is green the
+  fixer opens the PR and a MERGE card comes to Kevin (`mergeCard` in its JSON). A JSON with a
+  `mergeCard.error` exits 1: the card was not raised, so put it on the NEEDS YOU line yourself.
 - A red gate leaves the PR open. It never merges "probably fine".
 
 Do not merge with a bare `gh pr merge`. The gate is the point, and skipping it is how an
@@ -172,8 +187,8 @@ Do NOT DM Kevin (Slack contract, 21 Aug 2026). Return to daily-ops: how many fin
 
 ## Rules
 
-- One PR per run. Never push straight to main — the PR is the audit trail even when the
-  fixer merges it itself.
+- One PR per run, or two when protected-path fixes go in their own PR (STEP 4). Never push
+  straight to main — the PR is the audit trail even when the fixer merges it itself.
 - Never `git stash`. Another session's work is usually in the main checkout.
 - Never fix something absent from the findings queue. If you spot a new problem, add it as a finding for tomorrow rather than widening today's run.
 - **Cap of 25 per run** (raised from 10 on 29 Aug 2026, with auto-merge). It is a real cap,

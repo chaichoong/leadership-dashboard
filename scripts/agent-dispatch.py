@@ -76,6 +76,9 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 # event, written once for the whole team. The queue never hands one to an agent.
 import standing_holds  # noqa: E402
 import certificate_watch  # noqa: E402
+# The MERGE card (7 Oct 2026): a protected-path fix reaches Kevin as one card,
+# merged by scripts/merge-approved.py. The queue never hands one to an agent.
+import merge_card  # noqa: E402
 from agent_email_format import (  # noqa: E402
     CARRY_OUT_MARKER,
     CARRY_OUT_RE,
@@ -1389,6 +1392,16 @@ def idle_handback(t, last, now=None):
     approved_at = str(t.get("approvedAt") or "")
     if approved_at and approved_at > ts:
         return ""
+    # A PARKED TASK ON AN OPEN WALL RESTS UNTIL THE WALL CLEARS (Kevin, 7 Oct 2026). The day's
+    # rest used to end on its own, so the poll handed the task back, the agent met the same wall
+    # and parked it again: 235 parks and 264 dispatch actions on 39 blocked tasks in 14 days,
+    # and no progress. Every clear writes `unblocked` (wake_blocked), which ends this at once.
+    b = task_blocker(t.get("notes")) if event == "parked" else None
+    if b and b["kind"] != "KEVIN":
+        return f"parked on {b['kind']} {b['subject']} at {ts[:16]}; rests until the wall clears or Kevin's verdict changes"
+    # A KEVIN wall keeps the day's clock here: one the sweep can put in Kevin's lane leaves the
+    # queue within half an hour (Status Approval), and one it cannot (a decision card, a task with
+    # no agent) would otherwise rest for ever with no door (review, 7 Oct 2026).
     try:
         when = datetime.fromisoformat(ts.replace("Z", "+00:00"))
     except ValueError:
@@ -1403,10 +1416,11 @@ def idle_handback(t, last, now=None):
 
 
 def blocked_rest(t, last, now=None):
-    """Why an UNAPPROVED task with an open wall is resting, or ''. Same clock
-    as idle_handback: IDLE_HOURS from the `parked` event `block` writes, and
-    an earlier end the moment Kevin's verdict moves or the wall clears (the
-    clear writes `unblocked`, so `last` is no longer parked)."""
+    """Why an UNAPPROVED task with an open wall is resting, or ''. It rests from
+    the `parked` event `block` writes until the wall clears (the clear writes
+    `unblocked`, so `last` is no longer parked) or Kevin's verdict moves. No
+    clock (7 Oct 2026): a day's rest that ended by itself re-dispatched the task
+    to meet the same wall, every day, for twelve days."""
     if t.get("outcome") in APPROVED or not last or last[0] != "parked" or not last[1]:
         return ""
     b = task_blocker(t.get("notes"))
@@ -1414,16 +1428,17 @@ def blocked_rest(t, last, now=None):
         return ""
     if str(t.get("approvedAt") or "") > last[1]:
         return ""
-    try:
-        when = datetime.fromisoformat(last[1].replace("Z", "+00:00"))
-    except ValueError:
-        return ""
-    now = now or datetime.now(timezone.utc)
-    if now - when >= timedelta(hours=IDLE_HOURS):
-        return ""
-    left = int((timedelta(hours=IDLE_HOURS) - (now - when)).total_seconds() // 3600)
-    return (f"blocked on {b['kind']} {b['subject']} since {last[1][:16]}; rests {left}h more, "
-            "or until the wall clears")
+    if b["kind"] == "KEVIN":
+        # Nothing clears a KEVIN wall on unapproved work (block refuses a new one since 7 Oct
+        # 2026), so one left from before keeps the day's clock: the agent then submits a card.
+        try:
+            when = datetime.fromisoformat(last[1].replace("Z", "+00:00"))
+        except ValueError:
+            return ""
+        if (now or datetime.now(timezone.utc)) - when >= timedelta(hours=IDLE_HOURS):
+            return ""
+    return (f"blocked on {b['kind']} {b['subject']} since {last[1][:16]}; rests until the wall clears "
+            "or Kevin's verdict changes")
 
 
 def open_intents():
@@ -2989,6 +3004,7 @@ def build_queue(args=None):
     decided = []
     own_signal = []
     trial_checked, form_cards = [], []
+    merge_cards = []
     creditor_ok = bool(role_roster.get(CREDITOR_REC_ID, {}).get("dispatchable"))
     creditor_count = 0
     # Tenants mid-chase, for the rent reply lane. A failed read leaves the lane empty and says so: the
@@ -3045,6 +3061,13 @@ def build_queue(args=None):
         # formCards, never hidden.
         if form_card(t["name"], t["notes"]):
             form_cards.append(t)
+            continue
+        # A MERGE CARD IS NEVER AN AGENT'S WORK (7 Oct 2026). Approving one runs merge-pr.py in
+        # scripts/merge-approved.py, deterministic and with no model. Handed to the Builder as a
+        # carry-out, a Claude run would try the merge itself; as a redo, it would rewrite a card it
+        # cannot change. Pulled out before every lane, whatever its outcome. Listed, never hidden.
+        if merge_card.is_merge_card(t["name"]):
+            merge_cards.append(t)
             continue
         # ROY IS HANDLING THIS (24 Sep 2026): Roy forwarded this same matter to
         # his assistant. While his request is open this twin waits, listed
@@ -3346,6 +3369,8 @@ def build_queue(args=None):
         "ownGoSignal": own_signal,
         "trialChecked": trial_checked,
         "formCards": form_cards,
+        # MERGE cards (7 Oct 2026): merged by scripts/merge-approved.py, never by an agent.
+        "mergeCards": merge_cards,
         # Tasks a sign-in just reopened (ids): the pickup run and the 30-minute
         # poll work these first, whichever lane classified them.
         "signinReopened": signin_reopened,
@@ -3382,6 +3407,7 @@ def build_queue(args=None):
             "ownGoSignal": len(own_signal),
             "trialChecked": len(trial_checked),
             "formCards": len(form_cards),
+            "mergeCards": len(merge_cards),
             "changesRequested": len(changes_hb),
             # Redos Kevin asked to delay. Demoted behind new work rather than
             # dropped, and counted here so one sitting for weeks stays visible.
@@ -3526,6 +3552,11 @@ def cmd_reassign(args):
     problem."""
     task = get_task(args.task)
     tf = task.get("fields", {}) or {}
+    held = held_card_problem(tf)
+    if held:
+        # A reassign clears the outcome and the sender: on a Your step card it wipes his approval,
+        # and a MERGE card would sit at Today where no surface shows it (review, 7 Oct 2026).
+        sys.exit(f"ERROR: refusing to reassign {args.task}: {held}.")
     notes = str(tf.get(AF["notes"]) or "")
     bounces = reassign_bounces(notes)
     if bounces >= REASSIGN_MAX:
@@ -3805,6 +3836,9 @@ def cmd_escalate(args):
     reported, not rewritten. A card from before the brief is rebuilt once."""
     t = get_task(args.task)
     tf = t.get("fields", {}) or {}
+    held = held_card_problem(tf)
+    if held:
+        sys.exit(f"REFUSED: {args.task} is not a decision for Kevin: {held}.")
     status = sel(tf.get(AF["status"]))
     prior_output = str(tf.get(AF["agentOutput"]) or "")
     on_gate = status == "Approval" and is_decide_card(prior_output)
@@ -4011,6 +4045,9 @@ def cmd_handover(args):
                           _tf.get(AF["name"], ""), _tf.get(AF["notes"], ""))
     if trial:
         sys.exit(f"ERROR: refusing to hand over {args.task}: {trial}.")
+    held = held_card_problem(_tf)
+    if held:
+        sys.exit(f"ERROR: refusing to hand over {args.task}: {held}.")
     # Tier-1 gate (25 Aug 2026, Task Manager build review): a handover to
     # anyone but Kevin moves the task OUT of the agent queue and DMs the new
     # owner, so tier-1 content (creditor, legal, courts, HMRC, the live legal
@@ -4155,6 +4192,13 @@ def cmd_clear_alerts(args):
         # tasks the queue fix released.
         hit = system_alert_match(t.get("inboundSender"), t["name"])
         if not hit:
+            continue
+        # A MERGE card or a Your step card is Kevin's by construction, whatever its name says:
+        # "fix: send-email.py waits out the Gmail quota" is a merge he decides, and moving it would
+        # blank his approval (review, 7 Oct 2026).
+        held = held_card_problem((rec.get("fields") or {}))
+        if held:
+            skipped.append({"task": t["id"], "name": t["name"], "why": held})
             continue
         # Tier 1, a creditor matter or a sum of money never moves, whatever it
         # looks like. Named in the output so the sweep still says what it left.
@@ -4508,6 +4552,11 @@ def cmd_submit(args):
             f"ERROR: refusing to submit {args.task}: its KEVIN ONLY line names "
             f"{kevin_step['reason']!r}. Only these are Kevin's alone: "
             f"{', '.join(KEVIN_ONLY_REASONS)}. Anything else an agent does, or blocks on.")
+    if kevin_step and kevin_plan_missing(args.task, "", kevin_step["step"]):
+        # The submit path opens the same KEVIN wall `block` does, so it needs the same plan
+        # (review, 7 Oct 2026). A plan file written before the submit counts (rent_new_tenant does).
+        sys.exit(KEVIN_ONLY_PLAN_REFUSAL.format(task=args.task, reason=kevin_step["reason"],
+                                                plan=os.path.join(HANDOVER_DIR, args.task + ".json")))
     handoff = work_handoff_problem(output, kevin_step)
     if handoff and not SIGNIN_NEEDED_RE.search(output):
         sys.exit(
@@ -4550,6 +4599,9 @@ def cmd_submit(args):
     # the five questions were asked and names its trigger, or it is refused.
     # Read early so a report with nothing to decide can file itself below.
     tf_early = (get_task(args.task).get("fields", {}) or {})
+    held = held_card_problem(tf_early)
+    if held:
+        sys.exit(f"ERROR: refusing to submit {args.task}: {held}.")
     is_inbound = bool(tf_early.get(AF["inboundTask"]))
     # THE TASK IS ON TRIAL TOO (2 Oct 2026): a trial lane's task submitted under another agent's id
     # is held to the same rule as the trial agent's own submit, checked above. So is a task the trial
@@ -6774,6 +6826,10 @@ def signin_waiting(sites=None):
     groups = {}
     for rec in recs:
         f = rec.get("fields", {}) or {}
+        # A Your step card is approved work waiting on Kevin's own step: a SIGN-IN NEEDED line in
+        # the work below its step is history, and signin_done would wipe his approval (7 Oct 2026).
+        if your_step_split(f.get(AF["agentOutput"]))[0] is not None:
+            continue
         m = parse_signin_line(f.get(AF["agentOutput"]))
         if not m:
             continue
@@ -6911,7 +6967,8 @@ def signin_done(host, sites, groups=None):
                 if b and b["kind"] == "SIGN-IN":
                     woke = wake_blocked(t["id"], b, f"Kevin signed in to {g['label']} ({host}). The "
                                         "session is live now", by="Robot sign-in")
-                    handed.append({"task": t["id"], "agent": t["agent"], "name": woke["name"], "blocker": True})
+                    if woke:
+                        handed.append({"task": t["id"], "agent": t["agent"], "name": woke["name"], "blocker": True})
                 continue
             if KEEPALIVE_MARK in str(f.get(AF["notes"]) or ""):
                 # Raised by the keep-alive because the session had lapsed; the
@@ -6993,6 +7050,15 @@ def cmd_complete(args):
         sys.exit(f"ERROR: refusing to complete {args.task} — outcome is "
                  f"'{t['outcome'] or 'empty'}', not an approval. Only "
                  "approved, carried-out work completes.")
+
+    # A MERGE card closes only on its merge (7 Oct 2026): merge-approved.py completes it with the
+    # merge commit. Closed any other way, the PR would sit open with its TOOL walls for ever.
+    merge_pr = merge_card.pr_number(t["name"])
+    if merge_pr is not None and not re.search(r"\bPR #%d merged as [0-9a-f]{7,40}\b" % merge_pr,
+                                              str(getattr(args, "evidence", "") or "")):
+        sys.exit(f"ERROR: refusing to complete {args.task}: it is the MERGE card for PR #{merge_pr}, and it "
+                 "closes only when that PR has merged (scripts/merge-approved.py does it, with the merge "
+                 "commit as evidence).")
 
     # THE SIGNATURE-WATCH GATE (1 Sep 2026). A SIGN carry-out is not done when
     # the request is sent; it is done when the signed copy can find its way
@@ -7096,16 +7162,28 @@ def cmd_complete(args):
     # step Kevin owed has happened, clears it. See THE BLOCKER LOOP below.
     b = task_blocker(t["notes"])
     if b:
+        # An agent that tries to close an approved task on a KEVIN wall has done its part:
+        # only his step is left, so the card goes back to his lane now (7 Oct 2026), and the
+        # task rests until he says it is done.
+        surfaced = surface_your_step(args.task, b, t) if b["kind"] == "KEVIN" else {}
+        if surfaced:
+            ledger_append(args.task, "parked")
         sys.exit(
             f"ERROR: refusing to complete {args.task}: it is blocked "
             f"({b['kind']} {b['subject']}: {b['why'][:160]}).\n"
             f"       Fix: {blocker_fix_text(b)}\n"
-            "       The task wakes by itself when the cause is fixed. If the job is\n"
+            + ("       It is back in Kevin's approval queue as Your step.\n" if surfaced else "")
+            + "       The task wakes by itself when the cause is fixed. If the job is\n"
             "       in fact done, prove it first:\n"
             f"         python3 scripts/agent-dispatch.py unblock {args.task} "
             "--evidence \"<what you saw that proves it>\"")
 
     # Written with the close, never before it: a refused close leaves no mark.
+    evidence = " ".join(str(getattr(args, "evidence", "") or "").split())
+    if evidence:
+        stamp = datetime.now(LONDON).strftime("%d %b %Y")
+        no_cert_note = (no_cert_note + "\n\n" if no_cert_note else "") + \
+            f"[{stamp} — agent] DONE, evidence: {evidence[:600]}"
     declared = ({AF["notes"]: ((t["notes"] or "") + "\n\n" + no_cert_note).strip()[-90000:]}
                 if no_cert_note else {})
 
@@ -7298,8 +7376,10 @@ def blocker_fix_text(b):
                 "in the Robot sign-in app.")
     if kind == "TOOL":
         ref = f" (finding {b['finding']})" if b.get("finding") else ""
-        return (f"the robot's setup is repaired{ref}; a fix to a protected file "
-                "needs a Claude Code session.")
+        # Kevin, 7 Oct 2026: a protected-file fix is no longer a dead end. The fixer opens
+        # the PR and a MERGE card comes to him (scripts/merge_card.py).
+        return (f"the robot's setup is repaired{ref}; for a protected file, the fixer opens "
+                "the PR and a MERGE card comes to Kevin.")
     return (f"Kevin does the {subject} step; the task stays open until the agent "
             "sees proof it happened.")
 
@@ -7403,26 +7483,223 @@ def blocker_note(stamp, by, mark, b, tail):
     return f"[{stamp} — {by}] {mark} ({b['kind']} {b['subject']}): {tail}"
 
 
+# ─── KEVIN'S STEP IS A CARD IN HIS LANE (Kevin, 7 Oct 2026) ───────────
+#
+# Measured 25 Sep to 7 Oct: 13 tasks sat on KEVIN walls (a purchase, a
+# signature, a credential, an identity check, a payment) and none was in front
+# of him. The card left his Approval lane the moment he approved it (Status
+# back to Today), the 08:00 message carried a count with no names, and the
+# Your turn button existed for 2 of the 13. Two insurance tasks sat from 1 Oct
+# with no proof anything happened.
+#
+# So a KEVIN wall on a task he has approved puts the task back in his lane as
+# "Your step": Status Approval with his verdict KEPT, a YOUR STEP block on top of
+# the Agent Output (the original kept below a divider), and any knock-back date
+# cleared, so every approval surface shows it. The page shows the step, the
+# Your turn button when a plan exists, and a "Done, here is the proof" box, and
+# NO approve or reject: it is already approved. The box writes his proof into
+# Approval Feedback under KEVIN_DONE_MARK (the page cannot run this script); the
+# half-hourly sweep reads it, clears the wall, takes the marker out and hands
+# the task back to its agent, which checks the receipt and finishes the job.
+YOUR_STEP_MARK = "YOUR STEP:"
+YOUR_STEP_DIVIDER = "----- The agent's work, as you approved it -----"
+# The page writes exactly this line (os/agents/index.html APV_STEP_DONE_MARK).
+KEVIN_DONE_MARK = "KEVIN STEP DONE"
+KEVIN_DONE_RE = re.compile(r"^KEVIN STEP DONE \[(\d{4}-\d{2}-\d{2}T[0-9:.]+Z)\]:[ \t]*(.*)$", re.M)
+# Numbered written steps: "1. ..." or "1) ..." somewhere in the text.
+STEPS_NUMBERED_RE = re.compile(r"(?:^|\s)1[.)]\s+\S")
+CREDENTIAL_SEARCH_REMINDER = (
+    "REMINDER: a credential or identity wall is the last resort. Search for it first: the brain "
+    "(grep -ril '<what>' ~/knowledge-os, and the Drive vault '00 AI Context' with its Home.md index) "
+    "and Gmail (python3 scripts/inbound-triage.py search --q '<what>', and --account "
+    "kevinbrittain@gmail.com). Log the search in the task Notes with annotate, then block only if "
+    "it found nothing. Companies House personal codes, for one, are in Gmail.")
+
+
+KEVIN_PLAN_REFUSAL = ("ERROR: a KEVIN wall needs a plan: write {plan} (a website step, GUARDRAILS \"Kevin's "
+                      "turn\") or pass --steps \"1. ... 2. ...\" (a step with no website).")
+KEVIN_ONLY_PLAN_REFUSAL = ("ERROR: refusing to submit {task}: its KEVIN ONLY step has no plan. Write {plan} (a "
+                           "website step) or number the steps on the line itself: KEVIN ONLY: {reason}: 1. <first "
+                           "thing he does> 2. <next>.")
+
+
+def kevin_plan_missing(task_id, steps="", text=""):
+    """True when a KEVIN step has none of: a Your turn plan file, --steps, or numbered steps in
+    TEXT (the wall's own words, or the KEVIN ONLY step). Kevin must be told what to do, not that
+    something exists (7 Oct 2026: 11 of 13 KEVIN walls named a step and no way to take it)."""
+    return (not str(steps or "").strip() and not STEPS_NUMBERED_RE.search(str(text or ""))
+            and handover_plan(task_id) is None)
+
+
+def your_step_split(output):
+    """(step, original) when Agent Output carries Kevin's YOUR STEP block, else (None, output)."""
+    s = str(output or "")
+    lead = s.lstrip()
+    if not lead.startswith(YOUR_STEP_MARK) or YOUR_STEP_DIVIDER not in lead:
+        return None, s
+    head, rest = lead.split(YOUR_STEP_DIVIDER, 1)
+    # Exactly the two newlines your_step_output writes, so the round trip gives back the
+    # original byte for byte (review, 7 Oct 2026).
+    return head[len(YOUR_STEP_MARK):].strip(), (rest[2:] if rest.startswith("\n\n") else rest.lstrip("\n"))
+
+
+def your_step_output(step, output):
+    """The Agent Output with STEP on top and the original below the divider. Idempotent: an
+    output that already carries a block is re-wrapped, never wrapped twice."""
+    _, original = your_step_split(output)
+    return f"{YOUR_STEP_MARK} {str(step or '').strip()}\n\n{YOUR_STEP_DIVIDER}\n\n{original}"
+
+
+def handover_plan(task_id):
+    """The task's Your turn plan as a dict, or None (no plan, a bad id, an unreadable file)."""
+    if not TURN_TASK_RE.match(task_id or ""):
+        return None
+    try:
+        with open(os.path.join(HANDOVER_DIR, task_id + ".json")) as fh:
+            plan = json.load(fh)
+    except (OSError, ValueError):
+        return None
+    return plan if isinstance(plan, dict) else None
+
+
+def kevin_step_text(task_id, b, steps=""):
+    """What Kevin does, in words: the written steps, else the plan's own account of his step,
+    else the wall's why (a KEVIN ONLY line's step)."""
+    if str(steps or "").strip():
+        return str(steps).strip()
+    plan = handover_plan(task_id)
+    if plan is not None:
+        said = " ".join(str(plan.get("why") or plan.get("label") or b.get("why") or "").split())
+        return (f"{said} Press Your turn on the AI Agents page, on your Mac: the robot fills in "
+                "everything up to your step and hands you the window.").strip()
+    return str(b.get("why") or b.get("subject") or "").strip()
+
+
+def in_your_step(t):
+    """True when the task already sits in Kevin's lane as Your step."""
+    return t.get("status") == "Approval" and your_step_split(t.get("agentOutput"))[0] is not None
+
+
+def your_step_fields(t, step):
+    """The fields that put an APPROVED task back in Kevin's lane as Your step, or {} when it is
+    not his to see that way (not approved, closed, or a decision card, whose DECIDE: line the
+    board reads and a YOUR STEP block above it would hide)."""
+    if t.get("outcome") not in APPROVED or t.get("status") == "Completed" \
+            or is_decide_card(your_step_split(t.get("agentOutput"))[1]):
+        return {}
+    # The queue shows only a task with Sent For Approval By (APV_QUEUE_FORMULA). With no agent
+    # to name, Status Approval would hide the task from the queue AND from dispatch: leave it.
+    if not t.get("sentForApprovalByIds") and not t.get("teamMemberIds"):
+        return {}
+    fields = {AF["status"]: "Approval", AF["deferredUntil"]: None,
+              AF["agentOutput"]: your_step_output(step, t.get("agentOutput"))}
+    if not t.get("sentForApprovalByIds"):
+        fields[AF["sentForApprovalBy"]] = t["teamMemberIds"][:1]
+    return fields
+
+
+def kevin_done_said(feedback, since=""):
+    """(evidence, stamp) of Kevin's "Done, here is the proof" in Approval Feedback, or None.
+    The newest marker counts, and only one written after the wall opened: a marker left from an
+    earlier wall must never clear a new one. A wall with no `since` takes any marker."""
+    last = None
+    for m in KEVIN_DONE_RE.finditer(str(feedback or "")):
+        last = m
+    if not last:
+        return None
+    evidence = " ".join(last.group(2).split())
+    if not evidence:
+        return None
+    if since:
+        said, opened = _utc(last.group(1)), _utc(since)
+        # Read as times, never compared as text: "…00Z" sorts after "…00.000Z" (review).
+        if said is None or opened is None or said < opened:
+            return None
+    return evidence, last.group(1)
+
+
+def without_done_marks(feedback):
+    """Approval Feedback with every KEVIN STEP DONE line taken out, or None when nothing is left."""
+    kept = [ln for ln in str(feedback or "").split("\n") if not ln.startswith(KEVIN_DONE_MARK + " [")]
+    out = "\n".join(kept).strip()
+    return out or None
+
+
 def wake_blocked(task_id, b, reason, by="agent-dispatch"):
     """Clear the wall and hand the task back to its agent, keeping Kevin's
     verdict. The ledger's `unblocked` event ends the idle rest at once, so an
     approved carry-out is picked up by the next half-hourly poll; a task not
-    yet approved goes back on today's list for the next dispatch slot."""
+    yet approved goes back on today's list for the next dispatch slot. A task
+    waiting in Kevin's lane as Your step leaves it: Status back to Today and the
+    Agent Output back as he approved it. Clearing any wall also takes his
+    KEVIN STEP DONE lines out of Approval Feedback, in the same write, so one
+    "done" can never clear a later wall."""
     rec = get_task(task_id)
     t = task_view(rec)
+    cur = task_blocker(t["notes"])
+    if cur and not same_wall(cur, b):
+        # A newer wall opened after the caller read the task (the sweep reads in bulk, then writes
+        # minutes later). A CLEARED line now would clear THAT wall, which nothing has fixed: leave
+        # it for the next sweep to judge on its own (review, 7 Oct 2026).
+        return None
     stamp = datetime.now(LONDON).strftime("%d %b %Y %H:%M")
     note = blocker_note(stamp, by, BLOCKER_CLEARED_MARK, b,
                         f"{reason}. Carry on from where you stopped and finish the job. "
                         "Do not close it until the job itself is done.")
     fields = {AF["notes"]: ((t["notes"] or "").rstrip() + "\n\n" + note).strip()[-90000:]}
-    if t["outcome"] not in APPROVED and t["status"] not in ("Approval", "Completed"):
+    step, original = your_step_split(t["agentOutput"])
+    if step is not None:
+        fields[AF["agentOutput"]] = original
+    if (t["outcome"] not in APPROVED and t["status"] not in ("Approval", "Completed")) \
+            or (step is not None and t["status"] == "Approval"):
         fields[AF["status"]] = "Today"
         fields[AF["dueDate"]] = today_london()
         fields[AF["deferredUntil"]] = None
+    raw_feedback = (rec.get("fields") or {}).get(AF["approvalFeedback"]) or ""
+    if KEVIN_DONE_MARK + " [" in raw_feedback:
+        # Whatever cleared the wall: a done line left behind would be read by the next
+        # carry-out as Kevin's edit note (review, 7 Oct 2026).
+        fields[AF["approvalFeedback"]] = without_done_marks(raw_feedback)
     patch_task(task_id, fields)
     ledger_append(task_id, "unblocked")
     return {"task": task_id, "name": t["name"][:80], "kind": b["kind"],
             "subject": b["subject"], "reason": reason}
+
+
+def same_wall(a, b):
+    """True when two blocker dicts are the same wall: kind, subject, profile and opening time."""
+    return all((a or {}).get(k, "") == (b or {}).get(k, "") for k in ("kind", "subject", "profile", "since"))
+
+
+def surface_your_step(task_id, b, t=None, steps=""):
+    """Put an approved task with an open KEVIN wall in Kevin's lane as Your step. Returns what
+    was written ({} when nothing was: not approved, closed, a decision card, already there, or the
+    wall moved since B was read). T, when given, must be a fresh read: the write is built from it."""
+    t = t or task_view(get_task(task_id))
+    if in_your_step(t) or not same_wall(task_blocker(t["notes"]), b):
+        return {}
+    fields = your_step_fields(t, kevin_step_text(task_id, b, steps))
+    if fields:
+        patch_task(task_id, fields)
+    return fields
+
+
+def held_card_problem(fields):
+    """Why an agent may not rewrite, re-escalate or hand over this task, or ''. A MERGE card is
+    written by fixer-merge.py and carried out by merge-approved.py on Kevin's verdict: a submit
+    that turned it into a DECIDE: or CLOSE PROPOSAL card under the same name would let his "yes"
+    to that merge a protected PR (review, 7 Oct 2026). A Your step card is approved and waits on
+    his own step: a submit would wipe his approval and a handover would mail the step to Roy."""
+    fields = fields or {}
+    if merge_card.is_merge_card(fields.get(AF["name"])):
+        return ("it is a MERGE card: only fixer-merge.py writes it, and only merge-approved.py "
+                "carries it out on Kevin's verdict")
+    t = {"status": sel(fields.get(AF["status"])), "outcome": sel(fields.get(AF["approvalOutcome"])),
+         "agentOutput": fields.get(AF["agentOutput"])}
+    if t["outcome"] in APPROVED and in_your_step(t):
+        return ("it is in Kevin's approval queue as Your step: approved, and waiting on his own step. "
+                "It comes back to its agent when he says it is done")
+    return ""
 
 
 def submit_wall_notes(notes, kevin_step, now=None):
@@ -7454,6 +7731,9 @@ def cmd_block(args):
     if not subject or not why:
         sys.exit("ERROR: --subject and --why are both required: what is blocked, and what you saw.")
     t = task_view(get_task(args.task))
+    if merge_card.is_merge_card(t["name"]):
+        sys.exit(f"ERROR: {args.task} is a MERGE card: only fixer-merge.py and merge-approved.py act on it, "
+                 "and a wall on it would bury the card Kevin approves.")
     if t["status"] == "Completed":
         sys.exit(f"ERROR: {args.task} is Completed. A closed task cannot be blocked; if the job "
                  "was never done, say so in the run report so it is reopened.")
@@ -7495,15 +7775,49 @@ def cmd_block(args):
                  "and a wall the robot cannot pass is SIGN-IN, SITE or TOOL.")
     if kind == "KEVIN":
         subject = subject.lower()
+    steps = "\n".join(" ".join(ln.split()) for ln in str(getattr(args, "steps", None) or "").splitlines()
+                      if ln.strip())
+    if steps and kind != "KEVIN":
+        sys.exit("ERROR: --steps is only for a KEVIN wall: the written steps of a step only Kevin can take.")
+    if steps and not STEPS_NUMBERED_RE.search(steps):
+        sys.exit("ERROR: --steps must be numbered written steps (\"1. ... 2. ...\"), what Kevin does in order.")
+    if kind == "KEVIN" and t["outcome"] not in APPROVED:
+        # A KEVIN wall on work Kevin has not approved has no door (review, 7 Oct 2026): the task
+        # rests until the wall clears, the page offers "Done" only on approved work, and nothing
+        # else clears a KEVIN wall. His step reaches him as a card instead, which is also how
+        # he approves the work before it.
+        sys.exit(f"ERROR: {args.task} is not approved, so a KEVIN wall would leave it with no way "
+                 "back. Finish everything before his step and submit the card with the closing line "
+                 "KEVIN ONLY: <payment|purchase|signature|credential|identity|physical>: <the step>; "
+                 "submit records the wall and his approval brings the step to his queue.")
+    if kind == "KEVIN" and subject in ("credential", "identity"):
+        print(CREDENTIAL_SEARCH_REMINDER, file=sys.stderr)
     b = {"kind": kind, "subject": subject, "why": why, "finding": ""}
     current = task_blocker(t["notes"])
     if (current and current["kind"] == kind and current["subject"] == subject
             and current.get("profile", "") == (getattr(args, "profile", None) or "")):
         # Same wall, seen again: rest again, never a second line (the 46,000-
-        # character Notes of 11 Sep came from exactly this repetition).
+        # character Notes of 11 Sep came from exactly this repetition). A KEVIN
+        # wall seen again on an approved task is the agent saying its part is done
+        # and only his step is left: the card goes back to his lane (7 Oct 2026).
+        # It needs its plan too, unless the wall already carries numbered steps.
+        if kind == "KEVIN" and kevin_plan_missing(args.task, steps, current.get("why", "")):
+            sys.exit(KEVIN_PLAN_REFUSAL.format(plan=os.path.join(HANDOVER_DIR, args.task + ".json")))
+        surfaced = surface_your_step(args.task, current, t, steps) if kind == "KEVIN" else {}
         ledger_append(args.task, "parked")
-        print(json.dumps({"blocked": args.task, "already": True, **current}))
+        print(json.dumps({"blocked": args.task, "already": True, **current,
+                          **({"yourStep": True} if surfaced else {})}))
         return
+    # A KEVIN WALL IS A CARD WITH A PLAN (Kevin, 7 Oct 2026). 11 of 13 KEVIN walls had
+    # no Your turn plan and no written steps: Kevin was told a step existed, never what
+    # it was. A new wall needs the plan file (a website step) or --steps (a step with no
+    # website: a cheque, a signature on paper).
+    if kind == "KEVIN" and kevin_plan_missing(args.task, steps):
+        sys.exit(KEVIN_PLAN_REFUSAL.format(plan=os.path.join(HANDOVER_DIR, args.task + ".json")))
+    if steps:
+        # Kept in the wall's own line, so the sweep can show them when the card is approved later.
+        why = f"{why} Steps: {' '.join(steps.split())}"[:900]
+        b["why"] = why
     if kind == "TOOL" and args.finding:
         # A mistyped id would never clear, and the row would say it is being
         # fixed (review, 25 Sep 2026). It must be one findings.py knows.
@@ -7518,18 +7832,22 @@ def cmd_block(args):
     stamp = datetime.now(LONDON).strftime("%d %b %Y %H:%M")
     if getattr(args, "profile", None):
         b["profile"] = args.profile
-    tail = f"{why[:400]} Fix: {blocker_fix_text(b)} [since {now_iso()}]"
+    tail = f"{why[:900 if kind == 'KEVIN' else 400]} Fix: {blocker_fix_text(b)} [since {now_iso()}]"
     if b.get("profile"):
         tail += f" [profile {b['profile']}]"
     if b["finding"]:
         tail += f" [finding {b['finding']}]"
     note = blocker_note(stamp, "agent", BLOCKER_OPEN_MARK, b, tail)
-    patch_task(args.task, {AF["notes"]: ((t["notes"] or "").rstrip() + "\n\n" + note).strip()[-90000:]})
+    fields = {AF["notes"]: ((t["notes"] or "").rstrip() + "\n\n" + note).strip()[-90000:]}
+    # On a task Kevin has approved, the same write puts it back in his lane as Your step.
+    surfaced = your_step_fields(t, kevin_step_text(args.task, b, steps)) if kind == "KEVIN" else {}
+    patch_task(args.task, {**fields, **surfaced})
     ledger_append(args.task, "parked")
     back = task_blocker(task_view(get_task(args.task))["notes"])
     if not back or back["kind"] != kind:
         sys.exit(f"ERROR: wrote the blocker to {args.task} but it does not read back.")
-    print(json.dumps({"blocked": args.task, **back, "fix": blocker_fix_text(back)}))
+    print(json.dumps({"blocked": args.task, **back, "fix": blocker_fix_text(back),
+                      **({"yourStep": True} if surfaced else {})}))
 
 
 def cmd_unblock(args):
@@ -7541,7 +7859,10 @@ def cmd_unblock(args):
     b = task_blocker(t["notes"]) or unrecorded_turn(t["notes"])
     if not b:
         sys.exit(f"ERROR: {args.task} has no open blocker.")
-    print(json.dumps({"unblocked": wake_blocked(args.task, b, f"evidence: {evidence[:400]}", by="agent")}))
+    woke = wake_blocked(args.task, b, f"evidence: {evidence[:400]}", by="agent")
+    if not woke:
+        sys.exit(f"ERROR: {args.task}'s wall changed while this ran. Read the task again and retry.")
+    print(json.dumps({"unblocked": woke}))
 
 
 # The words the rent check closes a form card's Your turn step with when the app never recorded whether
@@ -7560,6 +7881,84 @@ def unrecorded_turn(notes):
             or UNRECORDED_TURN not in last.group("rest"):
         return None
     return {"kind": "KEVIN", "subject": last.group("subject").strip(), "why": "", "since": "", "finding": "", "profile": ""}
+
+
+def kevin_step_owed(t, b, last):
+    """True when an APPROVED task's KEVIN wall now waits on Kevin alone, so the sweep puts the
+    card in his lane: the wall opened after his approval, or an agent has been on the task since
+    (it parked on the wall, or carried out and kept it open), so its own part is done. A wall
+    opened at submit on a card he has only just approved waits for the agent's carry-out first:
+    the agent's `block` or `complete` then moves it itself."""
+    if t.get("outcome") not in APPROVED or t.get("status") == "Completed" or in_your_step(t):
+        return False
+    approved_at = str(t.get("approvedAt") or "")
+    if b.get("since") and b["since"] > approved_at:
+        return True
+    event, ts = last or ("", "")
+    return event in ("parked", "done") and bool(ts) and ts > approved_at
+
+
+def finding_details():
+    """finding id -> its full record (title, where, detail, pr), read through findings.py."""
+    import findings as _findings  # noqa: E402 — scripts/ is on sys.path above
+    return _findings.current_state()
+
+
+def card_for_wall(b, detail, cards):
+    """The MERGE card that carries this TOOL wall's fix, or None: a card listing the finding,
+    or the card for the PR the finding is pending on. An open card wins over a closed one."""
+    fid, pr = b.get("finding") or "", str((detail or {}).get("pr") or "")
+    hits = [c for c in cards if (fid and fid in c.get("findings", [])) or (pr and str(c.get("pr")) == pr)]
+    hits.sort(key=lambda c: (c.get("status") != "Completed", c.get("pr") or 0))
+    return hits[-1] if hits else None
+
+
+def tool_wall_state(b, status, detail, cards, days, findings_error="", cards_error=""):
+    """(code, words) for a TOOL wall: who can clear it, in Kevin's words (7 Oct 2026). The row
+    used to say "waiting on the daily robot fix" for 19 walls no fixer could reach."""
+    card = card_for_wall(b, detail, cards)
+    if card:
+        pr = card["pr"]
+        if card.get("status") == "Completed" and card.get("outcome") == "Rejected":
+            return "merge-rejected", f"you rejected the merge card for PR #{pr}, so the PR is left open"
+        if card.get("status") == "Completed":
+            # Merged, yet this wall's finding did not land (a wall clears only when it does).
+            return "merge-closed", (f"the merge card for PR #{pr} is closed but finding {b.get('finding') or '?'} "
+                                    f"is still {status or 'not in the queue'}, so nothing will clear this wall")
+        if card.get("outcome") in merge_card.APPROVED:
+            return "merge-approved", f"you approved the merge card for PR #{pr}; the robot is merging it"
+        return "merge-card", f"waiting on a merge card (PR #{pr})"
+    if not b.get("finding"):
+        return "no-finding", "no finding was filed, so nothing will clear this wall"
+    if findings_error:
+        return "unknown", "the findings queue could not be read: " + findings_error[:120]
+    if not status:
+        return "no-finding", f"finding {b['finding']} is not in the queue, so nothing will clear this wall"
+    if status == "pending":
+        return "pending", f"waiting on PR #{(detail or {}).get('pr') or '?'} to merge"
+    if status == "claimed":
+        return "claimed", "the fixer is working on it"
+    if status == "deferred" or (status == "open" and (days is None or days >= BLOCKER_STALE_DAYS)):
+        if cards_error:
+            return "unknown", "the merge cards could not be read: " + cards_error[:120]
+        d = detail or {}
+        try:
+            path = merge_card.protected_named(" ".join(str(d.get(k) or "") for k in ("title", "where", "detail", "fix"))
+                                              + " " + str(b.get("why") or ""))
+        except Exception as exc:  # noqa: BLE001 — the row says it could not tell, never guesses
+            return "unknown", "the protected-file list could not be read: %s" % str(exc)[:80]
+        if path:
+            return "no-fixer", f"no fixer can reach it (protected file: {path})"
+        if status == "deferred":
+            # Deferred is final: the fixer closed it and never comes back (review, 7 Oct 2026).
+            note = " ".join(str((detail or {}).get("close_note") or "").split())[:160]
+            return "deferred", ("the fixer deferred it" + (f" ({note})" if note else "")
+                                + ", so nothing will clear this wall")
+        # No protected file named: an ordinary finding the fixer has not reached. Said as that,
+        # never as "no fixer can reach it", which would be a guess (review, 7 Oct 2026).
+        age = (f" in {int(days)} day{'' if int(days) == 1 else 's'}" if days is not None else "")
+        return "unclaimed", f"no fixer has taken it{age}"
+    return "fixer", "waiting on the daily robot fix"
 
 
 def blockers_scan(sweep=False, now=None):
@@ -7584,7 +7983,19 @@ def blockers_scan(sweep=False, now=None):
         fstates = finding_states()
     except Exception as exc:  # noqa: BLE001
         findings_error = str(exc)[:200]
-    open_walls, woken, stale = [], [], []
+    # Read only when a TOOL wall or a KEVIN wall needs them, and never fatal: a failed read is
+    # said on the row ("could not read"), never read as "nothing there".
+    lazy = {}
+
+    def once(key, fn):
+        if key not in lazy:
+            try:
+                lazy[key] = (fn(), "")
+            except Exception as exc:  # noqa: BLE001 — carried into the JSON
+                lazy[key] = (None, str(exc)[:200])
+        return lazy[key]
+
+    open_walls, woken, stale, surfaced, done_refused = [], [], [], [], []
     for rec in recs:
         t = task_view(rec)
         b = task_blocker(t["notes"])
@@ -7592,9 +8003,50 @@ def blockers_scan(sweep=False, now=None):
             continue
         reason = (blocker_clear_reason(b, sites, fstates, walk=session_walk if sweep else None)
                   if not (sites_error and b["kind"] == "SITE") else "")
+        raw_feedback = (rec.get("fields") or {}).get(AF["approvalFeedback"]) or ""
+        done = kevin_done_said(raw_feedback, b.get("since", "")) if b["kind"] == "KEVIN" else None
+        if done and not reason:
+            # Kevin's "Done, here is the proof" on the page (7 Oct 2026). The agent still checks
+            # the receipt before it closes the task (GUARDRAILS "Kevin's turn").
+            reason = f"Kevin says the step is done: {done[0][:400]}"
         if reason and sweep:
-            woken.append(wake_blocked(t["id"], b, reason))
-            continue
+            woke = wake_blocked(t["id"], b, reason, by="Kevin" if done else "agent-dispatch")
+            if woke:
+                woken.append(woke)
+                continue
+        if sweep and not done and KEVIN_DONE_MARK + " [" in raw_feedback:
+            # A done line the sweep cannot take (written before this wall opened, or with no
+            # words) comes out, with a note, so the page offers the box again rather than
+            # showing "you said it is done" for ever (review, 7 Oct 2026). Judged again on a
+            # FRESH read: a line Kevin wrote since the bulk read is his, never wiped.
+            frec = get_task(t["id"])
+            ft = task_view(frec)
+            fresh_feedback = (frec.get("fields") or {}).get(AF["approvalFeedback"]) or ""
+            fb = task_blocker(ft["notes"])
+            if same_wall(fb, b) and KEVIN_DONE_MARK + " [" in fresh_feedback \
+                    and not kevin_done_said(fresh_feedback, b.get("since", "")):
+                stamp = datetime.now(LONDON).strftime("%d %b %Y %H:%M")
+                patch_task(t["id"], {
+                    AF["approvalFeedback"]: without_done_marks(fresh_feedback),
+                    AF["notes"]: ((ft["notes"] or "").rstrip() + "\n\n" + f"[{stamp} — agent-dispatch] "
+                                  "Kevin's done line was not used: it was written before this wall opened, or "
+                                  "it gave no proof. The Done box is back on his card.").strip()[-90000:]})
+                done_refused.append({"task": t["id"], "name": t["name"][:80]})
+        if sweep and b["kind"] == "KEVIN" and t["outcome"] in APPROVED and not in_your_step(t):
+            ledger, _ = once("ledger", ledger_last_events)
+            pair, _ = once("holds", load_standing_holds)
+            holds, holds_error = pair if pair else ([], "not read")
+            if holds_error:
+                lazy["holds"] = (pair, holds_error)       # said in readErrors; nothing surfaced blind
+            # A task a standing hold covers is parked by standing_holds.py; surfacing it would
+            # undo the park every half hour (review, 7 Oct 2026).
+            held = (not holds_error) and standing_holds.hold_for(t, holds)
+            if not holds_error and not held and kevin_step_owed(t, b, (ledger or {}).get(t["id"])):
+                # Written from a fresh read, never the bulk one (review, 7 Oct 2026).
+                wrote = surface_your_step(t["id"], b)
+                if wrote:
+                    t = dict(t, status="Approval", agentOutput=wrote.get(AF["agentOutput"], t["agentOutput"]))
+                    surfaced.append({"task": t["id"], "name": t["name"][:80], "subject": b["subject"]})
         try:
             since = datetime.fromisoformat(b["since"].replace("Z", "+00:00")) if b["since"] else None
         except ValueError:
@@ -7607,10 +8059,29 @@ def blockers_scan(sweep=False, now=None):
                "fix": blocker_fix_text(b), "finding": b["finding"],
                "findingStatus": fstates.get(b["finding"], "") if b["finding"] else "",
                "days": days, "clearsNow": bool(reason)}
+        if b["kind"] == "KEVIN":
+            # What Kevin does, for the page and the 08:00 line (7 Oct 2026): the YOUR STEP block
+            # once the card is in his lane, else the plan's or the wall's own words.
+            shown = your_step_split(t["agentOutput"])[0]
+            row["step"] = (shown if shown is not None else kevin_step_text(t["id"], b))[:600]
+            row["yourStep"] = in_your_step(t)
+            if done:
+                row["doneSaid"] = done[0][:200]
         if handover_ready(t["id"], b, t.get("outcome"), t):
             row["turn"] = True
             row["fix"] = ("Kevin clicks Your turn on the AI Agents page (on his Mac): the robot fills "
                           "everything in and hands him the window for his step.")
+        if b["kind"] == "TOOL":
+            cards, cards_error = once("cards", lambda: merge_card.list_cards(read=query_tasks))
+            details, details_error = once("details", finding_details)
+            code, text = tool_wall_state(b, row["findingStatus"], (details or {}).get(b["finding"]) or {},
+                                         cards or [], days,
+                                         findings_error or details_error, cards_error)
+            row["toolState"], row["tool"] = code, text
+            card = card_for_wall(b, (details or {}).get(b["finding"]) or {}, cards or [])
+            if card:
+                row["mergeCard"] = {"pr": card["pr"], "task": card["id"], "status": card["status"],
+                                    "outcome": card["outcome"]}
         open_walls.append(row)
         if days is None or days >= BLOCKER_STALE_DAYS:
             stale.append(row)
@@ -7623,7 +8094,10 @@ def blockers_scan(sweep=False, now=None):
                                    "subject": b["subject"], "why": b["why"][:200]})
     return {"openTasksRead": len(control), "open": open_walls, "woken": woken,
             "stale": stale, "closedWhileBlocked": closed_blocked,
-            "sitesError": sites_error, "findingsError": findings_error}
+            "surfaced": surfaced, "doneRefused": done_refused,
+            "sitesError": sites_error, "findingsError": findings_error,
+            # The lazy reads that failed, by name (ledger, cards, details). Never fatal, never silent.
+            "readErrors": {k: v[1] for k, v in lazy.items() if v[1]}}
 
 
 def cmd_blockers(args):
@@ -7640,6 +8114,8 @@ def cmd_blockers(args):
         problems.append("the robot's site list could not be read: " + r["sitesError"])
     if r["findingsError"]:
         problems.append("the findings queue could not be read: " + r["findingsError"])
+    for name, err in (r.get("readErrors") or {}).items():
+        problems.append(f"the {name} read failed: {err}")
     for s in r["stale"]:
         problems.append(f"{s['task']} blocked {s['days']} days on {s['kind']} {s['subject']}: {s['fix']}")
     for c in r["closedWhileBlocked"]:
@@ -10182,6 +10658,9 @@ def main():
     c.add_argument("--no-certificate", default="", metavar="REASON",
                    help="the file that arrived on this task is not a certificate "
                         "(say what it is); recorded in Notes")
+    c.add_argument("--evidence", default="",
+                   help="what proves the job is done (a merge commit, a receipt); written to Notes "
+                        "with the close")
 
     v = sub.add_parser("verify")
     v.add_argument("--report", required=True)
@@ -10212,6 +10691,9 @@ def main():
     bk.add_argument("--why", required=True, help="what you saw, in one or two sentences")
     bk.add_argument("--finding", help="TOOL only: an existing finding id instead of filing one")
     bk.add_argument("--profile", help="SIGN-IN on a site with one sign-in per profile (Utilita's flats): which one")
+    bk.add_argument("--steps", help="KEVIN only, for a step with no website (a cheque, a signature on paper): "
+                                    "the numbered written steps he takes, \"1. ... 2. ...\". A website step "
+                                    "needs its Your turn plan file instead")
 
     ub = sub.add_parser("unblock",
                         help="clear a wall with the evidence that the job can go on or is done")

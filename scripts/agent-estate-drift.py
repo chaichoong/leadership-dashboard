@@ -141,6 +141,11 @@ RETIRED = [
     # info@ assistant is paused): a line telling anyone Roy works by forwarding FROM info@.
     (r"(?i)Roy forwards? (a message |the message |a tenant'?s? \w+ |it )?FROM info@", "2026-10-06",
      "Roy emails info@ from his own Gmail and Inbox Triage works it; the info@-to-info@ door is paused"),
+    # Every wall gets a door (Kevin, 7 Oct 2026): a protected-file fix is no longer a session
+    # Kevin has to open. 19 TOOL walls sat behind this wording for up to twelve days.
+    (r"(?i)a fix to a protected file needs a Claude Code session|needs? a Claude Code session to fix the robot",
+     "2026-10-07",
+     "the fixer opens the PR and a MERGE card comes to Kevin"),
 ]
 
 # A line that is describing the old rule, not stating it.
@@ -334,6 +339,11 @@ def selftest():
     assert scan_text("Roy forwards a message FROM info@agilelets.co.uk TO itself.", "x")
     assert scan_text("Roy forwards from info@ to info@ with one line.", "x")
     assert not scan_text("Roy emails info@ from his own Gmail and Inbox Triage works it.", "x")
+    # Every wall gets a door (7 Oct 2026): the dead-end wording fires; the MERGE card route does not.
+    assert scan_text("TOOL: the setup is repaired; a fix to a protected file needs a Claude Code session.", "x")
+    assert scan_text("3 tasks need a Claude Code session to fix the robot.", "x")
+    assert not scan_text("For a protected file, the fixer opens the PR and a MERGE card comes to Kevin.", "x")
+    assert not scan_text("Kevin opened a Claude Code session on the Mac mini.", "x")
     assert stamp_of(os.devnull) is None
     assert rulings_after("2026-09-07", os.devnull) == []
     memory_selftest()

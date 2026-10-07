@@ -97,19 +97,16 @@ describe('what the fixer may never merge on its own', () => {
 
   it('a protected hit is a REFUSAL, not a warning it proceeds past', () => {
     const fn = SRC.slice(SRC.indexOf('def cmd_merge'), SRC.indexOf('def main'));
-    expect(fn).toMatch(/if not d\["mayAutoMerge"\]:[\s\S]{0,400}return 0/);
-    // …and it must return BEFORE the gate runs, so a protected PR is never
-    // merged by a lucky green run. It must also return before the merge result
-    // is BUILT: that fetches and creates a worktree for a PR we already know we
-    // will not merge. (Signature widened 1 Sep 2026 — the gate now takes the
-    // tree to test; see tests/fixer-merge-result.test.js and finding 414.)
-    const refuseAt = fn.indexOf('mayAutoMerge');
-    const gateAt = Math.min(
-      ...[fn.indexOf('run_gate('), fn.indexOf('build_merge_result(')].filter((i) => i > -1)
-    );
+    // Since 7 Oct 2026 a protected PR's gate runs (Kevin's MERGE card carries the
+    // result, and a red one never reaches his queue), so the refusal sits AFTER the
+    // gate and BEFORE the merge call: a lucky green run can still never merge it.
+    // The behaviour is driven for real in tests/merge-card.test.js.
+    expect(fn).toMatch(/if not d\["mayAutoMerge"\]:[\s\S]{0,1400}return 0 if not card/);
+    const refuseAt = fn.indexOf('if not d["mayAutoMerge"]:');
+    const mergeAt = fn.indexOf('"gh", "pr", "merge"');
     expect(refuseAt, 'the protected-path refusal is gone').toBeGreaterThan(-1);
-    expect(gateAt).toBeGreaterThan(-1);
-    expect(refuseAt).toBeLessThan(gateAt);
+    expect(mergeAt).toBeGreaterThan(-1);
+    expect(refuseAt).toBeLessThan(mergeAt);
   });
 
   it('matches a directory prefix, not just exact paths', () => {
