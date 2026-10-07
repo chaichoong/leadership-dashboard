@@ -116,11 +116,11 @@ def plan(ledger, slots, gaps=None, free=None, start=None):
     free = shutil.disk_usage(WORK if os.path.isdir(WORK) else os.path.expanduser("~")).free if free is None else free
     start = start_day() if start is None else start
     waiting = sorted({v["day"] for v in ledger.values() if v.get("status") == "new"})
-    # Kevin, 2 Oct 2026: "anything that is sent back for editing goes to the back of the queue... it doesn't block any
-    # new episodes going out". A day render.redo_day put back to 'new' carries a `reset` note. It is older than every
-    # new day, so it took slot 1 and a new episode lost its place. It now renders AFTER the night's new days, on top
-    # of the slots, never instead of one. A sent-back gap day stays on the gap route (its clip must fit the disk, and
-    # it waits while the gap list is paused).
+    # A day render.redo_day put back to 'new' carries a `reset` note: a day Kevin sent back. Kevin, 7 Oct 2026: a
+    # sent-back episode is redone and put back to the FRONT of the queue, never at the cost of the new ones. So the
+    # night's one redo renders first (from 2 Oct it went last, where the 04:00 last start and the 07:00 stop cut it
+    # first), and the night still renders MIN_NEW new days after it. A sent-back gap day stays on the gap route (its
+    # clip must fit the disk, and it waits while the gap list is paused).
     # Oldest first, but a day whose footage would not come down goes behind the others, least recently failed first
     # (Kevin, 2 Oct 2026): with one redo a night, an older day whose pull was refused every night would keep a younger
     # redo waiting for ever. `pull_failed` is stamped by pull() on every refusal and cleared when the clip arrives.
@@ -136,9 +136,9 @@ def plan(ledger, slots, gaps=None, free=None, start=None):
             notes.append("gap day %d skipped: its %.0f GB clip needs %.0f GB free, %.0f GB free" % (d, biggest / 1e9, pull_needs(biggest) / 1e9, free / 1e9))
     # The night never renders fewer than MIN_NEW new days. Past that, a waiting redo takes the spare slot rather than
     # going on top (Kevin, 2 Oct 2026: three a night, so a day he sends back still leaves two to publish). At three
-    # slots the night is two new days and the redo: three renders, about six to seven hours, inside the nine-hour stop.
-    # Four renders (three new and a redo) ran to the stop on a slow night, and the redo is the one that gets killed.
-    n_redo = min(len(redo), max(1, slots // 2)) if slots > 0 else 0
+    # slots the night is the redo and two new days: three renders, about six to seven hours, inside the nine-hour stop.
+    # One redo a night, whatever the slots (Kevin, 7 Oct 2026); a second waiting redo takes the next night.
+    n_redo = min(len(redo), 1) if slots > 0 else 0
     new_slots = max(min(slots, MIN_NEW), slots - n_redo)
     days = []
     for slot in range(new_slots):
@@ -146,14 +146,14 @@ def plan(ledger, slots, gaps=None, free=None, start=None):
         if gap_ok: days.append(gap_ok.pop(0)); notes.append("slot %d: gap day %d (oldest missing)" % (slot + 1, days[-1])); continue
         if cont: days.append(cont.pop(0)); notes.append("slot %d: day %d %s" % (slot + 1, days[-1], "continues the run (gap days paused)" if paused else "(no gap day fits, so the run moves on)")); continue
         break
-    # One redo for every two new slots, at least one, oldest first (review, 2 Oct 2026): a day takes about two hours
-    # to pull and render and the job is stopped at nine, so two new days and one redo fit and five redos do not. The
-    # redo is last, so it would be the one killed mid-render, with the copy, cards and publishing steps after it.
-    # A slot no new day filled goes to a waiting redo as well (second review).
+    # The redo goes FIRST (Kevin, 7 Oct 2026), oldest first. A slot no new day filled goes to a waiting redo as well
+    # (review, 2 Oct 2026): with nothing new waiting, a second redo costs no new episode its place.
     if slots > 0:
         room = n_redo + (new_slots - len(days))
-        for d in redo[:room]: days.append(d); notes.append("redo: day %d (sent back) re-renders after the night's new episodes" % d)
-        for d in redo[room:]: notes.append("redo: day %d (sent back) waits for another night: one redo for every two new episodes" % d)
+        front = redo[:room]
+        for d in front: notes.append("redo: day %d (sent back) renders first, before the night's new episodes" % d)
+        for d in redo[room:]: notes.append("redo: day %d (sent back) waits for another night: one redo a night" % d)
+        days = front + days
     return days, notes
 
 
@@ -872,13 +872,13 @@ def _selftest_gap_order():
     assert days == [2054, 2055, 2056], "no gap list: three continuity days"
     assert 2053 not in plan(led, 9, gaps=gaps, free=100 * gb, start=2054)[0], "nothing older than the takeover day is a continuity day"
     # 2 Oct 2026, the real night: 2081 sent back and set to re-render (render.redo_day stamps `reset`), 2084 and 2085 new.
-    # It was the oldest waiting day, so it took slot 1 and 2085 lost its place. It goes after the new days, on top of them.
+    # It took slot 1 and 2085 lost its place. Kevin, 7 Oct 2026: the redo goes FIRST, and the new days still all render.
     rd = {"r1": {"day": 2081, "date": "2026-02-10", "seq": 1, "size": 1 * gb, "status": "new", "reset": "2 Oct 2026: Learnings cut from the wrong section"},
           "r2": {"day": 2081, "date": "2026-02-10", "seq": 2, "size": 1 * gb, "status": "new", "reset": "2 Oct 2026: Learnings cut from the wrong section"},
           "n1": {"day": 2084, "date": "2026-02-13", "seq": 1, "size": 1 * gb, "status": "new"}, "n2": {"day": 2085, "date": "2026-02-14", "seq": 1, "size": 1 * gb, "status": "new"},
           "n3": {"day": 2086, "date": "2026-02-15", "seq": 1, "size": 1 * gb, "status": "new"}}
     days, notes = plan(rd, 2, gaps=set(), free=100 * gb, start=2054)
-    assert days == [2084, 2085, 2081], "a sent-back day renders after the night's new episodes, never instead of one: %s" % days
+    assert days == [2081, 2084, 2085], "a sent-back day renders first, never instead of a new one: %s" % days
     assert any("redo: day 2081" in n for n in notes), notes
     assert plan({k: v for k, v in rd.items() if k[0] == "r"}, 2, gaps=set(), free=100 * gb, start=2054)[0] == [2081], "with nothing new waiting the redo still renders"
     assert 2081 in plan(rd, 10 ** 6, gaps=set(), free=100 * gb, start=2054)[0], "the night still reaches it (content_report.stuck_sent_back asks this way)"
@@ -886,23 +886,24 @@ def _selftest_gap_order():
     # review, 2 Oct 2026: five sent-back days must not make a seven-render night; a sent-back gap day stays a gap day
     five = dict(rd, **{"x%d" % d: {"day": d, "date": "2026-02-01", "seq": 1, "size": 1 * gb, "status": "new", "reset": "x"} for d in (2075, 2077, 2079, 2080)})
     days, notes = plan(five, 2, gaps=set(), free=100 * gb, start=2054)
-    assert days == [2084, 2085, 2075], "one redo a night at two slots, the oldest first: %s" % days
+    assert days == [2075, 2084, 2085], "one redo a night at two slots, the oldest first: %s" % days
     assert sum("waits for another night" in n for n in notes) == 4, notes
     assert set(plan(five, 10 ** 6, gaps=set(), free=100 * gb, start=2054)[0]) >= {2075, 2077, 2079, 2080, 2081}, "every redo day is still reachable"
     only_redo = {k: v for k, v in five.items() if v.get("reset")}
     assert plan(only_redo, 2, gaps=set(), free=100 * gb, start=2054)[0] == [2075, 2077, 2079], "slots no new day filled go to waiting redo days"
     # Kevin, 2 Oct 2026: three a night. With a redo waiting it takes the spare slot (two new and the redo, three renders);
     # with none, three new days. Never fewer than two new.
-    assert plan(rd, 3, gaps=set(), free=100 * gb, start=2054)[0] == [2084, 2085, 2081], "at three slots the redo takes the spare: %s" % plan(rd, 3, gaps=set(), free=100 * gb, start=2054)[0]
+    assert plan(rd, 3, gaps=set(), free=100 * gb, start=2054)[0] == [2081, 2084, 2085], "at three slots the redo takes the spare, first: %s" % plan(rd, 3, gaps=set(), free=100 * gb, start=2054)[0]
     assert plan({k: v for k, v in rd.items() if k[0] == "n"}, 3, gaps=set(), free=100 * gb, start=2054)[0] == [2084, 2085, 2086], "no redo waiting: three new days"
-    assert plan(five, 3, gaps=set(), free=100 * gb, start=2054)[0] == [2084, 2085, 2075] and plan(five, 4, gaps=set(), free=100 * gb, start=2054)[0] == [2084, 2085, 2075, 2077]
-    assert plan(rd, 1, gaps=set(), free=100 * gb, start=2054)[0] == [2084, 2081]
+    assert plan(five, 3, gaps=set(), free=100 * gb, start=2054)[0] == [2075, 2084, 2085] and plan(five, 4, gaps=set(), free=100 * gb, start=2054)[0] == [2075, 2084, 2085, 2086], \
+        "one redo a night at any slot count: %s" % plan(five, 4, gaps=set(), free=100 * gb, start=2054)[0]
+    assert plan(rd, 1, gaps=set(), free=100 * gb, start=2054)[0] == [2081, 2084]
     # an older redo whose footage would not come down goes behind a younger one; two that both failed take turns
     stuck = dict(five, x2075=dict(five["x2075"], pull_failed="2026-10-01T23:10:00"))
-    assert plan(stuck, 2, gaps=set(), free=100 * gb, start=2054)[0] == [2084, 2085, 2077], "the younger redo passes the one whose pull failed"
+    assert plan(stuck, 2, gaps=set(), free=100 * gb, start=2054)[0] == [2077, 2084, 2085], "the younger redo passes the one whose pull failed"
     both = dict(stuck, x2077=dict(five["x2077"], pull_failed="2026-10-02T23:10:00"), x2079=dict(five["x2079"], pull_failed="2026-09-30T23:10:00"),
                 x2080=dict(five["x2080"], pull_failed="2026-10-02T23:20:00"), r1=dict(rd["r1"], pull_failed="2026-10-02T23:30:00"))
-    assert plan(both, 2, gaps=set(), free=100 * gb, start=2054)[0] == [2084, 2085, 2079], "all failed: the least recently failed goes first"
+    assert plan(both, 2, gaps=set(), free=100 * gb, start=2054)[0] == [2079, 2084, 2085], "all failed: the least recently failed goes first"
     import tempfile as _tf
     wk = _tf.mkdtemp(); lp = {"c": {"day": 2081, "size": 10 ** 15, "status": "new", "reset": "x"}}
     # save_ledger and clear_leftovers are faked: unfaked, a short disk makes pull() run the REAL clean-up, which empties
@@ -928,8 +929,8 @@ def _selftest_gap_order():
         assert pulled_in_queue(full) >= MAX_PULLED and next_exit(full, 2084, wk, pull_fn=lambda led, key, work: asked.append(key)) == 0 and asked == [], \
             "a full pull queue is a 0 with nothing pulled: the render that follows drains it"
     gapredo = dict(rd, g={"day": 1808, "date": "2025-05-13", "seq": 1, "size": 18 * gb, "status": "new", "reset": "x"})
-    assert plan(gapredo, 2, gaps={1799, 1808}, free=100 * gb, start=2054)[0] == [2084, 1808, 2081], "a sent-back gap day takes its gap slot, as any gap day"
-    assert plan(gapredo, 2, gaps={1799, 1808}, free=20 * gb, start=2054)[0] == [2084, 2085, 2081], "and still waits whole when its clip does not fit the disk"
+    assert plan(gapredo, 2, gaps={1799, 1808}, free=100 * gb, start=2054)[0] == [2081, 2084, 1808], "a sent-back gap day takes its gap slot, as any gap day"
+    assert plan(gapredo, 2, gaps={1799, 1808}, free=20 * gb, start=2054)[0] == [2081, 2084, 2085], "and still waits whole when its clip does not fit the disk"
     assert choose_next(led, day=2054) == "b" and choose_next(led, day=1808) == "g2" and choose_next(led, day=1900) is None
     pf = os.path.join(tempfile.gettempdir(), "od-gap-pause-%d" % os.getpid())
     assert not gaps_paused(pf); open(pf, "w").write("Kevin 15 Sep 2026\n"); assert gaps_paused(pf); os.remove(pf)

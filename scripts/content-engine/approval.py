@@ -14,6 +14,10 @@ Nothing is published by this script, ever.
                   episode record: Approved -> "Approved for Publishing";
                   Rejected / Changes requested -> his words into Feedback.
                   The publishing step reads "Approved for Publishing".
+                  Then (7 Oct 2026) a card he sent back is queued for its
+                  redo within the hour (render.queue_sent_back), and a card
+                  he approved with edits has them recorded once a receipt
+                  says they were made (revise_minor_edits).
   card --day N    print the write-up for one episode (nothing created).
   report          one line for the morning digest.
 
@@ -44,7 +48,8 @@ AGENT_TM = "recRcy1Edas6rGaaF"          # Team Members row "AI Content Engine" (
 BUSINESS_PERSONAL = "reclAPC2vMx2Umuzb"  # every Runpreneur task on the board sits under Personal (read 3 Sep 2026)
 TF = {"name": "fldgFjGBw6bTKJFCD", "desc": "fldRGhBQViKZKtkQ6", "status": "fldx4qCw17UfrKpaN", "team": "flduCtmQGpOA4eWaj",
       "priority": "fldS21RwmwOqt71LI", "due": "fld7XP8w8kbxfETV4", "business": "fldLu1Y4GzyWcDoxr", "notes": "fldR7apBzSp3oxFxz",
-      "sentBy": "fld30Yw8SWYVp049g", "outcome": "fldrHBSr6qoUfaKuZ", "feedback": "fldtI7SJI4gEohHD1", "approvedAt": "fldr4Mvf2RzKvhZhi"}
+      "sentBy": "fld30Yw8SWYVp049g", "outcome": "fldrHBSr6qoUfaKuZ", "feedback": "fldtI7SJI4gEohHD1", "approvedAt": "fldr4Mvf2RzKvhZhi",
+      "agentOutput": "fldzswp8fx6PqpLQ5"}   # Agent Output, as agent-dispatch's AF["agentOutput"]
 STATUS_READY, STATUS_QC, STATUS_APPROVED = "Copies in Progress", "Quality Control", "Approved for Publishing"
 APPROVED = ("Approved as-is", "Approved with minor edits")
 SOCIALS = "Facebook, Instagram, LinkedIn, Threads, TikTok and YouTube Shorts"
@@ -348,10 +353,109 @@ def refresh_card(day, receipt=None):
     print("episode %d: card %s refreshed%s" % (day, e["task"], " with receipt, verdict cleared" if receipt else ""))
 
 
+def mark(day, **keys):
+    """Re-read the state, set (or with None, drop) only these keys on one episode, save. A step that runs after the
+    sync must not save a copy read before it and undo what another step wrote (publish.mark_card, 30 Sep 2026)."""
+    state = load_state(); e = state.setdefault(str(day), {})
+    for k, v in keys.items():
+        if v is None: e.pop(k, None)
+        else: e[k] = v
+    save_state(state)
+
+
+def live_verdict(task):
+    """(Approval Outcome, Approval Feedback) as the card holds them in Airtable now."""
+    t = watch._airtable("GET", TASKS_API + "/" + task + "?returnFieldsByFieldId=true")["fields"]
+    outcome = t.get(TF["outcome"])
+    return (outcome.get("name") if isinstance(outcome, dict) else outcome) or "", t.get(TF["feedback"]) or ""
+
+
+EDITS_APPLIED = "EDITS APPLIED:"   # agent-dispatch's EDITS_APPLIED_MARK: `revise` writes it, `complete` refuses a with-edits card without it
+
+
+def with_edits_block(original, lines, stamp):
+    """The text Kevin approved with what was done for each of his edits, placed before its closing line (the line the
+    queue reads must stay last)."""
+    block = "Your edits, acted on (%s):\n%s" % (stamp, "\n".join("- %s → %s" % (p, c) for p, c in lines))
+    i = (original or "").rfind(CLOSING)
+    if i < 0: return (original or "").rstrip() + "\n\n" + block
+    return original[:i].rstrip() + "\n\n" + block + "\n\n" + original[i:]
+
+
+def revise_minor_edits(state=None, root=None, episodes=None, read=None, run=None, now=None):
+    """An episode Kevin approved WITH EDITS publishes on his yes, but agent-dispatch refuses to complete its card until
+    `revise` records the edit (2090, 6 Oct 2026: out on every section, card open since). Nothing in the engine acts on
+    a minor edit by itself, so this never guesses that one was made. Whoever made it leaves the engine's acted-on
+    marker, a receipt at content_engine_resubmit/<day>.md with one '- <his point> → <what was done>' line per point,
+    and this runs `revise` with the text he approved plus those lines; the hourly card close then completes the card.
+    The receipt goes to <day>.md.sent once recorded. Returns the days revised."""
+    import render
+    state = load_state() if state is None else state
+    root = root or render.RESUBMIT_DIR
+    read = read or (lambda task: watch._airtable("GET", TASKS_API + "/" + task + "?returnFieldsByFieldId=true")["fields"])
+    run = run or render.dispatch_run
+    if episodes is None:
+        import publish
+        episodes = publish.load_state()
+    now, done = now or dt.datetime.now(), []
+    for d, e in sorted(state.items(), key=lambda x: str(x[0])):
+        if not (str(d).isdigit() and isinstance(e, dict) and e.get("task") and e.get("verdict") == "approved"
+                and e.get("outcome") == "Approved with minor edits" and (e.get("feedback") or "").strip()): continue
+        pub = episodes.get(str(d)) or {}
+        if pub.get("card_closed"): continue
+        path = os.path.join(root, "%s.md" % d)
+        if not os.path.exists(path):
+            if pub.get("card_close_refused"):
+                print("episode %s: approved with your edits; its card stays open until a receipt of what was done is written to %s" % (d, path))
+            continue
+        lines, points = render.receipt_lines(open(path).read()), render.feedback_points(e["feedback"])
+        if not lines or len(lines) < len(points):
+            print("episode %s: the receipt at %s answers %d point(s) but Kevin made %d; one '- <his point> → <what was done>' line each"
+                  % (d, path, len(lines), len(points))); continue
+        if (e.get("revise_refused") or {}).get("receipt") == os.path.getmtime(path):
+            print("episode %s: edits not recorded, the same receipt was refused before: %s" % (d, e["revise_refused"].get("why", "")[-160:])); continue
+        try:
+            t = read(e["task"])
+        except (Exception, SystemExit) as ex:
+            print("episode %s: card %s not read this run (%s); its edits are recorded next run" % (d, e["task"], str(ex)[-160:])); continue
+        outcome = t.get(TF["outcome"]); outcome = outcome.get("name") if isinstance(outcome, dict) else outcome
+        if outcome != "Approved with minor edits":
+            print("episode %s: card %s reads %r now, not approved with edits; nothing recorded" % (d, e["task"], outcome)); continue
+        if EDITS_APPLIED in (t.get(TF["notes"]) or ""):
+            os.replace(path, path + ".sent"); print("episode %s: card %s already has its edits recorded" % (d, e["task"])); continue
+        revised = with_edits_block(t.get(TF["agentOutput"]) or "", lines, now.strftime("%-d %b %Y"))
+        with tempfile.NamedTemporaryFile("w", suffix=".md", delete=False) as fh:
+            fh.write(revised); tmp = fh.name
+        try: code, out = run("revise", e["task"], "--output-file", tmp)
+        finally: os.remove(tmp)
+        if code:
+            print("ERROR: episode %s: card %s edits NOT recorded: %s" % (d, e["task"], out[-300:]))
+            mark(d, revise_refused={"receipt": os.path.getmtime(path), "why": out[-300:]}); continue
+        os.replace(path, path + ".sent"); mark(d, revise_refused=None); done.append(int(d))
+        print("episode %s: card %s has your edits recorded; it closes once the episode is out everywhere" % (d, e["task"]))
+    return done
+
+
+def after_verdicts():
+    """What the sync does with the verdicts it has read (Kevin, 7 Oct 2026: fixes are carried out, not handed back): a
+    card he sent back is queued for its redo (render.queue_sent_back), and a card he approved with edits has them
+    recorded once a receipt says they were made. Neither may end the run: `approval.py sync || exit 1` stops the
+    hourly and the nightly job, so a failure here is printed and the run goes on."""
+    for name in ("queue_sent_back", "revise_minor_edits"):
+        try:
+            if name == "queue_sent_back":
+                import render
+                render.queue_sent_back()
+            else:
+                revise_minor_edits()
+        except (Exception, SystemExit) as ex:                     # noqa: BLE001
+            print("ERROR: approval sync: %s did not finish this run (%s)" % (name, str(ex)[-300:]))
+
+
 def sync():
     state = load_state()
     open_cards = {d: e for d, e in state.items() if e.get("task") and not e.get("verdict")}
-    if not open_cards: print("approval sync: no open cards"); return
+    if not open_cards: print("approval sync: no open cards")
     for day, e in open_cards.items():
         t = watch._airtable("GET", TASKS_API + "/" + e["task"] + "?returnFieldsByFieldId=true")["fields"]
         outcome = t.get(TF["outcome"])
@@ -364,7 +468,8 @@ def sync():
         watch._airtable("PATCH", watch.API + "/" + e["record"], {"fields": patch})
         e.update({"verdict": verdict, "outcome": outcome, "feedback": (t.get(TF["feedback"]) or ""), "synced": dt.datetime.now().isoformat(timespec="seconds")})
         print("episode %s: %s (%s)" % (day, verdict, outcome))
-    save_state(state)
+    if open_cards: save_state(state)
+    after_verdicts()
 
 
 def report():
