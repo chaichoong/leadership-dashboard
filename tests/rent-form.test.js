@@ -96,7 +96,7 @@ print(json.dumps({"answers": built["answers"], "missing": built["missing"], "pla
 out = {}
 for key, arrears in (("high", HIGH), ("unknown", None), ("soon", dict(LOW, asAt="2026-10-22"))):
     built = fp.build(TENANCY, TENANT, PROP, LANDLORD, arrears=arrears)
-    out[key] = {"answers": {q: a for q, a, _s in built["answers"]}, "steps": built["plan"]["steps"][:3]}
+    out[key] = {"answers": {q: a for q, a, _s in built["answers"]}, "steps": built["plan"]["steps"][:3], "plan": built["plan"]}
 print(json.dumps(out))`);
     // "soon": the next rent is due in 3 days, so a "No" would be out of date before Kevin could use it.
     for (const k of ['high', 'unknown', 'soon']) {
@@ -105,6 +105,10 @@ print(json.dumps(out))`);
       // The robot opens the form and waits for Kevin until the rent page: no type or arrears click of its own.
       expect(r[k].steps.map(s => s.do)).toEqual(['goto', 'click', 'kevin']);
       expect(r[k].steps[2].untilSelector).toBe('#f-rentAmount');
+      // His step mid-plan is his own statement to the DWP, so the window opens on it (7 Oct 2026: a
+      // step of Kevin's mid-plan is refused unless it is his sign-in, a code or his own statement).
+      expect(r[k].steps[2].say).toMatch(/your own statement to the DWP/);
+      expect(() => b.assertHandoverPlan(r[k].plan)).not.toThrow();
     }
     expect(r.high.steps[2].say).toContain("£1,800.00 unpaid: 2 months' rent due since the tenancy began");
     expect(r.unknown.answers['Type of payment']).toContain('the rent check could not count the arrears');

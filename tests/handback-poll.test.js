@@ -116,6 +116,30 @@ describe('in-flight guard — two runs must never work one hand-back', () => {
     const r = gate(queueFile(d, { changesRequested: 2 }), logs);
     expect(r.decision).toBe('work');
   });
+
+  // 7 Oct 2026: send-locks/ is where send-email.py and send-text.py keep one file per send. It never
+  // gets a report.json, so every send read as a run in flight for ten minutes.
+  it('the send-locks folder is never a run, however fresh', () => {
+    const d = tmp(); const logs = join(d, 'logs');
+    runDir(logs, 'send-locks', { ageMinutes: 0 });
+    expect(gate(queueFile(d, { approvedHandbacks: 1 }), logs).decision).toBe('work');
+  });
+
+  // The sign-in pickup's own check (signin-pickup-run.sh): every other run counts, another pickup's never does.
+  it('`inflight` names a run in flight (exit 3) and skips the suffix it is told to', () => {
+    const d = tmp(); const logs = join(d, 'logs');
+    const inflight = (...extra) => {
+      try { return { code: 0, out: execFileSync('python3', [POLL, 'inflight', '--dispatch-logs', logs, ...extra], { encoding: 'utf8' }).trim() }; }
+      catch (e) { return { code: e.status, out: String(e.stdout || '').trim() }; }
+    };
+    expect(inflight()).toEqual({ code: 0, out: '' });                 // no log folder yet: nothing in flight
+    runDir(logs, 'send-locks', { ageMinutes: 0 });
+    runDir(logs, '20261007-002000-signin', { ageMinutes: 0 });
+    expect(inflight('--ignore-suffix=-signin')).toEqual({ code: 0, out: '' });
+    expect(inflight()).toEqual({ code: 3, out: '20261007-002000-signin' });
+    runDir(logs, '20261007-003033', { ageMinutes: 1 });
+    expect(inflight('--ignore-suffix=-signin')).toEqual({ code: 3, out: '20261007-003033' });
+  });
 });
 
 describe('controls — a broken read must never read as a quiet queue', () => {

@@ -256,6 +256,17 @@ def read_site(host, entry):
         fh.write(json.dumps(line) + '\\n')
     return line
 ka.read_site = read_site
+# The waiting read (agent-dispatch.py signin-waiting --no-walk), stubbed: by default a task of real
+# work waits on each site, so the sign-in rule above is what decides (7 Oct 2026).
+WORK = {'host': None, 'tasks': [{'id': 'recWork', 'name': 'Read the bill'}]}
+groups = arg.get('groups', [dict(WORK, host='www.edfenergy.com'), dict(WORK, host='www.topcashback.co.uk')])
+reads = []
+def waiting_groups():
+    reads.append(1)
+    if arg.get('waitingBroken'): raise RuntimeError('signin-waiting failed: Airtable unreachable')
+    return groups
+ka.waiting_groups = waiting_groups
+# The read before 7 Oct 2026, stubbed as well: a revert of that change must never reach Airtable from a test.
 ka.already_waiting = lambda host: False
 created = []
 ka.create_task = lambda fields, dry_run: created.append(fields[ka.F['name']]) or {'created': True}
@@ -266,7 +277,7 @@ buf = io.StringIO()
 with contextlib.redirect_stdout(buf):
     code = ka.cmd_run()
 print('---JSON---'); print(json.dumps({'code': code, 'created': created, 'said': json.loads(buf.getvalue()),
-  'status': json.load(open(ka.STATUS))['sites']}))`, { ledger, dir, ...opts });
+  'status': json.load(open(ka.STATUS))['sites'], 'reads': len(reads)}))`, { ledger, dir, ...opts });
   };
 
   it('raises no card for EDF, still raises one for a site that held and then lapsed, and says so', () => {
@@ -289,6 +300,42 @@ print('---JSON---'); print(json.dumps({'code': code, 'created': created, 'said':
     const got = run(BEFORE, { broken: true });
     expect(got.created).toEqual(['SIGN-IN: EDF Energy session lapsed', 'SIGN-IN: TopCashback session lapsed']);
     expect(got.status[EDF].notHoldingError).toBe('ledger unreadable');
+  });
+
+  // 7 Oct 2026: 46 keep-alive cards in 31 days, and 81 of Kevin's 109 sign-ins handed no task to a
+  // robot. A signed-out site is asked for only when work waits on it.
+  const ONE_SIGNIN = BEFORE.filter(e => e !== EDF_LINES[1]);    // EDF's rule no longer excuses it
+  it('a signed-out site with no task waiting raises no card: the state is recorded and nothing is asked', () => {
+    const got = run(ONE_SIGNIN, { groups: [] });
+    expect(got.created).toEqual([]);
+    expect(got.status[TCB].state).toBe('signed-out');
+    expect(got.status[TCB].nothingWaiting).toBe(true);
+    expect(got.status[TCB].task).toBe('not raised: no task is waiting on this site');
+    expect(got.said.nothingWaiting).toEqual(['EDF Energy', 'TopCashback']);
+    expect(got.reads).toBe(1);                                   // one read for the whole run
+  });
+
+  it('a task waiting on the site raises its card, naming that task; another site\'s task does not', () => {
+    const got = run(ONE_SIGNIN, { groups: [{ host: TCB, tasks: [{ id: 'recQuote', name: 'Get the Chedburgh quote' }] }] });
+    expect(got.created).toEqual(['SIGN-IN: TopCashback session lapsed']);
+    expect(got.status[TCB].waiting).toEqual(['recQuote']);
+    expect(got.status[EDF].nothingWaiting).toBe(true);
+  });
+
+  it('the keep-alive\'s own open card is not work: alone it raises nothing, beside work it is the one card', () => {
+    const own = { id: 'recOwn', name: 'SIGN-IN: TopCashback session lapsed' };
+    expect(run(ONE_SIGNIN, { groups: [{ host: TCB, tasks: [own] }] }).created).toEqual([]);
+    const both = run(ONE_SIGNIN, { groups: [{ host: TCB, tasks: [own, { id: 'recQuote', name: 'Get the Chedburgh quote' }] }] });
+    expect(both.created).toEqual([]);
+    expect(both.status[TCB].task).toBe('already waiting');
+  });
+
+  it('a waiting read that fails raises nothing and says NOT CHECKED, never a quiet board', () => {
+    const got = run(ONE_SIGNIN, { waitingBroken: true });
+    expect(got.created).toEqual([]);
+    expect(got.status[TCB].task.error).toMatch(/signin-waiting failed/);
+    expect(got.said.notChecked).toEqual(['EDF Energy', 'TopCashback']);
+    expect(got.said.nothingWaiting).toEqual([]);
   });
 
   it('the reason names his sign-ins by the London day, and all four for a site that has held', () => {

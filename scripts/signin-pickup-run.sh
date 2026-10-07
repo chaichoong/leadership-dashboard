@@ -1,7 +1,8 @@
 #!/bin/bash
 # Sign-in pickup — started by the Robot sign-in app once Kevin has quit the LAST
-# sign-in window, wrapped by job-queue.py run so it holds the lock like every
-# other job.
+# sign-in window, wrapped by job-queue.py run. LOCK-EXEMPT since 7 Oct 2026
+# (lockExempt in job-schedule.json): it never queues for the lock, and keeps the
+# guards below instead.
 #
 # WHY (Kevin, 4 Sep 2026): a task that met a signed-out site sat in his queue
 # as "SIGN-IN NEEDED" until he signed in, approved, and the 30-minute poller
@@ -42,6 +43,8 @@
 #   SIGNIN_PICKUP_RUNS      parent of the per-run RUNDIR
 #   SIGNIN_PICKUP_CLAUDE    the claude binary
 #   SIGNIN_PICKUP_TOKEN     the OAuth token file
+#   SIGNIN_PICKUP_WAIT_S    how long it waits for a run in flight or another pickup (default 2700)
+#   SIGNIN_PICKUP_POLL_S    how often it looks again while it waits (default 15)
 set -uo pipefail
 . "$(dirname "$0")/agent-tools.sh"
 CLAUDE="${SIGNIN_PICKUP_CLAUDE:-/Users/kevinbrittain/.local/bin/claude}"
@@ -50,11 +53,9 @@ LOG_DIR="${SIGNIN_PICKUP_LOG_DIR:-/Users/kevinbrittain/knowledge-os/logs/signin-
 LOG="$LOG_DIR/runs.log"
 PENDING="${SIGNIN_PICKUP_DIR:-$LOG_DIR}/pending.jsonl"
 TOKEN_FILE="${SIGNIN_PICKUP_TOKEN:-/Users/kevinbrittain/.config/od/claude_oauth_token}"
+RUNS="${SIGNIN_PICKUP_RUNS:-$HOME/knowledge-os/logs/agent-dispatch}"
 mkdir -p "$LOG_DIR"
 cd "$REPO" || { echo "ERROR: repo not found at $REPO" >&2; exit 1; }
-
-RUNDIR="${SIGNIN_PICKUP_RUNS:-$HOME/knowledge-os/logs/agent-dispatch}/$(date +%Y%m%d-%H%M%S)-signin"
-mkdir -p "$RUNDIR"
 
 # One line in the log and a non-zero exit: job-queue.py turns that into the
 # "failed" outcome the Estate status tab reports. pending.jsonl is untouched
@@ -64,6 +65,76 @@ fail() {
   echo "signin-pickup FAILED: $1 — see $LOG" >&2
   exit 1
 }
+
+# Nothing handed back: say so now, before any wait below.
+if [ $# -eq 0 ] && [ ! -s "$PENDING" ]; then
+  echo "===== signin-pickup $(date) nothing pending =====" >> "$LOG"
+  echo "signin-pickup: nothing was handed back since the last run" | tee -a "$LOG"; exit 0
+fi
+
+# --- never beside another dispatch run (lock-exempt since 7 Oct 2026) -------
+# This run used to wait for the job queue lock, and the nightly render held it
+# a median 240 minutes (7 Sep to 7 Oct): five pickups gave up at 120 minutes and
+# Kevin's night sign-ins ran out with nothing picked up. It is lock-exempt now,
+# like handback-poll, and what stops a double run is the same: it waits while
+# another dispatch run is in flight (handback-poll.py inflight_run, the poll's
+# own gate), it keeps its own one-pickup-at-a-time lock (a pickup started while
+# one is working waits for it, then works only what still waits), and the
+# robot profile opens in one place at a time (agent-browser.js). It waits at
+# most SIGNIN_PICKUP_WAIT_S, then stops with pending.jsonl kept: the 30-minute
+# poll works the reopened tasks. Its own run folder is made only after the
+# wait, so it never waits on itself.
+WAIT_S="${SIGNIN_PICKUP_WAIT_S:-2700}"
+POLL_S="${SIGNIN_PICKUP_POLL_S:-15}"
+WAIT_FROM=$(date +%s)
+waited_out() { [ $(( $(date +%s) - WAIT_FROM )) -ge "$WAIT_S" ]; }
+skip_waited() {
+  echo "===== signin-pickup $(date) SKIPPED: $1 after $(( ($(date +%s) - WAIT_FROM) / 60 )) min; pending kept, the 30-minute poll works the reopened tasks =====" >> "$LOG"
+  echo "signin-pickup: skip — $1; the handed-back tasks stay pending and the 30-minute poll works them"
+  exit 0
+}
+# mkdir is atomic; the holder's pid says whether a lock left behind is live, and
+# a dead holder's lock is taken over (same shape as roy-assistant-run.sh). A lock
+# younger than a minute with no pid yet is a holder between its mkdir and its pid.
+# A lock older than 8 hours is debris whatever its pid says: job-queue.py stops any
+# run at 480 minutes, and a pickup killed outright, or a Mac restarted mid-run,
+# leaves a pid the system may hand to another process (review, 7 Oct 2026).
+RUNLOCK="$LOG_DIR/run.lock"
+HOLDER=""
+take_runlock() {
+  if mkdir "$RUNLOCK" 2>/dev/null; then echo $$ > "$RUNLOCK/pid"; return 0; fi
+  HOLDER=$(cat "$RUNLOCK/pid" 2>/dev/null || echo "")
+  if [ -n "$(find "$RUNLOCK" -maxdepth 0 -mmin +480 2>/dev/null)" ]; then
+    rm -rf "$RUNLOCK"
+    if mkdir "$RUNLOCK" 2>/dev/null; then echo $$ > "$RUNLOCK/pid"; return 0; fi
+    return 1
+  fi
+  if [ -n "$HOLDER" ] && kill -0 "$HOLDER" 2>/dev/null; then return 1; fi
+  if [ -z "$HOLDER" ] && [ -n "$(find "$RUNLOCK" -maxdepth 0 -mmin -1 2>/dev/null)" ]; then return 1; fi
+  rm -rf "$RUNLOCK"
+  if mkdir "$RUNLOCK" 2>/dev/null; then echo $$ > "$RUNLOCK/pid"; return 0; fi
+  return 1
+}
+until take_runlock; do
+  waited_out && skip_waited "another sign-in pickup (pid ${HOLDER:-not yet written}) was still working"
+  sleep "$POLL_S"
+done
+trap 'rm -rf "$RUNLOCK"' EXIT
+SAID_WAIT=""
+while :; do
+  BUSY=$(/usr/bin/python3 "$REPO/scripts/handback-poll.py" inflight --dispatch-logs "$RUNS" --ignore-suffix=-signin 2>"$LOG_DIR/inflight.err")
+  IRC=$?
+  [ $IRC -eq 0 ] && break
+  [ $IRC -eq 3 ] || fail "the in-flight check failed ($(tail -c 200 "$LOG_DIR/inflight.err" | tr '\n' ' '))"
+  waited_out && skip_waited "dispatch run $BUSY was still in flight"
+  if [ -z "$SAID_WAIT" ]; then
+    echo "===== signin-pickup $(date) waiting: dispatch run $BUSY is in flight =====" >> "$LOG"; SAID_WAIT=1
+  fi
+  sleep "$POLL_S"
+done
+
+RUNDIR="${SIGNIN_PICKUP_RUNS:-$HOME/knowledge-os/logs/agent-dispatch}/$(date +%Y%m%d-%H%M%S)-signin"
+mkdir -p "$RUNDIR"
 
 for HOST in "$@"; do
   if ! /usr/bin/python3 "$REPO/scripts/agent-dispatch.py" signin-done --site "$HOST" > "$RUNDIR/signin-done-$HOST.json" 2>"$RUNDIR/signin-done.err"; then
@@ -187,7 +258,7 @@ RUNDIR is $RUNDIR and STEP 1 IS ALREADY DONE — $RUNDIR/queue.json was written 
 
 WORK ONLY THESE TASK IDS: $IDS. Ignore every other item in the worklist. For each one, read its Notes: the last line says SIGNED IN (or BLOCKER CLEARED (SIGN-IN ...)) and tells the agent to carry on from where it stopped. An item whose Approval Outcome is an Approved kind (a carry-out a sign-in woke: its last note says BLOCKER CLEARED (SIGN-IN ...)) is CARRIED OUT and closed with complete (or complete --keep-open when the approval says it stays open), NEVER submitted: a submit wipes Kevin's approval and asks him again. If its site is still signed out, record it with python3 scripts/agent-dispatch.py block TASKID --kind SIGN-IN --subject <host> --why \"<what you saw>\" and stop. The session is live NOW and may lapse within the hour, so do the browser steps first. FIRST COMMAND for each site: node scripts/agent-browser.js session --site <host> (it walks the sign-in door and prints signedIn true/false with the landing URL; never judge a sign-in page yourself: the WebFiling entry always shows a Sign in page before the walk). If signedIn is true, go straight on with node scripts/agent-browser.js read/prepare (screenshots attached), then (for an item with no approval yet) submit the finished work through agent-dispatch.py submit as the skill specifies. Never run agent-browser.js login: that window is Kevin's step only. Never type a password, code or card detail. Work them in the order given: short-session sites (GOV.UK, HMRC) come first because their sessions lapse within the hour. If a site is STILL signed out when you look, say so in the output with the single line SIGN-IN NEEDED: <site> (<login url>) and stop.
 
-Everything else in the skill applies in full: the gate sits BEFORE the action; tier-1 labelling and --tier1 on tier-1 work; the carry-out closing line; step 5's report.json in $RUNDIR; step 7 (verify) is mandatory. Do not take the queue lock — this run already holds it. Do not edit, commit or push code; file anything needing a code change via scripts/findings.py. Working files go under $RUNDIR/TASKID/ only. End with at most ten lines of counts." \
+Everything else in the skill applies in full: the gate sits BEFORE the action; tier-1 labelling and --tier1 on tier-1 work; the carry-out closing line; step 5's report.json in $RUNDIR; step 7 (verify) is mandatory. Do not take the queue lock — this run is lock-exempt (7 Oct 2026) and must never queue for it; it started only once no other dispatch run was in flight. Do not edit, commit or push code; file anything needing a code change via scripts/findings.py. Working files go under $RUNDIR/TASKID/ only. End with at most ten lines of counts." \
   --add-dir "$RUNDIR" \
   --settings "$AGENT_SETTINGS_FILE" \
   --permission-mode acceptEdits \

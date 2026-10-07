@@ -522,12 +522,16 @@ describe('the Robot sign-in app and its link', () => {
     expect(run).toMatch(/short-session sites/i);
     // Nothing pending is a clean exit, not a failure.
     expect(run).toMatch(/nothing was handed back since the last run/);
-    // On demand, so deliberately NOT in job-schedule.json (every entry there
-    // must have a cron and a lateness limit, and this has nothing to be late
-    // for). job-queue still gives it the lock: an unknown job is never skipped.
+    // On demand, so it has no cron and nothing to be late for. It is in job-schedule.json
+    // since 7 Oct 2026 only to be lockExempt: it waited behind the nightly render for the
+    // lock and gave up at 120 minutes five times (tests/job-queue.test.js proves it now
+    // starts while another job holds the lock).
     const sched = JSON.parse(readFileSync(join(ROOT, 'scripts', 'job-schedule.json'), 'utf8'));
-    expect(sched['signin-pickup']).toBeUndefined();
-    // and not in the scheduled-jobs list either, which is only for jobs on a clock.
+    expect(sched['signin-pickup']).toMatchObject({ mode: 'on-demand', lockExempt: true });
+    expect(sched['signin-pickup'].cron).toBeUndefined();
+    expect(sched['signin-pickup'].maxLateMinutes).toBeUndefined();
+    expect(run).toMatch(/this run is lock-exempt \(7 Oct 2026\) and must never queue for it/);
+    expect(run).not.toMatch(/this run already holds it/);
   });
 });
 
@@ -969,13 +973,16 @@ print('---JSON---'); print(json.dumps({'ids': ids, 'a': bool(a.get('signinReopen
 // told, and a pending.jsonl that must survive everything but a clean run.
 describe('the pickup run never loses a hand-back (11 Sep 2026)', () => {
   const { mkdtempSync: md, mkdirSync, writeFileSync: wf, existsSync, readFileSync: rf, chmodSync, cpSync } = require('node:fs');
-  const { spawnSync } = require('node:child_process');
+  const { spawnSync, spawn } = require('node:child_process');
   const RUN = join(ROOT, 'scripts', 'signin-pickup-run.sh');
   const LINE = JSON.stringify({ at: '2026-09-11T09:22:00Z', host: 'app.pingen.com', label: 'Pingen (letters)', tasks: ['recA', 'recB'] });
-  function stage({ rc = 0, paused = false, reopened = ['recA', 'recB'], midRun = '', noKey = false, pendingText = LINE + '\n', outcomes = {} } = {}) {
+  function stage({ rc = 0, paused = false, reopened = ['recA', 'recB'], midRun = '', noKey = false, pendingText = LINE + '\n', outcomes = {},
+                   inflight = '', finishAfter = 0, otherPickup = false, lockPid = 0, waitS = '', setup } = {}) {
     const d = md(join(tmpdir(), 'od-pickup-'));
     const repo = join(d, 'repo', 'scripts'); mkdirSync(repo, { recursive: true });
     cpSync(join(ROOT, 'scripts', 'agent-tools.sh'), join(repo, 'agent-tools.sh'));
+    // The real in-flight check (handback-poll.py inflight), run against this stage's own runs folder.
+    cpSync(join(ROOT, 'scripts', 'handback-poll.py'), join(repo, 'handback-poll.py'));
     wf(join(repo, 'agent-dispatch.py'), noKey ? `import json\nprint(json.dumps({"counts": {"worklist": 1}}))\n`
       : `import json, sys\nif sys.argv[1:2] == ["outcome"]:\n    print(json.dumps(json.loads(${JSON.stringify(JSON.stringify(outcomes))}).get(sys.argv[2], {"status": "Today", "outcome": None}))); sys.exit(0)\n`
         + `print(json.dumps({"signinReopened": ${JSON.stringify(reopened)}, "counts": {"worklist": 1}}))\n`);
@@ -985,18 +992,31 @@ describe('the pickup run never loses a hand-back (11 Sep 2026)', () => {
     chmodSync(claude, 0o755);
     mkdirSync(join(d, 'pending')); wf(join(d, 'pending', 'pending.jsonl'), pendingText);
     mkdirSync(join(d, 'logs')); mkdirSync(join(d, 'runs')); wf(join(d, 'token'), 'tok');
+    // Another dispatch run, writing now and with no report yet: the run the pickup must not start beside.
+    if (inflight) { mkdirSync(join(d, 'runs', inflight, 'recX'), { recursive: true }); wf(join(d, 'runs', inflight, 'recX', 'work.json'), '{}'); }
+    if (inflight && finishAfter) {
+      spawn('sh', ['-c', `sleep ${finishAfter}; echo '{}' > "$1"`, 'sh', join(d, 'runs', inflight, 'report.json')], { detached: true, stdio: 'ignore' }).unref();
+    }
+    // A pickup that crashed: its folder is fresh and has no report, and it never counts as a run in flight.
+    if (otherPickup) { mkdirSync(join(d, 'runs', '20261007-002000-signin')); wf(join(d, 'runs', '20261007-002000-signin', 'pending.jsonl'), LINE); }
+    if (lockPid) { mkdirSync(join(d, 'logs', 'run.lock')); wf(join(d, 'logs', 'run.lock', 'pid'), String(lockPid)); }
+    if (setup) setup(d);
     const env = { ...process.env, STAGE: d, PAUSED: paused ? '1' : '0', SIGNIN_PICKUP_REPO: join(d, 'repo'), SIGNIN_PICKUP_DIR: join(d, 'pending'),
-      SIGNIN_PICKUP_LOG_DIR: join(d, 'logs'), SIGNIN_PICKUP_RUNS: join(d, 'runs'), SIGNIN_PICKUP_CLAUDE: claude, SIGNIN_PICKUP_TOKEN: join(d, 'token') };
+      SIGNIN_PICKUP_LOG_DIR: join(d, 'logs'), SIGNIN_PICKUP_RUNS: join(d, 'runs'), SIGNIN_PICKUP_CLAUDE: claude, SIGNIN_PICKUP_TOKEN: join(d, 'token'),
+      SIGNIN_PICKUP_POLL_S: '1', ...(waitS ? { SIGNIN_PICKUP_WAIT_S: String(waitS) } : {}) };
+    const started = Date.now();
     const r = spawnSync('bash', [RUN], { env, encoding: 'utf8' });
+    const tookMs = Date.now() - started;
     const pending = existsSync(join(d, 'pending', 'pending.jsonl')) ? rf(join(d, 'pending', 'pending.jsonl'), 'utf8') : null;
     const log = existsSync(join(d, 'logs', 'runs.log')) ? rf(join(d, 'logs', 'runs.log'), 'utf8') : '';
     const calls = existsSync(join(d, 'claude-calls')) ? rf(join(d, 'claude-calls'), 'utf8').trim().split('\n').length : 0;
     const allowance = existsSync(join(d, 'allowance-calls')) ? rf(join(d, 'allowance-calls'), 'utf8') : '';
-    return { status: r.status, stdout: r.stdout, stderr: r.stderr, pending, log, calls, allowance };
+    const lockLeft = existsSync(join(d, 'logs', 'run.lock'));
+    return { status: r.status, stdout: r.stdout, stderr: r.stderr, pending, log, calls, allowance, tookMs, lockLeft, d };
   }
   it('a clean run (rc=0) works the ids and removes its lines from pending.jsonl', () => {
     const r = stage({ rc: 0 });
-    expect(r.status).toBe(0);
+    expect(r.status, r.stderr + r.log).toBe(0);
     expect(r.calls).toBe(1);
     expect(r.stdout).toMatch(/signin-pickup OK — worked: recA recB/);
     // trimmed IN PLACE to empty (never unlinked: a signin-done waiting on the lock holds this inode)
@@ -1060,6 +1080,62 @@ describe('the pickup run never loses a hand-back (11 Sep 2026)', () => {
     expect(r.calls).toBe(0);
     expect(r.pending).toBe(LINE + '\n{"at":"x","host":"app.pin');
     expect(r.log).toMatch(/FAILED .*pending\.jsonl is unreadable/);
+  });
+
+  // 7 Oct 2026: lock-exempt. It no longer waits for the queue lock, so it waits for what the
+  // lock used to keep away: another dispatch run working the task list, and another pickup.
+  it('a clean run takes its own pickup lock and gives it back', () => {
+    const r = stage({ rc: 0 });
+    expect(r.status).toBe(0);
+    expect(r.lockLeft).toBe(false);
+  });
+  it('waits while another dispatch run is in flight, then stops with pending.jsonl kept and no claude call', () => {
+    const r = stage({ inflight: '20261007-003033', waitS: 3 });
+    expect(r.status).toBe(0);
+    expect(r.calls).toBe(0);
+    expect(r.pending).toBe(LINE + '\n');
+    expect(r.tookMs).toBeGreaterThanOrEqual(1500);   // the wait is counted in whole seconds (date +%s)
+    expect(r.log).toMatch(/waiting: dispatch run 20261007-003033 is in flight/);
+    expect(r.log).toMatch(/SKIPPED: dispatch run 20261007-003033 was still in flight after 0 min; pending kept, the 30-minute poll works the reopened tasks/);
+    expect(r.stdout).toMatch(/signin-pickup: skip — dispatch run 20261007-003033 was still in flight/);
+    expect(r.lockLeft).toBe(false);
+  });
+  it('starts the moment the run in flight finishes, and works the tasks', () => {
+    const r = stage({ inflight: '20261007-003033', finishAfter: 2, waitS: 30 });
+    expect(r.status).toBe(0);
+    expect(r.calls).toBe(1);
+    expect(r.tookMs).toBeGreaterThanOrEqual(1500);
+    expect(r.stdout).toMatch(/signin-pickup OK — worked: recA recB/);
+    expect(r.pending).toBe('');
+  });
+  it('another pickup\'s folder is never a run in flight (its own lock covers pickups), and a dead pickup\'s lock is taken over', () => {
+    const r = stage({ otherPickup: true, lockPid: 999999, waitS: 3 });
+    expect(r.status).toBe(0);
+    expect(r.calls).toBe(1);
+    expect(r.tookMs).toBeLessThan(2500);
+  });
+  it('waits for a live pickup holding the lock, then stops with pending.jsonl kept', () => {
+    const r = stage({ lockPid: process.pid, waitS: 2 });
+    expect(r.status).toBe(0);
+    expect(r.calls).toBe(0);
+    expect(r.pending).toBe(LINE + '\n');
+    expect(r.log).toMatch(new RegExp(`SKIPPED: another sign-in pickup \\(pid ${process.pid}\\) was still working`));
+    // Its lock, not ours: left where it was.
+    expect(r.lockLeft).toBe(true);
+  });
+  it('a pickup lock older than eight hours is taken over even if its pid is alive (a reused pid, review 7 Oct 2026)', () => {
+    const { utimesSync } = require('node:fs');
+    const old = Date.now() / 1000 - 9 * 3600;
+    const r = stage({ lockPid: process.pid, waitS: 3, setup: (d) => utimesSync(join(d, 'logs', 'run.lock'), old, old) });
+    expect(r.status).toBe(0);
+    expect(r.calls).toBe(1);
+    expect(r.lockLeft).toBe(false);
+  });
+  it('with nothing handed back it says so at once, never waiting on a run in flight', () => {
+    const r = stage({ pendingText: '', inflight: '20261007-003033', waitS: 30 });
+    expect(r.status).toBe(0);
+    expect(r.tookMs).toBeLessThan(5000);
+    expect(r.stdout).toMatch(/nothing was handed back since the last run/);
   });
 });
 

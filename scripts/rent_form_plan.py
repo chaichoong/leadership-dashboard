@@ -192,9 +192,12 @@ def build(tenancy, tenant, prop, landlord, roy=None, place="", arrears=None):
         ]
     else:
         opening = [
-            {"do": "kevin", "say": f"Choose the type of payment and answer whether the tenant has missed 2 months or more "
-                                   f"of rent ({counted}). Give the reason if the form asks. Then press Continue until "
-                                   "the page asking for the rent opens.",
+            # "your own statement" (7 Oct 2026): a step of Kevin's mid-plan is refused unless it is his
+            # sign-in, a code, or his own statement (agent-browser.js assertHandoverPlan), and these
+            # three answers are his statements to the DWP, which the records cannot give.
+            {"do": "kevin", "say": f"Choose the type of payment, answer whether the tenant has missed 2 months or more "
+                                   f"of rent ({counted}), and give the reason if the form asks: all three are your own "
+                                   "statement to the DWP. Then press Continue until the page asking for the rent opens.",
              "untilSelector": "#f-rentAmount", "minutes": 15},
         ]
     steps = [

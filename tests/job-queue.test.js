@@ -269,26 +269,37 @@ describe('serialisation under real concurrency', () => {
     expect(queued.length).toBeGreaterThan(0);
   }, 60000);
 
-  // 29 Sep 2026: the sign-in pickup waited 30 minutes behind two Content Engine jobs while
-  // Kevin's hour-long sign-in ran down. It goes to the head of the waiting line, never ahead
-  // of the job already holding the lock.
-  it('a waiting signin-pickup goes ahead of jobs that queued before it, never ahead of the holder', async () => {
-    const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
-    // A throwaway HOME: a killed waiter writes a SKIPPED line to ~/knowledge-os/logs/<job>/runs.log,
+  // 7 Oct 2026: the sign-in pickup waited for the lock behind the nightly Content Engine render
+  // (median hold 240 minutes) and gave up at 120 minutes five times, so Kevin's night sign-ins ran
+  // out with nothing picked up. Its REAL schedule entry makes it lock-exempt: it starts within
+  // seconds while another job holds the lock, and leaves that holder alone.
+  it('signin-pickup, as the real schedule has it, starts within seconds while another job holds the lock', async () => {
+    const REAL = JSON.parse(readFileSync(resolve(__dirname, '../scripts/job-schedule.json'), 'utf8'));
+    writeFileSync(schedulePath, JSON.stringify({
+      'long-render': { cron: '* * * * *', maxLateMinutes: 600, mode: 'wrapped' },
+      'signin-pickup': REAL['signin-pickup'],
+    }));
+    // A throwaway HOME: a refused run writes a SKIPPED line to ~/knowledge-os/logs/<job>/runs.log,
     // and the real signin-pickup log is read by check-routines.py (review, 29 Sep 2026).
     const fakeHome = mkdtempSync(join(ROOT, 'home-'));
-    const job = (name, secs) => runAsync(['run', name, '--no-stale-check', '--timeout', '2', '--',
-      'python3', '-c', `import time; time.sleep(${secs})`], { env: { HOME: fakeHome } });
-    const holder = job('render', 1.5);
-    await sleep(400);
-    const early = job('publish', 0.2);        // queues first
-    await sleep(400);
-    const pickup = job('signin-pickup', 0.2); // queues second
-    const results = await Promise.all([holder, early, pickup]);
-    expect(results.every((r) => r.code === 0)).toBe(true);
-    const order = events().filter((e) => e.state === 'acquired').map((e) => e.job);
-    expect(order).toEqual(['render', 'signin-pickup', 'publish']);
-  }, { timeout: 60000, retry: 2 });   // losing the prefix fails every attempt, so a retry hides nothing
+    expect(run(['acquire', 'long-render', '--lease', '90']).code).toBe(0);
+    // The control: a job without the exemption, in the same position, gives up on BUSY.
+    const blocked = await runAsync(['run', 'other-job', '--timeout', '0.02', '--', 'python3', '-c', 'pass'], { env: { HOME: fakeHome } });
+    expect(blocked.code).toBe(75);
+    // A short --timeout: if the exemption were lost, the pickup would give up (75) rather than run.
+    const t0 = Date.now();
+    const pickup = await runAsync(['run', 'signin-pickup', '--timeout', '0.05', '--', 'python3', '-c', 'print("pickup ran")'],
+      { env: { HOME: fakeHome } });
+    expect(pickup.code).toBe(0);
+    expect(pickup.stdout).toMatch(/pickup ran/);
+    expect(Date.now() - t0).toBeLessThan(10000);
+    const mine = events().filter((e) => e.job === 'signin-pickup').map((e) => e.state);
+    expect(mine).toContain('ran-unlocked');
+    expect(mine).not.toContain('acquired');
+    // ...and the render still holds the lock.
+    expect(JSON.parse(readFileSync(join(stateDir, 'lock', 'holder.json'), 'utf8')).job).toBe('long-render');
+    run(['release', 'long-render']);
+  }, 60000);
 
   it('gives up with EX_TEMPFAIL rather than running alongside a holder', async () => {
     // Take the lock cooperatively and leave it held.
@@ -868,8 +879,20 @@ describe('the real job-schedule.json', () => {
   const REAL = JSON.parse(readFileSync(resolve(__dirname, '../scripts/job-schedule.json'), 'utf8'));
   const jobs = Object.entries(REAL).filter(([k]) => !k.startsWith('_'));
 
+  // An on-demand job (signin-pickup, 7 Oct 2026: started by the Robot sign-in app) has no clock to be
+  // late against. It says so with mode "on-demand", and it is the only kind allowed no cron.
+  const clocked = jobs.filter(([, c]) => c.mode !== 'on-demand');
+  it('lists on-demand jobs only by name, with no cron, and they never queue for the lock', () => {
+    const onDemand = jobs.filter(([, c]) => c.mode === 'on-demand');
+    expect(onDemand.map(([n]) => n)).toEqual(['signin-pickup']);
+    for (const [name, cfg] of onDemand) {
+      expect(cfg.cron, `${name} is on demand: a cron would grade it on attendance`).toBeUndefined();
+      expect(cfg.lockExempt, `${name} is on demand`).toBe(true);
+    }
+  });
+
   it('gives every job a parseable cron and a lateness limit', () => {
-    for (const [name, cfg] of jobs) {
+    for (const [name, cfg] of clocked) {
       expect(cfg.cron, `${name} has no cron`).toBeTruthy();
       expect(cfg.cron.split(' ')).toHaveLength(5);
       expect(typeof cfg.maxLateMinutes, `${name} has no maxLateMinutes`).toBe('number');
@@ -877,7 +900,7 @@ describe('the real job-schedule.json', () => {
   });
 
   it('resolves a last-scheduled time for every cron', () => {
-    const crons = jobs.map(([, c]) => c.cron);
+    const crons = clocked.map(([, c]) => c.cron);
     const resolved = py(`[m.last_scheduled(c) is not None for c in ${JSON.stringify(crons)}]`);
     expect(resolved.every(Boolean)).toBe(true);
   });
@@ -1922,7 +1945,10 @@ describe('lock-exempt read-only checks', () => {
     // hourly publisher also rewrites whole from its own state, so the last writer is always a complete, current
     // report. It never writes the repo, the queue or the engine's state. Behind the lock it froze whenever a render
     // ran, which is the lag it exists to end (10:15 and 11:15 lost on 29 Sep).
-    expect(exempt.sort()).toEqual(['content-report-live', 'data-invariants', 'drift-scan', 'drive-auth', 'estate-drift', 'estate-status', 'handback-poll', 'job-digest', 'roy-assistant', 'utilita-balance']);
+    // signin-pickup (7 Oct 2026): the same shape as handback-poll (Airtable, the gate, the robot browser).
+    // It waits while another dispatch run is in flight and keeps its own one-pickup lock
+    // (tests/signin-pickup.test.js); the robot profile opens in one place at a time.
+    expect(exempt.sort()).toEqual(['content-report-live', 'data-invariants', 'drift-scan', 'drive-auth', 'estate-drift', 'estate-status', 'handback-poll', 'job-digest', 'roy-assistant', 'signin-pickup', 'utilita-balance']);
     // content-engine must never be exempt: it renders and writes.
     expect(real['content-engine'].lockExempt).toBeUndefined();
   });

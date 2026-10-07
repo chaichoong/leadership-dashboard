@@ -27,6 +27,14 @@ moment he has signed in. Never a second task while one is open (the create
 gate and signin-waiting both check). GOV.UK and HMRC are skipped on purpose:
 their sessions cannot be held and need his code every time.
 
+Only when work waits on it (7 Oct 2026). 46 of these cards in 31 days, and 81
+of Kevin's 109 sign-ins handed no task to a robot: most mornings asked him to
+sign in to a site nothing needed. A signed-out site now raises its card only
+when `agent-dispatch.py signin-waiting` lists a task waiting on that host (a
+SIGN-IN NEEDED line or a SIGN-IN wall) other than a card of this file's own.
+Otherwise its state is recorded in status.json and nothing is raised: the job
+that next needs the site asks for the sign-in then, and the pickup works it.
+
 No task for a site that did not stay signed in after his last two sign-ins,
 or his last four for a site that has held one before (2 Oct 2026,
 signin_hold.py): EDF had 15 of these cards, Amazon 7 and BW Legal's portal,
@@ -40,6 +48,7 @@ State:  ~/knowledge-os/logs/session-keepalive/status.json (latest verdict per si
 import glob
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -139,18 +148,35 @@ def not_holding_note(host, entry, events=None):
     return "not raised: signed out again after the sign-ins of %s" % " and ".join([", ".join(days[:-1]), days[-1]])
 
 
-def already_waiting(host):
-    """Is there an open SIGN-IN NEEDED task for this site already?"""
+def waiting_groups():
+    """Every site with a task waiting on a sign-in, as `agent-dispatch.py signin-waiting
+    --no-walk` lists them: the same read the morning message, waiting.json and the Robot
+    sign-in app use. Raises when the read fails or prints no list: never an empty one."""
     # --no-walk: this run has just walked the site itself; a second walk would
     # fight it for the one robot profile, and the listing is all it needs.
     r = subprocess.run([sys.executable, os.path.join(REPO, "scripts", "agent-dispatch.py"), "signin-waiting", "--no-walk"],
                        capture_output=True, text=True)
     if r.returncode != 0:
         raise RuntimeError("signin-waiting failed: " + (r.stderr or "")[:200])
-    return any(g.get("host") == host for g in json.loads(r.stdout).get("sites", []))
+    groups = json.loads(r.stdout).get("sites")
+    if not isinstance(groups, list):
+        raise RuntimeError("signin-waiting printed no list of sites")
+    return groups
 
 
-def signin_task_fields(host, entry, when):
+# The name signin_task_fields gives this file's own cards. A card of ours is a
+# sign-in to ask for, never a task waiting on the site (the selftest pins the two).
+KEEPALIVE_NAME_RE = re.compile(r"^SIGN-IN: .+ session lapsed$")
+
+
+def waiting_on(host, groups):
+    """(work, ours): the tasks waiting on HOST that are real work, and this file's own open cards."""
+    tasks = [t for g in groups if g.get("host") == host for t in (g.get("tasks") or [])]
+    ours = [t for t in tasks if KEEPALIVE_NAME_RE.match(str(t.get("name") or ""))]
+    return [t for t in tasks if t not in ours], ours
+
+
+def signin_task_fields(host, entry, when, work=()):
     label = entry.get("label") or host
     url = entry["loginUrl"]
     stamp = when.strftime("%d %b %Y %H:%M")
@@ -159,12 +185,13 @@ def signin_task_fields(host, entry, when):
     # the first live dry-run: "tomorrow" from a 06:40 run skipped a whole day.
     parked_for = when if when.hour < 8 else when + timedelta(days=1)
     tomorrow = parked_for.strftime("%Y-%m-%d")
+    names = "; ".join(str(t.get("name") or t.get("id") or "")[:80] for t in work[:5])
     output = (f"SIGN-IN NEEDED: {label} ({url})\n\n"
-              f"The robot's login to {label} has lapsed (daily session check, {stamp}). "
-              "Nothing is blocked yet; signing in once puts the session back so the next "
-              "job on this site does not stall.\n\n"
+              f"The robot's login to {label} has lapsed (daily session check, {stamp}), and "
+              f"{len(work)} task{'s' if len(work) != 1 else ''} wait{'s' if len(work) == 1 else ''} on it"
+              + (f": {names}" if names else "") + ".\n\n"
               "**Carrying this out will involve:** Nothing until you sign in; the moment you do, "
-              "the robot's session is back and this closes itself.")
+              "the robot's session is back, the waiting work is handed back to its robot, and this closes itself.")
     return {
         F["name"]: f"SIGN-IN: {label} session lapsed",
         F["description"]: f"Daily session keep-alive found {label} signed out on {stamp}.",
@@ -186,7 +213,7 @@ def create_task(fields, dry_run):
     # --force: the duplicate gate's fuzzy pass folded six "SIGN-IN: <site>
     # session lapsed" tasks into one on the first live run (4 Sep 2026), so
     # five sites vanished from the morning list. One task per site is the
-    # point; `already_waiting` is the dedupe, per host, before we get here.
+    # point; `waiting_on` is the dedupe, per host, before we get here.
     r = subprocess.run([sys.executable, os.path.join(REPO, "scripts", "create-agent-task.py"), "create",
                         "--force", "--fields-json", json.dumps(fields)], capture_output=True, text=True)
     if r.returncode != 0:
@@ -198,6 +225,7 @@ def cmd_run(dry_run=False):
     sites = keepalive_sites(load_sites())
     when = now_london()
     report = {"at": when.isoformat(), "sites": {}}
+    groups = None                                   # read once, and only if a site is signed out
     for host, entry in sites.items():
         # One site's failure must never stop the rest being checked, and an
         # unchecked site must read as unknown, never as fine.
@@ -208,7 +236,7 @@ def cmd_run(dry_run=False):
         state = session_state(res)
         row = {"label": entry.get("label"), "state": state, "landedOn": str(res.get("url") or "")[:120]}
         if state == "signed-out":
-            # A rule that cannot be worked out never silences the ask: the task is raised as before.
+            # A rule that cannot be worked out never silences the ask: the site goes on to the waiting check.
             try:
                 note = not_holding_note(host, entry)
             except Exception as e:                          # noqa: BLE001
@@ -216,11 +244,20 @@ def cmd_run(dry_run=False):
             try:
                 if note:
                     row["notHolding"], row["task"] = True, note
-                elif already_waiting(host):
-                    row["task"] = "already waiting"
                 else:
-                    row["task"] = create_task(signin_task_fields(host, entry, when), dry_run)
+                    if groups is None:
+                        groups = waiting_groups()
+                    work, ours = waiting_on(host, groups)
+                    row["waiting"] = [t.get("id") for t in work]
+                    if not work:
+                        # Recorded, never asked for: nothing needs this site today (7 Oct 2026).
+                        row["nothingWaiting"], row["task"] = True, "not raised: no task is waiting on this site"
+                    elif ours:
+                        row["task"] = "already waiting"
+                    else:
+                        row["task"] = create_task(signin_task_fields(host, entry, when, work), dry_run)
             except Exception as e:                          # noqa: BLE001
+                # The waiting read failed: NOT CHECKED, and said so in the summary, never a quiet board.
                 row["task"] = {"error": str(e)[:200]}
         elif state == "unknown":
             row["error"] = res.get("error", "")
@@ -234,6 +271,9 @@ def cmd_run(dry_run=False):
     print(json.dumps({"at": report["at"], "counts": counts,
                       "signedOut": [r["label"] for r in report["sites"].values() if r["state"] == "signed-out"],
                       "signInWhenNeeded": [r["label"] for r in report["sites"].values() if r.get("notHolding")],
+                      "nothingWaiting": [r["label"] for r in report["sites"].values() if r.get("nothingWaiting")],
+                      "notChecked": [r["label"] for r in report["sites"].values()
+                                     if isinstance(r.get("task"), dict) and r["task"].get("error")],
                       "unknown": [r["label"] for r in report["sites"].values() if r["state"] == "unknown"]}, indent=1))
     # An all-unknown run means the browser lane is broken, not that everything is fine.
     if report["sites"] and counts["unknown"] == len(report["sites"]):
@@ -268,6 +308,21 @@ def selftest():
                            datetime(2026, 9, 4, 6, 40))
     if not f[F["agentOutput"]].startswith("SIGN-IN NEEDED: Pingen (letters) (https://app.pingen.com/)"):
         bad.append(("task output line", "SIGN-IN NEEDED first", f[F["agentOutput"]][:60]))
+    # The card names the work it unblocks, and this file knows its own cards by that name (7 Oct 2026).
+    w = signin_task_fields("app.pingen.com", {"label": "Pingen (letters)", "loginUrl": "https://app.pingen.com/"},
+                           datetime(2026, 9, 4, 6, 40), [{"id": "recA", "name": "Post the letter to the council"}])
+    if "1 task waits on it: Post the letter to the council." not in w[F["agentOutput"]]:
+        bad.append(("card names the waiting task", "1 task waits on it: ...", w[F["agentOutput"]][:200]))
+    if not KEEPALIVE_NAME_RE.match(f[F["name"]]):
+        bad.append(("own card known by its name", f[F["name"]], KEEPALIVE_NAME_RE.pattern))
+    groups = [{"host": "app.pingen.com", "tasks": [{"id": "recA", "name": "Post the letter to the council"},
+                                                   {"id": "recK", "name": f[F["name"]]}]},
+              {"host": "www.edfenergy.com", "tasks": [{"id": "recE", "name": "Read the EDF bill"}]}]
+    work, ours = waiting_on("app.pingen.com", groups)
+    if [t["id"] for t in work] != ["recA"] or [t["id"] for t in ours] != ["recK"]:
+        bad.append(("work and our own cards split", (["recA"], ["recK"]), ([t["id"] for t in work], [t["id"] for t in ours])))
+    if waiting_on("www.amazon.co.uk", groups) != ([], []):
+        bad.append(("nothing waiting on a site with no group", ([], []), waiting_on("www.amazon.co.uk", groups)))
     if f[F["deferredUntil"]] != "2026-09-04" or "KEEPALIVE CHECK:" not in f[F["notes"]]:
         bad.append(("task parking (06:40 run -> today's 08:00)", "2026-09-04 + KEEPALIVE CHECK", (f[F["deferredUntil"]], f[F["notes"]][:40])))
     late = signin_task_fields("app.pingen.com", {"label": "Pingen (letters)", "loginUrl": "https://app.pingen.com/"},
@@ -288,7 +343,7 @@ def selftest():
         for b in bad:
             print("FAIL", b, file=sys.stderr)
         return 1
-    print(f"selftest OK ({len(cases) + 6} checks)")
+    print(f"selftest OK ({len(cases) + 10} checks)")
     return 0
 
 
