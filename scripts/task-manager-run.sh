@@ -116,6 +116,19 @@ cd "$REPO" || { echo "ERROR: repo not found at $REPO" >&2; exit 1; }
 /usr/bin/python3 "$REPO/scripts/standing_holds.py" run > /dev/null 2>> "$LOG" \
   || echo "WARNING: standing holds run failed (rc=$?) — a held matter may be on this slot's board" >> "$LOG"
 
+# THE CLOCK (Kevin, 7 Oct 2026): a wall past its clock is stuck, and the move is
+# the conversion that clears it, never "leave". 76% of this board's 1,346 moves
+# from 23 Sep to 6 Oct were "leave", and 24 of 39 blocked tasks were never
+# touched. In code, before the model step, after the holds park their matters:
+# KEVIN 3 days and SIGN-IN 1 day tick Hard Deadline (the 09:00 brief), TOOL 3
+# days raises its unclaimed finding to critical, and a Roy task 7 days with no
+# movement goes to its agent or gets one reminder a week. Writes clock.json
+# (verify fails the slot without a fresh one) and clock.md (the report's Clock
+# section) in $SCRATCH; only counts reach this log. Needs no Claude, so it runs
+# before the allowance guard. A failure prints a BROKEN line the epilogue reads.
+/usr/bin/python3 "$REPO/scripts/task-manager.py" clock >> "$LOG" 2>&1 \
+  || echo "TASK-MANAGER BROKEN: the clock pre-pass failed (rc=$?): see clock.json in scratch" >> "$LOG"
+
 # THE ALLOWANCE GUARD (Kevin, 14 Sep 2026): while scripts/allowance.py says the
 # Claude allowance is out, this slot does not start. It is recorded as missed
 # and re-run once at the reset by `allowance.py replay`. Exit 0: a paused tick

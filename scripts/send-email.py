@@ -925,6 +925,36 @@ def dispatch_module():
     return _DISPATCH["ad"]
 
 
+def notify_due_again(task_id, days, now=None):
+    """True when a REMINDER notify may go: the newest notify that went for this task is DAYS old or
+    more, and nothing since is a send that was cut off (intent or uncertain may have gone, so it
+    never sends twice). The Task Board Manager's clock (7 Oct 2026) nudges Roy once a week on a
+    physical task he has held seven days with no movement; without this the first handover's
+    notify refused every later one for ever."""
+    newest = sent = None
+    try:
+        with open(SENT_LEDGER) as fh:
+            for line in fh:
+                if not line.strip():
+                    continue
+                row = json.loads(line)
+                if row.get("task") == task_id and not row.get("recipient") and ledger_kind(row) == "notify":
+                    newest = row
+                    if row.get("event") == "sent":
+                        sent = row
+    except FileNotFoundError:
+        return False
+    if sent is None or (newest or {}).get("event") in ("intent", "uncertain"):
+        return False
+    try:
+        went = datetime.fromisoformat(str(sent.get("ts") or "").replace("Z", "+00:00"))
+    except ValueError:
+        return False
+    if went.tzinfo is None:
+        went = went.replace(tzinfo=timezone.utc)
+    return ((now or datetime.now(timezone.utc)) - went).total_seconds() >= float(days) * 86400
+
+
 def cmd_notify(args):
     humans, tier1_patterns, tier_match = team_roster()
     to = (args.to or "").strip().lower()
@@ -992,7 +1022,9 @@ def cmd_notify(args):
 
     # Same ledger as `send`, so one task cannot be notified twice by two runs.
     prior = already_sent(args.task, "notify")
-    if prior and prior.get("event") != "notify-superseded":
+    again = getattr(args, "again_after_days", None)
+    if prior and prior.get("event") != "notify-superseded" \
+            and not (again and notify_due_again(args.task, again)):
         # `event` says which: `sent` went; `intent` or `uncertain` is a send that was cut off and
         # may never have left, which the caller must be able to tell from "already emailed".
         went = prior.get("event") == "sent"
@@ -1508,6 +1540,9 @@ def main():
     n.add_argument("task")
     n.add_argument("--to", required=True, help="team email address")
     n.add_argument("--reason", default="", help="why it is theirs")
+    n.add_argument("--again-after-days", type=float, default=None,
+                   help="a reminder: send again once the last notify for this task went this many "
+                        "days ago (never over a send that was cut off)")
     n.add_argument("--dry-run", action="store_true")
     n.set_defaults(func=cmd_notify)
 

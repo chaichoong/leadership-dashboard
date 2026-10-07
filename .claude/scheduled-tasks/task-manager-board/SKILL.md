@@ -130,6 +130,54 @@ Members rec id and live status (its rosters). If `queue` exits non-zero
 because ITS population read looks broken, report it, run `board` without
 `--dispatch-queue`, and carry on — your read is independent.
 
+## Step 1a — The clock (already run, before you started)
+
+Kevin, 7 Oct 2026: **a wall past its clock is stuck, and the move is the
+conversion that clears it, never `leave`.** From 23 Sep to 6 Oct 2026, 76% of
+this board's 1,346 moves were `leave`, 39 tasks sat on walls (24 of them three
+days or more) and 24 of the 39 were never touched. A wall is a `BLOCKER OPEN`
+line in a task's Notes (SIGN-IN, SITE, TOOL or KEVIN), recorded with
+`agent-dispatch.py block`.
+
+The runner ran `task-manager.py clock` before this pass. It reads every open
+wall (`agent-dispatch.py blockers`) and dates each one from its own
+`[since ...]` stamp, never from note writes, so a sweep's or an agent's note
+does not make a wall look fresh. The clocks and the conversion each gets, once
+per wall:
+
+- **KEVIN, 3 days.** In his approval queue (waiting on his verdict, or back
+  as a Your step card): Hard Deadline is ticked, due at the far edge of the
+  brief's week, so the 09:00 brief shows it behind every real deadline due
+  sooner. The tick comes off when the wall clears. A task parked on purpose
+  (Some Day, a standing hold, Kevin's own date) is never ticked. Approved but not yet a Your step card: the half-hourly blocker sweep puts
+  it there (there is no one-task command for it); the clock ticks it next
+  slot. Not approved and not in his queue: reported, because such a wall has no
+  door until the agent submits the step as a `KEVIN ONLY` card.
+- **TOOL, 3 days.** Its finding still unclaimed: raised to critical
+  (`findings.py escalate`) so the fixer takes it first, with one line on the
+  task. Claimed, waiting on a PR or a MERGE card, or deferred: reported with
+  who holds it.
+- **SIGN-IN, 1 day.** Hard Deadline is ticked (the Robot sign-ins panel is the
+  first surface; the brief line is the second).
+- **SITE:** no clock. Kevin's "Add a new site" clears it.
+- **Roy, 7 days with no movement** (Roy holds it, no open wall, not parked):
+  plain admin moves to its agent by `reroute-roy-admin.py`'s own rules; a
+  physical step gets one reminder email a week to Roy (at most ten a slot,
+  oldest first). Movement is a web-app edit, the handover, a note in Roy's own
+  words (his page or his assistant) or his emailed reply folded into the task.
+
+`$TASK_MANAGER_SCRATCH/clock.json` holds every decision and
+`$TASK_MANAGER_SCRATCH/clock.md` is the report's Clock section, written for
+you. **Every stuck view in `board.json` that carries `blocker` is the clock's,
+not yours: skip it in Step 2.** Never `leave` it, never `escalate` or `route`
+around its wall, never close it. Leave is not a move on a blocked task, and
+verify fails the slot if you record `leave` on one. The one exception is an
+ownerless task on a wall (Step 2a): give it its owner with `route` to the
+agent whose lane it is; the wall stays on it and the clock still owns it. A
+board whose stuck tasks all stand on walls owes no move from you. If the clock could not
+make its move, clock.md says why; that reason goes in the report, it is not a
+reason to act on the task yourself.
+
 ## Step 1b — Field hygiene (09:00 SLOT ONLY)
 
 **Absorbed from the task-hygiene-sweep, 26 Aug 2026 (Kevin's restructure).** That
@@ -353,7 +401,9 @@ out of your list — the board subtracted dispatch's tasks in code):
    external send) → `finish` in-house: do the work, submit the result through
    the gate as your own output, type `Admin`.
 10. **Genuinely fine to sit** (future-dated on purpose, awaiting a fixed date)
-    → `leave` with the reason noted.
+    → `leave` with the reason noted. Never on a view carrying `blocker`: a
+    wall is not "fine to sit", and leave is not a move on a blocked task (Step
+    1a: the clock already moved it).
 
 When unsure between two moves, prefer the one that keeps the gate in front of
 the action: escalate beats guess for anything tier-1; leave-with-reason beats a
@@ -534,6 +584,10 @@ LEADING with what should have moved and did not:
    and the cleanse remainder still to judge.
 5. Moves made this slot, by kind.
 6. Remaining backlog and what next slot takes first.
+7. **Clock:** paste `$TASK_MANAGER_SCRATCH/clock.md` as it stands, under its
+   own `## Clock` heading: per kind, how many walls were past the clock, what
+   was done, what could not be done and why. Never rewrite or soften a line
+   of it. If clock.md is missing, say "Clock: NOT RUN this slot" and why.
 
 Never write task content into `monitoring/` — counts only, anywhere public.
 
@@ -549,7 +603,8 @@ stuck, openTasksRead, kevinOwned. The report JSON must carry
 `board: {openTasksRead, stuck, waitingOnKevin}`, `actions`, `ceoReview` and
 `scoreWritten: true` — verify fails the run loudly if the board was never
 read, a stuck board produced no actions, an action failed, a claimed write did
-not land, or the score is missing. A failed verify is a failed run: report it,
-do not soften it.
+not land, the score is missing, this slot's clock.json is missing or carries
+a failed move, or `leave` was recorded on a blocked task. A failed verify is a
+failed run: report it, do not soften it.
 
 End with at most twenty lines of counts only.

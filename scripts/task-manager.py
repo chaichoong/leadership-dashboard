@@ -25,6 +25,10 @@ Commands:
   score --stuck N --open M --kevin K  write Metric Score to the register row
   publish                    upsert today's decisions to AI Agent Daily Log
   verify --report PATH       loud control over a slot run's report
+  clock [--dry-run]          the deterministic pre-pass: every wall past its clock,
+                             and every Roy task with no movement for 7 days, gets
+                             its one conversion (run by task-manager-run.sh before
+                             the model step; writes clock.json and clock.md)
   selftest                   offline checks of the pure helpers
 """
 
@@ -32,6 +36,7 @@ import argparse
 import json
 import os
 import re
+import subprocess
 import sys
 import time
 import urllib.error
@@ -39,6 +44,7 @@ import urllib.parse
 import urllib.request
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
 BASE = "appnqjDpqDniH3IRl"
 TASKS_TABLE = "tblqB8b22hKBL4PF1"
@@ -127,7 +133,10 @@ def card_recommended(agent_output):
     brief. Only the card is read, never an earlier draft kept under it."""
     m = RECOMMENDED_RE.search(str(agent_output or "").partition(EARLIER_OUTPUT_MARK)[0])
     return " ".join(m.group(1).split()) if m else ""
-ROY_TOUCH_MARKS = ("Handed over to Roy Lavin", "Chase to Roy:")
+# The clock's own nudge to Roy (cmd_clock) counts as a touch, so the model's weekly chase is not
+# due again the same week.
+CLOCK_ROY_MARK = "CLOCK ROY:"
+ROY_TOUCH_MARKS = ("Handed over to Roy Lavin", "Chase to Roy:", CLOCK_ROY_MARK)
 ROY_CHASE_DAYS = 7
 
 DECISION_GROUPS = [
@@ -573,6 +582,12 @@ def task_view(rec, activity_ids, dispatch_ids, now):
         "hoursWaiting": hours_waiting(f, now),
         "movementSource": src,
     }
+    wall = open_wall(f.get("Notes"))
+    if wall:
+        # The clock's, not the foreman's (7 Oct 2026): the pre-pass already made its move, and
+        # `leave` on it fails verify. Read with agent-dispatch's own task_blocker.
+        view["blocker"] = {"kind": wall["kind"], "subject": wall["subject"][:80],
+                           "since": wall.get("since") or None}
     if bucket == "withRoy":
         view["royLastTouch"] = roy_touch.isoformat() if roy_touch else None
         view["chaseDue"] = bool(chase_due)
@@ -607,6 +622,35 @@ def _load_gate():
         spec.loader.exec_module(mod)
         _GATE_MOD = mod
     return _GATE_MOD
+
+
+_SCRIPT_MODS = {}
+
+
+def _load_script(filename, modname):
+    """Another estate script as a module, imported once, never copied (same pattern as
+    _load_gate): the wall parser is agent-dispatch.py's task_blocker, and the Roy split is
+    reroute-roy-admin.py's classify and new_fields, so neither can drift from its owner."""
+    if filename not in _SCRIPT_MODS:
+        import importlib.util
+        p = Path(__file__).resolve().parent / filename
+        spec = importlib.util.spec_from_file_location(modname, p)
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        _SCRIPT_MODS[filename] = mod
+    return _SCRIPT_MODS[filename]
+
+
+def _load_dispatch():
+    return _load_script("agent-dispatch.py", "od_dispatch")
+
+
+def open_wall(notes):
+    """The task's open wall (agent-dispatch.py task_blocker), or None. The import only happens
+    for a task whose Notes carry a blocker line at all."""
+    if "BLOCKER OPEN" not in str(notes or ""):
+        return None
+    return _load_dispatch().task_blocker(notes)
 
 
 def auto_reply_flag(f, cache=None, gate=None):
@@ -729,6 +773,22 @@ def ownerless_problems(actions, scratch=None):
             for v in board.get("ownerless") or [] if v.get("id") not in moved]
 
 
+def read_activity(now):
+    """(rows, task ids) of Task Activity inside the stuck window: web-app edits are movement."""
+    cutoff = (now - timedelta(days=STUCK_DAYS)).strftime("%Y-%m-%dT%H:%M:%S.000Z")
+    activity = query_all(
+        ACTIVITY_TABLE,
+        "IS_AFTER({At}, DATETIME_PARSE('%s'))" % cutoff,
+        ["TaskId"], "activity read")
+    activity_ids = {a["fields"].get("TaskId") for a in activity
+                    if a["fields"].get("TaskId")}
+    if activity and not activity_ids:
+        fail("%d Task Activity rows in the window but ZERO carry TaskId — the "
+             "activity writer has drifted; every web-app edit would read as "
+             "no-movement" % len(activity))
+    return activity, activity_ids
+
+
 def cmd_board(dispatch_queue_path=None):
     formula = "OR(%s)" % ",".join("{Status}='%s'" % s for s in OPEN_STATUSES)
     recs = query_all(TASKS_TABLE, formula, TASK_FIELDS, "board read")
@@ -751,17 +811,7 @@ def cmd_board(dispatch_queue_path=None):
              % (approval_rows, APPROVAL_STAMP_FIELDS))
 
     now = datetime.now(timezone.utc)
-    cutoff = (now - timedelta(days=STUCK_DAYS)).strftime("%Y-%m-%dT%H:%M:%S.000Z")
-    activity = query_all(
-        ACTIVITY_TABLE,
-        "IS_AFTER({At}, DATETIME_PARSE('%s'))" % cutoff,
-        ["TaskId"], "activity read")
-    activity_ids = {a["fields"].get("TaskId") for a in activity
-                    if a["fields"].get("TaskId")}
-    if activity and not activity_ids:
-        fail("%d Task Activity rows in the window but ZERO carry TaskId — the "
-             "activity writer has drifted; every web-app edit would read as "
-             "no-movement" % len(activity))
+    activity, activity_ids = read_activity(now)
 
     dispatch_ids = set()
     if dispatch_queue_path:
@@ -977,6 +1027,659 @@ def cmd_publish():
                       "summary": summary}))
 
 
+# ---------------------------------------------------------------------------
+# THE CLOCK (Kevin, 7 Oct 2026)
+# ---------------------------------------------------------------------------
+#
+# Measured 23 Sep to 6 Oct 2026: 1,346 board moves, 1,020 of them "leave" (76%).
+# 39 tasks sat on walls, 24 of them three days or more, and 24 of the 39 were
+# never touched. The skill never said BLOCKER, this script had no wall logic,
+# and escalate refuses a blocked task, so "leave" was the only move left.
+# Kevin's rule: a wall past its clock is stuck, and the move is the conversion
+# that clears it, never "leave". Clocks: SIGN-IN 1 day, TOOL 3, KEVIN 3, and a
+# Roy hand-off 7 days with no movement. A wall's age is read from its own
+# `[since]` stamp (the date on its BLOCKER OPEN line when it has none), never
+# from note writes, so a sweep's or an agent's note never resets it.
+#
+# The clock runs in code before the model step (task-manager-run.sh). One move
+# per task per slot; each move once per wall, keyed on a marker line in Notes
+# that names the wall's opening; every write is built from a fresh read by
+# field id and made only while the same wall still stands. It writes
+# clock.json (verify reads it) and clock.md (the report's Clock section).
+CLOCK_DAYS = {"SIGN-IN": 1, "TOOL": 3, "KEVIN": 3}
+ROY_CLOCK_DAYS = 7
+# Reminder emails to Roy per slot, oldest hand-off first. On 7 Oct 2026 a dry run found 38 of his
+# 52 tasks past the clock; 30 emails in one burst to the inbox he reads is noise, and three slots a
+# day clear such a backlog inside a day. Moves to an agent are not capped (they email nobody).
+ROY_NOTIFY_CAP = 10
+CLOCK_BY = "task-manager clock"
+# The 09:00 brief lists a Hard Deadline task only when it is due within this many days or overdue
+# (scripts/slack-automation/money-daily-worker.js DEADLINE_DAYS).
+BRIEF_HORIZON_DAYS = 7
+LONDON = ZoneInfo("Europe/London")
+# Task field ids, js/config.js TASK_FIELDS. The clock's fresh read and its write use ids on both
+# sides (CLAUDE.md: one key style for a read-modify-write).
+TF = {
+    "name": "fldgFjGBw6bTKJFCD", "status": "fldx4qCw17UfrKpaN", "notes": "fldR7apBzSp3oxFxz",
+    "dueDate": "fld7XP8w8kbxfETV4", "hardDeadline": "fldZKzIxgyrQ8CG8a",
+    "teamMember": "flduCtmQGpOA4eWaj",
+}
+CLOCK_FIELDS = [
+    "Task Name", "Status", "Notes", "Approval Outcome", "Approved At", "Approval Slack TS",
+    "Created Time", "Team Member", "Sent For Approval By", "Hard Deadline", "Some Day",
+    "Agent Output", "Due Date", "Deferred Until", "Description",
+]
+LINE_STAMP_RE = re.compile(r"^\[(\d{1,2} \w{3} \d{4})(?: (\d{1,2}):(\d{2}))?")
+# Roy's own words on a task: his Property Manager page signs "[YYYY-MM-DD HH:MM Roy Lavin]"
+# (workers/property-manager/compute.mjs appendNote); his assistant signs
+# "[DD Mon YYYY HH:MM Roy Lavin via his assistant, rec...]" (roy-assistant.py ROY_TASK_NOTE_TAG).
+ROY_PAGE_NOTE_RE = re.compile(r"^\[(\d{4}-\d{2}-\d{2}) \d{1,2}:\d{2} Roy Lavin\]", re.M)
+ROY_ASSISTANT_NOTE_RE = re.compile(r"^\[(\d{1,2} \w{3} \d{4})(?: \d{1,2}:\d{2})? Roy Lavin via his assistant", re.M)
+
+
+def _sel(v):
+    return v.get("name", "") if isinstance(v, dict) else str(v or "")
+
+
+def london_today(now):
+    return now.astimezone(LONDON).date()
+
+
+def wall_opened_from_line(notes, d):
+    """When the task's open wall was written, from the stamp on its BLOCKER OPEN line, or None.
+    For a wall recorded before `[since]` existed."""
+    last = None
+    for m in d.BLOCKER_LINE_RE.finditer(str(notes or "")):
+        last = m
+    if not last or last.group("mark") != d.BLOCKER_OPEN_MARK:
+        return None
+    s = LINE_STAMP_RE.match(last.group(0))
+    if not s:
+        return None
+    try:
+        day = datetime.strptime(s.group(1), "%d %b %Y")
+    except ValueError:
+        return None
+    return day.replace(hour=int(s.group(2) or 0), minute=int(s.group(3) or 0),
+                       tzinfo=LONDON).astimezone(timezone.utc)
+
+
+def wall_age(b, notes, now, d):
+    """(days, key) for an open wall: from its `[since]`, else its line's stamp, else (None,
+    "undated"). The key names the wall's opening, so a clock move is made once per wall."""
+    since = parse_iso(b.get("since"))
+    if since:
+        return (now - since).total_seconds() / 86400, b["since"]
+    opened = wall_opened_from_line(notes, d)
+    if opened:
+        return (now - opened).total_seconds() / 86400, "line " + opened.strftime("%Y-%m-%dT%H:%MZ")
+    return None, "undated"
+
+
+def clock_marker(kind, key):
+    return "CLOCK (%s wall since %s)" % (kind, key)
+
+
+def in_kevin_lane(f, d):
+    """True when the task sits in Kevin's approval queue: a card waiting on his verdict, or an
+    approved card back in front of him as Your step (agent-dispatch.py, PR 720)."""
+    if _sel(f.get("Status")) != "Approval" or not (f.get("Sent For Approval By") or []):
+        return False
+    outcome = _sel(f.get("Approval Outcome"))
+    if not outcome:
+        return True
+    return outcome in d.APPROVED and d.your_step_split(f.get("Agent Output"))[0] is not None
+
+
+def wall_decision(row, f, now, d, findings_error=""):
+    """What the clock does about one open wall. Pure: reads the blocker row and the task."""
+    kind = row.get("kind")
+    out = {"task": row.get("task"), "name": str(f.get("Task Name") or row.get("name") or "")[:90],
+           "kind": kind, "subject": str(row.get("subject") or "")[:80], "clock": CLOCK_DAYS.get(kind),
+           "past": False, "action": None, "why": ""}
+    notes = str(f.get("Notes") or "")
+    b = d.task_blocker(notes)
+    if not b or b["kind"] != kind or not str(row.get("subject") or "").startswith(b["subject"]):
+        out["why"] = "the wall changed between the blocker read and the task read; the next slot judges it"
+        return out
+    days, key = wall_age(b, notes, now, d)
+    out["days"] = round(days, 1) if days is not None else None
+    if out["clock"] is None:
+        out["why"] = "a %s wall has no clock: Kevin's Add a new site clears it" % kind
+        return out
+    if days is not None and days < out["clock"]:
+        return out
+    # Past the clock. A wall nothing can date is treated as past it, never as fresh.
+    out["past"] = True
+    if days is None:
+        out["undated"] = True
+    out["marker"] = clock_marker(kind, key)
+    marked = out["marker"] in notes
+    if kind == "TOOL":
+        fid = row.get("finding") or b.get("finding") or ""
+        status = row.get("findingStatus") or ""
+        out["finding"] = fid
+        if not fid:
+            out["why"] = ("no finding is named on the wall, so there is nothing to raise: the agent must "
+                          "record the wall again with its finding")
+        elif findings_error:
+            out["why"] = "the findings queue could not be read: %s" % findings_error[:160]
+        elif status != "open":
+            out["why"] = "finding %s is %s, not unclaimed: %s" % (
+                fid, status or "not in the queue", str(row.get("tool") or "")[:160] or "nothing more said")
+        else:
+            out["action"], out["annotate"] = "escalate", not marked
+        return out
+    if kind == "KEVIN" and not in_kevin_lane(f, d):
+        if _sel(f.get("Approval Outcome")) in d.APPROVED:
+            out["why"] = ("approved but not yet in his queue as Your step: agent-dispatch.py has no one-task "
+                          "conversion, so the half-hourly blocker sweep moves it there")
+        else:
+            out["why"] = ("not approved and not in his queue: a KEVIN wall on unapproved work has no door; the "
+                          "agent must submit the step as a KEVIN ONLY card")
+        return out
+    today = london_today(now)
+    due = str(f.get("Due Date") or "")[:10]
+    if parked_on_purpose(f, now):
+        out["why"] = "parked on purpose (Some Day, a standing hold or Kevin's own date, %s): never ticked" % (
+            due or "no date")
+    elif f.get("Hard Deadline"):
+        horizon = (today + timedelta(days=BRIEF_HORIZON_DAYS)).isoformat()
+        if due and due <= horizon:
+            out["why"], out["already"] = "already carries Hard Deadline, due %s, so it is on the brief" % due, True
+        else:
+            # A real deadline someone else ticked: its date is the letter's, never the clock's to move.
+            out["why"] = "carries Hard Deadline %s, so the brief cannot show it yet; its date is left as set" % (
+                "due " + due if due else "with no due date")
+    elif marked:
+        out["why"] = "Hard Deadline was ticked once for this wall and taken off since: left as it was set"
+    elif str(f.get("Deferred Until") or "")[:10] > today.isoformat():
+        out["why"] = "knocked back until %s; the brief shows it from then" % str(f.get("Deferred Until"))[:10]
+    else:
+        out["action"] = "tick"
+    return out
+
+
+def parked_on_purpose(f, now):
+    """Some Day, or Upcoming with a date still ahead: a standing hold (standing_holds.py parks to the
+    review date), Kevin's own `decided --until`, or a date someone moved forward by hand. The clock
+    never ticks, moves or chases such a task: a tick's due date would unpark it."""
+    return bool(f.get("Some Day")) or (_sel(f.get("Status")) == "Upcoming"
+                                       and str(f.get("Due Date") or "")[:10] > london_today(now).isoformat())
+
+
+def roy_note_stamp(notes):
+    """The newest day Roy himself wrote on the task (his page or his assistant), or None."""
+    best = None
+    for m in ROY_PAGE_NOTE_RE.finditer(str(notes or "")):
+        try:
+            dt = datetime.strptime(m.group(1), "%Y-%m-%d").replace(tzinfo=timezone.utc)
+        except ValueError:
+            continue
+        best = dt if best is None or dt > best else best
+    for m in ROY_ASSISTANT_NOTE_RE.finditer(str(notes or "")):
+        try:
+            dt = datetime.strptime(m.group(1), "%d %b %Y").replace(tzinfo=timezone.utc)
+        except ValueError:
+            continue
+        best = dt if best is None or dt > best else best
+    return best
+
+
+def roy_last_movement(f, task_id, activity_ids, now):
+    """When a Roy-held task last moved: the board's own stamps (a web-app edit, an approval, the
+    card, Created Time as the floor), the handover to him, or a note in his own words. Our chases
+    and the clock's nudges are not movement. None only when the task carries no stamp at all."""
+    moved, _ = last_movement(dict(f, _id=task_id), activity_ids, now)
+    notes = f.get("Notes")
+    cands = [c for c in (moved, newest_note_stamp(notes, "Handed over to Roy Lavin"), roy_note_stamp(notes),
+                         fold_stamp(f.get("Description"))) if c]
+    return max(cands) if cands else None
+
+
+# What the create gate writes when new mail on the matter is folded into the task
+# (create-agent-task.py build_update). Since 6 Oct 2026 Roy answers by email and triage folds his
+# reply in this way, so a fold is movement: a reminder must never follow his reply.
+FOLD_RE = re.compile(r"^UPDATE (\d{4}-\d{2}-\d{2}): new item folded in", re.M)
+
+
+def fold_stamp(description):
+    days = [m.group(1) for m in FOLD_RE.finditer(str(description or ""))]
+    try:
+        return datetime.strptime(max(days), "%Y-%m-%d").replace(tzinfo=timezone.utc) if days else None
+    except ValueError:
+        return None
+
+
+def roy_decision(rec, activity_ids, now):
+    f = rec["fields"]
+    out = {"task": rec["id"], "name": str(f.get("Task Name") or "")[:90], "kind": "ROY", "subject": "Roy Lavin",
+           "clock": ROY_CLOCK_DAYS, "past": False, "action": None, "why": ""}
+    moved = roy_last_movement(f, rec["id"], activity_ids, now)
+    days = (now - moved).total_seconds() / 86400 if moved else None
+    out["days"] = round(days, 1) if days is not None else None
+    if days is not None and days < ROY_CLOCK_DAYS:
+        return out
+    out["past"], out["action"] = True, "roy"
+    if moved is None:
+        out["undated"] = True
+    return out
+
+
+def roy_eligible(rec, walled, now):
+    """A task Roy holds that the Roy clock may judge: open, not parked or dated forward, not Kevin's
+    card, and not standing on a wall (the wall's own clock owns it)."""
+    f = rec["fields"]
+    return (ROY_REC in (f.get("Team Member") or []) and rec["id"] not in walled and not parked_on_purpose(f, now)
+            and _sel(f.get("Status")) in OPEN_STATUSES and _sel(f.get("Status")) != "Approval")
+
+
+# ── the clock's I/O, replaced by fakes in tests/task-manager-clock.test.js ──
+
+def clock_get(task_id):
+    rec = airtable_request("GET", "%s/%s?returnFieldsByFieldId=true" % (TASKS_TABLE, task_id), None,
+                           "clock read of one task")
+    return rec.get("fields") or {}
+
+
+def clock_patch(task_id, fields):
+    airtable_request("PATCH", "%s/%s" % (TASKS_TABLE, task_id), {"fields": fields, "typecast": False},
+                     "clock write")
+
+
+def clock_run(cmd):
+    r = subprocess.run(cmd, capture_output=True, text=True, timeout=600)
+    return r.returncode, r.stdout or "", r.stderr or ""
+
+
+def _last_json(text):
+    for line in reversed(str(text or "").strip().splitlines()):
+        line = line.strip()
+        if line.startswith("{"):
+            try:
+                return json.loads(line)
+            except ValueError:
+                return {}
+    return {}
+
+
+def _note_line(now, text):
+    return "[%s — %s] %s" % (now.astimezone(LONDON).strftime("%d %b %Y"), CLOCK_BY, text)
+
+
+def _same_wall_live(dec, live, now, d):
+    """The task's wall as it stands NOW, or None when it is gone or is no longer the wall the
+    decision was made on (a write would then be about a wall nobody judged)."""
+    notes = str(live.get(TF["notes"]) or "")
+    b = d.task_blocker(notes)
+    if not b or b["kind"] != dec["kind"] or clock_marker(b["kind"], wall_age(b, notes, now, d)[1]) != dec["marker"]:
+        return None
+    return notes
+
+
+def apply_tick(dec, now, d):
+    live = clock_get(dec["task"])
+    notes = _same_wall_live(dec, live, now, d)
+    if notes is None:
+        return {"why": "the wall changed since the read; the next slot judges it"}
+    if live.get(TF["hardDeadline"]):
+        return {"why": "already carries Hard Deadline", "already": True}
+    if dec["marker"] in notes:
+        return {"why": "Hard Deadline was ticked once for this wall and taken off since: left as it was set"}
+    today = london_today(now)
+    horizon = (today + timedelta(days=BRIEF_HORIZON_DAYS)).isoformat()
+    due = str(live.get(TF["dueDate"]) or "")[:10]
+    # The brief lists a Hard Deadline only when it is due inside its week (or overdue). The task's
+    # date was a soft one (nothing had ticked it), so it is set to the far edge of that week: on the
+    # brief, sorted behind every real deadline due sooner (review, 7 Oct 2026: a tick due today
+    # pushed a court date six days out below the brief's five), and clear of the
+    # hard-deadline-passed invariant for a week. A soft date already inside the week is kept.
+    new_due = due if (due and today.isoformat() < due <= horizon) else horizon
+    line = _note_line(now, "%s: past its %d-day clock, so Hard Deadline is ticked (due %s) and it is on Kevin's "
+                           "09:00 brief. It comes off when this wall clears." % (dec["marker"], dec["clock"], new_due))
+    fields = {TF["hardDeadline"]: True, TF["notes"]: (notes.rstrip() + "\n\n" + line).strip()[-90000:]}
+    if new_due != due:
+        fields[TF["dueDate"]] = new_due
+    clock_patch(dec["task"], fields)
+    return {"done": "Hard Deadline ticked, due %s" % new_due}
+
+
+# The tick line apply_tick writes, read back to take the tick off once its wall has cleared.
+TICK_LINE_RE = re.compile(r"(CLOCK \((?:KEVIN|SIGN-IN) wall since [^)]+\)): past its \d+-day clock, so Hard "
+                          r"Deadline is ticked \(due (\d{4}-\d{2}-\d{2})\)")
+UNTICK_MARK = "CLOCK UNTICK"
+
+
+def untick_decision(rec, now, d):
+    """The clock's own Hard Deadline tick on a task whose wall has since cleared, or None. Only a
+    tick the clock wrote, still standing, with the due date it set unchanged (a date someone moved,
+    or a tick someone put back by hand, is theirs). Otherwise the tick would stand for ever: nothing
+    in agent-dispatch.py takes it off when the wall clears."""
+    f = rec.get("fields") or {}
+    notes = str(f.get("Notes") or "")
+    if not f.get("Hard Deadline"):
+        return None
+    ticks = list(TICK_LINE_RE.finditer(notes))
+    if not ticks or notes.rfind(UNTICK_MARK) > ticks[-1].start():
+        return None
+    marker, set_due = ticks[-1].group(1), ticks[-1].group(2)
+    if str(f.get("Due Date") or "")[:10] != set_due:
+        return None
+    b = d.task_blocker(notes)
+    if b and clock_marker(b["kind"], wall_age(b, notes, now, d)[1]) == marker:
+        return None                                             # the same wall still stands
+    return {"task": rec["id"], "name": str(f.get("Task Name") or "")[:90], "kind": "UNTICK",
+            "subject": marker, "clock": None, "past": True, "action": "untick", "why": "",
+            "marker": marker, "setDue": set_due}
+
+
+def apply_untick(dec, now, d):
+    live = clock_get(dec["task"])
+    fresh = untick_decision({"id": dec["task"], "fields": {
+        "Notes": live.get(TF["notes"]), "Hard Deadline": live.get(TF["hardDeadline"]),
+        "Due Date": live.get(TF["dueDate"]), "Task Name": live.get(TF["name"])}}, now, d)
+    if not fresh or fresh["marker"] != dec["marker"]:
+        return {"why": "changed since the read; the next slot judges it"}
+    notes = str(live.get(TF["notes"]) or "")
+    line = _note_line(now, "%s (%s): the wall cleared, so the clock's Hard Deadline tick is taken off."
+                      % (UNTICK_MARK, dec["marker"]))
+    clock_patch(dec["task"], {TF["hardDeadline"]: False,
+                              TF["notes"]: (notes.rstrip() + "\n\n" + line).strip()[-90000:]})
+    return {"done": "the wall cleared, so the clock's Hard Deadline tick is off"}
+
+
+def apply_escalate(dec, now, d):
+    fid = dec["finding"]
+    why = "%s blocked %s days on TOOL %s; the robot cannot go on until it is fixed" % (
+        dec["task"], dec.get("days") if dec.get("days") is not None else "an unknown number of", dec["subject"])
+    rc, out, err = clock_run([sys.executable, str(Path(__file__).resolve().parent / "findings.py"), "escalate",
+                              fid, "--severity", "critical", "--why", why, "--by", "task-manager"])
+    if rc == 2:
+        return {"why": "findings.py refused: %s" % (err or out).strip()[-200:]}
+    if rc != 0:
+        raise RuntimeError("findings.py escalate exited %d: %s" % (rc, (err or out).strip()[-200:]))
+    changed = bool(_last_json(out).get("changed"))
+    noted = False
+    if dec.get("annotate"):
+        live = clock_get(dec["task"])
+        notes = _same_wall_live(dec, live, now, d)
+        if notes is not None and dec["marker"] not in notes:
+            line = _note_line(now, "%s: past its %d-day clock, so finding %s is raised to critical and the fixer "
+                                   "takes it first." % (dec["marker"], dec["clock"], fid))
+            clock_patch(dec["task"], {TF["notes"]: (notes.rstrip() + "\n\n" + line).strip()[-90000:]})
+            noted = True
+    if not changed and not noted:
+        return {"why": "already done: finding %s is critical and the task carries the note" % fid, "already": True}
+    return {"done": ("finding %s raised to critical" % fid if changed else "finding %s was already critical" % fid)
+                    + ("; noted on the task" if noted else "")}
+
+
+def _spend(budget):
+    if budget is not None:
+        budget["royNotify"] = budget.get("royNotify", 0) - 1
+
+
+def apply_roy(dec, now, d, rr, budget=None):
+    live = clock_get(dec["task"])
+    if ROY_REC not in (live.get(TF["teamMember"]) or []):
+        return {"why": "no longer held by Roy"}
+    verdict, why = rr.classify({"id": dec["task"], "fields": live}, rr.chain_names())
+    notes = str(live.get(TF["notes"]) or "")
+    # Only plain admin moves unattended. A repair-lane name with no repair word is one
+    # reroute-roy-admin.py lists for a person to check first (review, 7 Oct 2026): it stays Roy's
+    # and gets the reminder, never a guess at an agent that cannot book a repair.
+    if verdict == "move" and why == "admin":
+        if dec.get("listedNotes") and not notes.strip():
+            # CLAUDE.md: a field about to be appended to that reads blank is a STOP.
+            return {"why": "Notes read blank on the fresh read but not on the board read; not written"}
+        stamp = now.astimezone(LONDON).strftime("%d %b %Y")
+        clock_patch(dec["task"], rr.new_fields(live, stamp))
+        back = clock_get(dec["task"])
+        team = back.get(TF["teamMember"]) or []
+        agent = rr.target_agent(live.get(TF["name"]))
+        if ROY_REC in team or agent not in team:
+            raise RuntimeError("moved %s but the read back shows team %s" % (dec["task"], team))
+        return {"done": "moved to %s (%s)" % (rr.AGENT_NAMES.get(agent, agent), why)}
+    if why.startswith("in Approval"):
+        return {"why": why}
+    last = newest_note_stamp(notes, CLOCK_ROY_MARK)
+    if last and (now - last) < timedelta(days=ROY_CLOCK_DAYS):
+        return {"why": "Roy was reminded on %s; the next reminder is due 7 days after" % last.strftime("%d %b"),
+                "already": True}
+    if budget is not None and budget.get("royNotify", 0) <= 0:
+        return {"why": "over this slot's cap of %d reminders to Roy; the next slot sends it" % ROY_NOTIFY_CAP}
+    days = dec.get("days")
+    reason = ("REMINDER: this has been with you %s with no update. Reply with what is happening, or "
+              "\"done\" when it is finished." % ("%d days" % int(days) if days is not None else "a while"))
+    rc, out, err = clock_run([sys.executable, str(Path(__file__).resolve().parent / "send-email.py"), "notify",
+                              dec["task"], "--to", d.ROY_EMAIL, "--reason", reason,
+                              "--again-after-days", str(ROY_CLOCK_DAYS)])
+    res = _last_json(out)
+    if rc != 0:
+        msg = (err or out).strip()[-200:]
+        if "REFUSED" in msg:
+            return {"why": "not emailed: %s" % msg}
+        _spend(budget)                                  # it may have gone: it counts against the cap
+        raise RuntimeError("send-email.py notify exited %d: %s" % (rc, msg))
+    if res.get("skipped"):
+        # A refusal or a ledger skip sent nothing, so it uses no place in the cap (review, 7 Oct 2026).
+        return {"why": "not emailed: %s" % res.get("why")}
+    _spend(budget)
+    if not res.get("notified"):
+        raise RuntimeError("send-email.py notify said neither notified nor skipped: %s" % out.strip()[-200:])
+    fresh = clock_get(dec["task"])
+    fnotes = str(fresh.get(TF["notes"]) or "")
+    if notes.strip() and not fnotes.strip():
+        return {"done": "emailed Roy a reminder (%s); the note was not written: Notes read blank" % why}
+    line = _note_line(now, "%s emailed Roy a reminder: %s with no movement (%s)." % (
+        CLOCK_ROY_MARK, "%s days" % dec.get("days") if dec.get("days") is not None else "no stamp", why))
+    clock_patch(dec["task"], {TF["notes"]: (fnotes.rstrip() + "\n\n" + line).strip()[-90000:]})
+    return {"done": "emailed Roy a reminder (%s)" % why}
+
+
+def run_clock(walls, recs, now, activity_ids, d, apply=True, rr_loader=None):
+    """Decide every wall and every Roy hand-off, then make the moves. Returns the clock result."""
+    by_id = {r["id"]: r.get("fields") or {} for r in recs}
+    findings_error = str(walls.get("findingsError") or "")
+    decisions = []
+    for row in walls.get("open") or []:
+        f = by_id.get(row.get("task"))
+        if f is None:
+            decisions.append({"task": row.get("task"), "name": str(row.get("name") or "")[:90],
+                              "kind": row.get("kind"), "subject": str(row.get("subject") or "")[:80],
+                              "clock": CLOCK_DAYS.get(row.get("kind")), "past": False, "action": None,
+                              "why": "not in the clock's task read (closed since the blocker read)"})
+            continue
+        decisions.append(wall_decision(row, f, now, d, findings_error))
+    walled = {r["id"] for r in recs if open_wall((r.get("fields") or {}).get("Notes"))}
+    walled |= {row.get("task") for row in walls.get("open") or []}
+    roy_held = [r for r in recs if roy_eligible(r, walled, now)]
+    roy_decs = []
+    for r in roy_held:
+        dec = roy_decision(r, activity_ids, now)
+        dec["listedNotes"] = bool(str(r["fields"].get("Notes") or "").strip())
+        roy_decs.append(dec)
+    # Oldest first (an undated task counts as oldest), so the reminder cap takes the longest waits.
+    roy_decs.sort(key=lambda x: -(x["days"] if x.get("days") is not None else float("inf")))
+    decisions += roy_decs
+    # The clock's own ticks whose walls have cleared come off (one move per task: a task already
+    # moved above this slot is skipped below).
+    decisions += [u for u in (untick_decision(r, now, d) for r in recs) if u]
+    rr = None
+    moved = set()
+    budget = {"royNotify": ROY_NOTIFY_CAP}
+    for dec in decisions:
+        if not dec.get("action"):
+            continue
+        if dec["task"] in moved:
+            dec["why"], dec["action"] = "one move per task per slot: already moved this slot", None
+            continue
+        if not apply:
+            dec["done"] = "dry run: would %s" % dec["action"]
+            continue
+        try:
+            if dec["action"] == "tick":
+                res = apply_tick(dec, now, d)
+            elif dec["action"] == "untick":
+                res = apply_untick(dec, now, d)
+            elif dec["action"] == "escalate":
+                res = apply_escalate(dec, now, d)
+            else:
+                if rr is None:
+                    rr = (rr_loader or (lambda: _load_script("reroute-roy-admin.py", "od_reroute")))()
+                res = apply_roy(dec, now, d, rr, budget)
+        except (Exception, SystemExit) as exc:  # noqa: BLE001 — every failure is in clock.json and fails verify
+            dec["failed"] = ("%s: %s" % (type(exc).__name__, exc))[:300]
+            continue
+        dec.update(res)
+        if res.get("done"):
+            moved.add(dec["task"])
+    return {"at": now.isoformat(), "walls": len(walls.get("open") or []), "tasksRead": len(recs),
+            "royHeld": len(roy_held), "decisions": decisions, "summary": clock_summary(decisions)}
+
+
+def clock_summary(decisions):
+    out = {}
+    for dec in decisions:
+        k = out.setdefault(dec["kind"], {"walls": 0, "pastClock": 0, "done": 0, "already": 0,
+                                         "notDone": 0, "failed": 0})
+        k["walls"] += 1
+        if not dec.get("past"):
+            continue
+        k["pastClock"] += 1
+        if dec.get("failed"):
+            k["failed"] += 1
+        elif dec.get("done"):
+            k["done"] += 1
+        elif dec.get("already"):
+            k["already"] += 1
+        else:
+            k["notDone"] += 1
+    return out
+
+
+CLOCK_LABELS = (("KEVIN", "KEVIN walls (3-day clock)"), ("TOOL", "TOOL walls (3-day clock)"),
+                ("SIGN-IN", "SIGN-IN walls (1-day clock)"), ("SITE", "SITE walls (no clock)"),
+                ("ROY", "Roy hand-offs (7 days with no movement)"),
+                ("UNTICK", "Clock ticks taken off (their wall cleared)"))
+
+
+def clock_markdown(result):
+    """The report's Clock section: per kind, how many were past the clock, what was done, what
+    could not be done and why. Private: written to scratch, pasted into report-<date>-<HH>.md."""
+    lines = ["## Clock", "",
+             "%s open walls (agent-dispatch.py blockers) over %s open tasks read; %d tasks held by Roy "
+             "judged. A wall past its clock gets its conversion in code before this pass; `leave` is "
+             "never a move on a blocked task." % (result.get("walls"), result.get("tasksRead"),
+                                                 result.get("royHeld") or 0), ""]
+    decs = result.get("decisions") or []
+    for kind, label in CLOCK_LABELS:
+        s = (result.get("summary") or {}).get(kind)
+        if not s:
+            lines.append("- %s: none." % label)
+            continue
+        lines.append("- %s: %d judged, %d past the clock: %d done, %d already done, %d not done, %d failed."
+                     % (label, s["walls"], s["pastClock"], s["done"], s["already"], s["notDone"], s["failed"]))
+        for dec in decs:
+            if dec["kind"] != kind or not dec.get("past"):
+                continue
+            what = (("FAILED: " + dec["failed"]) if dec.get("failed") else
+                    dec.get("done") or ("not done: " + (dec.get("why") or "no reason recorded")))
+            lines.append("  - %s (%s, %s days%s): %s" % (
+                dec["name"][:70], dec["task"], dec.get("days") if dec.get("days") is not None else "?",
+                ", undated" if dec.get("undated") else "", what))
+    return "\n".join(lines) + "\n"
+
+
+def blockers_read():
+    """agent-dispatch.py blockers (read-only, no --sweep): every open wall, paginated by its own reader."""
+    rc, out, err = clock_run([sys.executable, str(Path(__file__).resolve().parent / "agent-dispatch.py"),
+                              "blockers"])
+    if rc != 0:
+        fail("agent-dispatch.py blockers exited %d: %s" % (rc, (err or out).strip()[-300:]))
+    try:
+        walls = json.loads(out)
+    except ValueError as e:
+        fail("agent-dispatch.py blockers printed no JSON (%s)" % e)
+    if not walls.get("openTasksRead"):
+        fail("the blocker read reached no open task at all: a blind read, not a quiet board")
+    return walls
+
+
+def cmd_clock(dry_run=False):
+    now = datetime.now(timezone.utc)
+    d = _load_dispatch()
+    walls = blockers_read()
+    recs = query_all(TASKS_TABLE, "NOT({Status}='Completed')", CLOCK_FIELDS, "clock read")
+    if not recs:
+        fail("the clock's task read returned ZERO open tasks: a broken read, not an empty board")
+    _, activity_ids = read_activity(now)
+    result = run_clock(walls, recs, now, activity_ids, d, apply=not dry_run)
+    result["dryRun"] = bool(dry_run)
+    scratch = os.environ.get("TASK_MANAGER_SCRATCH")
+    if scratch:
+        Path(scratch).mkdir(parents=True, exist_ok=True)
+        for name, text in (("clock.json", json.dumps(result, indent=1)), ("clock.md", clock_markdown(result))):
+            tmp = Path(scratch) / (name + ".tmp")
+            tmp.write_text(text)
+            os.replace(tmp, Path(scratch) / name)
+    failed = sum(s["failed"] for s in result["summary"].values())
+    # Counts only: this line lands in the run log.
+    print(json.dumps({"clock": result["summary"], "failed": failed, "dryRun": bool(dry_run)}))
+    if failed:
+        sys.exit(1)
+
+
+def clock_problems(actions, scratch=None, run_start=None):
+    """verify's half of the clock: this slot's clock.json exists and is fresh, none of its moves
+    failed, and no blocked task was recorded `leave` (Kevin, 7 Oct 2026: a wall past its clock is
+    stuck, and leave is not a move on it)."""
+    scratch = scratch or os.environ.get("TASK_MANAGER_SCRATCH")
+    run_start = run_start if run_start is not None else os.environ.get("TASK_MANAGER_RUN_START")
+    if not scratch:
+        return []
+    out = []
+    blocked, answered = set(), set()
+    try:
+        board = json.loads((Path(scratch) / "board.json").read_text())
+        blocked = {v.get("id") for k in ("stuck", "ownerless") for v in board.get(k) or []
+                   if isinstance(v, dict) and v.get("blocker")}
+        # Kevin's own "wait" on a decision card is recorded as leave (decided --until), and an
+        # episode card's finding is recorded as leave: both are his or the engine's, never a skip.
+        answered = {v.get("id") if isinstance(v, dict) else v
+                    for k in ("decided", "ownLane") for v in board.get(k) or []}
+    except (OSError, ValueError):
+        pass   # freshness_problems reports a missing or unreadable board
+    p = Path(scratch) / "clock.json"
+    if run_start:
+        try:
+            clock = json.loads(p.read_text())
+            if p.stat().st_mtime < float(run_start):
+                out.append("clock.json is from a PREVIOUS slot: the clock pre-pass did not run this slot")
+            for dec in clock.get("decisions") or []:
+                if dec.get("failed"):
+                    out.append("clock move on %s (%s) failed: %s" % (dec.get("task"), dec.get("kind"), dec["failed"]))
+            blocked |= {dec.get("task") for dec in clock.get("decisions") or [] if dec.get("kind") != "ROY"}
+        except (OSError, ValueError) as e:
+            out.append("clock.json missing or unreadable (%s): the clock pre-pass did not run this slot"
+                       % type(e).__name__)
+    for a in actions:
+        if a.get("move") == "leave" and a.get("task") in blocked - answered:
+            out.append("leave recorded on blocked task %s: leave is not a move on a blocked task, the clock "
+                       "owns it" % a.get("task"))
+    return out
+
+
+def walled_stuck(scratch=None):
+    """How many of this slot's stuck views stand on a wall (board.json), 0 when it cannot be read."""
+    scratch = scratch or os.environ.get("TASK_MANAGER_SCRATCH")
+    try:
+        board = json.loads((Path(scratch) / "board.json").read_text()) if scratch else {}
+    except (OSError, ValueError):
+        return 0
+    return sum(1 for v in board.get("stuck") or [] if isinstance(v, dict) and v.get("blocker"))
+
+
 def cmd_verify(report_path):
     """Loud control over one slot run. A run that read nothing, claimed writes
     that did not land, or skipped its score is a FAILED run, whatever it says."""
@@ -991,7 +1694,9 @@ def cmd_verify(report_path):
         problems.append("report carries no positive openTasksRead — board never read")
     stuck = board.get("stuck")
     actions = report.get("actions") or []
-    if isinstance(stuck, int) and stuck > 0 and not actions:
+    # A stuck task on a wall is the clock's, not the foreman's: a board whose stuck tasks all stand
+    # on walls owes no action (review, 7 Oct 2026).
+    if isinstance(stuck, int) and stuck - walled_stuck() > 0 and not actions:
         problems.append("%d stuck tasks but zero actions recorded" % stuck)
     for a in actions:
         if not a.get("ok"):
@@ -1085,6 +1790,7 @@ def cmd_verify(report_path):
 
     problems.extend(freshness_problems(board))
     problems.extend(ownerless_problems(actions))
+    problems.extend(clock_problems(actions))
 
     verdict = {
         "verified": not problems,
@@ -1405,6 +2111,9 @@ def main():
     sub.add_parser("publish")
     v = sub.add_parser("verify")
     v.add_argument("--report", required=True)
+    ck = sub.add_parser("clock")
+    ck.add_argument("--dry-run", action="store_true",
+                    help="decide every wall and Roy hand-off, write nothing to Airtable or the findings queue")
     sub.add_parser("selftest")
     a = ap.parse_args()
     if a.cmd == "board":
@@ -1421,6 +2130,8 @@ def main():
         cmd_publish()
     elif a.cmd == "verify":
         cmd_verify(a.report)
+    elif a.cmd == "clock":
+        cmd_clock(a.dry_run)
     elif a.cmd == "selftest":
         cmd_selftest()
 
