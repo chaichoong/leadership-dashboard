@@ -5144,12 +5144,16 @@ def lesson_line(date, task_name, feedback):
 def _lessons_section_bounds(text):
     """Where the lessons live, so a line is appended INSIDE the section even
     when later sections follow it. Appending at end-of-file looked right until
-    someone added a section below, which silently orphaned every new lesson."""
+    someone added a section below, which silently orphaned every new lesson.
+    A generated block's opening marker ends the section too (7 Oct 2026): the
+    binding rules block opens with a marker line BEFORE its own "## " heading,
+    so 18 lessons landed inside it that day, the block read as stale in 5 of 24
+    agents, the test gate went red, and the next push would have deleted them."""
     start = text.find(LESSONS_HEADING)
     if start == -1:
         return None
     body = start + len(LESSONS_HEADING)
-    nxt = re.search(r"^## ", text[body:], re.M)
+    nxt = re.search(r"^(?:## |<!-- )", text[body:], re.M)
     return (start, body + nxt.start() if nxt else len(text))
 
 
