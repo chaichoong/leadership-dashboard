@@ -63,6 +63,15 @@ const CLAUSES = [
   ['**Coming off:**', 'last quarter\'s KPIs are closed off the dashboard, not left behind'],
   ['A KPI that is not built is a task, never a remembered promise', 'unbuilt dashboard KPI work is tracked'],
   ['every "coming off" KPI has gone', 'the mid-quarter check that the changeover happened'],
+  // Kevin, 7 Oct 2026: the rule of three, and the session helps him fill his open slots.
+  ['Kevin owns at most three open projects at once, across every business', 'his capacity limit across businesses'],
+  ['does not\n  use one of his slots', 'projects Roy or an agent owns leave his slots free'],
+  ['Sessions run **Real Estate first**', 'the order of the sessions'],
+  ['Slots used: N of 3', 'the slot count is stated'],
+  ['Kevin as owner uses one of his three slots', 'the owner rule counts his slots'],
+  ["Phase 8: Kevin's open slots", 'the open-slot decision is part of the session'],
+  ['An empty slot is a decision, never a default', 'a free slot is ruled on, not left'],
+  ['is not offered unless Kevin reopens it', 'a parked business is not offered behind his ruling'],
 ];
 
 describe('strategy-session skill', () => {
@@ -97,6 +106,9 @@ describe('strategy-session skill', () => {
     expect(readFileSync(resolve(ROOT, 'js/wealth.js'), 'utf8')).toContain('buildMonthlyCashflow');
     // The skill says a closed project's KPI leaves the dashboard on its own. Keep that true.
     expect(readFileSync(resolve(ROOT, 'js/dashboard.js'), 'utf8')).toMatch(/p\.status!=='Completed'&&!p\.closedOn/);
+    // The skill points at the dashboard's slot count; keep it there.
+    expect(skill).toContain('renderStrategicCapacity');
+    expect(readFileSync(resolve(ROOT, 'js/dashboard.js'), 'utf8')).toContain('function renderStrategicCapacity');
     const gate = readFileSync(resolve(ROOT, 'scripts/create-agent-task.py'), 'utf8');
     expect(gate).toContain('"--force"');
     // The skill tells plan tasks to pass Upcoming; the gate must still accept it.
