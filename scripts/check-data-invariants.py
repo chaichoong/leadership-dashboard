@@ -712,6 +712,34 @@ INVARIANTS = [
         "fields": ["Name", "Stage", "Legacy Ref"],
     },
     {
+        # The insurance tasks the daily certificate watch raises (scripts/certificate_watch.py)
+        # reach Kevin's 09:00 brief ONLY through the Hard Deadline tick and a Due Date: the
+        # brief's deadline list keys on the tick, whoever holds the task
+        # (scripts/slack-automation/money-daily-worker.js selectDeadlines). In Sep 2026 three
+        # landlord policies renewed with no replacement quote and nothing told Kevin in time. A
+        # tick wiped later (the Some Day automation clears Status, Due Date and Assignee) would
+        # take the line off the brief with no error, so this checks it stays on.
+        # Back-tested 7 Oct 2026 by evaluating the same violation over open "INSURANCE:" tasks,
+        # read-only: it returns the open ones with no tick, so the formula fires.
+        "name": "insurance-quote-task-reaches-the-brief",
+        "table": TASKS,
+        "incident": "Sep 2026 — three landlord policies renewed with no replacement quote; Oct 2026 design: the watch's tasks reach the brief by the Hard Deadline tick alone",
+        "asserts": "an open insurance task raised by the certificate watch (renewal quote, renewal passed, premium rise) carries the Hard Deadline tick and a Due Date",
+        # The keys are certificate_watch.INSURANCE_KEY and PREMIUM_KEY; a formula sees
+        # the rich-text Description as plain text.
+        "violation": ("AND(OR(FIND('CERTWATCH-INSURANCE ', {Description}), "
+                      "FIND('CERTWATCH-PREMIUM ', {Description})), "
+                      "{Status} != 'Completed', {Status} != 'Cancelled', "
+                      "OR(NOT({Hard Deadline}), NOT({Due Date})))"),
+        "control": ("OR(FIND('CERTWATCH-INSURANCE ', {Description}), "
+                    "FIND('CERTWATCH-PREMIUM ', {Description}))"),
+        "control_means": "tasks the certificate watch raised for a landlord insurance renewal or a premium rise",
+        # The watch raises one only inside 30 days of a renewal, so the population is
+        # legitimately empty for weeks at a time.
+        "field_probe": "OR(LEN({Description} & '') >= 0, {Hard Deadline} = 1, LEN({Due Date} & '') >= 0)",
+        "fields": ["Task Name", "Status", "Hard Deadline", "Due Date"],
+    },
+    {
         # The tenant-chain row on the Estate Status board is Kevin's proof the chain works
         # (his condition for letting Roy take its tasks unasked, 25 Sep 2026). A row that
         # stopped updating looks exactly like a chain with nothing to report, so its age is
@@ -1086,7 +1114,45 @@ def check_payments_came_through_the_list(pat):
     } for t in missing], len(business)
 
 
+def check_missed_compliance_has_task(pat):
+    """Every required certificate with nothing in date on file has an open task.
+
+    The rules are scripts/certificate_watch.py's (judge_missed), and the book is
+    agent-dispatch.py's, read through the watch's own read_book: the same reads and
+    the same controls as the 06:05 compliance-watch job that raises the tasks, so
+    this fails only on what that job left behind. A broken read raises, so it
+    reports ERROR, never a pass. `pat` is unused: agent-dispatch reads its own
+    copy of the same PAT file.
+
+    Samples carry the property's record id and the certificate type, never the
+    address: this output can travel, and the repo is public."""
+    import datetime
+    from zoneinfo import ZoneInfo
+    sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+    import certificate_watch as cw
+    try:
+        book = cw.read_book(cw._dispatch())
+    except RuntimeError:
+        raise
+    except Exception as e:                      # a network error must read ERROR, not kill the run
+        raise RuntimeError(f"the compliance book read failed: {e}") from None
+    today = datetime.datetime.now(ZoneInfo("Europe/London")).date().isoformat()
+    items, _inactive = cw.missed_items(book["pages"])
+    _covered, _held, found = cw.judge_missed(items, book["open"], book["keyed"], book["patterns"], today)
+    judged = sum(1 for p in book["pages"] if p.get("active") and p.get("required"))
+    return [{"id": it["propertyId"], "type": it["type"], "state": it["label"],
+             "problem": "no in-date certificate on file and no open task; the 06:05 compliance-watch "
+                        "job raises one, so it did not run or its create failed"} for it in found], judged
+
+
 SCANS = [
+    {
+        "name": "missed-compliance-item-has-a-task",
+        "asserts": "a required certificate with nothing in date on file (expired, undated or missing) => an open task carries it",
+        "incident": "Oct 2026 — 20 lapsed certificates and 40 required items with no record, many with no task anywhere; nothing was going to happen to them",
+        "control_means": "active properties carrying a list of required certificates (the population the book judges)",
+        "run": check_missed_compliance_has_task,
+    },
     {
         "name": "ceo-brief-complete",
         "asserts": "past weekday => exactly one CEO Briefs row, and its Full Brief is populated",

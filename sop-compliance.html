@@ -109,7 +109,7 @@ li { margin-bottom:0.2rem; font-size:0.9rem; } hr { border:none; border-top:1px 
     <a class="header-back" href="index.html#sitemap">&#8592; Back to Site Map</a>
     <h1>&#x2705; Property Compliance</h1>
     <div class="subtitle">Standard Operating Procedure &mdash; Compliance Certificate Tracking Dashboard</div>
-    <div class="version">Version 1.1 &bull; 16 Apr 2026 &bull; Owner: Kevin Brittain</div>
+    <div class="version">Version 1.2 &bull; 7 Oct 2026 &bull; Owner: Kevin Brittain</div>
   </div>
 </div>
 
@@ -161,7 +161,8 @@ li { margin-bottom:0.2rem; font-size:0.9rem; } hr { border:none; border-top:1px 
       <a href="#data-source"><span class="toc-num">8</span> Airtable Data Structure</a>
       <a href="#manual-entry"><span class="toc-num">9</span> Manual Certificate Entry</a>
       <a href="#troubleshooting"><span class="toc-num">10</span> Troubleshooting</a>
-      <a href="#changelog"><span class="toc-num">11</span> Changelog</a>
+      <a href="#booking"><span class="toc-num">11</span> Renewals, Booking &amp; Order of Work</a>
+      <a href="#changelog"><span class="toc-num">12</span> Changelog</a>
     </div>
   </div>
 </div>
@@ -579,13 +580,47 @@ li { margin-bottom:0.2rem; font-size:0.9rem; } hr { border:none; border-top:1px 
   </div>
 </div>
 
-<!-- ============ 11. CHANGELOG ============ -->
+<!-- ============ 11. RENEWALS, BOOKING & ORDER OF WORK ============ -->
+<div class="section" id="booking">
+  <h2 class="section-title"><span class="icon">&#x1F4C5;</span> 11. Renewals, Booking &amp; Order of Work</h2>
+  <div class="card">
+    <p>How a certificate this page shows as missing or expired gets renewed (Kevin, 7 Oct 2026). The Property Administration agent does the admin; Roy only does the step that needs a person at the house.</p>
+    <ol class="steps">
+      <li>Every morning at 06:05 the certificate watch (<code>scripts/certificate_watch.py</code>) reads this book. Any required certificate with nothing in date on file and no open task gets one task for the Property Administration agent.</li>
+      <li>The agent searches first: the book, both Drives, Gmail and the bank. A certificate that already exists is filed, never bought again.</li>
+      <li>At a property we manage, the agent gets three quotes from tradespeople who cover the postcode. At a letting agent&rsquo;s property, it asks the letting agent for the certificate.</li>
+      <li>The agent books the cheapest of the three by email: one approval card for Kevin, sent from info@agilelets.co.uk, with Roy copied in so he can arrange access.</li>
+      <li>Once the contractor confirms the date, the tenants are told by email.</li>
+      <li>Only after the booking email has been approved and sent does Roy get a task, and it says only: attend or give access on that date.</li>
+      <li>The certificate is filed with its renewal date, and the task closes.</li>
+    </ol>
+    <div class="info-box info">
+      <span class="ib-icon">&#x2139;&#xFE0F;</span>
+      <div><strong>Order of work:</strong> lapsed first, then the quarter plan&rsquo;s list order (the Real Estate plan&rsquo;s compliance project, in the order it names the houses), then soonest expiry. Each task the watch raises says where it sits in that order.</div>
+    </div>
+    <div class="info-box warn">
+      <span class="ib-icon">&#x26A0;&#xFE0F;</span>
+      <div><strong>Landlord insurance never renews without a quote.</strong> The watch raises a replacement quote task through TopCashback 30 days and again 14 days before each renewal. If a renewal passes with nothing open, or a recorded premium rises by more than 10%, it raises a task with the Hard Deadline tick, which puts it in the 09:00 brief.</div>
+    </div>
+    <div class="info-box tip">
+      <span class="ib-icon">&#x1F4CC;</span>
+      <div><strong>The renewal date decides, not the Status field.</strong> A row marked Active with a renewal date in the past counts as expired, here and in the watch. A row marked Expired stays expired whatever its date.</div>
+    </div>
+  </div>
+</div>
+
+<!-- ============ 12. CHANGELOG ============ -->
 <div class="section" id="changelog">
-  <h2 class="section-title"><span class="icon">&#x1F4DD;</span> 11. Changelog</h2>
+  <h2 class="section-title"><span class="icon">&#x1F4DD;</span> 12. Changelog</h2>
   <div class="card">
     <table class="label-table">
       <thead><tr><th>Version</th><th>Date</th><th>Changes</th></tr></thead>
       <tbody>
+        <tr>
+          <td><strong>1.2</strong></td>
+          <td>7 Oct 2026</td>
+          <td>Added section 11: the daily certificate watch, the agent books the cheapest of three by email (Roy only attends or gives access), the order of work, the insurance renewal checkpoints, and that the renewal date decides over the Status field.</td>
+        </tr>
         <tr>
           <td><strong>1.1</strong></td>
           <td>16 Apr 2026</td>

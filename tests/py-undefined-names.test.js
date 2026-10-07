@@ -50,6 +50,7 @@ const ESTATE_SCRIPTS = [
   'scripts/agent-dispatch.py',
   'scripts/standing_holds.py',
   'scripts/certificate_watch.py',
+  'scripts/reroute-roy-admin.py',
   'scripts/handback-poll.py',
   'scripts/session-keepalive.py',
   'scripts/signin_hold.py',
