@@ -96,6 +96,11 @@ from pathlib import Path
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from agent_email_format import PROPERTY_SENDER, PERSONAL_SENDER  # noqa: E402  Roy's inbox, info@
+from gmail_pacer import (  # noqa: E402  one ledger and one cost model for every Gmail reader
+    GMAIL_LIST_PAGE_MAX, GMAIL_PACE_CEILING, GMAIL_REBUILD_CEILING,
+    GMAIL_UNITS_GET, GMAIL_UNITS_LIST, GMAIL_UNITS_PER_MINUTE,
+    _pace, gmail_note_refusal, gmail_pace, gmail_units,
+)
 
 WORKER_URL = "https://drive-upload.kevinbrittain.workers.dev"
 
@@ -414,6 +419,11 @@ _slowdown = {"waited": 0}
 MAX_WORKER_CALLS = 400
 _calls = {"n": 0}
 
+# The Gmail pacer lives in gmail_pacer.py so payment-run.py shares the SAME
+# per-minute ledger and the SAME cost model. Two processes each politely under
+# the limit still produce 403s if they do not count each other's calls.
+# Kevin's approved build, 5 Oct 2026 (finding 20261002-phase-2-702).
+
 
 def classify_worker_error(code, body):
     """('retry'|'slowdown'|'quota'|'stop', why) for a non-200 from the worker.
@@ -429,12 +439,21 @@ def classify_worker_error(code, body):
     if any(m in text for m in DAILY_QUOTA_MARKERS):
         return "quota", "Gmail daily quota is exhausted"
     if quota_shaped and any(m in text for m in SHORT_WINDOW_MARKERS):
-        return "slowdown", "Gmail short-window rate metric; it refills in about a minute"
+        return "slowdown", ("Gmail short-window rate metric is full. One page of 25 messages "
+                            "costs %d units (1 list + 25 gets). The documented allowance is %d a "
+                            "minute, but what Gmail enforces behaves like a moving average and "
+                            "refuses sooner, so the pacer learns the rate this mailbox is actually "
+                            "refused at rather than trusting the published number"
+                            % (GMAIL_UNITS_LIST + GMAIL_LIST_PAGE_MAX * GMAIL_UNITS_GET,
+                               GMAIL_UNITS_PER_MINUTE))
     if quota_shaped:
         # Quota-shaped but the metric is not named. Google's per-day cap is a
         # billion units, so the odds favour a short window — but this run cannot
         # prove it, so wait the minute rather than spending the slot on a guess.
-        return "slowdown", "Gmail quota error with no metric window named; waiting a minute"
+        return "slowdown", ("Gmail quota error with no metric window named. Gmail allows "
+                            "%d units a minute; one page of 25 messages costs %d"
+                            % (GMAIL_UNITS_PER_MINUTE,
+                               GMAIL_UNITS_LIST + GMAIL_LIST_PAGE_MAX * GMAIL_UNITS_GET))
     if code == 409:
         return "stop", "Gmail not connected on the worker"
     if any(m in text for m in RATE_LIMIT_MARKERS):
@@ -449,6 +468,18 @@ def backoff_seconds(attempt, jitter=None):
     three slots that collide do not retry in lockstep."""
     base = BACKOFF_BASE_SECONDS * (2 ** max(0, attempt - 1))
     return round(base + (random.random() if jitter is None else jitter) * base * 0.5, 2)
+
+
+def _pace_wait_note(path):
+    """One line per wait, so a paced run never looks like a hung one — the same
+    lesson as finding 20260925-agent-dispatch-615."""
+    def note(cost, spent, ceiling, wait):
+        progress("GMAIL PACER: holding %s for %.1fs — this call costs %d units and "
+                 "%d of the %d allowed this minute are already spent (Gmail allows "
+                 "%d a minute; a page of 25 messages costs %d)."
+                 % (path, wait, cost, spent, ceiling, GMAIL_UNITS_PER_MINUTE,
+                    GMAIL_UNITS_LIST + GMAIL_LIST_PAGE_MAX * GMAIL_UNITS_GET))
+    return note
 
 
 def worker_post(path, payload, sleep=time.sleep):
@@ -467,6 +498,15 @@ def worker_post(path, payload, sleep=time.sleep):
                  "User-Agent": "od-inbound-triage/1.0"},
         method="POST",
     )
+    # PACE BEFORE THE CALL, not after a 403 (Kevin's approved build, 5 Oct 2026).
+    # Every Gmail read in this file goes through here, so Roy's assistant, the
+    # track-record lookup, the standing holds and the hand-back searches all join
+    # the same ledger without changing a line.
+    units, waited = gmail_pace(path, payload, account=payload.get("account"),
+                               on_wait=_pace_wait_note(path))
+    if waited:
+        _pace["waited"] += waited
+
     _calls["n"] += 1
     if _calls["n"] > MAX_WORKER_CALLS:
         fail("GMAIL CALL BUDGET SPENT: this run has made %d worker calls "
@@ -491,6 +531,14 @@ def worker_post(path, payload, sleep=time.sleep):
                      "off. Detail: %s" % (why, path, e.code, detail),
                      kind="quota")
             if action == "slowdown":
+                # TEACH THE PACER (7 Oct 2026). Gmail has just told us what it
+                # really allows, which on the first live run was 2,526 units in a
+                # minute, not the 6,000 the documentation describes. Recording it
+                # here is the only place that knows a refusal happened, and from
+                # now on this mailbox is paced under it.
+                learned = gmail_note_refusal(payload.get("account"))
+                progress("GMAIL PACER LEARNED: Gmail refused at this rate, so calls on "
+                         "this mailbox are now held under %d units a minute." % learned)
                 # NOT the day gone. Wait past the metric window and try again;
                 # only if it survives every attempt does the slot give up.
                 if (attempt == MAX_ATTEMPTS
@@ -1679,7 +1727,72 @@ def cmd_history_stale():
     return 0 if (stale and not cooling and not given_up) else 1
 
 
-def cmd_history_build(pages):
+# ---------------------------------------------------------------------------
+# A REBUILD THAT CAN STOP AND CARRY ON (Kevin's approved build, 5 Oct 2026)
+# ---------------------------------------------------------------------------
+# Ten lanes at up to 20 pages is 101,000 quota units. Gmail gives 6,000 a
+# minute and a rebuild may take half of that, so a clean walk needs about 34
+# minutes. No slot has 34 minutes: it shares the serial queue with the scan
+# that actually triages mail. Every rebuild since 1 Sep 2026 therefore died
+# part-way and threw away everything it had read.
+#
+# So the walk SAVES ITS PLACE after every page. Inside a slot it stops cleanly
+# after HISTORY_SLOT_BUDGET_SECONDS and the next slot carries on from the same
+# page token. Only when every lane is finished does anything reach Airtable, so
+# the book is never half old and half new (finding 20260930-phase-2-611).
+#
+# A STOP AT THE WALL IS NOT A FAILURE. That distinction is the whole fix: the
+# give-up counter exists to stop a BROKEN rebuild retrying for ever, and
+# counting "ran out of time" as broken is what retired a rebuild that worked.
+HISTORY_PROGRESS_FILE = Path.home() / ".config/od/gmail_history_progress.json"
+HISTORY_SLOT_BUDGET_SECONDS = 8 * 60      # inside a slot
+HISTORY_FORCE_BUDGET_SECONDS = 60 * 60    # history-build --force, run on its own
+
+
+class HistoryWall(Exception):
+    """Out of time for this run, with the place saved. Not a fault."""
+
+    def __init__(self, done, total, spent):
+        self.done, self.total, self.spent = done, total, spent
+        super().__init__("history rebuild paused: %d of %d lanes done" % (done, total))
+
+
+def history_progress_read():
+    if not HISTORY_PROGRESS_FILE.exists():
+        return {}
+    try:
+        return json.loads(HISTORY_PROGRESS_FILE.read_text())
+    except (ValueError, OSError):
+        # Unreadable progress means start again, which costs quota but cannot
+        # produce a WRONG book. Silently continuing from nothing while keeping
+        # the old partial counts is the outcome that could.
+        return {}
+
+
+def history_progress_write(data):
+    HISTORY_PROGRESS_FILE.parent.mkdir(parents=True, exist_ok=True)
+    fd, tmp = tempfile.mkstemp(dir=str(HISTORY_PROGRESS_FILE.parent), suffix=".tmp")
+    with os.fdopen(fd, "w") as f:
+        json.dump(data, f)
+    os.replace(tmp, HISTORY_PROGRESS_FILE)      # atomic, per python-scripts.md
+
+
+def history_progress_clear():
+    try:
+        HISTORY_PROGRESS_FILE.unlink()
+    except OSError:
+        pass
+
+
+def history_merge_stats(into, addr, prefix, era, last_ms):
+    s = into.setdefault(addr, {"counts": {}, "human": 0, "hand": 0, "last_ms": 0})
+    s["counts"][prefix] = s["counts"].get(prefix, 0) + 1
+    s["human" if era == "human-era" else "hand"] += 1
+    s["last_ms"] = max(s["last_ms"], last_ms)
+    return s
+
+
+def cmd_history_build(pages, budget=None):
     """Wrapper that REMEMBERS a failure (finding 20260910-daily-ops-513).
 
     Without this the failure is invisible to the next slot: the book stays
@@ -1691,7 +1804,18 @@ def cmd_history_build(pages):
     something went wrong, so 24 days of identical failures were indistinguishable
     from one transient blip, and nothing could ever decide to stop trying."""
     try:
-        return _history_build(pages)
+        return _history_build(pages, budget=budget)
+    except HistoryWall as wall:
+        # NOT a failure, so the give-up counter does not move and the cooldown is
+        # not armed. This is the distinction whose absence retired a working
+        # rebuild at 35 days stale (findings 20261002-phase-2-702 and
+        # 20261004-daily-ops-738: a capacity refusal is not evidence of a fault).
+        print(json.dumps({"paused": True, "lanesDone": wall.done,
+                          "lanesTotal": wall.total, "secondsSpent": round(wall.spent),
+                          "unitsSpent": _pace["units"],
+                          "note": "out of time for this run; the place is saved and "
+                                  "the next run carries on. Nothing written to the book yet."}))
+        return None
     except BaseException:
         try:
             st = read_fail_state()
@@ -1712,34 +1836,98 @@ def cmd_history_build(pages):
         raise
 
 
-def _history_build(pages):
-    labels = worker_labels()
-    agent_ids = collect_agent_ids()
-    stats, sampled, truncated = {}, {}, {}
-    excluded_agent = 0
-    for prefix in sorted(HISTORY_LANE_MAP, key=int):
-        lbl = find_label(labels, prefix)
-        if not lbl:
-            sampled[prefix] = None   # label absent in Gmail — noted, not fatal
-            continue
-        msgs, trunc = worker_list(label_ids=[lbl["id"]], max_pages=pages)
-        truncated[prefix] = trunc
-        kept = 0
-        for m in msgs:
-            addr = parse_bare_email((m.get("headers") or {}).get("from", ""))
-            if not addr:
+def _history_build(pages, budget=None, now=None):
+    """Walk every lane, one page at a time, resuming where the last run stopped.
+
+    Paced at GMAIL_REBUILD_CEILING so a slot's own scan always keeps half the
+    minute. Raises HistoryWall when the budget runs out with the place saved.
+    """
+    clock = now or time.time
+    started = clock()
+    budget = budget if budget is not None else HISTORY_SLOT_BUDGET_SECONDS
+    prev_ceiling = _pace["ceiling"]
+    _pace["ceiling"] = GMAIL_REBUILD_CEILING
+    try:
+        labels = worker_labels()
+        agent_ids = collect_agent_ids()
+        saved = history_progress_read()
+        stats = {a: {"counts": dict(v.get("counts") or {}),
+                     "human": int(v.get("human") or 0),
+                     "hand": int(v.get("hand") or 0),
+                     "last_ms": int(v.get("last_ms") or 0)}
+                 for a, v in (saved.get("stats") or {}).items()}
+        sampled = dict(saved.get("sampled") or {})
+        truncated = dict(saved.get("truncated") or {})
+        lanes = dict(saved.get("lanes") or {})      # prefix -> {done, token, listed, kept}
+        excluded_agent = int(saved.get("excludedAgent") or 0)
+        all_prefixes = sorted(HISTORY_LANE_MAP, key=int)
+        if saved:
+            done_now = sum(1 for x in all_prefixes if (lanes.get(x) or {}).get("done"))
+            progress("history rebuild: carrying on from an earlier run — %d of %d lanes "
+                     "already walked, %d senders counted so far."
+                     % (done_now, len(all_prefixes), len(stats)))
+
+        def save():
+            history_progress_write({
+                "stats": stats, "sampled": sampled, "truncated": truncated,
+                "lanes": lanes, "excludedAgent": excluded_agent,
+                "updated": datetime.now().isoformat(timespec="seconds"),
+            })
+
+        for prefix in all_prefixes:
+            lane = lanes.setdefault(prefix, {"done": False, "token": None,
+                                             "pages": 0, "listed": 0, "kept": 0})
+            if lane.get("done"):
                 continue
-            era = classify_era(m.get("internalDate"), m.get("id"), agent_ids)
-            if era == "agent":
-                excluded_agent += 1
+            lbl = find_label(labels, prefix)
+            if not lbl:
+                sampled[prefix] = None   # label absent in Gmail — noted, not fatal
+                lane["done"] = True
+                save()
                 continue
-            s = stats.setdefault(addr.lower(),
-                                 {"counts": {}, "human": 0, "hand": 0, "last_ms": 0})
-            s["counts"][prefix] = s["counts"].get(prefix, 0) + 1
-            s["human" if era == "human-era" else "hand"] += 1
-            s["last_ms"] = max(s["last_ms"], int(m.get("internalDate") or 0))
-            kept += 1
-        sampled[prefix] = {"listed": len(msgs), "kept": kept}
+            while lane["pages"] < pages:
+                if clock() - started > budget:
+                    save()
+                    raise HistoryWall(
+                        sum(1 for x in all_prefixes if (lanes.get(x) or {}).get("done")),
+                        len(all_prefixes), clock() - started)
+                payload = {"labelIds": [lbl["id"]]}
+                if lane.get("token"):
+                    payload["pageToken"] = lane["token"]
+                data = worker_post("/gmail/list", payload)
+                msgs = data.get("messages", [])
+                lane["pages"] += 1
+                lane["listed"] += len(msgs)
+                for m in msgs:
+                    addr = parse_bare_email((m.get("headers") or {}).get("from", ""))
+                    if not addr:
+                        continue
+                    era = classify_era(m.get("internalDate"), m.get("id"), agent_ids)
+                    if era == "agent":
+                        excluded_agent += 1
+                        continue
+                    history_merge_stats(stats, addr.lower(), prefix, era,
+                                        int(m.get("internalDate") or 0))
+                    lane["kept"] += 1
+                lane["token"] = data.get("nextPageToken")
+                # SAVED AFTER EVERY PAGE. A page already paid for must never be
+                # paid for twice, which is what made 35 days of rebuilds futile.
+                if not lane["token"]:
+                    lane["done"] = True
+                    save()
+                    break
+                save()
+            else:
+                # Ran out of allowed pages with a token still pending.
+                truncated[prefix] = True
+                lane["done"] = True
+                save()
+            sampled[prefix] = {"listed": lane["listed"], "kept": lane["kept"]}
+            truncated.setdefault(prefix, bool(lane.get("token")))
+            save()
+    finally:
+        _pace["ceiling"] = prev_ceiling
+
     if len(stats) < HISTORY_MIN_SENDERS:
         fail("CONTROL FAILED: history build found %d senders (expected %d+). "
              "The human era alone holds hundreds of filed emails, so this is "
@@ -1776,10 +1964,16 @@ def _history_build(pages):
         state.pop(k, None)
     write_state(state)
     write_fail_state({})
+    # The walk is finished and the book is written, so the saved place is spent.
+    # Cleared AFTER the Airtable write, never before: a crash between the two
+    # must leave the place so the next run finishes rather than starts again.
+    history_progress_clear()
     # Counts only — runs.log must never carry sender addresses.
     print(json.dumps({"built": now_iso, "senders": len(stats),
                       "agentMovesExcluded": excluded_agent,
-                      "sampled": sampled, "truncated": truncated}))
+                      "sampled": sampled, "truncated": truncated,
+                      "unitsSpent": _pace["units"],
+                      "secondsWaitedForQuota": round(_pace["waited"], 1)}))
 
 
 def cmd_history_dump():
@@ -2167,7 +2361,7 @@ def selftest():
             check("stale with no prior failure exits 0 (rebuild now)",
                   cmd_history_stale() == 0)
             # Exactly what a quota death must leave behind.
-            def _boom(_pages):
+            def _boom(_pages, budget=None, now=None):
                 fail("GMAIL RATE METRIC STILL FULL", kind="rate")
             _real, globals()["_history_build"] = _history_build, _boom
             _fail_quiet["on"] = True
@@ -2956,7 +3150,12 @@ def main(argv):
         # give-up state FIRST so this attempt is judged on its own result.
         if "--force" in sys.argv:
             history_force_clear()
-        cmd_history_build(int(opt("--pages", str(HISTORY_BUILD_PAGES))))
+        # --force is run on its own, outside a slot, so it gets the hour it needs:
+        # ten lanes at 3,000 units a minute is about 34 minutes of walking. Inside a
+        # slot the budget is 8 minutes and the next slot carries on.
+        cmd_history_build(int(opt("--pages", str(HISTORY_BUILD_PAGES))),
+                          budget=(HISTORY_FORCE_BUDGET_SECONDS if "--force" in sys.argv
+                                  else HISTORY_SLOT_BUDGET_SECONDS))
     elif cmd == "history-dump":
         return cmd_history_dump()
     elif cmd == "matters":

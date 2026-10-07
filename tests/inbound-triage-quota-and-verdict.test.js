@@ -160,7 +160,7 @@ describe('a history rebuild that failed on quota does not retry next slot', () =
 import importlib.util, os, sys
 spec = importlib.util.spec_from_file_location("it", ${JSON.stringify(TRIAGE)})
 it = importlib.util.module_from_spec(spec); spec.loader.exec_module(it)
-it._history_build = lambda pages: it.fail("GMAIL RATE METRIC STILL FULL", kind="rate")
+it._history_build = lambda pages, budget=None, now=None: it.fail("GMAIL RATE METRIC STILL FULL", kind="rate")
 it._fail_quiet["on"] = True
 try:
     it.cmd_history_build(1)
