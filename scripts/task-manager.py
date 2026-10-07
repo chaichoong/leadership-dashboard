@@ -1048,10 +1048,11 @@ def cmd_publish():
 # clock.json (verify reads it) and clock.md (the report's Clock section).
 CLOCK_DAYS = {"SIGN-IN": 1, "TOOL": 3, "KEVIN": 3}
 ROY_CLOCK_DAYS = 7
-# Reminder emails to Roy per slot, oldest hand-off first. On 7 Oct 2026 a dry run found 38 of his
-# 52 tasks past the clock; 30 emails in one burst to the inbox he reads is noise, and three slots a
-# day clear such a backlog inside a day. Moves to an agent are not capped (they email nobody).
-ROY_NOTIFY_CAP = 10
+# Reminder emails to Roy per slot, oldest hand-off first (session lead, 7 Oct 2026). A dry run that
+# day found 38 of his 52 tasks past the clock; even ten a slot is 30 emails a day to one person,
+# which is noise. Three a slot is nine a day at most. Moves to an agent are not capped (they email
+# nobody), and a refused or skipped notify uses no place.
+ROY_NOTIFY_CAP = 3
 CLOCK_BY = "task-manager clock"
 # The 09:00 brief lists a Hard Deadline task only when it is due within this many days or overdue
 # (scripts/slack-automation/money-daily-worker.js DEADLINE_DAYS).

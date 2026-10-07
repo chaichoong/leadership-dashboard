@@ -162,8 +162,8 @@ per wall:
 - **SITE:** no clock. Kevin's "Add a new site" clears it.
 - **Roy, 7 days with no movement** (Roy holds it, no open wall, not parked):
   plain admin moves to its agent by `reroute-roy-admin.py`'s own rules; a
-  physical step gets one reminder email a week to Roy (at most ten a slot,
-  oldest first). Movement is a web-app edit, the handover, a note in Roy's own
+  physical step gets one reminder email a week to Roy, at his own Gmail from
+  info@ (at most three a slot, oldest first). Movement is a web-app edit, the handover, a note in Roy's own
   words (his page or his assistant) or his emailed reply folded into the task.
 
 `$TASK_MANAGER_SCRATCH/clock.json` holds every decision and

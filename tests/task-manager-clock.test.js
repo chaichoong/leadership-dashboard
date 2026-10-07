@@ -347,13 +347,13 @@ describe('Roy hand-offs: 7 days with no movement', () => {
     expect(r.res.decisions.filter((x) => x.task === 'recR8').map((x) => x.kind)).toEqual(['SIGN-IN']);
     expect(r.calls).toHaveLength(0);
   });
-  it('at most ten reminders a slot, oldest first', () => {
+  it('at most three reminders a slot, oldest first', () => {
     const many = Array.from({ length: 12 }, (_, i) => roy(`recRC${String(i).padStart(2, '0')}`, 'Visit 6 Example Road',
       { notes: 'x', created: daysAgo(8 + i) }));
     const r = clock({ tasks: many, runs: { 'send-email.py': ok } });
-    expect(r.calls).toHaveLength(10);
-    const capped = r.res.decisions.filter((x) => /cap of 10/.test(x.why || '')).map((x) => x.task);
-    expect(capped).toEqual(['recRC01', 'recRC00']);
+    expect(r.calls.map((c) => c[1])).toEqual(['recRC11', 'recRC10', 'recRC09']);
+    const capped = r.res.decisions.filter((x) => /cap of 3 reminders/.test(x.why || '')).map((x) => x.task);
+    expect(capped).toEqual(['recRC08', 'recRC07', 'recRC06', 'recRC05', 'recRC04', 'recRC03', 'recRC02', 'recRC01', 'recRC00']);
   });
   it('his emailed reply, folded into the task by the create gate, is movement: no reminder after it', () => {
     const t = roy('recRF', 'Visit 6 Example Road to photograph the meter', {
