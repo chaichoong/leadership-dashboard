@@ -36,7 +36,12 @@ spec = importlib.util.spec_from_file_location('t', ${JSON.stringify(TRIAGE)})
 m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m)
 ${body}
 `;
-  const r = execFileSync('python3', ['-c', src], { encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'] });
+  const r = execFileSync('python3', ['-c', src], {
+    encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'],
+    // Never touch the live Gmail pacer ledger: a fixture's fake refusals would otherwise teach
+    // the real pacer a ceiling and throttle production from a test (7 Oct 2026).
+    env: { ...process.env, OD_GMAIL_PACE_DIR: join(ROOT, 'pace') },
+  });
   return r;
 }
 
@@ -79,12 +84,30 @@ try:
 except SystemExit:
     pass
 `);
-    const lines = err.trim().split('\n').filter(Boolean);
+    const all = err.trim().split('\n').filter(Boolean);
+    // Since 7 Oct 2026 each refusal also teaches the pacer what Gmail really allows, and says so
+    // on its own line. Those are separated out rather than loosening the assertion below: the
+    // guarantee this file exists for is that EVERY WAIT announces itself, and that is still
+    // checked line for line.
+    const learned = all.filter((l) => /GMAIL PACER LEARNED/.test(l));
+    const held = all.filter((l) => /GMAIL PACER: holding/.test(l));
+    const lines = all.filter((l) => !/GMAIL PACER/.test(l));
     // MAX_ATTEMPTS is 4, so three waits happen before the last attempt gives up.
     expect(lines.length).toBeGreaterThanOrEqual(3);
     for (const l of lines) {
       expect(l).toMatch(/GMAIL PER-MINUTE METRIC FULL on \/gmail\/labels \(attempt \d+\/\d+\)/);
       expect(l).toMatch(/waiting 65s for the window to refill/);
+    }
+    // One learned-ceiling line per REFUSAL, each naming a real number. MAX_ATTEMPTS is 4, so
+    // there are four refusals and three waits: the last refusal teaches the pacer and then gives
+    // up, which is the right order — the lesson must survive the run that failed to learn it.
+    expect(learned.length).toBe(lines.length + 1);
+    for (const l of learned) {
+      expect(l).toMatch(/now held under \d+ units a minute/);
+    }
+    // Any holding line is the pacer doing its job, and must also say why in plain numbers.
+    for (const l of held) {
+      expect(l).toMatch(/this call costs \d+ units and \d+ of the \d+ allowed this minute/);
     }
     // The cumulative figure moves, so a reader can tell a wait from a stall.
     expect(lines[0]).toMatch(/65s of this run's 600s budget spent/);
@@ -118,7 +141,13 @@ except SystemExit:
 `);
     expect(out).toMatch(/GMAIL RATE METRIC STILL FULL/);
     expect(JSON.parse(out.trim().split('\n').filter(Boolean).pop()).kind).toBe('rate');
-  });
+    // 120s, not the 30s default. This case walks the whole MAX_SLOWDOWN_SECONDS budget through a
+    // real subprocess, so it is the slowest test in the file by an order of magnitude and sits
+    // close to the default limit even unloaded. It went red on 7 Oct 2026 at 57s with a history
+    // rebuild running beside it, and passed in isolation immediately after — the same shape as
+    // finding 20260925-queue-fixer-612, and a flaky red on the gate is what teaches people to
+    // reach for SKIP_SYNC_TESTS=1.
+  }, 120000);
 });
 
 describe('seconds_to_next_minute — what a cycle-2 scan waits for', () => {

@@ -412,14 +412,70 @@ def main(argv=None):
         for r in res["rulings_behind"]:
             print("BEHIND ESTATE.md (as at %s) has not absorbed: %s"
                   % (res["stamp"], r))
-    summary = ("estate drift: %d stale lines, %d rulings behind, %d files scanned "
-               "(%d of them CLAUDE.md and memory)"
-               % (len(res["hits"]), len(res["rulings_behind"]), res["files_scanned"],
-                  res["memory_files_scanned"]))
+    # CHECK 3 — DID THE NEW RULE ARRIVE? (Kevin, 7 Oct 2026)
+    #
+    # Checks 1 and 2 are both NEGATIVE: retired wording must be gone, and ESTATE.md must not be
+    # behind a ruling. Neither can see an ABSENCE. On 7 Oct the reporting rule that forbids
+    # presenting an unread figure as checked was in Kevin's global file and in the CEO's own
+    # instructions, and in 0 of the 24 agent definitions — so three heads wrote that morning's
+    # brief from figures they had not read and the run reported green. His ruling: find the
+    # overarching fix, not another patch. This is the positive half.
+    binding = binding_rules_verdict()
+    if not a.json and binding["code"]:
+        print(binding["message"])
+    if binding["code"] == 2 and code == 0:
+        print("CANNOT VERIFY: %s" % binding["message"], file=sys.stderr)
+        return 2
+    if binding["code"] == 1:
+        code = code or 1
+
+    summary = ("estate drift: %d stale lines, %d rulings behind, %d agents missing the binding "
+               "rules, %d files scanned (%d of them CLAUDE.md and memory)"
+               % (len(res["hits"]), len(res["rulings_behind"]), binding["offenders"],
+                  res["files_scanned"], res["memory_files_scanned"]))
     # In --json mode stdout is the JSON document and nothing else, or the caller
     # cannot parse a clean run (the first version printed the summary after it).
     print(summary, file=sys.stderr if (code or a.json) else sys.stdout)
     return code
+
+
+def binding_rules_verdict():
+    """Check 3: every agent carries the current block from BINDING-RULES.md.
+
+    Delegated to scripts/agent-binding-rules.py rather than reimplemented, so the daily job and
+    the test gate can never disagree with the pusher about what "current" means.
+    """
+    import importlib.util
+    path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "agent-binding-rules.py")
+    try:
+        spec = importlib.util.spec_from_file_location("agent_binding_rules", path)
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+    except Exception as exc:                                    # noqa: BLE001 - any failure here is "cannot verify"
+        return {"code": 2, "offenders": 0,
+                "message": "the binding-rules check could not be loaded (%s)" % str(exc)[:200]}
+    block = mod.source_block()
+    files = mod.agent_files()
+    if not block:
+        return {"code": 2, "offenders": 0,
+                "message": "no binding-rules block found in %s" % mod.SOURCE_NAME}
+    if len(files) < mod.MIN_AGENTS:
+        return {"code": 2, "offenders": 0,
+                "message": "only %d agent file(s) readable (expected %d+); "
+                           "'every agent is compliant' off an emptied folder is not a pass"
+                           % (len(files), mod.MIN_AGENTS)}
+    bad = []
+    for f in files:
+        have, markers = mod.agent_block(f)
+        if not markers or have != block:
+            bad.append(f.name)
+    if not bad:
+        return {"code": 0, "offenders": 0,
+                "message": "binding rules: all %d agents current" % len(files)}
+    return {"code": 1, "offenders": len(bad),
+            "message": ("BINDING RULES missing or stale in %d of %d agents: %s\n"
+                        "       Fix with: python3 scripts/agent-binding-rules.py --push"
+                        % (len(bad), len(files), ", ".join(bad)))}
 
 
 if __name__ == "__main__":

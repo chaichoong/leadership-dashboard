@@ -308,6 +308,58 @@ function todayLondonISO() {
 // and hands its result over through Airtable. Returns null when the huddle did not run (Mac
 // asleep, agent error): the brief then generates exactly as it always did, so the 09:00 message
 // never fails to arrive because of this.
+// WHETHER TODAY'S ROW EXISTS IS NOT THE SAME QUESTION AS WHETHER THE HUDDLE SAID ANYTHING
+// (30 Sep 2026: two rows for one date, found by the daily ceo-brief-complete check).
+//
+// storeBrief used to decide PATCH-or-POST from `huddle.recordId`. But gatherHuddle returns null
+// on FOUR routes, and on all four a row for today may already exist: the Airtable read was not ok;
+// every row for today already has a Full Brief; the 07:30 stub carries neither One Thing nor Board
+// Flags; or anything threw. Each of those then POSTed a second row for the day, which is what the
+// 31 Jul 2026 fix was meant to stop — it fixed the one route it had found (the missing
+// returnFieldsByFieldId) and left the conflation in place.
+//
+// So the upsert asks its own question, by date, and carries no opinion about huddle content.
+// It prefers the row still waiting to be filled, so a day that already holds a duplicate gets its
+// unfinished row patched rather than a third added.
+const isFallbackBrief = (raw) => {
+    try { return Boolean(JSON.parse(String(raw || '{}')).fallback); } catch { return false; }
+};
+
+
+async function findTodayBriefRow(pat) {
+    const today = todayLondonISO();
+    const url = `https://api.airtable.com/v0/${BASE_ID}/${TBL_BRIEFS}`
+        + `?returnFieldsByFieldId=true&maxRecords=10`
+        + `&filterByFormula=${encodeURIComponent(`DATESTR({Date})='${today}'`)}`;
+    let last = '';
+    for (let attempt = 0; attempt < 2; attempt++) {
+        try {
+            const r = await fetch(url, { headers: { Authorization: `Bearer ${pat}` } });
+            if (r.ok) {
+                const rows = (await r.json()).records || [];
+                if (!rows.length) return { exists: false, recordId: null };
+                const unfinished = rows.find(x => !getField(x, F.ceoFullBrief));
+                const finished = rows.find(x => String(getField(x, F.ceoFullBrief) || '').trim() !== '');
+                return {
+                    exists: true,
+                    recordId: (unfinished || rows[0]).id,
+                    rowCount: rows.length,
+                    // Whether the day already holds a real brief, which decides if the failure
+                    // marker may write at all. A fallback row does not count as a real one.
+                    finishedBrief: Boolean(finished) && !isFallbackBrief(getField(finished, F.ceoFullBrief)),
+                };
+            }
+            last = 'HTTP ' + r.status;
+        } catch (e) { last = String(e && e.message || e); }
+    }
+    // Unreadable is NOT "no row today". Blind POST is what produced the duplicates, and a duplicate
+    // row quietly breaks the CEO Brief tab's read of the latest record for as long as nobody looks.
+    // The brief text has already gone to Slack by this point, so failing loudly here costs the
+    // record, not the message, and the record can be rebuilt.
+    throw new Error('Cannot tell whether today already has a CEO brief row (' + last + '); refusing to POST a possible duplicate');
+}
+
+
 async function gatherHuddle(pat) {
     try {
         const today = todayLondonISO();
@@ -908,14 +960,18 @@ async function storeBrief(pat, brief, m, tasks, huddle) {
             [F.ceoSourceStats]: JSON.stringify(tasks.counts),
         } }],
     };
-    // Upsert. The 07:30 huddle already created today's record; a second POST would give Kevin
-    // two briefs for one day and break the CEO Brief tab's read of the latest record.
-    const usePatch = Boolean(huddle && huddle.recordId);
+    // Upsert, decided by whether today's row EXISTS — never by whether the huddle had content
+    // to carry forward. See findTodayBriefRow for the four routes that used to produce a duplicate.
+    // The huddle's own id is trusted when it has one, so the common path costs no extra read.
+    const target = (huddle && huddle.recordId)
+        ? { exists: true, recordId: huddle.recordId }
+        : await findTodayBriefRow(pat);
+    const usePatch = target.exists;
     const r = await fetch(`https://api.airtable.com/v0/${BASE_ID}/${TBL_BRIEFS}`, {
         method: usePatch ? 'PATCH' : 'POST',
         headers: { Authorization: `Bearer ${pat}`, 'Content-Type': 'application/json' },
         body: usePatch
-            ? JSON.stringify({ records: [{ id: huddle.recordId, fields: body.records[0].fields }] })
+            ? JSON.stringify({ records: [{ id: target.recordId, fields: body.records[0].fields }] })
             : JSON.stringify(body),
     });
     if (!r.ok) throw new Error('Brief store failed ' + r.status);
@@ -1066,6 +1122,22 @@ async function sendDailyDM(env) {
 // already alerted and there is nothing more to do.
 async function storeFallbackMarker(pat, m, tasks, huddle, reason, sentBrief) {
     try {
+        // A FAILURE MARKER MUST NOT LAND ON A BRIEF THAT WAS WRITTEN (30 Sep 2026).
+        //
+        // The marker exists for one reason: to make alreadyBriefedToday() true so the 10:00 and
+        // 11:00 firings do not re-send. When the 07:30 huddle already wrote a full brief, that is
+        // ALREADY true, so the marker has no work to do — and on 30 Sep it did the opposite,
+        // POSTing a second row for the day. Now that the upsert patches by date instead, writing
+        // it here would overwrite the real 07:30 brief with "could not be written today", which
+        // is worse than the duplicate it replaces. So: if the day already holds a real brief,
+        // write nothing. A fallback row does not count, so a second failure still refreshes it.
+        if (!(huddle && huddle.recordId)) {
+            const today = await findTodayBriefRow(pat);
+            if (today.finishedBrief) {
+                console.error('[ceo-brief] fallback marker NOT written: today already holds a finished brief; reason was:', String(reason).slice(0, 300));
+                return;
+            }
+        }
         const marker = sentBrief ? { ...sentBrief } : {
             one_thing: 'The CEO brief could not be written today. The money message was sent instead.',
             first_step: 'Open the Money tab in the app; the reason is in the CEO Brief tab and the worker logs.',

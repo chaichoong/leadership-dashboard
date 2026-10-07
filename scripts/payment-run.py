@@ -98,6 +98,13 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+# THE SAME pacer and the SAME ledger as inbound-triage.py. This run and a triage
+# slot can overlap — both read Gmail on the same account — and before 7 Oct 2026
+# each counted only its own calls, so together they walked straight past the
+# per-minute limit. Kevin's approved build, 5 Oct 2026.
+from gmail_pacer import gmail_pace  # noqa: E402
+
 LONDON = ZoneInfo("Europe/London")
 
 WORKER_URL = "https://drive-upload.kevinbrittain.workers.dev"
@@ -262,6 +269,7 @@ def worker_post(path, payload, account, sleep=time.sleep):
                  "User-Agent": "od-payment-run/1.0"},
         method="POST",
     )
+    gmail_pace(path, payload, account=account)
     _calls["n"] += 1
     body = None
     for attempt in range(1, MAX_ATTEMPTS + 1):
