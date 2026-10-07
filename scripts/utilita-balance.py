@@ -297,7 +297,9 @@ def parse_energy(text):
 # email-first login step renders no password box, so a SIGNED-OUT session read
 # as signed in, and the message then said "the balance was not on the page" and
 # withheld the Robot sign-in line that exists for exactly this case.
-AT_DOOR = re.compile(r"oauthSignIn|seclogin|/(?:log-?in|sign-?in|signin|login|auth)(?:/|\?|$)", re.I)
+# A sign-out address is a door too (agent-browser.js SIGN_OUT_URL_RE, 7 Oct 2026).
+AT_DOOR = re.compile(r"oauthSignIn|seclogin|/(?:log-?in|sign-?in|signin|login|auth)(?:/|\?|$)"
+                     r"|(?:^|[^a-z])(?:log-?out|sign-?out|log-?off)(?:[^a-z]|$)", re.I)
 
 
 BOT_CHECK_PROBLEM = ("BOT CHECK: Utilita showed the robot a \"verify you are human\" page, so no "

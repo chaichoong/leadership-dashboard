@@ -119,10 +119,135 @@ describe('a handover plan never submits, pays or uploads', () => {
     expect(() => b.assertHandoverPlan({ ...ok, steps: [{ do: 'press', selector: '#q', key: 'ArrowRight' }] })).toThrow(/an arrow key picks a radio answer/);
     expect(() => b.assertHandoverPlan({ ...ok, steps: [{ do: 'press', selector: '#q', key: 'Tab' }] })).not.toThrow();
   });
+  // Kevin, 7 Oct 2026: plans fill, Kevin submits. The robot had filled Agile Estates' confirmation
+  // statement at 08:31; the plan for his window, written at 08:34, told him to type it all again.
+  it('refuses a step of Kevin\'s that asks him for the robot\'s work: the two plans of 7 Oct, word for word', () => {
+    const signIn = { do: 'kevin', say: 'Sign in to Companies House WebFiling with GOV.UK One Login', untilUrl: 'page=savedCompanies' };
+    const robot = { do: 'click', selector: 'text=AGILE ESTATES LTD' };
+    // recGImsRxDQ1UYBti as written on 7 Oct (its "why" and its last step).
+    const agileWhy = "the robot signs you through to Agile Estates, where a part-done statement waits. Pick 'Continue with this "
+      + "confirmation statement' and press SUBMIT. Then answer exactly as the screenshot on the card shows: Yes to email, office, "
+      + 'officers, registers and PSCs; tick SIC, share capital (press Confirm, amount unpaid 0) and shareholders; tick the two '
+      + 'confirmation boxes; press Submit and pay the 50 pound fee';
+    const agileLast = { do: 'kevin', say: "Pick 'Continue with this confirmation statement', press SUBMIT, answer as the screenshot "
+      + 'on the card shows, tick the two confirmation boxes, press Submit and pay the 50 pound fee', untilText: 'Thank you' };
+    expect(() => b.assertHandoverPlan({ why: agileWhy, steps: [signIn, robot] })).toThrow(/"why" asks Kevin to "answer exactly"/);
+    expect(() => b.assertHandoverPlan({ why: 'pay', steps: [signIn, robot, agileLast] })).toThrow(/step 3 \(kevin\) asks Kevin to "answer as"/);
+    // rec9g6PKSy4nhdriO as written on 1 Oct.
+    const sheWhy = "choose Continue on the saved draft, add the personal code for each director, answer each "
+      + "'is this correct?' question, tick the two confirmations, submit and pay the GBP 50 fee";
+    const sheLast = { do: 'kevin', say: "Pick 'Continue with this confirmation statement' and press SUBMIT (this only reopens the draft). "
+      + "Then add both directors' personal codes, answer the questions, tick the two confirmations, submit and pay GBP 50.", untilText: 'Statement date' };
+    expect(() => b.assertHandoverPlan({ why: sheWhy, steps: [signIn, robot] })).toThrow(/"why" asks Kevin to "answer each"/);
+    expect(() => b.assertHandoverPlan({ why: 'pay', steps: [signIn, robot, sheLast] })).toThrow(/asks Kevin to "answer the"/);
+    // A step of his in the middle that is not his sign-in, a code or his own statement.
+    expect(() => b.assertHandoverPlan({ why: 'pay', steps: [signIn, { do: 'kevin', say: 'Pick the company and press Continue', untilText: 'x' }, robot] }))
+      .toThrow(/step 2 \(kevin\) sits in the middle of the plan/);
+    // The other words for the same thing.
+    for (const say of ['Fill in the rest of the form', 'Re-enter the answers below', 'Type the answers from the card', 'Enter the address',
+      'Tick SIC, share capital and shareholders', 'Retype each value', 'Complete the rest of the form as the card shows',
+      'Select Yes for each question', 'Choose the answers shown in the screenshot', 'Type the SIC code and share capital',
+      // Second review, 7 Oct 2026: the same work in other words.
+      'Complete the form from the card and pay', 'Provide the details from the card', 'Put in the answers and pay',
+      'Copy the answers into the form', 'Work through each page and pay', 'Decide every answer on the form', 'Type the SIC code.']) {
+      expect(() => b.assertHandoverPlan({ why: 'pay', steps: [robot, { do: 'kevin', say, untilText: 'x' }] }), say).toThrow(/asks Kevin to/);
+    }
+    // Calling it his own statement does not make the robot's answers his (review, 7 Oct 2026).
+    expect(() => b.assertHandoverPlan({ why: 'pay', steps: [robot, { do: 'kevin', say: 'This is your own statement: fill in every field from the card', untilText: 'x' }, robot] }))
+      .toThrow(/step 2 \(kevin\) asks Kevin to "fill"/);
+  });
+  it('lets through what only Kevin can give: his sign-in, a code, card or bank details, his own statement, the declarations, submit and pay', () => {
+    const robot = { do: 'click', selector: '#next' };
+    const ok = (plan) => expect(() => b.assertHandoverPlan(plan), JSON.stringify(plan)).not.toThrow();
+    // The two plans as rewritten on 7 Oct: his sign-in first, the robot's answers, his part in "why".
+    ok({ why: 'tick the two declaration boxes at the foot of the statement, press Submit and pay the £50 fee',
+         steps: [{ do: 'kevin', say: 'Sign in to Companies House WebFiling with GOV.UK One Login', untilUrl: 'page=savedCompanies' }, robot,
+                  { do: 'check', selector: "label:text-is('Yes') >> nth=0" }] });
+    ok({ why: "decide five answers the robot could not check: ...; then add both directors' personal codes, "
+           + 'tick the two declaration boxes, press Submit and pay the £50 fee',
+         steps: [{ do: 'kevin', say: 'Sign in to Companies House with GOV.UK One Login.', untilText: 'Saved companies' }, robot] });
+    // The DWP form (scripts/rent_form_plan.py): his own statement and an emailed code, mid-plan; bank numbers at the end.
+    ok({ why: 'choose the reason this tenant needs the rent paid direct if the form has not asked yet, type the sort code '
+           + 'and account number, check every answer, and press Accept and send',
+         steps: [robot, { do: 'kevin', say: 'Choose the reason this tenant needs the rent paid direct. It is your own statement to the DWP. '
+                          + 'Then press Continue until the page asking for the rent opens.', untilSelector: '#f-rentAmount' },
+                 robot, { do: 'kevin', say: 'Type the code the DWP has just emailed to info@agilelets.co.uk, then press Continue.', untilSelector: '#x' },
+                 robot] });
+    // Sign-ins as agents write them, and a last step that is his declarations.
+    ok({ why: 'answer the declaration questions yourself and pay', steps: [
+      { do: 'kevin', say: 'Sign in to Namecheap with your usual username and password, and any security code it asks for.', untilUrl: 'x' },
+      { do: 'kevin', say: 'Click Login and sign in to AXA. Enter your email and password.', untilUrl: 'y' }, robot,
+      { do: 'kevin', say: 'Tick both declarations, press Submit and pay by card', untilText: 'Thank you' }] });
+    // What a sign-in or a payment really asks of him (review, 7 Oct 2026: each of these was refused).
+    for (const say of ['Sign in with your password and press Enter', 'Log in and enter your memorable word',
+      'Sign in: enter your National Insurance number, then answer the security questions', 'Log in and enter your credentials',
+      'Enter the 6-digit code it texts you',
+      // Second review, 7 Oct 2026: a code step mid-plan, however it is worded.
+      'Enter the code', 'Enter the 2FA code', 'Enter the six-digit code', 'Enter the code from your phone',
+      'Enter the code from the text message', 'Sign in and enter the code your bank app shows']) {
+      ok({ why: 'pay', steps: [{ do: 'kevin', say, untilText: 'x' }, robot] });
+    }
+    for (const say of ['Fill in your card details and press Pay', 'Tick the box to agree to the terms, then press Pay',
+      'Type your full name as your signature and press Sign',
+      // His own final clicks and checks (second review, 7 Oct 2026).
+      'Click Yes to confirm the payment', 'Choose Yes to accept the quote and pay', 'Press Pay as shown',
+      'Check the page matches the screenshot on the card, tick the declaration and pay',
+      'Read the question and tick the declaration, then pay', 'Check every box is right, then press Submit']) {
+      ok({ why: 'pay', steps: [robot, { do: 'kevin', say, untilText: 'x' }] });
+    }
+    // A statement of his is his to make, but never the robot's answers over again.
+    expect(() => b.assertHandoverPlan({ why: 'pay', steps: [robot, { do: 'kevin', say: 'Answer each of the questions as shown: it is your own statement', untilText: 'x' }, robot] }))
+      .toThrow(/step 2 \(kevin\) asks Kevin to "the questions"/);
+  });
+  it('a window that stops early says everything from there is his, never only the declarations (review, 7 Oct 2026)', () => {
+    const banner = b.stuckBanner({ step: 8, error: 'refused: "Continue with this confirmation statement" reads like a declaration, which is Kevin\'s' },
+      'tick the two declaration boxes at the foot of the statement, press Submit and pay the £50 fee');
+    expect(banner).toMatch(/^The robot stopped at step 8 \(refused: "Continue with this confirmation statement" reads like a declaration/);
+    expect(banner).toMatch(/Everything from here is yours: finish by hand, or close this window\. At the end: tick the two declaration boxes/);
+  });
   it('fills {{today}} with the UK date', () => {
     expect(b.fillTokens('{{today}}', new Date('2026-10-01T09:00:00Z'))).toBe('01/10/2026');
     expect(b.fillTokens('CB9 0AJ')).toBe('CB9 0AJ');
   });
+});
+
+describe('the handover guard on a confirmation statement (real Chromium, 7 Oct 2026)', () => {
+  // The rewritten Agile Estates plan gives the robot every answer from its own 08:31 prepare run. The
+  // guard still keeps every statement to Companies House Kevin's: the draft's "Continue with this
+  // confirmation statement" (the word "statement"), its SUBMIT and the share capital Confirm (a
+  // reviewer's copy of the page refused each "Is ... correct?" Yes too). So the window is his from the
+  // first of them. This pins that: a guard change
+  // that lets the robot answer them is Kevin's decision, and it turns this test red on purpose.
+  it('stops at the draft\'s first statement and touches nothing after it', async () => {
+    expect(chromium, 'playwright-core is not installed').toBeTruthy();
+    const browser = await chromium.launch({ headless: true });
+    try {
+      const page = await browser.newPage();
+      await page.setContent(`<form><p>Would you like to:</p>
+        <label><input type="radio" name="r" id="cont"> Continue with this confirmation statement</label>
+        <label><input type="radio" name="r"> Delete this confirmation statement and go to your company overview</label>
+        <input type="submit" value="SUBMIT" onclick="event.preventDefault();document.getElementById('out').textContent='SUBMITTED'"></form>
+        <p>Is the registered email address correct?</p><label><input type="radio" name="em" id="emy"> Yes</label><label><input type="radio" name="em"> No</label>
+        <div id="out"></div>`);
+      const r = await b.runHandover(page, { why: 'pay', steps: [
+        { do: 'check', selector: 'text=Continue with this confirmation statement', timeout: 2000 },
+        { do: 'click', selector: 'input[type=submit]', timeout: 2000 },
+        { do: 'check', selector: "label:text-is('Yes') >> nth=0", timeout: 2000 },
+      ] }, { quiet: true });
+      expect(r.stuck.step).toBe(1);
+      expect(r.stuck.error).toMatch(/reads like a declaration/);
+      expect(await page.isChecked('#cont')).toBe(false);
+      expect(await page.isChecked('#emy')).toBe(false);
+      expect(await page.locator('#out').textContent()).toBe('');
+      // The draft's SUBMIT meets the guard on its own word too. (The "Is ... correct?" answers depend on
+      // how the live page ties each question to its radios, which is not copied here.)
+      const submit = await b.runHandover(page, { why: 'pay', steps: [{ do: 'click', selector: 'input[type=submit]', timeout: 2000 }] }, { quiet: true });
+      expect(submit.stuck.error).toMatch(/final action/);
+      expect(await page.locator('#out').textContent()).toBe('');
+    } finally {
+      await browser.close();
+    }
+  }, 60000);
 });
 
 describe('the robot does every step up to Kevin, waits for his part, and hands over (real Chromium)', () => {

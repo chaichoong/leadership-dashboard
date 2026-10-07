@@ -587,17 +587,45 @@ function assertApproved(taskId, { window = false } = {}) {
 // profile at the next launch, and WebFiling's sign-in request still asked
 // for his email, password and code). WebFiling's own session cookie is
 // session-only too. So after the window closes, every session-only cookie on
-// an allowlisted host is given a one-hour expiry, which is One Login's own
-// session length. Values are not read or changed; only the expiry flags are.
-function persistSessionCookies(dir, ttlMs = 60 * 60 * 1000) {
+// an allowlisted host is made to last. Values are not read or changed; only
+// the expiry flags are.
+//
+// HOW LONG (7 Oct 2026). Until today every one got ONE HOUR, One Login's own
+// session length, on every site, after every robot run. Xero died 1h06m and
+// 57m after Kevin's sign-ins, and GoHighLevel the same way: the robot itself
+// cut short sessions the sites would have kept. Each cookie now lasts its
+// site's `sessionCookieHours` (sites.json), else SESSION_COOKIE_HOURS. A site
+// that ends its session sooner on its own servers (One Login) still ends it;
+// this only stops the robot ending it first. ttlMs, when given, sets one
+// length for every site (tests).
+const SESSION_COOKIE_HOURS = 24;
+function sessionCookieHours(entry) {
+  const h = Number(entry && entry.sessionCookieHours);
+  return Number.isFinite(h) && h > 0 ? h : SESSION_COOKIE_HOURS;
+}
+function persistSessionCookies(dir, ttlMs) {
   const db = path.join(dir, 'Default', 'Cookies');
   if (!fs.existsSync(db)) return 0;
   const { spawnSync } = require('child_process');
-  const domains = Object.keys(loadSites());
-  const where = domains.map(d => `host_key = '${d}' OR host_key LIKE '%.${d}'`).join(' OR ');
+  const sites = loadSites();
+  // The most specific entry first: a cookie on ewf.companieshouse.gov.uk takes that entry's
+  // length, not gov.uk's. Each UPDATE touches only cookies still session-only, so the first
+  // entry that matches a cookie decides it.
+  const hosts = Object.keys(sites).sort((a, b) => b.length - a.length);
   // Chrome epoch: microseconds since 1601-01-01.
-  const exp = Math.round((Date.now() + ttlMs) / 1000 + 11644473600) * 1000000;
-  const sql = `UPDATE cookies SET is_persistent = 1, expires_utc = ${exp} WHERE is_persistent = 0 AND (${where}); SELECT changes();`;
+  const exp = (ms) => Math.round((Date.now() + ms) / 1000 + 11644473600) * 1000000;
+  const quote = (h) => h.replace(/'/g, "''");
+  const sql = hosts.map((d) => {
+    const q = quote(d);
+    const ms = ttlMs != null ? ttlMs : sessionCookieHours(sites[d]) * 60 * 60 * 1000;
+    // A login site's own registrable domain too (review, 7 Oct 2026): www.edfenergy.com keeps its
+    // cookies on .edfenergy.com, www.amazon.co.uk on .amazon.co.uk and login.xero.com on .xero.com,
+    // and a session cookie there died at the next launch whatever the entry said. Only that one
+    // parent, never its other sub-domains: those are other sites.
+    const parent = signinDomain(d);
+    const up = sites[d] && sites[d].login && parent && parent !== d ? ` OR host_key = '.${quote(parent)}' OR host_key = '${quote(parent)}'` : '';
+    return `UPDATE cookies SET is_persistent = 1, expires_utc = ${exp(ms)} WHERE is_persistent = 0 AND (host_key = '${q}' OR host_key LIKE '%.${q}'${up});`;
+  }).join(' ') + ' SELECT total_changes();';
   const r = spawnSync('sqlite3', [db, sql], { encoding: 'utf8' });
   if (r.status !== 0) { console.error('WARNING: session cookies not persisted: ' + (r.stderr || '').trim()); return 0; }
   return Number((r.stdout || '').trim()) || 0;
@@ -638,17 +666,46 @@ async function settleBotCheck(page, maxMs = 15000) {
 // One Login), not an error page or a slow load. The session line records it, and the Robot
 // sign-in app trusts only these (agent-dispatch.py ledger_signed_out; review, 29 Sep 2026:
 // BW Legal and Adobe show a password box on an ordinary address).
-function onSigninPage(url, passwordFields, text = '', title = '') {
-  const v = sessionVerdict(url, passwordFields, text, title);
+function onSigninPage(url, passwordFields, text = '', title = '', site) {
+  const v = sessionVerdict(url, passwordFields, text, title, site);
   return !v.signedIn && !v.botCheck && (Number(passwordFields) > 0 || v.atDoor || v.atOneLogin);
 }
-function sessionVerdict(url, passwordFields, text = '', title = '') {
+// A door with nothing on it that says so (7 Oct 2026). GoHighLevel's check landed on
+// app.gohighlevel.com/?logout=true and read "signed in" (5 and 6 Oct): no password box, no
+// /login path, and that false "in" reset the sign-in count and raised a fresh card. Virgin
+// Media's landed on its existing-customer page ("Sign in to see your bills"), and a sign-in
+// wall was cleared twice on it. So these are signed out too:
+//   - a sign-out address (logout, log-out, signout, sign-out, logoff, log-off);
+//   - a page the site's entry names in `doorUrls` (host and path, exactly);
+//   - when the check began anywhere but the site's own loginUrl (its `checkUrl`, or --url),
+//     a landing on that loginUrl's host and path: the site sent the robot back to its door.
+// `site` is { entry, start }: the allowlist entry and the address the check began on.
+const SIGN_OUT_URL_RE = /(?:^|[^a-z])(?:log-?out|sign-?out|log-?off)(?:[^a-z]|$)/i;
+function hostAndPath(u) {
+  try {
+    const x = new URL(/^[a-z][a-z0-9+.-]*:/i.test(String(u)) ? String(u) : 'https://' + String(u));
+    return x.hostname.toLowerCase().replace(/^www\./, '') + x.pathname.replace(/\/+$/, '').toLowerCase();
+  } catch { return ''; }
+}
+function doorLanding(url, site) {
+  if (SIGN_OUT_URL_RE.test(String(url || ''))) return 'a sign-out address';
+  const here = hostAndPath(url);
+  const entry = (site && site.entry) || {};
+  if (!here) return '';
+  if ((Array.isArray(entry.doorUrls) ? entry.doorUrls : []).some(d => hostAndPath(d) === here)) return "one of the site's doorUrls";
+  const login = entry.loginUrl ? hostAndPath(entry.loginUrl) : '';
+  if (login && site && site.start && hostAndPath(site.start) !== login && here === login) return "the site's own sign-in page";
+  return '';
+}
+function sessionVerdict(url, passwordFields, text = '', title = '', site) {
   let host = '';
   try { host = new URL(url).hostname.toLowerCase(); } catch { host = ''; }
-  const atDoor = /oauthSignIn|seclogin|\/(?:log-?in|sign-?in|signin|login|auth)(?:\/|\?|$)/i.test(url);
+  const door = doorLanding(url, site);
+  const atDoor = /oauthSignIn|seclogin|\/(?:log-?in|sign-?in|signin|login|auth)(?:\/|\?|$)/i.test(url) || !!door;
   const atOneLogin = /(^|\.)account\.gov\.uk$/i.test(host);
   const botCheck = isBotCheck(text, title);
-  return { signedIn: Number(passwordFields) === 0 && !atOneLogin && !atDoor && !botCheck, atDoor, atOneLogin, botCheck };
+  return { signedIn: Number(passwordFields) === 0 && !atOneLogin && !atDoor && !botCheck, atDoor, atOneLogin, botCheck,
+           ...(door ? { door } : {}) };
 }
 
 // ── Browser ──────────────────────────────────────────────────────────────────
@@ -850,7 +907,9 @@ function selfRefreshEntry(url, sites = loadSites()) {
 async function withSelfRefresh(entry, dir, run, refresh = plainRefresh, noted = () => {}) {
   const first = await run();
   if (!entry || !entry.selfRefresh || !entry.loginUrl) return first;
-  if (!onSigninPage(first.url, first.passwordFields, first.text, first.title)) return first;
+  // The read's own verdict when it carries one (`session` judges with the site's doors); else judged here.
+  const atDoor = typeof first.signinPage === 'boolean' ? first.signinPage : onSigninPage(first.url, first.passwordFields, first.text, first.title);
+  if (!atDoor) return first;
   const r = await refresh(dir, entry.loginUrl);
   if (!r.ok) { noted('not run: ' + r.why); return Object.assign(first, { selfRefresh: 'not run: ' + r.why }); }
   noted('ran');
@@ -928,7 +987,7 @@ async function withPage(profile, headed, fn) {
     await ctx.close().catch(() => {});
     // A site can replace its session cookie during the step, and the new one is
     // session-only: Chrome deletes it at the next launch, and the robot is signed
-    // out. Kevin's sign-in window already gives these an hour (persistSessionCookies);
+    // out. Kevin's sign-in window already makes these last (persistSessionCookies);
     // the robot's own runs did not. 29 Sep 2026: WebFiling was signed in on the
     // pickup's first two looks after Kevin's 00:30 sign-in (a cookie rewritten
     // during the second) and signed out on the third, three minutes later, with
@@ -1197,9 +1256,82 @@ const SIGNATURE_RE = /\b(sign|signature|signed|signing|e-?sign)\b/i;
 
 function handoverPlanPath(task) { return path.join(HANDOVER_DIR, task + '.json'); }
 
+// ── Plans fill, Kevin submits (Kevin, 7 Oct 2026) ────────────────────────────
+// At 08:31 on 7 Oct the robot filled Agile Estates' confirmation statement up to
+// the declarations. The plan an agent wrote for the Your turn window at 08:34
+// told Kevin to "answer exactly as the screenshot shows ... tick SIC, share
+// capital ... and shareholders": the robot's own work, to be typed again by
+// hand. So a plan is refused when a step of Kevin's asks him for the robot's work:
+//  1. A `kevin` step in the MIDDLE of a plan is his sign-in, a code only he
+//     receives, or his own statement (its `say` calls it "your own statement",
+//     as the DWP form's reason does). Any other step of his is the LAST step.
+//  2. No step of his, and not the "why" his window shows him at the end, asks
+//     him to answer, fill, enter, re-enter, type or tick anything except what
+//     only he can give: sign-in details, a code, card or bank details, his
+//     declarations. A question the sources cannot answer goes on his card as a
+//     decision, by name; never "answer the questions".
+// This reads the plan's own words: a tripwire for the shape of the 7 Oct plan.
+const KEVIN_SIGNIN_SAY_RE = /\b(?:sign|log)[ -]?(?:in|on)\b|\blogin\b/i;
+const KEVIN_CODE_SAY_RE = /\b(?:codes?|passcodes?|one-time|verification|authentication)\b/i;
+const KEVIN_STATEMENT_SAY_RE = /\byour own (?:statement|declaration)\b|\bstatement of truth\b/i;
+// What only he can give, named after its verb: set aside before the check. A code is his when it is
+// named as his (personal, security, sort, a 6-digit code) or as one sent to him; "type the SIC code"
+// is a form answer. The span never crosses "and", "from" or "answers": "type the answers from the
+// card" is the robot's work.
+const ENTRY_VERB = String.raw`(?:type|typing|enter|entering|add|adding|paste|pasting|fill\s+in|filling\s+in)`;
+const ENTRY_SPAN = String.raw`(?:\s+(?!(?:and|then|or|from|as|answers?|values?)\b)[\w'’-]+){0,5}?\s+`;
+const HIS_DETAILS = String.raw`(?:(?:personal|authentication|auth|security|verification|one-time|access|sort|2fa|mfa|sms|otp|\w+-digit)\s+codes?`
+  + String.raw`|codes?(?=(?:\s+[\w'’@.-]+){0,6}?\s+(?:emailed|texted|sent|emails|texts|sends|received|receives?|shows?|displays?|authenticator)\b)`
+  + String.raw`|passcodes?|passwords?|pins?|keys?|memorable\s+(?:word|information|date)|security\s+(?:questions?|answers?)`
+  + String.raw`|national\s+insurance\s+number|credentials|(?:payment|debit|credit|bank)\s+card(?:\s+(?:details|number))?|card\s+(?:details|number)`
+  + String.raw`|account\s+numbers?|bank\s+details)`;
+const KEVIN_ONLY_RE = new RegExp([
+  String.raw`\b${ENTRY_VERB}\b${ENTRY_SPAN}${HIS_DETAILS}\b`,
+  // "Enter the code", "Enter the code from your phone": the code itself, with no other word naming it.
+  String.raw`\b${ENTRY_VERB}\s+(?:the|your|a|this)\s+codes?(?=\s*(?:[.,;:)!]|$|\s+(?:from|on|in|that|it|they|your)\b))`,
+  String.raw`\b(?:type|typing|enter|entering)\s+your\s+(?:usual\s+|own\s+)?(?:email(?:\s+address)?|username|user\s+name|login(?:\s+details)?|sign[ -]?in\s+details)\b`,
+  // His signature, typed as his name.
+  String.raw`\b(?:type|typing|enter|entering)\s+your\s+(?:full\s+)?name\s+(?:as|for)\s+(?:your|the|a)\s+(?:e-?)?signature\b`,
+  // His declarations, however he ticks or answers them.
+  String.raw`\btick(?:ing)?\s+(?:the\s+|both\s+|all\s+|each\s+)?(?:(?:two|three|2|3)\s+)?(?:declarations?|confirmations?|(?:declaration|confirmation)\s+box(?:es)?)\b`,
+  String.raw`\btick(?:ing)?\s+(?:the\s+)?box(?:es)?\s+(?:to|that)\s+(?:agree|accept|confirm|declare)\b`,
+  String.raw`\banswer(?:ing)?\s+(?:the\s+)?(?:\w+\s+)?(?:declarations?|security\s+questions?)(?:\s+questions?)?\b`,
+  // A key on the keyboard, not a typed answer.
+  String.raw`\b(?:press|hit)\s+(?:the\s+)?enter\b`,
+].join('|'), 'gi');
+// The robot's work, asked of Kevin: typing or ticking answers, or copying them off the card.
+const COPYING = String.raw`\b(?:each|every|all(?:\s+the)?)\s+questions?\b|\bthe\s+questions\b|\bexactly as\b`
+  + String.raw`|\b(?:as|from|in|on)\s+the\s+screenshot\b|\bscreenshot\s+shows\b|\bas (?:the card|listed)\b|\bas shown (?:on|in) the (?:card|screenshot)\b`
+  + String.raw`|\b(?:shown|listed) on the card\b|\bfrom (?:the|your) card\b|\bthe rest of the form\b|\bcomplete the form\b|\bcopy\b|\bput in\b`
+  + String.raw`|\b(?:each|every) page\b|\bdecide (?:every|each|all)\b`;
+const KEVIN_REENTRY_RE = new RegExp(String.raw`\bre-?(?:enter|type)(?:ing)?\b|\bretyp(?:e|ing)\b|\bfill(?:ing)?\b|\benter(?:ing)?\b`
+  + String.raw`|\btyp(?:e|ing)\b(?!\s+of\b)|\btick(?:ing)?\b`
+  + String.raw`|\banswer(?:ing)?\s+(?:the|each|every|all|as|exactly|whether|them|these|those|it|yes|no|questions?)\b|` + COPYING, 'i');
+// His own statement is his to make (the answer itself), but never the robot's answers typed again.
+const KEVIN_STATEMENT_REENTRY_RE = new RegExp(String.raw`\bre-?(?:enter|type)(?:ing)?\b|\bretyp(?:e|ing)\b|\bfill(?:ing)?\b|\benter(?:ing)?\b`
+  + String.raw`|\btyp(?:e|ing)\b(?!\s+of\b)|` + COPYING, 'i');
+// The words in TEXT that ask Kevin for the robot's work, or '' when there are none.
+function kevinRobotWork(text, statement = false) {
+  const t = String(text || '').replace(KEVIN_ONLY_RE, ' ');
+  const m = t.match(statement ? KEVIN_STATEMENT_REENTRY_RE : KEVIN_REENTRY_RE);
+  return m ? m[0] : '';
+}
+const ROBOT_WORK_HELP = 'The robot fills every answer the plan\'s sources hold, as goto, click, check, select and fill steps; '
+  + 'Kevin\'s part is only his sign-in, a code, card or bank details, his declarations, submit and pay. '
+  + 'A question the sources cannot answer goes on his card as a decision, by name.';
+// What the window says when the robot stops before Kevin's part (7 Oct 2026). A plan now leaves him
+// only the last step, so a stop earlier must say that everything from there is his, never read as
+// "your part is the declarations" over a form the robot left half done.
+function stuckBanner(stuck, why) {
+  return `The robot stopped at step ${stuck.step} (${String((stuck && stuck.error) || '').slice(0, 160)}). Everything from here is `
+    + `yours: finish by hand, or close this window. At the end: ${why}.`;
+}
+
 function assertHandoverPlan(plan, now = new Date()) {
   if (!plan || !Array.isArray(plan.steps) || !plan.steps.length) die('the plan has no steps');
-  if (!String(plan.why || '').trim()) die('the plan needs "why": what Kevin does when it is his turn (for example "answer the declarations and pay")');
+  if (!String(plan.why || '').trim()) die('the plan needs "why": what Kevin does when it is his turn (for example "tick the declarations and pay")');
+  const whyAsks = kevinRobotWork(plan.why);
+  if (whyAsks) die(`the plan's "why" asks Kevin to "${whyAsks}". ${ROBOT_WORK_HELP}`);
   // An answer that holds only until a day (the DWP form's arrears answer, scripts/rent_form_plan.py):
   // after that day, London time, the window does not open on it. Its card is raised again with a fresh count.
   if (plan.validUntil !== undefined) {
@@ -1215,6 +1347,18 @@ function assertHandoverPlan(plan, now = new Date()) {
     }
     if (d === 'kevin' && (!String(s.say || '').trim() || !(s.untilUrl || s.untilSelector || s.untilText))) {
       die(`step ${i + 1} (kevin) needs "say" and one of untilUrl, untilSelector, untilText: what he does and how the robot knows he has.`);
+    }
+    if (d === 'kevin') {
+      const say = String(s.say);
+      const statement = KEVIN_STATEMENT_SAY_RE.test(say);
+      const last = i === plan.steps.length - 1;
+      if (!last && !statement && !KEVIN_SIGNIN_SAY_RE.test(say) && !KEVIN_CODE_SAY_RE.test(say)) {
+        die(`step ${i + 1} (kevin) sits in the middle of the plan and is not his sign-in, a code only he receives, or a reason or `
+          + `declaration only he can give (one the robot's guard refuses, which its say calls "your own statement"). Every step `
+          + `before Kevin's last one is the robot's. ${ROBOT_WORK_HELP}`);
+      }
+      const asks = kevinRobotWork(say, statement);
+      if (asks) die(`step ${i + 1} (kevin) asks Kevin to "${asks}". ${ROBOT_WORK_HELP}`);
     }
   });
   return plan;
@@ -1595,7 +1739,7 @@ async function main() {
         releaseSigninHold(dir);
       }
       const kept = persistSessionCookies(dir);
-      console.log(`Kept ${kept} session cookie(s) alive for one hour.`);
+      console.log(`Kept ${kept} session cookie(s) alive (${SESSION_COOKIE_HOURS} hours, or the site's own sessionCookieHours).`);
       ledger({ cmd: 'login', host, profile, mode: 'plain-chrome-mock-keychain', sessionCookiesKept: kept });
       return;
     }
@@ -1619,7 +1763,9 @@ async function main() {
     const sites = loadSites();
     const entry = sites[site];
     if (!entry || !entry.login) die(`${site || '(no --site)'} is not a login site on the allowlist.`);
-    const start = arg(rest, 'url') || entry.loginUrl;
+    // checkUrl (7 Oct 2026): a page that shows the account when signed in and sends the robot to
+    // the door when not (Virgin Media's bills page). Without one the check walks the loginUrl.
+    const start = arg(rest, 'url') || entry.checkUrl || entry.loginUrl;
     if (!start) die(`${site} has no login page to open (no loginUrl).`);
     if (!hostAllowed(start)) die(`${start} is not on the allowlist.`);
     const shot = arg(rest, 'shot');
@@ -1652,10 +1798,11 @@ async function main() {
       const passwordFields = await passwordFieldCount(page);
       const text = await domText(page, 600);
       const title = await page.title();
-      const verdict = sessionVerdict(url, passwordFields, text, title);
+      const doors = { entry, start };
+      const verdict = sessionVerdict(url, passwordFields, text, title, doors);
       const png = await shoot(page, shot);
       return { site, signedIn: verdict.signedIn, botCheck: verdict.botCheck, url, title, passwordFields, walked: clicked, text, screenshot: png,
-               signinPage: onSigninPage(url, passwordFields, text, title) };
+               signinPage: onSigninPage(url, passwordFields, text, title, doors), ...(verdict.door ? { door: verdict.door } : {}) };
     });
     // The verdict on the ledger is the one AFTER the robot's own refresh, when the site has one.
     const res = await withSelfRefresh(entry, path.join(PROFILE_ROOT, profile || 'default'), walkOnce, plainRefresh,
@@ -1872,7 +2019,7 @@ async function main() {
         const r = await runHandover(page, plan, { onTick: tick });
         const png = await shoot(page, path.join(HANDOVER_DIR, 'shots', `${task}-${Date.now()}.png`)).catch(() => null);
         await turnBanner(page, r.stuck
-          ? `The robot got stuck at step ${r.stuck.step}. You can finish by hand, or close this window.`
+          ? stuckBanner(r.stuck, plan.why)
           : `Your turn: ${plan.why}.${edit ? ` Your edit: ${edit}.` : ''} Close this window when you have finished: the other robots wait while it is open.`);
         console.log(JSON.stringify({ phase: 'your-turn', task, stuck: r.stuck, screenshot: png, edit: edit || null }));
         await waitForWindowClose(ctx, Number(process.env.AGENT_HANDOVER_WAIT_MS) || 0, tick);
@@ -1957,4 +2104,5 @@ module.exports = { namedAnswer, hostAllowed, pickLinks, runSteps, assertNotCrede
                    signinHoldActive, takeSigninHold, releaseSigninHold, waitForSigninHold, HOLD_MAX_MS, isBotCheck,
                    profileProcs, plainWindowOpen, pickOption, settleBotCheck, withPage, lastKeptCount: () => lastKept, onSigninPage,
                    assertHandoverPlan, fillTokens, runHandover, handoverPlanPath, HANDOVER_DIR, waitForWindowClose, FINAL_ACTION_RE,
-                   plainRefresh, withSelfRefresh, selfRefreshEntry, isRefreshWindowLine, holdBy };
+                   plainRefresh, withSelfRefresh, selfRefreshEntry, isRefreshWindowLine, holdBy,
+                   doorLanding, sessionCookieHours, SESSION_COOKIE_HOURS, stuckBanner };

@@ -244,6 +244,8 @@ print('HEALTHY=' + str(ub.row_alarm(r(34.30, 'More than a week left'), 10)))
             ['https://my.utilita.co.uk/login', 0, ''],
             ['https://my.utilita.co.uk/energy', 1, ''],
             ['https://my.utilita.co.uk/energy', 0, 'Verify you are human by completing the action below.'],
+            // A sign-out address reads signed out in both (7 Oct 2026).
+            ['https://my.utilita.co.uk/logout?next=/energy', 0, ''],
         ];
         const py = `
 import importlib.util, json
@@ -256,7 +258,7 @@ for url, pw, bot in json.loads(${JSON.stringify(JSON.stringify(urls.map(([u, pw,
             .trim().split('\n').map(l => l === 'True');
         const theirs = urls.map(([u, pw, t]) => sessionVerdict(u, pw, t, '').signedIn);
         expect(mine).toEqual(theirs);
-        expect(mine).toEqual([true, false, false, false, false]);
+        expect(mine).toEqual([true, false, false, false, false, false]);
     });
 
     it('a trimmed accounts list is refused, not reported as a clean run', () => {

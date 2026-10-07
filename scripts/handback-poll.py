@@ -70,6 +70,12 @@ DISPATCH_LOGS = os.path.expanduser("~/knowledge-os/logs/agent-dispatch")
 # newest file has not moved in this many minutes is dead, not busy.
 INFLIGHT_MINUTES = 10
 
+# Folders in the dispatch log that are not runs. send-locks/ holds one file per
+# email or text being sent (send-email.py, send-text.py) and never gets a
+# report.json, so after every send it read as a run in flight for ten minutes:
+# the poll skipped and the sign-in pickup waited behind nothing (review, 7 Oct 2026).
+NOT_RUNS = frozenset({"send-locks"})
+
 
 class Broken(Exception):
     """The read failed. Never the same thing as an empty queue."""
@@ -98,11 +104,15 @@ def load_counts(path):
     return queue, counts
 
 
-def inflight_run(logs_dir=DISPATCH_LOGS, minutes=INFLIGHT_MINUTES, now=None):
+def inflight_run(logs_dir=DISPATCH_LOGS, minutes=INFLIGHT_MINUTES, now=None, ignore_suffix=""):
     """Name of a dispatch run that is actively writing right now, or None.
 
     Two runs working the same hand-back would carry the approved action out
     twice. The intent ledger makes that recoverable; not starting is better.
+
+    ignore_suffix skips runs whose folder name ends with it: the sign-in pickup
+    (7 Oct 2026) waits for every other run but keeps its own one-at-a-time lock,
+    so another pickup's folder is never a live run while it holds that lock.
     """
     now = now if now is not None else time.time()
     try:
@@ -111,7 +121,7 @@ def inflight_run(logs_dir=DISPATCH_LOGS, minutes=INFLIGHT_MINUTES, now=None):
         return None  # no log directory yet is not a fault on a first run
     for name in sorted(entries, reverse=True):
         run = os.path.join(logs_dir, name)
-        if not os.path.isdir(run):
+        if not os.path.isdir(run) or name in NOT_RUNS or (ignore_suffix and name.endswith(ignore_suffix)):
             continue
         if os.path.exists(os.path.join(run, "report.json")):
             continue  # finished, whatever its verdict
@@ -171,6 +181,17 @@ def cmd_gate(args):
     return 0 if out["decision"] == "work" else 3
 
 
+def cmd_inflight(args):
+    """The in-flight check on its own, for a lock-exempt run that must not start
+    beside another dispatch run (signin-pickup-run.sh, 7 Oct 2026). Prints the
+    run's name, or nothing; exit 3 while a run is in flight, 0 when none is."""
+    busy = inflight_run(args.dispatch_logs, args.inflight_minutes, ignore_suffix=args.ignore_suffix)
+    if busy:
+        print(busy)
+        return 3
+    return 0
+
+
 def cmd_beat(args):
     """One line per tick, working or not.
 
@@ -196,6 +217,11 @@ def main(argv=None):
     g.add_argument("--dispatch-logs", default=DISPATCH_LOGS)
     g.add_argument("--inflight-minutes", type=int, default=INFLIGHT_MINUTES)
 
+    f = sub.add_parser("inflight", help="name a dispatch run in flight (exit 3), or none (exit 0)")
+    f.add_argument("--dispatch-logs", default=DISPATCH_LOGS)
+    f.add_argument("--inflight-minutes", type=int, default=INFLIGHT_MINUTES)
+    f.add_argument("--ignore-suffix", default="")
+
     b = sub.add_parser("beat", help="append one heartbeat line")
     b.add_argument("--log", required=True)
     b.add_argument("--decision", required=True)
@@ -204,7 +230,7 @@ def main(argv=None):
     b.add_argument("--spawned", default="no")
 
     args = p.parse_args(argv)
-    return {"gate": cmd_gate, "beat": cmd_beat}[args.cmd](args)
+    return {"gate": cmd_gate, "beat": cmd_beat, "inflight": cmd_inflight}[args.cmd](args)
 
 
 if __name__ == "__main__":

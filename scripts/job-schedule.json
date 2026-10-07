@@ -496,6 +496,11 @@
   "retryWhenDeferredNote": "Deliberately OFF, not forgotten. handback-poll runs every 30 minutes, so a deferred slot is picked up by the next one 30 minutes later — re-firing it would add a duplicate poll, not rescue a lost day. Revisit only if the cadence drops below hourly.",
   "lockExempt": true
  },
+ "signin-pickup": {
+  "mode": "on-demand",
+  "note": "ON DEMAND, NO CLOCK: the Robot sign-in app starts it through job-queue.py run once Kevin has closed his last sign-in window, so it has no cron and no lateness limit, and no attendance check grades it (every reader of this file skips an entry with no cron). Listed here ONLY for lockExempt. LOCK-EXEMPT from 7 Oct 2026 (sign-ins fix, PR 1): 7 Sep to 7 Oct the pickup waited for the queue lock behind the Content Engine render (median hold 240 min a night) and gave up at 120 minutes five times, so Kevin's night sign-ins ran out with nothing picked up; the lock-exempt hand-back poll was what saved two of them. Like handback-poll it touches only Airtable, the approval gate and the robot browser, never the repo or the queue's shared files. What stops a double run: signin-pickup-run.sh waits (up to 45 minutes) while another dispatch run is in flight (handback-poll.py inflight_run, the poll's own gate) and keeps its own one-pickup-at-a-time lock, and the robot profile itself opens in one place at a time (agent-browser.js).",
+  "lockExempt": true
+ },
  "roy-assistant": {
   "cron": "*/10 7-20 * * *",
   "maxLateMinutes": 9,
