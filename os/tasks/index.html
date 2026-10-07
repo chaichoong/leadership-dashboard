@@ -713,6 +713,8 @@ body.app-busy,body.app-busy *{cursor:progress!important}
 <!-- Agent accuracy scoring + the autonomy threshold. Shared with the
      Leadership Dashboard so both surfaces score identically. -->
 <script src="../../js/agent-accuracy.js?v=6"></script>
+<!-- A tab older than the live page reloads instead of saving a decision (7 Oct 2026). -->
+<script src="../../js/page-freshness.js?v=1"></script>
 <script>
 // CONFIG
 const BASE_ID = 'appnqjDpqDniH3IRl';
@@ -3879,6 +3881,17 @@ function apvSummary(raw){
   }
   return '';
 }
+// A note typed on a tab that reloaded itself because a newer copy was live (apvDecide), put back
+// in the same task's box once, then dropped.
+const TASKS_NOTE_CARRY='tasks_apv_note_over_reload';
+function tasksCarriedNote(taskId){
+  try{
+    const c=JSON.parse(sessionStorage.getItem(TASKS_NOTE_CARRY)||'null');
+    if(!c||c.id!==taskId||typeof c.note!=='string')return '';
+    sessionStorage.removeItem(TASKS_NOTE_CARRY);
+    return c.note;
+  }catch(e){console.warn('the note kept over the page reload could not be read',e);return ''}
+}
 const TASKS_STEP_MARK='YOUR STEP:';
 const TASKS_STEP_DIVIDER="----- The agent's work, as you approved it -----";
 function tasksYourStep(t){
@@ -3939,7 +3952,7 @@ function renderApprovalBlock(t){
         <option value="">Not set</option>
         ${TASK_TYPE_OPTIONS.map(o=>`<option value="${o}" ${t.taskType===o?'selected':''}>${o}</option>`).join('')}
       </select></div>
-    <textarea id="apvNote" placeholder="What to change, or why you are rejecting. Required for Request changes and Reject. Tap a chip below and it writes the sentence for you. (In Slack you just reply in the thread — same thing.)"></textarea>
+    <textarea id="apvNote" placeholder="What to change, or why you are rejecting. Required for Request changes and Reject. Tap a chip below and it writes the sentence for you. (In Slack you just reply in the thread — same thing.)">${escHtml(tasksCarriedNote(t.id))}</textarea>
     <label style="display:flex;align-items:center;gap:6px;font-size:11px;color:var(--text-secondary);margin:6px 0 2px">
       <input type="checkbox" id="apvRemember" style="margin:0" onchange="this.dataset.touched='1'">
       Remember this reason — the agent applies it to every future task (on by default for a rejection; untick for a one-off)
@@ -4022,6 +4035,14 @@ async function apvDecide(taskId,outcome,remember){
   const chosenType=(typeEl&&typeEl.value)||'';
   const btns=Array.from(document.querySelectorAll('[data-apv-btn]'));
   btns.forEach(b=>{b.disabled=true;b.style.opacity='0.6'});
+  // The code that drew this box must be the live code before it may decide it (7 Oct 2026): an old
+  // tab showed Your step cards with Approve. Nothing is written; his note waits for the reload.
+  if(window.PageFreshness&&await PageFreshness.isStale()){
+    try{if(note)sessionStorage.setItem(TASKS_NOTE_CARRY,JSON.stringify({id:taskId,note}))}catch(e){console.warn('note could not be kept over the page reload',e)}
+    toast('This page was updated after you opened it, so nothing was saved. Reloading now: open the task again to decide it.'+(note?' Your note comes back.':''),true);
+    PageFreshness.reload(2500);
+    return;
+  }
   const agentId=approvalRaiserId(t);
   const nowIso=new Date().toISOString();
   const payload={};

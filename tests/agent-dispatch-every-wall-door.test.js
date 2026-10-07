@@ -350,6 +350,28 @@ print(json.dumps({"surfaced": sorted(s["task"] for s in res["surfaced"]), "rows"
     expect(r.rows.fresh).toEqual([false, 'why']);
   });
 
+  it('a Your step card approved again from an out-of-date tab goes straight back to his lane, with no carry-out first', () => {
+    // 7 Oct 2026: a tab opened before Your step shipped showed the card with Approve. Each approval
+    // wrote Status Today and a new Approved At over the YOUR STEP block, so the agent was "owed" a
+    // carry-out, a hand-back run met the same wall, and the card came back an hour later. Shaped
+    // from a payment card approved three times that day; every name, date and figure is invented.
+    const r = py(setup + `
+rec("again", notes="${blk('KEVIN', 'payment', '2026-09-26T08:15:00.000Z')}", status="Today", outcome="Approved as-is",
+    approved_at="2026-10-07T13:41:05.120Z", output=m.your_step_output("1. Pay the 60 EUR toll by card.", "Draft: the toll is due by 12 Nov."))
+rec("owed", notes="${blk('KEVIN', 'payment', '2026-09-26T08:15:00.000Z')}", status="Today", outcome="Approved as-is",
+    approved_at="2026-10-07T13:41:05.120Z", output="Draft: the toll is due by 12 Nov.")
+m.ledger_last_events = lambda: {"again": ("parked", "2026-10-07T08:00:00.000Z"), "owed": ("parked", "2026-10-07T08:00:00.000Z")}
+res = m.blockers_scan(sweep=True, now=NOW)
+print(json.dumps({"surfaced": sorted(s["task"] for s in res["surfaced"]),
+                  "again": [f("again", "status"), f("again", "approvalOutcome"), f("again", "approvedAt"), m.your_step_split(f("again", "agentOutput"))],
+                  "owed": f("owed", "status")}))`);
+    expect(r.surfaced).toEqual(['again']);
+    // The step is written from the wall again (its words here are "why"), and there is one block, never two.
+    expect(r.again).toEqual(['Approval', 'Approved as-is', '2026-10-07T13:41:05.120Z', ['why', 'Draft: the toll is due by 12 Nov.']]);
+    // The control: the same wall and verdict without the block is a fresh approval, owed its carry-out.
+    expect(r.owed).toBe('Today');
+  });
+
   it('a done line the sweep cannot take comes out with a note, so the box comes back', () => {
     const r = py(setup + `
 rec("stale", notes="${blk('KEVIN', 'signature', '2026-10-05T09:00:00.000Z')}", status="Approval", outcome="Approved as-is",
@@ -716,6 +738,32 @@ open(m.INTENT_LEDGER, "w").write("".join(json.dumps(r) + "\\n" for r in rows))
 print(json.dumps({"ids": ids()}))`);
     // approvedAt (19 Sep) is newer than the park (18 Sep): he decided again, so it is worked.
     expect(r.ids).toEqual(['recBlockedCarryAa']);
+  });
+
+  it('a verdict on a Your step card is not new work: it rests, named, and never reaches a hand-back run', () => {
+    const r = queue(`
+KEVIN = "[x — agent] BLOCKER OPEN (KEVIN payment): why Fix: f [since 2026-09-17T09:00:00.000Z]"
+rec("recStepAgainAaaaa", KEVIN, outcome="Approved as-is")
+TASKS["recStepAgainAaaaa"]["fields"][AF["agentOutput"]] = m.your_step_output("1. Pay it by card.", "Draft: pay the toll.")
+rec("recStepOwedAaaaaa", KEVIN, outcome="Approved as-is")
+TASKS["recStepOwedAaaaaa"]["fields"][AF["agentOutput"]] = "Draft: pay the toll."
+# Approved again WITH words typed then: both pages stamp the note with the verdict's own minute.
+rec("recStepNoteAaaaaa", KEVIN, outcome="Approved with minor edits")
+TASKS["recStepNoteAaaaaa"]["fields"][AF["agentOutput"]] = m.your_step_output("1. Pay it by card.", "Draft: pay the toll.")
+TASKS["recStepNoteAaaaaa"]["fields"][AF["feedbackHistory"]] = "[2026-09-02 10:00] Use the business card.\\n\\n[2026-09-19 09:00] Paid it.\\n\\nRef EX-9 on the receipt."
+for i in ("recStepAgainAaaaa", "recStepOwedAaaaaa", "recStepNoteAaaaaa"):
+    m.ledger_append(i, "parked")
+rows = [json.loads(l) for l in open(m.INTENT_LEDGER)]
+for row in rows: row["ts"] = "2026-09-18T10:00:00.000Z"
+open(m.INTENT_LEDGER, "w").write("".join(json.dumps(r) + "\\n" for r in rows))
+q = m.build_queue()
+idle = {t["id"]: t["idleReason"] for t in q["idleHandbacks"]}
+print(json.dumps({"work": sorted(t["id"] for t in q["worklist"] + q["reserve"]), "idle": idle}))`);
+    // All three were approved (19 Sep) after the park (18 Sep). Owed work: the one without the block,
+    // and the one whose approval came with words his agent must read (review, 7 Oct 2026).
+    expect(r.work).toEqual(['recStepNoteAaaaaa', 'recStepOwedAaaaaa']);
+    expect(Object.keys(r.idle)).toEqual(['recStepAgainAaaaa']);
+    expect(r.idle.recStepAgainAaaaa).toMatch(/^waiting on Kevin's own step \(payment\): approved already/);
   });
 
   it('a MERGE card is never in the worklist, whatever its outcome, and is listed under mergeCards', () => {

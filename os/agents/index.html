@@ -574,6 +574,8 @@ a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}
 <script src="../../js/automations-data.js?v=20"></script>
 <script src="../../js/mcp-tools-data.js?v=1"></script>
 <script src="../../js/sync-bar.js?v=6"></script>
+<!-- A tab older than the live page reloads instead of saving a decision (7 Oct 2026). -->
+<script src="../../js/page-freshness.js?v=1"></script>
 <script>
 // ═══════════════════════════════════════════════════════════════════════
 // Constants
@@ -1468,6 +1470,16 @@ async function uploadQueuedApprovalFiles(taskId){
 // draft survives ANY re-render, including one whose filter hides the card it
 // belongs to (a per-render snapshot lost exactly that case).
 const _apvDrafts = {};
+// Notes typed on a tab that then reloaded itself because a newer copy of this page was live
+// (apvStaleTab, 7 Oct 2026). Read once and dropped, so they come back on the first render only.
+const APV_DRAFT_CARRY = 'apv_drafts_over_reload';
+try {
+    const carried = JSON.parse(sessionStorage.getItem(APV_DRAFT_CARRY) || 'null');
+    sessionStorage.removeItem(APV_DRAFT_CARRY);
+    if(carried && typeof carried === 'object') Object.entries(carried).forEach(([id, d]) => {
+        if(d && typeof d.note === 'string') _apvDrafts[id] = { note: d.note, type: String(d.type || ''), remember: d.remember !== false };
+    });
+} catch(e){ console.warn('notes kept over the page reload could not be read', e); }
 function snapshotApprovalDrafts(){
     allApprovals.forEach(t=>{
         const n = document.getElementById('apvNote-'+t.id);
@@ -1854,6 +1866,10 @@ async function agBulkDecide(outcome, opts){
         toast('Say what needs changing first. Every ticked agent reads it.');
         return;
     }
+    // An old tab decides nothing, so the run never starts (7 Oct 2026). Locked across the check,
+    // so a second tap cannot start a second run while it waits; the reload takes the lock away.
+    apvBulkLock(true);
+    if(await apvStaleTab()) return;
     const total = ids.length;
     // Where the view lands, worked out while every card is still on the
     // page: the lowest ticked card ON SCREEN (an Undo puts a card back in
@@ -1895,6 +1911,7 @@ async function agBulkDecide(outcome, opts){
             console.error('bulk ' + outcome + ' failed for ' + id, e);
         }
         if(result === 'saved'){ done++; if(opts.remember) remembered = true; }
+        else if(_apvGoingStale){ apvBulkLock(false); return; }   // a newer page went live mid-run: the reload says so
         else if(result === 'elsewhere') elsewhere++;
         else if(result === 'auth'){ apvBulkLock(false); return; }   // the auth bar is up; every further write would fail the same way
         else failed++;
@@ -3012,6 +3029,43 @@ window.agConfirmReject = agConfirmReject;
 // its write lands, so a second route could otherwise write it again and the
 // later verdict would win (review, 24 Sep 2026).
 const _apvSaving = new Set();
+// AN OLD TAB SAVES NOTHING (Kevin, 7 Oct 2026). His tab from the morning kept the code from before
+// the Your step cards and showed them with Approve: ten were approved two to four times. True when
+// a newer copy of this page is live: his typed notes are kept for the reload, nothing is written,
+// and the page reloads itself (js/page-freshness.js says how the copies are compared).
+let _apvGoingStale = false;
+async function apvStaleTab(){
+    if(!window.PageFreshness || !(await PageFreshness.isStale())) return false;
+    snapshotApprovalDrafts();
+    let files = 0;
+    try {
+        const keep = {};
+        Object.entries(_apvDrafts).forEach(([id, d]) => {
+            if(!d) return;
+            files += (d.files || []).length;
+            if(String(d.note || '').trim()) keep[id] = { note: d.note, type: d.type || '', remember: d.remember };
+        });
+        sessionStorage.setItem(APV_DRAFT_CARRY, JSON.stringify(keep));
+    } catch(e){ console.warn('notes could not be kept over the page reload', e); }
+    if(!_apvGoingStale){
+        toast('This page was updated after you opened it, so nothing was saved. Reloading now: decide on the latest version. Your typed notes come back'
+            + (files ? `, but ${files === 1 ? 'the file' : 'the ' + files + ' files'} you added must be added again.` : '.'), 6000);
+    }
+    _apvGoingStale = true;
+    apvReloadWhenIdle();
+    return true;
+}
+// Never mid-save: a file upload, a verdict or a bulk run finishes its write first (review, 7 Oct 2026).
+function apvReloadWhenIdle(){
+    if(_apvSaving.size){ setTimeout(apvReloadWhenIdle, 500); return; }
+    PageFreshness.reload(2500);
+}
+window.apvStaleTab = apvStaleTab;
+// Back on an old tab: it reloads before he reads a card the new code would show differently.
+['visibilitychange', 'focus'].forEach(ev => (ev === 'focus' ? window : document).addEventListener(ev, () => {
+    if(document.visibilityState !== 'visible' || _agentsView !== 'approvals') return;
+    apvStaleTab().catch(e => console.warn('page freshness check failed', e));
+}));
 async function applyApprovalDecision(taskId, outcome, remember, opts){
     opts = opts || {};
     if(_apvSaving.has(taskId)) return 'elsewhere';
@@ -3038,6 +3092,8 @@ async function applyApprovalDecision(taskId, outcome, remember, opts){
     let phase = 'check';
     _apvSaving.add(taskId);
     try {
+        // The code that drew this card must be the live code before it may decide it (7 Oct 2026).
+        if(await apvStaleTab()) return 'elsewhere';
         // STALE-APPROVAL GUARD (same principle as the Slack baseline): a click
         // approves what was on screen when the card RENDERED. Re-read the task
         // and refuse if it has changed since, rather than acting on something
