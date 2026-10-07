@@ -344,6 +344,17 @@ describe('robots stuck on Kevin', () => {
     expect(r.note).toBe('');
   });
 
+  it('a TOOL wall no fixer can reach says why, in the sweep\'s words; one on a merge card or the daily fix stays off (7 Oct 2026)', () => {
+    const r = H.readBlockers(row({ sweptAt: new Date(now - 10 * 60000).toISOString(), open: [
+      { task: 'recG', name: 'Stuck on a runner', kind: 'TOOL', subject: 'x', days: 6, findingStatus: 'open', toolState: 'no-fixer', tool: 'no fixer can reach it (protected file: scripts/agent-settings.json)' },
+      { task: 'recH', name: 'Card waiting', kind: 'TOOL', subject: 'y', days: 6, findingStatus: 'pending', toolState: 'merge-card', tool: 'waiting on a merge card (PR #812)' },
+      { task: 'recI', name: 'Fixer has it', kind: 'TOOL', subject: 'z', days: 1, findingStatus: 'deferred', toolState: 'fixer', tool: 'waiting on the daily robot fix' },
+    ] }), now);
+    const texts = r.items.map(i => i.text);
+    expect(texts).toEqual(['Stuck on a runner: no fixer can reach it (protected file: scripts/agent-settings.json)']);
+    expect(texts.join(' ')).not.toMatch(/Claude Code session/);
+  });
+
   it('says so when the sweep is old, missing or unreadable, never a silent empty list', () => {
     expect(H.readBlockers(row({ open: [], sweptAt: new Date(now - 5 * 3600000).toISOString() }), now).note).toMatch(/5 hours ago/);
     expect(H.readBlockers(null, now).note).toMatch(/never reported/);

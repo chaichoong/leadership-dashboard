@@ -42,6 +42,8 @@ SITES = {"www.topcashback.co.uk": {"label": "TopCashback", "login": True, "login
          "gov.uk": {"label": "GOV.UK", "login": False}}
 m.load_login_sites = lambda: SITES
 m.BROWSER_LEDGER = "/nonexistent/od-test-browser-ledger.jsonl"   # never the live robot's log
+m.ledger_last_events = lambda: {}   # never the live intent ledger
+m.finding_details = lambda: {}     # never the live findings queue
 class A:
     def __init__(self, **kw): self.__dict__.update(kw)
 def run(fn, args):
@@ -133,10 +135,12 @@ print(json.dumps([bool(m.ledger_bot_check(["loom.com"], path=L)), bool(m.ledger_
   });
 
   it('KEVIN only for the steps that are his by rule; "get the quote" is not one', () => {
+    // Approved: since 7 Oct 2026 a KEVIN wall on unapproved work is refused (its step goes to
+    // Kevin as a KEVIN ONLY card instead; tests/agent-dispatch-every-wall-door.test.js).
     const r = py(`
-rec("t1")
+rec("t1", outcome="Approved as-is", approved_at="2026-09-25T09:00:00.000Z")
 a = run(m.cmd_block, {"task": "t1", "kind": "KEVIN", "subject": "quote", "why": "x", "finding": None})
-b = run(m.cmd_block, {"task": "t1", "kind": "KEVIN", "subject": "Purchase", "why": "Kevin buys the RightSure policy through TopCashback.", "finding": None})
+b = run(m.cmd_block, {"task": "t1", "kind": "KEVIN", "subject": "Purchase", "why": "Kevin buys the RightSure policy through TopCashback.", "finding": None, "steps": "1. Open the saved quote. 2. Buy it."})
 print(json.dumps({"a": a["err"], "b": b["err"], "blk": m.task_blocker(notes("t1"))}))`);
     expect(r.a).toMatch(/a KEVIN wall is one of: payment, purchase, signature/);
     expect(r.b).toBeNull();
@@ -208,7 +212,7 @@ describe('a blocked task cannot close', () => {
   it('complete refuses while the wall stands, keeps --keep-open, and completes once it is cleared with evidence', () => {
     const r = py(`
 rec("t1", outcome="Approved as-is", approved_at="2026-09-25T09:00:00.000Z")
-run(m.cmd_block, {"task": "t1", "kind": "KEVIN", "subject": "purchase", "why": "Kevin buys the policy.", "finding": None})
+run(m.cmd_block, {"task": "t1", "kind": "KEVIN", "subject": "purchase", "why": "Kevin buys the policy.", "finding": None, "steps": "1. Buy the policy online."})
 a = run(m.cmd_complete, {"task": "t1", "keep_open": False, "note": None})
 k = run(m.cmd_complete, {"task": "t1", "keep_open": True, "note": "saved the quote"})
 thin = run(m.cmd_unblock, {"task": "t1", "evidence": "done"})
@@ -386,7 +390,7 @@ def submit(text):
                                    "plain_task": None, "plain_approve": None, "files": [], "receipt": None})["err"]
     except Reached:
         return "REACHED-THE-RECORD"
-K = "KEVIN ONLY: purchase: buy the Everywhen policy through the TopCashback link once the quote is saved.\\n\\n"
+K = "KEVIN ONLY: purchase: 1. Open the saved Everywhen quote through the TopCashback link. 2. Buy the policy.\\n\\n"
 bad = ${JSON.stringify(out(lines.swinton))}
 own = "Report body.\\n\\n**Carrying this out will involve:** saving the Everywhen quote on TopCashback, so that Kevin then buys the policy through the TopCashback link."
 mixed = "Report body.\\n\\n**Carrying this out will involve:** Kevin then pays the £20 fee, and someone can get three quotes."
@@ -464,7 +468,9 @@ red = dict(s, stale=[s["open"][0]])
 print(json.dumps([e.blockers_summary(fine)[:2], e.blockers_summary(red)[:2], e.blockers_summary(dict(s, open=[], stale=[]))[:2],
                   e.blockers_summary(dict(s, openTasksRead=0))[0]]))`);
     expect(r[0][0]).toBe('Worked');
-    expect(r[0][1]).toBe("Robots blocked on 4 tasks. For you: sign the robot in to www.topcashback.co.uk; 1 step only you can do (purchase); 1 task need a Claude Code session to fix the robot. 1 task waiting on the daily robot fix.");
+    // A report written before 7 Oct 2026 has no toolState: a deferred finding still reads as
+    // one no fixer can reach, never as "a Claude Code session" (retired that day).
+    expect(r[0][1]).toBe("Robots blocked on 4 tasks. For you: sign the robot in to www.topcashback.co.uk; 1 step only you can do (purchase). 1 task: no fixer can reach it. 1 task waiting on the daily robot fix.");
     expect(r[1][0]).toBe('Failed');
     expect(r[1][1]).toMatch(/add namecheap\.com to the robot's list \(Add a new site\).*1 task blocked 3 days or more\./);
     expect(r[2]).toEqual(['Worked', 'No robot is blocked.']);
@@ -476,9 +482,10 @@ print(json.dumps([e.blockers_summary(fine)[:2], e.blockers_summary(red)[:2], e.b
 s = ${JSON.stringify(sweep)}
 s["open"][2]["turn"] = True
 out = e.blockers_summary(dict(s, open=s["open"][1:], stale=[]))
-print(json.dumps([out[1], [w.get("turn") for w in out[2]["open"]]]))`);
+print(json.dumps([out[1], {w["task"]: w.get("turn") for w in out[2]["open"]}]))`);
     expect(r[0]).toMatch(/1 step only you can do \(purchase\); 1 step ready for Your turn on the AI Agents page \(your Mac\)/);
-    expect(r[1]).toEqual([null, true, null, null]);
+    // Keyed by task: since 7 Oct 2026 a KEVIN wall with its step or turn leads the list.
+    expect(r[1]).toEqual({ b: null, c: true, d: null, e: null });
   });
 
   it('a sweep file that has stopped being written is a Failed row, never an old "all clear"', () => {
@@ -595,7 +602,7 @@ print(json.dumps([f for f in F if f.startswith("AND({Status}='Completed'")]))`);
   it('annotate cannot write or clear a wall; only block, unblock with evidence and the sweep can', () => {
     const r = py(`
 rec("t1", outcome="Approved as-is")
-run(m.cmd_block, {"task": "t1", "kind": "KEVIN", "subject": "payment", "why": "Kevin pays.", "finding": None})
+run(m.cmd_block, {"task": "t1", "kind": "KEVIN", "subject": "payment", "why": "Kevin pays.", "finding": None, "steps": "1. Pay the invoice by bank transfer."})
 a = run(m.cmd_annotate, {"task": "t1", "note": "BLOCKER CLEARED (KEVIN payment): paid"})
 print(json.dumps({"err": a["err"], "still": m.task_blocker(notes("t1"))["kind"]}))`);
     expect(r.err).toMatch(/writes a blocker line/);
@@ -614,7 +621,7 @@ print(json.dumps([a["err"], b["err"], m.task_blocker(notes("t1"))["finding"]]))`
     expect(r[2]).toBe('20260925-agent-dispatch-606');
   });
 
-  it('blocked work Kevin has not approved rests a day too, and wakes when the wall clears or his verdict moves', () => {
+  it('blocked work Kevin has not approved rests until the wall clears or his verdict moves (no day clock since 7 Oct 2026)', () => {
     const r = py(`
 now = datetime(2026, 9, 25, 12, 0, tzinfo=timezone.utc)
 n = "[x — agent] BLOCKER OPEN (SITE namecheap.com): why Fix: f [since 2026-09-25T10:00:00.000Z]"
@@ -625,8 +632,12 @@ print(json.dumps([m.blocked_rest(t, ("parked", "2026-09-25T10:00:00.000Z"), now)
                   m.blocked_rest(dict(t, notes=""), ("parked", "2026-09-25T10:00:00.000Z"), now),
                   m.blocked_rest(t, ("parked", "2026-09-24T10:00:00.000Z"), now),
                   m.blocked_rest(dict(t, outcome="Approved as-is"), ("parked", "2026-09-25T10:00:00.000Z"), now)]))`);
-    expect(r[0]).toMatch(/^blocked on SITE namecheap\.com since 2026-09-25T10:00; rests 2[0-2]h more/);
-    expect(r.slice(1)).toEqual(['', '', '', '', '']);
+    expect(r[0]).toMatch(/^blocked on SITE namecheap\.com since 2026-09-25T10:00; rests until the wall clears/);
+    expect(r.slice(1, 4)).toEqual(['', '', '']);
+    // 26 hours on: the day's rest used to end here and the task met the same wall again
+    // (235 parks on 39 tasks in 14 days). It rests on until the wall clears.
+    expect(r[4]).toMatch(/^blocked on SITE namecheap\.com since 2026-09-24T10:00; rests until the wall clears/);
+    expect(r[5]).toBe('');
   });
 
   it('a SIGN-IN wall also clears when the browser ledger shows the session live after the wall', () => {

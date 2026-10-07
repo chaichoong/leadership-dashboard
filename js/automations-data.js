@@ -90,6 +90,8 @@ var AUTOMATIONS = {
           what: 'Runs the hand-back check for the Work Dispatcher agent, which has its own register row above. Listed here so every scheduled job is accounted for.' },
         { key: 'signin-pickup', agent: true, name: 'Sign-in Pickup', when: 'when you close the last Robot sign-in window', status: 'on',
           what: 'Runs the Work Dispatcher agent on the tasks that were waiting for the sites you have just signed the robot into, straight away while the sign-in is live. It never waits behind a long job such as the nightly video render; it waits only while another agent run is working the task list, for up to 45 minutes, and the 30-minute hand-back check covers anything it could not reach.' },
+        { key: 'merge-approved', name: 'Merge What You Approved', when: 'after you approve a MERGE card, queued behind the night render', status: 'on',
+          what: "When you approve a MERGE card (a robot fix that touches a protected file), this runs the full test gate on exactly the code the card showed you and merges it, then closes the card with the merge commit and wakes the tasks the fix was blocking. It never merges anything you did not approve. A failed test or changed code sends the card back to you saying why. No AI runs in it." },
         { key: 'roy-assistant', agent: true, name: "Roy's assistant", when: 'every 10 minutes, 7am to 9pm', status: 'on',
           what: "Picks up what Roy forwards from info@ to info@, has the Inbox Response agent work it straight away, and emails Roy what happened. Every email to a tenant, contractor or agent still waits for Kevin's yes." },
         { key: 'daily-ops', agent: true, name: 'Systems Check', when: '7:00am daily', status: 'on',

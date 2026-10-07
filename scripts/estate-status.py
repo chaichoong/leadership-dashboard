@@ -640,7 +640,20 @@ BLOCKERS_STALE_MIN = 120
 
 
 def _plural(n, word):
-    return "%d %s%s" % (n, word, "" if n == 1 else "s")
+    return "%d %s%s" % (n, word, "" if n == 1 else ("es" if word.endswith("x") else "s"))
+
+
+# A TOOL wall the daily fixer cannot clear (agent-dispatch.py tool_wall_state): its fix needs a
+# protected file and no MERGE card exists yet, no finding was filed, or Kevin rejected the card.
+WALLS_CAP = 80
+NO_FIXER_STATES = ("no-fixer", "no-finding", "deferred", "merge-rejected", "merge-closed")
+PROTECTED_RE = re.compile(r"protected file: ([^)]+)\)")
+
+
+def tool_state(w):
+    """The sweep's toolState, or, for a report written before 7 Oct 2026, the old reading: a
+    deferred finding meant no fixer would take it."""
+    return w.get("toolState") or ("no-fixer" if w.get("findingStatus") == "deferred" else "fixer")
 
 
 def blockers_summary(r):
@@ -649,14 +662,27 @@ def blockers_summary(r):
     stale = r.get("stale") or []
     closed = r.get("closedWhileBlocked") or []
     errors = [e for e in (r.get("sitesError"), r.get("findingsError")) if e]
+    # The sweep's lazy reads (the intent ledger, the MERGE cards, the findings' detail, the
+    # standing holds): a failed one is a failed check, never a quiet "daily robot fix" (review).
+    errors += ["%s: %s" % (k, v) for k, v in sorted((r.get("readErrors") or {}).items()) if v]
     if not r.get("openTasksRead"):
         return ("Failed", "The blocker check could not read the task board, so it cannot say what is blocked.",
                 {"open": [], "controlFailed": True})
     signin = sorted({w["subject"] for w in walls if w["kind"] == "SIGN-IN"})
     sites = sorted({w["subject"] for w in walls if w["kind"] == "SITE"})
     kevin = [w for w in walls if w["kind"] == "KEVIN"]
-    build = [w for w in walls if w["kind"] == "TOOL" and w.get("findingStatus") == "deferred"]
-    fixing = [w for w in walls if w["kind"] == "TOOL" and w.get("findingStatus") != "deferred"]
+    # A TOOL wall says who can clear it (Kevin, 7 Oct 2026). Until then all 19 read "waiting on
+    # the daily robot fix" while no fixer could reach the protected files their fixes needed.
+    tools = [w for w in walls if w["kind"] == "TOOL"]
+    merge_wait = [w for w in tools if tool_state(w) == "merge-card"]
+    merging = [w for w in tools if tool_state(w) == "merge-approved"]
+    build = [w for w in tools if tool_state(w) in NO_FIXER_STATES]
+    unclaimed = [w for w in tools if tool_state(w) == "unclaimed"]
+    open_pr = [w for w in tools if tool_state(w) == "pending"]
+    # A wall the sweep could not judge is a failed check, never "the daily robot fix" (review).
+    unknown = [w for w in tools if tool_state(w) == "unknown"]
+    errors += ["%s: %s" % (w["task"], w.get("tool") or "could not be judged") for w in unknown[:3]]
+    fixing = [w for w in tools if w not in merge_wait + merging + build + unclaimed + open_pr + unknown]
     parts = []
     if signin:
         parts.append("sign the robot in to " + ", ".join(signin))
@@ -669,10 +695,25 @@ def blockers_summary(r):
         if turns:
             # Kevin's turn (30 Sep 2026): the robot has the rest filled in and waits for his button.
             parts.append("%s ready for Your turn on the AI Agents page (your Mac)" % _plural(len(turns), "step"))
-    if build:
-        parts.append("%s need a Claude Code session to fix the robot" % _plural(len(build), "task"))
+        lane = [w for w in kevin if w.get("yourStep")]
+        if lane:
+            parts.append("%s in your approval queue as Your step" % _plural(len(lane), "step"))
+    if merge_wait:
+        prs = sorted({(w.get("mergeCard") or {}).get("pr") for w in merge_wait} - {None})
+        parts.append("%s waiting on a merge card in your approval queue (%s)"
+                     % (_plural(len(merge_wait), "fix"), ", ".join("PR #%s" % p for p in prs) or "PR not named"))
     detail = ("Robots blocked on %s. For you: %s." % (_plural(len(walls), "task"), "; ".join(parts))
               if parts else ("Robots blocked on %s." % _plural(len(walls), "task") if walls else "No robot is blocked."))
+    if build:
+        paths = sorted({m.group(1) for w in build for m in [PROTECTED_RE.search(str(w.get("tool") or ""))] if m})
+        detail += " %s: no fixer can reach it%s." % (
+            _plural(len(build), "task"), (" (protected file: %s)" % ", ".join(paths)) if paths else "")
+    if unclaimed:
+        detail += " %s: no fixer has taken the fix in 3 days or more." % _plural(len(unclaimed), "task")
+    if open_pr:
+        detail += " %s waiting on an open fix PR to merge." % _plural(len(open_pr), "task")
+    if merging:
+        detail += " %s approved by you and being merged by the robot." % _plural(len(merging), "fix")
     if fixing:
         detail += " %s waiting on the daily robot fix." % _plural(len(fixing), "task")
     if stale:
@@ -685,10 +726,27 @@ def blockers_summary(r):
     if errors:
         detail += " The sweep could not read: " + "; ".join(e[:120] for e in errors) + "."
     status = "Failed" if (stale or closed or errors) else "Worked"
-    slim = [{k: w.get(k) for k in ("task", "name", "agent", "kind", "subject", "fix", "days", "findingStatus", "turn")}
-            for w in walls][:40]
+    slim = []
+    # A KEVIN wall with its step leads and the list holds 80 (review, 7 Oct 2026): the page's Your
+    # step card and Your turn button read this list, so a step cut off at 40 had no button.
+    ordered = sorted(walls, key=lambda w: 0 if (w.get("kind") == "KEVIN" and (w.get("step") or w.get("turn"))) else 1)
+    for w in ordered[:WALLS_CAP]:
+        s = {k: w.get(k) for k in ("task", "name", "agent", "kind", "subject", "fix", "days", "findingStatus", "turn")}
+        if w["kind"] == "KEVIN":
+            # The page shows the step on his Your step card, with Your turn when a plan exists.
+            s.update(step=w.get("step") or w.get("why") or "", yourStep=bool(w.get("yourStep")),
+                     turn=bool(w.get("turn")))
+            if w.get("doneSaid"):
+                s["doneSaid"] = w["doneSaid"]
+        if w["kind"] == "TOOL":
+            s.update(toolState=tool_state(w), tool=w.get("tool") or "", mergeCard=w.get("mergeCard"))
+            if w.get("tool"):
+                s["fix"] = w["tool"]
+        slim.append(s)
     return status, detail, {"open": slim, "stale": len(stale), "closedWhileBlocked": closed[:10],
-                            "woken": len(r.get("woken") or [])}
+                            "woken": len(r.get("woken") or []),
+                            "noFixer": len(build), "unclaimed": len(unclaimed), "openPr": len(open_pr),
+                            "mergeCard": len(merge_wait), "merging": len(merging), "dailyFix": len(fixing)}
 
 
 def blockers_row(now, path=BLOCKERS_FILE):

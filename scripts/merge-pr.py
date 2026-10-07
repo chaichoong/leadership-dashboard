@@ -90,6 +90,7 @@ WHAT IT DOES
 Usage:
     python3 scripts/merge-pr.py --pr 123             # gate, then merge if green
     python3 scripts/merge-pr.py --pr 123 --dry-run   # gate only, never merges
+    python3 scripts/merge-pr.py --pr 123 --expect-head <sha>   # only that head (MERGE cards)
     Run it with run_in_background: a run takes 5 to 15 minutes. Progress lines
     go to stderr; ONE JSON result goes to stdout.
 Exit: 0 merged, or --dry-run green
@@ -1143,7 +1144,7 @@ def log_line(pr, head, status, why, flaky=None):
 
 # ─── THE RUN ──────────────────────────────────────────────────────────
 
-def gate(pr, dry_run):
+def gate(pr, dry_run, expect_head=""):
     """Returns (result dict, exit code)."""
     res = {"pr": pr, "dryRun": dry_run, "testedTree": None, "base": None, "head": None,
            "vitest": None, "browser": None, "walk": None, "protectedPathsTouched": [],
@@ -1214,6 +1215,12 @@ def gate(pr, dry_run):
         if err:
             return refuse("cannot judge: " + err)
         res["base"], res["head"] = base, head
+        # A MERGE card (scripts/merge-approved.py) is Kevin's approval of ONE head. A push after
+        # it was raised is code he never saw: refuse before any test runs (7 Oct 2026). The
+        # merge below matches this tested head, so nothing newer can slip in after.
+        if expect_head and not (head or "").startswith(expect_head):
+            return refuse("the PR head is %s, not %s, the head Kevin approved on its MERGE card; "
+                          "nothing merged" % ((head or "?")[:12], expect_head[:12]))
         files, err = tree_files(tree, base, head)
         if err:
             return refuse("cannot judge: " + err)
@@ -1354,6 +1361,9 @@ def main(argv=None):
     p = Args(prog="merge-pr.py", description="Gate, then merge, one PR.")
     p.add_argument("--pr", type=positive, required=True)
     p.add_argument("--dry-run", action="store_true")
+    p.add_argument("--expect-head", default="",
+                   help="refuse unless the PR head is this commit (scripts/merge-approved.py passes the "
+                        "head Kevin approved on the MERGE card)")
     try:
         a = p.parse_args(argv)
     except (ValueError, TypeError) as e:
@@ -1366,7 +1376,7 @@ def main(argv=None):
     signal.signal(signal.SIGTERM, _interrupt)
     signal.signal(signal.SIGHUP, _interrupt)
     try:
-        res, code = gate(a.pr, a.dry_run)
+        res, code = gate(a.pr, a.dry_run, a.expect_head)
     except BaseException as e:
         why = "the gate itself broke: %s: %s" % (type(e).__name__, str(e)[:300])
         res, code = {"pr": a.pr, "dryRun": a.dry_run, "merged": False, "why": why}, 2

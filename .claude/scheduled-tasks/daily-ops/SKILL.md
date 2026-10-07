@@ -216,8 +216,10 @@ python3 scripts/fixer-merge.py merge --pr <n>
 
 Kevin's ruling, 29 Aug 2026. He was the drain — 213 open findings against a cap of ten — and the
 gate is stricter than his glance: full vitest AND browser suite, and an outright refusal on
-money, auth, the approval loop, the send path, shared files and the workers. Those stay open and
-go on NEEDS YOU. A red gate leaves the PR open and merges nothing.
+money, auth, the approval loop, the send path, shared files and the workers. Those stay open, and
+on a green gate the fixer opens the PR and a MERGE card comes to Kevin (queue-fixer STEP 4; since
+7 Oct 2026 a protected fix is never deferred for that reason). A red gate leaves the PR open and
+merges nothing.
 
 ## Phase 5 — Report
 

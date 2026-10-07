@@ -152,6 +152,10 @@ a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}
 .apv-bulk-why{flex-basis:100%;margin-top:6px;padding:6px 10px;border:1px solid var(--border-default);border-radius:var(--radius-md);font-family:inherit;font-size:var(--fs-xs);background:var(--bg-surface);color:var(--text-primary)}
 .apv-bulk-why:focus{outline:none;border-color:var(--accent)}
 .apv-signin-strip{border:1px solid var(--border-default);border-left:4px solid var(--accent);border-radius:var(--radius-md);background:var(--accent-soft);padding:12px 16px;margin-bottom:12px;font-size:var(--fs-sm)}
+.apv-step{border:1px solid var(--border-default);border-left:4px solid var(--accent-gold);border-radius:var(--radius-md);background:var(--bg-surface-2);padding:10px 14px;margin:6px 0 8px;font-size:var(--fs-sm)}
+.apv-step-head{font-weight:var(--fw-semibold);color:var(--text-primary);margin-bottom:4px}
+.apv-step-text{color:var(--text-primary);white-space:pre-wrap;word-break:break-word;margin-bottom:6px}
+.apv-step-said{border:1px solid var(--border-default);border-radius:var(--radius-md);background:var(--success-bg);color:var(--text-primary);padding:8px 12px;font-size:var(--fs-sm);word-break:break-word}
 .apv-signin{display:flex;gap:10px;align-items:center;flex-wrap:wrap;justify-content:space-between;border:1px solid var(--border-default);border-radius:var(--radius-md);background:var(--accent-soft);padding:8px 12px;margin:6px 0 8px;font-size:var(--fs-sm)}
 .apv-signin-site{display:inline-block;border:1px solid var(--border-default);border-radius:var(--radius-full);padding:3px 10px;background:var(--bg-surface);color:var(--text-primary);text-decoration:none;font-size:var(--fs-xs)}
 .apv-signin-site:hover{border-color:var(--accent)}
@@ -567,7 +571,7 @@ a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}
 <!-- Shared accuracy scoring (per agent PER TASK TYPE) — same maths as the
      Leadership Dashboard card. Pure IIFE, safe to load here. -->
 <script src="../../js/agent-accuracy.js?v=6"></script>
-<script src="../../js/automations-data.js?v=19"></script>
+<script src="../../js/automations-data.js?v=20"></script>
 <script src="../../js/mcp-tools-data.js?v=1"></script>
 <script src="../../js/sync-bar.js?v=6"></script>
 <script>
@@ -1057,7 +1061,9 @@ const APV_QUEUE_FIELDS = () => [
     TF.name, TF.status, TF.description, TF.notes, TF.dueDate, TF.taskType,
     TF.agentOutput, TF.sentForApprovalBy, TF.teamMember, TF.lmt, TF.slackBaseline,
     TF.approver, TF.priority, TF.inboundUrl, TF.attachments, TF.deferredUntil,
-    TF.feedbackHistory, TF.inboundSender, TF.plainSummary];
+    TF.feedbackHistory, TF.inboundSender, TF.plainSummary,
+    // Your step (7 Oct 2026): an approved card back in his lane, and the proof he gave.
+    TF.approvalOutcome, TF.approvalFeedback];
 
 async function loadApprovals(){
     _approvalsState = 'loading';
@@ -1084,6 +1090,8 @@ async function loadApprovals(){
             description: gf(r,TF.description)||'',
             notes: gf(r,TF.notes)||'',
             feedbackHistory: gf(r,TF.feedbackHistory)||'',
+            outcome: selName(gf(r,TF.approvalOutcome)),
+            feedback: gf(r,TF.approvalFeedback)||'',
             created: r.createdTime||'',
             priority: selName(gf(r,TF.priority)),
             tier1: isTier1Output(gf(r,TF.agentOutput)||''),
@@ -1658,8 +1666,8 @@ let _apvBulkPanel = '';
 let _apvBulkReason = '';
 let _apvBulkBusy = false;
 
-// A sign-in wait is not a decision, so it cannot be ticked.
-function apvSelectable(t){ return !apvSignInNeeded(t.agentOutput); }
+// A sign-in wait is not a decision, so it cannot be ticked. Nor is Your step: it is approved already.
+function apvSelectable(t){ return !apvSignInNeeded(t.agentOutput) && !apvYourStep(t); }
 
 // Queue order, so the loop decides in the order Kevin read the cards.
 function apvBulkIds(){
@@ -1999,9 +2007,12 @@ async function apvBulkDeferTo(until){
 let _apvSignInClickedAt = 0, _apvLastQueueLoad = 0;
 const APV_SIGNIN_WATCH_MS = 20 * 60 * 1000;
 function apvQueueSignature(){
-    return allApprovals.map(t => t.id + ':' + (apvSignInNeeded(t.agentOutput) ? 'w' : 'd')).join(',');
+    return allApprovals.map(t => t.id + ':' + (apvSignInWait(t) ? 'w' : 'd')).join(',');
 }
-function apvSignInsWaiting(){ return allApprovals.some(t => apvSignInNeeded(t.agentOutput)); }
+function apvSignInsWaiting(){ return allApprovals.some(t => apvSignInWait(t)); }
+// A Your step card is approved work waiting on Kevin's own step: a SIGN-IN NEEDED line inside the
+// agent's approved work below its step is history, never a sign-in wait (review, 7 Oct 2026).
+function apvSignInWait(t){ return apvYourStep(t) ? null : apvSignInNeeded(t.agentOutput); }
 function apvWatchingSignIns(){ return apvSignInsWaiting() || (Date.now() - _apvSignInClickedAt) < APV_SIGNIN_WATCH_MS; }
 async function apvSilentRefresh(){
     if(_approvalsState === 'loading') return false;
@@ -2330,7 +2341,7 @@ function apvSignInLink(need){
     return need.host ? `robotsignin://site/${encodeURIComponent(need.host)}` : 'robotsignin://all';
 }
 function apvSignInStripHtml(items, onMac = true){
-    const needs = items.map(t => apvSignInNeeded(t.agentOutput)).filter(Boolean);
+    const needs = items.map(t => apvSignInWait(t)).filter(Boolean);
     if(!needs.length) return '';
     const bySite = {};
     needs.forEach(n => { const k = n.host || n.site.toLowerCase(); (bySite[k] = bySite[k] || { site: n.site, host: n.host, n: 0 }).n++; });
@@ -2440,6 +2451,8 @@ function apvPlain(t){
 }
 
 function apvCardHtml(t){
+    const ys = apvYourStep(t);
+    if(ys) return apvStepCardHtml(t, ys);
     const plain = apvPlain(t);
     const askBits = apvAskLine(t);
     const isAction = askBits.isAction;
@@ -2536,6 +2549,136 @@ function apvCardHtml(t){
         </div>
     </div>`;
 }
+
+// ─── YOUR STEP (Kevin, 7 Oct 2026) ───────────────────────────────────
+// 13 tasks sat on a step only Kevin could take (a purchase, a signature, a
+// credential, an identity check, a payment) and none was in front of him: the
+// card left this queue the moment he approved it. Now scripts/agent-dispatch.py
+// puts such a task back here, still APPROVED, with a YOUR STEP block on top of
+// the agent's work. Its card shows the step, the Your turn button when the robot
+// has a plan, and a "Done, here is the proof" box, and no approve or reject: it
+// is approved already, so approving again would change nothing. The box cannot
+// run the script, so it writes his proof into Approval Feedback under
+// APV_STEP_DONE_MARK, and the half-hourly blocker sweep reads it, clears the
+// wall, takes the line out and hands the task back to its agent. The marks are
+// mirrored from YOUR_STEP_MARK, YOUR_STEP_DIVIDER and KEVIN_DONE_MARK there.
+const APV_STEP_MARK = 'YOUR STEP:';
+const APV_STEP_DIVIDER = "----- The agent's work, as you approved it -----";
+const APV_STEP_DONE_MARK = 'KEVIN STEP DONE';
+const APV_APPROVED_OUTCOMES = ['Approved as-is', 'Approved with minor edits'];
+function apvYourStep(t){
+    if(!t || !APV_APPROVED_OUTCOMES.includes(t.outcome)) return null;
+    const s = String(t.agentOutput||'').replace(/^\s+/, '');
+    const cut = s.indexOf(APV_STEP_DIVIDER);
+    if(!s.startsWith(APV_STEP_MARK) || cut === -1) return null;
+    return { step: s.slice(APV_STEP_MARK.length, cut).trim(), work: s.slice(cut + APV_STEP_DIVIDER.length).replace(/^\n+/, '') };
+}
+// His newest "done" line, or null. The sweep, not this page, decides whether it clears the wall.
+function apvStepDoneSaid(feedback){
+    const re = /^KEVIN STEP DONE \[(\d{4}-\d{2}-\d{2}T[0-9:.]+Z)\]:[ \t]*(.*)$/gm;
+    let m, last = null;
+    while((m = re.exec(String(feedback||'')))) last = m;
+    return last && last[2].trim() ? { at: last[1], evidence: last[2].trim() } : null;
+}
+// The Your turn link, from the same agent-blockers row the sign-ins panel reads (KEVIN walls
+// marked turn by the sweep). Re-drawn when that row arrives, which can be after the queue.
+function apvStepTurnHtml(taskId){
+    if(!signinTurns().some(w => w.task === taskId)) return '';
+    return SIGNIN_ON_MAC
+        ? `<a class="btn btn-success btn-sm" href="robotsignin://turn/${esc(taskId)}" data-apv-step-turn="${esc(taskId)}" title="Opens the robot's window on your Mac, filled in up to your step">Your turn</a>`
+        : `<span class="rs-mac">Your turn opens on your Mac</span>`;
+}
+function apvRenderTurnSlots(){
+    document.querySelectorAll('[data-apv-turn-slot]').forEach(el => { el.innerHTML = apvStepTurnHtml(el.getAttribute('data-apv-turn-slot')); });
+}
+function apvStepCardHtml(t, ys){
+    const plain = apvPlain(t);
+    const agent = teamName(t.raiserId) || 'No agent recorded';
+    const said = apvStepDoneSaid(t.feedback);
+    const links = (t.emailLinks || []).map((u,i)=>
+        `<a class="apv-email" href="${esc(u)}" target="_blank" rel="noopener noreferrer" title="Opens the original email in Gmail, in a new tab">&#9993; ${t.emailLinks.length>1?`Open email ${i+1}`:'Open the email'}</a>`).join('');
+    return `<div class="apv-card apv-step-card" data-apv-card="${t.id}" data-apv-your-step>
+        <div class="apv-plain" data-apv-plain="${plain.written?'written':'fallback'}">
+            <span class="apv-plain-label">The task</span><span class="apv-plain-text" data-apv-plain-task>${esc(plain.task)}</span>
+        </div>
+        ${t.tier1 ? `<div class="apv-tier1">TIER 1. This touches your private legal and financial matter. An AI agent prepared it. Read it before you act.</div>` : ''}
+        <div class="apv-step" data-apv-step>
+            <div class="apv-step-head">Your step. You approved this already: only you can do this part.</div>
+            <div class="apv-step-text" data-apv-step-text>${esc(ys.step)}</div>
+            <div data-apv-turn-slot="${t.id}">${apvStepTurnHtml(t.id)}</div>
+        </div>
+        <div class="apv-meta">
+            <span class="apv-chip">${esc(agent)}</span>
+            <span class="apv-age" title="Measured from when it came back to you">waiting ${esc(agoText(t.submittedAt))}</span>
+            ${links}
+        </div>
+        <details class="apv-details"${_apvOpen.workShut.has(t.id)?'':' open'} ontoggle="if(this.open)_apvOpen.workShut.delete('${t.id}');else _apvOpen.workShut.add('${t.id}')">
+            <summary>The agent's work, as you approved it</summary>
+            ${ys.work ? `<div class="apv-body" data-apv-work>${apvLinkify(ys.work)}</div>` : `<div class="apv-body">The agent left no work under the step.</div>`}
+        </details>
+        ${apvTrailHtml(t)}
+        <div class="apv-decide" data-apv-decide>
+            ${said
+                ? `<div class="apv-step-said" data-apv-step-said>You said it is done (${esc(agoText(said.at))} ago): ${esc(said.evidence)}. The robot checks it within half an hour, then the agent finishes the job.</div>`
+                : `<div class="apv-actions" data-apv-step-actions>
+                    <div class="apv-note-row"><textarea class="apv-note" id="apvNote-${t.id}" rows="1" placeholder="What proves it is done: the receipt, the reference, where the signed copy went" oninput="apvGrowNote(this)"></textarea></div>
+                    <button class="btn btn-success" data-apv-step-done onclick="apvStepDone('${t.id}')" title="Tells the robot you have done your step. It checks your proof, then the agent finishes the job.">Done, here is the proof</button>
+                </div>`}
+            ${apvDeferRow(t.id)}
+        </div>
+    </div>`;
+}
+// The "Done, here is the proof" box. Writes the proof into Approval Feedback (and its durable copy
+// in Feedback History) through the page's own Airtable write. Never the verdict: the task stays
+// approved, and the sweep is what clears the wall.
+async function apvStepDone(taskId){
+    const t = allApprovals.find(x=>x.id===taskId);
+    if(!t || !apvYourStep(t)) return 'elsewhere';
+    if(_apvSaving.has(taskId)) return 'elsewhere';
+    const el = document.getElementById('apvNote-'+taskId);
+    const evidence = String(el && el.value || '').replace(/\s+/g, ' ').trim();
+    if(!evidence){
+        toast('Say what proves it first: the receipt, the reference, or where the signed copy went.');
+        if(el) el.focus();
+        return 'empty';
+    }
+    const card = document.querySelector(`[data-apv-card="${taskId}"]`);
+    const btn = card ? card.querySelector('[data-apv-step-done]') : null;
+    if(btn) btn.disabled = true;
+    _apvSaving.add(taskId);
+    try {
+        const live = await atFetchOne(TASKS_TBL, taskId);
+        const still = selName(gf(live,TF.status)) === 'Approval'
+            && apvYourStep({ outcome: selName(gf(live,TF.approvalOutcome)), agentOutput: gf(live,TF.agentOutput)||'' });
+        if(!still){
+            toast('This step has moved on since it was shown. Reloading the queue.');
+            await loadApprovals(); renderApprovals();
+            return 'elsewhere';
+        }
+        const nowIso = new Date().toISOString();
+        const prior = String(gf(live,TF.approvalFeedback)||'').replace(/\s+$/, '');
+        const payload = {};
+        payload[TF.approvalFeedback] = (prior ? prior + '\n' : '') + `${APV_STEP_DONE_MARK} [${nowIso}]: ${evidence}`;
+        const hist = String(gf(live,TF.feedbackHistory)||'').replace(/\s+$/, '');
+        payload[TF.feedbackHistory] = (hist + '\n\n[' + nowIso.replace('T',' ').slice(0,16) + '] Done, here is the proof: ' + evidence).trim();
+        await atUpdate(TASKS_TBL, taskId, payload);
+        try { await postTaskComment(taskId, 'Kevin did his step. Proof: ' + evidence); }
+        catch(e){ console.error('step done comment failed', e); }
+        t.feedback = payload[TF.approvalFeedback];
+        delete _apvDrafts[taskId];
+        if(card) card.outerHTML = apvCardHtml(t);
+        return 'saved';
+    } catch(e){
+        if(btn) btn.disabled = false;
+        if(e.message==='auth') return 'auth';
+        console.error('step done failed', e);
+        toast('Not saved: ' + (e && e.message || e) + '. Your words are still in the box.');
+        return 'failed';
+    } finally {
+        _apvSaving.delete(taskId);
+    }
+}
+window.apvStepDone = apvStepDone;
 
 // The note box sits in the decide row, open on every card: typing and one
 // click is the whole of feedback. It is also where a file is dropped, and
@@ -2874,6 +3017,13 @@ async function applyApprovalDecision(taskId, outcome, remember, opts){
     if(_apvSaving.has(taskId)) return 'elsewhere';
     const t = allApprovals.find(x=>x.id===taskId);
     if(!t) return 'elsewhere';
+    // Your step (7 Oct 2026): approved already. A verdict here would change nothing he meant
+    // (a second approval) or undo his approval, so no route may write one: the card's own box,
+    // the bulk bar, a carried note. Only "Done, here is the proof" or a knock-back acts on it.
+    if(apvYourStep(t)){
+        toast('Already approved. This is your step: use "Done, here is the proof" when it is done.');
+        return 'elsewhere';
+    }
     const noteEl = document.getElementById('apvNote-'+taskId);
     const note = (typeof opts.note === 'string' ? opts.note : (noteEl && noteEl.value || '')).trim();
     // Captured now: the check after the save needs the reason this verdict
@@ -2897,6 +3047,12 @@ async function applyApprovalDecision(taskId, outcome, remember, opts){
         const liveStatus = selName(gf(live,TF.status));
         if(liveStatus !== 'Approval'){
             toast('Already decided elsewhere (Slack or the Tasks drawer). Reloading the queue.');
+            await loadApprovals(); renderApprovals(); renderRegister();
+            return 'elsewhere';
+        }
+        // Approved since it was drawn and put back as Your step: approving again is a no-op.
+        if(apvYourStep({ outcome: selName(gf(live,TF.approvalOutcome)), agentOutput: gf(live,TF.agentOutput)||'' })){
+            toast('Already approved. This is your step now. Reloading the queue.');
             await loadApprovals(); renderApprovals(); renderRegister();
             return 'elsewhere';
         }
@@ -3175,7 +3331,7 @@ function apvCrossParse(parsed, others){
 }
 
 async function apvCrossCheck(src, note, outcome, reasonKey){
-    const others = allApprovals.filter(t=>t.id!==src.id && !apvSignInNeeded(t.agentOutput)).slice(0, APV_CROSS_MAX_CARDS);
+    const others = allApprovals.filter(t=>t.id!==src.id && !apvSignInNeeded(t.agentOutput) && !apvYourStep(t)).slice(0, APV_CROSS_MAX_CARDS);
     if(!others.length) return;
     const seq = ++_apvCrossSeq;
     _apvCrossLive[src.id] = seq;
@@ -6963,6 +7119,7 @@ async function loadEstateStatus(){
     }
     renderEstateStatus();
     renderSignins();
+    apvRenderTurnSlots();   // a Your step card drawn before this row arrived gets its Your turn button
     if(_agentsView === 'estate') loadEstateContent();
 }
 function renderEstateStatus(){
