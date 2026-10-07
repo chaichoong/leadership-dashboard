@@ -184,6 +184,125 @@
         try{const v=JSON.parse(raw);return v&&typeof v==='object'?v:null}
         catch(e){console.warn('[loadStrategicKpis] KPI Detail JSON did not parse',e);return null}
     }
+
+    // ── Monthly milestones (Kevin, 7 Oct 2026: "very clear monthly milestones" on the dashboard) ──
+    // They live on the quarter's plan (Objective & Strategy, OBJSTRAT in js/config.js), not on the
+    // project: three per quarterly project, tied to it by qpDetails[n].linkedProject.
+    let _stratMilestones={};      // project id -> [{label,start,end,text}] x3 (the plan quarter's months), or {issue} when unclear
+    let _stratMilestonesError='';
+    // Kevin's rule of three (7 Oct 2026): he owns at most three open projects at once, across
+    // every business. Projects owned by Roy or an AI agent do not use a slot.
+    const STRAT_SLOT_LIMIT=3;
+    function _stratQuarterMonths(quarter,year){
+        const q=Number(String(quarter||'').replace(/\D/g,'')),y=Number(year);
+        if(!(q>=1&&q<=4)||!y)return null;
+        return [0,1,2].map(m=>{
+            const start=new Date(y,(q-1)*3+m,1),end=new Date(y,(q-1)*3+m+1,0);
+            return {start,end,label:start.toLocaleDateString('en-GB',{month:'long'})};
+        });
+    }
+    // 'YYYY-MM-DD' as local midnight, so it compares cleanly with the month bounds above.
+    function _stratLocalDay(iso){
+        const m=/^(\d{4})-(\d{2})-(\d{2})/.exec(String(iso||''));
+        return m?new Date(Number(m[1]),Number(m[2])-1,Number(m[3])):null;
+    }
+    function _stratTodayIso(now){
+        return `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}-${String(now.getDate()).padStart(2,'0')}`;
+    }
+    // A project linked from more than one plan takes the plan whose quarter holds its start date.
+    // One linked from two slots of that plan has two sets of milestones: say so, never pick one.
+    function buildStrategicMilestones(plans,projects){
+        const byProject={};
+        (plans||[]).forEach(r=>{
+            const months=_stratQuarterMonths(_stratSelName(getField(r,OBJSTRAT.quarter)),_stratSelName(getField(r,OBJSTRAT.year)));
+            if(!months)return;
+            OBJSTRAT.qpDetails.forEach((qp,i)=>{
+                const links=getField(r,qp.linkedProject)||[];
+                const stones=OBJSTRAT.monthlyStones[i].map((fid,m)=>({...months[m],text:String(getField(r,fid)||'').trim()}));
+                if(!stones.some(s=>s.text))return;
+                links.forEach(l=>{const id=typeof l==='string'?l:(l&&l.id);if(id)(byProject[id]=byProject[id]||[]).push({plan:r.id,stones})});
+            });
+        });
+        const out={};
+        Object.keys(byProject).forEach(id=>{
+            const cands=byProject[id];
+            const p=(projects||[]).find(x=>x.id===id);
+            const start=p?_stratLocalDay(p.start):null;
+            const pick=(start&&cands.find(c=>start>=c.stones[0].start&&start<=c.stones[2].end))||cands[cands.length-1];
+            out[id]=cands.filter(c=>c.plan===pick.plan).length>1
+                ?{issue:'This project is linked twice on its plan, so its milestones are unclear. Fix the plan\'s project links.'}
+                :pick.stones;
+        });
+        return out;
+    }
+    async function loadStrategicMilestones(){
+        const fields=[OBJSTRAT.quarter,OBJSTRAT.year,...OBJSTRAT.qpDetails.map(q=>q.linkedProject),...OBJSTRAT.monthlyStones.flat()];
+        return airtableFetch(TABLES.objStrat,{'fields[]':fields});
+    }
+    // 'past' | 'now' | 'next' for one milestone month, against today's date.
+    function _stratMonthState(s,now){
+        const today=new Date(now.getFullYear(),now.getMonth(),now.getDate());
+        if(today>s.end)return 'past';
+        return today>=s.start?'now':'next';
+    }
+    function _stratShortDay(d){return d.toLocaleDateString('en-GB',{day:'numeric',month:'short'})}
+    // The milestone to show on a closed row: this month's, else the next one, else the last one.
+    function _stratFocusMilestone(stones,now){
+        if(!Array.isArray(stones))return null;
+        const states=stones.map(s=>_stratMonthState(s,now));
+        let i=states.indexOf('now');
+        if(i<0)i=states.indexOf('next');
+        if(i<0)i=stones.length-1;
+        return {stone:stones[i],state:states[i],index:i};
+    }
+    function _stratMilestoneWhen(s,state,now){
+        if(state==='now'){
+            const left=Math.round((s.end-new Date(now.getFullYear(),now.getMonth(),now.getDate()))/86400000);
+            if(left===0)return `this month, due today, ${_stratShortDay(s.end)}`;
+            return `this month, due ${_stratShortDay(s.end)}, ${left} day${left===1?'':'s'} left`;
+        }
+        if(state==='next')return `starts ${_stratShortDay(s.start)}, due ${_stratShortDay(s.end)}`;
+        return `ended ${_stratShortDay(s.end)}`;
+    }
+    // One line under each row, so the month's milestone reads without opening anything.
+    // A project with no milestones says so: a blank line would read as "nothing due".
+    function stratMilestoneLineHtml(p,now){
+        const base='grid-column:1/-1;font-size:var(--fs-sm);line-height:1.4;padding-top:2px;';
+        if(_stratMilestonesError)return `<div class="strat-kpi-milestone" style="${base}color:var(--danger)">${escHtml(_stratMilestonesError)}</div>`;
+        const ms=_stratMilestones[p.id];
+        if(ms&&ms.issue)return `<div class="strat-kpi-milestone" style="${base}color:var(--warning)">${escHtml(ms.issue)}</div>`;
+        const f=_stratFocusMilestone(ms,now);
+        if(!f)return `<div class="strat-kpi-milestone" style="${base}color:var(--warning)">No monthly milestones on the plan for this project.</div>`;
+        const text=f.stone.text||'Not set on the plan.';
+        return `<div class="strat-kpi-milestone" title="${escHtml(text)}" style="${base}color:var(--text-secondary);display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;word-break:break-word">`
+            +`<span style="font-weight:var(--fw-semibold);color:var(--accent)">${escHtml(f.stone.label)} milestone</span> `
+            +`<span style="color:var(--text-muted)">(${escHtml(_stratMilestoneWhen(f.stone,f.state,now))})</span>: ${escHtml(text)}</div>`;
+    }
+    // All three months, in the opened row.
+    function stratMilestonesPanelHtml(p,now){
+        const stones=_stratMilestones[p.id];
+        if(!Array.isArray(stones))return '';
+        return stones.map(s=>{
+            const state=_stratMonthState(s,now);
+            const on=state==='now';
+            return `<div class="strat-kpi-month" data-state="${state}" style="margin-top:6px;padding:6px 10px;border-left:3px solid ${on?'var(--accent)':'var(--border-default)'};background:${on?'var(--accent-soft)':'transparent'};border-radius:var(--radius-sm)">`
+                +`<div style="font-weight:var(--fw-semibold);color:var(--text-primary)">${escHtml(s.label)} <span style="font-weight:var(--fw-regular);color:var(--text-muted)">${escHtml(_stratMilestoneWhen(s,state,now))}</span></div>`
+                +`<div style="color:var(--text-secondary);white-space:pre-wrap;word-break:break-word">${escHtml(s.text||'Not set on the plan.')}</div></div>`;
+        }).join('');
+    }
+    // The slot count sits above the business pills and ignores them: the limit is across every business.
+    function renderStrategicCapacity(){
+        const el=document.getElementById('strategicKpiCapacity');
+        if(!el)return;
+        // Next quarter's projects exist before the old quarter is closed: only started ones use a slot.
+        const today=_stratTodayIso(new Date());
+        const mine=_strategicKpiProjects.filter(p=>!p.completed&&p.status!=='Completed'&&!p.closedOn&&(!p.start||p.start<=today)&&p.owner&&STRAT_TEAM_KEYS[p.owner.email]==='kevin');
+        const n=mine.length,free=STRAT_SLOT_LIMIT-n;
+        const names=mine.map(p=>p.name).join(', ');
+        const verdict=free>0?`${free} slot${free===1?'':'s'} free.`:free===0?'No slots free.':`${-free} over the limit: hand one to Roy or an agent, or drop it.`;
+        el.style.color=free<0?'var(--danger)':'var(--text-secondary)';
+        el.innerHTML=`<span style="font-weight:var(--fw-semibold);color:${free<0?'var(--danger)':'var(--text-primary)'}">Projects you own: ${n} of ${STRAT_SLOT_LIMIT}</span>${names?` (${escHtml(names)})`:''}. ${escHtml(verdict)}`;
+    }
     // Health is DERIVED (js/project-health.js), never read from the stored
     // Project Status. That field is left at Airtable's "Not Started" default
     // when the Strategy push creates a project, and this function used to
@@ -212,6 +331,12 @@
             (allBusinesses||[]).forEach(b=>{
                 const name=getField(b,'fldbbRqVxLxUdHwIR');
                 if(name)_strategicBusinessIdToName[b.id]=typeof name==='string'?name:(name.name||'');
+            });
+            // The plans are fetched alongside the projects. A failed fetch is shown on every row,
+            // never swallowed: no milestone line would read as "nothing due this month".
+            const plansP=loadStrategicMilestones().then(p=>({plans:p}),e=>{
+                console.warn('[loadStrategicKpis] monthly milestones failed',e);
+                return {error:'Monthly milestones could not be loaded from the plan. Refresh to try again.'};
             });
             const records=await airtableFetch(STRAT_PROJECTS_TABLE);
             _strategicKpiProjects=records.map(r=>{
@@ -256,6 +381,9 @@
                     kpiStored:_stratParseDetail(getField(r,STRAT_PF.kpiDetailJson)),
                 };
             });
+            const planRes=await plansP;
+            _stratMilestonesError=planRes.error||'';
+            _stratMilestones=planRes.error?{}:buildStrategicMilestones(planRes.plans,_strategicKpiProjects);
             // Render immediately with the values already on each project so
             // the section never disappears while compute runs. Compute writes
             // back to Airtable in the background and re-renders on completion.
@@ -697,6 +825,8 @@
         const active=_strategicKpiProjects.filter(p=>p.kpiName&&!p.completed&&p.status!=='Completed'&&!p.closedOn);
         if(!active.length){section.style.display='none';return}
         section.style.display='block';
+        renderStrategicCapacity();
+        const now=new Date();
 
         // Filter pills — match the sage-executive token palette used on the rest of the page.
         // Active businesses come from Airtable so deactivating a business hides its filter pill.
@@ -801,6 +931,7 @@
                 <div class="od-progress" style="margin-top:6px"><div class="od-progress-fill" style="width:${pct}%;background:${healthColor}"></div></div>
                 <div style="font-size:var(--fs-xs);font-weight:var(--fw-semibold);color:${healthColor};text-align:center;padding-top:2px">${escHtml(health)}</div>
                 <div style="text-align:right;padding-top:2px">${stamp}</div>
+                ${stratMilestoneLineHtml(p,now)}
             </div>${infoRow}${monthsRow}${drillRow}`;
         }).join('')+`<div style="height:1px;background:var(--border-subtle)"></div>`;
         // Rounded wrapper around the whole stack.
@@ -844,6 +975,7 @@
         return `<div style="font-weight:var(--fw-semibold);color:var(--text-primary)">Where it is up to</div>${para(where)}
             ${p.kpiComputeError?`<div class="text-red" style="margin-top:4px">${escHtml(p.kpiComputeError)}</div>`:''}
             ${breakdown||notes?`<div style="margin-top:8px">${breakdown}${notes}</div>`:''}
+            ${Array.isArray(_stratMilestones[p.id])?heading('Monthly milestones')+stratMilestonesPanelHtml(p,new Date()):''}
             ${p.defOfDone?heading('Definition of done')+para(p.defOfDone):''}
             ${p.kpiTracking?heading('How it is counted')+para(p.kpiTracking):''}
             ${heading('Project')}${para(`${p.completedTasks} of ${p.totalTasks} tasks done | ${day(p.start)} to ${day(p.end)} | Owner: ${owner} | KPI last worked out ${updated}`)}

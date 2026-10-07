@@ -1,6 +1,6 @@
 ---
 name: strategy-session
-description: The quarterly objective and strategy session for ONE of Kevin's businesses (Real Estate, Operations Director, Runpreneur), run once a quarter per business. Measures last quarter against its plan, puts it to the fitting board seats, holds the direction conversation with Kevin, builds next quarter's pack from last quarter's baseline, closes the old quarter, writes the plan, projects, monthly stepping stones and tasks to Airtable, agrees the KPIs for the leadership dashboard, asks whether to update the dashboard and builds the KPIs in the same session on his yes, and ends with the write-back. Use when Kevin says "strategy session", "quarterly session", "plan next quarter", "Q1/Q2/Q3/Q4 plan for <business>", "objective and strategy session" or "/strategy-session".
+description: The quarterly objective and strategy session for ONE of Kevin's businesses (Real Estate, Operations Director, Runpreneur, Personal), run once a quarter per business, Real Estate first. Holds Kevin's rule of three (he owns at most three open projects across every business; each business has at most three, each with three monthly milestones) and ends by helping him decide his open slots. Measures last quarter against its plan, puts it to the fitting board seats, holds the direction conversation with Kevin, builds next quarter's pack from last quarter's baseline, closes the old quarter, writes the plan, projects, monthly stepping stones and tasks to Airtable, agrees the KPIs for the leadership dashboard, asks whether to update the dashboard and builds the KPIs in the same session on his yes, and ends with the write-back. Use when Kevin says "strategy session", "quarterly session", "plan next quarter", "Q1/Q2/Q3/Q4 plan for <business>", "objective and strategy session" or "/strategy-session". Also use, running Phase 8 on its own, when Kevin asks which projects he should own, where his time goes this quarter, or "my open slots".
 ---
 
 # Strategy session (built from the first live run, Q4 2026 Real Estate, 1-2 Oct 2026)
@@ -10,6 +10,20 @@ The Objective & Strategy page (`os/strategy/index.html`, code `os/strategy/strat
 the record this session writes. This skill mirrors that page's rules. It does not replace the
 page and it does not run the page's wizard: the conversation happens here, the result lands on
 the same record, and Kevin gets the finished plan as a PDF in the page's own export layout.
+
+## The rule of three (Kevin, 7 Oct 2026, from John Lamerton's 90-day cycle)
+
+- **Each business** has at most three quarterly projects a quarter. Each project has three
+  monthly milestones (the monthly stepping stones), and each milestone has the tasks that
+  deliver it. Finish the tasks and the milestone lands; land the three milestones and the
+  quarter's target lands. A business may have fewer than three, and a paused business has none.
+- **Kevin owns at most three open projects at once, across every business** (Real Estate,
+  Operations Director, Runpreneur, Personal). A project Roy Lavin or an AI agent owns does not
+  use one of his slots: he oversees it through approvals. An open project is one with no
+  `Closed On` and not Completed.
+- Sessions run **Real Estate first**, because it matters most, then the other businesses.
+- The Leadership Dashboard shows the count ("Projects you own: N of 3", `renderStrategicCapacity`
+  in `js/dashboard.js`) and each project's milestone for the month.
 
 ## Rules that hold in every phase
 
@@ -30,7 +44,9 @@ the same record, and Kevin gets the finished plan as a PDF in the page's own exp
 ## Inputs: ask only for what is missing
 
 - The business. Read the Businesses table (`TABLES.businesses` in `js/config.js`) live and
-  match by name. Never hard-code a business id.
+  match by name. Never hard-code a business id. If the business has no row (Runpreneur had
+  none on 7 Oct 2026), stop before Phase 5 and ask Kevin: add a row, which then shows as a
+  filter on every money page, or file the plan under Personal.
 - The quarter being planned. Default: the quarter that contains today, or the next one if
   today is in a quarter's last two weeks.
 
@@ -47,6 +63,9 @@ folder and send it to Kevin.
 3. The one-year measurables: the reading when set, the reading now, the one-year target.
 4. Anything found that changes the next plan (a KPI that measures the wrong thing, a project
    with no owner, work nobody was driving).
+5. **Kevin's slots.** Read every Projects row (paginated) and count the open ones whose
+   `Owner` is Kevin, across all businesses. Put "Slots used: N of 3" at the top of the pack,
+   with each project's name and business.
 
 Every figure in the pack obeys all four:
 
@@ -74,6 +93,7 @@ questions in under 250 words: what was done, what was not done well, what to cha
   `dept-strategy`.
 - Operations Director: `dept-strategy`, `dept-finance`, `dept-sales`, `dept-marketing`.
 - Runpreneur: `dept-strategy`, `dept-marketing`, `dept-mindset`, `dept-productivity`.
+- Personal: `dept-mindset`, `dept-wealth`, `dept-productivity`, `dept-strategy`.
 
 Four seats, launched together, each handed the pack's path and told to read it. Swap a seat
 only when the pack shows a problem in another lane. Never all eleven. Put the four answers in
@@ -89,7 +109,9 @@ moment it is made, dated. A ruling made once is not asked again.
 
 1. Here is last quarter in five lines and the board's one change. Does that match what you saw?
 2. Has the overall direction changed, or is there anything new?
-3. Which projects, in which order? (Offer the board's list. He picks. Three at most.)
+3. Which projects, in which order? (Offer the board's list. He picks. Three at most.) For
+   each, name the owner by the owner order in Phase 4, and say whether it uses one of
+   Kevin's three slots.
 
 ### 3b. Every section of the plan, every quarter
 
@@ -233,7 +255,8 @@ Each of the three quarterly projects carries:
   Kevin.** Kevin only for decisions, approvals, sign-ins, payments and signatures. Never Mica.
   An AI agent has no Airtable login, so it cannot sit in the project's `Owner` field (a
   collaborator field): leave `Owner` blank and name the agent in the tracking method. Roy or
-  Kevin goes in `Owner` by email.
+  Kevin goes in `Owner` by email. **Kevin as owner uses one of his three slots.** If the plan
+  would give him a fourth, stop: he hands one to Roy or an agent, or drops one.
 - One KPI (name, unit, target), a tracking method, a definition of done with a date, and
   three monthly stepping stones.
 
@@ -432,13 +455,43 @@ node scripts/render-strategy-plan.cjs --record <plan record id> --out "<the sess
    finished plan in front of him.** Send it again after any later change to the record. Tell him where the same plan lives in the app: Objective &
    Strategy, his business, the quarter (`https://app.operationsdirector.co.uk/os/strategy/index.html`).
 
-## Phase 8: the write-back (the session is not finished without it)
+## Phase 8: Kevin's open slots (the session does not end with a slot undecided)
+
+The point of the session is to put Kevin's own time where it returns most. Once this
+business's plan is written, re-count his slots (Phase 1, step 5). If one is free, decide it
+now, one question at a time:
+
+1. **The count.** "Slots used: N of 3", with names, after this plan.
+2. **The candidates.** One per business that has no plan for this quarter, plus a second
+   project in this business for Kevin to own. Check each against the brain's
+   `current-priorities.md` and `Decisions/`. A business parked by a recorded ruling is shown
+   with that ruling, dated, and is not offered unless Kevin reopens it.
+3. **For each candidate:** what it would deliver by the quarter's end, Kevin's hours a week,
+   its effect on money (his minimum income first), and the risk to the running streak,
+   health or family time.
+4. **Score each** on his decision framework: consequential or not, reversible or not, the
+   data behind it, the probability of a good outcome as a percentage, and the return on
+   time, money and energy. Give the shortlist to `dept-strategy` and the one seat whose lane
+   fits each candidate, under 250 words each.
+5. **Recommend one candidate per free slot,** the recommendation first, with its trade-off in
+   one line. Ask with AskUserQuestion.
+6. **An empty slot is a decision, never a default.** If Kevin leaves one free, record why.
+7. **A chosen slot becomes a project** through its own run of this skill for that business:
+   up to three projects, with Kevin owning the one he chose. Real Estate is never re-run for it.
+
+Run on its own (Kevin asks where his time should go), this phase reads the slots live and
+skips Phases 1 to 7.
+
+Record each slot ruling in the decision note (Phase 9).
+
+## Phase 9: the write-back (the session is not finished without it)
 
 1. Brain decision note: `Decisions/<YYYY-MM-DD> Q<N> <business> strategy session - rulings.md`
    in `00 AI Context`, with Kevin's words, the plan record id and the project ids. It carries
    every ruling from the section walk, the growth pace, the signed-off targets with their
    confidence levels, and what was left out of the numbers and why.
-2. `current-priorities.md` in the brain: the three projects, in his order.
+2. `current-priorities.md` in the brain: the three projects, in his order, each with its
+   owner, and Kevin's slot count ("Slots used: N of 3").
 3. Memory: one dated project memory for the session, linked from `MEMORY.md`.
 4. A mid-quarter review date, about week 6, as a task for Kevin through
    `scripts/create-agent-task.py`, read back by id. Its description lists the first check of
