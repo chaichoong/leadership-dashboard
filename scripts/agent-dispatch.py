@@ -1381,8 +1381,14 @@ def idle_handback(t, last, now=None):
     verdict moves: an Approved At newer than the event means he approved again,
     so the task is worked. A plain "done" on a task still Approved with no
     keep-open mark in its Notes is NOT rested — that is an incomplete close and
-    the run must look at it."""
-    if not last or t.get("outcome") not in APPROVED:
+    the run must look at it. A verdict on a Your step card is not one that moves
+    (your_step_reapproved)."""
+    if t.get("outcome") not in APPROVED:
+        return ""
+    step_wait = your_step_reapproved(t)
+    if step_wait:
+        return step_wait
+    if not last:
         return ""
     event, ts = last
     if event not in ("done", "parked") or not ts:
@@ -2889,6 +2895,15 @@ def own_go_signal(agent_id):
     return bool(agent_id) and agent_id in ROLE_AGENTS and not ROLE_AGENTS[agent_id].get("dispatch", True)
 
 
+def note_with_verdict(history, approved_at):
+    """True when Kevin typed words with his newest verdict. Both pages archive a note into Feedback
+    History as "[YYYY-MM-DD HH:MM] <note>", stamped from the same clock reading as Approved At, so
+    the newest block carries that minute only when the verdict came with words."""
+    stamp = str(approved_at or "")[:16].replace("T", " ")
+    stamps = re.findall(r"^\[(\d{4}-\d{2}-\d{2} \d{2}:\d{2})\]", str(history or ""), re.M)
+    return len(stamp) == 16 and bool(stamps) and stamps[-1] == stamp
+
+
 def task_view(rec):
     f = rec.get("fields", {})
     agent_id = links(f.get(AF["sentForApprovalBy"]))[:1] or links(f.get(AF["teamMember"]))[:1]
@@ -2908,6 +2923,7 @@ def task_view(rec):
         # No Loom link means no network call — this is a regex miss on almost
         # every task.
         "feedback": expand_looms(f.get(AF["approvalFeedback"], "")),
+        "noteWithVerdict": note_with_verdict(f.get(AF["feedbackHistory"]), f.get(AF["approvedAt"])),
         "agentOutput": f.get(AF["agentOutput"], ""),
         "taskType": sel(f.get(AF["taskType"])),
         "teamMemberIds": links(f.get(AF["teamMember"])),
@@ -7580,6 +7596,27 @@ def in_your_step(t):
     return t.get("status") == "Approval" and your_step_split(t.get("agentOutput"))[0] is not None
 
 
+def your_step_reapproved(t):
+    """Why an approved task that has left Kevin's lane still waits on his own step, or ''.
+
+    A VERDICT ON A YOUR STEP CARD IS NOT NEW WORK (Kevin, 7 Oct 2026). The page refuses one, but a
+    tab opened before the Your step cards shipped showed them with an Approve button: ten cards
+    were approved two to four times that day, every approval woke a hand-back run (16 carry-out
+    slots) that met the same KEVIN wall, and the sweep put each card back 30 to 60 minutes later.
+    The YOUR STEP block is written only once the agent's part is done and is taken off only when
+    the wall clears (wake_blocked), so a task that carries it on an open KEVIN wall still waits on
+    him, whatever its Status or Approved At say. A verdict that came with words he typed then
+    ("paid, ref X") is new: its agent reads them, as it always did (review, 7 Oct 2026)."""
+    if t.get("outcome") not in APPROVED or t.get("status") in ("Approval", "Completed") \
+            or your_step_split(t.get("agentOutput"))[0] is None or t.get("noteWithVerdict"):
+        return ""
+    b = task_blocker(t.get("notes"))
+    if not b or b["kind"] != "KEVIN":
+        return ""
+    return (f"waiting on Kevin's own step ({b['subject']}): approved already, so a second approval "
+            "changes nothing; the sweep puts it back in his lane as Your step")
+
+
 def your_step_fields(t, step):
     """The fields that put an APPROVED task back in Kevin's lane as Your step, or {} when it is
     not his to see that way (not approved, closed, or a decision card, whose DECIDE: line the
@@ -7891,6 +7928,8 @@ def kevin_step_owed(t, b, last):
     the agent's `block` or `complete` then moves it itself."""
     if t.get("outcome") not in APPROVED or t.get("status") == "Completed" or in_your_step(t):
         return False
+    if your_step_reapproved(t):
+        return True    # approved again from an out-of-date tab: nothing new for the agent to do
     approved_at = str(t.get("approvedAt") or "")
     if b.get("since") and b["since"] > approved_at:
         return True
