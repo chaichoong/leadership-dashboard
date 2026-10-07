@@ -1245,7 +1245,20 @@ const HANDOVER_KEYS = new Set(['Tab', 'Shift+Tab', 'Space']);
 // The final click is always Kevin's (review, 30 Sep 2026: nothing in code stopped a plan's
 // click landing on "Buy policy"). A click, press or tick on anything worded like this refuses.
 // Review round 2 added the words sites use for the same click ("Confirm order", "Accept and continue").
+// A goto to an address worded like this is his too (assertNotFinalUrl).
 const FINAL_ACTION_RE = /\b(buy|purchase|pay|payment|order|submit|check ?out|declare|declaration|confirm|agree|accept|complete|send|file|sign)\b/i;
+// Narrowed 7 Oct 2026 (the session lead's ruling on PR #719): the robot gave up on Companies House's
+// confirmation statement at "Continue with this confirmation statement", the draft's own way back in,
+// and at every "Is ... correct? Yes", so Kevin re-did all of it by hand. Now:
+//  - HARD words are his on any click, press or tick, always.
+//  - SOFT words (on a button or link: confirm, declare, agree, accept; on an answer: DECLARATION_RE)
+//    are his unless the control also says it moves on (Continue, Next, Save and continue) and is not
+//    the last step before a HARD control on the same page, or it is a radio or tick box whose own
+//    words the plan names in "answers", each quoted in its "sources".
+//  - A declaration in the first person ("I confirm that...", "I declare") is his whatever else is true.
+const HARD_ACTION_RE = /\b(buy|purchase|pay|payment|order|submit|check ?out|send|file|sign|complete)\b/i;
+const SOFT_PRESS_RE = /\b(confirm|declare|declaration|agree|accept)\b/i;
+const MOVES_ON_RE = /\b(continue|next)\b/i;
 // A tick box worded like a declaration is his too, however it is phrased.
 const DECLARATION_RE = /\b(declare|declaration|confirm|agree|accept|true|correct|understand|terms|conditions|read|statement)\b/i;
 // Plain text near an answer carries help ("Not sure? Read our guide."), so it needs a whole
@@ -1274,6 +1287,9 @@ function handoverPlanPath(task) { return path.join(HANDOVER_DIR, task + '.json')
 const KEVIN_SIGNIN_SAY_RE = /\b(?:sign|log)[ -]?(?:in|on)\b|\blogin\b/i;
 const KEVIN_CODE_SAY_RE = /\b(?:codes?|passcodes?|one-time|verification|authentication)\b/i;
 const KEVIN_STATEMENT_SAY_RE = /\byour own (?:statement|declaration)\b|\bstatement of truth\b/i;
+// A press the robot may never make (submit, send, pay, file, sign...), his mid-plan too (7 Oct 2026):
+// the confirmation statement's draft reopens only through its own SUBMIT.
+const KEVIN_PRESS_SAY_RE = /\b(?:press|click)\s+(?:the\s+)?['"‘“]?(?:submit|send|pay|buy|order|file|sign|complete|check ?out)\b/i;
 // What only he can give, named after its verb: set aside before the check. A code is his when it is
 // named as his (personal, security, sort, a 6-digit code) or as one sent to him; "type the SIC code"
 // is a form answer. The span never crosses "and", "from" or "answers": "type the answers from the
@@ -1339,6 +1355,19 @@ function assertHandoverPlan(plan, now = new Date()) {
     const today = new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/London' }).format(now);
     if (today > plan.validUntil) die(`this plan's answers were good until ${plan.validUntil}, and a rent has fallen due since. The rent check raises a fresh card.`);
   }
+  // "answers" (7 Oct 2026): the exact words of each radio or tick box the robot may answer although
+  // they read like a declaration ("Is the registered office correct?" Yes). Each is quoted in the
+  // plan's "sources", which is what makes it a sourced answer; a declaration in the first person, or
+  // a submit, pay, send, file or sign, is never one.
+  if (plan.answers !== undefined) {
+    if (!Array.isArray(plan.answers) || plan.answers.some(a => typeof a !== 'string' || !a.trim())) {
+      die('the plan\'s "answers" must be a list of the exact words of each answer the robot may give');
+    }
+    for (const a of plan.answers) {
+      if (HARD_ACTION_RE.test(a) || NEARBY_DECLARATION_RE.test(a)) die(`the plan names "${a}" in "answers": a declaration, submit, payment or signature is Kevin's, never a named answer`);
+      if (!String(plan.sources || '').includes(a)) die(`the plan names "${a}" in "answers" but its "sources" never quote it: say where that answer comes from`);
+    }
+  }
   plan.steps.forEach((s, i) => {
     const d = s && s.do;
     if (!HANDOVER_STEPS.has(d)) die(`step ${i + 1} is "${d}". A handover plan never submits, pays or uploads: the last click is Kevin's.`);
@@ -1352,10 +1381,10 @@ function assertHandoverPlan(plan, now = new Date()) {
       const say = String(s.say);
       const statement = KEVIN_STATEMENT_SAY_RE.test(say);
       const last = i === plan.steps.length - 1;
-      if (!last && !statement && !KEVIN_SIGNIN_SAY_RE.test(say) && !KEVIN_CODE_SAY_RE.test(say)) {
-        die(`step ${i + 1} (kevin) sits in the middle of the plan and is not his sign-in, a code only he receives, or a reason or `
-          + `declaration only he can give (one the robot's guard refuses, which its say calls "your own statement"). Every step `
-          + `before Kevin's last one is the robot's. ${ROBOT_WORK_HELP}`);
+      if (!last && !statement && !KEVIN_SIGNIN_SAY_RE.test(say) && !KEVIN_CODE_SAY_RE.test(say) && !KEVIN_PRESS_SAY_RE.test(say)) {
+        die(`step ${i + 1} (kevin) sits in the middle of the plan and is not his sign-in, a code only he receives, a press only he `
+          + `may make (submit, send, pay), or a reason or declaration only he can give (one the robot's guard refuses, which its `
+          + `say calls "your own statement"). Every step before Kevin's last one is the robot's. ${ROBOT_WORK_HELP}`);
       }
       const asks = kevinRobotWork(say, statement);
       if (asks) die(`step ${i + 1} (kevin) asks Kevin to "${asks}". ${ROBOT_WORK_HELP}`);
@@ -1391,12 +1420,36 @@ async function turnBanner(page, text) {
 // inside (a span inside a Buy button), their labels however attached, and aria-labelledby.
 // Throws (the step is then stuck and the window his) on a final action, a declaration
 // tick box, or a target it cannot read.
-async function assertNotFinalAction(page, s) {
+// Is the step after this one a HARD control on this same page, or Kevin's own press of one?
+async function nextIsHard(page, n) {
+  if (!n) return false;
+  if (n.do === 'kevin') return HARD_ACTION_RE.test(String(n.say || '').replace(/\b(?:sign|log)[ -]?(?:in|on)\b/gi, ' '));
+  if (!['click', 'press', 'check'].includes(n.do)) return false;
+  if (HARD_ACTION_RE.test(String(n.selector || ''))) return true;
+  const loc = page.locator(n.selector).first();
+  // A selector this page cannot even parse, or a control not on it: not "on the same page". The next
+  // step is guarded in its own right when the robot reaches it.
+  const here = await loc.count().catch(() => 0);
+  if (!here) return false;
+  const words = await loc.evaluate(el => {
+    const c = el.closest('button,a,label,input,[role=button],[role=link]') || el;
+    return [c.innerText || c.textContent || '', c.value || '', c.getAttribute('aria-label') || ''].join(' ');
+  }).catch(e => { throw new Error(`could not read the step after this one, so this one was not touched: ${String(e.message || e).slice(0, 100)}`); });
+  return HARD_ACTION_RE.test(words);
+}
+// A radio or tick box whose own words, exactly, are one the plan names in "answers".
+function planNamed(seen, answers) {
+  const mine = String((seen && (seen.option || seen.boxOption)) || '').replace(/\s+/g, ' ').trim();
+  return !!(seen && seen.tick && mine && Array.isArray(answers)
+    && answers.some(a => String(a).replace(/\s+/g, ' ').trim() === mine));
+}
+
+async function assertNotFinalAction(page, s, ctx = {}) {
   // Tab only moves between fields: nothing is pressed. (Arrow keys select in a radio group,
   // so a handover never presses them: review round 4.)
   if (s.do === 'press' && s.key !== 'Space') return;
   const presses = ['click', 'press', 'check'].includes(s.do);
-  if (presses && FINAL_ACTION_RE.test(String(s.selector || ''))) throw new Error(`refused: "${s.selector}" looks like the final action, which is Kevin's`);
+  if (presses && HARD_ACTION_RE.test(String(s.selector || ''))) throw new Error(`refused: "${s.selector}" looks like the final action, which is Kevin's`);
   let seen;
   try {
     seen = await page.locator(s.selector).first().evaluate(el => {
@@ -1470,14 +1523,17 @@ async function assertNotFinalAction(page, s) {
       }
       // An answer: a tick box, radio, ARIA toggle, or a short button such as "Yes" (round 4).
       const own = control ? String(control.innerText || control.textContent || control.value || '').trim() : '';
-      // A radio's own option text, read from its labels only, for a site's named answers.
-      const option = control && ctype === 'radio' && control.labels
+      // A radio's own option text, read from its labels only, for a site's named answers; a tick
+      // box's the same way, for the plan's named answers (7 Oct 2026).
+      const labelled = (k) => control && ctype === k && control.labels
         ? Array.from(control.labels).map(l => String(l.textContent || '')).join(' ').replace(/\s+/g, ' ').trim() : '';
+      const option = labelled('radio');
+      const boxOption = labelled('checkbox');
       const answer = !!control && (['checkbox', 'radio'].includes(ctype) || ['checkbox', 'radio', 'switch'].includes(crole)
         || control.hasAttribute('aria-checked') || control.hasAttribute('aria-pressed')
         || ((control.tagName === 'BUTTON' || crole === 'button') && own.length <= 12));
       return { entry: false, words: squash(parts), question: answer ? squash(question(control)) : '', around: answer ? nearby(control) : '', tick: answer, option,
-               value: control ? String(control.value || '') : '' };
+               boxOption, value: control ? String(control.value || '') : '' };
     }, null, { timeout: Math.min(Number(s.timeout) || 20000, 60000) });
   } catch (e) {
     throw new Error(`could not read what "${s.selector}" is, so it was not touched: ${String(e.message || e).slice(0, 120)}`);
@@ -1493,10 +1549,20 @@ async function assertNotFinalAction(page, s) {
     return;
   }
   if (!presses) return;
-  if (FINAL_ACTION_RE.test(seen.words) && !namedAnswer(page.url(), seen)) throw new Error(`refused: "${seen.words.trim().slice(0, 60)}" looks like the final action, which is Kevin's`);
+  if (HARD_ACTION_RE.test(seen.words) && !namedAnswer(page.url(), seen)) throw new Error(`refused: "${seen.words.trim().slice(0, 60)}" looks like the final action, which is Kevin's`);
   const asked = (seen.words + ' ' + seen.question).trim();
-  if (seen.tick && (DECLARATION_RE.test(asked) || NEARBY_DECLARATION_RE.test(seen.around))) {
-    throw new Error(`refused: "${(asked + ' ' + seen.around).trim().slice(0, 80)}" reads like a declaration, which is Kevin's`);
+  const declaration = () => new Error(`refused: "${(asked + ' ' + seen.around).trim().slice(0, 80)}" reads like a declaration, which is Kevin's`);
+  // His declarations, in the first person: never the robot's, named or not.
+  if (seen.tick && (NEARBY_DECLARATION_RE.test(asked) || NEARBY_DECLARATION_RE.test(seen.around))) throw declaration();
+  const soft = seen.tick ? DECLARATION_RE.test(asked) : SOFT_PRESS_RE.test(seen.words);
+  if (!soft) return;
+  if (planNamed(seen, ctx.answers)) return;
+  if (!MOVES_ON_RE.test(seen.words)) {
+    if (seen.tick) throw declaration();
+    throw new Error(`refused: "${seen.words.trim().slice(0, 60)}" looks like the final action, which is Kevin's`);
+  }
+  if (await nextIsHard(page, ctx.next)) {
+    throw new Error(`refused: "${seen.words.trim().slice(0, 60)}" is the last step before a submit, pay or send on this page, which is Kevin's`);
   }
 }
 
@@ -1562,6 +1628,7 @@ async function runHandover(page, plan, opts = {}) {
     const s = plan.steps[i];
     try {
       if (s.do === 'kevin') {
+        if (opts.skipKevin) continue;            // a dry run: his steps are skipped, and still seen by the step before
         if (s.goto) {
           if (!hostAllowed(s.goto)) throw new Error(`${s.goto} is not on the allowlist`);
           await page.goto(s.goto, { waitUntil: 'domcontentloaded', timeout: 45000 });
@@ -1573,7 +1640,7 @@ async function runHandover(page, plan, opts = {}) {
         await turnBanner(page, FILLING);
         continue;
       }
-      if (['click', 'press', 'check', 'select', 'fill'].includes(s.do)) await assertNotFinalAction(page, s);
+      if (['click', 'press', 'check', 'select', 'fill'].includes(s.do)) await assertNotFinalAction(page, s, { next: plan.steps[i + 1], answers: plan.answers });
       if (s.do === 'goto') assertNotFinalUrl(s.url);
       const r = await runSteps(page, [s], false, null);
       done.push(...r.done);
@@ -1982,7 +2049,7 @@ async function main() {
       const shot = arg(rest, 'shot');
       if (!shot) die('--shot is required: the screenshot goes on the card');
       const res = await withPage(profile, false, async (page) => {
-        const r = await runHandover(page, { ...plan, steps: plan.steps.filter(s => s.do !== 'kevin') }, { quiet: true });
+        const r = await runHandover(page, plan, { quiet: true, skipKevin: true });
         return Object.assign(r, { screenshot: await shoot(page, shot).catch(() => null) });
       });
       console.log(JSON.stringify({ mode: 'handover-dry-run', task, stuck: res.stuck, screenshot: res.screenshot, steps: res.done.length }));
@@ -2105,4 +2172,4 @@ module.exports = { namedAnswer, hostAllowed, pickLinks, runSteps, assertNotCrede
                    profileProcs, plainWindowOpen, pickOption, settleBotCheck, withPage, lastKeptCount: () => lastKept, onSigninPage,
                    assertHandoverPlan, fillTokens, runHandover, handoverPlanPath, HANDOVER_DIR, waitForWindowClose, FINAL_ACTION_RE,
                    plainRefresh, withSelfRefresh, selfRefreshEntry, isRefreshWindowLine, holdBy,
-                   doorLanding, sessionCookieHours, SESSION_COOKIE_HOURS, stuckBanner };
+                   doorLanding, sessionCookieHours, SESSION_COOKIE_HOURS, stuckBanner, planNamed, HARD_ACTION_RE };
