@@ -337,7 +337,15 @@ LFMD_START_RE = re.compile(r"(?:\w+\s+)?(?P<prep>from|for|of|through|in|to)\s+(?
                            # (Kevin: "you've clipped the wrong section"). "dive" also counts between from/for + my and "today".
                            # Only dive/diver/dives: "for my dividends today" is not it. Measured 2 Oct 2026 over the 306
                            # episode transcripts on the records: the clip start moves on one episode, 2081.
-                           r"|(?:from|for)\s+my\s+dive[rs]?\s+(?:for\s+)?today", re.I)
+                           r"|(?:from|for)\s+my\s+dive[rs]?\s+(?:for\s+)?today"
+                           # 2087 (6 Oct 2026): "the learnings from my diary today" came out as "learning from an hour
+                           # today". "an hour" shares no letter with diary, so no d(ia|ie|ai|iv) route can reach it and
+                           # the section was skipped; Kevin sent the card back naming 6 min 25 s, and the captions put it
+                           # at 6:21. Only in the tightest context there is: learn.. + from/for + a determiner + hour/our
+                           # + today, because "hour" is an ordinary word. Measured 7 Oct 2026 over the 49 stored episode
+                           # transcripts: one match, episode 2087, and "hour(s)/our(s) today" appears nowhere else in the
+                           # set at all. The clip start moves on one episode, 2087.
+                           r"|learn\w*\s+(?:from|for)\s+(?:a|an|my|the|our)\s+(?:hour|our)s?\s+(?:today|the\s+day)", re.I)
 # The show's own name is "day 2072 of the diary of a Runpreneur". Whisper garbles the tail ("of the diary cover on
 # printer", 2072, 27 Sep 2026), so the "of a" guard above cannot be relied on. "of the diary" straight after a day
 # number (2072, 2,072, 2072th, then any commas, full stops, ellipses or dashes) is what marks it. "of MY diary" or
@@ -1652,7 +1660,15 @@ def selftest():
     assert redo_line("2086 @334.88-435.44 whisper heard no diary word at all\n") == (2086, (334.88, 435.44))
     assert redo_line("2087 @381-501 'learning from an hour today'\n") == (2087, (381.0, 501.0))
     assert redo_line("# a comment\n") is None and redo_line("\n") is None and redo_line("  \n") is None
-    print(json.dumps({"checks": 68, "failed": []}))
+    # 2087 (7 Oct 2026): the "an hour" mis-hearing, and the ordinary words it must NOT take
+    assert lfmd_window([(0, 5, "intro"), (381.0, 388.0, "So ultimately, learning from an hour today, that if you're running higher than 2,000 metres"), (495, 501, "stay positive, see you tomorrow")]) == (381.0, 501.0), "2087: 'learning from an hour today'"
+    assert lfmd_window([(0, 5, "the learnings from my hour today are"), (30, 40, "see you tomorrow")]) == (0, 40), "'my hour' too"
+    for text in ("I ran for an hour today and it was hard",
+                 "we learned a lot in an hour, today was good",
+                 "the learnings from an hour of running are",
+                 "I will learn from our hours of work"):
+        assert lfmd_window([(0, 5, text), (30, 40, "see you tomorrow")]) is None, "must not match: " + text
+    print(json.dumps({"checks": 74, "failed": []}))
 
 
 if __name__ == "__main__":
