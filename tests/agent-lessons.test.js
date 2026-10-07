@@ -111,6 +111,23 @@ ad.append_lesson_to_file("worker-writer", "- 2026-08-26: New — second rule")`)
     expect(text).toContain('- 2026-08-01: Old — first rule');
   });
 
+  it('lands BEFORE a generated block that follows the lessons, never inside it (7 Oct 2026)', () => {
+    // The binding rules block opens with a marker line, then its own "## " heading. Ending the
+    // section at the next heading put the lesson between the two: inside the block, where the
+    // next push of the block deletes it. Invented lesson text; the markers are the real ones.
+    const BLOCK = '<!-- BINDING RULES: BLOCK START -->\n## Rules that bind every agent (generated — do not edit here)\n\n- RULE.\n<!-- BINDING RULES: BLOCK END -->\n';
+    const dir = agentDir({
+      'worker-writer.md': FRONTMATTER + '\n## Lessons from Kevin\n\n- 2026-08-01: Old — first rule\n\n' + BLOCK,
+    });
+    py(`ad.AGENT_DIR = ${JSON.stringify(dir)}
+print(json.dumps(ad.append_lesson_to_file("worker-writer", "- 2026-08-26: New — second rule")))`);
+    const text = readFileSync(join(dir, 'worker-writer.md'), 'utf8');
+    const lesson = text.indexOf('- 2026-08-26: New — second rule');
+    expect(lesson).toBeGreaterThan(text.indexOf('- 2026-08-01: Old — first rule'));
+    expect(lesson).toBeLessThan(text.indexOf('<!-- BINDING RULES: BLOCK START -->'));
+    expect(text.endsWith(BLOCK)).toBe(true);   // the block is byte for byte what was pushed
+  });
+
   it('is idempotent — a retry after a crash cannot duplicate the lesson', () => {
     const dir = agentDir({ 'worker-writer.md': FRONTMATTER });
     const line = '- 2026-08-26: A — rule one';
