@@ -73,6 +73,11 @@ JOBS=(
   # It sends nothing and changes no tenancy. Twice a day: the bank feed lands near
   # 12:00, so 07:30 gives the morning line and 12:30 picks up the day's payments.
   "rent-check|7:30,12:30|/usr/bin/python3 $REPO/scripts/rent-check.py run"
+  # The daily certificate watch (Kevin, 7 Oct 2026). Rules only, no model: one task for
+  # the Property Administration agent per required certificate with nothing in date and
+  # no open task, and the landlord insurance checkpoints. Writes only through
+  # create-agent-task.py. Exits 1 on a morning it found something, by design.
+  "compliance-watch|6:05|/usr/bin/python3 $REPO/scripts/certificate_watch.py daily --apply"
 )
 
 # launchd's own numbering: Sunday = 0. Mapped here once so no caller ever writes
