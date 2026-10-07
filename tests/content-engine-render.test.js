@@ -12,10 +12,13 @@ const RENDER = path.join(DIR, 'render.py');
 const WATCH = path.join(DIR, 'watch.py');
 
 describe('content-engine render', () => {
-  it('passes its own selftest (folder naming, output names, banner title, record fields)', () => {
+  it('passes its own selftest (folder naming, output names, banner title, record fields, hand-read Learnings window)', () => {
     const out = JSON.parse(execFileSync('python3', [RENDER, 'selftest'], { encoding: 'utf8', cwd: DIR }));
     expect(out.failed).toEqual([]);
-    expect(out.checks).toBeGreaterThanOrEqual(40);
+    // 68 since 7 Oct 2026: the hand-read Learnings window (check_lfmd_window) and the redo list's
+    // optional @start-end (redo_line) are driven in there, not grepped. The floor rises with them so
+    // deleting those cases goes red instead of quietly shrinking the count.
+    expect(out.checks).toBeGreaterThanOrEqual(68);
   });
 
   // 5 Sep 2026 (finding 20260905-exceptions-462): the nightly run died inside overlays.py 'full'
@@ -76,7 +79,7 @@ describe('content-engine render', () => {
     const src = readFileSync(RENDER, 'utf8');
     expect(src).toContain('def assert_has_video(');
     expect(src).toContain('if p.endswith(".mp4"): assert_has_video(p');
-    expect(src).toContain('def redo_lfmd(day)');
+    expect(src).toContain('def redo_lfmd(day');   // takes an optional hand-read window since 7 Oct 2026
     const w = readFileSync(WATCH, 'utf8');
     expect(w).toContain('DAY_NAMED_RE');
   });
