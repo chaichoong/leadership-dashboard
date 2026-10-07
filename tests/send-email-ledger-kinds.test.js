@@ -75,7 +75,7 @@ try:
         buf = io.StringIO()
         try:
             with contextlib.redirect_stdout(buf):
-                m.cmd_notify(argparse.Namespace(task="recKho3l7jJKk9T0t", to=roy, reason="standing handover", dry_run=False))
+                m.cmd_notify(argparse.Namespace(task="recKho3l7jJKk9T0t", to=roy, reason="standing handover", dry_run=False, again_after_days=a.get("again")))
         finally:
             res["printed"] = [json.loads(l) for l in buf.getvalue().splitlines() if l.strip().startswith("{")]
     res["exit"] = 0
@@ -298,5 +298,31 @@ describe('a notify that dies is recorded, as a send is', () => {
     expect(again.printed[0]).toMatchObject({ skipped: 'recKho3l7jJKk9T0t', event: 'sent' });
     const died = run({ cmd: 'notify', rows: [sent.ledger[0]] });
     expect(died.printed[0]).toMatchObject({ skipped: 'recKho3l7jJKk9T0t', event: 'intent' });
+  });
+});
+
+// The Task Board Manager's clock (7 Oct 2026) nudges Roy once a week on a physical task he has held
+// seven days with no movement. notify sent once per task for ever, so the handover's own notify
+// refused every reminder; --again-after-days lets one through once the last went N days ago, and
+// never over a send that was cut off. Back-tested: dropping the age check sends inside the week.
+describe('a reminder notify goes once the last one is old enough, never twice over a cut-off send', () => {
+  const day = (n) => new Date(Date.now() - n * 86400000).toISOString().replace(/\.\d{3}Z$/, '.000Z');
+  const sentRow = (n) => ({ task: 'recKho3l7jJKk9T0t', ts: day(n), event: 'sent', kind: 'notify', to: ['info@agilelets.co.uk'] });
+  it('sent 8 days ago: the reminder goes', () => {
+    const r = run({ cmd: 'notify', rows: [sentRow(8)], again: 7 });
+    expect(r.calls).toHaveLength(1);
+    expect(r.ledger.slice(-1)[0]).toMatchObject({ kind: 'notify', event: 'sent' });
+  });
+  it('sent 2 days ago: skipped as before', () => {
+    const r = run({ cmd: 'notify', rows: [sentRow(2)], again: 7 });
+    expect(r.calls).toHaveLength(0);
+    expect(r.printed[0]).toMatchObject({ event: 'sent' });
+  });
+  it('a reminder that was cut off (intent after the last sent) is never sent again', () => {
+    const cut = { task: 'recKho3l7jJKk9T0t', ts: day(1), event: 'intent', kind: 'notify' };
+    expect(run({ cmd: 'notify', rows: [sentRow(8), cut], again: 7 }).calls).toHaveLength(0);
+  });
+  it('without the flag a sent notify still refuses for ever', () => {
+    expect(run({ cmd: 'notify', rows: [sentRow(30)] }).calls).toHaveLength(0);
   });
 });

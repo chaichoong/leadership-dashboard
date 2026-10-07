@@ -19,6 +19,7 @@ Usage
     findings.py close <id> --outcome fixed --evidence <sha> --note "..."
     findings.py close <id> --outcome pending --pr <n> --note "..."
     findings.py close <id> --outcome rejected|deferred --note "..."
+    findings.py escalate <id> --severity critical --why "..." [--by task-manager]
     findings.py count                 # the BACKLOG: open + claimed + pending
     findings.py count --status all    # every finding ever filed
     findings.py count --breakdown     # every status, labelled
@@ -152,6 +153,16 @@ def current_state():
                 if (new_sev in SEVERITIES and old_sev in SEVERITIES
                         and SEVERITIES.index(new_sev) < SEVERITIES.index(old_sev)):
                     state[fid]["severity"] = new_sev
+            elif rec.get("op") == "escalate":
+                # Raised by a clock (task-manager.py clock, 7 Oct 2026): a robot
+                # has waited on this fix past its wall's clock. Like a
+                # recurrence, severity only ever ratchets UP.
+                old_sev, new_sev = state[fid].get("severity"), rec.get("severity")
+                if (new_sev in SEVERITIES and (old_sev not in SEVERITIES
+                                               or SEVERITIES.index(new_sev) < SEVERITIES.index(old_sev))):
+                    state[fid]["severity"] = new_sev
+                state[fid]["escalated_at"] = rec.get("ts")
+                state[fid]["escalated_why"] = rec.get("why")
             elif rec.get("op") == "land":
                 # The PR carrying this fix actually merged.
                 state[fid]["status"] = "fixed"
@@ -606,6 +617,34 @@ def cmd_close(a):
     return 0
 
 
+def cmd_escalate(a):
+    """Raise an open finding's severity so the fixer takes it first.
+
+    WHY (Kevin, 7 Oct 2026): 19 robots sat on TOOL walls for up to 12 days while
+    their fixes were medium findings nobody claimed. The Task Board Manager's
+    clock calls this when a TOOL wall passes 3 days with its finding still
+    unclaimed. Append-only like every other op; severity only ratchets up, so a
+    second call on a finding already at that level writes nothing. A closed
+    finding is refused: reopen it first, so a raise never hides a closure."""
+    state = current_state()
+    if a.id not in state:
+        print("ERROR: no finding %s" % a.id, file=sys.stderr)
+        return 1
+    rec = state[a.id]
+    if rec.get("status") not in OPEN_STATES:
+        print("REFUSED: %s is %s, not open. Reopen it first if the fix is still needed."
+              % (a.id, rec.get("status")), file=sys.stderr)
+        return 2
+    old = rec.get("severity")
+    if old in SEVERITIES and SEVERITIES.index(old) <= SEVERITIES.index(a.severity):
+        print(json.dumps({"id": a.id, "severity": old, "changed": False}))
+        return 0
+    append({"op": "escalate", "id": a.id, "ts": iso(), "severity": a.severity,
+            "why": a.why, "by": a.by})
+    print(json.dumps({"id": a.id, "severity": a.severity, "was": old, "changed": True}))
+    return 0
+
+
 def cmd_land(a):
     """A PR merged. Everything pending on it is now genuinely fixed."""
     state = current_state()
@@ -706,6 +745,13 @@ def main(argv=None):
                          "statement of the non-code proof")
     sp.add_argument("--note", default="")
     sp.set_defaults(fn=cmd_close)
+
+    sp = sub.add_parser("escalate", help="raise an open finding's severity so the fixer takes it first")
+    sp.add_argument("id")
+    sp.add_argument("--severity", required=True, choices=SEVERITIES)
+    sp.add_argument("--why", required=True)
+    sp.add_argument("--by", default="")
+    sp.set_defaults(fn=cmd_escalate)
 
     sp = sub.add_parser("land", help="a PR merged — flip its pending findings to fixed")
     sp.add_argument("--pr", required=True)

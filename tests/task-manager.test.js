@@ -529,6 +529,8 @@ describe('verify proves the slot read its own board and leaves a verdict file', 
         const boardPath = path.join(scratch, 'board.json');
         writeFileSync(boardPath, JSON.stringify({ counts: { openTasksRead: boardCount } }));
         if (withGate) writeFileSync(path.join(scratch, 'gate.json'), '{"lane": []}');
+        // The clock pre-pass's file (7 Oct 2026): verify fails a slot without a fresh one.
+        writeFileSync(path.join(scratch, 'clock.json'), '{"decisions": []}');
         if (stale) {
             const past = new Date((start - 3600) * 1000);
             utimesSync(boardPath, past, past);

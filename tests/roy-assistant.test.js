@@ -619,10 +619,12 @@ exit 0
   });
 });
 
-// Roy's task emails (Kevin, 24 Sep 2026): they went to his personal Gmail and
-// promised "reply and it will be logged"; nothing read the replies. Now they
-// go to info@ as assistant notes, and a reply updates the task.
-describe("Roy's task emails reach info@, and his replies update the task", () => {
+// Roy's task emails. 24 Sep 2026: they went to info@ as assistant notes. 7 Oct
+// 2026: all 30 such notes since then sat in info@ and Roy answered none; he has
+// had no door into info@ since 2 Oct (brain Decisions 2026-10-06). So they go to
+// his own Gmail, sent FROM info@, so his reply lands in info@ for Inbox Triage.
+// Back-tested: with the old `"to": ROY_INBOX` the first case fails.
+describe("Roy's task emails reach his own Gmail from info@, and his replies come back to info@", () => {
   const SEND = resolve(ROOT, 'scripts/send-email.py');
   const notify = (to) => py(`
 import argparse, io, contextlib, tempfile, os
@@ -639,9 +641,9 @@ with contextlib.redirect_stdout(buf):
     se.cmd_notify(argparse.Namespace(task="recBOILER00000001", to=${JSON.stringify(to)}, reason="", dry_run=False))
 print(json.dumps(sent[0]))`);
 
-  it("a task email to Roy goes to info@ as one of his assistant's notes, with the task's Ref", () => {
+  it("a task email to Roy goes to his own Gmail, sent from info@, with the task's Ref", () => {
     const m = notify('roy.lavin1978@gmail.com');
-    expect(m.to).toBe('info@agilelets.co.uk');
+    expect(m.to).toBe('roy.lavin1978@gmail.com');
     expect(m.from).toBe('info@agilelets.co.uk');
     expect(m.subject).toBe('Assistant: a task is yours - MAINTENANCE: boiler - 5 Dalham Place');
     expect(m.text).toContain('Ref: recBOILER00000001');

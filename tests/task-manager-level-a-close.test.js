@@ -48,6 +48,8 @@ function verifyClose(move, fields) {
   const start = Math.floor(Date.now() / 1000);
   writeFileSync(join(scratch, 'board.json'), JSON.stringify({ counts: { openTasksRead: 7 } }));
   writeFileSync(join(scratch, 'gate.json'), '{"lane": []}');
+  // The clock pre-pass's file (7 Oct 2026): verify fails a slot without a fresh one.
+  writeFileSync(join(scratch, 'clock.json'), '{"decisions": []}');
   const report = join(scratch, 'report.json');
   writeFileSync(report, JSON.stringify({
     board: { openTasksRead: 7, stuck: 0 },

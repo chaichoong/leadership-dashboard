@@ -310,9 +310,18 @@ def classify(job, cfg, finishes, events, now, logs_dir=LOGS):
     if not last and not after:
         detail = "No run recorded in the last week."
 
+    first_ts = parse_ts(mine[0].get("ts")) if mine else None
+    lw_raw = str(worked[-1].get("ts") or "") if worked else ""
+    first_fail = next((parse_ts(r.get("ts")) for r in mine if not r.get("ok") and str(r.get("ts") or "") > lw_raw), None)
     return {
+        # Not a table field either: the first failed run after the last one that worked. A weekly job
+        # that worked 6 days ago and failed this morning has been red since this morning (review).
+        "firstFail": first_fail.strftime("%Y-%m-%dT%H:%M:%S.000Z") if first_fail else None,
         "key": job, "kind": "job", "schedule": cfg.get("cron", ""),
         "status": status, "detail": detail,
+        # Not a table field (to_fields never writes it): the oldest run in the week read, so a job
+        # that has not worked all week reads as red since then, not since its newest failure.
+        "firstRun": first_ts.strftime("%Y-%m-%dT%H:%M:%S.000Z") if first_ts else None,
         "lastRun": last_ts.strftime("%Y-%m-%dT%H:%M:%S.000Z") if last_ts else None,
         "lastWorked": last_worked.strftime("%Y-%m-%dT%H:%M:%S.000Z") if last_worked else None,
         "runs24h": len(runs24), "fails24h": len(fails24),
@@ -1076,6 +1085,226 @@ def upsert(rows, now, dry_run=False):
     return {"create": len(creates), "update": len(updates)}
 
 
+# ─── A RED ROW RAISES ONE OWNED TASK (Kevin, 7 Oct 2026) ──────────────
+#
+# On 7 Oct 2026 the agent-blockers row had been red 9 days, and data-invariants
+# and job-digest had not been green once in the week the board reads: the page
+# said so every ten minutes and nobody owned it. A row Failed for 2 days or more
+# now raises ONE task for the Builder agent, named "RED: <key> — <the first 60
+# characters of its Detail>", and the row's Detail says which task. The task is
+# found again by its "RED: <key> — " prefix over every open task, never by the
+# whole name: the Detail (a job's last words) changes run to run, and an exact
+# name would raise a twin on every change.
+#
+# How long a row has been red: since it last worked; when it has not worked
+# inside the week read, since the oldest of its first run in that week, its last
+# run and the first time this writer saw it red (red-since.json), because a job
+# failing daily has a Last Run of today and would otherwise never age. A report
+# row whose Detail names who acts on it (Kevin, Roy, "for you", the blocker
+# sweep's own "Robots blocked on" line, owned by agent-dispatch.py) is owned
+# already and raises nothing.
+RED_DAYS = 2
+RED_STATE = os.path.join(LOGS, "estate-status", "red-since.json")
+RED_NAME_DETAIL = 60
+OWNER_NAMED_RE = re.compile(r"\b(?:for you|only you can|Kevin|Roy)\b|^Robots blocked on\b", re.I)
+# Task field ids (js/config.js TASK_FIELDS).
+TF = {"name": "fldgFjGBw6bTKJFCD", "status": "fldx4qCw17UfrKpaN", "dueDate": "fld7XP8w8kbxfETV4",
+      "teamMember": "flduCtmQGpOA4eWaj", "description": "fldRGhBQViKZKtkQ6", "taskType": "fldZ2moDV2041Sobc"}
+TASKS_TABLE = "tblqB8b22hKBL4PF1"
+
+
+def dispatch_const(name, path=None):
+    """A constant read from agent-dispatch.py's own source (never copied, never imported: that
+    module is 10,000 lines). A missing one stops the red pass loudly."""
+    import ast
+    tree = ast.parse(open(path or os.path.join(HERE, "agent-dispatch.py")).read())
+    for node in tree.body:
+        if isinstance(node, ast.Assign) and any(getattr(t, "id", "") == name for t in node.targets):
+            return ast.literal_eval(node.value)
+    raise RuntimeError("agent-dispatch.py no longer defines %s" % name)
+
+
+def red_prefix(key):
+    return "RED: %s — " % key
+
+
+def red_task_name(key, detail):
+    return (red_prefix(key) + " ".join(str(detail or "").split())[:RED_NAME_DETAIL]).rstrip()
+
+
+def red_since(row, state):
+    """(when the row turned red, from what) or (None, why not)."""
+    lw = parse_ts(row.get("lastWorked"))
+    if lw:
+        ff = parse_ts(row.get("firstFail"))
+        return (ff, "first failure since it last worked") if ff and ff > lw else (lw, "last worked")
+    cands = [(parse_ts(row.get("firstRun")), "first run in the week read"),
+             (parse_ts(row.get("lastRun")), "last run"),
+             (parse_ts((state or {}).get(row.get("key"))), "first seen red by this writer")]
+    cands = [c for c in cands if c[0]]
+    return min(cands, key=lambda c: c[0]) if cands else (None, "no stamp")
+
+
+def red_log_paths(key, logs_dir=LOGS):
+    paths = [p for p in (os.path.join(logs_dir, key + ".last.log"), os.path.join(logs_dir, key, "runs.log"))
+             if os.path.exists(p)]
+    return paths + [os.path.join(logs_dir, "job-status.jsonl")]
+
+
+def red_task_fields(row, since, src, days, builder, today, logs_dir=LOGS):
+    detail = str(row.get("detail") or "").strip()
+    desc = ("ESTATE STATUS ROW RED. Raised by scripts/estate-status.py under Kevin's rule of 7 Oct 2026: "
+            "a row red for 2 days or more gets one owned task.\n\n"
+            "Row: %s (%s). Failed since %s (%s), %d days.\n\nDetail, as the row reads now:\n%s\n\n"
+            "Logs: %s\n\nDone when the row reads Worked again. Fix the cause, never the row, and complete "
+            "this task with the run that went green as evidence. If the job should no longer run, say so "
+            "and it is retired in scripts/job-schedule.json on Kevin's word."
+            % (row["key"], row.get("kind") or "?", since.strftime("%d %b %Y %H:%M UTC"), src, days,
+               detail or "(blank)", ", ".join(red_log_paths(row["key"], logs_dir))))
+    return {TF["name"]: red_task_name(row["key"], detail), TF["status"]: "Today", TF["dueDate"]: today,
+            TF["teamMember"]: [builder], TF["taskType"]: "Build", TF["description"]: desc[:95000]}
+
+
+def red_rows_pass(rows, stored, now, state, open_tasks, create, builder, logs_dir=LOGS):
+    """Raise one Builder task per row red RED_DAYS or more. `rows` are this refresh's rows (their
+    Detail gains the task line in place); `stored` holds the table's rows by key, for the rows
+    another script writes; `open_tasks()` lists every open task as (id, name) and `create(fields)`
+    returns the new task id. Returns what happened and the next red-since state."""
+    out = {"raised": [], "existing": [], "owned": [], "young": [], "errors": [], "patch": {}, "state": {}}
+    computed = {r["key"]: r for r in rows}
+    cands = list(rows) + [dict(s, key=k) for k, s in stored.items()
+                          if k not in computed and k in REPORT_ROWS_OWNED_ELSEWHERE]
+    red = [r for r in cands if r.get("status") == "Failed"]
+    # Every red row's first-seen time, kept whatever happens below; a row no longer red drops out.
+    for row in red:
+        out["state"][row["key"]] = (state or {}).get(row["key"]) or now.strftime("%Y-%m-%dT%H:%M:%S.000Z")
+    tasks = None
+    for row in red:
+        key = row["key"]
+        detail = str(row.get("detail") or "")
+        if row.get("kind") == "report" and OWNER_NAMED_RE.search(detail):
+            out["owned"].append(key)
+            continue
+        since, src = red_since(row, out["state"])
+        days = (now - since).total_seconds() / 86400 if since else 0
+        if not since or days < RED_DAYS:
+            out["young"].append(key)
+            continue
+        if tasks is None:
+            try:
+                tasks = open_tasks()
+            except Exception as exc:  # noqa: BLE001 — a failed read raises nothing and says so
+                out["errors"].append("open-task read failed: %s" % str(exc)[:200])
+                return out
+            if not tasks:
+                # The control: hundreds of tasks are always open. Zero is a broken read, and a
+                # create gated on a broken read is how twins are made.
+                out["errors"].append("open-task read returned ZERO tasks: nothing raised")
+                return out
+        # The prefix without its trailing space: a row with a blank Detail is named "RED: <key> —".
+        hit = next((t for t in tasks if str(t[1] or "").startswith(red_prefix(key).rstrip())), None)
+        if hit:
+            tid = hit[0]
+            out["existing"].append({"key": key, "task": tid})
+        else:
+            try:
+                tid = create(red_task_fields(row, since, src, int(days), builder,
+                                             now.astimezone(LONDON).strftime("%Y-%m-%d"), logs_dir))
+            except Exception as exc:  # noqa: BLE001
+                out["errors"].append("%s: task create failed: %s" % (key, str(exc)[:200]))
+                continue
+            tasks.append((tid, red_task_name(key, detail)))
+            out["raised"].append({"key": key, "task": tid, "days": round(days, 1), "since": src})
+        line = "Builder task %s raised." % tid
+        if ("task %s raised" % tid) not in detail:
+            new = (detail.rstrip() + " " + line).strip()
+            if key in computed:
+                computed[key]["detail"] = new
+            else:
+                out["patch"][key] = new
+    return out
+
+
+def load_red_state(path=RED_STATE):
+    try:
+        with open(path) as fh:
+            data = json.load(fh)
+        return data if isinstance(data, dict) else {}
+    except (OSError, ValueError):
+        return {}
+
+
+def save_red_state(state, path=RED_STATE):
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    tmp = path + ".tmp"
+    with open(tmp, "w") as fh:
+        json.dump(state, fh, indent=1, sort_keys=True)
+    os.replace(tmp, path)
+
+
+def stored_rows():
+    """Every Estate Status row by key, with the fields the red pass reads (paginated, field ids)."""
+    out, offset = {}, ""
+    want = ("key", "kind", "status", "lastRun", "lastWorked", "detail")
+    while True:
+        q = [("returnFieldsByFieldId", "true"), ("pageSize", "100")] + [("fields[]", ES[k]) for k in want]
+        if offset:
+            q.append(("offset", offset))
+        d = _request("GET", TABLE + "?" + urllib.parse.urlencode(q))
+        for r in d.get("records", []):
+            f = r.get("fields") or {}
+            key = f.get(ES["key"], "")
+            if key:
+                out[key] = dict({k: f.get(ES[k]) for k in want}, id=r["id"])
+        offset = d.get("offset")
+        if not offset:
+            return out
+
+
+def open_task_names():
+    """(id, name) of every open task, paginated. The red pass's exists-check."""
+    out, offset = [], ""
+    while True:
+        q = [("pageSize", "100"), ("fields[]", "Task Name"),
+             ("filterByFormula", "AND(NOT({Status}='Completed'), NOT({Status}='Cancelled'))")]
+        if offset:
+            q.append(("offset", offset))
+        d = _request("GET", TASKS_TABLE + "?" + urllib.parse.urlencode(q))
+        out += [(r["id"], (r.get("fields") or {}).get("Task Name", "")) for r in d.get("records", [])]
+        offset = d.get("offset")
+        if not offset:
+            return out
+
+
+def create_red_task(fields):
+    """Through the one task gate. --force: two RED tasks share every word but the job key, and the
+    gate's word pass would fold job-digest's into data-invariants'. The prefix check above is this
+    task's duplicate gate instead (the same choice merge_card.py makes)."""
+    import subprocess
+    r = subprocess.run([sys.executable, os.path.join(HERE, "create-agent-task.py"), "create", "--force",
+                        "--fields-json", json.dumps(fields)], capture_output=True, text=True, timeout=240)
+    try:
+        res = json.loads((r.stdout or "").strip().splitlines()[-1])
+    except (ValueError, IndexError):
+        res = {}
+    if r.returncode != 0 or not str(res.get("taskId", "")).startswith("rec"):
+        raise RuntimeError("create-agent-task.py exited %d: %s"
+                           % (r.returncode, ((r.stderr or "") + (r.stdout or "")).strip()[-300:]))
+    return res["taskId"]
+
+
+def red_pass_live(rows, now):
+    """The red pass against the live table, the live task board and the state file."""
+    stored = stored_rows()
+    red = red_rows_pass(rows, stored, now, load_red_state(), open_task_names, create_red_task,
+                        dispatch_const("BUILDER_REC_ID"))
+    save_red_state(red["state"])
+    for key, detail in red["patch"].items():
+        _request("PATCH", TABLE, {"records": [{"id": stored[key]["id"], "fields": {ES["detail"]: detail}}],
+                                  "typecast": True})
+    return red
+
+
 # ─── commands ─────────────────────────────────────────────────────────
 def build_rows(now, with_loop_health=True):
     sched = load_schedule()
@@ -1108,9 +1337,22 @@ def cmd_refresh(args):
     counts = {}
     for r in rows:
         counts[r["status"]] = counts.get(r["status"], 0) + 1
+    # Before the write, so a row's Detail carries its task line in the same write.
+    if args.dry_run:
+        red = {"skipped": "dry run: no table or task read"}
+    else:
+        try:
+            red = red_pass_live(rows, now)
+        except Exception as exc:  # noqa: BLE001 — the board is still written; the run fails below
+            red = {"errors": ["red pass failed: %s: %s" % (type(exc).__name__, str(exc)[:200])]}
     res = upsert(rows, now, dry_run=args.dry_run)
     print(json.dumps({"rows": len(rows), "byStatus": counts, "written": res, "dryRun": bool(args.dry_run),
-                      "attention": [r["key"] + ": " + r["status"] for r in rows if r["status"] in ("Failed", "Blocked")]}))
+                      "attention": [r["key"] + ": " + r["status"] for r in rows if r["status"] in ("Failed", "Blocked")],
+                      "redRows": {k: red.get(k) for k in ("raised", "existing", "owned", "young", "errors", "skipped")
+                                  if red.get(k)}}))
+    for e in red.get("errors") or []:
+        print("ESTATE STATUS RED PASS: %s" % e, file=sys.stderr)
+    return 1 if red.get("errors") else 0
 
 
 def cmd_signins(args):
@@ -1480,8 +1722,7 @@ def main(argv=None):
         return 0
     if args.cmd == "signins":
         return cmd_signins(args)
-    cmd_refresh(args)
-    return 0
+    return cmd_refresh(args)
 
 
 if __name__ == "__main__":

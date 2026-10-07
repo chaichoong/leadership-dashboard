@@ -169,3 +169,141 @@ print(json.dumps(row))`;
     expect(read('scripts/robot-signin.applescript')).toMatch(/scripts\/estate-status\.py signins/);
   });
 });
+
+// Kevin, 7 Oct 2026: a red row older than 2 days raises ONE owned task. That day agent-blockers had
+// been red 9 days and data-invariants and job-digest had not been green once in the week read, with
+// no owner. These drive the REAL red_rows_pass with the open-task read and the create replaced by
+// fakes. The live shape that mattered: a job failing daily has a Last Run of today, so red-since
+// must come from the oldest evidence, never the newest failure.
+describe('a red row raises one Builder task', () => {
+  const NOW = '2026-10-07T10:00:00+00:00';
+  const ago = (d) => new Date(Date.parse(NOW) - d * 86400000).toISOString().replace(/\.\d{3}Z$/, '.000Z');
+  function red({ rows = [], stored = {}, state = {}, open = [{ id: 'recOTHER000000001', name: 'something else' }], openFails = false }) {
+    const out = execFileSync('python3', ['-c', `
+import importlib.util, json, sys
+from datetime import datetime
+spec = importlib.util.spec_from_file_location("es", ${JSON.stringify(WRITER)})
+m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m)
+a = json.loads(sys.stdin.read())
+made = []
+def open_tasks():
+    if a["openFails"]:
+        raise RuntimeError("HTTP 503")
+    return [(t["id"], t["name"]) for t in a["open"]]
+def create(fields):
+    made.append(fields); return "recNEWTASK%07d" % len(made)
+res = m.red_rows_pass(a["rows"], a["stored"], datetime.fromisoformat(a["now"]), a["state"], open_tasks, create,
+                      m.dispatch_const("BUILDER_REC_ID"), logs_dir="/nonexistent")
+print("---JSON---"); print(json.dumps({"res": res, "made": made, "rows": a["rows"], "builder": m.dispatch_const("BUILDER_REC_ID")}))
+`], { input: JSON.stringify({ rows, stored, state, open, openFails, now: NOW }), encoding: 'utf8' });
+    return JSON.parse(out.split('---JSON---')[1]);
+  }
+  const job = (key, f) => ({ key, kind: 'job', status: 'Failed', detail: 'exit code 1. Last thing it said: the check failed on row 12 of the sheet today', ...f });
+
+  it('red 1 day: nothing', () => {
+    const r = red({ rows: [job('data-invariants', { lastWorked: ago(1), lastRun: ago(0.1) })] });
+    expect(r.made).toHaveLength(0);
+    expect(r.res.young).toEqual(['data-invariants']);
+  });
+  it('red 3 days: one task for the Builder, named for the row, and the row says which task', () => {
+    const r = red({ rows: [job('data-invariants', { lastWorked: ago(3), lastRun: ago(0.1) })] });
+    expect(r.made).toHaveLength(1);
+    const f = r.made[0];
+    expect(f.fldgFjGBw6bTKJFCD).toBe('RED: data-invariants — exit code 1. Last thing it said: the check failed on row 12');
+    expect(f.flduCtmQGpOA4eWaj).toEqual([r.builder]);
+    expect(r.builder).toBe('recQkO6BA4w5zqwZ4');
+    expect(f.fldx4qCw17UfrKpaN).toBe('Today');
+    expect(f.fldRGhBQViKZKtkQ6).toMatch(/the check failed on row 12 of the sheet today/);
+    expect(f.fldRGhBQViKZKtkQ6).toMatch(/job-status\.jsonl/);
+    expect(r.rows[0].detail).toMatch(/Builder task recNEWTASK0000001 raised\.$/);
+  });
+  it('red 3 days with its task already open: no second task, even after the Detail changed', () => {
+    const open = [{ id: 'recRED00000000001', name: 'RED: data-invariants — exit code 1. Last thing it said: an older tail' }];
+    const r = red({ rows: [job('data-invariants', { lastWorked: ago(3) })], open });
+    expect(r.made).toHaveLength(0);
+    expect(r.res.existing).toEqual([{ key: 'data-invariants', task: 'recRED00000000001' }]);
+    expect(r.rows[0].detail).toMatch(/task recRED00000000001 raised/);
+  });
+  it('a row with a blank Detail finds its own task next time (no twin every ten minutes)', () => {
+    const first = red({ rows: [job('job-z', { lastWorked: ago(3), detail: '' })] });
+    expect(first.made[0].fldgFjGBw6bTKJFCD).toBe('RED: job-z —');
+    const again = red({ rows: [job('job-z', { lastWorked: ago(3), detail: '' })],
+      open: [{ id: 'recRED00000000003', name: first.made[0].fldgFjGBw6bTKJFCD }] });
+    expect(again.made).toHaveLength(0);
+  });
+  it('another job\'s RED task is not this job\'s (the prefix carries the key and the dash)', () => {
+    const open = [{ id: 'recRED00000000002', name: 'RED: data-invariants-weekly — exit code 1' }];
+    expect(red({ rows: [job('data-invariants', { lastWorked: ago(3) })], open }).made).toHaveLength(1);
+  });
+  it('a weekly job that worked 6 days ago and failed this morning is not two days red', () => {
+    const r = red({ rows: [job('weekly-x', { lastWorked: ago(6), firstFail: ago(0.2), lastRun: ago(0.2) })] });
+    expect(r.made).toHaveLength(0);
+    expect(r.res.young).toEqual(['weekly-x']);
+  });
+  it('classify carries the first failure after the last good run, from the real finishes', () => {
+    const out = execFileSync('python3', ['-c', `
+import importlib.util, json
+from datetime import datetime, timezone
+spec = importlib.util.spec_from_file_location("es", ${JSON.stringify(WRITER)})
+m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m)
+now = datetime(2026, 10, 7, 10, 0, tzinfo=timezone.utc)
+fin = [{"job": "j", "ts": "2026-10-01T06:00:00Z", "ok": False}, {"job": "j", "ts": "2026-10-02T06:00:00Z", "ok": True},
+       {"job": "j", "ts": "2026-10-05T06:00:00Z", "ok": False}, {"job": "j", "ts": "2026-10-06T06:00:00Z", "ok": False}]
+r = m.classify("j", {"cron": "0 6 * * *"}, fin, [], now, logs_dir="/nonexistent")
+print(json.dumps({k: r.get(k) for k in ("status", "firstRun", "firstFail", "lastWorked")}))
+`], { encoding: 'utf8' });
+    expect(JSON.parse(out.trim().split('\n').pop())).toEqual({ status: 'Failed', firstRun: '2026-10-01T06:00:00.000Z',
+      firstFail: '2026-10-05T06:00:00.000Z', lastWorked: '2026-10-02T06:00:00.000Z' });
+  });
+  it('a row that never worked: Last Run is used', () => {
+    const r = red({ rows: [job('job-digest', { lastWorked: null, lastRun: ago(3) })] });
+    expect(r.made).toHaveLength(1);
+    expect(r.res.raised[0].since).toBe('last run');
+  });
+  it('a job failing daily (Last Run today) is red since its first run in the week read', () => {
+    const r = red({ rows: [job('job-digest', { lastWorked: null, lastRun: ago(0.1), firstRun: ago(6) })] });
+    expect(r.made).toHaveLength(1);
+    expect(r.res.raised[0].since).toBe('first run in the week read');
+  });
+  it('blank Last Worked and blank Last Run: dated from the first time this writer saw it red', () => {
+    const fresh = red({ rows: [job('job-x', { lastWorked: null, lastRun: null })] });
+    expect(fresh.made).toHaveLength(0);
+    expect(fresh.res.state['job-x']).toBe('2026-10-07T10:00:00.000Z');
+    const later = red({ rows: [job('job-x', { lastWorked: null, lastRun: null })], state: { 'job-x': ago(3) } });
+    expect(later.made).toHaveLength(1);
+    expect(later.res.raised[0].since).toBe('first seen red by this writer');
+  });
+  it('a row no longer red drops out of the state, so a later red starts its own clock', () => {
+    const r = red({ rows: [job('job-x', { status: 'Worked' })], state: { 'job-x': ago(9) } });
+    expect(r.res.state).toEqual({});
+  });
+  it('a report row whose Detail names the owner raises nothing; one that names nobody does', () => {
+    const blockers = { key: 'agent-blockers', kind: 'report', status: 'Failed', lastWorked: ago(9),
+      detail: 'Robots blocked on 35 tasks. For you: add axa.co.uk to the robot\'s list; 12 steps only you can do.' };
+    const blind = { key: 'built-inventory', kind: 'report', status: 'Failed', lastWorked: ago(4),
+      detail: 'The inventory could not be read: file missing.' };
+    const r = red({ rows: [blockers, blind] });
+    expect(r.res.owned).toEqual(['agent-blockers']);
+    expect(r.made.map((f) => f.fldgFjGBw6bTKJFCD)).toEqual(['RED: built-inventory — The inventory could not be read: file missing.']);
+  });
+  it('a row another script writes is read from the table, and its Detail is patched once', () => {
+    const stored = { 'rent-position': { kind: 'report', status: 'Failed', lastWorked: ago(5), detail: 'The rent read failed.', id: 'recROW' } };
+    const r = red({ stored });
+    expect(r.made).toHaveLength(1);
+    expect(r.res.patch['rent-position']).toMatch(/^The rent read failed\. Builder task recNEWTASK0000001 raised\.$/);
+  });
+  it('a broken open-task read raises nothing and says so', () => {
+    expect(red({ rows: [job('job-y', { lastWorked: ago(5) })], open: [] }).res.errors.join(' ')).toMatch(/ZERO tasks/);
+    const failed = red({ rows: [job('job-y', { lastWorked: ago(5) })], openFails: true });
+    expect(failed.made).toHaveLength(0);
+    expect(failed.res.errors.join(' ')).toMatch(/HTTP 503/);
+    expect(failed.res.state['job-y']).toBeTruthy();
+  });
+  it('the refresh fails loudly on a red-pass error, and the dry run never reads or writes tasks', () => {
+    const src = read('scripts/estate-status.py');
+    const refresh = src.slice(src.indexOf('def cmd_refresh('), src.indexOf('def cmd_signins('));
+    expect(refresh).toMatch(/return 1 if red\.get\("errors"\) else 0/);
+    expect(refresh).toMatch(/dry run: no table or task read/);
+    expect(src).toMatch(/return cmd_refresh\(args\)/);
+  });
+});
