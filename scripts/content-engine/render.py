@@ -993,9 +993,15 @@ def process(key, ledger, keep=False):
           {k: ("ok" if v else "NO DRIVE ID YET") for k, v in links.items()}))
 
 
-def redo_lfmd(day):
+def redo_lfmd(day, window=None):
     """Rebuild one episode's Learnings clip only: re-pull the clip if it is gone, transcribe, render the 9:16
-    master (reused when complete), cut the diary section, file it, update the record and refresh the card."""
+    master (reused when complete), cut the diary section, file it, update the record and refresh the card.
+
+    `window` is (start, end) in seconds, read off the captions by a person, for an episode where whisper mangled the
+    phrase so badly no route can reach it (2086 and 2087, 6 Oct 2026: "learning from an hour today" where he said
+    "the learnings from my diary today", and on 2086 no diary-like word in any of 287 captions). It REPLACES the
+    detector for this one rebuild; the detector itself is untouched, so no other episode's clip moves. Recorded as
+    lfmd_window_by "operator", so a hand-placed window is never mistaken for a detected one.""" 
     ledger = watch.load_ledger()
     keys = [k for k, v in ledger.items() if v.get("episode") == day and v.get("role") == "episode"]
     if not keys: raise SystemExit("no episode clip for day %d in the ledger" % day)
@@ -1011,7 +1017,13 @@ def redo_lfmd(day):
     workdir = os.path.join(os.path.dirname(clip), "render_" + key.replace(".insv", ""))
     os.makedirs(workdir, exist_ok=True)
     text, srt = transcribe(clip, workdir)
-    segs = srt_segments(open(srt).read()); window = lfmd_window(segs)
+    segs = srt_segments(open(srt).read())
+    by_hand = bool(window)
+    if by_hand:
+        window = check_lfmd_window(window, e.get("duration"), day)
+        print("episode %d: Learnings window given by hand, %.2f to %.2f s; the detector is not consulted" % (day, window[0], window[1]))
+    else:
+        window = lfmd_window(segs)
     if not window: raise SystemExit("episode %d has no diary section in its transcript" % day)
     # Saved BEFORE the new clip is filed: a rebuild that dies half way must not leave the new clip under the old yes
     if e.pop("lfmd_early_ok", None) is not None: watch.save_ledger(ledger)      # a clip cut again is watched again (qa.py accept-early)
@@ -1024,6 +1036,7 @@ def redo_lfmd(day):
     rid, how = find_or_create_record(day, e.get("drive_id"), key, dt.date.fromisoformat(e["date"]))
     if links.get("lfmd"): watch._airtable("PATCH", watch.API + "/" + rid, {"fields": {"Reframed Video URL": links["lfmd"]}})
     e["lfmd_window"] = window; e["lfmd_closes_talk"] = lfmd_closes_talk(segs, window)
+    e["lfmd_window_by"] = "operator" if by_hand else "detector"
     e["lfmd_redone"] = dt.datetime.now().isoformat(timespec="seconds"); e["status"] = "rendered"; e["local"] = clip
     e.setdefault("outputs", {}).update({k: v for k, v in links.items() if v})      # the publisher fetches by these links
     watch.save_ledger(ledger)
@@ -1083,6 +1096,23 @@ def lfmd_receipt(feedback, window, points=None):
     return "\n".join("- %s → the Learnings from my diary clip is rebuilt from %s to %s and goes to the socials and the YouTube Short with this episode" % (p.strip(), fmt(window[0]), fmt(window[1])) for p in pts) + "\n"
 
 
+def check_lfmd_window(window, duration, day):
+    """A hand-read (start, end) checked against the SAME bounds the detector holds itself to, so a typed window can
+    never produce a clip the detector would have refused. Raises SystemExit naming what is wrong."""
+    import inspect
+    lo = inspect.signature(lfmd_window).parameters["min_len"].default
+    hi = inspect.signature(lfmd_window).parameters["max_len"].default
+    try: start, end = float(window[0]), float(window[1])
+    except (TypeError, ValueError, IndexError): raise SystemExit("episode %d: window must be two numbers, got %r" % (day, window))
+    if not end > start: raise SystemExit("episode %d: window end %.2f is not after its start %.2f" % (day, end, start))
+    if start < 0: raise SystemExit("episode %d: window starts before the recording (%.2f)" % (day, start))
+    if not lo <= end - start <= hi:
+        raise SystemExit("episode %d: window is %.1f s, outside the %.0f to %.0f s a Learnings clip is allowed to be" % (day, end - start, lo, hi))
+    if duration and end > float(duration) + 0.5:
+        raise SystemExit("episode %d: window ends at %.2f s but the episode is %.1f s long" % (day, end, float(duration)))
+    return (round(start, 2), round(end, 2))
+
+
 REDO_LFMD_FILE = os.path.expanduser("~/.config/od/content_engine_redo_lfmd")
 HOLD_FILE = os.path.expanduser("~/.config/od/content_engine_hold_days")
 
@@ -1102,15 +1132,27 @@ def release_hold(day):
     _drop_day(REDO_LFMD_FILE, day)
 
 
+REDO_LINE_RE = re.compile(r"\s*(\d{3,4})\b(?:\s+@(\d+(?:\.\d+)?)-(\d+(?:\.\d+)?))?")
+
+
+def redo_line(line):
+    """(day, window or None) from one line of the redo list: "2086 reason", or "2086 @334.88-435.44 reason" when the
+    section was read off the captions by hand. None when the line names no day (a comment, or a blank)."""
+    m = REDO_LINE_RE.match(line)
+    if not m: return None
+    return int(m.group(1)), ((float(m.group(2)), float(m.group(3))) if m.group(2) else None)
+
+
 def redo_requested(path=None):
-    """Nightly: rebuild the Learnings clip for every day listed in content_engine_redo_lfmd (one day per line, reason
-    after it). A failure stays listed for the next night and is printed; a success clears the day and its hold."""
+    """Nightly: rebuild the Learnings clip for every day listed in content_engine_redo_lfmd (one day per line, an
+    optional @start-end window, then the reason). A failure stays listed for the next night and is printed; a success
+    clears the day and its hold."""
     path = path or REDO_LFMD_FILE
-    try: days = [int(m.group(1)) for m in (re.match(r"\s*(\d{3,4})\b", l) for l in open(path)) if m]
-    except OSError: days = []
-    if not days: print("redo: no Learnings rebuilds requested"); return
-    for day in days:
-        try: redo_lfmd(day)
+    try: asked = [r for r in (redo_line(l) for l in open(path)) if r]
+    except OSError: asked = []
+    if not asked: print("redo: no Learnings rebuilds requested"); return
+    for day, window in asked:
+        try: redo_lfmd(day, window)
         except (Exception, SystemExit) as ex: print("redo: episode %d Learnings rebuild FAILED, kept for the next night (%s)" % (day, str(ex)[-200:]), file=sys.stderr)
 
 
@@ -1594,7 +1636,23 @@ def selftest():
             except RuntimeError as exc: assert "test" in str(exc), str(exc)
         good = os.path.join(td, "ok.srt"); open(good, "w").write(srt)
         assert check_captions(good, "test") == 2
-    print(json.dumps({"checks": 55, "failed": []}))
+    # 7 Oct 2026: a hand-read Learnings window for 2086 and 2087, whose phrase whisper mangled past every route.
+    # The typed window is held to the DETECTOR's own bounds, so it can never make a clip the detector would refuse.
+    assert check_lfmd_window((334.88, 435.44), 458.8, 2086) == (334.88, 435.44)
+    assert check_lfmd_window(("381", "501"), 504.1, 2087) == (381.0, 501.0), "strings off a text file are read as numbers"
+    for bad, why in (((435.44, 334.88), "end before start"), ((-1, 100), "starts before the recording"),
+                     ((100, 110), "9 s is under the 20 s floor"), ((100, 400), "300 s is over the 180 s ceiling"),
+                     ((400, 470), "ends past a 458.8 s episode"), (("a", "b"), "not numbers")):
+        try: check_lfmd_window(bad, 458.8, 2086); raise AssertionError("must refuse: " + why)
+        except SystemExit as exc: assert "2086" in str(exc), str(exc)
+    assert check_lfmd_window((400.0, 458.9), 458.8, 2086) == (400.0, 458.9), "half a second of rounding slack at the end"
+    # the redo list: a bare day, a day with a reason, a day with a hand-read window, and a line naming no day
+    assert redo_line("2086\n") == (2086, None)
+    assert redo_line("2086 Learnings clip missed\n") == (2086, None)
+    assert redo_line("2086 @334.88-435.44 whisper heard no diary word at all\n") == (2086, (334.88, 435.44))
+    assert redo_line("2087 @381-501 'learning from an hour today'\n") == (2087, (381.0, 501.0))
+    assert redo_line("# a comment\n") is None and redo_line("\n") is None and redo_line("  \n") is None
+    print(json.dumps({"checks": 68, "failed": []}))
 
 
 if __name__ == "__main__":
@@ -1603,10 +1661,17 @@ if __name__ == "__main__":
     ap.add_argument("--out", default=os.path.expanduser("~/knowledge-os/logs/content-engine/manual"))
     ap.add_argument("--limit", type=int, default=1); ap.add_argument("--keep", action="store_true")
     ap.add_argument("--receipt", default=""); ap.add_argument("--why", default="")
+    ap.add_argument("--window", default="", help="START-END in seconds: the Learnings section read off the captions by hand, for redo --only lfmd")
     a = ap.parse_args()
     if a.mode == "selftest": selftest()
     elif a.mode == "run": run(a.limit, a.keep)
-    elif a.mode == "redo" and a.only == "lfmd": redo_lfmd(a.day)
+    elif a.mode == "redo" and a.only == "lfmd":
+        w = None
+        if a.window:
+            parts = re.split(r"[-\s]+", a.window.strip().lstrip("@"))
+            if len(parts) != 2: raise SystemExit('usage: --window START-END (seconds), e.g. --window 334.88-435.44')
+            w = (float(parts[0]), float(parts[1]))
+        redo_lfmd(a.day, w)
     elif a.mode == "redo-requested": redo_requested()
     elif a.mode == "redo": redo_full(a.day, keep=a.keep if hasattr(a, "keep") else False)
     elif a.mode == "one": one(a.clip, a.day, a.out)
