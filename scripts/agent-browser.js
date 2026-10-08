@@ -1786,8 +1786,9 @@ async function main() {
       // Hold the profile, then let the step in flight finish (25 Sep 2026).
       takeSigninHold(dir);
       process.on('exit', () => releaseSigninHold(dir));
-      // Still open when the 15 minutes ran out (8 Oct 2026): written on the ledger line, so a
-      // window he walked away from is never read as his try at signing in (signin_hold).
+      // Still open when the 15 minutes ran out (8 Oct 2026): written on the ledger line for diagnosis
+      // only. It is NOT used to excuse the window (review): closing the last window with the red
+      // button leaves Chrome running, so a real try would read as walked away and be asked for again.
       let timedOut = false;
       try {
         // A step that passed its last hold check a moment ago launches within

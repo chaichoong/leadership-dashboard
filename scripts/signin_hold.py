@@ -224,8 +224,6 @@ def kevin_login_after(events, hosts, since, profile="default"):
     for e in events or []:
         if not isinstance(e, dict) or e.get("cmd") != "login" or (e.get("profile") or "default") != profile:
             continue
-        if e.get("timedOut"):
-            continue                            # he walked away from it: not a try (8 Oct 2026)
         at = _at(e.get("at"))
         h = str(e.get("host") or e.get("site") or "").lower()
         if not at or (since_at and at <= since_at):

@@ -7668,21 +7668,18 @@ def kevin_tried_reason(kind, host, sites, since, profile="default", events=None)
 
 
 def kevin_wall_answer_nearby(events, host, since, profile="default"):
-    """(at, signed-in host, wall) of his newest window opened for a SITE wall on ANOTHER address of
-    HOST's own site (same registrable domain, never a shared platform domain), or None. After
-    "use landlordaxainsurance.com" for axa.co.uk, an agent could still raise one on www.axa.co.uk
-    (review, 8 Oct 2026)."""
-    dom = signin_domain(host)
-    if not dom or dom in SIGNIN_SHARED_DOMAINS:
-        return None
+    """(at, signed-in host, wall) of his newest window opened for a SITE wall on HOST with or without
+    its leading "www." (axa.co.uk for www.axa.co.uk), or None. After "use landlordaxainsurance.com" for
+    axa.co.uk, an agent could still raise one on www.axa.co.uk (review, 8 Oct 2026). Nothing wider: by
+    registrable domain every *.service.gov.uk host is one site, and as parent and child an answer for
+    gov.uk would cover every council and every GOV.UK service (two review rounds)."""
     since_at = _utc(since)
     best = None
     for e in events or []:
-        if not isinstance(e, dict) or e.get("cmd") != "login" or e.get("timedOut") \
-                or (e.get("profile") or "default") != profile:
+        if not isinstance(e, dict) or e.get("cmd") != "login" or (e.get("profile") or "default") != profile:
             continue
         wall = str(e.get("forWall") or "").lower()
-        if not wall or wall == host or signin_domain(wall) != dom:
+        if not wall or wall == host or not (host == "www." + wall or wall == "www." + host):
             continue
         at = _utc(e.get("at"))
         if not at or (since_at and at <= since_at):

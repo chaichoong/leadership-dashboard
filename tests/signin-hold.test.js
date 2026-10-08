@@ -273,6 +273,9 @@ ka.create_task = lambda fields, dry_run: created.append(fields[ka.F['name']]) or
 if arg.get('broken'):
     def boom(*a, **k): raise RuntimeError('ledger unreadable')
     sh.unheld_signins = boom
+if arg.get('triedBroken'):
+    def boom2(*a, **k): raise RuntimeError('ledger unreadable')
+    sh.kevin_signin_failed = boom2
 buf = io.StringIO()
 with contextlib.redirect_stdout(buf):
     code = ka.cmd_run()
@@ -339,6 +342,10 @@ print('---JSON---'); print(json.dumps({'code': code, 'created': created, 'said':
     expect(got.created).toEqual([]);
     expect(got.status[TCB].kevinTried).toBe(true);
     expect(got.status[TCB].task).toBe('not raised: his own sign-in did not get the robot in');
+    // A rule that cannot be worked out never silences the ask (review, 8 Oct 2026).
+    const broken = run([...ONE_SIGNIN, login(ago(1), TCB)], { ...waiting, readAt: ago(0.5), triedBroken: true });
+    expect(broken.created).toEqual(['SIGN-IN: TopCashback session lapsed']);
+    expect(broken.status[TCB].kevinTriedError).toBe('ledger unreadable');
     // His window a day earlier, read next morning: it may have worked and expired, so he is asked.
     expect(run([...ONE_SIGNIN, login(ago(20), TCB)], { ...waiting, readAt: ago(0.5) }).created)
       .toEqual(['SIGN-IN: TopCashback session lapsed']);
@@ -470,18 +477,6 @@ print("---JSON---" + json.dumps({
     expect(r.other).toBeNull();
     expect(r.child_read).toBeNull();
     expect(r.next_morning).toBeNull();
-  });
-
-  it('a window he walked away from (still open when the time ran out) is not his try', () => {
-    const r = py(`
-ev = arg["ev"]
-print("---JSON---" + json.dumps({"after": sh.kevin_login_after(ev, {arg["host"]}, "2026-10-06T00:00:00Z"),
-                               "failed": sh.kevin_signin_failed(ev, {arg["host"]}, "2026-10-06T00:00:00Z")}))`, {
-      host: PORTAL,
-      ev: [{ ...login('2026-10-08T11:59:13.000Z', PORTAL), timedOut: true }, out('2026-10-08T12:10:00.000Z', PORTAL)],
-    });
-    expect(r.after).toBeNull();
-    expect(r.failed).toBeNull();
   });
 
   it('a window opened from a blocked robot counts for the address it was opened for, wherever he signed in', () => {

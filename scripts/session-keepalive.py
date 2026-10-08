@@ -264,13 +264,18 @@ def cmd_run(dry_run=False):
                         row["nothingWaiting"], row["task"] = True, "not raised: no task is waiting on this site"
                     elif ours:
                         row["task"] = "already waiting"
-                    elif kevin_try_failed(host, entry):
+                    else:
                         # His own window closed and this check still found it signed out: asking him
                         # again cannot help, and the blocker sweep sends the waiting task another
-                        # route (8 Oct 2026).
-                        row["kevinTried"], row["task"] = True, "not raised: his own sign-in did not get the robot in"
-                    else:
-                        row["task"] = create_task(signin_task_fields(host, entry, when, work), dry_run)
+                        # route (8 Oct 2026). A rule that cannot be worked out never silences the ask.
+                        try:
+                            tried = kevin_try_failed(host, entry)
+                        except Exception as e:                  # noqa: BLE001
+                            tried, row["kevinTriedError"] = False, str(e)[:200]
+                        if tried:
+                            row["kevinTried"], row["task"] = True, "not raised: his own sign-in did not get the robot in"
+                        else:
+                            row["task"] = create_task(signin_task_fields(host, entry, when, work), dry_run)
             except Exception as e:                          # noqa: BLE001
                 # The waiting read failed: NOT CHECKED, and said so in the summary, never a quiet board.
                 row["task"] = {"error": str(e)[:200]}
