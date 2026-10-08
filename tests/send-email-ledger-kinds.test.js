@@ -38,6 +38,8 @@ calls, searches = [], []
 F = {m.AF["name"]: "INBOUND: Manchester City Council EICR", m.AF["agentOutput"]: a["output"],
      m.AF["taskType"]: {"name": "Correspondence"}, m.AF["status"]: {"name": "Today"},
      m.AF["approvalOutcome"]: {"name": "Approved as-is"}}
+if a.get("approvedAt"):
+    F[m.AF["approvedAt"]] = a["approvedAt"]
 def _get(tid):
     if a.get("airtableDown"):
         sys.exit("ERROR: Airtable GET 503: unavailable")
@@ -119,6 +121,58 @@ describe('the send ledger keeps notify and send apart', () => {
   });
 });
 
+describe('a second email on one task (finding 20261002-agent-dispatch-716, 7 Oct 2026)', () => {
+  // A task approved for a second round could never send: the ledger refused any send on a task that
+  // had ever sent, and its card came back after every approval. Shaped from the two stuck cards (a
+  // second contractor written to on the same certificate task); names and addresses are invented.
+  const FIRST = { task: 'recKho3l7jJKk9T0t', ts: '2026-09-15T12:10:14.000Z', event: 'sent', kind: 'send',
+    to: ['office@first-contractor.test'], cc: [], subject: 'Gas safety certificate - 1 Example Road' };
+  const SECOND = 'TO: bookings@second-contractor.test\nFROM: kevinbrittain@gmail.com\nSUBJECT: Book a gas safety check - 1 Example Road\n---\n'
+    + 'Hello,\n\nPlease book the gas safety check.\n\nKind regards,\nKevin Brittain\n\n'
+    + '**Carrying this out will involve:** sending the booking to the second contractor.';
+
+  it('a different email Kevin approved after the first one went is sent, and records its body fingerprint', () => {
+    const r = run({ cmd: 'send', rows: [FIRST], output: SECOND, approvedAt: '2026-10-07T19:23:10.772Z' });
+    expect(r.exit).toBe(0);
+    expect(r.calls).toHaveLength(1);
+    expect(r.calls[0].to).toBe('bookings@second-contractor.test');
+    expect(r.ledger.slice(-1)[0]).toMatchObject({ event: 'sent', kind: 'send', bodyHash: expect.stringMatching(/^[0-9a-f]{16}$/) });
+  });
+
+  it('with no approval since the first send, nothing goes', () => {
+    const r = run({ cmd: 'send', rows: [FIRST], output: SECOND, approvedAt: '2026-09-14T08:00:00.000Z' });
+    expect(r.message).toMatch(/nothing has been approved since/);
+    expect(r.calls).toHaveLength(0);
+  });
+
+  it('the same email approved again (an old page tab) is never sent twice', () => {
+    const same = { ...FIRST, to: ['bookings@second-contractor.test'], subject: 'Book a gas safety check - 1 Example Road' };
+    const r = run({ cmd: 'send', rows: [same], output: SECOND, approvedAt: '2026-10-07T19:23:10.772Z' });
+    expect(r.message).toMatch(/this email .* already went at/s);
+    expect(r.calls).toHaveLength(0);
+  });
+
+  it('same people and subject with a new body goes once its fingerprint differs, and the same body never twice', () => {
+    const a = run({ cmd: 'send', rows: [FIRST], output: SECOND, approvedAt: '2026-10-07T19:23:10.772Z' });
+    const sentRow = a.ledger.slice(-1)[0];
+    const chase = SECOND.replace('Please book the gas safety check.', 'A reminder: please book the gas safety check.');
+    const b = run({ cmd: 'send', rows: a.ledger, output: chase, approvedAt: '2026-10-08T09:00:00.000Z' });
+    expect(b.exit).toBe(0);
+    expect(b.calls).toHaveLength(1);
+    const c = run({ cmd: 'send', rows: b.ledger, output: chase, approvedAt: '2026-10-08T10:00:00.000Z' });
+    expect(c.calls).toHaveLength(0);
+    expect(sentRow.bodyHash).not.toBe(b.ledger.slice(-1)[0].bodyHash);
+  });
+
+  it('a second send that died mid-way is refused until it is settled, never sent twice', () => {
+    const rows = [FIRST, { task: 'recKho3l7jJKk9T0t', ts: '2026-10-07T20:00:00.000Z', event: 'intent', kind: 'send',
+      to: ['bookings@second-contractor.test'], cc: [], subject: 'Book a gas safety check - 1 Example Road' }];
+    const r = run({ cmd: 'send', rows, output: SECOND, approvedAt: '2026-10-07T19:23:10.772Z' });
+    expect(r.message).toMatch(/has an unfinished send .*resolve-intent/s);
+    expect(r.calls).toHaveLength(0);
+  });
+});
+
 describe('a send that dies is recorded, and an unfinished one is settled from the Sent folder', () => {
   it('a worker refusal before anything left is `failed`, and the next run may send', () => {
     const a = run({ cmd: 'send', failWith: 'ERROR: worker 429: slow down' });
@@ -146,8 +200,11 @@ describe('a send that dies is recorded, and an unfinished one is settled from th
     const legacy = run({ cmd: 'send', rows: [{ task: 'recKho3l7jJKk9T0t', ts: '2026-09-01T10:00:00.000Z', event: 'sent', to: ['housing@manchester.gov.uk'], subject: '1406 Oldham Road EICR' },
       { task: 'recKho3l7jJKk9T0t', ts: '2026-09-02T10:00:00.000Z', event: 'failed' }] });
     expect(legacy.message).toMatch(/was already sent/);
-    const resolve = run({ cmd: 'resolve', rows: [...rows, { task: 'recKho3l7jJKk9T0t', ts: '2026-09-25T11:00:00.000Z', event: 'intent', kind: 'send', to: ['housing@manchester.gov.uk'] }] });
-    expect(resolve.message).toMatch(/no unfinished send to resolve/);
+    // A later intent after the `sent` is an unfinished SECOND send (716, 7 Oct 2026): resolve-intent settles
+    // it from the Sent folder rather than refusing, and the second email still needs a new approval.
+    const resolve = run({ cmd: 'resolve', rows: [...rows, { task: 'recKho3l7jJKk9T0t', ts: '2026-09-25T11:00:00.000Z', event: 'intent', kind: 'send', to: ['housing@manchester.gov.uk'], subject: '1406 Oldham Road EICR' }] });
+    expect(resolve.message || '').not.toMatch(/no unfinished send to resolve/);
+    expect(resolve.ledger.slice(-1)[0].event).toMatch(/^(intent-cleared|sent)$/);
   });
 
   it('resolve-intent reads the mailbox the row says it went from (an alias maps to its account) and matches the subject', () => {
