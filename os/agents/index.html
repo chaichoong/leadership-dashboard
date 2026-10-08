@@ -2640,9 +2640,9 @@ function apvStepCardHtml(t, ys){
         ${apvTrailHtml(t)}
         <div class="apv-decide" data-apv-decide>
             ${said && said.cant
-                ? `<div class="apv-step-said apv-step-cant" data-apv-step-said>You said you can't do this (${esc(agoText(said.at))} ago): ${esc(said.evidence)}. Within half an hour it goes back to ${esc(agent)} as Request changes, to find another way.</div>`
+                ? `<div class="apv-step-said apv-step-cant" data-apv-step-said>You said you can't do this (${esc(agoText(said.at))} ago): ${esc(said.evidence.replace(/[.!?]+$/, ''))}. Within half an hour it goes back to ${esc(agent)} as Request changes, to find another way.</div>`
                 : said
-                ? `<div class="apv-step-said" data-apv-step-said>You said it is done (${esc(agoText(said.at))} ago): ${esc(said.evidence)}. The robot checks it within half an hour, then the agent finishes the job.</div>`
+                ? `<div class="apv-step-said" data-apv-step-said>You said it is done (${esc(agoText(said.at))} ago): ${esc(said.evidence.replace(/[.!?]+$/, ''))}. The robot checks it within half an hour, then the agent finishes the job.</div>`
                 : `<div class="apv-actions" data-apv-step-actions>
                     ${apvNoteRowHtml(t.id, "What proves it is done (the receipt, the reference, where the signed copy went), or why you can't do it", true, false)}
                     <button class="btn btn-success" data-apv-step-done onclick="apvStepDone('${t.id}')" title="Tells the robot you have done your step. It checks your proof, then the agent finishes the job.">Done, here is the proof</button>
@@ -2691,7 +2691,9 @@ async function apvStepSay(taskId, cant){
             return 'elsewhere';
         }
         const attached = await uploadQueuedApprovalFiles(taskId);
-        const said = [words, attached.length ? `Attached: ${attached.join(', ')}.` : ''].filter(Boolean).join(' ');
+        const said = attached.length
+            ? (words ? words.replace(/[.!?]*$/, '.') + ' ' : '') + `Attached: ${attached.join(', ')}`
+            : words;
         const nowIso = new Date().toISOString();
         const prior = String(gf(live,TF.approvalFeedback)||'').replace(/\s+$/, '');
         const payload = {};

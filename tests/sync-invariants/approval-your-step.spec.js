@@ -140,8 +140,10 @@ test.describe('Your step: an approved card back in his lane', () => {
     expect(uploads.map((u) => u.filename)).toEqual(['receipt.pdf', 'signed-copy.png']);
     expect(uploads.every((u) => u.url.includes(`/${ID}/${TF.attachments}/uploadAttachment`))).toBe(true);
     const p = patches.find((x) => x.id === ID).fields;
-    expect(p[FEEDBACK]).toMatch(/^KEVIN STEP DONE \[[^\]]+\]: Attached: receipt\.pdf, signed-copy\.png\.$/);
-    expect(p[TF.feedbackHistory]).toMatch(/Done, here is the proof: Attached: receipt\.pdf, signed-copy\.png\.$/);
+    expect(p[FEEDBACK]).toMatch(/^KEVIN STEP DONE \[[^\]]+\]: Attached: receipt\.pdf, signed-copy\.png$/);
+    expect(p[TF.feedbackHistory]).toMatch(/Done, here is the proof: Attached: receipt\.pdf, signed-copy\.png$/);
+    await expect(page.locator(`[data-apv-card="${ID}"] [data-apv-step-said]`))
+      .toContainText('Attached: receipt.pdf, signed-copy.png. The robot checks it');
   });
 
   // Kevin, 8 Oct 2026: a portal opened on a login he has no account for, and the card
@@ -156,16 +158,19 @@ test.describe('Your step: an approved card back in his lane', () => {
     await expect(page.locator('#toast')).toContainText("Say why you can't do it first");
     expect(patches.filter((p) => p.id === ID)).toHaveLength(0);
     await card.locator(`#apvNote-${ID}`).fill('Your turn opens a login page   and we have no account');
+    await page.route('**/content.airtable.com/**', (route) => route.fulfill({ status: 200, contentType: 'application/json', body: '{}' }));
+    await card.locator(`#apvFile-${ID}`).setInputFiles({ name: 'login-screen.png', mimeType: 'image/png', buffer: Buffer.from('png') });
     await card.locator('[data-apv-step-cant]').click();
     await expect.poll(() => patches.filter((p) => p.id === ID).length).toBe(1);
     const p = patches.find((x) => x.id === ID).fields;
-    expect(p[FEEDBACK]).toMatch(/^Use the business card\.\nKEVIN STEP CANT \[\d{4}-\d{2}-\d{2}T[0-9:.]+Z\]: Your turn opens a login page and we have no account$/);
-    expect(p[TF.feedbackHistory]).toMatch(/I can't do this step: Your turn opens a login page and we have no account$/);
+    expect(p[FEEDBACK]).toMatch(/^Use the business card\.\nKEVIN STEP CANT \[\d{4}-\d{2}-\d{2}T[0-9:.]+Z\]: Your turn opens a login page and we have no account\. Attached: login-screen\.png$/);
+    expect(p[TF.feedbackHistory]).toMatch(/I can't do this step: Your turn opens a login page and we have no account\. Attached: login-screen\.png$/);
     for (const k of [TF.approvalOutcome, TF.approvedAt, TF.status, TF.agentOutput, TF.completionDate]) {
       expect(k in p, `the can't button wrote ${k}`).toBe(false);
     }
     const said = page.locator(`[data-apv-card="${ID}"] [data-apv-step-said]`);
     await expect(said).toContainText("You said you can't do this");
+    await expect(said).toContainText('we have no account. Attached: login-screen.png. Within half an hour it goes back to');
     await expect(said).toContainText('as Request changes, to find another way');
     await expect(page.locator(`[data-apv-card="${ID}"] [data-apv-step-cant]`)).toHaveCount(0);
   });
