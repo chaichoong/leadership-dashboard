@@ -188,6 +188,16 @@ describe('a second email on one task (finding 20261002-agent-dispatch-716, 7 Oct
       approvedAt: '2026-10-07T19:23:10.772Z' }).calls).toHaveLength(1);
   });
 
+  it('a minor edit that adds a CC, a second TO or a Re: prefix is still the same email (review round 2)', () => {
+    const sent = { task: 'recKho3l7jJKk9T0t', ts: '2026-09-20T10:00:00.000Z', event: 'sent', kind: 'send',
+      to: ['bookings@second-contractor.test'], cc: [], subject: 'Book a gas safety check - 1 Example Road' };
+    for (const card of [SECOND.replace('FROM: kevinbrittain@gmail.com', 'CC: info@example-lets.test\nFROM: kevinbrittain@gmail.com'),
+                        SECOND.replace('TO: bookings@second-contractor.test', 'TO: bookings@second-contractor.test, office@second-contractor.test'),
+                        SECOND.replace('SUBJECT: Book', 'SUBJECT: Re: Book')]) {
+      expect(run({ cmd: 'send', rows: [sent], output: card, approvedAt: '2026-10-07T19:23:10.772Z' }).calls).toHaveLength(0);
+    }
+  });
+
   it('an Approved At with no timezone is read as UTC, never a crash', () => {
     const r = run({ cmd: 'send', rows: [FIRST], output: SECOND, approvedAt: '2026-10-07T19:23:10' });
     expect(r.exit).toBe(0);

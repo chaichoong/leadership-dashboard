@@ -344,8 +344,8 @@ def second_send_problem(task_id, mail):
     refused any send on a task that had ever sent, so a task Kevin approved for a second round (a new
     contractor on the same certificate task) could never send, and its card came back to him after
     every approval. A second email goes when BOTH hold: Kevin approved after the last send, and it is
-    not an email already sent on this task. "The same email" is the same recipients and the same
-    subject, whatever the body: a minor edit to a card that already went never sends it again, and a
+    not an email already sent on this task. "The same email" is the same subject (reply prefixes
+    aside) to any of the same TO addresses, whatever the body or the copies: a minor edit to a card that already went never sends it again, and a
     real chase changes its subject (review, 8 Oct 2026). A row that cannot be compared (no subject,
     no event) counts as the same email: a missed email is recoverable, a second copy is not."""
     rows = []
@@ -367,15 +367,22 @@ def second_send_problem(task_id, mail):
     if approved is None or last is None or approved <= last:
         return (f"it was already sent at {latest.get('ts')} to {', '.join(latest.get('to') or [])}, and "
                 "nothing has been approved since. Refusing to send it twice")
-    def people(to, cc):
-        return sorted(str(a).lower() for a in (to or []) + (cc or []))
-    subject = " ".join(str(mail.get("subject") or "").split()).lower()
+    def subject_key(value):
+        text = " ".join(str(value or "").split()).lower()
+        while True:                                   # "Re: Fwd: x" is still x (review round 2)
+            stripped = re.sub(r"^(?:re|fw|fwd)\s*:\s*", "", text)
+            if stripped == text:
+                return text
+            text = stripped
+    subject = subject_key(mail.get("subject"))
+    mine = {str(a).lower() for a in mail.get("to") or []}
     for r in rows:
-        # A row written before cc was recorded is compared on its TO alone (review, 8 Oct 2026).
-        mine = people(mail.get("to"), mail.get("cc") if "cc" in r else [])
-        theirs = people(r.get("to"), r.get("cc") if "cc" in r else [])
-        row_subject = " ".join(str(r.get("subject") or "").split()).lower()
-        if mine == theirs and (not row_subject or row_subject == subject or r.get("event") is None):
+        # The same email is the same subject to ANY of the same people: a minor edit that adds a CC or a
+        # second TO never sends the first person a second copy (review round 2, 8 Oct 2026). A row that
+        # names no subject, or records no event, cannot be compared, so it counts as the same email.
+        theirs = {str(a).lower() for a in r.get("to") or []}
+        row_subject = subject_key(r.get("subject"))
+        if mine & theirs and (not row_subject or row_subject == subject or r.get("event") is None):
             return (f"this email (to {', '.join(r.get('to') or [])}, \"{r.get('subject') or 'no subject recorded'}\") "
                     f"already went at {r.get('ts')}. Refusing to send it twice")
     return ""
@@ -1579,7 +1586,8 @@ def _resolve_intent(args):
         # The intent row's email goes onto the recovered `sent` row, so a later approval of the same card
         # is recognised as the email that already went (review of 716, 8 Oct 2026).
         ledger_append({"task": args.task, "ts": now_iso(), "event": "sent", "kind": "send",
-                       "from": last.get("from"), "to": to, "cc": last.get("cc") or [],
+                       "from": last.get("from"), "to": to,
+                       **({"cc": last["cc"]} if "cc" in last else {}),
                        "subject": last.get("subject"), "bodyHash": last.get("bodyHash"),
                        "recovered": True, "messageId": hits[0].get("id"),
                        "note": f"found in {account} Sent by resolve-intent"})
