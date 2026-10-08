@@ -220,6 +220,7 @@ SECOND_SEPARATOR_RE = re.compile(r"^[ \t]*(?:(?:-[ \t]*){3,}|(?:\*[ \t]*){3,}|(?
 KEVIN_ONLY_RE = re.compile(r"not for sending|not part of the email"
                            r"|\([^)\n]*\bfor kevin(?:'s review(?: only)?| only)\b[^)\n]*\)"
                            r"|^[ \t>*_#]*(?:AGENT NOTES?|NOTES? FOR KEVIN(?:'S REVIEW)?(?: ONLY)?)\b[^\n:(]{0,40}[:(]", re.M | re.I)
+UNDERSCORE_LINE_RE = re.compile(r"^[ \t]*_{3,}[ \t]*$", re.M)
 TIER1_LEFT_RE = re.compile(r"^[ \t>*_#]*(?::rotating_light:|\U0001F6A8)?[ \t*_]*TIER[ -]?1\b", re.M)   # capitals only
 
 
@@ -262,10 +263,15 @@ def clean_email_body(body):
                 while n < len(lines) and not lines[n].strip():
                     n += 1
                 if n > j and n < len(lines) and TR_DATED_BULLET_RE.match(lines[n]):
-                    # A blank line between the block's own DATED bullets (review round 3). An undated
-                    # bullet after a blank line is the email's own opening list, as before.
+                    # A blank line between the block's own DATED bullets (review round 3).
                     j = n
                     continue
+                if n > j and n < len(lines) and TR_BULLET_RE.match(lines[n]):
+                    # An undated bullet after a blank line could be the block's ("- Bank check: ...") or
+                    # the email's own opening list: it cannot be told, so it is refused (8 Oct 2026).
+                    raise EmailFormatError("a TRACK RECORD at the top of the email runs into a list after a blank line, "
+                                           "so its notes cannot be told from the email: open the email with its "
+                                           "greeting, or put the TRACK RECORD above the headers")
                 break
         lines = lines[:i] + lines[j:]
     body = "\n".join(lines)
@@ -503,6 +509,13 @@ def parse_output(output):
     if SECOND_SEPARATOR_RE.search(body):
         raise EmailFormatError("the email has a second separator line (---, *** or ===), so text written for "
                                "Kevin may sit inside it: write the email once, and put any notes for Kevin ABOVE the headers")
+    # A line of underscores is Outlook's quote divider only when the quoted "From:" follows it; any other
+    # one is a separator with notes under it (8 Oct 2026).
+    for m in UNDERSCORE_LINE_RE.finditer(body):
+        after = body[m.end():].lstrip("\n")
+        if not re.match(r"[ \t>*]*From:", after):
+            raise EmailFormatError("the email has a line of underscores with no quoted message under it, so text "
+                                   "written for Kevin may sit below it: put any notes for Kevin ABOVE the headers")
     if TIER1_LEFT_RE.search(body):
         raise EmailFormatError("a tier-1 banner sits inside the email: banners and notes for Kevin go "
                                "ABOVE the headers")

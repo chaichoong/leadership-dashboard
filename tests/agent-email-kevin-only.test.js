@@ -80,8 +80,14 @@ describe('a TRACK RECORD block in the body', () => {
     expect(r.mail.body.trim()).toBe(EMAIL);
   });
 
-  it("at the top of the body, the email's own opening bullets after the blank line stay (review, 8 Oct)", () => {
-    const own = '- Rent: 500 received on 1 Oct.\n- Deposit: protected.\n\nKind regards\nAlex';
+  it('at the top of the body, an undated bullet after a blank line is refused: block or email cannot be told (8 Oct)', () => {
+    for (const after of ['- Bank check: notes for Kevin.', '- Rent: 500 received on 1 Oct.']) {
+      const r = parse(HEAD + 'TRACK RECORD: (searched)\n- 03 Oct 2026 — email: Sam: asked\n\n' + after + '\n\nKind regards\nAlex' + CARRY);
+      expect(r.ok, after).toBe(false);
+      expect(r.error).toMatch(/runs into a list/);
+    }
+    // A greeting first, then the email's own list, is the email.
+    const own = 'Hi Sam,\n\n- Rent: 500 received on 1 Oct.\n\nKind regards\nAlex';
     const r = parse(HEAD + 'TRACK RECORD: (searched)\n- 2 Oct 2026 — email: Sam: asked\n\n' + own + CARRY);
     expect(r.ok).toBe(true);
     expect(r.mail.body.trim()).toBe(own);
@@ -112,6 +118,11 @@ describe('notes for Kevin under a second --- line', () => {
                          HEAD + 'Hi Sam,\n\n---EMAIL---\n\n' + EMAIL]) {
       expect(parse(shape + CARRY).ok).toBe(false);
     }
+  });
+
+  it('notes under a line of underscores are refused; Outlook\'s divider over a quoted From: is real email (8 Oct)', () => {
+    expect(parse(HEAD + EMAIL + '\n\n___\n\nPosition: step two only if they refuse.' + CARRY).ok).toBe(false);
+    expect(parse(HEAD + EMAIL + '\n\n________________________________\nFrom: Sam Example\nSent: 1 Oct\nThe earlier message.' + CARRY).ok).toBe(true);
   });
 
   it('a notes heading with no separator at all is refused ("not for sending", "for Kevin only")', () => {
