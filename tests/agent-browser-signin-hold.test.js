@@ -199,6 +199,35 @@ describe('Kevin\'s sign-in holds the robot profile', () => {
     expect(existsSync(log) ? readFileSync(log, 'utf8') : '').not.toMatch(/"cmd":"login"/);
   }, 30000);
 
+  // Kevin, 8 Oct 2026: a window he walks away from wrote a `login` line when the 15 minutes ran out,
+  // and the blocker sweep would read that as his try at signing in. It is marked timedOut now.
+  it('a window still open when the time runs out is marked timedOut on its ledger line; one he closes is not', async () => {
+    const { h, dir, sites } = home();
+    const bin = join(h, 'bin');
+    mkdirSync(bin);
+    writeFileSync(join(bin, 'open'), `#!/bin/sh
+for a in "$@"; do case "$a" in --user-data-dir=*) d="$a";; esac; done
+nohup sh -c "sleep \${OD_WINDOW_SECS:-3}; :" "$d" >/dev/null 2>&1 &
+`);
+    chmodSync(join(bin, 'open'), 0o755);
+    const login = (secs) => new Promise(resolveRun => {
+      const c = spawn(process.execPath, [SCRIPT, 'login', '--url', 'https://www.example.com/'], {
+        env: { ...process.env, HOME: h, AGENT_BROWSER_SITES_FILE: sites, PATH: `${bin}:${process.env.PATH}`,
+               AGENT_BROWSER_LOGIN_MS: '5000', OD_WINDOW_SECS: String(secs) }, stdio: ['ignore', 'pipe', 'pipe'] });
+      c.on('exit', code => resolveRun(code));
+    });
+    const log = join(h, 'knowledge-os', 'logs', 'agent-browser', 'runs.jsonl');
+    const lines = () => readFileSync(log, 'utf8').trim().split('\n').map(l => JSON.parse(l)).filter(e => e.cmd === 'login');
+    try {
+      expect(await login(2)).toBe(0);                      // closed after 2 s: inside the 5 s limit
+      expect(lines()[0].timedOut).toBeUndefined();
+      expect(await login(12)).toBe(0);                     // still open at 5 s
+      expect(lines()[1].timedOut).toBe(true);
+    } finally {
+      spawn('pkill', ['-f', `--user-data-dir=${dir}`]);
+    }
+  }, 40000);
+
   it('login takes the hold BEFORE the agent\'s step ends, opens the window after it, and releases on close', async () => {
     const { h, dir, sites } = home();
     // A fake `open`: records when it was called and runs a stand-in window

@@ -1786,6 +1786,9 @@ async function main() {
       // Hold the profile, then let the step in flight finish (25 Sep 2026).
       takeSigninHold(dir);
       process.on('exit', () => releaseSigninHold(dir));
+      // Still open when the 15 minutes ran out (8 Oct 2026): written on the ledger line, so a
+      // window he walked away from is never read as his try at signing in (signin_hold).
+      let timedOut = false;
       try {
         // A step that passed its last hold check a moment ago launches within
         // a second or two; wait for it to show before looking for a free profile.
@@ -1796,7 +1799,7 @@ async function main() {
           '--use-mock-keychain', '--no-first-run', url], { stdio: 'ignore' }).unref();
         console.log(`Plain Chrome window open for ${host} (no automation attached). Log in, then Cmd+Q that window.`);
         const opened = Date.now();
-        const deadline = opened + 15 * 60 * 1000;
+        const deadline = opened + (Number(process.env.AGENT_BROWSER_LOGIN_MS) || 15 * 60 * 1000);   // env: tests only
         let seen = false;
         while (Date.now() < deadline) {
           await new Promise(r => setTimeout(r, 2000));
@@ -1810,21 +1813,25 @@ async function main() {
             die('the sign-in window did not open, so nothing was signed in. Start this sign-in again.');
           }
         }
+        timedOut = plainWindowOpen(dir);
       } finally {
         releaseSigninHold(dir);
       }
       const kept = persistSessionCookies(dir);
       console.log(`Kept ${kept} session cookie(s) alive (${SESSION_COOKIE_HOURS} hours, or the site's own sessionCookieHours).`);
-      ledger({ cmd: 'login', host, profile, mode: 'plain-chrome-mock-keychain', sessionCookiesKept: kept, ...(forWall ? { forWall } : {}) });
+      ledger({ cmd: 'login', host, profile, mode: 'plain-chrome-mock-keychain', sessionCookiesKept: kept,
+               ...(forWall ? { forWall } : {}), ...(timedOut ? { timedOut: true } : {}) });
       return;
     }
+    let timedOut = false;
     await withPage(profile, true, async (page) => {
       await page.goto(url, { waitUntil: 'domcontentloaded' });
       console.log(`Signed-in window open for ${host}. Log in, then close the window.`);
-      await page.waitForEvent('close', { timeout: 15 * 60 * 1000 }).catch(() => {});
+      await page.waitForEvent('close', { timeout: 15 * 60 * 1000 }).catch(() => { timedOut = true; });
     });
     // withPage kept them as it closed; a second pass would find none (review, 29 Sep 2026).
-    ledger({ cmd: 'login', host, profile, sessionCookiesKept: lastKept, ...(forWall ? { forWall } : {}) });
+    ledger({ cmd: 'login', host, profile, sessionCookiesKept: lastKept,
+             ...(forWall ? { forWall } : {}), ...(timedOut ? { timedOut: true } : {}) });
     return;
   }
 

@@ -148,6 +148,16 @@ def not_holding_note(host, entry, events=None):
     return "not raised: signed out again after the sign-ins of %s" % " and ".join([", ".join(days[:-1]), days[-1]])
 
 
+def kevin_try_failed(host, entry, events=None, now=None):
+    """True when his sign-in window on HOST in the last week was followed by a signed-out read
+    within signin_hold.TRY_READ_HOURS (this run's own check included) and nothing read signed in
+    since. The same rule as agent-dispatch.py kevin_tried_reason for a SIGN-IN wall."""
+    url_host = urllib.parse.urlsplit(entry.get("loginUrl") or "").hostname
+    since = ((now or datetime.now().astimezone()) - timedelta(days=7)).isoformat()
+    return bool(signin_hold.kevin_signin_failed(signin_hold.load_events() if events is None else events,
+                                                {host, url_host}, since))
+
+
 def waiting_groups():
     """Every site with a task waiting on a sign-in, as `agent-dispatch.py signin-waiting
     --no-walk` lists them: the same read the morning message, waiting.json and the Robot
@@ -254,6 +264,11 @@ def cmd_run(dry_run=False):
                         row["nothingWaiting"], row["task"] = True, "not raised: no task is waiting on this site"
                     elif ours:
                         row["task"] = "already waiting"
+                    elif kevin_try_failed(host, entry):
+                        # His own window closed and this check still found it signed out: asking him
+                        # again cannot help, and the blocker sweep sends the waiting task another
+                        # route (8 Oct 2026).
+                        row["kevinTried"], row["task"] = True, "not raised: his own sign-in did not get the robot in"
                     else:
                         row["task"] = create_task(signin_task_fields(host, entry, when, work), dry_run)
             except Exception as e:                          # noqa: BLE001
