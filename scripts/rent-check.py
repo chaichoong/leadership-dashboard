@@ -106,6 +106,7 @@ import rent_cap  # noqa: E402
 import rent_new_tenant as lane_b_rules  # noqa: E402
 import rent_form_chase  # noqa: E402
 import rent_plans  # noqa: E402
+import rent_proof_of_residency  # noqa: E402
 import text_check  # noqa: E402
 
 LONDON = ZoneInfo("Europe/London")
@@ -627,6 +628,9 @@ def brief_line(res):
     texts = text_check.brief(res.get("texts") or {})
     if texts:
         parts.append(texts)
+    residency = rent_proof_of_residency.brief(res.get("residency") or {})
+    if residency:
+        parts.append(residency)
 
     def group(lane):
         return [r for r in res["tenancies"] if r["lane"] == lane and r["light"] != "green"]
@@ -1031,9 +1035,10 @@ def main(argv=None):
     res["cap"] = rent_cap.run(_Here(), data, day, res, writes, switch, plans["onTrack"])
     res["forms"] = rent_form_chase.run(_Here(), data, day, res, writes, switch)
     res["texts"] = text_check.run(_Here(), now, writes)
+    res["residency"] = rent_proof_of_residency.run(_Here(), now, writes, switch, day=day)
     res["briefLine"] = brief_line(res)              # lane B has put each new tenant's stage on its row
     failed = (res["tasks"]["failed"] or res["setup"]["failed"] or res["agentLate"]["failed"] or res["plans"]["failed"]
-              or res["cap"]["failed"] or res["forms"]["failed"] or res["texts"]["failed"])
+              or res["cap"]["failed"] or res["forms"]["failed"] or res["texts"]["failed"] or res["residency"]["failed"])
     if writes:
         public = {k: v for k, v in res.items() if k not in ("lights", "lanes", "paidFull")}
         # Blocked only when the bank data hid a verdict: a stale feed with every rent already seen hides nothing.
@@ -1041,12 +1046,14 @@ def main(argv=None):
         write_row(status, "\n".join([detail(res), lane_a_line(res["tasks"]), lane_b_rules.lane_b_line(res["setup"]),
                                       agent_late_line(res["agentLate"]), rent_plans.line(res["plans"]),
                                       rent_cap.line(res["cap"]), rent_form_chase.line(res["forms"]),
-                                      text_check.line(res["texts"])]), public, now)
+                                      text_check.line(res["texts"]), rent_proof_of_residency.line(res["residency"])]),
+                  public, now)
         append_history(res, now)
     print(json.dumps({"written": writes, "briefLine": res["briefLine"], "worst": res["worst"],
                       "counts": res["counts"], "tenancies": res["tenancies"], "feed": res["feed"],
                       "tasks": res["tasks"], "setup": res["setup"], "agentLate": res["agentLate"], "plans": res["plans"],
-                      "cap": res["cap"], "forms": res["forms"], "texts": res["texts"]}, indent=2, default=str))
+                      "cap": res["cap"], "forms": res["forms"], "texts": res["texts"], "residency": res["residency"]},
+                     indent=2, default=str))
     return 1 if failed else 0
 
 

@@ -98,14 +98,19 @@ With order on, the tenant's link goes out only once info@ has signed.
 
 Claude runs these. Kevin approves at the gates: every email and every form submission.
 
-1. Forward Adobe's "Signed and Filed" email for the proof of residency from
-   info@agilelets.co.uk to the tenant's own address as soon as info@ has signed it. Only we sign
-   it, so Adobe does not send the tenant a copy. This is standing: no approval card (Kevin,
-   28 Sep 2026). The sender must be info@. The Gmail API connector in a Claude session sends as
-   kevin@runpreneur.org.uk, so use Gmail in Kevin's Chrome (that mailbox receives info@ mail):
-   open the Adobe email, Forward, From info@agilelets.co.uk.
-2. Do not forward the agreement. The tenant signs it, so Adobe emails them the completed copy.
-   They upload both documents to their Universal Credit journal.
+1. The proof of residency goes to the tenant AND to Roy's own inbox (roy.lavin1978@gmail.com),
+   from info@agilelets.co.uk. Only we sign it, so Adobe sends the signed copy to info@ alone.
+   The daily rent check does this by itself (Kevin, 8 Oct 2026; `scripts/rent_proof_of_residency.py`,
+   07:30 and 12:30): it reads Adobe's "Signed and Filed" email, takes the tenant's address from
+   Adobe's own "sent out for signature" emails for the agreement and authority, and sends the
+   signed PDF once. Standing: no approval card (Kevin, 28 Sep 2026). Do not forward it by hand
+   as well. If the address is unclear (none after 2 days, or two different ones), it raises a
+   `PROOF OF RESIDENCY:` task for Kevin instead; his hand forward from info@ (Gmail in his
+   Chrome: open the Adobe email, Forward, From info@agilelets.co.uk, to the tenant and Roy)
+   closes that task at the next run.
+2. Do not forward the agreement or the authority to act. The tenant signs them, so Adobe emails
+   them the completed copies. They upload the agreement and the proof of residency to their
+   Universal Credit journal.
 3. Airtable onboarding waits until EVERY document is signed. Then Claude does it, not Kevin
    (changed 28 Sep 2026): tenant, tenancy, and the right rental unit at the right property
    (the `airtable-tenant-onboarding` route).
