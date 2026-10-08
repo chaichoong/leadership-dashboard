@@ -7860,7 +7860,9 @@ def send_back_blocked(task_id, b):
     if not cant or (done and (_utc(done[1]) or datetime.min.replace(tzinfo=timezone.utc))
                     >= (_utc(cant[1]) or datetime.min.replace(tzinfo=timezone.utc))):
         return None
-    why, said_at = cant[0][:1000], cant[1]
+    # Never cut: the page's Feedback History line holds his whole reason, and a cut copy reads as new
+    # words to cmd_submit's archive, which then stamps a second can't line on the resubmit's date.
+    why, said_at = cant[0], cant[1]
     retired = ""
     plan = os.path.join(HANDOVER_DIR, task_id + ".json")
     if TURN_TASK_RE.match(task_id or "") and os.path.isfile(plan):

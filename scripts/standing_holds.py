@@ -183,7 +183,8 @@ def approved_after_start(task, hold):
     turns the verdict into one, and the hold must not park his reason (review, 8 Oct 2026).
 
     The can't itself counts, through `cantAt`: the agent's resubmit clears the verdict fields, so
-    without it the hold parked the answer to his reason until it lifted (Kevin, 8 Oct 2026)."""
+    without it the hold parked the answer to his reason until it lifted (Kevin, 8 Oct 2026). Unlike
+    an approval, it does not end at the next submit: it stands for as long as the hold does."""
     if str(task.get("cantAt") or "") > str(hold.get("created") or ""):
         return True
     if task.get("outcome") not in APPROVED + ("Changes requested",):
