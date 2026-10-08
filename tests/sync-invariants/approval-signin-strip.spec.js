@@ -1,7 +1,9 @@
 // A task waiting on a site sign-in is a wait, not a decision (Kevin's ruling,
 // 4 Sep 2026). The card must show a "Sign in now" link that opens the Robot
-// sign-in app on his Mac at that site, and the queue must lead with a strip
-// naming every site waiting, with one link that does them all in turn.
+// sign-in app on his Mac at that site. Since 8 Oct 2026 the card is the only
+// place: "we seem to have bits everywhere ... I can just work through the
+// approval cards as standard", so the strip that named every waiting site at
+// the top of the Robot sign-ins panel is gone.
 const { test, expect } = require('@playwright/test');
 const { TF, defaultFixtures, mockAgentsPage, loadAgentsPage } = require('./agents-page.helpers');
 
@@ -19,16 +21,14 @@ test.describe('sign-ins waiting are a tap, not a decision', () => {
   // The strip's links open the Robot sign-in app, which lives on the Mac; off a Mac it names
   // the sites without links (25 Sep 2026). Pin a Mac so this suite means the same on any host.
   test.use({ userAgent: 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0 Safari/537.36' });
-  test('the strip names each site with its count and offers all of them in one link', async ({ page }) => {
+  test('no strip anywhere: each waiting card carries its own Sign in now (8 Oct 2026)', async ({ page }) => {
     await mockAgentsPage(page, withSignIns());
     await loadAgentsPage(page);
     await page.click('#ptab-approvals');
-    const strip = page.locator('[data-apv-signin-strip]');
-    await expect(strip).toBeVisible();
-    await expect(strip).toContainText('2 tasks are waiting on a sign-in');
-    await expect(strip.locator('a', { hasText: 'Sign in to all (2)' })).toHaveAttribute('href', 'robotsignin://all');
-    await expect(strip.locator('.apv-signin-site', { hasText: 'Companies House WebFiling' })).toHaveAttribute('href', 'robotsignin://site/ewf.companieshouse.gov.uk');
-    await expect(strip.locator('.apv-signin-site', { hasText: 'Pingen' })).toHaveAttribute('href', 'robotsignin://site/app.pingen.com');
+    await expect(page.locator('[data-apv-signin-strip]')).toHaveCount(0);
+    await expect(page.locator('a', { hasText: /^Sign in to all/ })).toHaveCount(0);
+    await expect(page.locator('[data-apv-signin="ewf.companieshouse.gov.uk"] a', { hasText: 'Sign in now' })).toHaveAttribute('href', 'robotsignin://site/ewf.companieshouse.gov.uk');
+    await expect(page.locator('[data-apv-signin="app.pingen.com"] a', { hasText: 'Sign in now' })).toHaveAttribute('href', 'robotsignin://site/app.pingen.com');
   });
   test('the card carries its own Sign in now link to that site', async ({ page }) => {
     await mockAgentsPage(page, withSignIns());
@@ -45,12 +45,9 @@ test.describe('sign-ins waiting are a tap, not a decision', () => {
     await mockAgentsPage(page, fx);
     await loadAgentsPage(page);
     await page.click('#ptab-approvals');
-    const strip = page.locator('[data-apv-signin-strip]');
-    await expect(strip).toContainText('One task is waiting on a sign-in');
     // The site is the name, not the sentence; the host comes from the URL.
-    await expect(strip.locator('.apv-signin-site')).toHaveText(/^pingen\.com \(1\)$/);
-    await expect(strip.locator('.apv-signin-site')).toHaveAttribute('href', 'robotsignin://site/www.pingen.com');
     await expect(page.locator('[data-apv-signin="www.pingen.com"]')).toContainText('Waiting on a sign-in: pingen.com.');
+    await expect(page.locator('[data-apv-signin="www.pingen.com"] a', { hasText: 'Sign in now' })).toHaveAttribute('href', 'robotsignin://site/www.pingen.com');
   });
   test('sign-in waits never fold into a "one thing" group, and trigger=none gets no Why-you chip (8 Sep 2026)', async ({ page }) => {
     const fx = defaultFixtures();
@@ -83,7 +80,7 @@ test.describe('sign-ins waiting are a tap, not a decision', () => {
     await expect(page.locator('[data-apv-signin]')).toHaveCount(2);
     // Tapping a sign-in link arms the watch (the link itself is a Mac URL scheme, so stop the navigation).
     const armed = await page.evaluate(() => {
-      const a = document.querySelector('[data-apv-signin-strip] a');
+      const a = document.querySelector('[data-apv-signin] a[href^="robotsignin://"]');
       a.addEventListener('click', (e) => e.preventDefault());
       a.click();
       return _apvSignInClickedAt > 0;
@@ -96,7 +93,6 @@ test.describe('sign-ins waiting are a tap, not a decision', () => {
     expect(changed).toBe(true);
     await expect(page.locator('[data-apv-signin]')).toHaveCount(1);
     await expect(page.locator('[data-apv-card="recApvA2"]')).toHaveCount(0);
-    await expect(page.locator('[data-apv-signin-strip]')).toContainText('One task is waiting');
     // Nothing changed: no redraw (open panels and scroll survive).
     expect(await page.evaluate(() => window.apvSilentRefresh())).toBe(false);
   });
@@ -142,29 +138,6 @@ test.describe('sign-ins waiting are a tap, not a decision', () => {
     const patch = patches.find((p) => p.id === taskId);
     expect(patch.fields['fldF9Bs4N5mttQvtl']).toBe('The work is wrong');   // Verdict Reason
     expect(String(patch.fields['fldtI7SJI4gEohHD1'])).toBe('Wrong site.');
-  });
-  // Found in review, 23 Sep 2026: the banner kept its count after a sign-in
-  // card was closed or knocked back, until the next full redraw.
-  test('the banner counts down as sign-in cards are closed, back up on Undo, and goes when none are left', async ({ page }) => {
-    const fx = withSignIns();
-    await mockAgentsPage(page, fx);
-    await loadAgentsPage(page);
-    await page.click('#ptab-approvals');
-    const strip = page.locator('[data-apv-signin-strip]');
-    await expect(strip).toContainText('2 tasks are waiting on a sign-in');
-    const [first, second] = [fx.approvals[0].id, fx.approvals[1].id];
-    await page.locator(`[data-apv-card="${first}"] .apv-reason`, { hasText: 'No longer relevant' }).click();
-    await expect(strip).toContainText('One task is waiting on a sign-in');
-    await expect(strip.locator('a', { hasText: 'Sign in to all (1)' })).toBeVisible();
-    await expect(strip.locator('.apv-signin-site', { hasText: 'Companies House WebFiling' })).toHaveCount(0);
-    await page.locator(`[data-apv-card="${first}"] [data-apv-undo]`).click();
-    await expect(strip).toContainText('2 tasks are waiting on a sign-in');
-    await page.locator(`[data-apv-card="${first}"] .apv-reason`, { hasText: 'No longer relevant' }).click();
-    await page.locator(`[data-apv-card="${second}"] .apv-defer-btn`, { hasText: 'A week' }).click();
-    await expect(page.locator('[data-apv-signin-strip]')).toHaveCount(0);
-    // Undo the knock-back: the last sign-in card is back, so is the banner.
-    await page.locator(`[data-apv-card="${second}"] [data-apv-undo]`).click();
-    await expect(page.locator('[data-apv-signin-strip]')).toContainText('One task is waiting on a sign-in');
   });
   test('no strip and no button when nothing waits on a sign-in', async ({ page }) => {
     await mockAgentsPage(page);

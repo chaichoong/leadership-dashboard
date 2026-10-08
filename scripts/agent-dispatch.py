@@ -7780,16 +7780,27 @@ def handover_plan(task_id):
     return plan if isinstance(plan, dict) else None
 
 
-def kevin_step_text(task_id, b, steps=""):
+# The sentence the page reads as "Your turn is ready" until the sweep has looked at the card
+# (os/agents/index.html APV_TURN_READY_RE). Written only when the plan passes the window's own check.
+YOUR_TURN_SENTENCE = ("Press Your turn on the AI Agents page, on your Mac: the robot fills in "
+                      "everything up to your step and hands you the window.")
+
+
+def kevin_step_text(task_id, b, steps="", check_plan=False):
     """What Kevin does, in words: the written steps, else the plan's own account of his step,
-    else the wall's why (a KEVIN ONLY line's step)."""
+    else the wall's why (a KEVIN ONLY line's step). CHECK_PLAN (the paths that put the card in his
+    queue): the Your turn sentence is written only when the plan passes agent-browser.js's own check,
+    so the card's button can show at once, before the half-hourly sweep has looked (8 Oct 2026: the
+    Swinton card arrived at 15:51 and its button waited for the 16:01 sweep)."""
     if str(steps or "").strip():
         return str(steps).strip()
     plan = handover_plan(task_id)
     if plan is not None:
         said = " ".join(str(plan.get("why") or plan.get("label") or b.get("why") or "").split())
-        return (f"{said} Press Your turn on the AI Agents page, on your Mac: the robot fills in "
-                "everything up to your step and hands you the window.").strip()
+        if check_plan and handover_plan_problem(task_id):
+            return (f"{said} The robot's plan for your window is being fixed; the Your turn button "
+                    "appears once it passes.").strip()
+        return f"{said} {YOUR_TURN_SENTENCE}".strip()
     return str(b.get("why") or b.get("subject") or "").strip()
 
 
@@ -7992,7 +8003,62 @@ def surface_your_step(task_id, b, t=None, steps=""):
     t = t or task_view(get_task(task_id))
     if in_your_step(t) or not same_wall(task_blocker(t["notes"]), b):
         return {}
-    fields = your_step_fields(t, kevin_step_text(task_id, b, steps))
+    fields = your_step_fields(t, kevin_step_text(task_id, b, steps, check_plan=True))
+    if fields:
+        patch_task(task_id, fields)
+    return fields
+
+
+# ─── A ROBOT'S SIGN-IN IS A CARD (Kevin, 8 Oct 2026) ───────────────────
+# "We seem to have bits everywhere: some sign-ins at the top, some sign-ins on cards, some cards
+# that need sign-ins but don't have the buttons ... even if a task is blocked and it needs a
+# sign-in, I think we add that as a task as well, rather than having them at the top. I can just
+# work through the approval cards as standard." A SIGN-IN or SITE wall now puts its task in his
+# queue as a card, the way a KEVIN wall does (Your step), whatever its verdict: the step block
+# names the site, the page draws Sign in or + Add this site from it, and the Robot sign-ins panel
+# keeps only the list of sites. The sign-in clears the wall through signin_done -> wake_blocked,
+# which takes the step block off and sends the task back to Today with any verdict kept.
+ROBOT_STEP_RE = re.compile(r"^ROBOT (SIGN-IN|SITE): ([a-z0-9.-]+)(?: \(([a-z0-9][a-z0-9-]*)\))?\.", re.I)
+
+
+def robot_step_text(b, sites=None):
+    """The step block for a SIGN-IN or SITE wall. Its first sentence is the machine-readable part
+    (os/agents/index.html APV_ROBOT_STEP_RE): ROBOT SIGN-IN: <host> [(<profile>)]. / ROBOT SITE: <host>."""
+    host = blocker_host(b["subject"]) or str(b["subject"]).lower()
+    if b["kind"] == "SITE":
+        return (f"ROBOT SITE: {host}. A robot is blocked until {host} is on its list. Press + Add this "
+                "site, sign in in the window that opens, then quit it (Cmd+Q): the robot picks the task "
+                "up by itself. If you cannot (no account, no password), say why and press I can't do this.")
+    entry = site_reachable(host, sites or {}) if sites else ""
+    label = ((sites or {}).get(entry) or {}).get("label") or host
+    prof = f" ({b['profile']})" if b.get("profile") else ""
+    return (f"ROBOT SIGN-IN: {host}{prof}. A robot is blocked until it is signed in to {label}. Press Sign "
+            "in, sign in yourself in the window that opens, then quit it (Cmd+Q): the robot picks the task "
+            "up by itself. If you cannot (no account, no password), say why and press I can't do this.")
+
+
+def robot_step_fields(t, b, sites=None):
+    """The fields that put a task blocked on a SIGN-IN or SITE wall in Kevin's queue as a card, or {}
+    when it is not his to see that way: closed, already a step card, a card he is deciding (Status
+    Approval), a decision card, or no agent to name."""
+    if t.get("status") in ("Completed", "Approval") or is_decide_card(your_step_split(t.get("agentOutput"))[1]):
+        return {}
+    if not t.get("sentForApprovalByIds") and not t.get("teamMemberIds"):
+        return {}
+    fields = {AF["status"]: "Approval", AF["deferredUntil"]: None,
+              AF["agentOutput"]: your_step_output(robot_step_text(b, sites), t.get("agentOutput"))}
+    if not t.get("sentForApprovalByIds"):
+        fields[AF["sentForApprovalBy"]] = t["teamMemberIds"][:1]
+    return fields
+
+
+def surface_robot_step(task_id, b, t=None, sites=None):
+    """Put a task with an open SIGN-IN or SITE wall in Kevin's queue as a card. Returns what was
+    written ({} when nothing was). T, when given, must be a fresh read."""
+    t = t or task_view(get_task(task_id))
+    if not same_wall(task_blocker(t["notes"]), b):
+        return {}
+    fields = robot_step_fields(t, b, sites)
     if fields:
         patch_task(task_id, fields)
     return fields
@@ -8051,6 +8117,7 @@ def cmd_block(args):
     if t["status"] == "Completed":
         sys.exit(f"ERROR: {args.task} is Completed. A closed task cannot be blocked; if the job "
                  "was never done, say so in the run report so it is reopened.")
+    sites = {}
     if kind in ("SIGN-IN", "SITE"):
         host = blocker_host(subject)
         if not host:
@@ -8124,7 +8191,8 @@ def cmd_block(args):
         # It needs its plan too, unless the wall already carries numbered steps.
         if kind == "KEVIN" and kevin_plan_missing(args.task, steps, current.get("why", "")):
             sys.exit(KEVIN_PLAN_REFUSAL.format(plan=os.path.join(HANDOVER_DIR, args.task + ".json")))
-        surfaced = surface_your_step(args.task, current, t, steps) if kind == "KEVIN" else {}
+        surfaced = (surface_your_step(args.task, current, t, steps) if kind == "KEVIN"
+                    else surface_robot_step(args.task, current, t, sites) if kind in ("SIGN-IN", "SITE") else {})
         ledger_append(args.task, "parked")
         print(json.dumps({"blocked": args.task, "already": True, **current,
                           **({"yourStep": True} if surfaced else {})}))
@@ -8161,7 +8229,8 @@ def cmd_block(args):
     note = blocker_note(stamp, "agent", BLOCKER_OPEN_MARK, b, tail)
     fields = {AF["notes"]: ((t["notes"] or "").rstrip() + "\n\n" + note).strip()[-90000:]}
     # On a task Kevin has approved, the same write puts it back in his lane as Your step.
-    surfaced = your_step_fields(t, kevin_step_text(args.task, b, steps)) if kind == "KEVIN" else {}
+    surfaced = (your_step_fields(t, kevin_step_text(args.task, b, steps, check_plan=True)) if kind == "KEVIN"
+                else robot_step_fields(t, b, sites) if kind in ("SIGN-IN", "SITE") else {})
     patch_task(args.task, {**fields, **surfaced})
     ledger_append(args.task, "parked")
     back = task_blocker(task_view(get_task(args.task))["notes"])
@@ -8341,7 +8410,8 @@ def blockers_scan(sweep=False, now=None):
                     reason = f"{tried}. {KEVIN_TRIED_ROUTE}"
         raw_feedback = (rec.get("fields") or {}).get(AF["approvalFeedback"]) or ""
         done = kevin_done_said(raw_feedback, b.get("since", "")) if b["kind"] == "KEVIN" else None
-        cant = kevin_cant_said(raw_feedback, b.get("since", "")) if b["kind"] == "KEVIN" else None
+        cant = (kevin_cant_said(raw_feedback, b.get("since", ""))
+                if b["kind"] in ("KEVIN", "SIGN-IN", "SITE") else None)
         if done and cant:
             # Two tabs can write both: the newer line is what he meant.
             if (_utc(cant[1]) or now) > (_utc(done[1]) or now):
@@ -8381,6 +8451,13 @@ def blockers_scan(sweep=False, now=None):
                                   "Kevin's done line was not used: it was written before this wall opened, or "
                                   "it gave no proof. The Done box is back on his card.").strip()[-90000:]})
                 done_refused.append({"task": t["id"], "name": t["name"][:80]})
+        if sweep and b["kind"] in ("SIGN-IN", "SITE") and not reason and not in_your_step(t) \
+                and not (sites_error and b["kind"] == "SITE"):
+            # A wall from before 8 Oct 2026, or one recorded some other way, becomes its card here.
+            wrote = surface_robot_step(t["id"], b, sites=sites)
+            if wrote:
+                t = dict(t, status="Approval", agentOutput=wrote.get(AF["agentOutput"], t["agentOutput"]))
+                surfaced.append({"task": t["id"], "name": t["name"][:80], "subject": b["subject"]})
         if sweep and b["kind"] == "KEVIN" and t["outcome"] in APPROVED and not in_your_step(t):
             ledger, _ = once("ledger", ledger_last_events)
             pair, _ = once("holds", load_standing_holds)
