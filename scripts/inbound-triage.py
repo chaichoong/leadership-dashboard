@@ -1671,6 +1671,27 @@ def history_force_clear():
     return sorted(set(dropped) | set(legacy))
 
 
+def history_pause_clear():
+    """A PAUSE MUST NOT LEAVE A COOLDOWN ARMED (8 Oct 2026, finding
+    20261001-exceptions-675).
+
+    The pause branches below stopped RECORDING a failure on 7 Oct, which was
+    only half of it. The record a pre-fix run had already written stayed on
+    disk, and `history_rebuild_decision` reads it: one stale
+    `history_build_failed_ms` refuses every rebuild for the next 24 hours. So
+    the 09:15 rate-pause on 7 Oct blocked the 13:00 and 17:00 slots and the
+    09:00 slot the next morning, each printing "the last rebuild failed and the
+    cooldown has not passed" about a rebuild that had not failed. With one slot
+    attempt a day and seven lanes to walk, the book stayed 36 days dead while
+    six of its seven lanes sat finished on disk.
+
+    A pause means the rebuild is working and out of budget, so there is no
+    outstanding failure for the cooldown or the give-up counter to hold. Clear
+    both. Staleness is still reported, by the daily
+    `triage-history-book-is-current` invariant, which is the surface for it."""
+    return history_force_clear()
+
+
 def cmd_history_stale():
     state = read_state()
     # The failure record is its own file now (finding 20260930-phase-2-667);
@@ -1813,9 +1834,11 @@ def cmd_history_build(pages, budget=None):
         # not armed. This is the distinction whose absence retired a working
         # rebuild at 35 days stale (findings 20261002-phase-2-702 and
         # 20261004-daily-ops-738: a capacity refusal is not evidence of a fault).
+        cleared = history_pause_clear()
         print(json.dumps({"paused": True, "lanesDone": wall.done,
                           "lanesTotal": wall.total, "secondsSpent": round(wall.spent),
                           "unitsSpent": _pace["units"],
+                          "clearedFailState": cleared,
                           "note": "out of time for this run; the place is saved and "
                                   "the next run carries on. Nothing written to the book yet."}))
         return None
@@ -1843,8 +1866,10 @@ def cmd_history_build(pages, budget=None):
         if _last_fail.get("kind") in ("rate", "quota"):
             done = sum(1 for v in (history_progress_read().get("lanes") or {}).values()
                        if v.get("done"))
+            cleared = history_pause_clear()
             print(json.dumps({"paused": True, "reason": _last_fail.get("kind"),
                               "lanesDone": done, "lanesTotal": len(HISTORY_LANE_MAP),
+                              "clearedFailState": cleared,
                               "note": "out of Gmail allowance for this run, not broken; the place "
                                       "is saved and the next run carries on from it."}))
             return None
@@ -2528,6 +2553,81 @@ def selftest():
             history_force_clear()
             check("and --force clears the legacy copies as well",
                   int(read_fail_state().get("history_build_fail_count") or 0) == 0)
+
+            # ── A PAUSE CLEARS THE COOLDOWN (8 Oct 2026, finding
+            # 20261001-exceptions-675) ────────────────────────────────────
+            # Back-tested against 7 Oct 2026. A pre-fix run recorded a rate
+            # failure at 09:15; the 13:00 slot then printed
+            # retry_in_seconds 67889 and the 17:00 slot 56317, both about a
+            # rebuild that had not failed, and the book stayed 36 days dead
+            # with six of its seven lanes already finished on disk. The
+            # inline back-test is the first check: with the stale record on
+            # disk the decision IS cooling, which is the broken behaviour.
+            _oct7 = _sep9_built + 36 * 86400 * 1000
+            _stale_fail = {"history_build_failed_ms": _oct7 - 3600 * 1000,
+                           "history_build_fail_count": 1,
+                           "history_build_fail_kind": "rate",
+                           "history_build_fail_reason": "pre-fix record"}
+            write_state({"history_built_ms": _sep9_built})
+            write_fail_state(dict(_stale_fail))
+            check("7 Oct back-test: a stale failure record DOES refuse the next rebuild",
+                  history_rebuild_decision(_sep9_built, _oct7 - 3600 * 1000,
+                                           _oct7)[1] is True)
+
+            _real_build = _history_build
+            try:
+                def _wall(pages, budget=None):
+                    raise HistoryWall(6, 7, 480)
+                globals()["_history_build"] = _wall
+                _b = _io.StringIO()
+                with _ctx.redirect_stdout(_b):
+                    cmd_history_build(20)
+                _pj = json.loads(_b.getvalue())
+                check("a time-wall pause reports what it cleared",
+                      _pj.get("paused") is True
+                      and "history_build_failed_ms" in (_pj.get("clearedFailState") or []))
+                check("a time-wall pause leaves no cooldown armed",
+                      read_fail_state().get("history_build_failed_ms") is None
+                      and history_rebuild_decision(_sep9_built,
+                                                   read_fail_state().get(
+                                                       "history_build_failed_ms"),
+                                                   _oct7)[1] is False)
+
+                write_fail_state(dict(_stale_fail))
+
+                def _quota(pages, budget=None):
+                    fail("GMAIL RATE METRIC STILL FULL after 585s", kind="rate")
+                globals()["_history_build"] = _quota
+                _b = _io.StringIO()
+                with _ctx.redirect_stdout(_b):
+                    cmd_history_build(20)
+                check("a quota pause clears it too, and the counter with it",
+                      read_fail_state().get("history_build_failed_ms") is None
+                      and int(read_fail_state().get(
+                          "history_build_fail_count") or 0) == 0)
+
+                # A GENUINE fault still records, or this fix would delete the
+                # only thing that can ever stop a broken rebuild retrying.
+                write_fail_state({})
+                _last_fail.clear()
+
+                def _broken(pages, budget=None):
+                    raise RuntimeError("history lane map is malformed")
+                globals()["_history_build"] = _broken
+                try:
+                    with _ctx.redirect_stdout(_io.StringIO()):
+                        cmd_history_build(20)
+                    _raised = False
+                except RuntimeError:
+                    _raised = True
+                check("a genuine fault still raises and still records a failure",
+                      _raised
+                      and isinstance(read_fail_state().get(
+                          "history_build_failed_ms"), int)
+                      and int(read_fail_state().get(
+                          "history_build_fail_count") or 0) == 1)
+            finally:
+                globals()["_history_build"] = _real_build
         finally:
             if _prev is None:
                 os.environ.pop("INBOUND_TRIAGE_DIR", None)
