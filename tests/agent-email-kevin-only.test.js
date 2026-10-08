@@ -62,6 +62,18 @@ describe('a TRACK RECORD block in the body', () => {
     expect(r.mail.body.trim()).toBe(EMAIL);
   });
 
+  it('a greeting straight under "TRACK RECORD: none found" stays (round 2)', () => {
+    const r = parse(HEAD + 'TRACK RECORD: none found (searched tasks + Gmail)\n' + EMAIL + CARRY);
+    expect(r.ok).toBe(true);
+    expect(r.mail.body.trim()).toBe(EMAIL);
+  });
+
+  it('a blank line between the header and its bullets still takes every bullet, dated or not (round 2)', () => {
+    const r = parse(HEAD + 'TRACK RECORD: (searched)\n\n- 03 Oct 2026 — email: Sam: the report\n- Bank check: notes.\n\n' + EMAIL + CARRY);
+    expect(r.ok).toBe(true);
+    expect(r.mail.body.trim()).toBe(EMAIL);
+  });
+
   it("at the top of the body, the email's own opening bullets after the blank line stay (review, 8 Oct)", () => {
     const own = '- Rent: 500 received on 1 Oct.\n- Deposit: protected.\n\nKind regards\nAlex';
     const r = parse(HEAD + 'TRACK RECORD: (searched)\n- 2 Oct 2026 — email: Sam: asked\n\n' + own + CARRY);
@@ -87,10 +99,10 @@ describe('notes for Kevin under a second --- line', () => {
     expect(r.error).toMatch(/second separator line/);
   });
 
-  it('also with Windows line endings, or a *** or ___ separator (review, 8 Oct)', () => {
+  it('also with Windows line endings, a *** separator or a --- NOTES --- marker (review, 8 Oct)', () => {
     const notes = '\n\nAGENT NOTES:\n\nStep two only if they refuse.';
     for (const shape of [(HEAD + EMAIL + '\n\n---' + notes).replace(/\n/g, '\r\n'),
-                         HEAD + EMAIL + '\n\n***' + notes, HEAD + EMAIL + '\n\n___' + notes,
+                         HEAD + EMAIL + '\n\n***' + notes, HEAD + EMAIL + '\n\n--- NOTES ---' + notes,
                          HEAD + 'Hi Sam,\n\n---EMAIL---\n\n' + EMAIL]) {
       expect(parse(shape + CARRY).ok).toBe(false);
     }
@@ -102,6 +114,17 @@ describe('notes for Kevin under a second --- line', () => {
       const r = parse(HEAD + EMAIL + '\n\n' + h + '\n\nClassification: a creditor.' + CARRY);
       expect(r.ok, h).toBe(false);
     }
+  });
+
+  it("a notes heading with a curly apostrophe is still a notes heading", () => {
+    expect(parse(HEAD + EMAIL + '\n\nAGENT NOTE (for Kevin\u2019s review only): the deadline.' + CARRY).ok).toBe(false);
+  });
+
+  it('with a separator that is not exactly ---, the cleaning still runs and a TRACK RECORD below is refused (round 2)', () => {
+    const r = parse('TO: office@example-alarms.test\nSUBJECT: Example House\n----\n' + EMAIL + '\n\nTRACK RECORD:\n- Bank check: notes.' + CARRY);
+    expect(r.ok).toBe(false);
+    const c = parse('TO: office@example-alarms.test\nSUBJECT: Example House\n----\nCHECKED: handled=no; roy=no; machine=no; open-task=no; trigger=legal\n' + EMAIL + CARRY);
+    expect(c.ok ? c.mail.body : '').not.toContain('CHECKED:');
   });
 
   it('a tier-1 banner left inside the email is refused, bold or not', () => {
@@ -128,6 +151,22 @@ describe('the shapes that were already right stay right', () => {
       + 'TRACK RECORD: (and again)\n- 3 Oct 2026 — email: Sam: thanks\n\n' + EMAIL + CARRY);
     expect(r.ok).toBe(true);
     expect(r.mail.body.trim()).toBe(EMAIL);
+  });
+
+  it('a quoted thread, a forward and an Outlook divider are real email, never a second separator (round 2)', () => {
+    for (const line of ['-----Original Message-----', '---------- Forwarded message ---------', '________________________________']) {
+      const body = 'Hi Sam,\n\nSee below.\n\nKind regards\nAlex\n\n' + line + '\nFrom: Sam\nThe earlier message.';
+      const r = parse(HEAD + body + CARRY);
+      expect(r.ok, line).toBe(true);
+      expect(r.mail.body.trim()).toBe(body);
+    }
+  });
+
+  it("a sentence that mentions Kevin's review in passing is the email's own", () => {
+    const body = "Hi Sam,\n\nPlease send the quote over for Kevin's review by Friday.\n\nKind regards\nAlex";
+    const r = parse(HEAD + body + CARRY);
+    expect(r.ok).toBe(true);
+    expect(r.mail.body.trim()).toBe(body);
   });
 
   it('an email that mentions a track record or a check in passing is untouched', () => {

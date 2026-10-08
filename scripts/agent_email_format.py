@@ -202,12 +202,20 @@ TRACK_RECORD_LINE_RE = re.compile(r"^[ \t>*_#]*(?:\[[^\]\n]*\][ \t]*)?TRACK RECO
 # ...", keys in any order. Written for Kevin's card, never the recipient's, wherever an agent put it.
 CHECKED_LINE_RE = re.compile(r"^[ \t>*_]*CHECKED:(?=[^\n]*\bhandled[ \t]*=)[^\n]*(?:\n|$)", re.M | re.I)
 SEPARATOR_LINE_RE = re.compile(r"^[ \t]*---[ \t]*$", re.M)
+TR_BULLET_RE = re.compile(r"^[ \t]*(?:[-*\u2022]|\d+[.)])[ \t]")
+TR_WRAP_RE = re.compile(r"^[ \t]{2,}\S")
 # What may never be left inside an email once the blocks above are out (7 Oct 2026). Every measured
 # notes heading ("AGENT NOTES (not for sending)", "... NOTES (... not for sending)", "AGENT NOTE (not
 # part of the email)", "(for Kevin's review only)"), a tier-1 banner, and a second separator.
-SECOND_SEPARATOR_RE = re.compile(r"^[ \t]*(?:-{3,}|\*{3,}|_{3,})", re.M)   # also "---EMAIL---" and "--- notes ---"
-KEVIN_ONLY_RE = re.compile(r"not for sending|not part of the email|for kevin(?:'s review)? only|for kevin's review"
-                           r"|^[ \t>*_#]*AGENT NOTES?\b", re.M | re.I)
+# A second separator: a line of only -, * (three or more), or a marker such as ---EMAIL--- / --- NOTES ---.
+# "-----Original Message-----", "---------- Forwarded message ---------" and Outlook's line of
+# underscores are real email and stay (review round 2, 8 Oct 2026).
+SECOND_SEPARATOR_RE = re.compile(r"^[ \t]*(?:(?:-[ \t]*){3,}|(?:\*[ \t]*){3,}|-{3,}[ \t]*[A-Z][A-Z &]*[ \t]*-{3,})[ \t]*$", re.M)
+# A notes heading: the measured ones all say so in brackets, "(not for sending)", "(not part of the
+# email — for Kevin only)", "(for Kevin's review only ...)", or open the line "AGENT NOTE(S)". A
+# sentence that mentions Kevin's review in passing is the email's own.
+KEVIN_ONLY_RE = re.compile(r"\([^)\n]*(?:not for sending|not part of the email|for kevin(?:'s review)?(?: only)?\b)[^)\n]*\)"
+                           r"|^[ \t>*_#]*(?:AGENT NOTES?|NOTES? FOR KEVIN)\b", re.M | re.I)
 TIER1_LEFT_RE = re.compile(r"^[ \t>*_#]*(?::rotating_light:|\U0001F6A8)?[ \t*_]*TIER[ -]?1\b", re.M)   # capitals only
 
 
@@ -234,9 +242,16 @@ def clean_email_body(body):
             i += 1
         if i == len(lines) or not TRACK_RECORD_LINE_RE.match(lines[i]):
             break
-        j = i + 1
-        while j < len(lines) and lines[j].strip():
-            j += 1
+        # The block is its header and its bullet lines (with their wrapped continuations), blank lines
+        # before the first bullet allowed. The first other line is the email: a greeting straight
+        # under "TRACK RECORD: none found" stays (review round 2, 8 Oct 2026).
+        j, k = i + 1, i + 1
+        while k < len(lines) and not lines[k].strip():
+            k += 1
+        if k < len(lines) and TR_BULLET_RE.match(lines[k]):
+            j = k
+            while j < len(lines) and (TR_BULLET_RE.match(lines[j]) or TR_WRAP_RE.match(lines[j])):
+                j += 1
         lines = lines[:i] + lines[j:]
     body = "\n".join(lines)
     m = TRACK_RECORD_LINE_RE.search(body)
@@ -390,11 +405,13 @@ def parse_output(output):
     """
     raw = strip_tier1_banner(str(output or "").replace("\r\n", "\n").replace("\r", "\n"))
     sep = SEPARATOR_LINE_RE.search(raw)
-    if sep:
+    cut = (sep.start(), sep.end()) if sep else ((raw.find("---"), raw.find("---") + 3) if "---" in raw else None)
+    if cut:
         # The body is cleaned of what is Kevin's BEFORE the dated-line strip can take a TRACK RECORD
         # header and leave its other lines behind (finding 20261007-agent-dispatch-780). Found by the
-        # line that is exactly "---", so a "---" inside a line above it never moves the split.
-        raw = raw[:sep.start()] + "---" + clean_email_body(raw[sep.end():])
+        # line that is exactly "---", so a "---" inside a line above it never moves the split; with no
+        # such line, at the same "---" the split below uses, so the cleaning always runs (review round 2).
+        raw = raw[:cut[0]] + "---" + clean_email_body(raw[cut[1]:])
     text = strip_track_record(raw)
     if not text.strip():
         raise EmailFormatError("Agent Output is empty")
@@ -469,12 +486,15 @@ def parse_output(output):
     # is the email cannot be known, so it is refused, never guessed: anything for Kevin goes ABOVE the
     # headers.
     if SECOND_SEPARATOR_RE.search(body):
-        raise EmailFormatError("the email has a second separator line (---, *** or ___), so text written for "
+        raise EmailFormatError("the email has a second separator line (--- or ***), so text written for "
                                "Kevin may sit inside it: write the email once, and put any notes for Kevin ABOVE the headers")
     if TIER1_LEFT_RE.search(body):
         raise EmailFormatError("a tier-1 banner sits inside the email: banners and notes for Kevin go "
                                "ABOVE the headers")
-    kevin_only = KEVIN_ONLY_RE.search(body)
+    if TRACK_RECORD_LINE_RE.search(body) or CHECKED_LINE_RE.search(body):
+        raise EmailFormatError("a TRACK RECORD or CHECKED line is still inside the email: it is written for Kevin, "
+                               "so it goes ABOVE the headers")
+    kevin_only = KEVIN_ONLY_RE.search(body.replace("\u2019", "'"))
     if kevin_only:
         raise EmailFormatError(f"the email holds a note written for Kevin ({kevin_only.group(0).strip()!r}): "
                                "notes for Kevin go ABOVE the headers, never in the email")
