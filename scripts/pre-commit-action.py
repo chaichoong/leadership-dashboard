@@ -133,6 +133,37 @@ def bump_version(ver_str):
     return ver_str
 
 
+def on_branch_other_than_main():
+    """The LOCAL commit's branch, or None when this is CI or git cannot say.
+
+    THE BUMP THAT BLOCKED EVERY FIXER PR (8 Oct 2026, finding
+    20261005-daily-ops-748). js/config.js is on fixer-merge.py's protected
+    list, so the gate refuses to auto-merge any PR that touches it. This hook
+    put it in the diff of every commit that touched a mapped page file, which
+    is most front-end fixes — so the fix phase could not merge its own work.
+    Proved on PR 690: protected:[js/config.js] mayAutoMerge:false, and with
+    config.js reverted to origin/main byte-for-byte, protected:[]
+    mayAutoMerge:true.
+
+    The bump was also redundant. auto-bump-pagever.yml runs on every push to
+    main and bumps the same digits there (commit 06c27bbd is one of its runs),
+    so a branch does not need the local copy: the version lands when the
+    branch merges. Only a commit made directly on main needs it, because that
+    push IS the one the workflow reacts to and the two would race otherwise.
+    """
+    if os.environ.get('GITHUB_BEFORE_SHA') or os.environ.get('CHANGED_FILES') \
+            or os.environ.get('GITHUB_ACTIONS'):
+        return None
+    r = subprocess.run(['git', 'symbolic-ref', '--quiet', '--short', 'HEAD'],
+                       capture_output=True, text=True)
+    branch = r.stdout.strip()
+    if r.returncode != 0 or not branch:
+        # Detached HEAD, or no git. Bumping is the old behaviour, so keep it:
+        # a missed cache-bust is worse than an unmergeable commit nobody made.
+        return None
+    return None if branch == 'main' else branch
+
+
 def main():
     changed = get_changed_files()
 
@@ -148,6 +179,15 @@ def main():
 
     if not pages_to_bump:
         print("No page files changed — nothing to bump.")
+        return 0
+
+    branch = on_branch_other_than_main()
+    if branch:
+        print("On branch %s, not main — leaving %s alone. The push to main "
+              "bumps %s through auto-bump-pagever.yml, and putting a protected "
+              "shared file in this diff is what stops fixer-merge.py merging "
+              "the branch (finding 20261005-daily-ops-748)."
+              % (branch, CONFIG_FILE, ", ".join(sorted(pages_to_bump))))
         return 0
 
     try:

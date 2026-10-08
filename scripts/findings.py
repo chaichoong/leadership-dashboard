@@ -397,6 +397,58 @@ def cmd_add(a):
     return 0
 
 
+def overflow_rows():
+    """Everything the cap refused, read back off disk.
+
+    THE FILE NOBODY READ (8 Oct 2026, finding 20261008-phase-2-790). The cap
+    kept the queue from growing without bound by appending the refusals to
+    findings-overflow.jsonl — and nothing in the rotation ever opened it. By
+    8 Oct it held 189 lines, three of them added the day before, one of them a
+    rent-check fault. A routine that files one is told "nothing is lost", which
+    was true of the disk and false of the work.
+
+    So `list` reads it. A backlog that is visible can be decided about; one in
+    an unread file is written off by neglect while still reporting as filed."""
+    rows = []
+    try:
+        with open(OVERFLOW) as f:
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    rows.append(json.loads(line))
+                except ValueError:
+                    # Loud, never silent: a half-written line must not make the
+                    # rest of the backlog disappear from the count.
+                    rows.append({"ts": "?", "routine": "?", "severity": "?",
+                                 "title": "UNREADABLE overflow line in %s" % OVERFLOW})
+    except FileNotFoundError:
+        return []
+    except OSError as e:
+        return [{"ts": "?", "routine": "?", "severity": "?",
+                 "title": "overflow log unreadable: %s" % e}]
+    return rows
+
+
+def print_overflow(stream):
+    rows = overflow_rows()
+    if not rows:
+        return
+    oldest = min((r.get("ts") or "?") for r in rows)
+    print("", file=stream)
+    print("OVERFLOW: %d finding(s) the cap refused, oldest %s, in %s."
+          % (len(rows), oldest, OVERFLOW), file=stream)
+    print("These are NOT in the queue above and no routine has ever read them."
+          " Oldest five:", file=stream)
+    for r in sorted(rows, key=lambda r: (r.get("ts") or "?"))[:5]:
+        print("  %s  %-8s %-20s %s"
+              % ((r.get("ts") or "?")[:10], r.get("severity", "?"),
+                 r.get("routine", "?"), (r.get("title") or "")[:90]),
+              file=stream)
+    return
+
+
 def cmd_list(a):
     state = current_state()
     rows = [r for r in state.values()
@@ -408,9 +460,12 @@ def cmd_list(a):
                              if r.get("severity") in SEVERITIES else 9, r["ts"]))
     if a.json:
         print(json.dumps(rows, indent=2))
+        # stderr, so the JSON on stdout keeps its shape for every caller.
+        print_overflow(sys.stderr)
         return 0
     if not rows:
         print("No findings match.")
+        print_overflow(sys.stdout)
         return 0
     for r in rows:
         print("[%s] %-8s %-20s %s" % (r["id"], r.get("severity", "?"),
@@ -426,6 +481,7 @@ def cmd_list(a):
             print("         also open on this file: %s" % ", ".join(still_open))
         if r.get("proposed_fix"):
             print("         fix:   %s" % r["proposed_fix"])
+    print_overflow(sys.stdout)
     return 0
 
 
