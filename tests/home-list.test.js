@@ -292,8 +292,9 @@ describe('lanes, blockers and honest emptiness (review findings, 29 Sep 2026)', 
   it('a blocked task already listed above is not listed again under robots', () => {
     const tasks = LIVE.map(H.toTask);
     const row = { fields: { Payload: JSON.stringify({ sweptAt: new Date(now).toISOString(), open: [
-      { task: TOKEN.id, name: 'Rotate the Airtable token', kind: 'KEVIN', subject: 'credential', days: 2 },
-      { task: 'recNotElsewhere', name: 'Some other step', kind: 'KEVIN', subject: 'identity', days: 1 }] }) } };
+      // TOOL walls no fixer can reach: the robots this group still lists (8 Oct 2026).
+      { task: TOKEN.id, name: 'Rotate the Airtable token', kind: 'TOOL', subject: 'x', days: 2, toolState: 'no-fixer', tool: 'no fixer can reach it' },
+      { task: 'recNotElsewhere', name: 'Some other step', kind: 'TOOL', subject: 'y', days: 1, toolState: 'no-fixer', tool: 'no fixer can reach it' }] }) } };
     const list = H.buildHomeList({ tasks, today: TODAY, needsRow: null, blockersRow: row, now });
     const everyId = list.groups.flatMap(g => g.items.map(i => i.id)).filter(Boolean);
     expect(everyId.filter(id => id === TOKEN.id)).toHaveLength(1);
@@ -332,15 +333,16 @@ describe('robots stuck on Kevin', () => {
     { task: 'recF', name: 'Daily fix has it', kind: 'TOOL', subject: 'x', days: 1, findingStatus: '' },
   ];
 
-  it('groups sign-ins and sites by subject, lists only-you steps, and leaves the daily fix\'s own work out', () => {
+  // Kevin, 8 Oct 2026: a sign-in, a site to add and a step only he can take are approval cards now,
+  // listed under "Waiting for your approval" on the same page; named here as well they were the same
+  // thing twice. Only a robot no fixer can reach stays in this group.
+  it('lists only the robots no fixer can reach: sign-ins, sites and his own steps are cards in the queue', () => {
     const r = H.readBlockers(row({ open: walls, sweptAt: new Date(now - 10 * 60000).toISOString() }), now);
     const texts = r.items.map(i => i.text);
-    expect(texts).toContain('Sign the robot in to portal.example.co.uk');
-    expect(r.items.find(i => i.kind === 'signin').count).toBe(2);
-    expect(texts).toContain("Add app.example.com to the robot's list (Add a new site)");
-    expect(texts.some(t => /Identity check: a step only you can do \(identity\)/.test(t))).toBe(true);
+    expect(texts.some(t => /portal\.example\.co\.uk|app\.example\.com|Identity check/.test(t))).toBe(false);
     expect(texts.some(t => /Robot needs a fix/.test(t))).toBe(true);
     expect(texts.some(t => /Daily fix has it/.test(t))).toBe(false);
+    expect(r.items).toHaveLength(1);
     expect(r.note).toBe('');
   });
 
