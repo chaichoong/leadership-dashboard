@@ -540,7 +540,11 @@ def rent_reply_senders(today=None):
             try:
                 to = parse_email_output(f.get(AF["agentOutput"]) or "").get("to") or []
             except (EmailFormatError, SystemExit):
-                to = []
+                # A body the parser now refuses (notes for Kevin inside it, 8 Oct 2026) still names its
+                # recipient on the TO line, and the letting agent's reply must still find this card.
+                head = (str(f.get(AF["agentOutput"]) or "").split("\n---", 1) + [""])[0]
+                line = re.search(r"^[ \t]*TO:[ \t]*(.+)$", head, re.M)
+                to = [a.strip() for a in re.split(r"[,;]", line.group(1))] if line else []
             # Our own addresses are never a letting agent's: one in a TO line must not send our own mail to the lane.
             own = {sender_key(a) for a in RULE_OWN_ADDRESSES}
             keys |= {k for k in (sender_key(x) for x in to if x) if k and k not in own}
