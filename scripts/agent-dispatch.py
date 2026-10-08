@@ -2930,6 +2930,8 @@ def task_view(rec):
         # every task.
         "feedback": expand_looms(f.get(AF["approvalFeedback"], "")),
         "noteWithVerdict": note_with_verdict(f.get(AF["feedbackHistory"]), f.get(AF["approvedAt"])),
+        # The date of his newest "I can't do this step" (standing_holds.approved_after_start).
+        "cantAt": standing_holds.latest_cant(f.get(AF["feedbackHistory"])),
         "agentOutput": f.get(AF["agentOutput"], ""),
         "taskType": sel(f.get(AF["taskType"])),
         "teamMemberIds": links(f.get(AF["teamMember"])),

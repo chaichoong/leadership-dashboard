@@ -165,10 +165,27 @@ def example_problems(hold):
     return out
 
 
+# The line the AI Agents page writes to Feedback History when Kevin presses "I can't do this" on a
+# Your step card (os/agents/index.html apvStepSay): "[2026-10-08 13:30] I can't do this step: ...".
+CANT_LINE_RE = re.compile(r"^\[(\d{4}-\d{2}-\d{2}) \d{2}:\d{2}\] I can't do this step: ", re.M)
+
+
+def latest_cant(history):
+    """The date (YYYY-MM-DD) of Kevin's newest "I can't do this step" line in Feedback History,
+    or ''. Callers carry this, not the history itself, on the task they hand to hold_for."""
+    dates = CANT_LINE_RE.findall(str(history or ""))
+    return max(dates) if dates else ""
+
+
 def approved_after_start(task, hold):
     """Kevin approved this exact task after the hold began: his newer word wins. A Changes
     requested after it began is his word too: "I can't do this" on a Your step card he approved
-    turns the verdict into one, and the hold must not park his reason (review, 8 Oct 2026)."""
+    turns the verdict into one, and the hold must not park his reason (review, 8 Oct 2026).
+
+    The can't itself counts, through `cantAt`: the agent's resubmit clears the verdict fields, so
+    without it the hold parked the answer to his reason until it lifted (Kevin, 8 Oct 2026)."""
+    if str(task.get("cantAt") or "") > str(hold.get("created") or ""):
+        return True
     if task.get("outcome") not in APPROVED + ("Changes requested",):
         return False
     at = str(task.get("approvedAt") or "")[:10]
@@ -177,7 +194,7 @@ def approved_after_start(task, hold):
 
 def hold_for(task, holds):
     """The first active, sound hold covering this task (a dict with name/description/outcome/
-    approvedAt), or None. The shared entry point: agent-dispatch's queue uses it too."""
+    approvedAt/cantAt), or None. The shared entry point: agent-dispatch's queue uses it too."""
     for h in active(holds):
         if example_problems(h):
             continue
@@ -246,7 +263,7 @@ def airtable(method, path, token, params=None, body=None):
 
 
 FIELDS = ["Task Name", "Description", "Notes", "Status", "Some Day", "Due Date",
-          "Approval Outcome", "Approved At"]
+          "Approval Outcome", "Approved At", "Feedback History"]
 
 
 def query_tasks(token, formula):
@@ -271,7 +288,7 @@ def task_of(rec):
             "notes": f.get("Notes", ""), "status": f.get("Status", ""), "someDay": bool(f.get("Some Day")),
             "dueDate": f.get("Due Date", ""),
             "outcome": outcome.get("name") if isinstance(outcome, dict) else (outcome or ""),
-            "approvedAt": f.get("Approved At", "")}
+            "approvedAt": f.get("Approved At", ""), "cantAt": latest_cant(f.get("Feedback History"))}
 
 
 def patch(token, rec_id, fields):
@@ -621,6 +638,11 @@ def selftest():
     check("an approval after the hold began wins", hold_for(task, [h]) is None)
     task["approvedAt"] = "2026-09-23T12:54:00Z"
     check("an approval on or before the start is still held", hold_for(task, [h]) is not None)
+    check("his I can't after the start wins, verdict cleared by a resubmit",
+          hold_for({"name": task["name"], "cantAt": latest_cant(
+              "[2026-09-24 13:30] I can't do this step: no account")}, [h]) is None)
+    check("his I can't on the start day is still held",
+          hold_for({"name": task["name"], "cantAt": "2026-09-23"}, [h]) is not None)
 
     notes = note_line("HELD (sample-council-tax, was Today): x")
     check("an open stamp is found", open_hold_ids(notes) == {"sample-council-tax"})
