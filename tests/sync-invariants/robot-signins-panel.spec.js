@@ -131,18 +131,6 @@ test.describe('Robot sign-ins panel on a Mac', () => {
     expect(await page.evaluate(() => signinsHealth())).toEqual({ status: 'pass', detail: '5 sign-ins listed, 2 signed out' });
   });
 
-  test('closing the last sign-in card mid re-read clears the strip at once', async ({ page }) => {
-    const fx = defaultFixtures();
-    fx.approvals = fx.approvals.map((r, i) => {
-      if (i === 0) r.fields[TF.agentOutput] = 'Letter built.\nSIGN-IN NEEDED: Pingen (https://app.pingen.com/)';
-      return r;
-    });
-    const panel = await open(page, [signinRow(MIXED)], { approvals: fx.approvals });
-    await expect(panel.locator('[data-apv-signin-strip]')).toBeVisible();
-    // The queue is re-reading, and the sign-in card leaves the list (a decision edits allApprovals).
-    await page.evaluate(() => { _approvalsState = 'loading'; allApprovals = allApprovals.filter(t => !apvSignInNeeded(t.agentOutput)); renderSignins(); });
-    await expect(panel.locator('[data-apv-signin-strip]')).toHaveCount(0);
-  });
 
   test('a line in a state the page does not know is shown as needing him, never hidden', async ({ page }) => {
     const panel = await open(page, [signinRow([line('Pingen (letters)', 'app.pingen.com', 'signed-in'),
@@ -151,19 +139,6 @@ test.describe('Robot sign-ins panel on a Mac', () => {
     await expect(panel.locator('[data-rs-signin="mystery.example.com"]')).toBeVisible();
   });
 
-  test('the waiting strip survives the 30-second re-read after a Sign in tap', async ({ page }) => {
-    const fx = defaultFixtures();
-    fx.approvals = fx.approvals.map((r, i) => {
-      if (i === 0) r.fields[TF.agentOutput] = 'Letter built.\nSIGN-IN NEEDED: Pingen (https://app.pingen.com/)';
-      return r;
-    });
-    const panel = await open(page, [signinRow(MIXED)], { approvals: fx.approvals });
-    await expect(panel.locator('[data-apv-signin-strip]')).toBeVisible();
-    // The queue re-read is still in flight when the estate re-read lands (the race the review proved).
-    await page.route('**/api.airtable.com/**tblqB8b22hKBL4PF1**', async (route) => { await new Promise((r) => setTimeout(r, 1500)); await route.fallback(); });
-    await page.evaluate(async () => { const q = window.apvSilentRefresh(); await loadEstateStatus(); await q; });
-    await expect(panel.locator('[data-apv-signin-strip]')).toContainText('One task is waiting on a sign-in');
-  });
 
   test('a failed refresh, a stale row and a missing row each say so; none reads as an empty list', async ({ page }) => {
     let panel = await open(page, [signinRow(MIXED, { [ES.status]: 'Failed', [ES.detail]: 'node not found' })]);
@@ -185,16 +160,17 @@ test.describe('Robot sign-ins panel on a Mac', () => {
     await expect(panel).toContainText('No sign-in list yet.');
   });
 
-  test('the waiting-task strip now leads the panel, not the queue', async ({ page }) => {
+  // Kevin, 8 Oct 2026: "we seem to have bits everywhere". The panel is the list of sites; a task
+  // waiting on a sign-in is its own card, which keeps its Sign in now button.
+  test('the panel carries no waiting-task strip; the card keeps its own Sign in now', async ({ page }) => {
     const fx = defaultFixtures();
     fx.approvals = fx.approvals.map((r, i) => {
       if (i === 0) r.fields[TF.agentOutput] = 'Letter built.\nSIGN-IN NEEDED: Pingen (https://app.pingen.com/)';
       return r;
     });
     const panel = await open(page, [signinRow(MIXED)], { approvals: fx.approvals });
-    await expect(panel.locator('[data-apv-signin-strip]')).toContainText('One task is waiting on a sign-in');
-    await expect(page.locator('#approvalsBody [data-apv-signin-strip]')).toHaveCount(0);
-    // The card keeps its own Sign in now button.
+    await expect(panel).toContainText('2 sign-ins need you: EDF Energy, Utilita Apartment 1.');
+    await expect(page.locator('[data-apv-signin-strip]')).toHaveCount(0);
     await expect(page.locator('[data-apv-signin="app.pingen.com"] a', { hasText: 'Sign in now' })).toHaveAttribute('href', 'robotsignin://site/app.pingen.com');
   });
 });
@@ -212,130 +188,28 @@ const WALLS = [
   { task: 'recW3', name: 'Phone-free step', agent: 'Admin', kind: 'KEVIN', subject: 'signature', fix: 'sign it', days: 0 },
 ];
 
-test.describe('Robot sign-ins panel and blocked robots', () => {
+// Kevin, 8 Oct 2026: blocked robots are approval cards now (a SIGN-IN or SITE wall puts its task
+// in the queue with its button; a KEVIN step is a Your step card with Your turn on it). The panel
+// shows none of them, never counts them, and never offers Your turn.
+test.describe('blocked robots are cards, never panel rows', () => {
   test.use({ userAgent: MAC_UA });
 
-  test('a robot blocked on a sign-in the list calls fine still needs him, never "All good"', async ({ page }) => {
-    // The last check called Amazon fine two days ago; the wall is a day old.
-    const panel = await open(page, [signinRow([line('Amazon (order history)', 'www.amazon.co.uk', 'signed-in', { at: ago(2880), how: 'robot check' }),
-      line('Pingen (letters)', 'app.pingen.com', 'signed-in')]), blockersRow(WALLS)]);
-    await expect(panel).not.toContainText('All good');
-    await expect(panel).toContainText('2 sign-ins need you: www.amazon.co.uk, portal.fylde.gov.uk.');
-    await expect(page.locator('#signinsCount')).toHaveText('2');
-    await expect(panel.locator('[data-rs-wall-line="SIGN-IN"]')).toContainText('One task is blocked until the robot is signed in to www.amazon.co.uk.');
-    await expect(panel.locator('[data-rs-wall="www.amazon.co.uk"]')).toHaveAttribute('href', 'robotsignin://site/www.amazon.co.uk');
-    // The wall's own address rides on the link, so the app's box starts there (8 Oct 2026).
-    await expect(panel.locator('[data-rs-wall-add="portal.fylde.gov.uk"]')).toHaveAttribute('href', 'robotsignin://add/portal.fylde.gov.uk');
-    await expect(panel.locator('[data-rs-wall-line]')).toHaveCount(2);   // a KEVIN step is not a sign-in
-    // The keyboard stays on the blocked site's own button through a redraw.
-    await panel.locator('[data-rs-wall-add="portal.fylde.gov.uk"]').focus();
-    await page.evaluate(() => renderSignins());
-    await expect(panel.locator('[data-rs-wall-add="portal.fylde.gov.uk"]')).toBeFocused();
-  });
-
-  test('a SIGN-IN wall on a site that stops the robot with a bot check has no Sign in button and is not counted (25 Sep 2026)', async ({ page }) => {
-    const wall = { task: 'recW9', name: 'Fix SPF and DKIM', agent: 'Builder', kind: 'SIGN-IN', subject: 'dash.cloudflare.com', fix: 'sign in', days: 0 };
-    // The bot check was seen a minute ago, after the wall opened (the sweep ran 5 minutes ago).
-    const panel = await open(page, [signinRow([line('dash.cloudflare.com', 'dash.cloudflare.com', 'bot-check', { how: 'robot check', at: ago(1) })]),
-      blockersRow([wall])]);
-    await expect(panel.locator('[data-rs-wall-line="bot-check"]')).toContainText('One task is blocked: dash.cloudflare.com stops the robot with a bot check, which a sign-in cannot fix.');
-    await expect(panel.locator('[data-rs-wall="dash.cloudflare.com"]')).toHaveCount(0);
+  test('SIGN-IN, SITE and KEVIN walls on the blocker row add nothing to the panel or its count', async ({ page }) => {
+    const walls = WALLS.concat(TURNS);
+    const panel = await open(page, [signinRow([line('Pingen (letters)', 'app.pingen.com', 'signed-in')]), blockersRow(walls)]);
+    await expect(panel).toContainText('All good.');
     await expect(page.locator('#signinsCount')).toHaveText('0');
-    await expect(panel).not.toContainText('All good');
-  });
-
-  test('a bot check seen BEFORE a sign-in wall opened does not hide that wall\'s Sign in button (review round 3)', async ({ page }) => {
-    const wall = { task: 'recW9', name: 'Fix SPF and DKIM', agent: 'Builder', kind: 'SIGN-IN', subject: 'dash.cloudflare.com', fix: 'sign in', days: 0 };
-    const panel = await open(page, [signinRow([line('dash.cloudflare.com', 'dash.cloudflare.com', 'bot-check', { how: 'robot check', at: ago(300) })]),
-      blockersRow([wall])]);
-    await expect(panel.locator('[data-rs-wall="dash.cloudflare.com"]')).toHaveAttribute('href', 'robotsignin://site/dash.cloudflare.com');
-    await expect(page.locator('#signinsCount')).toHaveText('1');
-  });
-
-  test('a wall on a site he has just signed in to says so, with no second button and no count', async ({ page }) => {
-    // The wall is a day old; he signed in two minutes ago.
-    const panel = await open(page, [signinRow([line('Amazon (order history)', 'www.amazon.co.uk', 'you-signed-in', { at: ago(2), how: 'you signed in' })]),
-      blockersRow(WALLS.slice(0, 1))]);
-    await expect(panel.locator('[data-rs-wall-line="done"]')).toContainText('You signed in since. The robot picks the task up at its next pass.');
-    await expect(panel.locator('[data-rs-wall="www.amazon.co.uk"]')).toHaveCount(0);
-    await expect(page.locator('#signinsCount')).toHaveText('0');
-    await expect(panel).not.toContainText('needs you');
-  });
-
-  test('a robot confirming his sign-in keeps the wall cleared; a check from before the wall does not', async ({ page }) => {
-    // Wall 0.2 days old at a sweep 25 min ago; the robot found the site signed in 2 min ago.
-    const w = Object.assign({}, WALLS[0], { days: 0.2 });
-    let panel = await open(page, [signinRow([line('Amazon (order history)', 'www.amazon.co.uk', 'signed-in', { at: ago(2), how: 'robot check' })]),
-      blockersRow([w], 25)]);
-    await expect(panel.locator('[data-rs-wall-line="done"]')).toContainText('The robot has found it signed in since.');
-    await expect(page.locator('#signinsCount')).toHaveText('0');
-    // The Amazon case: a check said signed in BEFORE the wall opened (the password prompt came
-    // back after it), so the wall still needs him.
-    const fresh = Object.assign({}, WALLS[0], { days: 0 });
-    panel = await open(page, [signinRow([line('Amazon (order history)', 'www.amazon.co.uk', 'signed-in', { at: ago(300), how: 'robot check' })]),
-      blockersRow([fresh], 5)]);
-    await expect(panel.locator('[data-rs-wall="www.amazon.co.uk"]')).toBeVisible();
-    await expect(page.locator('#signinsCount')).toHaveText('1');
-  });
-
-  test('a wall that may have opened AFTER his sign-in still needs him', async ({ page }) => {
-    // He signed in 150 minutes ago; a robot then met the password prompt again (the wall is fresh).
-    const fresh = Object.assign({}, WALLS[0], { days: 0 });
-    let panel = await open(page, [signinRow([line('Amazon (order history)', 'www.amazon.co.uk', 'you-signed-in', { at: ago(150), how: 'you signed in' })]),
-      blockersRow([fresh])]);
-    await expect(panel.locator('[data-rs-wall="www.amazon.co.uk"]')).toBeVisible();
-    await expect(page.locator('#signinsCount')).toHaveText('1');
-    // The review's case: sign-in 190 min ago, wall opened 100 min later, swept at 86 min old,
-    // which rounds to 0.1 of a day. It may have opened after him, so it still needs him.
-    const later = Object.assign({}, WALLS[0], { days: 0.1 });
-    panel = await open(page, [signinRow([line('Amazon (order history)', 'www.amazon.co.uk', 'you-signed-in', { at: ago(190), how: 'you signed in' })]),
-      blockersRow([later], 4)]);
-    await expect(panel.locator('[data-rs-wall="www.amazon.co.uk"]')).toBeVisible();
-    // A writer without sweptAt never marks a wall done.
-    const noSweep = blockersRow(WALLS.slice(0, 1));
-    noSweep.fields[ES.payload] = JSON.stringify({ open: WALLS.slice(0, 1) });
-    panel = await open(page, [signinRow([line('Amazon (order history)', 'www.amazon.co.uk', 'you-signed-in', { at: ago(2), how: 'you signed in' })]), noSweep]);
-    await expect(panel.locator('[data-rs-wall="www.amazon.co.uk"]')).toBeVisible();
-  });
-
-  test('a check that worked but found an old wall is not called a failed check', async ({ page }) => {
-    const old = blockersRow(WALLS.slice(0, 1));
-    old.fields[ES.status] = 'Failed';
-    old.fields[ES.detail] = 'Robots blocked on 1 task. For you: sign the robot in to www.amazon.co.uk. 1 task blocked 3 days or more.';
-    const panel = await open(page, [signinRow([line('Pingen (letters)', 'app.pingen.com', 'signed-in')]), old]);
-    await expect(panel).not.toContainText('could not be checked');
-    await expect(panel.locator('[data-rs-wall="www.amazon.co.uk"]')).toBeVisible();
-  });
-
-  test('a failed blocked-robots check says so, and a broken sign-in list never hides a stuck robot', async ({ page }) => {
-    const failedRow = blockersRow(WALLS.slice(0, 1));
-    failedRow.fields[ES.status] = 'Failed';
-    failedRow.fields[ES.detail] = 'The blocker sweep has not run for 9 hours.';
-    let panel = await open(page, [signinRow([line('Pingen (letters)', 'app.pingen.com', 'signed-in')]), failedRow]);
-    await expect(panel).toContainText('Blocked robots could not be checked just now: The blocker sweep has not run for 9 hours.');
-    panel = await open(page, [signinRow([], { [ES.payload]: '{"lines":[' }), blockersRow(WALLS.slice(0, 1))]);
-    await expect(panel).toContainText('The sign-in list could not be read');
-    await expect(panel.locator('[data-rs-wall="www.amazon.co.uk"]')).toBeVisible();
-  });
-
-  test('a wall on one Utilita flat opens that flat, is named by it, and only its own sign-in clears it', async ({ page }) => {
-    // PR #561: a flat's wall subject reads "my.utilita.co.uk (utilita-apt2)".
-    const flat = { task: 'recW9', name: 'Read the Duckworth meter', agent: 'Property', kind: 'SIGN-IN', subject: 'my.utilita.co.uk (utilita-apt2)', fix: 'sign in', days: 1 };
-    const lines = [line('Utilita Apartment 1', 'my.utilita.co.uk', 'you-signed-in', { profile: 'utilita-apt1', at: ago(2), how: 'you signed in' }),
-      line('Utilita Apartment 2', 'my.utilita.co.uk', 'signed-in', { profile: 'utilita-apt2', how: 'hourly read', at: ago(2880) })];   // read before the wall
-    const panel = await open(page, [signinRow(lines), blockersRow([flat])]);
-    const btn = panel.locator('[data-rs-wall="my.utilita.co.uk (utilita-apt2)"]');
-    await expect(btn).toHaveAttribute('href', 'robotsignin://profile/utilita-apt2');   // never site/<"host (profile)">
-    await expect(panel.locator('[data-rs-wall-line="SIGN-IN"]')).toContainText('blocked until the robot is signed in to Utilita Apartment 2.');
-    // Flat 1's fresh sign-in does not clear flat 2's wall.
-    await expect(page.locator('#signinsCount')).toHaveText('1');
-    await expect(panel).toContainText('One sign-in needs you: Utilita Apartment 2.');
-  });
-
-  test('a blocked site the list already calls signed out is counted once', async ({ page }) => {
-    const panel = await open(page, [signinRow([line('Amazon (order history)', 'www.amazon.co.uk', 'signed-out')]), blockersRow(WALLS.slice(0, 1))]);
-    await expect(panel).toContainText('One sign-in needs you: Amazon (order history).');
-    await expect(page.locator('#signinsCount')).toHaveText('1');
+    await expect(panel.locator('a[href^="robotsignin://turn/"]')).toHaveCount(0);
+    await expect(panel.locator('a[href^="robotsignin://add/"]')).toHaveCount(0);
+    await expect(panel).not.toContainText('www.amazon.co.uk');
+    await expect(panel).not.toContainText('portal.fylde.gov.uk');
+    await expect(panel).not.toContainText('Chedburgh');
+    // A failed blocker sweep is not the panel's to report either: the Estate tab's "Robots blocked" row says it.
+    const failed = blockersRow(walls);
+    failed.fields[ES.status] = 'Failed';
+    failed.fields[ES.detail] = 'The blocker sweep has not run for 9 hours.';
+    const again = await open(page, [signinRow([line('Pingen (letters)', 'app.pingen.com', 'signed-in')]), failed]);
+    await expect(again).not.toContainText('Blocked robots could not be checked');
   });
 });
 
@@ -348,32 +222,10 @@ const TURNS = [
   { task: 'recLRHyQ8AG0NUHt0', name: 'Athertons Exterior Cleaning invoice', agent: 'Finance', kind: 'KEVIN', subject: 'payment', fix: 'Kevin pays', days: 1 },
 ];
 
-test.describe('Your turn on a Mac', () => {
-  test.use({ userAgent: MAC_UA });
-
-  test('a Kevin step with a plan ready gets a Your turn button that opens the robot on his Mac; the others get none', async ({ page }) => {
-    const panel = await open(page, [signinRow([line('Pingen (letters)', 'app.pingen.com', 'signed-in')]), blockersRow(TURNS)]);
-    const turns = panel.locator('[data-rs-turns]');
-    await expect(turns).toContainText('Your turn (1)');
-    await expect(turns).toContainText('6 Chedburgh Place');
-    await expect(turns).toContainText('Your step: purchase.');
-    await expect(panel.locator('[data-rs-turn="recPYIC5nn7v2bh8e"]')).toHaveAttribute('href', 'robotsignin://turn/recPYIC5nn7v2bh8e');
-    await expect(panel.locator('a[href^="robotsignin://turn/"]')).toHaveCount(1);
-    await expect(panel).not.toContainText('Burnbank');
-    await expect(panel).not.toContainText('Athertons');
-    await expect(page.locator('#signinsCount')).toHaveText('1');       // his turn counts, even with every sign-in fine
-  });
-});
 
 test.describe('Robot sign-ins panel on a phone', () => {
   test.use({ userAgent: PHONE_UA });
 
-  test('Your turn shows on a phone as a Mac step, with no link that cannot work there', async ({ page }) => {
-    const panel = await open(page, [signinRow([line('Pingen (letters)', 'app.pingen.com', 'signed-in')]), blockersRow(TURNS)]);
-    await expect(panel.locator('[data-rs-turns]')).toContainText('6 Chedburgh Place');
-    await expect(panel.locator('[data-rs-turns]')).toContainText('On your Mac');
-    await expect(panel.locator('a[href^="robotsignin://"]')).toHaveCount(0);
-  });
 
   test('shows where each sign-in stands, with no button that cannot work there', async ({ page }) => {
     const fx = defaultFixtures();
@@ -382,7 +234,6 @@ test.describe('Robot sign-ins panel on a phone', () => {
       return r;
     });
     const panel = await open(page, [signinRow(MIXED)], { approvals: fx.approvals });
-    await expect(panel.locator('[data-apv-signin-strip]')).toContainText('One task is waiting on a sign-in');   // control: the strip is there
     await expect(panel).toContainText('2 sign-ins need you: EDF Energy, Utilita Apartment 1.');
     await expect(panel.locator('a[href^="robotsignin://"]')).toHaveCount(0);
     await expect(panel.locator('[data-rs-line="signed-out"]').first()).toContainText('Sign in on your Mac');

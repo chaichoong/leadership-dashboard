@@ -151,15 +151,12 @@ a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}
 .apv-bulk .apv-note{margin:0 0 8px;background:var(--bg-surface)}
 .apv-bulk-why{flex-basis:100%;margin-top:6px;padding:6px 10px;border:1px solid var(--border-default);border-radius:var(--radius-md);font-family:inherit;font-size:var(--fs-xs);background:var(--bg-surface);color:var(--text-primary)}
 .apv-bulk-why:focus{outline:none;border-color:var(--accent)}
-.apv-signin-strip{border:1px solid var(--border-default);border-left:4px solid var(--accent);border-radius:var(--radius-md);background:var(--accent-soft);padding:12px 16px;margin-bottom:12px;font-size:var(--fs-sm)}
 .apv-step{border:1px solid var(--border-default);border-left:4px solid var(--accent-gold);border-radius:var(--radius-md);background:var(--bg-surface-2);padding:10px 14px;margin:6px 0 8px;font-size:var(--fs-sm)}
 .apv-step-head{font-weight:var(--fw-semibold);color:var(--text-primary);margin-bottom:4px}
 .apv-step-text{color:var(--text-primary);white-space:pre-wrap;word-break:break-word;margin-bottom:6px}
 .apv-step-said{border:1px solid var(--border-default);border-radius:var(--radius-md);background:var(--success-bg);color:var(--text-primary);padding:8px 12px;font-size:var(--fs-sm);word-break:break-word}
 .apv-step-said.apv-step-cant{background:var(--warning-bg)}
 .apv-signin{display:flex;gap:10px;align-items:center;flex-wrap:wrap;justify-content:space-between;border:1px solid var(--border-default);border-radius:var(--radius-md);background:var(--accent-soft);padding:8px 12px;margin:6px 0 8px;font-size:var(--fs-sm)}
-.apv-signin-site{display:inline-block;border:1px solid var(--border-default);border-radius:var(--radius-full);padding:3px 10px;background:var(--bg-surface);color:var(--text-primary);text-decoration:none;font-size:var(--fs-xs)}
-.apv-signin-site:hover{border-color:var(--accent)}
 /* Robot sign-ins panel (25 Sep 2026): every login the robots use, above the approval queue. */
 .rs-summary{display:flex;gap:10px;align-items:center;flex-wrap:wrap;justify-content:space-between;font-size:var(--fs-sm);color:var(--text-primary)}
 .rs-actions{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
@@ -2360,28 +2357,6 @@ function apvSignInNeeded(output){
 function apvSignInLink(need){
     return need.host ? `robotsignin://site/${encodeURIComponent(need.host)}` : 'robotsignin://all';
 }
-function apvSignInStripHtml(items, onMac = true){
-    const needs = items.map(t => apvSignInWait(t)).filter(Boolean);
-    if(!needs.length) return '';
-    const bySite = {};
-    needs.forEach(n => { const k = n.host || n.site.toLowerCase(); (bySite[k] = bySite[k] || { site: n.site, host: n.host, n: 0 }).n++; });
-    // Off a Mac the robotsignin:// links cannot open anything (the app lives on the Mac), so the
-    // strip names the sites as plain text and says where to sign in (review, 25 Sep 2026).
-    const parts = Object.values(bySite).sort((a,b)=>b.n-a.n)
-        .map(g => onMac
-            ? `<a class="apv-signin-site" href="${esc(apvSignInLink(g))}" title="Opens the Robot sign-in app on your Mac at this site">${esc(g.site)} <span style="color:var(--text-muted)">(${g.n})</span></a>`
-            : `<span class="apv-signin-site">${esc(g.site)} <span style="color:var(--text-muted)">(${g.n})</span></span>`).join('');
-    const all = onMac
-        ? `<a class="btn btn-success btn-sm" href="robotsignin://all" title="Opens the Robot sign-in app on your Mac and goes through every waiting site in turn">Sign in to all (${needs.length})</a>`
-        : `<span class="rs-mac">Sign in on your Mac</span>`;
-    return `<div class="apv-signin-strip" data-apv-signin-strip>
-        <div><strong>${needs.length === 1 ? 'One task is' : needs.length + ' tasks are'} waiting on a sign-in.</strong>
-            <span style="color:var(--text-secondary)">${onMac ? 'Not a decision. Each site opens in turn: sign in, press Cmd+Q, the next opens. When the last one closes, the robots start on the work. This page updates itself as each site is handed back.' : 'Not a decision. Sign in from your Mac, where each site opens in turn.'}</span></div>
-        <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-top:6px">
-            ${all}${parts}
-        </div>
-    </div>`;
-}
 // THE REDO RECEIPT (Kevin, 7 Sep 2026). After "Changes requested" the agent's
 // resubmit must answer his points one by one; agent-dispatch.py writes them
 // into Notes under FEEDBACK ANSWERED. The card leads with the newest one, so
@@ -2589,12 +2564,23 @@ const APV_STEP_DONE_MARK = 'KEVIN STEP DONE';
 // sends the task back to its agent as Changes requested (send_back_blocked there).
 const APV_STEP_CANT_MARK = 'KEVIN STEP CANT';
 const APV_APPROVED_OUTCOMES = ['Approved as-is', 'Approved with minor edits'];
+// A robot's sign-in is a card too (Kevin, 8 Oct 2026): a SIGN-IN or SITE wall puts its task here
+// whatever its verdict, with a step block whose first sentence names the site. Mirrored from
+// ROBOT_STEP_RE in scripts/agent-dispatch.py.
+const APV_ROBOT_STEP_RE = /^ROBOT (SIGN-IN|SITE): ([a-z0-9-]+(?:\.[a-z0-9-]+)+)(?: \(([A-Za-z0-9][A-Za-z0-9-]*)\))?\. /;
+// The sentence agent-dispatch.py writes only when the Your turn plan passes the window's own check
+// (YOUR_TURN_SENTENCE there): until the sweep has looked at a card, it is what says the button is ready.
+const APV_TURN_READY_RE = /Press Your turn on the AI Agents page, on your Mac/;
 function apvYourStep(t){
-    if(!t || !APV_APPROVED_OUTCOMES.includes(t.outcome)) return null;
+    if(!t) return null;
     const s = String(t.agentOutput||'').replace(/^\s+/, '');
     const cut = s.indexOf(APV_STEP_DIVIDER);
     if(!s.startsWith(APV_STEP_MARK) || cut === -1) return null;
-    return { step: s.slice(APV_STEP_MARK.length, cut).trim(), work: s.slice(cut + APV_STEP_DIVIDER.length).replace(/^\n+/, '') };
+    const step = s.slice(APV_STEP_MARK.length, cut).trim();
+    const m = APV_ROBOT_STEP_RE.exec(step);
+    if(!m && !APV_APPROVED_OUTCOMES.includes(t.outcome)) return null;
+    return { step, work: s.slice(cut + APV_STEP_DIVIDER.length).replace(/^\n+/, ''),
+             robot: m ? { kind: m[1].toUpperCase(), host: m[2].toLowerCase(), profile: m[3] || '' } : null };
 }
 // His newest "done" or "can't" line, or null. The sweep, not this page, decides what it does.
 function apvStepDoneSaid(feedback){
@@ -2605,11 +2591,35 @@ function apvStepDoneSaid(feedback){
 }
 // The Your turn link, from the same agent-blockers row the sign-ins panel reads (KEVIN walls
 // marked turn by the sweep). Re-drawn when that row arrives, which can be after the queue.
+// Ready when the sweep marked it (the agent-blockers row), or, until the sweep has looked at this
+// card since it last changed, when the card carries the sentence written only for a plan that passed
+// (8 Oct 2026: the Swinton card arrived at 15:51 and its button waited for the 16:01 sweep). Once the
+// sweep has looked, its verdict stands, so a plan it refused never shows a button.
+function apvStepTurnReady(t, ys){
+    const row = _estateRows.find(r => (r.fields || {})[ES.key] === 'agent-blockers');
+    const p = row ? signinPayload(row) : null;
+    const swept = p ? Date.parse(p.sweptAt || '') : NaN;
+    const changed = Date.parse(t.submittedAt || '');
+    if(!isNaN(swept) && !isNaN(changed) && swept > changed) return signinTurns().some(w => w.task === t.id);
+    // A plan the sweep has refused stays refused until its agent rewrites it: never a button for it.
+    const open = p && Array.isArray(p.open) ? p.open : [];
+    if(open.some(w => w && w.task === t.id && w.planProblem)) return false;
+    return APV_TURN_READY_RE.test(ys.step) || signinTurns().some(w => w.task === t.id);
+}
 function apvStepTurnHtml(taskId){
-    if(!signinTurns().some(w => w.task === taskId)) return '';
+    const t = allApprovals.find(x => x.id === taskId);
+    const ys = t ? apvYourStep(t) : null;
+    if(!ys || ys.robot || !apvStepTurnReady(t, ys)) return '';
     return SIGNIN_ON_MAC
         ? `<a class="btn btn-success btn-sm" href="robotsignin://turn/${esc(taskId)}" data-apv-step-turn="${esc(taskId)}" title="Opens the robot's window on your Mac, filled in up to your step">Your turn</a>`
         : `<span class="rs-mac">Your turn opens on your Mac</span>`;
+}
+// The one button on a robot's sign-in card: the same links the Robot sign-in app always took.
+function apvRobotStepButton(r){
+    if(!SIGNIN_ON_MAC) return `<span class="rs-mac">${r.kind === 'SITE' ? 'Add it' : 'Sign in'} on your Mac</span>`;
+    if(r.kind === 'SITE') return `<a class="btn btn-success btn-sm" href="${esc('robotsignin://add/' + encodeURIComponent(r.host))}" data-apv-step-signin="${esc(r.host)}" title="Opens the Robot sign-in app on your Mac at ${esc(r.host)}: press Next and sign in">+ Add this site</a>`;
+    const href = r.profile ? 'robotsignin://profile/' + encodeURIComponent(r.profile) : 'robotsignin://site/' + encodeURIComponent(r.host);
+    return `<a class="btn btn-success btn-sm" href="${esc(href)}" data-apv-step-signin="${esc(r.host)}" title="Opens the Robot sign-in app on your Mac at this site. Sign in, then Cmd+Q.">Sign in</a>`;
 }
 function apvRenderTurnSlots(){
     document.querySelectorAll('[data-apv-turn-slot]').forEach(el => { el.innerHTML = apvStepTurnHtml(el.getAttribute('data-apv-turn-slot')); });
@@ -2626,9 +2636,11 @@ function apvStepCardHtml(t, ys){
         </div>
         ${t.tier1 ? `<div class="apv-tier1">TIER 1. This touches your private legal and financial matter. An AI agent prepared it. Read it before you act.</div>` : ''}
         <div class="apv-step" data-apv-step>
-            <div class="apv-step-head">Your step. You approved this already: only you can do this part.</div>
+            <div class="apv-step-head">${ys.robot
+                ? (ys.robot.kind === 'SITE' ? 'A robot needs a site added to its list. Nothing else is asked of you.' : 'A robot needs you to sign it in. Nothing else is asked of you.')
+                : 'Your step. You approved this already: only you can do this part.'}</div>
             <div class="apv-step-text" data-apv-step-text>${esc(ys.step)}</div>
-            <div data-apv-turn-slot="${t.id}">${apvStepTurnHtml(t.id)}</div>
+            ${ys.robot ? `<div data-apv-robot-step>${apvRobotStepButton(ys.robot)}</div>` : `<div data-apv-turn-slot="${t.id}">${apvStepTurnHtml(t.id)}</div>`}
         </div>
         <div class="apv-meta">
             <span class="apv-chip">${esc(agent)}</span>
@@ -2646,8 +2658,8 @@ function apvStepCardHtml(t, ys){
                 : said
                 ? `<div class="apv-step-said" data-apv-step-said>You said it is done (${esc(agoText(said.at))} ago): ${esc(said.evidence.replace(/[.!?]+$/, ''))}. The robot checks it within half an hour, then the agent finishes the job.</div>`
                 : `<div class="apv-actions" data-apv-step-actions>
-                    ${apvNoteRowHtml(t.id, "What proves it is done (the receipt, the reference, where the signed copy went), or why you can't do it", true, false)}
-                    <button class="btn btn-success" data-apv-step-done onclick="apvStepDone('${t.id}')" title="Tells the robot you have done your step. It checks your proof, then the agent finishes the job.">Done, here is the proof</button>
+                    ${apvNoteRowHtml(t.id, ys.robot ? "Only if you can't: say why (no account, no password, the wrong site)" : "What proves it is done (the receipt, the reference, where the signed copy went), or why you can't do it", true, false)}
+                    ${ys.robot ? '' : `<button class="btn btn-success" data-apv-step-done onclick="apvStepDone('${t.id}')" title="Tells the robot you have done your step. It checks your proof, then the agent finishes the job.">Done, here is the proof</button>`}
                     <button class="btn" data-apv-step-cant onclick="apvStepCant('${t.id}')" title="Goes back to the agent as Request changes, with your reason, to find another way. Say in the box why you can't do it.">I can't do this</button>
                 </div>
                 <div id="apvFiles-${t.id}" class="apv-file-list">${apvFileChipsHtml(t.id)}</div>`}
@@ -2668,7 +2680,9 @@ function apvStepDone(taskId){ return apvStepSay(taskId, false); }
 function apvStepCant(taskId){ return apvStepSay(taskId, true); }
 async function apvStepSay(taskId, cant){
     const t = allApprovals.find(x=>x.id===taskId);
-    if(!t || !apvYourStep(t)) return 'elsewhere';
+    const ys0 = t ? apvYourStep(t) : null;
+    // A robot's sign-in is cleared by the sign-in itself, never by a "done" line.
+    if(!ys0 || (ys0.robot && !cant)) return 'elsewhere';
     if(_apvSaving.has(taskId)) return 'elsewhere';
     const el = document.getElementById('apvNote-'+taskId);
     const words = String(el && el.value || '').replace(/\s+/g, ' ').trim();
@@ -6961,142 +6975,33 @@ function signinLineHtml(ln){
 // session, so a robot can be stuck on a site the last check called signed in (Amazon
 // asks for the password again); the panel must name it, or the 08:00 message says
 // "sign in" while this says "All good" (review, 25 Sep 2026).
-function signinWalls(){
-    const row = _estateRows.find(r => (r.fields || {})[ES.key] === 'agent-blockers');
-    const p = row ? signinPayload(row) : null;
-    const open = p && Array.isArray(p.open) ? p.open : [];
-    const by = {};
-    // The LATEST a wall can have opened: the sweep's exact run time (sweptAt) less its age in
-    // days, which the sweep rounds to 0.1 (72 minutes either way). A sign-in at or after that
-    // came after the wall for certain; anything earlier is not assumed (review, 25 Sep 2026).
-    const swept = p ? Date.parse(p.sweptAt || '') : NaN;
-    open.filter(w => w && (w.kind === 'SIGN-IN' || w.kind === 'SITE') && w.subject).forEach(w => {
-        const k = w.kind + ' ' + String(w.subject).toLowerCase();
-        // A wall on one Utilita flat reads "my.utilita.co.uk (utilita-apt1)" (PR #561): the
-        // host and the flat's profile, so its button opens that flat and matches its line.
-        const m = /^(\S+)\s+\(([a-z0-9][a-z0-9-]*)\)$/i.exec(String(w.subject));
-        const g = (by[k] = by[k] || { kind: w.kind, subject: String(w.subject), host: m ? m[1] : String(w.subject),
-            profile: m ? m[2] : '', names: [], openedBy: -Infinity });
-        g.names.push(String(w.name || ''));
-        const latest = (typeof w.days === 'number' && !isNaN(swept)) ? swept - Math.max(0, w.days - 0.05) * 86400000 : Infinity;
-        g.openedBy = Math.max(g.openedBy, latest);   // the newest wall on the site decides
-    });
-    // "Could not be checked" is the sweep's OWN failure only. The row is also Failed when the
-    // check worked and found a wall 3 days old or a task closed while blocked; that list is
-    // current, and calling it "from the last good check" would be false (review).
-    const f = row ? (row.fields || {}) : {};
-    const detail = String(f[ES.detail] || '');
-    const sweepFailed = row && f[ES.status] !== 'Worked'
-        && ((p && p.controlFailed) || !/^(Robots blocked on|No robot is blocked\.)/.test(detail));
-    return { walls: Object.values(by), failed: sweepFailed ? (detail || String(f[ES.status] || 'no reason given')) : '' };
-}
-// One site name covers another when they are equal or one is a subdomain of the other.
-function signinSameSite(a, b){ a = String(a).toLowerCase(); b = String(b).toLowerCase(); return a === b || a.endsWith('.' + b) || b.endsWith('.' + a); }
-// A line is the wall's sign-in: the same site, and the same flat when the wall names one.
-function signinLineIsWall(ln, w){
-    return signinSameSite(ln.host, w.host) && (!w.profile || ln.profile === w.profile);
-}
-function signinWallsHtml(walls, lines, failed){
-    const warn = failed ? `<div class="rs-note">Blocked robots could not be checked just now: ${esc(failed)} What is listed below is from the last good check.</div>` : '';
-    if(!walls.length) return warn;
-    const rows = walls.map(w => {
-        const n = w.names.length, tasks = n === 1 ? 'One task is' : `${n} tasks are`;
-        const what = w.botCheck
-            ? `${tasks} blocked: ${esc(w.label || w.subject)} stops the robot with a bot check, which a sign-in cannot fix.`
-            : w.kind === 'SIGN-IN'
-            ? `${tasks} blocked until the robot is signed in to ${esc(w.label || w.subject)}.`
-            : `${tasks} blocked until ${esc(w.subject)} is on the robot's list.`;
-        const btn = (w.done || w.botCheck) ? ''
-            : !SIGNIN_ON_MAC ? `<span class="rs-mac">${w.kind === 'SIGN-IN' ? 'Sign in' : 'Add it'} on your Mac</span>`
-            : w.kind === 'SIGN-IN'
-                ? `<a class="btn btn-success btn-sm" href="${esc(w.profile ? 'robotsignin://profile/' + encodeURIComponent(w.profile) : 'robotsignin://site/' + encodeURIComponent(w.host))}" data-rs-wall="${esc(w.subject)}" aria-label="Sign in to ${esc(w.label || w.subject)}">Sign in</a>`
-                // The wall's own address rides on the link (8 Oct 2026): a blank "Add a new site" box had
-                // Kevin add tiktok.com three times for a robot blocked on www.tiktok.com.
-                : `<a class="btn btn-sm" href="${esc('robotsignin://add/' + encodeURIComponent(w.subject))}" data-rs-wall-add="${esc(w.subject)}" aria-label="Add ${esc(w.subject)} to the robot's list">+ Add this site</a>`;
-        const note = w.done ? (w.doneBy === 'signed-in'
-                ? 'The robot has found it signed in since. It picks the task up at its next pass.'
-                : 'You signed in since. The robot picks the task up at its next pass.')
-            : w.names.slice(0, 3).join(', ') + (n > 3 ? ' and ' + (n - 3) + ' more' : '');
-        return `<div class="rs-line" data-rs-wall-line="${esc(w.done ? 'done' : w.botCheck ? 'bot-check' : w.kind)}"><div><span class="rs-label">${what}</span>
-            <span class="rs-when">${esc(note)}</span></div>${btn}</div>`;
-    }).join('');
-    return warn + `<div class="rs-list" data-rs-walls style="margin:0 0 10px">${rows}</div>`;
-}
-// The walls on their own, for the paths where the sign-in list cannot be shown: they come
-// from a separate row, so a broken list must not hide a robot that is stuck.
-function signinWallsBare(){
-    if(String(_estateState).indexOf('error') === 0) return '';
-    const { walls, failed } = signinWalls();
-    return signinWallsHtml(walls, [], failed);
-}
-// Which walls still need him: a SIGN-IN wall on a site he has signed in to SINCE it opened
-// does not (the sweep rewrites its list only every half hour). A wall that may have opened
-// after his sign-in (a robot met the password prompt again) still needs him; a wall of
-// unknown age, or from a writer without sweptAt, stays too (review, 25 Sep 2026).
-function signinMarkWalls(walls, lines){
-    walls.forEach(w => {
-        // A flat's wall is named by that flat's line ("Utilita Apartment 1 (…)"), not its host.
-        const own = w.profile ? lines.find(ln => signinLineIsWall(ln, w)) : null;
-        w.label = own ? own.label : '';
-        // Cleared by his sign-in OR a robot's signed-in look, either one after the wall opened:
-        // the first look after he signs in turns "You signed in" into "Signed in", and the
-        // wall must not come back for it (review). The same rule the sweep clears walls by.
-        const clear = isFinite(w.openedBy) ? lines.find(ln => (ln.state === 'you-signed-in' || ln.state === 'signed-in')
-            && signinLineIsWall(ln, w) && Date.parse(ln.at || '') >= w.openedBy) : null;
-        w.done = w.kind === 'SIGN-IN' && !!clear;
-        w.doneBy = clear ? clear.state : '';
-        // A SIGN-IN wall on a site that stops the robot with a bot check: no Sign in
-        // button, and not counted as a sign-in he owes (review, 25 Sep 2026).
-        // Only a bot check seen AFTER the wall opened: an older one may have gone, and a
-        // real sign-in wall must never lose its button to it (review round 3).
-        w.botCheck = w.kind === 'SIGN-IN' && !w.done && isFinite(w.openedBy) && lines.some(ln => ln.state === 'bot-check'
-            && signinLineIsWall(ln, w) && Date.parse(ln.at || '') >= w.openedBy);
-    });
-    return walls;
-}
-// YOUR TURN (Kevin, 30 Sep 2026): "Anything that I'm not needed for, you can do behind the
-// scenes. Anything where I'm needed to either make payment or something, we need to do it via
-// this new process." An approved task whose website step needs him (pay, file, sign, declare)
-// and whose robot has a handover plan ready: the button opens the robot's own window on his
-// Mac, filled in up to his step. From the agent-blockers row (KEVIN walls marked turn).
 function signinTurns(){
     const row = _estateRows.find(r => (r.fields || {})[ES.key] === 'agent-blockers');
     const p = row ? signinPayload(row) : null;
     return (p && Array.isArray(p.open) ? p.open : [])
         .filter(w => w && w.kind === 'KEVIN' && w.turn === true && /^rec[A-Za-z0-9]{14}$/.test(String(w.task || '')));
 }
-function signinTurnsHtml(turns){
-    if(!turns.length) return '';
-    const rows = turns.map(w => {
-        const btn = SIGNIN_ON_MAC
-            ? `<a class="btn btn-success btn-sm" href="robotsignin://turn/${esc(w.task)}" data-rs-turn="${esc(w.task)}" aria-label="Your turn: ${esc(w.name)}" title="Opens the robot's window on your Mac, filled in up to your step">Your turn</a>`
-            : `<span class="rs-mac">On your Mac</span>`;
-        return `<div class="rs-line" data-rs-turn-line="${esc(w.task)}"><div><span class="rs-label">${esc(w.name)}</span>
-            <span class="rs-when">Your step: ${esc(w.subject)}. The robot fills in everything else, then hands you the window.</span></div>${btn}</div>`;
-    }).join('');
-    return `<div class="rs-list" data-rs-turns style="margin:0 0 10px"><div class="rs-note"><strong>Your turn (${turns.length})</strong>: have 10 free minutes before you start one.</div>${rows}</div>`;
-}
+// THE PANEL IS THE LIST OF SITES (Kevin, 8 Oct 2026): "With the robot sections up top, anything
+// where it needs to sign in to be added to the system ... can be up there, and we can see all of our
+// sign-ins and the status of them. Anything task-related ... the Your Turn parts are only on the
+// cards." Blocked tasks, Your turn and the waiting-task strip all live on approval cards now (a
+// SIGN-IN or SITE wall puts its task in the queue with its button); the panel keeps every site, its
+// state, its Sign in button and + Add a new site.
 function renderSignins(){
     const body = document.getElementById('signinsBody'); if(!body) return;
     const countEl = document.getElementById('signinsCount');
-    const turns = signinTurns();
     const setCount = (n, hot) => {
         if(!countEl) return;
-        const total = typeof n === 'number' ? n + turns.length : n;       // '?' stays '?'
-        countEl.textContent = total; countEl.className = 'zone-count' + ((hot || turns.length) ? ' hot' : '');
+        countEl.textContent = n; countEl.className = 'zone-count' + (hot ? ' hot' : '');
     };
-    // The waiting-task strip (4 Sep 2026) leads the panel: work that stopped on a sign-in.
-    // Built from allApprovals while the queue re-reads too (every 30 s after a Sign in tap):
-    // that list keeps the last good read during a load and every decision edits it, so the
-    // strip neither vanishes mid re-read nor keeps a card he has just closed (review).
-    const strip = signinTurnsHtml(turns) + ((_approvalsState === 'ready' || _approvalsState === 'loading') ? apvSignInStripHtml(allApprovals, SIGNIN_ON_MAC) : '');
+    const strip = '';
     const addBtn = SIGNIN_ON_MAC
         ? `<a class="btn btn-sm" href="robotsignin://add" data-rs-add title="Opens the Robot sign-in app on your Mac: paste the site's sign-in page, name it, sign in">+ Add a new site</a>` : '';
     const macNote = SIGNIN_ON_MAC ? '' : `<div class="rs-note">Sign-ins open on your Mac, where the robots' browser lives. This page shows where each one stands.</div>`;
     const haveRows = _estateState === 'ready' || (_estateState === 'loading' && _estateRows.length);
     if(String(_estateState).indexOf('error') === 0){
         setCount('?', true);
-        body.innerHTML = strip + signinWallsBare() + `<div class="zone-error">Could not read the sign-in list (${esc(String(_estateState).slice(7))}). This list is NOT empty. It could not be read.</div>`;
+        body.innerHTML = `<div class="zone-error">Could not read the sign-in list (${esc(String(_estateState).slice(7))}). This list is NOT empty. It could not be read.</div>`;
         signinsSay('Robot sign-ins could not be read');
         return;
     }
@@ -7107,7 +7012,7 @@ function renderSignins(){
     const row = signinRow();
     if(!row){
         setCount('?', true);
-        body.innerHTML = strip + signinWallsBare() + `<div class="zone-error">No sign-in list yet. The estate-status job writes it every ten minutes. If this stays, that job has stopped.</div>`;
+        body.innerHTML = `<div class="zone-error">No sign-in list yet. The estate-status job writes it every ten minutes. If this stays, that job has stopped.</div>`;
         signinsSay('Robot sign-ins could not be read');
         return;
     }
@@ -7126,7 +7031,7 @@ function renderSignins(){
     // 4 Sep 2026, and "All good. 0 signed in" would be a calm lie.
     if(!p || p.broken || !Array.isArray(p.lines) || !p.lines.length){
         setCount('?', true);
-        body.innerHTML = strip + signinWallsBare() + warn + `<div class="zone-error">The sign-in list could not be read${p && p.broken ? ' (' + esc(p.broken) + ')' : ''}. This list is NOT empty. It could not be read.</div>`;
+        body.innerHTML = warn + `<div class="zone-error">The sign-in list could not be read${p && p.broken ? ' (' + esc(p.broken) + ')' : ''}. This list is NOT empty. It could not be read.</div>`;
         signinsSay('Robot sign-ins could not be read');
         return;
     }
@@ -7135,13 +7040,7 @@ function renderSignins(){
     const pick = st => lines.filter(ln => ln.state === st);
     const needs = lines.filter(signinNeedsYou);
     const mine = pick('you-signed-in'), ok = pick('signed-in'), od = pick('on-demand'), bot = pick('bot-check');
-    const { walls, failed: wallsFailed } = signinWalls();
-    signinMarkWalls(walls, lines);
-    // A blocked robot's site counts once, whether or not the list already calls it signed out;
-    // only a SIGN-IN wall can be the same thing as a signed-out line.
-    const wallNames = walls.filter(w => !w.done && !w.botCheck && !(w.kind === 'SIGN-IN' && needs.some(ln => signinLineIsWall(ln, w))))
-        .map(w => w.label || w.subject);
-    const needNames = needs.map(ln => ln.label).concat(wallNames);
+    const needNames = needs.map(ln => ln.label);
     setCount(needNames.length, needNames.length > 0);
     const summary = needNames.length
         ? `<span><strong>${needNames.length === 1 ? 'One sign-in needs' : needNames.length + ' sign-ins need'} you:</strong> ${esc(needNames.join(', '))}.</span>`
@@ -7162,11 +7061,8 @@ function renderSignins(){
     const had = document.activeElement && body.contains(document.activeElement) ? document.activeElement : null;
     const hadKey = !had ? '' : had.getAttribute('data-rs-signin') ? `[data-rs-signin="${CSS.escape(had.getAttribute('data-rs-signin'))}"]`
         : had.hasAttribute('data-rs-toggle') ? '[data-rs-toggle]' : had.hasAttribute('data-rs-add') ? '[data-rs-add]'
-        : had.getAttribute('data-rs-turn') ? `[data-rs-turn="${CSS.escape(had.getAttribute('data-rs-turn'))}"]`
-        : had.getAttribute('data-rs-wall') ? `[data-rs-wall="${CSS.escape(had.getAttribute('data-rs-wall'))}"]`
-        : had.getAttribute('data-rs-wall-add') ? `[data-rs-wall-add="${CSS.escape(had.getAttribute('data-rs-wall-add'))}"]`
         : had.getAttribute('href') ? `a[href="${CSS.escape(had.getAttribute('href'))}"]` : '';
-    body.innerHTML = strip + signinWallsHtml(walls, lines, wallsFailed) + warn + `<div class="rs-summary"><span>${summary}</span>
+    body.innerHTML = strip + warn + `<div class="rs-summary"><span>${summary}</span>
             <div class="rs-actions">${toggle}${addBtn}</div></div>
         <div class="rs-note">Updated ${esc(estateAgo(f[ES.updated]))}.</div>
         ${shown.length || rest ? `<div class="rs-list">${shown.map(signinLineHtml).join('')}${rest}</div>` : ''}

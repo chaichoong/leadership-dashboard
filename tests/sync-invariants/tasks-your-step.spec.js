@@ -17,6 +17,7 @@ const F = {
 };
 const STEP_ID = 'recYourStepTasksA';
 const PLAIN_ID = 'recPlainApprovalA';
+const ROBOT_ID = 'recRobotStepTaskA';
 const DIVIDER = "----- The agent's work, as you approved it -----";
 
 function taskRecords() {
@@ -26,6 +27,11 @@ function taskRecords() {
       [F.name]: 'Pay the Example Water bill', [F.status]: 'Approval', [F.dueDate]: localTodayISO(),
       [F.approvalOutcome]: 'Approved as-is',
       [F.agentOutput]: `YOUR STEP: 1. Pay <b>by transfer</b>.\n2. Reply to the email.\n\n${DIVIDER}\n\nInvoice checked: 42.10.`,
+    } },
+    // A robot's sign-in card (8 Oct 2026): unapproved work, a step card all the same.
+    { id: ROBOT_ID, createdTime: now, fields: {
+      [F.name]: 'Read the broker portal schedule', [F.status]: 'Approval', [F.dueDate]: localTodayISO(),
+      [F.agentOutput]: `YOUR STEP: ROBOT SIGN-IN: portal.broker.example. A robot is blocked until it is signed in to Broker portal.\n\n${DIVIDER}\n\nDraft: the schedule summary.`,
     } },
     { id: PLAIN_ID, createdTime: now, fields: {
       [F.name]: 'Reply to the Example Lane tenant', [F.status]: 'Approval', [F.dueDate]: localTodayISO(),
@@ -58,7 +64,7 @@ async function mockAirtable(page) {
 
 async function waitForTasks(page) {
   await page.waitForFunction((ids) => typeof allTasks !== 'undefined' && ids.every((id) => allTasks.some((t) => t.id === id)),
-    [STEP_ID, PLAIN_ID], { timeout: 20000 });
+    [STEP_ID, PLAIN_ID, ROBOT_ID], { timeout: 20000 });
 }
 
 test.describe('Tasks drawer: Your step', () => {
@@ -82,5 +88,22 @@ test.describe('Tasks drawer: Your step', () => {
     await page.evaluate((id) => apvDecide(id, 'Approved as-is', false), STEP_ID);   // needs no note, so only the guard stops it
     await page.waitForTimeout(300);
     expect(patches.filter((p) => p.url.includes(STEP_ID))).toHaveLength(0);
+  });
+});
+
+// Review, 8 Oct 2026: the drawer recognised a step card only on approved work, so a robot's sign-in
+// card on unapproved work showed Approve, and Approve handed the agent the draft under the step.
+test.describe("Tasks drawer: a robot's sign-in card", () => {
+  test('shows the sign-in as text and no verdict buttons, and apvDecide writes nothing', async ({ page }) => {
+    const patches = await mockAirtable(page);
+    await page.goto(PAGE);
+    await waitForTasks(page);
+    const html = await page.evaluate((id) => renderApprovalBlock(findTaskAnywhere(id)), ROBOT_ID);
+    expect(html).toContain('data-your-step');
+    expect(html).toContain('A robot needs a sign-in');
+    expect(html).not.toContain('apvDecide(');
+    await page.evaluate((id) => apvDecide(id, 'Approved as-is', false), ROBOT_ID);
+    await page.waitForTimeout(300);
+    expect(patches.filter((p) => p.url.includes(ROBOT_ID))).toHaveLength(0);
   });
 });

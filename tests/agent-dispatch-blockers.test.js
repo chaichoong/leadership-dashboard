@@ -27,8 +27,11 @@ spec.loader.exec_module(m)
 AF = m.AF
 TASKS, WRITES, LEDGER = {}, [], []
 def rec(i, notes="", status="Today", outcome="", name="INSURANCE: test task", approved_at=""):
+    # An agent is always named on a task it blocks (8 Oct 2026: a SIGN-IN or SITE wall with no agent
+    # to own its card is refused).
     TASKS[i] = {"id": i, "fields": {AF["notes"]: notes, AF["status"]: status, AF["approvalOutcome"]: outcome,
-                                      AF["name"]: name, AF["approvedAt"]: approved_at}}
+                                      AF["name"]: name, AF["approvedAt"]: approved_at,
+                                      AF["teamMember"]: ["recAgentAaaaaaaaa"]}}
     return TASKS[i]
 def _get(i): return json.loads(json.dumps(TASKS[i]))
 def _patch(i, fields):

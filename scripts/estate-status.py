@@ -747,6 +747,9 @@ def blockers_summary(r):
                      turn=bool(w.get("turn")))
             if w.get("doneSaid"):
                 s["doneSaid"] = w["doneSaid"]
+            # A plan the sweep refused: the page shows no Your turn for it (8 Oct 2026).
+            if w.get("planProblem"):
+                s["planProblem"] = str(w["planProblem"])[:300]
         if w["kind"] == "TOOL":
             s.update(toolState=tool_state(w), tool=w.get("tool") or "", mergeCard=w.get("mergeCard"))
             if w.get("tool"):
@@ -776,7 +779,10 @@ def blockers_row(now, path=BLOCKERS_FILE):
     # When the sweep ran: every wall listed existed then. The Robot sign-ins panel uses it to
     # tell a wall Kevin has since signed in to from one raised after (25 Sep 2026); the file's
     # own time is exact, where a wall's age in days is rounded to 0.1 (144 minutes).
-    payload = dict(payload, sweptAt=datetime.fromtimestamp(os.path.getmtime(path), timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.000Z"))
+    # Since 8 Oct 2026 the sweep stamps when it READ the board (readAt): a card written while it ran
+    # was not seen by it, and the page's Your turn test must not think it was. The file's own time
+    # stands in for a report from before then.
+    payload = dict(payload, sweptAt=r.get("readAt") or datetime.fromtimestamp(os.path.getmtime(path), timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.000Z"))
     out = dict(row, status=status, detail=detail, payload=json.dumps(payload))
     if status == "Worked":
         out["lastWorked"] = stamp

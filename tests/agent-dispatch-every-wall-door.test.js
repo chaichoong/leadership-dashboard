@@ -96,11 +96,28 @@ print(json.dumps({"bad": bad["err"], "ok": ok["err"], "tool": tool["err"], "why"
     writeFileSync(dir + '/recPlanTaskAaaaaa.json', JSON.stringify({ why: 'answer the declarations and pay monthly', steps: [] }));
     const r = py(`
 m.HANDOVER_DIR = ${JSON.stringify(dir)}
+m.handover_plan_problem = lambda t: ""              # the window's own check passes this plan
 rec("recPlanTaskAaaaaa", outcome="Approved as-is", approved_at="2026-10-01T09:00:00.000Z")
 a = run(m.cmd_block, {"task": "recPlanTaskAaaaaa", "kind": "KEVIN", "subject": "purchase", "why": "Kevin buys it.", "finding": None})
 print(json.dumps({"err": a["err"], "out": f("recPlanTaskAaaaaa", "agentOutput")}))`);
     expect(r.err).toBeNull();
     expect(r.out).toMatch(/^YOUR STEP: answer the declarations and pay monthly Press Your turn on the AI Agents page, on your Mac/);
+  });
+
+  // 8 Oct 2026: the page shows Your turn from the card's own sentence until the sweep has looked, so
+  // the sentence is written only for a plan the window would open.
+  it('a plan the window would refuse gets no Your turn sentence on the card', () => {
+    const dir = mkdtempSync(tmpdir() + '/od-plan-');
+    writeFileSync(dir + '/recPlanTaskBbbbbb.json', JSON.stringify({ why: 'answer the declarations', steps: [] }));
+    const r = py(`
+m.HANDOVER_DIR = ${JSON.stringify(dir)}
+m.handover_plan_problem = lambda t: "step 6 (kevin) needs say and one of untilUrl"
+rec("recPlanTaskBbbbbb", outcome="Approved as-is", approved_at="2026-10-01T09:00:00.000Z")
+a = run(m.cmd_block, {"task": "recPlanTaskBbbbbb", "kind": "KEVIN", "subject": "purchase", "why": "Kevin buys it.", "finding": None})
+print(json.dumps({"err": a["err"], "out": f("recPlanTaskBbbbbb", "agentOutput")}))`);
+    expect(r.err).toBeNull();
+    expect(r.out).toMatch(/^YOUR STEP: answer the declarations The robot's plan for your window is being fixed/);
+    expect(r.out).not.toMatch(/Press Your turn/);
   });
 
   it('before a credential or identity wall it reminds the agent to search the brain and Gmail first', () => {

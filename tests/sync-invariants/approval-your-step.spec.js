@@ -21,22 +21,24 @@ const ES = {
   lastRun: 'flduxV3TYwp9wQX9O', detail: 'fldLRFP2nJttDVQOa', payload: 'fldiqs9lvyLimoR7i', updated: 'fld3q8WN5XqrER92Z',
 };
 
-function withStep({ feedback = '', turn = false, step = '1. Sign page 3 <b>now</b>.\n2. Post it to the council.' } = {}) {
+function withStep({ feedback = '', turn = false, step = '1. Sign page 3 <b>now</b>.\n2. Post it to the council.',
+                   outcome = 'Approved with minor edits', open = null, sweptAt = undefined, lmt = undefined } = {}) {
   const fx = defaultFixtures();
   const now = new Date().toISOString();
   fx.approvals.push({ id: ID, createdTime: now, fields: {
     [TF.name]: 'INSURANCE: Example Lane cover', [TF.status]: 'Approval', [TF.priority]: 'High',
-    [TF.approvalOutcome]: 'Approved with minor edits',
+    [TF.approvalOutcome]: outcome || undefined,
     [TF.agentOutput]: `YOUR STEP: ${step}\n\n${DIVIDER}\n\nQuote ready from Example Insurer, 41 a month.`,
-    [FEEDBACK]: feedback, [TF.sentForApprovalBy]: [AGENT_A], [TF.teamMember]: [AGENT_A], [TF.lmt]: now,
+    [FEEDBACK]: feedback, [TF.sentForApprovalBy]: [AGENT_A], [TF.teamMember]: [AGENT_A], [TF.lmt]: lmt || now,
     [TF.taskType]: 'Admin',
   } });
-  if (turn) {
+  if (turn || open) {
     fx.estate = [{ id: 'recBlk', fields: {
       [ES.key]: 'agent-blockers', [ES.kind]: 'report', [ES.label]: 'Robots blocked', [ES.status]: 'Worked',
       [ES.lastRun]: now, [ES.updated]: now, [ES.detail]: 'Robots blocked on 1 task.',
-      [ES.payload]: JSON.stringify({ open: [{ task: ID, name: 'INSURANCE: Example Lane cover', kind: 'KEVIN',
-        subject: 'purchase', turn: true, step: '1. Buy it.', yourStep: true }], stale: 0, closedWhileBlocked: [], woken: 0 }),
+      [ES.payload]: JSON.stringify(Object.assign({ open: open || [{ task: ID, name: 'INSURANCE: Example Lane cover', kind: 'KEVIN',
+        subject: 'purchase', turn: true, step: '1. Buy it.', yourStep: true }], stale: 0, closedWhileBlocked: [], woken: 0 },
+        sweptAt ? { sweptAt } : {})),
     } }];
   }
   return fx;
@@ -193,5 +195,101 @@ test.describe('Your step: an approved card back in his lane', () => {
     const card = page.locator(`[data-apv-card="${ID}"]`);
     await expect(card.locator('[data-apv-step-said]')).toContainText('paid, ref EX-12');
     await expect(card.locator('[data-apv-step-done]')).toHaveCount(0);
+  });
+});
+
+// Kevin, 8 Oct 2026: "we seem to have bits everywhere: some sign-ins at the top, some sign-ins on cards,
+// some cards that need sign-ins but don't have the buttons." A SIGN-IN or SITE wall puts its task in the
+// queue as a card with its one button, whatever its verdict, and a Your step card's Your turn button
+// shows the moment the card arrives.
+const TURN_SENTENCE = 'Press Your turn on the AI Agents page, on your Mac: the robot fills in everything up to your step and hands you the window.';
+test.describe("a robot's sign-in is a card", () => {
+  test.use({ userAgent: 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0 Safari/537.36' });
+
+  test('a SIGN-IN wall on unapproved work is a card with Sign in, I can\'t do this and the knock-back, and no verdict or Done', async ({ page }) => {
+    await mockAgentsPage(page, withStep({ outcome: '', step: 'ROBOT SIGN-IN: portal.broker.example. A robot is blocked until it is signed in to Broker portal. Press Sign in.' }));
+    await loadAgentsPage(page);
+    await page.click('#ptab-approvals');
+    const card = page.locator(`[data-apv-card="${ID}"]`);
+    await expect(card.locator('.apv-step-head')).toHaveText('A robot needs you to sign it in. Nothing else is asked of you.');
+    await expect(card.locator('[data-apv-step-signin]')).toHaveAttribute('href', 'robotsignin://site/portal.broker.example');
+    await expect(card.locator('[data-apv-step-signin]')).toHaveText('Sign in');
+    await expect(card.locator('[data-apv-step-cant]')).toBeVisible();
+    await expect(card.locator('[data-apv-step-done]')).toHaveCount(0);
+    await expect(card.locator('button[onclick*="agDecide"]')).toHaveCount(0);
+    await expect(card.locator('.apv-defer')).toBeVisible();
+    await expect(card.locator('[data-apv-step-turn]')).toHaveCount(0);
+  });
+
+  test('a flat opens its own profile, and a SITE wall adds the exact address', async ({ page }) => {
+    await mockAgentsPage(page, withStep({ outcome: '', step: 'ROBOT SIGN-IN: my.utilita.example (utilita-apt2). A robot is blocked until it is signed in to Flat 2.' }));
+    await loadAgentsPage(page);
+    await page.click('#ptab-approvals');
+    await expect(page.locator(`[data-apv-card="${ID}"] [data-apv-step-signin]`)).toHaveAttribute('href', 'robotsignin://profile/utilita-apt2');
+    await mockAgentsPage(page, withStep({ outcome: 'Approved as-is', step: 'ROBOT SITE: www.clips.example. A robot is blocked until www.clips.example is on its list.' }));
+    await loadAgentsPage(page);
+    await page.click('#ptab-approvals');
+    const btn = page.locator(`[data-apv-card="${ID}"] [data-apv-step-signin]`);
+    await expect(btn).toHaveAttribute('href', 'robotsignin://add/www.clips.example');
+    await expect(btn).toHaveText('+ Add this site');
+    await expect(page.locator(`[data-apv-card="${ID}"] .apv-step-head`)).toHaveText('A robot needs a site added to its list. Nothing else is asked of you.');
+  });
+
+  test("I can't on a robot card writes the reason; the page never writes a done line for one", async ({ page }) => {
+    const patches = await mockAgentsPage(page, withStep({ outcome: '', step: 'ROBOT SIGN-IN: portal.broker.example. Blocked.' }));
+    await loadAgentsPage(page);
+    await page.click('#ptab-approvals');
+    const card = page.locator(`[data-apv-card="${ID}"]`);
+    expect(await page.evaluate((id) => window.apvStepDone(id), ID)).toBe('elsewhere');
+    await card.locator(`#apvNote-${ID}`).fill('We have no account there.');
+    await card.locator('[data-apv-step-cant]').click();
+    await expect.poll(() => patches.filter((p) => p.id === ID).length).toBe(1);
+    expect(patches.find((x) => x.id === ID).fields[FEEDBACK]).toMatch(/^KEVIN STEP CANT \[[^\]]+\]: We have no account there\.$/);
+  });
+
+  test('a plain step on unapproved work is still never a Your step card', async ({ page }) => {
+    await mockAgentsPage(page, withStep({ outcome: '' }));
+    await loadAgentsPage(page);
+    await page.click('#ptab-approvals');
+    await expect(page.locator(`[data-apv-card="${ID}"][data-apv-your-step]`)).toHaveCount(0);
+  });
+});
+
+test.describe('Your turn shows the moment the card arrives', () => {
+  test.use({ userAgent: 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0 Safari/537.36' });
+  const ago = (min) => new Date(Date.now() - min * 60000).toISOString();
+  const OTHER = [{ task: 'recOtherTaskAaaaa', name: 'Other', kind: 'KEVIN', subject: 'payment', turn: false }];
+
+  test('before the sweep has looked, the card that says Press Your turn has the button', async ({ page }) => {
+    await mockAgentsPage(page, withStep({ step: 'Answer the declarations. ' + TURN_SENTENCE, open: OTHER, sweptAt: ago(20), lmt: ago(2) }));
+    await loadAgentsPage(page);
+    await page.click('#ptab-approvals');
+    await expect(page.locator(`[data-apv-card="${ID}"] [data-apv-step-turn="${ID}"]`)).toHaveAttribute('href', `robotsignin://turn/${ID}`);
+  });
+
+  test('once the sweep has looked, its verdict stands: no button for a plan it did not mark', async ({ page }) => {
+    await mockAgentsPage(page, withStep({ step: 'Answer the declarations. ' + TURN_SENTENCE, open: OTHER, sweptAt: ago(1), lmt: ago(30) }));
+    await loadAgentsPage(page);
+    await page.click('#ptab-approvals');
+    await expect(page.locator(`[data-apv-card="${ID}"]`)).toBeVisible();
+    await expect(page.locator(`[data-apv-card="${ID}"] [data-apv-step-turn]`)).toHaveCount(0);
+  });
+
+  test('a plan the sweep has refused gets no button, even on a card written since', async ({ page }) => {
+    const refused = [{ task: ID, name: 'INSURANCE: Example Lane cover', kind: 'KEVIN', subject: 'purchase', turn: false,
+      planProblem: 'step 6 (kevin) needs say and one of untilUrl' }];
+    await mockAgentsPage(page, withStep({ step: 'Answer the declarations. ' + TURN_SENTENCE, open: refused, sweptAt: ago(20), lmt: ago(2) }));
+    await loadAgentsPage(page);
+    await page.click('#ptab-approvals');
+    await expect(page.locator(`[data-apv-card="${ID}"]`)).toBeVisible();
+    await expect(page.locator(`[data-apv-card="${ID}"] [data-apv-step-turn]`)).toHaveCount(0);
+  });
+
+  test('a card without the sentence (a plan being fixed) has no button before the sweep either', async ({ page }) => {
+    await mockAgentsPage(page, withStep({ step: "Answer the declarations. The robot's plan for your window is being fixed.", open: OTHER, sweptAt: ago(20), lmt: ago(2) }));
+    await loadAgentsPage(page);
+    await page.click('#ptab-approvals');
+    await expect(page.locator(`[data-apv-card="${ID}"]`)).toBeVisible();
+    await expect(page.locator(`[data-apv-card="${ID}"] [data-apv-step-turn]`)).toHaveCount(0);
   });
 });
