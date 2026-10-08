@@ -7010,7 +7010,9 @@ function signinWallsHtml(walls, lines, failed){
             : !SIGNIN_ON_MAC ? `<span class="rs-mac">${w.kind === 'SIGN-IN' ? 'Sign in' : 'Add it'} on your Mac</span>`
             : w.kind === 'SIGN-IN'
                 ? `<a class="btn btn-success btn-sm" href="${esc(w.profile ? 'robotsignin://profile/' + encodeURIComponent(w.profile) : 'robotsignin://site/' + encodeURIComponent(w.host))}" data-rs-wall="${esc(w.subject)}" aria-label="Sign in to ${esc(w.label || w.subject)}">Sign in</a>`
-                : `<a class="btn btn-sm" href="robotsignin://add" data-rs-wall-add="${esc(w.subject)}" aria-label="Add ${esc(w.subject)} to the robot's list">+ Add this site</a>`;
+                // The wall's own address rides on the link (8 Oct 2026): a blank "Add a new site" box had
+                // Kevin add tiktok.com three times for a robot blocked on www.tiktok.com.
+                : `<a class="btn btn-sm" href="${esc('robotsignin://add/' + encodeURIComponent(w.subject))}" data-rs-wall-add="${esc(w.subject)}" aria-label="Add ${esc(w.subject)} to the robot's list">+ Add this site</a>`;
         const note = w.done ? (w.doneBy === 'signed-in'
                 ? 'The robot has found it signed in since. It picks the task up at its next pass.'
                 : 'You signed in since. The robot picks the task up at its next pass.')
