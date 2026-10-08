@@ -156,6 +156,7 @@ a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}
 .apv-step-head{font-weight:var(--fw-semibold);color:var(--text-primary);margin-bottom:4px}
 .apv-step-text{color:var(--text-primary);white-space:pre-wrap;word-break:break-word;margin-bottom:6px}
 .apv-step-said{border:1px solid var(--border-default);border-radius:var(--radius-md);background:var(--success-bg);color:var(--text-primary);padding:8px 12px;font-size:var(--fs-sm);word-break:break-word}
+.apv-step-said.apv-step-cant{background:var(--warning-bg)}
 .apv-signin{display:flex;gap:10px;align-items:center;flex-wrap:wrap;justify-content:space-between;border:1px solid var(--border-default);border-radius:var(--radius-md);background:var(--accent-soft);padding:8px 12px;margin:6px 0 8px;font-size:var(--fs-sm)}
 .apv-signin-site{display:inline-block;border:1px solid var(--border-default);border-radius:var(--radius-full);padding:3px 10px;background:var(--bg-surface);color:var(--text-primary);text-decoration:none;font-size:var(--fs-xs)}
 .apv-signin-site:hover{border-color:var(--accent)}
@@ -2582,6 +2583,9 @@ function apvCardHtml(t){
 const APV_STEP_MARK = 'YOUR STEP:';
 const APV_STEP_DIVIDER = "----- The agent's work, as you approved it -----";
 const APV_STEP_DONE_MARK = 'KEVIN STEP DONE';
+// "I can't do this" (Kevin, 8 Oct 2026): the same box, his reason under this mark. The sweep
+// sends the task back to its agent as Changes requested (send_back_blocked there).
+const APV_STEP_CANT_MARK = 'KEVIN STEP CANT';
 const APV_APPROVED_OUTCOMES = ['Approved as-is', 'Approved with minor edits'];
 function apvYourStep(t){
     if(!t || !APV_APPROVED_OUTCOMES.includes(t.outcome)) return null;
@@ -2590,12 +2594,12 @@ function apvYourStep(t){
     if(!s.startsWith(APV_STEP_MARK) || cut === -1) return null;
     return { step: s.slice(APV_STEP_MARK.length, cut).trim(), work: s.slice(cut + APV_STEP_DIVIDER.length).replace(/^\n+/, '') };
 }
-// His newest "done" line, or null. The sweep, not this page, decides whether it clears the wall.
+// His newest "done" or "can't" line, or null. The sweep, not this page, decides what it does.
 function apvStepDoneSaid(feedback){
-    const re = /^KEVIN STEP DONE \[(\d{4}-\d{2}-\d{2}T[0-9:.]+Z)\]:[ \t]*(.*)$/gm;
+    const re = /^KEVIN STEP (DONE|CANT) \[(\d{4}-\d{2}-\d{2}T[0-9:.]+Z)\]:[ \t]*(.*)$/gm;
     let m, last = null;
-    while((m = re.exec(String(feedback||'')))) last = m;
-    return last && last[2].trim() ? { at: last[1], evidence: last[2].trim() } : null;
+    while((m = re.exec(String(feedback||'')))) if(!last || Date.parse(m[2]) >= Date.parse(last[2])) last = m;
+    return last && last[3].trim() ? { cant: last[1] === 'CANT', at: last[2], evidence: last[3].trim() } : null;
 }
 // The Your turn link, from the same agent-blockers row the sign-ins panel reads (KEVIN walls
 // marked turn by the sweep). Re-drawn when that row arrives, which can be after the queue.
@@ -2635,33 +2639,47 @@ function apvStepCardHtml(t, ys){
         </details>
         ${apvTrailHtml(t)}
         <div class="apv-decide" data-apv-decide>
-            ${said
+            ${said && said.cant
+                ? `<div class="apv-step-said apv-step-cant" data-apv-step-said>You said you can't do this (${esc(agoText(said.at))} ago): ${esc(said.evidence)}. Within half an hour it goes back to ${esc(agent)} as Request changes, to find another way.</div>`
+                : said
                 ? `<div class="apv-step-said" data-apv-step-said>You said it is done (${esc(agoText(said.at))} ago): ${esc(said.evidence)}. The robot checks it within half an hour, then the agent finishes the job.</div>`
                 : `<div class="apv-actions" data-apv-step-actions>
-                    <div class="apv-note-row"><textarea class="apv-note" id="apvNote-${t.id}" rows="1" placeholder="What proves it is done: the receipt, the reference, where the signed copy went" oninput="apvGrowNote(this)"></textarea></div>
+                    ${apvNoteRowHtml(t.id, "What proves it is done (the receipt, the reference, where the signed copy went), or why you can't do it", true, false)}
                     <button class="btn btn-success" data-apv-step-done onclick="apvStepDone('${t.id}')" title="Tells the robot you have done your step. It checks your proof, then the agent finishes the job.">Done, here is the proof</button>
-                </div>`}
+                    <button class="btn" data-apv-step-cant onclick="apvStepCant('${t.id}')" title="Goes back to the agent as Request changes, with your reason, to find another way. Say in the box why you can't do it.">I can't do this</button>
+                </div>
+                <div id="apvFiles-${t.id}" class="apv-file-list">${apvFileChipsHtml(t.id)}</div>`}
             ${apvDeferRow(t.id)}
         </div>
     </div>`;
 }
 // The "Done, here is the proof" box. Writes the proof into Approval Feedback (and its durable copy
 // in Feedback History) through the page's own Airtable write. Never the verdict: the task stays
-// approved, and the sweep is what clears the wall.
-async function apvStepDone(taskId){
+// approved, and the sweep is what clears the wall. Files attached or dropped on the box go onto
+// the task first and are named on the line, so the agent checking the receipt can find them
+// (Kevin, 8 Oct 2026). A file alone is proof enough.
+//
+// "I can't do this" (Kevin, 8 Oct 2026) is the same write under APV_STEP_CANT_MARK, and needs his
+// reason in words: the agent has to know what to get round. The sweep sends the task back to its
+// agent as Changes requested with that reason; this page never writes the verdict itself.
+function apvStepDone(taskId){ return apvStepSay(taskId, false); }
+function apvStepCant(taskId){ return apvStepSay(taskId, true); }
+async function apvStepSay(taskId, cant){
     const t = allApprovals.find(x=>x.id===taskId);
     if(!t || !apvYourStep(t)) return 'elsewhere';
     if(_apvSaving.has(taskId)) return 'elsewhere';
     const el = document.getElementById('apvNote-'+taskId);
-    const evidence = String(el && el.value || '').replace(/\s+/g, ' ').trim();
-    if(!evidence){
-        toast('Say what proves it first: the receipt, the reference, or where the signed copy went.');
+    const words = String(el && el.value || '').replace(/\s+/g, ' ').trim();
+    const files = apvFilesFor(taskId).length + ((_apvDrafts[taskId] && _apvDrafts[taskId].uploaded) || []).length;
+    if(cant ? !words : (!words && !files)){
+        toast(cant ? "Say why you can't do it first, so the agent knows what to get round."
+                   : 'Say what proves it first, or attach it: the receipt, the reference, or where the signed copy went.');
         if(el) el.focus();
         return 'empty';
     }
     const card = document.querySelector(`[data-apv-card="${taskId}"]`);
-    const btn = card ? card.querySelector('[data-apv-step-done]') : null;
-    if(btn) btn.disabled = true;
+    const btns = card ? Array.from(card.querySelectorAll('[data-apv-step-done],[data-apv-step-cant]')) : [];
+    btns.forEach(b=>{ b.disabled = true; });
     _apvSaving.add(taskId);
     try {
         const live = await atFetchOne(TASKS_TBL, taskId);
@@ -2672,23 +2690,26 @@ async function apvStepDone(taskId){
             await loadApprovals(); renderApprovals();
             return 'elsewhere';
         }
+        const attached = await uploadQueuedApprovalFiles(taskId);
+        const said = [words, attached.length ? `Attached: ${attached.join(', ')}.` : ''].filter(Boolean).join(' ');
         const nowIso = new Date().toISOString();
         const prior = String(gf(live,TF.approvalFeedback)||'').replace(/\s+$/, '');
         const payload = {};
-        payload[TF.approvalFeedback] = (prior ? prior + '\n' : '') + `${APV_STEP_DONE_MARK} [${nowIso}]: ${evidence}`;
+        payload[TF.approvalFeedback] = (prior ? prior + '\n' : '') + `${cant ? APV_STEP_CANT_MARK : APV_STEP_DONE_MARK} [${nowIso}]: ${said}`;
         const hist = String(gf(live,TF.feedbackHistory)||'').replace(/\s+$/, '');
-        payload[TF.feedbackHistory] = (hist + '\n\n[' + nowIso.replace('T',' ').slice(0,16) + '] Done, here is the proof: ' + evidence).trim();
+        payload[TF.feedbackHistory] = (hist + '\n\n[' + nowIso.replace('T',' ').slice(0,16) + '] '
+            + (cant ? "I can't do this step: " : 'Done, here is the proof: ') + said).trim();
         await atUpdate(TASKS_TBL, taskId, payload);
-        try { await postTaskComment(taskId, 'Kevin did his step. Proof: ' + evidence); }
-        catch(e){ console.error('step done comment failed', e); }
+        try { await postTaskComment(taskId, cant ? "Kevin can't do his step. Why: " + said : 'Kevin did his step. Proof: ' + said); }
+        catch(e){ console.error('step comment failed', e); }
         t.feedback = payload[TF.approvalFeedback];
         delete _apvDrafts[taskId];
         if(card) card.outerHTML = apvCardHtml(t);
         return 'saved';
     } catch(e){
-        if(btn) btn.disabled = false;
+        btns.forEach(b=>{ b.disabled = false; });
         if(e.message==='auth') return 'auth';
-        console.error('step done failed', e);
+        console.error('step write failed', e);
         toast('Not saved: ' + (e && e.message || e) + '. Your words are still in the box.');
         return 'failed';
     } finally {
@@ -2696,6 +2717,7 @@ async function apvStepDone(taskId){
     }
 }
 window.apvStepDone = apvStepDone;
+window.apvStepCant = apvStepCant;
 
 // The note box sits in the decide row, open on every card: typing and one
 // click is the whole of feedback. It is also where a file is dropped, and
@@ -2715,7 +2737,7 @@ function apvRememberBoxHtml(taskId){
             <input type="checkbox" id="apvRemember-${taskId}" checked style="margin:0"> Remember this
         </label>`;
 }
-function apvNoteRowHtml(taskId, placeholder, withAttach){
+function apvNoteRowHtml(taskId, placeholder, withAttach, withRemember = true){
     const note = `<textarea class="apv-note" id="apvNote-${taskId}" rows="1" placeholder="${esc(placeholder)}" title="Easier to say than type? Paste a Loom link and the agent reads what you said." oninput="apvGrowNote(this)"></textarea>`;
     // No .apv-attach here: that class is what lets a drop through the page-wide
     // guard, and this box has no drop handler to catch it.
@@ -2728,7 +2750,7 @@ function apvNoteRowHtml(taskId, placeholder, withAttach){
             <label class="apv-attach-btn" for="apvFile-${taskId}" title="Attach a screenshot, letter or document, or drop one on the box. It goes onto the task with your decision.">&#128206; Attach</label>
             <input type="file" id="apvFile-${taskId}" multiple style="display:none"
                    onchange="apvQueueFiles('${taskId}', this.files); this.value='';">
-            ${apvRememberBoxHtml(taskId)}
+            ${withRemember ? apvRememberBoxHtml(taskId) : ''}
         </div>`;
 }
 function apvGrowNote(el){
