@@ -250,7 +250,7 @@ ka.load_sites = lambda: {
   'www.edfenergy.com': {'label': 'EDF Energy', 'login': True, 'loginUrl': 'https://www.edfenergy.com/myaccount/login'},
   'www.topcashback.co.uk': {'label': 'TopCashback', 'login': True, 'loginUrl': 'https://www.topcashback.co.uk/logon/'}}
 def read_site(host, entry):
-    line = {'at': '2026-10-02T05:40:30.921Z', 'cmd': 'session', 'site': host, 'url': entry['loginUrl'], 'signedIn': False,
+    line = {'at': arg.get('readAt', '2026-10-02T05:40:30.921Z'), 'cmd': 'session', 'site': host, 'url': entry['loginUrl'], 'signedIn': False,
             'botCheck': False, 'signinPage': True, 'profile': 'default'}
     with open(arg['ledger'], 'a') as fh:
         fh.write(json.dumps(line) + '\\n')
@@ -273,6 +273,9 @@ ka.create_task = lambda fields, dry_run: created.append(fields[ka.F['name']]) or
 if arg.get('broken'):
     def boom(*a, **k): raise RuntimeError('ledger unreadable')
     sh.unheld_signins = boom
+if arg.get('triedBroken'):
+    def boom2(*a, **k): raise RuntimeError('ledger unreadable')
+    sh.kevin_signin_failed = boom2
 buf = io.StringIO()
 with contextlib.redirect_stdout(buf):
     code = ka.cmd_run()
@@ -328,6 +331,24 @@ print('---JSON---'); print(json.dumps({'code': code, 'created': created, 'said':
     const both = run(ONE_SIGNIN, { groups: [{ host: TCB, tasks: [own, { id: 'recQuote', name: 'Get the Chedburgh quote' }] }] });
     expect(both.created).toEqual([]);
     expect(both.status[TCB].task).toBe('already waiting');
+  });
+
+  // Kevin, 8 Oct 2026: his window closed and this check still found the site signed out. Asking him
+  // again cannot help, and the blocker sweep sends the waiting task another route.
+  it('a site his own sign-in did not get the robot into raises no card, even with work waiting', () => {
+    const ago = (h) => new Date(Date.now() - h * 3600e3).toISOString();
+    const waiting = { groups: [{ host: TCB, tasks: [{ id: 'recQuote', name: 'Get the Chedburgh quote' }] }] };
+    const got = run([...ONE_SIGNIN, login(ago(1), TCB)], { ...waiting, readAt: ago(0.5) });
+    expect(got.created).toEqual([]);
+    expect(got.status[TCB].kevinTried).toBe(true);
+    expect(got.status[TCB].task).toBe('not raised: his own sign-in did not get the robot in');
+    // A rule that cannot be worked out never silences the ask (review, 8 Oct 2026).
+    const broken = run([...ONE_SIGNIN, login(ago(1), TCB)], { ...waiting, readAt: ago(0.5), triedBroken: true });
+    expect(broken.created).toEqual(['SIGN-IN: TopCashback session lapsed']);
+    expect(broken.status[TCB].kevinTriedError).toBe('ledger unreadable');
+    // His window a day earlier, read next morning: it may have worked and expired, so he is asked.
+    expect(run([...ONE_SIGNIN, login(ago(20), TCB)], { ...waiting, readAt: ago(0.5) }).created)
+      .toEqual(['SIGN-IN: TopCashback session lapsed']);
   });
 
   it('a waiting read that fails raises nothing and says NOT CHECKED, never a quiet board', () => {

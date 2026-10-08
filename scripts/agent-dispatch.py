@@ -7654,6 +7654,10 @@ def kevin_tried_reason(kind, host, sites, since, profile="default", events=None)
                 f"landed on the sign-in page ({f[1][:16]})") if f else ""
     if kind == "SITE" and not entry:
         a = signin_hold.kevin_login_after(events, {host}, since, profile)
+        near = None if a else kevin_wall_answer_nearby(events, host, since, profile)
+        if near:
+            return (f"Kevin answered the wall on {near[2]} by signing in at {near[1]} (his window closed at "
+                    f"{near[0][:16]}), and {host} is the same site: use {near[1]}")
         if a and a[1] != host:
             # He answered this wall on another address (AXA's quote site for axa.co.uk): that is the site.
             return (f"Kevin answered this wall by signing in at {a[1]} (his window closed at {a[0][:16]}), "
@@ -7661,6 +7665,28 @@ def kevin_tried_reason(kind, host, sites, since, profile="default", events=None)
         return (f"Kevin's sign-in window on {host} closed at {a[0][:16]}, and {host} is still not a "
                 "sign-in site on the robot's list") if a else ""
     return ""
+
+
+def kevin_wall_answer_nearby(events, host, since, profile="default"):
+    """(at, signed-in host, wall) of his newest window opened for a SITE wall on HOST with or without
+    its leading "www." (axa.co.uk for www.axa.co.uk), or None. After "use landlordaxainsurance.com" for
+    axa.co.uk, an agent could still raise one on www.axa.co.uk (review, 8 Oct 2026). Nothing wider: by
+    registrable domain every *.service.gov.uk host is one site, and as parent and child an answer for
+    gov.uk would cover every council and every GOV.UK service (two review rounds)."""
+    since_at = _utc(since)
+    best = None
+    for e in events or []:
+        if not isinstance(e, dict) or e.get("cmd") != "login" or (e.get("profile") or "default") != profile:
+            continue
+        wall = str(e.get("forWall") or "").lower()
+        if not wall or wall == host or not (host == "www." + wall or wall == "www." + host):
+            continue
+        at = _utc(e.get("at"))
+        if not at or (since_at and at <= since_at):
+            continue
+        if best is None or at > best[0]:
+            best = (at, str(e.get("at")), str(e.get("host") or "").lower(), wall)
+    return best[1:] if best else None
 
 
 def kevin_tried_since(now=None):

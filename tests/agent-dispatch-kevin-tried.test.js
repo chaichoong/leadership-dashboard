@@ -49,6 +49,9 @@ SITES = {"portal.broker.example": {"label": "Broker portal", "login": True, "log
          "www.clips.example": {"label": "Clips (public reads)", "login": False},
          "clips.example": {"label": "clips.example", "login": True, "loginUrl": "https://clips.example/"},
          "cover.example": {"label": "Cover (landing pages)", "login": False},
+         "www.cover.example": {"label": "Cover (www)", "login": False},
+         "accounts.google.com": {"label": "Google accounts", "login": False},
+         "gov.uk": {"label": "GOV.UK", "login": False},
          "quotes.cover-insurer.example": {"label": "Cover quotes", "login": True, "loginUrl": "https://quotes.cover-insurer.example/"}}
 m.load_login_sites = lambda: SITES
 m.BROWSER_LEDGER = ${JSON.stringify(ledger)}
@@ -164,6 +167,40 @@ print(json.dumps({"a": a, "wall": m.task_blocker(notes("t1"))}))`,
     [login(iso(30 * H), P), out(iso(30 * H - 60e3), P), seen(iso(29 * H), 'oauth.broker-id.example')]);
     expect(r.a).toMatch(/^ERROR: refusing a SIGN-IN wall on portal\.broker\.example: Kevin's sign-in window on portal\.broker\.example/);
     expect(r.wall).toBeNull();
+  });
+
+  // Review, 8 Oct 2026: after "use quotes.cover-insurer.example" for cover.example, an agent could still
+  // raise a SITE wall on www.cover.example and the panel would show "+ Add this site" again.
+  it('a SITE wall on the www. twin of an address he answered is refused with the site he used; nothing wider is joined', () => {
+    const r = py(`
+rec("t1"); rec("t2")
+a = run(m.cmd_block, {"task": "t1", "kind": "SITE", "subject": "www.cover.example", "why": "Read-only.", "finding": None})
+b = run(m.cmd_block, {"task": "t2", "kind": "SITE", "subject": "accounts.google.com", "why": "Read-only.", "finding": None})
+rec("t3"); rec("t4"); rec("t5")
+c = run(m.cmd_block, {"task": "t3", "kind": "SITE", "subject": "www.access.service.gov.uk", "why": "Read-only.", "finding": None})
+d = run(m.cmd_block, {"task": "t4", "kind": "SITE", "subject": "www.sefton.gov.uk", "why": "Read-only.", "finding": None})
+e = run(m.cmd_block, {"task": "t5", "kind": "SITE", "subject": "drive.google.com", "why": "Read-only.", "finding": None})
+print(json.dumps({"a": a, "b": b, "c": c, "d": d, "e": e}))`,
+    [login(iso(30 * H), 'quotes.cover-insurer.example', { forWall: 'cover.example' }),
+     login(iso(30 * H), 'myaccount.google.com', { forWall: 'mail.google.com' }),
+     // Every *.service.gov.uk host shares one registrable domain: Companies House is not Government Gateway.
+     login(iso(30 * H), 'identity.company-information.service.gov.uk', { forWall: 'find-and-update.company-information.service.gov.uk' }),
+     // An answer for an umbrella (gov.uk, google.com) never covers the services under it.
+     login(iso(30 * H), 'signin.account.gov.uk', { forWall: 'gov.uk' }),
+     login(iso(30 * H), 'login.google.com', { forWall: 'google.com', timedOut: true })]);
+    expect(r.a).toMatch(/^ERROR: refusing a SITE wall on www\.cover\.example: Kevin answered the wall on cover\.example by signing in at quotes\.cover-insurer\.example .*use quotes\.cover-insurer\.example/);
+    expect(r.b).toBeNull();
+    expect(r.c).toBeNull();
+    expect(r.d).toBeNull();
+    expect(r.e).toBeNull();
+  });
+
+  it("a www. wall after an answer that timed out (red button, Chrome left running) is still caught", () => {
+    const r = py(`
+rec("t1")
+print(json.dumps({"a": run(m.cmd_block, {"task": "t1", "kind": "SITE", "subject": "www.cover.example", "why": "Read-only.", "finding": None})}))`,
+    [login(iso(30 * H), 'quotes.cover-insurer.example', { forWall: 'cover.example', timedOut: true })]);
+    expect(r.a).toMatch(/^ERROR: refusing a SITE wall on www\.cover\.example: Kevin answered the wall on cover\.example/);
   });
 
   it('submit refuses a SIGN-IN NEEDED line for a site his try did not get the robot into', () => {

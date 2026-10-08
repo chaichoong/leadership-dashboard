@@ -755,3 +755,15 @@ print(json.dumps({"re": [ad.RECOMMENDED_RE.pattern, tm.RECOMMENDED_RE.pattern], 
     expect(r.esc).toEqual([true, true]);
   });
 });
+
+// Review, 8 Oct 2026: could a decision card carry a SIGN-IN NEEDED line into the sign-in lane, and so
+// ask Kevin again for a site he already tried? No: the brief gate refuses the line outright. Pinned here
+// so the sign-in re-ask guard never depends on an assumption.
+describe('a decision card never carries a sign-in request', () => {
+  it('a brief with a SIGN-IN NEEDED line is refused and nothing is written', () => {
+    const r = escalate({ reason: 'Sell 12 Viola Street or keep it as an HMO?',
+                         brief: BRIEF + '\n\nSIGN-IN NEEDED: Broker portal (https://portal.broker.example/login)' });
+    expect(r.refused).toMatch(/the brief has a line the card reads as something else \('SIGN-IN NEEDED:'\)/);
+    expect(r.captured.fields).toBeUndefined();
+  });
+});
