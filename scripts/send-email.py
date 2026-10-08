@@ -331,9 +331,10 @@ def body_hash(body):
 
 def _ts(value):
     try:
-        return datetime.fromisoformat(str(value or "").replace("Z", "+00:00"))
+        t = datetime.fromisoformat(str(value or "").replace("Z", "+00:00"))
     except ValueError:
         return None
+    return t if t.tzinfo else t.replace(tzinfo=timezone.utc)   # Airtable and the ledger write UTC
 
 
 def second_send_problem(task_id, mail):
@@ -341,10 +342,12 @@ def second_send_problem(task_id, mail):
 
     ONE TASK, A SECOND EMAIL (Kevin, 7 Oct 2026, finding 20261002-agent-dispatch-716). The ledger
     refused any send on a task that had ever sent, so a task Kevin approved for a second round (a new
-    contractor, a reply on the same matter) could never send, and its card came back to him after
+    contractor on the same certificate task) could never send, and its card came back to him after
     every approval. A second email goes when BOTH hold: Kevin approved after the last send, and it is
-    not an email already sent on this task (same recipients and subject, and the same body where the
-    row recorded one). A re-approval of the same card from an old page tab never sends it twice."""
+    not an email already sent on this task. "The same email" is the same recipients and the same
+    subject, whatever the body: a minor edit to a card that already went never sends it again, and a
+    real chase changes its subject (review, 8 Oct 2026). A row that cannot be compared (no subject,
+    no event) counts as the same email: a missed email is recoverable, a second copy is not."""
     rows = []
     try:
         with open(SENT_LEDGER) as fh:
@@ -353,7 +356,7 @@ def second_send_problem(task_id, mail):
                     continue
                 row = json.loads(line)
                 if (row.get("task") == task_id and not row.get("recipient") and ledger_kind(row) == "send"
-                        and row.get("event") == "sent"):
+                        and row.get("event") in ("sent", None)):
                     rows.append(row)
     except FileNotFoundError:
         return ""
@@ -364,15 +367,17 @@ def second_send_problem(task_id, mail):
     if approved is None or last is None or approved <= last:
         return (f"it was already sent at {latest.get('ts')} to {', '.join(latest.get('to') or [])}, and "
                 "nothing has been approved since. Refusing to send it twice")
-    people = sorted(a.lower() for a in (mail.get("to") or []) + (mail.get("cc") or []))
+    def people(to, cc):
+        return sorted(str(a).lower() for a in (to or []) + (cc or []))
     subject = " ".join(str(mail.get("subject") or "").split()).lower()
-    digest = body_hash(mail.get("body"))
     for r in rows:
-        same_people = sorted(a.lower() for a in (r.get("to") or []) + (r.get("cc") or [])) == people
-        same_subject = " ".join(str(r.get("subject") or "").split()).lower() == subject
-        if same_people and same_subject and r.get("bodyHash") in (None, digest):
-            return (f"this email (to {', '.join(r.get('to') or [])}, \"{r.get('subject')}\") already went at "
-                    f"{r.get('ts')}. Refusing to send it twice")
+        # A row written before cc was recorded is compared on its TO alone (review, 8 Oct 2026).
+        mine = people(mail.get("to"), mail.get("cc") if "cc" in r else [])
+        theirs = people(r.get("to"), r.get("cc") if "cc" in r else [])
+        row_subject = " ".join(str(r.get("subject") or "").split()).lower()
+        if mine == theirs and (not row_subject or row_subject == subject or r.get("event") is None):
+            return (f"this email (to {', '.join(r.get('to') or [])}, \"{r.get('subject') or 'no subject recorded'}\") "
+                    f"already went at {r.get('ts')}. Refusing to send it twice")
     return ""
 
 
@@ -1571,8 +1576,12 @@ def _resolve_intent(args):
     query = f"in:sent to:{to[0]} after:{since}" + (f' subject:"{subject}"' if subject else "")
     hits = sent_folder_search(query, account)
     if hits:
+        # The intent row's email goes onto the recovered `sent` row, so a later approval of the same card
+        # is recognised as the email that already went (review of 716, 8 Oct 2026).
         ledger_append({"task": args.task, "ts": now_iso(), "event": "sent", "kind": "send",
-                       "to": to, "recovered": True, "messageId": hits[0].get("id"),
+                       "from": last.get("from"), "to": to, "cc": last.get("cc") or [],
+                       "subject": last.get("subject"), "bodyHash": last.get("bodyHash"),
+                       "recovered": True, "messageId": hits[0].get("id"),
                        "note": f"found in {account} Sent by resolve-intent"})
         print(json.dumps({"resolved": args.task, "went": True, "account": account,
                           "found": len(hits), "to": to[0]}))

@@ -152,16 +152,46 @@ describe('a second email on one task (finding 20261002-agent-dispatch-716, 7 Oct
     expect(r.calls).toHaveLength(0);
   });
 
-  it('same people and subject with a new body goes once its fingerprint differs, and the same body never twice', () => {
+  it('same people and subject is the same email whatever the body: a minor edit never resends; a chase changes its subject', () => {
     const a = run({ cmd: 'send', rows: [FIRST], output: SECOND, approvedAt: '2026-10-07T19:23:10.772Z' });
-    const sentRow = a.ledger.slice(-1)[0];
-    const chase = SECOND.replace('Please book the gas safety check.', 'A reminder: please book the gas safety check.');
-    const b = run({ cmd: 'send', rows: a.ledger, output: chase, approvedAt: '2026-10-08T09:00:00.000Z' });
-    expect(b.exit).toBe(0);
-    expect(b.calls).toHaveLength(1);
-    const c = run({ cmd: 'send', rows: b.ledger, output: chase, approvedAt: '2026-10-08T10:00:00.000Z' });
-    expect(c.calls).toHaveLength(0);
-    expect(sentRow.bodyHash).not.toBe(b.ledger.slice(-1)[0].bodyHash);
+    expect(a.calls).toHaveLength(1);
+    const edited = SECOND.replace('Please book the gas safety check.', 'Please book the gas safety check, thank you.');
+    const b = run({ cmd: 'send', rows: a.ledger, output: edited, approvedAt: '2026-10-08T09:00:00.000Z' });
+    expect(b.calls).toHaveLength(0);
+    expect(b.message).toMatch(/already went at/);
+    const chase = edited.replace('SUBJECT: Book a gas safety check', 'SUBJECT: Chase: book a gas safety check');
+    const c = run({ cmd: 'send', rows: a.ledger, output: chase, approvedAt: '2026-10-08T09:00:00.000Z' });
+    expect(c.exit).toBe(0);
+    expect(c.calls).toHaveLength(1);
+  });
+
+  it('an email resolve-intent found in the Sent folder is the same email when the card is approved again (review, 8 Oct)', () => {
+    const intent = { task: 'recKho3l7jJKk9T0t', ts: '2026-10-07T20:00:00.000Z', event: 'intent', kind: 'send', from: 'kevinbrittain@gmail.com',
+      to: ['bookings@second-contractor.test'], cc: [], subject: 'Book a gas safety check - 1 Example Road' };
+    const settled = run({ cmd: 'resolve', rows: [FIRST, intent], hits: [{ id: 'm9' }] });
+    expect(settled.ledger.slice(-1)[0]).toMatchObject({ event: 'sent', subject: 'Book a gas safety check - 1 Example Road', cc: [] });
+    const again = run({ cmd: 'send', rows: settled.ledger, output: SECOND, approvedAt: '2026-10-08T09:00:00.000Z' });
+    expect(again.calls).toHaveLength(0);
+  });
+
+  it('an old row with no cc, no subject or no event is compared safely: the same person is never written twice (review, 8 Oct)', () => {
+    const withCc = SECOND.replace('FROM: kevinbrittain@gmail.com', 'CC: info@example-lets.test\nFROM: kevinbrittain@gmail.com');
+    const noCc = { task: 'recKho3l7jJKk9T0t', ts: '2026-09-20T10:00:00.000Z', event: 'sent', kind: 'send',
+      to: ['bookings@second-contractor.test'], subject: 'Book a gas safety check - 1 Example Road' };
+    expect(run({ cmd: 'send', rows: [noCc], output: withCc, approvedAt: '2026-10-07T19:23:10.772Z' }).calls).toHaveLength(0);
+    const noSubject = { task: 'recKho3l7jJKk9T0t', ts: '2026-09-20T10:00:00.000Z', event: 'sent', kind: 'send', to: ['bookings@second-contractor.test'], cc: [] };
+    expect(run({ cmd: 'send', rows: [noSubject], output: SECOND, approvedAt: '2026-10-07T19:23:10.772Z' }).calls).toHaveLength(0);
+    const noEvent = { task: 'recKho3l7jJKk9T0t', ts: '2026-09-20T10:00:00.000Z', kind: 'send', to: ['bookings@second-contractor.test'], cc: [], subject: 'Other' };
+    expect(run({ cmd: 'send', rows: [noEvent], output: SECOND, approvedAt: '2026-10-07T19:23:10.772Z' }).calls).toHaveLength(0);
+    // A different person after such a row still gets the second email.
+    expect(run({ cmd: 'send', rows: [noSubject], output: SECOND.replace(/bookings@second-contractor.test/g, 'office@third-contractor.test'),
+      approvedAt: '2026-10-07T19:23:10.772Z' }).calls).toHaveLength(1);
+  });
+
+  it('an Approved At with no timezone is read as UTC, never a crash', () => {
+    const r = run({ cmd: 'send', rows: [FIRST], output: SECOND, approvedAt: '2026-10-07T19:23:10' });
+    expect(r.exit).toBe(0);
+    expect(r.calls).toHaveLength(1);
   });
 
   it('a second send that died mid-way is refused until it is settled, never sent twice', () => {
