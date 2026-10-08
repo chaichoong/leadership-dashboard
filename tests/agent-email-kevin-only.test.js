@@ -54,37 +54,20 @@ describe('a TRACK RECORD block in the body', () => {
     }
   });
 
-  it('at the top of the body, with the report gate line above it, both go and the email stays whole', () => {
-    const r = parse(HEAD + 'CHECKED: handled=no; roy=no; machine=no; open-task=no; trigger=unknown-sender\n\n'
-      + 'TRACK RECORD: (searched tasks + Gmail)\n- 14 Sep 2026 12:37 — email: Sam Example: first message\n- No reply sent yet.\n  wrapped onto a second line\n\n'
-      + EMAIL + CARRY);
-    expect(r.ok).toBe(true);
-    expect(r.mail.body.trim()).toBe(EMAIL);
-  });
-
-  it('a greeting straight under "TRACK RECORD: none found" stays (round 2)', () => {
-    const r = parse(HEAD + 'TRACK RECORD: none found (searched tasks + Gmail)\n' + EMAIL + CARRY);
-    expect(r.ok).toBe(true);
-    expect(r.mail.body.trim()).toBe(EMAIL);
-  });
-
-  it('a blank line between the block\'s own bullets still takes them all (round 3)', () => {
-    const r = parse(HEAD + 'TRACK RECORD: (s)\n- 03 Oct 2026 — one\n\n- 04 Oct 2026 — two\n\n' + EMAIL + CARRY);
-    expect(r.ok).toBe(true);
-    expect(r.mail.body.trim()).toBe(EMAIL);
-  });
-
-  it('a blank line between the header and its bullets still takes every bullet, dated or not (round 2)', () => {
-    const r = parse(HEAD + 'TRACK RECORD: (searched)\n\n- 03 Oct 2026 — email: Sam: the report\n- Bank check: notes.\n\n' + EMAIL + CARRY);
-    expect(r.ok).toBe(true);
-    expect(r.mail.body.trim()).toBe(EMAIL);
-  });
-
-  it("at the top of the body, the email's own opening bullets after the blank line stay (review, 8 Oct)", () => {
-    const own = '- Rent: 500 received on 1 Oct.\n- Deposit: protected.\n\nKind regards\nAlex';
-    const r = parse(HEAD + 'TRACK RECORD: (searched)\n- 2 Oct 2026 — email: Sam: asked\n\n' + own + CARRY);
-    expect(r.ok).toBe(true);
-    expect(r.mail.body.trim()).toBe(own);
+  it('at the top of the body it is refused, whatever follows it: it goes above the headers (8 Oct)', () => {
+    const shapes = [
+      'CHECKED: handled=no; roy=no; machine=no; open-task=no; trigger=unknown-sender\n\nTRACK RECORD: (searched)\n- 14 Sep 2026 12:37 — email: Sam: first\n\n' + EMAIL,
+      'TRACK RECORD: none found (searched tasks + Gmail)\n' + EMAIL,
+      'TRACK RECORD: (s)\n- 03 Oct 2026 — one\n\n- 04 Oct 2026 — two\n\n' + EMAIL,
+      'TRACK RECORD: (s)\n\n- 03 Oct 2026 — email: Sam: the report\n- Bank check: notes.\n\n' + EMAIL,
+      'TRACK RECORD: (s)\n- 03 Oct 2026 — email: Sam: asked\n\n- Bank check: notes for Kevin.\n\nKind regards\nAlex',
+      'TRACK RECORD: (s)\n- 03 Oct 2026 — email: Sam: asked\n\nBank check: deposit not protected, push hard.\n\n' + EMAIL,
+    ];
+    for (const body of shapes) {
+      const r = parse(HEAD + body + CARRY);
+      expect(r.ok, body.slice(0, 40)).toBe(false);
+      expect(r.error).toMatch(/TRACK RECORD sits inside the email/);
+    }
   });
 
   it('the report gate CHECKED line is never in an email, wherever it sits and whatever its key order', () => {
@@ -112,6 +95,11 @@ describe('notes for Kevin under a second --- line', () => {
                          HEAD + 'Hi Sam,\n\n---EMAIL---\n\n' + EMAIL]) {
       expect(parse(shape + CARRY).ok).toBe(false);
     }
+  });
+
+  it('notes under a line of underscores are refused; Outlook\'s divider over a quoted From: is real email (8 Oct)', () => {
+    expect(parse(HEAD + EMAIL + '\n\n___\n\nPosition: step two only if they refuse.' + CARRY).ok).toBe(false);
+    expect(parse(HEAD + EMAIL + '\n\n________________________________\nFrom: Sam Example\nSent: 1 Oct\nThe earlier message.' + CARRY).ok).toBe(true);
   });
 
   it('a notes heading with no separator at all is refused ("not for sending", "for Kevin only")', () => {
@@ -159,8 +147,7 @@ describe('the shapes that were already right stay right', () => {
   });
 
   it('a --- inside a dated line above the headers never moves the split (review, 8 Oct)', () => {
-    const r = parse('TRACK RECORD: (searched)\n- 2 Oct 2026 — email: Sam: re --- the old report\n\n' + HEAD
-      + 'TRACK RECORD: (and again)\n- 3 Oct 2026 — email: Sam: thanks\n\n' + EMAIL + CARRY);
+    const r = parse('TRACK RECORD: (searched)\n- 2 Oct 2026 — email: Sam: re --- the old report\n\n' + HEAD + EMAIL + CARRY);
     expect(r.ok).toBe(true);
     expect(r.mail.body.trim()).toBe(EMAIL);
   });
@@ -174,7 +161,7 @@ describe('the shapes that were already right stay right', () => {
     }
   });
 
-  it('a sign-off "(for Kevin Brittain)", agent notes as a noun, a numbered list and a capitalised quote are the email\'s own (round 3)', () => {
+  it('a sign-off "(for Kevin Brittain)", agent notes as a noun and a capitalised quote are the email\'s own (round 3)', () => {
     for (const body of ['Hi Sam,\n\nThanks.\n\nAlex Example (for Kevin Brittain)',
                         'Hi Sam,\n\nAgent notes from the inspection are attached.\n\nKind regards\nAlex',
                         'Hi Sam,\n\n-----ORIGINAL MESSAGE-----\nFrom: Sam\nEarlier.']) {
@@ -182,10 +169,6 @@ describe('the shapes that were already right stay right', () => {
       expect(r.ok, body).toBe(true);
       expect(r.mail.body.trim()).toBe(body);
     }
-    const listed = '1. The service report\n2. The lighting test\n\nKind regards\nAlex';
-    const r = parse(HEAD + 'TRACK RECORD: (s)\n- 2 Oct 2026 — email: Sam: asked\n' + listed + CARRY);
-    expect(r.ok).toBe(true);
-    expect(r.mail.body.trim()).toBe(listed);
   });
 
   it("a sentence that mentions Kevin's review in passing is the email's own", () => {

@@ -61,6 +61,8 @@ import mimetypes
 import os
 import re
 import subprocess
+import io
+import contextlib
 import sys
 import urllib.error
 import urllib.parse
@@ -7341,6 +7343,104 @@ def form_turn_unanswered(task_id, name="", notes=""):
     return max(opens, closes) > str(notes or "").count(TURN_NOT_FINISHED)
 
 
+def handover_plan_problem(task_id):
+    """Why the Your turn window would refuse this task's plan, or '' (no plan, it passes, or the check
+    could not run, in which case the window still checks it).
+
+    A PLAN IS CHECKED BEFORE ITS BUTTON SHOWS (Kevin, 8 Oct 2026). The plan's shape was checked only
+    when Kevin pressed Your turn, so a hand-written plan missing a step's "until" put a button on his
+    card that opened nothing but "BROWSER REFUSED: step 6 (kevin) needs say and one of untilUrl...".
+    The check is agent-browser.js's own assertHandoverPlan, run through node, so the two never drift."""
+    path = os.path.join(HANDOVER_DIR, (task_id or "") + ".json")
+    if not TURN_TASK_RE.match(task_id or "") or not os.path.isfile(path):
+        return ""
+    js = ("const ab=require(process.argv[1]);const fs=require('fs');"
+          "try{ab.assertHandoverPlan(JSON.parse(fs.readFileSync(process.argv[2],'utf8')));console.log('PLAN OK')}"
+          "catch(e){console.log('PLAN REFUSED '+String((e&&e.message)||e).replace(/\\s+/g,' '))}")
+    try:
+        r = subprocess.run([node_bin(), "-e", js, AGENT_BROWSER, path], capture_output=True, text=True, timeout=60)
+    except (OSError, RuntimeError, subprocess.TimeoutExpired) as e:
+        print(f"WARNING: the Your turn plan for {task_id} could not be checked: {e}", file=sys.stderr)
+        return ""
+    lines = (r.stdout or "").strip().splitlines()
+    last = lines[-1] if lines else ""
+    if last.startswith("PLAN REFUSED "):
+        return last[len("PLAN REFUSED "):].replace("BROWSER REFUSED: ", "").strip()
+    if last != "PLAN OK":
+        print(f"WARNING: the Your turn plan check for {task_id} said nothing usable: {(r.stderr or '')[-200:]}",
+              file=sys.stderr)
+    return ""
+
+
+PLAN_REPAIR_STATE = "plan-repairs.json"
+# No "repair" or "maintenance" word: the create gate's fold lanes read those, and a PLAN REPAIR: task
+# folded into an open maintenance job, or into the card itself, so none was made (review, 8 Oct 2026).
+PLAN_REPAIR_PREFIX = "YOUR TURN PLAN REFUSED: "
+PLAN_REPAIR_AGAIN_DAYS = 3
+
+
+def plan_repair_task(t, problem, now=None):
+    """Raise ONE task for the card's agent to rewrite a Your turn plan the window refuses. Created
+    straight (force: the duplicate fold would put it into an unrelated task); this function is its own
+    duplicate check: never while one is open, once per version of the plan file, and again after
+    PLAN_REPAIR_AGAIN_DAYS if a repair closed and the plan is still refused (the lane's clock).
+    Returns what was done, or {} when nothing was."""
+    path = os.path.join(HANDOVER_DIR, t["id"] + ".json")
+    try:
+        version = str(int(os.path.getmtime(path)))
+    except OSError:
+        return {}
+    now = now or datetime.now(timezone.utc)
+    state_path = os.path.join(STATE_DIR, PLAN_REPAIR_STATE)
+    try:
+        with open(state_path) as fh:
+            state = json.load(fh)
+    except (OSError, ValueError):
+        state = {}
+    if not isinstance(state, dict):
+        state = {}
+    seen = state.get(t["id"]) if isinstance(state.get(t["id"]), dict) else {}
+    name = (PLAN_REPAIR_PREFIX + str(t.get("name") or t["id"]))[:120]
+    open_now = query_tasks(f"AND({{Task Name}}={_airtable_quote(name)},NOT({{Status}}='Completed'),"
+                           "NOT({Status}='Cancelled'))", max_records=1, minimal=True)
+    if open_now:
+        return {}
+    raised = _utc(seen.get("at") or "")
+    if seen.get("version") == version and raised and now - raised < timedelta(days=PLAN_REPAIR_AGAIN_DAYS):
+        return {}
+    # The card's own agent; a person (Roy) or nobody linked sends it to the AI CEO, never to a human.
+    agent = t.get("agentId") if t.get("agentId") in ALL_AGENTS else CEO_REC_ID
+    fields = {
+        AF["name"]: name,
+        AF["description"]: (
+            f"The Your turn plan for {t['id']} ({path}) is refused by the window, so Kevin's Your turn button "
+            f"is hidden until it passes:\n\n{problem[:600]}\n\nRewrite the plan so "
+            f"`node scripts/agent-browser.js handover --task {t['id']} --dry-run --shot <file>` runs clean, then "
+            "close this task with that result as evidence. The card itself stays in Kevin's lane as Your step: "
+            "do not submit, move or rewrite it."),
+        AF["status"]: "Today",
+        AF["dueDate"]: today_london(),
+        AF["teamMember"]: [agent],
+    }
+    out = io.StringIO()
+    with contextlib.redirect_stdout(out):
+        code = _gate().cmd_create(fields, force=True)
+    try:
+        said = json.loads(out.getvalue().strip().splitlines()[-1])
+    except (ValueError, IndexError):
+        said = {}
+    if said.get("action") != "created" or not said.get("taskId"):
+        raise RuntimeError(f"the repair task for {t['id']} was not created (exit {code}, {said or 'no answer'})")
+    # Exit 4 (made, with a later step incomplete) is still a task made: its clock is recorded (review round 2).
+    state[t["id"]] = {"version": version, "at": now.strftime("%Y-%m-%dT%H:%M:%S.000Z"), "repair": said.get("taskId")}
+    os.makedirs(STATE_DIR, exist_ok=True)
+    tmp = state_path + ".tmp"
+    with open(tmp, "w") as fh:
+        json.dump(state, fh)
+    os.replace(tmp, state_path)
+    return {"task": t["id"], "repair": said.get("taskId"), "action": "created"}
+
+
 def handover_ready(task_id, b, outcome="", task=None):
     """True when Kevin has APPROVED the card and its KEVIN wall has a handover plan
     on file. The wall opens at submit, before he has seen the card, so a plan alone
@@ -8042,7 +8142,7 @@ def blockers_scan(sweep=False, now=None):
                 lazy[key] = (None, str(exc)[:200])
         return lazy[key]
 
-    open_walls, woken, stale, surfaced, done_refused = [], [], [], [], []
+    open_walls, woken, stale, surfaced, done_refused, plan_repairs = [], [], [], [], [], []
     for rec in recs:
         t = task_view(rec)
         b = task_blocker(t["notes"])
@@ -8115,9 +8215,23 @@ def blockers_scan(sweep=False, now=None):
             if done:
                 row["doneSaid"] = done[0][:200]
         if handover_ready(t["id"], b, t.get("outcome"), t):
-            row["turn"] = True
-            row["fix"] = ("Kevin clicks Your turn on the AI Agents page (on his Mac): the robot fills "
-                          "everything in and hands him the window for his step.")
+            problem = handover_plan_problem(t["id"])
+            if problem:
+                # No button that opens nothing: the step stays on his card as text, and the plan goes
+                # back to its agent to repair (8 Oct 2026).
+                row["planProblem"] = problem[:300]
+                if sweep:
+                    try:
+                        repaired = plan_repair_task(t, problem, now)
+                    except Exception as e:                       # noqa: BLE001 — one card, never the sweep
+                        repaired = {"task": t["id"], "error": str(e)[:200]}
+                        print(f"WARNING: {repaired['error']}", file=sys.stderr)
+                    if repaired:
+                        plan_repairs.append(repaired)
+            else:
+                row["turn"] = True
+                row["fix"] = ("Kevin clicks Your turn on the AI Agents page (on his Mac): the robot fills "
+                              "everything in and hands him the window for his step.")
         if b["kind"] == "TOOL":
             cards, cards_error = once("cards", lambda: merge_card.list_cards(read=query_tasks))
             details, details_error = once("details", finding_details)
@@ -8141,7 +8255,7 @@ def blockers_scan(sweep=False, now=None):
                                    "subject": b["subject"], "why": b["why"][:200]})
     return {"openTasksRead": len(control), "open": open_walls, "woken": woken,
             "stale": stale, "closedWhileBlocked": closed_blocked,
-            "surfaced": surfaced, "doneRefused": done_refused,
+            "surfaced": surfaced, "doneRefused": done_refused, "planRepairs": plan_repairs,
             "sitesError": sites_error, "findingsError": findings_error,
             # The lazy reads that failed, by name (ledger, cards, details). Never fatal, never silent.
             "readErrors": {k: v[1] for k, v in lazy.items() if v[1]}}
