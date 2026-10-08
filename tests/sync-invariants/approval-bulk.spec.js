@@ -33,8 +33,13 @@ const VERDICT_REASON = 'fldF9Bs4N5mttQvtl';
 const REMEMBER_THIS = 'fldZurhdHutYIDKVx';
 const APPROVAL_FEEDBACK = 'fldtI7SJI4gEohHD1';
 
+// The page counts from the later of the local and UTC dates (apvDatePlus), so
+// this does too, or a machine west of UTC fails after midnight UTC.
 function isoPlus(days) {
-  const d = new Date();
+  const now = new Date();
+  const d = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const utc = new Date(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate());
+  if (utc > d) d.setTime(utc.getTime());
   d.setDate(d.getDate() + days);
   return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
 }
@@ -270,7 +275,7 @@ test.describe('every bulk verdict is N single verdicts', () => {
     await page.locator('[data-apv-bulk-open="defer"]').click();
     await page.locator('#apvBulkDeferDate').fill(isoPlus(-2));
     await page.locator('#apvBulkPanel-defer .apv-defer-btn', { hasText: 'Go' }).click();
-    await expect(page.locator('#toast')).toContainText('after today');
+    await expect(page.locator('#toast')).toContainText('or later');
     expect(patches).toHaveLength(0);
   });
 });
@@ -436,6 +441,20 @@ test.describe('the view moves on to the next card', () => {
     await expect(page.locator('.apv-card')).toHaveCount(before - 2, { timeout: 12000 });
     await page.waitForTimeout(400);
     await expectCardAtTop(page, next);
+  });
+
+  test('the bulk knock back offers Tomorrow first, and it dates every ticked card the next day', async ({ page }) => {
+    const patches = await mockAgentsPage(page, withMany());
+    await loadAgentsPage(page);
+    await openApprovals(page);
+    const ids = await tick(page, [2, 3]);
+    await page.locator('[data-apv-bulk-open="defer"]').click();
+    const presets = page.locator('#apvBulkPanel-defer .apv-defer > .apv-defer-btn');
+    await expect(presets).toHaveText(['Tomorrow', '3 days', 'A week', '2 weeks', 'A month']);
+    await presets.first().click();
+    await expect.poll(() => patches.length).toBe(2);
+    expect(patches.map((p) => p.id).sort()).toEqual([...ids].sort());
+    for (const p of patches) expect(p.fields[TF.deferredUntil]).toBe(isoPlus(1));
   });
 
   test('a bulk knock back lands on the card after the lowest ticked one', async ({ page }) => {

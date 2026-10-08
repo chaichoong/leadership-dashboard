@@ -70,7 +70,10 @@ JOBS=(
   "tenant-leads|8:10|/usr/bin/python3 $REPO/scripts/tenant-leads.py run"
   # The daily rent check (Kevin, 2 Oct 2026), phase 1 of the Cash Flow Voids agent.
   # Rules only, no model: it reads, judges and writes the rent-position status row.
-  # It sends nothing and changes no tenancy. Twice a day: the bank feed lands near
+  # It changes no tenancy. Its one email of its own is a new tenant's signed proof of
+  # residency, sent from info@ to the tenant and Roy (Kevin, 8 Oct 2026,
+  # scripts/rent_proof_of_residency.py); every other email is a card Kevin approves,
+  # sent by send-email.py. Twice a day: the bank feed lands near
   # 12:00, so 07:30 gives the morning line and 12:30 picks up the day's payments.
   "rent-check|7:30,12:30|/usr/bin/python3 $REPO/scripts/rent-check.py run"
   # The daily certificate watch (Kevin, 7 Oct 2026). Rules only, no model: one task for

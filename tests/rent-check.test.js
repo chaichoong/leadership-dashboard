@@ -78,6 +78,20 @@ rc.text_check.LEDGER = os.path.join(tempfile.mkdtemp(), "no-texts.jsonl")
 def _no_mail(q):
     raise AssertionError("a rent-check test reached for info@'s mailbox")
 rc.text_check.default_list_mail = _no_mail
+# The proof of residency step reads info@'s mailbox and sends through the Gmail worker: never in a test. One Adobe
+# signed email that is not a proof of residency passes its control and leaves nothing to send. Its own cases are in
+# tests/rent-proof-of-residency.test.js.
+rc.rent_proof_of_residency.LEDGER = os.path.join(tempfile.mkdtemp(), "no-residency.jsonl")
+_ADOBE_OTHER = {"id": "mOTHER", "internalDate": "1790000000000", "attachments": [],
+                "headers": {"subject": "some-loa between Agile Lets and Someone is Signed and Filed!"}}
+def _residency_mail(q, account):
+    if q.startswith('from:adobesign@adobesign.com subject:"Signed and Filed"'):
+        return [_ADOBE_OTHER], False
+    raise AssertionError("a rent-check test reached for a mailbox: " + q)
+rc.rent_proof_of_residency.default_list_mail = _residency_mail
+def _no_residency_send(*a, **k): raise AssertionError("a rent-check test tried to send a proof of residency")
+rc.rent_proof_of_residency.default_send = _no_residency_send
+rc.rent_proof_of_residency.default_fetch = _no_residency_send
 rc.rent_cap.read_tenants = lambda _rc, ids: {}
 rc.rent_cap.read_busy = lambda _rc: set()
 rc.rent_cap.read_capped = lambda _rc, day: set()
@@ -1267,6 +1281,36 @@ print(json.dumps({"codes": [quiet, flagged, blind], "status": [x[0] for x in row
     // Straight after the paying figure: Home prints only the first 700 characters.
     expect(r.brief).toMatch(/^20 of 20 tenants paying \(100\.0%, floor [\d.]+%\)\. Text check: ClickSend wrote back after 1 rent text/);
     expect(r.blind).toBe('Text check FAILED: control failed: blind.');
+  });
+
+  it('the proof of residency step (8 Oct 2026): its line is on the row, a held one is on the Home line, and a failure turns the run red', () => {
+    const r = py(`
+rows = []
+today = rc.today_london()
+ts = [tenancy("recG%02d" % i, 1, 500) for i in range(20)]
+rc.load = lambda day: world(ts, [paid("recG%02d" % i, today.isoformat(), 500) for i in range(20)], day=today, feed=datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.000Z"))
+rc.read_task_state = lambda: {"on": True, "status": "Built", "keys": {}}
+rc.write_row = lambda status, text, payload, now: rows.append([status, text, payload.get("briefLine", "")])
+line = lambda n: next(l for l in rows[n][1].splitlines() if l.startswith("Proof of residency"))
+real = rc.rent_proof_of_residency.run
+with contextlib.redirect_stdout(io.StringIO()):
+    quiet = rc.main(["run"])
+held = dict(real(None, None, False, False), on=True, checked=1, held=["Ann Lee (Adobe sent this tenant's pack to more than one address: a@example.com, b@example.com)"])
+rc.rent_proof_of_residency.run = lambda *a, **k: held
+with contextlib.redirect_stdout(io.StringIO()):
+    holding = rc.main(["run"])
+rc.rent_proof_of_residency.run = lambda *a, **k: dict(held, held=[], failed="control failed: blind")
+with contextlib.redirect_stdout(io.StringIO()):
+    blind = rc.main(["run"])
+rc.rent_proof_of_residency.run = real
+print(json.dumps({"codes": [quiet, holding, blind], "status": [x[0] for x in rows], "quiet": line(0), "held": line(1),
+                  "brief": rows[1][2], "blind": line(2)}))`);
+    expect(r.codes).toEqual([0, 0, 1]);
+    expect(r.status).toEqual(['Worked', 'Worked', 'Failed']);
+    expect(r.quiet).toBe('Proof of residency: none signed and waiting.');
+    expect(r.held).toMatch(/^Proof of residency: held for Kevin: Ann Lee \(Adobe sent this tenant's pack to more than one address/);
+    expect(r.brief).toMatch(/^20 of 20 tenants paying \(100\.0%, floor [\d.]+%\)\. Proof of residency: 1 not sent to the tenant/);
+    expect(r.blind).toBe('Proof of residency: FAILED: control failed: blind.');
   });
 
   it('a failed raise is said on the row, turns the run red, and the rent line is still written', () => {

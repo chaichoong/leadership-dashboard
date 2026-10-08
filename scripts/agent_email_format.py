@@ -545,6 +545,11 @@ PROPERTY_SENDER = "info@agilelets.co.uk"
 # send-email.py (to re-check at send time, from the stored task) both call.
 # A sent email cannot be reversed in 24 hours like other Level A actions; that
 # is the named exception recorded in GUARDRAILS.md and Decisions/ on 17 Sep 2026.
+# Those two are an AGENT's emails. One rules-only robot also emails outside the
+# business with no card, and no model writes a word of it: the rent check sends
+# a new tenant their signed proof of residency, with a copy to Roy (Kevin, 28 Sep
+# and 8 Oct 2026; scripts/rent_proof_of_residency.py, fixed body, recipients only
+# from Adobe's own emails).
 RULE_STAMP = "AUTO-SEND BY RULE"
 # Kept identical to COVERAGE_MARK in agent-dispatch.py (tests/level-a-rule-sends.test.js).
 RULE_COVERAGE_MARK = "COVERAGE CHECKED"

@@ -62,7 +62,7 @@ test.describe('every option on the card, one click each', () => {
     await expect(card.locator('.apv-actions button', { hasText: 'Request changes' })).toBeVisible();
     await expect(card.locator('.apv-reasons')).toBeVisible();
     await expect(card.locator('.apv-reason')).toHaveCount(8);
-    for (const label of ['3 days', 'A week', '2 weeks', 'A month']) {
+    for (const label of ['Tomorrow', '3 days', 'A week', '2 weeks', 'A month']) {
       await expect(card.locator('.apv-defer-btn', { hasText: label }).first()).toBeVisible();
     }
     await expect(card.locator('#apvDeferDate-' + taskId)).toBeVisible();
