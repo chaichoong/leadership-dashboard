@@ -409,7 +409,12 @@ describe('the write itself', () => {
     expect(from).toBeGreaterThan(0);
     expect(to).toBeGreaterThan(from);
     const picker = agentsPage.slice(from, to);
-    expect(picker).toContain('until <= todayStr()');
+    // Not todayStr(): west of UTC in the evening local tomorrow is already
+    // Airtable's today. Driven for real in approval-knock-back.spec.js.
+    expect(picker).toContain('until < apvDatePlus(1)');
+    const bulkFrom = agentsPage.indexOf('function agBulkDeferOnDate');
+    const bulk = agentsPage.slice(bulkFrom, agentsPage.indexOf('window.agBulkDeferOnDate', bulkFrom));
+    expect(bulk).toContain('until < apvDatePlus(1)');
   });
 });
 

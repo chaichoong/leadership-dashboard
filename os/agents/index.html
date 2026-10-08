@@ -7702,7 +7702,9 @@ function registerAgentsSyncBar(){
                     // check above catches it; this catches the quieter case.
                     if(_approvalsState !== 'ready') return { status:'warn', detail:'Queue not loaded yet' };
                     if(String(_deferredState).indexOf('error') === 0) return { status:'fail', detail:'Could not read what you knocked back, so some approvals may be hidden with nothing saying so: '+String(_deferredState).slice(7) };
-                    const today = todayStr();
+                    // apvDatePlus(0): the formula's TODAY() is UTC, which is
+                    // ahead of the local date west of UTC in the evening.
+                    const today = apvDatePlus(0);
                     const leaked = allApprovals.filter(t=>t.deferredUntil && t.deferredUntil > today).length;
                     if(leaked) return { status:'fail', detail:`${leaked} task(s) you knocked back are back in the queue early — the date filter broke` };
                     return { status:'pass', detail: allDeferred.length

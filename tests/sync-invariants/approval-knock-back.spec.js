@@ -376,6 +376,21 @@ test.describe('Tomorrow from New York in the evening', () => {
     await expect.poll(() => patches.filter((p) => p.id === taskId).length).toBe(1);
     expect(patches.find((p) => p.id === taskId).fields[TF.deferredUntil]).toBe('2026-10-10');
   });
+  test('a card due back on 9 Oct, shown at 21:30 EDT on 8 Oct, is not a broken filter', async ({ page }) => {
+    // Airtable's TODAY() is already 9 Oct, so the queue rightly returns it.
+    await page.clock.setFixedTime(new Date('2026-10-09T01:30:00Z'));
+    const fx = defaultFixtures();
+    fx.approvals[0].fields[TF.deferredUntil] = '2026-10-09';
+    await mockAgentsPage(page, fx);
+    await loadAgentsPage(page);
+    await openApprovals(page);
+    await page.click('[data-sync-bar="agents"] .sync-bar-health');
+    const verdict = () => page.evaluate(() => {
+      const item = [...document.querySelectorAll('.sync-check-item')].find(el => el.textContent.includes('Knocked-back items stay out'));
+      return item ? [...item.classList].find(c => ['pass', 'warn', 'fail', 'pending'].includes(c)) + ' | ' + item.textContent.replace(/\s+/g, ' ') : 'missing';
+    });
+    await expect.poll(verdict).toMatch(/^pass \| /);
+  });
   test('09:00 EDT on 8 Oct writes 9 Oct', async ({ page }) => {
     expect(await tomorrowFrom(page, '2026-10-08T13:00:00Z')).toBe('2026-10-09');
   });
