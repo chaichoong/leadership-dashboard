@@ -248,11 +248,14 @@ print(json.dumps({"surfaced": [x["task"] for x in res["surfaced"]], "back": back
   it('an Upcoming task due today is being worked and gets its card; one due later is refused', () => {
     const r = py(`
 rec("due", status="Upcoming", due=m.today_london()); rec("later", status="Upcoming", due="2099-01-01")
+rec("prog", status="In Progress")
+c = run(m.cmd_block, {"task": "prog", "kind": "SITE", "subject": "cover.example", "why": "x", "finding": None})
 a = run(m.cmd_block, {"task": "due", "kind": "SITE", "subject": "cover.example", "why": "x", "finding": None})
 b = run(m.cmd_block, {"task": "later", "kind": "SITE", "subject": "cover.example", "why": "x", "finding": None})
-print(json.dumps({"a": [a["err"], f("due", "status")], "b": b["err"]}))`);
+print(json.dumps({"a": [a["err"], f("due", "status")], "b": b["err"], "c": [c["err"], f("prog", "status")]}))`);
     expect(r.a).toEqual([null, 'Approval']);
     expect(r.b).toMatch(/it is Upcoming, so it is not being worked/);
+    expect(r.c).toEqual([null, 'Approval']);          // the board spells it "In Progress"
   });
 
   it("after his I can't, the agent may not raise the same wall on that task again", () => {

@@ -8056,7 +8056,7 @@ PLAIN_HOST_RE = re.compile(r"^[a-z0-9-]+(?:\.[a-z0-9-]+)+$")
 # Overdue, or Upcoming due today) or a task marked To do / In progress. A task parked (Upcoming not
 # yet due, a standing hold's park), on Some Day (blank) or Cancelled is not being worked, and a card
 # would undo the park (two review rounds, 8 Oct 2026).
-ROBOT_STEP_FROM = ("To do", "In progress")
+ROBOT_STEP_FROM = ("To do", "In Progress")      # the board's own spellings (review, 8 Oct 2026)
 
 
 def robot_step_worked(t):
