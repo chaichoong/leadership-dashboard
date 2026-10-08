@@ -20,7 +20,7 @@
     // ── Page & SOP Version Registry ──
     const PAGE_REGISTRY = [
         // Home tab (Kevin, 29 Sep 2026): one list of what needs Kevin today, the real Leadership Dashboard underneath. On trial beside the old screens.
-        { id: 'home',        name: 'Home',                           icon: '📌', pageVer: '1.7', sopFile: '',                           sopVer: '1.0', standalone: 'index.html#home' },
+        { id: 'home',        name: 'Home',                           icon: '📌', pageVer: '1.8', sopFile: '',                           sopVer: '1.0', standalone: 'index.html#home' },
         { id: 'overview',    name: 'Leadership Dashboard',           icon: '📊', pageVer: '2.136', sopFile: 'sop.html',                   sopVer: '2.118', standalone: 'index.html#overview' },
         { id: 'os-strategy', name: 'Objective & Strategy',           icon: '🎯', pageVer: '1.76', sopFile: 'os/strategy/sop.html',       sopVer: '1.1', standalone: 'os/strategy/index.html' },
         { id: 'tasks',       name: 'Tasks & Projects',   icon: '✅', pageVer: '1.194', sopFile: 'os/tasks/sop.html',             sopVer: '1.4', standalone: 'os/tasks/index.html' },
