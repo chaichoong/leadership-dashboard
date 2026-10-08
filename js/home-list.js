@@ -146,9 +146,11 @@
         return { items, note: '' };
     }
 
-    // Robots stuck on Kevin, from the blocker sweep (scripts/estate-status.py blockers_summary):
-    // the same four kinds its "For you" sentence names. A TOOL wall that is not deferred is the
-    // daily robot fix's job, not Kevin's, so it is left out.
+    // Robots stuck on Kevin, from the blocker sweep (scripts/estate-status.py blockers_summary): a TOOL
+    // wall no fixer can reach. A TOOL wall that is not deferred is the daily robot fix's job, not
+    // Kevin's, so it is left out. A sign-in, a site to add and a step only he can take are approval
+    // cards since 8 Oct 2026 (Kevin: "I can just work through the approval cards as standard"), listed
+    // under "Waiting for your approval" on this page, so they are not named twice here.
     const BLOCKER_STALE_MS = 2 * 60 * 60 * 1000;
     function readBlockers(row, now) {
         const r = parsePayload(row);
@@ -165,21 +167,6 @@
         }
         const walls = r.p.open;
         const items = [];
-        const bySubject = kind => {
-            const m = new Map();
-            walls.filter(w => w.kind === kind).forEach(w => {
-                const k = String(w.subject || 'unknown');
-                if (!m.has(k)) m.set(k, []);
-                m.get(k).push(w);
-            });
-            return m;
-        };
-        bySubject('SIGN-IN').forEach((ws, subject) => items.push({ kind: 'signin', subject, count: ws.length,
-            text: `Sign the robot in to ${subject}`, days: Math.max(...ws.map(w => Number(w.days) || 0)) }));
-        bySubject('SITE').forEach((ws, subject) => items.push({ kind: 'site', subject, count: ws.length,
-            text: `Add ${subject} to the robot's list (Add a new site)`, days: Math.max(...ws.map(w => Number(w.days) || 0)) }));
-        walls.filter(w => w.kind === 'KEVIN').forEach(w => items.push({ kind: 'kevin', id: w.task, count: 1,
-            text: `${String(w.name || 'A task')}: a step only you can do (${String(w.subject || 'unknown')})`, days: Number(w.days) || 0 }));
         // A TOOL wall no fixer can reach (7 Oct 2026): its fix needs a protected file. The fixer
         // opens the PR and a MERGE card comes to Kevin; until the card exists, he is told why it
         // is stuck. A report written before then has no toolState: a deferred finding is that case.
