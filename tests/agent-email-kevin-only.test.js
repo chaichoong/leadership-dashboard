@@ -68,6 +68,12 @@ describe('a TRACK RECORD block in the body', () => {
     expect(r.mail.body.trim()).toBe(EMAIL);
   });
 
+  it('a blank line between the block\'s own bullets still takes them all (round 3)', () => {
+    const r = parse(HEAD + 'TRACK RECORD: (s)\n- 03 Oct 2026 — one\n\n- 04 Oct 2026 — two\n\n' + EMAIL + CARRY);
+    expect(r.ok).toBe(true);
+    expect(r.mail.body.trim()).toBe(EMAIL);
+  });
+
   it('a blank line between the header and its bullets still takes every bullet, dated or not (round 2)', () => {
     const r = parse(HEAD + 'TRACK RECORD: (searched)\n\n- 03 Oct 2026 — email: Sam: the report\n- Bank check: notes.\n\n' + EMAIL + CARRY);
     expect(r.ok).toBe(true);
@@ -99,10 +105,10 @@ describe('notes for Kevin under a second --- line', () => {
     expect(r.error).toMatch(/second separator line/);
   });
 
-  it('also with Windows line endings, a *** separator or a --- NOTES --- marker (review, 8 Oct)', () => {
+  it('also with Windows line endings, a *** or === separator, or a --- NOTES --- marker (review, 8 Oct)', () => {
     const notes = '\n\nAGENT NOTES:\n\nStep two only if they refuse.';
     for (const shape of [(HEAD + EMAIL + '\n\n---' + notes).replace(/\n/g, '\r\n'),
-                         HEAD + EMAIL + '\n\n***' + notes, HEAD + EMAIL + '\n\n--- NOTES ---' + notes,
+                         HEAD + EMAIL + '\n\n***' + notes, HEAD + EMAIL + '\n\n--- NOTES ---' + notes, HEAD + EMAIL + '\n\n====' + notes,
                          HEAD + 'Hi Sam,\n\n---EMAIL---\n\n' + EMAIL]) {
       expect(parse(shape + CARRY).ok).toBe(false);
     }
@@ -113,6 +119,12 @@ describe('notes for Kevin under a second --- line', () => {
                      "AGENT NOTE (not part of the email — for Kevin's review):", 'Note for Kevin only: check the deadline.']) {
       const r = parse(HEAD + EMAIL + '\n\n' + h + '\n\nClassification: a creditor.' + CARRY);
       expect(r.ok, h).toBe(false);
+    }
+  });
+
+  it('"not for sending" or "not part of the email" is refused with no brackets (round 3)', () => {
+    for (const h of ['LEGAL & COMPLIANCE NOTES - not for sending:', 'Everything below is not part of the email.']) {
+      expect(parse(HEAD + EMAIL + '\n\n' + h + '\nThe position.' + CARRY).ok, h).toBe(false);
     }
   });
 
@@ -160,6 +172,20 @@ describe('the shapes that were already right stay right', () => {
       expect(r.ok, line).toBe(true);
       expect(r.mail.body.trim()).toBe(body);
     }
+  });
+
+  it('a sign-off "(for Kevin Brittain)", agent notes as a noun, a numbered list and a capitalised quote are the email\'s own (round 3)', () => {
+    for (const body of ['Hi Sam,\n\nThanks.\n\nAlex Example (for Kevin Brittain)',
+                        'Hi Sam,\n\nAgent notes from the inspection are attached.\n\nKind regards\nAlex',
+                        'Hi Sam,\n\n-----ORIGINAL MESSAGE-----\nFrom: Sam\nEarlier.']) {
+      const r = parse(HEAD + body + CARRY);
+      expect(r.ok, body).toBe(true);
+      expect(r.mail.body.trim()).toBe(body);
+    }
+    const listed = '1. The service report\n2. The lighting test\n\nKind regards\nAlex';
+    const r = parse(HEAD + 'TRACK RECORD: (s)\n- 2 Oct 2026 — email: Sam: asked\n' + listed + CARRY);
+    expect(r.ok).toBe(true);
+    expect(r.mail.body.trim()).toBe(listed);
   });
 
   it("a sentence that mentions Kevin's review in passing is the email's own", () => {
