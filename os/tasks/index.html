@@ -3894,12 +3894,19 @@ function tasksCarriedNote(taskId){
 }
 const TASKS_STEP_MARK='YOUR STEP:';
 const TASKS_STEP_DIVIDER="----- The agent's work, as you approved it -----";
+// A robot's sign-in card (8 Oct 2026) is a step card whatever its verdict: no verdict may be written
+// on it here, or Approve would hand the agent the draft under the step to carry out. Mirrored from
+// ROBOT_STEP_RE in scripts/agent-dispatch.py.
+const TASKS_ROBOT_STEP_RE=/^ROBOT (SIGN-IN|SITE): ([a-z0-9-]+(?:\.[a-z0-9-]+)+)(?: \(([A-Za-z0-9][A-Za-z0-9-]*)\))?\. /;
 function tasksYourStep(t){
-  if(!t||['Approved as-is','Approved with minor edits'].indexOf(t.approvalOutcome)===-1)return null;
+  if(!t)return null;
   const s=String(t.agentOutput||'').replace(/^\s+/,'');
   const cut=s.indexOf(TASKS_STEP_DIVIDER);
   if(!s.startsWith(TASKS_STEP_MARK)||cut===-1)return null;
-  return {step:s.slice(TASKS_STEP_MARK.length,cut).trim(),work:s.slice(cut+TASKS_STEP_DIVIDER.length).replace(/^\n+/,'')};
+  const step=s.slice(TASKS_STEP_MARK.length,cut).trim();
+  const robot=TASKS_ROBOT_STEP_RE.test(step);
+  if(!robot&&['Approved as-is','Approved with minor edits'].indexOf(t.approvalOutcome)===-1)return null;
+  return {step,robot,work:s.slice(cut+TASKS_STEP_DIVIDER.length).replace(/^\n+/,'')};
 }
 function renderApprovalBlock(t){
   if(!t)return '';
@@ -3926,10 +3933,10 @@ function renderApprovalBlock(t){
   const ys=tasksYourStep(t);
   if(ys){
     return `<div class="approval-box" data-your-step>
-      <h3>Your step</h3>
-      <div class="apv-sub">You approved this already. Only you can do this part:</div>
+      <h3>${ys.robot?'A robot needs a sign-in':'Your step'}</h3>
+      <div class="apv-sub">${ys.robot?'Not a decision. The robot is blocked until this is done:':'You approved this already. Only you can do this part:'}</div>
       <div class="apv-summary"><div class="apv-summary-body">${escHtml(ys.step)}</div></div>
-      <div class="apv-sub">When it is done, open the AI Agents approval queue and use "Done, here is the proof". The robot checks it, then the agent finishes the job.</div>
+      <div class="apv-sub">${ys.robot?'Open the AI Agents approval queue and press the card\'s button on your Mac. The robot picks the task up by itself.':'When it is done, open the AI Agents approval queue and use "Done, here is the proof". The robot checks it, then the agent finishes the job.'}</div>
       <div class="apv-work"><div class="apv-work-label">The agent’s work, as you approved it</div><div class="apv-work-body">${linkifyUrls(ys.work)}</div></div>
     </div>`;
   }
@@ -4006,7 +4013,8 @@ async function apvDecide(taskId,outcome,remember){
   const t=findTaskAnywhere(taskId);if(!t)return;
   if(APPROVAL_OUTCOMES.indexOf(outcome)===-1)return;
   // Approved already and waiting on his own step: no verdict route may write one (7 Oct 2026).
-  if(tasksYourStep(t)){toast('Already approved. This is your step: use "Done, here is the proof" in the AI Agents queue.',true);return;}
+  const ysd=tasksYourStep(t);
+  if(ysd){toast(ysd.robot?'Not a decision: a robot needs a sign-in. Use the card in the AI Agents queue.':'Already approved. This is your step: use "Done, here is the proof" in the AI Agents queue.',true);return;}
   const noteEl=document.getElementById('apvNote');
   const note=(noteEl&&noteEl.value||'').trim();
   // The tickbox is the "remember" route for the other three verdicts; the

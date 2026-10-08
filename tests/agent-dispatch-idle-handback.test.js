@@ -83,7 +83,7 @@ describe('idle hand-backs rest for a day', () => {
     const r = py(`
 import io, contextlib
 W, L = [], []
-m.get_task = lambda i: {"id": i, "fields": {m.AF["notes"]: "", m.AF["status"]: "Today"}}
+m.get_task = lambda i: {"id": i, "fields": {m.AF["notes"]: "", m.AF["status"]: "Today", m.AF["teamMember"]: ["recAgentAaaaaaaaa"]}}
 m.patch_task = lambda i, f: W.append(f)
 m.ledger_append = lambda t, e: L.append(e)
 m.load_login_sites = lambda: {}
@@ -95,7 +95,7 @@ try:
         m.cmd_annotate(A(task="t1", note="PARKED: TopCashback off the allowlist"))
 except SystemExit as e:
     err = str(e)
-m.get_task = lambda i: {"id": i, "fields": {m.AF["notes"]: "\\n\\n".join(x.get(m.AF["notes"], "") for x in W), m.AF["status"]: "Today"}}
+m.get_task = lambda i: {"id": i, "fields": {m.AF["notes"]: "\\n\\n".join(x.get(m.AF["notes"], "") for x in W), m.AF["status"]: "Today", m.AF["teamMember"]: ["recAgentAaaaaaaaa"]}}
 with contextlib.redirect_stdout(io.StringIO()):
     m.cmd_block(A(task="t1", kind="SITE", subject="namecheap.com", why="renewal page", finding=None))
 print(json.dumps({"refused": bool(err and "block t1 --kind" in err), "ledger": L,

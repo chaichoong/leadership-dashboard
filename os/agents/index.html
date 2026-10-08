@@ -2567,7 +2567,7 @@ const APV_APPROVED_OUTCOMES = ['Approved as-is', 'Approved with minor edits'];
 // A robot's sign-in is a card too (Kevin, 8 Oct 2026): a SIGN-IN or SITE wall puts its task here
 // whatever its verdict, with a step block whose first sentence names the site. Mirrored from
 // ROBOT_STEP_RE in scripts/agent-dispatch.py.
-const APV_ROBOT_STEP_RE = /^ROBOT (SIGN-IN|SITE): ([a-z0-9.-]+)(?: \(([a-z0-9][a-z0-9-]*)\))?\./i;
+const APV_ROBOT_STEP_RE = /^ROBOT (SIGN-IN|SITE): ([a-z0-9-]+(?:\.[a-z0-9-]+)+)(?: \(([A-Za-z0-9][A-Za-z0-9-]*)\))?\. /;
 // The sentence agent-dispatch.py writes only when the Your turn plan passes the window's own check
 // (YOUR_TURN_SENTENCE there): until the sweep has looked at a card, it is what says the button is ready.
 const APV_TURN_READY_RE = /Press Your turn on the AI Agents page, on your Mac/;
@@ -2601,6 +2601,9 @@ function apvStepTurnReady(t, ys){
     const swept = p ? Date.parse(p.sweptAt || '') : NaN;
     const changed = Date.parse(t.submittedAt || '');
     if(!isNaN(swept) && !isNaN(changed) && swept > changed) return signinTurns().some(w => w.task === t.id);
+    // A plan the sweep has refused stays refused until its agent rewrites it: never a button for it.
+    const open = p && Array.isArray(p.open) ? p.open : [];
+    if(open.some(w => w && w.task === t.id && w.planProblem)) return false;
     return APV_TURN_READY_RE.test(ys.step) || signinTurns().some(w => w.task === t.id);
 }
 function apvStepTurnHtml(taskId){

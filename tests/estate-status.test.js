@@ -307,3 +307,35 @@ print(json.dumps({k: r.get(k) for k in ("status", "firstRun", "firstFail", "last
     expect(src).toMatch(/return cmd_refresh\(args\)/);
   });
 });
+
+// 8 Oct 2026: the page's Your turn test asks "has the sweep looked at this card?" by comparing the
+// card's time with the sweep's. A sweep that READ the board at 15:45 and finished at 15:52 never saw
+// a card written at 15:50, so the row carries the read time (readAt), not the file's finish time.
+describe('the Robots blocked row says when the sweep read the board', () => {
+  it('sweptAt is the sweep\'s own readAt, and the file time only for a report without one', () => {
+    const { mkdtempSync, writeFileSync } = require('node:fs');
+    const { tmpdir } = require('node:os');
+    const dir = mkdtempSync(resolve(tmpdir(), 'od-blockers-'));
+    const withRead = resolve(dir, 'with.json'), without = resolve(dir, 'without.json');
+    const base = { openTasksRead: 3, open: [], woken: [], stale: [], closedWhileBlocked: [], surfaced: [], doneRefused: [], planRepairs: [], sitesError: '', findingsError: '', readErrors: {} };
+    writeFileSync(withRead, JSON.stringify({ ...base, readAt: '2026-10-08T14:45:00.000Z',
+      open: [{ task: 'recStepAaaaaaaaaa', name: 'x', agent: 'a', kind: 'KEVIN', subject: 'purchase', fix: 'f', days: 0,
+               step: 'Buy it.', yourStep: true, planProblem: 'step 6 (kevin) needs say' }] }));
+    writeFileSync(without, JSON.stringify(base));
+    const script = `
+import importlib.util, json, sys
+from datetime import datetime, timezone
+spec = importlib.util.spec_from_file_location('es', ${JSON.stringify(WRITER)})
+m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m)
+now = datetime.now(timezone.utc)
+a = json.loads(m.blockers_row(now, ${JSON.stringify(withRead)})["payload"])
+b = json.loads(m.blockers_row(now, ${JSON.stringify(without)})["payload"])
+print(json.dumps([a["sweptAt"], b["sweptAt"], a["open"][0].get("planProblem")]))`;
+    const r = JSON.parse(execFileSync('python3', ['-c', script], { encoding: 'utf8' }).trim().split('\n').pop());
+    expect(r[0]).toBe('2026-10-08T14:45:00.000Z');
+    expect(r[1]).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.000Z$/);
+    expect(r[1]).not.toBe('2026-10-08T14:45:00.000Z');
+    // A plan the sweep refused reaches the page, which then shows no Your turn for it.
+    expect(r[2]).toBe('step 6 (kevin) needs say');
+  });
+});

@@ -275,6 +275,16 @@ test.describe('Your turn shows the moment the card arrives', () => {
     await expect(page.locator(`[data-apv-card="${ID}"] [data-apv-step-turn]`)).toHaveCount(0);
   });
 
+  test('a plan the sweep has refused gets no button, even on a card written since', async ({ page }) => {
+    const refused = [{ task: ID, name: 'INSURANCE: Example Lane cover', kind: 'KEVIN', subject: 'purchase', turn: false,
+      planProblem: 'step 6 (kevin) needs say and one of untilUrl' }];
+    await mockAgentsPage(page, withStep({ step: 'Answer the declarations. ' + TURN_SENTENCE, open: refused, sweptAt: ago(20), lmt: ago(2) }));
+    await loadAgentsPage(page);
+    await page.click('#ptab-approvals');
+    await expect(page.locator(`[data-apv-card="${ID}"]`)).toBeVisible();
+    await expect(page.locator(`[data-apv-card="${ID}"] [data-apv-step-turn]`)).toHaveCount(0);
+  });
+
   test('a card without the sentence (a plan being fixed) has no button before the sweep either', async ({ page }) => {
     await mockAgentsPage(page, withStep({ step: "Answer the declarations. The robot's plan for your window is being fixed.", open: OTHER, sweptAt: ago(20), lmt: ago(2) }));
     await loadAgentsPage(page);
