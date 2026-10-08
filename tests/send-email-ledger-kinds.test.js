@@ -156,11 +156,11 @@ describe('a second email on one task (finding 20261002-agent-dispatch-716, 7 Oct
     const a = run({ cmd: 'send', rows: [FIRST], output: SECOND, approvedAt: '2026-10-07T19:23:10.772Z' });
     expect(a.calls).toHaveLength(1);
     const edited = SECOND.replace('Please book the gas safety check.', 'Please book the gas safety check, thank you.');
-    const b = run({ cmd: 'send', rows: a.ledger, output: edited, approvedAt: '2026-10-08T09:00:00.000Z' });
+    const b = run({ cmd: 'send', rows: a.ledger, output: edited, approvedAt: '2099-01-01T00:00:00.000Z' });
     expect(b.calls).toHaveLength(0);
     expect(b.message).toMatch(/already went at/);
     const chase = edited.replace('SUBJECT: Book a gas safety check', 'SUBJECT: Chase: book a gas safety check');
-    const c = run({ cmd: 'send', rows: a.ledger, output: chase, approvedAt: '2026-10-08T09:00:00.000Z' });
+    const c = run({ cmd: 'send', rows: a.ledger, output: chase, approvedAt: '2099-01-01T00:00:00.000Z' });
     expect(c.exit).toBe(0);
     expect(c.calls).toHaveLength(1);
   });
@@ -170,7 +170,7 @@ describe('a second email on one task (finding 20261002-agent-dispatch-716, 7 Oct
       to: ['bookings@second-contractor.test'], cc: [], subject: 'Book a gas safety check - 1 Example Road' };
     const settled = run({ cmd: 'resolve', rows: [FIRST, intent], hits: [{ id: 'm9' }] });
     expect(settled.ledger.slice(-1)[0]).toMatchObject({ event: 'sent', subject: 'Book a gas safety check - 1 Example Road', cc: [] });
-    const again = run({ cmd: 'send', rows: settled.ledger, output: SECOND, approvedAt: '2026-10-08T09:00:00.000Z' });
+    const again = run({ cmd: 'send', rows: settled.ledger, output: SECOND, approvedAt: '2099-01-01T00:00:00.000Z' });
     expect(again.calls).toHaveLength(0);
   });
 
@@ -206,6 +206,14 @@ describe('a second email on one task (finding 20261002-agent-dispatch-716, 7 Oct
       .replace('SUBJECT: Book a gas safety check - 1 Example Road', 'SUBJECT: Gas safety certificate - 1 Example Road');
     const r = run({ cmd: 'send', rows: [first], output: second, approvedAt: '2026-10-07T19:23:10.772Z' });
     expect(r.calls).toHaveLength(1);
+  });
+
+  it('an email to our own mailboxes or Roy alone, approved again, is never sent twice (review round 4)', () => {
+    const toRoy = SECOND.replace(/bookings@second-contractor.test/g, 'roy.lavin1978@gmail.com');
+    const a = run({ cmd: 'send', rows: [FIRST], output: toRoy, approvedAt: '2026-10-07T19:23:10.772Z' });
+    expect(a.calls).toHaveLength(1);
+    const b = run({ cmd: 'send', rows: a.ledger, output: toRoy, approvedAt: '2099-01-01T00:00:00.000Z' });
+    expect(b.calls).toHaveLength(0);
   });
 
   it('an Approved At with no timezone is read as UTC, never a crash', () => {

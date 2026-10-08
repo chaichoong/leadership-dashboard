@@ -380,14 +380,18 @@ def second_send_problem(task_id, mail):
     # Our own mailboxes and Roy are copied on many emails, so they never make two emails "the same".
     own = {a.lower() for a in set(RULE_OWN_ADDRESSES) | set(ALLOWED_SENDERS)}
     def people(to, cc):
-        return {str(a).lower() for a in (to or []) + (cc or [])} - own
-    mine = people(mail.get("to"), mail.get("cc"))
+        return {str(a).lower() for a in (to or []) + (cc or [])}
+    mine_all = people(mail.get("to"), mail.get("cc"))
     for r in rows:
         # The same email is the same subject to ANY of the same people, on TO or CC on either side: a
         # minor edit that adds a CC, a second TO, or moves the first person to CC never sends them a
         # second copy (review rounds 2 and 3, 8 Oct 2026). A row that names no subject, or records no
         # event, cannot be compared, so it counts as the same email.
-        theirs = people(r.get("to"), r.get("cc"))
+        theirs_all = people(r.get("to"), r.get("cc"))
+        mine, theirs = mine_all - own, theirs_all - own
+        if not mine or not theirs:
+            # An email to our own mailboxes or Roy alone is compared on everyone (review round 4).
+            mine, theirs = mine_all, theirs_all
         row_subject = subject_key(r.get("subject"))
         if mine & theirs and (not row_subject or row_subject == subject or r.get("event") is None):
             return (f"this email (to {', '.join(r.get('to') or [])}, \"{r.get('subject') or 'no subject recorded'}\") "
