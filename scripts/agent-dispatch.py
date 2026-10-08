@@ -7623,10 +7623,12 @@ def blocker_clear_reason(b, sites, fstates, walk=None):
 # address (tiktok.com for www.tiktok.com) was the old blank "Add a new site", and the panel's button now
 # carries the wall's address instead.
 KEVIN_TRIED_DAYS = 7
-KEVIN_TRIED_ROUTE = ("Asking Kevin again cannot get the robot in. Use another route; or, if only he can do "
-                     "it, submit the card with the closing line KEVIN ONLY: credential: <the step> and a Your "
-                     "turn plan (GUARDRAILS \"Kevin's turn\"), so he signs in inside the robot's own window and "
-                     "takes the step there.")
+KEVIN_TRIED_ROUTE = ("Asking Kevin again cannot get the robot in. Use another route; or, if only he can do it, "
+                     "write a Your turn plan (GUARDRAILS \"Kevin's turn\") so he signs in inside the robot's own "
+                     "window and takes the step there. If he has APPROVED this task, record that with `block "
+                     "TASKID --kind KEVIN --subject credential` (the plan, or --steps): it comes back to him as a "
+                     "Your step card and keeps his approval; a submit would wipe it. If he has not, submit the card "
+                     "with the closing line KEVIN ONLY: credential: <the step>.")
 
 
 def wall_hosts(host, entry, sites):
@@ -7651,7 +7653,7 @@ def kevin_tried_reason(kind, host, sites, since, profile="default", events=None)
         return (f"Kevin's sign-in window on {f[2]} closed at {f[0][:16]} and the robot's next check still "
                 f"landed on the sign-in page ({f[1][:16]})") if f else ""
     if kind == "SITE" and not entry:
-        a = signin_hold.kevin_login_after(events, {host}, since, profile, exact=True)
+        a = signin_hold.kevin_login_after(events, {host}, since, profile)
         if a and a[1] != host:
             # He answered this wall on another address (AXA's quote site for axa.co.uk): that is the site.
             return (f"Kevin answered this wall by signing in at {a[1]} (his window closed at {a[0][:16]}), "
@@ -8040,16 +8042,19 @@ def cmd_block(args):
                      "If it is signed out, that is a SIGN-IN wall; check with "
                      f"`node scripts/agent-browser.js session --site {entry}` first.")
         subject = signin_door_host(entry, sites) if kind == "SIGN-IN" else host
+        # The address the wall is SAVED under, which is what the sweep checks (review, 8 Oct 2026):
+        # oauth.virginmediao2.co.uk is saved as virginmedia.com, and checking the typed address let a
+        # wall the sweep sends back be raised again every half hour.
+        tried = kevin_tried_reason(kind, subject, sites, kevin_tried_since(),
+                                   getattr(args, "profile", None) or "default")
+        if tried:
+            sys.exit(f"ERROR: refusing a {kind} wall on {subject}: {tried}. " + KEVIN_TRIED_ROUTE)
         names = [p.get("profile") for p in (sites.get(entry) or {}).get("profiles") or [] if isinstance(p, dict)]
         if kind == "SIGN-IN" and names and getattr(args, "profile", None) not in names:
             sys.exit(f"ERROR: {entry} keeps one sign-in per profile. Name which one: "
                      f"--profile {' | '.join(names)}")
         if getattr(args, "profile", None) and not (kind == "SIGN-IN" and names):
             sys.exit(f"ERROR: --profile is only for a SIGN-IN wall on a site with profiles; {host} has none.")
-        tried = kevin_tried_reason(kind, host, sites, kevin_tried_since(),
-                                   getattr(args, "profile", None) or "default")
-        if tried:
-            sys.exit(f"ERROR: refusing a {kind} wall on {host}: {tried}. " + KEVIN_TRIED_ROUTE)
         if kind == "SIGN-IN":
             # A bot check is not a sign-out (25 Sep 2026: Cloudflare's "verify
             # you are human" was filed as SIGN-IN, Kevin's sign-in could not

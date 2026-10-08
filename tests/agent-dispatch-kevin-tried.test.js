@@ -45,6 +45,7 @@ m.ledger_last_events = lambda: {}
 m.finding_details = lambda: {}
 m.finding_states = lambda: {}
 SITES = {"portal.broker.example": {"label": "Broker portal", "login": True, "loginUrl": "https://portal.broker.example/login"},
+         "oauth.broker-id.example": {"label": "oauth.broker-id.example", "login": True, "loginUrl": "https://portal.broker.example/login"},
          "www.clips.example": {"label": "Clips (public reads)", "login": False},
          "clips.example": {"label": "clips.example", "login": True, "loginUrl": "https://clips.example/"},
          "cover.example": {"label": "Cover (landing pages)", "login": False},
@@ -105,6 +106,8 @@ print(json.dumps({"woken": [w["task"] for w in res["woken"]], "reason": res["wok
       gotIn: [login(iso(3 * H), P), out(iso(3 * H - 60e3), P), seen(iso(2 * H), P)],
       noRead: [login(iso(3 * H), P)],
       old: [login(iso(8 * 24 * H), P), out(iso(8 * 24 * H - 60e3), P)],
+      // Read signed out the next morning: it may have worked and expired overnight.
+      nextMorning: [login(iso(20 * H), P), out(iso(3 * H), P)],
     };
     const res = {};
     for (const [k, lines] of Object.entries(cases)) {
@@ -113,7 +116,7 @@ rec("t1", notes="${blk('SIGN-IN', P, iso(1 * H))}")
 res = m.blockers_scan(sweep=True)
 print(json.dumps([w["task"] for w in res["woken"]]))`, lines);
     }
-    expect(res).toEqual({ gotIn: [], noRead: [], old: [] });
+    expect(res).toEqual({ gotIn: [], noRead: [], old: [], nextMorning: [] });
   });
 
   it('a SITE wall answered on another address tells the agent that address; one answered on a parent is left for the new button', () => {
@@ -143,9 +146,24 @@ print(json.dumps({"a": a, "b": b, "c": c, "walls": [m.task_blocker(notes(i)) is 
      login(iso(30 * H), 'quotes.cover-insurer.example', { forWall: 'cover.example' })]);
     expect(r.a).toMatch(/^ERROR: refusing a SIGN-IN wall on portal\.broker\.example: Kevin's sign-in window/);
     expect(r.a).toMatch(/KEVIN ONLY: credential/);
+    expect(r.a).toMatch(/If he has APPROVED this task, record that with `block TASKID --kind KEVIN --subject credential`/);
     expect(r.b).toMatch(/^ERROR: refusing a SITE wall on cover\.example: Kevin answered this wall by signing in at quotes\.cover-insurer\.example/);
     expect(r.c).toBeNull();
     expect(r.walls).toEqual([false, false, true]);
+  });
+
+  // Review, 8 Oct 2026: block checked the typed address while the wall is saved under its door
+  // (oauth.virginmediao2.co.uk is saved as virginmedia.com), so a wall the sweep sent back could be
+  // raised again every half hour.
+  it('block checks the address the wall is saved under, so another spelling of the same door is refused too', () => {
+    const P = 'portal.broker.example';
+    const r = py(`
+rec("t1")
+a = run(m.cmd_block, {"task": "t1", "kind": "SIGN-IN", "subject": "oauth.broker-id.example", "why": "Signed out.", "finding": None})
+print(json.dumps({"a": a, "wall": m.task_blocker(notes("t1"))}))`,
+    [login(iso(30 * H), P), out(iso(30 * H - 60e3), P), seen(iso(29 * H), 'oauth.broker-id.example')]);
+    expect(r.a).toMatch(/^ERROR: refusing a SIGN-IN wall on portal\.broker\.example: Kevin's sign-in window on portal\.broker\.example/);
+    expect(r.wall).toBeNull();
   });
 
   it('submit refuses a SIGN-IN NEEDED line for a site his try did not get the robot into', () => {

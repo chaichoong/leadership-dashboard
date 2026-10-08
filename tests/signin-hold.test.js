@@ -435,12 +435,18 @@ print("---JSON---" + json.dumps({
   "before": sh.kevin_signin_failed(ev, {arg["host"]}, "2026-10-08T12:00:00Z"),
   "later_in": sh.kevin_signin_failed(ev + [arg["inn"]], {arg["host"]}, "2026-10-06T00:00:00Z"),
   "no_read": sh.kevin_signin_failed(ev[:2], {arg["host"]}, "2026-10-06T00:00:00Z"),
-  "other": sh.kevin_signin_failed(ev, {"another.example.com"}, "2026-10-06T00:00:00Z")}))`, {
+  "other": sh.kevin_signin_failed(ev, {"another.example.com"}, "2026-10-06T00:00:00Z"),
+  "child_read": sh.kevin_signin_failed(arg["child"], {arg["host"]}, "2026-10-06T00:00:00Z"),
+  "next_morning": sh.kevin_signin_failed(arg["late"], {arg["host"]}, "2026-10-06T00:00:00Z")}))`, {
       host: PORTAL,
       ev: [out('2026-10-07T05:43:00.000Z', PORTAL), login('2026-10-07T10:52:00.000Z', PORTAL),
            out('2026-10-07T10:53:00.000Z', PORTAL), login('2026-10-08T11:59:13.000Z', PORTAL),
            out('2026-10-08T11:59:42.000Z', PORTAL)],
       inn: seen('2026-10-08T13:00:00.000Z', PORTAL),
+      // A read of a different address under it says nothing about this one.
+      child: [login('2026-10-08T11:59:13.000Z', PORTAL), out('2026-10-08T12:10:00.000Z', 'www.' + PORTAL)],
+      // A sign-in that may have worked and expired overnight is not a failed try (review, 8 Oct 2026).
+      late: [login('2026-10-06T12:11:00.000Z', PORTAL), out('2026-10-07T05:43:00.000Z', PORTAL)],
     });
     // His newest window, and the first signed-out read after it.
     expect(r.failed).toEqual(['2026-10-08T11:59:13.000Z', '2026-10-08T11:59:42.000Z', PORTAL]);
@@ -448,22 +454,23 @@ print("---JSON---" + json.dumps({
     expect(r.later_in).toBeNull();    // the robot got in after all
     expect(r.no_read).toBeNull();     // nothing read since his window yet
     expect(r.other).toBeNull();
+    expect(r.child_read).toBeNull();
+    expect(r.next_morning).toBeNull();
   });
 
   it('a window opened from a blocked robot counts for the address it was opened for, wherever he signed in', () => {
     const r = py(`
 ev = arg["ev"]
 print("---JSON---" + json.dumps({
-  "exact": sh.kevin_login_after(ev, {"www.clips.example"}, "2026-10-06T00:00:00Z", exact=True),
-  "wall": sh.kevin_login_after(ev, {"cover.example"}, "2026-10-06T00:00:00Z", exact=True),
-  "parent_not_exact": sh.kevin_login_after(ev[:1], {"www.clips.example"}, "2026-10-06T00:00:00Z", exact=True),
-  "parent_family": sh.kevin_login_after(ev[:1], {"www.clips.example"}, "2026-10-06T00:00:00Z")}))`, {
+  "child": sh.kevin_login_after(ev, {"www.clips.example"}, "2026-10-06T00:00:00Z"),
+  "wall": sh.kevin_login_after(ev, {"cover.example"}, "2026-10-06T00:00:00Z"),
+  "own": sh.kevin_login_after(ev, {"clips.example"}, "2026-10-06T00:00:00Z")}))`, {
       ev: [login('2026-10-07T10:51:00.000Z', 'clips.example'),
            { ...login('2026-10-08T12:04:00.000Z', 'quotes.cover-insurer.example'), forWall: 'cover.example' }],
     });
-    expect(r.exact).toBeNull();                                        // tiktok.com is not www.tiktok.com
+    // Exact hosts only (review, 8 Oct 2026): a parent and its www. site are separate sign-ins.
+    expect(r.child).toBeNull();                                        // tiktok.com is not www.tiktok.com
     expect(r.wall).toEqual(['2026-10-08T12:04:00.000Z', 'quotes.cover-insurer.example']);
-    expect(r.parent_not_exact).toBeNull();
-    expect(r.parent_family).toEqual(['2026-10-07T10:51:00.000Z', 'clips.example']);
+    expect(r.own).toEqual(['2026-10-07T10:51:00.000Z', 'clips.example']);
   });
 });
