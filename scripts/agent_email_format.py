@@ -202,9 +202,6 @@ TRACK_RECORD_LINE_RE = re.compile(r"^[ \t>*_#]*(?:\[[^\]\n]*\][ \t]*)?TRACK RECO
 # ...", keys in any order. Written for Kevin's card, never the recipient's, wherever an agent put it.
 CHECKED_LINE_RE = re.compile(r"^[ \t>*_]*CHECKED:(?=[^\n]*\bhandled[ \t]*=)[^\n]*(?:\n|$)", re.M | re.I)
 SEPARATOR_LINE_RE = re.compile(r"^[ \t]*---[ \t]*$", re.M)
-TR_BULLET_RE = re.compile(r"^[ \t]*[-*\u2022][ \t]")   # a numbered list under it is the email's
-TR_WRAP_RE = re.compile(r"^[ \t]{2,}\S")
-TR_DATED_BULLET_RE = re.compile(r"^[ \t]*[-*\u2022][ \t]+(?:\d{1,2} \w{3,4} \d{4}|\d{4}-\d{2}-\d{2})")
 # What may never be left inside an email once the blocks above are out (7 Oct 2026). Every measured
 # notes heading ("AGENT NOTES (not for sending)", "... NOTES (... not for sending)", "AGENT NOTE (not
 # part of the email)", "(for Kevin's review only)"), a tier-1 banner, and a second separator.
@@ -236,53 +233,18 @@ def clean_email_body(body):
     its undated lines, and as the report gate's CHECKED line. Two safe removals, and a refusal for the
     rest, because a guess here either leaks a note or cuts an email short:
       - the report gate's CHECKED line, wherever it sits;
-      - a TRACK RECORD block at the TOP of the body, through its first blank line (the email's own
-        bullets after it stay), and one of dated lines only at the very end;
-      - any other TRACK RECORD is refused: anything for Kevin goes ABOVE the headers."""
+      - a TRACK RECORD of dated lines only, at the very end of the body (the dated strip always took it);
+      - any other TRACK RECORD in the body is refused, at the top as anywhere else: its notes cannot be
+        told from the email, so it goes ABOVE the headers (8 Oct 2026: no open card had one at the top)."""
     body = CHECKED_LINE_RE.sub("", body or "")
-    lines = body.split("\n")
-    while True:
-        i = 0
-        while i < len(lines) and not lines[i].strip():
-            i += 1
-        if i == len(lines) or not TRACK_RECORD_LINE_RE.match(lines[i]):
-            break
-        # The block is its header and its bullet lines (with their wrapped continuations), blank lines
-        # before the first bullet allowed. The first other line is the email: a greeting straight
-        # under "TRACK RECORD: none found" stays (review round 2, 8 Oct 2026).
-        j, k = i + 1, i + 1
-        while k < len(lines) and not lines[k].strip():
-            k += 1
-        if k < len(lines) and TR_BULLET_RE.match(lines[k]):
-            j = k
-            while j < len(lines):
-                if TR_BULLET_RE.match(lines[j]) or TR_WRAP_RE.match(lines[j]):
-                    j += 1
-                    continue
-                n = j
-                while n < len(lines) and not lines[n].strip():
-                    n += 1
-                if n > j and n < len(lines) and TR_DATED_BULLET_RE.match(lines[n]):
-                    # A blank line between the block's own DATED bullets (review round 3).
-                    j = n
-                    continue
-                if n > j and n < len(lines) and TR_BULLET_RE.match(lines[n]):
-                    # An undated bullet after a blank line could be the block's ("- Bank check: ...") or
-                    # the email's own opening list: it cannot be told, so it is refused (8 Oct 2026).
-                    raise EmailFormatError("a TRACK RECORD at the top of the email runs into a list after a blank line, "
-                                           "so its notes cannot be told from the email: open the email with its "
-                                           "greeting, or put the TRACK RECORD above the headers")
-                break
-        lines = lines[:i] + lines[j:]
-    body = "\n".join(lines)
     m = TRACK_RECORD_LINE_RE.search(body)
     if m:
         # Below the email's words, a block of dated lines with nothing after it is the shape the dated
         # strip always removed cleanly: it still goes. Anything else after it cannot be told from the
         # email, so it is refused (a cut sent a stub of what Kevin approved; review, 8 Oct 2026).
         if strip_carry_out_line(strip_track_record(body[m.start():])).strip():
-            raise EmailFormatError("a TRACK RECORD sits inside the email, below its own words, with more than dated "
-                                   "lines after it: it is written for Kevin, so it goes ABOVE the headers")
+            raise EmailFormatError("a TRACK RECORD sits inside the email, with more than dated lines after it: "
+                                   "it is written for Kevin, so it goes ABOVE the headers")
         body = body[:m.start()]
     return body
 

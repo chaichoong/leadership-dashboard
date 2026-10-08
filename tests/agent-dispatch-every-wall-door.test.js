@@ -387,27 +387,38 @@ m.HANDOVER_DIR = ${JSON.stringify(dir)}
 m.STATE_DIR = ${JSON.stringify(dir)}
 CREATED = []
 class Gate:
-    def cmd_create(self, fields):
-        CREATED.append(fields); print(json.dumps({"action": "created", "taskId": "recRepairAaaaaaaa"})); return 0
+    def cmd_create(self, fields, force=False):
+        CREATED.append([fields, force]); print(json.dumps({"action": "created", "taskId": "recRepairAaaaaaaa"})); return 0
 m._gate = lambda: Gate()
+OPEN_REPAIRS = []
+base_q = m.query_tasks
+m.query_tasks = lambda formula, max_records=None, minimal=False: (list(OPEN_REPAIRS) if formula.startswith("AND({Task Name}=")
+                                                                 else base_q(formula, max_records, minimal))
 for i in ("recPlanGoodAaaaaa", "recPlanBadAaaaaaa"):
     rec(i, notes="${blk('KEVIN', 'signature', '2026-10-05T09:00:00.000Z')}", status="Approval", outcome="Approved as-is",
         approved_at="2026-10-04T09:00:00.000Z", output=STEP, name="TENANCY: Example Lane agreement " + i[-6:])
 dry = m.blockers_scan(sweep=False, now=NOW)
 made_dry = len(CREATED)
 one = m.blockers_scan(sweep=True, now=NOW)
-two = m.blockers_scan(sweep=True, now=NOW)
+OPEN_REPAIRS.append({"id": "recRepairAaaaaaaa", "fields": {}})
+two = m.blockers_scan(sweep=True, now=NOW + timedelta(days=5))          # one open: never a second
+OPEN_REPAIRS.clear()
+three = m.blockers_scan(sweep=True, now=NOW + timedelta(days=1))        # closed, same plan, inside the clock
+four = m.blockers_scan(sweep=True, now=NOW + timedelta(days=4))         # closed, same plan, past the clock
 rows = {w["task"]: [w.get("turn"), w.get("planProblem")] for w in one["open"]}
-print(json.dumps({"rows": rows, "dry": made_dry, "repairs1": one["planRepairs"], "repairs2": two["planRepairs"],
-                  "created": [[f[AF["name"]], f[AF["teamMember"]], f[AF["status"]]] for f in CREATED],
-                  "desc": CREATED[0][AF["description"]] if CREATED else ""}))`);
+print(json.dumps({"rows": rows, "dry": made_dry, "repairs": [len(x["planRepairs"]) for x in (one, two, three, four)],
+                  "first": one["planRepairs"],
+                  "created": [[f[AF["name"]], f[AF["teamMember"]], f[AF["status"]], force] for f, force in CREATED],
+                  "desc": CREATED[0][0][AF["description"]] if CREATED else ""}))`);
     expect(r.rows.recPlanGoodAaaaaa).toEqual([true, null]);
     expect(r.rows.recPlanBadAaaaaaa[0]).toBeFalsy();
     expect(r.rows.recPlanBadAaaaaaa[1]).toMatch(/step 2 \(kevin\) needs "say" and one of untilUrl/);
     expect(r.dry).toBe(0);                                   // a read-only scan raises nothing
-    expect(r.repairs1).toEqual([{ task: 'recPlanBadAaaaaaa', repair: 'recRepairAaaaaaaa', action: 'created' }]);
-    expect(r.repairs2).toEqual([]);                         // the same plan is never raised twice
-    expect(r.created).toEqual([['PLAN REPAIR: TENANCY: Example Lane agreement aaaaaa', ['recAgentAaaaaaaaa'], 'Today']]);
+    expect(r.first).toEqual([{ task: 'recPlanBadAaaaaaa', repair: 'recRepairAaaaaaaa', action: 'created' }]);
+    expect(r.repairs).toEqual([1, 0, 0, 1]);                // open: never twice; closed: again only after 3 days
+    // No "repair" word (the gate's maintenance lane would fold it away), created straight: this is its own check.
+    // The fixture's card is linked to no real agent, so the AI CEO gets it, never a person.
+    expect(r.created[0]).toEqual(['YOUR TURN PLAN REFUSED: TENANCY: Example Lane agreement aaaaaa', ['reciHUAEcEkbctnZ6'], 'Today', true]);
     expect(r.desc).toMatch(/--dry-run --shot/);
   });
 

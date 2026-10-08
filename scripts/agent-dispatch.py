@@ -7373,17 +7373,24 @@ def handover_plan_problem(task_id):
 
 
 PLAN_REPAIR_STATE = "plan-repairs.json"
+# No "repair" or "maintenance" word: the create gate's fold lanes read those, and a PLAN REPAIR: task
+# folded into an open maintenance job, or into the card itself, so none was made (review, 8 Oct 2026).
+PLAN_REPAIR_PREFIX = "YOUR TURN PLAN REFUSED: "
+PLAN_REPAIR_AGAIN_DAYS = 3
 
 
-def plan_repair_task(t, problem):
-    """Raise ONE repair task for the card's agent when its Your turn plan is refused, through the
-    create gate, once per version of the plan file (its mtime), so the sweep never re-raises it every
-    half hour. Returns what was done, or {} when this version was already raised."""
+def plan_repair_task(t, problem, now=None):
+    """Raise ONE task for the card's agent to rewrite a Your turn plan the window refuses. Created
+    straight (force: the duplicate fold would put it into an unrelated task); this function is its own
+    duplicate check: never while one is open, once per version of the plan file, and again after
+    PLAN_REPAIR_AGAIN_DAYS if a repair closed and the plan is still refused (the lane's clock).
+    Returns what was done, or {} when nothing was."""
     path = os.path.join(HANDOVER_DIR, t["id"] + ".json")
     try:
         version = str(int(os.path.getmtime(path)))
     except OSError:
         return {}
+    now = now or datetime.now(timezone.utc)
     state_path = os.path.join(STATE_DIR, PLAN_REPAIR_STATE)
     try:
         with open(state_path) as fh:
@@ -7392,11 +7399,19 @@ def plan_repair_task(t, problem):
         state = {}
     if not isinstance(state, dict):
         state = {}
-    if state.get(t["id"]) == version:
+    seen = state.get(t["id"]) if isinstance(state.get(t["id"]), dict) else {}
+    name = (PLAN_REPAIR_PREFIX + str(t.get("name") or t["id"]))[:120]
+    open_now = query_tasks(f"AND({{Task Name}}={_airtable_quote(name)},NOT({{Status}}='Completed'),"
+                           "NOT({Status}='Cancelled'))", max_records=1, minimal=True)
+    if open_now:
         return {}
-    agent = t.get("agentId") or (t.get("teamMemberIds") or [CEO_REC_ID])[0]
+    raised = _utc(seen.get("at") or "")
+    if seen.get("version") == version and raised and now - raised < timedelta(days=PLAN_REPAIR_AGAIN_DAYS):
+        return {}
+    # The card's own agent; a person (Roy) or nobody linked sends it to the AI CEO, never to a human.
+    agent = t.get("agentId") if t.get("agentId") in ALL_AGENTS else CEO_REC_ID
     fields = {
-        AF["name"]: f"PLAN REPAIR: {str(t.get('name') or t['id'])[:80]}",
+        AF["name"]: name,
         AF["description"]: (
             f"The Your turn plan for {t['id']} ({path}) is refused by the window, so Kevin's Your turn button "
             f"is hidden until it passes:\n\n{problem[:600]}\n\nRewrite the plan so "
@@ -7409,19 +7424,20 @@ def plan_repair_task(t, problem):
     }
     out = io.StringIO()
     with contextlib.redirect_stdout(out):
-        code = _gate().cmd_create(fields)
+        code = _gate().cmd_create(fields, force=True)
     try:
         said = json.loads(out.getvalue().strip().splitlines()[-1])
     except (ValueError, IndexError):
         said = {}
-    if code == 0:
-        state[t["id"]] = version
-        tmp = state_path + ".tmp"
-        os.makedirs(STATE_DIR, exist_ok=True)
-        with open(tmp, "w") as fh:
-            json.dump(state, fh)
-        os.replace(tmp, state_path)
-    return {"task": t["id"], "repair": said.get("taskId"), "action": said.get("action") or f"exit {code}"}
+    if code != 0 or said.get("action") != "created":
+        raise RuntimeError(f"the repair task for {t['id']} was not created (exit {code}, {said or 'no answer'})")
+    state[t["id"]] = {"version": version, "at": now.strftime("%Y-%m-%dT%H:%M:%S.000Z"), "repair": said.get("taskId")}
+    os.makedirs(STATE_DIR, exist_ok=True)
+    tmp = state_path + ".tmp"
+    with open(tmp, "w") as fh:
+        json.dump(state, fh)
+    os.replace(tmp, state_path)
+    return {"task": t["id"], "repair": said.get("taskId"), "action": "created"}
 
 
 def handover_ready(task_id, b, outcome="", task=None):
@@ -8204,7 +8220,11 @@ def blockers_scan(sweep=False, now=None):
                 # back to its agent to repair (8 Oct 2026).
                 row["planProblem"] = problem[:300]
                 if sweep:
-                    repaired = plan_repair_task(t, problem)
+                    try:
+                        repaired = plan_repair_task(t, problem, now)
+                    except Exception as e:                       # noqa: BLE001 — one card, never the sweep
+                        repaired = {"task": t["id"], "error": str(e)[:200]}
+                        print(f"WARNING: {repaired['error']}", file=sys.stderr)
                     if repaired:
                         plan_repairs.append(repaired)
             else:
