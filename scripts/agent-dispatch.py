@@ -7429,8 +7429,9 @@ def plan_repair_task(t, problem, now=None):
         said = json.loads(out.getvalue().strip().splitlines()[-1])
     except (ValueError, IndexError):
         said = {}
-    if code != 0 or said.get("action") != "created":
+    if said.get("action") != "created" or not said.get("taskId"):
         raise RuntimeError(f"the repair task for {t['id']} was not created (exit {code}, {said or 'no answer'})")
+    # Exit 4 (made, with a later step incomplete) is still a task made: its clock is recorded (review round 2).
     state[t["id"]] = {"version": version, "at": now.strftime("%Y-%m-%dT%H:%M:%S.000Z"), "repair": said.get("taskId")}
     os.makedirs(STATE_DIR, exist_ok=True)
     tmp = state_path + ".tmp"
