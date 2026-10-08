@@ -436,6 +436,94 @@ print(json.dumps({"refused": [x["task"] for x in res["doneRefused"]], "fb": f("s
     expect(r.woken).toEqual([]);
   });
 
+  // "I CAN'T DO THIS" (Kevin, 8 Oct 2026): a Your step card had two exits, done or a knock-back,
+  // so a step he could not take (a portal that opens on a login he has no account for) waited on
+  // him for ever. His reason sends the task back to its agent as Changes requested.
+  it("a can't line sends the task back as Changes requested with his reason, the wall cleared", () => {
+    const r = py(setup + `
+CANT = "KEVIN STEP CANT [2026-10-06T10:00:00.000Z]: Your turn opens a login page and we have no account"
+rec("cant", notes="${blk('KEVIN', 'identity', '2026-10-05T09:00:00.000Z')}", status="Approval", outcome="Approved as-is",
+    approved_at="2026-10-04T09:00:00.000Z", output=STEP, feedback="Use the business card.\\n" + CANT, deferred="2026-10-20")
+rec("stale", notes="${blk('KEVIN', 'identity', '2026-10-05T09:00:00.000Z')}", status="Approval", outcome="Approved as-is",
+    approved_at="2026-10-04T09:00:00.000Z", output=STEP, feedback="KEVIN STEP CANT [2026-10-01T10:00:00.000Z]: no account")
+rec("empty", notes="${blk('KEVIN', 'identity', '2026-10-05T09:00:00.000Z')}", status="Approval", outcome="Approved as-is",
+    approved_at="2026-10-04T09:00:00.000Z", output=STEP, feedback="KEVIN STEP CANT [2026-10-06T10:00:00.000Z]:   ")
+rec("cantlast", notes="${blk('KEVIN', 'identity', '2026-10-05T09:00:00.000Z')}", status="Approval", outcome="Approved as-is",
+    approved_at="2026-10-04T09:00:00.000Z", output=STEP,
+    feedback="KEVIN STEP DONE [2026-10-06T10:00:00.000Z]: signed it\\nKEVIN STEP CANT [2026-10-06T11:00:00.000Z]: the form wants a director")
+rec("donelast", notes="${blk('KEVIN', 'identity', '2026-10-05T09:00:00.000Z')}", status="Approval", outcome="Approved as-is",
+    approved_at="2026-10-04T09:00:00.000Z", output=STEP,
+    feedback="KEVIN STEP CANT [2026-10-06T10:00:00.000Z]: no account\\nKEVIN STEP DONE [2026-10-06T11:00:00.000Z]: made one and sent it")
+dry = m.blockers_scan(sweep=False, now=NOW)
+dry_rows = {w["task"]: [w.get("cantSaid"), w.get("doneSaid")] for w in dry["open"]}
+writes_dry = len(WRITES)
+res = m.blockers_scan(sweep=True, now=NOW)
+LEDGER_NOW = {t: ("unblocked", "2026-10-07T12:00:00.000Z") for t, e in LEDGER if e == "unblocked"}
+view = m.task_view(TASKS["cant"])
+print(json.dumps({"dry": dry_rows, "writesDry": writes_dry,
+                  "sentBack": sorted(x["task"] for x in res["sentBack"]), "woken": sorted(x["task"] for x in res["woken"]),
+                  "refused": sorted(x["task"] for x in res["doneRefused"]),
+                  "cant": [f("cant", k) for k in ("status", "approvalOutcome", "approvedAt", "approvalFeedback", "agentOutput", "deferredUntil")],
+                  "due": f("cant", "dueDate") == m.today_london(),
+                  "note": notes("cant").split("\\n\\n")[-1], "wall": m.task_blocker(notes("cant")),
+                  "rest": m.blocked_rest(view, LEDGER_NOW.get("cant")), "ledger": [x for x in LEDGER if x[0] == "cant"],
+                  "cantlast": [f("cantlast", "approvalOutcome"), f("cantlast", "approvalFeedback")],
+                  "donelast": [f("donelast", "approvalOutcome"), f("donelast", "status"), f("donelast", "approvalFeedback")],
+                  "stale": [f("stale", "approvalFeedback"), f("stale", "approvalOutcome"), f("stale", "status")]}))`);
+    expect(r.dry.cant).toEqual(['Your turn opens a login page and we have no account', null]);
+    expect(r.dry.cantlast).toEqual(['the form wants a director', null]);
+    expect(r.dry.donelast).toEqual([null, 'made one and sent it']);
+    expect(r.dry.stale[0]).toBeNull();
+    expect(r.writesDry).toBe(0);
+    expect(r.sentBack).toEqual(['cant', 'cantlast']);
+    expect(r.woken).toEqual(['donelast']);
+    expect(r.refused).toEqual(['empty', 'stale']);
+    expect(r.cant).toEqual(['Today', 'Changes requested', '2026-10-06T10:00:00.000Z',
+      "I can't do this step: Your turn opens a login page and we have no account", 'The form is ready.', null]);
+    expect(r.due).toBe(true);
+    expect(r.note).toMatch(/— Kevin\] BLOCKER CLEARED \(KEVIN identity\): Kevin cannot take this step: Your turn opens a login page and we have no account\. Sent back to you as Changes requested/);
+    expect(r.wall).toBeNull();
+    expect(r.rest).toBe('');
+    expect(r.ledger).toEqual([['cant', 'unblocked']]);
+    expect(r.cantlast).toEqual(['Changes requested', "I can't do this step: the form wants a director"]);
+    expect(r.donelast).toEqual(['Approved as-is', 'Today', null]);
+    expect(r.stale).toEqual([null, 'Approved as-is', 'Approval']);
+  });
+
+  it("a can't retires the task's Your turn plan, so a later wall cannot bring back the same button", () => {
+    const dir = mkdtempSync(tmpdir() + '/od-cant-plan-');
+    writeFileSync(dir + '/recCantPlanAaaaaa.json', JSON.stringify({ why: 'log in to the example portal and pay', steps: [] }));
+    const r = py(setup + `
+import os
+m.HANDOVER_DIR = ${JSON.stringify(dir)}
+rec("recCantPlanAaaaaa", notes="${blk('KEVIN', 'identity', '2026-10-05T09:00:00.000Z')}", status="Approval", outcome="Approved as-is",
+    approved_at="2026-10-04T09:00:00.000Z", output=STEP, feedback="KEVIN STEP CANT [2026-10-06T10:00:00.000Z]: we have no account")
+res = m.blockers_scan(sweep=True, now=NOW)
+left = sorted(os.listdir(m.HANDOVER_DIR))
+print(json.dumps({"sent": res["sentBack"], "left": left, "plan": m.handover_plan("recCantPlanAaaaaa"),
+                  "missing": m.kevin_plan_missing("recCantPlanAaaaaa"), "note": notes("recCantPlanAaaaaa").split("\\n\\n")[-1]}))`);
+    expect(r.sent.map((x) => [x.task, x.planRetired])).toEqual([['recCantPlanAaaaaa', true]]);
+    expect(r.left).toHaveLength(1);
+    expect(r.left[0]).toMatch(/^recCantPlanAaaaaa\.json\.cant-\d{12}$/);
+    expect(r.plan).toBeNull();
+    expect(r.missing).toBe(true);      // a new KEVIN wall needs a new plan or written steps
+    expect(r.note).toMatch(/The old Your turn plan is retired to .*recCantPlanAaaaaa\.json\.cant-\d{12}\./);
+  });
+
+  it("the send-back decides on a fresh read: a newer done line written since wins, and nothing is written", () => {
+    const r = py(setup + `
+b = m.task_blocker("${blk('KEVIN', 'identity', '2026-10-05T09:00:00.000Z')}")
+rec("t1", notes="${blk('KEVIN', 'identity', '2026-10-05T09:00:00.000Z')}", status="Approval", outcome="Approved as-is",
+    approved_at="2026-10-04T09:00:00.000Z", output=STEP,
+    feedback="KEVIN STEP CANT [2026-10-06T10:00:00.000Z]: no account\\nKEVIN STEP DONE [2026-10-06T10:30:00.000Z]: made one and sent it")
+rec("t2", notes="${blk('KEVIN', 'identity', '2026-10-05T09:00:00.000Z')}", status="Approval", outcome="Approved as-is",
+    approved_at="2026-10-04T09:00:00.000Z", output=STEP, feedback="Use the business card.")
+print(json.dumps({"t1": m.send_back_blocked("t1", b), "t2": m.send_back_blocked("t2", b), "writes": len(WRITES)}))`);
+    expect(r.t1).toBeNull();
+    expect(r.t2).toBeNull();
+    expect(r.writes).toBe(0);
+  });
+
   it('a task a standing hold covers is never surfaced: the hold parks it and the sweep must not undo that', () => {
     const r = py(setup + `
 rec("held", notes="${blk('KEVIN', 'payment', '2026-10-02T09:00:00.000Z')}", status="Upcoming", outcome="Approved as-is",

@@ -62,6 +62,9 @@ test.describe('Your step: an approved card back in his lane', () => {
     await expect(card.locator('.apv-reason')).toHaveCount(0);
     await expect(card.locator('[data-apv-pick]')).toHaveCount(0);
     await expect(card.locator('[data-apv-step-done]')).toHaveText('Done, here is the proof');
+    await expect(card.locator('[data-apv-step-cant]')).toHaveText("I can't do this");
+    await expect(card.locator('.apv-attach-btn')).toBeVisible();
+    await expect(card.locator(`#apvRemember-${ID}`)).toHaveCount(0);   // proof is not a standing rule
     // An ordinary card on the same page still has its buttons: the change is scoped to Your step.
     await expect(page.locator('[data-apv-card="recApvB1"] button[onclick*="agDecide"]').first()).toBeVisible();
   });
@@ -109,6 +112,78 @@ test.describe('Your step: an approved card back in his lane', () => {
     expect(patches.filter((x) => x.id === ID)).toHaveLength(0);
     const ticked = await page.evaluate((id) => { apvSelectAllShown(); return apvBulkIds().includes(id); }, ID);
     expect(ticked).toBe(false);
+  });
+
+  // Kevin, 8 Oct 2026: "I've not been able to attach documents to it like I used to be able to in
+  // the approval cards." The box takes a file chosen or dropped, uploads it to the task, and names
+  // it on the line; a file alone is proof enough.
+  test('attached and dropped files go onto the task and are named on the done line', async ({ page }) => {
+    const patches = await mockAgentsPage(page, withStep());
+    const uploads = [];
+    await page.route('**/content.airtable.com/**', async (route) => {
+      const body = JSON.parse(route.request().postData() || '{}');
+      uploads.push({ url: route.request().url(), filename: body.filename });
+      return route.fulfill({ status: 200, contentType: 'application/json', body: '{}' });
+    });
+    await loadAgentsPage(page);
+    await page.click('#ptab-approvals');
+    const card = page.locator(`[data-apv-card="${ID}"]`);
+    await card.locator(`#apvFile-${ID}`).setInputFiles({ name: 'receipt.pdf', mimeType: 'application/pdf', buffer: Buffer.from('%PDF-1.4 receipt') });
+    await page.evaluate((id) => {
+      const dt = new DataTransfer();
+      dt.items.add(new File(['png bytes'], 'signed-copy.png', { type: 'image/png' }));
+      document.getElementById('apvDrop-' + id).dispatchEvent(new DragEvent('drop', { dataTransfer: dt, bubbles: true, cancelable: true }));
+    }, ID);
+    await expect(card.locator('.apv-file-chip')).toHaveCount(2);
+    await card.locator('[data-apv-step-done]').click();
+    await expect.poll(() => patches.filter((p) => p.id === ID).length).toBe(1);
+    expect(uploads.map((u) => u.filename)).toEqual(['receipt.pdf', 'signed-copy.png']);
+    expect(uploads.every((u) => u.url.includes(`/${ID}/${TF.attachments}/uploadAttachment`))).toBe(true);
+    const p = patches.find((x) => x.id === ID).fields;
+    expect(p[FEEDBACK]).toMatch(/^KEVIN STEP DONE \[[^\]]+\]: Attached: receipt\.pdf, signed-copy\.png$/);
+    expect(p[TF.feedbackHistory]).toMatch(/Done, here is the proof: Attached: receipt\.pdf, signed-copy\.png$/);
+    await expect(page.locator(`[data-apv-card="${ID}"] [data-apv-step-said]`))
+      .toContainText('Attached: receipt.pdf, signed-copy.png. The robot checks it');
+  });
+
+  // Kevin, 8 Oct 2026: a portal opened on a login he has no account for, and the card
+  // could only say done. "I can't do this" needs his reason, writes it under KEVIN STEP CANT, and
+  // never the verdict: the sweep sends it back to the agent as Changes requested.
+  test("I can't do this needs a reason, then writes it under KEVIN STEP CANT and never the verdict", async ({ page }) => {
+    const patches = await mockAgentsPage(page, withStep({ feedback: 'Use the business card.' }));
+    await loadAgentsPage(page);
+    await page.click('#ptab-approvals');
+    const card = page.locator(`[data-apv-card="${ID}"]`);
+    await card.locator('[data-apv-step-cant]').click();
+    await expect(page.locator('#toast')).toContainText("Say why you can't do it first");
+    expect(patches.filter((p) => p.id === ID)).toHaveLength(0);
+    await card.locator(`#apvNote-${ID}`).fill('Your turn opens a login page   and we have no account');
+    await page.route('**/content.airtable.com/**', (route) => route.fulfill({ status: 200, contentType: 'application/json', body: '{}' }));
+    await card.locator(`#apvFile-${ID}`).setInputFiles({ name: 'login-screen.png', mimeType: 'image/png', buffer: Buffer.from('png') });
+    await card.locator('[data-apv-step-cant]').click();
+    await expect.poll(() => patches.filter((p) => p.id === ID).length).toBe(1);
+    const p = patches.find((x) => x.id === ID).fields;
+    expect(p[FEEDBACK]).toMatch(/^Use the business card\.\nKEVIN STEP CANT \[\d{4}-\d{2}-\d{2}T[0-9:.]+Z\]: Your turn opens a login page and we have no account\. Attached: login-screen\.png$/);
+    expect(p[TF.feedbackHistory]).toMatch(/I can't do this step: Your turn opens a login page and we have no account\. Attached: login-screen\.png$/);
+    for (const k of [TF.approvalOutcome, TF.approvedAt, TF.status, TF.agentOutput, TF.completionDate]) {
+      expect(k in p, `the can't button wrote ${k}`).toBe(false);
+    }
+    const said = page.locator(`[data-apv-card="${ID}"] [data-apv-step-said]`);
+    await expect(said).toContainText("You said you can't do this");
+    await expect(said).toContainText('we have no account. Attached: login-screen.png. Within half an hour it goes back to');
+    await expect(said).toContainText('as Request changes, to find another way');
+    await expect(page.locator(`[data-apv-card="${ID}"] [data-apv-step-cant]`)).toHaveCount(0);
+  });
+
+  test("a can't already given shows as given, the newer line winning over an older done", async ({ page }) => {
+    await mockAgentsPage(page, withStep({ feedback:
+      'KEVIN STEP DONE [2026-10-07T10:00:00.000Z]: paid\nKEVIN STEP CANT [2026-10-07T11:00:00.000Z]: the form wants a director' }));
+    await loadAgentsPage(page);
+    await page.click('#ptab-approvals');
+    const card = page.locator(`[data-apv-card="${ID}"]`);
+    await expect(card.locator('[data-apv-step-said]')).toContainText("You said you can't do this");
+    await expect(card.locator('[data-apv-step-said]')).toContainText('the form wants a director');
+    await expect(card.locator('[data-apv-step-done]')).toHaveCount(0);
   });
 
   test('a proof already given shows as given, with no second box', async ({ page }) => {

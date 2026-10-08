@@ -127,6 +127,19 @@ describe('standing holds — the dispatch queue every agent is fed from', () => 
     expect(working).toContain('recYES');
   });
 
+  // "I can't do this" on a Your step card he approved after the hold began turns the verdict into
+  // Changes requested; the hold must not park his reason (review, 8 Oct 2026).
+  it('a Changes requested given after the hold began is worked; one given the day it began is held', () => {
+    const q = queue([
+      { id: 'recSENT', name: 'Pay the 3 MP council tax SO online', outcome: 'Changes requested', approvedAt: '2026-09-24T09:00:00.000Z' },
+      { id: 'recSENTOLD', name: 'Pay the 3 MP council tax SO online again', outcome: 'Changes requested', approvedAt: '2026-09-23T12:54:00.000Z' },
+    ], holdsFile([HOLD]));
+    expect(q.error).toBe('');
+    expect(q.held).toEqual(['recSENTOLD']);
+    const working = Object.entries(q.lanes).filter(([k]) => k !== 'heldByStandingHold').flatMap(([, v]) => v);
+    expect(working).toContain('recSENT');
+  });
+
   it('back-test: with no hold on file the same task is worked, so the hold is what kept it back', () => {
     const q = queue(BOARD, holdsFile(null));
     expect(q.held).toEqual([]);

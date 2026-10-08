@@ -166,8 +166,10 @@ def example_problems(hold):
 
 
 def approved_after_start(task, hold):
-    """Kevin approved this exact task after the hold began: his newer word wins."""
-    if task.get("outcome") not in APPROVED:
+    """Kevin approved this exact task after the hold began: his newer word wins. A Changes
+    requested after it began is his word too: "I can't do this" on a Your step card he approved
+    turns the verdict into one, and the hold must not park his reason (review, 8 Oct 2026)."""
+    if task.get("outcome") not in APPROVED + ("Changes requested",):
         return False
     at = str(task.get("approvedAt") or "")[:10]
     return bool(at) and at > str(hold.get("created") or "")

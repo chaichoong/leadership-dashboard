@@ -7630,6 +7630,10 @@ YOUR_STEP_DIVIDER = "----- The agent's work, as you approved it -----"
 # The page writes exactly this line (os/agents/index.html APV_STEP_DONE_MARK).
 KEVIN_DONE_MARK = "KEVIN STEP DONE"
 KEVIN_DONE_RE = re.compile(r"^KEVIN STEP DONE \[(\d{4}-\d{2}-\d{2}T[0-9:.]+Z)\]:[ \t]*(.*)$", re.M)
+# "I can't do this" on the same card (Kevin, 8 Oct 2026): os/agents/index.html APV_STEP_CANT_MARK.
+# His reason sends the task back to its agent as Changes requested (send_back_blocked).
+KEVIN_CANT_MARK = "KEVIN STEP CANT"
+KEVIN_CANT_RE = re.compile(r"^KEVIN STEP CANT \[(\d{4}-\d{2}-\d{2}T[0-9:.]+Z)\]:[ \t]*(.*)$", re.M)
 # Numbered written steps: "1. ..." or "1) ..." somewhere in the text.
 STEPS_NUMBERED_RE = re.compile(r"(?:^|\s)1[.)]\s+\S")
 CREDENTIAL_SEARCH_REMINDER = (
@@ -7747,8 +7751,18 @@ def kevin_done_said(feedback, since=""):
     """(evidence, stamp) of Kevin's "Done, here is the proof" in Approval Feedback, or None.
     The newest marker counts, and only one written after the wall opened: a marker left from an
     earlier wall must never clear a new one. A wall with no `since` takes any marker."""
+    return _kevin_step_said(KEVIN_DONE_RE, feedback, since)
+
+
+def kevin_cant_said(feedback, since=""):
+    """(reason, stamp) of Kevin's "I can't do this" in Approval Feedback, or None. Same rules as
+    kevin_done_said: the newest line, written after the wall opened, with words."""
+    return _kevin_step_said(KEVIN_CANT_RE, feedback, since)
+
+
+def _kevin_step_said(regex, feedback, since):
     last = None
-    for m in KEVIN_DONE_RE.finditer(str(feedback or "")):
+    for m in regex.finditer(str(feedback or "")):
         last = m
     if not last:
         return None
@@ -7763,9 +7777,17 @@ def kevin_done_said(feedback, since=""):
     return evidence, last.group(1)
 
 
+def has_step_mark(feedback):
+    """True when Approval Feedback holds a KEVIN STEP DONE or KEVIN STEP CANT line."""
+    raw = str(feedback or "")
+    return KEVIN_DONE_MARK + " [" in raw or KEVIN_CANT_MARK + " [" in raw
+
+
 def without_done_marks(feedback):
-    """Approval Feedback with every KEVIN STEP DONE line taken out, or None when nothing is left."""
-    kept = [ln for ln in str(feedback or "").split("\n") if not ln.startswith(KEVIN_DONE_MARK + " [")]
+    """Approval Feedback with every KEVIN STEP DONE and KEVIN STEP CANT line taken out, or None
+    when nothing is left."""
+    kept = [ln for ln in str(feedback or "").split("\n")
+            if not ln.startswith((KEVIN_DONE_MARK + " [", KEVIN_CANT_MARK + " ["))]
     out = "\n".join(kept).strip()
     return out or None
 
@@ -7801,7 +7823,7 @@ def wake_blocked(task_id, b, reason, by="agent-dispatch"):
         fields[AF["dueDate"]] = today_london()
         fields[AF["deferredUntil"]] = None
     raw_feedback = (rec.get("fields") or {}).get(AF["approvalFeedback"]) or ""
-    if KEVIN_DONE_MARK + " [" in raw_feedback:
+    if has_step_mark(raw_feedback):
         # Whatever cleared the wall: a done line left behind would be read by the next
         # carry-out as Kevin's edit note (review, 7 Oct 2026).
         fields[AF["approvalFeedback"]] = without_done_marks(raw_feedback)
@@ -7809,6 +7831,61 @@ def wake_blocked(task_id, b, reason, by="agent-dispatch"):
     ledger_append(task_id, "unblocked")
     return {"task": task_id, "name": t["name"][:80], "kind": b["kind"],
             "subject": b["subject"], "reason": reason}
+
+
+def send_back_blocked(task_id, b):
+    """"I CAN'T DO THIS" (Kevin, 8 Oct 2026). A Your step card had two exits, done or a
+    knock-back, so a step he could not take (a portal that opens on a login he has no
+    account for) waited on him for ever. His reason now sends the task back to its agent as
+    Changes requested: the wall is cleared, the Agent Output goes back as he approved it, his
+    reason becomes the feedback, and Status goes to Today, so the redo lane picks it up. The
+    agent must find a way that does not need the step, or one he can take, and resubmit; the
+    redo receipt makes it answer his reason. Earlier feedback is already in Feedback History
+    (the page archives every note). Approved At is the stamp on his line.
+
+    Decided on a FRESH read, never the sweep's bulk one: a done line he wrote since from another
+    tab is newer and wins (review, 8 Oct 2026). The task's Your turn plan is retired (renamed, kept
+    beside it) so a later wall cannot bring back the button for the step he said he cannot take.
+    None, with nothing written, when the wall moved or his newest line is not a can't."""
+    rec = get_task(task_id)
+    t = task_view(rec)
+    cur = task_blocker(t["notes"])
+    if cur and not same_wall(cur, b):
+        return None
+    feedback = (rec.get("fields") or {}).get(AF["approvalFeedback"]) or ""
+    cant = kevin_cant_said(feedback, b.get("since", ""))
+    done = kevin_done_said(feedback, b.get("since", ""))
+    if not cant or (done and (_utc(done[1]) or datetime.min.replace(tzinfo=timezone.utc))
+                    >= (_utc(cant[1]) or datetime.min.replace(tzinfo=timezone.utc))):
+        return None
+    why, said_at = cant[0][:1000], cant[1]
+    retired = ""
+    plan = os.path.join(HANDOVER_DIR, task_id + ".json")
+    if TURN_TASK_RE.match(task_id or "") and os.path.isfile(plan):
+        retired = plan + ".cant-" + datetime.now(timezone.utc).strftime("%Y%m%d%H%M")
+        try:
+            os.replace(plan, retired)
+        except OSError as e:
+            print(f"WARNING: the Your turn plan for {task_id} could not be retired: {e}", file=sys.stderr)
+            retired = ""
+    stamp = datetime.now(LONDON).strftime("%d %b %Y %H:%M")
+    note = blocker_note(stamp, "Kevin", BLOCKER_CLEARED_MARK, b,
+                        f"Kevin cannot take this step: {why}. Sent back to you as Changes requested. "
+                        "Find a way that does not need this step from him, or a step he can take, then "
+                        "resubmit for approval answering his reason."
+                        + (f" The old Your turn plan is retired to {retired}." if retired else ""))
+    fields = {AF["notes"]: ((t["notes"] or "").rstrip() + "\n\n" + note).strip()[-90000:],
+              AF["approvalOutcome"]: "Changes requested",
+              AF["approvedAt"]: said_at,
+              AF["approvalFeedback"]: f"I can't do this step: {why}",
+              AF["status"]: "Today", AF["dueDate"]: today_london(), AF["deferredUntil"]: None}
+    step, original = your_step_split(t["agentOutput"])
+    if step is not None:
+        fields[AF["agentOutput"]] = original
+    patch_task(task_id, fields)
+    ledger_append(task_id, "unblocked")
+    return {"task": task_id, "name": t["name"][:80], "kind": b["kind"],
+            "subject": b["subject"], "reason": why[:400], "planRetired": bool(retired)}
 
 
 def same_wall(a, b):
@@ -8142,7 +8219,7 @@ def blockers_scan(sweep=False, now=None):
                 lazy[key] = (None, str(exc)[:200])
         return lazy[key]
 
-    open_walls, woken, stale, surfaced, done_refused, plan_repairs = [], [], [], [], [], []
+    open_walls, woken, stale, surfaced, done_refused, plan_repairs, sent_back = [], [], [], [], [], [], []
     for rec in recs:
         t = task_view(rec)
         b = task_blocker(t["notes"])
@@ -8152,6 +8229,18 @@ def blockers_scan(sweep=False, now=None):
                   if not (sites_error and b["kind"] == "SITE") else "")
         raw_feedback = (rec.get("fields") or {}).get(AF["approvalFeedback"]) or ""
         done = kevin_done_said(raw_feedback, b.get("since", "")) if b["kind"] == "KEVIN" else None
+        cant = kevin_cant_said(raw_feedback, b.get("since", "")) if b["kind"] == "KEVIN" else None
+        if done and cant:
+            # Two tabs can write both: the newer line is what he meant.
+            if (_utc(cant[1]) or now) > (_utc(done[1]) or now):
+                done = None
+            else:
+                cant = None
+        if cant and sweep:
+            sent = send_back_blocked(t["id"], b)
+            if sent:
+                sent_back.append(sent)
+                continue
         if done and not reason:
             # Kevin's "Done, here is the proof" on the page (7 Oct 2026). The agent still checks
             # the receipt before it closes the task (GUARDRAILS "Kevin's turn").
@@ -8161,17 +8250,18 @@ def blockers_scan(sweep=False, now=None):
             if woke:
                 woken.append(woke)
                 continue
-        if sweep and not done and KEVIN_DONE_MARK + " [" in raw_feedback:
-            # A done line the sweep cannot take (written before this wall opened, or with no
-            # words) comes out, with a note, so the page offers the box again rather than
+        if sweep and not done and not cant and has_step_mark(raw_feedback):
+            # A done or can't line the sweep cannot take (written before this wall opened, or
+            # with no words) comes out, with a note, so the page offers the box again rather than
             # showing "you said it is done" for ever (review, 7 Oct 2026). Judged again on a
             # FRESH read: a line Kevin wrote since the bulk read is his, never wiped.
             frec = get_task(t["id"])
             ft = task_view(frec)
             fresh_feedback = (frec.get("fields") or {}).get(AF["approvalFeedback"]) or ""
             fb = task_blocker(ft["notes"])
-            if same_wall(fb, b) and KEVIN_DONE_MARK + " [" in fresh_feedback \
-                    and not kevin_done_said(fresh_feedback, b.get("since", "")):
+            if same_wall(fb, b) and has_step_mark(fresh_feedback) \
+                    and not kevin_done_said(fresh_feedback, b.get("since", "")) \
+                    and not kevin_cant_said(fresh_feedback, b.get("since", "")):
                 stamp = datetime.now(LONDON).strftime("%d %b %Y %H:%M")
                 patch_task(t["id"], {
                     AF["approvalFeedback"]: without_done_marks(fresh_feedback),
@@ -8214,6 +8304,8 @@ def blockers_scan(sweep=False, now=None):
             row["yourStep"] = in_your_step(t)
             if done:
                 row["doneSaid"] = done[0][:200]
+            if cant:
+                row["cantSaid"] = cant[0][:200]
         if handover_ready(t["id"], b, t.get("outcome"), t):
             problem = handover_plan_problem(t["id"])
             if problem:
@@ -8256,6 +8348,7 @@ def blockers_scan(sweep=False, now=None):
     return {"openTasksRead": len(control), "open": open_walls, "woken": woken,
             "stale": stale, "closedWhileBlocked": closed_blocked,
             "surfaced": surfaced, "doneRefused": done_refused, "planRepairs": plan_repairs,
+            "sentBack": sent_back,
             "sitesError": sites_error, "findingsError": findings_error,
             # The lazy reads that failed, by name (ledger, cards, details). Never fatal, never silent.
             "readErrors": {k: v[1] for k, v in lazy.items() if v[1]}}
