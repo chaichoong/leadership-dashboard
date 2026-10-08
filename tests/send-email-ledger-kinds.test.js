@@ -193,9 +193,19 @@ describe('a second email on one task (finding 20261002-agent-dispatch-716, 7 Oct
       to: ['bookings@second-contractor.test'], cc: [], subject: 'Book a gas safety check - 1 Example Road' };
     for (const card of [SECOND.replace('FROM: kevinbrittain@gmail.com', 'CC: info@example-lets.test\nFROM: kevinbrittain@gmail.com'),
                         SECOND.replace('TO: bookings@second-contractor.test', 'TO: bookings@second-contractor.test, office@second-contractor.test'),
-                        SECOND.replace('SUBJECT: Book', 'SUBJECT: Re: Book')]) {
+                        SECOND.replace('SUBJECT: Book', 'SUBJECT: Re: Book'),
+                        // the first person moved to CC under a new TO (review round 3)
+                        SECOND.replace('TO: bookings@second-contractor.test', 'TO: office@second-contractor.test\nCC: bookings@second-contractor.test')]) {
       expect(run({ cmd: 'send', rows: [sent], output: card, approvedAt: '2026-10-07T19:23:10.772Z' }).calls).toHaveLength(0);
     }
+  });
+
+  it('our own mailboxes copied on both emails never make a different contractor\'s email "the same"', () => {
+    const first = { ...FIRST, cc: ['roy.lavin1978@gmail.com'] };
+    const second = SECOND.replace('FROM: kevinbrittain@gmail.com', 'CC: roy.lavin1978@gmail.com\nFROM: kevinbrittain@gmail.com')
+      .replace('SUBJECT: Book a gas safety check - 1 Example Road', 'SUBJECT: Gas safety certificate - 1 Example Road');
+    const r = run({ cmd: 'send', rows: [first], output: second, approvedAt: '2026-10-07T19:23:10.772Z' });
+    expect(r.calls).toHaveLength(1);
   });
 
   it('an Approved At with no timezone is read as UTC, never a crash', () => {

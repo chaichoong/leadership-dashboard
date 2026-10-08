@@ -107,6 +107,8 @@ from agent_email_format import (  # noqa: E402
     BUSINESS_BRAND_RE,
     PROPERTY_SENDER,
     PERSONAL_SENDER,
+    RULE_OWN_ADDRESSES,
+    ALLOWED_SENDERS,
     rule_send_problem,
     trial_problem,
 )
@@ -345,7 +347,7 @@ def second_send_problem(task_id, mail):
     contractor on the same certificate task) could never send, and its card came back to him after
     every approval. A second email goes when BOTH hold: Kevin approved after the last send, and it is
     not an email already sent on this task. "The same email" is the same subject (reply prefixes
-    aside) to any of the same TO addresses, whatever the body or the copies: a minor edit to a card that already went never sends it again, and a
+    aside) to any of the same people (TO or CC, our own mailboxes aside), whatever the body: a minor edit to a card that already went never sends it again, and a
     real chase changes its subject (review, 8 Oct 2026). A row that cannot be compared (no subject,
     no event) counts as the same email: a missed email is recoverable, a second copy is not."""
     rows = []
@@ -375,12 +377,17 @@ def second_send_problem(task_id, mail):
                 return text
             text = stripped
     subject = subject_key(mail.get("subject"))
-    mine = {str(a).lower() for a in mail.get("to") or []}
+    # Our own mailboxes and Roy are copied on many emails, so they never make two emails "the same".
+    own = {a.lower() for a in set(RULE_OWN_ADDRESSES) | set(ALLOWED_SENDERS)}
+    def people(to, cc):
+        return {str(a).lower() for a in (to or []) + (cc or [])} - own
+    mine = people(mail.get("to"), mail.get("cc"))
     for r in rows:
-        # The same email is the same subject to ANY of the same people: a minor edit that adds a CC or a
-        # second TO never sends the first person a second copy (review round 2, 8 Oct 2026). A row that
-        # names no subject, or records no event, cannot be compared, so it counts as the same email.
-        theirs = {str(a).lower() for a in r.get("to") or []}
+        # The same email is the same subject to ANY of the same people, on TO or CC on either side: a
+        # minor edit that adds a CC, a second TO, or moves the first person to CC never sends them a
+        # second copy (review rounds 2 and 3, 8 Oct 2026). A row that names no subject, or records no
+        # event, cannot be compared, so it counts as the same email.
+        theirs = people(r.get("to"), r.get("cc"))
         row_subject = subject_key(r.get("subject"))
         if mine & theirs and (not row_subject or row_subject == subject or r.get("event") is None):
             return (f"this email (to {', '.join(r.get('to') or [])}, \"{r.get('subject') or 'no subject recorded'}\") "
