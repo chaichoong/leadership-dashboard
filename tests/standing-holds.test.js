@@ -60,6 +60,8 @@ for t in json.loads(${JSON.stringify(JSON.stringify(tasks))}):
         f[AF["approvalOutcome"]] = {"name": t["outcome"]}
         f[AF["approvedAt"]] = t["approvedAt"]
         f[AF["sentForApprovalBy"]] = [agent]
+    if t.get("history"):
+        f[AF["feedbackHistory"]] = t["history"]
     recs.append({"id": t["id"], "fields": f})
 m.query_tasks = lambda formula, **kw: recs
 m.fetch_role_roster = lambda: {}
@@ -138,6 +140,23 @@ describe('standing holds — the dispatch queue every agent is fed from', () => 
     expect(q.held).toEqual(['recSENTOLD']);
     const working = Object.entries(q.lanes).filter(([k]) => k !== 'heldByStandingHold').flatMap(([, v]) => v);
     expect(working).toContain('recSENT');
+  });
+
+  // Kevin, 8 Oct 2026: the agent's resubmit after his "I can't do this" clears the verdict, so the
+  // hold parked the answer to his reason. His can't line, dated after the hold began, keeps it free.
+  it("a resubmitted card whose history holds his I can't after the hold began is worked; earlier, or none, is held", () => {
+    const q = queue([
+      { id: 'recCANT', name: 'Pay the 3 MP council tax SO online',
+        history: "[2026-09-20 10:00] Use the card.\n\n[2026-09-24 13:30] I can't do this step: the portal wants an account" },
+      { id: 'recCANTOLD', name: 'Pay the 3 MP council tax SO online again',
+        history: "[2026-09-23 13:30] I can't do this step: no account" },
+      { id: 'recNOTE', name: 'Pay the 3 MP council tax SO by phone',
+        history: '[2026-09-24 13:30] Done, here is the proof: paid, ref EX-1' },
+    ], holdsFile([HOLD]));
+    expect(q.error).toBe('');
+    expect(q.held.sort()).toEqual(['recCANTOLD', 'recNOTE']);
+    const working = Object.entries(q.lanes).filter(([k]) => k !== 'heldByStandingHold').flatMap(([, v]) => v);
+    expect(working).toContain('recCANT');
   });
 
   it('back-test: with no hold on file the same task is worked, so the hold is what kept it back', () => {

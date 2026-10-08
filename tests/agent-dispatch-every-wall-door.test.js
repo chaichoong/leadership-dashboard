@@ -510,6 +510,22 @@ print(json.dumps({"sent": res["sentBack"], "left": left, "plan": m.handover_plan
     expect(r.note).toMatch(/The old Your turn plan is retired to .*recCantPlanAaaaaa\.json\.cant-\d{12}\./);
   });
 
+  it("a long reason is sent back whole, so the resubmit's archive never stamps a second can't line", () => {
+    const r = py(setup + `
+long = "the portal wants an account " + "and a director's code " * 60
+hist = "[2026-10-06 10:00] I can't do this step: " + " ".join(long.split())
+rec("t1", notes="${blk('KEVIN', 'identity', '2026-10-05T09:00:00.000Z')}", status="Approval", outcome="Approved as-is",
+    approved_at="2026-10-04T09:00:00.000Z", output=STEP, feedback="KEVIN STEP CANT [2026-10-06T10:00:00.000Z]: " + long)
+res = m.blockers_scan(sweep=True, now=NOW)
+fb = f("t1", "approvalFeedback")
+print(json.dumps({"sent": [x["task"] for x in res["sentBack"]], "len": len(long), "whole": fb == "I can't do this step: " + " ".join(long.split()),
+                  "archived": m.feedback_archived(hist, fb)}))`);
+    expect(r.sent).toEqual(['t1']);
+    expect(r.len).toBeGreaterThan(1000);
+    expect(r.whole).toBe(true);
+    expect(r.archived).toBe(true);
+  });
+
   it("the send-back decides on a fresh read: a newer done line written since wins, and nothing is written", () => {
     const r = py(setup + `
 b = m.task_blocker("${blk('KEVIN', 'identity', '2026-10-05T09:00:00.000Z')}")

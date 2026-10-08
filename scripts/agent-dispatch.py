@@ -2930,6 +2930,8 @@ def task_view(rec):
         # every task.
         "feedback": expand_looms(f.get(AF["approvalFeedback"], "")),
         "noteWithVerdict": note_with_verdict(f.get(AF["feedbackHistory"]), f.get(AF["approvedAt"])),
+        # The date of his newest "I can't do this step" (standing_holds.approved_after_start).
+        "cantAt": standing_holds.latest_cant(f.get(AF["feedbackHistory"])),
         "agentOutput": f.get(AF["agentOutput"], ""),
         "taskType": sel(f.get(AF["taskType"])),
         "teamMemberIds": links(f.get(AF["teamMember"])),
@@ -7858,7 +7860,9 @@ def send_back_blocked(task_id, b):
     if not cant or (done and (_utc(done[1]) or datetime.min.replace(tzinfo=timezone.utc))
                     >= (_utc(cant[1]) or datetime.min.replace(tzinfo=timezone.utc))):
         return None
-    why, said_at = cant[0][:1000], cant[1]
+    # Never cut: the page's Feedback History line holds his whole reason, and a cut copy reads as new
+    # words to cmd_submit's archive, which then stamps a second can't line on the resubmit's date.
+    why, said_at = cant[0], cant[1]
     retired = ""
     plan = os.path.join(HANDOVER_DIR, task_id + ".json")
     if TURN_TASK_RE.match(task_id or "") and os.path.isfile(plan):
