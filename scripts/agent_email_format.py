@@ -196,6 +196,91 @@ def strip_track_record(text):
     return TRACK_RECORD_RE.sub("", text or "")
 
 
+# A TRACK RECORD header, also when decorated (**TRACK RECORD:**, a [stamp] before it, a quote mark).
+TRACK_RECORD_LINE_RE = re.compile(r"^[ \t>*_#]*(?:\[[^\]\n]*\][ \t]*)?TRACK RECORD:", re.M)
+# The report gate's own line (agent-dispatch.py CHECKED_RE / CHECK_KEYS): "CHECKED: handled=no; roy=no;
+# ...", keys in any order. Written for Kevin's card, never the recipient's, wherever an agent put it.
+CHECKED_LINE_RE = re.compile(r"^[ \t>*_]*CHECKED:(?=[^\n]*\bhandled[ \t]*=)[^\n]*(?:\n|$)", re.M | re.I)
+SEPARATOR_LINE_RE = re.compile(r"^[ \t]*---[ \t]*$", re.M)
+TR_BULLET_RE = re.compile(r"^[ \t]*[-*\u2022][ \t]")   # a numbered list under it is the email's
+TR_WRAP_RE = re.compile(r"^[ \t]{2,}\S")
+TR_DATED_BULLET_RE = re.compile(r"^[ \t]*[-*\u2022][ \t]+(?:\d{1,2} \w{3,4} \d{4}|\d{4}-\d{2}-\d{2})")
+# What may never be left inside an email once the blocks above are out (7 Oct 2026). Every measured
+# notes heading ("AGENT NOTES (not for sending)", "... NOTES (... not for sending)", "AGENT NOTE (not
+# part of the email)", "(for Kevin's review only)"), a tier-1 banner, and a second separator.
+# A second separator: a line of only -, * (three or more), or a marker such as ---EMAIL--- / --- NOTES ---.
+# "-----Original Message-----", "---------- Forwarded message ---------" and Outlook's line of
+# underscores are real email and stay (review round 2, 8 Oct 2026).
+SECOND_SEPARATOR_RE = re.compile(r"^[ \t]*(?:(?:-[ \t]*){3,}|(?:\*[ \t]*){3,}|(?:=[ \t]*){3,}"
+                                 r"|-{3,}[ \t]*(?!ORIGINAL MESSAGE|FORWARDED MESSAGE)[A-Z][A-Z &]*[ \t]*-{3,})[ \t]*$", re.M)
+# A notes heading. No email to anyone says "not for sending" or "not part of the email", so those are
+# refused wherever they sit. "For Kevin('s review) only" counts in brackets; "AGENT NOTE(S)" and
+# "NOTE(S) FOR KEVIN" count at a line start followed by "(" or ":". A sign-off "(for Kevin Brittain)"
+# and "Agent notes from the inspection are attached." are the email's own (review round 3, 8 Oct 2026).
+KEVIN_ONLY_RE = re.compile(r"not for sending|not part of the email"
+                           r"|\([^)\n]*\bfor kevin(?:'s review(?: only)?| only)\b[^)\n]*\)"
+                           r"|^[ \t>*_#]*(?:AGENT NOTES?|NOTES? FOR KEVIN(?:'S REVIEW)?(?: ONLY)?)\b[^\n:(]{0,40}[:(]", re.M | re.I)
+TIER1_LEFT_RE = re.compile(r"^[ \t>*_#]*(?::rotating_light:|\U0001F6A8)?[ \t*_]*TIER[ -]?1\b", re.M)   # capitals only
+
+
+def clean_email_body(body):
+    """The email body with what is Kevin's taken out, or EmailFormatError when that cannot be done
+    without guessing.
+
+    WHAT IS KEVIN'S NEVER GOES TO THE RECIPIENT (7 Oct 2026, finding 20261007-agent-dispatch-780).
+    Only the TRACK RECORD header and its DATED bullets were stripped. Replaying every email ever sent
+    found outside recipients had received internal notes (case summaries, negotiating positions,
+    compliance notes, a personal detail): written under a second "---" after the signature, as an
+    "AGENT NOTE (not part of the email)" paragraph, as a TRACK RECORD block under the signature with
+    its undated lines, and as the report gate's CHECKED line. Two safe removals, and a refusal for the
+    rest, because a guess here either leaks a note or cuts an email short:
+      - the report gate's CHECKED line, wherever it sits;
+      - a TRACK RECORD block at the TOP of the body, through its first blank line (the email's own
+        bullets after it stay), and one of dated lines only at the very end;
+      - any other TRACK RECORD is refused: anything for Kevin goes ABOVE the headers."""
+    body = CHECKED_LINE_RE.sub("", body or "")
+    lines = body.split("\n")
+    while True:
+        i = 0
+        while i < len(lines) and not lines[i].strip():
+            i += 1
+        if i == len(lines) or not TRACK_RECORD_LINE_RE.match(lines[i]):
+            break
+        # The block is its header and its bullet lines (with their wrapped continuations), blank lines
+        # before the first bullet allowed. The first other line is the email: a greeting straight
+        # under "TRACK RECORD: none found" stays (review round 2, 8 Oct 2026).
+        j, k = i + 1, i + 1
+        while k < len(lines) and not lines[k].strip():
+            k += 1
+        if k < len(lines) and TR_BULLET_RE.match(lines[k]):
+            j = k
+            while j < len(lines):
+                if TR_BULLET_RE.match(lines[j]) or TR_WRAP_RE.match(lines[j]):
+                    j += 1
+                    continue
+                n = j
+                while n < len(lines) and not lines[n].strip():
+                    n += 1
+                if n > j and n < len(lines) and TR_DATED_BULLET_RE.match(lines[n]):
+                    # A blank line between the block's own DATED bullets (review round 3). An undated
+                    # bullet after a blank line is the email's own opening list, as before.
+                    j = n
+                    continue
+                break
+        lines = lines[:i] + lines[j:]
+    body = "\n".join(lines)
+    m = TRACK_RECORD_LINE_RE.search(body)
+    if m:
+        # Below the email's words, a block of dated lines with nothing after it is the shape the dated
+        # strip always removed cleanly: it still goes. Anything else after it cannot be told from the
+        # email, so it is refused (a cut sent a stub of what Kevin approved; review, 8 Oct 2026).
+        if strip_carry_out_line(strip_track_record(body[m.start():])).strip():
+            raise EmailFormatError("a TRACK RECORD sits inside the email, below its own words, with more than dated "
+                                   "lines after it: it is written for Kevin, so it goes ABOVE the headers")
+        body = body[:m.start()]
+    return body
+
+
 # Who may send a text at all (review, 4 Oct 2026): only the rent lanes' own tenant cards, known by
 # their name or their key line (TRIAL_TASK_MARKS below). Any other card's TEXT lines are never sent.
 # RENT CAP (lane C, 5 Oct 2026): the benefit-cap email to a tenant is the lane's own tenant card too.
@@ -333,7 +418,16 @@ def parse_output(output):
 
     Raises EmailFormatError on anything that would not send cleanly.
     """
-    text = strip_track_record(strip_tier1_banner(output or ""))
+    raw = strip_tier1_banner(str(output or "").replace("\r\n", "\n").replace("\r", "\n"))
+    sep = SEPARATOR_LINE_RE.search(raw)
+    cut = (sep.start(), sep.end()) if sep else ((raw.find("---"), raw.find("---") + 3) if "---" in raw else None)
+    if cut:
+        # The body is cleaned of what is Kevin's BEFORE the dated-line strip can take a TRACK RECORD
+        # header and leave its other lines behind (finding 20261007-agent-dispatch-780). Found by the
+        # line that is exactly "---", so a "---" inside a line above it never moves the split; with no
+        # such line, at the same "---" the split below uses, so the cleaning always runs (review round 2).
+        raw = raw[:cut[0]] + "---" + clean_email_body(raw[cut[1]:])
+    text = strip_track_record(raw)
     if not text.strip():
         raise EmailFormatError("Agent Output is empty")
     if "---" not in text:
@@ -402,6 +496,23 @@ def parse_output(output):
     # recipient. Stripped before the empty-body check, so an output that is
     # nothing BUT the marker is refused rather than sent as a blank email.
     body = strip_carry_out_line(body)
+    # WHAT IS LEFT MUST BE ONE EMAIL (7 Oct 2026, finding 20261007-agent-dispatch-780). Notes for Kevin
+    # under a second separator, a notes heading or a tier-1 banner went out in sent emails. Which side
+    # is the email cannot be known, so it is refused, never guessed: anything for Kevin goes ABOVE the
+    # headers.
+    if SECOND_SEPARATOR_RE.search(body):
+        raise EmailFormatError("the email has a second separator line (---, *** or ===), so text written for "
+                               "Kevin may sit inside it: write the email once, and put any notes for Kevin ABOVE the headers")
+    if TIER1_LEFT_RE.search(body):
+        raise EmailFormatError("a tier-1 banner sits inside the email: banners and notes for Kevin go "
+                               "ABOVE the headers")
+    if TRACK_RECORD_LINE_RE.search(body) or CHECKED_LINE_RE.search(body):
+        raise EmailFormatError("a TRACK RECORD or CHECKED line is still inside the email: it is written for Kevin, "
+                               "so it goes ABOVE the headers")
+    kevin_only = KEVIN_ONLY_RE.search(body.replace("\u2019", "'"))
+    if kevin_only:
+        raise EmailFormatError(f"the email holds a note written for Kevin ({kevin_only.group(0).strip()!r}): "
+                               "notes for Kevin go ABOVE the headers, never in the email")
 
     if not to and not to_each:
         raise EmailFormatError("no TO recipient")
