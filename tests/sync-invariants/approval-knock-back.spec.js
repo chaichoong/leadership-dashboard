@@ -29,8 +29,13 @@ const APPROVED_AT = 'fldr4Mvf2RzKvhZhi';
 const STATUS = 'fldx4qCw17UfrKpaN';
 const SLACK_TS = 'fldHTaX3wP9VhD5Oz';
 
+// The page counts from the later of the local and UTC dates (apvDatePlus), so
+// this does too, or a machine west of UTC fails after midnight UTC.
 function isoPlus(days) {
-  const d = new Date();
+  const now = new Date();
+  const d = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const utc = new Date(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate());
+  if (utc > d) d.setTime(utc.getTime());
   d.setDate(d.getDate() + days);
   return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
 }
@@ -67,6 +72,22 @@ test.describe('knocking an approval back', () => {
       await expect(cards.nth(i).locator('.apv-defer-btn', { hasText: 'A week' }).first()).toBeVisible();
     }
     await expect(page.locator('.apv-more')).toHaveCount(0);
+  });
+
+  test('Tomorrow comes first, and one click brings it back the next day', async ({ page }) => {
+    // Kevin, 8 Oct 2026: a one-day knock-back meant typing the date and
+    // pressing Go every time.
+    const patches = await mockAgentsPage(page);
+    await loadAgentsPage(page);
+    await openApprovals(page);
+    const card = page.locator('.apv-card').first();
+    const taskId = await card.getAttribute('data-apv-card');
+    const presets = card.locator('.apv-defer > .apv-defer-btn');
+    await expect(presets).toHaveText(['Tomorrow', '3 days', 'A week', '2 weeks', 'A month']);
+    await presets.first().click();
+    await expect.poll(() => patches.filter((p) => p.id === taskId).length).toBe(1);
+    expect(patches.find((p) => p.id === taskId).fields[TF.deferredUntil]).toBe(isoPlus(1));
+    await expect(card.locator('[data-apv-state="saved"]')).toContainText('Knocked back to');
   });
 
   test('one click knocks it back in place, and Undo puts it straight back', async ({ page }) => {
@@ -320,5 +341,52 @@ test.describe('the reject option Kevin asked for', () => {
     const patch = patches.find((p) => p.id === taskId);
     expect(patch.fields[APPROVAL_OUTCOME]).toBe('Rejected');
     expect(String(patch.fields['fldtI7SJI4gEohHD1'])).toContain('Companies House changed the form');
+  });
+});
+
+// Tomorrow has to land after Airtable's TODAY(), which is UTC, or the queue
+// keeps showing a card that says "Knocked back". West of UTC in the evening
+// the UTC date is already tomorrow (found in review, 8 Oct 2026).
+async function tomorrowFrom(page, at) {
+  await page.clock.setFixedTime(new Date(at));
+  const patches = await mockAgentsPage(page);
+  await loadAgentsPage(page);
+  const { patch } = await knockBack(page, patches, 'Tomorrow');
+  return patch.fields[TF.deferredUntil];
+}
+
+test.describe('Tomorrow from New York in the evening', () => {
+  test.use({ timezoneId: 'America/New_York' });
+  test('21:30 EDT on 8 Oct is 9 Oct in UTC, so it writes 10 Oct', async ({ page }) => {
+    expect(await tomorrowFrom(page, '2026-10-09T01:30:00Z')).toBe('2026-10-10');
+  });
+  test('a typed 9 Oct at 21:30 EDT is refused: it is already Airtable\'s today', async ({ page }) => {
+    await page.clock.setFixedTime(new Date('2026-10-09T01:30:00Z'));
+    const patches = await mockAgentsPage(page);
+    await loadAgentsPage(page);
+    await openApprovals(page);
+    const card = page.locator('.apv-card').first();
+    const taskId = await card.getAttribute('data-apv-card');
+    await card.locator('#apvDeferDate-' + taskId).fill('2026-10-09');
+    await card.locator('.apv-defer-btn', { hasText: 'Go' }).click();
+    await expect(page.locator('#toast')).toContainText('Pick Sat 10 Oct or later');
+    expect(patches.filter((p) => p.id === taskId)).toHaveLength(0);
+    await card.locator('#apvDeferDate-' + taskId).fill('2026-10-10');
+    await card.locator('.apv-defer-btn', { hasText: 'Go' }).click();
+    await expect.poll(() => patches.filter((p) => p.id === taskId).length).toBe(1);
+    expect(patches.find((p) => p.id === taskId).fields[TF.deferredUntil]).toBe('2026-10-10');
+  });
+  test('09:00 EDT on 8 Oct writes 9 Oct', async ({ page }) => {
+    expect(await tomorrowFrom(page, '2026-10-08T13:00:00Z')).toBe('2026-10-09');
+  });
+});
+
+test.describe('Tomorrow from London either side of midnight', () => {
+  test.use({ timezoneId: 'Europe/London' });
+  test('23:30 BST on 8 Oct writes 9 Oct', async ({ page }) => {
+    expect(await tomorrowFrom(page, '2026-10-08T22:30:00Z')).toBe('2026-10-09');
+  });
+  test('00:30 BST on 9 Oct writes 10 Oct', async ({ page }) => {
+    expect(await tomorrowFrom(page, '2026-10-08T23:30:00Z')).toBe('2026-10-10');
   });
 });

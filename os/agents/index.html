@@ -1972,8 +1972,10 @@ function agBulkDeferOnDate(){
     const el = document.getElementById('apvBulkDeferDate');
     const until = (el && el.value || '').trim();
     if(!/^\d{4}-\d{2}-\d{2}$/.test(until)){ toast('Pick a date first.'); return; }
-    if(until <= todayStr()){
-        toast('Pick a date after today \u2014 anything earlier leaves them in the queue.');
+    // apvDatePlus(1), not todayStr(): west of UTC in the evening local
+    // tomorrow is already Airtable's today, and would hide nothing.
+    if(until < apvDatePlus(1)){
+        toast('Pick ' + apvDeferDateLabel(apvDatePlus(1)) + ' or later \u2014 anything earlier leaves them in the queue.');
         return;
     }
     apvBulkDeferTo(until);
@@ -3772,7 +3774,11 @@ function apvSyncCountsInPlace(decidedId){
 // writer owns Slack, so a thread can never be orphaned with no explanation in
 // it, and if that phase breaks the sweep logs "reconcile FAILED" instead of
 // losing the task.
+//
+// Tomorrow first (Kevin, 8 Oct 2026): a one-day knock-back meant typing the
+// date and pressing Go every time.
 const APV_DEFER_OPTIONS = [
+    { days: 1,  label: 'Tomorrow' },
     { days: 3,  label: '3 days'  },
     { days: 7,  label: 'A week'  },
     { days: 14, label: '2 weeks' },
@@ -3781,8 +3787,18 @@ const APV_DEFER_OPTIONS = [
 
 // Date arithmetic in LOCAL time, matching todayStr(). Using an ISO round-trip
 // here would shift the date by a day either side of a BST change.
+//
+// Counted from the LATER of the local and UTC dates. The queue hides a task
+// only while {Deferred Until} is after Airtable's TODAY(), which is UTC. West
+// of UTC in the evening (Kevin travelling) the UTC date is already tomorrow,
+// so "Tomorrow" from the local date would equal TODAY(), hide nothing, and
+// still say "Knocked back". In London the local date is never behind UTC, so
+// nothing changes there.
 function apvDatePlus(days){
-    const d = new Date();
+    const now = new Date();
+    const d = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    const utc = new Date(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate());
+    if(utc > d) d.setTime(utc.getTime());
     d.setDate(d.getDate() + Number(days||0));
     return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');
 }
@@ -3818,8 +3834,9 @@ function agDeferOnDate(taskId){
     const el = document.getElementById('apvDeferDate-'+taskId);
     const until = (el && el.value || '').trim();
     if(!/^\d{4}-\d{2}-\d{2}$/.test(until)){ toast('Pick a date first.'); return; }
-    if(until <= todayStr()){
-        toast('Pick a date after today — anything earlier leaves it in the queue.');
+    // apvDatePlus(1), not todayStr(): see apvDatePlus.
+    if(until < apvDatePlus(1)){
+        toast('Pick ' + apvDeferDateLabel(apvDatePlus(1)) + ' or later — anything earlier leaves it in the queue.');
         return;
     }
     apvDeferNow(taskId, until);
