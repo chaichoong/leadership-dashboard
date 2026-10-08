@@ -194,3 +194,70 @@ def unheld_signins(events, host, url_host=None, profile="default"):
     if len(last) < need or any(h for _, h in last):
         return []
     return [at for at, _ in last]
+
+
+# ─── HIS OWN TRY DID NOT GET THE ROBOT IN (Kevin, 8 Oct 2026) ─────────────────
+# "There are a lot of them that ask me to sign in or say Add this site. Every
+# time I add it or every time I try and sign in, it doesn't disappear." Swinton
+# had three of his windows close on 7 and 8 Oct and every robot read after each
+# still landed on the login page; the wall asked again, for ever. These two read
+# his try off the ledger, so the sweep can send such a wall back to its agent
+# and `block` can refuse to raise it again. A window closing is not proof he got
+# in (the app writes `login` either way), so callers say his window closed,
+# never that he signed in.
+#
+# Hosts match EXACTLY (review, 8 Oct 2026): landlordaxainsurance.com and its www.
+# site are separate sign-ins, and a parent's read said nothing about the child.
+# Callers pass every address the wall can be signed in at (its host, its entry,
+# its sign-in page). Only a signed-out read within TRY_READ_HOURS of his window
+# counts: one the next morning may be a sign-in that worked and expired overnight.
+TRY_READ_HOURS = 2
+
+
+def kevin_login_after(events, hosts, since, profile="default"):
+    """(at, host) of his newest sign-in window (a `login` line) on HOSTS that closed after SINCE,
+    or None. A window opened from a blocked robot's "+ Add this site" counts for the address it
+    was opened for (`forWall`), wherever he signed in: HOST is then where he did."""
+    hosts = {str(h).lower() for h in hosts if h}
+    since_at = _at(since)
+    best = None
+    for e in events or []:
+        if not isinstance(e, dict) or e.get("cmd") != "login" or (e.get("profile") or "default") != profile:
+            continue
+        at = _at(e.get("at"))
+        h = str(e.get("host") or e.get("site") or "").lower()
+        if not at or (since_at and at <= since_at):
+            continue
+        if h not in hosts and str(e.get("forWall") or "").lower() not in hosts:
+            continue
+        if best is None or at > best[0]:
+            best = (at, str(e.get("at")), h)
+    return (best[1], best[2]) if best else None
+
+
+def kevin_signin_failed(events, hosts, since, profile="default"):
+    """(login_at, out_at, host) when the robot's first usable read of HOSTS after his newest
+    sign-in window there (after SINCE) was signed out, within TRY_READ_HOURS of it, and nothing
+    has read signed in since; else None."""
+    hosts = {str(h).lower() for h in hosts if h}
+    login = kevin_login_after(events, hosts, since, profile)
+    if not login:
+        return None
+    login_at = _at(login[0])
+    reads = []
+    for e in events or []:
+        if not isinstance(e, dict) or e.get("cmd") != "session" or (e.get("profile") or "default") != profile:
+            continue
+        at = _at(e.get("at"))
+        if not at or at <= login_at or str(e.get("site") or "").lower() not in hosts:
+            continue
+        r = _read(e)
+        if r:
+            reads.append((at, r, str(e.get("at"))))
+    reads.sort(key=lambda x: x[0])
+    if not reads or any(r == "in" for _, r, _ in reads):
+        return None
+    first_at, _, first_iso = reads[0]
+    if first_at - login_at > timedelta(hours=TRY_READ_HOURS):
+        return None
+    return (login[0], first_iso, login[1])

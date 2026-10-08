@@ -44,6 +44,7 @@
  *
  * USAGE
  *   node scripts/agent-browser.js login   --url URL [--profile NAME] [--label NAME] [--add]   --add: a NEW site, Kevin's choice
+ *                                         [--for-wall HOST]   the address a blocked robot asked him to add (ledger only)
  *   node scripts/agent-browser.js signin-list [--for URL]              every sign-in the Robot sign-in app can open
  *   node scripts/agent-browser.js session --site HOST [--shot PATH]   is the robot signed in there? (walks the door)
  *   node scripts/agent-browser.js read    --url URL [--shot OUT.png] [--wait MS] [--wait-for SELECTOR] [--max-text N]
@@ -1748,7 +1749,14 @@ async function main() {
     if (!url) die('--url is required');
     if (!PROFILE_NAME_RE.test(profile)) die(`--profile ${profile} is not a plain folder name.`);
     // --add is a flag of its own, never the value of another (a label "--add").
-    const add = rest.some((a, i) => a === '--add' && !['--url', '--profile', '--label'].includes(rest[i - 1]));
+    const add = rest.some((a, i) => a === '--add' && !['--url', '--profile', '--label', '--for-wall'].includes(rest[i - 1]));
+    // The address a blocked robot asked Kevin to add (8 Oct 2026, the panel's "+ Add this site"):
+    // written on the ledger line, so the blocker sweep can tell the agent which site he meant when he
+    // signs in somewhere other than the address it named. A plain host name or nothing.
+    const forWall = String(arg(rest, 'for-wall', '') || '').toLowerCase();
+    if (forWall && !/^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$/.test(forWall)) {
+      die(`--for-wall ${forWall} is not a plain host name.`);
+    }
     const rec = recordLoginSite(url, { label: arg(rest, 'label', null), profile, add });
     if (rec.refuse) die(rec.refuse);
     const host = new URL(url).hostname.toLowerCase();
@@ -1807,7 +1815,7 @@ async function main() {
       }
       const kept = persistSessionCookies(dir);
       console.log(`Kept ${kept} session cookie(s) alive (${SESSION_COOKIE_HOURS} hours, or the site's own sessionCookieHours).`);
-      ledger({ cmd: 'login', host, profile, mode: 'plain-chrome-mock-keychain', sessionCookiesKept: kept });
+      ledger({ cmd: 'login', host, profile, mode: 'plain-chrome-mock-keychain', sessionCookiesKept: kept, ...(forWall ? { forWall } : {}) });
       return;
     }
     await withPage(profile, true, async (page) => {
@@ -1816,7 +1824,7 @@ async function main() {
       await page.waitForEvent('close', { timeout: 15 * 60 * 1000 }).catch(() => {});
     });
     // withPage kept them as it closed; a second pass would find none (review, 29 Sep 2026).
-    ledger({ cmd: 'login', host, profile, sessionCookiesKept: lastKept });
+    ledger({ cmd: 'login', host, profile, sessionCookiesKept: lastKept, ...(forWall ? { forWall } : {}) });
     return;
   }
 

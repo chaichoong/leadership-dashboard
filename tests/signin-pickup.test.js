@@ -293,11 +293,53 @@ describe('the Robot sign-in app and its link', () => {
     // A site already on the list opens on its own lines (a flat's profile), never as a new main-profile line.
     const ask = src.slice(src.indexOf('on askNewSite'), src.indexOf('end askNewSite'));
     expect(ask).toMatch(/agent-browser\.js signin-list --for " & quoted form of theUrl/);
-    expect(ask.indexOf('return known')).toBeGreaterThan(-1);
-    expect(ask.indexOf('return known')).toBeLessThan(ask.indexOf('newSiteLine('));
+    expect(ask.indexOf('return forWall(known, wallHost)')).toBeGreaterThan(-1);
+    expect(ask.indexOf('return forWall(known, wallHost)')).toBeLessThan(ask.indexOf('newSiteLine('));
     const link = src.slice(src.indexOf('on open location'), src.indexOf('end open location'));
     expect(link).toMatch(/set end of matches to/);
     expect(link).toMatch(/runChain\(matches, liveN\)/);
+  });
+  // Kevin, 8 Oct 2026: "Every time I add it ... it doesn't disappear." The panel's "+ Add this site"
+  // opened a BLANK box, he typed tiktok.com three times for a robot blocked on www.tiktok.com, and the
+  // wall never cleared. The link now names the wall's address, the box starts there, and the address
+  // rides on the sign-in as --for-wall. Driven through osascript; hosts are invented.
+  it('an Add this site link starts the box at the wall, and the wall rides on the sign-in', () => {
+    const { mkdtempSync, rmSync } = require('node:fs');
+    const { tmpdir } = require('node:os');
+    const dir = mkdtempSync(join(tmpdir(), 'od-robot-'));
+    try {
+      execFileSync('osacompile', ['-o', join(dir, 'r.scpt'), join(ROOT, 'scripts', 'robot-signin.applescript')]);
+      const run = (expr) => execFileSync('osascript', ['-e',
+        `set s to (load script POSIX file "${join(dir, 'r.scpt')}")\nreturn ${expr}`], { encoding: 'utf8' }).trim();
+      const host = (link) => run(`"[" & (s's wallAddHost(s's bodyOf("${link}"))) & "]"`);
+      expect(host('robotsignin://add/www.clips.example')).toBe('[www.clips.example]');
+      expect(host('robotsignin://add')).toBe('[]');                       // the plain "+ Add a new site"
+      expect(host('robotsignin://add/')).toBe('[]');
+      expect(host("robotsignin://add/a.example;touch x")).toBe('[]');      // nothing else reaches the box
+      expect(host("robotsignin://add/a.example'$(id)")).toBe('[]');
+      expect(host('robotsignin://add/https://a.example/')).toBe('[]');
+      // A known site's line keeps its four fields, is marked "known" (never --add), and names the wall.
+      const known = run(`s's loginCommand(item 1 of s's forWall({"Cover quotes | quotes.cover-insurer.example | https://quotes.cover-insurer.example/ | default"}, "cover.example"))`);
+      expect(known).toMatch(/login --url 'https:\/\/quotes\.cover-insurer\.example\/' --profile 'default' --label 'Cover quotes' --for-wall 'cover\.example'$/);
+      const added = run(`s's loginCommand(item 1 of s's forWall({s's newSiteLine("", "www.clips.example", "https://www.clips.example/")}, "www.clips.example"))`);
+      expect(added).toMatch(/--profile 'default' --label 'www\.clips\.example' --add --for-wall 'www\.clips\.example'$/);
+      // No wall: the lines are untouched.
+      expect(run(`s's loginCommand(item 1 of s's forWall({s's newSiteLine("", "portal.acme.co.uk", "https://portal.acme.co.uk/login")}, ""))`))
+        .toMatch(/--label 'portal\.acme\.co\.uk' --add$/);
+    } finally { rmSync(dir, { recursive: true, force: true }); }
+    const link = src.slice(src.indexOf('on open location'), src.indexOf('end open location'));
+    expect(link).toMatch(/set theLines to askNewSite\(wallAddHost\(body\)\)/);
+  });
+  it('login refuses a --for-wall that is not a plain host, before anything opens', () => {
+    const { mkdtempSync } = require('node:fs');
+    const { tmpdir } = require('node:os');
+    const root = mkdtempSync(join(tmpdir(), 'od-forwall-'));
+    let err = '';
+    try {
+      execFileSync('node', [join(ROOT, 'scripts', 'agent-browser.js'), 'login', '--url', 'https://portal.acme.co.uk/login', '--for-wall', "a.example;rm"],
+        { encoding: 'utf8', env: { ...process.env, AGENT_BROWSER_PROFILE_ROOT: root }, stdio: 'pipe' });
+    } catch (e) { err = String(e.stderr || '') + String(e.stdout || ''); }
+    expect(err).toMatch(/--for-wall a\.example;rm is not a plain host name/);
   });
   // 25 Sep 2026: the AI Agents page's Robot sign-ins panel opens one flat
   // (robotsignin://profile/<name>) and the add dialog (robotsignin://add), and
@@ -319,7 +361,7 @@ describe('the Robot sign-in app and its link', () => {
       expect(run(`(count of (s's linesForProfile("default", {"Pingen (2 waiting) | app.pingen.com | https://app.pingen.com/"}))) as text`)).toBe('1');
     } finally { rmSync(dir, { recursive: true, force: true }); }
     const link = src.slice(src.indexOf('on open location'), src.indexOf('end open location'));
-    expect(link).toMatch(/if body starts with "add" then\s+set theLines to askNewSite\(\)/);
+    expect(link).toMatch(/if body starts with "add" then\s+set theLines to askNewSite\(wallAddHost\(body\)\)/);
     expect(link).toMatch(/if body starts with "profile\/" then\s+set wantProfile to text 9 thru -1 of body/);
     const chain = src.slice(src.indexOf('on runChain'), src.indexOf('end runChain'));
     expect(chain.trim().split('\n').pop().trim()).toBe('refreshPanel()');

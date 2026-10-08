@@ -224,7 +224,8 @@ test.describe('Robot sign-ins panel and blocked robots', () => {
     await expect(page.locator('#signinsCount')).toHaveText('2');
     await expect(panel.locator('[data-rs-wall-line="SIGN-IN"]')).toContainText('One task is blocked until the robot is signed in to www.amazon.co.uk.');
     await expect(panel.locator('[data-rs-wall="www.amazon.co.uk"]')).toHaveAttribute('href', 'robotsignin://site/www.amazon.co.uk');
-    await expect(panel.locator('[data-rs-wall-add="portal.fylde.gov.uk"]')).toHaveAttribute('href', 'robotsignin://add');
+    // The wall's own address rides on the link, so the app's box starts there (8 Oct 2026).
+    await expect(panel.locator('[data-rs-wall-add="portal.fylde.gov.uk"]')).toHaveAttribute('href', 'robotsignin://add/portal.fylde.gov.uk');
     await expect(panel.locator('[data-rs-wall-line]')).toHaveCount(2);   // a KEVIN step is not a sign-in
     // The keyboard stays on the blocked site's own button through a redraw.
     await panel.locator('[data-rs-wall-add="portal.fylde.gov.uk"]').focus();

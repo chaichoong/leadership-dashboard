@@ -229,9 +229,22 @@ end newSiteLine
 -- lines for runChain: {} when he cancels or the address is not an https one, and the site's own
 -- lines when it is already on the list, so a site with its own profiles (a Utilita flat) opens
 -- on those and never on the main one (found in review).
-on askNewSite()
+--
+-- From a blocked robot's "+ Add this site" (8 Oct 2026), WALLHOST is the address the robot is
+-- blocked on, and the box starts there. Before, the box started blank: Kevin typed tiktok.com three
+-- times for a robot blocked on www.tiktok.com, and four times signed in to AXA's quote site for one
+-- blocked on axa.co.uk, and the wall asked again each time. Whatever he settles on, the wall's
+-- address rides on the sign-in (`login --for-wall`), so the robot learns which site he meant.
+on askNewSite(wallHost)
+	if wallHost is "" then
+		set promptText to "Paste the address of the site's sign-in page. The robots will be able to use this site once you have signed in."
+		set startUrl to "https://"
+	else
+		set promptText to "A robot is blocked until " & wallHost & " is on its list. Press Next to add it and sign in. If you know the sign-in page is somewhere else, paste that instead."
+		set startUrl to "https://" & wallHost & "/"
+	end if
 	try
-		set theUrl to text returned of (display dialog "Paste the address of the site's sign-in page. The robots will be able to use this site once you have signed in." default answer "https://" with title "Robot sign-in: add a site" buttons {"Cancel", "Next"} default button "Next" cancel button "Cancel")
+		set theUrl to text returned of (display dialog promptText default answer startUrl with title "Robot sign-in: add a site" buttons {"Cancel", "Next"} default button "Next" cancel button "Cancel")
 	on error number -128
 		return {}
 	end try
@@ -250,15 +263,38 @@ on askNewSite()
 	set known to sites of splitSiteList(sh(quoted form of nodeBin() & " scripts/agent-browser.js signin-list --for " & quoted form of theUrl & " 2>&1"))
 	if (count of known) > 0 then
 		display notification theHost & " is already on the list as " & fieldOf(item 1 of known, 1) & ". Opening it." with title "Robot sign-in"
-		return known
+		return forWall(known, wallHost)
 	end if
 	try
 		set theName to text returned of (display dialog "What should the robots call this site?" default answer theHost with title "Robot sign-in: add a site" buttons {"Cancel", "Open sign-in"} default button "Open sign-in" cancel button "Cancel")
 	on error number -128
 		return {}
 	end try
-	return {newSiteLine(theName, theHost, theUrl)}
+	return forWall({newSiteLine(theName, theHost, theUrl)}, wallHost)
 end askNewSite
+
+-- The address an "+ Add this site" link names (robotsignin://add/<host>), or "". Only a plain host
+-- name gets through; anything else opens the ordinary blank box.
+on wallAddHost(body)
+	if body does not start with "add/" or (length of body) < 5 then return ""
+	set theHost to text 5 thru -1 of body
+	set ok to do shell script "printf %s " & quoted form of theHost & " | grep -Eq '^[a-z0-9]([a-z0-9-]*[a-z0-9])?([.][a-z0-9]([a-z0-9-]*[a-z0-9])?)+$' && echo yes || echo no"
+	if ok is "yes" then return theHost
+	return ""
+end wallAddHost
+
+-- Each line with the blocked address as a sixth field, for loginCommand's --for-wall. A line from
+-- the list (four fields) is marked "known" in the fifth, so it never gets --add.
+on forWall(theLines, wallHost)
+	if wallHost is "" then return theLines
+	set out to {}
+	repeat with theLine in theLines
+		set theLine to contents of theLine
+		if fieldCount(theLine) < 5 then set theLine to theLine & " | known"
+		set end of out to theLine & " | " & wallHost
+	end repeat
+	return out
+end forWall
 
 -- Ask the engine ONCE what is waiting and keep its answer in a file the readers below
 -- share. signin-waiting checks every site's session before it answers and hands back the
@@ -379,6 +415,9 @@ on loginCommand(theLine)
 	if fieldCount(theLine) > 3 then set extra to " --label " & quoted form of fieldOf(theLine, 1)
 	if fieldCount(theLine) > 4 then
 		if fieldOf(theLine, 5) is "new" then set extra to extra & " --add"
+	end if
+	if fieldCount(theLine) > 5 then
+		if fieldOf(theLine, 6) is not "" then set extra to extra & " --for-wall " & quoted form of fieldOf(theLine, 6)
 	end if
 	return quoted form of nodeBin() & " scripts/agent-browser.js login --url " & quoted form of fieldOf(theLine, 3) & " --profile " & quoted form of profileOf(theLine) & extra
 end loginCommand
@@ -584,7 +623,7 @@ on run
 	set theLines to {}
 	repeat with c in choice
 		if (c as text) is addNewItem then
-			set theLines to theLines & askNewSite()
+			set theLines to theLines & askNewSite("")
 		else
 			set end of theLines to (c as text)
 		end if
@@ -683,7 +722,7 @@ on open location theURL
 		return
 	end if
 	if body starts with "add" then
-		set theLines to askNewSite()
+		set theLines to askNewSite(wallAddHost(body))
 		if (count of theLines) > 0 then runChain(theLines, 0)
 		return
 	end if

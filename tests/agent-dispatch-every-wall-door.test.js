@@ -526,6 +526,16 @@ print(json.dumps({"sent": [x["task"] for x in res["sentBack"]], "len": len(long)
     expect(r.archived).toBe(true);
   });
 
+  it("a reason that ends in a full stop reads as one sentence in the note", () => {
+    const r = py(setup + `
+rec("t1", notes="${blk('KEVIN', 'identity', '2026-10-05T09:00:00.000Z')}", status="Approval", outcome="Approved as-is",
+    approved_at="2026-10-04T09:00:00.000Z", output=STEP, feedback="KEVIN STEP CANT [2026-10-06T10:00:00.000Z]: Come back to me.")
+m.blockers_scan(sweep=True, now=NOW)
+print(json.dumps({"note": notes("t1").split("\\n\\n")[-1], "fb": f("t1", "approvalFeedback")}))`);
+    expect(r.note).toMatch(/Kevin cannot take this step: Come back to me\. Sent back to you/);
+    expect(r.fb).toBe("I can't do this step: Come back to me.");
+  });
+
   it("the send-back decides on a fresh read: a newer done line written since wins, and nothing is written", () => {
     const r = py(setup + `
 b = m.task_blocker("${blk('KEVIN', 'identity', '2026-10-05T09:00:00.000Z')}")

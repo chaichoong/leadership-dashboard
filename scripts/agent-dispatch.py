@@ -77,6 +77,8 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 # Standing holds (24 Sep 2026): Kevin's rulings that stay true only until an
 # event, written once for the whole team. The queue never hands one to an agent.
 import standing_holds  # noqa: E402
+# Whether a site keeps the robot signed in, and whether Kevin's own try got it in (8 Oct 2026).
+import signin_hold  # noqa: E402
 import certificate_watch  # noqa: E402
 # The MERGE card (7 Oct 2026): a protected-path fix reaches Kevin as one card,
 # merged by scripts/merge-approved.py. The queue never hands one to an agent.
@@ -4609,6 +4611,12 @@ def cmd_submit(args):
     problem = signin_line_problem(output, line_sites)
     if problem:
         sys.exit(f"ERROR: refusing to submit {args.task} — {problem}")
+    line = parse_signin_line(output)
+    line_host = signin_site_for(line["site"], line["url"], line_sites) if line else ""
+    tried = kevin_tried_reason("SIGN-IN", line_host, line_sites, kevin_tried_since()) if line_host else ""
+    if tried:
+        sys.exit(f"ERROR: refusing to submit {args.task} — its SIGN-IN NEEDED line names {line['site']!r}, "
+                 f"but {tried}. " + KEVIN_TRIED_ROUTE)
     # THE SESSION CHECK (15 Sep 2026): the line is only accepted when the robot
     # really is signed out. recmtmvJTP1MRXLZE wrote SIGN-IN NEEDED: Facebook on
     # 14 Sep while the browser ledger showed the Facebook session live every
@@ -7605,6 +7613,60 @@ def blocker_clear_reason(b, sites, fstates, walk=None):
     return ""
 
 
+# HIS TRY IS ASKED FOR ONCE (Kevin, 8 Oct 2026: "every time I add it or every time I try and sign in,
+# it doesn't disappear. It just keeps asking"). Swinton's wall had three of his windows close on 7 and 8
+# Oct, and each time the robot's next check still landed on the login page; Virgin Media's had one. A
+# SIGN-IN or SITE wall his own try did not clear goes back to its agent with what happened, and the same
+# wall is refused for KEVIN_TRIED_DAYS: asking him again cannot get the robot in. The agent uses another
+# route, or brings him one KEVIN ONLY card with a Your turn plan, so he takes the step inside the robot's
+# own window. A SITE wall counts only a window on its exact address: one on a parent or a different
+# address (tiktok.com for www.tiktok.com) was the old blank "Add a new site", and the panel's button now
+# carries the wall's address instead.
+KEVIN_TRIED_DAYS = 7
+KEVIN_TRIED_ROUTE = ("Asking Kevin again cannot get the robot in. Use another route; or, if only he can do it, "
+                     "write a Your turn plan (GUARDRAILS \"Kevin's turn\") so he signs in inside the robot's own "
+                     "window and takes the step there. If he has APPROVED this task, record that with `block "
+                     "TASKID --kind KEVIN --subject credential` (the plan, or --steps): it comes back to him as a "
+                     "Your step card and keeps his approval; a submit would wipe it. If he has not, submit the card "
+                     "with the closing line KEVIN ONLY: credential: <the step>.")
+
+
+def wall_hosts(host, entry, sites):
+    """The addresses a wall on HOST can be signed in at: the host, its entry on the list, and the
+    entry's sign-in page."""
+    hosts = {host, entry}
+    try:
+        hosts.add((urllib.parse.urlparse((sites.get(entry) or {}).get("loginUrl") or "").hostname or "").lower())
+    except ValueError:
+        pass
+    return {h for h in hosts if h}
+
+
+def kevin_tried_reason(kind, host, sites, since, profile="default", events=None):
+    """Why Kevin's own try on this SIGN-IN or SITE wall's site did not get the robot in, or ''."""
+    if not host or not since:
+        return ""
+    entry = site_reachable(host, sites)
+    events = signin_hold.load_events(BROWSER_LEDGER) if events is None else events
+    if kind == "SIGN-IN":
+        f = signin_hold.kevin_signin_failed(events, wall_hosts(host, entry, sites), since, profile)
+        return (f"Kevin's sign-in window on {f[2]} closed at {f[0][:16]} and the robot's next check still "
+                f"landed on the sign-in page ({f[1][:16]})") if f else ""
+    if kind == "SITE" and not entry:
+        a = signin_hold.kevin_login_after(events, {host}, since, profile)
+        if a and a[1] != host:
+            # He answered this wall on another address (AXA's quote site for axa.co.uk): that is the site.
+            return (f"Kevin answered this wall by signing in at {a[1]} (his window closed at {a[0][:16]}), "
+                    f"so the site for this job is {a[1]}, not {host}: use {a[1]}")
+        return (f"Kevin's sign-in window on {host} closed at {a[0][:16]}, and {host} is still not a "
+                "sign-in site on the robot's list") if a else ""
+    return ""
+
+
+def kevin_tried_since(now=None):
+    return ((now or datetime.now(timezone.utc)) - timedelta(days=KEVIN_TRIED_DAYS)).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
 def blocker_note(stamp, by, mark, b, tail):
     return f"[{stamp} — {by}] {mark} ({b['kind']} {b['subject']}): {tail}"
 
@@ -7874,7 +7936,7 @@ def send_back_blocked(task_id, b):
             retired = ""
     stamp = datetime.now(LONDON).strftime("%d %b %Y %H:%M")
     note = blocker_note(stamp, "Kevin", BLOCKER_CLEARED_MARK, b,
-                        f"Kevin cannot take this step: {why}. Sent back to you as Changes requested. "
+                        f"Kevin cannot take this step: {why.rstrip('.!? ')}. Sent back to you as Changes requested. "
                         "Find a way that does not need this step from him, or a step he can take, then "
                         "resubmit for approval answering his reason."
                         + (f" The old Your turn plan is retired to {retired}." if retired else ""))
@@ -7980,6 +8042,13 @@ def cmd_block(args):
                      "If it is signed out, that is a SIGN-IN wall; check with "
                      f"`node scripts/agent-browser.js session --site {entry}` first.")
         subject = signin_door_host(entry, sites) if kind == "SIGN-IN" else host
+        # The address the wall is SAVED under, which is what the sweep checks (review, 8 Oct 2026):
+        # oauth.virginmediao2.co.uk is saved as virginmedia.com, and checking the typed address let a
+        # wall the sweep sends back be raised again every half hour.
+        tried = kevin_tried_reason(kind, subject, sites, kevin_tried_since(),
+                                   getattr(args, "profile", None) or "default")
+        if tried:
+            sys.exit(f"ERROR: refusing a {kind} wall on {subject}: {tried}. " + KEVIN_TRIED_ROUTE)
         names = [p.get("profile") for p in (sites.get(entry) or {}).get("profiles") or [] if isinstance(p, dict)]
         if kind == "SIGN-IN" and names and getattr(args, "profile", None) not in names:
             sys.exit(f"ERROR: {entry} keeps one sign-in per profile. Name which one: "
@@ -8231,6 +8300,19 @@ def blockers_scan(sweep=False, now=None):
             continue
         reason = (blocker_clear_reason(b, sites, fstates, walk=session_walk if sweep else None)
                   if not (sites_error and b["kind"] == "SITE") else "")
+        if not reason and b["kind"] in ("SIGN-IN", "SITE") and not sites_error:
+            events, _ = once("events", lambda: signin_hold.load_events(BROWSER_LEDGER))
+            if events is not None:
+                # From the wall's opening or KEVIN_TRIED_DAYS back, whichever is earlier: the loop
+                # Kevin met re-opens the wall AFTER his try (the pickup reads signed out, the agent
+                # blocks again), so a try counted only after the wall's own opening is never seen.
+                look = kevin_tried_since(now)
+                if b.get("since") and _utc(b["since"]) and _utc(b["since"]) < _utc(look):
+                    look = b["since"]
+                tried = kevin_tried_reason(b["kind"], blocker_host(b["subject"]), sites, look,
+                                           b.get("profile") or "default", events)
+                if tried:
+                    reason = f"{tried}. {KEVIN_TRIED_ROUTE}"
         raw_feedback = (rec.get("fields") or {}).get(AF["approvalFeedback"]) or ""
         done = kevin_done_said(raw_feedback, b.get("since", "")) if b["kind"] == "KEVIN" else None
         cant = kevin_cant_said(raw_feedback, b.get("since", "")) if b["kind"] == "KEVIN" else None
