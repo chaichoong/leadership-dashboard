@@ -4,7 +4,7 @@
 // window, does every step up to Kevin's, waits while he does his own part (a
 // sign-in), hands him the window and never submits, pays or declares. These
 // drive the real functions and the real `handover` command against a local page.
-import { describe, it, expect, beforeAll, afterAll } from 'vitest';
+import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest';
 import { mkdtempSync, mkdirSync, writeFileSync, existsSync, readFileSync, readdirSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve, dirname } from 'node:path';
@@ -12,6 +12,10 @@ import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
 import { spawn, spawnSync } from 'node:child_process';
 import http from 'node:http';
+// Real Chrome launches in this file. 90s, not the suite's 30s (9 Oct 2026): in the merge
+// gate's throwaway tree, with the full suite running in parallel, a launch alone went past 30s
+// and refused every PR that day (main a40fa493 failed here; each test passes alone).
+vi.setConfig({ testTimeout: 90_000, hookTimeout: 90_000 });
 
 const require_ = createRequire(import.meta.url);
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
