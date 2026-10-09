@@ -339,3 +339,87 @@ print(json.dumps([a["sweptAt"], b["sweptAt"], a["open"][0].get("planProblem")]))
     expect(r[2]).toBe('step 6 (kevin) needs say');
   });
 });
+
+// Finding 20261007-agent-dispatch-782 (approved 9 Oct 2026): job-digest, data-invariants and
+// compliance-watch EXIT 1 BY DESIGN when they find something, and job-schedule.json says so
+// (completedWhen "ran"). classify never read that rule, so every working morning read Failed and the
+// red pass raised RED tasks against two healthy jobs. These drive the REAL classify with the REAL
+// schedule entries, then the REAL red pass on its output.
+describe('a job graded on running is Worked when it exits 1 by design (finding 782)', () => {
+  function classifyRows(cases) {
+    const out = execFileSync('python3', ['-c', `
+import importlib.util, json, sys
+from datetime import datetime, timezone
+spec = importlib.util.spec_from_file_location("es", ${JSON.stringify(WRITER)})
+m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m)
+sched = json.load(open(${JSON.stringify(resolve(ROOT, 'scripts/job-schedule.json'))}))
+now = datetime(2026, 10, 7, 12, 0, tzinfo=timezone.utc)
+res = {}
+for c in json.loads(sys.stdin.read()):
+    cfg = sched[c["cfg"]] if c["cfg"] in sched else {"cron": "0 6 * * *"}
+    r = m.classify(c["job"], cfg, c["fin"], c.get("ev", []), now, logs_dir="/nonexistent")
+    res[c["name"]] = {k: r.get(k) for k in ("status", "detail", "lastWorked", "fails24h", "firstFail")}
+red = m.red_rows_pass([dict(res["digest"], key="job-digest", kind="job", lastRun="2026-10-07T10:00:35.000Z",
+                            firstRun="2026-10-01T10:00:00.000Z")], {}, now, {},
+                      lambda: [("recOTHER000000001", "x")], lambda f: "recNEW", "recB", logs_dir="/nonexistent")
+print("---JSON---"); print(json.dumps({"rows": res, "red": red}))
+`], { input: JSON.stringify(cases), encoding: 'utf8' });
+    return JSON.parse(out.split('---JSON---')[1]);
+  }
+  const fin = (job, ts, exit, tail = 'Findings waiting for the fixer: 174', reason) =>
+    ({ ts, job, exit, ok: exit === 0, reason: reason ?? (exit === 0 ? '' : `exit code ${exit}`), tail });
+  const week = (job, exit, extra = {}) => ['01', '02', '03', '04', '05', '06', '07']
+    .map((d) => fin(job, `2026-10-${d}T10:00:35Z`, exit, extra.tail, extra.reason));
+  const r = classifyRows([
+    { name: 'digest', job: 'job-digest', cfg: 'job-digest', fin: week('job-digest', 1) },
+    { name: 'invariants', job: 'data-invariants', cfg: 'data-invariants', fin: week('data-invariants', 1) },
+    { name: 'compliance', job: 'compliance-watch', cfg: 'compliance-watch', fin: week('compliance-watch', 1) },
+    // exit 2 is data-invariants' broken read: the job did NOT do its work.
+    { name: 'brokenRead', job: 'data-invariants', cfg: 'data-invariants', fin: week('data-invariants', 2) },
+    { name: 'killed', job: 'job-digest', cfg: 'job-digest', fin: week('job-digest', 143) },
+    { name: 'allowance', job: 'job-digest', cfg: 'job-digest', fin: week('job-digest', 1, { tail: "posting\nYou've hit your limit · resets 3pm" }) },
+    { name: 'noRuns', job: 'job-digest', cfg: 'job-digest', fin: [] },
+    // The control: a job WITHOUT completedWhen that exits 1 is a failure, as before.
+    { name: 'control', job: 'plain-job', cfg: '__none__', fin: week('plain-job', 1) },
+    // The queue saw the by-design exit but the wrapper wrote no line of its own.
+    { name: 'queueOnly', job: 'data-invariants', cfg: 'data-invariants', fin: week('data-invariants', 1).slice(0, 6),
+      ev: [{ ts: '2026-10-07T05:40:05.811Z', job: 'data-invariants', state: 'ran-unlocked' },
+           { ts: '2026-10-07T05:42:09.213Z', job: 'data-invariants', state: 'finished', exit: 1 }] },
+  ]);
+
+  it('the three by-design jobs declare completedWhen "ran" (control: the rule this reads exists)', () => {
+    const sched = JSON.parse(read('scripts/job-schedule.json'));
+    for (const j of ['job-digest', 'data-invariants', 'compliance-watch']) expect(sched[j].completedWhen).toBe('ran');
+  });
+  it('exit 1 on a completedWhen "ran" job reads Worked, says it found things, and counts as worked', () => {
+    for (const k of ['digest', 'invariants', 'compliance']) {
+      expect(r.rows[k].status, k).toBe('Worked');
+      expect(r.rows[k].detail, k).toMatch(/found things needing attention \(exit 1 by design/);
+      expect(r.rows[k].lastWorked, k).toBe('2026-10-07T10:00:35.000Z');
+      expect(r.rows[k].fails24h, k).toBe(0);
+      expect(r.rows[k].firstFail, k).toBeNull();
+    }
+    expect(r.rows.digest.detail).toMatch(/Findings waiting for the fixer: 174/);
+  });
+  it('a broken read (exit 2) or a kill (exit 143) is still Failed; an allowance stop is still Blocked', () => {
+    expect(r.rows.brokenRead.status).toBe('Failed');
+    expect(r.rows.brokenRead.lastWorked).toBeNull();
+    expect(r.rows.killed.status).toBe('Failed');
+    expect(r.rows.allowance.status).toBe('Blocked');
+  });
+  it('no run at all is never Worked', () => {
+    expect(r.rows.noRuns.status).not.toBe('Worked');
+    expect(r.rows.noRuns.detail).toMatch(/No run recorded/);
+  });
+  it('control: a job with no completedWhen that exits 1 is Failed', () => {
+    expect(r.rows.control.status).toBe('Failed');
+    expect(r.rows.control.fails24h).toBe(1);
+  });
+  it('a by-design exit seen only by the queue reads Worked too', () => {
+    expect(r.rows.queueOnly.status).toBe('Worked');
+  });
+  it('the red pass raises no RED task for a by-design exit-1 week', () => {
+    expect(r.red.raised).toEqual([]);
+    expect(r.red.state).toEqual({});
+  });
+});
