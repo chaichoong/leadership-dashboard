@@ -77,7 +77,11 @@ TK = dict(rc.TK, agentOutput="fldzswp8fx6PqpLQ5", approvalOutcome="fldrHBSr6qoUf
 REC_RE = re.compile(r"rec[A-Za-z0-9]{14}")
 CHANGE_RE = re.compile(r"^RECORD CHANGE:\s*(?P<tenancy>rec[A-Za-z0-9]{14})\s+(?P<label>Payment Status|Due Day)\s*=\s*"
                        r"(?P<value>[^\n]+?)\s*$", re.M)
-LABELS = {"Payment Status": "Payment Status", "Due Day of Month": "Due Day"}
+# Kept identical to scripts/agent-dispatch.py (tests/tenancy-record.test.js reads both). `block --kind KEVIN --steps`
+# puts agent-written steps ON TOP of an approved card's Agent Output and keeps the approval (review round 3,
+# 9 Oct 2026): only the original below the LAST divider is what Kevin approved.
+YOUR_STEP_MARK = "YOUR STEP:"
+YOUR_STEP_DIVIDER = "----- The agent's work, as you approved it -----"
 
 
 class Refused(Exception):
@@ -121,6 +125,15 @@ def names_tenancy(task_fields, tenancy_id):
     return tenancy_id in text
 
 
+def approved_original(output):
+    """The part of the Agent Output Kevin approved: below the last Your step divider when a YOUR STEP block sits on
+    top (its steps are agent-written after his approval), and nothing at all for a block with no divider."""
+    s = str(output or "")
+    if not s.lstrip().startswith(YOUR_STEP_MARK):
+        return s
+    return s.rsplit(YOUR_STEP_DIVIDER, 1)[1] if YOUR_STEP_DIVIDER in s else ""
+
+
 def change_problem(task, tenancy_id, label, value):
     """'' when Kevin approved THIS change to THIS tenancy on this task, as-is, else why not."""
     f = task.get("fields") or {}
@@ -131,7 +144,7 @@ def change_problem(task, tenancy_id, label, value):
     if outcome != "Approved as-is":
         return (f"task {task['id']} was {outcome}, not Approved as-is: after an edit the card may not say what he read, "
                 "so put the change on a fresh card")
-    for m in CHANGE_RE.finditer(str(f.get(TK["agentOutput"]) or "")):
+    for m in CHANGE_RE.finditer(approved_original(f.get(TK["agentOutput"]))):
         if m.group("tenancy") == tenancy_id and m.group("label") == label and m.group("value").strip() == str(value):
             return ""
     return (f"the card Kevin approved (task {task['id']}) has no line 'RECORD CHANGE: {tenancy_id} {label} = {value}': "
