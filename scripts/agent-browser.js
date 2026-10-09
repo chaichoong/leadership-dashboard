@@ -1731,7 +1731,7 @@ function loadStanding(file = STANDING_FILE()) {
   for (const a of (raw && Array.isArray(raw.answers) ? raw.answers : [])) {
     try {
       if (!a || !a.key || !a.covers || !a.pick) throw new Error('needs key, covers and pick');
-      answers.push({ key: String(a.key), asks: new RegExp(a.asks || '.', 'i'), covers: new RegExp('^(?:' + a.covers + ')$', 'i'),
+      answers.push({ key: String(a.key), asks: new RegExp(a.asks || '.', 'i'), conditional: !!a.asks && a.asks !== '.', covers: new RegExp('^(?:' + a.covers + ')$', 'i'),
                      others: a.others ? new RegExp('^(?:' + a.others + ')$', 'i') : null, pick: String(a.pick), said: String(a.said || '') });
     } catch (e) {
       // One bad entry voids them all: a half-read list could answer a question it was never meant to.
@@ -1759,10 +1759,17 @@ function standingAnswerFor(question, chosen, standing) {
   const used = new Set();
   for (const clause of asked.split(CLAUSE_SPLIT_RE).map(c => c.trim()).filter(Boolean)) {
     const fit = standing.answers.filter(a => a.asks.test(clause));
+    const here = new Set();
     for (const w of topicsIn(clause)) {
       const a = fit.find(x => x.covers.test(w));
       if (!a) return no(`no standing answer covers "${w}" as asked here ("${clause.slice(0, 80)}")`);
+      here.add(a);
       used.add(a);
+    }
+    // Two topics in one breath: a time span in it could belong to either, so an answer that holds
+    // only for a span may not be read from it ("ever refused or any claims in the last 5 years").
+    if (here.size > 1 && [...here].some(a => a.conditional)) {
+      return no(`it asks about ${[...here].map(a => a.key).join(' and ')} in one clause, and a time span there could belong to either`);
     }
   }
   if (!used.size) return no('its topics could not be placed in a clause');
@@ -1797,6 +1804,9 @@ const CARRY_ON_ROUNDS = 3;            // rounds on one page: an answer can revea
 const CARRY_ON_KEVIN_MS = 20 * 60 * 1000;
 // The buttons that end the robot's part when the page shows a price: the quote is ready to buy.
 const BUY_RE = /\b(buy|purchase|pay|payment|check ?out|place (?:my |your )?order|proceed to (?:payment|checkout)|complete (?:my |your )?(?:purchase|order|payment))\b/i;
+// The only words the robot presses to move on. Anything else ("No", "Yes, that is right") can be an
+// answer, so it is his (review, 9 Oct 2026).
+const MOVE_ON_RE = /^(?:next|next step|continue|save and continue|proceed|get (?:a |my |your )?(?:quote|quotes|price)|see (?:my |your )?(?:quote|quotes|price)|find (?:my |an |the )?address|look ?up address|search|calculate(?: my)?(?: quote| price)?)\s*[>›»→]?$/i;
 
 // What the page asks, in a form the planner can answer: every visible question with a target the
 // robot can act on. Radios are grouped by name and their option labels are the targets (Acturis forms
@@ -1916,7 +1926,7 @@ async function snapshotForm(page) {
       if (!text || text.length > 40) continue;
       buttons.push({ kind: 'button', text, target: target(el) });
     }
-    const headings = Array.from(document.querySelectorAll('h1,h2')).filter(shown).map(h => clean(h.textContent)).filter(Boolean).slice(0, 8);
+    const headings = Array.from(document.querySelectorAll('h1')).filter(shown).map(h => clean(h.textContent)).filter(Boolean).slice(0, 4);
     const errors = Array.from(document.querySelectorAll('[role=alert],.error,.errors,.validation-message,.field-validation-error,.error-message,[aria-invalid=true]'))
       .filter(shown).map(e => clean(e.innerText || e.getAttribute('aria-label') || '')).filter(Boolean).slice(0, 10);
     const body = clean(document.body.innerText || '');
@@ -2009,10 +2019,20 @@ function valueInLine(v, line) {
 // A picked option is the cited line's own words: Yes or No as a word of it; anything else, every word
 // of the option in what the line says it IS (the part after "never", "not" or "no" set aside, so
 // "email only; never phone" never ticks Phone).
-function pickInLine(label, line) {
+const COMMON_WORDS = new Set(['property', 'insurance', 'insured', 'there', 'which', 'would', 'other', 'about', 'years', 'house',
+  'please', 'select', 'answer', 'question', 'details', 'currently', 'within', 'under']);
+const stems = t => new Set(tokensOf(t).filter(w => w.length >= 5 && !COMMON_WORDS.has(w)).map(w => w.slice(0, 6)));
+function pickInLine(label, line, question = '') {
   const words = tokensOf(label);
   if (!words.length) return false;
-  if (words.length === 1 && /^(yes|no)$/.test(words[0])) return tokensOf(line).includes(words[0]);
+  if (words.length === 1 && /^(yes|no)$/.test(words[0])) {
+    // A Yes or No comes from a line about the same thing ("Listed: No" for "Is the property listed?"),
+    // holding that one answer and no other.
+    const yn = new Set(tokensOf(line).filter(w => w === 'yes' || w === 'no'));
+    const subject = stems(question);
+    return yn.size === 1 && yn.has(words[0]) && [...stems(line)].some(w => subject.has(w));
+  }
+  if (POLARITY_RE.test(label)) return false;          // "I have had no claims": his, never a word match
   const said = normWords(line).replace(/\b(never|not|no|none)\b[^;.]*/g, ' ');
   const have = new Set(tokensOf(said));
   return words.filter(w => w.length >= 3 || /^\d+$/.test(w)).every(w => have.has(w));
@@ -2061,11 +2081,13 @@ function checkPlannerSteps(out, snap, facts, citable = facts) {
     }
     if (a.kind === 'select') {
       const pick = pickOption((a.item.options || []).map(l => ({ value: l, label: l })), String(s.value || '')).option;
-      if (!pick || !pickInLine(pick.label, line)) { unknown.push(q); continue; }
+      if (!pick || (factKeys.has(lineKey(s.source)) && !pickInLine(pick.label, line, a.item.question))) { unknown.push(q); continue; }
       steps.push({ do: 'select', selector: s.target, label: pick.label, question: q, item: a.item, pick: pick.label });
       continue;
     }
-    if (!pickInLine(a.pick, line)) { unknown.push(q); continue; }
+    // A declaration's pick is the standing answer's own, judged in code (liveAnswerProblem); anything
+    // else must be what its fact line says.
+    if (factKeys.has(lineKey(s.source)) && !pickInLine(a.pick, line, a.item.question)) { unknown.push(q); continue; }
     steps.push({ do: 'click', selector: s.target, question: q, item: a.item, pick: a.pick });
   }
   const next = out.next && buttons.has(out.next) ? buttons.get(out.next) : null;
@@ -2100,12 +2122,10 @@ async function liveAnswerProblem(page, s, standing) {
   const never = (own + ' ' + near.local).replace(EXCLUSION_RE, ' ').match(NEVER_ANSWER_RE);
   if (never) return `"${never[0]}" is asked on it, which only Kevin answers`;
   if (!topicsIn(own).length) {
-    // A typed answer goes in a box with its own label. A pick beside a declaration goes ahead only
-    // when its own question reads plainly as a question ("Answer" under "Any claims?" is not one).
-    if (s.do === 'fill') return '';
-    const plain = /\?\s*$/.test(own) && own.split(/\s+/).length >= 3;
-    return topicsIn(near.local + ' ' + near.wide).length && !plain
-      ? `a declaration question is beside it and its own question reads only "${own.slice(0, 60)}"` : '';
+    // Beside a declaration, nothing is answered that does not name the topic itself: a list under a
+    // legend, hint text or a vague label ("Number", "Answer") can be the declaration (review, 9 Oct 2026).
+    return topicsIn(near.local + ' ' + near.wide).length
+      ? `a declaration question is beside it and its own words ("${own.slice(0, 60)}") do not name it` : '';
   }
   if (s.do === 'fill') return 'a typed answer to a declaration question is his';
   if (s.item && s.item.kind === 'checkbox') return 'a tick box on a declaration question is his';
@@ -2203,7 +2223,7 @@ async function carryOnPages(page, plan, opts, done) {
     // The one button that moves on. Worded like a final action with a price on screen: the robot's part
     // is done. Worded like any other final action, a declaration or an agreement ("Agree and continue",
     // "Sign in", "Submit"): his, by name, and the robot carries on once he has pressed it.
-    if (HARD_ACTION_RE.test(next.text) || SOFT_PRESS_RE.test(next.text) || DECLARATION_RE.test(next.text)) {
+    if (!MOVE_ON_RE.test(next.text.trim())) {
       if (BUY_RE.test(next.text) && snap.prices.length) return { done, stuck: null, end: 'final' };
       const r = await his(p, [`press "${next.text}"`], snap);
       if (r) return r;

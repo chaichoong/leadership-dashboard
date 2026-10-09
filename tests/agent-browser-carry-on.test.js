@@ -75,6 +75,9 @@ describe('his standing answers: the code decides, never the planner', () => {
     expect(ok('Have you ever been refused insurance, or had any claims in the last 5 years?', 'No', fiveYearRefused))
       .toMatchObject({ ok: false, why: expect.stringMatching(/"refused"/) });
     expect(ok('Have you ever been refused insurance, or had any claims in the last 5 years?')).toMatchObject({ ok: true });
+    // review round 2: one clause, two topics, a five-year answer among them: the span could be either's.
+    expect(ok('Have you ever had insurance refused or any claims in the last 5 years?'))
+      .toMatchObject({ ok: false, why: expect.stringMatching(/in one clause, and a time span there could belong to either/) });
   });
 
   it('review: wording that can turn a yes into a no is his', () => {
@@ -181,8 +184,9 @@ describe("the planner's steps are checked against the facts", () => {
       { do: 'check', target: '#ph', question: 'Phone', source: 'Contact: email only; never phone, SMS or post (test)' },
       { do: 'click', target: 'label[for="cy"]', question: 'Any claims', source: 'No claims in the last 5 years (test)' },
     ]);
-    expect(r.steps).toEqual([]);
-    expect(r.unknown).toEqual(['press "No"', 'First name', 'Year you bought it', 'Phone', 'Any claims in the last 5 years?']);
+    // "Yes" cited from a standing answer passes this check: the standing pick is judged by the live check.
+    expect(r.steps).toMatchObject([{ selector: 'label[for="cy"]', pick: 'Yes' }]);
+    expect(r.unknown).toEqual(['press "No"', 'First name', 'Year you bought it', 'Phone']);
   });
 
   it('a standing answer is cited for a declaration only, never for another question', () => {
@@ -197,8 +201,16 @@ describe("the planner's steps are checked against the facts", () => {
     expect(b.valueInLine('235000', 'Rebuild value: £235,000')).toBe(true);
     expect(b.valueInLine('236000', 'Rebuild value: £235,000')).toBe(false);
     expect(b.valueInLine('0', 'Bought: 2009')).toBe(false);
-    expect(b.pickInLine('Yes', 'Within a quarter of a mile of water: Yes')).toBe(true);
-    expect(b.pickInLine('No', 'Within a quarter of a mile of water: Yes')).toBe(false);
+    const water = 'Is it within a quarter of a mile of water?';
+    expect(b.pickInLine('Yes', 'Within a quarter of a mile of water: Yes', water)).toBe(true);
+    expect(b.pickInLine('No', 'Within a quarter of a mile of water: Yes', water)).toBe(false);
+    // review 2/4: a Yes or No must come from a line about the same thing, holding that one answer.
+    const sub = 'Has the property ever suffered from subsidence or flooding?';
+    expect(b.pickInLine('No', 'Contact: email only, no phone', sub)).toBe(false);
+    expect(b.pickInLine('No', 'Subsidence: No', sub)).toBe(true);
+    expect(b.pickInLine('No', 'Subsidence: No; flooded: Yes', sub)).toBe(false);
+    // review 6: an option worded with a negation is never a word match.
+    expect(b.pickInLine('I have had no claims in the last 5 years', 'I have had claims in the last 5 years (one, 2022)')).toBe(false);
     expect(b.pickInLine('Phone', 'Contact: email only; never phone, SMS or post')).toBe(false);
     expect(b.pickInLine('1850 to 1919', 'Built: 1850 to 1919')).toBe(true);
   });
@@ -214,9 +226,16 @@ describe('the second net: the live check on the page itself', () => {
   it('review: a pick with no readable question, or a vague label beside a declaration, is his', async () => {
     expect(await b.liveAnswerProblem(pg('Have you ever made a claim? Yes No'), step(''), st)).toMatch(/its question could not be read/);
     expect(await b.liveAnswerProblem(pg('Have you made any claims ever? Answer Yes No'), step('Answer', { do: 'select', item: { kind: 'select', question: 'Answer' } }), st))
-      .toMatch(/a declaration question is beside it and its own question reads only "Answer"/);
-    // A plain question of its own goes ahead, whatever stands beside it.
-    expect(await b.liveAnswerProblem(pg('Is the property listed? Yes No', 'Is the property listed? Have you ever made a claim?'), step('Is the property listed?'), st)).toBe('');
+      .toMatch(/a declaration question is beside it and its own words \("Answer"\) do not name it/);
+    // review round 2: beside a declaration, a question that does not name it is his, plain or not
+    // (a legend over a list of claims, CCJs and convictions; a typed box labelled "Number").
+    expect(await b.liveAnswerProblem(pg('Is the property listed? Yes No', 'Is the property listed? Have you ever made a claim?'), step('Is the property listed?'), st))
+      .toMatch(/a declaration question is beside it/);
+    expect(await b.liveAnswerProblem(pg('In the last 10 years, have you or anyone to be insured had any of the following? A claim, a CCJ, a conviction Yes No'),
+      step('In the last 10 years, have you or anyone to be insured had any of the following?'), st)).toMatch(/a declaration question is beside it/);
+    expect(await b.liveAnswerProblem(pg('How many insurance claims have you ever made? Number'), step('Number', { do: 'fill', item: { kind: 'number', question: 'Number' } }), st))
+      .toMatch(/a declaration question is beside it/);
+    expect(await b.liveAnswerProblem(pg('Is the property listed? Yes No'), step('Is the property listed?'), st)).toBe('');
   });
 
   it('a typed answer or a tick box on a declaration is his; a never-list word on the control is his; a covered one goes ahead', async () => {
@@ -251,6 +270,7 @@ const PAGES = {
     <form action="/p2" method="get">
       <div class="q"><label for="first">First name</label><input id="first" name="first"></div>
       <div class="q"><label for="pc">Postcode</label><input id="pc" name="pc"></div>
+      <div class="q"><label for="built">When was it built?</label><select id="built" name="built"><option value="">Select</option><option>1850 to 1919</option><option>1920 to 1945</option></select></div>
       <button id="next1" type="submit">Next</button>
     </form><div id="out"></div></body></html>`,
   '/p2': `<!doctype html><html><head>${hide}</head><body><h1>About the property</h1>
@@ -261,7 +281,6 @@ const PAGES = {
       <div class="q"><p>Have you or any director been convicted of, or charged with, any criminal offence?</p>
         <input class="rb" type="radio" name="conv" id="vy" value="y"><label for="vy">Yes</label>
         <input class="rb" type="radio" name="conv" id="vn" value="n"><label for="vn">No</label></div>
-      <div class="q"><label for="built">When was it built?</label><select id="built" name="built"><option value="">Select</option><option>1850 to 1919</option><option>1920 to 1945</option></select></div>
       <div class="q"><label for="storeys">Number of storeys</label><input id="storeys" name="storeys"></div>
       <button id="next2" type="submit">Next</button>
     </form>
@@ -348,7 +367,7 @@ module.exports = async (input) => {
     else if (/storeys/.test(q) && !it.value) unknown.push(q);
   }
   if (tryIt === 'button') { const nb = btn(/^No$/); if (nb) steps.push({ do: 'click', target: nb.target, question: 'Ever made a claim?', source: said('claims-5y') }); }
-  const next = btn(/^(Next|Agree and continue|Sign in)$/);
+  const next = tryIt === 'next-no' ? btn(/^No$/) : btn(/^(Next|Agree and continue|Sign in)$/);
   return { steps, next: unknown.length ? null : (next ? next.target : null), unknown, done: 'no' };
 };
 `;
@@ -402,11 +421,10 @@ describe('the Your turn window carries on, page by page, to the price', () => {
     expect(r.code, r.err + r.out).toBe(0);
     const last = JSON.parse(r.out.trim().split('\n').pop());
     expect(last).toMatchObject({ mode: 'handover', handedOver: true, stuck: null, end: 'price' });
-    expect(hits.some(u => u.startsWith('/p2?first=Testa&pc=ZZ99+9ZZ'))).toBe(true);
+    expect(hits.some(u => u.startsWith('/p2?first=Testa&pc=ZZ99+9ZZ&built=1850+to+1919'))).toBe(true);
     const p3 = hits.find(u => u.startsWith('/p3?'));
     expect(p3).toMatch(/claims=n/);
     expect(p3).toMatch(/conv=n/);          // his own answer, given in the window
-    expect(p3).toMatch(/built=1850\+to\+1919/);
     expect(p3).toMatch(/storeys=2/);
     const handover = ledgerOf(x).find(l => l.cmd === 'handover');
     const kevin = handover.steps.filter(s => s.do === 'kevin');
@@ -431,15 +449,16 @@ describe('the Your turn window carries on, page by page, to the price', () => {
     expect((await dryRun('/p1', { PLANNER_TRY: 'invent' })).last.stuck.unknown).toEqual(['First name']);
     hits.length = 0;
     const yes = await dryRun('/p1', { PLANNER_TRY: 'yes' });
-    // "Yes" is not what his standing answer says, so the step never passes the facts check: the question is his.
-    expect(yes.last.stuck.unknown).toContain('Have you had any claims in the last 5 years?');
+    expect(yes.last.stuck.unknown.join(' | ')).toMatch(/Have you had any claims in the last 5 years\? \(a declaration question: the standing answer is "No", not "Yes"\)/);
   }, 120000);
 
-  it('review 1: an answer given as a link or a plain button is never pressed', async () => {
+  it('review 1: an answer given as a link or a plain button is never pressed, as a step or as the way on', async () => {
     const { last, x } = await dryRun('/q-btn', { PLANNER_TRY: 'button' });
     expect(last.stuck.unknown).toContain('press "No"');
-    const steps = ledgerOf(x).find(l => l.cmd === 'handover-dry-run').steps;
-    expect(steps.filter(s => s.carryOn)).toEqual([]);
+    expect(ledgerOf(x).find(l => l.cmd === 'handover-dry-run').steps.filter(s => s.carryOn)).toEqual([]);
+    const asNext = await dryRun('/q-btn', { PLANNER_TRY: 'next-no' });
+    expect(asNext.last.stuck.unknown).toEqual(['press "No"']);
+    expect(ledgerOf(asNext.x).find(l => l.cmd === 'handover-dry-run').steps.filter(s => s.carryOn)).toEqual([]);
   }, 120000);
 
   it('review 4: a dropdown labelled "Answer" under a claims question, and a number box asking about claims, are his', async () => {
