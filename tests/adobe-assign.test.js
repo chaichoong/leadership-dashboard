@@ -13,10 +13,14 @@
 // attribute while unselected), and each recipient row is painted the same
 // colour. These tests drive that reader against a page built to Adobe's
 // measured layout, and the verdict against the 23 Sep case.
-import { describe, it, expect, beforeAll } from 'vitest';
+import { describe, it, expect, beforeAll, vi } from 'vitest';
 import { join, resolve, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import { createRequire } from 'module';
+// Real Chrome launches in this file. 90s, not the suite's 30s (9 Oct 2026): in the merge
+// gate's throwaway tree, with the full suite running in parallel, a launch alone went past 30s
+// and refused PRs all day (the first three files got this in #751; these are the rest).
+vi.setConfig({ testTimeout: 90_000, hookTimeout: 90_000 });
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const require_ = createRequire(import.meta.url);

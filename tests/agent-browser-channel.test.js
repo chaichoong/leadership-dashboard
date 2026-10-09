@@ -9,9 +9,13 @@
 //
 // withPage is not exported, so this reads the source: the three properties
 // that matter must all be present, and the fallback must stay conditional.
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
+// Real Chrome launches in this file. 90s, not the suite's 30s (9 Oct 2026): in the merge
+// gate's throwaway tree, with the full suite running in parallel, a launch alone went past 30s
+// and refused PRs all day (the first three files got this in #751; these are the rest).
+vi.setConfig({ testTimeout: 90_000, hookTimeout: 90_000 });
 
 const src = readFileSync(join(__dirname, '..', 'scripts', 'agent-browser.js'), 'utf8');
 // The whole function, to its closing brace (a fixed 2,500-character cut lost the

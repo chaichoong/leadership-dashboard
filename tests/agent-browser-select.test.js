@@ -3,12 +3,16 @@
 // "Terraced" and then "House" for the property type, Playwright wanted the
 // option's exact value code or exact label, and the step failed with no clue
 // which options existed. Drives the real runSteps against a real Chromium page.
-import { describe, it, expect, beforeAll, afterAll } from 'vitest';
+import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest';
 import { mkdtempSync, writeFileSync, rmSync } from 'fs';
 import { tmpdir } from 'os';
 import { join, resolve, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import { createRequire } from 'module';
+// Real Chrome launches in this file. 90s, not the suite's 30s (9 Oct 2026): in the merge
+// gate's throwaway tree, with the full suite running in parallel, a launch alone went past 30s
+// and refused PRs all day (the first three files got this in #751; these are the rest).
+vi.setConfig({ testTimeout: 90_000, hookTimeout: 90_000 });
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const require_ = createRequire(import.meta.url);
