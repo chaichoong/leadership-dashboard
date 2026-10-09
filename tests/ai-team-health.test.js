@@ -82,6 +82,22 @@ print(json.dumps(es.defect_counts(state, NOW)))`);
     expect(out).toEqual({ open: 2, filed7d: 3, fixed7d: 1 });
   });
 
+  it('defects: a finding closed as fixed against a commit counts, by the close op\'s time', () => {
+    // Review finding, 9 Oct 2026: counting landed_at alone missed 9 of 23 fixes that week.
+    const out = py(`
+state = {
+  "g": {"status": "fixed", "ts": iso(NOW - timedelta(days=20))},
+  "h": {"status": "fixed", "ts": iso(NOW - timedelta(days=20))},
+}
+ops = [
+  {"op": "close", "id": "g", "outcome": "fixed", "ts": iso(NOW - timedelta(days=1))},
+  {"op": "close", "id": "h", "outcome": "fixed", "ts": iso(NOW - timedelta(days=12))},
+  {"op": "close", "id": "x", "outcome": "rejected", "ts": iso(NOW - timedelta(days=1))},
+]
+print(json.dumps(es.defect_counts(state, NOW, ops)))`);
+    expect(out.fixed7d).toBe(1);
+  });
+
   it('rework: zero fixes is no rate, not 0%', () => {
     expect(py(`print(json.dumps(es.rework_counts({"days": 14, "fixes": 0, "fix_of_fix": 0})))`).pct).toBeNull();
   });

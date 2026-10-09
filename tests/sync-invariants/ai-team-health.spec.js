@@ -123,6 +123,65 @@ test.describe('AI Team section', () => {
     }
   });
 
+  test('a failed health row shows its reason even when the last good numbers are still on it', async ({ page }) => {
+    // Review finding, 9 Oct 2026: a failed write leaves the old payload in place.
+    await page.addInitScript((pat) => localStorage.setItem('_dlr_pat', pat), MOCK_PAT);
+    await loadDashboard(page);
+    const stale = healthRow(5);
+    stale.fields[ES.status] = 'Failed';
+    stale.fields[ES.detail] = 'The defect queue or the rework rate could not be read: timeout';
+    await routeEstate(page, [stale, blockersRow()]);
+    await page.evaluate(async () => await loadAiTeamHealth());
+    for (const id of ['aiWorkCard', 'aiDefectsCard', 'aiReworkCard']) {
+      const c = await card(page, id);
+      expect(c.head, id).toBe('—');
+      expect(c.sub, id).toContain('timeout');
+    }
+  });
+
+  test('a blocker check that could not read the board is never "Nothing is blocked"', async ({ page }) => {
+    await page.addInitScript((pat) => localStorage.setItem('_dlr_pat', pat), MOCK_PAT);
+    await loadDashboard(page);
+    const b = blockersRow();
+    b.fields[ES.detail] = 'The blocker check could not read the task board, so it cannot say what is blocked.';
+    b.fields[ES.payload] = JSON.stringify({ open: [], controlFailed: true });
+    await routeEstate(page, [healthRow(), b]);
+    await page.evaluate(async () => await loadAiTeamHealth());
+    const c = await card(page, 'aiBlockedCard');
+    expect(c.head).toBe('—');
+    expect(c.sub).toContain('could not read the task board');
+    expect(c.cls).not.toContain('text-green');
+  });
+
+  test('blocked counts come from every wall, and age from the sweep, not the row', async ({ page }) => {
+    await page.addInitScript((pat) => localStorage.setItem('_dlr_pat', pat), MOCK_PAT);
+    await loadDashboard(page);
+    const b = blockersRow(5);   // the row was written 5 minutes ago...
+    b.fields[ES.payload] = JSON.stringify({ open: wall('TOOL', 80), openCount: 95,
+      byKind: { TOOL: 85, KEVIN: 10 }, sweptAt: minutesAgo(200) });   // ...but the sweep stopped 200 minutes ago
+    await routeEstate(page, [healthRow(), b]);
+    await page.evaluate(async () => await loadAiTeamHealth());
+    const c = await card(page, 'aiBlockedCard');
+    expect(c.head).toBe('95 blocked');
+    expect(c.sub).toMatch(/^Not updated since .*Biggest: 85 waiting on a code fix · 10 need you$/);
+    expect(c.cls).toContain('text-amber');
+  });
+
+  test('payload text never runs as HTML', async ({ page }) => {
+    await page.addInitScript((pat) => localStorage.setItem('_dlr_pat', pat), MOCK_PAT);
+    await loadDashboard(page);
+    const h = healthRow();
+    const p = JSON.parse(h.fields[ES.payload]);
+    p.work.open = '<img src=x onerror="window.__aiXss=1">';
+    h.fields[ES.payload] = JSON.stringify(p);
+    await routeEstate(page, [h, blockersRow()]);
+    await page.evaluate(async () => await loadAiTeamHealth());
+    await page.waitForTimeout(300);
+    expect(await page.evaluate(() => window.__aiXss)).toBeUndefined();
+    expect(await page.evaluate(() => document.querySelectorAll('#aiTeamCards img').length)).toBe(0);
+    expect((await card(page, 'aiWorkCard')).head).toBe('— open');
+  });
+
   test('a failed row shows its reason, never a number', async ({ page }) => {
     await page.addInitScript((pat) => localStorage.setItem('_dlr_pat', pat), MOCK_PAT);
     await loadDashboard(page);

@@ -1547,48 +1547,57 @@
         host.replaceWith(el);
     }
 
-    function aiTeamRowAge(row) {
-        const t = Date.parse((row && row.fields[ESTATE_FIELDS.lastRun]) || '');
+    // `at` overrides the row's Last Run: the blocker row's Last Run moves even when the
+    // sweep behind it has stopped, so its age is the sweep's own sweptAt.
+    function aiTeamRowAge(row, at) {
+        const t = Date.parse(at || (row && row.fields[ESTATE_FIELDS.lastRun]) || '');
         return Number.isFinite(t) ? (Date.now() - t) / 60000 : Infinity;
     }
 
-    function aiTeamClock(row) {
-        const t = Date.parse((row && row.fields[ESTATE_FIELDS.lastRun]) || '');
+    function aiTeamClock(row, at) {
+        const t = Date.parse(at || (row && row.fields[ESTATE_FIELDS.lastRun]) || '');
         if (!Number.isFinite(t)) return 'never';
         return new Date(t).toLocaleString('en-GB', { timeZone: 'Europe/London', weekday: 'short', hour: '2-digit', minute: '2-digit' });
     }
 
     // A missing, failed or stale row turns its card into a statement of that, never a zero.
-    function aiTeamRowProblem(row, label) {
+    // A failed write leaves the last payload in place, so for the health row Failed means
+    // failed whatever the payload says (review finding, 9 Oct 2026).
+    function aiTeamRowProblem(row, label, failedIsProblem) {
         if (row === undefined) return { label, value: '—', sub: 'Could not read Airtable. Refresh to retry.', detail: '', cls: 'text-amber' };
         if (!row) return { label, value: '—', sub: 'No data yet: the Mac has not written this row.', detail: '', cls: 'text-amber' };
         const f = row.fields;
-        if (f[ESTATE_FIELDS.status] === 'Failed' && !f[ESTATE_FIELDS.payload]) {
+        if (f[ESTATE_FIELDS.status] === 'Failed' && (failedIsProblem || !f[ESTATE_FIELDS.payload])) {
             return { label, value: '—', sub: escHtml(f[ESTATE_FIELDS.detail] || 'The Mac reported a failure.'), detail: '', cls: 'text-red' };
         }
         return null;
     }
 
+    // null when the payload cannot be read: the caller shows that, never an empty "all clear".
     function aiTeamPayload(row) {
-        try { return JSON.parse(row.fields[ESTATE_FIELDS.payload] || '{}'); } catch (e) { console.warn('AI Team payload unreadable:', e); return {}; }
+        try { return JSON.parse(row.fields[ESTATE_FIELDS.payload] || 'null'); } catch (e) { console.warn('AI Team payload unreadable:', e); return null; }
     }
 
-    function aiTeamStale(card, row) {
-        if (aiTeamRowAge(row) <= AI_TEAM_STALE_MIN) return card;
-        return Object.assign({}, card, { cls: 'text-amber', sub: `Not updated since ${escHtml(aiTeamClock(row))}. ${card.sub}` });
+    // Every payload number goes through here before it reaches the page: a payload is
+    // data from Airtable, and expandableCard does not escape what it is given.
+    function aiNum(v) { const n = Number(v); return Number.isFinite(n) ? n : '—'; }
+
+    function aiTeamStale(card, row, at) {
+        if (aiTeamRowAge(row, at) <= AI_TEAM_STALE_MIN) return card;
+        return Object.assign({}, card, { cls: 'text-amber', sub: `Not updated since ${escHtml(aiTeamClock(row, at))}. ${card.sub}` });
     }
 
     function aiTeamCards(health, blockers) {
         const updated = (row) => `<div class="od-breakdown-row"><span>Updated</span><span>${escHtml(aiTeamClock(row))}</span></div>`;
         const cards = {};
 
-        const hp = aiTeamRowProblem(health, '');
+        const hp = aiTeamRowProblem(health, '', true);
         if (hp) {
             cards.aiWorkCard = Object.assign({}, hp, { label: 'Agent Work' });
             cards.aiDefectsCard = Object.assign({}, hp, { label: 'Defects' });
             cards.aiReworkCard = Object.assign({}, hp, { label: 'Fix of a Fix' });
         } else {
-            const p = aiTeamPayload(health);
+            const p = aiTeamPayload(health) || {};
             if (!p.work || !p.defects || !p.rework) {
                 const none = { value: '—', sub: 'The row holds no numbers. The Mac writer may be an older version.', detail: '', cls: 'text-amber' };
                 return Object.assign(cards, {
@@ -1597,8 +1606,12 @@
                     aiReworkCard: Object.assign({ label: 'Fix of a Fix' }, none),
                 }, { aiBlockedCard: aiTeamCards(null, blockers).aiBlockedCard });
             }
-            const w = p.work, d = p.defects, r = p.rework;
-            const net = (w.created7d || 0) - (w.done7d || 0);
+            const w = {}, d = {}, r = {};
+            ['open', 'notMoving', 'created7d', 'done7d'].forEach(k => { w[k] = aiNum(p.work[k]); });
+            ['open', 'filed7d', 'fixed7d'].forEach(k => { d[k] = aiNum(p.defects[k]); });
+            ['days', 'fixes', 'fixOfFix', 'baselinePct'].forEach(k => { r[k] = aiNum(p.rework[k]); });
+            r.pct = p.rework.pct == null ? null : aiNum(p.rework.pct);
+            const net = (Number(w.created7d) || 0) - (Number(w.done7d) || 0);
             cards.aiWorkCard = aiTeamStale({
                 label: 'Agent Work', value: `${w.open} open`,
                 sub: `${w.notMoving} not moving · 7 days: ${w.created7d} in, ${w.done7d} done`,
@@ -1609,36 +1622,45 @@
             cards.aiDefectsCard = aiTeamStale({
                 label: 'Defects', value: `${d.open} open`,
                 sub: `7 days: ${d.filed7d} filed, ${d.fixed7d} fixed`,
-                cls: (d.filed7d || 0) > (d.fixed7d || 0) ? 'text-red' : 'text-green',
+                cls: (Number(d.filed7d) || 0) > (Number(d.fixed7d) || 0) ? 'text-red' : 'text-green',
                 detail: `<div style="color:var(--text-muted);font-size:var(--fs-xs)">Problems the robots and daily checks logged for fixing. Fixed means merged. A rejected one carries no date, so it is not counted as cleared.</div>${updated(health)}`,
             }, health);
             const pct = r.pct;
             cards.aiReworkCard = aiTeamStale({
                 label: 'Fix of a Fix', value: pct == null ? '—' : `${pct}%`,
                 sub: pct == null ? `No fixes in ${r.days} days` : `${r.fixOfFix} of ${r.fixes} fixes in ${r.days} days · baseline ${r.baselinePct}%`,
-                cls: pct == null ? '' : pct <= r.baselinePct ? 'text-green' : pct <= 40 ? 'text-amber' : 'text-red',
+                cls: typeof pct !== 'number' ? '' : pct <= r.baselinePct ? 'text-green' : pct <= 40 ? 'text-amber' : 'text-red',
                 detail: `<div style="color:var(--text-muted);font-size:var(--fs-xs)">The one number. A fix of a fix changed lines another fix wrote in the 7 days before. Lower is better.</div>${updated(health)}`,
             }, health);
         }
 
         const bp = aiTeamRowProblem(blockers, 'Bottleneck');
+        const bpay = bp ? null : aiTeamPayload(blockers);
         if (bp) {
             cards.aiBlockedCard = bp;
+        } else if (!bpay || !Array.isArray(bpay.open) || bpay.controlFailed) {
+            // The sweep could not read the board, or its report is unreadable: never "Nothing is blocked".
+            cards.aiBlockedCard = { label: 'Bottleneck', value: '—', cls: 'text-red', detail: '',
+                sub: escHtml(blockers.fields[ESTATE_FIELDS.detail] || 'The blocker report could not be read.') };
         } else {
-            const walls = aiTeamPayload(blockers).open || [];
-            const byKind = {};
-            walls.forEach(x => { byKind[x.kind] = (byKind[x.kind] || 0) + 1; });
-            const ranked = Object.entries(byKind).sort((a, b) => b[1] - a[1]);
-            const needYou = (byKind.KEVIN || 0) + (byKind['SIGN-IN'] || 0) + (byKind.SITE || 0);
+            // byKind and openCount cover every wall; "open" is capped at 80 for the page.
+            let byKind = bpay.byKind;
+            if (!byKind || typeof byKind !== 'object') {
+                byKind = {};
+                bpay.open.forEach(x => { byKind[x.kind] = (byKind[x.kind] || 0) + 1; });
+            }
+            const total = aiNum(bpay.openCount != null ? bpay.openCount : bpay.open.length);
+            const ranked = Object.entries(byKind).map(([k, n]) => [k, aiNum(n)]).sort((a, b) => b[1] - a[1]);
+            const needYou = ['KEVIN', 'SIGN-IN', 'SITE'].reduce((t, k) => t + (Number(byKind[k]) || 0), 0);
             const red = blockers.fields[ESTATE_FIELDS.status] === 'Failed';
             cards.aiBlockedCard = aiTeamStale({
-                label: 'Bottleneck', value: `${walls.length} blocked`,
-                sub: walls.length === 0 ? 'Nothing is blocked'
+                label: 'Bottleneck', value: `${total} blocked`,
+                sub: total === 0 || !ranked.length ? 'Nothing is blocked'
                     : `Biggest: ${ranked[0][1]} ${escHtml(AI_TEAM_WALLS[ranked[0][0]] || ranked[0][0])}${needYou ? ` · ${needYou} need you` : ''}`,
-                cls: walls.length === 0 ? 'text-green' : red ? 'text-red' : 'text-amber',
+                cls: total === 0 ? 'text-green' : red ? 'text-red' : 'text-amber',
                 detail: ranked.map(([k, n]) => `<div class="od-breakdown-row"><span>${escHtml(AI_TEAM_WALLS[k] || k)}</span><span>${n}</span></div>`).join('')
                     + `<div style="color:var(--text-muted);font-size:var(--fs-xs);margin-top:6px">${red ? 'Red: a block is 3 days old or a task closed while blocked. ' : ''}Each one is listed on the Estate tab of the AI Agents page.</div>${updated(blockers)}`,
-            }, blockers);
+            }, blockers, bpay.sweptAt);
         }
         return cards;
     }

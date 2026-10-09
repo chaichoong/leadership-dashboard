@@ -87,7 +87,10 @@ REPORT_ROWS_OWNED_ELSEWHERE = ("loop-health", "allowance", "content-publishing",
                                "tenant-chain",
                                # scripts/rent-check.py, the daily rent check's report (2 Oct 2026). Its
                                # key differs from the job's (rent-check), whose own row this writer keeps.
-                               "rent-position")
+                               "rent-position",
+                               # Written with loop-health in the same pass, so a --no-loop-health run
+                               # must not mark it "No longer scheduled" either (9 Oct 2026).
+                               "ai-team-health")
 
 # Why a run did not work, in Kevin's words. Matched against the wrapper's
 # reason and the last 600 characters the job printed. Order matters: the first
@@ -807,7 +810,12 @@ def blockers_summary(r):
             if w.get("tool"):
                 s["fix"] = w["tool"]
         slim.append(s)
-    return status, detail, {"open": slim, "stale": len(stale), "closedWhileBlocked": closed[:10],
+    kinds = {}
+    for w in walls:
+        kinds[w.get("kind")] = kinds.get(w.get("kind"), 0) + 1
+    # openCount and byKind cover every wall: "open" is capped at WALLS_CAP for the page.
+    return status, detail, {"open": slim, "openCount": len(walls), "byKind": kinds,
+                            "stale": len(stale), "closedWhileBlocked": closed[:10],
                             "woken": len(r.get("woken") or []),
                             "noFixer": len(build), "unclaimed": len(unclaimed), "openPr": len(open_pr),
                             "mergeCard": len(merge_wait), "merging": len(merging), "dailyFix": len(fixing)}
@@ -895,14 +903,28 @@ def _within(ts, now, days):
     return bool(t) and (now - t) <= timedelta(days=days)
 
 
-def defect_counts(state, now):
+def fixed_times(ops):
+    """When each finding last became fixed: a `land` op (its PR merged) or a `close` op with
+    outcome fixed (closed against a commit). The folded state keeps no time for the second,
+    so the raw log is read; counting `landed_at` alone missed 9 of 23 fixes in the week to
+    9 Oct 2026 (review finding)."""
+    out = {}
+    for rec in ops:
+        if rec.get("op") == "land" or (rec.get("op") == "close" and rec.get("outcome") == "fixed"):
+            out[rec.get("id")] = rec.get("ts")
+    return out
+
+
+def defect_counts(state, now, ops=()):
     """The defect queue from findings.py's folded state: open now (its BACKLOG), filed and
     fixed in the last 7 days. A rejected finding carries no close time, so it is not
-    counted as out; fixed means landed in a merged PR."""
-    items = list(state.values())
-    return {"open": sum(1 for f in items if f.get("status") in ("open", "claimed", "pending")),
-            "filed7d": sum(1 for f in items if _within(f.get("ts"), now, 7)),
-            "fixed7d": sum(1 for f in items if f.get("status") == "fixed" and _within(f.get("landed_at"), now, 7))}
+    counted as out; fixed means landed in a merged PR or closed against a commit."""
+    items = list(state.items())
+    when_fixed = fixed_times(ops)
+    return {"open": sum(1 for _, f in items if f.get("status") in ("open", "claimed", "pending")),
+            "filed7d": sum(1 for _, f in items if _within(f.get("ts"), now, 7)),
+            "fixed7d": sum(1 for fid, f in items if f.get("status") == "fixed"
+                           and _within(when_fixed.get(fid) or f.get("landed_at"), now, 7))}
 
 
 def rework_counts(r):
@@ -917,8 +939,11 @@ def _measure_defects_and_rework(now):
     spec = importlib.util.spec_from_file_location("findings", os.path.join(HERE, "findings.py"))
     fm = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(fm)
-    defects = defect_counts(fm.current_state(), now)
-    out = subprocess.run([sys.executable, os.path.join(HERE, "rework-rate.py"), "--days", str(REWORK_DAYS), "--json"],
+    defects = defect_counts(fm.current_state(), now, fm.read_all())
+    # --no-fetch: this job is lock-exempt because it never touches the repo, so it reads
+    # origin/main as the other jobs last fetched it (review finding, 9 Oct 2026).
+    out = subprocess.run([sys.executable, os.path.join(HERE, "rework-rate.py"), "--days", str(REWORK_DAYS),
+                          "--json", "--no-fetch"],
                          capture_output=True, text=True, timeout=300)
     if out.returncode != 0:
         raise RuntimeError("rework-rate.py exited %d: %s" % (out.returncode, (out.stderr or "")[-200:]))
