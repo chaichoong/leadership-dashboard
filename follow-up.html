@@ -927,24 +927,16 @@
     const CLAUDE_PROXY = 'https://claude-proxy.kevinbrittain.workers.dev';
     const INBOX_VALUE = '__INBOX__';
     const GHL_PROXY_URL = 'https://sms-email-bridge.kevinbrittain.workers.dev'; // SMS bridge: polls inbound SMS, routes replies
-    // Apps Script that pulls Gmail "3: to pay" → Airtable Invoice Records.
-    // Triggered ad-hoc when the team applies label 3 so Invoices reflects
-    // new invoices within seconds rather than waiting for the 15-min cron.
-    const GMAIL_INVOICE_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbwzn-xAv2li7Qo8GrEEkELWzRNp0_4fcz9tiuxQdXiDDgwhCHpoRTTbDyF2K3Ks5wza/exec';
-
-    // Debounced — a bulk apply that touches several label-3 emails should
-    // fire one sync, not N. The 1.5s settle also lets Gmail's label state
-    // propagate before the Apps Script scans.
-    let _invoiceSyncDebounce = null;
-    function triggerInvoiceSync() {
-        if (_invoiceSyncDebounce) clearTimeout(_invoiceSyncDebounce);
-        _invoiceSyncDebounce = setTimeout(() => {
-            try {
-                fetch(GMAIL_INVOICE_SCRIPT_URL + '?action=sync', { mode: 'no-cors', redirect: 'follow' });
-                addAuditEntry('invoice_sync_trigger', 'Triggered Gmail → Airtable invoice sync after label-3 apply');
-            } catch (err) { console.warn('Invoice sync trigger failed:', err); }
-        }, 1500);
-    }
+    // The invoice Apps Script (Gmail "3: to pay" → Airtable Invoice Records) is RETIRED from this page
+    // (Kevin, option A, 7 and 8 Oct 2026, task recJpS8LUkvdRThaw; finding 20261009-agent-dispatch-814).
+    // Label 3 has had no mail since 17 Aug 2026 and the Payment Run is built by scripts/payment-run.py,
+    // so applying label 3 no longer calls the script and no health check pings it. Kevin deletes the
+    // script's own timer in Google the day this goes live. The meetings script is a different project and
+    // is untouched. js/config.js emptied the dashboard's copy of this URL on 30 Sep 2026. To restore: put
+    // this URL back and bring back triggerInvoiceSync, its three label-3 calls and healthCheckInvoiceScript
+    // from git history (the commit that emptied this line):
+    // https://script.google.com/macros/s/AKfycbwzn-xAv2li7Qo8GrEEkELWzRNp0_4fcz9tiuxQdXiDDgwhCHpoRTTbDyF2K3Ks5wza/exec
+    const GMAIL_INVOICE_SCRIPT_URL = '';
 
     let tokenClient;
     let accessToken = null;
@@ -1946,13 +1938,6 @@
                             run: async () => {
                                 if (!getAirtablePat()) return { status: 'warn', detail: 'Skipped — set the Airtable PAT in Settings to enable this check' };
                                 const r = await healthCheckTenancies();
-                                return { status: r.ok ? 'pass' : 'fail', detail: r.detail };
-                            }
-                        },
-                        {
-                            name: 'Gmail Apps Script reachable', kind: 'automation', active: true,
-                            run: async () => {
-                                const r = await healthCheckInvoiceScript();
                                 return { status: r.ok ? 'pass' : 'fail', detail: r.detail };
                             }
                         },
@@ -4327,14 +4312,14 @@ Body: ${bodyText}`;
     // ============================================================
     // HEALTH CHECK — admin smoke test
     // ============================================================
-    // Verifies the three external systems Inbound Comms depends on:
+    // Verifies the external systems Inbound Comms depends on:
     //   1. Airtable Tasks table — creates a TEST record then deletes it.
     //      Catches field-format regressions (status, assignee, priority,
     //      etc.) before the team hits them in production.
-    //   2. Gmail Invoice Apps Script — hits ?action=count, expects a
-    //      number back. Catches script deploy or label-name issues.
-    //   3. Claude API proxy — sends a tiny Haiku call, expects a 200.
+    //   2. Claude API proxy — sends a tiny Haiku call, expects a 200.
     //      Catches proxy outages and credit exhaustion.
+    // The Gmail invoice Apps Script check was retired on 9 Oct 2026 with the
+    // script itself (task recJpS8LUkvdRThaw; see GMAIL_INVOICE_SCRIPT_URL).
     async function runHealthCheck() {
         const btn = document.getElementById('healthCheckBtn');
         const resultsEl = document.getElementById('healthCheckResults');
@@ -4357,11 +4342,7 @@ Body: ${bodyText}`;
         const tenancyResult = await healthCheckTenancies();
         checks.push({ name: 'Tenancy docs link (label 11)', ...tenancyResult });
 
-        // Check 4: Gmail Invoice Apps Script
-        const scriptResult = await healthCheckInvoiceScript();
-        checks.push({ name: 'Invoices (Gmail sync)', ...scriptResult });
-
-        // Check 5: Claude API proxy
+        // Check 4: Claude API proxy
         const aiResult = await healthCheckClaudeProxy();
         checks.push({ name: 'AI (Claude)', ...aiResult });
 
@@ -4574,20 +4555,6 @@ Body: ${bodyText}`;
             return { ok: true, detail: `${tenancies.length} active tenancies; write OK but revert failed — please clear "${testMarker}" from ${target.surname} manually` };
         }
         return { ok: true, detail: `${tenancies.length} active tenancies; Document Links write+revert OK` };
-    }
-
-    async function healthCheckInvoiceScript() {
-        try {
-            const resp = await fetch(GMAIL_INVOICE_SCRIPT_URL + '?action=count');
-            if (!resp.ok) return { ok: false, detail: `Apps Script HTTP ${resp.status}` };
-            const data = await resp.json();
-            if (typeof data.gmailCount !== 'number') {
-                return { ok: false, detail: 'Apps Script did not return a count — label may be missing' };
-            }
-            return { ok: true, detail: `${data.gmailCount} invoices in Gmail "to pay" label` };
-        } catch (err) {
-            return { ok: false, detail: 'Could not reach Apps Script: ' + err.message };
-        }
     }
 
     async function healthCheckClaudeProxy() {
@@ -5335,11 +5302,6 @@ Respond with ONLY valid JSON, no markdown.`;
             handleLabelTransitionSync(email, currentLabel, newLabelName)
                 .catch(err => console.error('[sync] label transition failed:', err));
 
-            // Trigger immediate Gmail → Airtable invoice sync if moved to label 3 (To Pay)
-            if (/^3[.:]\s/.test(newLabelName)) {
-                triggerInvoiceSync();
-            }
-
             // Auto-process compliance cert if moved to Property Compliance
             if (newLabelName.startsWith('10')) {
                 processComplianceEmail(email).catch(err => console.error('Compliance processing failed:', err));
@@ -5418,11 +5380,6 @@ Respond with ONLY valid JSON, no markdown.`;
             // so this will create tasks for 8/12/13 and complete for 4/5/6/7/9/14.
             handleLabelTransitionSync(email, 'INBOX', labelName)
                 .catch(err => console.error('[sync] inbox label transition failed:', err));
-
-            // Trigger immediate Gmail → Airtable invoice sync if applied to label 3 (To Pay)
-            if (/^3[.:]\s/.test(labelName)) {
-                triggerInvoiceSync();
-            }
 
             // Auto-process compliance cert if applied to Property Compliance
             if (labelName.startsWith('10')) {
@@ -5520,13 +5477,6 @@ Respond with ONLY valid JSON, no markdown.`;
                 // Unified task sync for bulk apply
                 handleLabelTransitionSync(email, 'INBOX', labelName)
                     .catch(err => console.error('[sync] bulk label transition failed:', err));
-
-                // Trigger immediate Gmail → Airtable invoice sync if applied to label 3 (To Pay).
-                // The trigger is debounced so a bulk apply with multiple label-3 emails
-                // collapses into a single Apps Script invocation.
-                if (/^3[.:]\s/.test(labelName)) {
-                    triggerInvoiceSync();
-                }
 
                 // Auto-process compliance cert if applied to Property Compliance
                 if (labelName.startsWith('10')) {
