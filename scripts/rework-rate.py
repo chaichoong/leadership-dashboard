@@ -338,6 +338,8 @@ def main(argv=None):
     ap.add_argument('--days', type=int, default=30)
     ap.add_argument('--until', help='end the window on this day (YYYY-MM-DD), 23:59:59 local')
     ap.add_argument('--json', action='store_true', help='print JSON with every fix and its evidence')
+    ap.add_argument('--no-fetch', action='store_true',
+                    help='read origin/main as it stands (a caller that must not touch the repo)')
     ap.add_argument('--repo', default=os.path.dirname(os.path.dirname(os.path.realpath(__file__))),
                     help='repository to read (default: this repo)')
     args = ap.parse_args(argv)
@@ -349,7 +351,8 @@ def main(argv=None):
         except ValueError:
             ap.error('--until must be YYYY-MM-DD')
 
-    fetch(args.repo)
+    if not args.no_fetch:
+        fetch(args.repo)
     try:
         m = measure(args.repo, args.days, args.until)
     except GitError as e:

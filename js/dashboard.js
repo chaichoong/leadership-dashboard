@@ -1429,7 +1429,10 @@
                 // A robot form card is nobody's draft (AgentAccuracy.isFormCard): left out here, by name below.
                 // TRUE() if an older cached accuracy module lacks the clause: a broken formula would empty the card.
                 fetch(url(`${flds}&filterByFormula=${encodeURIComponent(`AND(LEN({Approval Outcome}&'')>0, ${AgentAccuracy.FORM_CARD_CLAUSE || 'TRUE()'})`)}`), { headers: { Authorization: `Bearer ${PAT}` } }),
-                fetch(`https://api.airtable.com/v0/${BASE_ID}/${TABLES.teamMembers}?returnFieldsByFieldId=true&pageSize=100&fields%5B%5D=${TEAM_MEMBER_FIELDS.name}&filterByFormula=${encodeURIComponent(`{Active}=TRUE()`)}`, { headers: { Authorization: `Bearer ${PAT}` } }),
+                // Every member, switched off or not: this map only NAMES the agent on a past
+                // verdict. Filtered to Active, the eight seats that left the board on 9 Oct 2026
+                // showed as raw record ids on their 33 earlier decisions. 56 rows, one page.
+                fetch(`https://api.airtable.com/v0/${BASE_ID}/${TABLES.teamMembers}?returnFieldsByFieldId=true&pageSize=100&fields%5B%5D=${TEAM_MEMBER_FIELDS.name}`, { headers: { Authorization: `Bearer ${PAT}` } }),
             ]);
             if (!waitRes.ok || !histRes.ok) return;
             const waiting = (await waitRes.json()).records || [];
@@ -1521,6 +1524,177 @@
         if (!card) return;
         card.id = 'aiSavedCard';
         host.replaceWith(card);
+    }
+
+    // ── AI Team health cards (Kevin, 9 Oct 2026; brain Decisions/2026-10-09) ──
+    // Four numbers that say whether the AI team is keeping up: agent work in versus out,
+    // the defect queue in versus out, the biggest blocker, and the fix-of-a-fix rate (the
+    // one number Kevin judges the estate by). The Mac writes them to Estate Status
+    // (scripts/estate-status.py rows ai-team-health and agent-blockers). A row older than
+    // two hours says so on its card: a number that stopped updating looks like a calm week.
+    const AI_TEAM_STALE_MIN = 120;
+    const AI_TEAM_WALLS = {
+        TOOL: 'waiting on a code fix', KEVIN: 'waiting on a step only you can do',
+        'SIGN-IN': 'waiting on your sign-in', SITE: 'waiting on a site to be added',
+    };
+    let _aiTeamState = null;
+
+    function renderAiTeamCard(id, card) {
+        const host = document.getElementById(id);
+        if (!host) return;
+        const tmp = document.createElement('div');
+        tmp.innerHTML = expandableCard(card.label, card.value, card.sub, card.detail, card.cls);
+        const el = tmp.firstElementChild;
+        if (!el) return;
+        el.id = id;
+        host.replaceWith(el);
+    }
+
+    // `at` overrides the row's Last Run: the blocker row's Last Run moves even when the
+    // sweep behind it has stopped, so its age is the sweep's own sweptAt.
+    function aiTeamRowAge(row, at) {
+        const t = Date.parse(at || (row && row.fields[ESTATE_FIELDS.lastRun]) || '');
+        return Number.isFinite(t) ? (Date.now() - t) / 60000 : Infinity;
+    }
+
+    function aiTeamClock(row, at) {
+        const t = Date.parse(at || (row && row.fields[ESTATE_FIELDS.lastRun]) || '');
+        if (!Number.isFinite(t)) return 'never';
+        return new Date(t).toLocaleString('en-GB', { timeZone: 'Europe/London', weekday: 'short', hour: '2-digit', minute: '2-digit' });
+    }
+
+    // A missing, failed or stale row turns its card into a statement of that, never a zero.
+    // A failed write leaves the last payload in place, so for the health row Failed means
+    // failed whatever the payload says (review finding, 9 Oct 2026).
+    function aiTeamRowProblem(row, label, failedIsProblem) {
+        if (row === undefined) return { label, value: '—', sub: 'Could not read Airtable. Refresh to retry.', detail: '', cls: 'text-amber' };
+        if (!row) return { label, value: '—', sub: 'No data yet: the Mac has not written this row.', detail: '', cls: 'text-amber' };
+        const f = row.fields;
+        if (f[ESTATE_FIELDS.status] === 'Failed' && (failedIsProblem || !f[ESTATE_FIELDS.payload])) {
+            return { label, value: '—', sub: escHtml(f[ESTATE_FIELDS.detail] || 'The Mac reported a failure.'), detail: '', cls: 'text-red' };
+        }
+        return null;
+    }
+
+    // null when the payload cannot be read: the caller shows that, never an empty "all clear".
+    function aiTeamPayload(row) {
+        try { return JSON.parse(row.fields[ESTATE_FIELDS.payload] || 'null'); } catch (e) { console.warn('AI Team payload unreadable:', e); return null; }
+    }
+
+    // Every payload number goes through here before it reaches the page: a payload is
+    // data from Airtable, and expandableCard does not escape what it is given.
+    function aiNum(v) { const n = Number(v); return Number.isFinite(n) ? n : '—'; }
+
+    function aiTeamStale(card, row, at) {
+        if (aiTeamRowAge(row, at) <= AI_TEAM_STALE_MIN) return card;
+        return Object.assign({}, card, { cls: 'text-amber', sub: `Not updated since ${escHtml(aiTeamClock(row, at))}. ${card.sub}` });
+    }
+
+    function aiTeamCards(health, blockers) {
+        const updated = (row) => `<div class="od-breakdown-row"><span>Updated</span><span>${escHtml(aiTeamClock(row))}</span></div>`;
+        const cards = {};
+
+        const hp = aiTeamRowProblem(health, '', true);
+        if (hp) {
+            cards.aiWorkCard = Object.assign({}, hp, { label: 'Agent Work' });
+            cards.aiDefectsCard = Object.assign({}, hp, { label: 'Defects' });
+            cards.aiReworkCard = Object.assign({}, hp, { label: 'Fix of a Fix' });
+        } else {
+            const p = aiTeamPayload(health) || {};
+            if (!p.work || !p.defects || !p.rework) {
+                const none = { value: '—', sub: 'The row holds no numbers. The Mac writer may be an older version.', detail: '', cls: 'text-amber' };
+                return Object.assign(cards, {
+                    aiWorkCard: Object.assign({ label: 'Agent Work' }, none),
+                    aiDefectsCard: Object.assign({ label: 'Defects' }, none),
+                    aiReworkCard: Object.assign({ label: 'Fix of a Fix' }, none),
+                }, { aiBlockedCard: aiTeamCards(null, blockers).aiBlockedCard });
+            }
+            const w = {}, d = {}, r = {};
+            ['open', 'notMoving', 'created7d', 'done7d'].forEach(k => { w[k] = aiNum(p.work[k]); });
+            ['open', 'filed7d', 'fixed7d'].forEach(k => { d[k] = aiNum(p.defects[k]); });
+            ['days', 'fixes', 'fixOfFix', 'baselinePct'].forEach(k => { r[k] = aiNum(p.rework[k]); });
+            r.pct = p.rework.pct == null ? null : aiNum(p.rework.pct);
+            const net = (Number(w.created7d) || 0) - (Number(w.done7d) || 0);
+            cards.aiWorkCard = aiTeamStale({
+                label: 'Agent Work', value: `${w.open} open`,
+                sub: `${w.notMoving} not moving · 7 days: ${w.created7d} in, ${w.done7d} done`,
+                cls: net > 0 ? 'text-amber' : 'text-green',
+                detail: `<div class="od-breakdown-row"><span>${net > 0 ? 'Piling up this week' : 'Cleared beyond new work'}</span><span>${Math.abs(net)}</span></div>
+                         <div style="color:var(--text-muted);font-size:var(--fs-xs);margin-top:6px">Tasks owned by an AI agent. Not moving is the same list as the Estate tab on the AI Agents page.</div>${updated(health)}`,
+            }, health);
+            cards.aiDefectsCard = aiTeamStale({
+                label: 'Defects', value: `${d.open} open`,
+                sub: `7 days: ${d.filed7d} filed, ${d.fixed7d} fixed`,
+                cls: (Number(d.filed7d) || 0) > (Number(d.fixed7d) || 0) ? 'text-red' : 'text-green',
+                detail: `<div style="color:var(--text-muted);font-size:var(--fs-xs)">Problems the robots and daily checks logged for fixing. Fixed means merged. A rejected one carries no date, so it is not counted as cleared.</div>${updated(health)}`,
+            }, health);
+            const pct = r.pct;
+            cards.aiReworkCard = aiTeamStale({
+                label: 'Fix of a Fix', value: pct == null ? '—' : `${pct}%`,
+                sub: pct == null ? `No fixes in ${r.days} days` : `${r.fixOfFix} of ${r.fixes} fixes in ${r.days} days · baseline ${r.baselinePct}%`,
+                cls: typeof pct !== 'number' ? '' : pct <= r.baselinePct ? 'text-green' : pct <= 40 ? 'text-amber' : 'text-red',
+                detail: `<div style="color:var(--text-muted);font-size:var(--fs-xs)">The one number. A fix of a fix changed lines another fix wrote in the 7 days before. Lower is better.</div>${updated(health)}`,
+            }, health);
+        }
+
+        const bp = aiTeamRowProblem(blockers, 'Bottleneck');
+        const bpay = bp ? null : aiTeamPayload(blockers);
+        if (bp) {
+            cards.aiBlockedCard = bp;
+        } else if (!bpay || !Array.isArray(bpay.open) || bpay.controlFailed) {
+            // The sweep could not read the board, or its report is unreadable: never "Nothing is blocked".
+            cards.aiBlockedCard = { label: 'Bottleneck', value: '—', cls: 'text-red', detail: '',
+                sub: escHtml(blockers.fields[ESTATE_FIELDS.detail] || 'The blocker report could not be read.') };
+        } else {
+            // byKind and openCount cover every wall; "open" is capped at 80 for the page.
+            let byKind = bpay.byKind;
+            if (!byKind || typeof byKind !== 'object') {
+                byKind = {};
+                bpay.open.forEach(x => { byKind[x.kind] = (byKind[x.kind] || 0) + 1; });
+            }
+            const total = aiNum(bpay.openCount != null ? bpay.openCount : bpay.open.length);
+            const ranked = Object.entries(byKind).map(([k, n]) => [k, aiNum(n)]).sort((a, b) => b[1] - a[1]);
+            const needYou = ['KEVIN', 'SIGN-IN', 'SITE'].reduce((t, k) => t + (Number(byKind[k]) || 0), 0);
+            const red = blockers.fields[ESTATE_FIELDS.status] === 'Failed';
+            // Red names its own cause: the sweep also goes red on a read error (review, 9 Oct 2026).
+            const staleN = Number(bpay.stale) || 0;
+            const closedN = Array.isArray(bpay.closedWhileBlocked) ? bpay.closedWhileBlocked.length : 0;
+            const why = [];
+            if (staleN) why.push(`${staleN} block${staleN === 1 ? ' is' : 's are'} 3 or more days old`);
+            if (closedN) why.push(`${closedN} task${closedN === 1 ? '' : 's'} closed while blocked`);
+            const redWhy = !red ? '' : why.length ? `Red: ${why.join(', ')}. `
+                : `Red: ${escHtml(blockers.fields[ESTATE_FIELDS.detail] || 'the sweep reported a problem')} `;
+            cards.aiBlockedCard = aiTeamStale({
+                label: 'Bottleneck', value: `${total} blocked`,
+                sub: total === 0 || !ranked.length ? 'Nothing is blocked'
+                    : `Biggest: ${ranked[0][1]} ${escHtml(AI_TEAM_WALLS[ranked[0][0]] || ranked[0][0])}${needYou ? ` · ${needYou} need you` : ''}`,
+                cls: total === 0 ? 'text-green' : red ? 'text-red' : 'text-amber',
+                detail: ranked.map(([k, n]) => `<div class="od-breakdown-row"><span>${escHtml(AI_TEAM_WALLS[k] || k)}</span><span>${n}</span></div>`).join('')
+                    + `<div style="color:var(--text-muted);font-size:var(--fs-xs);margin-top:6px">${redWhy}Each one is listed on the Estate tab of the AI Agents page.</div>${updated(blockers)}`,
+            }, blockers, bpay.sweptAt);
+        }
+        return cards;
+    }
+
+    async function loadAiTeamHealth() {
+        if (!document.getElementById('aiWorkCard') || !PAT) return;
+        let health, blockers;
+        try {
+            const rows = await airtableFetch(TABLES.estateStatus, {
+                'fields[]': Object.values(ESTATE_FIELDS),
+                filterByFormula: "OR({Key}='ai-team-health',{Key}='agent-blockers')",
+            });
+            const byKey = (k) => rows.find(r => r.fields[ESTATE_FIELDS.key] === k) || null;
+            health = byKey('ai-team-health');
+            blockers = byKey('agent-blockers');
+            _aiTeamState = { health, blockers, error: null };
+        } catch (e) {
+            console.warn('AI Team rows unreadable:', e);
+            health = undefined; blockers = undefined;
+            _aiTeamState = { error: String(e && e.message || e) };
+        }
+        const cards = aiTeamCards(health, blockers);
+        Object.entries(cards).forEach(([id, card]) => renderAiTeamCard(id, card));
     }
 
     async function loadAiShareKpi() {
@@ -2439,14 +2613,30 @@
                     </div>
                 </div>
             </div>
+        `;
+
+        // ── SECTION 4b: AI Team (Kevin, 9 Oct 2026; brain Decisions/2026-10-09) ──
+        // The four health cards lead, then the four AI cards that used to sit in the
+        // operational section above. An older cached shell without the section keeps
+        // all eight in the operational grid rather than losing them.
+        // innerHTML, never append, on the section itself: the dashboard re-renders every 15 minutes.
+        const aiTeamSlots = `
+            <div id="aiWorkCard"></div>
+            <div id="aiDefectsCard"></div>
+            <div id="aiBlockedCard"></div>
+            <div id="aiReworkCard"></div>
             <div id="agentKpiCard"></div>
             <div id="agentApprovalCard"></div>
             <div id="aiShareCard"></div>
             <div id="aiSavedCard"></div>
         `;
+        const aiTeamGrid = document.getElementById('aiTeamCards');
+        if (aiTeamGrid) aiTeamGrid.innerHTML = aiTeamSlots;
+        else document.getElementById('operationalCards').insertAdjacentHTML('beforeend', aiTeamSlots);
         loadAgentKpi();
         loadAgentApprovalKpi();
         loadAiShareKpi();
+        loadAiTeamHealth();
 
         // ── SECTION 5: 31-Day Cash Flow Forecast ──
         // Build UC tenant map: tenant record ID → true if Universal Credit
@@ -2762,6 +2952,17 @@
                             if (_aiSavedState.error) return { status: 'warn', detail: 'Last load failed — the card may be stale. Refresh to retry.' };
                             if (_aiSavedState.noData) return { status: 'warn', detail: 'No completed tasks came back — the card shows "no data" rather than a fake £0' };
                             return { status: 'pass', detail: `${_aiSavedState.hours30.toFixed(1)} hrs / £${Math.round(_aiSavedState.saved30).toLocaleString('en-GB')} saved in 30 days · £${Math.round(_aiSavedState.savedAll).toLocaleString('en-GB')} since AI go-live` };
+                        }
+                    },
+                    {
+                        name: 'AI Team cards read from the Mac', kind: 'sync', run: () => {
+                            if (!_aiTeamState) return { status: 'warn', detail: 'Cards not yet loaded (loads in background)' };
+                            if (_aiTeamState.error) return { status: 'warn', detail: 'Estate Status could not be read. Refresh to retry.' };
+                            const missing = ['health', 'blockers'].filter(k => !_aiTeamState[k]);
+                            if (missing.length) return { status: 'fail', detail: `No ${missing.join(' or ')} row in Estate Status: the Mac writer has not run.` };
+                            const old = ['health', 'blockers'].filter(k => aiTeamRowAge(_aiTeamState[k]) > AI_TEAM_STALE_MIN);
+                            if (old.length) return { status: 'warn', detail: `Not updated since ${aiTeamClock(_aiTeamState[old[0]])}. The Mac writer (estate-status, every 10 minutes) has stopped.` };
+                            return { status: 'pass', detail: `Updated ${aiTeamClock(_aiTeamState.health)}` };
                         }
                     },
                     {

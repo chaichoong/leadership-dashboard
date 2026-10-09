@@ -21,7 +21,7 @@
     const PAGE_REGISTRY = [
         // Home tab (Kevin, 29 Sep 2026): one list of what needs Kevin today, the real Leadership Dashboard underneath. On trial beside the old screens.
         { id: 'home',        name: 'Home',                           icon: '📌', pageVer: '1.9', sopFile: '',                           sopVer: '1.0', standalone: 'index.html#home' },
-        { id: 'overview',    name: 'Leadership Dashboard',           icon: '📊', pageVer: '2.139', sopFile: 'sop.html',                   sopVer: '2.118', standalone: 'index.html#overview' },
+        { id: 'overview',    name: 'Leadership Dashboard',           icon: '📊', pageVer: '2.139', sopFile: 'sop.html',                   sopVer: '2.140', standalone: 'index.html#overview' },
         { id: 'os-strategy', name: 'Objective & Strategy',           icon: '🎯', pageVer: '1.77', sopFile: 'os/strategy/sop.html',       sopVer: '1.1', standalone: 'os/strategy/index.html' },
         { id: 'tasks',       name: 'Tasks & Projects',   icon: '✅', pageVer: '1.194', sopFile: 'os/tasks/sop.html',             sopVer: '1.4', standalone: 'os/tasks/index.html' },
         { id: 'cfv',        name: 'CFVs',                          icon: '🚨', pageVer: '1.43', sopFile: 'sop-cfvs.html',               sopVer: '1.34', standalone: 'index.html#cfv' },
@@ -187,6 +187,13 @@
             formUrl: 'https://airtable.com/appnqjDpqDniH3IRl/shrTuDF8s04Kp5XGT',    // the public sign-up form
             leadsUrl: 'https://airtable.com/appnqjDpqDniH3IRl/tbliYKA44VBFeLduP',   // the Tenant Leads table
         },
+    };
+
+    // ── Estate Status field IDs (TABLES.estateStatus). Mirrors ES in scripts/estate-status.py.
+    // The Leadership Dashboard's AI Team section reads the ai-team-health and agent-blockers rows. ──
+    const ESTATE_FIELDS = {
+        key: 'fldLO6xJqkokvVR4g', status: 'fldhOUiva3bqPNk1c', lastRun: 'flduxV3TYwp9wQX9O',
+        detail: 'fldLRFP2nJttDVQOa', payload: 'fldiqs9lvyLimoR7i',
     };
 
     // ── Prospects field IDs (Airtable table: Prospects / tbljHVGJoKJf8acy3) ──

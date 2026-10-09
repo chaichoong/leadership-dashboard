@@ -39,6 +39,7 @@ import importlib.util
 import json
 import os
 import re
+import subprocess
 import sys
 import urllib.error
 import urllib.parse
@@ -86,7 +87,10 @@ REPORT_ROWS_OWNED_ELSEWHERE = ("loop-health", "allowance", "content-publishing",
                                "tenant-chain",
                                # scripts/rent-check.py, the daily rent check's report (2 Oct 2026). Its
                                # key differs from the job's (rent-check), whose own row this writer keeps.
-                               "rent-position")
+                               "rent-position",
+                               # Written with loop-health in the same pass, so a --no-loop-health run
+                               # must not mark it "No longer scheduled" either (9 Oct 2026).
+                               "ai-team-health")
 
 # Why a run did not work, in Kevin's words. Matched against the wrapper's
 # reason and the last 600 characters the job printed. Order matters: the first
@@ -806,7 +810,12 @@ def blockers_summary(r):
             if w.get("tool"):
                 s["fix"] = w["tool"]
         slim.append(s)
-    return status, detail, {"open": slim, "stale": len(stale), "closedWhileBlocked": closed[:10],
+    kinds = {}
+    for w in walls:
+        kinds[w.get("kind")] = kinds.get(w.get("kind"), 0) + 1
+    # openCount and byKind cover every wall: "open" is capped at WALLS_CAP for the page.
+    return status, detail, {"open": slim, "openCount": len(walls), "byKind": kinds,
+                            "stale": len(stale), "closedWhileBlocked": closed[:10],
                             "woken": len(r.get("woken") or []),
                             "noFixer": len(build), "unclaimed": len(unclaimed), "openPr": len(open_pr),
                             "mergeCard": len(merge_wait), "merging": len(merging), "dailyFix": len(fixing)}
@@ -840,16 +849,25 @@ def blockers_row(now, path=BLOCKERS_FILE):
     return out
 
 
-def loop_health_row(now):
-    """The loop-health report as one row; a failed control is a Failed row, never a blank."""
+def loop_health_report():
+    """(report, None) from scripts/loop-health.py, or (None, error text). Run once per refresh
+    and shared by the loop-health and ai-team-health rows."""
     try:
         spec = importlib.util.spec_from_file_location("loop_health", os.path.join(HERE, "loop-health.py"))
         lh = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(lh)
-        res = lh.report()
+        return lh.report(), None
     except Exception as exc:  # noqa: BLE001 — the row must say WHY, whatever went wrong
+        return None, str(exc)[:300]
+
+
+def loop_health_row(now, res=None, err=None):
+    """The loop-health report as one row; a failed control is a Failed row, never a blank."""
+    if res is None and err is None:
+        res, err = loop_health_report()
+    if err is not None:
         return {"key": "loop-health", "kind": "report", "label": "Tasks not moving", "status": "Failed",
-                "detail": "The not-moving check could not run: %s" % str(exc)[:300],
+                "detail": "The not-moving check could not run: %s" % err,
                 "lastRun": now.strftime("%Y-%m-%dT%H:%M:%S.000Z")}   # payload and lastWorked left as they were
     stalled = res.get("stalled") or []
     slim = [{"name": s.get("name", "")[:90], "why": s.get("why", "")[:160], "days": s.get("days"),
@@ -863,6 +881,118 @@ def loop_health_row(now):
             "payload": json.dumps({"stalled": slim, "needsYou": len(res.get("needsYou") or []),
                                    "done7d": len(res.get("done") or []), "lanes": lanes}),
             "lastRun": now.strftime("%Y-%m-%dT%H:%M:%S.000Z"), "lastWorked": now.strftime("%Y-%m-%dT%H:%M:%S.000Z")}
+
+
+# ─── AI team health (Kevin, 9 Oct 2026) ───────────────────────────────
+# The Leadership Dashboard's AI Team section reads this row: agent work in versus out,
+# the defect queue in versus out, and the fix-of-a-fix rate (brain Decisions/2026-10-09:
+# "Judge by one number"). The bottleneck card reads the agent-blockers row above.
+# Defects and rework read local files and git, so they are recomputed at most once an
+# hour (this writer runs every 10 minutes) and carried in a cache between runs.
+AI_TEAM_KEY = "ai-team-health"
+AI_TEAM_CACHE = os.path.join(LOGS, "ai-team-health-cache.json")
+AI_TEAM_CACHE_MIN = 60
+REWORK_DAYS = 14
+REWORK_BASELINE_PCT = 32   # 36 of 111 fixes, 30 days to 28 Sep 2026 (rework-rate.py)
+
+
+def _within(ts, now, days):
+    t = parse_ts(ts)
+    if t and t.tzinfo is None:
+        t = t.replace(tzinfo=timezone.utc)
+    return bool(t) and (now - t) <= timedelta(days=days)
+
+
+def fixed_times(ops):
+    """When each finding last became fixed: a `land` op (its PR merged) or a `close` op with
+    outcome fixed (closed against a commit). The folded state keeps no time for the second,
+    so the raw log is read; counting `landed_at` alone missed 9 of 23 fixes in the week to
+    9 Oct 2026 (review finding)."""
+    out = {}
+    for rec in ops:
+        if rec.get("op") == "land" or (rec.get("op") == "close" and rec.get("outcome") == "fixed"):
+            out[rec.get("id")] = rec.get("ts")
+    return out
+
+
+def defect_counts(state, now, ops=()):
+    """The defect queue from findings.py's folded state: open now (its BACKLOG), filed and
+    fixed in the last 7 days. A rejected finding carries no close time, so it is not
+    counted as out; fixed means landed in a merged PR or closed against a commit."""
+    items = list(state.items())
+    when_fixed = fixed_times(ops)
+    return {"open": sum(1 for _, f in items if f.get("status") in ("open", "claimed", "pending")),
+            "filed7d": sum(1 for _, f in items if _within(f.get("ts"), now, 7)),
+            "fixed7d": sum(1 for fid, f in items if f.get("status") == "fixed"
+                           and _within(when_fixed.get(fid) or f.get("landed_at"), now, 7))}
+
+
+def rework_counts(r):
+    """The fix-of-a-fix share from rework-rate.py --json. Zero fixes is not 0%: it is None."""
+    fixes = int(r.get("fixes") or 0)
+    fof = int(r.get("fix_of_fix") or 0)
+    return {"days": r.get("days", REWORK_DAYS), "fixes": fixes, "fixOfFix": fof,
+            "pct": round(100.0 * fof / fixes) if fixes else None, "baselinePct": REWORK_BASELINE_PCT}
+
+
+def _measure_defects_and_rework(now):
+    spec = importlib.util.spec_from_file_location("findings", os.path.join(HERE, "findings.py"))
+    fm = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(fm)
+    defects = defect_counts(fm.current_state(), now, fm.read_all())
+    # --no-fetch: this job is lock-exempt because it never touches the repo, so it reads
+    # origin/main as the other jobs last fetched it (review finding, 9 Oct 2026).
+    out = subprocess.run([sys.executable, os.path.join(HERE, "rework-rate.py"), "--days", str(REWORK_DAYS),
+                          "--json", "--no-fetch"],
+                         capture_output=True, text=True, timeout=300)
+    if out.returncode != 0:
+        raise RuntimeError("rework-rate.py exited %d: %s" % (out.returncode, (out.stderr or "")[-200:]))
+    return defects, rework_counts(json.loads(out.stdout))
+
+
+def _cached_measures(now, cache=AI_TEAM_CACHE, measure=_measure_defects_and_rework):
+    try:
+        with open(cache, encoding="utf-8") as fh:
+            c = json.load(fh)
+        t = parse_ts(c.get("computedAt"))
+        if t and (now - t) < timedelta(minutes=AI_TEAM_CACHE_MIN):
+            return c["defects"], c["rework"], c["computedAt"]
+    except (OSError, ValueError, KeyError):
+        pass
+    defects, rework = measure(now)
+    stamp = now.strftime("%Y-%m-%dT%H:%M:%S.000Z")
+    tmp = cache + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as fh:
+        json.dump({"computedAt": stamp, "defects": defects, "rework": rework}, fh)
+    os.replace(tmp, cache)   # atomic: a reader never sees a half-written cache
+    return defects, rework, stamp
+
+
+def ai_team_row(now, lh_res, lh_err, measures=None):
+    """One row for the dashboard's AI Team section. Any part that cannot be read makes the
+    row Failed with the reason; the page then shows the reason, never a zero."""
+    stamp = now.strftime("%Y-%m-%dT%H:%M:%S.000Z")
+    row = {"key": AI_TEAM_KEY, "kind": "report", "label": "AI team health", "lastRun": stamp}
+    if lh_err is not None or not lh_res:
+        return dict(row, status="Failed", detail="Agent work could not be read: %s" % (lh_err or "no report"))
+    flow = lh_res.get("flow") or {}
+    work = {"open": flow.get("agentOpen"), "notMoving": len(lh_res.get("stalled") or []),
+            "created7d": flow.get("agentCreated7d"), "done7d": flow.get("agentDone7d")}
+    if work["open"] is None or work["created7d"] is None:
+        return dict(row, status="Failed", detail="loop-health.py returned no agent flow counts.")
+    try:
+        defects, rework, measured = (measures or _cached_measures)(now)
+    except Exception as exc:  # noqa: BLE001 — the row must say WHY, whatever went wrong
+        return dict(row, status="Failed", detail="The defect queue or the rework rate could not be read: %s" % str(exc)[:300])
+    pct = rework.get("pct")
+    detail = ("Agent work: %d open, %d not moving, %d in and %d done in 7 days. Defects: %d open, %d filed and "
+              "%d fixed in 7 days. Fix of a fix: %s over %d days (baseline %d%%)." % (
+                  work["open"], work["notMoving"], work["created7d"], work["done7d"],
+                  defects["open"], defects["filed7d"], defects["fixed7d"],
+                  ("%d%% (%d of %d fixes)" % (pct, rework["fixOfFix"], rework["fixes"])) if pct is not None else "no fixes",
+                  rework["days"], rework["baselinePct"]))
+    payload = {"work": work, "defects": defects, "rework": rework, "measuredAt": measured}
+    return dict(row, status="Worked", detail=detail, payload=json.dumps(payload), lastWorked=stamp)
 
 
 # ─── robot sign-ins (25 Sep 2026) ─────────────────────────────────────
@@ -1457,7 +1587,9 @@ def build_rows(now, with_loop_health=True):
     rows.append(blockers_row(now))
     rows.append(built_row(now))
     if with_loop_health:
-        rows.append(loop_health_row(now))
+        lh_res, lh_err = loop_health_report()
+        rows.append(loop_health_row(now, lh_res, lh_err))
+        rows.append(ai_team_row(now, lh_res, lh_err))
     return rows
 
 

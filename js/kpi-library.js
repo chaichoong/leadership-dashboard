@@ -87,6 +87,16 @@ const KPI_LIBRARY = [
       how: 'Tasks sitting at Status Approval — work an agent prepared that awaits a human yes.' },
     { tier: 1, group: 'AI workforce', name: 'AI agents live', shape: 'T3', status: 'ready',
       how: 'Register role agents at Status Live plus workflow agents in the live state, with register-linked workflows counted ONCE (AgentAccuracy.countAgents — the dashboard card and the Systemisation badge use the same subtraction). Live agents show their Metric Score against their Score Metric target.' },
+    // The AI Team section of the Leadership Dashboard (Kevin, 9 Oct 2026; brain Decisions/2026-10-09).
+    // Computed on the Mac by scripts/estate-status.py into the ai-team-health and agent-blockers rows.
+    { tier: 1, group: 'AI workforce', name: 'Agent work in vs out', shape: 'T3', status: 'live',
+      how: 'Open tasks owned by an AI agent, how many are not moving (scripts/loop-health.py, the same list as the Estate tab), and agent tasks created against agent tasks done in the last 7 days. More in than done means work is piling up.' },
+    { tier: 1, group: 'AI workforce', name: 'Defect queue in vs out', shape: 'T3', status: 'live',
+      how: 'Open findings (scripts/findings.py BACKLOG: open, claimed, pending) and, over the last 7 days, findings filed against findings fixed (landed in a merged PR). Rejected findings carry no close time, so they are not counted as cleared.' },
+    { tier: 1, group: 'AI workforce', name: 'Robots blocked (bottleneck)', shape: 'T3', status: 'live',
+      how: 'Open blocker walls from the half-hourly sweep (agent-dispatch.py blockers), grouped by kind: TOOL waits on a code fix, KEVIN on a step only he can do, SIGN-IN and SITE on him. The card names the biggest kind and how many need Kevin; red when a wall is 3 days old or a task closed while blocked.' },
+    { tier: 1, group: 'AI workforce', name: 'Fix-of-a-fix rate', shape: 'T4', status: 'live',
+      how: 'scripts/rework-rate.py over 14 days: fixes that changed lines another fix wrote in the 7 days before, over all fixes (a commit title starting "fix"). Baseline 32% (36 of 111, 30 days to 28 Sep 2026). The one number Kevin judges the estate by; lower is better.' },
     // Tier 2 — property pack (add-on only)
     { tier: 2, group: 'Property pack', name: 'Occupancy rate', shape: 'T4', status: 'ready', how: 'Occupied over total rental units.' },
     { tier: 2, group: 'Property pack', name: 'Rent roll (expected monthly income)', shape: 'T5', status: 'ready', how: 'Sum of rent by payment status over active tenancies.' },
