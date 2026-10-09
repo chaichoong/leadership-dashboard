@@ -123,13 +123,22 @@ describe('strategy-session skill', () => {
     expect(readFileSync(resolve(ROOT, 'scripts/agent-dispatch.py'), 'utf8')).toContain('handover');
   });
 
-  // The worked example from the build gate: a project one day into a 91-day quarter with a
-  // zero KPI is Not Started, not Off-Track. This is the rule the skill's status step applies.
-  it('a new project with a zero KPI on day 2 is Not Started', () => {
+  // The worked example, rewritten to Kevin's ruling of 2 Oct 2026: a project counts as
+  // started from its own start date. Pushed before the quarter opens it is Not Started; on
+  // day 2 with a zero KPI it is already Off-Track. This is the rule the skill's status step
+  // applies, and it is why the skill no longer says "Not Started in the first 5%".
+  it('a project pushed before its start date is Not Started', () => {
+    const { computeProjectHealth } = require('../js/project-health.js');
+    expect(computeProjectHealth(
+      { start: '2026-10-01', end: '2026-12-31', kpiTarget: 4, kpiCurrent: 0 }, '2026-09-28T12:00:00',
+    )).toBe('Not Started');
+  });
+
+  it('a new project with a zero KPI on day 2 is already Off-Track', () => {
     const { computeProjectHealth } = require('../js/project-health.js');
     expect(computeProjectHealth(
       { start: '2026-10-01', end: '2026-12-31', kpiTarget: 4, kpiCurrent: 0 }, '2026-10-02T12:00:00',
-    )).toBe('Not Started');
+    )).toBe('Off-Track');
   });
 
   // The skill's section meanings are taken from the page's wizard. If the wizard gains,
