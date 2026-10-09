@@ -39,6 +39,62 @@ describe('estate-status.py', () => {
   });
 });
 
+// Kevin approved 2 Oct 2026 (task recJfXJeMwZPENonk, finding 20261002-agent-dispatch-722): a job
+// that goes silent kept its last status and drifted to Idle after a week, which no attention list
+// reads. Drives the real refresh (dry run: no table, no task read) over a temp schedule and logs.
+describe('a slot that passes with no record reads Missed', () => {
+  function refresh(ownRecordAfterSlot) {
+    const out = execFileSync('python3', ['-c', `
+import importlib.util, json, os, sys, tempfile, types
+from datetime import datetime, timedelta, timezone
+spec = importlib.util.spec_from_file_location("es", ${JSON.stringify(WRITER)})
+m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m)
+own_after = sys.argv[1] == "1"
+now = datetime.now(timezone.utc)
+iso = lambda t: t.strftime("%Y-%m-%dT%H:%M:%SZ")
+daily = lambda t: "%d %d * * *" % (t.astimezone(m.LONDON).minute, t.astimezone(m.LONDON).hour)
+slot, other_slot = now - timedelta(hours=3), now - timedelta(hours=2)
+d = tempfile.mkdtemp()
+m.SCHEDULE = os.path.join(d, "s.json")
+json.dump({"night-publish": {"cron": daily(slot), "mode": "wrapped"},
+           "other-job": {"cron": daily(other_slot), "mode": "wrapped"},
+           "zz-new-job-never-run": {"cron": daily(slot), "mode": "wrapped"}}, open(m.SCHEDULE, "w"))
+fin = [{"ts": iso(now - timedelta(hours=27)), "job": "night-publish", "ok": True, "exit": 0},
+       {"ts": iso(now - timedelta(hours=1)), "job": "other-job", "ok": True, "exit": 0}]
+if own_after:
+    fin.append({"ts": iso(slot + timedelta(minutes=5)), "job": "night-publish", "ok": True, "exit": 0})
+m.STATUS_LOG = os.path.join(d, "job-status.jsonl")
+open(m.STATUS_LOG, "w").write("\\n".join(json.dumps(r) for r in fin) + "\\n")
+m.QUEUE_LOG = os.path.join(d, "queue-events.jsonl")
+rep = lambda key: (lambda now, **k: {"key": key, "kind": "report", "status": "Worked", "detail": "stub"})
+for name in ("allowance_row", "needs_you_row", "robot_signins_row", "blockers_row", "built_row"):
+    setattr(m, name, rep(name))
+m.cmd_refresh(types.SimpleNamespace(dry_run=True, no_loop_health=True))
+`, ownRecordAfterSlot ? '1' : '0'], { encoding: 'utf8' });
+    return JSON.parse(out.trim().split('\n').pop());
+  }
+
+  it('a job silent past its slot while another job ran is Missed and on the attention list', () => {
+    const r = refresh(false);
+    expect(r.byStatus.Missed).toBe(1);
+    expect(r.attention).toContain('night-publish: Missed');
+    expect(r.attention).not.toContain('other-job: Missed');   // control: a job that ran after its slot is not
+  });
+
+  it('a job just added to the schedule that has never left a record is new, not Missed (review of #749)', () => {
+    const r = refresh(false);
+    expect(r.attention).toContain('night-publish: Missed');   // control: the rule is firing on this board
+    expect(r.attention).not.toContain('zz-new-job-never-run: Missed');
+    expect(r.byStatus.Missed).toBe(1);
+  });
+
+  it('a job that left a record after its slot is not Missed', () => {
+    const r = refresh(true);
+    expect(r.byStatus.Missed).toBeUndefined();
+    expect(r.byStatus.Worked).toBeGreaterThanOrEqual(2);
+  });
+});
+
 describe('the Estate status tab', () => {
   const page = read('os/agents/index.html');
 

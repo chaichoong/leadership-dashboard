@@ -107,6 +107,26 @@ test.describe('KPI compute code actually runs', () => {
         expect(blocked.length, 'a built-identifier escape must be blocked AND reported').toBeGreaterThan(0);
     });
 
+    // Kevin approved removing the Prospects read from every load on 7 Oct 2026
+    // (task recUDc4h72X5vghXt): it paged all ~250 prospect rows on every visit
+    // and no open project's compute code used them. This keeps it gone.
+    test('running automated KPIs does not read the Prospects table', async ({ page }) => {
+        const gets = [];
+        page.on('request', (req) => {
+            if (req.method() === 'GET' && req.url().includes('/v0/')) gets.push(req.url());
+        });
+        await loadWithComputeCode(page, REAL_TEMPLATE_LITERAL_CODE);
+
+        // CONTROL: the automated-KPI path ran (it fetches the task list for
+        // computes). Without this, a load that never reached the KPI step would
+        // pass the assertion below for the wrong reason.
+        const kpiTaskFetch = gets.filter(u => u.includes('tblqB8b22hKBL4PF1') && u.includes('fldx4qCw17UfrKpaN'));
+        expect(kpiTaskFetch.length, 'control: the automated-KPI task fetch must have run').toBeGreaterThan(0);
+
+        const prospectGets = gets.filter(u => u.includes('tbljHVGJoKJf8acy3'));
+        expect(prospectGets, 'no Prospects read on a dashboard load').toEqual([]);
+    });
+
     test('a failing KPI is visibly marked, not silently blank', async ({ page }) => {
         await loadWithComputeCode(page, 'throw new Error("boom");');
         const body = await page.evaluate(() => document.body.innerText);
