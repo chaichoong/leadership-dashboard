@@ -53,6 +53,7 @@ function run(opts) {
     getTenantForTenancy: () => ({}),
     buildCFVEntry: () => ({}),
     CFV_TOLERANCE_DAYS: 2,
+    cfvSetOffCovers: () => false,   // no set-off here (9 Oct 2026); its own cases are in tests/rent-set-off.test.js
     cfvAutoReturnToPayment: (ids) => returned.push(...ids),
   };
   const names = Object.keys(scope);

@@ -19,7 +19,8 @@ WHAT EVERY WRITE NEEDS
     approval of something else, or an id the agent typed onto a task, must never be enough):
     the card he approved AS-IS (Approval Outcome exactly "Approved as-is", with the marks only a
     real approval leaves, scripts/approval_evidence.py) carries the exact line
-        RECORD CHANGE: <tenancy id> <Payment Status|Due Day> = <value>
+        RECORD CHANGE: <tenancy id> <Payment Status|Due Day|Set-off> = <value>
+    (a set-off's value is "YYYY-MM-DD to YYYY-MM-DD")
     The agent proposes the change on the card, in plain words too; his approval carries it out.
     Only "as-is": `agent-dispatch.py revise` rewrites the output after an "Approved with minor
     edits", so a line there may not be the line he read, and his edit may have changed it.
@@ -46,6 +47,10 @@ USAGE
   tenancy-record.py comment TENANCY --task T --text "..." a dated comment (no approval needed)
   tenancy-record.py status TENANCY "In Payment" --task T  Payment Status (Unified)
   tenancy-record.py due-day TENANCY 9 --task T            Due Day of Month
+  tenancy-record.py set-off TENANCY --from D --until D --task T
+                                                          rent a letting agent keeps against our bill
+                                                          counts as PAID for whole rent periods from D
+                                                          (a due date) to D (the day before one)
   add --dry-run to any write to see the gate's answer and change nothing.
 """
 import argparse
@@ -54,7 +59,7 @@ import json
 import os
 import re
 import sys
-from datetime import datetime
+from datetime import datetime, timedelta
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
@@ -69,13 +74,14 @@ LEDGER = os.environ.get("TENANCY_RECORD_LEDGER") or os.path.expanduser(
 
 # Tenancies fields this door may write, by field id (js/config.js F.tenPayStatus, F.tenDueDay).
 PAY_STATUS, DUE_DAY = rc.TY["payStatus"], rc.TY["dueDay"]
+SET_OFF_FROM, SET_OFF_UNTIL = rc.TY["setOffFrom"], rc.TY["setOffUntil"]   # js/config.js F.tenSetOffFrom / Until
 STATUSES = ("In Payment", "CFV", "CFV Actioned")
 REF = "fldyNVvFn4x8GY14q"            # Tenancy Reference (js/config.js F.tenRef), for the message only
 # Tasks fields (scripts/agent-dispatch.py AF; scripts/approval_evidence.py).
 TK = dict(rc.TK, agentOutput="fldzswp8fx6PqpLQ5", approvalOutcome="fldrHBSr6qoUfaKuZ",
           approvalFeedback="fldtI7SJI4gEohHD1", feedbackHistory="fldOzsq68lhfprKJu")
 REC_RE = re.compile(r"rec[A-Za-z0-9]{14}")
-CHANGE_RE = re.compile(r"^RECORD CHANGE:\s*(?P<tenancy>rec[A-Za-z0-9]{14})\s+(?P<label>Payment Status|Due Day)\s*=\s*"
+CHANGE_RE = re.compile(r"^RECORD CHANGE:\s*(?P<tenancy>rec[A-Za-z0-9]{14})\s+(?P<label>Payment Status|Due Day|Set-off)\s*=\s*"
                        r"(?P<value>[^\n]+?)\s*$", re.M)
 # Kept identical to scripts/agent-dispatch.py (tests/tenancy-record.test.js reads both). `block --kind KEVIN --steps`
 # puts agent-written steps ON TOP of an approved card's Agent Output and keeps the approval (review round 3,
@@ -268,6 +274,61 @@ def cmd_due_day(a):
     return write_field(a.tenancy, DUE_DAY, str(a.day), "Due Day of Month", task, a.why, a.dry_run)
 
 
+def cmd_set_off(a):
+    """Rent paid by set-off from one day to another, both inclusive. Kevin, 6 Oct 2026 (30 Burnbank Gardens): a
+    letting agent keeping the rent against a bill we owe them means the rent is paid, "so it's not a cash flow
+    void". The rent check, the Cash Flow Voids page and the rent statement count those days as paid."""
+    start, until = rc.parse_day(a.start), rc.parse_day(a.until)
+    if not start or not until:
+        raise Refused("--from and --until are dates, YYYY-MM-DD")
+    if until < start:
+        raise Refused(f"the set-off ends ({until}) before it starts ({start})")
+    if (until - start).days > 3 * 366:
+        raise Refused("a set-off longer than three years is not a set-off; ask Kevin")
+    tenancy = load_tenancy(a.tenancy)
+    if ended(tenancy):
+        raise Refused(f"tenancy {a.tenancy} has ended; no set-off is written")
+    # Whole rent periods only (independent review, 9 Oct 2026): a window ending mid-period would read a whole month as
+    # paid in the rent check and a few days in the rent statement. From is a due date; Until is the day before one.
+    try:
+        due_day = int(rc.sel((tenancy.get("fields") or {}).get(DUE_DAY)))
+    except ValueError:
+        raise Refused(f"tenancy {a.tenancy} has no due day, so a set-off cannot be lined up with its rent")
+    after = until + timedelta(days=1)
+    if rc.due_on(start.year, start.month, due_day) != start or rc.due_on(after.year, after.month, due_day) != after:
+        raise Refused(f"a set-off covers whole rent periods: --from must be a due date (the {due_day}th) and --until "
+                      "the day before one")
+    tenancy, task = gate(a.tenancy, a.task, ("Set-off", f"{start.isoformat()} to {until.isoformat()}"))
+    f = tenancy.get("fields") or {}
+    before = (f.get(SET_OFF_FROM) or "blank", f.get(SET_OFF_UNTIL) or "blank")
+    want = (start.isoformat(), until.isoformat())
+    if before == want:
+        return {"tenancy": a.tenancy, "unchanged": f"{want[0]} to {want[1]}"}
+    if a.dry_run:
+        return {"tenancy": a.tenancy, "field": "Rent Set-off", "from": f"{before[0]} to {before[1]}",
+                "to": f"{want[0]} to {want[1]}", "dryRun": True}
+    rc.api("PATCH", f"{rc.T_TENANCIES}/{a.tenancy}", {"fields": {SET_OFF_FROM: want[0], SET_OFF_UNTIL: want[1]}})
+    g = load_tenancy(a.tenancy).get("fields") or {}
+    if (g.get(SET_OFF_FROM), g.get(SET_OFF_UNTIL)) != want:
+        ledger({"kind": "unlanded", "tenancy": a.tenancy, "field": "Rent Set-off", "to": f"{want[0]} to {want[1]}",
+                "task": task["id"]})
+        raise RuntimeError(f"the set-off on {a.tenancy} reads {g.get(SET_OFF_FROM)!r} to {g.get(SET_OFF_UNTIL)!r} "
+                           f"after writing {want[0]} to {want[1]}: the write did not land")
+    out = {"tenancy": a.tenancy, "field": "Rent Set-off", "from": f"{before[0]} to {before[1]}",
+           "to": f"{want[0]} to {want[1]}", "task": task["id"]}
+    ledger(dict(out, kind="write", why=a.why))
+    authority = f"the RECORD CHANGE line of the card Kevin approved, task {task['id']}"
+    text = (f"{stamp()}: rent paid by set-off from {start.strftime('%-d %b %Y')} to {until.strftime('%-d %b %Y')} "
+            f"(was {before[0]} to {before[1]}), counted as paid, by the Cash Flow Voids agent on {authority} "
+            f"({task_label(task)}). Why: {a.why}")
+    try:
+        post_comment(a.tenancy, text)
+        out["commented"] = True
+    except Exception as e:                                   # noqa: BLE001 — the write stands; said loudly
+        out["commentProblem"] = f"the set-off was written but the tenancy comment failed: {str(e)[:200]}"
+    return out
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     sub = ap.add_subparsers(dest="cmd", required=True)
@@ -290,12 +351,20 @@ def main(argv=None):
     dd.add_argument("--task", required=True)
     dd.add_argument("--why", required=True)
     dd.add_argument("--dry-run", action="store_true")
+    so = sub.add_parser("set-off")
+    so.add_argument("tenancy")
+    so.add_argument("--from", dest="start", required=True)
+    so.add_argument("--until", required=True)
+    so.add_argument("--task", required=True)
+    so.add_argument("--why", required=True)
+    so.add_argument("--dry-run", action="store_true")
     a = ap.parse_args(argv)
     if getattr(a, "why", None) is not None and len(" ".join(a.why.split())) < 10:
         print(json.dumps({"refused": "--why needs the reason in a sentence"}))
         return 2
     try:
-        out = {"show": cmd_show, "comment": cmd_comment, "status": cmd_status, "due-day": cmd_due_day}[a.cmd](a)
+        out = {"show": cmd_show, "comment": cmd_comment, "status": cmd_status, "due-day": cmd_due_day,
+               "set-off": cmd_set_off}[a.cmd](a)
     except Refused as e:
         print(json.dumps({"refused": str(e)}))
         return 2

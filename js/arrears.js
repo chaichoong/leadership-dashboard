@@ -169,6 +169,23 @@
         }
         payments.sort((a, b) => (a.date || 0) - (b.date || 0));
 
+        // Rent paid by set-off (Kevin, 6 Oct 2026): the days a letting agent kept the rent against our bill
+        // count as paid, at the same daily rate the rent is charged. Not a payment row: no money moved.
+        // Counted in calendar days (summer time never loses one), over the days the rent above is charged for:
+        // from the effective start up to, not including, today.
+        let setOff = null;
+        const win = (typeof rentSetOffWindow === 'function') ? rentSetOffWindow(tenancy) : null;
+        if (win && win.from) {
+            const dayNo = (d) => Math.round(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()) / 86400000);
+            const first = Math.max(dayNo(win.from), dayNo(effectiveStart));
+            const last = Math.min(dayNo(win.until), dayNo(today) - 1);
+            const days = last - first + 1;
+            if (days > 0) {
+                setOff = { from: win.from > effectiveStart ? win.from : effectiveStart, until: win.until, days, amount: dailyRent * days };
+                totalRentPaid += setOff.amount;
+            }
+        }
+
         const balance = totalRentOwed - totalRentPaid;
         const daysInArrears = Math.round(balance / dailyRent);
         const s8Ready = daysInArrears >= S8_THRESHOLD_DAYS;
@@ -184,6 +201,7 @@
             totalRentOwed,
             totalRentPaid,
             payments,
+            setOff,
             balance,
             daysInArrears,
             s8Ready,
@@ -1097,6 +1115,7 @@
                     <div style="display:grid;grid-template-columns:auto 1fr;gap:4px 12px">
                         <div>Total rent owed:</div><div style="font-weight:600">${fmtMoney(s.totalRentOwed)}</div>
                         <div>Total rent paid:</div><div style="font-weight:600">${fmtMoney(s.totalRentPaid)}</div>
+                        ${s.setOff ? `<div>of which by set-off:</div><div>${fmtMoney(s.setOff.amount)} <span style="color:var(--text-muted);font-size:11px">(${fmtDate(s.setOff.from)} to ${fmtDate(s.setOff.until < new Date() ? s.setOff.until : new Date())}, kept by the letting agent against our bill)</span></div>` : ''}
                         <div>Balance:</div><div style="font-weight:700;color:${balanceColour}">${fmtMoney(s.balance)} <span style="font-weight:400;font-size:11px">(${balanceLabel})</span></div>
                         <div>Days in arrears:</div><div style="font-weight:700;color:${s.daysInArrears >= S8_THRESHOLD_DAYS ? 'var(--danger)' : s.daysInArrears > 0 ? 'var(--warning)' : 'var(--success)'}">${s.daysInArrears}</div>
                         <div>Section 8 ready:</div><div>${s.s8Ready ? '<strong style="color:var(--danger)">Yes</strong> (>= 62 days)' : 'No'}</div>
@@ -1386,9 +1405,18 @@
         }
         const totalOwed = rentDues.length * monthlyRent;
 
+        // Rent paid by set-off (Kevin, 6 Oct 2026): each rent due inside the window is shown paid, so the
+        // printed ledger agrees with the Cash Flow Voids page and the rent check.
+        const win = (typeof rentSetOffWindow === 'function') ? rentSetOffWindow(tenancy) : null;
+        const setOffEvents = win && win.from
+            ? rentDues.filter(r => r.date >= win.from && r.date <= win.until)
+                .map(r => ({ type: 'payment', date: new Date(r.date), amount: r.amount, desc: 'Paid by set-off: kept by the letting agent against our bill' }))
+            : [];
+        totalPaid += setOffEvents.reduce((t, e) => t + e.amount, 0);
         const allEvents = [
             ...rentDues.map(r => ({ ...r, desc: `Monthly rent due` })),
             ...payments.map(p => ({ type: 'payment', date: p.date, amount: p.amount, desc: p.description || 'Payment received' })),
+            ...setOffEvents,
         ];
         allEvents.sort((a, b) => a.date - b.date || (a.type === 'rent' ? -1 : 1));
 

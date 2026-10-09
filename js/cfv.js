@@ -60,6 +60,61 @@
             visible.filter(e => e.status === 'cfv actioned').length
         );
     }
+    // ── Rent paid by set-off (9 Oct 2026) ────────────────────────────────
+    // Kevin, 6 Oct 2026, on 30 Burnbank Gardens: a letting agent keeping the rent against a repair bill
+    // we owe them means the rent IS paid, "so it's not a cash flow void". The tenancy carries the window
+    // (Rent Set-off From / Until, written only by scripts/tenancy-record.py). Shared with js/arrears.js.
+    function rentSetOffWindow(tenancy) {
+        const read = (fid) => {
+            const v = getField(tenancy, fid);
+            if (!v) return null;
+            const d = new Date(String(v).slice(0, 10) + 'T00:00:00');
+            return isNaN(d.getTime()) ? null : d;
+        };
+        const until = read(F.tenSetOffUntil);
+        if (!until) return null;
+        const from = read(F.tenSetOffFrom);
+        return { from: from && from <= until ? from : null, until };
+    }
+    window.rentSetOffWindow = rentSetOffWindow;
+
+    // True while the rent is paid by set-off. Mirrors scripts/rent-check.py judge(): the oldest unpaid rent (a payment
+    // covers rent due up to 5 days after it; nothing before the tenancy began; nothing older than the 80-day bank look-
+    // back) must fall due INSIDE the window, and the first rent after the window must not be past the tolerance. Rent
+    // owed before the window began is still owed (independent review, 9 Oct 2026).
+    function cfvSetOffCovers(tenancy, today, txIndex) {
+        const win = rentSetOffWindow(tenancy);
+        if (!win || !win.from) return false;
+        const dueDay = getNumVal(tenancy, F.tenDueDay, 1) || 1;
+        const dueIn = (y, m) => new Date(y, m, Math.min(dueDay, new Date(y, m + 1, 0).getDate()));
+        const day = (v) => { const d = v ? new Date(String(v).slice(0, 10) + 'T00:00:00') : null; return d && !isNaN(d.getTime()) ? d : null; };
+        let newest = null;
+        const txs = txIndex ? (txIndex.get(tenancy.id) || [])
+            : (allTransactions || []).filter(tx => getField(tx, F.txReconciled) && txLinkedToTenancy(tx, tenancy.id));
+        for (const tx of txs) {
+            const d = day(getField(tx, F.txDate));
+            if (d && (!newest || d > newest)) newest = d;
+        }
+        let floor = day(getField(tenancy, F.tenStartDate));
+        const lookback = new Date(today);
+        lookback.setDate(lookback.getDate() - 80);
+        if (!floor || lookback > floor) floor = lookback;
+        if (newest) {
+            const paidTo = new Date(newest);
+            paidTo.setDate(paidTo.getDate() + 6);
+            if (paidTo > floor) floor = paidTo;
+        }
+        let owed = dueIn(floor.getFullYear(), floor.getMonth());
+        if (owed < floor) owed = dueIn(floor.getFullYear(), floor.getMonth() + 1);
+        if (owed < win.from || owed > win.until) return false;
+        const ref = new Date(today);
+        ref.setDate(ref.getDate() - CFV_TOLERANCE_DAYS);
+        let due = dueIn(ref.getFullYear(), ref.getMonth());
+        if (due > ref) due = dueIn(ref.getFullYear(), ref.getMonth() - 1);
+        return due <= win.until;
+    }
+    window.cfvSetOffCovers = cfvSetOffCovers;
+
     const CFV_STATUS_IDS = {
         inPayment:   'sel4I99slfpd7Vc1t',
         cfv:         'sel2mWzsvOd8d8de0',
@@ -187,6 +242,10 @@
                 // "Former"; new tenancies may have an empty/null rollup and must still show.
                 if (isTenantStatusFormer(tenancy)) return;
 
+                // Rent paid by set-off is paid: never listed as a cash flow void. The status itself is
+                // moved by the agent through scripts/tenancy-record.py, never from a page load.
+                if (cfvSetOffCovers(tenancy, today, txIndex)) return;
+
                 const paidDetected = hasLinkedPaymentThisMonth(tenancy.id, today, txIndex);
 
                 // Auto-return to In Payment if a linked reconciled transaction exists
@@ -222,6 +281,7 @@
 
             const rent = Number(getField(tenancy, F.tenRent)) || 0;
             if (rent <= 0) return;
+            if (cfvSetOffCovers(tenancy, today, txIndex)) return;   // rent paid by set-off: not a potential CFV
 
             // Use the new count-based check (handles timing via tolerance
             // windows: 5 days for Working/Agent, 14 days for UC). This
