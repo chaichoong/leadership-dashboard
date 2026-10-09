@@ -5123,6 +5123,111 @@ def cmd_annotate(args):
     print(json.dumps({"annotated": args.task, "chars": len(note), "parked": False}))
 
 
+# ─── MOVING A DUE DATE ON KEVIN'S WORD (9 Oct 2026) ──────────────────
+#
+# "Give him a week's grace and then chase this up again next week" (Kevin, 8 Oct
+# 2026, 34 Connaught Road) had nowhere to go: no subcommand moved a due date, so
+# the agent filed a finding, the finding went to the overflow log, and the task
+# sat at Today with the wrong date. The same wall stood on "bring this back in
+# January" and "move it to Monday 2 November" cards (finding 20261002-727 and the
+# 8 Oct overflow line). A task comes to the table when it needs to, not before or
+# after, only if the date Kevin gave is the date on the task.
+#
+# A due date moves only on Kevin's word: --quote must be his own words, verbatim,
+# from his feedback on that task, and a date more than DUE_FAR_DAYS out needs his
+# words to name a month or a date (independent review, 9 Oct 2026: any old note of
+# his must not let an agent push its own work out by months). An agent never
+# pushes its own work out. Never to a past date, never on a closed task, never on
+# a card waiting at Approval (his queue) or a task a robot holds In Progress.
+DUE_MOVED_MARK = "DUE MOVED"
+DUE_FAR_DAYS = 31
+# Review round 2 (9 Oct 2026): a quote from ANY old round, a stamp inside the quote, the word "may" or "3-4" let a
+# far date through. So: his NEWEST note only, stamps stripped, and the month or date he names must be the new one's.
+FEEDBACK_STAMP = re.compile(r"\[\d{4}-\d{2}-\d{2}(?: \d{2}:\d{2})?\]")
+_MONTH_NUM = {m: i + 1 for i, m in enumerate(("january", "february", "march", "april", "may", "june", "july", "august",
+                                              "september", "october", "november", "december"))}
+_MONTH_NUM.update({k[:3]: v for k, v in list(_MONTH_NUM.items()) if k != "may"})
+_MONTH_NUM["sept"] = 9
+_MONTH_WORD = re.compile(r"\b(" + "|".join(sorted((k for k in _MONTH_NUM if k != "may"), key=len, reverse=True)) + r")\b", re.I)
+
+
+def _norm_words(text):
+    return " ".join(str(text or "").split()).lower()
+
+
+def kevins_newest_note(fields):
+    """His newest words on the task: the live Approval Feedback, else the last stamped block of Feedback History."""
+    live = str(fields.get(AF["approvalFeedback"]) or "").strip()
+    if live:
+        return live
+    blocks = FEEDBACK_STAMP.split(str(fields.get(AF["feedbackHistory"]) or ""))
+    return blocks[-1].strip() if blocks else ""
+
+
+def quote_names_date(quote, new_due):
+    """True when his words name the new date's month, or the new date itself (dd/mm[/yy], or YYYY-MM-DD)."""
+    if new_due.isoformat() in quote:
+        return True
+    for d, m in re.findall(r"\b(\d{1,2})/(\d{1,2})(?:/\d{2,4})?\b", quote):
+        if (int(d), int(m)) == (new_due.day, new_due.month):
+            return True
+    return any(_MONTH_NUM[w.lower()] == new_due.month for w in _MONTH_WORD.findall(quote))
+
+
+def due_move_problem(fields, new_due, today, quote):
+    """'' when the due date may move to new_due on these words of Kevin's, else why not."""
+    status = sel(fields.get(AF["status"]))
+    if status in ("Completed", "Cancelled"):
+        return f"the task is {status}"
+    if status == "Approval":
+        return "the task is waiting at Approval in Kevin's queue; his knock-back sets that date"
+    if status == "In Progress":
+        return "a robot holds the task In Progress; its own lane moves it"
+    if new_due < today:
+        return f"{new_due.isoformat()} is in the past"
+    q = _norm_words(FEEDBACK_STAMP.sub(" ", quote or ""))
+    if len(q) < 12 or q not in _norm_words(kevins_newest_note(fields)):
+        return ("--quote is not Kevin's own words in his NEWEST note on this task (Approval Feedback, else the last "
+                "entry of Feedback History), word for word; an agent never moves its own work")
+    if (new_due - today).days > DUE_FAR_DAYS and not quote_names_date(FEEDBACK_STAMP.sub(" ", quote), new_due):
+        return (f"{new_due.isoformat()} is more than {DUE_FAR_DAYS} days out and Kevin's quoted words do not name its "
+                "month or date: quote the words that say when")
+    return ""
+
+
+def cmd_due(args):
+    try:
+        new_due = datetime.strptime(args.date, "%Y-%m-%d").date()
+    except ValueError:
+        sys.exit(f"ERROR: {args.date!r} is not a date (YYYY-MM-DD)")
+    why = " ".join(str(args.why or "").split())
+    if len(why) < 10:
+        sys.exit("ERROR: --why needs Kevin's words or the reason, in a sentence")
+    t = get_task(args.task)
+    fields = t.get("fields", {}) or {}
+    today = datetime.now(LONDON).date()
+    problem = due_move_problem(fields, new_due, today, args.quote)
+    if problem:
+        print(json.dumps({"refused": args.task, "why": problem}))
+        return 2
+    old = fields.get(AF["dueDate"]) or "blank"
+    status = "Upcoming" if new_due > today else "Today"
+    stamp = datetime.now(LONDON).strftime("%d %b %Y %H:%M")
+    quoted = " ".join(str(args.quote).split())
+    note = (f"[{stamp} — agent-dispatch] {DUE_MOVED_MARK} from {old} to {new_due.isoformat()}: {why} "
+            f"(Kevin: \"{quoted}\")")
+    patch_task(args.task, {
+        AF["dueDate"]: new_due.isoformat(),
+        AF["status"]: status,
+        AF["notes"]: (str(fields.get(AF["notes"]) or "") + "\n\n" + note).strip(),
+    })
+    check = get_task(args.task).get("fields", {}) or {}
+    if str(check.get(AF["dueDate"]) or "") != new_due.isoformat():
+        sys.exit(f"ERROR: {args.task} reads due {check.get(AF['dueDate'])!r} after writing {new_due.isoformat()}")
+    print(json.dumps({"due": args.task, "from": old, "to": new_due.isoformat(), "status": status}))
+    return 0
+
+
 # ─── THE LEARNING LOOP ────────────────────────────────────────────────
 #
 # Kevin's question, 26 Aug 2026: "how do I know the feedback is being taken by
@@ -7761,9 +7866,15 @@ def your_step_split(output):
     return head[len(YOUR_STEP_MARK):].strip(), (rest[2:] if rest.startswith("\n\n") else rest.lstrip("\n"))
 
 
+# Never inside a step: each would read as part of the approved card (tenancy-record.py review, 9 Oct 2026).
+STEP_FORBIDDEN = (YOUR_STEP_DIVIDER, YOUR_STEP_MARK, "RECORD CHANGE:")
+
+
 def your_step_output(step, output):
     """The Agent Output with STEP on top and the original below the divider. Idempotent: an
-    output that already carries a block is re-wrapped, never wrapped twice."""
+    output that already carries a block is re-wrapped, never wrapped twice. A step line carrying
+    a mark that belongs to the approved card is dropped, so it can never become part of it."""
+    step = "\n".join(ln for ln in str(step or "").splitlines() if not any(mk in ln for mk in STEP_FORBIDDEN))
     _, original = your_step_split(output)
     return f"{YOUR_STEP_MARK} {str(step or '').strip()}\n\n{YOUR_STEP_DIVIDER}\n\n{original}"
 
@@ -8275,6 +8386,11 @@ def cmd_block(args):
         sys.exit("ERROR: --steps is only for a KEVIN wall: the written steps of a step only Kevin can take.")
     if steps and not STEPS_NUMBERED_RE.search(steps):
         sys.exit("ERROR: --steps must be numbered written steps (\"1. ... 2. ...\"), what Kevin does in order.")
+    # Steps sit ON TOP of an approved card. A typed divider, YOUR STEP: or RECORD CHANGE: line in them would read as
+    # part of what Kevin approved once the wall clears (tenancy-record.py review, 9 Oct 2026).
+    if steps and any(mark in steps for mark in STEP_FORBIDDEN):
+        sys.exit("ERROR: --steps may not carry the Your step divider, 'YOUR STEP:' or 'RECORD CHANGE:': write only "
+                 "what Kevin does.")
     if kind == "KEVIN" and t["outcome"] not in APPROVED:
         # A KEVIN wall on work Kevin has not approved has no door (review, 7 Oct 2026): the task
         # rests until the wall clears, the page offers "Done" only on approved work, and nothing
@@ -11197,6 +11313,13 @@ def main():
     hi.add_argument("--no-gmail", action="store_true")
     hi.add_argument("--text", action="store_true", help="print the TRACK RECORD block to paste")
 
+    du = sub.add_parser("due",
+                        help="move a task's due date on Kevin's word (Upcoming until then)")
+    du.add_argument("task")
+    du.add_argument("date", help="YYYY-MM-DD, today or later")
+    du.add_argument("--why", required=True, help="the reason, in a sentence")
+    du.add_argument("--quote", required=True, help="Kevin's own words from his feedback on the task, verbatim")
+
     an = sub.add_parser("annotate")
     an.add_argument("task")
     an.add_argument("--note", required=True)
@@ -11370,7 +11493,7 @@ def main():
     # discarding the result here would make both checks ornamental.
     return {"queue": cmd_queue, "route": cmd_route, "escalate": cmd_escalate, "decided": cmd_decided,
             "handover": cmd_handover, "submit": cmd_submit_group, "roy-followups": cmd_roy_followups,
-            "annotate": cmd_annotate, "intent": cmd_intent,
+            "annotate": cmd_annotate, "due": cmd_due, "intent": cmd_intent,
             "complete": cmd_complete, "verify": cmd_verify,
             "score": cmd_score, "reconcile": cmd_reconcile,
             "lessons": cmd_lessons, "trial-settle": cmd_trial_settle, "revise": cmd_revise, "retype": cmd_retype,
