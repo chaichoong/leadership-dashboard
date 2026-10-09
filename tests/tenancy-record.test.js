@@ -176,33 +176,22 @@ describe('tenancy-record.py: an approval carries only the change it names (indep
     }
   });
 
-  it('Kevin\'s words carry a change only verbatim, only when they name it, and only for a tenancy linked or named by him', () => {
-    const words = '[2026-10-06 10:42] Okay, we have to assume that this rent has been paid, so it is not a cash flow void, so that needs updating.';
-    const ok = door(['status', TEN, 'In Payment', '--task', TASK, '--why', 'Kevin ruled the set-off rent is paid',
-      '--quote', 'so it is not a cash flow void, so that needs updating'], { task: { ...APPROVED, links: [TEN], feedback: words } });
-    expect(ok.code).toBe(0);
-    expect(ok.comments[0]).toMatch(/Kevin's words on task recTASK0000000001: "so it is not a cash flow void/);
-    const notVerbatim = door(['status', TEN, 'In Payment', '--task', TASK, '--why', 'agent paraphrase of Kevin',
-      '--quote', 'Kevin said the tenancy is in payment now'], { task: { ...APPROVED, links: [TEN], feedback: words } });
-    expect(notVerbatim.json.refused).toMatch(/not Kevin's own words/);
-    const agentWrote = door(['status', TEN, 'In Payment', '--task', TASK, '--why', 'quote from the agent output',
-      '--quote', 'so it is not a cash flow void'], { task: { ...APPROVED, links: [TEN], output: words } });
-    expect(agentWrote.json.refused).toMatch(/not Kevin's own words/);
-    const wrongWay = door(['status', TEN, 'CFV', '--task', TASK, '--why', 'reading his words backwards',
-      '--quote', 'so it is not a cash flow void, so that needs updating'], { task: { ...APPROVED, links: [TEN], feedback: words } });
-    expect(wrongWay.json.refused).toMatch(/do not name this change/);
-    const notLinked = door(['status', TEN, 'In Payment', '--task', TASK, '--why', 'id only in the agent output',
-      '--quote', 'so it is not a cash flow void, so that needs updating'],
-      { task: { ...APPROVED, output: `About ${TEN}.`, feedback: words } });
-    expect(notLinked.json.refused).toMatch(/not linked to tenancy/);
-    const dayWords = '[2026-10-07 13:10] Yes, move the due day to the 9th for both flats.';
-    const day9 = door(['due-day', TEN, '9', '--task', TASK, '--why', 'Kevin approved the 9th', '--quote', 'move the due day to the 9th'],
-      { task: { ...APPROVED, links: [TEN], feedback: dayWords } });
-    expect(day9.code).toBe(0);
-    const day10 = door(['due-day', TEN, '10', '--task', TASK, '--why', 'agent picked the 10th', '--quote', 'move the due day to the 9th'],
-      { task: { ...APPROVED, links: [TEN], feedback: dayWords } });
-    expect(day10.json.refused).toMatch(/do not name this change/);
-    expect([...notVerbatim.writes, ...agentWrote.writes, ...wrongWay.writes, ...notLinked.writes, ...day10.writes]).toEqual([]);
+  it('only a card approved AS-IS carries a change: "minor edits" may have rewritten the line after he read it', () => {
+    for (const outcome of ['Approved with minor edits', 'Approved with major edits']) {
+      const r = door(['status', TEN, 'In Payment', '--task', TASK, '--why', 'the line was added by revise'],
+        { task: { ...APPROVED, outcome, links: [TEN], output: CHANGE } });
+      expect(r.code).toBe(2);
+      expect(r.json.refused).toMatch(/not Approved as-is/);
+      expect(r.writes).toEqual([]);
+    }
+  });
+
+  it('his words in a note never carry a field change on their own: the change goes on a one-tap card', () => {
+    const r = door(['status', TEN, 'In Payment', '--task', TASK, '--why', 'Kevin wrote it in his note'],
+      { task: { ...APPROVED, links: [TEN], feedback: '[2026-10-06 10:42] it is not a cash flow void, so that needs updating' } });
+    expect(r.code).toBe(2);
+    expect(r.json.refused).toMatch(/put the change on a card/);
+    expect(r.writes).toEqual([]);
   });
 });
 
@@ -215,7 +204,7 @@ describe('tenancy-record.py: what it does', () => {
     expect(r.state.status).toBe('In Payment');
     expect(r.comments).toHaveLength(1);
     expect(r.comments[0]).toMatch(/Payment Status changed from CFV to In Payment/);
-    expect(r.comments[0]).toMatch(/RECORD CHANGE line on the card Kevin approved/);
+    expect(r.comments[0]).toMatch(/RECORD CHANGE line of the card Kevin approved/);
     expect(r.comments[0]).toContain(TASK);
     expect(r.comments[0]).toMatch(/rent kept against the boiler/);
     expect(r.ledger).toHaveLength(1);
@@ -313,11 +302,19 @@ describe('agent-dispatch.py due: a date Kevin gave lands on the task', () => {
     expect(due('next week', { feedback: said }).err).toMatch(/is not a date/);
   });
 
-  it('an old note of his never pushes work out by months: a far date needs his words to name the month or date', () => {
+  it('an old note of his never pushes work out: his NEWEST note only, and a far date must be the month he named', () => {
+    const y = new Date().getFullYear() + 1;
     const said = '[2026-09-01 09:00] Fine, leave it with you. Bring this back at the start of January please.';
-    const far = due(inDays(80), { feedback: said, quote: 'Fine, leave it with you.' });
+    const far = due(`${y}-03-02`, { feedback: said, quote: 'Fine, leave it with you.' });
     expect(JSON.parse(far.out).why).toMatch(/more than 31 days out/);
-    const named = due(inDays(80), { feedback: said, quote: 'Bring this back at the start of January please.' });
+    const stamped = due(`${y}-03-02`, { feedback: said, quote: '[2026-09-01 09:00] Fine, leave it with you.' });
+    expect(JSON.parse(stamped.out).why).toMatch(/more than 31 days out/);
+    const wrongMonth = due(`${y}-03-02`, { feedback: said, quote: 'Bring this back at the start of January please.' });
+    expect(JSON.parse(wrongMonth.out).why).toMatch(/more than 31 days out/);
+    const named = due(`${y + 1}-01-08`, { feedback: said, quote: 'Bring this back at the start of January please.' });
     expect(named.code).toBe(0);
+    const older = due(inDays(6), { feedback: '[2026-10-01 09:00] chase this up again next week\n\n[2026-10-08 14:56] leave it for now, I will deal with it',
+                                   quote: 'chase this up again next week' });
+    expect(JSON.parse(older.out).why).toMatch(/NEWEST note/);
   });
 });

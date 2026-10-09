@@ -5141,13 +5141,37 @@ def cmd_annotate(args):
 # a card waiting at Approval (his queue) or a task a robot holds In Progress.
 DUE_MOVED_MARK = "DUE MOVED"
 DUE_FAR_DAYS = 31
-_MONTHS = ("january|february|march|april|may|june|july|august|september|october|november|december|"
-           "jan|feb|mar|apr|jun|jul|aug|sep|sept|oct|nov|dec")
-DUE_NAMES_DATE = re.compile(rf"\b(?:{_MONTHS})\b|\b\d{{1,2}}[/-]\d{{1,2}}\b|\b\d{{4}}-\d{{2}}-\d{{2}}\b", re.I)
+# Review round 2 (9 Oct 2026): a quote from ANY old round, a stamp inside the quote, the word "may" or "3-4" let a
+# far date through. So: his NEWEST note only, stamps stripped, and the month or date he names must be the new one's.
+FEEDBACK_STAMP = re.compile(r"\[\d{4}-\d{2}-\d{2}(?: \d{2}:\d{2})?\]")
+_MONTH_NUM = {m: i + 1 for i, m in enumerate(("january", "february", "march", "april", "may", "june", "july", "august",
+                                              "september", "october", "november", "december"))}
+_MONTH_NUM.update({k[:3]: v for k, v in list(_MONTH_NUM.items()) if k != "may"})
+_MONTH_NUM["sept"] = 9
+_MONTH_WORD = re.compile(r"\b(" + "|".join(sorted((k for k in _MONTH_NUM if k != "may"), key=len, reverse=True)) + r")\b", re.I)
 
 
 def _norm_words(text):
     return " ".join(str(text or "").split()).lower()
+
+
+def kevins_newest_note(fields):
+    """His newest words on the task: the live Approval Feedback, else the last stamped block of Feedback History."""
+    live = str(fields.get(AF["approvalFeedback"]) or "").strip()
+    if live:
+        return live
+    blocks = FEEDBACK_STAMP.split(str(fields.get(AF["feedbackHistory"]) or ""))
+    return blocks[-1].strip() if blocks else ""
+
+
+def quote_names_date(quote, new_due):
+    """True when his words name the new date's month, or the new date itself (dd/mm[/yy], or YYYY-MM-DD)."""
+    if new_due.isoformat() in quote:
+        return True
+    for d, m in re.findall(r"\b(\d{1,2})/(\d{1,2})(?:/\d{2,4})?\b", quote):
+        if (int(d), int(m)) == (new_due.day, new_due.month):
+            return True
+    return any(_MONTH_NUM[w.lower()] == new_due.month for w in _MONTH_WORD.findall(quote))
 
 
 def due_move_problem(fields, new_due, today, quote):
@@ -5161,14 +5185,13 @@ def due_move_problem(fields, new_due, today, quote):
         return "a robot holds the task In Progress; its own lane moves it"
     if new_due < today:
         return f"{new_due.isoformat()} is in the past"
-    said = _norm_words(f"{fields.get(AF['approvalFeedback']) or ''}\n{fields.get(AF['feedbackHistory']) or ''}")
-    q = _norm_words(quote)
-    if len(q) < 12 or q not in said:
-        return ("--quote is not Kevin's own words on this task (Approval Feedback or Feedback History), word for "
-                "word; an agent never moves its own work")
-    if (new_due - today).days > DUE_FAR_DAYS and not DUE_NAMES_DATE.search(quote):
-        return (f"{new_due.isoformat()} is more than {DUE_FAR_DAYS} days out and Kevin's quoted words name no month "
-                "or date: quote the words that say when")
+    q = _norm_words(FEEDBACK_STAMP.sub(" ", quote or ""))
+    if len(q) < 12 or q not in _norm_words(kevins_newest_note(fields)):
+        return ("--quote is not Kevin's own words in his NEWEST note on this task (Approval Feedback, else the last "
+                "entry of Feedback History), word for word; an agent never moves its own work")
+    if (new_due - today).days > DUE_FAR_DAYS and not quote_names_date(FEEDBACK_STAMP.sub(" ", quote), new_due):
+        return (f"{new_due.isoformat()} is more than {DUE_FAR_DAYS} days out and Kevin's quoted words do not name its "
+                "month or date: quote the words that say when")
     return ""
 
 
