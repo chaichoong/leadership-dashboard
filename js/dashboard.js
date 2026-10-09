@@ -1429,7 +1429,10 @@
                 // A robot form card is nobody's draft (AgentAccuracy.isFormCard): left out here, by name below.
                 // TRUE() if an older cached accuracy module lacks the clause: a broken formula would empty the card.
                 fetch(url(`${flds}&filterByFormula=${encodeURIComponent(`AND(LEN({Approval Outcome}&'')>0, ${AgentAccuracy.FORM_CARD_CLAUSE || 'TRUE()'})`)}`), { headers: { Authorization: `Bearer ${PAT}` } }),
-                fetch(`https://api.airtable.com/v0/${BASE_ID}/${TABLES.teamMembers}?returnFieldsByFieldId=true&pageSize=100&fields%5B%5D=${TEAM_MEMBER_FIELDS.name}&filterByFormula=${encodeURIComponent(`{Active}=TRUE()`)}`, { headers: { Authorization: `Bearer ${PAT}` } }),
+                // Every member, switched off or not: this map only NAMES the agent on a past
+                // verdict. Filtered to Active, the eight seats that left the board on 9 Oct 2026
+                // showed as raw record ids on their 33 earlier decisions. 56 rows, one page.
+                fetch(`https://api.airtable.com/v0/${BASE_ID}/${TABLES.teamMembers}?returnFieldsByFieldId=true&pageSize=100&fields%5B%5D=${TEAM_MEMBER_FIELDS.name}`, { headers: { Authorization: `Bearer ${PAT}` } }),
             ]);
             if (!waitRes.ok || !histRes.ok) return;
             const waiting = (await waitRes.json()).records || [];
