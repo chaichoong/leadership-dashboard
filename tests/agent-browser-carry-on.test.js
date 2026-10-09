@@ -45,102 +45,12 @@ function standingFrom(obj) {
   return b.loadStanding(f);
 }
 
-describe('his standing answers: the code decides, never the planner', () => {
-  let st;
-  beforeAll(() => { st = standingFrom(STANDING); });
-  const ok = (q, pick = 'No', s = st) => b.standingAnswerFor(q, pick, s);
-
-  it('answers a question his answers cover, with his pick only', () => {
-    expect(ok('Have you had any claims in the last 5 years?')).toMatchObject({ topic: true, ok: true, keys: ['claims-5y'] });
-    expect(ok('In the past three years, have you made any claims?')).toMatchObject({ ok: true });
-    expect(ok('Have you had any claims in the last 5 years?', 'Yes')).toMatchObject({ ok: false, why: expect.stringMatching(/standing answer is "No"/) });
-    expect(ok('Have you ever been declared bankrupt or had a CCJ?')).toMatchObject({ ok: true });
-    expect(ok('Has any insurer ever refused or cancelled your insurance?')).toMatchObject({ ok: true });
-    // "Other than motoring offences" narrows the question; it does not ask about motoring.
-    expect(ok('Have you been convicted of any criminal offence, other than motoring offences?')).toMatchObject({ ok: true });
-  });
-
-  it('a question his answers do not cover exactly is his', () => {
-    // His claims answer covers five years, not "ever".
-    expect(ok('Have you ever made an insurance claim?')).toMatchObject({ ok: false, why: expect.stringMatching(/no standing answer covers "claim"/) });
-    expect(ok('Have you had any claims in the last 10 years?')).toMatchObject({ ok: false });
-    expect(ok('Have you committed any criminal offences?')).toMatchObject({ ok: false });
-  });
-
-  it('review: a time span is read in the clause that holds the topic, never borrowed from the one beside it', () => {
-    expect(ok('Have you had any claims in the last 5 years? Have you ever made a claim on another property?'))
-      .toMatchObject({ ok: false, why: expect.stringMatching(/"claim" as asked here \("Have you ever made a claim on another property/) });
-    const fiveYearRefused = standingFrom({ answers: [STANDING.answers[0],
-      Object.assign({}, STANDING.answers[4], { asks: STANDING.answers[0].asks })] });
-    expect(ok('Have you ever been refused insurance, or had any claims in the last 5 years?', 'No', fiveYearRefused))
-      .toMatchObject({ ok: false, why: expect.stringMatching(/"refused"/) });
-    expect(ok('Have you ever been refused insurance, or had any claims in the last 5 years?')).toMatchObject({ ok: true });
-    // review round 2: one clause, two topics, a five-year answer among them: the span could be either's.
-    expect(ok('Have you ever had insurance refused or any claims in the last 5 years?'))
-      .toMatchObject({ ok: false, why: expect.stringMatching(/in one clause, and a time span there could belong to either/) });
-  });
-
-  it('review: wording that can turn a yes into a no is his', () => {
-    for (const q of [
-      'Have you been claims free for the last 5 years?',
-      'Is it true that you have made no claims in the last 5 years?',
-      'Have you made no claims in the last 5 years?',
-      'Have you never been declared bankrupt?',
-    ]) expect(ok(q), q).toMatchObject({ topic: true, ok: false, why: expect.stringMatching(/yes and no could be the wrong way round/) });
-  });
-
-  it('charges, prosecutions, insolvency, motoring and "anything else" are never the robot\'s', () => {
-    for (const q of [
-      'Have you been convicted of, or charged with, any criminal offence?',
-      'Do you have any pending prosecutions?',
-      'Are you under police investigation?',
-      'Have you ever been bankrupt or entered an IVA?',
-      'Has the company been in liquidation or administration orders?',
-      'Do you have any motoring convictions?',
-      'Is there anything else you need to tell us?',
-      'Are there any other material facts?',
-      'Has the company ever been struck off?',
-    ]) expect(ok(q), q).toMatchObject({ topic: true, ok: false });
-  });
-
-  it('a declaration about other people (tenants, a co-director, the company) is his unless his answer says it covers them', () => {
-    expect(ok('Have you or anyone living at the property been convicted of a criminal offence?')).toMatchObject({ ok: false, why: expect.stringMatching(/"anyone"/) });
-    expect(ok('Have you or any director had a CCJ?')).toMatchObject({ ok: false, why: expect.stringMatching(/"director"/) });
-    expect(ok('Have any of your tenants been declared bankrupt?')).toMatchObject({ ok: false });
-    expect(ok('Has anyone with an interest in the property been declared bankrupt?')).toMatchObject({ ok: false });
-    // review: "persons", "insured person" and the company are other people too.
-    expect(ok('Has any insured person been declared bankrupt?')).toMatchObject({ ok: false });
-    expect(ok('Have you or any persons to be insured ever been bankrupt or had any CCJs?')).toMatchObject({ ok: false });
-    expect(ok('Has the company had a CCJ?')).toMatchObject({ ok: false, why: expect.stringMatching(/"company"/) });
-    const wider = standingFrom({ answers: [Object.assign({}, STANDING.answers[2], { others: 'directors?|company' })] });
-    expect(b.standingAnswerFor('Have you or any director had a CCJ?', 'No', wider)).toMatchObject({ ok: true });
-    expect(b.standingAnswerFor('Has the company had a CCJ?', 'No', wider)).toMatchObject({ ok: true });
-    expect(b.standingAnswerFor('Have you or any tenant had a CCJ?', 'No', wider)).toMatchObject({ ok: false });
-  });
-
-  it('special terms stop for him until a standing answer of his covers them (Rightsure, 9 Oct 2026)', () => {
-    const q = 'Have you ever had any insurance refused or any renewal declined or any special terms imposed?';
-    expect(ok(q)).toMatchObject({ ok: false, why: expect.stringMatching(/no standing answer covers "special terms"/) });
-    const wider = standingFrom({ answers: [Object.assign({}, STANDING.answers[4], { covers: 'refused|cancell?ed|voided|declined|special terms|terms imposed|imposed' })] });
-    expect(b.standingAnswerFor(q, 'No', wider)).toMatchObject({ ok: true });
-  });
-
-  it('a first-person declaration is his, even on a covered topic', () => {
-    expect(ok('I declare that I have had no claims in the last 5 years')).toMatchObject({ ok: false, why: expect.stringMatching(/first person/) });
-  });
-
-  it('a question on none of the topics is not this check\'s', () => {
-    expect(ok('Do you want loss of rent cover?', 'Yes')).toEqual({ topic: false });
-    expect(ok('How many bedrooms does the property have?', '4')).toEqual({ topic: false });
-  });
-
-  it('with no file, or one bad entry, nothing is answered for him', () => {
-    expect(b.standingAnswerFor('Have you had any claims in the last 5 years?', 'No', null)).toMatchObject({ ok: false });
-    expect(b.loadStanding(join(tmpdir(), 'od-no-such-standing.json'))).toBeNull();
-    const bad = standingFrom({ answers: [STANDING.answers[0], { key: 'broken', covers: '(', pick: 'No' }] });
-    expect(bad.answers).toEqual([]);
-    expect(bad.error).toMatch(/standing answer "broken" is unusable/);
-    expect(b.standingAnswerFor('Have you had any claims in the last 5 years?', 'No', bad)).toMatchObject({ ok: false, why: expect.stringMatching(/unusable/) });
+describe('a page that asks for a declaration is his, whole', () => {
+  it('names the word that made it his: a topic or a first-person declaration, anywhere in the form', () => {
+    expect(b.declarationWords('Have you had any claims in the last 5 years?')).toBe('claims');
+    expect(b.declarationWords('In the last 10 years, have you had any of the following? A county court judgment')).toBe('county court');
+    expect(b.declarationWords('I declare the information is true')).toMatch(/declare/);
+    expect(b.declarationWords('Has the property been flooded? How many bedrooms?')).toBe('');
   });
 });
 
@@ -153,15 +63,12 @@ describe("the planner's steps are checked against the facts", () => {
     { kind: 'checkbox', question: 'Email', option: 'Email', target: '#em' },
   ], buttons: [{ kind: 'button', text: 'Next', target: '#next' }, { kind: 'button', text: 'No', target: 'a.no' }], prices: [] };
   const facts = ['First name: Testa', 'Bought: 2009', 'Rebuild value: £235,000', 'Contact: email only; never phone, SMS or post (test)'];
-  const run = (steps, extra = {}) => b.checkPlannerSteps(Object.assign({ steps, next: null, unknown: [], done: 'no' }, extra), snap, facts,
-    facts.concat(['No claims in the last 5 years (test)']));
+  const run = (steps, extra = {}) => b.checkPlannerSteps(Object.assign({ steps, next: null, unknown: [], done: 'no' }, extra), snap, facts);
 
   it('keeps a step on an answer the robot read, citing one whole fact line, giving that line\'s words', () => {
     const r = run([{ do: 'fill', target: '#first', value: 'Testa', question: 'First name', source: 'First name: Testa' }], { next: '#next' });
     expect(r.steps).toMatchObject([{ do: 'fill', selector: '#first', value: 'Testa', question: 'First name' }]);
     expect(r.next).toMatchObject({ target: '#next', text: 'Next' });
-    const c = run([{ do: 'click', target: 'label[for="cn"]', question: 'Any claims', source: 'No claims in the last 5 years (test)' }]);
-    expect(c.steps).toMatchObject([{ do: 'click', selector: 'label[for="cn"]', pick: 'No' }]);
     expect(run([{ do: 'check', target: '#em', question: 'Email', source: 'Contact: email only; never phone, SMS or post (test)' }]).steps).toHaveLength(1);
   });
 
@@ -184,17 +91,8 @@ describe("the planner's steps are checked against the facts", () => {
       { do: 'check', target: '#ph', question: 'Phone', source: 'Contact: email only; never phone, SMS or post (test)' },
       { do: 'click', target: 'label[for="cy"]', question: 'Any claims', source: 'No claims in the last 5 years (test)' },
     ]);
-    // "Yes" cited from a standing answer passes this check: the standing pick is judged by the live check.
-    expect(r.steps).toMatchObject([{ selector: 'label[for="cy"]', pick: 'Yes' }]);
-    expect(r.unknown).toEqual(['press "No"', 'First name', 'Year you bought it', 'Phone']);
-  });
-
-  it('a standing answer is cited for a declaration only, never for another question', () => {
-    const listed = { items: [{ kind: 'radio', question: 'Is the property listed?', options: [{ label: 'No', target: '#ln' }] }], buttons: [], prices: [] };
-    const r = b.checkPlannerSteps({ steps: [{ do: 'click', target: '#ln', question: 'Listed?', source: 'No claims in the last 5 years (test)' }],
-      next: null, unknown: [], done: 'no' }, listed, facts, facts.concat(['No claims in the last 5 years (test)']));
     expect(r.steps).toEqual([]);
-    expect(r.unknown).toEqual(['Is the property listed?']);
+    expect(r.unknown).toEqual(['press "No"', 'First name', 'Year you bought it', 'Phone', 'Any claims in the last 5 years?']);
   });
 
   it('figures match whatever their commas and pound signs; a picked option must be what the line says it is', () => {
@@ -216,36 +114,6 @@ describe("the planner's steps are checked against the facts", () => {
   });
 });
 
-describe('the second net: the live check on the page itself', () => {
-  // A page stand-in: the words round the control, as the guard would read them.
-  const pg = (local, wide = local) => ({ locator: () => ({ first: () => ({ evaluate: async () => ({ local, wide }) }) }) });
-  let st;
-  beforeAll(() => { st = standingFrom(STANDING); });
-  const step = (question, extra = {}) => Object.assign({ do: 'click', selector: '#x', pick: 'No', item: { kind: 'radio', question } }, extra);
-
-  it('review: a pick with no readable question, or a vague label beside a declaration, is his', async () => {
-    expect(await b.liveAnswerProblem(pg('Have you ever made a claim? Yes No'), step(''), st)).toMatch(/its question could not be read/);
-    expect(await b.liveAnswerProblem(pg('Have you made any claims ever? Answer Yes No'), step('Answer', { do: 'select', item: { kind: 'select', question: 'Answer' } }), st))
-      .toMatch(/a declaration question is beside it and its own words \("Answer"\) do not name it/);
-    // review round 2: beside a declaration, a question that does not name it is his, plain or not
-    // (a legend over a list of claims, CCJs and convictions; a typed box labelled "Number").
-    expect(await b.liveAnswerProblem(pg('Is the property listed? Yes No', 'Is the property listed? Have you ever made a claim?'), step('Is the property listed?'), st))
-      .toMatch(/a declaration question is beside it/);
-    expect(await b.liveAnswerProblem(pg('In the last 10 years, have you or anyone to be insured had any of the following? A claim, a CCJ, a conviction Yes No'),
-      step('In the last 10 years, have you or anyone to be insured had any of the following?'), st)).toMatch(/a declaration question is beside it/);
-    expect(await b.liveAnswerProblem(pg('How many insurance claims have you ever made? Number'), step('Number', { do: 'fill', item: { kind: 'number', question: 'Number' } }), st))
-      .toMatch(/a declaration question is beside it/);
-    expect(await b.liveAnswerProblem(pg('Is the property listed? Yes No'), step('Is the property listed?'), st)).toBe('');
-  });
-
-  it('a typed answer or a tick box on a declaration is his; a never-list word on the control is his; a covered one goes ahead', async () => {
-    expect(await b.liveAnswerProblem(pg('How many claims in the last 5 years?'), step('How many claims in the last 5 years?', { do: 'fill' }), st)).toMatch(/typed answer/);
-    expect(await b.liveAnswerProblem(pg('No claims in the last 5 years'), step('No claims in the last 5 years', { item: { kind: 'checkbox', question: 'Any claims in the last 5 years?' } }), st)).toMatch(/tick box/);
-    expect(await b.liveAnswerProblem(pg('Have you been charged with an offence? Yes No'), step('Is the property listed?'), st)).toMatch(/"charged" is asked on it/);
-    expect(await b.liveAnswerProblem(pg('Have you had any claims in the last 5 years? Yes No'), step('Have you had any claims in the last 5 years?'), st)).toBe('');
-  });
-});
-
 describe('the robot has moved on only when the page has', () => {
   const page = (url, headings, qs) => ({ url, headings, items: qs.map(q => ({ question: q })) });
   it('review: a follow-up question appearing is not his Next; a new address, new headings or a new set of questions is', () => {
@@ -258,7 +126,7 @@ describe('the robot has moved on only when the page has', () => {
 
   it('review: a page that cannot be read ends the carry-on as stuck, never a throw that closes his window', async () => {
     const fake = { waitForLoadState: async () => {}, waitForTimeout: async () => {}, evaluate: async () => { throw new Error('Execution context was destroyed'); } };
-    const r = await b.carryOn(fake, { carryOn: { facts: ['a: b'] } }, { standing: null, planner: async () => ({ steps: [], next: null, unknown: [], done: 'no' }) });
+    const r = await b.carryOn(fake, { carryOn: { facts: ['a: b'] } }, { standingFacts: [], planner: async () => ({ steps: [], next: null, unknown: [], done: 'no' }) });
     expect(r.stuck.error).toMatch(/the robot stopped reading the page: Execution context was destroyed/);
   });
 });
@@ -290,7 +158,7 @@ const PAGES = {
         const t = document.getElementById('od-your-turn');
         if (t && /^Your turn/.test(t.textContent) && !window.__answered) {
           window.__answered = 1;
-          setTimeout(() => { document.getElementById('vn').checked = true; document.getElementById('storeys').value = '2'; document.getElementById('next2').click(); }, 300);
+          setTimeout(() => { document.getElementById('cn').checked = true; document.getElementById('vn').checked = true; document.getElementById('storeys').value = '2'; document.getElementById('next2').click(); }, 300);
         }
       }, 200);
     </script></body></html>`,
@@ -312,6 +180,19 @@ const PAGES = {
     <p>Have you had any claims in the last 5 years?</p><input type="radio" name="a" id="a1"><label for="a1">Yes</label><input type="radio" name="a" id="a2"><label for="a2">No</label>
     <p>Have you ever made a claim on another property?</p><input type="radio" name="c" id="c1"><label for="c1">Yes</label><input type="radio" name="c" id="c2"><label for="c2">No</label>
     </div><button id="nx">Next</button></body></html>`,
+  // review round 3: answering Yes inserts a declaration with answer buttons above an un-named Next.
+  '/q-insert': `<!doctype html><html><body><h1>Letting</h1><form><div class="q"><p>Do you let the property to tenants?</p>
+    <input type="radio" name="let" id="ly" onclick="document.getElementById('ins').innerHTML='<p>Has any insurer ever cancelled your policy?</p><button type=button onclick=&quot;document.body.dataset.pressed=1&quot;>Yes</button>'"><label for="ly">Yes</label>
+    <input type="radio" name="let" id="ln"><label for="ln">No</label></div><div id="ins"></div><button type="button">Next</button></form></body></html>`,
+  // review round 3: a legend over a long list; the robot must see the list however long it runs.
+  '/q-list': `<!doctype html><html><body><h1>About you</h1><form><fieldset><legend>In the last 10 years, have you or anyone to be insured had any of the following?</legend>
+    <ul><li>${'An insurance claim of any kind, whether or not it was paid, for any property you own or let. '.repeat(3)}</li><li>A county court judgment</li><li>A conviction</li><li>Insurance refused</li></ul>
+    <input type="radio" name="l" id="l1"><label for="l1">Yes</label><input type="radio" name="l" id="l2"><label for="l2">No</label></fieldset>
+    <button type="button">Next</button></form></body></html>`,
+  // A footer "Make a claim" link sits outside the form: the page is not a declaration page.
+  '/q-footer': `<!doctype html><html><body><h1>Your property</h1><form action="/p3" method="get"><div class="q"><label for="listed">Is the property listed?</label>
+    <select id="listed" name="listed"><option value="">Select</option><option>Yes</option><option>No</option></select></div><button id="nf" type="submit">Next</button></form>
+    <footer><a href="#">Make a claim</a></footer></body></html>`,
   // review 6 and 7: the way on is worded as an agreement, or a sign-in.
   '/q-statement': `<!doctype html><html><body><h1>Statement of fact</h1><div class="q"><label for="em">Email</label><input id="em"></div>
     <button id="ag">Agree and continue</button></body></html>`,
@@ -341,7 +222,6 @@ module.exports = async (input) => {
   if (process.env.PLANNER_LOG) fs.appendFileSync(process.env.PLANNER_LOG, JSON.stringify({ url: p.url, items: p.items.map(i => i.question) }) + '\\n');
   const fact = re => input.facts.find(f => re.test(f)) || '';
   const val = f => f.split(': ').slice(1).join(': ');
-  const said = k => (input.standing.find(s => s.topic === k) || {}).said || '';
   const btn = re => p.buttons.find(x => re.test(x.text));
   const tryIt = process.env.PLANNER_TRY || '';
   if (p.prices.length) {
@@ -354,19 +234,14 @@ module.exports = async (input) => {
     if (/First name/.test(q) && !it.value) { const f = fact(/^First name/); steps.push({ do: 'fill', target: it.target, value: tryIt === 'invent' ? 'Invented' : val(f), question: q, source: f }); }
     else if (/^Postcode/.test(q) && !it.value) { const f = fact(/^Postcode/); steps.push({ do: 'fill', target: it.target, value: val(f), question: q, source: f }); }
     else if (/^Email/.test(q) && !it.value) { const f = fact(/^Email/); steps.push({ do: 'fill', target: it.target, value: val(f), question: q, source: f }); }
-    else if (it.kind === 'radio' && (/claim/.test(q) || !q) && !it.options.some(o => o.checked)) {
-      const want = tryIt === 'yes' ? 'Yes' : 'No';
-      steps.push({ do: 'click', target: it.options.find(o => o.label === want).target, question: q, source: said('claims-5y') });
-    }
-    else if (it.kind === 'radio' && /convicted/.test(q) && !it.options.some(o => o.checked)) {
-      steps.push({ do: 'click', target: it.options.find(o => o.label === 'No').target, question: q, source: said('convictions') });
-    }
     else if (it.kind === 'select' && /built/.test(q) && !/\\d/.test(it.value)) { const f = fact(/^Built/); steps.push({ do: 'select', target: it.target, value: val(f), question: q, source: f }); }
-    else if (it.kind === 'select' && /^Answer/.test(q)) steps.push({ do: 'select', target: it.target, value: 'No', question: q, source: said('claims-5y') });
     else if (/claims have you ever/.test(q)) { const f = fact(/^Claims ever/); steps.push({ do: 'fill', target: it.target, value: '0', question: q, source: f }); }
     else if (/storeys/.test(q) && !it.value) unknown.push(q);
+    else if (it.kind === 'select' && /listed/.test(q) && !it.value.match(/Yes|No/)) { const f = fact(/^Listed/); steps.push({ do: 'select', target: it.target, value: val(f), question: q, source: f }); }
+    else if (it.kind === 'radio' && /let the property/.test(q) && !it.options.some(o => o.checked)) { const f = fact(/^Let to tenants/); steps.push({ do: 'click', target: it.options.find(o => o.label === 'Yes').target, question: q, source: f }); }
+    else if (it.kind === 'radio' && /any of the following/.test(q) && !it.options.some(o => o.checked)) { const f = fact(/^Anyone else/); steps.push({ do: 'click', target: it.options.find(o => o.label === 'No').target, question: q, source: f }); }
   }
-  if (tryIt === 'button') { const nb = btn(/^No$/); if (nb) steps.push({ do: 'click', target: nb.target, question: 'Ever made a claim?', source: said('claims-5y') }); }
+  if (tryIt === 'button') { const nb = btn(/^No$/); if (nb) steps.push({ do: 'click', target: nb.target, question: 'Ever made a claim?', source: fact(/^Claims ever/) }); }
   const next = tryIt === 'next-no' ? btn(/^No$/) : btn(/^(Next|Agree and continue|Sign in)$/);
   return { steps, next: unknown.length ? null : (next ? next.target : null), unknown, done: 'no' };
 };
@@ -401,7 +276,8 @@ function run(env, args, ms = 120000) {
     c.on('exit', code => { clearTimeout(t); res({ code, out, err }); });
   });
 }
-const FACTS = ['First name: Testa', 'Postcode: ZZ99 9ZZ', 'Built: 1850 to 1919', 'Email: testa@example.com', 'Claims ever made: 0'];
+const FACTS = ['First name: Testa', 'Postcode: ZZ99 9ZZ', 'Built: 1850 to 1919', 'Email: testa@example.com', 'Claims ever made: 0',
+  'Listed building: No', 'Let to tenants: Yes', 'Anyone else to be insured: No'];
 const PLAN = (steps, extra = {}) => ({ why: 'read the price and buy on monthly instalments only if you want it', site: 'practice', label: 'Practice quote',
   steps: steps || [{ do: 'goto', url: `${base}/p1` }], carryOn: { facts: FACTS }, ...extra });
 const ledgerOf = x => readFileSync(join(x.h, 'knowledge-os', 'logs', 'agent-browser', 'runs.jsonl'), 'utf8').trim().split('\n').map(l => JSON.parse(l));
@@ -413,7 +289,7 @@ async function dryRun(path, env = {}) {
 }
 
 describe('the Your turn window carries on, page by page, to the price', () => {
-  it('fills every page from the facts, answers the claims question from his standing answer, asks him only what it cannot answer, and stops at the price', async () => {
+  it('fills every page from the facts, hands him the declarations page whole, carries on once he presses Next, and stops at the price', async () => {
     const x = home();
     writeFileSync(join(x.plans, TASK + '.json'), JSON.stringify(PLAN()));
     hits.length = 0;
@@ -423,33 +299,49 @@ describe('the Your turn window carries on, page by page, to the price', () => {
     expect(last).toMatchObject({ mode: 'handover', handedOver: true, stuck: null, end: 'price' });
     expect(hits.some(u => u.startsWith('/p2?first=Testa&pc=ZZ99+9ZZ&built=1850+to+1919'))).toBe(true);
     const p3 = hits.find(u => u.startsWith('/p3?'));
-    expect(p3).toMatch(/claims=n/);
-    expect(p3).toMatch(/conv=n/);          // his own answer, given in the window
-    expect(p3).toMatch(/storeys=2/);
+    expect(p3).toMatch(/claims=n&conv=n&storeys=2/);      // all his own answers, given in the window
     const handover = ledgerOf(x).find(l => l.cmd === 'handover');
     const kevin = handover.steps.filter(s => s.do === 'kevin');
     expect(kevin).toHaveLength(1);
-    expect(kevin[0].say).toMatch(/convicted of, or charged with/);
-    expect(kevin[0].say).toMatch(/Number of storeys/);
-    expect(handover.steps.filter(s => s.next).length).toBe(1);      // the robot pressed Next on page 1; he pressed it on page 2
-    expect(handover.end).toBe('price');
+    expect(kevin[0].say).toMatch(/^this page asks your declarations \("claims"\)/);
+    expect(kevin[0].say).toMatch(/Have you had any claims in the last 5 years\?/);
+    // Nothing on the declarations page was touched by the robot: its only press was page 1's Next.
+    expect(handover.steps.filter(s => s.carryOn === 2 && s.do !== 'kevin')).toEqual([]);
+    expect(handover.steps.filter(s => s.next).length).toBe(1);
   }, 120000);
 
-  it('a dry run stops on the questions only he can answer and names them, so the agent puts them on his card', async () => {
+  it('a dry run stops at the declarations page and names its questions, so the agent puts them on his card', async () => {
     hits.length = 0;
     const { r, last } = await dryRun('/p1');
     expect(r.code).toBe(3);
     expect(last.stuck).toMatchObject({ do: 'carry-on' });
-    expect(last.stuck.unknown.join(' | ')).toMatch(/charged with/);
-    expect(last.stuck.unknown.join(' | ')).toMatch(/Number of storeys/);
+    expect(last.stuck.unknown[0]).toMatch(/this page asks your declarations/);
+    expect(last.stuck.unknown).toContain('Number of storeys');
     expect(hits.some(u => u.startsWith('/p3'))).toBe(false);
   }, 120000);
 
-  it('a value the planner made up is never typed, and a claims answer other than his standing one is his', async () => {
+  it('a value the planner made up is never typed', async () => {
     expect((await dryRun('/p1', { PLANNER_TRY: 'invent' })).last.stuck.unknown).toEqual(['First name']);
+  }, 120000);
+
+  it('review round 3: a declaration an answer inserts above Next is never pressed; the page becomes his', async () => {
+    const { last, x } = await dryRun('/q-insert');
+    expect(last.stuck.unknown[0]).toMatch(/this page asks your declarations \("cancelled"\)/);
+    const steps = ledgerOf(x).find(l => l.cmd === 'handover-dry-run').steps.filter(s => s.carryOn);
+    expect(steps.map(s => s.selector)).toEqual(['#ly']);      // the letting answer, then nothing
+  }, 120000);
+
+  it('review round 3: a legend over a long list of claims, CCJs and convictions makes the page his, however long the list', async () => {
+    const { last, x } = await dryRun('/q-list');
+    expect(last.stuck.unknown[0]).toMatch(/this page asks your declarations/);
+    expect(ledgerOf(x).find(l => l.cmd === 'handover-dry-run').steps.filter(s => s.carryOn)).toEqual([]);
+  }, 120000);
+
+  it('a "Make a claim" link outside the form leaves the page the robot\'s: it answers from the facts and moves on', async () => {
     hits.length = 0;
-    const yes = await dryRun('/p1', { PLANNER_TRY: 'yes' });
-    expect(yes.last.stuck.unknown.join(' | ')).toMatch(/Have you had any claims in the last 5 years\? \(a declaration question: the standing answer is "No", not "Yes"\)/);
+    const { last } = await dryRun('/q-footer');
+    expect(last.end).toBe('price');
+    expect(hits.some(u => u.startsWith('/p3?listed=No'))).toBe(true);
   }, 120000);
 
   it('review 1: an answer given as a link or a plain button is never pressed, as a step or as the way on', async () => {
@@ -461,18 +353,12 @@ describe('the Your turn window carries on, page by page, to the price', () => {
     expect(ledgerOf(asNext.x).find(l => l.cmd === 'handover-dry-run').steps.filter(s => s.carryOn)).toEqual([]);
   }, 120000);
 
-  it('review 4: a dropdown labelled "Answer" under a claims question, and a number box asking about claims, are his', async () => {
-    const { last, x } = await dryRun('/q-select');
-    const said = last.stuck.unknown.join(' | ');
-    expect(said).toMatch(/Answer/);
-    expect(said).toMatch(/How many insurance claims have you ever made\? \(a typed answer to a declaration question is his\)/);
-    expect(ledgerOf(x).find(l => l.cmd === 'handover-dry-run').steps.filter(s => s.carryOn)).toEqual([]);
-  }, 120000);
-
-  it('review 2: a radio whose own question cannot be read (flat layout) is his, never answered from the question beside it', async () => {
-    const { last, x } = await dryRun('/q-flat');
-    expect(last.stuck.unknown.length).toBeGreaterThan(0);
-    expect(ledgerOf(x).find(l => l.cmd === 'handover-dry-run').steps.filter(s => s.carryOn)).toEqual([]);
+  it('review 2 and 4: a vague label, a number box or flat radios beside a claims question are on a page that is his', async () => {
+    for (const path of ['/q-select', '/q-flat']) {
+      const { last, x } = await dryRun(path);
+      expect(last.stuck.unknown[0], path).toMatch(/this page asks your declarations/);
+      expect(ledgerOf(x).find(l => l.cmd === 'handover-dry-run').steps.filter(s => s.carryOn), path).toEqual([]);
+    }
   }, 120000);
 
   it('review 6 and 7: a way on worded as an agreement or a sign-in is his, never "done"; Buy with a price shown is', async () => {
@@ -485,7 +371,8 @@ describe('the Your turn window carries on, page by page, to the price', () => {
     writeFileSync(join(x.plans, TASK + '.json'), JSON.stringify(PLAN([{ do: 'goto', url: `${base}/p3` }])));
     const r = await run(x.env, ['handover', '--task', TASK]);
     const last = JSON.parse(r.out.trim().split('\n').pop());
-    expect(last).toMatchObject({ stuck: null, end: 'final', handedOver: true });
+    // The price page ends the robot's part before anything on it is pressed.
+    expect(last).toMatchObject({ stuck: null, end: 'price', handedOver: true });
     expect(ledgerOf(x).find(l => l.cmd === 'handover').steps.some(st => st.selector === '#buy' && st.executed)).toBe(false);
   }, 120000);
 

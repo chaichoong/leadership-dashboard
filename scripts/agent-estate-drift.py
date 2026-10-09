@@ -81,8 +81,6 @@ MIN_FILES = 20
 # it cannot match a sentence describing the rule as history. Add a line here in
 # the same change that retires the rule; that is the whole protocol.
 RETIRED = [
-    (r"Insurance declarations are Kevin's|declaration\s+questions\s+stay\s+Kevin's own answers", "2026-10-09",
-     "the robot answers insurance declarations from Kevin's standing answers, checked in code (Decisions/2026-10-09)"),
     (r"09:15 prospecting", "2026-09-27",
      "the prospecting slot is parked with Operations Director until January 2027"),
     (r"then Mica or Ericamae", "2026-08-25",
