@@ -103,6 +103,7 @@ token: prod-walk.js reads it itself. Guarded by tests/merge-pr.test.js.
 """
 
 import argparse
+import fcntl
 import glob
 import importlib.util
 import json
@@ -135,6 +136,16 @@ PAGE_ID = re.compile(r"^[A-Za-z0-9_.-]+$")
 STATUSES = ("PASS", "WARN", "FAIL")
 MIN_CHARS = 40              # prod-walk.js: a panel shorter than this is blank
 T0 = time.time()
+
+# One gate at a time on this Mac (Kevin, 9 Oct 2026). Gates from different sessions ran
+# together all day and knocked each other's real-browser tests past their time limits:
+# 12 refusals in one evening, most of them load, not code. A flock frees itself when a
+# gate dies, so a crashed gate can never hold the next one up. A nested gate inside a test
+# run (VITEST set) takes no lock unless the test names its own file in MERGE_GATE_LOCK.
+GATE_LOCK = os.environ.get("MERGE_GATE_LOCK") or os.path.join(
+    os.path.expanduser("~"), "knowledge-os", "logs", "merge-gate.lock")
+GATE_WAIT_MAX = int(os.environ.get("MERGE_GATE_WAIT_MAX") or 3600)
+_GATE_FD = None
 
 _FM = None
 
@@ -170,6 +181,67 @@ def name_guard():
 
 def progress(msg):
     print("[merge-pr %4ds] %s" % (time.time() - T0, msg), file=sys.stderr, flush=True)
+
+
+def lock_holder(path=None):
+    """Who holds the gate, in words, from what the holder wrote into the lock file."""
+    try:
+        with open(path or GATE_LOCK) as fh:
+            d = json.loads(fh.read() or "{}")
+        return "PR #%s since %s" % (d.get("pr", "?"), d.get("since", "?"))
+    except (OSError, ValueError):
+        return "another gate"
+
+
+def acquire_gate_lock(pr, path=None, wait_max=None, poll=15):
+    """Wait for the gate ahead, then hold the lock until this process ends. None on
+    success, else the refusal text. Skipped in a test run unless MERGE_GATE_LOCK is set."""
+    global _GATE_FD
+    if os.environ.get("VITEST") and not os.environ.get("MERGE_GATE_LOCK") and path is None:
+        return None
+    path = path or GATE_LOCK
+    wait_max = GATE_WAIT_MAX if wait_max is None else wait_max
+    os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
+    fd = os.open(path, os.O_RDWR | os.O_CREAT, 0o644)
+    start, said = time.time(), None
+    while True:
+        try:
+            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            break
+        except BlockingIOError:
+            waited = time.time() - start
+            if waited >= wait_max:
+                os.close(fd)
+                return ("another merge gate (%s) held this Mac for %d minutes; run it again"
+                        % (lock_holder(path), waited // 60))
+            if said is None or waited - said >= 300:
+                progress("waiting for the gate ahead to finish: %s" % lock_holder(path))
+                said = waited
+            time.sleep(poll)
+    os.ftruncate(fd, 0)
+    os.write(fd, json.dumps({"pr": pr, "pid": os.getpid(),
+                             "since": datetime.now(timezone.utc).strftime("%H:%M UTC")}).encode())
+    _GATE_FD = fd
+    return None
+
+
+_ANSI = re.compile(r"\x1b\[[0-9;]*m")
+_VITEST_FAIL = re.compile(r"^\s*FAIL\s+(\S+\.(?:test|spec)\.[cm]?js\b.*?)\s*$")
+_PW_FAIL = re.compile(r"^\s*\d+\) \[[^\]]+\] › (.+?)\s*[─━-]*\s*$")
+
+
+def failed_tests(text, cap=10):
+    """The failing tests a suite printed, in order, once each (9 Oct 2026: the result kept
+    400 characters of output, so a red gate never said WHICH test, and a load flake could not
+    be told from a real failure without re-running the whole suite)."""
+    out = []
+    for line in _ANSI.sub("", text or "").splitlines():
+        m = _VITEST_FAIL.match(line) or _PW_FAIL.match(line)
+        if m:
+            name = m.group(1).strip()[:240]
+            if name not in out:
+                out.append(name)
+    return out[:cap]
 
 
 def tail(text, n=400):
@@ -340,6 +412,8 @@ def run_suites(tree):
     code, so, se, to = run_group(["npx", "vitest", "run", "--allowOnly=false"], tree, SUITE_TIMEOUT,
                                  first=signal.SIGINT, grace=PLAYWRIGHT_GRACE)
     out["vitest"] = {"ok": code == 0, "tail": tail(so or se)}
+    if code != 0:
+        out["vitest"]["failed"] = failed_tests((so or "") + "\n" + (se or ""))
     if to:
         out["vitest"]["timedOut"] = True
     elif code != 0 and vitest_runner_flake((so or "") + "\n" + (se or "")):
@@ -347,6 +421,8 @@ def run_suites(tree):
         code, so, se, to = run_group(["npx", "vitest", "run", "--allowOnly=false"], tree,
                                      SUITE_TIMEOUT, first=signal.SIGINT, grace=PLAYWRIGHT_GRACE)
         out["vitest"] = {"ok": code == 0, "tail": tail(so or se), "runnerFlakeRetried": True}
+        if code != 0:
+            out["vitest"]["failed"] = failed_tests((so or "") + "\n" + (se or ""))
         if to:
             out["vitest"]["timedOut"] = True
     if not out["vitest"]["ok"]:
@@ -359,6 +435,8 @@ def run_suites(tree):
                                   "--forbid-only", "--reporter=dot"], tree, SUITE_TIMEOUT, env=env,
                                  first=signal.SIGINT, grace=PLAYWRIGHT_GRACE, port=port)
     out["browser"] = {"ok": code == 0, "tail": tail(so or se)}
+    if code != 0:
+        out["browser"]["failed"] = failed_tests((so or "") + "\n" + (se or ""))
     if to:
         out["browser"]["timedOut"] = True
     return out["browser"]["ok"], out, port
@@ -1192,6 +1270,10 @@ def gate(pr, dry_run, expect_head=""):
                       "The push has not reached it yet, or someone pushed again; run it again"
                       % (pr, lag[:12], want[:12]))
 
+    held = acquire_gate_lock(pr)
+    if held:
+        return refuse(held)
+
     fm = fixer()
     tree = server = None
     try:
@@ -1297,6 +1379,10 @@ def gate(pr, dry_run, expect_head=""):
                 stop_group(server)
                 server = None
         merge, why = verdict(gate_ok, walk, live, regate, main_ids)
+        if not gate_ok:
+            names = (res.get("vitest") or {}).get("failed") or (res.get("browser") or {}).get("failed") or []
+            if names:
+                why += ": " + "; ".join(names[:3]) + (" and %d more" % (len(names) - 3) if len(names) > 3 else "")
         res["walk"] = walk_summary(walk, live, regate, main_ids)
     finally:
         stop_group(server)
