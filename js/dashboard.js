@@ -1676,8 +1676,27 @@
         return cards;
     }
 
+    // The sync-bar check, as a function so a test can drive it. The blocker row is judged
+    // by its sweep's own time, as its card is (audit, 9 Oct 2026).
+    function aiTeamCheck() {
+        if (!_aiTeamState) return { status: 'warn', detail: 'Cards not yet loaded (loads in background)' };
+        if (_aiTeamState.error) return { status: 'warn', detail: 'Estate Status could not be read. Refresh to retry.' };
+        const missing = ['health', 'blockers'].filter(k => !_aiTeamState[k]);
+        if (missing.length) return { status: 'fail', detail: `No ${missing.join(' or ')} row in Estate Status: the Mac writer has not run.` };
+        const swept = (aiTeamPayload(_aiTeamState.blockers) || {}).sweptAt;
+        const ages = [['health', null], ['blockers', swept]].filter(([k, at]) => aiTeamRowAge(_aiTeamState[k], at) > AI_TEAM_STALE_MIN);
+        if (ages.length) {
+            const [k, at] = ages[0];
+            return { status: 'warn', detail: `Not updated since ${aiTeamClock(_aiTeamState[k], at)}. ${k === 'blockers' ? 'The blocker sweep (every 30 minutes) has stopped.' : 'The Mac writer (estate-status, every 10 minutes) has stopped.'}` };
+        }
+        return { status: 'pass', detail: `Updated ${aiTeamClock(_aiTeamState.health)}` };
+    }
+
     async function loadAiTeamHealth() {
         if (!document.getElementById('aiWorkCard') || !PAT) return;
+        // A placeholder while Airtable answers, so the section never sits blank (audit, 9 Oct 2026).
+        [['aiWorkCard', 'Agent Work'], ['aiDefectsCard', 'Defects'], ['aiBlockedCard', 'Bottleneck'], ['aiReworkCard', 'Fix of a Fix']]
+            .forEach(([id, label]) => { const el = document.getElementById(id); if (el && !el.textContent.trim()) renderAiTeamCard(id, { label, value: '…', sub: 'Loading from the Mac…', detail: '', cls: '' }); });
         let health, blockers;
         try {
             const rows = await airtableFetch(TABLES.estateStatus, {
@@ -2955,15 +2974,7 @@
                         }
                     },
                     {
-                        name: 'AI Team cards read from the Mac', kind: 'sync', run: () => {
-                            if (!_aiTeamState) return { status: 'warn', detail: 'Cards not yet loaded (loads in background)' };
-                            if (_aiTeamState.error) return { status: 'warn', detail: 'Estate Status could not be read. Refresh to retry.' };
-                            const missing = ['health', 'blockers'].filter(k => !_aiTeamState[k]);
-                            if (missing.length) return { status: 'fail', detail: `No ${missing.join(' or ')} row in Estate Status: the Mac writer has not run.` };
-                            const old = ['health', 'blockers'].filter(k => aiTeamRowAge(_aiTeamState[k]) > AI_TEAM_STALE_MIN);
-                            if (old.length) return { status: 'warn', detail: `Not updated since ${aiTeamClock(_aiTeamState[old[0]])}. The Mac writer (estate-status, every 10 minutes) has stopped.` };
-                            return { status: 'pass', detail: `Updated ${aiTeamClock(_aiTeamState.health)}` };
-                        }
+                        name: 'AI Team cards read from the Mac', kind: 'sync', run: () => aiTeamCheck()
                     },
                     {
                         name: 'Cash flow forecast renderable', kind: 'automation', run: () => {
