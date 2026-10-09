@@ -7866,9 +7866,15 @@ def your_step_split(output):
     return head[len(YOUR_STEP_MARK):].strip(), (rest[2:] if rest.startswith("\n\n") else rest.lstrip("\n"))
 
 
+# Never inside a step: each would read as part of the approved card (tenancy-record.py review, 9 Oct 2026).
+STEP_FORBIDDEN = (YOUR_STEP_DIVIDER, YOUR_STEP_MARK, "RECORD CHANGE:")
+
+
 def your_step_output(step, output):
     """The Agent Output with STEP on top and the original below the divider. Idempotent: an
-    output that already carries a block is re-wrapped, never wrapped twice."""
+    output that already carries a block is re-wrapped, never wrapped twice. A step line carrying
+    a mark that belongs to the approved card is dropped, so it can never become part of it."""
+    step = "\n".join(ln for ln in str(step or "").splitlines() if not any(mk in ln for mk in STEP_FORBIDDEN))
     _, original = your_step_split(output)
     return f"{YOUR_STEP_MARK} {str(step or '').strip()}\n\n{YOUR_STEP_DIVIDER}\n\n{original}"
 
@@ -8380,6 +8386,11 @@ def cmd_block(args):
         sys.exit("ERROR: --steps is only for a KEVIN wall: the written steps of a step only Kevin can take.")
     if steps and not STEPS_NUMBERED_RE.search(steps):
         sys.exit("ERROR: --steps must be numbered written steps (\"1. ... 2. ...\"), what Kevin does in order.")
+    # Steps sit ON TOP of an approved card. A typed divider, YOUR STEP: or RECORD CHANGE: line in them would read as
+    # part of what Kevin approved once the wall clears (tenancy-record.py review, 9 Oct 2026).
+    if steps and any(mark in steps for mark in STEP_FORBIDDEN):
+        sys.exit("ERROR: --steps may not carry the Your step divider, 'YOUR STEP:' or 'RECORD CHANGE:': write only "
+                 "what Kevin does.")
     if kind == "KEVIN" and t["outcome"] not in APPROVED:
         # A KEVIN wall on work Kevin has not approved has no door (review, 7 Oct 2026): the task
         # rests until the wall clears, the page offers "Done" only on approved work, and nothing
