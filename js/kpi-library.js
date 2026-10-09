@@ -111,6 +111,8 @@ const KPI_LIBRARY = [
       how: 'Count of a NAMED list of rental units that hold a live tenancy (started, not ended). A unit can exclude a tenant who is moving out, so it only counts once somebody else lives there. Named by record id because a quarter that says "the four units" with no list gets counted two ways.' },
     { tier: 2, group: 'Property pack', name: 'New monthly rent in payment from named tenants', shape: 'T5', status: 'live',
       how: 'Sum of contracted rent across a NAMED list of tenants and units, counted only while the tenancy reads In Payment. Each tenancy counts once. A replacement tenant in any unit not on the list is never counted, so the figure measures the plan and not general lettings.' },
+    { tier: 2, group: 'Property pack', name: 'Units moved to a new letting arrangement', shape: 'T3', status: 'live',
+      how: 'Count of a NAMED list of units moving from one letting arrangement to another (for example serviced accommodation to a letting agent), counting a unit only once a tenancy that STARTS on or after the move date is live in it. Every tenancy under the old arrangement, including old records left open, never counts.' },
     { tier: 2, group: 'Property pack', name: 'Self-managed properties fully compliant', shape: 'T3', status: 'live',
       how: 'Count of self-managed properties where gas (or a recorded no-gas mark), the electrical inspection and the insurance document are each in date AND have a file attached. States the number of properties it expects and warns when that count changes.' },
 ];

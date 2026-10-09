@@ -97,6 +97,11 @@ Added 2 Oct 2026 (Real Estate Q4 projects, rules in `js/re-kpis.js`, tests in
 - **New monthly rent in payment from named tenants.** Measures the plan, not general lettings:
   only the named tenants and units count, only while In Payment, each tenancy once. A
   replacement tenant elsewhere is deliberately invisible to it.
+- **Units moved to a new letting arrangement.** The named-units template with a move date. A
+  unit that changes arrangement (serviced accommodation to a letting agent, 9 Oct 2026) already
+  holds live tenancies, and some old records never got an end date, so "a live tenancy is
+  linked" would read the move as done on day one. Only a tenancy that starts on or after the
+  move date counts, and the old arrangement shows as "Still on the old arrangement".
 - **Self-managed properties fully compliant.** Certificate counts say how many documents are
   missing; this says how many properties are safe. In date AND on file for all three, with a
   "no gas" mark standing in for the gas certificate. It declares the number of properties it

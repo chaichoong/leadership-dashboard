@@ -187,10 +187,16 @@
     // ── KPI 5: named units with a signed tenant in ───────────────────────
     // units cfg: [{ id, label, stretch, excludeTenantIds }]   knownUnitIds: every unit id that loaded
     // tenancies: [{ id, unitIds, tenantIds, surname, start, end, payStatus, rent }]
-    function namedUnits({ units, tenancies, knownUnitIds, today }) {
+    // since (optional ISO date): only a tenancy that STARTS on or after it counts. For a move to a
+    // new letting arrangement (the Intus move, 9 Oct 2026), where the unit is already occupied
+    // under the old one and every old tenancy, however it is recorded, must never count.
+    function namedUnits({ units, tenancies, knownUnitIds, today, since }) {
         const alarms = [];
         const rows = (units || []).map(u => {
-            const live = liveInUnit(tenancies, u.id, u.excludeTenantIds, today);
+            const anyLive = liveInUnit(tenancies, u.id, u.excludeTenantIds, today);
+            const live = since ? anyLive.filter(t => iso(t.start) >= iso(since)) : anyLive;
+            // held counts every live tenancy, the excluded old tenant included, so the label survives the exclusion.
+            const held = since && !live.length ? liveInUnit(tenancies, u.id, [], today).length : 0;
             if (knownUnitIds && !knownUnitIds.includes(u.id)) alarms.push(red(`${u.label} is missing from the Rental Units table.`));
             // A tenancy with no start date is never live under the rule above. Say so, or a
             // let unit reads "Empty" for ever because one date was left blank.
@@ -202,10 +208,10 @@
             const incoming = live.length ? null : (tenancies || []).filter(t => (t.unitIds || []).includes(u.id) && t.start && iso(t.start) > iso(today)
                 && !(t.end && iso(t.end) < iso(t.start)) && !(t.tenantIds || []).some(id => skip.includes(id)))
                 .sort((a, b) => iso(a.start).localeCompare(iso(b.start)))[0] || null;
-            const outgoing = live.length ? [] : liveInUnit(tenancies, u.id, [], today);
+            const outgoing = live.length || since ? [] : liveInUnit(tenancies, u.id, [], today);
             return { id: u.id, label: u.label, stretch: !!u.stretch, filled: live.length > 0, tenant: live.map(t => t.surname).filter(Boolean).join(', '),
                 incoming: incoming ? { tenant: incoming.surname || '', start: iso(incoming.start) } : null,
-                outgoing: outgoing.map(t => t.surname).filter(Boolean).join(', ') };
+                outgoing: outgoing.map(t => t.surname).filter(Boolean).join(', '), held };
         });
         if (!(tenancies || []).length) alarms.push(red('No tenancies loaded.'));
         const committed = rows.filter(r => !r.stretch);

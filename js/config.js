@@ -1146,8 +1146,24 @@
         // The quarter the cash KPIs are compared against until Kevin sets a cash target.
         baselineLabel: 'Q3 average', baselineMonths: ['2026-07', '2026-08', '2026-09'],
         feedStaleDays: 4,
-        // The three Q4 projects whose KPI Compute Code calls ctx.reKpis (units, rent, compliance).
-        projectIds: ['recYhSC4pQTWAjD1o', 'reczzyVGR4Ci8CFob', 'recpaMGugoVrwTJde'],
+        // The Q4 projects whose KPI Compute Code calls ctx.reKpis (units, rent, compliance, intus).
+        // The fourth is the Intus move, Real Estate's fourth Q4 project: a one-quarter exception
+        // to the cap of three (Kevin, 9 Oct 2026).
+        projectIds: ['recYhSC4pQTWAjD1o', 'reczzyVGR4Ci8CFob', 'recpaMGugoVrwTJde', 'recGUIJ28kfPJBwy8'],
+        // The Intus move (Kevin, 9 to 10 Oct 2026): three units leave a serviced-accommodation
+        // arrangement for furnished lets through a letting agent. Each already holds live tenancies
+        // under the old arrangement, so a unit counts only once a tenancy that STARTS on or after
+        // the move date sits on it. Labels are read live by record id (this repo is public).
+        // excludeTenantIds: the old arrangement's own tenant record. A rent change is recorded as a
+        // NEW tenancy (house rule), so without this a re-dated old arrangement would read as moved.
+        intus: {
+            since: '2026-10-09',
+            units: [
+                { id: 'recQt9s4XMNW1IpNp', label: 'Moving unit 1', excludeTenantIds: ['recOWu8PsViCugn9g'] },
+                { id: 'recskqALqQ4VvL9l2', label: 'Moving unit 2', excludeTenantIds: ['recOWu8PsViCugn9g'] },
+                { id: 'rec4cTQjjLrVF6RNj', label: 'Moving stretch unit', stretch: true, excludeTenantIds: ['recOWu8PsViCugn9g'] },
+            ],
+        },
         // THIS REPO IS PUBLIC: no tenant name and no address is written here. Every label on
         // screen is read live from the Rental Units and Tenants tables by record id; the
         // `label` below is only the fallback shown if that record cannot be found.
@@ -1193,6 +1209,7 @@
             namedRent:    { committed: 2693, stretch: 6064 },
             personalNet:  { committed: 8300, stretch: 11996 },
             compliance:   { committed: 13, stretch: null },
+            intusUnits:   { committed: 2, stretch: 3 },
         },
     };
     // Property Certificates (tbl35rf9qtmq0P87r) and the Properties fields the compliance KPI reads.

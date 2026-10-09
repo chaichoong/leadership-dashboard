@@ -607,7 +607,8 @@ INVARIANTS = [
         # in: named units let, named rent in payment, properties compliant. The dashboard
         # works each one out on load and saves it to its project. The general check above
         # allows 14 days, which is too slow for numbers Roy and the agents are worked
-        # against weekly. These three must have been saved in the last 2 days.
+        # against weekly. These four must have been saved in the last 2 days (the fourth,
+        # the Intus move, joined 10 Oct 2026 as a one-quarter exception to the cap of three).
         #
         # The compute refuses to save when its inputs did not load (ctx.reKpis throws on a
         # red alarm), so a dead compliance fetch or a missing named unit stops the stamp
@@ -615,23 +616,23 @@ INVARIANTS = [
         "name": "q4-real-estate-kpis-are-current",
         "table": PROJECTS,
         "incident": "Q3 2026 — the real estate project KPI was read off a mixed personal-and-property basis all quarter; the Q4 KPIs are automated on the condition that they say so when they stop",
-        "asserts": "each of the three Q4 2026 real estate projects, while open => KPI Automated, compute code present, KPI Last Updated within 2 days",
+        "asserts": "each of the four Q4 2026 real estate projects, while open => KPI Automated, compute code present, KPI Last Updated within 2 days",
         "violation": (
             "AND(OR(RECORD_ID() = 'recYhSC4pQTWAjD1o', RECORD_ID() = 'reczzyVGR4Ci8CFob', "
-            "RECORD_ID() = 'recpaMGugoVrwTJde'), "
+            "RECORD_ID() = 'recpaMGugoVrwTJde', RECORD_ID() = 'recGUIJ28kfPJBwy8'), "
             "LEN({Closed On} & '') = 0, "
             "OR(NOT({KPI Automated} = 1), "
             "LEN({KPI Compute Code} & '') = 0, "
             "LEN({KPI Last Updated} & '') = 0, "
             "IS_BEFORE({KPI Last Updated}, DATEADD(NOW(), -2, 'days'))))"
         ),
-        # The three records themselves. If an id is mistyped or a record is deleted the
+        # The four records themselves. If an id is mistyped or a record is deleted the
         # control matches fewer than it should; zero fails the run outright.
         "control": ("OR(RECORD_ID() = 'recYhSC4pQTWAjD1o', RECORD_ID() = 'reczzyVGR4Ci8CFob', "
-                    "RECORD_ID() = 'recpaMGugoVrwTJde')"),
-        "control_means": "the three Q4 2026 real estate project records (retire this check when the quarter is closed)",
-        # All three or the check is asserting on fewer projects than it claims to.
-        "control_expected": 3,
+                    "RECORD_ID() = 'recpaMGugoVrwTJde', RECORD_ID() = 'recGUIJ28kfPJBwy8')"),
+        "control_means": "the four Q4 2026 real estate project records (retire this check when the quarter is closed)",
+        # All four or the check is asserting on fewer projects than it claims to.
+        "control_expected": 4,
         "field_probe": ("OR({KPI Automated} >= 0, LEN({KPI Compute Code} & '') >= 0, "
                         "LEN({KPI Last Updated} & '') >= 0, LEN({Closed On} & '') >= 0)"),
         "fields": ["Project Name", "KPI Name", "KPI Automated", "KPI Last Updated"],
