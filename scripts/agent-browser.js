@@ -1711,7 +1711,7 @@ async function waitForWindowClose(ctx, capMs, onTick) {
 // read on the page, citing one whole fact line and giving that line's own words, and press only a
 // button worded as moving on, read again the moment before it is pressed.
 const STANDING_FILE = () => process.env.AGENT_STANDING_ANSWERS || path.join(HANDOVER_DIR, 'standing-answers.json');
-const DECLARATION_TOPIC_RE = /\b(claims?|convict\w*|criminal|offences?|ccjs?|county court|judge?ments?|bankrupt\w*|refused|cancell?ed|voided|declined|special terms|terms imposed|imposed|charged?|prosecut\w*|investigat\w*|police|cautions?|insolven\w*|liquidat\w*|disqualif\w*|struck off|strike off|material facts?)\b/i;
+const DECLARATION_TOPIC_RE = /\b(claims?|convict\w*|criminal|offences?|ccjs?|county court|judge?ments?|bankrupt\w*|refused|cancell?ed|voided|declined|special terms|terms imposed|imposed|charged?|prosecut\w*|investigat\w*|police|cautions?|insolven\w*|liquidat\w*|disqualif\w*|struck off|strike off|material facts?|iva|individual voluntary|debt relief|sequestrat\w*|arrangements? with (?:your |their |its )?creditors|administration|administrators?|receivership)\b/i;
 const normWords = t => String(t || '').replace(/\s+/g, ' ').trim().toLowerCase();
 // A form that asks for a declaration, anywhere in it however long: his page.
 function declarationWords(text) {
@@ -2063,7 +2063,9 @@ async function carryOnPages(page, plan, opts, done) {
   };
   // A page that asks for a declaration is his, whole: every question on it, by name.
   const declarationPage = async (p, snap) => {
-    const word = declarationWords(snap.formText);
+    // The forms' text, and every question and option the robot read, wherever its words sit.
+    const word = declarationWords([snap.formText].concat(snap.items.map(i => [i.question, i.option || '']
+      .concat((i.options || []).map(o => (typeof o === 'string' ? o : o.label))).join(' '))).join(' | '));
     if (!word) return undefined;
     const qs = snap.items.map(i => i.question).filter(Boolean);
     return his(p, [`this page asks your declarations ("${word}")`].concat(qs).slice(0, 12), snap);
@@ -2137,9 +2139,12 @@ async function carryOnPages(page, plan, opts, done) {
     }
     try {
       // Read again the moment before the press: the page can have changed under a saved target.
-      const nowText = await page.locator(next.target).first().evaluate(el => String(el.innerText || el.value || el.getAttribute('aria-label') || '').replace(/\s+/g, ' ').trim(), null, { timeout: 15000 });
+      const [nowText, nowAria] = await page.locator(next.target).first().evaluate(el => [String(el.innerText || el.value || '').replace(/\s+/g, ' ').trim(),
+        [el.getAttribute('aria-label'), el.getAttribute('title')].filter(Boolean).join(' ')], null, { timeout: 15000 });
       const nowSnap = await snapshotForm(page);
-      if (!MOVE_ON_RE.test(nowText) || declarationWords(nowSnap.formText)) {
+      // Its hidden words count too: "Continue" labelled "Accept and continue" is an agreement.
+      if (!MOVE_ON_RE.test(nowText) || HARD_ACTION_RE.test(nowAria) || SOFT_PRESS_RE.test(nowAria) || declarationWords(nowAria)
+          || declarationWords([nowSnap.formText].concat(nowSnap.items.map(i => i.question)).join(' | '))) {
         const r = await his(p, [`press "${nowText || next.text}" (the page changed before the robot pressed it)`], nowSnap);
         if (r) return r;
         continue;

@@ -51,6 +51,9 @@ describe('a page that asks for a declaration is his, whole', () => {
     expect(b.declarationWords('In the last 10 years, have you had any of the following? A county court judgment')).toBe('county court');
     expect(b.declarationWords('I declare the information is true')).toMatch(/declare/);
     expect(b.declarationWords('Has the property been flooded? How many bedrooms?')).toBe('');
+    // review round 4: insolvency wording.
+    for (const q of ['Have you ever entered an IVA?', 'a debt relief order', 'an arrangement with your creditors', 'Has the company been in administration?'])
+      expect(b.declarationWords(q), q).not.toBe('');
   });
 });
 
@@ -194,6 +197,10 @@ const PAGES = {
     <div class="q"><label for="pc2">Postcode</label><input id="pc2"></div></form>
     <div><p>Have you had any claims in the last 5 years?</p><input type="radio" name="cl" id="cl1"><label for="cl1">Yes</label><input type="radio" name="cl" id="cl2"><label for="cl2">No</label></div>
     <button type="button">Next</button></body></html>`,
+  // review round 4: the question's words outside the box that holds its answers, in no form.
+  '/q-outside': `<!doctype html><html><body><h1>About you</h1><form><div class="q"><label for="fn2">First name</label><input id="fn2"></div></form>
+    <div class="q"><p>Have you made any claims in the last 5 years?</p><div class="opts"><input type="radio" name="oc" id="oc1"><label for="oc1">Yes</label>
+    <input type="radio" name="oc" id="oc2"><label for="oc2">No</label></div></div><button type="button">Next</button></body></html>`,
   // A footer "Make a claim" link sits outside the form: the page is not a declaration page.
   '/q-footer': `<!doctype html><html><body><h1>Your property</h1><form action="/p3" method="get"><div class="q"><label for="listed">Is the property listed?</label>
     <select id="listed" name="listed"><option value="">Select</option><option>Yes</option><option>No</option></select></div><button id="nf" type="submit">Next</button></form>
@@ -343,9 +350,11 @@ describe('the Your turn window carries on, page by page, to the price', () => {
   }, 120000);
 
   it('review round 4: declarations in no form, beside a form that holds the other answers, still make the page his', async () => {
-    const { last, x } = await dryRun('/q-twoforms');
-    expect(last.stuck.unknown[0]).toMatch(/this page asks your declarations \("claims"\)/);
-    expect(ledgerOf(x).find(l => l.cmd === 'handover-dry-run').steps.filter(s => s.carryOn)).toEqual([]);
+    for (const path of ['/q-twoforms', '/q-outside']) {
+      const { last, x } = await dryRun(path);
+      expect(last.stuck.unknown[0], path).toMatch(/this page asks your declarations \("claims"\)/);
+      expect(ledgerOf(x).find(l => l.cmd === 'handover-dry-run').steps.filter(s => s.carryOn), path).toEqual([]);
+    }
   }, 120000);
 
   it('a "Make a claim" link outside the form leaves the page the robot\'s: it answers from the facts and moves on', async () => {
