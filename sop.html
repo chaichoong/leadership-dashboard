@@ -181,7 +181,7 @@ li { margin-bottom:0.2rem; font-size:0.9rem; } hr { border:none; border-top:1px 
       <a href="#smart-refresh"><span class="toc-num">13</span> Smart Refresh System</a>
       <a href="#apps-script"><span class="toc-num">14</span> Google Apps Script Setup</a>
       <a href="#troubleshooting"><span class="toc-num">15</span> Troubleshooting</a>
-      <a href="#ai-workforce"><span class="toc-num">16</span> AI Workforce &amp; Labour Saved</a>
+      <a href="#ai-workforce"><span class="toc-num">16</span> AI Team &amp; Labour Saved</a>
       <a href="#changelog"><span class="toc-num">17</span> Changelog</a>
     </div>
   </div>
@@ -785,9 +785,20 @@ li { margin-bottom:0.2rem; font-size:0.9rem; } hr { border:none; border-top:1px 
 
 <!-- ============ 16. AI WORKFORCE & LABOUR SAVED ============ -->
 <div class="section" id="ai-workforce">
-  <h2 class="section-title"><span class="icon">&#x1F916;</span> 16. AI Workforce &amp; Labour Saved</h2>
+  <h2 class="section-title"><span class="icon">&#x1F916;</span> 16. AI Team &amp; Labour Saved</h2>
   <div class="card">
-    <p>Four cards at the bottom of the KPI grid track the north star: getting up to 90% of repeatable operational work done by AI agents. Two of them measure the outcome.</p>
+    <p>Since 9 Oct 2026 every AI card sits in its own <strong>AI Team</strong> section, below the 31-Day Operational Metrics. Four health cards come first. They say whether the AI team is keeping up, and they are read from the Mac (the Estate Status rows <code>ai-team-health</code> and <code>agent-blockers</code>, written every 10 minutes by <code>scripts/estate-status.py</code>).</p>
+    <table class="label-table">
+      <thead><tr><th>Card</th><th>What it shows</th></tr></thead>
+      <tbody>
+        <tr><td><strong>Agent Work</strong></td><td>Tasks owned by an AI agent that are open, how many are not moving, and over 7 days how many came in against how many were done. Amber when more came in than got done.</td></tr>
+        <tr><td><strong>Defects</strong></td><td>Problems the robots and daily checks logged for fixing: open now, and filed against fixed over 7 days. Red when more were filed than fixed.</td></tr>
+        <tr><td><strong>Bottleneck</strong></td><td>How many robot tasks are blocked, the biggest kind of block (a code fix, a step only you can do, a sign-in, a site to add) and how many need you. Red when a block is 3 days old.</td></tr>
+        <tr><td><strong>Fix of a Fix</strong></td><td>The one number: of the fixes in the last 14 days, the share that fixed an earlier fix. Baseline 32%. Green at or under it, red over 40%.</td></tr>
+      </tbody>
+    </table>
+    <p><strong>Trust guard:</strong> a row older than two hours shows "Not updated since &hellip;" in amber, and a row the Mac could not build shows its reason instead of a number. The health bar's "AI Team cards read from the Mac" check says the same.</p>
+    <p>The four cards that follow track the north star: getting up to 90% of repeatable operational work done by AI agents. Two of them measure the outcome.</p>
     <table class="label-table">
       <thead><tr><th>Card</th><th>What it shows</th></tr></thead>
       <tbody>
@@ -810,6 +821,11 @@ li { margin-bottom:0.2rem; font-size:0.9rem; } hr { border:none; border-top:1px 
     <table class="label-table">
       <thead><tr><th>Version</th><th>Date</th><th>Changes</th></tr></thead>
       <tbody>
+        <tr>
+          <td><strong>2.140</strong></td>
+          <td>9 Oct 2026</td>
+          <td>New AI Team section: Agent Work, Defects, Bottleneck and Fix of a Fix cards, with the four existing AI cards moved into it from the 31-Day Operational Metrics.</td>
+        </tr>
         <tr>
           <td><strong>2.94</strong></td>
           <td>3 Sep 2026</td>

@@ -73,6 +73,10 @@ AI workforce
 19. **Agent accuracy %** — T4 per agent per task type. Standardise on `js/agent-accuracy.js` (20 decisions, ≥90%, no recent rejections). The platform currently has THREE competing accuracy definitions (agent-accuracy.js, prospecting funnel, inbound-comms localStorage) — the library carries ONE.
 20. **Approvals waiting** — T3: tasks at Status Approval.
 21. **AI agents live** — T3 on workflow agent states.
+22. **Agent work in vs out** — T3: open agent tasks, not moving, and created against done in 7 days. *Live (9 Oct 2026),* on the AI Team section of the Leadership Dashboard.
+23. **Defect queue in vs out** — T3: open findings, and filed against fixed in 7 days. *Live.* Computed on the Mac, because the queue is a local file.
+24. **Robots blocked (bottleneck)** — T3 on the blocker sweep, by kind, with the count that needs Kevin. *Live.*
+25. **Fix-of-a-fix rate** — T4 from `scripts/rework-rate.py` over 14 days, against the 32% baseline. *Live.* Kevin's one number for estate health (brain Decisions/2026-10-09): defects arriving faster than they are fixed show up here first.
 
 ## 3. Tier 2 — Property pack (add-on only)
 

@@ -392,7 +392,24 @@ def report():
                       "tasksRead": len(tasks), "royRows": len(roy_ids),
                       "waitingApprovals": waiting, "decideAnchored": anchored}
     res["lanes"] = {lane: sum(1 for s in res["stalled"] if s["lane"] == lane) for lane in LANES}
+    res["flow"] = agent_flow(fields, agent_ids, linked, len(res["done"]))
     return res
+
+
+def agent_flow(fields, agent_ids, open_linked, done_7d, now=None):
+    """In versus out for the AI team card on the Leadership Dashboard (Kevin, 9 Oct 2026):
+    agent tasks created in the last 7 days against agent tasks done in the same 7 days.
+    The read above covers every task created in the window (open, or completed inside
+    8 days), so the count is whole, not a sample."""
+    now = now or datetime.now(timezone.utc)
+    created = 0
+    for f in fields:
+        if not any(x in agent_ids for x in (f.get("Team Member") or [])):
+            continue
+        h = hours_since(f.get("Created Time"), now)
+        if h is not None and h <= 7 * 24:
+            created += 1
+    return {"agentOpen": open_linked, "agentCreated7d": created, "agentDone7d": done_7d}
 
 
 def main():
