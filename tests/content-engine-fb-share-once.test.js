@@ -1,9 +1,13 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { execFileSync } from 'child_process';
 import { mkdtempSync, writeFileSync, mkdirSync } from 'fs';
 import { tmpdir } from 'os';
 import { resolve, dirname, join } from 'path';
 import { fileURLToPath } from 'url';
+// Real Chrome launches in this file. 90s, not the suite's 30s (9 Oct 2026): in the merge
+// gate's throwaway tree, with the full suite running in parallel, a launch alone went past 30s
+// and refused PRs all day (the first three files got this in #751; these are the rest).
+vi.setConfig({ testTimeout: 90_000, hookTimeout: 90_000 });
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 // CE_DIR lets the back-test point this file at an older copy of the engine
