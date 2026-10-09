@@ -13,7 +13,7 @@
     const READ_TIMEOUT_MS = 30 * 1000;
     const AUTO_RELOAD_MS = 5 * 60 * 1000;
     // The AI Agents queue's own formula (os/agents/index.html APV_QUEUE_FORMULA); its lane filter is applied below.
-    const QUEUE_FORMULA = "AND({Status}='Approval', LEN({Sent For Approval By}&'')>0, NOT(IS_AFTER({Deferred Until}, TODAY())))";
+    const QUEUE_FORMULA = "AND({Status}='Approval', LEN({Sent For Approval By}&'')>0, NOT(IS_AFTER({Deferred Until}, TODAY())), NOT(AND(LEFT({Agent Output}&'', 10)='YOUR STEP:', FIND('KEVIN STEP ', {Approval Feedback}&'')>0)))";
     const recordUrl = (tbl, id) => `https://airtable.com/${BASE_ID}/${tbl}/${id}`;
 
     let _state = { phase: 'idle' };   // idle | loading | ready | error
@@ -69,6 +69,12 @@
                 readEstateRow(H.ESTATE_KEYS.rent),
             ]);
             const tasks = taskRecs.map(H.toTask);
+            // A card he has answered left the queue (QUEUE_FORMULA leaves it out until the sweep takes it):
+            // it is not "waiting for your approval" on Home either (Kevin, 9 Oct 2026).
+            if (queueRecs) {
+                const live = new Set(queueRecs.map(q => q.id));
+                tasks.forEach(t => { if (t.inQueue && !live.has(t.id)) t.answered = true; });
+            }
             const mine = queueRecs ? queueRecs.filter(q => H.isKevinsLane(((q.fields || {}).Approver || {}).email)) : null;
             const list = H.buildHomeList({ tasks, today, needsRow, blockersRow, now });
             _state = { phase: 'ready', today, list, openTasks: tasks.length, tasks,

@@ -7081,7 +7081,17 @@ def cmd_signin_done(args):
     host = signin_site_for("", "https://" + args.site + "/", sites) or signin_site_for(args.site, "", sites)
     if not host:
         sys.exit(f"ERROR: {args.site!r} is not a login site on the allowlist")
-    print(json.dumps(signin_done(host, sites), indent=2))
+    out = signin_done(host, sites)
+    # A SITE wall his window answered clears now, not at the next half-hourly sweep. Never fatal:
+    # the sweep still judges every wall, so a failed read here only means the card waits for it.
+    try:
+        woke = wake_site_walls_answered(sites)
+    except Exception as exc:  # noqa: BLE001 — said on the output, never read as "nothing answered"
+        out["siteWallsError"] = str(exc)[:200]
+        woke = []
+    # Its own key: the app counts handedBack as this site's tasks, and these are walls on other addresses.
+    out["siteWallsCleared"] = [{"task": w["task"], "name": w["name"], "siteWall": w["subject"]} for w in woke]
+    print(json.dumps(out, indent=2))
 
 
 def signin_done(host, sites, groups=None):
@@ -7772,6 +7782,46 @@ def kevin_tried_reason(kind, host, sites, since, profile="default", events=None)
     return ""
 
 
+def kevin_tried_wall_reason(b, sites, events, now=None):
+    """kevin_tried_reason for wall B, with the sweep's reason line, or ''. Looks back from the wall's
+    opening or KEVIN_TRIED_DAYS, whichever is earlier: the loop Kevin met re-opens the wall AFTER his
+    try (the pickup reads signed out, the agent blocks again), so a try counted only after the wall's
+    own opening is never seen. Shared by the sweep and signin-done, so the two never disagree."""
+    look = kevin_tried_since(now)
+    if b.get("since") and _utc(b["since"]) and _utc(b["since"]) < _utc(look):
+        look = b["since"]
+    tried = kevin_tried_reason(b["kind"], blocker_host(b["subject"]), sites, look,
+                               b.get("profile") or "default", events)
+    return f"{tried}. {KEVIN_TRIED_ROUTE}" if tried else ""
+
+
+def wake_site_walls_answered(sites, events=None, now=None):
+    """SITE walls Kevin's sign-in window has just answered, woken now (Kevin, 9 Oct 2026: "When I sign
+    into a site, it just stays there"). On 9 Oct his AXA window closed at 10:58 UTC and the axa.co.uk
+    wall stood until the 11:00 sweep; a sweep run that overruns the next tick (the 11:30 one was still
+    going at 12:02) holds such a card an hour. The same judgement as the sweep (blocker_clear_reason,
+    then his try), on the
+    default profile only, never a session walk: signin-done runs while the app shows him a progress box."""
+    recs = query_tasks(f"AND(NOT({{Status}}='Completed'), FIND('{BLOCKER_OPEN_MARK} (SITE', {{Notes}}))")
+    events = signin_hold.load_events(BROWSER_LEDGER) if events is None else events
+    woke = []
+    for rec in recs:
+        t = task_view(rec)
+        b = task_blocker(t["notes"])
+        if not b or b["kind"] != "SITE" or (b.get("profile") or "default") != "default":
+            continue
+        if has_step_mark((rec.get("fields") or {}).get(AF["approvalFeedback"]) or ""):
+            # He has answered the card ("I can't do this"): the sweep sends it back, as it always has.
+            continue
+        reason = blocker_clear_reason(b, sites, {}) or kevin_tried_wall_reason(b, sites, events, now)
+        if not reason:
+            continue
+        w = wake_blocked(t["id"], b, reason, by="Robot sign-in")
+        if w:
+            woke.append(w)
+    return woke
+
+
 def kevin_wall_answer_nearby(events, host, since, profile="default"):
     """(at, signed-in host, wall) of his newest window opened for a SITE wall on HOST with or without
     its leading "www." (axa.co.uk for www.axa.co.uk), or None. After "use landlordaxainsurance.com" for
@@ -7989,6 +8039,32 @@ def _kevin_step_said(regex, feedback, since):
     return evidence, last.group(1)
 
 
+# THE UNDO WINDOW (Kevin, 9 Oct 2026: "there needs to be an undo button on the page so we can go back
+# and rectify it rather than submit incorrect information"). His 12:59 "the robot quit halfway" landed
+# on 82 Devon Street 21 seconds after the Everywhen window closed. The page keeps Undo on a done or
+# can't line for two minutes (APV_STEP_UNDO_MS); the sweep leaves the line alone until it is older than
+# this, so an Undo can never lose a race with a send-back. A minute over the page's window, for drift
+# between the clock of the Mac he answered on and this one.
+STEP_SETTLE_SECONDS = 180
+
+
+def step_line_settling(feedback, now=None):
+    """True while Kevin's newest KEVIN STEP DONE or CANT line is younger than STEP_SETTLE_SECONDS.
+    A stamp more than ten minutes ahead of this clock is not held: a wrong clock must never hold a
+    card back for hours."""
+    now = now or datetime.now(timezone.utc)
+    newest = None
+    for regex in (KEVIN_DONE_RE, KEVIN_CANT_RE):
+        for m in regex.finditer(str(feedback or "")):
+            at = _utc(m.group(1))
+            if at and (newest is None or at > newest):
+                newest = at
+    if newest is None:
+        return False
+    age = (now - newest).total_seconds()
+    return -600 < age < STEP_SETTLE_SECONDS
+
+
 def has_step_mark(feedback):
     """True when Approval Feedback holds a KEVIN STEP DONE or KEVIN STEP CANT line."""
     raw = str(feedback or "")
@@ -8004,7 +8080,7 @@ def without_done_marks(feedback):
     return out or None
 
 
-def wake_blocked(task_id, b, reason, by="agent-dispatch"):
+def wake_blocked(task_id, b, reason, by="agent-dispatch", done_stamp=""):
     """Clear the wall and hand the task back to its agent, keeping Kevin's
     verdict. The ledger's `unblocked` event ends the idle rest at once, so an
     approved carry-out is picked up by the next half-hourly poll; a task not
@@ -8021,6 +8097,13 @@ def wake_blocked(task_id, b, reason, by="agent-dispatch"):
         # minutes later). A CLEARED line now would clear THAT wall, which nothing has fixed: leave
         # it for the next sweep to judge on its own (review, 7 Oct 2026).
         return None
+    if done_stamp:
+        # Woken on his "done": it must still stand on this fresh read. He may have pressed Undo after
+        # the sweep's bulk read, and a sweep can take minutes to reach his task (review, 9 Oct 2026).
+        fresh = (rec.get("fields") or {}).get(AF["approvalFeedback"]) or ""
+        said = kevin_done_said(fresh, b.get("since", ""))
+        if not said or said[1] != done_stamp or step_line_settling(fresh):
+            return None
     stamp = datetime.now(LONDON).strftime("%d %b %Y %H:%M")
     note = blocker_note(stamp, by, BLOCKER_CLEARED_MARK, b,
                         f"{reason}. Carry on from where you stopped and finish the job. "
@@ -8090,6 +8173,9 @@ def send_back_blocked(task_id, b):
     done = kevin_done_said(feedback, b.get("since", ""))
     if not cant or (done and (_utc(done[1]) or datetime.min.replace(tzinfo=timezone.utc))
                     >= (_utc(cant[1]) or datetime.min.replace(tzinfo=timezone.utc))):
+        return None
+    if step_line_settling(feedback):
+        # Inside his Undo window on this fresh read: the next sweep takes it.
         return None
     # Never cut: the page's Feedback History line holds his whole reason, and a cut copy reads as new
     # words to cmd_submit's archive, which then stamps a second can't line on the resubmit's date.
@@ -8617,6 +8703,7 @@ def blockers_scan(sweep=False, now=None):
         return lazy[key]
 
     open_walls, woken, stale, surfaced, done_refused, plan_repairs, sent_back = [], [], [], [], [], [], []
+    settling = []   # his done or can't lines still inside the page's Undo window
     for rec in recs:
         t = task_view(rec)
         b = task_blocker(t["notes"])
@@ -8627,16 +8714,7 @@ def blockers_scan(sweep=False, now=None):
         if not reason and b["kind"] in ("SIGN-IN", "SITE") and not sites_error:
             events, _ = once("events", lambda: signin_hold.load_events(BROWSER_LEDGER))
             if events is not None:
-                # From the wall's opening or KEVIN_TRIED_DAYS back, whichever is earlier: the loop
-                # Kevin met re-opens the wall AFTER his try (the pickup reads signed out, the agent
-                # blocks again), so a try counted only after the wall's own opening is never seen.
-                look = kevin_tried_since(now)
-                if b.get("since") and _utc(b["since"]) and _utc(b["since"]) < _utc(look):
-                    look = b["since"]
-                tried = kevin_tried_reason(b["kind"], blocker_host(b["subject"]), sites, look,
-                                           b.get("profile") or "default", events)
-                if tried:
-                    reason = f"{tried}. {KEVIN_TRIED_ROUTE}"
+                reason = kevin_tried_wall_reason(b, sites, events, now)
         raw_feedback = (rec.get("fields") or {}).get(AF["approvalFeedback"]) or ""
         done = kevin_done_said(raw_feedback, b.get("since", "")) if b["kind"] == "KEVIN" else None
         cant = (kevin_cant_said(raw_feedback, b.get("since", ""))
@@ -8647,6 +8725,14 @@ def blockers_scan(sweep=False, now=None):
                 done = None
             else:
                 cant = None
+        # A line inside his Undo window is his to take back: nothing here acts on it, or wipes it, yet.
+        settling_now = sweep and step_line_settling(raw_feedback)
+        if settling_now:
+            # Nothing acts on the task this sweep: a wake for another reason (his own sign-in window) would
+            # take his can't line out, and before 9 Oct his can't won. The next sweep decides.
+            settling.append({"task": t["id"], "name": t["name"][:80]})
+            done = cant = None
+            reason = ""
         if cant and sweep:
             sent = send_back_blocked(t["id"], b)
             if sent:
@@ -8657,11 +8743,12 @@ def blockers_scan(sweep=False, now=None):
             # the receipt before it closes the task (GUARDRAILS "Kevin's turn").
             reason = f"Kevin says the step is done: {done[0][:400]}"
         if reason and sweep:
-            woke = wake_blocked(t["id"], b, reason, by="Kevin" if done else "agent-dispatch")
+            woke = wake_blocked(t["id"], b, reason, by="Kevin" if done else "agent-dispatch",
+                                done_stamp=done[1] if done and reason.startswith("Kevin says the step is done") else "")
             if woke:
                 woken.append(woke)
                 continue
-        if sweep and not done and not cant and has_step_mark(raw_feedback):
+        if sweep and not settling_now and not done and not cant and has_step_mark(raw_feedback):
             # A done or can't line the sweep cannot take (written before this wall opened, or
             # with no words) comes out, with a note, so the page offers the box again rather than
             # showing "you said it is done" for ever (review, 7 Oct 2026). Judged again on a
@@ -8772,6 +8859,7 @@ def blockers_scan(sweep=False, now=None):
             "stale": stale, "closedWhileBlocked": closed_blocked,
             "surfaced": surfaced, "doneRefused": done_refused, "planRepairs": plan_repairs,
             "sentBack": sent_back,
+            "settling": settling,
             "sitesError": sites_error, "findingsError": findings_error,
             # The lazy reads that failed, by name (ledger, cards, details). Never fatal, never silent.
             "readErrors": {k: v[1] for k, v in lazy.items() if v[1]}}

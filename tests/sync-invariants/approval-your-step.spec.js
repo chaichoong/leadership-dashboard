@@ -8,7 +8,9 @@
 //   2. Done writes his proof into Approval Feedback under KEVIN STEP DONE, keeping any note
 //      already there, and never touches the verdict, the status or Approved At.
 //   3. No route can write a verdict on it: the card's own write path refuses (a no-op).
-//   4. A proof already given shows as given, with no second box.
+//   4. An answered card leaves the queue at once (Kevin, 9 Oct 2026: "It needs to disappear once
+//      I've answered it"), with Undo for two minutes in a bar at the foot of the window; past that,
+//      one line says how many answered cards are going back to the agents.
 // Airtable is mocked (agents-page.helpers.js), so this runs with no PAT. Names are invented.
 const { test, expect } = require('@playwright/test');
 const { TF, AGENT_A, defaultFixtures, mockAgentsPage, loadAgentsPage } = require('./agents-page.helpers');
@@ -99,8 +101,9 @@ test.describe('Your step: an approved card back in his lane', () => {
     for (const k of [TF.approvalOutcome, TF.approvedAt, TF.status, TF.agentOutput, TF.completionDate]) {
       expect(k in p, `the Done box wrote ${k}`).toBe(false);
     }
-    await expect(page.locator(`[data-apv-card="${ID}"] [data-apv-step-said]`)).toContainText('You said it is done');
-    await expect(page.locator(`[data-apv-card="${ID}"] [data-apv-step-done]`)).toHaveCount(0);
+    await expect(page.locator(`[data-apv-card="${ID}"]`)).toHaveCount(0);
+    await expect(page.locator(`[data-apv-answered="${ID}"]`)).toContainText('Done: ');
+    await expect(page.locator(`[data-apv-answered="${ID}"] [data-apv-step-undo]`)).toBeVisible();
   });
 
   test('approving it again is a no-op: the write path refuses it and Select all never ticks it', async ({ page }) => {
@@ -144,8 +147,9 @@ test.describe('Your step: an approved card back in his lane', () => {
     const p = patches.find((x) => x.id === ID).fields;
     expect(p[FEEDBACK]).toMatch(/^KEVIN STEP DONE \[[^\]]+\]: Attached: receipt\.pdf, signed-copy\.png$/);
     expect(p[TF.feedbackHistory]).toMatch(/Done, here is the proof: Attached: receipt\.pdf, signed-copy\.png$/);
-    await expect(page.locator(`[data-apv-card="${ID}"] [data-apv-step-said]`))
-      .toContainText('Attached: receipt.pdf, signed-copy.png. The robot checks it');
+    await expect(page.locator(`[data-apv-card="${ID}"]`)).toHaveCount(0);
+    await expect(page.locator(`[data-apv-answered="${ID}"] .apv-answered-text`))
+      .toHaveAttribute('title', 'Attached: receipt.pdf, signed-copy.png');
   });
 
   // Kevin, 8 Oct 2026: a portal opened on a login he has no account for, and the card
@@ -170,31 +174,148 @@ test.describe('Your step: an approved card back in his lane', () => {
     for (const k of [TF.approvalOutcome, TF.approvedAt, TF.status, TF.agentOutput, TF.completionDate]) {
       expect(k in p, `the can't button wrote ${k}`).toBe(false);
     }
-    const said = page.locator(`[data-apv-card="${ID}"] [data-apv-step-said]`);
-    await expect(said).toContainText("You said you can't do this");
-    await expect(said).toContainText('we have no account. Attached: login-screen.png. Within half an hour it goes back to');
-    await expect(said).toContainText('as Request changes, to find another way');
-    await expect(page.locator(`[data-apv-card="${ID}"] [data-apv-step-cant]`)).toHaveCount(0);
+    await expect(page.locator(`[data-apv-card="${ID}"]`)).toHaveCount(0);
+    await expect(page.locator(`[data-apv-answered="${ID}"]`)).toContainText("You can't do it: ");
   });
 
-  test("a can't already given shows as given, the newer line winning over an older done", async ({ page }) => {
+  test('an answer given earlier keeps the card off the queue and out of its count, said in one line', async ({ page }) => {
     await mockAgentsPage(page, withStep({ feedback:
       'KEVIN STEP DONE [2026-10-07T10:00:00.000Z]: paid\nKEVIN STEP CANT [2026-10-07T11:00:00.000Z]: the form wants a director' }));
     await loadAgentsPage(page);
     await page.click('#ptab-approvals');
-    const card = page.locator(`[data-apv-card="${ID}"]`);
-    await expect(card.locator('[data-apv-step-said]')).toContainText("You said you can't do this");
-    await expect(card.locator('[data-apv-step-said]')).toContainText('the form wants a director');
-    await expect(card.locator('[data-apv-step-done]')).toHaveCount(0);
+    await expect(page.locator('[data-apv-card="recApvB1"]')).toBeVisible();
+    await expect(page.locator(`[data-apv-card="${ID}"]`)).toHaveCount(0);
+    await expect(page.locator('#apvAnsweredLine')).toHaveText('1 answered card going back to the agents at the next check (every half hour).');
+    await expect(page.locator('#apvAnsweredLine')).toHaveAttribute('title', 'INSURANCE: Example Lane cover');
+    const shown = await page.locator('#approvalsBody .apv-card').count();
+    await expect(page.locator('#approvalsCount')).toHaveText(String(shown));
+    await expect(page.locator(`[data-apv-answered="${ID}"]`)).toHaveCount(0);   // past its two minutes: no Undo
   });
+});
 
-  test('a proof already given shows as given, with no second box', async ({ page }) => {
-    await mockAgentsPage(page, withStep({ feedback: 'KEVIN STEP DONE [2026-10-07T10:00:00.000Z]: paid, ref EX-12' }));
+// THE UNDO (Kevin, 9 Oct 2026): "when you're scrolling around the page, sometimes you can put the
+// information into the wrong box and submit it by mistake ... there needs to be an undo button on the
+// page so we can go back and rectify it". The record is made live here (a read returns what the
+// writes left), because Undo decides on a fresh read.
+function liveRecord(page, fx) {
+  const writes = [];
+  const rec = fx.approvals.find((r) => r.id === ID);
+  return page.route((url) => url.pathname.endsWith('/' + ID), async (route) => {
+    const req = route.request();
+    if (req.method() === 'PATCH') {
+      const fields = JSON.parse(req.postData() || '{}').fields;
+      writes.push(fields);
+      Object.assign(rec.fields, fields);
+      return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ id: ID, fields: rec.fields }) });
+    }
+    return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(rec) });
+  }).then(() => writes);
+}
+
+test.describe('Undo on an answered Your step card', () => {
+  test.use({ userAgent: 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0 Safari/537.36' });
+
+  test("Undo inside two minutes takes his line and its history entry back out, and the card returns with his words", async ({ page }) => {
+    const fx = withStep({ feedback: 'Use the business card.' });
+    fx.approvals.find((r) => r.id === ID).fields[TF.feedbackHistory] = '[2026-10-01 09:00] Approved as-is.';
+    await mockAgentsPage(page, fx);
+    const writes = await liveRecord(page, fx);
     await loadAgentsPage(page);
     await page.click('#ptab-approvals');
+    const before = Number(await page.locator('#approvalsCount').textContent());
     const card = page.locator(`[data-apv-card="${ID}"]`);
-    await expect(card.locator('[data-apv-step-said]')).toContainText('paid, ref EX-12');
-    await expect(card.locator('[data-apv-step-done]')).toHaveCount(0);
+    await card.locator(`#apvNote-${ID}`).fill('The robot quit halfway');
+    await card.locator('[data-apv-step-cant]').click();
+    await expect(card).toHaveCount(0);
+    await expect(page.locator('#approvalsCount')).toHaveText(String(before - 1));
+    const row = page.locator(`[data-apv-answered="${ID}"]`);
+    await expect(row.locator('[data-apv-left]')).toHaveText(/^[12]:\d\d$/);
+    await row.locator('[data-apv-step-undo]').click();
+    await expect(page.locator(`[data-apv-card="${ID}"]`)).toBeVisible();
+    await expect(page.locator(`#apvNote-${ID}`)).toHaveValue('The robot quit halfway');
+    await expect(page.locator(`[data-apv-answered="${ID}"]`)).toHaveCount(0);
+    await expect(page.locator('#approvalsCount')).toHaveText(String(before));
+    expect(writes).toHaveLength(2);
+    expect(writes[0][FEEDBACK]).toMatch(/^Use the business card\.\nKEVIN STEP CANT \[[^\]]+\]: The robot quit halfway$/);
+    expect(writes[1][FEEDBACK]).toBe('Use the business card.');
+    expect(writes[1][TF.feedbackHistory]).toBe('[2026-10-01 09:00] Approved as-is.');
+    for (const k of [TF.approvalOutcome, TF.approvedAt, TF.status, TF.agentOutput]) expect(k in writes[1]).toBe(false);
+    // Answered again, on the right footing: one line, as the first time.
+    await page.locator(`#apvNote-${ID}`).fill('Everywhen quit halfway, not this one');
+    await page.locator(`[data-apv-card="${ID}"] [data-apv-step-cant]`).click();
+    await expect.poll(() => writes.length).toBe(3);
+    expect(writes[2][FEEDBACK]).toMatch(/^Use the business card\.\nKEVIN STEP CANT \[[^\]]+\]: Everywhen quit halfway, not this one$/);
+  });
+
+  test('an answer given a minute ago, in another tab, offers Undo after a reload', async ({ page }) => {
+    const stamp = new Date(Date.now() - 60000).toISOString();
+    const fx = withStep({ feedback: `KEVIN STEP DONE [${stamp}]: paid, ref EX-12` });
+    await mockAgentsPage(page, fx);
+    const writes = await liveRecord(page, fx);
+    await loadAgentsPage(page);
+    await page.click('#ptab-approvals');
+    await expect(page.locator(`[data-apv-card="${ID}"]`)).toHaveCount(0);
+    const row = page.locator(`[data-apv-answered="${ID}"]`);
+    await expect(row).toContainText('Done: ');
+    await expect(row.locator('[data-apv-left]')).toHaveText(/^[01]:\d\d$/);
+    await expect(page.locator('#apvAnsweredLine')).toHaveText('');   // in the bar, not the line
+    await row.locator('[data-apv-step-undo]').click();
+    await expect(page.locator(`#apvNote-${ID}`)).toHaveValue('paid, ref EX-12');
+    expect(writes).toHaveLength(1);
+    expect(writes[0][FEEDBACK]).toBeNull();
+  });
+
+  test('a refresh that read the queue before his answer is dropped, so the card stays answered (review, 9 Oct 2026)', async ({ page }) => {
+    const fx = withStep();
+    await mockAgentsPage(page, fx);
+    await liveRecord(page, fx);
+    await loadAgentsPage(page);
+    await page.click('#ptab-approvals');
+    let release;
+    const gate = new Promise((r) => { release = r; });
+    const stale = JSON.parse(JSON.stringify(fx.approvals));   // the queue as it was before his answer
+    await page.route((url) => decodeURIComponent(url.search.replace(/\+/g, ' ')).includes('NOT(AND(LEFT({Agent Output}'), async (route) => {
+      await gate;
+      route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ records: stale }) });
+    });
+    const refresh = page.evaluate(() => window.apvSilentRefresh());
+    await page.locator(`#apvNote-${ID}`).fill('Wrong card');
+    await page.locator(`[data-apv-card="${ID}"] [data-apv-step-cant]`).click();
+    await expect(page.locator(`[data-apv-answered="${ID}"]`)).toBeVisible();
+    release();
+    await refresh;
+    await page.waitForTimeout(300);
+    await expect(page.locator(`[data-apv-card="${ID}"]`)).toHaveCount(0);
+    await expect(page.locator(`[data-apv-answered="${ID}"]`)).toBeVisible();
+  });
+
+  test('when the sweep takes an answered card, its line goes at the next refresh (review, 9 Oct 2026)', async ({ page }) => {
+    const fx = withStep({ feedback: 'KEVIN STEP CANT [2026-10-07T11:00:00.000Z]: no account' });
+    await mockAgentsPage(page, fx);
+    await loadAgentsPage(page);
+    await page.click('#ptab-approvals');
+    await expect(page.locator('#apvAnsweredLine')).toHaveText('1 answered card going back to the agents at the next check (every half hour).');
+    fx.approvals.splice(fx.approvals.findIndex((r) => r.id === ID), 1);   // the sweep sent it back to its agent
+    await page.evaluate(() => window.apvSilentRefresh());
+    await expect(page.locator('#apvAnsweredLine')).toHaveText('');
+  });
+
+  test('Undo after the robot has taken the answer says too late and writes nothing', async ({ page }) => {
+    const fx = withStep();
+    await mockAgentsPage(page, fx);
+    const writes = await liveRecord(page, fx);
+    await loadAgentsPage(page);
+    await page.click('#ptab-approvals');
+    await page.locator(`#apvNote-${ID}`).fill('Paid by card');
+    await page.locator(`[data-apv-card="${ID}"] [data-apv-step-done]`).click();
+    await expect(page.locator(`[data-apv-answered="${ID}"]`)).toBeVisible();
+    // The sweep took the line out (it hands the task to its agent in the same write).
+    fx.approvals.find((r) => r.id === ID).fields[FEEDBACK] = null;
+    await page.locator(`[data-apv-answered="${ID}"] [data-apv-step-undo]`).click();
+    await expect(page.locator('#toast')).toContainText('Too late to undo');
+    await expect(page.locator(`[data-apv-answered="${ID}"]`)).toHaveCount(0);
+    await expect(page.locator(`[data-apv-card="${ID}"]`)).toHaveCount(0);
+    expect(writes).toHaveLength(1);
   });
 });
 

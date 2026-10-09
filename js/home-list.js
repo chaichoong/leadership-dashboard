@@ -71,6 +71,7 @@
     }
 
     function deadlineHolder(x) {
+        if (x.answered) return 'answered, going back to its agent';
         if (x.inQueue) return 'waiting in your approval queue';
         const holders = x.holders || [];
         if (holders.includes(KEVIN_TEAM_MEMBER)) return 'yours';
@@ -108,16 +109,18 @@
             .filter(x => (x.holders || []).includes(KEVIN_TEAM_MEMBER))
             .filter(x => x.due && x.due <= today && !(x.deferred && x.deferred > today) && !x.someDay)
             .filter(x => !x.inQueue || isOnlyYouName(x.name))
+            .filter(x => !x.answered)
             .filter(x => !(shown && shown.has(x.id)))
             .sort((a, b) => a.due.localeCompare(b.due) || a.name.localeCompare(b.name))
             .map(x => ({ id: x.id, name: x.name, due: x.due, inQueue: x.inQueue }));
     }
 
     // The approval queue exactly as the AI Agents page counts it (os/agents/index.html
-    // APV_QUEUE_FORMULA): Approval, raised by the loop, not knocked back to a later date.
+    // APV_QUEUE_FORMULA): Approval, raised by the loop, not knocked back to a later date, and not a
+    // Your step card he has answered (`answered`, set by js/home.js from the queue read, 9 Oct 2026).
     const isKevinsLane = email => !email || email === APPROVER_EMAIL;
     function queueCards(tasks, today) {
-        return (tasks || []).filter(x => x.inQueue && !(x.deferred && x.deferred > today) && isKevinsLane(x.approverEmail));
+        return (tasks || []).filter(x => x.inQueue && !x.answered && !(x.deferred && x.deferred > today) && isKevinsLane(x.approverEmail));
     }
 
     function parsePayload(row) {

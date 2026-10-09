@@ -149,9 +149,19 @@ describe('the queue formula', () => {
     const def = agentsPage.match(/const APV_DEFERRED_FORMULA = "([^"]+)"/);
     expect(def).not.toBeNull();
     // Same population, opposite date test — so no task can fall between the
-    // two lists and be visible in neither.
-    expect(def[1]).toBe(m[1].replace(`NOT(IS_AFTER({${DEFERRED_FIELD_NAME}}, TODAY()))`,
+    // lists and be visible in none. Since 9 Oct 2026 the not-deferred half is
+    // split in two (waiting, and answered Your step cards), so the deferred
+    // lane is the queue's population before that split.
+    const answeredOut = ", NOT(AND(LEFT({Agent Output}&'', 10)='YOUR STEP:', FIND('KEVIN STEP ', {Approval Feedback}&'')>0))";
+    expect(m[1]).toContain(answeredOut);
+    expect(def[1]).toBe(m[1].replace(answeredOut, '').replace(`NOT(IS_AFTER({${DEFERRED_FIELD_NAME}}, TODAY()))`,
                                      `IS_AFTER({${DEFERRED_FIELD_NAME}}, TODAY())`));
+  });
+
+  it('the answered read is the other half of the not-deferred population, so an answered card is never in neither', () => {
+    const ans = agentsPage.match(/const APV_ANSWERED_FORMULA = "([^"]+)"/);
+    expect(ans).not.toBeNull();
+    expect(ans[1]).toBe(m[1].replace(", NOT(AND(LEFT({Agent Output}", ', AND(LEFT({Agent Output}').replace(/\)\)\)$/, '))'));
   });
 });
 
