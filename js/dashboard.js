@@ -131,6 +131,9 @@
         closedOn:        'fldzGI0ywBTpOK2dy',  // quarter-close date — set = project is history
         defOfDone:       'fldgjzVEnfnZowrBD',  // shown when a row is opened
         kpiTracking:     'fld2wYB5ZEn9WRcjN',  // "KPI Tracking Method", shown when a row is opened
+        // "Month 1/2/3 Milestone": a project no plan record holds keeps its milestones here
+        // (Real Estate's fourth Q4 project, 10 Oct 2026: a plan has room for three).
+        months:          ['fldaIzPzXST5WvpRX', 'fldqm5Q7BDNzRsVsh', 'fldqb6HxvQQx2MZ7A'],
     };
     const STRAT_TEAM_KEYS = {
         'kevin@runpreneur.org.uk':'kevin',
@@ -224,6 +227,14 @@
             });
         });
         const out={};
+        // A project no plan holds falls back to its own Month fields, in the quarter its start date sits in.
+        (projects||[]).forEach(p=>{
+            if(byProject[p.id]||!(p.ownStones||[]).some(Boolean))return;
+            const start=_stratLocalDay(p.start);
+            const months=start&&_stratQuarterMonths(Math.floor(start.getMonth()/3)+1,start.getFullYear());
+            out[p.id]=months?months.map((m,i)=>({...m,text:p.ownStones[i]||''}))
+                :{issue:'This project has monthly milestones but no start date, so their months cannot be placed. Set its start date.'};
+        });
         Object.keys(byProject).forEach(id=>{
             const cands=byProject[id];
             const p=(projects||[]).find(x=>x.id===id);
@@ -379,6 +390,7 @@
                     defOfDone:getField(r,STRAT_PF.defOfDone)||'',
                     kpiTracking:getField(r,STRAT_PF.kpiTracking)||'',
                     kpiStored:_stratParseDetail(getField(r,STRAT_PF.kpiDetailJson)),
+                    ownStones:STRAT_PF.months.map(fid=>String(getField(r,fid)||'').trim()),
                 };
             });
             const planRes=await plansP;
@@ -528,6 +540,7 @@
                 namedUnits:()=>reKpiForProject('units'),
                 namedRent:()=>reKpiForProject('rent'),
                 compliance:()=>reKpiForProject('compliance'),
+                intusUnits:()=>reKpiForProject('intus'),
             },
         };
     }
@@ -1935,12 +1948,13 @@
         (allRentalUnits || []).forEach(u => { const n = reSelName(getField(u, F.unitName)); if (n) unitName[u.id] = n; });
         (allTenants || []).forEach(t => { const n = reSelName(getField(t, F.tenantName)); if (n) tenantName[t.id] = n; });
         const units = RE_Q4.units.map(u => ({ ...u, label: unitName[u.id] || u.label }));
+        const intus = RE_Q4.intus.units.map(u => ({ ...u, label: unitName[u.id] || u.label }));
         const lines = RE_Q4.rent.map(l => ({
             ...l,
             label: l.tenantId ? (tenantName[l.tenantId] || l.label)
                 : (unitName[l.unitId] ? `${l.excludeTenantIds ? 'New tenant' : 'Tenant'}, ${unitName[l.unitId]}` : l.label),
         }));
-        return { units, lines };
+        return { units, lines, intus };
     }
 
     // The compliance book is not part of the main dashboard load. Fetched once per
@@ -1994,6 +2008,7 @@
             return ReKpis.cashCushion({ transactions: kpiCtx.transactions, costBusinessNames, businessName: RE_Q4.businessName, today, baselineMonths: RE_Q4.baselineMonths, feedStaleDays: RE_Q4.feedStaleDays });
         });
         out.units = safe(() => ReKpis.namedUnits({ units: need().named.units, tenancies: rows.tenancies, knownUnitIds: rows.unitIds, today }));
+        out.intus = safe(() => ReKpis.namedUnits({ units: need().named.intus, tenancies: rows.tenancies, knownUnitIds: rows.unitIds, today, since: RE_Q4.intus.since }));
         out.rent = safe(() => ReKpis.namedRent({ lines: need().named.lines, tenancies: rows.tenancies, knownTenantIds: rows.tenancies.flatMap(t => t.tenantIds), knownUnitIds: rows.unitIds, today }));
         out.personal = safe(() => {
             if (typeof buildMonthlyCashflow !== 'function' || typeof wealthMonthKeys !== 'function') throw new Error('the Wealth page rules are not loaded');
@@ -2007,7 +2022,7 @@
         return out;
     }
 
-    // What the three Q4 projects' KPI Compute Code calls (ctx.reKpis.*). A red alarm
+    // What the four Q4 projects' KPI Compute Code calls (ctx.reKpis.*). A red alarm
     // THROWS: the project then shows "Compute failed" and its KPI Last Updated stops
     // moving, which is what the daily freshness invariant watches. Saving a number
     // worked out from data that did not load would defeat that alarm.
@@ -2028,7 +2043,8 @@
     // KPIs rows, so the two places never describe the same unit differently.
     const reUnitStatus = r => r.filled ? `In: ${r.tenant || 'tenant'}`
         : r.incoming ? `Signed: ${r.incoming.tenant || 'new tenant'}, moves in ${reDay(r.incoming.start)}`
-        : r.outgoing ? `To re-let: ${r.outgoing} still on record` : 'Empty';
+        : r.outgoing ? `To re-let: ${r.outgoing} still on record`
+        : r.held ? 'Still on the old arrangement' : 'Empty';
     // A replacement re-let below the leaving tenant's rent is a LOSS: fmt() drops the sign,
     // so it is put back here and the row is only green when it adds money.
     const reSignedGbp = n => (Number(n) < 0 ? '− ' : '') + fmt(n);
@@ -2955,7 +2971,7 @@
                             if (found.length !== ids.length) return { status: 'fail', detail: `${found.length} of ${ids.length} Q4 real estate projects found` };
                             // A closed project is history: it is no longer computed, by design.
                             const mine = found.filter(p => !p.closedOn);
-                            if (!mine.length) return { status: 'pass', detail: 'All three projects are closed' };
+                            if (!mine.length) return { status: 'pass', detail: 'All four projects are closed' };
                             const broken = mine.filter(p => p.kpiComputeError);
                             if (broken.length) return { status: 'fail', detail: `Compute failed: ${broken.map(p => p.name).join(', ')}. ${broken[0].kpiComputeError}` };
                             const stale = mine.filter(p => !p.kpiLastUpdated || (Date.now() - new Date(p.kpiLastUpdated).getTime()) > 2 * 864e5);

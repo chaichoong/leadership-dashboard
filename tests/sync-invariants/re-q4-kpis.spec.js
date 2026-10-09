@@ -79,6 +79,64 @@ async function loadDashboard(page, certs) {
 
 const complianceCard = (page) => page.locator('#reQ4Cards .kpi-card', { hasText: 'Self-managed properties fully compliant' });
 
+// The Intus move (10 Oct 2026): three units leave a serviced-accommodation arrangement. Each
+// already holds live tenancies (an old record with no end date and the current arrangement),
+// so only a tenancy that STARTS on or after 9 Oct may count. Unit ids are the real ones from
+// RE_Q4.intus in js/config.js; every other value is invented.
+const TENANCIES_TABLE = 'tblN51a88qTDB6iMH';
+const UNITS_TABLE = 'tblM3mZCR5kiEdWMj';
+const TEN = { unit: 'fld7cjLLEHKAx49OK', tenant: 'fld1i5bDoHL3B6rUf', surname: 'fldOXazTqBWieEOK2', start: 'fld2rPXwwV8dXb1zF', end: 'fldwHhhKAq4f1nY9e', rent: 'fldDMyfZLFMeONPq8' };
+const MOVING = ['recQt9s4XMNW1IpNp', 'recskqALqQ4VvL9l2', 'rec4cTQjjLrVF6RNj'];
+const tenancy = (id, unit, start, surname) => ({ id, fields: { [TEN.unit]: [unit], [TEN.tenant]: ['recTen' + id], [TEN.surname]: surname, [TEN.start]: start, [TEN.rent]: 500 } });
+
+async function loadIntus(page, tenancies) {
+    const saves = {};
+    await page.addInitScript((pat) => {
+        localStorage.setItem('_dlr_pat', pat);
+        try { indexedDB.deleteDatabase('_dlr_cache'); } catch {}
+    }, MOCK_PAT);
+    await page.route('**/v0/**', async (route) => {
+        const req = route.request();
+        const url = req.url();
+        const json = (records) => route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ records }) });
+        if (req.method() !== 'GET') {
+            const m = url.match(new RegExp(PROJECTS_TABLE + '/(rec\\w+)'));
+            if (m && req.method() === 'PATCH') (saves[m[1]] = saves[m[1]] || []).push(req.postDataJSON().fields);
+            return json([]);
+        }
+        if (url.includes(BUSINESSES_TABLE)) return json([{ id: 'recBiz1', fields: { [FIELDS.bizName]: 'Real Estate', [FIELDS.bizActive]: true } }]);
+        if (url.includes(PROJECTS_TABLE)) return json([project('recIntus', 'return ctx.reKpis.intusUnits();'), project('recControl', 'return { value: 7 };')]);
+        if (url.includes(UNITS_TABLE)) return json(MOVING.map((id, i) => ({ id, fields: { fldr8sliyu8h2jw9t: 'Sample flat ' + (i + 1) } })));
+        if (url.includes(TENANCIES_TABLE)) return json(tenancies);
+        return json([]);
+    });
+    await page.goto('/');
+    return saves;
+}
+
+test.describe('the Intus move counts only a tenancy that starts on or after the move date', () => {
+    const old = [
+        tenancy('o1', MOVING[0], '2021-02-24', ''), tenancy('o2', MOVING[0], '2026-01-01', 'Operator'),
+        tenancy('o3', MOVING[1], '2026-01-01', 'Operator'), tenancy('o4', MOVING[2], '2026-04-01', 'Operator'),
+    ];
+
+    test('the old arrangement alone saves 0, and the opened row says so', async ({ page }) => {
+        const saves = await loadIntus(page, old);
+        await expect.poll(() => (saves.recIntus || []).length, { timeout: 30000,
+            message: 'the Intus KPI was never saved, so this test cannot tell 0 from "never ran"' }).toBeGreaterThan(0);
+        expect(saves.recIntus[0][PF.kpiCurrent]).toBe(0);
+        await page.locator('.strat-kpi-row[data-project-id="recIntus"]').click();
+        await expect(page.locator('#stratKpiInfo-recIntus')).toContainText('0 of 2 committed units have a tenant in');
+        await expect(page.locator('#stratKpiInfo-recIntus')).toContainText('Still on the old arrangement');
+    });
+
+    test('a new tenancy from 9 Oct on the first unit saves 1', async ({ page }) => {
+        const saves = await loadIntus(page, [...old, tenancy('n1', MOVING[0], '2026-10-09', 'Newcomer')]);
+        await expect.poll(() => (saves.recIntus || []).length, { timeout: 30000 }).toBeGreaterThan(0);
+        expect(saves.recIntus[0][PF.kpiCurrent]).toBe(1);
+    });
+});
+
 test.describe('Q4 real estate KPIs refuse to save or show a figure from data that did not load', () => {
 
     test('control: with a full certificate book the compliance KPI is worked out and saved', async ({ page }) => {

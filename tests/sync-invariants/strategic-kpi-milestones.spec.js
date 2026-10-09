@@ -178,3 +178,25 @@ test('a project linked twice on its plan says so, rather than picking one set of
     await page.locator('.strat-kpi-row[data-project-id="recMine"]').click();
     await expect(page.locator('#stratKpiInfo-recMine .strat-kpi-month')).toHaveCount(0);
 });
+
+// Real Estate's fourth Q4 project (10 Oct 2026) sits on no plan record, because a plan has room
+// for three. It keeps its milestones on its own Month fields, in its start date's quarter.
+test('a project no plan holds shows the milestones from its own Month fields', async ({ page }) => {
+    const own = project('recOwn', 'Sample fourth project', { [PF.owner]: KEVIN, [PF.start]: '2026-10-10',
+        fldaIzPzXST5WvpRX: 'October own stone', fldqm5Q7BDNzRsVsh: 'November own stone', fldqb6HxvQQx2MZ7A: 'December own stone' });
+    await loadDashboard(page, { projects: [...PROJECTS, own] });
+    const line = page.locator('.strat-kpi-row[data-project-id="recOwn"] .strat-kpi-milestone');
+    await expect(line).toContainText('November milestone', { timeout: 30000 });
+    await expect(line).toContainText('November own stone');
+    await page.locator('.strat-kpi-row[data-project-id="recOwn"]').click();
+    await expect(page.locator('#stratKpiInfo-recOwn .strat-kpi-month')).toHaveCount(3);
+    await expect(page.locator('#strategicKpiCapacity')).toContainText('Projects you own: 2 of 3');
+});
+
+test('a project with its own milestones but no start date says so, rather than "no milestones"', async ({ page }) => {
+    const undated = project('recUndated', 'Sample undated project', { [PF.start]: '',
+        fldaIzPzXST5WvpRX: 'First own stone', fldqm5Q7BDNzRsVsh: 'Second own stone', fldqb6HxvQQx2MZ7A: 'Third own stone' });
+    await loadDashboard(page, { projects: [...PROJECTS, undated] });
+    const line = page.locator('.strat-kpi-row[data-project-id="recUndated"] .strat-kpi-milestone');
+    await expect(line).toContainText('no start date', { timeout: 30000 });
+});

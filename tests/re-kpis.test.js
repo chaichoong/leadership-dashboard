@@ -237,6 +237,56 @@ describe('named units and named rent', () => {
     });
 });
 
+// Kevin, 9 to 10 Oct 2026: three units move from a serviced-accommodation operator to a letting
+// agent. Each unit already holds a live tenancy under the old arrangement, and two also hold an old
+// record with no end date, so only a tenancy that STARTS on or after the move date counts. Shaped on
+// the real units (an old record from 2021 plus the current arrangement from 2026); ids invented.
+describe('named units since a move date: the old arrangement never counts', () => {
+    const units = [
+        { id: 'mv1', label: 'Moving unit 1' },
+        { id: 'mv2', label: 'Moving unit 2' },
+        { id: 'mv3', label: 'Moving stretch unit', stretch: true },
+    ];
+    const old = [
+        { id: 'o1', unitIds: ['mv1'], tenantIds: ['tenLegacy1'], surname: '', start: '2021-02-24', end: '', payStatus: '', rent: 0 },
+        { id: 'o2', unitIds: ['mv1'], tenantIds: ['tenOperator'], surname: 'Operator', start: '2026-01-01', end: '', payStatus: 'CFV', rent: 500 },
+        { id: 'o3', unitIds: ['mv2'], tenantIds: ['tenOperator'], surname: 'Operator', start: '2026-01-01', end: '', payStatus: 'CFV', rent: 500 },
+        { id: 'o4', unitIds: ['mv2'], tenantIds: ['tenLegacy2'], surname: '', start: '2021-02-24', end: '', payStatus: '', rent: 0 },
+        { id: 'o5', unitIds: ['mv3'], tenantIds: ['tenOperator'], surname: 'Operator', start: '2026-04-01', end: '', payStatus: 'CFV', rent: 500 },
+    ];
+    const known = { knownUnitIds: ['mv1', 'mv2', 'mv3'], since: '2026-10-09' };
+
+    it('today: 0 of 2, every unit shown as still on the old arrangement', () => {
+        const u = K.namedUnits({ units, tenancies: old, today: '2026-10-10', ...known });
+        expect([u.filled, u.of, u.value, u.stretchOf]).toEqual([0, 2, 0, 3]);
+        expect(u.rows.map(r => r.held)).toEqual([2, 2, 1]);
+        expect(u.rows.every(r => r.outgoing === '')).toBe(true);
+        expect(K.alarmLevel(u)).toBe('');
+    });
+    it('counts a new tenancy from the move date, even while the old record stays live', () => {
+        const moved = [...old,
+            { id: 'n1', unitIds: ['mv1'], tenantIds: ['tenNew1'], surname: 'NewOne', start: '2026-11-20', end: '', payStatus: 'In Payment', rent: 650 },
+            { id: 'n2', unitIds: ['mv2'], tenantIds: ['tenNew2'], surname: 'NewTwo', start: '2026-12-05', end: '', payStatus: '', rent: 640 }];
+        const u = K.namedUnits({ units, tenancies: moved, today: '2026-11-25', ...known });
+        expect(u.filled).toBe(1);
+        expect(u.rows[0]).toMatchObject({ filled: true, tenant: 'NewOne', held: 0 });
+        expect(u.rows[1].incoming).toEqual({ tenant: 'NewTwo', start: '2026-12-05' });
+        const later = K.namedUnits({ units, tenancies: moved, today: '2026-12-06', ...known });
+        expect([later.filled, later.value]).toEqual([2, 2]);
+    });
+    it('the old tenant re-dated after the move (a rent change is a new tenancy) never counts', () => {
+        const excl = units.map(u => ({ ...u, excludeTenantIds: ['tenOperator'] }));
+        const redated = [...old, { id: 'r1', unitIds: ['mv1'], tenantIds: ['tenOperator'], surname: 'Operator', start: '2026-10-15', end: '', payStatus: 'CFV', rent: 550 }];
+        const u = K.namedUnits({ units: excl, tenancies: redated, today: '2026-10-20', ...known });
+        expect(u.filled).toBe(0);
+        expect(u.rows[0].held).toBe(3);                              // the label still says "old arrangement"
+    });
+    it('without a move date the same units read as already let, which is why the date is set', () => {
+        const u = K.namedUnits({ units, tenancies: old, today: '2026-10-10', knownUnitIds: known.knownUnitIds });
+        expect(u.filled).toBe(2);
+    });
+});
+
 // Kevin, 6 Oct 2026: a room that replaces a leaving tenant is a named unit too. Shaped on
 // the live case (a tenant still paying the old rate while a new tenant at the newer rate
 // is found), with every name and amount invented.
