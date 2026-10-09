@@ -420,13 +420,16 @@ INVARIANTS = [
         "name": "started-projects-are-not-still-not-started",
         "table": PROJECTS,
         "incident": "Aug 2026 — 5 Q3 projects read 'Not Started' from 1 Jul to 3 Aug while sitting at 0 of 48 tasks and £0 of an £1,850 target",
-        "asserts": "started more than 7 days ago AND not closed => status is no longer 'Not Started'",
+        # Tightened from 7 days to any day after the start (Kevin, 2 Oct 2026: a project
+        # counts as started from its start date, so day two is already late). The window
+        # it replaced let a genuinely running project read Not Started for a week.
+        "asserts": "any day after the start date AND not closed => status is no longer 'Not Started'",
         "violation": (
             "AND({Project Status} = 'Not Started', "
-            "{Days from Start Date} > 7, "
+            "{Days from Start Date} > 0, "
             "LEN({Closed On} & '') = 0)"
         ),
-        "control": "AND({Days from Start Date} > 7, LEN({Closed On} & '') = 0)",
+        "control": "AND({Days from Start Date} > 0, LEN({Closed On} & '') = 0)",
         "control_means": "open projects whose start date has passed (the only population that can go stale)",
         # TRUE for every record and touches all three fields, so a renamed field
         # fails loudly instead of returning a quiet zero.

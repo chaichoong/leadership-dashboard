@@ -54,6 +54,7 @@ Runs daily as the wrapped launchd job `estate-drift` (06:25), and by hand:
     python3 scripts/agent-estate-drift.py --json
 """
 import argparse
+import datetime as dt
 import glob
 import json
 import os
@@ -233,12 +234,28 @@ def stamp_of(estate_path):
     return m.group(1) if m else None
 
 
+LOOKBACK_DAYS = 14
+
+
+def _squash(text):
+    """Whitespace squashed to single spaces, so a file name wrapped across two
+    lines of ESTATE.md still counts as named."""
+    return " ".join((text or "").split())
+
+
 def rulings_after(stamp, decisions_dir, estate_text=""):
-    """Decisions files dated after the stamp whose text touches the estate,
-    plus files dated ON the stamp day that ESTATE.md does not name. A stamp
-    has day granularity, so a ruling written later the same day would otherwise
-    be invisible for ever (review finding, 7 Sep 2026); naming the file in
-    ESTATE.md is the proof it was absorbed."""
+    """Decisions files that the estate page has not absorbed.
+
+    A file dated AFTER the stamp always counts as behind. A file dated on the
+    stamp day or in the 14 days before it counts as absorbed only when
+    ESTATE.md names it (Kevin, 2 Oct 2026). The old rule looked back zero days,
+    so a ruling written after the page was stamped but dated a day or more
+    earlier — a decision minuted late, which is the normal case — was invisible
+    for ever. The window is bounded so the check never re-raises the whole
+    archive, and names are compared with whitespace squashed because ESTATE.md
+    wraps long lines."""
+    floor = (dt.date.fromisoformat(stamp) - dt.timedelta(days=LOOKBACK_DAYS)).isoformat()
+    page = _squash(estate_text)
     out = []
     for p in sorted(glob.glob(os.path.join(decisions_dir, "*.md"))):
         # A Drive sync twin ("<ruling> 2.md") is a copy, not a second ruling, and
@@ -247,9 +264,9 @@ def rulings_after(stamp, decisions_dir, estate_text=""):
             continue
         name = os.path.basename(p)
         m = re.match(r"(\d{4}-\d{2}-\d{2})", name)
-        if not m or m.group(1) < stamp:
+        if not m or m.group(1) < floor:
             continue
-        if m.group(1) == stamp and name[:-3] in estate_text:
+        if m.group(1) <= stamp and _squash(name[:-3]) in page:
             continue
         try:
             with open(p) as f:

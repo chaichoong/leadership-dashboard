@@ -906,6 +906,21 @@ def process(key, ledger, keep=False):
     segs = srt_segments(open(srt).read()); window = lfmd_window(segs)
     duration = float(subprocess.run([os.path.expanduser("~/tools/bin/ffprobe"), "-v", "error", "-show_entries", "format=duration",
                                      "-of", "csv=p=0", clip], capture_output=True, text=True).stdout or 0)
+    # A Learnings window a person read off the captions survives a full re-render (Kevin's
+    # note on 2086, 9 Oct 2026). redo_day parks it as lfmd_window_keep before it resets the
+    # day, because the detector that missed the section once will miss it again, and without
+    # this a day sent back for anything else — a thumbnail title, a line of copy — could only
+    # be answered by losing its Learnings clip. A kept window that no longer fits the clip is
+    # said and dropped; it never stops the render.
+    kept, by_hand = e.pop("lfmd_window_keep", None), False
+    if kept:
+        try:
+            window, by_hand = check_lfmd_window(kept, duration, e.get("episode") or date_day), True
+            print("%s: Learnings window carried through the re-render by hand, %.2f to %.2f s; the detector is not consulted"
+                  % (key, window[0], window[1]))
+        except SystemExit as ex:
+            print("%s: the hand-placed Learnings window was dropped (%s); the detector decides this render"
+                  % (key, str(ex)[-160:]), file=sys.stderr)
     role = clip_role(duration, bool(window))
     spoken = watch.spoken_day(text)
     if teaser_for_day_before(role, spoken, date_day, ledger):
@@ -914,7 +929,9 @@ def process(key, ledger, keep=False):
         day, reason = watch.resolve_episode(date_day, spoken, prev_day_has_talk=prev_has_talk)
     e["episode"] = day; e["episode_reason"] = reason; e["status"] = "rendering"; watch.save_ledger(ledger)
     e.pop("lfmd_early_ok", None)      # a clip cut again is watched again before an early start is accepted (qa.py accept-early)
-    e["lfmd_window"] = window; e["lfmd_closes_talk"] = lfmd_closes_talk(segs, window); e["role"] = role; e["duration"] = round(duration, 1); watch.save_ledger(ledger)
+    e["lfmd_window"] = window; e["lfmd_closes_talk"] = lfmd_closes_talk(segs, window); e["role"] = role; e["duration"] = round(duration, 1)
+    e["lfmd_window_by"] = "operator" if by_hand else "detector"
+    watch.save_ledger(ledger)
     base = None
     if role == "episode":
         earlier = [k2 for k2, v in ledger.items() if k2 != key and v.get("episode") == day and v.get("role") == "episode" and v.get("status") == "rendered"]
@@ -1438,8 +1455,12 @@ def redo_day(day, receipt_path, why, ledger=None, state=None, root=None, today=N
     note = "%s: %s" % ((today or dt.date.today()).strftime("%-d %b %Y"), why)
     for k in mine:
         e = ledger[k]
+        # Carried across the reset, so the re-render reuses it rather than asking the
+        # detector that missed the section in the first place (9 Oct 2026).
+        hand = e.get("lfmd_window") if e.get("lfmd_window_by") == "operator" else None
         if e.get("status") == "failed":
             for f in RESET_STALE: e.pop(f, None)
+        if hand: e["lfmd_window_keep"] = hand
         e["status"] = "new"; e["reset"] = note
     watch.save_ledger(ledger)
     os.makedirs(root, exist_ok=True)
@@ -1615,9 +1636,6 @@ def queue_sent_back(state=None, ledger=None, root=None, redo_file=None, episodes
             return not_queued(day, e, "it is already on YouTube, which a re-render would not reach")
         if not receipt_points(e.get("feedback")):
             return not_queued(day, e, "sent back with no note, so a re-render has nothing to answer and would come back unchanged")
-        if any(v.get("lfmd_window_by") == "operator" for v in mine.values()):
-            return not_queued(day, e, "its Learnings clip was placed by hand from the captions and a full re-render would lose it: a "
-                                      "person answers his note, or lists the day for a Learnings rebuild with its window")
         if mine:
             trial = json.loads(json.dumps(ledger))
             for k in mine: trial[k]["status"] = "new"; trial[k]["reset"] = "trial"

@@ -172,6 +172,42 @@ res = {"first": first, "second": res, "saves": [saved_n, len(saved)], "reads": [
     expect(r.files.filter((f) => f.startsWith('2101.md'))).toEqual(['2101.md']);
   });
 
+  // 2086, 9 Oct 2026. Kevin sent the day back for its YouTube thumbnail title, and the sync refused to queue it
+  // for five days because the day's Learnings window had been placed by hand on 6 Oct, so a full re-render would
+  // have lost the clip. Neither route it named could answer a thumbnail note. The window now rides across the
+  // reset as lfmd_window_keep and the gate is gone, so a hand-placed day answers any note like any other.
+  const HAND = {
+    'VID_FAKE_A.insv': { day: 2101, episode: 2101, role: 'episode', status: 'rendered', duration: 480.0,
+      lfmd_window: [327.56, 456.76], lfmd_window_by: 'operator', rendered: '2026-10-06T23:10:00' },
+    'VID_FAKE_B.insv': { day: 2101, episode: 2101, role: 'teaser', status: 'rendered', duration: 40.0 },
+  };
+
+  it('BACK-TEST: a day whose Learnings window was placed by hand is queued, not refused', () => {
+    const r = py(QUEUE(HAND), { 2101: card({ feedback: "The YouTube thumbnail title doesn't read correctly." }) });
+    expect(r.code).toBe(0);
+    expect(r.res.notQueued).toEqual({});
+    expect(r.res.queued).toEqual([2101]);
+  });
+
+  it('the hand-placed window rides across the reset, so the re-render does not ask the detector again', () => {
+    const r = py(QUEUE(HAND), { 2101: card({ feedback: "The YouTube thumbnail title doesn't read correctly." }) });
+    const led = r.saved.at(-1);
+    expect(led['VID_FAKE_A.insv'].status).toBe('new');
+    expect(led['VID_FAKE_A.insv'].lfmd_window_keep).toEqual([327.56, 456.76]);
+    // a clip with no hand-placed window of its own carries nothing extra
+    expect(led['VID_FAKE_B.insv'].lfmd_window_keep).toBe(undefined);
+    // and the window it was measured from is still recorded on the card, for the receipt's own line
+    expect(r.state['2101'].redo_lfmd_before.window).toEqual([327.56, 456.76]);
+  });
+
+  it('a detected window is NOT carried across: only a person\'s reading overrides the detector', () => {
+    const detected = JSON.parse(JSON.stringify(HAND));
+    detected['VID_FAKE_A.insv'].lfmd_window_by = 'detector';
+    const r = py(QUEUE(detected), { 2101: card() });
+    expect(r.res.queued).toEqual([2101]);
+    expect(r.saved.at(-1)['VID_FAKE_A.insv'].lfmd_window_keep).toBe(undefined);
+  });
+
   it('a day on the Learnings rebuild list is already in motion: not queued over it', () => {
     const r = py(`open(render.REDO_LFMD_FILE, "w").write("2101 @300.0-420.0 hand window\\n")\n` + QUEUE(), { 2101: card() });
     expect(r.res.queued).toEqual([]);
@@ -235,10 +271,13 @@ res = {"first": first, "second": res, "saves": [saved_n, len(saved)], "reads": [
   });
 
   it('a Learnings clip placed by hand is never thrown away by a full re-render', () => {
+    // Until 9 Oct 2026 this was answered by refusing to queue the day at all, which left 2086's
+    // thumbnail note unanswerable for five days. It is now answered by carrying the window.
     const led = { ...LED, 'VID_FAKE_A.insv': { ...LED['VID_FAKE_A.insv'], lfmd_window: [300, 420], lfmd_window_by: 'operator' } };
     const r = py(QUEUE(led), { 2101: card() });
-    expect(r.res.notQueued['2101']).toContain('placed by hand');
-    expect(r.saved).toEqual([]);
+    expect(r.res.notQueued).toEqual({});
+    expect(r.res.queued).toEqual([2101]);
+    expect(r.saved.at(-1)['VID_FAKE_A.insv'].lfmd_window_keep).toEqual([300, 420]);
   });
 
   it('REVIEW a day the night plan would never render (older than the takeover day, paused gap day): not queued, said at once', () => {

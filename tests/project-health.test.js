@@ -67,11 +67,30 @@ describe('computeProjectHealth — pace against the quarter', () => {
             .toBe(expected);
     });
 
-    it('does not punish a project in the first 5% of its quarter', () => {
-        // This is what makes the rule fair, and what the old Airtable formula
-        // got wrong — it compared raw completion against a flat 85%, so every
-        // project read Off-Track on day one.
+    // Kevin's ruling, 2 Oct 2026 (option 3): a project counts as started from
+    // its own start date, so the only thing that reads Not Started is a project
+    // whose start date has not arrived. The share-of-quarter window this
+    // replaced kept a genuinely running project at Not Started for days, and
+    // flipped an unstarted one to Off-Track on day 6.
+    it('reads the start day itself as On-Target, with nothing done yet', () => {
+        expect(computeProjectHealth({ ...Q3, kpiTarget: 200, kpiCurrent: 0 }, '2026-07-01T12:00:00'))
+            .toBe('On-Target');
+    });
+
+    it('judges a project from day two, so nothing done reads Off-Track', () => {
         expect(computeProjectHealth({ ...Q3, kpiTarget: 200, kpiCurrent: 0 }, DAY2))
+            .toBe('Off-Track');
+    });
+
+    it('reads the day before the start date as Not Started', () => {
+        expect(computeProjectHealth({ ...Q3, kpiTarget: 200, kpiCurrent: 0 }, '2026-06-30T12:00:00'))
+            .toBe('Not Started');
+    });
+
+    it('reads Not Started before the start date even with nothing measurable', () => {
+        // The old rule reached Unknown here, because the share-of-quarter test
+        // sat after the progress check. The start date now settles it first.
+        expect(computeProjectHealth({ ...Q3, kpiTarget: 0, totalTasks: 0 }, '2026-06-30T12:00:00'))
             .toBe('Not Started');
     });
 

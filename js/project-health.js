@@ -37,11 +37,11 @@
 
     const PROJECT_STATUSES = ['Not Started', 'Off-Track', 'On-Track', 'On-Target', 'Completed'];
 
-    // Below this share of the quarter, a project with nothing done is not
-    // behind — it has barely started. Without it every project would read
-    // Off-Track on day one, which is the flaw in the legacy Airtable formula
-    // this replaces (it compared raw completion against a flat 85%).
-    const NOT_STARTED_TIME_PCT = 5;
+    // A project is Not Started until its own start date, and from that date it
+    // is judged (Kevin, 2 Oct 2026, option 3). The share-of-quarter window this
+    // replaces read "Not Started" for the first 5% of every quarter, so a
+    // project that had genuinely begun still reported Not Started for days,
+    // and one that had not begun read Off-Track from day 6.
     const ON_TARGET_RATIO = 100;
     const ON_TRACK_RATIO = 85;
 
@@ -73,6 +73,10 @@
         const today = now ? (now instanceof Date ? new Date(now) : new Date(now)) : new Date();
         today.setHours(0, 0, 0, 0);
 
+        // Before its own start date, a project has not started. Nothing else is
+        // judged until then; on the start day itself it reads On-Target.
+        if (today < start) return 'Not Started';
+
         // Past its end date and not marked complete — no ratio needed.
         if (end < today) return 'Off-Track';
 
@@ -91,9 +95,7 @@
         else if (totalTasks > 0) progPct = (completedTasks / totalTasks) * 100;
 
         // Nothing measurable at all — say so rather than guess a health.
-        if (progPct === null) return timePct < NOT_STARTED_TIME_PCT ? 'Not Started' : 'Unknown';
-
-        if (timePct < NOT_STARTED_TIME_PCT) return 'Not Started';
+        if (progPct === null) return 'Unknown';
 
         const ratio = timePct > 0 ? (progPct / timePct) * 100 : 100;
         if (ratio >= ON_TARGET_RATIO) return 'On-Target';
@@ -108,7 +110,7 @@
     }
 
     const api = { computeProjectHealth, isWritableStatus, PROJECT_STATUSES,
-                  NOT_STARTED_TIME_PCT, ON_TARGET_RATIO, ON_TRACK_RATIO };
+                  ON_TARGET_RATIO, ON_TRACK_RATIO };
 
     // Browser: plain <script> tag, so hang it on window like the rest of the app.
     // Node (the daily job and vitest): CommonJS export.

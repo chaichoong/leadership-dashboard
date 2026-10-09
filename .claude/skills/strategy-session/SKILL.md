@@ -302,9 +302,12 @@ snapshot failed, stop: that project's tasks are not carried.
    the owner rule in Phase 4), and `Project Status`.
 3. Write each project's id back onto the plan's `QP<n> Project` link.
 4. Set `Project Status` the way the page does, from `computeProjectHealth` in
-   `js/project-health.js`: Not Started in the first 5% of the quarter, the real health after
-   that. Left unset, the formula field `Project Status (Calc)` read Off-Track on day 2 with a
-   zero KPI on the first run, and `Project Status` was blank. Then prove it:
+   `js/project-health.js`: Not Started only while today is before the project's start date,
+   the real health from the start date on (Kevin, 2 Oct 2026). A project pushed before the
+   quarter opens reads Not Started; on the start day itself it reads On-Target, and from day
+   two a zero KPI reads Off-Track, which is correct and not a fault to hide. Left unset, the
+   formula field `Project Status (Calc)` read Off-Track on day 2 with a zero KPI on the first
+   run, and `Project Status` was blank. Then prove it:
 
 ```bash
 node scripts/sync-project-status.mjs --dry-run

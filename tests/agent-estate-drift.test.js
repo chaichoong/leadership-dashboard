@@ -242,6 +242,54 @@ describe('agent-estate-drift', () => {
     expect(r.json.rulings_behind).toEqual([]);
   });
 
+  // Kevin, 2 Oct 2026: the window looks back 14 days, so a ruling minuted after the page
+  // was stamped but DATED earlier cannot slip past. Before this it was invisible for ever,
+  // because the old rule skipped anything dated before the stamp outright.
+  it('a ruling dated BEFORE the stamp, inside the 14 days, fires unless ESTATE.md names it', () => {
+    const e = estate({ stamp: '2026-09-15' });
+    writeFileSync(join(e.brain, 'Decisions', '2026-09-10 Approval gate change.md'),
+      '# gate\nAgents now route differently.\n');
+    const before = run(e);
+    expect(before.code).toBe(1);
+    expect(before.json.rulings_behind).toEqual(['2026-09-10 Approval gate change.md']);
+    writeFileSync(join(e.agents, 'ESTATE.md'),
+      '# Estate\n\nAs at: 2026-09-15\nAbsorbed: 2026-09-10 Approval gate change\n');
+    expect(run(e).code).toBe(0);
+  });
+
+  it('a ruling named across two lines of ESTATE.md still counts as absorbed', () => {
+    // ESTATE.md wraps long lines, so the name is compared with whitespace squashed.
+    const e = estate({ stamp: '2026-09-15' });
+    writeFileSync(join(e.brain, 'Decisions', '2026-09-10 Approval gate change.md'),
+      '# gate\nAgents now route differently.\n');
+    writeFileSync(join(e.agents, 'ESTATE.md'),
+      '# Estate\n\nAs at: 2026-09-15\nAbsorbed: 2026-09-10 Approval\ngate change (see the brain)\n');
+    const r = run(e);
+    expect(r.code, JSON.stringify(r.json && r.json.rulings_behind)).toBe(0);
+    expect(r.json.rulings_behind).toEqual([]);
+  });
+
+  it('BOUND: a ruling older than the 14 days is never re-raised', () => {
+    // Without a floor the check would hand back the whole archive every morning.
+    const e = estate({ stamp: '2026-09-15' });
+    writeFileSync(join(e.brain, 'Decisions', '2026-08-20 Approval gate change.md'),
+      '# gate\nAgents now route differently.\n');
+    const r = run(e);
+    expect(r.code, JSON.stringify(r.json && r.json.rulings_behind)).toBe(0);
+    expect(r.json.rulings_behind).toEqual([]);
+  });
+
+  it('EDGE: the 14th day back is in the window, the 15th is not', () => {
+    const e = estate({ stamp: '2026-09-15' });
+    writeFileSync(join(e.brain, 'Decisions', '2026-09-01 Approval gate change.md'),
+      '# gate\nAgents now route differently.\n');
+    expect(run(e).json.rulings_behind).toEqual(['2026-09-01 Approval gate change.md']);
+    rmSync(join(e.brain, 'Decisions', '2026-09-01 Approval gate change.md'));
+    writeFileSync(join(e.brain, 'Decisions', '2026-08-31 Approval gate change.md'),
+      '# gate\nAgents now route differently.\n');
+    expect(run(e).json.rulings_behind).toEqual([]);
+  });
+
   it('a twin of a ruling newer than the stamp is listed once, as the ruling itself', () => {
     const e = estate({ stamp: '2026-09-01' });
     writeFileSync(join(e.brain, 'Decisions', '2026-09-06 Approval gate change.md'), '# gate\nAgents route.\n');
