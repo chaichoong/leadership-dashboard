@@ -5123,6 +5123,70 @@ def cmd_annotate(args):
     print(json.dumps({"annotated": args.task, "chars": len(note), "parked": False}))
 
 
+# ─── MOVING A DUE DATE ON KEVIN'S WORD (9 Oct 2026) ──────────────────
+#
+# "Give him a week's grace and then chase this up again next week" (Kevin, 8 Oct
+# 2026, 34 Connaught Road) had nowhere to go: no subcommand moved a due date, so
+# the agent filed a finding, the finding went to the overflow log, and the task
+# sat at Today with the wrong date. The same wall stood on "bring this back in
+# January" and "move it to Monday 2 November" cards (finding 20261002-727 and the
+# 8 Oct overflow line). A task comes to the table when it needs to, not before or
+# after, only if the date Kevin gave is the date on the task.
+#
+# A due date moves only on Kevin's word: the task must carry his approval or a
+# note from him. An agent never pushes its own work out. Never to a past date,
+# never on a closed task, never on a card waiting at Approval (his queue).
+DUE_MOVED_MARK = "DUE MOVED"
+
+
+def due_move_problem(fields, new_due, today):
+    """'' when the due date may move to new_due, else why not."""
+    status = sel(fields.get(AF["status"]))
+    if status in ("Completed", "Cancelled"):
+        return f"the task is {status}"
+    if status == "Approval":
+        return "the task is waiting at Approval in Kevin's queue; his knock-back sets that date"
+    if new_due < today:
+        return f"{new_due.isoformat()} is in the past"
+    said = (fields.get(AF["approvedAt"]) or fields.get(AF["approvalFeedback"])
+            or fields.get(AF["feedbackHistory"]))
+    if not said:
+        return ("the task carries no approval and no note from Kevin, so nothing says when it is due; "
+                "an agent never moves its own work")
+    return ""
+
+
+def cmd_due(args):
+    try:
+        new_due = datetime.strptime(args.date, "%Y-%m-%d").date()
+    except ValueError:
+        sys.exit(f"ERROR: {args.date!r} is not a date (YYYY-MM-DD)")
+    why = " ".join(str(args.why or "").split())
+    if len(why) < 10:
+        sys.exit("ERROR: --why needs Kevin's words or the reason, in a sentence")
+    t = get_task(args.task)
+    fields = t.get("fields", {}) or {}
+    today = datetime.now(LONDON).date()
+    problem = due_move_problem(fields, new_due, today)
+    if problem:
+        print(json.dumps({"refused": args.task, "why": problem}))
+        return 2
+    old = fields.get(AF["dueDate"]) or "blank"
+    status = "Upcoming" if new_due > today else "Today"
+    stamp = datetime.now(LONDON).strftime("%d %b %Y %H:%M")
+    note = f"[{stamp} — agent-dispatch] {DUE_MOVED_MARK} from {old} to {new_due.isoformat()}: {why}"
+    patch_task(args.task, {
+        AF["dueDate"]: new_due.isoformat(),
+        AF["status"]: status,
+        AF["notes"]: (str(fields.get(AF["notes"]) or "") + "\n\n" + note).strip(),
+    })
+    check = get_task(args.task).get("fields", {}) or {}
+    if str(check.get(AF["dueDate"]) or "") != new_due.isoformat():
+        sys.exit(f"ERROR: {args.task} reads due {check.get(AF['dueDate'])!r} after writing {new_due.isoformat()}")
+    print(json.dumps({"due": args.task, "from": old, "to": new_due.isoformat(), "status": status}))
+    return 0
+
+
 # ─── THE LEARNING LOOP ────────────────────────────────────────────────
 #
 # Kevin's question, 26 Aug 2026: "how do I know the feedback is being taken by
@@ -11197,6 +11261,12 @@ def main():
     hi.add_argument("--no-gmail", action="store_true")
     hi.add_argument("--text", action="store_true", help="print the TRACK RECORD block to paste")
 
+    du = sub.add_parser("due",
+                        help="move a task's due date on Kevin's word (Upcoming until then)")
+    du.add_argument("task")
+    du.add_argument("date", help="YYYY-MM-DD, today or later")
+    du.add_argument("--why", required=True, help="Kevin's words or the reason, in a sentence")
+
     an = sub.add_parser("annotate")
     an.add_argument("task")
     an.add_argument("--note", required=True)
@@ -11370,7 +11440,7 @@ def main():
     # discarding the result here would make both checks ornamental.
     return {"queue": cmd_queue, "route": cmd_route, "escalate": cmd_escalate, "decided": cmd_decided,
             "handover": cmd_handover, "submit": cmd_submit_group, "roy-followups": cmd_roy_followups,
-            "annotate": cmd_annotate, "intent": cmd_intent,
+            "annotate": cmd_annotate, "due": cmd_due, "intent": cmd_intent,
             "complete": cmd_complete, "verify": cmd_verify,
             "score": cmd_score, "reconcile": cmd_reconcile,
             "lessons": cmd_lessons, "trial-settle": cmd_trial_settle, "revise": cmd_revise, "retype": cmd_retype,
