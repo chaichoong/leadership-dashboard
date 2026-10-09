@@ -187,6 +187,39 @@ test.describe('AI Team section', () => {
     expect((await card(page, 'aiWorkCard')).head).toBe('— open');
   });
 
+  test('the cards say they are loading while Airtable answers, never sit blank (audit, 9 Oct 2026)', async ({ page }) => {
+    await page.addInitScript((pat) => localStorage.setItem('_dlr_pat', pat), MOCK_PAT);
+    await loadDashboard(page);
+    await page.route('**/api.airtable.com/v0/**', async (route) => {
+      if (route.request().method() === 'GET' && route.request().url().includes(ESTATE)) {
+        await new Promise((r) => setTimeout(r, 1500));
+        return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ records: [healthRow(), blockersRow()] }) });
+      }
+      return route.fallback();
+    });
+    await page.evaluate(() => { const el = document.getElementById('aiWorkCard'); const blank = document.createElement('div'); blank.id = 'aiWorkCard'; el.replaceWith(blank); window.__aiLoad = loadAiTeamHealth(); });
+    const during = await card(page, 'aiWorkCard');
+    expect(during.head).toBe('…');
+    expect(during.sub).toBe('Loading from the Mac…');
+    await page.evaluate(async () => await window.__aiLoad);
+    expect((await card(page, 'aiWorkCard')).head).toBe('178 open');
+  });
+
+  test('the health check judges the blocker row by its sweep, as the card does (audit, 9 Oct 2026)', async ({ page }) => {
+    await page.addInitScript((pat) => localStorage.setItem('_dlr_pat', pat), MOCK_PAT);
+    await loadDashboard(page);
+    const b = blockersRow(5);
+    b.fields[ES.payload] = JSON.stringify({ open: wall('TOOL', 2), openCount: 2, byKind: { TOOL: 2 }, sweptAt: minutesAgo(200) });
+    await routeEstate(page, [healthRow(5), b]);
+    await page.evaluate(async () => await loadAiTeamHealth());
+    const stale = await page.evaluate(() => aiTeamCheck());
+    expect(stale.status).toBe('warn');
+    expect(stale.detail).toMatch(/^Not updated since .*blocker sweep/);
+    await routeEstate(page, [healthRow(5), blockersRow(5)]);
+    await page.evaluate(async () => await loadAiTeamHealth());
+    expect((await page.evaluate(() => aiTeamCheck())).status).toBe('pass');
+  });
+
   test('a failed row shows its reason, never a number', async ({ page }) => {
     await page.addInitScript((pat) => localStorage.setItem('_dlr_pat', pat), MOCK_PAT);
     await loadDashboard(page);
