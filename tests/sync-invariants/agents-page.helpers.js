@@ -248,6 +248,11 @@ async function mockAgentsPage(page, overrides = {}) {
         return rec ? json(rec) : json({ error: 'NOT_FOUND' }, 404);
       }
       const decoded = decodeURIComponent(url.replace(/\+/g, ' '));
+      // Answered Your step cards (9 Oct 2026) are read on their own: the queue formula leaves them out.
+      const answered = (r) => String((r.fields || {})[TF.agentOutput] || '').startsWith('YOUR STEP:')
+        && String((r.fields || {}).fldtI7SJI4gEohHD1 || '').includes('KEVIN STEP ');   // Approval Feedback
+      if (decoded.includes(', AND(LEFT({Agent Output}')) return json({ records: fixtures.approvals.filter(answered) });
+      if (decoded.includes('NOT(AND(LEFT({Agent Output}')) return json({ records: fixtures.approvals.filter((r) => !answered(r)) });
       const hit = TASK_QUERY_MARKERS.find((m) => decoded.includes(m.marker));
       return json({ records: fixtures[hit ? hit.key : 'openTasks'] });
     }

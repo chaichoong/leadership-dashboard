@@ -265,6 +265,30 @@ test.describe('Undo on an answered Your step card', () => {
     expect(writes[0][FEEDBACK]).toBeNull();
   });
 
+  test('a refresh that read the queue before his answer is dropped, so the card stays answered (review, 9 Oct 2026)', async ({ page }) => {
+    const fx = withStep();
+    await mockAgentsPage(page, fx);
+    await liveRecord(page, fx);
+    await loadAgentsPage(page);
+    await page.click('#ptab-approvals');
+    let release;
+    const gate = new Promise((r) => { release = r; });
+    const stale = JSON.parse(JSON.stringify(fx.approvals));   // the queue as it was before his answer
+    await page.route((url) => decodeURIComponent(url.search.replace(/\+/g, ' ')).includes('NOT(AND(LEFT({Agent Output}'), async (route) => {
+      await gate;
+      route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ records: stale }) });
+    });
+    const refresh = page.evaluate(() => window.apvSilentRefresh());
+    await page.locator(`#apvNote-${ID}`).fill('Wrong card');
+    await page.locator(`[data-apv-card="${ID}"] [data-apv-step-cant]`).click();
+    await expect(page.locator(`[data-apv-answered="${ID}"]`)).toBeVisible();
+    release();
+    await refresh;
+    await page.waitForTimeout(300);
+    await expect(page.locator(`[data-apv-card="${ID}"]`)).toHaveCount(0);
+    await expect(page.locator(`[data-apv-answered="${ID}"]`)).toBeVisible();
+  });
+
   test('Undo after the robot has taken the answer says too late and writes nothing', async ({ page }) => {
     const fx = withStep();
     await mockAgentsPage(page, fx);

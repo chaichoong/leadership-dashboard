@@ -6984,7 +6984,8 @@ def cmd_signin_done(args):
     except Exception as exc:  # noqa: BLE001 — said on the output, never read as "nothing answered"
         out["siteWallsError"] = str(exc)[:200]
         woke = []
-    out["handedBack"] += [{"task": w["task"], "name": w["name"], "blocker": True, "siteWall": w["subject"]} for w in woke]
+    # Its own key: the app counts handedBack as this site's tasks, and these are walls on other addresses.
+    out["siteWallsCleared"] = [{"task": w["task"], "name": w["name"], "siteWall": w["subject"]} for w in woke]
     print(json.dumps(out, indent=2))
 
 
@@ -7704,6 +7705,9 @@ def wake_site_walls_answered(sites, events=None, now=None):
         b = task_blocker(t["notes"])
         if not b or b["kind"] != "SITE" or (b.get("profile") or "default") != "default":
             continue
+        if has_step_mark((rec.get("fields") or {}).get(AF["approvalFeedback"]) or ""):
+            # He has answered the card ("I can't do this"): the sweep sends it back, as it always has.
+            continue
         reason = blocker_clear_reason(b, sites, {}) or kevin_tried_wall_reason(b, sites, events, now)
         if not reason:
             continue
@@ -7965,7 +7969,7 @@ def without_done_marks(feedback):
     return out or None
 
 
-def wake_blocked(task_id, b, reason, by="agent-dispatch"):
+def wake_blocked(task_id, b, reason, by="agent-dispatch", done_stamp=""):
     """Clear the wall and hand the task back to its agent, keeping Kevin's
     verdict. The ledger's `unblocked` event ends the idle rest at once, so an
     approved carry-out is picked up by the next half-hourly poll; a task not
@@ -7982,6 +7986,13 @@ def wake_blocked(task_id, b, reason, by="agent-dispatch"):
         # minutes later). A CLEARED line now would clear THAT wall, which nothing has fixed: leave
         # it for the next sweep to judge on its own (review, 7 Oct 2026).
         return None
+    if done_stamp:
+        # Woken on his "done": it must still stand on this fresh read. He may have pressed Undo after
+        # the sweep's bulk read, and a sweep can take minutes to reach his task (review, 9 Oct 2026).
+        fresh = (rec.get("fields") or {}).get(AF["approvalFeedback"]) or ""
+        said = kevin_done_said(fresh, b.get("since", ""))
+        if not said or said[1] != done_stamp or step_line_settling(fresh):
+            return None
     stamp = datetime.now(LONDON).strftime("%d %b %Y %H:%M")
     note = blocker_note(stamp, by, BLOCKER_CLEARED_MARK, b,
                         f"{reason}. Carry on from where you stopped and finish the job. "
@@ -8601,8 +8612,11 @@ def blockers_scan(sweep=False, now=None):
         # A line inside his Undo window is his to take back: nothing here acts on it, or wipes it, yet.
         settling_now = sweep and step_line_settling(raw_feedback)
         if settling_now:
+            # Nothing acts on the task this sweep: a wake for another reason (his own sign-in window) would
+            # take his can't line out, and before 9 Oct his can't won. The next sweep decides.
             settling.append({"task": t["id"], "name": t["name"][:80]})
             done = cant = None
+            reason = ""
         if cant and sweep:
             sent = send_back_blocked(t["id"], b)
             if sent:
@@ -8613,7 +8627,8 @@ def blockers_scan(sweep=False, now=None):
             # the receipt before it closes the task (GUARDRAILS "Kevin's turn").
             reason = f"Kevin says the step is done: {done[0][:400]}"
         if reason and sweep:
-            woke = wake_blocked(t["id"], b, reason, by="Kevin" if done else "agent-dispatch")
+            woke = wake_blocked(t["id"], b, reason, by="Kevin" if done else "agent-dispatch",
+                                done_stamp=done[1] if done and reason.startswith("Kevin says the step is done") else "")
             if woke:
                 woken.append(woke)
                 continue

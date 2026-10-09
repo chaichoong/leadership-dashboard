@@ -114,10 +114,11 @@
     }
 
     // The approval queue exactly as the AI Agents page counts it (os/agents/index.html
-    // APV_QUEUE_FORMULA): Approval, raised by the loop, not knocked back to a later date.
+    // APV_QUEUE_FORMULA): Approval, raised by the loop, not knocked back to a later date, and not a
+    // Your step card he has answered (`answered`, set by js/home.js from the queue read, 9 Oct 2026).
     const isKevinsLane = email => !email || email === APPROVER_EMAIL;
     function queueCards(tasks, today) {
-        return (tasks || []).filter(x => x.inQueue && !(x.deferred && x.deferred > today) && isKevinsLane(x.approverEmail));
+        return (tasks || []).filter(x => x.inQueue && !x.answered && !(x.deferred && x.deferred > today) && isKevinsLane(x.approverEmail));
     }
 
     function parsePayload(row) {

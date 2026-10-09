@@ -1042,6 +1042,35 @@ print(json.dumps({"t1": m.send_back_blocked("t1", b), "t2": (m.send_back_blocked
     expect(r.written).toEqual(['t2']);
   });
 
+  it("a wake on his done line re-reads it: an Undo after the sweep's bulk read stops the wake (review, 9 Oct 2026)", () => {
+    const r = py(setup + `
+b = m.task_blocker(WALL)
+rec("undone", notes=WALL, status="Approval", outcome="Approved as-is", approved_at="2026-10-04T09:00:00.000Z", output=STEP, feedback="Use the business card.")
+rec("kept", notes=WALL, status="Approval", outcome="Approved as-is", approved_at="2026-10-04T09:00:00.000Z", output=STEP,
+    feedback="KEVIN STEP DONE [" + ago(400) + "]: paid, ref EX-12")
+stamp = m.kevin_done_said(TASKS["kept"]["fields"][AF["approvalFeedback"]])[1]
+print(json.dumps({"undone": m.wake_blocked("undone", b, "Kevin says the step is done: paid", by="Kevin", done_stamp=stamp),
+                  "kept": (m.wake_blocked("kept", b, "Kevin says the step is done: paid", by="Kevin", done_stamp=stamp) or {}).get("task"),
+                  "written": [w["task"] for w in WRITES]}))`);
+    expect(r.undone).toBeNull();
+    expect(r.kept).toBe('kept');
+    expect(r.written).toEqual(['kept']);
+  });
+
+  it("inside the window nothing wakes the task, even a wall whose cause is gone: his can't still wins next sweep", () => {
+    const r = py(setup + `
+m.load_login_sites = lambda: {"www.clips.example": {"label": "Clips", "login": True, "loginUrl": "https://www.clips.example/in"}}
+SITE = "${blk('SITE', 'www.clips.example', '2026-10-05T09:00:00.000Z')}"
+rec("t1", notes=SITE, status="Approval", outcome="Approved as-is", approved_at="2026-10-04T09:00:00.000Z",
+    output=m.your_step_output("ROBOT SITE: www.clips.example. Add it.", "The form is ready."), feedback="KEVIN STEP CANT [" + ago(30) + "]: wrong site")
+res = m.blockers_scan(sweep=True, now=NOW)
+print(json.dumps({"woken": res["woken"], "sent": res["sentBack"], "fb": f("t1", "approvalFeedback"), "wall": bool(m.task_blocker(notes("t1")))}))`);
+    expect(r.woken).toEqual([]);
+    expect(r.sent).toEqual([]);
+    expect(r.fb).toMatch(/KEVIN STEP CANT \[[^\]]+\]: wrong site$/);
+    expect(r.wall).toBe(true);
+  });
+
   it('signin-done clears a SITE wall his window answered at another address, and leaves every other wall', () => {
     const dir = mkdtempSync(tmpdir() + '/od-site-answer-');
     const ledger = dir + '/runs.jsonl';
@@ -1055,25 +1084,30 @@ SITES = {"www.landlord-quotes.example": {"label": "Landlord quotes", "login": Tr
 m.load_login_sites = lambda: SITES
 rec("answered", notes="${blk('SITE', 'insurer.example', '2026-10-09T10:00:00.000Z')}", status="Approval", outcome="Approved as-is",
     approved_at="2026-10-04T09:00:00.000Z", output=m.your_step_output("ROBOT SITE: insurer.example. Add it.", "The form is ready."))
+rec("said", notes="${blk('SITE', 'insurer.example', '2026-10-09T10:00:00.000Z')}", status="Approval", outcome="Approved as-is",
+    approved_at="2026-10-04T09:00:00.000Z", output=m.your_step_output("ROBOT SITE: insurer.example. Add it.", "x"),
+    feedback="KEVIN STEP CANT [2026-10-09T10:30:00.000Z]: we have no account there")
 rec("other", notes="${blk('SITE', 'clips.example', '2026-10-09T10:00:00.000Z')}", status="Approval", outcome="Approved as-is",
     approved_at="2026-10-04T09:00:00.000Z", output=m.your_step_output("ROBOT SITE: clips.example. Add it.", "x"))
 rec("signin", notes="${blk('SIGN-IN', 'insurer.example', '2026-10-09T10:00:00.000Z')}", status="Approval", outcome="Approved as-is",
     approved_at="2026-10-04T09:00:00.000Z", output=m.your_step_output("ROBOT SIGN-IN: insurer.example. Sign in.", "x"))
 out = run(m.cmd_signin_done, {"site": "www.landlord-quotes.example"})
 got = json.loads(out["out"])
-print(json.dumps({"err": out["err"], "handed": [[h["task"], h.get("siteWall")] for h in got["handedBack"]],
+print(json.dumps({"err": out["err"], "handed": [[h["task"], h.get("siteWall")] for h in got["siteWallsCleared"]], "own": got["handedBack"],
                   "wall": m.task_blocker(notes("answered")), "status": f("answered", "status"),
                   "output": f("answered", "agentOutput"), "approved": f("answered", "approvalOutcome"),
                   "note": notes("answered").split("\\n\\n")[-1],
-                  "others": [m.task_blocker(notes(i))["kind"] + " " + m.task_blocker(notes(i))["subject"] for i in ("other", "signin")]}))`);
+                  "others": [m.task_blocker(notes(i))["kind"] + " " + m.task_blocker(notes(i))["subject"] for i in ("other", "signin", "said")]}))`);
     expect(r.err).toBeNull();
     expect(r.handed).toEqual([['answered', 'insurer.example']]);
+    expect(r.own).toEqual([]);                      // the app's count for the site he signed in to stays its own
     expect(r.wall).toBeNull();
     expect(r.status).toBe('Today');                 // off his queue, back to its agent
     expect(r.output).toBe('The form is ready.');    // the step block comes off with the wall
     expect(r.approved).toBe('Approved as-is');      // his approval kept
     expect(r.note).toMatch(/— Robot sign-in\] BLOCKER CLEARED \(SITE insurer\.example\): Kevin answered this wall by signing in at www\.landlord-quotes\.example/);
     // A wall on another site is not his answer, and a SIGN-IN wall is signin_done's own (by its door host).
-    expect(r.others).toEqual(['SITE clips.example', 'SIGN-IN insurer.example']);
+    // A card he has answered ("I can't do this") is the sweep's to send back, as it always was.
+    expect(r.others).toEqual(['SITE clips.example', 'SIGN-IN insurer.example', 'SITE insurer.example']);
   });
 });

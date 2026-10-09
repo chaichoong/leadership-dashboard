@@ -488,7 +488,7 @@
     // asked us to stop. This string is byte-identical to APV_QUEUE_FORMULA in
     // os/agents/index.html and drift-tested in
     // tests/agent-register-surfaces.test.js.
-    const AGENTS_BADGE_FORMULA = "AND({Status}='Approval', LEN({Sent For Approval By}&'')>0, NOT(IS_AFTER({Deferred Until}, TODAY())))";
+    const AGENTS_BADGE_FORMULA = "AND({Status}='Approval', LEN({Sent For Approval By}&'')>0, NOT(IS_AFTER({Deferred Until}, TODAY())), NOT(AND(LEFT({Agent Output}&'', 10)='YOUR STEP:', FIND('KEVIN STEP ', {Approval Feedback}&'')>0)))";
     async function refreshAgentsBadge() {
         if (typeof PAT === 'undefined' || !PAT) return;
         try {

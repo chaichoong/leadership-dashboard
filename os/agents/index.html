@@ -1064,7 +1064,11 @@ async function postTaskComment(taskId, text){
 // deliberate: tests/agent-register-surfaces.test.js reads the string out of
 // both files and fails if they differ, so the badge can never count a queue
 // the page does not show. Composing it from parts would slip past that test.
-const APV_QUEUE_FORMULA = "AND({Status}='Approval', LEN({Sent For Approval By}&'')>0, NOT(IS_AFTER({Deferred Until}, TODAY())))";
+const APV_QUEUE_FORMULA = "AND({Status}='Approval', LEN({Sent For Approval By}&'')>0, NOT(IS_AFTER({Deferred Until}, TODAY())), NOT(AND(LEFT({Agent Output}&'', 10)='YOUR STEP:', FIND('KEVIN STEP ', {Approval Feedback}&'')>0)))";
+// The cards the queue formula leaves out because he has answered them (Kevin, 9 Oct 2026): a Your step
+// card carrying his KEVIN STEP DONE or CANT line, waiting for the half-hourly sweep. Read on their own
+// for the Undo bar and the one line that says they are going back.
+const APV_ANSWERED_FORMULA = "AND({Status}='Approval', LEN({Sent For Approval By}&'')>0, NOT(IS_AFTER({Deferred Until}, TODAY())), AND(LEFT({Agent Output}&'', 10)='YOUR STEP:', FIND('KEVIN STEP ', {Approval Feedback}&'')>0))";
 const APV_DEFERRED_FORMULA = "AND({Status}='Approval', LEN({Sent For Approval By}&'')>0, IS_AFTER({Deferred Until}, TODAY()))";
 const APV_QUEUE_FIELDS = () => [
     TF.name, TF.status, TF.description, TF.notes, TF.dueDate, TF.taskType,
@@ -1074,24 +1078,31 @@ const APV_QUEUE_FIELDS = () => [
     // Your step (7 Oct 2026): an approved card back in his lane, and the proof he gave.
     TF.approvalOutcome, TF.approvalFeedback];
 
+// Bumped by an answer or an Undo on this page: a read that started before it carries the record as it
+// was, so it is dropped rather than put back over the answer (review, 9 Oct 2026).
+let _apvQueueEpoch = 0;
 async function loadApprovals(){
+    const epoch = _apvQueueEpoch;
     _approvalsState = 'loading';
     try {
-        const recs = await atFetch(TASKS_TBL, APV_QUEUE_FIELDS(),
-            { filterByFormula: APV_QUEUE_FORMULA });
+        const [recs, answeredRecs] = await Promise.all([
+            atFetch(TASKS_TBL, APV_QUEUE_FIELDS(), { filterByFormula: APV_QUEUE_FORMULA }),
+            atFetch(TASKS_TBL, APV_QUEUE_FIELDS(), { filterByFormula: APV_ANSWERED_FORMULA })]);
+        if(epoch !== _apvQueueEpoch){ _approvalsState = 'ready'; return; }
         // This queue and badge are KEVIN'S. The Approver field decides whose
         // lane a task is in (empty = Kevin, same convention as approverFor in
         // scripts/slack-automation/approvals.js); Mica's label-8 lane must
         // not inflate his count or invite him to decide her items
         // (review finding, 24 Aug 2026).
-        const mine = recs.filter(r => {
+        const inLane = r => {
             const ap = gf(r,TF.approver);
             return !ap || !ap.email || ap.email === APPROVER_EMAIL;
-        });
+        };
+        const mine = recs.filter(inLane);
         _apvReason = {};
         _apvSelected.clear();
         _apvLastQueueLoad = Date.now();
-        const rows = mine.map(r=>({
+        const toRow = r=>({
             id: r.id,
             name: gf(r,TF.name)||'(Untitled)',
             taskType: selName(gf(r,TF.taskType)),
@@ -1130,12 +1141,13 @@ async function loadApprovals(){
             submittedAt: apvWaitingSince(
                 gf(r,TF.slackBaseline) || gf(r,TF.lmt) || r.createdTime,
                 gf(r,TF.deferredUntil)),
-        }));
+        });
         // An answered Your step card is not waiting on him (Kevin, 9 Oct 2026: "It needs to disappear
         // once I've answered it"). It stays at Status Approval until the half-hourly sweep hands it to
-        // its agent, so it is kept OUT of the queue and its counts, and said in one line instead.
-        allAnswered = rows.filter(t => apvYourStep(t) && apvStepDoneSaid(t.feedback));
-        allApprovals = rows.filter(t => !allAnswered.includes(t));
+        // its agent, so the queue formula leaves it out (and so do the sidebar badge and Home, which
+        // share the formula), and it is said in one line instead.
+        allApprovals = mine.map(toRow);
+        allAnswered = answeredRecs.filter(inLane).map(toRow);
         // Most important first (Kevin's ruling, 25 Aug 2026): tier 1 leads,
         // then the Priority field (which the Task Manager's 9am/1pm/5pm
         // board pass reviews and corrects), then longest waiting. The
@@ -2039,8 +2051,7 @@ async function apvBulkDeferTo(until){
 let _apvSignInClickedAt = 0, _apvLastQueueLoad = 0;
 const APV_SIGNIN_WATCH_MS = 20 * 60 * 1000;
 function apvQueueSignature(){
-    return allApprovals.map(t => t.id + ':' + (apvSignInWait(t) ? 'w' : 'd')).join(',')
-        + '|' + allAnswered.map(t => t.id).join(',');
+    return allApprovals.map(t => t.id + ':' + (apvSignInWait(t) ? 'w' : 'd')).join(',');
 }
 function apvSignInsWaiting(){ return allApprovals.some(t => apvSignInWait(t)); }
 // An answered card waits for the sweep: re-read on the same clock, so its line goes when it does.
@@ -2064,6 +2075,9 @@ async function apvSilentRefresh(){
     keptPicks.forEach(id => { if(queued.has(id)) _apvSelected.add(id); });
     _apvLastQueueLoad = Date.now();
     if(String(_approvalsState).indexOf('error') === 0) return false;
+    // Answered cards the sweep has taken: only their line and bar change, so the box he is typing
+    // in keeps its cursor (review, 9 Oct 2026).
+    apvRenderAnsweredBar();
     if(apvQueueSignature() === before) return false;
     renderApprovals();
     return true;
@@ -2764,6 +2778,7 @@ window.apvStepCant = apvStepCant;
 const APV_STEP_UNDO_MS = 2 * 60 * 1000;
 let _apvAnsweredTick = null;
 function apvStepAnswered(t){
+    _apvQueueEpoch++;
     allApprovals = allApprovals.filter(x => x.id !== t.id);
     allAnswered = allAnswered.filter(x => x.id !== t.id).concat([t]);
     const card = document.querySelector(`[data-apv-card="${t.id}"]`);
@@ -2856,6 +2871,8 @@ async function apvStepUndo(taskId){
         const at = hist.lastIndexOf(u.hist);
         if(at >= 0) payload[TF.feedbackHistory] = (hist.slice(0, at).replace(/\s+$/, '') + hist.slice(at + u.hist.length)).trim();
         await atUpdate(TASKS_TBL, taskId, payload);
+        _apvQueueEpoch++;
+        if(_approvalsState === 'loading') _approvalsState = 'ready';   // that read is dropped: draw the queue, not a spinner
         try { await postTaskComment(taskId, 'Kevin took back his answer with Undo. The card is back in his queue.'); }
         catch(e){ console.error('undo comment failed', e); }
         t.feedback = payload[TF.approvalFeedback] || '';
