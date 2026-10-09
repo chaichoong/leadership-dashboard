@@ -1369,6 +1369,14 @@ function assertHandoverPlan(plan, now = new Date()) {
       if (!String(plan.sources || '').includes(a)) die(`the plan names "${a}" in "answers" but its "sources" never quote it: say where that answer comes from`);
     }
   }
+  // "carryOn" (9 Oct 2026): the robot goes on page by page from where the steps end. Its facts are
+  // the only source the planner may answer from, so a plan without them cannot carry on.
+  if (plan.carryOn !== undefined) {
+    const c = plan.carryOn;
+    const facts = c && (Array.isArray(c.facts) ? c.facts.join('\n') : String(c.facts || ''));
+    if (!c || typeof c !== 'object' || !facts.trim()) die('the plan\'s "carryOn" needs "facts": every answer the form may ask for, one per line, from its sources');
+    if (c.maxPages !== undefined && !(Number(c.maxPages) >= 1 && Number(c.maxPages) <= CARRY_ON_MAX_PAGES)) die(`"carryOn.maxPages" must be 1 to ${CARRY_ON_MAX_PAGES}`);
+  }
   plan.steps.forEach((s, i) => {
     const d = s && s.do;
     if (!HANDOVER_STEPS.has(d)) die(`step ${i + 1} is "${d}". A handover plan never submits, pays or uploads: the last click is Kevin's.`);
@@ -1533,8 +1541,13 @@ async function assertNotFinalAction(page, s, ctx = {}) {
       const answer = !!control && (['checkbox', 'radio'].includes(ctype) || ['checkbox', 'radio', 'switch'].includes(crole)
         || control.hasAttribute('aria-checked') || control.hasAttribute('aria-pressed')
         || ((control.tagName === 'BUTTON' || crole === 'button') && own.length <= 12));
+      // The option the click picks, in its own words: the label clicked, else the box's shortest label,
+      // else a short button's text (the standing-answer check compares it with his pick, 9 Oct 2026).
+      const shortest = control && control.labels && control.labels.length
+        ? Array.from(control.labels).map(l => String(l.textContent || '').replace(/\s+/g, ' ').trim()).sort((a, b) => a.length - b.length)[0] : '';
+      const picked = host.tagName === 'LABEL' ? String(host.textContent || '').replace(/\s+/g, ' ').trim() : (shortest || own);
       return { entry: false, words: squash(parts), question: answer ? squash(question(control)) : '', around: answer ? nearby(control) : '', tick: answer, option,
-               boxOption, value: control ? String(control.value || '') : '' };
+               boxOption, picked, value: control ? String(control.value || '') : '' };
     }, null, { timeout: Math.min(Number(s.timeout) || 20000, 60000) });
   } catch (e) {
     throw new Error(`could not read what "${s.selector}" is, so it was not touched: ${String(e.message || e).slice(0, 120)}`);
@@ -1543,14 +1556,30 @@ async function assertNotFinalAction(page, s, ctx = {}) {
     if (s.do === 'select') {
       // The option it picks can be the declaration itself ("I agree with all the assumptions"): round 5.
       const pick = seen.options ? pickOption(seen.options, String(s.label !== undefined ? s.label : s.value)).option : null;
+      if (ctx.live) {
+        // A live answer to a declaration topic stands only on his standing answers (9 Oct 2026).
+        // A dropdown with a label is asked by that label: the words around it can hold another question.
+        const st = standingAnswerFor(seen.question || seen.around, pick ? pick.label : '', ctx.standing);
+        if (st.topic && !st.ok) throw new Error(`refused: "${(seen.question || seen.around).slice(0, 60)}" is a declaration question: ${st.why}`);
+        if (st.topic) return;
+      }
       const asked = ((pick ? pick.label : '') + ' ' + seen.question).trim();
       if (DECLARATION_RE.test(asked) || NEARBY_DECLARATION_RE.test(seen.around)) throw new Error(`refused: "${(asked + ' ' + seen.around).trim().slice(0, 80)}" reads like a declaration, which is Kevin's`);
+    }
+    if (s.do === 'fill' && ctx.live && standingAnswerFor(seen.question, '', null).topic) {
+      throw new Error(`refused: "${seen.question.slice(0, 60)}" asks him to describe a declaration matter, which is Kevin's`);
     }
     if (s.do === 'fill' && SIGNATURE_RE.test(seen.question)) throw new Error(`refused: "${seen.question.slice(0, 80)}" looks like a signature, which is Kevin's`);
     return;
   }
   if (!presses) return;
   if (HARD_ACTION_RE.test(seen.words) && !namedAnswer(page.url(), seen)) throw new Error(`refused: "${seen.words.trim().slice(0, 60)}" looks like the final action, which is Kevin's`);
+  if (ctx.live && seen.tick) {
+    // A live answer to a declaration topic stands only on his standing answers (9 Oct 2026).
+    const st = standingAnswerFor(seen.question + ' ' + seen.around, seen.picked, ctx.standing);
+    if (st.topic && !st.ok) throw new Error(`refused: "${(seen.question || seen.around).slice(0, 60)}" is a declaration question: ${st.why}`);
+    if (st.topic) return;
+  }
   const asked = (seen.words + ' ' + seen.question).trim();
   const declaration = () => new Error(`refused: "${(asked + ' ' + seen.around).trim().slice(0, 80)}" reads like a declaration, which is Kevin's`);
   // His declarations, in the first person: never the robot's, named or not.
@@ -1622,9 +1651,15 @@ async function waitForKevin(page, s, maxMs, onTick) {
 const FILLING = 'The robot is filling this in for you: hands off until this bar says Your turn.';
 
 // Runs the plan up to Kevin's turn. A step that fails does not throw: the window
-// stays his, with the step named, so he can finish by hand.
+// stays his, with the step named, so he can finish by hand. A plan with "carryOn" goes on
+// from where its steps end, or from a step that failed for any reason but the guard (the
+// Swinton plans' missing email box, 9 Oct 2026), page by page to the price.
 async function runHandover(page, plan, opts = {}) {
   const done = [];
+  const onward = async () => {
+    const c = await carryOn(page, plan, opts);
+    return { done: done.concat(c.done), stuck: c.stuck, end: c.end || null };
+  };
   for (let i = 0; i < plan.steps.length; i++) {
     const s = plan.steps[i];
     try {
@@ -1648,10 +1683,15 @@ async function runHandover(page, plan, opts = {}) {
       if (opts.onTick) opts.onTick();
       if (!opts.quiet) await turnBanner(page, FILLING);   // a new page drops the bar: put it back (not in a dry run's screenshot)
     } catch (e) {
-      return { done, stuck: { step: i + 1, do: s.do, error: String((e && e.message) || e).slice(0, 300) } };
+      const error = String((e && e.message) || e).slice(0, 300);
+      if (plan.carryOn && s.do !== 'kevin' && !GUARD_REFUSAL_RE.test(error)) {
+        done.push({ do: s.do, executed: false, error, carriedOnPast: true });
+        return onward();
+      }
+      return { done, stuck: { step: i + 1, do: s.do, error } };
     }
   }
-  return { done, stuck: null };
+  return plan.carryOn ? onward() : { done, stuck: null };
 }
 
 // The window is his until he closes it (the tab, the window or Chrome itself).
@@ -1666,6 +1706,409 @@ async function waitForWindowClose(ctx, capMs, onTick) {
     if (onTick) onTick();
     await new Promise(r => setTimeout(r, 1500));
   }
+}
+
+// ── Kevin's standing answers (Kevin, 9 Oct 2026) ─────────────────────────────
+// Insurance forms ask the same declaration questions on every quote: claims, convictions, CCJs,
+// bankruptcy, a policy refused or cancelled. On 27 Sep they were made his alone, so every quote
+// plan stopped at them and everything after his step was his too. On 8 Oct he typed his answers into
+// the cards; on 9 Oct he ruled the robot answers from them ("Robot answers them"), with these limits:
+// a question that ALSO asks about charges, prosecutions, investigations, insolvency or special terms
+// still stops for him, he still ticks the final "I declare" and presses Buy, and his answers stay in
+// a private file (HANDOVER_DIR/standing-answers.json), never in this public repo. Each answer there is
+// { key, asks (a pattern the question must match, e.g. a time window), covers (the topic words it
+// answers), pick (the option it chooses), said (his words and date) }.
+// This check is code, not the planner's judgement: an answer control (tick, radio, short button or
+// dropdown) whose question names a topic below is refused unless every topic in the question is
+// covered by a standing answer that fits it, all with the same pick, and the robot picks exactly that.
+const STANDING_FILE = () => process.env.AGENT_STANDING_ANSWERS || path.join(HANDOVER_DIR, 'standing-answers.json');
+const DECLARATION_TOPIC_RE = /\b(claims?|convict\w*|criminal|offences?|ccjs?|county court|judge?ments?|bankrupt\w*|refused|cancell?ed|voided|declined|special terms|terms imposed|imposed)\b/gi;
+// Never the robot's, whatever is on file. (Special terms is a topic, not on this list: it stops for him
+// until a standing answer of his covers it, as it did on Rightsure's form on 9 Oct 2026.)
+const NEVER_ANSWER_RE = new RegExp(String.raw`\b(charged?|charges|prosecut\w*|pending|awaiting|investigat\w*|police|cautions?|cautioned|arrest\w*`
+  + String.raw`|insolven\w*|liquidat\w*|administration orders?|administrators?|receivership|iva|individual voluntary`
+  + String.raw`|debt relief|sequestrat\w*|arrangements? with (?:your |their |its )?creditors|struck off|strike off|dissolv\w*|disqualif\w*`
+  + String.raw`|motoring|driving|speeding|material facts?|anything else|any other (?:information|facts?|circumstances|matters?))\b`, 'i');
+// A declaration about OTHER people (a co-director, a joint owner, the tenants) is not his to give from
+// his own answers: it stops for him unless a standing answer says it covers them ("others").
+const PEOPLE_RE = /\b(directors?|partners?|officers?|shareholders?|tenants?|occupants?|lodgers?|household|family|spouse|husband|wife|joint (?:owners?|policyholders?)|anyone|anybody|any (?:other )?(?:person|people|party|parties))\b/gi;
+// "Other than motoring offences" narrows a question; it does not ask about motoring.
+const EXCLUSION_RE = /\b(?:other than|excluding|except(?:ing)?|apart from|not including|ignoring)\s+(?:any\s+)?(?:\w+\s+){0,2}?(?:motoring|driving|parking)\s+(?:offences?|convictions?|fines?)\b/gi;
+const normWords = t => String(t || '').replace(/\s+/g, ' ').trim().toLowerCase();
+
+function loadStanding(file = STANDING_FILE()) {
+  let raw;
+  try { raw = JSON.parse(fs.readFileSync(file, 'utf8')); } catch (e) {
+    return e && e.code === 'ENOENT' ? null : { answers: [], facts: [], error: `standing answers unreadable: ${String(e.message || e).slice(0, 120)}` };
+  }
+  const answers = [];
+  for (const a of (raw && Array.isArray(raw.answers) ? raw.answers : [])) {
+    try {
+      if (!a || !a.key || !a.covers || !a.pick) throw new Error('needs key, covers and pick');
+      answers.push({ key: String(a.key), asks: new RegExp(a.asks || '.', 'i'), covers: new RegExp('^(?:' + a.covers + ')$', 'i'),
+                     others: a.others ? new RegExp('^(?:' + a.others + ')$', 'i') : null, pick: String(a.pick), said: String(a.said || '') });
+    } catch (e) {
+      // One bad entry voids them all: a half-read list could answer a question it was never meant to.
+      return { answers: [], facts: [], error: `standing answer "${a && a.key}" is unusable: ${String(e.message || e).slice(0, 120)}` };
+    }
+  }
+  return { answers, facts: Array.isArray(raw.facts) ? raw.facts.map(String) : [], ruling: String(raw.ruling || '') };
+}
+
+// {topic: false} for a question on none of the topics; else {topic: true, ok, why | keys}. A question
+// on the never list is his whether or not it names a topic ("Is there anything else we should know?").
+function standingAnswerFor(text, chosen, standing) {
+  const asked = String(text || '').replace(/\s+/g, ' ').replace(EXCLUSION_RE, ' ');
+  const no = why => ({ topic: true, ok: false, why });
+  const never = asked.match(NEVER_ANSWER_RE);
+  if (never) return no(`it asks about "${never[0]}", which only Kevin answers`);
+  const topics = [...new Set((asked.match(DECLARATION_TOPIC_RE) || []).map(w => w.toLowerCase()))];
+  if (!topics.length) return { topic: false };
+  if (NEARBY_DECLARATION_RE.test(asked)) return no('it is a declaration in the first person, which only Kevin makes');
+  if (!standing || !Array.isArray(standing.answers) || !standing.answers.length) {
+    return no(standing && standing.error ? standing.error : 'no standing answer is on file for it');
+  }
+  const fit = standing.answers.filter(a => a.asks.test(asked));
+  const uncovered = topics.filter(w => !fit.some(a => a.covers.test(w)));
+  if (uncovered.length) return no(`no standing answer covers "${uncovered.join('", "')}" as asked here`);
+  const used = fit.filter(a => topics.some(w => a.covers.test(w)));
+  const people = [...new Set((asked.match(PEOPLE_RE) || []).map(w => w.toLowerCase()))];
+  const strangers = people.filter(w => !used.every(a => a.others && a.others.test(w)));
+  if (strangers.length) return no(`it also asks about "${strangers.join('", "')}", which his own answers do not cover`);
+  const picks = [...new Set(used.map(a => normWords(a.pick)))];
+  if (picks.length !== 1) return no('the standing answers that fit it disagree');
+  if (normWords(chosen) !== picks[0]) return no(`the standing answer is "${used[0].pick}", not "${String(chosen || '').trim()}"`);
+  return { topic: true, ok: true, keys: used.map(a => a.key) };
+}
+
+// ── The robot carries on (Kevin, 9 Oct 2026) ─────────────────────────────────
+// "It signs in, starts doing stuff, but then it gets stuck. It asks me to do one thing and then
+// doesn't carry on again. It's basically opening up a page and then expecting me to do everything
+// for it." A plan is written before it runs, so it could only cover pages an agent had seen: the
+// Everywhen plan filled page 1 (22 steps) and handed him "the claims and declaration questions, then
+// read the price"; both Swinton plans died at step 18 on a box that is not there when he is signed in.
+// A plan with "carryOn" now goes on from where its steps end (or from a step that failed for any reason
+// but a guard refusal): the robot reads the page, a planner maps each question to the plan's facts,
+// the same guard checks every click, and Next moves it on, page after page, until the price is on
+// screen. A question no fact answers is HIS, by name: in his window the robot waits for him to answer
+// it and press Next, then carries on; in a dry run it stops and the agent puts it on his card.
+// The planner never decides alone: a typed value must appear in the facts, every answer cites a fact
+// that exists, and the guard above refuses any final action and any declaration his standing answers
+// do not cover.
+const CARRY_ON_MAX_PAGES = 25;
+const CARRY_ON_ROUNDS = 3;            // rounds on one page: an answer can reveal follow-up questions
+const CARRY_ON_KEVIN_MS = 20 * 60 * 1000;
+
+// What the page asks, in a form the planner can answer: every visible question with a target the
+// robot can act on. Radios are grouped by name and their option labels are the targets (Acturis forms
+// hide the input and style the label).
+async function snapshotForm(page) {
+  return page.evaluate(() => {
+    const clean = t => String(t || '').replace(/\s+/g, ' ').trim();
+    const shown = el => {
+      if (!el || !el.getBoundingClientRect) return false;
+      const r = el.getBoundingClientRect(); const s = getComputedStyle(el);
+      return r.width > 0 && r.height > 0 && s.visibility !== 'hidden' && s.display !== 'none' && Number(s.opacity) !== 0;
+    };
+    const cssId = id => '#' + CSS.escape(id);
+    const path = el => {
+      const parts = []; let n = el;
+      while (n && n.nodeType === 1 && n !== document.body) {
+        let i = 1, s = n; while ((s = s.previousElementSibling)) if (s.tagName === n.tagName) i++;
+        parts.unshift(`${n.tagName.toLowerCase()}:nth-of-type(${i})`); n = n.parentElement;
+      }
+      return 'body > ' + parts.join(' > ');
+    };
+    const target = el => {
+      if (el.id && document.querySelectorAll(cssId(el.id)).length === 1) return cssId(el.id);
+      if (el.name && document.getElementsByName(el.name).length === 1) return `[name="${CSS.escape(el.name)}"]`;
+      return path(el);
+    };
+    const byId = ids => String(ids || '').split(/\s+/).filter(Boolean).map(i => { const t = document.getElementById(i); return t ? t.textContent : ''; }).join(' ');
+    // The words around a control: the largest box round it under 300 characters holding no other
+    // question's control (the guard's own reading of a question, kept in step with it).
+    const around = c => {
+      let t = '';
+      for (let n = c.parentElement; n && n !== document.body; n = n.parentElement) {
+        const other = Array.from(n.querySelectorAll('input,select,textarea')).some(o => o !== c
+          && !['button', 'submit', 'reset', 'image', 'hidden'].includes(String(o.type || '').toLowerCase()) && !(c.name && o.name === c.name));
+        const x = clean(n.innerText || '');
+        if (other && t) break;
+        if (x.length > 300) break;
+        t = x;
+      }
+      return t;
+    };
+    const question = c => {
+      const q = [];
+      if (c.labels) for (const l of c.labels) q.push(l.textContent);
+      const fs = c.closest('fieldset'); const lg = fs && fs.querySelector('legend'); if (lg) q.push(lg.textContent);
+      q.push(c.getAttribute('aria-label') || '', byId(c.getAttribute('aria-labelledby')), c.getAttribute('placeholder') || '');
+      // A box with its own label is asked by that label; the words around it can hold the next question.
+      const own = clean(q.join(' '));
+      return (own || around(c)).slice(0, 400);
+    };
+    const items = []; const groups = {};
+    for (const el of document.querySelectorAll('input,select,textarea')) {
+      const type = String(el.type || '').toLowerCase();
+      if (['hidden', 'submit', 'button', 'reset', 'image', 'file', 'password'].includes(type)) continue;
+      if (type === 'radio' || type === 'checkbox') {
+        // The label he would click when the box itself is hidden; the shortest one is the option.
+        const labels = Array.from(el.labels || []).filter(shown).sort((a, b) => clean(a.textContent).length - clean(b.textContent).length);
+        const clickable = shown(el) ? el : labels[0];
+        if (!clickable) continue;
+        const t = clickable === el ? target(el) : (el.id ? `label[for="${CSS.escape(el.id)}"] >> nth=${Array.from(document.querySelectorAll(`label[for="${CSS.escape(el.id)}"]`)).indexOf(labels[0])}` : target(labels[0]));
+        const option = clean(labels.length ? labels[0].textContent : el.value);
+        if (type === 'radio' && el.name) {
+          const g = groups[el.name] || (groups[el.name] = { kind: 'radio', question: '', options: [] });
+          if (!g.question) {
+            const fs = el.closest('fieldset'); const lg = fs && fs.querySelector('legend');
+            // The question is what surrounds the group, less the option words themselves.
+            let q = lg ? clean(lg.textContent) : '';
+            if (!q) {
+              let n = el.parentElement, best = '';
+              for (; n && n !== document.body; n = n.parentElement) {
+                const all = Array.from(n.querySelectorAll('input,select,textarea')).filter(o => !['hidden', 'submit', 'button'].includes(String(o.type || '').toLowerCase()));
+                if (all.some(o => o.name !== el.name)) break;
+                const x = clean(n.innerText || ''); if (x.length > 300) break; best = x;
+              }
+              q = best;
+            }
+            g.question = q.slice(0, 400);
+            items.push(g);
+          }
+          g.options.push({ label: option, target: t, checked: !!el.checked });
+        } else {
+          items.push({ kind: 'checkbox', question: question(el), option, target: t, checked: !!el.checked });
+        }
+        continue;
+      }
+      if (!shown(el)) continue;
+      const it = { kind: el.tagName === 'SELECT' ? 'select' : (el.tagName === 'TEXTAREA' ? 'text' : (type || 'text')),
+                   question: question(el), target: target(el), value: clean(el.value).slice(0, 120), required: !!el.required };
+      if (el.tagName === 'SELECT') {
+        it.options = Array.from(el.options).map(o => clean(o.label || o.textContent)).filter(Boolean).slice(0, 60);
+        it.value = el.selectedIndex >= 0 && el.options[el.selectedIndex] ? clean(el.options[el.selectedIndex].label || el.options[el.selectedIndex].textContent) : '';
+      }
+      items.push(it);
+    }
+    const buttons = [];
+    for (const el of document.querySelectorAll('button,input[type=submit],input[type=button],a[role=button],[role=button],a.btn,a.button')) {
+      if (!shown(el)) continue;
+      const text = clean(el.innerText || el.value || el.getAttribute('aria-label') || '');
+      if (!text || text.length > 40) continue;
+      buttons.push({ kind: 'button', text, target: target(el) });
+    }
+    const headings = Array.from(document.querySelectorAll('h1,h2,h3,legend')).filter(shown).map(h => clean(h.textContent)).filter(Boolean).slice(0, 12);
+    const errors = Array.from(document.querySelectorAll('[role=alert],.error,.errors,.validation-message,.field-validation-error,.error-message,[aria-invalid=true]'))
+      .filter(shown).map(e => clean(e.innerText || e.getAttribute('aria-label') || '')).filter(Boolean).slice(0, 10);
+    const body = clean(document.body.innerText || '');
+    const prices = (body.match(/£\s?\d[\d,]*(?:\.\d{2})?[^.£]{0,40}/g) || []).slice(0, 8);
+    return { url: location.href, title: document.title, headings, errors, prices, items: items.slice(0, 90), buttons: buttons.slice(0, 40) };
+  });
+}
+
+// Where a page stands, to tell whether a press moved it on or Kevin has moved it on.
+function formSignature(snap) {
+  return JSON.stringify([String(snap.url).split('#')[0], snap.headings, snap.items.map(i => i.question)]);
+}
+
+// The model the planner uses: the platform's default (js/ai-models.js), never a literal here.
+function plannerModel() {
+  try {
+    const m = /default:\s*'([^']+)'/.exec(fs.readFileSync(path.join(REPO, 'js', 'ai-models.js'), 'utf8'));
+    if (m) return m[1];
+  } catch { /* said below */ }
+  throw new Error('js/ai-models.js has no default model, so the page planner cannot run');
+}
+
+const PLANNER_SCHEMA = {
+  type: 'object',
+  properties: {
+    steps: { type: 'array', items: { type: 'object', properties: {
+      do: { type: 'string', enum: ['fill', 'select', 'click', 'check'] }, target: { type: 'string' }, value: { type: 'string' },
+      question: { type: 'string' }, source: { type: 'string' } }, required: ['do', 'target', 'question', 'source'] } },
+    next: { type: ['string', 'null'] },
+    unknown: { type: 'array', items: { type: 'string' } },
+    done: { type: 'string', enum: ['no', 'price', 'blocked'] },
+    reason: { type: 'string' },
+  },
+  required: ['steps', 'next', 'unknown', 'done'],
+};
+const PLANNER_RULES = [
+  'You fill in ONE page of a UK web form (an insurance quote, usually) inside a robot browser for Kevin Brittain.',
+  'Answer only from FACTS and STANDING ANSWERS. Every step names the exact fact line it used in "source", quoted word for word.',
+  'Use only the targets listed on the page. To answer a radio question, click the target of the option you choose.',
+  'A typed value ("fill") must be copied exactly from a fact (dates as DD/MM/YYYY; TODAY is given).',
+  'If no fact answers a question the page needs, put the question in "unknown" and do not guess. Skip optional questions no fact answers.',
+  'Leave a question alone when its current value is already right.',
+  'Questions about claims, convictions, CCJs, bankruptcy, insurance refused, cancelled or voided, or special terms: answer only when a STANDING ANSWER covers exactly what is asked (its time span, and every person it asks about), with its pick. A question that also asks about charges, prosecutions, investigations, insolvency or anything else to declare goes in "unknown".',
+  'Never touch: a password, card or bank details, a signature, a final "I declare / I confirm the information is true" box, or any Buy, Pay, Purchase, Submit, Confirm, Accept or Agree button.',
+  'Contact or marketing preferences: email only, never phone, SMS, text, post or WhatsApp. Payment: monthly instalments.',
+  'When every needed question on this page is answered, set "next" to the target of the button that moves on (Next, Continue, Get a quote, Find address when an address lookup is needed). Otherwise null.',
+  'Set "done" to "price" when this page shows the quote price to buy, "blocked" (with "reason") when the site says it cannot quote, else "no".',
+].join('\n');
+
+function claudePlanner(input) {
+  const bin = process.env.AGENT_CLAUDE_BIN || path.join(os.homedir(), '.local', 'bin', 'claude');
+  const env = { ...process.env };
+  // The robots' own token (never on the command line); a desktop session's keychain login goes stale.
+  const tokenFile = path.join(os.homedir(), '.config', 'od', 'claude_oauth_token');
+  if (!env.CLAUDE_CODE_OAUTH_TOKEN && fs.existsSync(tokenFile)) env.CLAUDE_CODE_OAUTH_TOKEN = fs.readFileSync(tokenFile, 'utf8').trim();
+  const r = require('child_process').spawnSync(bin, ['-p', '--model', plannerModel(), '--output-format', 'json',
+    '--json-schema', JSON.stringify(PLANNER_SCHEMA), '--tools', '', '--setting-sources', '', '--strict-mcp-config',
+    '--no-session-persistence', '--system-prompt', PLANNER_RULES], {
+    input: JSON.stringify(input), cwd: os.tmpdir(), env, encoding: 'utf8', timeout: 180000, maxBuffer: 8 * 1024 * 1024 });
+  if (r.error) throw new Error(`the page planner could not run: ${r.error.message}`);
+  let out;
+  try { out = JSON.parse(r.stdout); } catch { throw new Error(`the page planner gave no answer (exit ${r.status}): ${String(r.stderr || r.stdout).slice(0, 200)}`); }
+  if (out.is_error || !out.structured_output) throw new Error(`the page planner failed: ${String(out.result || out.subtype || '').slice(0, 200)}`);
+  return out.structured_output;
+}
+
+function planner() {
+  // Tests stand a planner in (a module exporting one function); a run uses the robots' Claude.
+  return process.env.AGENT_HANDOVER_PLANNER ? require(path.resolve(process.env.AGENT_HANDOVER_PLANNER)) : claudePlanner;
+}
+
+const squashFact = t => normWords(t).replace(/[\s,£]/g, '');
+// A typed value is a fact's own words: it appears in the facts, spaces, commas and £ aside, or it is today.
+function valueInFacts(v, factsText) {
+  const want = squashFact(fillTokens(v));
+  return !!want && (squashFact(factsText).includes(want) || want === squashFact(fillTokens('{{today}}')));
+}
+
+function factsOf(plan, standing) {
+  const own = plan.carryOn && plan.carryOn.facts;
+  const lines = [].concat(Array.isArray(own) ? own : String(own || '').split('\n'), (standing && standing.facts) || []);
+  return lines.map(l => String(l).trim()).filter(Boolean);
+}
+
+// The planner's steps, checked: a known target, a cited fact that exists, a typed value the facts hold.
+// Anything else becomes a question for Kevin, never a guess.
+function checkPlannerSteps(out, snap, facts, citable = facts) {
+  const factsText = facts.join('\n');
+  const citeText = citable.join('\n');
+  const targets = new Set();
+  for (const i of snap.items) { if (i.target) targets.add(i.target); for (const o of i.options || []) if (o.target) targets.add(o.target); }
+  const buttons = new Set(snap.buttons.map(b => b.target));
+  const steps = [], unknown = [...new Set((out.unknown || []).map(String).filter(Boolean))];
+  for (const s of out.steps || []) {
+    const q = String(s.question || s.target || '').slice(0, 160);
+    const cited = String(s.source || '').trim();
+    if (!targets.has(s.target) && !buttons.has(s.target)) { unknown.push(q); continue; }
+    if (!cited || !squashFact(citeText).includes(squashFact(cited))) { unknown.push(q); continue; }
+    if (s.do === 'fill' && !valueInFacts(s.value, factsText)) { unknown.push(q); continue; }
+    steps.push(Object.assign(s.do === 'select' ? { do: 'select', selector: s.target, label: String(s.value || '') }
+      : s.do === 'fill' ? { do: 'fill', selector: s.target, value: String(s.value || '') }
+      : { do: s.do === 'check' ? 'check' : 'click', selector: s.target }, { question: q }));
+  }
+  const next = out.next && buttons.has(out.next) ? out.next : null;
+  return { steps, unknown: [...new Set(unknown)], next, done: out.done || 'no', reason: String(out.reason || '') };
+}
+
+const GUARD_REFUSAL_RE = /^(refused|could not read)/;
+const FINAL_REFUSAL_RE = /^refused: .*(looks like the final action|is the last step before a submit|looks like the final step)/;
+
+// Goes on from the page the plan's steps left, page by page. Returns { done, stuck, end }:
+// end is 'price' (the quote is on screen: his turn to buy), or stuck says where and why it stopped.
+async function carryOn(page, plan, opts = {}) {
+  const done = [];
+  const standing = opts.standing === undefined ? loadStanding() : opts.standing;
+  const facts = factsOf(plan, standing);
+  // An answer may cite a fact or one of his standing answers; a typed value only ever comes from a fact.
+  const citable = facts.concat(((standing && standing.answers) || []).map(a => a.said).filter(Boolean));
+  const plan_ = opts.planner || planner();
+  const maxPages = Math.min(Number(plan.carryOn.maxPages) || 15, CARRY_ON_MAX_PAGES);
+  let lastSig = '', samePage = 0;
+  for (let p = 1; p <= maxPages; p++) {
+    await page.waitForLoadState('domcontentloaded', { timeout: 30000 }).catch(() => {});
+    await page.waitForTimeout(Number(opts.settleMs) || 1500);
+    if (opts.onTick) opts.onTick();
+    let snap = await snapshotForm(page);
+    const sig = formSignature(snap);
+    samePage = sig === lastSig ? samePage + 1 : 0;
+    lastSig = sig;
+    if (samePage >= 2) {
+      return { done, stuck: { step: `page ${p}`, do: 'carry-on', error: `the page did not move on after Next${snap.errors.length ? ': ' + snap.errors.join('; ').slice(0, 200) : ''}` } };
+    }
+    let next = null;
+    for (let round = 1; round <= CARRY_ON_ROUNDS; round++) {
+      let out;
+      try {
+        out = checkPlannerSteps(await plan_({ today: fillTokens('{{today}}'), task: plan.label || plan.site || '', facts,
+          standing: (standing && standing.answers || []).map(a => ({ topic: a.key, pick: a.pick, said: a.said })), page: snap }), snap, facts, citable);
+      } catch (e) {
+        return { done, stuck: { step: `page ${p}`, do: 'carry-on', error: String(e.message || e).slice(0, 300) } };
+      }
+      if (out.done === 'price') return { done, stuck: null, end: 'price' };
+      if (out.done === 'blocked') return { done, stuck: { step: `page ${p}`, do: 'carry-on', error: `the site will not go on: ${out.reason || 'no reason given'}` } };
+      for (let i = 0; i < out.steps.length; i++) {
+        const s = out.steps[i];
+        try {
+          await assertNotFinalAction(page, s, { next: out.steps[i + 1], answers: plan.answers, standing, live: true });
+          const r = await runSteps(page, [s], false, null);
+          done.push(...r.done.map(d => Object.assign(d, { carryOn: p })));
+          await page.waitForTimeout(400);    // an answer can redraw the form
+        } catch (e) {
+          const why = String(e.message || '');
+          // The final action (Buy, Pay, Submit) is where the robot's part ends: his turn, nothing more to fill.
+          if (FINAL_REFUSAL_RE.test(why)) return { done, stuck: null, end: 'final' };
+          // A refused answer is his question; a missed click is the planner's to retry next round.
+          if (GUARD_REFUSAL_RE.test(why)) out.unknown.push(`${s.question || s.selector} (${why.slice(0, 160)})`);
+        }
+      }
+      if (out.unknown.length) {
+        if (opts.skipKevin) {
+          return { done, stuck: { step: `page ${p}`, do: 'carry-on', error: 'questions only Kevin can answer: ' + out.unknown.join(' | ').slice(0, 400), unknown: out.unknown } };
+        }
+        // His turn, mid-form: he answers these and presses Next himself; the robot then carries on.
+        await turnBanner(page, `Your turn: ${out.unknown.slice(0, 3).join(' | ').slice(0, 300)}. Answer ${out.unknown.length === 1 ? 'it' : 'them'} and press Next: the robot carries on.`);
+        const moved = await waitForPageMove(page, sig, opts.kevinMs || CARRY_ON_KEVIN_MS, opts.onTick);
+        if (!moved) return { done, stuck: { step: `page ${p}`, do: 'kevin', error: 'not done in time: ' + out.unknown.join(' | ').slice(0, 300) } };
+        done.push({ do: 'kevin', executed: true, say: out.unknown.join(' | ').slice(0, 300), carryOn: p });
+        await turnBanner(page, FILLING);
+        lastSig = '';
+        next = 'moved';
+        break;
+      }
+      const after = await snapshotForm(page);
+      const fresh = after.items.some(i => !snap.items.some(j => j.question === i.question));
+      snap = after;
+      if (out.next && !fresh) { next = out.next; break; }
+      if (!out.steps.length && !fresh) break;
+    }
+    if (next === 'moved') continue;
+    if (!next) return { done, stuck: { step: `page ${p}`, do: 'carry-on', error: 'the planner found no way on from this page' } };
+    try {
+      const s = { do: 'click', selector: next };
+      await assertNotFinalAction(page, s, { answers: plan.answers, standing, live: true });
+      await runSteps(page, [s], false, null);
+      done.push({ do: 'click', executed: true, selector: next, carryOn: p, next: true });
+    } catch (e) {
+      const why = String(e.message || e);
+      if (FINAL_REFUSAL_RE.test(why)) return { done, stuck: null, end: 'final' };
+      // "Next" refused or gone: the page is his from here, by name.
+      return { done, stuck: { step: `page ${p}`, do: 'carry-on', error: why.slice(0, 300) } };
+    }
+    if (!opts.quiet) await turnBanner(page, FILLING);
+  }
+  return { done, stuck: { step: `page ${maxPages}`, do: 'carry-on', error: `${maxPages} pages and still no price` } };
+}
+
+// True once the page is somewhere new (he pressed Next) and no password box is showing.
+async function waitForPageMove(page, sig, maxMs, onTick) {
+  const deadline = Date.now() + maxMs;
+  while (Date.now() < deadline) {
+    if (page.isClosed()) return false;
+    if (onTick) onTick();
+    try {
+      const now = formSignature(await snapshotForm(page));
+      if (now !== sig && Number(await visiblePasswordFieldCount(page)) === 0) return true;
+    } catch { /* mid-navigation: look again */ }
+    await new Promise(r => setTimeout(r, 1500));
+  }
+  return false;
 }
 
 function readPlan(p) {
@@ -2068,7 +2511,10 @@ async function main() {
         const r = await runHandover(page, plan, { quiet: true, skipKevin: true });
         return Object.assign(r, { screenshot: await shoot(page, shot).catch(() => null) });
       });
-      console.log(JSON.stringify({ mode: 'handover-dry-run', task, stuck: res.stuck, screenshot: res.screenshot, steps: res.done.length }));
+      // A plan that carries on reaches the price headless when no step is his: the agent's card then
+      // carries the price, and his window only re-runs the quote for him to buy (9 Oct 2026).
+      ledger({ cmd: 'handover-dry-run', task, profile, site: plan.site || null, steps: res.done, stuck: res.stuck, end: res.end || null, screenshot: res.screenshot });
+      console.log(JSON.stringify({ mode: 'handover-dry-run', task, stuck: res.stuck, end: res.end || null, screenshot: res.screenshot, steps: res.done.length }));
       if (res.stuck) process.exitCode = 3;
       return;
     }
@@ -2099,7 +2545,7 @@ async function main() {
         // For a robot form card the log IS the guard against a second government form: no log, no window.
         if (!logged && approval.formCard) throw new Error('the robot log could not be written, so this form window does not open');
         await turnBanner(page, FILLING);
-        const r = await runHandover(page, plan, { onTick: tick });
+        const r = await runHandover(page, plan, { onTick: tick, kevinMs: Number(process.env.AGENT_HANDOVER_KEVIN_MS) || undefined });
         const png = await shoot(page, path.join(HANDOVER_DIR, 'shots', `${task}-${Date.now()}.png`)).catch(() => null);
         await turnBanner(page, r.stuck
           ? stuckBanner(r.stuck, plan.why)
@@ -2111,8 +2557,8 @@ async function main() {
     } finally {
       releaseSigninHold(dir);
     }
-    ledger({ cmd: 'handover', task, profile, site: plan.site || null, steps: res.done, stuck: res.stuck, screenshot: res.screenshot });
-    console.log(JSON.stringify({ mode: 'handover', task, handedOver: !res.stuck, stuck: res.stuck, screenshot: res.screenshot, steps: res.done.length }));
+    ledger({ cmd: 'handover', task, profile, site: plan.site || null, steps: res.done, stuck: res.stuck, end: res.end || null, screenshot: res.screenshot });
+    console.log(JSON.stringify({ mode: 'handover', task, handedOver: !res.stuck, stuck: res.stuck, end: res.end || null, screenshot: res.screenshot, steps: res.done.length }));
     if (res.stuck) process.exitCode = 3;
     return;
   }
@@ -2188,4 +2634,5 @@ module.exports = { namedAnswer, hostAllowed, pickLinks, runSteps, assertNotCrede
                    profileProcs, plainWindowOpen, pickOption, settleBotCheck, withPage, lastKeptCount: () => lastKept, onSigninPage,
                    assertHandoverPlan, fillTokens, runHandover, handoverPlanPath, HANDOVER_DIR, waitForWindowClose, FINAL_ACTION_RE,
                    plainRefresh, withSelfRefresh, selfRefreshEntry, isRefreshWindowLine, holdBy,
-                   doorLanding, sessionCookieHours, SESSION_COOKIE_HOURS, stuckBanner, planNamed, HARD_ACTION_RE };
+                   doorLanding, sessionCookieHours, SESSION_COOKIE_HOURS, stuckBanner, planNamed, HARD_ACTION_RE,
+                   loadStanding, standingAnswerFor, snapshotForm, checkPlannerSteps, carryOn, valueInFacts, assertNotFinalAction, PLANNER_SCHEMA };
