@@ -324,26 +324,46 @@ NEW_WORK_FLOOR = 10
 # The 17 AI agent Team Member records → the local Claude Code agent that does
 # the work. Verified against the live Team Members table on 1 Aug 2026.
 # role: ceo routes, head works its own tasks, worker works directly.
+#
+# Board trimmed 9 Oct 2026 (Kevin; brain Decisions/2026-10-09): four heads and
+# four workers stay. Systemisation folded into Operations and Wealth into
+# Finance; HR, Mindset and Productivity retired; Marketing, Sales and the
+# Writer parked until the January Operations Director decision. Their Team
+# Member rows are switched off but kept here, pointed at a live agent, so a
+# task still linked to one is worked or routed by the CEO and never dispatched
+# to an agent file that no longer exists.
 AGENTS = {
     "reciHUAEcEkbctnZ6": {"name": "AI CEO (Dan Martell)",                    "agent": "od-ceo",                "role": "ceo"},
-    "rec27NaJB7JNLaBB0": {"name": "AI HR & People (Patrick Lencioni)",       "agent": "dept-hr",               "role": "head"},
-    "recCzAdg2rO8bha9A": {"name": "AI Wealth (Robert Kiyosaki)",             "agent": "dept-wealth",           "role": "head"},
+    "rec27NaJB7JNLaBB0": {"name": "AI HR & People (Patrick Lencioni)",       "agent": "od-ceo",                "role": "ceo"},     # retired 9 Oct 2026
+    "recCzAdg2rO8bha9A": {"name": "AI Wealth (Robert Kiyosaki)",             "agent": "dept-finance",          "role": "head"},    # folded into Finance 9 Oct 2026
     "recFZ1ofn0OuoZNEr": {"name": "AI Strategy (Gary Keller)",               "agent": "dept-strategy",         "role": "head"},
     "recGvMnprGf1hr9Z1": {"name": "AI Finance (Greg Crabtree)",              "agent": "dept-finance",          "role": "head"},
-    "recMKExCwu0ulMBMG": {"name": "AI Productivity (Chris Bailey)",          "agent": "dept-productivity",     "role": "head"},
+    "recMKExCwu0ulMBMG": {"name": "AI Productivity (Chris Bailey)",          "agent": "od-ceo",                "role": "ceo"},     # retired 9 Oct 2026
     "recRStFWWEyHgOD6t": {"name": "AI Operations (Gino Wickman)",            "agent": "dept-operations",       "role": "head"},
     "recSvV7a47ze9i5X9": {"name": "AI Legal & Compliance (Keith Cunningham)","agent": "dept-legal-compliance", "role": "head"},
-    "recYD7avVxouIkH5b": {"name": "AI Systemisation (Dave Jenyns)",          "agent": "dept-systemisation",    "role": "head"},
-    "recZlgKJZn7xsBfoz": {"name": "AI Mindset (John F. DeMartini)",          "agent": "dept-mindset",          "role": "head"},
-    "reciAJnPnFEbj5FhX": {"name": "AI Marketing (Alex Hormozi)",             "agent": "dept-marketing",        "role": "head"},
-    "recpCz18pCLCUf3oJ": {"name": "AI Sales (Jordan Belfort)",               "agent": "dept-sales",            "role": "head"},
-    "recFMVmHmqAOVPAeJ": {"name": "AI Worker — Writer",                      "agent": "worker-writer",         "role": "worker"},
+    "recYD7avVxouIkH5b": {"name": "AI Systemisation (Dave Jenyns)",          "agent": "dept-operations",       "role": "head"},    # folded into Operations 9 Oct 2026
+    "recZlgKJZn7xsBfoz": {"name": "AI Mindset (John F. DeMartini)",          "agent": "od-ceo",                "role": "ceo"},     # retired 9 Oct 2026
+    "reciAJnPnFEbj5FhX": {"name": "AI Marketing (Alex Hormozi)",             "agent": "od-ceo",                "role": "ceo"},     # parked to Jan 2027
+    "recpCz18pCLCUf3oJ": {"name": "AI Sales (Jordan Belfort)",               "agent": "od-ceo",                "role": "ceo"},     # parked to Jan 2027
+    "recFMVmHmqAOVPAeJ": {"name": "AI Worker — Writer",                      "agent": "od-ceo",                "role": "ceo"},     # parked to Jan 2027
     "recPVA1CgGyyGcBd9": {"name": "AI Worker — Auditor",                     "agent": "worker-auditor",        "role": "worker"},
     "recQkO6BA4w5zqwZ4": {"name": "AI Worker — Builder",                     "agent": "worker-builder",        "role": "worker"},
     "recbHvWqlQBbunF2F": {"name": "AI Worker — Researcher",                  "agent": "worker-researcher",     "role": "worker"},
     "recqmKBmq8ZGkxVH9": {"name": "AI Worker — Analyst",                     "agent": "worker-analyst",        "role": "worker"},
 }
 CEO_REC_ID = "reciHUAEcEkbctnZ6"
+# The rows that left the board on 9 Oct 2026 → where their work goes now.
+# `route` refuses them, so the CEO can never hand a task to a switched-off seat.
+OFF_BOARD = {
+    "rec27NaJB7JNLaBB0": "Retired. The AI CEO covers the workforce.",
+    "recCzAdg2rO8bha9A": "Folded into Finance: route to recGvMnprGf1hr9Z1.",
+    "recMKExCwu0ulMBMG": "Retired. The AI CEO covers how work reaches Kevin.",
+    "recYD7avVxouIkH5b": "Folded into Operations: route to recRStFWWEyHgOD6t.",
+    "recZlgKJZn7xsBfoz": "Retired. The AI CEO covers overwhelm and protected assets.",
+    "reciAJnPnFEbj5FhX": "Parked until the January Operations Director decision.",
+    "recpCz18pCLCUf3oJ": "Parked until the January Operations Director decision.",
+    "recFMVmHmqAOVPAeJ": "Parked until January. Drafted replies go to Inbox Response.",
+}
 REASSIGN_MAX = 2          # bounces before a task becomes Kevin's decision
 
 # Role-specific agents from the AI Agents register (tbl9msVjyQWslLOIZ) that
@@ -3542,6 +3562,9 @@ def cmd_route(args):
                  "(one of the 17 strategic agents or a built role agent)")
     if args.to == CEO_REC_ID:
         sys.exit("ERROR: routing back to the CEO is not a route")
+    if args.to in OFF_BOARD:
+        sys.exit(f"ERROR: {ALL_AGENTS[args.to]['name']} left the board on 9 Oct 2026. "
+                 f"{OFF_BOARD[args.to]}")
     require_role_agent_live(args.to, "route")
     fields = {AF["teamMember"]: [args.to]}
     tf = (get_task(args.task).get("fields", {}) or {})

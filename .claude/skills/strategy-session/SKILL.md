@@ -89,14 +89,12 @@ tenancies" with no list is a finding, not a detail.
 Give the numbers pack to only the seats whose lane fits the business. Each seat answers three
 questions in under 250 words: what was done, what was not done well, what to change.
 
-- Real Estate (the first run): `dept-finance`, `dept-wealth`, `dept-operations`,
-  `dept-strategy`.
-- Operations Director: `dept-strategy`, `dept-finance`, `dept-sales`, `dept-marketing`.
-- Runpreneur: `dept-strategy`, `dept-marketing`, `dept-mindset`, `dept-productivity`.
-- Personal: `dept-mindset`, `dept-wealth`, `dept-productivity`, `dept-strategy`.
+- Every business: `dept-strategy`, `dept-finance`, `dept-operations`,
+  `dept-legal-compliance`. The board is these four heads since 9 Oct 2026 (Finance carries
+  wealth, Operations carries systemisation).
 
-Four seats, launched together, each handed the pack's path and told to read it. Swap a seat
-only when the pack shows a problem in another lane. Never all eleven. Put the four answers in
+Four seats, launched together, each handed the pack's path and told to read it. Drop a seat
+only when the pack gives it nothing to judge. Never a seat that left the board. Put the four answers in
 `board.md`, with a three-line summary on top: where they agree, where they split, the one
 change most of them ask for.
 

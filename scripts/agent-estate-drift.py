@@ -120,7 +120,7 @@ RETIRED = [
     (r"Wickman's Integrator running Gary Keller", "2026-07-29",
      "the CEO is Dan Martell (org chart v3); Wickman heads Operations"),
     (r"Michalowicz cash, Jenyns systems, Martell AI-leverage", "2026-07-29",
-     "the v2 seat list; the live board is the eleven heads in ~/.claude/agents/"),
+     "the v2 seat list; the live board is the dept-* files in ~/.claude/agents/"),
     (r"Never an agent for a tier 1 or tier 2 matter", "2026-08-25",
      "tier 1 is PREPARED by an agent and lands with Kevin labelled; tier 2 no longer exists"),
     (r"Mica handles ALL creditor and debt correspondence", "2026-08-25",
@@ -151,6 +151,17 @@ RETIRED = [
     # from the Book 4 audit, ruling 5). A blanket month forward hides exactly the tenancies that have not paid.
     (r"(?i)advances? rent due dates|advance it forward by one month", "2026-09-24",
      "the 1st-of-month rent due-date job is a read-only drift report: it counts blank and past dates and never writes one"),
+    # The board trim (Kevin, 9 Oct 2026; Decisions/2026-10-09). Four heads stay: Strategy,
+    # Operations (with systemisation), Finance (with wealth), Legal and Compliance. HR,
+    # Productivity and Mindset retired; Marketing, Sales and the Writer parked to January.
+    (r"(?i)\beleven(-seat)? (department )?(heads|seats|board)\b", "2026-10-09",
+     "the board is four heads (Strategy, Operations, Finance, Legal and Compliance) and four workers"),
+    (r"(?i)\ball eleven\b", "2026-10-09",
+     "the board is four heads; convene the ones with live work"),
+    (r"(?i)\bfive workers\b", "2026-10-09",
+     "four workers: builder, auditor, analyst, researcher; the Writer is parked to January"),
+    (r"dept-marketing, dept-sales", "2026-10-09",
+     "the default huddle is dept-strategy and dept-operations; Marketing and Sales are parked to January"),
 ]
 
 # A line that is describing the old rule, not stating it.
