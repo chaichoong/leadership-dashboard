@@ -36,7 +36,7 @@ function estate(opts = {}) {
   const repo = join(box, 'repo');
   const claudeMd = join(box, 'CLAUDE.md');
   const memory = join(box, 'memory');
-  // 17 strategic files + 3 skills + 5 tasks + 5 brain + 1 worker = 31 surfaces,
+  // 17 strategic files + 3 skills + 7 tasks + 5 brain + 1 worker = 33 surfaces,
   // plus CLAUDE.md, MEMORY.md and one topic file, which do not count toward the floor.
   mkdirSync(agents, { recursive: true });
   const heads = ['od-ceo', 'worker-writer', ...Array.from({ length: 15 }, (_, i) => `dept-${i}`)];
@@ -45,7 +45,7 @@ function estate(opts = {}) {
     mkdirSync(join(skills, s), { recursive: true });
     writeFileSync(join(skills, s, 'SKILL.md'), '# skill\nclean\n');
   }
-  for (const t of ['ceo-agent', 'ceo-huddle', 'ceo-memory-sweep', 'agent-dispatch', 'task-manager-board']) {
+  for (const t of ['ceo-agent', 'ceo-huddle', 'ceo-memory-sweep', 'agent-dispatch', 'task-manager-board', 'daily-ops', 'monthly-rent-due-date']) {
     mkdirSync(join(tasks, t), { recursive: true });
     writeFileSync(join(tasks, t, 'SKILL.md'), '# task\nclean\n');
   }
@@ -103,6 +103,21 @@ describe('agent-estate-drift', () => {
     expect(r.json.hits[0].line).toBe(2);
     expect(r.json.hits[0].retired).toBe('2026-08-25');
     expect(r.json.hits[0].fix).toMatch(/AI only/);
+  });
+
+  it('the rent due-date job reports only (24 Sep 2026): the old write wording in daily-ops or its monthly skill fires', () => {
+    // Back-tested: without the RETIRED line nothing fires, and without the two task surfaces nothing is read.
+    const e = estate();
+    writeFileSync(join(e.tasks, 'daily-ops', 'SKILL.md'),
+      '# daily-ops\n- **1st of the month:** monthly-rent-due-date\n  Advances rent due dates for every active tenancy.\n');
+    writeFileSync(join(e.tasks, 'monthly-rent-due-date', 'SKILL.md'),
+      '# monthly\n4. If it is in the past, advance it forward by one month (preserving the day of month)\n'
+      + '5. Write nothing. A past date is the arrears signal, never something to advance.\n');
+    const r = run(e);
+    expect(r.code).toBe(1);
+    expect(r.json.hits.map((h) => [h.file.split('/').slice(-2)[0], h.line, h.retired])).toEqual([
+      ['daily-ops', 3, '2026-09-24'], ['monthly-rent-due-date', 2, '2026-09-24']]);
+    expect(r.json.hits[0].fix).toMatch(/read-only drift report/);
   });
 
   it('the worker prompt is scanned too: a numbered Mica destination fires', () => {

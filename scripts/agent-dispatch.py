@@ -1212,6 +1212,9 @@ def query_tasks(formula, max_records=None, minimal=False):
 
 
 ATTACH_MAX_BYTES = 5 * 1024 * 1024   # Airtable's cap, on the raw file
+# Types Python's own table lacks, so a host without a system mime list still
+# names the file right (7 Oct 2026: a PAT test report arrives as a spreadsheet).
+ATTACH_TYPES = {".xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"}
 
 
 def upload_attachment(task_id, path):
@@ -1243,7 +1246,9 @@ def upload_file(record_id, field_id, path):
     url = (f"https://content.airtable.com/v0/{BASE_ID}/{record_id}/"
            f"{field_id}/uploadAttachment")
     req = urllib.request.Request(url, method="POST", data=json.dumps({
-        "contentType": mimetypes.guess_type(path)[0] or "application/octet-stream",
+        "contentType": (mimetypes.guess_type(path)[0]
+                        or ATTACH_TYPES.get(os.path.splitext(path)[1].lower())
+                        or "application/octet-stream"),
         "filename": os.path.basename(path),
         "file": blob,
     }).encode(), headers={"Authorization": f"Bearer {pat()}",
@@ -10264,9 +10269,18 @@ CERT_FIELDS = {
     "tasks":       "fldnVZs4DKbcR3Ze9",
 }
 # The dated, renewable items. "Lock Code" and "Other" exist on the table but
-# are not compliance items and never count toward the reading.
+# are not compliance items and never count toward the reading. "PAT" (portable
+# appliance test, 7 Oct 2026: a council asked for one) is not required of any
+# let, so it counts only where one has been filed. A name here that the live
+# Type field lacks is added by its first filing (one typecast write, said in
+# the output); `certificate` refuses every type not listed here.
 CERT_TYPES = ("GSC", "EICR", "EPC", "Fire Alarm Cert", "Emergency Lighting",
-              "HMO Cert", "Landlord Insurance")
+              "HMO Cert", "Landlord Insurance", "PAT")
+# Filed and shown, never required (review, 9 Oct 2026): one PAT filed because a
+# council asked must not make the house "need" one, so it never counts as an
+# issue, never raises a renewal and never reaches the missed-item or tenant
+# move-in checks, which read the issues and the required list.
+FILED_ONLY_TYPES = ("PAT",)
 # In a Block these are held per apartment; everything else is the building's.
 # A certificate filed for the whole block with NO unit link covers every
 # apartment (compliance.html spreads it the same way).
@@ -10457,7 +10471,7 @@ def compliance_pages(properties, certificates, today, unit_names=None):
     for p in sorted(properties, key=lambda x: x["name"]):
         required = list(p["required"])
         for t in sorted(held_types.get(p["id"], ())):
-            if t not in required:
+            if t not in required and t not in FILED_ONLY_TYPES:
                 required.append(t)
         is_block = p["kind"] == "Block"
         per_unit = [t for t in UNIT_LEVEL_TYPES if is_block and t in required]
@@ -10473,7 +10487,7 @@ def compliance_pages(properties, certificates, today, unit_names=None):
                 continue
             it = _item(c, today)
             holds[t] = it
-            if it["state"] in ("expired", "due", "no date"):
+            if it["state"] in ("expired", "due", "no date") and t not in FILED_ONLY_TYPES:
                 issues.append({"type": t, **{k: it[k] for k in ("state", "renewalDate", "days")}})
         units = {}
         for uid in (p["units"] if is_block else []):
@@ -10564,6 +10578,8 @@ def renewals_due(pages, today):
                       for t, it in items.items() if t != "name"]
         seen = set()
         for uid, uname, t, it in slots:
+            if t in FILED_ONLY_TYPES:
+                continue
             d = it["days"]
             if d is None or not (-RENEWAL_LAPSE_GRACE_DAYS <= d <= RENEWAL_WINDOW_DAYS):
                 continue
@@ -10963,6 +10979,27 @@ def find_certificate_twin(certs, property_id, cert_type, renewal, unit_id):
     return None
 
 
+def certificate_type_choices():
+    """The live choices on the Property Certificates Type field, read from the
+    base schema, or None when the schema cannot be read (then nothing is
+    typecast, so no choice can be added on a guess)."""
+    req = urllib.request.Request(
+        f"https://api.airtable.com/v0/meta/bases/{BASE_ID}/tables",
+        headers={"Authorization": f"Bearer {pat()}"})
+    try:
+        with urllib.request.urlopen(req, timeout=60) as resp:
+            tables = json.load(resp).get("tables") or []
+    except (urllib.error.URLError, TimeoutError, OSError, ValueError):
+        return None
+    for t in tables:
+        if t.get("id") != CERTIFICATES_TABLE:
+            continue
+        for f in t.get("fields") or []:
+            if f.get("id") == CERT_FIELDS["type"]:
+                return [c.get("name") for c in (f.get("options") or {}).get("choices") or []]
+    return None
+
+
 def cmd_certificate(args):
     """Link 5 of the approved map, and the ONE write path to the Property
     Certificates table. A filed certificate needs the property, the type,
@@ -11006,6 +11043,7 @@ def cmd_certificate(args):
                  f"{', '.join(props[args.property]['units']) or 'none'})")
     twin = find_certificate_twin(fetch_certificates(), args.property,
                                  args.type, args.renewal, args.unit)
+    choice_created = None
     if twin:
         # The file goes on BEFORE the task is linked: a link on a row with no
         # document would let verify read the close as filed. Notes append,
@@ -11036,8 +11074,29 @@ def cmd_certificate(args):
             fields[CERT_FIELDS["unit"]] = [args.unit]
         if args.note:
             fields[CERT_FIELDS["notes"]] = f"{today_london()}: {args.note}"
-        created = _request("POST", f"/{CERTIFICATES_TABLE}",
-                           {"fields": fields, "typecast": True})
+        # Typecast OFF unless the type is one of CERT_TYPES that the live Type
+        # field lacks (9 Oct 2026). The API adds a select choice only through a
+        # typecast write, so that one write creates the choice, and says so.
+        # Every value here is a record id, a date, text or a Type choice, so
+        # nothing else needs converting; a type outside CERT_TYPES was refused
+        # above and never reaches a typecast.
+        choices = certificate_type_choices()
+        mint = choices is not None and args.type in CERT_TYPES and args.type not in choices
+        try:
+            created = _request("POST", f"/{CERTIFICATES_TABLE}",
+                               {"fields": fields, "typecast": mint})
+        except RuntimeError as exc:
+            if "INVALID_MULTIPLE_CHOICE_OPTIONS" in str(exc) or "select option" in str(exc):
+                sys.exit(f"ERROR: the Property Certificates Type field has no "
+                         f"\"{args.type}\" choice and its choices could not be "
+                         "read, so nothing was filed and no choice was added. "
+                         "Run this again once the base schema reads.")
+            raise
+        if mint:
+            choice_created = (f"created the {args.type} choice on Property "
+                              "Certificates > Type")
+            print(choice_created, file=sys.stderr)
+            ledger_append(args.task, f"certificate: {choice_created}")
         row_id = created["id"]
         # The file goes on AFTER the row exists (the upload needs a record
         # id), and a refused upload deletes the row again: a dated row with
@@ -11063,7 +11122,8 @@ def cmd_certificate(args):
                       "unit": args.unit or None,
                       "renewalDate": live["renewalDate"],
                       "file": filename, "hasFile": live["hasFile"],
-                      "taskLinked": args.task in live["taskIds"]}))
+                      "taskLinked": args.task in live["taskIds"],
+                      "choiceCreated": choice_created}))
 
 
 def property_selftest():
@@ -11591,7 +11651,8 @@ def main():
     ct.add_argument("--renewal", required=True,
                     help="YYYY-MM-DD the certificate or policy runs out")
     ct.add_argument("--file", required=True,
-                    help="the document itself (PDF/JPG/PNG, under 5MB)")
+                    help="the document itself (PDF, JPG, PNG, or an .xlsx "
+                         "spreadsheet such as a PAT test report; under 5MB)")
     ct.add_argument("--unit", help="Rental Unit record id, for a unit-level "
                                    "certificate in a block")
     ct.add_argument("--note", help="one line: who issued it, policy number")

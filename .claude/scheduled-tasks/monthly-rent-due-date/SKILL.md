@@ -1,6 +1,6 @@
 ---
 name: monthly-rent-due-date
-description: ABSORBED into daily-ops (8 Aug 2026) as phase 6b, which runs it on the 1st of the month. Do not re-enable separately.
+description: The monthly rent due-date DRIFT REPORT, read-only. ABSORBED into daily-ops (8 Aug 2026), which runs it on the 1st of the month. Do not re-enable separately.
 ---
 
 ## QUEUE AND WRITE POLICY (added 6 Aug 2026 — do this before anything else)
@@ -33,9 +33,9 @@ halted and why. `daily-ops` reports what you tell it.
 
 ### Rule 2 — you are read-only with respect to code
 
-You MAY still: read anything, query Airtable, write the Airtable data your job
-owns, send Slack messages, send email through the approved gate, and save reports
-under `monitoring/`.
+You MAY still: read anything, query Airtable, send Slack messages, send email
+through the approved gate, and save reports under `monitoring/`. This job owns no
+Airtable data: it writes nothing to Airtable.
 
 You MAY NOT, for any reason: edit a file in the repo, `git add`, `git commit`,
 `git push`, create a branch, or open a pull request. Even a one-line change. Even
@@ -58,29 +58,27 @@ Filing a finding IS your fix. Do not apologise for not fixing it, and do not
 describe it as blocked. The queue is the route.
 
 
-You are maintaining the Operations Director platform's rent due date system. This task runs on the 1st of each month at 6am.
-
-CONTEXT:
-- Airtable base contains a Tenancies table (tblN51a88qTDB6iMH)
-- The "Next Rent Due Date" field (fldSPslO6Wh5IUSK3) is a FORMULA field, so it cannot be written to directly
-- There may be a separate editable "Rent Due Date" or "Due Date" field that the formula depends on
-- Active tenancies have a start date but no end date, or an end date in the future
+You run the monthly rent due-date DRIFT REPORT. It reads and reports. It NEVER
+writes to Airtable (read-only since 1 Aug 2026; Kevin confirmed 24 Sep 2026, brain
+Decisions/2026-09-24 Property rulings from the Book 4 audit, ruling 5).
 
 TASK:
-1. Use the Airtable MCP to list the fields on the Tenancies table (tblN51a88qTDB6iMH) to identify the correct editable rent due date field (not the formula field)
-2. Fetch all active tenancies (where Tenancy End Date is empty or in the future)
-3. For each tenancy, check if the editable rent due date is in the past
-4. If it is in the past, advance it forward by one month (preserving the day of month)
-5. Update the records in Airtable via the Airtable MCP
-
-SAFETY:
-- Only update tenancies where the due date is genuinely in the past (before today)
-- Do NOT touch the formula field fldSPslO6Wh5IUSK3
-- If no editable due date field exists (i.e. the formula handles everything automatically), log that finding and take no action. The Make automation may have been redundant.
-- Report how many tenancies were updated
+1. Read every live tenancy in Tenancies (tblN51a88qTDB6iMH), paginated: Tenancy End
+   Date empty or in the future. State the count and fail loudly on zero.
+2. For each, read Due Day of Month (fldhy2U0CQmM2oS4P) and Next Rent Due Date
+   (fldSPslO6Wh5IUSK3, a formula).
+3. Report three counts with the tenancy names: blank Due Day of Month, blank Next
+   Rent Due Date, and Next Rent Due Date before today.
+4. Write nothing. A past date is the arrears signal, never something to advance. Do
+   not touch Next Rent Due Date (Static) (fldXwCxcyiBDD6qQN): the Airtable automation
+   "Tenancy Payments" owns it.
+5. Any non-zero count goes in the daily-ops report as an exception, with the
+   tenancy named.
 
 AIRTABLE TABLE: tblN51a88qTDB6iMH
-AIRTABLE FIELDS (known):
+AIRTABLE FIELDS (read live 9 Oct 2026):
 - Tenancy Start Date: fld2rPXwwV8dXb1zF
-- Tenancy End Date: fldwHhhKAq4f1nY9e  
+- Tenancy End Date: fldwHhhKAq4f1nY9e
+- Due Day of Month (the only maintained input): fldhy2U0CQmM2oS4P
 - Next Rent Due Date (FORMULA, read-only): fldSPslO6Wh5IUSK3
+- Next Rent Due Date (Static), owned by the Tenancy Payments automation: fldXwCxcyiBDD6qQN

@@ -60,9 +60,33 @@ test.describe('the tenant details form', () => {
     await openForm(page);
     await expect(page.locator('#form')).toBeVisible();
     const names = await page.locator('#form [name]').evaluateAll(els => els.map(e => e.name).sort());
-    expect(names).toEqual(['capExemption', 'ctAccount', 'dob', 'email', 'household', 'ni', 'otherAdults', 'otherBenefits', 'phone', 'ucPayDay', 'weeklyIncome', 'weeklySpending']);
+    expect(names).toEqual(['capExemption', 'dob', 'email', 'ni', 'otherBenefits', 'phone', 'ucPayDay', 'weeklyIncome', 'weeklySpending']);
+    // The same list the Worker accepts, read from the Worker's own code: the form and the Worker cannot drift.
+    const { TENANT_ANSWERS } = await import('../../workers/property-manager/fields.mjs');
+    expect(Object.keys(TENANT_ANSWERS).sort()).toEqual(names);
     const capValues = await page.locator('select[name="capExemption"] option').evaluateAll(os => os.map(o => o.value));
     expect(capValues).toEqual(['', 'None (capped)', 'LCWRA', 'PIP or DLA', 'Carer', 'Earnings over threshold', 'Not on UC']);
+  });
+
+  test('Kevin, 6 Oct 2026: no household, other adults or council tax question, and the money questions say what to count', async ({ page }) => {
+    const { calls } = await openForm(page);
+    await expect(page.locator('#form')).toBeVisible();
+    const text = await page.locator('#form').innerText();
+    expect(text).not.toMatch(/Who lives with you|Other adults|Council tax account/i);
+    const income = page.locator('label', { has: page.locator('input[name="weeklyIncome"]') });
+    const spending = page.locator('label', { has: page.locator('input[name="weeklySpending"]') });
+    await expect(income).toContainText('Money coming in each week (£)');
+    await expect(income.locator('.hint')).toHaveText('Everything paid to you: Universal Credit after any deductions, wages, PIP or other benefits, and money from family.');
+    await expect(spending).toContainText('Money going out each week (£)');
+    // Rent counts as money going out: the council counts the whole Universal Credit award, housing money included, as money in.
+    await expect(spending.locator('.hint')).toContainText('your rent,');
+    await expect(page.locator('.card', { has: page.locator('input[name="weeklyIncome"]') }).locator('.desc'))
+      .toContainText('times it by 12 and divide by 52. A rough figure is fine.');
+    await page.locator('input[name="weeklyIncome"]').fill('180');
+    await page.locator('input[name="weeklySpending"]').fill('175.50');
+    await page.locator('#save').click();
+    await expect(page.locator('#saveStatus')).toHaveText('Saved at 14:02. Thank you.');
+    expect(calls.find(c => c.path === '/tenant-form').body).toEqual({ answers: { weeklyIncome: '180', weeklySpending: '175.50' } });
   });
 
   test('a link the Worker does not know shows the plain message and offers no form', async ({ page }) => {

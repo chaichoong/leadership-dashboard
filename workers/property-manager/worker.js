@@ -44,7 +44,7 @@
 //           TENANT_ALL (ratelimit, optional) — the same routes, all callers together.
 
 import { computeAll, shapeTasks, isRoyScope, isTaskOpen, appendNote, buildNameMap, statusForDue, dateKey, txWindowStart } from './compute.mjs';
-import { BASE, TABLES, F, NAMES, REC, REAL_ESTATE_NAME, ROY_STATUS_ALLOW, GP, GP_TABLES, GP_TICKS, GP_UPLIFT_VALUES, GP_ROW_STATUS, GP_ROW_FIELDS, GP_TASK_FIELDS, GP_LIVE_TENANCIES, GP_COST_FILTER, GP_PM_TENANT_OMIT, GP_TENANT_FORM_FIELDS, TENANT_LINK, TENANT_ANSWERS } from './fields.mjs';
+import { BASE, TABLES, F, NAMES, REC, REAL_ESTATE_NAME, ROY_STATUS_ALLOW, GP, GP_TABLES, GP_TICKS, GP_UPLIFT_VALUES, GP_ROW_STATUS, GP_ROW_FIELDS, GP_TASK_FIELDS, GP_LIVE_TENANCIES, GP_COST_FILTER, GP_PM_TENANT_OMIT, GP_TENANT_FORM_FIELDS, TENANT_LINK, TENANT_ANSWERS, TENANT_ANSWERS_RETIRED } from './fields.mjs';
 
 const VERSION = '1.2';
 const TOKEN_TTL_S = 12 * 60 * 60;
@@ -376,6 +376,8 @@ export function cleanTenantAnswers(input) {
   if (!input || typeof input !== 'object' || Array.isArray(input)) return { error: 'Nothing was filled in.' };
   const fields = {};
   for (const [key, raw] of Object.entries(input)) {
+    // A question the form asked until 6 Oct 2026 (a page left open from before): dropped, never written.
+    if (TENANT_ANSWERS_RETIRED.includes(key)) continue;
     const spec = Object.prototype.hasOwnProperty.call(TENANT_ANSWERS, key) ? TENANT_ANSWERS[key] : null;
     // Refused, not trimmed: a form sending a field it does not show has been tampered with.
     if (!spec) return { error: 'That form has a question we do not recognise. Reload the page and try again.' };
@@ -520,7 +522,8 @@ async function handleTenantForm(request, env, origin, path) {
     const notes = String(row.fields[GP.tenant.notes] || '');
     const today = `[${dateKey(now)} `;
     if (!notes.split('\n').some(l => l.startsWith(today) && l.includes(SAVED_NOTE))) {
-      const names = Object.keys(body.answers).filter(k => clean.fields[TENANT_ANSWERS[k].id] !== undefined).map(k => TENANT_ANSWERS[k].label);
+      const names = Object.keys(body.answers).filter(k => Object.prototype.hasOwnProperty.call(TENANT_ANSWERS, k)
+        && clean.fields[TENANT_ANSWERS[k].id] !== undefined).map(k => TENANT_ANSWERS[k].label);
       fields[GP.tenant.notes] = appendNote(notes, `${SAVED_NOTE}: ${names.join(', ')}.`, 'tenant link', now);
     }
     await airtableRequest(env, `${TABLES.tenants}/${row.id}`, { method: 'PATCH', body: JSON.stringify({ fields, typecast: false }) }, 0, PUBLIC_RETRIES);

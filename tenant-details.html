@@ -70,8 +70,6 @@
     <section class="card">
       <h2>Universal Credit</h2>
       <label>Day of the month your Universal Credit is paid<input type="number" name="ucPayDay" min="1" max="31" inputmode="numeric"></label>
-      <label>Who lives with you
-        <select name="household"><option value="">Choose…</option><option>Single</option><option>Couple</option><option>With children</option></select></label>
       <label>The benefit cap<span class="hint">If you are not sure, leave it blank</span>
         <select name="capExemption">
           <option value="">Choose…</option>
@@ -86,12 +84,10 @@
     </section>
 
     <section class="card">
-      <h2>Council tax and money</h2>
-      <p class="desc">We use these to ask the council for help with your rent and council tax.</p>
-      <label>Other adults who live with you<span class="hint">Names, or "none"</span><input type="text" name="otherAdults" maxlength="300"></label>
-      <label>Council tax account number<input type="text" name="ctAccount" maxlength="40" autocomplete="off"></label>
-      <label>Money coming in each week (£)<input type="number" name="weeklyIncome" min="0" max="5000" step="0.01" inputmode="decimal"></label>
-      <label>Money going out each week (£)<input type="number" name="weeklySpending" min="0" max="5000" step="0.01" inputmode="decimal"></label>
+      <h2>Your money</h2>
+      <p class="desc">We use these to ask the council for help with your rent. Give the amount for a normal week. For anything paid once a month, like Universal Credit, times it by 12 and divide by 52. A rough figure is fine.</p>
+      <label>Money coming in each week (£)<span class="hint">Everything paid to you: Universal Credit after any deductions, wages, PIP or other benefits, and money from family.</span><input type="number" name="weeklyIncome" min="0" max="5000" step="0.01" inputmode="decimal"></label>
+      <label>Money going out each week (£)<span class="hint">Everything you pay out: your rent, your share of gas, electric and water, phone and internet, food, travel, TV licence, and any debts you pay back.</span><input type="number" name="weeklySpending" min="0" max="5000" step="0.01" inputmode="decimal"></label>
     </section>
 
     <section class="card">
@@ -122,7 +118,9 @@
   // The code after #c= is this tenant's pass for his own record. It never leaves the page except
   // in the body of a request to our Worker, and nothing on this page holds a database key.
   const API = 'https://pm.operationsdirector.co.uk';
-  const FIELDS = ['phone', 'email', 'dob', 'ni', 'ucPayDay', 'household', 'capExemption', 'otherBenefits', 'otherAdults', 'ctAccount', 'weeklyIncome', 'weeklySpending'];
+  // Kevin, 6 Oct 2026: every tenant lives on their own, so the form never asks who lives with them or
+  // about other adults (we fill those in), and never asks for a council tax account number they will not know.
+  const FIELDS = ['phone', 'email', 'dob', 'ni', 'ucPayDay', 'capExemption', 'otherBenefits', 'weeklyIncome', 'weeklySpending'];
   const LIMIT = Math.floor(3.7 * 1024 * 1024);
   const $ = id => document.getElementById(id);
   const code = (String(location.hash).match(/[#&]c=([A-Za-z0-9_-]{32})(?:&|$)/) || [])[1] || '';

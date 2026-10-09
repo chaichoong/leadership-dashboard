@@ -85,7 +85,26 @@ TN = {"name": "fldxBKW7QnujSDWqA", "dob": "fldv7FKsqXYswyCFE", "ni": "fld1rHf1qZ
       "weeklyIncome": "fldbiAag5eoEW23e0", "weeklySpending": "fldlZr8tUocCYzGPT", "otherBenefits": "fldwCMFvYqbFXXzOO",
       "saved": "fldc7XMcQcYY6C2Xa", "authority": "fldHPe9YQ6GmlrKBt", "documents": "flduPLQdNRKBmsSmr"}
 # The answers a council cannot decide a claim without: no card is raised while one is blank.
-NEEDED = ("name", "dob", "ni", "household", "weeklyIncome", "weeklySpending")
+NEEDED = ("name", "dob", "ni", "weeklyIncome", "weeklySpending")
+# Kevin, 6 Oct 2026: "They all live on their own." The tenant's form no longer asks who lives with them or about
+# other adults, so a blank household on a one-tenant tenancy reads as single and the card says where that came
+# from. Two tenants on one tenancy do not live on their own: there the household must be on the record (we fill it
+# in on the Growth Plan form) before a claim is raised.
+LIVES_ALONE = "Kevin's ruling, 6 Oct 2026: every tenant lives on their own; not asked on the form"
+_NO_ADULTS_RE = re.compile(r"^\s*(none|no|nobody|no one|n/?a|-)\s*\.?\s*$", re.I)
+
+
+def household_gap(fields, tenant_count):
+    """Why the household must be filled in before a claim, or "". The card never says "Single" beside a second
+    tenant or beside other adults an earlier form recorded (review, 9 Oct 2026): those wait for a real answer."""
+    household = _sel(fields.get(TN["household"]))
+    adults = str(fields.get(TN["otherAdults"]) or "")
+    if tenant_count > 1 and household in ("", "Single"):
+        return ("household (two tenants on one tenancy, the record says Single)" if household
+                else "household (two tenants on one tenancy)")
+    if not household and adults.strip() and not _NO_ADULTS_RE.match(adults):
+        return "household (other adults are on the record)"
+    return ""
 # Each council's claim form, by postcode district (researched 4 Oct 2026; all three run the CRF Housing Payment).
 COUNCILS = {
     "CB9": ("West Suffolk Council, through Anglia Revenues Partnership",
@@ -561,6 +580,9 @@ def plan(tid, view, row, tenancy, tenants, day, no_chase=False, busy=False, unli
                 if not who["fields"].get(TN["authority"]):
                     why.append("the letter of authority is not ticked as signed")
                 blank = [k for k in NEEDED if who["fields"].get(TN[k]) in (None, "", [], {})]
+                gap = household_gap(who["fields"], len(tenancy.get("fld1i5bDoHL3B6rUf") or []))
+                if gap:
+                    blank.append(gap)
                 if blank:
                     why.append("blank on the tenant record: " + ", ".join(blank))
             if why:
@@ -676,6 +698,10 @@ def claim_text(item, rec, landlord, place, screen=lambda v: False):
         pay = (f"WHO GETS THE MONEY: ask for it to be paid to the landlord, {landlord.get('full_name')}, "
                f"{where}. Their signed letter of authority lets us act for them.")
     lines += [why, pay, "", "THE ANSWERS, AND WHERE EACH CAME FROM"]
+    # The form no longer asks these three (Kevin, 6 Oct 2026): what is on the record was filled in by us, or by an
+    # earlier form. A blank household only reaches this card for a one-tenant tenancy (plan() holds a joint one).
+    household, adults, ct = _sel(f.get(TN["household"])), f.get(TN["otherAdults"]), f.get(TN["ctAccount"])
+    alone = household in ("", "Single")
     answers = [
         ("Name", f.get(TN["name"]), "tenant record"),
         ("Date of birth", f.get(TN["dob"]), "tenant record"),
@@ -684,11 +710,12 @@ def claim_text(item, rec, landlord, place, screen=lambda v: False):
          "property record"),
         ("Mobile", f.get(TN["phone"]), "their details form"),
         ("Email", f.get(TN["email"]), "their details form"),
-        ("Household", _sel(f.get(TN["household"])), "their details form"),
-        ("Other adults in the home", f.get(TN["otherAdults"]) or "none given", "their details form"),
+        ("Household", household or "Single", "tenant record" if household else LIVES_ALONE),
+        ("Other adults in the home", adults or ("none" if alone else "none given"),
+         "tenant record" if adults or not alone else LIVES_ALONE),
         ("Benefit cap", _sel(f.get(TN["cap"])) or "not given", "their details form"),
         ("Universal Credit payment day", f.get(TN["ucPayDay"]) or "not given", "their details form"),
-        ("Council tax account number", f.get(TN["ctAccount"]) or "not given", "their details form"),
+        ("Council tax account number", ct or "not given: the form no longer asks for it", "tenant record"),
         ("Weekly income", _money(f.get(TN["weeklyIncome"])), "their details form"),
         ("Weekly spending", _money(f.get(TN["weeklySpending"])), "their details form"),
         ("Other benefits", " ".join(str(f.get(TN["otherBenefits"]) or "none given").split()), "their details form"),
