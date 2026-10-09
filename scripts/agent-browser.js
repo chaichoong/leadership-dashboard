@@ -1541,13 +1541,8 @@ async function assertNotFinalAction(page, s, ctx = {}) {
       const answer = !!control && (['checkbox', 'radio'].includes(ctype) || ['checkbox', 'radio', 'switch'].includes(crole)
         || control.hasAttribute('aria-checked') || control.hasAttribute('aria-pressed')
         || ((control.tagName === 'BUTTON' || crole === 'button') && own.length <= 12));
-      // The option the click picks, in its own words: the label clicked, else the box's shortest label,
-      // else a short button's text (the standing-answer check compares it with his pick, 9 Oct 2026).
-      const shortest = control && control.labels && control.labels.length
-        ? Array.from(control.labels).map(l => String(l.textContent || '').replace(/\s+/g, ' ').trim()).sort((a, b) => a.length - b.length)[0] : '';
-      const picked = host.tagName === 'LABEL' ? String(host.textContent || '').replace(/\s+/g, ' ').trim() : (shortest || own);
       return { entry: false, words: squash(parts), question: answer ? squash(question(control)) : '', around: answer ? nearby(control) : '', tick: answer, option,
-               boxOption, picked, value: control ? String(control.value || '') : '' };
+               boxOption, value: control ? String(control.value || '') : '' };
     }, null, { timeout: Math.min(Number(s.timeout) || 20000, 60000) });
   } catch (e) {
     throw new Error(`could not read what "${s.selector}" is, so it was not touched: ${String(e.message || e).slice(0, 120)}`);
@@ -1556,30 +1551,14 @@ async function assertNotFinalAction(page, s, ctx = {}) {
     if (s.do === 'select') {
       // The option it picks can be the declaration itself ("I agree with all the assumptions"): round 5.
       const pick = seen.options ? pickOption(seen.options, String(s.label !== undefined ? s.label : s.value)).option : null;
-      if (ctx.live) {
-        // A live answer to a declaration topic stands only on his standing answers (9 Oct 2026).
-        // A dropdown with a label is asked by that label: the words around it can hold another question.
-        const st = standingAnswerFor(seen.question || seen.around, pick ? pick.label : '', ctx.standing);
-        if (st.topic && !st.ok) throw new Error(`refused: "${(seen.question || seen.around).slice(0, 60)}" is a declaration question: ${st.why}`);
-        if (st.topic) return;
-      }
       const asked = ((pick ? pick.label : '') + ' ' + seen.question).trim();
       if (DECLARATION_RE.test(asked) || NEARBY_DECLARATION_RE.test(seen.around)) throw new Error(`refused: "${(asked + ' ' + seen.around).trim().slice(0, 80)}" reads like a declaration, which is Kevin's`);
-    }
-    if (s.do === 'fill' && ctx.live && standingAnswerFor(seen.question, '', null).topic) {
-      throw new Error(`refused: "${seen.question.slice(0, 60)}" asks him to describe a declaration matter, which is Kevin's`);
     }
     if (s.do === 'fill' && SIGNATURE_RE.test(seen.question)) throw new Error(`refused: "${seen.question.slice(0, 80)}" looks like a signature, which is Kevin's`);
     return;
   }
   if (!presses) return;
   if (HARD_ACTION_RE.test(seen.words) && !namedAnswer(page.url(), seen)) throw new Error(`refused: "${seen.words.trim().slice(0, 60)}" looks like the final action, which is Kevin's`);
-  if (ctx.live && seen.tick) {
-    // A live answer to a declaration topic stands only on his standing answers (9 Oct 2026).
-    const st = standingAnswerFor(seen.question + ' ' + seen.around, seen.picked, ctx.standing);
-    if (st.topic && !st.ok) throw new Error(`refused: "${(seen.question || seen.around).slice(0, 60)}" is a declaration question: ${st.why}`);
-    if (st.topic) return;
-  }
   const asked = (seen.words + ' ' + seen.question).trim();
   const declaration = () => new Error(`refused: "${(asked + ' ' + seen.around).trim().slice(0, 80)}" reads like a declaration, which is Kevin's`);
   // His declarations, in the first person: never the robot's, named or not.
@@ -1652,8 +1631,9 @@ const FILLING = 'The robot is filling this in for you: hands off until this bar 
 
 // Runs the plan up to Kevin's turn. A step that fails does not throw: the window
 // stays his, with the step named, so he can finish by hand. A plan with "carryOn" goes on
-// from where its steps end, or from a step that failed for any reason but the guard (the
-// Swinton plans' missing email box, 9 Oct 2026), page by page to the price.
+// from where its steps end, or past a step whose box or button was not there (the Swinton
+// plans' missing email box, 9 Oct 2026), page by page to the price. A refusal (the guard,
+// the allowlist, the credential check) is never carried past.
 async function runHandover(page, plan, opts = {}) {
   const done = [];
   const onward = async () => {
@@ -1684,7 +1664,7 @@ async function runHandover(page, plan, opts = {}) {
       if (!opts.quiet) await turnBanner(page, FILLING);   // a new page drops the bar: put it back (not in a dry run's screenshot)
     } catch (e) {
       const error = String((e && e.message) || e).slice(0, 300);
-      if (plan.carryOn && s.do !== 'kevin' && !GUARD_REFUSAL_RE.test(error)) {
+      if (plan.carryOn && s.do !== 'kevin' && CARRY_PAST_RE.test(error) && !NEVER_PAST_RE.test(error)) {
         done.push({ do: s.do, executed: false, error, carriedOnPast: true });
         return onward();
       }
@@ -1713,14 +1693,13 @@ async function waitForWindowClose(ctx, capMs, onTick) {
 // bankruptcy, a policy refused or cancelled. On 27 Sep they were made his alone, so every quote
 // plan stopped at them and everything after his step was his too. On 8 Oct he typed his answers into
 // the cards; on 9 Oct he ruled the robot answers from them ("Robot answers them"), with these limits:
-// a question that ALSO asks about charges, prosecutions, investigations, insolvency or special terms
-// still stops for him, he still ticks the final "I declare" and presses Buy, and his answers stay in
-// a private file (HANDOVER_DIR/standing-answers.json), never in this public repo. Each answer there is
-// { key, asks (a pattern the question must match, e.g. a time window), covers (the topic words it
-// answers), pick (the option it chooses), said (his words and date) }.
-// This check is code, not the planner's judgement: an answer control (tick, radio, short button or
-// dropdown) whose question names a topic below is refused unless every topic in the question is
-// covered by a standing answer that fits it, all with the same pick, and the robot picks exactly that.
+// a question that ALSO asks about charges, prosecutions, investigations or insolvency still stops for
+// him, he still ticks the final "I declare" and presses Buy, and his answers stay in a private file
+// (HANDOVER_DIR/standing-answers.json), never in this public repo. Each answer there is
+// { key, asks (what the question's own clause must say, e.g. a time window), covers (the topic words
+// it answers), others (people besides him it covers, if he has said so), pick, said (his words) }.
+// A wrong declaration can void a policy, so every part of this check fails CLOSED: a question it
+// cannot read plainly is his. It is code, never the planner's judgement (review, 9 Oct 2026).
 const STANDING_FILE = () => process.env.AGENT_STANDING_ANSWERS || path.join(HANDOVER_DIR, 'standing-answers.json');
 const DECLARATION_TOPIC_RE = /\b(claims?|convict\w*|criminal|offences?|ccjs?|county court|judge?ments?|bankrupt\w*|refused|cancell?ed|voided|declined|special terms|terms imposed|imposed)\b/gi;
 // Never the robot's, whatever is on file. (Special terms is a topic, not on this list: it stops for him
@@ -1729,12 +1708,19 @@ const NEVER_ANSWER_RE = new RegExp(String.raw`\b(charged?|charges|prosecut\w*|pe
   + String.raw`|insolven\w*|liquidat\w*|administration orders?|administrators?|receivership|iva|individual voluntary`
   + String.raw`|debt relief|sequestrat\w*|arrangements? with (?:your |their |its )?creditors|struck off|strike off|dissolv\w*|disqualif\w*`
   + String.raw`|motoring|driving|speeding|material facts?|anything else|any other (?:information|facts?|circumstances|matters?))\b`, 'i');
-// A declaration about OTHER people (a co-director, a joint owner, the tenants) is not his to give from
-// his own answers: it stops for him unless a standing answer says it covers them ("others").
-const PEOPLE_RE = /\b(directors?|partners?|officers?|shareholders?|tenants?|occupants?|lodgers?|household|family|spouse|husband|wife|joint (?:owners?|policyholders?)|anyone|anybody|any (?:other )?(?:person|people|party|parties))\b/gi;
+// A declaration about OTHER people (a co-director, a joint owner, the tenants, the company) is not his
+// to give from his own answers: it stops for him unless every answer used says it covers them.
+const PEOPLE_RE = /\b(directors?|partners?|partnership|officers?|shareholders?|trustees?|tenants?|occupants?|lodgers?|household|family|spouse|husband|wife|joint (?:owners?|policyholders?)|anyone|anybody|persons?|people|insured persons?|any (?:other )?(?:party|parties)|(?:the |your |any )?(?:company|companies|business|firm)|associates?)\b/gi;
+// Words that can turn a yes into a no ("claims free", "made no claims", "is it true that..."): the
+// robot never answers a declaration worded like this, however its topics read.
+const POLARITY_RE = /\b(no|not|never|none|nil|free|without|true|false|correct|incorrect)\b/i;
 // "Other than motoring offences" narrows a question; it does not ask about motoring.
 const EXCLUSION_RE = /\b(?:other than|excluding|except(?:ing)?|apart from|not including|ignoring)\s+(?:any\s+)?(?:\w+\s+){0,2}?(?:motoring|driving|parking)\s+(?:offences?|convictions?|fines?)\b/gi;
+// A question's clauses: its time span is read in the clause that holds the topic, never borrowed
+// from the clause beside it ("ever been refused, or any claims in the last 5 years").
+const CLAUSE_SPLIT_RE = /[.?!;:]+|,\s*(?=(?:or|and|nor)\b)|\b(?:or|and)\s+(?=(?:have|has|had|are|is|were|was|been|do|does|did|ever)\b)/i;
 const normWords = t => String(t || '').replace(/\s+/g, ' ').trim().toLowerCase();
+const topicsIn = t => [...new Set((String(t || '').replace(EXCLUSION_RE, ' ').match(DECLARATION_TOPIC_RE) || []).map(w => w.toLowerCase()))];
 
 function loadStanding(file = STANDING_FILE()) {
   let raw;
@@ -1755,30 +1741,39 @@ function loadStanding(file = STANDING_FILE()) {
   return { answers, facts: Array.isArray(raw.facts) ? raw.facts.map(String) : [], ruling: String(raw.ruling || '') };
 }
 
-// {topic: false} for a question on none of the topics; else {topic: true, ok, why | keys}. A question
-// on the never list is his whether or not it names a topic ("Is there anything else we should know?").
-function standingAnswerFor(text, chosen, standing) {
-  const asked = String(text || '').replace(/\s+/g, ' ').replace(EXCLUSION_RE, ' ');
+// QUESTION is the question's own words, its answer labels taken out. {topic: false} when it names no
+// topic and nothing on the never list; else {topic: true, ok, why | keys}.
+function standingAnswerFor(question, chosen, standing) {
+  const asked = String(question || '').replace(/\s+/g, ' ').replace(EXCLUSION_RE, ' ');
   const no = why => ({ topic: true, ok: false, why });
   const never = asked.match(NEVER_ANSWER_RE);
   if (never) return no(`it asks about "${never[0]}", which only Kevin answers`);
-  const topics = [...new Set((asked.match(DECLARATION_TOPIC_RE) || []).map(w => w.toLowerCase()))];
+  const topics = topicsIn(asked);
   if (!topics.length) return { topic: false };
   if (NEARBY_DECLARATION_RE.test(asked)) return no('it is a declaration in the first person, which only Kevin makes');
+  const flip = asked.match(POLARITY_RE);
+  if (flip) return no(`it is worded with "${flip[0]}", so its yes and no could be the wrong way round`);
   if (!standing || !Array.isArray(standing.answers) || !standing.answers.length) {
     return no(standing && standing.error ? standing.error : 'no standing answer is on file for it');
   }
-  const fit = standing.answers.filter(a => a.asks.test(asked));
-  const uncovered = topics.filter(w => !fit.some(a => a.covers.test(w)));
-  if (uncovered.length) return no(`no standing answer covers "${uncovered.join('", "')}" as asked here`);
-  const used = fit.filter(a => topics.some(w => a.covers.test(w)));
-  const people = [...new Set((asked.match(PEOPLE_RE) || []).map(w => w.toLowerCase()))];
-  const strangers = people.filter(w => !used.every(a => a.others && a.others.test(w)));
+  const used = new Set();
+  for (const clause of asked.split(CLAUSE_SPLIT_RE).map(c => c.trim()).filter(Boolean)) {
+    const fit = standing.answers.filter(a => a.asks.test(clause));
+    for (const w of topicsIn(clause)) {
+      const a = fit.find(x => x.covers.test(w));
+      if (!a) return no(`no standing answer covers "${w}" as asked here ("${clause.slice(0, 80)}")`);
+      used.add(a);
+    }
+  }
+  if (!used.size) return no('its topics could not be placed in a clause');
+  // The people a question names apply to every clause ("you or any persons to be insured ... or been convicted").
+  const people = [...new Set((asked.match(PEOPLE_RE) || []).map(w => w.toLowerCase().replace(/^(?:the|your|any) /, '')))];
+  const strangers = people.filter(w => ![...used].every(a => a.others && a.others.test(w)));
   if (strangers.length) return no(`it also asks about "${strangers.join('", "')}", which his own answers do not cover`);
-  const picks = [...new Set(used.map(a => normWords(a.pick)))];
+  const picks = [...new Set([...used].map(a => normWords(a.pick)))];
   if (picks.length !== 1) return no('the standing answers that fit it disagree');
-  if (normWords(chosen) !== picks[0]) return no(`the standing answer is "${used[0].pick}", not "${String(chosen || '').trim()}"`);
-  return { topic: true, ok: true, keys: used.map(a => a.key) };
+  if (normWords(chosen) !== picks[0]) return no(`the standing answer is "${[...used][0].pick}", not "${String(chosen || '').trim()}"`);
+  return { topic: true, ok: true, keys: [...used].map(a => a.key) };
 }
 
 // ── The robot carries on (Kevin, 9 Oct 2026) ─────────────────────────────────
@@ -1787,21 +1782,26 @@ function standingAnswerFor(text, chosen, standing) {
 // for it." A plan is written before it runs, so it could only cover pages an agent had seen: the
 // Everywhen plan filled page 1 (22 steps) and handed him "the claims and declaration questions, then
 // read the price"; both Swinton plans died at step 18 on a box that is not there when he is signed in.
-// A plan with "carryOn" now goes on from where its steps end (or from a step that failed for any reason
-// but a guard refusal): the robot reads the page, a planner maps each question to the plan's facts,
-// the same guard checks every click, and Next moves it on, page after page, until the price is on
-// screen. A question no fact answers is HIS, by name: in his window the robot waits for him to answer
-// it and press Next, then carries on; in a dry run it stops and the agent puts it on his card.
-// The planner never decides alone: a typed value must appear in the facts, every answer cites a fact
-// that exists, and the guard above refuses any final action and any declaration his standing answers
-// do not cover.
+// A plan with "carryOn" now goes on from where its steps end (or past a step whose box was missing):
+// the robot reads the page, a planner maps each question to the plan's facts, and Next moves it on,
+// page after page, until the price is on screen. A question no fact answers is HIS, by name: in his
+// window the robot waits for him to answer it and press Next, then carries on; in a dry run it stops
+// and the agent puts it on his card.
+// The planner never decides alone (fail closed, review 9 Oct 2026): it may answer only a radio, tick
+// box, dropdown or text box the robot read on the page, and press only the one button that moves on;
+// every answer cites a whole fact line, and the words it gives must be in that line; a declaration is
+// answered only by standingAnswerFor; any button worded like a final action, a declaration or an
+// agreement is his.
 const CARRY_ON_MAX_PAGES = 25;
 const CARRY_ON_ROUNDS = 3;            // rounds on one page: an answer can reveal follow-up questions
 const CARRY_ON_KEVIN_MS = 20 * 60 * 1000;
+// The buttons that end the robot's part when the page shows a price: the quote is ready to buy.
+const BUY_RE = /\b(buy|purchase|pay|payment|check ?out|place (?:my |your )?order|proceed to (?:payment|checkout)|complete (?:my |your )?(?:purchase|order|payment))\b/i;
 
 // What the page asks, in a form the planner can answer: every visible question with a target the
 // robot can act on. Radios are grouped by name and their option labels are the targets (Acturis forms
-// hide the input and style the label).
+// hide the input and style the label). A group's question is the text round it with its own answer
+// labels taken out, so "No" is never read as part of the question.
 async function snapshotForm(page) {
   return page.evaluate(() => {
     const clean = t => String(t || '').replace(/\s+/g, ' ').trim();
@@ -1825,15 +1825,24 @@ async function snapshotForm(page) {
       return path(el);
     };
     const byId = ids => String(ids || '').split(/\s+/).filter(Boolean).map(i => { const t = document.getElementById(i); return t ? t.textContent : ''; }).join(' ');
-    // The words around a control: the largest box round it under 300 characters holding no other
-    // question's control (the guard's own reading of a question, kept in step with it).
-    const around = c => {
+    const isControl = o => !['button', 'submit', 'reset', 'image', 'hidden'].includes(String(o.type || '').toLowerCase());
+    // The text of N without the given elements (a group's own labels, any dropdown's options).
+    const textWithout = (n, drop) => {
+      const c = n.cloneNode(true);
+      const marks = new Set(drop);
+      const walkPair = (a, b) => { if (marks.has(a)) { b.remove(); return; } const ac = Array.from(a.children), bc = Array.from(b.children); for (let i = 0; i < ac.length; i++) if (bc[i]) walkPair(ac[i], bc[i]); };
+      walkPair(n, c);
+      c.querySelectorAll('select,option,script,style').forEach(x => x.remove());
+      return clean(c.textContent);
+    };
+    // The words round a control: the largest box round it under 300 characters holding no other
+    // question's control, less the control's own labels.
+    const around = (c, own) => {
       let t = '';
       for (let n = c.parentElement; n && n !== document.body; n = n.parentElement) {
-        const other = Array.from(n.querySelectorAll('input,select,textarea')).some(o => o !== c
-          && !['button', 'submit', 'reset', 'image', 'hidden'].includes(String(o.type || '').toLowerCase()) && !(c.name && o.name === c.name));
-        const x = clean(n.innerText || '');
-        if (other && t) break;
+        const other = Array.from(n.querySelectorAll('input,select,textarea')).some(o => o !== c && isControl(o) && !(c.name && o.name === c.name));
+        if (other) break;
+        const x = textWithout(n, own);
         if (x.length > 300) break;
         t = x;
       }
@@ -1846,7 +1855,7 @@ async function snapshotForm(page) {
       q.push(c.getAttribute('aria-label') || '', byId(c.getAttribute('aria-labelledby')), c.getAttribute('placeholder') || '');
       // A box with its own label is asked by that label; the words around it can hold the next question.
       const own = clean(q.join(' '));
-      return (own || around(c)).slice(0, 400);
+      return (own || around(c, [])).slice(0, 400);
     };
     const items = []; const groups = {};
     for (const el of document.querySelectorAll('input,select,textarea')) {
@@ -1854,30 +1863,19 @@ async function snapshotForm(page) {
       if (['hidden', 'submit', 'button', 'reset', 'image', 'file', 'password'].includes(type)) continue;
       if (type === 'radio' || type === 'checkbox') {
         // The label he would click when the box itself is hidden; the shortest one is the option.
-        const labels = Array.from(el.labels || []).filter(shown).sort((a, b) => clean(a.textContent).length - clean(b.textContent).length);
+        const labels = Array.from(el.labels || []).filter(l => shown(l) && clean(l.textContent)).sort((a, b) => clean(a.textContent).length - clean(b.textContent).length);
         const clickable = shown(el) ? el : labels[0];
         if (!clickable) continue;
         const t = clickable === el ? target(el) : (el.id ? `label[for="${CSS.escape(el.id)}"] >> nth=${Array.from(document.querySelectorAll(`label[for="${CSS.escape(el.id)}"]`)).indexOf(labels[0])}` : target(labels[0]));
         const option = clean(labels.length ? labels[0].textContent : el.value);
         if (type === 'radio' && el.name) {
-          const g = groups[el.name] || (groups[el.name] = { kind: 'radio', question: '', options: [] });
-          if (!g.question) {
-            const fs = el.closest('fieldset'); const lg = fs && fs.querySelector('legend');
-            // The question is what surrounds the group, less the option words themselves.
-            let q = lg ? clean(lg.textContent) : '';
-            if (!q) {
-              let n = el.parentElement, best = '';
-              for (; n && n !== document.body; n = n.parentElement) {
-                const all = Array.from(n.querySelectorAll('input,select,textarea')).filter(o => !['hidden', 'submit', 'button'].includes(String(o.type || '').toLowerCase()));
-                if (all.some(o => o.name !== el.name)) break;
-                const x = clean(n.innerText || ''); if (x.length > 300) break; best = x;
-              }
-              q = best;
-            }
-            g.question = q.slice(0, 400);
+          let g = groups[el.name];
+          if (!g) {
+            g = groups[el.name] = { kind: 'radio', question: '', options: [], _el: el };
             items.push(g);
           }
-          g.options.push({ label: option, target: t, checked: !!el.checked });
+          // Only the option's own label is taken out of the question: a form can tie its question label to the box too.
+          g.options.push({ label: option, target: t, checked: !!el.checked, _labels: labels.slice(0, 1) });
         } else {
           items.push({ kind: 'checkbox', question: question(el), option, target: t, checked: !!el.checked });
         }
@@ -1892,6 +1890,25 @@ async function snapshotForm(page) {
       }
       items.push(it);
     }
+    // A radio group's question: its legend, else the words round the group less its own labels.
+    for (const g of Object.values(groups)) {
+      const el = g._el;
+      const fs = el.closest('fieldset'); const lg = fs && fs.querySelector('legend');
+      const ownLabels = [].concat(...g.options.map(o => o._labels));
+      let q = lg ? clean(lg.textContent) : '';
+      if (!q) {
+        let best = '';
+        for (let n = el.parentElement; n && n !== document.body; n = n.parentElement) {
+          const all = Array.from(n.querySelectorAll('input,select,textarea')).filter(isControl);
+          if (all.some(o => o.name !== el.name)) break;
+          const x = textWithout(n, ownLabels); if (x.length > 300) break; best = x;
+        }
+        q = best;
+      }
+      g.question = q.slice(0, 400);
+      delete g._el;
+      for (const o of g.options) delete o._labels;
+    }
     const buttons = [];
     for (const el of document.querySelectorAll('button,input[type=submit],input[type=button],a[role=button],[role=button],a.btn,a.button')) {
       if (!shown(el)) continue;
@@ -1899,7 +1916,7 @@ async function snapshotForm(page) {
       if (!text || text.length > 40) continue;
       buttons.push({ kind: 'button', text, target: target(el) });
     }
-    const headings = Array.from(document.querySelectorAll('h1,h2,h3,legend')).filter(shown).map(h => clean(h.textContent)).filter(Boolean).slice(0, 12);
+    const headings = Array.from(document.querySelectorAll('h1,h2')).filter(shown).map(h => clean(h.textContent)).filter(Boolean).slice(0, 8);
     const errors = Array.from(document.querySelectorAll('[role=alert],.error,.errors,.validation-message,.field-validation-error,.error-message,[aria-invalid=true]'))
       .filter(shown).map(e => clean(e.innerText || e.getAttribute('aria-label') || '')).filter(Boolean).slice(0, 10);
     const body = clean(document.body.innerText || '');
@@ -1908,9 +1925,15 @@ async function snapshotForm(page) {
   });
 }
 
-// Where a page stands, to tell whether a press moved it on or Kevin has moved it on.
-function formSignature(snap) {
-  return JSON.stringify([String(snap.url).split('#')[0], snap.headings, snap.items.map(i => i.question)]);
+// Where a page stands: its address and main headings. A follow-up question appearing is not a move.
+function pageSignature(snap) {
+  return JSON.stringify([String(snap.url).split('#')[0], snap.headings]);
+}
+// He has moved the page on: a new address or headings, or none of the questions he was handed left.
+function movedOn(before, now) {
+  if (pageSignature(before) !== pageSignature(now)) return true;
+  const was = new Set(before.items.map(i => i.question).filter(Boolean));
+  return was.size > 0 && !now.items.some(i => was.has(i.question));
 }
 
 // The model the planner uses: the platform's default (js/ai-models.js), never a literal here.
@@ -1937,9 +1960,9 @@ const PLANNER_SCHEMA = {
 };
 const PLANNER_RULES = [
   'You fill in ONE page of a UK web form (an insurance quote, usually) inside a robot browser for Kevin Brittain.',
-  'Answer only from FACTS and STANDING ANSWERS. Every step names the exact fact line it used in "source", quoted word for word.',
-  'Use only the targets listed on the page. To answer a radio question, click the target of the option you choose.',
-  'A typed value ("fill") must be copied exactly from a fact (dates as DD/MM/YYYY; TODAY is given).',
+  'Answer only from FACTS and STANDING ANSWERS. Every step names in "source" the ONE whole fact line (or standing answer) it used, copied exactly.',
+  'Use only the targets listed on the page items. To answer a radio question, click the target of the option you choose. Never click a button as a step: the only button you may name is "next".',
+  'A typed value ("fill") must be copied exactly from the fact line you cite (dates as DD/MM/YYYY; TODAY is given).',
   'If no fact answers a question the page needs, put the question in "unknown" and do not guess. Skip optional questions no fact answers.',
   'Leave a question alone when its current value is already right.',
   'Questions about claims, convictions, CCJs, bankruptcy, insurance refused, cancelled or voided, or special terms: answer only when a STANDING ANSWER covers exactly what is asked (its time span, and every person it asks about), with its pick. A question that also asks about charges, prosecutions, investigations, insolvency or anything else to declare goes in "unknown".',
@@ -1971,11 +1994,32 @@ function planner() {
   return process.env.AGENT_HANDOVER_PLANNER ? require(path.resolve(process.env.AGENT_HANDOVER_PLANNER)) : claudePlanner;
 }
 
+const lineKey = t => normWords(t).replace(/[.;,\s]+$/, '');
 const squashFact = t => normWords(t).replace(/[\s,£]/g, '');
-// A typed value is a fact's own words: it appears in the facts, spaces, commas and £ aside, or it is today.
-function valueInFacts(v, factsText) {
+const tokensOf = t => normWords(t).match(/[a-z0-9]+/g) || [];
+// A typed value is the cited line's own words: in it (spaces, commas and £ aside), a short value as a
+// whole word of it, never a fragment ("0" inside "2009"); or it is today.
+function valueInLine(v, line) {
   const want = squashFact(fillTokens(v));
-  return !!want && (squashFact(factsText).includes(want) || want === squashFact(fillTokens('{{today}}')));
+  if (!want) return false;
+  if (want === squashFact(fillTokens('{{today}}'))) return true;
+  if (want.length < 3) return tokensOf(line).includes(want);
+  return squashFact(line).includes(want);
+}
+// A picked option is the cited line's own words: Yes or No as a word of it; anything else, every word
+// of the option in what the line says it IS (the part after "never", "not" or "no" set aside, so
+// "email only; never phone" never ticks Phone).
+function pickInLine(label, line) {
+  const words = tokensOf(label);
+  if (!words.length) return false;
+  if (words.length === 1 && /^(yes|no)$/.test(words[0])) return tokensOf(line).includes(words[0]);
+  const said = normWords(line).replace(/\b(never|not|no|none)\b[^;.]*/g, ' ');
+  const have = new Set(tokensOf(said));
+  return words.filter(w => w.length >= 3 || /^\d+$/.test(w)).every(w => have.has(w));
+}
+// Kept for callers that ask "is this value anywhere in the facts?" (the dry-run report).
+function valueInFacts(v, factsText) {
+  return String(factsText || '').split('\n').some(l => valueInLine(v, l));
 }
 
 function factsOf(plan, standing) {
@@ -1984,36 +2028,105 @@ function factsOf(plan, standing) {
   return lines.map(l => String(l).trim()).filter(Boolean);
 }
 
-// The planner's steps, checked: a known target, a cited fact that exists, a typed value the facts hold.
-// Anything else becomes a question for Kevin, never a guess.
+// The planner's steps, checked. Each must target an answer the robot read on the page (a radio
+// option, a tick box, a dropdown or a text box: never a button), cite one whole fact line (or one of
+// his standing answers), and give words that are in that line. Anything else is a question for
+// Kevin, never a guess. `item` and `pick` ride on each step for the live declaration check.
 function checkPlannerSteps(out, snap, facts, citable = facts) {
-  const factsText = facts.join('\n');
-  const citeText = citable.join('\n');
-  const targets = new Set();
-  for (const i of snap.items) { if (i.target) targets.add(i.target); for (const o of i.options || []) if (o.target) targets.add(o.target); }
-  const buttons = new Set(snap.buttons.map(b => b.target));
+  const lines = new Map(citable.map(l => [lineKey(l), l]));
+  const answers = new Map();
+  for (const it of snap.items) {
+    if (it.kind === 'radio') for (const o of it.options || []) answers.set(o.target, { item: it, pick: o.label, kind: 'click' });
+    else if (it.kind === 'checkbox') answers.set(it.target, { item: it, pick: it.option, kind: 'click' });
+    else if (it.kind === 'select') answers.set(it.target, { item: it, kind: 'select' });
+    else answers.set(it.target, { item: it, kind: 'fill' });
+  }
+  const buttons = new Map(snap.buttons.map(b => [b.target, b]));
   const steps = [], unknown = [...new Set((out.unknown || []).map(String).filter(Boolean))];
   for (const s of out.steps || []) {
-    const q = String(s.question || s.target || '').slice(0, 160);
-    const cited = String(s.source || '').trim();
-    if (!targets.has(s.target) && !buttons.has(s.target)) { unknown.push(q); continue; }
-    if (!cited || !squashFact(citeText).includes(squashFact(cited))) { unknown.push(q); continue; }
-    if (s.do === 'fill' && !valueInFacts(s.value, factsText)) { unknown.push(q); continue; }
-    steps.push(Object.assign(s.do === 'select' ? { do: 'select', selector: s.target, label: String(s.value || '') }
-      : s.do === 'fill' ? { do: 'fill', selector: s.target, value: String(s.value || '') }
-      : { do: s.do === 'check' ? 'check' : 'click', selector: s.target }, { question: q }));
+    const a = answers.get(s.target);
+    const q = String((a && a.item.question) || s.question || s.target || '').slice(0, 160);
+    const line = lines.get(lineKey(s.source));
+    const want = s.do === 'check' ? 'click' : s.do;
+    if (!a) { unknown.push(buttons.has(s.target) ? `press "${buttons.get(s.target).text}"` : q); continue; }
+    if (a.kind !== want || !line) { unknown.push(q); continue; }
+    if (a.kind === 'fill') {
+      if (!valueInLine(s.value, line)) { unknown.push(q); continue; }
+      steps.push({ do: 'fill', selector: s.target, value: String(s.value), question: q, item: a.item });
+      continue;
+    }
+    if (a.kind === 'select') {
+      const pick = pickOption((a.item.options || []).map(l => ({ value: l, label: l })), String(s.value || '')).option;
+      if (!pick || !pickInLine(pick.label, line)) { unknown.push(q); continue; }
+      steps.push({ do: 'select', selector: s.target, label: pick.label, question: q, item: a.item, pick: pick.label });
+      continue;
+    }
+    if (!pickInLine(a.pick, line)) { unknown.push(q); continue; }
+    steps.push({ do: 'click', selector: s.target, question: q, item: a.item, pick: a.pick });
   }
-  const next = out.next && buttons.has(out.next) ? out.next : null;
+  const next = out.next && buttons.has(out.next) ? buttons.get(out.next) : null;
   return { steps, unknown: [...new Set(unknown)], next, done: out.done || 'no', reason: String(out.reason || '') };
 }
 
-const GUARD_REFUSAL_RE = /^(refused|could not read)/;
-const FINAL_REFUSAL_RE = /^refused: .*(looks like the final action|is the last step before a submit|looks like the final step)/;
+// Why the robot may not give this live answer, or ''. The question is the one the robot read on the
+// page; the words round the control only ever make it stricter: LOCAL is the box round it holding no
+// other question (as the guard reads it), WIDE the box round it up to 400 characters, whatever it holds.
+async function liveAnswerProblem(page, s, standing) {
+  const own = String((s.item && s.item.question) || '').replace(/\s+/g, ' ').trim();
+  if (!own) return 'its question could not be read';
+  let near;
+  try {
+    near = await page.locator(s.selector).first().evaluate(el => {
+      const c = el.tagName === 'LABEL' && el.control ? el.control : el;
+      const txt = n => String(n.innerText || '').replace(/\s+/g, ' ').trim();
+      const isControl = o => !['button', 'submit', 'reset', 'image', 'hidden'].includes(String(o.type || '').toLowerCase());
+      let local = '', wide = '', boxed = true;
+      for (let n = c.parentElement; n && n !== document.body; n = n.parentElement) {
+        const x = txt(n);
+        if (x.length > 400) break;
+        wide = x;
+        if (boxed && Array.from(n.querySelectorAll('input,select,textarea')).some(o => o !== c && isControl(o) && !(c.name && o.name === c.name))) boxed = false;
+        if (boxed) local = x;
+      }
+      return { local, wide };
+    }, null, { timeout: 15000 });
+  } catch (e) {
+    return `could not read the words round it (${String(e.message || e).slice(0, 80)})`;
+  }
+  const never = (own + ' ' + near.local).replace(EXCLUSION_RE, ' ').match(NEVER_ANSWER_RE);
+  if (never) return `"${never[0]}" is asked on it, which only Kevin answers`;
+  if (!topicsIn(own).length) {
+    // A typed answer goes in a box with its own label. A pick beside a declaration goes ahead only
+    // when its own question reads plainly as a question ("Answer" under "Any claims?" is not one).
+    if (s.do === 'fill') return '';
+    const plain = /\?\s*$/.test(own) && own.split(/\s+/).length >= 3;
+    return topicsIn(near.local + ' ' + near.wide).length && !plain
+      ? `a declaration question is beside it and its own question reads only "${own.slice(0, 60)}"` : '';
+  }
+  if (s.do === 'fill') return 'a typed answer to a declaration question is his';
+  if (s.item && s.item.kind === 'checkbox') return 'a tick box on a declaration question is his';
+  const st = standingAnswerFor(own, s.pick, standing);
+  return st.ok ? '' : `a declaration question: ${st.why}`;
+}
 
-// Goes on from the page the plan's steps left, page by page. Returns { done, stuck, end }:
-// end is 'price' (the quote is on screen: his turn to buy), or stuck says where and why it stopped.
+// Errors that mean a box or button was not there (a plan step written for another state of the page):
+// the robot carries on past these. A refusal by the guard, the allowlist or the credential check never.
+const CARRY_PAST_RE = /Timeout \d+ms exceeded|waiting for (?:locator|selector)|resolved to 0 elements|element is not (?:visible|attached)/i;
+const NEVER_PAST_RE = /^(refused|BROWSER REFUSED)|not on the allowlist|password|credential/i;
+
+// Goes on from the page the plan's steps left, page by page. Returns { done, stuck, end }: end is
+// 'price' (the quote is on screen: his turn to buy) or 'final' (the button that moves on is Buy, with a
+// price showing); otherwise stuck says where and why it stopped. Never throws: his window stays his.
 async function carryOn(page, plan, opts = {}) {
   const done = [];
+  try {
+    return await carryOnPages(page, plan, opts, done);
+  } catch (e) {
+    return { done, stuck: { step: 'carry-on', do: 'carry-on', error: `the robot stopped reading the page: ${String(e.message || e).slice(0, 240)}` } };
+  }
+}
+
+async function carryOnPages(page, plan, opts, done) {
   const standing = opts.standing === undefined ? loadStanding() : opts.standing;
   const facts = factsOf(plan, standing);
   // An answer may cite a fact or one of his standing answers; a typed value only ever comes from a fact.
@@ -2021,18 +2134,29 @@ async function carryOn(page, plan, opts = {}) {
   const plan_ = opts.planner || planner();
   const maxPages = Math.min(Number(plan.carryOn.maxPages) || 15, CARRY_ON_MAX_PAGES);
   let lastSig = '', samePage = 0;
+  const his = async (p, questions, snapBefore) => {
+    // His turn, mid-form: he answers these and presses Next himself; the robot then carries on.
+    if (opts.skipKevin) return { done, stuck: { step: `page ${p}`, do: 'carry-on', error: 'questions only Kevin can answer: ' + questions.join(' | ').slice(0, 400), unknown: questions } };
+    await turnBanner(page, `Your turn: ${questions.slice(0, 3).join(' | ').slice(0, 300)}. Answer ${questions.length === 1 ? 'it' : 'them'} and press Next: the robot carries on.`);
+    const moved = await waitForPageMove(page, snapBefore, opts.kevinMs || CARRY_ON_KEVIN_MS, opts.onTick);
+    if (!moved) return { done, stuck: { step: `page ${p}`, do: 'kevin', error: 'not done in time: ' + questions.join(' | ').slice(0, 300) } };
+    done.push({ do: 'kevin', executed: true, say: questions.join(' | ').slice(0, 300), carryOn: p });
+    await turnBanner(page, FILLING);
+    lastSig = '';
+    return null;
+  };
   for (let p = 1; p <= maxPages; p++) {
     await page.waitForLoadState('domcontentloaded', { timeout: 30000 }).catch(() => {});
     await page.waitForTimeout(Number(opts.settleMs) || 1500);
     if (opts.onTick) opts.onTick();
     let snap = await snapshotForm(page);
-    const sig = formSignature(snap);
+    const sig = pageSignature(snap) + JSON.stringify(snap.items.map(i => i.question));
     samePage = sig === lastSig ? samePage + 1 : 0;
     lastSig = sig;
     if (samePage >= 2) {
       return { done, stuck: { step: `page ${p}`, do: 'carry-on', error: `the page did not move on after Next${snap.errors.length ? ': ' + snap.errors.join('; ').slice(0, 200) : ''}` } };
     }
-    let next = null;
+    let next = null, handed = false;
     for (let round = 1; round <= CARRY_ON_ROUNDS; round++) {
       let out;
       try {
@@ -2045,50 +2169,54 @@ async function carryOn(page, plan, opts = {}) {
       if (out.done === 'blocked') return { done, stuck: { step: `page ${p}`, do: 'carry-on', error: `the site will not go on: ${out.reason || 'no reason given'}` } };
       for (let i = 0; i < out.steps.length; i++) {
         const s = out.steps[i];
+        const problem = await liveAnswerProblem(page, s, standing);
+        if (problem) { out.unknown.push(`${s.question} (${problem})`); continue; }
         try {
-          await assertNotFinalAction(page, s, { next: out.steps[i + 1], answers: plan.answers, standing, live: true });
+          await assertNotFinalAction(page, s, { next: out.steps[i + 1], answers: plan.answers });
           const r = await runSteps(page, [s], false, null);
           done.push(...r.done.map(d => Object.assign(d, { carryOn: p })));
           await page.waitForTimeout(400);    // an answer can redraw the form
         } catch (e) {
           const why = String(e.message || '');
-          // The final action (Buy, Pay, Submit) is where the robot's part ends: his turn, nothing more to fill.
-          if (FINAL_REFUSAL_RE.test(why)) return { done, stuck: null, end: 'final' };
           // A refused answer is his question; a missed click is the planner's to retry next round.
-          if (GUARD_REFUSAL_RE.test(why)) out.unknown.push(`${s.question || s.selector} (${why.slice(0, 160)})`);
+          if (/^(refused|could not read|BROWSER REFUSED)/.test(why)) out.unknown.push(`${s.question} (${why.slice(0, 160)})`);
         }
-      }
-      if (out.unknown.length) {
-        if (opts.skipKevin) {
-          return { done, stuck: { step: `page ${p}`, do: 'carry-on', error: 'questions only Kevin can answer: ' + out.unknown.join(' | ').slice(0, 400), unknown: out.unknown } };
-        }
-        // His turn, mid-form: he answers these and presses Next himself; the robot then carries on.
-        await turnBanner(page, `Your turn: ${out.unknown.slice(0, 3).join(' | ').slice(0, 300)}. Answer ${out.unknown.length === 1 ? 'it' : 'them'} and press Next: the robot carries on.`);
-        const moved = await waitForPageMove(page, sig, opts.kevinMs || CARRY_ON_KEVIN_MS, opts.onTick);
-        if (!moved) return { done, stuck: { step: `page ${p}`, do: 'kevin', error: 'not done in time: ' + out.unknown.join(' | ').slice(0, 300) } };
-        done.push({ do: 'kevin', executed: true, say: out.unknown.join(' | ').slice(0, 300), carryOn: p });
-        await turnBanner(page, FILLING);
-        lastSig = '';
-        next = 'moved';
-        break;
       }
       const after = await snapshotForm(page);
+      if (out.unknown.length) {
+        const r = await his(p, [...new Set(out.unknown)], after);
+        if (r) return r;
+        handed = true;
+        break;
+      }
       const fresh = after.items.some(i => !snap.items.some(j => j.question === i.question));
       snap = after;
       if (out.next && !fresh) { next = out.next; break; }
       if (!out.steps.length && !fresh) break;
     }
-    if (next === 'moved') continue;
+    if (handed) continue;
     if (!next) return { done, stuck: { step: `page ${p}`, do: 'carry-on', error: 'the planner found no way on from this page' } };
+    // The one button that moves on. Worded like a final action with a price on screen: the robot's part
+    // is done. Worded like any other final action, a declaration or an agreement ("Agree and continue",
+    // "Sign in", "Submit"): his, by name, and the robot carries on once he has pressed it.
+    if (HARD_ACTION_RE.test(next.text) || SOFT_PRESS_RE.test(next.text) || DECLARATION_RE.test(next.text)) {
+      if (BUY_RE.test(next.text) && snap.prices.length) return { done, stuck: null, end: 'final' };
+      const r = await his(p, [`press "${next.text}"`], snap);
+      if (r) return r;
+      continue;
+    }
     try {
-      const s = { do: 'click', selector: next };
-      await assertNotFinalAction(page, s, { answers: plan.answers, standing, live: true });
+      const s = { do: 'click', selector: next.target };
+      await assertNotFinalAction(page, s, { answers: plan.answers });
       await runSteps(page, [s], false, null);
-      done.push({ do: 'click', executed: true, selector: next, carryOn: p, next: true });
+      done.push({ do: 'click', executed: true, selector: next.target, carryOn: p, next: true });
     } catch (e) {
       const why = String(e.message || e);
-      if (FINAL_REFUSAL_RE.test(why)) return { done, stuck: null, end: 'final' };
-      // "Next" refused or gone: the page is his from here, by name.
+      if (/^(refused|could not read|BROWSER REFUSED)/.test(why)) {
+        const r = await his(p, [`press "${next.text}" (${why.slice(0, 120)})`], snap);
+        if (r) return r;
+        continue;
+      }
       return { done, stuck: { step: `page ${p}`, do: 'carry-on', error: why.slice(0, 300) } };
     }
     if (!opts.quiet) await turnBanner(page, FILLING);
@@ -2096,15 +2224,15 @@ async function carryOn(page, plan, opts = {}) {
   return { done, stuck: { step: `page ${maxPages}`, do: 'carry-on', error: `${maxPages} pages and still no price` } };
 }
 
-// True once the page is somewhere new (he pressed Next) and no password box is showing.
-async function waitForPageMove(page, sig, maxMs, onTick) {
+// True once he has moved the page on (movedOn) and no password box is showing. BEFORE is the page as
+// the robot left it, taken after its own answers, so a follow-up the robot revealed is not his move.
+async function waitForPageMove(page, before, maxMs, onTick) {
   const deadline = Date.now() + maxMs;
   while (Date.now() < deadline) {
     if (page.isClosed()) return false;
     if (onTick) onTick();
     try {
-      const now = formSignature(await snapshotForm(page));
-      if (now !== sig && Number(await visiblePasswordFieldCount(page)) === 0) return true;
+      if (movedOn(before, await snapshotForm(page)) && Number(await visiblePasswordFieldCount(page)) === 0) return true;
     } catch { /* mid-navigation: look again */ }
     await new Promise(r => setTimeout(r, 1500));
   }
@@ -2635,4 +2763,5 @@ module.exports = { namedAnswer, hostAllowed, pickLinks, runSteps, assertNotCrede
                    assertHandoverPlan, fillTokens, runHandover, handoverPlanPath, HANDOVER_DIR, waitForWindowClose, FINAL_ACTION_RE,
                    plainRefresh, withSelfRefresh, selfRefreshEntry, isRefreshWindowLine, holdBy,
                    doorLanding, sessionCookieHours, SESSION_COOKIE_HOURS, stuckBanner, planNamed, HARD_ACTION_RE,
-                   loadStanding, standingAnswerFor, snapshotForm, checkPlannerSteps, carryOn, valueInFacts, assertNotFinalAction, PLANNER_SCHEMA };
+                   loadStanding, standingAnswerFor, snapshotForm, checkPlannerSteps, carryOn, valueInFacts, valueInLine, pickInLine,
+                   liveAnswerProblem, movedOn, assertNotFinalAction, PLANNER_SCHEMA, CARRY_PAST_RE, NEVER_PAST_RE };
