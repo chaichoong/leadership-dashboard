@@ -456,10 +456,7 @@
         const effectiveOpening = userBal !== null ? userBal : openingBalance;
 
         const DAY_NAMES_SHORT = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
-        const defaultCommitments = [
-            { label: 'Wages', amount: 330, day: 5 },
-            { label: 'Top-up', amount: 140, day: 5 },
-        ];
+        const defaultCommitments = waDefaultCommitments();
         const commitments = Array.isArray(waSettings.commitments) && waSettings.commitments.length > 0
             ? waSettings.commitments : defaultCommitments;
         const WEEKLY_COMMITMENTS = commitments.reduce((s, c) => s + (c.amount || 0), 0);
@@ -684,7 +681,7 @@
                     return `<div class="cashflow-detail-item out" style="${excluded ? 'opacity:0.5' : ''}"><label style="display:flex;align-items:center;gap:6px;cursor:pointer;flex:1"><input type="checkbox" data-cf-key="${cbId}" data-row="${i}" data-fi="${fi}" data-dir="out" ${checked} onchange="toggleCFExclusion(this.dataset.cfKey)"><span class="cashflow-detail-item-name" style="flex:1;${excluded ? 'text-decoration:line-through;color:var(--text-muted)' : ''}">${escHtml(f.name)}${acctTag(f.account)}</span></label><span class="cashflow-detail-item-value" style="${excluded ? 'text-decoration:line-through;color:var(--text-muted)' : ''}">-${fmt(f.amount)}</span></div>`;
                 }).join('')
                 : '';
-            // Weekly commitments (Wages, Top-up, etc.) are added to this day's Out
+            // Weekly commitments (Wages, etc.) are added to this day's Out
             // total in waProjected, so they must show in the detail too or the
             // Out column won't reconcile to the listed items.
             const rowCommitments = commitments.filter(c => r.date.getDay() === c.day && (c.amount || 0) > 0);
@@ -1191,12 +1188,42 @@
     const WA_KEY = '_wa_state';
     const WA_SETTINGS_KEY = '_wa_settings';
 
+    // Weekly costs box (Kevin, 7 Oct 2026, task rectkiXQ2jzhCbq4L). Wages are Roy's £150 a week,
+    // the same budget as WAGES_TARGET_GBP (£650 a month). The Together arrears top-ups became fixed
+    // costs on the 1st on 5 Oct 2026, so the old Friday "Top-up" row (£140) counted them twice.
+    const WA_WAGES_WEEKLY_GBP = Math.round(WAGES_TARGET_GBP * 12 / 52);
+    const WA_WEEKLY_RULING_KEY = 'weeklyCostsRuling20261007';
+    function waDefaultCommitments() {
+        return [{ label: 'Wages', amount: WA_WAGES_WEEKLY_GBP, day: 5 }];
+    }
+    // The box is saved only in this browser, so no robot could make Kevin's two edits for him.
+    // Applied once per browser, then his own later edits stand: a "Wages" row becomes £150 and
+    // the Together row ("Top-up") goes. Returns true when the settings need saving.
+    function applyWeeklyCostsRuling(settings) {
+        if (settings[WA_WEEKLY_RULING_KEY]) return false;
+        settings[WA_WEEKLY_RULING_KEY] = true;
+        if (Array.isArray(settings.commitments)) {
+            const label = c => String((c && c.label) || '');
+            const kept = settings.commitments
+                .filter(c => !/^\s*top-?up\s*$/i.test(label(c)) && !/together/i.test(label(c)))
+                .map(c => /^\s*wages\s*$/i.test(label(c)) ? { ...c, amount: WA_WAGES_WEEKLY_GBP } : c);
+            if (kept.length) settings.commitments = kept;
+            else delete settings.commitments;   // nothing left: the defaults (Wages £150) apply
+        }
+        return true;
+    }
+
     function getWASettings() {
+        let settings;
         try {
             const raw = localStorage.getItem(WA_SETTINGS_KEY);
-            if (!raw) return {};
-            return JSON.parse(raw);
+            settings = raw ? (JSON.parse(raw) || {}) : {};
         } catch { return {}; }
+        if (applyWeeklyCostsRuling(settings)) {
+            try { localStorage.setItem(WA_SETTINGS_KEY, JSON.stringify(settings)); }
+            catch (e) { console.warn('[cashflow] could not save the weekly costs update', e); }
+        }
+        return settings;
     }
 
     function saveWASettings() {
@@ -1222,10 +1249,7 @@
 
     function addWeeklyCost() {
         const settings = getWASettings();
-        const commitments = Array.isArray(settings.commitments) ? settings.commitments : [
-            { label: 'Wages', amount: 330, day: 5 },
-            { label: 'Top-up', amount: 140, day: 5 },
-        ];
+        const commitments = Array.isArray(settings.commitments) ? settings.commitments : waDefaultCommitments();
         commitments.push({ label: '', amount: 0, day: 5 });
         settings.commitments = commitments;
         localStorage.setItem(WA_SETTINGS_KEY, JSON.stringify(settings));
@@ -1234,10 +1258,7 @@
 
     function removeWeeklyCost(idx) {
         const settings = getWASettings();
-        const commitments = Array.isArray(settings.commitments) ? settings.commitments : [
-            { label: 'Wages', amount: 330, day: 5 },
-            { label: 'Top-up', amount: 140, day: 5 },
-        ];
+        const commitments = Array.isArray(settings.commitments) ? settings.commitments : waDefaultCommitments();
         commitments.splice(idx, 1);
         settings.commitments = commitments;
         localStorage.setItem(WA_SETTINGS_KEY, JSON.stringify(settings));

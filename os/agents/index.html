@@ -7038,9 +7038,11 @@ const ES = {
     updated:    'fld3q8WN5XqrER92Z',
 };
 const ESTATE_STALE_MIN = 30;   // the writer runs every 10 minutes; three misses is "stopped"
-const ESTATE_STATUS_ORDER = { Failed:0, Blocked:1, Running:2, Skipped:3, Worked:4, Idle:5 };
+// Missed: a slot passed with no record at all while other jobs ran (scripts/estate-status.py apply_missed, Kevin 2 Oct 2026)
+const ESTATE_STATUS_ORDER = { Failed:0, Missed:1, Blocked:2, Running:3, Skipped:4, Worked:5, Idle:6 };
 const ESTATE_STATUS_STYLE = {
     Failed:  ['var(--danger-bg)','var(--danger)'],
+    Missed:  ['var(--danger-bg)','var(--danger)'],
     Blocked: ['var(--warning-bg)','var(--warning)'],
     Running: ['var(--info-bg)','var(--info)'],
     Skipped: ['var(--warning-bg)','var(--warning)'],
@@ -7295,7 +7297,7 @@ function renderEstateStatus(){
     // job rows only: the content-publishing report row is written hourly by another job and would mask a stopped writer (15 Sep 2026)
     const newest = _estateRows.filter(r => gf(r,'kind') === 'job').map(r => gf(r,'updated')).filter(Boolean).sort().pop();
     const ageMin = newest ? Math.round((Date.now() - new Date(newest).getTime())/60000) : null;
-    const attention = jobs.filter(r => ['Failed','Blocked'].includes(gf(r,'status'))).length;
+    const attention = jobs.filter(r => ['Failed','Blocked','Missed'].includes(gf(r,'status'))).length;
     if(count) count.textContent = jobs.length;
     if(badge){ badge.textContent = attention; badge.style.display = attention ? '' : 'none'; }
     if(!jobs.length){

@@ -74,6 +74,7 @@ const ESTATE_SCRIPTS = [
   'scripts/rent_form_plan.py',
   'scripts/send-text.py',
   'scripts/tenancy-record.py',
+  'scripts/cost-record.py',
   'scripts/rent_signed_check.py',
   'scripts/rent_roy_email.py',
   'scripts/roy-assistant.py',
