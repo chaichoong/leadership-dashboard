@@ -20,7 +20,10 @@ WHAT EVERY WRITE NEEDS
     the card he approved AS-IS (Approval Outcome exactly "Approved as-is", with the marks only a
     real approval leaves, scripts/approval_evidence.py) carries the exact line
         RECORD CHANGE: <tenancy id> <Payment Status|Due Day|Set-off> = <value>
-    (a set-off's value is "YYYY-MM-DD to YYYY-MM-DD")
+    (a set-off's value is "YYYY-MM-DD to YYYY-MM-DD"), or for a move-in and a rent change
+        RECORD CHANGE: <agreement's Gmail id> Onboard = unit <rental unit>, due <N>, <type>, <email>[, replace <tenancy>]
+        RECORD CHANGE: <old tenancy id> Rent change = <agreement's Gmail id>
+    and the command's own arguments must be exactly what that line says.
     The agent proposes the change on the card, in plain words too; his approval carries it out.
     Only "as-is": `agent-dispatch.py revise` rewrites the output after an "Approved with minor
     edits", so a line there may not be the line he read, and his edit may have changed it.
@@ -38,9 +41,26 @@ WHAT EVERY WRITE DOES
   appends one line to LEDGER. A write whose comment then fails is said (exit 1), never undone.
 
 WHAT IT NEVER DOES
-  Void a unit, end a tenancy, edit a rent (a rent change is a NEW tenancy: Kevin, 5 Oct 2026), touch
-  a tenant record, or write any field not listed below. Payment Status takes only In Payment, CFV or
-  CFV Actioned: voiding has its own six-question gate (airtable-tenancy-ender skill).
+  Void a unit, edit a rent (a rent change is a NEW tenancy: Kevin, 5 Oct 2026), or write any field not
+  listed here. Payment Status takes only In Payment, CFV or CFV Actioned: voiding has its own
+  six-question gate (airtable-tenancy-ender skill). It ends a tenancy, creates a tenancy or a tenant, or
+  touches a tenant record ONLY in onboard and rent-change below.
+
+THE MOVE-IN AND RENT-CHANGE DOORS (onboard, rent-change; Kevin's rulings of 2, 5 and 9 Oct 2026)
+  Only on the `TENANCY RECORD:` task the rent check raised (scripts/rent_signed_check.py), approved by Kevin
+  AS-IS with its RECORD CHANGE line, and only with the agreement's facts THE RENT CHECK read off the signed PDF
+  (its cache, keyed by the task's own Gmail message id), which must equal the task's AGREEMENT lines: never a
+  name, rent or start the agent typed. Both re-check that the agreement is still unrecorded before writing.
+  onboard: a new tenant is onboarded once the AST is signed (9 Oct). A NEW tenant and a NEW tenancy at the
+    agreement's rent and start, Payment Status CFV (2 Oct). Refuses a unit at another house, a tenant already on
+    record (except the one its own earlier run created before its tenancy failed: the ledger keys it by the
+    agreement), an agreement naming two people, and an occupied unit unless the Onboard line says `replace` that
+    live tenancy: it is then taken off the unit and left live, and its tenant's Current Unit cleared.
+  rent-change: a NEW tenancy from the agreement's start, keeping the old one's Payment Status; the old one ended
+    the day before; its payments from the new start and its open tasks moved; the tenant and the unit untouched
+    (5 Oct). A re-run refuses once a tenancy with that tenant, start and rent exists. An end that fails after the
+    create is said (exit 1) and never creates again.
+  Billing Year is set when the start's year is one of its choices, else left blank and said (no typecast).
 
 USAGE
   tenancy-record.py show TENANCY                          the record and its comments (read only)
@@ -51,6 +71,9 @@ USAGE
                                                           rent a letting agent keeps against our bill
                                                           counts as PAID for whole rent periods from D
                                                           (a due date) to D (the day before one)
+  tenancy-record.py onboard --task T --unit RU --due-day N --type "Universal Credit" --email E [--replace TENANCY]
+                                                          a NEW tenant from a signed agreement
+  tenancy-record.py rent-change OLD --task T              a continuing tenant's new rent = a NEW tenancy
   add --dry-run to any write to see the gate's answer and change nothing.
 """
 import argparse
@@ -59,7 +82,7 @@ import json
 import os
 import re
 import sys
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
@@ -81,8 +104,9 @@ REF = "fldyNVvFn4x8GY14q"            # Tenancy Reference (js/config.js F.tenRef)
 TK = dict(rc.TK, agentOutput="fldzswp8fx6PqpLQ5", approvalOutcome="fldrHBSr6qoUfaKuZ",
           approvalFeedback="fldtI7SJI4gEohHD1", feedbackHistory="fldOzsq68lhfprKJu")
 REC_RE = re.compile(r"rec[A-Za-z0-9]{14}")
-CHANGE_RE = re.compile(r"^RECORD CHANGE:\s*(?P<tenancy>rec[A-Za-z0-9]{14})\s+(?P<label>Payment Status|Due Day|Set-off)\s*=\s*"
-                       r"(?P<value>[^\n]+?)\s*$", re.M)
+# The subject of a change is a tenancy, or for Onboard the agreement's Gmail message id (16 hex characters).
+CHANGE_RE = re.compile(r"^RECORD CHANGE:\s*(?P<tenancy>rec[A-Za-z0-9]{14}|[0-9a-f]{12,24})\s+"
+                       r"(?P<label>Payment Status|Due Day|Set-off|Onboard|Rent change)\s*=\s*(?P<value>[^\n]+?)\s*$", re.M)
 # Kept identical to scripts/agent-dispatch.py (tests/tenancy-record.test.js reads both). `block --kind KEVIN --steps`
 # puts agent-written steps ON TOP of an approved card's Agent Output and keeps the approval (review round 3,
 # 9 Oct 2026): only the original below the LAST divider is what Kevin approved.
@@ -329,6 +353,391 @@ def cmd_set_off(a):
     return out
 
 
+# ─── move-in and rent change ─────────────────────────────────────────
+T_UNITS = "tblM3mZCR5kiEdWMj"
+UNIT_NAME = "fldr8sliyu8h2jw9t"         # Rental Units: Rental Unit (the primary field, "Unit 1 – 18 Example Road")
+UNIT_REF = rc.TY["unitRef"]             # Tenancies: Unit Reference (lookup of that name)
+TEN = {"name": "fldxBKW7QnujSDWqA", "status": "fldAXzP9SGIHiAhrv", "payType": "fldZbrk8Xw5Dcwxhi",
+       "unit": "fldeLsZYqbKS77S2V", "email": "fldybEduFY3DWWTfT", "dueDay": "fldWjCUbAOQmTKfFP",
+       "agreement": "fldCqe5vCXSPDbGev"}
+TY_IN = {"customers": rc.TY["tenants"], "unit": "fld7cjLLEHKAx49OK", "frequency": "fld5O24mC8vOezjXK",
+         "dueDay": DUE_DAY, "deposit": "fldVMMm4Cs1JaT6b9", "metrics": "fldtuYDCmzfO7EB8a",
+         "fixedCost": "fldah9Aw21NniH2z7", "maintenance": "fldx64wdvjgI1xfi7", "cashflow": "fldoJHQv6KJCb8fNE",
+         "tenantsCopy": "fld82PCRs75UeYfSA", "start": rc.TY["start"], "end": rc.TY["end"],
+         "rent": rc.TY["rent"], "initialDue": "fldlZKHKwmEUl7YPm", "nextDue": "fldXwCxcyiBDD6qQN",
+         "billingYear": "fldhnwX4fCmr0jU71", "payStatus": PAY_STATUS, "docLinks": "fldaJGnXuCOLTqAs1",
+         "agreementUrl": "fldolJbKTPDSF9RwU"}
+# The links a unit carries on each of its tenancies (the 5 Oct 2026 rent-change recipe): copied, never invented.
+UNIT_LINKS = ("metrics", "fixedCost", "maintenance", "cashflow")
+TX_TENANCY, TX_DATE = rc.TX["tenancy"], rc.TX["date"]
+PAY_TYPES = ("Universal Credit", "Working", "Agent-Managed")
+EMAIL_RE = re.compile(r"[\w.+'-]+@[\w-]+(?:\.[\w-]+)+")
+AGREEMENT_LINE_RE = re.compile(r"^(AGREEMENT (?:NAME|RENT|START|HOUSE)):[ \t]*(.*?)[ \t]*$", re.M)
+
+
+def _rsc():
+    import rent_signed_check
+    return rent_signed_check
+
+
+def agreement_of(task):
+    """(Gmail id, agreement) for a TENANCY RECORD task the rent check raised: the agreement as the rent check read it
+    (its cache, keyed by the task's own Gmail id), refused unless the task's AGREEMENT lines say exactly the same."""
+    rsc = _rsc()
+    f = task.get("fields") or {}
+    desc = str(f.get(TK["description"]) or "")
+    keys = set(re.findall(re.escape(rsc.KEY_MARK) + r"(\S+)", f"{f.get(TK['notes']) or ''}\n{desc}"))
+    if not str(f.get(TK["name"]) or "").startswith(rsc.PREFIX) or len(keys) != 1:
+        raise Refused(f"task {task['id']} is not a TENANCY RECORD task the rent check raised (its name and one "
+                      f"'{rsc.KEY_MARK.strip()}' line)")
+    mail = keys.pop()
+    a = rsc.read_cache(rsc.CACHE).get(mail)
+    if not a:
+        raise Refused(f"the rent check has no reading of agreement {mail} (its cache {rsc.CACHE}); run the rent check")
+    if a.get("rent") is None or not a.get("start") or not a.get("name") or not a.get("house"):
+        raise Refused("the rent check could not read this agreement's rent, start date, tenant or house: it is Kevin's, "
+                      "put it on a card with what the PDF says")
+    if rsc.stale(a):
+        raise Refused(f"the rent check's reading of agreement {mail} is from an older reader: run the rent check, "
+                      "which reads it again")
+    want = {"AGREEMENT NAME": str(a["name"]), "AGREEMENT RENT": f"{float(a['rent']):.2f}",
+            "AGREEMENT START": str(a["start"]), "AGREEMENT HOUSE": str(a.get("house") or a.get("doc") or "")}
+    said = {}
+    for k, v in AGREEMENT_LINE_RE.findall(desc):
+        said.setdefault(k, set()).add(v)
+    for k, v in want.items():
+        got = said.get(k) or set()
+        if k == "AGREEMENT RENT":
+            same = len(got) == 1 and _money(next(iter(got))) is not None and abs(_money(next(iter(got))) - float(a["rent"])) < 0.005
+        else:
+            same = got == {v}
+        if not same:
+            shown = " / ".join(sorted(got)) or "missing"
+            raise Refused(f"task {task['id']}'s {k} line reads '{shown}' but the rent check read '{v}' off the agreement: "
+                          "the task and the agreement disagree, so nothing is written (a fresh reading needs a fresh task)")
+    return mail, a
+
+
+def _money(text):
+    try:
+        return float(str(text).replace("£", "").replace(",", "").strip())
+    except ValueError:
+        return None
+
+
+def first_due(start, due_day):
+    """The first due date on or after the start."""
+    d = rc.due_on(start.year, start.month, due_day)
+    return d if d >= start else rc.next_due(d, due_day)
+
+
+def next_due_from(start, due_day, today):
+    """(the first due date, the next due date on or after today)."""
+    due = nxt = first_due(start, due_day)
+    while nxt < today:
+        nxt = rc.next_due(nxt, due_day)
+    return due, nxt
+
+
+def read_records():
+    """(tenancies in rent_signed_check.on_record's shape, {tenant id: (name, email)}): a fresh read of both tables.
+    Zero rows from either is a broken read, never an empty business."""
+    tys = []
+    for t in rc.fetch_all(rc.T_TENANCIES, {"fields[]": [TY_IN["start"], TY_IN["rent"], TY_IN["customers"], UNIT_REF,
+                                                        TY_IN["end"], TY_IN["unit"]]}):
+        f = t.get("fields") or {}
+        tys.append({"id": t["id"], "fields": {"start": f.get(TY_IN["start"]), "rent": f.get(TY_IN["rent"]),
+                                              "tenants": f.get(TY_IN["customers"]) or [], "unit": f.get(UNIT_REF) or [],
+                                              "unitIds": f.get(TY_IN["unit"]) or [], "end": f.get(TY_IN["end"])}})
+    people = {}
+    for t in rc.fetch_all(rc.T_TENANTS, {"fields[]": [TEN["name"], TEN["email"]]}):
+        f = t.get("fields") or {}
+        people[t["id"]] = (str(f.get(TEN["name"]) or ""), str(f.get(TEN["email"]) or ""))
+    if not tys or not people:
+        raise RuntimeError(f"control failed: read {len(tys)} tenancies and {len(people)} tenants; the read is broken")
+    return tys, people
+
+
+def still_unrecorded(mail, ag, tys, people, today):
+    rec = _rsc().on_record(ag, tys, {k: v[0] for k, v in people.items()}, today)
+    if rec:
+        raise Refused(f"agreement {mail} is on record already: tenancy {rec[0]}"
+                      + (" carries it as a renewal at the same rent" if rec[1] else " starts with it")
+                      + "; nothing is created twice")
+
+
+def live_on_unit(unit_id, tys, today):
+    out = []
+    for t in tys:
+        f = t["fields"]
+        end = rc.parse_day(f.get("end"))
+        if unit_id in (f.get("unitIds") or []) and (end is None or end >= today):
+            out.append(t["id"])
+    return out
+
+
+def copy_unit_links(unit_id):
+    """The unit-level links from the newest tenancy on this unit, so a new tenancy reports where its unit does."""
+    rows = [t for t in rc.fetch_all(rc.T_TENANCIES, {"fields[]": [TY_IN["unit"], TY_IN["start"]] + [TY_IN[k] for k in UNIT_LINKS]})
+            if unit_id in ((t.get("fields") or {}).get(TY_IN["unit"]) or [])]
+    rows.sort(key=lambda t: str((t.get("fields") or {}).get(TY_IN["start"]) or ""))
+    f = (rows[-1].get("fields") or {}) if rows else {}
+    return {TY_IN[k]: f[TY_IN[k]] for k in UNIT_LINKS if f.get(TY_IN[k])}
+
+
+def billing_year(start):
+    """({Billing Year: year} or {}, what to say). The year is written only when it is already a choice: no typecast,
+    so a missing year is said, never created quietly (independent review, 9 Oct 2026)."""
+    choices = rc.field_choices(rc.T_TENANCIES, TY_IN["billingYear"])
+    if str(start.year) in choices:
+        return {TY_IN["billingYear"]: str(start.year)}, ""
+    return {}, (f"Billing Year left blank: {start.year} is not one of its choices ({', '.join(c for c in choices if c)}); "
+                "set it once the choice exists")
+
+
+def create(table, fields):
+    return rc.api("POST", table, {"records": [{"fields": fields}]})["records"][0]["id"]
+
+
+def comment_or_say(out, tenancy_id, text):
+    try:
+        post_comment(tenancy_id, text)
+    except Exception as e:                                   # noqa: BLE001 — the write stands; said loudly
+        out.setdefault("commentProblems", []).append(f"{tenancy_id}: {str(e)[:150]}")
+
+
+def ledger_rows():
+    """Every row of the ledger, in order. A torn line is skipped."""
+    out = []
+    try:
+        with open(LEDGER) as fh:
+            for ln in fh:
+                try:
+                    row = json.loads(ln) if ln.strip() else None
+                except ValueError:
+                    continue
+                if isinstance(row, dict):
+                    out.append(row)
+    except FileNotFoundError:
+        pass
+    return out
+
+
+def onboard_value(unit, due_day, kind, email, replace=None):
+    """The value of the Onboard line these arguments must match, word for word."""
+    return f"unit {unit}, due {due_day}, {kind}, {email}" + (f", replace {replace}" if replace else "")
+
+
+def cmd_onboard(a):
+    rsc = _rsc()
+    if a.type not in PAY_TYPES:
+        raise Refused(f"--type is one of {', '.join(PAY_TYPES)}")
+    if not (1 <= a.due_day <= 31):
+        raise Refused(f"a due day is 1 to 31, not {a.due_day}")
+    email = str(a.email or "").strip()
+    if not EMAIL_RE.fullmatch(email):
+        raise Refused(f"--email {email!r} is not an email address")
+    if not REC_RE.fullmatch(a.unit or ""):
+        raise Refused(f"--unit {a.unit!r} is not a record id")
+    if a.replace and not REC_RE.fullmatch(a.replace):
+        raise Refused(f"--replace {a.replace!r} is not a record id")
+    task = load_task(a.task)
+    mail, ag = agreement_of(task)
+    why = change_problem(task, mail, "Onboard", onboard_value(a.unit, a.due_day, a.type, email, a.replace))
+    if why:
+        raise Refused(why)
+    if ag.get("several"):
+        raise Refused(f"the agreement names more than one person ({ag.get('name') or ', '.join(ag.get('signers') or [])}): "
+                      "a joint tenancy or a guarantor is never onboarded as one person; it is Kevin's, on a card")
+    start = date.fromisoformat(ag["start"])
+    unit = _one(T_UNITS, a.unit)
+    if not unit:
+        raise Refused(f"{a.unit} is not a rental unit")
+    unit_name = str((unit.get("fields") or {}).get(UNIT_NAME) or "")     # "Unit 1 – 18 Example Road"
+    if not ag.get("house") or not rsc.same_house(ag["house"], unit_name):
+        raise Refused(f"unit {a.unit} ({unit_name or 'no name'}) is not at {ag.get('house') or 'the agreement house'}")
+    today = rc.today_london()
+    rows = ledger_rows()
+    done = [r for r in rows if r.get("kind") == "onboard" and r.get("mail") == mail]
+    if done:
+        raise Refused(f"agreement {mail} was onboarded already: tenant {done[-1].get('tenantId')}, tenancy "
+                      f"{done[-1].get('tenancy')}")
+    tys, people = read_records()
+    still_unrecorded(mail, ag, tys, people, today)
+    # A tenant this door created for THIS agreement whose tenancy then failed is the same person: reused, never
+    # refused as "already on record" and never created twice (independent review, 9 Oct 2026).
+    made = [r.get("tenantId") for r in rows if r.get("kind") == "tenant-created" and r.get("mail") == mail]
+    reuse = next((t for t in reversed(made) if t in people), None)
+    for tid, (tname, temail) in people.items():
+        if tid == reuse:
+            continue
+        if (temail and temail.lower() == email.lower()) or rsc.same_person(tname, ag["name"]):
+            raise Refused(f"tenant {tid} ({tname}) is already on record: a returning tenant or a rent change is not "
+                          "an onboarding (rent-change, or a card for Kevin)")
+    others = live_on_unit(a.unit, tys, today)
+    if others:
+        if a.replace not in others or len(others) > 1:
+            raise Refused(f"unit {a.unit} has live tenancy {', '.join(others)}: the Onboard line Kevin approves names it "
+                          "with ', replace <that tenancy>'")
+    elif a.replace:
+        raise Refused(f"--replace {a.replace} is not a live tenancy on unit {a.unit}")
+    name = " ".join(w[:1].upper() + w[1:] for w in ag["name"].split())
+    due, nxt = next_due_from(start, a.due_day, today)
+    year, year_note = billing_year(start)
+    plan = {"tenant": name, "unit": a.unit, "unitName": unit_name, "start": ag["start"], "rent": ag["rent"],
+            "dueDay": a.due_day, "status": "CFV", "replace": a.replace or None,
+            "reuseTenant": reuse, **({"billingYear": year_note} if year_note else {})}
+    if a.dry_run:
+        return dict(plan, dryRun=True)
+    out = dict(plan, task=task["id"], mail=mail)
+    if reuse:
+        tenant_id = reuse
+    else:
+        tf = {TEN["name"]: name, TEN["status"]: "Active", TEN["payType"]: a.type, TEN["unit"]: [a.unit],
+              TEN["email"]: email, TEN["dueDay"]: str(a.due_day), TEN["agreement"]: True}
+        tenant_id = create(rc.T_TENANTS, tf)
+        ledger({"kind": "tenant-created", "mail": mail, "tenantId": tenant_id, "task": task["id"]})
+    out["tenantId"] = tenant_id
+    yf = dict({TY_IN["customers"]: [tenant_id], TY_IN["unit"]: [a.unit], TY_IN["start"]: ag["start"],
+               TY_IN["frequency"]: "Monthly", TY_IN["rent"]: ag["rent"], TY_IN["dueDay"]: str(a.due_day),
+               TY_IN["initialDue"]: due.isoformat(), TY_IN["nextDue"]: nxt.isoformat(), TY_IN["payStatus"]: "CFV",
+               TY_IN["deposit"]: 0, TY_IN["agreementUrl"]: f"https://mail.google.com/mail/u/0/#all/{mail}",
+               TY_IN["docLinks"]: f"AST signed {ag.get('signed')} (Adobe '{ag.get('subject')}'): £{ag['rent']:.2f} a month "
+                                  f"from {start.strftime('%-d %B %Y')}. Onboarded by the Cash Flow Voids agent from task {task['id']}."},
+              **copy_unit_links(a.unit), **year)
+    tenancy_id = create(rc.T_TENANCIES, yf)
+    out["tenancy"] = tenancy_id
+    back = load_tenancy(tenancy_id).get("fields") or {}
+    if (back.get(TY_IN["start"]), float(back.get(TY_IN["rent"]) or 0), rc.sel(back.get(PAY_STATUS))) != (ag["start"], float(ag["rent"]), "CFV"):
+        ledger(dict(out, kind="unlanded"))
+        raise RuntimeError(f"the new tenancy {tenancy_id} does not read back as written: {back}")
+    if a.replace:
+        rc.api("PATCH", f"{rc.T_TENANCIES}/{a.replace}", {"fields": {TY_IN["unit"]: []}})
+        old = load_tenancy(a.replace).get("fields") or {}
+        for t in old.get(TY_IN["customers"]) or []:
+            tt = _one(rc.T_TENANTS, t, [TEN["unit"]])
+            if tt and a.unit in ((tt.get("fields") or {}).get(TEN["unit"]) or []):
+                rc.api("PATCH", f"{rc.T_TENANTS}/{t}", {"fields": {TEN["unit"]: []}})
+        comment_or_say(out, a.replace, f"{stamp()}: taken off unit {unit_name} and left live, unlinked, on the card Kevin "
+                                       f"approved (task {task['id']}). {name}'s tenancy {tenancy_id} replaces it on the unit.")
+    ledger(dict(out, kind="onboard"))
+    comment_or_say(out, tenancy_id, f"{stamp()}: onboarded from the signed agreement ({ag.get('signed')}): £{ag['rent']:.2f} a "
+                                    f"month from {start.strftime('%-d %b %Y')}, due on the {a.due_day}, starts as a cash flow "
+                                    f"void. By the Cash Flow Voids agent on the card Kevin approved, task {task['id']}. "
+                                    f"Why: {a.why}")
+    return out
+
+
+def cmd_rent_change(a):
+    rsc = _rsc()
+    task = load_task(a.task)
+    mail, ag = agreement_of(task)
+    why = change_problem(task, a.tenancy, "Rent change", mail)
+    if why:
+        raise Refused(why)
+    start = date.fromisoformat(ag["start"])
+    old = load_tenancy(a.tenancy)
+    f = old.get("fields") or {}
+    today = rc.today_london()
+    tys, people = read_records()
+    # A re-run, or a rent change recorded another way since the task was raised, writes nothing twice.
+    mine = set(f.get(TY_IN["customers"]) or [])
+    for t in tys:
+        g = t["fields"]
+        if (t["id"] != a.tenancy and mine & set(g["tenants"]) and str(g.get("start") or "")[:10] == ag["start"]
+                and abs(float(g.get("rent") or 0) - float(ag["rent"])) <= 0.01):
+            left = "" if f.get(TY_IN["end"]) else f"; tenancy {a.tenancy} still has no end date, so end it on a card"
+            raise Refused(f"tenancy {t['id']} already records this agreement (the same tenant, start and rent): nothing "
+                          f"is created twice{left}")
+    still_unrecorded(mail, ag, tys, people, today)
+    if ended(old) or f.get(TY_IN["end"]):
+        raise Refused(f"tenancy {a.tenancy} already has an end date; a rent change starts from a live tenancy")
+    status = rc.sel(f.get(PAY_STATUS))
+    if status not in STATUSES:
+        raise Refused(f"tenancy {a.tenancy}'s Payment Status is '{status or 'blank'}', not one of {', '.join(STATUSES)}: "
+                      "the new tenancy keeps the old one's, so this is Kevin's, on a card")
+    old_start = rc.parse_day(f.get(TY_IN["start"]))
+    if not old_start or start <= old_start:
+        raise Refused(f"the agreement starts {start}, not after tenancy {a.tenancy} began ({old_start})")
+    if abs(float(f.get(TY_IN["rent"]) or 0) - float(ag["rent"])) <= 0.01:
+        raise Refused(f"tenancy {a.tenancy} already carries £{ag['rent']:.2f}: there is no rent change")
+    names = [people.get(t, ("", ""))[0] for t in f.get(TY_IN["customers"]) or []]
+    if not any(rsc.same_person(n, ag["name"]) for n in names):
+        raise Refused(f"tenancy {a.tenancy}'s tenant ({', '.join(n for n in names if n) or 'none'}) is not {ag['name']}")
+    units = f.get(UNIT_REF) or []
+    units = units if isinstance(units, list) else [units]
+    if not ag.get("house") or not any(rsc.same_house(ag["house"], u) for u in units):
+        raise Refused(f"tenancy {a.tenancy} ({', '.join(str(u) for u in units) or 'no unit'}) is not at "
+                      f"{ag.get('house') or 'the agreement house'}")
+    try:
+        due_day = int(rc.sel(f.get(TY_IN["dueDay"])))
+    except ValueError:
+        raise Refused(f"tenancy {a.tenancy} has no due day to carry over")
+    due, nxt = next_due_from(start, due_day, today)
+    year, year_note = billing_year(start)
+    plan = {"from": a.tenancy, "start": ag["start"], "rent": ag["rent"], "status": status,
+            "oldEnds": (start - timedelta(days=1)).isoformat(), **({"billingYear": year_note} if year_note else {})}
+    if a.dry_run:
+        return dict(plan, dryRun=True)
+    keep = ("customers", "unit", "frequency", "dueDay", "deposit", "tenantsCopy") + UNIT_LINKS
+    yf = {TY_IN[k]: f[TY_IN[k]] for k in keep if f.get(TY_IN[k]) not in (None, [], "")}
+    for k in ("frequency", "dueDay"):
+        if TY_IN[k] in yf:
+            yf[TY_IN[k]] = rc.sel(yf[TY_IN[k]])
+    yf.update({TY_IN["start"]: ag["start"], TY_IN["rent"]: ag["rent"], TY_IN["initialDue"]: due.isoformat(),
+               TY_IN["nextDue"]: nxt.isoformat(), TY_IN["payStatus"]: status,
+               TY_IN["agreementUrl"]: f"https://mail.google.com/mail/u/0/#all/{mail}",
+               TY_IN["docLinks"]: f"New AST signed {ag.get('signed')}: £{ag['rent']:.2f} a month from {start.strftime('%-d %B %Y')}. "
+                                  f"Replaces tenancy {a.tenancy}, ended the day before (rent change = new tenancy, Kevin 5 Oct 2026)."},
+              **year)
+    new_id = create(rc.T_TENANCIES, yf)
+    out = dict(plan, tenancy=new_id, task=task["id"], mail=mail, movedPayments=[], movedTasks=[])
+    back_new = load_tenancy(new_id).get("fields") or {}
+    if (back_new.get(TY_IN["start"]), rc.sel(back_new.get(PAY_STATUS))) != (ag["start"], status):
+        ledger(dict(out, kind="unlanded"))
+        raise RuntimeError(f"the new tenancy {new_id} does not read back as written (start {back_new.get(TY_IN['start'])}, "
+                           f"status {rc.sel(back_new.get(PAY_STATUS)) or 'blank'}); tenancy {a.tenancy} was NOT ended")
+    # The old one ends the day before. If that fails the new tenancy stands and is never created again (a re-run
+    # refuses): said loudly, with what is left to do.
+    try:
+        rc.api("PATCH", f"{rc.T_TENANCIES}/{a.tenancy}", {"fields": {TY_IN["end"]: plan["oldEnds"], PAY_STATUS: None}})
+        back_old = load_tenancy(a.tenancy).get("fields") or {}
+        if back_old.get(TY_IN["end"]) != plan["oldEnds"]:
+            raise RuntimeError(f"it reads {back_old.get(TY_IN['end'])!r} after writing {plan['oldEnds']}")
+    except Exception as e:                                   # noqa: BLE001 — said loudly, never retried here
+        ledger(dict(out, kind="partial", problem=f"ending {a.tenancy} failed: {str(e)[:200]}"))
+        raise RuntimeError(f"new tenancy {new_id} was created, but ending tenancy {a.tenancy} on {plan['oldEnds']} "
+                           f"failed: {str(e)[:200]}. Nothing is created twice (a re-run refuses): end {a.tenancy} on "
+                           f"{plan['oldEnds']} and move its payments and open tasks to {new_id}, on a card for Kevin")
+    # The payments dated from the new start, and the open tasks, follow the tenancy (the 5 Oct 2026 recipe).
+    try:
+        for tx in rc.fetch_all(rc.T_TX, {"fields[]": [TX_TENANCY, TX_DATE],
+                                         "filterByFormula": f"IS_AFTER({{**Date}}, '{(start - timedelta(days=1)).isoformat()}')"}):
+            links = list((tx.get("fields") or {}).get(TX_TENANCY) or [])
+            if a.tenancy in links:
+                rc.api("PATCH", f"{rc.T_TX}/{tx['id']}", {"fields": {TX_TENANCY: [new_id if x == a.tenancy else x for x in links]}})
+                out["movedPayments"].append(tx["id"])
+        for t in rc.fetch_all(rc.T_TASKS, {"fields[]": [TK["tenancies"], TK["status"]],
+                                           "filterByFormula": "AND({Status}!='Completed', {Status}!='Cancelled')"}):
+            links = list((t.get("fields") or {}).get(TK["tenancies"]) or [])
+            if a.tenancy in links:
+                rc.api("PATCH", f"{rc.T_TASKS}/{t['id']}", {"fields": {TK["tenancies"]: [new_id if x == a.tenancy else x for x in links]}})
+                out["movedTasks"].append(t["id"])
+    except Exception as e:                                   # noqa: BLE001 — said loudly with what moved
+        ledger(dict(out, kind="partial", problem=f"moving payments or tasks failed: {str(e)[:200]}"))
+        raise RuntimeError(f"new tenancy {new_id} created and {a.tenancy} ended, but moving its payments and open tasks "
+                           f"failed after {len(out['movedPayments'])} payment(s) and {len(out['movedTasks'])} task(s): "
+                           f"{str(e)[:200]}")
+    ledger(dict(out, kind="rent-change"))
+    comment_or_say(out, a.tenancy, f"{stamp()}: ended {plan['oldEnds']}: the tenant signed a new agreement at £{ag['rent']:.2f} "
+                                   f"from {start.strftime('%-d %b %Y')}; new tenancy {new_id}. Tenant and unit unchanged. "
+                                   f"By the Cash Flow Voids agent on the card Kevin approved, task {task['id']}.")
+    comment_or_say(out, new_id, f"{stamp()}: created from the signed agreement ({ag.get('signed')}): £{ag['rent']:.2f} a month from "
+                                f"{start.strftime('%-d %b %Y')}, Payment Status {status} as before. Replaces {a.tenancy}. Moved "
+                                f"{len(out['movedPayments'])} payment(s) and {len(out['movedTasks'])} open task(s). Why: {a.why}")
+    return out
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     sub = ap.add_subparsers(dest="cmd", required=True)
@@ -358,13 +767,27 @@ def main(argv=None):
     so.add_argument("--task", required=True)
     so.add_argument("--why", required=True)
     so.add_argument("--dry-run", action="store_true")
+    ob = sub.add_parser("onboard")
+    ob.add_argument("--task", required=True)
+    ob.add_argument("--unit", required=True)
+    ob.add_argument("--due-day", dest="due_day", type=int, required=True)
+    ob.add_argument("--type", required=True)
+    ob.add_argument("--email", required=True)
+    ob.add_argument("--replace")
+    ob.add_argument("--why", required=True)
+    ob.add_argument("--dry-run", action="store_true")
+    rcg = sub.add_parser("rent-change")
+    rcg.add_argument("tenancy")
+    rcg.add_argument("--task", required=True)
+    rcg.add_argument("--why", required=True)
+    rcg.add_argument("--dry-run", action="store_true")
     a = ap.parse_args(argv)
     if getattr(a, "why", None) is not None and len(" ".join(a.why.split())) < 10:
         print(json.dumps({"refused": "--why needs the reason in a sentence"}))
         return 2
     try:
         out = {"show": cmd_show, "comment": cmd_comment, "status": cmd_status, "due-day": cmd_due_day,
-               "set-off": cmd_set_off}[a.cmd](a)
+               "set-off": cmd_set_off, "onboard": cmd_onboard, "rent-change": cmd_rent_change}[a.cmd](a)
     except Refused as e:
         print(json.dumps({"refused": str(e)}))
         return 2
@@ -372,7 +795,7 @@ def main(argv=None):
         print(json.dumps({"failed": str(e)[:400]}))
         return 1
     print(json.dumps(out, indent=2))
-    return 1 if out.get("commentProblem") else 0
+    return 1 if out.get("commentProblem") or out.get("commentProblems") else 0
 
 
 if __name__ == "__main__":
