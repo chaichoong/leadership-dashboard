@@ -80,6 +80,11 @@ test.describe('AI Team section', () => {
     expect(blocked.head).toBe('26 blocked');
     expect(blocked.sub).toBe('Biggest: 17 waiting on a code fix · 9 need you');
     expect(blocked.cls).toContain('text-red');          // the sweep's own red
+    // Red names its own cause. This fixture has no stale block and nothing closed while blocked,
+    // so the card must not claim either (review finding, 9 Oct 2026).
+    const detail = await page.evaluate(() => document.getElementById('aiBlockedCard').querySelector('.kpi-card-detail').textContent);
+    expect(detail).not.toMatch(/3 or more days old|closed while blocked/);
+    expect(detail).toContain('Robots blocked on 26 tasks.');
 
     const rework = await card(page, 'aiReworkCard');
     expect(rework.head).toBe('41%');

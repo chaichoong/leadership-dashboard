@@ -1656,13 +1656,21 @@
             const ranked = Object.entries(byKind).map(([k, n]) => [k, aiNum(n)]).sort((a, b) => b[1] - a[1]);
             const needYou = ['KEVIN', 'SIGN-IN', 'SITE'].reduce((t, k) => t + (Number(byKind[k]) || 0), 0);
             const red = blockers.fields[ESTATE_FIELDS.status] === 'Failed';
+            // Red names its own cause: the sweep also goes red on a read error (review, 9 Oct 2026).
+            const staleN = Number(bpay.stale) || 0;
+            const closedN = Array.isArray(bpay.closedWhileBlocked) ? bpay.closedWhileBlocked.length : 0;
+            const why = [];
+            if (staleN) why.push(`${staleN} block${staleN === 1 ? ' is' : 's are'} 3 or more days old`);
+            if (closedN) why.push(`${closedN} task${closedN === 1 ? '' : 's'} closed while blocked`);
+            const redWhy = !red ? '' : why.length ? `Red: ${why.join(', ')}. `
+                : `Red: ${escHtml(blockers.fields[ESTATE_FIELDS.detail] || 'the sweep reported a problem')} `;
             cards.aiBlockedCard = aiTeamStale({
                 label: 'Bottleneck', value: `${total} blocked`,
                 sub: total === 0 || !ranked.length ? 'Nothing is blocked'
                     : `Biggest: ${ranked[0][1]} ${escHtml(AI_TEAM_WALLS[ranked[0][0]] || ranked[0][0])}${needYou ? ` · ${needYou} need you` : ''}`,
                 cls: total === 0 ? 'text-green' : red ? 'text-red' : 'text-amber',
                 detail: ranked.map(([k, n]) => `<div class="od-breakdown-row"><span>${escHtml(AI_TEAM_WALLS[k] || k)}</span><span>${n}</span></div>`).join('')
-                    + `<div style="color:var(--text-muted);font-size:var(--fs-xs);margin-top:6px">${red ? 'Red: a block is 3 days old or a task closed while blocked. ' : ''}Each one is listed on the Estate tab of the AI Agents page.</div>${updated(blockers)}`,
+                    + `<div style="color:var(--text-muted);font-size:var(--fs-xs);margin-top:6px">${redWhy}Each one is listed on the Estate tab of the AI Agents page.</div>${updated(blockers)}`,
             }, blockers, bpay.sweptAt);
         }
         return cards;
