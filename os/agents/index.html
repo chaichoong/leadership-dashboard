@@ -2827,9 +2827,11 @@ function apvRenderAnsweredBar(){
                 <button class="apv-undo" type="button" data-apv-step-undo onclick="apvStepUndo('${esc(t.id)}')">Undo</button>
             </div>`;
         }).join('');
-        const line = document.getElementById('apvAnsweredLine');
-        if(line) line.outerHTML = apvAnsweredLineHtml();
     }
+    // The line follows the answered list on every call: the sweep takes a card only after its Undo
+    // window, so the rows above can be unchanged while the line must lose it (review, 9 Oct 2026).
+    const line = document.getElementById('apvAnsweredLine');
+    if(line){ const html = apvAnsweredLineHtml(); if(line.outerHTML !== html) line.outerHTML = html; }
     if(open.length && !_apvAnsweredTick) _apvAnsweredTick = setInterval(apvRenderAnsweredBar, 1000);
     if(!open.length && _apvAnsweredTick){ clearInterval(_apvAnsweredTick); _apvAnsweredTick = null; }
 }
@@ -2865,20 +2867,21 @@ async function apvStepUndo(taskId){
             return 'late';
         }
         const payload = {};
-        payload[TF.approvalFeedback] = lines.filter(l => !l.startsWith(u.lead)).join('\n').replace(/\s+$/, '') || null;
+        // Every done or can't line comes out: one left behind (a second tab) would hide the card again.
+        payload[TF.approvalFeedback] = lines.filter(l => !/^KEVIN STEP (DONE|CANT) \[/.test(l)).join('\n').replace(/\s+$/, '') || null;
         // His wrong answer also comes out of the durable copy the agents read.
         const hist = String(gf(live, TF.feedbackHistory) || '');
         const at = hist.lastIndexOf(u.hist);
         if(at >= 0) payload[TF.feedbackHistory] = (hist.slice(0, at).replace(/\s+$/, '') + hist.slice(at + u.hist.length)).trim();
         await atUpdate(TASKS_TBL, taskId, payload);
+        // The move is made at once, before anything else is awaited: a refresh started later reads the
+        // record as it is now, and one started earlier is dropped (review, 9 Oct 2026).
         _apvQueueEpoch++;
         if(_approvalsState === 'loading') _approvalsState = 'ready';   // that read is dropped: draw the queue, not a spinner
-        try { await postTaskComment(taskId, 'Kevin took back his answer with Undo. The card is back in his queue.'); }
-        catch(e){ console.error('undo comment failed', e); }
         t.feedback = payload[TF.approvalFeedback] || '';
         if(TF.feedbackHistory in payload) t.feedbackHistory = payload[TF.feedbackHistory];
         allAnswered = allAnswered.filter(x => x.id !== taskId);
-        allApprovals.push(t);
+        allApprovals = allApprovals.filter(x => x.id !== taskId).concat([t]);
         allApprovals.sort((a,b)=>apvRank(b)-apvRank(a));
         _apvFocusId = taskId;
         renderApprovals();
@@ -2886,6 +2889,8 @@ async function apvStepUndo(taskId){
         if(box){ box.value = u.words; apvGrowNote(box); }
         apvScrollToFocus();
         postApprovalBadge();
+        try { await postTaskComment(taskId, 'Kevin took back his answer with Undo. The card is back in his queue.'); }
+        catch(e){ console.error('undo comment failed', e); }
         return 'undone';
     } catch(e){
         if(e.message === 'auth') return 'auth';

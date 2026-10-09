@@ -289,6 +289,17 @@ test.describe('Undo on an answered Your step card', () => {
     await expect(page.locator(`[data-apv-answered="${ID}"]`)).toBeVisible();
   });
 
+  test('when the sweep takes an answered card, its line goes at the next refresh (review, 9 Oct 2026)', async ({ page }) => {
+    const fx = withStep({ feedback: 'KEVIN STEP CANT [2026-10-07T11:00:00.000Z]: no account' });
+    await mockAgentsPage(page, fx);
+    await loadAgentsPage(page);
+    await page.click('#ptab-approvals');
+    await expect(page.locator('#apvAnsweredLine')).toHaveText('1 answered card going back to the agents at the next check (every half hour).');
+    fx.approvals.splice(fx.approvals.findIndex((r) => r.id === ID), 1);   // the sweep sent it back to its agent
+    await page.evaluate(() => window.apvSilentRefresh());
+    await expect(page.locator('#apvAnsweredLine')).toHaveText('');
+  });
+
   test('Undo after the robot has taken the answer says too late and writes nothing', async ({ page }) => {
     const fx = withStep();
     await mockAgentsPage(page, fx);

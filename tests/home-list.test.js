@@ -364,3 +364,19 @@ describe('robots stuck on Kevin', () => {
     expect(H.readBlockers({ fields: { Payload: '{bad', Detail: 'The sweep failed.' } }, now).note).toMatch(/left no list.*The sweep failed/);
   });
 });
+
+// Kevin, 9 Oct 2026: "It needs to disappear once I've answered it." A Your step card he has answered
+// stays at Status Approval until the half-hourly sweep, but the queue read leaves it out, and js/home.js
+// flags it `answered`. Home then never lists it as waiting for him.
+describe('an answered Your step card is not waiting on him', () => {
+  const H2 = H;
+  it('is out of the queue cards and the Only you list, and says where it is going', () => {
+    const t = { id: 'recAnsweredAaaaaa', name: 'Pay the example insurer', inQueue: true, answered: true, due: '2026-10-09',
+      holders: [H2.KEVIN_TEAM_MEMBER], approverEmail: '', deferred: '' };
+    const live = Object.assign({}, t, { id: 'recLiveAaaaaaaaaa', answered: false });
+    expect(H2.queueCards([t, live], '2026-10-09').map(x => x.id)).toEqual(['recLiveAaaaaaaaaa']);
+    expect(H2.selectOnlyYou([t, live], '2026-10-09').map(x => x.id)).toEqual(['recLiveAaaaaaaaaa']);
+    expect(H2.deadlineHolder(t)).toBe('answered, going back to its agent');
+    expect(H2.deadlineHolder(live)).toBe('waiting in your approval queue');
+  });
+});
