@@ -154,8 +154,6 @@ a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}
 .apv-step{border:1px solid var(--border-default);border-left:4px solid var(--accent-gold);border-radius:var(--radius-md);background:var(--bg-surface-2);padding:10px 14px;margin:6px 0 8px;font-size:var(--fs-sm)}
 .apv-step-head{font-weight:var(--fw-semibold);color:var(--text-primary);margin-bottom:4px}
 .apv-step-text{color:var(--text-primary);white-space:pre-wrap;word-break:break-word;margin-bottom:6px}
-.apv-step-said{border:1px solid var(--border-default);border-radius:var(--radius-md);background:var(--success-bg);color:var(--text-primary);padding:8px 12px;font-size:var(--fs-sm);word-break:break-word}
-.apv-step-said.apv-step-cant{background:var(--warning-bg)}
 .apv-signin{display:flex;gap:10px;align-items:center;flex-wrap:wrap;justify-content:space-between;border:1px solid var(--border-default);border-radius:var(--radius-md);background:var(--accent-soft);padding:8px 12px;margin:6px 0 8px;font-size:var(--fs-sm)}
 /* Robot sign-ins panel (25 Sep 2026): every login the robots use, above the approval queue. */
 .rs-summary{display:flex;gap:10px;align-items:center;flex-wrap:wrap;justify-content:space-between;font-size:var(--fs-sm);color:var(--text-primary)}
@@ -227,6 +225,15 @@ a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}
 .apv-state.saved{background:var(--success-bg);color:var(--success)}
 .apv-state.failed{background:var(--danger-bg);color:var(--danger)}
 .apv-state .apv-undo{margin-left:auto;font-size:var(--fs-xs);background:var(--bg-surface);border:1px solid var(--border-default);border-radius:var(--radius-full);padding:4px 12px;cursor:pointer;color:var(--text-primary)}
+/* Answered Your step cards (Kevin, 9 Oct 2026): the card leaves the queue at once and its Undo
+   sits here, at the foot of the window wherever he has scrolled, for two minutes. */
+.apv-answered-bar{position:fixed;left:50%;bottom:76px;transform:translateX(-50%);z-index:290;display:flex;flex-direction:column;gap:6px;width:min(560px,calc(100vw - 32px))}
+.apv-answered-bar:empty{display:none}
+.apv-answered-row{display:flex;align-items:center;gap:10px;background:var(--bg-sidebar);color:var(--text-inverse);border-radius:var(--radius-md);padding:10px 14px;font-size:var(--fs-sm);box-shadow:var(--shadow-md)}
+.apv-answered-row .apv-answered-text{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.apv-answered-row .apv-answered-left{font-size:var(--fs-xs);opacity:.75;font-variant-numeric:tabular-nums}
+.apv-answered-row .apv-undo{font-size:var(--fs-xs);background:var(--bg-surface);border:1px solid var(--border-default);border-radius:var(--radius-full);padding:4px 12px;cursor:pointer;color:var(--text-primary);font-weight:var(--fw-semibold)}
+.apv-answered-line{font-size:var(--fs-xs);color:var(--text-muted);margin:0 0 10px}
 .apv-card.apv-done{transition:opacity .25s ease,max-height .3s ease,margin .3s ease,padding .3s ease;overflow:hidden}
 .apv-card.apv-done.apv-gone{opacity:0;max-height:0!important;margin-bottom:0;padding-top:0;padding-bottom:0;border-width:0}
 .apv-kind{font-size:var(--fs-xs);color:var(--text-secondary)}
@@ -560,6 +567,7 @@ a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}
 </div>
 
 <div class="loading" id="loader">Loading...</div>
+<div class="apv-answered-bar" id="apvAnsweredBar" aria-live="polite"></div>
 <div class="toast" id="toast"></div>
 
 <!-- Model IDs live once in js/ai-models.js. This page cannot load js/config.js
@@ -797,6 +805,7 @@ const AGENT_VIEWS = ['dashboard','approvals','checks','estate','built'];
 const AGENT_VIEW_ALIASES = { 'ceo-brief': 'dashboard', 'status': 'estate', 'jobs': 'estate', 'track-record': 'built' };
 let _agentsView = 'dashboard';  // which page tab is showing
 let allApprovals = [];          // loop-raised tasks at Status Approval
+let allAnswered = [];           // Your step cards he has answered, waiting for the half-hourly sweep
 let _approvalsState = 'idle';   // idle | loading | ready | 'error: <message>'
 let allDeferred = [];           // knocked back to a date — same queue, hidden until then
 let _deferredState = 'idle';    // idle | loading | ready | 'error: <message>'
@@ -1082,7 +1091,7 @@ async function loadApprovals(){
         _apvReason = {};
         _apvSelected.clear();
         _apvLastQueueLoad = Date.now();
-        allApprovals = mine.map(r=>({
+        const rows = mine.map(r=>({
             id: r.id,
             name: gf(r,TF.name)||'(Untitled)',
             taskType: selName(gf(r,TF.taskType)),
@@ -1122,6 +1131,11 @@ async function loadApprovals(){
                 gf(r,TF.slackBaseline) || gf(r,TF.lmt) || r.createdTime,
                 gf(r,TF.deferredUntil)),
         }));
+        // An answered Your step card is not waiting on him (Kevin, 9 Oct 2026: "It needs to disappear
+        // once I've answered it"). It stays at Status Approval until the half-hourly sweep hands it to
+        // its agent, so it is kept OUT of the queue and its counts, and said in one line instead.
+        allAnswered = rows.filter(t => apvYourStep(t) && apvStepDoneSaid(t.feedback));
+        allApprovals = rows.filter(t => !allAnswered.includes(t));
         // Most important first (Kevin's ruling, 25 Aug 2026): tier 1 leads,
         // then the Priority field (which the Task Manager's 9am/1pm/5pm
         // board pass reviews and corrects), then longest waiting. The
@@ -1556,7 +1570,8 @@ function renderApprovals(){
     // Rendered FIRST and in BOTH branches. An empty queue whose items are all
     // knocked back must never read as "nothing is waiting" with no sign of
     // where they went.
-    const laterHtml = apvDeferredLaneHtml();
+    const laterHtml = apvDeferredLaneHtml() + apvAnsweredLineHtml();
+    apvRenderAnsweredBar();
     if(!allApprovals.length){
         _apvAgentFilter = ''; _apvTier1Only = false;
         body.innerHTML = laterHtml + `<div class="empty-state"><p>Nothing is waiting for your approval${allDeferred.length?' right now':''}.</p></div>`;
@@ -2024,9 +2039,12 @@ async function apvBulkDeferTo(until){
 let _apvSignInClickedAt = 0, _apvLastQueueLoad = 0;
 const APV_SIGNIN_WATCH_MS = 20 * 60 * 1000;
 function apvQueueSignature(){
-    return allApprovals.map(t => t.id + ':' + (apvSignInWait(t) ? 'w' : 'd')).join(',');
+    return allApprovals.map(t => t.id + ':' + (apvSignInWait(t) ? 'w' : 'd')).join(',')
+        + '|' + allAnswered.map(t => t.id).join(',');
 }
 function apvSignInsWaiting(){ return allApprovals.some(t => apvSignInWait(t)); }
+// An answered card waits for the sweep: re-read on the same clock, so its line goes when it does.
+function apvWatchingQueue(){ return apvWatchingSignIns() || allAnswered.length > 0; }
 // A Your step card is approved work waiting on Kevin's own step: a SIGN-IN NEEDED line inside the
 // agent's approved work below its step is history, never a sign-in wait (review, 7 Oct 2026).
 function apvSignInWait(t){ return apvYourStep(t) ? null : apvSignInNeeded(t.agentOutput); }
@@ -2063,15 +2081,15 @@ document.addEventListener('click', (ev) => {
 function signinsWatching(){ return (Date.now() - _apvSignInClickedAt) < APV_SIGNIN_WATCH_MS; }
 setInterval(() => {
     if(_agentsView !== 'approvals' || document.visibilityState === 'hidden') return;
-    if(apvWatchingSignIns()) apvSilentRefresh().catch(() => {});
+    if(apvWatchingQueue()) apvSilentRefresh().catch(() => {});
     if(signinsWatching() && _estateState !== 'loading') loadEstateStatus();
 }, 30000);
 document.addEventListener('visibilitychange', () => {
     if(document.visibilityState !== 'visible') return;
-    if(Date.now() - _apvLastQueueLoad > 30000 && apvWatchingSignIns()) apvSilentRefresh().catch(() => {});
+    if(Date.now() - _apvLastQueueLoad > 30000 && apvWatchingQueue()) apvSilentRefresh().catch(() => {});
 });
 window.addEventListener('focus', () => {
-    if(Date.now() - _apvLastQueueLoad > 30000 && apvWatchingSignIns()) apvSilentRefresh().catch(() => {});
+    if(Date.now() - _apvLastQueueLoad > 30000 && apvWatchingQueue()) apvSilentRefresh().catch(() => {});
 });
 
 // THE DATED TRAIL (Kevin, 8 Sep 2026). Airtable stores no date on a file and
@@ -2627,7 +2645,6 @@ function apvRenderTurnSlots(){
 function apvStepCardHtml(t, ys){
     const plain = apvPlain(t);
     const agent = teamName(t.raiserId) || 'No agent recorded';
-    const said = apvStepDoneSaid(t.feedback);
     const links = (t.emailLinks || []).map((u,i)=>
         `<a class="apv-email" href="${esc(u)}" target="_blank" rel="noopener noreferrer" title="Opens the original email in Gmail, in a new tab">&#9993; ${t.emailLinks.length>1?`Open email ${i+1}`:'Open the email'}</a>`).join('');
     return `<div class="apv-card apv-step-card" data-apv-card="${t.id}" data-apv-your-step>
@@ -2653,16 +2670,12 @@ function apvStepCardHtml(t, ys){
         </details>
         ${apvTrailHtml(t)}
         <div class="apv-decide" data-apv-decide>
-            ${said && said.cant
-                ? `<div class="apv-step-said apv-step-cant" data-apv-step-said>You said you can't do this (${esc(agoText(said.at))} ago): ${esc(said.evidence.replace(/[.!?]+$/, ''))}. Within half an hour it goes back to ${esc(agent)} as Request changes, to find another way.</div>`
-                : said
-                ? `<div class="apv-step-said" data-apv-step-said>You said it is done (${esc(agoText(said.at))} ago): ${esc(said.evidence.replace(/[.!?]+$/, ''))}. The robot checks it within half an hour, then the agent finishes the job.</div>`
-                : `<div class="apv-actions" data-apv-step-actions>
-                    ${apvNoteRowHtml(t.id, ys.robot ? "Only if you can't: say why (no account, no password, the wrong site)" : "What proves it is done (the receipt, the reference, where the signed copy went), or why you can't do it", true, false)}
-                    ${ys.robot ? '' : `<button class="btn btn-success" data-apv-step-done onclick="apvStepDone('${t.id}')" title="Tells the robot you have done your step. It checks your proof, then the agent finishes the job.">Done, here is the proof</button>`}
-                    <button class="btn" data-apv-step-cant onclick="apvStepCant('${t.id}')" title="Goes back to the agent as Request changes, with your reason, to find another way. Say in the box why you can't do it.">I can't do this</button>
-                </div>
-                <div id="apvFiles-${t.id}" class="apv-file-list">${apvFileChipsHtml(t.id)}</div>`}
+            <div class="apv-actions" data-apv-step-actions>
+                ${apvNoteRowHtml(t.id, ys.robot ? "Only if you can't: say why (no account, no password, the wrong site)" : "What proves it is done (the receipt, the reference, where the signed copy went), or why you can't do it", true, false)}
+                ${ys.robot ? '' : `<button class="btn btn-success" data-apv-step-done onclick="apvStepDone('${t.id}')" title="Tells the robot you have done your step. It checks your proof, then the agent finishes the job.">Done, here is the proof</button>`}
+                <button class="btn" data-apv-step-cant onclick="apvStepCant('${t.id}')" title="Goes back to the agent as Request changes, with your reason, to find another way. Say in the box why you can't do it.">I can't do this</button>
+            </div>
+            <div id="apvFiles-${t.id}" class="apv-file-list">${apvFileChipsHtml(t.id)}</div>
             ${apvDeferRow(t.id)}
         </div>
     </div>`;
@@ -2721,8 +2734,9 @@ async function apvStepSay(taskId, cant){
         try { await postTaskComment(taskId, cant ? "Kevin can't do his step. Why: " + said : 'Kevin did his step. Proof: ' + said); }
         catch(e){ console.error('step comment failed', e); }
         t.feedback = payload[TF.approvalFeedback];
+        t.feedbackHistory = payload[TF.feedbackHistory];
         delete _apvDrafts[taskId];
-        if(card) card.outerHTML = apvCardHtml(t);
+        apvStepAnswered(t);
         return 'saved';
     } catch(e){
         btns.forEach(b=>{ b.disabled = false; });
@@ -2736,6 +2750,137 @@ async function apvStepSay(taskId, cant){
 }
 window.apvStepDone = apvStepDone;
 window.apvStepCant = apvStepCant;
+
+// ─── ANSWERED, WITH UNDO (Kevin, 9 Oct 2026) ─────────────────────────
+// "When I put some information into the approval gate, whether I can't do it or whether I've done
+// it, it just sits there frozen as a live approval ... It needs to disappear once I've answered it."
+// And: "when you're scrolling around the page, sometimes you can put the information into the wrong
+// box and submit it by mistake ... there needs to be an undo button." His 12:59 "the robot quit
+// halfway" landed on 82 Devon Street 21 seconds after the Everywhen window closed. So an answer takes
+// the card off the queue at once, and a bar at the foot of the window keeps Undo for two minutes;
+// the sweep leaves a line that young alone (STEP_SETTLE_SECONDS in scripts/agent-dispatch.py, three
+// minutes, so the Undo never races it). Undo takes his line back out and puts the card back with his
+// words in the box. Everything Undo needs is read off the line itself, so it works after a reload too.
+const APV_STEP_UNDO_MS = 2 * 60 * 1000;
+let _apvAnsweredTick = null;
+function apvStepAnswered(t){
+    allApprovals = allApprovals.filter(x => x.id !== t.id);
+    allAnswered = allAnswered.filter(x => x.id !== t.id).concat([t]);
+    const card = document.querySelector(`[data-apv-card="${t.id}"]`);
+    if(card){
+        card.classList.add('apv-done');
+        apvFoldAway(t.id);
+    } else {
+        apvSyncCountsInPlace(null);
+    }
+    apvRenderAnsweredBar();
+    postApprovalBadge();
+}
+// The line his answer wrote, and what Undo needs to take it back, or null.
+function apvStepUndoInfo(t){
+    const said = t ? apvStepDoneSaid(t.feedback) : null;
+    if(!said) return null;
+    const lead = `${said.cant ? APV_STEP_CANT_MARK : APV_STEP_DONE_MARK} [${said.at}]:`;
+    return { said, lead, left: APV_STEP_UNDO_MS - (Date.now() - Date.parse(said.at)),
+             hist: '[' + said.at.replace('T', ' ').slice(0, 16) + '] '
+                 + (said.cant ? "I can't do this step: " : 'Done, here is the proof: ') + said.evidence,
+             // His typed words, without the file names the page added (the files stay on the task).
+             words: said.evidence.replace(/(?:^|\s*)Attached: [^\n]*$/, '').trim() };
+}
+function apvAnsweredOpen(){ return allAnswered.filter(t => { const u = apvStepUndoInfo(t); return u && u.left > 0; }); }
+function apvAnsweredLeftText(u){
+    const s = Math.max(0, Math.ceil(u.left / 1000));
+    return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
+}
+function apvRenderAnsweredBar(){
+    const bar = document.getElementById('apvAnsweredBar');
+    if(!bar) return;
+    const open = apvAnsweredOpen();
+    const shown = Array.from(bar.querySelectorAll('[data-apv-answered]')).map(r => r.getAttribute('data-apv-answered'));
+    if(shown.join(',') === open.map(t => t.id).join(',')){
+        // Same rows: only the clock moves, so a button under his pointer is never redrawn mid-click.
+        open.forEach(t => {
+            const el = bar.querySelector(`[data-apv-answered="${t.id}"] [data-apv-left]`);
+            if(el) el.textContent = apvAnsweredLeftText(apvStepUndoInfo(t));
+        });
+    } else {
+        bar.innerHTML = open.map(t => {
+            const u = apvStepUndoInfo(t);
+            return `<div class="apv-answered-row" data-apv-answered="${esc(t.id)}">
+                <span class="apv-answered-text" title="${esc(u.said.evidence)}">${u.said.cant ? "You can't do it" : 'Done'}: ${esc(apvPlain(t).task)}</span>
+                <span class="apv-answered-left" data-apv-left>${apvAnsweredLeftText(u)}</span>
+                <button class="apv-undo" type="button" data-apv-step-undo onclick="apvStepUndo('${esc(t.id)}')">Undo</button>
+            </div>`;
+        }).join('');
+        const line = document.getElementById('apvAnsweredLine');
+        if(line) line.outerHTML = apvAnsweredLineHtml();
+    }
+    if(open.length && !_apvAnsweredTick) _apvAnsweredTick = setInterval(apvRenderAnsweredBar, 1000);
+    if(!open.length && _apvAnsweredTick){ clearInterval(_apvAnsweredTick); _apvAnsweredTick = null; }
+}
+// Answered cards past their Undo, said in one line: a card that left the queue is never just gone.
+function apvAnsweredLineHtml(){
+    const open = new Set(apvAnsweredOpen().map(t => t.id));
+    const waiting = allAnswered.filter(t => !open.has(t.id));
+    if(!waiting.length) return '<div id="apvAnsweredLine"></div>';
+    return `<div id="apvAnsweredLine" class="apv-answered-line" title="${esc(waiting.map(t => apvPlain(t).task).join('\n'))}">`
+        + `${waiting.length} answered card${waiting.length === 1 ? '' : 's'} going back to the agents at the next check (every half hour).</div>`;
+}
+async function apvStepUndo(taskId){
+    const t = allAnswered.find(x => x.id === taskId);
+    const u = apvStepUndoInfo(t);
+    if(!u){ apvRenderAnsweredBar(); return 'gone'; }
+    if(u.left <= 0){
+        toast('Too late to undo: it goes back to the agent at the next check. Tell the agent on the card when it comes back.');
+        apvRenderAnsweredBar();
+        return 'late';
+    }
+    if(_apvSaving.has(taskId)) return 'busy';
+    _apvSaving.add(taskId);
+    const row = document.querySelector(`[data-apv-answered="${taskId}"] .apv-answered-text`);
+    if(row) row.textContent = 'Undoing…';
+    try {
+        const live = await atFetchOne(TASKS_TBL, taskId);
+        const fb = String(gf(live, TF.approvalFeedback) || '');
+        const lines = fb.split('\n');
+        if(!lines.some(l => l.startsWith(u.lead))){
+            toast('Too late to undo: the robot has already taken this answer. Tell the agent on the card when it comes back.');
+            allAnswered = allAnswered.filter(x => x.id !== taskId);
+            apvRenderAnsweredBar();
+            return 'late';
+        }
+        const payload = {};
+        payload[TF.approvalFeedback] = lines.filter(l => !l.startsWith(u.lead)).join('\n').replace(/\s+$/, '') || null;
+        // His wrong answer also comes out of the durable copy the agents read.
+        const hist = String(gf(live, TF.feedbackHistory) || '');
+        const at = hist.lastIndexOf(u.hist);
+        if(at >= 0) payload[TF.feedbackHistory] = (hist.slice(0, at).replace(/\s+$/, '') + hist.slice(at + u.hist.length)).trim();
+        await atUpdate(TASKS_TBL, taskId, payload);
+        try { await postTaskComment(taskId, 'Kevin took back his answer with Undo. The card is back in his queue.'); }
+        catch(e){ console.error('undo comment failed', e); }
+        t.feedback = payload[TF.approvalFeedback] || '';
+        if(TF.feedbackHistory in payload) t.feedbackHistory = payload[TF.feedbackHistory];
+        allAnswered = allAnswered.filter(x => x.id !== taskId);
+        allApprovals.push(t);
+        allApprovals.sort((a,b)=>apvRank(b)-apvRank(a));
+        _apvFocusId = taskId;
+        renderApprovals();
+        const box = document.getElementById('apvNote-' + taskId);
+        if(box){ box.value = u.words; apvGrowNote(box); }
+        apvScrollToFocus();
+        postApprovalBadge();
+        return 'undone';
+    } catch(e){
+        if(e.message === 'auth') return 'auth';
+        console.error('step undo failed', e);
+        toast('Could not undo: ' + (e && e.message || e) + '. Try again.');
+        apvRenderAnsweredBar();
+        return 'failed';
+    } finally {
+        _apvSaving.delete(taskId);
+    }
+}
+window.apvStepUndo = apvStepUndo;
 
 // The note box sits in the decide row, open on every card: typing and one
 // click is the whole of feedback. It is also where a file is dropped, and

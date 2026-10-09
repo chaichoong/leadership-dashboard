@@ -977,3 +977,103 @@ print([p for p, d, w in x.RETIRED if d == "2026-10-07"][0].replace("(?i)", ""))`
     expect(r).toBe('the robot\'s setup is repaired (finding 20261001-agent-dispatch-901); for a protected file, the fixer opens the PR and a MERGE card comes to Kevin.');
   });
 });
+
+// THE UNDO WINDOW AND THE CARD THAT STAYED (Kevin, 9 Oct 2026). "When I put some information into
+// the approval gate, whether I can't do it or whether I've done it, it just sits there frozen" and
+// "there needs to be an undo button on the page so we can go back and rectify it". The page now takes
+// an answered card off the queue at once and keeps Undo for two minutes; the sweep must leave a line
+// inside that window alone, or an Undo could lose a race with a send-back. And a SITE wall his sign-in
+// window answered clears in signin-done, not at the next half-hourly sweep.
+describe("3. an answer inside the Undo window, and a sign-in that answers a SITE wall", () => {
+  const setup = `
+NOW = datetime(2026, 10, 7, 12, 0, tzinfo=timezone.utc)
+def q(formula, max_records=None, minimal=False):
+    if formula.startswith("NOT("):
+        return [{"id": "ctl", "fields": {}}]
+    want_done = formula.startswith("AND({Status}='Completed'")
+    if formula.startswith("LEFT({Task Name}"):
+        return []
+    return [json.loads(json.dumps(t)) for t in TASKS.values() if (t["fields"][AF["status"]] == "Completed") == want_done]
+m.query_tasks = q
+m.finding_states = lambda: {}
+STEP = m.your_step_output("1. Sign page 3.", "The form is ready.")
+def ago(seconds):
+    return (datetime.now(timezone.utc) - timedelta(seconds=seconds)).strftime("%Y-%m-%dT%H:%M:%S.000Z")
+WALL = "${blk('KEVIN', 'identity', '2026-10-05T09:00:00.000Z')}"
+`;
+
+  it("a done or can't line under three minutes old is not sent back, not woken and not wiped", () => {
+    const r = py(setup + `
+rec("cant", notes=WALL, status="Approval", outcome="Approved as-is", approved_at="2026-10-04T09:00:00.000Z",
+    output=STEP, feedback="Use the business card.\\nKEVIN STEP CANT [" + ago(60) + "]: the robot quit halfway")
+rec("done", notes=WALL, status="Approval", outcome="Approved as-is", approved_at="2026-10-04T09:00:00.000Z",
+    output=STEP, feedback="KEVIN STEP DONE [" + ago(90) + "]: paid, ref EX-12")
+rec("old", notes=WALL, status="Approval", outcome="Approved as-is", approved_at="2026-10-04T09:00:00.000Z",
+    output=STEP, feedback="KEVIN STEP CANT [" + ago(240) + "]: we have no account")
+rec("ahead", notes=WALL, status="Approval", outcome="Approved as-is", approved_at="2026-10-04T09:00:00.000Z",
+    output=STEP, feedback="KEVIN STEP CANT [" + ago(-3600) + "]: a wrong clock")
+before = {i: f(i, "approvalFeedback") for i in ("cant", "done")}
+res = m.blockers_scan(sweep=True, now=NOW)
+print(json.dumps({"sent": sorted(x["task"] for x in res["sentBack"]), "woken": [x["task"] for x in res["woken"]],
+                  "refused": [x["task"] for x in res["doneRefused"]], "settling": sorted(x["task"] for x in res["settling"]),
+                  "kept": all(f(i, "approvalFeedback") == before[i] for i in before),
+                  "status": [f("cant", "status"), f("done", "status")],
+                  "written": sorted({w["task"] for w in WRITES})}))`);
+    expect(r.settling).toEqual(['cant', 'done']);
+    expect(r.sent).toEqual(['ahead', 'old']);       // past the window, and a stamp an hour ahead is never held
+    expect(r.woken).toEqual([]);
+    expect(r.refused).toEqual([]);
+    expect(r.kept).toBe(true);
+    expect(r.status).toEqual(['Approval', 'Approval']);
+    expect(r.written).toEqual(['ahead', 'old']);
+  });
+
+  it("the send-back's own fresh read holds a can't line still inside the window, and writes nothing", () => {
+    const r = py(setup + `
+b = m.task_blocker(WALL)
+rec("t1", notes=WALL, status="Approval", outcome="Approved as-is", approved_at="2026-10-04T09:00:00.000Z",
+    output=STEP, feedback="KEVIN STEP CANT [" + ago(30) + "]: wrong card")
+rec("t2", notes=WALL, status="Approval", outcome="Approved as-is", approved_at="2026-10-04T09:00:00.000Z",
+    output=STEP, feedback="KEVIN STEP CANT [" + ago(200) + "]: we have no account")
+print(json.dumps({"t1": m.send_back_blocked("t1", b), "t2": (m.send_back_blocked("t2", b) or {}).get("task"),
+                  "written": [w["task"] for w in WRITES]}))`);
+    expect(r.t1).toBeNull();
+    expect(r.t2).toBe('t2');
+    expect(r.written).toEqual(['t2']);
+  });
+
+  it('signin-done clears a SITE wall his window answered at another address, and leaves every other wall', () => {
+    const dir = mkdtempSync(tmpdir() + '/od-site-answer-');
+    const ledger = dir + '/runs.jsonl';
+    writeFileSync(ledger, [
+      { at: '2026-10-09T10:58:00.000Z', cmd: 'login', mode: 'plain-chrome-mock-keychain', host: 'www.landlord-quotes.example', forWall: 'insurer.example' },
+    ].map((e) => JSON.stringify(e)).join('\n') + '\n');
+    const r = py(setup + `
+m.BROWSER_LEDGER = ${JSON.stringify(ledger)}
+m.SIGNIN_PICKUP_DIR = ${JSON.stringify(dir)}
+SITES = {"www.landlord-quotes.example": {"label": "Landlord quotes", "login": True, "loginUrl": "https://www.landlord-quotes.example/login"}}
+m.load_login_sites = lambda: SITES
+rec("answered", notes="${blk('SITE', 'insurer.example', '2026-10-09T10:00:00.000Z')}", status="Approval", outcome="Approved as-is",
+    approved_at="2026-10-04T09:00:00.000Z", output=m.your_step_output("ROBOT SITE: insurer.example. Add it.", "The form is ready."))
+rec("other", notes="${blk('SITE', 'clips.example', '2026-10-09T10:00:00.000Z')}", status="Approval", outcome="Approved as-is",
+    approved_at="2026-10-04T09:00:00.000Z", output=m.your_step_output("ROBOT SITE: clips.example. Add it.", "x"))
+rec("signin", notes="${blk('SIGN-IN', 'insurer.example', '2026-10-09T10:00:00.000Z')}", status="Approval", outcome="Approved as-is",
+    approved_at="2026-10-04T09:00:00.000Z", output=m.your_step_output("ROBOT SIGN-IN: insurer.example. Sign in.", "x"))
+out = run(m.cmd_signin_done, {"site": "www.landlord-quotes.example"})
+got = json.loads(out["out"])
+print(json.dumps({"err": out["err"], "handed": [[h["task"], h.get("siteWall")] for h in got["handedBack"]],
+                  "wall": m.task_blocker(notes("answered")), "status": f("answered", "status"),
+                  "output": f("answered", "agentOutput"), "approved": f("answered", "approvalOutcome"),
+                  "note": notes("answered").split("\\n\\n")[-1],
+                  "others": [m.task_blocker(notes(i))["kind"] + " " + m.task_blocker(notes(i))["subject"] for i in ("other", "signin")]}))`);
+    expect(r.err).toBeNull();
+    expect(r.handed).toEqual([['answered', 'insurer.example']]);
+    expect(r.wall).toBeNull();
+    expect(r.status).toBe('Today');                 // off his queue, back to its agent
+    expect(r.output).toBe('The form is ready.');    // the step block comes off with the wall
+    expect(r.approved).toBe('Approved as-is');      // his approval kept
+    expect(r.note).toMatch(/— Robot sign-in\] BLOCKER CLEARED \(SITE insurer\.example\): Kevin answered this wall by signing in at www\.landlord-quotes\.example/);
+    // A wall on another site is not his answer, and a SIGN-IN wall is signin_done's own (by its door host).
+    expect(r.others).toEqual(['SITE clips.example', 'SIGN-IN insurer.example']);
+  });
+});
