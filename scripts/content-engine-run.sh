@@ -198,7 +198,12 @@ python3 scripts/content-engine/od_lane.py cards || echo "od cards: failed this r
 python3 scripts/content-engine/od_lane.py publish-sync || echo "od publish sync: failed this run (see above)"
 python3 scripts/content-engine/od_lane.py publish || echo "od publish: failed this run (see above)"
 python3 scripts/content-engine/od_lane.py newsletter-publish || echo "od newsletter publish: failed this run (see above)"
-case "$(TZ=Europe/London date +%u)" in 7|1) python3 scripts/content-engine/od_lane.py topics || echo "od topics: failed this run (see above)";; esac
+# The recording brief is PAUSED until 4 Jan 2027 (Kevin, 7 Oct 2026, task recPoUouP5OgTtA3G): its panel is hidden,
+# so no Sunday/Monday topics. od_lane.py topics refuses on its own as well (TOPICS_PAUSED_UNTIL); both resume by themselves.
+case "$(TZ=Europe/London date +%u)" in 7|1)
+  if [ "$(TZ=Europe/London date +%Y%m%d)" -lt 20270104 ]; then echo "od topics: paused until January (Kevin, 7 Oct 2026, task recPoUouP5OgTtA3G)"
+  else python3 scripts/content-engine/od_lane.py topics || echo "od topics: failed this run (see above)"; fi;;
+esac
 python3 scripts/content-engine/runpreneur_map.py run || echo "map: not updated tonight (see above)"
 python3 scripts/content-engine/watch.py report
 python3 scripts/content-engine/approval.py report
