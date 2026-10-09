@@ -116,3 +116,104 @@ describe('content-engine OD lane', () => {
     expect(readFileSync(path.join(DIR, 'od_infographic.py'), 'utf8')).toMatch(/tokens\.css/);
   });
 });
+
+// Kevin, 7 Oct 2026 (task recPoUouP5OgTtA3G, option A; finding 20261008-agent-dispatch-795): the
+// recording brief's panel is hidden, so the Sunday/Monday topic writer pauses until January and the
+// brief comes off the Friday cards. Until this change the 02:00 run still called `od_lane.py topics`
+// on Sundays and Mondays (a model call and ten new Content Machine rows each time). These drive the
+// REAL topics(), raise_cards() and the REAL lines of content-engine-run.sh.
+describe('the recording brief is paused until January (finding 795)', () => {
+  const py = (body) => {
+    const out = execFileSync('python3', ['-c', `
+import importlib.util, io, json, sys, contextlib, datetime as dt
+sys.path.insert(0, ${JSON.stringify(DIR)})
+spec = importlib.util.spec_from_file_location("od", ${JSON.stringify(path.join(DIR, 'od_lane.py'))})
+m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m)
+${body}
+`], { encoding: 'utf8', cwd: DIR });
+    return JSON.parse(out.split('---JSON---')[1]);
+  };
+
+  it('the pause date is 4 Jan 2027 and it lifts by itself on that day', () => {
+    const r = py(`
+print("---JSON---"); print(json.dumps({"until": m.TOPICS_PAUSED_UNTIL.isoformat(),
+  "sun": m.topics_paused(dt.date(2026, 10, 11)), "eve": m.topics_paused(dt.date(2027, 1, 3)), "day": m.topics_paused(dt.date(2027, 1, 4))}))`);
+    expect(r).toEqual({ until: '2027-01-04', sun: true, eve: true, day: false });
+  });
+
+  const topicsRun = (until) => py(`
+calls = []
+def boom(name):
+    def f(*a, **k):
+        calls.append(name)
+        raise RuntimeError("stop after " + name)
+    return f
+m.TOPICS_PAUSED_UNTIL = dt.date(${until})
+m._claude = boom("model call"); m.brief_rows = boom("brief read"); m.register_rows = boom("register read")
+m.push_topics_to_airtable = boom("airtable write"); m.merged_prs = lambda *a, **k: []
+m._load = lambda p: {}; m._save = boom("state write")
+buf = io.StringIO()
+try:
+    with contextlib.redirect_stdout(buf):
+        m.topics()
+except RuntimeError:
+    pass
+print("---JSON---"); print(json.dumps({"calls": calls, "out": buf.getvalue()}))`);
+
+  it('topics() writes nothing and calls no model while paused', () => {
+    const r = topicsRun('2999, 1, 1');
+    expect(r.calls).toEqual([]);
+    expect(r.out).toMatch(/od topics: paused until 1 Jan 2999 \(Kevin, 7 Oct 2026, task recPoUouP5OgTtA3G\)/);
+  });
+  it('control: once the date has passed, topics() goes to work again', () => {
+    expect(topicsRun('2000, 1, 1').calls).toContain('model call');
+  });
+
+  const fridayCards = (until) => py(`
+m.TOPICS_PAUSED_UNTIL = dt.date(${until})
+m.HOLD_FILE = "/nonexistent/od-hold"
+m.publish.mode = lambda: "test"
+post = {"date": "2099-01-02", "day": "Fri", "shape": "The proof", "text": "Body", "hook": "Hook", "issues": [],
+        "source_line": "Episode 1, invented", "voice_loaded": True}
+ed = {"date": "2099-01-02", "n": 1, "title": "An invented edition", "share": "S", "body": "B", "issues": []}
+m._load = lambda p: {"posts": {"2099-01-02": post}, "newsletters": {"2099-01-02": ed},
+                     "topics": [{"n": 1, "title": "Invented topic one", "angle": "why", "number": "none needed"}]}
+buf = io.StringIO()
+with contextlib.redirect_stdout(buf):
+    m.raise_cards(dry_run=True)
+print("---JSON---"); print(json.dumps({"out": buf.getvalue()}))`);
+
+  it('no Friday post card or newsletter card carries the brief while paused', () => {
+    const r = fridayCards('2999, 1, 1');
+    expect(r.out).toMatch(/Post this on the Operations Director LinkedIn page/);   // control: the card was built
+    expect(r.out).toMatch(/An invented edition/);
+    expect(r.out).not.toMatch(/Invented topic one/);
+    expect(r.out).not.toMatch(/recording brief/i);
+  });
+  it('control: after the pause the Friday card carries the brief again', () => {
+    expect(fridayCards('2000, 1, 1').out).toMatch(/Invented topic one/);
+  });
+
+  it('the nightly job skips the Sunday/Monday topics call until 4 Jan 2027, and only then calls it', () => {
+    const { mkdtempSync, writeFileSync, chmodSync } = require('node:fs');
+    const { tmpdir } = require('node:os');
+    const sh = readFileSync(path.join(ROOT, 'scripts', 'content-engine-run.sh'), 'utf8').split('\n');
+    const start = sh.findIndex((l) => l.startsWith('case "$(TZ=Europe/London date +%u)" in 7|1)'));
+    const end = sh.findIndex((l, i) => i > start && l.trim() === 'esac');
+    expect(start, 'the Sunday/Monday block (control)').toBeGreaterThan(-1);
+    const dir = mkdtempSync(path.join(tmpdir(), 'od-topics-sh-'));
+    const bin = path.join(dir, 'bin');
+    require('node:fs').mkdirSync(bin);
+    writeFileSync(path.join(bin, 'date'), '#!/bin/sh\ncase "$1" in +%u) echo "$FAKE_DOW";; +%Y%m%d) echo "$FAKE_YMD";; esac\n');
+    writeFileSync(path.join(bin, 'python3'), '#!/bin/sh\necho "PY $*"\n');
+    chmodSync(path.join(bin, 'date'), 0o755); chmodSync(path.join(bin, 'python3'), 0o755);
+    const script = path.join(dir, 'block.sh');
+    writeFileSync(script, sh.slice(start, end + 1).join('\n') + '\n');
+    const runBlock = (dow, ymd) => execFileSync('/bin/bash', [script], { encoding: 'utf8',
+      env: { PATH: `${bin}:/usr/bin:/bin`, FAKE_DOW: dow, FAKE_YMD: ymd } });
+    expect(runBlock('7', '20261011')).toMatch(/^od topics: paused until January/);
+    expect(runBlock('1', '20270103')).not.toMatch(/PY /);
+    expect(runBlock('7', '20270110')).toMatch(/PY scripts\/content-engine\/od_lane\.py topics/);
+    expect(runBlock('3', '20261014')).toBe('');
+  });
+});

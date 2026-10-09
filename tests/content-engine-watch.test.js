@@ -92,7 +92,7 @@ describe('content-engine watch: nightly wiring', () => {
   it("resets a clip left 'pulling' by a dead run, so it is not skipped for ever", () => {
     const w = readFileSync(path.join(ROOT, 'scripts', 'content-engine', 'watch.py'), 'utf8');
     expect(w).toContain('def repair_stale_pulls(');
-    expect(w).toContain('stale = repair_stale_pulls(ledger)');
+    expect(w).toContain('stale = repair_stale_pulls(ledger, why=why)');
   });
 
   it('retries an Airtable call through a DNS blip, never through a real Airtable error (5 Sep 2026)', () => {
@@ -151,5 +151,98 @@ describe('content-engine watch: nightly wiring', () => {
     const r = readFileSync(path.join(ROOT, 'scripts', 'content-engine', 'render.py'), 'utf8');
     expect(r).toContain('links = publish_via_api(paths, day, transcript_txt, role)');
     expect(r).toContain('drive_api.folder_id(drive_api.EDITED_PATH + [hundreds_folder(day), str(day)], create=True)');
+  });
+});
+
+// Kevin's approved build (task rec1KkjrSv0U9KUXZ; review of 2 Oct 2026, finding 20261003-agent-dispatch-734): two
+// edge cases in the night loop. These run the REAL loop lines of content-engine-run.sh, the REAL `watch.py next`
+// decision (next_exit) and the REAL render.run queue, with only the Drive copy and the ffmpeg render stood in.
+describe('content-engine night loop: the two edge cases', () => {
+  const { mkdtempSync, writeFileSync, chmodSync, mkdirSync } = require('node:fs');
+  const { tmpdir } = require('node:os');
+  const CE = path.join(ROOT, 'scripts', 'content-engine');
+  const REAL_PY = execFileSync('python3', ['-c', 'import sys; print(sys.executable)'], { encoding: 'utf8' }).trim();   // the interpreter itself, not a shim that reads HOME
+
+  function night(ledger, days, { scanFirst = false } = {}) {
+    const home = mkdtempSync(path.join(tmpdir(), 'ce-night-'));
+    const work = path.join(home, 'work'); mkdirSync(work);
+    const ledgerDir = path.join(home, 'knowledge-os', 'logs', 'content-engine'); mkdirSync(ledgerDir, { recursive: true });
+    for (const v of Object.values(ledger)) {
+      if (v.local === 'ON_DISK') { v.local = path.join(work, v.key); writeFileSync(v.local, 'x'.repeat(v.size)); }
+      delete v.key;
+    }
+    writeFileSync(path.join(ledgerDir, 'ledger.json'), JSON.stringify(ledger));
+    const driver = path.join(home, 'driver.py');
+    writeFileSync(driver, `
+import os, sys
+sys.path.insert(0, ${JSON.stringify(CE)})
+import watch as w
+w.LEDGER = os.environ["CE_LEDGER"]   # a scratch ledger; HOME stays real so the interpreter finds its own packages
+mode, args = sys.argv[1], sys.argv[2:]
+if mode == "watch" and args[0] == "next":
+    def fake_pull(ledger, key, work):
+        p = os.path.join(work, key); open(p, "wb").write(b"x" * int(ledger[key]["size"]))
+        ledger[key].update(status="pulled", local=p); w.save_ledger(ledger); print("pull: %s" % key); return p
+    sys.exit(w.next_exit(w.load_ledger(), int(args[args.index("--day") + 1]), os.environ["CE_WORK"], pull_fn=fake_pull))
+if mode == "watch" and args[0] == "repair":
+    led = w.load_ledger(); why = {}
+    for k in w.repair_stale_pulls(led, os.environ["CE_WORK"], why=why): print("scan: %s %s" % (k, why.get(k, "")))
+    w.save_ledger(led); sys.exit(0)
+import render as r
+def fake_process(k, ledger, keep):
+    ledger[k]["status"] = "rendered"; w.save_ledger(ledger); print("RENDERED %s" % k)
+r.process = fake_process
+r.run(limit=1)
+`);
+    const bin = path.join(home, 'bin'); mkdirSync(bin);
+    writeFileSync(path.join(bin, 'python3'), `#!/bin/bash
+case "$1" in
+  scripts/content-engine/watch.py) shift; exec "${REAL_PY}" "${driver}" watch "$@";;
+  scripts/content-engine/render.py) shift; exec "${REAL_PY}" "${driver}" render "$@";;
+esac
+echo "unexpected: python3 $*" >&2; exit 9
+`);
+    chmodSync(path.join(bin, 'python3'), 0o755);
+    const sh = readFileSync(RUN, 'utf8');
+    const loop = sh.match(/# --- last-start-block[\s\S]*?\nfor day in \$DAYS; do\n[\s\S]*?\ndone\n/)[0];
+    const pre = scanFirst ? 'python3 scripts/content-engine/watch.py repair\n' : '';
+    return execFileSync('/bin/bash', ['-c', pre + loop], { encoding: 'utf8', cwd: home,
+      env: { PATH: `${bin}:/usr/bin:/bin`, HOME: process.env.HOME, CE_LEDGER: path.join(ledgerDir, 'ledger.json'), CE_WORK: work, DAYS: days, CE_ALLOW_DAYTIME: '1' } });
+  }
+  const dayBlock = (out, day) => out.split('== day ').find((b) => b.startsWith(String(day))) || '';
+
+  it('a one-clip day last in the night, behind an older pulled clip, renders inside its own day block', () => {
+    const out = night({
+      'older.insv': { key: 'older.insv', day: 2050, date: '2026-01-10', seq: 1, size: 5, status: 'pulled', local: 'ON_DISK' },
+      'only.insv': { key: 'only.insv', day: 2060, date: '2026-01-20', seq: 1, size: 5, status: 'new' },
+    }, '2060');
+    const block = dayBlock(out, 2060);
+    expect(block, 'control: the day ran').toMatch(/pull: only\.insv/);
+    expect(block).toMatch(/RENDERED older\.insv/);
+    expect(block).toMatch(/RENDERED only\.insv/);
+    expect(block).toMatch(/next: nothing waiting for day 2060/);   // and only then is the day done
+  });
+
+  it('two pulled clips whose files have gone no longer hold the pull limit: the night pulls and renders its day', () => {
+    const out = night({
+      'gone-a.insv': { key: 'gone-a.insv', day: 2040, date: '2026-01-01', seq: 1, size: 5, status: 'pulled', local: '/nonexistent/gone-a.insv' },
+      'gone-b.insv': { key: 'gone-b.insv', day: 2041, date: '2026-01-02', seq: 1, size: 5, status: 'pulled', local: '/nonexistent/gone-b.insv' },
+      'today.insv': { key: 'today.insv', day: 2070, date: '2026-01-30', seq: 1, size: 5, status: 'new' },
+    }, '2070', { scanFirst: true });
+    expect(out).toMatch(/scan: gone-a\.insv was pulled but its local copy is gone; reset to new/);
+    expect(out).toMatch(/scan: gone-b\.insv was pulled but its local copy is gone/);
+    const block = dayBlock(out, 2070);
+    expect(block).toMatch(/pull: today\.insv/);
+    expect(block).toMatch(/RENDERED today\.insv/);
+    expect(block).not.toMatch(/already pulled and not yet rendered/);
+  });
+
+  it('the counter alone also ignores a pulled clip with no file, even before the scan resets it', () => {
+    const out = night({
+      'gone-a.insv': { key: 'gone-a.insv', day: 2040, date: '2026-01-01', seq: 1, size: 5, status: 'pulled', local: '/nonexistent/gone-a.insv' },
+      'gone-b.insv': { key: 'gone-b.insv', day: 2041, date: '2026-01-02', seq: 1, size: 5, status: 'pulled', local: '/nonexistent/gone-b.insv' },
+      'today.insv': { key: 'today.insv', day: 2070, date: '2026-01-30', seq: 1, size: 5, status: 'new' },
+    }, '2070');
+    expect(dayBlock(out, 2070)).toMatch(/RENDERED today\.insv/);
   });
 });

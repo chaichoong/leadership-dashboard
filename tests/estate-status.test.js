@@ -339,3 +339,123 @@ print(json.dumps([a["sweptAt"], b["sweptAt"], a["open"][0].get("planProblem")]))
     expect(r[2]).toBe('step 6 (kevin) needs say');
   });
 });
+
+// Finding 20261007-agent-dispatch-782 (approved 9 Oct 2026): job-digest, data-invariants and
+// compliance-watch EXIT 1 BY DESIGN when they find something, and job-schedule.json says so
+// (completedWhen "ran"). classify never read that rule, so every working morning read Failed and the
+// red pass raised RED tasks against two healthy jobs. These drive the REAL classify with the REAL
+// schedule entries, then the REAL red pass on its output.
+describe('a job graded on running is Worked when it exits 1 by design (finding 782)', () => {
+  function classifyRows(cases) {
+    const out = execFileSync('python3', ['-c', `
+import importlib.util, json, sys
+from datetime import datetime, timezone
+spec = importlib.util.spec_from_file_location("es", ${JSON.stringify(WRITER)})
+m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m)
+sched = json.load(open(${JSON.stringify(resolve(ROOT, 'scripts/job-schedule.json'))}))
+now = datetime(2026, 10, 7, 12, 0, tzinfo=timezone.utc)
+res = {}
+for c in json.loads(sys.stdin.read()):
+    cfg = sched[c["cfg"]] if c["cfg"] in sched else {"cron": "0 6 * * *"}
+    logs = "/nonexistent"
+    if c.get("ownLog"):                          # the job's own last log, as run-job.sh leaves it
+        import tempfile, os
+        logs = tempfile.mkdtemp(prefix="es-logs-")
+        open(os.path.join(logs, c["job"] + ".last.log"), "w").write(c["ownLog"])
+    r = m.classify(c["job"], cfg, c["fin"], c.get("ev", []), now, logs_dir=logs)
+    res[c["name"]] = {k: r.get(k) for k in ("status", "detail", "lastWorked", "fails24h", "firstFail")}
+red = m.red_rows_pass([dict(res["digest"], key="job-digest", kind="job", lastRun="2026-10-07T10:00:35.000Z",
+                            firstRun="2026-10-01T10:00:00.000Z")], {}, now, {},
+                      lambda: [("recOTHER000000001", "x")], lambda f: "recNEW", "recB", logs_dir="/nonexistent")
+print("---JSON---"); print(json.dumps({"rows": res, "red": red}))
+`], { input: JSON.stringify(cases), encoding: 'utf8' });
+    return JSON.parse(out.split('---JSON---')[1]);
+  }
+  const fin = (job, ts, exit, tail = 'Findings waiting for the fixer: 174', reason) =>
+    ({ ts, job, exit, ok: exit === 0, reason: reason ?? (exit === 0 ? '' : `exit code ${exit}`), tail });
+  const week = (job, exit, extra = {}) => ['01', '02', '03', '04', '05', '06', '07']
+    .map((d) => fin(job, `2026-10-${d}T10:00:35Z`, exit, extra.tail, extra.reason));
+  // Each job's normal "found" tail, shaped from the real job-status lines of 7-9 Oct 2026.
+  const FOUND = {
+    digest: { tail: 'Findings waiting for the fixer: 174 (126 high or critical) • plus 48 medium or low' },
+    invariants: { tail: "{'id': 'recAAAAAAAAAAAAAA', 'problem': 'an invented row'} ==== RESULT: INVARIANT BROKEN — do not deploy" },
+    compliance: { tail: 'COMPLIANCE: 2 required items had no open task; 2 raised, 0 still without one; insurance: 0 raised.' },
+  };
+  const r = classifyRows([
+    { name: 'digest', job: 'job-digest', cfg: 'job-digest', fin: week('job-digest', 1, FOUND.digest) },
+    { name: 'invariants', job: 'data-invariants', cfg: 'data-invariants', fin: week('data-invariants', 1, FOUND.invariants) },
+    { name: 'compliance', job: 'compliance-watch', cfg: 'compliance-watch', fin: week('compliance-watch', 1, FOUND.compliance) },
+    // Review of PR #748: exit 1 is ALSO a real failure. compliance-watch's own broken read
+    // (certificate_watch.py cmd_daily), and an uncaught crash in any of the three.
+    { name: 'complianceReadFail', job: 'compliance-watch', cfg: 'compliance-watch', fin: week('compliance-watch', 1,
+      { tail: 'ERROR: control failed: the book holds 3 landlord insurance policies but the insurance read returned none. Nothing raised.' }) },
+    { name: 'digestCrash', job: 'job-digest', cfg: 'job-digest', fin: week('job-digest', 1,
+      { tail: 'Traceback (most recent call last):   File "morning-digest.py", line 10, in build KeyError: \'job\'' }) },
+    // The 600-character tail can lose the Traceback header; the exception line and the missing RESULT line still show it.
+    { name: 'invariantsCrashCut', job: 'data-invariants', cfg: 'data-invariants', fin: week('data-invariants', 1,
+      { tail: '  File "check-data-invariants.py", line 900, in scan_all     raise RuntimeError("HTTP 503") RuntimeError: HTTP 503' }) },
+    { name: 'invariantsNoResult', job: 'data-invariants', cfg: 'data-invariants', fin: week('data-invariants', 1,
+      { tail: 'FAIL   tasks-carry-a-business       asserts: every open task names its business' }) },
+    // A normal-looking tail, but the run's own log holds the crash.
+    { name: 'digestOwnLogCrash', job: 'job-digest', cfg: 'job-digest', fin: week('job-digest', 1, FOUND.digest),
+      ownLog: 'Traceback (most recent call last):\n  File "morning-digest.py", line 3\nValueError: bad line\n' + FOUND.digest.tail },
+    // exit 2 is data-invariants' broken read: the job did NOT do its work.
+    { name: 'brokenRead', job: 'data-invariants', cfg: 'data-invariants', fin: week('data-invariants', 2) },
+    { name: 'killed', job: 'job-digest', cfg: 'job-digest', fin: week('job-digest', 143) },
+    { name: 'allowance', job: 'job-digest', cfg: 'job-digest', fin: week('job-digest', 1, { tail: "posting\nYou've hit your limit · resets 3pm" }) },
+    { name: 'noRuns', job: 'job-digest', cfg: 'job-digest', fin: [] },
+    // The control: a job WITHOUT completedWhen that exits 1 is a failure, as before.
+    { name: 'control', job: 'plain-job', cfg: '__none__', fin: week('plain-job', 1) },
+    // The queue saw exit 1 but the wrapper wrote no line of its own: nothing shows it was a finding.
+    { name: 'queueOnly', job: 'data-invariants', cfg: 'data-invariants', fin: week('data-invariants', 1, FOUND.invariants).slice(0, 6),
+      ev: [{ ts: '2026-10-07T05:40:05.811Z', job: 'data-invariants', state: 'ran-unlocked' },
+           { ts: '2026-10-07T05:42:09.213Z', job: 'data-invariants', state: 'finished', exit: 1 }] },
+  ]);
+
+  it('the three by-design jobs declare completedWhen "ran" (control: the rule this reads exists)', () => {
+    const sched = JSON.parse(read('scripts/job-schedule.json'));
+    for (const j of ['job-digest', 'data-invariants', 'compliance-watch']) expect(sched[j].completedWhen).toBe('ran');
+  });
+  it('exit 1 on a completedWhen "ran" job reads Worked, says it found things, and counts as worked', () => {
+    for (const k of ['digest', 'invariants', 'compliance']) {
+      expect(r.rows[k].status, k).toBe('Worked');
+      expect(r.rows[k].detail, k).toMatch(/found things needing attention \(exit 1 by design/);
+      expect(r.rows[k].lastWorked, k).toBe('2026-10-07T10:00:35.000Z');
+      expect(r.rows[k].fails24h, k).toBe(0);
+      expect(r.rows[k].firstFail, k).toBeNull();
+    }
+    expect(r.rows.digest.detail).toMatch(/Findings waiting for the fixer: 174/);
+  });
+  it('exit 1 with a read failure, a crash, or no normal last line is still Failed and keeps its RED task', () => {
+    for (const k of ['complianceReadFail', 'digestCrash', 'invariantsCrashCut', 'invariantsNoResult', 'digestOwnLogCrash']) {
+      expect(r.rows[k].status, k).toBe('Failed');
+    }
+    for (const k of ['complianceReadFail', 'digestCrash', 'invariantsCrashCut', 'invariantsNoResult']) expect(r.rows[k].lastWorked, k).toBeNull();
+    // The own log belongs to the newest run alone: the six normal mornings before it still count as worked.
+    expect(r.rows.digestOwnLogCrash.lastWorked).toBe('2026-10-06T10:00:35.000Z');
+    const sched = JSON.parse(read('scripts/job-schedule.json'));
+    expect(sched['data-invariants'].completedWhenFoundLine).toBe('RESULT: INVARIANT BROKEN');
+    expect(sched['compliance-watch'].completedWhenFoundLine).toBeTruthy();
+  });
+  it('a broken read (exit 2) or a kill (exit 143) is still Failed; an allowance stop is still Blocked', () => {
+    expect(r.rows.brokenRead.status).toBe('Failed');
+    expect(r.rows.brokenRead.lastWorked).toBeNull();
+    expect(r.rows.killed.status).toBe('Failed');
+    expect(r.rows.allowance.status).toBe('Blocked');
+  });
+  it('no run at all is never Worked', () => {
+    expect(r.rows.noRuns.status).not.toBe('Worked');
+    expect(r.rows.noRuns.detail).toMatch(/No run recorded/);
+  });
+  it('control: a job with no completedWhen that exits 1 is Failed', () => {
+    expect(r.rows.control.status).toBe('Failed');
+    expect(r.rows.control.fails24h).toBe(1);
+  });
+  it('an exit 1 seen only by the queue (no wrapper line) stays Failed', () => {
+    expect(r.rows.queueOnly.status).toBe('Failed');
+  });
+  it('the red pass raises no RED task for a by-design exit-1 week', () => {
+    expect(r.red.raised).toEqual([]);
+    expect(r.red.state).toEqual({});
+  });
+});

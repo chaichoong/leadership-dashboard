@@ -85,6 +85,19 @@ def on_hold():
     return os.path.exists(HOLD_FILE)
 
 
+# The recording brief is PAUSED until January (Kevin, 7 Oct 2026, task recPoUouP5OgTtA3G, option A of
+# the Hide list's decision 8 of 8). Its panel on the AI Agents page was hidden on 29-30 Sep, yet the
+# Sunday and Monday runs still wrote ten topics and the Friday cards still carried them. Until this
+# date `topics` writes nothing (no model call, no Content Machine rows) and no card carries the brief.
+# It comes back by itself on this date; to restore it sooner, move the date. content-engine-run.sh
+# holds the same date for the Sunday/Monday call.
+TOPICS_PAUSED_UNTIL = dt.date(2027, 1, 4)
+
+
+def topics_paused(today=None):
+    return (today or dt.datetime.now(LONDON).date()) < TOPICS_PAUSED_UNTIL
+
+
 def gate_density(text):
     """OD words per 1,000 words. Free, deterministic, and only a FILTER: the AI decides."""
     words = max(1, len(text.split()))
@@ -822,6 +835,10 @@ def push_topics_to_airtable(topics, rows, dry_run=False):
 
 
 def topics(dry_run=False):
+    if topics_paused():
+        print("od topics: paused until %s (Kevin, 7 Oct 2026, task recPoUouP5OgTtA3G): nothing written, no model call"
+              % TOPICS_PAUSED_UNTIL.strftime("%-d %b %Y"))
+        return
     state = _load(STATE); bank = _load(BANK)
     try: rows = brief_rows()
     except Exception as ex: rows = []; print("od topics: brief records unreadable (%s)" % str(ex)[:80])
@@ -958,7 +975,8 @@ def _raise(name, desc, out, record, note_ref, files=None, post=None, *, plain):
 
 def raise_cards(dry_run=False):
     if on_hold(): print("od cards: ON HOLD (%s exists), no cards raised" % HOLD_FILE); return
-    state = _load(STATE); posts = state.get("posts", {}); m = publish.mode(); today = dt.date.today().isoformat(); tp = state.get("topics", [])
+    state = _load(STATE); posts = state.get("posts", {}); m = publish.mode(); today = dt.date.today().isoformat()
+    tp = None if topics_paused() else state.get("topics", [])   # the brief stays off every card while it is paused
     for pid, p in sorted(posts.items()):
         if p.get("task") or p.get("verdict") or (pid < today and not p.get("old_task")): continue   # a redo of a card Kevin already saw may land after its date
         if not dry_run:

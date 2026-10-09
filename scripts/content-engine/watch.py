@@ -309,9 +309,18 @@ def waits_for_bigger(key, ledger):
     return False
 
 
+def renderable(key, ledger):
+    """What render.run takes: a pulled clip whose local copy is on disk and is not parked behind its day's long clip.
+    A pulled clip whose file has gone is NOT renderable: the render skips it (render.run checks the file), so counting
+    it held the two-copy pull limit full and every pass of the night pulled nothing (review, 2 Oct 2026)."""
+    v = ledger[key]
+    return (v.get("status") == "pulled" and bool(v.get("local")) and os.path.exists(v["local"])
+            and not waits_for_bigger(key, ledger))
+
+
 def pulled_in_queue(ledger):
-    """Local copies the render will take next: pulled and not parked behind their day's long clip."""
-    return sum(1 for k, v in ledger.items() if v.get("status") == "pulled" and not waits_for_bigger(k, ledger))
+    """Local copies the render will take next: pulled, on disk, and not parked behind their day's long clip."""
+    return sum(1 for k in ledger if renderable(k, ledger))
 
 
 def requeue_failed(ledger, now=None):
@@ -423,8 +432,9 @@ def list_clips(batch=None, since=None, root=None, gaps=None, skipped=None):
 
 def scan(create=False, batch=None, since=None):
     ledger = load_ledger()
-    stale = repair_stale_pulls(ledger)
-    for k in stale: print("scan: %s was stuck 'pulling' from a dead run; reset" % k)
+    why = {}
+    stale = repair_stale_pulls(ledger, why=why)
+    for k in stale: print("scan: %s %s" % (k, why.get(k) or "was stuck 'pulling' from a dead run; reset"))
     back = requeue_failed(ledger)
     for k in back: print("scan: %s put back in the queue for one more try (failed last time)" % k)
     if stale or back: save_ledger(ledger)
@@ -519,11 +529,28 @@ def pull_via_api(e, part):
         return False
 
 
-def repair_stale_pulls(ledger, work=WORK):
+def repair_stale_pulls(ledger, work=WORK, why=None):
     """A run that died mid-copy (4 Sep 2026, Drive's EDEADLK) leaves a clip 'pulling' for ever, and the
-    chooser never looks at it again. Any 'pulling' entry with no complete local file goes back to 'new'."""
+    chooser never looks at it again. Any 'pulling' entry with no complete local file goes back to 'new'.
+    A 'pulled' entry whose local copy has gone, or is the wrong size, goes back to 'new' too (review, 2 Oct 2026;
+    Kevin's approved build, task rec1KkjrSv0U9KUXZ): the render skips a clip with no file, so it would sit 'pulled'
+    for ever. `why`, when given, is filled with each reset clip's reason for the night's log."""
     fixed = []
     for key, e in ledger.items():
+        if e.get("status") == "pulled":
+            local = e.get("local") or os.path.join(work, key)
+            try:
+                whole = os.path.getsize(local) == e.get("size")
+            except OSError:
+                whole = None
+            if whole:
+                continue
+            e["status"] = "new"; e.pop("local", None)
+            fixed.append(key)
+            if why is not None:
+                why[key] = "was pulled but its local copy is %s; reset to new, it is pulled again" % (
+                    "gone" if whole is None else "the wrong size")
+            continue
         if e.get("status") != "pulling": continue
         dest = os.path.join(work, key)
         if os.path.exists(dest) and os.path.getsize(dest) == e.get("size"):
@@ -636,6 +663,12 @@ def next_exit(ledger, day, work, pull_fn=None):
     first step, night after night (second review)."""
     key = choose_next(ledger, day)
     if not key:
+        # The day is done only when none of its clips is still waiting to render either. The render takes the OLDEST
+        # pulled clip first, so a day's last clip pulled behind an older stale one was left pulled when the next pass
+        # said "done", and a one-clip day last in the night rendered a night late (review, 2 Oct 2026; Kevin's
+        # approved build, task rec1KkjrSv0U9KUXZ). The loop's six-pass cap still bounds it.
+        if day and any(v.get("day") == day and renderable(k, ledger) for k, v in ledger.items()):
+            print("next: day %d has a clip pulled and still waiting to render; the render takes it" % day); return 0
         print("next: nothing waiting" + (" for day %d" % day if day else "")); return NEXT_DAY_DONE if day else 0
     if pulled_in_queue(ledger) >= MAX_PULLED:
         print("pull: %d clips already pulled and not yet rendered - not pulling more; the render takes one" % pulled_in_queue(ledger)); return 0
@@ -691,12 +724,31 @@ def _selftest_copy_retry():
 def _selftest_repair_stale():
     import tempfile
     work = tempfile.mkdtemp(prefix="od-pull-")
-    led = {"a.insv": {"status": "pulling", "size": 5}, "b.insv": {"status": "pulling", "size": 3}, "c.insv": {"status": "pulled", "size": 1}}
+    c = os.path.join(work, "c.insv")
+    led = {"a.insv": {"status": "pulling", "size": 5}, "b.insv": {"status": "pulling", "size": 3}, "c.insv": {"status": "pulled", "size": 1, "local": c}}
     open(os.path.join(work, "a.insv.part"), "wb").write(b"xx")            # died mid-copy
     open(os.path.join(work, "b.insv"), "wb").write(b"yyy")                 # finished but never marked
+    open(c, "wb").write(b"z")                                              # pulled, on disk, whole: left alone
     fixed = repair_stale_pulls(led, work)
     assert sorted(fixed) == ["a.insv", "b.insv"] and led["a.insv"]["status"] == "new" and led["b.insv"]["status"] == "pulled" and led["c.insv"]["status"] == "pulled"
     assert not os.path.exists(os.path.join(work, "a.insv.part")), "the dead part-file is removed"
+    # A pulled clip whose local copy has gone (or is the wrong size) goes back to new (review, 2 Oct 2026): two of them
+    # held the two-copy pull limit full, so every pass pulled nothing and the render skipped both, night after night.
+    open(os.path.join(work, "short.insv"), "wb").write(b"q")
+    led = {"gone1.insv": {"day": 2090, "date": "2026-03-01", "seq": 1, "size": 7, "status": "pulled", "local": os.path.join(work, "gone1.insv")},
+           "gone2.insv": {"day": 2091, "date": "2026-03-02", "seq": 1, "size": 7, "status": "pulled"},
+           "short.insv": {"day": 2092, "date": "2026-03-03", "seq": 1, "size": 7, "status": "pulled", "local": os.path.join(work, "short.insv")},
+           "today.insv": {"day": 2093, "date": "2026-03-04", "seq": 1, "size": 7, "status": "new"}}
+    assert pulled_in_queue(led) == 1, "a pulled clip with no file on disk is not in the render queue"
+    why = {}
+    assert sorted(repair_stale_pulls(led, work, why=why)) == ["gone1.insv", "gone2.insv", "short.insv"]
+    assert all(led[k]["status"] == "new" and "local" not in led[k] for k in ("gone1.insv", "gone2.insv", "short.insv"))
+    assert "gone" in why["gone1.insv"] and "wrong size" in why["short.insv"], why
+    asked = []
+    import io as _io, contextlib as _cl
+    with _cl.redirect_stdout(_io.StringIO()):
+        assert pulled_in_queue(led) == 0 and next_exit(led, 2093, work, pull_fn=lambda l, key, w: asked.append(key) or "/x") == 0 and asked == ["today.insv"], \
+            "the next pass pulls the day's clip"
     shutil.rmtree(work)
 
 
@@ -725,11 +777,15 @@ def _selftest_jam_and_retry():
            "2060 summary.insv": {"day": 2060, "date": "2026-01-20", "seq": 2, "size": 0.5 * gb, "status": "pulled"},
            "2059 Full.insv": {"day": 2059, "date": "2026-01-19", "seq": 1, "size": 6.4 * gb, "status": "new"},
            "2060 Full.insv": {"day": 2060, "date": "2026-01-20", "seq": 1, "size": 5.0 * gb, "status": "new"}}
+    disk = tempfile.mkdtemp(prefix="od-jam-")
+    for k in led:                                    # every copy on disk, so only the parking keeps the teasers out
+        led[k]["local"] = os.path.join(disk, k); open(led[k]["local"], "wb").close()
     assert waits_for_bigger("2059 Summary.insv", led) and not waits_for_bigger("2059 Full.insv", led)
     assert choose_next(led, day=2059) == "2059 Full.insv", "the long clip is the next pull, never the teaser"
     assert pulled_in_queue(led) == 0 < MAX_PULLED, "the two parked teasers do not count against the pull limit (it read 2 and refused)"
     led["2059 Full.insv"]["status"] = "pulled"
     assert pulled_in_queue(led) == 1 and not waits_for_bigger("2060 summary.insv", {**led, "2060 Full.insv": {**led["2060 Full.insv"], "status": "rendered"}})
+    shutil.rmtree(disk)
     led = {"2057 Full.insv": {"date": "2026-01-17", "episode": 2057, "size": 5.9 * gb, "status": "failed", "error": "name 'INTRO_LOCAL' is not defined", "local": "/w/2057 Full.insv"},
            "2057 Summary.insv": {"date": "2026-01-17", "episode": 2057, "size": 0.46 * gb, "status": "rendered", "local": "/w/2057 Summary.insv"},
            "VID_2194_teaser": {"date": "2026-01-17", "episode": 2194, "size": 0.3 * gb, "status": "rendered"},
@@ -924,10 +980,21 @@ def _selftest_gap_order():
     with _cl.redirect_stdout(_io.StringIO()):                # the command's own lines, not the selftest's
         assert next_exit(rd, 1900, wk, pull_fn=lambda led, key, work: "/tmp/clip") == NEXT_DAY_DONE == 3 and next_exit({}, 0, wk) == 0
         # two clips already pulled (two rebuilds that failed after their pull): still 0, so the render drains them
-        full = dict(rd, p1={"day": 2060, "date": "2026-01-20", "seq": 1, "size": gb, "status": "pulled"}, p2={"day": 2062, "date": "2026-01-22", "seq": 1, "size": gb, "status": "pulled"})
+        for p in ("p1", "p2"): open(os.path.join(wk, p), "wb").close()
+        full = dict(rd, p1={"day": 2060, "date": "2026-01-20", "seq": 1, "size": gb, "status": "pulled", "local": os.path.join(wk, "p1")},
+                    p2={"day": 2062, "date": "2026-01-22", "seq": 1, "size": gb, "status": "pulled", "local": os.path.join(wk, "p2")})
         asked = []
         assert pulled_in_queue(full) >= MAX_PULLED and next_exit(full, 2084, wk, pull_fn=lambda led, key, work: asked.append(key)) == 0 and asked == [], \
             "a full pull queue is a 0 with nothing pulled: the render that follows drains it"
+        # A day whose only clip is pulled and still waiting is NOT done: the render has not taken it yet (review, 2 Oct
+        # 2026: behind an older pulled clip, a one-clip day last in the night rendered a night late). Done once rendered.
+        open(os.path.join(wk, "one"), "wb").close()
+        oneday = {"older": dict(full["p1"]), "one": {"day": 2095, "date": "2026-03-06", "seq": 1, "size": gb, "status": "pulled", "local": os.path.join(wk, "one")}}
+        assert next_exit(oneday, 2095, wk, pull_fn=lambda led, key, work: asked.append(key)) == 0 and asked == [], "its clip still waits: render it"
+        oneday["one"]["status"] = "rendered"
+        assert next_exit(oneday, 2095, wk, pull_fn=lambda led, key, work: asked.append(key)) == NEXT_DAY_DONE, "rendered: the day is done"
+        oneday["one"].update(status="pulled", local=os.path.join(wk, "gone"))
+        assert next_exit(oneday, 2095, wk) == NEXT_DAY_DONE, "a pulled clip with no file is not waiting (the scan's repair puts it back to new)"
     gapredo = dict(rd, g={"day": 1808, "date": "2025-05-13", "seq": 1, "size": 18 * gb, "status": "new", "reset": "x"})
     assert plan(gapredo, 2, gaps={1799, 1808}, free=100 * gb, start=2054)[0] == [2081, 2084, 1808], "a sent-back gap day takes its gap slot, as any gap day"
     assert plan(gapredo, 2, gaps={1799, 1808}, free=20 * gb, start=2054)[0] == [2081, 2084, 2085], "and still waits whole when its clip does not fit the disk"

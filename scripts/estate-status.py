@@ -221,6 +221,49 @@ def paused_skip(log_text):
     return bool(lines) and "(PAUSED:" in lines[-1]
 
 
+# completedWhen "ran" (job-schedule.json): the job EXITS 1 BY DESIGN when it finds something
+# (data-invariants, job-digest, compliance-watch). morning-digest.py has graded these on
+# attendance since 19 Sep 2026; this writer never read the rule, so it called every working
+# morning Failed and raised RED tasks against two healthy jobs on 7 Oct (finding
+# 20261007-agent-dispatch-782). Only exit 1 means "ran and found": exit 2 is data-invariants'
+# broken read, 127 a missing command, 143 a kill, so every other code stays a failure.
+FOUND_BY_DESIGN_EXIT = 1
+# But a real failure exits 1 too (review of PR #748): compliance-watch on its own broken read ("ERROR: control
+# failed ... Nothing was raised."), and an uncaught Python crash in any of the three. So exit 1 reads "found" only
+# when the run's own words carry none of these marks AND, for a job that declares it (completedWhenFoundLine in
+# job-schedule.json), its normal last line is there. Anything else stays a failure and keeps its RED task.
+FAILURE_MARKS = re.compile(r"Traceback \(most recent call last\)|\bERROR:|(?i:control failed)"
+                           r"|\b[A-Z][A-Za-z]*(?:Error|Exception): ")
+
+
+def found_by_design(cfg, rec, log_text=""):
+    """True when this failed finish is a by-design 'ran and found something' exit. `log_text` is the job's own
+    last log, passed only for its newest run (the file holds that run alone)."""
+    cfg = cfg or {}
+    if cfg.get("completedWhen") != "ran" or rec.get("ok"):
+        return False
+    try:
+        code = int(rec.get("exit"))
+    except (TypeError, ValueError):
+        return False
+    if code != FOUND_BY_DESIGN_EXIT:
+        return False
+    tail = rec.get("tail") or ""
+    # An allowance, network or sign-in stop is still a stop, whatever the exit code.
+    if blocked_reason((rec.get("reason") or "") + " " + tail):
+        return False
+    if FAILURE_MARKS.search(tail) or FAILURE_MARKS.search(log_text or ""):
+        return False
+    normal = cfg.get("completedWhenFoundLine")
+    return not normal or bool(re.search(normal, tail))
+
+
+def found_detail(tail):
+    t = plain_tail(tail)
+    return ("Ran at its slot and found things needing attention (exit 1 by design: this job is graded "
+            "on running, and what it found has its own owners). Last thing it said: %s" % (t or "(nothing)"))
+
+
 def classify(job, cfg, finishes, events, now, logs_dir=LOGS):
     """One job's row fields (by ES key name), from its finishes and queue events."""
     ev = [e for e in events if e.get("job") == job]
@@ -233,8 +276,13 @@ def classify(job, cfg, finishes, events, now, logs_dir=LOGS):
     last_ts = parse_ts(last.get("ts")) if last else None
     day_ago = (now - timedelta(hours=24)).strftime("%Y-%m-%dT%H:%M:%SZ")
     runs24 = [r for r in mine if str(r.get("ts") or "") >= day_ago]
-    fails24 = [r for r in runs24 if not r.get("ok")]
-    worked = [r for r in mine if r.get("ok")]
+    # The job's own last log belongs to its newest run only; read it only when that run may be a by-design exit 1.
+    own_log = own_log_tail(job, logs_dir) if (cfg.get("completedWhen") == "ran" and last and not last.get("ok")) else ""
+
+    def did_work(r):
+        return bool(r.get("ok")) or found_by_design(cfg, r, own_log if r is last else "")
+    fails24 = [r for r in runs24 if not did_work(r)]
+    worked = [r for r in mine if did_work(r)]
     last_worked = parse_ts(worked[-1].get("ts")) if worked else None
 
     # Queue events newer than the last finish say what the job is doing NOW.
@@ -255,6 +303,8 @@ def classify(job, cfg, finishes, events, now, logs_dir=LOGS):
             status, detail = "Skipped", "Its slot came while the Claude allowance was out, so it did not start; it is queued to re-run at reset."
         elif last.get("ok"):
             status, detail = "Worked", "Ran at its slot and finished cleanly."
+        elif found_by_design(cfg, last, own_log):
+            status, detail = "Worked", found_detail(last.get("tail"))
         else:
             why = blocked_reason((last.get("reason") or "") + " " + (last.get("tail") or ""))
             if not why:
@@ -283,8 +333,9 @@ def classify(job, cfg, finishes, events, now, logs_dir=LOGS):
             code = e.get("exit")
             reason = str(e.get("reason") or "")
             outcome = str(e.get("outcome") or "")
+            # A wrapper that wrote no line left nothing to show the exit was a finding, so it stays a failure.
             if st == "finished" and code not in (None, 0):
-                words = blocked_reason(reason) or ("The queue stopped it: %s." % reason if reason else "It ended with exit code %s and left no report." % code)
+                words =blocked_reason(reason) or ("The queue stopped it: %s." % reason if reason else "It ended with exit code %s and left no report." % code)
                 status, detail = ("Blocked" if blocked_reason(reason) else "Failed"), words
             elif st in ("lease-lost", "max-runtime", "lock-broken"):
                 status, detail = "Blocked", blocked_reason(reason or st) or "The queue stopped it (%s)." % st
@@ -312,7 +363,7 @@ def classify(job, cfg, finishes, events, now, logs_dir=LOGS):
 
     first_ts = parse_ts(mine[0].get("ts")) if mine else None
     lw_raw = str(worked[-1].get("ts") or "") if worked else ""
-    first_fail = next((parse_ts(r.get("ts")) for r in mine if not r.get("ok") and str(r.get("ts") or "") > lw_raw), None)
+    first_fail = next((parse_ts(r.get("ts")) for r in mine if not did_work(r) and str(r.get("ts") or "") > lw_raw), None)
     return {
         # Not a table field either: the first failed run after the last one that worked. A weekly job
         # that worked 6 days ago and failed this morning has been red since this morning (review).
