@@ -1192,6 +1192,9 @@ def query_tasks(formula, max_records=None, minimal=False):
 
 
 ATTACH_MAX_BYTES = 5 * 1024 * 1024   # Airtable's cap, on the raw file
+# Types Python's own table lacks, so a host without a system mime list still
+# names the file right (7 Oct 2026: a PAT test report arrives as a spreadsheet).
+ATTACH_TYPES = {".xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"}
 
 
 def upload_attachment(task_id, path):
@@ -1223,7 +1226,9 @@ def upload_file(record_id, field_id, path):
     url = (f"https://content.airtable.com/v0/{BASE_ID}/{record_id}/"
            f"{field_id}/uploadAttachment")
     req = urllib.request.Request(url, method="POST", data=json.dumps({
-        "contentType": mimetypes.guess_type(path)[0] or "application/octet-stream",
+        "contentType": (mimetypes.guess_type(path)[0]
+                        or ATTACH_TYPES.get(os.path.splitext(path)[1].lower())
+                        or "application/octet-stream"),
         "filename": os.path.basename(path),
         "file": blob,
     }).encode(), headers={"Authorization": f"Bearer {pat()}",
@@ -10241,9 +10246,13 @@ CERT_FIELDS = {
     "tasks":       "fldnVZs4DKbcR3Ze9",
 }
 # The dated, renewable items. "Lock Code" and "Other" exist on the table but
-# are not compliance items and never count toward the reading.
+# are not compliance items and never count toward the reading. "PAT" (portable
+# appliance test, 7 Oct 2026: a council asked for one) is not required of any
+# let, so it counts only where one has been filed. Each name must be a choice on
+# the Type field: `certificate` creates a row with typecast off, so a choice
+# missing on the table is refused by name, never minted.
 CERT_TYPES = ("GSC", "EICR", "EPC", "Fire Alarm Cert", "Emergency Lighting",
-              "HMO Cert", "Landlord Insurance")
+              "HMO Cert", "Landlord Insurance", "PAT")
 # In a Block these are held per apartment; everything else is the building's.
 # A certificate filed for the whole block with NO unit link covers every
 # apartment (compliance.html spreads it the same way).
@@ -11013,8 +11022,19 @@ def cmd_certificate(args):
             fields[CERT_FIELDS["unit"]] = [args.unit]
         if args.note:
             fields[CERT_FIELDS["notes"]] = f"{today_london()}: {args.note}"
-        created = _request("POST", f"/{CERTIFICATES_TABLE}",
-                           {"fields": fields, "typecast": True})
+        # Typecast OFF (9 Oct 2026): every value here is a record id, a date,
+        # text or a Type choice, so nothing needs converting, and with it on a
+        # type the table lacks would be added to the Type field as a new choice.
+        try:
+            created = _request("POST", f"/{CERTIFICATES_TABLE}",
+                               {"fields": fields, "typecast": False})
+        except RuntimeError as exc:
+            if "INVALID_MULTIPLE_CHOICE_OPTIONS" in str(exc) or "select option" in str(exc):
+                sys.exit(f"ERROR: the Property Certificates Type field has no "
+                         f"\"{args.type}\" choice, so nothing was filed. This "
+                         "command never adds a choice: it must be added to the "
+                         "Type field in Airtable first, then run this again.")
+            raise
         row_id = created["id"]
         # The file goes on AFTER the row exists (the upload needs a record
         # id), and a refused upload deletes the row again: a dated row with
@@ -11568,7 +11588,8 @@ def main():
     ct.add_argument("--renewal", required=True,
                     help="YYYY-MM-DD the certificate or policy runs out")
     ct.add_argument("--file", required=True,
-                    help="the document itself (PDF/JPG/PNG, under 5MB)")
+                    help="the document itself (PDF, JPG, PNG, or an .xlsx "
+                         "spreadsheet such as a PAT test report; under 5MB)")
     ct.add_argument("--unit", help="Rental Unit record id, for a unit-level "
                                    "certificate in a block")
     ct.add_argument("--note", help="one line: who issued it, policy number")

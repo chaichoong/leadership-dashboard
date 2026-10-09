@@ -147,6 +147,10 @@ RETIRED = [
     (r"(?i)a fix to a protected file needs a Claude Code session|needs? a Claude Code session to fix the robot",
      "2026-10-07",
      "the fixer opens the PR and a MERGE card comes to Kevin"),
+    # The 1st-of-month rent due-date job reports and never writes (Decisions/2026-09-24 Property rulings
+    # from the Book 4 audit, ruling 5). A blanket month forward hides exactly the tenancies that have not paid.
+    (r"(?i)advances? rent due dates|advance it forward by one month", "2026-09-24",
+     "the 1st-of-month rent due-date job is a read-only drift report: it counts blank and past dates and never writes one"),
 ]
 
 # A line that is describing the old rule, not stating it.
@@ -172,9 +176,11 @@ ESTATE_WORDS = re.compile(
 def surfaces(agents=AGENTS, skills=SKILLS, tasks=TASKS, brain=BRAIN, repo=REPO):
     files = sorted(glob.glob(os.path.join(agents, "*.md")))
     files += [os.path.join(skills, s, "SKILL.md") for s in ("ceo", "huddle", "agent-gate")]
+    # daily-ops and monthly-rent-due-date since 9 Oct 2026: they carried the rent due-date write
+    # that RETIRED now names, and a pattern no scan reads guards nothing.
     files += [os.path.join(tasks, t, "SKILL.md") for t in
               ("ceo-agent", "ceo-huddle", "ceo-memory-sweep", "agent-dispatch",
-               "task-manager-board")]
+               "task-manager-board", "daily-ops", "monthly-rent-due-date")]
     files += [os.path.join(brain, p) for p in
               ("founder-profile.md", "current-priorities.md",
                "constraints-and-red-lines.md", "Knowledge/escalation-policy.md",
@@ -361,6 +367,11 @@ def selftest():
     assert scan_text("3 tasks need a Claude Code session to fix the robot.", "x")
     assert not scan_text("For a protected file, the fixer opens the PR and a MERGE card comes to Kevin.", "x")
     assert not scan_text("Kevin opened a Claude Code session on the Mac mini.", "x")
+    # The rent due-date job reports only (24 Sep 2026): the write wording fires; the report wording does not.
+    assert scan_text("  Advances rent due dates for every active tenancy.", "x")
+    assert scan_text("4. If it is in the past, advance it forward by one month", "x")
+    assert not scan_text("A read-only drift report on rent due dates. It never writes a date.", "x")
+    assert not scan_text("4. Write nothing. A past date is the arrears signal, never something to advance.", "x")
     assert stamp_of(os.devnull) is None
     assert rulings_after("2026-09-07", os.devnull) == []
     memory_selftest()

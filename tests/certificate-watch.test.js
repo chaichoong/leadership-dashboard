@@ -342,6 +342,84 @@ print(json.dumps({'err': err}))`);
   });
 });
 
+describe('a PAT test report (7 Oct 2026): the write path files the PAT type from an .xlsx and never adds a Type choice', () => {
+  // The agent stopped on a council's PAT report: the type list had no PAT and the help said PDF/JPG/PNG.
+  // Back-tested: without PAT in CERT_TYPES the filing is refused; with typecast on the create, a missing Type
+  // choice would be minted; without the .xlsx type a host with no system mime list uploads octet-stream; without
+  // the choice check the refusal is a stack trace; without the PAT lane words its own task never covers it.
+  const SETUP = `
+import os, tempfile, mimetypes, urllib.request
+d = tempfile.mkdtemp(); doc = os.path.join(d, 'Pat Testing.xlsx'); open(doc, 'wb').write(b'PK' + b'x' * 6000)
+calls, uploads = [], []
+m.get_task = lambda tid: {'id': tid, 'fields': {}}
+m.fetch_properties = lambda refresh=False: [{'id': 'pA', 'short': '6 Example Place', 'units': []}]
+m.fetch_certificates = lambda refresh=False: []
+m.pat = lambda: 'test-token'
+mimetypes.guess_type = lambda p, strict=True: (None, None)   # a host with no system mime list
+class Resp:
+    def __enter__(self): return self
+    def __exit__(self, *a): return False
+    def read(self): return b'{}'
+def urlopen(req, timeout=0):
+    uploads.append(json.loads(req.data.decode())); return Resp()
+urllib.request.urlopen = urlopen
+CF = m.CERT_FIELDS
+def request(method, path, body=None):
+    calls.append((method, body))
+    if method == 'POST' and REFUSE:
+        raise RuntimeError('Airtable POST /' + m.CERTIFICATES_TABLE + ' -> HTTP 422: {"error":{"type":"INVALID_MULTIPLE_CHOICE_OPTIONS","message":"Insufficient permissions to create new select option \\\\"\\\\"PAT\\\\"\\\\""}}')
+    if method == 'POST':
+        return {'id': 'recCERTPAT0000001'}
+    return {'id': 'recCERTPAT0000001', 'fields': {CF['type']: 'PAT', CF['property']: ['pA'], CF['renewal']: '2028-10-06',
+            CF['attachments']: [{'filename': 'Pat Testing.xlsx', 'size': 6002}], CF['tasks']: ['recTASK0000000001']}}
+m._request = request
+args = types.SimpleNamespace(task='recTASK0000000001', type='PAT', renewal='2028-10-06', file=doc, property='pA', unit=None, note=None)
+`;
+
+  it('files it: the PAT type, typecast off, the spreadsheet named as one', () => {
+    const r = py(SETUP + `
+REFUSE = False
+err, _ = run(lambda: m.cmd_certificate(args))
+post = [b for meth, b in calls if meth == 'POST'][0]
+print(json.dumps({'err': err, 'typecast': post['typecast'], 'type': post['fields'][CF['type']],
+                  'upload': [(u['filename'], u['contentType']) for u in uploads], 'types': list(m.CERT_TYPES)}))`);
+    expect(r.err).toBeNull();
+    expect(r.type).toBe('PAT');
+    expect(r.typecast).toBe(false);
+    expect(r.upload).toEqual([['Pat Testing.xlsx', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet']]);
+    expect(r.types).toContain('PAT');
+  });
+
+  it('a Type field with no PAT choice refuses by name and uploads nothing', () => {
+    const r = py(SETUP + `
+REFUSE = True
+err, _ = run(lambda: m.cmd_certificate(args))
+print(json.dumps({'err': err, 'uploads': len(uploads), 'posts': sum(1 for meth, _ in calls if meth == 'POST')}))`);
+    expect(r.err).toContain('the Property Certificates Type field has no "PAT" choice, so nothing was filed');
+    expect(r.err).toContain('never adds a choice');
+    expect([r.uploads, r.posts]).toEqual([0, 1]);
+  });
+
+  it('a PAT counts only where one is filed, and its own task covers it; a path, a patio, a token or a Pat never do', () => {
+    const r = py(`
+import certificate_watch as cw
+P = {'id': 'pA', 'name': 'A', 'short': 'A', 'kind': 'HMO', 'required': ['EICR'], 'units': [], 'active': True,
+     'managerEmail': '', 'postcode': '', 'manager': ''}
+C = {'id': 'c1', 'type': 'PAT', 'propertyIds': ['pA'], 'unitIds': [], 'status': 'Active', 'renewalDate': '2026-09-01',
+     'hasFile': True, 'taskIds': []}
+none = m.compliance_pages([P], [], '2026-10-09')[0]['issues']
+lapsed = m.compliance_pages([P], [C], '2026-10-09')[0]['issues']
+names = ['COMPLIANCE: file certificate - PAT - 6 Example Place', 'INBOUND: PAT test report for 6 Example Place',
+         'Portable appliance testing at 6 Example Place', 'COMPLIANCE: fix the garden path at 6 Example Place',
+         'COMPLIANCE: patio door at 6 Example Place', 'Airtable PAT expired: rotate the token', 'COMPLIANCE: Pat Example gas safety']
+print(json.dumps({'none': [i['type'] for i in none], 'lapsed': [(i['type'], i['state']) for i in lapsed if i['type'] == 'PAT'],
+                  'named': [cw.type_named(n, 'PAT') for n in names]}))`);
+    expect(r.none).not.toContain('PAT');
+    expect(r.lapsed).toEqual([['PAT', 'expired']]);
+    expect(r.named).toEqual([true, true, true, false, false, false, false]);
+  });
+});
+
 describe('a quote or booking is refused when the certificate is already held or already paid for', () => {
   const judge = (cert, pays, name, output, subject = '') => py(`${BOOK}
 m.fetch_compliance_payments = lambda: ${pays}

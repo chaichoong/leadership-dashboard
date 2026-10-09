@@ -365,7 +365,7 @@ Run this as one subagent with the prompt: "Read the results of this morning's th
 Check the date first and SKIP with a note when not due. A skip you announce is fine; a silent one is how a monthly job stops running for a quarter.
 
 - **1st of the month:** `~/.claude/scheduled-tasks/monthly-rent-due-date/SKILL.md`
-  Advances rent due dates for every active tenancy. This is a real obligation; if it is the 1st and this fails, say so at the very top of the report.
+  A read-only drift report on rent due dates (read-only since 1 Aug 2026, Kevin confirmed 24 Sep 2026): counts live tenancies with a blank Due Day of Month, a blank Next Rent Due Date or a past Next Rent Due Date. It never writes a date. If it is the 1st and the report does not run, say so at the very top of the report; any non-zero count is an exception.
 - **EVERY DAY — post:** run `python3 scripts/post-inbox-absence.py` from the repo. It is one directory listing and costs seconds.
   - **exit 3** — scans are sitting unprocessed in the Post Inbox root. Run `~/.claude/scheduled-tasks/post-manager-weekly/SKILL.md` NOW, whatever day it is. Only the days it finds something pay for the OCR, split and email work.
   - **exit 1 on a Monday** — nothing scanned for a fortnight. Put the printed message at the top of the report, per that skill's STEP 0.

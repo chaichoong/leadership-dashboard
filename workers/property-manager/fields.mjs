@@ -213,19 +213,18 @@ export const TENANT_LINK = {
   codeHash: 'fldMzA0MCPUYOCklP', codeHashName: 'Tenant Form Code Hash',
   codeExpires: 'fldsgGmWIUX48t4I7',
 };
-// What a tenant may write, and nothing else. The eleven answers already on the Growth Plan form,
-// plus other benefits. Field types and choices read live on 4 Oct 2026. "Unknown" is left off
-// the cap list: a tenant must never replace a known answer with Unknown.
+// What a tenant may write, and nothing else: the questions tenant-details.html asks. Field types and
+// choices read live on 4 Oct 2026. "Unknown" is left off the cap list: a tenant must never replace a
+// known answer with Unknown. Kevin, 6 Oct 2026: household, other adults and the council tax account
+// are not the tenant's to answer (every tenant lives on their own, and we fill those in on the
+// Growth Plan form), so a tenant link can no longer write them.
 export const TENANT_ANSWERS = {
   phone:          { label: 'mobile', id: GP.tenant.phone,          kind: 'phone' },
   email:          { label: 'email', id: GP.tenant.email,          kind: 'email', max: 120 },
   dob:            { label: 'date of birth', id: GP.tenant.dob,            kind: 'dob' },
   ni:             { label: 'National Insurance number', id: GP.tenant.ni,             kind: 'ni' },
   ucPayDay:       { label: 'UC payment day', id: GP.tenant.ucPayDay,       kind: 'day' },
-  household:      { label: 'household', id: GP.tenant.household,      kind: 'choice', choices: ['Single', 'Couple', 'With children'] },
-  otherAdults:    { label: 'other adults', id: GP.tenant.otherAdults,    kind: 'text', max: 300 },
   capExemption:   { label: 'benefit cap', id: GP.tenant.capExemption,   kind: 'choice', choices: ['None (capped)', 'LCWRA', 'PIP or DLA', 'Carer', 'Earnings over threshold', 'Not on UC'] },
-  ctAccount:      { label: 'council tax account', id: GP.tenant.ctAccount,      kind: 'text', max: 40 },
   weeklyIncome:   { label: 'weekly income', id: GP.tenant.weeklyIncome,   kind: 'money' },
   weeklySpending: { label: 'weekly spending', id: GP.tenant.weeklySpending, kind: 'money' },
   otherBenefits:  { label: 'other benefits', id: GP.tenant.otherBenefits,  kind: 'text', max: 1000 },

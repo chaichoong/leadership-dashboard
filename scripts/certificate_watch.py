@@ -374,6 +374,9 @@ COVER_STRONG = {
     "Fire Alarm Cert": r"fire alarm (?:cert\w*|inspection|test\w*|servic\w*)|"
                        r"fire (?:safety|risk) (?:cert\w*|assessment|inspection|report)|\bFRA\b|\bBS ?5839",
     "Emergency Lighting": r"emergency light\w* (?:cert\w*|test\w*|inspection|servic\w*)|\bBS ?5266",
+    # Portable appliance test (7 Oct 2026). Never the bare letters outside a compliance
+    # name: here "PAT" is also the Airtable access token. Capitals only: "Pat" is a name.
+    "PAT": r"portable appliance|(?-i:\bPAT\b) (?:test\w*|cert\w*|report)",
 }
 COVER_LANE = {
     "GSC": r"\bgas\b",
@@ -383,9 +386,13 @@ COVER_LANE = {
     "HMO Cert": r"\blicen[cs]\w*",
     "Fire Alarm Cert": r"\bfire alarm|\bfire safety|\bfire cert\w*",
     "Emergency Lighting": r"\bemergency light\w*",
+    "PAT": r"(?-i:\bPAT\b)",
 }
+# The type's own name, as the lane matches it. Only PAT needs its own: its letters sit
+# inside "path" and "patio", and in lower case it is a first name.
+LANE_TYPE_NAME = {"PAT": r"(?-i:\bPAT\b)"}
 _STRONG_RE = {t: re.compile(rx, re.I) for t, rx in COVER_STRONG.items()}
-_LANE_RE = {t: re.compile(rx + "|" + re.escape(t), re.I) for t, rx in COVER_LANE.items()}
+_LANE_RE = {t: re.compile(rx + "|" + LANE_TYPE_NAME.get(t, re.escape(t)), re.I) for t, rx in COVER_LANE.items()}
 LANE_NAME_RE = re.compile(r"^\s*(?:PROPERTY\s+)?(?:COMPLIANCE|INSURANCE)\b", re.I)
 # Insurance that is not the landlord buildings policy: a claim on it, rent
 # guarantee cover, or someone's car. None of these is the house's insurance.

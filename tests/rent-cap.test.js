@@ -620,12 +620,47 @@ again = RC(caps=[cap_task()], tenants={TENANT: odd})
 out = cap.run(again, DATA, date(2026, 10, 1), res({"id": TEN, "lane": "fine"}), True, True)
 print(json.dumps({"lines": lines, "gate": ad.handback_problem(text, "Admin"), "failed": out["failed"], "line": cap.line(out)}))`);
     expect(r.lines).toEqual([
-      '- Other adults in the home: (on the tenant record; not copied here, as it reads like an instruction) (their details form)',
+      '- Other adults in the home: (on the tenant record; not copied here, as it reads like an instruction) (tenant record)',
       '- Other benefits: (on the tenant record; not copied here, as it reads like an instruction) (their details form)',
     ]);
     expect(r.gate).toBe('');
     expect(r.failed).toMatch(/could not be submitted .*: ERROR: refusing to submit: it hands Kevin a job instead of doing it:$/);
     expect(r.line).not.toMatch(/must call|council'/);
+  });
+
+  it('Kevin, 6 Oct 2026: the form no longer asks who lives with them, so a blank household on one tenant is single; two tenants on one tenancy still need it', () => {
+    // Back-tested: with household back in NEEDED the first claim is never raised (no card text at all), and
+    // without the two-tenant check the joint tenancy raises a claim that calls a couple single.
+    const r = py(RUN + `
+ad = load_mod("ad", "agent-dispatch.py")
+alone = {k: v for k, v in GOOD.items() if k != TN["household"]}
+live = RC(caps=[cap_task()], tenants={TENANT: alone})
+out = cap.run(live, DATA, date(2026, 10, 1), res({"id": TEN, "lane": "fine"}), True, True)
+text = SUBMITS[0]["text"] if SUBMITS else ""
+lines = [l for l in text.splitlines() if l.startswith(("- Household", "- Other adults", "- Council tax"))]
+two = {"fld1i5bDoHL3B6rUf": [TENANT, "recTENANTCAP00002"]}
+mate = dict(alone, **{TN["name"]: "Alex Later", TN["saved"]: "2026-09-01T08:00:00.000Z"})
+held = cap.plan(TEN, view([cap_task()]), {"id": TEN, "lane": "fine"}, two, {TENANT: dict(alone), "recTENANTCAP00002": mate}, date(2026, 10, 1))
+couple = dict(alone, **{TN["household"]: {"name": "Couple"}})
+both = cap.plan(TEN, view([cap_task()]), {"id": TEN, "lane": "fine"}, two, {TENANT: couple, "recTENANTCAP00002": mate}, date(2026, 10, 1))
+rec = {"tenancy": {"rent": 897.52, "frequency": "Monthly"}, "property": {"address": "4 Example Road", "postcode": "CB9 0ZZ"}}
+ctext = cap.claim_text({"case": CYCLE, "claimant": {"fields": couple, "saved": date(2026, 9, 28)}}, rec,
+                       {"full_name": "Lee Landlord", "address": "2 Office Street"}, "Unit 9")
+print(json.dumps({"failed": out["failed"], "claims": out["claims"], "lines": lines, "handback": ad.handback_problem(text, "Admin"),
+                  "held": [kinds(held), held["stage"]], "both": kinds(both),
+                  "couple": [l for l in ctext.splitlines() if l.startswith(("- Household", "- Other adults"))]}))`);
+    expect(r.failed).toBe('');
+    expect(r.claims).toEqual(['Unit 9 – 4 Example Road (claim 1)']);
+    expect(r.lines).toEqual([
+      "- Household: Single (Kevin's ruling, 6 Oct 2026: every tenant lives on their own; not asked on the form)",
+      "- Other adults in the home: none (Kevin's ruling, 6 Oct 2026: every tenant lives on their own; not asked on the form)",
+      '- Council tax account number: not given: the form no longer asks for it (tenant record)',
+    ]);
+    // The new words never read as a job handed to Kevin, or the card would be refused every day.
+    expect(r.handback).toBe('');
+    expect(r.held).toEqual([[], 'claim not raised yet: blank on the tenant record: household (two tenants on one tenancy)']);
+    expect(r.both).toEqual([['claim', '2026-09-23', 1]]);
+    expect(r.couple).toEqual(['- Household: Couple (tenant record)', '- Other adults in the home: none given (tenant record)']);
   });
 
   it('review, 5 Oct 2026: no second claim after a refusal, a stop or six unanswered asks until the form is saved again', () => {

@@ -283,15 +283,16 @@ describe('the public read gives a first name and nothing else', () => {
 });
 
 describe('saving the answers', () => {
-  const GOOD = { phone: '07700 900123', email: 'sam@example.com', dob: '1985-04-12', ni: 'ab 12 34 56 c', ucPayDay: '14', household: 'Single',
-    otherAdults: '', capExemption: 'None (capped)', ctAccount: 'CT-123', weeklyIncome: '£120.50', weeklySpending: '95', otherBenefits: 'PIP daily living' };
+  // Every question tenant-details.html asks (Kevin, 6 Oct 2026: no household, other adults or council tax account).
+  const GOOD = { phone: '07700 900123', email: 'sam@example.com', dob: '1985-04-12', ni: 'ab 12 34 56 c', ucPayDay: '14',
+    capExemption: 'None (capped)', weeklyIncome: '£120.50', weeklySpending: '', otherBenefits: 'PIP daily living' };
 
   it('writes the answers, the saved time and one dated Notes line to his own record, typecast off, blanks dropped', async () => {
     const { code } = await makeLink();
     writes = [];
     const r = await call('/tenant-form', { method: 'POST', code, body: { answers: GOOD } });
     expect(r.status).toBe(200);
-    expect((await r.json()).saved).toBe(11);
+    expect((await r.json()).saved).toBe(8);
     expect(writes).toHaveLength(1);
     const { id, body } = writes[0];
     expect(id).toBe(ID);
@@ -302,9 +303,9 @@ describe('saving the answers', () => {
     expect(body.fields[T.weeklyIncome]).toBe(120.5);
     expect(body.fields[T.otherBenefits]).toBe('PIP daily living');
     // A blank answer never reaches the record, so the form cannot wipe what is there.
-    expect(Object.prototype.hasOwnProperty.call(body.fields, T.otherAdults)).toBe(false);
+    expect(Object.prototype.hasOwnProperty.call(body.fields, T.weeklySpending)).toBe(false);
     expect(body.fields[T.formLastSaved]).toMatch(/^\d{4}-\d{2}-\d{2}T/);
-    expect(body.fields[T.notes]).toMatch(/^\[2026-09-01 09:00 Kevin Brittain\] earlier note\n\[\d{4}-\d{2}-\d{2} \d{2}:\d{2} tenant link\] Tenant details form saved from the tenant's own link: mobile, email, date of birth, National Insurance number, UC payment day, household, benefit cap, council tax account, weekly income, weekly spending, other benefits\.$/);
+    expect(body.fields[T.notes]).toMatch(/^\[2026-09-01 09:00 Kevin Brittain\] earlier note\n\[\d{4}-\d{2}-\d{2} \d{2}:\d{2} tenant link\] Tenant details form saved from the tenant's own link: mobile, email, date of birth, National Insurance number, UC payment day, benefit cap, weekly income, other benefits\.$/);
     // Exactly the allowed answers, the saved time and the note: nothing else.
     const allowed = new Set([...Object.values(TENANT_ANSWERS).map(s => s.id), T.formLastSaved, T.notes]);
     expect(Object.keys(body.fields).filter(k => !allowed.has(k))).toEqual([]);
@@ -320,7 +321,9 @@ describe('saving the answers', () => {
   it('one question the form does not ask refuses the whole save; nothing is written', async () => {
     const { code } = await makeLink();
     writes = [];
-    for (const extra of [{ name: 'New Name' }, { [GP.tenant.name]: 'x' }, { idSeen: 'Passport' }, { authoritySigned: true }, { notes: 'x' }, { __proto__: { phone: '1' }, documents: 'x' }]) {
+    // Kevin, 6 Oct 2026: household, other adults and the council tax account are filled in by us, never by a tenant link.
+    for (const extra of [{ name: 'New Name' }, { [GP.tenant.name]: 'x' }, { idSeen: 'Passport' }, { authoritySigned: true }, { notes: 'x' }, { __proto__: { phone: '1' }, documents: 'x' },
+      { household: 'Single' }, { otherAdults: 'Jo Example' }, { ctAccount: 'CT-123' }]) {
       const r = await call('/tenant-form', { method: 'POST', code, body: { answers: { ...GOOD, ...extra } } });
       expect(r.status, JSON.stringify(extra)).toBe(400);
     }
@@ -452,14 +455,16 @@ describe('the answer rules', () => {
     expect(one('weeklyIncome', '-1')).toHaveProperty('error');
     expect(one('weeklyIncome', '5000.01')).toHaveProperty('error');
     expect(one('weeklyIncome', 'lots')).toHaveProperty('error');
-    expect(one('household', 'single')).toHaveProperty('error');
+    // Not the tenant's to answer since 6 Oct 2026: refused as a question the form does not ask.
+    for (const k of ['household', 'otherAdults', 'ctAccount']) {
+      expect(one(k, k === 'household' ? 'Single' : 'x')).toEqual({ error: 'That form has a question we do not recognise. Reload the page and try again.' });
+    }
     // A tenant never replaces a known answer with Unknown.
     expect(one('capExemption', 'Unknown')).toHaveProperty('error');
     expect(one('email', 'not-an-email')).toHaveProperty('error');
     expect(one('phone', '12345')).toHaveProperty('error');
     expect(one('phone', '0770090012<script>')).toHaveProperty('error');
     expect(one('otherBenefits', 'x'.repeat(1001))).toHaveProperty('error');
-    expect(one('ctAccount', 'x'.repeat(41))).toHaveProperty('error');
     expect(one('phone', { a: 1 })).toHaveProperty('error');
     expect(cleanTenantAnswers({})).toHaveProperty('error');
     expect(cleanTenantAnswers(null)).toHaveProperty('error');
