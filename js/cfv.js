@@ -88,17 +88,20 @@
         const dueDay = getNumVal(tenancy, F.tenDueDay, 1) || 1;
         const dueIn = (y, m) => new Date(y, m, Math.min(dueDay, new Date(y, m + 1, 0).getDate()));
         const day = (v) => { const d = v ? new Date(String(v).slice(0, 10) + 'T00:00:00') : null; return d && !isNaN(d.getTime()) ? d : null; };
+        // No start date: the rent check cannot tell, so neither can this (review round 2, 9 Oct 2026).
+        let floor = day(getField(tenancy, F.tenStartDate));
+        if (!floor) return false;
+        const lookback = new Date(today);
+        lookback.setDate(lookback.getDate() - 80);
+        if (lookback > floor) floor = lookback;
+        // Only payments the rent check reads: dated after today minus 80 days.
         let newest = null;
         const txs = txIndex ? (txIndex.get(tenancy.id) || [])
             : (allTransactions || []).filter(tx => getField(tx, F.txReconciled) && txLinkedToTenancy(tx, tenancy.id));
         for (const tx of txs) {
             const d = day(getField(tx, F.txDate));
-            if (d && (!newest || d > newest)) newest = d;
+            if (d && d > lookback && (!newest || d > newest)) newest = d;
         }
-        let floor = day(getField(tenancy, F.tenStartDate));
-        const lookback = new Date(today);
-        lookback.setDate(lookback.getDate() - 80);
-        if (!floor || lookback > floor) floor = lookback;
         if (newest) {
             const paidTo = new Date(newest);
             paidTo.setDate(paidTo.getDate() + 6);

@@ -38,6 +38,9 @@ const CASES = [
   { name: 'unpaid rent before the window began', start: '2025-11-21', due: 1, paid: '2026-08-01', from: '2026-12-01', until: '2026-12-31', today: '2026-10-09', covered: false },
   { name: 'no From: covers nothing', start: '2025-11-21', due: 1, paid: '2026-09-01', from: null, until: '2027-04-30', today: '2026-12-09', covered: false },
   { name: 'From after Until: covers nothing', start: '2025-11-21', due: 1, paid: '2026-09-01', from: '2027-05-01', until: '2027-04-30', today: '2026-12-09', covered: false },
+  // Review round 2: a payment 80 to 85 days old is outside the rent check's read, so the page must ignore it too.
+  { name: 'a payment just outside the 80-day read', start: '2025-11-21', due: 1, paid: '2025-12-27', from: '2026-02-01', until: '2026-06-30', today: '2026-03-19', covered: false },
+  { name: 'no start date: cannot tell, never covered', start: null, due: 1, paid: '2026-09-01', from: '2026-10-01', until: '2027-04-30', today: '2026-12-09', covered: false },
   { name: 'due day 31 in short months', start: '2025-11-21', due: 31, paid: '2026-08-31', from: '2026-09-30', until: '2026-12-30', today: '2026-11-15', covered: true },
 ];
 
@@ -51,13 +54,15 @@ TY = rc.TY
 out = []
 for c in json.loads(${JSON.stringify(JSON.stringify(CASES))}):
     day = date.fromisoformat(c["today"])
-    f = {TY["dueDay"]: str(c["due"]), TY["rent"]: 500, TY["payStatus"]: "CFV", TY["start"]: c["start"],
+    f = {TY["dueDay"]: str(c["due"]), TY["rent"]: 500, TY["payStatus"]: "CFV", TY["start"]: c["start"] or None,
          TY["tenants"]: ["recTEN"], TY["tenantStatus"]: ["Active"], TY["unitRef"]: ["Unit 1 – 9 Example Road"], TY["hasTx"]: True}
     if c["from"]: f[TY["setOffFrom"]] = c["from"]
     if c["until"]: f[TY["setOffUntil"]] = c["until"]
     rc.bank_view = lambda feed, payments, d=day: (d, [])
     rc.tenant_type = lambda f, tenants: "Agent-Managed"
+    # load() reads only payments dated after today minus TX_LOOKBACK_DAYS: the same filter here.
     pays = [{"day": date.fromisoformat(c["paid"]), "amount": 500}] if c["paid"] else []
+    pays = [p for p in pays if p["day"] > day - __import__("datetime").timedelta(days=rc.TX_LOOKBACK_DAYS)]
     row = rc.judge({"id": "recTENANCY", "fields": f}, {}, pays, day, {"asAt": day, "waiting": []}, set(), set())
     out.append({"name": c["name"], "lane": row["lane"], "note": row["note"], "owed": row.get("owed")})
 print(json.dumps(out))
