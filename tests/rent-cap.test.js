@@ -663,6 +663,24 @@ print(json.dumps({"failed": out["failed"], "claims": out["claims"], "lines": lin
     expect(r.couple).toEqual(['- Household: Couple (tenant record)', '- Other adults in the home: none given (tenant record)']);
   });
 
+  it('review, 9 Oct 2026: the card never says Single beside named adults or a second tenant', () => {
+    // Back-tested: without household_gap the adults case raises a card reading "Single" beside "Jo Example", and the
+    // joint tenancy whose record says Single raises a claim.
+    const r = py(`
+alone = {k: v for k, v in GOOD.items() if k != TN["household"]}
+one = lambda f: cap.plan(TEN, view([cap_task()]), {"id": TEN, "lane": "fine"}, TENANCY, {TENANT: f}, date(2026, 10, 1))
+adults = one(dict(alone, **{TN["otherAdults"]: "Jo Example"}))
+said_none = one(dict(alone, **{TN["otherAdults"]: "None."}))
+two = {"fld1i5bDoHL3B6rUf": [TENANT, "recTENANTCAP00002"]}
+mate = dict(alone, **{TN["name"]: "Alex Later", TN["saved"]: "2026-09-01T08:00:00.000Z"})
+single = cap.plan(TEN, view([cap_task()]), {"id": TEN, "lane": "fine"}, two,
+                  {TENANT: dict(alone, **{TN["household"]: {"name": "Single"}}), "recTENANTCAP00002": mate}, date(2026, 10, 1))
+print(json.dumps({"adults": [kinds(adults), adults["stage"]], "none": kinds(said_none), "single": [kinds(single), single["stage"]]}))`);
+    expect(r.adults).toEqual([[], 'claim not raised yet: blank on the tenant record: household (other adults are on the record)']);
+    expect(r.none).toEqual([['claim', '2026-09-23', 1]]);
+    expect(r.single).toEqual([[], 'claim not raised yet: blank on the tenant record: household (two tenants on one tenancy, the record says Single)']);
+  });
+
   it('review, 5 Oct 2026: no second claim after a refusal, a stop or six unanswered asks until the form is saved again', () => {
     const r = py(`
 sent = claim(status="Completed", notes_extra="\\nRENT CLAIM SENT: 2026-10-02 x")

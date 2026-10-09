@@ -91,6 +91,20 @@ NEEDED = ("name", "dob", "ni", "weeklyIncome", "weeklySpending")
 # from. Two tenants on one tenancy do not live on their own: there the household must be on the record (we fill it
 # in on the Growth Plan form) before a claim is raised.
 LIVES_ALONE = "Kevin's ruling, 6 Oct 2026: every tenant lives on their own; not asked on the form"
+_NO_ADULTS_RE = re.compile(r"^\s*(none|no|nobody|no one|n/?a|-)\s*\.?\s*$", re.I)
+
+
+def household_gap(fields, tenant_count):
+    """Why the household must be filled in before a claim, or "". The card never says "Single" beside a second
+    tenant or beside other adults an earlier form recorded (review, 9 Oct 2026): those wait for a real answer."""
+    household = _sel(fields.get(TN["household"]))
+    adults = str(fields.get(TN["otherAdults"]) or "")
+    if tenant_count > 1 and household in ("", "Single"):
+        return ("household (two tenants on one tenancy, the record says Single)" if household
+                else "household (two tenants on one tenancy)")
+    if not household and adults.strip() and not _NO_ADULTS_RE.match(adults):
+        return "household (other adults are on the record)"
+    return ""
 # Each council's claim form, by postcode district (researched 4 Oct 2026; all three run the CRF Housing Payment).
 COUNCILS = {
     "CB9": ("West Suffolk Council, through Anglia Revenues Partnership",
@@ -566,8 +580,9 @@ def plan(tid, view, row, tenancy, tenants, day, no_chase=False, busy=False, unli
                 if not who["fields"].get(TN["authority"]):
                     why.append("the letter of authority is not ticked as signed")
                 blank = [k for k in NEEDED if who["fields"].get(TN[k]) in (None, "", [], {})]
-                if len(tenancy.get("fld1i5bDoHL3B6rUf") or []) > 1 and not _sel(who["fields"].get(TN["household"])):
-                    blank.append("household (two tenants on one tenancy)")
+                gap = household_gap(who["fields"], len(tenancy.get("fld1i5bDoHL3B6rUf") or []))
+                if gap:
+                    blank.append(gap)
                 if blank:
                     why.append("blank on the tenant record: " + ", ".join(blank))
             if why:

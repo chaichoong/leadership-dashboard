@@ -218,6 +218,9 @@ export const TENANT_LINK = {
 // known answer with Unknown. Kevin, 6 Oct 2026: household, other adults and the council tax account
 // are not the tenant's to answer (every tenant lives on their own, and we fill those in on the
 // Growth Plan form), so a tenant link can no longer write them.
+// A page opened before that change still sends them: they are dropped, never written and never
+// a reason to refuse the rest of his answers.
+export const TENANT_ANSWERS_RETIRED = ['household', 'otherAdults', 'ctAccount'];
 export const TENANT_ANSWERS = {
   phone:          { label: 'mobile', id: GP.tenant.phone,          kind: 'phone' },
   email:          { label: 'email', id: GP.tenant.email,          kind: 'email', max: 120 },

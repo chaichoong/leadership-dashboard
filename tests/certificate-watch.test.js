@@ -342,80 +342,132 @@ print(json.dumps({'err': err}))`);
   });
 });
 
-describe('a PAT test report (7 Oct 2026): the write path files the PAT type from an .xlsx and never adds a Type choice', () => {
-  // The agent stopped on a council's PAT report: the type list had no PAT and the help said PDF/JPG/PNG.
-  // Back-tested: without PAT in CERT_TYPES the filing is refused; with typecast on the create, a missing Type
-  // choice would be minted; without the .xlsx type a host with no system mime list uploads octet-stream; without
-  // the choice check the refusal is a stack trace; without the PAT lane words its own task never covers it.
+describe('a PAT test report (7 Oct 2026): filed from an .xlsx, never a standing requirement', () => {
+  // The agent stopped on a council's PAT report: the type list had no PAT, the help said PDF/JPG/PNG and the
+  // live Type field has no PAT choice. Each case below was back-tested by removing the mechanism it names.
   const SETUP = `
-import os, tempfile, mimetypes, urllib.request
+import os, io, tempfile, mimetypes, urllib.request, urllib.error, contextlib
 d = tempfile.mkdtemp(); doc = os.path.join(d, 'Pat Testing.xlsx'); open(doc, 'wb').write(b'PK' + b'x' * 6000)
-calls, uploads = [], []
+calls, uploads, metas = [], [], []
+REFUSE, META_FAIL, CHOICES = False, False, ['GSC', 'EICR', 'Fire Alarm Cert', 'EPC', 'Emergency Lighting', 'HMO Cert', 'Landlord Insurance', 'Lock Code', 'Other']
 m.get_task = lambda tid: {'id': tid, 'fields': {}}
 m.fetch_properties = lambda refresh=False: [{'id': 'pA', 'short': '6 Example Place', 'units': []}]
 m.fetch_certificates = lambda refresh=False: []
 m.pat = lambda: 'test-token'
 mimetypes.guess_type = lambda p, strict=True: (None, None)   # a host with no system mime list
+CF = m.CERT_FIELDS
 class Resp:
+    def __init__(self, body): self.body = body
     def __enter__(self): return self
     def __exit__(self, *a): return False
-    def read(self): return b'{}'
+    def read(self): return self.body
 def urlopen(req, timeout=0):
-    uploads.append(json.loads(req.data.decode())); return Resp()
+    if '/meta/bases/' in req.full_url:
+        metas.append(req.full_url)
+        if META_FAIL: raise urllib.error.URLError('offline')
+        field = {'id': CF['type'], 'type': 'singleSelect', 'options': {'choices': [{'name': c} for c in CHOICES]}}
+        return Resp(json.dumps({'tables': [{'id': 'tblOther', 'fields': [dict(field, id='fldOther')]},
+                                           {'id': m.CERTIFICATES_TABLE, 'fields': [field]}]}).encode())
+    uploads.append(json.loads(req.data.decode())); return Resp(b'{}')
 urllib.request.urlopen = urlopen
-CF = m.CERT_FIELDS
 def request(method, path, body=None):
     calls.append((method, body))
     if method == 'POST' and REFUSE:
-        raise RuntimeError('Airtable POST /' + m.CERTIFICATES_TABLE + ' -> HTTP 422: {"error":{"type":"INVALID_MULTIPLE_CHOICE_OPTIONS","message":"Insufficient permissions to create new select option \\\\"\\\\"PAT\\\\"\\\\""}}')
+        raise RuntimeError('Airtable POST /' + m.CERTIFICATES_TABLE + ' -> HTTP 422: {"error":{"type":"INVALID_MULTIPLE_CHOICE_OPTIONS","message":"Insufficient permissions to create new select option"}}')
     if method == 'POST':
         return {'id': 'recCERTPAT0000001'}
     return {'id': 'recCERTPAT0000001', 'fields': {CF['type']: 'PAT', CF['property']: ['pA'], CF['renewal']: '2028-10-06',
             CF['attachments']: [{'filename': 'Pat Testing.xlsx', 'size': 6002}], CF['tasks']: ['recTASK0000000001']}}
 m._request = request
 args = types.SimpleNamespace(task='recTASK0000000001', type='PAT', renewal='2028-10-06', file=doc, property='pA', unit=None, note=None)
+def file_it():
+    out, errs = io.StringIO(), io.StringIO()
+    with contextlib.redirect_stdout(out), contextlib.redirect_stderr(errs):
+        err, _ = run(lambda: m.cmd_certificate(args))
+    posts = [b for meth, b in calls if meth == 'POST']
+    said = json.loads(out.getvalue().strip().splitlines()[-1]) if out.getvalue().strip() else None
+    return {'err': err, 'typecast': [p['typecast'] for p in posts], 'type': [p['fields'][CF['type']] for p in posts],
+            'upload': [(u['filename'], u['contentType']) for u in uploads], 'metas': len(metas),
+            'said': said, 'stderr': errs.getvalue()}
 `;
 
-  it('files it: the PAT type, typecast off, the spreadsheet named as one', () => {
+  it('the live field has the PAT choice: typecast off, the spreadsheet named as one', () => {
     const r = py(SETUP + `
-REFUSE = False
-err, _ = run(lambda: m.cmd_certificate(args))
-post = [b for meth, b in calls if meth == 'POST'][0]
-print(json.dumps({'err': err, 'typecast': post['typecast'], 'type': post['fields'][CF['type']],
-                  'upload': [(u['filename'], u['contentType']) for u in uploads], 'types': list(m.CERT_TYPES)}))`);
+CHOICES.append('PAT')
+print(json.dumps(file_it()))`);
     expect(r.err).toBeNull();
-    expect(r.type).toBe('PAT');
-    expect(r.typecast).toBe(false);
+    expect([r.type, r.typecast, r.metas]).toEqual([['PAT'], [false], 1]);
     expect(r.upload).toEqual([['Pat Testing.xlsx', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet']]);
-    expect(r.types).toContain('PAT');
+    expect(r.said.choiceCreated).toBeNull();
   });
 
-  it('a Type field with no PAT choice refuses by name and uploads nothing', () => {
+  it('a type on the code\'s own list that the live field lacks is created by that one write, and said', () => {
     const r = py(SETUP + `
-REFUSE = True
-err, _ = run(lambda: m.cmd_certificate(args))
-print(json.dumps({'err': err, 'uploads': len(uploads), 'posts': sum(1 for meth, _ in calls if meth == 'POST')}))`);
-    expect(r.err).toContain('the Property Certificates Type field has no "PAT" choice, so nothing was filed');
-    expect(r.err).toContain('never adds a choice');
-    expect([r.uploads, r.posts]).toEqual([0, 1]);
+print(json.dumps(file_it()))`);
+    expect(r.err).toBeNull();
+    expect([r.type, r.typecast]).toEqual([['PAT'], [true]]);
+    expect(r.said.choiceCreated).toBe('created the PAT choice on Property Certificates > Type');
+    expect(r.stderr).toContain('created the PAT choice on Property Certificates > Type');
   });
 
-  it('a PAT counts only where one is filed, and its own task covers it; a path, a patio, a token or a Pat never do', () => {
+  it('a type NOT on the code\'s list is refused by name and never reaches Airtable', () => {
+    const r = py(SETUP + `
+args.type = 'Portable Thing'
+print(json.dumps(dict(file_it(), calls=len(calls))))`);
+    expect(r.err).toContain('--type must be one of');
+    expect([r.calls, r.metas, r.upload.length]).toEqual([0, 0, 0]);
+  });
+
+  it('the schema cannot be read: no typecast, and a missing choice is refused by name with nothing uploaded', () => {
+    const r = py(SETUP + `
+META_FAIL, REFUSE = True, True
+print(json.dumps(file_it()))`);
+    expect(r.typecast).toEqual([false]);
+    expect(r.err).toContain('the Property Certificates Type field has no "PAT" choice and its choices could not be read');
+    expect(r.upload).toEqual([]);
+  });
+
+  it('review, 9 Oct 2026: a filed PAT never becomes a requirement, an issue or a renewal', () => {
     const r = py(`
-import certificate_watch as cw
 P = {'id': 'pA', 'name': 'A', 'short': 'A', 'kind': 'HMO', 'required': ['EICR'], 'units': [], 'active': True,
      'managerEmail': '', 'postcode': '', 'manager': ''}
-C = {'id': 'c1', 'type': 'PAT', 'propertyIds': ['pA'], 'unitIds': [], 'status': 'Active', 'renewalDate': '2026-09-01',
-     'hasFile': True, 'taskIds': []}
-none = m.compliance_pages([P], [], '2026-10-09')[0]['issues']
-lapsed = m.compliance_pages([P], [C], '2026-10-09')[0]['issues']
+C = lambda t, d: {'id': 'c' + t, 'type': t, 'propertyIds': ['pA'], 'unitIds': [], 'status': 'Active', 'renewalDate': d,
+                  'hasFile': True, 'taskIds': []}
+lapsed = m.compliance_pages([P], [C('PAT', '2026-09-01')], '2026-10-09')[0]
+due = m.compliance_pages([P], [C('PAT', '2026-10-20'), C('GSC', '2026-10-20')], '2026-10-09')
+import certificate_watch as cw
+print(json.dumps({'required': lapsed['required'], 'issues': [i['type'] for i in lapsed['issues']],
+                  'held': lapsed['holds'].get('PAT', {}).get('state'),
+                  'renewals': [x['type'] for x in m.renewals_due(due, '2026-10-09')],
+                  'missed': [i['type'] for i in cw.missed_items([lapsed])[0]]}))`);
+    expect(r.required).not.toContain('PAT');
+    expect(r.issues).toEqual(['EICR']);
+    expect(r.held).toBe('expired');
+    // Control: a held gas record still renews; the PAT beside it does not.
+    expect(r.renewals).toEqual(['GSC']);
+    expect(r.missed).toEqual(['EICR']);
+  });
+
+  it('review, 9 Oct 2026: the filing gate knows a PAT report and a PAT payment; a path, a patio, a token or a Pat never match', () => {
+    const r = py(`
+import certificate_watch as cw
+task = {'name': 'INBOUND: process PAT test report', 'description': '', 'notes': '',
+        'attachments': [{'filename': 'Pat Testing.xlsx'}]}
+pay = [{'id': 't1', 'date': '2026-10-06', 'amount': -72, 'name': 'PAT TESTING LTD', 'propertyIds': ['pA']}]
+eicr = [{'propertyIds': ['pA'], 'hasFile': True, 'created': '2026-10-06', 'type': 'EICR'}]
+pat = [dict(eicr[0], type='PAT')]
 names = ['COMPLIANCE: file certificate - PAT - 6 Example Place', 'INBOUND: PAT test report for 6 Example Place',
          'Portable appliance testing at 6 Example Place', 'COMPLIANCE: fix the garden path at 6 Example Place',
          'COMPLIANCE: patio door at 6 Example Place', 'Airtable PAT expired: rotate the token', 'COMPLIANCE: Pat Example gas safety']
-print(json.dumps({'none': [i['type'] for i in none], 'lapsed': [(i['type'], i['state']) for i in lapsed if i['type'] == 'PAT'],
+print(json.dumps({'owed': cw.certificate_owed(task, []), 'payType': cw.cert_types_named(pay[0]['name']),
+                  'unfiledBesideEicr': len(cw.paid_without_certificate(pay, eicr, '2026-10-09')[0]),
+                  'unfiledBesidePat': len(cw.paid_without_certificate(pay, pat, '2026-10-09')[0]),
+                  'token': [cw.names_certificate('Airtable PAT expired'), cw.cert_types_named('Airtable PAT expired')],
                   'named': [cw.type_named(n, 'PAT') for n in names]}))`);
-    expect(r.none).not.toContain('PAT');
-    expect(r.lapsed).toEqual([['PAT', 'expired']]);
+    expect(r.owed).toMatch(/names a certificate and a file arrived on it/);
+    expect(r.payType).toEqual(['PAT']);
+    expect([r.unfiledBesideEicr, r.unfiledBesidePat]).toEqual([1, 0]);
+    expect(r.token).toEqual([false, []]);
     expect(r.named).toEqual([true, true, true, false, false, false, false]);
   });
 });

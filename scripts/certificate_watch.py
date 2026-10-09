@@ -69,7 +69,11 @@ PLACEHOLDER_NAME_RE = re.compile(r"placeholder|dummy|to[-_ ]?follow|tbc", re.I)
 # the bare word "certificate": an SSL certificate, a certificate of posting and a
 # death certificate are not compliance documents, and every false hit costs an
 # agent a refused close.
+# A portable appliance test (7 Oct 2026). "PAT" in capitals and followed by its own
+# word: the bare letters are also the Airtable access token, and "Pat" is a name.
+PAT_WORDS = r"portable appliance|(?-i:\bPAT\b) (?:test\w*|cert\w*|report)"
 CERT_DOC_RE = re.compile(
+    PAT_WORDS + "|"
     # Letter boundaries, not \b: "EICR_Ref12903492" is how the 24 Aug report was named.
     r"(?<![A-Za-z])LGSR(?![A-Za-z])|\bCP\s?12\b|gas safe(?:ty)? (?:record|certificate|cert)\b|landlord gas\b|"
     r"(?<![A-Za-z])EICR(?![A-Za-z])|electrical installation condition|electrical (?:safety )?(?:certificate|report)|"
@@ -92,6 +96,7 @@ TYPE_WORDS = (
     ("EICR", re.compile(r"\bEICR\b|electrical", re.I)),
     ("EPC", re.compile(r"\bEPC\b|energy performance", re.I)),
     ("Landlord Insurance", re.compile(r"insurance", re.I)),
+    ("PAT", re.compile(PAT_WORDS, re.I)),
 )
 
 # A payment counts as answered by a certificate row created from this many days
@@ -374,9 +379,8 @@ COVER_STRONG = {
     "Fire Alarm Cert": r"fire alarm (?:cert\w*|inspection|test\w*|servic\w*)|"
                        r"fire (?:safety|risk) (?:cert\w*|assessment|inspection|report)|\bFRA\b|\bBS ?5839",
     "Emergency Lighting": r"emergency light\w* (?:cert\w*|test\w*|inspection|servic\w*)|\bBS ?5266",
-    # Portable appliance test (7 Oct 2026). Never the bare letters outside a compliance
-    # name: here "PAT" is also the Airtable access token. Capitals only: "Pat" is a name.
-    "PAT": r"portable appliance|(?-i:\bPAT\b) (?:test\w*|cert\w*|report)",
+    # Never the bare letters outside a compliance name (see PAT_WORDS).
+    "PAT": PAT_WORDS,
 }
 COVER_LANE = {
     "GSC": r"\bgas\b",
@@ -386,7 +390,7 @@ COVER_LANE = {
     "HMO Cert": r"\blicen[cs]\w*",
     "Fire Alarm Cert": r"\bfire alarm|\bfire safety|\bfire cert\w*",
     "Emergency Lighting": r"\bemergency light\w*",
-    "PAT": r"(?-i:\bPAT\b)",
+    "PAT": r"\bappliance test\w*",
 }
 # The type's own name, as the lane matches it. Only PAT needs its own: its letters sit
 # inside "path" and "patio", and in lower case it is a first name.
