@@ -101,7 +101,8 @@ print(json.dumps({"out": out, "made": made, "line": rsc.line(out), "brief": rsc.
     expect(pat.fldgFjGBw6bTKJFCD).toBe('TENANCY RECORD: signed agreement with no tenancy: 7 Example Close');
     expect(pat.flduCtmQGpOA4eWaj).toEqual(['rec7aHLK1Q8fMLRXH']);
     expect(pat.fldRGhBQViKZKtkQ6).toMatch(/AGREEMENT NAME: Pat Example\nAGREEMENT RENT: 897.52\nAGREEMENT START: 2026-10-07\nAGREEMENT HOUSE: 7 Example Close/);
-    expect(pat.fldRGhBQViKZKtkQ6).toMatch(/RECORD CHANGE: a0000000000000a1 Onboard = unit <rental unit>/);
+    expect(pat.fldRGhBQViKZKtkQ6).toMatch(/RECORD CHANGE: a0000000000000a1 Onboard = unit <rental unit id> \(<its Rental Unit name, e\.g\. Unit 2 – 7 Example Close>\), due <day>/);
+    expect(pat.fldRGhBQViKZKtkQ6).toMatch(/add `, replace <live tenancy id> \(<its Unit Reference>\)`/);
     expect(pat.fldR7apBzSp3oxFxz).toBe('TENANCY RECORD KEY: a0000000000000a1');
     const blank = r.made.find(f => /Kim Blank/.test(f.fldRGhBQViKZKtkQ6));
     expect(blank.fldRGhBQViKZKtkQ6).toMatch(/Could not read the rent or the start date/);
@@ -150,6 +151,26 @@ print(json.dumps(res))
     expect(r.other).toEqual(['Sam Sample, 3 Sample Street']);
     expect(r.ended).toEqual(['Sam Sample, 3 Sample Street']);
     expect(r.rise).toEqual(['Sam Sample, 3 Sample Street']);
+  });
+
+  it('two copies of one Signed and Filed (same document, same minute) are one agreement: one task, found by either copy', () => {
+    const r = py(SIGNED + `
+TEXT["aa0000000000000a7"] = TEXT["aa0000000000000a1"]
+copy = mail("a0000000000000a7", "AST_Pat_Example_7_Example_Close", "Pat example", (2026, 10, 8))
+copy["internalDate"] = str(int(copy["internalDate"]) + 20000)          # 20 seconds later, the same minute
+old = [tenancy("recSAMOLD", "recSAM", "2021-03-19", 524.6), tenancy("recLEE1", "recLEE", "2026-09-28", 897.52)]
+out, made = run(old, mails=MAILS + [copy])
+second, made2 = run(old, mails=MAILS + [copy], raised={"a0000000000000a7": ("recT9", "Today")})
+print(json.dumps({"out": out, "made": made, "second": second, "made2": made2}))
+`);
+    expect(r.out.checked).toBe(4);
+    expect(r.made).toHaveLength(3);
+    const pat = r.made.filter(f => /7 Example Close/.test(f.fldgFjGBw6bTKJFCD));
+    expect(pat).toHaveLength(1);
+    expect(pat[0].fldR7apBzSp3oxFxz).toBe('TENANCY RECORD KEY: a0000000000000a1');
+    expect(pat[0].fldRGhBQViKZKtkQ6).toMatch(/Adobe emailed 2 copies of this agreement \(Gmail a0000000000000a1, a0000000000000a7\)/);
+    expect(r.made2.filter(f => /7 Example Close/.test(f.fldgFjGBw6bTKJFCD))).toEqual([]);
+    expect(r.second.unrecorded.join(' | ')).toMatch(/Pat Example, 7 Example Close \(task recT9\)/);
   });
 
   it('a dry run raises nothing; a blind mailbox read fails loudly', () => {
@@ -330,8 +351,10 @@ W[T_TENANTS]["recOLDTENANT00001"] = {TEN["name"]: "Old Tenant", TEN["unit"]: ["r
 W[T_TENANTS]["recGONE0000000001"] = {TEN["name"]: "Gone Before"}
 MAIL = "a1b2c3d4e5f60001"
 ONB = ["--due-day", "24", "--type", "Universal Credit", "--email", "pat@example.com", "--why", "agreement signed, room 2 named on the pack task"]
-def onboard_line(unit, extra=""):
-    return "If you approve:\\nRECORD CHANGE: %s Onboard = unit %s, due 24, Universal Credit, pat@example.com%s" % (MAIL, unit, extra)
+def onboard_line(unit, replace=None, name=None, replace_name=None):
+    name = name or W[m.T_UNITS][unit][m.UNIT_NAME]
+    extra = (", replace %s (%s)" % (replace, replace_name or W[T_TEN][replace][m.UNIT_REF][0])) if replace else ""
+    return "If you approve:\\nRECORD CHANGE: %s Onboard = unit %s (%s), due 24, Universal Credit, pat@example.com%s" % (MAIL, unit, name, extra)
 def tenants_named(name):
     return [k for k, v in W[T_TENANTS].items() if v.get(TEN["name"]) == name]
 out = {}
@@ -380,7 +403,7 @@ print(json.dumps(out))
 `);
     expect(r.unapproved[1].refused).toMatch(/Kevin has not approved task recRECORDTASK0001/);
     expect(r.edited[1].refused).toMatch(/was Approved with minor edits, not Approved as-is/);
-    expect(r.otherDay[1].refused).toMatch(/no line 'RECORD CHANGE: a1b2c3d4e5f60001 Onboard = unit recUNITFREE000001, due 24, Universal Credit, pat@example.com'/);
+    expect(r.otherDay[1].refused).toMatch(/no line 'RECORD CHANGE: a1b2c3d4e5f60001 Onboard = unit recUNITFREE000001 \(Unit 2 – 7 Example Close\), due 24, Universal Credit, pat@example.com'/);
     expect(r.lines[1].refused).toMatch(/AGREEMENT RENT line reads '800.00' but the rent check read '897.52'/);
     expect(r.plain[1].refused).toMatch(/not a TENANCY RECORD task the rent check raised/);
     expect(r.older[1].refused).toMatch(/reading of agreement a1b2c3d4e5f60001 is from an older reader/);
@@ -390,9 +413,9 @@ print(json.dumps(out))
   it('refuses: a unit at another house (whole words), a tenant on record, an occupied unit the line does not replace, two people, an agreement on record', () => {
     const r = py(DOOR + `
 a = agreement(MAIL, "Pat Example", 897.52, "2026-10-07", "7 Example Close")
-def go(unit, extra=""):
-    record_task("recRECORDTASK0001", a, onboard_line(unit, extra))
-    return run(["onboard", "--task", "recRECORDTASK0001", "--unit", unit] + ONB + (["--replace", extra.split()[-1]] if extra else []))
+def go(unit, replace=None):
+    record_task("recRECORDTASK0001", a, onboard_line(unit, replace))
+    return run(["onboard", "--task", "recRECORDTASK0001", "--unit", unit] + ONB + (["--replace", replace] if replace else []))
 out["elsewhere"] = go("recUNITELSEWHER0E")              # Unit 1 – 17 Example Close is not 7 Example Close
 out["occupied"] = go("recUNITTAKEN00001")
 agreement(MAIL, "Ann One and Bob Two", 897.52, "2026-10-07", "7 Example Close", several=True)
@@ -416,10 +439,30 @@ print(json.dumps(out))
     expect(r.posts).toEqual([]);
   });
 
+  it('the Onboard line carries each record\'s own name, and a line naming another room is refused', () => {
+    const r = py(DOOR + `
+a = agreement(MAIL, "Pat Example", 897.52, "2026-10-07", "7 Example Close")
+record_task("recRECORDTASK0001", a, onboard_line("recUNITFREE000001", name="Unit 1 – 7 Example Close"))
+out["otherRoom"] = run(["onboard", "--task", "recRECORDTASK0001", "--unit", "recUNITFREE000001"] + ONB)
+record_task("recRECORDTASK0001", a, onboard_line("recUNITTAKEN00001", "recLIVEONUNIT0001", replace_name="Unit 2 – 7 Example Close"))
+out["otherReplace"] = run(["onboard", "--task", "recRECORDTASK0001", "--unit", "recUNITTAKEN00001", "--replace", "recLIVEONUNIT0001"] + ONB)
+W[T_TEN]["recLIVEONUNIT0001"][m.UNIT_REF] = ["Unit 3 – 7 Example Close"]
+record_task("recRECORDTASK0001", a, onboard_line("recUNITTAKEN00001", "recLIVEONUNIT0001"))
+out["refElsewhere"] = run(["onboard", "--task", "recRECORDTASK0001", "--unit", "recUNITTAKEN00001", "--replace", "recLIVEONUNIT0001"] + ONB)
+out["posts"] = log["posts"]
+print(json.dumps(out))
+`);
+    expect(r.otherRoom[0]).toBe(2);
+    expect(r.otherRoom[1].refused).toMatch(/The line, exactly: RECORD CHANGE: a1b2c3d4e5f60001 Onboard = unit recUNITFREE000001 \(Unit 2 – 7 Example Close\), due 24/);
+    expect(r.otherReplace[1].refused).toMatch(/replace recLIVEONUNIT0001 \(Unit 1 – 7 Example Close\)'/);
+    expect(r.refElsewhere[1].refused).toMatch(/tenancy recLIVEONUNIT0001's Unit Reference is 'Unit 3 – 7 Example Close', not this unit 'Unit 1 – 7 Example Close'/);
+    expect(r.posts).toEqual([]);
+  });
+
   it('an occupied unit: only when the approved Onboard line says replace; the old tenancy stays live, off the unit', () => {
     const r = py(DOOR + `
 a = agreement(MAIL, "Pat Example", 897.52, "2026-10-07", "7 Example Close")
-record_task("recRECORDTASK0001", a, onboard_line("recUNITTAKEN00001", ", replace recLIVEONUNIT0001"))
+record_task("recRECORDTASK0001", a, onboard_line("recUNITTAKEN00001", "recLIVEONUNIT0001"))
 out["res"] = run(["onboard", "--task", "recRECORDTASK0001", "--unit", "recUNITTAKEN00001", "--replace", "recLIVEONUNIT0001"] + ONB)
 out["old"] = W[T_TEN]["recLIVEONUNIT0001"]; out["oldTenant"] = W[T_TENANTS]["recOLDTENANT00001"]
 print(json.dumps(out))

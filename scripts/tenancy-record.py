@@ -21,7 +21,8 @@ WHAT EVERY WRITE NEEDS
     real approval leaves, scripts/approval_evidence.py) carries the exact line
         RECORD CHANGE: <tenancy id> <Payment Status|Due Day|Set-off> = <value>
     (a set-off's value is "YYYY-MM-DD to YYYY-MM-DD"), or for a move-in and a rent change
-        RECORD CHANGE: <agreement's Gmail id> Onboard = unit <rental unit>, due <N>, <type>, <email>[, replace <tenancy>]
+        RECORD CHANGE: <agreement's Gmail id> Onboard = unit <rental unit> (<its Rental Unit name>), due <N>, <type>,
+            <email>[, replace <tenancy> (<its Unit Reference>)]   (one line; each name read back from its record)
         RECORD CHANGE: <old tenancy id> Rent change = <agreement's Gmail id>
     and the command's own arguments must be exactly what that line says.
     The agent proposes the change on the card, in plain words too; his approval carries it out.
@@ -523,9 +524,12 @@ def ledger_rows():
     return out
 
 
-def onboard_value(unit, due_day, kind, email, replace=None):
-    """The value of the Onboard line these arguments must match, word for word."""
-    return f"unit {unit}, due {due_day}, {kind}, {email}" + (f", replace {replace}" if replace else "")
+def onboard_value(unit, unit_name, due_day, kind, email, replace=None, replace_name=None):
+    """The value of the Onboard line these arguments must match, word for word. Each id carries its record's own name
+    in brackets (independent review, 9 Oct 2026: an id alone tells Kevin nothing), read here from the records, so a
+    line that names another room is not this line."""
+    return (f"unit {unit} ({unit_name}), due {due_day}, {kind}, {email}"
+            + (f", replace {replace} ({replace_name})" if replace else ""))
 
 
 def cmd_onboard(a):
@@ -543,17 +547,31 @@ def cmd_onboard(a):
         raise Refused(f"--replace {a.replace!r} is not a record id")
     task = load_task(a.task)
     mail, ag = agreement_of(task)
-    why = change_problem(task, mail, "Onboard", onboard_value(a.unit, a.due_day, a.type, email, a.replace))
+    unit = _one(T_UNITS, a.unit)
+    if not unit:
+        raise Refused(f"{a.unit} is not a rental unit")
+    unit_name = " ".join(str((unit.get("fields") or {}).get(UNIT_NAME) or "").split())   # "Unit 1 – 18 Example Road"
+    if not unit_name:
+        raise Refused(f"rental unit {a.unit} has no name, so the line Kevin approves cannot say which room it is")
+    tys, people = read_records()
+    replace_name = None
+    if a.replace:
+        old = next((t for t in tys if t["id"] == a.replace), None)
+        if not old:
+            raise Refused(f"--replace {a.replace} is not a tenancy")
+        refs = [" ".join(str(u).split()) for u in (old["fields"].get("unit") or [])]
+        if refs != [unit_name] or a.unit not in (old["fields"].get("unitIds") or []):
+            raise Refused(f"tenancy {a.replace}'s Unit Reference is '{', '.join(refs) or 'blank'}', not this unit "
+                          f"'{unit_name}': it is not the tenancy on unit {a.unit}")
+        replace_name = refs[0]
+    line = onboard_value(a.unit, unit_name, a.due_day, a.type, email, a.replace, replace_name)
+    why = change_problem(task, mail, "Onboard", line)
     if why:
-        raise Refused(why)
+        raise Refused(f"{why}. The line, exactly: RECORD CHANGE: {mail} Onboard = {line}")
     if ag.get("several"):
         raise Refused(f"the agreement names more than one person ({ag.get('name') or ', '.join(ag.get('signers') or [])}): "
                       "a joint tenancy or a guarantor is never onboarded as one person; it is Kevin's, on a card")
     start = date.fromisoformat(ag["start"])
-    unit = _one(T_UNITS, a.unit)
-    if not unit:
-        raise Refused(f"{a.unit} is not a rental unit")
-    unit_name = str((unit.get("fields") or {}).get(UNIT_NAME) or "")     # "Unit 1 – 18 Example Road"
     if not ag.get("house") or not rsc.same_house(ag["house"], unit_name):
         raise Refused(f"unit {a.unit} ({unit_name or 'no name'}) is not at {ag.get('house') or 'the agreement house'}")
     today = rc.today_london()
@@ -562,7 +580,6 @@ def cmd_onboard(a):
     if done:
         raise Refused(f"agreement {mail} was onboarded already: tenant {done[-1].get('tenantId')}, tenancy "
                       f"{done[-1].get('tenancy')}")
-    tys, people = read_records()
     still_unrecorded(mail, ag, tys, people, today)
     # A tenant this door created for THIS agreement whose tenancy then failed is the same person: reused, never
     # refused as "already on record" and never created twice (independent review, 9 Oct 2026).

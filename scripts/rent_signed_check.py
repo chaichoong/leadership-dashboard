@@ -241,6 +241,19 @@ def on_record(agreement, tenancies, tenant_names, day=None):
     return renewal
 
 
+def one_per_agreement(agreements):
+    """Adobe can email info@ two copies of one "Signed and Filed" (review, 9 Oct 2026): the same document signed in
+    the same minute is ONE agreement, keyed by its lowest Gmail id, carrying every copy's id in `copies`."""
+    groups = {}
+    for a in agreements:
+        groups.setdefault((str(a.get("doc") or "").lower(), a.get("signed")), []).append(a)
+    out = []
+    for copies in groups.values():
+        copies.sort(key=lambda c: c["mail"])
+        out.append(dict(copies[0], copies=[c["mail"] for c in copies]))
+    return out
+
+
 def task_text(a, day):
     house = a.get("house") or a["doc"]
     missing = [w for w, k in (("rent", "rent"), ("start date", "start")) if a.get(k) is None]
@@ -251,6 +264,9 @@ def task_text(a, day):
              f"AGREEMENT START: {a.get('start') or 'not read'}", f"AGREEMENT HOUSE: {house}", ""]
     if missing:
         lines.append(f"Could not read the {' or the '.join(missing)} off the agreement: open the signed PDF on that email.")
+    if len(a.get("copies") or []) > 1:
+        lines.append(f"Adobe emailed {len(a['copies'])} copies of this agreement (Gmail {', '.join(a['copies'])}): this one "
+                     "task is for all of them.")
     if a.get("several"):
         lines.append(f"This agreement names more than one person ({a.get('name') or ', '.join(a.get('signers') or [])}): "
                      "onboard refuses it. A joint tenancy, or a guarantor who signed with the tenant, is Kevin's, on a card.")
@@ -260,8 +276,10 @@ def task_text(a, day):
               f"`RECORD CHANGE: <old tenancy> Rent change = {a['mail']}` on the card; once approved, "
               "`python3 scripts/tenancy-record.py rent-change <old tenancy> --task <this task> --why \"...\"`.",
               "- A new tenant: find the unit from the pack task that built this agreement. Put "
-              f"`RECORD CHANGE: {a['mail']} Onboard = unit <rental unit>, due <day>, <Universal Credit|Working|Agent-Managed>, "
-              "<email>` on the card (add `, replace <live tenancy>` when the unit is occupied); once approved, "
+              f"`RECORD CHANGE: {a['mail']} Onboard = unit <rental unit id> (<its Rental Unit name, e.g. Unit 2 – 7 Example "
+              "Close>), due <day>, <Universal Credit|Working|Agent-Managed>, <email>` on the card (add `, replace <live "
+              "tenancy id> (<its Unit Reference>)` when the unit is occupied; `onboard --dry-run` prints the exact line); "
+              "once approved, "
               "`python3 scripts/tenancy-record.py onboard --task <this task> --unit <rental unit> --due-day N --type "
               "\"Universal Credit\" --email ... [--replace <live tenancy>] --why \"...\"`.",
               "- Not ours to record (a cancelled pack, a test): say so in a report, quoting the evidence, and close it.",
@@ -345,6 +363,7 @@ def run(rc, now, writes, on, data, day=None, list_mail=None, fetch=None, text_of
             agreements.append(a)
         if dirty and writes:
             write_cache(cache_path, cache)
+        agreements = one_per_agreement(agreements)
         out["checked"] = len(agreements)
         if not agreements:
             return out
@@ -357,7 +376,8 @@ def run(rc, now, writes, on, data, day=None, list_mail=None, fetch=None, text_of
             if rec:
                 out["recorded"].append(f"{label} ({rec[0]}{', a renewal at the same rent' if rec[1] else ''})")
                 continue
-            task = raised.get(a["mail"])
+            # Any copy's id finds the task: a second copy is the same agreement, never a second task.
+            task = next((raised[m] for m in a["copies"] if m in raised), None)
             if task and task["status"] in CLOSED:
                 # The agent closed it, with its reason on the task (not ours, a cancelled pack): off Home and the count.
                 out["closed"].append(f"{label} (closed by its task {task['id']}, {task['status']})")

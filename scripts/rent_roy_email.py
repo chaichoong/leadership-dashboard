@@ -17,16 +17,17 @@ WHAT IT DOES, each rent check, before lane B reads its tasks
      raised, through the Gmail worker the proof of residency step uses. A read cut short fails. No email from Roy is
      checked against a read of every email to info@ in the same window: none at all means the read is blind, and the
      run fails loudly.
-  3. An email answers a task only when it arrived AFTER that task was raised (the reader's own rule: one reply is never
-     the answer to the question it caused) and its subject or own words name the task's tenant (the first name with
-     another of their names beside it, never one name alone) or its unit or house (whole words: "1 Example Road" is not
-     "11 Example Road"). One task: his words go on it. Several: nothing is written and the row says so, unless exactly
-     one is named by its tenant or unit and the rest only by the house they share (two rooms in one house).
+  3. An email answers a task ONLY as a reply in that check's own thread (independent review, 9 Oct 2026: a yes to
+     anything else must never start a DWP form): it arrived AFTER the task was raised (the reader's own rule: one reply
+     is never the answer to the question it caused), and its subject, Re:/Fwd: taken off, holds "housing costs check"
+     and the task's own place words from its name (whole words: "Unit 2 – 1 Example Road" is not "Unit 2 – 11 Example
+     Road"). A journal upload, a repair, keys, an invoice: never, whatever the body says. A subject naming two checks
+     writes nothing and the row says so. An email that names a check's tenant or house outside its thread is said on
+     the row, never written.
   4. His words: the email's own text above any quoted text and above his sign-off, on one line, at most WORDS_MAX
-     characters (the subject when the body has none). Written only when lane B's own reader reads them as a yes or a no
-     to "are the housing costs verified?", or his own text speaks about the housing costs, verification, Universal
-     Credit or the DWP. Any other email that names the tenant (keys, repairs, an invoice) is said on the row and never
-     written: the reader would take it as a reply it "could not read" and ask Roy again at once.
+     characters; the subject is never his words. Written only when they speak about the question (housing costs,
+     verified, Universal Credit, UC, the DWP, the journal), for a yes as for anything else: a bare "Yes" or "Approved"
+     is said on the row as not clear enough to record. Lane B's own reader then reads them as it reads any reply.
   5. Appends to the task's Notes his Property Manager page's shape, `[YYYY-MM-DD HH:MM Roy Lavin] <words>` (the
      email's London time), and under it `[ROY EMAIL <Gmail id>, read by the rent check] ...`, which ends his words for
      the reader and keys the write: an email whose id is on any lane B task, or in LEDGER, is never written again. The
@@ -62,8 +63,12 @@ SIGNATURE_RE = re.compile(r"^\s*(?:kind regards|best regards|warm regards|regard
                           r"|sent from my .*|--)\s*[,.!]*\s*$", re.I)
 SIGNOFF_RE = re.compile(r"^\s*(?:many thanks|thanks|thank you|cheers|best)\s*[,.!]*\s*$", re.I)
 SUBJECT_LEAD_RE = re.compile(r"^\s*(?:(?:re|fwd?|fw)\s*:\s*)+", re.I)
-# What the housing costs question is about. Never "journal": his "<tenant> - Journal Details" emails are not an answer.
-ABOUT_RE = re.compile(r"\bhousing\s+(?:costs?|element)\b|\bverif\w*|\buniversal\s+credit\b|\bUC\b|\bDWP\b", re.I)
+# What the housing costs question is about: his own words must say one of these, a yes included.
+ABOUT_RE = re.compile(r"\bhousing\s+(?:costs?|element)\b|\bverif\w*|\buniversal\s+credit\b|\bUC\b|\bDWP\b|\bjournal\b",
+                      re.I)
+# The thread of a housing costs check: its task name, "NEW TENANT RENT: housing costs check[ N]: <place>".
+THREAD_RE = re.compile(r"\bhousing\s+costs\s+check\b", re.I)
+TASK_PLACE_RE = re.compile(r"housing\s+costs\s+check(?:\s+\d+)?\s*:\s*(?P<place>\S.*?)\s*$", re.I)
 _GATE = []
 
 
@@ -96,16 +101,26 @@ def own_text(body):
 
 
 def his_words(msg, lb):
-    """(his words on one line, taken from the subject?). Never carrying a key line another reader would take."""
+    """His own words on one line ("" when the body has none: the subject is our task's name, never his words). Never
+    carrying a key line another reader would take."""
     text = " ".join(own_text(msg.get("body")).split())
-    from_subject = not text
-    if from_subject:
-        text = " ".join(SUBJECT_LEAD_RE.sub("", por.subject(msg)).split())
     cut = lb.SETUP_KEY_RE.search(text)
     if cut:
         text = text[:cut.start()].rstrip()
     text = text.split("Reference for the rent check", 1)[0].rstrip()
-    return text[:WORDS_MAX].rstrip(), from_subject
+    return text[:WORDS_MAX].rstrip()
+
+
+def task_place(name):
+    """The place words of a housing costs check, from its own task name; "" for a name of another shape."""
+    m = TASK_PLACE_RE.search(" ".join(norm(name).split()))
+    return m.group("place") if m else ""
+
+
+def in_thread(subject, place):
+    """True when a subject is a reply in this check's thread: "housing costs check" and the check's place words."""
+    s = SUBJECT_LEAD_RE.sub("", norm(subject))
+    return bool(place) and THREAD_RE.search(s) is not None and rsc.same_house(place, s)
 
 
 def name_words(name):
@@ -151,13 +166,14 @@ def open_checks(rc, data):
         unit = rc.first(f.get(rc.TY["unitRef"])) or ""
         part, house = split_unit(unit)
         out.append({"task": last["id"], "tenancy": tenancy, "made": last["made"], "place": lb.place_name(str(unit)),
-                    "unitPart": part, "house": house, "tenants": list(f.get(rc.TY["tenants"]) or [])})
+                    "thread": task_place(last.get("name")), "unitPart": part, "house": house,
+                    "tenants": list(f.get(rc.TY["tenants"]) or [])})
     return out, written
 
 
 def match(checks, text, names):
-    """The checks an email names. Several, unless exactly one is named by its tenant or unit and the others only by
-    the house they share with it."""
+    """The checks an email NAMES (its tenant, unit or house), for the row only: naming a check never writes on it.
+    Several, unless exactly one is named by its tenant or unit and the others only by the house they share."""
     hits = []
     for c in checks:
         exact = (any(names_tenant(text, names.get(t, "")) for t in c["tenants"])
@@ -232,8 +248,8 @@ def default_count_mail(q, account):
 def run(rc, data, now, writes, on, list_mail=None, count_mail=None, ledger=None, roy=None):
     """The bridge, once per rent check, before lane B. Never raises: a failure is said on the row and in the exit
     code."""
-    out = {"on": bool(on), "checks": 0, "read": 0, "written": [], "planned": [], "ambiguous": [], "skipped": [],
-           "already": 0, "failed": ""}
+    out = {"on": bool(on), "checks": 0, "read": 0, "written": [], "planned": [], "ambiguous": [], "unclear": [],
+           "skipped": [], "already": 0, "failed": ""}
     if not on:
         return out
     list_mail = list_mail or por.default_list_mail
@@ -264,23 +280,27 @@ def run(rc, data, now, writes, on, list_mail=None, count_mail=None, ledger=None,
             if mail in written:
                 out["already"] += 1
                 continue
-            text = por.subject(msg) + "\n" + own_text(msg.get("body"))
-            hits = match([c for c in checks if at > c["made"]], text, names)
-            if not hits:
-                continue
+            after = [c for c in checks if at > c["made"]]
             when = at.astimezone(por.LONDON).strftime("%-d %b %H:%M")
             subject = " ".join(por.subject(msg).split())[:80]
+            hits = [c for c in after if in_thread(por.subject(msg), c["thread"])]
+            if not hits:
+                named = match(after, por.subject(msg) + "\n" + own_text(msg.get("body")), names)
+                if named:
+                    out["skipped"].append(f"{when} \"{subject}\" names {'; '.join(c['place'] for c in named)} but is not a "
+                                          "reply in its housing costs check's thread, so it was not read")
+                continue
             if len(hits) > 1:
                 out["ambiguous"].append(f"{when} \"{subject}\" names {len(hits)} housing costs checks "
                                         f"({'; '.join(c['place'] for c in hits)}), so nothing was written")
                 continue
             c = hits[0]
-            words, from_subject = his_words(msg, lb)
-            verdict = lb.reading(words, "costs") if words else lb.UNCLEAR
-            if verdict not in (lb.YES, lb.NO) and (from_subject or not ABOUT_RE.search(words)):
-                out["skipped"].append(f"{when} \"{subject}\" names {c['place']} but does not answer the housing costs "
-                                      "check, so it was not written")
+            words = his_words(msg, lb)
+            if not ABOUT_RE.search(words):
+                out["unclear"].append(f"{when} \"{subject}\" ({c['place']}, task {c['task']}): reply not clear enough to "
+                                      f"record (\"{words[:60] or 'no words of his own'}\")")
                 continue
+            verdict = lb.reading(words, "costs")
             said = f"{c['place']} (task {c['task']}): Roy's email of {when}, read as {verdict}: \"{words[:80]}\""
             if not writes:
                 out["planned"].append(said)
@@ -301,9 +321,13 @@ def brief(out):
     """Home's words, or "": only what stops an answer reaching the clock."""
     if out.get("failed"):
         return "Roy's email check FAILED: see the rent check row."
+    bits = []
+    if out.get("unclear"):
+        bits.append(f"{len(out['unclear'])} repl{'y' if len(out['unclear']) == 1 else 'ies'} to a housing costs check not "
+                    "clear enough to record")
     if out.get("ambiguous"):
-        return f"Roy's emails: {len(out['ambiguous'])} named more than one housing costs check and were not read."
-    return ""
+        bits.append(f"{len(out['ambiguous'])} named more than one housing costs check")
+    return ("Roy's emails: " + "; ".join(bits) + ", see the rent check row.") if bits else ""
 
 
 def line(out):
@@ -316,6 +340,8 @@ def line(out):
         bits.append("a real run would write: " + "; ".join(out["planned"]))
     if out.get("ambiguous"):
         bits.append("NOT written: " + "; ".join(out["ambiguous"]))
+    if out.get("unclear"):
+        bits.append("NOT written: " + "; ".join(out["unclear"]))
     if out.get("skipped"):
         bits.append("not an answer: " + "; ".join(out["skipped"]))
     if out.get("failed"):
