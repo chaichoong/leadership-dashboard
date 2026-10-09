@@ -30,7 +30,7 @@ it('probe', () => {
 });
 `;
 
-function innerRun(probe) {
+function innerRun(probe, { git = true } = {}) {
   const dir = mkdtempSync(join(tmpdir(), 'tripwire-'));
   try {
     for (const f of CARRIED) {
@@ -41,8 +41,8 @@ function innerRun(probe) {
     writeFileSync(join(dir, 'package.json'), '{"type": "module"}');
     symlinkSync(join(ROOT, 'node_modules'), join(dir, 'node_modules'), 'dir');
     const env = clearGitLocalEnv({ ...process.env });
-    execFileSync('git', ['init', '-q'], { cwd: dir, env });
-    const before = readWatched(sharedConfigPath(dir));
+    if (git) execFileSync('git', ['init', '-q'], { cwd: dir, env });
+    const before = git ? readWatched(sharedConfigPath(dir)) : null;
     const r = spawnSync('npx', ['vitest', 'run'], {
       cwd: dir, encoding: 'utf8', timeout: 50000, env: { ...env, TRIPWIRE_PROBE: probe },
     });
@@ -81,6 +81,13 @@ describe('the real-repo git config tripwire', () => {
     const r = innerRun('branch');
     expect(r.status, r.out.slice(-1500)).toBe(0);
     expect(r.out).toMatch(/1 passed/);   // control: the probe really ran
+  }, 60000);
+
+  it('a copy with no git repository (a git archive export) runs its tests, with a one-line note', () => {
+    const r = innerRun('none', { git: false });
+    expect(r.status, r.out.slice(-1500)).toBe(0);
+    expect(r.out).toMatch(/real-repo config tripwire: skipped, .* is not a git checkout/);
+    expect(r.out).toMatch(/1 passed/);   // control: the tests still ran
   }, 60000);
 
   it('a run that touches nothing passes', () => {

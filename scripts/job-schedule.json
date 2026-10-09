@@ -440,6 +440,7 @@
  },
  "data-invariants": {
   "completedWhen": "ran",
+  "completedWhenFoundLine": "RESULT: INVARIANT BROKEN",
   "completedWhenNote": "data-invariants EXITS 1 BY DESIGN when it finds a violation, which is the whole point of it, so run-job.sh records ok:false every morning it works properly. The default test read that as 'did not run' and reported a 13-day outage (finding 20260919-daily-ops-phase2-excepti-549). It is graded on attendance; the violation itself already has its own ':x: data-invariants \u2014 exit code 1' line, so counting it twice was double counting.",
   "cron": "40 6 * * *",
   "maxLateMinutes": 180,
@@ -676,6 +677,7 @@
  },
  "compliance-watch": {
   "completedWhen": "ran",
+  "completedWhenFoundLine": "COMPLIANCE: \\d+ required items? had no open task",
   "completedWhenNote": "compliance-watch EXITS 1 BY DESIGN on any morning it finds a required certificate with no open task, even after it has raised that task: that a task had gone missing is the thing worth seeing, and the job's Estate Status row prints the count only when the run is not clean. It is graded on attendance, as data-invariants is.",
   "cron": "5 6 * * *",
   "maxLateMinutes": 240,

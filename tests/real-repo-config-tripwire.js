@@ -13,7 +13,8 @@
 // every user.* value and commit.gpgsign. Other sessions add branch and worktree sections to the
 // shared config all day, and those must not trip it.
 //
-// A read that fails at the start fails the run: a tripwire that cannot see is not a pass.
+// A read that fails at the start fails the run: a tripwire that cannot see is not a pass. A copy with no
+// .git at all (a `git archive` export) has nothing to guard: it is skipped with a one-line note.
 import { execFileSync } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { dirname, isAbsolute, resolve } from 'node:path';
@@ -61,6 +62,12 @@ export function diffWatched(before, after) {
 }
 
 export default function setup() {
+  // A copy with no git repository of its own (a `git archive` export, a tarball) has no settings to guard.
+  // Checked on this folder itself, never by asking git, which would find a parent repository and watch that.
+  if (!existsSync(resolve(ROOT, '.git'))) {
+    process.stderr.write(`real-repo config tripwire: skipped, ${ROOT} is not a git checkout\n`);
+    return undefined;
+  }
   const file = sharedConfigPath();
   const before = readWatched(file);
   // The control: every git repository's config carries core.bare. Without it this is not a read.
