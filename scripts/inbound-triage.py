@@ -1816,6 +1816,42 @@ def history_merge_stats(into, addr, prefix, era, last_ms):
     return s
 
 
+def history_restamp_unseen(seen, now_iso):
+    """Stamp every book row this build did not walk with this build's time.
+
+    The walk reads only the newest HISTORY_BUILD_PAGES pages of each lane, so a sender whose
+    filings have scrolled past that window is not walked again, although its counts (where people
+    filed its mail, which does not change) are still the best evidence the book holds. Until 9 Oct
+    2026 such a row kept the stamp of the build that last walked it: the 8 Oct rebuild finished,
+    130 of 281 rows read that day and 151 still read 1 Sep, and triage-history-book-is-current
+    stayed red on a book that had just been rebuilt (finding 20261008-agent-dispatch-793). A
+    finished build owns the whole book, so it stamps the whole book. Last Seen is left as it is:
+    it keeps the date the sender's mail was last walked, the honest age of that row's evidence.
+
+    The read must hold every sender this build just wrote. Fewer is a broken read, and the run
+    fails rather than stamp part of the book. Returns how many rows it re-stamped.
+    """
+    rows = _airtable_get_all(HISTORY_TABLE, [("pageSize", "100"), ("returnFieldsByFieldId", "true"),
+                                             ("fields[]", HB["sender"]), ("fields[]", HB["lastBuilt"])])
+
+    def addr_of(r):
+        return str((r.get("fields") or {}).get(HB["sender"]) or "").strip().lower()
+    present = {addr_of(r) for r in rows}
+    missing = len(set(seen) - present)
+    if missing:
+        fail("CONTROL FAILED: the history book read back %d rows, and %d of the %d senders this "
+             "build just wrote are not among them. That is a broken read, so no row was re-stamped."
+             % (len(rows), missing, len(seen)))
+    stale = [r["id"] for r in rows
+             if addr_of(r) and addr_of(r) not in seen
+             and str((r.get("fields") or {}).get(HB["lastBuilt"]) or "") != now_iso]
+    for i in range(0, len(stale), 10):
+        airtable_request("PATCH", HISTORY_TABLE, {
+            "records": [{"id": rid, "fields": {HB["lastBuilt"]: now_iso}} for rid in stale[i:i + 10]],
+        }, "history book re-stamp")
+    return len(stale)
+
+
 def cmd_history_build(pages, budget=None):
     """Wrapper that REMEMBERS a failure (finding 20260910-daily-ops-513).
 
@@ -2009,6 +2045,9 @@ def _history_build(pages, budget=None, now=None):
             "records": records[i:i + 10],
             "typecast": True,
         }, "history book upsert")
+    # Before the state moves: a failed re-stamp leaves the saved place, so the next run writes
+    # the book again from it (no Gmail spent) and stamps the rest (finding 793).
+    carried = history_restamp_unseen(set(stats), now_iso)
     state = read_state()
     state["history_built_ms"] = int(datetime.now().timestamp() * 1000)
     # A success clears the cooldown, so a transient quota blip never costs a
@@ -2026,6 +2065,7 @@ def _history_build(pages, budget=None, now=None):
     history_progress_clear()
     # Counts only — runs.log must never carry sender addresses.
     print(json.dumps({"built": now_iso, "senders": len(stats),
+                      "carriedForward": carried,
                       "agentMovesExcluded": excluded_agent,
                       "sampled": sampled, "truncated": truncated,
                       "unitsSpent": _pace["units"],

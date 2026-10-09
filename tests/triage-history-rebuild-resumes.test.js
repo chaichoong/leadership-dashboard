@@ -64,7 +64,16 @@ m.classify_era = lambda *a, **k: "human-era"
 
 # Airtable and state, stubbed: we assert on what the walk COUNTED, not on the network.
 wrote = {"batches": 0, "records": 0}
+book = {}
 def fake_airtable(method, table, payload=None, what=""):
+    # The re-stamp reads the book back after the upsert (finding 793): serve what was written.
+    if method == "GET":
+        return {"records": [{"id": "rec%014d" % i, "fields": {m.HB["sender"]: s, m.HB["lastBuilt"]: b}}
+                            for i, (s, b) in enumerate(sorted(book.items()))]}
+    for r in payload.get("records") or []:
+        f = r.get("fields") or {}
+        if m.HB["sender"] in f:
+            book[f[m.HB["sender"]]] = f.get(m.HB["lastBuilt"])
     wrote["batches"] += 1
     wrote["records"] += len(payload.get("records") or [])
     return {}
