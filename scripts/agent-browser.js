@@ -1369,6 +1369,14 @@ function assertHandoverPlan(plan, now = new Date()) {
       if (!String(plan.sources || '').includes(a)) die(`the plan names "${a}" in "answers" but its "sources" never quote it: say where that answer comes from`);
     }
   }
+  // "carryOn" (9 Oct 2026): the robot goes on page by page from where the steps end. Its facts are
+  // the only source the planner may answer from, so a plan without them cannot carry on.
+  if (plan.carryOn !== undefined) {
+    const c = plan.carryOn;
+    const facts = c && (Array.isArray(c.facts) ? c.facts.join('\n') : String(c.facts || ''));
+    if (!c || typeof c !== 'object' || !facts.trim()) die('the plan\'s "carryOn" needs "facts": every answer the form may ask for, one per line, from its sources');
+    if (c.maxPages !== undefined && !(Number(c.maxPages) >= 1 && Number(c.maxPages) <= CARRY_ON_MAX_PAGES)) die(`"carryOn.maxPages" must be 1 to ${CARRY_ON_MAX_PAGES}`);
+  }
   plan.steps.forEach((s, i) => {
     const d = s && s.do;
     if (!HANDOVER_STEPS.has(d)) die(`step ${i + 1} is "${d}". A handover plan never submits, pays or uploads: the last click is Kevin's.`);
@@ -1622,9 +1630,16 @@ async function waitForKevin(page, s, maxMs, onTick) {
 const FILLING = 'The robot is filling this in for you: hands off until this bar says Your turn.';
 
 // Runs the plan up to Kevin's turn. A step that fails does not throw: the window
-// stays his, with the step named, so he can finish by hand.
+// stays his, with the step named, so he can finish by hand. A plan with "carryOn" goes on
+// from where its steps end, or past a step whose box or button was not there (the Swinton
+// plans' missing email box, 9 Oct 2026), page by page to the price. A refusal (the guard,
+// the allowlist, the credential check) is never carried past.
 async function runHandover(page, plan, opts = {}) {
   const done = [];
+  const onward = async () => {
+    const c = await carryOn(page, plan, opts);
+    return { done: done.concat(c.done), stuck: c.stuck, end: c.end || null };
+  };
   for (let i = 0; i < plan.steps.length; i++) {
     const s = plan.steps[i];
     try {
@@ -1648,10 +1663,15 @@ async function runHandover(page, plan, opts = {}) {
       if (opts.onTick) opts.onTick();
       if (!opts.quiet) await turnBanner(page, FILLING);   // a new page drops the bar: put it back (not in a dry run's screenshot)
     } catch (e) {
-      return { done, stuck: { step: i + 1, do: s.do, error: String((e && e.message) || e).slice(0, 300) } };
+      const error = String((e && e.message) || e).slice(0, 300);
+      if (plan.carryOn && s.do !== 'kevin' && CARRY_PAST_RE.test(error) && !NEVER_PAST_RE.test(error)) {
+        done.push({ do: s.do, executed: false, error, carriedOnPast: true });
+        return onward();
+      }
+      return { done, stuck: { step: i + 1, do: s.do, error } };
     }
   }
-  return { done, stuck: null };
+  return plan.carryOn ? onward() : { done, stuck: null };
 }
 
 // The window is his until he closes it (the tab, the window or Chrome itself).
@@ -1666,6 +1686,500 @@ async function waitForWindowClose(ctx, capMs, onTick) {
     if (onTick) onTick();
     await new Promise(r => setTimeout(r, 1500));
   }
+}
+
+// ── The robot carries on (Kevin, 9 Oct 2026) ─────────────────────────────────
+// "It signs in, starts doing stuff, but then it gets stuck. It asks me to do one thing and then
+// doesn't carry on again. It's basically opening up a page and then expecting me to do everything
+// for it." A plan is written before it runs, so it could only cover pages an agent had seen: the
+// Everywhen plan filled page 1 (22 steps) and handed him "the claims and declaration questions, then
+// read the price"; both Swinton plans died at step 18 on a box that is not there when he is signed in.
+// A plan with "carryOn" now goes on from where its steps end (or past a step whose box was missing):
+// the robot reads the page, a planner maps each question to the plan's facts, and Next moves it on,
+// page after page, until the price is on screen. A question no fact answers is HIS, by name: in his
+// window the robot waits for him to answer it and press Next, then carries on; in a dry run it stops
+// and the agent puts it on his card.
+// DECLARATIONS ARE HIS PAGE (review, 9 Oct 2026). Kevin ruled the robot may answer declarations from
+// his standing answers, but three review rounds showed no reading of an arbitrary insurer's page can
+// say for certain which question a box answers (a list under a legend, a block inserted above Next, a
+// vague label), and a wrong declaration can void a policy. So a page whose form mentions claims,
+// convictions, CCJs, bankruptcy, refused or cancelled insurance, charges or a first-person declaration
+// is handed to him whole: the robot touches nothing on it and carries on once he presses Next. His
+// standing answers stay on file (HANDOVER_DIR/standing-answers.json) for the day an insurer's page is
+// mapped well enough to use them.
+// The planner never decides alone: it may answer only a radio, tick box, dropdown or text box the robot
+// read on the page, citing one whole fact line and giving that line's own words, and press only a
+// button worded as moving on, read again the moment before it is pressed.
+const STANDING_FILE = () => process.env.AGENT_STANDING_ANSWERS || path.join(HANDOVER_DIR, 'standing-answers.json');
+const DECLARATION_TOPIC_RE = /\b(claims?|convict\w*|criminal|offences?|ccjs?|county court|judge?ments?|bankrupt\w*|refused|cancell?ed|voided|declined|special terms|terms imposed|imposed|charged?|prosecut\w*|investigat\w*|police|cautions?|insolven\w*|liquidat\w*|disqualif\w*|struck off|strike off|material facts?|iva|individual voluntary|debt relief|sequestrat\w*|arrangements? with (?:your |their |its )?creditors|administration|administrators?|receivership)\b/i;
+const normWords = t => String(t || '').replace(/\s+/g, ' ').trim().toLowerCase();
+// A form that asks for a declaration, anywhere in it however long: his page.
+function declarationWords(text) {
+  const t = String(text || '');
+  const m = t.match(DECLARATION_TOPIC_RE) || t.match(NEARBY_DECLARATION_RE);
+  return m ? m[0] : '';
+}
+
+// The facts on his standing file that every quote form may ask (his address, email-only contact,
+// monthly instalments). Never fatal: a missing or unreadable file only means fewer facts.
+function loadStandingFacts(file = STANDING_FILE()) {
+  try {
+    const raw = JSON.parse(fs.readFileSync(file, 'utf8'));
+    return Array.isArray(raw && raw.facts) ? raw.facts.map(String) : [];
+  } catch { return []; }
+}
+
+const CARRY_ON_MAX_PAGES = 25;
+const CARRY_ON_ROUNDS = 3;            // rounds on one page: an answer can reveal follow-up questions
+const CARRY_ON_KEVIN_MS = 20 * 60 * 1000;
+// The buttons that end the robot's part when the page shows a price: the quote is ready to buy.
+const BUY_RE = /\b(buy|purchase|pay|payment|check ?out|place (?:my |your )?order|proceed to (?:payment|checkout)|complete (?:my |your )?(?:purchase|order|payment))\b/i;
+// The only words the robot presses to move on. Anything else ("No", "Yes, that is right") can be an
+// answer, so it is his (review, 9 Oct 2026).
+const MOVE_ON_RE = /^(?:next|next step|continue|save and continue|proceed|get (?:a |my |your )?(?:quote|quotes|price)|see (?:my |your )?(?:quote|quotes|price)|find (?:my |an |the )?address|look ?up address|search|calculate(?: my)?(?: quote| price)?)\s*[>›»→]?$/i;
+
+// What the page asks, in a form the planner can answer: every visible question with a target the
+// robot can act on. Radios are grouped by name and their option labels are the targets (Acturis forms
+// hide the input and style the label). A group's question is the text round it with its own answer
+// labels taken out, so "No" is never read as part of the question.
+async function snapshotForm(page) {
+  return page.evaluate(() => {
+    const clean = t => String(t || '').replace(/\s+/g, ' ').trim();
+    const shown = el => {
+      if (!el || !el.getBoundingClientRect) return false;
+      const r = el.getBoundingClientRect(); const s = getComputedStyle(el);
+      return r.width > 0 && r.height > 0 && s.visibility !== 'hidden' && s.display !== 'none' && Number(s.opacity) !== 0;
+    };
+    const cssId = id => '#' + CSS.escape(id);
+    const path = el => {
+      const parts = []; let n = el;
+      while (n && n.nodeType === 1 && n !== document.body) {
+        let i = 1, s = n; while ((s = s.previousElementSibling)) if (s.tagName === n.tagName) i++;
+        parts.unshift(`${n.tagName.toLowerCase()}:nth-of-type(${i})`); n = n.parentElement;
+      }
+      return 'body > ' + parts.join(' > ');
+    };
+    const target = el => {
+      if (el.id && document.querySelectorAll(cssId(el.id)).length === 1) return cssId(el.id);
+      if (el.name && document.getElementsByName(el.name).length === 1) return `[name="${CSS.escape(el.name)}"]`;
+      return path(el);
+    };
+    const byId = ids => String(ids || '').split(/\s+/).filter(Boolean).map(i => { const t = document.getElementById(i); return t ? t.textContent : ''; }).join(' ');
+    const isControl = o => !['button', 'submit', 'reset', 'image', 'hidden'].includes(String(o.type || '').toLowerCase());
+    // The text of N without the given elements (a group's own labels, any dropdown's options).
+    const textWithout = (n, drop) => {
+      const c = n.cloneNode(true);
+      const marks = new Set(drop);
+      const walkPair = (a, b) => { if (marks.has(a)) { b.remove(); return; } const ac = Array.from(a.children), bc = Array.from(b.children); for (let i = 0; i < ac.length; i++) if (bc[i]) walkPair(ac[i], bc[i]); };
+      walkPair(n, c);
+      c.querySelectorAll('select,option,script,style').forEach(x => x.remove());
+      return clean(c.textContent);
+    };
+    // The words round a control: the largest box round it under 300 characters holding no other
+    // question's control, less the control's own labels.
+    const around = (c, own) => {
+      let t = '';
+      for (let n = c.parentElement; n && n !== document.body; n = n.parentElement) {
+        const other = Array.from(n.querySelectorAll('input,select,textarea')).some(o => o !== c && isControl(o) && !(c.name && o.name === c.name));
+        if (other) break;
+        const x = textWithout(n, own);
+        if (x.length > 300) break;
+        t = x;
+      }
+      return t;
+    };
+    const question = c => {
+      const q = [];
+      if (c.labels) for (const l of c.labels) q.push(l.textContent);
+      const fs = c.closest('fieldset'); const lg = fs && fs.querySelector('legend'); if (lg) q.push(lg.textContent);
+      q.push(c.getAttribute('aria-label') || '', byId(c.getAttribute('aria-labelledby')), c.getAttribute('placeholder') || '');
+      // A box with its own label is asked by that label; the words around it can hold the next question.
+      const own = clean(q.join(' '));
+      return (own || around(c, [])).slice(0, 400);
+    };
+    const items = []; const groups = {};
+    for (const el of document.querySelectorAll('input,select,textarea')) {
+      const type = String(el.type || '').toLowerCase();
+      if (['hidden', 'submit', 'button', 'reset', 'image', 'file', 'password'].includes(type)) continue;
+      if (type === 'radio' || type === 'checkbox') {
+        // The label he would click when the box itself is hidden; the shortest one is the option.
+        const labels = Array.from(el.labels || []).filter(l => shown(l) && clean(l.textContent)).sort((a, b) => clean(a.textContent).length - clean(b.textContent).length);
+        const clickable = shown(el) ? el : labels[0];
+        if (!clickable) continue;
+        const t = clickable === el ? target(el) : (el.id ? `label[for="${CSS.escape(el.id)}"] >> nth=${Array.from(document.querySelectorAll(`label[for="${CSS.escape(el.id)}"]`)).indexOf(labels[0])}` : target(labels[0]));
+        const option = clean(labels.length ? labels[0].textContent : el.value);
+        if (type === 'radio' && el.name) {
+          let g = groups[el.name];
+          if (!g) {
+            g = groups[el.name] = { kind: 'radio', question: '', options: [], _el: el };
+            items.push(g);
+          }
+          // Only the option's own label is taken out of the question: a form can tie its question label to the box too.
+          g.options.push({ label: option, target: t, checked: !!el.checked, _labels: labels.slice(0, 1) });
+        } else {
+          items.push({ kind: 'checkbox', question: question(el), option, target: t, checked: !!el.checked });
+        }
+        continue;
+      }
+      if (!shown(el)) continue;
+      const it = { kind: el.tagName === 'SELECT' ? 'select' : (el.tagName === 'TEXTAREA' ? 'text' : (type || 'text')),
+                   question: question(el), target: target(el), value: clean(el.value).slice(0, 120), required: !!el.required };
+      if (el.tagName === 'SELECT') {
+        it.options = Array.from(el.options).map(o => clean(o.label || o.textContent)).filter(Boolean).slice(0, 60);
+        it.value = el.selectedIndex >= 0 && el.options[el.selectedIndex] ? clean(el.options[el.selectedIndex].label || el.options[el.selectedIndex].textContent) : '';
+      }
+      items.push(it);
+    }
+    // A radio group's question: its legend, else the words round the group less its own labels.
+    for (const g of Object.values(groups)) {
+      const el = g._el;
+      const fs = el.closest('fieldset'); const lg = fs && fs.querySelector('legend');
+      const ownLabels = [].concat(...g.options.map(o => o._labels));
+      let q = lg ? clean(lg.textContent) : '';
+      if (!q) {
+        let best = '';
+        for (let n = el.parentElement; n && n !== document.body; n = n.parentElement) {
+          const all = Array.from(n.querySelectorAll('input,select,textarea')).filter(isControl);
+          if (all.some(o => o.name !== el.name)) break;
+          const x = textWithout(n, ownLabels); if (x.length > 300) break; best = x;
+        }
+        q = best;
+      }
+      g.question = q.slice(0, 400);
+      delete g._el;
+      for (const o of g.options) delete o._labels;
+    }
+    const buttons = [];
+    for (const el of document.querySelectorAll('button,input[type=submit],input[type=button],a[role=button],[role=button],a.btn,a.button')) {
+      if (!shown(el)) continue;
+      const text = clean(el.innerText || el.value || el.getAttribute('aria-label') || '');
+      if (!text || text.length > 40) continue;
+      buttons.push({ kind: 'button', text, target: target(el) });
+    }
+    const headings = Array.from(document.querySelectorAll('h1')).filter(shown).map(h => clean(h.textContent)).filter(Boolean).slice(0, 4);
+    const errors = Array.from(document.querySelectorAll('[role=alert],.error,.errors,.validation-message,.field-validation-error,.error-message,[aria-invalid=true]'))
+      .filter(shown).map(e => clean(e.innerText || e.getAttribute('aria-label') || '')).filter(Boolean).slice(0, 10);
+    const body = clean(document.body.innerText || '');
+    const prices = (body.match(/£\s?\d[\d,]*(?:\.\d{2})?[^.£]{0,40}/g) || []).slice(0, 8);
+    // The forms' whole text, however long: every <form> that holds a visible answer, and the smallest
+    // box round the answers that sit in no form (a footer's "Make a claim" link stays outside both).
+    const inputs = Array.from(document.querySelectorAll('input,select,textarea')).filter(el => isControl(el) && String(el.type || '').toLowerCase() !== 'password'
+      && (shown(el) || Array.from(el.labels || []).some(shown)));
+    const boxes = new Set(inputs.map(i => i.closest('form')).filter(Boolean));
+    const loose = inputs.filter(i => !i.closest('form'));
+    if (loose.length) {
+      let box = loose[0].parentElement;
+      while (box && box !== document.body && !loose.every(i => box.contains(i))) box = box.parentElement;
+      boxes.add(box || document.body);
+    }
+    const formText = Array.from(boxes).map(b => clean(b.innerText || '')).join(' | ');
+    return { url: location.href, title: document.title, headings, errors, prices, formText, items: items.slice(0, 90), buttons: buttons.slice(0, 40) };
+  });
+}
+
+// Where a page stands: its address and main headings. A follow-up question appearing is not a move.
+function pageSignature(snap) {
+  return JSON.stringify([String(snap.url).split('#')[0], snap.headings]);
+}
+// He has moved the page on: a new address or headings, or none of the questions he was handed left.
+function movedOn(before, now) {
+  if (pageSignature(before) !== pageSignature(now)) return true;
+  const was = new Set(before.items.map(i => i.question).filter(Boolean));
+  return was.size > 0 && !now.items.some(i => was.has(i.question));
+}
+
+// The model the planner uses: the platform's default (js/ai-models.js), never a literal here.
+function plannerModel() {
+  try {
+    const m = /default:\s*'([^']+)'/.exec(fs.readFileSync(path.join(REPO, 'js', 'ai-models.js'), 'utf8'));
+    if (m) return m[1];
+  } catch { /* said below */ }
+  throw new Error('js/ai-models.js has no default model, so the page planner cannot run');
+}
+
+const PLANNER_SCHEMA = {
+  type: 'object',
+  properties: {
+    steps: { type: 'array', items: { type: 'object', properties: {
+      do: { type: 'string', enum: ['fill', 'select', 'click', 'check'] }, target: { type: 'string' }, value: { type: 'string' },
+      question: { type: 'string' }, source: { type: 'string' } }, required: ['do', 'target', 'question', 'source'] } },
+    next: { type: ['string', 'null'] },
+    unknown: { type: 'array', items: { type: 'string' } },
+    done: { type: 'string', enum: ['no', 'price', 'blocked'] },
+    reason: { type: 'string' },
+  },
+  required: ['steps', 'next', 'unknown', 'done'],
+};
+const PLANNER_RULES = [
+  'You fill in ONE page of a UK web form (an insurance quote, usually) inside a robot browser for Kevin Brittain.',
+  'Answer only from FACTS. Every step names in "source" the ONE whole fact line it used, copied exactly. A Yes or No needs a fact line about that same thing.',
+  'Use only the targets listed on the page items. To answer a radio question, click the target of the option you choose. Never click a button as a step: the only button you may name is "next".',
+  'A typed value ("fill") must be copied exactly from the fact line you cite (dates as DD/MM/YYYY; TODAY is given).',
+  'If no fact answers a question the page needs, put the question in "unknown" and do not guess. Skip optional questions no fact answers.',
+  'Leave a question alone when its current value is already right.',
+  'Never answer a declaration (claims, convictions, CCJs, bankruptcy, insurance refused or cancelled, charges, "I declare"): put it in "unknown". Kevin answers those himself.',
+  'Never touch: a password, card or bank details, a signature, a final "I declare / I confirm the information is true" box, or any Buy, Pay, Purchase, Submit, Confirm, Accept or Agree button.',
+  'Contact or marketing preferences: email only, never phone, SMS, text, post or WhatsApp. Payment: monthly instalments.',
+  'When every needed question on this page is answered, set "next" to the target of the button that moves on (Next, Continue, Get a quote, Find address when an address lookup is needed). Otherwise null.',
+  'Set "done" to "price" when this page shows the quote price to buy, "blocked" (with "reason") when the site says it cannot quote, else "no".',
+].join('\n');
+
+function claudePlanner(input) {
+  const bin = process.env.AGENT_CLAUDE_BIN || path.join(os.homedir(), '.local', 'bin', 'claude');
+  const env = { ...process.env };
+  // The robots' own token (never on the command line); a desktop session's keychain login goes stale.
+  const tokenFile = path.join(os.homedir(), '.config', 'od', 'claude_oauth_token');
+  if (!env.CLAUDE_CODE_OAUTH_TOKEN && fs.existsSync(tokenFile)) env.CLAUDE_CODE_OAUTH_TOKEN = fs.readFileSync(tokenFile, 'utf8').trim();
+  const r = require('child_process').spawnSync(bin, ['-p', '--model', plannerModel(), '--output-format', 'json',
+    '--json-schema', JSON.stringify(PLANNER_SCHEMA), '--tools', '', '--setting-sources', '', '--strict-mcp-config',
+    '--no-session-persistence', '--system-prompt', PLANNER_RULES], {
+    input: JSON.stringify(input), cwd: os.tmpdir(), env, encoding: 'utf8', timeout: 180000, maxBuffer: 8 * 1024 * 1024 });
+  if (r.error) throw new Error(`the page planner could not run: ${r.error.message}`);
+  let out;
+  try { out = JSON.parse(r.stdout); } catch { throw new Error(`the page planner gave no answer (exit ${r.status}): ${String(r.stderr || r.stdout).slice(0, 200)}`); }
+  if (out.is_error || !out.structured_output) throw new Error(`the page planner failed: ${String(out.result || out.subtype || '').slice(0, 200)}`);
+  return out.structured_output;
+}
+
+function planner() {
+  // Tests stand a planner in (a module exporting one function); a run uses the robots' Claude.
+  return process.env.AGENT_HANDOVER_PLANNER ? require(path.resolve(process.env.AGENT_HANDOVER_PLANNER)) : claudePlanner;
+}
+
+const lineKey = t => normWords(t).replace(/[.;,\s]+$/, '');
+const squashFact = t => normWords(t).replace(/[\s,£]/g, '');
+const tokensOf = t => normWords(t).match(/[a-z0-9]+/g) || [];
+// A typed value is the cited line's own words: in it (spaces, commas and £ aside), a short value as a
+// whole word of it, never a fragment ("0" inside "2009"); or it is today.
+function valueInLine(v, line) {
+  const want = squashFact(fillTokens(v));
+  if (!want) return false;
+  if (want === squashFact(fillTokens('{{today}}'))) return true;
+  if (want.length < 3) return tokensOf(line).includes(want);
+  return squashFact(line).includes(want);
+}
+const COMMON_WORDS = new Set(['property', 'insurance', 'insured', 'there', 'which', 'would', 'other', 'about', 'years', 'house',
+  'please', 'select', 'answer', 'question', 'details', 'currently', 'within', 'under']);
+const stems = t => new Set(tokensOf(t).filter(w => w.length >= 5 && !COMMON_WORDS.has(w)).map(w => w.slice(0, 6)));
+// A picked option is the cited line's own words. A Yes or No comes from a line about the same thing
+// ("Listed: No" for "Is the property listed?") holding that one answer and no other; any other option,
+// every word of it in what the line says it IS (the part after "never", "not" or "no" set aside, so
+// "email only; never phone" never ticks Phone), and never an option worded with a negation.
+function pickInLine(label, line, question = '') {
+  const words = tokensOf(label);
+  if (!words.length) return false;
+  if (words.length === 1 && /^(yes|no)$/.test(words[0])) {
+    const yn = new Set(tokensOf(line).filter(w => w === 'yes' || w === 'no'));
+    const subject = stems(question);
+    return yn.size === 1 && yn.has(words[0]) && [...stems(line)].some(w => subject.has(w));
+  }
+  if (/\b(no|not|never|none|nil|free|without)\b/i.test(label)) return false;
+  const said = normWords(line).replace(/\b(never|not|no|none)\b[^;.]*/g, ' ');
+  const have = new Set(tokensOf(said));
+  return words.filter(w => w.length >= 3 || /^\d+$/.test(w)).every(w => have.has(w));
+}
+// Is this value any fact line's own words? (The dry-run report.)
+function valueInFacts(v, factsText) {
+  return String(factsText || '').split('\n').some(l => valueInLine(v, l));
+}
+
+function factsOf(plan, standingFacts) {
+  const own = plan.carryOn && plan.carryOn.facts;
+  const lines = [].concat(Array.isArray(own) ? own : String(own || '').split('\n'), standingFacts || []);
+  return lines.map(l => String(l).trim()).filter(Boolean);
+}
+
+// The planner's steps, checked. Each must target an answer the robot read on the page (a radio
+// option, a tick box, a dropdown or a text box: never a button), cite one whole fact line, and give
+// words that are in that line. Anything else is a question for Kevin, never a guess.
+function checkPlannerSteps(out, snap, facts) {
+  const lines = new Map(facts.map(l => [lineKey(l), l]));
+  const answers = new Map();
+  for (const it of snap.items) {
+    if (it.kind === 'radio') for (const o of it.options || []) answers.set(o.target, { item: it, pick: o.label, kind: 'click' });
+    else if (it.kind === 'checkbox') answers.set(it.target, { item: it, pick: it.option, kind: 'click' });
+    else if (it.kind === 'select') answers.set(it.target, { item: it, kind: 'select' });
+    else answers.set(it.target, { item: it, kind: 'fill' });
+  }
+  const buttons = new Map(snap.buttons.map(b => [b.target, b]));
+  const steps = [], unknown = [...new Set((out.unknown || []).map(String).filter(Boolean))];
+  for (const s of out.steps || []) {
+    const a = answers.get(s.target);
+    const q = String((a && a.item.question) || s.question || s.target || '').slice(0, 160);
+    const line = lines.get(lineKey(s.source));
+    const want = s.do === 'check' ? 'click' : s.do;
+    if (!a) { unknown.push(buttons.has(s.target) ? `press "${buttons.get(s.target).text}"` : q); continue; }
+    if (a.kind !== want || !line || !a.item.question) { unknown.push(q); continue; }
+    if (a.kind === 'fill') {
+      if (!valueInLine(s.value, line)) { unknown.push(q); continue; }
+      steps.push({ do: 'fill', selector: s.target, value: String(s.value), question: q, item: a.item });
+      continue;
+    }
+    if (a.kind === 'select') {
+      const pick = pickOption((a.item.options || []).map(l => ({ value: l, label: l })), String(s.value || '')).option;
+      if (!pick || !pickInLine(pick.label, line, a.item.question)) { unknown.push(q); continue; }
+      steps.push({ do: 'select', selector: s.target, label: pick.label, question: q, item: a.item, pick: pick.label });
+      continue;
+    }
+    if (!pickInLine(a.pick, line, a.item.question)) { unknown.push(q); continue; }
+    steps.push({ do: 'click', selector: s.target, question: q, item: a.item, pick: a.pick });
+  }
+  const next = out.next && buttons.has(out.next) ? buttons.get(out.next) : null;
+  return { steps, unknown: [...new Set(unknown)], next, done: out.done || 'no', reason: String(out.reason || '') };
+}
+
+// Errors that mean a box or button was not there (a plan step written for another state of the page):
+// the robot carries on past these. A refusal by the guard, the allowlist or the credential check never.
+const CARRY_PAST_RE = /Timeout \d+ms exceeded|waiting for (?:locator|selector)|resolved to 0 elements|element is not (?:visible|attached)/i;
+const NEVER_PAST_RE = /^(refused|BROWSER REFUSED)|not on the allowlist|password|credential/i;
+
+// Goes on from the page the plan's steps left, page by page. Returns { done, stuck, end }: end is
+// 'price' (the quote is on screen: his turn to buy); otherwise stuck says where and why it stopped.
+// Never throws: his window stays his.
+async function carryOn(page, plan, opts = {}) {
+  const done = [];
+  try {
+    return await carryOnPages(page, plan, opts, done);
+  } catch (e) {
+    return { done, stuck: { step: 'carry-on', do: 'carry-on', error: `the robot stopped reading the page: ${String(e.message || e).slice(0, 240)}` } };
+  }
+}
+
+async function carryOnPages(page, plan, opts, done) {
+  const facts = factsOf(plan, opts.standingFacts === undefined ? loadStandingFacts() : opts.standingFacts);
+  const plan_ = opts.planner || planner();
+  const maxPages = Math.min(Number(plan.carryOn.maxPages) || 15, CARRY_ON_MAX_PAGES);
+  let lastSig = '', samePage = 0;
+  const his = async (p, questions, snapBefore) => {
+    // His turn, mid-form: he answers these and presses Next himself; the robot then carries on.
+    if (opts.skipKevin) return { done, stuck: { step: `page ${p}`, do: 'carry-on', error: 'questions only Kevin can answer: ' + questions.join(' | ').slice(0, 400), unknown: questions } };
+    await turnBanner(page, `Your turn: ${questions.slice(0, 3).join(' | ').slice(0, 300)}. Answer ${questions.length === 1 ? 'it' : 'them'} and press Next: the robot carries on.`);
+    const moved = await waitForPageMove(page, snapBefore, opts.kevinMs || CARRY_ON_KEVIN_MS, opts.onTick);
+    if (!moved) return { done, stuck: { step: `page ${p}`, do: 'kevin', error: 'not done in time: ' + questions.join(' | ').slice(0, 300) } };
+    done.push({ do: 'kevin', executed: true, say: questions.join(' | ').slice(0, 300), carryOn: p });
+    await turnBanner(page, FILLING);
+    lastSig = '';
+    return null;
+  };
+  // A page that asks for a declaration is his, whole: every question on it, by name.
+  const declarationPage = async (p, snap) => {
+    // The forms' text, and every question and option the robot read, wherever its words sit.
+    const word = declarationWords([snap.formText].concat(snap.items.map(i => [i.question, i.option || '']
+      .concat((i.options || []).map(o => (typeof o === 'string' ? o : o.label))).join(' '))).join(' | '));
+    if (!word) return undefined;
+    const qs = snap.items.map(i => i.question).filter(Boolean);
+    return his(p, [`this page asks your declarations ("${word}")`].concat(qs).slice(0, 12), snap);
+  };
+  for (let p = 1; p <= maxPages; p++) {
+    await page.waitForLoadState('domcontentloaded', { timeout: 30000 }).catch(() => {});
+    await page.waitForTimeout(Number(opts.settleMs) || 1500);
+    if (opts.onTick) opts.onTick();
+    let snap = await snapshotForm(page);
+    const sig = pageSignature(snap) + JSON.stringify(snap.items.map(i => i.question));
+    samePage = sig === lastSig ? samePage + 1 : 0;
+    lastSig = sig;
+    if (samePage >= 2) {
+      return { done, stuck: { step: `page ${p}`, do: 'carry-on', error: `the page did not move on after Next${snap.errors.length ? ': ' + snap.errors.join('; ').slice(0, 200) : ''}` } };
+    }
+    // The quote: a price on screen with a button to buy it. The robot's part ends here, whatever else
+    // the page asks (its "I declare" tick is his with the Buy, as it always was).
+    if (snap.prices.length && snap.buttons.some(x => BUY_RE.test(x.text))) return { done, stuck: null, end: 'price' };
+    const dec = await declarationPage(p, snap);
+    if (dec === null) continue;
+    if (dec) return dec;
+    let next = null, handed = false;
+    for (let round = 1; round <= CARRY_ON_ROUNDS; round++) {
+      let out;
+      try {
+        out = checkPlannerSteps(await plan_({ today: fillTokens('{{today}}'), task: plan.label || plan.site || '', facts, page: snap }), snap, facts);
+      } catch (e) {
+        return { done, stuck: { step: `page ${p}`, do: 'carry-on', error: String(e.message || e).slice(0, 300) } };
+      }
+      if (out.done === 'price') return { done, stuck: null, end: 'price' };
+      if (out.done === 'blocked') return { done, stuck: { step: `page ${p}`, do: 'carry-on', error: `the site will not go on: ${out.reason || 'no reason given'}` } };
+      for (let i = 0; i < out.steps.length; i++) {
+        const s = out.steps[i];
+        try {
+          await assertNotFinalAction(page, s, { next: out.steps[i + 1], answers: plan.answers });
+          const r = await runSteps(page, [s], false, null);
+          done.push(...r.done.map(d => Object.assign(d, { carryOn: p })));
+          await page.waitForTimeout(400);    // an answer can redraw the form
+        } catch (e) {
+          const why = String(e.message || '');
+          // A refused answer is his question; a missed click is the planner's to retry next round.
+          if (/^(refused|could not read|BROWSER REFUSED)/.test(why)) out.unknown.push(`${s.question} (${why.slice(0, 160)})`);
+        }
+        // An answer can bring a declaration onto the page: from then on the page is his.
+        const now = await snapshotForm(page);
+        const d2 = await declarationPage(p, now);
+        if (d2 === null) { handed = true; break; }
+        if (d2) return d2;
+      }
+      if (handed) break;
+      const after = await snapshotForm(page);
+      if (out.unknown.length) {
+        const r = await his(p, [...new Set(out.unknown)], after);
+        if (r) return r;
+        handed = true;
+        break;
+      }
+      const fresh = after.items.some(i => !snap.items.some(j => j.question === i.question));
+      snap = after;
+      if (out.next && !fresh) { next = out.next; break; }
+      if (!out.steps.length && !fresh) break;
+    }
+    if (handed) continue;
+    if (!next) return { done, stuck: { step: `page ${p}`, do: 'carry-on', error: 'the planner found no way on from this page' } };
+    // The one button that moves on, worded as moving on; anything else ("Agree and continue", "Sign in",
+    // "No") is his, by name. (A price with a Buy button already ended the robot's part above.)
+    if (!MOVE_ON_RE.test(next.text.trim())) {
+      const r = await his(p, [`press "${next.text}"`], snap);
+      if (r) return r;
+      continue;
+    }
+    try {
+      // Read again the moment before the press: the page can have changed under a saved target.
+      const [nowText, nowAria] = await page.locator(next.target).first().evaluate(el => [String(el.innerText || el.value || '').replace(/\s+/g, ' ').trim(),
+        [el.getAttribute('aria-label'), el.getAttribute('title')].filter(Boolean).join(' ')], null, { timeout: 15000 });
+      const nowSnap = await snapshotForm(page);
+      // Its hidden words count too: "Continue" labelled "Accept and continue" is an agreement.
+      if (!MOVE_ON_RE.test(nowText) || HARD_ACTION_RE.test(nowAria) || SOFT_PRESS_RE.test(nowAria) || declarationWords(nowAria)
+          || declarationWords([nowSnap.formText].concat(nowSnap.items.map(i => i.question)).join(' | '))) {
+        const r = await his(p, [`press "${nowText || next.text}" (the page changed before the robot pressed it)`], nowSnap);
+        if (r) return r;
+        continue;
+      }
+      const s = { do: 'click', selector: next.target };
+      await assertNotFinalAction(page, s, { answers: plan.answers });
+      await runSteps(page, [s], false, null);
+      done.push({ do: 'click', executed: true, selector: next.target, carryOn: p, next: true });
+    } catch (e) {
+      const why = String(e.message || e);
+      if (/^(refused|could not read|BROWSER REFUSED)/.test(why)) {
+        const r = await his(p, [`press "${next.text}" (${why.slice(0, 120)})`], snap);
+        if (r) return r;
+        continue;
+      }
+      return { done, stuck: { step: `page ${p}`, do: 'carry-on', error: why.slice(0, 300) } };
+    }
+    if (!opts.quiet) await turnBanner(page, FILLING);
+  }
+  return { done, stuck: { step: `page ${maxPages}`, do: 'carry-on', error: `${maxPages} pages and still no price` } };
+}
+
+// True once he has moved the page on (movedOn) and no password box is showing. BEFORE is the page as
+// the robot left it, taken after its own answers, so a follow-up the robot revealed is not his move.
+async function waitForPageMove(page, before, maxMs, onTick) {
+  const deadline = Date.now() + maxMs;
+  while (Date.now() < deadline) {
+    if (page.isClosed()) return false;
+    if (onTick) onTick();
+    try {
+      if (movedOn(before, await snapshotForm(page)) && Number(await visiblePasswordFieldCount(page)) === 0) return true;
+    } catch { /* mid-navigation: look again */ }
+    await new Promise(r => setTimeout(r, 1500));
+  }
+  return false;
 }
 
 function readPlan(p) {
@@ -2068,7 +2582,10 @@ async function main() {
         const r = await runHandover(page, plan, { quiet: true, skipKevin: true });
         return Object.assign(r, { screenshot: await shoot(page, shot).catch(() => null) });
       });
-      console.log(JSON.stringify({ mode: 'handover-dry-run', task, stuck: res.stuck, screenshot: res.screenshot, steps: res.done.length }));
+      // A plan that carries on reaches the price headless when no step is his: the agent's card then
+      // carries the price, and his window only re-runs the quote for him to buy (9 Oct 2026).
+      ledger({ cmd: 'handover-dry-run', task, profile, site: plan.site || null, steps: res.done, stuck: res.stuck, end: res.end || null, screenshot: res.screenshot });
+      console.log(JSON.stringify({ mode: 'handover-dry-run', task, stuck: res.stuck, end: res.end || null, screenshot: res.screenshot, steps: res.done.length }));
       if (res.stuck) process.exitCode = 3;
       return;
     }
@@ -2099,7 +2616,7 @@ async function main() {
         // For a robot form card the log IS the guard against a second government form: no log, no window.
         if (!logged && approval.formCard) throw new Error('the robot log could not be written, so this form window does not open');
         await turnBanner(page, FILLING);
-        const r = await runHandover(page, plan, { onTick: tick });
+        const r = await runHandover(page, plan, { onTick: tick, kevinMs: Number(process.env.AGENT_HANDOVER_KEVIN_MS) || undefined });
         const png = await shoot(page, path.join(HANDOVER_DIR, 'shots', `${task}-${Date.now()}.png`)).catch(() => null);
         await turnBanner(page, r.stuck
           ? stuckBanner(r.stuck, plan.why)
@@ -2111,8 +2628,8 @@ async function main() {
     } finally {
       releaseSigninHold(dir);
     }
-    ledger({ cmd: 'handover', task, profile, site: plan.site || null, steps: res.done, stuck: res.stuck, screenshot: res.screenshot });
-    console.log(JSON.stringify({ mode: 'handover', task, handedOver: !res.stuck, stuck: res.stuck, screenshot: res.screenshot, steps: res.done.length }));
+    ledger({ cmd: 'handover', task, profile, site: plan.site || null, steps: res.done, stuck: res.stuck, end: res.end || null, screenshot: res.screenshot });
+    console.log(JSON.stringify({ mode: 'handover', task, handedOver: !res.stuck, stuck: res.stuck, end: res.end || null, screenshot: res.screenshot, steps: res.done.length }));
     if (res.stuck) process.exitCode = 3;
     return;
   }
@@ -2188,4 +2705,6 @@ module.exports = { namedAnswer, hostAllowed, pickLinks, runSteps, assertNotCrede
                    profileProcs, plainWindowOpen, pickOption, settleBotCheck, withPage, lastKeptCount: () => lastKept, onSigninPage,
                    assertHandoverPlan, fillTokens, runHandover, handoverPlanPath, HANDOVER_DIR, waitForWindowClose, FINAL_ACTION_RE,
                    plainRefresh, withSelfRefresh, selfRefreshEntry, isRefreshWindowLine, holdBy,
-                   doorLanding, sessionCookieHours, SESSION_COOKIE_HOURS, stuckBanner, planNamed, HARD_ACTION_RE };
+                   doorLanding, sessionCookieHours, SESSION_COOKIE_HOURS, stuckBanner, planNamed, HARD_ACTION_RE,
+                   loadStandingFacts, declarationWords, snapshotForm, checkPlannerSteps, carryOn, valueInFacts, valueInLine, pickInLine,
+                   movedOn, assertNotFinalAction, PLANNER_SCHEMA, CARRY_PAST_RE, NEVER_PAST_RE, MOVE_ON_RE };
