@@ -13,12 +13,21 @@ Kevin ruled on 9 Oct 2026: the Cash Flow Voids agent OWNS tenancy-record upkeep,
 door, never a card per change (memory project_cfv_owns_tenancy_records_2026-10-09). This is it.
 
 WHAT EVERY WRITE NEEDS
-  * --task: an Airtable task that names this tenancy (its Tenancies link, or the record id written
-    in its name, description, notes, agent output or Kevin's feedback). That task is the reason,
-    and it is cited on the tenancy.
-  * For anything but a comment, Kevin's approval on that task: an Approval Outcome that starts
-    "Approved" AND the marks only a real approval leaves (scripts/approval_evidence.py). A ruling
-    he gave on a card is the authority; the agent never decides a status on its own.
+  * --task: an Airtable task about this tenancy. That task is the reason, and it is cited on the
+    tenancy. A comment may name the tenancy anywhere on the task.
+  * A FIELD change needs Kevin's approval OF THAT CHANGE (independent review, 9 Oct 2026: an
+    approval of something else, or an id the agent typed onto a task, must never be enough):
+      - the task carries his real approval (Approval Outcome "Approved..." AND the marks only a
+        real approval leaves, scripts/approval_evidence.py), and
+      - EITHER the Agent Output he approved carries the exact line
+          RECORD CHANGE: <tenancy id> <Payment Status|Due Day> = <value>
+        (the agent proposes the change on the card; his approval carries it out),
+      - OR --quote gives his own words, verbatim from his feedback on that task (Approval
+        Feedback or Feedback History), the tenancy is linked to the task or named in his words,
+        and his words name the change (the due day's number; "not a cash flow void" or "paid"
+        for In Payment; "actioned" or "form sent" for CFV Actioned).
+    LIMIT, as for approval_evidence: every field is written with the token the agents hold, so a
+    deliberate forgery still passes. This stops the lazy and the accidental route.
   * A tenancy proven to be in the Tenancies table (a list read by RECORD_ID, never a GET by id,
     which ignores the table in the URL).
 
@@ -35,8 +44,8 @@ WHAT IT NEVER DOES
 USAGE
   tenancy-record.py show TENANCY                          the record and its comments (read only)
   tenancy-record.py comment TENANCY --task T --text "..." a dated comment (no approval needed)
-  tenancy-record.py status TENANCY "In Payment" --task T  Payment Status (Unified)
-  tenancy-record.py due-day TENANCY 9 --task T            Due Day of Month
+  tenancy-record.py status TENANCY "In Payment" --task T [--quote "..."]   Payment Status (Unified)
+  tenancy-record.py due-day TENANCY 9 --task T [--quote "..."]            Due Day of Month
   add --dry-run to any write to see the gate's answer and change nothing.
 """
 import argparse
@@ -65,7 +74,17 @@ REF = "fldyNVvFn4x8GY14q"            # Tenancy Reference (js/config.js F.tenRef)
 # Tasks fields (scripts/agent-dispatch.py AF; scripts/approval_evidence.py).
 TK = dict(rc.TK, agentOutput="fldzswp8fx6PqpLQ5", approvalOutcome="fldrHBSr6qoUfaKuZ",
           approvalFeedback="fldtI7SJI4gEohHD1", feedbackHistory="fldOzsq68lhfprKJu")
-REC_RE = re.compile(r"^rec[A-Za-z0-9]{14}$")
+REC_RE = re.compile(r"rec[A-Za-z0-9]{14}")
+CHANGE_RE = re.compile(r"^RECORD CHANGE:\s*(?P<tenancy>rec[A-Za-z0-9]{14})\s+(?P<label>Payment Status|Due Day)\s*=\s*"
+                       r"(?P<value>[^\n]+?)\s*$", re.M)
+LABELS = {"Payment Status": "Payment Status", "Due Day of Month": "Due Day"}
+NOT_VOID = r"not\s+(?:a\s+|an\s+)?(?:cash\s*flow\s+)?void"
+# What Kevin's own words must say for --quote to carry each change. Read case-insensitively.
+NAMES_STATUS = {
+    "In Payment": re.compile(NOT_VOID + r"|in\s+payment|\bpaid\b|\bpaying\b", re.I),
+    "CFV": re.compile(r"\bcfv\b|cash\s*flow\s+void", re.I),
+    "CFV Actioned": re.compile(r"\bactioned\b|(?:form|uc47)\b.{0,40}\b(?:sent|submitted|gone\s+in|went\s+in)\b", re.I),
+}
 
 
 class Refused(Exception):
@@ -83,7 +102,7 @@ def _one(table, rec_id, fields=None):
 
 
 def load_tenancy(tenancy_id):
-    if not REC_RE.match(tenancy_id or ""):
+    if not REC_RE.fullmatch(tenancy_id or ""):
         raise Refused(f"{tenancy_id!r} is not a record id")
     row = _one(rc.T_TENANCIES, tenancy_id)
     if not row:
@@ -92,7 +111,7 @@ def load_tenancy(tenancy_id):
 
 
 def load_task(task_id):
-    if not REC_RE.match(task_id or ""):
+    if not REC_RE.fullmatch(task_id or ""):
         raise Refused(f"--task {task_id!r} is not a record id")
     row = _one(rc.T_TASKS, task_id)
     if not row:
@@ -101,12 +120,55 @@ def load_task(task_id):
 
 
 def names_tenancy(task_fields, tenancy_id):
-    """True when the task is about this tenancy: linked to it, or its id written on the task."""
+    """True when the task is about this tenancy, for a COMMENT: linked to it, or its id anywhere on the task."""
     if tenancy_id in (task_fields.get(TK["tenancies"]) or []):
         return True
     text = " ".join(str(task_fields.get(TK[k]) or "") for k in
                     ("name", "description", "notes", "agentOutput", "approvalFeedback", "feedbackHistory"))
     return tenancy_id in text
+
+
+def norm(text):
+    return " ".join(str(text or "").split()).lower()
+
+
+def kevins_words(task_fields):
+    """His own feedback on the task: what an approval surface wrote, never what an agent wrote."""
+    return "\n".join(str(task_fields.get(TK[k]) or "") for k in ("approvalFeedback", "feedbackHistory"))
+
+
+def quote_names(label, value, quote):
+    """True when Kevin's quoted words name this change."""
+    if label == "Due Day":
+        return re.search(rf"(?<!\d){int(value)}(?:st|nd|rd|th)?(?!\d)", quote) is not None
+    if label == "Payment Status":
+        if value == "CFV" and re.search(NOT_VOID, quote, re.I):
+            return False                      # "not a cash flow void" never makes one
+        return bool(NAMES_STATUS.get(value) and NAMES_STATUS[value].search(quote))
+    return False
+
+
+def change_problem(task, tenancy_id, label, value, quote):
+    """'' when Kevin approved THIS change to THIS tenancy on this task, else why not."""
+    f = task.get("fields") or {}
+    why = approval_problem(task)
+    if why:
+        return why
+    for m in CHANGE_RE.finditer(str(f.get(TK["agentOutput"]) or "")):
+        if m.group("tenancy") == tenancy_id and m.group("label") == label and m.group("value").strip() == str(value):
+            return ""
+    if not quote:
+        return (f"the card Kevin approved (task {task['id']}) has no line 'RECORD CHANGE: {tenancy_id} {label} = {value}', "
+                "and no --quote of his own words was given: put the change on a card for him to approve")
+    said = kevins_words(f)
+    if len(norm(quote)) < 12 or norm(quote) not in norm(said):
+        return f"--quote is not Kevin's own words on task {task['id']} (Approval Feedback or Feedback History), word for word"
+    if tenancy_id not in (f.get(TK["tenancies"]) or []) and tenancy_id not in said:
+        return (f"task {task['id']} is not linked to tenancy {tenancy_id} and Kevin's words do not name it, so his "
+                "words cannot be read as being about this tenancy")
+    if not quote_names(label, str(value), quote):
+        return f"Kevin's quoted words do not name this change ({label} = {value}): quote the words that say it"
+    return ""
 
 
 def approval_problem(task):
@@ -119,15 +181,17 @@ def approval_problem(task):
     return approval_evidence_problem(f, task.get("createdTime"))
 
 
-def gate(tenancy_id, task_id, needs_approval):
+def gate(tenancy_id, task_id, change=None):
+    """The tenancy and the task, or Refused. `change` is (label, value, quote) for a field change."""
     tenancy, task = load_tenancy(tenancy_id), load_task(task_id)
-    if not names_tenancy(task.get("fields") or {}, tenancy_id):
-        raise Refused(f"task {task_id} does not name tenancy {tenancy_id} (no Tenancies link and the id is "
-                      "not written on it), so it cannot be the reason for changing that record")
-    if needs_approval:
-        why = approval_problem(task)
-        if why:
-            raise Refused(why)
+    if change is None:
+        if not names_tenancy(task.get("fields") or {}, tenancy_id):
+            raise Refused(f"task {task_id} does not name tenancy {tenancy_id} (no Tenancies link and the id is "
+                          "not written on it), so it cannot be the reason for a comment on that record")
+        return tenancy, task
+    why = change_problem(task, tenancy_id, *change)
+    if why:
+        raise Refused(why)
     return tenancy, task
 
 
@@ -154,7 +218,7 @@ def ledger(row):
         fh.write(json.dumps(dict(row, at=datetime.now(rc.LONDON).isoformat(timespec="seconds"))) + "\n")
 
 
-def write_field(tenancy_id, field, value, label, task, why, dry_run):
+def write_field(tenancy_id, field, value, label, task, why, dry_run, quote=None):
     """Write one field, prove it landed, comment, log. Returns the result dict."""
     before = (load_tenancy(tenancy_id).get("fields") or {}).get(field)
     shown_before = rc.sel(before) if before not in (None, "") else "blank"
@@ -163,12 +227,16 @@ def write_field(tenancy_id, field, value, label, task, why, dry_run):
                 "note": f"{label} already reads {value}; nothing written"}
     if dry_run:
         return {"tenancy": tenancy_id, "field": label, "from": shown_before, "to": str(value), "dryRun": True}
-    rc.api("PATCH", f"{rc.T_TENANCIES}/{tenancy_id}", {"fields": {field: value}, "typecast": True})
+    # No typecast: a renamed choice must fail here, never be created quietly and read back as a pass.
+    rc.api("PATCH", f"{rc.T_TENANCIES}/{tenancy_id}", {"fields": {field: value}})
     after = (load_tenancy(tenancy_id).get("fields") or {}).get(field)
     if rc.sel(after) != str(value):
+        ledger({"kind": "unlanded", "tenancy": tenancy_id, "field": label, "to": str(value), "task": task["id"]})
         raise RuntimeError(f"{label} on {tenancy_id} reads {rc.sel(after)!r} after writing {value!r}: the write did not land")
-    text = (f"{stamp()}: {label} changed from {shown_before} to {value} by the Cash Flow Voids agent, "
-            f"on Kevin's approval of task {task['id']} ({task_label(task)}). Why: {why}")
+    authority = (f'Kevin\'s words on task {task["id"]}: "{" ".join(quote.split())}"' if quote
+                 else f"the RECORD CHANGE line on the card Kevin approved, task {task['id']}")
+    text = (f"{stamp()}: {label} changed from {shown_before} to {value} by the Cash Flow Voids agent, on "
+            f"{authority} ({task_label(task)}). Why: {why}")
     out = {"tenancy": tenancy_id, "field": label, "from": shown_before, "to": str(value), "task": task["id"]}
     ledger(dict(out, kind="write", why=why))
     try:
@@ -194,7 +262,7 @@ def cmd_comment(a):
     text = " ".join(str(a.text or "").split())
     if len(text) < 15:
         raise Refused("a comment needs the fact itself (at least a sentence), not a placeholder")
-    _, task = gate(a.tenancy, a.task, needs_approval=False)
+    _, task = gate(a.tenancy, a.task)
     body = f"{stamp()}: {text} (task {task['id']}: {task_label(task)})"
     if a.dry_run:
         return {"tenancy": a.tenancy, "comment": body, "dryRun": True}
@@ -207,19 +275,19 @@ def cmd_status(a):
     if a.value not in STATUSES:
         raise Refused(f"Payment Status may only be set to {', '.join(STATUSES)} here; {a.value!r} is refused "
                       "(a Void goes through the six-question gate in the airtable-tenancy-ender skill)")
-    tenancy, task = gate(a.tenancy, a.task, needs_approval=True)
+    tenancy, task = gate(a.tenancy, a.task, ("Payment Status", a.value, a.quote))
     if ended(tenancy):
         raise Refused(f"tenancy {a.tenancy} has ended; its payment status is not changed")
-    return write_field(a.tenancy, PAY_STATUS, a.value, "Payment Status", task, a.why, a.dry_run)
+    return write_field(a.tenancy, PAY_STATUS, a.value, "Payment Status", task, a.why, a.dry_run, a.quote)
 
 
 def cmd_due_day(a):
     if not (1 <= a.day <= 31):
         raise Refused(f"a due day is 1 to 31, not {a.day}")
-    tenancy, task = gate(a.tenancy, a.task, needs_approval=True)
+    tenancy, task = gate(a.tenancy, a.task, ("Due Day", str(a.day), a.quote))
     if ended(tenancy):
         raise Refused(f"tenancy {a.tenancy} has ended; its due day is not changed")
-    return write_field(a.tenancy, DUE_DAY, str(a.day), "Due Day of Month", task, a.why, a.dry_run)
+    return write_field(a.tenancy, DUE_DAY, str(a.day), "Due Day of Month", task, a.why, a.dry_run, a.quote)
 
 
 def main(argv=None):
@@ -237,12 +305,14 @@ def main(argv=None):
     st.add_argument("value")
     st.add_argument("--task", required=True)
     st.add_argument("--why", required=True, help="Kevin's words, or the fact from the task, in one sentence")
+    st.add_argument("--quote", help="Kevin's own words from his feedback on the task, verbatim, naming the change")
     st.add_argument("--dry-run", action="store_true")
     dd = sub.add_parser("due-day")
     dd.add_argument("tenancy")
     dd.add_argument("day", type=int)
     dd.add_argument("--task", required=True)
     dd.add_argument("--why", required=True)
+    dd.add_argument("--quote", help="Kevin's own words from his feedback on the task, verbatim, naming the day")
     dd.add_argument("--dry-run", action="store_true")
     a = ap.parse_args(argv)
     if getattr(a, "why", None) is not None and len(" ".join(a.why.split())) < 10:
@@ -253,6 +323,9 @@ def main(argv=None):
     except Refused as e:
         print(json.dumps({"refused": str(e)}))
         return 2
+    except RuntimeError as e:
+        print(json.dumps({"failed": str(e)[:400]}))
+        return 1
     print(json.dumps(out, indent=2))
     return 1 if out.get("commentProblem") else 0
 

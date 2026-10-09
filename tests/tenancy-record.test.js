@@ -21,6 +21,7 @@ const DISPATCH = resolve(ROOT, 'scripts/agent-dispatch.py');
 const TEN = 'recTENANCY0000001';
 const TASK = 'recTASK0000000001';
 const APPROVED = { outcome: 'Approved as-is', sentFor: ['recAGENT00000001'], approvedAt: '2026-10-06T10:42:00.000Z' };
+const CHANGE = `If you approve, the tenancy record changes:\nRECORD CHANGE: ${TEN} Payment Status = In Payment\nRECORD CHANGE: ${TEN} Due Day = 4`;
 
 // Runs one door command. `task` shapes the task; `tenancy` shapes the tenancy before and after a write;
 // `lands` false makes the read-back show the old value.
@@ -29,7 +30,7 @@ function door(argv, { task = {}, tenancy = {}, lands = true, taskExists = true, 
   const cfg = {
     argv, dir, lands, taskExists, tenancyExists, TEN, TASK,
     task: { name: 'INBOUND: letting agent kept the rent against a repair', output: '', links: [], feedback: '',
-            created: '2026-10-06T08:00:00.000Z', ...task },
+            approvalFeedback: '', created: '2026-10-06T08:00:00.000Z', ...task },
     tenancy: { status: 'CFV', dueDay: '4', end: null, ...tenancy },
   };
   const script = `
@@ -49,7 +50,7 @@ def tenancy_row():
 def task_row():
     t = cfg["task"]
     f = {m.TK["name"]: t["name"], m.TK["agentOutput"]: t["output"], m.TK["tenancies"]: t["links"],
-         m.TK["feedbackHistory"]: t["feedback"]}
+         m.TK["feedbackHistory"]: t["feedback"], m.TK["approvalFeedback"]: t["approvalFeedback"]}
     if t.get("outcome"): f[m.TK["approvalOutcome"]] = t["outcome"]
     if t.get("sentFor"): f["fld30Yw8SWYVp049g"] = t["sentFor"]
     if t.get("approvedAt"): f["fldr4Mvf2RzKvhZhi"] = t["approvedAt"]
@@ -65,6 +66,7 @@ def fetch_all(table, params=None):
 def api(method, path, payload=None, params=None):
     if method == "PATCH":
         writes.append(payload)
+        assert "typecast" not in payload, "a renamed choice must fail, never be created by typecast"
         if cfg["lands"]:
             f = payload["fields"]
             if rc.TY["payStatus"] in f: state["status"] = f[rc.TY["payStatus"]]
@@ -95,7 +97,7 @@ print(json.dumps({"code": code, "out": buf.getvalue(), "err": err, "reads": read
 describe('tenancy-record.py: what it refuses', () => {
   it('never voids a unit: Void, a blank or any other value is refused before anything is read or written', () => {
     for (const value of ['Void', '', 'Former', 'in payment']) {
-      const r = door(['status', TEN, value, '--task', TASK, '--why', 'Kevin said so on the card'], { task: { ...APPROVED, links: [TEN] } });
+      const r = door(['status', TEN, value, '--task', TASK, '--why', 'Kevin said so on the card'], { task: { ...APPROVED, links: [TEN], output: CHANGE } });
       expect(r.code).toBe(2);
       expect(r.json.refused).toMatch(/may only be set to In Payment, CFV, CFV Actioned/);
       expect(r.writes).toEqual([]);
@@ -103,11 +105,14 @@ describe('tenancy-record.py: what it refuses', () => {
   });
 
   it('refuses a task that does not name the tenancy (no link, id not written on it)', () => {
+    const c = door(['comment', TEN, '--task', TASK, '--text', 'The letting agent wrote about the rent today.'],
+      { task: { output: 'About a different house, recOTHER000000001.' } });
+    expect(c.code).toBe(2);
+    expect(c.json.refused).toMatch(/does not name tenancy/);
     const r = door(['status', TEN, 'In Payment', '--task', TASK, '--why', 'Kevin said so on the card'],
       { task: { ...APPROVED, output: 'About a different house, recOTHER000000001.' } });
-    expect(r.code).toBe(2);
-    expect(r.json.refused).toMatch(/does not name tenancy/);
-    expect(r.writes).toEqual([]);
+    expect(r.json.refused).toMatch(/has no line 'RECORD CHANGE/);
+    expect([...c.comments, ...r.writes]).toEqual([]);
   });
 
   it('refuses a change Kevin never approved, and an approval string with no approval marks', () => {
@@ -126,7 +131,7 @@ describe('tenancy-record.py: what it refuses', () => {
 
   it('proves the tenancy and the task by a list on their own tables, never a GET by id', () => {
     const r = door(['status', TEN, 'In Payment', '--task', TASK, '--why', 'Kevin said so on the card'],
-      { task: { ...APPROVED, links: [TEN] }, tenancyExists: false });
+      { task: { ...APPROVED, links: [TEN], output: CHANGE }, tenancyExists: false });
     expect(r.code).toBe(2);
     expect(r.json.refused).toMatch(/is not a tenancy/);
     expect(r.reads[0]).toEqual({ table: 'tblN51a88qTDB6iMH', formula: `RECORD_ID()='${TEN}'` });
@@ -136,10 +141,10 @@ describe('tenancy-record.py: what it refuses', () => {
 
   it('does not change an ended tenancy, and a due day must be 1 to 31', () => {
     const endedT = door(['due-day', TEN, '9', '--task', TASK, '--why', 'Kevin approved the 9th'],
-      { task: { ...APPROVED, links: [TEN] }, tenancy: { end: '2020-01-31' } });
+      { task: { ...APPROVED, links: [TEN], output: 'RECORD CHANGE: ' + TEN + ' Due Day = 9' }, tenancy: { end: '2020-01-31' } });
     expect(endedT.json.refused).toMatch(/has ended/);
     for (const day of ['0', '32']) {
-      const r = door(['due-day', TEN, day, '--task', TASK, '--why', 'Kevin approved it'], { task: { ...APPROVED, links: [TEN] } });
+      const r = door(['due-day', TEN, day, '--task', TASK, '--why', 'Kevin approved it'], { task: { ...APPROVED, links: [TEN], output: CHANGE } });
       expect(r.json.refused).toMatch(/1 to 31/);
     }
   });
@@ -147,41 +152,92 @@ describe('tenancy-record.py: what it refuses', () => {
   it('a comment needs the fact itself, and a write needs a reason', () => {
     const r = door(['comment', TEN, '--task', TASK, '--text', 'see task'], { task: { links: [TEN] } });
     expect(r.json.refused).toMatch(/needs the fact/);
-    const w = door(['status', TEN, 'In Payment', '--task', TASK, '--why', 'ok'], { task: { ...APPROVED, links: [TEN] } });
+    const w = door(['status', TEN, 'In Payment', '--task', TASK, '--why', 'ok'], { task: { ...APPROVED, links: [TEN], output: CHANGE } });
     expect(w.json.refused).toMatch(/--why needs/);
   });
 });
 
+describe('tenancy-record.py: an approval carries only the change it names (independent review, 9 Oct 2026)', () => {
+  it('an approval of something else on a linked task is not an approval of this change', () => {
+    const r = door(['status', TEN, 'CFV Actioned', '--task', TASK, '--why', 'the agent decided the form went in'],
+      { task: { ...APPROVED, links: [TEN], output: 'Send the rent reminder to the tenant.' } });
+    expect(r.code).toBe(2);
+    expect(r.json.refused).toMatch(/has no line 'RECORD CHANGE/);
+    expect(r.writes).toEqual([]);
+  });
+
+  it('a RECORD CHANGE line for another value, field or tenancy carries nothing', () => {
+    for (const output of [`RECORD CHANGE: ${TEN} Payment Status = CFV`, `RECORD CHANGE: ${TEN} Due Day = 9`,
+                          `RECORD CHANGE: recOTHER000000001 Payment Status = In Payment`]) {
+      const r = door(['status', TEN, 'In Payment', '--task', TASK, '--why', 'Kevin said so on the card'],
+        { task: { ...APPROVED, links: [TEN], output } });
+      expect(r.json.refused).toMatch(/has no line 'RECORD CHANGE/);
+      expect(r.writes).toEqual([]);
+    }
+  });
+
+  it('Kevin\'s words carry a change only verbatim, only when they name it, and only for a tenancy linked or named by him', () => {
+    const words = '[2026-10-06 10:42] Okay, we have to assume that this rent has been paid, so it is not a cash flow void, so that needs updating.';
+    const ok = door(['status', TEN, 'In Payment', '--task', TASK, '--why', 'Kevin ruled the set-off rent is paid',
+      '--quote', 'so it is not a cash flow void, so that needs updating'], { task: { ...APPROVED, links: [TEN], feedback: words } });
+    expect(ok.code).toBe(0);
+    expect(ok.comments[0]).toMatch(/Kevin's words on task recTASK0000000001: "so it is not a cash flow void/);
+    const notVerbatim = door(['status', TEN, 'In Payment', '--task', TASK, '--why', 'agent paraphrase of Kevin',
+      '--quote', 'Kevin said the tenancy is in payment now'], { task: { ...APPROVED, links: [TEN], feedback: words } });
+    expect(notVerbatim.json.refused).toMatch(/not Kevin's own words/);
+    const agentWrote = door(['status', TEN, 'In Payment', '--task', TASK, '--why', 'quote from the agent output',
+      '--quote', 'so it is not a cash flow void'], { task: { ...APPROVED, links: [TEN], output: words } });
+    expect(agentWrote.json.refused).toMatch(/not Kevin's own words/);
+    const wrongWay = door(['status', TEN, 'CFV', '--task', TASK, '--why', 'reading his words backwards',
+      '--quote', 'so it is not a cash flow void, so that needs updating'], { task: { ...APPROVED, links: [TEN], feedback: words } });
+    expect(wrongWay.json.refused).toMatch(/do not name this change/);
+    const notLinked = door(['status', TEN, 'In Payment', '--task', TASK, '--why', 'id only in the agent output',
+      '--quote', 'so it is not a cash flow void, so that needs updating'],
+      { task: { ...APPROVED, output: `About ${TEN}.`, feedback: words } });
+    expect(notLinked.json.refused).toMatch(/not linked to tenancy/);
+    const dayWords = '[2026-10-07 13:10] Yes, move the due day to the 9th for both flats.';
+    const day9 = door(['due-day', TEN, '9', '--task', TASK, '--why', 'Kevin approved the 9th', '--quote', 'move the due day to the 9th'],
+      { task: { ...APPROVED, links: [TEN], feedback: dayWords } });
+    expect(day9.code).toBe(0);
+    const day10 = door(['due-day', TEN, '10', '--task', TASK, '--why', 'agent picked the 10th', '--quote', 'move the due day to the 9th'],
+      { task: { ...APPROVED, links: [TEN], feedback: dayWords } });
+    expect(day10.json.refused).toMatch(/do not name this change/);
+    expect([...notVerbatim.writes, ...agentWrote.writes, ...wrongWay.writes, ...notLinked.writes, ...day10.writes]).toEqual([]);
+  });
+});
+
 describe('tenancy-record.py: what it does', () => {
-  it('writes Kevin\'s approved status, reads it back, comments with the task and logs it (the id written on the card counts)', () => {
+  it('writes Kevin\'s approved status, reads it back, comments with the task and logs it (the RECORD CHANGE line on the card)', () => {
     const r = door(['status', TEN, 'In Payment', '--task', TASK, '--why', 'Kevin: not a cash flow void, rent kept against the boiler'],
-      { task: { ...APPROVED, output: `The tenancy (${TEN}) is marked CFV.` } });
+      { task: { ...APPROVED, output: `The tenancy (${TEN}) is marked CFV.\n${CHANGE}` } });
     expect(r.code).toBe(0);
-    expect(r.writes).toEqual([{ fields: { fldxU3dPUnbK0SCDq: 'In Payment' }, typecast: true }]);
+    expect(r.writes).toEqual([{ fields: { fldxU3dPUnbK0SCDq: 'In Payment' } }]);
     expect(r.state.status).toBe('In Payment');
     expect(r.comments).toHaveLength(1);
     expect(r.comments[0]).toMatch(/Payment Status changed from CFV to In Payment/);
+    expect(r.comments[0]).toMatch(/RECORD CHANGE line on the card Kevin approved/);
     expect(r.comments[0]).toContain(TASK);
     expect(r.comments[0]).toMatch(/rent kept against the boiler/);
     expect(r.ledger).toHaveLength(1);
     expect(JSON.parse(r.ledger[0])).toMatchObject({ kind: 'write', tenancy: TEN, task: TASK, from: 'CFV', to: 'In Payment' });
   });
 
-  it('a write that does not land is an error, with no comment saying it happened', () => {
+  it('a write that does not land is a failure in JSON, logged as unlanded, with no comment saying it happened', () => {
     const r = door(['due-day', TEN, '9', '--task', TASK, '--why', 'Kevin approved the 9th'],
-      { task: { ...APPROVED, links: [TEN] }, lands: false });
-    expect(r.err).toMatch(/did not land/);
+      { task: { ...APPROVED, links: [TEN], output: 'RECORD CHANGE: ' + TEN + ' Due Day = 9' }, lands: false });
+    expect(r.code).toBe(1);
+    expect(r.json.failed).toMatch(/did not land/);
     expect(r.comments).toEqual([]);
-    expect(r.ledger).toEqual([]);
+    expect(r.ledger.map(l => JSON.parse(l).kind)).toEqual(['unlanded']);
   });
 
   it('a value already in place writes nothing; a dry run writes nothing', () => {
-    const same = door(['due-day', TEN, '4', '--task', TASK, '--why', 'Kevin approved the 4th'], { task: { ...APPROVED, links: [TEN] } });
+    const same = door(['due-day', TEN, '4', '--task', TASK, '--why', 'Kevin approved the 4th'], { task: { ...APPROVED, links: [TEN], output: CHANGE } });
     expect(same.code).toBe(0);
     expect(same.json.unchanged).toBe('4');
-    const dry = door(['status', TEN, 'CFV Actioned', '--task', TASK, '--why', 'Kevin said the form went in', '--dry-run'],
-      { task: { ...APPROVED, links: [TEN] } });
-    expect(dry.json).toMatchObject({ from: 'CFV', to: 'CFV Actioned', dryRun: true });
+    const dry = door(['status', TEN, 'In Payment', '--task', TASK, '--why', 'Kevin said it is not a void', '--dry-run'],
+      { task: { ...APPROVED, links: [TEN], output: CHANGE } });
+    expect(dry.json).toMatchObject({ from: 'CFV', to: 'In Payment', dryRun: true });
     expect([...same.writes, ...dry.writes, ...same.comments, ...dry.comments]).toEqual([]);
   });
 
@@ -196,8 +252,8 @@ describe('tenancy-record.py: what it does', () => {
 });
 
 // agent-dispatch.py due: the real cmd_due with get_task and patch_task recorded.
-function due(date, { status = 'Today', approvedAt = '', feedback = '', approvalFeedback = '' } = {}) {
-  const cfg = { date, status, approvedAt, feedback, approvalFeedback };
+function due(date, { status = 'Today', approvedAt = '', feedback = '', approvalFeedback = '', quote = 'chase this up again next week' } = {}) {
+  const cfg = { date, status, approvedAt, feedback, approvalFeedback, quote };
   const script = `
 import importlib.util, json, sys, io, contextlib, argparse
 cfg = json.loads(${JSON.stringify(JSON.stringify(cfg))})
@@ -216,7 +272,7 @@ m.patch_task = patch
 buf = io.StringIO(); code = None; err = ""
 try:
     with contextlib.redirect_stdout(buf):
-        code = m.cmd_due(argparse.Namespace(task="recTASK0000000001", date=cfg["date"], why="Kevin: give him a week, chase again next week"))
+        code = m.cmd_due(argparse.Namespace(task="recTASK0000000001", date=cfg["date"], why="Kevin gave the family a week", quote=cfg["quote"]))
 except SystemExit as e:
     err = str(e)
 print(json.dumps({"code": code, "out": buf.getvalue(), "err": err, "patches": patches, "AF": m.AF}))
@@ -236,19 +292,32 @@ describe('agent-dispatch.py due: a date Kevin gave lands on the task', () => {
     expect(p[r.AF.dueDate]).toBe(inDays(6));
     expect(p[r.AF.status]).toBe('Upcoming');
     expect(p[r.AF.notes]).toMatch(/^earlier notes\n\n\[.* — agent-dispatch\] DUE MOVED from 2026-10-08 to /);
+    expect(p[r.AF.notes]).toContain('(Kevin: "chase this up again next week")');
     expect(Object.keys(p).sort()).toEqual([r.AF.dueDate, r.AF.notes, r.AF.status].sort());
   });
 
   it('a date of today puts the task at Today', () => {
-    const r = due(inDays(0), { approvalFeedback: 'do it today' });
+    const r = due(inDays(0), { approvalFeedback: 'please do it today, not tomorrow', quote: 'do it today, not tomorrow' });
     expect(r.patches[0][r.AF.status]).toBe('Today');
   });
 
-  it('refuses: no word from Kevin, a past date, a closed task, a card waiting in his queue', () => {
-    expect(JSON.parse(due(inDays(5)).out).why).toMatch(/no approval and no note from Kevin/);
-    expect(JSON.parse(due(inDays(-1), { approvedAt: '2026-10-08T13:56:00.000Z' }).out).why).toMatch(/in the past/);
-    expect(JSON.parse(due(inDays(5), { status: 'Completed', approvedAt: '2026-10-08T13:56:00.000Z' }).out).why).toMatch(/Completed/);
-    expect(JSON.parse(due(inDays(5), { status: 'Approval', feedback: 'x' }).out).why).toMatch(/waiting at Approval/);
-    expect(due('next week', { approvedAt: '2026-10-08T13:56:00.000Z' }).err).toMatch(/is not a date/);
+  it('refuses: no words of Kevin\'s, words he did not write, a past date, a closed task, his queue, a robot\'s task', () => {
+    const said = '[2026-10-08 14:56] chase this up again next week';
+    expect(JSON.parse(due(inDays(5)).out).why).toMatch(/not Kevin's own words/);
+    expect(JSON.parse(due(inDays(5), { approvedAt: '2026-10-08T13:56:00.000Z' }).out).why).toMatch(/not Kevin's own words/);
+    expect(JSON.parse(due(inDays(5), { feedback: said, quote: 'chase this up in a month or two' }).out).why).toMatch(/not Kevin's own words/);
+    expect(JSON.parse(due(inDays(-1), { feedback: said }).out).why).toMatch(/in the past/);
+    expect(JSON.parse(due(inDays(5), { status: 'Completed', feedback: said }).out).why).toMatch(/Completed/);
+    expect(JSON.parse(due(inDays(5), { status: 'Approval', feedback: said }).out).why).toMatch(/waiting at Approval/);
+    expect(JSON.parse(due(inDays(5), { status: 'In Progress', feedback: said }).out).why).toMatch(/robot holds/);
+    expect(due('next week', { feedback: said }).err).toMatch(/is not a date/);
+  });
+
+  it('an old note of his never pushes work out by months: a far date needs his words to name the month or date', () => {
+    const said = '[2026-09-01 09:00] Fine, leave it with you. Bring this back at the start of January please.';
+    const far = due(inDays(80), { feedback: said, quote: 'Fine, leave it with you.' });
+    expect(JSON.parse(far.out).why).toMatch(/more than 31 days out/);
+    const named = due(inDays(80), { feedback: said, quote: 'Bring this back at the start of January please.' });
+    expect(named.code).toBe(0);
   });
 });

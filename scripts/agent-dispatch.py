@@ -5133,26 +5133,42 @@ def cmd_annotate(args):
 # 8 Oct overflow line). A task comes to the table when it needs to, not before or
 # after, only if the date Kevin gave is the date on the task.
 #
-# A due date moves only on Kevin's word: the task must carry his approval or a
-# note from him. An agent never pushes its own work out. Never to a past date,
-# never on a closed task, never on a card waiting at Approval (his queue).
+# A due date moves only on Kevin's word: --quote must be his own words, verbatim,
+# from his feedback on that task, and a date more than DUE_FAR_DAYS out needs his
+# words to name a month or a date (independent review, 9 Oct 2026: any old note of
+# his must not let an agent push its own work out by months). An agent never
+# pushes its own work out. Never to a past date, never on a closed task, never on
+# a card waiting at Approval (his queue) or a task a robot holds In Progress.
 DUE_MOVED_MARK = "DUE MOVED"
+DUE_FAR_DAYS = 31
+_MONTHS = ("january|february|march|april|may|june|july|august|september|october|november|december|"
+           "jan|feb|mar|apr|jun|jul|aug|sep|sept|oct|nov|dec")
+DUE_NAMES_DATE = re.compile(rf"\b(?:{_MONTHS})\b|\b\d{{1,2}}[/-]\d{{1,2}}\b|\b\d{{4}}-\d{{2}}-\d{{2}}\b", re.I)
 
 
-def due_move_problem(fields, new_due, today):
-    """'' when the due date may move to new_due, else why not."""
+def _norm_words(text):
+    return " ".join(str(text or "").split()).lower()
+
+
+def due_move_problem(fields, new_due, today, quote):
+    """'' when the due date may move to new_due on these words of Kevin's, else why not."""
     status = sel(fields.get(AF["status"]))
     if status in ("Completed", "Cancelled"):
         return f"the task is {status}"
     if status == "Approval":
         return "the task is waiting at Approval in Kevin's queue; his knock-back sets that date"
+    if status == "In Progress":
+        return "a robot holds the task In Progress; its own lane moves it"
     if new_due < today:
         return f"{new_due.isoformat()} is in the past"
-    said = (fields.get(AF["approvedAt"]) or fields.get(AF["approvalFeedback"])
-            or fields.get(AF["feedbackHistory"]))
-    if not said:
-        return ("the task carries no approval and no note from Kevin, so nothing says when it is due; "
-                "an agent never moves its own work")
+    said = _norm_words(f"{fields.get(AF['approvalFeedback']) or ''}\n{fields.get(AF['feedbackHistory']) or ''}")
+    q = _norm_words(quote)
+    if len(q) < 12 or q not in said:
+        return ("--quote is not Kevin's own words on this task (Approval Feedback or Feedback History), word for "
+                "word; an agent never moves its own work")
+    if (new_due - today).days > DUE_FAR_DAYS and not DUE_NAMES_DATE.search(quote):
+        return (f"{new_due.isoformat()} is more than {DUE_FAR_DAYS} days out and Kevin's quoted words name no month "
+                "or date: quote the words that say when")
     return ""
 
 
@@ -5167,14 +5183,16 @@ def cmd_due(args):
     t = get_task(args.task)
     fields = t.get("fields", {}) or {}
     today = datetime.now(LONDON).date()
-    problem = due_move_problem(fields, new_due, today)
+    problem = due_move_problem(fields, new_due, today, args.quote)
     if problem:
         print(json.dumps({"refused": args.task, "why": problem}))
         return 2
     old = fields.get(AF["dueDate"]) or "blank"
     status = "Upcoming" if new_due > today else "Today"
     stamp = datetime.now(LONDON).strftime("%d %b %Y %H:%M")
-    note = f"[{stamp} — agent-dispatch] {DUE_MOVED_MARK} from {old} to {new_due.isoformat()}: {why}"
+    quoted = " ".join(str(args.quote).split())
+    note = (f"[{stamp} — agent-dispatch] {DUE_MOVED_MARK} from {old} to {new_due.isoformat()}: {why} "
+            f"(Kevin: \"{quoted}\")")
     patch_task(args.task, {
         AF["dueDate"]: new_due.isoformat(),
         AF["status"]: status,
@@ -11265,7 +11283,8 @@ def main():
                         help="move a task's due date on Kevin's word (Upcoming until then)")
     du.add_argument("task")
     du.add_argument("date", help="YYYY-MM-DD, today or later")
-    du.add_argument("--why", required=True, help="Kevin's words or the reason, in a sentence")
+    du.add_argument("--why", required=True, help="the reason, in a sentence")
+    du.add_argument("--quote", required=True, help="Kevin's own words from his feedback on the task, verbatim")
 
     an = sub.add_parser("annotate")
     an.add_argument("task")
