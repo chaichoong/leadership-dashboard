@@ -1319,6 +1319,9 @@ def red_pass_live(rows, now):
 # another job left a record MISSED_AWAKE_MIN or more after it, and that record is at least
 # MISSED_SETTLE_MIN old, so a wake from sleep (launchd fires every overdue job at once) has time
 # to log before anything is called missed. If nothing else ran either, say nothing yet.
+# A job that has never left a record anywhere this reads (no line in the week of logs, and no
+# <job>.last.log or runs.log of its own) is new, not missed: a job just added to job-schedule.json
+# would otherwise read Missed until its first run, a week for a weekly job (review of #749).
 # Kept apart from classify() on purpose: it judges the slot, not the last run.
 MISSED_GRACE_MIN = 30
 MISSED_AWAKE_MIN = 20
@@ -1326,7 +1329,14 @@ MISSED_SETTLE_MIN = 10
 MISSED_WINDOW_DAYS = 7   # build_rows reads one week of logs; an older slot cannot be judged
 
 
-def missed_slot(job, cfg, finishes, events, now):
+def ran_before(job, logs_dir=LOGS):
+    """True when the job has its own log from an earlier run (the wrapper's <job>.last.log, or runs.log),
+    so a weekly job whose last run fell out of the week read still counts as one that has run."""
+    return any(os.path.exists(p) for p in (os.path.join(logs_dir, job + ".last.log"),
+                                            os.path.join(logs_dir, job, "runs.log")))
+
+
+def missed_slot(job, cfg, finishes, events, now, logs_dir=LOGS):
     """(due, last) when this job's newest due slot has no record and other jobs ran after it,
     else (None, None). `due` is the slot (UTC); `last` the job's newest record before it, or None."""
     if (cfg.get("mode") or "wrapped") != "wrapped":
@@ -1344,20 +1354,22 @@ def missed_slot(job, cfg, finishes, events, now):
     stamps = [(r.get("job"), parse_ts(r.get("ts"))) for r in list(finishes) + list(events)]
     if any(j == job and ts and ts >= due for j, ts in stamps):
         return None, None
+    mine = [ts for j, ts in stamps if j == job and ts]
+    if not mine and not ran_before(job, logs_dir):
+        return None, None   # never left a record anywhere: a new job, not a missed one
     awake = due + timedelta(minutes=MISSED_AWAKE_MIN)
     settled = now - timedelta(minutes=MISSED_SETTLE_MIN)
     if not any(j != job and ts and awake <= ts <= settled for j, ts in stamps):
         return None, None   # nothing else ran either: the Mac was asleep, so say nothing yet
-    mine = [ts for j, ts in stamps if j == job and ts]
     return due, (max(mine) if mine else None)
 
 
-def apply_missed(row, job, cfg, finishes, events, now):
+def apply_missed(row, job, cfg, finishes, events, now, logs_dir=LOGS):
     """Mark a job row Missed when missed_slot() finds its slot passed with no record. A row that
     is already Failed or Blocked stays so (the red pass reads Failed) and says it also missed."""
     if row.get("status") == "Running":
         return row
-    due, last = missed_slot(job, cfg, finishes, events, now)
+    due, last = missed_slot(job, cfg, finishes, events, now, logs_dir)
     if not due:
         return row
     when = due.astimezone(LONDON).strftime("%a %d %b %H:%M")
@@ -1368,7 +1380,7 @@ def apply_missed(row, job, cfg, finishes, events, now):
     row["status"] = "Missed"
     row["detail"] = ("Due at %s London and nothing was recorded for it (no run, no skip, no wait) while "
                      "other jobs ran. Last record: %s." % (
-                         when, last.astimezone(LONDON).strftime("%a %d %b %H:%M") if last else "none in the last week"))
+                         when, last.astimezone(LONDON).strftime("%a %d %b %H:%M") if last else "none in the week read (it has run before)"))
     return row
 
 
@@ -1587,6 +1599,14 @@ def selftest():
        "running is left alone")
     ok(missed_slot("daily-ops", {"cron": "0 7 * * *", "mode": "cooperative"}, [], others, now) == (None, None),
        "cooperative jobs keep their own rule")
+    #     a job just added to the schedule that has never left a record anywhere is new, not missed (review of #749)
+    empty_logs = tempfile.mkdtemp()
+    ok(missed_slot("publish-brain", pb, others, [], now, logs_dir=empty_logs) == (None, None), "never run -> not Missed")
+    #     one with its own log from an earlier run (a weekly job's last run fell out of the week) is still Missed
+    open(os.path.join(empty_logs, "publish-brain.last.log"), "w").write("ran\n")
+    r = apply_missed({"status": "Idle", "detail": "No run recorded in the last week."}, "publish-brain", pb, others, [], now,
+                     logs_dir=empty_logs)
+    ok(r["status"] == "Missed" and "it has run before" in r["detail"], "ran before, silent now -> Missed: %r" % r)
     # 6. the schedule filter drops retired and absorbed entries and keeps the live ones
     sched = load_schedule()
     ok("handback-poll" in sched and "ceo-huddle" not in sched and "uc-check" not in sched, "schedule filter")

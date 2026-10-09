@@ -57,7 +57,8 @@ slot, other_slot = now - timedelta(hours=3), now - timedelta(hours=2)
 d = tempfile.mkdtemp()
 m.SCHEDULE = os.path.join(d, "s.json")
 json.dump({"night-publish": {"cron": daily(slot), "mode": "wrapped"},
-           "other-job": {"cron": daily(other_slot), "mode": "wrapped"}}, open(m.SCHEDULE, "w"))
+           "other-job": {"cron": daily(other_slot), "mode": "wrapped"},
+           "zz-new-job-never-run": {"cron": daily(slot), "mode": "wrapped"}}, open(m.SCHEDULE, "w"))
 fin = [{"ts": iso(now - timedelta(hours=27)), "job": "night-publish", "ok": True, "exit": 0},
        {"ts": iso(now - timedelta(hours=1)), "job": "other-job", "ok": True, "exit": 0}]
 if own_after:
@@ -78,6 +79,13 @@ m.cmd_refresh(types.SimpleNamespace(dry_run=True, no_loop_health=True))
     expect(r.byStatus.Missed).toBe(1);
     expect(r.attention).toContain('night-publish: Missed');
     expect(r.attention).not.toContain('other-job: Missed');   // control: a job that ran after its slot is not
+  });
+
+  it('a job just added to the schedule that has never left a record is new, not Missed (review of #749)', () => {
+    const r = refresh(false);
+    expect(r.attention).toContain('night-publish: Missed');   // control: the rule is firing on this board
+    expect(r.attention).not.toContain('zz-new-job-never-run: Missed');
+    expect(r.byStatus.Missed).toBe(1);
   });
 
   it('a job that left a record after its slot is not Missed', () => {
