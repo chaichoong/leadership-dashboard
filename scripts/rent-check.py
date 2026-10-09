@@ -35,7 +35,12 @@ short payment, or anything this check "cannot tell".
 LANE B, A NEW TENANT INTO PAYMENT (Kevin, 2 Oct 2026)
 scripts/rent_new_tenant.py holds the clock: Roy's journal task, the housing costs check 7 days on,
 the form, and a check every 14 days until rent lands. This file calls it after lane A and prints
-each tenancy's stage on its row.
+each tenancy's stage on its row. Before it, scripts/rent_roy_email.py copies Roy's emailed answer to a
+housing costs check onto his task's Notes, in the shape lane B already reads as his (9 Oct 2026).
+
+SIGNED AGREEMENTS (9 Oct 2026)
+scripts/rent_signed_check.py matches every tenancy agreement Adobe says was signed since 10 Sep 2026 to a
+tenancy, and raises ONE TENANCY RECORD task for the Cash Flow Voids agent for one with none.
 
 NOT CHASED (Kevin's standing instruction)
 A tenant on the private "noChaseTenants" list (PRE_SLATE_PATH, ids only) is judged and shown like
@@ -107,6 +112,8 @@ import rent_new_tenant as lane_b_rules  # noqa: E402
 import rent_form_chase  # noqa: E402
 import rent_plans  # noqa: E402
 import rent_proof_of_residency  # noqa: E402
+import rent_roy_email  # noqa: E402
+import rent_signed_check  # noqa: E402
 import text_check  # noqa: E402
 
 LONDON = ZoneInfo("Europe/London")
@@ -653,6 +660,13 @@ def brief_line(res):
     residency = rent_proof_of_residency.brief(res.get("residency") or {})
     if residency:
         parts.append(residency)
+    # A signed agreement with no tenancy record (9 Oct 2026): a tenant the figure above does not even count.
+    signed = rent_signed_check.brief(res.get("signed") or {})
+    if signed:
+        parts.append(signed)
+    roy = rent_roy_email.brief(res.get("royEmail") or {})
+    if roy:
+        parts.append(roy)
 
     def group(lane):
         return [r for r in res["tenancies"] if r["lane"] == lane and r["light"] != "green"]
@@ -1051,6 +1065,8 @@ def main(argv=None):
     res["tasks"] = lane_a(res, data["tenancies"], day, writes, plans["onTrack"])
     # The agent's switch is lane A's read. With no status read back, lane B is told so, not "off".
     switch = res["tasks"]["on"] if res["tasks"]["status"] else None
+    # Roy's emailed answers to a housing costs check go on his task first, so lane B reads them this run.
+    res["royEmail"] = rent_roy_email.run(_Here(), data, now, writes, switch)
     res["setup"] = lane_b_rules.lane_b(_Here(), res, data, day, writes, switch, now)
     res["agentLate"] = agent_late(res, data["tenancies"], day, writes, switch)
     res["plans"] = rent_plans.act(_Here(), plans, data, day, writes, switch, res)
@@ -1058,23 +1074,28 @@ def main(argv=None):
     res["forms"] = rent_form_chase.run(_Here(), data, day, res, writes, switch)
     res["texts"] = text_check.run(_Here(), now, writes)
     res["residency"] = rent_proof_of_residency.run(_Here(), now, writes, switch, day=day)
+    res["signed"] = rent_signed_check.run(_Here(), now, writes, switch, data, day=day)
     res["briefLine"] = brief_line(res)              # lane B has put each new tenant's stage on its row
     failed = (res["tasks"]["failed"] or res["setup"]["failed"] or res["agentLate"]["failed"] or res["plans"]["failed"]
-              or res["cap"]["failed"] or res["forms"]["failed"] or res["texts"]["failed"] or res["residency"]["failed"])
+              or res["cap"]["failed"] or res["forms"]["failed"] or res["texts"]["failed"] or res["residency"]["failed"]
+              or res["signed"]["failed"] or res["royEmail"]["failed"])
     if writes:
         public = {k: v for k, v in res.items() if k not in ("lights", "lanes", "paidFull")}
         # Blocked only when the bank data hid a verdict: a stale feed with every rent already seen hides nothing.
         status = "Failed" if failed else ("Blocked" if res["bankBlocked"] or res["plans"].get("stuck") else "Worked")
-        write_row(status, "\n".join([detail(res), lane_a_line(res["tasks"]), lane_b_rules.lane_b_line(res["setup"]),
+        write_row(status, "\n".join([detail(res), lane_a_line(res["tasks"]), rent_roy_email.line(res["royEmail"]),
+                                      lane_b_rules.lane_b_line(res["setup"]),
                                       agent_late_line(res["agentLate"]), rent_plans.line(res["plans"]),
                                       rent_cap.line(res["cap"]), rent_form_chase.line(res["forms"]),
-                                      text_check.line(res["texts"]), rent_proof_of_residency.line(res["residency"])]),
+                                      text_check.line(res["texts"]), rent_proof_of_residency.line(res["residency"]),
+                                      rent_signed_check.line(res["signed"])]),
                   public, now)
         append_history(res, now)
     print(json.dumps({"written": writes, "briefLine": res["briefLine"], "worst": res["worst"],
                       "counts": res["counts"], "tenancies": res["tenancies"], "feed": res["feed"],
                       "tasks": res["tasks"], "setup": res["setup"], "agentLate": res["agentLate"], "plans": res["plans"],
-                      "cap": res["cap"], "forms": res["forms"], "texts": res["texts"], "residency": res["residency"]},
+                      "cap": res["cap"], "forms": res["forms"], "texts": res["texts"], "residency": res["residency"],
+                      "signed": res["signed"], "royEmail": res["royEmail"]},
                      indent=2, default=str))
     return 1 if failed else 0
 
