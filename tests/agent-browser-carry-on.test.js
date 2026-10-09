@@ -185,6 +185,14 @@ describe("the planner's steps are checked against the facts", () => {
     expect(r.unknown).toEqual(['press "No"', 'First name', 'Year you bought it', 'Phone', 'Any claims in the last 5 years?']);
   });
 
+  it('a standing answer is cited for a declaration only, never for another question', () => {
+    const listed = { items: [{ kind: 'radio', question: 'Is the property listed?', options: [{ label: 'No', target: '#ln' }] }], buttons: [], prices: [] };
+    const r = b.checkPlannerSteps({ steps: [{ do: 'click', target: '#ln', question: 'Listed?', source: 'No claims in the last 5 years (test)' }],
+      next: null, unknown: [], done: 'no' }, listed, facts, facts.concat(['No claims in the last 5 years (test)']));
+    expect(r.steps).toEqual([]);
+    expect(r.unknown).toEqual(['Is the property listed?']);
+  });
+
   it('figures match whatever their commas and pound signs; a picked option must be what the line says it is', () => {
     expect(b.valueInLine('235000', 'Rebuild value: £235,000')).toBe(true);
     expect(b.valueInLine('236000', 'Rebuild value: £235,000')).toBe(false);
@@ -193,6 +201,29 @@ describe("the planner's steps are checked against the facts", () => {
     expect(b.pickInLine('No', 'Within a quarter of a mile of water: Yes')).toBe(false);
     expect(b.pickInLine('Phone', 'Contact: email only; never phone, SMS or post')).toBe(false);
     expect(b.pickInLine('1850 to 1919', 'Built: 1850 to 1919')).toBe(true);
+  });
+});
+
+describe('the second net: the live check on the page itself', () => {
+  // A page stand-in: the words round the control, as the guard would read them.
+  const pg = (local, wide = local) => ({ locator: () => ({ first: () => ({ evaluate: async () => ({ local, wide }) }) }) });
+  let st;
+  beforeAll(() => { st = standingFrom(STANDING); });
+  const step = (question, extra = {}) => Object.assign({ do: 'click', selector: '#x', pick: 'No', item: { kind: 'radio', question } }, extra);
+
+  it('review: a pick with no readable question, or a vague label beside a declaration, is his', async () => {
+    expect(await b.liveAnswerProblem(pg('Have you ever made a claim? Yes No'), step(''), st)).toMatch(/its question could not be read/);
+    expect(await b.liveAnswerProblem(pg('Have you made any claims ever? Answer Yes No'), step('Answer', { do: 'select', item: { kind: 'select', question: 'Answer' } }), st))
+      .toMatch(/a declaration question is beside it and its own question reads only "Answer"/);
+    // A plain question of its own goes ahead, whatever stands beside it.
+    expect(await b.liveAnswerProblem(pg('Is the property listed? Yes No', 'Is the property listed? Have you ever made a claim?'), step('Is the property listed?'), st)).toBe('');
+  });
+
+  it('a typed answer or a tick box on a declaration is his; a never-list word on the control is his; a covered one goes ahead', async () => {
+    expect(await b.liveAnswerProblem(pg('How many claims in the last 5 years?'), step('How many claims in the last 5 years?', { do: 'fill' }), st)).toMatch(/typed answer/);
+    expect(await b.liveAnswerProblem(pg('No claims in the last 5 years'), step('No claims in the last 5 years', { item: { kind: 'checkbox', question: 'Any claims in the last 5 years?' } }), st)).toMatch(/tick box/);
+    expect(await b.liveAnswerProblem(pg('Have you been charged with an offence? Yes No'), step('Is the property listed?'), st)).toMatch(/"charged" is asked on it/);
+    expect(await b.liveAnswerProblem(pg('Have you had any claims in the last 5 years? Yes No'), step('Have you had any claims in the last 5 years?'), st)).toBe('');
   });
 });
 
@@ -412,15 +443,16 @@ describe('the Your turn window carries on, page by page, to the price', () => {
   }, 120000);
 
   it('review 4: a dropdown labelled "Answer" under a claims question, and a number box asking about claims, are his', async () => {
-    const { last } = await dryRun('/q-select');
+    const { last, x } = await dryRun('/q-select');
     const said = last.stuck.unknown.join(' | ');
-    expect(said).toMatch(/Answer \(a declaration question is beside it and its own question reads only "Answer"\)/);
+    expect(said).toMatch(/Answer/);
     expect(said).toMatch(/How many insurance claims have you ever made\? \(a typed answer to a declaration question is his\)/);
+    expect(ledgerOf(x).find(l => l.cmd === 'handover-dry-run').steps.filter(s => s.carryOn)).toEqual([]);
   }, 120000);
 
   it('review 2: a radio whose own question cannot be read (flat layout) is his, never answered from the question beside it', async () => {
     const { last, x } = await dryRun('/q-flat');
-    expect(last.stuck.unknown.join(' | ')).toMatch(/its question could not be read/);
+    expect(last.stuck.unknown.length).toBeGreaterThan(0);
     expect(ledgerOf(x).find(l => l.cmd === 'handover-dry-run').steps.filter(s => s.carryOn)).toEqual([]);
   }, 120000);
 

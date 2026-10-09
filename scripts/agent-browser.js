@@ -2034,6 +2034,7 @@ function factsOf(plan, standing) {
 // Kevin, never a guess. `item` and `pick` ride on each step for the live declaration check.
 function checkPlannerSteps(out, snap, facts, citable = facts) {
   const lines = new Map(citable.map(l => [lineKey(l), l]));
+  const factKeys = new Set(facts.map(lineKey));
   const answers = new Map();
   for (const it of snap.items) {
     if (it.kind === 'radio') for (const o of it.options || []) answers.set(o.target, { item: it, pick: o.label, kind: 'click' });
@@ -2050,6 +2051,9 @@ function checkPlannerSteps(out, snap, facts, citable = facts) {
     const want = s.do === 'check' ? 'click' : s.do;
     if (!a) { unknown.push(buttons.has(s.target) ? `press "${buttons.get(s.target).text}"` : q); continue; }
     if (a.kind !== want || !line) { unknown.push(q); continue; }
+    // One of his standing answers answers a declaration and nothing else: "No claims" is never the
+    // answer to "Is the property listed?".
+    if (!factKeys.has(lineKey(s.source)) && !topicsIn(a.item.question).length) { unknown.push(q); continue; }
     if (a.kind === 'fill') {
       if (!valueInLine(s.value, line)) { unknown.push(q); continue; }
       steps.push({ do: 'fill', selector: s.target, value: String(s.value), question: q, item: a.item });
