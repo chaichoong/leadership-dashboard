@@ -2294,6 +2294,8 @@
             const rent = Number(getField(t, F.tenRent)) || 0;
             if (rent <= 0) return;
             if (localStorage.getItem('cfv_dismissed_' + t.id)) return;
+            // Rent paid by set-off is paid (9 Oct 2026): the same rule as the CFV tab, so this count still matches it.
+            if (typeof cfvSetOffCovers === 'function' && cfvSetOffCovers(t, todayForCfv, cfvTxIndex)) return;
             let inArrears;
             if (typeof isCurrentlyInArrears === 'function') {
                 inArrears = isCurrentlyInArrears(t, null, todayForCfv, cfvTxIndex);

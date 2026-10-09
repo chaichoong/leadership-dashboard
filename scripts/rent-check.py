@@ -121,7 +121,10 @@ T_TASKS, T_REGISTER = "tblqB8b22hKBL4PF1", "tbl9msVjyQWslLOIZ"
 TY = {"rent": "fldDMyfZLFMeONPq8", "dueDay": "fldhy2U0CQmM2oS4P", "payStatus": "fldxU3dPUnbK0SCDq",
       "start": "fld2rPXwwV8dXb1zF", "end": "fldwHhhKAq4f1nY9e", "tenants": "fld1i5bDoHL3B6rUf",
       "tenantStatus": "fldgWAyha1Uij1SZP", "unitRef": "fldql2nyQlPfkPP4p", "hasTx": "fldQpk89SnnMLCpxa",
-      "surname": "fldOXazTqBWieEOK2"}
+      "surname": "fldOXazTqBWieEOK2",
+      # Rent Set-off From / Until (9 Oct 2026): the window of rent a letting agent keeps against a bill we owe them.
+      # Kevin, 6 Oct 2026: that rent is PAID, not a cash flow void. Written only by scripts/tenancy-record.py.
+      "setOffFrom": "fldkeJL4wXDcO6wqq", "setOffUntil": "fldwvF3MrJXlQMoCk"}
 TN = {"payType": "fldZbrk8Xw5Dcwxhi"}
 TX = {"date": "fldoyQ6Rr9cHp3bgQ", "tenancy": "fldPmAMmxwqs4SdPa", "amount": "fldot7iisZeL3WrdR",
       "account": "fld9hm24JQUPOCoWj"}
@@ -224,6 +227,13 @@ def first_uncovered(newest, start, day, due_day):
         floor = max(floor, newest + timedelta(days=EARLY_PAY_DAYS + 1))
     due = due_on(floor.year, floor.month, due_day)
     return due if due >= floor else next_due(due, due_day)
+
+
+def set_off_window(f):
+    """(from, until) of rent paid by set-off, or None. Both dates are needed and from must not be after until: a
+    half-written window covers nothing (independent review, 9 Oct 2026)."""
+    start, until = parse_day(f.get(TY["setOffFrom"])), parse_day(f.get(TY["setOffUntil"]))
+    return (start, until) if start and until and start <= until else None
 
 
 def parse_stamp(stamp):
@@ -493,6 +503,12 @@ def judge(rec, tenants, payments, day, feed, pre_slate, late_before):
 
     newest = max((p["day"] for p in payments), default=None)
     owed = first_uncovered(newest, start, day, due_day)
+    # Rent paid by set-off (Kevin, 6 Oct 2026): only when the oldest unpaid rent falls due INSIDE the window. Rent owed
+    # before the window began is still owed, and the first rent after it is judged as usual.
+    set_off = set_off_window(f)
+    covered = bool(set_off and set_off[0] <= owed <= set_off[1])
+    while covered and owed <= set_off[1]:
+        owed = next_due(owed, due_day)
     as_at, bank_why = bank_view(feed, payments)
     # With a fresh feed, everything is judged as at the feed's day (never a day ahead of today).
     # With a stale or missing one the calendar decides whether rent is overdue, and an overdue
@@ -526,6 +542,12 @@ def judge(rec, tenants, payments, day, feed, pre_slate, late_before):
                        f"({money(sum(w['amount'] for w in mine))}) not matched yet")
         return "cannot tell: " + "; ".join(why) if why else ""
 
+    # Paying by set-off while the first rent after the window is not yet late. Never weighed as short or full: no
+    # money moved.
+    if covered and not late:
+        still = f", still marked {status}" if status in (CFV, CFV_ACTIONED) else ""
+        return dict(row, light="green", lane="fine", paying=True, setOff=set_off[1].isoformat(),
+                    note=f"rent paid by set-off until {set_off[1].strftime('%-d %b %Y')} ({last}){still}")
     if status in (CFV, CFV_ACTIONED):
         word = "cash flow void actioned" if status == CFV_ACTIONED else "cash flow void"
         if judged and got is None:

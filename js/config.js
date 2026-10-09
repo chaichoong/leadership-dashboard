@@ -895,6 +895,10 @@
         tenProperty:      'fldxfIa0W1nqCbLo2',  // Property (lookup)
         tenStartDate:     'fld2rPXwwV8dXb1zF',  // Tenancy Start Date
         tenEndDate:       'fldwHhhKAq4f1nY9e',  // Tenancy End Date
+        // Rent paid by set-off (9 Oct 2026): rent a letting agent keeps against a bill we owe them counts as PAID
+        // (Kevin, 6 Oct 2026). Written only by scripts/tenancy-record.py set-off; read by js/cfv.js and js/arrears.js.
+        tenSetOffFrom:    'fldkeJL4wXDcO6wqq',  // Rent Set-off From
+        tenSetOffUntil:   'fldwvF3MrJXlQMoCk',  // Rent Set-off Until (inclusive)
         // Tenant contact fields
         tenantPhone:      'fldraHUkWfqo4olLF',  // Contact Number
         tenantEmail:      'fldybEduFY3DWWTfT',  // Email Address
