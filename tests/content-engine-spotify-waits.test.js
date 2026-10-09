@@ -1,10 +1,14 @@
 // The Spotify upload's status waits must read Spotify's own words, never the episode's copy (24 Sep 2026).
 // `text=Uploading` matched 2070's description ("uploading your bank statements") in the editor, so the wait for the
 // upload to finish never ended and every hourly retry left an Untitled draft. Drives the REAL plan's selectors in a page.
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { execFileSync } from 'node:child_process';
 import path from 'node:path';
 import { chromium } from 'playwright';
+// Real Chrome launches in this file. 90s, not the suite's 30s (9 Oct 2026): in the merge
+// gate's throwaway tree, with the full suite running in parallel, a launch alone went past 30s
+// and refused every PR that day (main a40fa493 failed here; each test passes alone).
+vi.setConfig({ testTimeout: 90_000, hookTimeout: 90_000 });
 
 const DIR = path.resolve(__dirname, '../scripts/content-engine');
 const plan = JSON.parse(execFileSync('python3', ['-c',
