@@ -1861,18 +1861,18 @@ async function snapshotForm(page) {
       .filter(shown).map(e => clean(e.innerText || e.getAttribute('aria-label') || '')).filter(Boolean).slice(0, 10);
     const body = clean(document.body.innerText || '');
     const prices = (body.match(/£\s?\d[\d,]*(?:\.\d{2})?[^.£]{0,40}/g) || []).slice(0, 8);
-    // The form's whole text, however long: the <form> holding most of the visible answers, else the
-    // smallest box round them all (a site footer's "Make a claim" link stays outside it).
+    // The forms' whole text, however long: every <form> that holds a visible answer, and the smallest
+    // box round the answers that sit in no form (a footer's "Make a claim" link stays outside both).
     const inputs = Array.from(document.querySelectorAll('input,select,textarea')).filter(el => isControl(el) && String(el.type || '').toLowerCase() !== 'password'
       && (shown(el) || Array.from(el.labels || []).some(shown)));
-    let box = null;
-    const forms = Array.from(document.querySelectorAll('form')).map(f => [f, inputs.filter(i => f.contains(i)).length]).filter(x => x[1]).sort((a, b) => b[1] - a[1]);
-    if (forms.length) box = forms[0][0];
-    else if (inputs.length) {
-      box = inputs[0].parentElement;
-      while (box && box !== document.body && !inputs.every(i => box.contains(i))) box = box.parentElement;
+    const boxes = new Set(inputs.map(i => i.closest('form')).filter(Boolean));
+    const loose = inputs.filter(i => !i.closest('form'));
+    if (loose.length) {
+      let box = loose[0].parentElement;
+      while (box && box !== document.body && !loose.every(i => box.contains(i))) box = box.parentElement;
+      boxes.add(box || document.body);
     }
-    const formText = box ? clean(box.innerText || '') : '';
+    const formText = Array.from(boxes).map(b => clean(b.innerText || '')).join(' | ');
     return { url: location.href, title: document.title, headings, errors, prices, formText, items: items.slice(0, 90), buttons: buttons.slice(0, 40) };
   });
 }

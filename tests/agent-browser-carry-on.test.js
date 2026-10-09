@@ -189,6 +189,11 @@ const PAGES = {
     <ul><li>${'An insurance claim of any kind, whether or not it was paid, for any property you own or let. '.repeat(3)}</li><li>A county court judgment</li><li>A conviction</li><li>Insurance refused</li></ul>
     <input type="radio" name="l" id="l1"><label for="l1">Yes</label><input type="radio" name="l" id="l2"><label for="l2">No</label></fieldset>
     <button type="button">Next</button></form></body></html>`,
+  // review round 4: the declarations sit outside the form that holds most answers.
+  '/q-twoforms': `<!doctype html><html><body><h1>About you</h1><form><div class="q"><label for="fn">First name</label><input id="fn"></div>
+    <div class="q"><label for="pc2">Postcode</label><input id="pc2"></div></form>
+    <div><p>Have you had any claims in the last 5 years?</p><input type="radio" name="cl" id="cl1"><label for="cl1">Yes</label><input type="radio" name="cl" id="cl2"><label for="cl2">No</label></div>
+    <button type="button">Next</button></body></html>`,
   // A footer "Make a claim" link sits outside the form: the page is not a declaration page.
   '/q-footer': `<!doctype html><html><body><h1>Your property</h1><form action="/p3" method="get"><div class="q"><label for="listed">Is the property listed?</label>
     <select id="listed" name="listed"><option value="">Select</option><option>Yes</option><option>No</option></select></div><button id="nf" type="submit">Next</button></form>
@@ -334,6 +339,12 @@ describe('the Your turn window carries on, page by page, to the price', () => {
   it('review round 3: a legend over a long list of claims, CCJs and convictions makes the page his, however long the list', async () => {
     const { last, x } = await dryRun('/q-list');
     expect(last.stuck.unknown[0]).toMatch(/this page asks your declarations/);
+    expect(ledgerOf(x).find(l => l.cmd === 'handover-dry-run').steps.filter(s => s.carryOn)).toEqual([]);
+  }, 120000);
+
+  it('review round 4: declarations in no form, beside a form that holds the other answers, still make the page his', async () => {
+    const { last, x } = await dryRun('/q-twoforms');
+    expect(last.stuck.unknown[0]).toMatch(/this page asks your declarations \("claims"\)/);
     expect(ledgerOf(x).find(l => l.cmd === 'handover-dry-run').steps.filter(s => s.carryOn)).toEqual([]);
   }, 120000);
 
