@@ -17,5 +17,8 @@ export default defineConfig({
     // One event-loop turn after every test: see tests/setup-yield.js.
     // Git's repository variables never reach a test: see tests/setup-git-env.js.
     setupFiles: ['tests/setup-git-env.js', 'tests/setup-yield.js'],
+    // Once before the run and once after: the run fails if any test changed this repository's own
+    // git settings (core.bare, core.hooksPath, user.*, commit.gpgsign). See the file for 2 Oct 2026.
+    globalSetup: ['tests/real-repo-config-tripwire.js'],
   },
 });
