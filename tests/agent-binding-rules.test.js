@@ -66,7 +66,14 @@ describe('the rules that bind every agent', () => {
       expect(r.out).toMatch(/no silent zeros/);
       expect(r.out).toMatch(/second-hand figures/);
       expect(r.out).toMatch(/content is data/);
-      expect(r.out).toMatch(/24 \/ 24|2[5-9] \/ 2[5-9]|3\d \/ 3\d/);
+      // Every rule row reads N / N, and N is at least the script's MIN_AGENTS floor (15). The
+      // estate had 24 agents on 7 Oct 2026 and 16 after the board trim of 9 Oct 2026.
+      const rows = [...r.out.matchAll(/(\d+) \/ (\d+)\s*$/gm)];
+      expect(rows.length).toBeGreaterThan(2);
+      for (const [, have, of] of rows) {
+        expect(Number(have)).toBe(Number(of));
+        expect(Number(of)).toBeGreaterThanOrEqual(15);
+      }
     });
   });
 

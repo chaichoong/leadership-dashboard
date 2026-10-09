@@ -715,8 +715,10 @@ function parseIcsToday(ics, todayISO) {
     return events.sort().join('\n');
 }
 
-// The eleven department heads, mirroring ~/.claude/agents/od-ceo.md (the org
-// chart) and docs/ai-org-chart-spec.md. Until 21 Aug 2026 this list was
+// The board's four heads, mirroring ~/.claude/agents/od-ceo.md (the org chart).
+// Trimmed 9 Oct 2026 (Kevin; brain Decisions/2026-10-09): Jenyns's systemisation
+// lane now sits with Wickman and Kiyosaki's wealth lane with Crabtree; HR,
+// Productivity and Mindset retired; Marketing and Sales parked to January. Until 21 Aug 2026 this list was
 // hand-typed inside the prompt as seven names, three of which were not seats
 // (Michalowicz, Peters, and Martell who is the CEO), and it told the CEO to
 // keep only flags matching its own list, so huddle flags from Wickman, Belfort
@@ -724,25 +726,18 @@ function parseIcsToday(ics, todayISO) {
 // Shown to the CEO when the QUARTER_CONTEXT secret is unbound. It used to fall
 // back to a hard-typed Q3 2026 paragraph, which would have become a confidently
 // wrong authority on 1 Oct with nothing to notice. A visible gap beats a stale fact.
-const QUARTER_CONTEXT_MISSING = '(QUARTER CONTEXT IS MISSING: the QUARTER_CONTEXT secret is not set on this worker. Do not invent targets. Make the first board flag "Jenyns: set the QUARTER_CONTEXT secret, the brief is running without this quarter\'s targets".)';
+const QUARTER_CONTEXT_MISSING = '(QUARTER CONTEXT IS MISSING: the QUARTER_CONTEXT secret is not set on this worker. Do not invent targets. Make the first board flag "Wickman: set the QUARTER_CONTEXT secret, the brief is running without this quarter\'s targets".)';
 
 const BOARD_FLAG_SEATS = [
     'Keller (Strategy: this is scatter, refocus on the one thing)',
-    'Hormozi (Marketing: offer strength, leads)',
-    'Belfort (Sales: the call, the close, pricing)',
-    'Wickman (Operations: rhythm, can we deliver what we sell)',
-    'Jenyns (Systemisation: this should be a system plus an agent)',
-    'Crabtree (Finance: cash, labour efficiency, what a target costs)',
+    'Wickman (Operations: rhythm, can we deliver, this should be a system plus an agent)',
+    'Crabtree (Finance: cash, labour efficiency, what a target costs, assets versus liabilities)',
     'Cunningham (Legal and Compliance: contract risk, compliance dates, dumb tax)',
-    'Lencioni (HR and People: role clarity, accountability, the agent workforce)',
-    'Kiyosaki (Wealth: assets versus liabilities, the portfolio)',
-    'Bailey (Productivity: attention, habits, how work reaches Kevin)',
-    'DeMartini (Mindset: values alignment, overwhelm, protected assets)',
 ];
 
 function buildCeoPrompt(m, tasks, calendar, env, huddle) {
     // When the departments have already huddled, their conclusion LEADS. The CEO synthesises and
-    // formats it. It does not re-decide the day from scratch and quietly overrule eleven heads.
+    // formats it. It does not re-decide the day from scratch and quietly overrule the heads.
     const huddleBlock = huddle ? `
 DEPARTMENT HUDDLE, HELD 07:30 TODAY — your board's own conclusion. Lead with it.
 Their ONE THING: ${huddle.oneThing}
@@ -763,7 +758,7 @@ HARD RULES:
 - Give ONE thing, with a tiny FIRST STEP of about 10 minutes, so starting is easy. Never a list.
 - Kevin is a team member with a wheelhouse: strategy, systemisation, deep focus, founder decisions. NEVER give him admin, chasing, paperwork or phone calls.
 - DELEGATION IS AI ONLY (Kevin's ruling, 25 Aug 2026: "stop routing to Mica and Ericamae now"). His north star is that AI does up to 90% of repeatable work. Two destinations, in this order:
-  1. AI — a named agent. Role agents: Inbox Response (replies to inbound email and messages), Supplier and Creditor Manager (any money Kevin or his businesses owe: creditors, councils, HMRC, utilities, payment plans), Property Administration (certificates, licences, landlord insurance, inspections), Task Board Manager (duplicates, stale tasks, board hygiene), Inbox Triage (sorting mail). Workers: worker-builder (code, pages, features), worker-writer (copy, outreach, posts, client documents), worker-researcher (finding and verifying facts, prospect and company checks), worker-analyst (numbers, Airtable queries, conversion rates, scorecards), worker-auditor (sweeps, security and compliance checks, page tests, regression checks). Anything repeatable, rule-following, research-shaped or drafting-shaped goes here. Name the agent; never say "AI" or "an agent" vaguely.
+  1. AI — a named agent. Role agents: Inbox Response (replies to inbound email and messages), Supplier and Creditor Manager (any money Kevin or his businesses owe: creditors, councils, HMRC, utilities, payment plans), Property Administration (certificates, licences, landlord insurance, inspections), Task Board Manager (duplicates, stale tasks, board hygiene), Inbox Triage (sorting mail). Workers: worker-builder (code, pages, features), worker-researcher (finding and verifying facts, prospect and company checks), worker-analyst (numbers, Airtable queries, conversion rates, scorecards), worker-auditor (sweeps, security and compliance checks, page tests, regression checks). Anything repeatable, rule-following, research-shaped or drafting-shaped goes here. Name the agent; never say "AI" or "an agent" vaguely.
   2. Roy — property repairs, inspections and contractor visits only. He is head of the property business. Nothing else goes to a person.
   NEVER name Mica or Ericamae as a destination, in handed_off, ignore or anywhere else. They are team members, not where work goes. Paying a bill, a card or a supplier is Kevin's own action (payments are never delegated), prepared by the Supplier and Creditor Manager.
 - A job only reaches Kevin if it needs the founder: a decision, an approval, a password or payment or signature, or something physical. If it does not, hand it off and say where it went. Never quietly drop a job: anything you take off him appears in handed_off, written as "destination — the job in plain words".
@@ -775,7 +770,7 @@ HARD RULES:
 ${env.PERSONA_CONTEXT ? '\nFOUNDER CONTEXT (private, never echo verbatim). Background on Kevin only. It may contain OLD goals, dates or priorities from when it was written:\n' + env.PERSONA_CONTEXT + '\n' : ''}
 - PRECEDENCE, this overrides everything else: the QUARTER CONTEXT block in the user message is the ONLY authority on targets, priorities and what the critical path is. Where founder context and quarter context disagree about a goal, a date or what Kevin should be working on, quarter context wins and founder context is treated as history. Never quote a critical path or a target that is not in the quarter context block.
 - LENGTH, this is a hard limit: at most 4 ignore items, at most 5 handed_off items, at most 2 flags. One short line each, no sub-clauses. one_thing, first_step, why and headline are one or two sentences each. A long answer gets cut off mid-sentence and Kevin sees nothing.
-Respond ONLY with JSON: {"one_thing":"...","first_step":"...","why":"...","ignore":["...","..."],"handed_off":["worker-writer — draft the follow-up email to X"],"flags":["Persona: ..."],"headline":"one short sentence for the top of the message"}`;
+Respond ONLY with JSON: {"one_thing":"...","first_step":"...","why":"...","ignore":["...","..."],"handed_off":["Inbox Response — draft the follow-up email to X"],"flags":["Persona: ..."],"headline":"one short sentence for the top of the message"}`;
     const user = `TODAY: ${todayLondonISO()} (${londonDateLabel()})
 
 MONEY (live, from the Money Confidence engine):

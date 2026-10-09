@@ -19,7 +19,7 @@ const CLAUSES = [
   ['Personal figures use the Wealth page\'s own grouping', 'one grouping for personal figures'],
   ['Name every unit, tenant, property and owner', 'the named list on every project'],
   ['under 250 words', 'the board word limit'],
-  ['Never all eleven', 'only the fitting board seats'],
+  ['Never a seat that left the board', 'only the four live board seats'],
   ['Committed and stretch targets, each built from a named list of actions', 'how targets are built'],
   ['an AI agent, then Roy Lavin for property work, then\n  Kevin', 'the owner order'],
   ['Snapshot first, carry second', 'the quarter-close order'],
@@ -89,8 +89,8 @@ describe('strategy-session skill', () => {
 
   it('names only board seats that are real agent types', () => {
     const seats = [...new Set(skill.match(/dept-[a-z-]+/g))];
-    const known = ['dept-finance', 'dept-hr', 'dept-legal-compliance', 'dept-marketing', 'dept-mindset',
-      'dept-operations', 'dept-productivity', 'dept-sales', 'dept-strategy', 'dept-systemisation', 'dept-wealth'];
+    // The board after the 9 Oct 2026 trim. A parked or retired seat named here fails.
+    const known = ['dept-finance', 'dept-legal-compliance', 'dept-operations', 'dept-strategy'];
     expect(seats.length).toBeGreaterThan(3);
     for (const s of seats) expect(known, `${s} is not a board seat`).toContain(s);
   });

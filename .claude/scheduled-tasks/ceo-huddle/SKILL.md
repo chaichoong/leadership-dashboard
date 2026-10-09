@@ -77,7 +77,7 @@ STEPS
 
    So: **re-run `TZ=Europe/London date` immediately before the write in step 4, and re-size from THAT reading, not the one in step 0.** Check it again after any long fan-out (parallel department agents, a browser pass) returns. If the second reading has crossed a band boundary, drop to the smaller huddle rather than pressing on with the plan you made at the start. Never assume the gap between two steps was small.
 
-1. Run the huddle. Follow ~/.claude/skills/huddle/SKILL.md. Convene ONLY the departments with live work, not all eleven. Default weekday set: dept-strategy, dept-marketing, dept-sales, dept-systemisation, dept-operations. Add dept-finance on Mondays and at month end. Add dept-legal-compliance when a contract, deadline or compliance date is live. Add dept-productivity or dept-mindset when the day's data suggests overload. Dispatch them in PARALLEL, one Agent call each, and give each the current 11 Operations Director tasks plus the standing targets.
+1. Run the huddle. Follow ~/.claude/skills/huddle/SKILL.md. Convene ONLY the departments with live work. The board is four heads since 9 Oct 2026. Default weekday set: dept-strategy, dept-operations. Add dept-finance on Mondays, at month end and when money is live. Add dept-legal-compliance when a contract, deadline or compliance date is live. When the day's data suggests overload, the CEO says so in the digest himself. Dispatch them in PARALLEL, one Agent call each, and give each the current 11 Operations Director tasks plus the standing targets.
 
 2. Ground them in the truth before they speak. Read ~/.claude/agents/ESTATE.md (how the estate works today) and every file in 00 AI Context/Decisions/ dated within the last fourteen days: a ruling made yesterday outranks any line in this skill. Then read 00 AI Context/Decisions/2026-07-29 Launch reset — targets, sequencing and who builds.md. Then read the 11 top-level Operations Director tasks in Airtable base appnqjDpqDniH3IRl, table Tasks tblqB8b22hKBL4PF1. Detail is held as a checklist in each Description. PAT at ~/.config/od/airtable_pat, never print it. A stale plan line is not current state: verify before generating any task for Kevin.
 
@@ -146,7 +146,7 @@ STEPS
    name the agent and the single unblocking action. Quiet is reported as quiet:
    "workforce: nothing stuck" is one line the brief can carry.
 
-3. Synthesise ONE digest, never eleven reports: the one thing today, the tiny first step (about ten minutes), and at most TWO department flags. Anything a worker agent can do gets dispatched, not reported to Kevin. Remember the delegation order (Kevin, 25 Aug 2026): AI agents only, Roy for property residue, then Kevin and only for founder decisions, approvals, credentials, payments, signatures and physical actions. Never name Mica or Ericamae as a destination in Handed Off or Ignore Today; the 4 Sep 2026 brief did ("Mica — pay credit card") and that was the ruling broken in Kevin's own brief.
+3. Synthesise ONE digest, never one report per head: the one thing today, the tiny first step (about ten minutes), and at most TWO department flags. Anything a worker agent can do gets dispatched, not reported to Kevin. Remember the delegation order (Kevin, 25 Aug 2026): AI agents only, Roy for property residue, then Kevin and only for founder decisions, approvals, credentials, payments, signatures and physical actions. Never name Mica or Ericamae as a destination in Handed Off or Ignore Today; the 4 Sep 2026 brief did ("Mica — pay credit card") and that was the ruling broken in Kevin's own brief.
 
 3b. Check the agent approval queue and the accuracy scores. Run `python3 /Users/kevinbrittain/Projects/leadership-dashboard/scripts/agent-accuracy-report.py`. Two things come out of it:
 
@@ -162,7 +162,7 @@ STEPS
    - fldzLwBd3Mjg7rDxM Date = today's Europe/London date, YYYY-MM-DD
    - fldQDCAcd74Bb6mpY One Thing = max 250 characters
    - fld4O4EuxHzMWARV7 First Step = max 250 characters
-   - fldS7ZoGAS7sAJfJq Board Flags = one flag per line, "Surname: one line". The surname must be one of the eleven seats: Keller, Hormozi, Belfort, Wickman, Jenyns, Crabtree, Cunningham, Lencioni, Kiyosaki, Bailey, DeMartini.
+   - fldS7ZoGAS7sAJfJq Board Flags = one flag per line, "Surname: one line". The surname must be one of the four seats: Keller, Wickman, Crabtree, Cunningham.
    - fld9PQ10p8V4N8Y0U Handed Off = everything you dispatched to a worker agent, one per line, written `destination — the job in plain words` (for example `worker-writer — draft the follow-up email to the Sefton letting agent`). The 09:00 worker reads this field, merges in its own hand-offs, and shows Kevin the list under "Not yours today, handed off". If you dispatched it and did not write it here, Kevin never learns it happened and the work looks like it vanished. This field was missing from this step until 21 Aug 2026 even though ~/.claude/skills/huddle/SKILL.md has always required it.
    LEAVE Full Brief (fldPkiaWvmYAoyHEl) EMPTY. The worker keys on it: populated means the worker already ran and it will ignore your huddle. It also tells the ceo-brief-morning-check task whether the 09:00 brief actually fired.
    If a record already exists for today, PATCH it. Only POST when there is none. Two records for one day breaks the CEO Brief tab's read of the latest.

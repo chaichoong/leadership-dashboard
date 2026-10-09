@@ -27,8 +27,9 @@ function loadFn(name) {
   return new Function(`${m[0]}; return ${name};`)();
 }
 
-const ELEVEN_SEATS = ['Keller', 'Hormozi', 'Belfort', 'Wickman', 'Jenyns', 'Crabtree',
-  'Cunningham', 'Lencioni', 'Kiyosaki', 'Bailey', 'DeMartini'];
+// The board after the 9 Oct 2026 trim (brain Decisions/2026-10-09).
+const BOARD_SEATS = ['Keller', 'Wickman', 'Crabtree', 'Cunningham'];
+const OFF_BOARD = ['Hormozi', 'Belfort', 'Jenyns', 'Lencioni', 'Kiyosaki', 'Bailey', 'DeMartini'];
 
 describe('board flag seats match the org chart', () => {
   // Finding 2. The prompt carried seven hand-typed names, three of which were
@@ -40,9 +41,9 @@ describe('board flag seats match the org chart', () => {
     expect(block).not.toBeNull();
   });
 
-  it('names all eleven department heads and nothing else', () => {
+  it('names the four live heads and nothing else', () => {
     const surnames = [...block[1].matchAll(/'([A-Za-z]+) \(/g)].map((m) => m[1]);
-    expect(surnames.sort()).toEqual([...ELEVEN_SEATS].sort());
+    expect(surnames.sort()).toEqual([...BOARD_SEATS].sort());
   });
 
   it('the prompt reads the list rather than a hand-typed copy', () => {
@@ -51,8 +52,16 @@ describe('board flag seats match the org chart', () => {
     expect(WORKER).not.toMatch(/Peters \(overwhelm/);
   });
 
-  it('the huddle phase writes flags from the same eleven seats', () => {
-    for (const s of ELEVEN_SEATS) expect(HUDDLE_PHASE).toContain(s);
+  it('the huddle phase writes flags from the same four seats', () => {
+    for (const s of BOARD_SEATS) expect(HUDDLE_PHASE).toContain(s);
+  });
+
+  it('no prompt names a seat that left the board as a flag or a destination', () => {
+    const flagLine = HUDDLE_PHASE.split('\n').find((l) => l.includes('Board Flags ='));
+    expect(flagLine).toBeTruthy();
+    for (const s of OFF_BOARD) expect(flagLine).not.toContain(s);
+    expect(WORKER).not.toMatch(/worker-writer \(copy/);
+    expect(WORKER).not.toMatch(/"handed_off":\["worker-writer/);
   });
 });
 
