@@ -399,7 +399,7 @@ describe('the Your turn window carries on, page by page, to the price', () => {
   it('review 8: a step whose box is missing is carried past (the Swinton email box); a refusal never is', async () => {
     const x = home();
     writeFileSync(join(x.plans, TASK + '.json'), JSON.stringify(PLAN([
-      { do: 'goto', url: `${base}/p1` }, { do: 'fill', selector: '#email-not-there', value: 'x' } ])));
+      { do: 'goto', url: `${base}/p1` }, { do: 'fill', selector: '#email-not-there', value: 'x', timeout: 1500 } ])));
     hits.length = 0;
     const r = await run(x.env, ['handover', '--task', TASK]);
     const last = JSON.parse(r.out.trim().split('\n').pop());
