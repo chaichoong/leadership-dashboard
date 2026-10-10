@@ -103,6 +103,7 @@
         valuations:      'tblZYsa0u1M17N7ZE', // Property Valuations (Wealth tab — per-property value, latest Approved)
         arVariable:    'tblmKRKZMJvUxN4h1', // Outbound Invoices (Accounts Receivable Variable)
         objStrat:      'tblEBvFw8DonwxzGh', // Objective and Strategy (one row per business per quarter)
+        runpreneurMoney: 'tblsH8x6fjWJC26Sa', // Runpreneur Money Record: one row per payment to a cause (10 Oct 2026)
         mainMethods:   'tbl065D58MBEJhjlp', // Main Methods (reusable steps linked from Objective)
         projects:      'tblHrpTMd5LNYn8v1', // Projects (quarterly projects from Strategy push here)
         reconAudit:    'tblbfuxYxu4uMMWwT', // AI Recon Audit — accuracy log (auto-pruned to last 35 days)
@@ -1211,6 +1212,20 @@
             compliance:   { committed: 13, stretch: null },
             intusUnits:   { committed: 2, stretch: 3 },
         },
+    };
+    // Runpreneur Q4 2026 (first plan, recnnpNaFcISto6U3, 9-10 Oct 2026). The projects' KPI Compute
+    // Code calls ctx.runpreneur.*, worked out by js/runpreneur-kpis.js. headline: the public total
+    // the nightly sync shows on the website, kept beside the proof, never used as the measure.
+    const RP_Q4 = {
+        businessId: 'recwq75zTYofP6TIp',
+        moneyProjectId: 'recvnvG2vNROrBG9P',
+        headline: 76920,
+        targets: { moneyConfirmed: { committed: 40000, stretch: 76920 } },
+    };
+    // Runpreneur Money Record field ids (TABLES.runpreneurMoney).
+    const RP_MONEY = {
+        line: 'fldyKmfKIyx52ZJAl', cause: 'fldJUKHkBJogRWhwJ', source: 'fldv4IShZu7n6Jw7w', amount: 'fld0baTCCR9cV3h5f',
+        datePaid: 'fldRBNJJLebzN7U67', receipt: 'fld3VVlIrhOS9rGI8', confirmed: 'fld7lQmNJCVBpKfgE', notes: 'fldTN5w1PqD9Ib9R8',
     };
     // Property Certificates (tbl35rf9qtmq0P87r) and the Properties fields the compliance KPI reads.
     const RE_CERT = {

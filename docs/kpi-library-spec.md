@@ -102,6 +102,10 @@ Added 2 Oct 2026 (Real Estate Q4 projects, rules in `js/re-kpis.js`, tests in
   holds live tenancies, and some old records never got an end date, so "a live tenancy is
   linked" would read the move as done on day one. Only a tenancy that starts on or after the
   move date counts, and the old arrangement shows as "Still on the old arrangement".
+- **Pounds a cause confirms it received.** (Fundraising pack, Runpreneur, 10 Oct 2026.) A
+  fundraising headline (£76,920 on the website) had a record for only £6,922 of it. The measure
+  is the money a cause confirms it received, one row per payment, with a receipt on file and a
+  Confirmed tick. The headline and the traced total sit beside it so the gap stays visible.
 - **Self-managed properties fully compliant.** Certificate counts say how many documents are
   missing; this says how many properties are safe. In date AND on file for all three, with a
   "no gas" mark standing in for the gas certificate. It declares the number of properties it

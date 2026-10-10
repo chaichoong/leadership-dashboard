@@ -542,6 +542,10 @@
                 compliance:()=>reKpiForProject('compliance'),
                 intusUnits:()=>reKpiForProject('intus'),
             },
+            // Runpreneur quarterly KPIs (js/runpreneur-kpis.js): return ctx.runpreneur.moneyConfirmed()
+            runpreneur:{
+                moneyConfirmed:()=>rpKpiForProject('money'),
+            },
         };
     }
 
@@ -673,7 +677,10 @@
         await (freshReady || _mainDataReadyPromise);
         // The compliance KPI reads the certificate book, which is not in the main load.
         // Never rejects: a failed fetch makes that one compute fail loudly instead.
-        await loadReCompliance();
+        // The Runpreneur money record (ctx.runpreneur.*) follows the same rule: never rejects, fails
+        // loudly. It is read only when a project's code uses it, alongside the certificate book.
+        const needRp = withCode.some(r => String(getField(r, STRAT_PF.kpiComputeCode) || '').includes('ctx.runpreneur'));
+        await Promise.all([loadReCompliance(), needRp ? loadRunpreneurRecords() : null]);
         // Fetch the task list once for any project KPI that needs it.
         const tasksForKpi=await fetchTasksForKpi();
         // Run all computes synchronously, updating local state per project so the
@@ -945,6 +952,9 @@
         }else if('status' in first&&'rent' in first){
             where=`${reSignedGbp(d.value||0)} a month in payment: committed ${reSignedGbp(d.committed||0)}, stretch ${reSignedGbp(d.stretch||0)}.`;
             breakdown=rows.map(r=>reRow(reRentLabel(r),reSignedGbp(r.rent),r.rent>0?'text-green':(r.rent<0?'text-red':''))).join('');
+        }else if('counts' in first){
+            where=`${reGbp(d.value)} confirmed by the causes, of ${reGbp(d.traced)} traced so far${d.headline?` (the website shows ${reGbp(d.headline)})`:''}. ${d.confirmedLines} of ${d.lines} lines confirmed.`;
+            breakdown=rows.map(r=>reRow(`${r.cause?r.cause+': ':''}${r.line}`,`${r.amount==null?'No amount yet':reGbp(r.amount)} | ${r.counts?'Confirmed':r.negative?'Negative, not counted':r.confirmed&&r.hasReceipt?'Counted once already':r.confirmed?'Receipt needed':'Not confirmed'}`,r.counts?'text-green':(r.negative?'text-red':''))).join('');
         }else if('gas' in first){
             where=`${d.value} of ${d.of} properties are fully compliant.`;
             breakdown=rows.map(r=>reRow(r.name,`Gas ${r.gas} | Electrical ${r.electrical} | Insurance ${r.insurance}`,r.compliant?'text-green':'')).join('');
@@ -1986,6 +1996,35 @@
             return _reCompliance;
         })();
         return _reCompliancePromise;
+    }
+
+    // ── Runpreneur Q4 KPIs (js/runpreneur-kpis.js, settings RP_Q4 in js/config.js) ──
+    // The money record is not in the main load. Read once per compute pass; a failed read is
+    // recorded, never swallowed, so the project shows "Compute failed" instead of a calm £0.
+    let _rpData = null;             // { money: [rows] } or { error }
+    async function loadRunpreneurRecords() {
+        try {
+            const rows = await airtableFetch(TABLES.runpreneurMoney, { 'fields[]': [RP_MONEY.line, RP_MONEY.cause, RP_MONEY.source, RP_MONEY.amount, RP_MONEY.datePaid, RP_MONEY.receipt, RP_MONEY.confirmed] });
+            _rpData = { money: rows.map(r => {
+                const amt = getField(r, RP_MONEY.amount);
+                return { line: String(getField(r, RP_MONEY.line) || ''), cause: String(getField(r, RP_MONEY.cause) || ''), source: reSelName(getField(r, RP_MONEY.source)),
+                    amount: amt == null || amt === '' ? null : Number(amt), datePaid: getField(r, RP_MONEY.datePaid) || '', hasReceipt: (getField(r, RP_MONEY.receipt) || []).length > 0, confirmed: !!getField(r, RP_MONEY.confirmed) };
+            }) };
+        } catch (e) {
+            console.warn('[loadRunpreneurRecords] failed:', e);
+            _rpData = { error: true };
+        }
+        return _rpData;
+    }
+    // What the Runpreneur projects' KPI Compute Code calls (ctx.runpreneur.*). A red alarm THROWS,
+    // so nothing is saved from data that did not load.
+    function rpKpiForProject(key) {
+        let r;
+        if (key === 'money') r = RunpreneurKpis.moneyConfirmed({ rows: _rpData && !_rpData.error ? _rpData.money : null, headline: RP_Q4.headline });
+        else throw new Error('unknown Runpreneur KPI ' + key);
+        if (RunpreneurKpis.alarmLevel(r) === 'red') throw new Error(r.alarms.filter(a => a.level === 'red').map(a => a.msg).join(' '));
+        const { alarms, ...detail } = r;
+        return { ...detail, notes: alarms.map(a => a.msg) };
     }
 
     // One rule per result, each in its own try: a rule that throws turns ITS card
