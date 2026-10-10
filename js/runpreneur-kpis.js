@@ -10,6 +10,9 @@
 //   • Money counts only when the cause that received it confirms it: a row in
 //     the Runpreneur Money Record with a receipt AND the Confirmed tick. A
 //     headline figure, or a line someone typed, is never the measure.
+//   • A partner counts only with a written yes on file (Status Signed AND the Written Yes
+//     attachment). Gear, content sharing, a collaboration or a sponsorship all count.
+//   • Cold email goes to limited companies only; an approached sole trader is flagged.
 //   • A figure that cannot be trusted says so: every result carries `alarms`,
 //     and a red alarm stops the project saving a number.
 // ════════════════════════════════════════════════════════════════════════
@@ -62,5 +65,40 @@
         return { value, traced, headline: Number(headline) || null, lines: out.length, confirmedLines: out.filter(r => r.counts).length, rows: out, alarms };
     }
 
-    return { moneyConfirmed, alarmLevel };
+    // ── Project 2: partners signed (a written yes) ───────────────────────
+    // rows: [{ name, kinds: [], status, rank, companyType, approachedOn, hasWrittenYes }], or null
+    // when the table did not load. approachTarget: the approaches the plan commits to (40).
+    // today (ISO): an Approached On date counts only once it has passed; a planned date is not a send.
+    const APPROACHED = ['Approached', 'Replied', 'Signed', 'Declined'];
+    function partnersSigned({ rows, approachTarget, today }) {
+        const now = String(today || new Date().toISOString()).slice(0, 10);
+        if (!Array.isArray(rows)) return { value: null, alarms: [red('The partners list did not load.')] };
+        const alarms = [];
+        if (!rows.length) alarms.push(amber('The partners list has no rows yet.'));
+        const out = rows.map(r => {
+            const status = String(r.status || 'Listed');
+            const sentOn = String(r.approachedOn || '').slice(0, 10);
+            // An approach already sent stays sent after an opt-out; the opt-out only stops the next one.
+            const approached = APPROACHED.includes(status) || (!!sentOn && sentOn <= now);
+            const signed = status === 'Signed' && !!r.hasWrittenYes;
+            return { name: r.name || '(no name)', kinds: r.kinds || [], status, rank: r.rank == null ? null : Number(r.rank), companyType: r.companyType || '',
+                approached, signed, optedOut: status === 'Do not contact', signedNoProof: status === 'Signed' && !r.hasWrittenYes,
+                yesNotSigned: status !== 'Signed' && !!r.hasWrittenYes };
+        });
+        const noProof = out.filter(r => r.signedNoProof).length;
+        if (noProof) alarms.push(amber(`${noProof} partner${noProof === 1 ? ' is' : 's are'} marked Signed with no written yes attached, so not counted.`));
+        const notLtd = out.filter(r => r.approached && r.companyType && r.companyType !== 'Limited company').length;
+        if (notLtd) alarms.push(amber(`${notLtd} approached partner${notLtd === 1 ? ' is' : 's are'} not a limited company. Cold email goes to limited companies only; anyone else must agree first.`));
+        const noType = out.filter(r => r.approached && !r.companyType).length;
+        if (noType) alarms.push(amber(`${noType} approached partner${noType === 1 ? ' has' : 's have'} no company type recorded, so the cold-email rule cannot be checked.`));
+        const yesNotSigned = out.filter(r => r.yesNotSigned).length;
+        if (yesNotSigned) alarms.push(amber(`${yesNotSigned} partner${yesNotSigned === 1 ? ' has' : 's have'} a written yes attached but is not marked Signed, so not counted.`));
+        const approached = out.filter(r => r.approached).length;
+        // Signed first, then approached, then the list by rank.
+        out.sort((a, b) => (b.signed - a.signed) || (b.approached - a.approached) || ((a.rank == null ? 1e9 : a.rank) - (b.rank == null ? 1e9 : b.rank)));
+        return { value: out.filter(r => r.signed).length, approached, approachTarget: Number(approachTarget) || null, listed: out.length,
+            optedOut: out.filter(r => r.optedOut).length, rows: out, alarms };
+    }
+
+    return { moneyConfirmed, partnersSigned, alarmLevel };
 });

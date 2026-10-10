@@ -545,6 +545,7 @@
             // Runpreneur quarterly KPIs (js/runpreneur-kpis.js): return ctx.runpreneur.moneyConfirmed()
             runpreneur:{
                 moneyConfirmed:()=>rpKpiForProject('money'),
+                partnersSigned:()=>rpKpiForProject('partners'),
             },
         };
     }
@@ -955,6 +956,13 @@
         }else if('counts' in first){
             where=`${reGbp(d.value)} confirmed by the causes, of ${reGbp(d.traced)} traced so far${d.headline?` (the website shows ${reGbp(d.headline)})`:''}. ${d.confirmedLines} of ${d.lines} lines confirmed.`;
             breakdown=rows.map(r=>reRow(`${r.cause?r.cause+': ':''}${r.line}`,`${r.amount==null?'No amount yet':reGbp(r.amount)} | ${r.counts?'Confirmed':r.negative?'Negative, not counted':r.confirmed&&r.hasReceipt?'Counted once already':r.confirmed?'Receipt needed':'Not confirmed'}`,r.counts?'text-green':(r.negative?'text-red':''))).join('');
+        }else if('kinds' in first){
+            const shown=rows.filter(r=>r.signed||r.approached||r.signedNoProof||r.yesNotSigned);
+            const waiting=rows.filter(r=>!shown.includes(r)&&!r.optedOut).length;
+            where=`${d.value} partner${d.value===1?'':'s'} signed with a written yes. ${d.approached} of ${d.approachTarget||'?'} approaches sent, from ${d.listed} on the list.`;
+            breakdown=shown.map(r=>reRow(`${r.name}${r.kinds.length?' ('+r.kinds.join(', ')+')':''}`,r.signed?'Signed':r.signedNoProof?'Signed, no written yes on file':r.status,r.signed?'text-green':'')).join('')
+                +(waiting?reRow(`${waiting} more on the list, not yet approached`,''):'')
+                +(d.optedOut?reRow(`${d.optedOut} asked not to be contacted`,''):'');
         }else if('gas' in first){
             where=`${d.value} of ${d.of} properties are fully compliant.`;
             breakdown=rows.map(r=>reRow(r.name,`Gas ${r.gas} | Electrical ${r.electrical} | Insurance ${r.insurance}`,r.compliant?'text-green':'')).join('');
@@ -2001,26 +2009,31 @@
     // ── Runpreneur Q4 KPIs (js/runpreneur-kpis.js, settings RP_Q4 in js/config.js) ──
     // The money record is not in the main load. Read once per compute pass; a failed read is
     // recorded, never swallowed, so the project shows "Compute failed" instead of a calm £0.
-    let _rpData = null;             // { money: [rows] } or { error }
+    // Each table keeps its own failure, so a dead partners read never blanks the money KPI.
+    let _rpData = null;             // { money: [rows] | null, partners: [rows] | null }
     async function loadRunpreneurRecords() {
-        try {
-            const rows = await airtableFetch(TABLES.runpreneurMoney, { 'fields[]': [RP_MONEY.line, RP_MONEY.cause, RP_MONEY.source, RP_MONEY.amount, RP_MONEY.datePaid, RP_MONEY.receipt, RP_MONEY.confirmed] });
-            _rpData = { money: rows.map(r => {
+        const read = async (label, fn) => { try { return await fn(); } catch (e) { console.warn('[loadRunpreneurRecords] ' + label + ' failed:', e); return null; } };
+        const [money, partners] = await Promise.all([
+            read('money record', async () => (await airtableFetch(TABLES.runpreneurMoney, { 'fields[]': [RP_MONEY.line, RP_MONEY.cause, RP_MONEY.source, RP_MONEY.amount, RP_MONEY.datePaid, RP_MONEY.receipt, RP_MONEY.confirmed] })).map(r => {
                 const amt = getField(r, RP_MONEY.amount);
                 return { line: String(getField(r, RP_MONEY.line) || ''), cause: String(getField(r, RP_MONEY.cause) || ''), source: reSelName(getField(r, RP_MONEY.source)),
                     amount: amt == null || amt === '' ? null : Number(amt), datePaid: getField(r, RP_MONEY.datePaid) || '', hasReceipt: (getField(r, RP_MONEY.receipt) || []).length > 0, confirmed: !!getField(r, RP_MONEY.confirmed) };
-            }) };
-        } catch (e) {
-            console.warn('[loadRunpreneurRecords] failed:', e);
-            _rpData = { error: true };
-        }
+            })),
+            read('partners list', async () => (await airtableFetch(TABLES.runpreneurPartners, { 'fields[]': [RP_PARTNERS.partner, RP_PARTNERS.kind, RP_PARTNERS.status, RP_PARTNERS.rank, RP_PARTNERS.companyType, RP_PARTNERS.approachedOn, RP_PARTNERS.writtenYes] })).map(r => ({
+                name: String(getField(r, RP_PARTNERS.partner) || ''), kinds: (getField(r, RP_PARTNERS.kind) || []).map(reSelName),
+                status: reSelName(getField(r, RP_PARTNERS.status)), rank: getField(r, RP_PARTNERS.rank), companyType: reSelName(getField(r, RP_PARTNERS.companyType)),
+                approachedOn: getField(r, RP_PARTNERS.approachedOn) || '', hasWrittenYes: (getField(r, RP_PARTNERS.writtenYes) || []).length > 0,
+            }))),
+        ]);
+        _rpData = { money, partners };
         return _rpData;
     }
     // What the Runpreneur projects' KPI Compute Code calls (ctx.runpreneur.*). A red alarm THROWS,
     // so nothing is saved from data that did not load.
     function rpKpiForProject(key) {
         let r;
-        if (key === 'money') r = RunpreneurKpis.moneyConfirmed({ rows: _rpData && !_rpData.error ? _rpData.money : null, headline: RP_Q4.headline });
+        if (key === 'money') r = RunpreneurKpis.moneyConfirmed({ rows: _rpData ? _rpData.money : null, headline: RP_Q4.headline });
+        else if (key === 'partners') r = RunpreneurKpis.partnersSigned({ rows: _rpData ? _rpData.partners : null, approachTarget: RP_Q4.approachTarget, today: reTodayIso() });
         else throw new Error('unknown Runpreneur KPI ' + key);
         if (RunpreneurKpis.alarmLevel(r) === 'red') throw new Error(r.alarms.filter(a => a.level === 'red').map(a => a.msg).join(' '));
         const { alarms, ...detail } = r;

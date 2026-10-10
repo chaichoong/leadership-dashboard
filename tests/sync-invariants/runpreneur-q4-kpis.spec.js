@@ -13,6 +13,14 @@ const { MOCK_PAT, FIELDS } = require('./helpers');
 const PROJECTS_TABLE = 'tblHrpTMd5LNYn8v1';
 const BUSINESSES_TABLE = 'tblpqkvWJJo8Uu25q';
 const MONEY_TABLE = 'tblsH8x6fjWJC26Sa';
+const PARTNERS_TABLE = 'tbl34aBkmSbY2XxTL';
+const P = { partner: 'fldrUQVzdE9Izl1mb', kind: 'fldXCU6h36U6oXY5f', status: 'fldJ1nFZvsAUIb0dS', rank: 'fld9xxbv0Lcf7uf3E', companyType: 'fldLMqESWPHA2eyta', approachedOn: 'fld8uBbPUMgC3DX4a', writtenYes: 'fldWoGqnh08v2xMWm' };
+const PARTNERS = [
+    { id: 'recP1', fields: { [P.partner]: 'Sample Coffee', [P.kind]: ['Sponsorship'], [P.status]: 'Signed', [P.rank]: 1, [P.companyType]: 'Limited company', [P.approachedOn]: '2026-11-03', [P.writtenYes]: [{ id: 'att2', url: 'https://example.invalid/yes.pdf' }] } },
+    { id: 'recP2', fields: { [P.partner]: 'Sample Shoes', [P.kind]: ['Gear'], [P.status]: 'Signed', [P.rank]: 2, [P.companyType]: 'Limited company', [P.approachedOn]: '2026-11-03' } },
+    { id: 'recP3', fields: { [P.partner]: 'Sample Brand', [P.status]: 'Listed', [P.rank]: 3 } },
+    { id: 'recP4', fields: { [P.partner]: 'Sample Opt-out', [P.status]: 'Do not contact', [P.rank]: 4 } },
+];
 const PF = {
     name: 'fldiMZICg1KOORpte', business: 'fldtdJTFkMtldxEVf', start: 'fldGIlsn0cSEpnj18', end: 'fldU0cJparnkvOUsV',
     kpiName: 'fldABYFMf2yBKWdlD', kpiTarget: 'fldaI0voHia91SYZz', kpiCurrent: 'fldB1QJDUsukxKzjQ', kpiUnit: 'fldrYZEghROXYf6w0',
@@ -31,7 +39,7 @@ const MONEY = [
     { id: 'recM3', fields: { [M.line]: 'Sample marathon', [M.cause]: 'Sample charity', [M.source]: 'Direct to cause' } },
 ];
 
-async function loadDashboard(page, money) {
+async function loadDashboard(page, money, partners = PARTNERS) {
     const saves = {};
     await page.addInitScript((pat) => {
         localStorage.setItem('_dlr_pat', pat);
@@ -47,7 +55,11 @@ async function loadDashboard(page, money) {
             return json([]);
         }
         if (url.includes(BUSINESSES_TABLE)) return json([{ id: 'recBiz1', fields: { [FIELDS.bizName]: 'Runpreneur', [FIELDS.bizActive]: true } }]);
-        if (url.includes(PROJECTS_TABLE)) return json([project('recMoney', 'return ctx.runpreneur.moneyConfirmed();'), project('recControl', 'return { value: 7 };')]);
+        if (url.includes(PROJECTS_TABLE)) return json([project('recMoney', 'return ctx.runpreneur.moneyConfirmed();'), project('recPartners', 'return ctx.runpreneur.partnersSigned();'), project('recControl', 'return { value: 7 };')]);
+        if (url.includes(PARTNERS_TABLE)) {
+            if (partners === 'fail') return route.fulfill({ status: 500, contentType: 'application/json', body: '{"error":"boom"}' });
+            return json(partners);
+        }
         if (url.includes(MONEY_TABLE)) {
             if (money === 'fail') return route.fulfill({ status: 500, contentType: 'application/json', body: '{"error":"boom"}' });
             return json(money);
@@ -78,5 +90,29 @@ test.describe('the Runpreneur money KPI saves only money a cause confirmed', () 
         await page.waitForTimeout(1000);
         expect(saves.recMoney || [], 'a money figure was saved after the record failed to load').toEqual([]);
         await expect(page.locator('.strat-kpi-row[data-project-id="recMoney"]')).toContainText('Compute failed');
+    });
+});
+
+test.describe('the Runpreneur partners KPI counts only a written yes', () => {
+    test('one Signed row with a written yes saves 1, and the opened row shows the approaches', async ({ page }) => {
+        const saves = await loadDashboard(page, MONEY);
+        await expect.poll(() => (saves.recPartners || []).length, { timeout: 30000,
+            message: 'the partners KPI was never saved, so this test cannot tell 1 from "never ran"' }).toBeGreaterThan(0);
+        expect(saves.recPartners[0][PF.kpiCurrent]).toBe(1);
+        await page.locator('.strat-kpi-row[data-project-id="recPartners"]').click();
+        const panel = page.locator('#stratKpiInfo-recPartners');
+        await expect(panel).toContainText('1 partner signed with a written yes. 2 of 40 approaches sent, from 4 on the list.');
+        await expect(panel).toContainText('Signed, no written yes on file');
+        await expect(panel).toContainText('1 more on the list, not yet approached');
+        await expect(panel).toContainText('1 asked not to be contacted');
+    });
+
+    test('a failed read of the partners list saves nothing for partners, and the money KPI still saves', async ({ page }) => {
+        const saves = await loadDashboard(page, MONEY, 'fail');
+        await expect.poll(() => (saves.recMoney || []).length, { timeout: 30000,
+            message: 'control: the money KPI was never saved, so the compute pass did not run' }).toBeGreaterThan(0);
+        await page.waitForTimeout(1000);
+        expect(saves.recPartners || [], 'a partners figure was saved after the list failed to load').toEqual([]);
+        expect(saves.recMoney[0][PF.kpiCurrent]).toBe(1000);
     });
 });
