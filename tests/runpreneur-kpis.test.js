@@ -68,3 +68,51 @@ describe('money confirmed: only a receipt plus the Confirmed tick counts', () =>
         expect([r.value, r.rows[0].counts, r.rows[0].amount]).toEqual([0, false, null]);
     });
 });
+
+// Kevin, 9-10 Oct 2026: a partner is a written yes to gear, content sharing, a collaboration or a
+// sponsorship. Shaped on the Dream 100 list; every name is invented.
+describe('partners signed: only a written yes counts, and the approaches sit beside it', () => {
+    const list = [
+        { name: 'Sample Coffee', kinds: ['Sponsorship'], status: 'Signed', rank: 1, companyType: 'Limited company', approachedOn: '2026-11-03', hasWrittenYes: true },
+        { name: 'Sample Shoes', kinds: ['Gear'], status: 'Signed', rank: 2, companyType: 'Limited company', approachedOn: '2026-11-03', hasWrittenYes: false },
+        { name: 'Sample Gym', kinds: ['Content sharing'], status: 'Replied', rank: 3, companyType: 'Limited company', approachedOn: '2026-11-04', hasWrittenYes: false },
+        { name: 'Sample Coach', kinds: [], status: 'Approached', rank: 4, companyType: 'Sole trader', approachedOn: '2026-11-05', hasWrittenYes: false },
+        { name: 'Sample Brand', kinds: [], status: 'Listed', rank: 5, companyType: 'Limited company', approachedOn: '', hasWrittenYes: false },
+        { name: 'Sample Opt-out', kinds: [], status: 'Do not contact', rank: 6, companyType: 'Limited company', approachedOn: '2026-11-05', hasWrittenYes: false },
+    ];
+
+    const today = '2026-11-10';
+    it('counts the one Signed row with a written yes, and five approaches against 40 (an opt-out after a send still counts)', () => {
+        const r = K.partnersSigned({ rows: list, approachTarget: 40, today });
+        expect([r.value, r.approached, r.approachTarget, r.listed, r.optedOut]).toEqual([1, 5, 40, 6, 1]);
+        expect(r.rows[0].name).toBe('Sample Coffee');                // signed first
+    });
+    it('flags a Signed row with no written yes, and an approached partner that is not a limited company', () => {
+        const msgs = K.partnersSigned({ rows: list, approachTarget: 40, today }).alarms.map(a => a.msg).join(' ');
+        expect(msgs).toContain('no written yes attached');
+        expect(msgs).toContain('not a limited company');
+    });
+    // Found in review, 10 Oct 2026.
+    it('a planned approach date in the future is not a send', () => {
+        const planned = [{ name: 'Sample Planned', status: 'Listed', companyType: 'Limited company', approachedOn: '2026-12-20' }];
+        expect(K.partnersSigned({ rows: planned, approachTarget: 40, today }).approached).toBe(0);
+        expect(K.partnersSigned({ rows: planned, approachTarget: 40, today: '2026-12-20' }).approached).toBe(1);
+    });
+    it('an approached row with no company type, or Other, is flagged', () => {
+        const rows = [{ name: 'Blank', status: 'Approached', companyType: '' }, { name: 'Other', status: 'Approached', companyType: 'Other' }];
+        const msgs = K.partnersSigned({ rows, approachTarget: 40, today }).alarms.map(a => a.msg).join(' ');
+        expect(msgs).toContain('no company type recorded');
+        expect(msgs).toContain('not a limited company');
+    });
+    it('a written yes on a row not marked Signed is flagged and not counted', () => {
+        const r = K.partnersSigned({ rows: [{ name: 'Yes', status: 'Replied', companyType: 'Limited company', hasWrittenYes: true }], approachTarget: 40, today });
+        expect(r.value).toBe(0);
+        expect(r.alarms.map(a => a.msg).join(' ')).toContain('not marked Signed');
+    });
+    it('a list that did not load is red with no number; an empty list is 0 with a warning', () => {
+        const dead = K.partnersSigned({ rows: null, approachTarget: 40 });
+        expect([dead.value, K.alarmLevel(dead)]).toEqual([null, 'red']);
+        const empty = K.partnersSigned({ rows: [], approachTarget: 40 });
+        expect([empty.value, K.alarmLevel(empty)]).toEqual([0, 'amber']);
+    });
+});

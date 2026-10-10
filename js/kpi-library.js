@@ -115,6 +115,8 @@ const KPI_LIBRARY = [
       how: 'Count of a NAMED list of units moving from one letting arrangement to another (for example serviced accommodation to a letting agent), counting a unit only once a tenancy that STARTS on or after the move date is live in it. Every tenancy under the old arrangement, including old records left open, never counts.' },
     { tier: 2, group: 'Fundraising pack', name: 'Pounds a cause confirms it received', shape: 'T5', status: 'live',
       how: 'Sum of a money record (one row per payment to a cause), counting a row only when it has a receipt or letter from the cause AND a Confirmed tick. The headline figure is shown beside it, never used as the measure. A ticked row with no receipt is flagged and not counted.' },
+    { tier: 2, group: 'Fundraising pack', name: 'Partners signed (a written yes)', shape: 'T3', status: 'live',
+      how: 'Count of a ranked partners list (a Dream 100) whose status is Signed AND carries the partner\'s written yes. Any kind counts: gear, content sharing, a collaboration or a sponsorship. Approaches sent are shown against the plan\'s number; a Signed row with no written yes, or an approached sole trader (cold email is limited companies only), is flagged.' },
     { tier: 2, group: 'Property pack', name: 'Self-managed properties fully compliant', shape: 'T3', status: 'live',
       how: 'Count of self-managed properties where gas (or a recorded no-gas mark), the electrical inspection and the insurance document are each in date AND have a file attached. States the number of properties it expects and warns when that count changes.' },
 ];

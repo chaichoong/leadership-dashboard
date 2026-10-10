@@ -106,6 +106,12 @@ Added 2 Oct 2026 (Real Estate Q4 projects, rules in `js/re-kpis.js`, tests in
   fundraising headline (£76,920 on the website) had a record for only £6,922 of it. The measure
   is the money a cause confirms it received, one row per payment, with a receipt on file and a
   Confirmed tick. The headline and the traced total sit beside it so the gap stays visible.
+- **Partners signed (a written yes).** (Fundraising pack, Runpreneur, 10 Oct 2026.) Kevin wants
+  partners of several kinds, and money is not required: gear, sharing content with their audience,
+  a collaboration, or a sponsorship. A partner counts once their written yes is attached. The
+  approach count sits beside it (40 by 31 Dec), because a yes cannot be steered week by week and
+  the number of asks can. Cold email goes to limited companies only, so an approached sole trader
+  is flagged.
 - **Self-managed properties fully compliant.** Certificate counts say how many documents are
   missing; this says how many properties are safe. In date AND on file for all three, with a
   "no gas" mark standing in for the gas certificate. It declares the number of properties it
