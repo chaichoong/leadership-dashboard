@@ -638,6 +638,30 @@ INVARIANTS = [
         "fields": ["Project Name", "KPI Name", "KPI Automated", "KPI Last Updated"],
     },
     {
+        # The Runpreneur Q4 2026 project KPIs (Kevin, 10 Oct 2026: every new project's metric updates
+        # itself). Same rule as the real estate check above: the dashboard works each out on load and
+        # saves it, and refuses to save when the money record did not load, so a dead read stops the
+        # stamp moving and lands here rather than saving a calm £0.
+        "name": "runpreneur-q4-kpis-are-current",
+        "table": PROJECTS,
+        "incident": "Oct 2026 — the Runpreneur headline (£76,920) had a record behind only £6,922; its metrics are automated on the condition that they say so when they stop",
+        "asserts": "each Runpreneur Q4 2026 project, while open => KPI Automated, compute code present, KPI Last Updated within 2 days",
+        "violation": (
+            "AND(RECORD_ID() = 'recvnvG2vNROrBG9P', "
+            "LEN({Closed On} & '') = 0, "
+            "OR(NOT({KPI Automated} = 1), "
+            "LEN({KPI Compute Code} & '') = 0, "
+            "LEN({KPI Last Updated} & '') = 0, "
+            "IS_BEFORE({KPI Last Updated}, DATEADD(NOW(), -2, 'days'))))"
+        ),
+        "control": "RECORD_ID() = 'recvnvG2vNROrBG9P'",
+        "control_means": "the Runpreneur Q4 2026 project records this check covers, by id (retire it when the quarter is closed)",
+        "control_expected": 1,
+        "field_probe": ("OR({KPI Automated} >= 0, LEN({KPI Compute Code} & '') >= 0, "
+                        "LEN({KPI Last Updated} & '') >= 0, LEN({Closed On} & '') >= 0)"),
+        "fields": ["Project Name", "KPI Name", "KPI Automated", "KPI Last Updated"],
+    },
+    {
         # The Site Map's "Update All Out-of-Sync SOPs" button writes a Pending row here
         # and then told Kevin the work was "Processing". Nothing processes it: the SOP
         # phase was absorbed into daily-ops and never wired back, so a request could sit
