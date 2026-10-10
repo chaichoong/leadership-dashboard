@@ -419,6 +419,19 @@ def thread_keys(url_field):
     return keys
 
 
+CHILD_OF_RE = re.compile(r"^\s*CHILD OF\s+(rec[A-Za-z0-9]+)\b")
+
+
+def child_of(description):
+    """The parent task id a CHILD-OF follow-up names, or None.
+
+    create-agent-task.py writes "CHILD OF <parent id> (an approved task whose job is to raise
+    this one; ...)" at the head of the Description. The board grouped such a task with its own
+    parent and offered the pair as closable twins (finding 20261003-task-manager-733)."""
+    m = CHILD_OF_RE.match(str(description or ""))
+    return m.group(1) if m else None
+
+
 def duplicate_groups(views, verdict=None):
     """Open tasks sharing one thread AND one lane:
     [{thread, lane, keeper, closable, untouchable, folds, names}].
@@ -434,6 +447,11 @@ def duplicate_groups(views, verdict=None):
       itself when it sits at Approval — report only, never propose on.
     - folds: [{id, why}] the reason each Approval twin was allowed to fold,
       for the skill to quote on the proposal.
+    - sameThreadDifferentMatter: [{id, why}] twins the fold check refuses that are
+      NOT at Approval. One thread can carry two unrelated matters, so these need
+      no move at all (findings 20261002-task-manager-board-720, 20261009-task-manager-818).
+    - childOf: [{id, parent}] follow-ups stamped "CHILD OF <parent id>" whose parent
+      is in this group. Never closable against their own parent (finding 20261003-task-manager-733).
     The fold check is create-agent-task.py's dupe_verdict in "fold" mode
     (same fold lane first, reply vs maintenance only since Kevin's ruling of
     15 Sep 2026, then a shared reference or enough shared non-address
@@ -459,24 +477,43 @@ def duplicate_groups(views, verdict=None):
             vs = sorted(vs, key=lambda v: v.get("createdTime") or "")
             keeper = vs[0]
             closable, untouchable, folds = [], [], []
+            different, children = [], []
+            ids_here = {v["id"] for v in vs}
             if keeper.get("status") == "Approval":
                 untouchable.append(keeper["id"])
             for v in vs[1:]:
-                if v.get("status") != "Approval":
-                    closable.append(v["id"])
+                # A CHILD-OF follow-up is not its parent's twin (finding
+                # 20261003-task-manager-733). create-agent-task.py stamps
+                # "CHILD OF <parent id> " at the head of the Description when an
+                # approved task's whole job was to raise this one, so closing it
+                # against the parent throws away the work the parent approved.
+                parent = child_of(v.get("description"))
+                if parent and parent in ids_here:
+                    children.append({"id": v["id"], "parent": parent})
                     continue
+                # EVERY twin meets the fold check, not only an Approval one
+                # (findings 20261002-task-manager-board-720, 20261009-task-manager-818).
+                # One email thread can carry two unrelated matters, and a shared
+                # thread alone was enough to list the wrong task as closable.
                 vd = verdict(v.get("name", ""), keeper.get("name", "")) or {}
-                if vd.get("match"):
-                    closable.append(v["id"])
+                if not vd.get("match"):
+                    if v.get("status") == "Approval":
+                        untouchable.append(v["id"])
+                    else:
+                        different.append({"id": v["id"], "why": vd.get("why", "")})
+                    continue
+                closable.append(v["id"])
+                if v.get("status") == "Approval":
                     folds.append({"id": v["id"], "why": vd.get("why", "")})
-                else:
-                    untouchable.append(v["id"])
             out.append({
                 "thread": k, "lane": lane,
                 "keeper": keeper["id"],
                 "closable": closable,
                 "untouchable": untouchable,
                 "folds": folds,
+                # Report only, no move owed: the pair shares a thread and nothing else.
+                "sameThreadDifferentMatter": different,
+                "childOf": children,
                 "names": [v["name"] for v in vs],
             })
     return sorted(out, key=lambda g: (g["thread"], g["lane"]))
@@ -575,6 +612,7 @@ def task_view(rec, activity_ids, dispatch_ids, now):
         "hardDeadline": bool(f.get("Hard Deadline")),
         "kevinOwned": is_kevin,
         "inboundUrl": f.get("Inbound Note URL Link"),
+        "description": f.get("Description", "") or "",
         "createdTime": f.get("Created Time"),
         "lastMoved": moved.isoformat() if moved else None,
         "daysStill": (round((now - moved).total_seconds() / 86400, 1)
@@ -701,6 +739,7 @@ def lane_view(f, now=None, cache=None, gate=None):
         "hoursWaiting": hours_waiting(f, now),
         "createdTime": f.get("Created Time"),
         "inboundUrl": f.get("Inbound Note URL Link"),
+        "description": f.get("Description", "") or "",
         "inboundSender": f.get("Inbound Sender", "") or "",
         "autoReply": auto_reply_flag(f, cache, gate),
         "outputExcerpt": output[:600] + ("…" if len(output) > 600 else ""),
@@ -2009,15 +2048,15 @@ def cmd_selftest():
     assert thread_keys("https://mail.google.com/mail/u/0/#all/T1 https://mail.google.com/mail/u/0/#all/T2") == ["T1", "T2"]
     assert thread_keys("") == [] and thread_keys(None) == []
     gs = duplicate_groups([
-        {"id": "t2", "name": "B", "inboundUrl": "https://mail.google.com/mail/u/0/#inbox/TH1", "createdTime": "2026-08-20T10:00:00.000Z"},
-        {"id": "t1", "name": "A", "inboundUrl": "https://mail.google.com/mail/u/0/#all/TH1", "createdTime": "2026-08-01T10:00:00.000Z"},
+        {"id": "t2", "name": "INBOUND: council tax summons 148778 reply", "inboundUrl": "https://mail.google.com/mail/u/0/#inbox/TH1", "createdTime": "2026-08-20T10:00:00.000Z"},
+        {"id": "t1", "name": "INBOUND: council tax summons 148778", "inboundUrl": "https://mail.google.com/mail/u/0/#all/TH1", "createdTime": "2026-08-01T10:00:00.000Z"},
         {"id": "t3", "name": "C", "inboundUrl": "https://mail.google.com/mail/u/0/#all/TH2", "createdTime": "2026-08-02T10:00:00.000Z"},
     ])
     assert len(gs) == 1 and gs[0]["keeper"] == "t1" and gs[0]["closable"] == ["t2"], gs
     # a folded task meets its twin on the second URL too
     gs = duplicate_groups([
-        {"id": "f1", "name": "folded", "inboundUrl": "https://mail.google.com/mail/u/0/#all/OLD https://mail.google.com/mail/u/0/#all/NEW", "createdTime": "2026-08-01T10:00:00.000Z"},
-        {"id": "f2", "name": "twin", "inboundUrl": "https://mail.google.com/mail/u/0/#all/NEW", "createdTime": "2026-08-02T10:00:00.000Z"},
+        {"id": "f1", "name": "INBOUND: Swinton policy RSAP6837602300 renewal", "inboundUrl": "https://mail.google.com/mail/u/0/#all/OLD https://mail.google.com/mail/u/0/#all/NEW", "createdTime": "2026-08-01T10:00:00.000Z"},
+        {"id": "f2", "name": "INBOUND: Swinton policy RSAP6837602300 renewal reminder", "inboundUrl": "https://mail.google.com/mail/u/0/#all/NEW", "createdTime": "2026-08-02T10:00:00.000Z"},
     ])
     assert len(gs) == 1 and gs[0]["thread"] == "NEW" and gs[0]["closable"] == ["f2"], gs
     # a Roy maintenance task on the same thread is NOT a duplicate of the
@@ -2056,6 +2095,35 @@ def cmd_selftest():
          "inboundUrl": "https://mail.google.com/mail/u/0/#all/TH6", "createdTime": "2026-08-03T10:00:00.000Z", "status": "Approval"},
     ])
     assert gs[0]["closable"] == [] and gs[0]["untouchable"] == ["u2"] and gs[0]["folds"] == [], gs
+    # A NON-Approval twin now meets the same fold check (findings
+    # 20261002-task-manager-board-720, 20261009-task-manager-818): one Roy email
+    # thread carrying two different matters offered the wrong twin for closing.
+    gs = duplicate_groups([
+        {"id": "d1", "name": "INBOUND: gas certificate booking 23 Viola Street",
+         "inboundUrl": "https://mail.google.com/mail/u/0/#all/TH7", "createdTime": "2026-08-01T10:00:00.000Z", "status": "Today"},
+        {"id": "d2", "name": "INBOUND: deposit return query 11 Elmdon Place",
+         "inboundUrl": "https://mail.google.com/mail/u/0/#all/TH7", "createdTime": "2026-08-03T10:00:00.000Z", "status": "Today"},
+    ])
+    assert gs[0]["closable"] == [] and [x["id"] for x in gs[0]["sameThreadDifferentMatter"]] == ["d2"], gs
+    # ... while a genuine same-thread duplicate still closes.
+    gs = duplicate_groups([
+        {"id": "s1", "name": "INBOUND: BW Legal account 9912345 payment plan",
+         "inboundUrl": "https://mail.google.com/mail/u/0/#all/TH8", "createdTime": "2026-08-01T10:00:00.000Z", "status": "Today"},
+        {"id": "s2", "name": "INBOUND: BW Legal account 9912345 payment plan chase",
+         "inboundUrl": "https://mail.google.com/mail/u/0/#all/TH8", "createdTime": "2026-08-03T10:00:00.000Z", "status": "Today"},
+    ])
+    assert gs[0]["closable"] == ["s2"] and gs[0]["sameThreadDifferentMatter"] == [], gs
+    # A CHILD-OF follow-up is never its own parent's closable twin (finding 20261003-task-manager-733).
+    gs = duplicate_groups([
+        {"id": "recParent", "name": "INBOUND: HMRC check CFS-2427425 deposit facts",
+         "inboundUrl": "https://mail.google.com/mail/u/0/#all/TH9", "createdTime": "2026-08-01T10:00:00.000Z", "status": "Today"},
+        {"id": "recKid", "name": "INBOUND: HMRC check CFS-2427425 deposit facts follow-up",
+         "description": "CHILD OF recParent (an approved task whose job is to raise this one)",
+         "inboundUrl": "https://mail.google.com/mail/u/0/#all/TH9", "createdTime": "2026-08-03T10:00:00.000Z", "status": "Today"},
+    ])
+    assert gs[0]["closable"] == [] and gs[0]["childOf"] == [{"id": "recKid", "parent": "recParent"}], gs
+    assert child_of("CHILD OF recAbc123 (an approved task ...)") == "recAbc123"
+    assert child_of("a normal description") is None and child_of(None) is None
     with tempfile.TemporaryDirectory() as td:
         os.environ["TASK_MANAGER_DIR"] = td
         digest_append({"task": "recT", "move": "leave", "reason": "moving"})

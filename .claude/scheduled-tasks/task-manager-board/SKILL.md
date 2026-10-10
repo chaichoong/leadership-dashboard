@@ -572,7 +572,11 @@ LEADING with what should have moved and did not:
    each (one line).
 2. Duplicate threads: the board's `duplicateGroups` and `duplicateExtras`
    counts, and what was proposed for each group this slot. Zero is the only
-   healthy number.
+   healthy number. `duplicateExtras` counts only `closable`. Two keys on a group
+   owe NO move and are report-only (10 Oct 2026): `sameThreadDifferentMatter`,
+   twins the fold check refuses because one email thread carries two unrelated
+   matters, and `childOf`, a follow-up stamped "CHILD OF <parent id>" whose
+   parent is in the same group. Never propose closing either against the keeper.
 3. Waiting on Kevin: count and the 5 oldest with hours waiting — read
    `hoursWaiting` off each `waitingOnKevin` view in board.json (anchored on
    the Slack card time, Created Time as fallback). Never write 0 for a

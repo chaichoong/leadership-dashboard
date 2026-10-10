@@ -1038,6 +1038,21 @@ def check_ceo_brief_complete(pat):
                  fields=["Date", "One Thing", "Full Brief"], page_size=100)
     today = datetime.datetime.now(datetime.timezone.utc).date().isoformat()
 
+    # Second control (finding 20261006-phase-2-758). The fallback test below reads keys out of the
+    # Full Brief JSON. If the worker ever stops writing that shape, every row parses to nothing and
+    # the test reads as a clean pass for ever. So prove the shape is still there: at least one row in
+    # the window must parse as JSON carrying 'headline' or 'fallback'. None does => control 0 =>
+    # CONTROL_FAILED, which is loud, rather than a silent green.
+    shape_seen = 0
+    for r in rows:
+        body = r["fields"].get("Full Brief") or ""
+        try:
+            parsed = json.loads(body)
+        except (ValueError, TypeError):
+            continue
+        if isinstance(parsed, dict) and ("headline" in parsed or "fallback" in parsed):
+            shape_seen += 1
+
     by_date = {}
     control = 0
     for r in rows:
@@ -1059,13 +1074,49 @@ def check_ceo_brief_complete(pat):
                 "ids": [r["id"] for r in recs],
             })
         for r in recs:
-            if not r["fields"].get("Full Brief"):
+            body = r["fields"].get("Full Brief") or ""
+            if not body:
                 violations.append({
                     "date": date,
                     "problem": "Full Brief empty on a past weekday — the 09:00 brief never landed",
                     "ids": [r["id"]],
                 })
+                continue
+            # Non-empty is not populated (finding 20261006-phase-2-758). On 21 Sep and 5 Oct 2026 the
+            # row held a 345-byte fallback stub saying "Brief failed today" and this invariant passed
+            # it, so the morning went unseen. A real brief runs 2,500 to 7,000 chars.
+            problem = _brief_not_written(body)
+            if problem:
+                violations.append({"date": date, "problem": problem, "ids": [r["id"]]})
+    if not shape_seen:
+        # The Full Brief JSON shape has gone. Report nothing as clean.
+        return violations, 0
     return violations, control
+
+
+FALLBACK_MIN_CHARS = 1000   # the two known fallbacks were 345 and 470; the thinnest real brief 2,504
+
+
+def _brief_not_written(body):
+    """Why this Full Brief is not a brief Kevin can read, or None when it is one."""
+    try:
+        parsed = json.loads(body)
+    except (ValueError, TypeError):
+        # Jul 2026: the brief blew past max_tokens and the JSON never closed.
+        if len(body) < FALLBACK_MIN_CHARS:
+            return (f"Full Brief is {len(body)} chars and does not parse as JSON — the brief was cut off "
+                    f"(under {FALLBACK_MIN_CHARS})")
+        return None
+    if not isinstance(parsed, dict):
+        return "Full Brief JSON is not an object — nothing can read it"
+    if parsed.get("fallback"):
+        return ("Full Brief is the FALLBACK stub, not a brief: "
+                + str(parsed.get("fallback_reason") or "no fallback_reason recorded"))
+    if str(parsed.get("headline") or "").strip().lower() == "brief failed today":
+        return "Full Brief headline is 'Brief failed today' — the 09:00 brief did not get written"
+    if len(body) < FALLBACK_MIN_CHARS:
+        return f"Full Brief is only {len(body)} chars (under {FALLBACK_MIN_CHARS}) — a stub, not a brief"
+    return None
 
 
 
@@ -1159,8 +1210,8 @@ SCANS = [
     },
     {
         "name": "ceo-brief-complete",
-        "asserts": "past weekday => exactly one CEO Briefs row, and its Full Brief is populated",
-        "incident": "Jul 2026 — huddle silently binned for 2 days + duplicate rows + a truncated brief; Kevin got a money-only DM",
+        "asserts": "past weekday => exactly one CEO Briefs row, and its Full Brief is a written brief (not the fallback stub)",
+        "incident": "Jul 2026 — huddle silently binned for 2 days + duplicate rows + a truncated brief; Kevin got a money-only DM. Oct 2026 — 21 Sep and 5 Oct held a 345-char 'Brief failed today' fallback stub and this check passed it, so the morning went unseen",
         "control_means": "CEO Briefs rows on past weekdays (the population both bugs corrupt)",
         "run": check_ceo_brief_complete,
     },

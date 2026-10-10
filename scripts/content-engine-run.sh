@@ -140,8 +140,9 @@ DAYS="$(python3 scripts/content-engine/watch.py plan --slots "$EPISODES")" || DA
 # --- last-start-block (extracted verbatim by tests/content-engine-watch.test.js) ---
 # No day starts rendering from 04:00 (Kevin, 2 Oct 2026: three a night). A day takes about two hours, up to four, and
 # the job is stopped at 07:00. A day begun late is killed mid-render, and the steps after this loop (copy, cards,
-# publishing, the report) never run: no cards in the morning, nothing to publish. The day listed last is the one left
-# for the next night: the redo when one is waiting, else the third new day. CE_ALLOW_DAYTIME=1 lifts it with the daytime rule.
+# publishing, the report) never run: no cards in the morning, nothing to publish. Since PR 723 watch.plan puts the
+# night's ONE redo FIRST (Kevin, 7 Oct 2026: a sent-back episode goes to the front), and still keeps MIN_NEW new days
+# after it, so the day listed LAST is a new day, not the redo. CE_ALLOW_DAYTIME=1 lifts it with the daytime rule.
 ce_may_start_day() {   # $1 = the hour now, 0-23
   [ "${CE_ALLOW_DAYTIME:-0}" = "1" ] && return 0
   [ "$1" -ge 22 ] || [ "$1" -lt "${CE_LAST_START_HOUR:-4}" ]
