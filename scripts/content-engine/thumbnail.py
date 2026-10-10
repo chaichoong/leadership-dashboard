@@ -45,7 +45,11 @@ Kevin runs a daily barefoot running streak, currently on Day 1940+.
 Mission: run 40,075km and raise £1M for children's charities (GOSH, BBC Children in Need).
 He holds two Guinness World Records in running.
 UK English. Direct. No fluff. No clichés. No em dashes."""
-TITLE_PROMPT = "Transcript:\n%s\n\nGenerate 2 punchy thumbnail title lines from this Runpreneur episode. Format EXACTLY like this, nothing else:\nLINE1: [3-4 words max, UPPERCASE]\nLINE2: [2-3 words, UPPERCASE]"
+TITLE_PROMPT = ("Transcript:\n%s\n\nGenerate 2 punchy thumbnail title lines from this Runpreneur episode.\n"
+                "The two lines must read as ONE complete phrase when read in order.\n"
+                "LINE1 must not end on an article, preposition, auxiliary or possessive (A, AN, THE, IN, ON, OF, AND, TO, FOR, MY, I'VE, I'M, IS, WAS, WERE, HAS, HAVE).\n"
+                "Never split a number across the two lines.\n"
+                "Format EXACTLY like this, nothing else:\nLINE1: [3-4 words max, UPPERCASE]\nLINE2: [2-3 words, UPPERCASE]")
 
 
 # ---------- geometry (thDraw) ----------
@@ -287,13 +291,34 @@ def compose(photo_path, out_png, line1, line2, icon=None, day=None):
     return out_png
 
 
-def titles_from_transcript(transcript):
-    import watch   # the lessons reader lives with the ledger; imported here so `make` needs no Airtable module
-    lessons = watch.kevin_lessons()
-    system = KEVIN_CONTEXT + ("\n\n" + lessons if lessons else "")
+# Words that cannot end LINE 1: the pair then reads as a sentence cut mid-clause. Episode 2086
+# shipped "MOST EXTREME RUNS I'VE" / "DONE IN 200" (finding 20261009-phase-4-812).
+DANGLING = {"A", "AN", "THE", "IN", "ON", "OF", "AND", "TO", "FOR", "MY",
+            "I'VE", "I'M", "IS", "WAS", "WERE", "HAS", "HAVE"}
+
+
+def bad_title_pair(l1, l2):
+    """Why this pair must not ship, or None when it reads as English.
+
+    Checked, not trusted: the prompt asks for a complete phrase and the model still hands back a
+    dangling line 1 or a number split across the break."""
+    a = (l1 or "").strip().upper(); b = (l2 or "").strip().upper()
+    if not a: return "LINE1 empty"
+    words = re.findall(r"[A-Z']+", a)
+    if words and words[-1] in DANGLING:
+        return "LINE1 ends on the dangling word %r" % words[-1]
+    bw = re.findall(r"[A-Z0-9']+", b)
+    if bw and re.fullmatch(r"\d+", bw[0]) and re.search(r"\d", a):
+        return "a number is split across the lines (LINE2 starts %r)" % bw[0]
+    if bw and re.fullmatch(r"\d+", bw[-1]):
+        return "LINE2 ends on the bare number %r" % bw[-1]
+    return None
+
+
+def _ask_titles(prompt, system):
     env = dict(os.environ)
     if os.path.exists(TOKEN_FILE): env["CLAUDE_CODE_OAUTH_TOKEN"] = open(TOKEN_FILE).read().strip()
-    r = _allowance().run_guarded("content-engine", [CLAUDE, "-p", TITLE_PROMPT % transcript[:2000], "--system-prompt", system, "--model", "sonnet",
+    r = _allowance().run_guarded("content-engine", [CLAUDE, "-p", prompt, "--system-prompt", system, "--model", "sonnet",
                         "--output-format", "json", "--tools", "", "--max-turns", "1",
                         "--settings", '{"disableAllHooks": true}'],   # no session rules in a published title (platform_copy.NO_HOOKS, 24 Sep 2026)
                         capture_output=True, text=True, env=env, timeout=300)
@@ -303,7 +328,30 @@ def titles_from_transcript(transcript):
     return (l1.group(1).strip().upper() if l1 else ""), (l2.group(1).strip().upper() if l2 else "")
 
 
+def titles_from_transcript(transcript):
+    import watch   # the lessons reader lives with the ledger; imported here so `make` needs no Airtable module
+    lessons = watch.kevin_lessons()
+    system = KEVIN_CONTEXT + ("\n\n" + lessons if lessons else "")
+    prompt = TITLE_PROMPT % transcript[:2000]
+    l1, l2 = _ask_titles(prompt, system)
+    why = bad_title_pair(l1, l2)
+    if not why: return l1, l2
+    print("thumbnail titles: refused %r / %r (%s), asking once more" % (l1, l2, why), file=sys.stderr)
+    l1b, l2b = _ask_titles(prompt + "\n\nYour last answer was rejected: %s. Fix it." % why, system)
+    if not bad_title_pair(l1b, l2b): return l1b, l2b
+    # Both asks dangled. An empty LINE1 is what render.thumb_lines reads as "use the banner title".
+    print("thumbnail titles: second answer %r / %r also refused (%s), falling back to the banner title"
+          % (l1b, l2b, bad_title_pair(l1b, l2b)), file=sys.stderr)
+    return "", ""
+
+
 def selftest():
+    # finding 20261009-phase-4-812: the live 2086 pair must be refused, a good pair must not be
+    assert bad_title_pair("MOST EXTREME RUNS I'VE", "DONE IN 200"), "2086's dangling pair must be refused"
+    assert bad_title_pair("I RAN FOR", "3 HOURS"), "a split number must be refused"
+    assert bad_title_pair("", "ANYTHING") == "LINE1 empty"
+    assert bad_title_pair("KIDS CAN'T FIND", "WORK TRY THIS") is None
+    assert bad_title_pair("DAY 1940 OF THE STREAK", "NO DAYS OFF") is None
     assert pick_icon("KIDS CAN'T FIND") in A.ICONS and pick_icon("") == "speech"
     assert pick_icon("COMMUNICATION MATTERS") == "speech"
     pls = svg_path_polylines("M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z")
@@ -328,7 +376,7 @@ def selftest():
     assert (got[100:600, 800:1000, 2] > 200).sum() > 5000, "photo not placed in the panel"
     white = lambda band: int((band.min(axis=2) > 240).sum())
     assert white(got[80:330, 580:670]) == 0 and white(got[230:510, 960:1030]) == 0, "no white diagonal lines (Kevin, 15 Sep 2026: they read as a glitch)"
-    print(json.dumps({"checks": 14, "failed": []}))
+    print(json.dumps({"checks": 19, "failed": []}))
 
 
 if __name__ == "__main__":
