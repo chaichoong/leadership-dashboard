@@ -58,6 +58,7 @@ const ESTATE_SCRIPTS = [
   'scripts/handback-poll.py',
   'scripts/session-keepalive.py',
   'scripts/signin_hold.py',
+  'scripts/secret-copy-guard.py',
   'scripts/create-agent-task.py',
   'scripts/job-queue.py',
   'scripts/estate-status.py',
