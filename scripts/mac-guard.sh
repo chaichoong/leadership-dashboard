@@ -146,5 +146,36 @@ if [ "$SESSIONS" -gt 3 ]; then
   say "              this is the main cause of memory pressure on a 16 GB Mac."
 fi
 
+# ---------------------------------------------------------------------------
+# 4. Credential copies. Rule 1 of the credential rules is one copy per secret,
+#    at ~/.config/od. It keeps being broken by hand inside slot runs rather
+#    than by code, so there is no call site to fix and nothing was LOOKING:
+#    the live Airtable token sat world-readable in two different agent scratch
+#    directories for weeks (findings 20260924-report-597, 20261010-phase-5-822).
+#    The guard reads nothing aloud, takes the world-readable bit off what it
+#    finds, and deletes nothing — a copy something still reads is a working
+#    dependency, and rule 1 of this script is that it never costs work.
+# ---------------------------------------------------------------------------
+#    A dry run LOOKS and nothing more: --dry-run means this script changes
+#    nothing, so it must not tighten a mode either, and it must still exit 0.
+#    (Caught by the existing "dry run changes nothing" test on the first wiring
+#    of this step, 11 Oct 2026.)
+HERE_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+SECRET_COPIES=0
+if [ -f "$HERE_DIR/secret-copy-guard.py" ]; then
+  GUARD_ARGS=()
+  [ "$DRY_RUN" -eq 1 ] && GUARD_ARGS=(--no-chmod)
+  GUARD_OUT=$(python3 "$HERE_DIR/secret-copy-guard.py" "${GUARD_ARGS[@]+"${GUARD_ARGS[@]}"}" 2>&1); GUARD_RC=$?
+  while IFS= read -r line; do [ -n "$line" ] && say "  $line"; done <<< "$GUARD_OUT"
+  [ "$GUARD_RC" -eq 1 ] && [ "$DRY_RUN" -eq 0 ] && SECRET_COPIES=1
+else
+  say "  SKIP        secret-copy-guard.py not in $HERE_DIR"
+fi
+
 say "mac-guard done: $KILLED reaped, $SKIPPED left alone"
+
+# A live credential sitting outside ~/.config/od is the one thing here worth a
+# red job: the exposure is off it, but only Kevin can rotate the value, so the
+# run must not read as clean until he has.
+[ "$SECRET_COPIES" -eq 1 ] && exit 1
 exit 0
