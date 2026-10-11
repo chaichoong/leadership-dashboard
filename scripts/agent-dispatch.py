@@ -83,6 +83,7 @@ import certificate_watch  # noqa: E402
 # The MERGE card (7 Oct 2026): a protected-path fix reaches Kevin as one card,
 # merged by scripts/merge-approved.py. The queue never hands one to an agent.
 import merge_card  # noqa: E402
+from secret_redact import redact_secrets  # noqa: E402
 from agent_email_format import (  # noqa: E402
     CARRY_OUT_MARKER,
     CARRY_OUT_RE,
@@ -1290,6 +1291,17 @@ def supersede_attachments(task_id, filenames):
 
 
 def patch_task(task_id, fields):
+    """Write fields to a task, with every secret-shaped string taken out first.
+
+    The redaction is HERE, at the one write, and not at each caller. On 1 Oct 2026 Kevin pasted a
+    live Anthropic key into a card's "changes requested" box — the task was "replace Karlo's
+    CLAUDE_AI_KEY secret" — and his words were archived verbatim into Notes, where the key sat in
+    plain text in an open record for nine days (finding 20261010-phase-5-822). No task field is
+    ever meant to hold a credential: secrets live once, at ~/.config/od, and a card that needs one
+    points Kevin at that folder rather than at a text box. So nothing is lost by refusing to store
+    the shape, and a caller added later cannot forget to ask.
+    """
+    fields = {k: (redact_secrets(v) if isinstance(v, str) else v) for k, v in (fields or {}).items()}
     return _request("PATCH", f"/{TASKS}/{task_id}",
                     {"fields": fields, "typecast": True})
 
