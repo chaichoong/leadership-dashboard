@@ -52,6 +52,7 @@ const ESTATE_SCRIPTS = [
   'scripts/standing_holds.py',
   'scripts/certificate_watch.py',
   'scripts/reroute-roy-admin.py',
+  'scripts/secret_redact.py',
   'scripts/merge_card.py',
   'scripts/merge-approved.py',
   'scripts/fixer-merge.py',
