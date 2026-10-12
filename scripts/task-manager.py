@@ -762,6 +762,12 @@ TASK_FIELDS = [
     # classifier reads so a move is never repeated; Approval Feedback and
     # Agent Output carry Kevin's answer to a DECIDE: card (15 Sep 2026).
     "Notes", "Approval Feedback", "Agent Output",
+    # Description carries create-agent-task.py's "CHILD OF <parent id>" stamp.
+    # It was missing from this read, so the CHILD-OF guard in the fold check
+    # (finding 20261003-task-manager-733) read "" on every live record and could
+    # never fire — a follow-up the parent's approval paid for was listed as its
+    # parent's closable twin. Finding 20261010-task-manager-825.
+    "Description",
 ]
 # Field-name drift control: each of these appears on at least one record of
 # any real board. If one vanishes from the WHOLE read, the name has drifted
@@ -939,6 +945,8 @@ GATE_FIELDS = [
     "Task Name", "Status", "Created Time", "Approval Slack TS",
     "Sent For Approval By", "Approver", "Priority", "Agent Output",
     "Inbound Note URL Link", "Inbound Sender", "Inbound Message Content",
+    # lane_view reads Description too, same CHILD OF stamp, same blind spot.
+    "Description",
 ]
 
 

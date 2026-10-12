@@ -146,7 +146,9 @@ describe('content-engine render', () => {
     expect(pt).toContain('if not pose_available(): return []'); // no pose library, no pan, and the card says so
     expect(pt).toContain('mp.solutions.pose.Pose(static_image_mode=True'); // mediapipe 0.10 CPU solution: 1.0 aborts wanting Metal from a headless process
     const st = readFileSync(path.join(DIR, 'stab.py'), 'utf8');
-    expect(st).toContain('def apply_pans(F_sm, pans, fps=FPS)');
+    // fps is late-bound since 12 Oct 2026 (finding 20261012-phase-3-837): the rate comes from the
+    // source clip, so a signature default of FPS would freeze it at import and re-break the judder.
+    expect(st).toContain('def apply_pans(F_sm, pans, fps=None)');
     expect(st).toContain('ap.add_argument("--pans"');
     expect(st).toContain('if pans: cmd += ["--pans", pans]'); // slices carry it
     const r = readFileSync(path.join(DIR, 'render.py'), 'utf8');
