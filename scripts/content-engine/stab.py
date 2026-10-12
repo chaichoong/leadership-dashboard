@@ -9,7 +9,49 @@ import numpy as np
 import telemetry_parser as tp
 import insta
 
+# The OUTPUT frame rate. It is NOT a constant: render() and sync() set it from the clip
+# before anything reads it (set_fps below). Forcing 24 on a 29.97 fps source made
+# insta.frame_stream resample 29.97 -> 24, which drops frames on an uneven 5:4 cadence and
+# reads as stabilisation judder. Episodes 2099, 2100 and 2106 were all sent back for it and
+# are all 29.97 fps; every episode to 2097 is 24.0 and was fine (finding 20261012-phase-3-837).
+# 24.0 is only the fallback for a clip whose rate cannot be probed.
 FPS = 24.0
+FPS_FALLBACK = 24.0
+
+
+def parse_fps(text):
+    """ffprobe r_frame_rate ('30000/1001', '24/1') -> float, or None when it is not a rate."""
+    if not text: return None
+    a, _, b = str(text).strip().split("\n")[0].partition("/")
+    try:
+        num, den = float(a), float(b or 1)
+    except ValueError:
+        return None
+    if den == 0 or num <= 0: return None
+    return round(num / den, 3)
+
+
+def probe_fps(clip):
+    """The clip's own frame rate, or None. Never guesses: the caller falls back explicitly."""
+    try:
+        r = subprocess.run([os.path.expanduser("~/tools/bin/ffprobe"), "-v", "error",
+                            "-select_streams", "v:0", "-show_entries", "stream=r_frame_rate",
+                            "-of", "csv=p=0", clip], capture_output=True, text=True, timeout=60).stdout
+        return parse_fps(r)
+    except Exception:
+        return None
+
+
+def set_fps(rate):
+    """Pin the render rate to the source. Returns what was set, so a caller can log it."""
+    global FPS
+    FPS = float(rate) if rate else FPS_FALLBACK
+    return FPS
+
+
+def fps_for(clip):
+    """Resolve and pin the rate for one clip in a single call."""
+    return set_fps(probe_fps(clip) or FPS_FALLBACK)
 STICK_CAM = np.array([0.0, 1.0, 0.0], np.float32)   # sphere "down" = along the stick towards Kevin
 UP_WORLD = np.array([0.0, -1.0, 0.0], np.float32)   # y is down in the sphere frame
 
@@ -109,7 +151,8 @@ def horizon_report(t, Rs, acc, M, secs=(1, 5, 10, 60), win=3.0):
     return out
 
 
-def per_frame_R(t, Rs, n_frames, fps=FPS, offset=0.0):
+def per_frame_R(t, Rs, n_frames, fps=None, offset=0.0):
+    fps = FPS if fps is None else fps
     ft = np.arange(n_frames) / fps + offset
     idx = np.clip(np.searchsorted(t, ft), 0, len(t) - 1)
     return Rs[idx]
@@ -239,7 +282,8 @@ def pan_target(F, yaw_deg, pitch_deg):
     return Ft / np.linalg.norm(Ft)
 
 
-def apply_pans(F_sm, pans, fps=FPS):
+def apply_pans(F_sm, pans, fps=None):
+    fps = FPS if fps is None else fps
     """Blend the planned view toward each pan target and back (Kevin, 9 Sep 2026: pan to what he points at, then return)."""
     F = F_sm.copy(); n = len(F)
     for (t0, yaw, pitch, sec) in pans:
@@ -317,6 +361,9 @@ def _render_one(args):
 def render(clip, out_mp4, map_name, dfov, start, end, size, smooth_s=1.0, tilt_deg=0.0, roll_lock=True,
            gain=0.0003, offset=0.0, blend=0.5, still=None, proj="sg", hfov=120.0, level=False,
            workers=1, raise_cut=True, video_only=False, pans=None):
+    # Pin the render rate to the clip's own rate BEFORE anything reads FPS. A forced 24 on a
+    # 29.97 source resampled on an uneven cadence and read as judder (20261012-phase-3-837).
+    print("stab: source rate %.3f fps" % fps_for(clip))
     t, gyro, acc = load_imu(clip)
     M = mapping_matrices()[map_name]
     Rs = integrate_warm(t, gyro, acc, M, gain=gain)
@@ -373,7 +420,7 @@ def render(clip, out_mp4, map_name, dfov, start, end, size, smooth_s=1.0, tilt_d
                     "-c:v", "h264_videotoolbox", "-b:v", "12M", "-pix_fmt", "yuv420p",
                     "-c:a", "aac", "-b:a", "160k", "-movflags", "+faststart", out_mp4]
     enc = subprocess.Popen(enc_cmd, stdin=subprocess.PIPE)
-    fr = insta.frame_stream(clip, insta.FRONT, start=start, end=end, fps=FPS)   # any source rate -> FPS (1841's 29.97 fps clip, 10 Sep 2026)
+    fr = insta.frame_stream(clip, insta.FRONT, start=start, end=end, fps=FPS)   # FPS is the SOURCE rate (fps_for above), so this is 1:1, never a resample
     bk = insta.frame_stream(clip, insta.BACK, start=start, end=end, fps=FPS)
     n = n0; faces = 0
     for front, back in zip(fr, bk):
@@ -387,6 +434,7 @@ def render(clip, out_mp4, map_name, dfov, start, end, size, smooth_s=1.0, tilt_d
 
 def sync(clip, map_name, start=5.0, end=15.0, gain=0.0003, offsets=None, lens=720, size=(320, 180), dfov=200, smooth_s=1.0):
     """Score IMU-to-video time offsets by residual frame-to-frame motion of a low-res stabilised render."""
+    fps_for(clip)                 # same rate the real render will use, or the scores do not transfer
     offsets = offsets if offsets is not None else [round(x, 3) for x in np.arange(-0.12, 0.121, 0.02)]
     t, gyro, acc = load_imu(clip)
     Rs = integrate(t, gyro, acc, mapping_matrices()[map_name], gain=gain)
@@ -421,6 +469,48 @@ def _selftest_pans():
     mid = out[int(FPS * 3.75)]; assert abs(np.dot(mid, F)) < 0.05, "held view at the pan's middle is the target"
     assert np.allclose(out[int(FPS * 1.0)], F) and np.allclose(out[int(FPS * 6.0)], F), "untouched before and after"
     assert np.allclose(np.linalg.norm(out, axis=1), 1.0, atol=1e-5)
+
+
+def _selftest_fps():
+    """The 24 fps forcing that sent 2099, 2100 and 2106 back (finding 20261012-phase-3-837).
+
+    The source rate must reach BOTH the frame pull and the gyro-to-frame mapping. Pinned here
+    rather than grepped, so a refactor that re-hardcodes 24 goes red.
+    """
+    global FPS
+    was = FPS
+    try:
+        assert parse_fps("30000/1001") == 29.97, parse_fps("30000/1001")
+        assert parse_fps("24/1") == 24.0 and parse_fps("25/1") == 25.0
+        assert parse_fps("30000/1001\n24/1") == 29.97, "only the first stream's rate"
+        for bad in ("", None, "0/0", "N/A", "-30/1"):
+            assert parse_fps(bad) is None, bad
+        assert set_fps(None) == FPS_FALLBACK, "an unprobeable clip falls back, it does not crash"
+
+        # the bug: with FPS forced to 24 the frame pull asks ffmpeg to resample a 29.97 source,
+        # which drops frames on an uneven 5:4 cadence. At the source rate it is 1:1.
+        set_fps(29.97)
+        assert FPS == 29.97
+        # per_frame_R's default must FOLLOW the pinned rate. It used to bind FPS at import time,
+        # so set_fps could not reach it and the gyro mapping stayed on a 24 fps timeline.
+        t = np.arange(0, 16, 0.001)
+        # a steady yaw, so a frame's rotation identifies the instant it was sampled from
+        Rs = np.stack([skew_exp(np.array([0.0, math.radians(10.0) * ti, 0.0])) for ti in t])
+        n_frames = 300
+        at_source = per_frame_R(t, Rs, n_frames)
+        at_pinned = per_frame_R(t, Rs, n_frames, fps=29.97)
+        at_forced = per_frame_R(t, Rs, n_frames, fps=24.0)
+        assert len(at_source) == len(at_forced) == n_frames
+        assert np.allclose(at_source, at_pinned), "the default must follow the pinned rate"
+        assert not np.allclose(at_source, at_forced), "a forced 24 must be a DIFFERENT timeline"
+        # frame 299 sits at 9.976 s on the source timeline and 12.458 s on a forced-24 one:
+        # a 2.5 s drift by the end of ten seconds, which is what the mapping must not do.
+        assert abs((n_frames - 1) / FPS - 9.976) < 0.01, (n_frames - 1) / FPS
+        assert abs((n_frames - 1) / 24.0 - 12.458) < 0.01
+        # a pan window is laid out on the same pinned rate
+        assert FPS != 24.0, "the pinned rate is what apply_pans must use"
+    finally:
+        FPS = was
 
 
 def selftest():
@@ -461,6 +551,7 @@ def selftest():
     Rall2 = np.repeat(Rhold[None], len(tt), 0); Rall2[int(3 * 1000):] = Rup
     _, _, mode2 = plan_views(tt, Rall2, n, 0.0, 1.0, 0.5, 0.0, False, raise_cut=True)
     assert (mode2[: int(2.5 * FPS)] == "body").all() and (mode2[-int(0.5 * FPS):] == "face").all(), mode2[-30:]
+    _selftest_fps()
     print("stab selftest ok")
 
 
