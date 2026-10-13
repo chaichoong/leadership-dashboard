@@ -134,6 +134,9 @@
         // "Month 1/2/3 Milestone": a project no plan record holds keeps its milestones here
         // (Real Estate's fourth Q4 project, 10 Oct 2026: a plan has room for three).
         months:          ['fldaIzPzXST5WvpRX', 'fldqm5Q7BDNzRsVsh', 'fldqb6HxvQQx2MZ7A'],
+        // The dated update line the 06:45 job writes (scripts/sync-project-status.mjs, 13 Oct 2026).
+        latestUpdate:    'fldRvVPngn2v4Mg49',
+        latestUpdateAt:  'fldZC3BcWrlpdOsXV',
     };
     const STRAT_TEAM_KEYS = {
         'kevin@runpreneur.org.uk':'kevin',
@@ -289,6 +292,19 @@
             +`<span style="font-weight:var(--fw-semibold);color:var(--accent)">${escHtml(f.stone.label)} milestone</span> `
             +`<span style="color:var(--text-muted)">(${escHtml(_stratMilestoneWhen(f.stone,f.state,now))})</span>: ${escHtml(text)}</div>`;
     }
+    // The robot's dated line: what moved, or that nothing did. Over 2 days old means the 06:45 job
+    // stopped writing, so the row says that instead of passing an old line off as today's news.
+    const STRAT_UPDATE_STALE_MS=2*86400000;
+    function stratUpdateLineHtml(p,now){
+        const base='grid-column:1/-1;font-size:var(--fs-xs);line-height:1.4;word-break:break-word;';
+        if(!p.latestUpdate||!p.latestUpdateAt)return `<div class="strat-kpi-update" style="${base}color:var(--text-muted)">No update written yet. The 06:45 job writes one each morning.</div>`;
+        const at=new Date(p.latestUpdateAt);
+        if(isNaN(at)||now-at>STRAT_UPDATE_STALE_MS){
+            const when=isNaN(at)?'an unknown date':_stratShortDay(at);
+            return `<div class="strat-kpi-update" data-stale="1" style="${base}color:var(--warning)">No update since ${escHtml(when)}: the 06:45 job has not written since. Last: ${escHtml(p.latestUpdate)}</div>`;
+        }
+        return `<div class="strat-kpi-update" style="${base}color:var(--text-secondary)"><span style="color:var(--text-muted)">Update</span> ${escHtml(p.latestUpdate)}</div>`;
+    }
     // All three months, in the opened row.
     function stratMilestonesPanelHtml(p,now){
         const stones=_stratMilestones[p.id];
@@ -391,6 +407,8 @@
                     kpiTracking:getField(r,STRAT_PF.kpiTracking)||'',
                     kpiStored:_stratParseDetail(getField(r,STRAT_PF.kpiDetailJson)),
                     ownStones:STRAT_PF.months.map(fid=>String(getField(r,fid)||'').trim()),
+                    latestUpdate:String(getField(r,STRAT_PF.latestUpdate)||'').trim(),
+                    latestUpdateAt:getField(r,STRAT_PF.latestUpdateAt)||'',
                 };
             });
             const planRes=await plansP;
@@ -922,6 +940,7 @@
                 <div style="font-size:var(--fs-xs);font-weight:var(--fw-semibold);color:${healthColor};text-align:center;padding-top:2px">${escHtml(health)}</div>
                 <div style="text-align:right;padding-top:2px">${stamp}</div>
                 ${stratMilestoneLineHtml(p,now)}
+                ${stratUpdateLineHtml(p,now)}
             </div>${infoRow}${monthsRow}${drillRow}`;
         }).join('')+`<div style="height:1px;background:var(--border-subtle)"></div>`;
         // Rounded wrapper around the whole stack.

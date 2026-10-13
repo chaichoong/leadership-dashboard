@@ -1,6 +1,12 @@
 #!/usr/bin/env node
 // ═════════════════════════════════════════════════════════════════════
-// SYNC PROJECT STATUS — writes each project's derived health back to Airtable.
+// SYNC PROJECT STATUS — writes each project's derived health back to Airtable,
+// then each open project's dated update line (js/project-update.js).
+//
+// THE UPDATE LINE (Kevin, 10 Oct 2026). Every open project gets one line a day:
+// what moved since the last update (KPI, tasks completed, status), or "nothing
+// moved since <date>". Written by rule, never by an AI model. The snapshot it
+// compares against is stored on the project (Latest Update State).
 //
 // WHY THIS EXISTS. The Strategy push creates projects and Airtable stamps
 // "Not Started" by default. Nothing ever cleared it. On 3 Aug 2026 five Q3
@@ -33,9 +39,17 @@ import { createRequire } from 'module';
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const require = createRequire(import.meta.url);
 const { computeProjectHealth, isWritableStatus } = require(join(ROOT, 'js/project-health.js'));
+const { buildProjectUpdate, parseState, baseline, selectCompleted } = require(join(ROOT, 'js/project-update.js'));
 
 const BASE_ID = 'appnqjDpqDniH3IRl';
 const PROJECTS = 'tblHrpTMd5LNYn8v1';
+const TASKS = 'tblqB8b22hKBL4PF1';
+// The update line's fields on Projects (created 13 Oct 2026), written by id.
+const U = { line: 'fldRvVPngn2v4Mg49', at: 'fldZC3BcWrlpdOsXV', state: 'fldifD8aCIkmWn5dY' };
+// Tasks: name, Completion Date, and the link to Projects.
+const T = { name: 'fldgFjGBw6bTKJFCD', completedAt: 'fldFOi1SwEKuJRmdN', projects: 'fldBg0rQy0FrOAkRN' };
+// A first update lists tasks completed since the project's start, but never further back than this.
+const LOOKBACK_DAYS = 31;
 
 // Field IDs from PROJ_F in os/strategy/strategy.js, plus the read-side rollups.
 const F = {
@@ -52,6 +66,9 @@ const BY_NAME = {
     totalTasks:     'Total Tasks (Countable)',
     completedTasks: 'Completed Tasks (Countable)',
     closedOn:       'Closed On',
+    kpiUnit:        'KPI Unit',
+    completedTick:  'Project Completed?',
+    updateState:    'Latest Update State',
 };
 
 const DRY_RUN = process.argv.includes('--dry-run');
@@ -111,8 +128,35 @@ function toProject(rec) {
         totalTasks: Number(rec.fields[BY_NAME.totalTasks]) || 0,
         completedTasks: Number(rec.fields[BY_NAME.completedTasks]) || 0,
         closedOn: rec.fields[BY_NAME.closedOn] || null,
+        kpiUnit: rec.fields[BY_NAME.kpiUnit] || '',
+        completedTick: !!rec.fields[BY_NAME.completedTick],
+        updateState: rec.fields[BY_NAME.updateState] || '',
     };
 }
+
+// Tasks completed in the last LOOKBACK_DAYS, by project id. Zero over a month means the query or
+// the field broke, not that nobody finished anything (the base completes hundreds a month): fail.
+async function fetchRecentCompletions(pat) {
+    const byProject = {};
+    let offset, count = 0;
+    const formula = `IS_AFTER({Completion Date}, DATEADD(NOW(), -${LOOKBACK_DAYS}, 'days'))`;
+    do {
+        const qs = new URLSearchParams({ pageSize: '100', returnFieldsByFieldId: 'true', filterByFormula: formula });
+        Object.values(T).forEach(f => qs.append('fields[]', f));
+        if (offset) qs.set('offset', offset);
+        const page = await airtable(pat, `${BASE_ID}/${TASKS}?${qs}`);
+        page.records.forEach(r => {
+            count++;
+            const f = r.fields || {};
+            (f[T.projects] || []).forEach(pid => (byProject[pid] = byProject[pid] || []).push({ name: f[T.name] || '', completedAt: f[T.completedAt] || '' }));
+        });
+        offset = page.offset;
+    } while (offset);
+    if (!count) throw new Error(`no task was completed in the last ${LOOKBACK_DAYS} days by this query: treating as a broken query, not a quiet month`);
+    return byProject;
+}
+
+const londonDay = d => d.toLocaleDateString('en-CA', { timeZone: 'Europe/London' });
 
 async function main() {
     const pat = loadPat();
@@ -127,6 +171,7 @@ async function main() {
     }
 
     const changes = [];
+    const statusNow = {};   // the status each project carries once this run's writes land
     let skippedClosed = 0, unknown = 0;
 
     for (const rec of records) {
@@ -137,22 +182,56 @@ async function main() {
 
         const health = computeProjectHealth(p);
         if (!isWritableStatus(health)) { unknown++; continue; }
+        statusNow[p.id] = health;
         if (health === p.status) continue;
         changes.push({ id: p.id, name: String(p.name).slice(0, 60), from: p.status || '(blank)', to: health });
     }
 
     console.log(`Projects read: ${records.length} · closed (skipped): ${skippedClosed} · not measurable: ${unknown}`);
-    if (!changes.length) {
-        console.log('All open projects already carry their derived status. Nothing to write.');
-        return;
-    }
-
+    if (!changes.length) console.log('All open projects already carry their derived status. Nothing to write.');
     changes.forEach(c => console.log(`  ${c.from} → ${c.to}   ${c.name}`));
 
     if (DRY_RUN) {
-        console.log(`\nDRY RUN — ${changes.length} record(s) would be updated. Nothing written.`);
-        return;
+        if (changes.length) console.log(`\nDRY RUN — ${changes.length} status change(s) would be written.`);
+    } else {
+        await writeStatuses(pat, changes);
     }
+    await writeUpdates(pat, records, statusNow);
+}
+
+// The dated update line on every open project (closed and Completed projects are history).
+async function writeUpdates(pat, records, statusNow) {
+    const now = new Date();
+    const today = londonDay(now);
+    const floor = londonDay(new Date(now.getTime() - LOOKBACK_DAYS * 86400000));
+    const completions = await fetchRecentCompletions(pat);
+    const writes = [];
+    for (const rec of records) {
+        const p = toProject(rec);
+        if (p.closedOn || p.completedTick || p.status === 'Completed' || statusNow[p.id] === 'Completed') continue;
+        const prev = baseline(parseState(p.updateState), today);
+        const { since, completed } = selectCompleted({ tasks: completions[p.id], prev, start: p.start, today, floor, nowIso: now.toISOString() });
+        const u = buildProjectUpdate({
+            prev, completed, today, nowIso: now.toISOString(), start: prev ? null : since,
+            now: { kpi: p.kpiCurrent, kpiTarget: p.kpiTarget, kpiUnit: p.kpiUnit, done: p.completedTasks, total: p.totalTasks, status: statusNow[p.id] || p.status },
+        });
+        writes.push({ id: p.id, name: String(p.name).slice(0, 60), fields: { [U.line]: u.line, [U.at]: now.toISOString(), [U.state]: JSON.stringify(u.state) } });
+    }
+    console.log(`\nUpdate lines: ${writes.length} open project(s).`);
+    writes.forEach(w => console.log(`  ${w.name}: ${w.fields[U.line]}`));
+    if (!writes.length) throw new Error('no open project to update: treating as a broken read, not a quiet board');
+    if (DRY_RUN) { console.log('DRY RUN — no update line written.'); return; }
+    for (let i = 0; i < writes.length; i += 10) {
+        await airtable(pat, `${BASE_ID}/${PROJECTS}`, {
+            method: 'PATCH',
+            body: JSON.stringify({ records: writes.slice(i, i + 10).map(w => ({ id: w.id, fields: w.fields })), typecast: false }),
+        });
+    }
+    console.log(`Wrote ${writes.length} update line(s).`);
+}
+
+async function writeStatuses(pat, changes) {
+    if (!changes.length) return;
 
     // Airtable accepts 10 records per PATCH.
     for (let i = 0; i < changes.length; i += 10) {
