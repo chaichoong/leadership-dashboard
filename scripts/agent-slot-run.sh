@@ -152,7 +152,8 @@ RC=$?
 # (schema-YYYY-MM-DD.json), which false-positived on 25 and 26 Aug 2026.
 "$REPO/scripts/slot-postrun.sh" "$JOB slot" "$RC" "$LOG" "$__START_LINE" "$__MARKER" "$SCRATCH" \
   '"description" *:|"Inbound Message Content" *:|CREDITOR MATTER' \
-  'HTTP Error 401|401 Unauthorized|Unauthorized|OAuth access token has expired|BROKEN|VERIFY FAIL|LANE UNAVAILABLE|tools are not loaded'
+  'HTTP Error 401|401 Unauthorized|Unauthorized|OAuth access token has expired|BROKEN|VERIFY FAIL|LANE UNAVAILABLE|tools are not loaded' \
+  'LANE UNAVAILABLE:?\*{0,2}:? *[Nn]o(ne|thing)([^A-Za-z]|$)|[Nn]o +LANE UNAVAILABLE|LANE UNAVAILABLE *:? *$'
 __FINAL=$?
 __POSTRUN_DONE=1
 exit "$__FINAL"
