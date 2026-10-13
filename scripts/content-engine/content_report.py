@@ -319,12 +319,14 @@ def stuck_sent_back(now=None, hours=24, approvals=None, ledger=None, episodes=No
     waiting clip counts on its OWN recording day, the one the planner schedules: 2194's clips were recorded on 2195. A rejected card is his no, not a job, and
     a day already on YouTube holds nothing.
 
-    MOTION AGES OUT after `stale_hours` (finding 20261013-phase-3-850). "A clip waits to render on a day the planner
-    will reach" said nothing about WHEN it would reach it, and the night drains roughly one sent-back day, so 2099 and
-    2100 (parked 9 Oct) and 2106 (10 Oct) sat with every clip at 'new' while this check returned 2097 alone: four days
-    of waiting read as healthy, which is the exact failure a trust surface exists to prevent. Past the ceiling the day
-    is listed whatever is notionally in motion, with how many nights it has waited and how many sent-back days sit in
-    front of it. Below the ceiling nothing changes, so a day queued last night is still not nagged about."""
+    A PARKED RECEIPT AGES OUT after `stale_hours` (finding 20261013-phase-3-850). "A clip waits to render on a day the
+    planner will reach" said nothing about WHEN it would reach it, and the night drains roughly one sent-back day, so
+    2099 and 2100 (parked 9 Oct) and 2106 (10 Oct) sat with every clip at 'new' while this check returned 2097 alone:
+    four days of waiting read as healthy, which is the exact failure a trust surface exists to prevent. A receipt older
+    than the ceiling now lists the day whatever else is notionally in motion, saying how many nights it has been parked
+    and how many sent-back days sit in front of it. It is keyed on the RECEIPT's age, not on how long ago the card was
+    sent back, so a receipt written two hours ago is still motion; and a day with NO receipt is unchanged, so the
+    existing reasons (a reachable waiting clip, a night that never reaches the day, a clip left mid-render) all stand."""
     import render
     now = now or dt.datetime.now()
     approvals = approval.load_state() if approvals is None else approvals
@@ -378,18 +380,21 @@ def stuck_sent_back(now=None, hours=24, approvals=None, ledger=None, episodes=No
         if waited is not None and waited < hours and not sync_said: continue
         mine = {k: v for k, v in ledger.items() if v.get("episode") == day or (v.get("day") == day and not v.get("episode"))}
         if (running and any(v.get("status") in RENDERING for v in mine.values())) or day in redo_days: continue
-        # Below the ceiling a waiting clip on a reachable day is motion. Past it, it is a QUEUE, and a queue that
-        # drains one day a night is not motion in any sense Kevin would recognise (finding 20261013-phase-3-850).
-        aged_out = waited is not None and waited >= stale_hours
-        if not aged_out and any(v.get("status") in WAITING and v.get("day") in reachable for v in mine.values()): continue
         written = receipts.get(day)
-        if not aged_out and written is not None and not render.receipt_stale(written, now, last_night, hours): continue
-        ahead = sum(1 for t, dd in queue_order if dd != day and t < (since or now))
-        if aged_out and (written is not None or any(v.get("status") in WAITING for v in mine.values())):
-            why = ("waiting %d night(s) with nothing moving (%d sent-back day(s) in front of it): %s"
-                   % (round(waited / 24), ahead,
-                      "a receipt is parked" if written is not None else "clips still at 'new'"))
-            if why_waiting and written is not None:
+        # A receipt PARKED past the ceiling is no longer motion, and it outranks every "in motion" skip below
+        # (finding 20261013-phase-3-850). redo_day has already queued the re-render by the time a receipt exists, so a
+        # receipt still waiting four days later says the queue is not draining, whatever the clips say: 2099 and 2100
+        # (parked 9 Oct) and 2106 (10 Oct) were skipped as "a clip waits on a day the planner will reach" while the
+        # morning report returned 2097 alone. Keyed on the RECEIPT's own age, never on how long ago Kevin sent the card
+        # back, so a receipt written two hours ago is still motion however old the send-back is.
+        aged_receipt = written is not None and (now - written).total_seconds() >= stale_hours * 3600
+        if not aged_receipt and any(v.get("status") in WAITING and v.get("day") in reachable for v in mine.values()): continue
+        if not aged_receipt and written is not None and not render.receipt_stale(written, now, last_night, hours): continue
+        if aged_receipt:
+            ahead = sum(1 for t, dd in queue_order if dd != day and t < (since or now))
+            why = ("a receipt has been parked %d night(s) with nothing moving (%d sent-back day(s) in front of it)"
+                   % (round((now - written).total_seconds() / 86400), ahead))
+            if why_waiting:
                 why += ": " + why_waiting(day)
         elif written is not None:
             why = "a receipt has waited %d h and the card has not gone back after the night had its chance" % round((now - written).total_seconds() / 3600)

@@ -39,22 +39,23 @@ print(json.dumps(rows))
 }
 
 describe('content_report stuck_sent_back — motion ages out', () => {
-  it('lists a day whose clips have not moved for four days, with the nights waited', () => {
-    const rows = stuck({ hoursAgo: 96, status: 'new' });
-    expect(rows.map((r) => r.day), 'a four-day wait still read as motion').toEqual([2099]);
-    expect(rows[0].why).toMatch(/waiting 4 night\(s\) with nothing moving/);
-    expect(rows[0].why).toMatch(/clips still at 'new'/);
+  it('lists a day whose receipt has been parked for four nights, with the nights counted', () => {
+    // The live case: 2099 parked 9 Oct, every clip still at 'new' on a reachable day, so the
+    // old "a clip waits and the planner will reach it" skip hid it for four days.
+    const rows = stuck({ hoursAgo: 96, receiptHoursAgo: 96, status: 'new' });
+    expect(rows.map((r) => r.day), 'a four-night parked receipt still read as motion').toEqual([2099]);
+    expect(rows[0].why).toMatch(/a receipt has been parked 4 night\(s\) with nothing moving/);
   });
 
-  it('lists a day whose receipt has been parked for four days', () => {
-    const rows = stuck({ hoursAgo: 96, receiptHoursAgo: 96, status: 'new' });
-    expect(rows.map((r) => r.day)).toEqual([2099]);
-    expect(rows[0].why).toMatch(/a receipt is parked/);
+  it('a receipt parked past the ceiling outranks a reachable waiting clip', () => {
+    // Keyed on the RECEIPT's age, so a fresh receipt is motion however old the send-back is.
+    expect(stuck({ hoursAgo: 96, receiptHoursAgo: 2, status: 'new' }),
+      'a receipt written two hours ago was treated as stalled').toEqual([]);
   });
 
   it('says how many sent-back days sit in front of it', () => {
     const rows = stuck({
-      hoursAgo: 96,
+      hoursAgo: 96, receiptHoursAgo: 96,
       others: {
         2095: { task: 'recB', verdict: 'changes', synced: '2026-10-07T07:00:00' },
         2096: { task: 'recC', verdict: 'changes', synced: '2026-10-08T07:00:00' },
@@ -67,14 +68,16 @@ describe('content_report stuck_sent_back — motion ages out', () => {
   });
 
   it('still treats a day queued last night as in motion', () => {
-    expect(stuck({ hoursAgo: 30, status: 'new' })).toEqual([]);
+    expect(stuck({ hoursAgo: 30, receiptHoursAgo: 6, status: 'new' })).toEqual([]);
   });
 
-  it('a clip genuinely mid-render is still motion, however long it has waited', () => {
-    expect(stuck({ hoursAgo: 96, status: 'rendered' }).length).toBe(1);
-    // 'rendered' is not WAITING, so it falls through to the old reasons rather
-    // than the aged-out one: the point is only that the ceiling did not invent
-    // a new skip. A day actively rendering is excluded by `running`, tested by
-    // the engine's own selftest.
+  it('CONTROL: a day with no receipt keeps its existing reasons, the ceiling adds no skip', () => {
+    // tests/content-engine-sent-back.test.js owns these paths. The ceiling must not
+    // reach them: a reachable waiting clip is still the backlog, whatever the send-back age.
+    expect(stuck({ hoursAgo: 96, status: 'new' }),
+      'the ceiling leaked onto the clip path and overrode its reason').toEqual([]);
+    const rendered = stuck({ hoursAgo: 96, status: 'rendered' });
+    expect(rendered.length).toBe(1);
+    expect(rendered[0].why).toMatch(/nothing in motion/);
   });
 });
