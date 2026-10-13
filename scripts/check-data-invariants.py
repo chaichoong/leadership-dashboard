@@ -638,6 +638,24 @@ INVARIANTS = [
         "fields": ["Project Name", "KPI Name", "KPI Automated", "KPI Last Updated"],
     },
     {
+        # The dated update line (Kevin, 10 Oct 2026: the projects overview's last piece). The 06:45
+        # project-status-sync job writes one on every open project each morning. A line that stops
+        # moving is the failure a trust surface must report, so the dashboard flags it after 2 days
+        # and this check fails the sweep.
+        "name": "project-updates-are-current",
+        "table": PROJECTS,
+        "incident": "Oct 2026 — KPI Last Updated is re-stamped by every dashboard load, so it never showed whether anything moved; the update line exists to say so, and must not go quiet",
+        "asserts": "every open project (not closed, not completed) => Latest Update written within 2 days",
+        "violation": (
+            "AND(LEN({Closed On} & '') = 0, NOT({Project Completed?}), {Project Status} != 'Completed', "
+            "OR(LEN({Latest Update At} & '') = 0, IS_BEFORE({Latest Update At}, DATEADD(NOW(), -2, 'days'))))"
+        ),
+        "control": "AND(LEN({Closed On} & '') = 0, NOT({Project Completed?}), {Project Status} != 'Completed')",
+        "control_means": "open projects the 06:45 job must write an update line on",
+        "field_probe": "OR(LEN({Latest Update At} & '') >= 0, LEN({Latest Update} & '') >= 0, LEN({Closed On} & '') >= 0)",
+        "fields": ["Project Name", "Latest Update At", "Latest Update"],
+    },
+    {
         # The Runpreneur Q4 2026 project KPIs (Kevin, 10 Oct 2026: every new project's metric updates
         # itself). Same rule as the real estate check above: the dashboard works each out on load and
         # saves it, and refuses to save when the money record did not load, so a dead read stops the

@@ -200,3 +200,17 @@ test('a project with its own milestones but no start date says so, rather than "
     const line = page.locator('.strat-kpi-row[data-project-id="recUndated"] .strat-kpi-milestone');
     await expect(line).toContainText('no start date', { timeout: 30000 });
 });
+
+// The dated update line (13 Oct 2026): the 06:45 job writes it; the row shows it, and says so when
+// it is over 2 days old rather than passing an old line off as today's news. Clock: 10 Nov 2026.
+test('each row shows the robot\'s update line, flags a stale one, and says when none was written', async ({ page }) => {
+    const fresh = project('recFresh', 'Sample fresh project', { fldRvVPngn2v4Mg49: '10 Nov: nothing moved since 8 Nov. Still 2 of 5 units.', fldZC3BcWrlpdOsXV: '2026-11-10T06:45:00.000Z' });
+    const stale = project('recStale', 'Sample stale project', { fldRvVPngn2v4Mg49: '5 Nov: KPI 1 → 2.', fldZC3BcWrlpdOsXV: '2026-11-05T06:45:00.000Z' });
+    await loadDashboard(page, { projects: [...PROJECTS, fresh, stale] });
+    const freshLine = page.locator('.strat-kpi-row[data-project-id="recFresh"] .strat-kpi-update');
+    await expect(freshLine).toHaveText('Update 10 Nov: nothing moved since 8 Nov. Still 2 of 5 units.', { timeout: 30000 });
+    const staleLine = page.locator('.strat-kpi-row[data-project-id="recStale"] .strat-kpi-update');
+    await expect(staleLine).toHaveAttribute('data-stale', '1');
+    await expect(staleLine).toContainText('No update since 5 Nov: the 06:45 job has not written since. Last: 5 Nov: KPI 1 → 2.');
+    await expect(page.locator('.strat-kpi-row[data-project-id="recMine"] .strat-kpi-update')).toHaveText('No update written yet. The 06:45 job writes one each morning.');
+});
