@@ -12,11 +12,16 @@ body.home-mode.home-folded-wealth .home-wealth-wait { display: none; }
 #tab-home .home-header { margin-bottom: var(--space-4); }
 #tab-home .home-header h1 { margin: 0; font-size: var(--fs-2xl); color: var(--text-primary); }
 #tab-home .home-header p { margin: var(--space-1) 0 0; color: var(--text-secondary); font-size: var(--fs-md); }
-#tab-home .home-links { display: flex; flex-wrap: wrap; gap: var(--space-2); margin: var(--space-3) 0 var(--space-4); }
-#tab-home .home-link { background: var(--bg-surface); border: 1px solid var(--border-default); border-radius: var(--radius-full);
+/* Jump buttons, one per section (Kevin, 14 Oct 2026). Once the row reaches the top of the screen js/home.js
+   pins it there (position:fixed over the content column), and the slot keeps its height so nothing jumps. */
+#tab-home .home-jump-slot { margin: var(--space-3) 0 var(--space-4); }
+#tab-home .home-jump { display: flex; flex-wrap: nowrap; gap: var(--space-2); overflow-x: auto; padding: var(--space-2) 0;
+    background: var(--bg-app); box-sizing: border-box; scrollbar-width: none; }
+#tab-home .home-jump.home-jump-pinned { position: fixed; top: 0; z-index: 90; box-shadow: 0 1px 0 var(--border-default), var(--shadow-sm); }   /* a shadow, not a border: the row keeps its height */
+#tab-home .home-jump-btn { flex: 0 0 auto; background: var(--bg-surface); border: 1px solid var(--border-default); border-radius: var(--radius-full);
     padding: var(--space-1) var(--space-3); font: inherit; font-size: var(--fs-base); color: var(--text-primary); cursor: pointer; }
-#tab-home .home-link:hover { background: var(--bg-surface-2); }
-#tab-home .home-link:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+#tab-home .home-jump-btn:hover { background: var(--bg-surface-2); }
+#tab-home .home-jump-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 
 /* The approvals and CEO brief frame grows to the page's own height (it posts it), so there is never a
    second scroll bar inside Home. */
@@ -38,5 +43,5 @@ body.home-mode.home-folded-dashboard #tab-overview { display: none; }
 body.home-mode.home-folded-wealth #tab-wealth { display: none; }
 
 @media print {
-    #tab-home .home-links { display: none; }
+    #tab-home .home-jump-slot { display: none; }
 }

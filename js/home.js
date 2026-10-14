@@ -79,7 +79,7 @@
         const f = frame();
         if (!f || !homeOpen()) return;
         const r = f.getBoundingClientRect();
-        const top = Math.max(0, -r.top);
+        const top = Math.max(0, pinnedHeight() - r.top);   // below the pinned jump row, so a sticky bar is never under it
         const bottom = Math.min(r.height, window.innerHeight - r.top);
         tellFrame({ type: 'homeViewport', top: Math.round(top), h: Math.round(Math.max(0, bottom - top)) });
     }
@@ -101,8 +101,7 @@
             return;
         }
         if (d.type === 'agentsHomeScrollTo') {
-            const y = f.getBoundingClientRect().top + window.pageYOffset + Math.max(0, Number(d.y) || 0) - 16;
-            window.scrollTo({ top: Math.max(0, Math.round(y)), behavior: 'smooth' });
+            scrollToY(f.getBoundingClientRect().top + window.pageYOffset + Math.max(0, Number(d.y) || 0));
             return;
         }
         if (d.type === 'agentsHomeReady') {
@@ -141,7 +140,7 @@
             try { const st = foldState(); st[key] = fold; localStorage.setItem(FOLD_KEY, JSON.stringify(st)); }
             catch (err) { console.warn('[home] fold state not saved', err); }
         }
-        if (key === 'wealth' && !fold && save && homeOpen()) loadWealth();   // opened by its header click, so it is in view
+        if (key === 'wealth' && !fold && save) maybeWealth();   // opened by hand: drawn if in view, once the approvals are in
         queueBand();
     }
 
@@ -207,12 +206,58 @@
         });
     }
 
+    // The jump row (Kevin, 14 Oct 2026): one button per section, pinned at the top once Home scrolls past it.
+    // The row covers the whole content column; its padding keeps the buttons in line with the page.
+    function jumpBar() { return document.getElementById('homeJump'); }
+    function pinnedHeight() { const b = jumpBar(); return b && b.classList.contains('home-jump-pinned') ? b.offsetHeight : 0; }
+    function syncPin() {
+        const slot = document.getElementById('homeJumpSlot'), bar = jumpBar();
+        if (!slot || !bar) return;
+        const r = slot.getBoundingClientRect();
+        const pin = homeOpen() && r.top < 0;
+        if (pin) {
+            // From the sidebar's edge to the screen's (the sidebar is off-screen on a phone).
+            const side = document.querySelector('.sidebar');
+            const left = side ? Math.max(0, Math.round(side.getBoundingClientRect().right)) : 0;
+            const right = document.documentElement.clientWidth;
+            // On a phone the menu button is pinned at the top left too, so the buttons start clear of it.
+            const menu = document.querySelector('.sidebar-toggle');
+            const menuRight = menu && getComputedStyle(menu).display !== 'none' ? menu.getBoundingClientRect().right + 8 : 0;
+            slot.style.height = `${bar.getBoundingClientRect().height}px`;
+            Object.assign(bar.style, { left: `${left}px`, width: `${Math.max(0, right - left)}px`,
+                paddingLeft: `${Math.max(0, r.left - left, menuRight - left)}px`, paddingRight: `${Math.max(0, right - r.right)}px` });
+        } else {
+            slot.style.height = '';
+            Object.assign(bar.style, { left: '', width: '', paddingLeft: '', paddingRight: '' });
+        }
+        bar.classList.toggle('home-jump-pinned', pin);
+    }
+    // Where a section's heading lands: just below the row, which is pinned by the time it gets there.
+    function scrollToY(y) {
+        const b = jumpBar();
+        const gap = (b ? b.offsetHeight : 0) + 12;
+        window.scrollTo({ top: Math.max(0, Math.round(y - gap)), behavior: 'smooth' });
+    }
+    function jumpTo(key) {
+        if (key === 'dashboard' || key === 'wealth') {
+            if (folded(key)) setFold(key, false, true);
+            const el = key === 'dashboard' ? document.querySelector('#tab-home .home-dash-divider') : document.getElementById('homeWealthDivider');
+            if (el) scrollToY(el.getBoundingClientRect().top + window.pageYOffset);
+            return;
+        }
+        // Sign-ins, approvals and the brief live in the frame: it opens the section and says where it starts.
+        // Until it has loaded, the jump goes to the top of the frame.
+        if (state.agents.phase === 'ready') { tellFrame({ type: 'homeJump', zone: key }); return; }
+        const f = frame();
+        if (f) scrollToY(f.getBoundingClientRect().top + window.pageYOffset);
+    }
+
     function wire() {
         const panel = document.getElementById('tab-home');
         if (!panel) return;
         panel.addEventListener('click', (e) => {
-            const nav = e.target.closest('[data-home-tab]');
-            if (nav && typeof switchTab === 'function') switchTab(nav.getAttribute('data-home-tab'));
+            const jump = e.target.closest('[data-home-jump]');
+            if (jump) jumpTo(jump.getAttribute('data-home-jump'));
         });
         // The Wealth header sits outside the Home panel (it heads the Wealth panel), so listen on the page.
         document.addEventListener('click', (e) => {
@@ -225,6 +270,7 @@
             const open = panel.classList.contains('active');
             document.body.classList.toggle('home-mode', open);
             if (open) { setDate(); keepFresh(); queueBand(); }
+            syncPin();
         };
         new MutationObserver(sync).observe(panel, { attributes: true, attributeFilter: ['class'] });
         sync();
@@ -232,10 +278,11 @@
         if (window.whenMainDataReady && typeof window.whenMainDataReady.then === 'function') window.whenMainDataReady.then(ready);
         else ready();
         setTimeout(ready, 20000);   // a dashboard read that never finishes must not keep the approvals off Home
-        window.addEventListener('scroll', queueBand, { passive: true });
-        window.addEventListener('resize', queueBand);
+        // The row pins in the scroll event itself, before the frame is painted, so it never lags a frame behind.
+        window.addEventListener('scroll', () => { syncPin(); queueBand(); }, { passive: true });
+        window.addEventListener('resize', () => { syncPin(); queueBand(); });
         // Layout above the frame can move without a scroll (the sync bar's drawer opening, the dashboard drawing).
-        if (typeof ResizeObserver === 'function') new ResizeObserver(queueBand).observe(document.body);
+        if (typeof ResizeObserver === 'function') new ResizeObserver(() => { syncPin(); queueBand(); }).observe(document.body);
         document.addEventListener('visibilitychange', () => keepFresh());   // never pass the event in as "force"
         setInterval(() => { if (Date.now() - state.rereadAt > KEEP_FRESH_MS) keepFresh(true); }, 30 * 1000);
         const divider = document.getElementById('homeWealthDivider');

@@ -437,6 +437,9 @@ html.home-embed .zone.home-collapsed .home-chev{transform:rotate(-90deg)}
 html.home-embed .zone.home-collapsed > :not(.zone-header){display:none !important}
 html.home-embed #ceoBriefBody h2{display:none}   /* the fold header carries the title on Home */
 html.home-embed .zone.home-collapsed > .zone-header{margin-bottom:0}
+/* On Home the sections line up with the dashboard and Wealth below them: no width cap, no side padding
+   (Kevin, 14 Oct 2026: they sat 138px further in on his 1,920px screen). */
+html.home-embed .main{max-width:none;margin:0;padding:0}
 </style>
 </head>
 <body>
@@ -8354,6 +8357,7 @@ window.addEventListener('hashchange', ()=>{
 // Foldable sections in the Home embed. The state lives under one key that Home's own dashboard and
 // Wealth headers share (same origin), so the whole page is remembered together in this browser.
 const HOME_FOLD_KEY = 'od_home_folded';
+const _homeFoldOpen = Object.create(null);   // section key -> opens it, for Home's jump buttons
 function homeFoldState(){
     try { return JSON.parse(localStorage.getItem(HOME_FOLD_KEY) || '{}') || {}; }
     catch(e){ console.warn('Home fold state unreadable', e); return {}; }
@@ -8392,6 +8396,7 @@ function homeFoldSetup(){
             apply(folded); homeFoldSave(key, folded);
         };
         apply(!!st[key]);
+        _homeFoldOpen[key] = () => { if(zone.classList.contains('home-collapsed')) flip(); return zone; };
         // The arrow's own click bubbles here too, so the fold happens once, whichever was pressed.
         head.addEventListener('click', (e) => {
             const ctl = e.target.closest('a,button,input,select,textarea');
@@ -8434,6 +8439,14 @@ if(HOME_MODE) window.addEventListener('message', (e) => {
     if(e.source !== window.parent || e.origin !== window.location.origin) return;
     const d = e.data || {};
     if(d.source !== 'home-shell') return;
+    if(d.type === 'homeJump'){   // a jump button on Home: open the section, then say where it starts
+        const open = _homeFoldOpen[String(d.zone || '')];
+        if(!open) return;
+        const zone = open();
+        if(_homeSendHeight) _homeSendHeight();   // the frame is its new height before Home scrolls
+        homeEmbedTell({ type:'agentsHomeScrollTo', y: Math.round(zone.getBoundingClientRect().top + window.pageYOffset) });
+        return;
+    }
     if(d.type === 'homeViewport'){
         document.documentElement.style.setProperty('--home-vis-top', `${Math.max(0, Number(d.top) || 0)}px`);
         document.documentElement.style.setProperty('--home-vis-h', `${Math.max(120, Number(d.h) || 0)}px`);
