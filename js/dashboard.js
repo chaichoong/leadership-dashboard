@@ -2772,12 +2772,10 @@
         const lloydsCCRec = accounts.find(r => r.id === REC.lloydsCreditCard);
         const amexRec = accounts.find(r => r.id === REC.americanExpress);
         const santanderCCRec = accounts.find(r => r.id === REC.santanderCC);
-        const lloydsCCBal = Number(getField(lloydsCCRec, F.accGBP)) || 0;
-        const amexBal = Number(getField(amexRec, F.accGBP)) || 0;
-        const santanderCCBal = Number(getField(santanderCCRec, F.accGBP)) || 0;
-        const lloydsCCOwed = Math.abs(lloydsCCBal);
-        const amexOwed = Math.max(0, amexBal);
-        const santanderCCOwed = Math.max(0, santanderCCBal);
+        // Today's balance, not the last statement's (cardOwed in shared.js says why).
+        const lloydsCCOwed = cardOwed(lloydsCCRec);
+        const amexOwed = cardOwed(amexRec);
+        const santanderCCOwed = cardOwed(santanderCCRec);
         const totalCCDebt = lloydsCCOwed + amexOwed + santanderCCOwed;
 
         const creditCards = [

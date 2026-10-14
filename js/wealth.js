@@ -139,7 +139,14 @@ function wealthLiveValue(name) {
     const a = accts.find(x => x.id === recId);
     if (!a) return null;
     const v = Number(getField(a, F.accGBP));
-    return isNaN(v) ? null : Math.abs(v);
+    return isNaN(v) ? null : accountAmount(a);
+}
+
+// An account's balance as net worth counts it: a magnitude, and for a card what it owes
+// TODAY (cardOwed in shared.js reads past the statement balance the feed sometimes stores).
+function accountAmount(a) {
+    if (getField(a, F.accNetWorthClass) === 'Credit Card') return cardOwed(a);
+    return Math.abs(Number(getField(a, F.accGBP)) || 0);
 }
 
 // Live cash / credit-card items straight from the Accounts table, by the "Net Worth
@@ -190,7 +197,7 @@ function netWorthAccounts(cls) {
             return {
                 name,
                 displayName: name + accountStaleNote(hoursAgo),
-                amount: Math.abs(Number(getField(a, F.accGBP)) || 0),
+                amount: accountAmount(a),
                 id: a.id,
                 feedHoursAgo: hoursAgo,
             };
@@ -281,10 +288,10 @@ function openAccountManager() {
     if (!el) return;
     const accts = ((typeof allAccounts !== 'undefined' && allAccounts) ? allAccounts : [])
         .filter(a => getField(a, F.accountAlias))
-        .slice().sort((a, b) => Math.abs(Number(getField(b, F.accGBP)) || 0) - Math.abs(Number(getField(a, F.accGBP)) || 0));
+        .slice().sort((a, b) => accountAmount(b) - accountAmount(a));
     const rowHtml = a => {
         const name = getField(a, F.accountAlias) || '(account)';
-        const bal = Math.abs(Number(getField(a, F.accGBP)) || 0);
+        const bal = accountAmount(a);
         const cur = getField(a, F.accNetWorthClass) || '';
         const opt = v => `<option value="${v}"${cur === v ? ' selected' : ''}>${v || 'Not counted'}</option>`;
         return `<div style="display:grid;grid-template-columns:1fr auto auto;gap:10px;align-items:center;padding:6px 8px;border-bottom:1px solid var(--border-subtle);font-size:var(--fs-sm)">
@@ -1891,10 +1898,13 @@ function debtRows() {
         // snapshot; mortgages amortise (interest-only holds at principal).
         let balance;
         if (cls === 'Loans') {
-            // A loan carrying a start date AND a rate is rolled forward automatically
-            // (the charging order accrues and is never paid down). Everything else keeps
-            // the existing behaviour: your edited figure, else the snapshot.
-            const rollForward = getField(r, DEBT.start) && _num(getField(r, DEBT.rate)) != null && principal > 0;
+            // An INTEREST-ONLY loan carrying a start date AND a rate is rolled forward
+            // automatically (the charging order accrues and is never paid down). Everything
+            // else keeps the existing behaviour: your edited figure, else the snapshot.
+            // A repayment loan never rolls forward: its start date is when it was drawn, not
+            // the date of the figure you typed, so compounding from it with no repayments
+            // grew a years-old business loan by its rate every month (14 Oct 2026).
+            const rollForward = type === 'Interest-only' && getField(r, DEBT.start) && _num(getField(r, DEBT.rate)) != null && principal > 0;
             if (rollForward) balance = manualDebtBalance(r);
             else { const lb = loanBal[name.trim().toLowerCase()]; balance = principal > 0 ? principal : (lb != null ? lb : 0); }
         }
