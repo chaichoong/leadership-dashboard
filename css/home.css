@@ -5,6 +5,9 @@ body.home-mode #tab-overview { display: block; }
 body.home-mode #tab-wealth { display: block; }
 #homeWealthDivider { display: none; }
 body.home-mode #homeWealthDivider { display: block; }
+.home-wealth-wait { display: none; }
+body.home-mode .home-wealth-wait:not([hidden]) { display: block; margin: 0 0 var(--space-3); font-size: var(--fs-sm); color: var(--text-muted); }
+body.home-mode.home-folded-wealth .home-wealth-wait { display: none; }
 
 #tab-home .home-header { margin-bottom: var(--space-4); }
 #tab-home .home-header h1 { margin: 0; font-size: var(--fs-2xl); color: var(--text-primary); }
@@ -24,6 +27,15 @@ body.home-mode #homeWealthDivider { display: block; }
 
 .home-dash-divider { margin: var(--space-6) 0 var(--space-3); font-size: var(--fs-sm); font-weight: var(--fw-semibold);
     text-transform: uppercase; letter-spacing: .04em; color: var(--text-secondary); }
+/* Foldable sections (Kevin, 14 Oct 2026). The headers are switches; a folded panel is hidden under Home. */
+.home-fold-btn { display: inline-flex; align-items: center; gap: var(--space-2); padding: 0; border: 0; background: none; cursor: pointer;
+    font: inherit; text-transform: inherit; letter-spacing: inherit; color: inherit; }
+.home-fold-btn:hover { color: var(--text-primary); }
+.home-fold-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.home-chev { display: inline-block; width: 16px; font-size: var(--fs-lg); line-height: 1; transition: transform .15s; }
+.home-fold-btn[aria-expanded="false"] .home-chev { transform: rotate(-90deg); }
+body.home-mode.home-folded-dashboard #tab-overview { display: none; }
+body.home-mode.home-folded-wealth #tab-wealth { display: none; }
 
 @media print {
     #tab-home .home-links { display: none; }
