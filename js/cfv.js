@@ -257,24 +257,13 @@
                     return; // Don't add to CFV list — it's being cleared
                 }
 
+                // No re-flag (Kevin, 14 Oct 2026): a CFV or CFV Actioned tenancy is already a CFV.
+                // The old rule re-flagged every actioned tenancy once its rent day was 2 days past,
+                // which is every month, since an actioned tenancy is unpaid by definition; and
+                // confirming the re-flag cleared its dismissal, so the row came straight back.
+                // A missed expected payment is moved back with the row's "Move to CFV" button.
                 const tenant = getTenantForTenancy(tenancy, tenantLookup);
-                const entry = buildCFVEntry(tenancy, tenant, statusName, today, txIndex);
-
-                // Re-flag check: CFV Actioned but next due date has passed with no payment
-                if (statusName === 'cfv actioned') {
-                    const dueDay = getNumVal(tenancy, F.tenDueDay, 1);
-                    const dueThisMonth = new Date(today.getFullYear(), today.getMonth(), dueDay);
-                    const daysSinceDue = today >= dueThisMonth ? Math.floor((today - dueThisMonth) / 86400000) : 0;
-
-                    if (daysSinceDue >= CFV_TOLERANCE_DAYS) {
-                        const reflagDismissKey = 'cfv_reflag_dismissed_' + tenancy.id;
-                        if (!localStorage.getItem(reflagDismissKey)) {
-                            entry.reflagged = true;
-                        }
-                    }
-                }
-
-                cfvList.push(entry);
+                cfvList.push(buildCFVEntry(tenancy, tenant, statusName, today, txIndex));
                 return;
             }
 
@@ -615,9 +604,7 @@
         });
 
         tbody.innerHTML = filteredList.map((entry, idx) => {
-            const statusBadge = entry.reflagged
-                ? '<span class="cfv-status-badge potential">Re-flagged ⚠</span>'
-                : entry.status === 'cfv actioned'
+            const statusBadge = entry.status === 'cfv actioned'
                 ? '<span class="cfv-status-badge cfv-actioned">CFV Actioned</span>'
                 : entry.status === 'potential'
                 ? '<span class="cfv-status-badge potential">Potential CFV</span>'
@@ -662,13 +649,6 @@
                 // Confirmed CFV — can mark actioned
                 actionsHtml = `
                     <button class="cfv-action-btn primary" onclick="event.stopPropagation(); cfvConfirmAction('actioned','${entry.tenancyId}','${escJs(entry.surname)}',this)">Mark Actioned</button>
-                    <button class="cfv-action-btn" data-comment-btn="${entry.tenancyId}" onclick="event.stopPropagation(); cfvShowComments('${entry.tenancyId}','${escJs(entry.surname)}','${escJs(entry.ref)}')" style="margin-top:4px">${commentBtnLabel}</button>
-                `;
-            } else if (entry.reflagged) {
-                // CFV Actioned but re-flagged — confirm as CFV again or dismiss
-                actionsHtml = `
-                    <button class="cfv-action-btn" style="background:var(--danger);color:white;border-color:var(--danger)" onclick="event.stopPropagation(); cfvConfirmReflag('${entry.tenancyId}','${escJs(entry.surname)}',this)">Confirm CFV</button>
-                    <button class="cfv-action-btn" onclick="event.stopPropagation(); cfvDismissReflag('${entry.tenancyId}',this)" style="margin-top:4px">Dismiss</button>
                     <button class="cfv-action-btn" data-comment-btn="${entry.tenancyId}" onclick="event.stopPropagation(); cfvShowComments('${entry.tenancyId}','${escJs(entry.surname)}','${escJs(entry.ref)}')" style="margin-top:4px">${commentBtnLabel}</button>
                 `;
             } else {
@@ -948,34 +928,6 @@
             }
         })));
         return restored;
-    }
-
-    // Re-flag: confirm CFV Actioned back to CFV
-    async function cfvConfirmReflag(tenancyId, surname, btn) {
-        if (!await showConfirm(`Re-flag ${surname} as CFV?\n\nPayment still hasn't come through.`, { title: 'Re-flag as CFV', danger: true })) return;
-        btn.textContent = '...';
-        btn.disabled = true;
-        const ok = await updateTenancyStatus(tenancyId, CFV_STATUS_IDS.cfv);
-        if (!ok) { btn.textContent = 'Failed'; btn.disabled = false; return; }
-        await addTenancyComment(tenancyId, 'Re-flagged as CFV — payment not received on next due date.');
-        const rec = allTenancies.find(t => t.id === tenancyId);
-        if (rec) rec.fields[F.tenPayStatus] = { id: CFV_STATUS_IDS.cfv, name: 'CFV' };
-        localStorage.removeItem('cfv_reflag_dismissed_' + tenancyId);
-        btn.textContent = 'Confirmed ✓';
-        setTimeout(() => renderCFVTab(), 1500);
-        // Bust the IDB cache before reloading. Without this, loadDashboard's
-        // "instant render from cache" path returns stale data from before the
-        // PATCH and overwrites our in-memory mutation, reverting the action.
-        // (Symptom: clicking Confirm CFV on Tenancy A then Tenancy B caused
-        // A to flip back to Potential CFV when B's loadDashboard fired.)
-        setTimeout(async () => { if (typeof clearDashCache === 'function') await clearDashCache(); loadDashboard(); }, 3000);
-    }
-
-    // Dismiss re-flag — keep as CFV Actioned
-    function cfvDismissReflag(tenancyId, btn) {
-        localStorage.setItem('cfv_reflag_dismissed_' + tenancyId, new Date().toISOString());
-        btn.textContent = 'Dismissed';
-        setTimeout(() => renderCFVTab(), 1000);
     }
 
     async function cfvMarkActioned(tenancyId, btn) {
