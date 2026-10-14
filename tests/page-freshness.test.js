@@ -66,6 +66,17 @@ describe('isStale compares the loaded size with the live copy', () => {
     expect(await PF.isStale({ mine: 608599, fetch: async () => res('W/"6ac6757c-94958"') })).toBe(true);
   });
 
+  it("the Home copy's reload never switches off the AI Agents copy's check (one guard per copy; review, 14 Oct 2026)", async () => {
+    const store = { 'page_freshness_reloaded_at:/os/agents/index.html:home': String(Date.now() - 5000) };
+    globalThis.sessionStorage = { getItem: (k) => store[k] ?? null, setItem: (k, v) => { store[k] = v; } };
+    // The Home copy itself just reloaded, so its own guard lets its save through...
+    globalThis.location = { pathname: '/os/agents/index.html', search: '?home=1', hash: '' };
+    expect(await PF.isStale({ mine: 513316, fetch: async () => res('W/"6ac6757c-7d525"'), force: true })).toBe(false);
+    // ...but the AI Agents copy, still on old code, is stopped.
+    globalThis.location = { pathname: '/os/agents/index.html', search: '', hash: '' };
+    expect(await PF.isStale({ mine: 513316, fetch: async () => res('W/"6ac6757c-7d525"'), force: true })).toBe(true);
+  });
+
   it('freshUrl keeps every parameter and the hash, and replaces only its own', () => {
     expect(PF.freshUrl({ pathname: '/os/tasks/index.html', search: '?filter=maintenance&fresh=1', hash: '' }, 99))
       .toBe('/os/tasks/index.html?filter=maintenance&fresh=99');

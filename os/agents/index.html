@@ -405,6 +405,22 @@ a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}
 .resources-chevron{font-size:10px;color:var(--text-muted);transition:transform .15s}
 .sop-fb-text{width:100%;box-sizing:border-box;border:1px solid var(--border-default);background:var(--bg-surface);border-radius:var(--radius-md);padding:8px 10px;font-size:var(--fs-sm);color:var(--text-primary);font-family:var(--font-family-base);resize:vertical}
 .sop-fb-actions{display:flex;gap:8px;margin-top:6px}
+/* Home embed (Kevin, 9 Oct 2026, approved plan; built 14 Oct): os/agents/index.html?home=1 runs inside the
+   shell's Home tab and shows ONLY the approval queue, then the CEO brief, at full height. The same page and
+   code as the AI Agents tab, so nothing is copied; html.home-embed hides the rest. */
+html.home-embed #topbar, html.home-embed .page-tabs, html.home-embed [data-sync-bar="agents"]{display:none !important}
+html.home-embed #main{display:flex !important;flex-direction:column}
+html.home-embed #view-approvals{display:block;order:1}
+html.home-embed #view-dashboard{display:block;order:2}
+html.home-embed #view-dashboard > .zone:not(#zoneCeoBrief){display:none !important}
+html.home-embed #view-checks, html.home-embed #view-estate, html.home-embed #view-built{display:none !important}
+html.home-embed body{overflow:hidden;min-height:0}
+/* In a frame as tall as its content, position:fixed means the whole frame, not the screen: a dialog would
+   open 2,000px below where Kevin is looking (review, 14 Oct 2026). Home posts the band of the frame that is
+   on screen (--home-vis-top/--home-vis-h); dialogs, toasts and the Undo bar sit inside that band. */
+html.home-embed .modal-overlay{position:absolute;bottom:auto;top:var(--home-vis-top,0px);height:var(--home-vis-h,100vh)}
+html.home-embed .toast{position:absolute;bottom:auto;top:calc(var(--home-vis-top,0px) + var(--home-vis-h,100vh) - 64px)}
+html.home-embed .apv-answered-bar{position:absolute;bottom:auto;top:calc(var(--home-vis-top,0px) + var(--home-vis-h,100vh) - 76px);transform:translate(-50%,-100%)}
 </style>
 </head>
 <body>
@@ -804,6 +820,9 @@ const AGENT_VIEWS = ['dashboard','approvals','checks','estate','built'];
 // memory still say 'ceo-brief' — map them home rather than 404 the view.
 const AGENT_VIEW_ALIASES = { 'ceo-brief': 'dashboard', 'status': 'estate', 'jobs': 'estate', 'track-record': 'built' };
 let _agentsView = 'dashboard';  // which page tab is showing
+// Home embed (see the CSS at html.home-embed): approvals view, plus the CEO brief, no tabs, no deep links.
+const HOME_MODE = new URLSearchParams(location.search).get('home') === '1';
+if(HOME_MODE){ document.documentElement.classList.add('home-embed'); _agentsView = 'approvals'; }
 let allApprovals = [];          // loop-raised tasks at Status Approval
 let allAnswered = [];           // Your step cards he has answered, waiting for the half-hourly sweep
 let _approvalsState = 'idle';   // idle | loading | ready | 'error: <message>'
@@ -1016,8 +1035,37 @@ async function atUpdate(tableId, recId, fields){
         body: JSON.stringify({ fields, typecast:true, returnFieldsByFieldId:true })
     });
     if(!res.ok) throw new Error(await res.text());
+    if(tableId === TASKS_TBL) apvAnnounceQueueChange();
     return (await res.json());
 }
+
+// ONE QUEUE, TWO COPIES (Kevin, 9 Oct 2026: "all of the information on the Home page synced with
+// the separate sections"). The queue now runs twice in the app: on Home (?home=1) and on the AI
+// Agents tab. Every task write here (a verdict, a knock-back, an undo, a Your step answer) goes
+// through atUpdate, which tells every other open copy; that copy re-reads the queue at once, so a
+// card answered in one is gone from the other. BroadcastChannel never echoes to its sender. The
+// stale-tab guard and the server-side checks still stop a double answer if a message is missed.
+const APV_CHANNEL = (typeof BroadcastChannel === 'function') ? new BroadcastChannel('od-approval-queue') : null;
+let _apvAnnounceTimer = null;
+function apvAnnounceQueueChange(){
+    if(!APV_CHANNEL) return;
+    clearTimeout(_apvAnnounceTimer);
+    _apvAnnounceTimer = setTimeout(() => {
+        try { APV_CHANNEL.postMessage({ type:'queue-changed', at: Date.now() }); }
+        catch(e){ console.warn('approval queue announce failed', e); }
+    }, 400);
+}
+function apvRereadQueue(tries){
+    if(!PAT) return;
+    // A read already running may have started before the other copy's write: wait for it, then read again.
+    if(_approvalsState === 'loading'){ if((tries||0) < 20) setTimeout(() => apvRereadQueue((tries||0) + 1), 500); return; }
+    apvSilentRefresh().catch(err => console.warn('approval queue re-read after another copy changed it failed', err));
+    loadDeferred().then(() => apvRefreshDeferredLane()).catch(err => console.warn('knocked-back list re-read failed', err));
+}
+if(APV_CHANNEL) APV_CHANNEL.onmessage = (e) => {
+    if(!e.data || e.data.type !== 'queue-changed') return;
+    apvRereadQueue(0);
+};
 
 // Best-effort Airtable record comment — same trail the Tasks drawer leaves.
 async function postTaskComment(taskId, text){
@@ -1496,7 +1544,7 @@ async function uploadQueuedApprovalFiles(taskId){
 const _apvDrafts = {};
 // Notes typed on a tab that then reloaded itself because a newer copy of this page was live
 // (apvStaleTab, 7 Oct 2026). Read once and dropped, so they come back on the first render only.
-const APV_DRAFT_CARRY = 'apv_drafts_over_reload';
+const APV_DRAFT_CARRY = 'apv_drafts_over_reload' + (HOME_MODE ? ':home' : '');   // one per copy: Home and the AI Agents tab share sessionStorage
 try {
     const carried = JSON.parse(sessionStorage.getItem(APV_DRAFT_CARRY) || 'null');
     sessionStorage.removeItem(APV_DRAFT_CARRY);
@@ -3855,6 +3903,7 @@ function apvScrollToFocus(){
     const bulk = document.getElementById('apvBulk');
     if(bulk && bulk.classList.contains('on')) offset += bulk.getBoundingClientRect().height + 12;
     const y = card.getBoundingClientRect().top + window.pageYOffset - offset;
+    if(HOME_MODE){ homeEmbedTell({ type:'agentsHomeScrollTo', y: Math.max(0, Math.round(y)) }); return; }   // the frame never scrolls; Home does
     window.scrollTo({ top: Math.max(0, Math.round(y)) });
 }
 // Try again repeats the SAME call, options included: a carried note is not
@@ -7967,6 +8016,7 @@ window.addEventListener('message', (e)=>{
     if(e.origin !== 'null' && e.origin !== window.location.origin) return;
     const d = e.data;
     if(!d || d.type !== 'agentsDeepLink') return;
+    if(HOME_MODE) return;   // a link aimed at the AI Agents tab must not turn Home's copy
     // A view request on its own (e.g. the shell's old #ceo-brief hash
     // forwarding here) just opens that page tab.
     if(d.view && !d.agent && !d.wf){ switchAgentsView(d.view); return; }
@@ -8233,16 +8283,55 @@ window.addEventListener('hashchange', ()=>{
     if(consumeAgentDeepLink()) switchAgentsView(_agentsView);
 });
 
+// Home embed: tell the Home tab how tall this page is, so its frame grows to full height and never
+// shows a scroll box of its own, and when the queue and brief are in (or failed).
+function homeEmbedTell(msg){
+    try { if(window.parent && window.parent !== window) window.parent.postMessage(Object.assign({ source:'agents-home' }, msg), window.location.origin); }
+    catch(e){ console.warn('home embed message failed', e); }
+}
+function homeEmbedWatchHeight(){
+    let last = 0, raf = 0;
+    // The content's own height, never scrollHeight: scrollHeight is at least the frame's height, so a
+    // frame could grow and never shrink after cards are answered (review, 14 Oct 2026).
+    const measure = () => {
+        const main = document.getElementById('main');
+        const el = (main && getComputedStyle(main).display !== 'none') ? main : document.getElementById('loader');
+        return el ? Math.ceil(el.getBoundingClientRect().bottom + window.pageYOffset + 24) : 0;
+    };
+    const send = () => { raf = 0; const h = measure(); if(h > 0 && h !== last){ last = h; homeEmbedTell({ type:'agentsHomeHeight', h }); } };
+    const ro = new ResizeObserver(() => { if(!raf) raf = requestAnimationFrame(send); });
+    ['main','loader'].forEach(id => { const el = document.getElementById(id); if(el) ro.observe(el); });
+    send();
+}
+// Messages from the Home shell that holds this copy, and from nothing else.
+if(HOME_MODE) window.addEventListener('message', (e) => {
+    if(e.source !== window.parent || e.origin !== window.location.origin) return;
+    const d = e.data || {};
+    if(d.source !== 'home-shell') return;
+    if(d.type === 'homeViewport'){
+        document.documentElement.style.setProperty('--home-vis-top', `${Math.max(0, Number(d.top) || 0)}px`);
+        document.documentElement.style.setProperty('--home-vis-h', `${Math.max(120, Number(d.h) || 0)}px`);
+        return;
+    }
+    if(d.type === 'homeRefresh' && PAT){
+        // Home was opened again or left open: the queue and the brief are read again, the page is not reloaded.
+        apvRereadQueue(0);
+        loadCeoBriefs().then(() => renderCeoBrief()).catch(err => console.warn('CEO brief re-read failed', err));
+    }
+});
+
 async function start(){
     document.getElementById('loader').style.display='block';
     document.getElementById('authBar').style.display='none';
+    if(HOME_MODE) homeEmbedWatchHeight();
     try {
-        consumeAgentDeepLink();
+        if(!HOME_MODE) consumeAgentDeepLink();
         // Announce boot so a deep link requested while this iframe was
         // reloading gets re-delivered by the parent (agentsPageReady
         // handshake in js/shared.js).
         try {
-            if(window.parent && window.parent !== window){
+            // Not from the Home copy: the shell would hand it a link meant for the AI Agents tab and drop it.
+            if(!HOME_MODE && window.parent && window.parent !== window){
                 window.parent.postMessage({ type:'agentsPageReady' }, '*');
             }
         } catch(e){ /* standalone — no parent */ }
@@ -8254,10 +8343,14 @@ async function start(){
         renderAllZones();
         registerAgentsSyncBar();
         updateSyncStatus('ok');
+        if(HOME_MODE){
+            homeEmbedTell({ type:'agentsHomeReady', ok:true, waiting: allApprovals.length, brief: _ceoBriefState });
+        }
     } catch(e){
-        if(e.message==='auth') return;
+        if(e.message==='auth'){ if(HOME_MODE) homeEmbedTell({ type:'agentsHomeReady', ok:false, error:'sign-in needed' }); return; }
         document.getElementById('loader').textContent='Error loading data: '+e.message;
         updateSyncStatus('error', e.message);
+        if(HOME_MODE) homeEmbedTell({ type:'agentsHomeReady', ok:false, error:e.message });
     }
 }
 

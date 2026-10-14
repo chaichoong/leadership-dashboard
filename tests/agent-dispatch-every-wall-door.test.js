@@ -970,7 +970,7 @@ spec = importlib.util.spec_from_file_location('x', ${JSON.stringify(resolve(ROOT
 x = importlib.util.module_from_spec(spec); spec.loader.exec_module(x)
 print([p for p, d, w in x.RETIRED if d == "2026-10-07"][0].replace("(?i)", ""))`], { encoding: 'utf8' }).trim(), 'i');
     expect(pat.test('a fix to a protected file needs a Claude Code session')).toBe(true);   // control
-    for (const f of ['scripts/agent-dispatch.py', 'scripts/estate-status.py', 'js/home-list.js']) {
+    for (const f of ['scripts/agent-dispatch.py', 'scripts/estate-status.py']) {   // js/home-list.js removed with the Home task list, 14 Oct 2026
       expect(pat.test(readFileSync(resolve(ROOT, f), 'utf8')), f).toBe(false);
     }
     const r = py(`print(json.dumps(m.blocker_fix_text({"kind": "TOOL", "subject": "x", "finding": "20261001-agent-dispatch-901"})))`);
