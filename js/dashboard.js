@@ -1727,16 +1727,21 @@
             const dHas = (k) => p.defects[k] != null && typeof d[k] === 'number';
             const defectsRed = (Number(d.filed7d) || 0) > (Number(d.fixed7d) || 0);
             if (dHas('code') && dHas('notCode')) {
-                const refused = dHas('refusedUnread') ? d.refusedUnread : null;
+                // An overflow log the Mac could not read is said as "not read", never a count
+                // (review of PR #784): a number there would be a guess presented as a reading.
+                const refusedErr = (typeof p.defects.refusedError === 'string' && p.defects.refusedError)
+                    ? escHtml(p.defects.refusedError) : '';
+                const refused = !refusedErr && dHas('refusedUnread') ? d.refusedUnread : null;
                 cards.aiDefectsCard = aiTeamStale({
                     label: 'Defects', value: `${d.open} open`,
                     sub: `${d.code} code, ${d.notCode} not code`
-                        + (refused ? ` · ${refused} refused, unread` : '')
+                        + (refusedErr ? ' · refused: not read' : refused ? ` · ${refused} refused, unread` : '')
                         + ` · 7 days: ${d.filed7d} filed, ${d.fixed7d} fixed`,
-                    cls: defectsRed ? 'text-red' : refused ? 'text-amber' : 'text-green',
+                    cls: defectsRed ? 'text-red' : (refused || refusedErr) ? 'text-amber' : 'text-green',
                     detail: row('Code fixes waiting', d.code)
                         + row('Not code (belongs on the task board)', d.notCode)
-                        + (refused != null ? row('Refused by the cap, unread', refused) : '')
+                        + (refusedErr ? row('Refused by the cap', 'not read') + note(`The overflow log could not be read: ${refusedErr}`)
+                            : refused != null ? row('Refused by the cap, unread', refused) : '')
                         + row('Filed in 7 days', d.filed7d, 'margin-top:6px')
                         + row('Fixed in 7 days', d.fixed7d)
                         + (dHas('toTasks7d') ? row('Moved to tasks in 7 days', d.toTasks7d) : '')

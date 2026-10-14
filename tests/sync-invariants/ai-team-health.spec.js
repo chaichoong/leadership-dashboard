@@ -142,6 +142,18 @@ test.describe('AI Team section', () => {
     await routeEstate(page, [row, blockersRow()]);
     await page.evaluate(async () => await loadAiTeamHealth());
     expect((await card(page, 'aiDefectsCard')).cls).toContain('text-amber');
+
+    // An overflow log the Mac could not read says so, never a number (review of PR #784).
+    p.defects = { ...p.defects, refusedUnread: null, refused7d: null, refusedError: '[Errno 13] Permission denied' };
+    row.fields[ES.payload] = JSON.stringify(p);
+    await routeEstate(page, [row, blockersRow()]);
+    await page.evaluate(async () => await loadAiTeamHealth());
+    const notRead = await card(page, 'aiDefectsCard');
+    expect(notRead.sub).toBe('129 code, 38 not code · refused: not read · 7 days: 10 filed, 20 fixed');
+    expect(notRead.cls).toContain('text-amber');
+    const nd = await cardDetail(page, 'aiDefectsCard');
+    expect(nd.rows).toContainEqual(['Refused by the cap', 'not read']);
+    expect(nd.text).toContain('The overflow log could not be read: [Errno 13] Permission denied');
   });
 
   test('Agent Work leads with live work and lists every kind of open work (14 Oct 2026)', async ({ page }) => {

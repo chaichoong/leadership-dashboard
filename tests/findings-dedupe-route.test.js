@@ -9,8 +9,8 @@
 // counted (245 lines). Every test drives the real scripts/findings.py (CLI, or its functions with the
 // Airtable read replaced) and the real defect_counts in scripts/estate-status.py, on a scratch queue.
 import { describe, it, expect, beforeEach, afterAll } from 'vitest';
-import { execFileSync, spawnSync } from 'node:child_process';
-import { mkdtempSync, rmSync, readFileSync, writeFileSync } from 'node:fs';
+import { spawnSync } from 'node:child_process';
+import { mkdtempSync, mkdirSync, rmSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 
@@ -18,6 +18,16 @@ const ROOT = resolve(__dirname, '..');
 const FINDINGS = resolve(ROOT, 'scripts/findings.py');
 const BOX = mkdtempSync(join(tmpdir(), 'findings-dedupe-'));
 afterAll(() => rmSync(BOX, { recursive: true, force: true }));
+
+// The AI agents the cap recognises (review of PR #784): a fresh cache stands in for the Team
+// Members read, and an empty agents folder for ~/.claude/agents, so no test reaches Airtable.
+const AGENTS_CACHE = join(BOX, 'agents-cache.json');
+const AGENTS_DIR = join(BOX, 'agents');
+mkdirSync(AGENTS_DIR);
+for (const f of ['creditor-management.md', 'worker-builder.md', 'ESTATE.md']) writeFileSync(join(AGENTS_DIR, f), '# agent');
+writeFileSync(AGENTS_CACHE, JSON.stringify({ fetchedAt: new Date().toISOString().replace(/\.\d{3}Z$/, 'Z'),
+  names: ['AI Property Administration', 'AI Supplier and Creditor Manager', 'AI Cash Flow Voids', 'AI Task Board Manager'] }));
+const AGENT_ENV = { FINDINGS_AGENTS_CACHE: AGENTS_CACHE, FINDINGS_AGENTS_DIR: AGENTS_DIR };
 
 let store; let overflow; let n = 0;
 beforeEach(() => {
@@ -28,7 +38,7 @@ beforeEach(() => {
 
 function fnd(args, env = {}) {
   const r = spawnSync('python3', [FINDINGS, ...args], {
-    env: { ...process.env, FINDINGS_FILE: store, FINDINGS_OVERFLOW_FILE: overflow, FINDINGS_AGENT: '', ...env },
+    env: { ...process.env, FINDINGS_FILE: store, FINDINGS_OVERFLOW_FILE: overflow, FINDINGS_AGENT: '', ...AGENT_ENV, ...env },
     encoding: 'utf8',
   });
   return { code: r.status, out: r.stdout, err: r.stderr, both: `${r.stdout}${r.stderr}` };
@@ -55,6 +65,8 @@ function py(code, tasks = {}) {
 import importlib.util, json, os, sys
 os.environ["FINDINGS_FILE"] = ${JSON.stringify(store)}
 os.environ["FINDINGS_OVERFLOW_FILE"] = ${JSON.stringify(overflow)}
+os.environ["FINDINGS_AGENTS_CACHE"] = ${JSON.stringify(AGENTS_CACHE)}
+os.environ["FINDINGS_AGENTS_DIR"] = ${JSON.stringify(AGENTS_DIR)}
 spec = importlib.util.spec_from_file_location("fm", ${JSON.stringify(FINDINGS)})
 fm = importlib.util.module_from_spec(spec); spec.loader.exec_module(fm)
 TASKS = json.loads(${JSON.stringify(JSON.stringify(tasks))})
@@ -166,6 +178,63 @@ describe('a repeat is merged into the finding that survives it', () => {
   });
 });
 
+describe('review of PR #784: chains, explicit retags and named agents', () => {
+  it('a chain (A into B, B into C) lands on C; undoing the middle link hands A back to B', () => {
+    const a = add('first report'); const b = add('second report'); const c = add('third report');
+    expect(fnd(['dupe', a.id, '--of', b.id]).code).toBe(0);
+    expect(fnd(['dupe', b.id, '--of', c.id]).code).toBe(0);
+    expect(count()).toBe(1);
+    expect(byId(a.id).duplicate_root).toBe(c.id);
+    expect(byId(c.id).duplicates.sort()).toEqual([a.id, b.id].sort());
+    fnd(['close', c.id, '--outcome', 'pending', '--pr', '901', '--note', 'x']);
+    fnd(['land', '--pr', '901']);
+    expect(byId(a.id).status).toBe('fixed');              // the end of the chain closes the whole chain
+    fnd(['reopen', c.id, '--force', '--note', 'it came back']);
+    expect(fnd(['undupe', b.id, '--note', 'B stands alone']).code).toBe(0);
+    expect(byId(b.id).status).toBe('open');
+    expect(byId(a.id).duplicate_root).toBe(b.id);         // A still points at B
+    expect(byId(a.id).status).toBe('duplicate');
+    expect(byId(b.id).duplicates).toEqual([a.id]);
+    expect(byId(c.id).duplicates).toBeUndefined();
+    expect(count()).toBe(2);
+  });
+
+  it('retagging the survivor --not-code wins over a repeat that needs code', () => {
+    const s = add('an unmirrored skill file reddens every gate', '', { code: false });
+    const r = add('every gate is red right now', 'tests/x.test.js', { code: true });
+    fnd(['dupe', r.id, '--of', s.id]);
+    expect(byId(s.id).touches_code).toBe(true);           // the fold: a repeat needs code
+    expect(fnd(['retag', s.id, '--not-code', '--note', 'it is a sync step, not a code change']).code).toBe(0);
+    expect(byId(s.id).touches_code).toBe(false);          // the reader's word stands
+  });
+
+  it('an invented --agent name is no agent: 17 mediums under 17 made-up names hit the shared cap', () => {
+    const codes = [];
+    for (let i = 0; i < 17; i += 1) codes.push(add(`invented ${i}`, `i${i}.js`, { agent: `Totally Real Agent ${i}` }).code);
+    expect(codes.filter((x) => x === 0)).toHaveLength(15);
+    const last = add('invented 99', 'i99.js', { agent: 'Made Up' });
+    expect(last.err).toMatch(/is not an AI agent/);
+    expect(byId(listOpen()[0].id).agent).toBeUndefined(); // never stored as an agent
+  });
+
+  it('a known agent is named by its Team Members name or its agent file, never by a stray file', () => {
+    expect(add('a', 'a.js', { agent: 'creditor-management' }).code).toBe(0);
+    expect(byId(listOpen()[0].id).agent).toBe('creditor-management');
+    expect(add('b', 'b.js', { agent: 'ESTATE' }).err).toMatch(/is not an AI agent/);   // ESTATE.md is not an agent
+  });
+
+  it('the routine as a whole stops at three caps, whatever names its filers use', () => {
+    for (const agent of ['Property Administration', 'Cash Flow Voids', 'Task Board Manager']) {
+      for (let i = 0; i < 15; i += 1) expect(add(`${agent} ${i}`, `${agent.length}${i}.js`, { agent }).code).toBe(0);
+    }
+    expect(count()).toBe(45);
+    const over = add('a fourth agent, under its own cap', 'w.js', { agent: 'worker-builder' });
+    expect(over.code).toBe(2);
+    expect(over.err).toMatch(/its ceiling \(45\) whatever the agent/);
+    expect(add('production is down', 'live', { severity: 'high', agent: 'worker-builder' }).code).toBe(0);
+  });
+});
+
 describe('a matter no code fix can close goes to a task', () => {
   it('a not-code finding closes against the open task that carries it, and leaves the backlog', () => {
     const f = add('A house IS insured: the policy is not on the compliance book', '', { code: false });
@@ -217,13 +286,13 @@ describe('the cap counts each filer, and never throws a finding away unread', ()
     for (let i = 0; i < 15; i += 1) add(`property admin noise ${i}`, `p${i}.js`, { agent: 'Property Administration' });
     const over = add('one too many', 'z.js', { agent: 'property-administration' });   // the same agent, spelt differently
     expect(over.code).toBe(2);
-    expect(over.err).toMatch(/REFUSED: agent-dispatch \/ property-administration already has 15/);
+    expect(over.err).toMatch(/REFUSED: agent-dispatch \/ AI Property Administration already has 15/);
     expect(add('a creditor fault', 'c.js', { agent: 'Creditor Management' }).code).toBe(0);
     expect(add('an unnamed filing', 'u.js').code).toBe(0);                              // the unnamed pool is its own
     const viaEnv = fnd(['add', '--routine', 'agent-dispatch', '--title', 'by env', '--severity', 'low'],
       { FINDINGS_AGENT: 'Cash Flow Voids' });
     expect(viaEnv.code).toBe(0);
-    expect(byId(viaEnv.out.trim()).agent).toBe('Cash Flow Voids');
+    expect(byId(viaEnv.out.trim()).agent).toBe('AI Cash Flow Voids');
   });
 
   it('an unnamed filer at the cap is told to name itself, and the refusal carries a reference', () => {
@@ -268,6 +337,49 @@ describe('the cap counts each filer, and never throws a finding away unread', ()
     expect(target.seen).toBe(2);
     expect(target.recurrences[0].note).toMatch(/From the overflow log/);
   });
+
+  it('a refusal refused twice is one refusal, and sort reads a repeat of a CLOSED finding, citing it', () => {
+    const closed = add('old fault', 'old.js');
+    fnd(['close', closed.id, '--outcome', 'rejected', '--note', 'could not reproduce']);
+    const row = (t, w, ts) => ({ op: 'overflow', ts, routine: 'agent-dispatch', severity: 'medium', title: t, where: w,
+      key: `agent dispatch|${t}|${w.replace('.', ' ')}` });
+    writeFileSync(overflow, `${[row('same thing', 'x.js', '2026-10-01T00:00:00Z'), row('same thing', 'x.js', '2026-10-02T00:00:00Z'),
+      row('old fault', 'old.js', '2026-10-03T00:00:00Z')].map((r) => JSON.stringify(r)).join('\n')}\n`);
+    expect(fnd(['count', '--breakdown']).out).toMatch(/^REFUSED\s+2$/m);   // 3 lines, 2 refusals
+    const done = JSON.parse(fnd(['overflow', 'sort', '--apply']).out);
+    expect(done.repeatsClosed).toBe(1);
+    expect(fnd(['count', '--breakdown']).out).toMatch(/^REFUSED\s+1$/m);
+    const read = JSON.parse(fnd(['overflow', 'list', '--all', '--json']).out).find((r) => r.title === 'old fault').read;
+    expect(read).toEqual(expect.objectContaining({ outcome: 'repeats-closed', into: closed.id }));
+  });
+
+  it('fold: a reader\'s match into an open finding, a closed one, or another refused line', () => {
+    const open = add('Coverage check refuses a postal address', 'scripts/agent-dispatch.py');
+    const shut = add('verify rejects keep-open carry-outs', 'scripts/agent-dispatch.py verify');
+    fnd(['close', shut.id, '--outcome', 'rejected', '--note', 'fixed elsewhere']);
+    const lines = [
+      { op: 'overflow', ts: '2026-10-01T00:00:00Z', routine: 'agent-dispatch', severity: 'medium', title: 'Coverage gate reads the send-to address as a property', key: 'k1' },
+      { op: 'overflow', ts: '2026-10-02T00:00:00Z', routine: 'agent-dispatch', severity: 'medium', title: 'verify fails keep-open compliance renewals', key: 'k2' },
+      { op: 'overflow', ts: '2026-10-03T00:00:00Z', routine: 'agent-dispatch', severity: 'medium', title: 'a new one', key: 'k3' },
+      { op: 'overflow', ts: '2026-10-04T00:00:00Z', routine: 'agent-dispatch', severity: 'medium', title: 'a new one, again', key: 'k4' },
+    ];
+    writeFileSync(overflow, `${lines.map((r) => JSON.stringify(r)).join('\n')}\n`);
+    const refs = Object.fromEntries(JSON.parse(fnd(['overflow', 'list', '--json']).out).map((r) => [r.title, r._ref]));
+    expect(JSON.parse(fnd(['overflow', 'fold', refs['Coverage gate reads the send-to address as a property'], '--into', open.id]).out).outcome).toBe('recurrence');
+    expect(byId(open.id).seen).toBe(2);
+    expect(JSON.parse(fnd(['overflow', 'fold', refs['verify fails keep-open compliance renewals'], '--into', shut.id]).out))
+      .toEqual(expect.objectContaining({ outcome: 'repeats-closed', into: shut.id, status: 'rejected' }));
+    expect(fnd(['overflow', 'fold', refs['a new one, again'], '--into', refs['a new one, again']]).code).toBe(2);
+    expect(JSON.parse(fnd(['overflow', 'fold', refs['a new one, again'], '--into', refs['a new one']]).out).outcome).toBe('repeat-of-refusal');
+    // The survivor of a refused pair stays unread: it is still a refusal nobody has sorted.
+    expect(fnd(['count', '--breakdown']).out).toMatch(/^REFUSED\s+1$/m);
+  });
+
+  it('an overflow log that cannot be opened reads NOT READ, never a count', () => {
+    mkdirSync(overflow);
+    expect(fnd(['count', '--breakdown']).out).toMatch(/^REFUSED\s+NOT READ/m);
+    expect(fnd(['list']).out).toMatch(/OVERFLOW: NOT READ/);
+  });
 });
 
 describe('the Defects card counts what the queue is', () => {
@@ -288,14 +400,23 @@ state = {
   "f": {"status": "fixed", "duplicate_root": "e", "ts": d1},
   "g": {"status": "tasked", "ts": iso(NOW - timedelta(days=20)), "closed_at": d1},
 }
-overflow = [{"ts": d1, "read": None}, {"ts": iso(NOW - timedelta(days=30)), "read": None},
-            {"ts": d1, "read": {"outcome": "dismissed"}}]
-print(json.dumps(es.defect_counts(state, NOW, (), overflow)))
-print(json.dumps(es.defect_counts(state, NOW)))`);
-    const [withOverflow, without] = out.out.trim().split('\n').map((l) => JSON.parse(l));
+# Three refused lines: two are ONE refusal (the same key), one was sorted; plus an older one.
+rows = [{"ts": d1, "key": "k1", "read": None}, {"ts": d1, "key": "k1", "read": None},
+        {"ts": iso(NOW - timedelta(days=30)), "key": "k2", "read": None},
+        {"ts": d1, "key": "k3", "read": {"outcome": "dismissed"}}]
+print(json.dumps(es.defect_counts(state, NOW, (), es.refused_summary(fm, rows, NOW))))
+print(json.dumps(es.defect_counts(state, NOW)))
+# The real reader, pointed at a path it cannot open as a file.
+os.makedirs(os.environ["FINDINGS_OVERFLOW_FILE"] + ".d", exist_ok=True)
+fm.OVERFLOW = os.environ["FINDINGS_OVERFLOW_FILE"] + ".d"
+print(json.dumps(es.defect_counts(state, NOW, (), es.refused_summary(fm, fm.overflow_state([]), NOW))))`);
+    const [withOverflow, without, unreadable] = out.out.trim().split('\n').map((l) => JSON.parse(l));
     expect(withOverflow).toEqual({ open: 3, code: 2, notCode: 1, filed7d: 3, fixed7d: 1, repeats: 2,
-      toTasks7d: 1, refusedUnread: 2, refused7d: 2 });
+      toTasks7d: 1, refusedUnread: 2, refused7d: 2 });       // distinct refusals, not lines
     expect(without.refusedUnread).toBeUndefined();          // never a zero for a log nobody read
+    // A log that cannot be opened is "not read", never "1 refused" (review of PR #784).
+    expect(unreadable.refusedUnread).toBeNull();
+    expect(unreadable.refusedError).toMatch(/Is a directory|directory/i);
   });
 
   it('a cache written before the new shape is not served after the change ships', () => {

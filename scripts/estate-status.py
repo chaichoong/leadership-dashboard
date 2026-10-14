@@ -900,7 +900,7 @@ def loop_health_row(now, res=None, err=None):
 AI_TEAM_KEY = "ai-team-health"
 AI_TEAM_CACHE = os.path.join(LOGS, "ai-team-health-cache.json")
 AI_TEAM_CACHE_MIN = 60
-AI_TEAM_CACHE_SHAPE = 2    # 14 Oct 2026: defects carry code / notCode / repeats / refusedUnread
+AI_TEAM_CACHE_SHAPE = 3    # 14 Oct 2026: defects carry code / notCode / repeats / refusedUnread (distinct)
 REWORK_DAYS = 14
 REWORK_BASELINE_PCT = 32   # 36 of 111 fixes, 30 days to 28 Sep 2026 (rework-rate.py)
 
@@ -924,7 +924,7 @@ def fixed_times(ops):
     return out
 
 
-def defect_counts(state, now, ops=(), overflow=None):
+def defect_counts(state, now, ops=(), refused=None):
     """The defect queue from findings.py's folded state: open now (its BACKLOG), filed and
     fixed in the last 7 days. A rejected finding carries no close time, so it is not
     counted as out; fixed means landed in a merged PR or closed against a commit.
@@ -948,10 +948,22 @@ def defect_counts(state, now, ops=(), overflow=None):
            "repeats": sum(1 for _, f in items if repeat(f)),
            "toTasks7d": sum(1 for _, f in items if f.get("status") == "tasked" and not repeat(f)
                             and _within(f.get("closed_at"), now, 7))}
-    if overflow is not None:
-        out["refusedUnread"] = sum(1 for r in overflow if not r.get("read"))
-        out["refused7d"] = sum(1 for r in overflow if _within(r.get("ts"), now, 7))
+    # REFUSED is findings.py's own count (refused_unread: distinct refusals, the same problem
+    # refused twice is one), passed in as {"unread", "error", "last7d"}. A log that could not be
+    # read is said as such: unread None plus the error, never a number (review of PR #784).
+    if refused is not None:
+        out["refusedUnread"] = None if refused.get("error") else refused.get("unread")
+        out["refused7d"] = None if refused.get("error") else refused.get("last7d")
+        if refused.get("error"):
+            out["refusedError"] = str(refused["error"])[:160]
     return out
+
+
+def refused_summary(fm, rows, now):
+    """The overflow log as defect_counts takes it, through findings.py's own helpers."""
+    unread, err = fm.refused_unread(rows)
+    last7d = None if err else len({fm.refusal_key(r) for r in rows if _within(r.get("ts"), now, 7)})
+    return {"unread": unread, "error": err, "last7d": last7d}
 
 
 def rework_counts(r):
@@ -967,7 +979,7 @@ def _measure_defects_and_rework(now):
     fm = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(fm)
     ops = fm.read_all()
-    defects = defect_counts(fm.current_state(), now, ops, fm.overflow_state(ops))
+    defects = defect_counts(fm.current_state(), now, ops, refused_summary(fm, fm.overflow_state(ops), now))
     # --no-fetch: this job is lock-exempt because it never touches the repo, so it reads
     # origin/main as the other jobs last fetched it (review finding, 9 Oct 2026).
     out = subprocess.run([sys.executable, os.path.join(HERE, "rework-rate.py"), "--days", str(REWORK_DAYS),
@@ -1041,7 +1053,9 @@ def ai_team_row(now, lh_res, lh_err, measures=None):
     # The split and the refusals arrived on 14 Oct 2026; a measure without them reads as before.
     split = ("" if defects.get("code") is None else
              " (%d code, %d not code)" % (defects["code"], defects.get("notCode") or 0))
-    refused = ("" if defects.get("refusedUnread") is None else
+    refused = (", the cap's overflow log could not be read (%s)" % defects["refusedError"]
+               if defects.get("refusedError") else
+               "" if defects.get("refusedUnread") is None else
                ", %d refused by the cap and unread" % defects["refusedUnread"])
     detail = ("Agent work: %s, %s, %d in and %d done in 7 days. Defects: %d open%s%s, %d filed and "
               "%d fixed in 7 days. Fix of a fix: %s over %d days (baseline %d%%)." % (

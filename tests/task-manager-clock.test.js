@@ -42,7 +42,7 @@ function liveOf(t) {
     [TF.maintenance]: f['Maintenance Ticket'] || false };
 }
 
-function clock({ walls = [], tasks = [], live = {}, runs = {}, apply = true, findingsError = '' }) {
+function clock({ walls = [], tasks = [], live = {}, runs = {}, apply = true, findingsError = '', env = null }) {
   const input = { walls: { openTasksRead: 1, open: walls, findingsError }, recs: tasks,
     live: Object.fromEntries(tasks.map((t) => [t.id, { ...liveOf(t), ...(live[t.id] || {}) }])),
     runs, apply, now: NOW };
@@ -66,7 +66,7 @@ m.clock_get, m.clock_patch, m.clock_run = get, patch, run
 d = m._load_dispatch()
 res = m.run_clock(a["walls"], a["recs"], datetime.fromisoformat(a["now"]), set(), d, apply=a["apply"])
 print("---JSON---"); print(json.dumps({"res": res, "patches": patches, "calls": calls, "md": m.clock_markdown(res)}))
-`], { input: JSON.stringify(input), encoding: 'utf8' });
+`], { input: JSON.stringify(input), encoding: 'utf8', ...(env ? { env: { ...process.env, ...env } } : {}) });
   return JSON.parse(out.split('---JSON---')[1]);
 }
 const dec = (r, id) => r.res.decisions.find((x) => x.task === id);
@@ -274,6 +274,31 @@ describe('TOOL walls: past 3 days with the finding unclaimed, the finding goes c
     const r = clock({ walls: [{ task: 'recT3', kind: 'TOOL', subject: 'uploader', finding: '', findingStatus: '' }], tasks: [t] });
     expect(r.calls).toHaveLength(0);
     expect(dec(r, 'recT3').why).toMatch(/no finding is named/);
+  });
+  it('a wall citing a merged repeat runs its clock on the survivor (review of PR #784)', () => {
+    // The blocker sweep reports a merged repeat as "duplicate"; before this the clock read that as
+    // "not unclaimed" and the wall lost its 3-day clock for good. findings.py survivor_status decides.
+    const qdir = fs.mkdtempSync(path.join(os.tmpdir(), 'clock-dupe-'));
+    const env = { FINDINGS_FILE: path.join(qdir, 'q.jsonl'), FINDINGS_OVERFLOW_FILE: path.join(qdir, 'o.jsonl'), FINDINGS_AGENT: '' };
+    const fp = (...args) => execFileSync('python3', [path.join(root, 'scripts/findings.py'), ...args],
+      { env: { ...process.env, ...env }, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim().split('\n')[0];
+    const survivor = fp('add', '--routine', 'agent-dispatch', '--title', 'uploader broken', '--where', 'scripts/up.py', '--touches-code');
+    const repeat = fp('add', '--routine', 'task-manager-board', '--title', 'Agent blocked: uploader', '--where', '', '--severity', 'high');
+    fp('dupe', repeat, '--of', survivor, '--note', 'one problem');
+    const t = task('recT9', { name: 'Fix the uploader', notes: wall('TOOL', 'uploader', daysAgo(5), ` [finding ${repeat}]`),
+      extra: { 'Team Member': [AGENT] } });
+    const r = clock({ walls: [{ task: 'recT9', kind: 'TOOL', subject: 'uploader', finding: repeat, findingStatus: 'duplicate' }],
+      tasks: [t], env, runs: { 'findings.py': [0, `{"id": "${survivor}", "severity": "critical", "changed": true}`] } });
+    expect(r.calls).toHaveLength(1);
+    expect(r.calls[0].slice(0, 2)).toEqual(['escalate', survivor]);
+    expect(dec(r, 'recT9').cited).toBe(repeat);
+    expect(r.patches[0].fields[TF.notes]).toMatch(new RegExp(`The wall cites ${repeat}, a repeat merged into it`));
+    // A repeat whose survivor is being worked stays the fixer's: nothing raised.
+    fp('claim', survivor, '--by', 'queue-fixer');
+    const again = clock({ walls: [{ task: 'recT9', kind: 'TOOL', subject: 'uploader', finding: repeat, findingStatus: 'duplicate' }],
+      tasks: [task('recT9', { name: 'Fix the uploader', notes: wall('TOOL', 'uploader', daysAgo(5), ` [finding ${repeat}]`) })], env });
+    expect(again.calls).toHaveLength(0);
+    expect(dec(again, 'recT9').why).toMatch(/claimed/);
   });
   it('a findings queue that could not be read is said, never read as "not in the queue"', () => {
     const r = clock({ walls: [row('recT4', '')], tasks: [tool('recT4', daysAgo(5))], findingsError: 'disk gone' });

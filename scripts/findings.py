@@ -25,6 +25,7 @@ Usage
     findings.py retag <id> --code|--not-code --note "..."   # correct the filer's guess
     findings.py escalate <id> --severity critical --why "..." [--by task-manager]
     findings.py overflow list|sort [--apply]|promote <ref>|dismiss <ref> --note "..."
+    findings.py overflow fold <ref> --into <finding id | ofl- ref>   # a reader's match
     findings.py count                 # the BACKLOG: open + claimed + pending
     findings.py count --status all    # every finding ever filed
     findings.py count --breakdown     # every status, labelled
@@ -115,7 +116,20 @@ TASK_ID_RE = re.compile(r"^rec[A-Za-z0-9]{14}$")
 DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 AIRTABLE_BASE = "appnqjDpqDniH3IRl"
 TASKS_TABLE = "tblqB8b22hKBL4PF1"
+TEAM_TABLE = "Team Members"
 PAT_FILE = os.path.expanduser("~/.config/od/airtable_pat")
+
+# A NAME IS NOT AN AGENT (review of PR #784, 14 Oct 2026). With the cap per agent, 17
+# mediums under one routine with 17 invented --agent names were all accepted. So a name
+# counts as an agent only when it is one: a Team Members row with Is AI Agent ticked
+# (read at most once a day, cached), or an agent definition file in ~/.claude/agents.
+# Anything else is no agent, counted in the routine's shared pool. And whatever the
+# names, one routine never holds more than ROUTINE_CEILING open below high.
+ROUTINE_CEILING = 3 * MAX_OPEN_PER_ROUTINE
+AGENTS_CACHE = os.environ.get(
+    "FINDINGS_AGENTS_CACHE", os.path.join(HOME, "knowledge-os/logs/findings-agents-cache.json"))
+AGENTS_DIR = os.environ.get("FINDINGS_AGENTS_DIR", os.path.join(HOME, ".claude/agents"))
+AGENTS_CACHE_HOURS = 24
 
 # ─── A CLAIM THAT OUTLIVES ITS RUN ───────────────────────────────────
 #
@@ -170,9 +184,82 @@ def today_str():
 
 
 def norm_agent(agent):
-    """An agent's name as the cap keys it: 'Property Administration' and
-    'property-administration' are one filer."""
-    return re.sub(r"[^a-z0-9]", "", (agent or "").lower())
+    """An agent's name as the cap keys it: 'Property Administration',
+    'property-administration' and 'AI Property Administration' are one filer."""
+    n = re.sub(r"[^a-z0-9]", "", (agent or "").lower())
+    return n[2:] if n.startswith("ai") and len(n) > 2 else n
+
+
+def _team_agent_names():
+    """Names of the Team Members rows with Is AI Agent ticked, paginated. Raises on a bad read."""
+    with open(PAT_FILE) as fh:
+        pat = fh.read().strip()
+    names, offset = [], None
+    while True:
+        q = [("filterByFormula", "{Is AI Agent}"), ("fields[]", "Name"), ("pageSize", "100")]
+        if offset:
+            q.append(("offset", offset))
+        req = urllib.request.Request("https://api.airtable.com/v0/%s/%s?%s" % (
+            AIRTABLE_BASE, urllib.parse.quote(TEAM_TABLE), urllib.parse.urlencode(q)),
+            headers={"Authorization": "Bearer " + pat})
+        with urllib.request.urlopen(req, timeout=30) as r:
+            d = json.load(r)
+        names += [(x.get("fields") or {}).get("Name") or "" for x in d.get("records") or []]
+        offset = d.get("offset")
+        if not offset:
+            break
+    if not any(names):
+        # Zero AI agents means the read broke, never an estate with no agents.
+        raise RuntimeError("the Team Members read returned no AI agents")
+    return [n for n in names if n]
+
+
+def known_agents(now=None):
+    """(normalised name -> display name, problem). The Team Members list comes from a cache
+    refreshed at most once a day; a failed refresh keeps the last good list and says so."""
+    now = now or datetime.utcnow()
+    out, problem, cached = {}, "", None
+    try:
+        with open(AGENTS_CACHE) as fh:
+            cached = json.load(fh)
+    except (OSError, ValueError):
+        cached = None
+    age = age_hours((cached or {}).get("fetchedAt"), now) if cached else None
+    names = (cached or {}).get("names") or []
+    if age is None or age >= AGENTS_CACHE_HOURS:
+        try:
+            names = _team_agent_names()
+            tmp = AGENTS_CACHE + ".tmp"
+            os.makedirs(os.path.dirname(AGENTS_CACHE), exist_ok=True)
+            with open(tmp, "w") as fh:
+                json.dump({"fetchedAt": now.strftime("%Y-%m-%dT%H:%M:%SZ"), "names": names}, fh)
+            os.replace(tmp, AGENTS_CACHE)
+        except Exception as e:  # noqa: BLE001 — said, and the last good list is kept
+            problem = "the AI agent list could not be refreshed (%s)%s" % (
+                str(e)[:120], "; using the cached list" if names else "")
+    for n in names:
+        out[norm_agent(n)] = n
+    try:
+        for f in os.listdir(AGENTS_DIR):
+            if f.endswith(".md") and f[:-3] == f[:-3].lower():
+                out.setdefault(norm_agent(f[:-3]), f[:-3])
+    except OSError:
+        pass
+    out.pop("", None)
+    return out, problem
+
+
+def resolve_agent(agent):
+    """(the agent's display name or '', a note). An unknown name is no agent."""
+    agent = (agent or "").strip()
+    if not agent:
+        return "", ""
+    known, problem = known_agents()
+    hit = known.get(norm_agent(agent))
+    if hit:
+        return hit, problem
+    return "", ("%r is not an AI agent on the Team Members list or in ~/.claude/agents, so this is "
+                "counted in the routine's shared pool.%s" % (agent, (" " + problem) if problem else ""))
 
 
 def current_state(today=None):
@@ -207,6 +294,7 @@ def current_state(today=None):
                 # The Defects card splits on it, so a wrong flag is a wrong card.
                 state[fid]["touches_code"] = bool(rec.get("touches_code"))
                 state[fid]["retag_note"] = rec.get("note")
+                state[fid]["retagged"] = True
             elif rec.get("op") == "claim":
                 state[fid]["status"] = "claimed"
                 state[fid]["claimed_by"] = rec.get("by")
@@ -297,6 +385,20 @@ def duplicate_root(state, fid, limit=50):
     return None
 
 
+def survivor_status(state, fid):
+    """(id, status) a wall citing FID is judged by: FID itself, or for a merged repeat the
+    survivor it points at, whatever that survivor's state. ('', '') for an unknown id.
+    THE one place this is decided (review of PR #784): the Task Board Manager's clock reads
+    it, and agent-dispatch.py's finding_states should read it too once PR #780 lands."""
+    r = state.get(fid)
+    if not r:
+        return "", ""
+    root = r.get("duplicate_root")
+    if root and root in state:
+        return root, state[root].get("status", "")
+    return fid, r.get("status", "")
+
+
 def _fold_duplicates(state):
     """Give each repeat its survivor's standing and each survivor its repeats'
     evidence. Done after every op is folded, so `undupe` needs no undo: drop
@@ -318,8 +420,12 @@ def _fold_duplicates(state):
         if (new_sev in SEVERITIES and (old_sev not in SEVERITIES
                                        or SEVERITIES.index(new_sev) < SEVERITIES.index(old_sev))):
             rr["severity"] = new_sev
-        # A repeat that needs code makes the problem a code problem.
-        rr["touches_code"] = bool(rr.get("touches_code") or r.get("touches_code"))
+        # A repeat that needs code makes the problem a code problem, unless a reader has
+        # retagged the survivor itself: an explicit decision on the problem beats a
+        # filer's guess on one of its reports (review of PR #784, finding 868 read as
+        # code because its repeat 873 did).
+        if not rr.get("retagged"):
+            rr["touches_code"] = bool(rr.get("touches_code") or r.get("touches_code"))
         words = " ".join(x for x in (
             "Repeat %s (%s, %s): %s" % (fid, r.get("routine") or "?", (r.get("ts") or "?")[:10], r.get("title") or ""),
             ("Where: %s" % r["where"]) if r.get("where") else "",
@@ -521,10 +627,13 @@ def file_finding(state, f, cap=True):
               file=sys.stderr)
         return 0, tid
 
-    # 2. Cap the FILER's own open queue. Critical and high are never refused.
+    # 2. Cap the FILER's own open queue, and the routine as a whole. Critical and
+    #    high are never refused.
     if cap and f["severity"] not in ALWAYS_ACCEPT:
         mine = open_findings_for(state, f["routine"], f.get("agent"))
-        if len(mine) >= MAX_OPEN_PER_ROUTINE:
+        lane = [r for r in state.values()
+                if r.get("routine") == f["routine"] and r.get("status") in OPEN_STATES]
+        if len(mine) >= MAX_OPEN_PER_ROUTINE or len(lane) >= ROUTINE_CEILING:
             rec = {"op": "overflow", "ts": iso(), "routine": f["routine"],
                    "severity": f["severity"], "title": f["title"], "where": f["where"],
                    "detail": f["detail"], "proposed_fix": f["fix"],
@@ -537,12 +646,18 @@ def file_finding(state, f, cap=True):
                 fh.write(line + "\n")
             ref = overflow_ref(line)
             who = f["routine"] + (" / " + f["agent"] if f.get("agent") else "")
+            if len(mine) >= MAX_OPEN_PER_ROUTINE:
+                print("REFUSED: %s already has %d open findings (cap %d)."
+                      % (who, len(mine), MAX_OPEN_PER_ROUTINE), file=sys.stderr)
+            else:
+                # The filer is under its own cap; the routine as a whole is full.
+                mine = lane
+                print("REFUSED: the routine %s holds %d open findings, its ceiling (%d) whatever "
+                      "the agent." % (f["routine"], len(lane), ROUTINE_CEILING), file=sys.stderr)
             oldest = sorted(mine, key=lambda r: r["ts"])[:3]
-            print("REFUSED: %s already has %d open findings (cap %d)."
-                  % (who, len(mine), MAX_OPEN_PER_ROUTINE), file=sys.stderr)
             print("Kept in %s as %s — nothing is lost, and the Defects card counts it as "
                   "refused and unread until someone sorts it." % (OVERFLOW, ref), file=sys.stderr)
-            if not f.get("agent"):
+            if not f.get("agent") and len(lane) < ROUTINE_CEILING:
                 print("If you are an AI agent filing under a shared routine, file again with "
                       "--agent \"<your name>\": the cap then counts your own findings, not the "
                       "whole lane's.", file=sys.stderr)
@@ -576,9 +691,11 @@ def file_finding(state, f, cap=True):
 
 
 def cmd_add(a):
+    agent, note = resolve_agent(a.agent)
+    if note:
+        print("NOTE: " + note, file=sys.stderr)
     f = {"routine": a.routine, "title": a.title, "where": a.where, "detail": a.detail,
-         "fix": a.fix, "severity": a.severity, "touches_code": a.touches_code,
-         "agent": (a.agent or "").strip()}
+         "fix": a.fix, "severity": a.severity, "touches_code": a.touches_code, "agent": agent}
     rc, _ = file_finding(current_state(), f)
     return rc
 
@@ -620,14 +737,31 @@ def overflow_rows():
     except FileNotFoundError:
         return []
     except OSError as e:
+        # `_error` marks the whole log unreadable: a reader must say "not read", never count
+        # this placeholder as one refusal (review of PR #784).
         return [{"ts": "?", "routine": "?", "severity": "?", "_ref": "ofl-unreadable",
-                 "title": "overflow log unreadable: %s" % e}]
+                 "_error": str(e)[:200], "title": "overflow log unreadable: %s" % e}]
     return rows
 
 
 def overflow_ref(line):
     """A stable name for one overflow line: the same line always gets the same ref."""
     return "ofl-" + hashlib.sha1(line.strip().encode("utf-8")).hexdigest()[:10]
+
+
+def refusal_key(row):
+    """What makes two refused lines ONE refusal: the dedupe key `add` wrote on the line
+    (the same routine, words and place refused twice is one problem), or the line itself."""
+    return row.get("key") or row.get("_ref")
+
+
+def refused_unread(rows):
+    """(distinct refusals nobody has sorted, the read error or ''). Never a number for a
+    log that could not be read."""
+    err = next((r["_error"] for r in rows if r.get("_error")), "")
+    if err:
+        return None, err
+    return len({refusal_key(r) for r in rows if not r.get("read")}), ""
 
 
 def overflow_reads(ops=None):
@@ -650,13 +784,19 @@ def overflow_state(ops=None):
 
 def print_overflow(stream):
     rows = overflow_state()
+    n, err = refused_unread(rows)
+    if err:
+        print("", file=stream)
+        print("OVERFLOW: NOT READ — %s could not be opened (%s). Refusals may be waiting there."
+              % (OVERFLOW, err), file=stream)
+        return
     unread = [r for r in rows if not r.get("read")]
     if not unread:
         return
     oldest = min((r.get("ts") or "?") for r in unread)
     print("", file=stream)
-    print("OVERFLOW: %d finding(s) the cap refused and nobody has sorted, oldest %s, in %s "
-          "(%d sorted already)." % (len(unread), oldest, OVERFLOW, len(rows) - len(unread)),
+    print("OVERFLOW: %d finding(s) the cap refused and nobody has sorted (%d lines), oldest %s, "
+          "in %s (%d lines sorted already)." % (n, len(unread), oldest, OVERFLOW, len(rows) - len(unread)),
           file=stream)
     print("These are NOT in the queue above. `findings.py overflow list` names each one;"
           " oldest five:", file=stream)
@@ -1118,7 +1258,8 @@ def cmd_count(a):
         print("%-9s %d" % ("BACKLOG", sum(1 for r in state.values()
                                           if r["status"] in OPEN_STATES)))
         print("%-9s %d" % ("TOTAL", len(state)))
-        print("%-9s %d" % ("REFUSED", sum(1 for r in overflow_state() if not r.get("read"))))
+        n, err = refused_unread(overflow_state())
+        print("%-9s %s" % ("REFUSED", n if err == "" else "NOT READ (%s)" % err))
         return 0
     if a.status == "all":
         print(len(state))
@@ -1148,6 +1289,15 @@ def overflow_match(state, row):
 def _mark_read(ref, outcome, into, by, note):
     append({"op": "overflow-read", "ref": ref, "ts": iso(), "outcome": outcome,
             "into": into or "", "by": by or "", "note": note or ""})
+
+
+def _fold_into_finding(row, fid, by, why):
+    """A refused row is evidence about an open finding: record it there, then mark it read."""
+    append({"op": "recur", "id": fid, "ts": iso(), "severity": row.get("severity"),
+            "note": "From the overflow log (%s, refused %s): %s %s" % (
+                row.get("_ref"), (row.get("ts") or "?")[:10], row.get("title") or "", row.get("detail") or ""),
+            "fix": row.get("proposed_fix") or ""})
+    _mark_read(row["_ref"], "recurrence", fid, by, why)
 
 
 def _overflow_row(ref):
@@ -1191,11 +1341,12 @@ def cmd_overflow(a):
                                              "agent": r.get("agent"), "title": r.get("title")}) + "\n")
         if a.apply:
             for r, fid in verdicts["recurrence"]:
-                append({"op": "recur", "id": fid, "ts": iso(), "severity": r.get("severity"),
-                        "note": "From the overflow log (%s, refused %s): %s %s" % (
-                            r.get("_ref"), (r.get("ts") or "?")[:10], r.get("title") or "", r.get("detail") or ""),
-                        "fix": r.get("proposed_fix") or ""})
-                _mark_read(r["_ref"], "recurrence", fid, a.by, "folded into the open finding it repeats")
+                _fold_into_finding(r, fid, a.by, "folded into the open finding it repeats")
+            for r, fid in verdicts["closed"]:
+                # Read, citing the closed finding it repeats (review of PR #784): left unread it
+                # would count as a refusal nobody sorted, for ever.
+                _mark_read(r["_ref"], "repeats-closed", fid, a.by,
+                           "repeats %s, closed as %s" % (fid, state[fid].get("status")))
         print(json.dumps({"unread": len(unread), "recurrence": len(verdicts["recurrence"]),
                           "repeatsClosed": len(verdicts["closed"]), "new": len(verdicts["new"]),
                           "applied": bool(a.apply)}))
@@ -1218,6 +1369,36 @@ def cmd_overflow(a):
             return 2
         _mark_read(a.ref, "dismissed", "", a.by, a.note)
         print("dismissed %s" % a.ref)
+        return 0
+    if a.action == "fold":
+        # A reader's match, where the mechanical rules in `sort` cannot see one (the same
+        # problem in other words). Into an open finding: recorded there as a recurrence. Into
+        # a closed one: read, citing it. Into another refused line: read, pointing at it, and
+        # that line stays unread until it is sorted itself.
+        into = (a.into or "").strip()
+        if not into:
+            print("REFUSED: fold needs --into <finding id or ofl- ref>", file=sys.stderr)
+            return 2
+        if into.startswith("ofl-"):
+            if into == a.ref or _overflow_row(into) is None:
+                print("REFUSED: %s is not another refused line" % into, file=sys.stderr)
+                return 2
+            _mark_read(a.ref, "repeat-of-refusal", into, a.by, a.note or "the same problem as %s" % into)
+            print(json.dumps({"ref": a.ref, "outcome": "repeat-of-refusal", "into": into}))
+            return 0
+        state = current_state()
+        if into not in state:
+            print("ERROR: no finding %s" % into, file=sys.stderr)
+            return 1
+        tid = live_target(state, state[into])
+        if tid:
+            _fold_into_finding(row, tid, a.by, a.note or "folded into the open finding it repeats")
+            print(json.dumps({"ref": a.ref, "outcome": "recurrence", "into": tid}))
+            return 0
+        target, status = survivor_status(state, into)
+        _mark_read(a.ref, "repeats-closed", target, a.by,
+                   a.note or "repeats %s, closed as %s" % (target, status))
+        print(json.dumps({"ref": a.ref, "outcome": "repeats-closed", "into": target, "status": status}))
         return 0
     # promote: a reader decided this one is worth the queue, so the cap that
     # refused it does not get a second say. The dedupe still does.
@@ -1276,8 +1457,9 @@ def main(argv=None):
     sp.set_defaults(fn=cmd_retag)
 
     sp = sub.add_parser("overflow", help="read what the cap refused")
-    sp.add_argument("action", choices=["list", "sort", "promote", "dismiss"])
+    sp.add_argument("action", choices=["list", "sort", "promote", "dismiss", "fold"])
     sp.add_argument("ref", nargs="?")
+    sp.add_argument("--into", default="", help="fold: the finding id (open or closed) or the ofl- ref it repeats")
     sp.add_argument("--all", action="store_true", help="list: include rows already sorted")
     sp.add_argument("--json", action="store_true")
     sp.add_argument("--apply", action="store_true",
