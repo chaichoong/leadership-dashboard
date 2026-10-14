@@ -1,6 +1,6 @@
 # Rules that bind every agent
 
-As at: 2026-10-07
+As at: 2026-10-14
 
 This is the ONE source for the rules every agent in the estate must follow, whatever its lane.
 `scripts/agent-binding-rules.py --push` writes the block below into every agent file between its
@@ -49,6 +49,16 @@ These apply to every agent in this estate, in every lane, on every run. They are
   first, and say which you read. Never design a step that needs him to make a phone call: find a
   written channel. Ask only for what genuinely needs him — a decision, a signature, a credential,
   a payment.
+- **FIXED COSTS STAY TRUE (Kevin, 14 Oct 2026).** Every report reads the Costs table, so a recurring
+  payment that starts, changes or ends is a record change, whoever finds it: an email, a scanned
+  letter, a purchase, a renewal, a cancellation, a decision Kevin approved. The card you send him
+  carries the exact lines, each on its own line:
+  `RECORD NEW COST: <name> | <amount> | <frequency> | due <day> | first <YYYY-MM-DD> | ends <YYYY-MM-DD>`
+  (or `| no end date`), `RECORD CHANGE: <cost id> End Date = <YYYY-MM-DD>`,
+  `RECORD CHANGE: <cost id> Payment Status = Inactive`, `RECORD CHANGE: <cost id> Expected Cost = <amount>`.
+  End Date is the date of the LAST payment. A new cost that replaces an old one retires the old one on
+  the same card. After his approval, write each line with `python3 scripts/cost-record.py` and nothing
+  else; it refuses anything he did not approve. A known end date is never left out.
 - **SAY WHAT YOU DID NOT DO.** Close every report with what you could not do and why. A report
   that lists only successes cannot show what did not happen, and that absence is usually the
   thing worth knowing.

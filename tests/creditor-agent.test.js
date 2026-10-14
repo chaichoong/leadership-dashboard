@@ -210,7 +210,7 @@ describe('register metrics (Kevin\'s two, 25 Aug 2026)', () => {
     // The steps are a table now — assert its CONTENT through the module, so
     // a new agent's build session adds an entry and this stays true.
     expect(pyEval('[label for label, fn in mod.SCORE_STEPS]'))
-      .toEqual(['response', 'creditor', 'weekly-review', 'monthly-review',
+      .toEqual(['response', 'creditor', 'weekly-review', 'monthly-review', 'ended-costs',
                 'chase', 'property', 'renewals', 'paid-filings', 'roy-followups', 'quarterly-review']);
     expect(score).toMatch(/for label, fn in SCORE_STEPS/);
     expect(score).toMatch(/sys\.exit\("ERROR: score failed/);
