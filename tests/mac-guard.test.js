@@ -1,7 +1,10 @@
-import { describe, it, expect } from 'vitest';
-import { readFileSync } from 'fs';
+import { describe, it, expect, beforeAll, afterAll } from 'vitest';
+import {
+  readFileSync, mkdtempSync, mkdirSync, writeFileSync, chmodSync, statSync, realpathSync, rmSync,
+} from 'fs';
 import { execFileSync } from 'child_process';
-import { resolve, dirname } from 'path';
+import { tmpdir } from 'os';
+import { resolve, dirname, join } from 'path';
 import { fileURLToPath } from 'url';
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
@@ -109,13 +112,65 @@ describe('mac-guard: kill rules', () => {
 });
 
 describe('mac-guard: dry run changes nothing', () => {
+  // The credential step scans ~/knowledge-os by content. Against the real home that is
+  // 13,786 files and 1.7 GB read: 11.5s of an 11.8s dry run at load 2, past the 30s test
+  // timeout at load 30-58, which failed merge-pr.py twice for an unrelated PR (14 Oct 2026).
+  // So HOME points at a fake one, as tests/secret-copy-guard.test.js does. The real guard
+  // still runs end to end, and a planted world-readable copy proves the dry run looked,
+  // reported it, left its mode alone and still exited clean.
+  const token = 'patPLANTEDtoken0123456789abcdefGHIJ';
+  let home;
+  let leak;
+  beforeAll(() => {
+    // realpath: the guard prints resolved paths, and macOS tmpdir sits behind /var -> /private/var.
+    home = realpathSync(mkdtempSync(join(tmpdir(), 'mg-home-')));
+    const cfg = join(home, '.config', 'od');
+    const scratch = join(home, 'knowledge-os', 'logs', 'some-agent', 'scratch');
+    mkdirSync(cfg, { recursive: true });
+    mkdirSync(scratch, { recursive: true });
+    writeFileSync(join(cfg, 'airtable_pat'), token + '\n');
+    leak = join(scratch, '.airtable_pat');
+    writeFileSync(leak, token + '\n');
+    chmodSync(leak, 0o644);
+  });
+  afterAll(() => home && rmSync(home, { recursive: true, force: true }));
+
+  // The fake home only keeps the test fast while every place the guard reads hangs off HOME.
+  // A root added as an absolute path would put the real tree, and the timeout, straight back.
+  it('reads secrets and scans only under HOME', () => {
+    const py = [
+      'import importlib.util, json, os, sys',
+      'spec = importlib.util.spec_from_file_location("guard", sys.argv[1])',
+      'g = importlib.util.module_from_spec(spec)',
+      'spec.loader.exec_module(g)',
+      'print(json.dumps([os.path.realpath(os.path.expanduser(p)) for p in (g.CONFIG_DIR, *g.SEARCH_ROOTS)]))',
+    ].join('\n');
+    const places = JSON.parse(
+      execFileSync('python3', ['-c', py, resolve(ROOT, 'scripts/secret-copy-guard.py')], {
+        encoding: 'utf8',
+        env: { ...process.env, HOME: home },
+      })
+    );
+    expect(places.length).toBeGreaterThan(1);
+    for (const p of places) expect(p === home || p.startsWith(home + '/'), `${p} is outside HOME`).toBe(true);
+  });
+
   it('reports without killing and exits clean', () => {
+    const started = Date.now();
     const out = execFileSync('bash', [resolve(ROOT, GUARD), '--dry-run'], {
       encoding: 'utf8',
+      env: { ...process.env, HOME: home },
     });
+    const elapsed = Date.now() - started;
     expect(out).toMatch(/mac-guard done: \d+ reaped/);
-    expect(out).toMatch(/reaped/);
     expect(out).not.toMatch(/^\s+KILLED/m);
     expect(out).toMatch(/dry run/);
+    expect(out).toContain("COPY OF 'airtable_pat'");
+    expect(out).toContain(leak);
+    expect(out).not.toContain(token);
+    expect(statSync(leak).mode & 0o777).toBe(0o644);
+    // 0.2-0.6s on the fake home at load 2-24. The bound is a third of the 30s timeout, so a
+    // slow step creeping back fails here with its time, not as a timeout under load.
+    expect(elapsed, `dry run took ${elapsed}ms`).toBeLessThan(10_000);
   });
 });
