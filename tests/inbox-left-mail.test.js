@@ -27,6 +27,7 @@ import { describe, it, expect, afterAll } from 'vitest';
 import { execFileSync, execFile } from 'node:child_process';
 import { createServer } from 'node:http';
 import { promisify } from 'node:util';
+import vm from 'node:vm';
 import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync, readdirSync, chmodSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve, dirname } from 'node:path';
@@ -155,7 +156,7 @@ const TWO_IN_INBOX = `cache({
     "mD": {"sender": "club@example.org", "subject": "Season report", "threadId": "tD",
            "internalDate": 1791760000000, "inbox": True, "ask": "", "reply_state": ""},
     "mP": {"sender": "agent@example.co.uk", "subject": "Your invoice", "threadId": "tP",
-           "internalDate": 1791760000000, "inbox": True, "ask": "a payment (invoice)", "reply_state": ""},
+           "internalDate": 1791760000000, "inbox": True, "ask": "money due (invoice)", "reply_state": ""},
 })`;
 const LEAVE_AB = `
 m.cmd_note("mA", "leave", "A friend sending weekend photos, nothing asked")
@@ -220,7 +221,7 @@ out({"cards": len(STORE), "created": len(CREATED), "patched": len(PATCHES),
     expect(r.firstName).toMatch(/^INBOX: 2 emails for you to read, since \d{1,2} \w{3} 09:00$/);
     expect(r.name).toMatch(/^INBOX: 4 emails for you to read, since \d{1,2} \w{3} 09:00$/);
     expect(r.output.startsWith('INBOX CARD: 4 emails for you to read')).toBe(true);
-    expect(r.output).toMatch(/Added \d{1,2} \w{3} 13:00 \(2\)/);
+    expect(r.output).toMatch(/For your information, added \d{1,2} \w{3} 13:00 \(2\)/);
     const nums = [...r.output.matchAll(/^(\d+)\. /gm)].map((x) => Number(x[1]));
     expect(nums).toEqual([1, 2, 3, 4]);
     expect(r.notes.split(': ')[1].split(',').sort()).toEqual(['mA', 'mB', 'mC', 'mD']);
@@ -313,31 +314,36 @@ moved_after_refusal = len(modifies())
 m.cmd_note("mP", "leave", "A statement copy, already paid", override="paid by direct debit last week, nothing to do")
 out({"err": err, "movedAfterRefusal": moved_after_refusal, "reason": digest()[-1]["reason"]})
 `);
-    expect(r.err.message).toMatch(/ASKS SOMETHING: a payment \(invoice\)/);
+    expect(r.err.message).toMatch(/ASKS SOMETHING: money due \(invoice\)/);
     expect(r.movedAfterRefusal).toBe(0);
-    expect(r.reason).toMatch(/^OVERRIDE ask signal \(a payment \(invoice\)\): paid by direct debit/);
+    expect(r.reason).toMatch(/^OVERRIDE ask signal \(money due \(invoice\)\): paid by direct debit/);
   });
 
-  it('the ask check reads the subject and the sender\'s own words, never the quoted history', () => {
+  it('a concrete ask is caught; a bare or rhetorical question mark is not (second review)', () => {
     const box = sandbox();
     const r = runPy(box, `
 q = m._load_gate().unquoted_body
-out({
-  "pay": m.ask_signal("", q("Please pay by Friday.")),
-  "date": m.ask_signal("", q("We are away from 12 Nov.")),
-  "question": m.ask_signal("", q("Fancy a coffee?")),
-  "decision": m.ask_signal("", q("Let us know your decision.")),
-  "subject": m.ask_signal("Your invoice", ""),
-  "none": m.ask_signal("Photos", q("Lovely to see everyone, here are the pictures.")),
-  "quoted": m.ask_signal("Re: photos", q("Thanks, lovely.\\n\\nOn Mon, Kevin wrote:\\n> Can you pay me back?")),
-})
+cases = {
+  "newsletter": ("Autumn news", "Ready for race season? Our new range has landed. Shop the collection today."),
+  "school": ("Term letter", "Did you know that our pupils read 2,000 books this term? Thank you for your support."),
+  "ebay": ("Re: your listing", "Is this still available?"),
+  "pay": ("Lunch money", "Please pay \u00a340 by Friday."),
+  "statement": ("Your statement is ready", "Your monthly statement is now available to view."),
+  "deadline": ("Forms", "Send the forms back before 12 Nov."),
+  "request": ("Viewing", "Please confirm the time works for you."),
+  "decision": ("Paint", "Do you want the blue or the green?"),
+  "quoted": ("Re: photos", "Thanks, lovely.\\n\\nOn Mon, Kevin wrote:\\n> Can you pay me back?"),
+}
+out({k: m.ask_signal(subj, q(body)) for k, (subj, body) in cases.items()})
 `);
-    expect(r.pay).toMatch(/^a payment/);
-    expect(r.date).toMatch(/^a deadline or date/);
-    expect(r.question).toMatch(/^a question/);
-    expect(r.decision).toMatch(/^a (request|decision)/);
-    expect(r.subject).toMatch(/^a payment/);
-    expect(r.none).toBe('');
+    expect(r.newsletter).toBe('');
+    expect(r.school).toBe('');
+    expect(r.ebay).toMatch(/^a question to you \(Is this still available\?\)/);
+    expect(r.pay).toMatch(/^money due/);
+    expect(r.statement).toBe('');
+    expect(r.deadline).toMatch(/^a deadline \(before 12 Nov\)/);
+    expect(r.request).toMatch(/^a request to act/);
+    expect(r.decision).toMatch(/^a decision \(Do you want\)/);
     expect(r.quoted).toBe('');
   });
 
@@ -669,20 +675,20 @@ out({"err": err})
   });
 });
 
-describe('the one-off backlog', () => {
+describe('the one-off backlog: ONE batch card (Kevin: "Let\'s do a batch run")', () => {
   const INBOX = `
 def msg(i, frm, subj, body="Lovely to hear from you.", labels=None, ts=1789600000000):
     return {"id": i, "threadId": "t" + i, "labelIds": ["INBOX"] + (labels or []), "internalDate": ts,
             "headers": {"from": frm, "subject": subj}, "body": body}
 LISTS["in:inbox"] = [
-    msg("d1", "Pat <pat@gmail.com>", "Holiday photos"),                         # leave, asks nothing -> card
-    msg("d6", "Sam <sam@gmail.com>", "Dinner", body="Can you pay me back by Friday?"),  # leave, asks -> triage
-    msg("d2", "agent@example.co.uk", "Re: viewing"),                            # answered, to the sender -> archive
-    msg("d7", "tenant@example.com", "Boiler"),                                  # answered, forwarded only -> triage
-    msg("d3", "noreply@example.com", "Your statement"),                         # duplicate -> archive
-    msg("d4", "x@example.com", "Lane mail still here"),                         # label12 -> counted only
-    msg("d5", "y@example.com", "Never decided"),                                # no decision -> the scan's job
-    msg("d8", "Kim <kim@gmail.com>", "Kevin filed this", labels=["Label_7"]),   # Kevin's own label -> left alone
+    msg("d1", "Pat <pat@gmail.com>", "Holiday photos"),                                  # leave, asks nothing -> for information
+    msg("d6", "Sam <sam@gmail.com>", "Dinner", body="Please pay me back by Friday."),    # leave, money due -> may need you to act
+    msg("d2", "agent@example.co.uk", "Re: viewing"),                                     # answered, to the sender -> archived
+    msg("d7", "tenant@example.com", "Boiler"),                                           # answered, forwarded only -> may need you to act
+    msg("d3", "noreply@example.com", "Your statement"),                                  # duplicate -> archived
+    msg("d4", "x@example.com", "Lane mail still here"),                                  # label12 -> counted only
+    msg("d5", "y@example.com", "Never decided"),                                         # no decision -> the scan's job
+    msg("d8", "Kim <kim@gmail.com>", "Kevin filed this", labels=["Label_7"]),            # Kevin's own label -> left alone
 ]
 LISTS["in:sent"] = [
     {"id": "s2", "threadId": "td2", "internalDate": 1789700000000, "headers": {"from": "kevin@runpreneur.org.uk", "to": "agent@example.co.uk"}},
@@ -692,7 +698,7 @@ LISTS["in:sent"] = [
     {"id": "d1", "do": "leave", "reason": "Photos from a friend, nothing to answer", "ts": "2026-09-20T09:00:00"},
     {"id": "d6", "do": "leave", "reason": "A friend about dinner", "ts": "2026-09-20T09:00:00"},
     {"id": "d2", "do": "answered", "ts": "2026-09-20T09:01:00"},
-    {"id": "d7", "do": "answered", "ts": "2026-09-20T09:01:00"},
+    {"id": "d7", "do": "answered", "reason": "Tenant reporting the boiler", "ts": "2026-09-20T09:01:00"},
     {"id": "d3", "do": "duplicate", "ts": "2026-09-20T09:02:00"},
     {"id": "d4", "do": "label12", "ts": "2026-09-20T09:03:00"},
     {"id": "d8", "do": "leave", "reason": "x", "ts": "2026-09-20T09:03:00"},
@@ -724,15 +730,24 @@ out({"res": res, "paths": sorted(set(c["path"] for c in CALLS)), "cards": len(ST
     expect(r.digestsSame).toBe(true);
     expect(r.ledger).toBe(false);
     expect(r.res).toMatchObject({
-      mode: 'dry-run', to_card: 1, card_groups: { person: 1 },
-      to_triage_as_tasks: 2, to_triage_because_it_asks: 1, to_triage_because_answered_unconfirmed: 1,
-      to_archive: 2, to_archive_answered_confirmed: 1, to_archive_duplicate: 1,
-      skipped_user_label: 1, decided_otherwise_still_in_inbox: { label12: 1 },
-      already_awaiting_triage: 1, gmail_writes: 0, airtable_writes: 0,
+      mode: 'dry-run', card_may_need_you_to_act: 2, card_act_because_answer_unconfirmed: 1,
+      card_for_your_information: 1, to_archive: 2, to_archive_answered_confirmed: 1,
+      to_archive_duplicate: 1, skipped_user_label: 1, decided_otherwise_still_in_inbox: { label12: 1 },
+      left_for_triage_no_decision: 1, card_items_that_fit: 3, gmail_writes: 0, airtable_writes: 0,
     });
+    expect(r.res.card_chars_if_new).toBe(r.preview.trim().length);
     expect(r.res.preview_file.startsWith(box.state)).toBe(true);
-    expect(r.preview).toContain('pat@gmail.com | Holiday photos');
-    expect(r.preview).toContain('sam@gmail.com | Dinner (asks something: a ');
+    // The card itself: act first, each with why; then for your information.
+    const p = r.preview;
+    expect(p.indexOf('These may need you to act')).toBeLessThan(p.indexOf('For your information'));
+    expect(p).toContain('1. sam@gmail.com | Dinner');
+    expect(p).toMatch(/Why it may need you: money due \(pay\)/);
+    expect(p).toContain('2. tenant@example.com | Boiler');
+    expect(p).toContain('Why it may need you: the later send went to other people, not to the sender');
+    expect(p).toContain('3. pat@gmail.com | Holiday photos');
+    expect(p).toContain('turns each number you name into its own task');
+    expect(p).not.toContain('Lane mail still here');
+    expect(p).not.toContain('Kevin filed this');
   });
 
   it('--apply refuses unless the queue runs it as inbound-triage-backlog', () => {
@@ -748,7 +763,7 @@ out({"unwrapped": unwrapped, "other": other, "calls": len(CALLS)})
     expect(r.calls).toBe(0);
   });
 
-  it('--apply under the queue: the no-ask email goes on the ONE open card, the rest is filed or sent back, Kevin\'s label untouched', () => {
+  it('--apply: both sections go on the ONE open card, every carded email is labelled and archived, nothing goes back to triage', () => {
     const box = sandbox();
     const r = runPy(box, INBOX + `
 cache({"o1": {"sender": "friend@gmail.com", "subject": "Earlier", "threadId": "to1", "internalDate": 1, "inbox": True, "ask": ""}})
@@ -758,27 +773,27 @@ CALLS.clear()
 holder("inbound-triage-backlog", os.getppid())
 res = backlog(True)
 first_cards = len(STORE)
+moves_first = modifies()
 res2 = backlog(True)
 d = digest()
 out({"res": res, "cards": len(STORE), "firstCards": first_cards, "patched": len(PATCHES),
-     "moves": modifies(), "output": card()[AF["agentOutput"]],
-     "retriage": sorted(r["id"] for r in d if r["do"] == "retriage"),
-     "second": res2.get("carded")})
+     "moves": moves_first, "output": card()[AF["agentOutput"]], "name": card()[AF["name"]],
+     "dos": sorted(set(r["do"] for r in d)), "second": res2.get("carded")})
 `);
-    // One card: the backlog's email was ADDED to the open run card.
     expect(r.firstCards).toBe(1);
     expect(r.cards).toBe(1);
     expect(r.patched).toBe(1);
-    expect(r.output).toMatch(/From the backlog, .*\(1\)/);
-    expect(r.output).toContain('2. pat@gmail.com | Holiday photos');
-    const ids = r.moves.flatMap((p) => p.ids);
-    expect(r.moves[0]).toEqual({ ids: ['d1'], addLabels: [READ_LABEL], removeLabels: ['INBOX'] });
+    expect(r.name).toMatch(/^INBOX: 4 emails for you to read, since/);
+    const o = r.output;
+    expect(o.indexOf('These may need you to act')).toBeLessThan(o.indexOf('For your information (from the backlog'));
+    expect([...o.matchAll(/^(\d+)\. /gm)].map((x) => Number(x[1]))).toEqual([1, 2, 3, 4]);
+    expect(o).toContain('2. sam@gmail.com | Dinner');
+    expect(o).toContain('4. pat@gmail.com | Holiday photos');
+    expect(r.moves[0]).toEqual({ ids: ['d6', 'd7', 'd1'], addLabels: [READ_LABEL], removeLabels: ['INBOX'] });
     expect(r.moves[1]).toEqual({ ids: ['d2', 'd3'], removeLabels: ['INBOX'] });
-    // Lane mail, undecided mail, asks, unconfirmed answers and Kevin's own
-    // label are never moved; asks and unconfirmed answers go back to triage once.
-    for (const untouched of ['d4', 'd5', 'd6', 'd7', 'd8']) expect(ids).not.toContain(untouched);
-    expect(r.retriage).toEqual(['d6', 'd7']);
-    // A re-run (the stub inbox still lists d1) cards nothing a second time.
+    const ids = r.moves.flatMap((p) => p.ids);
+    for (const untouched of ['d4', 'd5', 'd8']) expect(ids).not.toContain(untouched);
+    expect(r.dos).not.toContain('retriage');
     expect(r.second).toBe(0);
   });
 
@@ -791,6 +806,29 @@ out({"err": err, "calls": len(CALLS)})
 `);
     expect(r.err.message).toMatch(/BACKLOG REFUSED: the inbound-triage slot holds the queue lock/);
     expect(r.calls).toBe(0);
+  });
+});
+
+describe('the people and pages around the card', () => {
+  it('Inbox Response is told what an INBOX card verdict means: approve = seen, a named number = one task', () => {
+    // Its definition file is its prompt; this guards the instruction a redo needs.
+    const f = readFileSync(join(process.env.HOME, '.claude/agents/inbound-comms-response.md'), 'utf8');
+    const block = f.slice(f.indexOf('## INBOX cards'), f.indexOf('## Step 0'));
+    expect(block).toMatch(/Approved as-is:\*\* he has seen them/);
+    expect(block).toMatch(/turn EACH\s+number he names into its own task/);
+    expect(block).toContain('scripts/create-agent-task.py create');
+    expect(block).toContain('Nothing. Information only.');
+  });
+
+  it('the Inbound Comms page no longer offers "Respond" on label 19, and every other label is unchanged', () => {
+    const html = readFileSync(join(ROOT, 'follow-up.html'), 'utf8');
+    const src = html.match(/function getActionButtonLabel\(\) \{[\s\S]*?\n {4}\}/)[0];
+    const label = (name) => vm.runInNewContext(`${src}\ngetActionButtonLabel()`, { currentLabel: name });
+    expect(label('19: for Kevin to read')).toBe('Follow up');
+    for (const n of ['1: to respond', '10: property compliance', '12: kevin to respond', '13: maintenance',
+      '18: creditor', '8: task created']) expect(label(n), n).toBe('Respond');
+    expect(label('3: to pay')).toBe('Delay Payment');
+    expect(label('6: newsletter')).toBe('Follow up');
   });
 });
 

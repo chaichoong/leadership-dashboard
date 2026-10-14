@@ -5945,7 +5945,7 @@ ${emailDescriptions}`;
 
     function getActionButtonLabel() {
         const cl = currentLabel.toLowerCase();
-        if (cl.includes('to respond') || cl.startsWith('1')) return 'Respond';
+        if (cl.includes('to respond') || (cl.startsWith('1') && !cl.startsWith('19'))) return 'Respond';
         if (cl.includes('task created') || cl.startsWith('8')) return 'Respond';
         if (cl.includes('kevin to respond') || cl.startsWith('12')) return 'Respond';
         if (cl.includes('to pay') || cl.startsWith('3')) return 'Delay Payment';

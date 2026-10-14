@@ -100,10 +100,8 @@ All commands run from the main checkout
   covers it) and log it with `note --do duplicate`, which files it out of the
   inbox.
 - **`stale_to_triage` is decided like new mail (14 Oct 2026).** It lists inbox
-  mail older than 2 days that has no decision yet, was deferred, or was sent
-  back by the one-off backlog ("retriage": it asked something, or its
-  "answered" could not be confirmed). Run Step 2 on each exactly as on
-  `new_inbox`. Mail Kevin filed under a label of his own is not in it: that
+  mail older than 2 days that has no decision yet or was deferred. Run Step 2
+  on each exactly as on `new_inbox`. Mail Kevin filed under a label of his own is not in it: that
   is his, leave it alone.
 
 **NOTHING YOU DECIDE STAYS IN THE INBOX (Kevin, 14 Oct 2026):** "Anything I
@@ -228,12 +226,16 @@ the `list-unsubscribe` header (its presence = machine mail).
    (for mail he only needs to read, the INBOX card in rule 6 is that task; a
    family receipt or acknowledgement is the one exception, rule 6).
 6. **For Kevin to read — his INBOX card (Kevin, 14 Oct 2026):** ONLY an
-   email a person wrote that asks NOTHING of anyone, Kevin included: no ask,
-   no decision, no payment, no deadline and no date. Any of those makes it
-   work, not reading: rule 1, a task, as always (the robots never pay, so
-   "please pay by Friday" is never a card to read). The script enforces this:
-   `note --do leave` refuses a message whose subject or own words carry an
-   ask, a question, a payment, a decision, a deadline or a date (`ask` in the
+   email a person wrote that asks NOTHING of anyone, Kevin included: no money
+   due, no deadline, no request to act, no decision and no question put to
+   him. Any of those makes it work, not reading: rule 1, a task, as always
+   (the robots never pay, so "please pay £40 by Friday" is never a card to
+   read). The script enforces this: `note --do leave` refuses a message whose
+   subject or own words carry money due (pay, invoice, overdue, a £ sum due),
+   a deadline (by or before a date, "deadline", "expires"), a request to act
+   ("please confirm", "can you", "let me know"), a decision ("do you want",
+   "choose", "approve") or a direct question ("Is this still available?");
+   a rhetorical question ("Did you know...?") is not an ask (`ask` in the
    scan cache). Only if the signal is plainly wrong add `--override "<why it
    asks nothing>"`; the override is logged.
    Family and personal mail follows Kevin's 17 Sep 2026 protocol

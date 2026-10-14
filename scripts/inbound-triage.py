@@ -234,8 +234,8 @@ FILE_OUT_NOTES = ("answered", "duplicate")
 # Digest decisions that take a message out of the inbox, plus every file-*.
 INBOX_EXIT_DOS = ("label12", "label13", "archive", "leave") + FILE_OUT_NOTES
 # A stale inbox message whose LAST decision is one of these is the agent's to
-# decide (again): never decided, sent back by the backlog, or deferred.
-TRIAGE_AGAIN_DOS = ("", "retriage", "deferred")
+# decide (again): never decided, or deferred.
+TRIAGE_AGAIN_DOS = ("", "deferred")
 INBOX_CARD_PREFIX = "INBOX: "
 INBOX_CARD_HEAD = "INBOX CARD:"
 INBOX_CARD_IDS = "INBOX CARD MESSAGE IDS: "
@@ -271,51 +271,72 @@ SENDER_TYPES = (
     ("unknown", "Sender not known"),
 )
 
-# THE READ-ONLY CARD IS FOR MAIL THAT ASKS NOTHING (review of PR #783, 14 Oct
-# 2026). "Needs no reply or action from the robots" let "please pay by Friday"
-# onto a card Kevin approves as read: the robots never pay, so it qualified.
-# Kevin's 17 Sep protocol makes a decision for him a card of its own (a task),
-# and an ask, a payment, a deadline or a date is work, not reading. So `leave`
-# is refused when any of these appears in the subject or the sender's own
-# words (the quoted history is ignored). Deliberately broad: a wrong refusal
-# costs one task that its agent can file as information, a wrong card costs a
-# missed payment. `--override "<why it asks nothing>"` is logged.
+# THE READ-ONLY CARD IS FOR MAIL THAT ASKS NOTHING OF THE READER (review of PR
+# #783, 14 Oct 2026). "Needs no reply or action from the robots" let "please
+# pay by Friday" onto a card Kevin approves as read: the robots never pay, so it
+# qualified. Kevin's 17 Sep protocol makes a decision for him a card of its own
+# (a task). So `leave` is refused when the subject or the sender's own words
+# (the quoted history is ignored) carry a CONCRETE ask of the reader:
+#   * money due: pay, payment, invoice, amount due, overdue, or a £ sum with
+#     a due/by word near it;
+#   * a deadline: by / before / until a date or a weekday, "deadline", "expires";
+#   * a request to act: please confirm/reply/sign/send/call back/complete/
+#     submit, can you, could you, would you, let me know;
+#   * a decision: do you want, choose, approve;
+#   * a direct question to the reader: a sentence that ends "?" and opens like
+#     a question ("Is this still available?"), never a rhetorical one ("Did
+#     you know...?", "Ready for race day?").
+# The second review (same day) narrowed the first version: a bare question
+# mark flagged 40 of 82 left emails, newsletters and school letters among
+# them. `--override "<why it asks nothing>"` stays, and is logged.
 _WEEKDAYS = r"monday|tuesday|wednesday|thursday|friday|saturday|sunday"
 _MONTHS = (r"jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|june?|july?|aug(?:ust)?"
            r"|sept?(?:ember)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?")
+_A_DATE = (r"(?:(?:" + _WEEKDAYS + r")|tomorrow|tonight|today|(?:the )?end of (?:the )?(?:day|week|month)"
+           r"|next (?:week|month)|\d{1,2}(?:st|nd|rd|th)\b(?:\s+(?:of\s+)?(?:" + _MONTHS + r"))?"
+           r"|\d{1,2}\s+(?:of\s+)?(?:" + _MONTHS + r")|(?:" + _MONTHS + r")\s+\d{1,2}(?:st|nd|rd|th)?"
+           r"|\d{1,2}[/.]\d{1,2}(?:[/.]\d{2,4})?(?![\d%]))")
 ASK_SIGNALS = (
-    ("a question", re.compile(r"\?")),
-    ("a payment", re.compile(
-        r"£\s?\d|\b(?:pay|pays|paying|paid|payment|payments|invoice|invoices|bill|bills|balance"
-        r"|owe|owed|owing|overdue|arrears|refund|direct debit|standing order|instal?ments?"
-        r"|fee|fees|charge|charges|deposit)\b", re.I)),
-    ("a request", re.compile(
-        r"\b(?:please|kindly|could you|can you|would you|will you|are you able|let (?:me|us) know"
-        r"|get back to|confirm|reply|respond|rsvp|sign|complete|fill (?:in|out)"
-        r"|send (?:me|us|over)|action required|need you|needs you|you need|you must|required"
-        r"|request|requested)\b", re.I)),
-    ("a decision", re.compile(
-        r"\b(?:decide|decision|choose|choice|approve|approval|agree|accept|options?|whether"
-        r"|prefer)\b", re.I)),
-    ("a deadline or date", re.compile(
-        r"\b(?:deadline|due|expire[sd]?|expiry|renew(?:al|s|ed)?|appointment|meeting|booking"
-        r"|booked|scheduled|reschedule|viewing|visit|inspection|tomorrow|tonight|today"
-        r"|next week|this week|end of (?:the )?(?:week|month)|" + _WEEKDAYS + r")\b"
-        r"|\b\d{1,2}(?:st|nd|rd|th)?\s+(?:" + _MONTHS + r")\b"
-        r"|\b(?:" + _MONTHS + r")\s+\d{1,2}(?:st|nd|rd|th)?\b"
-        r"|\b\d{1,2}[/.]\d{1,2}(?:[/.]\d{2,4})?\b", re.I)),
+    ("money due", re.compile(
+        r"\b(?:pay|payment|payments|invoice|invoices|amount due|overdue)\b"
+        r"|£\s?\d[\d,.]*[^.\n]{0,40}\b(?:due|by)\b|\b(?:due|by)\b[^.\n]{0,40}£\s?\d", re.I)),
+    ("a deadline", re.compile(
+        r"\b(?:by|before|until)\s+(?:the\s+)?" + _A_DATE + r"\b|\bdeadline\b|\bexpires?\b", re.I)),
+    ("a request to act", re.compile(
+        r"\bplease\s+(?:do\s+)?(?:confirm|reply|respond|sign|send|call(?:\s+\w+)?\s+back|complete|submit"
+        r"|return|get back|let (?:me|us) know)\b"
+        r"|\b(?:can|could|would) you\b|\blet (?:me|us) know\b", re.I)),
+    ("a decision", re.compile(r"\b(?:do you want|choose|approve)\b", re.I)),
 )
+QUESTION_OPENER_RE = re.compile(
+    r"^(?:(?:hi|hello|hey|dear)\b[^,?]{0,30},\s*)?"
+    r"(?:is|are|was|were|do|does|did|can|could|would|will|shall|should|have|has|when|what"
+    r"|where|which|who|how|any chance)\b", re.I)
+RHETORICAL_RE = re.compile(
+    r"^(?:did you know|have you ever|ever wonder|want to|looking for|why not|ready (?:for|to)"
+    r"|fancy|who doesn'?t|what if|are you ready|do you love|need (?:a|an|some)\b"
+    r"|thinking (?:of|about))", re.I)
+
+
+def direct_question(text):
+    """The first sentence that asks the reader something, or ''."""
+    for sentence in re.split(r"(?<=[.!?])\s+|\n+", str(text or "")):
+        s = sentence.strip()
+        if s.endswith("?") and QUESTION_OPENER_RE.match(s) and not RHETORICAL_RE.match(s):
+            return s
+    return ""
 
 
 def ask_signal(subject, own_words):
-    """'' when the subject and the sender's own words ask nothing of anyone,
-    else what was found ("a payment (invoice)"). Pure, so the tests drive it."""
+    """'' when the subject and the sender's own words ask nothing of the
+    reader, else what was found ("money due (pay)"). Pure, so the tests drive it."""
     text = "%s\n%s" % (subject or "", own_words or "")
     for label, rx in ASK_SIGNALS:
         m = rx.search(text)
         if m:
             return "%s (%s)" % (label, " ".join(m.group(0).split())[:40])
-    return ""
+    q = direct_question(own_words) or direct_question(subject)
+    return "a question to you (%s)" % " ".join(q.split())[:40] if q else ""
 
 # State + digest live OUTSIDE the repo: the repo is public and the digest holds
 # senders and subjects. INBOUND_TRIAGE_DIR exists so selftest can use a tempdir.
@@ -911,8 +932,8 @@ def cmd_scan(back_hours, sleep=time.sleep):
 
     # OLD INBOX MAIL NOBODY HAS DECIDED (review of PR #783, 14 Oct 2026). The
     # agent triaged only mail newer than the watermark, so an old message with
-    # no decision, one the backlog sent back ("retriage") or one deferred sat
-    # in the inbox with nothing ever coming for it. These are decided like new
+    # no decision, or one deferred, sat in the inbox with nothing ever coming
+    # for it. These are decided like new
     # mail. Mail Kevin filed under a label of his own is his: left alone.
     last = digest_last_decisions()
     read_lbl = find_label(labels, READ_LABEL_NUM)
@@ -1272,16 +1293,17 @@ def _noun(n):
     return "email" if n == 1 else "emails"
 
 
-CARD_INTRO = ("Each one was written by a person and asks nothing of anyone, you included, so the "
-              "triage robot took it out of your inbox and listed it here. Nothing was deleted: "
-              "each is labelled %r in Gmail and its link opens it. New ones are added to this "
-              "card until you decide it." % READ_LABEL_NAME)
+CARD_INTRO = ("The triage robot took each of these out of your inbox and listed it here, so your inbox "
+              "stays empty. Nothing was deleted: each is labelled %r in Gmail and its link opens it. "
+              "New ones are added to this card until you decide it." % READ_LABEL_NAME)
 CARD_FOOTER = [
     "",
     INBOX_CARD_FOOT,
-    "- Approve once you have read them. The card closes and nothing is sent.",
-    "- Request changes to have one dealt with, naming its number, for example "
-    "\"reply to 2 saying yes\". Inbox Response does it and brings any reply back to you first.",
+    "- Approve once you have read them: approving means you have seen them. The card closes and "
+    "nothing is sent.",
+    "- To have any of them acted on, name its number in Request changes, for example \"act on 3 "
+    "and 7\" or \"reply to 2 saying yes\". The Inbox Response agent turns each number you name "
+    "into its own task and brings any reply back to you first.",
     "- To say one should not have come to you, Reject (or tick Remember this reason) and say "
     "why, for example \"never show me this sender's newsletters\". The triage robot reads "
     "that before its next run.",
@@ -1292,10 +1314,11 @@ CARD_FOOTER = [
 
 def render_items(items, start, public_domains, budget):
     """(lines, shown_ids). Grouped by sender type, oldest first inside each
-    group, numbered straight on from `start` so "reply to 2" names one email.
-    Stops at the character budget: an email that does not fit is left for the
-    next card, never half-listed, so no number is skipped and no heading is
-    printed without an email under it."""
+    group, numbered straight on from `start` so "act on 2" names one email. An
+    item carrying a `flag` says why it may need Kevin. Stops at the character
+    budget: an email that does not fit is left for the next card, never
+    half-listed, so no number is skipped and no heading is printed without an
+    email under it."""
     groups = {}
     for it in items:
         groups.setdefault(sender_type(it.get("sender"), public_domains), []).append(it)
@@ -1314,6 +1337,8 @@ def render_items(items, start, public_domains, budget):
                 e.append("   Received: %s" % when)
             e.append("   What it is: %s" % (" ".join(str(it.get("summary") or "").split())
                                             or "no summary recorded"))
+            if it.get("flag"):
+                e.append("   Why it may need you: %s" % " ".join(str(it["flag"]).split()))
             e.append("   Open: %s" % (GMAIL_THREAD_URL % it["threadId"] if it.get("threadId")
                                       else "link not known, search Gmail for the subject"))
             cost = sum(len(x) + 1 for x in e) + (len(title) + 12 if not entries else 0)
@@ -1330,35 +1355,55 @@ def render_items(items, start, public_domains, budget):
     return lines, shown
 
 
-def new_card_text(items, section, public_domains):
+def render_sections(sections, start, public_domains, budget):
+    """(lines, shown_ids) for [(title, items)] in order, numbered straight
+    through. A section that does not fit whole ends the card there: the rest
+    waits for the next card, so no number is skipped and no section heading
+    stands empty."""
+    lines, shown = [], []
+    for title, items in sections:
+        if not items:
+            continue
+        head = ["", "%s (%%d)" % title]
+        part, ids = render_items(items, start + len(shown), public_domains,
+                                 budget - sum(len(x) + 1 for x in lines) - len(title) - 12)
+        if ids:
+            head[1] = head[1] % len(ids)
+            lines += head + part
+            shown += ids
+        if len(ids) < len(items):
+            break
+    return lines, shown
+
+
+def new_card_text(sections, public_domains):
     """(text, shown_ids) for a fresh card, or (None, []) when nothing fits."""
     budget = INBOX_CARD_CHAR_CAP - len(CARD_INTRO) - sum(len(x) + 1 for x in CARD_FOOTER) - 400
-    lines, shown = render_items(items, 1, public_domains, budget)
+    lines, shown = render_sections(sections, 1, public_domains, budget)
     if not shown:
         return None, []
     head = "%s %d %s for you to read" % (INBOX_CARD_HEAD, len(shown), _noun(len(shown)))
-    return "\n".join([head, "", CARD_INTRO, "", "%s (%d)" % (section, len(shown))]
-                     + lines + CARD_FOOTER), shown
+    return "\n".join([head, "", CARD_INTRO] + lines + CARD_FOOTER), shown
 
 
-def appended_card_text(existing, items, section, public_domains):
-    """(text, shown_ids) with `items` added to an open card's text, numbered on
-    from its last email, or (None, []) when the card's shape is not the one
-    this code wrote or nothing more fits."""
+def appended_card_text(existing, sections, public_domains):
+    """(text, shown_ids) with the sections added to an open card's text,
+    numbered on from its last email, or (None, []) when the card's shape is not
+    the one this code wrote or nothing more fits."""
     idx = existing.rfind("\n\n" + INBOX_CARD_FOOT)
     first = existing.split("\n", 1)[0]
     if idx == -1 or not first.startswith(INBOX_CARD_HEAD):
         return None, []
     head, tail = existing[:idx], existing[idx:]
     nums = [int(x) for x in re.findall(r"^(\d+)\. ", head, re.M)]
-    budget = INBOX_CARD_CHAR_CAP - len(existing) - len(section) - 400
-    lines, shown = render_items(items, (max(nums) + 1) if nums else 1, public_domains, budget)
+    budget = INBOX_CARD_CHAR_CAP - len(existing) - 400
+    lines, shown = render_sections(sections, (max(nums) + 1) if nums else 1, public_domains, budget)
     if not shown:
         return None, []
     total = len(nums) + len(shown)
     head = re.sub(r"^%s \d+ emails?" % re.escape(INBOX_CARD_HEAD),
                   "%s %d %s" % (INBOX_CARD_HEAD, total, _noun(total)), head, count=1)
-    return head + "\n\n" + "%s (%d)" % (section, len(shown)) + "\n".join(lines) + tail, shown
+    return head + "\n" + "\n".join(lines) + tail, shown
 
 
 def card_plain_summary(total):
@@ -1451,16 +1496,18 @@ def card_ids(notes):
     return (m.group(0), [x for x in m.group(1).split(",") if x]) if m else (None, None)
 
 
-def raise_or_append(items, ad, opened, section):
+def raise_or_append(sections, ad, opened):
     """ONE open INBOX card at a time (review of PR #783, 14 Oct 2026). Every
     card had the same duplicate key, so the page's Duplicates lane told Kevin to
     close all but one, hiding the emails on the rest. So new emails are ADDED to
     the open card he has not decided yet, and a new card is made only when none
     is open (or the open one is full). The card is re-read by field id before
     it is written, and a blank read is a STOP: a field you are about to add to
-    that reads blank is a broken read, never an empty card. Returns
-    (task_id, "created"|"appended"|"already", carded_ids)."""
+    that reads blank is a broken read, never an empty card. `sections` is
+    [(title, items)], listed in that order and numbered straight through.
+    Returns (task_id, "created"|"appended"|"already", carded_ids)."""
     AF = ad.AF
+    items = [i for _, part in sections for i in part]
     public = _load_gate().PUBLIC_MAIL_DOMAINS
     cards = open_inbox_cards(ad)
     if cards:
@@ -1473,11 +1520,11 @@ def raise_or_append(items, ad, opened, section):
                 raise RuntimeError("open INBOX card %s reads blank (Agent Output, Task Name or its "
                                    "message-id line) on a fresh read by field id: STOP, nothing "
                                    "written to it" % cid)
-            new = [i for i in items if i["id"] not in on_card]
             already = [i["id"] for i in items if i["id"] in on_card]
-            if not new:
+            todo = [(t, [i for i in part if i["id"] not in on_card]) for t, part in sections]
+            if not any(part for _, part in todo):
                 return cid, "already", already
-            text, shown = appended_card_text(out, new, section, public)
+            text, shown = appended_card_text(out, todo, public)
             if text is not None:
                 ids = on_card + shown
                 total = len(ids)
@@ -1494,8 +1541,8 @@ def raise_or_append(items, ad, opened, section):
                         raise RuntimeError("the add to INBOX card %s did not land on read-back" % cid)
                     return cid, "appended", already + shown
                 # He decided it while we wrote: he never saw these. A new card.
-                items = [i for i in items if i["id"] not in already]
-    text, shown = new_card_text(items, section, public)
+                sections = [(t, [i for i in part if i["id"] not in already]) for t, part in sections]
+    text, shown = new_card_text(sections, public)
     if text is None:
         return None, "none", []
     task_id = _create_card(inbox_card_fields(card_name(len(shown), opened), text, shown, ad,
@@ -1527,7 +1574,8 @@ def cmd_inbox_card(slot=None, dry_run=False, dispatch=None):
         now = datetime.now()
         slot = slot or _slot_now()
         when = "%s %s" % (now.strftime("%d %b").lstrip("0"), slot)
-        task_id, action, done = raise_or_append(fresh, ad, when, "Added %s" % when)
+        task_id, action, done = raise_or_append(
+            [("For your information, added %s" % when, fresh)], ad, when)
     except SystemExit:
         restore_pending(taken)
         raise
@@ -1652,14 +1700,19 @@ def cmd_inbox_lessons(dry_run=False, dispatch=None):
 # and left behind: a message still in the inbox (the LIVE listing) whose last
 # recorded decision (the DIGESTS) was leave, answered or duplicate. Neither
 # source alone is trusted: the listing says where it is, the digest says what
-# was decided. Under the tightened rules (review of PR #783):
-#   * leave that asks nothing of anyone -> Kevin's INBOX card, labelled 19, archived;
-#   * leave that asks something, and "answered" with no later send TO the
-#     sender -> sent back to the triage agent ("retriage"), which decides it
-#     again next slot: a task under rule 1, or whatever the rules now say;
-#   * answered (confirmed against the sent folder) and duplicate -> archived;
+# was decided. ONE batch card, never a task per email and never a second pass
+# through triage (second review of PR #783):
+#   * every left email goes on Kevin's ONE open INBOX card, in two sections:
+#     "These may need you to act" (each says why: `ask_signal`, or an
+#     "answered" that never reached the sender) then "For your information",
+#     each grouped by sender type; all of them labelled 19 and archived;
+#   * answered (a later send went TO the sender) and duplicate -> archived, no
+#     card line;
 #   * anything carrying a label Kevin added himself -> left alone;
-#   * everything else in the inbox -> counted, never touched.
+#   * everything else in the inbox -> counted, never touched (mail with no
+#     decision is the ongoing triage's `stale_to_triage`).
+# Approving the card means seen; a number named in Request changes becomes a
+# task, made by Inbox Response.
 
 def queue_holder_path():
     root = os.environ.get("JOB_QUEUE_DIR") or str(Path.home() / "knowledge-os/logs/queue")
@@ -1722,8 +1775,13 @@ def digest_last_decisions(base=None):
 
 
 def backlog_plan(inbox, last, carded, read_label_id, sends, unquote=lambda b: b or ""):
-    """Pure. Sort the live inbox by each message's last recorded decision."""
-    plan = {"card": [], "move_only": [], "file": [], "retriage": [], "skipped_label": [],
+    """Pure. Sort the live inbox by each message's last recorded decision.
+    One batch, one card (Kevin: "Let's do a batch run"): every left email goes
+    on it, split by `ask_signal` into "may need you to act" (`flag` says why)
+    and "for your information"; an "answered" that was not a reply to the
+    sender goes on it too, flagged; confirmed answers and duplicates are
+    filed; Kevin's own labels and anything else are left alone."""
+    plan = {"act": [], "info": [], "move_only": [], "file": [], "skipped_label": [],
             "awaiting_triage": [], "other": {}}
     for m in inbox:
         e = last.get(m.get("id")) or {}
@@ -1736,22 +1794,19 @@ def backlog_plan(inbox, last, carded, read_label_id, sends, unquote=lambda b: b 
                 "do": do}
         if other_user_labels(m, read_label_id):
             plan["skipped_label"].append(item)
+        elif do in ("leave", "answered") and m.get("id") in carded:
+            plan["move_only"].append(item)
         elif do == "leave":
             ask = ask_signal(h.get("subject", ""), unquote(m.get("body", "")))
-            if m.get("id") in carded:
-                plan["move_only"].append(item)
-            elif ask:
-                plan["retriage"].append(dict(item, why="asks something: %s" % ask))
-            else:
-                plan["card"].append(item)
+            plan["act" if ask else "info"].append(dict(item, flag=ask) if ask else item)
         elif do == "answered":
             state = reply_state(m, sends)
             if state == "answered":
                 plan["file"].append(item)
             else:
-                plan["retriage"].append(dict(item, why=(
-                    "the later send went to other people, not the sender" if state == "elsewhere"
-                    else "no later send to the sender found")))
+                plan["act"].append(dict(item, flag=(
+                    "the later send went to other people, not to the sender" if state == "elsewhere"
+                    else "no reply to the sender was found in the sent mail")))
         elif do == "duplicate":
             plan["file"].append(item)
         elif do in TRIAGE_AGAIN_DOS:
@@ -1779,6 +1834,13 @@ def _move_and_log(items, add, reason):
         for it in chunk:
             digest_append({"id": it["id"], "do": it["do"] or "leave", "sender": it["sender"],
                            "subject": it["subject"], "reason": reason})
+
+
+def backlog_sections(plan):
+    stamp = date.today().strftime("%d %b %Y").lstrip("0")
+    return [("These may need you to act (from the backlog, %s). Name a number in Request "
+             "changes and it becomes a task" % stamp, plan["act"]),
+            ("For your information (from the backlog, %s)" % stamp, plan["info"])]
 
 
 def cmd_backlog(apply=False, dispatch=None, holder_path=None):
@@ -1812,68 +1874,70 @@ def cmd_backlog(apply=False, dispatch=None, holder_path=None):
     plan = backlog_plan(inbox, last, ledger_ids(), read_lbl["id"] if read_lbl else None,
                         sends, gate.unquoted_body)
     public = gate.PUBLIC_MAIL_DOMAINS
-    groups = {}
-    for it in plan["card"]:
-        k = sender_type(it["sender"], public)
-        groups[k] = groups.get(k, 0) + 1
-    asks = sum(1 for i in plan["retriage"] if i["why"].startswith("asks"))
+    sections = backlog_sections(plan)
+    preview_text, preview_ids = new_card_text(sections, public)
+
+    def groups(items):
+        out = {}
+        for it in items:
+            k = sender_type(it["sender"], public)
+            out[k] = out.get(k, 0) + 1
+        return out
     counts = {
         "inbox_listed": len(inbox) + roy, "inbox_listing_truncated": truncated,
         "roy_assistant_skipped": roy,
-        "to_card": len(plan["card"]), "card_groups": groups,
-        "to_triage_as_tasks": len(plan["retriage"]),
-        "to_triage_because_it_asks": asks,
-        "to_triage_because_answered_unconfirmed": len(plan["retriage"]) - asks,
+        "card_may_need_you_to_act": len(plan["act"]), "card_act_groups": groups(plan["act"]),
+        "card_act_because_answer_unconfirmed": sum(1 for i in plan["act"] if i["do"] == "answered"),
+        "card_for_your_information": len(plan["info"]), "card_info_groups": groups(plan["info"]),
+        "card_chars_if_new": len(preview_text or ""),
+        "card_items_that_fit": len(preview_ids),
         "to_archive": len(plan["file"]),
         "to_archive_answered_confirmed": sum(1 for i in plan["file"] if i["do"] == "answered"),
         "to_archive_duplicate": sum(1 for i in plan["file"] if i["do"] == "duplicate"),
         "already_carded_move_only": len(plan["move_only"]),
         "skipped_user_label": len(plan["skipped_label"]),
-        "already_awaiting_triage": len(plan["awaiting_triage"]),
+        "left_for_triage_no_decision": len(plan["awaiting_triage"]),
         "decided_otherwise_still_in_inbox": plan["other"],
         "sent_listing_truncated": sent_truncated,
-        "oldest": {"card": _oldest(plan["card"]), "triage": _oldest(plan["retriage"]),
+        "oldest": {"act": _oldest(plan["act"]), "info": _oldest(plan["info"]),
                    "archive": _oldest(plan["file"])},
     }
     stamp = date.today().isoformat()
-    section = ("From the backlog, %s: earlier triage runs left these in your inbox. Each is "
-               "labelled %r and archived now" % (date.today().strftime("%d %b %Y").lstrip("0"),
-                                                 READ_LABEL_NAME))
     if not apply:
-        # The card's new lines, for review. PRIVATE: senders and subjects never
-        # leave ~/knowledge-os/logs/inbound-triage/.
-        text, _ = new_card_text(plan["card"], section, public)
+        # The card exactly as a new card would read, for review. PRIVATE:
+        # senders and subjects never leave ~/knowledge-os/logs/inbound-triage/.
         base_dir().mkdir(parents=True, exist_ok=True)
         preview = base_dir() / "backlog-preview.txt"
-        preview.write_text((text or "no mail for the card\n") + "\n\nSENT BACK TO TRIAGE:\n" + "\n".join(
-            "- %s | %s (%s)" % (i["sender"], i["subject"], i["why"]) for i in plan["retriage"]) + "\n")
+        preview.write_text((preview_text or "no mail for the card") + "\n")
         print(json.dumps(dict(counts, mode="dry-run", preview_file=str(preview),
                               gmail_writes=0, airtable_writes=0)))
         return 0
     if triage_slot_block(holder_path) or backlog_unwrapped(holder_path):
         fail("BACKLOG REFUSED before any write: the queue lock changed hands.")
     task_id, action, carded = None, "none", []
-    if plan["card"]:
+    if plan["act"] or plan["info"]:
         try:
             task_id, action, carded = raise_or_append(
-                plan["card"], dispatch or _load_dispatch(), "%s (backlog)" % _oldest(plan["card"]), section)
+                sections, dispatch or _load_dispatch(),
+                "%s (backlog)" % _oldest(plan["act"] + plan["info"]))
         except Exception as e:  # noqa: BLE001 — nothing moved yet, so nothing is lost
             fail("BACKLOG CARD NOT WRITTEN (%s). Nothing was moved." % str(e)[:240])
         if carded:
             _append_jsonl(ledger_path(), [{"taskId": task_id, "action": action, "kind": "backlog",
                                            "ids": carded,
                                            "ts": datetime.now().isoformat(timespec="seconds")}])
-    to_label = [i for i in plan["card"] if i["id"] in set(carded)] + plan["move_only"]
+    on_card = set(carded)
+    # Everything listed on the card is labelled 19 and archived, the flagged
+    # "answered" ones included; only what did not fit stays for a re-run.
+    to_label = [i for i in plan["act"] + plan["info"] if i["id"] in on_card] + plan["move_only"]
     if to_label:
-        _move_and_log(to_label, [read_lbl["name"]],
+        _move_and_log([dict(i, do="leave") for i in to_label], [read_lbl["name"]],
                       "BACKLOG %s: labelled, archived, listed on INBOX card %s" % (stamp, task_id or "(earlier)"))
     _move_and_log(plan["file"], [], "BACKLOG %s: filed out of the inbox" % stamp)
-    for i in plan["retriage"]:
-        digest_append({"id": i["id"], "do": "retriage", "sender": i["sender"], "subject": i["subject"],
-                       "reason": "BACKLOG %s: sent back to triage, %s" % (stamp, i["why"])})
     print(json.dumps(dict(counts, mode="apply", card_task=task_id, card_action=action,
-                          carded=len(carded), labelled=len(to_label), archived=len(to_label) + len(plan["file"]),
-                          sent_back_to_triage=len(plan["retriage"]))))
+                          carded=len(carded), labelled=len(to_label),
+                          archived=len(to_label) + len(plan["file"]),
+                          not_fitted=len(plan["act"]) + len(plan["info"]) - len(on_card))))
     return 0
 
 
@@ -3974,24 +4038,26 @@ def selftest():
     check("a company is an organisation", sender_type("x@acme.co.uk", pub) == "organisation")
     check("Kevin's own domain is his", sender_type("x@runpreneur.org.uk", pub) == "own")
     check("no address is unknown", sender_type("", pub) == "unknown")
-    card, shown = new_card_text(
-        [{"id": "m2", "threadId": "t2", "sender": "x@acme.co.uk", "subject": "Two",
-          "internalDate": 2000, "summary": "second"},
-         {"id": "m1", "threadId": "t1", "sender": "a@gmail.com", "subject": "One",
-          "internalDate": 1000, "summary": "first"}], "Added today", pub)
+    card, shown = new_card_text([("Added today", [
+        {"id": "m2", "threadId": "t2", "sender": "x@acme.co.uk", "subject": "Two",
+         "internalDate": 2000, "summary": "second"},
+        {"id": "m1", "threadId": "t1", "sender": "a@gmail.com", "subject": "One",
+         "internalDate": 1000, "summary": "first"}])], pub)
     check("card groups people before companies and numbers straight through",
           card.index("1. a@gmail.com | One") < card.index("2. x@acme.co.uk | Two")
           and shown == ["m1", "m2"])
     check("card carries each Gmail link", GMAIL_THREAD_URL % "t1" in card)
     check("card ends with its carry-out line", card.rstrip().endswith("Nothing is sent."))
-    more, shown2 = appended_card_text(card, [{"id": "m3", "threadId": "t3", "sender": "b@gmail.com",
-                                              "subject": "Three", "internalDate": 3000,
-                                              "summary": "third"}], "Added later", pub)
+    more, shown2 = appended_card_text(card, [("Added later", [{"id": "m3", "threadId": "t3",
+                                                               "sender": "b@gmail.com", "subject": "Three",
+                                                               "internalDate": 3000, "summary": "third"}])], pub)
     check("an added email numbers on from the card's last, and the count follows",
           "3. b@gmail.com | Three" in more and more.startswith("INBOX CARD: 3 emails")
           and more.rstrip().endswith("Nothing is sent.") and shown2 == ["m3"])
-    check("an ask is refused for the read-only card", ask_signal("Invoice 42", "") != ""
-          and ask_signal("", "Can we meet on Friday?") != "" and ask_signal("Photos", "Lovely day") == "")
+    check("a concrete ask is caught, a bare question mark is not",
+          ask_signal("Invoice 42", "") != "" and ask_signal("", "Is this still available?") != ""
+          and ask_signal("Photos", "Lovely day") == ""
+          and ask_signal("News", "Did you know we read 2,000 books?") == "")
     sends = {"t": [{"id": "s1", "ts": 50, "to": ["roy@example.com"]}]}
     msg = {"id": "i1", "threadId": "t", "internalDate": 10, "headers": {"from": "Pat <pat@example.com>"}}
     check("a forward is not an answer", reply_state(msg, sends) == "elsewhere")
@@ -4009,8 +4075,8 @@ def selftest():
         {"a": {"do": "leave", "reason": "r"}, "b": {"do": "answered"}, "c": {"do": "duplicate"},
          "d": {"do": "label12"}, "f": {"do": "leave"}, "g": {"do": "leave"}, "h": {"do": "leave"}},
         {"f"}, "Label_12", {"tb": [{"id": "s", "ts": 5, "to": ["q@x.com"]}]})
-    check("backlog: a no-ask leave cards, an ask goes back to triage, a Kevin label is left alone",
-          [i["id"] for i in plan["card"]] == ["a"] and [i["id"] for i in plan["retriage"]] == ["g"]
+    check("backlog: one card, an ask in its act section, no-ask for information, a Kevin label left alone",
+          [i["id"] for i in plan["info"]] == ["a"] and [i["id"] for i in plan["act"]] == ["g"]
           and [i["id"] for i in plan["file"]] == ["b", "c"] and plan["other"] == {"label12": 1}
           and [i["id"] for i in plan["awaiting_triage"]] == ["e"]
           and [i["id"] for i in plan["move_only"]] == ["f"]
