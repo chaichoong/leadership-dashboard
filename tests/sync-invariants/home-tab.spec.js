@@ -131,10 +131,77 @@ test.describe('Home: one scroll of the real pages', () => {
     await page.waitForFunction(() => window.__wealthDrawnAt > 0, { timeout: 10000 });
   });
 
-  test('signed out, Home loads no approvals frame behind the sign-in screen', async ({ page }) => {
+  test('signed out, Home loads no approvals frame behind the sign-in screen, even past its 20-second fallback', async ({ page }) => {
+    await page.clock.install();
     await open(page, '', { signedOut: true });
-    await page.waitForTimeout(2500);
+    await page.clock.fastForward(25000);   // past the 20-second "dashboard never finished" fallback
+    await page.waitForTimeout(300);
     expect(await page.getAttribute('#homeAgentsFrame', 'src')).toBe('');
+  });
+
+  test('Refresh and reopening never reload the Home copy (a note being typed would be lost): they ask it to re-read', async ({ page }) => {
+    await open(page, 'home');
+    await waitForHomeFrame(page);
+    await page.evaluate(() => {
+      const w = document.getElementById('homeAgentsFrame').contentWindow;
+      w.__sameCopy = true;
+      w.__fromHome = [];
+      w.addEventListener('message', e => { if (e.data && e.data.source === 'home-shell') w.__fromHome.push(e.data.type); });
+      const t = w.document.createElement('textarea'); t.id = 'specNote'; t.value = 'half-typed note';
+      w.document.getElementById('approvalsBody').appendChild(t);
+    });
+    await page.locator('[data-sync-bar="home"] button', { hasText: 'Refresh' }).click();
+    await page.waitForFunction(() => document.getElementById('homeAgentsFrame').contentWindow.__fromHome.includes('homeRefresh'), { timeout: 5000 });
+    await page.evaluate(() => switchTab('overview'));
+    await page.evaluate(() => switchTab('home'));
+    await page.waitForTimeout(500);
+    const after = await page.evaluate(() => {
+      const w = document.getElementById('homeAgentsFrame').contentWindow;
+      return { same: w.__sameCopy === true, note: (w.document.getElementById('specNote') || {}).value };
+    });
+    expect(after).toEqual({ same: true, note: 'half-typed note' });
+  });
+
+  test('each copy keeps its own carried-over notes, so a reload of one never hands its notes to the other', async ({ page }) => {
+    await open(page, 'home');
+    await waitForHomeFrame(page);
+    await page.evaluate(() => switchTab('agents'));
+    await page.waitForFunction(() => { const f = document.getElementById('agentsFrame'); return f && f.contentWindow && typeof f.contentWindow.apvSilentRefresh === 'function'; }, { timeout: 20000 });
+    const keys = await page.evaluate(() => ['homeAgentsFrame', 'agentsFrame'].map(id => document.getElementById(id).contentWindow.eval('APV_DRAFT_CARRY')));
+    expect(keys).toEqual(['apv_drafts_over_reload:home', 'apv_drafts_over_reload']);
+  });
+
+  test('a read dropped because a write landed during it is read again, never left stale', async ({ page }) => {
+    await open(page, 'home');
+    await waitForHomeFrame(page);
+    await page.evaluate(() => {
+      const w = document.getElementById('homeAgentsFrame').contentWindow;
+      w.__loads = 0;
+      const load = w.loadApprovals;
+      w.loadApprovals = function () { w.__loads++; return load.apply(this, arguments); };
+      let bumped = false;
+      const read = w.atFetch;
+      // The first read sees a write land mid-flight (what a knock-back or Undo does), so it is dropped.
+      w.atFetch = function () { if (!bumped) { bumped = true; w.eval('_apvQueueEpoch++'); } return read.apply(this, arguments); };
+      w.eval('apvRereadQueue()');
+    });
+    await page.waitForFunction(() => document.getElementById('homeAgentsFrame').contentWindow.__loads >= 2, { timeout: 8000 });
+  });
+
+  test('a change announced while a read is running waits for it, then reads again', async ({ page }) => {
+    await open(page, 'home');
+    await waitForHomeFrame(page);
+    await page.evaluate(() => {
+      const w = document.getElementById('homeAgentsFrame').contentWindow;
+      w.__rereads = 0;
+      const orig = w.apvSilentRefresh;
+      w.apvSilentRefresh = function () { w.__rereads++; return orig.apply(this, arguments); };
+      w.eval("_approvalsState = 'loading'; apvRereadQueue();");
+    });
+    await page.waitForTimeout(3000);
+    expect(await page.evaluate(() => document.getElementById('homeAgentsFrame').contentWindow.__rereads), 'no re-read while a read runs').toBe(0);
+    await page.evaluate(() => document.getElementById('homeAgentsFrame').contentWindow.eval("_approvalsState = 'ready';"));
+    await page.waitForFunction(() => document.getElementById('homeAgentsFrame').contentWindow.__rereads > 0, { timeout: 5000 });
   });
 
   test('the Home copy never takes part in the AI Agents deep-link handshake', async ({ page }) => {
@@ -177,7 +244,12 @@ test.describe('Home: one scroll of the real pages', () => {
     // A real write through each copy's own atUpdate (the mock answers the PATCH).
     await page.evaluate(() => document.getElementById('homeAgentsFrame').contentWindow.eval("atUpdate(TASKS_TBL, 'recHomeSyncSpec01', {})"));
     await page.waitForFunction(() => document.getElementById('agentsFrame').contentWindow.__rereads > 0, { timeout: 5000 });
+    // The other way round: Home is hidden while the AI Agents tab is open, so its copy marks itself due
+    // and re-reads only once Home is shown again (no reads from a copy nobody can see).
     await page.evaluate(() => document.getElementById('agentsFrame').contentWindow.eval("atUpdate(TASKS_TBL, 'recHomeSyncSpec02', {})"));
+    await page.waitForTimeout(3000);
+    expect(await page.evaluate(() => document.getElementById('homeAgentsFrame').contentWindow.__rereads), 'no read while hidden').toBe(0);
+    await page.evaluate(() => switchTab('home'));
     await page.waitForFunction(() => document.getElementById('homeAgentsFrame').contentWindow.__rereads > 0, { timeout: 5000 });
   });
 });

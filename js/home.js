@@ -13,8 +13,8 @@
 (function () {
     'use strict';
     const TAB = 'home';
-    const RELOAD_AFTER_MS = 20 * 60 * 1000;   // an older copy reloads, as the shell's own frames do
     const REREAD_AFTER_MS = 60 * 1000;        // reopening Home re-reads the queue and the brief
+    const READY_TIMEOUT_MS = 60 * 1000;       // a copy that never says it is ready is reported, not waited on for ever
     const KEEP_FRESH_MS = 5 * 60 * 1000;      // a Home left open re-reads every five minutes
     const state = { agents: { phase: 'idle' }, wealth: 'waiting', loadedAt: 0, rereadAt: 0, dataReady: false };
 
@@ -44,14 +44,23 @@
         setStatus('Loading your approvals and the CEO brief…', false);
         if (typeof markTabRefreshing === 'function') markTabRefreshing(TAB);
         f.setAttribute('src', `${f.getAttribute('data-src')}&cb=${Date.now()}`);
+        const started = state.loadedAt;
+        setTimeout(() => {
+            if (state.loadedAt !== started || state.agents.phase !== 'loading') return;
+            state.agents = { phase: 'error', error: 'it did not finish loading within a minute' };
+            setStatus('Your approvals and the CEO brief are taking too long to load. Press Refresh in the bar above, or open the AI Agents page.', true);
+            if (typeof markTabSynced === 'function') markTabSynced(TAB);
+        }, READY_TIMEOUT_MS);
     }
-    // Home opened again, or left open: a copy over 20 minutes old reloads, otherwise it re-reads.
-    function keepFresh() {
+    // Home opened again, or left open. The copy is NEVER reloaded here: a reload would lose a note
+    // Kevin is typing (review, 14 Oct 2026). It is asked to re-read; a newer deploy reloads it through
+    // its own stale-tab path, which carries his notes over. Only a copy that failed is loaded again.
+    function keepFresh(force) {
         if (!homeOpen() || document.visibilityState !== 'visible') return;
         if (!frame() || !frame().getAttribute('src')) { loadAgents(false); return; }
+        if (state.agents.phase === 'error') { loadAgents(true); return; }
         const now = Date.now();
-        if (now - state.loadedAt > RELOAD_AFTER_MS) { loadAgents(true); return; }
-        if (now - state.rereadAt > REREAD_AFTER_MS && state.agents.phase === 'ready') { state.rereadAt = now; tellFrame({ type: 'homeRefresh' }); }
+        if ((force || now - state.rereadAt > REREAD_AFTER_MS) && state.agents.phase === 'ready') { state.rereadAt = now; tellFrame({ type: 'homeRefresh' }); }
     }
 
     // The band of the frame that is on screen, so its dialogs, toasts and Undo bar open where Kevin
@@ -121,7 +130,7 @@
         registerSyncBar(TAB, {
             refreshFn: () => {
                 setDate();
-                loadAgents(true);
+                keepFresh(true);
                 if (typeof loadDashboard === 'function') loadDashboard();
                 if (state.wealth !== 'waiting') { state.wealth = 'waiting'; loadWealth(); }
             },
@@ -162,8 +171,10 @@
         setTimeout(ready, 20000);   // a dashboard read that never finishes must not keep the approvals off Home
         window.addEventListener('scroll', queueBand, { passive: true });
         window.addEventListener('resize', queueBand);
-        document.addEventListener('visibilitychange', keepFresh);
-        setInterval(() => { if (Date.now() - state.rereadAt > KEEP_FRESH_MS) keepFresh(); }, 30 * 1000);
+        // Layout above the frame can move without a scroll (the sync bar's drawer opening, the dashboard drawing).
+        if (typeof ResizeObserver === 'function') new ResizeObserver(queueBand).observe(document.body);
+        document.addEventListener('visibilitychange', () => keepFresh());   // never pass the event in as "force"
+        setInterval(() => { if (Date.now() - state.rereadAt > KEEP_FRESH_MS) keepFresh(true); }, 30 * 1000);
         // Wealth is drawn the first time its heading comes near the screen, never on load.
         const divider = document.getElementById('homeWealthDivider');
         if (divider && typeof IntersectionObserver === 'function') {
@@ -180,7 +191,8 @@
         // The address is left bare until the page has loaded: the shell switches again to any page the
         // address names at load and once more when its data is in, and each switch scrolls to the top,
         // which would pull Kevin back up mid-scroll.
-        if (!window.location.hash && typeof switchTab === 'function') {
+        const opensHome = !window.location.hash || window.location.hash === '#' + TAB;   // a reload of #home too
+        if (opensHome && typeof switchTab === 'function') {
             switchTab(TAB);
             history.replaceState(null, '', window.location.pathname + window.location.search);
             window.addEventListener('load', () => {
