@@ -233,6 +233,42 @@ describe('review of PR #784: chains, explicit retags and named agents', () => {
     expect(over.err).toMatch(/its ceiling \(45\) whatever the agent/);
     expect(add('production is down', 'live', { severity: 'high', agent: 'worker-builder' }).code).toBe(0);
   });
+
+  it('high and critical findings never count toward the ceiling (round 2 review)', () => {
+    // agent-dispatch held 61 high/critical robot walls: counted, they kept every medium refused for ever.
+    for (let i = 0; i < 50; i += 1) expect(add(`robot wall ${i}`, `h${i}.js`, { severity: i % 2 ? 'high' : 'critical' }).code).toBe(0);
+    const medium = add('an ordinary medium', 'm.js', { agent: 'Cash Flow Voids' });
+    expect(medium.code, medium.err).toBe(0);
+  });
+
+  it('one agent has one cap under every spelling agent-dispatch maps to its file (round 2 review)', () => {
+    for (let i = 0; i < 15; i += 1) expect(add(`board ${i}`, `b${i}.js`, { agent: 'AI Task Board Manager' }).code).toBe(0);
+    const again = add('board 15', 'b15.js', { agent: 'task-manager' });
+    expect(again.code).toBe(2);
+    expect(again.err).toMatch(/REFUSED: agent-dispatch \/ task-manager already has 15/);
+  });
+
+  it('a failed agent-list refresh is not retried for 10 minutes (round 2 review)', () => {
+    writeFileSync(AGENTS_CACHE + '.stale', JSON.stringify({ fetchedAt: '2026-10-01T00:00:00Z', names: ['AI Cash Flow Voids'] }));
+    const out = py(`
+from datetime import datetime, timedelta
+fm.AGENTS_CACHE = ${JSON.stringify(AGENTS_CACHE + '.stale')}
+calls = []
+def down():
+    calls.append(1)
+    raise OSError("Airtable did not answer")
+fm._team_agent_names = down
+now = datetime(2026, 10, 14, 20, 0)
+k1, p1 = fm.known_agents(now)
+k2, p2 = fm.known_agents(now + timedelta(minutes=5))
+k3, p3 = fm.known_agents(now + timedelta(minutes=11))
+print(json.dumps({"calls": len(calls), "p1": p1, "p2": p2, "kept": k2.get("cashflowvoids")}))`);
+    const r = JSON.parse(out.out);
+    expect(r.calls).toBe(2);                              // once at 20:00, once after the pause, none at 20:05
+    expect(r.p1).toMatch(/could not be refreshed .*using the cached list/);
+    expect(r.p2).toMatch(/not retried for 10 minutes/);
+    expect(r.kept).toBe('cash-flow-voids');               // the last good list still answers
+  });
 });
 
 describe('a matter no code fix can close goes to a task', () => {
@@ -286,13 +322,13 @@ describe('the cap counts each filer, and never throws a finding away unread', ()
     for (let i = 0; i < 15; i += 1) add(`property admin noise ${i}`, `p${i}.js`, { agent: 'Property Administration' });
     const over = add('one too many', 'z.js', { agent: 'property-administration' });   // the same agent, spelt differently
     expect(over.code).toBe(2);
-    expect(over.err).toMatch(/REFUSED: agent-dispatch \/ AI Property Administration already has 15/);
+    expect(over.err).toMatch(/REFUSED: agent-dispatch \/ property-administration already has 15/);
     expect(add('a creditor fault', 'c.js', { agent: 'Creditor Management' }).code).toBe(0);
     expect(add('an unnamed filing', 'u.js').code).toBe(0);                              // the unnamed pool is its own
     const viaEnv = fnd(['add', '--routine', 'agent-dispatch', '--title', 'by env', '--severity', 'low'],
       { FINDINGS_AGENT: 'Cash Flow Voids' });
     expect(viaEnv.code).toBe(0);
-    expect(byId(viaEnv.out.trim()).agent).toBe('AI Cash Flow Voids');
+    expect(byId(viaEnv.out.trim()).agent).toBe('cash-flow-voids');   // one name per agent: its file
   });
 
   it('an unnamed filer at the cap is told to name itself, and the refusal carries a reference', () => {

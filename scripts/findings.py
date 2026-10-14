@@ -130,6 +130,13 @@ AGENTS_CACHE = os.environ.get(
     "FINDINGS_AGENTS_CACHE", os.path.join(HOME, "knowledge-os/logs/findings-agents-cache.json"))
 AGENTS_DIR = os.environ.get("FINDINGS_AGENTS_DIR", os.path.join(HOME, ".claude/agents"))
 AGENTS_CACHE_HOURS = 24
+# A failed refresh is not retried for this long, so an Airtable outage costs one slow
+# `add --agent`, not every one (round 2 review of PR #784).
+AGENTS_RETRY_MINUTES = 10
+# The table that says which agent file each Team Members row runs as. It lives in
+# agent-dispatch.py (AGENTS and ROLE_AGENTS: {"name": <Team Members name>, "agent": <file>}),
+# which is READ here, never imported or run, so the two can never disagree.
+DISPATCH_SOURCE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "agent-dispatch.py")
 
 # ─── A CLAIM THAT OUTLIVES ITS RUN ───────────────────────────────────
 #
@@ -214,9 +221,44 @@ def _team_agent_names():
     return [n for n in names if n]
 
 
+def agent_file_names(source=None):
+    """{normalised Team Members name: agent file name}, read from agent-dispatch.py's own
+    AGENTS and ROLE_AGENTS tables (parsed, never run). {} when the source cannot be read."""
+    import ast
+    try:
+        with open(source or DISPATCH_SOURCE) as fh:
+            tree = ast.parse(fh.read())
+    except (OSError, SyntaxError, ValueError):
+        return {}
+    out = {}
+    for node in tree.body:
+        if not (isinstance(node, ast.Assign) and isinstance(node.value, ast.Dict)
+                and any(isinstance(t, ast.Name) and t.id in ("AGENTS", "ROLE_AGENTS") for t in node.targets)):
+            continue
+        try:
+            table = ast.literal_eval(node.value)
+        except ValueError:
+            continue
+        for v in table.values():
+            if isinstance(v, dict) and v.get("name") and v.get("agent"):
+                out[norm_agent(v["name"])] = v["agent"]
+    return out
+
+
+def _write_agents_cache(data):
+    tmp = AGENTS_CACHE + ".tmp"
+    os.makedirs(os.path.dirname(AGENTS_CACHE), exist_ok=True)
+    with open(tmp, "w") as fh:
+        json.dump(data, fh)
+    os.replace(tmp, AGENTS_CACHE)
+
+
 def known_agents(now=None):
-    """(normalised name -> display name, problem). The Team Members list comes from a cache
-    refreshed at most once a day; a failed refresh keeps the last good list and says so."""
+    """(normalised name -> the agent's one name, problem). The Team Members list comes from a
+    cache refreshed at most once a day; a failed refresh keeps the last good list, says so, and
+    is not tried again for AGENTS_RETRY_MINUTES. ONE AGENT, ONE CAP: every spelling of an agent
+    that agent-dispatch.py maps to an agent file ('AI Task Board Manager', 'Task Board Manager',
+    'task-manager') resolves to that file name, so it cannot hold two caps."""
     now = now or datetime.utcnow()
     out, problem, cached = {}, "", None
     try:
@@ -224,27 +266,37 @@ def known_agents(now=None):
             cached = json.load(fh)
     except (OSError, ValueError):
         cached = None
-    age = age_hours((cached or {}).get("fetchedAt"), now) if cached else None
-    names = (cached or {}).get("names") or []
+    cached = cached or {}
+    age = age_hours(cached.get("fetchedAt"), now) if cached.get("fetchedAt") else None
+    names = cached.get("names") or []
+    failed_ago = age_hours(cached.get("failedAt"), now) if cached.get("failedAt") else None
     if age is None or age >= AGENTS_CACHE_HOURS:
-        try:
-            names = _team_agent_names()
-            tmp = AGENTS_CACHE + ".tmp"
-            os.makedirs(os.path.dirname(AGENTS_CACHE), exist_ok=True)
-            with open(tmp, "w") as fh:
-                json.dump({"fetchedAt": now.strftime("%Y-%m-%dT%H:%M:%SZ"), "names": names}, fh)
-            os.replace(tmp, AGENTS_CACHE)
-        except Exception as e:  # noqa: BLE001 — said, and the last good list is kept
-            problem = "the AI agent list could not be refreshed (%s)%s" % (
-                str(e)[:120], "; using the cached list" if names else "")
+        if failed_ago is not None and failed_ago * 60 < AGENTS_RETRY_MINUTES:
+            problem = ("the AI agent list could not be refreshed at %s; not retried for %d minutes%s"
+                       % (cached.get("failedAt"), AGENTS_RETRY_MINUTES, "; using the cached list" if names else ""))
+        else:
+            try:
+                names = _team_agent_names()
+                _write_agents_cache({"fetchedAt": now.strftime("%Y-%m-%dT%H:%M:%SZ"), "names": names})
+            except Exception as e:  # noqa: BLE001 — said, and the last good list is kept
+                problem = "the AI agent list could not be refreshed (%s)%s" % (
+                    str(e)[:120], "; using the cached list" if names else "")
+                try:
+                    _write_agents_cache(dict(cached, failedAt=now.strftime("%Y-%m-%dT%H:%M:%SZ")))
+                except OSError:
+                    pass
+    files = agent_file_names()
     for n in names:
-        out[norm_agent(n)] = n
+        out[norm_agent(n)] = files.get(norm_agent(n), n)
     try:
         for f in os.listdir(AGENTS_DIR):
             if f.endswith(".md") and f[:-3] == f[:-3].lower():
                 out.setdefault(norm_agent(f[:-3]), f[:-3])
     except OSError:
         pass
+    # An agent file named in the dispatch table is an agent too, under its own name.
+    for fname in set(files.values()):
+        out.setdefault(norm_agent(fname), fname)
     out.pop("", None)
     return out, problem
 
@@ -631,8 +683,12 @@ def file_finding(state, f, cap=True):
     #    high are never refused.
     if cap and f["severity"] not in ALWAYS_ACCEPT:
         mine = open_findings_for(state, f["routine"], f.get("agent"))
+        # The ceiling counts what the cap governs: findings below high. High and critical
+        # are never refused, so counting them would let 61 robot walls (all filed high) keep
+        # every medium refused for ever (round 2 review of PR #784).
         lane = [r for r in state.values()
-                if r.get("routine") == f["routine"] and r.get("status") in OPEN_STATES]
+                if r.get("routine") == f["routine"] and r.get("status") in OPEN_STATES
+                and r.get("severity") not in ALWAYS_ACCEPT]
         if len(mine) >= MAX_OPEN_PER_ROUTINE or len(lane) >= ROUTINE_CEILING:
             rec = {"op": "overflow", "ts": iso(), "routine": f["routine"],
                    "severity": f["severity"], "title": f["title"], "where": f["where"],
