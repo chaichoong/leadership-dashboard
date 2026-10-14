@@ -1090,7 +1090,7 @@ function apvRereadQueue(){ _apvDirty = true; apvRunReread(); }
 // picked, cards ticked, a save running.
 function apvBusy(){
     return apvTyping() || _apvSaving.size > 0 || _apvSelected.size > 0 || Object.keys(_apvReason).length > 0
-        || Object.values(_apvDrafts).some(dr => dr && (String(dr.note || '').trim() || (dr.files || []).length));
+        || allApprovals.some(t => { const dr = _apvDrafts[t.id]; return dr && (String(dr.note || '').trim() || (dr.files || []).length); });
 }
 async function apvRunReread(){
     if(!_apvDirty || _apvRereading || !PAT) return;
@@ -1100,8 +1100,10 @@ async function apvRunReread(){
     let failed = false;
     try {
         await apvSilentRefresh();
+        const deferredSig = () => allDeferred.map(t => `${t.id}:${t.until}:${t.why || ''}`).join('|');
+        const beforeDeferred = deferredSig();
         await loadDeferred();
-        apvRefreshDeferredLane();
+        if(deferredSig() !== beforeDeferred) apvRefreshDeferredLane();   // a rebuild could swallow a click on "Bring back now"
         // Both readers catch their own errors (they draw them in place), so failure is read from their state.
         failed = String(_approvalsState).indexOf('error') === 0 || String(_deferredState).indexOf('error') === 0;
     } catch(err){
@@ -1109,7 +1111,8 @@ async function apvRunReread(){
         failed = !(err && err.message === 'auth');
     } finally { _apvRereading = false; }
     if(!failed) _apvRereadFails = 0;
-    else if(++_apvRereadFails <= 3) _apvDirty = true;   // a few more tries, never a loop
+    // A few more tries, spaced 10, 20 and 30 seconds apart so a 30-second Airtable lockout is outlasted; never a loop.
+    else if(++_apvRereadFails <= 3) setTimeout(() => { _apvDirty = true; }, 10000 * _apvRereadFails);
 }
 setInterval(apvRunReread, 2000);
 if(APV_CHANNEL) APV_CHANNEL.onmessage = (e) => {
@@ -8356,6 +8359,9 @@ function homeEmbedWatchHeight(){
     ['main','loader'].forEach(id => { const el = document.getElementById(id); if(el) ro.observe(el); });
     send();
 }
+// The brief as last drawn on Home (records shown + the London day), so a refresh redraws it when
+// either changes, the day turning over at midnight included.
+let _homeBriefDrawn = '';
 // Messages from the Home shell that holds this copy, and from nothing else.
 if(HOME_MODE) window.addEventListener('message', (e) => {
     if(e.source !== window.parent || e.origin !== window.location.origin) return;
@@ -8379,8 +8385,8 @@ if(HOME_MODE) window.addEventListener('message', (e) => {
             // out: Airtable signs them afresh on every read.
             const sig = () => ceoBriefTodayISO() + '|' + (ceoBriefRecords || []).map(x => x.id + ':' + JSON.stringify(Object.entries(x.fields || {})
                 .filter(([, v]) => !(Array.isArray(v) && v.some(y => y && typeof y === 'object' && y.url))))).join('|');
-            const before = sig();
-            loadCeoBriefs().then(() => { if(sig() !== before) renderCeoBrief(); }).catch(err => console.warn('CEO brief re-read failed', err));
+            loadCeoBriefs().then(() => { const now = sig(); if(now !== _homeBriefDrawn){ renderCeoBrief(); _homeBriefDrawn = now; } })
+                .catch(err => console.warn('CEO brief re-read failed', err));
         }).catch(err => console.warn('Home refresh failed', err));
     }
 });
