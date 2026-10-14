@@ -118,12 +118,20 @@ fi
 # can never disagree about what is queued. cmd_queue has its own control and
 # exits non-zero when the read is broken rather than returning an empty queue.
 QJSON="$SCRATCH/queue.json"
-if ! /usr/bin/python3 "$REPO/scripts/agent-dispatch.py" queue > "$QJSON" 2>"$SCRATCH/queue.err"; then
+# Built in a temp file and renamed over the last one (14 Oct 2026). A redirect
+# empties the file first, and the build takes about 14 seconds, while
+# scripts/loop-health.py (the Agent Work card, every 10 minutes, on the half
+# hour too) reads this file for the tasks held under a lead task. A rename is
+# atomic, so a reader sees the last whole queue or the new whole queue. A failed
+# build leaves the last whole queue, which ages until the reader calls it stale.
+if ! /usr/bin/python3 "$REPO/scripts/agent-dispatch.py" queue > "$QJSON.tmp" 2>"$SCRATCH/queue.err"; then
+  rm -f "$QJSON.tmp"
   echo "ERROR: agent-dispatch queue failed — the queue read is broken, not empty" >&2
   tail -c 500 "$SCRATCH/queue.err" >&2
   beat broken "queue read failed" 0 no
   exit 1
 fi
+mv -f "$QJSON.tmp" "$QJSON"
 
 GATE="$(/usr/bin/python3 "$POLL" gate --queue "$QJSON" 2>"$SCRATCH/gate.err")"
 GRC=$?

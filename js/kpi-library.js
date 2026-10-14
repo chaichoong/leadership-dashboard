@@ -90,7 +90,7 @@ const KPI_LIBRARY = [
     // The AI Team section of the Leadership Dashboard (Kevin, 9 Oct 2026; brain Decisions/2026-10-09).
     // Computed on the Mac by scripts/estate-status.py into the ai-team-health and agent-blockers rows.
     { tier: 1, group: 'AI workforce', name: 'Agent work in vs out', shape: 'T3', status: 'live',
-      how: 'Open tasks owned by an AI agent, how many are not moving (scripts/loop-health.py, the same list as the Estate tab), and agent tasks created against agent tasks done in the last 7 days. More in than done means work is piling up.' },
+      how: 'Open tasks owned by an AI agent, split into parts that add up to the total: live (due now, not yet carried out), waiting for approval, waiting on a reply (the approved action is done, the task stays open for the answer, and no wall is open on it), scheduled for later (including approvals put off to a later date) and, shown only when there are any, tasks on no board. The headline is the live count. Stuck counts only agent tasks that should have moved and did not (scripts/loop-health.py), leaving out tasks the dispatcher holds under a lead task on purpose, plus any reply waited on for more than 14 days. Then agent tasks created against agent tasks done in the last 7 days: more in than done means work is piling up.' },
     { tier: 1, group: 'AI workforce', name: 'Defect queue in vs out', shape: 'T3', status: 'live',
       how: 'Open findings (scripts/findings.py BACKLOG: open, claimed, pending) and, over the last 7 days, findings filed against findings fixed (landed in a merged PR). Rejected findings carry no close time, so they are not counted as cleared.' },
     { tier: 1, group: 'AI workforce', name: 'Robots blocked (bottleneck)', shape: 'T3', status: 'live',

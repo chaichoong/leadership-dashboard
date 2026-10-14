@@ -31,6 +31,24 @@ const healthRow = (age = 5, over = {}) => ({
   },
 });
 
+// The split row (Kevin, 14 Oct 2026; scripts/loop-health.py agent_work), from the live dry run
+// that evening: 182 open agent tasks = 57 live + 18 waiting for approval + 43 waiting on a reply
+// + 64 scheduled; 26 stuck after leaving out a Roy task and 18 held under a lead task.
+const SPLIT_WORK = { open: 182, notMoving: 26, created7d: 129, done7d: 133, live: 57, approval: 18,
+  waitingReply: 43, scheduled: 64, other: 0, replyOverdue: 0, replyWindowDays: 14, held: 18,
+  heldCheck: null, waitCheck: null, splitCheck: null };
+const splitRow = (workOver = {}) => {
+  const row = healthRow();
+  const p = JSON.parse(row.fields[ES.payload]);
+  p.work = { ...SPLIT_WORK, ...workOver };
+  row.fields[ES.payload] = JSON.stringify(p);
+  return row;
+};
+const cardDetail = (page, id) => page.evaluate((cid) => {
+  const d = document.getElementById(cid).querySelector('.kpi-card-detail');
+  return { text: d.textContent, rows: [...d.querySelectorAll('.od-breakdown-row')].map(r => [...r.children].map(c => c.textContent.trim())) };
+}, id);
+
 const wall = (kind, n) => Array.from({ length: n }, (_, i) => ({ task: `rec${kind}${i}`, kind }));
 const blockersRow = (age = 5) => ({
   id: 'recBlockers', fields: {
@@ -90,6 +108,102 @@ test.describe('AI Team section', () => {
     expect(rework.head).toBe('41%');
     expect(rework.sub).toBe('43 of 105 fixes in 14 days · baseline 32%');
     expect(rework.cls).toContain('text-red');           // over 40%
+  });
+
+  test('Agent Work leads with live work and lists every kind of open work (14 Oct 2026)', async ({ page }) => {
+    await page.addInitScript((pat) => localStorage.setItem('_dlr_pat', pat), MOCK_PAT);
+    await loadDashboard(page);
+    await routeEstate(page, [splitRow(), blockersRow()]);
+    await page.evaluate(async () => await loadAiTeamHealth());
+    const work = await card(page, 'aiWorkCard');
+    expect(work.head).toBe('57 live');
+    expect(work.sub).toBe('26 stuck · 7 days: 129 in, 133 done');
+    expect(work.cls).toContain('text-green');            // more done than came in
+    const d = await cardDetail(page, 'aiWorkCard');
+    expect(d.rows.slice(0, 6)).toEqual([
+      ['Live', '57'], ['Waiting for your approval', '18'], ['Waiting on a reply', '43'],
+      ['Scheduled for later', '64'], ['All open', '182'], ['Stuck (not moving)', '26'],
+    ]);
+    expect(d.text).toContain('leaves out tasks held under a lead task (18 now)');
+    expect(d.text).toContain('after 14 days it counts as live and stuck');
+    expect(d.text).toContain('approvals you put off to a later date');
+    expect(d.text).not.toMatch(/On no board|too long|notes only/);   // none of those today
+  });
+
+  test('a task on no board gets its own row and turns the card amber, never hides in live (review item 6)', async ({ page }) => {
+    await page.addInitScript((pat) => localStorage.setItem('_dlr_pat', pat), MOCK_PAT);
+    await loadDashboard(page);
+    await routeEstate(page, [splitRow({ live: 55, other: 2, notMoving: 29, replyOverdue: 3,
+      waitCheck: 'no carry-out ledger at /tmp/x <b>bold</b>' }), blockersRow()]);
+    await page.evaluate(async () => await loadAiTeamHealth());
+    const work = await card(page, 'aiWorkCard');
+    expect(work.head).toBe('55 live');
+    expect(work.cls).toContain('text-amber');            // more done than in, but a task is on no board
+    const d = await cardDetail(page, 'aiWorkCard');
+    expect(d.rows.slice(0, 7)).toEqual([
+      ['Live', '55'], ['Waiting for your approval', '18'], ['Waiting on a reply', '43'],
+      ['Scheduled for later', '64'], ['On no board (nothing reads it)', '2'], ['All open', '182'],
+      ['Stuck (not moving)', '29'],
+    ]);
+    expect(d.text).toContain('3 of the stuck have waited on a reply too long');
+    expect(d.text).toContain('read from the task notes only: no carry-out ledger at /tmp/x <b>bold</b>');
+    expect(await page.evaluate(() => document.querySelectorAll('#aiWorkCard b').length)).toBe(0);
+  });
+
+  test('a withdrawn split with an unchecked held list still says so and goes amber (review item 5)', async ({ page }) => {
+    await page.addInitScript((pat) => localStorage.setItem('_dlr_pat', pat), MOCK_PAT);
+    await loadDashboard(page);
+    await routeEstate(page, [splitRow({ live: null, approval: null, waitingReply: null, scheduled: null, other: null,
+      notMoving: 44, held: null, heldCheck: 'the dispatch queue is 200 minutes old',
+      splitCheck: 'agent-dispatch.py could not be loaded: boom' }), blockersRow()]);
+    await page.evaluate(async () => await loadAiTeamHealth());
+    const work = await card(page, 'aiWorkCard');
+    expect(work.head).toBe('182 open');
+    expect(work.sub).toBe('44 not moving (held tasks not checked) · 7 days: 129 in, 133 done');
+    expect(work.cls).toContain('text-amber');            // done beats in, so only the unchecked count makes it amber
+    const text = (await cardDetail(page, 'aiWorkCard')).text;
+    expect(text).toContain('Live work could not be split out: agent-dispatch.py could not be loaded: boom');
+    expect(text).toContain('could not be left out of the stuck count this time: the dispatch queue is 200 minutes old');
+  });
+
+  test('a row written before the split still shows the open count, never "undefined live" or a zero', async ({ page }) => {
+    // healthRow() is the 9 Oct payload: no live, approval, waitingReply or scheduled keys.
+    await page.addInitScript((pat) => localStorage.setItem('_dlr_pat', pat), MOCK_PAT);
+    await loadDashboard(page);
+    await routeEstate(page, [healthRow(), blockersRow()]);
+    await page.evaluate(async () => await loadAiTeamHealth());
+    const work = await card(page, 'aiWorkCard');
+    expect(work.head).toBe('178 open');
+    expect(work.sub).toBe('40 not moving · 7 days: 164 in, 119 done');
+    expect((await cardDetail(page, 'aiWorkCard')).text).not.toMatch(/undefined|Waiting on a reply/);
+  });
+
+  test('a split the Mac withdrew shows the open count and says why', async ({ page }) => {
+    await page.addInitScript((pat) => localStorage.setItem('_dlr_pat', pat), MOCK_PAT);
+    await loadDashboard(page);
+    await routeEstate(page, [splitRow({ live: null, approval: null, waitingReply: null, scheduled: null,
+      splitCheck: '3 task(s) carry the mark and none carries a readable dated line' }), blockersRow()]);
+    await page.evaluate(async () => await loadAiTeamHealth());
+    const work = await card(page, 'aiWorkCard');
+    expect(work.head).toBe('182 open');
+    // More done than came in, so only the withdrawn split makes it amber (round 2, item 5).
+    expect(work.cls).toContain('text-amber');
+    expect((await cardDetail(page, 'aiWorkCard')).text).toContain('Live work could not be split out: 3 task(s) carry the mark');
+  });
+
+  test('a stuck count not checked for held tasks says so on the card and goes amber', async ({ page }) => {
+    await page.addInitScript((pat) => localStorage.setItem('_dlr_pat', pat), MOCK_PAT);
+    await loadDashboard(page);
+    await routeEstate(page, [splitRow({ notMoving: 44, held: null,
+      heldCheck: 'the dispatch queue is 200 minutes old <img src=x onerror="window.__aiHeldXss=1">' }), blockersRow()]);
+    await page.evaluate(async () => await loadAiTeamHealth());
+    await page.waitForTimeout(300);
+    const work = await card(page, 'aiWorkCard');
+    expect(work.sub).toBe('44 stuck (held tasks not checked) · 7 days: 129 in, 133 done');
+    expect(work.cls).toContain('text-amber');
+    expect((await cardDetail(page, 'aiWorkCard')).text).toContain('could not be left out of the stuck count this time: the dispatch queue is 200 minutes old');
+    expect(await page.evaluate(() => window.__aiHeldXss)).toBeUndefined();
+    expect(await page.evaluate(() => document.querySelectorAll('#aiTeamCards img').length)).toBe(0);
   });
 
   test('holds all eight AI cards, and the operational section none of them', async ({ page }) => {
