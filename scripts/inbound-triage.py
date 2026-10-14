@@ -50,11 +50,28 @@ USAGE
                                               file into an allow-listed
                                               taxonomy label (6, 10, 11, 17,
                                               18) and archive; no task
-  inbound-triage.py note --id MSGID --do leave|task-created|duplicate|deferred [--reason R]
-                                              log a no-Gmail-change decision
+  inbound-triage.py note --id MSGID --do task-created|updated|deferred [--reason R]
+                                              log a decision; no Gmail change
+  inbound-triage.py note --id MSGID --do answered|duplicate [--reason R]
+                                              log it AND file it out of the
+                                              inbox (archive, reversible)
+  inbound-triage.py note --id MSGID --do leave --reason "<one-line summary>"
+                                              for Kevin to read: label 19,
+                                              archive, and queue it for this
+                                              run's INBOX card (Kevin, 14 Oct 2026)
+  inbound-triage.py inbox-card [--slot HH:MM] [--dry-run]
+                                              ONE approval card listing every
+                                              queued "for Kevin to read" email
+  inbound-triage.py inbox-lessons [--dry-run] copy Kevin's remembered notes on
+                                              INBOX cards into the triage
+                                              agent's lessons (runner pre-read)
+  inbound-triage.py backlog --dry-run|--apply one-off: card + file the mail an
+                                              earlier run left in the inbox
   inbound-triage.py mark --upto MS            advance the watermark (epoch ms)
-  inbound-triage.py score --waiting N         record today's waiting count and
-                                              write Metric Score to the register
+  inbound-triage.py score --waiting N         record today's waiting count (N
+                                              plus inbox mail older than 2 days,
+                                              from the scan) and write Metric
+                                              Score to the register
   inbound-triage.py publish                   upsert today's decisions to the
                                               AI Agent Daily Log row on the
                                               register, so Kevin can check in
@@ -149,10 +166,10 @@ DECISION_GROUPS = [
     ("file-18",      "Filed: creditor"),
     ("archive",      "Archived as machine noise (reversible)"),
     ("updated",      "Existing thread task updated, no duplicate made"),
-    ("answered",     "Already answered by us, no task needed"),
-    ("leave",        "Left in the inbox on purpose"),
+    ("answered",     "Already answered by us, filed out of the inbox"),
+    ("leave",        "For you to read: on your INBOX card, out of the inbox"),
     ("deferred",     "Deferred to tomorrow (daily cap)"),
-    ("duplicate",    "Already had a task, nothing created"),
+    ("duplicate",    "Already had a task, filed out of the inbox"),
 ]
 
 # Airtable multilineText holds ~100k chars; stay well clear so an oversized
@@ -170,6 +187,193 @@ MAX_PAGES = 4
 # 15/16 (automation-owned), and the non-numbered pipeline labels ("Invoice to
 # Airtable", "Send to Airtable", "Add to ... AT Board") which trigger flows.
 FILE_LABEL_ALLOW = {"6", "10", "11", "17", "18"}
+
+# ─── NOTHING TRIAGE DECIDES STAYS IN THE INBOX (Kevin, 14 Oct 2026) ─────
+#
+# "Anything I need to see should come as an approval card. But ensuring that
+# feedback I give for anything I don't need to see is taken into consideration
+# for the next time."
+#
+# Three decisions used to end with the mail still in the inbox, for ever:
+# "leave" (a person wrote it, Kevin should read it, nothing to do), "answered"
+# (we spoke last on the thread) and "duplicate" (the thread already had a
+# task). `note` logged them and changed nothing in Gmail, the skill said "his
+# inbox tidying is his", and nobody cleared it after 17 Sep 2026. Measured on
+# 14 Oct 2026: 155 in the inbox, 110 of them already decided leave or
+# answered, the oldest 17 Sep. The score read "0 waiting" all the while,
+# because left mail was excluded from "waiting" by design.
+#
+# So, in code rather than prose:
+#   * leave     -> ONLY for mail that asks nothing of anyone, Kevin included
+#                  (`ask_signal` refuses the rest: an ask, a decision, a
+#                  payment, a deadline or a date is a rule-1 task); labelled
+#                  READ_LABEL_NUM, archived, and listed on Kevin's ONE open
+#                  INBOX card (new emails are added to it until he decides
+#                  it), owned by Inbox Response so a "reply to 2 saying yes"
+#                  note is worked by an agent that can;
+#   * answered  -> archived, but only when a later send on the thread went TO
+#                  the sender (a forward to Roy is not an answer);
+#   * duplicate -> archived;
+#   * the score counts inbox mail older than 2 days, so it cannot read 0 over
+#     a full inbox;
+#   * Kevin's notes on those cards are copied into the TRIAGE agent's lessons
+#     before each run (`inbox-lessons`).
+# Archive only removes INBOX: every label stays and nothing is deleted.
+#
+# No numbered label fitted "for Kevin to read": 1-5 are his manual workflow
+# states, 8/9/14 belong to Mica's lane and the completion sweep, and 12 is the
+# agent lane, where a message with no task is "stranded" and gets one minted.
+# So the label is a new one Kevin created on 14 Oct 2026. It is found by its
+# NAME's number (`find_label`), never by its id: Gmail gave it the id
+# "Label_12", which has nothing to do with lane 12. Missing label = a loud
+# refusal, never mail archived with no label.
+READ_LABEL_NUM = "19"
+READ_LABEL_NAME = "19: for Kevin to read"
+# Notes that now file the message out of the inbox (remove INBOX, nothing else).
+FILE_OUT_NOTES = ("answered", "duplicate")
+# Digest decisions that take a message out of the inbox, plus every file-*.
+INBOX_EXIT_DOS = ("label12", "label13", "archive", "leave") + FILE_OUT_NOTES
+# A stale inbox message whose LAST decision is one of these is the agent's to
+# decide (again): never decided, or deferred.
+TRIAGE_AGAIN_DOS = ("", "deferred")
+INBOX_CARD_PREFIX = "INBOX: "
+INBOX_CARD_HEAD = "INBOX CARD:"
+INBOX_CARD_IDS = "INBOX CARD MESSAGE IDS: "
+INBOX_CARD_FOOT = "How to answer:"
+# The URL form every inbound task already carries (it survives archiving).
+GMAIL_THREAD_URL = "https://mail.google.com/mail/u/0/#all/%s"
+INBOX_CARD_CHAR_CAP = 90000
+# The worker refuses more than 40 ids in one /gmail/modify (subrequest budget).
+MODIFY_BATCH = 40
+# The score's inbox snapshot must come from THIS slot's scan. Slots start four
+# hours apart, so a snapshot older than three hours is a previous slot's, and
+# one older than this slot's own start record is too.
+STALE_SNAPSHOT_MAX_HOURS = 3
+# The one-off backlog reads up to 300 inbox messages (155 on 14 Oct 2026), and
+# up to 200 sent ones to check each "answered" really went to the sender.
+BACKLOG_MAX_PAGES = 12
+BACKLOG_SENT_MAX_PAGES = 8
+# The job-queue lock the slot runs under (inbound-triage-run.sh is wrapped by
+# `job-queue.py run inbound-triage`), and the job the backlog must run as.
+TRIAGE_JOB = "inbound-triage"
+BACKLOG_JOB = "inbound-triage-backlog"
+# A card step's queue file left behind by a process that died: adopted by the
+# next card step once its process is gone, or once it is this old whatever the
+# pid says (a pid can be reused).
+TAKING_ORPHAN_SECONDS = 3 * 3600
+# Kevin's own addresses, so his own mail groups apart on a card.
+OWN_DOMAINS = {"runpreneur.org.uk", "operationsdirector.co.uk", "agilelets.co.uk"}
+SENDER_TYPES = (
+    ("person", "From people (personal email addresses)"),
+    ("public", "From government, councils and public bodies"),
+    ("organisation", "From companies and organisations"),
+    ("own", "From your own addresses"),
+    ("unknown", "Sender not known"),
+)
+
+# THE READ-ONLY CARD IS FOR MAIL THAT ASKS NOTHING OF THE READER (review of PR
+# #783, 14 Oct 2026). "Needs no reply or action from the robots" let "please
+# pay by Friday" onto a card Kevin approves as read: the robots never pay, so it
+# qualified. Kevin's 17 Sep protocol makes a decision for him a card of its own
+# (a task). So `leave` is refused when the subject or the sender's own words
+# (the quoted history is ignored) carry a CONCRETE ask of the reader:
+#   * money due: pay, payment, invoice, amount due, overdue, or a £ sum with
+#     a due/by word near it;
+#   * a deadline: by / before / until a date or a weekday, "deadline", "expires";
+#   * a request to act: please confirm/reply/sign/send/call back/complete/
+#     submit, can you, could you, would you, let me know;
+#   * a decision: do you want, choose, approve;
+#   * a direct question to the reader: a sentence that ends "?" and opens like
+#     a question ("Is this still available?"), never a rhetorical one ("Did
+#     you know...?", "Ready for race day?").
+# The second review (same day) narrowed the first version: a bare question
+# mark flagged 40 of 82 left emails, newsletters and school letters among
+# them. The third widened the requests it had missed: "please" + any word
+# (bar "please find", "please note", "please do not reply"), "kindly",
+# "grateful if", "need your", an attached form to complete, return or sign,
+# a signature, consent, keys to collect or return, and arrears. This is the
+# BACKSTOP: the agent's own judgement is the first guard, and anything it is
+# unsure of is a rule-1 task. `--override "<why it asks nothing>"` stays,
+# and is logged.
+_WEEKDAYS = r"monday|tuesday|wednesday|thursday|friday|saturday|sunday"
+_MONTHS = (r"jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|june?|july?|aug(?:ust)?"
+           r"|sept?(?:ember)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?")
+_A_DATE = (r"(?:(?:" + _WEEKDAYS + r")|tomorrow|tonight|today|(?:the )?end of (?:the )?(?:day|week|month)"
+           r"|next (?:week|month)|\d{1,2}(?:st|nd|rd|th)\b(?:\s+(?:of\s+)?(?:" + _MONTHS + r"))?"
+           r"|\d{1,2}\s+(?:of\s+)?(?:" + _MONTHS + r")|(?:" + _MONTHS + r")\s+\d{1,2}(?:st|nd|rd|th)?"
+           r"|\d{1,2}[/.]\d{1,2}(?:[/.]\d{2,4})?(?![\d%]))")
+ASK_SIGNALS = (
+    ("money due", re.compile(
+        r"\b(?:pay|payment|payments|invoice|invoices|amount due|overdue|arrears)\b"
+        r"|£\s?\d[\d,.]*[^.\n]{0,40}\b(?:due|by)\b|\b(?:due|by)\b[^.\n]{0,40}£\s?\d", re.I)),
+    ("a deadline", re.compile(
+        r"\b(?:by|before|until)\s+(?:the\s+)?" + _A_DATE + r"\b|\bdeadline\b|\bexpires?\b", re.I)),
+    ("a request to act", re.compile(
+        # "please" + any word, except the fixed politeness that asks nothing.
+        r"\bplease\s+(?!(?:find|note|enjoy|do not (?:reply|respond|hesitate)|don'?t (?:reply|respond|hesitate)"
+        r"|consider the environment|see (?:the )?(?:attached|below)|be (?:advised|aware)"
+        r"|accept (?:my|our) apolog\w*|give (?:my|our) love)\b)[a-z]+"
+        r"|\bkindly\b|\bgrateful if\b|\b(?:need|needs|require|requires)\s+(?:your|you to)\b"
+        r"|\b(?:can|could|would) you\b|\blet (?:me|us) know\b"
+        r"|\bfor you to (?:complete|return|sign|fill|send)\b"
+        r"|\b(?:attached|enclosed)\b[^\n]{0,80}?\b(?:form|document|slip|agreement|contract|declaration)s?\b"
+        r"[^\n]{0,80}?\b(?:complete|return|sign|fill)"
+        r"|\b(?:form|document|slip|agreement|contract|declaration)s?\b[^\n]{0,60}?\b(?:attached|enclosed)\b"
+        r"[^\n]{0,80}?\b(?:complete|return|sign|fill)"
+        r"|\bsignature\b|\bconsent\b"
+        r"|\b(?:collect|return|drop off|pick up|hand back)\b[^.\n]{0,30}?\bkeys?\b", re.I)),
+    ("a decision", re.compile(r"\b(?:do you want|choose|approve)\b", re.I)),
+)
+QUESTION_OPENER_RE = re.compile(
+    r"^(?:(?:hi|hello|hey|dear)\b[^,?]{0,30},\s*)?"
+    r"(?:is|are|was|were|do|does|did|can|could|would|will|shall|should|have|has|when|what"
+    r"|where|which|who|how|any chance)\b", re.I)
+RHETORICAL_RE = re.compile(
+    r"^(?:did you know|have you ever|ever wonder|want to|looking for|why not|ready (?:for|to)"
+    r"|fancy|who doesn'?t|what if|are you ready|do you love|need (?:a|an|some)\b"
+    r"|thinking (?:of|about))", re.I)
+
+
+def direct_question(text):
+    """The first sentence that asks the reader something, or ''."""
+    for sentence in re.split(r"(?<=[.!?])\s+|\n+", str(text or "")):
+        s = sentence.strip()
+        if s.endswith("?") and QUESTION_OPENER_RE.match(s) and not RHETORICAL_RE.match(s):
+            return s
+    return ""
+
+
+# THE SMALL PRINT ASKS NOTHING, BUT NOTHING ELSE IS CUT (fourth and fifth
+# reviews of PR #783). "Please consider the environment before printing" and
+# "if you are not the intended recipient, please notify the sender" sit under
+# half the mail a person sends, so those SENTENCES are taken out wherever they
+# appear. Nothing is cut at a sign-off: the fourth review's cut at "Many
+# thanks" / "Best regards" / "Thanks" lost the ask that came after it ("Many
+# thanks for yesterday. Could you send the signed form by Friday?", "PS please
+# pay by Friday"), so the check reads everything else, above and below any
+# sign-off. The quoted history is already gone (the gate's unquoted_body).
+BOILERPLATE_RE = re.compile(
+    r"(?:please consider the environment|if you are not the intended recipient"
+    r"|this e-?mail (?:and any|is confidential|may contain|message is)|confidentiality notice"
+    r"|disclaimer:|registered (?:in england|office))[^.\n]*(?:\.|\n|$)", re.I)
+
+
+def strip_boilerplate(text):
+    """The sender's words with the disclaimer and environment sentences taken out."""
+    return BOILERPLATE_RE.sub(" ", str(text or ""))
+
+
+def ask_signal(subject, own_words):
+    """'' when the subject and the sender's own words ask nothing of the
+    reader, else what was found ("money due (pay)"). Pure, so the tests drive it."""
+    own_words = strip_boilerplate(own_words)
+    text = "%s\n%s" % (subject or "", own_words or "")
+    for label, rx in ASK_SIGNALS:
+        m = rx.search(text)
+        if m:
+            return "%s (%s)" % (label, " ".join(m.group(0).split())[:40])
+    q = direct_question(own_words) or direct_question(subject)
+    return "a question to you (%s)" % " ".join(q.split())[:40] if q else ""
 
 # State + digest live OUTSIDE the repo: the repo is public and the digest holds
 # senders and subjects. INBOUND_TRIAGE_DIR exists so selftest can use a tempdir.
@@ -285,6 +489,7 @@ def write_scan_cache(messages):
     (4 Sep 2026, finding 20260904-daily-ops-450). Parsed by the gate's own
     function — imported, never copied."""
     parse_deadline = _load_gate().parse_deadline_line
+    unquote = _load_gate().unquoted_body
     cutoff_ms = int((datetime.now() - timedelta(days=30)).timestamp() * 1000)
     cache = {k: v for k, v in read_scan_cache().items()
              if (v.get("internalDate") or cutoff_ms) >= cutoff_ms}
@@ -300,6 +505,16 @@ def write_scan_cache(messages):
             # The date the letter itself states. Read back by the task gate,
             # which stamps Due Date + Hard Deadline from it deterministically.
             "deadline": parse_deadline(m.get("body", "")),
+            # Read back by `note`: a message already out of the inbox needs no
+            # Gmail call to file it (14 Oct 2026).
+            "inbox": "INBOX" in (m.get("labelIds") or []),
+            # Read back by `note --do leave`, which refuses mail that asks
+            # anything of anyone. Like `deadline`, only the full body can say.
+            "ask": ask_signal(((m.get("headers") or {}).get("subject", "")),
+                              unquote(m.get("body", ""))),
+            # "answered" / "elsewhere" / "": did a later send on this thread go
+            # TO this message's sender? Stamped by the scan; read by `note`.
+            "reply_state": m.get("reply_state", ""),
         }
     d = base_dir()
     d.mkdir(parents=True, exist_ok=True)
@@ -717,6 +932,14 @@ def cmd_scan(back_hours, sleep=time.sleep):
         ts = int(m.get("internalDate") or 0)
         if tid and ts > sent_threads.get(tid, 0):
             sent_threads[tid] = ts
+    # WHO EACH SEND WENT TO (review of PR #783, 14 Oct 2026). "We sent the
+    # last message" counted a forward to Roy or the accountant as an answer to
+    # the sender. A message is answered only by a later send that went TO its
+    # sender (reply or reply-all); every message the agent may decide carries
+    # that verdict, and `note --do answered` reads it back from the cache.
+    sends = thread_sends(sent_msgs)
+    for m in new_inbox + stale:
+        m["reply_state"] = reply_state(m, sends)
 
     # Stamp every message with the auto-reply signal (shared with the task
     # gate), then keep machine replies OUT of the stranded lists: a stranded
@@ -744,6 +967,20 @@ def cmd_scan(back_hours, sleep=time.sleep):
     except Exception as e:  # noqa: BLE001 — any failure = UNCHECKED, lists untouched
         stranded_lookup = "UNCHECKED: %s" % str(e)[:200]
 
+    # OLD INBOX MAIL NOBODY HAS DECIDED (review of PR #783, 14 Oct 2026). The
+    # agent triaged only mail newer than the watermark, so an old message with
+    # no decision, or one deferred, sat in the inbox with nothing ever coming
+    # for it. These are decided like new
+    # mail. Mail Kevin filed under a label of his own is his: left alone.
+    last = digest_last_decisions()
+    read_lbl = find_label(labels, READ_LABEL_NUM)
+    new_ids = {m.get("id") for m in new_inbox}
+    stale_to_triage = [
+        m for m in stale
+        if m.get("id") not in new_ids
+        and str((last.get(m.get("id")) or {}).get("do") or "") in TRIAGE_AGAIN_DOS
+        and not other_user_labels(m, read_lbl["id"] if read_lbl else None)]
+
     write_scan_cache(new_inbox + stale + stranded_8 + stranded_12 + stranded_13
                      + stranded_auto_replies + stranded_handled)
 
@@ -757,6 +994,12 @@ def cmd_scan(back_hours, sleep=time.sleep):
     # freezes the floor; only `mark` moves it after a full drain.
     if first_run:
         state["watermark_ms"] = wm
+    # THE INBOX MAIL OLDER THAN 2 DAYS, BY ID (Kevin, 14 Oct 2026). `score`
+    # counts what is still here after this run's own moves, so "waiting" can
+    # never read 0 while the inbox is full. Stamped with the scan's START, so
+    # every move this run makes afterwards is counted against it.
+    state["last_scan_stale"] = {"ids": [m["id"] for m in stale if m.get("id")],
+                                "truncated": bool(stale_trunc), "at_ms": now_ms}
     # A COMPLETED SCAN, STAMPED (finding 20260907-daily-ops-487). The pre-flight
     # probe is a `labels` call, which is cheap enough to survive a quota that a
     # full scan then dies on — so on 6 Sep both slots recorded ok:true and no
@@ -778,6 +1021,7 @@ def cmd_scan(back_hours, sleep=time.sleep):
                    "inbox_auto_replies": inbox_auto_replies,
                    "stranded_auto_replies": len(stranded_auto_replies),
                    "stranded_handled": len(stranded_handled),
+                   "stale_to_triage": len(stale_to_triage),
                    # Roy's requests to his assistant: roy-assistant.py's, never a task here.
                    "roy_assistant_skipped": roy_copies},
         # "checked", or "UNCHECKED: <why>" — then the stranded lists still
@@ -788,6 +1032,8 @@ def cmd_scan(back_hours, sleep=time.sleep):
                       "stranded_13": s13_trunc, "sent": sent_trunc},
         "new_inbox": new_inbox,
         "stale": stale,
+        # Old inbox mail with no decision yet: Step 2 decides it like new mail.
+        "stale_to_triage": stale_to_triage,
         "stranded_8": stranded_8,
         "stranded_12": stranded_12,
         "stranded_13": stranded_13,
@@ -807,6 +1053,10 @@ def cmd_scan(back_hours, sleep=time.sleep):
             {"id": m.get("id"), "threadId": m.get("threadId"),
              "handled_by": m.get("handled_by")} for m in stranded_handled],
         "sent_threads": sent_threads,
+        # thread -> [{id, ts, to}] for every send in the window: who each
+        # send went to, so a close or an "answered" can check it reached the
+        # sender, not just that something was sent.
+        "sent_thread_sends": sends,
     }))
 
 
@@ -870,14 +1120,970 @@ def cmd_act(msg_id, action, reason, label_num=None, override=None, task_id=None)
     print(json.dumps({"done": digest_do, "id": msg_id, "modified": result.get("modified")}))
 
 
-def cmd_note(msg_id, action, reason):
+def cmd_note(msg_id, action, reason, override=None):
+    """Log one decision. Since 14 Oct 2026 three of them also MOVE the mail,
+    because each used to be the end of the line for a message that then sat in
+    the inbox for ever (see READ_LABEL_NUM): `answered` and `duplicate` are
+    archived, and `leave` is labelled, archived and queued for Kevin's INBOX
+    card. Enforced here, so a skill that still says "note" cannot leave mail
+    behind, and checked here, so the card only ever holds mail that asks
+    nothing and "answered" only ever means the sender got the answer."""
     if action not in ("leave", "task-created", "duplicate", "deferred",
                       "updated", "answered"):
         fail("unknown note %r" % action)
     ctx = read_scan_cache().get(msg_id, {})
+    why = " ".join(str(override or "").split())
+    filed = False
+    if action == "leave":
+        summary = " ".join(str(reason or "").split())
+        if len(summary) < 10:
+            fail("note --do leave needs --reason: the one-line plain summary Kevin "
+                 "reads on his INBOX card (what it is and why he should see it), "
+                 "in your own words")
+        if "ask" not in ctx:
+            fail("note --do leave refused: %s has no ask check in the scan cache (not "
+                 "scanned, or scanned before the check existed). Run scan, then decide it."
+                 % msg_id)
+        if ctx["ask"] and not why:
+            fail("ASKS SOMETHING: %s. Kevin's INBOX card is only for mail that asks "
+                 "nothing of anyone, him included: an ask, a decision, a payment, a "
+                 "deadline or a date is a rule-1 task (Kevin's protocol, 17 Sep 2026). "
+                 "If the signal is plainly wrong, add --override \"<why it asks nothing>\"; "
+                 "the override is logged." % ctx["ask"])
+        if ctx["ask"]:
+            reason = "OVERRIDE ask signal (%s): %s; %s" % (ctx["ask"], why, summary)
+        lbl = read_label()
+        # QUEUED BEFORE THE MOVE: a move that then fails leaves a card line for
+        # mail still in the inbox (harmless), never archived mail on no card.
+        # An overridden ask is never dropped (third review of PR #783): it rides
+        # to the card as a flag, and the card lists it under "These may need
+        # you to act" with the override's reason beside it.
+        pending_append({"id": msg_id, "threadId": ctx.get("threadId", ""),
+                        "sender": ctx.get("sender", ""), "subject": ctx.get("subject", ""),
+                        "internalDate": ctx.get("internalDate"), "summary": summary[:300],
+                        "flag": ("%s; kept as reading by override: %s" % (ctx["ask"], why))
+                                if ctx["ask"] else ""})
+        worker_post("/gmail/modify", {"ids": [msg_id], "addLabels": [lbl["name"]],
+                                      "removeLabels": ["INBOX"]})
+        filed = True
+    elif action in FILE_OUT_NOTES:
+        if action == "answered" and ctx.get("reply_state") == "elsewhere":
+            if not why:
+                fail("NOT ANSWERED: the later send on this thread went to other people, not "
+                     "to this message's sender. A forward is not an answer, so decide it "
+                     "under the other rules. If it is handled some other way, add "
+                     "--override \"<how it was handled>\"; the override is logged.")
+            reason = "OVERRIDE forward-only thread: %s; %s" % (why, reason)
+        if ctx.get("inbox") is not False:
+            # Unknown (an older cache entry) counts as in the inbox: removing a
+            # label that is not there is harmless, leaving mail behind is not.
+            worker_post("/gmail/modify", {"ids": [msg_id], "removeLabels": ["INBOX"]})
+            filed = True
     digest_append({"id": msg_id, "do": action, "sender": ctx.get("sender", ""),
                    "subject": ctx.get("subject", ""), "reason": reason})
-    print(json.dumps({"noted": action, "id": msg_id}))
+    print(json.dumps({"noted": action, "id": msg_id, "filedOutOfInbox": filed}))
+
+
+# ─── THE INBOX CARD (Kevin, 14 Oct 2026) ─────────────────────────────────
+
+def pending_path():
+    return base_dir() / "inbox-card-pending.jsonl"
+
+
+def ledger_path():
+    return base_dir() / "inbox-cards.jsonl"
+
+
+def _jsonl(path):
+    rows = []
+    try:
+        lines = Path(path).read_text().splitlines()
+    except FileNotFoundError:
+        return rows
+    for line in lines:
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            rows.append(json.loads(line))
+        except ValueError:
+            continue
+    return rows
+
+
+def _append_jsonl(path, rows):
+    d = Path(path).parent
+    d.mkdir(parents=True, exist_ok=True)
+    with open(path, "a") as f:
+        for r in rows:
+            f.write(json.dumps(r) + "\n")
+
+
+def pending_append(entry):
+    _append_jsonl(pending_path(), [dict(entry, ts=datetime.now().isoformat(timespec="seconds"))])
+
+
+def ledger_ids():
+    """Message ids already listed on a card (any card, any run)."""
+    ids = set()
+    for r in _jsonl(ledger_path()):
+        ids.update(r.get("ids") or [])
+    return ids
+
+
+def _pid_alive(pid):
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    return True
+
+
+TAKING_RE = re.compile(r"^inbox-card-taking-(\d+)-\d+\.jsonl$")
+
+
+def adopt_orphans(now=None):
+    """A card step that was killed (a slot timeout, a SIGTERM) leaves its taken
+    queue behind, and the mail in it is already archived under label 19. Every
+    card step first puts such files back in the queue, once the process that
+    took them is gone (or the file is older than any run can be). Returns how
+    many files were adopted. Review of PR #783, 14 Oct 2026."""
+    now = time.time() if now is None else now
+    adopted = 0
+    for p in sorted(base_dir().glob("inbox-card-taking-*.jsonl")):
+        m = TAKING_RE.match(p.name)
+        pid = int(m.group(1)) if m else 0
+        try:
+            age = now - p.stat().st_mtime
+        except OSError:
+            continue
+        if pid and pid != os.getpid() and _pid_alive(pid) and age < TAKING_ORPHAN_SECONDS:
+            continue
+        restore_pending(p)
+        adopted += 1
+    return adopted
+
+
+def take_pending():
+    """(items, taken_path). Orphans first, then the queue is MOVED aside
+    (rename is atomic) and stamped, so a `leave` written while the card is
+    being made lands in a fresh queue, and a step killed now leaves a file the
+    next step adopts."""
+    adopt_orphans()
+    src = pending_path()
+    if not src.exists():
+        return [], None
+    taken = src.with_name("inbox-card-taking-%d-%d.jsonl" % (os.getpid(), int(time.time() * 1000)))
+    os.replace(src, taken)
+    os.utime(taken, None)          # its age is this step's, not the queue's
+    by_id = {}
+    for r in _jsonl(taken):
+        if r.get("id"):
+            by_id[r["id"]] = r          # the latest decision on a message wins
+    return list(by_id.values()), taken
+
+
+def restore_pending(taken, only_ids=None):
+    """Put taken rows back in the queue (all, or only the ids given), merged
+    with anything queued meanwhile, and remove the taken file. Nothing queued
+    is ever dropped."""
+    if taken and Path(taken).exists():
+        rows = _jsonl(taken)
+        if only_ids is not None:
+            rows = [r for r in rows if r.get("id") in only_ids]
+        if rows:
+            _append_jsonl(pending_path(), rows)
+        Path(taken).unlink()
+
+
+def read_label(labels=None):
+    """The "for Kevin to read" label, or a loud stop naming the one to create."""
+    lbl = find_label(labels if labels is not None else worker_labels(), READ_LABEL_NUM)
+    if not lbl:
+        fail("LABEL MISSING: no Gmail label starting %r in %s. Create the label %r "
+             "(the number is what counts), then re-run. Nothing was moved, so no "
+             "mail was archived without its label." % (READ_LABEL_NUM + ":", TRIAGE_ACCOUNT,
+                                                       READ_LABEL_NAME))
+    return lbl
+
+
+def sender_type(addr, public_domains=frozenset()):
+    """Which group a sender sits in on a card. Machine signal only: the address."""
+    a = str(addr or "").strip().lower()
+    if "@" not in a:
+        return "unknown"
+    dom = a.rsplit("@", 1)[1]
+    if a in {x.lower() for x in SEARCH_ACCOUNTS} or dom in OWN_DOMAINS:
+        return "own"
+    if dom.endswith((".gov.uk", ".nhs.uk", ".police.uk", ".gov")) or dom == "gov.uk":
+        return "public"
+    if dom in public_domains:
+        return "person"
+    return "organisation"
+
+
+def _card_date(ms):
+    try:
+        return datetime.fromtimestamp(int(ms) / 1000.0).strftime("%d %b %Y")
+    except (TypeError, ValueError, OverflowError, OSError):
+        return ""
+
+
+def _noun(n):
+    return "email" if n == 1 else "emails"
+
+
+CARD_INTRO = ("The triage robot took each of these out of your inbox and listed it here, so your inbox "
+              "stays empty. Nothing was deleted: each is labelled %r in Gmail and its link opens it. "
+              "New ones are added to this card until you decide it." % READ_LABEL_NAME)
+CARD_FOOTER = [
+    "",
+    INBOX_CARD_FOOT,
+    "- Approve once you have read them: approving means you have seen them. The card closes and "
+    "nothing is sent.",
+    "- To have any of them acted on, name its number in Request changes, for example \"act on 3 "
+    "and 7\" or \"reply to 2 saying yes\". The Inbox Response agent turns each number you name "
+    "into its own task and brings any reply back to you first.",
+    "- To say one should not have come to you, Reject (or tick Remember this reason) and say "
+    "why, for example \"never show me this sender's newsletters\". The triage robot reads "
+    "that before its next run.",
+    "",
+    "**Carrying this out will involve:** Closing this card as read. Nothing is sent.",
+]
+
+
+def render_items(items, start, public_domains, budget):
+    """(lines, shown_ids). Grouped by sender type, oldest first inside each
+    group, numbered straight on from `start` so "act on 2" names one email. An
+    item carrying a `flag` says why it may need Kevin. Stops at the character
+    budget: an email that does not fit is left for the next card, never
+    half-listed, so no number is skipped and no heading is printed without an
+    email under it."""
+    groups = {}
+    for it in items:
+        groups.setdefault(sender_type(it.get("sender"), public_domains), []).append(it)
+    lines, shown, used, full = [], [], 0, False
+    for key, title in SENDER_TYPES:
+        if full:
+            break
+        rows = sorted(groups.get(key) or [], key=lambda r: int(r.get("internalDate") or 0))
+        entries = []
+        for it in rows:
+            n = start + len(shown) + len(entries)
+            e = ["%d. %s | %s" % (n, it.get("sender") or "sender not known",
+                                  " ".join(str(it.get("subject") or "(no subject)").split()))]
+            when = _card_date(it.get("internalDate"))
+            if when:
+                e.append("   Received: %s" % when)
+            e.append("   What it is: %s" % (" ".join(str(it.get("summary") or "").split())
+                                            or "no summary recorded"))
+            if it.get("flag"):
+                e.append("   Why it may need you: %s" % " ".join(str(it["flag"]).split()))
+            e.append("   Open: %s" % (GMAIL_THREAD_URL % it["threadId"] if it.get("threadId")
+                                      else "link not known, search Gmail for the subject"))
+            cost = sum(len(x) + 1 for x in e) + (len(title) + 12 if not entries else 0)
+            if used + cost > budget:
+                full = True
+                break
+            entries.append((it, e))
+            used += cost
+        if entries:
+            lines += ["", "%s (%d)" % (title, len(entries))]
+            for it, e in entries:
+                lines += e
+                shown.append(it["id"])
+    return lines, shown
+
+
+def render_sections(sections, start, public_domains, budget):
+    """(lines, shown_ids) for [(title, items)] in order, numbered straight
+    through. A section that does not fit whole ends the card there: the rest
+    waits for the next card, so no number is skipped and no section heading
+    stands empty."""
+    lines, shown = [], []
+    for title, items in sections:
+        if not items:
+            continue
+        head = ["", "%s (%%d)" % title]
+        part, ids = render_items(items, start + len(shown), public_domains,
+                                 budget - sum(len(x) + 1 for x in lines) - len(title) - 12)
+        if ids:
+            head[1] = head[1] % len(ids)
+            lines += head + part
+            shown += ids
+        if len(ids) < len(items):
+            break
+    return lines, shown
+
+
+def new_card_text(sections, public_domains):
+    """(text, shown_ids) for a fresh card, or (None, []) when nothing fits."""
+    budget = INBOX_CARD_CHAR_CAP - len(CARD_INTRO) - sum(len(x) + 1 for x in CARD_FOOTER) - 400
+    lines, shown = render_sections(sections, 1, public_domains, budget)
+    if not shown:
+        return None, []
+    head = "%s %d %s for you to read" % (INBOX_CARD_HEAD, len(shown), _noun(len(shown)))
+    return "\n".join([head, "", CARD_INTRO] + lines + CARD_FOOTER), shown
+
+
+def appended_card_text(existing, sections, public_domains):
+    """(text, shown_ids) with the sections added to an open card's text,
+    numbered on from its last email, or (None, []) when the card's shape is not
+    the one this code wrote or nothing more fits."""
+    idx = existing.rfind("\n\n" + INBOX_CARD_FOOT)
+    first = existing.split("\n", 1)[0]
+    if idx == -1 or not first.startswith(INBOX_CARD_HEAD):
+        return None, []
+    head, tail = existing[:idx], existing[idx:]
+    nums = [int(x) for x in re.findall(r"^(\d+)\. ", head, re.M)]
+    budget = INBOX_CARD_CHAR_CAP - len(existing) - 400
+    lines, shown = render_sections(sections, (max(nums) + 1) if nums else 1, public_domains, budget)
+    if not shown:
+        return None, []
+    total = len(nums) + len(shown)
+    head = re.sub(r"^%s \d+ emails?" % re.escape(INBOX_CARD_HEAD),
+                  "%s %d %s" % (INBOX_CARD_HEAD, total, _noun(total)), head, count=1)
+    return head + "\n" + "\n".join(lines) + tail, shown
+
+
+def card_plain_summary(total):
+    return ("TASK: Read %d %s that came in for you. They are out of your inbox and listed here.\n"
+            "IF YOU APPROVE: The card closes as read. Nothing is sent." % (total, _noun(total)))
+
+
+def card_name(total, opened):
+    return "%s%d %s for you to read, since %s" % (INBOX_CARD_PREFIX, total, _noun(total), opened)
+
+
+def inbox_card_fields(name, text, ids, dispatch, today_iso, deferred_until=None):
+    """The task fields for a new card, keyed by the pipeline's own field map
+    (agent-dispatch.py AF), so the card is the shape every surface reads: Status
+    Approval with Sent For Approval By set (the queue hides a card without it).
+    Owned by Inbox Response: approving hands it back to close, a note such as
+    "reply to 2" is worked by the agent that answers mail."""
+    AF = dispatch.AF
+    resp = dispatch.RESPONSE_REC_ID
+    return {
+        AF["name"]: name,
+        AF["status"]: "Approval",
+        AF["dueDate"]: today_iso,
+        AF["teamMember"]: [resp],
+        AF["sentForApprovalBy"]: [resp],
+        AF["taskType"]: "Admin",
+        AF["priority"]: "Medium",
+        AF["agentOutput"]: text,
+        AF["description"]: (
+            "INBOX CARD raised by Inbox Triage (scripts/inbound-triage.py). A reading list for "
+            "Kevin: each email was written by a person and asks nothing of anyone, so it was "
+            "labelled %r and archived and listed on this card instead of sitting in his inbox "
+            "(Kevin, 14 Oct 2026). New emails are added to this card while it waits.\n"
+            "If Kevin approves as-is: he has read them. Complete this task with "
+            "agent-dispatch.py complete and send nothing.\n"
+            "If he requests changes: his note names what to do about one or more listed "
+            "emails, by number (for example reply to one). Do exactly that through your normal "
+            "reply path and bring any reply back to him for approval first. The Gmail links "
+            "are on the card.\n"
+            "Never close this card as a duplicate of another INBOX card: each lists "
+            "different emails." % READ_LABEL_NAME),
+        AF["notes"]: INBOX_CARD_IDS + ",".join(ids),
+        AF["plainSummary"]: card_plain_summary(len(ids)),
+        **({AF["deferredUntil"]: deferred_until} if deferred_until else {}),
+    }
+
+
+def _load_dispatch():
+    """agent-dispatch.py as a module: its field map, its Airtable client, its
+    agent roster and its learning-loop writer, imported and never copied."""
+    import importlib.util
+    p = Path(__file__).resolve().parent / "agent-dispatch.py"
+    spec = importlib.util.spec_from_file_location("od_dispatch", p)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+CARD_PLACEHOLDER_HEAD = "INBOX LIST BEING WRITTEN:"
+CARD_PLACEHOLDER = (CARD_PLACEHOLDER_HEAD + " the list of emails is added in a moment. If you can read "
+                    "this line, the write failed; the next card step cancels this card.")
+
+
+def _create_card(fields):
+    """Through the one task gate, with --force like the MERGE card: the card's
+    name repeats its own words run after run, so the duplicate key would fold it
+    into an unrelated task. One open card at a time is this card's guard."""
+    from merge_card import create_card
+    return create_card(fields)
+
+
+def _slot_now():
+    import importlib.util
+    p = Path(__file__).resolve().parent / "slot-label.py"
+    spec = importlib.util.spec_from_file_location("od_slot_label", p)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod.label(datetime.now())
+
+
+def open_inbox_cards(ad):
+    """INBOX cards waiting on Kevin with no verdict, oldest first. Known by
+    name AND body: a card sent back for changes and resubmitted as a reply
+    draft keeps the name but is no longer a reading list."""
+    AF = ad.AF
+    formula = ("AND(LEFT({Task Name},%d)='%s',{Status}='Approval',LEN({Approval Outcome}&'')=0,"
+               "NOT(IS_AFTER({Deferred Until},TODAY())))" % (len(INBOX_CARD_PREFIX), INBOX_CARD_PREFIX))
+    rows = [r for r in ad.query_tasks(formula)
+            if str((r.get("fields") or {}).get(AF["name"]) or "").startswith(INBOX_CARD_PREFIX)
+            and str((r.get("fields") or {}).get(AF["agentOutput"]) or "").startswith(INBOX_CARD_HEAD)]
+    return sorted(rows, key=lambda r: r.get("createdTime") or "")
+
+
+def card_ids(notes):
+    m = re.search(r"^%s(.*)$" % re.escape(INBOX_CARD_IDS), str(notes or ""), re.M)
+    return (m.group(0), [x for x in m.group(1).split(",") if x]) if m else (None, None)
+
+
+def raise_or_append(sections, ad, opened):
+    """ONE open INBOX card at a time (review of PR #783, 14 Oct 2026). Every
+    card had the same duplicate key, so the page's Duplicates lane told Kevin to
+    close all but one, hiding the emails on the rest. So new emails are ADDED to
+    the open card he has not decided yet, and a new card is made only when none
+    is open (or the open one is full). The card is re-read by field id before
+    it is written, and a blank read is a STOP: a field you are about to add to
+    that reads blank is a broken read, never an empty card. `sections` is
+    [(title, items)], listed in that order and numbered straight through.
+    Returns (task_id, "created"|"appended"|"already", carded_ids)."""
+    AF = ad.AF
+    items = [i for _, part in sections for i in part]
+    cancel_stale_placeholders(ad)
+    public = _load_gate().PUBLIC_MAIL_DOMAINS
+    cards = open_inbox_cards(ad)
+    if cards:
+        cid = cards[0]["id"]
+        f = (ad.get_task(cid) or {}).get("fields") or {}
+        out, notes, name = (str(f.get(AF[k]) or "") for k in ("agentOutput", "notes", "name"))
+        if ad.sel(f.get(AF["status"])) == "Approval" and not ad.sel(f.get(AF["approvalOutcome"])):
+            line, on_card = card_ids(notes)
+            if not out.strip() or not name.strip() or line is None:
+                raise RuntimeError("open INBOX card %s reads blank (Agent Output, Task Name or its "
+                                   "message-id line) on a fresh read by field id: STOP, nothing "
+                                   "written to it" % cid)
+            already = [i["id"] for i in items if i["id"] in on_card]
+            todo = [(t, [i for i in part if i["id"] not in on_card]) for t, part in sections]
+            if not any(part for _, part in todo):
+                return cid, "already", already
+            text, shown = appended_card_text(out, todo, public)
+            if text is not None:
+                ids = on_card + shown
+                total = len(ids)
+                ad.patch_task(cid, {
+                    AF["agentOutput"]: text,
+                    AF["notes"]: notes.replace(line, INBOX_CARD_IDS + ",".join(ids), 1),
+                    AF["name"]: re.sub(r"^%s\d+ emails?" % re.escape(INBOX_CARD_PREFIX),
+                                       "%s%d %s" % (INBOX_CARD_PREFIX, total, _noun(total)), name, count=1),
+                    AF["plainSummary"]: card_plain_summary(total),
+                })
+                back = (ad.get_task(cid) or {}).get("fields") or {}
+                if ad.sel(back.get(AF["status"])) == "Approval" and not ad.sel(back.get(AF["approvalOutcome"])):
+                    if (card_ids(back.get(AF["notes"]))[1] or []) != ids:
+                        raise RuntimeError("the add to INBOX card %s did not land on read-back" % cid)
+                    return cid, "appended", already + shown
+                # He decided it while we wrote: he never saw these. A new card.
+                sections = [(t, [i for i in part if i["id"] not in already]) for t, part in sections]
+    text, shown = new_card_text(sections, public)
+    if text is None:
+        return None, "none", []
+    # EMAIL TEXT NEVER RIDES ON A COMMAND LINE (third review of PR #783). The
+    # gate takes its fields only as --fields-json, which any process can read
+    # with `ps`, and the list holds senders and subjects. So the card is made
+    # through the gate with a placeholder in Agent Output (its first line is
+    # not the card's own, so nothing can mistake it for an open card), and the
+    # list goes in by the dispatcher's own write, in the request body.
+    #
+    # THE PLACEHOLDER IS BORN HIDDEN (fourth review). It is created with
+    # Deferred Until = tomorrow, which every surface that shows a card skips:
+    # the page's queue (APV_QUEUE_FORMULA), the Slack post sweep and the 08:00
+    # digest (NOT_DEFERRED in scripts/slack-automation/approvals.js) and
+    # open_inbox_cards here. The SAME write that adds the list clears it, and
+    # the read-back checks the list landed, the card is no longer deferred and
+    # no verdict arrived. A failed write leaves a hidden placeholder: it is
+    # cancelled (clearing the date in that write, so the knock-back invariant
+    # holds), and if even that fails it stays hidden, the next card step
+    # cancels it (cancel_stale_placeholders), and the emails stay queued.
+    task_id = _create_card(inbox_card_fields(card_name(len(shown), opened), CARD_PLACEHOLDER, shown,
+                                             ad, date.today().isoformat(),
+                                             deferred_until=ad.tomorrow_london()))
+    try:
+        ad.patch_task(task_id, {AF["agentOutput"]: text, AF["deferredUntil"]: None})
+        back = ((ad.get_task(task_id) or {}).get("fields") or {})
+        if not str(back.get(AF["agentOutput"]) or "").startswith(INBOX_CARD_HEAD):
+            raise RuntimeError("its list did not land on read-back")
+        if back.get(AF["deferredUntil"]):
+            raise RuntimeError("it still reads deferred on read-back")
+        if ad.sel(back.get(AF["approvalOutcome"])) or ad.sel(back.get(AF["status"])) != "Approval":
+            raise RuntimeError("a verdict or a status change arrived before its list")
+    except Exception as e:  # noqa: BLE001 — never leave a placeholder card in his queue
+        cancelled = cancel_placeholder(ad, task_id, str(e))
+        raise RuntimeError("INBOX card %s was created but its list could not be written (%s); %s"
+                           % (task_id, str(e)[:160],
+                              "it was cancelled" if cancelled else
+                              "the cancel failed too, so it stays hidden (deferred) and the next "
+                              "card step cancels it"))
+    return task_id, "created", shown
+
+
+def cancel_placeholder(ad, task_id, why):
+    """Cancel a placeholder card, clearing Deferred Until in the same write.
+    True when it worked; a failure is said on stderr, never swallowed."""
+    AF = ad.AF
+    try:
+        ad.patch_task(task_id, {AF["status"]: "Cancelled", AF["deferredUntil"]: None, AF["notes"]: (
+            "INBOX CARD CANCELLED: the list could not be written (%s); the emails stay queued "
+            "for the next card." % str(why)[:160])})
+        return True
+    except Exception as e:  # noqa: BLE001 — reported loudly here and by the caller
+        progress("INBOX CARD %s NOT CANCELLED (%s): it stays deferred and hidden until the next "
+                 "card step cancels it." % (task_id, str(e)[:160]))
+        return False
+
+
+def cancel_stale_placeholders(ad):
+    """Cancel any placeholder an earlier step could not cancel. Run before
+    every card write, so a hidden placeholder never reaches the day its
+    deferral ends. Returns the ids cancelled; a failed read is said, not fatal."""
+    AF = ad.AF
+    try:
+        rows = ad.query_tasks("AND(LEFT({Task Name},%d)='%s',{Status}='Approval',"
+                              "LEFT({Agent Output}&'',%d)='%s')"
+                              % (len(INBOX_CARD_PREFIX), INBOX_CARD_PREFIX,
+                                 len(CARD_PLACEHOLDER_HEAD), CARD_PLACEHOLDER_HEAD))
+    except Exception as e:  # noqa: BLE001 — the write path still works without it
+        progress("INBOX placeholder check NOT CHECKED: %s" % str(e)[:160])
+        return []
+    done = []
+    for r in rows:
+        f = r.get("fields") or {}
+        if (str(f.get(AF["name"]) or "").startswith(INBOX_CARD_PREFIX)
+                and str(f.get(AF["agentOutput"]) or "").startswith(CARD_PLACEHOLDER_HEAD)
+                and cancel_placeholder(ad, r["id"], "an earlier card step left it")):
+            done.append(r["id"])
+    return done
+
+
+def cmd_inbox_card(slot=None, dry_run=False, dispatch=None):
+    """Every email queued by `note --do leave` goes on Kevin's open INBOX card,
+    or on a new one when none is open. Run by the skill at the end of the email
+    lane and again by the runner after the agent exits (a step the agent must
+    remember is a step that gets skipped); the second call finds an empty
+    queue and does nothing."""
+    items, taken = take_pending()
+    carded = ledger_ids()
+    fresh = [it for it in items if it.get("id") not in carded]
+    if not fresh:
+        if taken:
+            Path(taken).unlink()
+        print(json.dumps({"card": "none", "queued": len(items),
+                          "alreadyCarded": len(items) - len(fresh)}))
+        return 0
+    if dry_run:
+        restore_pending(taken)
+        print(json.dumps({"card": "dry-run", "queued": len(fresh)}))
+        return 0
+    try:
+        ad = dispatch or _load_dispatch()
+        now = datetime.now()
+        slot = slot or _slot_now()
+        when = "%s %s" % (now.strftime("%d %b").lstrip("0"), slot)
+        task_id, action, done = raise_or_append(
+            [("These may need you to act, added %s" % when, [i for i in fresh if i.get("flag")]),
+             ("For your information, added %s" % when, [i for i in fresh if not i.get("flag")])],
+            ad, when)
+    except SystemExit:
+        restore_pending(taken)
+        raise
+    except Exception as e:  # noqa: BLE001 — the queue survives any failure
+        restore_pending(taken)
+        fail("INBOX CARD NOT WRITTEN (%s). The %d emails stay queued and go on the next "
+             "card step; they are labelled %r in Gmail meanwhile."
+             % (str(e)[:240], len(fresh), READ_LABEL_NAME))
+    if done:
+        _append_jsonl(ledger_path(), [{"taskId": task_id, "action": action, "ids": done,
+                                       "ts": datetime.now().isoformat(timespec="seconds")}])
+    left = {it["id"] for it in fresh} - set(done)
+    restore_pending(taken, only_ids=left)      # what did not fit waits for the next card
+    print(json.dumps({"card": action, "taskId": task_id, "items": len(done),
+                      "stillQueued": len(left)}))
+    return 0
+
+
+# ─── KEVIN'S NOTES ON INBOX CARDS TEACH THE TRIAGE (14 Oct 2026) ─────────
+#
+# `agent-dispatch.py lessons` writes a remembered note to the agent that SENT
+# the card (Inbox Response), and reroutes to triage only for a relevance reason
+# on an INBOUND task. An INBOX card is neither, yet every note on one is about
+# what triage chose to show him: "never show me these" must reach the agent
+# that decides, before its next run. Two sources, both read, both Kevin's
+# words only:
+#   * the dispatcher's own store: every "- <date>: INBOX: ... — <words>" line
+#     it wrote into any agent's file. Read there because `submit` clears the
+#     Remember tick and the Lesson Written At stamp on a resubmit (review of
+#     PR #783: a Request changes note was otherwise gone before the next slot);
+#   * cards still ticked Remember that the dispatcher has not written yet.
+# Each goes into the triage agent's file through the dispatcher's own writer
+# (same line shape, same section, atomic, read back), idempotent on the card
+# name and Kevin's words. It never stamps Lesson Written At: that stays the
+# dispatcher's.
+FEEDBACK_STAMP_RE = re.compile(r"^\s*\[\d{4}-\d{2}-\d{2}(?: \d{2}:\d{2})?\]\s*")
+INBOX_LESSON_RE = re.compile(r"^- (\d{4}-\d{2}-\d{2}): (%s.*?) — (.+)$" % re.escape(INBOX_CARD_PREFIX))
+
+
+def lesson_already_held(text, name, words):
+    """True when a line in the agent file already carries this card's name and
+    Kevin's words (written by this command or by the dispatcher's own reroute,
+    which may keep a feedback stamp in front of the words)."""
+    n = " ".join(str(name or "untitled task").split())[:70]
+    w = " ".join(FEEDBACK_STAMP_RE.sub("", str(words or "")).split())[:400]
+    return any(n in line and w in line for line in str(text or "").splitlines())
+
+
+def stored_inbox_lessons(agent_dir, skip):
+    """[(line, name, words)] for every INBOX-card lesson the dispatcher wrote
+    into an agent file other than `skip`."""
+    out = []
+    for p in sorted(Path(agent_dir).glob("*.md")):
+        if p.stem == skip:
+            continue
+        try:
+            text = p.read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            continue
+        for line in text.splitlines():
+            m = INBOX_LESSON_RE.match(line.strip())
+            if m:
+                out.append((line.strip(), m.group(2), m.group(3)))
+    return out
+
+
+def cmd_inbox_lessons(dry_run=False, dispatch=None):
+    ad = dispatch or _load_dispatch()
+    AF = ad.AF
+    slug = ad.ALL_AGENTS[ad.TRIAGE_REC_ID]["agent"]
+    path = os.path.join(ad.AGENT_DIR, slug + ".md")
+    formula = ("AND(LEFT({Task Name},%d)='%s',{Remember This})"
+               % (len(INBOX_CARD_PREFIX), INBOX_CARD_PREFIX))
+    try:
+        rows = ad.query_tasks(formula)
+    except Exception as e:  # noqa: BLE001 — a failed read is NOT CHECKED, never "no lessons"
+        fail("INBOX LESSONS NOT CHECKED: the Tasks read failed (%s). Kevin's notes on "
+             "INBOX cards may be missing from %s this run." % (str(e)[:200], path))
+    candidates = list(stored_inbox_lessons(ad.AGENT_DIR, slug))
+    for rec in rows:
+        f = rec.get("fields") or {}
+        name = str(f.get(AF["name"]) or "")
+        if not name.startswith(INBOX_CARD_PREFIX):
+            continue
+        words = FEEDBACK_STAMP_RE.sub("", ad.lesson_source_text(f)).strip()
+        if words:
+            decided = str(f.get(AF["approvedAt"]) or "")[:10] or ad.today_london()
+            candidates.append((ad.lesson_line(decided, name, words), name, words))
+    written, held, problems = 0, 0, []
+    for line, name, words in candidates:
+        try:
+            with open(path, encoding="utf-8") as fh:
+                text = fh.read()
+        except OSError as e:
+            fail("INBOX LESSONS NOT WRITTEN: cannot read %s (%s)" % (path, e))
+        if lesson_already_held(text, name, words):
+            held += 1
+            continue
+        if dry_run:
+            written += 1
+            continue
+        try:
+            ad.append_lesson_to_file(slug, line)
+            written += 1
+        except Exception as e:  # noqa: BLE001 — reported, and retried next run
+            problems.append({"error": str(e)[:200]})
+            continue
+        try:
+            ad.mirror_lesson_to_register(ad.ROLE_AGENTS[ad.TRIAGE_REC_ID]["registerRow"], line)
+        except Exception as e:  # noqa: BLE001 — the file is the delivery; the mirror is display
+            problems.append({"error": "mirror: %s" % str(e)[:160]})
+    print(json.dumps({"agentFile": path, "cardsStillTicked": len(rows),
+                      "lessonsFound": len(candidates), "written": written,
+                      "alreadyHeld": held, "problems": problems, "dryRun": dry_run}))
+    return 1 if problems else 0
+
+
+# ─── THE ONE-OFF BACKLOG (Kevin approved a batch run, 14 Oct 2026) ───────
+#
+# "Let's do a batch run, and then we should be able to get this under control.
+# Then it should be fixed on an ongoing basis." The mail earlier runs decided
+# and left behind: a message still in the inbox (the LIVE listing) whose last
+# recorded decision (the DIGESTS) was leave, answered or duplicate. Neither
+# source alone is trusted: the listing says where it is, the digest says what
+# was decided. ONE batch card, never a task per email and never a second pass
+# through triage (second review of PR #783):
+#   * every left email goes on Kevin's ONE open INBOX card, in two sections:
+#     "These may need you to act" (each says why: `ask_signal`, or an
+#     "answered" that never reached the sender) then "For your information",
+#     each grouped by sender type; all of them labelled 19 and archived;
+#   * answered (a later send went TO the sender) and duplicate -> archived, no
+#     card line;
+#   * anything carrying a label Kevin added himself -> left alone;
+#   * everything else in the inbox -> counted, never touched (mail with no
+#     decision is the ongoing triage's `stale_to_triage`).
+# Approving the card means seen; a number named in Request changes becomes a
+# task, made by Inbox Response.
+
+def queue_holder_path():
+    root = os.environ.get("JOB_QUEUE_DIR") or str(Path.home() / "knowledge-os/logs/queue")
+    return Path(root) / "lock" / "holder.json"
+
+
+def _read_holder(path=None):
+    """(holder or None, error). Two reads: the holder file is rewritten by every heartbeat."""
+    p = Path(path) if path else queue_holder_path()
+    err = ""
+    for _ in range(2):
+        try:
+            return json.loads(p.read_text()), ""
+        except FileNotFoundError:
+            return None, ""
+        except (ValueError, OSError) as e:
+            err = str(e)
+            time.sleep(0.05)
+    return None, "the queue lock holder at %s cannot be read (%s)" % (p, err[:120])
+
+
+def triage_slot_block(path=None):
+    """Why the backlog must not run now, or ''. The slot reads and moves the
+    same mail and spends the same Gmail minute, so it waits for the slot. An
+    unreadable holder is a refusal: it cannot rule the slot out."""
+    holder, err = _read_holder(path)
+    if err:
+        return err
+    if isinstance(holder, dict) and holder.get("job") == TRIAGE_JOB:
+        return "the %s slot holds the queue lock (since %s)" % (
+            TRIAGE_JOB, holder.get("acquired_iso", "unknown"))
+    return ""
+
+
+def backlog_unwrapped(path=None, parent_pid=None):
+    """Why --apply is not running under the queue, or ''. Wrapped, no slot can
+    start part way through the writes: the queue lock is held by
+    BACKLOG_JOB and its holder is this process's own parent (job-queue.py run
+    starts the command as its direct child)."""
+    holder, err = _read_holder(path)
+    if err:
+        return err
+    parent_pid = os.getppid() if parent_pid is None else parent_pid
+    if not isinstance(holder, dict) or holder.get("job") != BACKLOG_JOB:
+        return "the queue lock is not held by %s" % BACKLOG_JOB
+    if int(holder.get("pid") or 0) != int(parent_pid):
+        return "the %s lock belongs to another process (pid %s)" % (BACKLOG_JOB, holder.get("pid"))
+    return ""
+
+
+def digest_last_decisions(base=None):
+    """id -> the LAST digest entry for that message, across every digest."""
+    d = Path(base) if base else base_dir()
+    last = {}
+    for p in sorted(d.glob("digest-*.jsonl")):
+        for r in _jsonl(p):
+            if r.get("id"):
+                last[r["id"]] = r
+    return last
+
+
+# THE OLD NOTE COUNTS TOO (third review of PR #783). The backlog's "leave"
+# decisions were made under the looser rule ("needs no reply or action from
+# the robots"), so the agent's own note on each may say what the email asks
+# even when the email's words slip past `ask_signal`. A note that mentions a
+# request puts the email in "may need you to act". Negated phrases ("nothing to
+# answer", "needs no reply") are taken out first.
+NOTE_NEGATION_RE = re.compile(
+    r"\b(?:needs?\s+no|asks?\s+nothing|no|nothing|not|without|never)\b(?:\s+[\w-]+){0,3}", re.I)
+NOTE_REQUEST_RE = re.compile(
+    r"\b(?:asks?|asked|asking|request(?:s|ed|ing)?|wants?|needs?|invit(?:e|es|ed|ation)"
+    r"|chas(?:e|es|ing)|reply|respond|confirm(?:s|ation)?|pay(?:s|ment)?|deadline|due"
+    r"|sign(?:s|ature)?|complete|return|decid(?:e|es)|decision|action|rsvp|book(?:s|ing)?)\b", re.I)
+
+
+def note_request(reason):
+    """The request word in the agent's own earlier note, or ''."""
+    m = NOTE_REQUEST_RE.search(NOTE_NEGATION_RE.sub(" ", str(reason or "")))
+    return m.group(0) if m else ""
+
+
+def backlog_plan(inbox, last, carded, read_label_id, sends, unquote=lambda b: b or ""):
+    """Pure. Sort the live inbox by each message's last recorded decision.
+    One batch, one card (Kevin: "Let's do a batch run"): every left email goes
+    on it, split by `ask_signal` into "may need you to act" (`flag` says why)
+    and "for your information"; an "answered" that was not a reply to the
+    sender goes on it too, flagged; confirmed answers and duplicates are
+    filed; Kevin's own labels and anything else are left alone."""
+    plan = {"act": [], "info": [], "move_only": [], "file": [], "skipped_label": [],
+            "awaiting_triage": [], "other": {}}
+    for m in inbox:
+        e = last.get(m.get("id")) or {}
+        do = str(e.get("do") or "")
+        h = m.get("headers") or {}
+        item = {"id": m.get("id"), "threadId": m.get("threadId", ""),
+                "sender": parse_bare_email(h.get("from", "")) or e.get("sender", ""),
+                "subject": (h.get("subject") or e.get("subject") or "")[:200],
+                "internalDate": m.get("internalDate"), "summary": e.get("reason", ""),
+                "do": do}
+        if other_user_labels(m, read_label_id):
+            plan["skipped_label"].append(item)
+        elif do in ("leave", "answered") and m.get("id") in carded:
+            plan["move_only"].append(item)
+        elif do == "leave":
+            ask = ask_signal(h.get("subject", ""), unquote(m.get("body", "")))
+            if not ask and note_request(e.get("reason")):
+                ask = "the earlier triage note mentions a request (%s)" % note_request(e.get("reason"))
+            plan["act" if ask else "info"].append(dict(item, flag=ask) if ask else item)
+        elif do == "answered":
+            state = reply_state(m, sends)
+            if state == "answered":
+                plan["file"].append(item)
+            else:
+                plan["act"].append(dict(item, flag=(
+                    "the later send went to other people, not to the sender" if state == "elsewhere"
+                    else "no reply to the sender was found in the sent mail")))
+        elif do == "duplicate":
+            plan["file"].append(item)
+        elif do in TRIAGE_AGAIN_DOS:
+            plan["awaiting_triage"].append(item)
+        else:
+            plan["other"][do] = plan["other"].get(do, 0) + 1
+    return plan
+
+
+def _oldest(items):
+    ms = [int(i.get("internalDate") or 0) for i in items if i.get("internalDate")]
+    return _card_date(min(ms)) if ms else ""
+
+
+def _move_and_log(items, add, reason):
+    """Take items out of the inbox in worker-sized batches, logging each batch
+    to the digest as soon as Gmail confirms it, so a run that dies part way
+    still leaves a record of every message it did move."""
+    for i in range(0, len(items), MODIFY_BATCH):
+        chunk = items[i:i + MODIFY_BATCH]
+        payload = {"ids": [it["id"] for it in chunk], "removeLabels": ["INBOX"]}
+        if add:
+            payload["addLabels"] = add
+        worker_post("/gmail/modify", payload)
+        for it in chunk:
+            digest_append({"id": it["id"], "do": it["do"] or "leave", "sender": it["sender"],
+                           "subject": it["subject"], "reason": reason})
+
+
+def backlog_sections(plan):
+    stamp = date.today().strftime("%d %b %Y").lstrip("0")
+    return [("These may need you to act (from the backlog, %s). Name a number in Request "
+             "changes and it becomes a task" % stamp, plan["act"]),
+            ("For your information (from the backlog, %s)" % stamp, plan["info"])]
+
+
+def cmd_backlog(apply=False, dispatch=None, holder_path=None):
+    why = triage_slot_block(holder_path)
+    if why:
+        fail("BACKLOG REFUSED: %s. Run it between slots." % why)
+    if apply:
+        why = backlog_unwrapped(holder_path)
+        if why:
+            fail("BACKLOG REFUSED: --apply runs only under the queue, so no triage slot can start "
+                 "part way through (%s). Run: python3 scripts/job-queue.py run %s -- python3 "
+                 "scripts/inbound-triage.py backlog --apply" % (why, BACKLOG_JOB))
+    labels = worker_labels()
+    read_lbl = find_label(labels, READ_LABEL_NUM)
+    if apply and not read_lbl:
+        read_label(labels)
+    inbox, truncated = worker_list(q="in:inbox -in:chats", max_pages=BACKLOG_MAX_PAGES)
+    roy = sum(1 for m in inbox if roy_assistant_copy(m))
+    inbox = [m for m in inbox if not roy_assistant_copy(m)]
+    last = digest_last_decisions()
+    # The "answered" check needs the sent folder back to the oldest such email.
+    answered = [m for m in inbox if str((last.get(m.get("id")) or {}).get("do") or "") == "answered"]
+    sends, sent_truncated = {}, False
+    if answered:
+        oldest_ms = min(int(m.get("internalDate") or 0) for m in answered)
+        days = max(3, int((time.time() * 1000 - oldest_ms) // 86400000) + 2)
+        sent, sent_truncated = worker_list(q="in:sent newer_than:%dd" % days,
+                                           max_pages=BACKLOG_SENT_MAX_PAGES)
+        sends = thread_sends(sent)
+    gate = _load_gate()
+    plan = backlog_plan(inbox, last, ledger_ids(), read_lbl["id"] if read_lbl else None,
+                        sends, gate.unquoted_body)
+    public = gate.PUBLIC_MAIL_DOMAINS
+    sections = backlog_sections(plan)
+    preview_text, preview_ids = new_card_text(sections, public)
+
+    def groups(items):
+        out = {}
+        for it in items:
+            k = sender_type(it["sender"], public)
+            out[k] = out.get(k, 0) + 1
+        return out
+    counts = {
+        "inbox_listed": len(inbox) + roy, "inbox_listing_truncated": truncated,
+        "roy_assistant_skipped": roy,
+        "card_may_need_you_to_act": len(plan["act"]), "card_act_groups": groups(plan["act"]),
+        "card_act_because_answer_unconfirmed": sum(1 for i in plan["act"] if i["do"] == "answered"),
+        "card_for_your_information": len(plan["info"]), "card_info_groups": groups(plan["info"]),
+        "card_chars_if_new": len(preview_text or ""),
+        "card_items_that_fit": len(preview_ids),
+        "to_archive": len(plan["file"]),
+        "to_archive_answered_confirmed": sum(1 for i in plan["file"] if i["do"] == "answered"),
+        "to_archive_duplicate": sum(1 for i in plan["file"] if i["do"] == "duplicate"),
+        "already_carded_move_only": len(plan["move_only"]),
+        "skipped_user_label": len(plan["skipped_label"]),
+        "left_for_triage_no_decision": len(plan["awaiting_triage"]),
+        "decided_otherwise_still_in_inbox": plan["other"],
+        "sent_listing_truncated": sent_truncated,
+        "oldest": {"act": _oldest(plan["act"]), "info": _oldest(plan["info"]),
+                   "archive": _oldest(plan["file"])},
+    }
+    stamp = date.today().isoformat()
+    if not apply:
+        # The card exactly as a new card would read, for review. PRIVATE:
+        # senders and subjects never leave ~/knowledge-os/logs/inbound-triage/.
+        base_dir().mkdir(parents=True, exist_ok=True)
+        preview = base_dir() / "backlog-preview.txt"
+        preview.write_text((preview_text or "no mail for the card") + "\n")
+        print(json.dumps(dict(counts, mode="dry-run", preview_file=str(preview),
+                              gmail_writes=0, airtable_writes=0)))
+        return 0
+    if triage_slot_block(holder_path) or backlog_unwrapped(holder_path):
+        fail("BACKLOG REFUSED before any write: the queue lock changed hands.")
+    task_id, action, carded = None, "none", []
+    if plan["act"] or plan["info"]:
+        try:
+            task_id, action, carded = raise_or_append(
+                sections, dispatch or _load_dispatch(),
+                "%s (backlog)" % _oldest(plan["act"] + plan["info"]))
+        except Exception as e:  # noqa: BLE001 — nothing moved yet, so nothing is lost
+            fail("BACKLOG CARD NOT WRITTEN (%s). Nothing was moved." % str(e)[:240])
+        if carded:
+            _append_jsonl(ledger_path(), [{"taskId": task_id, "action": action, "kind": "backlog",
+                                           "ids": carded,
+                                           "ts": datetime.now().isoformat(timespec="seconds")}])
+    on_card = set(carded)
+    # Everything listed on the card is labelled 19 and archived, the flagged
+    # "answered" ones included; only what did not fit stays for a re-run.
+    to_label = [i for i in plan["act"] + plan["info"] if i["id"] in on_card] + plan["move_only"]
+    if to_label:
+        _move_and_log([dict(i, do="leave") for i in to_label], [read_lbl["name"]],
+                      "BACKLOG %s: labelled, archived, listed on INBOX card %s" % (stamp, task_id or "(earlier)"))
+    _move_and_log(plan["file"], [], "BACKLOG %s: filed out of the inbox" % stamp)
+    print(json.dumps(dict(counts, mode="apply", card_task=task_id, card_action=action,
+                          carded=len(carded), labelled=len(to_label),
+                          archived=len(to_label) + len(plan["file"]),
+                          not_fitted=len(plan["act"]) + len(plan["info"]) - len(on_card))))
+    return 0
 
 
 # ─── HAS THIS ALREADY BEEN DEALT WITH? (27 Aug 2026) ────────────────
@@ -942,6 +2148,50 @@ def self_addressed(headers):
     return to.issubset(set(sender))
 
 
+def send_recipients(headers):
+    """Every address a send went to (To and Cc), lowercased."""
+    h = headers or {}
+    return sorted(set(EMAIL_RE.findall(("%s %s" % (h.get("to") or "", h.get("cc") or "")).lower())))
+
+
+def thread_sends(sent_msgs):
+    """thread id -> [{id, ts, to}] for every genuine send (a note to self is
+    never an answer to anyone)."""
+    out = {}
+    for m in sent_msgs or []:
+        tid = m.get("threadId")
+        h = m.get("headers") or {}
+        if not tid or self_addressed(h):
+            continue
+        out.setdefault(tid, []).append({"id": m.get("id") or "", "ts": int(m.get("internalDate") or 0),
+                                        "to": send_recipients(h)})
+    return out
+
+
+def reply_state(msg, sends):
+    """'answered' when a later send on the message's thread (a different
+    message) went to its sender, 'elsewhere' when later sends went only to
+    other people (a forward is not an answer), '' when nothing was sent after
+    it. Pure, so the tests drive it."""
+    mid, ts = msg.get("id"), int(msg.get("internalDate") or 0)
+    sender = parse_bare_email(str((msg.get("headers") or {}).get("from") or "")).lower()
+    later = [s for s in (sends or {}).get(msg.get("threadId"), [])
+             if s.get("id") != mid and int(s.get("ts") or 0) > ts]
+    if not later:
+        return ""
+    if sender and any(sender in (s.get("to") or []) for s in later):
+        return "answered"
+    return "elsewhere"
+
+
+def other_user_labels(msg, read_label_id):
+    """The user labels on a message other than "for Kevin to read". Gmail user
+    label ids all start "Label_"; matched whole, never by a substring (the
+    read label's own id is "Label_12")."""
+    return [lab for lab in (msg.get("labelIds") or [])
+            if str(lab).startswith("Label_") and lab != read_label_id]
+
+
 # Roy's assistant (24 Sep 2026): Roy forwards a message from info@ to info@
 # itself, and scripts/roy-assistant.py makes the task from info@'s Sent folder.
 # info@ mail is copied into this inbox, so the same message could otherwise
@@ -972,7 +2222,8 @@ def cmd_sentcheck(days):
         ts = int(m.get("internalDate") or 0)
         if ts > threads.get(tid, 0):
             threads[tid] = ts
-            sends[tid] = {"id": m.get("id") or "", "ts": ts}
+            sends[tid] = {"id": m.get("id") or "", "ts": ts,
+                          "to": send_recipients(m.get("headers"))}
     out = {
         "days": days,
         "sentMessages": len(messages),
@@ -981,13 +2232,19 @@ def cmd_sentcheck(days):
         # answers an incoming message when it is a different message and
         # strictly newer — a thread id on its own cannot say that.
         "threadSends": sends,
+        # Every genuine send per thread with who it went TO (review of PR
+        # #783, 14 Oct 2026): a forward to Roy or the accountant is a send on
+        # the thread but no answer to the sender.
+        "threadSendList": thread_sends(messages),
         # Self-addressed mail excluded from the map above. The scanned-post
         # lane is entirely this shape, so a zero here on a day post arrived
         # means the exclusion has stopped working.
         "selfAddressedExcluded": self_sent,
-        "rule": ("a thread counts as answered only when threadSends[tid].id is "
-                 "a DIFFERENT message from the one being judged AND "
-                 "threadSends[tid].ts is strictly greater than its internalDate"),
+        "rule": ("a message counts as answered only when some send in "
+                 "threadSendList[tid] is a DIFFERENT message from the one being judged, "
+                 "its ts is strictly greater than that message's internalDate, AND its "
+                 "\"to\" includes that message's sender; a later send that went only "
+                 "to other people is a forward, not an answer"),
         # The agent MUST know when the listing was cut short: a truncated sent
         # folder means "not found here" no longer implies "not answered".
         "truncated": truncated,
@@ -1017,16 +2274,96 @@ def cmd_mark(upto_ms):
     print(json.dumps({"watermark_ms": state["watermark_ms"]}))
 
 
+def digest_ids_since(since_ms, wanted, base=None):
+    """Message ids with a digest entry at or after since_ms whose decision
+    `wanted(do)` accepts."""
+    d = Path(base) if base else base_dir()
+    # Floored to the second: a digest stamp carries whole seconds, so a move in
+    # the same second as the scan's start would otherwise read as before it.
+    start = datetime.fromtimestamp(int(since_ms) // 1000)
+    ids = set()
+    day = start.date()
+    while day <= date.today():
+        for r in _jsonl(d / ("digest-%s.jsonl" % day.isoformat())):
+            if not r.get("id") or not wanted(str(r.get("do") or "")):
+                continue
+            try:
+                if datetime.fromisoformat(str(r.get("ts") or "")) >= start:
+                    ids.add(r["id"])
+            except ValueError:
+                continue
+        day += timedelta(days=1)
+    return ids
+
+
+def digest_moved_ids_since(since_ms, base=None):
+    """Message ids a digest entry took out of the inbox at or after since_ms."""
+    return digest_ids_since(since_ms, lambda do: do in INBOX_EXIT_DOS or do.startswith("file-"), base)
+
+
+def last_slot_start_ms(path=None):
+    """When the newest email-lane slot record was written (the runner writes one
+    before the agent starts), in epoch ms, or None when there is none."""
+    rows = read_slot_results(path) or []
+    for r in reversed(rows):
+        if r.get("lane") == "email" and r.get("ts"):
+            try:
+                return int(datetime.fromisoformat(str(r["ts"])).timestamp() * 1000)
+            except ValueError:
+                return None
+    return None
+
+
+def stale_inbox_left(state, now_ms=None, base=None, slot_start_ms=None):
+    """{count, truncated} of the inbox mail older than 2 days that this run's
+    scan saw, that nothing has taken out since, and that the agent has not
+    already counted as deferred; None when the snapshot is not this slot's (an
+    older one would count another slot's inbox: a failed scan must never be
+    scored on the previous slot's numbers)."""
+    snap = state.get("last_scan_stale")
+    if not isinstance(snap, dict) or not isinstance(snap.get("ids"), list) or not snap.get("at_ms"):
+        return None
+    now_ms = now_ms if now_ms is not None else int(datetime.now().timestamp() * 1000)
+    if now_ms - int(snap["at_ms"]) > STALE_SNAPSHOT_MAX_HOURS * 3600 * 1000:
+        return None
+    if slot_start_ms and int(snap["at_ms"]) < int(slot_start_ms):
+        return None
+    moved = digest_moved_ids_since(snap["at_ms"], base)
+    # A deferred message is in the agent's own count already: never twice.
+    deferred = digest_ids_since(snap["at_ms"], lambda do: do == "deferred", base)
+    left = [i for i in snap["ids"] if i not in moved and i not in deferred]
+    return {"count": len(left), "truncated": bool(snap.get("truncated"))}
+
+
 def cmd_score(waiting):
+    """`waiting` from the agent (deferred, failed, stranded without a task)
+    PLUS the inbox mail older than 2 days still there after this run, counted
+    here from the scan and the digest. Until 14 Oct 2026 only the first part
+    counted, so the score read "0 waiting; at zero 7 of last 7 days" over an
+    inbox of 155, 110 of them decided and left behind."""
     state = read_state()
+    left = stale_inbox_left(state, slot_start_ms=last_slot_start_ms())
+    if left is None:
+        fail("SCORE REFUSED: no inbox scan from this slot (none since the slot began, or "
+             "none in the last %d hours), so the mail older than 2 days that still sits in "
+             "the inbox cannot be counted. A score without it could read 0 over a full "
+             "inbox (Kevin, 14 Oct 2026)." % STALE_SNAPSHOT_MAX_HOURS)
     history = state.get("history", {})
     today = date.today().isoformat()
-    history[today] = int(waiting)
+    total = int(waiting) + left["count"]
+    history[today] = total
     state["history"] = trim_history(history)
+    detail = trim_history(state.get("history_detail", {}))
+    detail[today] = {"agent": int(waiting), "inbox_over_2_days": left["count"],
+                     "inbox_listing_truncated": left["truncated"]}
+    state["history_detail"] = detail
     write_state(state)
     text = metric_string(state["history"], today)
     airtable_patch_metric(text)
-    print(json.dumps({"metric_score": text, "written_to_register": True}))
+    print(json.dumps({"metric_score": text, "written_to_register": True,
+                      "waiting_agent": int(waiting), "inbox_over_2_days": left["count"],
+                      # a truncated listing makes the inbox figure a floor, never a ceiling
+                      "inbox_listing_truncated": left["truncated"]}))
 
 
 def format_daily_log(rows):
@@ -1225,11 +2562,14 @@ MATTERS_CLOSED_DAYS = 14
 
 def collect_agent_ids(digest_dir=None):
     """Message ids whose LABEL PLACEMENT this agent chose — every digest entry
-    that MOVED mail (label12, label13, archive, file-*). Note-only entries
+    that MOVED mail (label12, label13, archive, file-*). Note entries
     (task-created, duplicate, updated, leave, answered, deferred) are kept
     OUT on purpose: stranded mail was labelled by a human before the agent
     ever tasked it, and that human filing is exactly the evidence the book
-    exists to keep."""
+    exists to keep. Since 14 Oct 2026 leave, answered and duplicate also take
+    mail out of the inbox (and leave adds label 19), but the book samples
+    neither the inbox nor label 19, so a lane label a human put on such a
+    message is still human evidence."""
     d = Path(digest_dir) if digest_dir else base_dir()
     ids = set()
     for p in sorted(d.glob("digest-*.jsonl")):
@@ -2836,6 +4176,74 @@ def selftest():
             else:
                 os.environ["INBOUND_TRIAGE_DIR"] = _prev
 
+    # ── nothing triage decides stays in the inbox (Kevin, 14 Oct 2026) ──
+    pub = {"gmail.com"}
+    check("a personal address is a person", sender_type("a@gmail.com", pub) == "person")
+    check("a council is public", sender_type("x@burnley.gov.uk", pub) == "public")
+    check("a company is an organisation", sender_type("x@acme.co.uk", pub) == "organisation")
+    check("Kevin's own domain is his", sender_type("x@runpreneur.org.uk", pub) == "own")
+    check("no address is unknown", sender_type("", pub) == "unknown")
+    card, shown = new_card_text([("Added today", [
+        {"id": "m2", "threadId": "t2", "sender": "x@acme.co.uk", "subject": "Two",
+         "internalDate": 2000, "summary": "second"},
+        {"id": "m1", "threadId": "t1", "sender": "a@gmail.com", "subject": "One",
+         "internalDate": 1000, "summary": "first"}])], pub)
+    check("card groups people before companies and numbers straight through",
+          card.index("1. a@gmail.com | One") < card.index("2. x@acme.co.uk | Two")
+          and shown == ["m1", "m2"])
+    check("card carries each Gmail link", GMAIL_THREAD_URL % "t1" in card)
+    check("card ends with its carry-out line", card.rstrip().endswith("Nothing is sent."))
+    more, shown2 = appended_card_text(card, [("Added later", [{"id": "m3", "threadId": "t3",
+                                                               "sender": "b@gmail.com", "subject": "Three",
+                                                               "internalDate": 3000, "summary": "third"}])], pub)
+    check("an added email numbers on from the card's last, and the count follows",
+          "3. b@gmail.com | Three" in more and more.startswith("INBOX CARD: 3 emails")
+          and more.rstrip().endswith("Nothing is sent.") and shown2 == ["m3"])
+    check("a concrete ask is caught, a bare question mark is not",
+          ask_signal("Invoice 42", "") != "" and ask_signal("", "Is this still available?") != ""
+          and ask_signal("Photos", "Lovely day") == ""
+          and ask_signal("News", "Did you know we read 2,000 books?") == "")
+    sends = {"t": [{"id": "s1", "ts": 50, "to": ["roy@example.com"]}]}
+    msg = {"id": "i1", "threadId": "t", "internalDate": 10, "headers": {"from": "Pat <pat@example.com>"}}
+    check("a forward is not an answer", reply_state(msg, sends) == "elsewhere")
+    sends["t"].append({"id": "s2", "ts": 60, "to": ["pat@example.com"]})
+    check("a send to the sender is an answer", reply_state(msg, sends) == "answered")
+    check("the read label's own id is not another user label",
+          other_user_labels({"labelIds": ["INBOX", "Label_12"]}, "Label_12") == []
+          and other_user_labels({"labelIds": ["Label_12", "Label_7"]}, "Label_12") == ["Label_7"])
+    plan = backlog_plan(
+        [{"id": "a", "headers": {"from": "p@gmail.com", "subject": "Photos"}, "body": "Lovely"},
+         {"id": "b", "threadId": "tb", "internalDate": 1, "headers": {"from": "q@x.com"}},
+         {"id": "c"}, {"id": "d"}, {"id": "e"}, {"id": "f"},
+         {"id": "g", "headers": {"subject": "Please pay"}},
+         {"id": "h", "labelIds": ["Label_7"]}],
+        {"a": {"do": "leave", "reason": "r"}, "b": {"do": "answered"}, "c": {"do": "duplicate"},
+         "d": {"do": "label12"}, "f": {"do": "leave"}, "g": {"do": "leave"}, "h": {"do": "leave"}},
+        {"f"}, "Label_12", {"tb": [{"id": "s", "ts": 5, "to": ["q@x.com"]}]})
+    check("backlog: one card, an ask in its act section, no-ask for information, a Kevin label left alone",
+          [i["id"] for i in plan["info"]] == ["a"] and [i["id"] for i in plan["act"]] == ["g"]
+          and [i["id"] for i in plan["file"]] == ["b", "c"] and plan["other"] == {"label12": 1}
+          and [i["id"] for i in plan["awaiting_triage"]] == ["e"]
+          and [i["id"] for i in plan["move_only"]] == ["f"]
+          and [i["id"] for i in plan["skipped_label"]] == ["h"])
+    check("a lesson already held is matched on the name and Kevin's words",
+          lesson_already_held("- 2026-10-15: INBOX: 2 emails — [2026-10-15 09:00] never these",
+                              "INBOX: 2 emails", "never these"))
+    with tempfile.TemporaryDirectory() as tmp:
+        start = int(datetime.now().timestamp() * 1000) - 60_000
+        (Path(tmp) / ("digest-%s.jsonl" % date.today().isoformat())).write_text(
+            json.dumps({"id": "s1", "do": "leave", "ts": datetime.now().isoformat(timespec="seconds")})
+            + "\n" + json.dumps({"id": "s3", "do": "deferred",
+                                 "ts": datetime.now().isoformat(timespec="seconds")}) + "\n")
+        st = {"last_scan_stale": {"ids": ["s1", "s2", "s3"], "truncated": False, "at_ms": start}}
+        check("score counts the old inbox mail this run did not move or defer",
+              stale_inbox_left(st, base=tmp) == {"count": 1, "truncated": False})
+        check("score refuses a snapshot older than the window",
+              stale_inbox_left(st, now_ms=start + 4 * 3600 * 1000, base=tmp) is None)
+        check("score refuses a snapshot from before this slot began",
+              stale_inbox_left(st, base=tmp, slot_start_ms=start + 1000) is None)
+        check("score refuses with no snapshot", stale_inbox_left({}, base=tmp) is None)
+
     if failures:
         print("selftest FAILED: %d" % len(failures))
         sys.exit(1)
@@ -3320,7 +4728,15 @@ def main(argv):
         action = opt("--do")
         if not msg_id or not action:
             fail("note needs --id and --do")
-        cmd_note(msg_id, action, opt("--reason", ""))
+        cmd_note(msg_id, action, opt("--reason", ""), opt("--override"))
+    elif cmd == "inbox-card":
+        return cmd_inbox_card(opt("--slot"), dry_run="--dry-run" in argv)
+    elif cmd == "inbox-lessons":
+        return cmd_inbox_lessons(dry_run="--dry-run" in argv)
+    elif cmd == "backlog":
+        if ("--dry-run" in argv) == ("--apply" in argv):
+            fail("backlog needs exactly one of --dry-run or --apply")
+        return cmd_backlog(apply="--apply" in argv)
     elif cmd == "sentcheck":
         return cmd_sentcheck(opt("--days", "7"))
     elif cmd == "mark":

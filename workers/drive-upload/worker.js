@@ -623,7 +623,9 @@ async function gmailList(token, { q, labelIds, maxResults, pageToken }) {
             // precedence) lets the triage scan mark a machine receipt of
             // something we sent WITHOUT judgement — those were reaching
             // Kevin's approval gate as tasks (2 Sep 2026).
-            if (['from', 'to', 'subject', 'date', 'list-unsubscribe',
+            // cc (14 Oct 2026): a reply-all that answered the sender only in
+            // Cc must read as answered, and a note to self must stay one.
+            if (['from', 'to', 'cc', 'subject', 'date', 'list-unsubscribe',
                  'auto-submitted', 'x-auto-response-suppress', 'x-autoreply',
                  'x-autorespond', 'precedence', 'in-reply-to'].includes(k)) headers[k] = h.value;
         }
