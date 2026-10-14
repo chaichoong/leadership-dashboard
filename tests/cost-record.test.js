@@ -275,9 +275,11 @@ describe('cost-record.py amounts: an annual premium keeps its comma', () => {
     const big = expected('£1,234.50', { task: { ...APPROVED, output: `RECORD CHANGE: ${COST} Expected Cost = £1,234.50` } });
     expect(big.code).toBe(0);
     expect(big.writes[0].payload.fields[F.expected]).toBe(1234.5);
+    const top = expected('9,999,999.99', { task: { ...APPROVED, output: `RECORD CHANGE: ${COST} Expected Cost = £9,999,999.99` } });
+    expect(top.code).toBe(0);
     const spaced = expected('31.27', { task: { ...APPROVED, output: `RECORD CHANGE: ${COST} Expected Cost = £ 31.27` } });
     expect(spaced.code).toBe(0);
-    for (const v of ['1,23', '0,500', '1,234,567,890.00', '£,5', '1.234,56']) {
+    for (const v of ['1,23', '0,500', '1,234,567,890.00', '10,000,000', '£,5', '1.234,56']) {
       expect(expected(v, { task: { ...APPROVED, output: LINE } }).json.refused, v).toMatch(/must be a pounds amount above zero/);
     }
   });

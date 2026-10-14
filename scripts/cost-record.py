@@ -121,7 +121,7 @@ CHANGE_RE = re.compile(r"^RECORD CHANGE:[ \t]*(?P<cost>rec[A-Za-z0-9]{14})[ \t]+
                        r"(?P<label>Expected Cost|End Date|Payment Status)[ \t]*=[ \t]*(?P<value>[^\n]+?)[ \t]*$", re.M)
 NEW_RE = re.compile(r"^RECORD NEW COST:[ \t]*(?P<body>[^\n]+?)[ \t]*$", re.M)
 # Up to £9,999,999.99, with or without thousands commas; a leading zero group ("0,500") is not an amount.
-AMOUNT_RE = re.compile(r"^(?:£|GBP)?\s*((?:[1-9]\d{0,2}(?:,\d{3}){1,2}|\d{1,7})(?:\.\d{1,2})?)$", re.I)
+AMOUNT_RE = re.compile(r"^(?:£|GBP)?\s*((?:[1-9]\d{0,2},\d{3}|[1-9],\d{3},\d{3}|\d{1,7})(?:\.\d{1,2})?)$", re.I)
 DAY_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 
 
