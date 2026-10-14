@@ -509,6 +509,17 @@
             : calculatedRounded;
         const usingCustomFloor = floorOverride !== null && floorOverride !== undefined;
 
+        // Hold back the rest of the variable budget (Kevin, 14 Oct 2026): maintenance, compliance,
+        // utilities and the non-payment allowance, spent evenly across the window. Wages are not
+        // in it while the weekly costs box pays them; a box with no wages row holds them here too.
+        // Without this, "safe to withdraw" counted that money as spare: £23,950 on 14 Oct 2026,
+        // when £20,300 left the budget covered. Only the withdrawals shrink; the balance columns
+        // still hold the money.
+        const waWagesInBox = commitments.some(c => /wages/i.test(String(c.label || '')) && (c.amount || 0) > 0);
+        const waHeldBack = RE_VARIABLE_BUDGET_GBP - (waWagesInBox ? WAGES_TARGET_GBP : 0);
+        const waDailyHold = waProjected.length ? waHeldBack / waProjected.length : 0;
+        const heldBy = n => waDailyHold * n;   // budget spent by the end of day n-1
+
         // Run withdrawal algorithm
         const waWithdrawals = [];
         let waLastIdx = -1;
@@ -516,7 +527,7 @@
         for (let i = 0; i < waProjected.length; i++) {
             if (i - waLastIdx < WA_MIN_GAP && waLastIdx >= 0) continue;
             const day = waProjected[i];
-            const availNow = day.opening - roundedBuffer;
+            const availNow = day.opening - heldBy(i) - roundedBuffer;
             if (availNow < 50) continue;
             // Cap by the LOWER of this day's opening and its own closing balance
             // (opening minus today's outflows). On every day but the last, the
@@ -524,9 +535,9 @@
             // on the final window day there is no next day, so without this the
             // withdrawal would ignore that day's costs and push the balance
             // negative. min() keeps day i's own outflows inside the safety buffer.
-            let minFuture = Math.min(day.opening, day.balance) - roundedBuffer;
+            let minFuture = Math.min(day.opening - heldBy(i), day.balance - heldBy(i + 1)) - roundedBuffer;
             for (let j = i + 1; j < waProjected.length; j++) {
-                const lowest = Math.min(waProjected[j].opening, waProjected[j].balance);
+                const lowest = Math.min(waProjected[j].opening - heldBy(j), waProjected[j].balance - heldBy(j + 1));
                 const futAvail = lowest - roundedBuffer;
                 if (futAvail < minFuture) minFuture = futAvail;
             }
@@ -561,12 +572,12 @@
             <div class="kpi-card">
                 <div class="kpi-card-label" style="${cfLabelStyle}">Final Balance</div>
                 <div class="kpi-card-value ${waFinalBalance >= 0 ? 'text-green' : 'text-red'}">${fmtAccounting(waFinalBalance)}</div>
-                <div class="kpi-card-sub">Post-withdrawal day 31</div>
+                <div class="kpi-card-sub">Post-withdrawal day 31${waTotalAvailable > 0 ? `, with the ${fmt(waHeldBack)} budget held back still in it` : ''}</div>
             </div>
             <div class="kpi-card">
                 <div class="kpi-card-label" style="${cfLabelStyle}">Lowest Balance</div>
                 <div class="kpi-card-value ${waLowestBal >= 0 ? 'text-green' : 'text-red'}">${fmtAccounting(waLowestBal)}</div>
-                <div class="kpi-card-sub">Post-withdrawal lowest</div>
+                <div class="kpi-card-sub">Post-withdrawal lowest, before the held-back budget is spent</div>
             </div>
         `;
 
@@ -625,6 +636,7 @@
                         <span style="color:var(--text-muted);font-size:var(--fs-xs)">Your actual bank balance right now</span>
                         ${waTotalAvailable > 0 ? `<span style="margin-left:auto;font-weight:var(--fw-semibold);color:var(--success)">Safe to withdraw (31-day cycle): ${fmt(waTotalAvailable)}</span>` : '<span style="margin-left:auto;color:var(--text-muted);font-size:var(--fs-sm)">No safe withdrawal windows</span>'}
                     </div>
+                    <div id="waHeldBackNote" style="margin-bottom:8px;font-size:var(--fs-xs);color:var(--text-secondary)">Holds back ${fmt(waHeldBack)} for ${waWagesInBox ? 'maintenance, compliance, utilities and the non-payment allowance. Wages are in the weekly costs below.' : 'wages, maintenance, compliance, utilities and the non-payment allowance. No wages row is in the weekly costs below.'}</div>
 
                     ${balanceWarning ? `<div style="padding:8px 12px;background:var(--warning-bg);border-radius:var(--radius-sm);margin-bottom:8px;font-size:var(--fs-xs);color:var(--text-primary)">
                         <strong>Balance mismatch:</strong> Entered balance (${fmt(effectiveOpening)}) differs from dashboard (${fmt(openingBalance)}) by ${fmt(Math.abs(effectiveOpening - openingBalance))}.
@@ -904,44 +916,7 @@
                 }
             }
         });
-        // ── Credit Card Summary ──
-        const ccEl = document.getElementById('creditCardSummary');
-        if (ccEl && creditCards && creditCards.length > 0) {
-            const totalCCDebt = creditCards.reduce((s, c) => s + c.owed, 0);
-            const monthlySurplus = netChangeLow > 0 ? netChangeLow : 0;
-
-            const ccRows = creditCards.filter(c => c.owed > 0.01).map(c => {
-                const d = c.dueDay;
-                const lastTwo = d % 100;
-                const last = d % 10;
-                const suffix = (lastTwo >= 11 && lastTwo <= 13) ? 'th'
-                    : last === 1 ? 'st' : last === 2 ? 'nd' : last === 3 ? 'rd' : 'th';
-                const monthsToClear = monthlySurplus > 0 ? Math.ceil(c.owed / monthlySurplus) : null;
-                const projectionText = monthsToClear !== null
-                    ? `~${monthsToClear} month${monthsToClear !== 1 ? 's' : ''} to clear`
-                    : 'No surplus to project';
-                return `<div style="display:flex;justify-content:space-between;align-items:center;padding:8px 0;border-bottom:1px solid var(--border-subtle);font-size:var(--fs-sm)">
-                    <span style="flex:1">${escHtml(c.name)} <span style="color:var(--text-muted);font-size:var(--fs-xs)">(due ${d}${suffix})</span></span>
-                    <span style="width:100px;text-align:right;font-weight:var(--fw-semibold);color:${c.owed > 5000 ? 'var(--danger)' : 'var(--warning)'}">${fmt(c.owed)}</span>
-                    <span style="width:160px;text-align:right;font-size:var(--fs-xs);color:var(--text-secondary)">${projectionText}</span>
-                </div>`;
-            }).join('');
-
-            const totalMonths = monthlySurplus > 0 ? Math.ceil(totalCCDebt / monthlySurplus) : null;
-            const totalProjection = totalMonths !== null
-                ? `At current surplus of ${fmt(monthlySurplus)}/month, total debt clears in ~${totalMonths} month${totalMonths !== 1 ? 's' : ''}.`
-                : 'No monthly surplus available to project clearance timeline.';
-
-            ccEl.innerHTML = `
-                <div style="margin-top:20px;padding:16px;background:var(--bg-surface);border:1px solid var(--border-subtle);border-radius:var(--radius-md)">
-                    <div style="font-weight:var(--fw-semibold);margin-bottom:8px;color:var(--text-primary)">Credit Card Balances <span style="font-weight:var(--fw-regular);color:var(--text-secondary)">Total: ${fmt(totalCCDebt)}</span></div>
-                    ${ccRows}
-                    <div style="margin-top:10px;font-size:var(--fs-xs);color:var(--text-secondary)">${totalProjection}</div>
-                </div>
-            `;
-        } else if (ccEl) {
-            ccEl.innerHTML = '';
-        }
+        renderCreditCardSummary(creditCards);
 
         // Store all args so waRecalc can trigger a full rebuild
         window._cfBuildArgs = {
@@ -954,6 +929,55 @@
         window._waIncomeTenancies = incomeTenancies;
 
         return rows;
+    }
+
+    // ── Credit Card Summary ──
+    // The payoff time runs on what can actually go to the cards: window._ccPaydown, set by
+    // the dashboard from ReKpis.debtPaydown (personal net cash flow x the Debt pot share).
+    // It used to run on the forecast's property surplus, which comes before the variable
+    // budget and before Kevin's own living costs: on 14 Oct 2026 it said "£13,404.77 a
+    // month, clears in ~2 months" for £24,165 of cards that clear in about 7.
+    // undefined = still loading; { perMonth: null, reason } = cannot be worked out.
+    function renderCreditCardSummary(creditCards) {
+        const ccEl = document.getElementById('creditCardSummary');
+        if (!ccEl) return;
+        if (!creditCards || creditCards.length === 0) { ccEl.innerHTML = ''; return; }
+        const totalCCDebt = creditCards.reduce((s, c) => s + c.owed, 0);
+        const paydown = window._ccPaydown;
+        const perMonth = paydown && paydown.perMonth > 0 ? paydown.perMonth : 0;
+        const plural = n => `~${n} month${n !== 1 ? 's' : ''}`;
+
+        const ccRows = creditCards.filter(c => c.owed > 0.01).map(c => {
+            const d = c.dueDay;
+            const lastTwo = d % 100;
+            const last = d % 10;
+            const suffix = (lastTwo >= 11 && lastTwo <= 13) ? 'th'
+                : last === 1 ? 'st' : last === 2 ? 'nd' : last === 3 ? 'rd' : 'th';
+            const projectionText = perMonth > 0 ? `${plural(Math.ceil(c.owed / perMonth))} to clear` : '';
+            return `<div style="display:flex;justify-content:space-between;align-items:center;padding:8px 0;border-bottom:1px solid var(--border-subtle);font-size:var(--fs-sm)">
+                <span style="flex:1">${escHtml(c.name)} <span style="color:var(--text-muted);font-size:var(--fs-xs)">(due ${d}${suffix})</span></span>
+                <span style="width:100px;text-align:right;font-weight:var(--fw-semibold);color:${c.owed > 5000 ? 'var(--danger)' : 'var(--warning)'}">${fmt(c.owed)}</span>
+                <span style="width:160px;text-align:right;font-size:var(--fs-xs);color:var(--text-secondary)">${projectionText}</span>
+            </div>`;
+        }).join('');
+
+        const totalProjection = paydown === undefined
+            ? 'Working out the payoff time from your Wealth figures…'
+            : paydown.perMonth == null
+                ? `Payoff time not shown: ${escHtml(paydown.reason || 'the figures did not load')}.`
+                : perMonth > 0
+                    ? `At ${fmt(perMonth)} a month to the cards (your Debt pot's ${paydown.debtPct}% of ${fmt(paydown.average)} personal net cash flow, 3-month average), the total clears in ${plural(Math.ceil(totalCCDebt / perMonth))}.`
+                    : paydown.debtPct === 0
+                        ? 'Your Debt pot share is 0%, so no payoff time can be given.'
+                        : 'Personal net cash flow (3-month average) is not above £0, so nothing is going to the Debt pot and no payoff time can be given.';
+
+        ccEl.innerHTML = `
+            <div style="margin-top:20px;padding:16px;background:var(--bg-surface);border:1px solid var(--border-subtle);border-radius:var(--radius-md)">
+                <div style="font-weight:var(--fw-semibold);margin-bottom:8px;color:var(--text-primary)">Credit Card Balances <span style="font-weight:var(--fw-regular);color:var(--text-secondary)">Total: ${fmt(totalCCDebt)}</span></div>
+                ${ccRows}
+                <div style="margin-top:10px;font-size:var(--fs-xs);color:var(--text-secondary)">${totalProjection}</div>
+            </div>
+        `;
     }
 
     // Convert a MONTHLY-equivalent "Expected Cost" into the real cash that leaves
