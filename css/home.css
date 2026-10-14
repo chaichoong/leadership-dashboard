@@ -5,6 +5,9 @@ body.home-mode #tab-overview { display: block; }
 body.home-mode #tab-wealth { display: block; }
 #homeWealthDivider { display: none; }
 body.home-mode #homeWealthDivider { display: block; }
+.home-wealth-wait { display: none; }
+body.home-mode .home-wealth-wait:not([hidden]) { display: block; margin: 0 0 var(--space-3); font-size: var(--fs-sm); color: var(--text-muted); }
+body.home-mode.home-folded-wealth .home-wealth-wait { display: none; }
 
 #tab-home .home-header { margin-bottom: var(--space-4); }
 #tab-home .home-header h1 { margin: 0; font-size: var(--fs-2xl); color: var(--text-primary); }

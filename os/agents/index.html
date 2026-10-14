@@ -425,13 +425,16 @@ html.home-embed .modal{max-height:calc(var(--home-vis-h,100vh) * .9)}
 /* The frame never scrolls, so a sticky bar is held inside the band on screen by its offset from the frame's edge. */
 html.home-embed .apv-bulk{top:var(--home-vis-top,0px)}
 html.home-embed .apv-decide{bottom:calc(100vh - var(--home-vis-top,0px) - var(--home-vis-h,100vh))}
-/* Foldable sections on Home (Kevin, 14 Oct 2026: "collapse each section down should I need it"): the
-   zone's own header is the switch; a folded zone shows its header only, and Home remembers the choice. */
+/* Foldable sections on Home (Kevin, 14 Oct 2026: "collapse each section down should I need it"): a
+   click anywhere on the zone's header folds it, and the arrow is a real button for the keyboard and
+   screen readers. A folded zone shows its header only, and Home remembers the choice. */
 html.home-embed .zone > .zone-header.home-fold{cursor:pointer;user-select:none}
-html.home-embed .zone > .zone-header.home-fold:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+html.home-embed .home-fold-toggle{display:inline-flex;align-items:center;background:none;border:0;padding:0;margin:0;cursor:pointer;color:inherit;font:inherit}
+html.home-embed .home-fold-toggle:focus-visible{outline:2px solid var(--accent);outline-offset:2px;border-radius:var(--radius-sm)}
+html.home-embed .zone-header h2.zone-title{margin:0}
 html.home-embed .home-chev{display:inline-block;width:16px;font-size:var(--fs-lg);line-height:1;color:var(--text-secondary);transition:transform .15s}
 html.home-embed .zone.home-collapsed .home-chev{transform:rotate(-90deg)}
-html.home-embed .zone.home-collapsed > :not(.zone-header):not([role="status"]){display:none !important}
+html.home-embed .zone.home-collapsed > :not(.zone-header){display:none !important}
 html.home-embed #ceoBriefBody h2{display:none}   /* the fold header carries the title on Home */
 html.home-embed .zone.home-collapsed > .zone-header{margin-bottom:0}
 </style>
@@ -8369,16 +8372,19 @@ function homeFoldSetup(){
         if(!head){   // the brief draws its own heading inside its body, so it gets a plain one to fold by
             head = document.createElement('div');
             head.className = 'zone-header';
-            head.innerHTML = `<span class="zone-title">${esc(madeTitle)}</span>`;
+            head.innerHTML = `<h2 class="zone-title">${esc(madeTitle)}</h2>`;
             zone.insertBefore(head, zone.firstChild);
         }
-        // A live region inside a button is read out as part of its name, so it moves out beside it.
-        head.querySelectorAll('[role="status"]').forEach(n => zone.insertBefore(n, head.nextSibling));
         head.classList.add('home-fold');
-        head.setAttribute('role', 'button');
-        head.setAttribute('tabindex', '0');
-        head.insertAdjacentHTML('afterbegin', '<span class="home-chev" aria-hidden="true">▾</span>');
-        const apply = folded => { zone.classList.toggle('home-collapsed', folded); head.setAttribute('aria-expanded', folded ? 'false' : 'true'); };
+        const title = head.querySelector('.zone-title');
+        if(title && !title.id) title.id = zoneId + 'FoldTitle';
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        btn.className = 'home-fold-toggle';
+        btn.innerHTML = '<span class="home-chev" aria-hidden="true">▾</span>';
+        if(title) btn.setAttribute('aria-labelledby', title.id);
+        head.insertBefore(btn, head.firstChild);
+        const apply = folded => { zone.classList.toggle('home-collapsed', folded); btn.setAttribute('aria-expanded', folded ? 'false' : 'true'); };
         const flip = () => {
             const folded = !zone.classList.contains('home-collapsed');
             // Ticks hidden by a fold would hold off the new-version reload unseen, and are one click to redo.
@@ -8386,8 +8392,11 @@ function homeFoldSetup(){
             apply(folded); homeFoldSave(key, folded);
         };
         apply(!!st[key]);
-        head.addEventListener('click', (e) => { if(!e.target.closest('a,button,input,select,textarea')) flip(); });
-        head.addEventListener('keydown', (e) => { if(e.key === 'Enter' || e.key === ' '){ e.preventDefault(); flip(); } });
+        // The arrow's own click bubbles here too, so the fold happens once, whichever was pressed.
+        head.addEventListener('click', (e) => {
+            const ctl = e.target.closest('a,button,input,select,textarea');
+            if(!ctl || ctl === btn) flip();
+        });
     });
 }
 
@@ -8452,7 +8461,9 @@ if(HOME_MODE) window.addEventListener('message', (e) => {
 async function start(){
     document.getElementById('loader').style.display='block';
     document.getElementById('authBar').style.display='none';
-    if(HOME_MODE) homeEmbedWatchHeight();
+    // Tell Home a load has started before any height goes out: a reload for a new version sends the
+    // loading screen's height first, and Home must not read that as the page's real size (review, 14 Oct 2026).
+    if(HOME_MODE){ homeEmbedTell({ type:'agentsHomeLoading' }); homeEmbedWatchHeight(); }
     try {
         if(!HOME_MODE) consumeAgentDeepLink();
         // Announce boot so a deep link requested while this iframe was

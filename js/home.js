@@ -39,12 +39,16 @@
         const f = frame();
         if (!f || !signedIn() || !state.dataReady) return;
         if (f.getAttribute('src') && !force) return;
-        state.agents = { phase: 'loading' };
-        state.loadedAt = state.rereadAt = Date.now();
+        state.rereadAt = Date.now();
         setStatus('Loading your approvals and the CEO brief…', false);
         if (typeof markTabRefreshing === 'function') markTabRefreshing(TAB);
         f.setAttribute('src', `${f.getAttribute('data-src')}&cb=${Date.now()}`);
-        const started = state.loadedAt;
+        frameLoading();
+    }
+    // A load has started, from here or from the copy reloading itself for a new version.
+    function frameLoading() {
+        state.agents = { phase: 'loading' };
+        const started = state.loadedAt = Date.now();
         setTimeout(() => {
             if (state.loadedAt !== started || state.agents.phase !== 'loading') return;
             state.agents = { phase: 'error', error: 'it did not finish loading within a minute' };
@@ -90,6 +94,10 @@
         if (d.type === 'agentsHomeHeight' && Number(d.h) > 0) {
             f.style.height = `${Math.ceil(Number(d.h))}px`;
             queueBand();
+            return;
+        }
+        if (d.type === 'agentsHomeLoading') {
+            if (state.agents.phase !== 'loading') frameLoading();   // our own load already counts
             return;
         }
         if (d.type === 'agentsHomeScrollTo') {
@@ -147,8 +155,13 @@
         return r.bottom > -300 && r.top < window.innerHeight + 300;
     }
     function maybeWealth() {
-        if (!homeOpen() || state.agents.phase === 'idle' || state.agents.phase === 'loading') return;
-        if (wealthNear()) loadWealth();
+        if (!homeOpen()) return;
+        const waiting = state.agents.phase === 'idle' || state.agents.phase === 'loading';
+        const near = wealthNear();
+        // Say why the heading has nothing under it yet, rather than leave it blank.
+        const note = document.getElementById('homeWealthWait');
+        if (note) note.hidden = !(waiting && near && state.wealth === 'waiting');
+        if (!waiting && near) loadWealth();
     }
 
     async function loadWealth() {
@@ -156,6 +169,8 @@
         if (state.wealth === 'loading' || state.wealth === 'loaded') return;
         if (typeof renderWealthTab !== 'function') { state.wealth = 'failed'; return; }
         state.wealth = 'loading';
+        const note = document.getElementById('homeWealthWait');
+        if (note) note.hidden = true;
         try { await renderWealthTab(); state.wealth = wealthOutcome(); }
         catch (err) { state.wealth = 'failed'; console.error('[home] Wealth could not be drawn:', err); }
         if (typeof markTabSynced === 'function') markTabSynced(TAB);
