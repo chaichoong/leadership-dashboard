@@ -1,4 +1,4 @@
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -101,7 +101,7 @@ describe('netWorthAccounts counts a card at what it owes today', () => {
 describe('debtRows: only an interest-only loan rolls forward on its own', () => {
   const DEBT = { name: 'n', cls: 'c', type: 't', principal: 'p', rate: 'r', term: 'm', start: 's', payMatch: 'pm' };
   const loan = (id, name, type, principal, rate, start) => ({ id, fields: { n: name, c: 'Loans', t: type, p: principal, r: rate, s: start } });
-  const rows = (debts) => new Function('F', 'getField', 'DEBT', '_debtRecords', 'allTransactions',
+  const rows = (debts, asOf) => new Function('F', 'getField', 'DEBT', '_debtRecords', 'allTransactions', 'asOf',
     `const _num = v => (v === '' || v == null) ? null : (isFinite(Number(v)) ? Number(v) : null);
      const creditCardItems = () => [];
      const debtCostByAcct = () => ({});
@@ -112,7 +112,7 @@ describe('debtRows: only an interest-only loan rolls forward on its own', () => 
      ${extract(wealthSrc, 'manualDebtBalance', 'js/wealth.js')}
      ${extract(wealthSrc, 'debtPayments', 'js/wealth.js')}
      ${extract(wealthSrc, 'accruedDebtBalance', 'js/wealth.js')}
-     ${extract(wealthSrc, 'debtRows', 'js/wealth.js')}; return debtRows();`)(F, getField, DEBT, debts, []);
+     ${extract(wealthSrc, 'debtRows', 'js/wealth.js')}; return asOf ? debtRows(asOf) : debtRows();`)(F, getField, DEBT, debts, [], asOf);
 
   it('a repayment loan with a start date and a rate holds at the figure you typed', () => {
     const [r] = rows([loan('recTestRepay', 'Test Repayment Loan', 'Repayment', 31234.56, 2.5, '2021-06-01')]);
@@ -136,6 +136,69 @@ describe('debtRows: only an interest-only loan rolls forward on its own', () => 
       expect(r.balance).toBeCloseTo(20460.27, 2);
       expect(r.accrues).toBe(true);
     } finally { vi.useRealTimers(); }
+  });
+  it('works an accruing debt out as at a given moment, so a re-check later agrees with the page', () => {
+    // The page draws at 23:50 on 28 Jul; its "Net worth reconciles" check runs after
+    // midnight. Both must use the 28 Jul figure, or a day's interest reads as drift.
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(new Date(2030, 6, 29, 0, 20));
+    try {
+      const debts = [loan('recTestAccrue', 'Test Accruing Debt', 'Interest-only', 20000, 6, '2030-03-10')];
+      const [r] = rows(debts, new Date(2030, 6, 28, 23, 50));
+      expect(r.balance).toBeCloseTo(20460.27, 2);
+    } finally { vi.useRealTimers(); }
+  });
+});
+
+// 14 Oct 2026 — a loan made to accrue in one save. The editor pre-fills today's balance;
+// saving it with a past start date counts the interest since twice. The first Save now
+// stops and says so; the second goes through. All values invented.
+describe('wealthSaveDebt: a loan that starts accruing is checked once before saving', () => {
+  const DEBT = { name: 'n', cls: 'c', type: 't', principal: 'p', rate: 'r', term: 'm', start: 's' };
+  const setup = ({ cls = 'Loans', type = 'Interest-only', start = '2030-01-15', rate = '6', principal = '12000', accrues = '', stored = '12000' } = {}) => {
+    const inputs = { '.de-rate': { value: rate }, '.de-type': { value: type }, '.de-principal': { value: principal }, '.de-term': { value: '' }, '.de-start': { value: start } };
+    const status = { textContent: '', style: {} };
+    const box = { dataset: { id: 'recTestLoan', name: 'Test Loan', cls, accrues, principal: stored }, querySelector: sel => sel === '.de-status' ? status : inputs[sel] };
+    const btn = { closest: () => box, disabled: false, textContent: 'Save' };
+    const calls = [];
+    const fetch = async (url, opts) => { calls.push(opts); return { ok: true, json: async () => ({}) }; };
+    const save = new Function('_num', 'DEBT', 'fetch', 'BASE_ID', 'TABLES', 'PAT', 'showToast', 'airtableFetch', 'renderWealthContent', 'document', '_wealthRecords', '_debtPromise', '_debtRecords',
+      `async ${extract(wealthSrc, 'wealthSaveDebt', 'js/wealth.js')}; return wealthSaveDebt;`)(
+      v => (v === '' || v == null) ? null : (isFinite(Number(v)) ? Number(v) : null), DEBT, fetch, 'appTest', { debtTerms: 'tblTest' }, 'x',
+      () => {}, async () => [], () => {}, { getElementById: () => null }, null, null, null);
+    return { save, btn, status, calls };
+  };
+  beforeEach(() => { vi.useFakeTimers({ toFake: ['Date'] }); vi.setSystemTime(new Date(2030, 6, 28, 12, 0)); });
+  afterEach(() => vi.useRealTimers());
+
+  it('the first Save stops and asks; the second saves', async () => {
+    const t = setup();
+    await t.save(t.btn);
+    expect(t.calls.length).toBe(0);
+    expect(t.status.textContent).toContain('ON that date');
+    vi.setSystemTime(new Date(2030, 6, 28, 12, 0, 5));
+    await t.save(t.btn);
+    expect(t.calls.length).toBe(1);
+    expect(t.calls[0].method).toBe('PATCH');
+  });
+  it('a double-click does not slip past the warning', async () => {
+    const t = setup();
+    await t.save(t.btn);
+    vi.setSystemTime(new Date(2030, 6, 28, 12, 0, 0, 200));
+    await t.save(t.btn);
+    expect(t.calls.length).toBe(0);
+  });
+  it('a cleared amount box is still checked against the stored amount', async () => {
+    const t = setup({ principal: '' });
+    await t.save(t.btn);
+    expect(t.calls.length).toBe(0);
+  });
+  it('saves straight away when nothing new starts accruing', async () => {
+    for (const opts of [{ accrues: '1' }, { type: 'Repayment' }, { start: '2030-07-28' }, { start: '' }, { rate: '' }]) {
+      const t = setup(opts);
+      await t.save(t.btn);
+      expect(t.calls.length, JSON.stringify(opts)).toBe(1);
+    }
   });
 });
 
@@ -192,5 +255,47 @@ describe('debtEditorHtml: an accruing debt saves its amount on the start date', 
     const html = editor(row);
     expect(valueOf(html)).toBe('31234.56');
     expect(html).toContain('data-accrues=""');
+  });
+});
+
+// 14 Oct 2026 — the "Net worth reconciles" health check runs when its drawer opens, which
+// can be long after the page drew. Calculated debts grow with time, so the check must
+// work them out as at the moment the page drew (view.figuresAsOf), not as at "now".
+describe('"Net worth reconciles" checks the figures as at the moment the page drew them', () => {
+  const NW = { name: 'n', amount: 'a', type: 't', month: 'm', year: 'y' };
+  const day = d => Math.floor(d.getTime() / 864e5);
+  // Stand-ins that grow by 10 a day, like debts accruing interest. Each alone is past the
+  // check's £1 tolerance, so leaving any one of them on "now" fails the test.
+  const debtRows = (asOf = new Date()) => [{ cls: 'Loans', balance: 1000 + 10 * day(asOf) }];
+  const creditCardItems = (asOf = new Date()) => [{ amount: 500 + 10 * day(asOf) }];
+  const buildPortfolio = (v, d, asOf = new Date()) => ({ rows: [{}], totalValue: 0, totalMortAll: 2000 + 10 * day(asOf) });
+  const liabilitiesAt = t => debtRows(t)[0].balance + creditCardItems(t)[0].amount + buildPortfolio(null, null, t).totalMortAll;
+  const run = (view) => {
+    let config = null;
+    new Function('registerSyncBar', '_wealthRecords', 'NW', 'WEALTH_MONTH_INDEX', 'WEALTH_EXCLUDE_ITEMS', '_valRecords', '_debtRecords',
+      'debtRows', 'netWorthAccounts', 'creditCardItems', 'NW_ASSET_CLASSES', 'NW_LIABILITY_CLASSES', 'fmt', 'getField', 'buildPortfolio',
+      `${extract(wealthSrc, 'registerWealthSyncBar', 'js/wealth.js')}; return registerWealthSyncBar;`)(
+      (id, c) => { config = c; },
+      [{ fields: { n: 'Test Loan', a: 1, t: 'Loans', m: 'July', y: '2030' } }],
+      NW, { July: 6 }, [], [], [], debtRows, () => [], creditCardItems,
+      ['Cash', 'Real Estate'], ['Credit Cards', 'Loans', 'Mortgages'], n => String(n), (r, f) => r?.fields?.[f], buildPortfolio)(view, 0, 'July 2030', 'July 2030');
+    return config.checks.find(c => c.name === 'Net worth reconciles').run();
+  };
+
+  it('passes when the drawer opens the afternoon after the page drew', () => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    try {
+      vi.setSystemTime(new Date(2030, 6, 28, 23, 50));
+      const drawnAt = new Date();
+      const liabilities = liabilitiesAt(drawnAt);
+      const view = { assets: 0, liabilities, net: -liabilities, figuresAsOf: drawnAt };
+      vi.setSystemTime(new Date(2030, 6, 29, 14, 20));
+      expect(run(view).status).toBe('pass');
+    } finally { vi.useRealTimers(); }
+  });
+  it('still fails on a real drift', () => {
+    const drawnAt = new Date(2030, 6, 28, 12, 0);
+    const liabilities = liabilitiesAt(drawnAt) + 50;
+    expect(run({ assets: 0, liabilities, net: -liabilities, figuresAsOf: drawnAt }).status).toBe('fail');
   });
 });

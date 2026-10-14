@@ -227,7 +227,7 @@ function netWorthAccounts(cls) {
 // Interest is applied to the balance AFTER that month's payments, month by month, so
 // paying earlier genuinely costs less. A rate of 0 means interest is frozen (common on
 // a closed account under an arrangement) and the balance simply reduces by payments.
-function manualDebtBalance(rec) {
+function manualDebtBalance(rec, asOf = new Date()) {
     const opening = Math.abs(Number(getField(rec, DEBT.principal)) || 0);
     if (!opening) return 0;
     const startStr = getField(rec, DEBT.start);
@@ -244,7 +244,7 @@ function manualDebtBalance(rec) {
     });
 
     let bal = opening;
-    const now = new Date();
+    const now = asOf;
     const cur = new Date(start.getFullYear(), start.getMonth(), 1);
     const end = new Date(now.getFullYear(), now.getMonth(), 1);
     let guard = 0;
@@ -307,14 +307,14 @@ function accruedDebtBalance(rec, asOf = new Date()) {
     return owed + interest;
 }
 
-function creditCardItems() {
+function creditCardItems(asOf = new Date()) {
     const live = netWorthAccounts('Credit Card');
     const have = new Set(live.map(a => String(a.name || '').trim().toLowerCase()));
     const debts = (typeof _debtRecords !== 'undefined' && _debtRecords) ? _debtRecords : [];
     const manual = debts
         .filter(r => getField(r, DEBT.cls) === 'Credit Cards')
         .filter(r => !have.has(String(getField(r, DEBT.name) || '').trim().toLowerCase()))
-        .map(r => ({ name: getField(r, DEBT.name) || '(card)', amount: manualDebtBalance(r), id: r.id, manual: true }))
+        .map(r => ({ name: getField(r, DEBT.name) || '(card)', amount: manualDebtBalance(r, asOf), id: r.id, manual: true }))
         .filter(x => x.amount > 0);
     return live.concat(manual).sort((a, b) => b.amount - a.amount);
 }
@@ -769,10 +769,16 @@ function renderWealthContent(el, records, valRecs, debtRecs) {
     // classes still come from the monthly snapshot. `view` is a shallow copy so the
     // trend (built from the raw snapshots) stays untouched.
     const view = { byClass: { ...latest.byClass }, assets: latest.assets, liabilities: latest.liabilities, net: latest.net };
+    // Calculated balances move with time (accruing debts by the day, closed cards and
+    // repayment mortgages by the month), so the view and its "Net worth reconciles" check
+    // both work them out as at THIS moment; a tab left open past midnight would otherwise
+    // report the change as drift.
+    const figuresAsOf = new Date();
+    view.figuresAsOf = figuresAsOf;
     let livePortfolio = null;
     if (valRecs && debtRecs) {
         try {
-            const pf = buildPortfolio(valRecs, debtRecs);
+            const pf = buildPortfolio(valRecs, debtRecs, figuresAsOf);
             if (pf.rows.length) {
                 view.byClass['Real Estate'] = pf.totalValue;
                 view.byClass['Mortgages'] = pf.totalMortAll;
@@ -785,14 +791,14 @@ function renderWealthContent(el, records, valRecs, debtRecs) {
     }
     // Sync the Loans class with the editable Debt Terms balances used in "Debts in detail"
     // (your typed figure wins, else the snapshot), so net worth and the debt table agree.
-    const syncedLoanItems = debtRows().filter(r => r.cls === 'Loans').map(r => ({ name: r.name, amount: r.balance }));
+    const syncedLoanItems = debtRows(figuresAsOf).filter(r => r.cls === 'Loans').map(r => ({ name: r.name, amount: r.balance }));
     if (syncedLoanItems.length) {
         view.byClass['Loans'] = syncedLoanItems.reduce((s, i) => s + (i.amount || 0), 0);
     }
     // Cash + credit cards: live from the Accounts you've ticked (Net Worth Class).
     // Falls back to the snapshot only if nothing is ticked yet (so it never blanks out).
     const cashItems = netWorthAccounts('Cash');
-    const cardItems = creditCardItems();
+    const cardItems = creditCardItems(figuresAsOf);
     if (cashItems.length) view.byClass['Cash'] = cashItems.reduce((s, i) => s + i.amount, 0);
     if (cardItems.length) view.byClass['Credit Cards'] = cardItems.reduce((s, i) => s + i.amount, 0);
     // Recompute the roll-ups after the loan/cash/card overrides.
@@ -1151,18 +1157,18 @@ function registerWealthSyncBar(view, monthsBehind, asOf, currentLabel) {
                 // Mirror the live real-estate/mortgage override the view applies.
                 if (_valRecords && _debtRecords) {
                     try {
-                        const pf = buildPortfolio(_valRecords, _debtRecords);
+                        const pf = buildPortfolio(_valRecords, _debtRecords, view.figuresAsOf);
                         if (pf.rows.length) { byClass['Real Estate'] = pf.totalValue; byClass['Mortgages'] = pf.totalMortAll; }
                     } catch (e) { /* compare against the snapshot figures instead */ }
                 }
                 // Mirror the loan sync the view applies (editable Debt Terms balances).
                 try {
-                    const sl = debtRows().filter(r => r.cls === 'Loans');
+                    const sl = debtRows(view.figuresAsOf).filter(r => r.cls === 'Loans');
                     if (sl.length) byClass['Loans'] = sl.reduce((s, r) => s + (r.balance || 0), 0);
                 } catch (e) { /* compare against the snapshot loans instead */ }
                 // Mirror the live cash/card override (Accounts ticked as Cash / Credit Card).
                 const mc = netWorthAccounts('Cash'); if (mc.length) byClass['Cash'] = mc.reduce((s, i) => s + i.amount, 0);
-                const md = creditCardItems(); if (md.length) byClass['Credit Cards'] = md.reduce((s, i) => s + i.amount, 0);
+                const md = creditCardItems(view.figuresAsOf); if (md.length) byClass['Credit Cards'] = md.reduce((s, i) => s + i.amount, 0);
                 const rawAssets = NW_ASSET_CLASSES.reduce((s, c) => s + (byClass[c] || 0), 0);
                 const rawLiabilities = NW_LIABILITY_CLASSES.reduce((s, c) => s + (byClass[c] || 0), 0);
                 const assetDiff = rawAssets - view.assets;
@@ -1906,7 +1912,7 @@ function solveRepayRate(payment, balance, remMonths) {
     return (lo + hi) / 2 * 12 * 100;
 }
 
-function debtRows() {
+function debtRows(asOf = new Date()) {
     const debts = (typeof _debtRecords !== 'undefined' && _debtRecords) ? _debtRecords : [];
     const costByAcct = debtCostByAcct();
     const loanBal = debtLoanBalances();
@@ -1915,7 +1921,7 @@ function debtRows() {
     debts.forEach(r => { if (getField(r, DEBT.cls) === 'Credit Cards') cardRec[(getField(r, DEBT.name) || '').trim().toLowerCase()] = r; });
     // Cards = the Accounts you've ticked as "Credit Card" (balance live from the account),
     // matched to a Debt Terms row by name for the rate.
-    const cardRows = creditCardItems().map(acc => {
+    const cardRows = creditCardItems(asOf).map(acc => {
         const rec = cardRec[acc.name.trim().toLowerCase()];
         const rate = rec ? _num(getField(rec, DEBT.rate)) : null;
         // Live from the Accounts table where the card has a feed; for a closed card it is
@@ -1945,10 +1951,10 @@ function debtRows() {
             // the date of the figure you typed, so compounding from it with no repayments
             // grew a years-old business loan by its rate every month (14 Oct 2026).
             rollForward = !!(type === 'Interest-only' && getField(r, DEBT.start) && _num(getField(r, DEBT.rate)) != null && principal > 0);
-            if (rollForward) balance = accruedDebtBalance(r);
+            if (rollForward) balance = accruedDebtBalance(r, asOf);
             else { const lb = loanBal[name.trim().toLowerCase()]; balance = principal > 0 ? principal : (lb != null ? lb : 0); }
         }
-        else { balance = amortisedBalance(type, principal, storedRate || 0, term, start).balance; }
+        else { balance = amortisedBalance(type, principal, storedRate || 0, term, start, asOf).balance; }
         // Real monthly payment, matched by account number.
         const monthly = costByAcct[debtAcctKey(name)] != null ? costByAcct[debtAcctKey(name)] : null;
         // Rate DERIVED from the real payment: interest-only = payment×12÷balance; repayment solved.
@@ -2041,7 +2047,7 @@ function wealthToggleDebtEditor(eid) {
 function debtEditorHtml(r) {
     const inp = (cls, ph, val, extra) => `<input class="${cls}" placeholder="${escHtml(ph)}" value="${val == null ? '' : escHtml(String(val))}" ${extra || ''} style="padding:5px 8px;border:1px solid var(--border-default);border-radius:var(--radius-md);font-size:var(--fs-sm);background:var(--bg-surface);width:100%">`;
     const isRepay = r.type === 'Repayment';
-    return `<div class="debt-editor" data-id="${escHtml(r.id)}" data-name="${escHtml(r.name)}" data-cls="${escHtml(r.cls)}" data-accrues="${r.accrues ? '1' : ''}"
+    return `<div class="debt-editor" data-id="${escHtml(r.id)}" data-name="${escHtml(r.name)}" data-cls="${escHtml(r.cls)}" data-accrues="${r.accrues ? '1' : ''}" data-principal="${escHtml(String(r.principal || ''))}"
         ondragover="event.preventDefault();this.style.background='var(--bg-surface-2)'" ondragleave="this.style.background=''" ondrop="wealthDebtDrop(event,this)">
         <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:8px;margin-bottom:8px">
             <label style="font-size:var(--fs-xs);color:var(--text-muted)">Rate %${inp('de-rate', 'e.g. 22.9', r.rate, 'type="number" step="0.01"')}</label>
@@ -2078,6 +2084,22 @@ async function wealthSaveDebt(btn) {
     const term = _num(val('.de-term')); if (term != null) fields[DEBT.term] = Math.round(term);
     const start = val('.de-start'); if (start) fields[DEBT.start] = start;
     if (!Object.keys(fields).length) { if (status) { status.textContent = 'Nothing to save yet.'; } return; }
+    // A loan that STARTS accruing with this save (interest-only, a rate, a past start date)
+    // grows from its start date, so its amount must be what was owed ON that date. The box
+    // was pre-filled with today's balance, which would count the interest since twice, so
+    // say so once and let the second Save go through.
+    const n = new Date();
+    const today = `${n.getFullYear()}-${String(n.getMonth() + 1).padStart(2, '0')}-${String(n.getDate()).padStart(2, '0')}`;
+    const amount = principal != null ? principal : (Number(box.dataset.principal) || 0); // a cleared box keeps the stored amount
+    const willAccrue = box.dataset.cls === 'Loans' && type === 'Interest-only' && !!start && start < today && rate != null && amount > 0;
+    const warnedAt = Number(box.dataset.accrueCheckedAt) || 0;
+    // A double-click is two clicks: the second must not slip past the warning.
+    if (willAccrue && box.dataset.accrues !== '1' && (!warnedAt || Date.now() - warnedAt < 1000)) {
+        if (warnedAt) return;
+        box.dataset.accrueCheckedAt = String(Date.now());
+        if (status) { status.textContent = `This debt will now add interest from ${start}. Check the amount is what was owed ON that date, not today, then press Save again.`; status.style.color = 'var(--warning)'; }
+        return;
+    }
     if (btn) { btn.disabled = true; btn.textContent = 'Saving…'; }
     try {
         const id = box.dataset.id;
@@ -2228,7 +2250,7 @@ async function loadWealthProperties() {
 // to its mortgage balance (Debt Terms, Class=Mortgages). Returns the rows plus
 // reconciled totals. Shared by the per-property card and the hero reconciliation
 // so both always show the same real-estate and mortgage figures.
-function buildPortfolio(valRecs, debtRecs) {
+function buildPortfolio(valRecs, debtRecs, asOf) {
     // Latest Approved valuation per property (key from the title).
     const latestByProp = {};
     (valRecs || []).forEach(r => {
@@ -2254,7 +2276,7 @@ function buildPortfolio(valRecs, debtRecs) {
         const rate = Number(getField(r, DEBT.rate)) || 0;
         const term = Number(getField(r, DEBT.term)) || 0;
         const start = getField(r, DEBT.start) || '';
-        const bal = amortisedBalance(type, principal, rate, term, start).balance;
+        const bal = amortisedBalance(type, principal, rate, term, start, asOf).balance;
         const note = getField(r, DEBT.notes) || '';
         const key = wealthPropKey(note) || wealthPropKey(getField(r, DEBT.name));
         if (!key) return;
