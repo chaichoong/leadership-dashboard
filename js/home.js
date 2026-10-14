@@ -160,7 +160,7 @@
         const near = wealthNear();
         // Say why the heading has nothing under it yet, rather than leave it blank.
         const note = document.getElementById('homeWealthWait');
-        if (note) note.hidden = !(waiting && near && state.wealth === 'waiting');
+        if (note) note.hidden = !(waiting && near && state.wealth === 'waiting' && wealthOutcome() === 'waiting');   // the Wealth page may have drawn it already
         if (!waiting && near) loadWealth();
     }
 
