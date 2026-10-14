@@ -1710,11 +1710,13 @@
                         + updated(health),
                 }, health);
             } else {
+                // A split the Mac withdrew (splitCheck: agent-dispatch.py would not load, or the carry-out
+                // stamp changed) is a fault, so the card goes amber whatever the week did (review of PR #782).
                 const why = text('splitCheck') ? `Live work could not be split out: ${text('splitCheck')}. ` : '';
                 cards.aiWorkCard = aiTeamStale({
                     label: 'Agent Work', value: `${w.open} open`,
                     sub: stuckSub('not moving'),
-                    cls: net > 0 || heldUnchecked ? 'text-amber' : 'text-green',
+                    cls: net > 0 || heldUnchecked || why ? 'text-amber' : 'text-green',
                     detail: netRow + note(`${why}Tasks owned by an AI agent.${heldNote ? ` ${heldNote}` : ''}`) + updated(health),
                 }, health);
             }

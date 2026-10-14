@@ -186,6 +186,8 @@ test.describe('AI Team section', () => {
     await page.evaluate(async () => await loadAiTeamHealth());
     const work = await card(page, 'aiWorkCard');
     expect(work.head).toBe('182 open');
+    // More done than came in, so only the withdrawn split makes it amber (round 2, item 5).
+    expect(work.cls).toContain('text-amber');
     expect((await cardDetail(page, 'aiWorkCard')).text).toContain('Live work could not be split out: 3 task(s) carry the mark');
   });
 

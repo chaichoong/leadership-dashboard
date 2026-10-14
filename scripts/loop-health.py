@@ -116,7 +116,10 @@ KEVIN_AIRTABLE_EMAIL = "kevin@runpreneur.org.uk"
 # rule carries no day count, so sorting the whole list by age would sink every
 # "an agent has drafted nothing" item below every dated one — and that is the
 # rule that catches work never being started at all.
-RULE_ORDER = {"invisible": 0, "deadline": 1, "amend": 2, "draft": 3, "decide": 4}
+RULE_ORDER = {"invisible": 0, "deadline": 1, "amend": 2, "draft": 3, "decide": 4,
+              # Python only (14 Oct 2026): added by report(), not compute(), so the
+              # Approvals tab's mirror of compute() is untouched (reply_overdue_rows).
+              "reply": 5}
 LONDON = ZoneInfo("Europe/London")
 
 # The UC verification lane routinely holds open tasks past their date (its
@@ -294,6 +297,12 @@ def report():
     query that found nothing."""
     try:
         team = fetch(TEAM, ["Name", "Is AI Agent"])
+        team_agents = {r["id"] for r in team if (r.get("fields") or {}).get("Is AI Agent")}
+        # The open agent tasks counted a second way, by Airtable's own formula,
+        # before and after the main read (agent_work compares them; review of
+        # PR #782). Bracketing tells a real disagreement from the board moving
+        # while it was read.
+        open_before = open_agent_ids(team_agents)
         # Open tasks, plus completions inside the Done window. Reading the whole
         # table meant 74 sequential pages and 1m45s of wall clock every morning
         # in daily-ops phase 9, to look at ~300 relevant rows out of 7,400.
@@ -311,10 +320,11 @@ def report():
                               "Deferred Until", "Some Day", "Notes"],
                       formula=('OR({Status}!="Completed",'
                                "IS_AFTER({Completion Date},DATEADD(TODAY(),-8,'days')))"))
+        open_after = open_agent_ids(team_agents)
     except (urllib.error.HTTPError, urllib.error.URLError, OSError) as exc:
         raise RuntimeError(f"could not read Airtable — {exc}")
 
-    agent_ids = {r["id"] for r in team if (r.get("fields") or {}).get("Is AI Agent")}
+    agent_ids = team_agents
     # Roy's row by name, from the same Team Members read — never a typed id.
     roy_ids = {r["id"] for r in team if (r.get("fields") or {}).get("Name") == ROY_NAME}
 
@@ -395,13 +405,31 @@ def report():
     res["control"] = {"agents": len(agent_ids), "agentLinkedTasks": linked,
                       "tasksRead": len(tasks), "royRows": len(roy_ids),
                       "waitingApprovals": waiting, "decideAnchored": anchored}
-    res["lanes"] = {lane: sum(1 for s in res["stalled"] if s["lane"] == lane) for lane in LANES}
     res["flow"] = agent_flow(fields, agent_ids, linked, len(res["done"]))
-    held_ids, held_err = dispatch_held_ids(datetime.now(timezone.utc))
-    # `linked` is the control above, counted from its own filter; agent_work's
-    # buckets must add up to it or the report fails.
-    res["agentWork"] = agent_work(tasks, agent_ids, res["stalled"], held_ids, held_err,
-                                  expected_open=linked)
+    now = datetime.now(timezone.utc)
+    # A reply waited on too long is not moving, so it goes on the list a person
+    # reads, under its own rule, and the card counts it from there (review of
+    # PR #782: four stuck tasks were on no list). Needs agent-dispatch.py, which
+    # owns the rules; if it cannot load, agent_work says so and nothing is added.
+    ledger = ledger_err = None
+    ledger_skipped = 0
+    added = []
+    try:
+        dispatcher()
+        rules_loaded = True
+    except Exception:  # noqa: BLE001 — not swallowed: agent_work loads it again and names the failure (splitCheck)
+        rules_loaded = False
+    if rules_loaded:
+        ledger, ledger_err, ledger_skipped = carryout_ledger()
+        added = reply_overdue_rows(tasks, now, ledger, roy_ids, {s["id"] for s in res["stalled"]})
+    if added:
+        res["stalled"] = sorted(res["stalled"] + added,
+                                key=lambda s: (RULE_ORDER.get(s["rule"], 9), -s["days"]))
+    res["lanes"] = {lane: sum(1 for s in res["stalled"] if s["lane"] == lane) for lane in LANES}
+    held_ids, held_err = dispatch_held_ids(now)
+    res["agentWork"] = agent_work(tasks, agent_ids, res["stalled"], held_ids, held_err, now=now,
+                                  ledger=ledger, ledger_error=ledger_err, ledger_skipped=ledger_skipped,
+                                  open_check=(open_before, open_after))
     return res
 
 
@@ -430,7 +458,9 @@ def agent_flow(fields, agent_ids, open_linked, done_7d, now=None):
 # holds, which the deadline rule counted, and compliance tasks the dispatcher
 # holds on purpose under an open lead task. So the card leads with LIVE work,
 # and counts as stuck only agent tasks the dispatcher is not holding on purpose.
-# The stalled list itself (the Estate tab, the Approvals tab) is unchanged.
+# The stalled list gains one rule, "reply" (report() adds it; the Approvals
+# tab's mirror of compute() is unchanged), so every task the card counts as
+# stuck is on the Estate tab's list.
 #
 # `other` is a task on no board at all (lane_for's "invisible"): never folded
 # into live, where it would look like work an agent is doing.
@@ -445,14 +475,22 @@ WORK_BUCKETS = ("live", "approval", "waitingReply", "scheduled", "other")
 # copy would drift.
 DISPATCH_QUEUE = os.path.expanduser("~/knowledge-os/logs/handback-poll/scratch/queue.json")
 DISPATCH_QUEUE_MAX_MIN = 120   # written every 30 minutes; older than this, the poll has stopped
+
+# How long a carried-out task may wait on an outside reply before it counts as
+# stuck (review of PR #782). Loop-health's own number, not the dispatcher's
+# REPLY_WINDOW_DAYS, which is the rent check's window for matching a reply to
+# a card and happens to be 14 too. Two weeks: a reply, a certificate or a
+# visit that has not come by then needs chasing or a new plan, and a list of
+# what to chase is the point of Stuck.
+REPLY_STUCK_DAYS = 14
 HERE = os.path.dirname(os.path.abspath(__file__))
 _DISPATCH = {}
 
 
 def dispatcher():
     """agent-dispatch.py, loaded once. The rules that decide whether a task is
-    waiting (the carry-out mark, the approved outcomes, the open blocker, the
-    carry-out ledger and the reply window) are read from it, never copied."""
+    waiting (the carry-out mark, the approved outcomes, the open blocker and the
+    carry-out ledger) are read from it, never copied."""
     if "m" not in _DISPATCH:
         spec = importlib.util.spec_from_file_location("agent_dispatch_for_loop_health",
                                                       os.path.join(HERE, "agent-dispatch.py"))
@@ -492,40 +530,48 @@ def carried_out_days(notes):
 
 
 def carryout_ledger(path=None):
-    """({task id: [(event, aware time)] oldest first}, None) from the dispatcher's
-    carry-out ledger, or (None, why not). `complete --keep-open` logs "done" there
-    with a full time; `block` logs "parked", a cleared wall "unblocked", a run
-    about to act "intent". The Notes stamp holds the date only, so the ledger is
-    what tells a same-day approval from the carry-out it followed."""
+    """({task id: [(event, aware time)] oldest first}, None, lines skipped) from
+    the dispatcher's carry-out ledger, or (None, why not, 0). `complete
+    --keep-open` logs "done" there with a full time; `block` logs "parked", a
+    cleared wall "unblocked", a run about to act "intent". The Notes stamp holds
+    the date only, so the ledger is what tells a same-day approval from the
+    carry-out it followed.
+
+    One bad line is skipped and counted, never fatal (review of PR #782): a stray
+    byte is replaced, not raised, and a line that is not a whole record with a
+    zoned time is left out."""
     path = path or dispatcher().INTENT_LEDGER
-    out = {}
+    out, skipped = {}, 0
     try:
-        with open(path, encoding="utf-8") as fh:
+        with open(path, encoding="utf-8", errors="replace") as fh:
             for line in fh:
+                if not line.strip():
+                    continue
                 try:
                     rec = json.loads(line)
                 except ValueError:
+                    skipped += 1
                     continue
-                if not isinstance(rec, dict):
+                when = _aware(rec.get("ts")) if isinstance(rec, dict) else None
+                if not (when and rec.get("task") and rec.get("event")):
+                    skipped += 1
                     continue
-                when = _aware(rec.get("ts"))
-                if rec.get("task") and rec.get("event") and when:
-                    out.setdefault(rec["task"], []).append((rec["event"], when))
+                out.setdefault(rec["task"], []).append((rec["event"], when))
     except FileNotFoundError:
-        return None, "no carry-out ledger at %s" % path
-    except OSError as exc:
-        return None, "the carry-out ledger could not be read: %s" % str(exc)[:120]
+        return None, "no carry-out ledger at %s" % path, 0
+    except (OSError, ValueError) as exc:
+        return None, "the carry-out ledger could not be read: %s" % str(exc)[:120], 0
     for events in out.values():
         events.sort(key=lambda e: e[1])
-    return out, None
+    return out, None, skipped
 
 
 def reply_wait(f, now, events=None):
     """For an approved task in the dispatch window: "waiting" when Kevin's
     approved action was carried out and the task kept open on purpose, so it
     waits on someone outside (a reply, a certificate, a visit); "overdue" when
-    that wait is older than the dispatcher's REPLY_WINDOW_DAYS (14), which makes
-    it live AND stuck; "" for anything else, which is live.
+    that wait is longer than REPLY_STUCK_DAYS, which makes it live AND stuck;
+    "" for anything else, which is live.
 
     Not waiting (review of PR #782, 14 Oct 2026):
       - an open blocker (task_blocker): it waits on a wall, not a reply. The
@@ -538,30 +584,37 @@ def reply_wait(f, now, events=None):
         and an approval on the same London day as the carry-out is NOT waiting.
     The age runs from the first carry-out after the approval, not the newest:
     a daily re-check writes a fresh line and must not restart the clock."""
+    return _reply_wait(f, now, events)[0]
+
+
+def _reply_wait(f, now, events):
+    """(reply_wait's answer, when the wait began as a London date or None)."""
     d = dispatcher()
     if f.get("Approval Outcome") not in d.APPROVED:
-        return ""
+        return "", None
     notes = str(f.get("Notes") or "")
     days = carried_out_days(notes)
     if not days or d.task_blocker(notes):
-        return ""
+        return "", None
     approved = _aware(f.get("Approved At"))
     if f.get("Approved At") and approved is None:
-        return ""          # cannot tell which came first: shown as live, never hidden
+        return "", None    # cannot tell which came first: shown as live, never hidden
     if events is not None:
         if not events or events[-1][0] != "done":
-            return ""
+            return "", None
         after = [when for event, when in events if event == "done" and (approved is None or when >= approved)]
         if not after:
-            return ""
+            return "", None
+        began = after[0].astimezone(LONDON).date()
         waited = (now - after[0]).total_seconds() / 86400.0
     else:
         approved_day = approved.astimezone(LONDON).date() if approved else None
         after = [day for day in days if approved_day is None or day > approved_day]
         if not after:
-            return ""
-        waited = (now.astimezone(LONDON).date() - after[0]).days
-    return "overdue" if waited > d.REPLY_WINDOW_DAYS else "waiting"
+            return "", None
+        began = after[0]
+        waited = (now.astimezone(LONDON).date() - began).days
+    return ("overdue" if waited > REPLY_STUCK_DAYS else "waiting"), began
 
 
 def work_bucket(f, now, events=None):
@@ -580,6 +633,51 @@ def work_bucket(f, now, events=None):
         return ("scheduled" if status == "Upcoming" else "other"), ""
     wait = reply_wait(f, now, events)
     return ("waitingReply" if wait == "waiting" else "live"), wait
+
+
+def reply_overdue_rows(tasks, now, ledger, roy_ids=(), already=()):
+    """Stalled rows, rule "reply", for every open task in the dispatch window
+    whose carried-out wait is past REPLY_STUCK_DAYS. report() adds them to the
+    stalled list, so the Estate tab shows each task the card counts as stuck
+    (review of PR #782: four were on no list). `already` holds ids another rule
+    has listed: a task appears once. Not in compute(): the Approvals tab mirrors
+    compute() rule for rule, and the ledger this reads is on the Mac only."""
+    today = now.astimezone(LONDON).date().isoformat()
+    rows = []
+    for r in tasks:
+        f = r.get("fields") or {}
+        status = f.get("Status") or ""
+        if r["id"] in already or status in CLOSED or f.get("Completion Date") or status == "Approval":
+            continue
+        if not in_dispatch_window(status, f.get("Due Date"), today, bool(f.get("Some Day"))):
+            continue
+        wait, began = _reply_wait(f, now, None if ledger is None else ledger.get(r["id"], []))
+        if wait != "overdue":
+            continue
+        days = (now.astimezone(LONDON).date() - began).days
+        rows.append({"id": r["id"], "name": f.get("Task Name") or "(untitled)", "rule": "reply", "days": days,
+                     "why": "Waiting on a reply for more than %d days: carried out %s and no answer has closed it"
+                            % (REPLY_STUCK_DAYS, began.strftime("%d %b %Y").lstrip("0")),
+                     "lane": lane_for(f, set(roy_ids), today)})
+    return rows
+
+
+def open_agent_ids(agent_ids, fetcher=None):
+    """Open tasks owned by an AI agent, counted by Airtable's own formula: the
+    second way of counting `open` (review of PR #782). It matches the agent's
+    record id through the Tasks lookup of Team Members' "Record ID (Used for
+    Automation)" (CLAUDE.md: match ids through a lookup of RECORD_ID(), never
+    ARRAYJOIN over a link, which gives names). On 14 Oct 2026 every Team Members
+    row's field equalled its record id, and this counted 192 against the
+    Python filter's 192. A record id is 17 letters and digits, so FIND cannot
+    match one inside another."""
+    fetcher = fetcher or fetch
+    if not agent_ids:
+        return set()
+    look = "{Record ID (Used for Automation) (from Team Members)}"
+    formula = ("AND({Status}!='Completed',{Status}!='Cancelled',{Completion Date}=BLANK(),OR("
+               + ",".join("FIND('%s',ARRAYJOIN(%s)&'')" % (a, look) for a in sorted(agent_ids)) + "))")
+    return {r["id"] for r in fetcher(TASKS, ["Status"], formula=formula)}
 
 
 def dispatch_held_ids(now, path=None, max_min=DISPATCH_QUEUE_MAX_MIN):
@@ -607,22 +705,29 @@ def dispatch_held_ids(now, path=None, max_min=DISPATCH_QUEUE_MAX_MIN):
 
 
 def agent_work(tasks, agent_ids, stalled, held_ids, held_error=None, now=None,
-               expected_open=None, ledger=None, ledger_error=None):
+               ledger=None, ledger_error=None, ledger_skipped=0, open_check=None):
     """The Agent Work card's numbers. `open` splits into WORK_BUCKETS, which add up
-    to it. `notMoving` is the stalled rows that are open agent tasks and not held
-    under a lead, plus any reply wait past the window (`replyOverdue`). With no
-    held list (`held_ids` None) it counts held tasks too and `heldCheck` says why.
-    `ledger` is carryout_ledger()'s map; left out, it is read here. When it cannot
-    be read, `waitCheck` says so and the stricter date-only rule decides.
+    to it. `notMoving` counts the rows of `stalled` that are open agent tasks and
+    not held under a lead, so every task it counts is on the list a person reads;
+    `replyOverdue` is how many of those are the "reply" rule. With no held list
+    (`held_ids` None) it counts held tasks too and `heldCheck` says why. `ledger`
+    is carryout_ledger()'s map; left out, it is read here. When it cannot be read,
+    `waitCheck` says so and the stricter date-only rule decides.
 
-    `expected_open` is a count made by a separate filter (report()'s control);
-    buckets that do not add up to it fail the report.
+    Two controls on `open` (review of PR #782):
+      - the buckets must add up to it, or the report fails;
+      - `open_check` is (before, after): the open agent task ids Airtable's own
+        formula found just before and just after the main read
+        (open_agent_ids). When the two agree the board held still, and they must
+        then equal this split's own set, or the report fails. When they differ
+        the board moved during the read, so nothing is compared and `openCheck`
+        says so.
 
-    Control: the waiting rule fires on the PRESENCE of a carry-out line, so a
-    changed stamp would quietly move every waiting task into live. When some task
-    read carries the mark but no task carries a readable own line, the split is
-    withdrawn (`splitCheck` says why) and the card shows the plain open count.
-    So is it when agent-dispatch.py, which owns the rules, cannot be loaded."""
+    Control on the waiting rule: it fires on the PRESENCE of a carry-out line, so
+    a changed stamp would quietly move every waiting task into live. When some
+    task read carries the mark but no task carries a readable own line, the
+    split is withdrawn (`splitCheck` says why) and the card shows the plain open
+    count. So is it when agent-dispatch.py, which owns the rules, cannot load."""
     now = now or datetime.now(timezone.utc)
     split_error = None
     try:
@@ -630,9 +735,9 @@ def agent_work(tasks, agent_ids, stalled, held_ids, held_error=None, now=None,
     except Exception as exc:  # noqa: BLE001 — the card must say WHY it has no split
         mark, split_error = None, "agent-dispatch.py could not be loaded: %s" % str(exc)[:160]
     if mark and ledger is None and ledger_error is None:
-        ledger, ledger_error = carryout_ledger()
+        ledger, ledger_error, ledger_skipped = carryout_ledger()
     counts = dict.fromkeys(WORK_BUCKETS, 0)
-    owned_open, overdue = set(), set()
+    owned_open = set()
     marked = readable = 0
     for r in tasks:
         f = r.get("fields") or {}
@@ -647,20 +752,29 @@ def agent_work(tasks, agent_ids, stalled, held_ids, held_error=None, now=None,
         if mark in notes:
             marked += 1
             readable += bool(carried_out_days(notes))
-        bucket, wait = work_bucket(f, now, None if ledger is None else ledger.get(r["id"], []))
-        counts[bucket] += 1
-        if wait == "overdue":
-            overdue.add(r["id"])
-    if expected_open is not None and len(owned_open) != expected_open:
-        raise RuntimeError("agent work split counted %d open agent tasks, the control counted %d"
-                           % (len(owned_open), expected_open))
+        counts[work_bucket(f, now, None if ledger is None else ledger.get(r["id"], []))[0]] += 1
+    if mark and sum(counts.values()) != len(owned_open):
+        raise RuntimeError("agent work split placed %d of %d open agent tasks in a bucket"
+                           % (sum(counts.values()), len(owned_open)))
+    open_note = None
+    if open_check is not None:
+        before, after = (set(x) for x in open_check)
+        if before != after:
+            open_note = ("the board changed while it was read (%d task(s) opened or closed), so the "
+                         "open count was not checked against Airtable this time" % len(before ^ after))
+        elif before != owned_open:
+            raise RuntimeError(
+                "open agent tasks: this split counted %d, Airtable's own filter counted %d "
+                "(only here: %s; only in Airtable: %s)" % (
+                    len(owned_open), len(before), ", ".join(sorted(owned_open - before)[:5]) or "none",
+                    ", ".join(sorted(before - owned_open)[:5]) or "none"))
     held = owned_open & set(held_ids or ())
-    stuck = {s.get("id") for s in stalled if s.get("id") in owned_open and s.get("id") not in held}
-    stuck |= overdue - held
-    out = dict(counts, open=len(owned_open), notMoving=len(stuck), replyOverdue=len(overdue - held),
-               replyWindowDays=dispatcher().REPLY_WINDOW_DAYS if mark else None,
-               held=None if held_ids is None else len(held), heldCheck=held_error,
-               waitCheck=ledger_error if mark else None, splitCheck=split_error)
+    stuck = [s for s in stalled if s.get("id") in owned_open and s.get("id") not in held]
+    out = dict(counts, open=len(owned_open), notMoving=len(stuck),
+               replyOverdue=sum(1 for s in stuck if s.get("rule") == "reply"),
+               replyWindowDays=REPLY_STUCK_DAYS, held=None if held_ids is None else len(held),
+               heldCheck=held_error, waitCheck=ledger_error if mark else None,
+               ledgerSkipped=ledger_skipped if mark else 0, openCheck=open_note, splitCheck=split_error)
     if mark and marked and not readable:
         split_error = ("%d task(s) carry '%s' and none carries a readable dated line, so "
                        "carried-out work cannot be told from live work" % (marked, mark))
@@ -694,7 +808,9 @@ def main():
           f"waiting on a reply {aw['waitingReply']}, scheduled {aw['scheduled']}, other {aw['other']}; "
           f"stuck {aw['notMoving']} ({aw['replyOverdue']} waited on a reply too long), "
           f"held under a lead {aw['held']}")
-    for why in (aw["heldCheck"], aw["waitCheck"], aw["splitCheck"]):
+    if aw["ledgerSkipped"]:
+        print(f"  CANNOT CHECK: {aw['ledgerSkipped']} line(s) of the carry-out ledger were unreadable and skipped")
+    for why in (aw["heldCheck"], aw["waitCheck"], aw["openCheck"], aw["splitCheck"]):
         if why:
             print(f"  CANNOT CHECK: {why}")
     print(f"  NOT MOVING  : {len(res['stalled'])}  "

@@ -39,7 +39,8 @@ const LH_RES = `{"flow": {"agentOpen": 178, "agentCreated7d": 164, "agentDone7d"
                  "stalled": [{"name": "t%d" % i} for i in range(40)],
                  "agentWork": {"live": 55, "approval": 18, "waitingReply": 41, "scheduled": 64, "other": 0,
                                "open": 178, "notMoving": 26, "replyOverdue": 2, "replyWindowDays": 14, "held": 18,
-                               "heldCheck": None, "waitCheck": None, "splitCheck": None}}`;
+                               "heldCheck": None, "waitCheck": None, "ledgerSkipped": 0, "openCheck": None,
+                               "splitCheck": None}}`;
 const MEASURES = `lambda now: ({"open": 207, "filed7d": 95, "fixed7d": 14},
                                es.rework_counts({"days": 14, "fixes": 105, "fix_of_fix": 43}),
                                "2026-10-09T16:23:52.000Z")`;
@@ -52,7 +53,7 @@ describe('the ai-team-health row', () => {
     const p = JSON.parse(row.payload);
     expect(p.work).toEqual({ open: 178, notMoving: 26, created7d: 164, done7d: 119,
       live: 55, approval: 18, waitingReply: 41, scheduled: 64, other: 0, replyOverdue: 2, replyWindowDays: 14,
-      held: 18, heldCheck: null, waitCheck: null, splitCheck: null });
+      held: 18, heldCheck: null, waitCheck: null, ledgerSkipped: 0, openCheck: null, splitCheck: null });
     expect(p.defects).toEqual({ open: 207, filed7d: 95, fixed7d: 14 });
     expect(p.rework).toEqual({ days: 14, fixes: 105, fixOfFix: 43, pct: 41, baselinePct: 32 });
     expect(row.detail).toMatch(/41% \(43 of 105 fixes\)/);
@@ -66,6 +67,21 @@ del res["agentWork"]
 print(json.dumps(es.ai_team_row(NOW, res, None, measures=${MEASURES})))`);
     expect(row.status).toBe('Failed');
     expect(row.detail).toMatch(/no agent work split/);
+  });
+
+  it('the Estate tab gets every not-moving row, and a cut list says how many it left out (round 2, item 1)', () => {
+    // The cap was 40 and on 14 Oct 2026 the list was 48: eight tasks the card counted were on no list.
+    const out = py(`
+def res(n): return {"stalled": [{"name": "t%d" % i, "why": "w", "days": 0, "rule": "reply", "lane": "withAgent"} for i in range(n)],
+                    "needsYou": [], "done": [], "lanes": {}, "control": {"tasksRead": 300}}
+a = es.loop_health_row(NOW, res(48), None); b = es.loop_health_row(NOW, res(160), None)
+print(json.dumps({"a": len(json.loads(a["payload"])["stalled"]), "aDetail": a["detail"],
+                  "b": len(json.loads(b["payload"])["stalled"]), "bDetail": b["detail"], "bLen": len(b["payload"])}))`);
+    expect(out.a).toBe(48);
+    expect(out.aDetail).not.toMatch(/not shown/);
+    expect(out.b).toBe(150);
+    expect(out.bDetail).toMatch(/The list shows the first 150; 10 more are not shown\./);
+    expect(out.bLen).toBeLessThan(100000);
   });
 
   it('is Failed with the reason, never a zero, when agent work cannot be read', () => {
@@ -228,7 +244,10 @@ LEDGER = {
     "recSAMEDAYDONEx01": [("done", N - timedelta(minutes=30))],
 }
 HELD = {"recHELDxxxxxxxx01"}
-STALLED = lh.compute(TASKS, {AGENT}, now=N, roy_ids={ROY})["stalled"]
+BASE = lh.compute(TASKS, {AGENT}, now=N, roy_ids={ROY})["stalled"]
+# As report() builds it: compute()'s rows, then a "reply" row for each wait past REPLY_STUCK_DAYS.
+STALLED = BASE + lh.reply_overdue_rows(TASKS, N, LEDGER, {ROY}, {s["id"] for s in BASE})
+OPEN_AGENT = {t["id"] for t in TASKS if t["fields"]["Status"] != "Completed" and AGENT in t["fields"]["Team Member"]}
 def work(**kw):
     args = dict(ledger=LEDGER, now=N)
     args.update(kw)
@@ -245,8 +264,8 @@ describe('the Agent Work split (14 Oct 2026)', () => {
 print(json.dumps({"stalled": sorted(s["id"] for s in STALLED), "aw": work()}))`);
     // The fixture really fires the rules: both excluded tasks ARE on the stalled list.
     expect(out.stalled).toEqual(['recAMENDxxxxxxx01', 'recDEADLINExxxx01', 'recDRAFTxxxxxxx01',
-      'recHELDxxxxxxxx01', 'recNOBOARDxxxxx01', 'recROYTASKxxxxx01']);
-    // DRAFT, AMEND, DEADLINE, NOBOARD from the stalled list, and OLDWAIT past the reply window.
+      'recHELDxxxxxxxx01', 'recNOBOARDxxxxx01', 'recOLDWAITxxxxx01', 'recROYTASKxxxxx01']);
+    // DRAFT, AMEND, DEADLINE, NOBOARD, and OLDWAIT's "reply" row.
     expect(out.aw.notMoving).toBe(5);
     expect(out.aw.replyOverdue).toBe(1);
     expect(out.aw.held).toBe(1);
@@ -287,7 +306,7 @@ print(json.dumps({i: bucket(i) for i in ids}))`);
   it('with no ledger, a same-day approval is never waiting, and the card says the ledger was not read', () => {
     const out = py(`${FIX}
 d = tempfile.mkdtemp()
-ledger, why = lh.carryout_ledger(os.path.join(d, "none.jsonl"))
+ledger, why, skipped = lh.carryout_ledger(os.path.join(d, "none.jsonl"))
 aw = work(ledger=None, ledger_error=why)
 print(json.dumps({"why": why, "aw": aw, "sameDayDone": bucket("recSAMEDAYDONEx01", None),
                   "wait": bucket("recWAITxxxxxxxx01", None), "blocked": bucket("recBLOCKEDxxxxx01", None)}))`);
@@ -298,18 +317,26 @@ print(json.dumps({"why": why, "aw": aw, "sameDayDone": bucket("recSAMEDAYDONEx01
     expect(out.blocked).toBe('live');
   });
 
-  it('reads the real ledger file: full times, bad lines and times with no zone skipped', () => {
+  it('reads the real ledger file: full times; a bad line, a bad byte or a zone-less time is skipped and counted, never fatal (round 2, item 4)', () => {
     const out = py(`${FIX}
 d = tempfile.mkdtemp(); p = os.path.join(d, "carryout-intent.jsonl")
-with open(p, "w") as fh:
-    fh.write(json.dumps({"task": "recSAMEDAYDONEx01", "ts": "2026-10-14T16:39:05.000Z", "event": "done"}) + "\\n")
-    fh.write("not json\\n")
-    fh.write(json.dumps({"task": "recSAMEDAYDONEx01", "ts": "2026-10-14T16:00:00", "event": "parked"}) + "\\n")
-    fh.write(json.dumps({"task": "recSAMEDAYDONEx01", "ts": "2026-10-14T16:10:00.000Z", "event": "intent"}) + "\\n")
-ledger, why = lh.carryout_ledger(p)
-print(json.dumps({"why": why, "events": [[e, w.isoformat()] for e, w in ledger["recSAMEDAYDONEx01"]]}))`);
+with open(p, "wb") as fh:
+    fh.write((json.dumps({"task": "recSAMEDAYDONEx01", "ts": "2026-10-14T16:39:05.000Z", "event": "done"}) + "\\n").encode())
+    fh.write(b"not json\\n")
+    fh.write(b'{"task": "recSAMEDAYDONEx01", "ts": "2026-10-14T16:20:00.000Z", "event": "do\\xff\\xfene"}\\n')
+    fh.write(b"\\xc3\\x28 broken utf-8\\n")
+    fh.write((json.dumps({"task": "recSAMEDAYDONEx01", "ts": "2026-10-14T16:00:00", "event": "parked"}) + "\\n").encode())
+    fh.write((json.dumps(["not", "a", "record"]) + "\\n").encode())
+    fh.write((json.dumps({"task": "recSAMEDAYDONEx01", "ts": "2026-10-14T16:10:00.000Z", "event": "intent"}) + "\\n").encode())
+ledger, why, skipped = lh.carryout_ledger(p)
+aw = work(ledger=ledger, ledger_skipped=skipped)
+print(json.dumps({"why": why, "skipped": skipped, "awSkipped": aw["ledgerSkipped"],
+                  "events": [[e, w.isoformat()] for e, w in ledger["recSAMEDAYDONEx01"]]}))`);
     expect(out.why).toBeNull();
-    expect(out.events).toEqual([['intent', '2026-10-14T16:10:00+00:00'], ['done', '2026-10-14T16:39:05+00:00']]);
+    // A replaced byte inside a whole record still reads (its event name is not one the rules use).
+    expect(out.events.map(e => e[0])).toEqual(['intent', 'do��ne', 'done']);
+    expect(out.skipped).toBe(4);     // not json, broken utf-8, zone-less time, not a record
+    expect(out.awSkipped).toBe(4);
   });
 
   it('with no held list it counts held tasks as stuck and says it could not check, never a quiet number', () => {
@@ -402,17 +429,73 @@ print(json.dumps(work(tasks=[t for t in TASKS if t["id"] in keep])))`);
     expect(out.open).toBe(4);
   });
 
-  it('buckets that do not add up to the separately counted control fail the report (review item 6)', () => {
+  it('open is checked against Airtable\'s own count: a still board must agree, a moving one is named (round 2, item 2)', () => {
     const out = py(`${FIX}
-try:
-    work(expected_open=18)
-    print(json.dumps({"raised": None}))
-except RuntimeError as exc:
-    print(json.dumps({"raised": str(exc)}))`);
-    expect(out.raised).toMatch(/counted 19 open agent tasks, the control counted 18/);
+def attempt(check):
+    try:
+        return {"ok": work(open_check=check)}
+    except RuntimeError as exc:
+        return {"raised": str(exc)}
+short = OPEN_AGENT - {"recDRAFTxxxxxxx01"}
+print(json.dumps({"agree": attempt((OPEN_AGENT, OPEN_AGENT)),
+                  "disagree": attempt((short, short)),
+                  "moved": attempt((OPEN_AGENT, short)),
+                  "none": attempt(None)}))`);
+    expect(out.agree.ok.openCheck).toBeNull();
+    expect(out.agree.ok.open).toBe(19);
+    expect(out.disagree.raised).toMatch(/this split counted 19, Airtable's own filter counted 18 \(only here: recDRAFTxxxxxxx01; only in Airtable: none\)/);
+    expect(out.moved.ok.openCheck).toMatch(/board changed while it was read \(1 task\(s\)/);
+    expect(out.none.ok.openCheck).toBeNull();
   });
 
-  it('report() carries the split, built from one read and the dispatcher\'s ledger', () => {
+  it('the second count asks Airtable by the agent\'s record id through the Team Members lookup, never by name', () => {
+    const out = py(`${FIX}
+seen = []
+def fake(table, fields=None, formula=None):
+    seen.append({"table": table, "fields": fields, "formula": formula})
+    return [{"id": "recDRAFTxxxxxxx01"}]
+ids = lh.open_agent_ids({"recAGENTxxxxxxx01", "recAGENTxxxxxxx02"}, fetcher=fake)
+print(json.dumps({"ids": sorted(ids), "seen": seen, "none": sorted(lh.open_agent_ids(set(), fetcher=fake))}))`);
+    expect(out.ids).toEqual(['recDRAFTxxxxxxx01']);
+    expect(out.seen).toHaveLength(1);
+    const f = out.seen[0].formula;
+    expect(out.seen[0].table).toBe('tblqB8b22hKBL4PF1');
+    expect(f).toContain("{Status}!='Completed'");
+    expect(f).toContain("{Status}!='Cancelled'");
+    expect(f).toContain('{Completion Date}=BLANK()');
+    expect(f).toContain("FIND('recAGENTxxxxxxx01',ARRAYJOIN({Record ID (Used for Automation) (from Team Members)})&'')");
+    expect(f).toContain("FIND('recAGENTxxxxxxx02',");
+    expect(out.none).toEqual([]);
+  });
+
+  it('every task the card counts as stuck is on the list a person reads, with a plain reason (round 2, item 1)', () => {
+    const out = py(`${FIX}
+rows = {s["id"]: s for s in STALLED}
+aw = work()
+counted = {s["id"] for s in STALLED if s["id"] in OPEN_AGENT and s["id"] not in HELD}
+print(json.dumps({"reply": rows.get("recOLDWAITxxxxx01"), "counted": len(counted), "notMoving": aw["notMoving"],
+                  "replyRows": [s["id"] for s in STALLED if s["rule"] == "reply"]}))`);
+    expect(out.notMoving).toBe(out.counted);
+    expect(out.replyRows).toEqual(['recOLDWAITxxxxx01']);
+    expect(out.reply.rule).toBe('reply');
+    expect(out.reply.days).toBe(19);
+    expect(out.reply.lane).toBe('withAgent');
+    expect(out.reply.why).toMatch(/^Waiting on a reply for more than 14 days: carried out \d{1,2} \w{3} \d{4} and no answer has closed it$/);
+  });
+
+  it('the stuck threshold is loop-health\'s own, not the rent check\'s reply window (round 2, item 3)', () => {
+    const out = py(`${FIX}
+D.REPLY_WINDOW_DAYS = 0          # the rent check's window moves: nothing here may follow it
+a = {"wait": bucket("recWAITxxxxxxxx01"), "old": bucket("recOLDWAITxxxxx01")}
+lh.REPLY_STUCK_DAYS = 30         # loop-health's own number moves: the answer does
+b = {"wait": bucket("recWAITxxxxxxxx01"), "old": bucket("recOLDWAITxxxxx01"),
+     "replyRows": len(lh.reply_overdue_rows(TASKS, N, LEDGER, {ROY})), "window": work()["replyWindowDays"]}
+print(json.dumps({"a": a, "b": b}))`);
+    expect(out.a).toEqual({ wait: 'waitingReply', old: 'live' });
+    expect(out.b).toEqual({ wait: 'waitingReply', old: 'waitingReply', replyRows: 0, window: 30 });
+  });
+
+  it('report() carries the split, built from one read, the dispatcher\'s ledger and Airtable\'s own count', () => {
     const out = py(`${FIX}
 d = tempfile.mkdtemp(); q = os.path.join(d, "queue.json"); led = os.path.join(d, "carryout-intent.jsonl")
 with open(q, "w") as fh: json.dump({"generatedAt": iso(N), "heldUnderLead": [{"id": "recHELDxxxxxxxx01"}]}, fh)
@@ -423,14 +506,35 @@ with open(led, "w") as fh:
 lh.DISPATCH_QUEUE = q
 D.INTENT_LEDGER = led
 team = [{"id": AGENT, "fields": {"Name": "AI Worker", "Is AI Agent": True}}, {"id": ROY, "fields": {"Name": "Roy Lavin"}}]
-lh.fetch = lambda table, fields=None, formula=None: team if table == lh.TEAM else TASKS
+counts = []
+def fake(table, fields=None, formula=None):
+    if table == lh.TEAM:
+        return team
+    if formula and "Record ID (Used for Automation)" in formula:   # Airtable's own count of open agent tasks
+        counts.append(1)
+        return [{"id": i} for i in sorted(OPEN_AGENT)]
+    return TASKS
+lh.fetch = fake
 res = lh.report()
 row = es.ai_team_row(N, res, None, measures=${MEASURES})
-print(json.dumps({"aw": res["agentWork"], "stalled": len(res["stalled"]), "work": json.loads(row["payload"])["work"]}))`);
-    expect(out.stalled).toBe(6);
-    expect(out.aw).toMatchObject({ open: 19, live: 11, waitingReply: 2, notMoving: 5, held: 1, waitCheck: null });
+lh.fetch = lambda table, fields=None, formula=None: (team if table == lh.TEAM else
+    [{"id": i} for i in sorted(OPEN_AGENT - {"recDRAFTxxxxxxx01"})] if formula and "Record ID (Used for Automation)" in formula else TASKS)
+try:
+    lh.report(); raised = None
+except RuntimeError as exc:
+    raised = str(exc)
+print(json.dumps({"aw": res["agentWork"], "stalled": len(res["stalled"]), "counts": len(counts),
+                  "reply": [s["id"] for s in res["stalled"] if s["rule"] == "reply"],
+                  "lanes": res["lanes"], "work": json.loads(row["payload"])["work"], "raised": raised}))`);
+    expect(out.counts).toBe(2);                         // before and after the main read
+    expect(out.stalled).toBe(7);                        // compute()'s 6 and one "reply" row
+    expect(out.reply).toEqual(['recOLDWAITxxxxx01']);
+    expect(Object.values(out.lanes).reduce((a, b) => a + b, 0)).toBe(7);
+    expect(out.aw).toMatchObject({ open: 19, live: 11, waitingReply: 2, notMoving: 5, held: 1, waitCheck: null,
+      openCheck: null, ledgerSkipped: 0 });
     expect(out.work).toMatchObject({ open: 19, live: 11, approval: 1, waitingReply: 2, scheduled: 4, other: 1,
       notMoving: 5, replyOverdue: 1, replyWindowDays: 14 });
+    expect(out.raised).toMatch(/Airtable's own filter counted 18/);
   });
 
   it('the London midnight edge: the answer is London\'s, whatever the process time zone', () => {
