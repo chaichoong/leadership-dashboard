@@ -440,6 +440,59 @@ describe('personal net cash flow', () => {
     });
 });
 
+// Leadership Dashboard audit, 14 Oct 2026: the credit card payoff time divided the cards by
+// the forecast's property surplus (before the variable budget and Kevin's living costs) and
+// said £24,165 would clear in about 2 months. It now runs on personal net cash flow times the
+// Debt pot share. Amounts invented.
+describe('credit card paydown pace', () => {
+    const personal = K.personalNet({ months: [{ key: '2026-07', net: 5000, totalIncome: 30000 }, { key: '2026-08', net: 4000, totalIncome: 30000 }, { key: '2026-09', net: 6000, totalIncome: 30000 }] });
+    it('is the 3-month personal average times the Debt pot share', () => {
+        const r = K.debtPaydown({ personal, debtPct: 70 });
+        expect(r.perMonth).toBe(3500);
+        expect(r.average).toBe(5000);
+        expect(r.debtPct).toBe(70);
+    });
+    it('gives no pace, with a reason, when the Wealth cash flow did not load', () => {
+        const r = K.debtPaydown({ personal: K.personalNet({ months: [] }), debtPct: 70 });
+        expect(r.perMonth).toBeNull();
+        expect(r.reason).toContain('Wealth');
+        expect(K.debtPaydown({ personal: null, debtPct: 70 }).perMonth).toBeNull();
+    });
+    it('gives no pace when the Debt pot share is missing', () => {
+        expect(K.debtPaydown({ personal, debtPct: null }).perMonth).toBeNull();
+        expect(K.debtPaydown({ personal, debtPct: '' }).reason).toContain('Debt pot');
+    });
+    it('a share of 0 or a negative personal month average sends nothing to the cards', () => {
+        expect(K.debtPaydown({ personal, debtPct: 0 }).perMonth).toBe(0);
+        const short = K.personalNet({ months: [{ key: '2026-09', net: -800, totalIncome: 30000 }] });
+        expect(K.debtPaydown({ personal: short, debtPct: 70 }).perMonth).toBe(0);
+    });
+});
+
+// The cash cards headline the last full month (Kevin, 14 Oct 2026), so a payment that needs
+// checking in that month raises the alarm even when it is older than the rolling 31 days.
+describe('cash cushion checks cover the last full month as well as the rolling 31 days', () => {
+    const tx = (date, amount, sub, extra = {}) => ({ id: date + sub + amount, date, amount, subCategories: [sub], businesses: ['Real Estate'], costIds: [], reconciled: true, description: '', ...extra });
+    const costBusinessNames = { c1: ['Real Estate'], c3: ['Personal'] };
+    const base = [tx('2026-09-10', 1000, 'Rental Income'), tx('2026-10-01', 1000, 'Rental Income'), tx('2026-09-12', -400, 'Mortgage Interest', { costIds: ['c1'] })];
+    it('a 1 Sep payment against another business cost record is named on 2 Oct', () => {
+        const r = K.cashCushion({ transactions: [...base, tx('2026-09-01', -30, 'Software & Subscriptions', { costIds: ['c3'] })], costBusinessNames, businessName: 'Real Estate', today: TODAY });
+        expect(r.rolling.start).toBe('2026-09-02');            // outside the rolling window
+        expect(r.lastMonth.mismatches).toHaveLength(1);         // inside the headline month
+        expect(r.checks.mismatches).toHaveLength(1);
+        expect(K.alarmLevel(r)).toBe('amber');
+        expect(r.alarms[0].msg).toContain('since 1 Sep');
+    });
+    it('an unfiled 1 Sep payment is named too', () => {
+        const r = K.cashCushion({ transactions: [...base, tx('2026-09-01', -50, '', { reconciled: false })], costBusinessNames, businessName: 'Real Estate', today: TODAY });
+        expect(r.checks.unreconciled).toBe(1);
+        expect(K.alarmLevel(r)).toBe('amber');
+    });
+    it('control: the same month with nothing to check raises nothing', () => {
+        expect(K.alarmLevel(K.cashCushion({ transactions: base, costBusinessNames, businessName: 'Real Estate', today: TODAY }))).toBe('');
+    });
+});
+
 describe('alarmLevel', () => {
     it('a missing result is red, never blank', () => {
         expect(K.alarmLevel(null)).toBe('red');

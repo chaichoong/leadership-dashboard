@@ -370,9 +370,9 @@ li { margin-bottom:0.2rem; font-size:0.9rem; } hr { border:none; border-top:1px 
         <tr><td><code>UTILITIES_TARGET_GBP</code></td><td><strong>&pound;200/month</strong></td><td>Utilities budget</td></tr>
         <tr><td><code>COMPLIANCE_TARGET_GBP</code></td><td><strong>&pound;1,000/month</strong> (&pound;250 from 1 January 2027)</td><td>Compliance certificates budget</td></tr>
         <tr><td><code>CFV_TARGET_GBP</code></td><td><strong>&pound;750/month</strong></td><td>Non-payment allowance</td></tr>
-        <tr><td><code>CLEAR_PROFIT_TARGET</code></td><td><strong>&pound;10,000/month</strong></td><td>Target clear profit after all variable costs</td></tr>
+        <tr><td><code>CLEAR_PROFIT_TARGET</code></td><td><strong>&pound;10,000/month</strong></td><td>The income floor: your income from property after all variable costs</td></tr>
         <tr><td><code>variableCostReserve</code></td><td><strong>&pound;4,300/month</strong></td><td>The property variable budget: <code>RE_VARIABLE_BUDGET_GBP</code>, the sum of the five lines above</td></tr>
-        <tr><td><code>requiredOperatingCushion</code></td><td><strong>&pound;14,000/month</strong></td><td>Clear profit target + variable cost reserve (calculated)</td></tr>
+        <tr><td><code>requiredOperatingCushion</code></td><td><strong>&pound;14,300/month</strong></td><td>The cushion the income floor needs: the floor + the variable budget (calculated). A floor, not the Q4 target</td></tr>
       </tbody>
     </table>
   </div>
@@ -383,9 +383,9 @@ li { margin-bottom:0.2rem; font-size:0.9rem; } hr { border:none; border-top:1px 
       <thead><tr><th>Card</th><th>How it is worked out</th></tr></thead>
       <tbody>
         <tr><td><strong>Income from property (plan)</strong></td><td>Property cushion (plan) less the &pound;4,300 variable budget.</td></tr>
-        <tr><td><strong>Income from property (cash)</strong></td><td>Property cushion (cash) less every other property payment in the window (payments tagged Real Estate with no cost record: wages, maintenance, utilities, compliance, other).</td></tr>
+        <tr><td><strong>Income from property (cash)</strong></td><td>Property cushion (cash) less every other property payment in the same month (payments tagged Real Estate with no cost record: wages, maintenance, utilities, compliance, other).</td></tr>
         <tr><td><strong>Property cushion (plan)</strong></td><td>Rent of tenancies that read In Payment, less active costs whose Business is Real Estate.</td></tr>
-        <tr><td><strong>Property cushion (cash)</strong></td><td>Rental Income received, less payments tagged Real Estate that are linked to a cost record. Rolling 31 days, with the last full month and the Q3 average beside it. Both cash cards are held to the same 31 December marker as their plan card: the gap between plan and cash is the leak.</td></tr>
+        <tr><td><strong>Property cushion (cash)</strong></td><td>Rental Income received, less payments tagged Real Estate that are linked to a cost record. The last full calendar month, with the rolling 31 days and the Q3 average beside it. A rolling 31 days can take in two of a monthly payment that lands at both ends (on 14 Oct 2026, two mortgages paid on 14 Sep and again on 12 and 13 Oct, &pound;1,411), so the headline is the last full month (Kevin, 14 Oct 2026). Both cash cards are held to the same 31 December marker as their plan card: the gap between plan and cash is the leak.</td></tr>
         <tr><td><strong>Named units with a signed tenant in</strong></td><td>Each named unit counts when a tenancy that has started and not ended is linked to it. One unit is set to count only once someone other than the tenant moving out of it lives there.</td></tr>
         <tr><td><strong>New rent in payment from the named tenants</strong></td><td>Rent of the named tenants and units, counted only while the tenancy reads In Payment. A replacement tenant anywhere else is never counted.</td></tr>
         <tr><td><strong>Personal net cash flow</strong></td><td>The Wealth page's own figure (<code>buildMonthlyCashflow</code>) for the last full month, with the 3-month average beside it.</td></tr>
@@ -491,10 +491,10 @@ li { margin-bottom:0.2rem; font-size:0.9rem; } hr { border:none; border-top:1px 
           <td>Same traffic light logic</td>
         </tr>
         <tr>
-          <td><strong>Target Operating Cushion</strong></td>
-          <td>Best-case operating cushion (In Payment + CFV Actioned income minus property fixed costs) vs required &pound;14,300</td>
-          <td><strong>&pound;14,300</strong> (<code>requiredOperatingCushion</code>)</td>
-          <td>Green if actual &ge; target, amber if below</td>
+          <td><strong>Cushion for the &pound;10,000 income floor</strong></td>
+          <td>Property cushion from In Payment tenancies (their rent less property fixed costs) vs the &pound;14,300 the income floor needs. Rent from CFV Actioned tenancies is not counted: it is not being paid. This is a floor, not the Q4 target, which sits on the Property cushion (plan) card.</td>
+          <td><strong>&pound;14,300</strong> (<code>requiredOperatingCushion</code>: the &pound;10,000 floor + the &pound;4,300 variable budget)</td>
+          <td>Green if at or above the floor, amber if below</td>
         </tr>
       </tbody>
     </table>
@@ -504,7 +504,7 @@ li { margin-bottom:0.2rem; font-size:0.9rem; } hr { border:none; border-top:1px 
     </div>
     <div class="info-box tip">
       <span class="ib-icon">&#x1F4A1;</span>
-      <div><strong>Target Operating Cushion breakdown:</strong> Expanding the Target Operating Cushion card shows: wages budget (&pound;650), maintenance budget (&pound;1,700), utilities budget (&pound;200), compliance budget (&pound;1,000), non-payment allowance (&pound;750), variable cost reserve (&pound;4,300), clear profit target (&pound;10,000), and required operating cushion (&pound;14,300). The operating cushion must be large enough to absorb all variable costs and still leave the clear profit target behind &mdash; this becomes the <em>operating profit</em>.</div>
+      <div><strong>Income floor breakdown:</strong> Expanding the card shows: wages budget (&pound;650), maintenance budget (&pound;1,700), utilities budget (&pound;200), compliance budget (&pound;1,000), non-payment allowance (&pound;750), variable budget (&pound;4,300), income floor (&pound;10,000), the cushion the floor needs (&pound;14,300), the cushion now from In Payment tenancies, and the cushion if the CFV Actioned tenancies pay too. Below &pound;14,300, your income from property is under &pound;10,000.</div>
     </div>
   </div>
 </div>
@@ -572,8 +572,8 @@ li { margin-bottom:0.2rem; font-size:0.9rem; } hr { border:none; border-top:1px 
     <div class="card-header">&#x1F4B7; Withdrawal Advisor &amp; Weekly Commitments</div>
     <p>The forecast is not a plain projection of Airtable data. Two things are applied on top of it before the table is drawn.</p>
     <ol class="steps">
-      <li><strong>Weekly commitments.</strong> Wages of &pound;330 and a Top-up of &pound;140 are added to the Out column every Friday by default (<code>js/cashflow.js:459-465</code>, applied at <code>:491</code>). That is &pound;470 a week, roughly &pound;2,000 a month, and it is <strong>not</strong> held in Airtable. It lives in this browser only, under the <code>localStorage</code> key <code>_wa_settings</code> (<code>:1192</code>). Edit the amounts and days in the controls above the table. A different browser, or a cleared cache, falls back to those defaults.</li>
-      <li><strong>Recommended withdrawals.</strong> The advisor walks the 31 days and, at least three days apart, marks an amount that is safe to take out, in &pound;50 steps (<code>:517-552</code>). It only takes what still leaves the safety floor intact on that day and on every day after it. Once marked, the withdrawal is subtracted from every later Opening and Closing (<code>:546-549</code>), so the Closing balance you are reading already assumes you took that cash. The green <strong>Safe to withdraw (31-day cycle)</strong> figure above the table is the total of them (<code>:629</code>).</li>
+      <li><strong>Weekly commitments.</strong> Wages of &pound;150 (Roy, the &pound;650 a month wages budget) are added to the Out column every Friday by default (<code>waDefaultCommitments()</code>). It is <strong>not</strong> held in Airtable. It lives in this browser only, under the <code>localStorage</code> key <code>_wa_settings</code> (<code>:1192</code>). Edit the amounts and days in the controls above the table. A different browser, or a cleared cache, falls back to those defaults.</li>
+      <li><strong>Recommended withdrawals.</strong> The advisor walks the 31 days and, at least three days apart, marks an amount that is safe to take out, in &pound;50 steps (<code>:517-552</code>). It only takes what still leaves the safety floor intact on that day and on every day after it, <strong>after holding back the rest of the variable budget</strong>: &pound;3,650 a month for maintenance, compliance, utilities and the non-payment allowance, spread evenly over the 31 days (wages are already in the weekly commitments). That money stays in the Closing column; only the withdrawals are smaller (Kevin, 14 Oct 2026: it read &pound;23,950 when &pound;20,300 left the budget covered). Once marked, the withdrawal is subtracted from every later Opening and Closing (<code>:546-549</code>), so the Closing balance you are reading already assumes you took that cash. The green <strong>Safe to withdraw (31-day cycle)</strong> figure above the table is the total of them (<code>:629</code>).</li>
     </ol>
     <p><strong>Where the safety floor comes from:</strong> the largest single expected payment in, times 30%, scaled by how late payments have actually been running (<code>analysePaymentLag()</code>, <code>:502-508</code>), rounded up to the nearest &pound;50 and never below &pound;500. You can type over it in the floor box, which is also stored in <code>_wa_settings</code>.</p>
     <div class="info-box info">
@@ -591,10 +591,10 @@ li { margin-bottom:0.2rem; font-size:0.9rem; } hr { border:none; border-top:1px 
     <p>The AI commentary section (<code>id="aiCommentary"</code>) is generated in <code>renderDashboard()</code> using live KPI data. It covers six titled sections:</p>
     <ul>
       <li><strong>Financial Health:</strong> Confirmed monthly income (In Payment), best-case total (+ CFV Actioned), fixed costs, gross margin range, and whether the upper range is healthy (&ge;40%).</li>
-      <li><strong>Profit Targets:</strong> Current best-case gross profit vs the &pound;14,000 required target. If on track, shows surplus; if off track, shows shortfall and % achieved.</li>
-      <li><strong>Operational Performance (31-Day):</strong> Actual rental income, maintenance status (vs &pound;1,000 budget), wages status (vs &pound;1,500 budget).</li>
+      <li><strong>Income Floor:</strong> The cushion from In Payment tenancies vs the &pound;14,300 the &pound;10,000 income floor needs, how far above or below it is, the figure if the CFV Actioned tenancies pay too, and the Q4 target.</li>
+      <li><strong>Operational Performance (31-Day):</strong> Actual rental income, maintenance status (vs the &pound;1,700 budget), wages status (vs the &pound;650 budget).</li>
       <li><strong>Occupancy &amp; Voids:</strong> Occupancy rate, void count, estimated cost per void per month (monthly income &divide; occupied units), and ROI of filling voids.</li>
-      <li><strong>CFV Risk:</strong> CFV exposure vs &pound;1,500 allowance, count of unactioned CFVs and value at risk.</li>
+      <li><strong>CFV Risk:</strong> CFV exposure vs the &pound;750 non-payment allowance, count of unactioned CFVs and value at risk.</li>
       <li><strong>Quick Wins:</strong> Prioritised action list: fill voids (1), action CFVs (2), reduce maintenance if over budget (3), plus a note about mortgage clusters on days 1&ndash;6.</li>
     </ul>
   </div>
@@ -613,7 +613,7 @@ li { margin-bottom:0.2rem; font-size:0.9rem; } hr { border:none; border-top:1px 
     <p>Any card with nothing owed drops out of the list entirely (<code>:1966</code>).</p>
     <h4 style="margin-top:1rem">How the split is worked out</h4>
     <ol class="steps">
-      <li>The Payment box starts at the low operating cushion figure, rounded down (<code>:1991</code>). You can type any amount over it and the split redraws as you type.</li>
+      <li>The Payment box starts at what can go to the cards each month: personal net cash flow (Wealth page rules, 3-month average) times your Debt pot share (Income Buckets, 70% in October 2026), rounded down. You can type any amount over it and the split redraws as you type.</li>
       <li>Cards are sorted by estimated APR, dearest first (<code>:2049</code>). This is the avalanche method: pay the minimum on everything, then put all the rest against the dearest card.</li>
       <li>Every card gets its minimum first (<code>:2054</code>). If your figure is below the total of the minimums, the total of the minimums is used instead (<code>:2052</code>).</li>
       <li>Whatever is left goes to the dearest card until it is cleared, then to the next (<code>:2055-2059</code>).</li>
@@ -625,7 +625,7 @@ li { margin-bottom:0.2rem; font-size:0.9rem; } hr { border:none; border-top:1px 
     </div>
     <div class="info-box info">
       <span class="ib-icon">&#x1F4A1;</span>
-      <div><strong>&ldquo;Months to clear&rdquo; is a best case.</strong> Under the cash flow forecast, the Credit Card Balances panel divides each balance by a monthly surplus (<code>js/cashflow.js:914-935</code>). That surplus is the best-case 31-day net change, which counts fixed costs only. Maintenance, wages, the CFV reserve and any cash you withdraw are not in it, and it assumes the same 31 days repeat every month. Treat the number of months as the floor, not the plan.</div>
+      <div><strong>&ldquo;Months to clear&rdquo; runs on your Debt pot.</strong> Under the cash flow forecast, the Credit Card Balances panel divides each balance by what goes to the cards each month: personal net cash flow (the Wealth page's figure, 3-month average, after your living costs) times the Debt pot share (<code>ReKpis.debtPaydown</code>, drawn by <code>renderCreditCardSummary()</code>). Until 14 Oct 2026 it divided by the property surplus before the variable budget and your living costs, and said &pound;24,165 of cards would clear in about 2 months. If the Wealth figures or the Debt pot share cannot be read, the panel says so and gives no time.</div>
     </div>
   </div>
 </div>
@@ -821,6 +821,11 @@ li { margin-bottom:0.2rem; font-size:0.9rem; } hr { border:none; border-top:1px 
     <table class="label-table">
       <thead><tr><th>Version</th><th>Date</th><th>Changes</th></tr></thead>
       <tbody>
+        <tr>
+          <td><strong>2.147</strong></td>
+          <td>14 Oct 2026</td>
+          <td>Money figures audit against Airtable. Four figures corrected: the operating cushion card now measures In Payment tenancies against the &pound;14,300 income floor (it counted CFV Actioned rent and called the floor a target); the cash cushion and cash income cards headline the last full month (a rolling 31 days counted two mortgages twice); Safe to withdraw holds back the &pound;3,650 of the variable budget not already in wages; credit card &ldquo;months to clear&rdquo; runs on personal net cash flow times the Debt pot share. Stale wages, budget and allowance figures in this guide corrected.</td>
+        </tr>
         <tr>
           <td><strong>2.140</strong></td>
           <td>9 Oct 2026</td>

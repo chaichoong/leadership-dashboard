@@ -958,6 +958,281 @@ def fold_on_address_only(name_a, name_b, shared):
     return len([w for w in shared if w not in noise]) < DUPE_MIN_SHARED
 
 
+# ─── A NUMBER ALONE IS NEVER A SUBJECT ───────────────────────────────
+#
+# 14 Oct 2026, twice in one day. Creating a lender request for a mortgage
+# interest certificate ("... for 1406 Oldham Road (account <ref>)") folded it
+# into the OPEN, ALREADY-APPROVED "COMPLIANCE: Pest control quote chase ... -
+# 1406 Oldham Road M40 1EZ", and the gate exited 0 with {"action":
+# "updated"}, so the request looked done and was not. Kevin stripped the
+# appended paragraph off the pest-control card by hand and re-created the
+# request under a name that did not collide. An approved card is the worst
+# place in the system to put new work: he has already read it, so the
+# folded-in text is never approved and never done.
+#
+# The only thing the two names had in common was the HOUSE NUMBER. A run of
+# four or more digits is read as a reference number, and 1406 is not a
+# calendar year, so it became `num:1406` on both sides; one shared strong id
+# is proof of identity on its own, ahead of the address rules and the word
+# threshold, and `fold_on_address_only` lets a strong id through by design
+# ("a reference number is identity, not address").
+#
+# Fourth in one family — the address words (28 Aug), the postcode halves
+# (finding 605), the year 2026 (1 Sep), the house number (today): a token
+# that appears on everything cannot identify anything.
+#
+# THREE DRAFTS, TWO OF THEM WRONG, BOTH FOUND BY REVIEW RATHER THAN REASONING.
+# Each failure is pinned as a test below the fix.
+#   1. Demoting house numbers out of the strong set loses the real duplicate
+#      the strong pass exists for, because the word pass alone cannot see a
+#      pair whose subject words the place reader has eaten.
+#   2. Letting ONE shared telling word carry the fold is a LOWER bar than
+#      DUPE_MIN_SHARED, so adding a house number to two names re-enabled the
+#      very fold finding 605 refuses (a gas quote request and a council
+#      licence fee at one house share the TOWN, not the subject).
+#   3. Firing only on a number the address reader recognises as a house
+#      number FAILED OPEN: six ordinary spellings of one address defeat
+#      `DUPE_ADDRESS_RE` ("1406, Oldham Road" with the comma, "1406
+#      Deansgate" with no street type, "1406 New Road" because `new` is a
+#      stop word, "1406 Old Great Western Road" with three words before the
+#      type, "Flat 1406 Duckworth Court" as a unit) and every one of them
+#      reproduced the incident. The same reader also invents houses out of
+#      "claim 1406 small claims court", because `court` is a street type.
+#
+# So this asks nothing about addresses. Kevin's rule, in his words: a merge
+# needs real subject agreement, not one shared token. When the only thing two
+# names agree on is a NUMBER, the fold must stand on their words, at the bar
+# the word pass already sets (DUPE_MIN_SHARED telling words, DUPE_MIN_RATIO
+# of the shorter name) — never a softer one, or a shared number would buy a
+# fold that a pair without one cannot have. A PHONE NUMBER written as a phone
+# number is the one exemption: it identifies a thread, which is what the
+# strong pass is for.
+#
+# The cost, measured rather than argued: on the 267 open tasks of 14 Oct 2026
+# the verdict would fold 59 pairs, 2 were already refused on the address, and
+# 3 are newly refused — every one a different job at 1406 Oldham Road. No
+# real duplicate on the live board is lost. The shapes that do lose a fold
+# are a chaser whose name repeats nothing of the task it chases ("2nd
+# reminder 10045678" against "Acme Roofing invoice 10045678") and two tasks
+# at one property agreeing on a single subject word. Both leave Kevin two
+# cards he can merge, which is the trade he asked for: never an approved card
+# quietly rewritten.
+#
+# Guards the creation gate's FOLD, like `fold_on_address_only` above and for
+# the same reason: grouping shows and may be generous, folding destroys and
+# may not. The page's Duplicates lane still groups the pair, and the board
+# and dispatch callers put a close proposal in front of Kevin rather than
+# rewriting a card, so `dupe_verdict` stays byte-identical to its JS mirror.
+
+# A PHONE NUMBER CARRIES ITS TRUNK PREFIX AND TEN SUBSCRIBER DIGITS; A UTR
+# DOES NOT. `dupe_signals` calls any 9-to-12 digit run `tel:` and then
+# compares the last NINE digits, so a UTR, a mortgage account number and a
+# council tax reference all read as phone numbers — and two different
+# 10-digit account numbers whose last nine agree read as ONE thread. The
+# thread exemption is therefore spent only on a number whose SHAPE is a UK
+# phone number, and the shape is read off the digits rather than matched in
+# the text, because people write one number six ways: 07700900747,
+# 07398 536055, 07398-536055, +44 7700 900747, +44 (0)7398 536055,
+# (07398) 536055, 0044 7398 536055. Two review rounds went on this: the first
+# version missed the spaced form and would have refused two real SMS messages
+# from one tenant (caught by the live back-test), and the second accepted
+# `UTR 0123456789` as a phone because it only counted digits after the 0.
+DUPE_PHONE_CANDIDATE_RE = re.compile(r"\+?\d[\d ()\-.]{7,20}\d")
+
+# WHAT A WORD LIST CANNOT DO. "account 01406 536055" is digit-for-digit a
+# valid UK landline (01406 is a real area code), so no shape test separates
+# it from "call 01406 536055". The first attempt read the word in FRONT of
+# the number and refused a list of reference labels; review found it both too
+# broad and too narrow in one pass — `mobile no 07398 536055` was denied
+# (losing a real SMS thread, because "no" was on the list) while `a/c 01406
+# 536055` sailed through (because the list had no entry for it). A list of
+# labels will always be both.
+#
+# So the test is on the MATTER, not on the number: the exemption is for a
+# message thread, and a message thread says so. Both names must be about a
+# message or a call AND carry the same number. A pest-control card and a
+# meter reading are not about a call, whatever reference they quote, and the
+# cost of being wrong here is one-sided — a denied exemption makes a second
+# card Kevin can merge, a wrong one rewrites a card he has already approved.
+# Only words that can mean nothing else. Review found the first version
+# firing on `missed` (a missed instalment, appointment, inspection), `ring`
+# (a ring main circuit), `mobile` (a mobile home pitch) and `call` (a
+# call-out charge), each of which granted the thread exemption to two
+# unrelated matters quoting one phone-shaped reference. A phone thread
+# written with none of these words simply loses its exemption and makes a
+# second card, which is the cheap direction.
+DUPE_MESSAGE_WORDS = {
+    "sms", "text", "texts", "texted", "texting", "message", "messages",
+    "messaged", "voicemail", "answerphone", "caller", "phoned", "telephone",
+    "whatsapp", "imessage",
+}
+
+# Words that LABEL a reference rather than name a matter. A UTR rides on
+# every HMRC task name, so counting it as a subject word let an HMRC filing
+# fold into the approved compliance-check response on `hmrc` + `utr` at
+# exactly the bar (review, round 5). Same family as the address words and
+# the postcode halves: a token that appears on everything cannot identify
+# anything. Used only by the word bar BELOW — never to decide what is a
+# phone number, which is the mistake above.
+DUPE_REFERENCE_LABELS = {
+    "account", "accounts", "acct", "acc", "invoice", "inv", "ref", "reference",
+    "utr", "case", "claim", "policy", "permit", "licence", "license",
+    "number", "no", "nr", "num", "meter", "mpan", "mprn", "uprn", "nino",
+    "statement", "docket", "folio", "contract", "agreement", "serial",
+}
+
+
+def _uk_phone_digits(text):
+    """The ten subscriber digits of `text` when it is written as a UK phone
+    number, else "".
+
+    Three tests separate a phone number from a reference: it carries a trunk
+    prefix (0, 44, 0044, or 44 then "(0)"); what follows is exactly ten more
+    digits; and the first of those is one a UK number can start with. `UTR
+    0123456789` fails the second (nine digits after the 0), `UTR 1234567890`
+    the first, and a reference starting 04, 05 or 06 the third.
+    """
+    d = re.sub(r"[^0-9]", "", str(text or ""))
+    prefixed = False
+    if d.startswith("0044"):
+        d, prefixed = d[4:], True
+    elif d.startswith("44"):
+        d, prefixed = d[2:], True
+    if d.startswith("0"):
+        d, prefixed = d[1:], True        # the trunk 0, or the "(0)" after +44
+    if not prefixed or len(d) != 10 or d[0] not in "123789":
+        return ""
+    return d
+
+
+def _phone_numbers(name):
+    """{the ten subscriber digits: the strong ids that number produces} for
+    every UK phone number in `name`.
+
+    Keyed on all TEN digits, not on the nine `dupe_signals` compares, so a
+    mobile and a landline that agree on their last nine (07398 536055 and
+    01398 536055) stay two numbers (review, round 5).
+
+    Grouped BY NUMBER, not flattened, because the pieces are what the strong
+    set actually receives: `dupe_signals` reads "07398 536055" as two
+    reference numbers rather than one phone number, so every digit run of
+    four or more digits is listed under its number — the same floor
+    `dupe_signals` uses, so a run of three ("07398 536 055") contributes no
+    id of its own. Flattening across numbers let two DIFFERENT mobiles that
+    share one digit group read as one thread.
+    """
+    out = {}
+    # Space-like characters and the dashes first, from the list this file
+    # already spells out: a number copied out of a PDF or a signature block
+    # carries a non-breaking space or an en dash, and the candidate pattern
+    # would not see it (review, round 4).
+    text = re.sub(DUPE_SPACES, " ", str(name or ""))
+    text = re.sub(r"[\u2012-\u2015\u2212]", "-", text)
+    for m in DUPE_PHONE_CANDIDATE_RE.finditer(text):
+        groups = re.findall(r"\d+", m.group(0))
+        for i in range(len(groups)):
+            # The candidate is greedy and runs on through any digits that
+            # follow the number ("+447700900747 - 1406 Oldham Road" reads as
+            # one 16-digit run), so each contiguous span of digit groups is
+            # tried, longest first, and the longest span that IS a phone
+            # number wins.
+            for j in range(len(groups), i, -1):
+                digits = _uk_phone_digits("".join(groups[i:j]))
+                if not digits:
+                    continue
+                ids = out.setdefault(digits, {"tel:" + digits[-9:]})
+                ids.update("num:" + g for g in groups[i:j] if len(g) >= 4)
+                break
+    return out
+
+
+# A REFERENCE'S OWN PREFIX IS PART OF THE REFERENCE, not a subject word.
+# "HMRC CFS-2427425 - provide bank statements" and "HMRC CFS-2427425
+# response - rental income schedule" are two obligations under the live
+# compliance check, and they cleared the word bar on `hmrc` (the
+# counterparty) and `cfs` (the case reference's prefix), at exactly the
+# ratio. Read structurally rather than from a list, because a list can never
+# hold the prefix of a case nobody has opened yet: a short alphabetic token
+# joined to three or more digits, directly or by a hyphen or slash, is the
+# head of a reference. Two digits are not enough — `UC47` and `v12` are
+# names of things, not references.
+DUPE_REFERENCE_PREFIX_RE = re.compile(r"\b([a-z]{2,6})[-/]?\d{3,}\b", re.I)
+
+
+def _reference_prefixes(name):
+    """The alphabetic head of every reference in `name`: "CFS-2427425" -> cfs."""
+    return {m.group(1).lower() for m in DUPE_REFERENCE_PREFIX_RE.finditer(str(name or ""))}
+
+
+def _about_a_message(name):
+    """True when this task name is about a message or a call."""
+    words = re.sub(r"[^a-z0-9]+", " ", str(name or "").lower()).split()
+    return any(w in DUPE_MESSAGE_WORDS for w in words)
+
+
+def _phone_shaped_ids(name):
+    """Every strong id in `name` that comes from a UK phone number."""
+    out = set()
+    for ids in _phone_numbers(name).values():
+        out |= ids
+    return out
+
+
+# A shared word is [a-z0-9]+ with at least one letter: `dupe_signals` cleans
+# the name down to those characters and drops every all-digit token. So
+# anything that is neither a word nor a `num:`/`tel:` id — a bare number
+# among them — is evidence this code cannot read, and unreadable evidence
+# refuses the fold rather than allowing it. Every earlier draft of this guard
+# failed open, which is the direction that cost the lender request.
+DUPE_SHARED_WORD_RE = re.compile(r"^(?=[a-z0-9]*[a-z])[a-z0-9]+$")
+
+
+def fold_on_a_number_only(name_a, name_b, shared):
+    """True when the only thing these two task names agree on is a number and
+    their words do not agree, so the fold must not go ahead.
+
+    `shared` is the verdict's own evidence: `num:`/`tel:` ids from the strong
+    pass, or plain words from the word pass. A word-pass match has already
+    cleared the bar below, so it is passed through. Evidence in any other
+    shape REFUSES the fold: every earlier draft of this guard failed open,
+    which is the direction that cost the lender request.
+    """
+    ids = [str(s) for s in (shared or [])]
+    if not ids:
+        return True
+    if not all(i.startswith(("num:", "tel:")) for i in ids):
+        return not all(DUPE_SHARED_WORD_RE.match(i) for i in ids)
+    # ONE MESSAGE THREAD: both names about a message or a call, and the same
+    # number in both. Three rounds of review went into this test. Unioning
+    # the two names' ids let a reference equal to a run inside somebody's
+    # mobile buy a free fold ("Vermguard invoice 536055" into "SMS reply from
+    # 07398 536055"); intersecting the flattened ids let two DIFFERENT
+    # mobiles sharing a digit group read as one thread ("07398 536055" and
+    # "07398 112233"), which the queue has its own test against; and judging
+    # the number by the label in front of it was both too broad and too
+    # narrow at once.
+    if _about_a_message(name_a) and _about_a_message(name_b):
+        a_nums, b_nums = _phone_numbers(name_a), _phone_numbers(name_b)
+        thread = set()
+        for digits in set(a_nums) & set(b_nums):
+            thread |= a_nums[digits] | b_nums[digits]
+        if any(i in thread for i in ids):
+            return False                  # one thread, in both names
+    _, _, words_a, places_a = dupe_signals(name_a)
+    _, _, words_b, places_b = dupe_signals(name_b)
+    if not words_a or not words_b:
+        return True
+    agreed = words_a & words_b
+    noise = (places_a | places_b | DUPE_REFERENCE_LABELS
+             | _postcode_tokens(name_a) | _postcode_tokens(name_b)
+             | _reference_prefixes(name_a) | _reference_prefixes(name_b))
+    # A single letter is never a subject: "a/c 01406" leaves `a` and `c`
+    # behind as words, and two of those would clear the bar on their own.
+    telling = [w for w in agreed if w not in noise and len(w) > 1]
+    ratio = len(agreed) / min(len(words_a), len(words_b))
+    return len(telling) < DUPE_MIN_SHARED or ratio < DUPE_MIN_RATIO
+
+
 # ─── A DIFFERENT TENANT OR A DIFFERENT HOUSE IS A DIFFERENT MATTER ───
 #
 # 28 Sep 2026. Creating "Check DWP decision on <tenant A>'s UC47 (55 Elmdon
@@ -1287,7 +1562,11 @@ def decide(incoming_fields, open_rows):
     incoming_name = incoming_fields.get(F["name"], "")
     incoming_lane = fold_lane(incoming_name, incoming_fields.get(F["team"]),
                               bool(incoming_fields.get(F["maintenance"])))
-    matches, why_matched = [], {}
+    # WHEN THE GATE IS UNSURE IT CREATES, AND SAYS SO (Kevin, 14 Oct 2026).
+    # Every fold a guard refuses is recorded here and reported on the create,
+    # because the failure that cost him the lender request was a refusal the
+    # gate never mentioned either way: success-looking JSON, exit 0, work lost.
+    matches, why_matched, not_folded = [], {}, []
     for row in open_rows:
         f = row.get("fields", {})
         if _sel_name(f.get(F["status"])) in CLOSED_STATUSES:
@@ -1316,6 +1595,8 @@ def decide(incoming_fields, open_rows):
         # to the page's Duplicates lane, where Kevin sees both and decides.
         if dupe_task_key(other) == key:
             if fold_on_address_only(incoming_name, other, key.split("|")[-1].split()):
+                not_folded.append("%s: same subject key, but the names agree on "
+                                  "nothing but the address" % row["id"])
                 continue
             why_matched[row["id"]] = "same subject"
             matches.append(row)
@@ -1323,12 +1604,37 @@ def decide(incoming_fields, open_rows):
         verdict = dupe_verdict(incoming_name, other, mode="fold")
         if verdict["match"]:
             if fold_on_address_only(incoming_name, other, verdict["shared"]):
+                not_folded.append("%s: the names agree on nothing but the address"
+                                  % row["id"])
+                continue
+            # A NUMBER ALONE IS NEVER A SUBJECT (14 Oct 2026): the house
+            # number 1406, read as a reference, folded a lender request into
+            # an approved pest-control card at the same property.
+            if fold_on_a_number_only(incoming_name, other, verdict["shared"]):
+                not_folded.append("%s: the names share a number and no subject"
+                                  % row["id"])
                 continue
             why_matched[row["id"]] = verdict["why"]
             matches.append(row)
 
+    # WHEN THE GATE IS UNSURE IT SAYS SO, AND NAMES THE RECORD (14 Oct 2026).
+    # No promise about the Duplicates lane: it is filtered to agent-owned
+    # tasks, so a card held by a person appears in no lane and a note that
+    # said otherwise would be wrong.
+    unsure = ""
+    if not_folded:
+        unsure = ("%d open task(s) looked like a duplicate and the gate was not "
+                  "sure, so nothing was folded into them (%s)."
+                  % (len(not_folded), "; ".join(sorted(set(not_folded)))))
+
     if not matches:
-        return {"action": "create", "key": key}
+        out = {"action": "create", "key": key}
+        if unsure:
+            out["note"] = ("created rather than folded: " + unsure
+                           + " A fold rewrites a task Kevin may already have "
+                             "approved, so an unsure gate creates and leaves both "
+                             "cards open for him to merge.")
+        return out
 
     matches.sort(key=lambda r: r.get("createdTime", ""))
     for row in matches:
@@ -1341,13 +1647,19 @@ def decide(incoming_fields, open_rows):
                 # WHY it folded, in Kevin's words rather than a key. A fold he
                 # cannot audit is a fold he has to take on trust.
                 "matchedWhy": why_matched.get(row["id"], "same subject"),
+                # A refusal elsewhere on the board rides along: the caller is
+                # told about every card the gate looked at and left alone. The
+                # wording is the fold path's own — this item was NOT created.
+                **({"note": "folded into %s; separately, %s" % (row["id"], unsure)}
+                   if unsure else {}),
             }
     return {
         "action": "create",
         "key": key,
         "note": ("subject matches %d open task(s) from a different sender; "
-                 "not folding across counterparties. The page's Duplicates "
-                 "lane flags the pair for Kevin." % len(matches)),
+                 "not folding across counterparties. Both cards stay open for "
+                 "Kevin." % len(matches))
+                + ((" Separately, " + unsure) if unsure else ""),
     }
 
 
@@ -1648,9 +1960,21 @@ def cmd_create(fields, force=False, dry_run=False, parent=None):
                          "creating a sibling (one subject = one open task). "
                          "New item: " + str(fields.get(F["name"], "")))
             write_track_record(task_id, fields)
-        print(json.dumps({"action": "updated", "taskId": task_id,
-                          "matchedName": verdict.get("matchedName", ""),
-                          "key": verdict.get("key", ""), "dryRun": dry_run}))
+        # EVERY FOLD STATES ITS REASON AT THE CALL SITE (14 Oct 2026). The
+        # incident's output named the task it folded into and nothing about
+        # WHY, so "same reference 1406" — a house number — was invisible to
+        # the caller and to the run log.
+        folded_out = {"action": "updated", "taskId": task_id,
+                      "matchedName": verdict.get("matchedName", ""),
+                      "matchedWhy": verdict.get("matchedWhy", ""),
+                      "key": verdict.get("key", ""), "dryRun": dry_run}
+        if verdict.get("note"):
+            folded_out["note"] = verdict["note"]
+        print(json.dumps(folded_out))
+        print("FOLDED into %s (%s): %s" % (task_id, verdict.get("matchedWhy", ""),
+                                           verdict.get("matchedName", "")), file=sys.stderr)
+        if verdict.get("note"):
+            print("GATE NOTE: " + verdict["note"], file=sys.stderr)
         return 0
 
     if not dry_run:
@@ -1705,6 +2029,7 @@ def cmd_create(fields, force=False, dry_run=False, parent=None):
         out["statusCorrected"] = fixed
     if verdict.get("note"):
         out["note"] = verdict["note"]
+        print("GATE NOTE: " + verdict["note"], file=sys.stderr)
     print(json.dumps(out))
     if missing:
         # The task EXISTS — the caller must not create it again. Exit 4 says
@@ -1864,6 +2189,139 @@ def selftest():
           decide({F["name"]: "Weekly cost review", F["tenancies"]: ["recA"]}, [linked])["action"] == "create")
     check("the same linked tenancy folds",
           decide({F["name"]: "Weekly cost review", F["tenancies"]: ["recB"]}, [linked])["action"] == "update")
+    # A HOUSE NUMBER IS NOT A REFERENCE NUMBER (14 Oct 2026). 1406, read as a
+    # reference, folded a lender request into an approved pest-control card at
+    # the same property. The number says WHERE, so the fold must stand on the
+    # words, at the bar the word pass already sets — never a softer one, or a
+    # house number would re-enable the fold finding 605 refuses.
+    pest = row("recP", "COMPLIANCE: Pest control quote chase - 1406 Oldham Road",
+               status="Approval")
+    d = decide({F["name"]: "Mortgage lender - request interest certificate "
+                           "2019-20 for 1406 Oldham Road (account 90000111)"}, [pest])
+    check("a shared house number alone never folds", d["action"] == "create")
+    check("an unsure gate says it created, and names the card",
+          "created rather than folded" in d.get("note", "") and "recP" in d.get("note", ""))
+    check("a shared number never lowers the bar (finding 605)",
+          decide({F["name"]: "COMPLIANCE: Send GSC quote requests - Manchester Gas "
+                             "Engineers - 1406 Oldham Road M40 1EZ"},
+                 [row("recG", "COMPLIANCE: Manchester Council HMO licence fee overdue - "
+                              "1406 Oldham Road M40 1EZ")])["action"] == "create")
+    # The draft that fired only on an address the house reader RECOGNISED
+    # failed open on every one of these spellings. This guard asks nothing
+    # about addresses, so none of them can switch it off.
+    check("the address spelling cannot switch the guard off",
+          all(decide({F["name"]: "Mortgage lender - request interest certificate "
+                                 "2019-20 for %s (account 90000111)" % addr},
+                     [row("recS", "COMPLIANCE: Pest control quote chase - %s" % addr,
+                          status="Approval")])["action"] == "create"
+              for addr in ("1406 Oldham Road", "1406, Oldham Road, Manchester",
+                           "1406 Deansgate", "1406 New Road", "1406 The Broadway",
+                           "1406-1408 Oldham Road", "Flat 1406 Duckworth Court")))
+    # NOT in that list: a street name of three or more words. "1406 Old Great
+    # Western Road" folds, because `_place_tokens` sets aside only the street
+    # type and one word either side, so `old` and `great` count as subject
+    # words and the pair clears the bar on them. Measured both ways: it folds
+    # with the number on `num:1406` and without it on "both about great, old",
+    # so it is a limitation of the place reader, not of this guard, and
+    # fixing it means changing a function the JS mirror shares.
+    # A PHONE NUMBER IS ONE THREAD, IN BOTH NAMES. The exemption is the only
+    # way past the bar above, so it is spent only on a number whose shape is
+    # a UK phone number, and only when both names carry it.
+    check("a mobile written six ways is still one thread",
+          all(decide({F["name"]: "INBOUND: SMS reply from %s" % n},
+                     [row("recM", "INBOUND: SMS from %s - unknown content" % n)]
+                     )["action"] == "update"
+              for n in ("07398 536055", "07398-536055", "07398536055",
+                        "+44 (0)7398 536055", "(07398) 536055", "0044 7398 536055")))
+    # A 10-digit reference beginning with 0 looks like a phone number until
+    # you count the subscriber digits. (Not claimed here: two HMRC tasks that
+    # share `hmrc` and `utr` fold on the WORD pass, at exactly the bar, with
+    # or without the reference. That is the word lists' business, not this
+    # guard's.)
+    check("a leading-zero reference is not a phone number",
+          decide({F["name"]: "INBOUND: Vectis Water account 0123456789 - "
+                             "meter reading needed"},
+                 [row("recR", "COMPLIANCE: Pest control quote chase - 1406 Oldham "
+                              "Road, acct 0123456789", status="Approval")]
+                 )["action"] == "create")
+    check("a reference matching a run inside someone's mobile is not that thread",
+          decide({F["name"]: "COMPLIANCE: Vermguard invoice 536055 overdue"},
+                 [row("recN", "INBOUND: SMS reply from 07398 536055")])["action"] == "create")
+    check("two different mobiles sharing a digit group are two threads",
+          decide({F["name"]: "INBOUND: SMS reply from 07398 536055"},
+                 [row("recQ", "INBOUND: SMS from 07398 112233 - unknown content")]
+                 )["action"] == "create"
+          and decide({F["name"]: "INBOUND: SMS reply from 07398 536055"},
+                     [row("recQ", "INBOUND: SMS from 07700 536055 - unknown content")]
+                     )["action"] == "create")
+    # THE EXEMPTION IS FOR A MESSAGE THREAD, so the test is on the matter.
+    # "account 01406 536055" is digit-for-digit a valid UK landline; what
+    # separates it from a phone number is that neither task is about a call.
+    # Spelt three ways, because a list of reference labels was both too broad
+    # and too narrow at once (review, round 5).
+    check("a reference in a task about nothing phoney is never a phone number",
+          all(decide({F["name"]: "INBOUND: Vectis Water %s 01406 536055 - meter reading" % lbl},
+                     [row("recV", "COMPLIANCE: Pest control quote chase - %s 01406 536055" % lbl,
+                          status="Approval")])["action"] == "create"
+              for lbl in ("account", "a/c", "customer")))
+    # A message thread keeps its fold however the number is written, as long
+    # as both names say they are about a message. A task that quotes a mobile
+    # without saying so ("tenant reports boiler leak - mobile no 07398
+    # 536055") now loses the exemption and makes a second card: the cheap
+    # direction, and the price of not letting `missed`, `ring`, `mobile` or
+    # `call` speak for a message (review, round 6).
+    check("a message thread keeps its fold even when the number is labelled",
+          decide({F["name"]: "INBOUND: SMS from tenant - mobile no 07398 536055"},
+                 [row("recB", "INBOUND: text from mobile no 07398 536055 - boiler leak")]
+                 )["action"] == "update")
+    check("a word that only sometimes means a message never speaks for one",
+          all(decide({F["name"]: "INBOUND: Vectis Water a/c 01406 536055 - %s" % na},
+                     [row("recMi", "COMPLIANCE: Pest control quote chase - %s - "
+                                   "a/c 01406 536055" % nb, status="Approval")]
+                      )["action"] == "create"
+              for na, nb in (("missed meter reading", "missed appointment"),
+                             ("missed instalment", "missed inspection"),
+                             ("ring main circuit", "call-out charge disputed"))))
+    check("a reference prefix is part of the reference, not the subject",
+          decide({F["name"]: "INBOUND: HMRC CFS-2427425 - provide bank statements by 16 Oct"},
+                 [row("recC", "COMPLIANCE: HMRC CFS-2427425 response - rental income "
+                              "schedule", status="Approval")])["action"] == "create")
+    check("a mobile and a landline agreeing on nine digits are two numbers",
+          decide({F["name"]: "INBOUND: SMS reply from 07398 536055"},
+                 [row("recL", "INBOUND: voicemail from 01398 536055 - unknown content")]
+                 )["action"] == "create")
+    # A reference LABEL rides on every task of its kind, so it is not a
+    # subject word: an HMRC filing folded into the APPROVED compliance-check
+    # response on `hmrc` + `utr`, at exactly the bar.
+    check("a reference label is not a subject word",
+          decide({F["name"]: "INBOUND: HMRC self assessment filing due - UTR 0123456789"},
+                 [row("recH", "COMPLIANCE: HMRC check CFS-2427425 response - UTR 0123456789",
+                      status="Approval")])["action"] == "create")
+    check("a separator the text uses instead of a space keeps one thread",
+          all(decide({F["name"]: "INBOUND: SMS reply from 07398%s536055" % sep},
+                     [row("recW", "INBOUND: SMS from 07398%s536055 - unknown" % sep)]
+                     )["action"] == "update"
+              for sep in (" ", "\u00a0", "\u2013", "\u2009", ".", "-")))
+    check("a shared reference still folds when the words agree",
+          decide({F["name"]: "INBOUND: chase Vectis Water on account 44556677"},
+                 [row("recI", "INBOUND: Vectis Water account 44556677 - final demand")]
+                 )["action"] == "update")
+    check("a phone number is one thread and still folds",
+          decide({F["name"]: "INBOUND: SMS reply from +447700900747 - 1406 Oldham Road"},
+                 [row("recT", "INBOUND: SMS from 447700900747 - 1406 Oldham Road")]
+                 )["action"] == "update")
+    # `dupe_signals` calls any 9-to-12 digit run a phone number and compares
+    # the last NINE digits, so two DIFFERENT 10-digit account numbers read as
+    # one thread. The exemption is spent only on a number written as a phone.
+    check("two different account numbers are not one thread",
+          decide({F["name"]: "INBOUND: Vectis Water account 1234567890 - arrears"},
+                 [row("recU", "INBOUND: Marlstone Credit account 9234567890 - statement",
+                      status="Approval")])["action"] == "create")
+    check("the same matter at the same house still folds when the words agree",
+          decide({F["name"]: "INBOUND: Manchester Council HMO licence fee unpaid - "
+                             "1406 Oldham Road"},
+                 [row("recH", "COMPLIANCE: Manchester Council HMO licence fee overdue - "
+                              "1406 Oldham Road")])["action"] == "update")
     oldest = [row("recB", "Chase Acme invoice #9", sender="x@acme.com",
                   created="2026-08-20T00:00:00.000Z"),
               row("recA", "Chase Acme invoice #8", sender="x@acme.com",

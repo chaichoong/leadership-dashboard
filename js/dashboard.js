@@ -1587,6 +1587,12 @@
         TOOL: 'waiting on a code fix', KEVIN: 'waiting on a step only you can do',
         'SIGN-IN': 'waiting on your sign-in', SITE: 'waiting on a site to be added',
     };
+    // The Agent Work card's split (Kevin, 14 Oct 2026; scripts/loop-health.py agent_work).
+    // The four rows add up to every open agent task.
+    const AI_WORK_SPLIT = [
+        ['live', 'Live'], ['approval', 'Waiting for your approval'],
+        ['waitingReply', 'Waiting on a reply'], ['scheduled', 'Scheduled for later'],
+    ];
     let _aiTeamState = null;
 
     function renderAiTeamCard(id, card) {
@@ -1660,18 +1666,60 @@
                 }, { aiBlockedCard: aiTeamCards(null, blockers).aiBlockedCard });
             }
             const w = {}, d = {}, r = {};
-            ['open', 'notMoving', 'created7d', 'done7d'].forEach(k => { w[k] = aiNum(p.work[k]); });
+            ['open', 'notMoving', 'created7d', 'done7d', 'held', 'other', 'replyOverdue', 'replyWindowDays']
+                .concat(AI_WORK_SPLIT.map(s => s[0])).forEach(k => { w[k] = aiNum(p.work[k]); });
             ['open', 'filed7d', 'fixed7d'].forEach(k => { d[k] = aiNum(p.defects[k]); });
             ['days', 'fixes', 'fixOfFix', 'baselinePct'].forEach(k => { r[k] = aiNum(p.rework[k]); });
             r.pct = p.rework.pct == null ? null : aiNum(p.rework.pct);
             const net = (Number(w.created7d) || 0) - (Number(w.done7d) || 0);
-            cards.aiWorkCard = aiTeamStale({
-                label: 'Agent Work', value: `${w.open} open`,
-                sub: `${w.notMoving} not moving · 7 days: ${w.created7d} in, ${w.done7d} done`,
-                cls: net > 0 ? 'text-amber' : 'text-green',
-                detail: `<div class="od-breakdown-row"><span>${net > 0 ? 'Piling up this week' : 'Cleared beyond new work'}</span><span>${Math.abs(net)}</span></div>
-                         <div style="color:var(--text-muted);font-size:var(--fs-xs);margin-top:6px">Tasks owned by an AI agent. Not moving is the same list as the Estate tab on the AI Agents page.</div>${updated(health)}`,
-            }, health);
+            const netRow = `<div class="od-breakdown-row"><span>${net > 0 ? 'Piling up this week' : 'Cleared beyond new work'}</span><span>${Math.abs(net)}</span></div>`;
+            const note = (text) => `<div style="color:var(--text-muted);font-size:var(--fs-xs);margin-top:6px">${text}</div>`;
+            // The split arrived on 14 Oct 2026. A row written before it (or one whose split the Mac
+            // withdrew, splitCheck) has no live count: show the open count as before, never a zero.
+            // aiNum(null) is 0, so the keys are tested before they are read.
+            const split = AI_WORK_SPLIT.every(([k]) => p.work[k] != null && typeof w[k] === 'number');
+            const has = (k) => p.work[k] != null && typeof w[k] === 'number';
+            const text = (k) => (typeof p.work[k] === 'string' && p.work[k]) ? escHtml(p.work[k]) : '';
+            // A stuck count that could not leave out the held tasks says so on either face of the card
+            // (review of PR #782): it is the larger number, and an unlabelled one reads as calm.
+            const heldUnchecked = text('heldCheck');
+            const heldNote = heldUnchecked ? `Tasks held under a lead task could not be left out of the stuck count this time: ${heldUnchecked}.` : '';
+            const stuckSub = (word) => `${w.notMoving} ${word}${heldUnchecked ? ' (held tasks not checked)' : ''} · 7 days: ${w.created7d} in, ${w.done7d} done`;
+            const row = (label, n, style) => `<div class="od-breakdown-row"${style ? ` style="${style}"` : ''}><span>${label}</span><span>${n}</span></div>`;
+            if (split) {
+                // A task on no board is never folded into live: its own row, and the card goes amber.
+                const other = has('other') ? w.other : 0;
+                const windowDays = has('replyWindowDays') ? w.replyWindowDays : null;
+                cards.aiWorkCard = aiTeamStale({
+                    label: 'Agent Work', value: `${w.live} live`,
+                    sub: stuckSub('stuck'),
+                    cls: net > 0 || heldUnchecked || other > 0 ? 'text-amber' : 'text-green',
+                    detail: AI_WORK_SPLIT.map(([k, label]) => row(label, w[k])).join('')
+                        + (other > 0 ? row('On no board (nothing reads it)', other) : '')
+                        + row('All open', w.open)
+                        + row('Stuck (not moving)', w.notMoving, 'margin-top:6px')
+                        + netRow
+                        + note('Tasks owned by an AI agent. Live: due now and not yet carried out. Waiting on a reply: your approved action is done and the task stays open for the answer'
+                            + (windowDays != null ? `; after ${windowDays} days it counts as live and stuck. ` : '. ')
+                            + 'Scheduled for later includes approvals you put off to a later date. '
+                            + 'Stuck is counted in the rows above. It counts agent tasks only, so it can be shorter than the Estate tab\'s list'
+                            + (heldUnchecked ? `. ${heldNote}`
+                                : `, and leaves out tasks held under a lead task${has('held') ? ` (${w.held} now)` : ''}.`)
+                            + (has('replyOverdue') && w.replyOverdue > 0 ? ` ${w.replyOverdue} of the stuck have waited on a reply too long.` : '')
+                            + (text('waitCheck') ? ` Waiting on a reply was read from the task notes only: ${text('waitCheck')}.` : ''))
+                        + updated(health),
+                }, health);
+            } else {
+                // A split the Mac withdrew (splitCheck: agent-dispatch.py would not load, or the carry-out
+                // stamp changed) is a fault, so the card goes amber whatever the week did (review of PR #782).
+                const why = text('splitCheck') ? `Live work could not be split out: ${text('splitCheck')}. ` : '';
+                cards.aiWorkCard = aiTeamStale({
+                    label: 'Agent Work', value: `${w.open} open`,
+                    sub: stuckSub('not moving'),
+                    cls: net > 0 || heldUnchecked || why ? 'text-amber' : 'text-green',
+                    detail: netRow + note(`${why}Tasks owned by an AI agent.${heldNote ? ` ${heldNote}` : ''}`) + updated(health),
+                }, health);
+            }
             cards.aiDefectsCard = aiTeamStale({
                 label: 'Defects', value: `${d.open} open`,
                 sub: `7 days: ${d.filed7d} filed, ${d.fixed7d} fixed`,
@@ -1949,6 +1997,32 @@
     let _reCompliancePromise = null;
     let _reComplianceLoading = false;
     const RE_COMPLIANCE_TTL_MS = 60000;
+    let _debtShare = null;          // { at, pct } or { error }: the Debt pot's Allocation %
+    let _debtSharePromise = null;
+    let _debtShareLoading = false;
+
+    // The Debt pot's share of personal net cash flow (Income Buckets), for the credit card
+    // payoff time under the forecast. Read once per load like the compliance book; a failed
+    // read is recorded, never swallowed, so the card says why it gives no payoff time.
+    function loadDebtShare() {
+        const fresh = _debtShare && !_debtShare.error && Date.now() - _debtShare.at < RE_COMPLIANCE_TTL_MS;
+        if (_debtSharePromise && (fresh || _debtShareLoading)) return _debtSharePromise;
+        _debtShareLoading = true;
+        _debtSharePromise = (async () => {
+            try {
+                const rows = await airtableFetch(TABLES.incomeBuckets, { 'fields[]': [BUCKET.name, BUCKET.pct] });
+                const debt = rows.find(r => String(getField(r, BUCKET.name) || '').trim().toLowerCase() === 'debt');
+                const pct = debt ? getField(debt, BUCKET.pct) : null;
+                _debtShare = { at: Date.now(), pct: pct === null || pct === undefined || pct === '' ? null : Number(pct) };
+            } catch (e) {
+                console.warn('[loadDebtShare] failed:', e);
+                _debtShare = { error: true };
+            }
+            _debtShareLoading = false;
+            return _debtShare;
+        })();
+        return _debtSharePromise;
+    }
 
     const reLinkIds = v => (Array.isArray(v) ? v : []).map(x => (x && typeof x === 'object') ? x.id : x).filter(Boolean);
     const reSelName = v => (v && typeof v === 'object' && !Array.isArray(v)) ? (v.name || '') : String(Array.isArray(v) ? (v[0] || '') : (v || ''));
@@ -2163,26 +2237,31 @@
         const gbpTarget = t => t ? { committed: reGbp(t.committed), stretch: t.stretch ? reGbp(t.stretch) : '' } : null;
         const pctOf = (v, t) => (t && t.committed && typeof v === 'number') ? (v / t.committed) * 100 : null;
         const { plan, cash, units, rent, personal, compliance } = q;
-        const roll = cash.rolling || {}, last = cash.lastMonth || {}, base = cash.baseline || {};
+        const roll = cash.rolling || {}, last = cash.lastMonth || {}, base = cash.baseline || {}, checks = cash.checks || roll;
         const lastName = reMonthName(cash.lastMonthKey);
-        const cashValue = key => cash.rolling ? reGbp(roll[key]) : '—';
-        const cashSub = key => cash.rolling
-            ? `Rolling 31 days to ${escHtml(reDay(roll.end))} | ${escHtml(lastName)} ${reGbp(last[key])} | ${escHtml(RE_Q4.baselineLabel)} ${reGbp(base[key])}`
+        // The cash cards headline the LAST FULL MONTH (Kevin, 14 Oct 2026). A rolling 31 days
+        // takes in two of any monthly payment that lands at both ends: on 14 Oct 2026 two
+        // mortgages paid on 14 Sep and again on 12 and 13 Oct cut the cushion by £1,411, and
+        // payment dates moved the figure by up to £4,000 a day. The rolling figure stays beside it.
+        const cashValue = key => cash.lastMonth ? reGbp(last[key]) : '—';
+        const cashSub = key => cash.lastMonth
+            ? `${escHtml(lastName)}, the last full month | rolling 31 days to ${escHtml(reDay(roll.end))} ${reGbp(roll[key])} | ${escHtml(RE_Q4.baselineLabel)} ${reGbp(base[key])}`
             : '';
         const budgetRows = reRow('Wages budget', reGbp(WAGES_TARGET_GBP)) + reRow('Maintenance budget', reGbp(MAINT_TARGET_GBP))
             + reRow('Utilities budget', reGbp(UTILITIES_TARGET_GBP)) + reRow('Compliance budget', reGbp(COMPLIANCE_TARGET_GBP))
             + reRow('Non-payment allowance', reGbp(CFV_TARGET_GBP));
-        const cashRows = cash.rolling ? (
-            reRow(`Rent received (${roll.rentCount} payments)`, fmt(roll.rent))
-            + reRow(`Property fixed costs paid (${roll.fixedCount} payments)`, '− ' + fmt(roll.fixed))
-            + reRow('Property cushion (cash)', fmt(roll.cushion))
-            + Object.keys(roll.variableLines).sort().map(k => reRow(`${k} paid`, '− ' + fmt(roll.variableLines[k]))).join('')
-            + reRow('Income from property (cash)', fmt(roll.income))
-            + reRow('Window', `${reDay(roll.start)} to ${reDay(roll.end)}`)
+        const cashRows = cash.lastMonth ? (
+            reRow(`Rent received (${last.rentCount} payments)`, fmt(last.rent))
+            + reRow(`Property fixed costs paid (${last.fixedCount} payments)`, '− ' + fmt(last.fixed))
+            + reRow('Property cushion (cash)', reSignedGbp(last.cushion))
+            + Object.keys(last.variableLines).sort().map(k => reRow(`${k} paid`, '− ' + fmt(last.variableLines[k]))).join('')
+            + reRow('Income from property (cash)', reSignedGbp(last.income))
+            + reRow('Window', `${reDay(last.start)} to ${reDay(last.end)}, the last full month`)
+            + reRow(`Rolling 31 days, ${reDay(roll.start)} to ${reDay(roll.end)}`, `cushion ${reSignedGbp(roll.cushion)}, income ${reSignedGbp(roll.income)}`)
             + reRow('Target', 'Same 31 Dec marker as the plan card. The gap between plan and cash is the leak.')
             + reRow('Newest bank transaction', reDay(cash.newestTransaction))
-            + roll.mismatches.map(m => reRow(`Check: ${reDay(m.date)} ${m.description} (cost record is ${m.costBusiness})`, fmt(m.amount), 'text-amber')).join('')
-            + roll.untagged.map(m => reRow(`Left out, not tagged to property: ${reDay(m.date)} ${m.description}`, fmt(m.amount), 'text-amber')).join('')
+            + checks.mismatches.map(m => reRow(`Check: ${reDay(m.date)} ${m.description} (cost record is ${m.costBusiness})`, fmt(m.amount), 'text-amber')).join('')
+            + checks.untagged.map(m => reRow(`Left out, not tagged to property: ${reDay(m.date)} ${m.description}`, fmt(m.amount), 'text-amber')).join('')
         ) : '';
 
         const open = [...host.querySelectorAll('.kpi-card')].map(c => c.classList.contains('expanded'));
@@ -2196,7 +2275,7 @@
             }),
             reCard({
                 title: 'Income from property (cash)', result: cash,
-                value: cashValue('income'), target: gbpTarget(T.incomeCash), pct: pctOf(roll.income, T.incomeCash), sub: cashSub('income'), rows: cashRows,
+                value: cashValue('income'), target: gbpTarget(T.incomeCash), pct: pctOf(last.income, T.incomeCash), sub: cashSub('income'), rows: cashRows,
             }),
             reCard({
                 title: 'Property cushion (plan)', result: plan,
@@ -2209,7 +2288,7 @@
             }),
             reCard({
                 title: 'Property cushion (cash)', result: cash,
-                value: cashValue('cushion'), target: gbpTarget(T.cushionCash), pct: pctOf(roll.cushion, T.cushionCash), sub: cashSub('cushion'), rows: cashRows,
+                value: cashValue('cushion'), target: gbpTarget(T.cushionCash), pct: pctOf(last.cushion, T.cushionCash), sub: cashSub('cushion'), rows: cashRows,
             }),
             reCard({
                 title: 'Named units with a signed tenant in', result: units,
@@ -2645,9 +2724,8 @@
 
         // Variable cost reserve (sum of budgets)
         const variableCostReserve = RE_VARIABLE_BUDGET_GBP;
-        // Required operating cushion = clear profit target + variable cost budgets.
-        // The operating cushion must be big enough to absorb variable costs AND still leave the
-        // clear profit target behind — anything less means we're eating into the profit target.
+        // The cushion the £10,000 income floor needs = the floor + the variable budget. It is a
+        // FLOOR, not the Q4 target (RE_Q4.targets.cushionPlan, on the Q4 cards).
         const requiredOperatingCushion = CLEAR_PROFIT_TARGET + variableCostReserve;
 
         // Traffic light uses £ targets now (actual vs budget)
@@ -2666,9 +2744,12 @@
             </div>`;
         }
 
-        // Operating cushion progress towards target
-        const ocProgressPct = requiredOperatingCushion > 0 ? Math.min(operatingCushionHigh / requiredOperatingCushion * 100, 150).toFixed(1) : '0.0';
-        const ocOnTrack = operatingCushionHigh >= requiredOperatingCushion;
+        // Measured on the cushion from In Payment tenancies only (the Q4 rule, Kevin 1 Oct 2026):
+        // CFV Actioned rent is not being paid. Counting it read "120.7% of target, on track" on
+        // 14 Oct 2026 when the cushion was 101.8% of the floor.
+        const ocProgressPct = requiredOperatingCushion > 0 ? Math.min(operatingCushionLow / requiredOperatingCushion * 100, 150).toFixed(1) : '0.0';
+        const ocOnTrack = operatingCushionLow >= requiredOperatingCushion;
+        const ocGap = Math.abs(operatingCushionLow - requiredOperatingCushion);
 
         document.getElementById('operationalCards').innerHTML = `
             ${expandableCard('Rental Income (31d)', fmt(rentalInc30), 'Actual from transactions',
@@ -2700,9 +2781,9 @@
                 targetProgressBarGBP(cfvNum, CFV_TARGET_GBP)
             )}
             <div class="kpi-card clickable" onclick="toggleCard(this)">
-                <div class="kpi-card-label">Target Operating Cushion (plan) <span class="chevron">▸</span></div>
-                <div class="kpi-card-value"><span class="${ocOnTrack ? 'text-green' : 'text-amber'}">£${Math.floor(operatingCushionHigh).toLocaleString('en-GB')}</span><span style="color:var(--text-muted);font-size:20px;margin:0 4px">/</span><span style="color:var(--text-primary)">£${Math.floor(requiredOperatingCushion).toLocaleString('en-GB')}</span></div>
-                <div class="kpi-card-sub">${ocProgressPct}% of target | ${ocOnTrack ? `<span class="text-green">On track — ${fmt(CLEAR_PROFIT_TARGET)} clear profit</span>` : `<span class="text-red">Shortfall: ${fmt(requiredOperatingCushion - operatingCushionHigh)}</span>`}</div>
+                <div class="kpi-card-label">Cushion for the ${reGbp(CLEAR_PROFIT_TARGET)} income floor (plan) <span class="chevron">▸</span></div>
+                <div class="kpi-card-value"><span class="${ocOnTrack ? 'text-green' : 'text-amber'}">£${Math.floor(operatingCushionLow).toLocaleString('en-GB')}</span><span style="color:var(--text-muted);font-size:20px;margin:0 4px">/</span><span style="color:var(--text-primary)">£${Math.floor(requiredOperatingCushion).toLocaleString('en-GB')}</span></div>
+                <div class="kpi-card-sub">${ocProgressPct}% of the floor | ${ocOnTrack ? `<span class="text-green">${fmt(ocGap)} above it</span>` : `<span class="text-red">${fmt(ocGap)} below it, so your income from property is under ${reGbp(CLEAR_PROFIT_TARGET)}</span>`}<br>Paying tenants only. The Q4 target, ${reGbp(RE_Q4.targets.cushionPlan.committed)} by 31 Dec, is on the Property cushion (plan) card.</div>
                 <div class="progress-bar" style="position:relative">
                     <div class="progress-bar-fill ${ocOnTrack ? 'green' : 'amber'}" style="width:${Math.min(Number(ocProgressPct), 100)}%"></div>
                 </div>
@@ -2713,9 +2794,11 @@
                         <div class="od-breakdown-row"><span>Utilities budget</span><span>${fmt(UTILITIES_TARGET_GBP)}</span></div>
                         <div class="od-breakdown-row"><span>Compliance budget</span><span>${fmt(COMPLIANCE_TARGET_GBP)}</span></div>
                         <div class="od-breakdown-row"><span>Non-payment allowance</span><span>${fmt(CFV_TARGET_GBP)}</span></div>
-                        <div class="od-breakdown-row" style="border-top:1px solid var(--border-default);margin-top:4px;padding-top:4px"><span>Variable cost reserve</span><span style="font-weight:600">${fmt(variableCostReserve)}</span></div>
-                        <div class="od-breakdown-row"><span>Clear profit target</span><span style="font-weight:600">${fmt(CLEAR_PROFIT_TARGET)}</span></div>
-                        <div class="od-breakdown-row" style="border-top:1px solid var(--border-default);margin-top:4px;padding-top:4px;font-weight:600;color:var(--text-primary)"><span>Required operating cushion</span><span>${fmt(requiredOperatingCushion)}</span></div>
+                        <div class="od-breakdown-row" style="border-top:1px solid var(--border-default);margin-top:4px;padding-top:4px"><span>Variable budget</span><span style="font-weight:600">${fmt(variableCostReserve)}</span></div>
+                        <div class="od-breakdown-row"><span>Income floor</span><span style="font-weight:600">${fmt(CLEAR_PROFIT_TARGET)}</span></div>
+                        <div class="od-breakdown-row" style="border-top:1px solid var(--border-default);margin-top:4px;padding-top:4px;font-weight:600;color:var(--text-primary)"><span>Cushion the floor needs</span><span>${fmt(requiredOperatingCushion)}</span></div>
+                        <div class="od-breakdown-row"><span>Cushion now, In Payment tenancies</span><span>${fmt(operatingCushionLow)}</span></div>
+                        <div class="od-breakdown-row"><span>If the CFV Actioned tenancies pay too</span><span>${fmt(operatingCushionHigh)}</span></div>
                     </div>
                 </div>
             </div>
@@ -2808,11 +2891,30 @@
             card.minPayment = card.avgMonthlyInterest > 0 ? Math.max(25, card.owed * 0.01 + card.avgMonthlyInterest) : Math.max(25, card.owed * 0.025);
         });
 
-        const defaultPayment = Math.max(0, Math.floor(operatingCushionLow));
+        // What can go to the cards each month: personal net cash flow x the Debt pot share
+        // (ReKpis.debtPaydown). The payment box used to start at the whole property cushion,
+        // £14,564 on 14 Oct 2026, which is before the variable budget and Kevin's living costs.
+        // undefined while the Debt pot share is still loading.
+        const ccPaydown = () => _debtShare === null ? undefined
+            : ReKpis.debtPaydown({ personal: _reQ4 && _reQ4.personal, debtPct: _debtShare.error ? null : _debtShare.pct });
+        const paydownPayment = () => (window._ccPaydown && window._ccPaydown.perMonth > 0) ? Math.floor(window._ccPaydown.perMonth) : 0;
+        window._ccPaydown = ccPaydown();
+        const defaultPayment = paydownPayment();
         window._ccStrategyCards = creditCards;
         window._ccDefaultPayment = defaultPayment;
 
         const cashFlowRows = buildCashFlow(today, openingBalance, incTenancies, activeCosts, tenancies, transactions, monthlyIncome, tenancyIsUC, creditCards);
+        loadDebtShare().then(() => {
+            window._ccPaydown = ccPaydown();
+            window._ccDefaultPayment = paydownPayment();
+            // The latest forecast's cards: an older render's callback must not redraw stale balances.
+            renderCreditCardSummary((window._cfBuildArgs && window._cfBuildArgs.creditCards) || creditCards);
+            const inp = document.getElementById('ccPaymentInput');
+            if (inp && !inp.dataset.userEdited) {
+                inp.value = paydownPayment();
+                recalcCCStrategy(paydownPayment());
+            }
+        });
 
         const voidCostPerMonth = monthlyIncome > 0 && occupiedCount > 0
             ? (monthlyIncome / occupiedCount).toFixed(0)
@@ -2828,8 +2930,8 @@
             <h3 class="od-section-header">Financial Health</h3>
             <p>The portfolio generates ${fmt(inPaymentIncome)} confirmed monthly income (In Payment) with a further ${fmt(cfvActionedIncome)} from ${cfvActionedCount} CFV Actioned tenancies, giving a best-case total of ${fmt(monthlyIncome)}. Against ${fmt(propertyCosts)} in property fixed costs, the operating cushion margin ranges from ${operatingCushionMarginLow}% to ${operatingCushionMarginHigh}%. ${Number(operatingCushionMarginHigh) >= 40 ? 'The upper range is healthy.' : 'Margins are tight — cost reduction or occupancy gains are needed.'}</p>
 
-            <h3 class="od-section-header" style="margin:16px 0 8px">Operating Cushion Target</h3>
-            <p>Target operating cushion: ${fmt(requiredOperatingCushion)}/month (${fmt(CLEAR_PROFIT_TARGET)} clear profit + ${fmt(variableCostReserve)} variable costs: ${fmt(WAGES_TARGET_GBP)} wages, ${fmt(MAINT_TARGET_GBP)} maintenance, ${fmt(UTILITIES_TARGET_GBP)} utilities, ${fmt(COMPLIANCE_TARGET_GBP)} compliance, ${fmt(CFV_TARGET_GBP)} non-payment allowance). Current best-case operating cushion is ${fmt(operatingCushionHigh)} — ${ocOnTrack ? `a surplus of ${fmt(operatingCushionHigh - requiredOperatingCushion)} above target. You are on track.` : `a shortfall of ${fmt(requiredOperatingCushion - operatingCushionHigh)} (${ocProgressPct}% of target). Focus on filling voids and converting CFVs to close the gap.`}</p>
+            <h3 class="od-section-header" style="margin:16px 0 8px">Income Floor</h3>
+            <p>To keep your ${fmt(CLEAR_PROFIT_TARGET)} income after the ${fmt(variableCostReserve)} variable budget (${fmt(WAGES_TARGET_GBP)} wages, ${fmt(MAINT_TARGET_GBP)} maintenance, ${fmt(UTILITIES_TARGET_GBP)} utilities, ${fmt(COMPLIANCE_TARGET_GBP)} compliance, ${fmt(CFV_TARGET_GBP)} non-payment allowance), the property cushion must be at least ${fmt(requiredOperatingCushion)} a month. From In Payment tenancies it is ${fmt(operatingCushionLow)}: ${ocOnTrack ? `${fmt(ocGap)} above the floor (${ocProgressPct}%).` : `${fmt(ocGap)} below the floor (${ocProgressPct}%). Focus on filling voids and getting the CFV Actioned tenancies paying.`} If the ${cfvActionedCount} CFV Actioned ${cfvActionedCount === 1 ? 'tenancy pays' : 'tenancies pay'} too, it is ${fmt(operatingCushionHigh)}. The Q4 target is ${fmt(RE_Q4.targets.cushionPlan.committed)} by 31 Dec.</p>
 
             <h3 class="od-section-header" style="margin:16px 0 8px">Operational Performance (31-Day)</h3>
             <p>Actual rental income over 31 days: ${fmt(rentalInc30)}. Maintenance spend of ${fmt(maintSpend)} is ${maintStatus === 'green' ? 'under' : maintStatus === 'amber' ? 'on' : 'over'} the ${fmt(MAINT_TARGET_GBP)} budget${maintStatus === 'red' ? ' — investigate whether reactive costs can shift to planned maintenance' : ''}. Wages at ${fmt(wagesSpend)} are ${wagesStatus === 'green' ? 'under' : wagesStatus === 'amber' ? 'on' : 'over'} the ${fmt(WAGES_TARGET_GBP)} budget.</p>
@@ -2906,9 +3008,10 @@
 
         // Initial render + attach listener
         setTimeout(() => {
-            recalcCCStrategy(defaultPayment);
+            const start = document.getElementById('ccPaymentInput');
+            recalcCCStrategy(start ? (Number(start.value) || 0) : defaultPayment);
             const inp = document.getElementById('ccPaymentInput');
-            if (inp) inp.addEventListener('input', () => recalcCCStrategy(Number(inp.value) || 0));
+            if (inp) inp.addEventListener('input', () => { inp.dataset.userEdited = '1'; recalcCCStrategy(Number(inp.value) || 0); });
         }, 0);
 
         // (Removed) — the "Last bank sync" footer was dropped from index.html; the
