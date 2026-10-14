@@ -300,11 +300,13 @@ def report():
         # The window is deliberately a superset (8 days, from UTC midnight) and
         # is narrowed to 168h in compute(), so a timezone edge cannot silently
         # clip a completion out of the report.
+        # Notes since 14 Oct 2026: the Agent Work card reads the keep-open
+        # carry-out line there (waiting_on_reply). About 2.6 MB of the ~4.5 MB read.
         tasks = fetch(TASKS, ["Task Name", "Status", "Team Member", "Approval Outcome",
                               "Approved At", "Agent Output", "Completion Date",
                               "Created Time", "Approval Slack TS", "Assignee",
                               "Due Date", "Hard Deadline", "Sent For Approval By",
-                              "Deferred Until", "Some Day"],
+                              "Deferred Until", "Some Day", "Notes"],
                       formula=('OR({Status}!="Completed",'
                                "IS_AFTER({Completion Date},DATEADD(TODAY(),-8,'days')))"))
     except (urllib.error.HTTPError, urllib.error.URLError, OSError) as exc:
@@ -393,6 +395,13 @@ def report():
                       "waitingApprovals": waiting, "decideAnchored": anchored}
     res["lanes"] = {lane: sum(1 for s in res["stalled"] if s["lane"] == lane) for lane in LANES}
     res["flow"] = agent_flow(fields, agent_ids, linked, len(res["done"]))
+    held_ids, held_err = dispatch_held_ids(datetime.now(timezone.utc))
+    res["agentWork"] = agent_work(tasks, agent_ids, res["stalled"], held_ids, held_err)
+    # Two counts of one population, made two ways: if they ever disagree, one
+    # of them is measuring something else, and the card would add up wrong.
+    if res["agentWork"]["open"] != linked:
+        raise RuntimeError("agent work split counted %d open agent tasks, the control counted %d"
+                           % (res["agentWork"]["open"], linked))
     return res
 
 
@@ -410,6 +419,148 @@ def agent_flow(fields, agent_ids, open_linked, done_7d, now=None):
         if h is not None and h <= 7 * 24:
             created += 1
     return {"agentOpen": open_linked, "agentCreated7d": created, "agentDone7d": done_7d}
+
+
+# ─── the Agent Work card, split (Kevin, 14 Oct 2026) ──────────────────
+# The card read "190 open, 46 not moving" and Kevin took it as "nothing is
+# working". A live recount that afternoon: of 185 open agent tasks, 64 were
+# scheduled for later (some to June 2027), 18 were with him at Approval, and
+# about 40 had been carried out and were only waiting on an outside reply.
+# And 19 of the 46 "not moving" were not stuck agent work at all: a task Roy
+# holds, which the deadline rule counted, and compliance tasks the dispatcher
+# holds on purpose under an open lead task. So the card leads with LIVE work,
+# and counts as stuck only agent tasks the dispatcher is not holding on purpose.
+# The stalled list itself (the Estate tab, the Approvals tab) is unchanged.
+WORK_BUCKETS = ("live", "approval", "waitingReply", "scheduled")
+
+# What `complete --keep-open` writes into Notes (agent-dispatch.py cmd_complete):
+# "[14 Oct 2026 — agent] CARRIED OUT (task left open): ...". MUST match
+# CARRIED_OUT_MARK and APPROVED there: tests/ai-team-health.test.js runs the real
+# cmd_complete and reads its note back through waiting_on_reply(). Only the
+# bracketed line counts. A TRACK RECORD block quotes OTHER tasks' carry-outs as
+# "- 09 Oct 2026 — agent: CARRIED OUT ...", and at 17:05 on 14 Oct 2026, 12
+# open agent tasks carried only those.
+CARRIED_OUT_MARK = "CARRIED OUT (task left open):"
+CARRIED_OUT_RE = re.compile(r"\[(\d{1,2} [A-Z][a-z]{2} \d{4}) — agent\] " + re.escape(CARRIED_OUT_MARK))
+APPROVED_OUTCOMES = ("Approved as-is", "Approved with minor edits")
+
+# The dispatcher's own list of tasks it holds on purpose under an open lead
+# task (agent-dispatch.py queue, key heldUnderLead): property siblings grouped
+# under one lead, a sibling submitted under a lead that is still open, and the
+# twin of a request Roy is handling. Read from the queue the half-hourly
+# hand-back poll writes (scripts/handback-poll-run.sh), never recomputed here:
+# three rules and the worklist cap decide it, and a second copy would drift.
+DISPATCH_QUEUE = os.path.expanduser("~/knowledge-os/logs/handback-poll/scratch/queue.json")
+DISPATCH_QUEUE_MAX_MIN = 120   # written every 30 minutes; older than this, the poll has stopped
+
+
+def carried_out_on(notes):
+    """London date of the task's newest own keep-open carry-out line, or None."""
+    best = None
+    for raw in CARRIED_OUT_RE.findall(str(notes or "")):
+        try:
+            day = datetime.strptime(raw, "%d %b %Y").date()
+        except ValueError:
+            continue
+        if best is None or day > best:
+            best = day
+    return best
+
+
+def waiting_on_reply(f):
+    """True when Kevin's approved action was carried out and the task kept open
+    on purpose (the approval said so): it waits on someone outside, a reply, a
+    certificate, a visit. An approval dated AFTER the newest carry-out is new
+    approved work, so the task is live again. Same day counts as carried out:
+    the stamp holds the date only."""
+    if f.get("Approval Outcome") not in APPROVED_OUTCOMES:
+        return False
+    done = carried_out_on(f.get("Notes"))
+    if done is None:
+        return False
+    approved = f.get("Approved At")
+    if not approved:
+        return True
+    try:
+        approved_day = datetime.fromisoformat(str(approved).replace("Z", "+00:00")).astimezone(LONDON).date()
+    except ValueError:
+        return False   # cannot tell which came first: shown as live, never hidden
+    return approved_day <= done
+
+
+def work_bucket(f, today):
+    """Which of WORK_BUCKETS an OPEN agent task is in. `today` is the London date."""
+    status = f.get("Status") or ""
+    if status == "Approval":
+        return "approval"
+    if status == "Upcoming" and not in_dispatch_window(status, f.get("Due Date"), today,
+                                                       bool(f.get("Some Day"))):
+        return "scheduled"
+    if waiting_on_reply(f):
+        return "waitingReply"
+    return "live"
+
+
+def dispatch_held_ids(now, path=None, max_min=DISPATCH_QUEUE_MAX_MIN):
+    """(set of task ids, None) from the dispatcher's newest queue, or (None, why not).
+    A missing, unreadable or stale queue is NOT CHECKED, never an empty list."""
+    path = path or DISPATCH_QUEUE
+    try:
+        with open(path, encoding="utf-8") as fh:
+            q = json.load(fh)
+    except FileNotFoundError:
+        return None, "no dispatch queue at %s" % path
+    except (OSError, ValueError) as exc:
+        return None, "the dispatch queue could not be read: %s" % str(exc)[:120]
+    held = q.get("heldUnderLead") if isinstance(q, dict) else None
+    if not isinstance(held, list):
+        return None, "the dispatch queue carries no heldUnderLead list"
+    try:
+        made = datetime.fromisoformat(str(q.get("generatedAt") or "").replace("Z", "+00:00"))
+    except ValueError:
+        return None, "the dispatch queue carries no readable generatedAt"
+    age = (now - made).total_seconds() / 60.0
+    if age > max_min:
+        return None, "the dispatch queue is %d minutes old (the hand-back poll writes it every 30)" % age
+    return {t.get("id") for t in held if isinstance(t, dict) and t.get("id")}, None
+
+
+def agent_work(tasks, agent_ids, stalled, held_ids, held_error=None, now=None):
+    """The Agent Work card's numbers. `open` splits into WORK_BUCKETS, which add up
+    to it. `notMoving` is the stalled rows that are open agent tasks and not held
+    under a lead; with no held list (`held_ids` None) it counts them all and
+    `heldCheck` says why, so the card can say the number is not checked.
+
+    Control: the waiting rule fires on the PRESENCE of a carry-out line, so a
+    changed stamp would quietly move every waiting task into live. When some task
+    read carries the mark but no task carries a readable own line, the split is
+    withdrawn (`splitCheck` says why) and the card shows the plain open count."""
+    now = now or datetime.now(timezone.utc)
+    today = now.astimezone(LONDON).date().isoformat()
+    counts = dict.fromkeys(WORK_BUCKETS, 0)
+    owned_open = set()
+    marked = readable = 0
+    for r in tasks:
+        f = r.get("fields") or {}
+        notes = str(f.get("Notes") or "")
+        if CARRIED_OUT_MARK in notes:
+            marked += 1
+            readable += carried_out_on(notes) is not None
+        if (f.get("Status") or "") in CLOSED or f.get("Completion Date"):
+            continue
+        if not any(x in agent_ids for x in (f.get("Team Member") or [])):
+            continue
+        owned_open.add(r["id"])
+        counts[work_bucket(f, today)] += 1
+    held = owned_open & set(held_ids or ())
+    stuck = [s for s in stalled if s.get("id") in owned_open and s.get("id") not in held]
+    out = dict(counts, open=len(owned_open), notMoving=len(stuck),
+               held=None if held_ids is None else len(held), heldCheck=held_error, splitCheck=None)
+    if marked and not readable:
+        out.update(dict.fromkeys(WORK_BUCKETS))
+        out["splitCheck"] = ("%d task(s) carry '%s' and none carries a readable dated line, so "
+                             "carried-out work cannot be told from live work" % (marked, CARRIED_OUT_MARK))
+    return out
 
 
 def main():
@@ -432,6 +583,13 @@ def main():
         print(f"  CANNOT CHECK: {line}")
     print(f"  Needs Kevin : {len(res['needsYou'])}")
     print(f"  Done (7d)   : {len(res['done'])}")
+    aw = res["agentWork"]
+    print(f"  Agent work  : {aw['open']} open = live {aw['live']}, approval {aw['approval']}, "
+          f"waiting on a reply {aw['waitingReply']}, scheduled {aw['scheduled']}; "
+          f"stuck {aw['notMoving']}, held under a lead {aw['held']}")
+    for why in (aw["heldCheck"], aw["splitCheck"]):
+        if why:
+            print(f"  CANNOT CHECK: {why}")
     print(f"  NOT MOVING  : {len(res['stalled'])}  "
           + ", ".join(f"{k} {v}" for k, v in res["lanes"].items() if v))
     for s in res["stalled"]:

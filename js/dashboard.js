@@ -1587,6 +1587,12 @@
         TOOL: 'waiting on a code fix', KEVIN: 'waiting on a step only you can do',
         'SIGN-IN': 'waiting on your sign-in', SITE: 'waiting on a site to be added',
     };
+    // The Agent Work card's split (Kevin, 14 Oct 2026; scripts/loop-health.py agent_work).
+    // The four rows add up to every open agent task.
+    const AI_WORK_SPLIT = [
+        ['live', 'Live'], ['approval', 'Waiting for your approval'],
+        ['waitingReply', 'Waiting on a reply'], ['scheduled', 'Scheduled for later'],
+    ];
     let _aiTeamState = null;
 
     function renderAiTeamCard(id, card) {
@@ -1660,18 +1666,43 @@
                 }, { aiBlockedCard: aiTeamCards(null, blockers).aiBlockedCard });
             }
             const w = {}, d = {}, r = {};
-            ['open', 'notMoving', 'created7d', 'done7d'].forEach(k => { w[k] = aiNum(p.work[k]); });
+            ['open', 'notMoving', 'created7d', 'done7d', 'held'].concat(AI_WORK_SPLIT.map(s => s[0])).forEach(k => { w[k] = aiNum(p.work[k]); });
             ['open', 'filed7d', 'fixed7d'].forEach(k => { d[k] = aiNum(p.defects[k]); });
             ['days', 'fixes', 'fixOfFix', 'baselinePct'].forEach(k => { r[k] = aiNum(p.rework[k]); });
             r.pct = p.rework.pct == null ? null : aiNum(p.rework.pct);
             const net = (Number(w.created7d) || 0) - (Number(w.done7d) || 0);
-            cards.aiWorkCard = aiTeamStale({
-                label: 'Agent Work', value: `${w.open} open`,
-                sub: `${w.notMoving} not moving · 7 days: ${w.created7d} in, ${w.done7d} done`,
-                cls: net > 0 ? 'text-amber' : 'text-green',
-                detail: `<div class="od-breakdown-row"><span>${net > 0 ? 'Piling up this week' : 'Cleared beyond new work'}</span><span>${Math.abs(net)}</span></div>
-                         <div style="color:var(--text-muted);font-size:var(--fs-xs);margin-top:6px">Tasks owned by an AI agent. Not moving is the same list as the Estate tab on the AI Agents page.</div>${updated(health)}`,
-            }, health);
+            const netRow = `<div class="od-breakdown-row"><span>${net > 0 ? 'Piling up this week' : 'Cleared beyond new work'}</span><span>${Math.abs(net)}</span></div>`;
+            const note = (text) => `<div style="color:var(--text-muted);font-size:var(--fs-xs);margin-top:6px">${text}</div>`;
+            // The split arrived on 14 Oct 2026. A row written before it (or one whose split the Mac
+            // withdrew, splitCheck) has no live count: show the open count as before, never a zero.
+            // aiNum(null) is 0, so the keys are tested before they are read.
+            const split = AI_WORK_SPLIT.every(([k]) => p.work[k] != null && typeof w[k] === 'number');
+            const heldUnchecked = typeof p.work.heldCheck === 'string' && p.work.heldCheck;
+            if (split) {
+                cards.aiWorkCard = aiTeamStale({
+                    label: 'Agent Work', value: `${w.live} live`,
+                    sub: `${w.notMoving} stuck${heldUnchecked ? ' (held tasks not checked)' : ''} · 7 days: ${w.created7d} in, ${w.done7d} done`,
+                    cls: net > 0 || heldUnchecked ? 'text-amber' : 'text-green',
+                    detail: AI_WORK_SPLIT.map(([k, label]) => `<div class="od-breakdown-row"><span>${label}</span><span>${w[k]}</span></div>`).join('')
+                        + `<div class="od-breakdown-row"><span>All open</span><span>${w.open}</span></div>`
+                        + `<div class="od-breakdown-row" style="margin-top:6px"><span>Stuck (not moving)</span><span>${w.notMoving}</span></div>`
+                        + netRow
+                        + note('Tasks owned by an AI agent. Live: due now and not yet carried out. Waiting on a reply: your approved action is done and the task stays open for the answer. '
+                            + 'Stuck is counted in the rows above. It counts agent tasks only, so it can be shorter than the Estate tab\'s list, '
+                            + (heldUnchecked ? `but tasks held under a lead task could not be left out this time: ${escHtml(p.work.heldCheck)}.`
+                                : `and leaves out tasks held under a lead task${typeof w.held === 'number' && p.work.held != null ? ` (${w.held} now)` : ''}.`))
+                        + updated(health),
+                }, health);
+            } else {
+                const why = typeof p.work.splitCheck === 'string' && p.work.splitCheck
+                    ? `Live work could not be split out: ${escHtml(p.work.splitCheck)}. ` : '';
+                cards.aiWorkCard = aiTeamStale({
+                    label: 'Agent Work', value: `${w.open} open`,
+                    sub: `${w.notMoving} not moving · 7 days: ${w.created7d} in, ${w.done7d} done`,
+                    cls: net > 0 ? 'text-amber' : 'text-green',
+                    detail: netRow + note(`${why}Tasks owned by an AI agent.`) + updated(health),
+                }, health);
+            }
             cards.aiDefectsCard = aiTeamStale({
                 label: 'Defects', value: `${d.open} open`,
                 sub: `7 days: ${d.filed7d} filed, ${d.fixed7d} fixed`,
