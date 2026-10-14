@@ -72,7 +72,8 @@ for tid, t in cfg["tasks"].items():
                   AF["notes"]: t.get("notes", ""), AF["teamMember"]: t.get("teamMember", [${JSON.stringify(INBOX)}]),
                   AF["inboundTask"]: True, AF["agentOutput"]: t.get("agentOutput", ""),
                   AF["approvalOutcome"]: t.get("outcome") or None, AF["approvalFeedback"]: t.get("feedback", ""),
-                  AF["feedbackHistory"]: t.get("history", "")}
+                  AF["feedbackHistory"]: t.get("history", ""), AF["deferredUntil"]: t.get("deferred") or None,
+                  m.SOME_DAY_FIELD: bool(t.get("someDay"))}
 writes, listed, gets, fails = [], [], [], [cfg["readFails"]]
 def fake_get_task(tid):
     gets.append(tid)
@@ -446,6 +447,61 @@ except SystemExit as e:
     const r = verify({ tasks: { [T]: { name: 'INBOUND: something', status: 'Approval' } },
       actions: [noCard(T, 'no card from the agent'), { task: T, kind: 'escalate', ok: true }] });
     expect(r.writes).toEqual([]);
+  });
+});
+
+describe("Kevin's holds, as his own actions record them, never come back to him as cards", () => {
+  const EPC = 'recEPCEXPIREDTASK';
+  const QUOTES = 'recEPCQUOTESTASK1';
+  const HOLD = "[2026-10-08 14:09] Let's put these on the back burner until we've got the EICRs and gas safety certificates in place.";
+  // The live shape of 14 Oct: the EPC task carries nothing of Kevin's; his hold is his verdict on the quotes
+  // task, and each task names the other.
+  const epc = (quotes, epcExtra = {}) => verify({
+    tasks: { [EPC]: { name: 'COMPLIANCE: EPC expired - 1 Example Place', notes: `[{day:0} — agent] still on hold by Kevin's ruling on ${QUOTES}`, ...epcExtra },
+      [QUOTES]: { name: 'COMPLIANCE: EPC quotes received - four houses', status: 'Upcoming', due: '{d:+1}', notes: `[{day:-6} — agent] not a duplicate of ${EPC}`, ...quotes } },
+    actions: [noCard(EPC, "no card: the EPC stays on hold by Kevin's ruling until the EICR is filed")], owed: [[EPC, 'new']] });
+
+  it('the EPC shape: his hold on the quotes task, the two linked both ways, is a door that spends no pass', () => {
+    const r = epc({ history: HOLD });
+    expect(r.code).toBe(0);
+    expect(r.writes).toEqual([]);
+    expect(r.out.parkedWithDoor[0].door).toBe(`${QUOTES}, linked both ways to it, is held by Kevin: Kevin's own words hold it: "Let's put these on the back burner until we've got the EICRs and gas safety certificates in place."`);
+  });
+
+  it('...and so does the other side being his card already, with no pass spent', () => {
+    const r = epc({ status: 'Approval', due: '{d:-3}' });
+    expect(r.writes).toEqual([]);
+    expect(r.out.parkedWithDoor[0].door).toBe(`${QUOTES}, linked both ways to it, is already a card in Kevin's queue`);
+  });
+
+  it.each([
+    ['his newest words do not hold it', { history: '[2026-10-08 14:09] Book the cheapest one.' }],
+    ['he negates the hold', { history: "[2026-10-08 14:09] Don't put these on hold, book them this week." }],
+  ])('CONTROL: %s, so the two-way link alone is no door and a card is made', (_label, quotes) => {
+    const r = epc({ ...quotes, due: '{d:+17}' });
+    expect(isCard(r.final[EPC])).toBe(true);
+    expect(r.final[EPC].agentOutput).toContain(`${QUOTES} cites this task back`);
+  });
+
+  it('CONTROL: his hold on a task linked one way only is not his hold on this one', () => {
+    const r = epc({ history: HOLD, due: '{d:+17}', notes: '' });
+    expect(isCard(r.final[EPC])).toBe(true);
+  });
+
+  it("CONTROL: an agent's note saying Kevin parked it is not his park", () => {
+    const r = epc({ due: '{d:+17}', notes: '' }, { notes: "[{day:0} — agent] PARKED by Kevin's ruling: let's put these on the back burner until the EICRs are in." });
+    expect(isCard(r.final[EPC])).toBe(true);
+  });
+
+  it.each([
+    ['his knock-back to a later day (Deferred Until)', { deferred: '{d:+5}' }, /^Kevin knocked it back to \d{4}-\d{2}-\d{2}$/],
+    ['the Some Day tick', { someDay: true }, /^Kevin put it on Some Day$/],
+    ['his own words on the task putting it on hold', { feedback: 'Park this until the new tenant is in.', outcome: 'Changes requested' }, /^Kevin's own words hold it: "Park this until the new tenant is in\."$/],
+  ])('on the task itself, %s is his park: no card, no pass', (_label, extra, door) => {
+    const T = 'recKEVINHELDTASK1';
+    const r = verify({ tasks: { [T]: { name: GENERIC, ...extra } }, actions: [noCard(T, 'no card: Kevin is holding this')] });
+    expect(r.writes).toEqual([]);
+    expect(r.out.parkedWithDoor[0].door).toMatch(door);
   });
 });
 

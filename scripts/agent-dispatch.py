@@ -9061,8 +9061,12 @@ def rested_on_wall(live, last_event, started_at, now=None):
 #     line an agent wrote (never the Description, never the inbound email), with
 #     its day and clock time inside the next 48 hours. The pass is written on the
 #     task (NO_CARD_PASS_MARK), so forging a door buys 48 hours once, never silence.
-#   - (2) Kevin's own park (`decided --until`, or `due` on his words) holds until
-#     his date and uses no pass: the clock is his.
+#   - (2) Kevin's own park holds and uses no pass: the clock is his. Read only from
+#     what his own actions write: `decided --until`, `due` on his words, his
+#     knock-back (Deferred Until), the Some Day tick, or his newest verdict words
+#     putting it on hold. His hold on a task linked BOTH ways to this one (the EPC
+#     and its quotes, 14 Oct 2026), or that task being his card already, holds
+#     this one too; a two-way link alone is no door.
 #   - A park with no door, or any park once the pass is used up, becomes the same
 #     card for every task: a decision card through `escalate`, quoting the task
 #     name and the robot's own words. A redo keeps Kevin's change request: his
@@ -9092,6 +9096,14 @@ NO_CARD_REC_RE = re.compile(r"\brec[A-Za-z0-9]{14}\b")
 KEVIN_PARK_RE = re.compile(r"^\[[^\]\n]*— agent-dispatch\] Parked until (\d{4}-\d{2}-\d{2}) on Kevin's answer", re.M)
 DUE_MOVED_TO_RE = re.compile(r"^\[[^\]\n]*— agent-dispatch\] " + re.escape(DUE_MOVED_MARK)
                              + r" from \S+ to (\d{4}-\d{2}-\d{2})", re.M)
+# The Some Day tick: Kevin's own park (kept identical to SOME_DAY_FIELD in scripts/rent_new_tenant.py).
+SOME_DAY_FIELD = "fldmhkeRaDkiL3Ga4"
+# His words that put a task on hold, and the words that undo one in front of them.
+KEVIN_HOLD_RE = re.compile(
+    r"\b(?:back[\s-]?burner|on\s+hold|hold\s+(?:off|fire)|put\s+(?:this|these|it|them)\s+aside"
+    r"|park\s+(?:this|these|it|them)|leave\s+(?:this|these|it|them)\s+(?:for\s+now|until|till)"
+    r"|wait\s+(?:until|till)|not\s+until)\b", re.I)
+KEVIN_HOLD_NOT_RE = re.compile(r"\b(?:don'?t|do\s+not|never|no\s+need\s+to|stop|no\s+longer)\b", re.I)
 NO_CARD_PASS_RE = re.compile(r"^\[([^\]\n]*?)\s*— agent-dispatch\] " + re.escape(NO_CARD_PASS_MARK) + r"\b", re.M)
 # A Notes line an agent wrote (annotate: "[14 Oct 2026 — agent] ..."), with the day it was written.
 AGENT_NOTE_RE = re.compile(r"^\[(\d{1,2} \w{3} \d{4})(?: \d{2}:\d{2})?\s*— agent\]", re.M)
@@ -9163,9 +9175,23 @@ def parked_tasks(actions, owed_new=()):
     return parked
 
 
-def kevin_park(t, today):
-    """What Kevin's own park on the task says, or '': his answer parked it until a later day
-    (`decided --until`), or its due date was moved to a later day on his words (`due`)."""
+def kevin_hold_words(tf):
+    """His newest words on the task, when they put it on hold ("Let's put these on the back burner
+    until...", 8 Oct 2026), or ''. Read only from what his own verdicts write (Approval Feedback, else
+    the last block of Feedback History: kevins_newest_note), never an agent's Notes; a hold he negates
+    ("don't put this on hold") is none."""
+    said = " ".join(FEEDBACK_STAMP.sub(" ", kevins_newest_note(tf or {})).split())
+    for m in KEVIN_HOLD_RE.finditer(said):
+        if not KEVIN_HOLD_NOT_RE.search(said[max(0, m.start() - 40):m.start()]):
+            return said[:200]
+    return ""
+
+
+def kevin_park(t, today, tf=None):
+    """What Kevin's own park on the task says, or ''. Only what his own actions write: his answer
+    parked it until a later day (`decided --until`), its due date moved to a later day on his words
+    (`due`), his knock-back to a later day (Deferred Until), the Some Day tick, or his newest verdict
+    words putting it on hold. `tf` is the task's raw fields (needed for the last three)."""
     notes = str(t.get("notes") or "")
     parks = KEVIN_PARK_RE.findall(notes)
     if parks and parks[-1] > today.isoformat():
@@ -9174,6 +9200,15 @@ def kevin_park(t, today):
     due = str(t.get("dueDate") or "")[:10]
     if moved and moved[-1] == due and due > today.isoformat():
         return f"its due date was moved to {due} on Kevin's words"
+    tf = tf or {}
+    back = str(tf.get(AF["deferredUntil"]) or "")[:10]
+    if back > today.isoformat():
+        return f"Kevin knocked it back to {back}"
+    if tf.get(SOME_DAY_FIELD):
+        return "Kevin put it on Some Day"
+    held = kevin_hold_words(tf)
+    if held:
+        return f"Kevin's own words hold it: \"{held}\""
     return ""
 
 
@@ -9262,20 +9297,22 @@ def named_ids(t, said, today):
             if i != t.get("id")]
 
 
-def no_card_door(t, said, named, now, parked=()):
+def no_card_door(t, said, named, now, parked=(), raw=None):
     """(door, why, uses_pass) for a task a run left with no card. `door` names what holds it, or is ''
     and `why` says why it becomes a card; `uses_pass` is True when the door spends the task's one
     48-hour pass (a door a robot can name), False when no pass is spent (Kevin's own park, a card
     already in his queue, a closed task). `t` is the live task (task_view), `named` the live tasks
     its park names ({id: task_view}, read by listing), `parked` every task left with no card this
-    run, `now` London. Pure."""
+    run, `raw` the raw fields of the task and of those it names ({id: fields}, for Kevin's own marks),
+    `now` London. Pure."""
     today = now.date()
+    raw = raw or {}
     status = t.get("status") or ""
     if status == "Approval":
         return "it is already a card in Kevin's queue", "", False
     if status in ("Completed", "Cancelled"):
         return f"it is {status}", "", False
-    park = kevin_park(t, today)
+    park = kevin_park(t, today, raw.get(t.get("id")))
     if park:
         return park, "", False
     began = no_card_pass(t)
@@ -9294,11 +9331,19 @@ def no_card_door(t, said, named, now, parked=()):
             seen.append(f"{rid} is not a task on the board")
             continue
         st, due = n.get("status") or "", str(n.get("dueDate") or "")[:10]
+        both_ways = bool(t.get("id")) and t["id"] in f"{n.get('notes') or ''} {n.get('description') or ''}"
+        # A task and its follow-up linked both ways (the EPC and its quotes, 14 Oct 2026) are one matter:
+        # when Kevin holds the other side, or it is his card already, his clock is the door, and no pass
+        # is spent. One way only, an Approval card spends the pass; a two-way link alone is no door.
+        held = kevin_park(n, today, raw.get(rid)) if both_ways and st not in ("Completed", "Cancelled") else ""
+        if both_ways and (st == "Approval" or held):
+            return (f"{rid}, linked both ways to it, "
+                    + ("is already a card in Kevin's queue" if st == "Approval" else f"is held by Kevin: {held}")), "", False
         if st == "Approval":
             return f"{rid} is already a card in Kevin's queue", "", True
         if rid in parked:
             seen.append(f"{rid} was itself left with no card this run")
-        elif t.get("id") and t["id"] in f"{n.get('notes') or ''} {n.get('description') or ''}":
+        elif both_ways:
             seen.append(f"{rid} cites this task back")
         elif task_blocker(n.get("notes")):
             seen.append(f"{rid} is on a wall")
@@ -9449,7 +9494,7 @@ def settle_no_cards(actions, dry_run=False, rundir="", owed_new=(), now=None):
         return set(), [], [], []
     now = now or datetime.now(LONDON)
     tier1 = {a.get("task") for a in actions or [] if a.get("tier1")}
-    fields = list(AF.values())
+    fields = list(AF.values()) + [SOME_DAY_FIELD]
     try:
         recs = _list_by_id(TASKS, list(said), fields)
         views = {i: task_view(r) for i, r in recs.items()}
@@ -9469,8 +9514,10 @@ def settle_no_cards(actions, dry_run=False, rundir="", owed_new=(), now=None):
         t = task_view(rec)
         if task_blocker(t["notes"]):
             continue      # a wall has its own owner and wake: the blocker loop's, never this rule's
-        named = {i: task_view(recs[i]) for i in named_ids(t, words, now.date()) if i in recs}
-        door, why, uses_pass = no_card_door(t, words, named, now, set(said))
+        ids = [tid] + [i for i in named_ids(t, words, now.date()) if i in recs]
+        named = {i: task_view(recs[i]) for i in ids[1:]}
+        door, why, uses_pass = no_card_door(t, words, named, now, set(said),
+                                            {i: recs[i].get("fields", {}) or {} for i in ids})
         settled.add(tid)
         if door and uses_pass and not dry_run:
             try:
