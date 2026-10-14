@@ -390,7 +390,10 @@ async function setupMockAirtable(page, customFixtures = null) {
 async function loadDashboard(page, hash = '') {
   await page.addInitScript((pat) => {
     localStorage.setItem('_dlr_pat', pat);
-    // Clear IndexedDB cache so dashboard uses fresh mock data, not stale cached data
+    // Clear IndexedDB cache so dashboard uses fresh mock data, not stale cached data. The shell only:
+    // an init script runs in every frame, and the app opens on Home, which loads the AI Agents page in
+    // a frame (14 Oct 2026); that frame's delete would wipe the cache the shell had just written.
+    if (window !== window.top) return;
     try {
       indexedDB.deleteDatabase('_dlr_cache');
     } catch {}
@@ -417,6 +420,8 @@ async function loadDashboardWithFixtures(page, fixtureOverrides, hash = '') {
     // Force-skip the dashboard cache so tests use fresh mock data.
     // indexedDB.deleteDatabase is async and may not finish before scripts run,
     // so we also monkeypatch the IDB open to return a dummy that always misses.
+    // The shell only (see loadDashboard): a frame's delete would wipe the shell's cache.
+    if (window !== window.top) return;
     try { indexedDB.deleteDatabase('_dlr_cache'); } catch {}
     // Override indexedDB.open to return a store that always yields undefined
     const origOpen = indexedDB.open.bind(indexedDB);
