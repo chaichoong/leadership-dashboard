@@ -427,9 +427,17 @@ def report():
                                 key=lambda s: (RULE_ORDER.get(s["rule"], 9), -s["days"]))
     res["lanes"] = {lane: sum(1 for s in res["stalled"] if s["lane"] == lane) for lane in LANES}
     held_ids, held_err = dispatch_held_ids(now)
-    res["agentWork"] = agent_work(tasks, agent_ids, res["stalled"], held_ids, held_err, now=now,
-                                  ledger=ledger, ledger_error=ledger_err, ledger_skipped=ledger_skipped,
-                                  open_check=(open_before, open_after))
+    try:
+        res["agentWork"] = agent_work(tasks, agent_ids, res["stalled"], held_ids, held_err, now=now,
+                                      ledger=ledger, ledger_error=ledger_err, ledger_skipped=ledger_skipped,
+                                      open_check=(open_before, open_after))
+    except SplitCheckFailed as exc:
+        # Only the card's split is withdrawn: it shows the plain open count, amber, with
+        # this reason. The stalled list above and every other number still stand.
+        aw = exc.partial
+        aw.update(dict.fromkeys(WORK_BUCKETS))
+        aw["splitCheck"] = str(exc)
+        res["agentWork"] = aw
     return res
 
 
@@ -714,14 +722,15 @@ def agent_work(tasks, agent_ids, stalled, held_ids, held_error=None, now=None,
     is carryout_ledger()'s map; left out, it is read here. When it cannot be read,
     `waitCheck` says so and the stricter date-only rule decides.
 
-    Two controls on `open` (review of PR #782):
-      - the buckets must add up to it, or the report fails;
+    Two controls on `open` (review of PR #782), each raising SplitCheckFailed:
+      - the buckets must add up to it;
       - `open_check` is (before, after): the open agent task ids Airtable's own
         formula found just before and just after the main read
         (open_agent_ids). When the two agree the board held still, and they must
-        then equal this split's own set, or the report fails. When they differ
-        the board moved during the read, so nothing is compared and `openCheck`
-        says so.
+        then equal this split's own set. When they differ the board moved during
+        the read, so nothing is compared and `openCheck` says so.
+    report() catches SplitCheckFailed and withdraws only the split (`splitCheck`
+    carries the reason); the stalled list and every other number still stand.
 
     Control on the waiting rule: it fires on the PRESENCE of a carry-out line, so
     a changed stamp would quietly move every waiting task into live. When some
@@ -753,21 +762,20 @@ def agent_work(tasks, agent_ids, stalled, held_ids, held_error=None, now=None,
             marked += 1
             readable += bool(carried_out_days(notes))
         counts[work_bucket(f, now, None if ledger is None else ledger.get(r["id"], []))[0]] += 1
+    open_note, failed = None, None
     if mark and sum(counts.values()) != len(owned_open):
-        raise RuntimeError("agent work split placed %d of %d open agent tasks in a bucket"
-                           % (sum(counts.values()), len(owned_open)))
-    open_note = None
+        failed = ("agent work split placed %d of %d open agent tasks in a bucket"
+                  % (sum(counts.values()), len(owned_open)))
     if open_check is not None:
         before, after = (set(x) for x in open_check)
         if before != after:
             open_note = ("the board changed while it was read (%d task(s) opened or closed), so the "
                          "open count was not checked against Airtable this time" % len(before ^ after))
-        elif before != owned_open:
-            raise RuntimeError(
-                "open agent tasks: this split counted %d, Airtable's own filter counted %d "
-                "(only here: %s; only in Airtable: %s)" % (
-                    len(owned_open), len(before), ", ".join(sorted(owned_open - before)[:5]) or "none",
-                    ", ".join(sorted(before - owned_open)[:5]) or "none"))
+        elif before != owned_open and not failed:
+            failed = ("open agent tasks: this split counted %d, Airtable's own filter counted %d "
+                      "(only here: %s; only in Airtable: %s)" % (
+                          len(owned_open), len(before), ", ".join(sorted(owned_open - before)[:5]) or "none",
+                          ", ".join(sorted(before - owned_open)[:5]) or "none"))
     held = owned_open & set(held_ids or ())
     stuck = [s for s in stalled if s.get("id") in owned_open and s.get("id") not in held]
     out = dict(counts, open=len(owned_open), notMoving=len(stuck),
@@ -781,7 +789,20 @@ def agent_work(tasks, agent_ids, stalled, held_ids, held_error=None, now=None,
     if split_error:
         out.update(dict.fromkeys(WORK_BUCKETS))
         out["splitCheck"] = split_error
+    if failed:
+        raise SplitCheckFailed(failed, out)
     return out
+
+
+class SplitCheckFailed(RuntimeError):
+    """A control on the Agent Work split failed. It carries every other number the
+    card needs, so report() withdraws only the split (final review of PR #782): a
+    task closed and reopened between the two Airtable counts must not take down the
+    Estate tab's not-moving list or the daily loop-health run with it."""
+
+    def __init__(self, message, partial):
+        super().__init__(message)
+        self.partial = partial
 
 def main():
     ap = argparse.ArgumentParser()

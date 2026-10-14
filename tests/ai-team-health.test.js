@@ -495,7 +495,7 @@ print(json.dumps({"a": a, "b": b}))`);
     expect(out.b).toEqual({ wait: 'waitingReply', old: 'waitingReply', replyRows: 0, window: 30 });
   });
 
-  it('report() carries the split, built from one read, the dispatcher\'s ledger and Airtable\'s own count', () => {
+  it('report() carries the split, built from one read, the dispatcher\'s ledger and Airtable\'s own count; a failed split check withdraws only the split (final review)', () => {
     const out = py(`${FIX}
 d = tempfile.mkdtemp(); q = os.path.join(d, "queue.json"); led = os.path.join(d, "carryout-intent.jsonl")
 with open(q, "w") as fh: json.dump({"generatedAt": iso(N), "heldUnderLead": [{"id": "recHELDxxxxxxxx01"}]}, fh)
@@ -520,12 +520,17 @@ row = es.ai_team_row(N, res, None, measures=${MEASURES})
 lh.fetch = lambda table, fields=None, formula=None: (team if table == lh.TEAM else
     [{"id": i} for i in sorted(OPEN_AGENT - {"recDRAFTxxxxxxx01"})] if formula and "Record ID (Used for Automation)" in formula else TASKS)
 try:
-    lh.report(); raised = None
+    bad = lh.report(); raised = None
 except RuntimeError as exc:
-    raised = str(exc)
+    bad, raised = None, str(exc)
+lrow = es.loop_health_row(N, bad, None) if bad else None
+arow = es.ai_team_row(N, bad, None, measures=${MEASURES}) if bad else None
 print(json.dumps({"aw": res["agentWork"], "stalled": len(res["stalled"]), "counts": len(counts),
                   "reply": [s["id"] for s in res["stalled"] if s["rule"] == "reply"],
-                  "lanes": res["lanes"], "work": json.loads(row["payload"])["work"], "raised": raised}))`);
+                  "lanes": res["lanes"], "work": json.loads(row["payload"])["work"], "raised": raised,
+                  "bad": bad and {"aw": bad["agentWork"], "stalled": sorted(s["id"] for s in bad["stalled"]),
+                                  "lrow": [lrow["status"], len(json.loads(lrow["payload"])["stalled"])],
+                                  "arow": [arow["status"], arow["detail"], json.loads(arow["payload"])["work"]]}}))`);
     expect(out.counts).toBe(2);                         // before and after the main read
     expect(out.stalled).toBe(7);                        // compute()'s 6 and one "reply" row
     expect(out.reply).toEqual(['recOLDWAITxxxxx01']);
@@ -534,7 +539,18 @@ print(json.dumps({"aw": res["agentWork"], "stalled": len(res["stalled"]), "count
       openCheck: null, ledgerSkipped: 0 });
     expect(out.work).toMatchObject({ open: 19, live: 11, approval: 1, waitingReply: 2, scheduled: 4, other: 1,
       notMoving: 5, replyOverdue: 1, replyWindowDays: 14 });
-    expect(out.raised).toMatch(/Airtable's own filter counted 18/);
+    // Final review of PR #782: a still board that disagrees withdraws ONLY the card's split. The
+    // report still returns, the not-moving list keeps every row, and the reason rides in splitCheck.
+    expect(out.raised).toBeNull();
+    expect(out.bad.aw.splitCheck).toMatch(/this split counted 19, Airtable's own filter counted 18 \(only here: recDRAFTxxxxxxx01/);
+    expect(out.bad.aw).toMatchObject({ live: null, approval: null, waitingReply: null, scheduled: null, other: null,
+      open: 19, notMoving: 5, held: 1 });
+    expect(out.bad.stalled).toEqual(['recAMENDxxxxxxx01', 'recDEADLINExxxx01', 'recDRAFTxxxxxxx01', 'recHELDxxxxxxxx01',
+      'recNOBOARDxxxxx01', 'recOLDWAITxxxxx01', 'recROYTASKxxxxx01']);
+    expect(out.bad.lrow).toEqual(['Worked', 7]);           // the Estate tab's list still renders
+    expect(out.bad.arow[0]).toBe('Worked');
+    expect(out.bad.arow[1]).toMatch(/^Agent work: 19 open \(not split: open agent tasks: this split counted 19/);
+    expect(out.bad.arow[2]).toMatchObject({ live: null, open: 19, notMoving: 5 });
   });
 
   it('the London midnight edge: the answer is London\'s, whatever the process time zone', () => {
