@@ -711,6 +711,8 @@ def _plural(n, word):
 # protected file and no MERGE card exists yet, no finding was filed, or Kevin rejected the card.
 WALLS_CAP = 80
 NO_FIXER_STATES = ("no-fixer", "no-finding", "deferred", "merge-rejected", "merge-closed")
+# Not in that list on purpose (#784): "tasked" (a task carries it and its completion wakes the
+# wall) and "deferred-dated" (it comes back open by itself on its date).
 PROTECTED_RE = re.compile(r"protected file: ([^)]+)\)")
 
 
@@ -746,7 +748,10 @@ def blockers_summary(r):
     # A wall the sweep could not judge is a failed check, never "the daily robot fix" (review).
     unknown = [w for w in tools if tool_state(w) == "unknown"]
     errors += ["%s: %s" % (w["task"], w.get("tool") or "could not be judged") for w in unknown[:3]]
-    fixing = [w for w in tools if w not in merge_wait + merging + build + unclaimed + open_pr + unknown]
+    # A finding moved to a task, or parked to a date (#784), is neither a fixer's job nor stuck.
+    on_task = [w for w in tools if tool_state(w) == "tasked"]
+    dated = [w for w in tools if tool_state(w) == "deferred-dated"]
+    fixing = [w for w in tools if w not in merge_wait + merging + build + unclaimed + open_pr + unknown + on_task + dated]
     parts = []
     if signin:
         parts.append("sign the robot in to " + ", ".join(signin))
@@ -778,6 +783,10 @@ def blockers_summary(r):
         detail += " %s waiting on an open fix PR to merge." % _plural(len(open_pr), "task")
     if merging:
         detail += " %s approved by you and being merged by the robot." % _plural(len(merging), "fix")
+    if on_task:
+        detail += " %s waiting on the task its fix was moved to." % _plural(len(on_task), "task")
+    if dated:
+        detail += " %s waiting on a fix parked to a date; it comes back by itself." % _plural(len(dated), "task")
     if fixing:
         detail += " %s waiting on the daily robot fix." % _plural(len(fixing), "task")
     if stale:

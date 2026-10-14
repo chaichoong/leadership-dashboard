@@ -7713,10 +7713,12 @@ def site_reachable(host, sites):
     return best if v.get("login") and (v.get("loginUrl") or v.get("profiles")) else ""
 
 
-def file_tool_finding(task_id, subject, why):
+def file_tool_finding(task_id, subject, why, agent=""):
     """File (or fold into) a HIGH finding for a TOOL wall; its id, or ''.
     High, because the cap sends anything lower to an overflow log no job
-    reads, which is where "node unavailable" sat for four days."""
+    reads, which is where "node unavailable" sat for four days. AGENT is the
+    task's agent file name (task_view's localAgent), so the finding says who
+    filed it and findings.py counts that agent's own cap (#784)."""
     r = subprocess.run(
         [sys.executable, os.path.join(os.path.dirname(os.path.abspath(__file__)), "findings.py"),
          "add", "--routine", "agent-dispatch", "--severity", "high", "--touches-code",
@@ -7724,16 +7726,20 @@ def file_tool_finding(task_id, subject, why):
          "--where", "the robot's own setup (blocks agent work)",
          "--detail", f"{why} First seen on task {task_id}.",
          "--fix", ("Repair it so the agent can finish. Closing this finding as fixed "
-                   "wakes every task blocked on it (agent-dispatch.py blockers --sweep).")],
+                   "wakes every task blocked on it (agent-dispatch.py blockers --sweep).")]
+        + (["--agent", agent] if agent else []),
         capture_output=True, text=True)
     fid = (r.stdout or "").strip().splitlines()[:1]
     return fid[0] if r.returncode == 0 and fid and BLOCKER_FINDING_RE.match(f"[finding {fid[0]}]") else ""
 
 
 def finding_states():
-    """finding id -> status, read through findings.py so the two agree."""
+    """finding id -> status, read through findings.py so the two agree. A repeat merged into
+    another finding reads its SURVIVOR's status (findings.survivor_status, the one place that
+    is decided, #784): the survivor is the one the fixer works and whose fix clears the wall."""
     import findings as _findings  # noqa: E402 — scripts/ is on sys.path above
-    return {k: v.get("status", "") for k, v in _findings.current_state().items()}
+    state = _findings.current_state()
+    return {k: _findings.survivor_status(state, k)[1] for k in state}
 
 
 def profile_door(host, profile, sites):
@@ -7744,10 +7750,12 @@ def profile_door(host, profile, sites):
     return ""
 
 
-def blocker_clear_reason(b, sites, fstates, walk=None):
+def blocker_clear_reason(b, sites, fstates, walk=None, tasked_done=None):
     """Why this wall is gone, or '' while it stands. SIGN-IN clears in
     signin_done (the sign-in IS the event); KEVIN clears only on the agent's
-    evidence (`unblock`), never on a guess."""
+    evidence (`unblock`), never on a guess. TASKED_DONE(fid) answers whether the
+    task a finding was moved to (findings.py close --outcome tasked) is Completed:
+    True, False, or None when it could not be read (never read as done)."""
     if b["kind"] == "SITE":
         host = blocker_host(b["subject"])
         entry = site_reachable(host, sites) if host else ""
@@ -7776,6 +7784,11 @@ def blocker_clear_reason(b, sites, fstates, walk=None):
             return f"the fix landed (finding {b['finding']})"
         if status == "rejected":
             return (f"the fixer found nothing broken (finding {b['finding']}); try again, "
+                    "and if it fails the same way block it again with what you saw")
+        # A finding no code fix could close was moved to a task (#784). Before this the wall
+        # waited on a "fixed" that would never come; it now wakes when that task is done.
+        if status == "tasked" and tasked_done and tasked_done(b["finding"]) is True:
+            return (f"the task finding {b['finding']} was moved to is Completed; try again, "
                     "and if it fails the same way block it again with what you saw")
     return ""
 
@@ -8578,7 +8591,7 @@ def cmd_block(args):
             sys.exit(f"ERROR: --finding {args.finding!r} is not a finding in the queue "
                      "(python3 scripts/findings.py list). Leave it off and one is filed.")
     if kind == "TOOL":
-        b["finding"] = args.finding or file_tool_finding(args.task, subject, why)
+        b["finding"] = args.finding or file_tool_finding(args.task, subject, why, t.get("localAgent", ""))
         if not b["finding"]:
             sys.exit("ERROR: could not file the TOOL finding (findings.py add failed). Nothing "
                      "was written; run it again, or pass --finding <id> if one exists.")
@@ -8660,6 +8673,14 @@ def finding_details():
     return _findings.current_state()
 
 
+def survivor_detail(details, fid):
+    """The record a wall citing FID is labelled from: FID's own, or for a repeat merged into
+    another finding, its survivor's (findings.py sets duplicate_root on the repeat)."""
+    d = (details or {}).get(fid) or {}
+    root = d.get("duplicate_root")
+    return ((details or {}).get(root) or d) if root else d
+
+
 def card_for_wall(b, detail, cards):
     """The MERGE card that carries this TOOL wall's fix, or None: a card listing the finding,
     or the card for the PR the finding is pending on. An open card wins over a closed one."""
@@ -8694,6 +8715,13 @@ def tool_wall_state(b, status, detail, cards, days, findings_error="", cards_err
         return "pending", f"waiting on PR #{(detail or {}).get('pr') or '?'} to merge"
     if status == "claimed":
         return "claimed", "the fixer is working on it"
+    if status == "tasked":
+        # Moved to a task because no code fix can close it (#784): the task is the door.
+        return "tasked", (f"moved to task {(detail or {}).get('task') or '?'}: this wall clears when "
+                          "that task is Completed")
+    if status == "deferred" and (detail or {}).get("deferred_until"):
+        # A dated deferral comes back open by itself on its date (#784): not "nothing will clear it".
+        return "deferred-dated", f"deferred until {detail['deferred_until']}; it comes back open on that date"
     if status == "deferred" or (status == "open" and (days is None or days >= BLOCKER_STALE_DAYS)):
         if cards_error:
             return "unknown", "the merge cards could not be read: " + cards_error[:120]
@@ -8754,6 +8782,17 @@ def blockers_scan(sweep=False, now=None):
                 lazy[key] = (None, str(exc)[:200])
         return lazy[key]
 
+    def tasked_done(fid):
+        """Is the task this finding was moved to Completed? None when unknown (#784)."""
+        det, _ = once("details", finding_details)
+        task = survivor_detail(det, fid).get("task") or ""
+        if not re.match(r"^rec[A-Za-z0-9]{14}$", task):
+            return None
+        rows, err = once("task:" + task, lambda: query_records(TASKS, f"RECORD_ID()='{task}'", [AF["status"]], 1))
+        if err or rows is None:
+            return None
+        return bool(rows) and sel((rows[0].get("fields") or {}).get(AF["status"])) == "Completed"
+
     open_walls, woken, stale, surfaced, done_refused, plan_repairs, sent_back = [], [], [], [], [], [], []
     settling = []   # his done or can't lines still inside the page's Undo window
     for rec in recs:
@@ -8761,7 +8800,8 @@ def blockers_scan(sweep=False, now=None):
         b = task_blocker(t["notes"])
         if not b:
             continue
-        reason = (blocker_clear_reason(b, sites, fstates, walk=session_walk if sweep else None)
+        reason = (blocker_clear_reason(b, sites, fstates, walk=session_walk if sweep else None,
+                                       tasked_done=tasked_done)
                   if not (sites_error and b["kind"] == "SITE") else "")
         if not reason and b["kind"] in ("SIGN-IN", "SITE") and not sites_error:
             events, _ = once("events", lambda: signin_hold.load_events(BROWSER_LEDGER))
@@ -8889,11 +8929,15 @@ def blockers_scan(sweep=False, now=None):
         if b["kind"] == "TOOL":
             cards, cards_error = once("cards", lambda: merge_card.list_cards(read=query_tasks))
             details, details_error = once("details", finding_details)
-            code, text = tool_wall_state(b, row["findingStatus"], (details or {}).get(b["finding"]) or {},
-                                         cards or [], days,
+            # A wall on a merged repeat is labelled from its survivor (#784): the survivor holds
+            # the PR, the task or the date the row names.
+            det = survivor_detail(details, b["finding"])
+            code, text = tool_wall_state(b, row["findingStatus"], det, cards or [], days,
                                          findings_error or details_error, cards_error)
+            if det.get("id") and det.get("id") != b["finding"]:
+                text += f" (finding {b['finding']} was merged into {det['id']})"
             row["toolState"], row["tool"] = code, text
-            card = card_for_wall(b, (details or {}).get(b["finding"]) or {}, cards or [])
+            card = card_for_wall(b, det, cards or [])
             if card:
                 row["mergeCard"] = {"pr": card["pr"], "task": card["id"], "status": card["status"],
                                     "outcome": card["outcome"]}
