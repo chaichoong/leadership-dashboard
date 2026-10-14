@@ -234,6 +234,16 @@ fi
 /usr/bin/python3 "$REPO/scripts/inbound-triage.py" matters \
   > "$SCRATCH/open-matters.json" 2>&1 || true
 
+# KEVIN'S NOTES ON INBOX CARDS REACH THE TRIAGE (Kevin, 14 Oct 2026). Mail he
+# should read comes to him as an INBOX card, and "I don't need to see this" on
+# one must change what the NEXT run shows him. The dispatcher's lesson writer
+# files a note on the card's sender (Inbox Response), so this copies every
+# remembered note on an INBOX card into the triage agent's own file, BEFORE
+# claude starts and reads that file at step 0. `|| true`: a failure lands in
+# the JSON as NOT CHECKED, and the slot still triages on the lessons it has.
+/usr/bin/python3 "$REPO/scripts/inbound-triage.py" inbox-lessons \
+  > "$SCRATCH/inbox-lessons.json" 2>&1 || true
+
 # THE LESSONS FILE IS READ FIRST, AND THAT IS LOAD-BEARING (27 Aug 2026).
 #
 # This runner invokes `claude -p` against SKILL.md files. It does NOT load
@@ -281,6 +291,13 @@ RC=$?
 if /usr/bin/python3 "$REPO/scripts/inbound-triage.py" history-stale >> "$LOG" 2>&1; then
   /usr/bin/python3 "$REPO/scripts/inbound-triage.py" history-build >> "$LOG" 2>&1 || true
 fi
+
+# THE INBOX CARD, WHATEVER THE AGENT REMEMBERED (Kevin, 14 Oct 2026). Every
+# "for Kevin to read" email the agent filed this slot is queued; the skill
+# raises the card at the end of the email lane, and this raises it if that step
+# was skipped or failed. An empty queue makes nothing. A failure prints an
+# error line here, which fails the slot loudly, and the emails stay queued.
+/usr/bin/python3 "$REPO/scripts/inbound-triage.py" inbox-card --slot "$SLOT_LABEL" >> "$LOG" 2>&1 || true
 
 # THE OUTCOME, NOT THE FORECAST (finding 20260907-daily-ops-487). If the email
 # lane was recorded ok before the agent started but no scan reached the end of
