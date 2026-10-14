@@ -6187,6 +6187,10 @@
     "name": "Active? (From Business)",
     "type": "multipleLookupValues"
    },
+   "fldRvVPngn2v4Mg49": {
+    "name": "Latest Update",
+    "type": "multilineText"
+   },
    "fldSeoVQwchENxjC8": {
     "name": "Objective and Strategy 3",
     "type": "multipleRecordLinks"
@@ -6222,6 +6226,10 @@
    "fldZ1ovBfw0Hp0VoZ": {
     "name": "Completion Rate Legacy",
     "type": "formula"
+   },
+   "fldZC3BcWrlpdOsXV": {
+    "name": "Latest Update At",
+    "type": "dateTime"
    },
    "fldZlwupuZrnY9m32": {
     "name": "Total Meetings MTD",
@@ -6289,6 +6297,10 @@
    },
    "fldic3mgIRLLu2Sre": {
     "name": "KPI Source",
+    "type": "multilineText"
+   },
+   "fldifD8aCIkmWn5dY": {
+    "name": "Latest Update State",
     "type": "multilineText"
    },
    "fldkvklKNZm9yNbik": {

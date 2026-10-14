@@ -65,6 +65,7 @@ const ESTATE_SCRIPTS = [
   'scripts/estate-status.py',
   'scripts/loop-health.py',
   'scripts/drift-scan.py',
+  'scripts/airtable-read.py',
   'scripts/transcripts-for-day.py',
   'scripts/build-reference-map.py',
   'scripts/agent-accuracy-report.py',
