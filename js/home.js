@@ -110,8 +110,11 @@
             setStatus(d.ok ? '' : `Your approvals and the CEO brief could not be read (${state.agents.error}). Press Refresh in the bar above, or open the AI Agents page.`, !d.ok);
             queueBand();
             maybeWealth();   // the frame has its real height now, so "near the screen" means something
+            if (pendingJump) redoJump();   // a jump made while it loaded is aimed again at its real place
             if (typeof markTabSynced === 'function') markTabSynced(TAB);
+            return;
         }
+        if (d.type === 'agentsHomeInput') pendingJump = null;   // he has moved on: never pull him back
     });
 
     // renderWealthTab handles its own errors and draws them into the panel, so the outcome is read
@@ -172,6 +175,8 @@
         if (note) note.hidden = true;
         try { await renderWealthTab(); state.wealth = wealthOutcome(); }
         catch (err) { state.wealth = 'failed'; console.error('[home] Wealth could not be drawn:', err); }
+        document.body.classList.add('home-wealth-drawn');
+        if (pendingJump && pendingJump.key === 'wealth') redoJump();   // it has its real height now
         if (typeof markTabSynced === 'function') markTabSynced(TAB);
     }
 
@@ -216,13 +221,14 @@
         const r = slot.getBoundingClientRect();
         const pin = homeOpen() && r.top < 0;
         if (pin) {
-            // From the sidebar's edge to the screen's (the sidebar is off-screen on a phone).
-            const side = document.querySelector('.sidebar');
-            const left = side ? Math.max(0, Math.round(side.getBoundingClientRect().right)) : 0;
-            const right = document.documentElement.clientWidth;
-            // On a phone the menu button is pinned at the top left too, so the buttons start clear of it.
+            // On a phone the menu button is pinned at the top left, so the row spans the screen and its
+            // buttons start clear of it. On a wider screen it runs from the sidebar's edge to the screen's.
             const menu = document.querySelector('.sidebar-toggle');
-            const menuRight = menu && getComputedStyle(menu).display !== 'none' ? menu.getBoundingClientRect().right + 8 : 0;
+            const phone = !!menu && getComputedStyle(menu).display !== 'none';
+            const side = document.querySelector('.sidebar');
+            const left = phone || !side ? 0 : Math.max(0, Math.round(side.getBoundingClientRect().right));
+            const right = document.documentElement.clientWidth;
+            const menuRight = phone ? menu.getBoundingClientRect().right + 8 : 0;
             slot.style.height = `${bar.getBoundingClientRect().height}px`;
             Object.assign(bar.style, { left: `${left}px`, width: `${Math.max(0, right - left)}px`,
                 paddingLeft: `${Math.max(0, r.left - left, menuRight - left)}px`, paddingRight: `${Math.max(0, right - r.right)}px` });
@@ -231,6 +237,8 @@
             Object.assign(bar.style, { left: '', width: '', paddingLeft: '', paddingRight: '' });
         }
         bar.classList.toggle('home-jump-pinned', pin);
+        // A control reached with Tab is scrolled clear of the row, never left underneath it.
+        document.documentElement.style.scrollPaddingTop = pin ? `${Math.ceil(bar.getBoundingClientRect().height) + 12}px` : '';
     }
     // Where a section's heading lands: just below the row, which is pinned by the time it gets there.
     function scrollToY(y) {
@@ -238,11 +246,20 @@
         const gap = (b ? b.offsetHeight : 0) + 12;
         window.scrollTo({ top: Math.max(0, Math.round(y - gap)), behavior: 'smooth' });
     }
-    function jumpTo(key) {
+    // A jump made before the page has its final shape (the approvals still loading, Wealth not yet drawn)
+    // is aimed again once it has, unless Kevin has scrolled or typed since. It lapses after 20 seconds.
+    let pendingJump = null;
+    function redoJump() {
+        if (!pendingJump) return;
+        if (Date.now() - pendingJump.at > 20000) { pendingJump = null; return; }
+        jumpTo(pendingJump.key, true);
+    }
+    function jumpTo(key, again) {
+        if (!again) pendingJump = { key, at: Date.now() };
         if (key === 'dashboard' || key === 'wealth') {
             if (folded(key)) setFold(key, false, true);
-            const el = key === 'dashboard' ? document.querySelector('#tab-home .home-dash-divider') : document.getElementById('homeWealthDivider');
-            if (el) scrollToY(el.getBoundingClientRect().top + window.pageYOffset);
+            const b = document.querySelector(`[data-home-fold="${key}"]`);
+            if (b) { scrollToY(b.getBoundingClientRect().top + window.pageYOffset); if (!again) b.focus({ preventScroll: true }); }
             return;
         }
         // Sign-ins, approvals and the brief live in the frame: it opens the section and says where it starts.
@@ -278,6 +295,8 @@
         if (window.whenMainDataReady && typeof window.whenMainDataReady.then === 'function') window.whenMainDataReady.then(ready);
         else ready();
         setTimeout(ready, 20000);   // a dashboard read that never finishes must not keep the approvals off Home
+        // Kevin scrolling or typing himself cancels a jump still waiting to be re-aimed.
+        ['wheel', 'touchmove', 'keydown'].forEach(t => window.addEventListener(t, () => { pendingJump = null; }, { passive: true }));
         // The row pins in the scroll event itself, before the frame is painted, so it never lags a frame behind.
         window.addEventListener('scroll', () => { syncPin(); queueBand(); }, { passive: true });
         window.addEventListener('resize', () => { syncPin(); queueBand(); });
