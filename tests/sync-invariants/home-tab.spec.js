@@ -96,6 +96,18 @@ test.describe('Home: one scroll of the real pages', () => {
     await page.waitForFunction(b => Math.abs(document.getElementById('homeAgentsFrame').getBoundingClientRect().height - b) <= 4, before, { timeout: 5000 });
   });
 
+  test('in a hidden tab (no animation frames) the frame still grows to its content', async ({ page }) => {
+    await page.addInitScript(() => { if (window !== window.top) window.requestAnimationFrame = () => 1; });
+    await open(page, 'home');
+    await waitForHomeFrame(page);
+    await page.evaluate(() => {
+      const d = document.getElementById('homeAgentsFrame').contentDocument;
+      const tall = d.createElement('div'); tall.style.height = '3000px';
+      d.getElementById('zoneApprovals').appendChild(tall);
+    });
+    await page.waitForFunction(() => document.getElementById('homeAgentsFrame').getBoundingClientRect().height > 3000, null, { timeout: 5000 });
+  });
+
   test('a toast and a dialog inside the frame open where Kevin is looking, not at the frame\'s far end', async ({ page }) => {
     await open(page, 'home');
     await waitForHomeFrame(page);
