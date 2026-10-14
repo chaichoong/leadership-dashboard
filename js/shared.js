@@ -206,6 +206,35 @@
     }
     window.getField = getField;
 
+    // What a credit card owes today, from its bank feed (an Accounts record).
+    // The feed copies ONE of the balances the bank sends into **GBP, and not always the
+    // current one: for Santander Credit Card it copies "previouslyClosedBooked", the last
+    // statement balance, so a payment made since the statement never showed (14 Oct 2026:
+    // the card read its old statement figure for weeks after a payment cut it). **Raw keeps
+    // every balance the bank sent, so take the current booked one from there. An
+    // "Available" balance is spare credit, never the debt. The bank sends what is owed as
+    // a negative, so a positive balance is a card in credit and owes nothing. With no
+    // usable balance in **Raw it falls back to the magnitude of **GBP, whose sign the
+    // feed does not keep consistent from card to card.
+    const CARD_BALANCE_ORDER = ['interimBooked', 'closingBooked', 'openingBooked', 'expected', 'information', 'previouslyClosedBooked'];
+    function cardOwed(acc) {
+        const stored = Math.abs(Number(getField(acc, F.accGBP)) || 0);
+        let list = null;
+        try {
+            const raw = JSON.parse(getField(acc, F.accRaw) || 'null');
+            const b = raw && raw.balances;
+            list = Array.isArray(b) ? b : (b && Array.isArray(b.balances) ? b.balances : null);
+        } catch (e) { return stored; } // unreadable feed payload: the stored figure is all there is
+        if (!list) return stored;
+        for (const type of CARD_BALANCE_ORDER) {
+            const hit = list.find(x => x && x.balanceType === type && x.balanceAmount);
+            const v = hit ? Number(hit.balanceAmount.amount) : NaN;
+            if (isFinite(v)) return Math.max(0, -v);
+        }
+        return stored;
+    }
+    window.cardOwed = cardOwed;
+
     // Split-aware amount: returns the correct per-portion amount for any
     // transaction. Checks Split Override first (set on split parents and
     // custom-amount children) so we never need to rely on Split Count > 1
