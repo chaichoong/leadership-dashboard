@@ -900,6 +900,7 @@ def loop_health_row(now, res=None, err=None):
 AI_TEAM_KEY = "ai-team-health"
 AI_TEAM_CACHE = os.path.join(LOGS, "ai-team-health-cache.json")
 AI_TEAM_CACHE_MIN = 60
+AI_TEAM_CACHE_SHAPE = 2    # 14 Oct 2026: defects carry code / notCode / repeats / refusedUnread
 REWORK_DAYS = 14
 REWORK_BASELINE_PCT = 32   # 36 of 111 fixes, 30 days to 28 Sep 2026 (rework-rate.py)
 
@@ -923,16 +924,34 @@ def fixed_times(ops):
     return out
 
 
-def defect_counts(state, now, ops=()):
+def defect_counts(state, now, ops=(), overflow=None):
     """The defect queue from findings.py's folded state: open now (its BACKLOG), filed and
     fixed in the last 7 days. A rejected finding carries no close time, so it is not
-    counted as out; fixed means landed in a merged PR or closed against a commit."""
+    counted as out; fixed means landed in a merged PR or closed against a commit.
+
+    WHAT THE CARD IS (Kevin, 14 Oct 2026). The card read "230 open" when about a fifth were
+    one problem filed again, 62 were matters no code fix can close, and 245 refusals sat in an
+    overflow log no number counted. So: open counts each problem ONCE (a merged repeat is
+    `duplicate`, never open), split into code and not code, and every refusal the cap made
+    that nobody has sorted is counted as refused-unread. A repeat is neither filed nor fixed
+    in its own right: its survivor is the one problem."""
     items = list(state.items())
     when_fixed = fixed_times(ops)
-    return {"open": sum(1 for _, f in items if f.get("status") in ("open", "claimed", "pending")),
-            "filed7d": sum(1 for _, f in items if _within(f.get("ts"), now, 7)),
-            "fixed7d": sum(1 for fid, f in items if f.get("status") == "fixed"
-                           and _within(when_fixed.get(fid) or f.get("landed_at"), now, 7))}
+    repeat = lambda f: bool(f.get("duplicate_root") or f.get("status") == "duplicate")  # noqa: E731
+    live = [f for _, f in items if f.get("status") in ("open", "claimed", "pending")]
+    out = {"open": len(live),
+           "code": sum(1 for f in live if f.get("touches_code")),
+           "notCode": sum(1 for f in live if not f.get("touches_code")),
+           "filed7d": sum(1 for _, f in items if not repeat(f) and _within(f.get("ts"), now, 7)),
+           "fixed7d": sum(1 for fid, f in items if f.get("status") == "fixed" and not repeat(f)
+                          and _within(when_fixed.get(fid) or f.get("landed_at"), now, 7)),
+           "repeats": sum(1 for _, f in items if repeat(f)),
+           "toTasks7d": sum(1 for _, f in items if f.get("status") == "tasked" and not repeat(f)
+                            and _within(f.get("closed_at"), now, 7))}
+    if overflow is not None:
+        out["refusedUnread"] = sum(1 for r in overflow if not r.get("read"))
+        out["refused7d"] = sum(1 for r in overflow if _within(r.get("ts"), now, 7))
+    return out
 
 
 def rework_counts(r):
@@ -947,7 +966,8 @@ def _measure_defects_and_rework(now):
     spec = importlib.util.spec_from_file_location("findings", os.path.join(HERE, "findings.py"))
     fm = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(fm)
-    defects = defect_counts(fm.current_state(), now, fm.read_all())
+    ops = fm.read_all()
+    defects = defect_counts(fm.current_state(), now, ops, fm.overflow_state(ops))
     # --no-fetch: this job is lock-exempt because it never touches the repo, so it reads
     # origin/main as the other jobs last fetched it (review finding, 9 Oct 2026).
     out = subprocess.run([sys.executable, os.path.join(HERE, "rework-rate.py"), "--days", str(REWORK_DAYS),
@@ -963,7 +983,9 @@ def _cached_measures(now, cache=AI_TEAM_CACHE, measure=_measure_defects_and_rewo
         with open(cache, encoding="utf-8") as fh:
             c = json.load(fh)
         t = parse_ts(c.get("computedAt"))
-        if t and (now - t) < timedelta(minutes=AI_TEAM_CACHE_MIN):
+        # A cache written before the defects payload changed shape is not served: the card
+        # would read the old numbers for up to an hour after the change ships.
+        if t and (now - t) < timedelta(minutes=AI_TEAM_CACHE_MIN) and c.get("shape") == AI_TEAM_CACHE_SHAPE:
             return c["defects"], c["rework"], c["computedAt"]
     except (OSError, ValueError, KeyError):
         pass
@@ -971,7 +993,7 @@ def _cached_measures(now, cache=AI_TEAM_CACHE, measure=_measure_defects_and_rewo
     stamp = now.strftime("%Y-%m-%dT%H:%M:%S.000Z")
     tmp = cache + ".tmp"
     with open(tmp, "w", encoding="utf-8") as fh:
-        json.dump({"computedAt": stamp, "defects": defects, "rework": rework}, fh)
+        json.dump({"computedAt": stamp, "shape": AI_TEAM_CACHE_SHAPE, "defects": defects, "rework": rework}, fh)
     os.replace(tmp, cache)   # atomic: a reader never sees a half-written cache
     return defects, rework, stamp
 
@@ -1016,10 +1038,15 @@ def ai_team_row(now, lh_res, lh_err, measures=None):
     stuck = "%d stuck" % work["notMoving"] + (
         ", %d of them waiting on a reply too long" % work["replyOverdue"] if work["replyOverdue"] else "") + (
         " (held tasks not checked: %s)" % work["heldCheck"] if work["heldCheck"] else "")
-    detail = ("Agent work: %s, %s, %d in and %d done in 7 days. Defects: %d open, %d filed and "
+    # The split and the refusals arrived on 14 Oct 2026; a measure without them reads as before.
+    split = ("" if defects.get("code") is None else
+             " (%d code, %d not code)" % (defects["code"], defects.get("notCode") or 0))
+    refused = ("" if defects.get("refusedUnread") is None else
+               ", %d refused by the cap and unread" % defects["refusedUnread"])
+    detail = ("Agent work: %s, %s, %d in and %d done in 7 days. Defects: %d open%s%s, %d filed and "
               "%d fixed in 7 days. Fix of a fix: %s over %d days (baseline %d%%)." % (
                   opened, stuck, work["created7d"], work["done7d"],
-                  defects["open"], defects["filed7d"], defects["fixed7d"],
+                  defects["open"], split, refused, defects["filed7d"], defects["fixed7d"],
                   ("%d%% (%d of %d fixes)" % (pct, rework["fixOfFix"], rework["fixes"])) if pct is not None else "no fixes",
                   rework["days"], rework["baselinePct"]))
     payload = {"work": work, "defects": defects, "rework": rework, "measuredAt": measured}

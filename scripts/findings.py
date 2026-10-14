@@ -11,27 +11,35 @@ records, so they stay off GitHub.
 
 Usage
     findings.py add --routine drift-monitor --title "..." --where js/config.js:42 \
-                    --detail "..." --fix "..." [--severity high]
+                    --detail "..." --fix "..." [--severity high] [--agent "<agent name>"]
     findings.py list [--status open] [--routine X] [--json]
     findings.py claim <id> --by queue-fixer
     findings.py reopen <id> [--force] | findings.py reopen --stale
     findings.py list --stale
     findings.py close <id> --outcome fixed --evidence <sha> --note "..."
     findings.py close <id> --outcome pending --pr <n> --note "..."
-    findings.py close <id> --outcome rejected|deferred --note "..."
+    findings.py close <id> --outcome rejected|deferred --note "..." [--until YYYY-MM-DD]
+    findings.py close <id> --outcome tasked --task <rec id> --note "..."
+    findings.py dupe <id> --of <survivor id> --note "..."   # the same problem, filed again
+    findings.py undupe <id> --note "..."                    # take a merge back
+    findings.py retag <id> --code|--not-code --note "..."   # correct the filer's guess
     findings.py escalate <id> --severity critical --why "..." [--by task-manager]
+    findings.py overflow list|sort [--apply]|promote <ref>|dismiss <ref> --note "..."
     findings.py count                 # the BACKLOG: open + claimed + pending
     findings.py count --status all    # every finding ever filed
     findings.py count --breakdown     # every status, labelled
 """
 
 import argparse
+import hashlib
 import json
 import os
 import re
 import subprocess
 import sys
 import time
+import urllib.parse
+import urllib.request
 from datetime import datetime
 
 HOME = os.path.expanduser("~")
@@ -71,6 +79,43 @@ OVERFLOW = os.environ.get(
     "FINDINGS_OVERFLOW_FILE",
     os.path.join(HOME, "knowledge-os/logs/findings-overflow.jsonl"),
 )
+
+# ─── ONE PROBLEM, ONE LINE; A FILER IS AN AGENT, NOT A LANE (14 Oct 2026) ─
+#
+# Kevin, 14 Oct 2026: "merge duplicates, move the non-code items to tasks, stop
+# the overflow log". Measured that day: 235 open, of which about a fifth were
+# the same problem filed again (one insurer's sign-in window three times, one findings
+# cap four times), 62 were flagged as needing no code at all (a council tax
+# hearing, an insurance gap, tenancy data) so the code fixer could never close
+# them, and 89 came from AI agents who all file under ONE routine name,
+# `agent-dispatch`. With a cap of 15 per routine, every medium or low finding
+# any agent filed went to the overflow log: 245 lines, nothing read them.
+#
+# Four answers, all here:
+#   1. `dupe` merges a repeat into the finding that survives. The repeat leaves
+#      every backlog count but keeps its words on the survivor, and it takes
+#      the survivor's final state when that closes, so a robot's TOOL wall on
+#      the repeat still wakes when the fix lands (agent-dispatch.py clears a
+#      wall only on `fixed`). `undupe` takes it back.
+#   2. `tasked` closes a finding a code fix cannot close, against the open task
+#      that now carries it. The task is read off Airtable first.
+#   3. `deferred --until` comes back by itself on its date, so a park is a
+#      clock and not a burial.
+#   4. The cap counts per FILER: the routine plus the agent that names itself
+#      (`--agent`, or FINDINGS_AGENT). A refusal gets a reference and stays
+#      "refused, unread" on the Defects card until a reader promotes it,
+#      dismisses it, or `overflow sort --apply` folds it into the open finding
+#      it repeats.
+DUPLICATE = "duplicate"
+TASKED = "tasked"
+# Closed states a repeat takes from its survivor. Pending is NOT here: a fix in
+# an open PR is still owed, so the repeat stays `duplicate` until it lands.
+FINAL_STATES = ("fixed", "rejected", "deferred", TASKED)
+TASK_ID_RE = re.compile(r"^rec[A-Za-z0-9]{14}$")
+DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
+AIRTABLE_BASE = "appnqjDpqDniH3IRl"
+TASKS_TABLE = "tblqB8b22hKBL4PF1"
+PAT_FILE = os.path.expanduser("~/.config/od/airtable_pat")
 
 # ─── A CLAIM THAT OUTLIVES ITS RUN ───────────────────────────────────
 #
@@ -119,7 +164,18 @@ def append(rec):
         f.write(json.dumps(rec) + "\n")
 
 
-def current_state():
+def today_str():
+    """Today's date where the Mac is. FINDINGS_TODAY pins it for tests."""
+    return os.environ.get("FINDINGS_TODAY") or datetime.now().strftime("%Y-%m-%d")
+
+
+def norm_agent(agent):
+    """An agent's name as the cap keys it: 'Property Administration' and
+    'property-administration' are one filer."""
+    return re.sub(r"[^a-z0-9]", "", (agent or "").lower())
+
+
+def current_state(today=None):
     """Fold the append-only log into the current state of each finding.
 
     Append-only rather than rewrite-in-place: two routines writing findings at
@@ -134,7 +190,24 @@ def current_state():
         if rec.get("op") == "add":
             state[fid] = dict(rec, status="open")
         elif fid in state:
-            if rec.get("op") == "claim":
+            if rec.get("op") in ("close", "land", "reopen"):
+                # A decision on the finding itself ends any merge: closing a
+                # repeat in its own right, or reopening it, is the reader saying
+                # it stands alone again.
+                state[fid].pop("duplicate_of", None)
+            if rec.get("op") == "dupe":
+                state[fid]["duplicate_of"] = rec.get("of")
+                state[fid]["dupe_at"] = rec.get("ts")
+                state[fid]["dupe_note"] = rec.get("note")
+            elif rec.get("op") == "undupe":
+                state[fid].pop("duplicate_of", None)
+                state[fid]["undupe_note"] = rec.get("note")
+            elif rec.get("op") == "retag":
+                # The filer's guess at code / not code corrected by a reader.
+                # The Defects card splits on it, so a wrong flag is a wrong card.
+                state[fid]["touches_code"] = bool(rec.get("touches_code"))
+                state[fid]["retag_note"] = rec.get("note")
+            elif rec.get("op") == "claim":
                 state[fid]["status"] = "claimed"
                 state[fid]["claimed_by"] = rec.get("by")
                 state[fid]["claimed_at"] = rec.get("ts")
@@ -142,6 +215,7 @@ def current_state():
                 state[fid]["status"] = "open"
                 state[fid].pop("claimed_by", None)
                 state[fid].pop("claimed_at", None)
+                state[fid].pop("deferred_until", None)
                 state[fid]["reopen_note"] = rec.get("note")
             elif rec.get("op") == "recur":
                 # Seen again. Evidence about an existing finding, never a new
@@ -186,9 +260,74 @@ def current_state():
                 # count so nobody reads unmerged work as finished.
                 state[fid]["status"] = "pending" if outcome == "pending" else outcome
                 state[fid]["close_note"] = rec.get("note")
+                state[fid]["closed_at"] = rec.get("ts")
                 if rec.get("pr"):
                     state[fid]["pr"] = rec.get("pr")
+                if rec.get("task"):
+                    state[fid]["task"] = rec.get("task")
+                if outcome == "deferred" and rec.get("until"):
+                    state[fid]["deferred_until"] = rec.get("until")
+                else:
+                    state[fid].pop("deferred_until", None)
+    # A park with a date is a clock (Kevin, 7 Oct 2026: no lane without a
+    # clock). On its date it is open again, with no job needed to wake it.
+    day = today or today_str()
+    for r in state.values():
+        until = r.get("deferred_until")
+        if r.get("status") == "deferred" and until and until <= day:
+            r["status"] = "open"
+            r["woke_from_deferral"] = until
+    _fold_duplicates(state)
     return state
+
+
+def duplicate_root(state, fid, limit=50):
+    """The finding a repeat finally points at, or None for a pointer to a
+    missing finding or a loop (never followed for ever, never guessed)."""
+    seen = {fid}
+    cur = fid
+    for _ in range(limit):
+        nxt = (state.get(cur) or {}).get("duplicate_of")
+        if not nxt:
+            return cur
+        if nxt not in state or nxt in seen:
+            return None
+        seen.add(nxt)
+        cur = nxt
+    return None
+
+
+def _fold_duplicates(state):
+    """Give each repeat its survivor's standing and each survivor its repeats'
+    evidence. Done after every op is folded, so `undupe` needs no undo: drop
+    the pointer and the evidence is simply never attached."""
+    roots = {fid: duplicate_root(state, fid) for fid, r in state.items() if r.get("duplicate_of")}
+    for fid in sorted(roots, key=lambda i: (state[i].get("dupe_at") or "", i)):
+        r, root = state[fid], roots[fid]
+        if root is None:
+            r["duplicate_broken"] = True     # shown at its own status, so nothing hides
+            continue
+        rr = state[root]
+        r["duplicate_root"] = root
+        r["status"] = DUPLICATE if rr.get("status") in OPEN_STATES else rr.get("status")
+        rr.setdefault("duplicates", []).append(fid)
+        rr["seen"] = rr.get("seen", 1) + r.get("seen", 1)
+        rr["last_seen"] = max(rr.get("last_seen") or rr.get("ts") or "",
+                              r.get("last_seen") or r.get("ts") or "")
+        old_sev, new_sev = rr.get("severity"), r.get("severity")
+        if (new_sev in SEVERITIES and (old_sev not in SEVERITIES
+                                       or SEVERITIES.index(new_sev) < SEVERITIES.index(old_sev))):
+            rr["severity"] = new_sev
+        # A repeat that needs code makes the problem a code problem.
+        rr["touches_code"] = bool(rr.get("touches_code") or r.get("touches_code"))
+        words = " ".join(x for x in (
+            "Repeat %s (%s, %s): %s" % (fid, r.get("routine") or "?", (r.get("ts") or "?")[:10], r.get("title") or ""),
+            ("Where: %s" % r["where"]) if r.get("where") else "",
+            r.get("detail") or "") if x)
+        rr.setdefault("recurrences", []).append(
+            {"ts": r.get("ts"), "note": words, "fix": r.get("proposed_fix") or "", "from": fid})
+        for rc in r.get("recurrences") or []:
+            rr["recurrences"].append(dict(rc, **{"from": fid}))
 
 
 def dedupe_key(routine, title, where):
@@ -295,9 +434,26 @@ def open_sharing_file(state, where, exclude_id=None):
     return sorted(out)
 
 
-def open_findings_for(state, routine):
+def open_findings_for(state, routine, agent=""):
+    """The filer's own open findings: the routine AND the agent that named
+    itself (or, for a filer that names none, the routine's unnamed ones).
+    Fourteen agents filing under `agent-dispatch` shared one cap of 15, so
+    every medium any of them filed was refused (14 Oct 2026)."""
+    me = norm_agent(agent)
     return [r for r in state.values()
-            if r.get("routine") == routine and r.get("status") in OPEN_STATES]
+            if r.get("routine") == routine and r.get("status") in OPEN_STATES
+            and norm_agent(r.get("agent")) == me]
+
+
+def live_target(state, r):
+    """The open finding a match on R should land on: R itself, or the survivor
+    R was merged into. None when that survivor is no longer open."""
+    if r.get("status") in OPEN_STATES:
+        return r["id"]
+    if r.get("status") == DUPLICATE and r.get("duplicate_root"):
+        root = state.get(r["duplicate_root"]) or {}
+        return root.get("id") if root.get("status") in OPEN_STATES else None
+    return None
 
 
 def next_id(routine):
@@ -330,74 +486,85 @@ def is_stale_claim(rec, hours=STALE_CLAIM_HOURS, now=None):
     return age is None or age >= hours
 
 
-def cmd_add(a):
-    state = current_state()
-    key = dedupe_key(a.routine, a.title, a.where)
-
-    # 1. Already known and still open? Record the recurrence on the existing
-    #    finding and return ITS id. A defect seen again is evidence about that
-    #    defect, never a second defect.
+def known_match(state, routine, title, where):
+    """(target id, why) for the open finding this one repeats, or (None, '').
+    A repeat of a merged finding lands on its survivor."""
+    key = dedupe_key(routine, title, where)
+    # 1. Same routine, same words, same place.
     for r in state.values():
-        if r.get("status") not in OPEN_STATES:
-            continue
-        if dedupe_key(r.get("routine"), r.get("title"), r.get("where")) != key:
-            continue
-        append({"op": "recur", "id": r["id"], "ts": iso(),
-                "severity": a.severity, "note": a.detail, "fix": a.fix})
-        print(r["id"])
-        print("RECURRENCE of %s (seen %d times) — no duplicate filed."
-              % (r["id"], r.get("seen", 1) + 1), file=sys.stderr)
-        return 0
-
+        tid = live_target(state, r)
+        if tid and dedupe_key(r.get("routine"), r.get("title"), r.get("where")) == key:
+            return tid, ""
     # 1b. Same FILE and same SYMBOL, whatever the routine or the wording. See
-    #     the block above open_findings_for for why this is narrower than "same
-    #     file" and why it has to be.
+    #     the block above code_paths for why this is narrower than "same file"
+    #     and why it has to be.
     for r in state.values():
-        if r.get("status") not in OPEN_STATES:
-            continue
-        if not same_code_target(a.where, r.get("where")):
-            continue
-        append({"op": "recur", "id": r["id"], "ts": iso(),
-                "severity": a.severity, "note": a.detail, "fix": a.fix})
-        print(r["id"])
-        print("RECURRENCE of %s (seen %d times) — same code target (%s). "
-              "No duplicate filed."
-              % (r["id"], r.get("seen", 1) + 1,
-                 ", ".join(sorted(code_paths(a.where) & code_paths(r.get("where"))))),
-              file=sys.stderr)
-        return 0
+        tid = live_target(state, r)
+        if tid and same_code_target(where, r.get("where")):
+            return tid, "same code target (%s)" % ", ".join(
+                sorted(code_paths(where) & code_paths(r.get("where"))))
+    return None, ""
 
-    # 2. Cap the routine's own open queue. Critical and high are never refused.
-    if a.severity not in ALWAYS_ACCEPT:
-        mine = open_findings_for(state, a.routine)
+
+def file_finding(state, f, cap=True):
+    """File one finding: a recurrence of an open one, a refusal past the
+    filer's cap, or a new id. Returns (exit code, id or overflow ref)."""
+    key = dedupe_key(f["routine"], f["title"], f["where"])
+    tid, why = known_match(state, f["routine"], f["title"], f["where"])
+    if tid:
+        # A defect seen again is evidence about that defect, never a second one.
+        append({"op": "recur", "id": tid, "ts": iso(),
+                "severity": f["severity"], "note": f["detail"], "fix": f["fix"]})
+        print(tid)
+        print("RECURRENCE of %s (seen %d times)%s — no duplicate filed."
+              % (tid, state[tid].get("seen", 1) + 1, (" — " + why) if why else ""),
+              file=sys.stderr)
+        return 0, tid
+
+    # 2. Cap the FILER's own open queue. Critical and high are never refused.
+    if cap and f["severity"] not in ALWAYS_ACCEPT:
+        mine = open_findings_for(state, f["routine"], f.get("agent"))
         if len(mine) >= MAX_OPEN_PER_ROUTINE:
-            rec = {"op": "overflow", "ts": iso(), "routine": a.routine,
-                   "severity": a.severity, "title": a.title, "where": a.where,
-                   "detail": a.detail, "proposed_fix": a.fix,
-                   "touches_code": a.touches_code, "key": key}
+            rec = {"op": "overflow", "ts": iso(), "routine": f["routine"],
+                   "severity": f["severity"], "title": f["title"], "where": f["where"],
+                   "detail": f["detail"], "proposed_fix": f["fix"],
+                   "touches_code": f["touches_code"], "key": key}
+            if f.get("agent"):
+                rec["agent"] = f["agent"]
+            line = json.dumps(rec)
             os.makedirs(os.path.dirname(OVERFLOW), exist_ok=True)
-            with open(OVERFLOW, "a") as f:
-                f.write(json.dumps(rec) + "\n")
+            with open(OVERFLOW, "a") as fh:
+                fh.write(line + "\n")
+            ref = overflow_ref(line)
+            who = f["routine"] + (" / " + f["agent"] if f.get("agent") else "")
             oldest = sorted(mine, key=lambda r: r["ts"])[:3]
             print("REFUSED: %s already has %d open findings (cap %d)."
-                  % (a.routine, len(mine), MAX_OPEN_PER_ROUTINE), file=sys.stderr)
-            print("Kept in %s — nothing is lost." % OVERFLOW, file=sys.stderr)
-            print("Close or merge some of yours first. Oldest three:", file=sys.stderr)
+                  % (who, len(mine), MAX_OPEN_PER_ROUTINE), file=sys.stderr)
+            print("Kept in %s as %s — nothing is lost, and the Defects card counts it as "
+                  "refused and unread until someone sorts it." % (OVERFLOW, ref), file=sys.stderr)
+            if not f.get("agent"):
+                print("If you are an AI agent filing under a shared routine, file again with "
+                      "--agent \"<your name>\": the cap then counts your own findings, not the "
+                      "whole lane's.", file=sys.stderr)
+            print("A reader files it with `findings.py overflow promote %s`. Close or merge "
+                  "some of yours first. Oldest three:" % ref, file=sys.stderr)
             for r in oldest:
                 print("  %s  %-8s %s" % (r["id"], r.get("severity", "?"), r["title"]),
                       file=sys.stderr)
-            return 2
+            return 2, ref
 
-    fid = next_id(a.routine)
+    fid = next_id(f["routine"])
     rec = {
-        "op": "add", "id": fid, "ts": iso(), "routine": a.routine,
-        "severity": a.severity, "title": a.title, "where": a.where,
-        "detail": a.detail, "proposed_fix": a.fix, "touches_code": a.touches_code,
+        "op": "add", "id": fid, "ts": iso(), "routine": f["routine"],
+        "severity": f["severity"], "title": f["title"], "where": f["where"],
+        "detail": f["detail"], "proposed_fix": f["fix"], "touches_code": f["touches_code"],
     }
+    if f.get("agent"):
+        rec["agent"] = f["agent"]
     # Rule 2: not the same defect, but the same file. Carried on the record so
     # the fixer sees the cluster in `list` instead of meeting six ids one at a
     # time and treating each as a small separate thing.
-    neighbours = open_sharing_file(state, a.where, exclude_id=fid)
+    neighbours = open_sharing_file(state, f["where"], exclude_id=fid)
     if neighbours:
         rec["same_file_as"] = neighbours
     append(rec)
@@ -405,7 +572,15 @@ def cmd_add(a):
     if neighbours:
         print("NOTE: %d open finding(s) already name this file: %s"
               % (len(neighbours), ", ".join(neighbours)), file=sys.stderr)
-    return 0
+    return 0, fid
+
+
+def cmd_add(a):
+    f = {"routine": a.routine, "title": a.title, "where": a.where, "detail": a.detail,
+         "fix": a.fix, "severity": a.severity, "touches_code": a.touches_code,
+         "agent": (a.agent or "").strip()}
+    rc, _ = file_finding(current_state(), f)
+    return rc
 
 
 def overflow_rows():
@@ -419,7 +594,10 @@ def overflow_rows():
     was true of the disk and false of the work.
 
     So `list` reads it. A backlog that is visible can be decided about; one in
-    an unread file is written off by neglect while still reporting as filed."""
+    an unread file is written off by neglect while still reporting as filed.
+
+    Each row carries `_ref`, a hash of its own line, so a reader can name it
+    and the queue can record that it was read (14 Oct 2026)."""
     rows = []
     try:
         with open(OVERFLOW) as f:
@@ -428,33 +606,63 @@ def overflow_rows():
                 if not line:
                     continue
                 try:
-                    rows.append(json.loads(line))
+                    row = json.loads(line)
                 except ValueError:
                     # Loud, never silent: a half-written line must not make the
                     # rest of the backlog disappear from the count.
-                    rows.append({"ts": "?", "routine": "?", "severity": "?",
-                                 "title": "UNREADABLE overflow line in %s" % OVERFLOW})
+                    row = {"ts": "?", "routine": "?", "severity": "?",
+                           "title": "UNREADABLE overflow line in %s" % OVERFLOW}
+                if not isinstance(row, dict):
+                    row = {"ts": "?", "routine": "?", "severity": "?",
+                           "title": "UNREADABLE overflow line in %s" % OVERFLOW}
+                row["_ref"] = overflow_ref(line)
+                rows.append(row)
     except FileNotFoundError:
         return []
     except OSError as e:
-        return [{"ts": "?", "routine": "?", "severity": "?",
+        return [{"ts": "?", "routine": "?", "severity": "?", "_ref": "ofl-unreadable",
                  "title": "overflow log unreadable: %s" % e}]
     return rows
 
 
-def print_overflow(stream):
+def overflow_ref(line):
+    """A stable name for one overflow line: the same line always gets the same ref."""
+    return "ofl-" + hashlib.sha1(line.strip().encode("utf-8")).hexdigest()[:10]
+
+
+def overflow_reads(ops=None):
+    """ref -> the newest `overflow-read` op: who sorted that refused line, and how."""
+    out = {}
+    for rec in (read_all() if ops is None else ops):
+        if rec.get("op") == "overflow-read" and rec.get("ref"):
+            out[rec["ref"]] = rec
+    return out
+
+
+def overflow_state(ops=None):
+    """Every refused row, each with `read` (its read op) or None while unread."""
+    reads = overflow_reads(ops)
     rows = overflow_rows()
-    if not rows:
+    for r in rows:
+        r["read"] = reads.get(r.get("_ref"))
+    return rows
+
+
+def print_overflow(stream):
+    rows = overflow_state()
+    unread = [r for r in rows if not r.get("read")]
+    if not unread:
         return
-    oldest = min((r.get("ts") or "?") for r in rows)
+    oldest = min((r.get("ts") or "?") for r in unread)
     print("", file=stream)
-    print("OVERFLOW: %d finding(s) the cap refused, oldest %s, in %s."
-          % (len(rows), oldest, OVERFLOW), file=stream)
-    print("These are NOT in the queue above and no routine has ever read them."
-          " Oldest five:", file=stream)
-    for r in sorted(rows, key=lambda r: (r.get("ts") or "?"))[:5]:
-        print("  %s  %-8s %-20s %s"
-              % ((r.get("ts") or "?")[:10], r.get("severity", "?"),
+    print("OVERFLOW: %d finding(s) the cap refused and nobody has sorted, oldest %s, in %s "
+          "(%d sorted already)." % (len(unread), oldest, OVERFLOW, len(rows) - len(unread)),
+          file=stream)
+    print("These are NOT in the queue above. `findings.py overflow list` names each one;"
+          " oldest five:", file=stream)
+    for r in sorted(unread, key=lambda r: (r.get("ts") or "?"))[:5]:
+        print("  %s  %s  %-8s %-20s %s"
+              % (r.get("_ref", "?"), (r.get("ts") or "?")[:10], r.get("severity", "?"),
                  r.get("routine", "?"), (r.get("title") or "")[:90]),
               file=stream)
     return
@@ -486,6 +694,12 @@ def cmd_list(a):
         if r.get("seen", 1) > 1:
             print("         SEEN %d TIMES (last %s) — recurring, not new"
                   % (r["seen"], r.get("last_seen") or "?"))
+        if r.get("duplicate_root"):
+            print("         REPEAT of %s — work that one, not this" % r["duplicate_root"])
+        if r.get("duplicates"):
+            print("         repeats merged in: %s" % ", ".join(r["duplicates"]))
+        if r.get("touches_code") is False:
+            print("         NOT CODE — a code fix cannot close this; it belongs on the task board")
         still_open = [i for i in (r.get("same_file_as") or [])
                       if (state.get(i) or {}).get("status") in OPEN_STATES]
         if still_open:
@@ -493,11 +707,90 @@ def cmd_list(a):
         if r.get("proposed_fix"):
             print("         fix:   %s" % r["proposed_fix"])
         # A later sighting's fix text is the one a fixer must read, so it is
-        # printed, never only stored. Newest last, each with its date.
+        # printed, never only stored. Newest last, each with its date. A merged
+        # repeat says where it came from and what it saw.
         for rc in (r.get("recurrences") or []):
+            if rc.get("from") and rc.get("note"):
+                print("         from %s: %s" % (rc["from"], " ".join(rc["note"].split())[:300]))
             if rc.get("fix"):
-                print("         fix (added %s): %s" % (rc.get("ts") or "?", rc["fix"]))
+                print("         fix (added %s%s): %s" % (rc.get("ts") or "?",
+                                                         (", from " + rc["from"]) if rc.get("from") else "",
+                                                         rc["fix"]))
     print_overflow(sys.stdout)
+    return 0
+
+
+def cmd_dupe(a):
+    """Merge a repeat into the finding that survives it.
+
+    Refused, never guessed: two findings that name DIFFERENT code files are two
+    problems (one file holds many defects, so a shared file is not proof either;
+    see rule 2 above). Only an open finding can be merged, only into one still
+    open, and never into itself or round a loop."""
+    state = current_state()
+    for fid in (a.id, a.of):
+        if fid not in state:
+            print("ERROR: no finding %s" % fid, file=sys.stderr)
+            return 1
+    me, them = state[a.id], state[a.of]
+    if a.id == a.of:
+        print("REFUSED: a finding cannot repeat itself.", file=sys.stderr)
+        return 2
+    if me.get("status") != "open":
+        print("REFUSED: %s is %s. Only an open finding can be merged; a claimed one is being "
+              "worked and a pending one has a PR." % (a.id, me.get("status")), file=sys.stderr)
+        return 2
+    root = duplicate_root(state, a.of) if them.get("duplicate_of") else a.of
+    if root is None or root == a.id:
+        print("REFUSED: %s leads back to %s, so the merge would loop." % (a.of, a.id), file=sys.stderr)
+        return 2
+    if state[root].get("status") not in OPEN_STATES:
+        print("REFUSED: %s is %s. A problem seen again after its finding closed is a recurrence: "
+              "reopen that one (`reopen %s --force`) instead of merging into it."
+              % (root, state[root].get("status"), root), file=sys.stderr)
+        return 2
+    pa, pb = code_paths(me.get("where")), code_paths(state[root].get("where"))
+    if pa and pb and not (pa & pb) and not a.force:
+        print("REFUSED: %s names %s and %s names %s. Different files are different problems; "
+              "--force only if you have read both and they are one."
+              % (a.id, ", ".join(sorted(pa)), root, ", ".join(sorted(pb))), file=sys.stderr)
+        return 2
+    append({"op": "dupe", "id": a.id, "of": root, "ts": iso(), "by": a.by, "note": a.note})
+    print(json.dumps({"id": a.id, "duplicateOf": root}))
+    return 0
+
+
+def cmd_undupe(a):
+    """Take a merge back: the finding stands on its own again, at its own status."""
+    state = current_state()
+    if a.id not in state:
+        print("ERROR: no finding %s" % a.id, file=sys.stderr)
+        return 1
+    if not state[a.id].get("duplicate_of"):
+        print("REFUSED: %s is not merged into anything." % a.id, file=sys.stderr)
+        return 2
+    append({"op": "undupe", "id": a.id, "ts": iso(), "by": a.by, "note": a.note})
+    print(json.dumps({"id": a.id, "duplicateOf": None}))
+    return 0
+
+
+def cmd_retag(a):
+    """Correct whether a finding needs code. Routing reads it: a code problem
+    handed to an agent's task board is never fixed, and a matter left in the
+    code queue is never handled."""
+    state = current_state()
+    if a.id not in state:
+        print("ERROR: no finding %s" % a.id, file=sys.stderr)
+        return 1
+    if not (a.note or "").strip():
+        print("REFUSED: retag needs --note saying why", file=sys.stderr)
+        return 2
+    want = bool(a.code)
+    if bool(state[a.id].get("touches_code")) == want:
+        print(json.dumps({"id": a.id, "touchesCode": want, "changed": False}))
+        return 0
+    append({"op": "retag", "id": a.id, "ts": iso(), "touches_code": want, "by": a.by, "note": a.note})
+    print(json.dumps({"id": a.id, "touchesCode": want, "changed": True}))
     return 0
 
 
@@ -627,10 +920,52 @@ def landed_on_main(sha):
                            "it is on a branch, so the fix has not landed" % sha)
 
 
+def task_status(rec_id):
+    """The Status of a record in the Tasks table: its value ('' when blank), or
+    None when no task has that id. Listed with RECORD_ID() on the Tasks table,
+    because a GET by record id ignores the table in its URL (CLAUDE.md), so it
+    cannot prove the record is a TASK. Raises when Airtable cannot be read."""
+    with open(PAT_FILE) as fh:
+        pat = fh.read().strip()
+    q = urllib.parse.urlencode([("filterByFormula", "RECORD_ID()='%s'" % rec_id),
+                                ("fields[]", "Status"), ("pageSize", "1")])
+    req = urllib.request.Request("https://api.airtable.com/v0/%s/%s?%s" % (AIRTABLE_BASE, TASKS_TABLE, q),
+                                 headers={"Authorization": "Bearer " + pat})
+    with urllib.request.urlopen(req, timeout=30) as r:
+        recs = json.load(r).get("records") or []
+    if not recs:
+        return None
+    return (recs[0].get("fields") or {}).get("Status") or ""
+
+
+def check_task(task):
+    """(ok, message) for closing a finding against TASK: it must be a real task
+    on the board and still open, or the finding's problem is in nobody's hands."""
+    task = (task or "").strip()
+    if not TASK_ID_RE.match(task):
+        return False, ("--outcome tasked needs --task <rec id> of the open task that now "
+                       "carries this problem (got %r)" % task)
+    try:
+        status = task_status(task)
+    except Exception as e:  # noqa: BLE001 — refused with the reason, never assumed fine
+        return False, "could not read task %s from Airtable, so it is NOT CHECKED: %s" % (task, str(e)[:160])
+    if status is None:
+        return False, "%s is not in the Tasks table" % task
+    if status == "Completed":
+        return False, ("%s is Completed. A finding closes against a task that still carries "
+                       "the work; if the work was done, close it rejected or fixed and say so." % task)
+    return True, "task %s is open (Status %s)" % (task, status or "blank")
+
+
 def check_evidence(outcome, evidence, note, pr):
     """(ok, message). The whole gate, pure, so the tests can reach it."""
     note = (note or "").strip()
     evidence = (evidence or "").strip()
+
+    if outcome == TASKED:
+        if not note:
+            return False, "--outcome tasked needs --note saying what the task carries"
+        return True, ""
 
     if outcome == "pending":
         if not str(pr or "").strip():
@@ -676,10 +1011,30 @@ def cmd_close(a):
     if not ok:
         print("REFUSED: %s" % msg, file=sys.stderr)
         return 2
-    append({"op": "close", "id": a.id, "ts": iso(),
-            "outcome": a.outcome, "note": a.note, "pr": getattr(a, "pr", ""),
-            "evidence": (getattr(a, "evidence", "") or "").strip()})
-    print("closed %s as %s" % (a.id, a.outcome))
+    until = (getattr(a, "until", "") or "").strip()
+    if until and (a.outcome != "deferred" or not DATE_RE.match(until)):
+        print("REFUSED: --until takes a YYYY-MM-DD date and only goes with --outcome deferred "
+              "(got %r with %s)" % (until, a.outcome), file=sys.stderr)
+        return 2
+    task = (getattr(a, "task", "") or "").strip()
+    if a.outcome == TASKED:
+        ok, tmsg = check_task(task)
+        if not ok:
+            print("REFUSED: %s" % tmsg, file=sys.stderr)
+            return 2
+        msg = tmsg
+    elif task:
+        print("REFUSED: --task only goes with --outcome tasked", file=sys.stderr)
+        return 2
+    rec = {"op": "close", "id": a.id, "ts": iso(),
+           "outcome": a.outcome, "note": a.note, "pr": getattr(a, "pr", ""),
+           "evidence": (getattr(a, "evidence", "") or "").strip()}
+    if until:
+        rec["until"] = until
+    if task:
+        rec["task"] = task
+    append(rec)
+    print("closed %s as %s%s" % (a.id, a.outcome, (" until %s" % until) if until else ""))
     if msg:
         print("  %s" % msg)
     if a.outcome == "pending":
@@ -703,6 +1058,15 @@ def cmd_escalate(a):
         print("ERROR: no finding %s" % a.id, file=sys.stderr)
         return 1
     rec = state[a.id]
+    if rec.get("status") == DUPLICATE and rec.get("duplicate_root") in state:
+        # A wall's clock names the finding the wall cites. When that finding
+        # was merged, the fix that clears the wall is the survivor's, so the
+        # raise goes there (14 Oct 2026), never a refusal the clock reads as
+        # "nothing to raise".
+        print("NOTE: %s is a repeat of %s; raising %s." % (a.id, rec["duplicate_root"],
+                                                           rec["duplicate_root"]), file=sys.stderr)
+        a.id = rec["duplicate_root"]
+        rec = state[a.id]
     if rec.get("status") not in OPEN_STATES:
         print("REFUSED: %s is %s, not open. Reopen it first if the fix is still needed."
               % (a.id, rec.get("status")), file=sys.stderr)
@@ -745,12 +1109,16 @@ def cmd_count(a):
     """
     state = current_state()
     if a.breakdown:
-        for st in OPEN_STATES + ["fixed", "rejected", "deferred"]:
-            print("%-9s %d" % (st, sum(1 for r in state.values()
-                                       if r["status"] == st)))
+        # A merged repeat is counted once, as a repeat, whatever state it took
+        # from its survivor: a survivor's fix is one fix, not one per repeat.
+        own = [r for r in state.values() if not r.get("duplicate_root")]
+        for st in OPEN_STATES + ["fixed", "rejected", "deferred", TASKED]:
+            print("%-9s %d" % (st, sum(1 for r in own if r["status"] == st)))
+        print("%-9s %d" % (DUPLICATE, len(state) - len(own)))
         print("%-9s %d" % ("BACKLOG", sum(1 for r in state.values()
                                           if r["status"] in OPEN_STATES)))
         print("%-9s %d" % ("TOTAL", len(state)))
+        print("%-9s %d" % ("REFUSED", sum(1 for r in overflow_state() if not r.get("read"))))
         return 0
     if a.status == "all":
         print(len(state))
@@ -758,6 +1126,110 @@ def cmd_count(a):
         print(sum(1 for r in state.values() if r["status"] == a.status))
     else:
         print(sum(1 for r in state.values() if r["status"] in OPEN_STATES))
+    return 0
+
+
+def overflow_match(state, row):
+    """(verdict, finding id) for one refused row: 'recurrence' of an open finding
+    (or of the survivor it was merged into), 'closed' when it repeats a finding
+    already closed, or 'new'. Mechanical rules only (the same ones `add` uses),
+    because sort --apply writes what this decides."""
+    tid, _ = known_match(state, row.get("routine") or "", row.get("title") or "", row.get("where") or "")
+    if tid:
+        return "recurrence", tid
+    key = dedupe_key(row.get("routine"), row.get("title"), row.get("where"))
+    for r in state.values():
+        if r.get("status") in FINAL_STATES and not r.get("duplicate_root") \
+                and dedupe_key(r.get("routine"), r.get("title"), r.get("where")) == key:
+            return "closed", r["id"]
+    return "new", None
+
+
+def _mark_read(ref, outcome, into, by, note):
+    append({"op": "overflow-read", "ref": ref, "ts": iso(), "outcome": outcome,
+            "into": into or "", "by": by or "", "note": note or ""})
+
+
+def _overflow_row(ref):
+    for r in overflow_state():
+        if r.get("_ref") == ref:
+            return r
+    return None
+
+
+def cmd_overflow(a):
+    """Read the refusals: list them, sort them against the queue, promote one
+    into the queue or dismiss it. Every read is a ledger line, so the Defects
+    card's "refused, unread" count only falls when someone actually decided."""
+    if a.action in ("list", "sort"):
+        rows = overflow_state()
+        unread = [r for r in rows if not r.get("read")]
+        pick = rows if getattr(a, "all", False) else unread
+        if a.action == "list":
+            if a.json:
+                print(json.dumps(pick, indent=2))
+                return 0
+            for r in sorted(pick, key=lambda r: r.get("ts") or "?"):
+                print("%s  %s  %-8s %-20s %s%s" % (
+                    r.get("_ref"), (r.get("ts") or "?")[:10], r.get("severity", "?"),
+                    (r.get("routine") or "?") + ("/" + r["agent"] if r.get("agent") else ""),
+                    (r.get("title") or "")[:100],
+                    ("  [read: %s %s]" % (r["read"].get("outcome"), r["read"].get("into") or "")) if r.get("read") else ""))
+            print("%d refused, %d unread" % (len(rows), len(unread)))
+            return 0
+        state = current_state()
+        verdicts = {"recurrence": [], "closed": [], "new": []}
+        for r in unread:
+            v, fid = overflow_match(state, r)
+            verdicts[v].append((r, fid))
+        if a.out:
+            with open(a.out, "w") as fh:
+                for v in ("recurrence", "closed", "new"):
+                    for r, fid in verdicts[v]:
+                        fh.write(json.dumps({"verdict": v, "finding": fid, "ref": r.get("_ref"),
+                                             "ts": r.get("ts"), "routine": r.get("routine"),
+                                             "agent": r.get("agent"), "title": r.get("title")}) + "\n")
+        if a.apply:
+            for r, fid in verdicts["recurrence"]:
+                append({"op": "recur", "id": fid, "ts": iso(), "severity": r.get("severity"),
+                        "note": "From the overflow log (%s, refused %s): %s %s" % (
+                            r.get("_ref"), (r.get("ts") or "?")[:10], r.get("title") or "", r.get("detail") or ""),
+                        "fix": r.get("proposed_fix") or ""})
+                _mark_read(r["_ref"], "recurrence", fid, a.by, "folded into the open finding it repeats")
+        print(json.dumps({"unread": len(unread), "recurrence": len(verdicts["recurrence"]),
+                          "repeatsClosed": len(verdicts["closed"]), "new": len(verdicts["new"]),
+                          "applied": bool(a.apply)}))
+        return 0
+
+    if not a.ref:
+        print("ERROR: give the overflow ref (from `findings.py overflow list`)", file=sys.stderr)
+        return 1
+    row = _overflow_row(a.ref)
+    if row is None:
+        print("ERROR: no overflow line %s" % a.ref, file=sys.stderr)
+        return 1
+    if row.get("read"):
+        print("REFUSED: %s was already sorted (%s %s)." % (a.ref, row["read"].get("outcome"),
+                                                           row["read"].get("into") or ""), file=sys.stderr)
+        return 2
+    if a.action == "dismiss":
+        if not (a.note or "").strip():
+            print("REFUSED: dismiss needs --note saying why it is not worth a finding", file=sys.stderr)
+            return 2
+        _mark_read(a.ref, "dismissed", "", a.by, a.note)
+        print("dismissed %s" % a.ref)
+        return 0
+    # promote: a reader decided this one is worth the queue, so the cap that
+    # refused it does not get a second say. The dedupe still does.
+    f = {"routine": row.get("routine") or "overflow", "title": row.get("title") or "",
+         "where": row.get("where") or "", "detail": row.get("detail") or "",
+         "fix": row.get("proposed_fix") or "", "touches_code": bool(row.get("touches_code")),
+         "severity": row.get("severity") if row.get("severity") in SEVERITIES else "medium",
+         "agent": row.get("agent") or ""}
+    rc, fid = file_finding(current_state(), f, cap=False)
+    if rc != 0:
+        return rc
+    _mark_read(a.ref, "promoted", fid, a.by, a.note)
     return 0
 
 
@@ -774,7 +1246,46 @@ def main(argv=None):
     sp.add_argument("--severity", default="medium", choices=SEVERITIES)
     sp.add_argument("--touches-code", action="store_true",
                     help="set when fixing this means editing a repo file")
+    sp.add_argument("--agent", default=os.environ.get("FINDINGS_AGENT", ""),
+                    help="the AI agent filing it, when the routine is shared: the cap "
+                         "counts each agent's own open findings (default $FINDINGS_AGENT)")
     sp.set_defaults(fn=cmd_add)
+
+    sp = sub.add_parser("dupe", help="merge a repeat into the finding that survives it")
+    sp.add_argument("id")
+    sp.add_argument("--of", required=True, help="the survivor's id")
+    sp.add_argument("--note", default="")
+    sp.add_argument("--by", default="")
+    sp.add_argument("--force", action="store_true",
+                    help="merge even though the two name different code files")
+    sp.set_defaults(fn=cmd_dupe)
+
+    sp = sub.add_parser("undupe", help="take a merge back")
+    sp.add_argument("id")
+    sp.add_argument("--note", default="")
+    sp.add_argument("--by", default="")
+    sp.set_defaults(fn=cmd_undupe)
+
+    sp = sub.add_parser("retag", help="correct whether a finding needs code")
+    sp.add_argument("id")
+    g = sp.add_mutually_exclusive_group(required=True)
+    g.add_argument("--code", action="store_true", help="fixing it means editing a repo file")
+    g.add_argument("--not-code", action="store_true", help="no code change can close it")
+    sp.add_argument("--note", default="")
+    sp.add_argument("--by", default="")
+    sp.set_defaults(fn=cmd_retag)
+
+    sp = sub.add_parser("overflow", help="read what the cap refused")
+    sp.add_argument("action", choices=["list", "sort", "promote", "dismiss"])
+    sp.add_argument("ref", nargs="?")
+    sp.add_argument("--all", action="store_true", help="list: include rows already sorted")
+    sp.add_argument("--json", action="store_true")
+    sp.add_argument("--apply", action="store_true",
+                    help="sort: fold each repeat of an open finding into it (default: report only)")
+    sp.add_argument("--out", default="", help="sort: write every verdict to this file")
+    sp.add_argument("--note", default="")
+    sp.add_argument("--by", default="")
+    sp.set_defaults(fn=cmd_overflow)
 
     sp = sub.add_parser("list")
     sp.add_argument("--status")
@@ -805,12 +1316,16 @@ def main(argv=None):
     sp = sub.add_parser("close")
     sp.add_argument("id")
     sp.add_argument("--outcome", required=True,
-                    choices=["fixed", "pending", "rejected", "deferred"],
+                    choices=["fixed", "pending", "rejected", "deferred", TASKED],
                     help="'fixed' means LANDED on origin/main. A fix sitting in "
                          "an open PR is 'pending' — on 26 Aug 2026 four fixer "
                          "PRs were unmerged while 40 findings citing them read "
-                         "as fixed.")
+                         "as fixed. 'tasked' hands a problem no code fix can "
+                         "close to the open task that now carries it.")
     sp.add_argument("--pr", default="", help="PR number carrying the fix")
+    sp.add_argument("--task", default="", help="REQUIRED for --outcome tasked: the open task's rec id")
+    sp.add_argument("--until", default="",
+                    help="with --outcome deferred: the YYYY-MM-DD it comes back open by itself")
     sp.add_argument("--evidence", default="",
                     help="REQUIRED for --outcome fixed: the commit SHA that "
                          "landed it (checked against origin/main), or a plain "
