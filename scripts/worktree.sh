@@ -82,6 +82,43 @@ unpushed_count() {
     git -C "$p" rev-list --count '@{u}..HEAD' 2>/dev/null || echo 0
 }
 
+# Has this branch's WORK reached origin/main? (finding 20261012-phase-4-839)
+#
+# Ancestry alone answers the wrong question. Every fixer PR merges through
+# scripts/merge-pr.py, which SQUASHES, so the branch commit is never an
+# ancestor of origin/main even when every line of it has landed. `done` then
+# refused a workspace with nothing to lose, and the operator either forced it
+# or — the common case — walked away: 10 workspaces had piled up by 12 Oct
+# 2026, three on a detached HEAD, and content-engine has already run from a
+# stale one once (20260909-queue-fixer-504).
+#
+# Git merges by change, not by snapshot, so the honest test is whether the
+# branch still carries any change origin/main does not:
+#   1. ancestry — a fast-forward or real merge;
+#   2. an empty `git diff origin/main <branch>` — a squash merge leaves the
+#      tree identical, which is exactly what landing means;
+#   3. `git cherry` marking every commit '-' — each patch is already upstream,
+#      which catches a squash whose branch then gained an empty-diff commit.
+# The caller keeps its own hard refusals for uncommitted files and unpushed
+# commits, so this never decides whether work is SAFE, only whether it LANDED.
+branch_work_has_landed() {
+    local p="$1" branch="$2"
+    git -C "$p" merge-base --is-ancestor "$branch" origin/main 2>/dev/null && return 0
+    # An empty diff is only evidence when both refs resolved; a failed
+    # rev-parse would otherwise make a typo'd branch read as landed.
+    git -C "$p" rev-parse --verify -q "$branch" >/dev/null || return 1
+    git -C "$p" rev-parse --verify -q origin/main >/dev/null || return 1
+    [ -z "$(git -C "$p" diff --name-only origin/main "$branch" 2>/dev/null)" ] && return 0
+    local unmerged
+    unmerged="$(git -C "$p" cherry origin/main "$branch" 2>/dev/null | grep -c '^+' || true)"
+    # No commits at all (empty output) is not "all landed" — ancestry above
+    # already covers that case, so an unreadable cherry must refuse.
+    if [ -n "$(git -C "$p" cherry origin/main "$branch" 2>/dev/null)" ] && [ "$unmerged" = "0" ]; then
+        return 0
+    fi
+    return 1
+}
+
 cmd_new() {
     local topic="${1:-}" kind="${2:-feature}"
     [ -n "$topic" ] || die "Usage: worktree.sh new <topic> [fix|feature|chore]"
@@ -189,7 +226,7 @@ cmd_done() {
 Then re-run. Use --force only if you are certain the changes are disposable."
 
         git fetch -q origin main
-        if ! git merge-base --is-ancestor "$branch" origin/main 2>/dev/null; then
+        if ! branch_work_has_landed "$path" "$branch"; then
             if [ "$unpushed" = "never-pushed" ]; then
                 die "$branch has commits that exist ONLY here — it has never been pushed.
 Push them first, then merge:

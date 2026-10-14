@@ -149,6 +149,17 @@ def current_state():
                 # to be critical on its third sighting is critical.
                 state[fid]["seen"] = state[fid].get("seen", 1) + 1
                 state[fid]["last_seen"] = rec.get("ts")
+                # Keep what the recurrence SAID, not just that it happened
+                # (finding 20261012-agent-dispatch-840). A fold threw away the
+                # filer's --fix, so a fixer taking the finding read only the
+                # original fix text: on 12 Oct 2026 finding 681 still showed
+                # its 30 Sep fix while the cause found on 12 Oct survived in a
+                # scratch file nothing reads, so the fix that shipped would
+                # have left the live bug alone.
+                if rec.get("note") or rec.get("fix"):
+                    state[fid].setdefault("recurrences", []).append(
+                        {"ts": rec.get("ts"), "note": rec.get("note") or "",
+                         "fix": rec.get("fix") or ""})
                 old_sev, new_sev = state[fid].get("severity"), rec.get("severity")
                 if (new_sev in SEVERITIES and old_sev in SEVERITIES
                         and SEVERITIES.index(new_sev) < SEVERITIES.index(old_sev)):
@@ -332,7 +343,7 @@ def cmd_add(a):
         if dedupe_key(r.get("routine"), r.get("title"), r.get("where")) != key:
             continue
         append({"op": "recur", "id": r["id"], "ts": iso(),
-                "severity": a.severity, "note": a.detail})
+                "severity": a.severity, "note": a.detail, "fix": a.fix})
         print(r["id"])
         print("RECURRENCE of %s (seen %d times) — no duplicate filed."
               % (r["id"], r.get("seen", 1) + 1), file=sys.stderr)
@@ -347,7 +358,7 @@ def cmd_add(a):
         if not same_code_target(a.where, r.get("where")):
             continue
         append({"op": "recur", "id": r["id"], "ts": iso(),
-                "severity": a.severity, "note": a.detail})
+                "severity": a.severity, "note": a.detail, "fix": a.fix})
         print(r["id"])
         print("RECURRENCE of %s (seen %d times) — same code target (%s). "
               "No duplicate filed."
@@ -481,6 +492,11 @@ def cmd_list(a):
             print("         also open on this file: %s" % ", ".join(still_open))
         if r.get("proposed_fix"):
             print("         fix:   %s" % r["proposed_fix"])
+        # A later sighting's fix text is the one a fixer must read, so it is
+        # printed, never only stored. Newest last, each with its date.
+        for rc in (r.get("recurrences") or []):
+            if rc.get("fix"):
+                print("         fix (added %s): %s" % (rc.get("ts") or "?", rc["fix"]))
     print_overflow(sys.stdout)
     return 0
 
