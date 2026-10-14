@@ -60,7 +60,9 @@ import json
 import mimetypes
 import os
 import re
+import fcntl
 import subprocess
+import tempfile
 import time
 import io
 import contextlib
@@ -9052,8 +9054,10 @@ def rested_on_wall(live, last_event, started_at, now=None):
 # argue with:
 #   - A task is PARKED when the run says it left it with no card (any wording),
 #     or when it was owed new work, the run touched it, and no card, close, wall,
-#     hand-over or route came after the last failure. A failure that is capacity
-#     or time (a usage limit, a timeout, a 429) is a pause, never a park.
+#     hand-over or route came after the last failure. An outcome the run reports
+#     counts only when the task's live re-read shows it landed (review round 4: a
+#     report is the runner's to write). A failure that is capacity or time (a
+#     usage limit, a timeout, a 429) is a pause, never a park.
 #   - Only a task owed this run, or held by an AI agent, is ever parked; a task
 #     Roy or Kevin holds is theirs and is never escalated by this control.
 #   - A parked task stays off Kevin's queue for ONE pass of 48 hours, once in its
@@ -9079,10 +9083,10 @@ def rested_on_wall(live, last_event, started_at, now=None):
 NO_CARD_RE = re.compile(
     r"\b(?:no[\s-]+(?:new\s+|approval\s+)?card|without\s+(?:an?\s+)?(?:new\s+)?card|not\s+carded)\b"
     r"(?![-\s]*(?:payments?|numbers?|details|updates?|statements?|transactions?|readers?|on\s+file)\b)", re.I)
-# The kinds that are an outcome, when they worked AFTER the run's last failure on the task: the kinds the
-# commands write (a card, a close, a wall, a route, a hand-over, a decision recorded). Any other kind,
-# including the invented ones real reports carry ("covered-by-related", "new-work-dispatched", "routing",
-# "dispatch"), is no outcome (review round 3).
+# The kinds that are an outcome, when they worked AFTER the run's last failure on the task AND the task's
+# live re-read shows the effect (action_landed): the kinds the commands write (a card, a close, a wall, a
+# route, a hand-over, a decision recorded). Any other kind, including the invented ones real reports carry
+# ("covered-by-related", "new-work-dispatched", "routing", "dispatch"), is no outcome (review round 3).
 OUTCOME_KINDS = ("new", "redo", "submit", "carry_out", "complete", "block", "route", "handover", "escalate",
                  "decided")
 # A failure that is capacity or time is a pause, never a park (memory: a capacity refusal is not a fault).
@@ -9143,9 +9147,38 @@ def owed_new_work(queue, handback_only=False, owed=None):
     return {i for i in owed if kinds.get(i) in ("new", "redo")}
 
 
-def parked_tasks(actions, owed_new=()):
+def action_landed(a, t, today=None):
+    """True when the live task T shows what action A reports it did: a card (Approval), a close
+    (Completed), a wall (an open BLOCKER line), the route's agent or the hand-over's person now holding
+    it, or Kevin's dated hold that `decided --until` writes. A report the board does not bear out is no
+    outcome. T is None when the task could not be read: nothing is borne out."""
+    if not t:
+        return False
+    kind, st = a.get("kind"), t.get("status") or ""
+    held = t.get("teamMemberIds") or []
+    people = {h["rec"] for h in HUMANS.values()} | {KEVIN_REC_ID}
+    if kind == "block":
+        return bool(task_blocker(t.get("notes")))
+    if kind == "complete":
+        return st in ("Completed", "Cancelled")
+    if kind in ("carry_out",):       # not the plain `==` spelling: tests/certificate-watch.test.js slices on it
+        return st == "Completed" or CARRIED_OUT_MARK in str(t.get("notes") or "")
+    if kind == "route":
+        return bool(a.get("to")) and a.get("to") in held
+    if kind == "handover":
+        who = HUMANS.get(str(a.get("to") or "").strip().lower())
+        return bool(who) and who["rec"] in held
+    if kind == "decided":
+        return st in ("Approval", "Completed", "Cancelled") or bool(
+            kevin_park(t, today or datetime.now(LONDON).date()))
+    # new, redo, submit, escalate: a card in his queue, the task filed or closed, or handed to a person
+    return st in ("Approval", "Completed", "Cancelled") or any(i in people for i in held)
+
+
+def parked_tasks(actions, owed_new=(), landed=None):
     """{task id: the run's own words} for every task this run left with no card, read in the order the
-    run acted: an OUTCOME_KINDS action that worked AFTER the last failure is an outcome. Parked: the
+    run acted: an OUTCOME_KINDS action that worked AFTER the last failure, and that LANDED(action) bears
+    out on the board (None: the report is taken at its word), is an outcome. Parked: the
     run says so in any wording, or a new or redo action failed, or it was owed new work the run touched.
     A capacity or time failure is a pause and its words declare nothing; a task the run did not touch
     is the next tick's, as before (silent_run_problem); a carry-out is never read ("no card payment")."""
@@ -9156,7 +9189,7 @@ def parked_tasks(actions, owed_new=()):
             continue
         touched.add(tid)
         if a.get("kind") == "carry_out":     # an approved task, never a park ("no card payment found")
-            if a.get("ok"):
+            if a.get("ok") and (landed is None or landed(a)):
                 outcome_at.setdefault(tid, []).append(i)
             continue
         said = " ".join(" ".join(str(a.get(k) or "").split()) for k in ("error", "note")).strip()
@@ -9169,7 +9202,7 @@ def parked_tasks(actions, owed_new=()):
             declared.add(tid)
         if a.get("kind") in ("new", "redo") and not a.get("ok"):
             last_fail[tid] = i
-        if a.get("ok") and a.get("kind") in OUTCOME_KINDS:
+        if a.get("ok") and a.get("kind") in OUTCOME_KINDS and (landed is None or landed(a)):
             outcome_at.setdefault(tid, []).append(i)
     parked = {}
     for tid in touched:
@@ -9212,7 +9245,8 @@ def pass_ledger_path():
 
 def load_pass_ledger():
     """{task id: {"began": iso, "door": str}}. A missing ledger is empty; one that cannot be read raises,
-    because an empty ledger read by mistake would hand every task a fresh pass."""
+    because an empty ledger read by mistake would hand every task a fresh pass (the caller then treats
+    every pass as used)."""
     try:
         with open(pass_ledger_path()) as fh:
             led = json.load(fh)
@@ -9474,18 +9508,39 @@ def card_no_door(rec, said, why, rundir, tier1=False):
     return {"card": "decision"}
 
 
+NO_CARD_LOCK_TRIES = 50       # 0.2 s apart: ten seconds for the ledger lock, then no pass (a card)
+
+
 def start_no_card_pass(task_id, door, listed_notes, now):
-    """Start the task's one pass: the ledger entry first (the source of truth, written atomically and
-    merged with a fresh read so a run beside this one loses nothing), then a Notes line for reading."""
-    led = load_pass_ledger()
-    if task_id in led:
-        raise RuntimeError("the ledger already holds a pass for it")
-    led[task_id] = {"began": now.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"), "door": door[:300]}
+    """Start the task's one pass: the ledger entry first (the source of truth), then a Notes line for
+    reading. The ledger's read-modify-write holds an exclusive lock (signin-pickup's verify runs beside
+    the slots, lock-exempt) and writes a unique temp file in the same folder, renamed over the ledger."""
     os.makedirs(STATE_DIR, exist_ok=True)
-    tmp = pass_ledger_path() + ".tmp"
-    with open(tmp, "w") as fh:
-        json.dump(led, fh, indent=1)
-    os.replace(tmp, pass_ledger_path())
+    with open(pass_ledger_path() + ".lock", "a") as lock:
+        for _ in range(NO_CARD_LOCK_TRIES):
+            try:
+                fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                break
+            except BlockingIOError:
+                time.sleep(0.2)
+        else:
+            raise RuntimeError("the pass ledger's lock stayed busy")
+        try:
+            led = load_pass_ledger()
+            if task_id in led:
+                raise RuntimeError("the ledger already holds a pass for it")
+            led[task_id] = {"began": now.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"), "door": door[:300]}
+            fd, tmp = tempfile.mkstemp(dir=STATE_DIR, prefix=NO_CARD_PASS_LEDGER + ".", suffix=".tmp")
+            try:
+                with os.fdopen(fd, "w") as fh:
+                    json.dump(led, fh, indent=1)
+                os.replace(tmp, pass_ledger_path())
+            except BaseException:
+                if os.path.exists(tmp):
+                    os.unlink(tmp)
+                raise
+        finally:
+            fcntl.flock(lock, fcntl.LOCK_UN)
     append_note_checked(task_id, listed_notes, f"[{now.strftime('%d %b %Y %H:%M')} — agent-dispatch] {NO_CARD_PASS_MARK} "
                                                f"({NO_CARD_PASS_HOURS} hours, once): left with no card at a door, "
                                                f"{door}. Left with no card again after the 48 hours, it comes to "
@@ -9517,12 +9572,13 @@ def _list_by_id(table, ids, fields):
     return out
 
 
-def settle_no_cards(actions, dry_run=False, rundir="", owed_new=(), now=None):
+def settle_no_cards(actions, dry_run=False, rundir="", owed_new=(), now=None, landed=None, notices=None):
     """Check every task this run left with no card, and in the final control start a door's one pass or
     put the task in Kevin's queue. Returns (settled, doors, cards, problems): `settled` is the task ids
     whose park is answered here (a door, a card made, or a problem of its own), so the generic "action
-    failed" line does not repeat it. A read that fails is a problem, never a pass."""
-    said = parked_tasks(actions, owed_new)
+    failed" line does not repeat it. A read that fails is a problem, never a pass. LANDED(action) says
+    whether a reported outcome is on the board; NOTICES collects what is said loudly without failing."""
+    said = parked_tasks(actions, owed_new, landed)
     if not said:
         return set(), [], [], []
     now = now or datetime.now(LONDON)
@@ -9531,8 +9587,13 @@ def settle_no_cards(actions, dry_run=False, rundir="", owed_new=(), now=None):
     try:
         ledger = load_pass_ledger()
     except RuntimeError as e:
-        return set(said), [], [], [f"{e}, so no task left with no card is excused or carded this run: "
-                                   f"{', '.join(said)}"]
+        # Every pass counts as used: a park still becomes a card, so nothing goes silent, and the slot is
+        # not failed for a file of ours (review round 4). Said loudly, on stderr and in the run's output.
+        ledger = {tid: {"began": "unreadable"} for tid in said}
+        msg = f"{e}: every pass is read as used this run, so each task left with no card comes to Kevin as a card"
+        print(f"WARNING: {msg}", file=sys.stderr)
+        if notices is not None:
+            notices.append(msg)
     try:
         recs = _list_by_id(TASKS, list(said), fields)
         views = {i: task_view(r) for i, r in recs.items()}
@@ -9566,7 +9627,11 @@ def settle_no_cards(actions, dry_run=False, rundir="", owed_new=(), now=None):
                 start_no_card_pass(tid, door, t["notes"], now)
                 door = f"{door} (its one {NO_CARD_PASS_HOURS}-hour pass starts now)"
             except Exception as e:                        # noqa: BLE001 — said loudly, whichever half failed
-                if tid in load_pass_ledger():
+                try:
+                    held = tid in load_pass_ledger()
+                except RuntimeError:
+                    held = False
+                if held:
                     problems.append(f"{tid}'s pass is in the ledger, but its Notes line was not written: {str(e)[:200]}")
                     door = f"{door} (its one {NO_CARD_PASS_HOURS}-hour pass starts now)"
                 else:
@@ -9651,10 +9716,31 @@ def cmd_verify(args):
     if owed_override == []:
         # the runners write it only with ids in hand; an empty one was emptied, never "owes nothing" (review, 28 Sep 2026)
         problems.append("owed-ids is empty — the run's owed tasks cannot be counted")
+    # One re-read per task an action reports worked, shared by the no-card rule and the checks below.
+    live_reads = {}
+
+    def live_task(tid):
+        if tid not in live_reads:
+            try:
+                live_reads[tid] = task_view(get_task(tid))
+            except Exception as e:                        # noqa: BLE001 — kept, and raised to each caller
+                live_reads[tid] = e
+        if isinstance(live_reads[tid], Exception):
+            raise live_reads[tid]
+        return live_reads[tid]
+
+    def landed(a):
+        try:
+            return action_landed(a, live_task(a.get("task")))
+        except Exception:                                 # noqa: BLE001 — unread is not borne out
+            return False
+
     # NO SILENT PARKING (Kevin, 14 Oct 2026): a task left with no card has a door that exists, or
     # the final control puts it in his queue. Read before the failures, which it settles.
+    no_card_notices = []
     settled, doors, no_door_cards, no_card_problems = settle_no_cards(
-        actions, dry_run, rundir, owed_new_work(queue, handback_only, owed_override))
+        actions, dry_run, rundir, owed_new_work(queue, handback_only, owed_override), landed=landed,
+        notices=no_card_notices)
     problems += no_card_problems
     rested = []
     ledger = ledger_last_events() if failed else {}
@@ -9836,7 +9922,7 @@ def cmd_verify(args):
     compliance_closes = []
     for a in ok_actions:
         try:
-            live = task_view(get_task(a["task"]))
+            live = live_task(a["task"])
         except Exception as e:
             problems.append(f"could not re-read {a.get('task')}: {e}")
             continue
@@ -9999,6 +10085,7 @@ def cmd_verify(args):
                       # Left with no card at a door that exists, and put in Kevin's queue with none.
                       "parkedWithDoor": doors,
                       "cardedNoDoor": no_door_cards,
+                      **({"noCardNotices": no_card_notices} if no_card_notices else {}),
                       "dryRun": dry_run}))
 
 

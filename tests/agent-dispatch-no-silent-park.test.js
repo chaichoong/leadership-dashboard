@@ -343,11 +343,44 @@ describe('a door buys ONE 48-hour pass, once, kept in a ledger; then it is a car
     }
   });
 
-  it('a ledger that cannot be read fails the run loudly, and nothing is excused or carded', () => {
+  it('a ledger that cannot be read means every pass is used: the park is a card, said loudly, and the slot does not fail', () => {
     const r = verify({ tasks: { [T]: { name: NAME, notes: ADOBE } }, ledger: '{not json', actions: [noCard(T, 'no card')] });
-    expect(r.code).toBe(1);
-    expect(r.err).toContain('the no-card pass ledger cannot be read');
-    expect(r.writes).toEqual([]);
+    expect(r.code).toBe(0);
+    expect(isCard(r.final[T])).toBe(true);
+    expect(r.err).toContain('WARNING: the no-card pass ledger cannot be read');
+    expect(r.out.noCardNotices).toHaveLength(1);
+    expect(r.ledger).toBe(null);                         // never overwritten
+  });
+
+  it("two runs starting passes at once lose none: the ledger's read-modify-write is locked", () => {
+    const script = `
+import json, os, subprocess, sys, tempfile
+state = tempfile.mkdtemp()
+worker = '''
+import importlib.util, sys, time
+from datetime import datetime
+spec = importlib.util.spec_from_file_location("d", ${JSON.stringify(DISPATCH)})
+m = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(m)
+m.STATE_DIR = sys.argv[1]
+m.append_note_checked = lambda *a, **k: None
+real = m.load_pass_ledger
+def slow():
+    led = real()
+    time.sleep(0.004)                                   # widen the gap between the read and the write
+    return led
+m.load_pass_ledger = slow
+now = datetime.now(m.LONDON)
+for i in sys.argv[2:]:
+    m.start_no_card_pass(i, "a door", "", now)
+'''
+procs = [subprocess.Popen([sys.executable, "-c", worker, state] + ["rec%s%013d" % (w, n) for n in range(25)]) for w in "AB"]
+codes = [p.wait() for p in procs]
+led = json.load(open(os.path.join(state, "no-card-pass.json")))
+print("@@@" + json.dumps({"codes": codes, "entries": len(led), "tmpLeft": [f for f in os.listdir(state) if f.endswith(".tmp")]}))
+`;
+    const raw = execFileSync('python3', ['-c', script], { encoding: 'utf8' });
+    expect(JSON.parse(raw.slice(raw.indexOf('@@@') + 3))).toEqual({ codes: [0, 0], entries: 50, tmpLeft: [] });
   });
 
   it('Notes that read blank by id while the listing read them: the pass stands in the ledger, Notes are not overwritten, and the run says so', () => {
@@ -476,7 +509,7 @@ except SystemExit as e:
     expect(r.err).toContain(`action failed: carry_out ${T}`);
   });
 
-  it('a task the run put a card on after the failure is not parked', () => {
+  it('a task the run put a card on after the failure, and the card is in his queue, is not parked', () => {
     const T = 'recESCALATEDTASK1';
     const r = verify({ tasks: { [T]: { name: 'INBOUND: something', status: 'Approval' } },
       actions: [noCard(T, 'no card from the agent'), { task: T, kind: 'escalate', ok: true }] });
@@ -554,10 +587,36 @@ describe('only the kinds the commands write are an outcome', () => {
       expect(isCard(r.final[T])).toBe(true);
     });
 
-  it.each([['complete'], ['block'], ['handover'], ['decided'], ['submit']])('CONTROL: "%s" is an outcome: no card', (kind) => {
+  // Each reported outcome, with and without its effect on the board (review round 4: a report is the
+  // runner's to write; the board is the evidence).
+  const OUTCOMES = [
+    ['submit', {}, { status: 'Approval', agentOutput: 'a card' }],
+    ['new', {}, { status: 'Approval', agentOutput: 'a card' }],
+    ['escalate', {}, { status: 'Approval', agentOutput: 'DECIDE: something' }],
+    ['complete', {}, { status: 'Completed' }],
+    ['block', {}, { notes: '[{day:0} — agent] BLOCKER OPEN (TOOL robot setup): broken. Fix: x [since {iso:-1h}]' }],
+    ['route', { to: 'rec1hYELb4zS8pjjO' }, { teamMember: ['rec1hYELb4zS8pjjO'] }],
+    ['handover', { to: 'roy.lavin1978@gmail.com' }, { teamMember: ['reclbdjfVev3bqNHS'] }],
+    ['decided', {}, { status: 'Upcoming', notes: "[{day:0} — agent-dispatch] Parked until {d:+20} on Kevin's answer; it comes back on the board that day." }],
+  ];
+  it.each(OUTCOMES)('CONTROL: "%s" reported and on the board is an outcome: no card', (kind, extra, board) => {
     const T = 'recREALKINDTASK01';
-    const r = verify({ tasks: { [T]: { name: GENERIC } }, actions: [{ task: T, kind, ok: true }] });
-    expect(r.writes).toEqual([]);
+    const r = verify({ tasks: { [T]: { name: GENERIC, ...board } }, actions: [{ task: T, kind, ok: true, ...extra }] });
+    expect(r.out.cardedNoDoor ?? []).toEqual([]);
+    expect(r.writes.filter((w) => JSON.stringify(w.fields).includes('DECIDE: A robot left'))).toEqual([]);
+  });
+
+  it.each(OUTCOMES)('"%s" reported ok but not on the board is no outcome: a card', (kind, extra) => {
+    const T = 'recREALKINDTASK02';
+    const r = verify({ tasks: { [T]: { name: GENERIC } }, actions: [{ task: T, kind, ok: true, ...extra }] });
+    expect(isCard(r.final[T])).toBe(true);
+  });
+
+  it('the review\'s own case: {"kind":"escalate","ok":true} with the task still at Today is carded', () => {
+    const T = 'recESCALATECLAIM1';
+    const r = verify({ tasks: { [T]: { name: GENERIC, status: 'Today' } }, actions: [{ task: T, kind: 'escalate', ok: true }] });
+    expect(isCard(r.final[T])).toBe(true);
+    expect(r.final[T].agentOutput).toContain('It recorded no reason.');
   });
 });
 
