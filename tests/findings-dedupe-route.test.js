@@ -53,6 +53,12 @@ function add(title, where = '', { severity = 'medium', routine = 'agent-dispatch
   return { ...r, id: r.out.trim() };
 }
 
+// Open findings written straight into the scratch queue: the cap and ceiling tests need dozens,
+// and one CLI process each is what timed out under a full-suite load.
+function seed(rows) {
+  writeFileSync(store, `${rows.map((r, i) => JSON.stringify({ op: 'add', id: `seed-${i}`, ts: '2026-10-14T12:00:00Z',
+    routine: 'agent-dispatch', severity: 'medium', where: `seed${i}.js`, touches_code: true, ...r })).join('\n')}\n`);
+}
 const listOpen = () => JSON.parse(fnd(['list', '--status', 'open', '--json']).out);
 const state = () => JSON.parse(fnd(['list', '--json']).out);
 const byId = (id) => state().find((r) => r.id === id);
@@ -224,9 +230,8 @@ describe('review of PR #784: chains, explicit retags and named agents', () => {
   });
 
   it('the routine as a whole stops at three caps, whatever names its filers use', () => {
-    for (const agent of ['Property Administration', 'Cash Flow Voids', 'Task Board Manager']) {
-      for (let i = 0; i < 15; i += 1) expect(add(`${agent} ${i}`, `${agent.length}${i}.js`, { agent }).code).toBe(0);
-    }
+    seed(['property-administration', 'cash-flow-voids', 'task-manager']
+      .flatMap((agent) => Array.from({ length: 15 }, (_, i) => ({ title: `${agent} ${i}`, agent }))));
     expect(count()).toBe(45);
     const over = add('a fourth agent, under its own cap', 'w.js', { agent: 'worker-builder' });
     expect(over.code).toBe(2);
@@ -236,13 +241,25 @@ describe('review of PR #784: chains, explicit retags and named agents', () => {
 
   it('high and critical findings never count toward the ceiling (round 2 review)', () => {
     // agent-dispatch held 61 high/critical robot walls: counted, they kept every medium refused for ever.
-    for (let i = 0; i < 50; i += 1) expect(add(`robot wall ${i}`, `h${i}.js`, { severity: i % 2 ? 'high' : 'critical' }).code).toBe(0);
+    seed(Array.from({ length: 50 }, (_, i) => ({ title: `robot wall ${i}`, severity: i % 2 ? 'high' : 'critical' })));
     const medium = add('an ordinary medium', 'm.js', { agent: 'Cash Flow Voids' });
     expect(medium.code, medium.err).toBe(0);
   });
 
+  it('high and critical findings never count toward a filer\'s own cap either (round 2, Kevin\'s yes)', () => {
+    // The unnamed agent-dispatch pool held 63 open, 61 of them high or critical robot walls.
+    seed(Array.from({ length: 20 }, (_, i) => ({ title: `wall ${i}`, severity: 'high' })));
+    const medium = add('an ordinary medium from an unnamed filer', 'u.js');
+    expect(medium.code, medium.err).toBe(0);
+    seed([...Array.from({ length: 20 }, (_, i) => ({ title: `wall ${i}`, severity: 'high' })),
+      ...Array.from({ length: 15 }, (_, i) => ({ title: `medium ${i}` }))]);
+    expect(add('the sixteenth medium', 'm16.js').code).toBe(2);            // the cap still bites below high
+  });
+
   it('one agent has one cap under every spelling agent-dispatch maps to its file (round 2 review)', () => {
-    for (let i = 0; i < 15; i += 1) expect(add(`board ${i}`, `b${i}.js`, { agent: 'AI Task Board Manager' }).code).toBe(0);
+    expect(add('board 0', 'b0.js', { agent: 'AI Task Board Manager' }).code).toBe(0);
+    expect(byId(listOpen()[0].id).agent).toBe('task-manager');           // stored under its one name
+    seed(Array.from({ length: 15 }, (_, i) => ({ title: `board ${i}`, agent: 'task-manager' })));
     const again = add('board 15', 'b15.js', { agent: 'task-manager' });
     expect(again.code).toBe(2);
     expect(again.err).toMatch(/REFUSED: agent-dispatch \/ task-manager already has 15/);

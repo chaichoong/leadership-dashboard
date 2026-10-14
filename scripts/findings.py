@@ -596,10 +596,16 @@ def open_findings_for(state, routine, agent=""):
     """The filer's own open findings: the routine AND the agent that named
     itself (or, for a filer that names none, the routine's unnamed ones).
     Fourteen agents filing under `agent-dispatch` shared one cap of 15, so
-    every medium any of them filed was refused (14 Oct 2026)."""
+    every medium any of them filed was refused (14 Oct 2026).
+
+    Only findings BELOW high count, the same rule as the routine ceiling: high
+    and critical are never refused, so counting them let 61 robot walls (all
+    filed high or critical) refuse every medium for ever (Kevin's yes, round 2
+    review of PR #784)."""
     me = norm_agent(agent)
     return [r for r in state.values()
             if r.get("routine") == routine and r.get("status") in OPEN_STATES
+            and r.get("severity") not in ALWAYS_ACCEPT
             and norm_agent(r.get("agent")) == me]
 
 
