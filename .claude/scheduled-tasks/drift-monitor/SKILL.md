@@ -174,7 +174,8 @@ Read them lexically instead — e.g. `(()=>{try{return allTransactions.length}ca
 //
 //     CORRECTED AGAIN 2026-08-06: "every cfv_* value parses as a valid Date" is too
 //     loose, and passes for the wrong reason. js/cfv.js writes TWO value shapes:
-//       ISO timestamps — `cfv_dismissed_*`, `cfv_reflag_dismissed_*`, `*_chaseStart`
+//       ISO timestamps — `cfv_dismissed_*`, `*_chaseStart` (`cfv_reflag_dismissed_*` is a dead
+//                        key since 14 Oct 2026: nothing writes it, a leftover is still a date)
 //                        (cfv.js:297, :797, :846, :876)
 //       sentinel '1'   — `*_returned`, `*_returnDismissed` (cfv.js:187, :763, :920)
 //     `new Date('1')` is NOT NaN — it returns 1 Jan 2001 — so the sentinel keys sail
