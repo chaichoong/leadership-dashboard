@@ -93,6 +93,7 @@
         if (d.source !== 'agents-home') return;
         if (d.type === 'agentsHomeHeight' && Number(d.h) > 0) {
             layoutMovedAt = Date.now();
+            if (pendingJump && pendingJump.settled != null) watchSettle();   // the browser may move the page to keep his place: measure again
             f.style.height = `${Math.ceil(Number(d.h))}px`;
             queueBand();
             return;
@@ -178,6 +179,7 @@
         catch (err) { state.wealth = 'failed'; console.error('[home] Wealth could not be drawn:', err); }
         document.body.classList.add('home-wealth-drawn');
         layoutMovedAt = Date.now();
+        if (pendingJump && pendingJump.settled != null) watchSettle();
         if (pendingJump && pendingJump.key === 'wealth') redoJump();   // it has its real height now
         if (typeof markTabSynced === 'function') markTabSynced(TAB);
     }
