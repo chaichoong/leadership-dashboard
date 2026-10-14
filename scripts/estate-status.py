@@ -861,6 +861,9 @@ def loop_health_report():
         return None, str(exc)[:300]
 
 
+LOOP_HEALTH_ROWS_MAX = 150   # ~300 characters a row, so ~45,000: inside a long-text cell's 100,000
+
+
 def loop_health_row(now, res=None, err=None):
     """The loop-health report as one row; a failed control is a Failed row, never a blank."""
     if res is None and err is None:
@@ -870,14 +873,19 @@ def loop_health_row(now, res=None, err=None):
                 "detail": "The not-moving check could not run: %s" % err,
                 "lastRun": now.strftime("%Y-%m-%dT%H:%M:%S.000Z")}   # payload and lastWorked left as they were
     stalled = res.get("stalled") or []
+    # Every row, up to a payload guard (14 Oct 2026). The cap was 40, and on 14 Oct the list
+    # was 48: eight tasks the Agent Work card counted as stuck were on no list a person could
+    # read (review of PR #782). A cut list now says how many it left out.
     slim = [{"name": s.get("name", "")[:90], "why": s.get("why", "")[:160], "days": s.get("days"),
              "rule": s.get("rule"), "lane": s.get("lane")}
-            for s in stalled][:40]
+            for s in stalled][:LOOP_HEALTH_ROWS_MAX]
+    cut = len(stalled) - len(slim)
     lanes = res.get("lanes") or {}
     return {"key": "loop-health", "kind": "report", "label": "Tasks not moving", "status": "Worked",
-            "detail": "%d not moving, %d need Kevin, %d done in the last 7 days (%d tasks read)." % (
+            "detail": "%d not moving, %d need Kevin, %d done in the last 7 days (%d tasks read).%s" % (
                 len(stalled), len(res.get("needsYou") or []), len(res.get("done") or []),
-                (res.get("control") or {}).get("tasksRead", 0)),
+                (res.get("control") or {}).get("tasksRead", 0),
+                " The list shows the first %d; %d more are not shown." % (len(slim), cut) if cut else ""),
             "payload": json.dumps({"stalled": slim, "needsYou": len(res.get("needsYou") or []),
                                    "done7d": len(res.get("done") or []), "lanes": lanes}),
             "lastRun": now.strftime("%Y-%m-%dT%H:%M:%S.000Z"), "lastWorked": now.strftime("%Y-%m-%dT%H:%M:%S.000Z")}
@@ -976,18 +984,41 @@ def ai_team_row(now, lh_res, lh_err, measures=None):
     if lh_err is not None or not lh_res:
         return dict(row, status="Failed", detail="Agent work could not be read: %s" % (lh_err or "no report"))
     flow = lh_res.get("flow") or {}
-    work = {"open": flow.get("agentOpen"), "notMoving": len(lh_res.get("stalled") or []),
+    split = lh_res.get("agentWork")
+    if not isinstance(split, dict):
+        return dict(row, status="Failed", detail="loop-health.py returned no agent work split.")
+    # `open` stays for a page still running the code from before 14 Oct 2026. notMoving is
+    # stuck AGENT work only, never the whole stalled list (loop-health.py agent_work).
+    work = {"open": flow.get("agentOpen"), "notMoving": split.get("notMoving"),
             "created7d": flow.get("agentCreated7d"), "done7d": flow.get("agentDone7d")}
-    if work["open"] is None or work["created7d"] is None:
+    for k in ("live", "approval", "waitingReply", "scheduled", "other", "replyOverdue", "replyWindowDays", "held",
+              "heldCheck", "waitCheck", "ledgerSkipped", "openCheck", "splitCheck"):
+        work[k] = split.get(k)
+    if work["open"] is None or work["created7d"] is None or work["notMoving"] is None:
         return dict(row, status="Failed", detail="loop-health.py returned no agent flow counts.")
     try:
         defects, rework, measured = (measures or _cached_measures)(now)
     except Exception as exc:  # noqa: BLE001 — the row must say WHY, whatever went wrong
         return dict(row, status="Failed", detail="The defect queue or the rework rate could not be read: %s" % str(exc)[:300])
     pct = rework.get("pct")
-    detail = ("Agent work: %d open, %d not moving, %d in and %d done in 7 days. Defects: %d open, %d filed and "
+    if work["live"] is None:
+        opened = "%d open (not split: %s)" % (work["open"], work["splitCheck"] or "no split")
+    else:
+        opened = "%d live, %d waiting for approval, %d waiting on a reply, %d scheduled%s (%d open)" % (
+            work["live"], work["approval"], work["waitingReply"], work["scheduled"],
+            ", %d on no board" % work["other"] if work["other"] else "", work["open"])
+        if work["waitCheck"]:
+            opened += " (waiting read from the notes only: %s)" % work["waitCheck"]
+        if work["ledgerSkipped"]:
+            opened += " (%d unreadable carry-out ledger line(s) skipped)" % work["ledgerSkipped"]
+    if work["openCheck"]:
+        opened += " (%s)" % work["openCheck"]
+    stuck = "%d stuck" % work["notMoving"] + (
+        ", %d of them waiting on a reply too long" % work["replyOverdue"] if work["replyOverdue"] else "") + (
+        " (held tasks not checked: %s)" % work["heldCheck"] if work["heldCheck"] else "")
+    detail = ("Agent work: %s, %s, %d in and %d done in 7 days. Defects: %d open, %d filed and "
               "%d fixed in 7 days. Fix of a fix: %s over %d days (baseline %d%%)." % (
-                  work["open"], work["notMoving"], work["created7d"], work["done7d"],
+                  opened, stuck, work["created7d"], work["done7d"],
                   defects["open"], defects["filed7d"], defects["fixed7d"],
                   ("%d%% (%d of %d fixes)" % (pct, rework["fixOfFix"], rework["fixes"])) if pct is not None else "no fixes",
                   rework["days"], rework["baselinePct"]))
