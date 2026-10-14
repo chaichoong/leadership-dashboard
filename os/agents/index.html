@@ -8445,8 +8445,8 @@ if(HOME_MODE) window.addEventListener('message', (e) => {
         const zone = open();
         if(_homeSendHeight) _homeSendHeight();   // the frame is its new height before Home scrolls
         homeEmbedTell({ type:'agentsHomeScrollTo', y: Math.round(zone.getBoundingClientRect().top + window.pageYOffset) });
-        const toggle = zone.querySelector('.home-fold-toggle');   // the keyboard carries on from the section jumped to
-        if(toggle) toggle.focus({ preventScroll:true });
+        const toggle = zone.querySelector('.home-fold-toggle');   // a keyboard jump: the keyboard carries on from here
+        if(d.focus && toggle) toggle.focus({ preventScroll:true });
         return;
     }
     if(d.type === 'homeViewport'){
@@ -8485,7 +8485,7 @@ async function start(){
         // second): a jump Home is waiting to finish must not pull him back once he has moved on.
         let lastInput = 0;
         const tellInput = () => { const now = Date.now(); if(now - lastInput > 500){ lastInput = now; homeEmbedTell({ type:'agentsHomeInput' }); } };
-        ['wheel', 'touchmove', 'keydown'].forEach(t => window.addEventListener(t, tellInput, { passive:true }));
+        ['wheel', 'touchmove', 'keydown', 'pointerdown'].forEach(t => window.addEventListener(t, tellInput, { passive:true }));
     }
     try {
         if(!HOME_MODE) consumeAgentDeepLink();

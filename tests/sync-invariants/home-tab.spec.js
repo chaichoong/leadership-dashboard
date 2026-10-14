@@ -489,14 +489,17 @@ test.describe('Home: one scroll of the real pages', () => {
     }
   });
 
-  test('a jump moves the keyboard to the section, and a control reached by Tab is never left under the row', async ({ page }) => {
+  test('a keyboard jump moves the keyboard to the section, and a control reached by Tab is never left under the row', async ({ page }) => {
     await tallHome(page);
-    await page.locator('[data-home-jump="dashboard"]').click();
-    await settled(page);
+    const press = async (key) => { await page.locator(`[data-home-jump="${key}"]`).focus(); await page.keyboard.press('Enter'); await settled(page); };
+    await press('dashboard');
     expect(await page.evaluate(() => document.activeElement && document.activeElement.getAttribute('data-home-fold'))).toBe('dashboard');
-    await page.locator('[data-home-jump="approvals"]').click();
-    await settled(page);
+    await press('approvals');
     expect(await page.frame({ url: /home=1/ }).evaluate(() => document.activeElement && document.activeElement.closest('.zone').id)).toBe('zoneApprovals');
+    // A mouse jump leaves focus where it was.
+    await page.locator('[data-home-jump="wealth"]').click();
+    await settled(page);
+    expect(await page.evaluate(() => document.activeElement && document.activeElement.getAttribute('data-home-jump'))).toBe('wealth');
     // The Dashboard heading parked under the pinned row, then reached by keyboard: it is scrolled clear.
     await page.evaluate(() => {
       const b = document.querySelector('[data-home-fold="dashboard"]');
@@ -522,6 +525,38 @@ test.describe('Home: one scroll of the real pages', () => {
     const at = await headingTop(page, 'dashboard');
     expect(at.top).toBeGreaterThanOrEqual(at.barBottom - 1);
     expect(at.top).toBeLessThanOrEqual(at.barBottom + 40);
+  });
+
+  // Review, 14 Oct 2026: a jump waiting for the approvals to load must never pull Kevin back once he has
+  // moved on, take the keyboard from where he is typing, or run on another page.
+  test('a waiting jump never pulls Kevin back after he drags the page elsewhere', async ({ page }) => {
+    await tallHome(page, null, { slow: true });
+    await page.locator('[data-home-jump="signins"]').click();
+    await page.waitForTimeout(1200);
+    await page.evaluate(() => window.scrollTo(0, 1500));   // a scroll bar drag: scrolling, and no wheel, key or touch
+    await page.waitForFunction(() => window.__shellMessages.includes('agentsHomeReady'), null, { timeout: 30000 });
+    await settled(page);
+    expect(await page.evaluate(() => window.scrollY)).toBeGreaterThan(1000);
+  });
+
+  test('a waiting jump never takes the keyboard from where Kevin is typing', async ({ page }) => {
+    await tallHome(page, null, { slow: true });
+    await page.locator('[data-home-jump="approvals"]').focus();
+    await page.keyboard.press('Enter');
+    await page.evaluate(() => { const i = document.createElement('input'); i.id = 'specTyping'; document.getElementById('tab-home').prepend(i); i.focus({ preventScroll: true }); });
+    await page.waitForFunction(() => window.__shellMessages.includes('agentsHomeReady'), null, { timeout: 30000 });
+    await settled(page);
+    expect(await page.evaluate(() => document.activeElement && document.activeElement.id)).toBe('specTyping');
+  });
+
+  test('a waiting jump is dropped when Kevin leaves Home', async ({ page }) => {
+    await tallHome(page, { approvals: true }, { slow: true });
+    await page.locator('[data-home-jump="approvals"]').click();
+    await page.evaluate(() => switchTab('overview'));
+    await page.waitForFunction(() => window.__shellMessages.includes('agentsHomeReady'), null, { timeout: 30000 });
+    await page.waitForTimeout(1000);
+    // Aimed again on another page, it would have opened the approvals (and saved that) out of sight.
+    expect(await page.evaluate(() => JSON.parse(localStorage.getItem('od_home_folded')).approvals)).toBe(true);
   });
 
   test('a jump to a folded section further down the frame lands on it', async ({ page }) => {
