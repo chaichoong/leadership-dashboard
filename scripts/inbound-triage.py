@@ -343,35 +343,30 @@ def direct_question(text):
     return ""
 
 
-# THE SIGN-OFF AND THE SMALL PRINT ASK NOTHING (fourth review of PR #783).
-# "Please consider the environment before printing" and "if you are not the
-# intended recipient, please notify the sender" sit under half the mail a
-# person sends, so the check reads only what comes before the sign-off or the
-# disclaimer. The quoted history is already gone (the gate's unquoted_body).
-SIGNOFF_RE = re.compile(
-    r"^[ \t]*(?:--[ \t]*$|(?:kind|best|warm|many)\s+(?:regards|thanks)\b|regards,?[ \t]*$"
-    r"|thanks,?[ \t]*$|thank you,?[ \t]*$|cheers,?[ \t]*$|yours (?:sincerely|faithfully|truly)\b"
-    r"|sent from my \w+)", re.I | re.M)
-DISCLAIMER_RE = re.compile(
-    r"(?:this e-?mail (?:and any|is confidential|may contain|message is)|confidentiality notice"
-    r"|\bdisclaimer\b|if you are not the intended recipient|please consider the environment"
-    r"|registered (?:in england|office))", re.I)
+# THE SMALL PRINT ASKS NOTHING, BUT NOTHING ELSE IS CUT (fourth and fifth
+# reviews of PR #783). "Please consider the environment before printing" and
+# "if you are not the intended recipient, please notify the sender" sit under
+# half the mail a person sends, so those SENTENCES are taken out wherever they
+# appear. Nothing is cut at a sign-off: the fourth review's cut at "Many
+# thanks" / "Best regards" / "Thanks" lost the ask that came after it ("Many
+# thanks for yesterday. Could you send the signed form by Friday?", "PS please
+# pay by Friday"), so the check reads everything else, above and below any
+# sign-off. The quoted history is already gone (the gate's unquoted_body).
+BOILERPLATE_RE = re.compile(
+    r"(?:please consider the environment|if you are not the intended recipient"
+    r"|this e-?mail (?:and any|is confidential|may contain|message is)|confidentiality notice"
+    r"|disclaimer:|registered (?:in england|office))[^.\n]*(?:\.|\n|$)", re.I)
 
 
-def strip_signature(text):
-    """The sender's words above their sign-off and any disclaimer. A sign-off
-    with nothing written above it ("Thanks," as a first line) is not one."""
-    t = str(text or "")
-    cuts = [next((m.start() for m in rx.finditer(t) if t[:m.start()].strip()), None)
-            for rx in (SIGNOFF_RE, DISCLAIMER_RE)]
-    cuts = [c for c in cuts if c is not None]
-    return t[:min(cuts)] if cuts else t
+def strip_boilerplate(text):
+    """The sender's words with the disclaimer and environment sentences taken out."""
+    return BOILERPLATE_RE.sub(" ", str(text or ""))
 
 
 def ask_signal(subject, own_words):
     """'' when the subject and the sender's own words ask nothing of the
     reader, else what was found ("money due (pay)"). Pure, so the tests drive it."""
-    own_words = strip_signature(own_words)
+    own_words = strip_boilerplate(own_words)
     text = "%s\n%s" % (subject or "", own_words or "")
     for label, rx in ASK_SIGNALS:
         m = rx.search(text)

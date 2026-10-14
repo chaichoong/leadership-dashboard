@@ -454,7 +454,11 @@ cases = {
   "aware": ("Road", "Please be aware the road is closed this weekend."),
   "apologies": ("Sorry", "Please accept my apologies for missing the call."),
   "love": ("Hello", "Please give my love to the kids."),
-  "signoff": ("Hello", "Lovely to see you all.\\n\\nKind regards\\nPat\\nPlease call 01234 567890 for bookings."),
+  "signoff": ("Hello", "Lovely to see you all.\\n\\nKind regards\\nPat\\nPlease consider the environment before printing this email."),
+  "manyThanks": ("Form", "Hi Kevin,\\nMany thanks for yesterday. Could you send the signed form by Friday?"),
+  "bestRegards": ("Keys", "Hi Kevin,\\nBest regards from all of us, and can you return the keys on Monday?"),
+  "thanksLine": ("Invoice", "Hi Kevin,\\nThanks\\nCan you pay the invoice this week?"),
+  "postscript": ("Catch up", "Great to see you.\\nThanks,\\nAda\\n\\nPS please pay by Friday"),
   "disclaimer": ("Minutes", "Minutes attached. This email and any attachments are confidential; please notify the sender if received in error."),
   "askAboveSignoff": ("Lease", "Can you sign the lease?\\n\\nKind regards\\nPat"),
 }
@@ -480,6 +484,8 @@ out({k: m.ask_signal(subj, q(body)) for k, (subj, body) in cases.items()})
     for (const k of ['environment', 'hesitate', 'intended', 'seeAttached', 'seeBelow', 'advised', 'aware',
       'apologies', 'love', 'signoff', 'disclaimer']) expect(r[k], k).toBe('');
     expect(r.askAboveSignoff).toMatch(/^a request to act \(Can you\)/);
+    // Fifth review: nothing is cut at a sign-off, so an ask after one, or in a PS, still counts.
+    for (const k of ['manyThanks', 'bestRegards', 'thanksLine', 'postscript']) expect(r[k], k).not.toBe('');
   });
 
   it('without the label it refuses before moving anything, and lane 12 is never the read label', () => {
