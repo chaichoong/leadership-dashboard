@@ -51,6 +51,7 @@
         const [y, m] = monthKey.split('-').map(Number);
         return `${monthKey}-${String(new Date(Date.UTC(y, m, 0)).getUTCDate()).padStart(2, '0')}`;
     }
+    const dayMonth = isoDate => `${Number(iso(isoDate).slice(8, 10))} ${['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'][Number(iso(isoDate).slice(5, 7)) - 1]}`;
     function previousMonthKey(today) {
         const [y, m] = iso(today).split('-').map(Number);
         const d = new Date(Date.UTC(y, m - 2, 1));
@@ -166,15 +167,21 @@
         // live personal card feed must not hide a property account that has stopped.
         const isProperty = tx => (tx.subCategories || []).includes(RENT_SUB) || (tx.businesses || []).includes(businessName);
         const newest = (transactions || []).reduce((mx, tx) => (isProperty(tx) && iso(tx.date) > mx && iso(tx.date) <= iso(today) ? iso(tx.date) : mx), '');
+        // The cards headline the last full month, with the rolling 31 days beside it (Kevin,
+        // 14 Oct 2026), so a payment that needs checking in EITHER figure is named once: the
+        // checks run from whichever window starts first to today.
+        const checkStart = rolling.start < `${lastKey}-01` ? rolling.start : `${lastKey}-01`;
+        const checks = cashWindow({ ...base, start: checkStart, end: iso(today) });
+        const since = `since ${dayMonth(checkStart)}`;
         const alarms = [];
         if (!(transactions || []).length) alarms.push(red('No bank transactions loaded.'));
         else if (!newest) alarms.push(red('No property transaction found. The bank feed or the filing has stopped.'));
         else if (newest < addDays(today, -(feedStaleDays || 4))) alarms.push(red(`The newest property transaction is dated ${newest}. The bank feed or the filing has stopped.`));
-        if (!rolling.rentCount) alarms.push(red('No rent received in the window. The feed or the filing has stopped.'));
-        if (rolling.unreconciled) alarms.push(amber(`${rolling.unreconciled} payment(s) in the window are not filed yet, so this figure will move.`));
-        if (rolling.untagged.length) alarms.push(amber(`${rolling.untagged.length} payment(s) against a property cost record are not tagged to the property business, so they are left out. Check them.`));
-        if (rolling.mismatches.length) alarms.push(amber(`${rolling.mismatches.length} payment(s) are tagged to property but linked to another business's cost record. They are counted as property. Check them.`));
-        return { rolling, lastMonth, lastMonthKey: lastKey, baseline, newestTransaction: newest, alarms };
+        if (!rolling.rentCount) alarms.push(red('No rent received in the last 31 days. The feed or the filing has stopped.'));
+        if (checks.unreconciled) alarms.push(amber(`${checks.unreconciled} payment(s) ${since} are not filed yet, so this figure will move.`));
+        if (checks.untagged.length) alarms.push(amber(`${checks.untagged.length} payment(s) ${since} against a property cost record are not tagged to the property business, so they are left out. Check them.`));
+        if (checks.mismatches.length) alarms.push(amber(`${checks.mismatches.length} payment(s) ${since} are tagged to property but linked to another business's cost record. They are counted as property. Check them.`));
+        return { rolling, lastMonth, lastMonthKey: lastKey, baseline, checks, newestTransaction: newest, alarms };
     }
 
     // Live tenancies sitting in a unit, leaving out anyone the unit must not count.
@@ -296,6 +303,19 @@
         return { value: last ? round2(last.net) : null, lastMonthKey: last ? last.key : '', average, months: list.map(m => ({ key: m.key, net: round2(m.net) })), alarms };
     }
 
+    // ── Credit card paydown pace (the credit card summary under the forecast) ──
+    // What can go to the cards each month: personal net cash flow (KPI 7's 3-month average,
+    // Wealth page rules) times the Debt pot's share of it (Income Buckets). Never the property
+    // surplus: that comes before the variable budget and before Kevin's living costs, and on
+    // 14 Oct 2026 it said £24,165 of card debt would clear in about 2 months.
+    // personal: the personalNet() result. debtPct: the Debt pot's Allocation %, 70 meaning 70%.
+    function debtPaydown({ personal, debtPct }) {
+        if (!personal || alarmLevel(personal) === 'red' || personal.average == null) return { perMonth: null, reason: 'the Wealth cash flow did not load' };
+        const pct = Number(debtPct);
+        if (debtPct == null || debtPct === '' || !isFinite(pct)) return { perMonth: null, reason: 'the Debt pot share could not be read' };
+        return { perMonth: round2(Math.max(0, personal.average) * pct / 100), average: round2(personal.average), debtPct: pct };
+    }
+
     // Worst alarm on a result: 'red' | 'amber' | ''. A thrown rule is red, never blank.
     function alarmLevel(result) {
         if (!result) return 'red';
@@ -303,5 +323,5 @@
         return a.some(x => x.level === 'red') ? 'red' : (a.length ? 'amber' : '');
     }
 
-    return { planCushion, cashWindow, cashCushion, namedUnits, namedRent, compliance, personalNet, alarmLevel, isLive, addDays, previousMonthKey, VARIABLE_LINES };
+    return { planCushion, cashWindow, cashCushion, namedUnits, namedRent, compliance, personalNet, debtPaydown, alarmLevel, isLive, addDays, previousMonthKey, VARIABLE_LINES };
 });
