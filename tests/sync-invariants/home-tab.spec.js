@@ -131,6 +131,14 @@ test.describe('Home: one scroll of the real pages', () => {
     await page.waitForFunction(() => window.__wealthDrawnAt > 0, { timeout: 10000 });
   });
 
+  test('opened in a background tab, Home still loads the approvals, so they are ready when Kevin looks', async ({ page }) => {
+    await page.addInitScript(() => {
+      Object.defineProperty(Document.prototype, 'visibilityState', { get: () => 'hidden', configurable: true });
+    });
+    await open(page, '');
+    await page.waitForFunction(() => /home=1/.test(document.getElementById('homeAgentsFrame').getAttribute('src') || ''), { timeout: 15000 });
+  });
+
   test('signed out, Home loads no approvals frame behind the sign-in screen, even past its 20-second fallback', async ({ page }) => {
     await page.clock.install();
     await open(page, '', { signedOut: true });

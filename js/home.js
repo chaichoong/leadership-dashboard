@@ -56,8 +56,11 @@
     // Kevin is typing (review, 14 Oct 2026). It is asked to re-read; a newer deploy reloads it through
     // its own stale-tab path, which carries his notes over. Only a copy that failed is loaded again.
     function keepFresh(force) {
-        if (!homeOpen() || document.visibilityState !== 'visible') return;
+        if (!homeOpen()) return;
+        // The first load happens even in a background tab, so the approvals are ready when Kevin looks
+        // (live check, 14 Oct 2026: a tab opened behind another showed "Loading…" until it was shown).
         if (!frame() || !frame().getAttribute('src')) { loadAgents(false); return; }
+        if (document.visibilityState !== 'visible') return;   // re-reads wait for him to be looking
         if (state.agents.phase === 'error') { loadAgents(true); return; }
         const now = Date.now();
         if ((force || now - state.rereadAt > REREAD_AFTER_MS) && state.agents.phase === 'ready') { state.rereadAt = now; tellFrame({ type: 'homeRefresh' }); }
