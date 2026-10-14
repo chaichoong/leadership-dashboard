@@ -46,10 +46,16 @@ When you find something needing a code change, file it and move on:
 
 ```
 python3 /Users/kevinbrittain/Projects/leadership-dashboard/scripts/findings.py add --routine agent-dispatch --severity high \
+  --agent "<the agent filing it, e.g. property-administration>" \
   --title "short summary" --where "js/config.js:42" \
   --detail "what is wrong and how you know" \
   --fix "what you would change" --touches-code
 ```
+
+Always pass `--agent` with the agent's own name (its agent file name, or its Team Members
+name): every agent files under the one routine `agent-dispatch`, and the cap counts each
+named agent's own findings, so a finding filed with no agent shares one pool with every other
+unnamed filing and is the first to be refused. A name that is not an AI agent counts as none.
 
 Severity is `critical`, `high`, `medium` or `low`. Be honest: `critical` means
 money, data or production is broken right now.
@@ -120,7 +126,7 @@ STEPS
         - Closing a task the agent owns as a duplicate of an older open task, by folding into
           the older one so nothing is lost. Only where the duplicate gate already keys them
           together. Closing for any other reason stays gated.
-        - Filing a sweep or audit finding, via `scripts/findings.py add`.
+        - Filing a sweep or audit finding, via `scripts/findings.py add --agent <your name>`.
       Everything else is unchanged: the gate still sits before every outward-facing action.
 
    c. SWEEP AND ERROR FINDINGS ARE NOT APPROVALS. A finding is a note for the queue, not a

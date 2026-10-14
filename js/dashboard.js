@@ -1668,7 +1668,8 @@
             const w = {}, d = {}, r = {};
             ['open', 'notMoving', 'created7d', 'done7d', 'held', 'other', 'replyOverdue', 'replyWindowDays']
                 .concat(AI_WORK_SPLIT.map(s => s[0])).forEach(k => { w[k] = aiNum(p.work[k]); });
-            ['open', 'filed7d', 'fixed7d'].forEach(k => { d[k] = aiNum(p.defects[k]); });
+            ['open', 'filed7d', 'fixed7d', 'code', 'notCode', 'repeats', 'toTasks7d', 'refusedUnread', 'refused7d']
+                .forEach(k => { d[k] = aiNum(p.defects[k]); });
             ['days', 'fixes', 'fixOfFix', 'baselinePct'].forEach(k => { r[k] = aiNum(p.rework[k]); });
             r.pct = p.rework.pct == null ? null : aiNum(p.rework.pct);
             const net = (Number(w.created7d) || 0) - (Number(w.done7d) || 0);
@@ -1720,12 +1721,45 @@
                     detail: netRow + note(`${why}Tasks owned by an AI agent.${heldNote ? ` ${heldNote}` : ''}`) + updated(health),
                 }, health);
             }
-            cards.aiDefectsCard = aiTeamStale({
-                label: 'Defects', value: `${d.open} open`,
-                sub: `7 days: ${d.filed7d} filed, ${d.fixed7d} fixed`,
-                cls: (Number(d.filed7d) || 0) > (Number(d.fixed7d) || 0) ? 'text-red' : 'text-green',
-                detail: `<div style="color:var(--text-muted);font-size:var(--fs-xs)">Problems the robots and daily checks logged for fixing. Fixed means merged. A rejected one carries no date, so it is not counted as cleared.</div>${updated(health)}`,
-            }, health);
+            // The split (Kevin, 14 Oct 2026): open counts each problem once, says how many need code
+            // and how many a code fix can never close, and counts what the cap refused and nobody has
+            // read. A row written before then has none of these keys and renders as it always did.
+            const dHas = (k) => p.defects[k] != null && typeof d[k] === 'number';
+            const defectsRed = (Number(d.filed7d) || 0) > (Number(d.fixed7d) || 0);
+            if (dHas('code') && dHas('notCode')) {
+                // An overflow log the Mac could not read is said as "not read", never a count
+                // (review of PR #784): a number there would be a guess presented as a reading.
+                const refusedErr = (typeof p.defects.refusedError === 'string' && p.defects.refusedError)
+                    ? escHtml(p.defects.refusedError) : '';
+                const refused = !refusedErr && dHas('refusedUnread') ? d.refusedUnread : null;
+                cards.aiDefectsCard = aiTeamStale({
+                    label: 'Defects', value: `${d.open} open`,
+                    sub: `${d.code} code, ${d.notCode} not code`
+                        + (refusedErr ? ' · refused: not read' : refused ? ` · ${refused} refused, unread` : '')
+                        + ` · 7 days: ${d.filed7d} filed, ${d.fixed7d} fixed`,
+                    cls: defectsRed ? 'text-red' : (refused || refusedErr) ? 'text-amber' : 'text-green',
+                    detail: row('Code fixes waiting', d.code)
+                        + row('Not code (belongs on the task board)', d.notCode)
+                        + (refusedErr ? row('Refused by the cap', 'not read') + note(`The overflow log could not be read: ${refusedErr}`)
+                            : refused != null ? row('Refused by the cap, unread', refused) : '')
+                        + row('Filed in 7 days', d.filed7d, 'margin-top:6px')
+                        + row('Fixed in 7 days', d.fixed7d)
+                        + (dHas('toTasks7d') ? row('Moved to tasks in 7 days', d.toTasks7d) : '')
+                        + (dHas('repeats') ? row('Repeats merged into the first report', d.repeats) : '')
+                        + note('Problems the robots and daily checks logged for fixing. Open counts each problem once: a repeat is merged into the first report and counted there. '
+                            + 'Not code means no code change can close it, so it is moved to a task. '
+                            + 'Refused means the queue\'s cap turned it away; it waits in the overflow log until someone sorts it. '
+                            + 'Fixed means merged. A rejected one carries no date, so it is not counted as cleared.')
+                        + updated(health),
+                }, health);
+            } else {
+                cards.aiDefectsCard = aiTeamStale({
+                    label: 'Defects', value: `${d.open} open`,
+                    sub: `7 days: ${d.filed7d} filed, ${d.fixed7d} fixed`,
+                    cls: defectsRed ? 'text-red' : 'text-green',
+                    detail: `<div style="color:var(--text-muted);font-size:var(--fs-xs)">Problems the robots and daily checks logged for fixing. Fixed means merged. A rejected one carries no date, so it is not counted as cleared.</div>${updated(health)}`,
+                }, health);
+            }
             const pct = r.pct;
             cards.aiReworkCard = aiTeamStale({
                 label: 'Fix of a Fix', value: pct == null ? '—' : `${pct}%`,

@@ -110,6 +110,52 @@ test.describe('AI Team section', () => {
     expect(rework.cls).toContain('text-red');           // over 40%
   });
 
+  // The Defects card after the clean-up Kevin approved on 14 Oct 2026 ("merge duplicates, move the
+  // non-code items to tasks, stop the overflow log"). The fixture is the live read that evening:
+  // 167 open once 51 repeats were merged (129 code, 38 not code), 86 distinct filed and 46 fixed in
+  // 7 days, 4 moved to tasks, and 245 refusals in the overflow log nobody had sorted.
+  test('Defects counts each problem once, splits code from not code, and counts the refused (14 Oct 2026)', async ({ page }) => {
+    await page.addInitScript((pat) => localStorage.setItem('_dlr_pat', pat), MOCK_PAT);
+    await loadDashboard(page);
+    const row = healthRow();
+    const p = JSON.parse(row.fields[ES.payload]);
+    p.defects = { open: 167, code: 129, notCode: 38, filed7d: 86, fixed7d: 46, repeats: 51, toTasks7d: 4,
+      refusedUnread: 245, refused7d: 58 };
+    row.fields[ES.payload] = JSON.stringify(p);
+    await routeEstate(page, [row, blockersRow()]);
+    await page.evaluate(async () => await loadAiTeamHealth());
+    const defects = await card(page, 'aiDefectsCard');
+    expect(defects.head).toBe('167 open');
+    expect(defects.sub).toBe('129 code, 38 not code · 245 refused, unread · 7 days: 86 filed, 46 fixed');
+    expect(defects.cls).toContain('text-red');            // filed still beats fixed
+    const d = await cardDetail(page, 'aiDefectsCard');
+    expect(d.rows).toEqual([
+      ['Code fixes waiting', '129'], ['Not code (belongs on the task board)', '38'],
+      ['Refused by the cap, unread', '245'], ['Filed in 7 days', '86'], ['Fixed in 7 days', '46'],
+      ['Moved to tasks in 7 days', '4'], ['Repeats merged into the first report', '51'], ['Updated', expect.any(String)],
+    ]);
+    expect(d.text).toContain('a repeat is merged into the first report');
+
+    // Fixed beats filed, but refusals nobody has read keep it off green: an unread pile is not calm.
+    p.defects = { ...p.defects, filed7d: 10, fixed7d: 20 };
+    row.fields[ES.payload] = JSON.stringify(p);
+    await routeEstate(page, [row, blockersRow()]);
+    await page.evaluate(async () => await loadAiTeamHealth());
+    expect((await card(page, 'aiDefectsCard')).cls).toContain('text-amber');
+
+    // An overflow log the Mac could not read says so, never a number (review of PR #784).
+    p.defects = { ...p.defects, refusedUnread: null, refused7d: null, refusedError: '[Errno 13] Permission denied' };
+    row.fields[ES.payload] = JSON.stringify(p);
+    await routeEstate(page, [row, blockersRow()]);
+    await page.evaluate(async () => await loadAiTeamHealth());
+    const notRead = await card(page, 'aiDefectsCard');
+    expect(notRead.sub).toBe('129 code, 38 not code · refused: not read · 7 days: 10 filed, 20 fixed');
+    expect(notRead.cls).toContain('text-amber');
+    const nd = await cardDetail(page, 'aiDefectsCard');
+    expect(nd.rows).toContainEqual(['Refused by the cap', 'not read']);
+    expect(nd.text).toContain('The overflow log could not be read: [Errno 13] Permission denied');
+  });
+
   test('Agent Work leads with live work and lists every kind of open work (14 Oct 2026)', async ({ page }) => {
     await page.addInitScript((pat) => localStorage.setItem('_dlr_pat', pat), MOCK_PAT);
     await loadDashboard(page);
