@@ -52,7 +52,12 @@
 
     // One guard per page: the AI Agents and Tasks pages share sessionStorage as iframes of one
     // dashboard tab, and one page's reload must never switch off the other's check (review round 2).
-    function reloadKey() { return RELOADED_KEY + ':' + root.location.pathname; }
+    // The AI Agents page also runs a second copy on Home (?home=1, 14 Oct 2026): it gets its own guard,
+    // or the Home copy's reload would let the AI Agents copy save on old code for a minute.
+    function reloadKey() {
+        const home = new URLSearchParams(root.location.search || '').get('home') === '1';
+        return RELOADED_KEY + ':' + root.location.pathname + (home ? ':home' : '');
+    }
 
     // A reload in the last minute that still left this page different means the server is not
     // giving out one copy yet: say so and let the save go, rather than reload for ever.

@@ -11,7 +11,7 @@
     <link rel="stylesheet" href="css/sync-bar.css?v=3">
     <link rel="stylesheet" href="css/quick-task.css?v=2">
     <link rel="stylesheet" href="css/styles.css?v=23">
-    <link rel="stylesheet" href="css/home.css?v=2"><!-- Home tab (29 Sep 2026) -->
+    <link rel="stylesheet" href="css/home.css?v=3"><!-- Home tab (29 Sep 2026) -->
 </head>
 <body>
     <!-- Auth Screen -->
@@ -200,21 +200,24 @@
             <button class="accounts-subtab" data-tab="cfv" onclick="switchTab('cfv')">Cash Flow Voids</button>
         </div>
 
-        <!-- Home tab (Kevin, 29 Sep 2026; brain Decisions/2026-09-29 Home screen is one list): one list of what
-             needs Kevin today (js/home.js, rules in js/home-list.js), then the real Leadership Dashboard panel below,
-             shown by body.home-mode in css/home.css. Nothing else in the shell changes. -->
+        <!-- Home tab (Kevin, 29 Sep 2026; rebuilt 14 Oct 2026 to the plan he approved on 9 Oct, task recwJcP4xIgAeR723):
+             ONE scroll of the real pages, nothing copied. The approval queue and the CEO brief come from the AI Agents
+             page itself in its Home mode (os/agents/index.html?home=1), then the Leadership Dashboard panel, then the
+             Wealth panel (loaded when scrolled to), both shown by body.home-mode in css/home.css. js/home.js drives it.
+             The app opens here. -->
         <div class="tab-panel" id="tab-home">
             <div data-sync-bar="home"></div>
             <div class="home-header">
                 <h1>Home</h1>
-                <p><span id="homeDate"></span> · Everything that needs you today, then your Leadership Dashboard.</p>
+                <p><span id="homeDate"></span> · Your approvals, the CEO brief, your Leadership Dashboard and your wealth, in one scroll.</p>
             </div>
             <nav class="home-links" aria-label="One tap deeper">
                 <button type="button" class="home-link" data-home-tab="agents">Team: AI Agents</button>
                 <button type="button" class="home-link" data-home-tab="tasks">Board: Tasks</button>
                 <button type="button" class="home-link" data-home-tab="ai-brain">Memory: AI Brain</button>
             </nav>
-            <div class="home-card"><div id="homeList"></div></div>
+            <div id="homeAgentsStatus" class="home-status" role="status" aria-live="polite">Loading your approvals and the CEO brief…</div>
+            <iframe id="homeAgentsFrame" class="home-agents-frame" src="" data-src="os/agents/index.html?home=1" title="Your approvals and the CEO brief" scrolling="no"></iframe>
             <h2 class="home-dash-divider">Your Leadership Dashboard</h2>
         </div>
 
@@ -672,6 +675,7 @@
         <div class="tab-panel" id="tab-money"></div>
 
         <!-- Tab: Wealth (isolated — net worth + income buckets) -->
+        <h2 class="home-dash-divider" id="homeWealthDivider">Your wealth</h2><!-- Home tab: shown only in body.home-mode (css/home.css) -->
         <div class="tab-panel" id="tab-wealth"></div>
 
         <!-- Tab 4: CFVs -->
@@ -973,7 +977,6 @@
     <script defer src="js/skills.js?v=12"></script>
     <script defer src="js/ai-assistant.js?v=19"></script>
     <script defer src="js/quick-task.js?v=4"></script>
-    <script defer src="js/home-list.js?v=3"></script><!-- Home tab (29 Sep 2026) -->
-    <script defer src="js/home.js?v=2"></script>
+    <script defer src="js/home.js?v=3"></script><!-- Home tab (29 Sep 2026; rebuilt 14 Oct 2026) -->
 </body>
 </html>

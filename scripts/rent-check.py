@@ -676,8 +676,8 @@ def brief_line(res):
         return shown + (f"; and {len(rows) - BRIEF_NAMES_MAX} more" if len(rows) > BRIEF_NAMES_MAX else "") + "."
 
     def staged(r):
-        # Lane B's few words for the stage. The whole of it is in the row's note, not here: Home
-        # prints only the first 700 characters of this line (js/home-list.js readRent).
+        # Lane B's few words for the stage. The whole of it is in the row's note, not here: the
+        # line is read in short form (Home printed its first 700 characters until 14 Oct 2026).
         return f"{r['unit']} ({r['stage']})" if r.get("stage") else r["unit"]
 
     if group("late"):

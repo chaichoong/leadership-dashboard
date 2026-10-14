@@ -199,7 +199,8 @@
         const container = document.getElementById('aiChips');
         if (!container) return;
         const tab = getActiveTab();
-        const actions = AI_ACTIONS[tab] || AI_ACTIONS._default;
+        // Home opens with the Leadership Dashboard on it, so it offers the dashboard's actions (14 Oct 2026).
+        const actions = AI_ACTIONS[tab === 'home' ? 'overview' : tab] || AI_ACTIONS._default;
         container.innerHTML = actions.filter(a => a.prompt).map(a =>
             `<div class="ai-chip" onclick="sendQuickAction('${escJs(a.label)}')">${escHtml(a.label)}</div>`
         ).join('');
@@ -315,7 +316,9 @@
         const tab = ctx.currentTab || 'overview';
         const page = (typeof PAGE_REGISTRY !== 'undefined') ? PAGE_REGISTRY.find(p => p.id === tab) : null;
         const pageName = page ? page.name : tab;
-        const purpose = PAGE_PURPOSES[tab] || '';
+        const purpose = tab === 'home'
+            ? 'Home — the approval queue and the CEO brief, then the Leadership Dashboard and Wealth, in one scroll. ' + (PAGE_PURPOSES.overview || '')
+            : (PAGE_PURPOSES[tab] || '');
         const sopText = await loadSOPForTab(tab);
 
         const mentor = (typeof BOARDROOM_MENTOR_PROMPT !== 'undefined') ? BOARDROOM_MENTOR_PROMPT : '';

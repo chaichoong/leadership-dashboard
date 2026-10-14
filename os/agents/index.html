@@ -405,6 +405,26 @@ a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}
 .resources-chevron{font-size:10px;color:var(--text-muted);transition:transform .15s}
 .sop-fb-text{width:100%;box-sizing:border-box;border:1px solid var(--border-default);background:var(--bg-surface);border-radius:var(--radius-md);padding:8px 10px;font-size:var(--fs-sm);color:var(--text-primary);font-family:var(--font-family-base);resize:vertical}
 .sop-fb-actions{display:flex;gap:8px;margin-top:6px}
+/* Home embed (Kevin, 9 Oct 2026, approved plan; built 14 Oct): os/agents/index.html?home=1 runs inside the
+   shell's Home tab and shows ONLY the approval queue, then the CEO brief, at full height. The same page and
+   code as the AI Agents tab, so nothing is copied; html.home-embed hides the rest. */
+html.home-embed #topbar, html.home-embed .page-tabs, html.home-embed [data-sync-bar="agents"]{display:none !important}
+html.home-embed:not(.home-failed) #main{display:flex !important;flex-direction:column}
+html.home-embed #view-approvals{display:block;order:1}
+html.home-embed #view-dashboard{display:block;order:2}
+html.home-embed #view-dashboard > .zone:not(#zoneCeoBrief){display:none !important}
+html.home-embed #view-checks, html.home-embed #view-estate, html.home-embed #view-built{display:none !important}
+html.home-embed body{overflow:hidden;min-height:0}
+/* In a frame as tall as its content, position:fixed means the whole frame, not the screen: a dialog would
+   open 2,000px below where Kevin is looking (review, 14 Oct 2026). Home posts the band of the frame that is
+   on screen (--home-vis-top/--home-vis-h); dialogs, toasts and the Undo bar sit inside that band. */
+html.home-embed .modal-overlay{position:absolute;bottom:auto;top:var(--home-vis-top,0px);height:var(--home-vis-h,100vh)}
+html.home-embed .toast{position:absolute;bottom:auto;top:calc(var(--home-vis-top,0px) + var(--home-vis-h,100vh) - 64px)}
+html.home-embed .apv-answered-bar{position:absolute;bottom:auto;top:calc(var(--home-vis-top,0px) + var(--home-vis-h,100vh) - 76px);transform:translate(-50%,-100%)}
+html.home-embed .modal{max-height:calc(var(--home-vis-h,100vh) * .9)}
+/* The frame never scrolls, so a sticky bar is held inside the band on screen by its offset from the frame's edge. */
+html.home-embed .apv-bulk{top:var(--home-vis-top,0px)}
+html.home-embed .apv-decide{bottom:calc(100vh - var(--home-vis-top,0px) - var(--home-vis-h,100vh))}
 </style>
 </head>
 <body>
@@ -804,6 +824,9 @@ const AGENT_VIEWS = ['dashboard','approvals','checks','estate','built'];
 // memory still say 'ceo-brief' — map them home rather than 404 the view.
 const AGENT_VIEW_ALIASES = { 'ceo-brief': 'dashboard', 'status': 'estate', 'jobs': 'estate', 'track-record': 'built' };
 let _agentsView = 'dashboard';  // which page tab is showing
+// Home embed (see the CSS at html.home-embed): approvals view, plus the CEO brief, no tabs, no deep links.
+const HOME_MODE = new URLSearchParams(location.search).get('home') === '1';
+if(HOME_MODE){ document.documentElement.classList.add('home-embed'); _agentsView = 'approvals'; }
 let allApprovals = [];          // loop-raised tasks at Status Approval
 let allAnswered = [];           // Your step cards he has answered, waiting for the half-hourly sweep
 let _approvalsState = 'idle';   // idle | loading | ready | 'error: <message>'
@@ -989,10 +1012,20 @@ function atFetchByName(tableId, params){
     return atFetch(tableId, null, Object.assign({ returnFieldsByFieldId:'false' }, params||{}));
 }
 
+// Airtable answers 429 above five requests a second, and the queue now runs in two copies (Home and
+// the AI Agents tab), so single reads and writes wait and retry too (review, 14 Oct 2026). A 429 means
+// the request was not processed, so a write is safe to repeat.
+async function atRetry429(doFetch){
+    for(let attempt=0;;attempt++){
+        const res = await doFetch();
+        if(res.status===429 && attempt<4){ await new Promise(r=>setTimeout(r, 1100 * (attempt + 1))); continue; }
+        return res;
+    }
+}
 async function atFetchOne(tableId, recId){
-    const res = await fetch(`https://api.airtable.com/v0/${BASE_ID}/${tableId}/${recId}?returnFieldsByFieldId=true`,{
+    const res = await atRetry429(() => fetch(`https://api.airtable.com/v0/${BASE_ID}/${tableId}/${recId}?returnFieldsByFieldId=true`,{
         headers:{'Authorization':`Bearer ${PAT}`}
-    });
+    }));
     if(res.status===401||res.status===403){ showAuthBar(); throw new Error('auth'); }
     if(!res.ok) throw new Error(await res.text());
     return res.json();
@@ -1010,14 +1043,82 @@ async function atCreate(tableId, fields){
 }
 
 async function atUpdate(tableId, recId, fields){
-    const res = await fetch(`https://api.airtable.com/v0/${BASE_ID}/${tableId}/${recId}`,{
+    const res = await atRetry429(() => fetch(`https://api.airtable.com/v0/${BASE_ID}/${tableId}/${recId}`,{
         method:'PATCH',
         headers:{'Authorization':`Bearer ${PAT}`,'Content-Type':'application/json'},
         body: JSON.stringify({ fields, typecast:true, returnFieldsByFieldId:true })
-    });
+    }));
     if(!res.ok) throw new Error(await res.text());
+    // A queue read that started before this write carries the task as it was: drop it (loadApprovals
+    // checks the epoch), then tell the other copies.
+    if(tableId === TASKS_TBL){ _apvQueueEpoch++; _apvLocalWriteAt = Date.now(); apvAnnounceQueueChange(); }
     return (await res.json());
 }
+
+// ONE QUEUE, TWO COPIES (Kevin, 9 Oct 2026: "all of the information on the Home page synced with
+// the separate sections"). The queue now runs twice in the app: on Home (?home=1) and on the AI
+// Agents tab. Every task write here (a verdict, a knock-back, an undo, a Your step answer) goes
+// through atUpdate, which tells every other open copy; that copy re-reads the queue at once, so a
+// card answered in one is gone from the other. BroadcastChannel never echoes to its sender. The
+// stale-tab guard and the server-side checks still stop a double answer if a message is missed.
+const APV_CHANNEL = (typeof BroadcastChannel === 'function') ? new BroadcastChannel('od-approval-queue') : null;
+let _apvAnnounceTimer = null;
+function apvAnnounceQueueChange(){
+    if(!APV_CHANNEL) return;
+    clearTimeout(_apvAnnounceTimer);
+    _apvAnnounceTimer = setTimeout(() => {
+        try { APV_CHANNEL.postMessage({ type:'queue-changed', at: Date.now() }); }
+        catch(e){ console.warn('approval queue announce failed', e); }
+    }, 400);
+}
+// ONE re-read at a time, whatever asks for it (another copy's write, Home reopening, the five-minute
+// keep-fresh): a request while one is due or running only marks the queue dirty. It waits while this
+// copy is hidden in the app (re-read when shown), while a read or a save is running (a read started
+// before a save could put the answered card back), and while Kevin is typing in a card (a redraw would
+// take his cursor). Review, 14 Oct 2026.
+let _apvDirty = false, _apvRereading = false, _apvRereadFails = 0, _apvLocalWriteAt = 0, _apvLastKeyAt = 0;
+const APV_QUIET_AFTER_WRITE_MS = 6000;   // a knock-back, Undo or bring-back draws its own result in this window
+document.addEventListener('input', (e) => { if(e.target && /^(TEXTAREA|INPUT)$/.test(e.target.tagName)) _apvLastKeyAt = Date.now(); }, true);
+function apvHiddenInApp(){ try { return !!window.frameElement && window.frameElement.offsetParent === null; } catch(e){ return false; } }
+function apvTyping(){
+    const a = document.activeElement;
+    const textBox = !!a && (a.tagName === 'TEXTAREA' || (a.tagName === 'INPUT' && /^(text|search|email|url|number|date|)$/i.test(a.type || '')));
+    return textBox && Date.now() - _apvLastKeyAt < 30000;
+}
+function apvRereadQueue(){ _apvDirty = true; apvRunReread(); }
+// Busy = something a reload would lose: words being typed, a note or file waiting on a card, a reason
+// picked, cards ticked, a save running.
+function apvBusy(){
+    return apvTyping() || _apvSaving.size > 0 || _apvSelected.size > 0 || Object.keys(_apvReason).length > 0
+        || allApprovals.some(t => { const dr = _apvDrafts[t.id]; return dr && (String(dr.note || '').trim() || (dr.files || []).length); });
+}
+async function apvRunReread(){
+    if(!_apvDirty || _apvRereading || !PAT) return;
+    if(apvHiddenInApp() || _approvalsState === 'loading' || _apvSaving.size || apvTyping()
+        || Date.now() - _apvLocalWriteAt < APV_QUIET_AFTER_WRITE_MS) return;   // the 2-second tick tries again
+    _apvDirty = false; _apvRereading = true;
+    let failed = false;
+    try {
+        await apvSilentRefresh();
+        const deferredSig = () => allDeferred.map(t => `${t.id}:${t.until}:${t.why || ''}`).join('|');
+        const beforeDeferred = deferredSig();
+        await loadDeferred();
+        if(deferredSig() !== beforeDeferred) apvRefreshDeferredLane();   // a rebuild could swallow a click on "Bring back now"
+        // Both readers catch their own errors (they draw them in place), so failure is read from their state.
+        failed = String(_approvalsState).indexOf('error') === 0 || String(_deferredState).indexOf('error') === 0;
+    } catch(err){
+        console.warn('approval queue re-read failed', err);
+        failed = !(err && err.message === 'auth');
+    } finally { _apvRereading = false; }
+    if(!failed) _apvRereadFails = 0;
+    // A few more tries, spaced 10, 20 and 30 seconds apart so a 30-second Airtable lockout is outlasted; never a loop.
+    else if(++_apvRereadFails <= 3) setTimeout(() => { _apvDirty = true; }, 10000 * _apvRereadFails);
+}
+setInterval(apvRunReread, 2000);
+if(APV_CHANNEL) APV_CHANNEL.onmessage = (e) => {
+    if(!e.data || e.data.type !== 'queue-changed') return;
+    apvRereadQueue();
+};
 
 // Best-effort Airtable record comment — same trail the Tasks drawer leaves.
 async function postTaskComment(taskId, text){
@@ -1088,7 +1189,9 @@ async function loadApprovals(){
         const [recs, answeredRecs] = await Promise.all([
             atFetch(TASKS_TBL, APV_QUEUE_FIELDS(), { filterByFormula: APV_QUEUE_FORMULA }),
             atFetch(TASKS_TBL, APV_QUEUE_FIELDS(), { filterByFormula: APV_ANSWERED_FORMULA })]);
-        if(epoch !== _apvQueueEpoch){ _approvalsState = 'ready'; return; }
+        // Dropped, so the queue is due another read (the 2-second tick runs it): a read that is simply
+        // thrown away would leave the other copy's change unseen (review, 14 Oct 2026).
+        if(epoch !== _apvQueueEpoch){ _approvalsState = 'ready'; _apvDirty = true; return 'dropped'; }
         // This queue and badge are KEVIN'S. The Approver field decides whose
         // lane a task is in (empty = Kevin, same convention as approverFor in
         // scripts/slack-automation/approvals.js); Mica's label-8 lane must
@@ -1496,7 +1599,7 @@ async function uploadQueuedApprovalFiles(taskId){
 const _apvDrafts = {};
 // Notes typed on a tab that then reloaded itself because a newer copy of this page was live
 // (apvStaleTab, 7 Oct 2026). Read once and dropped, so they come back on the first render only.
-const APV_DRAFT_CARRY = 'apv_drafts_over_reload';
+const APV_DRAFT_CARRY = 'apv_drafts_over_reload' + (HOME_MODE ? ':home' : '');   // one per copy: Home and the AI Agents tab share sessionStorage
 try {
     const carried = JSON.parse(sessionStorage.getItem(APV_DRAFT_CARRY) || 'null');
     sessionStorage.removeItem(APV_DRAFT_CARRY);
@@ -2068,7 +2171,7 @@ async function apvSilentRefresh(){
     // nothing, so it keeps them for cards still queued: otherwise "The work
     // is wrong", typed slowly, saves as "Something else" (review, 23 Sep 2026).
     const keptReason = { ..._apvReason }, keptPicks = new Set(_apvSelected);
-    try { await loadApprovals(); }
+    try { if(await loadApprovals() === 'dropped') return false; }   // not stamped as a fresh read
     catch(e){ if(e.message === 'auth') throw e; return false; }
     const queued = new Set(allApprovals.map(t => t.id));
     Object.keys(keptReason).forEach(id => { if(queued.has(id)) _apvReason[id] = keptReason[id]; });
@@ -2095,15 +2198,15 @@ document.addEventListener('click', (ev) => {
 function signinsWatching(){ return (Date.now() - _apvSignInClickedAt) < APV_SIGNIN_WATCH_MS; }
 setInterval(() => {
     if(_agentsView !== 'approvals' || document.visibilityState === 'hidden') return;
-    if(apvWatchingQueue()) apvSilentRefresh().catch(() => {});
+    if(apvWatchingQueue()) apvRereadQueue();   // gated: never while hidden, typing, saving or just after a write
     if(signinsWatching() && _estateState !== 'loading') loadEstateStatus();
 }, 30000);
 document.addEventListener('visibilitychange', () => {
     if(document.visibilityState !== 'visible') return;
-    if(Date.now() - _apvLastQueueLoad > 30000 && apvWatchingQueue()) apvSilentRefresh().catch(() => {});
+    if(Date.now() - _apvLastQueueLoad > 30000 && apvWatchingQueue()) apvRereadQueue();
 });
 window.addEventListener('focus', () => {
-    if(Date.now() - _apvLastQueueLoad > 30000 && apvWatchingQueue()) apvSilentRefresh().catch(() => {});
+    if(Date.now() - _apvLastQueueLoad > 30000 && apvWatchingQueue()) apvRereadQueue();
 });
 
 // THE DATED TRAIL (Kevin, 8 Sep 2026). Airtable stores no date on a file and
@@ -3271,6 +3374,7 @@ window.apvStaleTab = apvStaleTab;
 // Back on an old tab: it reloads before he reads a card the new code would show differently.
 ['visibilitychange', 'focus'].forEach(ev => (ev === 'focus' ? window : document).addEventListener(ev, () => {
     if(document.visibilityState !== 'visible' || _agentsView !== 'approvals') return;
+    if(HOME_MODE && apvBusy()) return;   // the Home copy is clicked into constantly: never reload under his work
     apvStaleTab().catch(e => console.warn('page freshness check failed', e));
 }));
 async function applyApprovalDecision(taskId, outcome, remember, opts){
@@ -3855,6 +3959,7 @@ function apvScrollToFocus(){
     const bulk = document.getElementById('apvBulk');
     if(bulk && bulk.classList.contains('on')) offset += bulk.getBoundingClientRect().height + 12;
     const y = card.getBoundingClientRect().top + window.pageYOffset - offset;
+    if(HOME_MODE){ homeEmbedTell({ type:'agentsHomeScrollTo', y: Math.max(0, Math.round(y)) }); return; }   // the frame never scrolls; Home does
     window.scrollTo({ top: Math.max(0, Math.round(y)) });
 }
 // Try again repeats the SAME call, options included: a carried note is not
@@ -7967,6 +8072,7 @@ window.addEventListener('message', (e)=>{
     if(e.origin !== 'null' && e.origin !== window.location.origin) return;
     const d = e.data;
     if(!d || d.type !== 'agentsDeepLink') return;
+    if(HOME_MODE) return;   // a link aimed at the AI Agents tab must not turn Home's copy
     // A view request on its own (e.g. the shell's old #ceo-brief hash
     // forwarding here) just opens that page tab.
     if(d.view && !d.agent && !d.wf){ switchAgentsView(d.view); return; }
@@ -8233,16 +8339,70 @@ window.addEventListener('hashchange', ()=>{
     if(consumeAgentDeepLink()) switchAgentsView(_agentsView);
 });
 
+// Home embed: tell the Home tab how tall this page is, so its frame grows to full height and never
+// shows a scroll box of its own, and when the queue and brief are in (or failed).
+function homeEmbedTell(msg){
+    try { if(window.parent && window.parent !== window) window.parent.postMessage(Object.assign({ source:'agents-home' }, msg), window.location.origin); }
+    catch(e){ console.warn('home embed message failed', e); }
+}
+function homeEmbedWatchHeight(){
+    let last = 0, raf = 0;
+    // The content's own height, never scrollHeight: scrollHeight is at least the frame's height, so a
+    // frame could grow and never shrink after cards are answered (review, 14 Oct 2026).
+    const measure = () => {
+        const main = document.getElementById('main');
+        const el = (main && getComputedStyle(main).display !== 'none') ? main : document.getElementById('loader');
+        return el ? Math.ceil(el.getBoundingClientRect().bottom + window.pageYOffset + 24) : 0;
+    };
+    const send = () => { raf = 0; const h = measure(); if(h > 0 && h !== last){ last = h; homeEmbedTell({ type:'agentsHomeHeight', h }); } };
+    const ro = new ResizeObserver(() => { if(!raf) raf = requestAnimationFrame(send); });
+    ['main','loader'].forEach(id => { const el = document.getElementById(id); if(el) ro.observe(el); });
+    send();
+}
+// The brief as last drawn on Home (records shown + the London day), so a refresh redraws it when
+// either changes, the day turning over at midnight included.
+let _homeBriefDrawn = '';
+// Messages from the Home shell that holds this copy, and from nothing else.
+if(HOME_MODE) window.addEventListener('message', (e) => {
+    if(e.source !== window.parent || e.origin !== window.location.origin) return;
+    const d = e.data || {};
+    if(d.source !== 'home-shell') return;
+    if(d.type === 'homeViewport'){
+        document.documentElement.style.setProperty('--home-vis-top', `${Math.max(0, Number(d.top) || 0)}px`);
+        document.documentElement.style.setProperty('--home-vis-h', `${Math.max(120, Number(d.h) || 0)}px`);
+        return;
+    }
+    if(d.type === 'homeRefresh' && PAT){
+        // Home was opened again or left open. Never a plain reload, which would lose a note being typed:
+        // a newer deploy reloads through the stale-tab path that carries the notes over; otherwise the
+        // queue and the brief are read again, and the brief is redrawn only if it changed.
+        // While he is busy (typing, a note or file waiting, cards ticked, a save running) there is no
+        // freshness reload: the check before any save still stops old code saving.
+        (apvBusy() ? Promise.resolve(false) : apvStaleTab()).then(reloading => {
+            if(reloading) return;
+            apvRereadQueue();
+            // What the brief shows, plus the day ("today" turns over at midnight). File links are left
+            // out: Airtable signs them afresh on every read.
+            const sig = () => ceoBriefTodayISO() + '|' + (ceoBriefRecords || []).map(x => x.id + ':' + JSON.stringify(Object.entries(x.fields || {})
+                .filter(([, v]) => !(Array.isArray(v) && v.some(y => y && typeof y === 'object' && y.url))))).join('|');
+            loadCeoBriefs().then(() => { const now = sig(); if(now !== _homeBriefDrawn){ renderCeoBrief(); _homeBriefDrawn = now; } })
+                .catch(err => console.warn('CEO brief re-read failed', err));
+        }).catch(err => console.warn('Home refresh failed', err));
+    }
+});
+
 async function start(){
     document.getElementById('loader').style.display='block';
     document.getElementById('authBar').style.display='none';
+    if(HOME_MODE) homeEmbedWatchHeight();
     try {
-        consumeAgentDeepLink();
+        if(!HOME_MODE) consumeAgentDeepLink();
         // Announce boot so a deep link requested while this iframe was
         // reloading gets re-delivered by the parent (agentsPageReady
         // handshake in js/shared.js).
         try {
-            if(window.parent && window.parent !== window){
+            // Not from the Home copy: the shell would hand it a link meant for the AI Agents tab and drop it.
+            if(!HOME_MODE && window.parent && window.parent !== window){
                 window.parent.postMessage({ type:'agentsPageReady' }, '*');
             }
         } catch(e){ /* standalone — no parent */ }
@@ -8254,10 +8414,14 @@ async function start(){
         renderAllZones();
         registerAgentsSyncBar();
         updateSyncStatus('ok');
+        if(HOME_MODE){
+            homeEmbedTell({ type:'agentsHomeReady', ok:true, waiting: allApprovals.length, brief: _ceoBriefState });
+        }
     } catch(e){
-        if(e.message==='auth') return;
+        if(e.message==='auth'){ if(HOME_MODE) homeEmbedTell({ type:'agentsHomeReady', ok:false, error:'sign-in needed' }); return; }
         document.getElementById('loader').textContent='Error loading data: '+e.message;
         updateSyncStatus('error', e.message);
+        if(HOME_MODE){ document.documentElement.classList.add('home-failed'); homeEmbedTell({ type:'agentsHomeReady', ok:false, error:e.message }); }
     }
 }
 

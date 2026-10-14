@@ -167,6 +167,10 @@ test.describe('Strategic KPI save on load', () => {
 
         // Load 1: two transactions, fresh from Airtable. Saves 2 and writes the cache.
         await page.addInitScript((pat) => {
+            // The shell only. An init script runs in every frame, and the app opens on Home, which
+            // loads the AI Agents page in a frame (14 Oct 2026): its copy of this delete wiped the
+            // cache the shell had just written.
+            if (window !== window.top) return;
             localStorage.setItem('_dlr_pat', pat);
             try { indexedDB.deleteDatabase('_dlr_cache'); } catch {}
         }, MOCK_PAT);
