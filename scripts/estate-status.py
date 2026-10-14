@@ -983,7 +983,8 @@ def ai_team_row(now, lh_res, lh_err, measures=None):
     # stuck AGENT work only, never the whole stalled list (loop-health.py agent_work).
     work = {"open": flow.get("agentOpen"), "notMoving": split.get("notMoving"),
             "created7d": flow.get("agentCreated7d"), "done7d": flow.get("agentDone7d")}
-    for k in ("live", "approval", "waitingReply", "scheduled", "held", "heldCheck", "splitCheck"):
+    for k in ("live", "approval", "waitingReply", "scheduled", "other", "replyOverdue", "replyWindowDays", "held",
+              "heldCheck", "waitCheck", "splitCheck"):
         work[k] = split.get(k)
     if work["open"] is None or work["created7d"] is None or work["notMoving"] is None:
         return dict(row, status="Failed", detail="loop-health.py returned no agent flow counts.")
@@ -995,9 +996,13 @@ def ai_team_row(now, lh_res, lh_err, measures=None):
     if work["live"] is None:
         opened = "%d open (not split: %s)" % (work["open"], work["splitCheck"] or "no split")
     else:
-        opened = "%d live, %d waiting for approval, %d waiting on a reply, %d scheduled (%d open)" % (
-            work["live"], work["approval"], work["waitingReply"], work["scheduled"], work["open"])
+        opened = "%d live, %d waiting for approval, %d waiting on a reply, %d scheduled%s (%d open)" % (
+            work["live"], work["approval"], work["waitingReply"], work["scheduled"],
+            ", %d on no board" % work["other"] if work["other"] else "", work["open"])
+        if work["waitCheck"]:
+            opened += " (waiting read from the notes only: %s)" % work["waitCheck"]
     stuck = "%d stuck" % work["notMoving"] + (
+        ", %d of them waiting on a reply too long" % work["replyOverdue"] if work["replyOverdue"] else "") + (
         " (held tasks not checked: %s)" % work["heldCheck"] if work["heldCheck"] else "")
     detail = ("Agent work: %s, %s, %d in and %d done in 7 days. Defects: %d open, %d filed and "
               "%d fixed in 7 days. Fix of a fix: %s over %d days (baseline %d%%)." % (
