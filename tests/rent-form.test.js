@@ -729,6 +729,7 @@ RECORDS = {
   "recFormTest000003": {"fldy2t735TV5e1DIL": "1 Example Road, Exampleton, EX1 2MP", "fld6ebSQgD7eRsobd": "EX1 2MP", "fldYLRz2GgVojKaq9": "Exampleton"},
 }
 FAIL_SUBMIT, FAIL_PATCH, FAIL_COMMENT, FAIL_TENANCY = [], [], [], []
+DIRECT_CARDS, SEARCHES = [], []
 def api(method, path, payload=None, params=None):
     if method == "POST" and path.endswith("/comments"):
         if FAIL_COMMENT: FAIL_COMMENT.pop(); raise RuntimeError("Airtable comment 500")
@@ -741,7 +742,10 @@ def api(method, path, payload=None, params=None):
         if FAIL_PATCH: FAIL_PATCH.pop(); raise RuntimeError("Airtable PATCH 503")
         if FAIL_TENANCY and path == rc.T_TENANCIES: FAIL_TENANCY.pop(); raise RuntimeError("Airtable tenancy 422")
         patches.append(rec); RECORDS.setdefault(rec["id"], {}).update(rec["fields"]); return {}
-    wanted = re.search(r"RECORD_ID\\(\\)='(rec\\w+)'", params["filterByFormula"]).group(1)
+    found = re.search(r"RECORD_ID\\(\\)='(rec\\w+)'", params["filterByFormula"])
+    if not found:                                  # the direct rent card search (no silent parking, 14 Oct 2026)
+        SEARCHES.append(params["filterByFormula"]); return {"records": DIRECT_CARDS}
+    wanted = found.group(1)
     return {"records": [{"id": wanted, "fields": RECORDS[wanted]}] if wanted in RECORDS else []}
 rc.api = api
 HANDOVER = tempfile.mkdtemp()
@@ -791,6 +795,29 @@ print(json.dumps({"tid": tid, "owner": posts[0][rc.TK["teamMember"]], "name": po
     expect(r.submitted).toEqual([{ task: r.tid, agent: 'rec7aHLK1Q8fMLRXH', type: 'Admin', kevin: true,
       plain: 'The DWP direct rent payment form for Sam Sample, filled from the records and waiting for you.' }]);
     expect(r.cardFileLeft).toBe(false);
+  });
+
+  it('a tenancy Kevin already has a direct rent card for (raised from an inbound request) gets no second form card', () => {
+    // No silent parking (14 Oct 2026): agent-dispatch puts an inbound UC47 / APA request in Kevin's queue and
+    // marks its tenancy. Two cards would be two forms to the DWP.
+    const r = py(RC + `
+DIRECT_CARDS.append({"id": "recKEVINRENTCARD1", "fields": {}})
+try: lb.raise_one(rc._Here(), dict(ITEM, arrears=LOW), DAY); held = "raised"
+except lb.NotReady as e: held = str(e)
+ad_mark = load_mod("adm", "agent-dispatch.py").DIRECT_RENT_CARD_MARK
+print(json.dumps({"held": held, "posts": len(posts), "submitted": len(submitted), "search": SEARCHES[-1],
+                  "markSame": ad_mark == lb.DIRECT_RENT_CARD_MARK}))`);
+    expect(r.held).toBe('form card for Unit 9 not raised: Kevin already has the direct rent request card recKEVINRENTCARD1 for this tenancy');
+    expect([r.posts, r.submitted]).toEqual([0, 0]);
+    expect(r.search).toBe("AND(FIND('DIRECT RENT CARD: recFormTest000001', {Notes}&''), NOT({Status}='Cancelled'))");
+    expect(r.markSame).toBe(true);
+  });
+
+  it('CONTROL: with no such card the form card is raised as before', () => {
+    const r = py(RC + `
+tid = lb.raise_one(rc._Here(), dict(ITEM, arrears=LOW), DAY)
+print(json.dumps({"posts": len(posts), "submitted": len(submitted), "searched": len(SEARCHES)}))`);
+    expect(r).toEqual({ posts: 1, submitted: 1, searched: 1 });
   });
 
   it('a blank record raises nothing and is a note, not a failed run; a refused submit withdraws the card (keys kept, so the clock raises the next) and removes the plan', () => {

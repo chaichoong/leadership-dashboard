@@ -9043,58 +9043,83 @@ def rested_on_wall(live, last_event, started_at, now=None):
 # a lane nobody polls is a silent stall (Kevin, 7 Oct 2026: no wall without a
 # door, no lane without a clock).
 #
-# So a run may leave a task with no card only when its own words NAME a door
-# that exists, read here from the live board:
-#   (a) an open task, by its id, due within NO_CARD_DOOR_DAYS, that will carry
-#       the work (found by listing the Tasks table on RECORD_ID(), so a record in
-#       another table never passes as one);
-#   (b) a dated recheck: the task's due date moved on Kevin's words (`due`), or
-#       an outside event at a stated time inside the window ("the signing service
-#       sends its own reminder tonight at 21:41"). A hand-off to another lane of
-#       ours is never (b): it needs (a);
-#   (c) Kevin's own park on the task (`decided --until`).
+# A task is PARKED when the run says it left it with no card, in any wording, or
+# when it is owed new work the run touched and ended with no outcome: no card, no
+# close, no wall, no hand-over (independent review, 14 Oct 2026: "code build,
+# waits for a build session" parked a task without the words). A parked task may
+# stay off Kevin's queue only at a door the live board proves:
+#   (a) an open task, by its id, due today or within NO_CARD_DOOR_DAYS, not on a
+#       wall and not itself parked in this run (two parked twins never vouch for
+#       each other), or any task already at Approval (a card in his queue); read
+#       by listing the Tasks table on RECORD_ID(), never a GET by id;
+#   (b) an outside event read from the TASK's own Notes or Description, never
+#       from the run's report alone: an outside sender or system that acts by
+#       itself (Adobe's reminder, the DWP's reply), a clock time, ahead of now,
+#       and none of our own robots, lanes or people in the same sentence. Our own
+#       re-check is a clock we would have to keep, never a door;
+#   (c) Kevin's own park on the task (`decided --until`, or `due` on his words).
 # With none, the final control puts the task in his queue itself, as a decision
 # card through `escalate`. A direct rent payment request to the DWP never waits on
 # another lane: no robot can send it (the form needs the code the DWP emails him
-# and the bank numbers), so only a card already in his queue or his own park holds
-# it. Otherwise it reaches him the same day as a KEVIN ONLY card through `submit`,
-# which his approval turns into Your step (and a decision card if that refuses).
-# A task on an open wall is the blocker loop's, and is left to it. The self-check
-# (--dry-run) writes nothing: it names the missing door so the run can fix it.
+# and the bank numbers), so only a card already in his queue, a direct rent card
+# for the same tenancy, its tenancy marked CFV Actioned, or his own park holds it.
+# Otherwise it reaches him the same day as a KEVIN ONLY card through `submit`,
+# which his approval turns into Your step (a decision card if that refuses), and
+# the card's tenancy gets a DIRECT_RENT_CARD_MARK line, which the rent lane reads
+# before it raises a form card of its own (scripts/rent_new_tenant.py), so the
+# DWP is never sent the form twice. A task on an open wall is the blocker loop's
+# and is left to it. The self-check (--dry-run) writes nothing: it names the
+# missing door so the run can fix it.
 NO_CARD_RE = re.compile(
-    r"\bno\s+(?:approval\s+)?card\b(?![-\s]*(?:payments?|numbers?|details|updates?|statements?"
-    r"|transactions?|readers?|on\s+file)\b)", re.I)
-# The kinds a slot records a deliberate no-card under. A carry-out is never read:
-# "no card payment found in Gmail" is about a bank card on an approved task.
-NO_CARD_KINDS = ("new", "redo", "annotate")
-# Any of these done this run means the task reached a card, a close, a wall or a person.
-CARDED_KINDS = ("new", "redo", "escalate", "handover", "carry_out", "complete", "block", "submit")
+    r"\b(?:no[\s-]+(?:new\s+|approval\s+)?card|without\s+(?:an?\s+)?(?:new\s+)?card|not\s+carded)\b"
+    r"(?![-\s]*(?:payments?|numbers?|details|updates?|statements?|transactions?|readers?|on\s+file)\b)", re.I)
+# Kinds that are no outcome: a note, or a park by another name. Any other action that worked is one (a card,
+# a close, a wall, a hand-over, a fold); a route is one unless the run also tried new work on the task and
+# failed (14 Oct 13:18: routed to Inbox Response, then "no card by the agent").
+NO_OUTCOME_KINDS = ("annotate", "park", "parked", "parked-stale", "hold", "held", "leave", "skip", "skipped",
+                    "wait", "defer", "deferred", "checked")
 NO_CARD_DOOR_DAYS = 7
 NO_CARD_REC_RE = re.compile(r"\brec[A-Za-z0-9]{14}\b")
 # Only cmd_decided and cmd_due write these lines, under the agent-dispatch stamp; annotate refuses them.
 KEVIN_PARK_RE = re.compile(r"^\[[^\]\n]*— agent-dispatch\] Parked until (\d{4}-\d{2}-\d{2}) on Kevin's answer", re.M)
 DUE_MOVED_TO_RE = re.compile(r"^\[[^\]\n]*— agent-dispatch\] " + re.escape(DUE_MOVED_MARK)
                              + r" from \S+ to (\d{4}-\d{2}-\d{2})", re.M)
-# Words that hand the work to another lane of ours. A date beside them is that lane's, not an outside event.
-NO_CARD_HANDOFF_RE = re.compile(
-    r"\b(?:lanes?|twins?|comes?\s+through|another\s+task|other\s+task|its\s+own\s+(?:route|lane|task|card)"
-    r"|(?:will\s+be|gets?|is)\s+raised|raises?\s+(?:the|a|its)\s+card|handled\s+(?:by|in|on|under)"
-    r"|held\s+(?:by|under|on)|picked\s+up\s+by)\b", re.I)
-# A direct rent payment request to the DWP, read from the task NAME only: the Notes hold every agent's
-# trail (14 Sep 2026). The ask must sit next to the form ("submit an APA", "UC47 application"); a chase,
-# a decision or a payment already running is not a request to send one. Back-tested on all 8,533 task
-# names on 14 Oct 2026: 7 read as requests, each one a request to send the form.
-_DIRECT_RENT_TERM = (r"(?:UC\s?47|APA|alternative\s+payment\s+arrangement"
-                     r"|direct\s+(?:rent\s+)?payment(?:\s+to\s+(?:the\s+)?landlord)?"
-                     r"|managed\s+payment(?:\s+direct\s+to\s+(?:the\s+)?landlord)?)")
-DIRECT_RENT_REQUEST_RE = re.compile(
-    rf"\b(?:submit|send|apply\s+for|request)\s+(?:[\w'-]+\s+){{0,3}}?{_DIRECT_RENT_TERM}\b"
-    rf"|\b{_DIRECT_RENT_TERM}\s+(?:form\s+)?(?:request|application)\b", re.I)
-DIRECT_RENT_NOT_RE = re.compile(
-    r"\b(?:decision|chase|chasing|declined?|stopped|started|not\s+agreed|waiting|awaiting|landed|cancell?ed)\b", re.I)
+NO_CARD_STAMP_RE = re.compile(r"^\[[^\]\n]*\]", re.M)
+# Who may set a door's date: someone outside who acts by itself.
+OUTSIDE_ACTOR_RE = re.compile(
+    r"\b(?:adobe|docusign|signing\s+service|e-?sign(?:ature|ing)?\s+service|dwp|universal\s+credit|jobcentre|hmrc"
+    r"|council|court|tribunal|bank|lender|building\s+society|solicitors?|insurers?|brokers?|suppliers?|contractors?"
+    r"|engineers?|couriers?|royal\s+mail|parcelforce|land\s+registry|companies\s+house|letting\s+agents?"
+    r"|tenants?|utility|energy\s+supplier)\b", re.I)
+# Who never may: our own robots, lanes and people. In the event's sentence, any of these is no door.
+OWN_SIDE_RE = re.compile(
+    r"\b(?:robots?|(?<!letting )agents?|ai|dispatch\w*|slots?|sweeps?|sweeping|re-?checks?|re-?checking|polls?"
+    r"|polling|task\s+manager|board\s+manager|rent\s+check|triage|lanes?|twins?|queue|next\s+run"
+    r"|follow-?up\s+task|we(?:'ll|\s+will)|i(?:'ll|\s+will)|tries\s+again|try\s+again|looks?\s+again"
+    r"|checks?\s+again|roy|kevin|mica)\b", re.I)
+# A direct rent payment request to the DWP, read from the task NAME only: the Notes hold every agent's trail
+# (14 Sep 2026). UC47 or APA as a word is one; a direct, managed or alternative payment is one only beside
+# rent, a landlord, the DWP, UC or Universal Credit ("HMRC managed payment plan" is not).
+_RENT_PAY = r"(?:direct|managed|alternative)\s+payments?(?:\s+arrangements?)?"
+_RENT_CTX = r"(?:rent|landlords?|DWP|UC|Universal\s+Credit)"
+DIRECT_RENT_NAME_RE = re.compile(
+    r"\b(?:UC\s?47|APA)\b|\b(?:direct|managed)\s+rent\s+payments?\b"
+    rf"|\b{_RENT_CTX}\b(?:\W+\w+){{0,3}}?\W+{_RENT_PAY}\b|\b{_RENT_PAY}\b(?:\W+\w+){{0,3}}?\W+{_RENT_CTX}\b", re.I)
+# A task about a form already sent is not a request to send one: read as one, it would put a second
+# submission in front of Kevin, the risk the DIRECT_RENT_CARD_MARK exists to stop.
+DIRECT_RENT_DONE_RE = re.compile(
+    r"\b(?:decision|declined?|stopped|not\s+agreed|submitted|in\s+payment|landed|chas(?:e|ing)"
+    r"|(?:arrangement|payments?)\s+(?:has\s+|have\s+)?started)\b", re.I)
 # The rent lane's own tasks (kept identical to ROY_PREFIX, FORM_PREFIX and ASK_PREFIX in
 # scripts/rent_new_tenant.py): its clock owns them.
 RENT_LANE_PREFIXES = ("NEW TENANT RENT: ", "RENT FORM: ", "RENT ASK: ")
+# Written on a direct rent card this control made, once per linked tenancy, and read by
+# scripts/rent_new_tenant.py (DIRECT_RENT_CARD_MARK there, kept identical) before it raises a form card.
+DIRECT_RENT_CARD_MARK = "DIRECT RENT CARD: "
+RENT_FORM_KEY_MARK = "RENT FORM KEY: "     # kept identical to FORM_KEY_MARK in scripts/rent_new_tenant.py
+TASK_TENANCIES = "fldmne4RYJU22ICub"        # Tasks: Tenancies link (TK["tenancies"] in scripts/rent-check.py)
+TENANCY_PAY_STATUS = "fldxU3dPUnbK0SCDq"    # Tenancies: Payment Status (TY["payStatus"] in scripts/rent-check.py)
+CFV_ACTIONED_STATUS = "CFV Actioned"        # kept identical to CFV_ACTIONED in scripts/rent-check.py
 NO_CARD_DAY_RE = re.compile(
     r"\b(?P<d>\d{1,2})(?:st|nd|rd|th)?\s+(?P<m>jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\.?"
     r"(?:\s+(?P<y>20\d\d))?\b"
@@ -9102,9 +9127,9 @@ NO_CARD_DAY_RE = re.compile(
     r"|\b(?P<word>today|tonight|tomorrow|this\s+(?:morning|afternoon|evening))\b", re.I)
 NO_CARD_TIME_RE = re.compile(
     r"\b(?P<h>[01]?\d|2[0-3]):(?P<mi>[0-5]\d)\b"
-    r"|\b(?P<h12>1[0-2]|0?[1-9])(?::(?P<mi12>[0-5]\d))?\s?(?P<ampm>am|pm)\b"
-    r"|\b(?P<tw>tonight|this\s+(?:morning|afternoon|evening)|midday|noon|midnight)\b", re.I)
+    r"|\b(?P<h12>1[0-2]|0?[1-9])(?::(?P<mi12>[0-5]\d))?\s?(?P<ampm>am|pm)\b", re.I)
 NO_CARD_TIME_REACH = 14     # characters either side of a day that its time may sit in
+NO_CARD_SENTENCE_END_RE = re.compile(r"[;.!?\n]|:\s")
 _EVENT_MONTHS = {m: i + 1 for i, m in enumerate(
     ("jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec"))}
 NO_DOOR_ASK = ("A robot left this task with no card and nothing lined up to pick it up. "
@@ -9116,25 +9141,44 @@ def direct_rent_request(name):
     name = str(name or "")
     if name.startswith(RENT_LANE_PREFIXES) or form_card(name):
         return False
-    return bool(DIRECT_RENT_REQUEST_RE.search(name) and not DIRECT_RENT_NOT_RE.search(name))
+    return bool(DIRECT_RENT_NAME_RE.search(name) and not DIRECT_RENT_DONE_RE.search(name))
 
 
-def declared_no_cards(actions):
-    """{task id: the run's own words} for every task this run says it left with no card on purpose
-    (the words "no card" in the error or note of a new, redo or annotate action) and put no card,
-    close, wall or hand-over on."""
-    said, carded = {}, set()
+def owed_new_work(queue, handback_only=False, owed=None):
+    """The ids of new or redo work the run owed, from the queue it was handed."""
+    kinds = {w.get("id"): w.get("kind") for w in (queue or {}).get("worklist") or [] if w.get("id")}
+    owed = owed if owed is not None else owed_ids(queue or {}, handback_only)
+    return {i for i in owed if kinds.get(i) in ("new", "redo")}
+
+
+def parked_tasks(actions, owed_new=()):
+    """{task id: the run's own words} for every task this run left with no card: one it says so of (any
+    wording NO_CARD_RE reads, on any action but a carry-out), and any owed new or redo task it touched and
+    ended with no outcome, whatever it wrote. A task the run did not touch at all is the next tick's, as
+    before (silent_run_problem), and a carry-out is never read: "no card payment found" is a bank card."""
+    words, outcome, failed_new, touched, declared = {}, set(), set(), set(), set()
     for a in actions or []:
-        tid = a.get("task")
+        tid, kind = a.get("task"), a.get("kind")
         if not tid:
             continue
-        if a.get("ok") and a.get("kind") in CARDED_KINDS:
-            carded.add(tid)
-        if a.get("kind") in NO_CARD_KINDS:
-            words = " ".join(" ".join(str(a.get(k) or "").split()) for k in ("error", "note")).strip()
-            if NO_CARD_RE.search(words):
-                said[tid] = f"{said.get(tid, '')} {words}".strip()
-    return {t: w for t, w in said.items() if t not in carded}
+        touched.add(tid)
+        if a.get("kind") == "carry_out":     # a bank card, never a park ("no card payment found")
+            if a.get("ok"):
+                outcome.add(tid)
+            continue
+        said = " ".join(" ".join(str(a.get(k) or "").split()) for k in ("error", "note")).strip()
+        if said:
+            words[tid] = f"{words.get(tid, '')} {said}".strip()
+        if NO_CARD_RE.search(said):
+            declared.add(tid)
+        if kind in ("new", "redo") and not a.get("ok"):
+            failed_new.add(tid)
+        if a.get("ok") and kind not in NO_OUTCOME_KINDS and kind != "route":
+            outcome.add(tid)
+    for a in actions or []:
+        if a.get("ok") and a.get("kind") == "route" and a.get("task") not in failed_new:
+            outcome.add(a.get("task"))
+    return {t: words.get(t, "") for t in (declared | (touched & set(owed_new))) - outcome}
 
 
 def kevin_park(t, today):
@@ -9166,53 +9210,63 @@ def _event_day(m, today):
         return None
 
 
-def _event_time(text, m):
-    """The time written right beside a day ("14 Oct 21:41", "tonight at 9pm", "21:41 on 14 Oct"),
-    or None. Only in the same clause: in "reminder 14 Oct 21:41; re-check 15 Oct" the time is 14
-    Oct's, never 15 Oct's."""
-    word = (m.group("word") or "").lower()
+def _event_clock(text, m):
+    """(hour, minute) of the clock time written right beside a day ("14 Oct 21:41", "tonight at 9pm",
+    "21:41 on 14 Oct"), in the same sentence, or None. A time of day alone ("this morning") is none."""
     after = text[m.end(): m.end() + NO_CARD_TIME_REACH]
     t = NO_CARD_TIME_RE.search(after)
-    if t and not re.search(r"[;.!?]", after[:t.start()]):
-        return t
-    before = text[max(0, m.start() - NO_CARD_TIME_REACH): m.start()]
-    hits = list(NO_CARD_TIME_RE.finditer(before))
-    if hits and not re.search(r"[;.!?]", before[hits[-1].end():]):
-        return hits[-1]
-    # "tonight" or "this evening" is its own time of day.
-    return NO_CARD_TIME_RE.fullmatch(word) if word and word not in ("today", "tomorrow") else None
+    if not (t and not NO_CARD_SENTENCE_END_RE.search(after[:t.start()])):
+        before = text[max(0, m.start() - NO_CARD_TIME_REACH): m.start()]
+        hits = list(NO_CARD_TIME_RE.finditer(before))
+        t = hits[-1] if hits and not NO_CARD_SENTENCE_END_RE.search(before[hits[-1].end():]) else None
+    if not t:
+        return None
+    if t.group("h") is not None:
+        return int(t.group("h")), int(t.group("mi"))
+    return (int(t.group("h12")) % 12 + (12 if t.group("ampm").lower() == "pm" else 0), int(t.group("mi12") or 0))
 
 
-def no_card_event(said, today, now):
-    """'<day> <time>' of an outside event the run's words date AND time inside the window, or ''.
-    A day with no time beside it is not enough ("the 15 Oct costs check"), and a time today that
-    has already gone is no door."""
-    text = str(said or "")
+def _sentence(text, start, end):
+    """The sentence around text[start:end]: to the nearest ; . ! ? line end or ': ' either side."""
+    stops = [x.end() for x in NO_CARD_SENTENCE_END_RE.finditer(text, 0, start)]
+    after = NO_CARD_SENTENCE_END_RE.search(text, end)
+    return text[(stops[-1] if stops else 0):(after.start() if after else len(text))]
+
+
+def no_card_event(text, today, now):
+    """'<who> <day> <time>' of an outside event the task's own words date and time inside the window, or ''.
+    The sentence must name an outside sender or system that acts by itself (OUTSIDE_ACTOR_RE) and none of
+    our own robots, lanes or people (OWN_SIDE_RE); the day needs a clock time beside it; and a time today
+    that has already gone is no door."""
+    text = NO_CARD_STAMP_RE.sub(" ", str(text or ""))
     last = today + timedelta(days=NO_CARD_DOOR_DAYS)
     for m in NO_CARD_DAY_RE.finditer(text):
         day = _event_day(m, today)
         if day is None or not (today <= day <= last):
             continue
-        t = _event_time(text, m)
-        if not t:
+        clock = _event_clock(text, m)
+        if clock is None or (day == today and (now.hour, now.minute) >= clock):
             continue
-        clock = None
-        if t.group("h") is not None:
-            clock = (int(t.group("h")), int(t.group("mi")))
-        elif t.group("h12") is not None:
-            clock = (int(t.group("h12")) % 12 + (12 if t.group("ampm").lower() == "pm" else 0),
-                     int(t.group("mi12") or 0))
-        if day == today and clock and (now.hour, now.minute) >= clock:
-            continue
-        return f"{day.isoformat()} " + (f"{clock[0]:02d}:{clock[1]:02d}" if clock else t.group(0).lower())
+        sentence = _sentence(text, m.start(), m.end())
+        actor = OUTSIDE_ACTOR_RE.search(sentence)
+        if actor and not OWN_SIDE_RE.search(sentence):
+            return f"{' '.join(actor.group(0).split())} {day.isoformat()} {clock[0]:02d}:{clock[1]:02d}"
     return ""
 
 
-def no_card_door(t, said, named, today, now):
-    """(door, why) for a task a run left with no card. `door` names the door that exists, or is ''
-    and `why` says what is missing. `t` is the live task (task_view), `named` the live tasks the
-    run's words name by id ({id: task_view}, read by listing the Tasks table), `today` and `now`
-    are London. Pure."""
+def named_ids(t, said):
+    """The task ids a park names: in the run's words, or in the newest note on the task."""
+    blocks = NO_CARD_STAMP_RE.split(str(t.get("notes") or ""))
+    return [i for i in dict.fromkeys(NO_CARD_REC_RE.findall(f"{said or ''} {blocks[-1] if blocks else ''}"))
+            if i != t.get("id")]
+
+
+def no_card_door(t, said, named, today, now, parked=(), rent=None):
+    """(door, why) for a task a run left with no card. `door` names the door that exists, or is '' and
+    `why` says what is missing. `t` is the live task (task_view); `named` the live tasks it names
+    ({id: task_view}, read by listing); `parked` every task left with no card this run; `rent`, for a
+    direct rent request, what the board says of its tenancy ({"actioned": id, "cards": [(id, status)]});
+    `today` and `now` are London. Pure."""
     status = t.get("status") or ""
     if status == "Approval":
         return "it is already a card in Kevin's queue", ""
@@ -9221,41 +9275,45 @@ def no_card_door(t, said, named, today, now):
     park = kevin_park(t, today)
     if park:
         return park, ""
-    rent = direct_rent_request(t.get("name"))
-    last = (today + timedelta(days=NO_CARD_DOOR_DAYS)).isoformat()
+    rent_ask = direct_rent_request(t.get("name"))
+    if rent_ask and rent:
+        if rent.get("actioned"):
+            return f"its tenancy {rent['actioned']} is marked {CFV_ACTIONED_STATUS}: the form has gone in", ""
+        for cid, cst in rent.get("cards") or []:
+            return f"{cid} is already the direct rent card for its tenancy ({cst or 'no status'})", ""
+    first, last = today.isoformat(), (today + timedelta(days=NO_CARD_DOOR_DAYS)).isoformat()
     seen = []
-    for rid in dict.fromkeys(NO_CARD_REC_RE.findall(str(said or ""))):
-        if rid == t.get("id"):
-            continue
+    for rid in named_ids(t, said):
         n = named.get(rid)
         if not n:
             seen.append(f"{rid} is not a task on the board")
             continue
         st, due = n.get("status") or "", str(n.get("dueDate") or "")[:10]
-        if rent:
-            if st == "Approval":
-                return f"{rid} is already a card in Kevin's queue", ""
+        if st == "Approval":
+            return f"{rid} is already a card in Kevin's queue", ""
+        if rent_ask:
             seen.append(f"{rid} is {st or 'on Some Day'}, not a card in Kevin's queue")
+        elif rid in parked:
+            seen.append(f"{rid} was itself left with no card this run")
+        elif task_blocker(n.get("notes")):
+            seen.append(f"{rid} is on a wall")
         elif st in ("Completed", "Cancelled", ""):
             seen.append(f"{rid} is {st or 'on Some Day'}")
-        elif not due or due > last:
-            seen.append(f"{rid} is due {due or 'on no date'}, not within {NO_CARD_DOOR_DAYS} days")
+        elif not due or not first <= due <= last:
+            seen.append(f"{rid} is due {due or 'on no date'}, not today or within {NO_CARD_DOOR_DAYS} days")
         else:
             return f"open task {rid} ({st}, due {due}) carries it", ""
     named_why = "; ".join(seen) if seen else "it names no task by its id"
-    if rent:
+    if rent_ask:
         return "", ("a direct rent payment request to the DWP never waits on another lane: no robot can send "
                     "it (the form needs the code the DWP emails Kevin and the bank numbers), so only a card "
-                    f"already in his queue or his own park may hold it, and {named_why}")
-    handoff = NO_CARD_HANDOFF_RE.search(str(said or ""))
-    event = "" if handoff else no_card_event(said, today, now)
+                    f"already in his queue, a direct rent card for its tenancy or his own park may hold it, and "
+                    f"{named_why}")
+    event = no_card_event(f"{t.get('notes') or ''}\n{t.get('description') or ''}", today, now)
     if event:
-        return f"an outside event dated {event}", ""
-    return "", (f"{named_why}; "
-                + (f"it hands the work to another lane ('{handoff.group(0)}'), which needs an open task named "
-                   "by its id" if handoff else
-                   f"it dates no outside event at a stated time within {NO_CARD_DOOR_DAYS} days")
-                + "; and no park of Kevin's is recorded on it")
+        return f"an outside event on the task: {event}", ""
+    return "", (f"{named_why}; the task's own words date no outside event (an outside sender, a clock time, "
+                f"within {NO_CARD_DOOR_DAYS} days, none of our own robots); and no park of Kevin's is recorded on it")
 
 
 def _flat(text, limit=600):
@@ -9281,6 +9339,10 @@ def _in_process(fn, args):
     return json.loads(lines[-1]) if lines else {}
 
 
+def _robot_said(said):
+    return f"It said: \"{_flat(said)}\"." if str(said or "").strip() else "It recorded no reason."
+
+
 def no_door_rent_card(t, tf, said, why, stamp):
     """The KEVIN ONLY card for a direct rent payment request no robot may hold back."""
     import rent_form_plan                          # here: only this card needs the form's address
@@ -9291,7 +9353,8 @@ def no_door_rent_card(t, tf, said, why, stamp):
     lines = (["CHECKED: handled=no; roy=no; machine=no; open-task=no; trigger=money", ""] if t.get("inboundTask") else [])
     lines += [
         "THE ASK: send the direct rent payment request for this tenancy to the DWP today. No robot can send it: "
-        f"the form needs the code the DWP emails to {PROPERTY_SENDER} and the bank sort code and account number.",
+        f"the form needs the code the DWP emails to {PROPERTY_SENDER} and the bank sort code and account number. "
+        "Check first that no direct rent form has gone in for this tenancy already.",
         "",
         f"THE TASK: {_flat(t.get('name'), 200)}",
     ]
@@ -9300,8 +9363,8 @@ def no_door_rent_card(t, tf, said, why, stamp):
     lines += [
         "",
         "WHY IT IS WITH YOU NOW",
-        f"A robot worked this task on {stamp} and made no card. It said: \"{_flat(said)}\". So it comes to you "
-        f"the same day: {why}.",
+        f"A robot worked this task on {stamp} and made no card. {_robot_said(said)} So it comes to you the same "
+        f"day: {why}.",
         "",
         decision_track_record(t["id"], tf),
         "",
@@ -9319,7 +9382,7 @@ def no_door_brief(t, tf, said, why, stamp):
     desc = _flat(t.get("description"), 500)
     parts = [
         f"WHAT THIS IS: the task \"{name}\", which a robot was working." + (f" Its description: {desc}" if desc else ""),
-        f"WHAT HAS HAPPENED: a robot worked this task on {stamp} and made no card. It said: \"{_flat(said)}\". "
+        f"WHAT HAS HAPPENED: a robot worked this task on {stamp} and made no card. {_robot_said(said)} "
         f"Nothing is lined up to carry the work: {why}. A task left like that sits until someone notices (Kevin, "
         "7 Oct 2026: no wall without a door), so it has come to you.",
         "OPTIONS:\nA. Its agent finishes the job now and brings you its card.\n"
@@ -9377,49 +9440,105 @@ def card_no_door(rec, said, why, rundir, tier1=False):
     return {"card": "decision", **({"note": "; ".join(tried)} if tried else {})}
 
 
-def settle_no_cards(actions, dry_run=False, rundir="", now=None):
-    """Check the door on every task this run left with no card on purpose, and in the final control
-    put each one with no door in Kevin's queue. Returns (settled, doors, cards, problems): `settled`
-    is the task ids whose no-card is answered here (a door, a card made, or the self-check's own
-    problem), so the generic "action failed" line does not repeat it."""
-    said = declared_no_cards(actions)
+def mark_direct_rent_card(task_id, tenancies):
+    """Write DIRECT_RENT_CARD_MARK for each tenancy on the card, read back. The rent lane reads it."""
+    tf = get_task(task_id).get("fields", {}) or {}
+    notes = str(tf.get(AF["notes"]) or "")
+    new = [f"{DIRECT_RENT_CARD_MARK}{ten}" for ten in tenancies if f"{DIRECT_RENT_CARD_MARK}{ten}" not in notes]
+    if not new:
+        return
+    stamp = datetime.now(LONDON).strftime("%d %b %Y %H:%M")
+    patch_task(task_id, {AF["notes"]: (notes.rstrip() + "\n\n" + "\n".join(
+        f"[{stamp} — agent-dispatch] {line}: Kevin has this tenancy's direct rent request as a card, so the rent "
+        "check raises no second form card for it." for line in new)).strip()[-90000:]})
+    back = str((get_task(task_id).get("fields", {}) or {}).get(AF["notes"]) or "")
+    missing = [line for line in new if line not in back]
+    if missing:
+        raise RuntimeError(f"wrote {', '.join(missing)} and it does not read back")
+
+
+def _list_by_id(table, ids, fields):
+    """Every record of `ids` in `table`, listed on RECORD_ID() in pages of 40: never a GET by id, which
+    answers for a record in any table, and never capped. Raises on a failed read."""
+    out, ids = {}, list(dict.fromkeys(i for i in ids if i))
+    for n in range(0, len(ids), 40):
+        formula = "OR(" + ",".join(f"RECORD_ID()='{i}'" for i in ids[n:n + 40]) + ")"
+        for r in query_records(table, formula, fields):
+            out[r["id"]] = r
+    return out
+
+
+def direct_rent_state(recs, parked_ids):
+    """{task id: {"actioned": tenancy id or '', "cards": [(id, status)], "tenancies": [...]}} for each
+    parked direct rent request with a linked tenancy: its tenancy's Payment Status, and any other task
+    that is already a direct rent card for it (the rent lane's form card, or one this control made)."""
+    asks = {tid: links(recs[tid].get("fields", {}).get(TASK_TENANCIES))
+            for tid in parked_ids if tid in recs and direct_rent_request(recs[tid].get("fields", {}).get(AF["name"]))}
+    tens = sorted({ten for v in asks.values() for ten in v})
+    if not tens:
+        return {}
+    pay = {i: sel(r.get("fields", {}).get(TENANCY_PAY_STATUS))
+           for i, r in _list_by_id(TENANCIES_TABLE, tens, [TENANCY_PAY_STATUS]).items()}
+    finds = ",".join(f"FIND('{mark}{ten}', {{Notes}}&'')" for ten in tens
+                     for mark in (RENT_FORM_KEY_MARK, DIRECT_RENT_CARD_MARK))
+    cards = query_records(TASKS, f"AND(OR({finds}), NOT({{Status}}='Cancelled'))", [AF["status"], AF["notes"]])
+    out = {}
+    for tid, mine in asks.items():
+        if not mine:
+            continue
+        held = [(c["id"], sel(c.get("fields", {}).get(AF["status"]))) for c in cards if c["id"] != tid
+                and any(f"{mark}{ten}" in str(c.get("fields", {}).get(AF["notes"]) or "")
+                        for ten in mine for mark in (RENT_FORM_KEY_MARK, DIRECT_RENT_CARD_MARK))]
+        out[tid] = {"actioned": next((ten for ten in mine if pay.get(ten) == CFV_ACTIONED_STATUS), ""),
+                    "cards": held, "tenancies": mine}
+    return out
+
+
+def settle_no_cards(actions, dry_run=False, rundir="", owed_new=(), now=None):
+    """Check the door on every task this run left with no card, and in the final control put each one
+    with no door in Kevin's queue. Returns (settled, doors, cards, problems): `settled` is the task ids
+    whose park is answered here (a door, a card made, or a problem of its own), so the generic "action
+    failed" line does not repeat it. A read that fails is a problem, never a pass."""
+    said = parked_tasks(actions, owed_new)
     if not said:
         return set(), [], [], []
     now = now or datetime.now(LONDON)
     today = now.date()
     tier1 = {a.get("task") for a in actions or [] if a.get("tier1")}
-    ids = list(said)
-    for words in said.values():
-        ids += NO_CARD_REC_RE.findall(words)
-    ids = list(dict.fromkeys(ids))[:60]
+    fields = list(AF.values()) + [TASK_TENANCIES]
     try:
-        # Listed, never a GET by id: a GET answers for a record in any table (CLAUDE.md).
-        recs = {r["id"]: r for r in query_tasks("OR(" + ",".join(f"RECORD_ID()='{i}'" for i in ids) + ")")}
+        recs = _list_by_id(TASKS, list(said), fields)
+        views = {i: task_view(r) for i, r in recs.items()}
+        named = _list_by_id(TASKS, [i for tid, w in said.items() if tid in views
+                                    for i in named_ids(views[tid], w) if i not in recs], fields)
+        recs.update(named)
+        rent = direct_rent_state(recs, said)
     except Exception as e:                                # noqa: BLE001 — a door unread is no door: said
-        return set(), [], [], [f"the tasks left with no card could not be read to check their doors "
-                                f"({str(e)[:160]}): {', '.join(said)}"]
+        return set(said), [], [], [f"the tasks left with no card could not be read to check their doors "
+                                   f"({str(e)[:160]}), so none is excused: {', '.join(said)}"]
     settled, doors, cards, problems = set(), [], [], []
     for tid, words in said.items():
         rec = recs.get(tid)
         if rec is None:
+            settled.add(tid)
             problems.append(f"{tid} was left with no card and does not read back as a task, so its door "
                             "cannot be checked")
             continue
         t = task_view(rec)
         if task_blocker(t["notes"]):
             continue      # a wall has its own owner and wake: the blocker loop's, never this rule's
-        named = {i: task_view(recs[i]) for i in NO_CARD_REC_RE.findall(words) if i in recs and i != tid}
-        door, why = no_card_door(t, words, named, today, now)
+        door, why = no_card_door(t, words, {i: task_view(recs[i]) for i in named_ids(t, words) if i in recs},
+                                 today, now, set(said), rent.get(tid))
+        settled.add(tid)
         if door:
-            settled.add(tid)
             doors.append({"task": tid, "door": door})
             continue
-        settled.add(tid)
         if dry_run:
             problems.append(
                 f"{tid} was left with no card and no door: {why}. The control will put it in Kevin's queue as "
-                "a card. Submit its card yourself, or name a door that exists: an open task by its id, due "
-                f"within {NO_CARD_DOOR_DAYS} days; an outside event with its day and time; or Kevin's park on it")
+                "a card. Submit its card yourself, or give it a door that exists: an open task by its id, due "
+                f"within {NO_CARD_DOOR_DAYS} days; an outside event with its day and clock time in the task's own "
+                "notes; or Kevin's park on it")
             continue
         try:
             made = card_no_door(rec, words, why, rundir or STATE_DIR, tid in tier1)
@@ -9430,6 +9549,13 @@ def settle_no_cards(actions, dry_run=False, rundir="", now=None):
         print(f"INFO: {tid} was left with no card and no door; it is in Kevin's queue now as a {made['card']} "
               f"card — {why[:160]}", file=sys.stderr)
         cards.append({"task": tid, **made})
+        tens = (rent.get(tid) or {}).get("tenancies") or []
+        if tens:
+            try:
+                mark_direct_rent_card(tid, tens)
+            except Exception as e:                        # noqa: BLE001 — a second DWP form is the risk: loud
+                problems.append(f"{tid} is in Kevin's queue as a direct rent card, but the line that stops the "
+                                f"rent check raising a second form card for its tenancy was not written: {str(e)[:200]}")
     return settled, doors, cards, problems
 
 
@@ -9481,16 +9607,25 @@ def cmd_verify(args):
     # startedAt: the agent writes that, and half of them carry London time with a
     # "Z" on the end, an hour late (review, 27 Sep 2026).
     started_at = (queue or {}).get("generatedAt") or report.get("startedAt")
-    # NO SILENT PARKING (Kevin, 14 Oct 2026): a task left with no card names a door that exists,
-    # or the final control puts it in his queue. Read before the failures, which it settles.
-    settled, doors, no_door_cards, no_card_problems = settle_no_cards(actions, dry_run, rundir)
+    owed_override = None
+    try:
+        with open(os.path.join(rundir, OWED_IDS_MARK)) as fh:
+            owed_override = [i for i in re.split(r"[\s,]+", fh.read()) if i]
+    except FileNotFoundError:
+        pass
+    if owed_override == []:
+        # the runners write it only with ids in hand; an empty one was emptied, never "owes nothing" (review, 28 Sep 2026)
+        problems.append("owed-ids is empty — the run's owed tasks cannot be counted")
+    # NO SILENT PARKING (Kevin, 14 Oct 2026): a task left with no card has a door that exists, or
+    # the final control puts it in his queue. Read before the failures, which it settles.
+    settled, doors, no_door_cards, no_card_problems = settle_no_cards(
+        actions, dry_run, rundir, owed_new_work(queue, handback_only, owed_override))
     problems += no_card_problems
     rested = []
     ledger = ledger_last_events() if failed else {}
     for a in failed:
-        if a.get("task") in settled and a.get("kind") in NO_CARD_KINDS and NO_CARD_RE.search(
-                " ".join(str(a.get(k) or "") for k in ("error", "note"))):
-            continue      # answered above: a door, a card made, or the self-check's own line
+        if a.get("task") in settled and a.get("kind") != "carry_out":
+            continue      # answered above: a door, a card made, or a problem of its own
         try:
             live = task_view(get_task(a.get("task")))
         except Exception:                                 # noqa: BLE001
@@ -9526,15 +9661,6 @@ def cmd_verify(args):
         since = _utc(b.get("since")) if b else None
         if b and since and run_start and since < run_start:
             known_parked.add(pid)
-    owed_override = None
-    try:
-        with open(os.path.join(rundir, OWED_IDS_MARK)) as fh:
-            owed_override = [i for i in re.split(r"[\s,]+", fh.read()) if i]
-    except FileNotFoundError:
-        pass
-    if owed_override == []:
-        # the runners write it only with ids in hand; an empty one was emptied, never "owes nothing" (review, 28 Sep 2026)
-        problems.append("owed-ids is empty — the run's owed tasks cannot be counted")
     # A task parked at a door, or put in Kevin's queue by the control, is not owed again.
     excused_no_card = [d["task"] for d in doors] + [c["task"] for c in no_door_cards]
     silent = silent_run_problem(report, queue, handback_only, rested + excused_no_card, known_parked,
