@@ -288,7 +288,13 @@ SENDER_TYPES = (
 #     you know...?", "Ready for race day?").
 # The second review (same day) narrowed the first version: a bare question
 # mark flagged 40 of 82 left emails, newsletters and school letters among
-# them. `--override "<why it asks nothing>"` stays, and is logged.
+# them. The third widened the requests it had missed: "please" + any word
+# (bar "please find", "please note", "please do not reply"), "kindly",
+# "grateful if", "need your", an attached form to complete, return or sign,
+# a signature, consent, keys to collect or return, and arrears. This is the
+# BACKSTOP: the agent's own judgement is the first guard, and anything it is
+# unsure of is a rule-1 task. `--override "<why it asks nothing>"` stays,
+# and is logged.
 _WEEKDAYS = r"monday|tuesday|wednesday|thursday|friday|saturday|sunday"
 _MONTHS = (r"jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|june?|july?|aug(?:ust)?"
            r"|sept?(?:ember)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?")
@@ -298,14 +304,22 @@ _A_DATE = (r"(?:(?:" + _WEEKDAYS + r")|tomorrow|tonight|today|(?:the )?end of (?
            r"|\d{1,2}[/.]\d{1,2}(?:[/.]\d{2,4})?(?![\d%]))")
 ASK_SIGNALS = (
     ("money due", re.compile(
-        r"\b(?:pay|payment|payments|invoice|invoices|amount due|overdue)\b"
+        r"\b(?:pay|payment|payments|invoice|invoices|amount due|overdue|arrears)\b"
         r"|£\s?\d[\d,.]*[^.\n]{0,40}\b(?:due|by)\b|\b(?:due|by)\b[^.\n]{0,40}£\s?\d", re.I)),
     ("a deadline", re.compile(
         r"\b(?:by|before|until)\s+(?:the\s+)?" + _A_DATE + r"\b|\bdeadline\b|\bexpires?\b", re.I)),
     ("a request to act", re.compile(
-        r"\bplease\s+(?:do\s+)?(?:confirm|reply|respond|sign|send|call(?:\s+\w+)?\s+back|complete|submit"
-        r"|return|get back|let (?:me|us) know)\b"
-        r"|\b(?:can|could|would) you\b|\blet (?:me|us) know\b", re.I)),
+        # "please" + any word, except the fixed politeness that asks nothing.
+        r"\bplease\s+(?!(?:find|note|enjoy|do not (?:reply|respond)|don'?t (?:reply|respond))\b)[a-z]+"
+        r"|\bkindly\b|\bgrateful if\b|\b(?:need|needs|require|requires)\s+(?:your|you to)\b"
+        r"|\b(?:can|could|would) you\b|\blet (?:me|us) know\b"
+        r"|\bfor you to (?:complete|return|sign|fill|send)\b"
+        r"|\b(?:attached|enclosed)\b[^\n]{0,80}?\b(?:form|document|slip|agreement|contract|declaration)s?\b"
+        r"[^\n]{0,80}?\b(?:complete|return|sign|fill)"
+        r"|\b(?:form|document|slip|agreement|contract|declaration)s?\b[^\n]{0,60}?\b(?:attached|enclosed)\b"
+        r"[^\n]{0,80}?\b(?:complete|return|sign|fill)"
+        r"|\bsignature\b|\bconsent\b"
+        r"|\b(?:collect|return|drop off|pick up|hand back)\b[^.\n]{0,30}?\bkeys?\b", re.I)),
     ("a decision", re.compile(r"\b(?:do you want|choose|approve)\b", re.I)),
 )
 QUESTION_OPENER_RE = re.compile(
@@ -1118,9 +1132,14 @@ def cmd_note(msg_id, action, reason, override=None):
         lbl = read_label()
         # QUEUED BEFORE THE MOVE: a move that then fails leaves a card line for
         # mail still in the inbox (harmless), never archived mail on no card.
+        # An overridden ask is never dropped (third review of PR #783): it rides
+        # to the card as a flag, and the card lists it under "These may need
+        # you to act" with the override's reason beside it.
         pending_append({"id": msg_id, "threadId": ctx.get("threadId", ""),
                         "sender": ctx.get("sender", ""), "subject": ctx.get("subject", ""),
-                        "internalDate": ctx.get("internalDate"), "summary": summary[:300]})
+                        "internalDate": ctx.get("internalDate"), "summary": summary[:300],
+                        "flag": ("%s; kept as reading by override: %s" % (ctx["ask"], why))
+                                if ctx["ask"] else ""})
         worker_post("/gmail/modify", {"ids": [msg_id], "addLabels": [lbl["name"]],
                                       "removeLabels": ["INBOX"]})
         filed = True
@@ -1461,6 +1480,10 @@ def _load_dispatch():
     return mod
 
 
+CARD_PLACEHOLDER = ("INBOX LIST BEING WRITTEN: the list of emails is added in a moment. If you can read "
+                    "this line, the write failed and the card was cancelled.")
+
+
 def _create_card(fields):
     """Through the one task gate, with --force like the MERGE card: the card's
     name repeats its own words run after run, so the duplicate key would fold it
@@ -1545,8 +1568,29 @@ def raise_or_append(sections, ad, opened):
     text, shown = new_card_text(sections, public)
     if text is None:
         return None, "none", []
-    task_id = _create_card(inbox_card_fields(card_name(len(shown), opened), text, shown, ad,
-                                             date.today().isoformat()))
+    # EMAIL TEXT NEVER RIDES ON A COMMAND LINE (third review of PR #783). The
+    # gate takes its fields only as --fields-json, which any process can read
+    # with `ps`, and the list holds senders and subjects. So the card is made
+    # through the gate with a placeholder in Agent Output (its first line is
+    # not the card's own, so nothing can mistake it for an open card), and the
+    # list goes in by the dispatcher's own write, in the request body, then is
+    # read back.
+    task_id = _create_card(inbox_card_fields(card_name(len(shown), opened), CARD_PLACEHOLDER, shown,
+                                             ad, date.today().isoformat()))
+    try:
+        ad.patch_task(task_id, {AF["agentOutput"]: text})
+        back = str(((ad.get_task(task_id) or {}).get("fields") or {}).get(AF["agentOutput"]) or "")
+        if not back.startswith(INBOX_CARD_HEAD):
+            raise RuntimeError("its list did not land on read-back")
+    except Exception as e:  # noqa: BLE001 — never leave a placeholder card in his queue
+        try:
+            ad.patch_task(task_id, {AF["status"]: "Cancelled", AF["notes"]: (
+                "INBOX CARD CANCELLED: the list could not be written (%s); the emails stay queued "
+                "for the next card." % str(e)[:160])})
+        except Exception:  # noqa: BLE001 — named in the error below instead
+            pass
+        raise RuntimeError("INBOX card %s was created but its list could not be written (%s); it "
+                           "was cancelled" % (task_id, str(e)[:160]))
     return task_id, "created", shown
 
 
@@ -1575,7 +1619,9 @@ def cmd_inbox_card(slot=None, dry_run=False, dispatch=None):
         slot = slot or _slot_now()
         when = "%s %s" % (now.strftime("%d %b").lstrip("0"), slot)
         task_id, action, done = raise_or_append(
-            [("For your information, added %s" % when, fresh)], ad, when)
+            [("These may need you to act, added %s" % when, [i for i in fresh if i.get("flag")]),
+             ("For your information, added %s" % when, [i for i in fresh if not i.get("flag")])],
+            ad, when)
     except SystemExit:
         restore_pending(taken)
         raise
@@ -1774,6 +1820,26 @@ def digest_last_decisions(base=None):
     return last
 
 
+# THE OLD NOTE COUNTS TOO (third review of PR #783). The backlog's "leave"
+# decisions were made under the looser rule ("needs no reply or action from
+# the robots"), so the agent's own note on each may say what the email asks
+# even when the email's words slip past `ask_signal`. A note that mentions a
+# request puts the email in "may need you to act". Negated phrases ("nothing to
+# answer", "needs no reply") are taken out first.
+NOTE_NEGATION_RE = re.compile(
+    r"\b(?:needs?\s+no|asks?\s+nothing|no|nothing|not|without|never)\b(?:\s+[\w-]+){0,3}", re.I)
+NOTE_REQUEST_RE = re.compile(
+    r"\b(?:asks?|asked|asking|request(?:s|ed|ing)?|wants?|needs?|invit(?:e|es|ed|ation)"
+    r"|chas(?:e|es|ing)|reply|respond|confirm(?:s|ation)?|pay(?:s|ment)?|deadline|due"
+    r"|sign(?:s|ature)?|complete|return|decid(?:e|es)|decision|action|rsvp|book(?:s|ing)?)\b", re.I)
+
+
+def note_request(reason):
+    """The request word in the agent's own earlier note, or ''."""
+    m = NOTE_REQUEST_RE.search(NOTE_NEGATION_RE.sub(" ", str(reason or "")))
+    return m.group(0) if m else ""
+
+
 def backlog_plan(inbox, last, carded, read_label_id, sends, unquote=lambda b: b or ""):
     """Pure. Sort the live inbox by each message's last recorded decision.
     One batch, one card (Kevin: "Let's do a batch run"): every left email goes
@@ -1798,6 +1864,8 @@ def backlog_plan(inbox, last, carded, read_label_id, sends, unquote=lambda b: b 
             plan["move_only"].append(item)
         elif do == "leave":
             ask = ask_signal(h.get("subject", ""), unquote(m.get("body", "")))
+            if not ask and note_request(e.get("reason")):
+                ask = "the earlier triage note mentions a request (%s)" % note_request(e.get("reason"))
             plan["act" if ask else "info"].append(dict(item, flag=ask) if ask else item)
         elif do == "answered":
             state = reply_state(m, sends)

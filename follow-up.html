@@ -6789,7 +6789,7 @@ Sign off as ${senderName}.`;
         document.getElementById('attachmentSizeInfo').textContent = '';
         document.getElementById('attachmentInput').value = '';
         const isToPayDraft = currentLabel.toLowerCase().includes('to pay') || currentLabel.startsWith('3');
-        const isToRespondDraft = currentLabel.toLowerCase().includes('to respond') || currentLabel.startsWith('1');
+        const isToRespondDraft = currentLabel.toLowerCase().includes('to respond') || (currentLabel.startsWith('1') && !currentLabel.startsWith('19'));
         const isFollowUpDraft = currentLabel.toLowerCase().includes('follow') || currentLabel.startsWith('2');
 
         let draftLabel, draftStatusMsg;

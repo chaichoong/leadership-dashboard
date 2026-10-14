@@ -230,14 +230,22 @@ the `list-unsubscribe` header (its presence = machine mail).
    due, no deadline, no request to act, no decision and no question put to
    him. Any of those makes it work, not reading: rule 1, a task, as always
    (the robots never pay, so "please pay £40 by Friday" is never a card to
-   read). The script enforces this: `note --do leave` refuses a message whose
-   subject or own words carry money due (pay, invoice, overdue, a £ sum due),
-   a deadline (by or before a date, "deadline", "expires"), a request to act
-   ("please confirm", "can you", "let me know"), a decision ("do you want",
-   "choose", "approve") or a direct question ("Is this still available?");
-   a rhetorical question ("Did you know...?") is not an ask (`ask` in the
-   scan cache). Only if the signal is plainly wrong add `--override "<why it
-   asks nothing>"`; the override is logged.
+   read). YOUR JUDGEMENT IS THE FIRST GUARD: read the email, and if it might
+   ask anything of Kevin (a reply, a form, a signature, keys, a payment, a
+   date, a choice), it is rule 1, a task. Anything ambiguous goes to rule 1.
+   The script is only the BACKSTOP behind you: `note --do leave` refuses a
+   message whose subject or own words carry money due (pay, invoice, overdue,
+   arrears, a £ sum due), a deadline (by or before a date, "deadline",
+   "expires"), a request to act ("please" + any verb bar "please find" and
+   "please do not reply", "kindly", "grateful if", "need your", an attached
+   form to complete or sign, a signature, consent, keys to collect), a
+   decision ("do you want", "choose", "approve") or a direct question ("Is
+   this still available?"); a rhetorical question ("Did you know...?") is
+   not an ask (`ask` in the scan cache). A message the script lets through is
+   not thereby reading: the script misses what you can see. Only if the
+   signal is plainly wrong add `--override "<why it asks nothing>"`; the
+   override is logged, and the email is listed on the card under "These may
+   need you to act" with your reason beside it.
    Family and personal mail follows Kevin's 17 Sep 2026 protocol
    (`Knowledge/inbox-decision-protocol.md`), word for word: "**Family and
    personal:** a card when there is a decision for Kevin, or information he

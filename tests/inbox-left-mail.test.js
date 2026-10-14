@@ -79,6 +79,7 @@ ad = load('dispatch_under_test', ${JSON.stringify(DISPATCH)})
 m._fail_quiet["on"] = True
 AF = ad.AF
 CALLS, CREATED, PATCHES, STORE = [], [], [], {}
+FAIL_LIST_WRITE = False
 LABELS = ${JSON.stringify(LABELS)}
 LISTS = {}            # gmail query fragment -> messages
 def fake_worker(path, payload, sleep=None):
@@ -111,7 +112,10 @@ def fake_query(formula, max_records=None, minimal=False):
 ad.query_tasks = fake_query
 ad.get_task = lambda tid: json.loads(json.dumps(STORE[tid]))
 def fake_patch(tid, fields):
-    PATCHES.append(tid)
+    if FAIL_LIST_WRITE and AF["agentOutput"] in fields:
+        raise RuntimeError("Airtable 503")
+    if AF["notes"] in fields and AF["status"] not in fields:
+        PATCHES.append(tid)       # an append: the card's message-id line changed
     STORE[tid]["fields"].update(json.loads(json.dumps(fields)))
     return STORE[tid]
 ad.patch_task = fake_patch
@@ -319,6 +323,41 @@ out({"err": err, "movedAfterRefusal": moved_after_refusal, "reason": digest()[-1
     expect(r.reason).toMatch(/^OVERRIDE ask signal \(money due \(invoice\)\): paid by direct debit/);
   });
 
+  it('an overridden ask is listed first, under "These may need you to act", numbered straight through', () => {
+    const box = sandbox();
+    const r = runPy(box, `${TWO_IN_INBOX}${LEAVE_AB}
+m.cmd_note("mP", "leave", "A statement copy, already paid", override="paid by direct debit last week")
+quiet(lambda: m.cmd_inbox_card("13:00", dispatch=ad))
+m.cmd_note("mC", "leave", "An aunt writing with family news, nothing asked")
+quiet(lambda: m.cmd_inbox_card("17:00", dispatch=ad))
+out({"output": card()[AF["agentOutput"]], "cards": len(STORE)})
+`);
+    const o = r.output;
+    expect(r.cards).toBe(1);
+    expect(o.indexOf('These may need you to act, added')).toBeGreaterThan(-1);
+    expect(o.indexOf('These may need you to act, added')).toBeLessThan(o.indexOf('For your information, added'));
+    expect(o).toContain('1. agent@example.co.uk | Your invoice');
+    expect(o).toContain('Why it may need you: money due (invoice); kept as reading by override: paid by direct debit last week');
+    // One number per email, 1..N across both sections and the later batch.
+    expect([...o.matchAll(/^(\d+)\. /gm)].map((x) => Number(x[1]))).toEqual([1, 2, 3, 4]);
+    expect(o).toContain('4. aunt@gmail.com | A note');
+  });
+
+  it('a card whose list cannot be written is cancelled, never left as a placeholder, and the emails stay queued', () => {
+    const box = sandbox();
+    const r = runPy(box, `${TWO_IN_INBOX}${LEAVE_AB}
+FAIL_LIST_WRITE = True
+_, err = attempt(lambda: m.cmd_inbox_card("13:00", dispatch=ad))
+out({"err": err, "status": card()[AF["status"]], "notes": card()[AF["notes"]],
+     "output": card()[AF["agentOutput"]],
+     "queued": sorted(json.loads(l)["id"] for l in m.pending_path().read_text().splitlines())})
+`);
+    expect(r.err.message).toMatch(/created but its list could not be written .*cancelled/);
+    expect(r.status).toBe('Cancelled');
+    expect(r.output.startsWith('INBOX CARD:')).toBe(false);
+    expect(r.queued).toEqual(['mA', 'mB']);
+  });
+
   it('a concrete ask is caught; a bare or rhetorical question mark is not (second review)', () => {
     const box = sandbox();
     const r = runPy(box, `
@@ -333,6 +372,16 @@ cases = {
   "request": ("Viewing", "Please confirm the time works for you."),
   "decision": ("Paint", "Do you want the blue or the green?"),
   "quoted": ("Re: photos", "Thanks, lovely.\\n\\nOn Mon, Kevin wrote:\\n> Can you pay me back?"),
+  "dwp": ("Direct rent", "Please find attached the form for you to complete and return to DWP."),
+  "keys": ("Keys", "Please advise when you are free to collect the keys."),
+  "signature": ("Form", "We need your signature on the attached form."),
+  "consent": ("Trip", "Kindly return the consent slip."),
+  "boiler": ("Boiler", "I would be grateful if you could look at the boiler."),
+  "arrears": ("Account", "Your account is now \u00a3120 in arrears."),
+  "pleaseAdvise": ("Next step", "Please advise on the next step."),
+  "pleaseCall": ("Call", "Please call me."),
+  "politeNewsletter": ("October news", "Please find our October newsletter below. Please do not reply to this email."),
+  "politeNote": ("Opening hours", "Please note our office closes early on bank holidays."),
 }
 out({k: m.ask_signal(subj, q(body)) for k, (subj, body) in cases.items()})
 `);
@@ -345,6 +394,13 @@ out({k: m.ask_signal(subj, q(body)) for k, (subj, body) in cases.items()})
     expect(r.request).toMatch(/^a request to act/);
     expect(r.decision).toMatch(/^a decision \(Do you want\)/);
     expect(r.quoted).toBe('');
+    // Third review: the asks the narrowed check missed, and the politeness it must not flag.
+    for (const k of ['dwp', 'keys', 'signature', 'consent', 'boiler', 'pleaseAdvise', 'pleaseCall']) {
+      expect(r[k], k).toMatch(/^a request to act/);
+    }
+    expect(r.arrears).toMatch(/^money due \(arrears\)/);
+    expect(r.politeNewsletter).toBe('');
+    expect(r.politeNote).toBe('');
   });
 
   it('without the label it refuses before moving anything, and lane 12 is never the read label', () => {
@@ -689,6 +745,7 @@ LISTS["in:inbox"] = [
     msg("d4", "x@example.com", "Lane mail still here"),                                  # label12 -> counted only
     msg("d5", "y@example.com", "Never decided"),                                         # no decision -> the scan's job
     msg("d8", "Kim <kim@gmail.com>", "Kevin filed this", labels=["Label_7"]),            # Kevin's own label -> left alone
+    msg("d9", "tenant2@example.com", "Update", body="Just an update on the flat."),       # leave, the old note asks -> act
 ]
 LISTS["in:sent"] = [
     {"id": "s2", "threadId": "td2", "internalDate": 1789700000000, "headers": {"from": "kevin@runpreneur.org.uk", "to": "agent@example.co.uk"}},
@@ -702,6 +759,7 @@ LISTS["in:sent"] = [
     {"id": "d3", "do": "duplicate", "ts": "2026-09-20T09:02:00"},
     {"id": "d4", "do": "label12", "ts": "2026-09-20T09:03:00"},
     {"id": "d8", "do": "leave", "reason": "x", "ts": "2026-09-20T09:03:00"},
+    {"id": "d9", "do": "leave", "reason": "Tenant asks Kevin to call back about the flat", "ts": "2026-09-20T09:04:00"},
 ]) + "\\n")
 def holder(job, pid):
     p = m.queue_holder_path()
@@ -730,10 +788,10 @@ out({"res": res, "paths": sorted(set(c["path"] for c in CALLS)), "cards": len(ST
     expect(r.digestsSame).toBe(true);
     expect(r.ledger).toBe(false);
     expect(r.res).toMatchObject({
-      mode: 'dry-run', card_may_need_you_to_act: 2, card_act_because_answer_unconfirmed: 1,
+      mode: 'dry-run', card_may_need_you_to_act: 3, card_act_because_answer_unconfirmed: 1,
       card_for_your_information: 1, to_archive: 2, to_archive_answered_confirmed: 1,
       to_archive_duplicate: 1, skipped_user_label: 1, decided_otherwise_still_in_inbox: { label12: 1 },
-      left_for_triage_no_decision: 1, card_items_that_fit: 3, gmail_writes: 0, airtable_writes: 0,
+      left_for_triage_no_decision: 1, card_items_that_fit: 4, gmail_writes: 0, airtable_writes: 0,
     });
     expect(r.res.card_chars_if_new).toBe(r.preview.trim().length);
     expect(r.res.preview_file.startsWith(box.state)).toBe(true);
@@ -744,7 +802,9 @@ out({"res": res, "paths": sorted(set(c["path"] for c in CALLS)), "cards": len(ST
     expect(p).toMatch(/Why it may need you: money due \(pay\)/);
     expect(p).toContain('2. tenant@example.com | Boiler');
     expect(p).toContain('Why it may need you: the later send went to other people, not to the sender');
-    expect(p).toContain('3. pat@gmail.com | Holiday photos');
+    expect(p).toContain('3. tenant2@example.com | Update');
+    expect(p).toContain('Why it may need you: the earlier triage note mentions a request (asks)');
+    expect(p).toContain('4. pat@gmail.com | Holiday photos');
     expect(p).toContain('turns each number you name into its own task');
     expect(p).not.toContain('Lane mail still here');
     expect(p).not.toContain('Kevin filed this');
@@ -783,13 +843,13 @@ out({"res": res, "cards": len(STORE), "firstCards": first_cards, "patched": len(
     expect(r.firstCards).toBe(1);
     expect(r.cards).toBe(1);
     expect(r.patched).toBe(1);
-    expect(r.name).toMatch(/^INBOX: 4 emails for you to read, since/);
+    expect(r.name).toMatch(/^INBOX: 5 emails for you to read, since/);
     const o = r.output;
     expect(o.indexOf('These may need you to act')).toBeLessThan(o.indexOf('For your information (from the backlog'));
-    expect([...o.matchAll(/^(\d+)\. /gm)].map((x) => Number(x[1]))).toEqual([1, 2, 3, 4]);
+    expect([...o.matchAll(/^(\d+)\. /gm)].map((x) => Number(x[1]))).toEqual([1, 2, 3, 4, 5]);
     expect(o).toContain('2. sam@gmail.com | Dinner');
-    expect(o).toContain('4. pat@gmail.com | Holiday photos');
-    expect(r.moves[0]).toEqual({ ids: ['d6', 'd7', 'd1'], addLabels: [READ_LABEL], removeLabels: ['INBOX'] });
+    expect(o).toContain('5. pat@gmail.com | Holiday photos');
+    expect(r.moves[0]).toEqual({ ids: ['d6', 'd7', 'd9', 'd1'], addLabels: [READ_LABEL], removeLabels: ['INBOX'] });
     expect(r.moves[1]).toEqual({ ids: ['d2', 'd3'], removeLabels: ['INBOX'] });
     const ids = r.moves.flatMap((p) => p.ids);
     for (const untouched of ['d4', 'd5', 'd8']) expect(ids).not.toContain(untouched);
@@ -813,10 +873,16 @@ describe('the people and pages around the card', () => {
   it('Inbox Response is told what an INBOX card verdict means: approve = seen, a named number = one task', () => {
     // Its definition file is its prompt; this guards the instruction a redo needs.
     const f = readFileSync(join(process.env.HOME, '.claude/agents/inbound-comms-response.md'), 'utf8');
-    const block = f.slice(f.indexOf('## INBOX cards'), f.indexOf('## Step 0'));
+    const block = f.slice(f.indexOf('## INBOX cards'), f.indexOf('## Step 0')).replace(/\s+/g, ' ');
     expect(block).toMatch(/Approved as-is:\*\* he has seen them/);
-    expect(block).toMatch(/turn EACH\s+number he names into its own task/);
+    expect(block).toMatch(/turn EACH number he names into its own task/);
     expect(block).toContain('scripts/create-agent-task.py create');
+    // Closed only with every named item's task read back; a failure goes back to Kevin.
+    expect(block).toContain('scripts/agent-dispatch.py outcome <taskId>');
+    expect(block).toMatch(/Close the card ONLY when every item he named has a task id read back/);
+    expect(block).toMatch(/do NOT use that line/);
+    // How his note is read: lists, ranges, sections, none, and no guessing.
+    for (const s of ['"2 and 14"', '"3-7"', '"all the act ones"', '"none"', 'is NOT guessed']) expect(block).toContain(s);
     expect(block).toContain('Nothing. Information only.');
   });
 
@@ -829,6 +895,48 @@ describe('the people and pages around the card', () => {
       '18: creditor', '8: task created']) expect(label(n), n).toBe('Respond');
     expect(label('3: to pay')).toBe('Delay Payment');
     expect(label('6: newsletter')).toBe('Follow up');
+  });
+
+  it('the draft step does not treat label 19 as "to respond" either', () => {
+    const html = readFileSync(join(ROOT, 'follow-up.html'), 'utf8');
+    const line = html.match(/const isToRespondDraft = ([^\n]+);/)[1];
+    const respond = (name) => vm.runInNewContext(line, { currentLabel: name });
+    expect(respond('19: for Kevin to read')).toBe(false);
+    for (const n of ['1: to respond', '12: kevin to respond', '13: maintenance']) expect(respond(n), n).toBe(true);
+    expect(respond('6: newsletter')).toBe(false);
+  });
+
+  it('the Gmail worker returns the Cc header, so a reply-all that answered the sender in Cc is seen', async () => {
+    const src = readFileSync(join(ROOT, 'workers/drive-upload/worker.js'), 'utf8');
+    const grab = (marker) => {
+      const start = src.indexOf(marker);
+      if (start === -1) throw new Error(`${marker} not found in worker.js`);
+      if (marker.startsWith('const ')) return src.slice(start, src.indexOf(';', start) + 1);
+      let i = src.indexOf('{', src.indexOf(')', start)), depth = 0;
+      for (; i < src.length; i++) {
+        if (src[i] === '{') depth++;
+        else if (src[i] === '}') { depth--; if (depth === 0) return src.slice(start, i + 1); }
+      }
+      throw new Error(`could not parse ${marker}`);
+    };
+    const code = [grab('function b64urlDecodeUtf8('), grab('const INLINE_PHOTO_MIN_BYTES'),
+      grab('function extractAttachments('), grab('function extractPlainText('),
+      grab('async function gmailList(')].join('\n');
+    const fetch = async (url) => ({
+      ok: true,
+      json: async () => (String(url).includes('/messages?')
+        ? { messages: [{ id: 'm1' }] }
+        : { id: 'm1', threadId: 't1', labelIds: ['SENT'], internalDate: '1', snippet: '',
+            payload: { headers: [{ name: 'From', value: 'kevin@runpreneur.org.uk' },
+              { name: 'To', value: 'roy@example.com' }, { name: 'Cc', value: 'Pat <pat@example.com>' },
+              { name: 'Subject', value: 'Re: keys' }], mimeType: 'text/plain', body: { data: '' } } }),
+      text: async () => '',
+    });
+    const ctx = vm.createContext({ fetch, URLSearchParams, TextDecoder, atob, Uint8Array });
+    vm.runInContext(code, ctx);
+    const res = await vm.runInContext("gmailList('token', { q: 'in:sent' })", ctx);
+    expect(res.messages[0].headers.cc).toBe('Pat <pat@example.com>');
+    expect(res.messages[0].headers.to).toBe('roy@example.com');
   });
 });
 
@@ -851,7 +959,7 @@ describe('the card through the real task gate, against a fake Airtable over HTTP
       const parts = url.pathname.split('/').filter(Boolean);   // v0, base, table, rec?
       const send = (code, obj) => { res.writeHead(code, { 'Content-Type': 'application/json' }); res.end(JSON.stringify(obj)); };
       const json = body ? JSON.parse(body) : null;
-      seen.push({ method: req.method, table: parts[2], rec: parts[3] || null, typecast: json && json.typecast });
+      seen.push({ method: req.method, table: parts[2], rec: parts[3] || null, typecast: json && json.typecast, body });
       if (parts[2] !== 'tblqB8b22hKBL4PF1') return send(200, { records: [] });
       if (req.method === 'POST' && !parts[3]) {
         n += 1;
@@ -938,6 +1046,10 @@ print("RESULT " + json.dumps([json.loads(l) for l in buf.getvalue().splitlines()
     // The gate's create went out with typecast OFF, as every gate create does.
     const create = seen.find((s) => s.method === 'POST' && s.table === 'tblqB8b22hKBL4PF1' && !s.rec);
     expect(create.typecast).toBe(false);
+    // The gate's request mirrors its --fields-json, which `ps` can read: it
+    // carries the placeholder, never a sender or a subject.
+    expect(create.body).not.toMatch(/@gmail\.com|Hello [abc]/);
+    expect(create.body).toContain('INBOX LIST BEING WRITTEN');
   }, 120000);
 });
 
