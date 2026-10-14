@@ -83,6 +83,36 @@ STEPS
 
    **Use this query exactly. Two earlier phrasings of this step produced a silent zero.**
 
+   **THE HEADS' SHELL ALLOWS ONLY COMMANDS THAT START WITH `python3`, `curl` OR
+   `node` (added 14 Oct 2026, findings 20261013-ceo-agent-856 and 20261011-phase-2-765).**
+   On 13 and 14 Oct 2026 three lanes came back NOT CHECKED two days running
+   because every head reached for `cat`, `ls`, `head`, a pipe or `$(...)` and the
+   robot allow list refused all of them. `PAT=$(cat ...)` is not a command that
+   starts with `curl`, so the block below cannot run inside a head.
+
+   - Read files with the Read, Grep and Glob tools, never `cat` or `head`.
+   - Read Airtable with ONE bare command, which reads the token itself:
+     `python3 /Users/kevinbrittain/Projects/leadership-dashboard/scripts/airtable-read.py <table> [--formula F] [--fields "A,B"] [--count-only]`
+     It paginates to the end, prints JSON, and never prints the token.
+   - No `for` loops, no `sed`, no `git`, no pipes. If a step seems to need one,
+     it needs a script instead: say so as a finding and move on.
+
+   The board read, as a head must run it:
+
+   ```bash
+   python3 /Users/kevinbrittain/Projects/leadership-dashboard/scripts/airtable-read.py Tasks \
+     --formula 'AND(REGEX_MATCH({Task Name},"^[0-9]+\. "),{Business}="Operations Director")' \
+     --fields "Task Name,Status,Due Date,Description"
+   ```
+
+   Verified 14 Oct 2026: that command returns `"count": 12`, the same control as
+   the curl below. The register read is
+   `... airtable-read.py "AI Agents" --fields "Status,Guardrail Level,Metric Score,Learning Log"`
+   (26 rows on 14 Oct 2026).
+
+   The curl form below stays as the reference for a caller that HAS a shell
+   (this skill's own orchestrating session does). A head uses the python3 form.
+
    ```bash
    PAT=$(cat ~/.config/od/airtable_pat)
    curl -s -G -H "Authorization: Bearer $PAT" \
