@@ -275,3 +275,326 @@ describe('a shared address is never enough to fold one task into another', () =>
     expect(v.matchedWhy).toContain('phone');
   });
 });
+
+
+// ─── A NUMBER ALONE IS NEVER A SUBJECT (14 Oct 2026, twice in one day) ──
+//
+// Creating a lender request for a mortgage interest certificate at 1406
+// Oldham Road folded it into the OPEN, ALREADY-APPROVED pest-control quote
+// chase at the same property. The gate exited 0 with {"action": "updated",
+// "matchedName": "COMPLIANCE: Pest control quote chase ..."}, so the request
+// looked done and was not; the appended paragraph was stripped off the
+// pest-control card by hand and the request re-created under a name that did
+// not collide.
+//
+// The house number did it. dupe_signals reads four or more digits as a
+// reference number, 1406 is not a calendar year, so both names carried
+// `num:1406`; ONE shared strong id is proof of identity on its own, ahead of
+// the address rules and the word threshold, and fold_on_address_only lets a
+// strong id through by design.
+//
+// THREE DRAFTS, TWO WRONG, both found by review. All three are pinned here:
+//   1. Demoting house numbers out of the strong set — breaks the pairs the
+//      strong pass exists for.
+//   2. Letting ONE shared telling word carry the fold — a LOWER bar than
+//      DUPE_MIN_SHARED, which re-enabled the fold finding 605 refuses.
+//   3. Firing only on a number the address reader recognises as a house
+//      number — FAILED OPEN on six ordinary spellings of one address, and
+//      invented houses out of "claim 1406 small claims court".
+// What shipped asks nothing about addresses: when the only agreement is a
+// number, the fold must stand on the words, at the bar the word pass sets.
+//
+// Names are invented (public repo) except the street, which this repo's test
+// corpus already carries; the shapes are the incident's and the review's.
+// Back-tested by deleting the fold_on_a_number_only call in decide(): the
+// first case flips to action "update" on recX and this block fails.
+describe('a shared number is never enough to fold one task into another', () => {
+  const F = runPy('mod.F');
+  const row = (id, name, status = 'Approval', created = '2026-10-13T00:00:00.000Z') => ({
+    id, createdTime: created, fields: { [F.name]: name, [F.status]: { name: status } },
+  });
+  const decide = (incoming, board) => runPy(`mod.decide(arg[0], arg[1])`,
+    [{ [F.name]: incoming }, board]);
+  const one = (incoming, existing) => decide(incoming, [row('recX', existing)]);
+  const guard = (a, b, shared) => runPy(
+    `mod.fold_on_a_number_only(arg[0], arg[1], arg[2])`, [a, b, shared]);
+
+  const PEST = 'COMPLIANCE: Pest control quote chase (Vermguard, Able Group) - 1406 Oldham Road';
+  const LENDER = 'Mortgage lender - request interest certificate 2019-20 for 1406 Oldham Road (account 90000111)';
+
+  it('the incident: a lender request does NOT fold into an approved pest-control card at the same house', () => {
+    const v = one(LENDER, PEST);
+    expect(v.action).toBe('create');
+    expect(v.taskId).toBeUndefined();
+  });
+
+  it('the house number is what did it: four digits read as a reference', () => {
+    expect(runPy('sorted(mod.dupe_signals(arg)[1])', LENDER)).toContain('num:1406');
+    expect(runPy(`mod.dupe_verdict(arg[0], arg[1], "fold")`, [LENDER, PEST]).shared)
+      .toEqual(['num:1406']);
+    expect(guard(LENDER, PEST, ['num:1406'])).toBe(true);
+  });
+
+  it('REGRESSION, draft three: no spelling of the address can switch the guard off', () => {
+    // The draft that fired only on a number the address reader recognised as
+    // a house number failed OPEN on all of these, each reproducing the
+    // incident. This guard asks nothing about addresses.
+    for (const addr of ['1406 Oldham Road', '1406, Oldham Road, Manchester',
+      '1406 Deansgate', '1406 New Road', '1406 The Broadway',
+      '1406-1408 Oldham Road', 'Flat 1406 Duckworth Court']) {
+      expect(one(`Mortgage lender - request interest certificate 2019-20 for ${addr} (account 90000111)`,
+        `COMPLIANCE: Pest control quote chase - ${addr}`).action, addr).toBe('create');
+    }
+  });
+
+  it('REGRESSION, draft two: a shared number must never LOWER the bar (finding 605)', () => {
+    // One shared telling word carried the fold in an earlier draft, which
+    // re-enabled the gas-quote-into-licence-fee fold finding 605 refuses:
+    // the two names share the TOWN, not the subject.
+    expect(one(
+      'COMPLIANCE: Send GSC quote requests - Manchester Gas Engineers - 1406 Oldham Road M40 1EZ',
+      'COMPLIANCE: Manchester Council HMO licence fee overdue - 1406 Oldham Road M40 1EZ',
+    ).action).toBe('create');
+    expect(one(
+      'Mortgage lender - landlord interest certificate for 1406 Oldham Road',
+      'COMPLIANCE: Pest control quote chase, landlord to confirm - 1406 Oldham Road',
+    ).action).toBe('create');
+  });
+
+  it('two different jobs at one house never fold — the live board of 14 Oct 2026', () => {
+    // Three open jobs at one property that morning, and all three pairs
+    // folded on num:1406 before this fix.
+    const JOBS = [
+      'MAINTENANCE: Pest control quote requests - 1406 Oldham Road M40 1EZ',
+      'MAINTENANCE: Roy fwd - 1406 Oldham Road council matter (add to jobs list)',
+      'MAINTENANCE: 1406 Oldham Road - urgent kitchen ceiling and rat infestation',
+    ];
+    for (const a of JOBS) {
+      for (const b of JOBS) {
+        if (a !== b) expect(one(a, b).action, `${a}\n  vs ${b}`).toBe('create');
+      }
+    }
+    // NOT claimed here: two DIFFERENT houses sharing a number, one written
+    // without a street type ("1406 Deansgate"), when the names also agree on
+    // the subject ("gas safety cert due"). The word pass matches that pair on
+    // its words with or without the number, and identity_conflict cannot see
+    // a street with no street type. Pre-existing, and a separate fix.
+  });
+
+  it('a 10-digit reference is not a phone number, so two account numbers are not one thread', () => {
+    // dupe_signals calls any 9-to-12 digit run `tel:` and compares the last
+    // NINE digits, so two different 10-digit account numbers read as one
+    // thread. The thread exemption is spent only on a number written as a UK
+    // phone number.
+    expect(runPy('sorted(mod._phone_shaped_ids(arg))', 'INBOUND: UTR 1234567890 filing due'))
+      .toEqual([]);
+    expect(runPy('sorted(mod._phone_shaped_ids(arg))', 'INBOUND: SMS reply from +447700900747'))
+      .toContain('tel:700900747');
+    // A mobile written with a space reaches the strong set as its PIECES, so
+    // each piece is exempt too (found on the live board of 14 Oct 2026: two
+    // SMS messages from one tenant, "07398 536055", would have been refused).
+    expect(runPy('sorted(mod._phone_shaped_ids(arg))', 'INBOUND: [SMS] 07398 536055: hello'))
+      .toEqual(['num:07398', 'num:536055', 'tel:398536055']);
+    expect(one('INBOUND: [SMS] 07398 536055: the window in my second bedroom is stuck',
+      'INBOUND: [SMS] 07398 536055: Roy asked me to text you about the window').action)
+      .toBe('update');
+    expect(one('INBOUND: Vectis Water account 1234567890 - arrears',
+      'INBOUND: Marlstone Credit account 9234567890 - statement').action).toBe('create');
+    // A 10-digit reference beginning with 0 looks like a phone number until
+    // the subscriber digits are counted: a UK number carries its trunk
+    // prefix AND ten more digits that do not start with 0.
+    expect(runPy('sorted(mod._phone_shaped_ids(arg))', 'INBOUND: UTR 0123456789 filing'))
+      .toEqual([]);
+    expect(runPy('mod._uk_phone_digits(arg)', 'UTR 0123456789')).toBe('');
+    expect(runPy('mod._uk_phone_digits(arg)', '+44 (0)7398 536055')).toBe('7398536055');
+    expect(one('INBOUND: Vectis Water account 0123456789 - meter reading needed',
+      'COMPLIANCE: Pest control quote chase - 1406 Oldham Road, acct 0123456789').action)
+      .toBe('create');
+  });
+
+  it('a mobile written six ways is one thread, and only when BOTH names carry it', () => {
+    // The exemption is the only way past the bar, so it is spent only on a
+    // number shaped like a UK phone number, in both names. Each of these is
+    // how a signature block, a letterhead or a tenant actually writes one.
+    for (const n of ['07398 536055', '07398-536055', '07398536055',
+      '+44 (0)7398 536055', '(07398) 536055', '0044 7398 536055']) {
+      expect(one(`INBOUND: SMS reply from ${n}`,
+        `INBOUND: SMS from ${n} - unknown content`).action, n).toBe('update');
+    }
+    // Two spellings of the same number are still one thread.
+    expect(one('INBOUND: SMS reply from +44 (0)7398 536055',
+      'INBOUND: SMS from 07398 536055 - unknown content').action).toBe('update');
+    // A reference that happens to equal a run inside someone's mobile is NOT
+    // that thread: the exemption needs the number in both names.
+    expect(one('COMPLIANCE: Vermguard invoice 536055 overdue',
+      'INBOUND: SMS reply from 07398 536055').action).toBe('create');
+    expect(one('COMPLIANCE: Vermguard quote 07398 accepted',
+      'INBOUND: SMS reply from 07398 536055').action).toBe('create');
+    // A number that follows the phone number is not part of it.
+    expect(runPy('sorted(mod._phone_shaped_ids(arg))',
+      'INBOUND: SMS reply from +447700900747 - 1406 Oldham Road'))
+      .toEqual(['num:447700900747', 'tel:700900747']);
+  });
+
+  it('two different mobiles are two threads, even sharing a digit group', () => {
+    // A spaced mobile reaches the strong set as its PIECES, so a shared
+    // 5-digit block ("07398") made two tenants one thread while the ids were
+    // flattened across numbers. The queue has its own test against exactly
+    // that ("two DIFFERENT phone numbers never merge on the words around
+    // them"), written after two threads collapsed into one cluster.
+    expect(one('INBOUND: SMS reply from 07398 536055',
+      'INBOUND: SMS from 07398 112233 - unknown content').action).toBe('create');
+    expect(one('INBOUND: SMS reply from 07398 536055',
+      'INBOUND: SMS from 07700 536055 - unknown content').action).toBe('create');
+    // Keyed on all TEN digits, not the nine dupe_signals compares, so a
+    // mobile and a landline agreeing on their last nine stay two numbers.
+    expect(runPy('sorted(mod._phone_numbers(arg).keys())', 'INBOUND: SMS from 07398 536055'))
+      .toEqual(['7398536055']);
+    expect(one('INBOUND: SMS reply from 07398 536055',
+      'INBOUND: voicemail from 01398 536055 - unknown content').action).toBe('create');
+  });
+
+  it('the exemption is for a MESSAGE THREAD, not for anything phone-shaped', () => {
+    // "account 01406 536055" is digit-for-digit a valid UK landline (01406 is
+    // a real area code), so no shape test separates it from "call 01406
+    // 536055". An earlier draft read the word in FRONT of the number against
+    // a list of reference labels, and review found that list both too broad
+    // and too narrow in one pass: "mobile no 07398 536055" was denied (losing
+    // a real SMS thread, because "no" was on the list) while "a/c 01406
+    // 536055" sailed through. So the test is on the MATTER: both names must
+    // be about a message or a call.
+    for (const label of ['account', 'a/c', 'customer', 'meter serial']) {
+      expect(one(`INBOUND: Vectis Water ${label} 01406 536055 - meter reading needed`,
+        `COMPLIANCE: Pest control quote chase - ${label} 01406 536055`).action, label)
+        .toBe('create');
+    }
+    // And a real thread keeps its fold however the number is introduced.
+    expect(one('INBOUND: SMS from tenant - mobile no 07398 536055',
+      'INBOUND: text from mobile no 07398 536055 - boiler leak').action).toBe('update');
+    expect(runPy('mod._about_a_message(arg)', 'COMPLIANCE: Pest control quote chase')).toBe(false);
+    expect(runPy('mod._about_a_message(arg)', 'INBOUND: [SMS] 07398 536055: hello')).toBe(true);
+    // A word that only SOMETIMES means a message never speaks for one: on
+    // this board `missed` attaches to an instalment, an appointment or an
+    // inspection, `ring` to a ring main circuit, `mobile` to a mobile home
+    // and `call` to a call-out charge. Each granted the exemption to two
+    // unrelated matters quoting one phone-shaped reference.
+    for (const [a, b] of [['missed meter reading', 'missed appointment'],
+      ['missed instalment', 'missed inspection'],
+      ['ring main circuit', 'call-out charge disputed']]) {
+      expect(one(`INBOUND: Vectis Water a/c 01406 536055 - ${a}`,
+        `COMPLIANCE: Pest control quote chase - ${b} - a/c 01406 536055`).action, a)
+        .toBe('create');
+    }
+    expect(runPy('mod._about_a_message(arg)', 'COMPLIANCE: missed inspection')).toBe(false);
+    // A UK number cannot start 04, 05 or 06.
+    expect(runPy('mod._uk_phone_digits(arg)', '05123456789')).toBe('');
+  });
+
+  it('a reference PREFIX is part of the reference, not the subject', () => {
+    // Two obligations under the live HMRC compliance check cleared the word
+    // bar on `hmrc` (the counterparty) and `cfs` (the case reference's own
+    // prefix), at exactly the ratio, and the keeper was at Approval. Read
+    // structurally, because no list can hold the prefix of a case nobody has
+    // opened yet.
+    expect(one('INBOUND: HMRC CFS-2427425 - provide bank statements by 16 Oct',
+      'COMPLIANCE: HMRC CFS-2427425 response - rental income schedule').action).toBe('create');
+    expect(runPy('sorted(mod._reference_prefixes(arg))', 'HMRC CFS-2427425 response'))
+      .toEqual(['cfs']);
+    // Two digits are a name, not a reference: UC47 is a form, v12 a version.
+    expect(runPy('sorted(mod._reference_prefixes(arg))', 'UC47 form for 5 Dalham Place'))
+      .toEqual([]);
+    expect(runPy('sorted(mod._reference_prefixes(arg))', 'Renew v12 licence')).toEqual([]);
+    expect(runPy('sorted(mod._reference_prefixes(arg))', '1406 Oldham Road M40 1EZ'))
+      .toEqual([]);
+  });
+
+  it('a reference label is not a subject word', () => {
+    // A UTR rides on every HMRC task name, so counting it as subject let an
+    // HMRC filing fold into the APPROVED compliance-check response on
+    // `hmrc` + `utr`, at exactly the bar. Same family as the address words
+    // and the postcode halves.
+    expect(one('INBOUND: HMRC self assessment filing due - UTR 0123456789',
+      'COMPLIANCE: HMRC check CFS-2427425 response - UTR 0123456789').action).toBe('create');
+    // CONTROL: a reference whose words DO agree still folds.
+    expect(one('INBOUND: chase Vectis Water on account 44556677',
+      'INBOUND: Vectis Water account 44556677 - final demand').action).toBe('update');
+  });
+
+  it('the separator people actually type keeps one thread', () => {
+    // A number copied out of a PDF, a Word letter or a signature block
+    // carries a non-breaking space or an en dash. This file already spells
+    // out that character list for the same reason (DUPE_SPACES).
+    for (const sep of [' ', '\u00a0', '\u2013', '\u2009', '.', '-']) {
+      expect(one(`INBOUND: SMS reply from 07398${sep}536055`,
+        `INBOUND: SMS from 07398${sep}536055 - unknown content`).action,
+        JSON.stringify(sep)).toBe('update');
+    }
+  });
+
+  it('the gate SAYS it created instead of folding, and names the card it left alone', () => {
+    const v = one(LENDER, PEST);
+    expect(v.note).toContain('created rather than folded');
+    expect(v.note).toContain('recX');
+    // It promises no surface it cannot keep: the page's Duplicates lane is
+    // filtered to agent-owned tasks, so a card held by a person is in no lane.
+    expect(v.note).not.toContain('Duplicates lane');
+  });
+
+  it('a refusal rides along with a fold elsewhere, worded for the path it is on', () => {
+    const v = decide('Mortgage lender - interest certificate for 1406 Oldham Road', [
+      row('recPEST', 'COMPLIANCE: Pest control quote chase - 1406 Oldham Road'),
+      row('recLEND', 'INBOUND: Mortgage lender interest certificate request for 1406 Oldham Road',
+        'Today', '2026-10-14T08:00:00.000Z'),
+    ]);
+    expect(v.action).toBe('update');
+    expect(v.taskId).toBe('recLEND');
+    expect(v.note).toContain('recPEST');
+    expect(v.note).toContain('folded into recLEND');
+    // It must not claim the gate created: it folded.
+    expect(v.note).not.toContain('created rather than folded');
+  });
+
+  it('unreadable evidence refuses the fold — every earlier draft failed open', () => {
+    expect(guard(LENDER, PEST, [])).toBe(true);
+    expect(guard(LENDER, PEST, null)).toBe(true);
+    expect(guard(LENDER, PEST, ['NUM:1406'])).toBe(true);
+    expect(guard(LENDER, PEST, ['num:1406 '])).toBe(true);
+    // A word-pass match has already cleared the bar and passes through.
+    expect(guard('INBOUND: Sefton Council HMO licence fee unpaid',
+      'COMPLIANCE: Sefton Council HMO licence fee overdue', ['licence', 'fee'])).toBe(false);
+  });
+
+  it('CONTROL: a phone number is one thread and still folds across one house', () => {
+    const v = one('INBOUND: SMS reply from +447700900747 - 1406 Oldham Road',
+      'INBOUND: SMS from 447700900747 - 1406 Oldham Road');
+    expect(v.action).toBe('update');
+    expect(v.matchedWhy).toContain('phone');
+  });
+
+  it('CONTROL: a reference still folds when the words agree, so the gate is not switched off', () => {
+    // Without this the fix would be indistinguishable from disabling the
+    // strong pass, which is the failure the 28 Aug second pass exists for.
+    expect(one('INBOUND: chase Vectis Water on account 44556677',
+      'INBOUND: Vectis Water account 44556677 - final demand').action).toBe('update');
+    expect(one('INBOUND: Manchester Council HMO licence fee unpaid - 1406 Oldham Road',
+      'COMPLIANCE: Manchester Council HMO licence fee overdue - 1406 Oldham Road').action)
+      .toBe('update');
+    expect(one('Chase Acme invoice #10', 'Chase Acme invoice #9').action).toBe('update');
+  });
+
+  it('THE COST, stated: a chaser that repeats nothing, and one shared word at one house', () => {
+    // Deliberate, not a bug, and the price of refusing the incident: no
+    // threshold can tell these apart from the pairs above. Kevin's ruling —
+    // a duplicate card he can merge beats an approved card quietly rewritten.
+    expect(one('INBOUND: 2nd reminder 10045678', 'INBOUND: Acme Roofing invoice 10045678').action)
+      .toBe('create');
+    expect(one('INBOUND: 1406 Oldham Road electrical safety cert outstanding',
+      'INBOUND (follow-up): 1406 Oldham Road EICR cert - send to Manchester Council').action)
+      .toBe('create');
+    // The page still GROUPS both pairs, so nothing is hidden from Kevin.
+    expect(runPy(`mod.dupe_verdict(arg[0], arg[1], "group")`,
+      ['INBOUND: 1406 Oldham Road electrical safety cert outstanding',
+       'INBOUND (follow-up): 1406 Oldham Road EICR cert - send to Manchester Council']).match)
+      .toBe(true);
+  });
+});
