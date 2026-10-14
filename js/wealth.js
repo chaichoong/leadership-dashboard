@@ -237,22 +237,11 @@ function manualDebtBalance(rec) {
     const monthlyRate = rate / 100 / 12;
 
     // Payments since the opening date, bucketed by month.
-    const terms = String(getField(rec, DEBT.payMatch) || '')
-        .split('|').map(t => t.trim().toUpperCase()).filter(Boolean);
     const paidByMonth = {};
-    if (terms.length) {
-        const txns = (typeof allTransactions !== 'undefined' && allTransactions) ? allTransactions : [];
-        txns.forEach(t => {
-            const amt = Number(getField(t, F.txReportAmount)) || 0;
-            if (amt >= 0) return;                       // outflows only — a payment reduces the debt
-            const name = String(getField(t, F.txDescription) || '').toUpperCase();
-            if (!terms.some(term => name.includes(term))) return;
-            const ds = getField(t, F.txDate); if (!ds) return;
-            const d = new Date(ds); if (isNaN(d) || d < start) return;
-            const k = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
-            paidByMonth[k] = (paidByMonth[k] || 0) + Math.abs(amt);
-        });
-    }
+    debtPayments(rec, start).forEach(p => {
+        const k = `${p.date.getFullYear()}-${String(p.date.getMonth() + 1).padStart(2, '0')}`;
+        paidByMonth[k] = (paidByMonth[k] || 0) + p.amount;
+    });
 
     let bal = opening;
     const now = new Date();
@@ -266,6 +255,56 @@ function manualDebtBalance(rec) {
         cur.setMonth(cur.getMonth() + 1);
     }
     return Math.max(0, bal);
+}
+
+// Payments made against a debt since its start date, matched from the bank feed by the
+// debt's Payment Match terms (outflows only), oldest first: [{ date, amount }].
+function debtPayments(rec, start) {
+    const terms = String(getField(rec, DEBT.payMatch) || '')
+        .split('|').map(t => t.trim().toUpperCase()).filter(Boolean);
+    if (!terms.length) return [];
+    const txns = (typeof allTransactions !== 'undefined' && allTransactions) ? allTransactions : [];
+    const out = [];
+    txns.forEach(t => {
+        const amt = Number(getField(t, F.txReportAmount)) || 0;
+        if (amt >= 0) return;                       // outflows only — a payment reduces the debt
+        const name = String(getField(t, F.txDescription) || '').toUpperCase();
+        if (!terms.some(term => name.includes(term))) return;
+        const ds = getField(t, F.txDate); if (!ds) return;
+        const d = new Date(ds); if (isNaN(d) || d < start) return;
+        out.push({ date: d, amount: Math.abs(amt) });
+    });
+    return out.sort((a, b) => a.date - b.date);
+}
+
+// Balance of an ACCRUING debt (an interest-only loan with a start date and a rate: the
+// charging order): the amount owed on its start date plus SIMPLE interest, day by day,
+// at the stored annual rate. Judgment-debt interest is simple and runs per day; the
+// monthly compounding above, which also charged the start month and the current month in
+// full, overstated it (14 Oct 2026). A payment matched from the
+// bank feed clears interest already run up first, then the amount owed.
+function accruedDebtBalance(rec, asOf = new Date()) {
+    let owed = Math.abs(Number(getField(rec, DEBT.principal)) || 0);
+    if (!owed) return 0;
+    const startStr = getField(rec, DEBT.start);
+    const start = startStr ? new Date(startStr) : null;
+    if (!start || isNaN(start)) return owed;
+    const daily = (Number(getField(rec, DEBT.rate)) || 0) / 100 / 365;
+    // Whole calendar days, so the time of day, a clock change or the time zone never shift
+    // the count. Stored dates ('YYYY-MM-DD') parse as midnight UTC; asOf is a local moment.
+    const storedDay = d => Math.floor(d.getTime() / 864e5);
+    const localDay = d => Math.round(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()) / 864e5);
+    const asOfDay = localDay(asOf);
+    let interest = 0, from = storedDay(start);
+    const runTo = to => { if (to > from) { interest += owed * daily * (to - from); from = to; } };
+    debtPayments(rec, start).filter(p => storedDay(p.date) <= asOfDay).forEach(p => {
+        runTo(storedDay(p.date));
+        const toInterest = Math.min(interest, p.amount);
+        interest -= toInterest;
+        owed = Math.max(0, owed - (p.amount - toInterest));
+    });
+    runTo(asOfDay);
+    return owed + interest;
 }
 
 function creditCardItems() {
@@ -1896,16 +1935,17 @@ function debtRows() {
         const start = getField(r, DEBT.start) || '';
         // Balance: loans use your edited figure (Debt Terms) first, falling back to the
         // snapshot; mortgages amortise (interest-only holds at principal).
-        let balance;
+        let balance, rollForward = false;
         if (cls === 'Loans') {
             // An INTEREST-ONLY loan carrying a start date AND a rate is rolled forward
-            // automatically (the charging order accrues and is never paid down). Everything
-            // else keeps the existing behaviour: your edited figure, else the snapshot.
+            // automatically (the charging order accrues simple interest and is never paid
+            // down). Everything else keeps the existing behaviour: your edited figure, else
+            // the snapshot.
             // A repayment loan never rolls forward: its start date is when it was drawn, not
             // the date of the figure you typed, so compounding from it with no repayments
             // grew a years-old business loan by its rate every month (14 Oct 2026).
-            const rollForward = type === 'Interest-only' && getField(r, DEBT.start) && _num(getField(r, DEBT.rate)) != null && principal > 0;
-            if (rollForward) balance = manualDebtBalance(r);
+            rollForward = !!(type === 'Interest-only' && getField(r, DEBT.start) && _num(getField(r, DEBT.rate)) != null && principal > 0);
+            if (rollForward) balance = accruedDebtBalance(r);
             else { const lb = loanBal[name.trim().toLowerCase()]; balance = principal > 0 ? principal : (lb != null ? lb : 0); }
         }
         else { balance = amortisedBalance(type, principal, storedRate || 0, term, start).balance; }
@@ -1924,7 +1964,7 @@ function debtRows() {
         }
         if (rate == null) rate = storedRate;                 // no payment yet → fall back to the lender rate
         const flag = (rate != null && storedRate != null && Math.abs(rate - storedRate) > 0.5);
-        return { id: r.id, name, cls, type, rate, storedRate, balance, monthly, live: false, principal, term, start, flag };
+        return { id: r.id, name, cls, type, rate, storedRate, balance, monthly, live: false, principal, term, start, flag, accrues: rollForward };
     });
     return cardRows.concat(otherRows);
 }
@@ -2001,13 +2041,18 @@ function wealthToggleDebtEditor(eid) {
 function debtEditorHtml(r) {
     const inp = (cls, ph, val, extra) => `<input class="${cls}" placeholder="${escHtml(ph)}" value="${val == null ? '' : escHtml(String(val))}" ${extra || ''} style="padding:5px 8px;border:1px solid var(--border-default);border-radius:var(--radius-md);font-size:var(--fs-sm);background:var(--bg-surface);width:100%">`;
     const isRepay = r.type === 'Repayment';
-    return `<div class="debt-editor" data-id="${escHtml(r.id)}" data-name="${escHtml(r.name)}" data-cls="${escHtml(r.cls)}"
+    return `<div class="debt-editor" data-id="${escHtml(r.id)}" data-name="${escHtml(r.name)}" data-cls="${escHtml(r.cls)}" data-accrues="${r.accrues ? '1' : ''}"
         ondragover="event.preventDefault();this.style.background='var(--bg-surface-2)'" ondragleave="this.style.background=''" ondrop="wealthDebtDrop(event,this)">
         <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:8px;margin-bottom:8px">
             <label style="font-size:var(--fs-xs);color:var(--text-muted)">Rate %${inp('de-rate', 'e.g. 22.9', r.rate, 'type="number" step="0.01"')}</label>
             <label style="font-size:var(--fs-xs);color:var(--text-muted)">Type<select class="de-type" style="padding:5px 8px;border:1px solid var(--border-default);border-radius:var(--radius-md);font-size:var(--fs-sm);background:var(--bg-surface);width:100%"><option${r.type === 'Interest-only' ? ' selected' : ''}>Interest-only</option><option${isRepay ? ' selected' : ''}>Repayment</option><option${r.cls === 'Credit Cards' ? ' selected' : ''}>Revolving</option></select></label>
             ${r.cls === 'Credit Cards'
                 ? `<label style="font-size:var(--fs-xs);color:var(--text-muted)">Balance (from Accounts, live)<div style="padding:5px 8px;font-size:var(--fs-sm);color:var(--text-secondary)">${escHtml(fmt0(r.balance))}</div></label>`
+                : r.accrues
+                // An accruing debt saves its amount ON THE START DATE: pre-filling today's
+                // figure (interest included) and saving it against the same start date
+                // would count that interest twice.
+                ? `<label style="font-size:var(--fs-xs);color:var(--text-muted)">Amount on start date £${inp('de-principal', '0', r.principal || '', 'type="number" step="0.01"')}</label>`
                 : `<label style="font-size:var(--fs-xs);color:var(--text-muted)">${r.cls === 'Loans' ? 'Current balance £' : 'Original amount £'}${inp('de-principal', '0', (r.cls === 'Loans' ? r.balance : r.principal) || '', 'type="number" step="0.01"')}</label>`}
             <label style="font-size:var(--fs-xs);color:var(--text-muted)">Term (months)${inp('de-term', 'repayment only', r.term || '', 'type="number"')}</label>
             <label style="font-size:var(--fs-xs);color:var(--text-muted)">Start date${inp('de-start', 'YYYY-MM-DD', r.start || '', 'type="date"')}</label>
@@ -2109,7 +2154,9 @@ async function wealthExtractDebtTerms(box, file) {
         const got = JSON.parse(m[0]);
         const put = (sel, v) => { if (v == null) return; const e = box.querySelector(sel); if (e) { e.value = v; e.style.borderColor = 'var(--success)'; } };
         put('.de-rate', got.rate);
-        put('.de-principal', got.principal);
+        // A statement gives TODAY's balance; an accruing debt stores its amount on the start
+        // date, so filling it in here would count the interest twice. Leave it as it is.
+        if (box.dataset.accrues !== '1') put('.de-principal', got.principal);
         put('.de-term', got.term);
         put('.de-start', got.start);
         if (got.type) { const t = box.querySelector('.de-type'); if (t) t.value = got.type; }
