@@ -401,7 +401,11 @@ describe('a tolerated line is not a failure marker (finding 531)', () => {
 // deleting them there fails this test.
 describe('slot failure markers: an unavailable lane fails the run (finding 544)', () => {
   const runnerSrc = readFileSync(resolve(ROOT, 'scripts/agent-slot-run.sh'), 'utf8');
-  const realBad = (runnerSrc.match(/^\s*'(HTTP Error 401\|[^']*)'\s*$/m) || [])[1];
+  // The line may end with a shell continuation, because a TOLERATED pattern
+  // now follows it (PR #763). Without the optional backslash this read
+  // silently returns undefined and all three cases below fail on a change
+  // that is correct.
+  const realBad = (runnerSrc.match(/^\s*'(HTTP Error 401\|[^']*)'\s*\\?\s*$/m) || [])[1];
 
   it('agent-slot-run.sh still passes a failure-marker pattern to the epilogue', () => {
     expect(realBad).toBeTruthy();
