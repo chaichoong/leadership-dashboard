@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -110,6 +110,8 @@ describe('debtRows: only an interest-only loan rolls forward on its own', () => 
      ${extract(wealthSrc, 'debtAcctKey', 'js/wealth.js')}
      ${extract(wealthSrc, 'solveRepayRate', 'js/wealth.js')}
      ${extract(wealthSrc, 'manualDebtBalance', 'js/wealth.js')}
+     ${extract(wealthSrc, 'debtPayments', 'js/wealth.js')}
+     ${extract(wealthSrc, 'accruedDebtBalance', 'js/wealth.js')}
      ${extract(wealthSrc, 'debtRows', 'js/wealth.js')}; return debtRows();`)(F, getField, DEBT, debts, []);
 
   it('a repayment loan with a start date and a rate holds at the figure you typed', () => {
@@ -123,5 +125,72 @@ describe('debtRows: only an interest-only loan rolls forward on its own', () => 
   it('a loan with no start date holds at its figure, whatever its type', () => {
     const out = rows([loan('recA', 'Test Loan A', 'Repayment', 15000, 3, ''), loan('recB', 'Test Loan B', 'Interest-only', 9000, 4, '')]);
     expect(out.map(r => r.balance)).toEqual([15000, 9000]);
+  });
+  it('an accruing debt runs simple interest by the day, not whole months compounded', () => {
+    // 140 days from 10 Mar to 28 Jul at 6%: 20,000 + 20,000 x 6% x 140/365 = 20,460.27.
+    // Monthly compounding over Mar..Jul (the old maths) gives 20,505.03.
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(new Date(2030, 6, 28, 15, 30));
+    try {
+      const [r] = rows([loan('recTestAccrue', 'Test Accruing Debt', 'Interest-only', 20000, 6, '2030-03-10')]);
+      expect(r.balance).toBeCloseTo(20460.27, 2);
+      expect(r.accrues).toBe(true);
+    } finally { vi.useRealTimers(); }
+  });
+});
+
+// 14 Oct 2026 — the charging order. Judgment-debt interest is simple and runs per day; the
+// monthly compounding (which also charged the start month and the current month in full)
+// overstated it. All figures invented.
+describe('accruedDebtBalance: simple interest by the day', () => {
+  const DEBT = { name: 'n', cls: 'c', type: 't', principal: 'p', rate: 'r', start: 's', payMatch: 'pm' };
+  const TF = { ...F, txReportAmount: 'amt', txDescription: 'desc', txDate: 'date' };
+  const build = (txns) => new Function('F', 'getField', 'DEBT', 'allTransactions',
+    `${extract(wealthSrc, 'debtPayments', 'js/wealth.js')}
+     ${extract(wealthSrc, 'accruedDebtBalance', 'js/wealth.js')}; return accruedDebtBalance;`)(TF, getField, DEBT, txns);
+  const debt = (fields) => ({ id: 'recTestDebt', fields: { n: 'Test Accruing Debt', c: 'Loans', t: 'Interest-only', ...fields } });
+
+  it('adds nothing on the start day and a day\'s interest per calendar day after', () => {
+    const acc = build([]);
+    const d = debt({ p: 20000, r: 6, s: '2030-03-10' });
+    expect(acc(d, new Date(2030, 2, 10, 18, 0))).toBe(20000);
+    expect(acc(d, new Date(2030, 6, 28, 9, 0))).toBeCloseTo(20460.27, 2);
+  });
+  it('a matched payment clears the interest run up first, then the amount owed', () => {
+    // 7.3% a year on 10,000 = 2.00 a day. 100 days to 11 Apr = 200 interest; a 300
+    // payment clears it and 100 of the debt (9,900 left); 40 more days at 1.98 = 79.20.
+    const acc = build([
+      { fields: { amt: -300, desc: 'TEST LENDER REPAYMENT', date: '2030-04-11' } },
+      { fields: { amt: -50, desc: 'UNRELATED SHOP', date: '2030-04-12' } },
+      { fields: { amt: 300, desc: 'TEST LENDER REFUND', date: '2030-04-13' } },
+    ]);
+    const d = debt({ p: 10000, r: 7.3, s: '2030-01-01', pm: 'TEST LENDER' });
+    expect(acc(d, new Date(2030, 4, 21, 12, 0))).toBeCloseTo(9979.2, 2);
+  });
+  it('holds at its amount with no start date, and owes nothing with no amount', () => {
+    const acc = build([]);
+    expect(acc(debt({ p: 5000, r: 8, s: '' }), new Date(2030, 0, 1))).toBe(5000);
+    expect(acc(debt({ p: 0, r: 8, s: '2030-01-01' }), new Date(2030, 5, 1))).toBe(0);
+  });
+});
+
+describe('debtEditorHtml: an accruing debt saves its amount on the start date', () => {
+  const editor = new Function('escHtml', 'fmt0',
+    `${extract(wealthSrc, 'debtEditorHtml', 'js/wealth.js')}; return debtEditorHtml;`)(s => String(s), n => String(n));
+  const valueOf = html => (html.match(/class="de-principal"[^>]*value="([^"]*)"/) || [])[1];
+
+  it('pre-fills the start-date amount, so saving never stores interest twice', () => {
+    const row = { id: 'recTestDebt', name: 'Test Accruing Debt', cls: 'Loans', type: 'Interest-only', rate: 6, balance: 20460.27, principal: 20000, term: 0, start: '2030-03-10', accrues: true };
+    const html = editor(row);
+    expect(valueOf(html)).toBe('20000');
+    expect(html).toContain('Amount on start date');
+    // The "Read screenshot / document" flow reads this flag and leaves the amount alone.
+    expect(html).toContain('data-accrues="1"');
+  });
+  it('a loan that does not accrue still edits its current balance', () => {
+    const row = { id: 'recTestLoan', name: 'Test Loan', cls: 'Loans', type: 'Repayment', rate: 2.5, balance: 31234.56, principal: 31234.56, term: 0, start: '', accrues: false };
+    const html = editor(row);
+    expect(valueOf(html)).toBe('31234.56');
+    expect(html).toContain('data-accrues=""');
   });
 });
