@@ -808,6 +808,105 @@ print(json.dumps({"detail": detail, "open": payload["open"], "counts": [payload[
   });
 });
 
+describe('4d. a wall on a finding merged, moved to a task or parked to a date (#784)', () => {
+  it('labels say what clears the wall: the task, or the date it comes back', () => {
+    const r = py(`
+b = {"kind": "TOOL", "subject": "x", "why": "w", "finding": "20261001-agent-dispatch-901", "since": ""}
+print(json.dumps([
+  m.tool_wall_state(b, "tasked", {"task": "recTASKxxxxxxxxxx"}, [], 5),
+  m.tool_wall_state(b, "deferred", {"deferred_until": "2027-01-04", "where": "scripts/agent-dispatch.py"}, [], 5),
+  m.tool_wall_state(b, "deferred", {"where": "the robot's own setup"}, [], 5),
+]))`);
+    expect(r[0]).toEqual(['tasked', 'moved to task recTASKxxxxxxxxxx: this wall clears when that task is Completed']);
+    // A dated deferral comes back by itself, protected file or not: never "nothing will clear".
+    expect(r[1]).toEqual(['deferred-dated', 'deferred until 2027-01-04; it comes back open on that date']);
+    expect(r[2]).toEqual(['deferred', 'the fixer deferred it, so nothing will clear this wall']);   // undated: unchanged
+  });
+
+  it('a wall on a tasked finding wakes when its task is Completed, Cancelled or gone, and stands otherwise', () => {
+    const r = py(`
+b = {"kind": "TOOL", "subject": "x", "why": "w", "finding": "F1", "since": ""}
+fs = {"F1": "tasked"}
+print(json.dumps([m.blocker_clear_reason(b, {}, fs, tasked_status=lambda f: s)
+                  for s in ("Completed", "Cancelled", "missing", "Today", None)] + [m.blocker_clear_reason(b, {}, fs)]))`);
+    expect(r[0]).toMatch(/the task finding F1 was moved to is Completed/);
+    // Round 3: a dropped task must never leave the wall shut on a door nobody holds.
+    expect(r[1]).toMatch(/^the task carrying this fix was dropped \(finding F1: task cancelled\); try again or block again$/);
+    expect(r[2]).toMatch(/^the task carrying this fix was dropped \(finding F1: task no longer exists\); try again or block again$/);
+    expect(r.slice(3)).toEqual(['', '', '']);   // still open, unreadable, or not asked: the wall stands
+  });
+
+  it('the sweep reads the task off the board: Completed, Cancelled and missing wake; open and unreadable do not', () => {
+    const r = py(`
+NOW = datetime(2026, 10, 14, 12, 0, tzinfo=timezone.utc)
+F = {"done": "20261001-agent-dispatch-901", "cancel": "20261001-agent-dispatch-902", "gone": "20261001-agent-dispatch-903",
+     "open": "20261001-agent-dispatch-904", "unread": "20261001-agent-dispatch-905"}
+T = {"done": "recDONEaaaaaaaaaa", "cancel": "recCANCELaaaaaaaa", "gone": "recGONEaaaaaaaaaa", "open": "recOPENaaaaaaaaaa",
+     "unread": "recUNREADaaaaaaa"}
+for k in F:
+    rec(k, notes="[x — agent] BLOCKER OPEN (TOOL uploader): why Fix: f [since 2026-10-05T09:00:00.000Z] [finding %s]" % F[k])
+def q(formula, max_records=None, minimal=False):
+    if formula.startswith("NOT("):
+        return [{"id": "ctl", "fields": {}}]
+    if formula.startswith("AND(NOT({Status}='Completed')"):
+        return [json.loads(json.dumps(t)) for t in TASKS.values()]
+    return []
+BOARD = {T["done"]: "Completed", T["cancel"]: "Cancelled", T["open"]: "Today"}
+def qr(table, formula, fields, max_records=None):
+    task = formula.split("'")[1]
+    if task == T["unread"]:
+        raise OSError("Airtable did not answer")
+    return [{"id": task, "fields": {AF["status"]: BOARD[task]}}] if task in BOARD else []
+m.query_tasks = q
+m.query_records = qr
+m.finding_states = lambda: {F[k]: "tasked" for k in F}
+m.finding_details = lambda: {F[k]: {"id": F[k], "task": T[k]} for k in F}
+m.merge_card.list_cards = lambda read=None: []
+dry = m.blockers_scan(sweep=False, now=NOW)
+print(json.dumps({w["task"]: w["clearsNow"] for w in dry["open"]}))`);
+    expect(r).toEqual({ done: true, cancel: true, gone: true, open: false, unread: false });
+  });
+
+  it('a wall citing a merged repeat reads its survivor: state, details and the merge named', () => {
+    const dir = mkdtempSync(resolve(tmpdir(), 'wall-dupe-'));
+    const env = { FINDINGS_FILE: resolve(dir, 'q.jsonl'), FINDINGS_OVERFLOW_FILE: resolve(dir, 'o.jsonl'), FINDINGS_AGENT: '' };
+    const fp = (...args) => execFileSync('python3', [resolve(ROOT, 'scripts/findings.py'), ...args],
+      { env: { ...process.env, ...env }, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim().split('\n')[0];
+    const survivor = fp('add', '--routine', 'agent-dispatch', '--title', 'uploader broken', '--where', 'scripts/up.py', '--touches-code');
+    const repeat = fp('add', '--routine', 'task-manager-board', '--title', 'Agent blocked: uploader', '--severity', 'high');
+    fp('dupe', repeat, '--of', survivor);
+    fp('close', survivor, '--outcome', 'pending', '--pr', '950', '--note', 'fix in PR 950');
+    const r = py(`
+import findings
+st = findings.current_state()
+print(json.dumps({"state": m.finding_states()[${JSON.stringify(repeat)}], "own": st[${JSON.stringify(repeat)}]["status"],
+                  "det": m.survivor_detail(st, ${JSON.stringify(repeat)}).get("pr"),
+                  "label": m.tool_wall_state({"kind": "TOOL", "finding": ${JSON.stringify(repeat)}}, m.finding_states()[${JSON.stringify(repeat)}],
+                                             m.survivor_detail(st, ${JSON.stringify(repeat)}), [], 1)}))`, env);
+    expect(r.own).toBe('duplicate');            // findings.py's own state for the repeat
+    expect(r.state).toBe('pending');            // the wall reads its survivor's
+    expect(r.det).toBe('950');
+    expect(r.label).toEqual(['pending', 'waiting on PR #950 to merge']);
+  });
+
+  it('the Estate row says a moved or dated fix is neither the daily fix nor stuck', () => {
+    const script = `
+import importlib.util, json
+spec = importlib.util.spec_from_file_location('e', ${JSON.stringify(ESTATE)})
+e = importlib.util.module_from_spec(spec); spec.loader.exec_module(e)
+s = {"openTasksRead": 1, "woken": [], "closedWhileBlocked": [], "sitesError": "", "findingsError": "", "stale": [], "open": [
+  {"task": "a", "name": "n", "kind": "TOOL", "subject": "x", "fix": "f", "days": 1, "findingStatus": "tasked", "toolState": "tasked", "tool": "moved to task recX"},
+  {"task": "b", "name": "n", "kind": "TOOL", "subject": "y", "fix": "f", "days": 1, "findingStatus": "deferred", "toolState": "deferred-dated", "tool": "deferred until 2027-01-04"},
+]}
+st, detail, payload = e.blockers_summary(s)
+print(json.dumps({"detail": detail, "noFixer": payload.get("noFixer"), "daily": payload.get("dailyFix")}))`;
+    const r = JSON.parse(execFileSync('python3', ['-c', script], { encoding: 'utf8' }));
+    expect(r.detail).toMatch(/1 task waiting on the task its fix was moved to/);
+    expect(r.detail).toMatch(/1 task waiting on a fix parked to a date; it comes back by itself/);
+    expect(r.detail).not.toMatch(/daily robot fix|no fixer can reach/);
+  });
+});
+
 describe('4b. the row never hides a gap', () => {
   it('unclaimed and open-PR walls are counted on their own, and a failed sweep read makes the row Failed', () => {
     const script = `

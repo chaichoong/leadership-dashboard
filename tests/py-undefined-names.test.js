@@ -63,6 +63,7 @@ const ESTATE_SCRIPTS = [
   'scripts/create-agent-task.py',
   'scripts/job-queue.py',
   'scripts/estate-status.py',
+  'scripts/findings.py',
   'scripts/loop-health.py',
   'scripts/drift-scan.py',
   'scripts/airtable-read.py',

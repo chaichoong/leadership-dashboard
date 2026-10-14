@@ -117,7 +117,8 @@ state = {
   "f": {"status": "deferred", "ts": iso(NOW - timedelta(days=40))},
 }
 print(json.dumps(es.defect_counts(state, NOW)))`);
-    expect(out).toEqual({ open: 2, filed7d: 3, fixed7d: 1 });
+    // 14 Oct 2026: the split and the repeats ride along; none of these carries touches_code.
+    expect(out).toEqual({ open: 2, filed7d: 3, fixed7d: 1, code: 0, notCode: 2, repeats: 0, toTasks7d: 0 });
   });
 
   it('defects: a finding closed as fixed against a commit counts, by the close op\'s time', () => {

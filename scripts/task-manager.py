@@ -683,6 +683,20 @@ def _load_dispatch():
     return _load_script("agent-dispatch.py", "od_dispatch")
 
 
+def finding_resolver(loader=None):
+    """A function fid -> (id, status) for TOOL walls, reading the findings queue at most once and
+    only when a wall cites a merged repeat. The decision is findings.py's survivor_status (one
+    helper, never a copy): a repeat is judged by its survivor (review of PR #784)."""
+    cache = {}
+
+    def resolve(fid):
+        if "state" not in cache:
+            fm = (loader or (lambda: _load_script("findings.py", "od_findings")))()
+            cache["fm"], cache["state"] = fm, fm.current_state()
+        return cache["fm"].survivor_status(cache["state"], fid)
+    return resolve
+
+
 def open_wall(notes):
     """The task's open wall (agent-dispatch.py task_blocker), or None. The import only happens
     for a task whose Notes carry a blocker line at all."""
@@ -1179,7 +1193,7 @@ def in_kevin_lane(f, d):
     return outcome in d.APPROVED and d.your_step_split(f.get("Agent Output"))[0] is not None
 
 
-def wall_decision(row, f, now, d, findings_error=""):
+def wall_decision(row, f, now, d, findings_error="", resolve=None):
     """What the clock does about one open wall. Pure: reads the blocker row and the task."""
     kind = row.get("kind")
     out = {"task": row.get("task"), "name": str(f.get("Task Name") or row.get("name") or "")[:90],
@@ -1206,6 +1220,16 @@ def wall_decision(row, f, now, d, findings_error=""):
     if kind == "TOOL":
         fid = row.get("finding") or b.get("finding") or ""
         status = row.get("findingStatus") or ""
+        if fid and status == "duplicate" and resolve and not findings_error:
+            # The wall cites a repeat that was merged into another finding. Its clock runs on the
+            # survivor: that is the one the fixer works and the one whose fix clears this wall.
+            try:
+                target, status = resolve(fid)
+            except Exception as exc:  # noqa: BLE001 — said, never read as "nothing to raise"
+                findings_error = "merged repeat %s could not be resolved: %s" % (fid, str(exc)[:120])
+                target = fid
+            if target and target != fid:
+                out["cited"], fid = fid, target
         out["finding"] = fid
         if not fid:
             out["why"] = ("no finding is named on the wall, so there is nothing to raise: the agent must "
@@ -1453,7 +1477,9 @@ def apply_escalate(dec, now, d):
         notes = _same_wall_live(dec, live, now, d)
         if notes is not None and dec["marker"] not in notes:
             line = _note_line(now, "%s: past its %d-day clock, so finding %s is raised to critical and the fixer "
-                                   "takes it first." % (dec["marker"], dec["clock"], fid))
+                                   "takes it first.%s" % (dec["marker"], dec["clock"], fid,
+                                                          (" The wall cites %s, a repeat merged into it."
+                                                           % dec["cited"]) if dec.get("cited") else ""))
             clock_patch(dec["task"], {TF["notes"]: (notes.rstrip() + "\n\n" + line).strip()[-90000:]})
             noted = True
     if not changed and not noted:
@@ -1525,10 +1551,11 @@ def apply_roy(dec, now, d, rr, budget=None):
     return {"done": "emailed Roy a reminder (%s)" % why}
 
 
-def run_clock(walls, recs, now, activity_ids, d, apply=True, rr_loader=None):
+def run_clock(walls, recs, now, activity_ids, d, apply=True, rr_loader=None, resolve=None):
     """Decide every wall and every Roy hand-off, then make the moves. Returns the clock result."""
     by_id = {r["id"]: r.get("fields") or {} for r in recs}
     findings_error = str(walls.get("findingsError") or "")
+    resolve = resolve or finding_resolver()
     decisions = []
     for row in walls.get("open") or []:
         f = by_id.get(row.get("task"))
@@ -1538,7 +1565,7 @@ def run_clock(walls, recs, now, activity_ids, d, apply=True, rr_loader=None):
                               "clock": CLOCK_DAYS.get(row.get("kind")), "past": False, "action": None,
                               "why": "not in the clock's task read (closed since the blocker read)"})
             continue
-        decisions.append(wall_decision(row, f, now, d, findings_error))
+        decisions.append(wall_decision(row, f, now, d, findings_error, resolve))
     walled = {r["id"] for r in recs if open_wall((r.get("fields") or {}).get("Notes"))}
     walled |= {row.get("task") for row in walls.get("open") or []}
     roy_held = [r for r in recs if roy_eligible(r, walled, now)]
