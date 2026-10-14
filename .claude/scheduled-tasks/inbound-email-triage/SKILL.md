@@ -170,6 +170,19 @@ the `list-unsubscribe` header (its presence = machine mail).
    Priority `Urgent`, and the task Description must say this is a tier-1
    matter to be PREPARED only. When unsure whether something is tier-1, treat
    it as tier-1.
+1b. **A recurring payment that starts, changes or ends is always a task (Kevin, 14 Oct 2026).**
+   Every report reads the Costs table, so a message, email or scanned post, that states a new
+   recurring payment, a new amount, a final payment, an end or expiry date, a renewal, a
+   cancellation or a direct-debit schedule (an insurance schedule or renewal, a finance or credit
+   agreement, a payment plan, a subscription cancelled or downgraded, a council or utility
+   instalment plan) is NEVER archived or filed without a task, even when it asks nothing and reads
+   as a notification. Label 12 and a task named `FIXED COST: <supplier> <starts|changes|ends>
+   <date>`; landlord insurance on one of Kevin's properties keeps the `COMPLIANCE:` name above, and
+   creditor mail keeps its creditor rules. Either way the Description names the payment, the
+   amount, the first and last payment dates the message gives, the reference, and ends with the
+   line `FIXED COST RECORD: update the Costs table through scripts/cost-record.py (End Date = the
+   last payment)`. A receipt for a payment already in the Costs table at the same amount ("your
+   payment was received", a monthly statement) is not this: archive it as before.
 2. **Label 13 — maintenance:** repair reports, contractor quotes, trade
    scheduling for a property job. Label 13 AND a task for Roy (Step 4b) —
    Kevin's standing approval covers the pass, so no per-task ask.
@@ -186,7 +199,8 @@ the `list-unsubscribe` header (its presence = machine mail).
    lane 12 AND `file --label-num 18` on top (always tier-1, always a task).
 5. **Archive — machine noise with no taxonomy home:** marketing, promotions,
    automated notifications, receipts and order confirmations with no ask
-   (transactions reach the books through the bank feeds, not the inbox).
+   (transactions reach the books through the bank feeds, not the inbox). Never
+   a recurring payment that starts, changes or ends: that is rule 1b.
    Machine-generated AND no ask = archive. NEVER archive an email written by
    a human being without creating a task for it — this is the hard guardrail.
 6. **Leave in inbox:** an email a human wrote that Kevin should read himself

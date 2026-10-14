@@ -7957,7 +7957,7 @@ def your_step_split(output):
 
 
 # Never inside a step: each would read as part of the approved card (tenancy-record.py review, 9 Oct 2026).
-STEP_FORBIDDEN = (YOUR_STEP_DIVIDER, YOUR_STEP_MARK, "RECORD CHANGE:")
+STEP_FORBIDDEN = (YOUR_STEP_DIVIDER, YOUR_STEP_MARK, "RECORD CHANGE:", "RECORD NEW COST:")
 
 
 def your_step_output(step, output):
@@ -8515,8 +8515,8 @@ def cmd_block(args):
     # Steps sit ON TOP of an approved card. A typed divider, YOUR STEP: or RECORD CHANGE: line in them would read as
     # part of what Kevin approved once the wall clears (tenancy-record.py review, 9 Oct 2026).
     if steps and any(mark in steps for mark in STEP_FORBIDDEN):
-        sys.exit("ERROR: --steps may not carry the Your step divider, 'YOUR STEP:' or 'RECORD CHANGE:': write only "
-                 "what Kevin does.")
+        sys.exit("ERROR: --steps may not carry the Your step divider, 'YOUR STEP:', 'RECORD CHANGE:' or "
+                 "'RECORD NEW COST:': write only what Kevin does.")
     if kind == "KEVIN" and t["outcome"] not in APPROVED:
         # A KEVIN wall on work Kevin has not approved has no door (review, 7 Oct 2026): the task
         # rests until the wall clears, the page offers "Done" only on approved work, and nothing
@@ -9839,6 +9839,90 @@ def ensure_weekly_review():
                                        "existing": bool(existing)})
     print(json.dumps({"agent": "creditor", "weeklyReview": week,
                       "created": not existing}))
+
+
+# ─── ENDED COSTS (Kevin, 14 Oct 2026) ──
+#
+# "Anything that specifies an end date has to be updated in the fixed costs to ensure that our costs remain
+# accurate at all times. Really important for reporting purposes." Every report counts a cost by its Payment Status
+# alone (isCostActive in js/shared.js), so a cost whose End Date, its last payment, has passed stays in Monthly
+# Costs until someone marks it. On 14 Oct 2026 seven counted costs were past their End Date, £426.55 a month, and
+# three of them were still being paid: they had renewed and the date was stale. A rule that dropped a cost on its
+# End Date would have cut £214.73 a month of real costs out of every report with nothing to show it. So the check
+# never changes a record: it raises ONE task for the agent that owns the fixed-cost base, which judges each cost
+# (ended: End Date and Inactive; renewed: the new End Date) on one card through scripts/cost-record.py. The list is
+# that door's own `ended_costs`, so the check and the door share one rule.
+ENDED_COSTS_TASK_NAME = "FIXED COST: costs past their end date still counted"
+ENDED_COSTS_STATE = os.path.join(STATE_DIR, "ended-costs.json")
+_COST_RECORD_MOD = None
+
+
+def _cost_record():
+    global _COST_RECORD_MOD
+    if _COST_RECORD_MOD is None:
+        import importlib.util
+        p = os.path.join(os.path.dirname(os.path.abspath(__file__)), "cost-record.py")
+        spec = importlib.util.spec_from_file_location("od_cost_record", p)
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        _COST_RECORD_MOD = mod
+    return _COST_RECORD_MOD
+
+
+def ensure_ended_costs(dry_run=False, fetch_costs=None, fetch_tasks=None, now=None, state_path=None):
+    """At most one task a day, and never while one is open, listing every counted cost past its End Date."""
+    cr = _cost_record()
+    fetch_costs = fetch_costs or (lambda: query_records(COSTS_TABLE, fields=[
+        cr.COST_NAME, cr.COST_EXPECTED, cr.COST_PAY_STATUS, cr.COST_INACTIVE, cr.COST_END, cr.COST_LAST_RECON]))
+    fetch_tasks = fetch_tasks or query_tasks
+    now = now or datetime.now(LONDON)
+    state_path = state_path or ENDED_COSTS_STATE
+    today = now.strftime("%Y-%m-%d")
+    rows = fetch_costs()
+    active = sum(1 for r in rows if cr.is_active(r.get("fields") or {}))
+    if not active:
+        # CONTROL: 91 costs were counted on 14 Oct 2026. Zero is a broken read or a renamed status.
+        raise RuntimeError(f"ended-costs control failed: {len(rows)} costs read and none counted as active; "
+                           "the read or the active rule is broken")
+    ended = cr.ended_costs(rows, now.date())
+    result = {"day": today, "activeCosts": active, "ended": ended, "created": False}
+    if not ended or dry_run:
+        return result
+    if load_score_state(state_path).get("day") == today:
+        return dict(result, reason="already raised today")
+    if fetch_tasks(f"AND({{Task Name}}='{ENDED_COSTS_TASK_NAME}', {{Status}}!='Completed', "
+                   "{Status}!='Cancelled')", max_records=1, minimal=True):
+        return dict(result, reason="a task is already open")
+    lines = []
+    for c in ended:
+        paid = (f"last payment {c['lastPayment']}, AFTER the End Date: renewed?" if c["paidAfterEnd"]
+                else f"last payment {c['lastPayment'] or 'none recorded'}: ended?")
+        lines.append(f"- {c['cost']}: {c['name']}, £{float(c['expectedCost'] or 0):,.2f}, {c['paymentStatus']}, "
+                     f"End Date {c['endDate']}, {paid}")
+    total = sum(float(c["expectedCost"] or 0) for c in ended)
+    desc = (f"FIXED COSTS (raised automatically, at most once a day; Kevin's rule, 14 Oct 2026). Every report still "
+            f"counts these {len(ended)} costs, £{total:,.2f} a month, but each End Date (its last payment) passed more "
+            f"than {cr.ENDED_GRACE_DAYS} days ago. Judge each one from the bank, the task history and the mail, never "
+            "by the date alone: a payment after the End Date usually means it renewed.\n"
+            "- Ended: 'RECORD CHANGE: <cost> Payment Status = Inactive' (and the End Date line first if the date is "
+            "wrong).\n"
+            "- Renewed or extended: 'RECORD CHANGE: <cost> End Date = <the new last payment>', and an 'Expected Cost' "
+            "line if the amount changed. A renewal that is really a new policy or agreement is a RECORD NEW COST line "
+            "plus the old one retired.\n"
+            "- Still running with no end (a rolling contract, a cost Kevin keeps): 'RECORD CHANGE: <cost> End Date = "
+            "none'.\n"
+            "ONE card for Kevin with every line, each with its evidence. After his approval, carry each line out with "
+            "scripts/cost-record.py. Run `python3 scripts/cost-record.py ended` for the live list first: one may have "
+            "been dealt with since this was raised.\n" + "\n".join(lines))
+    raise_engine_task(ENDED_COSTS_TASK_NAME, CREDITOR_REC_ID, "30 min", desc[:95000])
+    save_state(state_path, {"day": today, "raisedAt": now_iso(), "ended": len(ended)})
+    result["created"] = True
+    print(json.dumps({"agent": "creditor", "endedCosts": len(ended), "created": True}))
+    return result
+
+
+def cmd_ended_costs(args):
+    print(json.dumps(ensure_ended_costs(dry_run=args.dry_run), indent=2))
 
 
 # ─── THE CREDITOR RECORD BOOK (revamp, Kevin-approved chain, 1 Sep 2026) ──
@@ -11253,6 +11337,7 @@ SCORE_STEPS = (
     ("creditor", creditor_score),
     ("weekly-review", ensure_weekly_review),
     ("monthly-review", ensure_monthly_review),
+    ("ended-costs", ensure_ended_costs),
     ("chase", ensure_chase_tasks),
     ("property", property_score),
     ("renewals", ensure_renewal_tasks),
@@ -11432,6 +11517,10 @@ def main():
     h.add_argument("--to", required=True,
                    help="team email; one of " + ", ".join(sorted(HUMANS)))
     h.add_argument("--reason", default="")
+
+    ec = sub.add_parser("ended-costs",
+                        help="one task listing the counted costs whose End Date has passed")
+    ec.add_argument("--dry-run", action="store_true", help="list the ended costs, create nothing")
 
     rf = sub.add_parser("roy-followups",
                         help="one weekly follow-up task for Roy's repairs unmoved for 7 days")
@@ -11677,6 +11766,7 @@ def main():
     # discarding the result here would make both checks ornamental.
     return {"queue": cmd_queue, "route": cmd_route, "escalate": cmd_escalate, "decided": cmd_decided,
             "handover": cmd_handover, "submit": cmd_submit_group, "roy-followups": cmd_roy_followups,
+            "ended-costs": cmd_ended_costs,
             "annotate": cmd_annotate, "due": cmd_due, "intent": cmd_intent,
             "complete": cmd_complete, "verify": cmd_verify,
             "score": cmd_score, "reconcile": cmd_reconcile,
