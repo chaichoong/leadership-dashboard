@@ -221,36 +221,66 @@ def _team_agent_names():
     return [n for n in names if n]
 
 
+_AGENT_MAP_WARNED = []
+
+
 def agent_file_names(source=None):
     """{normalised Team Members name: agent file name}, read from agent-dispatch.py's own
-    AGENTS and ROLE_AGENTS tables (parsed, never run). {} when the source cannot be read."""
+    AGENTS and ROLE_AGENTS tables (parsed, never run). {} when the source cannot be read.
+
+    NEVER RAISES (round 3 review of PR #784): `add --agent` and `block --kind TOOL` both pass
+    through here, so a table this cannot read means "no mapping" (said once on stderr), never a
+    failed filing. A plain or annotated assignment (`AGENTS: dict = {...}`) both count, and an
+    entry whose name or agent is not text is skipped."""
     import ast
     try:
         with open(source or DISPATCH_SOURCE) as fh:
             tree = ast.parse(fh.read())
-    except (OSError, SyntaxError, ValueError):
+        out = {}
+        for node in tree.body:
+            if isinstance(node, ast.Assign):
+                targets, value = node.targets, node.value
+            elif isinstance(node, ast.AnnAssign):
+                targets, value = [node.target], node.value
+            else:
+                continue
+            if not (isinstance(value, ast.Dict)
+                    and any(isinstance(t, ast.Name) and t.id in ("AGENTS", "ROLE_AGENTS") for t in targets)):
+                continue
+            try:
+                table = ast.literal_eval(value)
+            except Exception:  # noqa: BLE001 — one unreadable table is skipped, not fatal
+                continue
+            for v in (table.values() if isinstance(table, dict) else []):
+                if isinstance(v, dict) and isinstance(v.get("name"), str) and isinstance(v.get("agent"), str) \
+                        and v["name"].strip() and v["agent"].strip():
+                    out[norm_agent(v["name"])] = v["agent"].strip()
+        return out
+    except Exception as e:  # noqa: BLE001 — said once, and the filing goes on with no mapping
+        if not _AGENT_MAP_WARNED:
+            _AGENT_MAP_WARNED.append(1)
+            print("WARNING: the agent name table in %s could not be read (%s); agent names are "
+                  "used as given." % (source or DISPATCH_SOURCE, str(e)[:120]), file=sys.stderr)
         return {}
-    out = {}
-    for node in tree.body:
-        if not (isinstance(node, ast.Assign) and isinstance(node.value, ast.Dict)
-                and any(isinstance(t, ast.Name) and t.id in ("AGENTS", "ROLE_AGENTS") for t in node.targets)):
-            continue
-        try:
-            table = ast.literal_eval(node.value)
-        except ValueError:
-            continue
-        for v in table.values():
-            if isinstance(v, dict) and v.get("name") and v.get("agent"):
-                out[norm_agent(v["name"])] = v["agent"]
-    return out
 
 
 def _write_agents_cache(data):
-    tmp = AGENTS_CACHE + ".tmp"
-    os.makedirs(os.path.dirname(AGENTS_CACHE), exist_ok=True)
-    with open(tmp, "w") as fh:
-        json.dump(data, fh)
-    os.replace(tmp, AGENTS_CACHE)
+    """Atomic, and under a unique temp name: two filings refreshing at once never share a
+    half-written temp file (round 3 review of PR #784)."""
+    import tempfile
+    d = os.path.dirname(AGENTS_CACHE) or "."
+    os.makedirs(d, exist_ok=True)
+    fd, tmp = tempfile.mkstemp(prefix=".findings-agents-", suffix=".tmp", dir=d)
+    try:
+        with os.fdopen(fd, "w") as fh:
+            json.dump(data, fh)
+        os.replace(tmp, AGENTS_CACHE)
+    except BaseException:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+        raise
 
 
 def known_agents(now=None):
@@ -753,7 +783,11 @@ def file_finding(state, f, cap=True):
 
 
 def cmd_add(a):
-    agent, note = resolve_agent(a.agent)
+    try:
+        agent, note = resolve_agent(a.agent)
+    except Exception as e:  # noqa: BLE001 — a name that cannot be checked never stops a filing
+        agent, note = "", ("the agent name %r could not be checked (%s), so this is counted in the "
+                           "routine's shared pool." % (a.agent, str(e)[:120]))
     if note:
         print("NOTE: " + note, file=sys.stderr)
     f = {"routine": a.routine, "title": a.title, "where": a.where, "detail": a.detail,

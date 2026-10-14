@@ -823,16 +823,48 @@ print(json.dumps([
     expect(r[2]).toEqual(['deferred', 'the fixer deferred it, so nothing will clear this wall']);   // undated: unchanged
   });
 
-  it('a wall on a tasked finding wakes when that task is Completed, and only then', () => {
+  it('a wall on a tasked finding wakes when its task is Completed, Cancelled or gone, and stands otherwise', () => {
     const r = py(`
 b = {"kind": "TOOL", "subject": "x", "why": "w", "finding": "F1", "since": ""}
 fs = {"F1": "tasked"}
-print(json.dumps([m.blocker_clear_reason(b, {}, fs, tasked_done=lambda f: True),
-                  m.blocker_clear_reason(b, {}, fs, tasked_done=lambda f: False),
-                  m.blocker_clear_reason(b, {}, fs, tasked_done=lambda f: None),
-                  m.blocker_clear_reason(b, {}, fs)]))`);
+print(json.dumps([m.blocker_clear_reason(b, {}, fs, tasked_status=lambda f: s)
+                  for s in ("Completed", "Cancelled", "missing", "Today", None)] + [m.blocker_clear_reason(b, {}, fs)]))`);
     expect(r[0]).toMatch(/the task finding F1 was moved to is Completed/);
-    expect(r.slice(1)).toEqual(['', '', '']);   // not done, unreadable, or not asked: the wall stands
+    // Round 3: a dropped task must never leave the wall shut on a door nobody holds.
+    expect(r[1]).toMatch(/^the task carrying this fix was dropped \(finding F1: task cancelled\); try again or block again$/);
+    expect(r[2]).toMatch(/^the task carrying this fix was dropped \(finding F1: task no longer exists\); try again or block again$/);
+    expect(r.slice(3)).toEqual(['', '', '']);   // still open, unreadable, or not asked: the wall stands
+  });
+
+  it('the sweep reads the task off the board: Completed, Cancelled and missing wake; open and unreadable do not', () => {
+    const r = py(`
+NOW = datetime(2026, 10, 14, 12, 0, tzinfo=timezone.utc)
+F = {"done": "20261001-agent-dispatch-901", "cancel": "20261001-agent-dispatch-902", "gone": "20261001-agent-dispatch-903",
+     "open": "20261001-agent-dispatch-904", "unread": "20261001-agent-dispatch-905"}
+T = {"done": "recDONEaaaaaaaaaa", "cancel": "recCANCELaaaaaaaa", "gone": "recGONEaaaaaaaaaa", "open": "recOPENaaaaaaaaaa",
+     "unread": "recUNREADaaaaaaa"}
+for k in F:
+    rec(k, notes="[x — agent] BLOCKER OPEN (TOOL uploader): why Fix: f [since 2026-10-05T09:00:00.000Z] [finding %s]" % F[k])
+def q(formula, max_records=None, minimal=False):
+    if formula.startswith("NOT("):
+        return [{"id": "ctl", "fields": {}}]
+    if formula.startswith("AND(NOT({Status}='Completed')"):
+        return [json.loads(json.dumps(t)) for t in TASKS.values()]
+    return []
+BOARD = {T["done"]: "Completed", T["cancel"]: "Cancelled", T["open"]: "Today"}
+def qr(table, formula, fields, max_records=None):
+    task = formula.split("'")[1]
+    if task == T["unread"]:
+        raise OSError("Airtable did not answer")
+    return [{"id": task, "fields": {AF["status"]: BOARD[task]}}] if task in BOARD else []
+m.query_tasks = q
+m.query_records = qr
+m.finding_states = lambda: {F[k]: "tasked" for k in F}
+m.finding_details = lambda: {F[k]: {"id": F[k], "task": T[k]} for k in F}
+m.merge_card.list_cards = lambda read=None: []
+dry = m.blockers_scan(sweep=False, now=NOW)
+print(json.dumps({w["task"]: w["clearsNow"] for w in dry["open"]}))`);
+    expect(r).toEqual({ done: true, cancel: true, gone: true, open: false, unread: false });
   });
 
   it('a wall citing a merged repeat reads its survivor: state, details and the merge named', () => {

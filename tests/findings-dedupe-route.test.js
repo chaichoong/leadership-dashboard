@@ -265,6 +265,51 @@ describe('review of PR #784: chains, explicit retags and named agents', () => {
     expect(again.err).toMatch(/REFUSED: agent-dispatch \/ task-manager already has 15/);
   });
 
+  it('the agent name table: an annotated table counts, a bad entry is skipped, a broken source is no mapping (round 3)', () => {
+    const src = join(BOX, 'dispatch-src.py');
+    writeFileSync(src, [
+      'AGENTS: dict = {"recA": {"name": "AI Thing Doer", "agent": "thing-doer"},',
+      '                "recB": {"name": 42, "agent": "bad-name"}, "recC": {"name": "AI No Agent", "agent": None}}',
+      'ROLE_AGENTS = {"recD": {"name": "AI Other", "agent": "other"}, "recE": "not a dict"}',
+      'OTHER = {"recF": {"name": "AI Ignored", "agent": "ignored"}}',
+    ].join('\n'));
+    const bad = join(BOX, 'dispatch-bad.py');
+    writeFileSync(bad, 'AGENTS = {"recA": {"name": "AI X", "agent": "x"}\nthis is not python (');
+    const out = py(`
+good = fm.agent_file_names(${JSON.stringify(src)})
+broken = fm.agent_file_names(${JSON.stringify(bad)})
+missing = fm.agent_file_names(${JSON.stringify(join(BOX, 'no-such-file.py'))})
+print(json.dumps({"good": good, "broken": broken, "missing": missing}))`);
+    const r = JSON.parse(out.out);
+    expect(r.good).toEqual({ thingdoer: 'thing-doer', other: 'other' });
+    expect(r.broken).toEqual({});
+    expect(r.missing).toEqual({});
+    expect(out.err.match(/could not be read/g)).toHaveLength(1);         // said once, not per call
+  });
+
+  it('a name table or name check that breaks never stops a filing (round 3)', () => {
+    const out = py(`
+fm.DISPATCH_SOURCE = ${JSON.stringify(join(BOX, 'no-such-file.py'))}
+rc1 = fm.main(["add", "--routine", "agent-dispatch", "--title", "one", "--where", "a.js", "--agent", "AI Cash Flow Voids"])
+def boom(name): raise RuntimeError("the list exploded")
+fm.resolve_agent = boom
+rc2 = fm.main(["add", "--routine", "agent-dispatch", "--title", "two", "--where", "b.js", "--agent", "cash-flow-voids"])
+print(json.dumps({"rc": [rc1, rc2]}))`);
+    expect(JSON.parse(out.out.trim().split('\n').pop()).rc).toEqual([0, 0]);
+    expect(out.err).toMatch(/could not be checked \(the list exploded\)/);
+    expect(count()).toBe(2);
+  });
+
+  it('the agent-list cache is written through a unique temp file, never a fixed one (round 3)', () => {
+    const cache = join(BOX, `agents-unique-${n}.json`);
+    mkdirSync(`${cache}.tmp`);                    // the fixed name the old writer used, taken
+    const out = py(`
+fm.AGENTS_CACHE = ${JSON.stringify(cache)}
+fm._write_agents_cache({"fetchedAt": "2026-10-14T20:00:00Z", "names": ["AI Cash Flow Voids"]})
+print(json.dumps(json.load(open(fm.AGENTS_CACHE))))`);
+    expect(JSON.parse(out.out).names).toEqual(['AI Cash Flow Voids']);
+  });
+
   it('a failed agent-list refresh is not retried for 10 minutes (round 2 review)', () => {
     writeFileSync(AGENTS_CACHE + '.stale', JSON.stringify({ fetchedAt: '2026-10-01T00:00:00Z', names: ['AI Cash Flow Voids'] }));
     const out = py(`

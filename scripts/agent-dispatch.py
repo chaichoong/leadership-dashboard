@@ -7750,12 +7750,13 @@ def profile_door(host, profile, sites):
     return ""
 
 
-def blocker_clear_reason(b, sites, fstates, walk=None, tasked_done=None):
+def blocker_clear_reason(b, sites, fstates, walk=None, tasked_status=None):
     """Why this wall is gone, or '' while it stands. SIGN-IN clears in
     signin_done (the sign-in IS the event); KEVIN clears only on the agent's
-    evidence (`unblock`), never on a guess. TASKED_DONE(fid) answers whether the
-    task a finding was moved to (findings.py close --outcome tasked) is Completed:
-    True, False, or None when it could not be read (never read as done)."""
+    evidence (`unblock`), never on a guess. TASKED_STATUS(fid) is the Status of the
+    task a finding was moved to (findings.py close --outcome tasked): its Status,
+    "missing" when no such task exists, or None when it could not be read (never
+    read as done or dropped)."""
     if b["kind"] == "SITE":
         host = blocker_host(b["subject"])
         entry = site_reachable(host, sites) if host else ""
@@ -7786,10 +7787,16 @@ def blocker_clear_reason(b, sites, fstates, walk=None, tasked_done=None):
             return (f"the fixer found nothing broken (finding {b['finding']}); try again, "
                     "and if it fails the same way block it again with what you saw")
         # A finding no code fix could close was moved to a task (#784). Before this the wall
-        # waited on a "fixed" that would never come; it now wakes when that task is done.
-        if status == "tasked" and tasked_done and tasked_done(b["finding"]) is True:
-            return (f"the task finding {b['finding']} was moved to is Completed; try again, "
-                    "and if it fails the same way block it again with what you saw")
+        # waited on a "fixed" that would never come; it now wakes when that task is done, and
+        # also when the task is dropped, so the wall never stays shut on a door nobody holds.
+        if status == "tasked" and tasked_status:
+            ts = tasked_status(b["finding"])
+            if ts == "Completed":
+                return (f"the task finding {b['finding']} was moved to is Completed; try again, "
+                        "and if it fails the same way block it again with what you saw")
+            if ts in ("Cancelled", "missing"):
+                return (f"the task carrying this fix was dropped (finding {b['finding']}: task "
+                        f"{'cancelled' if ts == 'Cancelled' else 'no longer exists'}); try again or block again")
     return ""
 
 
@@ -8782,8 +8789,9 @@ def blockers_scan(sweep=False, now=None):
                 lazy[key] = (None, str(exc)[:200])
         return lazy[key]
 
-    def tasked_done(fid):
-        """Is the task this finding was moved to Completed? None when unknown (#784)."""
+    def tasked_status(fid):
+        """The Status of the task this finding was moved to, "missing" when no such task
+        exists, None when it cannot be read (#784)."""
         det, _ = once("details", finding_details)
         task = survivor_detail(det, fid).get("task") or ""
         if not re.match(r"^rec[A-Za-z0-9]{14}$", task):
@@ -8791,7 +8799,7 @@ def blockers_scan(sweep=False, now=None):
         rows, err = once("task:" + task, lambda: query_records(TASKS, f"RECORD_ID()='{task}'", [AF["status"]], 1))
         if err or rows is None:
             return None
-        return bool(rows) and sel((rows[0].get("fields") or {}).get(AF["status"])) == "Completed"
+        return sel((rows[0].get("fields") or {}).get(AF["status"])) if rows else "missing"
 
     open_walls, woken, stale, surfaced, done_refused, plan_repairs, sent_back = [], [], [], [], [], [], []
     settling = []   # his done or can't lines still inside the page's Undo window
@@ -8801,7 +8809,7 @@ def blockers_scan(sweep=False, now=None):
         if not b:
             continue
         reason = (blocker_clear_reason(b, sites, fstates, walk=session_walk if sweep else None,
-                                       tasked_done=tasked_done)
+                                       tasked_status=tasked_status)
                   if not (sites_error and b["kind"] == "SITE") else "")
         if not reason and b["kind"] in ("SIGN-IN", "SITE") and not sites_error:
             events, _ = once("events", lambda: signin_hold.load_events(BROWSER_LEDGER))
