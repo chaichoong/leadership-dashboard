@@ -50,6 +50,7 @@
             state.agents = { phase: 'error', error: 'it did not finish loading within a minute' };
             setStatus('Your approvals and the CEO brief are taking too long to load. Press Refresh in the bar above, or open the AI Agents page.', true);
             if (typeof markTabSynced === 'function') markTabSynced(TAB);
+            maybeWealth();
         }, READY_TIMEOUT_MS);
     }
     // Home opened again, or left open. The copy is NEVER reloaded here: a reload would lose a note
@@ -101,6 +102,7 @@
                 : { phase: 'error', error: String(d.error || 'unknown') };
             setStatus(d.ok ? '' : `Your approvals and the CEO brief could not be read (${state.agents.error}). Press Refresh in the bar above, or open the AI Agents page.`, !d.ok);
             queueBand();
+            maybeWealth();   // the frame has its real height now, so "near the screen" means something
             if (typeof markTabSynced === 'function') markTabSynced(TAB);
         }
     });
@@ -114,7 +116,43 @@
         if (!text.trim() || /Loading wealth data/.test(text)) return 'waiting';
         return 'loaded';
     }
+    // Foldable sections (Kevin, 14 Oct 2026: "collapse each section down should I need it"). The
+    // approvals, sign-ins and brief fold inside their own page; the dashboard and Wealth fold here.
+    // One key for the whole page, remembered in this browser.
+    const FOLD_KEY = 'od_home_folded';
+    function foldState() {
+        try { return JSON.parse(localStorage.getItem(FOLD_KEY) || '{}') || {}; }
+        catch (err) { console.warn('[home] fold state unreadable', err); return {}; }
+    }
+    function folded(key) { return document.body.classList.contains('home-folded-' + key); }
+    function setFold(key, fold, save) {
+        document.body.classList.toggle('home-folded-' + key, fold);
+        const b = document.querySelector(`[data-home-fold="${key}"]`);
+        if (b) b.setAttribute('aria-expanded', fold ? 'false' : 'true');
+        if (save) {
+            try { const st = foldState(); st[key] = fold; localStorage.setItem(FOLD_KEY, JSON.stringify(st)); }
+            catch (err) { console.warn('[home] fold state not saved', err); }
+        }
+        if (key === 'wealth' && !fold && save && homeOpen()) loadWealth();   // opened by its header click, so it is in view
+        queueBand();
+    }
+
+    // Wealth is drawn the first time its heading comes near the screen, never on load. Until the
+    // approvals frame has its real height its heading sits near the top, so it waits for the frame
+    // (review, 14 Oct 2026: with the dashboard folded, Wealth drew at load).
+    function wealthNear() {
+        const divider = document.getElementById('homeWealthDivider');
+        if (!divider) return false;
+        const r = divider.getBoundingClientRect();
+        return r.bottom > -300 && r.top < window.innerHeight + 300;
+    }
+    function maybeWealth() {
+        if (!homeOpen() || state.agents.phase === 'idle' || state.agents.phase === 'loading') return;
+        if (wealthNear()) loadWealth();
+    }
+
     async function loadWealth() {
+        if (folded('wealth')) return;   // a folded Wealth is never drawn
         if (state.wealth === 'loading' || state.wealth === 'loaded') return;
         if (typeof renderWealthTab !== 'function') { state.wealth = 'failed'; return; }
         state.wealth = 'loading';
@@ -161,6 +199,13 @@
             const nav = e.target.closest('[data-home-tab]');
             if (nav && typeof switchTab === 'function') switchTab(nav.getAttribute('data-home-tab'));
         });
+        // The Wealth header sits outside the Home panel (it heads the Wealth panel), so listen on the page.
+        document.addEventListener('click', (e) => {
+            const b = e.target.closest('[data-home-fold]');
+            if (b) { const key = b.getAttribute('data-home-fold'); setFold(key, !folded(key), true); }
+        });
+        const st = foldState();
+        ['dashboard', 'wealth'].forEach(key => setFold(key, !!st[key], false));
         const sync = () => {
             const open = panel.classList.contains('active');
             document.body.classList.toggle('home-mode', open);
@@ -178,11 +223,10 @@
         if (typeof ResizeObserver === 'function') new ResizeObserver(queueBand).observe(document.body);
         document.addEventListener('visibilitychange', () => keepFresh());   // never pass the event in as "force"
         setInterval(() => { if (Date.now() - state.rereadAt > KEEP_FRESH_MS) keepFresh(true); }, 30 * 1000);
-        // Wealth is drawn the first time its heading comes near the screen, never on load.
         const divider = document.getElementById('homeWealthDivider');
         if (divider && typeof IntersectionObserver === 'function') {
             new IntersectionObserver((entries) => {
-                if (entries.some(en => en.isIntersecting) && document.body.classList.contains('home-mode')) loadWealth();
+                if (entries.some(en => en.isIntersecting)) maybeWealth();
             }, { rootMargin: '300px 0px' }).observe(divider);
         }
     }

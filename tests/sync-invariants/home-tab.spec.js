@@ -134,6 +134,103 @@ test.describe('Home: one scroll of the real pages', () => {
     expect(inView.overlayBottom).toBeLessThanOrEqual(inView.vh + 2);
   });
 
+  test('each section folds from its header, and stays folded after a reload', async ({ page }) => {
+    await open(page, 'home');
+    await waitForHomeFrame(page);
+    const f = homeFrame(page);
+    const frameH = () => page.evaluate(() => Math.round(document.getElementById('homeAgentsFrame').getBoundingClientRect().height));
+    const tall = await frameH();
+    // Inside the approvals frame: sign-ins, approvals and the brief fold by their own headers.
+    for (const zone of ['zoneSignins', 'zoneApprovals', 'zoneCeoBrief']) {
+      await f.locator(`#${zone} > .zone-header.home-fold`).click();
+      await expect(f.locator(`#${zone}`)).toHaveClass(/home-collapsed/);
+      await expect(f.locator(`#${zone} > .zone-header`)).toHaveAttribute('aria-expanded', 'false');
+    }
+    await expect(f.locator('#approvalsBody')).toBeHidden();
+    await page.waitForFunction(t => document.getElementById('homeAgentsFrame').getBoundingClientRect().height < t, tall, { timeout: 5000 });
+    // On Home itself: the dashboard and Wealth fold by theirs.
+    await page.locator('[data-home-fold="dashboard"]').click();
+    await page.locator('[data-home-fold="wealth"]').click();
+    expect(await shown(page, 'tab-overview')).toBe(false);
+    expect(await shown(page, 'tab-wealth')).toBe(false);
+    // Reload: everything comes back folded.
+    await page.reload();
+    await waitForHomeFrame(page);
+    for (const zone of ['zoneSignins', 'zoneApprovals', 'zoneCeoBrief']) await expect(homeFrame(page).locator(`#${zone}`)).toHaveClass(/home-collapsed/);
+    expect(await shown(page, 'tab-overview')).toBe(false);
+    expect(await shown(page, 'tab-wealth')).toBe(false);
+    // And unfolds again.
+    await homeFrame(page).locator('#zoneApprovals > .zone-header.home-fold').click();
+    await expect(homeFrame(page).locator('#approvalsBody')).toBeVisible();
+    await page.locator('[data-home-fold="dashboard"]').click();
+    expect(await shown(page, 'tab-overview')).toBe(true);
+  });
+
+  test('a folded Wealth is never drawn, even scrolled to, and is drawn when unfolded', async ({ page }) => {
+    await page.addInitScript(() => { try { localStorage.setItem('od_home_folded', JSON.stringify({ wealth: true })); } catch (e) {} });
+    await open(page, 'home');
+    await waitForHomeFrame(page);
+    await page.locator('#homeWealthDivider').scrollIntoViewIfNeeded();
+    await page.waitForTimeout(1500);
+    expect(await page.evaluate(() => window.__wealthDrawnAt), 'drawn while folded').toBe(0);
+    await page.locator('[data-home-fold="wealth"]').click();
+    await page.waitForFunction(() => window.__wealthDrawnAt > 0, { timeout: 10000 });
+  });
+
+  // Review, 14 Oct 2026: with the dashboard folded, Wealth's heading sat near the top while the frame
+  // was still at its first 600px, so Wealth drew at load.
+  test('with the dashboard folded, Wealth still waits until it is scrolled to', async ({ page }) => {
+    await page.addInitScript(() => {
+      try { localStorage.setItem('od_home_folded', JSON.stringify({ dashboard: true })); } catch (e) {}
+      // A queue of cards a few screens tall, as Kevin's is, so Wealth's heading is far below once the frame is in.
+      if (window !== window.top) document.addEventListener('DOMContentLoaded', () => {
+        const tall = document.createElement('div'); tall.style.height = '3000px';
+        document.getElementById('zoneApprovals').appendChild(tall);
+      });
+    });
+    await open(page, 'home');
+    await waitForHomeFrame(page);
+    await page.waitForTimeout(1500);
+    expect(await page.evaluate(() => window.__wealthDrawnAt), 'drawn at load').toBe(0);
+    await page.locator('#homeWealthDivider').scrollIntoViewIfNeeded();
+    await page.waitForFunction(() => window.__wealthDrawnAt > 0, { timeout: 10000 });
+  });
+
+  test('a section header folds with Enter and Space, and its live status line sits outside the button', async ({ page }) => {
+    await open(page, 'home');
+    await waitForHomeFrame(page);
+    const f = homeFrame(page);
+    const head = f.locator('#zoneApprovals > .zone-header.home-fold');
+    await head.focus();
+    await page.keyboard.press('Enter');
+    await expect(f.locator('#zoneApprovals')).toHaveClass(/home-collapsed/);
+    await page.keyboard.press('Space');
+    await expect(f.locator('#zoneApprovals')).not.toHaveClass(/home-collapsed/);
+    // A live region inside a button is read out as part of the button's name.
+    await expect(f.locator('#zoneSignins > .zone-header [role="status"]')).toHaveCount(0);
+    await expect(f.locator('#zoneSignins > #signinsLive')).toHaveCount(1);
+  });
+
+  test('the CEO brief shows one title on Home, the one it folds by', async ({ page }) => {
+    await open(page, 'home');
+    await waitForHomeFrame(page);
+    const f = homeFrame(page);
+    await expect(f.locator('#zoneCeoBrief > .zone-header .zone-title')).toHaveText('CEO brief');
+    await expect(f.locator('#ceoBriefBody h2')).toHaveCount(1);
+    await expect(f.locator('#ceoBriefBody h2')).toBeHidden();
+  });
+
+  test('folding the approvals clears ticked cards, so hidden ticks never hold off a new version', async ({ page }) => {
+    await open(page, 'home');
+    await waitForHomeFrame(page);
+    const fr = page.frame({ url: /home=1/ });
+    // A ticked card makes the copy "busy", which holds off the reload a new version needs.
+    expect(await fr.evaluate(() => { _apvSelected.add('recSpecTicked'); return apvBusy(); })).toBe(true);
+    await homeFrame(page).locator('#zoneApprovals > .zone-header.home-fold').click();
+    await expect(homeFrame(page).locator('#zoneApprovals')).toHaveClass(/home-collapsed/);
+    expect(await fr.evaluate(() => ({ ticked: _apvSelected.size, busy: apvBusy() }))).toEqual({ ticked: 0, busy: false });
+  });
+
   test('Wealth is not drawn until it is scrolled into view', async ({ page }) => {
     await open(page, 'home');
     await waitForHomeFrame(page);

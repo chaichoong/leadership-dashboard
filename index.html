@@ -11,7 +11,7 @@
     <link rel="stylesheet" href="css/sync-bar.css?v=3">
     <link rel="stylesheet" href="css/quick-task.css?v=2">
     <link rel="stylesheet" href="css/styles.css?v=23">
-    <link rel="stylesheet" href="css/home.css?v=3"><!-- Home tab (29 Sep 2026) -->
+    <link rel="stylesheet" href="css/home.css?v=4"><!-- Home tab (29 Sep 2026) -->
 </head>
 <body>
     <!-- Auth Screen -->
@@ -218,7 +218,7 @@
             </nav>
             <div id="homeAgentsStatus" class="home-status" role="status" aria-live="polite">Loading your approvals and the CEO brief…</div>
             <iframe id="homeAgentsFrame" class="home-agents-frame" src="" data-src="os/agents/index.html?home=1" title="Your approvals and the CEO brief" scrolling="no"></iframe>
-            <h2 class="home-dash-divider">Your Leadership Dashboard</h2>
+            <h2 class="home-dash-divider"><button type="button" class="home-fold-btn" data-home-fold="dashboard" aria-expanded="true"><span class="home-chev" aria-hidden="true">▾</span>Your Leadership Dashboard</button></h2>
         </div>
 
         <!-- Tab 1: Leadership Dashboard -->
@@ -675,7 +675,7 @@
         <div class="tab-panel" id="tab-money"></div>
 
         <!-- Tab: Wealth (isolated — net worth + income buckets) -->
-        <h2 class="home-dash-divider" id="homeWealthDivider">Your wealth</h2><!-- Home tab: shown only in body.home-mode (css/home.css) -->
+        <h2 class="home-dash-divider" id="homeWealthDivider"><button type="button" class="home-fold-btn" data-home-fold="wealth" aria-expanded="true"><span class="home-chev" aria-hidden="true">▾</span>Your wealth</button></h2><!-- Home tab: shown only in body.home-mode (css/home.css) -->
         <div class="tab-panel" id="tab-wealth"></div>
 
         <!-- Tab 4: CFVs -->
@@ -977,6 +977,6 @@
     <script defer src="js/skills.js?v=12"></script>
     <script defer src="js/ai-assistant.js?v=19"></script>
     <script defer src="js/quick-task.js?v=4"></script>
-    <script defer src="js/home.js?v=3"></script><!-- Home tab (29 Sep 2026; rebuilt 14 Oct 2026) -->
+    <script defer src="js/home.js?v=4"></script><!-- Home tab (29 Sep 2026; rebuilt 14 Oct 2026) -->
 </body>
 </html>
