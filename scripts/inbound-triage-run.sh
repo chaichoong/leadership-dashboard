@@ -27,22 +27,27 @@ set -u
 # draft emails. Guarded by tests/agent-tools-parity.test.js.
 . "$(dirname "$0")/agent-tools.sh"
 
-CLAUDE="/Users/kevinbrittain/.local/bin/claude"
-REPO="/Users/kevinbrittain/Projects/leadership-dashboard"
-LOG_DIR="/Users/kevinbrittain/knowledge-os/logs/inbound-triage"
+# The INBOUND_TRIAGE_RUNNER_* names exist for ONE test only
+# (tests/inbox-left-mail.test.js runs this script against a stub repo to prove
+# what runs before and after the agent). Nothing in production sets them, so
+# every path below is the real one on every scheduled run.
+CLAUDE="${INBOUND_TRIAGE_RUNNER_CLAUDE:-/Users/kevinbrittain/.local/bin/claude}"
+REPO="${INBOUND_TRIAGE_RUNNER_REPO:-/Users/kevinbrittain/Projects/leadership-dashboard}"
+LOG_DIR="${INBOUND_TRIAGE_RUNNER_LOG_DIR:-/Users/kevinbrittain/knowledge-os/logs/inbound-triage}"
 SCRATCH="$LOG_DIR/scratch"
 LOG="$LOG_DIR/runs.log"
 # Step 3 runs the agent-dispatch skill, which makes its own run folder in
 # here (RUNDIR=$HOME/knowledge-os/logs/agent-dispatch/<time>) once the run has
 # started, so the folder name is not known yet: the parent is granted with
 # --add-dir below. See "WORKING FOLDERS" in agent-tools.sh.
-DISPATCH_RUNS="/Users/kevinbrittain/knowledge-os/logs/agent-dispatch"
+DISPATCH_RUNS="${INBOUND_TRIAGE_RUNNER_DISPATCH_RUNS:-/Users/kevinbrittain/knowledge-os/logs/agent-dispatch}"
 mkdir -p "$SCRATCH" "$DISPATCH_RUNS"
 
 # Same token discipline as compound_brain.sh: without the exported OAuth token
 # a headless `claude -p` dies with "OAuth access token has expired".
-if [ -f "/Users/kevinbrittain/.config/od/claude_oauth_token" ]; then
-  export CLAUDE_CODE_OAUTH_TOKEN="$(cat /Users/kevinbrittain/.config/od/claude_oauth_token)"
+TOKEN_FILE="${INBOUND_TRIAGE_RUNNER_TOKEN_FILE:-/Users/kevinbrittain/.config/od/claude_oauth_token}"
+if [ -f "$TOKEN_FILE" ]; then
+  export CLAUDE_CODE_OAUTH_TOKEN="$(cat "$TOKEN_FILE")"
 else
   echo "ERROR: claude OAuth token missing at ~/.config/od/claude_oauth_token" >&2
   exit 1
@@ -271,7 +276,7 @@ fi
 0. FIRST read /Users/kevinbrittain/.claude/agents/inbound-comms-triage.md — that file is your standing instructions, including the '## Lessons from Kevin' section, which is where every rule he has asked you to remember lives. Apply every lesson in it to the decisions you make below. If a lesson conflicts with a skill step, say so in your report rather than guessing which wins.
 EMAIL LANE STATUS FOR THIS SLOT: $EMAIL_LANE_NOTE
 Then do these three skills in order, each in full:
-1. /Users/kevinbrittain/.claude/scheduled-tasks/inbound-email-triage/SKILL.md — BEFORE creating a task for any email thread, check \$SCRATCH/gmail-sent.json: a thread counts as ANSWERED only when threadSends[thread id] exists AND its \"id\" is a DIFFERENT message from the one you are judging AND its \"ts\" is strictly greater than that message internalDate. A message never answers itself: scanned post is emailed from Kevin to Kevin, and reading that one message as its own answer produced ZERO post tasks for 17 days (finding 20260904-daily-ops-454). Self-addressed sends are already stripped from the file and counted in selfAddressedExcluded. If a thread is answered, file it, do not create a task. If that file carries an \"error\" key or \"truncated\": true, treat every thread as UNCHECKED and say so in your report; never read a failed check as \"nothing was answered\". Report how many you suppressed this way. Two more pre-reads on the same contract: \$SCRATCH/history-book.json is where each sender's mail has HISTORICALLY been filed by humans (the skill's Step 2 history-book rule — the skill's rules WIN over the book, and a disagreement goes in your --reason), and \$SCRATCH/open-matters.json is every open agent task plus 14 days of completed ones (the skill's Step 3b matter check — one matter, one task). An \"error\" key in either file means that check is UNCHECKED this run: say so and fall back to the rules and the per-thread dedupe alone. Report how many decisions the book steered and how many threads JOINED an existing matter.
+1. /Users/kevinbrittain/.claude/scheduled-tasks/inbound-email-triage/SKILL.md — BEFORE creating a task for any email thread, check \$SCRATCH/gmail-sent.json: a message counts as ANSWERED only when some send in threadSendList[thread id] is a DIFFERENT message from the one you are judging AND its \"ts\" is strictly greater than that message internalDate AND its \"to\" includes that message's sender (the scan stamps the same verdict on each message as reply_state: \"answered\"). A later send that went only to other people, such as a forward to Roy or the accountant, is NOT an answer (reply_state \"elsewhere\"): decide that message under the other rules. A message never answers itself: scanned post is emailed from Kevin to Kevin, and reading that one message as its own answer produced ZERO post tasks for 17 days (finding 20260904-daily-ops-454). Self-addressed sends are already stripped from the file and counted in selfAddressedExcluded. If a thread is answered, file it, do not create a task. If that file carries an \"error\" key or \"truncated\": true, treat every thread as UNCHECKED and say so in your report; never read a failed check as \"nothing was answered\". Report how many you suppressed this way. Two more pre-reads on the same contract: \$SCRATCH/history-book.json is where each sender's mail has HISTORICALLY been filed by humans (the skill's Step 2 history-book rule — the skill's rules WIN over the book, and a disagreement goes in your --reason), and \$SCRATCH/open-matters.json is every open agent task plus 14 days of completed ones (the skill's Step 3b matter check — one matter, one task). An \"error\" key in either file means that check is UNCHECKED this run: say so and fall back to the rules and the per-thread dedupe alone. Report how many decisions the book steered and how many threads JOINED an existing matter.
 2. /Users/kevinbrittain/.claude/scheduled-tasks/inbound-messages-sweep/SKILL.md — IMPORTANT: in this context chat.db reads are DENIED to you; the fresh pre-read dumps at $SCRATCH/imessage-scan.json and $SCRATCH/imessage-sent.json are your scan and sent-check data, per the skill's pre-dump rules.
 3. /Users/kevinbrittain/.claude/scheduled-tasks/agent-dispatch/SKILL.md (Kevin's ruling, 24 Aug 2026: dispatch runs in every slot so the work triaged above reaches the approval queue in the same slot)
 Rules for the whole run: this is real mail — when unsure between outcomes choose the agent-lane task; when unsure about archiving, do not archive; never send, reply, or delete anything yourself (dispatch prepares and submits through its own gated script only). Working and temp files go ONLY under $SCRATCH — NEVER under the repo, and never in monitoring/, because monitoring/ is committed to a public repository and scan output carries full email bodies. Counts-only reports in monitoring/ are fine. A broken read (Gmail or iMessage) is reported loudly, never treated as a quiet day. Do not take the queue lock (this run already holds it). Do not edit, commit, or push code; file anything needing a code change via scripts/findings.py. Complete each skill's closing steps in full (watermark, score, publish; dispatch's verify step). End with at most twenty lines of counts only — never message content, sender names, or record IDs." \

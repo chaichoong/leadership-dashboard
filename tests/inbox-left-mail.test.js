@@ -11,19 +11,28 @@
 // and the triage score read "0 waiting; at zero 7 of last 7 days" because left
 // mail was excluded from "waiting" by design.
 //
-// These tests drive the REAL scripts/inbound-triage.py and the REAL
-// scripts/agent-dispatch.py lesson writer, with Gmail and Airtable stubbed at
-// the one function each goes through, and HOME pointed at a temp folder so
-// nothing here can touch Kevin's agent files, logs or queue lock. Fixtures are
-// invented: this repo is public.
+// The independent review of PR #783 (same day) tightened it: the read-only
+// card holds only mail that asks nothing of anyone; there is ONE open card and
+// new emails are added to it; a killed card step loses nothing; "answered"
+// needs a send TO the sender; Kevin's labels are his; Kevin's notes reach the
+// triage agent from where the dispatcher stores them; the score is this slot's.
+//
+// These tests drive the REAL scripts/inbound-triage.py, the REAL
+// scripts/agent-dispatch.py lesson writer, the REAL runner and the REAL
+// create-agent-task.py (against a fake Airtable over HTTP), with HOME pointed
+// at a temp folder so nothing here can touch Kevin's agent files, logs or
+// queue lock. Fixtures are invented: this repo is public.
 
-import { describe, it, expect } from 'vitest';
-import { execFileSync } from 'node:child_process';
-import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync, readdirSync } from 'node:fs';
+import { describe, it, expect, afterAll } from 'vitest';
+import { execFileSync, execFile } from 'node:child_process';
+import { createServer } from 'node:http';
+import { promisify } from 'node:util';
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync, readdirSync, chmodSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
+const run = promisify(execFile);
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const SCRIPTS = resolve(ROOT, 'scripts');
 const TRIAGE = resolve(SCRIPTS, 'inbound-triage.py');
@@ -32,9 +41,11 @@ const RUNNER = resolve(SCRIPTS, 'inbound-triage-run.sh');
 
 const RESPONSE = 'recJ8J8idWE8d97tH';   // Inbox Response, Team Members row
 const READ_LABEL = '19: for Kevin to read';
+// The real label's id is "Label_12": nothing may read that as lane 12.
 const LABELS = [
-  { id: 'L8', name: '8: task created' }, { id: 'L12', name: '12: kevin to respond' },
-  { id: 'L13', name: '13: maintenance' }, { id: 'L19', name: READ_LABEL },
+  { id: 'Label_801', name: '8: task created' }, { id: 'Label_899', name: '12: kevin to respond' },
+  { id: 'Label_813', name: '13: maintenance' }, { id: 'Label_12', name: READ_LABEL },
+  { id: 'Label_7', name: '2: to follow-up' },
 ];
 
 /** A fresh HOME (agent files, queue lock) and state folder (digests, scan cache). */
@@ -46,12 +57,16 @@ function sandbox() {
   return { home, state };
 }
 
-/** Run a snippet against the real modules. `m` is inbound-triage, `ad` is
- *  agent-dispatch. Every Gmail call is recorded in CALLS and every card the
- *  gate would create in CREATED. The snippet calls out(obj) once. */
-function runPy(box, snippet, setup = '') {
-  const script = `
-import importlib.util, json, sys, os
+function envFor(box, extra = {}) {
+  return { ...process.env, HOME: box.home, INBOUND_TRIAGE_DIR: box.state,
+    OD_GMAIL_PACE_DIR: join(box.home, 'pace'), JOB_QUEUE_DIR: join(box.home, 'queue'), ...extra };
+}
+
+/** Python preamble: the real modules, Gmail stubbed at worker_post, and an
+ *  in-memory Airtable behind the dispatcher's own task read/write functions
+ *  and the card gate. Each snippet calls out(obj) once. */
+const PREAMBLE = `
+import importlib.util, json, sys, os, io, contextlib
 sys.path.insert(0, ${JSON.stringify(SCRIPTS)})
 def load(name, path):
     spec = importlib.util.spec_from_file_location(name, path)
@@ -61,7 +76,8 @@ def load(name, path):
 m = load('triage_under_test', ${JSON.stringify(TRIAGE)})
 ad = load('dispatch_under_test', ${JSON.stringify(DISPATCH)})
 m._fail_quiet["on"] = True
-CALLS, CREATED = [], []
+AF = ad.AF
+CALLS, CREATED, PATCHES, STORE = [], [], [], {}
 LABELS = ${JSON.stringify(LABELS)}
 LISTS = {}            # gmail query fragment -> messages
 def fake_worker(path, payload, sleep=None):
@@ -80,107 +96,263 @@ def fake_worker(path, payload, sleep=None):
 m.worker_post = fake_worker
 def fake_create(fields):
     CREATED.append(fields)
-    return "recCARD%010d" % len(CREATED)
+    rid = "recCARD%010d" % (len(STORE) + 1)
+    STORE[rid] = {"id": rid, "createdTime": "2026-10-14T%02d:00:00.000Z" % len(STORE),
+                  "fields": json.loads(json.dumps(fields))}
+    return rid
 m._create_card = fake_create
+def fake_query(formula, max_records=None, minimal=False):
+    if "LEFT({Task Name}" in formula and "'Approval'" in formula:
+        return [json.loads(json.dumps(r)) for r in STORE.values()
+                if ad.sel(r["fields"].get(AF["status"])) == "Approval"
+                and not r["fields"].get(AF["approvalOutcome"])]
+    return []
+ad.query_tasks = fake_query
+ad.get_task = lambda tid: json.loads(json.dumps(STORE[tid]))
+def fake_patch(tid, fields):
+    PATCHES.append(tid)
+    STORE[tid]["fields"].update(json.loads(json.dumps(fields)))
+    return STORE[tid]
+ad.patch_task = fake_patch
 def cache(entries):
     (m.base_dir() / "scan-cache.json").write_text(json.dumps(entries))
 def attempt(fn):
     try:
-        return fn(), None
+        with contextlib.redirect_stdout(io.StringIO()):
+            return fn(), None
     except SystemExit:
         return None, dict(m._last_fail)
+def quiet(fn):
+    with contextlib.redirect_stdout(io.StringIO()):
+        return fn()
 def modifies():
     return [c["payload"] for c in CALLS if c["path"] == "/gmail/modify"]
+def card(i=0):
+    return list(STORE.values())[i]["fields"]
+def digest():
+    rows = []
+    for p in sorted(m.base_dir().glob("digest-*.jsonl")):
+        rows += [json.loads(l) for l in p.read_text().splitlines() if l.strip()]
+    return rows
 def out(obj):
     print("RESULT " + json.dumps(obj))
-${setup}
-${snippet}
 `;
-  const stdout = execFileSync('python3', ['-c', script], {
-    encoding: 'utf8',
-    env: { ...process.env, HOME: box.home, INBOUND_TRIAGE_DIR: box.state,
-           OD_GMAIL_PACE_DIR: join(box.home, 'pace'), JOB_QUEUE_DIR: join(box.home, 'queue') },
-  });
+
+function runPy(box, snippet, extraEnv = {}) {
+  const stdout = execFileSync('python3', ['-c', PREAMBLE + snippet], { encoding: 'utf8', env: envFor(box, extraEnv) });
   const line = stdout.split('\n').filter((l) => l.startsWith('RESULT ')).pop();
   if (!line) throw new Error('no RESULT line:\n' + stdout);
   return JSON.parse(line.slice(7));
 }
 
 const TWO_IN_INBOX = `cache({
-    "mA": {"sender": "friend@gmail.com", "subject": "How did the run go", "threadId": "tA",
-           "internalDate": 1791800000000, "inbox": True},
-    "mB": {"sender": "clerk@example-council.gov.uk", "subject": "Notice of a meeting", "threadId": "tB",
-           "internalDate": 1791700000000, "inbox": True},
+    "mA": {"sender": "friend@gmail.com", "subject": "Photos from the weekend", "threadId": "tA",
+           "internalDate": 1791800000000, "inbox": True, "ask": "", "reply_state": ""},
+    "mB": {"sender": "neighbour@example.com", "subject": "Lovely to see you", "threadId": "tB",
+           "internalDate": 1791700000000, "inbox": True, "ask": "", "reply_state": ""},
+    "mC": {"sender": "aunt@gmail.com", "subject": "A note", "threadId": "tC",
+           "internalDate": 1791750000000, "inbox": True, "ask": "", "reply_state": ""},
+    "mD": {"sender": "club@example.org", "subject": "Season report", "threadId": "tD",
+           "internalDate": 1791760000000, "inbox": True, "ask": "", "reply_state": ""},
+    "mP": {"sender": "agent@example.co.uk", "subject": "Your invoice", "threadId": "tP",
+           "internalDate": 1791760000000, "inbox": True, "ask": "a payment (invoice)", "reply_state": ""},
 })`;
+const LEAVE_AB = `
+m.cmd_note("mA", "leave", "A friend sending weekend photos, nothing asked")
+m.cmd_note("mB", "leave", "A neighbour saying it was lovely to catch up")
+`;
 
-describe('"for Kevin to read" mail leaves the inbox and comes to him as ONE approval card', () => {
+describe('"for Kevin to read" mail leaves the inbox and comes to him on ONE approval card', () => {
   it('leave labels it 19, archives it, and the run raises one card he can answer', () => {
     const box = sandbox();
-    const r = runPy(box, `
-${TWO_IN_INBOX}
-m.cmd_note("mA", "leave", "A friend asking how the run went, nothing to answer")
-m.cmd_note("mB", "leave", "The council confirming a meeting date, for information")
-first = m.cmd_inbox_card("17:00", dispatch=ad)
-second = m.cmd_inbox_card("17:00", dispatch=ad)
-f = CREATED[0] if CREATED else {}
-AF = ad.AF
-out({"modifies": modifies(), "cards": len(CREATED),
-     "name": f.get(AF["name"]), "status": f.get(AF["status"]),
-     "team": f.get(AF["teamMember"]), "sentBy": f.get(AF["sentForApprovalBy"]),
-     "output": f.get(AF["agentOutput"]), "plain": f.get(AF["plainSummary"]),
+    const r = runPy(box, `${TWO_IN_INBOX}${LEAVE_AB}
+quiet(lambda: m.cmd_inbox_card("17:00", dispatch=ad))
+quiet(lambda: m.cmd_inbox_card("17:00", dispatch=ad))
+f = card()
+out({"modifies": modifies(), "cards": len(CREATED), "name": f[AF["name"]],
+     "status": f[AF["status"]], "team": f[AF["teamMember"]], "sentBy": f[AF["sentForApprovalBy"]],
+     "output": f[AF["agentOutput"]], "plain": f[AF["plainSummary"]], "notes": f[AF["notes"]],
      "pendingLeft": m.pending_path().exists()})
 `);
-    // Both messages were taken out of the inbox and labelled, nothing deleted.
     expect(r.modifies).toEqual([
       { ids: ['mA'], addLabels: [READ_LABEL], removeLabels: ['INBOX'] },
       { ids: ['mB'], addLabels: [READ_LABEL], removeLabels: ['INBOX'] },
     ]);
-    // ONE card for the run, and the second call (the runner's backstop) makes none.
+    // ONE card, and the second call (the runner's backstop) does nothing.
     expect(r.cards).toBe(1);
     expect(r.pendingLeft).toBe(false);
-    expect(r.name).toMatch(/^INBOX: 2 emails for you to read, \d{1,2} \w{3} 17:00$/);
-    // In Kevin's approval queue: Status Approval with a sender, owned by Inbox Response.
+    expect(r.name).toMatch(/^INBOX: 2 emails for you to read, since \d{1,2} \w{3} 17:00$/);
     expect(r.status).toBe('Approval');
     expect(r.team).toEqual([RESPONSE]);
     expect(r.sentBy).toEqual([RESPONSE]);
-    // Each email: sender, subject, the one-line summary and its Gmail link.
-    for (const s of ['friend@gmail.com | How did the run go', 'A friend asking how the run went',
-      'https://mail.google.com/mail/u/0/#all/tA', 'clerk@example-council.gov.uk | Notice of a meeting',
-      'https://mail.google.com/mail/u/0/#all/tB']) {
+    expect(r.notes).toBe('INBOX CARD MESSAGE IDS: mA,mB');
+    for (const s of ['friend@gmail.com | Photos from the weekend', 'A friend sending weekend photos',
+      'https://mail.google.com/mail/u/0/#all/tA', 'neighbour@example.com | Lovely to see you']) {
       expect(r.output).toContain(s);
     }
-    // Grouped by sender type: the person before the council.
-    expect(r.output.indexOf('From people')).toBeLessThan(r.output.indexOf('From government'));
+    expect(r.output.indexOf('From people')).toBeLessThan(r.output.indexOf('From companies'));
     expect(r.output).toMatch(/\*\*Carrying this out will involve:\*\* Closing this card as read\. Nothing is sent\.$/);
     expect(r.plain).toMatch(/^TASK: Read 2 emails that came in for you/);
   });
 
-  it('a failed card keeps every email queued for the next run, never lost', () => {
+  it('the next run ADDS to the open card: one card, numbered on, so no duplicate pair can hide emails', () => {
     const box = sandbox();
-    const r = runPy(box, `
-${TWO_IN_INBOX}
-m.cmd_note("mA", "leave", "A friend asking how the run went, nothing to answer")
+    const r = runPy(box, `${TWO_IN_INBOX}${LEAVE_AB}
+quiet(lambda: m.cmd_inbox_card("09:00", dispatch=ad))
+first_name = card()[AF["name"]]
+m.cmd_note("mC", "leave", "An aunt writing with family news, nothing asked")
+m.cmd_note("mD", "leave", "The club's season report, for reading")
+quiet(lambda: m.cmd_inbox_card("13:00", dispatch=ad))
+gate = m._load_gate()
+f = card()
+out({"cards": len(STORE), "created": len(CREATED), "patched": len(PATCHES),
+     "output": f[AF["agentOutput"]], "name": f[AF["name"]], "notes": f[AF["notes"]],
+     "plain": f[AF["plainSummary"]], "firstName": first_name,
+     # why one card: two INBOX card names share one duplicate key, so the
+     # Duplicates lane would tell Kevin to close the second
+     "sameKey": gate.dupe_task_key("INBOX: 2 emails for you to read, since 14 Oct 09:00")
+                == gate.dupe_task_key("INBOX: 2 emails for you to read, since 14 Oct 13:00")})
+`);
+    expect(r.sameKey).toBe(true);
+    expect(r.cards).toBe(1);
+    expect(r.created).toBe(1);
+    expect(r.patched).toBe(1);
+    expect(r.firstName).toMatch(/^INBOX: 2 emails for you to read, since \d{1,2} \w{3} 09:00$/);
+    expect(r.name).toMatch(/^INBOX: 4 emails for you to read, since \d{1,2} \w{3} 09:00$/);
+    expect(r.output.startsWith('INBOX CARD: 4 emails for you to read')).toBe(true);
+    expect(r.output).toMatch(/Added \d{1,2} \w{3} 13:00 \(2\)/);
+    const nums = [...r.output.matchAll(/^(\d+)\. /gm)].map((x) => Number(x[1]));
+    expect(nums).toEqual([1, 2, 3, 4]);
+    expect(r.notes.split(': ')[1].split(',').sort()).toEqual(['mA', 'mB', 'mC', 'mD']);
+    expect(r.plain).toMatch(/^TASK: Read 4 emails/);
+  });
+
+  it('a card Kevin has decided is never added to: the next emails get a new card', () => {
+    const box = sandbox();
+    const r = runPy(box, `${TWO_IN_INBOX}${LEAVE_AB}
+quiet(lambda: m.cmd_inbox_card("09:00", dispatch=ad))
+card()[AF["approvalOutcome"]] = "Approved as-is"
+card()[AF["status"]] = "Today"
+m.cmd_note("mC", "leave", "An aunt writing with family news, nothing asked")
+quiet(lambda: m.cmd_inbox_card("13:00", dispatch=ad))
+out({"cards": len(STORE), "patched": len(PATCHES), "second": card(1)[AF["agentOutput"]]})
+`);
+    expect(r.cards).toBe(2);
+    expect(r.patched).toBe(0);
+    expect(r.second).toContain('1. aunt@gmail.com | A note');
+  });
+
+  it('an open card that reads blank is a STOP: nothing written to it, the emails stay queued', () => {
+    const box = sandbox();
+    const r = runPy(box, `${TWO_IN_INBOX}${LEAVE_AB}
+quiet(lambda: m.cmd_inbox_card("09:00", dispatch=ad))
+real_get = ad.get_task
+def blank_read(tid):
+    rec = real_get(tid)
+    rec["fields"].pop(AF["agentOutput"], None)
+    return rec
+ad.get_task = blank_read
+m.cmd_note("mC", "leave", "An aunt writing with family news, nothing asked")
+_, err = attempt(lambda: m.cmd_inbox_card("13:00", dispatch=ad))
+out({"err": err, "patched": len(PATCHES), "cards": len(STORE),
+     "queued": [json.loads(l)["id"] for l in m.pending_path().read_text().splitlines()]})
+`);
+    expect(r.err.message).toMatch(/INBOX CARD NOT WRITTEN .*reads blank.*STOP/);
+    expect(r.patched).toBe(0);
+    expect(r.cards).toBe(1);
+    expect(r.queued).toEqual(['mC']);
+  });
+
+  it('a failed card keeps every email queued for the next step, never lost', () => {
+    const box = sandbox();
+    const r = runPy(box, `${TWO_IN_INBOX}
+m.cmd_note("mA", "leave", "A friend sending weekend photos, nothing asked")
 def boom(fields):
     raise RuntimeError("gate exited 2")
 m._create_card = boom
 _, err = attempt(lambda: m.cmd_inbox_card("13:00", dispatch=ad))
 m._create_card = fake_create
-m.cmd_inbox_card("17:00", dispatch=ad)
-out({"err": err, "cards": len(CREATED), "ids": CREATED[0][ad.AF["notes"]] if CREATED else ""})
+quiet(lambda: m.cmd_inbox_card("17:00", dispatch=ad))
+out({"err": err, "cards": len(STORE), "ids": card()[AF["notes"]]})
 `);
-    expect(r.err.message).toMatch(/INBOX CARD NOT CREATED/);
+    expect(r.err.message).toMatch(/INBOX CARD NOT WRITTEN/);
     expect(r.cards).toBe(1);
     expect(r.ids).toBe('INBOX CARD MESSAGE IDS: mA');
   });
 
-  it('without the label it refuses before moving anything', () => {
+  it('a card step killed part way loses nothing: the next step adopts its queue', () => {
+    const box = sandbox();
+    // First process: queue two emails, then die (SIGKILL) inside the card step.
+    let killed = false;
+    try {
+      execFileSync('python3', ['-c', PREAMBLE + `${TWO_IN_INBOX}${LEAVE_AB}
+import signal
+m._create_card = lambda fields: os.kill(os.getpid(), signal.SIGKILL)
+m.cmd_inbox_card("13:00", dispatch=ad)
+`], { encoding: 'utf8', env: envFor(box) });
+    } catch (e) { killed = e.signal === 'SIGKILL'; }
+    expect(killed).toBe(true);
+    const left = readdirSync(box.state).filter((f) => f.startsWith('inbox-card-taking-'));
+    expect(left.length).toBe(1);
+    // Second process: the orphan is adopted and both emails reach the card.
+    const r = runPy(box, `
+quiet(lambda: m.cmd_inbox_card("17:00", dispatch=ad))
+out({"cards": len(STORE), "ids": card()[AF["notes"]] if STORE else "",
+     "orphans": [p.name for p in m.base_dir().glob("inbox-card-taking-*")]})
+`);
+    expect(r.cards).toBe(1);
+    expect(r.ids.split(': ')[1].split(',').sort()).toEqual(['mA', 'mB']);
+    expect(r.orphans).toEqual([]);
+  });
+
+  it('mail that asks anything is refused for the card; an override is logged', () => {
+    const box = sandbox();
+    const r = runPy(box, `${TWO_IN_INBOX}
+_, err = attempt(lambda: m.cmd_note("mP", "leave", "An agent sending an invoice to pay"))
+moved_after_refusal = len(modifies())
+m.cmd_note("mP", "leave", "A statement copy, already paid", override="paid by direct debit last week, nothing to do")
+out({"err": err, "movedAfterRefusal": moved_after_refusal, "reason": digest()[-1]["reason"]})
+`);
+    expect(r.err.message).toMatch(/ASKS SOMETHING: a payment \(invoice\)/);
+    expect(r.movedAfterRefusal).toBe(0);
+    expect(r.reason).toMatch(/^OVERRIDE ask signal \(a payment \(invoice\)\): paid by direct debit/);
+  });
+
+  it('the ask check reads the subject and the sender\'s own words, never the quoted history', () => {
     const box = sandbox();
     const r = runPy(box, `
-${TWO_IN_INBOX}
-LABELS[:] = [l for l in LABELS if not l["name"].startswith("19")]
-_, err = attempt(lambda: m.cmd_note("mA", "leave", "A friend asking how the run went"))
-out({"err": err, "modifies": modifies(), "queued": m.pending_path().exists()})
+q = m._load_gate().unquoted_body
+out({
+  "pay": m.ask_signal("", q("Please pay by Friday.")),
+  "date": m.ask_signal("", q("We are away from 12 Nov.")),
+  "question": m.ask_signal("", q("Fancy a coffee?")),
+  "decision": m.ask_signal("", q("Let us know your decision.")),
+  "subject": m.ask_signal("Your invoice", ""),
+  "none": m.ask_signal("Photos", q("Lovely to see everyone, here are the pictures.")),
+  "quoted": m.ask_signal("Re: photos", q("Thanks, lovely.\\n\\nOn Mon, Kevin wrote:\\n> Can you pay me back?")),
+})
 `);
+    expect(r.pay).toMatch(/^a payment/);
+    expect(r.date).toMatch(/^a deadline or date/);
+    expect(r.question).toMatch(/^a question/);
+    expect(r.decision).toMatch(/^a (request|decision)/);
+    expect(r.subject).toMatch(/^a payment/);
+    expect(r.none).toBe('');
+    expect(r.quoted).toBe('');
+  });
+
+  it('without the label it refuses before moving anything, and lane 12 is never the read label', () => {
+    const box = sandbox();
+    const r = runPy(box, `${TWO_IN_INBOX}
+l8, l12, l13 = m.resolve_triage_labels(LABELS)
+read_id = m.read_label(LABELS)["id"]
+LABELS[:] = [l for l in LABELS if not l["name"].startswith("19")]
+_, err = attempt(lambda: m.cmd_note("mA", "leave", "A friend sending weekend photos"))
+out({"err": err, "modifies": modifies(), "queued": m.pending_path().exists(),
+     "lane12": l12["id"], "readId": read_id})
+`);
+    expect(r.lane12).toBe('Label_899');
+    expect(r.readId).toBe('Label_12');
     expect(r.err.message).toMatch(/LABEL MISSING/);
     expect(r.err.message).toContain(READ_LABEL);
     expect(r.modifies).toEqual([]);
@@ -189,99 +361,151 @@ out({"err": err, "modifies": modifies(), "queued": m.pending_path().exists()})
 
   it('a leave with no summary is refused: the summary is what Kevin reads', () => {
     const box = sandbox();
-    const r = runPy(box, `
-${TWO_IN_INBOX}
+    const r = runPy(box, `${TWO_IN_INBOX}
 _, err = attempt(lambda: m.cmd_note("mA", "leave", ""))
 out({"err": err, "modifies": modifies()})
 `);
     expect(r.err.message).toMatch(/needs --reason/);
     expect(r.modifies).toEqual([]);
   });
+
+  it('at the length limit no number is skipped and no heading stands empty', () => {
+    const box = sandbox();
+    const r = runPy(box, `
+# A person's email that fits, a second person's that does not, then a short
+# company email that would fit in the space left: the old renderer skipped a
+# number for the second and printed an empty heading.
+items = [{"id": "p1", "sender": "a@gmail.com", "subject": "One", "internalDate": 1, "threadId": "t1", "summary": "s"},
+         {"id": "p2", "sender": "b@gmail.com", "subject": "Two " + "y" * 300, "internalDate": 2, "threadId": "t2", "summary": "s"},
+         {"id": "o1", "sender": "x@acme.co.uk", "subject": "Three", "internalDate": 3, "threadId": "t3", "summary": "s"}]
+lines, shown = m.render_items(items, 1, {"gmail.com"}, 330)
+out({"lines": lines, "shown": shown})
+`);
+    expect(r.shown).toEqual(['p1']);
+    const text = r.lines.join('\n');
+    expect([...text.matchAll(/^(\d+)\. /gm)].map((x) => Number(x[1]))).toEqual([1]);
+    expect(text).not.toContain('From companies');
+  });
 });
 
 describe('answered and duplicate mail is filed out of the inbox, with no card', () => {
-  it('answered: archived (INBOX removed, no label added), nothing queued', () => {
+  it('answered (a later send went TO the sender): archived, nothing queued', () => {
     const box = sandbox();
     const r = runPy(box, `
-${TWO_IN_INBOX}
-m.cmd_note("mA", "answered", "we replied on this thread after it arrived")
-card = m.cmd_inbox_card("09:00", dispatch=ad)
-out({"modifies": modifies(), "cards": len(CREATED)})
+cache({"mA": {"sender": "pat@example.com", "subject": "s", "threadId": "tA", "inbox": True, "ask": "", "reply_state": "answered"}})
+m.cmd_note("mA", "answered", "we replied to the sender after it arrived")
+quiet(lambda: m.cmd_inbox_card("09:00", dispatch=ad))
+out({"modifies": modifies(), "cards": len(STORE)})
 `);
     expect(r.modifies).toEqual([{ ids: ['mA'], removeLabels: ['INBOX'] }]);
     expect(r.cards).toBe(0);
   });
 
-  it('duplicate: archived the same way', () => {
+  it('a forward to someone else is not an answer: refused, nothing moved; an override is logged', () => {
     const box = sandbox();
     const r = runPy(box, `
-${TWO_IN_INBOX}
+cache({"mA": {"sender": "pat@example.com", "subject": "s", "threadId": "tA", "inbox": True, "ask": "", "reply_state": "elsewhere"}})
+_, err = attempt(lambda: m.cmd_note("mA", "answered", "forwarded to Roy"))
+before = len(modifies())
+m.cmd_note("mA", "answered", "Roy replied from info@", override="Roy answered the sender from info@ this morning")
+out({"err": err, "movedBefore": before, "moves": modifies(), "reason": digest()[-1]["reason"]})
+`);
+    expect(r.err.message).toMatch(/NOT ANSWERED/);
+    expect(r.movedBefore).toBe(0);
+    expect(r.moves).toEqual([{ ids: ['mA'], removeLabels: ['INBOX'] }]);
+    expect(r.reason).toMatch(/^OVERRIDE forward-only thread: Roy answered/);
+  });
+
+  it('duplicate: archived the same way; a message already out of the inbox costs no call', () => {
+    const box = sandbox();
+    const r = runPy(box, `
+cache({"mB": {"sender": "x@example.com", "subject": "s", "threadId": "tB", "inbox": True},
+       "mC": {"sender": "x@example.com", "subject": "s", "threadId": "tC", "inbox": False}})
 m.cmd_note("mB", "duplicate", "thread already has a completed task")
-out({"modifies": modifies(), "cards": len(CREATED)})
+m.cmd_note("mC", "duplicate", "labelled lane mail, already handled")
+out({"modifies": modifies(), "cards": len(STORE)})
 `);
     expect(r.modifies).toEqual([{ ids: ['mB'], removeLabels: ['INBOX'] }]);
     expect(r.cards).toBe(0);
   });
 
-  it('a message the scan saw outside the inbox costs no Gmail call', () => {
+  it('the scan stamps "answered" only where the later send went to the sender', () => {
     const box = sandbox();
     const r = runPy(box, `
-cache({"mC": {"sender": "x@example.com", "subject": "s", "threadId": "tC", "inbox": False}})
-m.cmd_note("mC", "duplicate", "labelled lane mail, already handled")
-out({"modifies": modifies()})
+def msg(i, frm, ts):
+    return {"id": i, "threadId": "t" + i, "labelIds": ["INBOX"], "internalDate": ts,
+            "headers": {"from": frm, "subject": "s"}, "body": "Thanks, lovely."}
+LISTS["after:"] = [msg("r1", "Pat <pat@example.com>", 1000), msg("r2", "Sam <sam@example.com>", 1000)]
+LISTS["in:sent"] = [
+  {"id": "s1", "threadId": "tr1", "internalDate": 2000, "headers": {"from": "kevin@runpreneur.org.uk", "to": "Pat <pat@example.com>"}},
+  {"id": "s2", "threadId": "tr2", "internalDate": 2000, "headers": {"from": "kevin@runpreneur.org.uk", "to": "roy@example.com"}}]
+m.lookup_thread_tasks = lambda ids, fetch=None: {}
+buf = io.StringIO()
+with contextlib.redirect_stdout(buf):
+    m.cmd_scan(12)
+res = json.loads(buf.getvalue().strip().splitlines()[-1])
+c = m.read_scan_cache()
+out({"r1": c["r1"]["reply_state"], "r2": c["r2"]["reply_state"],
+     "sends": res["sent_thread_sends"]["tr2"][0]["to"]})
 `);
-    expect(r.modifies).toEqual([]);
+    expect(r.r1).toBe('answered');
+    expect(r.r2).toBe('elsewhere');
+    expect(r.sends).toEqual(['roy@example.com']);
   });
 });
 
 describe('the score counts inbox mail older than 2 days, so it cannot read 0 over a full inbox', () => {
   // Drives the real scan (Gmail lists stubbed) into the real score: three old
-  // emails in the inbox, the run files one, two are still there.
-  const SCAN_THEN_SCORE = `
+  // emails in the inbox, and the run then acts on them.
+  const SCAN = `
 OLD = [{"id": i, "threadId": "t" + i, "labelIds": ["INBOX"], "internalDate": 1791000000000,
-        "headers": {"from": "p@example.com", "subject": "old " + i}, "body": ""}
+        "headers": {"from": "p@example.com", "subject": "old " + i}, "body": "Hello there."}
        for i in ("s1", "s2", "s3")]
 LISTS["older_than:2d"] = OLD
 m.lookup_thread_tasks = lambda ids, fetch=None: {}
 written = []
 m.airtable_patch_metric = lambda text: written.append(text)
-import io, contextlib
-with contextlib.redirect_stdout(io.StringIO()):
-    m.cmd_scan(12)
-m.cmd_note("s1", "leave", "A neighbour asking about the bins, nothing to answer")
+quiet(lambda: m.cmd_scan(12))
+scan_cache = m.read_scan_cache()
+m.cmd_note("s1", "leave", "A neighbour saying hello, nothing asked")
 `;
 
   it('three old emails, one filed: the score is 2, not 0', () => {
     const box = sandbox();
-    const r = runPy(box, SCAN_THEN_SCORE + `
-m.cmd_score(0)
+    const r = runPy(box, SCAN + `
+quiet(lambda: m.cmd_score(0))
 st = m.read_state()
-out({"metric": written[-1], "today": st["history"][m.date.today().isoformat()],
-     "detail": st["history_detail"][m.date.today().isoformat()]})
+out({"metric": written[-1], "detail": st["history_detail"][m.date.today().isoformat()]})
 `);
-    expect(r.metric).toMatch(/^2 waiting; at zero 0 of last 7 days$/);
-    expect(r.today).toBe(2);
+    expect(r.metric).toBe('2 waiting; at zero 0 of last 7 days');
     expect(r.detail).toEqual({ agent: 0, inbox_over_2_days: 2, inbox_listing_truncated: false });
   });
 
-  it("the agent's own count is added, never replaced", () => {
+  it("the agent's own count is added, and a message it deferred is never counted twice", () => {
     const box = sandbox();
-    const r = runPy(box, SCAN_THEN_SCORE + `
-m.cmd_score(3)
+    const r = runPy(box, SCAN + `
+m.cmd_note("s2", "deferred", "task create failed, retry next run")
+quiet(lambda: m.cmd_score(1))
 out({"metric": written[-1]})
 `);
-    expect(r.metric).toMatch(/^5 waiting;/);
+    // s1 filed, s2 deferred (the agent's 1), s3 still there: 1 + 1, not 1 + 2.
+    expect(r.metric).toMatch(/^2 waiting;/);
   });
 
-  it('no scan this run: the score refuses rather than write a guess', () => {
+  it('no scan from this slot: the score refuses rather than reuse another slot\'s numbers', () => {
     const box = sandbox();
-    const r = runPy(box, `
-written = []
-m.airtable_patch_metric = lambda text: written.append(text)
+    const r = runPy(box, SCAN + `
+import datetime as _dt
+later = (_dt.datetime.now() + _dt.timedelta(minutes=5)).astimezone().isoformat(timespec="seconds")
+(m.base_dir() / "slot-results.jsonl").write_text(json.dumps({"ts": later, "slot": "13:00", "lane": "email", "ok": True}) + "\\n")
 _, err = attempt(lambda: m.cmd_score(0))
-out({"err": err, "written": written})
+(m.base_dir() / "slot-results.jsonl").unlink()
+(m.base_dir() / "state.json").write_text("{}")
+_, err2 = attempt(lambda: m.cmd_score(0))
+out({"err": err, "err2": err2, "written": written})
 `);
     expect(r.err.message).toMatch(/SCORE REFUSED/);
+    expect(r.err2.message).toMatch(/SCORE REFUSED/);
     expect(r.written).toEqual([]);
   });
 });
@@ -314,23 +538,27 @@ You answer mail.
 Standing rules.
 `;
   const WORDS = 'Never show me newsletters from the running club, archive them';
+  const CARD_NAME = 'INBOX: 2 emails for you to read, since 15 Oct 09:00';
   const CARD = `CARD = {"id": "recCARD0000000001", "fields": {
-    ad.AF["name"]: "INBOX: 2 emails for you to read, 15 Oct 09:00",
-    ad.AF["approvalFeedback"]: ${JSON.stringify(WORDS)},
-    ad.AF["rememberThis"]: True,
-    ad.AF["approvalOutcome"]: "Approved as-is",
-    ad.AF["approvedAt"]: "2026-10-15T09:30:00.000Z",
-    ad.AF["sentForApprovalBy"]: [${JSON.stringify(RESPONSE)}],
-    ad.AF["teamMember"]: [${JSON.stringify(RESPONSE)}],
+    AF["name"]: ${JSON.stringify(CARD_NAME)},
+    AF["approvalFeedback"]: ${JSON.stringify(WORDS)},
+    AF["rememberThis"]: True,
+    AF["approvalOutcome"]: "Approved as-is",
+    AF["approvedAt"]: "2026-10-15T09:30:00.000Z",
+    AF["sentForApprovalBy"]: [${JSON.stringify(RESPONSE)}],
+    AF["teamMember"]: [${JSON.stringify(RESPONSE)}],
 }}
-ad.query_tasks = lambda formula, max_records=None, minimal=False: [CARD]
+TICKED = [CARD]
+ad.query_tasks = lambda formula, max_records=None, minimal=False: list(TICKED)
 ad.patch_task = lambda tid, fields: None
 ad.mirror_lesson_to_register = lambda row, line: True
-import io, contextlib
+def files():
+    return {n: open(os.path.join(ad.AGENT_DIR, n + ".md")).read()
+            for n in ("inbound-comms-triage", "inbound-comms-response")}
 `;
 
-  function agentFiles(box) {
-    writeFileSync(join(box.home, '.claude/agents/inbound-comms-triage.md'), TRIAGE_FILE);
+  function agentFiles(box, triage = TRIAGE_FILE) {
+    writeFileSync(join(box.home, '.claude/agents/inbound-comms-triage.md'), triage);
     writeFileSync(join(box.home, '.claude/agents/inbound-comms-response.md'), RESPONSE_FILE);
   }
 
@@ -338,38 +566,51 @@ import io, contextlib
     const box = sandbox();
     agentFiles(box);
     const r = runPy(box, CARD + `
-with contextlib.redirect_stdout(io.StringIO()):
-    ad.cmd_lessons(None)
-before = open(os.path.join(ad.AGENT_DIR, "inbound-comms-triage.md")).read()
-m.cmd_inbox_lessons(dispatch=ad)
-m.cmd_inbox_lessons(dispatch=ad)
-out({"agentDir": ad.AGENT_DIR, "triageBefore": before,
-     "triage": open(os.path.join(ad.AGENT_DIR, "inbound-comms-triage.md")).read(),
-     "response": open(os.path.join(ad.AGENT_DIR, "inbound-comms-response.md")).read()})
+quiet(lambda: ad.cmd_lessons(None))
+before = files()
+quiet(lambda: m.cmd_inbox_lessons(dispatch=ad))
+quiet(lambda: m.cmd_inbox_lessons(dispatch=ad))
+out({"agentDir": ad.AGENT_DIR, "before": before, "after": files()})
 `);
-    // The sandbox, never Kevin's real agent files.
     expect(r.agentDir.startsWith(box.home)).toBe(true);
-    // The gap this closes: the dispatcher's writer reaches Inbox Response only.
-    expect(r.response).toContain(WORDS);
-    expect(r.triageBefore).not.toContain(WORDS);
-    // After the pre-read, the triage agent holds it, once, inside its section.
-    const t = r.triage;
+    expect(r.before['inbound-comms-response']).toContain(WORDS);
+    expect(r.before['inbound-comms-triage']).not.toContain(WORDS);
+    const t = r.after['inbound-comms-triage'];
     expect(t.split(WORDS).length - 1).toBe(1);
-    expect(t).toContain('- 2026-10-15: INBOX: 2 emails for you to read, 15 Oct 09:00 — ' + WORDS);
+    expect(t).toContain(`- 2026-10-15: ${CARD_NAME} — ${WORDS}`);
     expect(t.indexOf(WORDS)).toBeGreaterThan(t.indexOf('## Lessons from Kevin'));
     expect(t.indexOf(WORDS)).toBeLessThan(t.indexOf('## Never'));
     expect(t).toContain('an older lesson — keep this');
   });
 
-  it("a note the dispatcher already rerouted to triage (with its stamp) is not written twice", () => {
+  it('a Request changes note still arrives after the resubmit cleared the Remember tick', () => {
+    // The dispatcher wrote its lesson, then the agent's resubmit cleared
+    // Remember This and Lesson Written At. The tick is gone; the lesson is
+    // where the dispatcher stored it, and that is where this reads it.
     const box = sandbox();
-    writeFileSync(join(box.home, '.claude/agents/inbound-comms-triage.md'),
-      TRIAGE_FILE.replace('- 2026-09-01', `- 2026-10-15: INBOX: 2 emails for you to read, 15 Oct 09:00 — [2026-10-15 09:30] ${WORDS}\n- 2026-09-01`));
+    agentFiles(box);
     const r = runPy(box, CARD + `
-m.cmd_inbox_lessons(dispatch=ad)
-out({"triage": open(os.path.join(ad.AGENT_DIR, "inbound-comms-triage.md")).read()})
+CARD["fields"][AF["approvalOutcome"]] = "Changes requested"
+quiet(lambda: ad.cmd_lessons(None))
+CARD["fields"][AF["rememberThis"]] = False
+CARD["fields"][AF["approvalFeedback"]] = ""
+TICKED.clear()
+quiet(lambda: m.cmd_inbox_lessons(dispatch=ad))
+out({"after": files()})
 `);
-    expect(r.triage.split(WORDS).length - 1).toBe(1);
+    expect(r.after['inbound-comms-response']).toContain(WORDS);
+    expect(r.after['inbound-comms-triage']).toContain(`${CARD_NAME} — ${WORDS}`);
+  });
+
+  it('a note the dispatcher already rerouted to triage (with its stamp) is not written twice', () => {
+    const box = sandbox();
+    agentFiles(box, TRIAGE_FILE.replace('- 2026-09-01',
+      `- 2026-10-15: ${CARD_NAME} — [2026-10-15 09:30] ${WORDS}\n- 2026-09-01`));
+    const r = runPy(box, CARD + `
+quiet(lambda: m.cmd_inbox_lessons(dispatch=ad))
+out({"after": files()})
+`);
+    expect(r.after['inbound-comms-triage'].split(WORDS).length - 1).toBe(1);
   });
 
   it('a failed Tasks read is NOT CHECKED, never "no lessons"', () => {
@@ -385,105 +626,281 @@ out({"err": err})
     expect(r.err.message).toMatch(/INBOX LESSONS NOT CHECKED/);
   });
 
-  it('the runner copies the lessons BEFORE the agent starts and raises the card AFTER it', () => {
-    // Shell ordering cannot be driven without running the slot; the copy itself
-    // is driven above. This pins only where the two calls sit in the runner.
-    const runner = readFileSync(RUNNER, 'utf8');
-    const lessons = runner.indexOf('inbound-triage.py" inbox-lessons');
-    const agent = runner.indexOf('"$CLAUDE" -p');
-    const card = runner.indexOf('inbound-triage.py" inbox-card');
-    expect(lessons).toBeGreaterThan(-1);
-    expect(lessons).toBeLessThan(agent);
-    expect(card).toBeGreaterThan(agent);
-    expect(runner).toContain('.claude/agents/inbound-comms-triage.md');
+  it('the runner, run for real against stub scripts, copies lessons BEFORE the agent and raises the card AFTER it', () => {
+    const box = sandbox();
+    const repo = join(box.home, 'repo');
+    mkdirSync(join(repo, 'scripts'), { recursive: true });
+    const calls = join(box.home, 'calls.log');
+    const stub = (name, body = '') => {
+      writeFileSync(join(repo, 'scripts', name),
+        'import sys, json\n' +
+        `open(${JSON.stringify(calls)}, "a").write(${JSON.stringify(name)} + " " + " ".join(sys.argv[1:]) + "\\n")\n` + body);
+    };
+    stub('slot-label.py', 'print("13:00")\n');
+    stub('imessage-sweep.py', 'print("{}")\n');
+    stub('agent-dispatch.py', 'print("{}")\n');
+    stub('allowance.py', 'sys.exit(0)\n');
+    stub('inbound-triage.py',
+      'cmd = sys.argv[1] if len(sys.argv) > 1 else ""\n' +
+      'print(json.dumps({"ok": True}) if cmd == "health" else "{}")\n' +
+      'sys.exit(1 if cmd == "history-stale" else 0)\n');
+    writeFileSync(join(repo, 'scripts', 'slot-postrun.sh'), `#!/bin/bash\necho "slot-postrun.sh" >> ${JSON.stringify(calls)}\nexit "$2"\n`);
+    chmodSync(join(repo, 'scripts', 'slot-postrun.sh'), 0o755);
+    const claude = join(box.home, 'claude');
+    writeFileSync(claude, `#!/bin/bash\necho "claude" >> ${JSON.stringify(calls)}\nexit 0\n`);
+    chmodSync(claude, 0o755);
+    const token = join(box.home, 'token');
+    writeFileSync(token, 'fake-token');
+    execFileSync('bash', [RUNNER], {
+      encoding: 'utf8', stdio: 'pipe',
+      env: envFor(box, {
+        INBOUND_TRIAGE_RUNNER_REPO: repo, INBOUND_TRIAGE_RUNNER_CLAUDE: claude,
+        INBOUND_TRIAGE_RUNNER_LOG_DIR: join(box.home, 'logs'),
+        INBOUND_TRIAGE_RUNNER_DISPATCH_RUNS: join(box.home, 'dispatch'),
+        INBOUND_TRIAGE_RUNNER_TOKEN_FILE: token,
+      }),
+    });
+    const order = readFileSync(calls, 'utf8').trim().split('\n');
+    const at = (re) => order.findIndex((l) => re.test(l));
+    expect(at(/^inbound-triage\.py inbox-lessons$/)).toBeGreaterThan(-1);
+    expect(at(/^claude$/)).toBeGreaterThan(at(/^inbound-triage\.py inbox-lessons$/));
+    expect(at(/^inbound-triage\.py inbox-card --slot 13:00$/)).toBeGreaterThan(at(/^claude$/));
+    expect(at(/^slot-postrun\.sh$/)).toBeGreaterThan(at(/^inbound-triage\.py inbox-card/));
   });
 });
 
 describe('the one-off backlog', () => {
   const INBOX = `
-def msg(i, frm, subj):
-    return {"id": i, "threadId": "t" + i, "labelIds": ["INBOX"], "internalDate": 1789600000000,
-            "headers": {"from": frm, "subject": subj}, "body": ""}
-LISTS["in:inbox"] = [msg("d1", "Pat <pat@gmail.com>", "Holiday photos"),
-                     msg("d2", "agent@example.co.uk", "Re: viewing"),
-                     msg("d3", "noreply@example.com", "Your statement"),
-                     msg("d4", "x@example.com", "Lane mail still here"),
-                     msg("d5", "y@example.com", "Never decided")]
+def msg(i, frm, subj, body="Lovely to hear from you.", labels=None, ts=1789600000000):
+    return {"id": i, "threadId": "t" + i, "labelIds": ["INBOX"] + (labels or []), "internalDate": ts,
+            "headers": {"from": frm, "subject": subj}, "body": body}
+LISTS["in:inbox"] = [
+    msg("d1", "Pat <pat@gmail.com>", "Holiday photos"),                         # leave, asks nothing -> card
+    msg("d6", "Sam <sam@gmail.com>", "Dinner", body="Can you pay me back by Friday?"),  # leave, asks -> triage
+    msg("d2", "agent@example.co.uk", "Re: viewing"),                            # answered, to the sender -> archive
+    msg("d7", "tenant@example.com", "Boiler"),                                  # answered, forwarded only -> triage
+    msg("d3", "noreply@example.com", "Your statement"),                         # duplicate -> archive
+    msg("d4", "x@example.com", "Lane mail still here"),                         # label12 -> counted only
+    msg("d5", "y@example.com", "Never decided"),                                # no decision -> the scan's job
+    msg("d8", "Kim <kim@gmail.com>", "Kevin filed this", labels=["Label_7"]),   # Kevin's own label -> left alone
+]
+LISTS["in:sent"] = [
+    {"id": "s2", "threadId": "td2", "internalDate": 1789700000000, "headers": {"from": "kevin@runpreneur.org.uk", "to": "agent@example.co.uk"}},
+    {"id": "s7", "threadId": "td7", "internalDate": 1789700000000, "headers": {"from": "kevin@runpreneur.org.uk", "to": "roy@example.com"}},
+]
 (m.base_dir() / "digest-2026-09-20.jsonl").write_text("\\n".join(json.dumps(r) for r in [
     {"id": "d1", "do": "leave", "reason": "Photos from a friend, nothing to answer", "ts": "2026-09-20T09:00:00"},
+    {"id": "d6", "do": "leave", "reason": "A friend about dinner", "ts": "2026-09-20T09:00:00"},
     {"id": "d2", "do": "answered", "ts": "2026-09-20T09:01:00"},
+    {"id": "d7", "do": "answered", "ts": "2026-09-20T09:01:00"},
     {"id": "d3", "do": "duplicate", "ts": "2026-09-20T09:02:00"},
     {"id": "d4", "do": "label12", "ts": "2026-09-20T09:03:00"},
+    {"id": "d8", "do": "leave", "reason": "x", "ts": "2026-09-20T09:03:00"},
 ]) + "\\n")
+def holder(job, pid):
+    p = m.queue_holder_path()
+    p.parent.mkdir(parents=True, exist_ok=True)
+    p.write_text(json.dumps({"job": job, "pid": pid, "acquired_iso": "2026-10-14T19:00:00Z"}))
 DIGESTS = lambda: sorted(p.name + ":" + str(len(p.read_text().splitlines())) for p in m.base_dir().glob("digest-*.jsonl"))
+def backlog(apply):
+    buf = io.StringIO()
+    with contextlib.redirect_stdout(buf):
+        m.cmd_backlog(apply=apply, dispatch=ad)
+    return json.loads(buf.getvalue().strip().splitlines()[-1])
 `;
 
-  it('--dry-run reads the inbox and the digests and writes nothing to Gmail or Airtable', () => {
+  it('--dry-run reads the inbox, the sent folder and the digests, and writes nothing to Gmail or Airtable', () => {
     const box = sandbox();
     const r = runPy(box, INBOX + `
 before = DIGESTS()
-import io, contextlib
-buf = io.StringIO()
-with contextlib.redirect_stdout(buf):
-    m.cmd_backlog(apply=False, dispatch=ad, holder_path=os.path.join(${JSON.stringify(box.home)}, "no-lock"))
-res = json.loads(buf.getvalue().strip().splitlines()[-1])
-out({"res": res, "paths": sorted(set(c["path"] for c in CALLS)), "created": len(CREATED),
-     "digestsSame": before == DIGESTS(), "ledger": m.ledger_path().exists(),
+res = backlog(False)
+out({"res": res, "paths": sorted(set(c["path"] for c in CALLS)), "cards": len(STORE),
+     "patched": len(PATCHES), "digestsSame": before == DIGESTS(), "ledger": m.ledger_path().exists(),
      "preview": open(res["preview_file"]).read()})
 `);
-    expect(r.paths).toEqual(['/gmail/list']);
-    expect(r.created).toBe(0);
+    expect(r.paths).toEqual(['/gmail/labels', '/gmail/list']);
+    expect(r.cards).toBe(0);
+    expect(r.patched).toBe(0);
     expect(r.digestsSame).toBe(true);
     expect(r.ledger).toBe(false);
     expect(r.res).toMatchObject({
-      mode: 'dry-run', leave_to_card: 1, answered_to_file: 1, duplicate_to_file: 1,
-      decided_otherwise_still_in_inbox: { label12: 1 }, no_recorded_decision_in_inbox: 1,
-      card_groups: { person: 1 }, gmail_writes: 0, airtable_writes: 0,
+      mode: 'dry-run', to_card: 1, card_groups: { person: 1 },
+      to_triage_as_tasks: 2, to_triage_because_it_asks: 1, to_triage_because_answered_unconfirmed: 1,
+      to_archive: 2, to_archive_answered_confirmed: 1, to_archive_duplicate: 1,
+      skipped_user_label: 1, decided_otherwise_still_in_inbox: { label12: 1 },
+      already_awaiting_triage: 1, gmail_writes: 0, airtable_writes: 0,
     });
-    // The preview is the card itself, kept in the private state folder.
     expect(r.res.preview_file.startsWith(box.state)).toBe(true);
     expect(r.preview).toContain('pat@gmail.com | Holiday photos');
-    expect(r.preview).toContain('Photos from a friend, nothing to answer');
+    expect(r.preview).toContain('sam@gmail.com | Dinner (asks something: a ');
   });
 
-  it('--apply makes one card, labels and archives the leave mail, files the rest, and a re-run cards nothing twice', () => {
+  it('--apply refuses unless the queue runs it as inbound-triage-backlog', () => {
     const box = sandbox();
     const r = runPy(box, INBOX + `
-import io, contextlib
-lock = os.path.join(${JSON.stringify(box.home)}, "no-lock")
-with contextlib.redirect_stdout(io.StringIO()):
-    m.cmd_backlog(apply=True, dispatch=ad, holder_path=lock)
-    first = len(CREATED)
-    m.cmd_backlog(apply=True, dispatch=ad, holder_path=lock)
-out({"first": first, "second": len(CREATED) - first, "modifies": modifies(),
-     "name": CREATED[0][ad.AF["name"]]})
+_, unwrapped = attempt(lambda: m.cmd_backlog(apply=True, dispatch=ad))
+holder("inbound-triage-backlog", os.getppid() + 999999)
+_, other = attempt(lambda: m.cmd_backlog(apply=True, dispatch=ad))
+out({"unwrapped": unwrapped, "other": other, "calls": len(CALLS)})
 `);
-    expect(r.first).toBe(1);
+    expect(r.unwrapped.message).toMatch(/BACKLOG REFUSED: --apply runs only under the queue/);
+    expect(r.other.message).toMatch(/belongs to another process/);
+    expect(r.calls).toBe(0);
+  });
+
+  it('--apply under the queue: the no-ask email goes on the ONE open card, the rest is filed or sent back, Kevin\'s label untouched', () => {
+    const box = sandbox();
+    const r = runPy(box, INBOX + `
+cache({"o1": {"sender": "friend@gmail.com", "subject": "Earlier", "threadId": "to1", "internalDate": 1, "inbox": True, "ask": ""}})
+m.cmd_note("o1", "leave", "An earlier note from a friend, nothing asked")
+quiet(lambda: m.cmd_inbox_card("09:00", dispatch=ad))
+CALLS.clear()
+holder("inbound-triage-backlog", os.getppid())
+res = backlog(True)
+first_cards = len(STORE)
+res2 = backlog(True)
+d = digest()
+out({"res": res, "cards": len(STORE), "firstCards": first_cards, "patched": len(PATCHES),
+     "moves": modifies(), "output": card()[AF["agentOutput"]],
+     "retriage": sorted(r["id"] for r in d if r["do"] == "retriage"),
+     "second": res2.get("carded")})
+`);
+    // One card: the backlog's email was ADDED to the open run card.
+    expect(r.firstCards).toBe(1);
+    expect(r.cards).toBe(1);
+    expect(r.patched).toBe(1);
+    expect(r.output).toMatch(/From the backlog, .*\(1\)/);
+    expect(r.output).toContain('2. pat@gmail.com | Holiday photos');
+    const ids = r.moves.flatMap((p) => p.ids);
+    expect(r.moves[0]).toEqual({ ids: ['d1'], addLabels: [READ_LABEL], removeLabels: ['INBOX'] });
+    expect(r.moves[1]).toEqual({ ids: ['d2', 'd3'], removeLabels: ['INBOX'] });
+    // Lane mail, undecided mail, asks, unconfirmed answers and Kevin's own
+    // label are never moved; asks and unconfirmed answers go back to triage once.
+    for (const untouched of ['d4', 'd5', 'd6', 'd7', 'd8']) expect(ids).not.toContain(untouched);
+    expect(r.retriage).toEqual(['d6', 'd7']);
+    // A re-run (the stub inbox still lists d1) cards nothing a second time.
     expect(r.second).toBe(0);
-    expect(r.name).toMatch(/^INBOX BACKLOG: 1 email waiting in your inbox since \d{1,2} \w{3}, for you to read$/);
-    // First run: label + archive the leave mail, archive answered and duplicate.
-    expect(r.modifies.slice(0, 2)).toEqual([
-      { ids: ['d1'], addLabels: [READ_LABEL], removeLabels: ['INBOX'] },
-      { ids: ['d2', 'd3'], removeLabels: ['INBOX'] },
-    ]);
-    // Never touches lane mail or undecided mail.
-    for (const p of r.modifies) {
-      expect(p.ids).not.toContain('d4');
-      expect(p.ids).not.toContain('d5');
-    }
   });
 
   it('refuses while a triage slot holds the queue lock, before any Gmail call', () => {
     const box = sandbox();
-    const lock = join(box.home, 'holder.json');
-    writeFileSync(lock, JSON.stringify({ job: 'inbound-triage', acquired_iso: '2026-10-14T16:00:06Z' }));
     const r = runPy(box, INBOX + `
-_, err = attempt(lambda: m.cmd_backlog(apply=False, dispatch=ad, holder_path=${JSON.stringify(lock)}))
+holder("inbound-triage", 4242)
+_, err = attempt(lambda: m.cmd_backlog(apply=False, dispatch=ad))
 out({"err": err, "calls": len(CALLS)})
 `);
     expect(r.err.message).toMatch(/BACKLOG REFUSED: the inbound-triage slot holds the queue lock/);
     expect(r.calls).toBe(0);
   });
+});
+
+// ─── THE REAL GATE, A FAKE AIRTABLE ────────────────────────────────────────
+// The card is created by scripts/create-agent-task.py (through merge_card's
+// create_card, --force) in its own process, and read and written back by the
+// dispatcher's own client. A sitecustomize on PYTHONPATH sends every
+// api.airtable.com call from every one of those processes to this server and
+// refuses any other network call, so the test sees the exact HTTP the robots
+// would send. Nothing in the production scripts was changed to allow it.
+describe('the card through the real task gate, against a fake Airtable over HTTP', () => {
+  const records = new Map();
+  const seen = [];
+  let n = 0;
+  const server = createServer((req, res) => {
+    let body = '';
+    req.on('data', (c) => { body += c; });
+    req.on('end', () => {
+      const url = new URL(req.url, 'http://localhost');
+      const parts = url.pathname.split('/').filter(Boolean);   // v0, base, table, rec?
+      const send = (code, obj) => { res.writeHead(code, { 'Content-Type': 'application/json' }); res.end(JSON.stringify(obj)); };
+      const json = body ? JSON.parse(body) : null;
+      seen.push({ method: req.method, table: parts[2], rec: parts[3] || null, typecast: json && json.typecast });
+      if (parts[2] !== 'tblqB8b22hKBL4PF1') return send(200, { records: [] });
+      if (req.method === 'POST' && !parts[3]) {
+        n += 1;
+        const id = `recFAKE${String(n).padStart(10, '0')}`;
+        const rec = { id, createdTime: `2026-10-14T1${n}:00:00.000Z`, fields: { ...json.fields } };
+        records.set(id, rec);
+        return send(200, rec);
+      }
+      if (parts[3]) {
+        const rec = records.get(parts[3]);
+        if (!rec) return send(404, { error: 'NOT_FOUND' });
+        if (req.method === 'PATCH') Object.assign(rec.fields, json.fields);
+        return send(200, rec);
+      }
+      const formula = url.searchParams.get('filterByFormula') || '';
+      if (formula.includes('LEFT({Task Name}') && formula.includes("'Approval'")) {
+        return send(200, { records: [...records.values()].filter((r) => r.fields.fldx4qCw17UfrKpaN === 'Approval' && !r.fields.fldrHBSr6qoUfaKuZ) });
+      }
+      return send(200, { records: [] });
+    });
+  });
+  const listening = new Promise((r) => server.listen(0, '127.0.0.1', r));
+  afterAll(() => server.close());
+
+  it('creates ONE Approval card through create-agent-task.py, then adds the next run to it', async () => {
+    await listening;
+    const box = sandbox();
+    mkdirSync(join(box.home, '.config/od'), { recursive: true });
+    writeFileSync(join(box.home, '.config/od/airtable_pat'), 'fake-pat');
+    const site = join(box.home, 'site');
+    mkdirSync(site);
+    writeFileSync(join(site, 'sitecustomize.py'), `
+import os, urllib.request, urllib.error
+_BASE = os.environ.get("FAKE_AIRTABLE_BASE")
+if _BASE:
+    _orig = urllib.request.urlopen
+    def _redirect(req, *a, **k):
+        url = req.full_url if isinstance(req, urllib.request.Request) else str(req)
+        if url.startswith("https://api.airtable.com"):
+            new = _BASE + url[len("https://api.airtable.com"):]
+            if isinstance(req, urllib.request.Request):
+                req = urllib.request.Request(new, data=req.data, headers=dict(req.header_items()), method=req.get_method())
+            else:
+                req = new
+        elif not url.startswith(_BASE):
+            raise urllib.error.URLError("network blocked in test: " + url.split("?")[0])
+        return _orig(req, *a, **k)
+    urllib.request.urlopen = _redirect
+`);
+    const py = `
+import importlib.util, json, sys, os, io, contextlib
+sys.path.insert(0, ${JSON.stringify(SCRIPTS)})
+spec = importlib.util.spec_from_file_location("t", ${JSON.stringify(TRIAGE)})
+m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m)
+m.worker_post = lambda path, payload, sleep=None: (
+    {"labels": ${JSON.stringify(LABELS)}} if path == "/gmail/labels" else {"modified": 1})
+(m.base_dir() / "scan-cache.json").write_text(json.dumps({
+    i: {"sender": i + "@gmail.com", "subject": "Hello " + i, "threadId": "t" + i,
+        "internalDate": 1791800000000, "inbox": True, "ask": ""} for i in ("a", "b", "c")}))
+res = []
+with contextlib.redirect_stdout(io.StringIO()) as buf:
+    m.cmd_note("a", "leave", "A friend saying hello, nothing asked")
+    m.cmd_note("b", "leave", "Another friend saying hello, nothing asked")
+    m.cmd_inbox_card("09:00")
+    m.cmd_note("c", "leave", "A third friend saying hello, nothing asked")
+    m.cmd_inbox_card("13:00")
+print("RESULT " + json.dumps([json.loads(l) for l in buf.getvalue().splitlines() if l.startswith('{"card"')]))
+`;
+    const { stdout } = await run('python3', ['-c', py], {
+      encoding: 'utf8', timeout: 120000,
+      env: envFor(box, { PYTHONPATH: site, FAKE_AIRTABLE_BASE: `http://127.0.0.1:${server.address().port}` }),
+    });
+    const steps = JSON.parse(stdout.split('\n').filter((l) => l.startsWith('RESULT ')).pop().slice(7));
+    expect(steps.map((s) => s.card)).toEqual(['created', 'appended']);
+    const tasks = [...records.values()];
+    expect(tasks.length).toBe(1);
+    const f = tasks[0].fields;
+    expect(f.fldx4qCw17UfrKpaN).toBe('Approval');                     // Status
+    expect(f.fld30Yw8SWYVp049g).toEqual([RESPONSE]);                  // Sent For Approval By
+    expect(f.flduCtmQGpOA4eWaj).toEqual([RESPONSE]);                  // Team Member
+    expect(f.fldgFjGBw6bTKJFCD).toMatch(/^INBOX: 3 emails for you to read, since \d{1,2} \w{3} 09:00$/);
+    expect([...f.fldzswp8fx6PqpLQ5.matchAll(/^(\d+)\. /gm)].map((x) => Number(x[1]))).toEqual([1, 2, 3]);
+    expect(f.fldR7apBzSp3oxFxz).toContain('INBOX CARD MESSAGE IDS: a,b,c');
+    // The gate's create went out with typecast OFF, as every gate create does.
+    const create = seen.find((s) => s.method === 'POST' && s.table === 'tblqB8b22hKBL4PF1' && !s.rec);
+    expect(create.typecast).toBe(false);
+  }, 120000);
 });
 
 describe('the sandbox held', () => {

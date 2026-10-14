@@ -99,6 +99,12 @@ All commands run from the main checkout
   labelled by hand without being archived: skip it here (the stranded check
   covers it) and log it with `note --do duplicate`, which files it out of the
   inbox.
+- **`stale_to_triage` is decided like new mail (14 Oct 2026).** It lists inbox
+  mail older than 2 days that has no decision yet, was deferred, or was sent
+  back by the one-off backlog ("retriage": it asked something, or its
+  "answered" could not be confirmed). Run Step 2 on each exactly as on
+  `new_inbox`. Mail Kevin filed under a label of his own is not in it: that
+  is his, leave it alone.
 
 **NOTHING YOU DECIDE STAYS IN THE INBOX (Kevin, 14 Oct 2026):** "Anything I
 need to see should come as an approval card. But ensuring that feedback I give
@@ -140,15 +146,18 @@ the `list-unsubscribe` header (its presence = machine mail).
      with `act --do label12 --override "<why it is human>"` — the override
      is logged in the digest so a wrong flag gets found.
 
-0. **Already answered by us — no task (Kevin's ruling, 25 Aug 2026):** check
-   the scan's `sent_threads` map first. If this message's `threadId` is in it
-   with a LATER time than the message's own `internalDate`, we spoke last:
-   Kevin (or an agent send) has already answered this thread. Log
-   `note --do answered` and create nothing: the note files it out of the
-   inbox (archive, reversible), because he has handled it (Kevin, 14 Oct
-   2026; this replaces "his inbox tidying is his"). If the sent time is EARLIER than this message,
-   the sender replied to us: this is live conversation, continue to rule 1
-   (the Step 3 dedupe will UPDATE the thread's task rather than duplicate it).
+0. **Already answered by us — no task (Kevin's ruling, 25 Aug 2026):** the
+   scan stamps every message with `reply_state`. `"answered"` means a later
+   send on its thread (a different message) went TO this message's sender:
+   Kevin (or an agent send) has already answered. Log `note --do answered` and
+   create nothing: the note files it out of the inbox (archive, reversible),
+   because he has handled it (Kevin, 14 Oct 2026; this replaces "his inbox
+   tidying is his"). `"elsewhere"` means the later sends went only to other
+   people, a forward to Roy or the accountant: that is NOT an answer, the
+   script refuses `note --do answered` on it, so decide it under the rules
+   below. `""` means nothing was sent after it: if the sender replied to us,
+   this is live conversation, continue to rule 1 (the Step 3 dedupe will
+   UPDATE the thread's task rather than duplicate it).
 
 0b. **The history book (Kevin's approved revamp, 1 Sep 2026):** the runner
    pre-reads `$SCRATCH/history-book.json` — for each sender, where their mail
@@ -216,22 +225,41 @@ the `list-unsubscribe` header (its presence = machine mail).
    a recurring payment that starts, changes or ends: that is rule 1b.
    Machine-generated AND no ask = archive. NEVER archive an email written by
    a human being without creating a task for it — this is the hard guardrail
-   (for mail he only needs to read, the INBOX card in rule 6 is that task).
-6. **For Kevin to read — his INBOX card (Kevin, 14 Oct 2026):** an email a
-   human wrote that Kevin should read himself but needs no reply or action
-   from the robots, personal mail included. Before you choose this, check
-   your `## Lessons from Kevin`: a note on an earlier INBOX card that says he
-   does not need to see this kind of mail wins, so file or archive it instead
-   and name the lesson in your `--reason`. Otherwise:
+   (for mail he only needs to read, the INBOX card in rule 6 is that task; a
+   family receipt or acknowledgement is the one exception, rule 6).
+6. **For Kevin to read — his INBOX card (Kevin, 14 Oct 2026):** ONLY an
+   email a person wrote that asks NOTHING of anyone, Kevin included: no ask,
+   no decision, no payment, no deadline and no date. Any of those makes it
+   work, not reading: rule 1, a task, as always (the robots never pay, so
+   "please pay by Friday" is never a card to read). The script enforces this:
+   `note --do leave` refuses a message whose subject or own words carry an
+   ask, a question, a payment, a decision, a deadline or a date (`ask` in the
+   scan cache). Only if the signal is plainly wrong add `--override "<why it
+   asks nothing>"`; the override is logged.
+   Family and personal mail follows Kevin's 17 Sep 2026 protocol
+   (`Knowledge/inbox-decision-protocol.md`), word for word: "**Family and
+   personal:** a card when there is a decision for Kevin, or information he
+   needs to know about his family or his children. Kevin expects the agents to
+   help with personal matters. Receipts and acknowledgements (a dinner money
+   receipt) are filed with no card. This replaces the older Triage rule that
+   filed all personal mail." So: a family decision is rule 1 (a task the
+   agents help with); family information he needs to know goes on this card;
+   a family receipt or acknowledgement is archived with no card (`act --do
+   archive`, reason "family receipt, filed with no card: protocol 17 Sep";
+   the one human-written mail rule 5 lets you archive without a task).
+   Before you choose this, check your `## Lessons from Kevin`: a note on an
+   earlier INBOX card that says he does not need to see this kind of mail
+   wins, so file or archive it instead and name the lesson in your
+   `--reason`. Otherwise:
 
        python3 scripts/inbound-triage.py note --id <id> --do leave --reason "<one line: what it is and why he should see it>"
 
    The `--reason` is the line Kevin reads on the card, in your own words,
    never text copied from the email. The script labels the message "19: for
-   Kevin to read", archives it (nothing deleted) and queues it for this run's
-   ONE INBOX card (Step 6). If it refuses with LABEL MISSING, stop using
-   `leave`, leave those messages untouched, and say so loudly in your report:
-   the label has to exist before anything is archived under it.
+   Kevin to read", archives it (nothing deleted) and queues it for his INBOX
+   card (Step 6). If it refuses with LABEL MISSING, stop using `leave`, leave
+   those messages untouched, and say so loudly in your report: the label has
+   to exist before anything is archived under it.
 
 **When unsure between outcomes, choose label 12. When unsure between archive
 and anything else, do not archive.** A wrong task costs Kevin a click; a
@@ -260,7 +288,10 @@ the board — an open task for a done reply is noise (Kevin's ruling, 25 Aug
    ONLY if, for EVERY one of its threads, `sent_threads[threadId]` is LATER
    than ALL of the task's own inbound evidence: its `Created Time`, its
    `Inbound Date Received`, and the newest `NEW MESSAGE <date>` or
-   `REOPENED <date>` line in its Description. Do NOT test against this
+   `REOPENED <date>` line in its Description. AND one of those later sends in
+   `sent_thread_sends[threadId]` must have gone TO the task's `Inbound Sender`
+   (its `to` list): a forward to Roy or the accountant answers nobody (14 Oct
+   2026). Do NOT test against this
    scan's inbox lists — Step 3's own update path removes handled mail from
    the inbox and the watermark moves past it, so the scan window proves
    nothing about who spoke last; the task's own stamps do. A date-only stamp
@@ -610,9 +641,11 @@ Then raise Kevin's INBOX card, once, after every decision of every cycle:
 
     python3 scripts/inbound-triage.py inbox-card --slot "<the slot you were given>"
 
-It lists every email you queued with `note --do leave` this run on ONE
-approval card ("INBOX: N emails for you to read, <date> <slot>"), grouped by
-sender type, each with its sender, subject, your one-line summary and its
+It puts every email you queued with `note --do leave` on Kevin's ONE open
+INBOX card ("INBOX: N emails for you to read, since <date> <slot>"): added
+under a dated heading to the card he has not decided yet, or on a new card
+when none is open, so he never has two reading lists to tell apart. Grouped
+by sender type, each with its sender, subject, your one-line summary and its
 Gmail link, owned by Inbox Response so a "reply to 2 saying yes" note gets
 worked. `"card": "none"` means nothing was queued. A failure keeps the emails
 queued for the next card: report it loudly. The runner calls the same command
@@ -621,8 +654,10 @@ after you finish, so a skipped step is caught, but do not rely on that.
 Then the score. `waiting` = messages still needing triage or a task after
 this run: deferred count + failed count + any stranded email still without a
 task. Do NOT add the inbox mail older than 2 days yourself: the script adds
-it, counted from this run's scan minus everything this run took out of the
-inbox, so the score can never read 0 over a full inbox (Kevin, 14 Oct 2026).
+it, counted from this slot's scan minus everything this run took out of the
+inbox and minus what you deferred (already in your count), so the score can
+never read 0 over a full inbox (Kevin, 14 Oct 2026). It refuses when this
+slot's scan did not complete: report that, never a guessed score.
 `leave` decisions are not waiting: they are on his card and out of the inbox.
 
     python3 scripts/inbound-triage.py score --waiting <N>
