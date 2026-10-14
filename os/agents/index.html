@@ -8358,6 +8358,10 @@ function homeEmbedWatchHeight(){
     const ro = new ResizeObserver(() => { if(!raf) raf = requestAnimationFrame(send); });
     ['main','loader'].forEach(id => { const el = document.getElementById(id); if(el) ro.observe(el); });
     send();
+    // A page in a hidden or covered browser tab runs no animation frames, so the observer's send never
+    // came and the frame stayed at its first height (live, 14 Oct 2026: 432px around 17,000px of cards).
+    // A once-a-second check posts only on a change.
+    setInterval(send, 1000);
 }
 // The brief as last drawn on Home (records shown + the London day), so a refresh redraws it when
 // either changes, the day turning over at midnight included.
