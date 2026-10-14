@@ -310,7 +310,9 @@ ASK_SIGNALS = (
         r"\b(?:by|before|until)\s+(?:the\s+)?" + _A_DATE + r"\b|\bdeadline\b|\bexpires?\b", re.I)),
     ("a request to act", re.compile(
         # "please" + any word, except the fixed politeness that asks nothing.
-        r"\bplease\s+(?!(?:find|note|enjoy|do not (?:reply|respond)|don'?t (?:reply|respond))\b)[a-z]+"
+        r"\bplease\s+(?!(?:find|note|enjoy|do not (?:reply|respond|hesitate)|don'?t (?:reply|respond|hesitate)"
+        r"|consider the environment|see (?:the )?(?:attached|below)|be (?:advised|aware)"
+        r"|accept (?:my|our) apolog\w*|give (?:my|our) love)\b)[a-z]+"
         r"|\bkindly\b|\bgrateful if\b|\b(?:need|needs|require|requires)\s+(?:your|you to)\b"
         r"|\b(?:can|could|would) you\b|\blet (?:me|us) know\b"
         r"|\bfor you to (?:complete|return|sign|fill|send)\b"
@@ -341,9 +343,35 @@ def direct_question(text):
     return ""
 
 
+# THE SIGN-OFF AND THE SMALL PRINT ASK NOTHING (fourth review of PR #783).
+# "Please consider the environment before printing" and "if you are not the
+# intended recipient, please notify the sender" sit under half the mail a
+# person sends, so the check reads only what comes before the sign-off or the
+# disclaimer. The quoted history is already gone (the gate's unquoted_body).
+SIGNOFF_RE = re.compile(
+    r"^[ \t]*(?:--[ \t]*$|(?:kind|best|warm|many)\s+(?:regards|thanks)\b|regards,?[ \t]*$"
+    r"|thanks,?[ \t]*$|thank you,?[ \t]*$|cheers,?[ \t]*$|yours (?:sincerely|faithfully|truly)\b"
+    r"|sent from my \w+)", re.I | re.M)
+DISCLAIMER_RE = re.compile(
+    r"(?:this e-?mail (?:and any|is confidential|may contain|message is)|confidentiality notice"
+    r"|\bdisclaimer\b|if you are not the intended recipient|please consider the environment"
+    r"|registered (?:in england|office))", re.I)
+
+
+def strip_signature(text):
+    """The sender's words above their sign-off and any disclaimer. A sign-off
+    with nothing written above it ("Thanks," as a first line) is not one."""
+    t = str(text or "")
+    cuts = [next((m.start() for m in rx.finditer(t) if t[:m.start()].strip()), None)
+            for rx in (SIGNOFF_RE, DISCLAIMER_RE)]
+    cuts = [c for c in cuts if c is not None]
+    return t[:min(cuts)] if cuts else t
+
+
 def ask_signal(subject, own_words):
     """'' when the subject and the sender's own words ask nothing of the
     reader, else what was found ("money due (pay)"). Pure, so the tests drive it."""
+    own_words = strip_signature(own_words)
     text = "%s\n%s" % (subject or "", own_words or "")
     for label, rx in ASK_SIGNALS:
         m = rx.search(text)
@@ -1434,7 +1462,7 @@ def card_name(total, opened):
     return "%s%d %s for you to read, since %s" % (INBOX_CARD_PREFIX, total, _noun(total), opened)
 
 
-def inbox_card_fields(name, text, ids, dispatch, today_iso):
+def inbox_card_fields(name, text, ids, dispatch, today_iso, deferred_until=None):
     """The task fields for a new card, keyed by the pipeline's own field map
     (agent-dispatch.py AF), so the card is the shape every surface reads: Status
     Approval with Sent For Approval By set (the queue hides a card without it).
@@ -1466,6 +1494,7 @@ def inbox_card_fields(name, text, ids, dispatch, today_iso):
             "different emails." % READ_LABEL_NAME),
         AF["notes"]: INBOX_CARD_IDS + ",".join(ids),
         AF["plainSummary"]: card_plain_summary(len(ids)),
+        **({AF["deferredUntil"]: deferred_until} if deferred_until else {}),
     }
 
 
@@ -1480,8 +1509,9 @@ def _load_dispatch():
     return mod
 
 
-CARD_PLACEHOLDER = ("INBOX LIST BEING WRITTEN: the list of emails is added in a moment. If you can read "
-                    "this line, the write failed and the card was cancelled.")
+CARD_PLACEHOLDER_HEAD = "INBOX LIST BEING WRITTEN:"
+CARD_PLACEHOLDER = (CARD_PLACEHOLDER_HEAD + " the list of emails is added in a moment. If you can read "
+                    "this line, the write failed; the next card step cancels this card.")
 
 
 def _create_card(fields):
@@ -1531,6 +1561,7 @@ def raise_or_append(sections, ad, opened):
     Returns (task_id, "created"|"appended"|"already", carded_ids)."""
     AF = ad.AF
     items = [i for _, part in sections for i in part]
+    cancel_stale_placeholders(ad)
     public = _load_gate().PUBLIC_MAIL_DOMAINS
     cards = open_inbox_cards(ad)
     if cards:
@@ -1573,25 +1604,76 @@ def raise_or_append(sections, ad, opened):
     # with `ps`, and the list holds senders and subjects. So the card is made
     # through the gate with a placeholder in Agent Output (its first line is
     # not the card's own, so nothing can mistake it for an open card), and the
-    # list goes in by the dispatcher's own write, in the request body, then is
-    # read back.
+    # list goes in by the dispatcher's own write, in the request body.
+    #
+    # THE PLACEHOLDER IS BORN HIDDEN (fourth review). It is created with
+    # Deferred Until = tomorrow, which every surface that shows a card skips:
+    # the page's queue (APV_QUEUE_FORMULA), the Slack post sweep and the 08:00
+    # digest (NOT_DEFERRED in scripts/slack-automation/approvals.js) and
+    # open_inbox_cards here. The SAME write that adds the list clears it, and
+    # the read-back checks the list landed, the card is no longer deferred and
+    # no verdict arrived. A failed write leaves a hidden placeholder: it is
+    # cancelled (clearing the date in that write, so the knock-back invariant
+    # holds), and if even that fails it stays hidden, the next card step
+    # cancels it (cancel_stale_placeholders), and the emails stay queued.
     task_id = _create_card(inbox_card_fields(card_name(len(shown), opened), CARD_PLACEHOLDER, shown,
-                                             ad, date.today().isoformat()))
+                                             ad, date.today().isoformat(),
+                                             deferred_until=ad.tomorrow_london()))
     try:
-        ad.patch_task(task_id, {AF["agentOutput"]: text})
-        back = str(((ad.get_task(task_id) or {}).get("fields") or {}).get(AF["agentOutput"]) or "")
-        if not back.startswith(INBOX_CARD_HEAD):
+        ad.patch_task(task_id, {AF["agentOutput"]: text, AF["deferredUntil"]: None})
+        back = ((ad.get_task(task_id) or {}).get("fields") or {})
+        if not str(back.get(AF["agentOutput"]) or "").startswith(INBOX_CARD_HEAD):
             raise RuntimeError("its list did not land on read-back")
+        if back.get(AF["deferredUntil"]):
+            raise RuntimeError("it still reads deferred on read-back")
+        if ad.sel(back.get(AF["approvalOutcome"])) or ad.sel(back.get(AF["status"])) != "Approval":
+            raise RuntimeError("a verdict or a status change arrived before its list")
     except Exception as e:  # noqa: BLE001 — never leave a placeholder card in his queue
-        try:
-            ad.patch_task(task_id, {AF["status"]: "Cancelled", AF["notes"]: (
-                "INBOX CARD CANCELLED: the list could not be written (%s); the emails stay queued "
-                "for the next card." % str(e)[:160])})
-        except Exception:  # noqa: BLE001 — named in the error below instead
-            pass
-        raise RuntimeError("INBOX card %s was created but its list could not be written (%s); it "
-                           "was cancelled" % (task_id, str(e)[:160]))
+        cancelled = cancel_placeholder(ad, task_id, str(e))
+        raise RuntimeError("INBOX card %s was created but its list could not be written (%s); %s"
+                           % (task_id, str(e)[:160],
+                              "it was cancelled" if cancelled else
+                              "the cancel failed too, so it stays hidden (deferred) and the next "
+                              "card step cancels it"))
     return task_id, "created", shown
+
+
+def cancel_placeholder(ad, task_id, why):
+    """Cancel a placeholder card, clearing Deferred Until in the same write.
+    True when it worked; a failure is said on stderr, never swallowed."""
+    AF = ad.AF
+    try:
+        ad.patch_task(task_id, {AF["status"]: "Cancelled", AF["deferredUntil"]: None, AF["notes"]: (
+            "INBOX CARD CANCELLED: the list could not be written (%s); the emails stay queued "
+            "for the next card." % str(why)[:160])})
+        return True
+    except Exception as e:  # noqa: BLE001 — reported loudly here and by the caller
+        progress("INBOX CARD %s NOT CANCELLED (%s): it stays deferred and hidden until the next "
+                 "card step cancels it." % (task_id, str(e)[:160]))
+        return False
+
+
+def cancel_stale_placeholders(ad):
+    """Cancel any placeholder an earlier step could not cancel. Run before
+    every card write, so a hidden placeholder never reaches the day its
+    deferral ends. Returns the ids cancelled; a failed read is said, not fatal."""
+    AF = ad.AF
+    try:
+        rows = ad.query_tasks("AND(LEFT({Task Name},%d)='%s',{Status}='Approval',"
+                              "LEFT({Agent Output}&'',%d)='%s')"
+                              % (len(INBOX_CARD_PREFIX), INBOX_CARD_PREFIX,
+                                 len(CARD_PLACEHOLDER_HEAD), CARD_PLACEHOLDER_HEAD))
+    except Exception as e:  # noqa: BLE001 — the write path still works without it
+        progress("INBOX placeholder check NOT CHECKED: %s" % str(e)[:160])
+        return []
+    done = []
+    for r in rows:
+        f = r.get("fields") or {}
+        if (str(f.get(AF["name"]) or "").startswith(INBOX_CARD_PREFIX)
+                and str(f.get(AF["agentOutput"]) or "").startswith(CARD_PLACEHOLDER_HEAD)
+                and cancel_placeholder(ad, r["id"], "an earlier card step left it")):
+            done.append(r["id"])
+    return done
 
 
 def cmd_inbox_card(slot=None, dry_run=False, dispatch=None):

@@ -80,6 +80,8 @@ m._fail_quiet["on"] = True
 AF = ad.AF
 CALLS, CREATED, PATCHES, STORE = [], [], [], {}
 FAIL_LIST_WRITE = False
+FAIL_CANCEL = False
+VERDICT_DURING_WRITE = False
 LABELS = ${JSON.stringify(LABELS)}
 LISTS = {}            # gmail query fragment -> messages
 def fake_worker(path, payload, sleep=None):
@@ -104,19 +106,28 @@ def fake_create(fields):
     return rid
 m._create_card = fake_create
 def fake_query(formula, max_records=None, minimal=False):
+    if "LEFT({Agent Output}" in formula:
+        return [json.loads(json.dumps(r)) for r in STORE.values()
+                if ad.sel(r["fields"].get(AF["status"])) == "Approval"
+                and str(r["fields"].get(AF["agentOutput"]) or "").startswith(m.CARD_PLACEHOLDER_HEAD)]
     if "LEFT({Task Name}" in formula and "'Approval'" in formula:
         return [json.loads(json.dumps(r)) for r in STORE.values()
                 if ad.sel(r["fields"].get(AF["status"])) == "Approval"
-                and not r["fields"].get(AF["approvalOutcome"])]
+                and not r["fields"].get(AF["approvalOutcome"])
+                and not r["fields"].get(AF["deferredUntil"])]
     return []
 ad.query_tasks = fake_query
 ad.get_task = lambda tid: json.loads(json.dumps(STORE[tid]))
 def fake_patch(tid, fields):
     if FAIL_LIST_WRITE and AF["agentOutput"] in fields:
         raise RuntimeError("Airtable 503")
+    if FAIL_CANCEL and fields.get(AF["status"]) == "Cancelled":
+        raise RuntimeError("Airtable 503 on cancel")
     if AF["notes"] in fields and AF["status"] not in fields:
         PATCHES.append(tid)       # an append: the card's message-id line changed
     STORE[tid]["fields"].update(json.loads(json.dumps(fields)))
+    if VERDICT_DURING_WRITE and AF["agentOutput"] in fields:
+        STORE[tid]["fields"][AF["approvalOutcome"]] = "Rejected"
     return STORE[tid]
 ad.patch_task = fake_patch
 def cache(entries):
@@ -343,19 +354,71 @@ out({"output": card()[AF["agentOutput"]], "cards": len(STORE)})
     expect(o).toContain('4. aunt@gmail.com | A note');
   });
 
-  it('a card whose list cannot be written is cancelled, never left as a placeholder, and the emails stay queued', () => {
+  it('the placeholder is created hidden (deferred) and the write that adds the list un-hides it', () => {
+    const box = sandbox();
+    const r = runPy(box, `${TWO_IN_INBOX}${LEAVE_AB}
+quiet(lambda: m.cmd_inbox_card("13:00", dispatch=ad))
+out({"created": CREATED[0], "after": card(), "tomorrow": ad.tomorrow_london(),
+     "deferredKey": AF["deferredUntil"], "outKey": AF["agentOutput"]})
+`);
+    // As created through the gate: deferred to tomorrow, carrying only the placeholder.
+    expect(r.created[r.deferredKey]).toBe(r.tomorrow);
+    expect(r.created[r.outKey]).toMatch(/^INBOX LIST BEING WRITTEN:/);
+    // After the one write: the list, and no longer deferred.
+    expect(r.after[r.outKey]).toMatch(/^INBOX CARD: 2 emails/);
+    expect(r.after[r.deferredKey]).toBeNull();
+  });
+
+  it('a card whose list cannot be written is cancelled and un-deferred, and the emails stay queued', () => {
     const box = sandbox();
     const r = runPy(box, `${TWO_IN_INBOX}${LEAVE_AB}
 FAIL_LIST_WRITE = True
 _, err = attempt(lambda: m.cmd_inbox_card("13:00", dispatch=ad))
-out({"err": err, "status": card()[AF["status"]], "notes": card()[AF["notes"]],
+out({"err": err, "status": card()[AF["status"]], "deferred": card().get(AF["deferredUntil"]),
      "output": card()[AF["agentOutput"]],
      "queued": sorted(json.loads(l)["id"] for l in m.pending_path().read_text().splitlines())})
 `);
-    expect(r.err.message).toMatch(/created but its list could not be written .*cancelled/);
+    expect(r.err.message).toMatch(/created but its list could not be written .*it was cancelled/);
     expect(r.status).toBe('Cancelled');
+    // Cleared in the cancel write: a future Deferred Until off Approval breaks the knock-back invariant.
+    expect(r.deferred).toBeNull();
     expect(r.output.startsWith('INBOX CARD:')).toBe(false);
     expect(r.queued).toEqual(['mA', 'mB']);
+  });
+
+  it('a verdict that lands before the list is caught on read-back: the card is cancelled, the emails stay queued', () => {
+    const box = sandbox();
+    const r = runPy(box, `${TWO_IN_INBOX}${LEAVE_AB}
+VERDICT_DURING_WRITE = True
+_, err = attempt(lambda: m.cmd_inbox_card("13:00", dispatch=ad))
+out({"err": err, "status": card()[AF["status"]],
+     "queued": sorted(json.loads(l)["id"] for l in m.pending_path().read_text().splitlines())})
+`);
+    expect(r.err.message).toMatch(/a verdict or a status change arrived before its list/);
+    expect(r.status).toBe('Cancelled');
+    expect(r.queued).toEqual(['mA', 'mB']);
+  });
+
+  it('if the cancel fails too, the placeholder stays hidden and the next card step cancels it', () => {
+    const box = sandbox();
+    const r = runPy(box, `${TWO_IN_INBOX}${LEAVE_AB}
+FAIL_LIST_WRITE = True
+FAIL_CANCEL = True
+_, err = attempt(lambda: m.cmd_inbox_card("13:00", dispatch=ad))
+stuck = dict(card())
+FAIL_LIST_WRITE = False
+FAIL_CANCEL = False
+quiet(lambda: m.cmd_inbox_card("17:00", dispatch=ad))
+out({"err": err, "stuckStatus": stuck[AF["status"]], "stuckDeferred": stuck.get(AF["deferredUntil"]),
+     "firstNow": card(0)[AF["status"]], "second": card(1)[AF["agentOutput"]], "cards": len(STORE)})
+`);
+    expect(r.err.message).toMatch(/the cancel failed too, so it stays hidden \(deferred\)/);
+    expect(r.stuckStatus).toBe('Approval');
+    expect(r.stuckDeferred).toBeTruthy();
+    // Next step: the stuck placeholder is cancelled, and the emails reach a real card.
+    expect(r.firstNow).toBe('Cancelled');
+    expect(r.cards).toBe(2);
+    expect(r.second).toMatch(/^INBOX CARD: 2 emails/);
   });
 
   it('a concrete ask is caught; a bare or rhetorical question mark is not (second review)', () => {
@@ -382,6 +445,18 @@ cases = {
   "pleaseCall": ("Call", "Please call me."),
   "politeNewsletter": ("October news", "Please find our October newsletter below. Please do not reply to this email."),
   "politeNote": ("Opening hours", "Please note our office closes early on bank holidays."),
+  "environment": ("Minutes", "Here are the minutes.\\n\\nPlease consider the environment before printing this email."),
+  "hesitate": ("Update", "All done on our side. Please do not hesitate to contact me with any questions."),
+  "intended": ("Minutes", "Here are the minutes. If you are not the intended recipient, please notify us and delete it."),
+  "seeAttached": ("Minutes", "Please see attached the minutes from Tuesday."),
+  "seeBelow": ("News", "Please see below our latest update."),
+  "advised": ("Move", "Please be advised the office moves next month."),
+  "aware": ("Road", "Please be aware the road is closed this weekend."),
+  "apologies": ("Sorry", "Please accept my apologies for missing the call."),
+  "love": ("Hello", "Please give my love to the kids."),
+  "signoff": ("Hello", "Lovely to see you all.\\n\\nKind regards\\nPat\\nPlease call 01234 567890 for bookings."),
+  "disclaimer": ("Minutes", "Minutes attached. This email and any attachments are confidential; please notify the sender if received in error."),
+  "askAboveSignoff": ("Lease", "Can you sign the lease?\\n\\nKind regards\\nPat"),
 }
 out({k: m.ask_signal(subj, q(body)) for k, (subj, body) in cases.items()})
 `);
@@ -401,6 +476,10 @@ out({k: m.ask_signal(subj, q(body)) for k, (subj, body) in cases.items()})
     expect(r.arrears).toMatch(/^money due \(arrears\)/);
     expect(r.politeNewsletter).toBe('');
     expect(r.politeNote).toBe('');
+    // Fourth review: boilerplate under or around a person's words asks nothing.
+    for (const k of ['environment', 'hesitate', 'intended', 'seeAttached', 'seeBelow', 'advised', 'aware',
+      'apologies', 'love', 'signoff', 'disclaimer']) expect(r[k], k).toBe('');
+    expect(r.askAboveSignoff).toMatch(/^a request to act \(Can you\)/);
   });
 
   it('without the label it refuses before moving anything, and lane 12 is never the read label', () => {
@@ -975,8 +1054,13 @@ describe('the card through the real task gate, against a fake Airtable over HTTP
         return send(200, rec);
       }
       const formula = url.searchParams.get('filterByFormula') || '';
+      if (formula.includes('LEFT({Agent Output}')) {
+        return send(200, { records: [...records.values()].filter((r) => r.fields.fldx4qCw17UfrKpaN === 'Approval'
+          && String(r.fields.fldzswp8fx6PqpLQ5 || '').startsWith('INBOX LIST BEING WRITTEN:')) });
+      }
       if (formula.includes('LEFT({Task Name}') && formula.includes("'Approval'")) {
-        return send(200, { records: [...records.values()].filter((r) => r.fields.fldx4qCw17UfrKpaN === 'Approval' && !r.fields.fldrHBSr6qoUfaKuZ) });
+        return send(200, { records: [...records.values()].filter((r) => r.fields.fldx4qCw17UfrKpaN === 'Approval'
+          && !r.fields.fldrHBSr6qoUfaKuZ && !r.fields.fldJ9IHS1yxwYzYSN) });
       }
       return send(200, { records: [] });
     });
@@ -1050,6 +1134,9 @@ print("RESULT " + json.dumps([json.loads(l) for l in buf.getvalue().splitlines()
     // carries the placeholder, never a sender or a subject.
     expect(create.body).not.toMatch(/@gmail\.com|Hello [abc]/);
     expect(create.body).toContain('INBOX LIST BEING WRITTEN');
+    // Born hidden, and the list write un-hid it.
+    expect(JSON.parse(create.body).fields.fldJ9IHS1yxwYzYSN).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+    expect(f.fldJ9IHS1yxwYzYSN).toBeNull();
   }, 120000);
 });
 
