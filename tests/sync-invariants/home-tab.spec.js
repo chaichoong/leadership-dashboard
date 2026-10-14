@@ -409,4 +409,235 @@ test.describe('Home: one scroll of the real pages', () => {
     await page.evaluate(() => switchTab('home'));
     await page.waitForFunction(() => document.getElementById('homeAgentsFrame').contentWindow.__rereads > 0, { timeout: 5000 });
   });
+
+  // Kevin, 14 Oct 2026: the sections inside the frame sat 138px further in than the dashboard and Wealth on
+  // his 1,920px screen, and the three links at the top opened pages already in the sidebar. Now every
+  // section shares one left and right edge, and a pinned row of five buttons jumps to each.
+  test('on a wide screen every section starts and ends on the same edges', async ({ page }) => {
+    await page.setViewportSize({ width: 1920, height: 1080 });
+    await open(page, 'home');
+    await waitForHomeFrame(page);
+    const edges = await page.evaluate(() => {
+      const f = document.getElementById('homeAgentsFrame'), d = f.contentDocument, fr = f.getBoundingClientRect();
+      const own = el => { const r = el.getBoundingClientRect(); return [Math.round(r.left), Math.round(r.right)]; };
+      const inner = el => { const r = el.getBoundingClientRect(); return [Math.round(fr.left + r.left), Math.round(fr.left + r.right)]; };
+      return {
+        signins: inner(d.querySelector('#zoneSignins > .zone-header')),
+        approvals: inner(d.querySelector('#zoneApprovals > .zone-header')),
+        brief: inner(d.querySelector('#zoneCeoBrief > .zone-header')),
+        dashboard: own(document.querySelector('#tab-home .home-dash-divider')),
+        dashboardPanel: own(document.getElementById('tab-overview')),
+        wealth: own(document.getElementById('homeWealthDivider')),
+      };
+    });
+    for (const k of ['signins', 'approvals', 'brief', 'dashboardPanel', 'wealth']) expect(edges[k], k).toEqual(edges.dashboard);
+  });
+
+  async function settled(page) {
+    let last = -1;
+    for (let i = 0; i < 40; i++) {
+      const y = await page.evaluate(() => window.scrollY);
+      if (y === last) return y;
+      last = y;
+      await page.waitForTimeout(150);
+    }
+    return last;
+  }
+  async function tallHome(page, folded, opts = {}) {
+    await page.addInitScript(({ st, slow }) => {
+      try { if (st) localStorage.setItem('od_home_folded', JSON.stringify(st)); } catch (e) {}
+      if (window !== window.top) {
+        // A queue and a brief a few screens tall, as Kevin's are.
+        document.addEventListener('DOMContentLoaded', () => {
+          for (const id of ['zoneApprovals', 'zoneCeoBrief']) {
+            const tall = document.createElement('div'); tall.style.height = '3000px';
+            document.getElementById(id).appendChild(tall);
+          }
+        });
+        if (slow) { const real = window.fetch; window.fetch = (...a) => new Promise(r => setTimeout(r, 3000)).then(() => real(...a)); }
+      }
+    }, { st: folded || null, slow: !!opts.slow });
+    // Kevin's drawn Wealth is long; the fixture's is one line. Only DRAWN content is lengthened, so an
+    // undrawn Wealth is still the empty panel a first jump meets.
+    await page.addInitScript(() => {
+      if (window === window.top) document.addEventListener('DOMContentLoaded', () => {
+        const st = document.createElement('style'); st.textContent = '#tab-wealth > * { min-height: 2000px; }'; document.head.appendChild(st);
+      });
+    });
+    await open(page, 'home');
+    if (!opts.slow) await waitForHomeFrame(page);
+  }
+  // Where a section's heading sits on screen, against the bottom of the jump row.
+  const headingTop = (page, key) => page.evaluate((k) => {
+    const f = document.getElementById('homeAgentsFrame'), d = f.contentDocument;
+    const inFrame = { signins: '#zoneSignins', approvals: '#zoneApprovals', brief: '#zoneCeoBrief' }[k];
+    const top = inFrame ? f.getBoundingClientRect().top + d.querySelector(`${inFrame} > .zone-header`).getBoundingClientRect().top
+      : (k === 'dashboard' ? document.querySelector('#tab-home .home-dash-divider') : document.getElementById('homeWealthDivider')).getBoundingClientRect().top;
+    return { top: Math.round(top), barBottom: Math.round(document.getElementById('homeJump').getBoundingClientRect().bottom) };
+  }, key);
+
+  test('the jump row replaces the three page links, and each button lands its section just below the row', async ({ page }) => {
+    await tallHome(page);
+    await expect(page.locator('[data-home-tab]')).toHaveCount(0);
+    await expect(page.locator('#homeJump button')).toHaveText(['Sign-ins', 'Approvals', 'CEO brief', 'Dashboard', 'Wealth']);
+    for (const key of ['wealth', 'brief', 'dashboard', 'signins', 'approvals', 'wealth']) {
+      await page.locator(`[data-home-jump="${key}"]`).click();
+      await settled(page);
+      const at = await headingTop(page, key);
+      expect(at.top, `${key} heading under the row`).toBeGreaterThanOrEqual(at.barBottom - 1);
+      expect(at.top, `${key} heading far below the row`).toBeLessThanOrEqual(at.barBottom + 40);
+    }
+  });
+
+  test('a keyboard jump moves the keyboard to the section, and a control reached by Tab is never left under the row', async ({ page }) => {
+    await tallHome(page);
+    const press = async (key) => { await page.locator(`[data-home-jump="${key}"]`).focus(); await page.keyboard.press('Enter'); await settled(page); };
+    await press('dashboard');
+    expect(await page.evaluate(() => document.activeElement && document.activeElement.getAttribute('data-home-fold'))).toBe('dashboard');
+    await press('approvals');
+    expect(await page.frame({ url: /home=1/ }).evaluate(() => document.activeElement && document.activeElement.closest('.zone').id)).toBe('zoneApprovals');
+    // A mouse jump leaves focus where it was.
+    await page.locator('[data-home-jump="wealth"]').click();
+    await settled(page);
+    expect(await page.evaluate(() => document.activeElement && document.activeElement.getAttribute('data-home-jump'))).toBe('wealth');
+    // The Dashboard heading parked under the pinned row, then reached by keyboard: it is scrolled clear.
+    await page.evaluate(() => {
+      const b = document.querySelector('[data-home-fold="dashboard"]');
+      window.scrollTo(0, b.getBoundingClientRect().top + window.scrollY - 10);
+    });
+    await expect(page.locator('#homeJump')).toHaveClass(/home-jump-pinned/);
+    await page.evaluate(() => { document.activeElement.blur(); document.querySelector('[data-home-fold="dashboard"]').focus(); });
+    const at = await page.evaluate(() => ({ top: document.querySelector('[data-home-fold="dashboard"]').getBoundingClientRect().top,
+      barBottom: document.getElementById('homeJump').getBoundingClientRect().bottom }));
+    expect(at.top).toBeGreaterThanOrEqual(at.barBottom);
+  });
+
+  test('a jump made while the approvals load lands once they are in', async ({ page }) => {
+    // Safari keeps no scroll anchor, so content growing above the screen throws the view; Chromium's
+    // anchoring would hide the bug, so it is switched off here.
+    await page.addInitScript(() => { if (window === window.top) document.addEventListener('DOMContentLoaded', () => {
+      const st = document.createElement('style'); st.textContent = '* { overflow-anchor: none !important; }'; document.head.appendChild(st);
+    }); });
+    await tallHome(page, null, { slow: true });
+    await page.locator('[data-home-jump="dashboard"]').click();
+    await page.waitForFunction(() => window.__shellMessages.includes('agentsHomeReady'), null, { timeout: 30000 });
+    await settled(page);
+    const at = await headingTop(page, 'dashboard');
+    expect(at.top).toBeGreaterThanOrEqual(at.barBottom - 1);
+    expect(at.top).toBeLessThanOrEqual(at.barBottom + 40);
+  });
+
+  // Review, 14 Oct 2026: a jump waiting for the approvals to load must never pull Kevin back once he has
+  // moved on, take the keyboard from where he is typing, or run on another page.
+  test('a waiting jump never pulls Kevin back after he drags the page elsewhere', async ({ page }) => {
+    await tallHome(page, null, { slow: true });
+    await page.locator('[data-home-jump="signins"]').click();
+    await page.waitForTimeout(1200);
+    await page.evaluate(() => window.scrollTo(0, 1500));   // a scroll bar drag: scrolling, and no wheel, key or touch
+    await page.waitForFunction(() => window.__shellMessages.includes('agentsHomeReady'), null, { timeout: 30000 });
+    await settled(page);
+    expect(await page.evaluate(() => window.scrollY)).toBeGreaterThan(1000);
+  });
+
+  test('a waiting jump never takes the keyboard from where Kevin is typing', async ({ page }) => {
+    await tallHome(page, null, { slow: true });
+    await page.locator('[data-home-jump="approvals"]').focus();
+    await page.keyboard.press('Enter');
+    await page.evaluate(() => { const i = document.createElement('input'); i.id = 'specTyping'; document.getElementById('tab-home').prepend(i); i.focus({ preventScroll: true }); });
+    await page.waitForFunction(() => window.__shellMessages.includes('agentsHomeReady'), null, { timeout: 30000 });
+    await settled(page);
+    expect(await page.evaluate(() => document.activeElement && document.activeElement.id)).toBe('specTyping');
+  });
+
+  test('a waiting jump is dropped when Kevin leaves Home', async ({ page }) => {
+    await tallHome(page, { approvals: true }, { slow: true });
+    await page.locator('[data-home-jump="approvals"]').click();
+    await page.evaluate(() => switchTab('overview'));
+    await page.waitForFunction(() => window.__shellMessages.includes('agentsHomeReady'), null, { timeout: 30000 });
+    await page.waitForTimeout(1000);
+    // Aimed again on another page, it would have opened the approvals (and saved that) out of sight.
+    expect(await page.evaluate(() => JSON.parse(localStorage.getItem('od_home_folded')).approvals)).toBe(true);
+  });
+
+  test('a jump to a folded section further down the frame lands on it', async ({ page }) => {
+    await tallHome(page, { signins: true, approvals: true, brief: true, dashboard: true, wealth: true });
+    await page.locator('[data-home-jump="brief"]').click();
+    await settled(page);
+    const at = await headingTop(page, 'brief');
+    expect(at.top).toBeGreaterThanOrEqual(at.barBottom - 1);
+    expect(at.top).toBeLessThanOrEqual(at.barBottom + 40);
+  });
+
+  test('a jump to a folded section opens it first', async ({ page }) => {
+    await tallHome(page, { signins: true, approvals: true, brief: true, dashboard: true, wealth: true });
+    const f = homeFrame(page);
+    await page.locator('[data-home-jump="approvals"]').click();
+    await expect(f.locator('#zoneApprovals')).not.toHaveClass(/home-collapsed/);
+    await expect(f.locator('#zoneSignins')).toHaveClass(/home-collapsed/);
+    await page.locator('[data-home-jump="brief"]').click();
+    await expect(f.locator('#zoneCeoBrief')).not.toHaveClass(/home-collapsed/);
+    await page.locator('[data-home-jump="dashboard"]').click();
+    expect(await shown(page, 'tab-overview')).toBe(true);
+    await page.locator('[data-home-jump="wealth"]').click();
+    expect(await shown(page, 'tab-wealth')).toBe(true);
+    await page.waitForFunction(() => window.__wealthDrawnAt > 0, { timeout: 10000 });
+    // Opened by a jump is remembered, as opened by its arrow is.
+    expect(await page.evaluate(() => JSON.parse(localStorage.getItem('od_home_folded'))))
+      .toEqual({ signins: true, approvals: false, brief: false, dashboard: false, wealth: false });
+  });
+
+  test('the row stays pinned while Home scrolls, and the queue\'s own pinned bars sit below it', async ({ page }) => {
+    await tallHome(page);
+    const bar = page.locator('#homeJump');
+    await expect(bar).not.toHaveClass(/home-jump-pinned/);
+    const slotH = await page.evaluate(() => document.getElementById('homeJumpSlot').offsetHeight);
+    await page.evaluate(() => window.scrollTo(0, 1500));
+    await expect(bar).toHaveClass(/home-jump-pinned/);
+    const pinned = await page.evaluate(() => {
+      const b = document.getElementById('homeJump').getBoundingClientRect(), slot = document.getElementById('homeJumpSlot');
+      const f = document.getElementById('homeAgentsFrame'), fr = f.getBoundingClientRect();
+      return { top: Math.round(b.top), bottom: Math.round(b.bottom), slotH: slot.offsetHeight, frameTop: fr.top };
+    });
+    expect(pinned.top).toBe(0);
+    // It runs from the sidebar to the screen's edge, with its buttons still in line with the page.
+    const span = await page.evaluate(() => {
+      const b = document.getElementById('homeJump').getBoundingClientRect(), side = document.getElementById('sidebar').getBoundingClientRect();
+      const btn = document.querySelector('.home-jump-btn').getBoundingClientRect(), title = document.querySelector('#tab-home .home-header h1').getBoundingClientRect();
+      return { left: Math.round(b.left), right: Math.round(b.right), side: Math.round(side.right), vw: document.documentElement.clientWidth, btn: Math.round(btn.left), title: Math.round(title.left) };
+    });
+    expect([span.left, span.right, span.btn]).toEqual([span.side, span.vw, span.title]);
+    expect(pinned.slotH, 'the page under the row did not move').toBe(slotH);
+    // The frame is told its visible band starts under the row, so its sticky bars and dialogs never hide behind it.
+    await page.waitForFunction((p) => {
+      const d = document.getElementById('homeAgentsFrame').contentDocument;
+      const visTop = parseFloat(d.documentElement.style.getPropertyValue('--home-vis-top')) || 0;
+      return Math.abs(visTop - (p.bottom - p.frameTop)) <= 2;
+    }, pinned, { timeout: 5000 });
+    // Further down, over the dashboard and Wealth, it is still there; back at the top it rests in place.
+    await page.evaluate(() => window.scrollTo(0, document.getElementById('homeWealthDivider').getBoundingClientRect().top + window.scrollY));
+    await expect(bar).toHaveClass(/home-jump-pinned/);
+    await page.evaluate(() => window.scrollTo(0, 0));
+    await expect(bar).not.toHaveClass(/home-jump-pinned/);
+  });
+
+  test('on a phone every button fits on screen, the pinned row starts clear of the menu button, and an open menu never squeezes it', async ({ page }) => {
+    await page.setViewportSize({ width: 390, height: 844 });
+    await tallHome(page);
+    const fits = () => page.evaluate(() => [...document.querySelectorAll('.home-jump-btn')].every(b => b.getBoundingClientRect().right <= document.documentElement.clientWidth));
+    expect(await fits(), 'unpinned').toBe(true);
+    await page.evaluate(() => window.scrollTo(0, 1500));
+    await expect(page.locator('#homeJump')).toHaveClass(/home-jump-pinned/);
+    expect(await fits(), 'pinned').toBe(true);
+    const at = await page.evaluate(() => ({ menu: document.querySelector('.sidebar-toggle').getBoundingClientRect().right,
+      btn: document.querySelector('.home-jump-btn').getBoundingClientRect().left, bar: document.getElementById('homeJump').getBoundingClientRect().left }));
+    expect(at.bar).toBe(0);
+    expect(at.btn).toBeGreaterThan(at.menu);
+    // Scroll with the menu open, then close it: the row still spans the screen.
+    await page.evaluate(() => toggleSidebar());
+    await page.evaluate(() => window.scrollTo(0, 1600));
+    await page.evaluate(() => toggleSidebar());
+    await page.waitForTimeout(400);
+    const span = await page.evaluate(() => { const b = document.getElementById('homeJump').getBoundingClientRect(); return [Math.round(b.left), Math.round(b.width), document.documentElement.clientWidth]; });
+    expect([span[0], span[1]]).toEqual([0, span[2]]);
+  });
 });

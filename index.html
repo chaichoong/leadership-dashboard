@@ -11,7 +11,7 @@
     <link rel="stylesheet" href="css/sync-bar.css?v=3">
     <link rel="stylesheet" href="css/quick-task.css?v=2">
     <link rel="stylesheet" href="css/styles.css?v=23">
-    <link rel="stylesheet" href="css/home.css?v=5"><!-- Home tab (29 Sep 2026) -->
+    <link rel="stylesheet" href="css/home.css?v=6"><!-- Home tab (29 Sep 2026) -->
 </head>
 <body>
     <!-- Auth Screen -->
@@ -211,11 +211,17 @@
                 <h1>Home</h1>
                 <p><span id="homeDate"></span> · Your approvals, the CEO brief, your Leadership Dashboard and your wealth, in one scroll.</p>
             </div>
-            <nav class="home-links" aria-label="One tap deeper">
-                <button type="button" class="home-link" data-home-tab="agents">Team: AI Agents</button>
-                <button type="button" class="home-link" data-home-tab="tasks">Board: Tasks</button>
-                <button type="button" class="home-link" data-home-tab="ai-brain">Memory: AI Brain</button>
-            </nav>
+            <!-- Jump buttons (Kevin, 14 Oct 2026): one per section, pinned at the top while Home scrolls.
+                 They replaced Team / Board / Memory, which opened pages already in the sidebar. -->
+            <div class="home-jump-slot" id="homeJumpSlot">
+                <nav class="home-jump" id="homeJump" aria-label="Jump to a section">
+                    <button type="button" class="home-jump-btn" data-home-jump="signins">Sign-ins</button>
+                    <button type="button" class="home-jump-btn" data-home-jump="approvals">Approvals</button>
+                    <button type="button" class="home-jump-btn" data-home-jump="brief">CEO brief</button>
+                    <button type="button" class="home-jump-btn" data-home-jump="dashboard">Dashboard</button>
+                    <button type="button" class="home-jump-btn" data-home-jump="wealth">Wealth</button>
+                </nav>
+            </div>
             <div id="homeAgentsStatus" class="home-status" role="status" aria-live="polite">Loading your approvals and the CEO brief…</div>
             <iframe id="homeAgentsFrame" class="home-agents-frame" src="" data-src="os/agents/index.html?home=1" title="Your approvals and the CEO brief" scrolling="no"></iframe>
             <h2 class="home-dash-divider"><button type="button" class="home-fold-btn" data-home-fold="dashboard" aria-expanded="true"><span class="home-chev" aria-hidden="true">▾</span>Your Leadership Dashboard</button></h2>
@@ -977,6 +983,6 @@
     <script defer src="js/skills.js?v=12"></script>
     <script defer src="js/ai-assistant.js?v=19"></script>
     <script defer src="js/quick-task.js?v=4"></script>
-    <script defer src="js/home.js?v=5"></script><!-- Home tab (29 Sep 2026; rebuilt 14 Oct 2026) -->
+    <script defer src="js/home.js?v=6"></script><!-- Home tab (29 Sep 2026; rebuilt 14 Oct 2026) -->
 </body>
 </html>

@@ -430,13 +430,16 @@ html.home-embed .apv-decide{bottom:calc(100vh - var(--home-vis-top,0px) - var(--
    screen readers. A folded zone shows its header only, and Home remembers the choice. */
 html.home-embed .zone > .zone-header.home-fold{cursor:pointer;user-select:none}
 html.home-embed .home-fold-toggle{display:inline-flex;align-items:center;background:none;border:0;padding:0;margin:0;cursor:pointer;color:inherit;font:inherit}
-html.home-embed .home-fold-toggle:focus-visible{outline:2px solid var(--accent);outline-offset:2px;border-radius:var(--radius-sm)}
+html.home-embed .home-fold-toggle:focus-visible{outline:2px solid var(--accent);outline-offset:-2px;border-radius:var(--radius-sm)}   /* inside: the button sits on the frame's edge */
 html.home-embed .zone-header h2.zone-title{margin:0}
 html.home-embed .home-chev{display:inline-block;width:16px;font-size:var(--fs-lg);line-height:1;color:var(--text-secondary);transition:transform .15s}
 html.home-embed .zone.home-collapsed .home-chev{transform:rotate(-90deg)}
 html.home-embed .zone.home-collapsed > :not(.zone-header){display:none !important}
 html.home-embed #ceoBriefBody h2{display:none}   /* the fold header carries the title on Home */
 html.home-embed .zone.home-collapsed > .zone-header{margin-bottom:0}
+/* On Home the sections line up with the dashboard and Wealth below them: no width cap, no side padding
+   (Kevin, 14 Oct 2026: they sat 138px further in on his 1,920px screen). */
+html.home-embed .main{max-width:none;margin:0;padding:0}
 </style>
 </head>
 <body>
@@ -8354,6 +8357,7 @@ window.addEventListener('hashchange', ()=>{
 // Foldable sections in the Home embed. The state lives under one key that Home's own dashboard and
 // Wealth headers share (same origin), so the whole page is remembered together in this browser.
 const HOME_FOLD_KEY = 'od_home_folded';
+const _homeFoldOpen = Object.create(null);   // section key -> opens it, for Home's jump buttons
 function homeFoldState(){
     try { return JSON.parse(localStorage.getItem(HOME_FOLD_KEY) || '{}') || {}; }
     catch(e){ console.warn('Home fold state unreadable', e); return {}; }
@@ -8392,6 +8396,7 @@ function homeFoldSetup(){
             apply(folded); homeFoldSave(key, folded);
         };
         apply(!!st[key]);
+        _homeFoldOpen[key] = () => { if(zone.classList.contains('home-collapsed')) flip(); return zone; };
         // The arrow's own click bubbles here too, so the fold happens once, whichever was pressed.
         head.addEventListener('click', (e) => {
             const ctl = e.target.closest('a,button,input,select,textarea');
@@ -8434,6 +8439,16 @@ if(HOME_MODE) window.addEventListener('message', (e) => {
     if(e.source !== window.parent || e.origin !== window.location.origin) return;
     const d = e.data || {};
     if(d.source !== 'home-shell') return;
+    if(d.type === 'homeJump'){   // a jump button on Home: open the section, then say where it starts
+        const open = _homeFoldOpen[String(d.zone || '')];
+        if(!open) return;
+        const zone = open();
+        if(_homeSendHeight) _homeSendHeight();   // the frame is its new height before Home scrolls
+        homeEmbedTell({ type:'agentsHomeScrollTo', y: Math.round(zone.getBoundingClientRect().top + window.pageYOffset) });
+        const toggle = zone.querySelector('.home-fold-toggle');   // a keyboard jump: the keyboard carries on from here
+        if(d.focus && toggle) toggle.focus({ preventScroll:true });
+        return;
+    }
     if(d.type === 'homeViewport'){
         document.documentElement.style.setProperty('--home-vis-top', `${Math.max(0, Number(d.top) || 0)}px`);
         document.documentElement.style.setProperty('--home-vis-h', `${Math.max(120, Number(d.h) || 0)}px`);
@@ -8463,7 +8478,15 @@ async function start(){
     document.getElementById('authBar').style.display='none';
     // Tell Home a load has started before any height goes out: a reload for a new version sends the
     // loading screen's height first, and Home must not read that as the page's real size (review, 14 Oct 2026).
-    if(HOME_MODE){ homeEmbedTell({ type:'agentsHomeLoading' }); homeEmbedWatchHeight(); }
+    if(HOME_MODE){
+        homeEmbedTell({ type:'agentsHomeLoading' });
+        homeEmbedWatchHeight();
+        // Kevin scrolling or typing in here never reaches Home's own listeners, so say so (at most twice a
+        // second): a jump Home is waiting to finish must not pull him back once he has moved on.
+        let lastInput = 0;
+        const tellInput = () => { const now = Date.now(); if(now - lastInput > 500){ lastInput = now; homeEmbedTell({ type:'agentsHomeInput' }); } };
+        ['wheel', 'touchmove', 'keydown', 'pointerdown'].forEach(t => window.addEventListener(t, tellInput, { passive:true }));
+    }
     try {
         if(!HOME_MODE) consumeAgentDeepLink();
         // Announce boot so a deep link requested while this iframe was
