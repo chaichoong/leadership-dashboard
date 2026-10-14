@@ -655,7 +655,7 @@
                 // CFV Actioned — can return to In Payment or move back to CFV
                 actionsHtml = `
                     <button class="cfv-action-btn success" onclick="event.stopPropagation(); cfvConfirmAction('inpayment','${entry.tenancyId}','${escJs(entry.surname)}',this)">In Payment</button>
-                    <button class="cfv-action-btn" style="border-color:var(--danger);color:var(--danger)" onclick="event.stopPropagation(); cfvConfirmAction('cfv','${entry.tenancyId}','${escJs(entry.surname)}',this)" style="margin-top:4px">Move to CFV</button>
+                    <button class="cfv-action-btn" style="border-color:var(--danger);color:var(--danger);margin-top:4px" onclick="event.stopPropagation(); cfvConfirmAction('cfv','${entry.tenancyId}','${escJs(entry.surname)}',this)">Move to CFV</button>
                     <button class="cfv-action-btn" data-comment-btn="${entry.tenancyId}" onclick="event.stopPropagation(); cfvShowComments('${entry.tenancyId}','${escJs(entry.surname)}','${escJs(entry.ref)}')" style="margin-top:4px">${commentBtnLabel}</button>
                 `;
             }
