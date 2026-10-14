@@ -115,10 +115,13 @@ ACTIVE_STATUSES = ("In Payment", "Overdue")
 # ended once this many days have passed.
 ENDED_GRACE_DAYS = 5
 
-CHANGE_RE = re.compile(r"^RECORD CHANGE:\s*(?P<cost>rec[A-Za-z0-9]{14})\s+(?P<label>Expected Cost|End Date|Payment Status)"
-                       r"\s*=\s*(?P<value>[^\n]+?)\s*$", re.M)
-NEW_RE = re.compile(r"^RECORD NEW COST:\s*(?P<body>[^\n]+?)\s*$", re.M)
-AMOUNT_RE = re.compile(r"^(?:£|GBP)?\s*((?:\d{1,3}(?:,\d{3})+|\d{1,7})(?:\.\d{1,2})?)$", re.I)
+# One line each: [ \t] never crosses a line break, so a value can never be read off the next line (review, 14 Oct
+# 2026: "End Date =" then "none" on its own line would otherwise clear a date).
+CHANGE_RE = re.compile(r"^RECORD CHANGE:[ \t]*(?P<cost>rec[A-Za-z0-9]{14})[ \t]+"
+                       r"(?P<label>Expected Cost|End Date|Payment Status)[ \t]*=[ \t]*(?P<value>[^\n]+?)[ \t]*$", re.M)
+NEW_RE = re.compile(r"^RECORD NEW COST:[ \t]*(?P<body>[^\n]+?)[ \t]*$", re.M)
+# Up to £9,999,999.99, with or without thousands commas; a leading zero group ("0,500") is not an amount.
+AMOUNT_RE = re.compile(r"^(?:£|GBP)?\s*((?:[1-9]\d{0,2}(?:,\d{3}){1,2}|\d{1,7})(?:\.\d{1,2})?)$", re.I)
 DAY_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 
 
@@ -457,10 +460,18 @@ def cmd_new(a):
     # ledger is read before the names (review, 14 Oct 2026).
     rows = rc.fetch_all(T_COSTS, {"fields[]": [COST_NAME]})
     ids = {r["id"] for r in rows}
-    made = [x["cost"] for x in read_ledger() if x.get("kind") == "create" and x.get("task") == task["id"]
+    made = [x for x in read_ledger() if x.get("kind") == "create" and x.get("task") == task["id"]
             and name_key(x.get("name")) == name_key(name) and x.get("cost") in ids]
     if made:
-        return dict(out, cost=made[0], unchanged=True, note=f"this card's cost already exists as {made[0]}")
+        spec_keys = ("expectedCost", "frequency", "dueDay", "firstPayment", "endDate")
+        if all(made[-1].get(k) == out[k] for k in spec_keys):
+            return dict(out, cost=made[-1]["cost"], unchanged=True,
+                        note=f"this card's cost already exists as {made[-1]['cost']}")
+        # A second approval on the same task for different terms is a change to the row already made, never a
+        # silent "unchanged" (review round 2, 14 Oct 2026).
+        raise Refused(f"this task already created {made[-1]['cost']} as "
+                      f"{', '.join(str(made[-1].get(k)) for k in spec_keys)}: a different amount, day or end is a "
+                      f"RECORD CHANGE line for {made[-1]['cost']}, not a second create")
     same = [r for r in rows if name_key((r.get("fields") or {}).get(COST_NAME)) == name_key(name)]
     if same:
         raise Refused(f"a cost named {name!r} already exists ({', '.join(r['id'] for r in same)}): change that "

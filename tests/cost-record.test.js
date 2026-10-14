@@ -261,6 +261,9 @@ describe('cost-record.py end = none: a cost that rolls on with no end leaves the
     expect(r.comments[0].text).toMatch(/changed from 2026-08-26 to blank \(no end date\)/);
     const dated = end('none', { task: { ...APPROVED, output: `RECORD CHANGE: ${COST} End Date = 2027-08-26` }, cost: { fields: { [F.end]: '2026-08-26' } } });
     expect(dated.json.refused).toMatch(/has no line 'RECORD CHANGE: recCOST0000000001 End Date = none'/);
+    const split = end('none', { task: { ...APPROVED, output: `RECORD CHANGE: ${COST} End Date =\nnone` }, cost: { fields: { [F.end]: '2026-08-26' } } });
+    expect(split.json.refused).toMatch(/has no line/);
+    expect(split.writes).toEqual([]);
     const blank = end('none', { task: { ...APPROVED, output: line } });
     expect(blank.json.unchanged).toBe(true);
     expect([...dated.writes, ...blank.writes]).toEqual([]);
@@ -274,7 +277,9 @@ describe('cost-record.py amounts: an annual premium keeps its comma', () => {
     expect(big.writes[0].payload.fields[F.expected]).toBe(1234.5);
     const spaced = expected('31.27', { task: { ...APPROVED, output: `RECORD CHANGE: ${COST} Expected Cost = £ 31.27` } });
     expect(spaced.code).toBe(0);
-    expect(expected('1,23', { task: { ...APPROVED, output: LINE } }).json.refused).toMatch(/must be a pounds amount above zero/);
+    for (const v of ['1,23', '0,500', '1,234,567,890.00', '£,5', '1.234,56']) {
+      expect(expected(v, { task: { ...APPROVED, output: LINE } }).json.refused, v).toMatch(/must be a pounds amount above zero/);
+    }
   });
 });
 
@@ -317,6 +322,10 @@ describe('cost-record.py inactive: an ended cost leaves every report, and says w
     expect(done.writes).toEqual([]);
   });
 });
+
+// The ledger line a landed create writes (cmd_new's `out`), shaped from NEW_LINE.
+const LOGGED = { kind: 'create', cost: NEWID, task: TASK, name: 'Premium finance - Example Road insurance - REF EX-011',
+  expectedCost: '£31.27', frequency: 'Monthly', dueDay: 28, firstPayment: '2026-10-28', endDate: '2027-06-28' };
 
 describe('cost-record.py new: a recurring cost goes in with its end, on an approved line', () => {
   const links = { [F.business]: [BIZ], [F.category]: [CAT], [F.subCat]: [SUB], [F.property]: [PROP] };
@@ -381,7 +390,7 @@ describe('cost-record.py new: a recurring cost goes in with its end, on an appro
   it('a re-run of the same approved create answers with the row it made, and makes no second one', () => {
     const made = { id: NEWID, fields: { [F.name]: 'Premium finance - Example Road insurance - REF EX-011' } };
     const r = create(['--end-date', '2027-06-28', '--like', COST], { task: { ...APPROVED, output: NEW_LINE }, cost: old,
-      rows: [made], ledger: [{ kind: 'create', cost: NEWID, task: TASK, name: 'Premium finance - Example Road insurance - REF EX-011' }] });
+      rows: [made], ledger: [LOGGED] });
     expect(r.code).toBe(0);
     expect(r.json).toMatchObject({ cost: NEWID, unchanged: true });
     expect(r.creates).toEqual([]);
@@ -390,10 +399,23 @@ describe('cost-record.py new: a recurring cost goes in with its end, on an appro
   it('a re-run after the new row was renamed still answers from the ledger, and makes no second cost', () => {
     const renamed = { id: NEWID, fields: { [F.name]: 'Example Road insurance (renamed by hand)' } };
     const r = create(['--end-date', '2027-06-28', '--like', COST], { task: { ...APPROVED, output: NEW_LINE }, cost: old,
-      rows: [renamed], ledger: [{ kind: 'create', cost: NEWID, task: TASK, name: 'Premium finance - Example Road insurance - REF EX-011' }] });
+      rows: [renamed], ledger: [LOGGED] });
     expect(r.code).toBe(0);
     expect(r.json).toMatchObject({ cost: NEWID, unchanged: true });
     expect(r.creates).toEqual([]);
+  });
+
+  it('a re-run on the same task with different terms refuses, never a silent "unchanged"', () => {
+    const made = { id: NEWID, fields: { [F.name]: 'Premium finance - Example Road insurance - REF EX-011' } };
+    const logged = LOGGED;
+    const same = create(['--end-date', '2027-06-28', '--like', COST], { task: { ...APPROVED, output: NEW_LINE }, cost: old, rows: [made], ledger: [logged] });
+    expect(same.json).toMatchObject({ cost: NEWID, unchanged: true });
+    const dearer = door(['new', '--name', 'Premium finance - Example Road insurance - REF EX-011', '--expected', '36.27',
+      '--frequency', 'Monthly', '--due-day', '28', '--first-payment', '2026-10-28', '--end-date', '2027-06-28', '--like', COST,
+      '--task', TASK, '--why', WHY], { task: { ...APPROVED, output: NEW_LINE.replace('£31.27', '£36.27') }, cost: old, rows: [made], ledger: [logged] });
+    expect(dearer.code).toBe(2);
+    expect(dearer.json.refused).toMatch(/this task already created recNEWC0000000001 as £31\.27.*a RECORD CHANGE line/);
+    expect([...same.creates, ...dearer.creates]).toEqual([]);
   });
 
   it('a retired cost of the same name still blocks the name: the new one carries its own policy number', () => {
