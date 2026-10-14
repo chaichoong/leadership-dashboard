@@ -161,10 +161,6 @@ ANSWER_WAIT_HOURS = 6       # after a window closes, the app's "did you finish?"
 # answer against them. Kept identical to UNRECORDED_TURN in scripts/agent-dispatch.py.
 UNRECORDED = "the app never recorded whether Kevin sent the form"
 FORM_CLOSED_MARK = "RENT FORM CLOSED: "         # a card closed by this file once the form went in another way
-# Written by scripts/agent-dispatch.py (DIRECT_RENT_CARD_MARK there, kept identical) on a card it put in Kevin's
-# queue for an inbound direct rent request that no robot may hold back (no silent parking, 14 Oct 2026). A
-# tenancy with such a card, open or done, gets no form card from here: two would be two forms to the DWP.
-DIRECT_RENT_CARD_MARK = "DIRECT RENT CARD: "
 # The tenant draft is the trial agent's. Both marks are trial marks in scripts/agent_email_format.py
 # TRIAL_TASK_MARKS, kept identical there (tests/cash-flow-voids-agent.test.js).
 ASK_PREFIX, TRIAL_KEY_MARK = "RENT ASK: ", "RENT CHECK KEY: "
@@ -1365,15 +1361,6 @@ def drop_plan(ad, task_id):
                 os.unlink(os.path.join(where, name))
 
 
-def direct_rent_card(rc, tenancy):
-    """The id of a card Kevin already has for this tenancy's direct rent request, raised by agent-dispatch from
-    an inbound request (DIRECT_RENT_CARD_MARK), or ''. Open or done counts; a cancelled one does not."""
-    got = rc.api("GET", rc.T_TASKS, params={
-        "filterByFormula": f"AND(FIND('{DIRECT_RENT_CARD_MARK}{tenancy}', {{Notes}}&''), NOT({{Status}}='Cancelled'))",
-        "pageSize": 1, "returnFieldsByFieldId": "true", "fields[]": [rc.TK["name"]]}).get("records") or []
-    return got[0]["id"] if got else ""
-
-
 def raise_form(rc, item, day):
     """Raise the form card: build the answers and the robot's plan from the records, create the
     card under the Cash Flow Voids agent, put the plan where the Your turn button finds it, and
@@ -1382,10 +1369,6 @@ def raise_form(rc, item, day):
     CHANGES_WAIT_DAYS have passed). A refused submit withdraws the card, so the next run raises
     it again; if even that write fails, the next run finds it outside his queue and does the same."""
     import rent_form_plan                          # here, so lane B runs without it until a form is due
-    held = direct_rent_card(rc, item["tenancy"])
-    if held:
-        raise NotReady(f"form card for {item['place']} not raised: Kevin already has the direct rent request card "
-                       f"{held} for this tenancy")
     ad = module("ad")
     rec = read_form_records(rc, item["tenancy"])
     built = rent_form_plan.build(rec["tenancy"], rec["tenant"], rec["property"], read_landlord(), place=item["place"],
