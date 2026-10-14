@@ -8,14 +8,17 @@
 //
 // CLOCKS, NOT WORDS (review round 2). A task a run leaves with no card stays off Kevin's queue for ONE
 // 48-hour pass, once, and only at a door: an open task named by its id (due within 7 days, clear, not a
-// twin), or an event with its day and clock time in a Notes line an agent wrote. Kevin's own park holds
-// until his date. Anything else, and any park once the pass is used, becomes the same decision card
-// for every task, quoting its name and the robot's own words.
+// twin), or an event with its day and clock time in a Notes line an agent wrote; the pass lives in a
+// ledger keyed by task id. Kevin's own park holds while its date does (`decided --until`, `due`, his
+// knock-back, Some Day for 30 days), and his words are never read as one. Only tasks owed this run or
+// held by an AI agent are parked, never Roy's or Kevin's. Anything else, and any park once the pass is
+// used, becomes the same decision card for every task, quoting its name and the robot's own words.
 //
 // These drive the real cmd_verify (and through it the real cmd_escalate) with only the Airtable reads
 // and writes swapped for an in-memory board. Every name is invented. Times are relative to now:
 // {d:+N} an ISO day, {dm:+N} "15 Oct", {day:+N} "15 Oct 2026" (an agent note's stamp), and
-// {stamp:-Nh} "15 Oct 2026 13:18" N hours ago (an agent-dispatch stamp), so the tests hold on any day.
+// {stamp:-Nh} "15 Oct 2026 13:18" N hours ago (an agent-dispatch stamp), {iso:-Nh} the same as UTC ISO
+// (the ledger and LMT fields), so the tests hold on any day.
 import { describe, it, expect } from 'vitest';
 import { execFileSync } from 'node:child_process';
 import { resolve, dirname } from 'node:path';
@@ -36,11 +39,13 @@ const GENERIC = 'INBOUND: council asks for the HMO licence renewal form';
 
 // tasks: {id: {name, status, due, notes, description, teamMember, agentOutput, outcome, feedback, history}}
 // owed: the queue's worklist as [[id, kind]]; by default every task the run acted on, as new work.
-function verify({ tasks, actions, dryRun = false, owed = null, readFails = 0, runs = 1 }) {
-  const cfg = { tasks, actions, dryRun, owed, readFails, runs };
+function verify({ tasks, actions, dryRun = false, owed = null, readFails = 0, failWith = 'http', runs = 1,
+                  ledger = null, blankById = [], ownerNow = {} }) {
+  const cfg = { tasks, actions, dryRun, owed, readFails, failWith, runs, ledger, blankById, ownerNow };
   const script = `
 import importlib.util, json, os, re, io, sys, types, tempfile, contextlib
-from datetime import datetime, timedelta
+import urllib.error
+from datetime import datetime, timedelta, timezone
 spec = importlib.util.spec_from_file_location('d', ${JSON.stringify(DISPATCH)})
 m = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(m)
@@ -50,11 +55,14 @@ def rel(txt):
     txt = re.sub(r"\\{d:([+-]\\d+)\\}", lambda g: (TODAY + timedelta(days=int(g.group(1)))).isoformat(), txt)
     txt = re.sub(r"\\{dm:([+-]\\d+)\\}", lambda g: (TODAY + timedelta(days=int(g.group(1)))).strftime("%-d %b"), txt)
     txt = re.sub(r"\\{day:([+-]?\\d+)\\}", lambda g: (TODAY + timedelta(days=int(g.group(1)))).strftime("%d %b %Y"), txt)
+    txt = re.sub(r"\\{iso:([+-][\\d.]+)h\\}", lambda g: (NOW + timedelta(hours=float(g.group(1)))).astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.000Z"), txt)
     return re.sub(r"\\{stamp:([+-][\\d.]+)h\\}", lambda g: (NOW + timedelta(hours=float(g.group(1)))).strftime("%d %b %Y %H:%M"), txt)
 cfg = json.loads(rel(${JSON.stringify(JSON.stringify(cfg))}))
 tmp = tempfile.mkdtemp()
 m.STATE_DIR = tmp
 m.NO_CARD_RETRY_PAUSE = 0
+if cfg["ledger"] is not None:
+    open(os.path.join(tmp, m.NO_CARD_PASS_LEDGER), 'w').write(cfg["ledger"] if isinstance(cfg["ledger"], str) else json.dumps(cfg["ledger"]))
 rundir = os.path.join(tmp, 'run'); os.makedirs(rundir)
 report = {"startedAt": NOW.isoformat(), "queueCounts": {"worklist": len(cfg["tasks"]), "openTasksRead": 50},
           "actions": cfg["actions"], "parkedFlags": [], "skippedTier2": []}
@@ -73,16 +81,23 @@ for tid, t in cfg["tasks"].items():
                   AF["inboundTask"]: True, AF["agentOutput"]: t.get("agentOutput", ""),
                   AF["approvalOutcome"]: t.get("outcome") or None, AF["approvalFeedback"]: t.get("feedback", ""),
                   AF["feedbackHistory"]: t.get("history", ""), AF["deferredUntil"]: t.get("deferred") or None,
-                  m.SOME_DAY_FIELD: bool(t.get("someDay"))}
+                  m.SOME_DAY_FIELD: bool(t.get("someDay")), m.LMT_DUE_FIELD: t.get("lmtDue")}
+    if "due" in t and t["due"] is None:
+        store[tid][AF["dueDate"]] = None
 writes, listed, gets, fails = [], [], [], [cfg["readFails"]]
 def fake_get_task(tid):
     gets.append(tid)
     if tid not in store: raise RuntimeError('no such task')
-    return {"id": tid, "fields": dict(store[tid])}
+    f = dict(store[tid])
+    if tid in cfg["blankById"]: f[AF["notes"]] = ""
+    if tid in cfg["ownerNow"]: f[AF["teamMember"]] = [cfg["ownerNow"][tid]]
+    return {"id": tid, "fields": f}
 def fake_query_records(table, formula=None, fields=None, max_records=None):
     listed.append(formula)
     if fails[0]:
         fails[0] -= 1
+        if cfg["failWith"] == "network": raise urllib.error.URLError("timed out")
+        if cfg["failWith"] == "timeout": raise TimeoutError("The read operation timed out")
         raise RuntimeError("Airtable GET /tblqB8b22hKBL4PF1 → HTTP 503: service unavailable")
     assert table == m.TASKS, table
     ids = re.findall(r"RECORD_ID\\(\\)='(rec[A-Za-z0-9]+)'", formula or "")
@@ -107,7 +122,9 @@ for _ in range(cfg["runs"]):
     results.append({"code": code, "out": json.loads(printed[-1]) if printed else {}, "err": err.getvalue()})
 final = {tid: {"status": f.get(AF["status"]), "agentOutput": f.get(AF["agentOutput"]) or "", "notes": f.get(AF["notes"]) or "",
                "sentBy": f.get(AF["sentForApprovalBy"]) or [], "history": f.get(AF["feedbackHistory"]) or ""} for tid, f in store.items()}
-print('@@@' + json.dumps({**results[-1], "first": results[0], "writes": writes, "listed": listed, "gets": gets, "final": final}))
+try: led = json.load(open(os.path.join(tmp, m.NO_CARD_PASS_LEDGER)))
+except Exception: led = None
+print('@@@' + json.dumps({**results[-1], "first": results[0], "writes": writes, "listed": listed, "gets": gets, "final": final, "ledger": led}))
 `;
   const raw = execFileSync('python3', ['-c', script], { encoding: 'utf8' });
   return JSON.parse(raw.slice(raw.indexOf('@@@') + 3));
@@ -191,6 +208,11 @@ describe('Case A: a task parked with no door comes to Kevin as a card (the 13-14
     const r = verify({ tasks: { [UC47]: { name: UC47_NAME } }, actions: [noCard(UC47, LANE_WORDS)], readFails: 1 });
     expect(isCard(r.final[UC47])).toBe(true);
     expect(r.listed.filter((f) => (f || '').includes(UC47)).length).toBeGreaterThanOrEqual(2);
+  });
+
+  it.each([['network'], ['timeout']])('a %s error once is retried once too, and the card is made', (failWith) => {
+    const r = verify({ tasks: { [UC47]: { name: UC47_NAME } }, actions: [noCard(UC47, LANE_WORDS)], readFails: 1, failWith });
+    expect(isCard(r.final[UC47])).toBe(true);
   });
 
   it('a parked task that does not read back as a task is a failure too', () => {
@@ -277,40 +299,63 @@ describe('a redo with no door keeps Kevin\'s change request', () => {
   });
 });
 
-describe('a door buys ONE 48-hour pass, once; then it is a card', () => {
+describe('a door buys ONE 48-hour pass, once, kept in a ledger; then it is a card', () => {
   const T = 'recAUTHORITYFORM1';
   const NAME = 'Ada Example (Unit 1): authority to act still unsigned, send a reminder';
   const ADOBE = "[{day:0} — agent] still unsigned. Adobe reminder {dm:+1} 21:41, so a chase now would duplicate it.";
 
-  it('a robot writing "Adobe reminder <tomorrow> 21:41" in an agent note gets the pass, and the pass is written on the task', () => {
+  it('a robot writing "Adobe reminder <tomorrow> 21:41" in an agent note gets the pass: in the ledger, and a line in Notes', () => {
     const r = verify({ tasks: { [T]: { name: NAME, notes: ADOBE } }, actions: [noCard(T, 'no card: the reminder goes tomorrow')] });
     expect(r.err).not.toContain('action failed');
     expect(r.code).toBe(0);
     expect(r.out.parkedWithDoor[0].door).toMatch(/^an event an agent noted on the task, \d{4}-\d{2}-\d{2} 21:41 \(its one 48-hour pass starts now\)$/);
+    expect(Object.keys(r.ledger)).toEqual([T]);
+    expect(r.ledger[T].began).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/);
     expect(r.final[T].notes).toMatch(/— agent-dispatch\] NO-CARD PASS \(48 hours, once\): left with no card at a door/);
     expect(r.final[T].status).toBe('Today');
   });
 
   it('parked again inside the 48 hours: still inside its pass, nothing written', () => {
-    const r = verify({ tasks: { [T]: { name: NAME, notes: `${ADOBE}\n\n[{stamp:-2h} — agent-dispatch] NO-CARD PASS (48 hours, once): x` } },
+    const r = verify({ tasks: { [T]: { name: NAME, notes: ADOBE } }, ledger: { [T]: { began: '{iso:-2h}', door: 'x' } },
       actions: [noCard(T, 'no card: still waiting')] });
     expect(r.writes).toEqual([]);
     expect(r.out.parkedWithDoor[0].door).toMatch(/^inside its one 48-hour pass, which ends /);
   });
 
-  it('parked again once the 48 hours are up: a card, whatever door it names now', () => {
-    const r = verify({ tasks: { [T]: { name: NAME, notes: `${ADOBE}\n\n[{stamp:-49h} — agent-dispatch] NO-CARD PASS (48 hours, once): x` } },
+  it('parked again once the 48 hours are up: a card, whatever door it names now, even with no pass line left in Notes', () => {
+    const r = verify({ tasks: { [T]: { name: NAME, notes: ADOBE } }, ledger: { [T]: { began: '{iso:-49h}', door: 'x' } },
       actions: [noCard(T, 'no card: Adobe reminder tomorrow')] });
     expect(isCard(r.final[T])).toBe(true);
     expect(r.final[T].agentOutput).toContain('its one 48-hour pass ran out at');
   });
 
-  it('a pass line stamped in the future, or one whose time cannot be read, buys nothing', () => {
-    for (const stamp of ['{stamp:+30h}', 'sometime']) {
-      const r = verify({ tasks: { [T]: { name: NAME, notes: `${ADOBE}\n\n[${stamp} — agent-dispatch] NO-CARD PASS (48 hours, once): x` } },
-        actions: [noCard(T, 'no card')] });
+  it('a pass line in Notes that the ledger does not hold (a folded twin\'s, a hand-typed one) neither renews nor spends this task\'s pass', () => {
+    const r = verify({ tasks: { [T]: { name: NAME, notes: `[{stamp:-60h} — agent-dispatch] NO-CARD PASS (48 hours, once): copied from a twin\n\n${ADOBE}` } },
+      actions: [noCard(T, 'no card')] });
+    expect(r.out.parkedWithDoor[0].door).toContain('(its one 48-hour pass starts now)');
+    expect(Object.keys(r.ledger)).toEqual([T]);
+  });
+
+  it('a ledger entry stamped in the future, or one whose time cannot be read, buys nothing', () => {
+    for (const began of ['{iso:+30h}', 'sometime']) {
+      const r = verify({ tasks: { [T]: { name: NAME, notes: ADOBE } }, ledger: { [T]: { began } }, actions: [noCard(T, 'no card')] });
       expect(isCard(r.final[T])).toBe(true);
     }
+  });
+
+  it('a ledger that cannot be read fails the run loudly, and nothing is excused or carded', () => {
+    const r = verify({ tasks: { [T]: { name: NAME, notes: ADOBE } }, ledger: '{not json', actions: [noCard(T, 'no card')] });
+    expect(r.code).toBe(1);
+    expect(r.err).toContain('the no-card pass ledger cannot be read');
+    expect(r.writes).toEqual([]);
+  });
+
+  it('Notes that read blank by id while the listing read them: the pass stands in the ledger, Notes are not overwritten, and the run says so', () => {
+    const r = verify({ tasks: { [T]: { name: NAME, notes: ADOBE } }, blankById: [T], actions: [noCard(T, 'no card')] });
+    expect(r.code).toBe(1);
+    expect(r.err).toContain('its Notes read blank by id while the listing read');
+    expect(r.writes).toEqual([]);
+    expect(Object.keys(r.ledger)).toEqual([T]);
   });
 
   it('CONTROL: the event in the Description (the inbound email) never counts', () => {
@@ -386,18 +431,7 @@ describe('a named task is a door only when it is open, due within 7 days, clear 
   });
 });
 
-describe("Kevin's own park, and what the rule leaves alone", () => {
-  it.each([
-    ['decided --until', "[08 Oct 2026 — agent-dispatch] Parked until {d:+20} on Kevin's answer; it comes back on the board that day.", {}],
-    ['due on his words', '[09 Oct 2026 10:00 — agent-dispatch] DUE MOVED from 2026-10-09 to {d:+9}: give it a week (Kevin: "leave it a week")', { due: '{d:+9}' }],
-  ])('a park recorded by %s holds until his date and uses no pass', (_label, notes, extra) => {
-    const T = 'recPARKEDBYKEVIN1';
-    const r = verify({ tasks: { [T]: { name: 'COMPLIANCE: EPC expired - 1 Example Place', notes, ...extra } },
-      actions: [noCard(T, "no card: Kevin's ruling holds this")] });
-    expect(r.writes).toEqual([]);
-    expect(r.out.parkedWithDoor[0].door).toMatch(/^(Kevin's answer parks it until \d{4}-\d{2}-\d{2}|its due date was moved to \d{4}-\d{2}-\d{2} on Kevin's words)$/);
-  });
-
+describe('what the rule leaves alone', () => {
   it('an agent cannot type a park line or a pass line itself: annotate refuses both', () => {
     for (const note of ["[14 Oct 2026 09:00 — agent-dispatch] Parked until 2026-12-01 on Kevin's answer",
       '[14 Oct 2026 09:00 — agent-dispatch] NO-CARD PASS (48 hours, once): x']) {
@@ -450,58 +484,103 @@ except SystemExit as e:
   });
 });
 
-describe("Kevin's holds, as his own actions record them, never come back to him as cards", () => {
+describe("Kevin's hold counts only from dated fields his own actions write", () => {
   const EPC = 'recEPCEXPIREDTASK';
   const QUOTES = 'recEPCQUOTESTASK1';
   const HOLD = "[2026-10-08 14:09] Let's put these on the back burner until we've got the EICRs and gas safety certificates in place.";
-  // The live shape of 14 Oct: the EPC task carries nothing of Kevin's; his hold is his verdict on the quotes
-  // task, and each task names the other.
-  const epc = (quotes, epcExtra = {}) => verify({
-    tasks: { [EPC]: { name: 'COMPLIANCE: EPC expired - 1 Example Place', notes: `[{day:0} — agent] still on hold by Kevin's ruling on ${QUOTES}`, ...epcExtra },
+  // The live shape of 14 Oct: the EPC task carries nothing of Kevin's; his hold is a sentence in his verdict on
+  // the quotes task, and each task names the other. Words are not a hold, so it comes to him ONCE as a card,
+  // where he sets a dated hold; it never comes back while that card waits.
+  const epc = (quotes, runs = 1) => verify({ runs,
+    tasks: { [EPC]: { name: 'COMPLIANCE: EPC expired - 1 Example Place', notes: `[{day:0} — agent] still on hold by Kevin's ruling on ${QUOTES}` },
       [QUOTES]: { name: 'COMPLIANCE: EPC quotes received - four houses', status: 'Upcoming', due: '{d:+1}', notes: `[{day:-6} — agent] not a duplicate of ${EPC}`, ...quotes } },
     actions: [noCard(EPC, "no card: the EPC stays on hold by Kevin's ruling until the EICR is filed")], owed: [[EPC, 'new']] });
 
-  it('the EPC shape: his hold on the quotes task, the two linked both ways, is a door that spends no pass', () => {
-    const r = epc({ history: HOLD });
-    expect(r.code).toBe(0);
-    expect(r.writes).toEqual([]);
-    expect(r.out.parkedWithDoor[0].door).toBe(`${QUOTES}, linked both ways to it, is held by Kevin: Kevin's own words hold it: "Let's put these on the back burner until we've got the EICRs and gas safety certificates in place."`);
+  it('the EPC shape comes to Kevin exactly once as a card', () => {
+    const r = epc({ history: HOLD }, 2);
+    expect(r.first.out.cardedNoDoor).toEqual([{ task: EPC, card: 'decision' }]);
+    expect(isCard(r.final[EPC])).toBe(true);
+    expect(r.final[EPC].agentOutput).toContain(`${QUOTES} cites this task back`);
+    expect(r.out.cardedNoDoor).toEqual([]);
+    expect(r.out.parkedWithDoor).toEqual([{ task: EPC, door: "it is already a card in Kevin's queue" }]);
+    expect(r.writes.filter((w) => w.task === QUOTES)).toEqual([]);
   });
 
-  it('...and so does the other side being his card already, with no pass spent', () => {
+  it('a linked task at Approval is a door only through the ordinary rule, which spends the pass', () => {
     const r = epc({ status: 'Approval', due: '{d:-3}' });
-    expect(r.writes).toEqual([]);
-    expect(r.out.parkedWithDoor[0].door).toBe(`${QUOTES}, linked both ways to it, is already a card in Kevin's queue`);
+    expect(r.out.parkedWithDoor[0].door).toBe(`${QUOTES} is already a card in Kevin's queue (its one 48-hour pass starts now)`);
+    expect(Object.keys(r.ledger)).toEqual([EPC]);
   });
 
   it.each([
-    ['his newest words do not hold it', { history: '[2026-10-08 14:09] Book the cheapest one.' }],
-    ['he negates the hold', { history: "[2026-10-08 14:09] Don't put these on hold, book them this week." }],
-  ])('CONTROL: %s, so the two-way link alone is no door and a card is made', (_label, quotes) => {
-    const r = epc({ ...quotes, due: '{d:+17}' });
-    expect(isCard(r.final[EPC])).toBe(true);
-    expect(r.final[EPC].agentOutput).toContain(`${QUOTES} cites this task back`);
-  });
-
-  it('CONTROL: his hold on a task linked one way only is not his hold on this one', () => {
-    const r = epc({ history: HOLD, due: '{d:+17}', notes: '' });
-    expect(isCard(r.final[EPC])).toBe(true);
-  });
-
-  it("CONTROL: an agent's note saying Kevin parked it is not his park", () => {
-    const r = epc({ due: '{d:+17}', notes: '' }, { notes: "[{day:0} — agent] PARKED by Kevin's ruling: let's put these on the back burner until the EICRs are in." });
-    expect(isCard(r.final[EPC])).toBe(true);
+    ["Why is this still on hold?"], ['This should not be on hold.'], ["Let's put this on the back burner for now."],
+  ])('his verdict words "%s" on the task itself are never read as a hold', (words) => {
+    const T = 'recKEVINWORDSTASK';
+    const r = verify({ tasks: { [T]: { name: GENERIC, feedback: words, outcome: 'Changes requested' } }, owed: [[T, 'redo']],
+      actions: [{ task: T, kind: 'redo', ok: false, error: 'no card: Kevin is holding this' }] });
+    expect(isCard(r.final[T])).toBe(true);
   });
 
   it.each([
     ['his knock-back to a later day (Deferred Until)', { deferred: '{d:+5}' }, /^Kevin knocked it back to \d{4}-\d{2}-\d{2}$/],
-    ['the Some Day tick', { someDay: true }, /^Kevin put it on Some Day$/],
-    ['his own words on the task putting it on hold', { feedback: 'Park this until the new tenant is in.', outcome: 'Changes requested' }, /^Kevin's own words hold it: "Park this until the new tenant is in\."$/],
-  ])('on the task itself, %s is his park: no card, no pass', (_label, extra, door) => {
+    ['the Some Day tick, dated by the due date it blanked 3 days ago', { someDay: true, due: null, lmtDue: '{iso:-72h}' }, /^Kevin put it on Some Day, which holds it until \d{2} \w{3} \d{4}$/],
+    ["his answer parking it (decided --until)", { notes: "[08 Oct 2026 — agent-dispatch] Parked until {d:+20} on Kevin's answer; it comes back on the board that day." }, /^Kevin's answer parks it until \d{4}-\d{2}-\d{2}$/],
+    ['his due date (due, on his words)', { notes: '[09 Oct 2026 10:00 — agent-dispatch] DUE MOVED from 2026-10-09 to {d:+9}: a week (Kevin: "leave it a week")', due: '{d:+9}' }, /^its due date was moved to \d{4}-\d{2}-\d{2} on Kevin's words$/],
+  ])('%s holds it: no card, no pass', (_label, extra, door) => {
     const T = 'recKEVINHELDTASK1';
     const r = verify({ tasks: { [T]: { name: GENERIC, ...extra } }, actions: [noCard(T, 'no card: Kevin is holding this')] });
     expect(r.writes).toEqual([]);
+    expect(r.ledger).toBe(null);
     expect(r.out.parkedWithDoor[0].door).toMatch(door);
+  });
+
+  it.each([
+    ['ticked 31 days ago', { someDay: true, due: null, lmtDue: '{iso:-744h}' }],
+    ['ticked with no readable time', { someDay: true, due: null }],
+    ['ticked while a due date stands (the time is not the tick\'s)', { someDay: true, lmtDue: '{iso:-24h}' }],
+    ['knocked back to a day already gone', { deferred: '{d:-1}' }],
+  ])('CONTROL: Some Day or a knock-back %s holds nothing: a card', (_label, extra) => {
+    const T = 'recKEVINHELDTASK2';
+    const r = verify({ tasks: { [T]: { name: GENERIC, ...extra } }, actions: [noCard(T, 'no card')] });
+    expect(isCard(r.final[T])).toBe(true);
+  });
+});
+
+describe('only the kinds the commands write are an outcome', () => {
+  it.each([['covered-by-related'], ['new-work-dispatched'], ['routing'], ['dispatch']])(
+    'an owed task whose only action is "%s" is parked: a card', (kind) => {
+      const T = 'recINVENTEDKIND01';
+      const r = verify({ tasks: { [T]: { name: GENERIC } }, actions: [{ task: T, kind, ok: true, note: 'handled elsewhere' }] });
+      expect(isCard(r.final[T])).toBe(true);
+    });
+
+  it.each([['complete'], ['block'], ['handover'], ['decided'], ['submit']])('CONTROL: "%s" is an outcome: no card', (kind) => {
+    const T = 'recREALKINDTASK01';
+    const r = verify({ tasks: { [T]: { name: GENERIC } }, actions: [{ task: T, kind, ok: true }] });
+    expect(r.writes).toEqual([]);
+  });
+});
+
+describe("a task Roy or Kevin holds is theirs: never parked, never escalated by this control", () => {
+  it.each([['Roy', 'reclbdjfVev3bqNHS'], ['Kevin', 'recHEt2VPYothaqTd']])('owed, failed with no card, held by %s: no card, and the failure still alarms', (_who, rec) => {
+    const T = 'recPERSONHELDTASK';
+    const r = verify({ tasks: { [T]: { name: GENERIC, teamMember: [rec] } }, actions: [noCard(T, 'no card: with the person')] });
+    expect(r.writes).toEqual([]);
+    expect(r.err).toContain(`action failed: new ${T}`);
+  });
+
+  it('handed to Roy between the listing and the card: escalate reads the owner again and makes no card', () => {
+    const T = 'recHANDEDTOROY001';
+    const r = verify({ tasks: { [T]: { name: GENERIC } }, ownerNow: { [T]: 'reclbdjfVev3bqNHS' }, actions: [noCard(T, 'no card: later')] });
+    expect(r.code).toBe(1);
+    expect(r.err).toContain('a person holds it now');
+    expect(r.writes).toEqual([]);
+  });
+
+  it('not owed and held by no AI agent: not parked', () => {
+    const T = 'recNOBODYSTASK001';
+    const r = verify({ tasks: { [T]: { name: GENERIC, teamMember: [] } }, owed: [], actions: [{ task: T, kind: 'annotate', ok: true, note: 'no card: later' }] });
+    expect(r.writes).toEqual([]);
   });
 });
 

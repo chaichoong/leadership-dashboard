@@ -9054,19 +9054,22 @@ def rested_on_wall(live, last_event, started_at, now=None):
 #     or when it was owed new work, the run touched it, and no card, close, wall,
 #     hand-over or route came after the last failure. A failure that is capacity
 #     or time (a usage limit, a timeout, a 429) is a pause, never a park.
+#   - Only a task owed this run, or held by an AI agent, is ever parked; a task
+#     Roy or Kevin holds is theirs and is never escalated by this control.
 #   - A parked task stays off Kevin's queue for ONE pass of 48 hours, once in its
 #     life, and only at a door: (1) an open task named by its id, due today to 7
 #     days ahead, not on a wall, not itself parked this run and not citing this
 #     task back, or any task already at Approval; (3) an outside event in a Notes
 #     line an agent wrote (never the Description, never the inbound email), with
-#     its day and clock time inside the next 48 hours. The pass is written on the
-#     task (NO_CARD_PASS_MARK), so forging a door buys 48 hours once, never silence.
-#   - (2) Kevin's own park holds and uses no pass: the clock is his. Read only from
-#     what his own actions write: `decided --until`, `due` on his words, his
-#     knock-back (Deferred Until), the Some Day tick, or his newest verdict words
-#     putting it on hold. His hold on a task linked BOTH ways to this one (the EPC
-#     and its quotes, 14 Oct 2026), or that task being his card already, holds
-#     this one too; a two-way link alone is no door.
+#     its day and clock time inside the next 48 hours. The pass is kept in a
+#     ledger keyed by task id (NO_CARD_PASS_LEDGER, the source of truth; the Notes
+#     line is only for reading), so forging a door buys 48 hours once, never
+#     silence, and neither a long Notes trail nor a folded twin's line renews it.
+#   - (2) Kevin's own park holds and uses no pass, read only from fields his own
+#     actions write that carry a date: `decided --until`, `due` on his words, his
+#     knock-back (Deferred Until), and the Some Day tick for 30 days from when the
+#     tick blanked the due date. His words are never read as a hold (review round
+#     3: "Why is this still on hold?" read as one, and a worded hold never ended).
 #   - A park with no door, or any park once the pass is used up, becomes the same
 #     card for every task: a decision card through `escalate`, quoting the task
 #     name and the robot's own words. A redo keeps Kevin's change request: his
@@ -9076,10 +9079,12 @@ def rested_on_wall(live, last_event, started_at, now=None):
 NO_CARD_RE = re.compile(
     r"\b(?:no[\s-]+(?:new\s+|approval\s+)?card|without\s+(?:an?\s+)?(?:new\s+)?card|not\s+carded)\b"
     r"(?![-\s]*(?:payments?|numbers?|details|updates?|statements?|transactions?|readers?|on\s+file)\b)", re.I)
-# Kinds that are no outcome: a note, or a park by another name. Any other action that worked is one (a card,
-# a close, a wall, a hand-over, a fold, a route), when it comes after the run's last failure on the task.
-NO_OUTCOME_KINDS = ("annotate", "park", "parked", "parked-stale", "hold", "held", "leave", "skip", "skipped",
-                    "wait", "defer", "deferred", "checked")
+# The kinds that are an outcome, when they worked AFTER the run's last failure on the task: the kinds the
+# commands write (a card, a close, a wall, a route, a hand-over, a decision recorded). Any other kind,
+# including the invented ones real reports carry ("covered-by-related", "new-work-dispatched", "routing",
+# "dispatch"), is no outcome (review round 3).
+OUTCOME_KINDS = ("new", "redo", "submit", "carry_out", "complete", "block", "route", "handover", "escalate",
+                 "decided")
 # A failure that is capacity or time is a pause, never a park (memory: a capacity refusal is not a fault).
 # The CLI's own limit line is allowance.LIMIT_RE; a run report says it in its own words, read here.
 NO_CARD_CAPACITY_RE = re.compile(
@@ -9096,15 +9101,15 @@ NO_CARD_REC_RE = re.compile(r"\brec[A-Za-z0-9]{14}\b")
 KEVIN_PARK_RE = re.compile(r"^\[[^\]\n]*— agent-dispatch\] Parked until (\d{4}-\d{2}-\d{2}) on Kevin's answer", re.M)
 DUE_MOVED_TO_RE = re.compile(r"^\[[^\]\n]*— agent-dispatch\] " + re.escape(DUE_MOVED_MARK)
                              + r" from \S+ to (\d{4}-\d{2}-\d{2})", re.M)
-# The Some Day tick: Kevin's own park (kept identical to SOME_DAY_FIELD in scripts/rent_new_tenant.py).
+# The Some Day tick (kept identical to SOME_DAY_FIELD in scripts/rent_new_tenant.py). It has no date of its
+# own: the deployed Some Day automation (wflwN7tFqQy8V8cKz) blanks the Due Date within a minute of the tick,
+# and "LMT Due Date" records when, so a tick with a blank due date is dated from that time and holds for
+# SOME_DAY_HOLD_DAYS. A tick whose time cannot be read that way excuses nothing.
 SOME_DAY_FIELD = "fldmhkeRaDkiL3Ga4"
-# His words that put a task on hold, and the words that undo one in front of them.
-KEVIN_HOLD_RE = re.compile(
-    r"\b(?:back[\s-]?burner|on\s+hold|hold\s+(?:off|fire)|put\s+(?:this|these|it|them)\s+aside"
-    r"|park\s+(?:this|these|it|them)|leave\s+(?:this|these|it|them)\s+(?:for\s+now|until|till)"
-    r"|wait\s+(?:until|till)|not\s+until)\b", re.I)
-KEVIN_HOLD_NOT_RE = re.compile(r"\b(?:don'?t|do\s+not|never|no\s+need\s+to|stop|no\s+longer)\b", re.I)
-NO_CARD_PASS_RE = re.compile(r"^\[([^\]\n]*?)\s*— agent-dispatch\] " + re.escape(NO_CARD_PASS_MARK) + r"\b", re.M)
+LMT_DUE_FIELD = "fldulMgyNxwGbqDIx"     # Tasks: "LMT Due Date", last modified time over Due Date
+SOME_DAY_HOLD_DAYS = 30
+# The 48-hour pass, one entry per task id, written atomically (scripts rules: os.replace, never in place).
+NO_CARD_PASS_LEDGER = "no-card-pass.json"
 # A Notes line an agent wrote (annotate: "[14 Oct 2026 — agent] ..."), with the day it was written.
 AGENT_NOTE_RE = re.compile(r"^\[(\d{1,2} \w{3} \d{4})(?: \d{2}:\d{2})?\s*— agent\]", re.M)
 ANY_NOTE_STAMP_RE = re.compile(r"^\[[^\]\n]*\]", re.M)
@@ -9140,7 +9145,7 @@ def owed_new_work(queue, handback_only=False, owed=None):
 
 def parked_tasks(actions, owed_new=()):
     """{task id: the run's own words} for every task this run left with no card, read in the order the
-    run acted: a card, close, wall, hand-over or route AFTER the last failure is an outcome. Parked: the
+    run acted: an OUTCOME_KINDS action that worked AFTER the last failure is an outcome. Parked: the
     run says so in any wording, or a new or redo action failed, or it was owed new work the run touched.
     A capacity or time failure is a pause and its words declare nothing; a task the run did not touch
     is the next tick's, as before (silent_run_problem); a carry-out is never read ("no card payment")."""
@@ -9164,7 +9169,7 @@ def parked_tasks(actions, owed_new=()):
             declared.add(tid)
         if a.get("kind") in ("new", "redo") and not a.get("ok"):
             last_fail[tid] = i
-        if a.get("ok") and a.get("kind") not in NO_OUTCOME_KINDS:
+        if a.get("ok") and a.get("kind") in OUTCOME_KINDS:
             outcome_at.setdefault(tid, []).append(i)
     parked = {}
     for tid in touched:
@@ -9175,23 +9180,12 @@ def parked_tasks(actions, owed_new=()):
     return parked
 
 
-def kevin_hold_words(tf):
-    """His newest words on the task, when they put it on hold ("Let's put these on the back burner
-    until...", 8 Oct 2026), or ''. Read only from what his own verdicts write (Approval Feedback, else
-    the last block of Feedback History: kevins_newest_note), never an agent's Notes; a hold he negates
-    ("don't put this on hold") is none."""
-    said = " ".join(FEEDBACK_STAMP.sub(" ", kevins_newest_note(tf or {})).split())
-    for m in KEVIN_HOLD_RE.finditer(said):
-        if not KEVIN_HOLD_NOT_RE.search(said[max(0, m.start() - 40):m.start()]):
-            return said[:200]
-    return ""
-
-
-def kevin_park(t, today, tf=None):
-    """What Kevin's own park on the task says, or ''. Only what his own actions write: his answer
-    parked it until a later day (`decided --until`), its due date moved to a later day on his words
-    (`due`), his knock-back to a later day (Deferred Until), the Some Day tick, or his newest verdict
-    words putting it on hold. `tf` is the task's raw fields (needed for the last three)."""
+def kevin_park(t, today, tf=None, now=None):
+    """What Kevin's own park on the task says, or ''. Only fields his own actions write, each with a date:
+    his answer parked it until a later day (`decided --until`), its due date moved to a later day on his
+    words (`due`), his knock-back to a later day (Deferred Until), or the Some Day tick for
+    SOME_DAY_HOLD_DAYS from when it blanked the due date. Never his words, never an agent's.
+    `tf` is the task's raw fields."""
     notes = str(t.get("notes") or "")
     parks = KEVIN_PARK_RE.findall(notes)
     if parks and parks[-1] > today.isoformat():
@@ -9204,24 +9198,40 @@ def kevin_park(t, today, tf=None):
     back = str(tf.get(AF["deferredUntil"]) or "")[:10]
     if back > today.isoformat():
         return f"Kevin knocked it back to {back}"
-    if tf.get(SOME_DAY_FIELD):
-        return "Kevin put it on Some Day"
-    held = kevin_hold_words(tf)
-    if held:
-        return f"Kevin's own words hold it: \"{held}\""
+    ticked = _utc(tf.get(LMT_DUE_FIELD)) if tf.get(SOME_DAY_FIELD) and not tf.get(AF["dueDate"]) else None
+    if ticked:
+        ends = ticked + timedelta(days=SOME_DAY_HOLD_DAYS)
+        if (now or datetime.now(timezone.utc)) < ends:
+            return f"Kevin put it on Some Day, which holds it until {ends.astimezone(LONDON).strftime('%d %b %Y')}"
     return ""
 
 
-def no_card_pass(t):
-    """When this task's one pass began (aware datetime), True when a pass line is there but its time
-    cannot be read (used, so no door), or None when it has never had one."""
-    found = NO_CARD_PASS_RE.findall(str(t.get("notes") or ""))
-    if not found:
-        return None
+def pass_ledger_path():
+    return os.path.join(STATE_DIR, NO_CARD_PASS_LEDGER)
+
+
+def load_pass_ledger():
+    """{task id: {"began": iso, "door": str}}. A missing ledger is empty; one that cannot be read raises,
+    because an empty ledger read by mistake would hand every task a fresh pass."""
     try:
-        return datetime.strptime(found[0].strip(), "%d %b %Y %H:%M").replace(tzinfo=LONDON)
-    except ValueError:
-        return True
+        with open(pass_ledger_path()) as fh:
+            led = json.load(fh)
+    except FileNotFoundError:
+        return {}
+    except (OSError, ValueError) as e:
+        raise RuntimeError(f"the no-card pass ledger cannot be read ({str(e)[:120]})") from None
+    if not isinstance(led, dict):
+        raise RuntimeError("the no-card pass ledger is not a mapping of task ids")
+    return led
+
+
+def pass_began(entry):
+    """When a ledger entry's pass began (aware datetime), True when the entry is there but its time cannot
+    be read (the pass is used, so no door), or None when the task has never had one."""
+    if entry is None:
+        return None
+    began = _utc((entry or {}).get("began") if isinstance(entry, dict) else None)
+    return began if began else True
 
 
 def agent_note_text(t, today):
@@ -9297,14 +9307,14 @@ def named_ids(t, said, today):
             if i != t.get("id")]
 
 
-def no_card_door(t, said, named, now, parked=(), raw=None):
+def no_card_door(t, said, named, now, parked=(), raw=None, began=None):
     """(door, why, uses_pass) for a task a run left with no card. `door` names what holds it, or is ''
     and `why` says why it becomes a card; `uses_pass` is True when the door spends the task's one
     48-hour pass (a door a robot can name), False when no pass is spent (Kevin's own park, a card
     already in his queue, a closed task). `t` is the live task (task_view), `named` the live tasks
     its park names ({id: task_view}, read by listing), `parked` every task left with no card this
     run, `raw` the raw fields of the task and of those it names ({id: fields}, for Kevin's own marks),
-    `now` London. Pure."""
+    `began` its pass from the ledger (pass_began), `now` London. Pure."""
     today = now.date()
     raw = raw or {}
     status = t.get("status") or ""
@@ -9312,10 +9322,9 @@ def no_card_door(t, said, named, now, parked=(), raw=None):
         return "it is already a card in Kevin's queue", "", False
     if status in ("Completed", "Cancelled"):
         return f"it is {status}", "", False
-    park = kevin_park(t, today, raw.get(t.get("id")))
+    park = kevin_park(t, today, raw.get(t.get("id")), now)
     if park:
         return park, "", False
-    began = no_card_pass(t)
     if began is True:
         return "", "its one 48-hour pass is used and its time cannot be read", False
     if began is not None:
@@ -9331,19 +9340,11 @@ def no_card_door(t, said, named, now, parked=(), raw=None):
             seen.append(f"{rid} is not a task on the board")
             continue
         st, due = n.get("status") or "", str(n.get("dueDate") or "")[:10]
-        both_ways = bool(t.get("id")) and t["id"] in f"{n.get('notes') or ''} {n.get('description') or ''}"
-        # A task and its follow-up linked both ways (the EPC and its quotes, 14 Oct 2026) are one matter:
-        # when Kevin holds the other side, or it is his card already, his clock is the door, and no pass
-        # is spent. One way only, an Approval card spends the pass; a two-way link alone is no door.
-        held = kevin_park(n, today, raw.get(rid)) if both_ways and st not in ("Completed", "Cancelled") else ""
-        if both_ways and (st == "Approval" or held):
-            return (f"{rid}, linked both ways to it, "
-                    + ("is already a card in Kevin's queue" if st == "Approval" else f"is held by Kevin: {held}")), "", False
         if st == "Approval":
             return f"{rid} is already a card in Kevin's queue", "", True
         if rid in parked:
             seen.append(f"{rid} was itself left with no card this run")
-        elif both_ways:
+        elif t.get("id") and t["id"] in f"{n.get('notes') or ''} {n.get('description') or ''}":
             seen.append(f"{rid} cites this task back")
         elif task_blocker(n.get("notes")):
             seen.append(f"{rid} is on a wall")
@@ -9410,6 +9411,19 @@ def no_door_brief(t, tf, said, why, stamp):
     return brief
 
 
+def append_note_checked(task_id, listed_notes, line):
+    """Append LINE to the task's Notes, read by id first. A blank read by id while the listing read
+    Notes is the read-modify-write trap (CLAUDE.md, 28 Sep 2026: three Descriptions wiped): stop, write
+    nothing, and say so. Read back after."""
+    fresh = str((get_task(task_id).get("fields", {}) or {}).get(AF["notes"]) or "")
+    if not fresh.strip() and str(listed_notes or "").strip():
+        raise RuntimeError(f"its Notes read blank by id while the listing read {len(str(listed_notes))} characters, "
+                           "so nothing was written over them")
+    patch_task(task_id, {AF["notes"]: (fresh.rstrip() + "\n\n" + line).strip()[-90000:]})
+    if line not in str((get_task(task_id).get("fields", {}) or {}).get(AF["notes"]) or ""):
+        raise RuntimeError("the line written to Notes does not read back")
+
+
 def keep_change_request(task_id, tf):
     """A redo Kevin asked for keeps his words: escalate clears Approval Feedback (archiving it), so before
     the card his change request is appended to the task's Notes, where the agent reads its work. Read back."""
@@ -9420,17 +9434,30 @@ def keep_change_request(task_id, tf):
     if feedback in notes:
         return
     stamp = datetime.now(LONDON).strftime("%d %b %Y %H:%M")
-    patch_task(task_id, {AF["notes"]: (notes.rstrip() + f"\n\n[{stamp} — agent-dispatch] KEVIN ASKED FOR "
-                                       f"CHANGES, still owed when this went back to him as a card: {feedback}")
-                         .strip()[-90000:]})
-    if feedback not in str((get_task(task_id).get("fields", {}) or {}).get(AF["notes"]) or ""):
-        raise RuntimeError("Kevin's change request did not read back in Notes, so no card was made over it")
+    append_note_checked(task_id, notes, f"[{stamp} — agent-dispatch] KEVIN ASKED FOR CHANGES, still owed when "
+                                        f"this went back to him as a card: {feedback}")
+
+
+def no_card_owner_problem(t, owed):
+    """Why this control may not park or card this task, or ''. A task Roy or Kevin holds is theirs; a task
+    no AI agent holds is parked only when this run owed it."""
+    humans = {h["rec"] for h in HUMANS.values()} | {KEVIN_REC_ID}
+    held = t.get("teamMemberIds") or []
+    if any(i in humans for i in held):
+        return "a person holds it (Team Member is Roy, Kevin or another of the team)"
+    if not owed and not any(i in ALL_AGENTS for i in held):
+        return "no AI agent holds it and this run did not owe it"
+    return ""
 
 
 def card_no_door(rec, said, why, rundir, tier1=False):
     """Put a task a run parked with no door in Kevin's queue as a decision card, the one card every
     such task gets. Returns what was made; raises when no card could be made."""
     t, tf = task_view(rec), rec.get("fields", {}) or {}
+    live = task_view(get_task(t["id"]))
+    if any(i in {h["rec"] for h in HUMANS.values()} | {KEVIN_REC_ID} for i in live.get("teamMemberIds") or []):
+        raise RuntimeError("a person holds it now (Team Member is Roy, Kevin or another of the team), so it is "
+                           "theirs, never escalated by this control")
     stamp = datetime.now(LONDON).strftime("%d %b %Y %H:%M")
     keep_change_request(t["id"], tf)
     os.makedirs(rundir, exist_ok=True)
@@ -9447,25 +9474,31 @@ def card_no_door(rec, said, why, rundir, tier1=False):
     return {"card": "decision"}
 
 
-def start_no_card_pass(task_id, door):
-    """Write the task's one pass line (its clock starts now), read back."""
-    tf = get_task(task_id).get("fields", {}) or {}
-    notes = str(tf.get(AF["notes"]) or "")
-    if NO_CARD_PASS_RE.search(notes):
-        raise RuntimeError("it already carries a pass line")
-    stamp = datetime.now(LONDON).strftime("%d %b %Y %H:%M")
-    patch_task(task_id, {AF["notes"]: (notes.rstrip() + f"\n\n[{stamp} — agent-dispatch] {NO_CARD_PASS_MARK} "
-                                       f"({NO_CARD_PASS_HOURS} hours, once): left with no card at a door, {door}. "
-                                       "Left with no card again after the 48 hours, it comes to Kevin as a card.")
-                         .strip()[-90000:]})
-    if not NO_CARD_PASS_RE.search(str((get_task(task_id).get("fields", {}) or {}).get(AF["notes"]) or "")):
-        raise RuntimeError("the pass line does not read back")
+def start_no_card_pass(task_id, door, listed_notes, now):
+    """Start the task's one pass: the ledger entry first (the source of truth, written atomically and
+    merged with a fresh read so a run beside this one loses nothing), then a Notes line for reading."""
+    led = load_pass_ledger()
+    if task_id in led:
+        raise RuntimeError("the ledger already holds a pass for it")
+    led[task_id] = {"began": now.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"), "door": door[:300]}
+    os.makedirs(STATE_DIR, exist_ok=True)
+    tmp = pass_ledger_path() + ".tmp"
+    with open(tmp, "w") as fh:
+        json.dump(led, fh, indent=1)
+    os.replace(tmp, pass_ledger_path())
+    append_note_checked(task_id, listed_notes, f"[{now.strftime('%d %b %Y %H:%M')} — agent-dispatch] {NO_CARD_PASS_MARK} "
+                                               f"({NO_CARD_PASS_HOURS} hours, once): left with no card at a door, "
+                                               f"{door}. Left with no card again after the 48 hours, it comes to "
+                                               "Kevin as a card.")
 
 
 def _retry_once(read):
-    """Run a read; on Airtable's 429 or a 5xx, wait and try once more. Anything else raises at once."""
+    """Run a read; on Airtable's 429 or a 5xx, a network error or a timeout, wait and try once more.
+    Anything else raises at once."""
     try:
         return read()
+    except OSError:
+        pass                     # URLError, a socket timeout, a dropped connection: all OSError
     except RuntimeError as e:
         if not re.search(r"HTTP (?:429|5\d\d)\b", str(e)):
             raise
@@ -9494,7 +9527,12 @@ def settle_no_cards(actions, dry_run=False, rundir="", owed_new=(), now=None):
         return set(), [], [], []
     now = now or datetime.now(LONDON)
     tier1 = {a.get("task") for a in actions or [] if a.get("tier1")}
-    fields = list(AF.values()) + [SOME_DAY_FIELD]
+    fields = list(AF.values()) + [SOME_DAY_FIELD, LMT_DUE_FIELD]
+    try:
+        ledger = load_pass_ledger()
+    except RuntimeError as e:
+        return set(said), [], [], [f"{e}, so no task left with no card is excused or carded this run: "
+                                   f"{', '.join(said)}"]
     try:
         recs = _list_by_id(TASKS, list(said), fields)
         views = {i: task_view(r) for i, r in recs.items()}
@@ -9514,17 +9552,25 @@ def settle_no_cards(actions, dry_run=False, rundir="", owed_new=(), now=None):
         t = task_view(rec)
         if task_blocker(t["notes"]):
             continue      # a wall has its own owner and wake: the blocker loop's, never this rule's
+        owner = no_card_owner_problem(t, tid in set(owed_new))
+        if owner:
+            continue      # Roy's or Kevin's task, or not ours to park: left exactly as before
         ids = [tid] + [i for i in named_ids(t, words, now.date()) if i in recs]
         named = {i: task_view(recs[i]) for i in ids[1:]}
         door, why, uses_pass = no_card_door(t, words, named, now, set(said),
-                                            {i: recs[i].get("fields", {}) or {} for i in ids})
+                                            {i: recs[i].get("fields", {}) or {} for i in ids},
+                                            pass_began(ledger.get(tid)))
         settled.add(tid)
         if door and uses_pass and not dry_run:
             try:
-                start_no_card_pass(tid, door)
+                start_no_card_pass(tid, door, t["notes"], now)
                 door = f"{door} (its one {NO_CARD_PASS_HOURS}-hour pass starts now)"
-            except Exception as e:                        # noqa: BLE001 — no clock recorded, no door
-                door, why = "", f"it has a door ({door}) but its clock could not be written: {str(e)[:160]}"
+            except Exception as e:                        # noqa: BLE001 — said loudly, whichever half failed
+                if tid in load_pass_ledger():
+                    problems.append(f"{tid}'s pass is in the ledger, but its Notes line was not written: {str(e)[:200]}")
+                    door = f"{door} (its one {NO_CARD_PASS_HOURS}-hour pass starts now)"
+                else:
+                    door, why = "", f"it has a door ({door}) but its clock could not be written: {str(e)[:160]}"
         if door:
             doors.append({"task": tid, "door": door})
             continue
