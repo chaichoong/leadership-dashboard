@@ -103,7 +103,7 @@ li { margin-bottom:0.2rem; font-size:0.9rem; } hr { border:none; border-top:1px 
     <a href="index.html#sitemap" class="header-back">&larr; Back to Site Map</a>
     <h1>Cash Flow Voids (CFVs) &mdash; Standard Operating Procedure</h1>
     <div class="subtitle">Detection, management, chase tracking, auto-return and resolution of missing rent payments</div>
-    <div class="version">Version 1.35 &middot; 3 September 2026 &middot; Owner: Kevin Brittain</div>
+    <div class="version">Version 1.44 &middot; 14 October 2026 &middot; Owner: Kevin Brittain</div>
   </div>
 </div>
 
@@ -132,7 +132,7 @@ li { margin-bottom:0.2rem; font-size:0.9rem; } hr { border:none; border-top:1px 
       </div>
       <div class="qr-item">
         <div class="qr-label">2-Day Tolerance</div>
-        <div class="qr-value">(<code>CFV_TOLERANCE_DAYS = 2</code>) Used for re-flagging and for how long a dismissal lasts. It is <strong>not</strong> a waiting period before a new CFV is spotted</div>
+        <div class="qr-value">(<code>CFV_TOLERANCE_DAYS = 2</code>) Used for how long a dismissal lasts. It is <strong>not</strong> a waiting period before a new CFV is spotted</div>
       </div>
       <div class="qr-item">
         <div class="qr-label">Owner</div>
@@ -140,7 +140,7 @@ li { margin-bottom:0.2rem; font-size:0.9rem; } hr { border:none; border-top:1px 
       </div>
       <div class="qr-item">
         <div class="qr-label">Version</div>
-        <div class="qr-value">1.35</div>
+        <div class="qr-value">1.44</div>
       </div>
     </div>
   </div>
@@ -159,7 +159,7 @@ li { margin-bottom:0.2rem; font-size:0.9rem; } hr { border:none; border-top:1px 
         <a href="#table-columns"><span class="toc-num">7</span> CFV Table &amp; Columns</a>
         <a href="#actions"><span class="toc-num">8</span> Action Buttons Reference</a>
         <a href="#chase"><span class="toc-num">9</span> Chase Stage Tracking</a>
-        <a href="#reflag"><span class="toc-num">10</span> Re-Flagging Logic</a>
+        <a href="#reflag"><span class="toc-num">10</span> CFV Actioned Is Never Re-Flagged</a>
         <a href="#comments"><span class="toc-num">11</span> Comments &amp; Audit Trail</a>
         <a href="#sidebar-badges"><span class="toc-num">12</span> Sidebar Badges</a>
         <a href="#rent-statements"><span class="toc-num">13</span> Rent Statements Block</a>
@@ -237,7 +237,7 @@ li { margin-bottom:0.2rem; font-size:0.9rem; } hr { border:none; border-top:1px 
         <li>Run <strong>the payment check</strong> (described below) on the tenancy.</li>
         <li>If the current rent cycle has been paid: add the tenancy to the <strong>auto-return queue</strong> (see Section 6). It will be returned to In Payment automatically.</li>
         <li>If the cycle has not been paid: display the tenancy in the CFV table with its current status.</li>
-        <li>For <strong>CFV Actioned</strong> tenancies: if this month&rsquo;s due day has passed by <strong>2 days or more</strong> (<code>CFV_TOLERANCE_DAYS</code>), mark as <strong>re-flagged</strong> (see Section 10). This is the only place a plain days-since-due count is still used.</li>
+        <li>A <strong>CFV</strong> or <strong>CFV Actioned</strong> tenancy keeps its status. It is never re-flagged, however long it stays unpaid (see Section 10).</li>
       </ol>
 
       <h4 style="margin-top:1rem;font-weight:700;color:var(--text-primary)">Path B &mdash; &ldquo;In Payment&rdquo; Tenancies (New CFV Detection)</h4>
@@ -314,7 +314,7 @@ li { margin-bottom:0.2rem; font-size:0.9rem; } hr { border:none; border-top:1px 
           <tr><td>Potential CFV &rarr; dismissed</td><td>User clicks <strong>&ldquo;Not a CFV&rdquo;</strong> button. Only a <strong>Potential CFV</strong> can be dismissed. The dismissal lasts until the tenancy&rsquo;s <strong>next rent due day plus the 2-day tolerance</strong>, then the tenancy is re-checked.</td><td>Yes &mdash; posts a tagged <code>[CFV-DISMISSED:YYYY-MM-DD]</code> comment on the tenancy, as well as saving it in localStorage</td></tr>
           <tr><td>CFV &rarr; <span class="label-badge lb-amber">CFV Actioned</span></td><td>User clicks <strong>&ldquo;Mark Actioned&rdquo;</strong> button</td><td>Yes &mdash; PATCH to set status to CFV Actioned</td></tr>
           <tr><td>CFV Actioned &rarr; <span class="label-badge lb-green">In Payment</span></td><td>User clicks <strong>&ldquo;In Payment&rdquo;</strong> button, or <strong>automatically</strong> when a reconciled linked transaction is detected</td><td>Yes &mdash; PATCH to set status to In Payment</td></tr>
-          <tr><td>CFV Actioned &rarr; <span class="label-badge lb-red">CFV</span></td><td>User clicks <strong>&ldquo;Move to CFV&rdquo;</strong> button, or user confirms a re-flag</td><td>Yes &mdash; PATCH to set status to CFV</td></tr>
+          <tr><td>CFV Actioned &rarr; <span class="label-badge lb-red">CFV</span></td><td>User clicks <strong>&ldquo;Move to CFV&rdquo;</strong> button (for example, when a payment you were expecting has not arrived). Never automatic.</td><td>Yes &mdash; PATCH to set status to CFV</td></tr>
           <tr><td>CFV / CFV Actioned &rarr; <span class="label-badge lb-green">In Payment</span></td><td><strong>Auto-return:</strong> the payment check finds the current rent cycle paid by a reconciled transaction linked to this tenancy</td><td>Yes &mdash; automatic PATCH + audit comment</td></tr>
         </tbody>
       </table>
@@ -397,7 +397,7 @@ li { margin-bottom:0.2rem; font-size:0.9rem; } hr { border:none; border-top:1px 
           <tr><td><strong>Due Day</strong></td><td><code>tenDueDay</code></td><td>The day of the month rent is due (e.g. 1, 15, 28).</td></tr>
           <tr><td><strong>Days Overdue</strong></td><td>Calculated</td><td>Days since the rent cycle that the last received payment did NOT cover (see below). Colour-coded: black (0&ndash;3), amber (4&ndash;7), red (8+).</td></tr>
           <tr><td><strong>Last Payment</strong></td><td>Calculated</td><td>The date and amount of the most recent reconciled transaction linked to this tenancy. This is the figure the Days Overdue count is built from.</td></tr>
-          <tr><td><strong>Status</strong></td><td><code>tenPayStatus</code></td><td>Badge: <span class="label-badge lb-amber">Potential CFV</span>, <span class="label-badge lb-red">CFV</span>, <span class="label-badge lb-purple">CFV Actioned</span>, or <span class="label-badge lb-amber">Re-flagged</span></td></tr>
+          <tr><td><strong>Status</strong></td><td><code>tenPayStatus</code></td><td>Badge: <span class="label-badge lb-amber">Potential CFV</span>, <span class="label-badge lb-red">CFV</span> or <span class="label-badge lb-purple">CFV Actioned</span></td></tr>
           <tr><td><strong>Contact</strong></td><td><code>tenantPhone</code> + <code>tenantEmail</code></td><td>Clickable phone (tel:) and email (mailto:) links. Shows warning if no contact info.</td></tr>
           <tr><td><strong>Actions</strong></td><td>&mdash;</td><td>Context-sensitive action buttons (see Section 8).</td></tr>
         </tbody>
@@ -455,15 +455,6 @@ li { margin-bottom:0.2rem; font-size:0.9rem; } hr { border:none; border-top:1px 
         </tbody>
       </table>
 
-      <h4 style="margin-top:1.5rem;font-weight:700">When status is: <span class="label-badge lb-amber">Re-flagged</span> (CFV Actioned + overdue)</h4>
-      <table class="label-table">
-        <thead><tr><th>Button</th><th>Appearance</th><th>What It Does</th></tr></thead>
-        <tbody>
-          <tr><td><strong>Confirm CFV</strong></td><td>Red background</td><td>After confirmation: PATCHes status back to CFV. Adds comment &ldquo;Re-flagged as CFV &mdash; payment not received on next due date.&rdquo; Clears re-flag dismissal.</td></tr>
-          <tr><td><strong>Dismiss</strong></td><td>Default</td><td>Stores dismissal in localStorage. The re-flag badge disappears but the tenancy stays as CFV Actioned.</td></tr>
-          <tr><td><strong>&#128172; Comments</strong></td><td>Default, shows count</td><td>Opens comments panel.</td></tr>
-        </tbody>
-      </table>
 
       <div class="info-box info">
         <span class="ib-icon">&#8505;&#65039;</span>
@@ -496,21 +487,19 @@ li { margin-bottom:0.2rem; font-size:0.9rem; } hr { border:none; border-top:1px 
     </div>
   </div>
 
-  <!-- 10. Re-Flagging Logic -->
+  <!-- 10. CFV Actioned Is Never Re-Flagged -->
   <div class="section" id="reflag">
-    <h2 class="section-title"><span class="icon">&#9888;&#65039;</span> 10. Re-Flagging Logic</h2>
+    <h2 class="section-title"><span class="icon">&#9888;&#65039;</span> 10. CFV Actioned Is Never Re-Flagged</h2>
     <div class="card">
-      <p>A <strong>CFV Actioned</strong> tenancy can be automatically re-flagged if the next month&rsquo;s due date passes without payment. The system checks:</p>
-      <ol class="steps">
-        <li>Is the tenancy currently <strong>CFV Actioned</strong>?</li>
-        <li>Has the due day for the current month already passed?</li>
-        <li>Have at least <strong>2 days</strong> (<code>CFV_TOLERANCE_DAYS</code>) elapsed since the due day?</li>
-        <li>Has the user previously dismissed this re-flag? (Check <code>cfv_reflag_dismissed_{id}</code> in localStorage.)</li>
-      </ol>
-      <p>If all conditions are met and the re-flag hasn&rsquo;t been dismissed, the row shows a <strong>&ldquo;Re-flagged &#9888;&rdquo;</strong> badge in amber/warning style, along with &ldquo;Confirm CFV&rdquo; and &ldquo;Dismiss&rdquo; buttons.</p>
+      <p>A tenancy marked <strong>CFV</strong> or <strong>CFV Actioned</strong> is already a cash flow void. The page never asks you to confirm it as a CFV again (Kevin, 14 Oct 2026).</p>
+      <ul>
+        <li>A <strong>CFV Actioned</strong> row always shows <strong>&ldquo;In Payment&rdquo;</strong> and <strong>&ldquo;Move to CFV&rdquo;</strong>.</li>
+        <li>If a payment you were expecting does not arrive, click <strong>&ldquo;Move to CFV&rdquo;</strong> and confirm. Your call, never automatic.</li>
+        <li>When a reconciled payment links to the tenancy, it returns to In Payment by itself (Section 6).</li>
+      </ul>
       <div class="info-box tip">
         <span class="ib-icon">&#128161;</span>
-        <span>Re-flagging ensures that &ldquo;CFV Actioned&rdquo; tenancies don&rsquo;t get forgotten. If the tenant was promised to pay and misses the next due date, the system brings it back to your attention.</span>
+        <span>Until 14 Oct 2026 the page re-flagged every CFV Actioned tenancy once its rent day was 2 days past. An actioned tenancy is unpaid by definition, so it re-flagged every month, and confirming the re-flag cleared its dismissal, so the row came straight back after you marked it Actioned again. Old tenancy comments reading &ldquo;Re-flagged as CFV &mdash; payment not received on next due date.&rdquo; come from that rule.</span>
       </div>
     </div>
   </div>
@@ -529,7 +518,6 @@ li { margin-bottom:0.2rem; font-size:0.9rem; } hr { border:none; border-top:1px 
         <li>Marking as CFV Actioned: <em>&ldquo;Status changed to CFV Actioned from Leadership Dashboard.&rdquo;</em></li>
         <li>Returning to In Payment: <em>&ldquo;Returned to In Payment from Leadership Dashboard. Payment confirmed.&rdquo;</em></li>
         <li>Moving back to CFV: <em>&ldquo;Moved back to CFV from CFV Actioned via Leadership Dashboard.&rdquo;</em></li>
-        <li>Re-flagging: <em>&ldquo;Re-flagged as CFV &mdash; payment not received on next due date.&rdquo;</em></li>
         <li>Auto-return: <em>&ldquo;Auto-returned to In Payment &mdash; reconciled transaction linked to this tenancy detected for [Month Year].&rdquo;</em></li>
       </ul>
 
@@ -688,7 +676,7 @@ li { margin-bottom:0.2rem; font-size:0.9rem; } hr { border:none; border-top:1px 
           <tr><td><code>cfv_{id}_returned</code></td><td>&ldquo;1&rdquo;</td><td>Prevents a just-returned tenancy from re-appearing before the next full data load.</td><td>Cleared if Airtable PATCH fails</td></tr>
           <tr><td><code>cfv_{id}_returnDismissed</code></td><td>&ldquo;1&rdquo;</td><td>Legacy flag for dismissing return banners.</td><td>Returned to In Payment</td></tr>
           <tr><td><code>cfv_dismissed_{id}</code></td><td>ISO date string</td><td>Potential CFV dismissed by user. Backed up as a <code>[CFV-DISMISSED:date]</code> comment in Airtable and restored from it on another device.</td><td>Expires at the next rent due day + 2 days, then the system re-checks</td></tr>
-          <tr><td><code>cfv_reflag_dismissed_{id}</code></td><td>ISO date string</td><td>Re-flag dismissed by user. Tenancy stays CFV Actioned.</td><td>When user confirms re-flag as CFV</td></tr>
+          <tr><td><code>cfv_reflag_dismissed_{id}</code></td><td>&mdash;</td><td><strong>Dead legacy key.</strong> It held a dismissed re-flag. Re-flagging was removed on 14 Oct 2026 and nothing reads or writes it now.</td><td>Never; a leftover key is harmless</td></tr>
           <tr><td><code>cfv_{id}_startDate</code></td><td>&mdash;</td><td><strong>Dead legacy key.</strong> It used to hold a frozen CFV start date that drove Days Overdue. Nothing writes it any more; the code only ever deletes it, to clear up leftovers from the old build. Days Overdue is now worked out from the last reconciled payment instead (Section 7).</td><td>Deleted on dismissal, on return to In Payment, and on auto-return</td></tr>
         </tbody>
       </table>
@@ -733,7 +721,7 @@ li { margin-bottom:0.2rem; font-size:0.9rem; } hr { border:none; border-top:1px 
       </div>
       <div class="ts-item">
         <div class="ts-problem">A dismissed potential CFV has reappeared</div>
-        <div class="ts-solution">Dismissals last until the tenancy&rsquo;s <strong>next rent due day plus 2 days</strong>, then expire by design &mdash; so a dismissal made just before the due day is short, and one made just after it lasts almost a month. If the tenant still has not paid, the system re-flags them for review. Dismiss again or confirm as CFV if the payment is still missing.</div>
+        <div class="ts-solution">Dismissals last until the tenancy&rsquo;s <strong>next rent due day plus 2 days</strong>, then expire by design &mdash; so a dismissal made just before the due day is short, and one made just after it lasts almost a month. If the tenant still has not paid, the tenancy shows again as a Potential CFV. Dismiss again or confirm as CFV if the payment is still missing.</div>
       </div>
     </div>
   </div>
@@ -745,6 +733,7 @@ li { margin-bottom:0.2rem; font-size:0.9rem; } hr { border:none; border-top:1px 
       <table class="label-table">
         <thead><tr><th>Version</th><th>Date</th><th>Changes</th></tr></thead>
         <tbody>
+          <tr><td><strong>1.44</strong></td><td>14 Oct 2026</td><td>Removed re-flagging (Kevin, 14 Oct 2026: a CFV or CFV Actioned tenancy is already a CFV and never needs confirming again). A CFV Actioned row now always shows &ldquo;In Payment&rdquo; and &ldquo;Move to CFV&rdquo;; moving it back when an expected payment is missed is your call, with Move to CFV. Rewrote Section 10, and removed the Re-flagged badge, its buttons, its audit comment and its localStorage key from Sections 4, 5, 7, 8, 11, 15 and 16.</td></tr>
           <tr><td><strong>1.35</strong></td><td>3 Sep 2026</td><td>Drift repair against the live code (findings 035, 055, 170, 171, 276). Rewrote Section 4: detection no longer waits 2 days after the due day and no longer asks whether a payment landed in the current calendar month. Both paths now run one payment check, described in full &mdash; no linked payment at all means unpaid, otherwise the cycle that is due (this month&rsquo;s once the due day has passed by 2 days, last month&rsquo;s until then) must have a payment dated within 5 days before its due day. The calendar-month rule is documented as the fallback it now is. Corrected the same wording in the lifecycle table, Section 6, the flow diagrams, the Transactions field table and troubleshooting. The 2-day tolerance is now described where it is really used: re-flagging and dismissal expiry. Removed the <strong>Chase</strong> column from the Section 7 table (it is gone from the page) and added the <strong>Last Payment</strong> column that replaced it; Section 9 now says the chase stage is computed but not shown. Added the dead <code>cfv_{id}_startDate</code> key to Section 15 and corrected the note that said clearing browser data resets Days Overdue.</td></tr>
           <tr><td><strong>1.34</strong></td><td>26 Aug 2026</td><td>Drift repair against the live code (findings 164&ndash;169, 172). Dismissals expire at the next rent due day + 2 days, not after 25 days, and are backed up as tagged Airtable comments that restore them on another device. Days Overdue is derived from the last reconciled payment with a 5-day early-pay window; the localStorage start date is gone. New section 13 documents the Rent Statements block and its live writes to the Transactions table. Corrected how the tab is opened (dashboard button, not a sidebar item) and where the badges render. Payment Status is PATCHed by NAME, so a renamed option is what breaks it. Added the <code>data.recordComments:write</code> scope; a failed comment now warns on screen instead of failing silently.</td></tr>
           <tr><td><strong>1.6</strong></td><td>16 Apr 2026</td><td>Complete SOP rewrite. Documented: direct tenancy-linked payment detection (replaced keyword matching), auto-return to In Payment, re-flagging logic, sidebar badges, all action buttons per status, comments system via Airtable Comments API, localStorage tracking keys, chase stages (visual only, not automated), all Airtable field IDs and select option IDs.</td></tr>
