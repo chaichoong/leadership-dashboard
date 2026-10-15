@@ -351,7 +351,15 @@ def judge_bottlenecks(f, now):
     answer = "No blocked task past its limit" if n == 0 else "%s past %s limit" % (
         plural(n, "blocked task"), "its" if n == 1 else "their")
     extra = [[k, v] for k, v in (f.get("byKind") or [])] + [["Blocked in all", f.get("total", 0)]]
-    return line("bottlenecks", colour, answer, n, past, extra, src, count=n, keys=task_keys(past),
+    # The colour and the number judge walls past their clock. The one number at the top counts
+    # EVERY blocked task (review of PR #795): a stuck task that gets blocked leaves "Everything's
+    # moving", and counting it here only once past its clock let the number fall with nothing
+    # fixed. "Everything's moving" takes every walled task out by id, so none is counted twice.
+    blocked = f.get("blocked")
+    if blocked is None:
+        blocked = past
+    extra.append(["Blocked tasks, each counted as a thing to fix", len(blocked)])
+    return line("bottlenecks", colour, answer, n, past, extra, src, count=len(blocked), keys=task_keys(blocked),
                 short=("%s blocked too long" % plural(n, "task")) if n else None)
 
 
@@ -671,8 +679,9 @@ def apply_history(lines, history, now, head=None, lights=None):
     from <date>"). A grey line, a line whose source was missed or failed (no number), and a line
     read only in part (`partial`) store nothing and have no direction.
     `head` (headline()) and `lights` (build_lights()) are kept in the day's snapshot for the
-    weekly bars: a full count replaces any earlier one today, an "at least" replaces only another
-    "at least", so a later part-read pass never lowers the day. Days past 30 keep only those two,
+    weekly bars: a full count replaces any earlier one today, an "at least" replaces another
+    "at least" or a full count below it, so a later part-read pass never lowers the day and a
+    higher floor is never lost. Days past 30 keep only those two,
     up to HEADLINE_DAYS, so eight weeks of bars fit in the payload."""
     today = london_day(now)
     hist = merge_history(history)
@@ -687,7 +696,10 @@ def apply_history(lines, history, now, head=None, lights=None):
     snap[COLOUR_KEY] = colours
     if head and isinstance(head.get("number"), int):
         had = day_headline(snap)
-        if had is None or had[1] or not head["atLeast"]:
+        # A full count replaces anything; an "at least" replaces another "at least", or a full
+        # count it is already above (review of PR #795: 5 at 10:00 then "at least 40" at 23:50
+        # kept 5, a day that read better than the truth). It stays marked "at least".
+        if had is None or had[1] or not head["atLeast"] or head["number"] > had[0]:
             snap[HEAD_KEY] = [head["number"], bool(head["atLeast"])]
     if lights:
         kept = dict(snap.get(LIGHTS_KEY) or {})
@@ -932,10 +944,13 @@ def weekly_series(hist, now, head):
 
 def team_verdict(head, last_week, lights, prev_lights, lines):
     """The answer at the top right, never better than the truth. In this order:
-      1. red "Getting worse": a light red now that was not red at the end of last week, or more
-         things to fix than last week (an "at least" number above last week counts: it is more);
+      1. red "Getting worse": with a number from last week, a light red now that was not on
+         record as red at the end of last week (green, amber, grey or no record at all: review
+         of PR #795), or more things to fix than last week (an "at least" number above last
+         week counts: it is more);
       2. grey "Can't tell": more than 2 lines cannot be read, or the number is "at least";
-      3. green "Working well": no red light, every line read, and 5 things or fewer;
+      3. green "Working well": no red light, no light worse than at the end of last week, every
+         line read, and 5 things or fewer;
       4. grey "Can't tell": no number from last week to compare with;
       5. amber "Getting better": fewer things than last week and no light worse than it was;
       6. amber "Not getting better": the same number, or fewer while a light got worse.
@@ -945,7 +960,10 @@ def team_verdict(head, last_week, lights, prev_lights, lines):
     lw_floor = bool((last_week or {}).get("atLeast"))
     prev = prev_lights or {}
     reds = [x for x in lights if x["colour"] == "red"]
-    turned = [x for x in reds if prev.get(x["key"]) in ("green", "amber")]
+    # Only red on record at the end of last week is "red last week". With no week to compare at
+    # all (the first week), nothing is said to have gone red: the answer is "Can't tell" anyway.
+    turned = [x for x in reds if prev.get(x["key"]) != "red"] if isinstance(lw, int) else []
+    unrecorded = [x for x in turned if prev.get(x["key"]) not in ("green", "amber")]
     worse = [x for x in lights if x["colour"] in RANK and prev.get(x["key"]) in RANK
              and RANK[x["colour"]] > RANK[prev[x["key"]]]]
     greys = [l for l in lines if l["colour"] == "grey"]
@@ -957,8 +975,14 @@ def team_verdict(head, last_week, lights, prev_lights, lines):
 
     if turned or higher:
         colour, text = "red", "Getting worse"
-        why = "%s things to fix, up from %s last week" % (things, lw_text) if higher else \
-            "%s went red this week" % " and ".join(x["title"] for x in turned)
+        if higher:
+            why = "%s things to fix, up from %s last week" % (things, lw_text)
+        else:
+            said = [x["title"] for x in turned if x not in unrecorded]
+            why = "; ".join(
+                (["%s went red this week" % " and ".join(said)] if said else []) +
+                (["%s is red and was not on record as red last week" % " and ".join(x["title"] for x in unrecorded)]
+                 if unrecorded else []))
     elif len(greys) > 2 or floor or not known:
         colour, text = "grey", "Can't tell"
         names = []
@@ -967,7 +991,7 @@ def team_verdict(head, last_week, lights, prev_lights, lines):
                 names.append(q)
         why = "%s can't be fully read: %s" % (plural(len(names), "check"), ", ".join(names)) \
             if names and known else "the number of things to fix could not be read"
-    elif not reds and not greys and n <= WORKING_WELL_MAX:
+    elif not reds and not worse and not greys and n <= WORKING_WELL_MAX:
         colour, text = "green", "Working well"
         why = "%s to fix" % plural(n, "thing")
     elif not isinstance(lw, int):
@@ -992,7 +1016,8 @@ def team_verdict(head, last_week, lights, prev_lights, lines):
     # Never hide a break behind an improving total (Kevin's design, 15 Oct 2026): every red light
     # is named, whatever the answer, and one that went red this week says so.
     if reds:
-        why += ". Red: " + "; ".join("%s%s%s" % (x["title"], ", new this week" if x in turned else "",
+        why += ". Red: " + "; ".join("%s%s%s" % (x["title"], ", not on record as red last week" if x in unrecorded
+                                                  else ", new this week" if x in turned else "",
                                                   " (%s)" % x["text"] if x["text"] else "") for x in reds)
     if greys and colour != "grey":
         why += ". %s can't be read: %s" % (plural(len(greys), "check"), ", ".join(l["question"] for l in greys))
@@ -1067,15 +1092,23 @@ WALL_WORDS = {"TOOL": "waiting on a code fix", "KEVIN": "waiting on a step only 
               "SIGN-IN": "waiting on your sign-in", "SITE": "waiting on a site to be added"}
 
 
-def facts_bottlenecks(blockers, clock_days, now):
+def facts_bottlenecks(blockers, clock_days, now, fresh=()):
+    """`blocked`: every blocked task once (a task with two walls is one thing to fix), the
+    sweep's walls plus `fresh`, open tasks whose own Notes carry a wall opened since the sweep
+    (the same walls "Everything's moving" takes out, so the two lines never miss one)."""
     if blockers.get("error"):
         return {"error": blockers["error"]}
     read_at = _aware(blockers.get("readAt"))
     extra_days = (now - read_at).total_seconds() / 86400 if read_at else 0.0
-    past, kinds = [], {}
+    past, kinds, blocked, seen = [], {}, [], set()
     for w in blockers.get("open") or []:
         kind = w.get("kind") or "?"
         kinds[kind] = kinds.get(kind, 0) + 1
+        tid = w.get("task")
+        if not tid or tid not in seen:
+            blocked.append(item(w.get("name"), tid, WALL_WORDS.get(kind, kind)))
+            if tid:
+                seen.add(tid)
         clock = clock_days.get(kind)
         if clock is None:
             continue                      # a SITE wall has no clock (task-manager.py CLOCK_DAYS)
@@ -1086,7 +1119,11 @@ def facts_bottlenecks(blockers, clock_days, now):
             past.append(item(w.get("name"), w.get("task"), "%s, %s" % (
                 WALL_WORDS.get(kind, kind), "%.1f days (limit %d)" % (age, clock) if age is not None else "no date on the block")))
     by_kind = [[WALL_WORDS.get(k, k).capitalize(), n] for k, n in sorted(kinds.items(), key=lambda kv: -kv[1])]
-    return {"past": past, "byKind": by_kind, "total": sum(kinds.values())}
+    for it in fresh or ():
+        if it.get("id") and it["id"] not in seen:
+            seen.add(it["id"])
+            blocked.append(it)
+    return {"past": past, "byKind": by_kind, "total": sum(kinds.values()), "blocked": blocked}
 
 
 def facts_moving(lh_res, walled, task_names):
@@ -1793,7 +1830,12 @@ def gather(now, es, rows, lh_res, lh_err, measures, readers=None):
         f["moving"] = {"error": "blocked tasks could not be taken out first (%s)" % blockers["error"]}
     else:
         f["moving"] = facts_moving(lh_res, walled, names)
-    f["bottlenecks"] = facts_bottlenecks(blockers, tm.CLOCK_DAYS, now)
+    # A wall opened since the last sweep, on a task still open, is a blocked task too: the same
+    # set "Everything's moving" took out, so every walled task is counted under one line.
+    swept = {w.get("task") for w in (blockers.get("open") or []) if w.get("task")}
+    open_ids = {r["id"] for r in tasks if _open(r.get("fields") or {}, lh.CLOSED)}
+    fresh = [item(names.get(i, i), i, "blocked since the last sweep") for i in sorted(walled - swept) if i in open_ids]
+    f["bottlenecks"] = facts_bottlenecks(blockers, tm.CLOCK_DAYS, now, fresh)
     f["carried"] = facts_carried(queue, now)
     # A held list the poll could not give is not fatal here: the HELD UNDER note on each task is
     # read as well, so a held sibling is still left out.
