@@ -96,7 +96,7 @@ file so one failed read cannot wipe it; and no line counts what another counts w
 mislead, so walled tasks are taken out of "Everything's moving" before it counts. Verdict, in
 order (tightened by two independent reviews of PR #790: no line or verdict may read better than
 the truth): a red line worse than a week ago is red "Needs attention: <that line>"; a line that
-read red earlier today and cannot be read now is red, "last known red at <time>; can't read now"
+last read red (today, or on an earlier day across midnight) and cannot be read now is red, "last known red at <time>; can't read now"
 (each line's colour and time are kept in the day's snapshot, and a grey line counts at its last
 known colour today); when the lines it can read would be green (no red, at most two amber), a
 grey line last known amber is amber, more than two grey lines is grey "Can't tell", one or two is

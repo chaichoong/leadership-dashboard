@@ -724,3 +724,27 @@ print(json.dumps([es.defects_as_of(fm, ops, NOW - timedelta(days=7)), es.defects
     expect(out[1]).toEqual({ open: 1, code: 1 });   // f5 today
   });
 });
+
+// ─── The third review of PR #790 (15 Oct 2026) ───────────────────────
+describe('review of PR #790, round 3', () => {
+  it('a line red at 23:50 and grey at 00:10 (London) is still last known red, labelled with its day; never "Healthy"', () => {
+    const out = py(`
+before = datetime(2026, 10, 14, 23, 50, tzinfo=L)            # Wednesday 23:50 London
+after = datetime(2026, 10, 15, 0, 10, tzinfo=L)              # Thursday 00:10 London: a new day
+first = [A.line(d["key"], "red" if d["key"] == "jobs" else "green", "a", 1) for d in A.LINES]
+p1 = A.build_payload(first, {}, before.astimezone(timezone.utc))
+later = [A.grey("jobs", "the board could not be read") if d["key"] == "jobs" else A.line(d["key"], "green", "a", 1) for d in A.LINES]
+p2 = A.build_payload(later, p1["history"], after.astimezone(timezone.utc))
+jobs = next(l for l in p2["lines"] if l["key"] == "jobs")
+# A green reading earlier on the new day wins over the older red: the newest reading counts.
+greener = [A.line(d["key"], "green", "a", 1) for d in A.LINES]
+p3 = A.build_payload(greener, p1["history"], datetime(2026, 10, 15, 0, 5, tzinfo=L).astimezone(timezone.utc))
+p4 = A.build_payload([A.grey("jobs", "x") if d["key"] == "jobs" else A.line(d["key"], "green", "a", 1) for d in A.LINES],
+                     p3["history"], after.astimezone(timezone.utc))
+print(json.dumps({"answer": jobs["answer"], "overall": p2["overall"], "afterGreen": p4["overall"]["colour"]}))`);
+    expect(out.answer).toBe("Can't tell: the board could not be read · Last known: red (Wed 23:50); can't read now");
+    expect(out.overall.colour).toBe('red');
+    expect(out.overall.text).toMatch(/^Needs attention: No job is broken \(last known red at Wed 23:50; can't read now\)/);
+    expect(out.afterGreen).toBe('amber');                    // its newest reading was green: "Healthy where it can be read"
+  });
+});

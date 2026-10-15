@@ -519,14 +519,27 @@ COLOUR_KEY = "_c"       # inside a day's snapshot: {line key: [colour, "HH:MM"]}
 
 
 def last_known(lines, history, now):
-    """Mark each grey line whose last reading TODAY was red or amber: its answer says so, and
-    the verdict counts it at that colour (review 2 of PR #790)."""
-    prior = (merge_history(history).get(london_day(now)) or {}).get(COLOUR_KEY) or {}
+    """Mark each grey line whose newest reading (today, else an earlier day) was red or amber:
+    its answer says so, and the verdict counts it at that colour (reviews 2 and 3 of PR #790)."""
+    hist = merge_history(history)
+    today = london_day(now)
+    # Newest day first: today's reading, else the latest from an earlier day, so a red at 23:50
+    # that goes grey at 00:10 is still known (review 3 of PR #790). An earlier day's time carries
+    # its weekday ("Wed 23:50"). Only the NEWEST reading counts: a later green clears an older red.
+    days = sorted((d for d in hist if d <= today), reverse=True)
     for l in lines:
-        lk = prior.get(l["key"])
-        if l["colour"] == "grey" and isinstance(lk, list) and len(lk) == 2 and lk[0] in ("red", "amber"):
-            l["lastKnown"] = {"colour": lk[0], "at": str(lk[1])}
-            l["answer"] += " · Last known: %s (%s); can't read now" % (lk[0], lk[1])
+        if l["colour"] != "grey":
+            continue
+        for d in days:
+            lk = (hist[d].get(COLOUR_KEY) or {}).get(l["key"])
+            if not (isinstance(lk, list) and len(lk) == 2):
+                continue
+            if lk[0] in ("red", "amber"):
+                at = str(lk[1]) if d == today else "%s %s" % (
+                    datetime.strptime(d, "%Y-%m-%d").strftime("%a"), lk[1])
+                l["lastKnown"] = {"colour": lk[0], "at": at, "day": d}
+                l["answer"] += " · Last known: %s (%s); can't read now" % (lk[0], at)
+            break
 
 
 def effective(l):
