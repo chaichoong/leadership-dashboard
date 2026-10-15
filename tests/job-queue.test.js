@@ -2420,6 +2420,27 @@ python3 "$STEP" "$NAME-after" "$AFTER" "$TL"
     }
   });
 
+  // Review round 2 of PR #788: a guest's short ceiling applies ONLY in the guest lane. The same job run normally
+  // keeps its own maxRuntimeMinutes, or compound-brain's long video step would be killed on an ordinary night.
+  it('a guest-eligible job gets its normal ceiling when it runs normally and the guest ceiling only as a guest', async () => {
+    const sched = JSON.parse(readFileSync(schedulePath, 'utf8'));
+    sched['two-limits'] = { cron: '* * * * *', maxLateMinutes: 600, mode: 'wrapped', backgroundSafe: true,
+      maxRuntimeMinutes: 0.5, guestMaxRuntimeMinutes: 0.05 };      // normal 30 s, guest 3 s
+    writeFileSync(schedulePath, JSON.stringify(sched));
+    // Normally, with the queue free: a 5 s step finishes inside its 30 s ceiling.
+    const normal = await stepRun('two-limits', 'normal', '5');
+    expect(normal.code, normal.stdout + normal.stderr).toBe(0);
+    expect(events().some((e) => e.job === 'two-limits' && e.state === 'max-runtime'), 'killed at the guest ceiling on a normal run').toBe(false);
+    // As a guest beside a render: the same 5 s step is stopped at the 3 s guest ceiling.
+    const h = hostRun('render-host', { until: 'asguest' });
+    expect(await waitFor(() => yielded())).toBe(true);
+    const guest = await stepRun('two-limits', 'asguest', '5');
+    const done = await h;
+    expect(done.code).toBe(0);
+    expect(events().find((e) => e.job === 'two-limits' && e.state === 'acquired' && e.lane === 'guest'), 'control: it ran as a guest').toBeTruthy();
+    expect(guest.code, 'the guest ceiling did not apply in the guest lane').toBe(124);
+  });
+
   it('backgroundSafe must be a real true: the string "false" opens nothing', async () => {
     const h = hostRun('render-host', { secs: '2.5' });
     expect(await waitFor(() => yielded())).toBe(true);
@@ -2512,12 +2533,16 @@ python3 "$STEP" "$NAME-after" "$AFTER" "$TL"
       expect(real[k].mode, k).toBe('wrapped');
       expect(real[k].lockExempt, k).toBeUndefined();
       // The render's job waits for a guest still inside before its next step,
-      // so every guest carries a short ceiling of its own: 20 minutes (review
+      // so every guest carries a short GUEST-ONLY ceiling: 20 minutes (review
       // of PR #788; the longest completed run of any of the four is 1,075 s).
       expect(real[k].backgroundSafe, k).toBe(true);
-      expect(Number(real[k].maxRuntimeMinutes), k).toBeGreaterThan(0);
-      expect(Number(real[k].maxRuntimeMinutes), k).toBeLessThanOrEqual(20);
+      expect(Number(real[k].guestMaxRuntimeMinutes), k).toBeGreaterThan(0);
+      expect(Number(real[k].guestMaxRuntimeMinutes), k).toBeLessThanOrEqual(20);
     }
+    // Their normal runs keep the ceilings they had before this PR (round 2 of
+    // the review): compound-brain's video step has no per-run cap of its own.
+    expect([real['apple-notes-bridge'].maxRuntimeMinutes, real['feed-brain'].maxRuntimeMinutes,
+      real['compound-brain'].maxRuntimeMinutes, real['publish-brain'].maxRuntimeMinutes]).toEqual([undefined, 60, 60, 60]);
     // Heavy work never runs as a guest: local whisper, a render, the robot
     // browser, Playwright suites.
     for (const k of ['audiobook-backfill', 'content-engine', 'content-engine-publish', 'merge-approved',

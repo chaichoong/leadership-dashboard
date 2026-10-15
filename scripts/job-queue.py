@@ -919,8 +919,10 @@ def prune_dead_tickets():
 # Opt-in only, and the opt-in is the whole safety argument, as lockExempt's is:
 # a job that has not been checked waits for the whole run, as every job did
 # before. backgroundSafe means short and light: no render, no whisper, no
-# Playwright, nothing of the Content Engine's own state, and a maxRuntimeMinutes
-# of 20 or less, because the phase's job waits for a guest still inside
+# Playwright, nothing of the Content Engine's own state, and a guest-only
+# ceiling, guestMaxRuntimeMinutes, of 20 or less (its normal maxRuntimeMinutes
+# still governs its normal runs), because the phase's job waits for a guest
+# still inside
 # (tests/job-queue.test.js holds the real schedule to that). Only a JSON true
 # opts in.
 
@@ -1035,7 +1037,7 @@ def _clear_yield(pid):
 
 def _drain_guests():
     """Wait for a guest already inside the lane to finish. Bounded by the
-    guest's own maxRuntimeMinutes (every backgroundSafe job carries one) and by
+    guest's guestMaxRuntimeMinutes (every backgroundSafe job carries one) and by
     its lease if it stops beating. Returns the seconds waited."""
     started = now()
     while os.path.isdir(GUEST_DIR):
@@ -1423,6 +1425,21 @@ def max_runtime_minutes(job):
         return DEFAULT_MAX_RUNTIME_MIN
 
 
+def guest_max_runtime_minutes(job):
+    """The ceiling for a run in the GUEST LANE: `guestMaxRuntimeMinutes`, else
+    the job's normal one. Guest-only (review round 2 of PR #788): a guest's
+    ceiling is time the render's job may wait, so it is short, but the same job
+    run normally keeps its own maxRuntimeMinutes (compound-brain's video step
+    has no per-run cap and can legitimately take longer than a guest may)."""
+    val = (load_schedule().get(job) or {}).get("guestMaxRuntimeMinutes")
+    if val is None:
+        return max_runtime_minutes(job)
+    try:
+        return float(val)
+    except (TypeError, ValueError):
+        return max_runtime_minutes(job)
+
+
 def release(job, quiet=False, outcome="completed", reason=None):
     # A lock-exempt job never took the lock, so it has nothing to give back.
     # Without this it would fall through to the "you are not the holder" branch
@@ -1694,7 +1711,8 @@ def run(job, cmd, lease_minutes, timeout_minutes=None, check_stale=True,
                 if write_failures == 1:
                     event(job, "heartbeat-write-failed", reason=str(exc))
 
-    ceiling_min = max_runtime_minutes(job)
+    ceiling_min = (guest_max_runtime_minutes(job) if lane == GUEST_DIR
+                   else max_runtime_minutes(job))
 
     def watchdog():
         # Event.wait runs on the monotonic clock, so a sleeping Mac does not
