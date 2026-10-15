@@ -408,7 +408,9 @@ the phase that gives way, never the report.
 Raised 15 Oct 2026 (Kevin): about 14 findings filed a day against about 4 fixed; 90 minutes keeps the weekly allowance under 100% (45% used with 3.4 days left on 15 Oct).
 
 - **Stop claiming new findings** at 90 minutes from the start of the phase OR at 08:20
-  Europe/London, whichever comes first. Note the time the phase starts, and check the clock
+  Europe/London, whichever comes first. The 08:20 ceiling applies only when the phase starts
+  before 08:20 Europe/London, so a late run whose phase starts at or after 08:20 works to the
+  plain 90-minute budget. Note the time the phase starts, and check the clock
   (`TZ=Europe/London date +%H:%M`) before every claim. Land what is already written — commit, PR,
   gate — and name the cap that stopped you (90 minutes or 08:20) as the reason in the PR body and
   the report.
