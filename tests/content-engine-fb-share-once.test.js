@@ -63,8 +63,13 @@ approval.load_state = lambda: {}
 facebook_share.signed_in = lambda: True
 facebook_share.verify_shared = lambda url: True
 pressed = []
+SCENARIO_EARLY = ${JSON.stringify(scenario)}
 def run_plan(plan_path, task, test, shot):
-    pressed.append(json.load(open(plan_path))["steps"][0]["url"])
+    url = json.load(open(plan_path))["steps"][0]["url"]
+    # 15 Oct 2026: the real run_plan signals a lane failure by RAISING SystemExit
+    if SCENARIO_EARLY == "lane-dies" and url == ${JSON.stringify(SUMMARY_REEL)}:
+        raise SystemExit("page.waitForSelector: Timeout 20000ms exceeded.\\nwaiting for locator('[aria-label=\"Share\"]') to be visible")
+    pressed.append(url)
 facebook_share.run_plan = run_plan
 COPY = {"Short Form Video": {"fields": {"Facebook Reels Copy": ${JSON.stringify(SUMMARY_COPY)}}},
         "Learnings From My Diary": {"fields": {"Facebook Post Copy": ${JSON.stringify(LEARNINGS_COPY)}}}}
@@ -186,6 +191,18 @@ describe('a page reel reaches Kevin\'s Facebook profile once (2083, 2 Oct 2026)'
     expect(r.pressed).toEqual([]);
     expect(r.lfmd.status).toBe('page-post-not-found');
     expect(r.lfmd.post_url).toBeUndefined();
+  });
+
+  // 15 Oct 2026, episode 2099: the Share control was not on the page, facebook_share.run_plan raised
+  // SystemExit (a BaseException), and `except Exception` in both share_to_facebook_profile and sync let it
+  // through. The 03:54 content run died exit 1 with nothing but node's stack trace, and the two publish runs
+  // of 14 Oct went the same way. One unreachable button took three whole runs with it.
+  it('a lane failure on one clip is recorded and the other clip still shares (2099, 15 Oct 2026)', () => {
+    const r = harness(SAME_OPENING, 'lane-dies');
+    expect(r.summary.status).toBe('failed');                 // recorded, not silent
+    expect(r.summary.error).toContain('Share');
+    expect(r.pressed).toEqual([LEARNINGS_REEL]);             // the run carried on past the dead share
+    expect(r.lfmd.status).toBe('shared');
   });
 
   it('a reel already shared for an older day is skipped too, and the day still shares both of its own', () => {
