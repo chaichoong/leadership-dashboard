@@ -336,7 +336,10 @@ def report():
                               "Approved At", "Agent Output", "Completion Date",
                               "Created Time", "Approval Slack TS", "Assignee",
                               "Due Date", "Hard Deadline", "Sent For Approval By",
-                              "Deferred Until", "Some Day", "Notes"],
+                              "Deferred Until", "Some Day", "Notes",
+                              # 15 Oct 2026: the AI team verdict's "Responses are getting
+                              # written" line reads it from this same read (_tasks).
+                              "Inbound Communication Task"],
                       formula=('OR({Status}!="Completed",'
                                "IS_AFTER({Completion Date},DATEADD(TODAY(),-8,'days')))"))
         open_after = open_agent_ids(team_agents)
@@ -457,6 +460,15 @@ def report():
         aw.update(dict.fromkeys(WORK_BUCKETS))
         aw["splitCheck"] = str(exc)
         res["agentWork"] = aw
+    # The one read, handed on in memory (15 Oct 2026): scripts/ai_team_health.py judges the
+    # "Is the AI team healthy?" panel from these same records, never a second read of the board.
+    # Leading underscore: never printed (main() drops them) and never written to a row.
+    res["_tasks"] = tasks
+    res["_team"] = team
+    res["_ledger"] = ledger
+    res["_ledgerError"] = ledger_err
+    res["_heldIds"] = sorted(held_ids) if held_ids is not None else None
+    res["_heldError"] = held_err
     return res
 
 
@@ -797,7 +809,10 @@ def agent_work(tasks, agent_ids, stalled, held_ids, held_error=None, now=None,
                           ", ".join(sorted(before - owned_open)[:5]) or "none"))
     held = owned_open & set(held_ids or ())
     stuck = [s for s in stalled if s.get("id") in owned_open and s.get("id") not in held]
+    # stuckIds (15 Oct 2026): the "Is the AI team healthy?" panel takes the walled tasks out of
+    # this list by id (scripts/ai_team_health.py), so a wall is never counted as "not moving" too.
     out = dict(counts, open=len(owned_open), notMoving=len(stuck),
+               stuckIds=[s.get("id") for s in stuck],
                replyOverdue=sum(1 for s in stuck if s.get("rule") == "reply"),
                replyWindowDays=REPLY_STUCK_DAYS, held=None if held_ids is None else len(held),
                heldCheck=held_error, waitCheck=ledger_error if mark else None,
@@ -835,7 +850,7 @@ def main():
     tasks_read = res["control"]["tasksRead"]; linked = res["control"]["agentLinkedTasks"]
 
     if args.json:
-        print(json.dumps(res, indent=2))
+        print(json.dumps({k: v for k, v in res.items() if not k.startswith("_")}, indent=2))
         return
 
     print(f"Approval loop — {tasks_read} tasks read, {linked} agent-linked")

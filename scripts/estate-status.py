@@ -90,7 +90,9 @@ REPORT_ROWS_OWNED_ELSEWHERE = ("loop-health", "allowance", "content-publishing",
                                "rent-position",
                                # Written with loop-health in the same pass, so a --no-loop-health run
                                # must not mark it "No longer scheduled" either (9 Oct 2026).
-                               "ai-team-health")
+                               "ai-team-health",
+                               # Same pass, same reason (15 Oct 2026): the "Is the AI team healthy?" row.
+                               "ai-team-verdict")
 
 # Why a run did not work, in Kevin's words. Matched against the wrapper's
 # reason and the last 600 characters the job printed. Order matters: the first
@@ -858,14 +860,25 @@ def blockers_row(now, path=BLOCKERS_FILE):
     return out
 
 
-def loop_health_report():
-    """(report, None) from scripts/loop-health.py, or (None, error text). Run once per refresh
-    and shared by the loop-health and ai-team-health rows."""
-    try:
+_LH = {}
+
+
+def loop_health_module():
+    """scripts/loop-health.py, loaded once per process: the report and the AI team verdict read
+    its rules from the same copy (one dispatcher load, one ledger)."""
+    if "m" not in _LH:
         spec = importlib.util.spec_from_file_location("loop_health", os.path.join(HERE, "loop-health.py"))
         lh = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(lh)
-        return lh.report(), None
+        _LH["m"] = lh
+    return _LH["m"]
+
+
+def loop_health_report():
+    """(report, None) from scripts/loop-health.py, or (None, error text). Run once per refresh
+    and shared by the loop-health, ai-team-health and ai-team-verdict rows."""
+    try:
+        return loop_health_module().report(), None
     except Exception as exc:  # noqa: BLE001 — the row must say WHY, whatever went wrong
         return None, str(exc)[:300]
 
@@ -909,7 +922,7 @@ def loop_health_row(now, res=None, err=None):
 AI_TEAM_KEY = "ai-team-health"
 AI_TEAM_CACHE = os.path.join(LOGS, "ai-team-health-cache.json")
 AI_TEAM_CACHE_MIN = 60
-AI_TEAM_CACHE_SHAPE = 3    # 14 Oct 2026: defects carry code / notCode / repeats / refusedUnread (distinct)
+AI_TEAM_CACHE_SHAPE = 4    # 15 Oct 2026: defects carry openWeekAgo / codeWeekAgo (the verdict panel)
 REWORK_DAYS = 14
 REWORK_BASELINE_PCT = 32   # 36 of 111 fixes, 30 days to 28 Sep 2026 (rework-rate.py)
 
@@ -983,12 +996,42 @@ def rework_counts(r):
             "pct": round(100.0 * fof / fixes) if fixes else None, "baselinePct": REWORK_BASELINE_PCT}
 
 
+def defects_as_of(fm, ops, when):
+    """{"open", "code"} as findings.py's own fold would have read at `when`: the same
+    append-only log, cut at that moment, through the real current_state (15 Oct 2026). The
+    "Is the AI team healthy?" panel compares open code problems now against a week ago from
+    its first day, rather than waiting a week for its own history. A later retag is not
+    applied to the past, which is how the queue read then. An op with no readable time is
+    left out of the past (it cannot be shown to be older)."""
+    def older(rec):
+        t = parse_ts(rec.get("ts"))
+        if t and t.tzinfo is None:
+            t = t.replace(tzinfo=timezone.utc)
+        return bool(t) and t <= when
+    past = [r for r in ops if older(r)]
+    keep = fm.read_all
+    fm.read_all = lambda: past
+    try:
+        state = fm.current_state(today=when.astimezone(LONDON).date().isoformat())
+    finally:
+        fm.read_all = keep
+    live = [f for f in state.values() if f.get("status") in ("open", "claimed", "pending")]
+    return {"open": len(live), "code": sum(1 for f in live if f.get("touches_code"))}
+
+
 def _measure_defects_and_rework(now):
     spec = importlib.util.spec_from_file_location("findings", os.path.join(HERE, "findings.py"))
     fm = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(fm)
     ops = fm.read_all()
     defects = defect_counts(fm.current_state(), now, ops, refused_summary(fm, fm.overflow_state(ops), now))
+    # A week ago, by the same fold (15 Oct 2026, the AI team verdict's "No bugs or errors" line).
+    # A failure here is said in the payload, never a number.
+    try:
+        ago = defects_as_of(fm, ops, now - timedelta(days=7))
+        defects["openWeekAgo"], defects["codeWeekAgo"] = ago["open"], ago["code"]
+    except Exception as exc:  # noqa: BLE001 — the panel says why it cannot judge the direction
+        defects["weekAgoError"] = str(exc)[:160]
     # --no-fetch: this job is lock-exempt because it never touches the repo, so it reads
     # origin/main as the other jobs last fetched it (review finding, 9 Oct 2026).
     out = subprocess.run([sys.executable, os.path.join(HERE, "rework-rate.py"), "--days", str(REWORK_DAYS),
@@ -1647,7 +1690,7 @@ def apply_missed(row, job, cfg, finishes, events, now, logs_dir=LOGS):
 
 
 # ─── commands ─────────────────────────────────────────────────────────
-def build_rows(now, with_loop_health=True):
+def build_rows(now, with_loop_health=True, with_verdict=True):
     sched = load_schedule()
     if not sched:
         raise SystemExit("ERROR: no live jobs in scripts/job-schedule.json — refusing to write an empty board")
@@ -1670,8 +1713,48 @@ def build_rows(now, with_loop_health=True):
     if with_loop_health:
         lh_res, lh_err = loop_health_report()
         rows.append(loop_health_row(now, lh_res, lh_err))
-        rows.append(ai_team_row(now, lh_res, lh_err))
+        # The defect queue and rework rate, measured once and shared by both AI team rows.
+        try:
+            measured, measure_err = _cached_measures(now), None
+        except Exception as exc:  # noqa: BLE001 — each row says why, never a zero
+            measured, measure_err = None, exc
+
+        def measures(_now):
+            if measure_err is not None:
+                raise measure_err
+            return measured
+        rows.append(ai_team_row(now, lh_res, lh_err, measures=measures))
+        vm = ({"error": "the defect queue or the rework rate could not be read (%s)" % str(measure_err)[:200]}
+              if measure_err is not None else {"defects": measured[0], "rework": measured[1]})
+        LAST_LOOP_HEALTH.clear()
+        LAST_LOOP_HEALTH.update(res=lh_res, err=lh_err, measures=vm)
+        if with_verdict:
+            # Last, so its "No job is broken" line reads every other row of this pass.
+            rows.append(ai_team_verdict_row(now, rows, lh_res, lh_err, vm))
     return rows
+
+
+# What the last build_rows read, for the verdict's dry run (scripts/ai_team_health.py dry-run).
+LAST_LOOP_HEALTH = {}
+
+
+def ai_team_verdict_row(now, rows, lh_res, lh_err, measures):
+    """The "Is the AI team healthy?" row (Kevin, 15 Oct 2026), from scripts/ai_team_health.py.
+    Built from this pass's own reads; a module that will not load is a Failed row, never a gap."""
+    import types
+    stamp = now.strftime("%Y-%m-%dT%H:%M:%S.000Z")
+    try:
+        spec = importlib.util.spec_from_file_location("ai_team_health", os.path.join(HERE, "ai_team_health.py"))
+        ath = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(ath)
+    except Exception as exc:  # noqa: BLE001
+        return {"key": "ai-team-verdict", "kind": "report", "label": "Is the AI team healthy?", "lastRun": stamp,
+                "status": "Failed", "detail": "The AI team verdict could not load: %s" % str(exc)[:240]}
+    es = types.SimpleNamespace(
+        loop_health_module=loop_health_module, load_schedule=load_schedule, last_due=last_due,
+        read_jsonl=read_jsonl, QUEUE_LOG=QUEUE_LOG, _request=_request, TABLE=TABLE, ES=ES,
+        TASKS_TABLE=TASKS_TABLE)
+    return ath.verdict_row(now, es, rows, lh_res, lh_err, measures)
 
 
 def cmd_refresh(args):

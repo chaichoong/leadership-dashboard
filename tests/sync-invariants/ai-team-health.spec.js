@@ -1,11 +1,11 @@
-// Invariant: the AI Team section of the Leadership Dashboard (Kevin, 9 Oct 2026; brain
-// Decisions/2026-10-09) shows the four health numbers from the Mac's Estate Status rows,
-// holds the four AI cards that used to sit in the operational section, and never shows a
-// stale or failed row as a calm number.
+// Invariant: the AI Team section of the Leadership Dashboard leads with ONE panel, "Is the AI
+// team healthy?" (Kevin, 15 Oct 2026): a verdict, three groups and fourteen lines from the Mac's
+// Estate Status row ai-team-verdict (scripts/ai_team_health.py). It replaced the Agent Work,
+// Defects, Bottleneck and Fix of a Fix cards. A missing, stale, failed or unreadable row says so
+// in plain words, a line the Mac could not read is grey and named, and the two north-star cards
+// stay below under their own heading.
 //
-// The fixture is the live state read on 9 Oct 2026: 178 agent tasks open, 40 not moving,
-// 164 in and 119 done in 7 days; 207 defects open, 95 filed and 14 fixed; 26 robots
-// blocked (17 TOOL, 7 KEVIN, 2 SIGN-IN); 43 of 105 fixes a fix of a fix (41%, baseline 32%).
+// The fixture is shaped from the live dry run of 15 Oct 2026 (names invented: the repo is public).
 
 const { test, expect } = require('@playwright/test');
 const { MOCK_PAT, loadDashboard } = require('./helpers');
@@ -15,383 +15,231 @@ const ES = {
   key: 'fldLO6xJqkokvVR4g', status: 'fldhOUiva3bqPNk1c', lastRun: 'flduxV3TYwp9wQX9O',
   detail: 'fldLRFP2nJttDVQOa', payload: 'fldiqs9lvyLimoR7i',
 };
-
 const minutesAgo = (n) => new Date(Date.now() - n * 60000).toISOString();
 
-const healthRow = (age = 5, over = {}) => ({
-  id: 'recHealth', fields: {
-    [ES.key]: 'ai-team-health', [ES.status]: 'Worked', [ES.lastRun]: minutesAgo(age),
-    [ES.detail]: 'Agent work: 178 open ...',
-    [ES.payload]: JSON.stringify({
-      work: { open: 178, notMoving: 40, created7d: 164, done7d: 119 },
-      defects: { open: 207, filed7d: 95, fixed7d: 14 },
-      rework: { days: 14, fixes: 105, fixOfFix: 43, pct: 41, baselinePct: 32 },
-    }),
-    ...over,
-  },
-});
+const GROUPS = [['flow', 'Is work flowing?'], ['broken', 'Is anything broken?'], ['keep', 'Can it keep going?']];
+// [key, group, question, colour, answer, number, unit, before, direction, fullWeek]
+const SPEC = [
+  ['emails', 'flow', 'Emails are getting cleared', 'green', 'Inbox clear', 0, '', 3, 'better', true],
+  ['responses', 'flow', 'Responses are getting written', 'amber', '1 email task waiting for a draft', 1, '', null, null, false],
+  ['moving', 'flow', "Everything's moving", 'red', '23 of 74 live tasks stuck (31%)', 31, '%', 28, 'worse', true],
+  ['bottlenecks', 'flow', 'No bottlenecks', 'red', '11 blocked tasks past their limit', 11, '', null, null, false],
+  ['carried', 'flow', 'Approved work gets carried out', 'green', 'Every approved job done', 0, '', null, null, false],
+  ['agents', 'broken', 'Every agent is working', 'amber', '9 of 10 worked today', 1, '', null, null, false],
+  ['jobs', 'broken', 'No job is broken', 'red', '3 jobs failed', 3, '', null, null, false],
+  ['bugs', 'broken', 'No bugs or errors', 'red', '167 open, up from 149', 167, '', 149, 'worse', true],
+  ['data', 'broken', 'The data is accurate', 'grey', "Can't tell: the data check has not run since Tue 13 Oct 06:42", null, '', null, null, false],
+  ['missed', 'broken', "Nothing's getting missed", 'amber', '1 thing missed', 1, '', null, null, false],
+  ['ontop', 'keep', 'Agents are on top of their work', 'amber', '147 done, 153 new in 7 days', 96, '%', 90, 'better', false],
+  ['queue', 'keep', 'Your queue is under control', 'green', '7 cards, oldest under a day', 7, '', null, null, false],
+  ['firsttime', 'keep', 'Drafts are right first time', 'green', '90% approved without changes', 90, '%', null, null, false],
+  ['allowance', 'keep', 'Enough allowance to finish the week', 'green', 'No pause this week', 0, 'h', null, null, false],
+];
 
-// The split row (Kevin, 14 Oct 2026; scripts/loop-health.py agent_work), from the live dry run
-// that evening: 182 open agent tasks = 57 live + 18 waiting for approval + 43 waiting on a reply
-// + 64 scheduled; 26 stuck after leaving out a Roy task and 18 held under a lead task.
-const SPLIT_WORK = { open: 182, notMoving: 26, created7d: 129, done7d: 133, live: 57, approval: 18,
-  waitingReply: 43, scheduled: 64, other: 0, replyOverdue: 0, replyWindowDays: 14, held: 18,
-  heldCheck: null, waitCheck: null, splitCheck: null };
-const splitRow = (workOver = {}) => {
-  const row = healthRow();
-  const p = JSON.parse(row.fields[ES.payload]);
-  p.work = { ...SPLIT_WORK, ...workOver };
-  row.fields[ES.payload] = JSON.stringify(p);
-  return row;
-};
-const cardDetail = (page, id) => page.evaluate((cid) => {
-  const d = document.getElementById(cid).querySelector('.kpi-card-detail');
-  return { text: d.textContent, rows: [...d.querySelectorAll('.od-breakdown-row')].map(r => [...r.children].map(c => c.textContent.trim())) };
-}, id);
+function payload(over = {}) {
+  const lines = SPEC.map(([key, group, question, colour, answer, number, unit, before, direction, fullWeek], i) => ({
+    key, n: i + 1, group, question, colour, answer, number, unit, better: key === 'ontop' || key === 'firsttime' ? 'higher' : 'lower',
+    rule: `Green means the ${question.toLowerCase()} rule holds.`,
+    items: key === 'bottlenecks' ? [{ name: 'Reconnect the bank feed', id: 'recWALL1', note: 'KEVIN wall, 6.5 days (limit 3)' },
+                                   { name: 'Fix the robot setup', id: 'recWALL2', note: 'TOOL wall, 8.0 days (limit 3)' }] : [],
+    itemsTotal: key === 'bottlenecks' ? 11 : 0,
+    extra: key === 'bugs' ? [['Code fixes waiting', 167], ['A week ago', 149], ['Fix of a fix (14 days)', '49% (41 of 84 fixes, baseline 32%)']]
+      : key === 'moving' ? [['Live', 74], ['Waiting for your approval', 7], ['Waiting on a reply', 42], ['Scheduled for later', 72]]
+      : key === 'bottlenecks' ? [['Waiting on a code fix', 25], ['Waiting on a step only you can do', 8]] : [],
+    source: 'a fixture', why: colour === 'grey' ? 'the data check has not run since Tue 13 Oct 06:42' : undefined,
+    trend: { vsDate: before == null ? null : (fullWeek ? '2026-10-08' : '2026-10-13'), before, after: number, direction,
+             fullWeek, since: '2026-10-13' },
+  }));
+  return {
+    version: 1, computedAt: minutesAgo(5),
+    overall: { colour: 'red', text: "Needs attention: Everything's moving · 1 line can't be read: The data is accurate",
+               worst: 'moving', red: 4, amber: 4, green: 5, grey: 1, greyLines: ['data'], better: 2, worse: 2 },
+    groups: GROUPS.map(([key, title]) => ({ key, title, colour: key === 'keep' ? 'amber' : 'red',
+      text: key === 'flow' ? '2 red, 1 amber' : key === 'broken' ? "2 red, 2 amber, 1 can't tell" : '1 amber' })),
+    lines, history: {}, historyCheck: null, ...over,
+  };
+}
 
-const wall = (kind, n) => Array.from({ length: n }, (_, i) => ({ task: `rec${kind}${i}`, kind }));
-const blockersRow = (age = 5) => ({
-  id: 'recBlockers', fields: {
-    [ES.key]: 'agent-blockers', [ES.status]: 'Failed', [ES.lastRun]: minutesAgo(age),
-    [ES.detail]: 'Robots blocked on 26 tasks.',
-    [ES.payload]: JSON.stringify({ open: [...wall('TOOL', 17), ...wall('KEVIN', 7), ...wall('SIGN-IN', 2)] }),
+const verdictRow = (age = 5, over = {}, p = payload()) => ({
+  id: 'recVerdict', fields: {
+    [ES.key]: 'ai-team-verdict', [ES.status]: 'Worked', [ES.lastRun]: minutesAgo(age),
+    [ES.detail]: 'Needs attention. 5 green, 4 amber, 4 red, 1 can\'t tell.', [ES.payload]: JSON.stringify(p), ...over,
   },
 });
 
 // Register AFTER loadDashboard(): Playwright matches the newest handler first.
-async function routeEstate(page, rows) {
+async function routeEstate(page, rows, status = 200) {
   await page.route('**/api.airtable.com/v0/**', async (route) => {
     if (route.request().method() === 'GET' && route.request().url().includes(ESTATE)) {
-      return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ records: rows }) });
+      return route.fulfill({ status, contentType: 'application/json', body: JSON.stringify(status === 200 ? { records: rows } : { error: 'x' }) });
     }
     return route.fallback();
   });
 }
 
-const card = (page, id) => page.evaluate((cid) => {
-  const c = document.getElementById(cid);
-  if (!c) return null;
-  const v = c.querySelector('.kpi-card-value');
-  const s = c.querySelector('.kpi-card-sub');
-  return { head: v ? v.textContent.trim() : '', cls: v ? v.className : '', sub: s ? s.textContent.trim() : '',
-           inSection: !!c.closest('#aiTeamCards') };
-}, id);
+async function load(page, rows, status) {
+  await page.addInitScript((pat) => localStorage.setItem('_dlr_pat', pat), MOCK_PAT);
+  await loadDashboard(page);
+  await routeEstate(page, rows, status);
+  await page.evaluate(async () => await loadAiTeamHealth());
+}
 
-test.describe('AI Team section', () => {
-  test('shows the four health numbers from the 9 Oct worked example', async ({ page }) => {
-    await page.addInitScript((pat) => localStorage.setItem('_dlr_pat', pat), MOCK_PAT);
-    await loadDashboard(page);
-    await routeEstate(page, [healthRow(), blockersRow()]);
-    await page.evaluate(async () => await loadAiTeamHealth());
+const panelText = (page) => page.evaluate(() => document.getElementById('aiHealthPanel').innerText);
 
-    const work = await card(page, 'aiWorkCard');
-    expect(work.head).toBe('178 open');
-    expect(work.sub).toBe('40 not moving · 7 days: 164 in, 119 done');
-    expect(work.cls).toContain('text-amber');           // more in than done
-
-    const defects = await card(page, 'aiDefectsCard');
-    expect(defects.head).toBe('207 open');
-    expect(defects.sub).toBe('7 days: 95 filed, 14 fixed');
-    expect(defects.cls).toContain('text-red');          // filed beats fixed
-
-    const blocked = await card(page, 'aiBlockedCard');
-    expect(blocked.head).toBe('26 blocked');
-    expect(blocked.sub).toBe('Biggest: 17 waiting on a code fix · 9 need you');
-    expect(blocked.cls).toContain('text-red');          // the sweep's own red
-    // Red names its own cause. This fixture has no stale block and nothing closed while blocked,
-    // so the card must not claim either (review finding, 9 Oct 2026).
-    const detail = await page.evaluate(() => document.getElementById('aiBlockedCard').querySelector('.kpi-card-detail').textContent);
-    expect(detail).not.toMatch(/3 or more days old|closed while blocked/);
-    expect(detail).toContain('Robots blocked on 26 tasks.');
-
-    const rework = await card(page, 'aiReworkCard');
-    expect(rework.head).toBe('41%');
-    expect(rework.sub).toBe('43 of 105 fixes in 14 days · baseline 32%');
-    expect(rework.cls).toContain('text-red');           // over 40%
+test.describe('Is the AI team healthy? panel', () => {
+  test('one verdict, three groups and fourteen lines, each with a dot, its question, a short answer and a trend', async ({ page }) => {
+    await load(page, [verdictRow()]);
+    const v = await page.evaluate(() => {
+      const p = document.getElementById('aiHealthPanel');
+      return {
+        verdict: p.querySelector('.aih-verdict-text').textContent,
+        verdictCls: p.querySelector('.aih-verdict').className,
+        groups: [...p.querySelectorAll('.aih-group-title')].map(e => e.textContent),
+        lines: [...p.querySelectorAll('.aih-line')].map(b => ({
+          dot: b.querySelector('.aih-dot').className.replace('aih-dot ', ''),
+          label: b.querySelector('.aih-dot').getAttribute('aria-label'),
+          q: b.querySelector('.aih-q').textContent, a: b.querySelector('.aih-a').textContent,
+          t: b.querySelector('.aih-trend').textContent.trim(), tc: b.querySelector('.aih-trend').className,
+        })),
+      };
+    });
+    expect(v.verdict).toBe("Needs attention: Everything's moving · 1 line can't be read: The data is accurate");
+    expect(v.verdictCls).toContain('aih-verdict-red');
+    expect(v.groups).toEqual(['Is work flowing?', 'Is anything broken?', 'Can it keep going?']);
+    expect(v.lines).toHaveLength(14);
+    expect(v.lines.map(l => l.q)).toEqual(SPEC.map(s => s[2]));
+    expect(v.lines[0]).toMatchObject({ dot: 'aih-green', label: 'Green', a: 'Inbox clear' });
+    expect(v.lines[0].t).toBe('↓ was 3 last week (better than last week)');
+    expect(v.lines[0].tc).toContain('aih-better');
+    expect(v.lines[2].t).toBe('↑ was 28% last week (worse than last week)');   // the unit rides with the number
+    expect(v.lines[2].tc).toContain('aih-worse');
+    expect(v.lines[7].t).toBe('↑ was 149 last week (worse than last week)');
+    // Before a week of history exists, the arrow says where the trend runs from.
+    expect(v.lines[10].t).toBe('↑ trend from 13 Oct: was 90% (better than 13 Oct)');
+    expect(v.lines[1].t).toBe('trend from 13 Oct');
+    // A grey line: its dot, its answer, and no trend at all.
+    expect(v.lines[8]).toMatchObject({ dot: 'aih-grey', label: "Can't tell", t: '' });
+    expect(v.lines[8].a).toMatch(/^Can't tell: /);
+    expect(await panelText(page)).toContain("4 red · 1 can't tell");
+    expect(await page.evaluate(() => aiTeamCheck())).toMatchObject({ status: 'warn', detail: expect.stringMatching(/1 line can't be read$/) });
   });
 
-  // The Defects card after the clean-up Kevin approved on 14 Oct 2026 ("merge duplicates, move the
-  // non-code items to tasks, stop the overflow log"). The fixture is the live read that evening:
-  // 167 open once 51 repeats were merged (129 code, 38 not code), 86 distinct filed and 46 fixed in
-  // 7 days, 4 moved to tasks, and 245 refusals in the overflow log nobody had sorted.
-  test('Defects counts each problem once, splits code from not code, and counts the refused (14 Oct 2026)', async ({ page }) => {
-    await page.addInitScript((pat) => localStorage.setItem('_dlr_pat', pat), MOCK_PAT);
-    await loadDashboard(page);
-    const row = healthRow();
-    const p = JSON.parse(row.fields[ES.payload]);
-    p.defects = { open: 167, code: 129, notCode: 38, filed7d: 86, fixed7d: 46, repeats: 51, toTasks7d: 4,
-      refusedUnread: 245, refused7d: 58 };
-    row.fields[ES.payload] = JSON.stringify(p);
-    await routeEstate(page, [row, blockersRow()]);
-    await page.evaluate(async () => await loadAiTeamHealth());
-    const defects = await card(page, 'aiDefectsCard');
-    expect(defects.head).toBe('167 open');
-    expect(defects.sub).toBe('129 code, 38 not code · 245 refused, unread · 7 days: 86 filed, 46 fixed');
-    expect(defects.cls).toContain('text-red');            // filed still beats fixed
-    const d = await cardDetail(page, 'aiDefectsCard');
-    expect(d.rows).toEqual([
-      ['Code fixes waiting', '129'], ['Not code (belongs on the task board)', '38'],
-      ['Refused by the cap, unread', '245'], ['Filed in 7 days', '86'], ['Fixed in 7 days', '46'],
-      ['Moved to tasks in 7 days', '4'], ['Repeats merged into the first report', '51'], ['Updated', expect.any(String)],
-    ]);
-    expect(d.text).toContain('a repeat is merged into the first report');
-
-    // Fixed beats filed, but refusals nobody has read keep it off green: an unread pile is not calm.
-    p.defects = { ...p.defects, filed7d: 10, fixed7d: 20 };
-    row.fields[ES.payload] = JSON.stringify(p);
-    await routeEstate(page, [row, blockersRow()]);
-    await page.evaluate(async () => await loadAiTeamHealth());
-    expect((await card(page, 'aiDefectsCard')).cls).toContain('text-amber');
-
-    // An overflow log the Mac could not read says so, never a number (review of PR #784).
-    p.defects = { ...p.defects, refusedUnread: null, refused7d: null, refusedError: '[Errno 13] Permission denied' };
-    row.fields[ES.payload] = JSON.stringify(p);
-    await routeEstate(page, [row, blockersRow()]);
-    await page.evaluate(async () => await loadAiTeamHealth());
-    const notRead = await card(page, 'aiDefectsCard');
-    expect(notRead.sub).toBe('129 code, 38 not code · refused: not read · 7 days: 10 filed, 20 fixed');
-    expect(notRead.cls).toContain('text-amber');
-    const nd = await cardDetail(page, 'aiDefectsCard');
-    expect(nd.rows).toContainEqual(['Refused by the cap', 'not read']);
-    expect(nd.text).toContain('The overflow log could not be read: [Errno 13] Permission denied');
+  test('tapping a line opens its rule, its list and the old card\'s numbers; tapping again closes it', async ({ page }) => {
+    await load(page, [verdictRow()]);
+    const bottleneck = page.locator('.aih-line', { hasText: 'No bottlenecks' });
+    const detail = page.locator('#aihd-bottlenecks');
+    await expect(detail).toBeHidden();
+    await bottleneck.click();
+    await expect(bottleneck).toHaveAttribute('aria-expanded', 'true');
+    await expect(detail).toBeVisible();
+    await expect(detail).toContainText('Green means the no bottlenecks rule holds.');
+    await expect(detail.locator('.aih-items li')).toHaveText([
+      'Reconnect the bank feed · KEVIN wall, 6.5 days (limit 3)', 'Fix the robot setup · TOOL wall, 8.0 days (limit 3)', 'and 9 more']);
+    await expect(detail).toContainText('Waiting on a code fix');                // the old Bottleneck card's split
+    await bottleneck.click();
+    await expect(detail).toBeHidden();
+    // The old Defects and Fix of a Fix numbers live on inside No bugs or errors.
+    await page.locator('.aih-line', { hasText: 'No bugs or errors' }).click();
+    await expect(page.locator('#aihd-bugs')).toContainText('Fix of a fix (14 days)');
+    await expect(page.locator('#aihd-bugs')).toContainText('49% (41 of 84 fixes, baseline 32%)');
+    // A grey line says why it cannot tell.
+    await page.locator('.aih-line', { hasText: 'The data is accurate' }).click();
+    await expect(page.locator('#aihd-data')).toContainText("Why it can't tell: the data check has not run since Tue 13 Oct 06:42.");
   });
 
-  test('Agent Work leads with live work and lists every kind of open work (14 Oct 2026)', async ({ page }) => {
+  test('the four old cards are gone, and the north-star cards stay below under their heading', async ({ page }) => {
     await page.addInitScript((pat) => localStorage.setItem('_dlr_pat', pat), MOCK_PAT);
     await loadDashboard(page);
-    await routeEstate(page, [splitRow(), blockersRow()]);
-    await page.evaluate(async () => await loadAiTeamHealth());
-    const work = await card(page, 'aiWorkCard');
-    expect(work.head).toBe('57 live');
-    expect(work.sub).toBe('26 stuck · 7 days: 129 in, 133 done');
-    expect(work.cls).toContain('text-green');            // more done than came in
-    const d = await cardDetail(page, 'aiWorkCard');
-    expect(d.rows.slice(0, 6)).toEqual([
-      ['Live', '57'], ['Waiting for your approval', '18'], ['Waiting on a reply', '43'],
-      ['Scheduled for later', '64'], ['All open', '182'], ['Stuck (not moving)', '26'],
-    ]);
-    expect(d.text).toContain('leaves out tasks held under a lead task (18 now)');
-    expect(d.text).toContain('after 14 days it counts as live and stuck');
-    expect(d.text).toContain('approvals you put off to a later date');
-    expect(d.text).not.toMatch(/On no board|too long|notes only/);   // none of those today
-  });
-
-  test('a task on no board gets its own row and turns the card amber, never hides in live (review item 6)', async ({ page }) => {
-    await page.addInitScript((pat) => localStorage.setItem('_dlr_pat', pat), MOCK_PAT);
-    await loadDashboard(page);
-    await routeEstate(page, [splitRow({ live: 55, other: 2, notMoving: 29, replyOverdue: 3,
-      waitCheck: 'no carry-out ledger at /tmp/x <b>bold</b>' }), blockersRow()]);
-    await page.evaluate(async () => await loadAiTeamHealth());
-    const work = await card(page, 'aiWorkCard');
-    expect(work.head).toBe('55 live');
-    expect(work.cls).toContain('text-amber');            // more done than in, but a task is on no board
-    const d = await cardDetail(page, 'aiWorkCard');
-    expect(d.rows.slice(0, 7)).toEqual([
-      ['Live', '55'], ['Waiting for your approval', '18'], ['Waiting on a reply', '43'],
-      ['Scheduled for later', '64'], ['On no board (nothing reads it)', '2'], ['All open', '182'],
-      ['Stuck (not moving)', '29'],
-    ]);
-    expect(d.text).toContain('3 of the stuck have waited on a reply too long');
-    expect(d.text).toContain('read from the task notes only: no carry-out ledger at /tmp/x <b>bold</b>');
-    expect(await page.evaluate(() => document.querySelectorAll('#aiWorkCard b').length)).toBe(0);
-  });
-
-  test('a withdrawn split with an unchecked held list still says so and goes amber (review item 5)', async ({ page }) => {
-    await page.addInitScript((pat) => localStorage.setItem('_dlr_pat', pat), MOCK_PAT);
-    await loadDashboard(page);
-    await routeEstate(page, [splitRow({ live: null, approval: null, waitingReply: null, scheduled: null, other: null,
-      notMoving: 44, held: null, heldCheck: 'the dispatch queue is 200 minutes old',
-      splitCheck: 'agent-dispatch.py could not be loaded: boom' }), blockersRow()]);
-    await page.evaluate(async () => await loadAiTeamHealth());
-    const work = await card(page, 'aiWorkCard');
-    expect(work.head).toBe('182 open');
-    expect(work.sub).toBe('44 not moving (held tasks not checked) · 7 days: 129 in, 133 done');
-    expect(work.cls).toContain('text-amber');            // done beats in, so only the unchecked count makes it amber
-    const text = (await cardDetail(page, 'aiWorkCard')).text;
-    expect(text).toContain('Live work could not be split out: agent-dispatch.py could not be loaded: boom');
-    expect(text).toContain('could not be left out of the stuck count this time: the dispatch queue is 200 minutes old');
-  });
-
-  test('a row written before the split still shows the open count, never "undefined live" or a zero', async ({ page }) => {
-    // healthRow() is the 9 Oct payload: no live, approval, waitingReply or scheduled keys.
-    await page.addInitScript((pat) => localStorage.setItem('_dlr_pat', pat), MOCK_PAT);
-    await loadDashboard(page);
-    await routeEstate(page, [healthRow(), blockersRow()]);
-    await page.evaluate(async () => await loadAiTeamHealth());
-    const work = await card(page, 'aiWorkCard');
-    expect(work.head).toBe('178 open');
-    expect(work.sub).toBe('40 not moving · 7 days: 164 in, 119 done');
-    expect((await cardDetail(page, 'aiWorkCard')).text).not.toMatch(/undefined|Waiting on a reply/);
-  });
-
-  test('a split the Mac withdrew shows the open count and says why', async ({ page }) => {
-    await page.addInitScript((pat) => localStorage.setItem('_dlr_pat', pat), MOCK_PAT);
-    await loadDashboard(page);
-    await routeEstate(page, [splitRow({ live: null, approval: null, waitingReply: null, scheduled: null,
-      splitCheck: '3 task(s) carry the mark and none carries a readable dated line' }), blockersRow()]);
-    await page.evaluate(async () => await loadAiTeamHealth());
-    const work = await card(page, 'aiWorkCard');
-    expect(work.head).toBe('182 open');
-    // More done than came in, so only the withdrawn split makes it amber (round 2, item 5).
-    expect(work.cls).toContain('text-amber');
-    expect((await cardDetail(page, 'aiWorkCard')).text).toContain('Live work could not be split out: 3 task(s) carry the mark');
-  });
-
-  test('a stuck count not checked for held tasks says so on the card and goes amber', async ({ page }) => {
-    await page.addInitScript((pat) => localStorage.setItem('_dlr_pat', pat), MOCK_PAT);
-    await loadDashboard(page);
-    await routeEstate(page, [splitRow({ notMoving: 44, held: null,
-      heldCheck: 'the dispatch queue is 200 minutes old <img src=x onerror="window.__aiHeldXss=1">' }), blockersRow()]);
-    await page.evaluate(async () => await loadAiTeamHealth());
-    await page.waitForTimeout(300);
-    const work = await card(page, 'aiWorkCard');
-    expect(work.sub).toBe('44 stuck (held tasks not checked) · 7 days: 129 in, 133 done');
-    expect(work.cls).toContain('text-amber');
-    expect((await cardDetail(page, 'aiWorkCard')).text).toContain('could not be left out of the stuck count this time: the dispatch queue is 200 minutes old');
-    expect(await page.evaluate(() => window.__aiHeldXss)).toBeUndefined();
-    expect(await page.evaluate(() => document.querySelectorAll('#aiTeamCards img').length)).toBe(0);
-  });
-
-  test('holds all eight AI cards, and the operational section none of them', async ({ page }) => {
-    await page.addInitScript((pat) => localStorage.setItem('_dlr_pat', pat), MOCK_PAT);
-    await loadDashboard(page);
-    // By label, not id: some cards replace their slot with an element that carries no id.
-    // The label is upper-cased by CSS, so match case-insensitively on textContent.
-    const LABELS = ['Agent Work', 'Defects', 'Bottleneck', 'Fix of a Fix',
-      'AI Agents', 'Agent Approvals', 'Work Done by AI', 'AI Time & Money Saved'];
-    await page.waitForFunction((n) => document.querySelectorAll('#aiTeamCards .kpi-card').length >= n, LABELS.length, { timeout: 15000 });
-    const where = await page.evaluate((labels) => labels.map(label => {
-      const has = (sel) => [...document.querySelectorAll(`${sel} .kpi-card-label`)]
-        .some(el => el.textContent.replace('▸', '').trim().toLowerCase() === label.toLowerCase());
-      return { label, inSection: has('#aiTeamCards'), inOps: has('#operationalCards') };
-    }), LABELS);
-    for (const w of where) {
-      expect(w.inSection, `${w.label} not in the AI Team section`).toBe(true);
-      expect(w.inOps, `${w.label} still in the operational section`).toBe(false);
-    }
-    // A second load (the 15-minute refresh runs the same path) must not duplicate the cards.
+    await page.waitForFunction(() => document.querySelectorAll('#aiTeamCards .kpi-card').length >= 4, null, { timeout: 15000 });
+    const where = await page.evaluate(() => {
+      const grid = document.getElementById('aiTeamCards');
+      const order = [...grid.children].map(c => c.id || c.textContent.trim().slice(0, 40));
+      const label = (t) => [...grid.querySelectorAll('.kpi-card-label')].some(el => el.textContent.replace('▸', '').trim() === t);
+      return {
+        old: ['aiWorkCard', 'aiDefectsCard', 'aiBlockedCard', 'aiReworkCard'].filter(id => document.getElementById(id)),
+        order, share: label('Work Done by AI'), saved: label('AI Time & Money Saved'),
+        agents: label('AI Agents'), approvals: label('Agent Approvals'),
+      };
+    });
+    expect(where.old).toEqual([]);
+    expect(where.order[0]).toBe('aiHealthPanel');
+    expect(where.order[1]).toBe('North star: how much work AI does');
+    expect(where.order.slice(2, 4)).toEqual(['aiShareCard', 'aiSavedCard']);
+    expect(where.share && where.saved && where.agents && where.approvals).toBe(true);
+    // The 15-minute refresh runs the same path and must not duplicate the panel.
     await page.evaluate(() => loadDashboard());
     await page.waitForTimeout(2500);
-    const count = await page.evaluate(() => document.querySelectorAll('#aiTeamCards .kpi-card').length);
-    expect(count).toBe(LABELS.length);
+    expect(await page.evaluate(() => document.querySelectorAll('#aiHealthPanel').length)).toBe(1);
   });
 
-  test('a row over two hours old says so and goes amber', async ({ page }) => {
-    await page.addInitScript((pat) => localStorage.setItem('_dlr_pat', pat), MOCK_PAT);
-    await loadDashboard(page);
-    await routeEstate(page, [healthRow(180), blockersRow(180)]);
-    await page.evaluate(async () => await loadAiTeamHealth());
-    for (const id of ['aiWorkCard', 'aiDefectsCard', 'aiBlockedCard', 'aiReworkCard']) {
-      const c = await card(page, id);
-      expect(c.sub, id).toMatch(/^Not updated since /);
-      expect(c.cls, id).toContain('text-amber');
-    }
+  test('no row yet: says the Mac has not written it, and the health check fails', async ({ page }) => {
+    await load(page, []);
+    expect(await panelText(page)).toContain("Can't read the Mac's report: it has not written the AI team answer yet.");
+    expect(await page.evaluate(() => document.querySelectorAll('#aiHealthPanel .aih-line').length)).toBe(0);
+    expect((await page.evaluate(() => aiTeamCheck())).status).toBe('fail');
   });
 
-  test('a failed health row shows its reason even when the last good numbers are still on it', async ({ page }) => {
-    // Review finding, 9 Oct 2026: a failed write leaves the old payload in place.
-    await page.addInitScript((pat) => localStorage.setItem('_dlr_pat', pat), MOCK_PAT);
-    await loadDashboard(page);
-    const stale = healthRow(5);
-    stale.fields[ES.status] = 'Failed';
-    stale.fields[ES.detail] = 'The defect queue or the rework rate could not be read: timeout';
-    await routeEstate(page, [stale, blockersRow()]);
-    await page.evaluate(async () => await loadAiTeamHealth());
-    for (const id of ['aiWorkCard', 'aiDefectsCard', 'aiReworkCard']) {
-      const c = await card(page, id);
-      expect(c.head, id).toBe('—');
-      expect(c.sub, id).toContain('timeout');
-    }
+  test('Airtable not answering: says so, never a calm panel', async ({ page }) => {
+    await load(page, [], 500);
+    expect(await panelText(page)).toContain("Can't read the Mac's report: Airtable did not answer. Refresh to retry.");
+    expect((await page.evaluate(() => aiTeamCheck())).status).toBe('warn');
   });
 
-  test('a blocker check that could not read the board is never "Nothing is blocked"', async ({ page }) => {
-    await page.addInitScript((pat) => localStorage.setItem('_dlr_pat', pat), MOCK_PAT);
-    await loadDashboard(page);
-    const b = blockersRow();
-    b.fields[ES.detail] = 'The blocker check could not read the task board, so it cannot say what is blocked.';
-    b.fields[ES.payload] = JSON.stringify({ open: [], controlFailed: true });
-    await routeEstate(page, [healthRow(), b]);
-    await page.evaluate(async () => await loadAiTeamHealth());
-    const c = await card(page, 'aiBlockedCard');
-    expect(c.head).toBe('—');
-    expect(c.sub).toContain('could not read the task board');
-    expect(c.cls).not.toContain('text-green');
+  test('a row over two hours old shows an amber banner over its answers', async ({ page }) => {
+    await load(page, [verdictRow(180)]);
+    const notice = page.locator('#aiHealthPanel .aih-notice-amber');
+    await expect(notice).toContainText(/^Not updated since .+ The Mac's report has stopped, so these answers may be out of date\.$/);
+    expect(await page.evaluate(() => document.querySelectorAll('#aiHealthPanel .aih-line').length)).toBe(14);
+    expect(await page.evaluate(() => aiTeamCheck())).toMatchObject({ status: 'warn', detail: expect.stringMatching(/^Not updated since/) });
   });
 
-  test('blocked counts come from every wall, and age from the sweep, not the row', async ({ page }) => {
-    await page.addInitScript((pat) => localStorage.setItem('_dlr_pat', pat), MOCK_PAT);
-    await loadDashboard(page);
-    const b = blockersRow(5);   // the row was written 5 minutes ago...
-    b.fields[ES.payload] = JSON.stringify({ open: wall('TOOL', 80), openCount: 95,
-      byKind: { TOOL: 85, KEVIN: 10 }, sweptAt: minutesAgo(200) });   // ...but the sweep stopped 200 minutes ago
-    await routeEstate(page, [healthRow(), b]);
+  test('a failed row with no answer shows its reason in red; a fresh healthy row passes the check', async ({ page }) => {
+    await load(page, [verdictRow(5, { [ES.status]: 'Failed', [ES.detail]: 'The AI team verdict could not be built: KeyError: x', [ES.payload]: undefined })]);
+    await expect(page.locator('#aiHealthPanel .aih-notice-red')).toHaveText("Can't read the Mac's report: The AI team verdict could not be built: KeyError: x");
+    const healthy = payload({ overall: { colour: 'green', text: 'Healthy', red: 0, amber: 1, green: 13, grey: 0, greyLines: [] } });
+    await routeEstate(page, [verdictRow(5, {}, healthy)]);
     await page.evaluate(async () => await loadAiTeamHealth());
-    const c = await card(page, 'aiBlockedCard');
-    expect(c.head).toBe('95 blocked');
-    expect(c.sub).toMatch(/^Not updated since .*Biggest: 85 waiting on a code fix · 10 need you$/);
-    expect(c.cls).toContain('text-amber');
+    await expect(page.locator('#aiHealthPanel .aih-verdict-text')).toHaveText('Healthy');
+    expect((await page.evaluate(() => aiTeamCheck())).status).toBe('pass');
   });
 
-  test('payload text never runs as HTML', async ({ page }) => {
-    await page.addInitScript((pat) => localStorage.setItem('_dlr_pat', pat), MOCK_PAT);
-    await loadDashboard(page);
-    const h = healthRow();
-    const p = JSON.parse(h.fields[ES.payload]);
-    p.work.open = '<img src=x onerror="window.__aiXss=1">';
-    h.fields[ES.payload] = JSON.stringify(p);
-    await routeEstate(page, [h, blockersRow()]);
-    await page.evaluate(async () => await loadAiTeamHealth());
+  test('payload text never runs as HTML, and an unknown colour is drawn grey', async ({ page }) => {
+    const p = payload();
+    p.lines[0].answer = '<img src=x onerror="window.__aiXss=1">';
+    p.lines[0].colour = 'red" onmouseover="window.__aiXss=2';
+    p.lines[3].items = [{ name: '<b id="aiInjected">x</b>' }];
+    p.overall.text = '<script>window.__aiXss=3</script>';
+    await load(page, [verdictRow(5, {}, p)]);
     await page.waitForTimeout(300);
     expect(await page.evaluate(() => window.__aiXss)).toBeUndefined();
-    expect(await page.evaluate(() => document.querySelectorAll('#aiTeamCards img').length)).toBe(0);
-    expect((await card(page, 'aiWorkCard')).head).toBe('— open');
+    expect(await page.evaluate(() => document.querySelectorAll('#aiHealthPanel img, #aiInjected, #aiHealthPanel script').length)).toBe(0);
+    expect(await page.evaluate(() => document.querySelector('#aiHealthPanel .aih-line .aih-dot').className)).toBe('aih-dot aih-grey');
   });
 
-  test('the cards say they are loading while Airtable answers, never sit blank (audit, 9 Oct 2026)', async ({ page }) => {
+  test('the panel says it is checking while Airtable answers, never sits blank', async ({ page }) => {
     await page.addInitScript((pat) => localStorage.setItem('_dlr_pat', pat), MOCK_PAT);
     await loadDashboard(page);
     await page.route('**/api.airtable.com/v0/**', async (route) => {
       if (route.request().method() === 'GET' && route.request().url().includes(ESTATE)) {
         await new Promise((r) => setTimeout(r, 1500));
-        return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ records: [healthRow(), blockersRow()] }) });
+        return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ records: [verdictRow()] }) });
       }
       return route.fallback();
     });
-    await page.evaluate(() => { const el = document.getElementById('aiWorkCard'); const blank = document.createElement('div'); blank.id = 'aiWorkCard'; el.replaceWith(blank); window.__aiLoad = loadAiTeamHealth(); });
-    const during = await card(page, 'aiWorkCard');
-    expect(during.head).toBe('…');
-    expect(during.sub).toBe('Loading from the Mac…');
+    await page.evaluate(() => { document.getElementById('aiHealthPanel').innerHTML = ''; window.__aiLoad = loadAiTeamHealth(); });
+    expect(await panelText(page)).toContain('Checking the AI team…');
     await page.evaluate(async () => await window.__aiLoad);
-    expect((await card(page, 'aiWorkCard')).head).toBe('178 open');
+    expect(await page.evaluate(() => document.querySelectorAll('#aiHealthPanel .aih-line').length)).toBe(14);
   });
 
-  test('the health check judges the blocker row by its sweep, as the card does (audit, 9 Oct 2026)', async ({ page }) => {
-    await page.addInitScript((pat) => localStorage.setItem('_dlr_pat', pat), MOCK_PAT);
-    await loadDashboard(page);
-    const b = blockersRow(5);
-    b.fields[ES.payload] = JSON.stringify({ open: wall('TOOL', 2), openCount: 2, byKind: { TOOL: 2 }, sweptAt: minutesAgo(200) });
-    await routeEstate(page, [healthRow(5), b]);
-    await page.evaluate(async () => await loadAiTeamHealth());
-    const stale = await page.evaluate(() => aiTeamCheck());
-    expect(stale.status).toBe('warn');
-    expect(stale.detail).toMatch(/^Not updated since .*blocker sweep/);
-    await routeEstate(page, [healthRow(5), blockersRow(5)]);
-    await page.evaluate(async () => await loadAiTeamHealth());
-    expect((await page.evaluate(() => aiTeamCheck())).status).toBe('pass');
-  });
-
-  test('a failed row shows its reason, never a number', async ({ page }) => {
-    await page.addInitScript((pat) => localStorage.setItem('_dlr_pat', pat), MOCK_PAT);
-    await loadDashboard(page);
-    await routeEstate(page, [
-      { id: 'recHealth', fields: { [ES.key]: 'ai-team-health', [ES.status]: 'Failed', [ES.lastRun]: minutesAgo(5),
-        [ES.detail]: 'The defect queue or the rework rate could not be read: rework-rate.py exited 1' } },
-      blockersRow(),
-    ]);
-    await page.evaluate(async () => await loadAiTeamHealth());
-    const rework = await card(page, 'aiReworkCard');
-    expect(rework.head).toBe('—');
-    expect(rework.sub).toContain('rework-rate.py exited 1');
-    expect(rework.cls).toContain('text-red');
+  test('fits a phone: no line wider than the screen', async ({ page }) => {
+    await page.setViewportSize({ width: 375, height: 812 });
+    await load(page, [verdictRow()]);
+    const over = await page.evaluate(() => {
+      const panel = document.getElementById('aiHealthPanel');
+      const w = panel.getBoundingClientRect().right;
+      return [...panel.querySelectorAll('.aih-line, .aih-verdict')].filter(e => e.getBoundingClientRect().right > w + 1).length;
+    });
+    expect(over).toBe(0);
   });
 });

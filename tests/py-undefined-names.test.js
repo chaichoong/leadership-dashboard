@@ -23,6 +23,8 @@ const CHECK = resolve(ROOT, 'tests/helpers/py_undefined_names.py');
 // ["INTRO_LOCAL"]; the repaired file reports [].
 const ESTATE_SCRIPTS = [
   'scripts/content-engine/render.py',
+  // 15 Oct 2026: the "Is the AI team healthy?" verdict, judged on the estate-status pass
+  'scripts/ai_team_health.py',
   'scripts/approval_evidence.py',
   'scripts/calendar-write.py',
   'scripts/send-email.py',

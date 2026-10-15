@@ -78,6 +78,69 @@ AI workforce
 24. **Robots blocked (bottleneck)** — T3 on the blocker sweep, by kind, with the count that needs Kevin. *Live.*
 25. **Fix-of-a-fix rate** — T4 from `scripts/rework-rate.py` over 14 days, against the 32% baseline. *Live.* Kevin's one number for estate health (brain Decisions/2026-10-09): defects arriving faster than they are fixed show up here first.
 
+**Retired 15 Oct 2026: entries 22 to 25.** They stopped being their own cards on the dashboard.
+Kevin could not read four true numbers as an answer ("If I can't understand them, I can't use
+them"), so the "Is the AI team healthy?" panel (26 to 39) replaced them. Nothing they measured
+was lost: the Agent Work split sits inside line 28's detail, the defect split and the fix-of-a-fix
+rate inside line 33's, and the blocked count by kind inside line 29's. In `js/kpi-library.js` they
+carry `status: 'retired'` with the date and what replaced them; a retired entry is never deleted.
+
+**The "Is the AI team healthy?" panel (Kevin, 15 Oct 2026).** Fourteen of his questions in three
+groups, each a colour, a short answer, a number, one sentence of rule and a trend against the
+same day last week, under one verdict. Judged on the Mac by `scripts/ai_team_health.py` into the
+Estate Status row `ai-team-verdict`; the page only draws it. Three rules hold for every line:
+a source that cannot be read, is missing or is older than its own cadence makes the line grey,
+"Can't tell", and the verdict names it (never green, never a zero); the trend history is kept
+inside the row's payload, one number per line per London day for 30 days, mirrored to a local
+file so one failed read cannot wipe it; and no line counts what another counts where that would
+mislead, so walled tasks are taken out of "Everything's moving" before it counts. Verdict: green
+"Healthy" with no red and at most two amber; amber "Issues, but going the right way" when more
+lines are better than worse than a week ago; red "Needs attention: <worst line>" otherwise. A
+board green apart from lines it cannot read is amber and says so.
+
+Is work flowing?
+26. **Emails cleared (old inbox mail)** — T3: inbox mail older than 2 days after the last triage
+    run, from the triage script's own scan and slot record, never its prose. Red also when the
+    last scheduled sort did not run or failed (Kevin's 14 Oct ruling: mail never ends in the
+    inbox). A cut-off listing is a floor, never green.
+27. **Email tasks waiting for a draft** — T8: open inbound tasks an agent owns, due, with no draft
+    or card, made more than 1 working day ago. Walled and held tasks are left out.
+28. **Live work stuck with nothing blocking it** — T4: the not-moving list's agent tasks minus
+    every walled task, over live agent work. The walls are subtracted by id, from the sweep and
+    a fresh read of each task's Notes, so a wall opened since the sweep is not counted twice.
+29. **Blocked tasks past their limit** — T8: open walls past the task manager's own clock
+    (`CLOCK_DAYS`: sign-in 1 day, code fix and the owner's step 3). An undated wall counts as past.
+30. **Approved work not carried out in 24 hours** — T8: the dispatcher's own carry-out list,
+    read from its queue, so work carried out and kept open, or resting on a wall, never counts.
+
+Is anything broken?
+31. **Agents idle with live work** — T3: agents holding live, unwalled work for a day with no
+    action in 24 hours (a run report action, a completion, or a note line only the agent's own
+    commands write). Shown as "N of M worked today".
+32. **Scheduled jobs failing** — T3: Failed rows on the job status board, by plain name. The
+    blocked-robots report is left out: it is line 29's subject.
+33. **Open code problems against a week ago** — T3: open code findings now against the same log
+    folded as it stood 7 days ago (`defects_as_of` in `scripts/estate-status.py`, through the real
+    `current_state`), so the direction is known from the first day; plus filed against fixed.
+34. **Daily data check result** — T3: the daily invariant sweep's result, each broken check named;
+    grey when it has not run in 26 hours.
+35. **Things missed** — T3: in 24 hours, parks the dispatcher's own `parked_tasks` reports that
+    still have no card, wall or door; jobs that gave up waiting, were skipped as too late or missed
+    their time; old inbox mail nobody decided.
+
+Can it keep going?
+36. **Agent work done against new (7 days)** — T4.
+37. **Approval queue size and oldest card** — T8: the queue population is `APV_QUEUE_FORMULA`'s
+    (Approval, not put off past today). Age runs from the newest send stamp in Notes (a submit, an
+    escalation, or the KEVIN wall a Your step card waits on) or the day a put-off ended. Last
+    Updated is not it: any edit moves it. A card with no stamp is aged from its creation and says so.
+38. **Drafts approved first time %** — T4 over 14 days, the accuracy report's own population (form
+    cards left out), checked against the task board's read: a verdict the board shows that the
+    14-day read missed makes the line grey.
+39. **Robot hours paused for the allowance** — T5: hours paused in 7 days from the allowance guard,
+    plus any job whose last run hit the limit. The guard keeps only its newest outage, so two
+    outages in one week count the newer one; said in the line's detail.
+
 ## 3. Tier 2 — Property pack (add-on only)
 
 Occupancy rate · void units · rent roll (expected monthly income by payment status) · paid
