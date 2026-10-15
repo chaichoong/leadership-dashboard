@@ -69,6 +69,17 @@ BOARD_STATUSES = ("Today", "Upcoming", "Overdue", "Approval", "Completed", "Canc
 #   withAgent     an agent holds it inside the dispatch window
 LANES = ("withKevin", "deferred", "signInNeeded", "withRoy", "invisible", "withAgent")
 SIGNIN_RE = re.compile(r"^\s*SIGN-IN NEEDED:\s*\S", re.I | re.M)
+
+# A property certificate task stamped HELD UNDER an open lead is being worked, in one job, BY that
+# lead: agent-dispatch.py groups a certificate type plus a postcode district, the earliest-due task
+# leads, and every sibling gets this note. 13 Oct 2026 (finding 20261013-phase-5-851): 17 of the 40
+# NOT MOVING rows were these siblings, every one reading "the agent has drafted nothing" — true of
+# the row, false of the work. The list is ordered by how much each item needs someone, so 17
+# invented rows pushed the two that genuinely needed Kevin (a certificate decision that alone gates
+# four certificates, and an insurance purchase at his approval gate) down a 40-line list.
+# Matches agent-dispatch.py's own HELD_UNDER_RE. A hold only counts while the lead is still OPEN, so
+# a sibling whose lead has closed goes back to being stalled rather than hiding for ever.
+HELD_UNDER_RE = re.compile(r"HELD UNDER (rec[A-Za-z0-9]{14})")
 ROY_NAME = "Roy Lavin"
 
 
@@ -188,6 +199,12 @@ def compute(tasks, agent_ids, now=None, roy_ids=()):
     today = now.astimezone(LONDON).date().isoformat()
     needs_you, done, stalled = [], [], []
 
+    # The open leads, read before the loop: a HELD UNDER note only suppresses the draft rule while
+    # the lead it names is still open.
+    open_ids = {r.get("id") for r in tasks
+                if (r.get("fields") or {}).get("Status") not in CLOSED
+                and not (r.get("fields") or {}).get("Completion Date")}
+
     for r in tasks:
         f = r.get("fields", {}) or {}
         name = f.get("Task Name") or "(untitled)"
@@ -254,7 +271,9 @@ def compute(tasks, agent_ids, now=None, roy_ids=()):
         # 2. An agent owns it, it is DUE, and it has produced nothing. No day
         #    count: these are usually old tasks routed to an agent recently, so
         #    "has had this 499 days" would measure the wrong thing and be false.
-        if (owned and not f.get("Agent Output")
+        held = HELD_UNDER_RE.search(str(f.get("Notes") or ""))
+        held_by_open_lead = bool(held and held.group(1) in open_ids)
+        if (owned and not f.get("Agent Output") and not held_by_open_lead
                 and in_dispatch_window(status, f.get("Due Date"), today, bool(f.get("Some Day")))):
             h = hours_since(f.get("Created Time"), now)
             if h is not None and h > STALL_DRAFT_HOURS:

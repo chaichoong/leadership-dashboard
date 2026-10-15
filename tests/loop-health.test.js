@@ -96,6 +96,7 @@ function toParsed(rec, derive) {
     approvalOutcome: f['Approval Outcome'] || '',
     approvedAt: f['Approved At'] || '',
     agentOutput: f['Agent Output'] || '',
+    notes: f.Notes || '',
     approvalSlackTs: f['Approval Slack TS'] || '',
     assigneeEmail: (f.Assignee || {}).email || '',
     hardDeadline: !!f['Hard Deadline'],
@@ -205,6 +206,33 @@ describe('approval-loop stall rules', () => {
       })]);
       expect(future.js.stalled).toHaveLength(0);
       expect(future.py.stalled).toHaveLength(0);
+    });
+
+    // 13 Oct 2026, finding 20261013-phase-5-851: 17 of the 40 NOT MOVING rows were certificate
+    // tasks stamped HELD UNDER an open lead — work the property agent correctly batches into one
+    // quote email per contractor. Every one read "the agent has drafted nothing", which is true of
+    // the row and false of the work, and 17 invented rows buried the two items that genuinely
+    // needed Kevin. The hold holds only while the lead is open.
+    it('agrees that a task HELD UNDER an open lead is not stalled, and one whose lead closed is', () => {
+      const leadId = 'rec' + 'LEAD'.padEnd(14, '0');
+      const held = (leadStatus, completion) => [
+        { id: leadId, fields: { 'Task Name': 'EICR CB9 lead', Status: leadStatus, 'Team Member': [AGENT],
+          'Due Date': '2026-08-14', 'Created Time': '2024-01-01T09:00:00Z', 'Agent Output': 'quotes sent',
+          ...(completion ? { 'Completion Date': completion } : {}) } },
+        { id: 'rec' + 'SIB'.padEnd(14, '0'), fields: { 'Task Name': 'EICR 5 Dalham Place', Status: 'Overdue',
+          'Team Member': [AGENT], 'Due Date': '2026-08-10', 'Created Time': '2024-01-01T09:00:00Z',
+          Notes: `[10 Aug 2026 10:00 - agent-dispatch] HELD UNDER ${leadId} (EICR|CB9): worked in one job.` } },
+      ];
+
+      const open = runBoth(held('Overdue', ''));
+      expect(open.js.stalled).toHaveLength(0);
+      expect(open.py.stalled).toHaveLength(0);
+
+      // Lead finished: the sibling is back on its own, so the draft rule fires again and it is
+      // never hidden for ever by a note.
+      const closed = runBoth(held('Completed', '2026-08-13T09:00:00Z'));
+      expect(closed.js.stalled.map(s => s.rule)).toEqual(['draft']);
+      expect(closed.py.stalled.map(s => s.rule)).toEqual(['draft']);
     });
 
     it('agrees in the same ORDER, so "the worst three" means the same thing', () => {
