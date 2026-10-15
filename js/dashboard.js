@@ -1742,7 +1742,7 @@
                 return `<section class="aih-group" aria-label="${escHtml(g.title || '')}">
                     <div class="aih-group-head"><span class="aih-dot aih-${gc}" role="img" aria-label="${AI_HEALTH_WORDS[gc]}"></span>
                         <span class="aih-group-title">${escHtml(g.title || '')}</span>
-                        <span class="aih-muted aih-small">${escHtml(g.text || '')}</span></div>
+                        <span class="aih-muted aih-small">${stale ? 'Not updated' : escHtml(g.text || '')}</span></div>
                     <ul class="aih-list">${mine.map(l => aiHealthLine(l, row, stale)).join('')}</ul>
                 </section>`;
             }).join('')

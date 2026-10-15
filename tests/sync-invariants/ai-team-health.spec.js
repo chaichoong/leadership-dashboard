@@ -199,6 +199,7 @@ test.describe('Is the AI team healthy? panel', () => {
         sub: p.querySelector('.aih-verdict .aih-small').textContent,
         dots: [...p.querySelectorAll('.aih-line .aih-dot, .aih-group-head .aih-dot')].map(d => d.className),
         coloured: p.querySelectorAll('.aih-trend.aih-better, .aih-trend.aih-worse').length,
+        groupText: [...p.querySelectorAll('.aih-group-head .aih-small')].map(e => e.textContent),
       };
     });
     expect(v.verdict).toMatch(/^Not updated since /);
@@ -207,6 +208,8 @@ test.describe('Is the AI team healthy? panel', () => {
     expect(v.dots).toHaveLength(17);
     expect(v.dots.every(c => c === 'aih-dot aih-grey')).toBe(true);
     expect(v.coloured).toBe(0);
+    // The group headings never carry the old answer's counts either.
+    expect(v.groupText).toEqual(['Not updated', 'Not updated', 'Not updated']);
     expect(await page.evaluate(() => document.querySelectorAll('#aiHealthPanel .aih-line').length)).toBe(14);
     expect(await page.evaluate(() => aiTeamCheck())).toMatchObject({ status: 'warn', detail: expect.stringMatching(/^Not updated since/) });
   });
