@@ -2240,7 +2240,14 @@ def selftest():
 
     fsrc = _i.getsource(share_to_facebook_profile); assert "find_page_post" in fsrc and "verify_shared" in fsrc, "it shares the page post and checks the profile afterwards"
     assert fsrc.index('"status": "sharing"') < fsrc.index("run_plan(") and fsrc.index("save_state(state)") < fsrc.index("run_plan("), "the share is on disk before Share is pressed"
-    assert re.search(r"except Exception as ex:\s+# a page read timed out", _i.getsource(sync)), "a failing share never ends the run"
+    # Both guards must catch SystemExit as well as Exception: facebook_share.run_plan and _browser
+    # RAISE SystemExit, a BaseException, so `except Exception` let an unreachable Share control kill
+    # the whole run (2099, 15 Oct 2026; three dead runs). The behaviour itself is DRIVEN in
+    # tests/content-engine-fb-share-once.test.js ("a lane failure on one clip is recorded and the
+    # other clip still shares"); this line only stops the guards being narrowed again.
+    assert re.search(r"except \(Exception, SystemExit\) as ex:\s+print\(\"episode %s: Facebook %s profile share skipped",
+                     _i.getsource(sync)), "a failing share never ends the run"
+    assert "except (Exception, SystemExit) as ex:" in fsrc, "the lane's own SystemExit is caught where Share is pressed"
     rsrc = _i.getsource(run); assert 'stage_for(entry, yt_ok) == "socials"' in rsrc and rsrc.count("schedule_stage(") == 3 and rsrc.count("fill_learnings(") == 2 and "broken_uploads" in rsrc, "both stages run the same day, and a broken upload is replaced once"
     t0 = dt.datetime(2026, 9, 10, 9, 0, tzinfo=LONDON)
     assert when_for("youtube", "full", 0, now=t0) == "2026-09-10T08:15:00Z", "the 06:00 slot has passed: 15 minutes from now, same morning"
