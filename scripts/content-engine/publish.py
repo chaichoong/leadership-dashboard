@@ -1051,7 +1051,11 @@ def share_to_facebook_profile(day, entry, state, clip="summary"):
     save_state(state)                                  # on disk BEFORE Share is pressed, so a dead run never shares twice
     try:
         facebook_share.run_plan(plan_path, task, test, shot)
-    except Exception as ex:
+    # SystemExit too (15 Oct 2026): facebook_share.run_plan and _browser signal a lane failure by
+    # RAISING SystemExit, which is a BaseException, so `except Exception` let it straight past. An
+    # unreachable Share control on episode 2099 killed the whole 03:54 content run, and the same
+    # control killed both publish runs on 14 Oct, leaving only exit 1 and node's stack trace.
+    except (Exception, SystemExit) as ex:
         fb["status"] = "failed"; fb["error"] = str(ex)[-300:]
         print("episode %s: Facebook %s profile share FAILED: %s" % (day, clip, str(ex)[-200:]), file=sys.stderr)
         return True
@@ -1365,12 +1369,14 @@ def sync():
         if not str(day).isdigit() or not isinstance(entry, dict): continue   # _cursor, _skipped_days, held_posts live beside the episodes (9 Sep 2026: the first live cursor crashed sync)
         try:
             if monetise_long_video(day, entry): save_state(state)
-        except Exception as ex:
+        except (Exception, SystemExit) as ex:
             print("episode %s: monetisation check skipped this run (%s)" % (day, str(ex)[-160:]), file=sys.stderr)
         for clip in FB_SHARES:            # both page posts reach Kevin's profile, not just the summary (20 Sep 2026)
             try:
                 if share_to_facebook_profile(day, entry, state, clip=clip): save_state(state)
-            except Exception as ex:       # a page read timed out on 11 Sep 2026 and ended the whole hourly run
+            # a page read timed out on 11 Sep 2026 and ended the whole hourly run; SystemExit added
+            # 15 Oct 2026, the lane's own failure signal, which `except Exception` does not catch
+            except (Exception, SystemExit) as ex:
                 print("episode %s: Facebook %s profile share skipped this run (%s)" % (day, clip, str(ex)[-160:]), file=sys.stderr)
         pod = entry.get("podcast") or {}
         if spotify_link_due(pod):
@@ -2234,7 +2240,14 @@ def selftest():
 
     fsrc = _i.getsource(share_to_facebook_profile); assert "find_page_post" in fsrc and "verify_shared" in fsrc, "it shares the page post and checks the profile afterwards"
     assert fsrc.index('"status": "sharing"') < fsrc.index("run_plan(") and fsrc.index("save_state(state)") < fsrc.index("run_plan("), "the share is on disk before Share is pressed"
-    assert re.search(r"except Exception as ex:\s+# a page read timed out", _i.getsource(sync)), "a failing share never ends the run"
+    # Both guards must catch SystemExit as well as Exception: facebook_share.run_plan and _browser
+    # RAISE SystemExit, a BaseException, so `except Exception` let an unreachable Share control kill
+    # the whole run (2099, 15 Oct 2026; three dead runs). The behaviour itself is DRIVEN in
+    # tests/content-engine-fb-share-once.test.js ("a lane failure on one clip is recorded and the
+    # other clip still shares"); this line only stops the guards being narrowed again.
+    assert re.search(r"except \(Exception, SystemExit\) as ex:\s+print\(\"episode %s: Facebook %s profile share skipped",
+                     _i.getsource(sync)), "a failing share never ends the run"
+    assert "except (Exception, SystemExit) as ex:" in fsrc, "the lane's own SystemExit is caught where Share is pressed"
     rsrc = _i.getsource(run); assert 'stage_for(entry, yt_ok) == "socials"' in rsrc and rsrc.count("schedule_stage(") == 3 and rsrc.count("fill_learnings(") == 2 and "broken_uploads" in rsrc, "both stages run the same day, and a broken upload is replaced once"
     t0 = dt.datetime(2026, 9, 10, 9, 0, tzinfo=LONDON)
     assert when_for("youtube", "full", 0, now=t0) == "2026-09-10T08:15:00Z", "the 06:00 slot has passed: 15 minutes from now, same morning"

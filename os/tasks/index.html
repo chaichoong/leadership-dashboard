@@ -9515,6 +9515,18 @@ function computeApprovalLoop(tasks){
     .filter(t=>_hoursSince(t.completion)!==null&&_hoursSince(t.completion)<=7*24)
     .sort((a,b)=>new Date(b.completion)-new Date(a.completion));
 
+  // A property certificate task stamped HELD UNDER an open lead is being worked, in one job, BY
+  // that lead: agent-dispatch.py groups a certificate type plus a postcode district, the
+  // earliest-due task leads, and every sibling carries this note. 13 Oct 2026 (finding
+  // 20261013-phase-5-851): 17 of the 40 NOT MOVING rows were siblings reading "the agent has
+  // drafted nothing" — true of the row, false of the work — and they pushed the two items that
+  // genuinely needed Kevin down a 40-line list. The hold only holds while the lead is OPEN.
+  const _openIds=new Set(all.filter(_isOpen).map(t=>t.id));
+  const _heldByOpenLead=(t)=>{
+    const m=/HELD UNDER (rec[A-Za-z0-9]{14})/.exec(String((t&&t.notes)||''));
+    return !!(m&&_openIds.has(m[1]));
+  };
+
   const stalled=[];
   all.forEach(t=>{
     if(!_isOpen(t))return;
@@ -9558,7 +9570,7 @@ function computeApprovalLoop(tasks){
     //    STORED value. Using the derived one flagged 63 tasks the dispatcher was
     //    never going to pick up, which is the false-positive flood this rule was
     //    narrowed to avoid in the first place.
-    if(_isAgentOwned(t)&&!t.agentOutput&&_inDispatchWindow(t)){
+    if(_isAgentOwned(t)&&!t.agentOutput&&!_heldByOpenLead(t)&&_inDispatchWindow(t)){
       // `created` is the real createdTime. NOT `createdDate` — that field is
       // "Due Date for Interface", a due date, and anchoring a staleness rule to
       // a re-stampable due date is the exact bug rule 3 below exists to avoid.

@@ -631,6 +631,40 @@ def teaser_for_day_before(role, spoken, date_day, ledger):
         v.get("episode") == spoken and v.get("role") == "teaser" and v.get("status") == "rendered" for v in ledger.values())
 
 
+# ---------- one day, ONE summary (finding 20261015-phase-3-888) ----------
+# Day 2106 held two short recordings. Both were role=teaser, both rendered, and both wrote Summary
+# Video URL to the same episode record, so the later render (502 s) silently replaced the earlier
+# (300 s) and Kevin's card carried a summary from a different run: "the summary video is for the
+# wrong episode compared to the other links in this approval card" (10 Oct 2026). The earlier clip
+# had been flagged "spoken day 2101 disagrees with the date (2106); date used, flagged" and the flag
+# changed nothing. The episode role has refused a second long recording since 24 Sep 2026; this is
+# the same refusal for the short one, with the flag as the tie-break so the answer does not depend
+# on which clip finishes rendering last.
+FLAGGED_DAY = "disagrees with the date"
+
+
+def summary_rival(key, day, reason, ledger):
+    """What to do with a teaser when episode `day` already has a rendered summary.
+
+    Returns ("", "") to render it as the first summary of the day, ("replace", why) when the summary
+    on the record came from a clip whose spoken day disagreed with its date and this one's agrees, or
+    ("refuse", why) when it must not be rendered at all. Pure: it reads the ledger and nothing else.
+    """
+    done = sorted(k2 for k2, v in ledger.items()
+                  if k2 != key and v.get("episode") == day and v.get("role") == "teaser"
+                  and v.get("status") == "rendered")
+    if not done:
+        return "", ""
+    mine_flagged = FLAGGED_DAY in str(reason or "")
+    agreed = [k2 for k2 in done if FLAGGED_DAY not in str(ledger[k2].get("episode_reason") or "")]
+    if mine_flagged or agreed:
+        return "refuse", ("a second short recording for episode %d (%s is already its summary%s): not rendered, so it "
+                          "cannot replace that summary" % (day, done[0], ", and this one's spoken day disagrees with "
+                          "the date" if mine_flagged else ""))
+    return "replace", ("episode %d's summary came from %s, whose spoken day disagreed with its date; this one's agrees, "
+                       "so it is the day's summary" % (day, ", ".join(done)))
+
+
 def part_number(key):
     return watch.part_no(key) or None
 
@@ -953,6 +987,15 @@ def process(key, ledger, keep=False):
                 e["status"] = "failed"; e["error"] = why; e["requeued"] = "not requeued: it needs a person"   # the page names it; a retry would do the same
                 if not keep: os.remove(clip); shutil.rmtree(workdir, ignore_errors=True)
                 watch.save_ledger(ledger); print("%s: NOT rendered: %s" % (key, why), file=sys.stderr); return
+    if role == "teaser":
+        what, why = summary_rival(key, day, reason, ledger)
+        if what == "refuse":
+            e["status"] = "failed"; e["error"] = why
+            e["requeued"] = "not requeued: it needs a person"       # a retry would do the same
+            if not keep: os.remove(clip); shutil.rmtree(workdir, ignore_errors=True)
+            watch.save_ledger(ledger); print("%s: NOT rendered: %s" % (key, why), file=sys.stderr); return
+        if what == "replace":
+            print("%s: %s" % (key, why))
     if role == "episode" and base:
         # the later part: its own masters, then part 1 + part 2 joined into the episode's masters and one caption track
         masters2 = render_masters(clip, workdir)
@@ -1140,6 +1183,24 @@ def about_learnings(point):
     return bool(LEARN_RE.search(SHOW_NAME_RE.sub(" ", point or "")))
 
 
+# HOW the video is made, not WHICH footage is used. A re-render on unchanged code produces the same
+# picture, so answering one of these points with "the day is re-rendered; nothing else is changed"
+# claims the point was handled when nothing touched it. 15 Oct 2026, finding 20261015-phase-3-889:
+# day 2106 came back with four points, two of them about stabilisation getting jolty, and all four
+# got the same sentence. The real cause (29.97 fps resampled to 24) was found two days later by a
+# different route, by luck. Deliberately narrow: a word here only changes the receipt LINE and files
+# a finding, it never stops the re-render.
+NEEDS_CODE_RE = re.compile(
+    r"\b(stabilis\w*|stabiliz\w*|jolty|judder\w*|jerky|jerk|stutter\w*|shaky|shake|wobbl\w*"
+    r"|frame ?rate|fps|dropped frames|blurr\w*|out of focus|pixelat\w*"
+    r"|out of sync|lip ?sync|audio level\w*|volume)\b", re.I)
+
+
+def needs_code_change(point):
+    """Whether this point of Kevin's note is about how the video is MADE, which only a code change reaches."""
+    return bool(NEEDS_CODE_RE.search(point or ""))
+
+
 def receipt_points(feedback):
     """Kevin's note as the points a receipt answers, one line each. Split where agent-dispatch's gate splits it
     (sentence ends and new lines, his [date] stamps dropped), so there is a line for every point the gate counts. A
@@ -1162,11 +1223,18 @@ def receipt_points(feedback):
     return out if len(out) >= len(gate) else [show(p) or p for p in gate]     # never fewer lines than the gate asks for
 
 
-def answer_points(points, learnings_change, other_change):
+def answer_points(points, learnings_change, other_change, code_change=None):
     """'- <his point> → <what changed>' for each point: the Learnings answer for a point about that clip, the other
     answer for anything else. Never refuses a point for want of a keyword (Kevin, 7 Oct 2026: 2062's rebuilt card sat
-    61.7 h unsent because one sentence carried its topic in a pronoun)."""
-    return "".join("- %s → %s\n" % (p, learnings_change if about_learnings(p) else other_change) for p in points)
+    61.7 h unsent because one sentence carried its topic in a pronoun).
+
+    `code_change` answers a point about how the video is made (needs_code_change): a re-render on the current code
+    does not touch it, and saying so is the whole point of the line."""
+    def answer(p):
+        if about_learnings(p): return learnings_change
+        if code_change and needs_code_change(p): return code_change
+        return other_change
+    return "".join("- %s → %s\n" % (p, answer(p)) for p in points)
 
 
 def lfmd_receipt(feedback, window, points=None):
@@ -1483,13 +1551,42 @@ REDO_LEARNINGS = ("the episode is re-rendered at the front of the night's queue 
                   "found again in the new captions; it goes to the socials and the YouTube Short with this episode")
 REDO_OTHER = ("rebuilt to this note: the whole day is re-rendered at the front of the night's queue on the current code "
               "and its copy is written again; nothing else is changed for this point")
+REDO_NEEDS_CODE = ("NOT answered by this rebuild: this point is about how the video is made, not which footage is used, so "
+                   "re-rendering on the current code gives the same picture. It is filed as a finding for a code fix and "
+                   "this rebuild does not change it")
 CLIP_FINDER = "clip-finder"       # the TOOL wall's subject: the fixer lane's finding is titled "Agent blocked: clip-finder"
 
 
 def sent_back_receipt(feedback):
     """The receipt the hourly sync parks with a redo: one line per point of Kevin's note, '' when he left none."""
     pts = receipt_points(feedback)
-    return answer_points(pts, REDO_LEARNINGS, REDO_OTHER) if pts else ""
+    return answer_points(pts, REDO_LEARNINGS, REDO_OTHER, REDO_NEEDS_CODE) if pts else ""
+
+
+def file_code_points(day, feedback, run=None):
+    """File ONE finding for the points a re-render cannot answer, so the receipt's promise is true.
+
+    Returns the points filed. The receipt tells Kevin the point is filed for a code fix, and before this nothing
+    filed anything: day 2106's judder was found two days later by a different route (finding 20261015-phase-3-889).
+    A failure to file is printed and never stops the redo — the card still goes back with the honest line.
+    """
+    pts = [p for p in receipt_points(feedback) if not about_learnings(p) and needs_code_change(p)]
+    if not pts: return []
+    cmd = [sys.executable, os.path.join(os.path.dirname(HERE), "findings.py"), "add",
+           "--routine", "content-engine", "--severity", "high", "--touches-code",
+           "--title", "Episode %d came back on how the video is MADE, which a re-render cannot fix: %s"
+                      % (day, "; ".join(p[:80] for p in pts))[:240],
+           "--where", "scripts/content-engine/render.py (the night render of day %d)" % day,
+           "--detail", "Kevin sent episode %d back. These point(s) are about the picture itself, so the re-render "
+                       "answers them with the same output: %s" % (day, " | ".join(pts)),
+           "--fix", "Find what in the render produces this and change the code; the re-render alone will not."]
+    try:
+        r = (run or subprocess.run)(cmd, capture_output=True, text=True, timeout=120)
+        if getattr(r, "returncode", 1) != 0:
+            print("episode %d: could not file the code-fix finding (%s)" % (day, (r.stderr or "")[-200:]), file=sys.stderr)
+    except (OSError, subprocess.SubprocessError) as ex:
+        print("episode %d: could not file the code-fix finding (%s)" % (day, str(ex)[-200:]), file=sys.stderr)
+    return pts
 
 
 def finder_code():
@@ -1655,6 +1752,9 @@ def queue_sent_back(state=None, ledger=None, root=None, redo_file=None, episodes
         before = _episode_window(day, mine)
         with tempfile.NamedTemporaryFile("w", suffix=".md", delete=False) as fh:
             fh.write(sent_back_receipt(e["feedback"])); rpath = fh.name
+        # the receipt tells Kevin these points are filed for a code fix, so they are actually filed
+        for p in file_code_points(day, e["feedback"]):
+            print("episode %d: \"%s\" needs a code change; filed as a finding, the re-render does not answer it" % (day, p[:120]))
         try:
             redo_day(day, rpath, "Kevin sent it back: " + " ".join(e["feedback"].split())[:140], ledger=ledger, state=state, root=root,
                      today=now.date(), last_night=last_night, running=running)
@@ -1945,6 +2045,17 @@ def selftest():
     f3 = record_updates(2225, {"summary": "u3"}, "t", "r", "c", role="teaser")
     assert "Record Status" not in f3 and "Transcription" not in f3 and f3["Summary Video URL"] == "u3", "a teaser never closes the episode"
     assert clip_role(41.6, False) == "teaser" and clip_role(700, True) == "episode" and clip_role(100, True) == "episode"
+    # one day, ONE summary (2106, finding 20261015-phase-3-888): the flag decides, not the render order
+    _flag = "spoken day 2101 disagrees with the date (2106); date used, flagged"
+    _ok = "spoken day matches the date"
+    _led = lambda why: {"a.insv": {"episode": 2106, "role": "teaser", "status": "rendered", "episode_reason": why}}
+    assert summary_rival("b.insv", 2106, _ok, {}) == ("", ""), "the first summary of a day is always rendered"
+    assert summary_rival("b.insv", 2106, _ok, _led(_flag))[0] == "replace", "a clean teaser replaces a flagged summary"
+    assert summary_rival("b.insv", 2106, _flag, _led(_ok))[0] == "refuse", "a flagged teaser never overwrites a clean summary"
+    assert summary_rival("b.insv", 2106, _ok, _led(_ok))[0] == "refuse", "two clean teasers: the first stays, the second is named"
+    assert summary_rival("b.insv", 2106, _flag, _led(_flag))[0] == "refuse", "both flagged: the first stays, so the answer is the same either way"
+    assert summary_rival("b.insv", 2107, _ok, _led(_ok)) == ("", ""), "another day's summary is not a rival"
+    assert summary_rival("a.insv", 2106, _ok, _led(_ok)) == ("", ""), "a re-render of the day's own summary is not a rival of itself"
     segs = [(0, 5, "So consecutive day 2195"), (5, 60, "today I talk about off-road running"), (60, 70, "so the learnings from my diary today are"),
             (70, 95, "be careful on descents"), (95, 100, "Thank you as always, stay positive"), (100, 110, "[BLANK]")]
     assert lfmd_window(segs) == (60.0, 100.0), lfmd_window(segs)
