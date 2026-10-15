@@ -44,8 +44,21 @@ skill counts the item unhandled and reports the failure.
     sent is never a matter; the reference it carries belongs on the open
     task or the creditor plan, not in Kevin's approval gate (2 Sep 2026).
 
+  * The Team Member is an AI agent no robot works (not dispatched, paused,
+    planned or retired: the AI Bookkeeper is the known case) -> CREATED with
+    a working agent instead (the Bookkeeper's work goes to the AI Analyst,
+    anything else to the AI CEO), exit 0, `rerouted` in the JSON and a dated
+    REROUTED line in Notes. Never a refusal: exit 3 means "auto-reply" to the
+    inbox skills. A person or a blank owner is never moved, and anything that
+    cannot be checked creates as given and says NOT CHECKED (15 Oct 2026).
+
+    `--owner <agent file>` (e.g. `--owner worker-analyst`) sets Team Member to
+    the agent the dispatcher works under that file, read from its own roster
+    and confirmed live, so a skill never types a Team Members id.
+
 Exit codes: 0 created/updated (JSON on stdout), 2 gate could not run
-(broken read), 3 refused (auto-reply), 1 anything else.
+(broken read), 3 refused (auto-reply, never-a-card, a bad --parent; never an
+owner problem), 4 created but a field did not stick, 1 anything else.
 """
 
 import json
@@ -1886,7 +1899,238 @@ def _field_names(ids):
     return [rev.get(i, i) for i in ids]
 
 
-def cmd_create(fields, force=False, dry_run=False, parent=None):
+# A HOLDER NO ROBOT WORKS IS MOVED AT THE DOOR, NEVER REFUSED (Kevin, 15 Oct 2026, after PR #792).
+#
+# PR #792 taught the board to move a live task held by an AI agent no robot works: the AI
+# Bookkeeper (the Reconciliation tab's own matcher, outside agent-dispatch.py's ALL_AGENTS) held
+# tasks daily-ops raised from failed data invariants on 30 Sep, 3, 5, 11 and 15 Oct, and each
+# waited up to seven days for the board. This places it right at creation instead. The test is
+# agent-dispatch.py's own `no_lane_holders` over its own two reads (`fetch_ai_agents`,
+# `fetch_role_roster`), imported, never copied, so the gate, the dispatcher and the Task Board
+# Manager give one answer to "does any robot work this holder?".
+#
+# NOTHING CAN BE LOST (review of PR #793). An owner problem never refuses: exit 3 means "an
+# auto-reply, archive it" to the inbox skills (inbound-email-triage, inbound-messages-sweep) and
+# GUARDRAILS, so a refusal for a paused agent would have archived real mail with no task. Instead
+# the task is CREATED with a working agent as Team Member (the Bookkeeper's work goes to the AI
+# Analyst, anything else to the AI CEO, which routes it), exit 0, `rerouted` in the JSON and a
+# dated REROUTED line in its Notes saying from whom and why.
+#
+#  * A person (Roy, Kevin), a blank Team Member or a set Assignee is never moved.
+#  * An agent on its own schedule (Inbox Triage, the Content Engine) raises its OWN cards: its job
+#    creates the task and submits it in the same run, and `route` refuses it as a target, so a task
+#    made on its row is its own card, the case no_lane_holders lets through once Kevin answers.
+#  * Anything that cannot be checked (the dispatcher will not import, a read fails, the check
+#    itself errors) creates the task with the owner it was given and says NOT CHECKED (stderr and
+#    `holderCheck` in the JSON). A register read that fails alone is judged by the dispatcher's
+#    list, exactly as build_queue judges it, and says so. The board's ownerless step is the
+#    backstop.
+
+# Same id as AF["assignee"] in agent-dispatch.py (drift-tested in tests/create-task-no-lane.test.js).
+ASSIGNEE_FIELD = "fldELMncVJYPDRJNc"
+# Where work goes instead of an agent no robot works, keyed by its live Team Members NAME. The
+# value is the dispatcher's agent file, resolved through its own roster (ALL_AGENTS), so no
+# Team Members id is typed here. A holder not listed goes to the AI CEO, which routes it.
+NO_TASK_SUCCESSOR = {"AI Bookkeeper": "worker-analyst"}
+CEO_AGENT_FILE = "od-ceo"
+REROUTE_MARK = "— create-agent-task] REROUTED: "
+
+_DISPATCH = None
+
+
+def _dispatch():
+    """agent-dispatch.py as a module, imported once, never copied (task-manager.py's pattern).
+    Its reads go through THIS file's `_request`, so the gate has one Airtable client and a test
+    that fakes `_request` fakes every read the gate makes. Raises on a failed import: call
+    load_dispatch, which never does."""
+    global _DISPATCH
+    if _DISPATCH is None:
+        import importlib.util
+        p = os.path.join(os.path.dirname(os.path.abspath(__file__)), "agent-dispatch.py")
+        spec = importlib.util.spec_from_file_location("od_dispatch_for_gate", p)
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        mod._request = lambda method, path, body=None: _request(method, path, body)
+        _DISPATCH = mod
+    return _DISPATCH
+
+
+def load_dispatch():
+    """(the dispatcher module, '') or (None, the NOT CHECKED line). A dispatcher that will not
+    import never blocks a create: the task is made with the owner it was given."""
+    try:
+        return _dispatch(), ""
+    except (Exception, SystemExit) as exc:   # noqa: BLE001 — said in the output, never swallowed
+        return None, ("NOT CHECKED: agent-dispatch.py could not be loaded (%s: %s), so whether a "
+                      "robot works this Team Member was not checked"
+                      % (type(exc).__name__, str(exc)[:160]))
+
+
+def read_holder_rosters(d):
+    """(ai_agents, roster, note) through the dispatcher's own two reads. ai_agents None: the Team
+    Members read failed, so nothing can be judged (a person and an agent look alike without it).
+    roster None: the register read failed, so the dispatcher's list alone judges, as build_queue
+    does. `note` says which, in NOT CHECKED words, or is ''."""
+    try:
+        ai_agents = d.fetch_ai_agents()
+    except (Exception, SystemExit) as exc:   # noqa: BLE001 — said in the output, never swallowed
+        return None, None, ("NOT CHECKED: the Team Members read failed (%s), so whether a robot "
+                            "works this Team Member was not checked" % str(exc)[:200])
+    try:
+        roster = d.fetch_role_roster()
+        if not roster:
+            raise RuntimeError("the register read returned no role agents")
+    except (Exception, SystemExit) as exc:   # noqa: BLE001
+        return ai_agents, None, ("NOT CHECKED: the AI Agents register read failed (%s); judged by "
+                                 "the dispatcher's list alone, so a role agent Kevin paused was "
+                                 "not checked" % str(exc)[:200])
+    return ai_agents, roster, ""
+
+
+def agent_for_file(agent_file, d):
+    """(Team Members id, name, '') of the one agent the dispatcher's own roster (ALL_AGENTS) runs
+    under AGENT_FILE, or (None, '', why). The roster only: whether a robot works it is
+    holder_check's question."""
+    if agent_file == CEO_AGENT_FILE:
+        ids = [d.CEO_REC_ID]
+    else:
+        ids = [i for i, a in d.ALL_AGENTS.items()
+               if a.get("agent") == agent_file and i not in d.OFF_BOARD]
+    if len(ids) != 1:
+        return None, "", ("the dispatcher works no single agent under %r (%d found)"
+                          % (agent_file, len(ids)))
+    return ids[0], d.ALL_AGENTS[ids[0]]["name"], ""
+
+
+def working_agent(agent_file, d, ai_agents=None, roster=None):
+    """(Team Members id, name, '') of the agent the dispatcher works under AGENT_FILE, or
+    (None, '', why). The id comes from the dispatcher's own roster, never typed here; with a live
+    Team Members read it must be a row with Is AI Agent ticked that a robot works (no_lane_holders
+    finds no problem). With no read, the dispatcher's id stands unconfirmed."""
+    rec, name, why = agent_for_file(agent_file, d)
+    if not rec:
+        return None, "", why
+    if ai_agents is not None:
+        if rec not in ai_agents:
+            return None, "", ("%s (%s) is not a Team Members row with Is AI Agent ticked"
+                              % (name, rec))
+        name = ai_agents[rec]
+        if d.no_lane_holders([rec], [], ai_agents, False, roster, ""):
+            return None, "", ("no robot works %s (%s): %s"
+                              % (name, rec, d.holder_problem(rec, roster, "")))
+    return rec, name, ""
+
+
+def _link_list(v):
+    """A link field's ids in the order given, each once (the first holder decides the successor)."""
+    out = []
+    for x in (v if isinstance(v, (list, tuple)) else [v] if isinstance(v, (str, dict)) else []):
+        i = x.get("id", "") if isinstance(x, dict) else str(x or "")
+        if i and i not in out:
+            out.append(i)
+    return out
+
+
+def holder_check(fields, d, reads):
+    """What the dispatcher says about the Team Member a create carries: {"problem", "held",
+    "use", "note"}. `problem` is '' when a robot works a holder, a person holds it or nobody does;
+    otherwise the plain reason, `held` the holders no robot works ([{"id", "name"}]) and `use`
+    the working agent to give it to ({"id", "name", "agentFile"}, None if none could be named).
+    `note` is the NOT CHECKED line when a read failed. `reads` is read_holder_rosters' answer."""
+    out = {"problem": "", "held": [], "use": None, "note": ""}
+    team = _link_list(fields.get(F["team"]))
+    if not team or fields.get(ASSIGNEE_FIELD) or any(d.own_go_signal(i) for i in team):
+        return out
+    ai_agents, roster, out["note"] = reads
+    if ai_agents is None:
+        return out
+    # A link given by NAME is linked by the typecast retry to the row of that name, so it is
+    # judged as that row: "AI Bookkeeper" is the Bookkeeper, not a person.
+    by_name = {str(n).strip().lower(): i for i, n in ai_agents.items()}
+    team = [by_name.get(str(t).strip().lower(), t) for t in team]
+    if any(d.own_go_signal(i) for i in team):
+        return out
+    sent_by = [by_name.get(str(t).strip().lower(), t)
+               for t in _link_list(fields.get(F["sentForApprovalBy"]))]
+    outcome = _sel_name(fields.get(F["approvalOutcome"]))
+    held = d.no_lane_holders(team, sent_by, ai_agents, False, roster, outcome)
+    if not held:
+        return out
+    out["held"] = [{"id": i, "name": ai_agents.get(i, i)} for i in held]
+    out["problem"] = "%s takes no tasks: %s" % (
+        ", ".join("%s (%s)" % (h["name"], h["id"]) for h in out["held"]),
+        d.holder_problem(held[0], roster, outcome))
+    successors = [NO_TASK_SUCCESSOR[n] for n in (ai_agents.get(i, "") for i in held)
+                  if n in NO_TASK_SUCCESSOR]
+    for agent_file in successors[:1] + [CEO_AGENT_FILE]:
+        rec, name, _ = working_agent(agent_file, d, ai_agents, roster)
+        if rec:
+            out["use"] = {"id": rec, "name": name, "agentFile": agent_file}
+            break
+    return out
+
+
+def _reroute(fields, frm, to, why, stamp):
+    """Put TO on the task as its Team Member and say so in a dated Notes line."""
+    fields[F["team"]] = [to["id"]]
+    line = ("[%s %s%s, so nothing would ever pick this task up on that row. Given to %s (%s) "
+            "instead." % (stamp, REROUTE_MARK, why, to["name"], to["id"]))
+    existing = str(fields.get(F["notes"]) or "").rstrip()
+    fields[F["notes"]] = (existing + "\n\n" + line).strip()
+    return {"from": frm, "to": {"id": to["id"], "name": to["name"]}, "why": why}
+
+
+def settle_owner(fields, owner=None, stamp=""):
+    """Who holds the task, settled before the board is read (15 Oct 2026). Never refuses, never
+    raises, never drops the task: returns (fields, rerouted, notes). `rerouted` is
+    {"from", "to", "why"} when the Team Member was moved to a working agent; `notes` are the lines
+    to say on stderr and in `holderCheck` (NOT CHECKED, or an --owner that was not used)."""
+    fields = dict(fields)
+    team = _link_list(fields.get(F["team"]))
+    if not owner and (not team or fields.get(ASSIGNEE_FIELD)):
+        return fields, None, []
+    d, why = load_dispatch()
+    if d is not None and not owner and any(d.own_go_signal(i) for i in team):
+        return fields, None, []   # its own card: no read needed (holder_check says the same)
+    if d is None:
+        if owner and not team:
+            why += ("; --owner %s could not be resolved, so the task has no Team Member and the "
+                    "Task Board Manager's ownerless step places it" % owner)
+        return fields, None, [why]
+    try:
+        notes, rerouted = [], None
+        reads = read_holder_rosters(d)
+        if owner:
+            rec, name, why = agent_for_file(owner, d)
+            if team and team != [rec]:
+                notes.append("--owner %s was not used: the fields already carry Team Member %s, "
+                             "which was kept and checked" % (owner, ", ".join(team)))
+            elif rec:
+                fields[F["team"]] = [rec]
+            else:
+                rec, name, _ = working_agent(CEO_AGENT_FILE, d, reads[0], reads[1])
+                if rec:
+                    rerouted = _reroute(fields, [{"id": "", "name": "--owner " + owner}],
+                                        {"id": rec, "name": name}, "--owner " + why, stamp)
+                if reads[2]:
+                    notes.append(reads[2])
+                return fields, rerouted, notes
+        check = holder_check(fields, d, reads)
+        if check["note"]:
+            notes.append(check["note"])
+        if check["problem"] and check["use"]:
+            rerouted = _reroute(fields, check["held"], check["use"], check["problem"], stamp)
+        elif check["problem"]:
+            notes.append("NOT PLACED: %s, and no working agent could be named, so it was created "
+                         "as given" % check["problem"])
+        return fields, rerouted, notes
+    except Exception as exc:   # noqa: BLE001 — said in the output, never swallowed
+        return fields, None, ["NOT CHECKED: the holder check failed (%s: %s), so the task was "
+                              "created with the owner it was given"
+                              % (type(exc).__name__, str(exc)[:160])]
+
+
+def cmd_create(fields, force=False, dry_run=False, parent=None, owner=None):
     if F["name"] not in fields or not str(fields[F["name"]]).strip():
         print("fields JSON must carry the Task Name field " + F["name"], file=sys.stderr)
         return 1
@@ -1898,6 +2142,17 @@ def cmd_create(fields, force=False, dry_run=False, parent=None):
         fields = dict(fields)
         fields[F["desc"]] = (f"CHILD OF {parent} (an approved task whose job is to raise this one; "
                              "it goes to the gate itself).\n\n" + str(fields.get(F["desc"]) or "")).strip()
+
+    # WHO HOLDS IT, before the board is read or anything written (15 Oct 2026). Not skipped by
+    # --force, and never a refusal: an owner no robot works is replaced and said (settle_owner).
+    fields, rerouted, holder_notes = settle_owner(fields, owner, date.today().strftime("%d %b %Y"))
+    holder_note = " | ".join(holder_notes)
+    if rerouted:
+        print("REROUTED: %s; Team Member set to %s (%s)."
+              % (rerouted["why"], rerouted["to"]["name"], rerouted["to"]["id"]), file=sys.stderr)
+    if holder_note:
+        print("HOLDER " + holder_note + ". The Task Board Manager's ownerless step is the "
+              "backstop.", file=sys.stderr)
 
     cache = load_scan_cache()
 
@@ -1970,6 +2225,8 @@ def cmd_create(fields, force=False, dry_run=False, parent=None):
                       "key": verdict.get("key", ""), "dryRun": dry_run}
         if verdict.get("note"):
             folded_out["note"] = verdict["note"]
+        if holder_note:
+            folded_out["holderCheck"] = holder_note
         print(json.dumps(folded_out))
         print("FOLDED into %s (%s): %s" % (task_id, verdict.get("matchedWhy", ""),
                                            verdict.get("matchedName", "")), file=sys.stderr)
@@ -2027,6 +2284,10 @@ def cmd_create(fields, force=False, dry_run=False, parent=None):
             out["fieldsNotWritten"] = _field_names(missing)
     if fixed:
         out["statusCorrected"] = fixed
+    if rerouted:
+        out["rerouted"] = rerouted
+    if holder_note:
+        out["holderCheck"] = holder_note
     if verdict.get("note"):
         out["note"] = verdict["note"]
         print("GATE NOTE: " + verdict["note"], file=sys.stderr)
@@ -2760,13 +3021,15 @@ def main(argv):
             return 1
         return cmd_check(argv[2])
     if cmd == "create":
-        fields, force, dry, parent = None, False, False, None
+        fields, force, dry, parent, owner = None, False, False, None, None
         i = 1
         while i < len(argv):
             if argv[i] == "--fields-json":
                 fields = json.loads(argv[i + 1]); i += 2
             elif argv[i] == "--parent":
                 parent = argv[i + 1]; i += 2
+            elif argv[i] == "--owner":
+                owner = argv[i + 1]; i += 2
             elif argv[i] == "--force":
                 force = True; i += 1
             elif argv[i] == "--dry-run":
@@ -2776,7 +3039,7 @@ def main(argv):
         if fields is None:
             print("create needs --fields-json", file=sys.stderr)
             return 1
-        return cmd_create(fields, force=force, dry_run=dry, parent=parent)
+        return cmd_create(fields, force=force, dry_run=dry, parent=parent, owner=owner)
     print(f"unknown command {cmd}", file=sys.stderr)
     return 1
 
