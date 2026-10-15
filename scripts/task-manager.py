@@ -51,6 +51,8 @@ TASKS_TABLE = "tblqB8b22hKBL4PF1"
 ACTIVITY_TABLE = "tbl2ZTHBDBPo681UL"
 AGENTS_TABLE = "tbl9msVjyQWslLOIZ"
 DAILY_LOG_TABLE = "tbl6VQKVMnK0Q7hbJ"
+TEAM_TABLE = "tblco0p2OnlLQVAX7"
+CEO_TEAM_REC = "reciHUAEcEkbctnZ6"           # Team Members "AI CEO (Dan Martell)": the roster read's control
 
 AGENT_NAME = "Task Board Manager"
 TASKMGR_REGISTER_ROW = "reczg8BygPFnJMQnh"   # AI Agents register
@@ -329,6 +331,16 @@ def classify(f, activity_ids, now=None):
     # card is decided whatever the stamps say; the stamps carry a day and no
     # time, so a card carried out and asked again on one day reads as closed.
     answered = f.get("Approval Outcome") and str(f.get("Agent Output") or "").lstrip().upper().startswith("DECIDE:")
+    # A CARD NOBODY RAISED WITH `escalate` IS ANSWERED TOO (15 Oct 2026). Dispatch files every
+    # answered DECIDE: card as `decided` ("the Task Manager's move, never a carry-out",
+    # agent-dispatch.py is_decide_card), but this board only did so when the card carried the
+    # escalate stamp. A card an agent raised through `submit`, or a script through the create gate
+    # (the weekly trust review), carries none, so on 15 Oct four answered cards had no consumer:
+    # dispatch would not carry them out and this board read them as "moving" for seven days. One
+    # held by the AI CEO (Kevin's question on the trust review, 12 Oct) left the CEO "idle" on his
+    # AI team panel. A live verdict on a DECIDE: card is decided here exactly as it is in dispatch.
+    if answered and not esc:
+        return "decided", "answeredCard", moved
     if esc and (answered or not (done and done >= esc)):
         if (now - esc) < timedelta(days=STUCK_DAYS) or answered:
             if f.get("Approval Outcome"):
@@ -805,14 +817,43 @@ APPROVAL_STAMP_FIELDS = [
 ]
 
 
-def ownerless_views(buckets):
+def ownerless_views(buckets, ai_agents=None, dispatch=None):
     """Open tasks with no Team Member and no Assignee, whatever their age (Kevin, 23 Sep 2026).
     The stuck rule waits seven days for no movement, so a task created with no owner sat unseen for
     a week: on 23 Sep a legal task due in October had been ownerless for five days.
     Only the actionable buckets: an Approval card has its raiser, a parked task is parked on
-    purpose, and dispatch's in-flight work is dispatch's."""
-    return [v for b in ("stuck", "moving") for v in buckets.get(b, [])
-            if not v.get("teamMember") and not v.get("hasAssignee") and not v.get("assigneeEmail")]
+    purpose, and dispatch's in-flight work is dispatch's.
+
+    A task held only by an AI agent that no robot works is ownerless too (15 Oct 2026): the AI
+    Bookkeeper held two live tasks dispatch never read. `ai_agents` is {Team Members id: name} for
+    the rows with Is AI Agent ticked; the test is agent-dispatch.py's own `no_lane_holders`, so the
+    board and dispatch give one answer. Each such view carries `noLaneHolder`, the agents' names."""
+    out = []
+    for b in ("stuck", "moving"):
+        for v in buckets.get(b, []):
+            if v.get("hasAssignee") or v.get("assigneeEmail"):
+                continue
+            if not v.get("teamMember"):
+                out.append(v)
+                continue
+            if ai_agents is None:
+                continue
+            held = (dispatch or _load_dispatch()).no_lane_holders(
+                v.get("teamMember"), v.get("sentForApprovalBy"), ai_agents)
+            if held:
+                out.append(dict(v, noLaneHolder=[ai_agents.get(i, i) for i in held]))
+    return out
+
+
+def read_ai_agents():
+    """{Team Members id: name} for every row with Is AI Agent ticked, for the ownerless check.
+    The AI CEO's row always exists and is ticked, so a read without it is broken, never empty."""
+    rows = query_all(TEAM_TABLE, "{Is AI Agent}", ["Name"], "AI agent roster read")
+    out = {r["id"]: (r.get("fields") or {}).get("Name") or r["id"] for r in rows}
+    if CEO_TEAM_REC not in out:
+        fail("AI agent roster read returned %d rows and not the AI CEO's: the read is broken, "
+             "not the roster empty" % len(out))
+    return out
 
 
 def ownerless_problems(actions, scratch=None):
@@ -896,7 +937,7 @@ def cmd_board(dispatch_queue_path=None):
 
     for k in buckets:
         buckets[k].sort(key=lambda v: (v["lastMoved"] or ""))
-    ownerless = ownerless_views(buckets)
+    ownerless = ownerless_views(buckets, read_ai_agents())
     # Duplicates are judged over ACTIONABLE views only: parked (Some Day)
     # twins are deliberately dormant, and dispatch's in-flight tasks are not
     # the foreman's to touch this slot. waitingOnKevin views join so an
@@ -924,9 +965,12 @@ def cmd_board(dispatch_queue_path=None):
             "duplicateGroups": len(dupes),
             "duplicateExtras": sum(len(g["closable"]) for g in dupes),
             "ownerless": len(ownerless),
+            # Of those, held by an AI agent no robot works (ownerless_views, 15 Oct 2026).
+            "ownerlessNoLane": sum(1 for v in ownerless if v.get("noLaneHolder")),
         },
-        # Open tasks nobody holds, ANY age: each gets one move THIS slot (Step 2a), and verify
-        # fails the slot if one was left without a recorded move.
+        # Open tasks nobody holds, or only an AI agent no robot works holds (`noLaneHolder`), ANY
+        # age: each gets one move THIS slot (Step 2a), and verify fails the slot if one was left
+        # without a recorded move.
         "ownerless": ownerless,
         "stuck": buckets["stuck"],
         "duplicates": dupes,

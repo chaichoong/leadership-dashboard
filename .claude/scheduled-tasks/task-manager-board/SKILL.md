@@ -268,7 +268,12 @@ waits seven days; a legal task due in October sat with no owner for five
 days and was on no list at all.
 
 `board.json` carries `ownerless`: every open task with no Team Member and no
-Assignee, whatever its age. Give EACH one exactly one move this slot, using
+Assignee, whatever its age. It also carries every task held only by an AI agent
+that no robot works (the view's `noLaneHolder` names it, for example the AI
+Bookkeeper, which is the Reconciliation tab's matcher and works no tasks; 15 Oct
+2026): that task is as unowned as a blank one, so `route` it to the agent whose
+lane it is (`route` refuses a target no robot works, so it cannot go back).
+Give EACH one exactly one move this slot, using
 the Step 2 rules below (tier-1 and legal → `escalate`, creditor → the Supplier
 and Creditor Manager, repairs → `roy`, a domain agent's goal → `route`,
 generic work → the right worker, a system alert or sweep finding → the
