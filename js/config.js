@@ -23,7 +23,7 @@
         { id: 'home',        name: 'Home',                           icon: '📌', pageVer: '1.13', sopFile: '',                           sopVer: '1.0', standalone: 'index.html#home' },
         { id: 'overview',    name: 'Leadership Dashboard',           icon: '📊', pageVer: '2.149', sopFile: 'sop.html',                   sopVer: '2.147', standalone: 'index.html#overview' },
         { id: 'os-strategy', name: 'Objective & Strategy',           icon: '🎯', pageVer: '1.81', sopFile: 'os/strategy/sop.html',       sopVer: '1.1', standalone: 'os/strategy/index.html' },
-        { id: 'tasks',       name: 'Tasks & Projects',   icon: '✅', pageVer: '1.194', sopFile: 'os/tasks/sop.html',             sopVer: '1.4', standalone: 'os/tasks/index.html' },
+        { id: 'tasks',       name: 'Tasks & Projects',   icon: '✅', pageVer: '1.195', sopFile: 'os/tasks/sop.html',             sopVer: '1.4', standalone: 'os/tasks/index.html' },
         { id: 'cfv',        name: 'CFVs',                          icon: '🚨', pageVer: '1.44', sopFile: 'sop-cfvs.html',               sopVer: '1.44', standalone: 'index.html#cfv' },
         { id: 'money',      name: 'Money Confidence',              icon: '🧭', pageVer: '1.1', sopFile: '',                            sopVer: '1.0', standalone: 'index.html#money' },
         { id: 'wealth',     name: 'Wealth',                        icon: '📈', pageVer: '1.24', sopFile: '',                            sopVer: '1.0', standalone: 'index.html#wealth' },
