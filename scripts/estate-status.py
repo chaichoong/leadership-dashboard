@@ -996,13 +996,9 @@ def rework_counts(r):
             "pct": round(100.0 * fof / fixes) if fixes else None, "baselinePct": REWORK_BASELINE_PCT}
 
 
-def defects_as_of(fm, ops, when):
-    """{"open", "code"} as findings.py's own fold would have read at `when`: the same
-    append-only log, cut at that moment, through the real current_state (15 Oct 2026). The
-    "Is the AI team healthy?" panel compares open code problems now against a week ago from
-    its first day, rather than waiting a week for its own history. A later retag is not
-    applied to the past, which is how the queue read then. An op with no readable time is
-    left out of the past (it cannot be shown to be older)."""
+def _fold_as_of(fm, ops, when):
+    """findings.py's own fold (current_state) over the log cut at `when`. An op with no
+    readable time is left out of the past (it cannot be shown to be older)."""
     def older(rec):
         t = parse_ts(rec.get("ts"))
         if t and t.tzinfo is None:
@@ -1012,11 +1008,36 @@ def defects_as_of(fm, ops, when):
     keep = fm.read_all
     fm.read_all = lambda: past
     try:
-        state = fm.current_state(today=when.astimezone(LONDON).date().isoformat())
+        return fm.current_state(today=when.astimezone(LONDON).date().isoformat())
     finally:
         fm.read_all = keep
-    live = [f for f in state.values() if f.get("status") in ("open", "claimed", "pending")]
-    return {"open": len(live), "code": sum(1 for f in live if f.get("touches_code"))}
+
+
+def defects_as_of(fm, ops, when, today=None):
+    """{"open", "code"} a week ago ON TODAY'S RULES (15 Oct 2026; review of PR #790): each
+    finding's status as it stood at `when`, but a finding merged as a repeat since is left out,
+    and the code / not-code tag is today's. Folding the past with its own rules counted 150
+    where today's rules count 127, so the "No bugs or errors" line read a rise as smaller than
+    it was. `today` is the current fold (current_state); left out, it is folded from `ops`."""
+    if today is None:
+        keep = fm.read_all
+        fm.read_all = lambda: list(ops)
+        try:
+            today = fm.current_state()
+        finally:
+            fm.read_all = keep
+    then = _fold_as_of(fm, ops, when)
+    repeat = lambda f: bool(f.get("duplicate_root") or f.get("status") == "duplicate")  # noqa: E731
+    open_n = code_n = 0
+    for fid, f in then.items():
+        if f.get("status") not in ("open", "claimed", "pending"):
+            continue
+        cur = today.get(fid) or f
+        if repeat(cur):
+            continue
+        open_n += 1
+        code_n += bool(cur.get("touches_code"))
+    return {"open": open_n, "code": code_n}
 
 
 def _measure_defects_and_rework(now):
@@ -1024,11 +1045,12 @@ def _measure_defects_and_rework(now):
     fm = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(fm)
     ops = fm.read_all()
-    defects = defect_counts(fm.current_state(), now, ops, refused_summary(fm, fm.overflow_state(ops), now))
-    # A week ago, by the same fold (15 Oct 2026, the AI team verdict's "No bugs or errors" line).
+    state = fm.current_state()
+    defects = defect_counts(state, now, ops, refused_summary(fm, fm.overflow_state(ops), now))
+    # A week ago, on today's rules (the AI team verdict's "No bugs or errors" line).
     # A failure here is said in the payload, never a number.
     try:
-        ago = defects_as_of(fm, ops, now - timedelta(days=7))
+        ago = defects_as_of(fm, ops, now - timedelta(days=7), today=state)
         defects["openWeekAgo"], defects["codeWeekAgo"] = ago["open"], ago["code"]
     except Exception as exc:  # noqa: BLE001 — the panel says why it cannot judge the direction
         defects["weekAgoError"] = str(exc)[:160]
@@ -1748,12 +1770,13 @@ def ai_team_verdict_row(now, rows, lh_res, lh_err, measures):
         ath = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(ath)
     except Exception as exc:  # noqa: BLE001
+        # payload "" clears the last good verdict, so the page never shows it under a new Last Run.
         return {"key": "ai-team-verdict", "kind": "report", "label": "Is the AI team healthy?", "lastRun": stamp,
-                "status": "Failed", "detail": "The AI team verdict could not load: %s" % str(exc)[:240]}
+                "status": "Failed", "payload": "", "detail": "The AI team verdict could not load: %s" % str(exc)[:240]}
     es = types.SimpleNamespace(
         loop_health_module=loop_health_module, load_schedule=load_schedule, last_due=last_due,
-        read_jsonl=read_jsonl, QUEUE_LOG=QUEUE_LOG, _request=_request, TABLE=TABLE, ES=ES,
-        TASKS_TABLE=TASKS_TABLE)
+        next_due=next_due, read_jsonl=read_jsonl, QUEUE_LOG=QUEUE_LOG, STATUS_LOG=STATUS_LOG,
+        _request=_request, TABLE=TABLE, ES=ES, TASKS_TABLE=TASKS_TABLE)
     return ath.verdict_row(now, es, rows, lh_res, lh_err, measures)
 
 

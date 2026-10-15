@@ -60,10 +60,13 @@ function payload(over = {}) {
   };
 }
 
-const verdictRow = (age = 5, over = {}, p = payload()) => ({
+// `age` is how old the answer is: when the Mac worked it out (payload.computedAt). `runAge` is
+// the row's Last Run, which moves on every pass, a failed one included.
+const verdictRow = (age = 5, over = {}, p = payload(), runAge = age) => ({
   id: 'recVerdict', fields: {
-    [ES.key]: 'ai-team-verdict', [ES.status]: 'Worked', [ES.lastRun]: minutesAgo(age),
-    [ES.detail]: 'Needs attention. 5 green, 4 amber, 4 red, 1 can\'t tell.', [ES.payload]: JSON.stringify(p), ...over,
+    [ES.key]: 'ai-team-verdict', [ES.status]: 'Worked', [ES.lastRun]: minutesAgo(runAge),
+    [ES.detail]: 'Needs attention. 5 green, 4 amber, 4 red, 1 can\'t tell.',
+    [ES.payload]: JSON.stringify({ ...p, computedAt: minutesAgo(age) }), ...over,
   },
 });
 
@@ -185,10 +188,25 @@ test.describe('Is the AI team healthy? panel', () => {
     expect((await page.evaluate(() => aiTeamCheck())).status).toBe('warn');
   });
 
-  test('a row over two hours old shows an amber banner over its answers', async ({ page }) => {
-    await load(page, [verdictRow(180)]);
-    const notice = page.locator('#aiHealthPanel .aih-notice-amber');
-    await expect(notice).toContainText(/^Not updated since .+ The Mac's report has stopped, so these answers may be out of date\.$/);
+  // Review of PR #790, items 1 and 6: the age is the ANSWER's (payload.computedAt), never the
+  // row's Last Run, and a stale answer is never drawn in its old colours.
+  test('an answer over two hours old turns the verdict and every dot grey, however fresh the row\'s Last Run', async ({ page }) => {
+    await load(page, [verdictRow(180, {}, payload(), 3)]);
+    const v = await page.evaluate(() => {
+      const p = document.getElementById('aiHealthPanel');
+      return {
+        verdict: p.querySelector('.aih-verdict-text').textContent, cls: p.querySelector('.aih-verdict').className,
+        sub: p.querySelector('.aih-verdict .aih-small').textContent,
+        dots: [...p.querySelectorAll('.aih-line .aih-dot, .aih-group-head .aih-dot')].map(d => d.className),
+        coloured: p.querySelectorAll('.aih-trend.aih-better, .aih-trend.aih-worse').length,
+      };
+    });
+    expect(v.verdict).toMatch(/^Not updated since /);
+    expect(v.cls).toContain('aih-verdict-grey');
+    expect(v.sub).toMatch(/^The Mac's report has stopped, so every answer below may be out of date\. Its last verdict: Needs attention/);
+    expect(v.dots).toHaveLength(17);
+    expect(v.dots.every(c => c === 'aih-dot aih-grey')).toBe(true);
+    expect(v.coloured).toBe(0);
     expect(await page.evaluate(() => document.querySelectorAll('#aiHealthPanel .aih-line').length)).toBe(14);
     expect(await page.evaluate(() => aiTeamCheck())).toMatchObject({ status: 'warn', detail: expect.stringMatching(/^Not updated since/) });
   });

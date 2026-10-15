@@ -1600,13 +1600,21 @@
     const AI_UNKNOWN = 'not known';
     function aiNum(v) { const n = Number(v); return (v !== null && v !== '' && Number.isFinite(n)) ? n : AI_UNKNOWN; }
 
+    // When the Mac WORKED OUT the answer: the payload's own computedAt, never the row's Last Run,
+    // which moves on every pass, a failed one included (review of PR #790).
+    function aiTeamComputedAt(row) {
+        const p = row ? aiTeamPayload(row) : null;
+        const t = Date.parse((p && p.computedAt) || '');
+        return Number.isFinite(t) ? t : NaN;
+    }
+
     function aiTeamRowAge(row) {
-        const t = Date.parse((row && row.fields[ESTATE_FIELDS.lastRun]) || '');
+        const t = aiTeamComputedAt(row);
         return Number.isFinite(t) ? (Date.now() - t) / 60000 : Infinity;
     }
 
     function aiTeamClock(row) {
-        const t = Date.parse((row && row.fields[ESTATE_FIELDS.lastRun]) || '');
+        const t = aiTeamComputedAt(row);
         if (!Number.isFinite(t)) return 'never';
         return new Date(t).toLocaleString('en-GB', { timeZone: 'Europe/London', weekday: 'short', hour: '2-digit', minute: '2-digit' });
     }
@@ -1635,7 +1643,9 @@
     }
 
     // "↓ was 12 last week" once a week of history exists; before that "trend from <date>".
-    function aiHealthTrend(l) {
+    // A stale panel, or a number read only in part (no direction from the Mac), shows last week's
+    // number with no arrow and no colour: it cannot say which way things went.
+    function aiHealthTrend(l, stale) {
         const t = l.trend || {};
         // Always a span, so the chevron keeps its column on a line with no trend.
         if (aiHealthColour(l.colour) === 'grey' || aiNum(t.after) === AI_UNKNOWN) return '<span class="aih-trend"></span>';
@@ -1644,11 +1654,14 @@
             const since = aiHealthDay(t.since);
             return `<span class="aih-trend aih-muted">${since ? `trend from ${escHtml(since)}` : 'no trend yet'}</span>`;
         }
-        const after = aiNum(t.after);
-        const arrow = after > before ? '↑' : after < before ? '↓' : '→';
-        const dir = t.direction === 'better' ? 'better' : t.direction === 'worse' ? 'worse' : 'same';
         const was = `was ${escHtml(aiHealthNumber(before, l.unit))}`;
         const text = t.fullWeek ? `${was} last week` : `trend from ${escHtml(aiHealthDay(t.vsDate))}: ${was}`;
+        if (stale || (t.direction !== 'better' && t.direction !== 'worse' && t.direction !== 'same')) {
+            return `<span class="aih-trend aih-muted">${text}</span>`;
+        }
+        const after = aiNum(t.after);
+        const arrow = after > before ? '↑' : after < before ? '↓' : '→';
+        const dir = t.direction;
         const label = dir === 'same' ? 'no change' : `${dir} than ${t.fullWeek ? 'last week' : escHtml(aiHealthDay(t.vsDate))}`;
         return `<span class="aih-trend aih-${dir}" title="${label}"><span aria-hidden="true">${arrow}</span> ${text}<span class="aih-sr"> (${label})</span></span>`;
     }
@@ -1666,8 +1679,9 @@
             <p class="aih-src">Read from: ${escHtml(l.source || 'the Mac')}. Updated ${escHtml(aiTeamClock(row))}.</p>`;
     }
 
-    function aiHealthLine(l, row) {
-        const c = aiHealthColour(l.colour);
+    function aiHealthLine(l, row, stale) {
+        // A stale answer is never drawn in its old colour (review of PR #790).
+        const c = stale ? 'grey' : aiHealthColour(l.colour);
         const id = `aihd-${String(l.key || '').replace(/[^a-z0-9]/gi, '') || 'x'}`;
         return `
             <li class="aih-li">
@@ -1675,7 +1689,7 @@
                     <span class="aih-dot aih-${c}" role="img" aria-label="${AI_HEALTH_WORDS[c]}"></span>
                     <span class="aih-q">${escHtml(l.question || '')}</span>
                     <span class="aih-a">${escHtml(l.answer || '')}</span>
-                    ${aiHealthTrend(l)}
+                    ${aiHealthTrend(l, stale)}
                     <span class="aih-chev" aria-hidden="true">▸</span>
                 </button>
                 <div class="aih-detail" id="${id}" hidden>${aiHealthDetail(l, row)}</div>
@@ -1704,29 +1718,32 @@
             const failed = f[ESTATE_FIELDS.status] === 'Failed';
             return head + aiHealthNotice(failed ? 'red' : 'amber', `Can't read the Mac's report: ${escHtml(f[ESTATE_FIELDS.detail] || 'the answer could not be read.')}`);
         }
+        // Older than two hours by the time the Mac worked it out: the verdict and every dot go grey
+        // and say so. A board that stopped updating must not look like a calm one.
         const stale = aiTeamRowAge(row) > AI_TEAM_STALE_MIN;
         const o = p.overall || {};
-        const oc = aiHealthColour(o.colour);
+        const oc = stale ? 'grey' : aiHealthColour(o.colour);
         const counts = ['green', 'amber', 'red'].map(k => `${aiNum(o[k])} ${k}`).join(' · ')
             + (aiNum(o.grey) > 0 ? ` · ${aiNum(o.grey)} can't tell` : '');
         const groups = Array.isArray(p.groups) ? p.groups : [];
         const lines = p.lines.filter(l => l && typeof l === 'object');
         return head
-            + (stale ? aiHealthNotice('amber', `Not updated since ${escHtml(aiTeamClock(row))}. The Mac's report has stopped, so these answers may be out of date.`) : '')
             + (f[ESTATE_FIELDS.status] === 'Failed' ? aiHealthNotice('red', escHtml(f[ESTATE_FIELDS.detail] || 'The Mac reported a failure.')) : '')
             + `<div class="aih-verdict aih-verdict-${oc}">
                    <span class="aih-dot aih-dot-lg aih-${oc}" role="img" aria-label="${AI_HEALTH_WORDS[oc]}"></span>
-                   <div><div class="aih-verdict-text">${escHtml(o.text || '')}</div>
-                   <div class="aih-muted aih-small">${counts} · Updated ${escHtml(aiTeamClock(row))}</div></div>
+                   <div><div class="aih-verdict-text">${stale ? `Not updated since ${escHtml(aiTeamClock(row))}` : escHtml(o.text || '')}</div>
+                   <div class="aih-muted aih-small">${stale
+                       ? `The Mac's report has stopped, so every answer below may be out of date. Its last verdict: ${escHtml(o.text || '')}`
+                       : `${counts} · Updated ${escHtml(aiTeamClock(row))}`}</div></div>
                </div>`
             + groups.map(g => {
-                const gc = aiHealthColour(g.colour);
+                const gc = stale ? 'grey' : aiHealthColour(g.colour);
                 const mine = lines.filter(l => l.group === g.key);
                 return `<section class="aih-group" aria-label="${escHtml(g.title || '')}">
                     <div class="aih-group-head"><span class="aih-dot aih-${gc}" role="img" aria-label="${AI_HEALTH_WORDS[gc]}"></span>
                         <span class="aih-group-title">${escHtml(g.title || '')}</span>
                         <span class="aih-muted aih-small">${escHtml(g.text || '')}</span></div>
-                    <ul class="aih-list">${mine.map(l => aiHealthLine(l, row)).join('')}</ul>
+                    <ul class="aih-list">${mine.map(l => aiHealthLine(l, row, stale)).join('')}</ul>
                 </section>`;
             }).join('')
             + '<p class="aih-muted aih-small aih-foot">Tap a line to see its rule and what is behind it.</p>';
@@ -1741,7 +1758,7 @@
             .aih-panel{grid-column:1/-1;background:var(--bg-surface);border:1px solid var(--border-default);border-radius:var(--radius-lg);padding:var(--space-4);min-width:0}
             .aih-title{margin:0 0 var(--space-3);font-size:var(--fs-lg);font-weight:var(--fw-semibold);color:var(--text-primary)}
             .aih-verdict{display:flex;gap:var(--space-3);align-items:center;padding:var(--space-3);border-radius:var(--radius-md);margin-bottom:var(--space-4);background:var(--bg-surface-2)}
-            .aih-verdict-green{background:var(--success-bg)}.aih-verdict-amber{background:var(--warning-bg)}.aih-verdict-red{background:var(--danger-bg)}
+            .aih-verdict-green{background:var(--success-bg)}.aih-verdict-amber{background:var(--warning-bg)}.aih-verdict-red{background:var(--danger-bg)}.aih-verdict-grey{background:var(--bg-subtle)}
             .aih-verdict-text{font-size:var(--fs-lg);font-weight:var(--fw-semibold);color:var(--text-primary);word-break:break-word}
             .aih-dot{display:inline-block;flex:0 0 auto;width:12px;height:12px;border-radius:var(--radius-full);background:var(--text-muted)}
             .aih-dot-lg{width:18px;height:18px}

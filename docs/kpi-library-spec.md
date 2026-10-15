@@ -93,16 +93,25 @@ a source that cannot be read, is missing or is older than its own cadence makes 
 "Can't tell", and the verdict names it (never green, never a zero); the trend history is kept
 inside the row's payload, one number per line per London day for 30 days, mirrored to a local
 file so one failed read cannot wipe it; and no line counts what another counts where that would
-mislead, so walled tasks are taken out of "Everything's moving" before it counts. Verdict: green
-"Healthy" with no red and at most two amber; amber "Issues, but going the right way" when more
-lines are better than worse than a week ago; red "Needs attention: <worst line>" otherwise. A
-board green apart from lines it cannot read is amber and says so.
+mislead, so walled tasks are taken out of "Everything's moving" before it counts. Verdict, in
+order (tightened by the independent review of PR #790: no line or verdict may read better than
+the truth): a red line worse than a week ago is red "Needs attention: <that line>"; more than two
+lines that cannot be read is grey "Can't tell" (red, naming the worst red, when a red is known);
+no red and at most two amber is green "Healthy" (amber "Healthy where it can be read" with one or
+two grey lines); reds or ambers with more of THOSE lines better than worse than a week ago is
+amber "Issues, but going the right way"; otherwise red. A failed build writes an empty payload,
+so the page never shows the last good verdict under a fresh Last Run; the page ages the answer
+by its own computedAt, and an answer over two hours old turns the verdict and every dot grey.
+History keeps the last real number per line per day: a grey line, a missed or failed source and
+a part-read floor store nothing and have no direction.
 
 Is work flowing?
 26. **Emails cleared (old inbox mail)** — T3: inbox mail older than 2 days after the last triage
     run, from the triage script's own scan and slot record, never its prose. Red also when the
-    last scheduled sort did not run or failed (Kevin's 14 Oct ruling: mail never ends in the
-    inbox). A cut-off listing is a floor, never green.
+    last scheduled run did not start or failed (Kevin's 14 Oct ruling: mail never ends in the
+    inbox), and when it wrote no "done" line in its run log within its own run limit plus 15
+    minutes: the slot record is written before the run, so a killed run still reads ok. A
+    cut-off listing is a floor, never green.
 27. **Email tasks waiting for a draft** — T8: open inbound tasks an agent owns, due, with no draft
     or card, made more than 1 working day ago. Walled and held tasks are left out.
 28. **Live work stuck with nothing blocking it** — T4: the not-moving list's agent tasks minus
@@ -117,16 +126,21 @@ Is anything broken?
 31. **Agents idle with live work** — T3: agents holding live, unwalled work for a day with no
     action in 24 hours (a run report action, a completion, or a note line only the agent's own
     commands write). Shown as "N of M worked today".
-32. **Scheduled jobs failing** — T3: Failed rows on the job status board, by plain name. The
-    blocked-robots report is left out: it is line 29's subject.
-33. **Open code problems against a week ago** — T3: open code findings now against the same log
-    folded as it stood 7 days ago (`defects_as_of` in `scripts/estate-status.py`, through the real
-    `current_state`), so the direction is known from the first day; plus filed against fixed.
+32. **Scheduled jobs failing or blocked** — T3: Failed and Blocked rows on the job status board,
+    by plain name (a Blocked run did no work: an expired sign-in, no network, the drive, the lock,
+    a run stopped for its length). Claude limit stops are line 39's, the blocked-tasks report line 29's.
+33. **Open code problems against a week ago** — T3: open code findings now against a week ago
+    on today's rules (`defects_as_of` in `scripts/estate-status.py`): each finding's status as the
+    real `current_state` folds the log cut 7 days back, leaving out findings merged as repeats
+    since and using today's code tag. Folding the past with its own rules read 150 where today's
+    rules read 127 (15 Oct 2026), so a rise looked smaller than it was. One number drives both the
+    colour and the arrow. Plus filed against fixed.
 34. **Daily data check result** — T3: the daily invariant sweep's result, each broken check named;
     grey when it has not run in 26 hours.
 35. **Things missed** — T3: in 24 hours, parks the dispatcher's own `parked_tasks` reports that
     still have no card, wall or door; jobs that gave up waiting, were skipped as too late or missed
-    their time; old inbox mail nobody decided.
+    their time, unless the job then finished cleanly (either log: run-job.sh's or the queue's own)
+    before its next due time, which is listed as "ran late"; old inbox mail nobody decided.
 
 Can it keep going?
 36. **Agent work done against new (7 days)** — T4.
@@ -137,9 +151,11 @@ Can it keep going?
 38. **Drafts approved first time %** — T4 over 14 days, the accuracy report's own population (form
     cards left out), checked against the task board's read: a verdict the board shows that the
     14-day read missed makes the line grey.
-39. **Robot hours paused for the allowance** — T5: hours paused in 7 days from the allowance guard,
-    plus any job whose last run hit the limit. The guard keeps only its newest outage, so two
-    outages in one week count the newer one; said in the line's detail.
+39. **Robot hours paused for the allowance** — T5: hours stopped in 7 days, the allowance guard's
+    pauses joined with every limit line in any job's own `runs.log` (allowance.py's own `LIMIT_RE`
+    and `parse_reset`), each running from its run's end line to the reset it names. The guard
+    missed the 3-4 Oct stop; replayed on the real logs, 4 Oct 18:00 reads red "paused now" and
+    6 Oct reads amber, 26 hours stopped, where the guard alone read green.
 
 ## 3. Tier 2 — Property pack (add-on only)
 

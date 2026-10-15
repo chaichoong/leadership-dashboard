@@ -42,8 +42,8 @@ describe('the fourteen rules, each with its grey case', () => {
       .toEqual(['green', 'amber', 'amber', 'red']);
     const out = py(`print(json.dumps([A.judge_emails({"left": 0, "scannedAt": ago(hours=3), "slot": {"state": s, "name": "13:00", "date": "2026-10-15"}}, NOW) for s in ("missed", "failed")]))`);
     expect(out.map(l => l.colour)).toEqual(['red', 'red']);                 // a missed slot is red over a clear inbox
-    expect(out[0].answer).toBe('The 13:00 sort did not run');
-    expect(out[1].answer).toBe('The 13:00 sort failed');
+    expect(out[0].answer).toBe('The 13:00 inbox run did not start');
+    expect(out[1].answer).toBe('The 13:00 inbox run failed');
     // Grey: unreadable, and a scan older than its cadence (18 hours: the longest gap is 17:00 to 09:00).
     expect(colours(`[A.judge_emails({"error": "the inbox sort has no state file"}, NOW),
                      A.judge_emails({"left": 0, "scannedAt": ago(hours=19), "slot": ${ok}}, NOW)]`)).toEqual(['grey', 'grey']);
@@ -192,7 +192,7 @@ l = A.judge_agents(f)
 print(json.dumps({"rows": [[a["name"], a["live"], a["acted"]] for a in f["agents"]], "answer": l["answer"], "colour": l["colour"]}))`);
     // The new-work agent has had its work under a day, so it is not held to it yet; the walled task is No bottlenecks'.
     expect(out.rows).toEqual([['Idle agent', 1, false], ['Busy agent', 1, true], ['Noting agent', 1, true]]);
-    expect(out.answer).toBe('2 of 3 worked today');
+    expect(out.answer).toBe('1 idle, 2 of 3 worked today');
     expect(out.colour).toBe('amber');
     expect(colours(`[A.judge_agents({"agents": [{"name": "a", "live": 1, "acted": i >= n} for i in range(5)]}) for n in (0, 1, 2)] + [A.judge_agents({"error": "x"})]`))
       .toEqual(['green', 'amber', 'red', 'grey']);
@@ -278,7 +278,7 @@ passes = lambda: {"recDOOR": {"began": ago(hours=3), "door": "an open task"}}
 parks, err = A.facts_parks(reports, tasks, {AG}, lh, D, NOW, passes)
 ev = [{"ts": ago(hours=3), "job": "feed-brain", "state": "queue-timeout"}, {"ts": ago(hours=4), "job": "feed-brain", "state": "queue-timeout"},
       {"ts": ago(hours=30), "job": "old-job", "state": "queue-timeout"}, {"ts": ago(hours=1), "job": "x", "state": "acquired"}]
-gave = A.facts_gave_up(ev, [{"key": "late-job", "label": "Late job", "status": "Missed"}], NOW, {"feed-brain": {"label": "Brain feed"}})
+gave, _late = A.facts_gave_up(ev, [{"key": "late-job", "label": "Late job", "status": "Missed"}], NOW, {"feed-brain": {"label": "Brain feed"}})
 print(json.dumps({"parks": [i["id"] for i in parks], "err": err, "gave": [i["name"] for i in gave]}))`);
     expect(out.parks).toEqual(['recSILENT']);                  // a card, a door, a later outcome and a close all excuse
     expect(out.err).toBeNull();
@@ -368,13 +368,13 @@ describe('the verdict, the groups and the trend', () => {
 
   it('amber "Issues, but going the right way" needs more lines better than worse than a week ago; red names the worst line', () => {
     const out = py(`
-ls = ${lines('["green", "green", "red"] + ["green"] * 11')}
-for l, d in zip(ls, ["better", "better", "worse"] + [None] * 11):
+ls = ${lines('["amber", "amber", "red"] + ["green"] * 11')}
+for l, d in zip(ls, ["better", "better", "same"] + [None] * 11):
     l["trend"] = {"direction": d}
 up = A.overall_verdict(ls)
 for l in ls[:2]: l["trend"] = {"direction": "same"}
 print(json.dumps([up, A.overall_verdict(ls)]))`);
-    expect(out[0]).toMatchObject({ colour: 'amber', text: 'Issues, but going the right way', better: 2, worse: 1 });
+    expect(out[0]).toMatchObject({ colour: 'amber', text: 'Issues, but going the right way', better: 2, worse: 0 });
     expect(out[1]).toMatchObject({ colour: 'red', text: "Needs attention: Everything's moving", worst: 'moving' });
   });
 
@@ -420,10 +420,8 @@ print(json.dumps([ls[0]["trend"], first[0]["trend"]]))`);
   });
 });
 
-describe('the row', () => {
-  // Every reader stubbed: the row must hold fourteen lines and the verdict, and a reader that
-  // throws must turn its own line grey, never the whole row Failed and never a green.
-  const stubs = (over = '') => `
+// Every reader stubbed, shared by the row tests and the review tests below.
+const stubs = (over = '') => `
 lh = load("lh", "loop-health.py")
 class ES:
     def loop_health_module(self): return lh
@@ -444,13 +442,18 @@ readers = {"lh": lh, "tm": TM, "tri": None, "aar": load("aar", "agent-accuracy-r
            "board": lambda: {}, "invariants": lambda: {"ranAt": ago(hours=4), "result": "pass", "broken": [], "checks": 3},
            "events": lambda: [], "passes": lambda: {}, "decided": lambda: [
                {"id": "r%d" % i, "fields": {"Approval Outcome": "Approved as-is", "Approved At": ago(hours=5), "Sent For Approval By": [AG], "Task Name": "t"}} for i in range(9)],
-           "history": lambda: ({}, None)}
+           "history": lambda: ({}, None), "finishes": lambda: [], "limitHits": lambda: ([], []),
+           "schedule": lambda: {}}
 ${over}
 row = A.verdict_row(NOW, ES(), [], lh_res, None, measures, readers)
 p = json.loads(row["payload"]) if row.get("payload") else None
 print(json.dumps({"status": row["status"], "detail": row["detail"], "key": row["key"],
                   "lines": p and [[l["key"], l["colour"]] for l in p["lines"]], "overall": p and p["overall"],
                   "bugs": p and next(l for l in p["lines"] if l["key"] == "bugs")["trend"]}))`;
+
+describe('the row', () => {
+  // Every reader stubbed: the row must hold fourteen lines and the verdict, and a reader that
+  // throws must turn its own line grey, never the whole row Failed and never a green.
 
   it('carries fourteen lines in Kevin\'s order, three groups and one verdict', () => {
     const out = py(stubs());
@@ -493,5 +496,166 @@ stalled = [{"id": "recS1", "rule": "draft"}, {"id": "recS2", "rule": "amend"}, {
 aw = lh.agent_work(tasks, {AG}, stalled, [], now=NOW, ledger={})
 print(json.dumps({"ids": aw["stuckIds"], "n": aw["notMoving"]}))`);
     expect(out).toEqual({ ids: ['recS1', 'recS2'], n: 2 });
+  });
+});
+
+// ─── The independent review of PR #790 (15 Oct 2026) ─────────────────
+// The bar: no line or verdict may read better than the truth. Each test below failed on the
+// code as first pushed and passes on the fix.
+describe('review of PR #790: nothing reads better than the truth', () => {
+  it('1 a build that fails clears the payload, so the page can never show the last good verdict as new', () => {
+    const out = py(stubs(`readers["blockers"] = lambda: (_ for _ in ()).throw(RuntimeError("disk full"))
+es = load("es", "estate-status.py")`).replace('print(json.dumps({"status"', 'f = es.to_fields(row, NOW)\nprint(json.dumps({"payloadField": f.get(es.ES["payload"], "absent"), "status"'));
+    expect(out.status).toBe('Failed');
+    expect(out.detail).toMatch(/could not be built: RuntimeError: disk full/);
+    expect(out.payloadField).toBe('');                        // written, and empty: the old verdict is gone
+  });
+
+  it('2 the verdict: more than 2 grey lines is "Can\'t tell"; better and worse count only on red and amber lines; a red line getting worse is red', () => {
+    const v = (spec, dirs) => `(lambda ls: ([l.__setitem__("trend", {"direction": d}) for l, d in zip(ls, ${dirs})], A.overall_verdict(ls))[1])(
+        [A.line(d["key"], c, "a", 1) if c != "grey" else A.grey(d["key"], "x") for d, c in zip(A.LINES, ${spec})])`;
+    const out = py(`print(json.dumps([
+      ${v('["grey"] * 14', '[None] * 14')},
+      ${v('["grey"] * 3 + ["green"] * 11', '[None] * 14')},
+      ${v('["red"] * 5 + ["green"] * 6 + ["amber"] * 3', '["worse"] * 5 + ["better"] * 6 + ["same"] * 3')},
+      ${v('["red", "amber", "amber"] + ["green"] * 11', '["better", "worse", "worse"] + ["better"] * 11')},
+      ${v('["red", "amber", "amber"] + ["green"] * 11', '["better", "better", "same"] + [None] * 11')},
+      ${v('["green", "red"] + ["grey"] * 3 + ["green"] * 9', '[None] * 14')}]))`);
+    expect(out[0].colour).toBe('grey');
+    expect(out[0].text).toMatch(/^Can't tell: 14 lines can't be read/);
+    expect(out[1].colour).toBe('grey');
+    expect(out[1].text).toMatch(/^Can't tell: 3 lines can't be read/);
+    expect(out[2]).toMatchObject({ colour: 'red', text: 'Needs attention: Emails are getting cleared' });   // greens improving never cover it
+    expect(out[3]).toMatchObject({ colour: 'red', better: 1, worse: 2 });                                   // only red and amber lines count
+    expect(out[4]).toMatchObject({ colour: 'amber', text: 'Issues, but going the right way' });
+    expect(out[5]).toMatchObject({ colour: 'red', text: expect.stringMatching(/^Needs attention: Responses are getting written · 3 lines can't be read/) });
+  });
+
+  it('3 a Blocked job counts as broken (an expired sign-in, no network, killed for running too long); only Claude-limit pauses are left to line 14', () => {
+    const out = py(`
+rows = [{"key": "a", "label": "Job A", "status": "Blocked", "detail": "A sign-in has expired. Kevin needs to sign the robot in again."},
+        {"key": "b", "label": "Job B", "status": "Blocked", "detail": "The Claude allowance ran out (resets 19:00). The job did no work."},
+        {"key": "allowance", "label": "Claude allowance", "status": "Blocked", "detail": "The Claude allowance ran out (seen Sun 13:00)."},
+        {"key": "c", "label": "Job C", "status": "Failed", "detail": "exit code 1"}]
+l = A.judge_jobs(A.facts_jobs(rows, {}, None))
+print(json.dumps({"names": [i["name"] for i in l["items"]], "answer": l["answer"], "extra": l["extra"]}))`);
+    expect(out.names).toEqual(['Job A', 'Job C']);
+    expect(out.answer).toBe('2 jobs failed or were blocked');
+    expect(JSON.stringify(out.extra)).not.toMatch(/see No bottlenecks/);
+  });
+
+  it('4 a Claude-limit stop the guard missed is read from the jobs\' own run logs (the 3-4 Oct shape)', () => {
+    const out = py(`
+d = tempfile.mkdtemp()
+for job, (start, done) in {"inbound-triage": ("Sun Oct  4 13:00:03", "Sun Oct  4 13:00:30"), "task-manager": ("Sun Oct  4 17:20:05", "Sun Oct  4 17:20:18")}.items():
+    os.makedirs(os.path.join(d, job))
+    open(os.path.join(d, job, "runs.log"), "w").write(
+        "===== %s run [13:00 slot] %s BST 2026 =====\\n"
+        "You've hit your weekly limit · resets 7pm (Europe/London)\\n"
+        "===== done rc=1 %s BST 2026 =====\\n"
+        "===== %s run later =====\\nA summary that quotes it: the slot said You've hit your weekly limit\\n" % (job, start, done, job))
+al = load("al", "allowance.py")
+class AL:
+    def cmd_status(self, now=None): return {"paused": False, "last_outage": {"seen_at": "2026-09-15T10:30:53Z", "paused_until": "2026-09-15T10:40:00Z"}}
+    LIMIT_RE = al.LIMIT_RE
+    def parse_reset(self, text, now): return al.parse_reset(text, now)
+res = []
+for when in (datetime(2026, 10, 4, 18, 0, tzinfo=L), datetime(2026, 10, 6, 10, 0, tzinfo=L), datetime(2026, 10, 15, 12, 0, tzinfo=L)):
+    hits, bad = A.read_limit_hits(when.astimezone(timezone.utc), al, d)
+    l = A.judge_allowance(A.facts_allowance(AL(), [], when.astimezone(timezone.utc), hits), when.astimezone(timezone.utc))
+    res.append([col(l), l["number"], len(hits)])
+print(json.dumps(res))`);
+    expect(out[0]).toEqual(['red', 5, 2]);       // 4 Oct 18:00: stopped since 13:00, back at 19:00
+    expect(out[1]).toEqual(['amber', 6, 2]);     // 6 Oct: a 6-hour stop this week, running again
+    expect(out[2]).toEqual(['green', 0, 0]);     // 15 Oct: older than a week
+  });
+
+  it('5 "a week ago" is each finding\'s status then, judged by today\'s merges and today\'s code tag', () => {
+    const out = py(`
+es = load("es", "estate-status.py")
+fm = load("fm", "findings.py")
+t = lambda d: iso(NOW - timedelta(days=d))
+ops = [{"op": "add", "id": "f1", "ts": t(10), "touches_code": True},
+       {"op": "add", "id": "f2", "ts": t(9), "touches_code": True},
+       {"op": "add", "id": "f3", "ts": t(8), "touches_code": True},
+       {"op": "dupe", "id": "f1", "of": "f2", "ts": t(2)},                   # merged as a repeat since
+       {"op": "retag", "id": "f3", "touches_code": False, "ts": t(1)},       # found not to need code since
+       {"op": "add", "id": "f4", "ts": t(1), "touches_code": True}]
+fm.read_all = lambda: ops
+print(json.dumps(es.defects_as_of(fm, ops, NOW - timedelta(days=7))))`);
+    expect(out).toEqual({ open: 2, code: 1 });   // f1 is a repeat by today's rules; f3 is not code by today's tag
+  });
+
+  it('7 history keeps the last real number for each line each day; a grey, missed or part-read line stores nothing', () => {
+    const out = py(`
+day = NOW.astimezone(L).date().isoformat()
+missed = A.judge_emails({"slot": {"state": "missed", "name": "13:00", "date": day}, "left": 3}, NOW)
+part = A.judge_jobs(A.facts_jobs([{"key": k, "label": k, "status": "Failed"} for k in "abcd"], {}, "HTTP 503"))
+ls = [missed, A.grey("data", "x"), A.line("queue", "green", "a", 4), part]
+h = A.apply_history(ls, {day: {"emails": 2, "data": 5, "queue": 9, "jobs": 1}}, NOW)
+print(json.dumps({"today": h[day], "emailsNumber": missed["number"], "partTrend": part["trend"]}))`);
+    expect(out.emailsNumber).toBeNull();                                  // never yesterday's count under a missed slot
+    expect(out.today).toEqual({ emails: 2, data: 5, queue: 4, jobs: 1 }); // earlier real numbers kept; queue updated
+    expect(out.partTrend.direction).toBeNull();                           // a floor has no direction
+  });
+
+  it('8 a slot whose record said ok but whose run never finished is red once it is past its run time', () => {
+    const out = py(`
+tri = load("tri", "inbound-triage.py")
+class ES:
+    def load_schedule(self): return {"inbound-triage": {"cron": "0 9,13,17 * * *", "maxRuntimeMinutes": 150}}
+    def last_due(self, cron, now): return datetime(2026, 10, 15, 8, 0, tzinfo=timezone.utc)   # the 09:00 slot
+def run(log, now):
+    d = tempfile.mkdtemp()
+    at = int((datetime(2026, 10, 15, 8, 10, tzinfo=timezone.utc)).timestamp() * 1000)
+    json.dump({"history_detail": {"2026-10-15": {"inbox_over_2_days": 0}}, "last_scan_ok_ms": at,
+               "last_scan_stale": {"ids": [], "at_ms": at}}, open(os.path.join(d, "state.json"), "w"))
+    open(os.path.join(d, "slot-results.jsonl"), "w").write(json.dumps({"ts": "2026-10-15T09:00:20+01:00", "date": "2026-10-15", "slot": "09:00", "lane": "email", "ok": True}) + "\\n")
+    open(os.path.join(d, "runs.log"), "w").write(log)
+    l = A.judge_emails(A.facts_emails(A.read_triage(now, tri, ES(), base=d)), now)
+    return [col(l), l["answer"]]
+head = "===== done rc=0 Wed Oct 14 18:12:08 BST 2026 =====\\n===== inbound-triage run [09:00 slot] Thu Oct 15 09:00:00 BST 2026 =====\\n"
+late = datetime(2026, 10, 15, 11, 50, tzinfo=timezone.utc)      # 12:50 London: past 09:00 + 150 + 15 minutes
+early = datetime(2026, 10, 15, 9, 0, tzinfo=timezone.utc)       # 10:00 London: still inside its run time
+print(json.dumps([run(head, late), run(head, early),
+                  run(head + "===== done rc=0 Thu Oct 15 09:47:56 BST 2026 =====\\n", late),
+                  run(head + "===== done rc=1 Thu Oct 15 09:47:56 BST 2026 =====\\n", late)]))`);
+    expect(out[0]).toEqual(['red', 'The 09:00 inbox run did not finish']);
+    expect(out[1][0]).toBe('green');
+    expect(out[2]).toEqual(['green', 'Inbox clear']);
+    expect(out[3]).toEqual(['red', 'The 09:00 inbox run ended with an error']);
+  });
+
+  it('9 a job that gave up but ran cleanly before its next due time ran late, not missed; one that skipped a whole cycle counts', () => {
+    const out = py(`
+# The backlog job runs through job-queue.py alone: its clean finish is only in the queue's own log,
+# as on 15 Oct 2026 (gave up at 00:01, 02:01 and 04:01, then "finished", exit 0, at 05:03).
+ev = [{"ts": ago(hours=h), "job": "backlog", "state": "queue-timeout"} for h in (12, 10, 8)] + [
+      {"ts": ago(hours=7), "job": "backlog", "state": "finished", "exit": 0},
+      {"ts": ago(hours=7), "job": "nightly", "state": "queue-timeout"},
+      {"ts": ago(hours=6), "job": "brainfeed", "state": "queue-timeout"},
+      {"ts": ago(hours=2), "job": "brainfeed", "state": "finished", "exit": 1}]
+finishes = [{"ts": ago(hours=5), "job": "nightly", "ok": True}, {"ts": ago(hours=1), "job": "brainfeed", "ok": False}]
+schedule = {"nightly": {"cron": "40 22 * * *"}, "brainfeed": {"cron": "45 22 * * *"}}
+nd = lambda cron, t: iso(t + timedelta(hours=10))
+gave, late = A.facts_gave_up(ev, [], NOW, {}, finishes, schedule, nd)
+print(json.dumps({"gave": [[i["name"], i["note"]] for i in gave], "late": [i["name"] for i in late]}))`);
+    // gave up, and every run since failed; its next due time is still ahead, so it says "has not run since"
+    expect(out.gave).toEqual([['brainfeed', expect.stringMatching(/^gave up waiting at .+, and has not run cleanly since$/)]]);
+    expect(out.late.sort()).toEqual(['backlog', 'nightly']);
+  });
+
+  it('lower: line 8 says "code problems"; lines 6 and 11 show the number their trend arrow compares', () => {
+    const out = py(`
+b = A.judge_bugs({"code": 167, "codeWeekAgo": 127, "open": 171, "filed7d": 10, "fixed7d": 5})
+a = A.judge_agents({"agents": [{"name": "x", "live": 1, "acted": i > 1} for i in range(10)]})
+o = A.judge_ontop({"in": 153, "done": 147})
+print(json.dumps([b["answer"], dict(b["extra"])["All open problems"], a["answer"], a["number"], o["answer"], o["number"]]))`);
+    expect(out[0]).toBe('167 code problems open, up from 127');
+    expect(out[1]).toBe('171');
+    expect(out[2]).toBe('2 idle, 8 of 10 worked today');
+    expect(out[3]).toBe(2);
+    expect(out[4]).toBe('96% done: 147 done, 153 new');
+    expect(out[5]).toBe(96);
   });
 });

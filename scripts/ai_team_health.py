@@ -58,6 +58,8 @@ ITEMS_MAX = 20
 TRIAGE_DIR = os.path.join(LOGS, "inbound-triage")
 TRIAGE_SCAN_MAX_HOURS = 18          # slots at 09:00, 13:00 and 17:00: the longest gap is 16 hours
 TRIAGE_SLOT_GRACE_MIN = 30          # a slot writes its record within seconds of starting
+TRIAGE_DEFAULT_RUN_MIN = 150        # job-schedule.json's maxRuntimeMinutes for the slot, when it is not set
+TRIAGE_FINISH_GRACE_MIN = 15        # past its run limit plus this, a run with no end line did not finish
 BLOCKERS_FILE = os.path.join(LOGS, "handback-poll", "scratch", "blockers.json")
 BLOCKERS_MAX_MIN = 120              # the sweep runs every 30 minutes with the hand-back poll
 DISPATCH_QUEUE = os.path.join(LOGS, "handback-poll", "scratch", "queue.json")
@@ -162,7 +164,9 @@ def item(name, rid="", note=""):
     return out
 
 
-def line(key, colour, answer, number, items=(), extra=(), source="", why=None):
+def line(key, colour, answer, number, items=(), extra=(), source="", why=None, partial=False):
+    """`partial`: the number came from a source read only in part (a floor, review of PR #790).
+    It is shown, never written to the history and never given a trend direction."""
     d = LINE_BY_KEY[key]
     assert colour in COLOURS, colour
     out = {"key": key, "n": [x["key"] for x in LINES].index(key) + 1, "group": d["group"],
@@ -172,6 +176,8 @@ def line(key, colour, answer, number, items=(), extra=(), source="", why=None):
            "extra": [[str(a), str(b)] for a, b in extra], "source": source}
     if why:
         out["why"] = why
+    if partial:
+        out["partial"] = True
     return out
 
 
@@ -217,6 +223,9 @@ def _read_json(path):
 
 
 # ─── the judges: pure functions of what was read ──────────────────────
+# How a known-bad inbox run reads (line 1). Each is red: the inbox was not cleared by it.
+SLOT_BAD = {"missed": "The %s inbox run did not start", "failed": "The %s inbox run failed",
+            "unfinished": "The %s inbox run did not finish", "errored": "The %s inbox run ended with an error"}
 def judge_emails(f, now):
     """f: {"left", "truncated", "scannedAt", "slot": {"name", "date", "state", "reason"}, "items"}
     or {"error"}. A missed or failed slot is red whatever the count, because it is known."""
@@ -224,11 +233,13 @@ def judge_emails(f, now):
     if f.get("error"):
         return grey("emails", f["error"], src)
     slot = f.get("slot") or {}
-    if slot.get("state") in ("failed", "missed"):
-        what = "did not run" if slot["state"] == "missed" else "failed"
-        return line("emails", "red", "The %s sort %s" % (slot.get("name") or "last", what), f.get("left"),
-                    f.get("items") or (), [["Last sort", "%s %s: %s" % (slot.get("date", ""), slot.get("name", ""),
-                                                                           slot.get("reason") or what)]], src)
+    if slot.get("state") in SLOT_BAD:
+        # The count on file is an earlier run's: it is shown in the detail, never as this line's
+        # number, so the history never keeps it as today's (review of PR #790).
+        answer = SLOT_BAD[slot["state"]] % (slot.get("name") or "last")
+        return line("emails", "red", answer, None, f.get("items") or (),
+                    [["Last inbox run", "%s %s: %s" % (slot.get("date", ""), slot.get("name", ""), slot.get("reason") or answer)],
+                     ["Old mail counted by an earlier run", f.get("left") if f.get("left") is not None else "not known"]], src)
     scanned = _aware(f.get("scannedAt"))
     if not scanned or (now - scanned) > timedelta(hours=TRIAGE_SCAN_MAX_HOURS):
         return grey("emails", "the inbox was last sorted %s" % when_text(scanned), src)
@@ -308,7 +319,12 @@ def judge_agents(f):
     idle = [a for a in agents if not a.get("acted")]
     n, total = len(idle), len(agents)
     colour = by_count(n, 1)
-    answer = ("%d of %d worked today" % (total - n, total)) if total else "No agent has live work"
+    if not total:
+        answer = "No agent has live work"
+    elif n:
+        answer = "%d idle, %d of %d worked today" % (n, total - n, total)
+    else:
+        answer = "All %d worked today" % total
     items = [item(a["name"], a.get("id", ""), "%s live, nothing done in 24h%s" % (
         plural(a.get("live", 0), "task"), (": " + "; ".join(str(t)[:50] for t in a["tasks"][:2])) if a.get("tasks") else ""))
         for a in idle]
@@ -327,11 +343,12 @@ def judge_jobs(f):
     if n == 0:
         answer = "Every job ran cleanly"
     else:
-        answer = "%s failed" % plural(n, "job")
-    extra = [["Not counted here", "Robots blocked (see No bottlenecks)"]]
+        answer = "%s failed or %s blocked" % (plural(n, "job"), "was" if n == 1 else "were")
+    extra = [["Counted", "a last run that failed, or was blocked (a sign-in, the network, Drive, the lock, too long)"],
+             ["Counted elsewhere", "the blocked-tasks report under No bottlenecks; Claude limit stops under Enough allowance"]]
     if f.get("error"):
         extra.append(["Could not read", f["error"]])
-    return line("jobs", colour, answer, n, failed, extra, src)
+    return line("jobs", colour, answer, n, failed, extra, src, partial=bool(f.get("error")))
 
 
 def judge_bugs(f):
@@ -347,13 +364,14 @@ def judge_bugs(f):
             ": " + f["weekAgoError"] if f.get("weekAgoError") else ""), src)
     filed, fixed = int(f.get("filed7d") or 0), int(f.get("fixed7d") or 0)
     if code > before:
-        colour, answer = "red", "%d open, up from %d" % (code, before)
-    elif fixed >= filed:
-        colour, answer = "green", "%d open, down from %d" % (code, before) if code < before else "%d open, no rise" % code
+        colour, answer = "red", "%d code problems open, up from %d" % (code, before)
     else:
-        colour, answer = "amber", ("%d open, down from %d" % (code, before)) if code < before else "%d open, no rise" % code
+        colour = "green" if fixed >= filed else "amber"
+        answer = ("%d code problems open, down from %d" % (code, before)) if code < before \
+            else "%d code problems open, no rise" % code
     rw = f.get("rework") or {}
-    extra = [["Code fixes waiting", code], ["A week ago", before], ["Not code (moved to tasks)", f.get("notCode", "not known")],
+    extra = [["Code problems open", code], ["A week ago, by today's rules", before],
+             ["All open problems", f.get("open", "not known")], ["Not code (moved to tasks)", f.get("notCode", "not known")],
              ["Filed in 7 days", filed], ["Fixed in 7 days", fixed]]
     if f.get("refusedUnread") is not None:
         extra.append(["Turned away because the list was full, not yet read", f["refusedUnread"]])
@@ -395,9 +413,12 @@ def judge_missed(f):
     answer = "Nothing missed" if n == 0 else "%s missed" % plural(n, "thing")
     extra = [["Left with no card and no door", len(parks)], ["Jobs that gave up or did not run", len(gave)],
              ["Old emails nobody decided", len(undecided)]]
+    for it in f.get("late") or []:
+        extra.append(["Ran late (not counted)", "%s: %s" % (it["name"], it.get("note", ""))])
     for e in errors:
         extra.append(["Could not read", e])
-    return line("missed", colour, answer, n, list(parks) + list(gave) + list(undecided), extra, src)
+    return line("missed", colour, answer, n, list(parks) + list(gave) + list(undecided), extra, src,
+                partial=bool(errors))
 
 
 def judge_ontop(f):
@@ -409,7 +430,7 @@ def judge_ontop(f):
         return grey("ontop", "the 7-day counts could not be read", src)
     pct = round(100.0 * done / new) if new else 100
     colour = "green" if done >= new else "amber" if done >= 0.8 * new else "red"
-    return line("ontop", colour, "%d done, %d new in 7 days" % (done, new), pct, (),
+    return line("ontop", colour, "%d%% done: %d done, %d new" % (pct, done, new), pct, (),
                 [["New agent tasks", new], ["Done", done], ["Done as a share of new", "%d%%" % pct]], src)
 
 
@@ -456,7 +477,7 @@ def judge_firsttime(f):
 
 
 def judge_allowance(f, now):
-    src = "The Claude allowance guard and this week's job runs"
+    src = "The Claude allowance guard and every job's run log, last 7 days"
     if f.get("error"):
         return grey("allowance", f["error"], src)
     hours = round(float(f.get("hours7d") or 0), 1)
@@ -464,13 +485,13 @@ def judge_allowance(f, now):
         until = _aware(f.get("pausedUntil"))
         return line("allowance", "red", "Paused now until %s" % (until.astimezone(LONDON).strftime("%a %H:%M") if until else "unknown"),
                     hours, f.get("items") or (), [["Paused this week", "%.1f hours" % hours]], src)
-    if hours > 0 or f.get("items"):
+    if hours > 0 or f.get("items") or f.get("hits"):
         answer = "Paused %.1f hours this week, running again" % hours if hours > 0 else "Paused this week, running again"
         return line("allowance", "amber", answer, hours, f.get("items") or (), [["Paused this week", "%.1f hours" % hours]], src)
     last = _aware(f.get("lastOutage"))
     return line("allowance", "green", "No pause this week", 0.0, (),
-                [["Last pause ended", when_text(last) if last else "none recorded"],
-                 ["Note", "the guard keeps only its newest pause, so two in one week count as one"]], src)
+                [["Last pause the guard recorded", when_text(last) if last else "none recorded"],
+                 ["Also read", "every job's run log for the Claude limit line, last 7 days"]], src)
 
 
 # ─── trend, history and the verdicts ──────────────────────────────────
@@ -490,12 +511,16 @@ def merge_history(*histories):
 
 
 def apply_history(lines, history, now):
-    """Add today's snapshot (overwriting any earlier one from today), keep 30 days, and give each
-    line a trend against the snapshot 7 days back, or the oldest one there is (said as "trend
-    from <date>"). A grey line has no number, so it is never written to history and has no trend."""
+    """Merge today's numbers into today's snapshot line by line (the last real number for each
+    line wins, so a later grey run never wipes the day: review of PR #790), keep 30 days, and give
+    each line a trend against the snapshot 7 days back, or the oldest one there is (said as "trend
+    from <date>"). A grey line, a line whose source was missed or failed (no number), and a line
+    read only in part (`partial`) store nothing and have no direction."""
     today = london_day(now)
     hist = merge_history(history)
-    snap = {l["key"]: l["number"] for l in lines if isinstance(l.get("number"), (int, float))}
+    snap = dict(hist.get(today) or {})
+    snap.update({l["key"]: l["number"] for l in lines
+                 if isinstance(l.get("number"), (int, float)) and not l.get("partial")})
     hist[today] = snap
     keep = (now.astimezone(LONDON).date() - timedelta(days=HISTORY_DAYS - 1)).isoformat()
     hist = {d: s for d, s in hist.items() if keep <= d <= today}
@@ -510,7 +535,7 @@ def apply_history(lines, history, now):
         if seeded and vs != week:
             vs, before = seeded
         direction = None
-        if isinstance(after, (int, float)) and isinstance(before, (int, float)):
+        if isinstance(after, (int, float)) and isinstance(before, (int, float)) and not l.get("partial"):
             if after == before:
                 direction = "same"
             elif (after < before) == (l["better"] == "lower"):
@@ -519,6 +544,8 @@ def apply_history(lines, history, now):
                 direction = "worse"
         l["trend"] = {"vsDate": vs, "before": before, "after": after, "direction": direction,
                       "fullWeek": vs == week, "since": min(hist) if hist else today}
+        if l.get("partial"):
+            l["trend"]["partial"] = True
     return hist
 
 
@@ -541,24 +568,40 @@ def group_verdicts(lines):
 
 
 def overall_verdict(lines):
-    """Green "Healthy": no red and at most 2 amber, and every line read. Amber "Issues, but going
-    the right way": reds or ambers, with more lines better than worse than a week ago. Red
-    "Needs attention: <worst line>" otherwise. Grey lines are named, never counted as green: a
-    board that would be green apart from lines it cannot read is amber and says so."""
+    """One answer, never better than the truth (review of PR #790), in this order:
+      1. a red line worse than a week ago: red "Needs attention: <that line>";
+      2. more than 2 lines that cannot be read: grey "Can't tell" (or red, naming the worst red
+         line, when a red is already known: a known red is never hidden behind "can't tell");
+      3. no red and at most 2 amber: green "Healthy", or amber "Healthy where it can be read"
+         when 1 or 2 lines cannot be read;
+      4. reds or ambers, with more of THOSE lines better than worse than a week ago: amber
+         "Issues, but going the right way" (green lines improving never count);
+      5. otherwise red "Needs attention: <worst line>".
+    Grey lines are always named."""
     reds = [l for l in lines if l["colour"] == "red"]
     ambers = [l for l in lines if l["colour"] == "amber"]
     greys = [l for l in lines if l["colour"] == "grey"]
-    better = sum(1 for l in lines if (l.get("trend") or {}).get("direction") == "better")
-    worse = sum(1 for l in lines if (l.get("trend") or {}).get("direction") == "worse")
-    worst = reds[0] if reds else ambers[0] if ambers else None
-    if not reds and len(ambers) <= 2:
+    issues = reds + ambers
+    direction = lambda l: (l.get("trend") or {}).get("direction")   # noqa: E731
+    better = sum(1 for l in issues if direction(l) == "better")
+    worse = sum(1 for l in issues if direction(l) == "worse")
+    worsening = [l for l in reds if direction(l) == "worse"]
+    worst = worsening[0] if worsening else reds[0] if reds else ambers[0] if ambers else None
+    if worsening:
+        colour, text = "red", "Needs attention: %s" % worsening[0]["question"]
+    elif len(greys) > 2 and not reds:
+        colour, text = "grey", "Can't tell"
+    elif len(greys) > 2:
+        colour, text = "red", "Needs attention: %s" % worst["question"]
+    elif not reds and len(ambers) <= 2:
         colour, text = ("green", "Healthy") if not greys else ("amber", "Healthy where it can be read")
     elif better > worse:
         colour, text = "amber", "Issues, but going the right way"
     else:
         colour, text = "red", "Needs attention: %s" % worst["question"]
     if greys:
-        text += " · %s can't be read: %s" % (plural(len(greys), "line"), ", ".join(l["question"] for l in greys))
+        named = "%s can't be read: %s" % (plural(len(greys), "line"), ", ".join(l["question"] for l in greys))
+        text = (text + ": " + named) if colour == "grey" else (text + " · " + named)
     return {"colour": colour, "text": text, "worst": worst["key"] if worst else None,
             "red": len(reds), "amber": len(ambers), "green": sum(1 for l in lines if l["colour"] == "green"),
             "grey": len(greys), "greyLines": [l["key"] for l in greys], "better": better, "worse": worse}
@@ -804,19 +847,33 @@ def facts_agents(tasks, team, lh, ledger, held_ids, walled, reports, now):
     return {"agents": rows}
 
 
+ALLOWANCE_STOP = "The Claude allowance ran out"   # estate-status.py BLOCKED_MARKERS[0] and allowance_row
+
+
+def job_broken(key, status, detail):
+    """A board row whose last run failed or was blocked (an expired sign-in, no network, Drive
+    unreadable, the lock lost, stopped for running too long: review of PR #790). A Claude limit
+    stop is line 14's, and the blocked-tasks report and this panel's own rows are not jobs."""
+    if key in ("agent-blockers", "ai-team-health", KEY, "allowance"):
+        return False
+    if status == "Failed":
+        return True
+    return status == "Blocked" and not str(detail or "").startswith(ALLOWANCE_STOP)
+
+
 def facts_jobs(rows, stored, stored_error):
-    """Failed rows on the board: this pass's rows first, the rows other scripts write from the
-    table. Robots blocked is No bottlenecks' line, and this panel's own rows are left out."""
-    skip = {"agent-blockers", "ai-team-health", KEY}
+    """Broken rows on the board (job_broken): this pass's rows first, then the rows other
+    scripts write, read from the table."""
     seen, failed = set(), []
     for r in rows or []:
         seen.add(r.get("key"))
-        if r.get("key") not in skip and r.get("status") == "Failed":
-            failed.append(item(r.get("label") or r.get("key"), "", str(r.get("detail") or "")[:120]))
+        if job_broken(r.get("key"), r.get("status"), r.get("detail")):
+            failed.append(item(r.get("label") or r.get("key"), "", "%s: %s" % (
+                r.get("status"), str(r.get("detail") or "")[:110])))
     for k, s in (stored or {}).items():
-        if k in seen or k in skip or s.get("status") != "Failed":
+        if k in seen or not job_broken(k, s.get("status"), s.get("detail")):
             continue
-        failed.append(item(s.get("label") or k, "", str(s.get("detail") or "")[:120]))
+        failed.append(item(s.get("label") or k, "", "%s: %s" % (s.get("status"), str(s.get("detail") or "")[:110])))
     out = {"failed": failed}
     if stored_error:
         out["error"] = "the rows other jobs write could not be read (%s)" % stored_error
@@ -882,25 +939,45 @@ def facts_parks(reports, tasks, agents, lh, dispatch, now, ledger_reader=None):
     return out, None
 
 
-def facts_gave_up(events, rows, now, stored=None):
-    """Scheduled jobs that waited for the queue and gave up, or were skipped as too late, in the
-    last 24 hours (queue-events.jsonl), and jobs the board marks Missed (no record at their time)."""
-    out, seen = [], set()
+def facts_gave_up(events, rows, now, stored=None, finishes=None, schedule=None, next_due=None):
+    """(missed, late). A job that waited for the queue and gave up, or was skipped as too late,
+    in the last 24 hours (queue-events.jsonl) is missed UNLESS it then finished cleanly
+    (job-status.jsonl) after its newest give-up and before its next due time: that one ran late,
+    and is listed as such but not counted (review of PR #790: the backlog job gave up three times
+    and then finished). A job with no schedule has no next due time, so any clean finish after
+    the give-up counts as late. Jobs the board marks Missed (no record at their time) are missed."""
     labels = {k: (s or {}).get("label") or k for k, s in (stored or {}).items()}
     labels.update({r.get("key"): r.get("label") or r.get("key") for r in rows or []})
+    newest = {}
     for e in events or []:
         t = _aware(e.get("ts"))
-        if not t or now - t > timedelta(hours=24):
+        if not t or now - t > timedelta(hours=24) or e.get("state") not in ("queue-timeout", "skipped-stale"):
             continue
-        if e.get("state") in ("queue-timeout", "skipped-stale") and e.get("job") not in seen:
-            seen.add(e.get("job"))
-            out.append(item(labels.get(e.get("job"), e.get("job")), "", "gave up waiting at %s" % when_text(t)
-                            if e["state"] == "queue-timeout" else "skipped, too late at %s" % when_text(t)))
+        if e.get("job") not in newest or t > newest[e["job"]][0]:
+            newest[e["job"]] = (t, e["state"])
+    # A clean finish is either log's: run-job.sh writes job-status.jsonl, and a job run through
+    # job-queue.py alone (the inbox backlog, 15 Oct 2026) writes only the queue's "finished".
+    clean_runs = [(x.get("job"), _aware(x.get("ts"))) for x in finishes or [] if x.get("ok")]
+    clean_runs += [(e.get("job"), _aware(e.get("ts"))) for e in events or []
+                   if e.get("state") == "finished" and e.get("exit") == 0]
+    out, late, seen = [], [], set()
+    for job, (t, state) in sorted(newest.items(), key=lambda kv: kv[1][0]):
+        seen.add(job)
+        cron = ((schedule or {}).get(job) or {}).get("cron")
+        due = _aware(next_due(cron, t)) if (cron and next_due) else None
+        clean = sorted(at for j, at in clean_runs if j == job and at and at > t and (due is None or at <= due))
+        what = "gave up waiting at %s" % when_text(t) if state == "queue-timeout" else "skipped, too late, at %s" % when_text(t)
+        if clean:
+            late.append(item(labels.get(job, job), "", "%s, then ran cleanly at %s" % (what, when_text(clean[0]))))
+        elif due is not None and due <= now:
+            out.append(item(labels.get(job, job), "", "%s, and did not run before its next time, %s" % (what, when_text(due))))
+        else:
+            out.append(item(labels.get(job, job), "", "%s, and has not run cleanly since" % what))
     for r in rows or []:
         if r.get("status") == "Missed" and r.get("key") not in seen:
             seen.add(r.get("key"))
             out.append(item(r.get("label") or r.get("key"), "", "did not run at its time"))
-    return out
+    return out, late
 
 
 def read_triage(now, tri, es, base=TRIAGE_DIR):
@@ -943,6 +1020,19 @@ def read_triage(now, tri, es, base=TRIAGE_DIR):
                 v = mine[-1]
                 out["slot"] = {"name": name, "date": day, "state": "ok" if v.get("ok") else "failed",
                                "reason": v.get("reason") or ""}
+                # The record is written BEFORE the run (review of PR #790): a run killed or frozen
+                # part way still reads ok. Once the slot is past its own run limit, it must have
+                # written its end line after it started, or it did not finish.
+                limit = float(cfg.get("maxRuntimeMinutes") or TRIAGE_DEFAULT_RUN_MIN) + TRIAGE_FINISH_GRACE_MIN
+                if out["slot"]["state"] == "ok":
+                    rc, err = run_end_after(os.path.join(base, "runs.log"), due)
+                    if err:
+                        out["slotError"] = err
+                    elif rc is not None and rc != 0:
+                        out["slot"].update(state="errored", reason="its run ended with exit code %d" % rc)
+                    elif rc is None and now >= due + timedelta(minutes=limit):
+                        out["slot"].update(state="unfinished", reason="no end line in its run log %d minutes after it began"
+                                           % int((now - due).total_seconds() // 60))
     # The mail itself: the scan's old-mail snapshot, minus what was moved or deferred since.
     snap = state.get("last_scan_stale") or {}
     ids, at_ms = snap.get("ids"), snap.get("at_ms")
@@ -972,11 +1062,47 @@ def read_triage(now, tri, es, base=TRIAGE_DIR):
     return out
 
 
+DONE_LINE_RE = re.compile(r"^===== done rc=(-?\d+) (\w{3} \w{3} +\d{1,2} \d{2}:\d{2}:\d{2}) \w+ (\d{4}) =====\s*$", re.M)
+RUN_LOG_TAIL = 300_000
+
+
+def _log_time(stamp, year):
+    """'Thu Oct 15 09:47:56' + '2026', written by the runners in London time."""
+    try:
+        return datetime.strptime("%s %s" % (" ".join(stamp.split()), year), "%a %b %d %H:%M:%S %Y").replace(tzinfo=LONDON)
+    except ValueError:
+        return None
+
+
+def _tail(path, size=RUN_LOG_TAIL):
+    with open(path, "rb") as fh:
+        fh.seek(0, os.SEEK_END)
+        fh.seek(max(0, fh.tell() - size))
+        return fh.read().decode("utf-8", "replace")
+
+
+def run_end_after(path, start):
+    """(exit code, None) of the first "===== done rc=N <time> =====" line written at or after
+    `start` in a runner's log, (None, None) when there is none yet, or (None, why) when the log
+    cannot be read."""
+    try:
+        text = _tail(path)
+    except FileNotFoundError:
+        return None, None
+    except OSError as exc:
+        return None, "the inbox run log could not be read (%s)" % str(exc)[:80]
+    for m in DONE_LINE_RE.finditer(text):
+        t = _log_time(m.group(2), m.group(3))
+        if t and t >= start:
+            return int(m.group(1)), None
+    return None, None
+
+
 def facts_emails(t):
     """A slot known to have failed or been missed is red whatever else could be read; any other
     gap is "Can't tell"."""
     slot = t.get("slot") or {}
-    if slot.get("state") in ("failed", "missed"):
+    if slot.get("state") in SLOT_BAD:
         return {"slot": slot, "left": t.get("left"), "items": t.get("items") or ()}
     for k in ("error", "slotError"):
         if t.get(k):
@@ -1060,35 +1186,99 @@ def facts_firsttime(decided, tasks, aar, now):
     return counts
 
 
-def facts_allowance(al, rows, now):
+LOG_HEADER_RE = re.compile(r"^===== .*? (\w{3} \w{3} +\d{1,2} \d{2}:\d{2}:\d{2}) \w+ (\d{4}) =====\s*$")
+
+
+def read_limit_hits(now, al, logs_dir=LOGS, days=7):
+    """([{job, at, until}], unreadable logs) for every Claude limit line a runner wrote in the
+    last `days` (review of PR #790). The guard's allowance.json missed the 3-4 Oct stop; each
+    job's runs.log did not. The line is allowance.py's own LIMIT_RE (line start, never prose that
+    quotes it), its time the run's next end line (else its start line), its reset the line's own
+    words through allowance.py's parse_reset."""
+    hits, bad = [], []
+    for path in sorted(glob.glob(os.path.join(logs_dir, "*", "runs.log"))):
+        job = os.path.basename(os.path.dirname(path))
+        try:
+            lines = _tail(path).splitlines()
+        except OSError:
+            bad.append(job)
+            continue
+        last_start = None
+        for i, text in enumerate(lines):
+            h = LOG_HEADER_RE.match(text)
+            if h and not text.startswith("===== done"):
+                last_start = _log_time(h.group(1), h.group(2))
+            if not al.LIMIT_RE.search(text):
+                continue
+            at = None
+            for later in lines[i + 1:i + 40]:
+                m = DONE_LINE_RE.match(later)
+                if m:
+                    at = _log_time(m.group(2), m.group(3))
+                    break
+            at = at or last_start
+            if not at or now - at > timedelta(days=days) or at > now + timedelta(minutes=5):
+                continue
+            until = al.parse_reset(text, at) or (at + timedelta(hours=1))
+            hits.append({"job": job, "at": at.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+                         "until": until.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")})
+    return hits, bad
+
+
+def _merge_spans(spans):
+    out = []
+    for a, b in sorted(spans):
+        if out and a <= out[-1][1]:
+            out[-1] = (out[-1][0], max(out[-1][1], b))
+        else:
+            out.append((a, b))
+    return out
+
+
+def facts_allowance(al, rows, now, limit_hits=None, unreadable=()):
     try:
         st = al.cmd_status(now=now)
     except Exception as exc:  # noqa: BLE001 — the line says why
         return {"error": "the allowance guard could not be read (%s)" % str(exc)[:100]}
     week = now - timedelta(days=7)
-    hours, items = 0.0, []
+    spans, items = [], []
+    paused_until = None
 
-    def span(a, b):
+    def add(a, b):
         a, b = _aware(a), _aware(b)
-        if not a or not b:
-            return 0.0
-        lo, hi = max(a, week), min(b, now)
-        return max(0.0, (hi - lo).total_seconds() / 3600)
+        if a and b and b > week:
+            spans.append((max(a, week), b))
 
     if st.get("paused"):
-        hours += span(st.get("seen_at"), now.strftime("%Y-%m-%dT%H:%M:%SZ"))
+        add(st.get("seen_at"), st.get("paused_until"))
+        paused_until = _aware(st.get("paused_until"))
         items.append(item("Paused now", "", "since %s" % when_text(_aware(st.get("seen_at")))))
     last = st.get("last_outage") or {}
     if last and (_aware(last.get("paused_until")) or week) > week:
-        hours += span(last.get("seen_at"), last.get("paused_until"))
+        add(last.get("seen_at"), last.get("paused_until"))
         items.append(item("Paused %s to %s" % (when_text(_aware(last.get("seen_at"))),
                                                when_text(_aware(last.get("paused_until")))), ""))
+    # Every limit line a runner wrote this week, whether or not the guard saw it (the 3-4 Oct gap).
+    for h in limit_hits or []:
+        add(h["at"], h["until"])
+        if _aware(h["at"]) <= now < _aware(h["until"]):
+            paused_until = max(paused_until or _aware(h["until"]), _aware(h["until"]))
+    jobs = sorted({h["job"] for h in limit_hits or []})
+    if jobs:
+        items.append(item("Stopped by the Claude limit: %s" % ", ".join(jobs), "",
+                          "%s in the run logs this week" % plural(len(limit_hits), "stop")))
+    merged = _merge_spans(spans)
+    hours = sum(((min(b, now) - a).total_seconds() / 3600) for a, b in merged if min(b, now) > a)
     # A job whose last run died on the limit says so on the board, even when the guard missed it.
     for r in rows or []:
         if str(r.get("detail") or "").startswith("The Claude allowance ran out"):
             items.append(item(r.get("label") or r.get("key"), "", "its last run hit the Claude limit"))
-    return {"pausedNow": bool(st.get("paused")), "pausedUntil": st.get("paused_until"), "hours7d": hours,
-            "items": items, "lastOutage": last.get("paused_until")}
+    out = {"pausedNow": paused_until is not None and now < paused_until,
+           "pausedUntil": paused_until.strftime("%Y-%m-%dT%H:%M:%SZ") if paused_until else None, "hours7d": hours,
+           "items": items, "lastOutage": last.get("paused_until"), "hits": len(limit_hits or [])}
+    if unreadable:
+        out["error"] = "%s could not be read for Claude limit stops" % plural(len(unreadable), "run log")
+    return out
 
 
 # ─── Airtable reads (through estate-status.py's own request) ──────────
@@ -1222,11 +1412,16 @@ def gather(now, es, rows, lh_res, lh_err, measures, readers=None):
         es.QUEUE_LOG, (now - timedelta(hours=25)).strftime("%Y-%m-%dT%H:%M:%S"))
     if events is None:
         errors.append("the job queue log is missing")
-    gave = facts_gave_up(events or [], rows, now, stored)
+    finishes = rd["finishes"]() if "finishes" in rd else es.read_jsonl(
+        es.STATUS_LOG, (now - timedelta(hours=25)).strftime("%Y-%m-%dT%H:%M:%S"))
+    schedule = rd["schedule"]() if "schedule" in rd else es.load_schedule()
+    if finishes is None:
+        errors.append("the job finish log is missing")
+    gave, late = facts_gave_up(events or [], rows, now, stored, finishes or [], schedule, getattr(es, "next_due", None))
     undecided = tri_facts.get("undecided")
     if undecided is None:
         errors.append(tri_facts.get("mailError") or tri_facts.get("error") or "the inbox decisions were not read")
-    f["missed"] = {"parks": parks, "gaveUp": gave, "undecided": undecided or [], "errors": errors}
+    f["missed"] = {"parks": parks, "gaveUp": gave, "late": late, "undecided": undecided or [], "errors": errors}
 
     flow = (lh_res or {}).get("flow") or {}
     f["ontop"] = {"error": no_board} if no_board else {"in": flow.get("agentCreated7d"), "done": flow.get("agentDone7d")}
@@ -1239,7 +1434,8 @@ def gather(now, es, rows, lh_res, lh_err, measures, readers=None):
             f["firsttime"] = facts_firsttime(decided, tasks, aar, now)
         except Exception as exc:  # noqa: BLE001
             f["firsttime"] = {"error": "your verdicts could not be read (%s)" % str(exc)[:100]}
-    f["allowance"] = facts_allowance(al, rows, now)
+    hits, unreadable = rd["limitHits"]() if "limitHits" in rd else read_limit_hits(now, al)
+    f["allowance"] = facts_allowance(al, rows, now, hits, unreadable)
     return f
 
 
@@ -1284,7 +1480,10 @@ def verdict_row(now, es, rows, lh_res, lh_err, measures, readers=None, write_his
                 payload["historyCheck"] = ((hcheck + "; ") if hcheck else "") + \
                     "the local history copy could not be written (%s)" % str(exc)[:80]
     except Exception as exc:  # noqa: BLE001 — the row says why, never an empty all-clear
-        return dict(row, status="Failed", detail="The AI team verdict could not be built: %s: %s" % (
+        # payload "" is written (estate-status.py to_fields writes any value that is not None), so
+        # the last good verdict can never sit under a fresh Last Run (review of PR #790). The
+        # trend history survives in the local mirror.
+        return dict(row, status="Failed", payload="", detail="The AI team verdict could not be built: %s: %s" % (
             type(exc).__name__, str(exc)[:240]))
     o = payload["overall"]
     detail = "%s. %d green, %d amber, %d red%s." % (
