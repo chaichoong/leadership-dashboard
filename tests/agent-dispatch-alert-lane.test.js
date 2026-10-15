@@ -31,17 +31,17 @@ ${snippet}
 describe('system-alert lane — sender and subject only', () => {
   it('the queue (task_lane, which build_queue lists by) asks the classifier about the sender and the NAME, never the notes', () => {
     const fn = SRC.slice(SRC.indexOf('def task_lane('), SRC.indexOf('\ndef ', SRC.indexOf('def task_lane(') + 1));
-    expect(fn).toMatch(/hit_alert = system_alert_match\(t\.get\("inboundSender"\), t\["name"\]\)/);
+    expect(fn).toMatch(/hit_alert = alert_lane_match\(t\.get\("inboundSender"\), t\.get\("inboundTask"\), t\["name"\]\)/);
     expect(fn).not.toMatch(/system_alert_match\([^)]*t\["notes"\]/);
     expect(fn).toMatch(/if hit_alert and alert_veto\(t\):/);
   });
 
   it('the two WRITE paths use the same rule: clear-alerts and the submit gate read sender and name, then veto', () => {
     const clear = SRC.slice(SRC.indexOf('def cmd_clear_alerts('), SRC.indexOf('def cmd_', SRC.indexOf('def cmd_clear_alerts(') + 10));
-    expect(clear).toMatch(/hit = system_alert_match\(t\.get\("inboundSender"\), t\["name"\]\)/);
+    expect(clear).toMatch(/hit = alert_lane_match\(t\.get\("inboundSender"\), t\.get\("inboundTask"\), t\["name"\]\)/);
     expect(clear).toMatch(/alert_veto\(/);
     const submit = SRC.slice(SRC.indexOf('def cmd_submit('), SRC.indexOf('def cmd_', SRC.indexOf('def cmd_submit(') + 10));
-    expect(submit).toMatch(/alert_hit = system_alert_match\(tf_probe\.get\(AF\["inboundSender"\], ""\), _pn\)/);
+    expect(submit).toMatch(/alert_hit = alert_lane_match\(tf_probe\.get\(AF\["inboundSender"\], ""\), tf_probe\.get\(AF\["inboundTask"\]\), _pn\)/);
     expect(submit).toMatch(/alert_veto\(/);
     expect(SRC.match(/system_alert_match\([^)]*notes/g)).toBeNull();
   });
@@ -65,6 +65,27 @@ cases = [
 ]
 print(json.dumps([m.alert_veto(dict(c, tier1=False, creditor="")) for c in cases]))`);
     expect(r).toEqual(['names a sum of money', 'names a sum of money', 'names a sum of money']);
+  });
+
+  // Review of PR #794 (15 Oct 2026): a task a session or an agent raised was parked as an alert by its
+  // own words. "Check five Airtable automation failure notices" (no sender, not inbound) sat parked,
+  // and a Builder fix named for the Gmail quota it caps sat 10.8 days with no robot handed it.
+  it('the NAME patterns park only inbound mail; the machine-sender rule parks always', () => {
+    const r = py(`
+print(json.dumps({
+  "sessionRaised": m.alert_lane_match("", False, "Check five Airtable automation failure notices (28 Sep to 14 Oct)"),
+  "builderFix": m.alert_lane_match("", None, "Cap the sender-history rebuild so it stops burning its whole budget on a full Gmail quota"),
+  "airtableMail": m.alert_lane_match("noreply@airtable.com", True, "Run failed: Daily rent sync"),
+  "machineSenderNoTick": m.alert_lane_match("noreply@notify.cloudflare.com", False, "Your worker hit an error"),
+  "inboundTicked": m.alert_lane_match("", True, "Apps Script failure: daily sync stopped"),
+  "inboundForwarded": m.alert_lane_match("kevinbrittain@gmail.com", False, "Fwd: Airtable automation failed"),
+}))`);
+    expect(r.sessionRaised).toBe('');
+    expect(r.builderFix).toBe('');
+    expect(r.airtableMail).toBe('noreply@airtable.com');
+    expect(r.machineSenderNoTick).toBe('noreply@notify.cloudflare.com');
+    expect(r.inboundTicked).toMatch(/apps script/);
+    expect(r.inboundForwarded).toMatch(/airtable automation/);
   });
 
   it('a real Apps Script failure mail is still an alert (the lane keeps its job)', () => {

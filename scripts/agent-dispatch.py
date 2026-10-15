@@ -1085,8 +1085,20 @@ def alert_veto(t):
     return ""
 
 
+def alert_lane_match(sender, inbound_task, name):
+    """Why this TASK is a machine alert, or "": the one rule build_queue's task_lane, clear-alerts
+    and the submit gate share (15 Oct 2026). A machine sender (SYSTEM_ALERT_SENDERS) always counts.
+    The NAME patterns count only for inbound mail (an Inbound Sender, or Inbound Communication Task
+    ticked): a task a session or an agent raised is never alert-parked by its own words. On 15 Oct
+    2026 two such tasks sat parked: "Check five Airtable automation failure notices", raised by a
+    session, and a Builder fix named for the Gmail quota it caps, 10.8 days with no robot handed it."""
+    inbound = bool(str(sender or "").strip()) or bool(inbound_task)
+    return system_alert_match(sender, name) if inbound else system_alert_match(sender)
+
+
 def system_alert_match(sender, *texts):
-    """Why this is a machine telling us something broke, or ""."""
+    """Why this is a machine telling us something broke, or "". Tasks go through
+    alert_lane_match, which applies the name patterns to inbound mail only."""
     addr = str(sender or "").lower()
     for known in SYSTEM_ALERT_SENDERS:
         if known in addr:
@@ -3099,6 +3111,12 @@ def load_standing_holds():
 # board asks it (through queue_lanes) before it puts a task on its held,
 # decided or ownerless lists, so the two can never disagree on those.
 #
+# The review of PR #794 settled the alert: a parked alert has no door, so it is
+# the board's ordinary work (stuck clock, three-leaves rule), never held; and
+# the alert lane reads a task's NAME only when the task is inbound mail
+# (alert_lane_match). A held task has a door, but a door can stay shut (a lead
+# kept open for weeks), so one held past the board's stuck clock needs a move.
+#
 # Two orderings changed on purpose, each so the dispatcher agrees with a rule
 # the board already applied:
 #   - An answered DECIDE: card is `decided` ahead of the Roy-lead hold, the
@@ -3113,8 +3131,10 @@ def load_standing_holds():
 #     still win, and the task becomes noLane when the door opens.
 
 # Lanes where the task waits on a door: listed, never worked, and never a move
-# for the board either (its `held` list).
-HELD_LANES = ("heldByStandingHold", "heldUnderLead", "skippedTier2", "systemAlerts", "royRequests")
+# for the board either (its `held` list) until it has waited past the board's
+# stuck clock. NOT the alert lane (review of PR #794): an alert has no door, so
+# it is ordinary board work, on the stuck clock and the three-leaves rule.
+HELD_LANES = ("heldByStandingHold", "heldUnderLead", "skippedTier2", "royRequests")
 # Lanes a dispatched agent works: the worklist, the reserve and the idle
 # hand-backs are drawn from these and nothing else.
 WORK_LANES = ("approvedHandbacks", "changesRequested", "routingNeeded", "newWork")
@@ -3278,7 +3298,8 @@ def task_lane(t, ctx):
     # 19 days and no agent ever saw them. A monitoring alert names itself
     # in its subject line and comes from a machine address; that is enough.
     # Money, a creditor marker or the tier-1 banner is never an alert.
-    hit_alert = system_alert_match(t.get("inboundSender"), t["name"])
+    # INBOUND MAIL ONLY FOR THE NAME (15 Oct 2026): alert_lane_match.
+    hit_alert = alert_lane_match(t.get("inboundSender"), t.get("inboundTask"), t["name"])
     if hit_alert and alert_veto(t):
         hit_alert = ""
     if hit_alert and t["outcome"] not in APPROVED:
@@ -3826,15 +3847,25 @@ def cmd_route(args):
     tf = (get_task(args.task).get("fields", {}) or {})
     stamp = datetime.now(LONDON).strftime("%d %b %Y")
     decided = decision_carry_out_fields(tf, stamp)
+    verdict_moved = False
     if decided:
         note = decided.pop("_note")
         existing = str(tf.get(AF["notes"]) or "").rstrip()
         decided[AF["notes"]] = (existing + "\n\n" + note).strip()[-90000:]
         fields.update(decided)
+    elif sel(tf.get(AF["approvalOutcome"])) in APPROVED + ("Changes requested",):
+        # THE VERDICT GOES WITH THE WORK (review of PR #794, 15 Oct 2026). A carry-out or a redo is
+        # handed to Sent For Approval By (task_view's agentId), not the Team Member, so a route that
+        # changed only the Team Member left a paused agent's approved card with the paused agent:
+        # the board placed it and dispatch handed it straight back. The new holder becomes the
+        # sender too; Kevin's verdict, Approved At and his words stay exactly as he left them.
+        fields[AF["sentForApprovalBy"]] = [args.to]
+        verdict_moved = True
     patch_task(args.task, fields)
     print(json.dumps({"routed": args.task, "to": args.to,
                       "agent": ALL_AGENTS[args.to]["name"],
-                      "decisionCarriedOut": bool(decided)}))
+                      "decisionCarriedOut": bool(decided),
+                      "verdictMovedWith": verdict_moved}))
 
 
 REASSIGN_MARK = "REASSIGNED TO CEO"
@@ -4500,7 +4531,7 @@ def cmd_clear_alerts(args):
         # same rule as build_queue (14 Sep 2026). This sweep WRITES three
         # times a day; reading Notes here would re-park at the gate the very
         # tasks the queue fix released.
-        hit = system_alert_match(t.get("inboundSender"), t["name"])
+        hit = alert_lane_match(t.get("inboundSender"), t.get("inboundTask"), t["name"])
         if not hit:
             continue
         # A MERGE card or a Your step card is Kevin's by construction, whatever its name says:
@@ -5043,7 +5074,7 @@ def cmd_submit(args):
     # refused "machine alert".
     _pn, _pd, _pnotes = (tf_probe.get(AF["name"], "") or "", tf_probe.get(AF["description"], "") or "",
                          tf_probe.get(AF["notes"], "") or "")
-    alert_hit = system_alert_match(tf_probe.get(AF["inboundSender"], ""), _pn)
+    alert_hit = alert_lane_match(tf_probe.get(AF["inboundSender"], ""), tf_probe.get(AF["inboundTask"]), _pn)
     if alert_hit and alert_veto({"name": _pn, "description": _pd,
                                  "tier1": bool(tier_match(TIER1_PATTERNS, _pn, _pd, _pnotes)),
                                  "creditor": creditor_match(_pn, _pd, _pnotes)}):

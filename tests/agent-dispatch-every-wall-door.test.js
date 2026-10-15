@@ -733,7 +733,13 @@ rec("mc", status="Approval", name="MERGE: PR #812 — fix: send-email.py waits o
 rec("ys", status="Approval", name="Upgrade the Cloudflare Workers plan", outcome="Approved as-is",
     approved_at="2026-10-01T09:00:00.000Z", output=step)
 rec("alert", status="Approval", name="Cloudflare Worker error rate alert")
-m.query_tasks = lambda formula, **k: [json.loads(json.dumps(TASKS[i])) for i in ("mc", "ys", "alert")]
+# All three arrived as mail, so their names count (the alert lane reads a NAME only on inbound mail,
+# review of PR #794); the held-card guard is what must still protect the first two.
+for i in ("mc", "ys", "alert"):
+    TASKS[i]["fields"][AF["inboundTask"]] = True
+# A card a session raised, named like an alert: never moved by its words.
+rec("sess", status="Approval", name="Check the Cloudflare Worker error rate after the deploy")
+m.query_tasks = lambda formula, **k: [json.loads(json.dumps(TASKS[i])) for i in ("mc", "ys", "alert", "sess")]
 res = run(m.cmd_clear_alerts, {"dry_run": False})
 out = json.loads(res["out"])
 print(json.dumps({"moved": [x["task"] for x in out["items"]], "left": sorted(x["task"] for x in out["leftWithKevin"]),
@@ -741,7 +747,7 @@ print(json.dumps({"moved": [x["task"] for x in out["items"]], "left": sorted(x["
     expect(r.left).toEqual(['mc', 'ys']);
     expect(r.mc).toEqual(['Approval', ['recAgentAaaaaaaaa']]);
     expect(r.ys).toEqual(['Approval', 'Approved as-is']);
-    expect(r.moved).toEqual(['alert']);          // the control: a real alert still moves
+    expect(r.moved).toEqual(['alert']);          // the control: a real alert still moves, a session's card does not
   });
 });
 

@@ -379,11 +379,13 @@ def classify(f, activity_ids, now=None, lane=None):
     # was the 34-handovers bug.
     if ROY_REC in (f.get("Team Member") or []):
         return "withRoy", src, moved
-    # HELD BY DISPATCH, HELD HERE (15 Oct 2026). A task dispatch parks as a system alert, holds
-    # under an open lead (Roy's request or a property group's lead), holds for Roy's own job, parks
-    # on the tier-2 fallback or under Kevin's standing hold waits on a door. Until today the board
-    # read every one as ordinary stuck work and the foreman "left" each one three times a day for a
-    # robot that would never be handed it: one task, two answers. Never a move: listed on `held`.
+    # HELD BY DISPATCH, HELD HERE (15 Oct 2026). A task dispatch holds under an open lead (Roy's
+    # request or a property group's lead), holds for Roy's own job, parks on the tier-2 fallback or
+    # under Kevin's standing hold waits on a door. Until today the board read every one as ordinary
+    # stuck work and the foreman "left" each one three times a day for a robot that would never be
+    # handed it: one task, two answers. Listed on `held`; a move only once it has waited past the
+    # stuck clock (`pastClock`, held_problems). A system alert is NOT held: it has no door, so it
+    # stays ordinary board work (review of PR #794).
     if lane and lane in _load_dispatch().HELD_LANES:
         return "held", "dispatchLane", moved
     # Escalated inside the window. With an outcome it is DECIDED: Kevin has
@@ -826,9 +828,6 @@ def held_why(lane, detail):
     if lane == "heldUnderLead":
         return "held under %s %s while it is open" % (
             "Roy's request" if detail.get("heldFor") else "its lead task", detail.get("groupLead") or "")
-    if lane == "systemAlerts":
-        return "parked by dispatch as a system alert (matched %r): no agent is handed it" % (
-            detail.get("alertSource") or "")
     if lane == "royRequests":
         return "Roy's own request: worked by his assistant job, never by a slot"
     if lane == "skippedTier2":
@@ -1087,6 +1086,59 @@ def ownerless_problems(actions, scratch=None):
     return out
 
 
+def _slot_board(scratch=None):
+    """This slot's board.json, or None (freshness_problems reports a missing or unreadable one)."""
+    scratch = scratch or os.environ.get("TASK_MANAGER_SCRATCH")
+    if not scratch:
+        return None
+    try:
+        return json.loads((Path(scratch) / "board.json").read_text())
+    except (OSError, ValueError):
+        return None
+
+
+def held_problems(actions, scratch=None):
+    """Every held task past the stuck clock must carry a recorded move this slot (review of PR #794,
+    15 Oct 2026): 18 of the 20 held on the live board had waited more than seven days, one under a
+    lead that was approved, carried out and kept open, so its door would never open by itself. Any
+    move counts, `leave` included with a reason (close it if its lead covers it, route or escalate
+    it, or say why it waits); what verify refuses is silence."""
+    board = _slot_board(scratch)
+    if not board:
+        return []
+    moved = {a.get("task") for a in actions if a.get("ok")}
+    return ["held task %s (%s) has waited %s days (%s) past the %d-day clock with no move this slot: "
+            "close it if its lead covers it, route or escalate it, or leave it with a reason"
+            % (v.get("id"), (v.get("name") or "")[:60], v.get("daysStill"), v.get("why") or v.get("lane"),
+               STUCK_DAYS)
+            for v in board.get("held") or [] if v.get("pastClock") and v.get("id") not in moved]
+
+
+def alert_problems(actions, scratch=None):
+    """A stuck system alert (dispatch's lane `systemAlerts`: parked, never handed to an agent) is
+    ordinary board work with no door, so after LEAVE_STREAK_MAX `leave` moves in a row this slot's
+    move must place it: route, close, finish, chase, escalate, or `roy` where it is Roy's lane
+    (review of PR #794, 15 Oct 2026). The same rule ownerless_problems applies to a holder no robot
+    works."""
+    board = _slot_board(scratch)
+    if not board:
+        return []
+    run_start = os.environ.get("TASK_MANAGER_RUN_START")
+    out = []
+    for v in board.get("stuck") or []:
+        if not isinstance(v, dict) or v.get("dispatchLane") != "systemAlerts":
+            continue
+        streak = leave_streak(prior_moves(v.get("id"), float(run_start) if run_start else None))
+        mine = {a.get("move") for a in actions if a.get("ok") and a.get("task") == v.get("id")}
+        placing = set(PLACING_MOVES) | ({"roy"} if v.get("royLane") else set())
+        if streak >= LEAVE_STREAK_MAX and not mine & placing:
+            out.append("task %s (%s) is a system alert dispatch never hands to an agent, and was left %d "
+                       "slots running: route it, close it, escalate it to Kevin%s, never another leave"
+                       % (v.get("id"), (v.get("name") or "")[:60], streak,
+                          " or hand it to Roy (his lane)" if v.get("royLane") else ""))
+    return out
+
+
 LEAVE_STREAK_MAX = 3
 # Moves that settle a task no robot works. `roy` counts only where the task is Roy's lane by the
 # dispatcher's own rules (the view's `royAllowed`, set in ownerless_views; round 2 of PR #792).
@@ -1231,8 +1283,14 @@ def cmd_board(dispatch_queue_path=None):
     # twins are deliberately dormant, and dispatch's in-flight tasks are not
     # the foreman's to touch this slot. waitingOnKevin views join so an
     # Approval twin can surface as untouchable.
+    # Held twins are duplicate-checked too (review of PR #794): a held task is not the foreman's to
+    # move, but a second task on its thread is still a second card for one matter.
     dupes = duplicate_groups(
-        buckets["stuck"] + buckets["moving"] + buckets["waitingOnKevin"])
+        buckets["stuck"] + buckets["moving"] + buckets["waitingOnKevin"] + buckets["held"])
+    # A door can stay shut (a lead kept open for weeks): a held task past the stuck clock needs a
+    # move this slot, and verify names each one that has none (held_problems).
+    for v in buckets["held"]:
+        v["pastClock"] = v["daysStill"] is None or v["daysStill"] >= STUCK_DAYS
     out = {
         "generatedAt": now.isoformat(),
         "stuckDays": STUCK_DAYS,
@@ -1253,6 +1311,8 @@ def cmd_board(dispatch_queue_path=None):
             "ownLane": len(buckets["ownLane"]),
             # Held by dispatch on a door (alert, lead, Roy's job, tier-2 park, standing hold).
             "held": len(buckets["held"]),
+            # Of those, waiting past the stuck clock: each needs a move this slot (verify).
+            "heldPastStuckDays": sum(1 for v in buckets["held"] if v["pastClock"]),
             "duplicateGroups": len(dupes),
             "duplicateExtras": sum(len(g["closable"]) for g in dupes),
             "ownerless": len(ownerless),
@@ -1272,7 +1332,8 @@ def cmd_board(dispatch_queue_path=None):
         # Tasks dispatch holds on a door, each with its lane and what it waits on: never a move for
         # the foreman, never stuck, never ownerless. Listed so a hold is seen, never hidden.
         "held": [{"id": v["id"], "name": v["name"], "lane": v["dispatchLane"], "why": v.get("heldWhy", ""),
-                  "groupLead": v.get("groupLead"), "daysStill": v["daysStill"]} for v in buckets["held"]],
+                  "groupLead": v.get("groupLead"), "daysStill": v["daysStill"], "pastClock": v["pastClock"]}
+                 for v in buckets["held"]],
         "stuck": buckets["stuck"],
         "duplicates": dupes,
         "waitingOnKevin": buckets["waitingOnKevin"],
@@ -2210,6 +2271,8 @@ def cmd_verify(report_path):
 
     problems.extend(freshness_problems(board))
     problems.extend(ownerless_problems(actions))
+    problems.extend(held_problems(actions))
+    problems.extend(alert_problems(actions))
     problems.extend(clock_problems(actions))
 
     verdict = {

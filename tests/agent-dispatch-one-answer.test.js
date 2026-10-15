@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeAll } from 'vitest';
 import { execFileSync } from 'child_process';
-import { mkdtempSync, writeFileSync } from 'fs';
+import { mkdtempSync, writeFileSync, readFileSync } from 'fs';
 import { tmpdir } from 'os';
 import { resolve, dirname } from 'path';
 import { fileURLToPath } from 'url';
@@ -64,7 +64,11 @@ const ROWS = [
   ['recCarryOutAaaaaa', 'Today', '2026-10-14', [ANALYST], [ANALYST], 'Approved as-is', '', 'Dear Sir, thank you for the survey.', '', 'Reply to the surveyor', {}],
   ['recRedoAaaaaaaaaa', 'Today', '2026-10-14', [ANALYST], [ANALYST], 'Changes requested', 'Shorter, please.', 'Dear Sir, ...', '', 'Reply to the valuer', {}],
   ['recCeoRouteAaaaaa', 'Today', '2026-10-14', [CEO], [], '', '', '', '', 'Look into a second business bank account', {}],
-  ['recAlertMoneyAaaa', 'Today', '2026-10-14', [BUILDER], [], '', '', '', '', 'Apps Script add-on renewal £12.00', {}],
+  ['recAlertMoneyAaaa', 'Today', '2026-10-14', [BUILDER], [], '', '', '', '', 'Apps Script add-on renewal £12.00', { 'Inbound Communication Task': true }],
+  // a task a session raised, named for an alert: never parked by its own words (the rec7P8 shape)
+  ['recAirtableAutoAa', 'Today', '2026-10-01', [BUILDER], [], '', '', '', '', 'Check five Airtable automation failure notices (28 Sep to 14 Oct)', {}],
+  // tier 1 is marked and worked, never dropped out of the worked lanes
+  ['recTierOneAaaaaaa', 'Today', '2026-10-14', [ANALYST], [], '', '', '', '', 'Prepare the bundle for the solicitor', {}],
   ['recBlankCarryAaaa', 'Today', '2026-10-14', [], [ANALYST], 'Approved as-is', '', 'Dear Sir, the meter reading is attached.', '', 'Send the meter reading', {}],
   // escalated yesterday, then a draft written over the card and approved: a carry-out, never also decided
   ['recEscRewrittenAa', 'Today', '2026-10-14', [ANALYST], [ANALYST], 'Approved as-is', '', 'Dear Sir, our final offer is attached.', ESC_STAMP, 'Reply to the buyer', {}],
@@ -77,10 +81,16 @@ const ROWS = [
   ['recPausedCarryAaa', 'Today', '2026-10-11', [RENT], [RENT], 'Approved as-is', '', 'Dear tenant, your statement is attached.', '', 'Send the rent statement', {}],
   ['recTriageHeldAaaa', 'Today', '2026-10-11', [TRIAGE], [], '', '', '', '', 'Sort the folder', {}],
   ['recPausedAlertAaa', 'Today', '2026-10-11', [RENT], [], '', '', '', '', 'Apps Script failure: rent sync', {}],
-  // Held on a door: never worked, never the foreman's move
-  ['recAlertNameAaaaa', 'Today', '2026-10-01', [BUILDER], [], '', '', '', '', 'Apps Script failure: daily sync stopped', {}],
+  // Machine alerts: never handed to an agent, but no door either, so ordinary board work (never held)
+  ['recAlertNameAaaaa', 'Today', '2026-10-01', [BUILDER], [], '', '', '', '', 'Apps Script failure: daily sync stopped', { 'Inbound Communication Task': true }],
   ['recAlertSendAaaaa', 'Today', '2026-10-01', [BUILDER], [], '', '', '', '', 'Your worker hit an error', { 'Inbound Sender': 'noreply@notify.cloudflare.com' }],
-  ['recRoyTwinAaaaaaa', 'Today', '2026-10-01', [RESPONSE], [], '', '', '', `${ROY_STAMP} ROY IS HANDLING THIS: recRoyLeadAaaaaaa`, 'Tenant asks about the spare keys', {}],
+  ['recAirtableMailAa', 'Today', '2026-10-01', [BUILDER], [], '', '', '', '', 'Run failed: Daily rent sync', { 'Inbound Sender': 'noreply@airtable.com', 'Inbound Communication Task': true }],
+  // Held on a door: never worked, no move while the door can open, a move once past the clock
+  ['recRoyTwinAaaaaaa', 'Today', '2026-10-01', [RESPONSE], [], '', '', '', `${ROY_STAMP} ROY IS HANDLING THIS: recRoyLeadAaaaaaa`, 'Tenant asks about the spare keys', { 'Inbound Note URL Link': 'https://mail.google.com/mail/u/0/#all/18f0aa11bb22cc33' }],
+  // a second task on the same thread, held under the same request: held twins are still duplicate-checked
+  ['recRoyTwinTwoAaaa', 'Today', '2026-10-02', [RESPONSE], [], '', '', '', `${ROY_STAMP} ROY IS HANDLING THIS: recRoyLeadAaaaaaa`, 'Tenant asks about the spare keys again', { 'Inbound Note URL Link': 'https://mail.google.com/mail/u/0/#all/18f0aa11bb22cc33' }],
+  // held, but inside the stuck clock: listed, no move owed
+  ['recSiblingNewAaaa', 'Today', '2026-10-01', [PROPERTY], [], '', '', '', '[14 Oct 2026 — agent-dispatch] HELD UNDER recLeadPropAaaaaa', 'COMPLIANCE: EICR missing - 42 Example Road', { 'Created Time': new Date(Date.now() - 86400000).toISOString() }],
   ['recRoyRequestAaaa', 'Today', '2026-10-01', [RESPONSE], [], '', '', '', `${ROY_STAMP} ROY REQUEST from Roy`, 'ROY: send the tenant the bin collection days', {}],
   ['recSiblingAaaaaaa', 'Today', '2026-10-01', [PROPERTY], [], '', '', '', '[1 Oct 2026 — agent-dispatch] HELD UNDER recLeadPropAaaaaa', 'COMPLIANCE: GSC expired - 42 Example Road', {}],
   ['recStandingHoldAa', 'Today', '2026-10-01', [ANALYST], [], '', '', '', '', 'Survey report for 32 Example Road', {}],
@@ -107,9 +117,9 @@ const ROWS = [
 // ownerless, decided or held on the board; what it holds is held there with the same lane; its
 // decided is the board's decided; its noLane is the board's ownerless.
 const WORKED = ['worklist', 'reserve', 'routingNeeded', 'idleHandbacks'];
-const HELD = ['systemAlerts', 'heldUnderLead', 'heldByStandingHold', 'skippedTier2', 'royRequests'];
+const HELD = ['heldUnderLead', 'heldByStandingHold', 'skippedTier2', 'royRequests'];
 const OTHER_ROBOT = ['royLane', 'mergeCards', 'ownGoSignal', 'trialChecked'];
-const DISPATCH_LISTS = [...WORKED, ...HELD, ...OTHER_ROBOT, 'decided', 'noLane', 'formCards', 'unmappedAgent', 'unclassified'];
+const DISPATCH_LISTS = [...WORKED, ...HELD, ...OTHER_ROBOT, 'systemAlerts', 'decided', 'noLane', 'formCards', 'unmappedAgent', 'unclassified'];
 const BOARD_LISTS = ['stuck', 'waitingOnKevin', 'inFlight', 'withRoy', 'escalated', 'decided', 'parked', 'ownLane', 'held'];
 
 let run;
@@ -139,7 +149,7 @@ AI = json.loads(${JSON.stringify(JSON.stringify(AI))})
 ROSTER = json.loads(${JSON.stringify(JSON.stringify(ROSTER))})
 ROWS = json.loads(${JSON.stringify(JSON.stringify(ROWS))})
 AF = d.AF
-NAME_TO_AF = {"Inbound Sender": "inboundSender"}
+NAME_TO_AF = {"Inbound Sender": "inboundSender", "Inbound Communication Task": "inboundTask"}
 def drec(r):
     i, st, due, team, sfab, out, fb, output, notes, name, extra = r
     f = {AF["name"]: name, AF["status"]: {"name": st}, AF["dueDate"]: due, AF["teamMember"]: team,
@@ -147,7 +157,8 @@ def drec(r):
     if out:
         f[AF["approvalOutcome"]] = {"name": out}; f[AF["approvedAt"]] = "2026-10-14T09:00:00.000Z"
     for k, v in extra.items():
-        f[AF[NAME_TO_AF[k]]] = v
+        if k in NAME_TO_AF:
+            f[AF[NAME_TO_AF[k]]] = v
     return {"id": i, "fields": f}
 def brec(r):
     i, st, due, team, sfab, out, fb, output, notes, name, extra = r
@@ -239,6 +250,7 @@ describe('one task, one answer: the dispatcher and the task board on every lane 
       else if (dsp === 'decided') ok = brd === 'decided' && !own;
       else if (dsp === 'noLane') ok = ['stuck', 'moving'].includes(brd) && own && Boolean(ownerless[id].noLaneHolder);
       else if (HELD.includes(dsp)) ok = brd === 'held' && !own;
+      else if (dsp === 'systemAlerts') ok = ['stuck', 'moving'].includes(brd) && !own;
       else if (dsp === 'formCards') ok = brd === 'ownLane' && !own;
       else if (OTHER_ROBOT.includes(dsp)) ok = ['stuck', 'moving', 'inFlight'].includes(brd) && !own;
       else if (dsp === 'unmappedAgent' || dsp === 'unclassified') ok = ['stuck', 'moving'].includes(brd);
@@ -272,7 +284,7 @@ describe('one task, one answer: the dispatcher and the task board on every lane 
     // Full views only (the stuck, decided, Roy and Kevin lists, and every ownerless one, moving
     // included); the slim held list carries `lane`, checked above.
     const full = Object.entries({ ...view, ...ownerless }).filter(([, v]) => 'dispatchLane' in v);
-    expect(full.length).toBe(14);   // the full views this fixture set yields: a broken read is not a pass
+    expect(full.length).toBe(17);   // the full views this fixture set yields: a broken read is not a pass
     for (const [id, v] of full) {
       const dsp = (dispatchOf[id] || [])[0];
       if (!dsp) { expect(v.dispatchLane ?? '', id).toBe(''); continue; }
@@ -283,14 +295,41 @@ describe('one task, one answer: the dispatcher and the task board on every lane 
 });
 
 describe('the three disagreements of 15 Oct 2026, by name', () => {
-  it('(a) a system alert is held on both sides, never stuck work on the board', () => {
+  it('(a) a machine alert is parked by dispatch and is ordinary stuck work on the board, never held', () => {
     const { dispatchOf, boardOf } = answers();
-    for (const id of ['recAlertNameAaaaa', 'recAlertSendAaaaa']) {
-      expect(dispatchOf[id]).toEqual(['systemAlerts']);
-      expect(boardOf[id]).toEqual(['held']);
+    for (const id of ['recAlertNameAaaaa', 'recAlertSendAaaaa', 'recAirtableMailAa']) {
+      expect(dispatchOf[id], id).toEqual(['systemAlerts']);
+      expect(boardOf[id], id).toEqual(['stuck']);
     }
+    const stuck = Object.fromEntries(run.board.stuck.map((v) => [v.id, v]));
+    expect(stuck.recAirtableMailAa.dispatchLane).toBe('systemAlerts');
     // the veto still holds: a sum of money is worked, whatever the name says
     expect(dispatchOf.recAlertMoneyAaaa[0]).toMatch(/^(worklist|reserve)$/);
+  });
+
+  it('(a) a task a session raised is never alert-parked by its words (the rec7P8 shape)', () => {
+    const { dispatchOf } = answers();
+    expect(dispatchOf.recAirtableAutoAa[0]).toMatch(/^(worklist|reserve)$/);
+  });
+
+  it('tier 1 is marked and lands in a lane dispatch works', () => {
+    const { dispatchOf } = answers();
+    expect(run.queue.tier1Tasks.map((t) => t.id)).toContain('recTierOneAaaaaaa');
+    expect(dispatchOf.recTierOneAaaaaaa[0]).toMatch(/^(worklist|reserve)$/);
+  });
+
+  it('a held task past the stuck clock is counted and flagged; one inside it is not', () => {
+    const held = Object.fromEntries(run.board.held.map((v) => [v.id, v]));
+    expect(held.recSiblingNewAaaa.pastClock).toBe(false);
+    expect(held.recRoyTwinAaaaaaa.pastClock).toBe(true);
+    expect(run.board.counts.heldPastStuckDays).toBe(run.board.held.filter((v) => v.pastClock).length);
+    expect(run.board.counts.heldPastStuckDays).toBe(run.board.held.length - 1);
+  });
+
+  it('held twins on one thread are still duplicate-checked', () => {
+    const group = run.board.duplicates.find((g) => g.keeper === 'recRoyTwinAaaaaaa' || (g.closable || []).includes('recRoyTwinAaaaaaa'));
+    expect(group, JSON.stringify(run.board.duplicates)).toBeTruthy();
+    expect([group.keeper, ...group.closable].sort()).toEqual(['recRoyTwinAaaaaaa', 'recRoyTwinTwoAaaa']);
   });
 
   it("(b) a twin held for Roy's request, and a property sibling under its lead, are held on both sides", () => {
@@ -354,5 +393,131 @@ print(json.dumps(tm.read_dispatch_lanes({}, {}, "")))
     const [lanes, why] = JSON.parse(out.trim());
     expect(lanes).toBeNull();
     expect(why).toMatch(/dispatch lanes read failed .*503/);
+  });
+});
+
+// ─── Review of PR #794 (15 Oct 2026): no lane without a clock, and the verdict goes with the work ───
+
+function tmVerify(fn, board, actions, prior = []) {
+  const dir = mkdtempSync(tmpdir() + '/od-held-verify-');
+  const scratch = mkdtempSync(tmpdir() + '/od-held-scratch-');
+  writeFileSync(resolve(scratch, 'board.json'), JSON.stringify(board));
+  const out = execFileSync('python3', ['-c', `
+import importlib.util, json, sys, os, time
+from datetime import datetime
+from pathlib import Path
+sys.path.insert(0, ${JSON.stringify(resolve(ROOT, 'scripts'))})
+spec = importlib.util.spec_from_file_location("tm", ${JSON.stringify(TM)})
+m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m)
+start = time.time()
+PRIOR = json.loads(${JSON.stringify(JSON.stringify(prior))})
+rows = [{"task": t, "move": mv, "reason": "x", "ts": datetime.fromtimestamp(start - 3600 * (len(PRIOR) - n)).isoformat(timespec="seconds")}
+        for n, (t, mv) in enumerate(PRIOR)]
+Path(${JSON.stringify(dir)}, "digest-2026-10-15.jsonl").write_text("".join(json.dumps(r) + "\\n" for r in rows))
+os.environ["TASK_MANAGER_RUN_START"] = str(start)
+print(json.dumps(m.${fn}(json.loads(${JSON.stringify(JSON.stringify(actions))}), scratch=${JSON.stringify(scratch)})))
+`], { encoding: 'utf8', env: { ...process.env, TASK_MANAGER_DIR: dir } });
+  return JSON.parse(out.trim().split('\n').pop());
+}
+
+describe('a held task past the stuck clock needs a move (verify)', () => {
+  const board = { held: [
+    { id: 'recHeldOldAaaaaaa', name: 'Tenant asks about keys', lane: 'heldUnderLead', why: 'held under its lead task while it is open', daysStill: 10.8, pastClock: true },
+    { id: 'recHeldNewAaaaaaa', name: 'EICR missing', lane: 'heldUnderLead', why: 'held', daysStill: 1, pastClock: false }] };
+
+  it('fails the slot naming the one past the clock with no move, never the one inside it', () => {
+    const r = tmVerify('held_problems', board, []);
+    expect(r).toHaveLength(1);
+    expect(r[0]).toMatch(/recHeldOldAaaaaaa .* has waited 10.8 days .* past the 7-day clock with no move this slot/);
+  });
+
+  it('any recorded move answers it, a reasoned leave included; a failed move does not', () => {
+    expect(tmVerify('held_problems', board, [{ task: 'recHeldOldAaaaaaa', move: 'leave', ok: true }])).toEqual([]);
+    expect(tmVerify('held_problems', board, [{ task: 'recHeldOldAaaaaaa', move: 'close', ok: true }])).toEqual([]);
+    expect(tmVerify('held_problems', board, [{ task: 'recHeldOldAaaaaaa', move: 'route', ok: false }])).toHaveLength(1);
+  });
+
+  it("cmd_verify runs it: the slot fails on the board's own pastClock list", () => {
+    const src = readFileSync(TM, 'utf8');
+    const verify = src.slice(src.indexOf('def cmd_verify('), src.indexOf('\ndef ', src.indexOf('def cmd_verify(') + 1));
+    expect(verify).toContain('problems.extend(held_problems(actions))');
+    expect(verify).toContain('problems.extend(alert_problems(actions))');
+  });
+});
+
+describe('a stuck system alert is ordinary board work: three leaves, then a placing move (verify)', () => {
+  const alert = (extra = {}) => ({ stuck: [{ id: 'recAlertStuckAaaa', name: 'Run failed: Daily rent sync', dispatchLane: 'systemAlerts', ...extra }] });
+  const leave = [{ task: 'recAlertStuckAaaa', move: 'leave', ok: true }];
+  const prior3 = [['recAlertStuckAaaa', 'leave'], ['recAlertStuckAaaa', 'leave'], ['recAlertStuckAaaa', 'leave']];
+
+  it('a fourth leave fails the slot; after two leaves another is still allowed', () => {
+    const r = tmVerify('alert_problems', alert(), leave, prior3);
+    expect(r).toHaveLength(1);
+    expect(r[0]).toMatch(/system alert dispatch never hands to an agent, and was left 3 slots running/);
+    expect(tmVerify('alert_problems', alert(), leave, prior3.slice(1))).toEqual([]);
+  });
+
+  it('route, close or escalate places it; roy only where the view says it is his lane', () => {
+    for (const move of ['route', 'close', 'escalate']) {
+      expect(tmVerify('alert_problems', alert(), [{ task: 'recAlertStuckAaaa', move, ok: true }], prior3), move).toEqual([]);
+    }
+    const roy = [{ task: 'recAlertStuckAaaa', move: 'roy', ok: true }];
+    expect(tmVerify('alert_problems', alert({ royLane: 'repair' }), roy, prior3)).toEqual([]);
+    expect(tmVerify('alert_problems', alert(), roy, prior3)).toHaveLength(1);
+  });
+
+  it('a task in any other lane is not judged by this rule', () => {
+    expect(tmVerify('alert_problems', { stuck: [{ id: 'recAlertStuckAaaa', dispatchLane: 'newWork' }] }, leave, prior3)).toEqual([]);
+  });
+});
+
+describe("route hands Kevin's verdict to the new holder, so the old one never carries it out", () => {
+  const route = (fields) => {
+    const out = execFileSync('python3', ['-c', `
+import importlib.util, json, sys, types
+sys.path.insert(0, ${JSON.stringify(resolve(ROOT, 'scripts'))})
+def boom(*a, **k): raise RuntimeError("network call in a test")
+import urllib.request; urllib.request.urlopen = boom
+spec = importlib.util.spec_from_file_location("d", ${JSON.stringify(DISPATCH)})
+m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m)
+AF = m.AF
+F = json.loads(${JSON.stringify(JSON.stringify(fields))})
+TASK = {"id": "recPausedCarryAaa", "fields": {AF[k]: v for k, v in F.items()}}
+m.get_task = lambda tid: json.loads(json.dumps(TASK))
+def patch_task(tid, fields):
+    TASK["fields"].update(fields)
+    return TASK
+m.patch_task = patch_task
+m.cmd_route(types.SimpleNamespace(task="recPausedCarryAaa", to="${ANALYST}"))
+f = TASK["fields"]
+t = m.task_view(TASK)
+roster = json.loads(${JSON.stringify(JSON.stringify(ROSTER))})
+ctx = m.lane_context([], roster, "", [], {"${RENT}": "AI Cash Flow Voids", "${ANALYST}": "AI Worker — Analyst"})
+print(json.dumps({"team": f[AF["teamMember"]], "sender": f.get(AF["sentForApprovalBy"]), "outcome": f.get(AF["approvalOutcome"]),
+                  "approvedAt": f.get(AF["approvedAt"]), "lane": m.task_lane(t, ctx)[0], "agentId": t["agentId"]}))
+`], { encoding: 'utf8' });
+    return JSON.parse(out.trim().split('\n').pop());
+  };
+
+  it('an approved card held by a paused agent: both links move, his approval stays, and the new holder carries it out', () => {
+    const r = route({ name: 'Send the rent statement', status: 'Today', teamMember: [RENT], sentForApprovalBy: [RENT],
+      approvalOutcome: 'Approved as-is', approvedAt: '2026-10-14T09:00:00.000Z', agentOutput: 'Dear tenant, ...' });
+    expect(r.team).toEqual([ANALYST]);
+    expect(r.sender).toEqual([ANALYST]);
+    expect(r.outcome).toBe('Approved as-is');
+    expect(r.approvedAt).toBe('2026-10-14T09:00:00.000Z');
+    expect(r.agentId).toBe(ANALYST);
+    expect(r.lane).toBe('approvedHandbacks');
+  });
+
+  it('a redo moves with it too; a task with no verdict keeps its sender as it was', () => {
+    const redo = route({ name: 'Send the rent statement', status: 'Today', teamMember: [RENT], sentForApprovalBy: [RENT],
+      approvalOutcome: 'Changes requested', approvedAt: '2026-10-14T09:00:00.000Z', approvalFeedback: 'Shorter.', agentOutput: 'Dear tenant, ...' });
+    expect(redo.sender).toEqual([ANALYST]);
+    expect(redo.lane).toBe('changesRequested');
+    const fresh = route({ name: 'Monthly rent summary', status: 'Today', teamMember: [RENT] });
+    expect(fresh.team).toEqual([ANALYST]);
+    expect(fresh.sender ?? []).toEqual([]);
+    expect(fresh.lane).toBe('newWork');
   });
 });

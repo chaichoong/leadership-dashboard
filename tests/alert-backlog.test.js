@@ -40,9 +40,13 @@ describe('the backlog is swept, not just the inflow', () => {
   it('uses the SAME classifier the lane uses', () => {
     // A second definition of "is this a machine breakage" would be a second
     // answer, and the sweep would disagree with the lane about the same task.
+    // Since the review of PR #794 that classifier is alert_lane_match (the name counts on inbound
+    // mail only), shared by the lane (task_lane), this sweep and the submit gate.
     const fn = DISPATCH.slice(DISPATCH.indexOf('def cmd_clear_alerts'),
                               DISPATCH.indexOf('def cmd_handover_property'));
-    expect(fn).toMatch(/system_alert_match\(/);
+    expect(fn).toMatch(/alert_lane_match\(/);
+    const lane = DISPATCH.slice(DISPATCH.indexOf('def task_lane('), DISPATCH.indexOf('\ndef ', DISPATCH.indexOf('def task_lane(') + 1));
+    expect(lane).toMatch(/alert_lane_match\(/);
   });
 });
 

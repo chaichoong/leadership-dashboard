@@ -310,14 +310,25 @@ describe('agent-dispatch.py does not drift from config.js or approvals.js', () =
     });
 
     it('tier 1 is no longer dropped out of the worklist', () => {
-      // The tier-1 mark lives in _mark_task since 15 Oct 2026 (one task, one answer: task_lane).
-      const at = PY.indexOf('def _mark_task(');
-      const loop = PY.slice(at, PY.indexOf('\ndef ', at + 1));
-      expect(loop.length, 'classification-loop parse went blind').toBeGreaterThan(100);
-      // The regression: a `continue` (or an early return) straight after the tier-1 match, which
-      // silently removes the task from everything downstream.
-      expect(loop).not.toMatch(/if hit1:[\s\S]{0,120}(continue|return)/);
-      expect(loop, 'tier-1 tasks must be marked, not skipped').toMatch(/t\["tier1"\]/);
+      // Driven, not grepped (review of PR #794): the lanes live in task_lane since 15 Oct 2026, so
+      // the regression to fear is a tier-1 task leaving the worked lanes. A tier-1 task held by a
+      // working agent must be marked AND land in a lane dispatch works.
+      const out = execFileSync('python3', ['-c', `
+import importlib.util, json, sys
+sys.path.insert(0, ${JSON.stringify(resolve(ROOT, 'scripts'))})
+spec = importlib.util.spec_from_file_location("d", ${JSON.stringify(resolve(ROOT, 'scripts/agent-dispatch.py'))})
+m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m)
+t = {"id": "recTierOneAaaaaaa", "name": "Prepare the bundle for the solicitor", "description": "", "notes": "",
+     "outcome": "", "agentOutput": "", "teamMemberIds": ["recqmKBmq8ZGkxVH9"], "sentForApprovalByIds": [],
+     "agentId": "recqmKBmq8ZGkxVH9", "localAgent": "worker-analyst", "inboundTask": False, "inboundSender": "",
+     "hasAssignee": False, "approvedAt": "", "cantAt": ""}
+ctx = m.lane_context([], {}, "", [], None)
+lane, _ = m.task_lane(t, ctx)
+print(json.dumps({"lane": lane, "tier1": t.get("tier1"), "work": list(m.WORK_LANES)}))
+`], { encoding: 'utf8' });
+      const r = JSON.parse(out.trim().split('\n').pop());
+      expect(r.tier1, 'tier-1 tasks must be marked, not skipped').toBe(true);
+      expect(r.work, 'a tier-1 task must stay in a lane dispatch works').toContain(r.lane);
     });
 
     it('the worker still renders its own banner on the post', () => {
