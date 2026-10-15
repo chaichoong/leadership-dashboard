@@ -79,8 +79,18 @@ carries `ask`, `approvalOutcome`, `approvalFeedback` and `recommended`; your
 move this slot is whatever he said — route, roy, close, leave — recorded as
 that move; a Rejected card means close it. Three rules: an approval with EMPTY
 `approvalFeedback` means he took the card's own recommendation, so the move is
-the view's `recommended` (every card since 2 Oct 2026 carries one). Only when
-`recommended` is empty too (a card from before the brief) is there no move:
+the view's `recommended`. `recommendedFrom` says where it was read: the
+brief's `RECOMMENDED:` line, or on a card an agent raised through submit (no
+brief) its bare RECOMMENDED heading, its option marked RECOMMENDED, or its
+"Carrying this out will involve:" line, which is exactly what approving it
+does. Carry that out; never ask him again about a card he approved. When the
+view carries `answersMissing`, his approval chose an option that needs words he
+did not type (for example "Reply with the answers in the box"): close the old
+card with `decided TASKID` and `escalate` ONE card whose ask is only the
+missing answers, listed from the card, with a `SINCE YOU LAST ANSWERED:` line
+saying his choice stands. Never the whole question again. Only when
+`recommended` is empty too (a card with no recommendation and no carrying-out
+line) is there no move:
 close the old card with `python3 scripts/agent-dispatch.py decided TASKID`,
 then escalate again with a proper brief rather than inventing an answer. When
 his answer is to WAIT ("leave it until the 5th", "remind me in November"),
@@ -272,7 +282,13 @@ Assignee, whatever its age. It also carries every task held only by an AI agent
 that no robot works (the view's `noLaneHolder` names it, for example the AI
 Bookkeeper, which is the Reconciliation tab's matcher and works no tasks; 15 Oct
 2026): that task is as unowned as a blank one, so `route` it to the agent whose
-lane it is (`route` refuses a target no robot works, so it cannot go back).
+lane it is (`route` refuses a target no robot works, so it cannot go back). An
+agent Kevin paused on the register, or Inbox Triage and the Content Engine
+holding anything but their own answered cards, works nothing either. After
+three `leave` moves in a row on such a task, verify fails the slot unless the
+move is `route`, `roy` or `escalate` (a card for Kevin). If `noLaneCheck` reads
+NOT CHECKED, say so in the report: the agent-held half was not read, which is
+never "none".
 Give EACH one exactly one move this slot, using
 the Step 2 rules below (tier-1 and legal → `escalate`, creditor → the Supplier
 and Creditor Manager, repairs → `roy`, a domain agent's goal → `route`,

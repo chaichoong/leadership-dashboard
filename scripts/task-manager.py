@@ -132,9 +132,64 @@ EARLIER_OUTPUT_MARK = "\n\nEarlier output:\n"
 
 def card_recommended(agent_output):
     """The recommendation on a decision card, '' on a card from before the
-    brief. Only the card is read, never an earlier draft kept under it."""
+    brief. Only the card is read, never an earlier draft kept under it.
+    Strict on purpose: verify reads it to prove an `escalate` wrote a brief.
+    The decided view reads card_move, which also reads cards nobody escalated."""
     m = RECOMMENDED_RE.search(str(agent_output or "").partition(EARLIER_OUTPUT_MARK)[0])
     return " ".join(m.group(1).split()) if m else ""
+
+
+# A card an agent raised through `submit`, or a script through the create gate, has no
+# `RECOMMENDED:` line (15 Oct 2026, review of PR #792): all four answered cards on the board that
+# day read `recommended` blank, and the skill's rule for a blank one is to close the card and ask
+# Kevin again, about cards he had already approved. Their move is written three other ways: a bare
+# RECOMMENDED heading over the option, an option line marked RECOMMENDED, or the card's own
+# "Carrying this out will involve:" line, which is exactly what approving it does.
+RECOMMENDED_HEADING_RE = re.compile(
+    r"^[ \t]*(?:#+[ \t]*)?\**RECOMMENDED\**[ \t]*\n((?:[ \t]*\S[^\n]*(?:\n|\Z))+)", re.M)
+RECOMMENDED_OPTION_RE = re.compile(
+    r"^[ \t]*(?:[-*]|\d{1,2}[.)]|[A-H][.)])[ \t]+(\S[^\n]*?)[ \t]*(?:\bRECOMMENDED\b|\((?:R|r)ecommended\))[ \t.]*$",
+    re.M)
+CARRY_OUT_RE = re.compile(r"\**Carrying this out will involve:\**[ \t]*([^\n]+)")
+# A card whose option needs words typed in the box ("Reply with the answers in the box", "With your
+# 8 answers"): approving it with the box empty chose the option and left out what it needs.
+ANSWERS_ASKED_RE = re.compile(
+    r"\bin the (?:box|note)\b|\breply with\b|\bwith your (?:\w+ )?answers?\b"
+    r"|\banswer (?:the|these) (?:\w+ )?(?:facts|questions)\b|\btype (?:the|your) (?:answers?|figures?|details?)\b",
+    re.I)
+
+
+def card_move(agent_output):
+    """(what approving this card does, where it was read) or ('', ''). In order: the brief's
+    RECOMMENDED: line, a bare RECOMMENDED heading, an option marked RECOMMENDED, the card's
+    "Carrying this out will involve:" line. Only the card, never an earlier draft under it."""
+    head = str(agent_output or "").partition(EARLIER_OUTPUT_MARK)[0]
+    found = card_recommended(head)
+    if found:
+        return found, "RECOMMENDED: line"
+    for rx, source in ((RECOMMENDED_HEADING_RE, "RECOMMENDED heading"),
+                       (RECOMMENDED_OPTION_RE, "option marked RECOMMENDED"),
+                       (CARRY_OUT_RE, "carrying-out line")):
+        m = rx.search(head)
+        if m and m.group(1).strip():
+            return " ".join(m.group(1).split()), source
+    return "", ""
+
+
+def answers_missing(f):
+    """The words on an approved card asking for answers Kevin did not type, or ''. His approval
+    chose the option; the card it needs next asks for those answers only, never the whole question."""
+    if str(f.get("Approval Feedback") or "").strip() or f.get("Approval Outcome") not in (
+            "Approved as-is", "Approved with minor edits"):
+        return ""
+    output = str(f.get("Agent Output") or "").partition(EARLIER_OUTPUT_MARK)[0]
+    ask = (output.strip().splitlines() or [""])[0]
+    move, _ = card_move(output)
+    carry = CARRY_OUT_RE.search(output)
+    for text in (ask, move, carry.group(1) if carry else ""):
+        if ANSWERS_ASKED_RE.search(text or ""):
+            return " ".join(str(text).split())[:300]
+    return ""
 # The clock's own nudge to Roy (cmd_clock) counts as a touch, so the model's weekly chase is not
 # due again the same week.
 CLOCK_ROY_MARK = "CLOCK ROY:"
@@ -170,7 +225,7 @@ def pat():
     return p.read_text().strip()
 
 
-def airtable_request(method, path, body, why):
+def airtable_request(method, path, body, why, soft=False):
     """One request with the failure modes this platform has actually hit:
     a 429/5xx gets ONE retry after a pause (a slot run makes 50+ calls on a
     base shared with daily-ops, so a transient throttle must not turn a
@@ -206,10 +261,13 @@ def airtable_request(method, path, body, why):
             if attempt == 1:
                 time.sleep(5)
                 continue
+    if soft:
+        # A read whose failure is reported as NOT CHECKED by its caller, never a broken board.
+        raise RuntimeError("%s failed: %s" % (why, last_err))
     fail("%s failed: %s" % (why, last_err))
 
 
-def query_all(table, formula, fields, why):
+def query_all(table, formula, fields, why, soft=False):
     """Paginated read — a hand-rolled single-page fetch is how the recon
     accuracy card silently measured 100 of 259 rows. Always follow offset."""
     records, offset = [], None
@@ -219,7 +277,7 @@ def query_all(table, formula, fields, why):
         if offset:
             params.append(("offset", offset))
         out = airtable_request(
-            "GET", "%s?%s" % (table, urllib.parse.urlencode(params)), None, why)
+            "GET", "%s?%s" % (table, urllib.parse.urlencode(params)), None, why, soft=soft)
         records += out.get("records", [])
         offset = out.get("offset")
         if not offset:
@@ -339,7 +397,9 @@ def classify(f, activity_ids, now=None):
     # dispatch would not carry them out and this board read them as "moving" for seven days. One
     # held by the AI CEO (Kevin's question on the trust review, 12 Oct) left the CEO "idle" on his
     # AI team panel. A live verdict on a DECIDE: card is decided here exactly as it is in dispatch.
-    if answered and not esc:
+    # Only where dispatch would read the card at all (review of PR #792): inside its window and
+    # under no standing hold, by its own in_dispatch_window and hold_for, imported, never copied.
+    if answered and not esc and dispatch_reads(f, now):
         return "decided", "answeredCard", moved
     if esc and (answered or not (done and done >= esc)):
         if (now - esc) < timedelta(days=STUCK_DAYS) or answered:
@@ -620,6 +680,8 @@ def task_view(rec, activity_ids, dispatch_ids, now):
         "assigneeEmail": assignee,
         "hasAssignee": bool(f.get("Assignee")),
         "sentForApprovalBy": f.get("Sent For Approval By") or [],
+        # Kevin's verdict, if any: an agent on its own schedule works only its own answered cards.
+        "outcome": f.get("Approval Outcome") or "",
         "maintenanceTicket": bool(f.get("Maintenance Ticket")),
         "hardDeadline": bool(f.get("Hard Deadline")),
         "kevinOwned": is_kevin,
@@ -646,7 +708,11 @@ def task_view(rec, activity_ids, dispatch_ids, now):
         view["approvalOutcome"] = f.get("Approval Outcome")
         view["approvalFeedback"] = f.get("Approval Feedback") or ""
         view["ask"] = (str(f.get("Agent Output") or "").strip().splitlines() or [""])[0]
-        view["recommended"] = card_recommended(f.get("Agent Output"))
+        # What approving the card does: its RECOMMENDED: line, or on a card nobody escalated its
+        # RECOMMENDED heading, marked option or carrying-out line (card_move, 15 Oct 2026).
+        view["recommended"], view["recommendedFrom"] = card_move(f.get("Agent Output"))
+        # An approval that chose an option needing answers he did not type: ask for those only.
+        view["answersMissing"] = answers_missing(f)
         # Who held it when it was escalated: the gate's approve path re-links
         # the task to the sender, so the board restores this holder unless
         # Kevin named another.
@@ -693,6 +759,32 @@ def _load_script(filename, modname):
 
 def _load_dispatch():
     return _load_script("agent-dispatch.py", "od_dispatch")
+
+
+_HOLDS = {}
+
+
+def board_holds():
+    """Kevin's standing holds as dispatch reads them (its load_standing_holds), once per run. An
+    unreadable file is [] with the error kept, exactly as the queue treats it."""
+    if "holds" not in _HOLDS:
+        _HOLDS["holds"], _HOLDS["error"] = _load_dispatch().load_standing_holds()
+    return _HOLDS["holds"]
+
+
+def dispatch_reads(f, now):
+    """True when dispatch would read this task at all: inside its window (Today, Overdue, or
+    Upcoming and due) and under no standing hold. Both rules are agent-dispatch.py's own
+    (in_dispatch_window, standing_holds.hold_for), so the board's `decided` and dispatch's cannot
+    disagree about a card that waits on a date or on Kevin's hold."""
+    d = _load_dispatch()
+    today = now.astimezone(LONDON).date().isoformat()
+    if not d.in_dispatch_window(f.get("Status") or "", f.get("Due Date"), today, bool(f.get("Some Day"))):
+        return False
+    task = {"name": f.get("Task Name") or "", "description": f.get("Description") or "",
+            "outcome": f.get("Approval Outcome") or "", "approvedAt": f.get("Approved At") or "",
+            "cantAt": d.standing_holds.latest_cant(f.get("Feedback History"))}
+    return not d.standing_holds.hold_for(task, board_holds())
 
 
 def finding_resolver(loader=None):
@@ -788,6 +880,9 @@ TASK_FIELDS = [
     # classifier reads so a move is never repeated; Approval Feedback and
     # Agent Output carry Kevin's answer to a DECIDE: card (15 Sep 2026).
     "Notes", "Approval Feedback", "Agent Output",
+    # His "I can't do this" stamps (standing_holds.latest_cant): a standing hold never parks the
+    # answer to his own reason, and dispatch_reads asks hold_for exactly as the queue does.
+    "Feedback History",
     # Description carries create-agent-task.py's "CHILD OF <parent id>" stamp.
     # It was missing from this read, so the CHILD-OF guard in the fold check
     # (finding 20261003-task-manager-733) read "" on every live record and could
@@ -817,7 +912,7 @@ APPROVAL_STAMP_FIELDS = [
 ]
 
 
-def ownerless_views(buckets, ai_agents=None, dispatch=None):
+def ownerless_views(buckets, ai_agents=None, dispatch=None, roster=None):
     """Open tasks with no Team Member and no Assignee, whatever their age (Kevin, 23 Sep 2026).
     The stuck rule waits seven days for no movement, so a task created with no owner sat unseen for
     a week: on 23 Sep a legal task due in October had been ownerless for five days.
@@ -827,7 +922,10 @@ def ownerless_views(buckets, ai_agents=None, dispatch=None):
     A task held only by an AI agent that no robot works is ownerless too (15 Oct 2026): the AI
     Bookkeeper held two live tasks dispatch never read. `ai_agents` is {Team Members id: name} for
     the rows with Is AI Agent ticked; the test is agent-dispatch.py's own `no_lane_holders`, so the
-    board and dispatch give one answer. Each such view carries `noLaneHolder`, the agents' names."""
+    board and dispatch give one answer. `roster` is dispatch's register map, so a role agent Kevin
+    paused, or one on its own schedule holding work that is not its own card, works nothing either
+    (None: the register was unread, judged by the list alone). Each such view carries
+    `noLaneHolder`, the agents' names."""
     out = []
     for b in ("stuck", "moving"):
         for v in buckets.get(b, []):
@@ -839,21 +937,41 @@ def ownerless_views(buckets, ai_agents=None, dispatch=None):
             if ai_agents is None:
                 continue
             held = (dispatch or _load_dispatch()).no_lane_holders(
-                v.get("teamMember"), v.get("sentForApprovalBy"), ai_agents)
+                v.get("teamMember"), v.get("sentForApprovalBy"), ai_agents,
+                roster=roster, outcome=v.get("outcome") or "")
             if held:
                 out.append(dict(v, noLaneHolder=[ai_agents.get(i, i) for i in held]))
     return out
 
 
 def read_ai_agents():
-    """{Team Members id: name} for every row with Is AI Agent ticked, for the ownerless check.
-    The AI CEO's row always exists and is ticked, so a read without it is broken, never empty."""
-    rows = query_all(TEAM_TABLE, "{Is AI Agent}", ["Name"], "AI agent roster read")
+    """({Team Members id: name} for every row with Is AI Agent ticked, ''), or (None, why) when
+    the read failed. The AI CEO's row always exists and is ticked, so a read without it is broken,
+    never empty. A failure never stops the board (review of PR #792): the ownerless check for
+    agent-held tasks says NOT CHECKED instead, exactly as dispatch's queue does."""
+    try:
+        rows = query_all(TEAM_TABLE, "{Is AI Agent}", ["Name"], "AI agent roster read", soft=True)
+    except Exception as e:               # noqa: BLE001 — any failure is the same NOT CHECKED
+        return None, "the Team Members read failed (%s)" % str(e)[:200]
     out = {r["id"]: (r.get("fields") or {}).get("Name") or r["id"] for r in rows}
     if CEO_TEAM_REC not in out:
-        fail("AI agent roster read returned %d rows and not the AI CEO's: the read is broken, "
-             "not the roster empty" % len(out))
-    return out
+        return None, ("the Team Members read returned %d AI agent rows and not the AI CEO's: the "
+                      "read is broken, not the roster empty" % len(out))
+    return out, ""
+
+
+def read_role_roster():
+    """(dispatch's register map, '') or (None, why). The same read and the same map `route`
+    judges a target by (fetch_role_roster)."""
+    try:
+        roster = _load_dispatch().fetch_role_roster()
+    except SystemExit as e:
+        return None, "the register read failed (%s)" % e
+    except Exception as e:               # noqa: BLE001
+        return None, "the register read failed (%s)" % str(e)[:200]
+    if not roster:
+        return None, "the register read returned no role agents: the read is broken"
+    return roster, ""
 
 
 def ownerless_problems(actions, scratch=None):
@@ -868,9 +986,62 @@ def ownerless_problems(actions, scratch=None):
     except (OSError, ValueError):
         return []   # freshness_problems already reports a missing or unreadable board
     moved = {a.get("task") for a in actions if a.get("ok")}
-    return ["ownerless task %s (%s) was given no owner and no move this slot"
-            % (v.get("id"), (v.get("name") or "")[:60])
-            for v in board.get("ownerless") or [] if v.get("id") not in moved]
+    out = ["ownerless task %s (%s) was given no owner and no move this slot"
+           % (v.get("id"), (v.get("name") or "")[:60])
+           for v in board.get("ownerless") or [] if v.get("id") not in moved]
+    # A task held by an agent no robot works could be `left` three times a day for ever (review
+    # of PR #792). After LEAVE_STREAK_MAX leaves in a row, this slot's move must place it.
+    run_start = os.environ.get("TASK_MANAGER_RUN_START")
+    for v in board.get("ownerless") or []:
+        if not v.get("noLaneHolder"):
+            continue
+        streak = leave_streak(prior_moves(v.get("id"), float(run_start) if run_start else None))
+        mine = {a.get("move") for a in actions if a.get("ok") and a.get("task") == v.get("id")}
+        if streak >= LEAVE_STREAK_MAX and not mine & set(PLACING_MOVES):
+            out.append("task %s (%s) is held by %s, which no robot works, and was left %d slots running: "
+                       "route it to an agent whose lane it is or escalate it to Kevin, never another leave"
+                       % (v.get("id"), (v.get("name") or "")[:60], ", ".join(v["noLaneHolder"]), streak))
+    return out
+
+
+LEAVE_STREAK_MAX = 3
+PLACING_MOVES = ("route", "escalate", "roy")
+
+
+def prior_moves(task, before=None, days=14):
+    """This task's recorded moves (the `note` digest), oldest first, written before `before`
+    (epoch seconds: this slot's start, so its own move is not counted). Priority corrections are
+    not moves on who holds the task and are left out."""
+    rows = []
+    for p in sorted(base_dir().glob("digest-*.jsonl"))[-days:]:
+        try:
+            lines = p.read_text().splitlines()
+        except OSError:
+            continue
+        for line in lines:
+            try:
+                r = json.loads(line)
+            except ValueError:
+                continue
+            if r.get("task") != task or r.get("move") == "priority":
+                continue
+            try:
+                at = datetime.fromisoformat(str(r.get("ts"))).timestamp()
+            except ValueError:
+                continue
+            if before is None or at < before:
+                rows.append((at, r.get("move")))
+    return [m for _, m in sorted(rows)]
+
+
+def leave_streak(moves):
+    """How many of the newest moves in a row were `leave`."""
+    n = 0
+    for m in reversed(moves):
+        if m != "leave":
+            break
+        n += 1
+    return n
 
 
 def read_activity(now):
@@ -937,7 +1108,17 @@ def cmd_board(dispatch_queue_path=None):
 
     for k in buckets:
         buckets[k].sort(key=lambda v: (v["lastMoved"] or ""))
-    ownerless = ownerless_views(buckets, read_ai_agents())
+    # Agent-held tasks no robot works (15 Oct 2026). A failed read never stops the board: the
+    # blank-holder half still runs and the agent half says NOT CHECKED, as dispatch's queue does.
+    ai_agents, ai_error = read_ai_agents()
+    roster, roster_error = read_role_roster() if ai_agents is not None else (None, "")
+    ownerless = ownerless_views(buckets, ai_agents, roster=roster)
+    no_lane_check = ("NOT CHECKED: " + ai_error) if ai_error else (
+        "checked (register unread, judged by dispatch's list alone: %s)" % roster_error
+        if roster_error else "checked")
+    if ai_error:
+        print("WARNING: tasks held by an AI agent no robot works were NOT CHECKED: %s" % ai_error,
+              file=sys.stderr)
     # Duplicates are judged over ACTIONABLE views only: parked (Some Day)
     # twins are deliberately dormant, and dispatch's in-flight tasks are not
     # the foreman's to touch this slot. waitingOnKevin views join so an
@@ -972,6 +1153,9 @@ def cmd_board(dispatch_queue_path=None):
         # age: each gets one move THIS slot (Step 2a), and verify fails the slot if one was left
         # without a recorded move.
         "ownerless": ownerless,
+        # Whether the agent-held half of that list was read: "NOT CHECKED: <why>" is said in the
+        # report, never read as "no orphans".
+        "noLaneCheck": no_lane_check,
         "stuck": buckets["stuck"],
         "duplicates": dupes,
         "waitingOnKevin": buckets["waitingOnKevin"],
