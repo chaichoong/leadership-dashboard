@@ -3083,6 +3083,343 @@ def load_standing_holds():
         return [], str(exc)[:200]
 
 
+# ─── ONE TASK, ONE ANSWER (Kevin, 15 Oct 2026) ───────────────────────
+#
+# The dispatcher and the Task Board Manager (scripts/task-manager.py) both
+# classify the open board, and until 15 Oct 2026 they did it with partly
+# separate rules. Read off the live board that day, three kinds of task got two
+# answers: a task parked here as a SYSTEM ALERT read as ordinary stuck work on
+# the board, so the foreman "left" it three times a day for a robot that would
+# never be handed it; a twin HELD UNDER a lead (Roy's request, or a property
+# group's lead) read the same way, 17 of them stuck on the board; and a task
+# held by an agent Kevin PAUSED went into this worklist while the board listed
+# it as ownerless, so two robots owned it. Kevin's rule: one task, one answer.
+#
+# task_lane is that one answer. build_queue lists every task by it, and the
+# board asks it (through queue_lanes) before it puts a task on its held,
+# decided or ownerless lists, so the two can never disagree on those.
+#
+# Two orderings changed on purpose, each so the dispatcher agrees with a rule
+# the board already applied:
+#   - An answered DECIDE: card is `decided` ahead of the Roy-lead hold, the
+#     tier-2 park, the alert lane, the Roy lane and an unmapped holder. Kevin's
+#     answer is the Task Manager's move whatever the card is about; before,
+#     a "Changes requested" DECIDE: card about a repair went to Roy here while
+#     the board also carried out his answer.
+#   - A task held only by agents no robot works (no_lane_holders) is `noLane`
+#     ahead of the alert lane, the Roy lane, Roy's requests and every worked
+#     lane: it leaves this worklist, and the board owns placing it. Holds with a
+#     door (Kevin's standing hold, a Roy lead, the tier-2 park, a robot card)
+#     still win, and the task becomes noLane when the door opens.
+
+# Lanes where the task waits on a door: listed, never worked, and never a move
+# for the board either (its `held` list).
+HELD_LANES = ("heldByStandingHold", "heldUnderLead", "skippedTier2", "systemAlerts", "royRequests")
+# Lanes a dispatched agent works: the worklist, the reserve and the idle
+# hand-backs are drawn from these and nothing else.
+WORK_LANES = ("approvedHandbacks", "changesRequested", "routingNeeded", "newWork")
+
+
+def lane_context(tasks, role_roster, role_roster_error="", standing=None, ai_agents=None,
+                 rent_senders=frozenset(), property_ok=None, roy_run=False, lead_reader=None):
+    """The run-level facts task_lane reads besides the task, built once per run by build_queue and
+    by queue_lanes alike. `tasks` is the population task_lane will judge: the HELD UNDER and ROY IS
+    HANDLING leads it names are read for status here (open_lead_ids). `role_roster` is
+    fetch_role_roster's map ({} when unread, with `role_roster_error` saying why); `ai_agents` is
+    fetch_ai_agents' map, None when that read failed (the no-lane test is then NOT CHECKED, as it
+    always was). `property_ok` None means the register alone decides; build_queue passes False when
+    the compliance book could not be read."""
+    roster = role_roster or {}
+    lead_ids = {held_lead_id(t) for t in tasks if held_lead_id(t)}
+    roy_ids = {roy_handling_lead(t["notes"]) for t in tasks if roy_handling_lead(t["notes"])}
+    return {
+        "standing": standing or [],
+        "role_roster": roster,
+        "creditor_ok": bool(roster.get(CREDITOR_REC_ID, {}).get("dispatchable")),
+        "property_ok": (bool(roster.get(PROPERTY_REC_ID, {}).get("dispatchable"))
+                        if property_ok is None else bool(property_ok)),
+        "rent_senders": rent_senders or set(),
+        "roy_run": bool(roy_run),
+        "ai_agents": ai_agents,
+        # no_lane_holders judges by the list alone when the register was unread, never by guessing
+        # every role agent paused (review of PR #792).
+        "no_lane_roster": None if role_roster_error else roster,
+        "open_leads": open_lead_ids(lead_ids, lead_reader),
+        "open_roy_leads": open_lead_ids(roy_ids, lead_reader),
+    }
+
+
+def lane_population(open_tasks, ctx):
+    """The tasks task_lane judges: every task an agent dispatch serves holds or sent, plus every
+    task held only by AI agents no robot works (the AI Bookkeeper's, 15 Oct 2026), which no lane
+    below would otherwise name. A person's task, or one nobody holds, is not the dispatcher's."""
+    out = []
+    for t in open_tasks:
+        if (any(i in ALL_AGENTS for i in t["teamMemberIds"])
+                or any(i in ALL_AGENTS for i in t["sentForApprovalByIds"])
+                or no_lane_of(t, ctx)):
+            out.append(t)
+    return out
+
+
+def no_lane_of(t, ctx):
+    """The AI agents holding this task that no robot works ([] when something works it, or when
+    the roster read failed: NOT CHECKED, said in the queue JSON)."""
+    if ctx.get("ai_agents") is None:
+        return []
+    return no_lane_holders(t["teamMemberIds"], t["sentForApprovalByIds"], ctx["ai_agents"],
+                           t.get("hasAssignee"), ctx.get("no_lane_roster"), t["outcome"])
+
+
+def _mark_task(t, ctx):
+    """The marks the lanes after it read: tier 1, the creditor lane, the rent reply lane and tier-2
+    correspondence. Returns (tier-2 pattern, outbound pattern) for the park."""
+    # Tier 1 no longer drops out of the worklist. It is MARKED and worked,
+    # and the mark rides all the way to the Slack post. Removing this line
+    # so tier-1 work is prepared silently is the regression to fear.
+    hit1 = tier_match(TIER1_PATTERNS, t["name"], t["description"], t["notes"])
+    t["tier1"] = bool(hit1)
+    t["matchedPattern"] = hit1 or ""
+    # A message the rent agent sent back with `reassign` (not about rent: keys, papers, a repair) is the CEO's
+    # to place, never the rent lane's again: otherwise the lane would take it straight back (review, 5 Oct 2026).
+    rent_senders = ctx.get("rent_senders")
+    t["rentReply"] = bool(t["inboundTask"] and rent_senders and sender_key(t["inboundSender"]) in rent_senders
+                          and not REASSIGN_LINE_RE.search(str(t.get("notes") or "")))
+    t["creditor"] = creditor_match(t["name"], t["description"], t["notes"])
+    # Creditor work is ALWAYS tier-1 (Kevin's triage ruling, 24 Aug 2026)
+    # — but "statutory demand" and "letter of claim" are tier-2 vocabulary
+    # the tier-1 keyword list missed, so an unparked correspondence task
+    # would have reached Kevin unbannered (review finding, 25 Aug 2026).
+    if t["creditor"] and not t["tier1"]:
+        t["tier1"] = True
+        t["matchedPattern"] = t["matchedPattern"] or "creditor lane"
+    hit2 = tier_match(TIER2_PATTERNS, t["name"], t["description"], t["notes"])
+    out2 = outbound_intent(t["name"], t["description"], t["notes"]) if hit2 else ""
+    # Stored on the task because the AUTO_ROUTES steal predicates read it.
+    t["tier2Correspondence"] = bool(hit2 and out2)
+    return hit2, out2
+
+
+def task_lane(t, ctx):
+    """The ONE lane this task is in (Kevin, 15 Oct 2026: one task, one answer). Returns
+    (lane, extra): `lane` is the build_queue key the task is listed under, `extra` the fields its
+    listing adds. Marks the task as the later lanes read it (tier1, creditor, property,
+    autoTarget, ...), exactly as build_queue always has. Pure apart from those marks: every read
+    is in `ctx` (lane_context)."""
+    # A STANDING HOLD WINS FIRST (Kevin, 24 Sep 2026). He ruled that nothing
+    # on the matter moves until an event (a named person's reply); on
+    # 23 Sep the Task Board Manager raised eight cards he had already ruled
+    # on, because the ruling lived in two other agents' files. A hold is
+    # read here for every agent, and an approval he gave AFTER the hold
+    # began is his newer word, so hold_for never holds it. Listed, never
+    # dropped: the task waits on the board with the reason on it.
+    hold = standing_holds.hold_for(t, ctx["standing"])
+    if hold:
+        return "heldByStandingHold", {"holdId": hold["id"], "holdTitle": hold.get("title", "")}
+    # A ROBOT FORM CARD IS NEVER AN AGENT'S WORK (3 Oct 2026). The rent check raises it, reads
+    # Kevin's verdict and finishes it in code; approving it opens the robot's window and
+    # nothing else. Pulled out here, before every lane, whatever its outcome or none: a
+    # changed, rejected or stranded card handed to an agent would be redone or "carried out"
+    # by a run that has no business with it (independent review, 3 Oct 2026). Listed under
+    # formCards, never hidden.
+    if form_card(t["name"], t["notes"]):
+        return "formCards", {}
+    # A MERGE CARD IS NEVER AN AGENT'S WORK (7 Oct 2026). Approving one runs merge-pr.py in
+    # scripts/merge-approved.py, deterministic and with no model. Handed to the Builder as a
+    # carry-out, a Claude run would try the merge itself; as a redo, it would rewrite a card it
+    # cannot change. Pulled out before every lane, whatever its outcome. Listed, never hidden.
+    if merge_card.is_merge_card(t["name"]):
+        return "mergeCards", {}
+    # A DECIDED CARD (15 Sep 2026). Kevin's answer to a DECIDE: card is a
+    # ruling on what should happen, not an approval of a draft. Carrying
+    # it out as a hand-back would spawn an agent to "execute" a question;
+    # the Task Manager's board reads its `decided` bucket and makes the
+    # move Kevin named (its verdict is in the task's Approval Feedback).
+    # AHEAD OF EVERY LANE BELOW (15 Oct 2026): the board files every answered
+    # DECIDE: card as decided whatever it is about, so this lane must too.
+    if t["outcome"] and is_decide_card(t["agentOutput"]):
+        _mark_task(t, ctx)
+        return "decided", {}
+    # ROY IS HANDLING THIS (24 Sep 2026): Roy forwarded this same matter to
+    # his assistant. While his request is open this twin waits, listed
+    # under heldUnderLead with the request as its lead, so Kevin never gets
+    # two cards for one tenant. An approval Kevin already gave still runs.
+    roy_lead = roy_handling_lead(t["notes"])
+    if roy_lead and roy_lead != t["id"] and roy_lead in ctx["open_roy_leads"] \
+            and t["outcome"] not in APPROVED:
+        return "heldUnderLead", {"groupLead": roy_lead, "heldFor": "Roy's request"}
+    hit2, out2 = _mark_task(t, ctx)
+    if hit2 and out2 and not ctx["creditor_ok"]:
+        # The old Mica lane survives ONLY as the fallback: while the
+        # Creditor Management agent's register row is not Built/Live
+        # (Kevin's pause lever), creditor correspondence parks exactly as
+        # it did before 25 Aug 2026 rather than flowing to a generalist.
+        return "skippedTier2", {"matchedPattern": hit2, "outboundPattern": out2}
+    # HELD BY AN AGENT NO ROBOT WORKS (15 Oct 2026, see no_lane_holders): the
+    # AI Bookkeeper's tasks, or a task held by an agent Kevin paused on the
+    # register. Never dispatched from here: the Task Manager's ownerless step
+    # gives each one a move. Before the alert and Roy lanes, because neither
+    # would ever move it (an alert is never worked, and a parked agent's task
+    # never goes to Roy: review of PR #792).
+    held = no_lane_of(t, ctx)
+    if held:
+        names = ctx["ai_agents"] or {}
+        return "noLane", {"noLaneHolder": [{"id": i, "name": names.get(i, i)} for i in held]}
+    # A machine reporting a breakage is work for the board, never a
+    # question for Kevin. Checked AFTER tier 1 and tier 2 on purpose: those
+    # classifications are about what the work TOUCHES and must win, and a
+    # monitoring alert never trips them anyway.
+    # THE SENDER AND THE NAME ONLY (14 Sep 2026). Until today this read
+    # the Description and the Notes too. Notes carry every agent's run
+    # log, and those logs say "Gmail quota" and "Apps Script" whenever a
+    # scan hit a limit — so eleven real matters (a solicitor's letter, a
+    # four-figure rent payment to verify, an adviser's £50+VAT fee, two compliance
+    # renewals, a domain renewal, an EICR quote) were parked here for up to
+    # 19 days and no agent ever saw them. A monitoring alert names itself
+    # in its subject line and comes from a machine address; that is enough.
+    # Money, a creditor marker or the tier-1 banner is never an alert.
+    hit_alert = system_alert_match(t.get("inboundSender"), t["name"])
+    if hit_alert and alert_veto(t):
+        hit_alert = ""
+    if hit_alert and t["outcome"] not in APPROVED:
+        return "systemAlerts", {"alertSource": hit_alert}
+    # ROY'S LANE. Checked AFTER tier 1, the creditor lane and the alert
+    # lane, all of which must win: the veto in roy_match already keeps
+    # money and law out, and this ordering is the second line of the same
+    # defence. An APPROVED task is never diverted — Kevin has already said
+    # yes to that exact work and it must be carried out, not handed on.
+    # THE PROPERTY LANE (2 Sep 2026). Compliance matters go to the
+    # Property Administration agent through AUTO_ROUTES below, so they
+    # are marked here and NOT diverted to Roy. While the agent's register
+    # row is not Built/Live (Kevin's pause lever) the mark is dropped and
+    # the task falls through to the Roy lane exactly as before this
+    # build — the same fallback shape as the creditor tier-2 park.
+    # ROY'S OWN REQUESTS (24 Sep 2026) stay with the agent he asked. A
+    # "log a repair for the boiler" request matches the Roy lane's repair
+    # words, and diverting it would hand Roy's request straight back to
+    # him; the property steal would move it to an agent that has no
+    # answer-to-Roy shapes. Tier 1 and the creditor lane still win.
+    roy_request = is_roy_request(t["name"], t["notes"])
+    t["property"] = ("" if (t["tier1"] or t["creditor"] or not ctx["property_ok"]) else
+                     property_match(t["name"], t["description"], t["notes"]))
+    if roy_request:
+        t["property"] = ""
+    # A CEO-lane task the fresh lane cannot place (neither inbound nor
+    # COMPLIANCE-named) keeps its old home — the Roy lane — rather than
+    # being taken from Roy and routed nowhere (review finding, 2 Sep 2026).
+    owner = t["teamMemberIds"][0] if t["teamMemberIds"] else ""
+    if (t["property"] and owner == CEO_REC_ID and not t["inboundTask"]
+            and not str(t["name"]).startswith(COMPLIANCE_TASK_PREFIX)):
+        t["property"] = ""
+    hit_roy = ("" if (t["tier1"] or t["creditor"] or t["outcome"] in APPROVED
+                      or t["property"])
+               else roy_match(t["name"], t["description"], t["notes"]))
+    if roy_request:
+        hit_roy = ""
+    if hit_roy:
+        return "royLane", {"royReason": hit_roy}
+    # Roy's NEW requests are worked by his own job alone (24 Sep 2026). It runs
+    # outside the queue lock so he is not kept waiting behind a 34-minute triage
+    # slot, which means another dispatch run could otherwise draft the same
+    # request at the same time. Only a queue read made for roy-assistant-run.sh
+    # (ROY_ASSISTANT_RUN=1) puts them in the worklist; every other run lists
+    # them under royRequests, counted, never worked and never dropped.
+    if roy_request and not t["outcome"] and not ctx["roy_run"]:
+        return "royRequests", {}
+    if not t["localAgent"]:
+        return "unmappedAgent", {}
+    # AN AGENT ON ITS OWN GO SIGNAL CARRIES OUT ITS OWN CARDS (16 Sep 2026). The Content Engine raises a card per
+    # episode and its hourly job publishes what Kevin approves. On 16 Sep the hand-back poll also took both
+    # approved episode cards as carry-outs: a headless Claude run drove publish.py by hand, its command time
+    # limit killed each YouTube upload part way, the next attempt adopted the half-uploaded videos with no publish
+    # time, and 2058's Short was left stuck processing on the channel. Listed under ownGoSignal, never hidden.
+    if t["outcome"] and own_go_signal(t["agentId"]):
+        return "ownGoSignal", {}
+    # A TRIAL AGENT'S APPROVED CARD IS CHECKED, NEVER CARRIED OUT (2 Oct 2026). Handing it to a carry-out run
+    # would have an agent try a send that send-email.py refuses, every 30 minutes, for ever. `trial-settle`
+    # closes it in code with Kevin's verdict on the task. Listed under trialChecked, never hidden.
+    if t["outcome"] in APPROVED and trial_problem(t["sentForApprovalByIds"] + t["teamMemberIds"], t["name"], t["notes"],
+                                                  t["approvedAt"]):
+        return "trialChecked", {}
+    # agentId (Sent For Approval By, falling back to Team Member) decides
+    # hand-backs: the drawer's decide path sets both, but an approved task
+    # missing Sent For Approval By must still be carried out, not lost.
+    if t["outcome"] in APPROVED and t["agentId"]:
+        return "approvedHandbacks", {}
+    if t["outcome"] == "Changes requested":
+        return "changesRequested", {}
+    if not t["outcome"] and held_lead_id(t) in ctx["open_leads"]:
+        return "heldUnderLead", {"groupLead": held_lead_id(t)}
+    if not t["outcome"]:
+        tm = t["teamMemberIds"][0] if t["teamMemberIds"] else ""
+        if tm == CEO_REC_ID:
+            # Deterministic lanes skip the CEO's judgement pass entirely
+            # (AUTO_ROUTES — Kevin's rulings, 24 and 25 Aug 2026): the
+            # dispatcher routes them straight to the role agent with
+            # `route TASKID --to <autoTarget>` — no od-ceo dispatch.
+            # Gated on the LIVE register inside auto_route_fresh: if the
+            # lane's row is not Built/Live (Kevin's pause lever) or the
+            # roster read failed, the task stays in the CEO lane and
+            # routes to a strategic agent like any other — work keeps
+            # flowing, the lever stays honoured, and cmd_route re-checks
+            # regardless.
+            target = auto_route_fresh(t, ctx["role_roster"])
+            if target:
+                t["autoTarget"] = target
+            return "routingNeeded", {}
+        if tm in ALL_AGENTS:
+            # A task sitting with the WRONG agent moves to its lane's
+            # specialist — the deliberately narrow steal predicates in
+            # AUTO_ROUTES decide, so the CEO's explicit routing choices
+            # are not silently overridden.
+            target = auto_route_steal(t, tm, ctx["role_roster"])
+            if target:
+                t["autoTarget"] = target
+                return "routingNeeded", {}
+            return "newWork", {}
+        # e.g. Team Member cleared while Sent For Approval By still
+        # points at an agent. Surfaced, never silently dropped.
+        return "unclassified", {}
+    # Includes a Rejected task still sitting open — reject is meant to
+    # close, so that state is an anomaly worth eyes, not silence.
+    return "unclassified", {}
+
+
+# A caller whose own AI agent roster read failed passes this: the no-lane test is then NOT CHECKED
+# here too, never answered from a second read the caller does not have.
+NOT_READ = "NOT READ"
+
+
+def queue_lanes(ai_agents=None, role_roster=None, role_roster_error=""):
+    """{task id: (lane, extra)} for every task the queue reads and classifies, by the queue's own read and
+    task_lane: the one answer the Task Manager's board gives too (task-manager.py imports this,
+    never a copy). The board passes the AI agent roster and the register it has already read; a
+    missing one is read here, and NOT_READ means the caller's read failed. The compliance book and
+    the rent reply senders are not read: they choose only between the Roy lane and the worked
+    lanes, and the board treats both alike. Raises on a failed task read; the caller says NOT
+    CHECKED."""
+    open_tasks = [task_view(r) for r in query_tasks(QUEUE_FORMULA)]
+    if role_roster is None and not role_roster_error:
+        try:
+            role_roster = fetch_role_roster()
+            if not role_roster:
+                role_roster_error = "register read returned zero role agents"
+        except Exception as exc:  # noqa: BLE001 — judged exactly as build_queue judges a failed read
+            role_roster, role_roster_error = {}, str(exc)[:300]
+    if isinstance(ai_agents, str):        # NOT_READ
+        ai_agents = None
+    elif ai_agents is None:
+        try:
+            ai_agents = fetch_ai_agents()
+        except Exception:  # noqa: BLE001 — the no-lane test is then NOT CHECKED, as in build_queue
+            ai_agents = None
+    standing, _ = load_standing_holds()
+    probe = lane_context([], role_roster or {}, role_roster_error, standing, ai_agents)
+    population = lane_population(open_tasks, probe)
+    ctx = lane_context(population, role_roster or {}, role_roster_error, standing, ai_agents)
+    return {t["id"]: task_lane(t, ctx) for t in population}
+
+
 def build_queue(args=None):
     """Classify the open board. Returns the queue dict, prints nothing.
 
@@ -3128,40 +3465,19 @@ def build_queue(args=None):
         sys.exit(1)
 
     # Held by an AI agent no lane serves (15 Oct 2026, see no_lane_holders):
-    # outside agent_linked, so no bucket below would ever name them. Listed
-    # here for the Task Manager's ownerless step, which moves each one. A
-    # failed roster read says NOT CHECKED in the queue JSON, never a quiet 0.
-    no_lane, no_lane_error = [], ""
+    # task_lane lists such tasks under `noLane` for the Task Manager's
+    # ownerless step, which moves each one. A failed roster read says NOT
+    # CHECKED in the queue JSON, never a quiet 0.
+    no_lane_error = ""
     try:
         ai_agents = fetch_ai_agents()
-        roster = None if role_roster_error else role_roster
-        for t in open_tasks:
-            held = no_lane_holders(t["teamMemberIds"], t["sentForApprovalByIds"],
-                                   ai_agents, t.get("hasAssignee"), roster, t["outcome"])
-            if held:
-                no_lane.append({**t, "noLaneHolder": [{"id": i, "name": ai_agents.get(i, i)}
-                                                      for i in held]})
     except Exception as exc:  # noqa: BLE001 — said in the queue JSON and on stderr
+        ai_agents = None
         no_lane_error = "NOT CHECKED: " + str(exc)[:280]
         print(f"WARNING: holders no robot works were not checked: {exc}"[:400], file=sys.stderr)
 
-    tier1, skipped_tier2, unmapped, unclassified = [], [], [], []
-    system_alerts = []
-    roy_lane = []
-    # Roy's NEW requests are worked by his own job alone (24 Sep 2026). It runs
-    # outside the queue lock so he is not kept waiting behind a 34-minute triage
-    # slot, which means another dispatch run could otherwise draft the same
-    # request at the same time. Only a queue read made for roy-assistant-run.sh
-    # (ROY_ASSISTANT_RUN=1) puts them in the worklist; every other run lists
-    # them under royRequests, counted, never worked and never dropped.
-    roy_requests = []
+    tier1 = []
     roy_run = os.environ.get("ROY_ASSISTANT_RUN") == "1"
-    approved_hb, changes_hb, new_work, routing = [], [], [], []
-    decided = []
-    own_signal = []
-    trial_checked, form_cards = [], []
-    merge_cards = []
-    creditor_ok = bool(role_roster.get(CREDITOR_REC_ID, {}).get("dispatchable"))
     creditor_count = 0
     # Tenants mid-chase, for the rent reply lane. A failed read leaves the lane empty and says so: the
     # message then goes to Inbox Response as before, never nowhere.
@@ -3187,220 +3503,38 @@ def build_queue(args=None):
             compliance_book_error = str(e)[:200]
             property_ok = False
     property_count = 0
-    held_under = []
     standing, standing_error = load_standing_holds()
     if standing_error:
         print(f"WARNING: standing holds unreadable: {standing_error}", file=sys.stderr)
-    standing_held = []
-    open_leads = open_lead_ids({held_lead_id(t) for t in agent_linked if held_lead_id(t)})
-    open_roy_leads = open_lead_ids({roy_handling_lead(t["notes"]) for t in agent_linked
-                                    if roy_handling_lead(t["notes"])})
 
-    for t in agent_linked:
-        # A STANDING HOLD WINS FIRST (Kevin, 24 Sep 2026). He ruled that nothing
-        # on the matter moves until an event (a named person's reply); on
-        # 23 Sep the Task Board Manager raised eight cards he had already ruled
-        # on, because the ruling lived in two other agents' files. A hold is
-        # read here for every agent, and an approval he gave AFTER the hold
-        # began is his newer word, so hold_for never holds it. Listed, never
-        # dropped: the task waits on the board with the reason on it.
-        hold = standing_holds.hold_for(t, standing)
-        if hold:
-            standing_held.append({**t, "holdId": hold["id"],
-                                  "holdTitle": hold.get("title", "")})
-            continue
-        # A ROBOT FORM CARD IS NEVER AN AGENT'S WORK (3 Oct 2026). The rent check raises it, reads
-        # Kevin's verdict and finishes it in code; approving it opens the robot's window and
-        # nothing else. Pulled out here, before every lane, whatever its outcome or none: a
-        # changed, rejected or stranded card handed to an agent would be redone or "carried out"
-        # by a run that has no business with it (independent review, 3 Oct 2026). Listed under
-        # formCards, never hidden.
-        if form_card(t["name"], t["notes"]):
-            form_cards.append(t)
-            continue
-        # A MERGE CARD IS NEVER AN AGENT'S WORK (7 Oct 2026). Approving one runs merge-pr.py in
-        # scripts/merge-approved.py, deterministic and with no model. Handed to the Builder as a
-        # carry-out, a Claude run would try the merge itself; as a redo, it would rewrite a card it
-        # cannot change. Pulled out before every lane, whatever its outcome. Listed, never hidden.
-        if merge_card.is_merge_card(t["name"]):
-            merge_cards.append(t)
-            continue
-        # ROY IS HANDLING THIS (24 Sep 2026): Roy forwarded this same matter to
-        # his assistant. While his request is open this twin waits, listed
-        # under heldUnderLead with the request as its lead, so Kevin never gets
-        # two cards for one tenant. An approval Kevin already gave still runs.
-        roy_lead = roy_handling_lead(t["notes"])
-        if roy_lead and roy_lead != t["id"] and roy_lead in open_roy_leads \
-                and t["outcome"] not in APPROVED:
-            held_under.append({**t, "groupLead": roy_lead, "heldFor": "Roy's request"})
-            continue
-        # Tier 1 no longer drops out of the worklist. It is MARKED and worked,
-        # and the mark rides all the way to the Slack post. Removing this line
-        # so tier-1 work is prepared silently is the regression to fear.
-        hit1 = tier_match(TIER1_PATTERNS, t["name"], t["description"], t["notes"])
-        t["tier1"] = bool(hit1)
-        t["matchedPattern"] = hit1 or ""
-        if hit1:
+    # ONE TASK, ONE ANSWER (15 Oct 2026): every lane below is task_lane's, the
+    # function the Task Manager's board asks too (queue_lanes). Listed, never
+    # dropped: each task lands in exactly one list.
+    def ctx_for(tasks):
+        return lane_context(tasks, role_roster, role_roster_error, standing, ai_agents,
+                            rent_senders, property_ok, roy_run)
+    population = lane_population(open_tasks, ctx_for([]))
+    ctx = ctx_for(population)
+    lanes = {k: [] for k in ("heldByStandingHold", "formCards", "mergeCards", "decided",
+                             "heldUnderLead", "skippedTier2", "noLane", "systemAlerts", "royLane",
+                             "royRequests", "unmappedAgent", "ownGoSignal", "trialChecked",
+                             "approvedHandbacks", "changesRequested", "routingNeeded", "newWork",
+                             "unclassified")}
+    for t in population:
+        lane, extra = task_lane(t, ctx)
+        if t.get("tier1"):
             tier1.append(t)
-        # A message the rent agent sent back with `reassign` (not about rent: keys, papers, a repair) is the CEO's
-        # to place, never the rent lane's again: otherwise the lane would take it straight back (review, 5 Oct 2026).
-        t["rentReply"] = bool(t["inboundTask"] and rent_senders and sender_key(t["inboundSender"]) in rent_senders
-                              and not REASSIGN_LINE_RE.search(str(t.get("notes") or "")))
-        t["creditor"] = creditor_match(t["name"], t["description"], t["notes"])
-        creditor_count += t["creditor"]
-        # Creditor work is ALWAYS tier-1 (Kevin's triage ruling, 24 Aug 2026)
-        # — but "statutory demand" and "letter of claim" are tier-2 vocabulary
-        # the tier-1 keyword list missed, so an unparked correspondence task
-        # would have reached Kevin unbannered (review finding, 25 Aug 2026).
-        if t["creditor"] and not t["tier1"]:
-            t["tier1"] = True
-            t["matchedPattern"] = t["matchedPattern"] or "creditor lane"
-            tier1.append(t)
-        hit2 = tier_match(TIER2_PATTERNS, t["name"], t["description"], t["notes"])
-        out2 = outbound_intent(t["name"], t["description"],
-                               t["notes"]) if hit2 else ""
-        # Stored on the task because the AUTO_ROUTES steal predicates read it
-        # after this loop iteration's locals are gone.
-        t["tier2Correspondence"] = bool(hit2 and out2)
-        if hit2 and out2 and not creditor_ok:
-            # The old Mica lane survives ONLY as the fallback: while the
-            # Creditor Management agent's register row is not Built/Live
-            # (Kevin's pause lever), creditor correspondence parks exactly as
-            # it did before 25 Aug 2026 rather than flowing to a generalist.
-            skipped_tier2.append({**t, "matchedPattern": hit2,
-                                  "outboundPattern": out2})
-            continue
-        # A machine reporting a breakage is work for the board, never a
-        # question for Kevin. Checked AFTER tier 1 and tier 2 on purpose: those
-        # classifications are about what the work TOUCHES and must win, and a
-        # monitoring alert never trips them anyway.
-        # THE SENDER AND THE NAME ONLY (14 Sep 2026). Until today this read
-        # the Description and the Notes too. Notes carry every agent's run
-        # log, and those logs say "Gmail quota" and "Apps Script" whenever a
-        # scan hit a limit — so eleven real matters (a solicitor's letter, a
-        # four-figure rent payment to verify, an adviser's £50+VAT fee, two compliance
-        # renewals, a domain renewal, an EICR quote) were parked here for up to
-        # 19 days and no agent ever saw them. A monitoring alert names itself
-        # in its subject line and comes from a machine address; that is enough.
-        # Money, a creditor marker or the tier-1 banner is never an alert.
-        hit_alert = system_alert_match(t.get("inboundSender"), t["name"])
-        if hit_alert and alert_veto(t):
-            hit_alert = ""
-        if hit_alert and t["outcome"] not in APPROVED:
-            system_alerts.append({**t, "alertSource": hit_alert})
-            continue
-        # ROY'S LANE. Checked AFTER tier 1, the creditor lane and the alert
-        # lane, all of which must win: the veto in roy_match already keeps
-        # money and law out, and this ordering is the second line of the same
-        # defence. An APPROVED task is never diverted — Kevin has already said
-        # yes to that exact work and it must be carried out, not handed on.
-        # THE PROPERTY LANE (2 Sep 2026). Compliance matters go to the
-        # Property Administration agent through AUTO_ROUTES below, so they
-        # are marked here and NOT diverted to Roy. While the agent's register
-        # row is not Built/Live (Kevin's pause lever) the mark is dropped and
-        # the task falls through to the Roy lane exactly as before this
-        # build — the same fallback shape as the creditor tier-2 park.
-        # ROY'S OWN REQUESTS (24 Sep 2026) stay with the agent he asked. A
-        # "log a repair for the boiler" request matches the Roy lane's repair
-        # words, and diverting it would hand Roy's request straight back to
-        # him; the property steal would move it to an agent that has no
-        # answer-to-Roy shapes. Tier 1 and the creditor lane still win.
-        roy_request = is_roy_request(t["name"], t["notes"])
-        t["property"] = ("" if (t["tier1"] or t["creditor"] or not property_ok) else
-                         property_match(t["name"], t["description"], t["notes"]))
-        if roy_request:
-            t["property"] = ""
-        # A CEO-lane task the fresh lane cannot place (neither inbound nor
-        # COMPLIANCE-named) keeps its old home — the Roy lane — rather than
-        # being taken from Roy and routed nowhere (review finding, 2 Sep 2026).
-        owner = t["teamMemberIds"][0] if t["teamMemberIds"] else ""
-        if (t["property"] and owner == CEO_REC_ID and not t["inboundTask"]
-                and not str(t["name"]).startswith(COMPLIANCE_TASK_PREFIX)):
-            t["property"] = ""
-        property_count += bool(t["property"])
-        hit_roy = ("" if (t["tier1"] or t["creditor"] or t["outcome"] in APPROVED
-                          or t["property"])
-                   else roy_match(t["name"], t["description"], t["notes"]))
-        if roy_request:
-            hit_roy = ""
-        if hit_roy:
-            roy_lane.append({**t, "royReason": hit_roy})
-            continue
-        if roy_request and not t["outcome"] and not roy_run:
-            roy_requests.append(t)
-            continue
-        if not t["localAgent"]:
-            unmapped.append(t)
-            continue
-        # agentId (Sent For Approval By, falling back to Team Member) decides
-        # hand-backs: the drawer's decide path sets both, but an approved task
-        # missing Sent For Approval By must still be carried out, not lost.
-        # A DECIDED CARD (15 Sep 2026). Kevin's answer to a DECIDE: card is a
-        # ruling on what should happen, not an approval of a draft. Carrying
-        # it out as a hand-back would spawn an agent to "execute" a question;
-        # the Task Manager's board reads its `decided` bucket and makes the
-        # move Kevin named (its verdict is in the task's Approval Feedback).
-        if t["outcome"] and is_decide_card(t["agentOutput"]):
-            decided.append(t)
-            continue
-        # AN AGENT ON ITS OWN GO SIGNAL CARRIES OUT ITS OWN CARDS (16 Sep 2026). The Content Engine raises a card per
-        # episode and its hourly job publishes what Kevin approves. On 16 Sep the hand-back poll also took both
-        # approved episode cards as carry-outs: a headless Claude run drove publish.py by hand, its command time
-        # limit killed each YouTube upload part way, the next attempt adopted the half-uploaded videos with no publish
-        # time, and 2058's Short was left stuck processing on the channel. Listed under ownGoSignal, never hidden.
-        if t["outcome"] and own_go_signal(t["agentId"]):
-            own_signal.append(t)
-            continue
-        # A TRIAL AGENT'S APPROVED CARD IS CHECKED, NEVER CARRIED OUT (2 Oct 2026). Handing it to a carry-out run
-        # would have an agent try a send that send-email.py refuses, every 30 minutes, for ever. `trial-settle`
-        # closes it in code with Kevin's verdict on the task. Listed under trialChecked, never hidden.
-        if t["outcome"] in APPROVED and trial_problem(t["sentForApprovalByIds"] + t["teamMemberIds"], t["name"], t["notes"],
-                                                      t["approvedAt"]):
-            trial_checked.append(t)
-            continue
-        if t["outcome"] in APPROVED and t["agentId"]:
-            approved_hb.append(t)
-        elif t["outcome"] == "Changes requested":
-            changes_hb.append(t)
-        elif not t["outcome"] and held_lead_id(t) in open_leads:
-            held_under.append({**t, "groupLead": held_lead_id(t)})
-            continue
-        elif not t["outcome"]:
-            tm = t["teamMemberIds"][0] if t["teamMemberIds"] else ""
-            if tm == CEO_REC_ID:
-                # Deterministic lanes skip the CEO's judgement pass entirely
-                # (AUTO_ROUTES — Kevin's rulings, 24 and 25 Aug 2026): the
-                # dispatcher routes them straight to the role agent with
-                # `route TASKID --to <autoTarget>` — no od-ceo dispatch.
-                # Gated on the LIVE register inside auto_route_fresh: if the
-                # lane's row is not Built/Live (Kevin's pause lever) or the
-                # roster read failed, the task stays in the CEO lane and
-                # routes to a strategic agent like any other — work keeps
-                # flowing, the lever stays honoured, and cmd_route re-checks
-                # regardless.
-                target = auto_route_fresh(t, role_roster)
-                if target:
-                    t["autoTarget"] = target
-                routing.append(t)
-            elif tm in ALL_AGENTS:
-                # A task sitting with the WRONG agent moves to its lane's
-                # specialist — the deliberately narrow steal predicates in
-                # AUTO_ROUTES decide, so the CEO's explicit routing choices
-                # are not silently overridden.
-                target = auto_route_steal(t, tm, role_roster)
-                if target:
-                    t["autoTarget"] = target
-                    routing.append(t)
-                else:
-                    new_work.append(t)
-            else:
-                # e.g. Team Member cleared while Sent For Approval By still
-                # points at an agent. Surfaced, never silently dropped.
-                unclassified.append(t)
-        else:
-            # Includes a Rejected task still sitting open — reject is meant to
-            # close, so that state is an anomaly worth eyes, not silence.
-            unclassified.append(t)
+        creditor_count += bool(t.get("creditor"))
+        property_count += bool(t.get("property"))
+        lanes[lane].append({**t, **extra} if extra else t)
+    standing_held, form_cards, merge_cards = (lanes["heldByStandingHold"], lanes["formCards"],
+                                              lanes["mergeCards"])
+    decided, held_under, skipped_tier2 = lanes["decided"], lanes["heldUnderLead"], lanes["skippedTier2"]
+    no_lane, system_alerts, roy_lane = lanes["noLane"], lanes["systemAlerts"], lanes["royLane"]
+    roy_requests, unmapped, own_signal = lanes["royRequests"], lanes["unmappedAgent"], lanes["ownGoSignal"]
+    trial_checked, unclassified = lanes["trialChecked"], lanes["unclassified"]
+    approved_hb, changes_hb = lanes["approvedHandbacks"], lanes["changesRequested"]
+    routing, new_work = lanes["routingNeeded"], lanes["newWork"]
 
     for bucket in (approved_hb, changes_hb, new_work, routing):
         bucket.sort(key=sort_key)

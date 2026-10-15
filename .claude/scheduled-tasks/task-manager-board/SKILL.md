@@ -133,7 +133,18 @@ gets the same finding asking the engine to resubmit it, recorded as `leave`. The
 cards, such as the monthly performance read, do not close themselves and stay
 ordinary board work),
 `parked` (Some Day, or held until a date on Kevin's own answer by
-`decided --until`: not yours to touch before that date) and counts. Upcoming
+`decided --until`: not yours to touch before that date), `held` (ONE TASK, ONE
+ANSWER, 15 Oct 2026: tasks the dispatcher holds on a door, by its own
+`task_lane`, each with `lane` and `why`: parked as a system alert, held under an
+open lead (Roy's request or a property group's lead), Roy's own request for his
+assistant job, creditor correspondence parked while the Creditor Management agent
+is not live, or Kevin's standing hold. Never a move, never stuck, never
+ownerless: the door releases them. Report the count, and how many have sat
+longer than `stuckDays`: a system alert has no door yet) and counts. Every
+full view also carries `dispatchLane`, the dispatcher's lane for it; `decided`
+and the ownerless list follow it, so a task the dispatcher works is never on
+either. If `dispatchLaneCheck` reads NOT CHECKED, say so in the report: held,
+decided and ownerless were judged by this board alone that slot. Upcoming
 tasks whose due date has arrived were already flipped to Today by the runner
 (`task-hygiene-sweep.py flip-due`) before this read. Dispatch's queue JSON also gives you every routable agent's Team
 Members rec id and live status (its rosters). If `queue` exits non-zero

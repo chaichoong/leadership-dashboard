@@ -310,11 +310,13 @@ describe('agent-dispatch.py does not drift from config.js or approvals.js', () =
     });
 
     it('tier 1 is no longer dropped out of the worklist', () => {
-      const loop = PY.match(/for t in agent_linked:(.*?)\n\n/s)?.[1] ?? '';
+      // The tier-1 mark lives in _mark_task since 15 Oct 2026 (one task, one answer: task_lane).
+      const at = PY.indexOf('def _mark_task(');
+      const loop = PY.slice(at, PY.indexOf('\ndef ', at + 1));
       expect(loop.length, 'classification-loop parse went blind').toBeGreaterThan(100);
-      // The regression: a `continue` straight after the tier-1 match, which
+      // The regression: a `continue` (or an early return) straight after the tier-1 match, which
       // silently removes the task from everything downstream.
-      expect(loop).not.toMatch(/if hit1:[\s\S]{0,120}continue/);
+      expect(loop).not.toMatch(/if hit1:[\s\S]{0,120}(continue|return)/);
       expect(loop, 'tier-1 tasks must be marked, not skipped').toMatch(/t\["tier1"\]/);
     });
 

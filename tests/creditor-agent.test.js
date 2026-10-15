@@ -102,7 +102,8 @@ describe('the routing floor (real creditor_match, one batched python call)', () 
 });
 
 describe('queue routing and the pause lever', () => {
-  const queue = src.slice(src.indexOf('def build_queue'), src.indexOf('# ─── WRITES'));
+  // The lanes live in task_lane, just above build_queue, since 15 Oct 2026 (one task, one answer).
+  const queue = src.slice(src.indexOf('# ─── ONE TASK, ONE ANSWER'), src.indexOf('# ─── WRITES'));
 
   it('the deterministic creditor lane is inbound-only and beats the Response route (real AUTO_ROUTES)', () => {
     // Behavioural, through the real table — never source offsets.
@@ -140,9 +141,9 @@ describe('queue routing and the pause lever', () => {
   });
 
   it('the tier-2 park survives ONLY while the agent is not dispatchable', () => {
-    expect(queue).toMatch(/if hit2 and out2 and not creditor_ok:/);
+    expect(queue).toMatch(/if hit2 and out2 and not ctx\["creditor_ok"\]:/);
     expect(queue).toMatch(
-      /creditor_ok = bool\(role_roster\.get\(CREDITOR_REC_ID, \{\}\)\.get\("dispatchable"\)\)/);
+      /"creditor_ok": bool\(roster\.get\(CREDITOR_REC_ID, \{\}\)\.get\("dispatchable"\)\)/);
   });
 
   it('reroutes off the WRONG agent narrowly: Response or parked correspondence only (real AUTO_ROUTES)', () => {

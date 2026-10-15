@@ -29,8 +29,8 @@ ${snippet}
 }
 
 describe('system-alert lane — sender and subject only', () => {
-  it('build_queue asks the classifier about the sender and the NAME, never the notes', () => {
-    const fn = SRC.slice(SRC.indexOf('def build_queue('), SRC.indexOf('def cmd_queue('));
+  it('the queue (task_lane, which build_queue lists by) asks the classifier about the sender and the NAME, never the notes', () => {
+    const fn = SRC.slice(SRC.indexOf('def task_lane('), SRC.indexOf('\ndef ', SRC.indexOf('def task_lane(') + 1));
     expect(fn).toMatch(/hit_alert = system_alert_match\(t\.get\("inboundSender"\), t\["name"\]\)/);
     expect(fn).not.toMatch(/system_alert_match\([^)]*t\["notes"\]/);
     expect(fn).toMatch(/if hit_alert and alert_veto\(t\):/);

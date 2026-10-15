@@ -38,7 +38,8 @@ print(json.dumps({"engine": m.own_go_signal(engine), "other": m.own_go_signal(di
   it('the check sits before an approved task becomes a hand-back, and the queue lists what it held', () => {
     const at = SRC.indexOf('own_go_signal(t["agentId"])');
     expect(at).toBeGreaterThan(-1);
-    expect(at).toBeLessThan(SRC.indexOf('approved_hb.append(t)'));
+    // The lanes live in task_lane since 15 Oct 2026 (one task, one answer); build_queue lists by it.
+    expect(at).toBeLessThan(SRC.indexOf('return "approvedHandbacks"'));
     expect(SRC).toMatch(/"ownGoSignal": own_signal,/);
   });
 });
