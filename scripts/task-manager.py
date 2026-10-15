@@ -344,10 +344,14 @@ def newest_note_stamp(notes, *marks):
     return best
 
 
-def classify(f, activity_ids, now=None):
+def classify(f, activity_ids, now=None, lane=None):
     """One task's bucket: parked | waitingOnKevin | escalated | withRoy |
-    ownLane | stuck | moving. Returns (bucket, source, moved_dt) so the caller never
-    recomputes."""
+    ownLane | held | decided | stuck | moving. Returns (bucket, source, moved_dt) so the caller
+    never recomputes.
+
+    `lane` is agent-dispatch.py's task_lane for this task, read by queue_lanes (one task, one
+    answer, 15 Oct 2026): a name when dispatch classifies the task, '' when the lanes were read
+    and dispatch has no lane for it, None when they were not read (the rules below alone)."""
     now = now or datetime.now(timezone.utc)
     moved, src = last_movement(f, activity_ids, now)
     if f.get("Some Day"):
@@ -375,6 +379,15 @@ def classify(f, activity_ids, now=None):
     # was the 34-handovers bug.
     if ROY_REC in (f.get("Team Member") or []):
         return "withRoy", src, moved
+    # HELD BY DISPATCH, HELD HERE (15 Oct 2026). A task dispatch holds under an open lead (Roy's
+    # request or a property group's lead), holds for Roy's own job, parks on the tier-2 fallback or
+    # under Kevin's standing hold waits on a door. Until today the board read every one as ordinary
+    # stuck work and the foreman "left" each one three times a day for a robot that would never be
+    # handed it: one task, two answers. Listed on `held`; a move only once it has waited past the
+    # stuck clock (`pastClock`, held_problems). A system alert is NOT held: it has no door, so it
+    # stays ordinary board work (review of PR #794).
+    if lane and lane in _load_dispatch().HELD_LANES:
+        return "held", "dispatchLane", moved
     # Escalated inside the window. With an outcome it is DECIDED: Kevin has
     # answered the card and the foreman makes the move he named. Without one
     # the card is still his; escalating again would be the seven-times bug.
@@ -399,13 +412,18 @@ def classify(f, activity_ids, now=None):
     # AI team panel. A live verdict on a DECIDE: card is decided here exactly as it is in dispatch.
     # Only where dispatch would read the card at all (review of PR #792): inside its window and
     # under no standing hold, by its own in_dispatch_window and hold_for, imported, never copied.
-    if answered and not esc and dispatch_reads(f, now):
+    # Since 15 Oct 2026 dispatch's own lane decides when it was read: decided here exactly when
+    # task_lane says decided, so a card is never decided here while dispatch carries it out.
+    if answered and not esc and (lane == "decided" if lane else dispatch_reads(f, now)):
         return "decided", "answeredCard", moved
     if esc and (answered or not (done and done >= esc)):
         if (now - esc) < timedelta(days=STUCK_DAYS) or answered:
-            if f.get("Approval Outcome"):
+            if not f.get("Approval Outcome"):
+                return "escalated", "escalateNote", esc
+            # A verdict dispatch reads as other work (an approved draft written over the card after
+            # the escalation is a carry-out) is that work, never decided here as well (15 Oct 2026).
+            if not lane or lane == "decided":
                 return "decided", "escalateNote", esc
-            return "escalated", "escalateNote", esc
     # PARKED ON HIS ANSWER (2 Oct 2026). `decided --until` records "leave it
     # until <date>" and parks the task at Upcoming with that Due Date. Before
     # the date it is not stuck: he said wait, and forcing a move on it three
@@ -464,12 +482,15 @@ def format_daily_log(rows):
 
 
 def in_flight_ids(queue_json):
-    """Task ids dispatch already owns this slot: worklist + reserve."""
+    """Task ids dispatch already owns this slot: worklist + reserve, and the siblings a property
+    lead carries (worked as one job with it this slot, 15 Oct 2026)."""
     ids = set()
     for key in ("worklist", "reserve"):
         for t in queue_json.get(key) or []:
             if isinstance(t, dict) and t.get("id"):
                 ids.add(t["id"])
+                ids.update(s.get("id") for s in t.get("siblings") or []
+                           if isinstance(s, dict) and s.get("id"))
     return ids
 
 
@@ -647,7 +668,7 @@ def hours_waiting(f, now=None):
     return round((now - sent).total_seconds() / 3600, 1) if sent else None
 
 
-def task_view(rec, activity_ids, dispatch_ids, now):
+def task_view(rec, activity_ids, dispatch_ids, now, lanes=None):
     """One board record → (bucket, view). Pulled out of cmd_board so the view
     shape is testable without a live read. The 1 Sep 2026 13:00 report showed
     every waiting-on-Kevin item as 0 hours because the view carried no
@@ -656,7 +677,10 @@ def task_view(rec, activity_ids, dispatch_ids, now):
     assignee = (f.get("Assignee") or {}).get("email", "")
     team = f.get("Team Member") or []
     is_kevin = assignee == KEVIN_EMAIL or KEVIN_REC in team
-    bucket, src, moved = classify(f, activity_ids, now)
+    # Dispatch's lane for this task (queue_lanes): None when the lanes were not read.
+    entry = lanes.get(rec["id"]) if lanes is not None else None
+    lane = (entry[0] if entry else "") if lanes is not None else None
+    bucket, src, moved = classify(f, activity_ids, now, lane=lane)
     # A stuck task dispatch already holds this slot is not the foreman's
     # to touch — set-subtract in code, never by eyeballing two JSON files.
     if bucket == "stuck" and rec["id"] in dispatch_ids:
@@ -693,8 +717,15 @@ def task_view(rec, activity_ids, dispatch_ids, now):
                       if moved else None),
         "hoursWaiting": hours_waiting(f, now),
         "movementSource": src,
+        # agent-dispatch.py's lane for it ('' none, None not read): the one answer both share.
+        "dispatchLane": lane,
     }
-    if bucket in ("stuck", "moving") and team:
+    if bucket == "held":
+        detail = (entry[1] if entry else {}) or {}
+        view["heldWhy"] = held_why(lane, detail)
+        if detail.get("groupLead"):
+            view["groupLead"] = detail["groupLead"]
+    if bucket in ("stuck", "moving", "held") and team:
         # Read here, where the Notes are in hand, for the ownerless check's `royAllowed`.
         view["royLane"] = roy_lane(f)
     wall = open_wall(f.get("Notes"))
@@ -788,6 +819,35 @@ def dispatch_reads(f, now):
             "outcome": f.get("Approval Outcome") or "", "approvedAt": f.get("Approved At") or "",
             "cantAt": d.standing_holds.latest_cant(f.get("Feedback History"))}
     return not d.standing_holds.hold_for(task, board_holds())
+
+
+def held_why(lane, detail):
+    """One plain line saying what a held task waits on, from dispatch's own listing of it."""
+    if lane == "heldByStandingHold":
+        return "Kevin's standing hold: %s" % (detail.get("holdTitle") or detail.get("holdId") or "")
+    if lane == "heldUnderLead":
+        return "held under %s %s while it is open" % (
+            "Roy's request" if detail.get("heldFor") else "its lead task", detail.get("groupLead") or "")
+    if lane == "royRequests":
+        return "Roy's own request: worked by his assistant job, never by a slot"
+    if lane == "skippedTier2":
+        return "creditor correspondence parked while the Creditor Management agent is not live"
+    return lane
+
+
+def read_dispatch_lanes(ai_agents, roster, roster_error):
+    """({task id: (lane, extra)}, '') from agent-dispatch.py's queue_lanes, the classification
+    build_queue lists by, or (None, why) when it could not be read. The board passes the rosters it
+    has already read, so its ownerless list and dispatch's noLane are judged on one read. A failure
+    never stops the board: it says NOT CHECKED and the board's own rules decide, as before."""
+    try:
+        d = _load_dispatch()
+        return d.queue_lanes(ai_agents if ai_agents is not None else d.NOT_READ,
+                             roster, roster_error), ""
+    except SystemExit as e:
+        return None, "the dispatch lanes read failed (%s)" % e
+    except Exception as e:               # noqa: BLE001 — any failure is the same NOT CHECKED
+        return None, "the dispatch lanes read failed (%s)" % str(e)[:200]
 
 
 def finding_resolver(loader=None):
@@ -934,6 +994,12 @@ def ownerless_views(buckets, ai_agents=None, dispatch=None, roster=None):
         for v in buckets.get(b, []):
             if v.get("hasAssignee") or v.get("assigneeEmail"):
                 continue
+            # One task, one answer (15 Oct 2026): a task dispatch lists in a lane a robot works (its
+            # worklist lanes, the Roy hand-over, a robot's own card) is not ownerless here, whoever
+            # the Team Member is: an approved card whose holder was cleared is still carried out by
+            # its sender. Only dispatch's noLane, and what it cannot place, come here.
+            if v.get("dispatchLane") and v["dispatchLane"] not in OWNERLESS_LANES:
+                continue
             if not v.get("teamMember"):
                 out.append(v)
                 continue
@@ -950,6 +1016,11 @@ def ownerless_views(buckets, ai_agents=None, dispatch=None, roster=None):
                 out.append(dict(v, noLaneHolder=[ai_agents.get(i, i) for i in held],
                                 royAllowed=bool(v.get("royLane")) and not parked))
     return out
+
+
+# Dispatch lanes (agent-dispatch.py task_lane) that leave a task to the board's ownerless step:
+# held by agents no robot works, or a state dispatch cannot place.
+OWNERLESS_LANES = ("noLane", "unclassified", "unmappedAgent")
 
 
 def read_ai_agents():
@@ -1012,6 +1083,73 @@ def ownerless_problems(actions, scratch=None):
                        % (v.get("id"), (v.get("name") or "")[:60], ", ".join(v["noLaneHolder"]), streak,
                           "" if v.get("royAllowed") or "roy" not in mine else
                           " (a hand-over to Roy is not a placement here: it is not his lane)"))
+    return out
+
+
+def _slot_board(scratch=None):
+    """This slot's board.json, or None (freshness_problems reports a missing or unreadable one)."""
+    scratch = scratch or os.environ.get("TASK_MANAGER_SCRATCH")
+    if not scratch:
+        return None
+    try:
+        return json.loads((Path(scratch) / "board.json").read_text())
+    except (OSError, ValueError):
+        return None
+
+
+def held_problems(actions, scratch=None):
+    """Every held task past the stuck clock must carry a recorded move this slot (review of PR #794,
+    15 Oct 2026): 18 of the 20 held on the live board had waited more than seven days, one under a
+    lead that was approved, carried out and kept open, so its door would never open by itself. A
+    `leave` with a reason counts, but not for ever: after LEAVE_STREAK_MAX leaves in a row the move
+    must place it (route, close, finish, chase, escalate, or `roy` where it is Roy's lane), the same
+    limit alert_problems and ownerless_problems apply (review round 2 of PR #794)."""
+    board = _slot_board(scratch)
+    if not board:
+        return []
+    run_start = os.environ.get("TASK_MANAGER_RUN_START")
+    out = []
+    for v in board.get("held") or []:
+        if not v.get("pastClock"):
+            continue
+        mine = {a.get("move") for a in actions if a.get("ok") and a.get("task") == v.get("id")}
+        label = "held task %s (%s) has waited %s days (%s) past the %d-day clock" % (
+            v.get("id"), (v.get("name") or "")[:60], v.get("daysStill"), v.get("why") or v.get("lane"), STUCK_DAYS)
+        if not mine:
+            out.append(label + " with no move this slot: close it if its lead covers it, route or escalate it, "
+                       "or leave it with a reason")
+            continue
+        streak = leave_streak(prior_moves(v.get("id"), float(run_start) if run_start else None))
+        placing = set(PLACING_MOVES) | ({"roy"} if v.get("royLane") else set())
+        if streak >= LEAVE_STREAK_MAX and not mine & placing:
+            out.append(label + " and was left %d slots running: close it if its lead covers it, route it, "
+                       "escalate it to Kevin%s, never another leave"
+                       % (streak, " or hand it to Roy (his lane)" if v.get("royLane") else ""))
+    return out
+
+
+def alert_problems(actions, scratch=None):
+    """A stuck system alert (dispatch's lane `systemAlerts`: parked, never handed to an agent) is
+    ordinary board work with no door, so after LEAVE_STREAK_MAX `leave` moves in a row this slot's
+    move must place it: route, close, finish, chase, escalate, or `roy` where it is Roy's lane
+    (review of PR #794, 15 Oct 2026). The same rule ownerless_problems applies to a holder no robot
+    works."""
+    board = _slot_board(scratch)
+    if not board:
+        return []
+    run_start = os.environ.get("TASK_MANAGER_RUN_START")
+    out = []
+    for v in board.get("stuck") or []:
+        if not isinstance(v, dict) or v.get("dispatchLane") != "systemAlerts":
+            continue
+        streak = leave_streak(prior_moves(v.get("id"), float(run_start) if run_start else None))
+        mine = {a.get("move") for a in actions if a.get("ok") and a.get("task") == v.get("id")}
+        placing = set(PLACING_MOVES) | ({"roy"} if v.get("royLane") else set())
+        if streak >= LEAVE_STREAK_MAX and not mine & placing:
+            out.append("task %s (%s) is a system alert dispatch never hands to an agent, and was left %d "
+                       "slots running: route it, close it, escalate it to Kevin%s, never another leave"
+                       % (v.get("id"), (v.get("name") or "")[:60], streak,
+                          " or hand it to Roy (his lane)" if v.get("royLane") else ""))
     return out
 
 
@@ -1123,23 +1261,31 @@ def cmd_board(dispatch_queue_path=None):
             print("WARNING: dispatch queue unreadable (%s) — inFlight "
                   "detection disabled this slot" % e, file=sys.stderr)
 
-    buckets = {"stuck": [], "waitingOnKevin": [], "parked": [], "moving": [],
-               "inFlight": [], "withRoy": [], "escalated": [], "decided": [], "ownLane": []}
+    # Agent-held tasks no robot works (15 Oct 2026). A failed read never stops the board: the
+    # blank-holder half still runs and the agent half says NOT CHECKED, as dispatch's queue does.
+    ai_agents, ai_error = read_ai_agents()
+    roster, roster_error = read_role_roster()
+    # ONE TASK, ONE ANSWER (15 Oct 2026): dispatch's own lane for every task it reads, by its own
+    # task_lane on its own read, so a task is never in its worklist and on this board's ownerless
+    # or decided list at once, and what it holds is held here too. NOT CHECKED, never a quiet board.
+    lanes, lanes_error = read_dispatch_lanes(ai_agents, roster, roster_error)
+    if lanes_error:
+        print("WARNING: dispatch lanes NOT CHECKED (%s): the board's own rules decide this slot"
+              % lanes_error, file=sys.stderr)
+
+    buckets = {"stuck": [], "waitingOnKevin": [], "parked": [], "moving": [], "inFlight": [],
+               "withRoy": [], "escalated": [], "decided": [], "ownLane": [], "held": []}
     by_status, kevin_count = {}, 0
     for r in recs:
         status = r["fields"].get("Status", "?")
         by_status[status] = by_status.get(status, 0) + 1
-        bucket, is_kevin, view = task_view(r, activity_ids, dispatch_ids, now)
+        bucket, is_kevin, view = task_view(r, activity_ids, dispatch_ids, now, lanes)
         if is_kevin:
             kevin_count += 1
         buckets[bucket].append(view)
 
     for k in buckets:
         buckets[k].sort(key=lambda v: (v["lastMoved"] or ""))
-    # Agent-held tasks no robot works (15 Oct 2026). A failed read never stops the board: the
-    # blank-holder half still runs and the agent half says NOT CHECKED, as dispatch's queue does.
-    ai_agents, ai_error = read_ai_agents()
-    roster, roster_error = read_role_roster() if ai_agents is not None else (None, "")
     ownerless = ownerless_views(buckets, ai_agents, roster=roster)
     no_lane_check = ("NOT CHECKED: " + ai_error) if ai_error else (
         "checked (register unread, judged by dispatch's list alone: %s)" % roster_error
@@ -1151,8 +1297,14 @@ def cmd_board(dispatch_queue_path=None):
     # twins are deliberately dormant, and dispatch's in-flight tasks are not
     # the foreman's to touch this slot. waitingOnKevin views join so an
     # Approval twin can surface as untouchable.
+    # Held twins are duplicate-checked too (review of PR #794): a held task is not the foreman's to
+    # move, but a second task on its thread is still a second card for one matter.
     dupes = duplicate_groups(
-        buckets["stuck"] + buckets["moving"] + buckets["waitingOnKevin"])
+        buckets["stuck"] + buckets["moving"] + buckets["waitingOnKevin"] + buckets["held"])
+    # A door can stay shut (a lead kept open for weeks): a held task past the stuck clock needs a
+    # move this slot, and verify names each one that has none (held_problems).
+    for v in buckets["held"]:
+        v["pastClock"] = v["daysStill"] is None or v["daysStill"] >= STUCK_DAYS
     out = {
         "generatedAt": now.isoformat(),
         "stuckDays": STUCK_DAYS,
@@ -1171,6 +1323,10 @@ def cmd_board(dispatch_queue_path=None):
             "escalated": len(buckets["escalated"]),
             "decided": len(buckets["decided"]),
             "ownLane": len(buckets["ownLane"]),
+            # Held by dispatch on a door (alert, lead, Roy's job, tier-2 park, standing hold).
+            "held": len(buckets["held"]),
+            # Of those, waiting past the stuck clock: each needs a move this slot (verify).
+            "heldPastStuckDays": sum(1 for v in buckets["held"] if v["pastClock"]),
             "duplicateGroups": len(dupes),
             "duplicateExtras": sum(len(g["closable"]) for g in dupes),
             "ownerless": len(ownerless),
@@ -1184,6 +1340,16 @@ def cmd_board(dispatch_queue_path=None):
         # Whether the agent-held half of that list was read: "NOT CHECKED: <why>" is said in the
         # report, never read as "no orphans".
         "noLaneCheck": no_lane_check,
+        # Whether dispatch's lanes were read: "NOT CHECKED: <why>" means held, decided and ownerless
+        # were judged by this board's own rules alone this slot, and the report says so.
+        "dispatchLaneCheck": ("NOT CHECKED: " + lanes_error) if lanes_error else "checked",
+        # Tasks dispatch holds on a door, each with its lane and what it waits on: never a move for
+        # the foreman, never stuck, never ownerless. Listed so a hold is seen, never hidden.
+        "held": [{"id": v["id"], "name": v["name"], "lane": v["dispatchLane"], "why": v.get("heldWhy", ""),
+                  "groupLead": v.get("groupLead"), "daysStill": v["daysStill"], "pastClock": v["pastClock"],
+                  # Roy's lane by dispatch's rules: a hand-over to Roy places it (held_problems).
+                  "royLane": v.get("royLane") or ""}
+                 for v in buckets["held"]],
         "stuck": buckets["stuck"],
         "duplicates": dupes,
         "waitingOnKevin": buckets["waitingOnKevin"],
@@ -2121,6 +2287,8 @@ def cmd_verify(report_path):
 
     problems.extend(freshness_problems(board))
     problems.extend(ownerless_problems(actions))
+    problems.extend(held_problems(actions))
+    problems.extend(alert_problems(actions))
     problems.extend(clock_problems(actions))
 
     verdict = {

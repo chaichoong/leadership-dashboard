@@ -258,13 +258,15 @@ ${code}`], { encoding: 'utf8' }).trim();
     expect(JSON.parse(py(`print(json.dumps([m.is_decide_card('DECIDE: sell?'), m.is_decide_card('  decide: x'), m.is_decide_card('Draft: DECIDE later'), m.is_decide_card('')]))`)))
       .toEqual([true, true, false, false]);
     const src = require('node:fs').readFileSync(DISPATCH, 'utf8');
-    const start = src.indexOf('def build_queue');
-    const bq = src.slice(start, src.indexOf('\ndef ', start + 1));
-    const decidedAt = bq.indexOf('is_decide_card(t["agentOutput"])');
-    const approvedAt = bq.indexOf('approved_hb.append(t)');
+    // The lanes live in task_lane since 15 Oct 2026 (one task, one answer); build_queue lists by it.
+    const start = src.indexOf('def task_lane(');
+    const lane = src.slice(start, src.indexOf('\ndef ', start + 1));
+    const decidedAt = lane.indexOf('is_decide_card(t["agentOutput"])');
+    const approvedAt = lane.indexOf('return "approvedHandbacks"');
     expect(decidedAt).toBeGreaterThan(0);
     expect(decidedAt, 'the decided check must run before the approved hand-back split').toBeLessThan(approvedAt);
-    expect(bq).toContain('"decided": decided');
+    const bqStart = src.indexOf('def build_queue');
+    expect(src.slice(bqStart, src.indexOf('\ndef cmd_queue', bqStart))).toContain('"decided": decided');
   });
 
   it('in_dispatch_window mirrors the formula for a record in hand', () => {

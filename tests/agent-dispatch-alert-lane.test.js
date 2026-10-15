@@ -29,9 +29,9 @@ ${snippet}
 }
 
 describe('system-alert lane — sender and subject only', () => {
-  it('build_queue asks the classifier about the sender and the NAME, never the notes', () => {
-    const fn = SRC.slice(SRC.indexOf('def build_queue('), SRC.indexOf('def cmd_queue('));
-    expect(fn).toMatch(/hit_alert = system_alert_match\(t\.get\("inboundSender"\), t\["name"\]\)/);
+  it('the queue (task_lane, which build_queue lists by) asks the classifier about the sender and the NAME, never the notes', () => {
+    const fn = SRC.slice(SRC.indexOf('def task_lane('), SRC.indexOf('\ndef ', SRC.indexOf('def task_lane(') + 1));
+    expect(fn).toMatch(/hit_alert = alert_lane_match\(t\.get\("inboundSender"\), t\.get\("inboundTask"\), t\["name"\]\)/);
     expect(fn).not.toMatch(/system_alert_match\([^)]*t\["notes"\]/);
     expect(fn).toMatch(/if hit_alert and alert_veto\(t\):/);
   });
@@ -65,6 +65,56 @@ cases = [
 ]
 print(json.dumps([m.alert_veto(dict(c, tier1=False, creditor="")) for c in cases]))`);
     expect(r).toEqual(['names a sum of money', 'names a sum of money', 'names a sum of money']);
+  });
+
+  // Review of PR #794 (15 Oct 2026): a task a session or an agent raised was parked as an alert by its
+  // own words. "Check five Airtable automation failure notices" (no sender, not inbound) sat parked,
+  // and a Builder fix named for the Gmail quota it caps sat 10.8 days with no robot handed it.
+  it('the NAME patterns park only inbound mail; the machine-sender rule parks always', () => {
+    const r = py(`
+print(json.dumps({
+  "sessionRaised": m.alert_lane_match("", False, "Check five Airtable automation failure notices (28 Sep to 14 Oct)"),
+  "builderFix": m.alert_lane_match("", None, "Cap the sender-history rebuild so it stops burning its whole budget on a full Gmail quota"),
+  "airtableMail": m.alert_lane_match("noreply@airtable.com", True, "Run failed: Daily rent sync"),
+  "machineSenderNoTick": m.alert_lane_match("noreply@notify.cloudflare.com", False, "Your worker hit an error"),
+  "inboundTicked": m.alert_lane_match("", True, "Apps Script failure: daily sync stopped"),
+  "inboundForwarded": m.alert_lane_match("kevinbrittain@gmail.com", False, "Fwd: Airtable automation failed"),
+}))`);
+    expect(r.sessionRaised).toBe('');
+    expect(r.builderFix).toBe('');
+    expect(r.airtableMail).toBe('noreply@airtable.com');
+    expect(r.machineSenderNoTick).toBe('noreply@notify.cloudflare.com');
+    expect(r.inboundTicked).toMatch(/apps script/);
+    expect(r.inboundForwarded).toMatch(/airtable automation/);
+  });
+
+  // Review round 2 of PR #794: the GATES keep the full match. An agent's write-up named for a breakage
+  // is swept off Kevin's queue, and the same task, now at Today with the Builder, is worked, not parked.
+  it('an agent-raised "Apps Script trigger stopped" card is swept off Approval, then worked by the Builder, never parked', () => {
+    const r = py(`
+import io, contextlib, types
+AF = m.AF
+TASK = {"id": "recAgentAlertAaaa", "fields": {AF["name"]: "Apps Script trigger stopped", AF["status"]: {"name": "Approval"},
+        AF["teamMember"]: ["recqmKBmq8ZGkxVH9"], AF["sentForApprovalBy"]: ["recqmKBmq8ZGkxVH9"],
+        AF["agentOutput"]: "The nightly trigger stopped on 14 Oct; recommend re-creating it.", AF["notes"]: ""}}
+m.query_tasks = lambda formula, **k: [json.loads(json.dumps(TASK))]
+def patch_task(tid, fields):
+    TASK["fields"].update(fields)
+    return TASK
+m.patch_task = patch_task
+buf = io.StringIO()
+with contextlib.redirect_stdout(buf):
+    m.cmd_clear_alerts(types.SimpleNamespace(dry_run=False))
+swept = json.loads(buf.getvalue())
+t = m.task_view(TASK)
+ctx = m.lane_context([], {}, "", [], None)
+print(json.dumps({"moved": [x["task"] for x in swept["items"]], "status": t["status"], "team": t["teamMemberIds"],
+                  "sender": t["sentForApprovalByIds"], "lane": m.task_lane(t, ctx)[0]}))`);
+    expect(r.moved).toEqual(['recAgentAlertAaaa']);
+    expect(r.status).toBe('Today');
+    expect(r.team).toEqual(['recQkO6BA4w5zqwZ4']);   // the Builder
+    expect(r.sender).toEqual([]);
+    expect(r.lane).toBe('newWork');                 // the lane does not park it by its words
   });
 
   it('a real Apps Script failure mail is still an alert (the lane keeps its job)', () => {

@@ -1000,7 +1000,8 @@ print('---JSON---'); print(json.dumps({'ids': ids, 'a': bool(a.get('signinReopen
     expect(fn).toMatch(/"signinReopened": signin_reopened,/);
     expect(fn).toMatch(/"signinReopened": len\(signin_reopened\),/);
     // marked BEFORE the lanes copy the dicts
-    expect(fn.indexOf('mark_signin_reopened(agent_linked)')).toBeLessThan(fn.indexOf('for t in agent_linked:'));
+    expect(fn.indexOf('for t in population:')).toBeGreaterThan(-1);
+    expect(fn.indexOf('mark_signin_reopened(agent_linked)')).toBeLessThan(fn.indexOf('for t in population:'));
     const poll = readFileSync(join(ROOT, 'scripts', 'handback-poll.py'), 'utf8');
     expect(poll).toMatch(/HANDBACK_KEYS = \("approvedHandbacks", "changesRequested", "deferredRedos", "signinReopened"\)/);
     const runner = readFileSync(join(ROOT, 'scripts', 'handback-poll-run.sh'), 'utf8');

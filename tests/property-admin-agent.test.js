@@ -146,7 +146,8 @@ describe('queue routing and the pause lever (real AUTO_ROUTES)', () => {
     // build_queue needs Airtable, so the mark rule is pinned at source: the
     // mark is only ever computed when property_ok, and property_ok also
     // requires the book to have been read.
-    expect(src).toMatch(/t\["property"\] = \(""\s+if \(t\["tier1"\] or t\["creditor"\] or not property_ok\)/);
+    expect(src).toMatch(/t\["property"\] = \(""\s+if \(t\["tier1"\] or t\["creditor"\] or not ctx\["property_ok"\]\)/);
+    expect(src).toMatch(/lane_context\(tasks, role_roster, role_roster_error, standing, ai_agents,\s+rent_senders, property_ok, roy_run\)/);
     expect(src).toMatch(/compliance_book_error = str\(e\)\[:200\]\s+property_ok = False/);
     expect(src).toMatch(/or t\["property"\]\)\s+else roy_match/);
   });
