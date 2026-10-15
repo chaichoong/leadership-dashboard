@@ -62,6 +62,10 @@ LOCK_DIR = os.path.join(STATE_DIR, "lock")
 HOLDER_FILE = os.path.join(LOCK_DIR, "holder.json")
 TICKET_DIR = os.path.join(STATE_DIR, "tickets")
 EVENTS = os.path.join(STATE_DIR, "queue-events.jsonl")
+# The guest lane and the phase marker that opens it (15 Oct 2026). Both are
+# explained at background() below.
+GUEST_DIR = os.path.join(STATE_DIR, "guest")
+YIELD_FILE = os.path.join(STATE_DIR, "yield.json")
 
 # Every "did it run today" question is asked about Kevin's day, not about UTC.
 # In BST a 23:30 UTC event belongs to the NEXT London day, and a run refused or
@@ -695,7 +699,18 @@ def pid_alive(pid):
     return True
 
 
-def drop_lock():
+def _holder_path(lock_dir):
+    """holder.json inside a lock directory: HOLDER_FILE for the queue lock."""
+    return HOLDER_FILE if lock_dir == LOCK_DIR else os.path.join(lock_dir, "holder.json")
+
+
+def _lane_tag(lock_dir):
+    """Extra event fields naming the guest lane. The queue lock's events stay
+    exactly as they were, so nothing that reads the log changes."""
+    return {"lane": "guest"} if lock_dir == GUEST_DIR else {}
+
+
+def drop_lock(lock_dir=LOCK_DIR):
     """Remove the lock without ever leaving it visible and ownerless.
 
     A plain rmtree unlinks holder.json first and the directory second, so for a
@@ -703,18 +718,18 @@ def drop_lock():
     try_take_lock goes to such lengths to avoid. Rename it out of the way first,
     then delete at leisure.
     """
-    if not os.path.isdir(LOCK_DIR):
+    if not os.path.isdir(lock_dir):
         return
     staging = os.path.join(STATE_DIR, ".dropped-%d-%f" % (os.getpid(), now()))
     try:
-        os.rename(LOCK_DIR, staging)
+        os.rename(lock_dir, staging)
     except OSError:
-        shutil.rmtree(LOCK_DIR, ignore_errors=True)
+        shutil.rmtree(lock_dir, ignore_errors=True)
         return
     shutil.rmtree(staging, ignore_errors=True)
 
 
-def read_holder():
+def read_holder(lock_dir=LOCK_DIR):
     """The lock's holder, or None when there is no readable holder file.
 
     Two reads, not one: the holder file is rewritten by every heartbeat, and
@@ -723,9 +738,10 @@ def read_holder():
     inbound-triage waiter judged the lock ownerless and stole it from a live,
     beating run 15 minutes in). write_holder is now atomic, so this retry is
     belt-and-braces against anything else that can make a read flicker."""
+    path = _holder_path(lock_dir)
     for attempt in range(2):
         try:
-            with open(HOLDER_FILE) as f:
+            with open(path) as f:
                 return json.load(f)
         except FileNotFoundError:
             return None
@@ -735,7 +751,7 @@ def read_holder():
     return None
 
 
-def write_holder(holder):
+def write_holder(holder, lock_dir=LOCK_DIR):
     """Replace the holder file in ONE step, so no reader ever sees it empty.
 
     open(path, "w") truncates first and writes second; a reader in between
@@ -743,10 +759,11 @@ def write_holder(holder):
     ownerless lock. Write beside it and rename over it — rename is atomic on
     every POSIX filesystem, which is the same guarantee the lock directory
     itself relies on."""
-    tmp = "%s.%d.tmp" % (HOLDER_FILE, os.getpid())
+    path = _holder_path(lock_dir)
+    tmp = "%s.%d.tmp" % (path, os.getpid())
     with open(tmp, "w") as f:
         json.dump(holder, f)
-    os.replace(tmp, HOLDER_FILE)
+    os.replace(tmp, path)
 
 
 # One grace line per holder per waiting process. break_stale_lock runs on every
@@ -755,17 +772,18 @@ def write_holder(holder):
 _GRACE_ANNOUNCED = set()
 
 
-def break_stale_lock():
+def break_stale_lock(lock_dir=LOCK_DIR):
     """Release a lock whose owner cannot still be working.
 
     A crashed routine must never block tomorrow, so every lock carries a
     deadline. For a wrapped job we can also prove death directly; for a
     cooperative one the lease is all we have, because the shell that took the
-    lock exited seconds later by design.
+    lock exited seconds later by design. The guest lane's lock follows exactly
+    the same rules.
     """
-    if not os.path.isdir(LOCK_DIR):
+    if not os.path.isdir(lock_dir):
         return None
-    holder = read_holder()
+    holder = read_holder(lock_dir)
     if holder is None:
         # try_take_lock builds the lock complete and renames it into place, so a
         # lock without a readable holder should be impossible. If one appears it
@@ -782,17 +800,17 @@ def break_stale_lock():
         # older than its whole lease is genuinely abandoned; anything younger
         # is somebody's lock.
         try:
-            age = now() - os.path.getmtime(LOCK_DIR)
+            age = now() - os.path.getmtime(lock_dir)
             try:
-                age = min(age, now() - os.path.getmtime(HOLDER_FILE))
+                age = min(age, now() - os.path.getmtime(_holder_path(lock_dir)))
             except OSError:
                 pass
         except OSError:
             return None
         if age > WRAPPED_LEASE_MIN * 60:
             event("unknown", "lock-broken", reason="holder file unreadable",
-                  age_seconds=round(age))
-            drop_lock()
+                  age_seconds=round(age), **_lane_tag(lock_dir))
+            drop_lock(lock_dir)
             return "unreadable holder"
         return None
 
@@ -821,12 +839,13 @@ def break_stale_lock():
 
     if reason:
         event(holder.get("job", "unknown"), "lock-broken", reason=reason,
-              held_seconds=round(now() - holder.get("acquired_at", now())))
-        drop_lock()
+              held_seconds=round(now() - holder.get("acquired_at", now())),
+              **_lane_tag(lock_dir))
+        drop_lock(lock_dir)
     return reason
 
 
-def try_take_lock(job, mode, lease_minutes):
+def try_take_lock(job, mode, lease_minutes, lock_dir=LOCK_DIR):
     """Build the lock complete, then move it into place in one atomic step.
 
     The obvious version — mkdir, then write holder.json — leaves a window where
@@ -853,7 +872,7 @@ def try_take_lock(job, mode, lease_minutes):
             os.fsync(f.fileno())
         try:
             # Fails with ENOTEMPTY / EEXIST when the lock is already held.
-            os.rename(staging, LOCK_DIR)
+            os.rename(staging, lock_dir)
         except OSError:
             shutil.rmtree(staging, ignore_errors=True)
             return False
@@ -882,6 +901,109 @@ def prune_dead_tickets():
                 os.unlink(path)
             except OSError:
                 pass
+
+
+# --------------------------------------------------------------------------
+# background phases and the guest lane (15 Oct 2026)
+# --------------------------------------------------------------------------
+#
+# The nightly Content Engine render is CPU work on local disk that runs for
+# hours inside a job that holds the queue lock. background() below lets that job
+# declare such a step a BACKGROUND PHASE. The queue lock never leaves the job:
+# it stays held and beating, so every waiter, on any version of this file, sees
+# the queue held exactly as before. What changes is that a waiting job declared
+# `"backgroundSafe": true` in job-schedule.json may run meanwhile in the GUEST
+# LANE, a second lock beside the queue lock with the same rules (atomic take,
+# lease, heartbeat, stale-breaking). One guest at a time, in arrival order.
+#
+# Opt-in only, and the opt-in is the whole safety argument, as lockExempt's is:
+# a job that has not been checked waits for the whole run, as every job did
+# before. backgroundSafe means short and light: no render, no whisper, no
+# Playwright, nothing of the Content Engine's own state, and a maxRuntimeMinutes
+# of its own (tests/job-queue.test.js holds the real schedule to that).
+
+def background_safe(job, schedule=None):
+    """May this job run in the guest lane beside a declared background phase?"""
+    cfg = (schedule if schedule is not None else load_schedule()).get(job) or {}
+    return bool(cfg.get("backgroundSafe"))
+
+
+def active_yield():
+    """The background phase in force, or None.
+
+    A phase is real only while the job that declared it still holds the queue
+    lock from the same run (the holder's pid is the run's pid) and the process
+    running the phase is alive. A marker left behind by a killed run fails one
+    of those, so it can never open the guest lane by itself."""
+    try:
+        with open(YIELD_FILE) as f:
+            y = json.load(f)
+    except (OSError, json.JSONDecodeError):
+        return None
+    pid, run_pid = y.get("pid"), y.get("run_pid")
+    if not isinstance(pid, int) or pid <= 0 or not isinstance(run_pid, int) or run_pid <= 0:
+        return None
+    holder = read_holder()
+    if not holder or holder.get("job") != y.get("job") or holder.get("pid") != run_pid:
+        return None
+    if not pid_alive(pid):
+        return None
+    return y
+
+
+def _guest_turn(job, mode, lease_minutes, ticket_name, waiting, schedule):
+    """Take the guest lane if a phase is open and this is the oldest guest
+    waiting. Take FIRST, then check the phase is still open; background() shuts
+    the phase first, then checks the lane is empty. Whichever of the two moves
+    second sees the other, so a guest can never start after the phase's job has
+    gone back to its own next step."""
+    if not active_yield():
+        return False
+    for name in waiting:
+        try:
+            with open(os.path.join(TICKET_DIR, name)) as f:
+                ahead = json.load(f).get("job")
+        except (OSError, json.JSONDecodeError):
+            continue
+        if background_safe(ahead, schedule):
+            if name != ticket_name:
+                return False          # an older guest goes first
+            break
+    else:
+        return False
+    if not try_take_lock(job, mode, lease_minutes, GUEST_DIR):
+        return False
+    if active_yield():
+        return True
+    drop_lock(GUEST_DIR)
+    return False
+
+
+def _clear_yield(pid):
+    """Shut the phase this process opened, and only that one."""
+    try:
+        with open(YIELD_FILE) as f:
+            mine = json.load(f).get("pid") == pid
+    except (OSError, json.JSONDecodeError):
+        return
+    if mine:
+        try:
+            os.unlink(YIELD_FILE)
+        except OSError:
+            pass
+
+
+def _drain_guests():
+    """Wait for a guest already inside the lane to finish. Bounded by the
+    guest's own maxRuntimeMinutes (every backgroundSafe job carries one) and by
+    its lease if it stops beating. Returns the seconds waited."""
+    started = now()
+    while os.path.isdir(GUEST_DIR):
+        break_stale_lock(GUEST_DIR)
+        if not os.path.isdir(GUEST_DIR):
+            break
+        time.sleep(POLL_SECONDS)
+    return round(now() - started, 1)
 
 
 # Why acquire() last refused, so a wrapped run can say so in the job's OWN log.
@@ -1039,14 +1161,27 @@ def acquire(job, mode="cooperative", lease_minutes=DEFAULT_LEASE_MIN,
             # still works; it just cannot report its own death.
             pass
 
+    # A job declared backgroundSafe may also take the guest lane while the
+    # queue's holder is in a background phase (see background()).
+    safe = bool(cfg.get("backgroundSafe"))
+
     try:
         while True:
             break_stale_lock()
+            if safe:
+                break_stale_lock(GUEST_DIR)
             prune_dead_tickets()
             waiting = sorted(os.listdir(TICKET_DIR))
             first = waiting[0] if waiting else ticket_name
 
+            lane = None
             if first == ticket_name and try_take_lock(job, mode, lease_minutes):
+                lane = LOCK_DIR
+            elif safe and _guest_turn(job, mode, lease_minutes, ticket_name,
+                                      waiting, schedule):
+                lane = GUEST_DIR
+
+            if lane:
                 waited = round(now() - started, 1)
 
                 # The precondition check ran BEFORE this wait, deliberately, so a
@@ -1079,11 +1214,18 @@ def acquire(job, mode="cooperative", lease_minutes=DEFAULT_LEASE_MIN,
                     return note_refusal(job, EX_NOTREADY,
                                         "preconditions lapsed during a %ss queue wait" % waited)
 
+                guest = {}
+                if lane == GUEST_DIR:
+                    guest = {"lane": "guest",
+                             "beside": (read_holder() or {}).get("job")}
                 event(job, "acquired", mode=mode, waited_seconds=waited,
-                      queue_depth=len(waiting) - 1, lease_minutes=lease_minutes)
+                      queue_depth=len(waiting) - 1, lease_minutes=lease_minutes,
+                      **guest)
                 if not quiet:
-                    print("ACQUIRED %s (waited %ss, %d behind)" %
-                          (job, waited, len(waiting) - 1))
+                    print("ACQUIRED %s (waited %ss, %d behind)%s" %
+                          (job, waited, len(waiting) - 1,
+                           " as a guest beside %s's background phase"
+                           % guest["beside"] if guest else ""))
                 return EX_OK
 
             if not announced:
@@ -1232,6 +1374,19 @@ def release(job, quiet=False, outcome="completed", reason=None):
             print("NOTE %s: lock-exempt, nothing to release" % job)
         return EX_OK
 
+    # A guest gives back the guest lane, never the queue lock it ran beside.
+    guest = read_holder(GUEST_DIR)
+    if guest and guest.get("job") == job:
+        held = round(now() - guest.get("acquired_at", now()), 1)
+        drop_lock(GUEST_DIR)
+        extra = {"outcome": outcome, "lane": "guest"}
+        if reason:
+            extra["reason"] = reason
+        event(job, "released", held_seconds=held, **extra)
+        if not quiet:
+            print("RELEASED %s (guest lane, held %ss, %s)" % (job, held, outcome))
+        return EX_OK
+
     holder = read_holder()
     if holder is None:
         if os.path.isdir(LOCK_DIR):
@@ -1269,7 +1424,7 @@ def holds(job):
     A job whose lease lapsed while the Mac slept, or whose lock was broken by a
     contender, carried on writing with no idea it had been replaced.
     """
-    holder = read_holder()
+    holder = _own_holder(job)[1]
     if holder is None:
         return False, "lock is not held by anyone"
     if holder.get("job") != job:
@@ -1297,8 +1452,17 @@ def assert_held(job, quiet=False):
     return EX_LOSTLOCK
 
 
+def _own_holder(job):
+    """(lock_dir, holder) for the lane this job holds: the guest lane when it is
+    the guest, else the queue lock, whoever holds it."""
+    guest = read_holder(GUEST_DIR)
+    if guest and guest.get("job") == job:
+        return GUEST_DIR, guest
+    return LOCK_DIR, read_holder()
+
+
 def heartbeat(job, lease_minutes=DEFAULT_LEASE_MIN):
-    holder = read_holder()
+    lane, holder = _own_holder(job)
     if holder is None or holder.get("job") != job:
         # Not a usage error. Somebody else has the machine, and the caller is
         # mid-run believing otherwise, so give it the distinct code it must act on.
@@ -1309,8 +1473,8 @@ def heartbeat(job, lease_minutes=DEFAULT_LEASE_MIN):
               file=sys.stderr)
         return EX_LOSTLOCK
     holder["lease_until"] = now() + lease_minutes * 60
-    write_holder(holder)
-    event(job, "heartbeat", lease_minutes=lease_minutes)
+    write_holder(holder, lane)
+    event(job, "heartbeat", lease_minutes=lease_minutes, **_lane_tag(lane))
     return EX_OK
 
 
@@ -1395,6 +1559,12 @@ def run(job, cmd, lease_minutes, timeout_minutes=None, check_stale=True,
     # SIGKILL a child that never had one. Run the command, record it, done.
     exempt = bool((load_schedule().get(job) or {}).get("lockExempt"))
 
+    # Which lock this run holds: the queue lock, or the guest lane beside
+    # another job's background phase. The heartbeat keeps THAT one alive.
+    _guest = read_holder(GUEST_DIR) or {}
+    lane = GUEST_DIR if (_guest.get("job") == job
+                         and _guest.get("pid") == os.getpid()) else LOCK_DIR
+
     def stop_child(reason):
         # TERM first, KILL only if it lingers. A wrapper script traps TERM and
         # writes its "done" line and log summary before dying; SIGKILL is
@@ -1418,7 +1588,7 @@ def run(job, cmd, lease_minutes, timeout_minutes=None, check_stale=True,
         # drop the lock, but a genuine suspend does.
         write_failures = 0
         while not stop.wait(HEARTBEAT_SECONDS):
-            holder = read_holder()
+            holder = read_holder(lane)
             if not holder:
                 # The lock lapsed (the Mac slept through the lease) or was
                 # broken as debris, and NOBODY has taken it. There is no second
@@ -1426,11 +1596,20 @@ def run(job, cmd, lease_minutes, timeout_minutes=None, check_stale=True,
                 # run that nobody displaced only loses the work (27 Aug 2026,
                 # prospecting: "lock is not held by anyone", run destroyed for
                 # no contender at all).
-                if try_take_lock(job, "wrapped", WRAPPED_LEASE_MIN):
+                retaken = try_take_lock(job, "wrapped", WRAPPED_LEASE_MIN, lane)
+                if retaken and lane == GUEST_DIR and not active_yield():
+                    # A guest re-takes only while the phase it ran beside is
+                    # still open. Once that job has gone back to its own next
+                    # step the lane is shut, so this guest stops like any
+                    # displaced run (same take-then-check as _guest_turn).
+                    drop_lock(GUEST_DIR)
+                    retaken = False
+                if retaken:
                     event(job, "lock-retaken",
-                          reason="lease had lapsed with no new holder")
+                          reason="lease had lapsed with no new holder",
+                          **_lane_tag(lane))
                     continue
-                holder = read_holder()
+                holder = read_holder(lane)
             if not holder or holder.get("job") != job:
                 # Losing the lock used to be advisory: the thread returned and
                 # the job carried on writing, alongside whoever now holds the
@@ -1443,7 +1622,7 @@ def run(job, cmd, lease_minutes, timeout_minutes=None, check_stale=True,
                 return
             holder["lease_until"] = now() + WRAPPED_LEASE_MIN * 60
             try:
-                write_holder(holder)
+                write_holder(holder, lane)
                 write_failures = 0
             except OSError as exc:
                 # Returning here silently stopped the heartbeat, so the lease
@@ -1469,6 +1648,15 @@ def run(job, cmd, lease_minutes, timeout_minutes=None, check_stale=True,
     if not exempt:
         ticker = threading.Thread(target=beat, daemon=True)
         ticker.start()
+    # The run's identity, for `job-queue.py background` inside the command: only
+    # a run that holds the QUEUE lock may declare a background phase. Cleared
+    # otherwise, so a value inherited from a parent run can never be used.
+    if not exempt and lane == LOCK_DIR:
+        os.environ["JOB_QUEUE_JOB"] = job
+        os.environ["JOB_QUEUE_RUN_PID"] = str(os.getpid())
+    else:
+        os.environ.pop("JOB_QUEUE_JOB", None)
+        os.environ.pop("JOB_QUEUE_RUN_PID", None)
     try:
         # Its own process group, so stop_child can take the whole tree down.
         proc = subprocess.Popen(cmd, start_new_session=True)
@@ -1499,6 +1687,137 @@ def run(job, cmd, lease_minutes, timeout_minutes=None, check_stale=True,
             release(job, quiet=True, outcome="failed", reason=running["ceiling"])
         elif not running["lost"]:
             release(job, quiet=True, **release_outcome(running["code"]))
+
+
+class PhaseStopped(Exception):
+    """A background phase was told to stop (TERM, HUP or INT)."""
+
+    def __init__(self, signum):
+        super().__init__("background phase stopped by signal %s" % signum)
+        self.signum = signum
+
+
+def _exit_status(code):
+    """Popen's -N for a signal death, as the 128+N a shell expects."""
+    return 128 - code if code is not None and code < 0 else code
+
+
+def background(cmd, quiet=False):
+    """Run `cmd` as a BACKGROUND PHASE of the queue run it is part of.
+
+    WHY (15 Oct 2026). The nightly Content Engine held the queue lock from
+    22:00:06 to 04:54:10 on 14-15 Oct (24,844 s), and for three to seven and a
+    half hours on every night it ran from 25 Sep. About 4.7 hours of that night was
+    `render.py run`: ffmpeg, stabilising and transcribing on local disk. Behind
+    it apple-notes-bridge and feed-brain gave up after six hours on 14 AND
+    15 Oct, compound-brain and photo-filer on 14 Oct, and a one-off inbox job
+    three times at two hours each. The schedule's own notes had named the fix
+    since 19 Sep: take the render out of the global lock.
+
+    HOW. The run's queue lock does not move. It stays held by this job and kept
+    alive by the run's own heartbeat, so a waiter on any version of this file
+    still sees the queue held. This writes a phase marker, and while it stands a
+    waiting job declared `backgroundSafe` may take the GUEST LANE (_guest_turn),
+    one guest at a time. When the command ends the marker goes first, then this
+    waits for a guest still inside to finish, then returns the command's own exit
+    code. So the job's next step never runs beside a guest.
+
+    WHY IT IS SAFE.
+      * Nothing that waited before can start now: the queue lock is never free.
+        A second render, a Playwright suite, the whisper audiobook run and every
+        undeclared job wait for the whole run, exactly as before.
+      * Only declared jobs run as guests, and they are short and light (the real
+        schedule is held to that in tests/job-queue.test.js).
+      * A marker from a killed phase is inert (active_yield checks the holder
+        and the pid), and a run whose lock was lost refuses to start the
+        command at all.
+      * Outside a queue run (a hand-started script, a test, or the first night
+        after this merges, when the wrapper already running is the old code and
+        exports no run identity) it simply runs the command, as before.
+    """
+    job = os.environ.get("JOB_QUEUE_JOB") or ""
+    try:
+        run_pid = int(os.environ.get("JOB_QUEUE_RUN_PID") or 0)
+    except ValueError:
+        run_pid = 0
+    if not job or run_pid <= 0:
+        if not quiet:
+            print("background: not inside a queue run, so there is no queue to "
+                  "share; running the step as before")
+        return _exit_status(subprocess.call(cmd))
+
+    ensure_dirs()
+    holder = read_holder()
+    if not holder or holder.get("job") != job or holder.get("pid") != run_pid:
+        why = ("nobody holds the queue" if not holder else
+               "the queue is held by %s (pid %s), not by this run of %s (pid %s)"
+               % (holder.get("job"), holder.get("pid"), job, run_pid))
+        event(job, "background-refused", reason=why)
+        print("LOST LOCK: %s cannot start a background phase: %s. Nothing was run."
+              % (job, why), file=sys.stderr)
+        return EX_LOSTLOCK
+
+    me = os.getpid()
+    what = " ".join(cmd)[:200]
+    tmp = "%s.%d.tmp" % (YIELD_FILE, me)
+    with open(tmp, "w") as f:
+        json.dump({"job": job, "pid": me, "run_pid": run_pid, "since": now(),
+                   "since_iso": iso(), "command": what}, f)
+    os.replace(tmp, YIELD_FILE)
+    started = now()
+    event(job, "yielded", command=what,
+          reason="background phase: jobs declared backgroundSafe may run beside it, one at a time")
+    if not quiet:
+        print("background: %s keeps the queue; light jobs may run beside this step" % job)
+
+    def _stop(signum, _frame):
+        raise PhaseStopped(signum)
+    prev = {}
+    for sig in (signal.SIGTERM, signal.SIGHUP, signal.SIGINT):
+        try:
+            prev[sig] = signal.signal(sig, _stop)
+        except (ValueError, OSError):
+            pass
+
+    proc = None
+    code = None
+    try:
+        try:
+            proc = subprocess.Popen(cmd)
+            code = proc.wait()
+        finally:
+            _clear_yield(me)          # 1. shut the lane: no new guest from here
+        guest_wait = _drain_guests()  # 2. let a guest already inside finish
+    except PhaseStopped as stop:
+        # The command must not outlive its phase: a render still running with
+        # no phase and, soon, no lock is two heavy jobs at once.
+        if proc is not None and proc.poll() is None:
+            proc.terminate()
+            try:
+                proc.wait(timeout=STOP_GRACE_SECONDS)
+            except subprocess.TimeoutExpired:
+                proc.kill()
+        try:
+            name = signal.Signals(stop.signum).name
+        except (ValueError, AttributeError):
+            name = "signal %s" % stop.signum
+        event(job, "resumed", outcome="signalled", signal=name,
+              background_seconds=round(now() - started, 1))
+        return 128 + stop.signum
+    finally:
+        for sig, handler in prev.items():
+            try:
+                signal.signal(sig, handler)
+            except (ValueError, OSError):
+                pass
+
+    sig = signal_of(code)
+    event(job, "resumed", exit=code, background_seconds=round(now() - started, 1),
+          guest_wait_seconds=guest_wait, **({"signal": sig} if sig else {}))
+    if not quiet:
+        print("background: %s has the queue to itself again (step exit %s, "
+              "waited %ss for a guest)" % (job, code, guest_wait))
+    return _exit_status(code)
 
 
 def parse_event_ts(value):
@@ -1615,6 +1934,15 @@ def status():
             (holder.get("lease_until", now()) - now()) / 60))
     else:
         print("FREE")
+    phase = active_yield()
+    if phase:
+        print("  in a background phase since %s: jobs declared backgroundSafe may "
+              "run beside it, one at a time" % phase.get("since_iso"))
+    guest = read_holder(GUEST_DIR)
+    if guest:
+        print("GUEST %s (%s, since %s, lease %.0f min left)" % (
+            guest.get("job"), guest.get("mode"), guest.get("acquired_iso"),
+            (guest.get("lease_until", now()) - now()) / 60))
     print("Waiting: %d" % len(waiting))
     for name in waiting:
         try:
@@ -1638,11 +1966,20 @@ def sweep():
     anything else that runs on a clock.
 
     Exit 0 nothing wrong (no lock, or a live one) · 1 a stale lock was
-    reclaimed, and that is worth reporting, not swallowing.
+    reclaimed, and that is worth reporting, not swallowing. The guest lane
+    (see background()) is swept by the same rules.
     """
+    guest_reclaimed = False
+    if os.path.isdir(GUEST_DIR):
+        guest = (read_holder(GUEST_DIR) or {}).get("job", "unknown")
+        why = break_stale_lock(GUEST_DIR)
+        if why:
+            guest_reclaimed = True
+            print("queue sweep: RECLAIMED the guest lane from %s — %s." % (guest, why))
+
     if not os.path.isdir(LOCK_DIR):
         print("queue sweep: no lock held.")
-        return EX_OK
+        return 1 if guest_reclaimed else EX_OK
 
     holder = read_holder() or {}
     job = holder.get("job", "unknown")
@@ -1657,7 +1994,7 @@ def sweep():
     left = (holder.get("lease_until", now()) - now()) / 60
     print("queue sweep: %s still holds the queue, lease live for another "
           "%.0f min." % (job, left))
-    return EX_OK
+    return 1 if guest_reclaimed else EX_OK
 
 
 def main(argv=None):
@@ -1708,6 +2045,14 @@ def main(argv=None):
     sp = sub.add_parser("assert-held")
     sp.add_argument("job")
     sp.add_argument("--quiet", action="store_true")
+
+    # A long local step (the nightly render) inside a wrapped run: the run keeps
+    # the queue and jobs declared backgroundSafe may run beside the step
+    # (15 Oct 2026). Exits with the step's own code; 70 if the run lost its lock.
+    sp = sub.add_parser("background",
+                        help="run one step of a queued job as a background phase")
+    sp.add_argument("--quiet", action="store_true")
+    sp.add_argument("cmd_args", nargs="*")
 
     sub.add_parser("status")
 
@@ -1769,6 +2114,12 @@ def main(argv=None):
         return heartbeat(a.job, a.lease)
     if a.cmd == "assert-held":
         return assert_held(a.job, quiet=a.quiet)
+    if a.cmd == "background":
+        cmd = a.cmd_args + trailing
+        if not cmd:
+            print("ERROR: no command given for the background phase", file=sys.stderr)
+            return EX_USAGE
+        return background(cmd, quiet=a.quiet)
     if a.cmd == "status":
         return status()
     if a.cmd == "sweep":

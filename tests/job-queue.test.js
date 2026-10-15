@@ -1501,7 +1501,10 @@ describe('a sleeping job cannot hold the lock', () => {
 
   it('writes the holder file atomically — no truncate-then-write anywhere', () => {
     const body = src();
-    expect(body).toMatch(/os\.replace\(tmp, HOLDER_FILE\)/);
+    // write_holder takes the lane's lock directory since 15 Oct 2026 (the guest
+    // lane); `path` is HOLDER_FILE for the queue lock.
+    expect(body).toMatch(/os\.replace\(tmp, path\)/);
+    expect(body).toMatch(/return HOLDER_FILE if lock_dir == LOCK_DIR/);
     // The one legitimate direct write is inside the staging directory that
     // try_take_lock renames into place whole. Nothing may open the LIVE
     // holder path for writing.
@@ -2199,5 +2202,239 @@ describe('a waiter stopped mid-queue records itself (finding 20260915-daily-ops-
 
     // And the ticket is still cleaned up, as it always was.
     expect(readdirSync(join(stateDir, 'tickets')).length).toBe(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// A LONG JOB'S BACKGROUND PHASE (15 Oct 2026)
+//
+// The nightly Content Engine held the queue lock from 22:00:06 to 04:54:10 on
+// 14-15 Oct 2026 (24,844 s), about 4.7 hours of it ffmpeg rendering on local
+// disk. Behind it apple-notes-bridge and feed-brain gave up after six hours on
+// BOTH 14 and 15 Oct and compound-brain on 14 Oct, so the brain went unfed for
+// two nights; each needs minutes of machine time.
+//
+// `job-queue.py background -- <cmd>` declares the render a background phase.
+// The queue lock never leaves the render's job, so nothing the queue held back
+// before can start; only a job declared `backgroundSafe` may run, one at a time,
+// in a guest lane beside it, and the render's job waits for that guest to finish
+// before its next step. Real processes against the real script throughout.
+// ---------------------------------------------------------------------------
+describe("a long job's background phase lets light jobs run beside it", () => {
+  let fakeHome, tl, step, host;
+
+  // Every queue call here clears the run identity a parent wrapper may have
+  // exported (the suite itself can run under `job-queue.py run merge-approved`).
+  const bgEnv = (extra = {}) => ({ HOME: fakeHome, JOB_QUEUE_JOB: '', JOB_QUEUE_RUN_PID: '', ...extra });
+
+  beforeEach(() => {
+    fakeHome = mkdtempSync(join(ROOT, 'home-'));
+    tl = join(stateDir, 'timeline.txt');
+    step = join(stateDir, 'step.py');
+    host = join(stateDir, 'host.sh');
+    writeFileSync(schedulePath, JSON.stringify({
+      'render-host': { cron: '* * * * *', maxLateMinutes: 600, mode: 'wrapped' },
+      'render-host-2': { cron: '* * * * *', maxLateMinutes: 600, mode: 'wrapped' },
+      'light-guest': { cron: '* * * * *', maxLateMinutes: 600, mode: 'wrapped', backgroundSafe: true, maxRuntimeMinutes: 60 },
+      'light-guest-2': { cron: '* * * * *', maxLateMinutes: 600, mode: 'wrapped', backgroundSafe: true, maxRuntimeMinutes: 60 },
+      'heavy-job': { cron: '* * * * *', maxLateMinutes: 600, mode: 'wrapped' },
+    }));
+    // One step of work: stamps its start and end on the shared timeline. With
+    // a fourth argument it holds on until the named steps have started (at most
+    // `secs`), so "did the guest start during the render" is decided by the
+    // queue, not by how busy the machine running the suite happens to be.
+    writeFileSync(step, `import sys, time
+label, secs, tl = sys.argv[1], float(sys.argv[2]), sys.argv[3]
+until = [u for u in (sys.argv[4] if len(sys.argv) > 4 else "").split(",") if u]
+def mark(what):
+    with open(tl, "a") as f:
+        f.write("%s %s %f\\n" % (label, what, time.time()))
+mark("start")
+deadline = time.time() + secs
+if until:
+    while time.time() < deadline:
+        try:
+            seen = open(tl).read()
+        except OSError:
+            seen = ""
+        if all(("%s start" % u) in seen for u in until):
+            break
+        time.sleep(0.05)
+    time.sleep(0.3)
+else:
+    time.sleep(secs)
+mark("end")
+`);
+    // The render job's run script, shaped like content-engine-run.sh: a render
+    // declared as a background phase, then a step that needs the queue back.
+    writeFileSync(host, `set -e
+python3 "$Q" background -- python3 "$STEP" "$NAME" "$SECS" "$TL" "$UNTIL"
+python3 "$Q" assert-held "$JOB" --quiet
+python3 "$STEP" "$NAME-after" "$AFTER" "$TL"
+`);
+  });
+
+  const hostRun = (job, { name = 'render', secs = '20', until = '', after = '0.2' } = {}) =>
+    runAsync(['run', job, '--no-stale-check', '--timeout', '1', '--', 'bash', host],
+      { env: bgEnv({ Q: QUEUE, STEP: step, TL: tl, NAME: name, SECS: secs, UNTIL: until, AFTER: after, JOB: job }) });
+
+  const stepRun = (job, label, secs, timeout = '1') =>
+    runAsync(['run', job, '--no-stale-check', '--timeout', timeout, '--', 'python3', step, label, secs, tl],
+      { env: bgEnv() });
+
+  function timeline() {
+    const t = {};
+    if (!existsSync(tl)) return t;
+    for (const line of readFileSync(tl, 'utf8').trim().split('\n').filter(Boolean)) {
+      const [label, what, at] = line.split(' ');
+      (t[label] = t[label] || {})[what] = Number(at);
+    }
+    return t;
+  }
+
+  async function waitFor(pred, ms = 20000) {
+    const deadline = Date.now() + ms;
+    while (Date.now() < deadline) {
+      if (pred()) return true;
+      await new Promise((r) => setTimeout(r, 50));
+    }
+    return false;
+  }
+  const yielded = (job = 'render-host') => events().some((e) => e.job === job && e.state === 'yielded');
+
+  it('a light job queued behind the render runs DURING it, in the guest lane', async () => {
+    const h = hostRun('render-host', { until: 'guest' });
+    expect(await waitFor(() => yielded()), 'the render never declared its background phase').toBe(true);
+    const g = await stepRun('light-guest', 'guest', '0.3');
+    const done = await h;
+    expect(g.code, g.stdout + g.stderr).toBe(0);
+    expect(done.code, done.stdout + done.stderr).toBe(0);
+    const t = timeline();
+    expect(t.guest.start).toBeGreaterThan(t.render.start);
+    expect(t.guest.end, 'the guest only ran once the render had finished').toBeLessThan(t.render.end);
+    const acq = events().find((e) => e.job === 'light-guest' && e.state === 'acquired');
+    expect(acq.lane).toBe('guest');
+    expect(acq.beside).toBe('render-host');
+    // The render's job held the queue lock the whole time: it never changed hands.
+    expect(events().filter((e) => e.job === 'render-host' && e.state === 'acquired')).toHaveLength(1);
+  });
+
+  it('the render job takes its turn back, waits for a guest still inside, then finishes', async () => {
+    const h = hostRun('render-host', { until: 'guest' });
+    expect(await waitFor(() => yielded())).toBe(true);
+    const g = stepRun('light-guest', 'guest', '2');    // outlives the render on purpose
+    const [gr, done] = await Promise.all([g, h]);
+    expect(gr.code, gr.stdout + gr.stderr).toBe(0);
+    expect(done.code, done.stdout + done.stderr).toBe(0);
+    const t = timeline();
+    expect(t.guest.start).toBeLessThan(t.render.end);
+    expect(t.guest.end).toBeGreaterThan(t.render.end);
+    expect(t['render-after'].start, "the job's next step ran beside the guest").toBeGreaterThan(t.guest.end);
+    const mine = events().filter((e) => e.job === 'render-host').map((e) => e.state);
+    expect(mine.indexOf('acquired')).toBeLessThan(mine.indexOf('yielded'));
+    expect(mine.indexOf('yielded')).toBeLessThan(mine.indexOf('resumed'));
+    expect(mine.indexOf('resumed')).toBeLessThan(mine.indexOf('released'));
+    // Released ONCE, at the end: a mid-run "released" reads as the night's
+    // success in the morning digest and in retry-deferred.
+    const rel = events().filter((e) => e.job === 'render-host' && e.state === 'released');
+    expect(rel).toHaveLength(1);
+    expect(rel[0].outcome).toBe('completed');
+    const resumed = events().find((e) => e.job === 'render-host' && e.state === 'resumed');
+    expect(resumed.guest_wait_seconds).toBeGreaterThan(0);
+    expect(existsSync(join(stateDir, 'guest')), 'guest lane left held').toBe(false);
+    expect(existsSync(join(stateDir, 'yield.json')), 'phase marker left behind').toBe(false);
+  });
+
+  it('no two heavy jobs at once: a second render and an undeclared job both wait for the WHOLE run', async () => {
+    const h = hostRun('render-host', { secs: '2.5' });
+    expect(await waitFor(() => yielded())).toBe(true);
+    // A second render job and a heavy job (a Playwright suite, a whisper run)
+    // arrive mid-render. Neither is declared safe, so neither may start.
+    const second = hostRun('render-host-2', { name: 'render2', secs: '0.3' });
+    const heavy = stepRun('heavy-job', 'heavy', '0.3');
+    const [done, s2, hv] = await Promise.all([h, second, heavy]);
+    for (const r of [done, s2, hv]) expect(r.code, r.stdout + r.stderr).toBe(0);
+    const t = timeline();
+    // Nothing undeclared overlaps any part of the first run, render included.
+    expect(t.heavy.start).toBeGreaterThan(t['render-after'].end);
+    expect(t.render2.start).toBeGreaterThan(t['render-after'].end);
+    // ...and they do not overlap each other either.
+    const spans = [[t.heavy.start, t.heavy.end], [t.render2.start, t['render2-after'].end]].sort((a, b) => a[0] - b[0]);
+    expect(spans[1][0]).toBeGreaterThan(spans[0][1]);
+    expect(events().some((e) => e.job === 'heavy-job' && e.lane === 'guest')).toBe(false);
+  });
+
+  it('guests take turns: two light jobs never run at once, even beside the render', async () => {
+    const h = hostRun('render-host', { until: 'g1,g2' });
+    expect(await waitFor(() => yielded())).toBe(true);
+    const [a, b] = await Promise.all([stepRun('light-guest', 'g1', '0.6'), stepRun('light-guest-2', 'g2', '0.6')]);
+    const done = await h;
+    for (const r of [a, b, done]) expect(r.code, r.stdout + r.stderr).toBe(0);
+    const t = timeline();
+    const spans = [[t.g1.start, t.g1.end], [t.g2.start, t.g2.end]].sort((x, y) => x[0] - y[0]);
+    expect(spans[1][0], 'two guests overlapped').toBeGreaterThan(spans[0][1]);
+    expect(t.g1.start).toBeGreaterThan(t.render.start);
+    expect(t.g2.start).toBeGreaterThan(t.render.start);
+  });
+
+  it('once the phase is over the lane is shut: a light job then waits for the queue like any other', async () => {
+    const h = hostRun('render-host', { secs: '0.3', after: '1.5' });
+    expect(await waitFor(() => events().some((e) => e.job === 'render-host' && e.state === 'resumed'))).toBe(true);
+    // The job is on its next step (1.5 s), holding the queue in the foreground.
+    const g = await stepRun('light-guest', 'late', '0.1');
+    const done = await h;
+    expect(g.code).toBe(0);
+    expect(done.code).toBe(0);
+    const t = timeline();
+    expect(t.late.start).toBeGreaterThan(t['render-after'].end);
+    expect(events().find((e) => e.job === 'light-guest' && e.state === 'acquired').lane).toBeUndefined();
+  });
+
+  it('outside a queue run it simply runs the command, as the script line did before', () => {
+    const r = run(['background', '--', 'python3', '-c', 'import sys; print("rendered"); sys.exit(7)'], { env: bgEnv() });
+    expect(r.code).toBe(7);                    // the command's own exit code, untouched
+    expect(r.stdout).toMatch(/rendered/);
+    expect(existsSync(join(stateDir, 'yield.json'))).toBe(false);
+  });
+
+  it('refuses, and runs nothing, when the run it names no longer holds the queue', () => {
+    expect(run(['acquire', 'heavy-job', '--lease', '10'], { env: bgEnv() }).code).toBe(0);
+    const ran = join(stateDir, 'ran.txt');
+    const r = run(['background', '--', 'python3', '-c', `open(${JSON.stringify(ran)}, "w").write("x")`],
+      { env: bgEnv({ JOB_QUEUE_JOB: 'render-host', JOB_QUEUE_RUN_PID: String(process.pid) }) });
+    expect(r.code).toBe(70);                   // EX_LOSTLOCK: never render without the lock
+    expect(existsSync(ran)).toBe(false);
+    expect(existsSync(join(stateDir, 'yield.json'))).toBe(false);
+    run(['release', 'heavy-job'], { env: bgEnv() });
+  });
+
+  it('a phase marker left by a killed run never opens the lane on its own', () => {
+    // A SIGKILLed phase cannot remove its marker. It names a dead process and a
+    // run that no longer holds the queue, so it must read as no phase at all.
+    expect(run(['acquire', 'heavy-job', '--lease', '10'], { env: bgEnv() }).code).toBe(0);
+    writeFileSync(join(stateDir, 'yield.json'), JSON.stringify({ job: 'heavy-job', pid: 999999, run_pid: 999998 }));
+    const r = run(['acquire', 'light-guest', '--timeout', '0.02'], { env: bgEnv() });
+    expect(r.code).toBe(75);
+    run(['release', 'heavy-job'], { env: bgEnv() });
+  });
+
+  it('the real schedule opens the guest lane only to the four short night jobs, each with a ceiling', () => {
+    const real = JSON.parse(readFileSync(resolve(__dirname, '../scripts/job-schedule.json'), 'utf8'));
+    const safe = Object.keys(real).filter((k) => real[k] && real[k].backgroundSafe);
+    expect(safe.sort()).toEqual(['apple-notes-bridge', 'compound-brain', 'feed-brain', 'publish-brain']);
+    for (const k of safe) {
+      expect(real[k].mode, k).toBe('wrapped');
+      expect(real[k].lockExempt, k).toBeUndefined();
+      // The render's job waits for a guest still inside before its next step,
+      // so every guest carries a short ceiling of its own.
+      expect(Number(real[k].maxRuntimeMinutes), k).toBeGreaterThan(0);
+      expect(Number(real[k].maxRuntimeMinutes), k).toBeLessThanOrEqual(60);
+    }
+    // Heavy work never runs as a guest: local whisper, a render, the robot
+    // browser, Playwright suites.
+    for (const k of ['audiobook-backfill', 'content-engine', 'content-engine-publish', 'merge-approved',
+      'prod-sweep-weekly', 'prod-e2e-sweep', 'queue-fixer']) {
+      expect(real[k] && real[k].backgroundSafe, k).toBeFalsy();
+    }
   });
 });

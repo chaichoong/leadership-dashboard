@@ -156,7 +156,10 @@ for day in $DAYS; do
   echo "== day $day"
   for i in 1 2 3 4 5 6; do
     python3 scripts/content-engine/watch.py next --day "$day" || break    # exit 3: the day is done; 4: the clip did not come down; anything else: the pull was refused. All move on
-    python3 scripts/content-engine/render.py run --limit 1 || exit 1
+    # The render is a BACKGROUND PHASE (15 Oct 2026): this job keeps the queue lock, and the short night jobs declared
+    # backgroundSafe (the brain feeds) may run beside it instead of waiting hours; the next pull waits for any such job
+    # to finish. Same render, same exit code. Outside a queue run, and on the first night after a merge, it simply runs.
+    python3 scripts/job-queue.py background -- python3 scripts/content-engine/render.py run --limit 1 || exit 1
   done
 done
 # Learnings clips Kevin asked to be rebuilt (content_engine_redo_lfmd, one day per line). A success releases the
