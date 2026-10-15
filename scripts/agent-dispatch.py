@@ -462,6 +462,75 @@ TASKMGR_REGISTER_ROW = ROLE_AGENTS[TASKMGR_REC_ID]["registerRow"]
 PROPERTY_REGISTER_ROW = ROLE_AGENTS[PROPERTY_REC_ID]["registerRow"]
 RENT_REGISTER_ROW = ROLE_AGENTS[RENT_REC_ID]["registerRow"]
 
+# ─── A holder no robot works (15 Oct 2026) ───────────────────────────
+#
+# Kevin's AI team panel read "2 idle, 7 of 9 worked today". One of the two was
+# the AI Bookkeeper: daily-ops raised two live tasks on its Team Members row (a
+# Payment Run gap on 11 Oct, bank re-import duplicates on 15 Oct), but the
+# Bookkeeper is the Reconciliation tab's own matcher (its register Go Signal is
+# the tab opening). It has no agent file and no entry above, so build_queue
+# never read those tasks as agent work: they sat in no bucket, not even
+# `unclassified`, and no robot would ever pick them up. Eight Team Members rows
+# with Is AI Agent ticked are in that state (the Bookkeeper plus seven Planned,
+# Paused or Retired register rows); only the Bookkeeper held work that day.
+#
+# One answer for both readers, so they never disagree: `no_lane_holders`.
+# build_queue lists such tasks under `noLane`, named and counted, never
+# dropped. The Task Manager's board puts them on its `ownerless` list, where
+# every slot must give each one a move (its verify fails the slot otherwise),
+# and `route` already refuses any target outside ALL_AGENTS, so the move can
+# only be to an agent that works.
+TEAM_TABLE = "tblco0p2OnlLQVAX7"
+# js/config.js TEAM_MEMBER_FIELDS (drift-tested in tests/agent-dispatch-no-lane.test.js).
+TEAM_FIELDS = {"name": "flds7xoRFQhcRTnbB", "isAgent": "fldKGsz9kTpFypeOr"}
+
+
+def holder_problem(rec_id, roster=None, outcome=""):
+    """Why no robot works a task this agent holds, or '' when one does (15 Oct 2026, review of
+    PR #792). Off the list: nothing reads it. An agent on its own Go Signal (Inbox Triage, the
+    Content Engine) is never handed work, so it works only its own cards, the ones with Kevin's
+    verdict on them (build_queue's ownGoSignal). Otherwise the register decides through
+    role_agent_problem, the check `route` uses, so a role agent Kevin paused holds nothing either.
+    `roster` None means the register could not be read: judged by the list alone, never by
+    guessing every role agent paused."""
+    if rec_id not in ALL_AGENTS:
+        return "no robot works this agent"
+    if own_go_signal(rec_id):
+        return "" if outcome else "runs on its own schedule and is never handed work"
+    if roster is None:
+        return ""
+    return role_agent_problem(rec_id, roster, "route")
+
+
+def no_lane_holders(team_ids, sent_by_ids, ai_agents, has_assignee=False, roster=None, outcome=""):
+    """The AI agents holding a task that no robot works, or [] when something works it.
+    Something works it when any holder or the card's sender is one dispatch works
+    (holder_problem), a person is a holder (a Team Members row without Is AI Agent ticked), or a
+    person is the Assignee. `ai_agents` is the set (or dict) of Team Members ids with Is AI Agent
+    ticked; `roster` is fetch_role_roster's map (None when unread). Pure: no read, no write."""
+    team = [i for i in (team_ids or []) if i]
+    if not team or has_assignee:
+        return []
+    if any(not holder_problem(i, roster, outcome) for i in team + [i for i in (sent_by_ids or []) if i]):
+        return []
+    if not all(i in ai_agents for i in team):
+        return []
+    return team
+
+
+def fetch_ai_agents():
+    """{Team Members id: name} for every row with Is AI Agent ticked. Raises on
+    a read that cannot be true: the AI CEO's row exists and is ticked, so a read
+    without it is a drifted field or a broken filter, never an empty roster."""
+    rows = query_records(TEAM_TABLE, "{Is AI Agent}",
+                         [TEAM_FIELDS["name"], TEAM_FIELDS["isAgent"]])
+    out = {r["id"]: (r.get("fields") or {}).get(TEAM_FIELDS["name"]) or r["id"]
+           for r in rows if (r.get("fields") or {}).get(TEAM_FIELDS["isAgent"])}
+    if CEO_REC_ID not in out:
+        raise RuntimeError("Team Members read returned %d AI agent rows and not the AI CEO's: the "
+                           "read is broken, not the roster empty" % len(out))
+    return out
+
 # ─── Deterministic routing lanes (ordered, first match wins) ─────────
 #
 # Kevin's rulings: inbound reply tasks go to the Response agent (24 Aug 2026)
@@ -2980,6 +3049,7 @@ def task_view(rec):
         "taskType": sel(f.get(AF["taskType"])),
         "teamMemberIds": links(f.get(AF["teamMember"])),
         "sentForApprovalByIds": links(f.get(AF["sentForApprovalBy"])),
+        "hasAssignee": bool(f.get(AF["assignee"])),
         "approverEmail": (f.get(AF["approver"]) or {}).get("email", ""),
         "agentId": agent_id,
         "agentName": ALL_AGENTS.get(agent_id, {}).get("name", ""),
@@ -3056,6 +3126,24 @@ def build_queue(args=None):
               "zero tasks with an approval outcome. The read is broken, not "
               "the queue empty.", file=sys.stderr)
         sys.exit(1)
+
+    # Held by an AI agent no lane serves (15 Oct 2026, see no_lane_holders):
+    # outside agent_linked, so no bucket below would ever name them. Listed
+    # here for the Task Manager's ownerless step, which moves each one. A
+    # failed roster read says NOT CHECKED in the queue JSON, never a quiet 0.
+    no_lane, no_lane_error = [], ""
+    try:
+        ai_agents = fetch_ai_agents()
+        roster = None if role_roster_error else role_roster
+        for t in open_tasks:
+            held = no_lane_holders(t["teamMemberIds"], t["sentForApprovalByIds"],
+                                   ai_agents, t.get("hasAssignee"), roster, t["outcome"])
+            if held:
+                no_lane.append({**t, "noLaneHolder": [{"id": i, "name": ai_agents.get(i, i)}
+                                                      for i in held]})
+    except Exception as exc:  # noqa: BLE001 — said in the queue JSON and on stderr
+        no_lane_error = "NOT CHECKED: " + str(exc)[:280]
+        print(f"WARNING: holders no robot works were not checked: {exc}"[:400], file=sys.stderr)
 
     tier1, skipped_tier2, unmapped, unclassified = [], [], [], []
     system_alerts = []
@@ -3458,6 +3546,10 @@ def build_queue(args=None):
         "decided": decided,            # answered DECIDE: cards; the Task Manager's move, never a carry-out
         "unmappedAgent": unmapped,
         "unclassified": unclassified,  # states the buckets cannot place — eyes, not silence
+        # Held by an AI agent no robot works (no_lane_holders). Never dispatched
+        # from here: the Task Manager's ownerless step gives each one a move.
+        "noLane": no_lane,
+        "noLaneError": no_lane_error,
         "agents": ALL_AGENTS,          # the roster the CEO routes against
         # The full role-agent workforce from the live register, so the CEO
         # routes with knowledge of every role agent and what it does. Only
@@ -3504,6 +3596,7 @@ def build_queue(args=None):
             "creditorMatters": creditor_count,
             "routingNeeded": len(routing),
             "unclassified": len(unclassified),
+            "noLane": len(no_lane),
             "tier1Open": len(tier1),
             "tier1InWorklist": len([t for t in worklist if t.get("tier1")]),
             "worklist": len(worklist),
@@ -3533,7 +3626,18 @@ def require_role_agent_live(rec_id, verb):
                  f"{ROLE_AGENTS[rec_id]['name']} — the register is "
                  f"unreadable ({str(exc)[:160]}); use a strategic agent "
                  "this run and let verify surface the roster failure")
-    entry = roster.get(rec_id)
+    problem = role_agent_problem(rec_id, roster, verb)
+    if problem:
+        sys.exit(f"ERROR: {problem}")
+
+
+def role_agent_problem(rec_id, roster, verb):
+    """Why the register refuses `verb` for this agent, or ''. The one register check: route and
+    submit use it through require_role_agent_live, and no_lane_holders asks it whether a holder
+    is one dispatch would work (15 Oct 2026). Strategic agents have no register row: ''."""
+    if rec_id not in ROLE_AGENTS:
+        return ""
+    entry = (roster or {}).get(rec_id)
     status = (entry or {}).get("status", "no register row")
     # `dispatch: False` means the CEO pass never hands this agent WORK. It does
     # not mean the agent cannot hand in its OWN work: the Content Engine runs on
@@ -3541,11 +3645,12 @@ def require_role_agent_live(rec_id, verb):
     # `submit` (3 Sep 2026). For a submit the lever is the register status
     # alone — Built or Live — exactly as it is for a dispatchable agent.
     if verb == "submit" and entry and status in ("Built", "Live"):
-        return
+        return ""
     if not entry or not entry.get("dispatchable"):
-        sys.exit(f"ERROR: role agent {ROLE_AGENTS[rec_id]['name']} is not "
-                 f"dispatchable (register status: {status}) — Kevin's "
-                 "register controls this; route to a strategic agent instead")
+        return (f"role agent {ROLE_AGENTS[rec_id]['name']} is not "
+                f"dispatchable (register status: {status}) — Kevin's "
+                "register controls this; route to a strategic agent instead")
+    return ""
 
 
 DECIDED_NOTE_MARK = "Decision carried out"
@@ -9878,6 +9983,12 @@ def cmd_verify(args):
     if report.get("roleAgentsError"):
         problems.append("role-agent register read failed: "
                         f"{str(report['roleAgentsError'])[:160]}")
+    # The same for the holders no robot works (15 Oct 2026): read off the run's own queue.json,
+    # so it fails loudly whether or not the report copied it.
+    no_lane_error = report.get("noLaneError") or (queue or {}).get("noLaneError")
+    if no_lane_error:
+        problems.append("holders no robot works were not checked: "
+                        f"{str(no_lane_error)[:160]}")
 
     # THE LEARNING GATE (Kevin's ruling, 26 Aug 2026). Read from the LIVE
     # table, never from what the run claimed, and checked on every run whether

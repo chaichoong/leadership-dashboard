@@ -31,8 +31,11 @@ CHILD  = "recCHILD000000001"
 THREAD = "https://mail.google.com/mail/u/0/#all/THX"
 asked = []
 
-def fake_query_all(table, formula, fields, why):
+def fake_query_all(table, formula, fields, why, **kw):
     asked.append({"why": why, "fields": list(fields)})
+    if why == "AI agent roster read":
+        # the roster read's control: the AI CEO's row is always there (15 Oct 2026)
+        return [{"id": "reciHUAEcEkbctnZ6", "fields": {"Name": "AI CEO (Dan Martell)"}}]
     if why != "board read":
         return []
     def rec(rid, name, created, desc=None):
@@ -49,6 +52,7 @@ def fake_query_all(table, formula, fields, why):
     ]
 
 m.query_all = fake_query_all
+m.read_role_roster = lambda: (None, "not read in this test")   # the register read goes through agent-dispatch.py
 m.read_activity = lambda *a, **k: ([], set())
 m.dispatch_in_flight = lambda *a, **k: set()
 buf = io.StringIO()
