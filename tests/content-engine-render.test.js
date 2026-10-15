@@ -18,7 +18,47 @@ describe('content-engine render', () => {
     // 68 since 7 Oct 2026: the hand-read Learnings window (check_lfmd_window) and the redo list's
     // optional @start-end (redo_line) are driven in there, not grepped. The floor rises with them so
     // deleting those cases goes red instead of quietly shrinking the count.
-    expect(out.checks).toBeGreaterThanOrEqual(68);
+    expect(out.checks).toBeGreaterThanOrEqual(74);
+  });
+
+  // 15 Oct 2026, finding 20261015-phase-3-888: day 2106 held two short recordings. Both were
+  // role=teaser, both rendered, and both wrote Summary Video URL to the same episode record, so the
+  // later render silently replaced the earlier one and Kevin's card carried a summary from a
+  // different run. The earlier clip had been flagged "spoken day 2101 disagrees with the date
+  // (2106)" and the flag changed nothing. Driven here, so the answer cannot depend on which clip
+  // finishes rendering last.
+  it('gives a day ONE summary, and the spoken-day flag decides it whichever teaser renders first', () => {
+    const decide = (key, day, reason, ledger) => JSON.parse(execFileSync('python3', ['-c', `
+import sys, json
+sys.path.insert(0, ${JSON.stringify(DIR)})
+import render
+print(json.dumps(render.summary_rival(${JSON.stringify(key)}, ${day}, ${JSON.stringify(reason)}, json.loads(sys.argv[1]))))
+`, JSON.stringify(ledger)], { encoding: 'utf8', cwd: DIR }));
+
+    const FLAG = 'spoken day 2101 disagrees with the date (2106); date used, flagged';
+    const OK = 'spoken day matches the date';
+    const rendered = (why, key = 'VID_002.insv') => ({ [key]: { episode: 2106, role: 'teaser', status: 'rendered', episode_reason: why } });
+
+    // the real 2106 order: the flagged clip rendered first, the clean one came second
+    expect(decide('VID_004.insv', 2106, OK, rendered(FLAG))[0]).toBe('replace');
+    // the other order: the clean one is already the summary, so the flagged one is refused
+    const refused = decide('VID_002.insv', 2106, FLAG, rendered(OK, 'VID_004.insv'));
+    expect(refused[0]).toBe('refuse');
+    expect(refused[1]).toContain('cannot replace that summary');
+    expect(refused[1]).toContain("spoken day disagrees with the date");
+    // two clean teasers: the first stays, and the second is named rather than silently overwriting
+    expect(decide('VID_004.insv', 2106, OK, rendered(OK))[0]).toBe('refuse');
+    expect(decide('VID_002.insv', 2106, OK, rendered(OK))).toEqual(['', '']);   // a re-render of the day's own summary
+    // and nothing in the way of the first summary of a day, or of another day's
+    expect(decide('VID_002.insv', 2106, OK, {})).toEqual(['', '']);
+    expect(decide('VID_004.insv', 2107, OK, rendered(OK))).toEqual(['', '']);
+  });
+
+  it('the render step acts on that decision instead of writing the link anyway', () => {
+    const src = readFileSync(RENDER, 'utf8');
+    // the refusal path mirrors the episode branch's: failed, named, clip and workdir cleaned up
+    expect(src).toContain('what, why = summary_rival(key, day, reason, ledger)');
+    expect(src).toMatch(/if what == "refuse":[\s\S]{0,400}return/);
   });
 
   // 5 Sep 2026 (finding 20260905-exceptions-462): the nightly run died inside overlays.py 'full'

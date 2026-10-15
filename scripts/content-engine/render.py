@@ -631,6 +631,40 @@ def teaser_for_day_before(role, spoken, date_day, ledger):
         v.get("episode") == spoken and v.get("role") == "teaser" and v.get("status") == "rendered" for v in ledger.values())
 
 
+# ---------- one day, ONE summary (finding 20261015-phase-3-888) ----------
+# Day 2106 held two short recordings. Both were role=teaser, both rendered, and both wrote Summary
+# Video URL to the same episode record, so the later render (502 s) silently replaced the earlier
+# (300 s) and Kevin's card carried a summary from a different run: "the summary video is for the
+# wrong episode compared to the other links in this approval card" (10 Oct 2026). The earlier clip
+# had been flagged "spoken day 2101 disagrees with the date (2106); date used, flagged" and the flag
+# changed nothing. The episode role has refused a second long recording since 24 Sep 2026; this is
+# the same refusal for the short one, with the flag as the tie-break so the answer does not depend
+# on which clip finishes rendering last.
+FLAGGED_DAY = "disagrees with the date"
+
+
+def summary_rival(key, day, reason, ledger):
+    """What to do with a teaser when episode `day` already has a rendered summary.
+
+    Returns ("", "") to render it as the first summary of the day, ("replace", why) when the summary
+    on the record came from a clip whose spoken day disagreed with its date and this one's agrees, or
+    ("refuse", why) when it must not be rendered at all. Pure: it reads the ledger and nothing else.
+    """
+    done = sorted(k2 for k2, v in ledger.items()
+                  if k2 != key and v.get("episode") == day and v.get("role") == "teaser"
+                  and v.get("status") == "rendered")
+    if not done:
+        return "", ""
+    mine_flagged = FLAGGED_DAY in str(reason or "")
+    agreed = [k2 for k2 in done if FLAGGED_DAY not in str(ledger[k2].get("episode_reason") or "")]
+    if mine_flagged or agreed:
+        return "refuse", ("a second short recording for episode %d (%s is already its summary%s): not rendered, so it "
+                          "cannot replace that summary" % (day, done[0], ", and this one's spoken day disagrees with "
+                          "the date" if mine_flagged else ""))
+    return "replace", ("episode %d's summary came from %s, whose spoken day disagreed with its date; this one's agrees, "
+                       "so it is the day's summary" % (day, ", ".join(done)))
+
+
 def part_number(key):
     return watch.part_no(key) or None
 
@@ -953,6 +987,15 @@ def process(key, ledger, keep=False):
                 e["status"] = "failed"; e["error"] = why; e["requeued"] = "not requeued: it needs a person"   # the page names it; a retry would do the same
                 if not keep: os.remove(clip); shutil.rmtree(workdir, ignore_errors=True)
                 watch.save_ledger(ledger); print("%s: NOT rendered: %s" % (key, why), file=sys.stderr); return
+    if role == "teaser":
+        what, why = summary_rival(key, day, reason, ledger)
+        if what == "refuse":
+            e["status"] = "failed"; e["error"] = why
+            e["requeued"] = "not requeued: it needs a person"       # a retry would do the same
+            if not keep: os.remove(clip); shutil.rmtree(workdir, ignore_errors=True)
+            watch.save_ledger(ledger); print("%s: NOT rendered: %s" % (key, why), file=sys.stderr); return
+        if what == "replace":
+            print("%s: %s" % (key, why))
     if role == "episode" and base:
         # the later part: its own masters, then part 1 + part 2 joined into the episode's masters and one caption track
         masters2 = render_masters(clip, workdir)
@@ -2002,6 +2045,17 @@ def selftest():
     f3 = record_updates(2225, {"summary": "u3"}, "t", "r", "c", role="teaser")
     assert "Record Status" not in f3 and "Transcription" not in f3 and f3["Summary Video URL"] == "u3", "a teaser never closes the episode"
     assert clip_role(41.6, False) == "teaser" and clip_role(700, True) == "episode" and clip_role(100, True) == "episode"
+    # one day, ONE summary (2106, finding 20261015-phase-3-888): the flag decides, not the render order
+    _flag = "spoken day 2101 disagrees with the date (2106); date used, flagged"
+    _ok = "spoken day matches the date"
+    _led = lambda why: {"a.insv": {"episode": 2106, "role": "teaser", "status": "rendered", "episode_reason": why}}
+    assert summary_rival("b.insv", 2106, _ok, {}) == ("", ""), "the first summary of a day is always rendered"
+    assert summary_rival("b.insv", 2106, _ok, _led(_flag))[0] == "replace", "a clean teaser replaces a flagged summary"
+    assert summary_rival("b.insv", 2106, _flag, _led(_ok))[0] == "refuse", "a flagged teaser never overwrites a clean summary"
+    assert summary_rival("b.insv", 2106, _ok, _led(_ok))[0] == "refuse", "two clean teasers: the first stays, the second is named"
+    assert summary_rival("b.insv", 2106, _flag, _led(_flag))[0] == "refuse", "both flagged: the first stays, so the answer is the same either way"
+    assert summary_rival("b.insv", 2107, _ok, _led(_ok)) == ("", ""), "another day's summary is not a rival"
+    assert summary_rival("a.insv", 2106, _ok, _led(_ok)) == ("", ""), "a re-render of the day's own summary is not a rival of itself"
     segs = [(0, 5, "So consecutive day 2195"), (5, 60, "today I talk about off-road running"), (60, 70, "so the learnings from my diary today are"),
             (70, 95, "be careful on descents"), (95, 100, "Thank you as always, stay positive"), (100, 110, "[BLANK]")]
     assert lfmd_window(segs) == (60.0, 100.0), lfmd_window(segs)
