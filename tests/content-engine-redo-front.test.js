@@ -597,3 +597,61 @@ res = ran`, {});
     expect(sh).not.toContain('render.py');                       // the hourly job still renders nothing
   });
 });
+
+// 15 Oct 2026, finding 20261015-phase-3-889: day 2106 came back with four points and the receipt answered all four
+// with the same sentence — "the whole day is re-rendered ... nothing else is changed for this point". Two of them were
+// about stabilisation getting jolty, which no re-render on unchanged code can fix. The receipt read as if the point
+// was handled, and nothing filed the code change: the real cause (29.97 fps resampled to 24) was found two days later
+// by a different route, by luck. Invented note, same shape as his.
+describe('a point only a code change can fix is not answered with a re-render', () => {
+  const MIXED = 'The summary video is for the wrong episode compared to the other links. '
+    + 'The stabilisation goes jolty about halfway through the climb. '
+    + 'It judders again over the last minute. '
+    + 'The title should say the day number.';
+
+  it('says plainly that the rebuild does not change it, and still answers the other points', () => {
+    const r = py(`res = render.sent_back_receipt(${J(MIXED)})`);
+    const lines = r.res.trim().split('\n');
+    expect(lines.length).toBe(4);
+    expect(lines[0]).toMatch(/→ rebuilt to this note: /);            // footage choice: the re-render answers it
+    expect(lines[1]).toContain('NOT answered by this rebuild');
+    expect(lines[2]).toContain('NOT answered by this rebuild');
+    expect(lines[3]).toMatch(/→ rebuilt to this note: /);
+    // the sentence that made the old receipt dishonest never reaches a code point
+    expect(lines[1]).not.toContain('nothing else is changed for this point');
+  });
+
+  it('files ONE finding naming those points, so the receipt\'s promise is true', () => {
+    const r = py(`
+cmds = []
+class R: returncode = 0; stderr = ""
+res = render.file_code_points(2106, ${J(MIXED)}, run=lambda c, **k: (cmds.append(c), R())[1])
+res = {"points": res, "cmd": cmds}`);
+    expect(r.res.cmd.length).toBe(1);
+    const cmd = r.res.cmd[0].join(' ');
+    expect(cmd).toContain('findings.py');
+    expect(cmd).toContain('--touches-code');
+    expect(cmd).toContain('which a re-render cannot fix');
+    expect(r.res.points.length).toBe(2);
+    expect(r.res.points.join(' ')).toContain('jolty');
+  });
+
+  it('files nothing, and keeps the old wording, when every point is about the footage', () => {
+    const r = py(`
+cmds = []
+res = {"points": render.file_code_points(2106, ${J(NOTE)}, run=lambda c, **k: cmds.append(c)), "cmd": cmds,
+       "receipt": render.sent_back_receipt(${J(NOTE)})}`);
+    expect(r.res.cmd).toEqual([]);
+    expect(r.res.points).toEqual([]);
+    expect(r.res.receipt).not.toContain('NOT answered by this rebuild');
+  });
+
+  it('a failure to file is reported and never stops the redo', () => {
+    const r = py(`
+def boom(c, **k): raise OSError("findings.py missing")
+res = render.file_code_points(2106, ${J(MIXED)}, run=boom)`);
+    expect(r.code).toBe(0);
+    expect(r.res.length).toBe(2);
+    expect(r.err).toContain('could not file the code-fix finding');
+  });
+});

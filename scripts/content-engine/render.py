@@ -1140,6 +1140,24 @@ def about_learnings(point):
     return bool(LEARN_RE.search(SHOW_NAME_RE.sub(" ", point or "")))
 
 
+# HOW the video is made, not WHICH footage is used. A re-render on unchanged code produces the same
+# picture, so answering one of these points with "the day is re-rendered; nothing else is changed"
+# claims the point was handled when nothing touched it. 15 Oct 2026, finding 20261015-phase-3-889:
+# day 2106 came back with four points, two of them about stabilisation getting jolty, and all four
+# got the same sentence. The real cause (29.97 fps resampled to 24) was found two days later by a
+# different route, by luck. Deliberately narrow: a word here only changes the receipt LINE and files
+# a finding, it never stops the re-render.
+NEEDS_CODE_RE = re.compile(
+    r"\b(stabilis\w*|stabiliz\w*|jolty|judder\w*|jerky|jerk|stutter\w*|shaky|shake|wobbl\w*"
+    r"|frame ?rate|fps|dropped frames|blurr\w*|out of focus|pixelat\w*"
+    r"|out of sync|lip ?sync|audio level\w*|volume)\b", re.I)
+
+
+def needs_code_change(point):
+    """Whether this point of Kevin's note is about how the video is MADE, which only a code change reaches."""
+    return bool(NEEDS_CODE_RE.search(point or ""))
+
+
 def receipt_points(feedback):
     """Kevin's note as the points a receipt answers, one line each. Split where agent-dispatch's gate splits it
     (sentence ends and new lines, his [date] stamps dropped), so there is a line for every point the gate counts. A
@@ -1162,11 +1180,18 @@ def receipt_points(feedback):
     return out if len(out) >= len(gate) else [show(p) or p for p in gate]     # never fewer lines than the gate asks for
 
 
-def answer_points(points, learnings_change, other_change):
+def answer_points(points, learnings_change, other_change, code_change=None):
     """'- <his point> → <what changed>' for each point: the Learnings answer for a point about that clip, the other
     answer for anything else. Never refuses a point for want of a keyword (Kevin, 7 Oct 2026: 2062's rebuilt card sat
-    61.7 h unsent because one sentence carried its topic in a pronoun)."""
-    return "".join("- %s → %s\n" % (p, learnings_change if about_learnings(p) else other_change) for p in points)
+    61.7 h unsent because one sentence carried its topic in a pronoun).
+
+    `code_change` answers a point about how the video is made (needs_code_change): a re-render on the current code
+    does not touch it, and saying so is the whole point of the line."""
+    def answer(p):
+        if about_learnings(p): return learnings_change
+        if code_change and needs_code_change(p): return code_change
+        return other_change
+    return "".join("- %s → %s\n" % (p, answer(p)) for p in points)
 
 
 def lfmd_receipt(feedback, window, points=None):
@@ -1483,13 +1508,42 @@ REDO_LEARNINGS = ("the episode is re-rendered at the front of the night's queue 
                   "found again in the new captions; it goes to the socials and the YouTube Short with this episode")
 REDO_OTHER = ("rebuilt to this note: the whole day is re-rendered at the front of the night's queue on the current code "
               "and its copy is written again; nothing else is changed for this point")
+REDO_NEEDS_CODE = ("NOT answered by this rebuild: this point is about how the video is made, not which footage is used, so "
+                   "re-rendering on the current code gives the same picture. It is filed as a finding for a code fix and "
+                   "this rebuild does not change it")
 CLIP_FINDER = "clip-finder"       # the TOOL wall's subject: the fixer lane's finding is titled "Agent blocked: clip-finder"
 
 
 def sent_back_receipt(feedback):
     """The receipt the hourly sync parks with a redo: one line per point of Kevin's note, '' when he left none."""
     pts = receipt_points(feedback)
-    return answer_points(pts, REDO_LEARNINGS, REDO_OTHER) if pts else ""
+    return answer_points(pts, REDO_LEARNINGS, REDO_OTHER, REDO_NEEDS_CODE) if pts else ""
+
+
+def file_code_points(day, feedback, run=None):
+    """File ONE finding for the points a re-render cannot answer, so the receipt's promise is true.
+
+    Returns the points filed. The receipt tells Kevin the point is filed for a code fix, and before this nothing
+    filed anything: day 2106's judder was found two days later by a different route (finding 20261015-phase-3-889).
+    A failure to file is printed and never stops the redo — the card still goes back with the honest line.
+    """
+    pts = [p for p in receipt_points(feedback) if not about_learnings(p) and needs_code_change(p)]
+    if not pts: return []
+    cmd = [sys.executable, os.path.join(os.path.dirname(HERE), "findings.py"), "add",
+           "--routine", "content-engine", "--severity", "high", "--touches-code",
+           "--title", "Episode %d came back on how the video is MADE, which a re-render cannot fix: %s"
+                      % (day, "; ".join(p[:80] for p in pts))[:240],
+           "--where", "scripts/content-engine/render.py (the night render of day %d)" % day,
+           "--detail", "Kevin sent episode %d back. These point(s) are about the picture itself, so the re-render "
+                       "answers them with the same output: %s" % (day, " | ".join(pts)),
+           "--fix", "Find what in the render produces this and change the code; the re-render alone will not."]
+    try:
+        r = (run or subprocess.run)(cmd, capture_output=True, text=True, timeout=120)
+        if getattr(r, "returncode", 1) != 0:
+            print("episode %d: could not file the code-fix finding (%s)" % (day, (r.stderr or "")[-200:]), file=sys.stderr)
+    except (OSError, subprocess.SubprocessError) as ex:
+        print("episode %d: could not file the code-fix finding (%s)" % (day, str(ex)[-200:]), file=sys.stderr)
+    return pts
 
 
 def finder_code():
@@ -1655,6 +1709,9 @@ def queue_sent_back(state=None, ledger=None, root=None, redo_file=None, episodes
         before = _episode_window(day, mine)
         with tempfile.NamedTemporaryFile("w", suffix=".md", delete=False) as fh:
             fh.write(sent_back_receipt(e["feedback"])); rpath = fh.name
+        # the receipt tells Kevin these points are filed for a code fix, so they are actually filed
+        for p in file_code_points(day, e["feedback"]):
+            print("episode %d: \"%s\" needs a code change; filed as a finding, the re-render does not answer it" % (day, p[:120]))
         try:
             redo_day(day, rpath, "Kevin sent it back: " + " ".join(e["feedback"].split())[:140], ledger=ledger, state=state, root=root,
                      today=now.date(), last_night=last_night, running=running)
