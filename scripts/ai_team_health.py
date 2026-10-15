@@ -28,6 +28,25 @@ THE RULES THAT MATTER MORE THAN THE THRESHOLDS
 - The trend history (one number per line per London day, 30 days) lives INSIDE the row's
   payload, mirrored to a local file so one failed Airtable read cannot wipe a month of it.
 
+THE SIMPLER VIEW (Kevin, 15 Oct 2026: the fourteen lines were "too cluttered and confusing")
+--------------------------------------------------------------------------------------------
+The page now leads with ONE number, weekly bars and three lights; the fourteen lines open from
+the lights, unchanged.
+- "Things needing a fix" (headline()): the distinct real problems right now, summed over the
+  eleven lines that count problems (HEADLINE_LINES). The code-problem backlog (line 8) and the
+  two rates (lines 11 and 13) never add to it. A task, a job, an email or a check that two
+  lines both count is counted once (each line hands on the ids it counted). A line that cannot
+  be read, or was read only in part, makes the number "at least N" and is named.
+- Weekly bars (weekly_series()): one bar per London week, Monday to Sunday, the week's last
+  daily number (today's for this week), up to 8 weeks. The daily number is kept in each day's
+  snapshot from 15 Oct 2026. No earlier day can be rebuilt from its line numbers: "Everything's
+  moving" stored a percentage and "Your queue" every card, neither a count of problems.
+- Three lights (build_lights()): the three groups, each the worst of its lines, titled for
+  its colour, with a few words naming what is wrong under a red or amber one.
+- The verdict (team_verdict()): Working well, Getting better, Not getting better, Getting
+  worse or Can't tell, by the rule in its docstring. A red light always shows: it is never
+  hidden behind a falling number.
+
 Usage:
   python3 scripts/ai_team_health.py dry-run [--out FILE]   the 14 lines and their evidence,
                                                           read-only (FILE: the row, outside the repo)
@@ -51,6 +70,12 @@ KEY = "ai-team-verdict"
 LABEL = "Is the AI team healthy?"
 HISTORY_DAYS = 30
 TREND_DAYS = 7
+WEEKS_SHOWN = 8
+# Days kept for the weekly bars: 8 London weeks reach back at most 55 days. Days older than
+# HISTORY_DAYS keep only the day's number and lights, so the payload stays small.
+HEADLINE_DAYS = 63
+WORKING_WELL_MAX = 5                # "Working well": no red light and this many things or fewer
+QUEUE_OLD_DAYS = 2                  # a card older than this counts as a thing to fix (line 12's amber limit)
 HISTORY_MIRROR = os.path.join(LOGS, "ai-team-verdict-history.json")
 ITEMS_MAX = 20
 
@@ -80,46 +105,46 @@ GROUPS = (
 
 # Kevin's fourteen questions, in his order. `better` says which way the number should move.
 LINES = (
-    {"key": "emails", "group": "flow", "question": "Emails are getting cleared", "better": "lower", "unit": "",
+    {"key": "emails", "noun": "the inbox", "group": "flow", "question": "Emails are getting cleared", "better": "lower", "unit": "",
      "rule": "Green means no email older than 2 days is left in the inbox after the last sort; "
              "amber is 1 to 5; red is more than 5, or the last sort did not run."},
-    {"key": "responses", "group": "flow", "question": "Responses are getting written", "better": "lower", "unit": "",
+    {"key": "responses", "noun": "email drafts", "group": "flow", "question": "Responses are getting written", "better": "lower", "unit": "",
      "rule": "Green means every email task gets a draft within 1 working day; amber is 1 to 3 "
              "waiting longer; red is more than 3."},
-    {"key": "moving", "group": "flow", "question": "Everything's moving", "better": "lower", "unit": "%",
+    {"key": "moving", "noun": "task flow", "group": "flow", "question": "Everything's moving", "better": "lower", "unit": "%",
      "rule": "Green means 10% or fewer of the live tasks are stuck with nothing blocking them; "
              "amber is up to 25%; red is more. Blocked tasks are counted under No bottlenecks."},
-    {"key": "bottlenecks", "group": "flow", "question": "No bottlenecks", "better": "lower", "unit": "",
+    {"key": "bottlenecks", "noun": "blocked tasks", "group": "flow", "question": "No bottlenecks", "better": "lower", "unit": "",
      "rule": "Green means no blocked task has waited past its limit (a sign-in 1 day, a code fix or "
              "your step 3 days); amber is 1 to 3; red is more than 3."},
-    {"key": "carried", "group": "flow", "question": "Approved work gets carried out", "better": "lower", "unit": "",
+    {"key": "carried", "noun": "approved work", "group": "flow", "question": "Approved work gets carried out", "better": "lower", "unit": "",
      "rule": "Green means every job you approved was done within 24 hours; amber is 1 or 2 still "
              "waiting; red is more than 2."},
-    {"key": "agents", "group": "broken", "question": "Every agent is working", "better": "lower", "unit": "",
+    {"key": "agents", "noun": "the agents", "group": "broken", "question": "Every agent is working", "better": "lower", "unit": "",
      "rule": "Green means every agent that has had live work for a day did something in the last "
              "24 hours; amber is 1 idle agent; red is 2 or more."},
-    {"key": "jobs", "group": "broken", "question": "No job is broken", "better": "lower", "unit": "",
+    {"key": "jobs", "noun": "the jobs", "group": "broken", "question": "No job is broken", "better": "lower", "unit": "",
      "rule": "Green means no scheduled job failed its last run; amber is 1 or 2; red is 3 or more."},
-    {"key": "bugs", "group": "broken", "question": "No bugs or errors", "better": "lower", "unit": "",
+    {"key": "bugs", "noun": "code problems", "group": "broken", "question": "No bugs or errors", "better": "lower", "unit": "",
      "rule": "Green means code problems are fixed as fast as they come in and no more are open than "
              "a week ago; amber means no more are open but more came in than were fixed; red means "
              "more are open than a week ago."},
-    {"key": "data", "group": "broken", "question": "The data is accurate", "better": "lower", "unit": "",
+    {"key": "data", "noun": "the data check", "group": "broken", "question": "The data is accurate", "better": "lower", "unit": "",
      "rule": "Green means the daily data check passed; red means it found wrong data; grey means it "
              "has not run in 26 hours."},
-    {"key": "missed", "group": "broken", "question": "Nothing's getting missed", "better": "lower", "unit": "",
+    {"key": "missed", "noun": "missed work", "group": "broken", "question": "Nothing's getting missed", "better": "lower", "unit": "",
      "rule": "Green means in the last 24 hours no task was left with no card, no job gave up or missed "
              "its time, and no old email was left undecided; amber is 1; red is 2 or more."},
-    {"key": "ontop", "group": "keep", "question": "Agents are on top of their work", "better": "higher", "unit": "%",
+    {"key": "ontop", "noun": "agent workload", "group": "keep", "question": "Agents are on top of their work", "better": "higher", "unit": "%",
      "rule": "Green means agents finished at least as many tasks as they were given in the last 7 "
              "days; amber is at least 80%; red is less."},
-    {"key": "queue", "group": "keep", "question": "Your queue is under control", "better": "lower", "unit": "",
+    {"key": "queue", "noun": "your queue", "group": "keep", "question": "Your queue is under control", "better": "lower", "unit": "",
      "rule": "Green means 10 or fewer cards wait for you and none has waited over 2 days; amber is up "
              "to 25 cards and 5 days; red is more."},
-    {"key": "firsttime", "group": "keep", "question": "Drafts are right first time", "better": "higher", "unit": "%",
+    {"key": "firsttime", "noun": "your verdicts", "group": "keep", "question": "Drafts are right first time", "better": "higher", "unit": "%",
      "rule": "Green means you approved 85% or more of the agents' drafts without changes in the last "
              "14 days; amber is 70% to 85%; red is under 70%."},
-    {"key": "allowance", "group": "keep", "question": "Enough allowance to finish the week", "better": "lower",
+    {"key": "allowance", "noun": "the allowance", "group": "keep", "question": "Enough allowance to finish the week", "better": "lower",
      "unit": "h",
      "rule": "Green means the robots were not paused for the Claude limit this week; amber means they "
              "were paused and are running again; red means they are paused now."},
@@ -164,21 +189,35 @@ def item(name, rid="", note=""):
     return out
 
 
-def line(key, colour, answer, number, items=(), extra=(), source="", why=None, partial=False):
+def line(key, colour, answer, number, items=(), extra=(), source="", why=None, partial=False,
+         count=None, keys=(), short=None, count_floor=False):
     """`partial`: the number came from a source read only in part (a floor, review of PR #790).
-    It is shown, never written to the history and never given a trend direction."""
+    It is shown, never written to the history and never given a trend direction.
+    `count`: how many things this line says need a fix, for the one number at the top (None on a
+    line that counts no problems, or cannot be read). `keys`: the identity of each one it can
+    name ("task:rec…", "job:<label>", "mail:<id>"), so two lines counting one thing count it once;
+    taken off the payload before it is written. `short`: a few words for its light.
+    `count_floor`: the count is a floor (a cut-off listing), so the number reads "at least"."""
     d = LINE_BY_KEY[key]
     assert colour in COLOURS, colour
+    items = list(items)
     out = {"key": key, "n": [x["key"] for x in LINES].index(key) + 1, "group": d["group"],
            "question": d["question"], "colour": colour, "answer": answer, "number": number,
            "unit": d["unit"], "better": d["better"], "rule": d["rule"],
-           "items": list(items)[:ITEMS_MAX], "itemsTotal": len(list(items)),
-           "extra": [[str(a), str(b)] for a, b in extra], "source": source}
+           "items": items[:ITEMS_MAX], "itemsTotal": len(items),
+           "extra": [[str(a), str(b)] for a, b in extra], "source": source,
+           "count": count, "short": short, "_keys": sorted({str(k) for k in keys or () if k})}
     if why:
         out["why"] = why
     if partial:
         out["partial"] = True
+    if partial or count_floor:
+        out["countFloor"] = True
     return out
+
+
+def task_keys(items):
+    return ["task:" + i["id"] for i in items if i.get("id")]
 
 
 def grey(key, why, source="", extra=()):
@@ -226,6 +265,8 @@ def _read_json(path):
 # How a known-bad inbox run reads (line 1). Each is red: the inbox was not cleared by it.
 SLOT_BAD = {"missed": "The %s inbox run did not start", "failed": "The %s inbox run failed",
             "unfinished": "The %s inbox run did not finish", "errored": "The %s inbox run ended with an error"}
+SLOT_SHORT = {"missed": "inbox run did not start", "failed": "inbox run failed",
+              "unfinished": "inbox run did not finish", "errored": "inbox run errored"}
 def judge_emails(f, now):
     """f: {"left", "truncated", "scannedAt", "slot": {"name", "date", "state", "reason"}, "items"}
     or {"error"}. A missed or failed slot is red whatever the count, because it is known."""
@@ -237,9 +278,11 @@ def judge_emails(f, now):
         # The count on file is an earlier run's: it is shown in the detail, never as this line's
         # number, so the history never keeps it as today's (review of PR #790).
         answer = SLOT_BAD[slot["state"]] % (slot.get("name") or "last")
+        # No count either: the one number at the top reads "at least" and names this line.
         return line("emails", "red", answer, None, f.get("items") or (),
                     [["Last inbox run", "%s %s: %s" % (slot.get("date", ""), slot.get("name", ""), slot.get("reason") or answer)],
-                     ["Old mail counted by an earlier run", f.get("left") if f.get("left") is not None else "not known"]], src)
+                     ["Old mail counted by an earlier run", f.get("left") if f.get("left") is not None else "not known"]], src,
+                    why=answer, short=SLOT_SHORT[slot["state"]])
     scanned = _aware(f.get("scannedAt"))
     if not scanned or (now - scanned) > timedelta(hours=TRIAGE_SCAN_MAX_HOURS):
         return grey("emails", "the inbox was last sorted %s" % when_text(scanned), src)
@@ -256,7 +299,14 @@ def judge_emails(f, now):
     extra = [["Last sort", when_text(scanned)]]
     if f.get("truncated"):
         extra.append(["Note", "the inbox list was cut off, so this is a floor"])
-    return line("emails", colour, answer, n, f.get("items") or (), extra, src)
+    items = list(f.get("items") or ())
+    # The listed mail is what is left of the count's own snapshot, so each id is one of the n.
+    # A longer list than the count (a newer scan not yet scored) names nothing: counting a mail
+    # twice reads worse than the truth, never better.
+    keys = ["mail:" + i["id"] for i in items if i.get("id")] if len(items) <= n else []
+    short = "%s%s" % (floor, plural(n, "old email")) if colour != "green" else None
+    return line("emails", colour, answer, n, items, extra, src, count=n, keys=keys, short=short,
+                count_floor=bool(f.get("truncated")))
 
 
 def judge_responses(f):
@@ -267,7 +317,9 @@ def judge_responses(f):
     n = len(items)
     colour = by_count(n, 3)
     answer = "Every email task has a draft" if n == 0 else "%s waiting for a draft" % plural(n, "email task")
-    return line("responses", colour, answer, n, items, [["Waiting over 1 working day", n]], src)
+    return line("responses", colour, answer, n, items, [["Waiting over 1 working day", n]], src,
+                count=n, keys=task_keys(items),
+                short=("%s a draft" % (plural(n, "email") + (" needs" if n == 1 else " need"))) if n else None)
 
 
 def judge_moving(f):
@@ -284,7 +336,9 @@ def judge_moving(f):
     colour = "green" if pct <= 10 else "amber" if pct <= 25 else "red"
     extra = [[k, v] for k, v in (f.get("split") or [])] + [
         ["Stuck, nothing blocking", n], ["Stuck but blocked (counted under No bottlenecks)", f.get("walledOut", 0)]]
-    return line("moving", colour, "%d of %d live tasks stuck (%d%%)" % (n, live, pct), pct, stuck, extra, src)
+    # The number is a share; the count of stuck tasks is what goes into the one number at the top.
+    return line("moving", colour, "%d of %d live tasks stuck (%d%%)" % (n, live, pct), pct, stuck, extra, src,
+                count=n, keys=task_keys(stuck), short=("%s stuck" % plural(n, "task")) if n else None)
 
 
 def judge_bottlenecks(f, now):
@@ -297,7 +351,8 @@ def judge_bottlenecks(f, now):
     answer = "No blocked task past its limit" if n == 0 else "%s past %s limit" % (
         plural(n, "blocked task"), "its" if n == 1 else "their")
     extra = [[k, v] for k, v in (f.get("byKind") or [])] + [["Blocked in all", f.get("total", 0)]]
-    return line("bottlenecks", colour, answer, n, past, extra, src)
+    return line("bottlenecks", colour, answer, n, past, extra, src, count=n, keys=task_keys(past),
+                short=("%s blocked too long" % plural(n, "task")) if n else None)
 
 
 def judge_carried(f):
@@ -308,7 +363,8 @@ def judge_carried(f):
     n = len(items)
     colour = by_count(n, 2)
     answer = "Every approved job done" if n == 0 else "%s not done after 24h" % plural(n, "approved job")
-    return line("carried", colour, answer, n, items, [["Approved, waiting under 24h", f.get("young", 0)]], src)
+    return line("carried", colour, answer, n, items, [["Approved, waiting under 24h", f.get("young", 0)]], src,
+                count=n, keys=task_keys(items), short=("%s not done" % plural(n, "approved job")) if n else None)
 
 
 def judge_agents(f):
@@ -330,7 +386,9 @@ def judge_agents(f):
         for a in idle]
     extra = [[a["name"], "%d live, %s" % (a.get("live", 0), "worked" if a.get("acted") else "idle")]
              for a in agents][:ITEMS_MAX]
-    return line("agents", colour, answer, n, items, extra, src)
+    return line("agents", colour, answer, n, items, extra, src, count=n,
+                keys=["agent:" + str(a.get("id") or a["name"]) for a in idle],
+                short=("%s idle" % plural(n, "agent")) if n else None)
 
 
 def judge_jobs(f):
@@ -351,7 +409,10 @@ def judge_jobs(f):
              ["Counted elsewhere", "the blocked-tasks report under No bottlenecks; Claude limit stops under Enough allowance"]]
     if f.get("error"):
         extra.append(["Could not read", f["error"]])
-    return line("jobs", colour, answer, n, failed, extra, src, partial=bool(f.get("error")))
+    # Keyed by the job's name, the same name "Nothing's getting missed" lists a job under.
+    return line("jobs", colour, answer, n, failed, extra, src, partial=bool(f.get("error")), count=n,
+                keys=["job:" + i["name"] for i in failed],
+                short=("%s%s failing" % ("at least " if f.get("error") else "", plural(n, "job"))) if n else None)
 
 
 def judge_bugs(f):
@@ -383,7 +444,11 @@ def judge_bugs(f):
             rw["pct"], rw.get("fixOfFix"), rw.get("fixes"), rw.get("baselinePct"))])
     elif rw:
         extra.append(["Fix of a fix", "no fixes in %s days" % rw.get("days", 14)])
-    return line("bugs", colour, answer, code, (), extra, src)
+    # The backlog never adds to the one number at the top (Kevin's design, 15 Oct 2026): it drives
+    # the "Something is broken" light instead, red when it rose this week.
+    short = ("code problems up %d" % (code - before)) if colour == "red" else \
+        "more code problems in than fixed" if colour == "amber" else None
+    return line("bugs", colour, answer, code, (), extra, src, short=short)
 
 
 def judge_data(f, now):
@@ -395,12 +460,16 @@ def judge_data(f, now):
         return grey("data", "the data check has not run since %s" % when_text(ran), src)
     broken = f.get("broken") or []
     if f.get("result") == "pass" and not broken:
-        return line("data", "green", "Data check passed", 0, (), [["Ran", when_text(ran)], ["Checks", f.get("checks", "not known")]], src)
+        return line("data", "green", "Data check passed", 0, (), [["Ran", when_text(ran)], ["Checks", f.get("checks", "not known")]], src,
+                    count=0)
     if f.get("result") not in ("pass", "broken"):
         return grey("data", "the data check's log has no result line", src)
     n = len(broken)
     answer = "%s found wrong data" % plural(n, "data check") if n else "The data check failed"
-    return line("data", "red", answer, n, [item(b) for b in broken], [["Ran", when_text(ran)]], src)
+    # A failed check that names nothing is still one thing to fix, never a zero.
+    return line("data", "red", answer, n, [item(b) for b in broken], [["Ran", when_text(ran)]], src,
+                count=max(n, 1), keys=["check:" + b for b in broken],
+                short=("%s wrong" % plural(n, "data check")) if n else "data check failed")
 
 
 def judge_missed(f):
@@ -422,8 +491,12 @@ def judge_missed(f):
         extra.append(["Ran late (not counted)", "%s: %s" % (it["name"], it.get("note", ""))])
     for e in errors:
         extra.append(["Could not read", e])
+    # Each miss keyed as the line that may also count it does: a parked task by its id, a job by
+    # its name ("No job is broken"), an old email by its id ("Emails are getting cleared").
+    keys = task_keys(parks) + ["job:" + i["name"] for i in gave] + ["mail:" + i["id"] for i in undecided if i.get("id")]
     return line("missed", colour, answer, n, list(parks) + list(gave) + list(undecided), extra, src,
-                partial=bool(errors))
+                partial=bool(errors), count=n, keys=keys,
+                short=("%s%s missed" % ("at least " if errors else "", plural(n, "thing"))) if n else None)
 
 
 def judge_ontop(f):
@@ -435,8 +508,10 @@ def judge_ontop(f):
         return grey("ontop", "the 7-day counts could not be read", src)
     pct = round(100.0 * done / new) if new else 100
     colour = "green" if done >= new else "amber" if done >= 0.8 * new else "red"
+    # A rate, not a count of problems: it drives the "It can keep going" light only.
     return line("ontop", colour, "%d%% done: %d done, %d new" % (pct, done, new), pct, (),
-                [["New agent tasks", new], ["Done", done], ["Done as a share of new", "%d%%" % pct]], src)
+                [["New agent tasks", new], ["Done", done], ["Done as a share of new", "%d%%" % pct]], src,
+                short=("agents behind: %d%% done" % pct) if colour != "green" else None)
 
 
 def judge_queue(f):
@@ -460,7 +535,14 @@ def judge_queue(f):
     extra = [["Waiting", n], ["Oldest", "%.1f days" % oldest]]
     if f.get("undated"):
         extra.append(["Counted from when the card was made", f["undated"]])
-    return line("queue", colour, answer, n, items, extra, src)
+    # Only a card past the amber age limit is a thing to fix; a fresh card is the queue working.
+    old = [c for c in cards if c["days"] > QUEUE_OLD_DAYS]
+    extra.append(["Waiting over %d days (counted as things to fix)" % QUEUE_OLD_DAYS, len(old)])
+    short = None
+    if colour != "green":
+        short = ("%s over %d days old" % (plural(len(old), "card"), QUEUE_OLD_DAYS)) if old else "%s waiting" % plural(n, "card")
+    return line("queue", colour, answer, n, items, extra, src, count=len(old),
+                keys=["task:" + c["id"] for c in old if c.get("id")], short=short)
 
 
 def judge_firsttime(f):
@@ -478,7 +560,9 @@ def judge_firsttime(f):
     if f.get("other"):
         extra.append(["Other verdicts", f["other"]])
     extra.append(["All verdicts", total])
-    return line("firsttime", colour, "%d%% approved without changes" % pct, pct, (), extra, src)
+    # A rate, not a count of problems: it drives the "It can keep going" light only.
+    return line("firsttime", colour, "%d%% approved without changes" % pct, pct, (), extra, src,
+                short=("%d%% of drafts right first time" % pct) if colour != "green" else None)
 
 
 def judge_allowance(f, now):
@@ -486,17 +570,20 @@ def judge_allowance(f, now):
     if f.get("error"):
         return grey("allowance", f["error"], src)
     hours = round(float(f.get("hours7d") or 0), 1)
+    # A pause this week is ONE thing to fix in the number at the top, however many hours it ran.
     if f.get("pausedNow"):
         until = _aware(f.get("pausedUntil"))
         return line("allowance", "red", "Paused now until %s" % (until.astimezone(LONDON).strftime("%a %H:%M") if until else "unknown"),
-                    hours, f.get("items") or (), [["Paused this week", "%.1f hours" % hours]], src)
+                    hours, f.get("items") or (), [["Paused this week", "%.1f hours" % hours]], src,
+                    count=1, keys=["allowance"], short="paused for the Claude limit now")
     if hours > 0 or f.get("items") or f.get("hits"):
         answer = "Paused %.1f hours this week, running again" % hours if hours > 0 else "Paused this week, running again"
-        return line("allowance", "amber", answer, hours, f.get("items") or (), [["Paused this week", "%.1f hours" % hours]], src)
+        return line("allowance", "amber", answer, hours, f.get("items") or (), [["Paused this week", "%.1f hours" % hours]], src,
+                    count=1, keys=["allowance"], short="paused for the Claude limit this week")
     last = _aware(f.get("lastOutage"))
     return line("allowance", "green", "No pause this week", 0.0, (),
                 [["Last pause the guard recorded", when_text(last) if last else "none recorded"],
-                 ["Also read", "every job's run log for the Claude limit line, last 7 days"]], src)
+                 ["Also read", "every job's run log for the Claude limit line, last 7 days"]], src, count=0)
 
 
 # ─── trend, history and the verdicts ──────────────────────────────────
@@ -516,6 +603,8 @@ def merge_history(*histories):
 
 
 COLOUR_KEY = "_c"       # inside a day's snapshot: {line key: [colour, "HH:MM"]}, never a line key
+HEAD_KEY = "_h"         # the day's "Things needing a fix": [number, at least?] (from 15 Oct 2026)
+LIGHTS_KEY = "_l"       # the day's three lights: {light key: colour} (from 15 Oct 2026)
 
 
 def last_known(lines, history, now):
@@ -547,12 +636,44 @@ def effective(l):
     return (l.get("lastKnown") or {}).get("colour") or l["colour"]
 
 
-def apply_history(lines, history, now):
+def day_headline(snap):
+    """(number, at least?) a day's snapshot kept, or None. Only a day written from 15 Oct 2026
+    has one: an earlier day cannot be rebuilt from its line numbers, because "Everything's
+    moving" stored a percentage and "Your queue" every card, neither a count of problems."""
+    h = (snap or {}).get(HEAD_KEY)
+    if isinstance(h, list) and len(h) == 2 and isinstance(h[0], int) and not isinstance(h[0], bool):
+        return h[0], bool(h[1])
+    return None
+
+
+def day_lights(snap):
+    """{light key: colour} a day's snapshot kept: its own record, else the worst of the line
+    colours the day kept (a day from before the lights), else None."""
+    snap = snap or {}
+    if isinstance(snap.get(LIGHTS_KEY), dict) and snap[LIGHTS_KEY]:
+        return dict(snap[LIGHTS_KEY])
+    cols = snap.get(COLOUR_KEY)
+    if not isinstance(cols, dict) or not cols:
+        return None
+    out = {}
+    for key, _good, _bad, _ask in LIGHTS:
+        mine = [(cols.get(d["key"]) or [None])[0] for d in LINES if d["group"] == key]
+        known = [c for c in mine if c in RANK]
+        if known:
+            out[key] = max(known, key=lambda c: RANK[c])
+    return out or None
+
+
+def apply_history(lines, history, now, head=None, lights=None):
     """Merge today's numbers into today's snapshot line by line (the last real number for each
     line wins, so a later grey run never wipes the day: review of PR #790), keep 30 days, and give
     each line a trend against the snapshot 7 days back, or the oldest one there is (said as "trend
     from <date>"). A grey line, a line whose source was missed or failed (no number), and a line
-    read only in part (`partial`) store nothing and have no direction."""
+    read only in part (`partial`) store nothing and have no direction.
+    `head` (headline()) and `lights` (build_lights()) are kept in the day's snapshot for the
+    weekly bars: a full count replaces any earlier one today, an "at least" replaces only another
+    "at least", so a later part-read pass never lowers the day. Days past 30 keep only those two,
+    up to HEADLINE_DAYS, so eight weeks of bars fit in the payload."""
     today = london_day(now)
     hist = merge_history(history)
     snap = dict(hist.get(today) or {})
@@ -564,9 +685,28 @@ def apply_history(lines, history, now):
     clock = now.astimezone(LONDON).strftime("%H:%M")
     colours.update({l["key"]: [l["colour"], clock] for l in lines if l["colour"] != "grey"})
     snap[COLOUR_KEY] = colours
+    if head and isinstance(head.get("number"), int):
+        had = day_headline(snap)
+        if had is None or had[1] or not head["atLeast"]:
+            snap[HEAD_KEY] = [head["number"], bool(head["atLeast"])]
+    if lights:
+        kept = dict(snap.get(LIGHTS_KEY) or {})
+        kept.update({x["key"]: x["colour"] for x in lights if x["colour"] in RANK})
+        if kept:
+            snap[LIGHTS_KEY] = kept
     hist[today] = snap
     keep = (now.astimezone(LONDON).date() - timedelta(days=HISTORY_DAYS - 1)).isoformat()
-    hist = {d: s for d, s in hist.items() if keep <= d <= today}
+    keep_head = (now.astimezone(LONDON).date() - timedelta(days=HEADLINE_DAYS - 1)).isoformat()
+    kept = {}
+    for d, s in hist.items():
+        if d > today or d < keep_head:
+            continue
+        if d < keep:
+            s = {k: v for k, v in s.items() if k in (HEAD_KEY, LIGHTS_KEY)}
+        if s:
+            kept[d] = s
+    hist = kept
+    lined = [d for d in hist if any(k in hist[d] for k in LINE_BY_KEY)]
     week = (now.astimezone(LONDON).date() - timedelta(days=TREND_DAYS)).isoformat()
     for l in lines:
         after = l.get("number")
@@ -586,7 +726,7 @@ def apply_history(lines, history, now):
             else:
                 direction = "worse"
         l["trend"] = {"vsDate": vs, "before": before, "after": after, "direction": direction,
-                      "fullWeek": vs == week, "since": min(hist) if hist else today}
+                      "fullWeek": vs == week, "since": min(lined) if lined else today}
         if l.get("partial"):
             l["trend"]["partial"] = True
     return hist
@@ -671,11 +811,216 @@ def overall_verdict(lines):
             "lastKnown": {l["key"]: l["lastKnown"] for l in greys if l.get("lastKnown")}}
 
 
+# ─── the simpler view: one number, weekly bars, three lights, one verdict (15 Oct 2026) ──
+# The lines that count real problems. Line 8 (the code-problem backlog) and the rates (lines 11
+# and 13) never add to the number: the backlog drives "Something is broken", the rates drive
+# "It can keep going".
+HEADLINE_LINES = ("emails", "responses", "moving", "bottlenecks", "carried", "agents", "jobs",
+                  "data", "missed", "queue", "allowance")
+# (group key, title when green, title when red or amber, the question when it cannot be read)
+LIGHTS = (
+    ("flow", "Work is flowing", "Work is held up", "Is work flowing?"),
+    ("broken", "Nothing is broken", "Something is broken", "Is anything broken?"),
+    ("keep", "It can keep going", "It may not keep going", "Can it keep going?"),
+)
+RANK = {"green": 0, "amber": 1, "red": 2}
+LIGHT_PHRASES = 2           # a light names at most two things, then "+N more" (about 8 words)
+
+
+def headline(lines):
+    """"Things needing a fix": every problem the eleven counting lines name, each counted once.
+    A task, job, email or check two lines both list is taken off once for each extra line it
+    is on (each line hands on the ids of what it counted). A line that cannot be read, or was
+    read only in part, makes the number "at least" and is named in `unread`; with no counting
+    line read at all, the number is None, never a zero."""
+    total, parts, unread, seen = 0, [], [], {}
+    floor, read = False, 0
+    for l in lines:
+        if l["key"] not in HEADLINE_LINES:
+            continue
+        c = l.get("count")
+        if not isinstance(c, int) or isinstance(c, bool):
+            floor = True
+            unread.append({"key": l["key"], "question": l["question"],
+                           "why": l.get("why") or l.get("answer") or "it could not be read"})
+            continue
+        read += 1
+        if l.get("countFloor"):
+            floor = True
+            unread.append({"key": l["key"], "question": l["question"], "why": "read only in part"})
+        total += c
+        parts.append({"key": l["key"], "question": l["question"], "count": c})
+        for k in l.get("_keys") or ():
+            seen[k] = seen.get(k, 0) + 1
+    shared = sum(v - 1 for v in seen.values() if v > 1)
+    by_kind = {}
+    for k, v in seen.items():
+        if v > 1:
+            kind = k.split(":", 1)[0]
+            by_kind[kind] = by_kind.get(kind, 0) + v - 1
+    return {"number": (total - shared) if read else None, "atLeast": floor, "parts": parts,
+            "shared": shared, "sharedByKind": by_kind, "unread": unread}
+
+
+def light_phrase(l):
+    """A few words for one line under its light."""
+    if l["colour"] == "grey":
+        lk = l.get("lastKnown")
+        return "can't read %s%s" % (LINE_BY_KEY[l["key"]]["noun"],
+                                    " (last %s %s)" % (lk["colour"], lk["at"]) if lk else "")
+    return l.get("short") or l["question"]
+
+
+def build_lights(lines, groups):
+    """The three groups as lights. Each light's colour is its group's, the worst of its lines
+    (a grey line counted at its last known colour, and one that cannot be read at all keeps the
+    light off green). The title says the light's state in words; red and amber lights carry a
+    few words naming the worst lines, red first."""
+    by_key = {g["key"]: g for g in groups}
+    out = []
+    for key, good, bad, ask in LIGHTS:
+        colour = by_key[key]["colour"]
+        mine = [l for l in lines if l["group"] == key]
+        order = {"red": 0, "amber": 1}
+        # Red before amber; within a colour, a line that counts things to fix before a trend or rate.
+        wrong = sorted((l for l in mine if effective(l) in order),
+                       key=lambda l: (order[effective(l)], l["key"] not in HEADLINE_LINES, l["n"]))
+        wrong += [l for l in mine if l["colour"] == "grey" and not l.get("lastKnown")]
+        phrases = [light_phrase(l) for l in wrong]
+        text = ""
+        if colour != "green" and phrases:
+            text = ", ".join(phrases[:LIGHT_PHRASES]) + (" +%d more" % (len(phrases) - LIGHT_PHRASES)
+                                                          if len(phrases) > LIGHT_PHRASES else "")
+        title = good if colour == "green" else ask if colour == "grey" else bad
+        out.append({"key": key, "colour": colour, "title": title, "text": text,
+                    "lines": [l["key"] for l in mine]})
+    return out
+
+
+def _monday(day):
+    return day - timedelta(days=day.weekday())
+
+
+def weekly_series(hist, now, head):
+    """One bar per London week, Monday to Sunday, oldest first, up to WEEKS_SHOWN: the week's
+    last day with a number, and this week's bar is today's number as it stands. A week with no
+    number between two that have one is kept, with no bar. Returns (weeks, the first day any
+    number was kept)."""
+    today = now.astimezone(LONDON).date()
+    days = {}
+    for d, s in (hist or {}).items():
+        h = day_headline(s)
+        if h is not None:
+            days[datetime.strptime(d, "%Y-%m-%d").date()] = (d, h)
+    if head and isinstance(head.get("number"), int):
+        days[today] = (today.isoformat(), (head["number"], bool(head["atLeast"])))
+    if not days:
+        return [], None
+    first = min(days)
+    this = _monday(today)
+    start = max(_monday(first), this - timedelta(days=7 * (WEEKS_SHOWN - 1)))
+    weeks, w = [], start
+    while w <= this:
+        mine = [d for d in days if w <= d <= min(w + timedelta(days=6), today)]
+        d = max(mine) if mine else None
+        n, al = days[d][1] if d else (None, False)
+        weeks.append({"start": w.isoformat(), "end": (w + timedelta(days=6)).isoformat(),
+                      "day": days[d][0] if d else None, "number": n, "atLeast": al, "current": w == this})
+        w += timedelta(days=7)
+    return weeks, first.isoformat()
+
+
+def team_verdict(head, last_week, lights, prev_lights, lines):
+    """The answer at the top right, never better than the truth. In this order:
+      1. red "Getting worse": a light red now that was not red at the end of last week, or more
+         things to fix than last week (an "at least" number above last week counts: it is more);
+      2. grey "Can't tell": more than 2 lines cannot be read, or the number is "at least";
+      3. green "Working well": no red light, every line read, and 5 things or fewer;
+      4. grey "Can't tell": no number from last week to compare with;
+      5. amber "Getting better": fewer things than last week and no light worse than it was;
+      6. amber "Not getting better": the same number, or fewer while a light got worse.
+    A red light is never hidden: whatever the answer, `why` names every red light."""
+    n, floor = head.get("number"), bool(head.get("atLeast"))
+    lw = (last_week or {}).get("number")
+    lw_floor = bool((last_week or {}).get("atLeast"))
+    prev = prev_lights or {}
+    reds = [x for x in lights if x["colour"] == "red"]
+    turned = [x for x in reds if prev.get(x["key"]) in ("green", "amber")]
+    worse = [x for x in lights if x["colour"] in RANK and prev.get(x["key"]) in RANK
+             and RANK[x["colour"]] > RANK[prev[x["key"]]]]
+    greys = [l for l in lines if l["colour"] == "grey"]
+    known = isinstance(n, int)
+    higher = known and isinstance(lw, int) and n > lw and not lw_floor
+    lower = known and isinstance(lw, int) and n < lw and not floor
+    things = ("at least %d" % n if floor else "%d" % n) if known else "not known"
+    lw_text = ("at least %d" % lw if lw_floor else "%d" % lw) if isinstance(lw, int) else None
+
+    if turned or higher:
+        colour, text = "red", "Getting worse"
+        why = "%s things to fix, up from %s last week" % (things, lw_text) if higher else \
+            "%s went red this week" % " and ".join(x["title"] for x in turned)
+    elif len(greys) > 2 or floor or not known:
+        colour, text = "grey", "Can't tell"
+        names = []
+        for q in [l["question"] for l in greys] + [u["question"] for u in head.get("unread") or ()]:
+            if q not in names:
+                names.append(q)
+        why = "%s can't be fully read: %s" % (plural(len(names), "check"), ", ".join(names)) \
+            if names and known else "the number of things to fix could not be read"
+    elif not reds and not greys and n <= WORKING_WELL_MAX:
+        colour, text = "green", "Working well"
+        why = "%s to fix" % plural(n, "thing")
+    elif not isinstance(lw, int):
+        colour, text = "grey", "Can't tell"
+        why = "no number from last week to compare with yet"
+    elif lw_floor and n >= lw:
+        colour, text = "grey", "Can't tell"
+        why = "last week's number was only partly read (%s)" % lw_text
+    elif lower and not worse:
+        colour, text = "amber", "Getting better"
+        why = "%s things to fix, down from %s last week" % (things, lw_text)
+    else:
+        colour, text = "amber", "Not getting better"
+        why = ("%s things to fix, the same as last week" % things) if n == lw else \
+            "%s things to fix, down from %s, but %s" % (things, lw_text, ", ".join(
+                "%s went %s" % (x["title"], x["colour"]) for x in worse))
+    # The page shows `reason` under the answer and the lights below it; a red light is named in
+    # it whenever the answer itself is not red.
+    reason = why[:1].upper() + why[1:]
+    if reds and colour != "red":
+        reason += ". Still red: " + ", ".join(x["title"] for x in reds)
+    # Never hide a break behind an improving total (Kevin's design, 15 Oct 2026): every red light
+    # is named, whatever the answer, and one that went red this week says so.
+    if reds:
+        why += ". Red: " + "; ".join("%s%s%s" % (x["title"], ", new this week" if x in turned else "",
+                                                  " (%s)" % x["text"] if x["text"] else "") for x in reds)
+    if greys and colour != "grey":
+        why += ". %s can't be read: %s" % (plural(len(greys), "check"), ", ".join(l["question"] for l in greys))
+    why = why[:1].upper() + why[1:]
+    return {"colour": colour, "text": text, "reason": reason, "why": why, "redLights": [x["key"] for x in reds],
+            "turnedRed": [x["key"] for x in turned], "worseLights": [x["key"] for x in worse]}
+
+
 def build_payload(lines, history, now, history_check=None):
     last_known(lines, history, now)      # before the day's snapshot takes this run's colours
-    hist = apply_history(lines, history, now)
-    return {"version": 1, "computedAt": now.strftime("%Y-%m-%dT%H:%M:%S.000Z"),
-            "overall": overall_verdict(lines), "groups": group_verdicts(lines), "lines": lines,
+    groups = group_verdicts(lines)
+    lights = build_lights(lines, groups)
+    head = headline(lines)
+    hist = apply_history(lines, history, now, head, lights)
+    weeks, since = weekly_series(hist, now, head)
+    last_week = weeks[-2] if len(weeks) >= 2 else None
+    if last_week and last_week["number"] is None:
+        last_week = None
+    prev = day_lights(hist.get(last_week["day"])) if last_week else None
+    verdict = team_verdict(head, last_week, lights, prev, lines)
+    for l in lines:
+        l.pop("_keys", None)             # identities for the count only: never written to Airtable
+    return {"version": 2, "computedAt": now.strftime("%Y-%m-%dT%H:%M:%S.000Z"),
+            "verdict": verdict, "headline": head, "lastWeek": last_week, "weeks": weeks, "weeksSince": since,
+            "lights": lights,
+            # The fourteen lines and their groups open from the lights; `overall` is the old
+            # line-by-line verdict, kept for the health bar's grey count and the dry run.
+            "overall": overall_verdict(lines), "groups": groups, "lines": lines,
             "history": hist, "historyCheck": history_check}
 
 
@@ -1550,10 +1895,22 @@ def verdict_row(now, es, rows, lh_res, lh_err, measures, readers=None, write_his
         # trend history survives in the local mirror.
         return dict(row, status="Failed", payload="", detail="The AI team verdict could not be built: %s: %s" % (
             type(exc).__name__, str(exc)[:240]))
-    o = payload["overall"]
-    detail = "%s. %d green, %d amber, %d red%s." % (
-        o["text"], o["green"], o["amber"], o["red"], (", %d can't tell" % o["grey"]) if o["grey"] else "")
+    detail = "%s: %s." % (payload["verdict"]["text"], headline_text(payload["headline"], payload.get("lastWeek")))
     return dict(row, status="Worked", detail=detail, payload=json.dumps(payload), lastWorked=stamp)
+
+
+def headline_text(head, last_week=None):
+    """"46 things need a fix (58 last week)", in words the Estate tab can show."""
+    n = head.get("number")
+    if not isinstance(n, int):
+        said = "the number of things to fix could not be read"
+    else:
+        said = "%s%s %s a fix" % ("at least " if head.get("atLeast") else "", plural(n, "thing"),
+                                  "needs" if n == 1 and not head.get("atLeast") else "need")
+    lw = (last_week or {}).get("number")
+    if isinstance(lw, int):
+        said += " (%s%d last week)" % ("at least " if last_week.get("atLeast") else "", lw)
+    return said
 
 
 # ─── command line ─────────────────────────────────────────────────────
@@ -1582,7 +1939,23 @@ def cmd_dry_run(out=None):
         with open(out, "w", encoding="utf-8") as fh:
             json.dump(row, fh)
     p = json.loads(row["payload"])
-    print("OVERALL: %s [%s]" % (p["overall"]["text"], p["overall"]["colour"]))
+    v, h = p["verdict"], p["headline"]
+    print("VERDICT: %s [%s] %s" % (v["text"], v["colour"], v["why"]))
+    print("NUMBER: %s" % headline_text(h, p.get("lastWeek")))
+    print("  parts: %s" % ", ".join("%s %d" % (x["key"], x["count"]) for x in h["parts"]))
+    print("  counted on two lines, taken off once each: %d %s" % (h["shared"], json.dumps(h.get("sharedByKind") or {})))
+    for u in h["unread"]:
+        print("  could not read: %s (%s)" % (u["question"], u["why"]))
+    lw = p.get("lastWeek")
+    print("LAST WEEK: %s" % (("%s%d (w/c %s, from %s)" % ("at least " if lw["atLeast"] else "", lw["number"], lw["start"], lw["day"]))
+                              if lw else "none"))
+    print("BARS (since %s): %s" % (p.get("weeksSince"), " | ".join(
+        "w/c %s: %s%s%s" % (w["start"], "no data" if w["number"] is None else w["number"],
+                            "+" if w["atLeast"] else "", " (this week)" if w["current"] else "") for w in p["weeks"])))
+    for x in p["lights"]:
+        print("LIGHT: %-6s %-22s %s" % (x["colour"], x["title"], x["text"]))
+    print("PAYLOAD: %d characters (Airtable's long text limit is 100,000)" % len(row["payload"]))
+    print("OVERALL (old line-by-line verdict, kept for the health bar): %s [%s]" % (p["overall"]["text"], p["overall"]["colour"]))
     for g in p["groups"]:
         print("  %s %s [%s]" % (g["title"], g["text"], g["colour"]))
     for l in p["lines"]:
@@ -1612,6 +1985,16 @@ def selftest():
     assert working_days_between(datetime(2026, 10, 16, 17, 0, tzinfo=LONDON), datetime(2026, 10, 19, 9, 0, tzinfo=LONDON)) < 1; checks += 1
     lines = [grey(d["key"], "x") for d in LINES]
     assert overall_verdict(lines)["colour"] != "green"; checks += 1
+    # The one number: the backlog and the rates never add to it; a grey counting line makes it a floor.
+    ls = [line(d["key"], "red", "a", 9, count=None if d["key"] not in HEADLINE_LINES else 1) for d in LINES]
+    h = headline(ls)
+    assert h["number"] == len(HEADLINE_LINES) and not h["atLeast"]; checks += 1
+    ls[0] = grey("emails", "x")
+    assert headline(ls)["atLeast"]; checks += 1
+    # A red light is named whatever the number did.
+    v = team_verdict({"number": 3, "atLeast": False}, {"number": 9}, [{"key": "broken", "colour": "red", "title": "Something is broken", "text": "x"}],
+                     {"broken": "red"}, [])
+    assert v["text"] == "Getting better" and "Red: Something is broken" in v["why"]; checks += 1
     return {"checks": checks, "failed": []}
 
 

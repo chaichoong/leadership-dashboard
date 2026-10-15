@@ -787,17 +787,28 @@ li { margin-bottom:0.2rem; font-size:0.9rem; } hr { border:none; border-top:1px 
 <div class="section" id="ai-workforce">
   <h2 class="section-title"><span class="icon">&#x1F916;</span> 16. AI Team &amp; Labour Saved</h2>
   <div class="card">
-    <p>Since 9 Oct 2026 every AI card sits in its own <strong>AI Team</strong> section, below the 31-Day Operational Metrics. Since 15 Oct 2026 it opens with one panel, <strong>Is the AI team healthy?</strong>, which replaced the Agent Work, Defects, Bottleneck and Fix of a Fix cards. It answers fourteen questions in three groups, each with a coloured dot, a short answer and last week's number, under one verdict. The Mac works every line out (<code>scripts/ai_team_health.py</code>, the Estate Status row <code>ai-team-verdict</code>, every 10 minutes); the page only draws it. Tap a line to see its rule, the tasks or jobs behind it, and where the number came from.</p>
+    <p>Since 9 Oct 2026 every AI card sits in its own <strong>AI Team</strong> section, below the 31-Day Operational Metrics. Since 15 Oct 2026 it opens with one panel that replaced the Agent Work, Defects, Bottleneck and Fix of a Fix cards. The same day it was made simpler, so you can see at a glance whether the AI team works and whether it improves week on week. The Mac works all of it out (<code>scripts/ai_team_health.py</code>, the Estate Status row <code>ai-team-verdict</code>, every 10 minutes); the page only draws it.</p>
     <table class="label-table">
-      <thead><tr><th>Group</th><th>Questions</th></tr></thead>
+      <thead><tr><th>Part</th><th>What it shows</th></tr></thead>
       <tbody>
-        <tr><td><strong>Is work flowing?</strong></td><td>Emails are getting cleared &middot; Responses are getting written &middot; Everything's moving &middot; No bottlenecks &middot; Approved work gets carried out</td></tr>
-        <tr><td><strong>Is anything broken?</strong></td><td>Every agent is working &middot; No job is broken &middot; No bugs or errors &middot; The data is accurate &middot; Nothing's getting missed</td></tr>
-        <tr><td><strong>Can it keep going?</strong></td><td>Agents are on top of their work &middot; Your queue is under control &middot; Drafts are right first time &middot; Enough allowance to finish the week</td></tr>
+        <tr><td><strong>The answer</strong> (top right)</td><td>Green "Working well", amber "Getting better", amber "Not getting better", red "Getting worse" or grey "Can't tell", with one line saying why.</td></tr>
+        <tr><td><strong>Things needing a fix</strong></td><td>One number: the real problems right now, against last week's number. "At least" when a check could not be read, and the check is named.</td></tr>
+        <tr><td><strong>Weekly bars</strong></td><td>One bar a week (Monday to Sunday), oldest on the left, up to 8 weeks. Shorter is better. Until there are two weeks it says when the bars start (15 Oct 2026).</td></tr>
+        <tr><td><strong>Three lights</strong></td><td><strong>Work is flowing</strong>, <strong>Something is broken</strong> (or Nothing is broken), <strong>It can keep going</strong>. A red or amber light names what is wrong in a few words. Tap a light to open its checks.</td></tr>
       </tbody>
     </table>
-    <p><strong>The verdict:</strong> red "Needs attention" naming a red line that is worse than a week ago, or a line whose last reading was red (today, or an earlier day such as just before midnight) and cannot be read now ("last known red; can't read now"); grey "Can't tell" when more than two lines cannot be read and the rest would be green; green "Healthy" when nothing is red and at most two lines are amber; amber "Issues, but going the right way" when more of the red and amber lines are better than worse than a week ago; red "Needs attention" naming the worst line otherwise. Before a week of history exists, a line's trend says "trend from" the first day it has.</p>
-    <p><strong>Trust guards:</strong> a line whose source cannot be read, is missing or is out of date is grey, "Can't tell", and the verdict names it; it is never shown green. "Everything's moving" leaves out blocked tasks, which "No bottlenecks" counts, so one task is never counted twice. An answer the Mac worked out more than two hours ago turns the verdict and every dot grey, "Not updated since &hellip;", and a row the Mac could not build shows its reason instead of its last answer. The health bar's "AI team verdict read from the Mac" check says the same. The old cards' numbers (the agent work split, the defect split, blocks by kind and the fix-of-a-fix rate) sit inside the lines they explain.</p>
+    <p><strong>The checks behind each light</strong> (tap a check to see its rule, the tasks or jobs behind it, and where the number came from):</p>
+    <table class="label-table">
+      <thead><tr><th>Light</th><th>Checks</th></tr></thead>
+      <tbody>
+        <tr><td><strong>Work is flowing</strong></td><td>Emails are getting cleared &middot; Responses are getting written &middot; Everything's moving &middot; No bottlenecks &middot; Approved work gets carried out</td></tr>
+        <tr><td><strong>Something is broken</strong></td><td>Every agent is working &middot; No job is broken &middot; No bugs or errors &middot; The data is accurate &middot; Nothing's getting missed</td></tr>
+        <tr><td><strong>It can keep going</strong></td><td>Agents are on top of their work &middot; Your queue is under control &middot; Drafts are right first time &middot; Enough allowance to finish the week</td></tr>
+      </tbody>
+    </table>
+    <p><strong>What counts as a thing needing a fix:</strong> tasks stuck with nothing blocking them, blocked tasks past their limit, approved work not done in 24 hours, idle agents, failing or blocked jobs, wrong data checks, things missed, emails over 2 days old, email tasks waiting for a draft, approval cards over 2 days old, and 1 for any Claude allowance pause this week. The open code-problem backlog and the two rates (work done against new, drafts right first time) never add to it; they turn their light amber or red instead. A task, job or email that two checks both count is counted once.</p>
+    <p><strong>The answer, in order:</strong> red "Getting worse" when a light went red since the end of last week, or there are more things to fix than last week; grey "Can't tell" when more than two checks cannot be read or the number is "at least"; green "Working well" when no light is red, every check was read and there are 5 things or fewer; grey "Can't tell" when there is no number from last week yet; amber "Getting better" when there are fewer things than last week and no light got worse; amber "Not getting better" otherwise. A red light always shows red and is named under the answer, even when the number falls.</p>
+    <p><strong>Trust guards:</strong> a check whose source cannot be read, is missing or is out of date is grey, "Can't tell"; it is never shown green, and the number becomes "at least". A check that read red and cannot be read now keeps its light red. "Everything's moving" leaves out blocked tasks, which "No bottlenecks" counts, so one task is never counted twice. An answer the Mac worked out more than two hours ago turns the answer, the lights and the bars grey, "Not updated since &hellip;", and a row the Mac could not build shows its reason instead of its last answer. The health bar's "AI team verdict read from the Mac" check says the same. The old cards' numbers (the agent work split, the defect split, blocks by kind and the fix-of-a-fix rate) sit inside the checks they explain.</p>
     <p>Below the panel, under the heading <strong>North star: how much work AI does</strong>, two cards measure progress to getting up to 90% of repeatable operational work done by AI agents. The two agent cards follow under <strong>The agents and your approvals</strong>.</p>
     <table class="label-table">
       <thead><tr><th>Card</th><th>What it shows</th></tr></thead>
@@ -821,6 +832,11 @@ li { margin-bottom:0.2rem; font-size:0.9rem; } hr { border:none; border-top:1px 
     <table class="label-table">
       <thead><tr><th>Version</th><th>Date</th><th>Changes</th></tr></thead>
       <tbody>
+        <tr>
+          <td><strong>2.151</strong></td>
+          <td>15 Oct 2026</td>
+          <td>The AI Team panel made simpler: one answer, one number ("Things needing a fix") against last week, weekly bars and three lights (Work is flowing, Something is broken, It can keep going). The fourteen checks open from the lights, unchanged. A red light always shows, even when the number falls.</td>
+        </tr>
         <tr>
           <td><strong>2.150</strong></td>
           <td>15 Oct 2026</td>

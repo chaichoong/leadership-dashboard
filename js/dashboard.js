@@ -1585,6 +1585,14 @@
     // It replaced the Agent Work, Defects, Bottleneck and Fix of a Fix cards, whose numbers now
     // sit inside the lines they explain (tap a line).
     //
+    // Simplified the same day (Kevin: the fourteen lines were "too cluttered and confusing"; he
+    // needs to see at a glance that it works and that it improves week on week). The panel now
+    // shows ONE number, "Things needing a fix", against last week; weekly bars, shorter is
+    // better; three lights (Work is flowing, Something is broken, It can keep going); and one
+    // answer top right. Tap a light and its lines open exactly as before, so nothing is lost.
+    // The Mac works all of it out; the page draws it, and draws an older report (the Mac not yet
+    // on the new code) from its groups, saying the number is not known yet.
+    //
     // A row older than two hours says so in an amber banner: a board that stopped updating
     // looks exactly like a calm one. A line the Mac could not read is grey, "Can't tell", and
     // the verdict names it. Every payload value is data from Airtable: text goes through
@@ -1707,9 +1715,88 @@
         return `<div class="aih-notice aih-notice-${cls}" role="status">${text}</div>`;
     }
 
+    // The three lights, in order: [key, title when green, title when red or amber, the question
+    // when it cannot be read]. The Mac sends its own titles; these draw an older report, and a
+    // stale one, where a grey light must not carry a claim such as "Work is flowing".
+    const AI_LIGHTS = [
+        ['flow', 'Work is flowing', 'Work is held up', 'Is work flowing?'],
+        ['broken', 'Nothing is broken', 'Something is broken', 'Is anything broken?'],
+        ['keep', 'It can keep going', 'It may not keep going', 'Can it keep going?'],
+    ];
+    const AI_HEAD = '<div class="aih-head"><h3 class="aih-title">AI team</h3></div>';
+
+    function aiHealthLights(p) {
+        const sent = Array.isArray(p.lights) ? p.lights.filter(x => x && typeof x === 'object') : [];
+        const groups = Array.isArray(p.groups) ? p.groups : [];
+        return AI_LIGHTS.map(([key, good, bad, ask]) => {
+            const x = sent.find(l => l.key === key);
+            if (x) return { key, colour: aiHealthColour(x.colour), title: String(x.title || ask), text: String(x.text || ''), ask };
+            // An older report has groups, not lights: the same colours, its own count words.
+            const g = groups.find(l => l && l.key === key) || {};
+            const c = aiHealthColour(g.colour);
+            return { key, colour: c, title: c === 'green' ? good : c === 'grey' ? ask : bad, text: c === 'green' ? '' : String(g.text || ''), ask };
+        });
+    }
+
+    // "46", "at least 46", or "not known": never a zero the Mac did not count.
+    function aiHealthFixText(n, atLeast) {
+        const v = aiNum(n);
+        if (v === AI_UNKNOWN) return AI_UNKNOWN;
+        return `${atLeast ? 'at least ' : ''}${v}`;
+    }
+
+    // One bar a week, oldest on the left, plain bars on one neutral colour (shorter is better).
+    // Fewer than two weeks with a number: no chart, just when the bars start.
+    function aiHealthBars(p, stale) {
+        const weeks = (Array.isArray(p.weeks) ? p.weeks : []).filter(w => w && typeof w === 'object').slice(-8);
+        const known = weeks.filter(w => aiNum(w.number) !== AI_UNKNOWN);
+        if (known.length < 2) {
+            const since = aiHealthDay(p.weeksSince) || '15 Oct';
+            return `<p class="aih-bars-empty aih-muted aih-small">Weekly bars build from ${escHtml(since)}.</p>`;
+        }
+        const max = Math.max(1, ...known.map(w => aiNum(w.number)));
+        const said = [];
+        const cols = weeks.map(w => {
+            const n = aiNum(w.number);
+            const label = w.current ? 'This week' : aiHealthDay(w.start);
+            if (n === AI_UNKNOWN) {
+                said.push(`${label}: no number`);
+                return `<div class="aih-bar-col"><span class="aih-bar-val aih-muted">-</span><div class="aih-bar-track"></div><span class="aih-bar-lab">${escHtml(label)}</span></div>`;
+            }
+            said.push(`${label}: ${w.atLeast ? 'at least ' : ''}${n}`);
+            const h = n > 0 ? Math.max(4, Math.round(100 * n / max)) : 0;
+            return `<div class="aih-bar-col${w.current ? ' aih-bar-now' : ''}"><span class="aih-bar-val">${n}${w.atLeast ? '+' : ''}</span>`
+                + `<div class="aih-bar-track"><div class="aih-bar" style="height:${h}%"></div></div><span class="aih-bar-lab">${escHtml(label)}</span></div>`;
+        });
+        const aria = `Things needing a fix each week, oldest first. ${said.join(', ')}. Shorter is better.`;
+        return `<div class="aih-bars${stale ? ' aih-bars-stale' : ''}" role="img" aria-label="${escHtml(aria)}">${cols.join('')}</div>`
+            + '<p class="aih-bars-note aih-muted aih-small">One bar a week, oldest on the left. Shorter is better.</p>';
+    }
+
+    // The three lights as buttons; each opens its fourteen-line group exactly as it was drawn
+    // before (aiHealthLine), so no detail is lost.
+    function aiHealthLightsHtml(p, row, stale) {
+        const lines = p.lines.filter(l => l && typeof l === 'object');
+        const lights = aiHealthLights(p);
+        const buttons = lights.map(x => {
+            const c = stale ? 'grey' : x.colour;
+            const title = stale ? x.ask : x.title;
+            const text = stale ? 'Not updated' : (c === 'green' ? '' : x.text);
+            return `<button type="button" class="aih-light" aria-expanded="false" aria-controls="aihl-${x.key}" onclick="aiHealthToggle(this)">
+                    <span class="aih-dot aih-${c}" role="img" aria-label="${AI_HEALTH_WORDS[c]}"></span>
+                    <span class="aih-light-body"><span class="aih-light-title">${escHtml(title)}</span>${text ? `<span class="aih-light-text">${escHtml(text)}</span>` : ''}</span>
+                    <span class="aih-chev" aria-hidden="true">▸</span>
+                </button>`;
+        });
+        const details = lights.map(x => `<div class="aih-light-detail" id="aihl-${x.key}" hidden>
+                <ul class="aih-list">${lines.filter(l => l.group === x.key).map(l => aiHealthLine(l, row, stale)).join('')}</ul>
+            </div>`);
+        return `<div class="aih-lights">${buttons.join('')}</div>${details.join('')}`;
+    }
+
     // The panel's HTML for a row as read (undefined: Airtable did not answer; null: no row).
     function aiHealthPanelHtml(row) {
-        const head = '<h3 class="aih-title">Is the AI team healthy?</h3>';
+        const head = AI_HEAD;
         if (row === undefined) return head + aiHealthNotice('amber', "Can't read the Mac's report: Airtable did not answer. Refresh to retry.");
         if (!row) return head + aiHealthNotice('amber', "Can't read the Mac's report: it has not written the AI team answer yet.");
         const f = row.fields;
@@ -1718,35 +1805,37 @@
             const failed = f[ESTATE_FIELDS.status] === 'Failed';
             return head + aiHealthNotice(failed ? 'red' : 'amber', `Can't read the Mac's report: ${escHtml(f[ESTATE_FIELDS.detail] || 'the answer could not be read.')}`);
         }
-        // Older than two hours by the time the Mac worked it out: the verdict and every dot go grey
-        // and say so. A board that stopped updating must not look like a calm one.
+        // Older than two hours by the time the Mac worked it out: the answer, the lights and the
+        // bars go grey and say so. A board that stopped updating must not look like a calm one.
         const stale = aiTeamRowAge(row) > AI_TEAM_STALE_MIN;
-        const o = p.overall || {};
-        const oc = stale ? 'grey' : aiHealthColour(o.colour);
-        const counts = ['green', 'amber', 'red'].map(k => `${aiNum(o[k])} ${k}`).join(' · ')
-            + (aiNum(o.grey) > 0 ? ` · ${aiNum(o.grey)} can't tell` : '');
-        const groups = Array.isArray(p.groups) ? p.groups : [];
-        const lines = p.lines.filter(l => l && typeof l === 'object');
-        return head
+        const clock = escHtml(aiTeamClock(row));
+        // An older report (the Mac not yet on the new code) has no answer, number or bars.
+        const older = !p.verdict || !p.headline;
+        const v = p.verdict || {};
+        const vc = (stale || older) ? 'grey' : aiHealthColour(v.colour);
+        const answer = stale ? `Not updated since ${clock}` : older ? "Can't tell" : escHtml(v.text || "Can't tell");
+        const reason = stale
+            ? `The Mac's report has stopped, so these numbers may be out of date. Its last answer: ${escHtml(older ? "can't tell" : (v.text || ''))}.`
+            : older ? "The Mac is still sending its older report. The number and weekly bars appear on its next run, within 10 minutes."
+            : escHtml(v.reason || v.why || '');
+        const h = p.headline || {};
+        const lw = p.lastWeek || null;
+        const lwText = lw && aiNum(lw.number) !== AI_UNKNOWN ? aiHealthFixText(lw.number, lw.atLeast) : 'no number yet';
+        const unread = (Array.isArray(h.unread) ? h.unread : []).filter(u => u && typeof u === 'object');
+        return `<div class="aih-head"><h3 class="aih-title">AI team</h3>
+                   <div class="aih-verdict aih-verdict-${vc}"><span class="aih-dot aih-${vc}" role="img" aria-label="${AI_HEALTH_WORDS[vc]}"></span>
+                   <span class="aih-verdict-text">${answer}</span></div></div>`
             + (f[ESTATE_FIELDS.status] === 'Failed' ? aiHealthNotice('red', escHtml(f[ESTATE_FIELDS.detail] || 'The Mac reported a failure.')) : '')
-            + `<div class="aih-verdict aih-verdict-${oc}">
-                   <span class="aih-dot aih-dot-lg aih-${oc}" role="img" aria-label="${AI_HEALTH_WORDS[oc]}"></span>
-                   <div><div class="aih-verdict-text">${stale ? `Not updated since ${escHtml(aiTeamClock(row))}` : escHtml(o.text || '')}</div>
-                   <div class="aih-muted aih-small">${stale
-                       ? `The Mac's report has stopped, so every answer below may be out of date. Its last verdict: ${escHtml(o.text || '')}`
-                       : `${counts} · Updated ${escHtml(aiTeamClock(row))}`}</div></div>
+            + `<p class="aih-reason aih-small">${reason} <span class="aih-muted">Updated ${clock}.</span></p>`
+            + `<div class="aih-fix${stale ? ' aih-fix-stale' : ''}">
+                   <span class="aih-fix-label">Things needing a fix</span>
+                   <span class="aih-fix-num">${escHtml(older ? 'not known yet' : aiHealthFixText(h.number, h.atLeast))}</span>
+                   <span class="aih-fix-last">last week: <strong>${escHtml(lwText)}</strong></span>
                </div>`
-            + groups.map(g => {
-                const gc = stale ? 'grey' : aiHealthColour(g.colour);
-                const mine = lines.filter(l => l.group === g.key);
-                return `<section class="aih-group" aria-label="${escHtml(g.title || '')}">
-                    <div class="aih-group-head"><span class="aih-dot aih-${gc}" role="img" aria-label="${AI_HEALTH_WORDS[gc]}"></span>
-                        <span class="aih-group-title">${escHtml(g.title || '')}</span>
-                        <span class="aih-muted aih-small">${stale ? 'Not updated' : escHtml(g.text || '')}</span></div>
-                    <ul class="aih-list">${mine.map(l => aiHealthLine(l, row, stale)).join('')}</ul>
-                </section>`;
-            }).join('')
-            + '<p class="aih-muted aih-small aih-foot">Tap a line to see its rule and what is behind it.</p>';
+            + (unread.length && !stale ? `<p class="aih-unread aih-small">Could not read all of: ${unread.map(u => escHtml(u.question || '')).join(', ')}.</p>` : '')
+            + (older ? '' : aiHealthBars(p, stale))
+            + aiHealthLightsHtml(p, row, stale)
+            + '<p class="aih-muted aih-small aih-foot">Tap a light to see the checks behind it. Tap a check to see its rule and what is behind it.</p>';
     }
 
     // One small stylesheet for the panel, tokens only, added once.
@@ -1756,16 +1845,40 @@
         s.id = 'aiHealthStyles';
         s.textContent = `
             .aih-panel{grid-column:1/-1;background:var(--bg-surface);border:1px solid var(--border-default);border-radius:var(--radius-lg);padding:var(--space-4);min-width:0}
-            .aih-title{margin:0 0 var(--space-3);font-size:var(--fs-lg);font-weight:var(--fw-semibold);color:var(--text-primary)}
-            .aih-verdict{display:flex;gap:var(--space-3);align-items:center;padding:var(--space-3);border-radius:var(--radius-md);margin-bottom:var(--space-4);background:var(--bg-surface-2)}
+            .aih-head{display:flex;justify-content:space-between;align-items:center;gap:var(--space-3);flex-wrap:wrap;margin-bottom:var(--space-2)}
+            .aih-title{margin:0;font-size:var(--fs-sm);font-weight:var(--fw-semibold);text-transform:uppercase;letter-spacing:.06em;color:var(--text-secondary)}
+            .aih-verdict{display:inline-flex;gap:var(--space-2);align-items:center;padding:var(--space-1) var(--space-3);border-radius:var(--radius-full);background:var(--bg-surface-2);max-width:100%}
             .aih-verdict-green{background:var(--success-bg)}.aih-verdict-amber{background:var(--warning-bg)}.aih-verdict-red{background:var(--danger-bg)}.aih-verdict-grey{background:var(--bg-subtle)}
             .aih-verdict-text{font-size:var(--fs-lg);font-weight:var(--fw-semibold);color:var(--text-primary);word-break:break-word}
             .aih-dot{display:inline-block;flex:0 0 auto;width:12px;height:12px;border-radius:var(--radius-full);background:var(--text-muted)}
-            .aih-dot-lg{width:18px;height:18px}
             .aih-green{background:var(--success)}.aih-amber{background:var(--warning)}.aih-red{background:var(--danger)}.aih-grey{background:var(--text-muted)}
-            .aih-group{margin-top:var(--space-3)}
-            .aih-group-head{display:flex;align-items:center;gap:var(--space-2);flex-wrap:wrap;padding-bottom:var(--space-1);border-bottom:1px solid var(--border-subtle)}
-            .aih-group-title{font-weight:var(--fw-semibold);color:var(--text-primary)}
+            .aih-reason{margin:0 0 var(--space-3);color:var(--text-secondary);word-break:break-word}
+            .aih-fix{display:flex;align-items:baseline;flex-wrap:wrap;gap:var(--space-2) var(--space-4)}
+            .aih-fix-label{font-size:var(--fs-md);font-weight:var(--fw-medium);color:var(--text-primary)}
+            .aih-fix-num{font-size:var(--fs-3xl);font-weight:var(--fw-bold);color:var(--text-primary);line-height:1}
+            .aih-fix-last{font-size:var(--fs-md);color:var(--text-secondary)}
+            .aih-fix-stale .aih-fix-num{color:var(--text-muted)}
+            .aih-unread{margin:var(--space-1) 0 0;color:var(--text-secondary);word-break:break-word}
+            .aih-bars{display:flex;align-items:stretch;gap:var(--space-2);height:112px;margin-top:var(--space-3);max-width:560px}
+            .aih-bar-col{flex:1 1 0;min-width:0;display:flex;flex-direction:column;align-items:center;gap:2px}
+            .aih-bar-track{flex:1 1 auto;width:100%;display:flex;align-items:flex-end;border-bottom:1px solid var(--border-default)}
+            .aih-bar{width:100%;max-width:40px;margin:0 auto;background:var(--tone-blue);border-radius:var(--radius-sm) var(--radius-sm) 0 0}
+            .aih-bar-now .aih-bar-lab{font-weight:var(--fw-semibold);color:var(--text-primary)}
+            .aih-bars-stale .aih-bar{background:var(--text-muted)}
+            .aih-bar-val{font-size:var(--fs-sm);font-weight:var(--fw-semibold);color:var(--text-primary)}
+            .aih-bar-lab{font-size:var(--fs-xs);color:var(--text-muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%}
+            .aih-bars-note,.aih-bars-empty{margin:var(--space-1) 0 0}
+            .aih-lights{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:var(--space-2);margin-top:var(--space-4)}
+            .aih-light{display:flex;align-items:flex-start;gap:var(--space-2);width:100%;padding:var(--space-2) var(--space-3);background:var(--bg-surface-2);border:1px solid var(--border-subtle);border-radius:var(--radius-md);text-align:left;font:inherit;color:var(--text-primary);cursor:pointer;min-width:0}
+            .aih-light:hover{border-color:var(--border-default)}
+            .aih-light:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+            .aih-light .aih-dot{margin-top:3px}
+            .aih-light-body{flex:1 1 auto;min-width:0;display:flex;flex-direction:column;gap:2px}
+            .aih-light-title{font-weight:var(--fw-semibold);word-break:break-word}
+            .aih-light-text{font-size:var(--fs-sm);color:var(--text-secondary);word-break:break-word}
+            .aih-light[aria-expanded="true"]{border-color:var(--accent)}
+            .aih-light[aria-expanded="true"] .aih-chev{transform:rotate(90deg)}
+            .aih-light-detail{margin-top:var(--space-2)}
             .aih-list{list-style:none;margin:0;padding:0}
             .aih-li{border-bottom:1px solid var(--border-subtle)}
             .aih-line{display:grid;grid-template-columns:auto minmax(0,1.3fr) minmax(0,1.2fr) minmax(0,1fr) auto;gap:var(--space-2);align-items:center;width:100%;padding:var(--space-2) 0;background:none;border:0;text-align:left;font:inherit;color:var(--text-primary);cursor:pointer}
@@ -1794,6 +1907,7 @@
             .aih-sr{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
             .aih-subhead{grid-column:1/-1;margin:var(--space-2) 0 0;font-size:var(--fs-xs);font-weight:var(--fw-semibold);text-transform:uppercase;letter-spacing:.05em;color:var(--text-muted)}
             @media (max-width:768px){
+                .aih-lights{grid-template-columns:minmax(0,1fr)}
                 .aih-line{grid-template-columns:auto minmax(0,1fr) auto;row-gap:2px}
                 .aih-a{grid-column:2/3}.aih-trend{grid-column:2/3}
                 .aih-chev{grid-row:1;grid-column:3}
@@ -1819,7 +1933,11 @@
         if (aiTeamRowAge(row) > AI_TEAM_STALE_MIN) {
             return { status: 'warn', detail: `Not updated since ${aiTeamClock(row)}. The Mac writer (estate-status, every 10 minutes) has stopped.` };
         }
-        const grey = aiNum((aiTeamPayload(row).overall || {}).grey);
+        const p = aiTeamPayload(row);
+        if (!p.verdict || !p.headline) {
+            return { status: 'warn', detail: `Updated ${aiTeamClock(row)}, but the Mac is still sending its older report (no number or weekly bars yet)` };
+        }
+        const grey = aiNum((p.overall || {}).grey);
         if (grey > 0) return { status: 'warn', detail: `Updated ${aiTeamClock(row)}, but ${grey} line${grey === 1 ? '' : 's'} can't be read` };
         return { status: 'pass', detail: `Updated ${aiTeamClock(row)}` };
     }
@@ -1830,7 +1948,7 @@
         const host = document.getElementById('aiHealthPanel');
         if (!host.textContent.trim()) {
             aiHealthStyles();
-            host.innerHTML = '<h3 class="aih-title">Is the AI team healthy?</h3><p class="aih-muted">Checking the AI team…</p>';
+            host.innerHTML = AI_HEAD + '<p class="aih-muted">Checking the AI team…</p>';
         }
         let row;
         try {
