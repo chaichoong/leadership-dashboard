@@ -920,12 +920,48 @@ def prune_dead_tickets():
 # a job that has not been checked waits for the whole run, as every job did
 # before. backgroundSafe means short and light: no render, no whisper, no
 # Playwright, nothing of the Content Engine's own state, and a maxRuntimeMinutes
-# of its own (tests/job-queue.test.js holds the real schedule to that).
+# of 20 or less, because the phase's job waits for a guest still inside
+# (tests/job-queue.test.js holds the real schedule to that). Only a JSON true
+# opts in.
 
 def background_safe(job, schedule=None):
-    """May this job run in the guest lane beside a declared background phase?"""
+    """May this job run in the guest lane beside a declared background phase?
+    Only a JSON true counts: the string "false" is a typo, not an opt-in."""
     cfg = (schedule if schedule is not None else load_schedule()).get(job) or {}
-    return bool(cfg.get("backgroundSafe"))
+    return cfg.get("backgroundSafe") is True
+
+
+def _guest_inside():
+    """Is a live guest in the guest lane? Stale guest locks are cleared first."""
+    break_stale_lock(GUEST_DIR)
+    return os.path.isdir(GUEST_DIR)
+
+
+def _caller_run_pid(job):
+    """The pid that owns a wrapped lock for `job` from the caller's side: the
+    wrapper's own pid, which run() exports to everything it starts, or this
+    process when there is no such run."""
+    if os.environ.get("JOB_QUEUE_JOB") == job:
+        try:
+            return int(os.environ.get("JOB_QUEUE_RUN_PID") or 0) or os.getpid()
+        except ValueError:
+            pass
+    return os.getpid()
+
+
+def _guest_holder(job):
+    """The guest lane's holder when the caller is that guest, else None.
+
+    Name AND pid for a wrapped guest, so a stranger sharing the job's name (a
+    stale run, a hand-typed release) never frees or renews another process's
+    lane. A cooperative holder is matched on name alone, as the queue lock is:
+    the shell that took it exited by design, so its pid proves nothing."""
+    guest = read_holder(GUEST_DIR)
+    if not guest or guest.get("job") != job:
+        return None
+    if guest.get("mode") == "wrapped" and guest.get("pid") != _caller_run_pid(job):
+        return None
+    return guest
 
 
 def active_yield():
@@ -951,24 +987,28 @@ def active_yield():
     return y
 
 
-def _guest_turn(job, mode, lease_minutes, ticket_name, waiting, schedule):
+def _guest_turn(job, mode, lease_minutes, ticket_name, waiting):
     """Take the guest lane if a phase is open and this is the oldest guest
     waiting. Take FIRST, then check the phase is still open; background() shuts
     the phase first, then checks the lane is empty. Whichever of the two moves
     second sees the other, so a guest can never start after the phase's job has
-    gone back to its own next step."""
+    gone back to its own next step.
+
+    "The oldest guest waiting" counts only tickets marked "guest" (written by
+    this version for a backgroundSafe job). A waiter on older code, on the night
+    this rolls out, never takes the lane, so its ticket must not hold the lane
+    shut for those that can (review of PR #788)."""
     if not active_yield():
         return False
     for name in waiting:
+        if name == ticket_name:
+            break
         try:
             with open(os.path.join(TICKET_DIR, name)) as f:
-                ahead = json.load(f).get("job")
+                if json.load(f).get("guest") is True:
+                    return False      # an older guest goes first
         except (OSError, json.JSONDecodeError):
             continue
-        if background_safe(ahead, schedule):
-            if name != ticket_name:
-                return False          # an older guest goes first
-            break
     else:
         return False
     if not try_take_lock(job, mode, lease_minutes, GUEST_DIR):
@@ -1134,11 +1174,16 @@ def acquire(job, mode="cooperative", lease_minutes=DEFAULT_LEASE_MIN,
             print("UNLOCKED %s: read-only check, runs without the queue lock" % job)
         return EX_OK
 
+    # A job declared backgroundSafe may also take the guest lane while the
+    # queue's holder is in a background phase (see background()). Its ticket
+    # says so, so other guests know it is ahead of them.
+    safe = background_safe(job, schedule)
+
     # Fixed-width timestamp so plain lexical sort is true arrival order.
     ticket_name = "%017.6f-%d" % (now(), os.getpid())
     ticket_path = os.path.join(TICKET_DIR, ticket_name)
     with open(ticket_path, "w") as f:
-        json.dump({"job": job, "pid": os.getpid(), "at": iso()}, f)
+        json.dump({"job": job, "pid": os.getpid(), "at": iso(), "guest": safe}, f)
 
     started = now()
     deadline = started + timeout_minutes * 60
@@ -1161,9 +1206,7 @@ def acquire(job, mode="cooperative", lease_minutes=DEFAULT_LEASE_MIN,
             # still works; it just cannot report its own death.
             pass
 
-    # A job declared backgroundSafe may also take the guest lane while the
-    # queue's holder is in a background phase (see background()).
-    safe = bool(cfg.get("backgroundSafe"))
+    guest_noted = False
 
     try:
         while True:
@@ -1176,9 +1219,26 @@ def acquire(job, mode="cooperative", lease_minutes=DEFAULT_LEASE_MIN,
 
             lane = None
             if first == ticket_name and try_take_lock(job, mode, lease_minutes):
-                lane = LOCK_DIR
+                # THE QUEUE LOCK ONLY WITH THE GUEST LANE EMPTY (review of PR
+                # #788, reproduced). A render job stopped mid-phase (its
+                # ceiling, a lost lock, a TERM, a sleep past the lease grace)
+                # never drains, so its run frees the queue lock while a guest is
+                # still inside. Take, THEN check, then give it straight back:
+                # _guest_turn takes the lane and then checks the phase, which
+                # needs the phase's job to hold this lock, so whichever moves
+                # second sees the other.
+                if _guest_inside():
+                    drop_lock()
+                    if not guest_noted:
+                        guest_noted = True
+                        event(job, "waiting-for-guest",
+                              guest=(read_holder(GUEST_DIR) or {}).get("job"),
+                              reason="the queue is free but a guest from an ended "
+                                     "background phase is still running")
+                else:
+                    lane = LOCK_DIR
             elif safe and _guest_turn(job, mode, lease_minutes, ticket_name,
-                                      waiting, schedule):
+                                      waiting):
                 lane = GUEST_DIR
 
             if lane:
@@ -1375,8 +1435,8 @@ def release(job, quiet=False, outcome="completed", reason=None):
         return EX_OK
 
     # A guest gives back the guest lane, never the queue lock it ran beside.
-    guest = read_holder(GUEST_DIR)
-    if guest and guest.get("job") == job:
+    guest = _guest_holder(job)
+    if guest:
         held = round(now() - guest.get("acquired_at", now()), 1)
         drop_lock(GUEST_DIR)
         extra = {"outcome": outcome, "lane": "guest"}
@@ -1453,10 +1513,11 @@ def assert_held(job, quiet=False):
 
 
 def _own_holder(job):
-    """(lock_dir, holder) for the lane this job holds: the guest lane when it is
-    the guest, else the queue lock, whoever holds it."""
-    guest = read_holder(GUEST_DIR)
-    if guest and guest.get("job") == job:
+    """(lock_dir, holder) for the lane this job holds: the guest lane when the
+    caller is that guest (name and pid, see _guest_holder), else the queue
+    lock, whoever holds it."""
+    guest = _guest_holder(job)
+    if guest:
         return GUEST_DIR, guest
     return LOCK_DIR, read_holder()
 
@@ -1648,10 +1709,12 @@ def run(job, cmd, lease_minutes, timeout_minutes=None, check_stale=True,
     if not exempt:
         ticker = threading.Thread(target=beat, daemon=True)
         ticker.start()
-    # The run's identity, for `job-queue.py background` inside the command: only
-    # a run that holds the QUEUE lock may declare a background phase. Cleared
-    # otherwise, so a value inherited from a parent run can never be used.
-    if not exempt and lane == LOCK_DIR:
+    # The run's identity, for what the command calls back into this file:
+    # `background` (only a run holding the QUEUE lock may declare a phase; a
+    # guest just runs its step) and assert-held / heartbeat (a wrapped guest's
+    # lane is matched on this pid). Cleared for a lock-exempt run, so a value
+    # inherited from a parent run can never be used.
+    if not exempt:
         os.environ["JOB_QUEUE_JOB"] = job
         os.environ["JOB_QUEUE_RUN_PID"] = str(os.getpid())
     else:
@@ -1731,6 +1794,10 @@ def background(cmd, quiet=False):
       * A marker from a killed phase is inert (active_yield checks the holder
         and the pid), and a run whose lock was lost refuses to start the
         command at all.
+      * A phase stopped from outside (the run's ceiling, a lost lock, a TERM)
+        does not wait for its guest, so its run can free the queue lock while
+        the guest is still inside. acquire() takes the queue lock only with the
+        guest lane empty, so the next job waits for that guest to leave.
       * Outside a queue run (a hand-started script, a test, or the first night
         after this merges, when the wrapper already running is the old code and
         exports no run identity) it simply runs the command, as before.
@@ -1747,6 +1814,12 @@ def background(cmd, quiet=False):
         return _exit_status(subprocess.call(cmd))
 
     ensure_dirs()
+    guest = read_holder(GUEST_DIR) or {}
+    if guest.get("job") == job and guest.get("pid") == run_pid:
+        if not quiet:
+            print("background: %s is itself a guest beside another job's phase; "
+                  "running the step as before" % job)
+        return _exit_status(subprocess.call(cmd))
     holder = read_holder()
     if not holder or holder.get("job") != job or holder.get("pid") != run_pid:
         why = ("nobody holds the queue" if not holder else
@@ -1814,6 +1887,16 @@ def background(cmd, quiet=False):
     sig = signal_of(code)
     event(job, "resumed", exit=code, background_seconds=round(now() - started, 1),
           guest_wait_seconds=guest_wait, **({"signal": sig} if sig else {}))
+    # The run may keep its own tally of time lost to guests (content-engine's
+    # 04:00 last-start rule counts it): one line of seconds per wait.
+    tally = os.environ.get("JOB_QUEUE_DRAIN_FILE")
+    if tally and guest_wait > 0:
+        try:
+            with open(tally, "a") as f:
+                f.write("%.1f\n" % guest_wait)
+        except OSError as exc:
+            print("background: could not record %ss of guest wait in %s (%s)"
+                  % (guest_wait, tally, exc), file=sys.stderr)
     if not quiet:
         print("background: %s has the queue to itself again (step exit %s, "
               "waited %ss for a guest)" % (job, code, guest_wait))

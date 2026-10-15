@@ -143,14 +143,25 @@ DAYS="$(python3 scripts/content-engine/watch.py plan --slots "$EPISODES")" || DA
 # publishing, the report) never run: no cards in the morning, nothing to publish. Since PR 723 watch.plan puts the
 # night's ONE redo FIRST (Kevin, 7 Oct 2026: a sent-back episode goes to the front), and still keeps MIN_NEW new days
 # after it, so the day listed LAST is a new day, not the redo. CE_ALLOW_DAYTIME=1 lifts it with the daytime rule.
-ce_may_start_day() {   # $1 = the hour now, 0-23
+# TIME LOST TO GUESTS COUNTS (review of PR #788, 15 Oct 2026). Each render is a background phase, and it can end waiting
+# for a light job still running beside it (at most that job's 20-minute ceiling). job-queue.py writes every such wait,
+# in seconds, to the file below, and the last start moves earlier by the minutes the night has spent that way. A night
+# with no wait keeps exactly 04:00.
+CE_GUEST_WAIT_FILE="${CE_GUEST_WAIT_FILE:-${LOG_DIR:-/tmp}/guest-wait.txt}"
+ce_guest_wait_minutes() {   # whole minutes this night has waited for guests; no record reads as 0
+  [ -s "$CE_GUEST_WAIT_FILE" ] || { echo 0; return; }
+  awk '{ s += $1 } END { printf "%d\n", s / 60 }' "$CE_GUEST_WAIT_FILE" 2>/dev/null || echo 0
+}
+ce_may_start_day() {   # $1 = the hour now, 0-23; $2 = the minute (default 0); $3 = minutes waited for guests (default 0)
   [ "${CE_ALLOW_DAYTIME:-0}" = "1" ] && return 0
-  [ "$1" -ge 22 ] || [ "$1" -lt "${CE_LAST_START_HOUR:-4}" ]
+  [ "$1" -ge 22 ] && return 0
+  [ $(( $1 * 60 + 10#${2:-0} )) -lt $(( 10#${CE_LAST_START_HOUR:-4} * 60 - ${3:-0} )) ]
 }
 # --- end last-start-block ---
+export JOB_QUEUE_DRAIN_FILE="$CE_GUEST_WAIT_FILE"; : > "$CE_GUEST_WAIT_FILE"
 for day in $DAYS; do
-  if ! ce_may_start_day "$(date +%-H)"; then
-    echo "plan: day $day NOT started at $(date +%H:%M): no day starts from $(printf '%02d' "$((10#${CE_LAST_START_HOUR:-4}))"):00, so the copy, cards and publishing steps run before the job's stop. It waits for the next night."
+  if ! ce_may_start_day "$(date +%-H)" "$(date +%-M)" "$(ce_guest_wait_minutes)"; then
+    echo "plan: day $day NOT started at $(date +%H:%M): no day starts from $(printf '%02d' "$((10#${CE_LAST_START_HOUR:-4}))"):00, less the $(ce_guest_wait_minutes) min this night waited for light jobs beside its renders, so the copy, cards and publishing steps run before the job's stop. It waits for the next night."
     continue
   fi
   echo "== day $day"

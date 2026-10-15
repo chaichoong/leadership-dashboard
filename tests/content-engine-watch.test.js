@@ -75,8 +75,28 @@ describe('content-engine watch: nightly wiring', () => {
     expect([4, 5, 6, 7, 12, 21].map(h => may(h))).toEqual([false, false, false, false, false, false]);
     expect(may(5, { CE_ALLOW_DAYTIME: '1' })).toBe(true);          // a deliberate daytime run is not cut short
     expect(may(3, { CE_LAST_START_HOUR: '3' })).toBe(false);
-    expect(run).toMatch(/if ! ce_may_start_day "\$\(date \+%-H\)"; then[\s\S]{0,400}continue/);
+    expect(run).toMatch(/if ! ce_may_start_day "\$\(date \+%-H\)" "\$\(date \+%-M\)" "\$\(ce_guest_wait_minutes\)"; then[\s\S]{0,400}continue/);
+    expect(run).toMatch(/export JOB_QUEUE_DRAIN_FILE="\$CE_GUEST_WAIT_FILE"/);
+    expect(run, 'the record must start empty each night').toMatch(/: > "\$CE_GUEST_WAIT_FILE"/);
     expect(run).toContain('approval.py run --pending --limit "$COPY_LIMIT"');   // a card for every episode the night planned
+  });
+
+  // Review of PR #788 (15 Oct 2026): a render's background phase can end waiting for a light job still inside the
+  // guest lane. Minutes the night spends that way come off the 04:00 last start, so the last day keeps its room
+  // before the 07:00 stop. A night with no such wait keeps exactly 04:00.
+  it('counts the minutes spent waiting for guests against the 04:00 last start', () => {
+    const { mkdtempSync, writeFileSync } = require('node:fs');
+    const { tmpdir } = require('node:os');
+    const run = readFileSync(RUN, 'utf8');
+    const block = run.match(/# --- last-start-block[\s\S]*?# --- end last-start-block ---/)[0];
+    const sh = (cmd, env = {}) => execFileSync('bash', ['-c', `${block}\n${cmd}`], { encoding: 'utf8', env: { PATH: process.env.PATH, ...env } }).trim();
+    const may = (h, m, waited) => { try { sh(`ce_may_start_day ${h} ${m} ${waited}`); return true; } catch (e) { return false; } };
+    expect([may(3, 59, 0), may(4, 0, 0)], 'no wait: exactly 04:00').toEqual([true, false]);
+    expect([may(3, 19, 40), may(3, 20, 40), may(23, 50, 40)]).toEqual([true, false, true]);
+    const f = path.join(mkdtempSync(path.join(tmpdir(), 'ce-wait-')), 'guest-wait.txt');
+    writeFileSync(f, '1500.0\n900.4\n');
+    expect(sh('ce_guest_wait_minutes', { CE_GUEST_WAIT_FILE: f })).toBe('40');
+    expect(sh('ce_guest_wait_minutes', { CE_GUEST_WAIT_FILE: f + '.none' }), 'no record reads as no wait').toBe('0');
   });
 
   it('streams the raw clip with retries while Drive hydrates it, and a failed pull never kills the run (4 Sep 2026)', () => {
@@ -220,7 +240,7 @@ echo "unexpected: python3 $*" >&2; exit 9
       : ['/bin/bash', ['-c', pre + loop]];
     const out = execFileSync(argv[0], argv[1], { encoding: 'utf8', cwd: home,
       env: { PATH: `${bin}:/usr/bin:/bin`, HOME: process.env.HOME, CE_LEDGER: path.join(ledgerDir, 'ledger.json'), CE_WORK: work, DAYS: days, CE_ALLOW_DAYTIME: '1',
-        JOB_QUEUE_DIR: queueDir, JOB_QUEUE_SCHEDULE: schedule, JOB_QUEUE_POLL: '0.05' } });
+        JOB_QUEUE_DIR: queueDir, JOB_QUEUE_SCHEDULE: schedule, JOB_QUEUE_POLL: '0.05', CE_GUEST_WAIT_FILE: path.join(home, 'guest-wait.txt') } });
     if (!underQueue) return out;
     const log = path.join(queueDir, 'queue-events.jsonl');
     const events = existsSync(log) ? readFileSync(log, 'utf8').trim().split('\n').filter(Boolean).map((l) => JSON.parse(l)) : [];

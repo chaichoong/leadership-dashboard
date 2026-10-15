@@ -2238,6 +2238,10 @@ describe("a long job's background phase lets light jobs run beside it", () => {
       'light-guest': { cron: '* * * * *', maxLateMinutes: 600, mode: 'wrapped', backgroundSafe: true, maxRuntimeMinutes: 60 },
       'light-guest-2': { cron: '* * * * *', maxLateMinutes: 600, mode: 'wrapped', backgroundSafe: true, maxRuntimeMinutes: 60 },
       'heavy-job': { cron: '* * * * *', maxLateMinutes: 600, mode: 'wrapped' },
+      // A render job whose ceiling (6 s) falls mid-render, as the 540-minute one can.
+      'short-host': { cron: '* * * * *', maxLateMinutes: 600, mode: 'wrapped', maxRuntimeMinutes: 0.1 },
+      // The flag must be a real true; a string is a typo, not an opt-in.
+      'stringy': { cron: '* * * * *', maxLateMinutes: 600, mode: 'wrapped', backgroundSafe: 'false', maxRuntimeMinutes: 20 },
     }));
     // One step of work: stamps its start and end on the shared timeline. With
     // a fourth argument it holds on until the named steps have started (at most
@@ -2274,9 +2278,10 @@ python3 "$STEP" "$NAME-after" "$AFTER" "$TL"
 `);
   });
 
-  const hostRun = (job, { name = 'render', secs = '20', until = '', after = '0.2' } = {}) =>
+  const hostRun = (job, { name = 'render', secs = '20', until = '', after = '0.2', drainFile = '' } = {}) =>
     runAsync(['run', job, '--no-stale-check', '--timeout', '1', '--', 'bash', host],
-      { env: bgEnv({ Q: QUEUE, STEP: step, TL: tl, NAME: name, SECS: secs, UNTIL: until, AFTER: after, JOB: job }) });
+      { env: bgEnv({ Q: QUEUE, STEP: step, TL: tl, NAME: name, SECS: secs, UNTIL: until, AFTER: after, JOB: job,
+        JOB_QUEUE_DRAIN_FILE: drainFile }) });
 
   const stepRun = (job, label, secs, timeout = '1') =>
     runAsync(['run', job, '--no-stale-check', '--timeout', timeout, '--', 'python3', step, label, secs, tl],
@@ -2343,6 +2348,87 @@ python3 "$STEP" "$NAME-after" "$AFTER" "$TL"
     expect(resumed.guest_wait_seconds).toBeGreaterThan(0);
     expect(existsSync(join(stateDir, 'guest')), 'guest lane left held').toBe(false);
     expect(existsSync(join(stateDir, 'yield.json')), 'phase marker left behind').toBe(false);
+  });
+
+  // Review of PR #788 (15 Oct 2026). The night's own 04:00 last-start rule needs the minutes it spent waiting for a
+  // guest, so the phase writes them where the run script reads them.
+  it('tells the run how long it waited for a guest, in the file the run names', async () => {
+    const drain = join(stateDir, 'guest-wait.txt');
+    const h = hostRun('render-host', { until: 'guest', drainFile: drain });
+    expect(await waitFor(() => yielded())).toBe(true);
+    const [gr, done] = await Promise.all([stepRun('light-guest', 'guest', '1.5'), h]);
+    expect(gr.code).toBe(0);
+    expect(done.code).toBe(0);
+    expect(existsSync(drain), 'no guest-wait record written').toBe(true);
+    const secs = readFileSync(drain, 'utf8').trim().split('\n').map(Number);
+    expect(secs).toHaveLength(1);
+    expect(secs[0]).toBeGreaterThan(0);
+  });
+
+  // Review of PR #788, finding 1 (reproduced): a render job stopped mid-phase (its 540-minute ceiling, a lost lock,
+  // a TERM, a sleep past the lease grace) skips the drain. Its run then frees the queue lock while a guest is still
+  // inside, and the next waiter must not take it until that guest has left.
+  it('a render job stopped at its ceiling with a guest inside: nobody takes the queue until the guest leaves', async () => {
+    const h = hostRun('short-host', { until: 'guest' });     // waits for the guest; its 6 s ceiling stops it first
+    expect(await waitFor(() => yielded('short-host'))).toBe(true);
+    const g = stepRun('light-guest', 'guest', '9');           // outlives the host's ceiling
+    expect(await waitFor(() => (timeline().guest || {}).start)).toBeTruthy();
+    const heavy = stepRun('heavy-job', 'heavy', '0.2');
+    const [done, gr, hv] = await Promise.all([h, g, heavy]);
+    expect(done.code, 'control: the host really was stopped at its ceiling').toBe(124);
+    expect(gr.code, gr.stdout + gr.stderr).toBe(0);
+    expect(hv.code, hv.stdout + hv.stderr).toBe(0);
+    expect(events().find((e) => e.job === 'light-guest' && e.state === 'acquired').lane).toBe('guest');
+    const t = timeline();
+    expect(t.heavy.start, 'a job took the queue while the guest was still inside').toBeGreaterThan(t.guest.end);
+  });
+
+  // Review of PR #788, finding 1 (second half): a guest lane held by a wrapped run belongs to that run's process, not
+  // to anything that shares the job's name.
+  it('a release or heartbeat from a process that is not the guest run never touches the guest lane', () => {
+    const lane = join(stateDir, 'guest');
+    mkdirSync(lane);
+    const at = Date.now() / 1000;
+    writeFileSync(join(lane, 'holder.json'), JSON.stringify({ job: 'light-guest', pid: process.pid, mode: 'wrapped',
+      acquired_at: at, acquired_iso: 'now', lease_until: at + 600 }));
+    expect(run(['heartbeat', 'light-guest'], { env: bgEnv() }).code).toBe(70);
+    run(['release', 'light-guest'], { env: bgEnv() });
+    expect(existsSync(join(lane, 'holder.json')), 'a stranger released the guest lane').toBe(true);
+    // Control: the run that owns the lane (its pid exported to its own children) is recognised.
+    expect(run(['heartbeat', 'light-guest'],
+      { env: bgEnv({ JOB_QUEUE_JOB: 'light-guest', JOB_QUEUE_RUN_PID: String(process.pid) }) }).code).toBe(0);
+    rmSync(lane, { recursive: true, force: true });
+  });
+
+  // Review of PR #788, finding 2: on the night this rolls out, a guest-eligible job still on the OLD code waits in
+  // the queue without ever entering the lane. Its older ticket must not hold the lane shut for newer guests.
+  it('an older ticket from a waiter that cannot be a guest does not hold the lane shut', async () => {
+    const h = hostRun('render-host', { until: 'guest' });
+    expect(await waitFor(() => yielded())).toBe(true);
+    // An old-code waiter for a guest-eligible job: its ticket has no "guest" mark, and it sorts first.
+    const old = join(stateDir, 'tickets', `0000000001.000000-${process.pid}`);
+    writeFileSync(old, JSON.stringify({ job: 'light-guest-2', pid: process.pid, at: 'old code' }));
+    try {
+      const g = await stepRun('light-guest', 'guest', '0.3', '0.5');
+      const done = await h;
+      expect(g.code, g.stdout + g.stderr).toBe(0);
+      expect(done.code).toBe(0);
+      const t = timeline();
+      expect(t.guest.end, 'the old ticket held the lane shut').toBeLessThan(t.render.end);
+    } finally {
+      rmSync(old, { force: true });
+    }
+  });
+
+  it('backgroundSafe must be a real true: the string "false" opens nothing', async () => {
+    const h = hostRun('render-host', { secs: '2.5' });
+    expect(await waitFor(() => yielded())).toBe(true);
+    const s = await stepRun('stringy', 'str', '0.1');
+    const done = await h;
+    expect(s.code).toBe(0);
+    expect(done.code).toBe(0);
+    const t = timeline();
+    expect(t.str.start, '"false" was read as true').toBeGreaterThan(t['render-after'].end);
   });
 
   it('no two heavy jobs at once: a second render and an undeclared job both wait for the WHOLE run', async () => {
@@ -2426,9 +2512,11 @@ python3 "$STEP" "$NAME-after" "$AFTER" "$TL"
       expect(real[k].mode, k).toBe('wrapped');
       expect(real[k].lockExempt, k).toBeUndefined();
       // The render's job waits for a guest still inside before its next step,
-      // so every guest carries a short ceiling of its own.
+      // so every guest carries a short ceiling of its own: 20 minutes (review
+      // of PR #788; the longest completed run of any of the four is 1,075 s).
+      expect(real[k].backgroundSafe, k).toBe(true);
       expect(Number(real[k].maxRuntimeMinutes), k).toBeGreaterThan(0);
-      expect(Number(real[k].maxRuntimeMinutes), k).toBeLessThanOrEqual(60);
+      expect(Number(real[k].maxRuntimeMinutes), k).toBeLessThanOrEqual(20);
     }
     // Heavy work never runs as a guest: local whisper, a render, the robot
     // browser, Playwright suites.
