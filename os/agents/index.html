@@ -1093,12 +1093,21 @@ function apvAnnounceQueueChange(){
 // take his cursor). Review, 14 Oct 2026.
 let _apvDirty = false, _apvRereading = false, _apvRereadFails = 0, _apvLocalWriteAt = 0, _apvLastKeyAt = 0;
 const APV_QUIET_AFTER_WRITE_MS = 6000;   // a knock-back, Undo or bring-back draws its own result in this window
-document.addEventListener('input', (e) => { if(e.target && /^(TEXTAREA|INPUT)$/.test(e.target.tagName)) _apvLastKeyAt = Date.now(); }, true);
+['input', 'focusin'].forEach(ev => document.addEventListener(ev, (e) => { if(e.target && /^(TEXTAREA|INPUT)$/.test(e.target.tagName)) _apvLastKeyAt = Date.now(); }, true));
+window.addEventListener('blur', () => { if(apvTextBoxFocused()) _apvLastKeyAt = Date.now(); });   // he left for another window
 function apvHiddenInApp(){ try { return !!window.frameElement && window.frameElement.offsetParent === null; } catch(e){ return false; } }
-function apvTyping(){
+function apvTextBoxFocused(){
     const a = document.activeElement;
-    const textBox = !!a && (a.tagName === 'TEXTAREA' || (a.tagName === 'INPUT' && /^(text|search|email|url|number|date|)$/i.test(a.type || '')));
-    return textBox && Date.now() - _apvLastKeyAt < 30000;
+    return !!a && (a.tagName === 'TEXTAREA' || (a.tagName === 'INPUT' && /^(text|search|email|url|number|date|)$/i.test(a.type || '')));
+}
+// A box is in use from the moment his cursor goes into it, not from his first key. Wispr Flow types
+// nothing while he speaks and pastes the lot at the end, so a box that waited for a key read as idle,
+// a re-read redrew the cards, the cursor left the box and the paste landed nowhere (Kevin, 15 Oct
+// 2026). It stays in use while this page has the keyboard, and for 30 seconds after a key, a click
+// into it or his leaving for another window (copying from Wispr Flow, say). A cursor parked in a box
+// holds re-reads until he clicks out; the held re-read then runs within two seconds.
+function apvTyping(){
+    return apvTextBoxFocused() && (document.hasFocus() || Date.now() - _apvLastKeyAt < 30000);
 }
 function apvRereadQueue(){ _apvDirty = true; apvRunReread(); }
 // Busy = something a reload would lose: words being typed, a note or file waiting on a card, a reason
@@ -2132,6 +2141,8 @@ async function apvBulkDeferTo(until){
     if(_apvBulkBusy) return;
     const ids = apvBulkIds();
     if(!ids.length) return;
+    apvBulkLock(true);
+    if(await apvStaleTab()) return;   // an old tab knocks nothing back, as agBulkDecide (15 Oct 2026)
     const whyEl = document.getElementById('apvBulkDeferWhy');
     const why = (whyEl && whyEl.value || '').trim();
     const total = ids.length;
@@ -2843,6 +2854,9 @@ async function apvStepSay(taskId, cant){
     btns.forEach(b=>{ b.disabled = true; });
     _apvSaving.add(taskId);
     try {
+        // An old tab writes nothing (7 Oct 2026). On Home a click into the box no longer reloads an old
+        // copy under him (15 Oct 2026), so the check is here, at the save.
+        if(await apvStaleTab()) return 'elsewhere';
         const live = await atFetchOne(TASKS_TBL, taskId);
         const still = selName(gf(live,TF.status)) === 'Approval'
             && apvYourStep({ outcome: selName(gf(live,TF.approvalOutcome)), agentOutput: gf(live,TF.agentOutput)||'' });
@@ -3359,8 +3373,28 @@ const _apvSaving = new Set();
 // a newer copy of this page is live: his typed notes are kept for the reload, nothing is written,
 // and the page reloads itself (js/page-freshness.js says how the copies are compared).
 let _apvGoingStale = false;
-async function apvStaleTab(){
+// opts.unlessBusy: a check nothing is waiting to save (Home's refresh, coming back to the frame) asks
+// again once the live copy has answered. A click into a box fires the frame's focus BEFORE the box has
+// the cursor, so the busy check made then always passed and the frame reloaded under him (15 Oct 2026).
+async function apvStaleTab(opts){
     if(!window.PageFreshness || !(await PageFreshness.isStale())) return false;
+    const unlessBusy = !!(opts && opts.unlessBusy);
+    // One task later, so the click that started this has put the cursor in its box (a second check
+    // answers at once, from the first one's result). The notes are read off the boxes first: a note
+    // left in a box since the last redraw is work waiting too.
+    if(unlessBusy){ await new Promise(r => setTimeout(r, 0)); snapshotApprovalDrafts(); if(apvBusy()) return false; }
+    const files = apvCarryDrafts();
+    if(!_apvGoingStale){
+        toast('This page was updated after you opened it, so nothing was saved. Reloading now: decide on the latest version. Your typed notes come back'
+            + (files ? `, but ${files === 1 ? 'the file' : 'the ' + files + ' files'} you added must be added again.` : '.'), 6000);
+    }
+    _apvGoingStale = true;
+    if(!unlessBusy) _apvSaveReload = true;   // a save's reload: no idle timer drops it or lets its kept notes go
+    apvReloadWhenIdle(unlessBusy);
+    return true;
+}
+// The notes in the boxes, kept in this tab for the reload. Returns the count of files, which cannot be kept.
+function apvCarryDrafts(){
     snapshotApprovalDrafts();
     let files = 0;
     try {
@@ -3372,25 +3406,36 @@ async function apvStaleTab(){
         });
         sessionStorage.setItem(APV_DRAFT_CARRY, JSON.stringify(keep));
     } catch(e){ console.warn('notes could not be kept over the page reload', e); }
-    if(!_apvGoingStale){
-        toast('This page was updated after you opened it, so nothing was saved. Reloading now: decide on the latest version. Your typed notes come back'
-            + (files ? `, but ${files === 1 ? 'the file' : 'the ' + files + ' files'} you added must be added again.` : '.'), 6000);
-    }
-    _apvGoingStale = true;
-    apvReloadWhenIdle();
-    return true;
+    return files;
 }
 // Never mid-save: a file upload, a verdict or a bulk run finishes its write first (review, 7 Oct 2026).
-function apvReloadWhenIdle(){
-    if(_apvSaving.size){ setTimeout(apvReloadWhenIdle, 500); return; }
-    PageFreshness.reload(2500);
+// When nothing was waiting to save, a box he starts on while the notice shows wins: the reload is
+// dropped, never done under him, and the next check or his next save reloads (15 Oct 2026).
+let _apvIdleReload = 0, _apvSaveReload = false;
+function apvReloadWhenIdle(unlessBusy){
+    if(_apvSaving.size){ setTimeout(() => apvReloadWhenIdle(unlessBusy), 500); return; }
+    clearTimeout(_apvIdleReload);
+    if(!unlessBusy){ PageFreshness.reload(2500); return; }
+    _apvIdleReload = setTimeout(() => {
+        if(_apvSaveReload) return;
+        if(apvBusy()){
+            // Dropped: the re-read Home's refresh skipped runs once he is free, and notes kept for a
+            // reload that never came are let go, so no other reload brings back a note he has cleared.
+            _apvGoingStale = false; _apvDirty = true;
+            try { sessionStorage.removeItem(APV_DRAFT_CARRY); } catch(e){ console.warn('kept notes could not be let go', e); }
+            return;
+        }
+        apvCarryDrafts();   // and anything typed while the notice showed
+        _apvSaveReload = true;   // under way: a later idle timer must not let these notes go
+        PageFreshness.reload(0);
+    }, 2500);
 }
 window.apvStaleTab = apvStaleTab;
 // Back on an old tab: it reloads before he reads a card the new code would show differently.
 ['visibilitychange', 'focus'].forEach(ev => (ev === 'focus' ? window : document).addEventListener(ev, () => {
     if(document.visibilityState !== 'visible' || _agentsView !== 'approvals') return;
     if(HOME_MODE && apvBusy()) return;   // the Home copy is clicked into constantly: never reload under his work
-    apvStaleTab().catch(e => console.warn('page freshness check failed', e));
+    apvStaleTab({ unlessBusy: HOME_MODE }).catch(e => console.warn('page freshness check failed', e));
 }));
 async function applyApprovalDecision(taskId, outcome, remember, opts){
     opts = opts || {};
@@ -4213,6 +4258,9 @@ async function apvDeferNow(taskId, until){
     btns.forEach(b=>{ b.disabled = true; });
     apvShowSaving(taskId, 'your knock-back');
     try {
+        // An old tab knocks nothing back, as applyApprovalDecision (15 Oct 2026). After the buttons are
+        // off, so a double click cannot pass the check twice and write twice.
+        if(await apvStaleTab()) return;
         const ok = await apvDeferWrite(taskId, until, why);
         if(!ok){
             toast('Already decided elsewhere (Slack or the Tasks drawer). Reloading the queue.');
@@ -8460,7 +8508,7 @@ if(HOME_MODE) window.addEventListener('message', (e) => {
         // queue and the brief are read again, and the brief is redrawn only if it changed.
         // While he is busy (typing, a note or file waiting, cards ticked, a save running) there is no
         // freshness reload: the check before any save still stops old code saving.
-        (apvBusy() ? Promise.resolve(false) : apvStaleTab()).then(reloading => {
+        (apvBusy() ? Promise.resolve(false) : apvStaleTab({ unlessBusy: true })).then(reloading => {
             if(reloading) return;
             apvRereadQueue();
             // What the brief shows, plus the day ("today" turns over at midnight). File links are left

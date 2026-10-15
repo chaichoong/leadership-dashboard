@@ -8,12 +8,14 @@
 //   2. AI Agents queue, same as the live page: Approve saves as before (the check is not a wall).
 //   3. Tasks drawer, older than the live page: apvDecide writes nothing, reloads, and his note is
 //      back in that task's box.
+//   4. A Your step Done, a knock-back and a bulk knock-back check too (15 Oct 2026): on Home a click
+//      into a note box no longer reloads an old copy under him, so the check sits at every save.
 // The live copy's ETag is faked with page.route on the page's own HEAD request; Airtable is mocked.
 // Names are invented (the repo is public).
 const fs = require('fs');
 const path = require('path');
 const { test, expect } = require('@playwright/test');
-const { mockAgentsPage, loadAgentsPage } = require('./agents-page.helpers');
+const { mockAgentsPage, loadAgentsPage, defaultFixtures, TF, AGENT_A } = require('./agents-page.helpers');
 const { stubExternalHosts, localTodayISO } = require('./helpers');
 
 const ROOT = path.resolve(__dirname, '..', '..');
@@ -69,6 +71,80 @@ test.describe('AI Agents queue: an old tab saves nothing', () => {
     await page.locator('[data-apv-bulk-approve]').click();
     await expect(page.locator('#toast')).toContainText('updated after you opened it, so nothing was saved');
     await expect(page.locator('#toast')).not.toContainText('decided elsewhere');
+    live.bytes = bytes('os/agents/index.html');
+    await reloaded;
+    expect(patches).toHaveLength(0);
+  });
+
+  test('older than the live page: a Your step Done writes nothing, reloads, and his proof comes back', async ({ page }) => {
+    const STEP = 'recYourStepOld01';
+    const fx = defaultFixtures();
+    const now = new Date().toISOString();
+    fx.approvals.push({ id: STEP, createdTime: now, fields: {
+      [TF.name]: 'INSURANCE: Example Lane cover', [TF.status]: 'Approval', [TF.priority]: 'High',
+      [TF.approvalOutcome]: 'Approved with minor edits',
+      [TF.agentOutput]: "YOUR STEP: 1. Sign page 3.\n\n----- The agent's work, as you approved it -----\n\nQuote ready.",
+      [TF.sentForApprovalBy]: [AGENT_A], [TF.teamMember]: [AGENT_A], [TF.lmt]: now, [TF.taskType]: 'Admin' } });
+    const patches = await mockAgentsPage(page, fx);
+    const live = { bytes: bytes('os/agents/index.html') + 7 };
+    await fakeLiveCopy(page, PAGE, live);
+    await loadAgentsPage(page);
+    await page.click('#ptab-approvals');
+    const card = page.locator(`[data-apv-card="${STEP}"]`);
+    await card.locator(`#apvNote-${STEP}`).fill('Signed and posted, recorded delivery.');
+    const reloaded = page.waitForEvent('load', { timeout: 15000 });
+    await card.locator('[data-apv-step-done]').click();
+    await expect(page.locator('#toast')).toContainText('updated after you opened it, so nothing was saved');
+    live.bytes = bytes('os/agents/index.html');
+    await reloaded;
+    expect(patches.filter((p) => p.id === STEP)).toHaveLength(0);
+    await page.click('#ptab-approvals');
+    await expect(page.locator(`#apvNote-${STEP}`)).toHaveValue('Signed and posted, recorded delivery.');
+  });
+
+  test('older than the live page: a knock-back writes nothing and reloads', async ({ page }) => {
+    const patches = await mockAgentsPage(page);
+    const live = { bytes: bytes('os/agents/index.html') + 7 };
+    await fakeLiveCopy(page, PAGE, live);
+    await loadAgentsPage(page);
+    await page.click('#ptab-approvals');
+    const card = page.locator(`[data-apv-card="${ID}"]`);
+    await card.locator(`#apvNote-${ID}`).fill('Waiting on the auth code.');
+    const reloaded = page.waitForEvent('load', { timeout: 15000 });
+    await card.locator('.apv-defer-btn', { hasText: 'A week' }).first().click();
+    await expect(page.locator('#toast')).toContainText('updated after you opened it, so nothing was saved');
+    live.bytes = bytes('os/agents/index.html');
+    await reloaded;
+    expect(patches.filter((p) => p.id === ID)).toHaveLength(0);
+  });
+
+  test('a double click on a knock-back while the check is out writes once', async ({ page }) => {
+    const patches = await mockAgentsPage(page);
+    // The live copy is the same, but slow to answer: the first click's check is still out at the second.
+    await page.route(/\/os\/agents\/index\.html(\?.*)?$/, async (route) => {
+      if (route.request().method() !== 'HEAD') return route.continue();
+      await new Promise((r) => setTimeout(r, 400));
+      return route.fulfill({ status: 200, headers: { etag: etag(bytes('os/agents/index.html')), 'content-type': 'text/html' }, body: '' });
+    });
+    await loadAgentsPage(page);
+    await page.click('#ptab-approvals');
+    await page.locator(`[data-apv-card="${ID}"] .apv-defer-btn`, { hasText: 'A week' }).first().dblclick();
+    await expect.poll(() => patches.filter((p) => p.id === ID).length).toBe(1);
+    await page.waitForTimeout(1500);
+    expect(patches.filter((p) => p.id === ID)).toHaveLength(1);
+  });
+
+  test('older than the live page: a bulk knock-back never starts', async ({ page }) => {
+    const patches = await mockAgentsPage(page);
+    const live = { bytes: bytes('os/agents/index.html') + 7 };
+    await fakeLiveCopy(page, PAGE, live);
+    await loadAgentsPage(page);
+    await page.click('#ptab-approvals');
+    for (const i of [0, 1]) await page.locator('.apv-card').nth(i).locator('[data-apv-pick]').check();
+    const reloaded = page.waitForEvent('load', { timeout: 15000 });
+    await page.locator('[data-apv-bulk-open="defer"]').click();
+    await page.locator('#apvBulkPanel-defer .apv-defer > .apv-defer-btn').first().click();
+    await expect(page.locator('#toast')).toContainText('updated after you opened it, so nothing was saved');
     live.bytes = bytes('os/agents/index.html');
     await reloaded;
     expect(patches).toHaveLength(0);
