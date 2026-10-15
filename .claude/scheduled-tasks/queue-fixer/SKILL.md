@@ -44,17 +44,21 @@ cd /Users/kevinbrittain/Projects/leadership-dashboard
 
 Work only inside `.claude/worktrees/queue-fixes-{date}` from here on.
 
-## STEP 3b — The 60-minute budget
+## STEP 3b — The 90-minute budget and the 08:20 ceiling
 
-Phase 4 has a **60-minute wall-clock budget** (findings 20260930-phase-5-668 and
-20261001-daily-ops-680). On 30 Sep 2026 daily-ops reached 2h12m and on 1 Oct the fix phase
-stalled with no output at all, so the report — and the NEEDS YOU list the 09:00 CEO brief
-lifts out of it — landed after the brief had gone. The report must always be written before
-09:00, so the fix queue is what gives way, never the report.
+Phase 4 has a **90-minute wall-clock budget and an 08:20 ceiling** (findings
+20260930-phase-5-668 and 20261001-daily-ops-680). On 30 Sep 2026 daily-ops reached 2h12m and on
+1 Oct the fix phase stalled with no output at all, so the report — and the NEEDS YOU list the
+09:00 CEO brief lifts out of it — landed after the brief had gone. The report must always be
+written before 09:00, so the fix queue is what gives way, never the report.
 
-- At 60 minutes from the start of this phase, **stop claiming new findings.** Land what is
-  already written: commit, PR, gate, close. Name the cap as the reason in the PR body and in
-  the report.
+Raised 15 Oct 2026 (Kevin): about 14 findings filed a day against about 4 fixed; 90 minutes keeps the weekly allowance under 100% (45% used with 3.4 days left on 15 Oct).
+
+- **Stop claiming new findings** at 90 minutes from the start of this phase OR at 08:20
+  Europe/London, whichever comes first. Note the time the phase starts, and check the clock
+  (`TZ=Europe/London date +%H:%M`) before every claim. Land what is already written: commit, PR,
+  gate, close. Name the cap that stopped you (90 minutes or 08:20) as the reason in the PR body
+  and in the report.
 - A claim you abandon is reopened as stale by tomorrow's run, so an unworked claim costs
   nothing. An unwritten report costs the whole morning.
 - **Print one line per finding as you claim it.** On 1 Oct the only evidence of the stall was

@@ -390,7 +390,7 @@ Check the date first and SKIP with a note when not due. A skip you announce is f
 Follow `~/.claude/scheduled-tasks/queue-fixer/SKILL.md`, with these changes:
 
 - Do NOT take the queue lock; you already hold the machine.
-- **Also commit the reports** the scripts and slots left in `monitoring/`, EXCEPT this routine's own report, which is never in `monitoring/` and never in git: it names properties, sums and Kevin's legal and financial matters, so since 24 Sep 2026 it lives in `~/knowledge-os/logs/daily-ops/`, outside the repo. If you ever find a `daily-ops-*.md` in `monitoring/`, move it there; never `git add -f` one. Copy them into the worktree before committing — they are written in the main checkout and a fresh worktree cannot see them. APPEND to existing report files, never overwrite: on 7 Aug 2026 rewriting one destroyed 195 lines of earlier investigation.
+- **Also commit the reports** the scripts and slots left in `monitoring/`, EXCEPT this routine's own report, which is never in `monitoring/` and never in git: it names properties, sums and Kevin's legal and financial matters, so since 24 Sep 2026 it lives in `~/knowledge-os/logs/daily-ops/`, outside the repo. If you ever find a `daily-ops-*.md` in `monitoring/`, move it there; never `git add -f` one. The post pass's report is the same: it names people, debts and legal matters, so it lives in `~/knowledge-os/logs/daily-ops/post-passes/`. If you ever find a `post-manager-*.md` in `monitoring/`, move it to `~/knowledge-os/logs/daily-ops/post-passes/`; never `git add` or `git add -f` one. Copy them into the worktree before committing — they are written in the main checkout and a fresh worktree cannot see them. APPEND to existing report files, never overwrite: on 7 Aug 2026 rewriting one destroyed 195 lines of earlier investigation.
 
 **Close findings honestly.** A fix that is written but sitting in an open PR is `--outcome pending --pr <n>`, NOT `--outcome fixed`. On 26 Aug 2026 four fixer PRs (#107, #110, #126, #137) were all open and unmerged while forty findings sat closed as "fixed" citing them — the queue was reporting work as done that had never reached production. When a PR merges, `python3 scripts/findings.py land --pr <n>` turns its pending findings into fixed.
 
@@ -399,14 +399,19 @@ green work, so an open fixer PR now means one of two things and the report must 
 gate went RED, or it touched a protected path and is waiting for Kevin. If three or more are
 open, do NOT open a fourth — that is the drain failing again, and only he can clear it.
 
-**Phase 4 has a 60-minute wall-clock budget** (findings 20260930-phase-5-668 and
-20261001-daily-ops-680). On 30 Sep the run reached 2h12m and on 1 Oct the fix phase stalled with
+**Phase 4 has a 90-minute wall-clock budget and an 08:20 ceiling** (findings 20260930-phase-5-668
+and 20261001-daily-ops-680). On 30 Sep the run reached 2h12m and on 1 Oct the fix phase stalled with
 no output at all, so the report, and with it the NEEDS YOU list, landed after the 09:00 CEO brief
 had already gone out. The 07:00 report must always be written before 09:00, so the fix queue is
 the phase that gives way, never the report.
 
-- At 60 minutes from the start of the phase, **stop claiming new findings**. Land what is already
-  written — commit, PR, gate — and name the cap as the reason in the PR body and the report.
+Raised 15 Oct 2026 (Kevin): about 14 findings filed a day against about 4 fixed; 90 minutes keeps the weekly allowance under 100% (45% used with 3.4 days left on 15 Oct).
+
+- **Stop claiming new findings** at 90 minutes from the start of the phase OR at 08:20
+  Europe/London, whichever comes first. Note the time the phase starts, and check the clock
+  (`TZ=Europe/London date +%H:%M`) before every claim. Land what is already written — commit, PR,
+  gate — and name the cap that stopped you (90 minutes or 08:20) as the reason in the PR body and
+  the report.
 - A finding claimed and then abandoned is reopened as stale by the next run, so an unworked claim
   costs nothing. An unwritten report costs the whole morning.
 - **Emit one line per finding as you claim it.** A silent transcript cannot be diagnosed: on
