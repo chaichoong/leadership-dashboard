@@ -1576,276 +1576,276 @@
         host.replaceWith(card);
     }
 
-    // ── AI Team health cards (Kevin, 9 Oct 2026; brain Decisions/2026-10-09) ──
-    // Four numbers that say whether the AI team is keeping up: agent work in versus out,
-    // the defect queue in versus out, the biggest blocker, and the fix-of-a-fix rate (the
-    // one number Kevin judges the estate by). The Mac writes them to Estate Status
-    // (scripts/estate-status.py rows ai-team-health and agent-blockers). A row older than
-    // two hours says so on its card: a number that stopped updating looks like a calm week.
+    // ── Is the AI team healthy? (Kevin, 15 Oct 2026) ─────────────────────
+    // Kevin: "I just need to see that it's working, and/or if we've got loads of issues, that
+    // the issues are reducing and it's going in the right direction. If I can't understand them,
+    // I can't use them." Fourteen of his questions, each with a colour, a short answer, a number
+    // and last week's number, in three groups under one verdict. The Mac judges every line
+    // (scripts/ai_team_health.py, Estate Status row ai-team-verdict); this page only draws it.
+    // It replaced the Agent Work, Defects, Bottleneck and Fix of a Fix cards, whose numbers now
+    // sit inside the lines they explain (tap a line).
+    //
+    // A row older than two hours says so in an amber banner: a board that stopped updating
+    // looks exactly like a calm one. A line the Mac could not read is grey, "Can't tell", and
+    // the verdict names it. Every payload value is data from Airtable: text goes through
+    // escHtml, numbers through aiNum, colours through a fixed list.
     const AI_TEAM_STALE_MIN = 120;
-    const AI_TEAM_WALLS = {
-        TOOL: 'waiting on a code fix', KEVIN: 'waiting on a step only you can do',
-        'SIGN-IN': 'waiting on your sign-in', SITE: 'waiting on a site to be added',
-    };
-    // The Agent Work card's split (Kevin, 14 Oct 2026; scripts/loop-health.py agent_work).
-    // The four rows add up to every open agent task.
-    const AI_WORK_SPLIT = [
-        ['live', 'Live'], ['approval', 'Waiting for your approval'],
-        ['waitingReply', 'Waiting on a reply'], ['scheduled', 'Scheduled for later'],
-    ];
+    const AI_HEALTH_KEY = 'ai-team-verdict';
+    const AI_HEALTH_COLOURS = { green: 'green', amber: 'amber', red: 'red', grey: 'grey' };
+    const AI_HEALTH_WORDS = { green: 'Green', amber: 'Amber', red: 'Red', grey: "Can't tell" };
     let _aiTeamState = null;
 
-    function renderAiTeamCard(id, card) {
-        const host = document.getElementById(id);
-        if (!host) return;
-        const tmp = document.createElement('div');
-        tmp.innerHTML = expandableCard(card.label, card.value, card.sub, card.detail, card.cls);
-        const el = tmp.firstElementChild;
-        if (!el) return;
-        el.id = id;
-        host.replaceWith(el);
+    // Every payload number goes through here before it reaches the page. A value that is not a
+    // number is said in words, never drawn as a zero.
+    const AI_UNKNOWN = 'not known';
+    function aiNum(v) { const n = Number(v); return (v !== null && v !== '' && Number.isFinite(n)) ? n : AI_UNKNOWN; }
+
+    // When the Mac WORKED OUT the answer: the payload's own computedAt, never the row's Last Run,
+    // which moves on every pass, a failed one included (review of PR #790).
+    function aiTeamComputedAt(row) {
+        const p = row ? aiTeamPayload(row) : null;
+        const t = Date.parse((p && p.computedAt) || '');
+        return Number.isFinite(t) ? t : NaN;
     }
 
-    // `at` overrides the row's Last Run: the blocker row's Last Run moves even when the
-    // sweep behind it has stopped, so its age is the sweep's own sweptAt.
-    function aiTeamRowAge(row, at) {
-        const t = Date.parse(at || (row && row.fields[ESTATE_FIELDS.lastRun]) || '');
+    function aiTeamRowAge(row) {
+        const t = aiTeamComputedAt(row);
         return Number.isFinite(t) ? (Date.now() - t) / 60000 : Infinity;
     }
 
-    function aiTeamClock(row, at) {
-        const t = Date.parse(at || (row && row.fields[ESTATE_FIELDS.lastRun]) || '');
+    function aiTeamClock(row) {
+        const t = aiTeamComputedAt(row);
         if (!Number.isFinite(t)) return 'never';
         return new Date(t).toLocaleString('en-GB', { timeZone: 'Europe/London', weekday: 'short', hour: '2-digit', minute: '2-digit' });
     }
 
-    // A missing, failed or stale row turns its card into a statement of that, never a zero.
-    // A failed write leaves the last payload in place, so for the health row Failed means
-    // failed whatever the payload says (review finding, 9 Oct 2026).
-    function aiTeamRowProblem(row, label, failedIsProblem) {
-        if (row === undefined) return { label, value: '—', sub: 'Could not read Airtable. Refresh to retry.', detail: '', cls: 'text-amber' };
-        if (!row) return { label, value: '—', sub: 'No data yet: the Mac has not written this row.', detail: '', cls: 'text-amber' };
-        const f = row.fields;
-        if (f[ESTATE_FIELDS.status] === 'Failed' && (failedIsProblem || !f[ESTATE_FIELDS.payload])) {
-            return { label, value: '—', sub: escHtml(f[ESTATE_FIELDS.detail] || 'The Mac reported a failure.'), detail: '', cls: 'text-red' };
-        }
-        return null;
-    }
-
-    // null when the payload cannot be read: the caller shows that, never an empty "all clear".
+    // null when the payload cannot be read: the panel says so, never an empty "all clear".
     function aiTeamPayload(row) {
-        try { return JSON.parse(row.fields[ESTATE_FIELDS.payload] || 'null'); } catch (e) { console.warn('AI Team payload unreadable:', e); return null; }
+        try {
+            const p = JSON.parse(row.fields[ESTATE_FIELDS.payload] || 'null');
+            return p && Array.isArray(p.lines) && p.overall ? p : null;
+        } catch (e) { console.warn('AI team verdict payload unreadable:', e); return null; }
     }
 
-    // Every payload number goes through here before it reaches the page: a payload is
-    // data from Airtable, and expandableCard does not escape what it is given.
-    function aiNum(v) { const n = Number(v); return Number.isFinite(n) ? n : '—'; }
+    function aiHealthColour(c) { return AI_HEALTH_COLOURS[c] || 'grey'; }
 
-    function aiTeamStale(card, row, at) {
-        if (aiTeamRowAge(row, at) <= AI_TEAM_STALE_MIN) return card;
-        return Object.assign({}, card, { cls: 'text-amber', sub: `Not updated since ${escHtml(aiTeamClock(row, at))}. ${card.sub}` });
+    function aiHealthDay(iso) {
+        const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(iso || ''));
+        if (!m) return '';
+        return new Date(Date.UTC(+m[1], +m[2] - 1, +m[3], 12)).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', timeZone: 'UTC' });
     }
 
-    function aiTeamCards(health, blockers) {
-        const updated = (row) => `<div class="od-breakdown-row"><span>Updated</span><span>${escHtml(aiTeamClock(row))}</span></div>`;
-        const cards = {};
+    function aiHealthNumber(n, unit) {
+        const v = aiNum(n);
+        if (v === AI_UNKNOWN) return AI_UNKNOWN;
+        const shown = unit === 'h' ? (Math.round(v * 10) / 10) : v;
+        return `${shown}${unit === '%' ? '%' : unit === 'h' ? 'h' : ''}`;
+    }
 
-        const hp = aiTeamRowProblem(health, '', true);
-        if (hp) {
-            cards.aiWorkCard = Object.assign({}, hp, { label: 'Agent Work' });
-            cards.aiDefectsCard = Object.assign({}, hp, { label: 'Defects' });
-            cards.aiReworkCard = Object.assign({}, hp, { label: 'Fix of a Fix' });
-        } else {
-            const p = aiTeamPayload(health) || {};
-            if (!p.work || !p.defects || !p.rework) {
-                const none = { value: '—', sub: 'The row holds no numbers. The Mac writer may be an older version.', detail: '', cls: 'text-amber' };
-                return Object.assign(cards, {
-                    aiWorkCard: Object.assign({ label: 'Agent Work' }, none),
-                    aiDefectsCard: Object.assign({ label: 'Defects' }, none),
-                    aiReworkCard: Object.assign({ label: 'Fix of a Fix' }, none),
-                }, { aiBlockedCard: aiTeamCards(null, blockers).aiBlockedCard });
-            }
-            const w = {}, d = {}, r = {};
-            ['open', 'notMoving', 'created7d', 'done7d', 'held', 'other', 'replyOverdue', 'replyWindowDays']
-                .concat(AI_WORK_SPLIT.map(s => s[0])).forEach(k => { w[k] = aiNum(p.work[k]); });
-            ['open', 'filed7d', 'fixed7d', 'code', 'notCode', 'repeats', 'toTasks7d', 'refusedUnread', 'refused7d']
-                .forEach(k => { d[k] = aiNum(p.defects[k]); });
-            ['days', 'fixes', 'fixOfFix', 'baselinePct'].forEach(k => { r[k] = aiNum(p.rework[k]); });
-            r.pct = p.rework.pct == null ? null : aiNum(p.rework.pct);
-            const net = (Number(w.created7d) || 0) - (Number(w.done7d) || 0);
-            const netRow = `<div class="od-breakdown-row"><span>${net > 0 ? 'Piling up this week' : 'Cleared beyond new work'}</span><span>${Math.abs(net)}</span></div>`;
-            const note = (text) => `<div style="color:var(--text-muted);font-size:var(--fs-xs);margin-top:6px">${text}</div>`;
-            // The split arrived on 14 Oct 2026. A row written before it (or one whose split the Mac
-            // withdrew, splitCheck) has no live count: show the open count as before, never a zero.
-            // aiNum(null) is 0, so the keys are tested before they are read.
-            const split = AI_WORK_SPLIT.every(([k]) => p.work[k] != null && typeof w[k] === 'number');
-            const has = (k) => p.work[k] != null && typeof w[k] === 'number';
-            const text = (k) => (typeof p.work[k] === 'string' && p.work[k]) ? escHtml(p.work[k]) : '';
-            // A stuck count that could not leave out the held tasks says so on either face of the card
-            // (review of PR #782): it is the larger number, and an unlabelled one reads as calm.
-            const heldUnchecked = text('heldCheck');
-            const heldNote = heldUnchecked ? `Tasks held under a lead task could not be left out of the stuck count this time: ${heldUnchecked}.` : '';
-            const stuckSub = (word) => `${w.notMoving} ${word}${heldUnchecked ? ' (held tasks not checked)' : ''} · 7 days: ${w.created7d} in, ${w.done7d} done`;
-            const row = (label, n, style) => `<div class="od-breakdown-row"${style ? ` style="${style}"` : ''}><span>${label}</span><span>${n}</span></div>`;
-            if (split) {
-                // A task on no board is never folded into live: its own row, and the card goes amber.
-                const other = has('other') ? w.other : 0;
-                const windowDays = has('replyWindowDays') ? w.replyWindowDays : null;
-                cards.aiWorkCard = aiTeamStale({
-                    label: 'Agent Work', value: `${w.live} live`,
-                    sub: stuckSub('stuck'),
-                    cls: net > 0 || heldUnchecked || other > 0 ? 'text-amber' : 'text-green',
-                    detail: AI_WORK_SPLIT.map(([k, label]) => row(label, w[k])).join('')
-                        + (other > 0 ? row('On no board (nothing reads it)', other) : '')
-                        + row('All open', w.open)
-                        + row('Stuck (not moving)', w.notMoving, 'margin-top:6px')
-                        + netRow
-                        + note('Tasks owned by an AI agent. Live: due now and not yet carried out. Waiting on a reply: your approved action is done and the task stays open for the answer'
-                            + (windowDays != null ? `; after ${windowDays} days it counts as live and stuck. ` : '. ')
-                            + 'Scheduled for later includes approvals you put off to a later date. '
-                            + 'Stuck is counted in the rows above. It counts agent tasks only, so it can be shorter than the Estate tab\'s list'
-                            + (heldUnchecked ? `. ${heldNote}`
-                                : `, and leaves out tasks held under a lead task${has('held') ? ` (${w.held} now)` : ''}.`)
-                            + (has('replyOverdue') && w.replyOverdue > 0 ? ` ${w.replyOverdue} of the stuck have waited on a reply too long.` : '')
-                            + (text('waitCheck') ? ` Waiting on a reply was read from the task notes only: ${text('waitCheck')}.` : ''))
-                        + updated(health),
-                }, health);
-            } else {
-                // A split the Mac withdrew (splitCheck: agent-dispatch.py would not load, or the carry-out
-                // stamp changed) is a fault, so the card goes amber whatever the week did (review of PR #782).
-                const why = text('splitCheck') ? `Live work could not be split out: ${text('splitCheck')}. ` : '';
-                cards.aiWorkCard = aiTeamStale({
-                    label: 'Agent Work', value: `${w.open} open`,
-                    sub: stuckSub('not moving'),
-                    cls: net > 0 || heldUnchecked || why ? 'text-amber' : 'text-green',
-                    detail: netRow + note(`${why}Tasks owned by an AI agent.${heldNote ? ` ${heldNote}` : ''}`) + updated(health),
-                }, health);
-            }
-            // The split (Kevin, 14 Oct 2026): open counts each problem once, says how many need code
-            // and how many a code fix can never close, and counts what the cap refused and nobody has
-            // read. A row written before then has none of these keys and renders as it always did.
-            const dHas = (k) => p.defects[k] != null && typeof d[k] === 'number';
-            const defectsRed = (Number(d.filed7d) || 0) > (Number(d.fixed7d) || 0);
-            if (dHas('code') && dHas('notCode')) {
-                // An overflow log the Mac could not read is said as "not read", never a count
-                // (review of PR #784): a number there would be a guess presented as a reading.
-                const refusedErr = (typeof p.defects.refusedError === 'string' && p.defects.refusedError)
-                    ? escHtml(p.defects.refusedError) : '';
-                const refused = !refusedErr && dHas('refusedUnread') ? d.refusedUnread : null;
-                cards.aiDefectsCard = aiTeamStale({
-                    label: 'Defects', value: `${d.open} open`,
-                    sub: `${d.code} code, ${d.notCode} not code`
-                        + (refusedErr ? ' · refused: not read' : refused ? ` · ${refused} refused, unread` : '')
-                        + ` · 7 days: ${d.filed7d} filed, ${d.fixed7d} fixed`,
-                    cls: defectsRed ? 'text-red' : (refused || refusedErr) ? 'text-amber' : 'text-green',
-                    detail: row('Code fixes waiting', d.code)
-                        + row('Not code (belongs on the task board)', d.notCode)
-                        + (refusedErr ? row('Refused by the cap', 'not read') + note(`The overflow log could not be read: ${refusedErr}`)
-                            : refused != null ? row('Refused by the cap, unread', refused) : '')
-                        + row('Filed in 7 days', d.filed7d, 'margin-top:6px')
-                        + row('Fixed in 7 days', d.fixed7d)
-                        + (dHas('toTasks7d') ? row('Moved to tasks in 7 days', d.toTasks7d) : '')
-                        + (dHas('repeats') ? row('Repeats merged into the first report', d.repeats) : '')
-                        + note('Problems the robots and daily checks logged for fixing. Open counts each problem once: a repeat is merged into the first report and counted there. '
-                            + 'Not code means no code change can close it, so it is moved to a task. '
-                            + 'Refused means the queue\'s cap turned it away; it waits in the overflow log until someone sorts it. '
-                            + 'Fixed means merged. A rejected one carries no date, so it is not counted as cleared.')
-                        + updated(health),
-                }, health);
-            } else {
-                cards.aiDefectsCard = aiTeamStale({
-                    label: 'Defects', value: `${d.open} open`,
-                    sub: `7 days: ${d.filed7d} filed, ${d.fixed7d} fixed`,
-                    cls: defectsRed ? 'text-red' : 'text-green',
-                    detail: `<div style="color:var(--text-muted);font-size:var(--fs-xs)">Problems the robots and daily checks logged for fixing. Fixed means merged. A rejected one carries no date, so it is not counted as cleared.</div>${updated(health)}`,
-                }, health);
-            }
-            const pct = r.pct;
-            cards.aiReworkCard = aiTeamStale({
-                label: 'Fix of a Fix', value: pct == null ? '—' : `${pct}%`,
-                sub: pct == null ? `No fixes in ${r.days} days` : `${r.fixOfFix} of ${r.fixes} fixes in ${r.days} days · baseline ${r.baselinePct}%`,
-                cls: typeof pct !== 'number' ? '' : pct <= r.baselinePct ? 'text-green' : pct <= 40 ? 'text-amber' : 'text-red',
-                detail: `<div style="color:var(--text-muted);font-size:var(--fs-xs)">The one number. A fix of a fix changed lines another fix wrote in the 7 days before. Lower is better.</div>${updated(health)}`,
-            }, health);
+    // "↓ was 12 last week" once a week of history exists; before that "trend from <date>".
+    // A stale panel, or a number read only in part (no direction from the Mac), shows last week's
+    // number with no arrow and no colour: it cannot say which way things went.
+    function aiHealthTrend(l, stale) {
+        const t = l.trend || {};
+        // Always a span, so the chevron keeps its column on a line with no trend.
+        if (aiHealthColour(l.colour) === 'grey' || aiNum(t.after) === AI_UNKNOWN) return '<span class="aih-trend"></span>';
+        const before = aiNum(t.before);
+        if (before === AI_UNKNOWN) {
+            const since = aiHealthDay(t.since);
+            return `<span class="aih-trend aih-muted">${since ? `trend from ${escHtml(since)}` : 'no trend yet'}</span>`;
         }
-
-        const bp = aiTeamRowProblem(blockers, 'Bottleneck');
-        const bpay = bp ? null : aiTeamPayload(blockers);
-        if (bp) {
-            cards.aiBlockedCard = bp;
-        } else if (!bpay || !Array.isArray(bpay.open) || bpay.controlFailed) {
-            // The sweep could not read the board, or its report is unreadable: never "Nothing is blocked".
-            cards.aiBlockedCard = { label: 'Bottleneck', value: '—', cls: 'text-red', detail: '',
-                sub: escHtml(blockers.fields[ESTATE_FIELDS.detail] || 'The blocker report could not be read.') };
-        } else {
-            // byKind and openCount cover every wall; "open" is capped at 80 for the page.
-            let byKind = bpay.byKind;
-            if (!byKind || typeof byKind !== 'object') {
-                byKind = {};
-                bpay.open.forEach(x => { byKind[x.kind] = (byKind[x.kind] || 0) + 1; });
-            }
-            const total = aiNum(bpay.openCount != null ? bpay.openCount : bpay.open.length);
-            const ranked = Object.entries(byKind).map(([k, n]) => [k, aiNum(n)]).sort((a, b) => b[1] - a[1]);
-            const needYou = ['KEVIN', 'SIGN-IN', 'SITE'].reduce((t, k) => t + (Number(byKind[k]) || 0), 0);
-            const red = blockers.fields[ESTATE_FIELDS.status] === 'Failed';
-            // Red names its own cause: the sweep also goes red on a read error (review, 9 Oct 2026).
-            const staleN = Number(bpay.stale) || 0;
-            const closedN = Array.isArray(bpay.closedWhileBlocked) ? bpay.closedWhileBlocked.length : 0;
-            const why = [];
-            if (staleN) why.push(`${staleN} block${staleN === 1 ? ' is' : 's are'} 3 or more days old`);
-            if (closedN) why.push(`${closedN} task${closedN === 1 ? '' : 's'} closed while blocked`);
-            const redWhy = !red ? '' : why.length ? `Red: ${why.join(', ')}. `
-                : `Red: ${escHtml(blockers.fields[ESTATE_FIELDS.detail] || 'the sweep reported a problem')} `;
-            cards.aiBlockedCard = aiTeamStale({
-                label: 'Bottleneck', value: `${total} blocked`,
-                sub: total === 0 || !ranked.length ? 'Nothing is blocked'
-                    : `Biggest: ${ranked[0][1]} ${escHtml(AI_TEAM_WALLS[ranked[0][0]] || ranked[0][0])}${needYou ? ` · ${needYou} need you` : ''}`,
-                cls: total === 0 ? 'text-green' : red ? 'text-red' : 'text-amber',
-                detail: ranked.map(([k, n]) => `<div class="od-breakdown-row"><span>${escHtml(AI_TEAM_WALLS[k] || k)}</span><span>${n}</span></div>`).join('')
-                    + `<div style="color:var(--text-muted);font-size:var(--fs-xs);margin-top:6px">${redWhy}Each one is listed on the Estate tab of the AI Agents page.</div>${updated(blockers)}`,
-            }, blockers, bpay.sweptAt);
+        const was = `was ${escHtml(aiHealthNumber(before, l.unit))}`;
+        const text = t.fullWeek ? `${was} last week` : `trend from ${escHtml(aiHealthDay(t.vsDate))}: ${was}`;
+        if (stale || (t.direction !== 'better' && t.direction !== 'worse' && t.direction !== 'same')) {
+            return `<span class="aih-trend aih-muted">${text}</span>`;
         }
-        return cards;
+        const after = aiNum(t.after);
+        const arrow = after > before ? '↑' : after < before ? '↓' : '→';
+        const dir = t.direction;
+        const label = dir === 'same' ? 'no change' : `${dir} than ${t.fullWeek ? 'last week' : escHtml(aiHealthDay(t.vsDate))}`;
+        return `<span class="aih-trend aih-${dir}" title="${label}"><span aria-hidden="true">${arrow}</span> ${text}<span class="aih-sr"> (${label})</span></span>`;
     }
 
-    // The sync-bar check, as a function so a test can drive it. The blocker row is judged
-    // by its sweep's own time, as its card is (audit, 9 Oct 2026).
+    function aiHealthDetail(l, row) {
+        const items = Array.isArray(l.items) ? l.items : [];
+        const more = aiNum(l.itemsTotal) !== AI_UNKNOWN && l.itemsTotal > items.length ? l.itemsTotal - items.length : 0;
+        const extra = Array.isArray(l.extra) ? l.extra : [];
+        const cell = (v) => (typeof v === 'number' ? aiNum(v) : escHtml(v));
+        return `
+            <p class="aih-rule">${escHtml(l.rule || '')}</p>
+            ${aiHealthColour(l.colour) === 'grey' ? `<p class="aih-why">Why it can't tell: ${escHtml(l.why || 'the source could not be read')}.</p>` : ''}
+            ${items.length ? `<ul class="aih-items">${items.map(it => `<li>${escHtml((it && it.name) || '')}${it && it.note ? ` <span class="aih-muted">· ${escHtml(it.note)}</span>` : ''}</li>`).join('')}${more ? `<li class="aih-muted">and ${aiNum(more)} more</li>` : ''}</ul>` : ''}
+            ${extra.length ? `<div class="aih-extra">${extra.map(e => `<div class="od-breakdown-row"><span>${escHtml(Array.isArray(e) ? e[0] : '')}</span><span>${cell(Array.isArray(e) ? e[1] : '')}</span></div>`).join('')}</div>` : ''}
+            <p class="aih-src">Read from: ${escHtml(l.source || 'the Mac')}. Updated ${escHtml(aiTeamClock(row))}.</p>`;
+    }
+
+    function aiHealthLine(l, row, stale) {
+        // A stale answer is never drawn in its old colour (review of PR #790).
+        const c = stale ? 'grey' : aiHealthColour(l.colour);
+        const id = `aihd-${String(l.key || '').replace(/[^a-z0-9]/gi, '') || 'x'}`;
+        return `
+            <li class="aih-li">
+                <button type="button" class="aih-line" aria-expanded="false" aria-controls="${id}" onclick="aiHealthToggle(this)">
+                    <span class="aih-dot aih-${c}" role="img" aria-label="${AI_HEALTH_WORDS[c]}"></span>
+                    <span class="aih-q">${escHtml(l.question || '')}</span>
+                    <span class="aih-a">${escHtml(l.answer || '')}</span>
+                    ${aiHealthTrend(l, stale)}
+                    <span class="aih-chev" aria-hidden="true">▸</span>
+                </button>
+                <div class="aih-detail" id="${id}" hidden>${aiHealthDetail(l, row)}</div>
+            </li>`;
+    }
+
+    function aiHealthToggle(btn) {
+        const open = btn.getAttribute('aria-expanded') !== 'true';
+        btn.setAttribute('aria-expanded', open ? 'true' : 'false');
+        const d = document.getElementById(btn.getAttribute('aria-controls'));
+        if (d) d.hidden = !open;
+    }
+
+    function aiHealthNotice(cls, text) {
+        return `<div class="aih-notice aih-notice-${cls}" role="status">${text}</div>`;
+    }
+
+    // The panel's HTML for a row as read (undefined: Airtable did not answer; null: no row).
+    function aiHealthPanelHtml(row) {
+        const head = '<h3 class="aih-title">Is the AI team healthy?</h3>';
+        if (row === undefined) return head + aiHealthNotice('amber', "Can't read the Mac's report: Airtable did not answer. Refresh to retry.");
+        if (!row) return head + aiHealthNotice('amber', "Can't read the Mac's report: it has not written the AI team answer yet.");
+        const f = row.fields;
+        const p = aiTeamPayload(row);
+        if (!p) {
+            const failed = f[ESTATE_FIELDS.status] === 'Failed';
+            return head + aiHealthNotice(failed ? 'red' : 'amber', `Can't read the Mac's report: ${escHtml(f[ESTATE_FIELDS.detail] || 'the answer could not be read.')}`);
+        }
+        // Older than two hours by the time the Mac worked it out: the verdict and every dot go grey
+        // and say so. A board that stopped updating must not look like a calm one.
+        const stale = aiTeamRowAge(row) > AI_TEAM_STALE_MIN;
+        const o = p.overall || {};
+        const oc = stale ? 'grey' : aiHealthColour(o.colour);
+        const counts = ['green', 'amber', 'red'].map(k => `${aiNum(o[k])} ${k}`).join(' · ')
+            + (aiNum(o.grey) > 0 ? ` · ${aiNum(o.grey)} can't tell` : '');
+        const groups = Array.isArray(p.groups) ? p.groups : [];
+        const lines = p.lines.filter(l => l && typeof l === 'object');
+        return head
+            + (f[ESTATE_FIELDS.status] === 'Failed' ? aiHealthNotice('red', escHtml(f[ESTATE_FIELDS.detail] || 'The Mac reported a failure.')) : '')
+            + `<div class="aih-verdict aih-verdict-${oc}">
+                   <span class="aih-dot aih-dot-lg aih-${oc}" role="img" aria-label="${AI_HEALTH_WORDS[oc]}"></span>
+                   <div><div class="aih-verdict-text">${stale ? `Not updated since ${escHtml(aiTeamClock(row))}` : escHtml(o.text || '')}</div>
+                   <div class="aih-muted aih-small">${stale
+                       ? `The Mac's report has stopped, so every answer below may be out of date. Its last verdict: ${escHtml(o.text || '')}`
+                       : `${counts} · Updated ${escHtml(aiTeamClock(row))}`}</div></div>
+               </div>`
+            + groups.map(g => {
+                const gc = stale ? 'grey' : aiHealthColour(g.colour);
+                const mine = lines.filter(l => l.group === g.key);
+                return `<section class="aih-group" aria-label="${escHtml(g.title || '')}">
+                    <div class="aih-group-head"><span class="aih-dot aih-${gc}" role="img" aria-label="${AI_HEALTH_WORDS[gc]}"></span>
+                        <span class="aih-group-title">${escHtml(g.title || '')}</span>
+                        <span class="aih-muted aih-small">${stale ? 'Not updated' : escHtml(g.text || '')}</span></div>
+                    <ul class="aih-list">${mine.map(l => aiHealthLine(l, row, stale)).join('')}</ul>
+                </section>`;
+            }).join('')
+            + '<p class="aih-muted aih-small aih-foot">Tap a line to see its rule and what is behind it.</p>';
+    }
+
+    // One small stylesheet for the panel, tokens only, added once.
+    function aiHealthStyles() {
+        if (document.getElementById('aiHealthStyles')) return;
+        const s = document.createElement('style');
+        s.id = 'aiHealthStyles';
+        s.textContent = `
+            .aih-panel{grid-column:1/-1;background:var(--bg-surface);border:1px solid var(--border-default);border-radius:var(--radius-lg);padding:var(--space-4);min-width:0}
+            .aih-title{margin:0 0 var(--space-3);font-size:var(--fs-lg);font-weight:var(--fw-semibold);color:var(--text-primary)}
+            .aih-verdict{display:flex;gap:var(--space-3);align-items:center;padding:var(--space-3);border-radius:var(--radius-md);margin-bottom:var(--space-4);background:var(--bg-surface-2)}
+            .aih-verdict-green{background:var(--success-bg)}.aih-verdict-amber{background:var(--warning-bg)}.aih-verdict-red{background:var(--danger-bg)}.aih-verdict-grey{background:var(--bg-subtle)}
+            .aih-verdict-text{font-size:var(--fs-lg);font-weight:var(--fw-semibold);color:var(--text-primary);word-break:break-word}
+            .aih-dot{display:inline-block;flex:0 0 auto;width:12px;height:12px;border-radius:var(--radius-full);background:var(--text-muted)}
+            .aih-dot-lg{width:18px;height:18px}
+            .aih-green{background:var(--success)}.aih-amber{background:var(--warning)}.aih-red{background:var(--danger)}.aih-grey{background:var(--text-muted)}
+            .aih-group{margin-top:var(--space-3)}
+            .aih-group-head{display:flex;align-items:center;gap:var(--space-2);flex-wrap:wrap;padding-bottom:var(--space-1);border-bottom:1px solid var(--border-subtle)}
+            .aih-group-title{font-weight:var(--fw-semibold);color:var(--text-primary)}
+            .aih-list{list-style:none;margin:0;padding:0}
+            .aih-li{border-bottom:1px solid var(--border-subtle)}
+            .aih-line{display:grid;grid-template-columns:auto minmax(0,1.3fr) minmax(0,1.2fr) minmax(0,1fr) auto;gap:var(--space-2);align-items:center;width:100%;padding:var(--space-2) 0;background:none;border:0;text-align:left;font:inherit;color:var(--text-primary);cursor:pointer}
+            .aih-line:hover{background:var(--bg-surface-2)}
+            .aih-line:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+            .aih-q{font-weight:var(--fw-medium);word-break:break-word}
+            .aih-a{color:var(--text-secondary);word-break:break-word}
+            .aih-trend{font-size:var(--fs-sm);word-break:break-word}
+            .aih-better{color:var(--success)}.aih-worse{color:var(--danger)}.aih-same,.aih-muted{color:var(--text-muted)}
+            .aih-chev{color:var(--text-muted);transition:transform .15s}
+            .aih-line[aria-expanded="true"] .aih-chev{transform:rotate(90deg)}
+            .aih-detail{padding:0 0 var(--space-3) var(--space-5);font-size:var(--fs-sm);color:var(--text-secondary)}
+            .aih-rule{margin:var(--space-1) 0 var(--space-2);color:var(--text-primary)}
+            .aih-why{margin:0 0 var(--space-2)}
+            .aih-items{margin:0 0 var(--space-2);padding-left:var(--space-5)}
+            .aih-items li{margin:2px 0;word-break:break-word}
+            .aih-extra{margin-bottom:var(--space-2);max-width:560px}
+            .aih-extra .od-breakdown-row{gap:var(--space-3)}
+            .aih-extra .od-breakdown-row span:last-child{text-align:right;word-break:break-word;min-width:0}
+            .aih-src{margin:0;color:var(--text-muted);font-size:var(--fs-xs)}
+            .aih-small{font-size:var(--fs-sm)}
+            .aih-foot{margin:var(--space-3) 0 0}
+            .aih-notice{padding:var(--space-2) var(--space-3);border-radius:var(--radius-md);margin-bottom:var(--space-3);font-size:var(--fs-sm)}
+            .aih-notice-amber{background:var(--warning-bg);color:var(--text-primary)}
+            .aih-notice-red{background:var(--danger-bg);color:var(--text-primary)}
+            .aih-sr{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
+            .aih-subhead{grid-column:1/-1;margin:var(--space-2) 0 0;font-size:var(--fs-xs);font-weight:var(--fw-semibold);text-transform:uppercase;letter-spacing:.05em;color:var(--text-muted)}
+            @media (max-width:768px){
+                .aih-line{grid-template-columns:auto minmax(0,1fr) auto;row-gap:2px}
+                .aih-a{grid-column:2/3}.aih-trend{grid-column:2/3}
+                .aih-chev{grid-row:1;grid-column:3}
+                .aih-detail{padding-left:var(--space-3)}
+            }`;
+        document.head.appendChild(s);
+    }
+
+    function renderAiHealthPanel(row) {
+        const host = document.getElementById('aiHealthPanel');
+        if (!host) return;
+        aiHealthStyles();
+        host.innerHTML = aiHealthPanelHtml(row);
+    }
+
+    // The sync-bar check, as a function so a test can drive it.
     function aiTeamCheck() {
-        if (!_aiTeamState) return { status: 'warn', detail: 'Cards not yet loaded (loads in background)' };
+        if (!_aiTeamState) return { status: 'warn', detail: 'Panel not yet loaded (loads in background)' };
         if (_aiTeamState.error) return { status: 'warn', detail: 'Estate Status could not be read. Refresh to retry.' };
-        const missing = ['health', 'blockers'].filter(k => !_aiTeamState[k]);
-        if (missing.length) return { status: 'fail', detail: `No ${missing.join(' or ')} row in Estate Status: the Mac writer has not run.` };
-        const swept = (aiTeamPayload(_aiTeamState.blockers) || {}).sweptAt;
-        const ages = [['health', null], ['blockers', swept]].filter(([k, at]) => aiTeamRowAge(_aiTeamState[k], at) > AI_TEAM_STALE_MIN);
-        if (ages.length) {
-            const [k, at] = ages[0];
-            return { status: 'warn', detail: `Not updated since ${aiTeamClock(_aiTeamState[k], at)}. ${k === 'blockers' ? 'The blocker sweep (every 30 minutes) has stopped.' : 'The Mac writer (estate-status, every 10 minutes) has stopped.'}` };
+        const row = _aiTeamState.row;
+        if (!row) return { status: 'fail', detail: 'No ai-team-verdict row in Estate Status: the Mac writer has not written it.' };
+        if (!aiTeamPayload(row)) return { status: 'fail', detail: `The verdict row cannot be read: ${row.fields[ESTATE_FIELDS.detail] || 'no payload'}` };
+        if (aiTeamRowAge(row) > AI_TEAM_STALE_MIN) {
+            return { status: 'warn', detail: `Not updated since ${aiTeamClock(row)}. The Mac writer (estate-status, every 10 minutes) has stopped.` };
         }
-        return { status: 'pass', detail: `Updated ${aiTeamClock(_aiTeamState.health)}` };
+        const grey = aiNum((aiTeamPayload(row).overall || {}).grey);
+        if (grey > 0) return { status: 'warn', detail: `Updated ${aiTeamClock(row)}, but ${grey} line${grey === 1 ? '' : 's'} can't be read` };
+        return { status: 'pass', detail: `Updated ${aiTeamClock(row)}` };
     }
 
     async function loadAiTeamHealth() {
-        if (!document.getElementById('aiWorkCard') || !PAT) return;
-        // A placeholder while Airtable answers, so the section never sits blank (audit, 9 Oct 2026).
-        [['aiWorkCard', 'Agent Work'], ['aiDefectsCard', 'Defects'], ['aiBlockedCard', 'Bottleneck'], ['aiReworkCard', 'Fix of a Fix']]
-            .forEach(([id, label]) => { const el = document.getElementById(id); if (el && !el.textContent.trim()) renderAiTeamCard(id, { label, value: '…', sub: 'Loading from the Mac…', detail: '', cls: '' }); });
-        let health, blockers;
+        if (!document.getElementById('aiHealthPanel') || !PAT) return;
+        // A placeholder while Airtable answers, so the panel never sits blank.
+        const host = document.getElementById('aiHealthPanel');
+        if (!host.textContent.trim()) {
+            aiHealthStyles();
+            host.innerHTML = '<h3 class="aih-title">Is the AI team healthy?</h3><p class="aih-muted">Checking the AI team…</p>';
+        }
+        let row;
         try {
             const rows = await airtableFetch(TABLES.estateStatus, {
                 'fields[]': Object.values(ESTATE_FIELDS),
-                filterByFormula: "OR({Key}='ai-team-health',{Key}='agent-blockers')",
+                filterByFormula: `{Key}='${AI_HEALTH_KEY}'`,
             });
-            const byKey = (k) => rows.find(r => r.fields[ESTATE_FIELDS.key] === k) || null;
-            health = byKey('ai-team-health');
-            blockers = byKey('agent-blockers');
-            _aiTeamState = { health, blockers, error: null };
+            row = rows.find(r => r.fields[ESTATE_FIELDS.key] === AI_HEALTH_KEY) || null;
+            _aiTeamState = { row, error: null };
         } catch (e) {
-            console.warn('AI Team rows unreadable:', e);
-            health = undefined; blockers = undefined;
+            console.warn('AI team verdict row unreadable:', e);
+            row = undefined;
             _aiTeamState = { error: String(e && e.message || e) };
         }
-        const cards = aiTeamCards(health, blockers);
-        Object.entries(cards).forEach(([id, card]) => renderAiTeamCard(id, card));
+        renderAiHealthPanel(row);
     }
 
     async function loadAiShareKpi() {
@@ -2838,21 +2838,22 @@
             </div>
         `;
 
-        // ── SECTION 4b: AI Team (Kevin, 9 Oct 2026; brain Decisions/2026-10-09) ──
-        // The four health cards lead, then the four AI cards that used to sit in the
-        // operational section above. An older cached shell without the section keeps
-        // all eight in the operational grid rather than losing them.
+        // ── SECTION 4b: AI Team (Kevin, 9 Oct 2026; panel 15 Oct 2026) ──
+        // The "Is the AI team healthy?" panel leads (it replaced the Agent Work, Defects,
+        // Bottleneck and Fix of a Fix cards), then the two north-star cards, then the agents
+        // and approvals cards. An older cached shell without the section keeps them all in
+        // the operational grid rather than losing them.
         // innerHTML, never append, on the section itself: the dashboard re-renders every 15 minutes.
         const aiTeamSlots = `
-            <div id="aiWorkCard"></div>
-            <div id="aiDefectsCard"></div>
-            <div id="aiBlockedCard"></div>
-            <div id="aiReworkCard"></div>
-            <div id="agentKpiCard"></div>
-            <div id="agentApprovalCard"></div>
+            <div id="aiHealthPanel" class="aih-panel" aria-live="polite"></div>
+            <div class="aih-subhead">North star: how much work AI does</div>
             <div id="aiShareCard"></div>
             <div id="aiSavedCard"></div>
+            <div class="aih-subhead">The agents and your approvals</div>
+            <div id="agentKpiCard"></div>
+            <div id="agentApprovalCard"></div>
         `;
+        aiHealthStyles();     // the panel and the two small headings, before they are drawn
         const aiTeamGrid = document.getElementById('aiTeamCards');
         if (aiTeamGrid) aiTeamGrid.innerHTML = aiTeamSlots;
         else document.getElementById('operationalCards').insertAdjacentHTML('beforeend', aiTeamSlots);
@@ -3196,7 +3197,7 @@
                         }
                     },
                     {
-                        name: 'AI Team cards read from the Mac', kind: 'sync', run: () => aiTeamCheck()
+                        name: 'AI team verdict read from the Mac', kind: 'sync', run: () => aiTeamCheck()
                     },
                     {
                         name: 'Cash flow forecast renderable', kind: 'automation', run: () => {

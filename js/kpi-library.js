@@ -38,7 +38,10 @@ const KPI_SHAPES = [
 // status: 'live' = running with compute code on Kevin's projects today;
 //         'ready' = shape proven elsewhere in the platform, template is a lift;
 //         'setting' = needs a per-tenant setting first (the de-Kevin list);
-//         'blocked' = known defect must be fixed before a client ever sees it.
+//         'blocked' = known defect must be fixed before a client ever sees it;
+//         'retired' = no longer shown as its own number on any dashboard (15 Oct 2026). The
+//                     entry stays, with the date and what replaced it at the end of `how`,
+//                     so the reasoning is never lost. Never delete a retired entry.
 const KPI_LIBRARY = [
     // Tier 1 — generic core (ships with the spine)
     { tier: 1, group: 'Money', name: 'Monthly Recurring Revenue', shape: 'T1', status: 'live',
@@ -89,14 +92,45 @@ const KPI_LIBRARY = [
       how: 'Register role agents at Status Live plus workflow agents in the live state, with register-linked workflows counted ONCE (AgentAccuracy.countAgents — the dashboard card and the Systemisation badge use the same subtraction). Live agents show their Metric Score against their Score Metric target.' },
     // The AI Team section of the Leadership Dashboard (Kevin, 9 Oct 2026; brain Decisions/2026-10-09).
     // Computed on the Mac by scripts/estate-status.py into the ai-team-health and agent-blockers rows.
-    { tier: 1, group: 'AI workforce', name: 'Agent work in vs out', shape: 'T3', status: 'live',
-      how: 'Open tasks owned by an AI agent, split into parts that add up to the total: live (due now, not yet carried out), waiting for approval, waiting on a reply (the approved action is done, the task stays open for the answer, and no wall is open on it), scheduled for later (including approvals put off to a later date) and, shown only when there are any, tasks on no board. The headline is the live count. Stuck counts only agent tasks that should have moved and did not (scripts/loop-health.py), leaving out tasks the dispatcher holds under a lead task on purpose, plus any reply waited on for more than 14 days. Then agent tasks created against agent tasks done in the last 7 days: more in than done means work is piling up.' },
-    { tier: 1, group: 'AI workforce', name: 'Defect queue in vs out', shape: 'T3', status: 'live',
-      how: 'Open findings (scripts/findings.py BACKLOG: open, claimed, pending), each problem counted once: a repeat merged into the first report (findings.py dupe) is never open and never filed or fixed in its own right. Split into code (a repo change fixes it) and not code (no code change can close it, so it is moved to a task: findings.py close --outcome tasked). Refused, unread: findings the per-filer cap turned away into the overflow log that nobody has promoted, dismissed or folded in. Over the last 7 days, distinct findings filed against findings fixed (landed in a merged PR). Rejected findings carry no close time, so they are not counted as cleared.' },
-    { tier: 1, group: 'AI workforce', name: 'Robots blocked (bottleneck)', shape: 'T3', status: 'live',
-      how: 'Open blocker walls from the half-hourly sweep (agent-dispatch.py blockers), grouped by kind: TOOL waits on a code fix, KEVIN on a step only he can do, SIGN-IN and SITE on him. The card names the biggest kind and how many need Kevin; red when a wall is 3 days old or a task closed while blocked.' },
-    { tier: 1, group: 'AI workforce', name: 'Fix-of-a-fix rate', shape: 'T4', status: 'live',
-      how: 'scripts/rework-rate.py over 14 days: fixes that changed lines another fix wrote in the 7 days before, over all fixes (a commit title starting "fix"). Baseline 32% (36 of 111, 30 days to 28 Sep 2026). The one number Kevin judges the estate by; lower is better.' },
+    { tier: 1, group: 'AI workforce', name: 'Agent work in vs out', shape: 'T3', status: 'retired',
+      how: 'Open tasks owned by an AI agent, split into parts that add up to the total: live (due now, not yet carried out), waiting for approval, waiting on a reply (the approved action is done, the task stays open for the answer, and no wall is open on it), scheduled for later (including approvals put off to a later date) and, shown only when there are any, tasks on no board. The headline is the live count. Stuck counts only agent tasks that should have moved and did not (scripts/loop-health.py), leaving out tasks the dispatcher holds under a lead task on purpose, plus any reply waited on for more than 14 days. Then agent tasks created against agent tasks done in the last 7 days: more in than done means work is piling up. Retired 15 Oct 2026: replaced on the dashboard by the Is the AI team healthy? panel; the split now sits inside Everything\'s moving and the 7-day counts are Agents are on top of their work.' },
+    { tier: 1, group: 'AI workforce', name: 'Defect queue in vs out', shape: 'T3', status: 'retired',
+      how: 'Open findings (scripts/findings.py BACKLOG: open, claimed, pending), each problem counted once: a repeat merged into the first report (findings.py dupe) is never open and never filed or fixed in its own right. Split into code (a repo change fixes it) and not code (no code change can close it, so it is moved to a task: findings.py close --outcome tasked). Refused, unread: findings the per-filer cap turned away into the overflow log that nobody has promoted, dismissed or folded in. Over the last 7 days, distinct findings filed against findings fixed (landed in a merged PR). Rejected findings carry no close time, so they are not counted as cleared. Retired 15 Oct 2026: replaced on the dashboard by the Is the AI team healthy? panel; its numbers now sit inside No bugs or errors.' },
+    { tier: 1, group: 'AI workforce', name: 'Robots blocked (bottleneck)', shape: 'T3', status: 'retired',
+      how: 'Open blocker walls from the half-hourly sweep (agent-dispatch.py blockers), grouped by kind: TOOL waits on a code fix, KEVIN on a step only he can do, SIGN-IN and SITE on him. The card names the biggest kind and how many need Kevin; red when a wall is 3 days old or a task closed while blocked. Retired 15 Oct 2026: replaced on the dashboard by the Is the AI team healthy? panel; the count by kind now sits inside No bottlenecks, which counts walls past their own clock.' },
+    { tier: 1, group: 'AI workforce', name: 'Fix-of-a-fix rate', shape: 'T4', status: 'retired',
+      how: 'scripts/rework-rate.py over 14 days: fixes that changed lines another fix wrote in the 7 days before, over all fixes (a commit title starting "fix"). Baseline 32% (36 of 111, 30 days to 28 Sep 2026). The one number Kevin judges the estate by; lower is better. Retired 15 Oct 2026: replaced on the dashboard by the Is the AI team healthy? panel; the rate now sits inside No bugs or errors.' },
+    // The "Is the AI team healthy?" panel (Kevin, 15 Oct 2026): fourteen questions in three groups and
+    // one verdict. Judged on the Mac by scripts/ai_team_health.py into the ai-team-verdict row; every
+    // line goes grey ("Can't tell") when its source cannot be read, is missing or is stale, never green.
+    { tier: 1, group: 'AI workforce', name: 'Emails cleared (old inbox mail)', shape: 'T3', status: 'live',
+      how: 'Inbox mail older than 2 days still in the inbox after the last triage run, counted by the triage script from its own scan, never from its prose. Green 0, amber 1 to 5, red over 5 or when the last scheduled run did not start, failed, or wrote no end line within its own run limit (its slot record is written before it runs, so it is never trusted alone). A cut-off inbox listing makes the count a floor and is never green.' },
+    { tier: 1, group: 'AI workforce', name: 'Email tasks waiting for a draft', shape: 'T8', status: 'live',
+      how: 'Open inbound tasks an AI agent owns, due now, with no draft and no card, made more than 1 working day ago (weekends do not count). Walled tasks and tasks held under a lead task are left out. Green 0, amber 1 to 3, red over 3.' },
+    { tier: 1, group: 'AI workforce', name: 'Live work stuck with nothing blocking it', shape: 'T4', status: 'live',
+      how: 'Agent tasks on the not-moving list minus every task with an open wall (so a wall is never counted here and as a bottleneck), as a share of live agent work. Green 10% or less, amber up to 25%, red above.' },
+    { tier: 1, group: 'AI workforce', name: 'Blocked tasks past their limit', shape: 'T8', status: 'live',
+      how: 'Open walls older than their own clock, the task manager\'s clock: a sign-in 1 day, a code fix or the owner\'s own step 3 days. A wall nothing can date counts as past it. Green 0, amber 1 to 3, red over 3.' },
+    { tier: 1, group: 'AI workforce', name: 'Approved work not carried out in 24 hours', shape: 'T8', status: 'live',
+      how: 'Approved hand-backs still on the dispatcher\'s own carry-out list more than 24 hours after the approval. Read from the dispatcher\'s queue, so work carried out and kept open for a reply, or resting on a wall, is never counted. Green 0, amber 1 or 2, red over 2.' },
+    { tier: 1, group: 'AI workforce', name: 'Agents idle with live work', shape: 'T3', status: 'live',
+      how: 'AI agents that have held live, unwalled work for a day and did nothing in the last 24 hours: no run action, no completion, no note of their own. Green 0, amber 1, red 2 or more. Shown as "N idle, M of T worked today", so the number the trend compares is in the answer.' },
+    { tier: 1, group: 'AI workforce', name: 'Scheduled jobs failing or blocked', shape: 'T3', status: 'live',
+      how: 'Rows on the job status board whose last run failed or was blocked (an expired sign-in, no network, the drive unreadable, the lock lost, stopped for running too long), named in plain words. A Claude limit stop is the allowance line\'s, and the blocked-tasks report is the bottleneck line\'s. Green 0, amber 1 or 2, red 3 or more. When part of the board cannot be read, what is known shows in its colour as "at least N (partly read)"; grey only when nothing is known.' },
+    { tier: 1, group: 'AI workforce', name: 'Open code problems against a week ago', shape: 'T3', status: 'live',
+      how: 'Open code findings now against a week ago on TODAY\'S rules: each finding\'s status as it stood 7 days ago, leaving out any since merged as a repeat and using today\'s code or not-code tag, plus findings filed against fixed in 7 days. The answer says "code problems" and the detail shows all open problems beside it. Red when more are open than a week ago; green when no more are open and fixed keeps up with filed; amber when no more are open but filed beats fixed. The fix-of-a-fix rate rides in its detail.' },
+    { tier: 1, group: 'AI workforce', name: 'Daily data check result', shape: 'T3', status: 'live',
+      how: 'The daily live data check: green when every check holds, red when any finds wrong data (each named in plain words), grey when it has not run in 26 hours.' },
+    { tier: 1, group: 'AI workforce', name: 'Things missed (no card, gave up, undecided)', shape: 'T3', status: 'live',
+      how: 'In the last 24 hours: tasks a run left with no card that still have no card, wall or door; scheduled jobs that gave up waiting or were skipped or missed their time; old inbox mail nobody has decided. A job that gave up but then finished cleanly before its next due time ran late: listed, not counted. Green 0, amber 1, red 2 or more. A part that cannot be read makes the count a floor, shown in its colour as "at least N (partly read)"; grey only when nothing is known.' },
+    { tier: 1, group: 'AI workforce', name: 'Agent work done against new (7 days)', shape: 'T4', status: 'live',
+      how: 'Agent tasks done in the last 7 days as a share of agent tasks created, the share leading the answer. Green when done keeps up with new, amber at 80% or more, red below.' },
+    { tier: 1, group: 'AI workforce', name: 'Approval queue size and oldest card', shape: 'T8', status: 'live',
+      how: 'Cards at Approval not put off to a later date, and how long the oldest has waited since it last reached the owner (its newest send stamp, or the day a put-off ended; never Last Updated, which any edit moves). Green 10 or fewer and none over 2 days, amber up to 25 and 5 days, red beyond.' },
+    { tier: 1, group: 'AI workforce', name: 'Drafts approved first time %', shape: 'T4', status: 'live',
+      how: 'Approved as-is over every verdict on agent drafts in the last 14 days, robot form cards left out (the accuracy report\'s own population). Green 85% or more, amber 70% to 85%, red under 70%. Checked against the task board: a verdict the board shows and the read missed makes the line grey.' },
+    { tier: 1, group: 'AI workforce', name: 'Robot hours paused for the allowance', shape: 'T5', status: 'live',
+      how: 'Hours the robots were stopped by the Claude limit in the last 7 days: the allowance guard\'s pauses joined with every limit line any job\'s own run log wrote (the guard missed the 3-4 Oct stop; the run logs did not), each stop running to the reset its own line names. Green no stop, amber a stop now over, red stopped now.' },
     // Tier 2 — property pack (add-on only)
     { tier: 2, group: 'Property pack', name: 'Occupancy rate', shape: 'T4', status: 'ready', how: 'Occupied over total rental units.' },
     { tier: 2, group: 'Property pack', name: 'Rent roll (expected monthly income)', shape: 'T5', status: 'ready', how: 'Sum of rent by payment status over active tenancies.' },
@@ -176,6 +210,7 @@ const KPILIB_STATUS = {
     ready:   { label: 'READY',          colour: 'var(--info)',    bg: 'var(--info-bg)',    hint: 'Shape proven elsewhere in the platform — template is a lift' },
     setting: { label: 'NEEDS SETTING',  colour: 'var(--warning)', bg: 'var(--warning-bg)', hint: 'Needs a per-tenant setting before a client can use it' },
     blocked: { label: 'BLOCKED',        colour: 'var(--danger)',  bg: 'var(--danger-bg)',  hint: 'Known defect — fix before any client sees it' },
+    retired: { label: 'RETIRED',        colour: 'var(--text-muted)', bg: 'var(--bg-subtle)', hint: 'No longer shown as its own number; kept so the reasoning is not lost' },
 };
 
 function kpiLibChip(status) {
