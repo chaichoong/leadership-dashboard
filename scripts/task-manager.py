@@ -694,6 +694,9 @@ def task_view(rec, activity_ids, dispatch_ids, now):
         "hoursWaiting": hours_waiting(f, now),
         "movementSource": src,
     }
+    if bucket in ("stuck", "moving") and team:
+        # Read here, where the Notes are in hand, for the ownerless check's `royAllowed`.
+        view["royLane"] = roy_lane(f)
     wall = open_wall(f.get("Notes"))
     if wall:
         # The clock's, not the foreman's (7 Oct 2026): the pre-pass already made its move, and
@@ -940,7 +943,12 @@ def ownerless_views(buckets, ai_agents=None, dispatch=None, roster=None):
                 v.get("teamMember"), v.get("sentForApprovalBy"), ai_agents,
                 roster=roster, outcome=v.get("outcome") or "")
             if held:
-                out.append(dict(v, noLaneHolder=[ai_agents.get(i, i) for i in held]))
+                # Roy takes it only when it is his lane (royLane) and no holder is parked: a row
+                # Paused, Planned or Retired on the register (the Operations Director agents parked
+                # to January among them), or one the register cannot show, never goes to Roy.
+                parked = [i for i in held if ((roster or {}).get(i) or {}).get("status") not in ("Built", "Live")]
+                out.append(dict(v, noLaneHolder=[ai_agents.get(i, i) for i in held],
+                                royAllowed=bool(v.get("royLane")) and not parked))
     return out
 
 
@@ -997,15 +1005,35 @@ def ownerless_problems(actions, scratch=None):
             continue
         streak = leave_streak(prior_moves(v.get("id"), float(run_start) if run_start else None))
         mine = {a.get("move") for a in actions if a.get("ok") and a.get("task") == v.get("id")}
-        if streak >= LEAVE_STREAK_MAX and not mine & set(PLACING_MOVES):
+        placing = set(PLACING_MOVES) | ({"roy"} if v.get("royAllowed") else set())
+        if streak >= LEAVE_STREAK_MAX and not mine & placing:
             out.append("task %s (%s) is held by %s, which no robot works, and was left %d slots running: "
-                       "route it to an agent whose lane it is or escalate it to Kevin, never another leave"
-                       % (v.get("id"), (v.get("name") or "")[:60], ", ".join(v["noLaneHolder"]), streak))
+                       "route it to an agent whose lane it is or escalate it to Kevin, never another leave%s"
+                       % (v.get("id"), (v.get("name") or "")[:60], ", ".join(v["noLaneHolder"]), streak,
+                          "" if v.get("royAllowed") or "roy" not in mine else
+                          " (a hand-over to Roy is not a placement here: it is not his lane)"))
     return out
 
 
 LEAVE_STREAK_MAX = 3
-PLACING_MOVES = ("route", "escalate", "roy")
+# Moves that settle a task no robot works. `roy` counts only where the task is Roy's lane by the
+# dispatcher's own rules (the view's `royAllowed`, set in ownerless_views; round 2 of PR #792).
+PLACING_MOVES = ("route", "escalate", "close", "finish", "chase")
+
+
+def roy_lane(f):
+    """Why this task is Roy's to take by the dispatcher's own rules, or '': roy_match or
+    property_match on the task, or a Maintenance Ticket that neither lane's veto nor Kevin's own
+    home rules out. Imported from agent-dispatch.py, never copied."""
+    d = _load_dispatch()
+    name, desc, notes = f.get("Task Name") or "", f.get("Description") or "", f.get("Notes") or ""
+    hit = d.roy_match(name, desc, notes) or d.property_match(name, desc, notes)
+    if hit:
+        return hit
+    everything = " ".join((name, desc, notes))
+    if f.get("Maintenance Ticket") and not (d.ROY_EXCLUDE_RE.search(everything) or d.ROY_HOME_RE.search(everything)):
+        return "maintenance ticket"
+    return ""
 
 
 def prior_moves(task, before=None, days=14):

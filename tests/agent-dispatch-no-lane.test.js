@@ -454,7 +454,7 @@ print(json.dumps({
 });
 
 describe('review 3: a task no robot works cannot be left for ever', () => {
-  const run = (prior, actions) => {
+  const run = (prior, actions, viewExtra = {}) => {
     const dir = mkdtempSync(tmpdir() + '/od-leave-');
     return py(TM, `
 import tempfile, time
@@ -469,7 +469,8 @@ rows.append({"task": "recPaymentGapAaaa", "move": "leave", "reason": "now",
              "ts": datetime.fromtimestamp(start + 5).isoformat(timespec="seconds")})
 Path(${JSON.stringify(dir)}, "digest-2026-10-15.jsonl").write_text("".join(json.dumps(r) + "\\n" for r in rows))
 scratch = tempfile.mkdtemp()
-Path(scratch, "board.json").write_text(json.dumps({"ownerless": [{"id": "recPaymentGapAaaa", "name": "Payment Run gap", "noLaneHolder": ["AI Bookkeeper"]}]}))
+VIEW = dict({"id": "recPaymentGapAaaa", "name": "Payment Run gap", "noLaneHolder": ["AI Bookkeeper"]}, **${PYJ(viewExtra)})
+Path(scratch, "board.json").write_text(json.dumps({"ownerless": [VIEW]}))
 os.environ["TASK_MANAGER_RUN_START"] = str(start)
 print(json.dumps(m.ownerless_problems(${PYJ(actions)}, scratch=scratch)))`, { TASK_MANAGER_DIR: dir });
   };
@@ -486,6 +487,48 @@ print(json.dumps(m.ownerless_problems(${PYJ(actions)}, scratch=scratch)))`, { TA
     expect(run(['leave', 'leave', 'leave'], [{ task: 'recPaymentGapAaaa', move: 'escalate', ok: true }])).toEqual([]);
     expect(run(['leave', 'leave'], leave)).toEqual([]);
     expect(run(['leave', 'leave', 'route', 'leave'], leave)).toEqual([]);
+  });
+
+  it('round 2: a correct close, finish or chase after three leaves passes', () => {
+    for (const move of ['close', 'finish', 'chase']) {
+      expect(run(['leave', 'leave', 'leave'], [{ task: 'recPaymentGapAaaa', move, ok: true }]), move).toEqual([]);
+    }
+  });
+
+  it("round 2: a hand-over to Roy settles it only where the view says it is Roy's lane", () => {
+    const roy = [{ task: 'recPaymentGapAaaa', move: 'roy', ok: true }];
+    expect(run(['leave', 'leave', 'leave'], roy, { royAllowed: true })).toEqual([]);
+    const refused = run(['leave', 'leave', 'leave'], roy, { royAllowed: false });
+    expect(refused).toHaveLength(1);
+    expect(refused[0]).toMatch(/not a placement here: it is not his lane/);
+  });
+});
+
+describe("round 2: royAllowed comes from the dispatcher's own lane rules and the register", () => {
+  it("Roy's lane by roy_match, property_match or a Maintenance Ticket, never a parked holder or Kevin's home", () => {
+    const LEAD = 'rec0unnz5sNaBoIG2';   // AI Lead Finder: Paused on the register (Operations Director, parked to January)
+    const r = py(TM, `
+now = datetime(2026, 10, 15, 12, 0, tzinfo=timezone.utc)
+AGENTS = dict(AI, **{"${LEAD}": "AI Lead Finder"})
+ROSTER = ${PYJ({ [BOOKKEEPER]: { status: 'Live', dispatchable: false }, rec0unnz5sNaBoIG2: { status: 'Paused', dispatchable: false } })}
+def rec(i, holder, name, **extra):
+    return {"id": i, "fields": dict({"Task Name": name, "Created Time": "2026-10-01T10:00:00.000Z", "Status": "Today",
+                                     "Team Member": [holder]}, **extra)}
+recs = [rec("recBoilerAaaaaaaa", "${BOOKKEEPER}", "MAINTENANCE: boiler not working at 5 Example Street"),
+        rec("recGasSafetyAaaaa", "${BOOKKEEPER}", "COMPLIANCE: gas safety certificate for 5 Example Street"),
+        rec("recTicketAaaaaaaa", "${BOOKKEEPER}", "Look at the back gate", **{"Maintenance Ticket": True}),
+        rec("recHomeTicketAaaa", "${BOOKKEEPER}", "Look at the gate at my house", **{"Maintenance Ticket": True}),
+        rec("recPaymentGapAaaa", "${BOOKKEEPER}", "Payment Run gap"),
+        rec("recParkedBoilerAa", "${LEAD}", "MAINTENANCE: boiler not working at 5 Example Street")]
+buckets = {}
+for r in recs:
+    b, _, v = m.task_view(r, set(), set(), now)
+    buckets.setdefault(b, []).append(v)
+print(json.dumps({v["id"]: v["royAllowed"] for v in m.ownerless_views(buckets, AGENTS, roster=ROSTER)}))`);
+    expect(r).toEqual({
+      recBoilerAaaaaaaa: true, recGasSafetyAaaaa: true, recTicketAaaaaaaa: true,
+      recHomeTicketAaaa: false, recPaymentGapAaaa: false, recParkedBoilerAa: false,
+    });
   });
 });
 

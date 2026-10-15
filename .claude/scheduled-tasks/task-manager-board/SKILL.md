@@ -286,7 +286,9 @@ lane it is (`route` refuses a target no robot works, so it cannot go back). An
 agent Kevin paused on the register, or Inbox Triage and the Content Engine
 holding anything but their own answered cards, works nothing either. After
 three `leave` moves in a row on such a task, verify fails the slot unless the
-move is `route`, `roy` or `escalate` (a card for Kevin). If `noLaneCheck` reads
+move is `route`, `escalate` (a card for Kevin), `close`, `finish` or `chase`.
+`roy` counts only when the view's `royAllowed` is true: the task is Roy's lane
+by dispatch's own rules and no holder is a parked agent. If `noLaneCheck` reads
 NOT CHECKED, say so in the report: the agent-held half was not read, which is
 never "none".
 Give EACH one exactly one move this slot, using
