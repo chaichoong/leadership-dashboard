@@ -75,8 +75,28 @@ describe('content-engine watch: nightly wiring', () => {
     expect([4, 5, 6, 7, 12, 21].map(h => may(h))).toEqual([false, false, false, false, false, false]);
     expect(may(5, { CE_ALLOW_DAYTIME: '1' })).toBe(true);          // a deliberate daytime run is not cut short
     expect(may(3, { CE_LAST_START_HOUR: '3' })).toBe(false);
-    expect(run).toMatch(/if ! ce_may_start_day "\$\(date \+%-H\)"; then[\s\S]{0,400}continue/);
+    expect(run).toMatch(/if ! ce_may_start_day "\$\(date \+%-H\)" "\$\(date \+%-M\)" "\$\(ce_guest_wait_minutes\)"; then[\s\S]{0,400}continue/);
+    expect(run).toMatch(/export JOB_QUEUE_DRAIN_FILE="\$CE_GUEST_WAIT_FILE"/);
+    expect(run, 'the record must start empty each night').toMatch(/: > "\$CE_GUEST_WAIT_FILE"/);
     expect(run).toContain('approval.py run --pending --limit "$COPY_LIMIT"');   // a card for every episode the night planned
+  });
+
+  // Review of PR #788 (15 Oct 2026): a render's background phase can end waiting for a light job still inside the
+  // guest lane. Minutes the night spends that way come off the 04:00 last start, so the last day keeps its room
+  // before the 07:00 stop. A night with no such wait keeps exactly 04:00.
+  it('counts the minutes spent waiting for guests against the 04:00 last start', () => {
+    const { mkdtempSync, writeFileSync } = require('node:fs');
+    const { tmpdir } = require('node:os');
+    const run = readFileSync(RUN, 'utf8');
+    const block = run.match(/# --- last-start-block[\s\S]*?# --- end last-start-block ---/)[0];
+    const sh = (cmd, env = {}) => execFileSync('bash', ['-c', `${block}\n${cmd}`], { encoding: 'utf8', env: { PATH: process.env.PATH, ...env } }).trim();
+    const may = (h, m, waited) => { try { sh(`ce_may_start_day ${h} ${m} ${waited}`); return true; } catch (e) { return false; } };
+    expect([may(3, 59, 0), may(4, 0, 0)], 'no wait: exactly 04:00').toEqual([true, false]);
+    expect([may(3, 19, 40), may(3, 20, 40), may(23, 50, 40)]).toEqual([true, false, true]);
+    const f = path.join(mkdtempSync(path.join(tmpdir(), 'ce-wait-')), 'guest-wait.txt');
+    writeFileSync(f, '1500.0\n900.4\n');
+    expect(sh('ce_guest_wait_minutes', { CE_GUEST_WAIT_FILE: f })).toBe('40');
+    expect(sh('ce_guest_wait_minutes', { CE_GUEST_WAIT_FILE: f + '.none' }), 'no record reads as no wait').toBe('0');
   });
 
   it('streams the raw clip with retries while Drive hydrates it, and a failed pull never kills the run (4 Sep 2026)', () => {
@@ -163,7 +183,12 @@ describe('content-engine night loop: the two edge cases', () => {
   const CE = path.join(ROOT, 'scripts', 'content-engine');
   const REAL_PY = execFileSync('python3', ['-c', 'import sys; print(sys.executable)'], { encoding: 'utf8' }).trim();   // the interpreter itself, not a shim that reads HOME
 
-  function night(ledger, days, { scanFirst = false } = {}) {
+  const QUEUE = path.join(ROOT, 'scripts', 'job-queue.py');
+
+  // underQueue: run the loop the way launchd does, inside `job-queue.py run`, so the render line's
+  // `job-queue.py background` really declares its phase (15 Oct 2026). Otherwise it runs bare, as a
+  // hand-started script would, and background simply runs the render.
+  function night(ledger, days, { scanFirst = false, underQueue = false } = {}) {
     const home = mkdtempSync(path.join(tmpdir(), 'ce-night-'));
     const work = path.join(home, 'work'); mkdirSync(work);
     const ledgerDir = path.join(home, 'knowledge-os', 'logs', 'content-engine'); mkdirSync(ledgerDir, { recursive: true });
@@ -199,15 +224,27 @@ r.run(limit=1)
 case "$1" in
   scripts/content-engine/watch.py) shift; exec "${REAL_PY}" "${driver}" watch "$@";;
   scripts/content-engine/render.py) shift; exec "${REAL_PY}" "${driver}" render "$@";;
+  scripts/job-queue.py) shift; exec "${REAL_PY}" "${QUEUE}" "$@";;
 esac
 echo "unexpected: python3 $*" >&2; exit 9
 `);
     chmodSync(path.join(bin, 'python3'), 0o755);
+    const queueDir = path.join(home, 'queue');
+    const schedule = path.join(home, 'schedule.json');
+    writeFileSync(schedule, JSON.stringify({ 'ce-night': { cron: '0 22 * * *', maxLateMinutes: 600, mode: 'wrapped' } }));
     const sh = readFileSync(RUN, 'utf8');
     const loop = sh.match(/# --- last-start-block[\s\S]*?\nfor day in \$DAYS; do\n[\s\S]*?\ndone\n/)[0];
     const pre = scanFirst ? 'python3 scripts/content-engine/watch.py repair\n' : '';
-    return execFileSync('/bin/bash', ['-c', pre + loop], { encoding: 'utf8', cwd: home,
-      env: { PATH: `${bin}:/usr/bin:/bin`, HOME: process.env.HOME, CE_LEDGER: path.join(ledgerDir, 'ledger.json'), CE_WORK: work, DAYS: days, CE_ALLOW_DAYTIME: '1' } });
+    const argv = underQueue
+      ? [REAL_PY, [QUEUE, 'run', 'ce-night', '--no-stale-check', '--timeout', '1', '--', '/bin/bash', '-c', pre + loop]]
+      : ['/bin/bash', ['-c', pre + loop]];
+    const out = execFileSync(argv[0], argv[1], { encoding: 'utf8', cwd: home,
+      env: { PATH: `${bin}:/usr/bin:/bin`, HOME: process.env.HOME, CE_LEDGER: path.join(ledgerDir, 'ledger.json'), CE_WORK: work, DAYS: days, CE_ALLOW_DAYTIME: '1',
+        JOB_QUEUE_DIR: queueDir, JOB_QUEUE_SCHEDULE: schedule, JOB_QUEUE_POLL: '0.05', CE_GUEST_WAIT_FILE: path.join(home, 'guest-wait.txt') } });
+    if (!underQueue) return out;
+    const log = path.join(queueDir, 'queue-events.jsonl');
+    const events = existsSync(log) ? readFileSync(log, 'utf8').trim().split('\n').filter(Boolean).map((l) => JSON.parse(l)) : [];
+    return { out, events };
   }
   const dayBlock = (out, day) => out.split('== day ').find((b) => b.startsWith(String(day))) || '';
 
@@ -244,5 +281,25 @@ echo "unexpected: python3 $*" >&2; exit 9
       'today.insv': { key: 'today.insv', day: 2070, date: '2026-01-30', seq: 1, size: 5, status: 'new' },
     }, '2070');
     expect(dayBlock(out, 2070)).toMatch(/RENDERED today\.insv/);
+  });
+
+  // 15 Oct 2026: the render held the queue lock for hours while the brain feeds gave up behind it. Under the queue,
+  // every render of the REAL loop is a declared background phase, the run keeps the lock throughout (one acquire, one
+  // release), and the renders and their order are unchanged.
+  it('under the queue, every render is a background phase and the run keeps the lock from start to finish', () => {
+    const { out, events } = night({
+      'a.insv': { key: 'a.insv', day: 2080, date: '2026-02-09', seq: 1, size: 5, status: 'new' },
+      'b.insv': { key: 'b.insv', day: 2080, date: '2026-02-09', seq: 2, size: 5, status: 'new' },
+    }, '2080', { underQueue: true });
+    const block = dayBlock(out, 2080);
+    expect(block).toMatch(/RENDERED a\.insv[\s\S]*RENDERED b\.insv/);
+    expect(block).toMatch(/next: nothing waiting for day 2080/);
+    const states = events.filter((e) => e.job === 'ce-night').map((e) => e.state);
+    expect(states.filter((s) => s === 'yielded')).toHaveLength(2);       // one phase per render
+    expect(states.filter((s) => s === 'resumed')).toHaveLength(2);
+    expect(states.filter((s) => s === 'acquired')).toHaveLength(1);      // the lock never changed hands
+    expect(states.filter((s) => s === 'released')).toHaveLength(1);
+    expect(events.filter((e) => e.state === 'resumed').every((e) => e.exit === 0)).toBe(true);
+    expect(states[states.length - 1]).toBe('released');
   });
 });

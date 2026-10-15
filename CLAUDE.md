@@ -163,11 +163,15 @@ branch you are on — especially before reading a quiet "Everything up-to-date" 
 
 When a feature gets overwritten by another commit, check git history before reimplementing.
 
-### Session hygiene — this Mac has 16 GB and 8 cores
+### Session hygiene — this Mac mini has 24 GB and 12 cores
+
+Measured on the Mac mini that runs the estate, 15 Oct 2026: `sysctl hw.memsize hw.ncpu` reads
+25769803776 bytes (24 GB) and 12 cores (2 Super, 4 Performance, 6 Efficiency). The 16 GB and
+8 cores this section used to state were the MacBook Air's, where the limits below were learned.
 
 Worktrees fix *correctness* under concurrency. They do nothing for *capacity*, and capacity
-is a real limit here: six sessions at once on 6 Aug 2026 made the machine unusable, with no
-error raised, because nothing was broken, only oversubscribed.
+is a real limit here: six sessions at once on 6 Aug 2026 (on the Air) made the machine
+unusable, with no error raised, because nothing was broken, only oversubscribed.
 
 - **Three concurrent sessions maximum.** Close one before opening a fourth. Each session
   carries its own MCP servers and helper processes on top of its own memory.
