@@ -34,8 +34,12 @@ halted and why. `daily-ops` reports what you tell it.
 ### Rule 2 — you are read-only with respect to code
 
 You MAY still: read anything, query Airtable, write the Airtable data your job
-owns, send Slack messages, send email through the approved gate, and save reports
-under `monitoring/`.
+owns, send Slack messages, send email through the approved gate, and save your
+post-pass report to `~/knowledge-os/logs/daily-ops/post-passes/post-manager-<date>.md`
+(create the folder if it is missing).
+
+**Never save it under `monitoring/`** (15 Oct 2026): it names people, debts and legal
+matters, and daily-ops commits what it finds in `monitoring/` to a PUBLIC repo.
 
 You MAY NOT, for any reason: edit a file in the repo, `git add`, `git commit`,
 `git push`, create a branch, or open a pull request. Even a one-line change. Even
@@ -170,6 +174,7 @@ If PDFs are found, process each one through this pipeline:
    source with no email is the one outcome this step must never produce.
 
 7. Report a summary: source filename, number of documents found, number of emails sent, and a list of each document (sender, summary, urgency, deadline).
+   Write it to `~/knowledge-os/logs/daily-ops/post-passes/post-manager-<date>.md`, never to `monitoring/` (Rule 2).
 
    Put every document carrying a deadline inside the next 14 days at the TOP of
    the report, with its date, and say so in one line at the very start. A

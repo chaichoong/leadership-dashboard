@@ -81,4 +81,9 @@ rec[A-Za-z0-9][A-Za-z0-9][A-Za-z0-9][A-Za-z0-9][A-Za-z0-9][A-Za-z0-9][A-Za-z0-9]
 # ~/knowledge-os/logs/daily-ops/, outside the repo, where scripts/estate-status.py reads it for the
 # 09:00 brief. This rule stays as the backstop for a run that follows an old instruction.
 daily-ops-*.md
+# The post pass's report (Kevin, 15 Oct 2026). It names people, debts and legal matters. It is
+# written to ~/knowledge-os/logs/daily-ops/post-passes/, but a 12 Oct report was found untracked
+# here, one collect-routine-reports.py run from this public repo. The collector never takes an
+# ignored file, so this rule is what stops it if a run follows the old "save under monitoring/".
+post-manager-*.md
 # never-commit:end
