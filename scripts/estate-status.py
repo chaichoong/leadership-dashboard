@@ -1014,9 +1014,9 @@ def _fold_as_of(fm, ops, when):
 
 
 def defects_as_of(fm, ops, when, today=None):
-    """{"open", "code"} a week ago ON TODAY'S RULES (15 Oct 2026; review of PR #790): each
-    finding's status as it stood at `when`, but a finding merged as a repeat since is left out,
-    and the code / not-code tag is today's. Folding the past with its own rules counted 150
+    """{"open", "code"} a week ago ON TODAY'S RULES (15 Oct 2026; reviews of PR #790): each
+    finding open at `when` counted as its current survivor, once (a repeat merged since counts as
+    the report that now carries it), with today's code / not-code tag. Folding the past with its own rules counted 150
     where today's rules count 127, so the "No bugs or errors" line read a rise as smaller than
     it was. `today` is the current fold (current_state); left out, it is folded from `ops`."""
     if today is None:
@@ -1027,17 +1027,18 @@ def defects_as_of(fm, ops, when, today=None):
         finally:
             fm.read_all = keep
     then = _fold_as_of(fm, ops, when)
-    repeat = lambda f: bool(f.get("duplicate_root") or f.get("status") == "duplicate")  # noqa: E731
-    open_n = code_n = 0
+    # Each finding open then is counted as the problem it is TODAY: its current survivor, once
+    # (review 2 of PR #790). Leaving out findings since merged into a newer report dropped 8 that
+    # were open a week ago, and overstated the rise.
+    survivors = {}
     for fid, f in then.items():
         if f.get("status") not in ("open", "claimed", "pending"):
             continue
         cur = today.get(fid) or f
-        if repeat(cur):
-            continue
-        open_n += 1
-        code_n += bool(cur.get("touches_code"))
-    return {"open": open_n, "code": code_n}
+        root = cur.get("duplicate_root") if (cur.get("duplicate_root") or cur.get("status") == "duplicate") else fid
+        root = root if root in today else fid
+        survivors[root] = bool((today.get(root) or cur).get("touches_code"))
+    return {"open": len(survivors), "code": sum(1 for v in survivors.values() if v)}
 
 
 def _measure_defects_and_rework(now):

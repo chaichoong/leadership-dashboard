@@ -94,12 +94,15 @@ a source that cannot be read, is missing or is older than its own cadence makes 
 inside the row's payload, one number per line per London day for 30 days, mirrored to a local
 file so one failed read cannot wipe it; and no line counts what another counts where that would
 mislead, so walled tasks are taken out of "Everything's moving" before it counts. Verdict, in
-order (tightened by the independent review of PR #790: no line or verdict may read better than
-the truth): a red line worse than a week ago is red "Needs attention: <that line>"; more than two
-lines that cannot be read is grey "Can't tell" (red, naming the worst red, when a red is known);
-no red and at most two amber is green "Healthy" (amber "Healthy where it can be read" with one or
-two grey lines); reds or ambers with more of THOSE lines better than worse than a week ago is
-amber "Issues, but going the right way"; otherwise red. A failed build writes an empty payload,
+order (tightened by two independent reviews of PR #790: no line or verdict may read better than
+the truth): a red line worse than a week ago is red "Needs attention: <that line>"; a line that
+read red earlier today and cannot be read now is red, "last known red at <time>; can't read now"
+(each line's colour and time are kept in the day's snapshot, and a grey line counts at its last
+known colour today); when the lines it can read would be green (no red, at most two amber), a
+grey line last known amber is amber, more than two grey lines is grey "Can't tell", one or two is
+amber "Healthy where it can be read", none is green "Healthy"; otherwise reds or ambers with more
+of THOSE lines better than worse than a week ago is amber "Issues, but going the right way", and
+anything else red. "Can't tell" is never used over readable reds or ambers. A failed build writes an empty payload,
 so the page never shows the last good verdict under a fresh Last Run; the page ages the answer
 by its own computedAt, and an answer over two hours old turns the verdict and every dot grey.
 History keeps the last real number per line per day: a grey line, a missed or failed source and
@@ -130,9 +133,9 @@ Is anything broken?
     by plain name (a Blocked run did no work: an expired sign-in, no network, the drive, the lock,
     a run stopped for its length). Claude limit stops are line 39's, the blocked-tasks report line 29's.
 33. **Open code problems against a week ago** — T3: open code findings now against a week ago
-    on today's rules (`defects_as_of` in `scripts/estate-status.py`): each finding's status as the
-    real `current_state` folds the log cut 7 days back, leaving out findings merged as repeats
-    since and using today's code tag. Folding the past with its own rules read 150 where today's
+    on today's rules (`defects_as_of` in `scripts/estate-status.py`): each finding open in the
+    real `current_state` fold of the log cut 7 days back, counted once as its CURRENT survivor (a
+    repeat merged since counts as the report that now carries it), with today's code tag. Folding the past with its own rules read 150 where today's
     rules read 127 (15 Oct 2026), so a rise looked smaller than it was. One number drives both the
     colour and the arrow. Plus filed against fixed.
 34. **Daily data check result** — T3: the daily invariant sweep's result, each broken check named;

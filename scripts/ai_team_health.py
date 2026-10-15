@@ -337,13 +337,16 @@ def judge_jobs(f):
     src = "The Estate Status board (every scheduled job's last run)"
     failed = f.get("failed") or []
     n = len(failed)
-    if f.get("error") and n < 3:
-        return grey("jobs", f["error"], src)
+    if f.get("error") and n == 0:
+        return grey("jobs", f["error"], src)       # nothing known: can't tell
     colour = by_count(n, 2)
     if n == 0:
         answer = "Every job ran cleanly"
     else:
         answer = "%s failed or %s blocked" % (plural(n, "job"), "was" if n == 1 else "were")
+        if f.get("error"):
+            # What IS known is shown in its colour, never hidden behind grey (review 2 of PR #790).
+            answer = "At least %s (partly read)" % answer
     extra = [["Counted", "a last run that failed, or was blocked (a sign-in, the network, Drive, the lock, too long)"],
              ["Counted elsewhere", "the blocked-tasks report under No bottlenecks; Claude limit stops under Enough allowance"]]
     if f.get("error"):
@@ -401,16 +404,18 @@ def judge_data(f, now):
 
 
 def judge_missed(f):
-    """Three kinds of miss, counted together. A part that cannot be read keeps the line grey
-    unless the parts that were read already make it red."""
+    """Three kinds of miss, counted together. A part that cannot be read makes the count a floor:
+    shown in its colour as "at least N (partly read)", and grey only when nothing is known."""
     src = "The agents' run reports, the job queue's log and the inbox sort, last 24 hours"
     parks, gave, undecided = f.get("parks") or [], f.get("gaveUp") or [], f.get("undecided") or []
     errors = f.get("errors") or []
     n = len(parks) + len(gave) + len(undecided)
-    if errors and n < 2:
+    if errors and n == 0:
         return grey("missed", "; ".join(errors), src)
     colour = by_count(n, 1)
     answer = "Nothing missed" if n == 0 else "%s missed" % plural(n, "thing")
+    if errors and n:
+        answer = "At least %s (partly read)" % answer
     extra = [["Left with no card and no door", len(parks)], ["Jobs that gave up or did not run", len(gave)],
              ["Old emails nobody decided", len(undecided)]]
     for it in f.get("late") or []:
@@ -510,6 +515,25 @@ def merge_history(*histories):
     return out
 
 
+COLOUR_KEY = "_c"       # inside a day's snapshot: {line key: [colour, "HH:MM"]}, never a line key
+
+
+def last_known(lines, history, now):
+    """Mark each grey line whose last reading TODAY was red or amber: its answer says so, and
+    the verdict counts it at that colour (review 2 of PR #790)."""
+    prior = (merge_history(history).get(london_day(now)) or {}).get(COLOUR_KEY) or {}
+    for l in lines:
+        lk = prior.get(l["key"])
+        if l["colour"] == "grey" and isinstance(lk, list) and len(lk) == 2 and lk[0] in ("red", "amber"):
+            l["lastKnown"] = {"colour": lk[0], "at": str(lk[1])}
+            l["answer"] += " · Last known: %s (%s); can't read now" % (lk[0], lk[1])
+
+
+def effective(l):
+    """A line's colour for the verdict: a grey line counts at its last known colour today."""
+    return (l.get("lastKnown") or {}).get("colour") or l["colour"]
+
+
 def apply_history(lines, history, now):
     """Merge today's numbers into today's snapshot line by line (the last real number for each
     line wins, so a later grey run never wipes the day: review of PR #790), keep 30 days, and give
@@ -521,6 +545,12 @@ def apply_history(lines, history, now):
     snap = dict(hist.get(today) or {})
     snap.update({l["key"]: l["number"] for l in lines
                  if isinstance(l.get("number"), (int, float)) and not l.get("partial")})
+    # Each line's last real colour today, with its London time (review 2 of PR #790): a line
+    # that goes grey later keeps it, so the verdict never calls a red line "Healthy" by losing it.
+    colours = dict(snap.get(COLOUR_KEY) or {})
+    clock = now.astimezone(LONDON).strftime("%H:%M")
+    colours.update({l["key"]: [l["colour"], clock] for l in lines if l["colour"] != "grey"})
+    snap[COLOUR_KEY] = colours
     hist[today] = snap
     keep = (now.astimezone(LONDON).date() - timedelta(days=HISTORY_DAYS - 1)).isoformat()
     hist = {d: s for d, s in hist.items() if keep <= d <= today}
@@ -554,7 +584,8 @@ def group_verdicts(lines):
     for key, title in GROUPS:
         ls = [l for l in lines if l["group"] == key]
         counts = {c: sum(1 for l in ls if l["colour"] == c) for c in COLOURS}
-        colour = "red" if counts["red"] else "amber" if counts["amber"] else "grey" if counts["grey"] == len(ls) \
+        eff = [effective(l) for l in ls]
+        colour = "red" if "red" in eff else "amber" if "amber" in eff else "grey" if counts["grey"] == len(ls) \
             else "amber" if counts["grey"] else "green"
         if counts["red"] or counts["amber"]:
             text = ", ".join(t for t in ("%d red" % counts["red"] if counts["red"] else "",
@@ -563,51 +594,72 @@ def group_verdicts(lines):
             text = "All %d green" % len(ls) if not counts["grey"] else "%d green" % counts["green"]
         if counts["grey"]:
             text += ", %d can't tell" % counts["grey"]
+            known = sorted({l["lastKnown"]["colour"] for l in ls if l.get("lastKnown")})
+            if known:
+                text += " (last known %s)" % " and ".join(known)
         out.append({"key": key, "title": title, "colour": colour, "text": text, "counts": counts})
     return out
 
 
 def overall_verdict(lines):
-    """One answer, never better than the truth (review of PR #790), in this order:
+    """One answer, never better than the truth (reviews 1 and 2 of PR #790), in this order:
       1. a red line worse than a week ago: red "Needs attention: <that line>";
-      2. more than 2 lines that cannot be read: grey "Can't tell" (or red, naming the worst red
-         line, when a red is already known: a known red is never hidden behind "can't tell");
-      3. no red and at most 2 amber: green "Healthy", or amber "Healthy where it can be read"
-         when 1 or 2 lines cannot be read;
-      4. reds or ambers, with more of THOSE lines better than worse than a week ago: amber
-         "Issues, but going the right way" (green lines improving never count);
+      2. a line that read red earlier today and cannot be read now: red, naming it, "last known
+         red at <time>; can't read now";
+      3. when the lines it CAN read would be green (no red, at most 2 amber, a grey line counted
+         at its last known colour today): amber naming a grey line last known amber; grey "Can't
+         tell" with more than 2 grey lines; amber "Healthy where it can be read" with 1 or 2;
+         green "Healthy" with none;
+      4. otherwise, reds or ambers with more of THOSE lines better than worse than a week ago:
+         amber "Issues, but going the right way";
       5. otherwise red "Needs attention: <worst line>".
     Grey lines are always named."""
-    reds = [l for l in lines if l["colour"] == "red"]
-    ambers = [l for l in lines if l["colour"] == "amber"]
+    reds = [l for l in lines if effective(l) == "red"]
+    ambers = [l for l in lines if effective(l) == "amber"]
     greys = [l for l in lines if l["colour"] == "grey"]
-    issues = reds + ambers
     direction = lambda l: (l.get("trend") or {}).get("direction")   # noqa: E731
+    issues = [l for l in reds + ambers if l["colour"] != "grey"]
     better = sum(1 for l in issues if direction(l) == "better")
     worse = sum(1 for l in issues if direction(l) == "worse")
-    worsening = [l for l in reds if direction(l) == "worse"]
-    worst = worsening[0] if worsening else reds[0] if reds else ambers[0] if ambers else None
+    worsening = [l for l in reds if l["colour"] == "red" and direction(l) == "worse"]
+    dark_red = [l for l in greys if (l.get("lastKnown") or {}).get("colour") == "red"]
+    dark_amber = [l for l in greys if (l.get("lastKnown") or {}).get("colour") == "amber"]
+
+    def name(l):
+        lk = l.get("lastKnown")
+        return l["question"] + (" (last known %s at %s; can't read now)" % (lk["colour"], lk["at"]) if lk else "")
+
+    worst = (worsening or dark_red or reds or ambers or [None])[0]
     if worsening:
-        colour, text = "red", "Needs attention: %s" % worsening[0]["question"]
-    elif len(greys) > 2 and not reds:
-        colour, text = "grey", "Can't tell"
-    elif len(greys) > 2:
-        colour, text = "red", "Needs attention: %s" % worst["question"]
+        colour, text = "red", "Needs attention: %s" % name(worsening[0])
+    elif dark_red:
+        colour, text = "red", "Needs attention: %s" % name(dark_red[0])
     elif not reds and len(ambers) <= 2:
-        colour, text = ("green", "Healthy") if not greys else ("amber", "Healthy where it can be read")
+        if dark_amber:
+            colour, text = "amber", "%s: last known amber (%s); can't read now" % (
+                dark_amber[0]["question"], dark_amber[0]["lastKnown"]["at"])
+        elif len(greys) > 2:
+            colour, text = "grey", "Can't tell"
+        elif greys:
+            colour, text = "amber", "Healthy where it can be read"
+        else:
+            colour, text = "green", "Healthy"
     elif better > worse:
         colour, text = "amber", "Issues, but going the right way"
     else:
-        colour, text = "red", "Needs attention: %s" % worst["question"]
+        colour, text = "red", "Needs attention: %s" % name(worst)
     if greys:
         named = "%s can't be read: %s" % (plural(len(greys), "line"), ", ".join(l["question"] for l in greys))
         text = (text + ": " + named) if colour == "grey" else (text + " · " + named)
     return {"colour": colour, "text": text, "worst": worst["key"] if worst else None,
-            "red": len(reds), "amber": len(ambers), "green": sum(1 for l in lines if l["colour"] == "green"),
-            "grey": len(greys), "greyLines": [l["key"] for l in greys], "better": better, "worse": worse}
+            "red": sum(1 for l in lines if l["colour"] == "red"), "amber": sum(1 for l in lines if l["colour"] == "amber"),
+            "green": sum(1 for l in lines if l["colour"] == "green"),
+            "grey": len(greys), "greyLines": [l["key"] for l in greys], "better": better, "worse": worse,
+            "lastKnown": {l["key"]: l["lastKnown"] for l in greys if l.get("lastKnown")}}
 
 
 def build_payload(lines, history, now, history_check=None):
+    last_known(lines, history, now)      # before the day's snapshot takes this run's colours
     hist = apply_history(lines, history, now)
     return {"version": 1, "computedAt": now.strftime("%Y-%m-%dT%H:%M:%S.000Z"),
             "overall": overall_verdict(lines), "groups": group_verdicts(lines), "lines": lines,

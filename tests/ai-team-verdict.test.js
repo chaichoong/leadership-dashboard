@@ -209,7 +209,7 @@ print(json.dumps({"names": [i["name"] for i in f["failed"]],
                   "grey": col(A.judge_jobs(A.facts_jobs(rows, {}, "HTTP 429"))),
                   "redAnyway": col(A.judge_jobs(A.facts_jobs(rows * 3, {}, "HTTP 429")))}))`);
     expect(out.names).toEqual(['Job A', 'Tenant chain']);       // this pass's own row beats a stale stored copy
-    expect(out.grey).toBe('grey');                              // 1 known failure, the rest unread: can't tell
+    expect(out.grey).toBe('amber');                             // 1 known failure, the rest unread: at least 1, partly read (review 2)
     expect(out.redAnyway).toBe('red');                          // 3 known failures are red whatever is unread
     expect(colours(`[A.judge_jobs({"failed": [A.item("j")] * n}) for n in (0, 1, 2, 3)]`))
       .toEqual(['green', 'amber', 'amber', 'red']);
@@ -262,7 +262,7 @@ print(json.dumps({"colours": [col(l) for l in ls], "names": [i["name"] for i in 
     // A part that cannot be read: grey unless what was read is already red.
     expect(colours(`[A.judge_missed({"parks": [A.item("p")], "errors": ["the job queue log is missing"]}),
                      A.judge_missed({"parks": [A.item("p")] * 2, "errors": ["the job queue log is missing"]})]`))
-      .toEqual(['grey', 'red']);
+      .toEqual(['amber', 'red']);   // a known miss shows in its colour, partly read (review 2)
     const out = py(`
 lh = load("lh", "loop-health.py"); D = lh.dispatcher()
 AG = "recAGENTxxxxxxx01"
@@ -394,7 +394,7 @@ hist = {day(d): {"emails": 10 + d, "ontop": 50} for d in range(1, 40)}
 hist[day(0)] = {"emails": 99}                                   # an earlier pass today, overwritten
 ls = [A.line("emails", "amber", "a", 4), A.line("ontop", "green", "a", 90), A.grey("data", "x")]
 h = A.apply_history(ls, hist, NOW)
-print(json.dumps({"days": len(h), "oldest": min(h), "today": h[day(0)], "trends": [l["trend"] for l in ls]}))`);
+print(json.dumps({"days": len(h), "oldest": min(h), "today": {k: v for k, v in h[day(0)].items() if k != A.COLOUR_KEY}, "trends": [l["trend"] for l in ls]}))`);
     expect(out.days).toBe(30);
     expect(out.oldest).toBe('2026-09-16');
     expect(out.today).toEqual({ emails: 4, ontop: 90 });             // a grey line writes no number
@@ -593,7 +593,7 @@ missed = A.judge_emails({"slot": {"state": "missed", "name": "13:00", "date": da
 part = A.judge_jobs(A.facts_jobs([{"key": k, "label": k, "status": "Failed"} for k in "abcd"], {}, "HTTP 503"))
 ls = [missed, A.grey("data", "x"), A.line("queue", "green", "a", 4), part]
 h = A.apply_history(ls, {day: {"emails": 2, "data": 5, "queue": 9, "jobs": 1}}, NOW)
-print(json.dumps({"today": h[day], "emailsNumber": missed["number"], "partTrend": part["trend"]}))`);
+print(json.dumps({"today": {k: v for k, v in h[day].items() if k != A.COLOUR_KEY}, "emailsNumber": missed["number"], "partTrend": part["trend"]}))`);
     expect(out.emailsNumber).toBeNull();                                  // never yesterday's count under a missed slot
     expect(out.today).toEqual({ emails: 2, data: 5, queue: 4, jobs: 1 }); // earlier real numbers kept; queue updated
     expect(out.partTrend.direction).toBeNull();                           // a floor has no direction
@@ -657,5 +657,70 @@ print(json.dumps([b["answer"], dict(b["extra"])["All open problems"], a["answer"
     expect(out[3]).toBe(2);
     expect(out[4]).toBe('96% done: 147 done, 153 new');
     expect(out[5]).toBe(96);
+  });
+});
+
+// ─── The second review of PR #790 (15 Oct 2026) ──────────────────────
+// Each test failed on the code as it stood after round 1 and passes on the fix.
+describe('review of PR #790, round 2', () => {
+  const board = (spec, dirs) => `(lambda ls: ([l.__setitem__("trend", {"direction": d}) for l, d in zip(ls, ${dirs})], ls)[1])(
+      [A.line(d["key"], c, "a", 1) if c != "grey" else A.grey(d["key"], "x") for d, c in zip(A.LINES, ${spec})])`;
+
+  it('1 "Can\'t tell" only when the lines it CAN read would be green; otherwise the red and amber rules, with the grey lines named', () => {
+    const out = py(`print(json.dumps([
+      A.overall_verdict(${board('["grey"] * 3 + ["amber"] * 5 + ["green"] * 6', '[None] * 3 + ["worse"] * 5 + [None] * 6')}),
+      A.overall_verdict(${board('["green"] * 3 + ["amber"] * 5 + ["green"] * 6', '[None] * 3 + ["worse"] * 5 + [None] * 6')}),
+      A.overall_verdict(${board('["grey"] * 3 + ["amber"] * 2 + ["green"] * 9', '[None] * 14')})]))`);
+    expect(out[0].colour).toBe('red');
+    expect(out[0].text).toMatch(/^Needs attention: No bottlenecks · 3 lines can't be read: /);
+    expect(out[1]).toMatchObject({ colour: 'red', text: 'Needs attention: No bottlenecks' });     // same board, no greys
+    expect(out[2].colour).toBe('grey');                                                              // readable lines are fine: can't tell
+  });
+
+  it('2 a line that read red earlier today and cannot be read now is never "Healthy": last known red, can\'t read now', () => {
+    const out = py(`
+day = NOW.astimezone(L).date().isoformat()
+first = [A.line(d["key"], "red" if d["key"] == "jobs" else "green", "a", 1) for d in A.LINES]
+p1 = A.build_payload(first, {}, NOW - timedelta(hours=2))                     # 11:00 London: jobs read red
+later = [A.grey("jobs", "the board could not be read") if d["key"] == "jobs" else A.line(d["key"], "green", "a", 1) for d in A.LINES]
+p2 = A.build_payload(later, p1["history"], NOW)
+jobs = next(l for l in p2["lines"] if l["key"] == "jobs")
+print(json.dumps({"stored": p1["history"][day]["_c"]["jobs"], "overall": p2["overall"], "answer": jobs["answer"],
+                  "kept": p2["history"][day]["_c"]["jobs"], "group": next(g for g in p2["groups"] if g["key"] == "broken")}))`);
+    expect(out.stored).toEqual(['red', '10:00']);
+    expect(out.kept).toEqual(['red', '10:00']);                    // a grey run keeps the day's last real colour
+    expect(out.answer).toBe("Can't tell: the board could not be read · Last known: red (10:00); can't read now");
+    expect(out.overall.colour).toBe('red');
+    expect(out.overall.text).toMatch(/^Needs attention: No job is broken \(last known red at 10:00; can't read now\)/);
+    expect(out.group.colour).toBe('red');
+  });
+
+  it('3 lines 7 and 10 show what they DO know, in its colour, marked as partly read; grey only when nothing is known', () => {
+    const out = py(`
+j1 = A.judge_jobs(A.facts_jobs([{"key": "a", "label": "Job A", "status": "Failed"}], {}, "HTTP 503"))
+j0 = A.judge_jobs(A.facts_jobs([], {}, "HTTP 503"))
+m1 = A.judge_missed({"parks": [A.item("p")], "errors": ["the job queue log is missing"]})
+m0 = A.judge_missed({"errors": ["the job queue log is missing"]})
+print(json.dumps([[col(l), l["answer"], l.get("partial", False)] for l in (j1, j0, m1, m0)]))`);
+    expect(out[0]).toEqual(['amber', 'At least 1 job failed or was blocked (partly read)', true]);
+    expect(out[1][0]).toBe('grey');
+    expect(out[2]).toEqual(['amber', 'At least 1 thing missed (partly read)', true]);
+    expect(out[3][0]).toBe('grey');
+  });
+
+  it('4 a finding open a week ago and since merged into a newer report counts once, as its survivor', () => {
+    const out = py(`
+es = load("es", "estate-status.py")
+fm = load("fm", "findings.py")
+t = lambda d: iso(NOW - timedelta(days=d))
+ops = [{"op": "add", "id": "f1", "ts": t(10), "touches_code": True},
+       {"op": "add", "id": "f2", "ts": t(9), "touches_code": True},
+       {"op": "add", "id": "f5", "ts": t(2), "touches_code": True},
+       {"op": "dupe", "id": "f1", "of": "f5", "ts": t(1)},      # f1 was open a week ago; f5 now carries it
+       {"op": "dupe", "id": "f2", "of": "f5", "ts": t(1)}]      # so was f2: the same problem, counted once
+fm.read_all = lambda: ops
+print(json.dumps([es.defects_as_of(fm, ops, NOW - timedelta(days=7)), es.defects_as_of(fm, ops, NOW)]))`);
+    expect(out[0]).toEqual({ open: 1, code: 1 });   // f1 and f2 were open then: one problem, now f5
+    expect(out[1]).toEqual({ open: 1, code: 1 });   // f5 today
   });
 });
