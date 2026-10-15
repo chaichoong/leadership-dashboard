@@ -75,6 +75,36 @@ describe('secret-copy-guard: driven against a planted credential copy', () => {
     expect(r.stdout).toContain('tightened to 0600');
   });
 
+  // 15 Oct 2026, finding 20261015-agent-dispatch-885: the closing line always demanded a rotation,
+  // so a 0600 copy in a local log directory came to Kevin as a credential wall he could not act on
+  // (task rec1PD85WcOJRtNF7). Deleting that copy clears the exposure; rotation is for a copy that
+  // had a route off this Mac.
+  it('tells Kevin to delete a local copy, and does not demand a rotation it does not need', () => {
+    const r = run(['--no-chmod'], { env });
+    expect(r.stdout).toContain('Delete the file(s) listed above');
+    expect(r.stdout).toContain('no rotation needed');
+    expect(r.stdout).not.toContain('ROTATE');
+  });
+
+  it('does demand a rotation, and names the stored secret, when git tracks the copy', () => {
+    // A copy git tracks is a published copy: this repo is public.
+    const repo = join(home, 'knowledge-os', 'logs', 'tracked');
+    mkdirSync(repo, { recursive: true });
+    const tracked = join(repo, 'notes.txt');
+    writeFileSync(tracked, token + '\n');
+    const g = (...args) => execFileSync('git', args, { cwd: repo, encoding: 'utf8',
+      env: { ...process.env, GIT_AUTHOR_NAME: 't', GIT_AUTHOR_EMAIL: 't@t', GIT_COMMITTER_NAME: 't', GIT_COMMITTER_EMAIL: 't@t' } });
+    g('init', '-q');
+    g('add', 'notes.txt');
+    g('commit', '-qm', 'plant');
+    const r = run(['--no-chmod'], { env });
+    expect(r.stdout).toContain('ROTATE the secret held in');
+    expect(r.stdout).toContain('airtable_pat');
+    expect(r.stdout).toContain('git tracks it');
+    expect(r.stdout).not.toContain(token);
+    execFileSync('rm', ['-rf', repo]);
+  });
+
   it('goes quiet and green once the copy is gone', () => {
     execFileSync('rm', [leak]);
     const r = run([], { env });

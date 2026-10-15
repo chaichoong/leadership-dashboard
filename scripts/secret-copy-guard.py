@@ -23,6 +23,7 @@ Usage:
 """
 import os
 import re
+import subprocess
 import sys
 
 CONFIG_DIR = os.path.expanduser("~/.config/od")
@@ -127,6 +128,35 @@ def find_copies(secrets, files):
     return hits
 
 
+# A copy that never left this Mac is cleared by DELETING it. Rotation is the answer only when the
+# value has had a route off the machine. 15 Oct 2026, finding 20261015-agent-dispatch-885: the
+# closing line always demanded a rotation ("that is Kevin's, not a script's"), which put a
+# credential wall on task rec1PD85WcOJRtNF7 that Kevin could not act on — it asked for work the
+# exposure did not need and did not say which token was meant.
+SYNCED_MARKERS = ("/Library/Mobile Documents/", "/Library/CloudStorage/", "/Dropbox/",
+                  "/Google Drive/", "/OneDrive")
+
+
+def left_the_mac(path):
+    """Why this copy may have escaped this Mac, or "" when it cannot have.
+
+    Two routes exist under the search roots: a folder a sync client uploads, and a file git
+    tracks, because the leadership-dashboard repo is PUBLIC and a tracked copy is a published one.
+    """
+    real = os.path.realpath(path)
+    for marker in SYNCED_MARKERS:
+        if marker in real:
+            return "it sits in a folder a sync client uploads (%s)" % marker.strip("/")
+    try:
+        r = subprocess.run(["git", "ls-files", "--error-unmatch", "--", real],
+                           cwd=os.path.dirname(real), capture_output=True, text=True, timeout=30)
+        if r.returncode == 0:
+            return "git tracks it, and this repo is public"
+    except (OSError, subprocess.SubprocessError):
+        pass
+    return ""
+
+
 def tighten(path):
     """0600 the file, so the world-readable exposure stops. Returns True when the mode changed."""
     try:
@@ -152,13 +182,23 @@ def main(argv):
         print("secret-copy-guard: clean — no copy of any of the %d stored secrets outside %s"
               % (len(secrets), CONFIG_DIR))
         return 0
+    escaped = []
     for path, name, mode in hits:
         changed = tighten(path) if do_chmod else False
         print("secret-copy-guard: COPY OF '%s' at %s (mode %s)%s"
               % (name, path, oct(mode) if mode is not None else "unknown",
                  " -> tightened to 0600" if changed else ""))
-    print("secret-copy-guard: %d copy/copies found. The value is live, so it is only safe once the "
-          "secret is rotated: that is Kevin's, not a script's." % len(hits))
+        why = left_the_mac(path)
+        if why:
+            escaped.append((path, name, why))
+    print("secret-copy-guard: %d copy/copies found. Delete the file(s) listed above and the "
+          "exposure this guard measures is gone; the one stored copy at %s/<name> keeps working."
+          % (len(hits), CONFIG_DIR))
+    for path, name, why in escaped:
+        print("secret-copy-guard: ROTATE the secret held in %s/%s as well — %s (%s)"
+              % (CONFIG_DIR, name, why, path))
+    if not escaped:
+        print("secret-copy-guard: no rotation needed — none of these copies had a route off this Mac.")
     return 1
 
 
