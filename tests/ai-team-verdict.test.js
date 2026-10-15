@@ -463,7 +463,8 @@ describe('the row', () => {
       'bugs', 'data', 'missed', 'ontop', 'queue', 'firsttime', 'allowance']);
     expect(out.lines.every(l => l[1] === 'green')).toBe(true);
     expect(out.overall).toMatchObject({ colour: 'green', text: 'Healthy', grey: 0 });
-    expect(out.detail).toBe('Healthy. 14 green, 0 amber, 0 red.');
+    // The row's detail is the simpler view's answer and number (15 Oct 2026).
+    expect(out.detail).toBe('Working well: 0 things need a fix.');
     // No bugs or errors shows a real week's trend on day one, from the queue's own log.
     expect(out.bugs).toMatchObject({ vsDate: '2026-10-08', before: 6, after: 5, direction: 'better' });
   });
@@ -746,5 +747,295 @@ print(json.dumps({"answer": jobs["answer"], "overall": p2["overall"], "afterGree
     expect(out.overall.colour).toBe('red');
     expect(out.overall.text).toMatch(/^Needs attention: No job is broken \(last known red at Wed 23:50; can't read now\)/);
     expect(out.afterGreen).toBe('amber');                    // its newest reading was green: "Healthy where it can be read"
+  });
+});
+
+// ─── The simpler view (Kevin, 15 Oct 2026: "too cluttered and confusing") ──
+// One number ("Things needing a fix"), weekly bars, three lights and one answer. Each test drives
+// the real functions. Names and ids are invented: this repo is public.
+describe('the simpler view: one number, weekly bars, three lights, one answer', () => {
+  // A board where every counting line has something, and the backlog and the rates are bad too.
+  const board = `
+ok = {"state": "ok", "name": "09:00", "date": "2026-10-15"}
+def board(bugs=167, ontop=(100, 10), first=(10, 1)):
+    return [
+        A.judge_emails({"left": 3, "scannedAt": ago(hours=1), "slot": ok}, NOW),                     # 3
+        A.judge_responses({"items": [A.item("r1", "recR1"), A.item("r2", "recR2")]}),               # 2
+        A.judge_moving({"stuck": [A.item("s", "recS%d" % i) for i in range(4)], "live": 40}),       # 4 (a 10% share)
+        A.judge_bottlenecks({"past": [A.item("b", "recB1")], "total": 3}, NOW),                    # 1
+        A.judge_carried({"items": [A.item("c", "recC1")]}),                                        # 1
+        A.judge_agents({"agents": [{"id": "recAG1", "name": "Agent", "live": 2, "acted": False}]}), # 1
+        A.judge_jobs({"failed": [A.item("Job A")]}),                                               # 1
+        A.judge_bugs({"code": bugs, "codeWeekAgo": 120, "filed7d": 9, "fixed7d": 1}),              # never counted
+        A.judge_data({"ranAt": ago(hours=2), "result": "broken", "broken": ["check one", "check two"]}, NOW),  # 2
+        A.judge_missed({"parks": [A.item("p", "recP1")]}),                                         # 1
+        A.judge_ontop({"in": ontop[0], "done": ontop[1]}),                                         # a rate: never counted
+        A.judge_queue({"cards": [{"id": "recQ1", "name": "q", "days": 3.0, "dated": True},
+                                 {"id": "recQ2", "name": "q2", "days": 0.5, "dated": True}]}),       # 1: only the card over 2 days
+        A.judge_firsttime({"total": first[0], "asIs": first[1]}),                                  # a rate: never counted
+        A.judge_allowance({"hours7d": 26.0, "pausedNow": False, "items": []}, NOW)]                # 1: a pause is one thing
+`;
+
+  it('the number sums the eleven counting lines; the code-problem backlog and the two rates never add to it', () => {
+    const out = py(`${board}
+a, b = A.headline(board()), A.headline(board(bugs=999, ontop=(100, 100), first=(10, 10)))
+print(json.dumps({"a": a, "b": b["number"], "parts": {p["key"]: p["count"] for p in a["parts"]}}))`);
+    expect(out.a).toMatchObject({ number: 18, atLeast: false, shared: 0, unread: [] });
+    expect(out.b).toBe(18);                                       // the backlog and the rates moved; the number did not
+    expect(out.parts).toEqual({ emails: 3, responses: 2, moving: 4, bottlenecks: 1, carried: 1, agents: 1, jobs: 1,
+      data: 2, missed: 1, queue: 1, allowance: 1 });
+    expect(Object.keys(out.parts)).not.toContain('bugs');
+  });
+
+  it('one task, job or email two lines both count is counted once; a list longer than its count is never used to take one off', () => {
+    const out = py(`
+T = "recSAMETASK0001"
+ok = {"state": "ok", "name": "09:00", "date": "2026-10-15"}
+ls = [A.judge_emails({"left": 2, "scannedAt": ago(hours=1), "slot": ok, "items": [A.item("m", "mailA"), A.item("m", "mailB")]}, NOW),
+      A.judge_responses({"items": [A.item("t", T)]}),
+      A.judge_moving({"stuck": [A.item("t", T), A.item("u", "recOTHER")], "live": 50}),
+      A.judge_carried({"items": [A.item("t", T)]}),
+      A.judge_jobs({"failed": [A.item("Nightly sync")]}),
+      A.judge_missed({"parks": [A.item("t", T)], "gaveUp": [A.item("Nightly sync", "", "gave up")], "undecided": [A.item("m", "mailA")]}),
+      A.judge_queue({"cards": [{"id": T, "name": "t", "days": 4.0, "dated": True}]})]
+h = A.headline(ls)
+# The inbox list is longer than the count it came with (a newer scan not yet scored): no id is taken off.
+long = [A.judge_emails({"left": 1, "scannedAt": ago(hours=1), "slot": ok, "items": [A.item("m", "mailA"), A.item("m", "mailB")]}, NOW),
+        A.judge_missed({"undecided": [A.item("m", "mailA")]})]
+print(json.dumps({"h": h, "long": A.headline(long)["number"]}))`);
+    // 2 + 1 + 2 + 1 + 1 + 3 + 1 = 11 counted; the task on five lines, the job on two and the email on two are one each.
+    expect(out.h.number).toBe(5);
+    expect(out.h.shared).toBe(6);
+    expect(out.h.sharedByKind).toEqual({ task: 4, job: 1, mail: 1 });
+    expect(out.long).toBe(2);                                     // never lower than the truth
+  });
+
+  it('a counting line that cannot be read makes it "at least N" and is named; a grey rate or backlog does not', () => {
+    const out = py(`${board}
+ls = board(); ls[8] = A.grey("data", "the data check has not run since Tue 13 Oct 06:42")
+grey_count = A.headline(ls)
+ls = board(); ls[6] = A.judge_jobs(A.facts_jobs([{"key": "a", "label": "Job A", "status": "Failed"}], {}, "HTTP 503"))
+part = A.headline(ls)
+ls = board(); ls[7] = A.grey("bugs", "x"); ls[10] = A.grey("ontop", "x"); ls[12] = A.grey("firsttime", "x")
+rates = A.headline(ls)
+none = A.headline([A.grey(d["key"], "x") for d in A.LINES])
+print(json.dumps({"grey": grey_count, "part": part, "rates": rates, "none": none["number"]}))`);
+    expect(out.grey).toMatchObject({ number: 16, atLeast: true });
+    expect(out.grey.unread).toEqual([{ key: 'data', question: 'The data is accurate', why: 'the data check has not run since Tue 13 Oct 06:42' }]);
+    expect(out.part).toMatchObject({ number: 18, atLeast: true });
+    expect(out.part.unread).toEqual([{ key: 'jobs', question: 'No job is broken', why: 'read only in part' }]);
+    expect(out.rates).toMatchObject({ number: 18, atLeast: false, unread: [] });
+    expect(out.none).toBeNull();                                  // nothing read: not known, never a zero
+  });
+
+  it('three lights: each the worst of its lines, titled for its colour, naming at most two things', () => {
+    const out = py(`${board}
+ls = board()
+ls[0:5] = [A.line(d["key"], "green", "a", 0) for d in A.LINES[0:5]]
+ls[11:14] = [A.grey(d["key"], "x") for d in A.LINES[11:14]]
+ls[10] = A.grey("ontop", "x")
+lights = A.build_lights(ls, A.group_verdicts(ls))
+print(json.dumps([[x["key"], x["colour"], x["title"], x["text"]] for x in lights]))`);
+    expect(out[0]).toEqual(['flow', 'green', 'Work is flowing', '']);
+    // Red before amber (1 job failing is amber); within red, a counted problem before the backlog.
+    expect(out[1]).toEqual(['broken', 'red', 'Something is broken', '2 data checks wrong, code problems up 47 +3 more']);
+    expect(out[2]).toEqual(['keep', 'grey', 'Can it keep going?', "can't read agent workload, can't read your queue +2 more"]);
+  });
+
+  const L = (flow, broken, keep) => `[{"key": "flow", "colour": "${flow}", "title": "Work is held up", "text": "x"},
+     {"key": "broken", "colour": "${broken}", "title": "Something is broken", "text": "3 jobs failing"},
+     {"key": "keep", "colour": "${keep}", "title": "It can keep going", "text": ""}]`;
+  const green = `[A.line(d["key"], "green", "a", 0) for d in A.LINES]`;
+  const v = (n, lw, lights, prev = '{}', lines = green, at = 'False', lwAt = 'False') =>
+    `A.team_verdict({"number": ${n}, "atLeast": ${at}}, ${lw === null ? 'None' : `{"number": ${lw}, "atLeast": ${lwAt}}`}, ${lights}, ${prev}, ${lines})`;
+
+  it('the answer: Working well, Getting better, Not getting better, Getting worse, Can\'t tell', () => {
+    const out = py(`print(json.dumps([
+      ${v(4, 9, L('green', 'amber', 'green'))},
+      ${v(4, null, L('green', 'green', 'green'))},
+      ${v(6, 9, L('amber', 'amber', 'green'), '{"flow": "amber", "broken": "amber", "keep": "green"}')},
+      ${v(12, 9, L('green', 'green', 'green'))},
+      ${v(9, 9, L('amber', 'green', 'green'))},
+      ${v(6, 9, L('amber', 'green', 'green'), '{"flow": "green", "broken": "green", "keep": "green"}')},
+      ${v(46, null, L('red', 'red', 'amber'))},
+      ${v(40, 50, L('amber', 'amber', 'green'), '{}', green, 'True')},
+      ${v(60, 50, L('amber', 'amber', 'green'), '{}', green, 'True')},
+      ${v(55, 50, L('amber', 'amber', 'green'), '{}', green, 'False', 'True')},
+      ${v(45, 50, L('amber', 'amber', 'green'), '{}', green, 'False', 'True')},
+      ${v(3, 9, L('green', 'green', 'green'), '{}', '[A.grey(d["key"], "x") if i < 3 else A.line(d["key"], "green", "a", 0) for i, d in enumerate(A.LINES)]')}]))`);
+    const at = (i) => [out[i].colour, out[i].text];
+    expect(at(0)).toEqual(['green', 'Working well']);             // no red light, 5 or fewer, all read
+    expect(at(1)).toEqual(['green', 'Working well']);             // needs no last week
+    expect(at(2)).toEqual(['amber', 'Getting better']);
+    expect(out[2].reason).toBe('6 things to fix, down from 9 last week');
+    expect(at(3)).toEqual(['red', 'Getting worse']);
+    expect(out[3].reason).toBe('12 things to fix, up from 9 last week');
+    expect(at(4)).toEqual(['amber', 'Not getting better']);       // the same number
+    expect(at(5)).toEqual(['amber', 'Not getting better']);       // fewer, but a light went from green to amber
+    expect(out[5].reason).toBe('6 things to fix, down from 9, but Work is held up went amber');
+    expect(at(6)).toEqual(['grey', "Can't tell"]);                // the first week: nothing to compare with
+    expect(out[6].reason).toBe('No number from last week to compare with yet. Still red: Work is held up, Something is broken');
+    expect(at(7)).toEqual(['grey', "Can't tell"]);                // "at least 40" might be more than 50
+    expect(at(8)).toEqual(['red', 'Getting worse']);              // "at least 60" is more than 50 whatever it hides
+    expect(at(9)).toEqual(['grey', "Can't tell"]);                // last week was "at least 50": 55 may be fewer
+    expect(at(10)).toEqual(['amber', 'Getting better']);          // 45 is fewer than at least 50
+    expect(at(11)).toEqual(['grey', "Can't tell"]);               // more than 2 checks can't be read
+  });
+
+  it('a red light is never hidden behind a falling number: went red this week is "Getting worse"; red both weeks is named', () => {
+    const out = py(`print(json.dumps([
+      ${v(5, 9, L('green', 'red', 'green'), '{"flow": "green", "broken": "green", "keep": "green"}')},
+      ${v(5, 9, L('green', 'red', 'green'), '{"flow": "green", "broken": "red", "keep": "green"}')}]))`);
+    expect([out[0].colour, out[0].text]).toEqual(['red', 'Getting worse']);
+    expect(out[0].reason).toBe('Something is broken went red this week');
+    expect(out[0].why).toBe('Something is broken went red this week. Red: Something is broken, new this week (3 jobs failing)');
+    expect(out[0].turnedRed).toEqual(['broken']);
+    // Red last week too: the number fell, so the answer may say better, but the red light is named in it.
+    expect([out[1].colour, out[1].text]).toEqual(['amber', 'Getting better']);
+    expect(out[1].reason).toBe('5 things to fix, down from 9 last week. Still red: Something is broken');
+    expect(out[1].redLights).toEqual(['broken']);
+  });
+
+  it('weekly bars: one per London week, the week\'s last daily number; Monday 00:30 London is the new week', () => {
+    const out = py(`
+# Monday 12 Oct 00:30 London is 23:30 UTC on Sunday 11 Oct: a UTC reading would put it in last week.
+mon = datetime(2026, 10, 11, 23, 30, tzinfo=timezone.utc)
+hist = {"2026-10-08": {A.HEAD_KEY: [30, False], A.LIGHTS_KEY: {"broken": "red"}},
+        "2026-10-11": {A.HEAD_KEY: [25, False], A.LIGHTS_KEY: {"flow": "green", "broken": "amber", "keep": "green"}}}
+weeks, since = A.weekly_series(hist, mon, {"number": 20, "atLeast": False})
+ls = [A.line(d["key"], "green", "a", 0, count=(2 if d["key"] == "moving" else 0) if d["key"] in A.HEADLINE_LINES else None) for d in A.LINES]
+p = A.build_payload(ls, hist, mon)
+print(json.dumps({"weeks": weeks, "since": since, "lastWeek": p["lastWeek"], "verdict": p["verdict"]["text"],
+                  "today": p["history"]["2026-10-12"][A.HEAD_KEY], "sunday": A.london_day(mon - timedelta(hours=1))}))`);
+    expect(out.weeks).toEqual([
+      { start: '2026-10-05', end: '2026-10-11', day: '2026-10-11', number: 25, atLeast: false, current: false },   // Sunday's, not Thursday's
+      { start: '2026-10-12', end: '2026-10-18', day: '2026-10-12', number: 20, atLeast: false, current: true }]);
+    expect(out.since).toBe('2026-10-08');
+    expect(out.lastWeek).toMatchObject({ number: 25, day: '2026-10-11' });
+    expect(out.today).toEqual([2, false]);                        // kept under the London day, Monday
+    expect(out.sunday).toBe('2026-10-11');
+    expect(out.verdict).toBe('Working well');                     // 2 things, no red light
+  });
+
+  it('eight weeks shown at most; the day\'s number outlives the 30-day history; a part-read pass never lowers the day', () => {
+    const out = py(`
+day = lambda d: (NOW.astimezone(L).date() - timedelta(days=d)).isoformat()
+hist = {day(d): {A.HEAD_KEY: [100 - d, False], "emails": 1} for d in range(1, 80)}
+ls = [A.line("emails", "green", "a", 0)]
+h = A.apply_history(ls, hist, NOW, {"number": 5, "atLeast": False}, [])
+weeks, since = A.weekly_series(h, NOW, {"number": 5, "atLeast": False})
+d1 = A.apply_history([A.line("emails", "green", "a", 0)], {}, NOW, {"number": 40, "atLeast": False}, [])
+d2 = A.apply_history([A.line("emails", "green", "a", 0)], d1, NOW, {"number": 30, "atLeast": True}, [])
+d3 = A.apply_history([A.line("emails", "green", "a", 0)], d2, NOW, {"number": 35, "atLeast": False}, [])
+f1 = A.apply_history([A.line("emails", "green", "a", 0)], {}, NOW, {"number": 30, "atLeast": True}, [])
+f2 = A.apply_history([A.line("emails", "green", "a", 0)], f1, NOW, {"number": 33, "atLeast": True}, [])
+t = day(0)
+print(json.dumps({"oldest": min(h), "days": len(h), "slim": h[day(40)], "full": sorted(h[day(10)]), "weeks": len(weeks),
+                  "first": weeks[0]["start"], "last": weeks[-1], "trendSince": ls[0]["trend"]["since"],
+                  "kept": [d2[t][A.HEAD_KEY], d3[t][A.HEAD_KEY], f2[t][A.HEAD_KEY]]}))`);
+    expect(out.oldest).toBe('2026-08-14');                        // 62 days back: eight weeks of bars fit
+    expect(out.days).toBe(63);
+    expect(out.slim).toEqual({ _h: [60, false] });                 // past 30 days: only the number is kept
+    expect(out.full).toContain('emails');
+    expect(out.weeks).toBe(8);
+    expect(out.first).toBe('2026-08-24');                          // the Monday seven weeks before this one
+    expect(out.last).toMatchObject({ start: '2026-10-12', number: 5, current: true });
+    expect(out.trendSince).toBe('2026-09-16');                     // a line's trend still starts inside its 30 days
+    expect(out.kept).toEqual([[40, false], [35, false], [33, true]]);
+  });
+
+  it('the row carries the answer, the number, the bars and the lights, and never the ids it used to count', () => {
+    const out = py(stubs().replace('print(json.dumps({"status"', 'print(json.dumps({"v": p["verdict"], "h": p["headline"], "weeks": p["weeks"], "lights": p["lights"], "keys": any("_keys" in l for l in p["lines"]), "version": p["version"], "status"'));
+    expect(out.version).toBe(2);
+    expect(out.v).toMatchObject({ colour: 'green', text: 'Working well' });
+    expect(out.h).toMatchObject({ number: 0, atLeast: false });
+    expect(out.weeks).toHaveLength(1);
+    expect(out.lights.map(x => [x.title, x.colour])).toEqual([
+      ['Work is flowing', 'green'], ['Nothing is broken', 'green'], ['It can keep going', 'green']]);
+    expect(out.keys).toBe(false);
+  });
+});
+
+// ─── The independent review of PR #795 (15 Oct 2026) ─────────────────
+// Each test failed on the code as first pushed and passes on the fix.
+describe('review of PR #795: the simpler view never reads better than the truth', () => {
+  const L = (flow, broken, keep) => `[{"key": "flow", "colour": "${flow}", "title": "Work is held up", "text": "x"},
+     {"key": "broken", "colour": "${broken}", "title": "Something is broken", "text": "3 jobs failing"},
+     {"key": "keep", "colour": "${keep}", "title": "It can keep going", "text": ""}]`;
+  const green = `[A.line(d["key"], "green", "a", 0) for d in A.LINES]`;
+
+  it('1 "Working well" needs no light worse than last week: 2 things with Work is flowing gone amber is "Not getting better"', () => {
+    const out = py(`print(json.dumps([
+      A.team_verdict({"number": 2, "atLeast": False}, {"number": 9}, ${L('amber', 'green', 'green')}, {"flow": "green", "broken": "green", "keep": "green"}, ${green}),
+      A.team_verdict({"number": 2, "atLeast": False}, {"number": 9}, ${L('amber', 'green', 'green')}, {"flow": "amber", "broken": "green", "keep": "green"}, ${green})]))`);
+    expect([out[0].colour, out[0].text]).toEqual(['amber', 'Not getting better']);
+    expect(out[0].reason).toBe('2 things to fix, down from 9, but Work is held up went amber');
+    expect([out[1].colour, out[1].text]).toEqual(['green', 'Working well']);   // amber both weeks: nothing got worse
+  });
+
+  it('2 a later "at least" above the day\'s full count replaces it, marked "at least", for that day\'s bar and next week\'s "last week"', () => {
+    const out = py(`
+ten = datetime(2026, 10, 15, 10, 0, tzinfo=L).astimezone(timezone.utc)
+late = datetime(2026, 10, 15, 23, 50, tzinfo=L).astimezone(timezone.utc)
+d1 = A.apply_history([A.line("emails", "green", "a", 0)], {}, ten, {"number": 5, "atLeast": False}, [])
+d2 = A.apply_history([A.line("emails", "green", "a", 0)], d1, late, {"number": 40, "atLeast": True}, [])
+d3 = A.apply_history([A.line("emails", "green", "a", 0)], d1, late, {"number": 4, "atLeast": True}, [])
+week, _ = A.weekly_series(d2, late, None)
+nxt = datetime(2026, 10, 22, 12, 0, tzinfo=L).astimezone(timezone.utc)
+weeks, _ = A.weekly_series(d2, nxt, {"number": 45, "atLeast": False})
+v = A.team_verdict({"number": 45, "atLeast": False}, weeks[-2], ${L('amber', 'amber', 'green')}, {}, ${green})
+print(json.dumps({"day": d2["2026-10-15"][A.HEAD_KEY], "lower": d3["2026-10-15"][A.HEAD_KEY], "bar": week[-1],
+                  "lastWeek": weeks[-2], "v": [v["colour"], v["text"], v["reason"]]}))`);
+    expect(out.day).toEqual([40, true]);
+    expect(out.lower).toEqual([5, false]);                        // a floor below the full count still never lowers the day
+    expect(out.bar).toMatchObject({ number: 40, atLeast: true });
+    expect(out.lastWeek).toMatchObject({ start: '2026-10-12', number: 40, atLeast: true });
+    expect(out.v).toEqual(['grey', "Can't tell", "Last week's number was only partly read (at least 40)"]);
+  });
+
+  it('3 a red light that was grey or not on record last week counts as gone red: never "Getting better" over it', () => {
+    const out = py(`print(json.dumps([
+      A.team_verdict({"number": 5, "atLeast": False}, {"number": 9}, ${L('green', 'red', 'green')}, {"flow": "green", "broken": "grey", "keep": "green"}, ${green}),
+      A.team_verdict({"number": 5, "atLeast": False}, {"number": 9}, ${L('green', 'red', 'green')}, {}, ${green}),
+      A.team_verdict({"number": 5, "atLeast": False}, {"number": 9}, ${L('green', 'red', 'green')}, None, ${green}),
+      A.team_verdict({"number": 5, "atLeast": False}, None, ${L('green', 'red', 'green')}, None, ${green})]))`);
+    for (const v of out.slice(0, 3)) {
+      expect([v.colour, v.text]).toEqual(['red', 'Getting worse']);
+      expect(v.reason).toBe('Something is broken is red and was not on record as red last week');
+      expect(v.turnedRed).toEqual(['broken']);
+    }
+    // The first week has no last week at all: nothing is said to have gone red, and it never says better.
+    expect([out[3].colour, out[3].text]).toEqual(['grey', "Can't tell"]);
+  });
+
+  it('4 every open blocked task counts in the number, so a stuck task that gets blocked inside its limit never makes it fall', () => {
+    const out = py(`
+lh = load("lh", "loop-health.py"); D = lh.dispatcher()
+CLOCK = {"SIGN-IN": 1, "TOOL": 3, "KEVIN": 3}
+names = {"recX": "task X", "recY": "task Y"}
+# Before: X and Y are stuck, nothing is blocked.
+before = [A.judge_moving(A.facts_moving({"agentWork": {"live": 20, "stuckIds": ["recX", "recY"], "heldCheck": None}}, set(), names)),
+          A.judge_bottlenecks(A.facts_bottlenecks({"readAt": iso(NOW), "openTasksRead": 1, "open": []}, CLOCK, NOW), NOW)]
+# After: X is blocked half a day ago (inside its 3-day limit): it leaves "moving" and is not past its clock.
+sweep = {"readAt": iso(NOW), "openTasksRead": 1, "open": [{"task": "recX", "name": "task X", "kind": "TOOL", "days": 0.5},
+                                                          {"task": "recX", "name": "task X", "kind": "KEVIN", "days": 0.4}]}
+after = [A.judge_moving(A.facts_moving({"agentWork": {"live": 20, "stuckIds": ["recX", "recY"], "heldCheck": None}}, {"recX"}, names)),
+         A.judge_bottlenecks(A.facts_bottlenecks(sweep, CLOCK, NOW), NOW)]
+b = after[1]
+print(json.dumps({"before": A.headline(before)["number"], "after": A.headline(after)["number"], "shared": A.headline(after)["shared"],
+                  "line": [b["colour"], b["number"], b["count"], b["answer"]]}))`);
+    expect(out.before).toBe(2);
+    expect(out.after).toBe(2);                                    // nothing was fixed, so the number did not fall
+    expect(out.shared).toBe(0);                                   // "moving" took X out: counted once, under the block
+    expect(out.line).toEqual(['green', 0, 1, 'No blocked task past its limit']);   // its own colour rule is unchanged; two walls, one task
+  });
+
+  it('4 a wall opened since the last sweep, on an open task, is counted too; one on a closed task is not', () => {
+    const wall = '[15 Oct 2026 10:00 — agent] BLOCKER OPEN (TOOL robot setup): the fix is not merged [since 2026-10-15T09:00:00Z]';
+    const out = py(stubs(`lh_res["_tasks"] = [{"id": "recFRESHWALL", "fields": {"Task Name": "fresh", "Status": "Today", "Notes": ${JSON.stringify(wall)}}},
+                    {"id": "recCLOSEDWALL", "fields": {"Task Name": "closed", "Status": "Completed", "Completion Date": "2026-10-14", "Notes": ${JSON.stringify(wall)}}}]`)
+      .replace('print(json.dumps({"status"', 'b = next(l for l in p["lines"] if l["key"] == "bottlenecks")\nprint(json.dumps({"h": p["headline"]["number"], "b": [b["colour"], b["count"]], "status"'));
+    expect(out.h).toBe(1);
+    expect(out.b).toEqual(['green', 1]);
   });
 });

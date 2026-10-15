@@ -160,6 +160,57 @@ Can it keep going?
     missed the 3-4 Oct stop; replayed on the real logs, 4 Oct 18:00 reads red "paused now" and
     6 Oct reads amber, 26 hours stopped, where the guard alone read green.
 
+**The simpler view (Kevin, 15 Oct 2026).** The same day, Kevin found the fourteen lines "too
+cluttered and confusing": he has to see at a glance that it works and that it improves week on
+week. The panel now leads with one number, weekly bars, three lights and one answer; the fourteen
+lines (26 to 39) open from the lights, unchanged, so nothing they measured is lost. All of it is
+judged by `scripts/ai_team_health.py` into the same `ai-team-verdict` row.
+
+40. **Things needing a fix (AI team)** — T3: the distinct real problems right now, summed over
+    the eleven lines that count problems (26, 27, 28's stuck COUNT, EVERY blocked task under 29,
+    30, 31, 32, 34, 35, 37's cards over 2 days old only, and 1 for any allowance pause this week).
+    Line 29 judges its colour on walls past their clock, but the number counts every open wall's
+    task, the sweep's plus any opened since it on an open task (review of PR #795): 28 takes
+    every walled task out, so counting a wall only once past its clock let the number fall with
+    nothing fixed, and 19 of 33 walls were inside their clock that day. Line 33 (the code
+    backlog) and the rates (36, 38) never add to it: a backlog of 171 would bury every daily
+    change, and a percentage is not a count. A task, job, email or check two lines both count is
+    counted once: each line hands on the ids of what it counted (`task:`, `job:`, `mail:`,
+    `check:`), and each id is taken off once for every extra line it is on. The live dry run on
+    15 Oct 2026 found one task on two lines. An inbox list longer than its own count names
+    nothing, so a mismatch can only count high, never low. A line that cannot be read, or was
+    read only in part, makes the number "at least N" and is named; with no counting line read
+    the number is "not known", never 0. Weekly bars: one per London week (Monday to Sunday),
+    the week's last daily number, this week's as it stands, up to 8 weeks. The daily number is
+    kept in each day's snapshot (`_h`) from 15 Oct 2026, and days past the 30-day history keep
+    only it and the lights (`_l`) for 63 days. No earlier day can be rebuilt from its stored
+    line numbers: line 28 stored a percentage and line 37 every card, neither a count. A
+    part-read pass never lowers a day that already has a full count, and an "at least" above
+    the day's full count replaces it, marked "at least", for that day's bar and the next week's
+    "last week" (review of PR #795: 5 at 10:00 then "at least 40" at 23:50 had kept 5).
+41. **Work is flowing (light)** — T10 over lines 26 to 30: the worst colour (a grey line counts
+    at its last known colour; one with none keeps the light off green). Titled for its colour:
+    "Work is flowing", "Work is held up", or the question when it cannot be read. Red and amber
+    carry a few words naming the worst lines (red first, counted problems before trends, at most
+    two, then "+N more").
+42. **Something is broken (light)** — T10 over lines 31 to 35, the code backlog included (red
+    when more are open than a week ago). "Nothing is broken" or "Something is broken".
+43. **It can keep going (light)** — T10 over lines 36 to 39. "It can keep going" or "It may not
+    keep going".
+44. **AI team answer, week on week** — T10 over 40 to 43, in order: red "Getting worse" when,
+    with a number from last week, a light is red now that was not on record as red at the end of
+    last week (green, amber, grey or no record at all: review of PR #795), or the number (an "at
+    least" number included) is above last week's; grey "Can't tell" when more than 2 lines cannot
+    be read or the number is "at least"; green "Working well" with no red light, no light worse
+    than at the end of last week (review of PR #795), every line read and 5 or fewer;
+    grey "Can't tell" with no number from last week; amber "Getting better" with fewer than last
+    week and no light worse; amber "Not getting better" otherwise (the same number, or fewer while
+    a light got worse: the approved design named four answers and this case fitted none
+    honestly). A red light always shows and is named in the answer's reason, even when the
+    number falls: never a break hidden behind an improving total. Back-tested by ignoring a
+    light that went red (the answer read "Not getting better") and by dropping the red light
+    from the reason; both fail `tests/ai-team-verdict.test.js`.
+
 ## 3. Tier 2 — Property pack (add-on only)
 
 Occupancy rate · void units · rent roll (expected monthly income by payment status) · paid
