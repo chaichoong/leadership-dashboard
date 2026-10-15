@@ -1086,12 +1086,15 @@ def alert_veto(t):
 
 
 def alert_lane_match(sender, inbound_task, name):
-    """Why this TASK is a machine alert, or "": the one rule build_queue's task_lane, clear-alerts
-    and the submit gate share (15 Oct 2026). A machine sender (SYSTEM_ALERT_SENDERS) always counts.
-    The NAME patterns count only for inbound mail (an Inbound Sender, or Inbound Communication Task
-    ticked): a task a session or an agent raised is never alert-parked by its own words. On 15 Oct
-    2026 two such tasks sat parked: "Check five Airtable automation failure notices", raised by a
-    session, and a Builder fix named for the Gmail quota it caps, 10.8 days with no robot handed it."""
+    """Why this task is PARKED in the alert lane, or "" (task_lane only, 15 Oct 2026). A machine
+    sender (SYSTEM_ALERT_SENDERS) always counts. The NAME patterns count only for inbound mail (an
+    Inbound Sender, or Inbound Communication Task ticked): a task a session or an agent raised is
+    never parked by its own words. On 15 Oct 2026 two such tasks sat parked: "Check five Airtable
+    automation failure notices", raised by a session, and a Builder fix named for the Gmail quota it
+    caps, 10.8 days with no robot handed it. The two GATES keep the full match on purpose (review
+    round 2 of PR #794): the submit gate and the clear-alerts sweep still keep any alert-named
+    write-up off Kevin's approval queue, whoever raised it, so work is never parked by its words
+    but a breakage report is never a card either."""
     inbound = bool(str(sender or "").strip()) or bool(inbound_task)
     return system_alert_match(sender, name) if inbound else system_alert_match(sender)
 
@@ -4531,7 +4534,9 @@ def cmd_clear_alerts(args):
         # same rule as build_queue (14 Sep 2026). This sweep WRITES three
         # times a day; reading Notes here would re-park at the gate the very
         # tasks the queue fix released.
-        hit = alert_lane_match(t.get("inboundSender"), t.get("inboundTask"), t["name"])
+        # The FULL match, inbound or not (review round 2 of PR #794): a write-up an agent raised
+        # about a breakage never stays on Kevin's queue as a card. Only task_lane reads inbound-only.
+        hit = system_alert_match(t.get("inboundSender"), t["name"])
         if not hit:
             continue
         # A MERGE card or a Your step card is Kevin's by construction, whatever its name says:
@@ -5074,7 +5079,9 @@ def cmd_submit(args):
     # refused "machine alert".
     _pn, _pd, _pnotes = (tf_probe.get(AF["name"], "") or "", tf_probe.get(AF["description"], "") or "",
                          tf_probe.get(AF["notes"], "") or "")
-    alert_hit = alert_lane_match(tf_probe.get(AF["inboundSender"], ""), tf_probe.get(AF["inboundTask"]), _pn)
+    # The FULL match, inbound or not (review round 2 of PR #794): an alert an agent wrote up never
+    # reaches Kevin's queue as a card. Only task_lane, which decides PARKING, reads inbound-only.
+    alert_hit = system_alert_match(tf_probe.get(AF["inboundSender"], ""), _pn)
     if alert_hit and alert_veto({"name": _pn, "description": _pd,
                                  "tier1": bool(tier_match(TIER1_PATTERNS, _pn, _pd, _pnotes)),
                                  "creditor": creditor_match(_pn, _pd, _pnotes)}):

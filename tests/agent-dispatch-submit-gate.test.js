@@ -31,7 +31,7 @@ const SEND_EMAIL = resolve(ROOT, 'scripts/send-email.py');
 // no Airtable call happens and the assertions are against the payload the
 // script would really send. Re-implementing the payload in JS would guard
 // nothing.
-function submit({ type, output, tier1 = false, approverEmail = '', inboundSender = '' }) {
+function submit({ type, output, tier1 = false, approverEmail = '', inboundSender = '', name = '' }) {
   const script = `
 import importlib.util, json, sys, tempfile, os, types
 spec = importlib.util.spec_from_file_location('ad', ${JSON.stringify(DISPATCH)})
@@ -60,6 +60,8 @@ def fake_get(task):
         fields[m.AF['approver']] = {'email': payload['approverEmail']}
     if payload.get('inboundSender'):
         fields[m.AF['inboundSender']] = payload['inboundSender']
+    if payload.get('name'):
+        fields[m.AF['name']] = payload['name']
     fields.update(captured.get('fields', {}))
     return {'id': task, 'fields': fields}
 m.get_task = fake_get
@@ -86,7 +88,7 @@ print(json.dumps(out))
 `;
   // SIGNIN_SKIP_WALK: a SIGN-IN NEEDED line makes submit walk the site's door
   // (15 Sep 2026); these tests never open the robot browser.
-  const raw = execFileSync('python3', ['-c', script, JSON.stringify({ type, output, tier1, approverEmail, inboundSender })],
+  const raw = execFileSync('python3', ['-c', script, JSON.stringify({ type, output, tier1, approverEmail, inboundSender, name })],
     { encoding: 'utf8', env: { ...process.env, SIGNIN_SKIP_WALK: '1' } });
   return JSON.parse(raw.split('---JSON---')[1]);
 }
@@ -355,6 +357,14 @@ print(json.dumps(m.parse_output(sys.stdin.read())))
         output: 'The Meetings Intake script is failing on every run; recommend investigating the trigger.\n\n' + CARRY_OUT });
       expect(r.refused).toBe(true);
       expect(r.error).toMatch(/machine reporting a breakage/);
+    });
+    // Review round 2 of PR #794: the lane no longer PARKS a task an agent raised by its words, but the
+    // gate still refuses an agent's write-up of a breakage as a card, by its name alone.
+    it('refuses an agent-raised write-up named for a breakage, with no machine sender', () => {
+      const r = submit({ type: 'Drafting', name: 'Apps Script trigger stopped',
+        output: 'The nightly trigger stopped on 14 Oct; recommend re-creating it.\n\n' + CARRY_OUT });
+      expect(r.refused).toBe(true);
+      expect(r.error).toMatch(/machine reporting a breakage \(matched 'apps script'\)/);
     });
     it('accepts a CLOSE PROPOSAL, because folding a duplicate alert is hygiene', () => {
       const r = submit({ type: 'Admin', inboundSender: ALERT,

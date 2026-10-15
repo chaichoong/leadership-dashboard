@@ -725,7 +725,7 @@ def task_view(rec, activity_ids, dispatch_ids, now, lanes=None):
         view["heldWhy"] = held_why(lane, detail)
         if detail.get("groupLead"):
             view["groupLead"] = detail["groupLead"]
-    if bucket in ("stuck", "moving") and team:
+    if bucket in ("stuck", "moving", "held") and team:
         # Read here, where the Notes are in hand, for the ownerless check's `royAllowed`.
         view["royLane"] = roy_lane(f)
     wall = open_wall(f.get("Notes"))
@@ -1100,18 +1100,32 @@ def _slot_board(scratch=None):
 def held_problems(actions, scratch=None):
     """Every held task past the stuck clock must carry a recorded move this slot (review of PR #794,
     15 Oct 2026): 18 of the 20 held on the live board had waited more than seven days, one under a
-    lead that was approved, carried out and kept open, so its door would never open by itself. Any
-    move counts, `leave` included with a reason (close it if its lead covers it, route or escalate
-    it, or say why it waits); what verify refuses is silence."""
+    lead that was approved, carried out and kept open, so its door would never open by itself. A
+    `leave` with a reason counts, but not for ever: after LEAVE_STREAK_MAX leaves in a row the move
+    must place it (route, close, finish, chase, escalate, or `roy` where it is Roy's lane), the same
+    limit alert_problems and ownerless_problems apply (review round 2 of PR #794)."""
     board = _slot_board(scratch)
     if not board:
         return []
-    moved = {a.get("task") for a in actions if a.get("ok")}
-    return ["held task %s (%s) has waited %s days (%s) past the %d-day clock with no move this slot: "
-            "close it if its lead covers it, route or escalate it, or leave it with a reason"
-            % (v.get("id"), (v.get("name") or "")[:60], v.get("daysStill"), v.get("why") or v.get("lane"),
-               STUCK_DAYS)
-            for v in board.get("held") or [] if v.get("pastClock") and v.get("id") not in moved]
+    run_start = os.environ.get("TASK_MANAGER_RUN_START")
+    out = []
+    for v in board.get("held") or []:
+        if not v.get("pastClock"):
+            continue
+        mine = {a.get("move") for a in actions if a.get("ok") and a.get("task") == v.get("id")}
+        label = "held task %s (%s) has waited %s days (%s) past the %d-day clock" % (
+            v.get("id"), (v.get("name") or "")[:60], v.get("daysStill"), v.get("why") or v.get("lane"), STUCK_DAYS)
+        if not mine:
+            out.append(label + " with no move this slot: close it if its lead covers it, route or escalate it, "
+                       "or leave it with a reason")
+            continue
+        streak = leave_streak(prior_moves(v.get("id"), float(run_start) if run_start else None))
+        placing = set(PLACING_MOVES) | ({"roy"} if v.get("royLane") else set())
+        if streak >= LEAVE_STREAK_MAX and not mine & placing:
+            out.append(label + " and was left %d slots running: close it if its lead covers it, route it, "
+                       "escalate it to Kevin%s, never another leave"
+                       % (streak, " or hand it to Roy (his lane)" if v.get("royLane") else ""))
+    return out
 
 
 def alert_problems(actions, scratch=None):
@@ -1332,7 +1346,9 @@ def cmd_board(dispatch_queue_path=None):
         # Tasks dispatch holds on a door, each with its lane and what it waits on: never a move for
         # the foreman, never stuck, never ownerless. Listed so a hold is seen, never hidden.
         "held": [{"id": v["id"], "name": v["name"], "lane": v["dispatchLane"], "why": v.get("heldWhy", ""),
-                  "groupLead": v.get("groupLead"), "daysStill": v["daysStill"], "pastClock": v["pastClock"]}
+                  "groupLead": v.get("groupLead"), "daysStill": v["daysStill"], "pastClock": v["pastClock"],
+                  # Roy's lane by dispatch's rules: a hand-over to Roy places it (held_problems).
+                  "royLane": v.get("royLane") or ""}
                  for v in buckets["held"]],
         "stuck": buckets["stuck"],
         "duplicates": dupes,

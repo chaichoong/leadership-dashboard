@@ -38,10 +38,10 @@ describe('system-alert lane — sender and subject only', () => {
 
   it('the two WRITE paths use the same rule: clear-alerts and the submit gate read sender and name, then veto', () => {
     const clear = SRC.slice(SRC.indexOf('def cmd_clear_alerts('), SRC.indexOf('def cmd_', SRC.indexOf('def cmd_clear_alerts(') + 10));
-    expect(clear).toMatch(/hit = alert_lane_match\(t\.get\("inboundSender"\), t\.get\("inboundTask"\), t\["name"\]\)/);
+    expect(clear).toMatch(/hit = system_alert_match\(t\.get\("inboundSender"\), t\["name"\]\)/);
     expect(clear).toMatch(/alert_veto\(/);
     const submit = SRC.slice(SRC.indexOf('def cmd_submit('), SRC.indexOf('def cmd_', SRC.indexOf('def cmd_submit(') + 10));
-    expect(submit).toMatch(/alert_hit = alert_lane_match\(tf_probe\.get\(AF\["inboundSender"\], ""\), tf_probe\.get\(AF\["inboundTask"\]\), _pn\)/);
+    expect(submit).toMatch(/alert_hit = system_alert_match\(tf_probe\.get\(AF\["inboundSender"\], ""\), _pn\)/);
     expect(submit).toMatch(/alert_veto\(/);
     expect(SRC.match(/system_alert_match\([^)]*notes/g)).toBeNull();
   });
@@ -86,6 +86,35 @@ print(json.dumps({
     expect(r.machineSenderNoTick).toBe('noreply@notify.cloudflare.com');
     expect(r.inboundTicked).toMatch(/apps script/);
     expect(r.inboundForwarded).toMatch(/airtable automation/);
+  });
+
+  // Review round 2 of PR #794: the GATES keep the full match. An agent's write-up named for a breakage
+  // is swept off Kevin's queue, and the same task, now at Today with the Builder, is worked, not parked.
+  it('an agent-raised "Apps Script trigger stopped" card is swept off Approval, then worked by the Builder, never parked', () => {
+    const r = py(`
+import io, contextlib, types
+AF = m.AF
+TASK = {"id": "recAgentAlertAaaa", "fields": {AF["name"]: "Apps Script trigger stopped", AF["status"]: {"name": "Approval"},
+        AF["teamMember"]: ["recqmKBmq8ZGkxVH9"], AF["sentForApprovalBy"]: ["recqmKBmq8ZGkxVH9"],
+        AF["agentOutput"]: "The nightly trigger stopped on 14 Oct; recommend re-creating it.", AF["notes"]: ""}}
+m.query_tasks = lambda formula, **k: [json.loads(json.dumps(TASK))]
+def patch_task(tid, fields):
+    TASK["fields"].update(fields)
+    return TASK
+m.patch_task = patch_task
+buf = io.StringIO()
+with contextlib.redirect_stdout(buf):
+    m.cmd_clear_alerts(types.SimpleNamespace(dry_run=False))
+swept = json.loads(buf.getvalue())
+t = m.task_view(TASK)
+ctx = m.lane_context([], {}, "", [], None)
+print(json.dumps({"moved": [x["task"] for x in swept["items"]], "status": t["status"], "team": t["teamMemberIds"],
+                  "sender": t["sentForApprovalByIds"], "lane": m.task_lane(t, ctx)[0]}))`);
+    expect(r.moved).toEqual(['recAgentAlertAaaa']);
+    expect(r.status).toBe('Today');
+    expect(r.team).toEqual(['recQkO6BA4w5zqwZ4']);   // the Builder
+    expect(r.sender).toEqual([]);
+    expect(r.lane).toBe('newWork');                 // the lane does not park it by its words
   });
 
   it('a real Apps Script failure mail is still an alert (the lane keeps its job)', () => {

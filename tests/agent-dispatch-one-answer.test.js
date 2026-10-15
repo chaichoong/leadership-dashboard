@@ -437,6 +437,33 @@ describe('a held task past the stuck clock needs a move (verify)', () => {
     expect(tmVerify('held_problems', board, [{ task: 'recHeldOldAaaaaaa', move: 'route', ok: false }])).toHaveLength(1);
   });
 
+  // Review round 2 of PR #794: a leave is a move, but not for ever.
+  const prior3 = [['recHeldOldAaaaaaa', 'leave'], ['recHeldOldAaaaaaa', 'leave'], ['recHeldOldAaaaaaa', 'leave']];
+  const leave = [{ task: 'recHeldOldAaaaaaa', move: 'leave', ok: true }];
+
+  it('after three leaves in a row, a fourth fails the slot; after two, a leave still answers it', () => {
+    const r = tmVerify('held_problems', board, leave, prior3);
+    expect(r).toHaveLength(1);
+    expect(r[0]).toMatch(/recHeldOldAaaaaaa .* was left 3 slots running: .* never another leave/);
+    expect(tmVerify('held_problems', board, leave, prior3.slice(1))).toEqual([]);
+    expect(tmVerify('held_problems', board, leave, [['recHeldOldAaaaaaa', 'leave'], ['recHeldOldAaaaaaa', 'leave'],
+      ['recHeldOldAaaaaaa', 'route'], ['recHeldOldAaaaaaa', 'leave']])).toEqual([]);   // a route broke the streak
+  });
+
+  it('after three leaves, close, route or escalate places it; roy only where the view says it is his lane', () => {
+    for (const move of ['close', 'route', 'escalate']) {
+      expect(tmVerify('held_problems', board, [{ task: 'recHeldOldAaaaaaa', move, ok: true }], prior3), move).toEqual([]);
+    }
+    const roy = [{ task: 'recHeldOldAaaaaaa', move: 'roy', ok: true }];
+    expect(tmVerify('held_problems', board, roy, prior3)).toHaveLength(1);
+    const royBoard = { held: board.held.map((v) => (v.id === 'recHeldOldAaaaaaa' ? { ...v, royLane: 'repair' } : v)) };
+    expect(tmVerify('held_problems', royBoard, roy, prior3)).toEqual([]);
+  });
+
+  it("the board's held list carries royLane for that check", () => {
+    for (const v of run.board.held) expect(v, v.id).toHaveProperty('royLane');
+  });
+
   it("cmd_verify runs it: the slot fails on the board's own pastClock list", () => {
     const src = readFileSync(TM, 'utf8');
     const verify = src.slice(src.indexOf('def cmd_verify('), src.indexOf('\ndef ', src.indexOf('def cmd_verify(') + 1));
