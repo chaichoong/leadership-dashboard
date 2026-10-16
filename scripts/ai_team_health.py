@@ -13,7 +13,7 @@ work; every agent is working; no one is broken; no bugs or errors.
 
 WHAT IT IS
 ----------
-Fourteen lines, each a question in his words with a colour, a short answer, a number, a
+Fifteen lines (the hand-back line joined on 16 Oct 2026), each a question in his words with a colour, a short answer, a number, a
 one-sentence rule and a trend against last week, in three groups, with one overall verdict.
 scripts/estate-status.py calls verdict_row() on its ten-minute pass and writes it as the
 Estate Status row `ai-team-verdict`. The page (js/dashboard.js) only draws it.
@@ -96,6 +96,14 @@ APPROVED_CARRY_HOURS = 24
 AGENT_IDLE_HOURS = 24
 DECIDED_DAYS = 14
 INBOUND_WAIT_WORKING_DAYS = 1
+# The hand-back line (Kevin, 16 Oct 2026). The robot browser logs every sign-in window Kevin opens;
+# a sign-in to a site the robot already had in the 30 days before is access the robot did not keep.
+SIGNIN_LOG = os.path.join(LOGS, "agent-browser", "runs.jsonl")
+ACCESS_KEPT_DAYS = 30
+SIGNIN_SAME_HOURS = 2               # a second window within this of the first is the same sign-in
+KEVIN_STEPS_ALLOWED = ("payment", "purchase")   # paying is one of his four; every other KEVIN step is not
+KEVIN_STEP_WORDS = {"credential": "a sign-in or settings step", "identity": "an ID check",
+                    "signature": "a signature", "physical": "an in-person step"}
 
 GROUPS = (
     ("flow", "Is work flowing?"),
@@ -103,7 +111,7 @@ GROUPS = (
     ("keep", "Can it keep going?"),
 )
 
-# Kevin's fourteen questions, in his order. `better` says which way the number should move.
+# Kevin's fourteen questions, in his order, and since 16 Oct 2026 the hand-back line (his four reasons). `better` says which way the number should move.
 LINES = (
     {"key": "emails", "noun": "the inbox", "group": "flow", "question": "Emails are getting cleared", "better": "lower", "unit": "",
      "rule": "Green means no email older than 2 days is left in the inbox after the last sort; "
@@ -144,6 +152,15 @@ LINES = (
     {"key": "firsttime", "noun": "your verdicts", "group": "keep", "question": "Drafts are right first time", "better": "higher", "unit": "%",
      "rule": "Green means you approved 85% or more of the agents' drafts without changes in the last "
              "14 days; amber is 70% to 85%; red is under 70%."},
+    # Kevin, 16 Oct 2026: he does four things only (approve, correct wrong work, pay, give access).
+    # This line counts the cards that asked him for anything else. Verdicts are not counted here:
+    # wrong work is the line above's, and the accuracy score's.
+    {"key": "handback", "noun": "hand-backs", "group": "keep", "question": "You only approve, pay or give access",
+     "better": "higher", "unit": "%",
+     "rule": "Green means 95% or more of the agents' cards in the last 14 days asked nothing of you but "
+             "approving, correcting, paying or giving access; amber is 85% to 95%; red is under 85%. A card "
+             "came back to you when you did any other step, could not do the step it gave you, or signed "
+             "the robot in again to a site it already had in the 30 days before."},
     {"key": "allowance", "noun": "the allowance", "group": "keep", "question": "Enough allowance to finish the week", "better": "lower",
      "unit": "h",
      "rule": "Green means the robots were not paused for the Claude limit this week; amber means they "
@@ -571,6 +588,48 @@ def judge_firsttime(f):
     # A rate, not a count of problems: it drives the "It can keep going" light only.
     return line("firsttime", colour, "%d%% approved without changes" % pct, pct, (), extra, src,
                 short=("%d%% of drafts right first time" % pct) if colour != "green" else None)
+
+
+def handback_colour(score):
+    return "green" if score >= 95 else "amber" if score >= 85 else "red"
+
+
+def judge_handback(f):
+    """Kevin's four reasons (16 Oct 2026). The score is the share of the agents' cards that asked
+    him for nothing else. A sign-in log that cannot be read leaves the repeat sign-ins uncounted,
+    so the line is shown as read in part and is never green."""
+    src = ("Your verdicts and every wall on the agents' tasks, last 14 days, with the robot browser's "
+           "sign-in log (form cards left out)")
+    if f.get("error"):
+        return grey("handback", f["error"], src)
+    cards = int(f.get("cards") or 0)
+    if not cards:
+        return grey("handback", "no agent cards in the last 14 days", src)
+    back = int(f.get("back") or 0)
+    score = round(100.0 * (cards - back) / cards)
+    colour = handback_colour(score)
+    partial = bool(f.get("loginsError"))
+    if partial and colour == "green":
+        colour = "amber"
+    answer = "%d of %d cards came back to you" % (back, cards)
+    if partial:
+        answer += " (sign-in log not read)"
+    extra = [[why, n] for why, n in f.get("reasons") or []]
+    for a in f.get("byAgent") or []:
+        extra.append([a["name"], "score %d (%d of %d came back)" % (a["score"], a["back"], a["cards"])])
+    s = f.get("signins")
+    if s:
+        extra.append(["Robot sign-ins you did", "%d, %d of them again for a site the robot already had"
+                      % (s["total"], s["repeats"])])
+    if partial:
+        extra.append(["Sign-in log", "not read: %s" % f["loginsError"]])
+    out = line("handback", colour, answer, score, f.get("items") or (), extra, src, partial=partial,
+               short=("%s came back to you" % plural(back, "card")) if colour != "green" else None)
+    # The AI Agents page reads each agent's score from here, so the two surfaces never disagree.
+    # Each agent's colour is worked out here, by the same rule, so the page never keeps its own copy.
+    out["byAgent"] = [dict({k: a[k] for k in ("id", "name", "cards", "back", "score", "reasons")},
+                           colour=handback_colour(a["score"])) for a in f.get("byAgent") or []]
+    return out
 
 
 def judge_allowance(f, now):
@@ -1633,6 +1692,179 @@ def facts_firsttime(decided, tasks, aar, now):
     return counts
 
 
+# ─── the hand-back line (Kevin, 16 Oct 2026) ──────────────────────────
+# A wall line as agent-dispatch.py writes it: "[16 Oct 2026 00:38 — agent-dispatch] BLOCKER OPEN
+# (KEVIN credential): ...". The stamp is London time; a few older lines carry the day only.
+WALL_LINE_RE = re.compile(
+    r"^\[(?P<day>\d{1,2} \w{3} \d{4})(?: (?P<clock>\d{2}:\d{2}))?[^\]\n]*\]\s*"
+    r"(?P<mark>BLOCKER OPEN|BLOCKER CLEARED)\s*\((?P<kind>SIGN-IN|SITE|TOOL|KEVIN) (?P<subject>[^)\n]+)\):"
+    r"\s*(?P<rest>[^\n]*)$", re.M)
+WALL_PROFILE_RE = re.compile(r"\[profile ([a-z0-9][a-z0-9-]*)\]", re.I)
+KEVIN_CANT_NOTE = "Kevin cannot take this step"        # agent-dispatch.py KEVIN_CANT_NOTE
+SIGNED_IN_NOTE = "Kevin signed in to"                    # agent-dispatch.py signin_done
+
+
+def wall_lines(notes):
+    """Every wall line in a task's Notes as {at, mark, kind, subject, rest, profile}, oldest first.
+    `at` is an aware time (midday London when the line has no clock), or None when unreadable."""
+    out = []
+    for m in WALL_LINE_RE.finditer(str(notes or "")):
+        try:
+            t = datetime.strptime(m.group("day") + " " + (m.group("clock") or "12:00"), "%d %b %Y %H:%M")
+            at = t.replace(tzinfo=LONDON).astimezone(timezone.utc)
+        except ValueError:
+            at = None
+        p = WALL_PROFILE_RE.search(m.group("rest"))
+        out.append({"at": at, "mark": m.group("mark"), "kind": m.group("kind"),
+                    "subject": m.group("subject").strip(), "rest": m.group("rest"),
+                    "profile": p.group(1).lower() if p else ""})
+    return out
+
+
+def read_logins(now, path=SIGNIN_LOG):
+    """(sign-in windows Kevin opened, None) from the robot browser's own log, or ([], why not).
+    Each is {at, host, profile}; `host` is the wall the window was opened for when the log says."""
+    floor = now - timedelta(days=DECIDED_DAYS + ACCESS_KEPT_DAYS + 1)
+    out = []
+    try:
+        with open(path, encoding="utf-8") as fh:
+            for ln in fh:
+                if '"login"' not in ln:
+                    continue
+                try:
+                    d = json.loads(ln)
+                except ValueError:
+                    continue
+                at = _aware(d.get("at"))
+                if d.get("cmd") != "login" or not at or at < floor:
+                    continue
+                out.append({"at": at, "host": str(d.get("forWall") or d.get("host") or "").lower(),
+                            "profile": str(d.get("profile") or "default").lower()})
+    except OSError as exc:
+        return [], "the robot browser's sign-in log could not be read (%s)" % str(exc)[:80]
+    return sorted(out, key=lambda e: e["at"]), None
+
+
+def _same_site(e, host, profile):
+    return e["host"] == host and e["profile"] == (profile or "default")
+
+
+def kevin_signin(logins, host, profile, when):
+    """The sign-in window Kevin opened that a "signed in" clear at `when` came from, or None (the
+    check found the session live by itself, which asks nothing of him)."""
+    hits = [e for e in logins if _same_site(e, host, profile)
+            and when - timedelta(hours=6) <= e["at"] <= when + timedelta(minutes=15)]
+    return hits[-1] if hits else None
+
+
+def access_not_kept(logins, signin):
+    """True when Kevin had already signed the robot in to the same site in the 30 days before."""
+    lo = signin["at"] - timedelta(days=ACCESS_KEPT_DAYS)
+    hi = signin["at"] - timedelta(hours=SIGNIN_SAME_HOURS)
+    return any(_same_site(e, signin["host"], signin["profile"]) and lo <= e["at"] <= hi for e in logins)
+
+
+def signin_summary(logins, now):
+    """Kevin's sign-ins in the last 14 days, a window within 2 hours of the one before counted
+    once, and how many were again for a site the robot had in the 30 days before."""
+    cut = now - timedelta(days=DECIDED_DAYS)
+    total = repeats = 0
+    last = {}
+    for e in logins:
+        k = (e["host"], e["profile"])
+        prev = last.get(k)
+        last[k] = e["at"]
+        if prev and e["at"] - prev < timedelta(hours=SIGNIN_SAME_HOURS):
+            continue
+        if e["at"] < cut:
+            continue
+        total += 1
+        if access_not_kept(logins, e):
+            repeats += 1
+    return {"total": total, "repeats": repeats}
+
+
+def card_handbacks(f, logins, cut):
+    """(in the population, [why it came back]) for one task. In the population: a verdict in the
+    window, or a wall line Kevin's side touched (KEVIN, SIGN-IN, SITE) in the window."""
+    whys = []
+    touched = False
+    lines = wall_lines(f.get("Notes"))
+    opened_profile = {}
+    for w in lines:
+        if w["mark"] == "BLOCKER OPEN" and w["kind"] == "SIGN-IN":
+            opened_profile[w["subject"].lower()] = w["profile"]
+        if not w["at"] or w["at"] <= cut:
+            continue
+        if w["kind"] in ("KEVIN", "SIGN-IN", "SITE"):
+            touched = True
+        if w["mark"] == "BLOCKER OPEN" and w["kind"] == "KEVIN":
+            step = (w["subject"].split() or [""])[0].lower()
+            if step not in KEVIN_STEPS_ALLOWED:
+                whys.append("you did " + KEVIN_STEP_WORDS.get(step, "a step yourself"))
+        elif w["mark"] == "BLOCKER CLEARED" and w["rest"].startswith(KEVIN_CANT_NOTE):
+            whys.append("you could not do the step it gave you")
+        elif w["mark"] == "BLOCKER CLEARED" and w["kind"] == "SIGN-IN" and SIGNED_IN_NOTE in w["rest"]:
+            host = w["subject"].lower()
+            s = kevin_signin(logins, host, opened_profile.get(host, ""), w["at"])
+            if s and access_not_kept(logins, s):
+                whys.append("you signed the robot in again (access not kept)")
+    at = _aware(f.get("Approved At"))
+    decided = bool(f.get("Approval Outcome")) and bool(at) and at > cut
+    seen = []
+    for w in whys:                      # each reason once per card, in the order it happened
+        if w not in seen:
+            seen.append(w)
+    return (decided or touched), seen
+
+
+def facts_handback(rows, tasks, team, aar, now, logins, logins_err=None):
+    """rows: the 14-day read (verdicts plus walls, with Notes). Its control is the verdicts line's:
+    every decided agent task the main board read can see inside the window must be in it."""
+    cut = now - timedelta(days=DECIDED_DAYS)
+    names = {r["id"]: (r.get("fields") or {}).get("Name") or r["id"]
+             for r in team or [] if (r.get("fields") or {}).get("Is AI Agent")}
+    ids = {r["id"] for r in rows}
+    missing = []
+    for r in tasks or []:
+        f = r.get("fields") or {}
+        at = _aware(f.get("Approved At"))
+        if not f.get("Approval Outcome") or not at or at <= cut or aar.form_card(f.get("Task Name"), f.get("Notes")):
+            continue
+        if any(x in names for x in (f.get("Sent For Approval By") or []) + (f.get("Team Member") or [])):
+            if r["id"] not in ids:
+                missing.append(r["id"])
+    if missing:
+        return {"error": "the 14-day read missed %d the task board shows (%s)" % (len(missing), ", ".join(missing[:3]))}
+    per, reasons, items = {}, {}, []
+    for r in rows:
+        f = r.get("fields") or {}
+        if aar.form_card(f.get("Task Name"), f.get("Notes")):
+            continue
+        who = next((x for x in f.get("Sent For Approval By") or [] if x in names), None) or \
+            next((x for x in f.get("Team Member") or [] if x in names), None)
+        if not who:
+            continue                    # a person's card, or no agent on it: not an agent's hand-back
+        counted, whys = card_handbacks(f, logins, cut)
+        if not counted:
+            continue
+        a = per.setdefault(who, {"id": who, "name": names[who], "cards": 0, "back": 0, "reasons": {}})
+        a["cards"] += 1
+        if whys:
+            a["back"] += 1
+            for w in whys:
+                a["reasons"][w] = a["reasons"].get(w, 0) + 1
+                reasons[w] = reasons.get(w, 0) + 1
+            items.append(item(f.get("Task Name"), r["id"], "%s: %s" % (names[who], ", ".join(whys))))
+    for a in per.values():
+        a["score"] = round(100.0 * (a["cards"] - a["back"]) / a["cards"])
+    by_agent = sorted(per.values(), key=lambda a: (a["score"], -a["cards"], a["name"]))
+    return {"cards": sum(a["cards"] for a in per.values()), "back": sum(a["back"] for a in per.values()),
+            "byAgent": by_agent, "items": items,
+            "reasons": sorted(reasons.items(), key=lambda kv: (-kv[1], kv[0])),
+            "signins": None if logins_err else signin_summary(logins, now), "loginsError": logins_err}
+
+
 LOG_HEADER_RE = re.compile(r"^===== .*? (\w{3} \w{3} +\d{1,2} \d{2}:\d{2}:\d{2}) \w+ (\d{4}) =====\s*$")
 
 
@@ -1747,6 +1979,17 @@ def read_decided(es, aar, now):
                % (since, aar.FORM_KEY_CLAUSE))
     fields = ["Approval Outcome", "Approved At", "Task Type", "Sent For Approval By", "Team Member",
               "Verdict Reason", "Task Name"]
+    return _get_all(es, es.TASKS_TABLE, [("filterByFormula", formula)] + [("fields[]", f) for f in fields])
+
+
+def read_handback(es, aar, now):
+    """Every task with a verdict in the window, or a wall line written in it (its last change is
+    then in the window too), with its Notes: the walls live there."""
+    since = (now - timedelta(days=DECIDED_DAYS + 1)).strftime("%Y-%m-%d")
+    formula = ("AND(OR(AND(LEN({Approval Outcome}&'')>0, IS_AFTER({Approved At}, DATETIME_PARSE('%s'))), "
+               "AND(FIND('BLOCKER ', {Notes}&''), IS_AFTER(LAST_MODIFIED_TIME(), DATETIME_PARSE('%s'))))%s)"
+               % (since, since, aar.FORM_KEY_CLAUSE))
+    fields = ["Task Name", "Approval Outcome", "Approved At", "Sent For Approval By", "Team Member", "Notes"]
     return _get_all(es, es.TASKS_TABLE, [("filterByFormula", formula)] + [("fields[]", f) for f in fields])
 
 
@@ -1886,6 +2129,15 @@ def gather(now, es, rows, lh_res, lh_err, measures, readers=None):
             f["firsttime"] = facts_firsttime(decided, tasks, aar, now)
         except Exception as exc:  # noqa: BLE001
             f["firsttime"] = {"error": "your verdicts could not be read (%s)" % str(exc)[:100]}
+    if no_board:
+        f["handback"] = {"error": no_board}
+    else:
+        try:
+            hb_rows = rd["handback"]() if "handback" in rd else read_handback(es, aar, now)
+            logins, logins_err = rd["logins"]() if "logins" in rd else read_logins(now)
+            f["handback"] = facts_handback(hb_rows, tasks, team, aar, now, logins, logins_err)
+        except Exception as exc:  # noqa: BLE001
+            f["handback"] = {"error": "the agents' cards and walls could not be read (%s)" % str(exc)[:100]}
     hits, unreadable = rd["limitHits"]() if "limitHits" in rd else read_limit_hits(now, al)
     f["allowance"] = facts_allowance(al, rows, now, hits, unreadable)
     return f
@@ -1897,7 +2149,7 @@ def judge_all(f, now):
         judge_bottlenecks(f["bottlenecks"], now), judge_carried(f["carried"]), judge_agents(f["agents"]),
         judge_jobs(f["jobs"]), judge_bugs(f["bugs"]), judge_data(f["data"], now), judge_missed(f["missed"]),
         judge_ontop(f["ontop"]), judge_queue(f["queue"]), judge_firsttime(f["firsttime"]),
-        judge_allowance(f["allowance"], now),
+        judge_handback(f["handback"]), judge_allowance(f["allowance"], now),
     ]
     # No bugs or errors can show a real week's trend from its first day: the queue's own log
     # says what was open 7 days ago, so that seeds the trend until the history holds a week.

@@ -154,6 +154,22 @@ Can it keep going?
 38. **Drafts approved first time %** — T4 over 14 days, the accuracy report's own population (form
     cards left out), checked against the task board's read: a verdict the board shows that the
     14-day read missed makes the line grey.
+38a. **Agent hand-back score %** (Kevin, 16 Oct 2026) — T4 over 14 days. Kevin does four things
+    only: approve, correct wrong work, pay and give access (a legal signature is an approval, after
+    which the agent signs for him). The score is the share of the agents' cards that asked him for
+    nothing else. Population: a task an AI agent sent (Sent For Approval By, else Team Member) with
+    a verdict in the window, or a KEVIN, SIGN-IN or SITE wall line written in it; robot form cards
+    and people's cards are left out. A card came back when a KEVIN wall opened for anything but
+    payment or purchase, when a clear says "Kevin cannot take this step", or when a SIGN-IN clear
+    came from a sign-in window (the robot browser's own `runs.jsonl` login line, within 6 hours
+    before) for a site and profile Kevin had already signed the robot in to in the 30 days before.
+    A clear the check found live by itself has no window and asks nothing of him. Verdicts are not
+    hand-backs: wrong work is line 38. Rationale: of the 36 cards that came back in the 14 days to
+    16 Oct, 20 were key or settings steps inside accounts the robot could have been given; the live
+    dry run read 40 of 288 (86%) with 32 of his 58 sign-ins again for a site the robot already had.
+    Green 95% or more, amber 85% to 95%, red under 85%; a sign-in log that cannot be read is never
+    green. Each agent's score rides on the line as `byAgent`, which the AI Agents scorecards read,
+    so the two surfaces cannot disagree. Checked against the task board like line 38.
 39. **Robot hours paused for the allowance** — T5: hours stopped in 7 days, the allowance guard's
     pauses joined with every limit line in any job's own `runs.log` (allowance.py's own `LIMIT_RE`
     and `parse_reset`), each running from its run's end line to the reset it names. The guard
@@ -173,7 +189,7 @@ judged by `scripts/ai_team_health.py` into the same `ai-team-verdict` row.
     task, the sweep's plus any opened since it on an open task (review of PR #795): 28 takes
     every walled task out, so counting a wall only once past its clock let the number fall with
     nothing fixed, and 19 of 33 walls were inside their clock that day. Line 33 (the code
-    backlog) and the rates (36, 38) never add to it: a backlog of 171 would bury every daily
+    backlog) and the rates (36, 38, 38a) never add to it: a backlog of 171 would bury every daily
     change, and a percentage is not a count. A task, job, email or check two lines both count is
     counted once: each line hands on the ids of what it counted (`task:`, `job:`, `mail:`,
     `check:`), and each id is taken off once for every extra line it is on. The live dry run on
@@ -195,7 +211,7 @@ judged by `scripts/ai_team_health.py` into the same `ai-team-verdict` row.
     two, then "+N more").
 42. **Something is broken (light)** — T10 over lines 31 to 35, the code backlog included (red
     when more are open than a week ago). "Nothing is broken" or "Something is broken".
-43. **It can keep going (light)** — T10 over lines 36 to 39. "It can keep going" or "It may not
+43. **It can keep going (light)** — T10 over lines 36 to 39, and 38a since 16 Oct 2026. "It can keep going" or "It may not
     keep going".
 44. **AI team answer, week on week** — T10 over 40 to 43, in order: red "Getting worse" when,
     with a number from last week, a light is red now that was not on record as red at the end of

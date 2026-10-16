@@ -350,6 +350,104 @@ print(json.dumps([[col(l), l["number"]] for l in ls]))`);
   });
 });
 
+// Kevin, 16 Oct 2026: he does four things only (approve, correct wrong work, pay, give access).
+// The shapes below are the live cards that set the rule, renamed: an invoice he paid (not counted),
+// a token step he could not follow (came back twice over), an insurer he signed the robot in to a
+// second time (access not kept). Names and hosts are invented: this repo is public.
+const HANDBACK = `
+aar = load("aar", "agent-accuracy-report.py")
+AG, AG2, ROY = "recAGENTxxxxxxx01", "recAGENTxxxxxxx02", "recPERSONxxxxxx1"
+team = [{"id": AG, "fields": {"Name": "AI Inbox", "Is AI Agent": True}},
+        {"id": AG2, "fields": {"Name": "AI Builder", "Is AI Agent": True}},
+        {"id": ROY, "fields": {"Name": "A Person"}}]
+st = lambda dt: dt.astimezone(L).strftime("%d %b %Y %H:%M")
+def wall(dt, mark, kind, subject, rest, by="agent-dispatch"):
+    return "[%s — %s] BLOCKER %s (%s %s): %s" % (st(dt), by, mark, kind, subject, rest)
+D1, D2 = NOW - timedelta(days=1), NOW - timedelta(days=2)
+def card(i, notes="", outcome="Approved as-is", at=None, who=AG, name=None):
+    f = {"Task Name": name or i, "Notes": notes, "Sent For Approval By": [who]}
+    if outcome:
+        f["Approval Outcome"] = outcome; f["Approved At"] = iso(at or D2)
+    return {"id": i, "fields": f}
+rows = [
+    card("rONECLICK"),
+    card("rPAID", wall(D1, "OPEN", "KEVIN", "payment", "90 GBP to a contractor, ref 527") + "\\n" +
+         wall(D1 + timedelta(minutes=30), "CLEARED", "KEVIN", "payment", "Kevin says the step is done: paid", by="Kevin")),
+    card("rTOKEN", wall(D2, "OPEN", "KEVIN", "credential", "1. Open the tokens page. 2. Regenerate the robots' key.") + "\\n" +
+         wall(D1, "CLEARED", "KEVIN", "credential", "Kevin cannot take this step: I don't know which tokens you mean.", by="Kevin"), who=AG2),
+    card("rSIGNAGAIN", wall(D1 - timedelta(hours=1), "OPEN", "SIGN-IN", "www.insurer-one.example", "session check signedIn false") + "\\n" +
+         wall(D1, "CLEARED", "SIGN-IN", "www.insurer-one.example", "Kevin signed in to Insurer One (www.insurer-one.example). The session is live now", by="Robot sign-in")),
+    card("rSIGNFIRST", wall(D1 - timedelta(hours=1), "OPEN", "SIGN-IN", "www.insurer-two.example", "signed out") + "\\n" +
+         wall(D1, "CLEARED", "SIGN-IN", "www.insurer-two.example", "Kevin signed in to Insurer Two (www.insurer-two.example). The session is live now", by="Robot sign-in")),
+    card("rCHECKONLY", wall(D1 - timedelta(hours=1), "OPEN", "SIGN-IN", "www.bank-three.example", "signed out") + "\\n" +
+         wall(D1, "CLEARED", "SIGN-IN", "www.bank-three.example", "Kevin signed in to Bank Three (www.bank-three.example). The session is live now", by="Robot sign-in")),
+    card("rSIGNATURE", wall(D1, "OPEN", "KEVIN", "signature", "sign the court form")),
+    card("rOLD", wall(NOW - timedelta(days=20), "OPEN", "KEVIN", "credential", "old step"), at=NOW - timedelta(days=20)),
+    card("rFORM", wall(D1, "OPEN", "KEVIN", "credential", "x"), name="RENT FORM: a tenant's direct payment form"),
+    card("rPERSON", wall(D1, "OPEN", "KEVIN", "credential", "x"), who=ROY),
+    card("rWALLONLY", wall(NOW - timedelta(days=3), "OPEN", "KEVIN", "physical", "swap the camera's plug"), outcome=None),
+    card("rPROFILE", wall(D1 - timedelta(hours=1), "OPEN", "SIGN-IN", "my.energy.example", "signed out [profile flat-2]") + "\\n" +
+         wall(D1, "CLEARED", "SIGN-IN", "my.energy.example", "Kevin signed in to Energy (my.energy.example). The session is live now", by="Robot sign-in")),
+]
+win = lambda dt, host, profile="default": {"at": dt, "host": host, "profile": profile}
+logins = [win(NOW - timedelta(days=10), "www.insurer-one.example"),
+          win(D1 - timedelta(minutes=6), "www.insurer-one.example"),
+          win(D1 - timedelta(minutes=6), "www.insurer-two.example"),
+          win(NOW - timedelta(days=5), "my.energy.example", "flat-1"),
+          win(D1 - timedelta(minutes=6), "my.energy.example", "flat-2")]
+board = [r for r in rows if r["id"] not in ("rOLD",)]
+`;
+
+describe('the hand-back line (Kevin, 16 Oct 2026): approve, correct, pay or give access, nothing else', () => {
+  it('green 95%+, amber 85-95%, red under 85%; grey on no cards or an error; a sign-in log not read is never green', () => {
+    const j = (cards, back, err = 'None') => `A.judge_handback({"cards": ${cards}, "back": ${back}, "loginsError": ${err}})`;
+    expect(colours(`[${j(100, 5)}, ${j(100, 6)}, ${j(100, 15)}, ${j(100, 16)}, ${j(0, 0)}, A.judge_handback({"error": "x"}), ${j(10, 0, '"gone"')}]`))
+      .toEqual(['green', 'amber', 'amber', 'red', 'grey', 'grey', 'amber']);
+    const out = py(`l = ${j(10, 0, '"gone"')}\nprint(json.dumps([l["answer"], l.get("partial")]))`);
+    expect(out).toEqual(['0 of 10 cards came back to you (sign-in log not read)', true]);
+  });
+
+  it('counts the steps outside the four, never paying, a first sign-in or a session the check found live', () => {
+    const out = py(`${HANDBACK}
+f = A.facts_handback(rows, board, team, aar, NOW, logins)
+back = {i["id"]: i["note"] for i in f["items"]}
+print(json.dumps({"cards": f["cards"], "back": f["back"], "items": back,
+                  "agents": [[a["name"], a["cards"], a["back"], a["score"]] for a in f["byAgent"]]}))`);
+    expect(out.cards).toBe(9);           // rOLD is outside the window, rFORM a form card, rPERSON a person's
+    expect(out.back).toBe(4);
+    expect(Object.keys(out.items).sort()).toEqual(['rSIGNAGAIN', 'rSIGNATURE', 'rTOKEN', 'rWALLONLY']);
+    expect(out.items.rTOKEN).toBe('AI Builder: you did a sign-in or settings step, you could not do the step it gave you');
+    expect(out.items.rSIGNAGAIN).toBe('AI Inbox: you signed the robot in again (access not kept)');
+    expect(out.items.rSIGNATURE).toBe('AI Inbox: you did a signature');
+    expect(out.items.rWALLONLY).toBe('AI Inbox: you did an in-person step');      // a wall with no verdict yet still counts
+    expect(out.agents).toEqual([['AI Builder', 1, 1, 0], ['AI Inbox', 8, 3, 62]]);   // worst first
+  });
+
+  it("the line carries each agent's score for the AI Agents page, and its reasons", () => {
+    const out = py(`${HANDBACK}
+l = A.judge_handback(A.facts_handback(rows, board, team, aar, NOW, logins))
+print(json.dumps({"colour": l["colour"], "number": l["number"], "answer": l["answer"], "byAgent": l["byAgent"], "extra": l["extra"]}))`);
+    expect(out).toMatchObject({ colour: 'red', number: 56, answer: '4 of 9 cards came back to you' });
+    expect(out.byAgent[1]).toEqual({ id: 'recAGENTxxxxxxx01', name: 'AI Inbox', cards: 8, back: 3, score: 62, colour: 'red',
+      reasons: { 'you signed the robot in again (access not kept)': 1, 'you did a signature': 1, 'you did an in-person step': 1 } });
+    expect(out.extra).toContainEqual(['Robot sign-ins you did', '5, 1 of them again for a site the robot already had']);
+  });
+
+  it('a decided agent card the board shows but the read missed makes the line grey, never a better score', () => {
+    const out = py(`${HANDBACK}
+print(json.dumps(A.facts_handback([r for r in rows if r["id"] != "rTOKEN"], board, team, aar, NOW, logins)))`);
+    expect(out.error).toMatch(/missed 1 the task board shows \(rTOKEN\)/);
+  });
+
+  it('two windows within two hours are one sign-in; the second sign-in to a site within 30 days is a repeat', () => {
+    const out = py(`
+w = lambda d, h: {"at": NOW - timedelta(days=d, hours=h), "host": "a.example", "profile": "default"}
+print(json.dumps([A.signin_summary([w(3, 1), w(3, 0)], NOW), A.signin_summary([w(25, 0), w(3, 1), w(3, 0)], NOW),
+                  A.signin_summary([w(40, 0), w(3, 0)], NOW)]))`);
+    expect(out).toEqual([{ total: 1, repeats: 0 }, { total: 1, repeats: 1 }, { total: 1, repeats: 0 }]);
+  });
+});
+
 describe('the verdict, the groups and the trend', () => {
   const lines = (spec) => `[A.line(d["key"], c, "a", 1) if c != "grey" else A.grey(d["key"], "x") for d, c in zip(A.LINES, ${spec})]`;
 
@@ -443,7 +541,10 @@ readers = {"lh": lh, "tm": TM, "tri": None, "aar": load("aar", "agent-accuracy-r
            "events": lambda: [], "passes": lambda: {}, "decided": lambda: [
                {"id": "r%d" % i, "fields": {"Approval Outcome": "Approved as-is", "Approved At": ago(hours=5), "Sent For Approval By": [AG], "Task Name": "t"}} for i in range(9)],
            "history": lambda: ({}, None), "finishes": lambda: [], "limitHits": lambda: ([], []),
-           "schedule": lambda: {}}
+           "schedule": lambda: {},
+           "handback": lambda: [
+               {"id": "r%d" % i, "fields": {"Approval Outcome": "Approved as-is", "Approved At": ago(hours=5), "Sent For Approval By": [AG], "Task Name": "t", "Notes": ""}} for i in range(9)],
+           "logins": lambda: ([], None)}
 ${over}
 row = A.verdict_row(NOW, ES(), [], lh_res, None, measures, readers)
 p = json.loads(row["payload"]) if row.get("payload") else None
@@ -455,12 +556,12 @@ describe('the row', () => {
   // Every reader stubbed: the row must hold fourteen lines and the verdict, and a reader that
   // throws must turn its own line grey, never the whole row Failed and never a green.
 
-  it('carries fourteen lines in Kevin\'s order, three groups and one verdict', () => {
+  it('carries fifteen lines in Kevin\'s order (the hand-back line since 16 Oct 2026), three groups and one verdict', () => {
     const out = py(stubs());
     expect(out.status).toBe('Worked');
     expect(out.key).toBe('ai-team-verdict');
     expect(out.lines.map(l => l[0])).toEqual(['emails', 'responses', 'moving', 'bottlenecks', 'carried', 'agents', 'jobs',
-      'bugs', 'data', 'missed', 'ontop', 'queue', 'firsttime', 'allowance']);
+      'bugs', 'data', 'missed', 'ontop', 'queue', 'firsttime', 'handback', 'allowance']);
     expect(out.lines.every(l => l[1] === 'green')).toBe(true);
     expect(out.overall).toMatchObject({ colour: 'green', text: 'Healthy', grey: 0 });
     // The row's detail is the simpler view's answer and number (15 Oct 2026).
@@ -482,7 +583,7 @@ readers["decided"] = lambda: (_ for _ in ()).throw(RuntimeError("HTTP 429"))`));
     const out = py(stubs().replace('row = A.verdict_row(NOW, ES(), [], lh_res, None, measures, readers)',
       'row = A.verdict_row(NOW, ES(), [], None, "could not read Airtable", measures, readers)'));
     const grey = out.lines.filter(l => l[1] === 'grey').map(l => l[0]);
-    expect(grey).toEqual(['responses', 'moving', 'agents', 'missed', 'ontop', 'queue', 'firsttime']);
+    expect(grey).toEqual(['responses', 'moving', 'agents', 'missed', 'ontop', 'queue', 'firsttime', 'handback']);
     expect(out.overall.colour).not.toBe('green');
   });
 });
