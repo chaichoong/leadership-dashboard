@@ -2501,6 +2501,21 @@ async function signingAsks(p) {
   return { boxes: labels.length, empty: labels.filter(l => /click to sign/i.test(l)).length, remaining: m ? Number(m[1]) : null };
 }
 
+// Adobe's Submit never stops moving once every field is filled (a pulse; live, 16 Oct 2026: Playwright's
+// click waited 30 s on "element is not stable" twice and nothing was signed). So prove it is the thing at
+// its own centre, with nothing over it, and press it there without waiting for it to keep still.
+async function assertSubmitPressable(p, footer) {
+  const hit = await footer.evaluate((el) => {
+    const r = el.getBoundingClientRect();
+    const top = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
+    return { onTop: !!top && (top === el || el.contains(top)), inView: r.width > 0 && r.height > 0
+      && r.top >= 0 && r.left >= 0 && r.bottom <= innerHeight && r.right <= innerWidth };
+  });
+  if (!hit.inView || !hit.onTop) {
+    die(`Adobe's Submit is ${hit.inView ? 'covered by something else' : 'not on screen'}, so it was not pressed. Nothing was signed.`);
+  }
+}
+
 // The saved signature into every empty box, then Adobe's own word that nothing else is required.
 async function applySavedSignature(p, door) {
   const boxes = p.locator('[data-testid="signature-form-field"]');
@@ -2610,10 +2625,11 @@ async function runSignFlow(page, ctx, o) {
   // His approval, read again at the last moment: an Undo, a knock-back or a resubmission since the
   // run began stops it here (review, 16 Oct 2026).
   if (o.recheck) await o.recheck();
+  await assertSubmitPressable(p, applied.footer);
   // From the press on, every failure is "not confirmed", never "nothing was signed": a click that
   // throws may still have landed (second review, 16 Oct 2026).
   try {
-    await applied.footer.click();
+    await applied.footer.click({ force: true, timeout: 10000 });
     // Adobe moves off the form when it takes the signature. Believed only from its record, below.
     await applied.footer.waitFor({ state: 'detached', timeout: 90000 }).catch(() => {});
     await p.waitForTimeout(SIGN_WAIT.settle);

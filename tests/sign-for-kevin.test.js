@@ -385,7 +385,7 @@ function adobe(over = {}) {
   return Object.assign({
     rows: [{ id: ID, name: NAME }],
     agreements: { [ID]: { name: NAME, status: 'Waiting For Me to Sign' }, [OTHER_ID]: { name: 'Some_Other_Document', status: 'Waiting For Me to Sign' } },
-    boxes: 1, extraRequired: 0, savedLabel: 'Agile Lets', signingAid: null, signingTitle: null,
+    boxes: 1, extraRequired: 0, savedLabel: 'Agile Lets', signingAid: null, signingTitle: null, pulse: true, coverSubmit: false,
     statusAfterSubmit: 'Completed', submits: 0, rowSignPressed: 0, pdf: null, renameAfterSubmit: null,
   }, over);
 }
@@ -433,13 +433,16 @@ ${/Waiting For Me/.test(a.status) || s.alwaysView ? `<button id="view">View &amp
     const boxes = Array.from({ length: s.boxes }, () => '<div data-testid="signature-form-field" aria-label="Click to Sign (required)" style="width:120px;height:30px;border:1px solid"></div>').join('');
     return route.fulfill(html(`<input aria-label="Document Title" value="${s.signingTitle || a.name}">
 <div id="left"></div>${boxes}<input data-testid="date-of-signing-field" value="16/10/2026">
-<button data-testid="footer-submit-button">Submit</button><script>
+${s.pulse ? '<style>@keyframes pulse{0%{transform:scale(1)}50%{transform:scale(1.06)}100%{transform:scale(1)}}.go{animation:pulse .6s infinite}</style>' : ''}
+<button data-testid="footer-submit-button" style="position:fixed;bottom:10px;right:20px">Submit</button>
+${s.coverSubmit ? '<div style="position:fixed;bottom:0;right:0;width:300px;height:80px;background:white;z-index:9">a banner over Submit</div>' : ''}<script>
 const EXTRA = ${s.extraRequired};
 const footer = document.querySelector('[data-testid=footer-submit-button]');
 function refresh() {
   const empty = [...document.querySelectorAll('[data-testid=signature-form-field]')].filter(b => /Click to Sign/.test(b.getAttribute('aria-label'))).length + EXTRA;
   document.getElementById('left').textContent = empty + ' required field' + (empty === 1 ? '' : 's') + ' remaining';
   footer.setAttribute('aria-label', empty ? empty + ' required fields remaining' : 'All required fields complete. Click submit to sign.');
+  footer.classList.toggle('go', !empty);         // Adobe's Submit pulses once every field is filled (live, 16 Oct 2026)
 }
 document.querySelectorAll('[data-testid=signature-form-field]').forEach(b => b.onclick = () => { b.setAttribute('aria-label', ${JSON.stringify(s.savedLabel)} + ' Click to change (required)'); refresh(); });
 footer.onclick = () => fetch('/submit?aid=${aid}', { method: 'POST' }).then(() => { footer.remove(); document.body.append("You're all set"); });
@@ -465,6 +468,16 @@ describe('the robot signs the approved agreement, and only it', () => {
     expect(r).toMatchObject({ agreementId: ID, statusBefore: 'Waiting For Me to Sign', statusAfter: 'Completed', boxes: 1 });
     expect(s.submits).toBe(1);
     expect(s.rowSignPressed).toBe(0);
+  });
+
+  it('presses Adobe\'s pulsing Submit (it never keeps still), and never one something covers', async () => {
+    const s = adobe();                              // pulse is on by default, as on the live page
+    expect((await runFlow(s, { mode: 'sign' })).statusAfter).toBe('Completed');
+    expect(s.submits).toBe(1);
+    const t = adobe({ coverSubmit: true });
+    const err = await runFlow(t, { mode: 'sign' }).catch((e) => e);
+    expect(err.message).toMatch(/covered by something else/);
+    expect([err.unconfirmed, t.submits]).toEqual([undefined, 0]);      // refused before the press: no lock
   });
 
   it('signs every box on the document, not just the first', async () => {
