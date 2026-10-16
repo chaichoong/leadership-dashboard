@@ -25,6 +25,7 @@ const ESTATE_SCRIPTS = [
   'scripts/content-engine/render.py',
   // 15 Oct 2026: the "Is the AI team healthy?" verdict, judged on the estate-status pass
   'scripts/ai_team_health.py',
+  'scripts/key-register.py',
   'scripts/approval_evidence.py',
   'scripts/calendar-write.py',
   'scripts/send-email.py',

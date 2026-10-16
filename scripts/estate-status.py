@@ -1733,6 +1733,7 @@ def build_rows(now, with_loop_health=True, with_verdict=True):
     rows.append(robot_signins_row(now))
     rows.append(blockers_row(now))
     rows.append(built_row(now))
+    rows.append(keys_row(now))
     if with_loop_health:
         lh_res, lh_err = loop_health_report()
         rows.append(loop_health_row(now, lh_res, lh_err))
@@ -1759,6 +1760,26 @@ def build_rows(now, with_loop_health=True, with_verdict=True):
 
 # What the last build_rows read, for the verdict's dry run (scripts/ai_team_health.py dry-run).
 LAST_LOOP_HEALTH = {}
+
+
+def keys_row(now):
+    """The robots' keys (Kevin, 16 Oct 2026), from scripts/key-register.py: a key that fails its
+    test, is missing or runs out within 14 days makes the row Failed, so the red pass gives it to
+    the Builder after 2 days, never to Kevin. The check re-runs once a day, or the moment a key
+    file changes; in between this reads the saved result. A module that will not load is a Failed
+    row, never a gap."""
+    try:
+        spec = importlib.util.spec_from_file_location("key_register_for_status", os.path.join(HERE, "key-register.py"))
+        kr = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(kr)
+    except Exception as exc:  # noqa: BLE001
+        return {"key": "keys", "kind": "report", "label": "Robot keys", "lastRun": _iso(now), "status": "Failed",
+                "detail": "The key check could not load: %s" % str(exc)[:240]}
+    try:
+        return kr.status_row(now)
+    except BaseException as exc:  # noqa: BLE001 — one row's failure must never lose the whole pass
+        return {"key": "keys", "kind": "report", "label": "Robot keys", "lastRun": _iso(now), "status": "Failed",
+                "detail": "The key check stopped: %s" % type(exc).__name__}
 
 
 def ai_team_verdict_row(now, rows, lh_res, lh_err, measures):

@@ -287,9 +287,11 @@ describe('the Robot sign-in app and its link', () => {
     expect(signIn.indexOf('if theProfile is not "default"')).toBeGreaterThan(-1);
     expect(signIn.indexOf('if theProfile is not "default"')).toBeLessThan(signIn.indexOf('signin-done --site'));
     expect(src).toMatch(/signin-list 2>&1/);
-    // The full list takes several picks at once: the watcher's message asks for both flats.
+    // The full list takes several picks at once: the watcher's message asks for both flats. Since
+    // 16 Oct 2026 its second line is "+ Replace a key" (scripts/key-register.py).
     const runH = src.slice(src.indexOf('\non run\n'), src.indexOf('\nend run\n'));
-    expect(runH).toMatch(/choose from list \(\{addNewItem\} & allSites\(\)\)[^\n]*with multiple selections allowed/);
+    expect(runH).toMatch(/choose from list \(\{addNewItem, replaceKeyItem\} & allSites\(\)\)[^\n]*with multiple selections allowed/);
+    expect(runH).toMatch(/if \(choice as list\) contains replaceKeyItem then\n\t\trunReplaceKey\(""\)/);
     // A site already on the list opens on its own lines (a flat's profile), never as a new main-profile line.
     const ask = src.slice(src.indexOf('on askNewSite'), src.indexOf('end askNewSite'));
     expect(ask).toMatch(/agent-browser\.js signin-list --for " & quoted form of theUrl/);
