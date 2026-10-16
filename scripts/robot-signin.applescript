@@ -709,7 +709,12 @@ on runReplaceKey(keyName)
 		display dialog out with title "Replace a key: done" buttons {"OK"} default button "OK"
 	on error errMsg number errNum
 		do shell script "rm -f " & quoted form of inFile
-		if errNum is -128 then return
+		if errNum is -128 then
+			-- Stop ends the watching, not the replace, which runs detached and may still finish
+			-- (review of PR #799): say where the answer will be instead of going quiet.
+			display alert "Replace a key" message "Stopped watching. The replace may still finish on its own: the Robot keys row on the AI Agents page's Estate tab says within ten minutes whether every copy took the new key."
+			return
+		end if
 		display alert "Replace a key" message errMsg
 	end try
 end runReplaceKey

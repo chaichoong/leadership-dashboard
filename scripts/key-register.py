@@ -53,6 +53,7 @@ import json
 import os
 import re
 import secrets
+import shutil
 import stat
 import subprocess
 import sys
@@ -83,9 +84,29 @@ INCOMING_MAX_MINUTES = 60
 HTTP_TIMEOUT = 20
 CLAUDE_TOKEN_DAYS = 365       # a `claude setup-token` sign-in lasts a year (Anthropic's own wording)
 
-# Commands, overridable so a test can stand in for them (never a real Worker or GitHub write).
-WRANGLER = os.environ.get("KEY_REGISTER_WRANGLER", "npx --yes wrangler").split()
-GH = os.environ.get("KEY_REGISTER_GH", "gh").split()
+# Commands, overridable so a test can stand in for them (never a real Worker or GitHub write). launchd
+# and the Robot sign-in app run with a bare PATH (/usr/bin:/bin:/usr/sbin:/sbin), so each tool is
+# found by its full path (review of PR #799: "gh" and "npx" alone were "file not found" in production).
+def _node_bin():
+    def ver(p):
+        m = re.search(r"/v(\d+)\.(\d+)\.(\d+)/bin$", p)
+        return tuple(int(x) for x in m.groups()) if m else (0, 0, 0)
+    found = sorted(glob.glob(os.path.expanduser("~/.nvm/versions/node/*/bin")), key=ver)
+    return found[-1] if found else ""
+
+
+def _tool(name, *places):
+    for p in places:
+        if p and os.access(p, os.X_OK):
+            return p
+    return shutil.which(name) or name
+
+
+NODE_BIN = _node_bin()
+WRANGLER = os.environ.get("KEY_REGISTER_WRANGLER", "").split() or \
+    [_tool("npx", os.path.join(NODE_BIN, "npx") if NODE_BIN else "", "/opt/homebrew/bin/npx", "/usr/local/bin/npx"), "--yes", "wrangler"]
+GH = os.environ.get("KEY_REGISTER_GH", "").split() or \
+    [_tool("gh", os.path.expanduser("~/tools/bin/gh"), "/opt/homebrew/bin/gh", "/usr/local/bin/gh")]
 
 KINDS = ("key", "renews", "shared", "passcode", "id", "setting", "worker-only", "unknown")
 
@@ -151,6 +172,11 @@ CATALOGUE = {
 }
 IDS = ("ghl_location_id", "ghl_location_id_od", "ghl_location_id_runpreneur", "ghl_user_id_kevin",
        "pingen_client_id", "pingen_org_id", "strava_client_id")
+# Files that are settings, not keys. Anything not named here or in the catalogue is "unknown" and
+# flagged, so a new key file is never quietly filed as a setting (review of PR #799).
+SETTINGS = ("direct-payment-landlord.json", "home-battery-names.json", "letterheads.json", "payment-run.json",
+            "redact-names.txt", "rent-check-pre-slate.json", "standing-holds.json", "tenancy-pack-exceptions.json",
+            "text-sending-on", "utilita_accounts.json", "aqara.json")
 SKIP_FILES = ("key-register.json",)
 
 # A Worker or GitHub secret that is a copy of a Mac key file. Only names that MUST hold the same value
@@ -162,9 +188,21 @@ COPY_OF = {
     "APPROVALS_ADMIN_KEY": "approvals_admin_key", "CEO_TRANSCRIPT_KEY": "ceo_transcript_key",
     "AGENT_RUNNER_TOKEN": "agent_runner_token", "GHL_API_KEY": "ghl_api_key",
 }
+# The same, for a secret whose name means different things in different Workers: (worker, secret).
+COPY_OF_AT = {
+    ("money-confidence-daily", "TRIGGER_KEY"): "money_trigger_key",       # its manual test endpoints
+    ("claude-proxy", "PROXY_SERVICE_TOKEN_2"): "proxy_service_token2",    # od_compose.py's bearer
+    ("money-confidence-daily", "PROXY_TOKEN"): "proxy_service_token2",    # its wrangler toml: = PROXY_SERVICE_TOKEN_2
+}
+# A Worker-only secret that is a key to an OUTSIDE service: any valid key from that service works, so
+# one paste may go to every Worker holding one. Any other Worker-only secret is a key we made that
+# pairs with a caller this register cannot see (PROXY_TOKEN, BEARER_TOKEN, ...): listed, never
+# replaced here, because a new value in one place breaks the other (review of PR #799).
+OUTSIDE_KEYS = ("ANTHROPIC_API_KEY", "CLAUDE_API_KEY", "RESEND_API_KEY", "SLACK_BOT_TOKEN", "SLACK_SIGNING_SECRET",
+                "GOOGLE_CLIENT_SECRET", "GOOGLE_REFRESH_TOKEN", "GOOGLE_SERVICE_ACCOUNT_JSON", "SUPABASE_SERVICE_KEY")
 # Worker secrets that are not secrets at all (text, addresses, ids): listed as settings.
 WORKER_SETTINGS = ("FROM_EMAIL", "RECIPIENT_EMAIL", "PERSONA_CONTEXT", "QUARTER_CONTEXT", "DRIVE_PARENT_FOLDER_ID",
-                   "GHL_LOCATION_ID", "PM_KEVIN_AIRTABLE_ID", "GOOGLE_CLIENT_ID", "ALLOWED_ORIGIN")
+                   "GHL_LOCATION_ID", "PM_KEVIN_AIRTABLE_ID", "GOOGLE_CLIENT_ID", "ALLOWED_ORIGIN", "CALENDAR_ICS_URL")
 WORKER_PASSCODES = ("PM_PASSCODE", "PM_PASSCODE_KEVIN")        # typed by people: never changed by a script
 
 
@@ -206,13 +244,15 @@ def read_value(path):
 
 
 def load_register(path=REGISTER):
+    """A ValueError, never SystemExit, for a broken register: the status pass catches Exception and
+    must turn it into a Failed row, not lose every row (review of PR #799)."""
     try:
         with open(path, encoding="utf-8") as fh:
             d = json.load(fh)
     except FileNotFoundError:
         return {"version": 1, "keys": {}}
-    if not isinstance(d.get("keys"), dict):
-        raise SystemExit("ERROR: %s is not a register (no keys)" % path)
+    if not isinstance(d, dict) or not isinstance(d.get("keys"), dict):
+        raise ValueError("%s is not a register (no keys)" % path)
     return d
 
 
@@ -222,9 +262,10 @@ def save_register(reg, path=REGISTER):
 
 
 def worker_names(repo=REPO):
-    """Every Worker this repo deploys: the top-level name in each wrangler.toml."""
+    """Every Worker this repo deploys: the top-level name in each wrangler*.toml (a folder can hold
+    two: scripts/slack-automation has wrangler.money-daily.toml, review of PR #799)."""
     out = []
-    for p in sorted(glob.glob(os.path.join(repo, "**", "wrangler.toml"), recursive=True)):
+    for p in sorted(glob.glob(os.path.join(repo, "**", "wrangler*.toml"), recursive=True)):
         if "/node_modules/" in p or "/.claude/worktrees/" in p[len(repo):]:
             continue
         with open(p, encoding="utf-8") as fh:
@@ -254,9 +295,16 @@ def readers_of(name, repo=REPO):
 
 # ─── discovery: what the Workers and GitHub hold (names only) ─────────
 def run_cmd(args, value=None, timeout=120):
-    """A command whose only input is stdin. Its output is never printed whole: it can echo a value."""
+    """A command whose only input is stdin. Its output is never printed whole: it can echo a value.
+    A tool that is missing or hangs comes back as a failed run (exit 127), never an exception that
+    would stop a replace half way through its copies."""
+    env = dict(os.environ)
+    env["PATH"] = os.pathsep.join(x for x in (NODE_BIN, env.get("PATH", ""), "/opt/homebrew/bin", "/usr/local/bin") if x)
     with tempfile.TemporaryDirectory() as d:     # outside any project, so wrangler reads no config
-        return subprocess.run(args, input=value, capture_output=True, text=True, timeout=timeout, cwd=d)
+        try:
+            return subprocess.run(args, input=value, capture_output=True, text=True, timeout=timeout, cwd=d, env=env)
+        except (OSError, subprocess.SubprocessError) as exc:
+            return subprocess.CompletedProcess(args, 127, "", "could not run %s (%s)" % (os.path.basename(args[0]), type(exc).__name__))
 
 
 def _cf_token():
@@ -296,17 +344,20 @@ def list_github_secrets():
 
 
 def discover():
-    """{"workers": {worker: [secret names]}, "github": [names] or None, "errors": [...]}."""
-    out = {"workers": {}, "github": None, "errors": []}
+    """{"workers": {worker: [secret names]}, "github": [names] or None, "failed": [places that could
+    not be listed], "errors": [...]}. A place that could not be listed keeps its old copies."""
+    out = {"workers": {}, "github": None, "failed": [], "errors": []}
     for w in worker_names():
         names, err = list_worker_secrets(w)
         if err:
             out["errors"].append("Worker %s: %s" % (w, err))
+            out["failed"].append(w)
         else:
             out["workers"][w] = names
     names, err = list_github_secrets()
     if err:
         out["errors"].append("GitHub: %s" % err)
+        out["failed"].append("github")
     else:
         out["github"] = names
     return out
@@ -321,16 +372,25 @@ def copy_rows(found):
         c = {"where": where, "secret": secret}
         if worker:
             c["worker"] = worker
-        if secret in COPY_OF:
-            copies.setdefault(COPY_OF[secret], []).append(c)
+        mac = COPY_OF_AT.get((worker, secret)) or COPY_OF.get(secret)
+        if mac:
+            copies.setdefault(mac, []).append(c)
             continue
-        key = "%s:%s" % ("worker" if where == "worker" else "github", secret)
-        row = own.setdefault(key, {"service": "Cloudflare Workers" if where == "worker" else "GitHub",
-                                   "kind": "setting" if secret in WORKER_SETTINGS else
-                                   "passcode" if secret in WORKER_PASSCODES else "worker-only",
-                                   "test": "", "file": None, "copies": [],
-                                   "purpose": "held only in %s, never on the Mac" % ("Cloudflare" if where == "worker" else "GitHub"),
-                                   "renew": "Kevin makes a new one at the service, then pastes it into Replace a key"})
+        place = "Cloudflare" if where == "worker" else "GitHub"
+        if secret in OUTSIDE_KEYS:
+            key, kind = "%s:%s" % ("worker" if where == "worker" else "github", secret), "worker-only"
+            purpose = "a key to an outside service, held only in %s" % place
+        elif secret in WORKER_SETTINGS or secret in WORKER_PASSCODES:
+            key = "%s:%s" % ("worker" if where == "worker" else "github", secret)
+            kind = "setting" if secret in WORKER_SETTINGS else "passcode"
+            purpose = "not a key" if kind == "setting" else "a passcode people type"
+        else:
+            key, kind = "%s:%s:%s" % (where, worker or "repo", secret), "worker-pair"
+            purpose = "a key we made, paired with a caller this register cannot see: listed, never replaced here"
+        row = own.setdefault(key, {"service": place, "kind": kind, "test": "", "file": None, "copies": [],
+                                   "purpose": purpose,
+                                   "renew": "Kevin makes a new one at the service, then pastes it into Replace a key"
+                                   if kind == "worker-only" else "not replaced by a script"})
         row["copies"].append(c)
     return copies, own
 
@@ -341,7 +401,7 @@ def describe(name):
         return dict(CATALOGUE[name])
     if name in IDS:
         return {"service": "", "kind": "id", "test": "", "purpose": "an identifier, not a secret"}
-    if name.endswith((".json", ".txt")) or name.startswith(("content_engine_", "text-sending")):
+    if name in SETTINGS or name.startswith("content_engine_"):
         return {"service": "", "kind": "setting", "test": "", "purpose": "a setting file, not a key"}
     return {"service": "", "kind": "unknown", "test": "", "purpose": "nobody has described this file yet"}
 
@@ -358,9 +418,9 @@ def seed(found=None, config_dir=CONFIG_DIR, reg_path=REGISTER, with_readers=True
     for name in key_files(config_dir):
         row = keys.setdefault(name, {})
         d = describe(name)
-        # The catalogue in this file describes a key. A file it does not know keeps whatever was
-        # written on its row by hand, so describing it in the register sticks.
-        if d["kind"] != "unknown" or row.get("kind") in (None, "unknown"):
+        # The catalogue in this file describes a key. A row marked "manual": true, or a file the
+        # catalogue does not know, keeps what was written on it by hand; "note" is never touched.
+        if not row.get("manual") and (d["kind"] != "unknown" or row.get("kind") in (None, "unknown")):
             row.update(d)
         row["file"] = name
         row.pop("missingSince", None)
@@ -371,13 +431,28 @@ def seed(found=None, config_dir=CONFIG_DIR, reg_path=REGISTER, with_readers=True
     added = []
     if found is not None:
         copies, own = copy_rows(found)
-        for name, cs in copies.items():
-            if name in keys:
-                keys[name]["copies"] = cs
+        failed = set(found.get("failed") or [])
+
+        def kept(old):
+            """Copies in a place that could not be listed this time: kept, never dropped."""
+            return [c for c in old or [] if (c.get("worker") or c.get("where")) in failed]
+        for name, row in keys.items():
+            if row.get("file") is not None or name in copies:
+                row["copies"] = copies.get(name, []) + kept(row.get("copies"))
         for key, row in own.items():
             if key not in keys:
                 added.append(key)
-            keys[key] = dict(keys.get(key, {}), **row)
+            old = keys.get(key, {})
+            if old.get("manual"):
+                old["copies"] = row["copies"] + kept(old.get("copies"))
+                continue
+            keys[key] = dict(old, **row)
+            keys[key]["copies"] = row["copies"] + kept(old.get("copies"))
+        # A Worker or GitHub row this listing no longer produces (the secret was removed, or it is now
+        # filed under another name) goes, unless written by hand or held in a place not listed today.
+        for key in [k for k, r in keys.items() if r.get("file") is None and k not in own and not r.get("manual")]:
+            if not kept(keys[key].get("copies")):
+                del keys[key]
         reg["discoveredAt"] = iso(now_utc())
         reg["discoveryErrors"] = found["errors"]
     gone = [n for n, r in keys.items() if r.get("file") and not os.path.exists(os.path.join(config_dir, r["file"]))
@@ -397,9 +472,20 @@ def _http(url, headers=None, data=None, method=None):
         with urllib.request.urlopen(req, timeout=HTTP_TIMEOUT) as r:
             return r.status, dict(r.headers), json.loads(r.read() or b"{}")
     except urllib.error.HTTPError as e:
-        return e.code, dict(e.headers or {}), {}
-    except (urllib.error.URLError, OSError, ValueError) as e:
-        return None, {}, {"error": str(getattr(e, "reason", e))[:120]}
+        # Only a short error CODE from the body (Google's "invalid_grant"), never its free text.
+        try:
+            body = json.loads(e.read() or b"{}")
+        except (ValueError, OSError):
+            body = {}
+        code = body.get("error") if isinstance(body, dict) else None
+        return e.code, dict(e.headers or {}), {"error": code} if isinstance(code, str) and re.match(r"^[a-z_]{3,40}$", code) else {}
+    except urllib.error.URLError as e:
+        # Never the message: some carry the request's own text. The kind of failure is enough.
+        return None, {}, {"error": "network error (%s)" % type(getattr(e, "reason", e)).__name__}
+    except (ValueError, OSError) as e:
+        # A header the library refused (a key file with a newline in it) puts the key in the
+        # message (review of PR #799): only the class name ever leaves this function.
+        return None, {}, {"error": "the request could not be made (%s)" % type(e).__name__}
 
 
 def _ok(status, body=None, expires=None):
@@ -425,12 +511,13 @@ def t_github(v, row):
     exp = next((h[k] for k in h if k.lower() == "github-authentication-token-expiration"), None)
     if exp:
         t = None
-        for fmt in ("%Y-%m-%d %H:%M:%S %Z", "%Y-%m-%d %H:%M:%S %z"):
+        try:
+            t = datetime.strptime(exp.strip(), "%Y-%m-%d %H:%M:%S %z")          # "+0100": its own offset
+        except ValueError:
             try:
-                t = datetime.strptime(exp.strip(), fmt).replace(tzinfo=timezone.utc)
-                break
+                t = datetime.strptime(exp.strip().replace(" UTC", ""), "%Y-%m-%d %H:%M:%S").replace(tzinfo=timezone.utc)
             except ValueError:
-                continue
+                t = None
         exp = iso(t) if t else None
     return _ok(s, b, exp)
 
@@ -504,7 +591,8 @@ def t_gdrive(v, row):
         claims = b64(json.dumps({"iss": sa["client_email"], "scope": "https://www.googleapis.com/auth/drive.metadata.readonly",
                                  "aud": sa["token_uri"], "iat": now, "exp": now + 600}, separators=(",", ":")).encode())
         signing = head + b"." + claims
-        fd, kp = tempfile.mkstemp(prefix=".kr-", dir=CONFIG_DIR)
+        os.makedirs(INCOMING, mode=0o700, exist_ok=True)
+        fd, kp = tempfile.mkstemp(prefix=".kr-", dir=INCOMING)     # swept like a pasted key if it outlives us
         try:
             os.fchmod(fd, 0o600)
             with os.fdopen(fd, "w") as fh:
@@ -519,6 +607,7 @@ def t_gdrive(v, row):
                                            "assertion": (signing + b"." + b64(sig)).decode()})
 
 
+EXPIRY_TESTS = ("github", "cloudflare")    # these read the key's own end date, so an "ok" without one clears it
 TESTS = {"airtable": t_airtable, "github": t_github, "cloudflare": t_cloudflare, "gemini": t_gemini,
          "homeassistant": t_homeassistant, "stripe": t_stripe, "ticketmaster": t_ticketmaster, "pingen": t_pingen,
          "youtube": t_youtube, "gdrive": t_gdrive}
@@ -565,6 +654,8 @@ def judge_row(name, row, now, config_dir=CONFIG_DIR):
         said = "a passcode people type: never changed by a script"
     elif kind == "worker-only":
         said = "held only in %s: not tested here" % row.get("service", "a Worker")
+    elif kind == "worker-pair":
+        said = "a key we made, paired between Workers: listed, never replaced here"
     test = row.get("test") or ""
     if test.startswith("fresh:") and path:
         hours = int(test.split(":", 1)[1])
@@ -576,12 +667,20 @@ def judge_row(name, row, now, config_dir=CONFIG_DIR):
             value = read_value(path)
         except OSError:
             value = ""
-        res = test_value(row, value) if value else {"result": "rejected", "said": "the key file is empty"}
+        if not value:
+            res = {"result": "rejected", "said": "the key file is empty"}
+        elif not row.get("json") and not VALUE_OK.match(value):
+            # A space or a second line: never sent to a service, whose refusal can quote it back.
+            res = {"result": "rejected", "said": "the key file holds more than one key (a space or a second line)"}
+        else:
+            res = test_value(row, value)
+        if value and value in res.get("said", ""):        # belt and braces: no reply ever carries a value out
+            res["said"] = "the test failed (its reply was withheld)"
         out["test"] = res["result"]
         if res["result"] == "ok":
             status, said = "green", "works"
-            if res.get("expires"):
-                row["expires"] = res["expires"]
+            if test in EXPIRY_TESTS:
+                row["expires"] = res.get("expires")        # a key with no end date clears an old one
         elif res["result"] == "rejected":
             status, said = "red", res["said"]
         else:
@@ -599,6 +698,9 @@ def judge_row(name, row, now, config_dir=CONFIG_DIR):
             status, said = "red", "runs out in %d days (%s): renew it now" % (days, t.strftime("%d %b %Y"))
         elif days <= EXPIRY_AMBER_DAYS and status != "red":
             status, said = "amber", "runs out in %d days (%s)" % (days, t.strftime("%d %b %Y"))
+    failed = (row.get("lastReplace") or {}).get("failed")
+    if failed:
+        status, said = "red", "the last replace did not reach: %s" % "; ".join(failed)
     if notes:
         said += "; " + "; ".join(notes)
         if status == "green":
@@ -683,6 +785,7 @@ def status_row(now):
     stamp = now.strftime("%Y-%m-%dT%H:%M:%S.000Z")
     row = {"key": STATUS_KEY, "kind": "report", "label": "Robot keys", "lastRun": stamp}
     try:
+        sweep_incoming(now)                       # a pasted key never waits a day for the daily check
         due, saved = needs_check(now)
         if due:
             # The Workers and GitHub are listed once a day (about a minute); a key file that
@@ -695,6 +798,13 @@ def status_row(now):
     except Exception as exc:  # noqa: BLE001 — the row says why, never an empty all-clear
         return dict(row, status="Failed", detail="The key check could not run: %s: %s" % (type(exc).__name__, str(exc)[:200]))
     red = [r for r in res["rows"] if r["status"] == "red"]
+    tested = [r for r in res["rows"] if r.get("test")]
+    judged = [r for r in tested if r["test"] in ("ok", "rejected")]
+    if tested and not judged and not red:
+        # Every test ran and none could reach its service: that is not a working register.
+        return dict(row, status="Blocked", detail="No key could be tested: %s" % summary_detail(res),
+                    payload=json.dumps({"checkedAt": res["checkedAt"], "counts": res["counts"],
+                                        "rows": [r for r in res["rows"] if r["status"] != "none"]}))
     return dict(row, status="Failed" if red else "Worked", detail=summary_detail(res),
                 payload=json.dumps({"checkedAt": res["checkedAt"], "counts": res["counts"],
                                     "rows": [r for r in res["rows"] if r["status"] != "none"]}),
@@ -754,17 +864,24 @@ def replace(name, args, reg_path=REGISTER, config_dir=CONFIG_DIR, log_path=REPLA
 
 
 def _replace(name, args, reg_path, config_dir, log_path, print):
+    value = take_value(args)                      # always taken first, so a pasted file never lingers
+    sweep_incoming(now_utc())
     reg = load_register(reg_path)
     row = reg["keys"].get(name)
-    value = take_value(args)                      # always taken first, so a pasted file never lingers
     if not row:
         print("REFUSED: %s is not in the key register. Run seed first." % name)
         return 2
-    if row.get("kind") in ("id", "setting", "passcode", "unknown"):
-        print("REFUSED: %s is %s, not a key a script may change." % (name, {"passcode": "a passcode people type"}.get(row["kind"], "not a key")))
+    if row.get("kind") in ("id", "setting", "passcode", "unknown", "worker-pair"):
+        print("REFUSED: %s is %s, not a key a script may change." % (name, {
+            "passcode": "a passcode people type",
+            "worker-pair": "a key paired with a caller this register cannot see"}.get(row["kind"], "not a key")))
         return 2
     if args.get("generate") and row.get("kind") != "shared":
         print("REFUSED: only a key we made ourselves (shared with a Worker) may be generated here.")
+        return 2
+    if args.get("generate") and not row.get("copies"):
+        # The Worker that checks it would keep the old value and every call between them would fail.
+        print("REFUSED: no copy of %s is known, so a new value would break whatever checks it. Run seed first." % name)
         return 2
     value = value.strip()
     if row.get("json"):
@@ -794,6 +911,8 @@ def _replace(name, args, reg_path, config_dir, log_path, print):
             failed.append("the key file did not pass its test again (%s)" % after["said"])
     stamp = iso(now_utc())
     row["changed"], row["replacedAt"] = stamp, stamp
+    if row.get("test") in EXPIRY_TESTS:
+        row["expires"] = (after or res or {}).get("expires")   # the new key's own end date, or none
     row["lastReplace"] = {"at": stamp, "tested": res["result"] if res else "not tested here", "reached": done, "failed": failed}
     save_register(reg, reg_path)
     os.makedirs(os.path.dirname(log_path), exist_ok=True)

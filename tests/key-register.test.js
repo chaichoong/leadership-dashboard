@@ -36,7 +36,11 @@ function home() {
     const p = join(bin, name);
     writeFileSync(p, `#!/bin/bash
 echo "$*" >> "${h}/${name}.argv"
-if [ "$2" = "list" ]; then echo '${listing}'; exit 0; fi
+if [ "$2" = "list" ]; then
+  if [ -e "${h}/${name}.listfail" ] && grep -q -- "$(cat "${h}/${name}.listfail")" <<< "$*"; then exit 1; fi
+  if [ -e "${h}/list-$4.json" ]; then cat "${h}/list-$4.json"; else echo '${listing}'; fi
+  exit 0
+fi
 cat >> "${h}/${name}.stdin"; echo >> "${h}/${name}.stdin"
 if [ -e "${h}/${name}.fail" ] && grep -q -- "$(cat "${h}/${name}.fail")" <<< "$*"; then exit 1; fi
 exit 0
@@ -45,7 +49,7 @@ exit 0
     return p;
   };
   // wrangler is called as: <stub> secret list --name W; gh as: <stub> secret list --repo R --json name
-  const w = stub('wrangler', '[{"name":"AIRTABLE_PAT","type":"secret_text"},{"name":"ANTHROPIC_API_KEY","type":"secret_text"},{"name":"PM_PASSCODE","type":"secret_text"},{"name":"FROM_EMAIL","type":"secret_text"}]');
+  const w = stub('wrangler', '[{"name":"AIRTABLE_PAT","type":"secret_text"},{"name":"ANTHROPIC_API_KEY","type":"secret_text"},{"name":"PM_PASSCODE","type":"secret_text"},{"name":"FROM_EMAIL","type":"secret_text"},{"name":"GMAIL_SEND_KEY","type":"secret_text"}]');
   const g = stub('gh', '[{"name":"AIRTABLE_PAT"}]');
   return { h, od, w, g };
 }
@@ -58,7 +62,9 @@ import importlib.util, json, os, sys, io, contextlib
 from datetime import datetime, timedelta, timezone
 spec = importlib.util.spec_from_file_location("kr", ${JSON.stringify(SCRIPT)})
 kr = importlib.util.module_from_spec(spec); spec.loader.exec_module(kr)
-kr.worker_names = lambda repo=None: ["w1", "w2"]
+REAL_HTTP, REAL_WORKERS = kr._http, kr.worker_names
+kr.worker_names = lambda repo=None: WORKERS
+WORKERS = ["w1", "w2"]
 kr.readers_of = lambda name, repo=None: ["scripts/example.py"]
 FAKE = ${fake}
 CALLS = []
@@ -245,6 +251,8 @@ rc, so, se = run_main(["replace", "gmail_send_key", "--generate"])
 after = open(os.path.join(kr.CONFIG_DIR, "gmail_send_key")).read()
 res["generated"] = [rc, before != after and len(after.strip()) >= 32, after.strip() in (so + se + tree_text())]
 print(json.dumps(res))`);
+    // --generate pushed the new value to both Workers that check it, through stdin only.
+    expect(read(join(env.h, 'wrangler.argv'))).toContain('secret put GMAIL_SEND_KEY --name w2');
     expect(out.property_manager_passcode_roy).toEqual([2, 'REFUSED: property_manager_passcode_roy is a passcode people type, not a key a script may change.']);
     expect(out.ghl_location_id[0]).toBe(2);
     expect(out.nope).toEqual([2, 'REFUSED: nope is not in the key register. Run seed first.']);
@@ -264,3 +272,159 @@ print(json.dumps({"rc": rc, "err": se}))`, `{"api.airtable.com": [200, {}]}`);
     expect(out.err).toMatch(/Reached 3 places/);
   });
 });
+
+// ─── The independent review of PR #799 (16 Oct 2026). Each test failed on the code as first pushed.
+describe('review of PR #799: no leak, no half-done replace, no false green', () => {
+  it('1 a key file holding two lines is never sent anywhere, and a refused header never quotes the key', () => {
+    const env = home();
+    writeFileSync(join(env.od, 'airtable_pat'), OLD + '\n# the robots row\n');
+    const out = py(env, `
+kr.seed(None, with_readers=False)
+res = kr.check(NOW, None)
+row = [r for r in res["rows"] if r["name"] == "airtable_pat"][0]
+s, h, b = REAL_HTTP("https://example.invalid/", {"Authorization": "Bearer abc\\nSECRET0123456789VALUE"})
+print(json.dumps({"row": [row["status"], row["said"]], "calls": len([c for c in CALLS if "airtable" in c["url"]]), "http": [s, b],
+                  "leak": ${JSON.stringify(OLD)} in (json.dumps(res) + tree_text())}))`, `{"api.airtable.com": [200, {}]}`);
+    expect(out.row).toEqual(['red', 'the key file holds more than one key (a space or a second line)']);
+    expect(out.calls).toBe(0);                                 // never sent to the service
+    expect(out.http[0]).toBe(null);
+    expect(JSON.stringify(out.http[1])).not.toContain('SECRET0123456789VALUE');
+    expect(out.leak).toBe(false);
+  });
+
+  it('2 a tool that is not there is a failed copy, never a crash half way through the copies', () => {
+    const env = home();
+    const out = py(env, `
+r = kr.run_cmd(["/nonexistent/wrangler", "secret", "put", "X"], value="v")
+kr.seed(kr.discover(), with_readers=False)
+kr.GH = ["/nonexistent/gh"]                    # gone after the copies were listed
+rc, so, se = run_main(["replace", "airtable_pat", "--stdin"], stdin=${JSON.stringify(NEW)})
+reg = json.load(open(kr.REGISTER))
+print(json.dumps({"rc127": r.returncode, "err": r.stderr, "replace": rc, "said": se, "failed": reg["keys"]["airtable_pat"]["lastReplace"]["failed"]}))`,
+    `{"api.airtable.com": [200, {}]}`);
+    expect(out.rc127).toBe(127);
+    expect(out.err).toBe('could not run wrangler (FileNotFoundError)');
+    expect(out.replace).toBe(4);                               // the Workers took it, GitHub is named
+    expect(out.failed).toEqual(['GitHub (AIRTABLE_PAT): refused (exit 127)']);
+  });
+
+  it('3 every wrangler*.toml is a Worker; a pair secret is mapped per Worker or never replaced; a listing that fails keeps its copies', () => {
+    const env = home();
+    writeFileSync(join(env.h, 'list-money-confidence-daily.json'), '[{"name":"AIRTABLE_PAT"},{"name":"TRIGGER_KEY"},{"name":"PROXY_TOKEN"}]');
+    writeFileSync(join(env.h, 'list-claude-proxy.json'), '[{"name":"PROXY_SERVICE_TOKEN_2"}]');
+    writeFileSync(join(env.h, 'list-w2.json'), '[{"name":"AIRTABLE_PAT"},{"name":"PROXY_TOKEN"}]');
+    const repo = join(env.h, 'repo');
+    mkdirSync(join(repo, 'a'), { recursive: true });
+    mkdirSync(join(repo, 'b'), { recursive: true });
+    writeFileSync(join(repo, 'a', 'wrangler.toml'), 'name = "w2"\n[vars]\nname = "not this"\n');
+    writeFileSync(join(repo, 'b', 'wrangler.money-daily.toml'), 'name = "money-confidence-daily"\n');
+    const out = py(env, `
+names = REAL_WORKERS(${JSON.stringify(repo)})
+WORKERS[:] = ["money-confidence-daily", "claude-proxy", "w2"]
+open(os.path.expanduser("~/.config/od/money_trigger_key"), "w").write("trigger-0123456789abcdef\\n")
+open(os.path.expanduser("~/.config/od/proxy_service_token2"), "w").write("proxy-0123456789abcdef\\n")
+kr.seed(kr.discover(), with_readers=False)
+k = json.load(open(kr.REGISTER))["keys"]
+where = lambda n: sorted("%s:%s" % (c.get("worker") or c["where"], c["secret"]) for c in k[n].get("copies", []))
+first = {"workers": names, "trigger": where("money_trigger_key"), "proxy2": where("proxy_service_token2"),
+         "pair": k.get("worker:w2:PROXY_TOKEN", {}).get("kind")}
+rc, so, se = run_main(["replace", "worker:w2:PROXY_TOKEN", "--stdin"], stdin="0123456789abcdefghij")
+first["pairRefused"] = [rc, se.strip()]
+open(os.path.join(os.path.expanduser("~"), "wrangler.listfail"), "w").write("--name w2")
+kr.seed(kr.discover(), with_readers=False)
+k = json.load(open(kr.REGISTER))["keys"]
+first["airtableAfterFailedListing"] = where("airtable_pat")
+print(json.dumps(first))`);
+    expect(out.workers).toEqual(['money-confidence-daily', 'w2']);
+    expect(out.trigger).toEqual(['money-confidence-daily:TRIGGER_KEY']);
+    expect(out.proxy2).toEqual(['claude-proxy:PROXY_SERVICE_TOKEN_2', 'money-confidence-daily:PROXY_TOKEN']);
+    expect(out.pair).toBe('worker-pair');
+    expect(out.pairRefused).toEqual([2, 'REFUSED: worker:w2:PROXY_TOKEN is a key paired with a caller this register cannot see, not a key a script may change.']);
+    expect(out.airtableAfterFailedListing).toEqual(['github:AIRTABLE_PAT', 'money-confidence-daily:AIRTABLE_PAT', 'w2:AIRTABLE_PAT']);
+  });
+
+  it('3b a Worker row the listing no longer produces goes, unless it was written by hand or its place was not listed', () => {
+    const env = home();
+    const out = py(env, `
+kr.seed(kr.discover(), with_readers=False)
+reg = json.load(open(kr.REGISTER))
+reg["keys"]["worker:OLD_GROUPED_NAME"] = {"kind": "worker-only", "file": None, "copies": [{"where": "worker", "worker": "w1", "secret": "OLD"}]}
+reg["keys"]["worker:HAND_ROW"] = {"kind": "worker-only", "file": None, "manual": True, "copies": []}
+reg["keys"]["worker:IN_FAILED_PLACE"] = {"kind": "worker-only", "file": None, "copies": [{"where": "worker", "worker": "w2", "secret": "X"}]}
+open(kr.REGISTER, "w").write(json.dumps(reg))
+open(os.path.join(os.path.expanduser("~"), "wrangler.listfail"), "w").write("--name w2")
+kr.seed(kr.discover(), with_readers=False)
+k = json.load(open(kr.REGISTER))["keys"]
+print(json.dumps(["worker:OLD_GROUPED_NAME" in k, "worker:HAND_ROW" in k, "worker:IN_FAILED_PLACE" in k, "worker:ANTHROPIC_API_KEY" in k]))`);
+    expect(out).toEqual([false, true, true, true]);
+  });
+
+  it('5 a copy the last replace did not reach keeps the key red until a replace reaches it', () => {
+    const env = home();
+    writeFileSync(join(env.h, 'wrangler.fail'), '--name w2');
+    const out = py(env, `
+kr.seed(kr.discover(), with_readers=False)
+run_main(["replace", "airtable_pat", "--stdin"], stdin=${JSON.stringify(NEW)})
+row = [r for r in kr.check(NOW, None)["rows"] if r["name"] == "airtable_pat"][0]
+os.remove(os.path.join(os.path.expanduser("~"), "wrangler.fail"))
+run_main(["replace", "airtable_pat", "--stdin"], stdin=${JSON.stringify(NEW)})
+again = [r for r in kr.check(NOW, None)["rows"] if r["name"] == "airtable_pat"][0]
+print(json.dumps([[row["status"], row["said"]], again["status"]]))`, `{"api.airtable.com": [200, {}]}`);
+    expect(out[0]).toEqual(['red', 'the last replace did not reach: Worker w2 (AIRTABLE_PAT): refused (exit 1)']);
+    expect(out[1]).toBe('green');
+  });
+
+  it('6 a Google sign-in Google has revoked is red, never "could not be judged"', () => {
+    const env = home();
+    const out = py(env, `
+kr._http = lambda *a, **k: (400, {}, {"error": "invalid_grant"})
+print(json.dumps(kr._google_token("https://oauth2.example/token", {"a": "b"})))`);
+    expect(out.result).toBe('rejected');
+  });
+
+  it('7 and 8 nothing testable reached is Blocked, never Worked; a broken register is a Failed row, never a lost pass', () => {
+    const env = home();
+    const out = py(env, `
+kr.seed(None, with_readers=False)
+kr.discover = lambda: {"workers": {}, "github": [], "failed": [], "errors": []}
+blocked = kr.status_row(NOW)
+open(kr.REGISTER, "w").write('{"keys": []}')
+os.remove(kr.LAST_CHECK)
+broken = kr.status_row(NOW)
+print(json.dumps([blocked["status"], blocked["detail"][:28], broken["status"], broken["detail"]]))`);
+    expect(out[0]).toBe('Blocked');
+    expect(out[1]).toBe('No key could be tested: 5 ke');   // "5 keys: 0 tested and working"
+    expect(out[2]).toBe('Failed');
+    expect(out[3]).toMatch(/^The key check could not run: ValueError: .* is not a register/);
+  });
+
+  it('9 an end date read from the key is cleared when the key no longer has one; a numeric offset is kept', () => {
+    const env = home();
+    const out = py(env, `
+kr.seed(None, with_readers=False)
+FAKE["api.github.com"] = (200, {"github-authentication-token-expiration": "2026-10-20 10:00:00 +0100"})
+first = [r for r in kr.check(NOW, None)["rows"] if r["name"] == "github_pat"][0]
+FAKE["api.github.com"] = (200, {})
+second = [r for r in kr.check(NOW, None)["rows"] if r["name"] == "github_pat"][0]
+print(json.dumps([first.get("expires"), first["status"], second.get("expires"), second["status"]]))`, `{"api.github.com": [200, {}]}`);
+    expect(out).toEqual(['2026-10-20T09:00:00Z', 'red', null, 'green']);
+  });
+
+  it('10 a row described by hand keeps its description; a new .json key file is flagged, never filed as a setting', () => {
+    const env = home();
+    writeFileSync(join(env.od, 'new_service_account.json'), '{"private_key": "x"}');
+    const out = py(env, `
+kr.seed(kr.discover(), with_readers=False)
+reg = json.load(open(kr.REGISTER))
+reg["keys"]["worker:PM_PASSCODE"].update({"manual": True, "kind": "worker-only", "note": "Roy's"})
+reg["keys"]["gmail_send_key"].update({"manual": True, "purpose": "written by hand"})
+reg["keys"]["mystery_file"].update({"manual": True, "kind": "setting", "purpose": "the content engine's flag"})
+open(kr.REGISTER, "w").write(json.dumps(reg))
+kr.seed(kr.discover(), with_readers=False)
+k = json.load(open(kr.REGISTER))["keys"]
+print(json.dumps([k["worker:PM_PASSCODE"]["note"], k["worker:PM_PASSCODE"]["kind"], k["gmail_send_key"]["purpose"],
+                  k["mystery_file"]["kind"], k["new_service_account.json"]["kind"]]))`);
+    expect(out).toEqual(["Roy's", 'worker-only', 'written by hand', 'setting', 'unknown']);
+  });
+});
+

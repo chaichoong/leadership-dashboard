@@ -1775,7 +1775,11 @@ def keys_row(now):
     except Exception as exc:  # noqa: BLE001
         return {"key": "keys", "kind": "report", "label": "Robot keys", "lastRun": _iso(now), "status": "Failed",
                 "detail": "The key check could not load: %s" % str(exc)[:240]}
-    return kr.status_row(now)
+    try:
+        return kr.status_row(now)
+    except BaseException as exc:  # noqa: BLE001 — one row's failure must never lose the whole pass
+        return {"key": "keys", "kind": "report", "label": "Robot keys", "lastRun": _iso(now), "status": "Failed",
+                "detail": "The key check stopped: %s" % type(exc).__name__}
 
 
 def ai_team_verdict_row(now, rows, lh_res, lh_err, measures):
