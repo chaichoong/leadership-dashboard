@@ -151,7 +151,7 @@ print(json.dumps(c["documentUrl"]))`, CARD);
     expect(state('rec(arg, approver="someone@example.com")')[1]).toMatch(/only Kevin approves his signature/);
     expect(state('rec(F.TIER1_BANNER + "\\n\\n" + arg)')[1]).toMatch(/private legal matter/);
     expect(state('rec(arg, status="Completed")')[1]).toMatch(/Completed/);
-    expect(state('rec(arg)', 'm.approved_text_changed = lambda t: True')[1]).toMatch(/changed after Kevin approved/);
+    expect(state('rec(arg)', 'm.approved_text_changed = lambda t: True')[1]).toMatch(/changed after his approval/);
     expect(state('rec(arg)', 'def boom(t): raise RuntimeError("no read")\nm.approved_text_changed = boom')[1])
       .toMatch(/could not be shown that the card is unchanged/);
     expect(state('rec("TO: a@b.com\\nFROM: kevinbrittain@gmail.com\\nSUBJECT: x\\n---\\nhi")')).toEqual([false, expect.stringMatching(/not a SIGN AS KEVIN card/)]);

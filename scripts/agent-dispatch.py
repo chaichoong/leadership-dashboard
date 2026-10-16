@@ -6269,7 +6269,7 @@ def sign_as_kevin_state(rec):
     card = dict(card, documentUrl=url)
     try:
         if approved_text_changed(t["id"]):
-            return card, ("the card's text changed after Kevin approved it, so what it says now is "
+            return card, ("the card's text changed after his approval, so what it says now is "
                           "not what he approved")
     except Exception as exc:              # noqa: BLE001 — an unreadable check is a refusal
         return card, f"it could not be shown that the card is unchanged since approval: {str(exc)[:160]}"
@@ -7826,7 +7826,7 @@ def cmd_complete(args):
             sys.exit(
                 f"ERROR: refusing to complete {args.task} — it is a {SIGN_AS_KEVIN} card for agreement "
                 f"{sign_id} and the robot's ledger has no signature for it.\n"
-                "       Sign it first (Kevin approved it):\n"
+                "       Sign it first (it is approved):\n"
                 f"         node scripts/agent-browser.js sign --task {args.task} --shot <png>\n"
                 "       or, if the robot did not sign it, say why on the record:\n"
                 f"         python3 scripts/agent-dispatch.py complete {args.task} "
