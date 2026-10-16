@@ -2344,7 +2344,7 @@ const OWN_SIGNER_NAMES = Object.values(SIGN_DOORS).map((d) => d.savedSignature.t
 const signedStatus = (st) => SIGNED_STATUS_RE.test(normName(st)) && !NOT_SIGNED_STATUS_RE.test(st)
   && !OWN_SIGNER_NAMES.some((n) => normName(st).toLowerCase().includes(n));
 // A status that ends the agreement without this signature: the lock on an unproved Submit can clear.
-const FINAL_STATUS_RE = /cancel|expire|declin|recall|reject|abort/i;
+const FINAL_STATUS_RE = /^(?:cancel|expire|declin|recall|reject|abort)/i;
 const AGREEMENT_ID_RE = /^[A-Za-z0-9_\-:.]{12,200}$/;
 // Adobe's screens, measured 16 Oct 2026: the list paints about 20 s after its nav; the agreement and
 // signing pages within 30 s. Overridable so a test against fixture pages does not wait for Adobe.
@@ -2387,6 +2387,12 @@ function robotSigned(task, id) {
 }
 // A Submit that was pressed and never proved: nothing signs that agreement again until Adobe is read
 // (`sign --task T --check`), because a second Submit could be a second signature.
+// Every agreement on this task with an unproved Submit, with the name it was pressed under.
+function signLocks(task) {
+  const seen = new Map();
+  for (const r of signLedgerRows()) if (r.task === task && r.agreementId && !seen.has(r.agreementId)) seen.set(r.agreementId, r.agreement || '');
+  return [...seen].filter(([id]) => signUnconfirmed(task, id)).map(([agreementId, agreement]) => ({ agreementId, agreement }));
+}
 function signUnconfirmed(task, id) {
   const mine = signLedgerRows().filter((r) => r.task === task && r.agreementId === id && ['unconfirmed', 'cleared'].includes(r.cmd));
   return !!mine.length && mine[mine.length - 1].cmd === 'unconfirmed' && !robotSigned(task, id);
@@ -3135,23 +3141,24 @@ async function main() {
       return;
     }
     if (rest.includes('--check')) {
-      // After "SIGN NOT CONFIRMED": Adobe's own page decides. Signed there = recorded now; still waiting =
-      // the Submit never landed, and the agreement may be signed again on the same approval.
-      let state;
-      try {
-        state = JSON.parse(execFileSync('python3', [process.env.AGENT_OUTCOME_SCRIPT || path.join(REPO, 'scripts', 'agent-dispatch.py'),
-          'outcome', task], { encoding: 'utf8', timeout: 60000 }));
-      } catch (e) { die(`could not read ${task}: ${(e.stderr || e.message || '').toString().trim().slice(0, 200)}`); }
-      const card = state.signAsKevin || state.signStamp || {};
-      const door = SIGN_DOORS[String(card.signer || '').toLowerCase()] || SIGN_DOORS['info@agilelets.co.uk'];
-      const r = await withPage(door.profile, false, (page) => runSignCheck(page, task, card, shot));
-      const problems = r.signed ? signFollowUps(task, r) : [];
-      console.log(JSON.stringify(Object.assign({ mode: 'sign-check' }, r, { problems,
-        next: r.signed ? `SIGNED (proved now). Complete the task: python3 scripts/agent-dispatch.py complete ${task}.`
-          : WAITING_RE.test(r.statusAfter) ? 'NOT SIGNED: the Submit never landed. The approval stands; run sign again.'
-          : FINAL_STATUS_RE.test(r.statusAfter) ? `NOT SIGNED: Adobe ended it ("${r.statusAfter}"). Close it with complete --not-signed quoting that.`
-          : `NOT PROVED (Adobe: "${r.statusAfter}"). Do not sign again and do not close it as not signed: tell Kevin on the card what Adobe shows.` }), null, 2));
-      if (!r.signed || problems.length) process.exit(1);
+      // After "SIGN NOT CONFIRMED": Adobe's own page decides, for every agreement on this task the robot
+      // pressed Submit on and never proved (read from its own ledger, never the card, which may have moved on).
+      if (!/^rec[A-Za-z0-9]{14}$/.test(task || '')) die(`--task must be an Airtable record id, got "${task}"`);
+      const locks = signLocks(task);
+      if (!locks.length) die(`no unproved Submit is on record for ${task}, so there is nothing to check.`);
+      const door = SIGN_DOORS['info@agilelets.co.uk'];
+      const results = [];
+      for (const lock of locks) {
+        results.push(await withPage(door.profile, false, (page) => runSignCheck(page, task, lock, shot)));
+      }
+      const problems = [];
+      for (const r of results) if (r.signed) problems.push(...signFollowUps(task, r));
+      const said = (r) => (r.signed ? `SIGNED (proved now): ${r.agreement}.`
+        : WAITING_RE.test(r.statusAfter) ? `NOT SIGNED: ${r.agreement}: the Submit never landed. The approval stands; run sign again.`
+        : FINAL_STATUS_RE.test(r.statusAfter) ? `ENDED BY ADOBE, SUBMIT UNPROVED: ${r.agreement} ("${r.statusAfter}"). Say so on the card, quoting Adobe, and close it with complete --not-signed.`
+        : `NOT PROVED: ${r.agreement} ("${r.statusAfter}"). Do not sign again and do not close it: tell Kevin on the card what Adobe shows.`);
+      console.log(JSON.stringify({ mode: 'sign-check', results, problems, next: results.map(said).join(' ') }, null, 2));
+      if (results.some((r) => !r.signed) || problems.length) process.exit(1);
       return;
     }
     const card = signBinding(task);

@@ -6216,6 +6216,24 @@ def robot_sign_unconfirmed(task_id, agreement_id):
     return bool(rows) and rows[-1] == "unconfirmed" and not robot_signed(task_id, agreement_id)
 
 
+def robot_sign_locks(task_id):
+    """Every agreement on this task the robot pressed Submit on and never proved, read from its own
+    ledger (Notes are trimmed, and a card is replaced; the ledger is neither)."""
+    ids = []
+    try:
+        with open(SIGN_FOR_KEVIN_LEDGER) as fh:
+            for line in fh:
+                try:
+                    row = json.loads(line)
+                except ValueError:
+                    continue
+                if row.get("task") == task_id and row.get("agreementId") and row["agreementId"] not in ids:
+                    ids.append(row["agreementId"])
+    except OSError:
+        pass
+    return [i for i in ids if robot_sign_unconfirmed(task_id, i)]
+
+
 def approved_text_changed(task_id):
     """True when the Agent Output was written after Approved At: the card the robot would read is
     not the card Kevin approved. Two reads, each the other's control: exactly one must match, so a
@@ -7836,8 +7854,7 @@ def cmd_complete(args):
     sign_id = (sign_card or {}).get("agreementId") or latest_sign_card(t["notes"])
     not_signed = " ".join(str(getattr(args, "not_signed", "") or "").split())
     sign_note = ""
-    locked = [i for i in dict.fromkeys(SIGN_CARD_RE.findall(str(t["notes"] or "")) + ([sign_id] if sign_id else []))
-              if robot_sign_unconfirmed(args.task, i)]
+    locked = robot_sign_locks(args.task)
     if locked:
         sign_id = locked[0]
         sys.exit(f"ERROR: refusing to complete {args.task} — the robot pressed Submit on {sign_id} and it was "

@@ -282,6 +282,8 @@ print(json.dumps(out))`, { notes, output, notSigned });
       // A lock on an EARLIER agreement on the same task still blocks the close after a resubmission.
       const older = `[16 Oct 2026 10:00 — agent-dispatch] SIGN AS KEVIN CARD: ${ID} (${NAME}) copy sha256:${'a'.repeat(64)}. Kevin's Approve lets the robot sign this one agreement.`;
       expect(complete(older, { output: CARD.replace(ID, OTHER_ID), notSigned: 'gave up' }).error).toMatch(new RegExp(`pressed Submit on ${ID}`));
+      // The lock is read from the robot's own ledger, so a trimmed Notes field cannot lose it.
+      expect(complete('', { output: CARD.replace(ID, OTHER_ID), notSigned: 'gave up' }).error).toMatch(new RegExp(`pressed Submit on ${ID}`));
     } finally { rmSync(LEDGER, { force: true }); }
     const out = complete('', { notSigned: 'Kevin signed it himself from his phone on 16 Oct.' });
     expect(out).toMatchObject({ refused: false, status: 'Completed' });
