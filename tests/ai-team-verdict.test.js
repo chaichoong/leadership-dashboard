@@ -576,7 +576,8 @@ readers = {"lh": lh, "tm": TM, "tri": None, "aar": load("aar", "agent-accuracy-r
            "schedule": lambda: {},
            "handback": lambda: [
                {"id": "r%d" % i, "fields": {"Approval Outcome": "Approved as-is", "Approved At": ago(hours=5), "Sent For Approval By": [AG], "Task Name": "t", "Notes": ""}} for i in range(9)],
-           "logins": lambda: ([], None)}
+           "logins": lambda: ([], None),
+           "sessions": lambda: {"sessions": 10, "back": 0, "asks": 20, "backAsks": 0, "model": 0, "reasons": [], "items": [], "unread": []}}
 ${over}
 row = A.verdict_row(NOW, ES(), [], lh_res, None, measures, readers)
 p = json.loads(row["payload"]) if row.get("payload") else None
@@ -588,18 +589,24 @@ describe('the row', () => {
   // Every reader stubbed: the row must hold fourteen lines and the verdict, and a reader that
   // throws must turn its own line grey, never the whole row Failed and never a green.
 
-  it('carries fifteen lines in Kevin\'s order (the hand-back line since 16 Oct 2026), three groups and one verdict', () => {
+  it('carries sixteen lines in Kevin\'s order (the hand-back and sessions lines since 16 Oct 2026), three groups and one verdict', () => {
     const out = py(stubs());
     expect(out.status).toBe('Worked');
     expect(out.key).toBe('ai-team-verdict');
     expect(out.lines.map(l => l[0])).toEqual(['emails', 'responses', 'moving', 'bottlenecks', 'carried', 'agents', 'jobs',
-      'bugs', 'data', 'missed', 'ontop', 'queue', 'firsttime', 'handback', 'allowance']);
+      'bugs', 'data', 'missed', 'ontop', 'queue', 'firsttime', 'handback', 'sessions', 'allowance']);
     expect(out.lines.every(l => l[1] === 'green')).toBe(true);
     expect(out.overall).toMatchObject({ colour: 'green', text: 'Healthy', grey: 0 });
     // The row's detail is the simpler view's answer and number (15 Oct 2026).
     expect(out.detail).toBe('Working well: 0 things need a fix.');
     // No bugs or errors shows a real week's trend on day one, from the queue's own log.
     expect(out.bugs).toMatchObject({ vsDate: '2026-10-08', before: 6, after: 5, direction: 'better' });
+  });
+
+  it('a sessions reader that throws greys only its own line; the row still works', () => {
+    const out = py(stubs('readers["sessions"] = lambda: 1 / 0'));
+    expect(out.status).toBe('Worked');
+    expect(out.lines.filter(l => l[1] === 'grey').map(l => l[0])).toEqual(['sessions']);
   });
 
   it('a source that throws turns only its own line grey, and the verdict names it', () => {

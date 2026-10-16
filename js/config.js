@@ -46,7 +46,7 @@
         // client tenant's shell; the adminOnly flag is the contract the Supabase
         // migration must honour. Replaced the Plan Builder entry 1 Aug 2026 on
         // Kevin's direction (os/business-plan-builder/ files remain on disk).
-        { id: 'kpi-library', name: 'KPI Library', icon: '📚', pageVer: '1.21', sopFile: '', sopVer: '1.0', standalone: 'index.html#kpi-library', adminOnly: true },
+        { id: 'kpi-library', name: 'KPI Library', icon: '📚', pageVer: '1.22', sopFile: '', sopVer: '1.0', standalone: 'index.html#kpi-library', adminOnly: true },
         // AI Agents (Leadership) — ADMIN ONLY, like KPI Library. Approvals,
         // checks and the workforce register in one place (Kevin's ruling,
         // 24 Aug 2026; moved out of the Systemisation page).

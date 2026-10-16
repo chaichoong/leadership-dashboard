@@ -87,6 +87,18 @@ if ! /usr/bin/python3 "$REPO/scripts/standing_holds.py" run > "$SCRATCH/holds.js
   tail -c 800 "$SCRATCH/holds.json" >&2
 fi
 
+# --- free half: keep short sessions warm (Kevin, 16 Oct 2026) ---------------
+# He gives the robot access once, and the estate keeps it. Xero signs the robot
+# out after 60 minutes without use, and the daily 06:40 keep-alive cannot hold
+# that: four of his Xero sign-ins in a week were for a session the robot had
+# just let lapse. This visits each site with `idleMinutes` while it is in use
+# (session-keepalive.py warm). No model tokens; a failure is loud but never
+# stops hand-backs.
+if ! /usr/bin/python3 "$REPO/scripts/session-keepalive.py" warm > "$SCRATCH/warm.json" 2>"$SCRATCH/warm.err"; then
+  echo "WARNING: keep-warm failed — a short-session site (Xero) may lapse and ask Kevin to sign in again" >&2
+  tail -c 500 "$SCRATCH/warm.err" >&2
+fi
+
 # --- free half: the blocker loop (Kevin, 25 Sep 2026) ----------------------
 # A task an agent could not finish carries a BLOCKER OPEN line with its kind
 # (SIGN-IN, SITE, TOOL, KEVIN). This clears every wall whose cause is gone (the
@@ -223,10 +235,23 @@ __CLAUDE_PID=$!
   fi
 ) &
 __WATCHDOG_PID=$!
+# Keep-warm while this run works (review, 16 Oct 2026): launchd starts no new tick while this one
+# runs, and 6 of 240 runs since 2 Oct ran past 30 minutes, which would leave Xero a gap past its
+# 60-minute limit. A visit every 20 minutes until the run ends; a busy profile is skipped. The stop
+# waits for a visit in progress (at most 240 s): cut off half-way, its cookies would not be kept.
+(
+  trap 'exit 0' TERM
+  while sleep 1200 & wait $! && kill -0 "$__CLAUDE_PID" 2>/dev/null; do
+    /usr/bin/python3 "$REPO/scripts/session-keepalive.py" warm >> "$SCRATCH/warm.json" 2>>"$SCRATCH/warm.err" || true
+  done
+) >/dev/null 2>&1 &
+__WARM_PID=$!
 wait "$__CLAUDE_PID"
 RC=$?
 kill "$__WATCHDOG_PID" 2>/dev/null
+kill -TERM "$__WARM_PID" 2>/dev/null
 wait "$__WATCHDOG_PID" 2>/dev/null
+wait "$__WARM_PID" 2>/dev/null
 if [ "$RC" -ge 128 ]; then
   echo "handback-poll: the run was stopped after ${HANDBACK_MAX_MINUTES} minutes (signal $((RC - 128))). Unworked hand-backs stay queued for the next tick." >&2
 fi

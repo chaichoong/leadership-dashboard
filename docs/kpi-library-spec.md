@@ -173,6 +173,26 @@ Can it keep going?
     Green 95% or more, amber 85% to 95%, red under 85%; a sign-in log that cannot be read is never
     green. Each agent's score rides on the line as `byAgent`, which the AI Agents scorecards read,
     so the two surfaces cannot disagree. Checked against the task board like line 38.
+38b. **Session hand-back score %** (Kevin, 16 Oct 2026) — T4 over 14 days, the same four for the
+    Claude Code chats. Kevin: "Too often, in too many sessions, you're coming back to me asking me
+    to do stuff that you're capable of doing." `scripts/session_handbacks.py` reads
+    `~/.claude/projects/*/*.jsonl` (read-only; a cache keeps what each file held, so a ten-minute
+    pass re-reads only changed chats). Population: desktop sessions (entrypoint `claude-desktop`),
+    main thread, not scheduled runs, with an ask inside the window. The unit is an ask: each
+    AskUserQuestion question, each next-step box `ask`, and each closing line (last 6 lines of a
+    reply, quotes, headings, tables and code left out) addressed to him. An option question is a
+    decision unless it asks for a step. Each ask is sorted into approve, correct, pay, access, or a
+    hand-back with its reason; a model switch is not counted (the app refuses a session switching
+    its own model). Score: sessions with no hand-back over sessions that asked anything.
+    Back-test (16 Oct 2026, 154 real asks labelled by hand, labels kept outside the repo): 20 of
+    the 21 hand-backs it counted were right (the miss: a card's "do its 3 steps", which was a key
+    paste, i.e. giving access); in the first 80 closings where it found no ask, 2 hand-backs hid
+    (a command block given to run, a menu path to click), so rules were added for both and a fresh
+    40 showed none. After two independent reviews (closings only from replies that ended their
+    turn or carry the box; a format control that turns the line grey): 150 of 154 agree. Free text
+    stays the weak half: read the number as a floor. First live read: 6 of 50 sessions came back
+    (88%, amber), 22 of 400 asks, 10 of them fetching a document.
+    Green 95% or more, amber 85% to 95%, red under 85%; a chat that cannot be read is never green.
 39. **Robot hours paused for the allowance** — T5: hours stopped in 7 days, the allowance guard's
     pauses joined with every limit line in any job's own `runs.log` (allowance.py's own `LIMIT_RE`
     and `parse_reset`), each running from its run's end line to the reset it names. The guard
@@ -192,7 +212,7 @@ judged by `scripts/ai_team_health.py` into the same `ai-team-verdict` row.
     task, the sweep's plus any opened since it on an open task (review of PR #795): 28 takes
     every walled task out, so counting a wall only once past its clock let the number fall with
     nothing fixed, and 19 of 33 walls were inside their clock that day. Line 33 (the code
-    backlog) and the rates (36, 38, 38a) never add to it: a backlog of 171 would bury every daily
+    backlog) and the rates (36, 38, 38a, 38b) never add to it: a backlog of 171 would bury every daily
     change, and a percentage is not a count. A task, job, email or check two lines both count is
     counted once: each line hands on the ids of what it counted (`task:`, `job:`, `mail:`,
     `check:`), and each id is taken off once for every extra line it is on. The live dry run on
@@ -214,7 +234,7 @@ judged by `scripts/ai_team_health.py` into the same `ai-team-verdict` row.
     two, then "+N more").
 42. **Something is broken (light)** — T10 over lines 31 to 35, the code backlog included (red
     when more are open than a week ago). "Nothing is broken" or "Something is broken".
-43. **It can keep going (light)** — T10 over lines 36 to 39, and 38a since 16 Oct 2026. "It can keep going" or "It may not
+43. **It can keep going (light)** — T10 over lines 36 to 39, and 38a and 38b since 16 Oct 2026. "It can keep going" or "It may not
     keep going".
 44. **AI team answer, week on week** — T10 over 40 to 43, in order: red "Getting worse" when,
     with a number from last week, a light is red now that was not on record as red at the end of
