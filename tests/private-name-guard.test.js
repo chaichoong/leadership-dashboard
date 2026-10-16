@@ -43,6 +43,14 @@ beforeEach(() => {
     OD_REDACT_NAMES: join(dir, 'roster.txt'),
     GIT_CONFIG_GLOBAL: join(dir, 'gitconfig'),
     GIT_CONFIG_NOSYSTEM: '1',
+    // The hook also refuses a live routine SKILL.md that is not mirrored in the
+    // repo (scripts/scheduled-task-drift-guard.py, 16 Oct 2026). That is nothing
+    // to do with the name guard, and leaving it switched on would make these
+    // tests fail whenever some other session edited a live routine — the exact
+    // unrelated red this codebase keeps learning not to ship. Pointing the live
+    // directory at a path that does not exist is the guard's own documented
+    // "another machine, CI" case, where it passes without checking.
+    SCHEDULED_TASKS_LIVE: join(dir, 'no-live-scheduled-tasks'),
   };
   for (const k of ['GITHUB_BEFORE_SHA', 'CHANGED_FILES', 'GITHUB_ACTIONS']) delete env[k];
   git('init', '-q');

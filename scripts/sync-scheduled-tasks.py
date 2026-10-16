@@ -41,7 +41,14 @@ import os
 import shutil
 import sys
 
-LIVE = os.path.expanduser("~/.claude/scheduled-tasks")
+# Read at CALL time, never bound once at import, so the drift guard's test can
+# point this at a scratch directory and exercise the real comparison rather than
+# grepping the source for it. A test that cannot drive the code is theatre.
+LIVE_DEFAULT = "~/.claude/scheduled-tasks"
+
+
+def live_dir():
+    return os.path.expanduser(os.environ.get("SCHEDULED_TASKS_LIVE", LIVE_DEFAULT))
 REPO_REL = os.path.join(".claude", "scheduled-tasks")
 FILENAME = "SKILL.md"
 
@@ -54,7 +61,7 @@ def repo_root():
 def task_names(root):
     """Every routine that has a SKILL.md in either location."""
     names = set()
-    for base in (LIVE, os.path.join(root, REPO_REL)):
+    for base in (live_dir(), os.path.join(root, REPO_REL)):
         if not os.path.isdir(base):
             continue
         for name in os.listdir(base):
@@ -69,7 +76,7 @@ def compare(root):
     """Returns (only_live, only_repo, differing) — the three shapes drift takes."""
     only_live, only_repo, differing = [], [], []
     for name in task_names(root):
-        live = os.path.join(LIVE, name, FILENAME)
+        live = os.path.join(live_dir(), name, FILENAME)
         repo = os.path.join(root, REPO_REL, name, FILENAME)
         live_here, repo_here = os.path.isfile(live), os.path.isfile(repo)
         if live_here and not repo_here:
@@ -99,10 +106,10 @@ def main():
 
     root = repo_root()
 
-    if not os.path.isdir(LIVE):
+    if not os.path.isdir(live_dir()):
         # Another machine, or CI. Nothing to compare against, and pretending
         # otherwise would fail the gate for a reason nobody can act on.
-        print("No %s on this machine; nothing to sync." % LIVE)
+        print("No %s on this machine; nothing to sync." % live_dir())
         return 0
 
     only_live, only_repo, differing = compare(root)
@@ -125,7 +132,7 @@ def main():
 
     moved = 0
     for name in task_names(root):
-        live = os.path.join(LIVE, name, FILENAME)
+        live = os.path.join(live_dir(), name, FILENAME)
         repo = os.path.join(root, REPO_REL, name, FILENAME)
         if args.pull and os.path.isfile(live):
             if not os.path.isfile(repo) or not filecmp.cmp(live, repo, shallow=False):

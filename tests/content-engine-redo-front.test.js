@@ -83,7 +83,12 @@ res = {"days": days, "notes": notes}`);
     const r = plan([2101, 2103]).res;
     expect(r.days).toEqual([2101, 2110, 2111]);
     expect(r.days.filter((d) => d >= 2110).length).toBe(2);
-    expect(r.notes.join('\n')).toContain('redo: day 2103 (sent back) waits for another night: one redo a night');
+    // The note names the place in the queue and the nights to go since 16 Oct 2026
+    // (finding 20261016-phase-3-935): "waits for another night" said nothing about
+    // WHICH night, and day 2106 sat behind the cap for six of them reading the same.
+    expect(r.notes.join('\n')).toContain(
+      'redo: day 2103 (sent back) waits for another night: 2 of 2 in the redo queue, about 1 night(s) away, one redo a night'
+    );
   });
 
   it('one redo a night at any slot count: at four slots, one redo and three new days', () => {

@@ -171,6 +171,59 @@ res = [[render.lfmd_said(t), render.lfmd_window(segs(["welcome back", "some talk
   });
 });
 
+describe('whisper hearing "diary" as "day" is still the diary line', () => {
+  // Finding 20261016-phase-3-936, 16 Oct 2026. Episode 1799 says "the learnings
+  // from my diary today" and whisper wrote "learning from a day today". "day"
+  // shares only its first letter with diary, so no d(ia|ie|ai|iv) route could
+  // reach it: the cutter found NO section at all and the episode was blocked for
+  // the fixer lane. Kevin's rule is that there is no fixed time point — any
+  // phrase that sounds like the diary line starts the section.
+  //
+  // Measured 16 Oct 2026 over the 152 stored Runpreneur transcripts: 8 matches,
+  // every one a real Learnings line, and all 8 on episodes where the cutter
+  // found no window, so no stored clip moves. 1799, 1970, 1993, 1996, 2005,
+  // 2022, 2025, 2034.
+  it('finds the section in every spelling whisper produced', () => {
+    const r = py(`
+said = ["so the learning from a day today here in the UK times are tough",
+        "the learnings for my day today is that you have to keep going",
+        "the learning from my day today was a tough one",
+        "the learnings from my day today are simple"]
+res = [render.lfmd_said(t) for t in said]`).res;
+    expect(r).toEqual([true, true, true, true]);
+  });
+
+  it('cuts the section from that phrase to the sign-off', () => {
+    const r = py(`
+talk = ["welcome back to consecutive day 1799 for diary of Ron Prenner",
+        "today I am talking about bank holiday weekend breaks",
+        "and the coastal towns get really busy at this time of year",
+        "so yeah learning from a day today or there here in the UK times are tough",
+        "there are a lot of people really struggling out there right now",
+        "thank you as always stay positive stay happy and I will see you again tomorrow"]
+w = render.lfmd_window(segs(talk), min_len=5.0)
+res = [w, render.lfmd_closes_talk(segs(talk), w)]`).res;
+    // Segments are 10 s each, so the phrase sits in the fourth: 30 s to the
+    // sign-off's end at 60 s. The section closes the talk, which is its shape.
+    expect(r[0]).toEqual([30, 60]);
+    expect(r[1]).toBe(true);
+  });
+
+  it('CONTROL: an ordinary sentence about a day is NOT the diary line', () => {
+    // "day" is the commonest word in this show, so the route is only ever
+    // allowed in the tightest context there is. Without that, every episode
+    // would match and the clip would be cut anywhere.
+    const r = py(`
+said = ["I learned from a day of rest that recovery matters",
+        "you can learn from my days of running in the rain",
+        "learning from a day out with the family",
+        "what I learned today from my run",
+        "welcome back to day 1799 of the diary of a Runpreneur"]
+res = [render.lfmd_said(t) for t in said]`).res;
+    expect(r).toEqual([false, false, false, false, false]);
+  });
+});
+
 describe('the output gate reads the talk the way the cutter does', () => {
   it('BACK-TEST: the show name with a noise note in the transcript is not "he said the diary line"', () => {
     const r = py(`res = gate_for(None, 520.8, transcript="So consecutive day 2090\\n[BLANK_AUDIO]\\nof the diary cover on printer, and today I talk about rest.")`).res;
