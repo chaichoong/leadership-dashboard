@@ -52,18 +52,41 @@ def has_audit_report(path):
     return False
 
 
-def append_audit(signed_path, audit_path, out_path=None):
-    """Write signed + audit into out_path (default: over the signed file, via
-    a temp file and rename). Returns the output path and the page count."""
+def _append_pypdf(signed_path, audit_path, tmp):
     from pypdf import PdfWriter
-    out_path = out_path or signed_path
     w = PdfWriter()
     for src in (signed_path, audit_path):
         for p in _reader(src).pages:
             w.add_page(p)
-    tmp = out_path + ".tmp"
     with open(tmp, "wb") as fh:
         w.write(fh)
+
+
+def _append_pikepdf(signed_path, audit_path, tmp):
+    import pikepdf  # noqa: WPS433
+    with pikepdf.open(signed_path) as a, pikepdf.open(audit_path) as b:
+        a.pages.extend(b.pages)
+        a.save(tmp)
+
+
+def append_audit(signed_path, audit_path, out_path=None):
+    """Write signed + audit into out_path (default: over the signed file, via
+    a temp file and rename). Returns the output path and the page count.
+
+    Adobe's signed copy and its audit report are AES-encrypted with an empty
+    password (measured on the first robot-signed agreement, 16 Oct 2026): pypdf
+    reads them but cannot write them back ("not a multiple of the block
+    length"), so signature-watch recorded `audit: false` on it. qpdf, through
+    pikepdf, writes them; it is tried whenever pypdf cannot."""
+    out_path = out_path or signed_path
+    tmp = out_path + ".tmp"
+    try:
+        _append_pypdf(signed_path, audit_path, tmp)
+    except Exception as first:                                # noqa: BLE001 — retried below, said if both fail
+        try:
+            _append_pikepdf(signed_path, audit_path, tmp)
+        except ImportError:
+            raise RuntimeError(f"pypdf could not combine them ({str(first)[:120]}) and pikepdf is not installed") from first
     os.replace(tmp, out_path)
     return out_path, len(_reader(out_path).pages)
 
@@ -128,6 +151,26 @@ def selftest():
     plain = os.path.join(d, "plain.pdf")
     w3 = PdfWriter(); w3.add_blank_page(width=200, height=200); w3.write(open(plain, "wb"))
     checks.append(("problem text names the fix", "Download Audit Report" in audit_problem(plain, "2026-09-10") and audit_problem(plain, "2026-09-01") == "" and audit_problem(signed, "2026-09-10") == ""))
+    # Adobe's own shape: both files AES-encrypted with an empty password, and pypdf unable to write them.
+    try:
+        import pikepdf
+        enc = pikepdf.Encryption(owner="adobe", user="", R=4, aes=True)
+        signed2, audit2 = os.path.join(d, "signed2.pdf"), os.path.join(d, "audit2.pdf")
+        with pikepdf.open(plain) as x:
+            x.save(signed2, encryption=enc)
+        with pikepdf.open(audit) as x:
+            x.save(audit2, encryption=enc)
+        real = _append_pypdf
+        def refuse(*_a, **_k):
+            raise ValueError("The length of the provided data is not a multiple of the block length.")
+        globals()["_append_pypdf"] = refuse
+        try:
+            out2, n2 = append_audit(signed2, audit2)
+        finally:
+            globals()["_append_pypdf"] = real
+        checks.append(("an encrypted Adobe copy gets its audit report", n2 == 2 and has_audit_report(out2)))
+    except ImportError:
+        checks.append(("pikepdf is installed (Adobe's encrypted copies need it)", False))
     failed = [n for n, ok in checks if not ok]
     print("selftest %s: %d checks%s" % ("OK" if not failed else "FAILED", len(checks), ("; failed: " + ", ".join(failed)) if failed else ""))
     return 0 if not failed else 1
