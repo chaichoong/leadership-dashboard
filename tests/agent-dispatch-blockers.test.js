@@ -611,12 +611,17 @@ a = m.submit_wall_notes(o, None)
 b = m.submit_wall_notes(o, k)
 c = m.submit_wall_notes(b, k)
 d = m.submit_wall_notes("", None)
-print(json.dumps([m.task_blocker(a), m.task_blocker(b), c, d, b.count("BLOCKER CLEARED (SITE namecheap.com): superseded")]))`);
+e = m.submit_wall_notes(b, {"reason": "payment", "step": "1. Open the page. 2. Press Pay."})
+print(json.dumps([m.task_blocker(a), m.task_blocker(b), c, d, b.count("BLOCKER CLEARED (SITE namecheap.com): superseded"),
+                  m.task_blocker(e), e.count("BLOCKER CLEARED (KEVIN payment): superseded")]))`);
     expect(r[0]).toBeNull();
     expect(r[1]).toMatchObject({ kind: 'KEVIN', subject: 'payment', why: 'pay the £12 renewal' });
     expect(r[2]).toBeNull();     // the same KEVIN wall already open: nothing written
     expect(r[3]).toBeNull();
     expect(r[4]).toBe(1);
+    // A redo with new steps replaces the wall, so the Your step card never shows the old steps (16 Oct 2026).
+    expect(r[5]).toMatchObject({ kind: 'KEVIN', subject: 'payment', why: '1. Open the page. 2. Press Pay.' });
+    expect(r[6]).toBe(1);
   });
 
   it("Kevin's Reject is not a close while blocked: the query leaves Rejected cards out", () => {
