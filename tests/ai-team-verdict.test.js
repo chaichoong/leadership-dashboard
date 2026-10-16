@@ -385,6 +385,12 @@ rows = [
     card("rOLD", wall(NOW - timedelta(days=20), "OPEN", "KEVIN", "credential", "old step") + "\\n" +
          wall(NOW - timedelta(days=18), "CLEARED", "KEVIN", "credential", "Kevin says the step is done: done", by="Kevin"),
          at=NOW - timedelta(days=20)),
+    # One wall at a time, as the dispatcher reads Notes: a new OPEN line ends the wall before it (review 2 of PR #798).
+    card("rREPLACED", wall(NOW - timedelta(days=20), "OPEN", "KEVIN", "credential", "x") + "\\n" +
+         wall(NOW - timedelta(days=18), "OPEN", "SIGN-IN", "a.example", "signed out") + "\\n" +
+         wall(NOW - timedelta(days=17), "CLEARED", "SIGN-IN", "a.example", "the robot's session on a.example is live now"), outcome=None),
+    card("rREPLACEDINSIDE", wall(NOW - timedelta(days=20), "OPEN", "KEVIN", "credential", "x") + "\\n" +
+         wall(NOW - timedelta(days=10), "OPEN", "TOOL", "a script", "a code fix"), outcome=None),
     # Still open from before the window: he is still being asked, so it counts.
     card("rSTILLOPEN", wall(NOW - timedelta(days=20), "OPEN", "KEVIN", "physical", "collect the parcel"), outcome=None),
     card("rFORM", wall(D1, "OPEN", "KEVIN", "credential", "x"), name="RENT FORM: a tenant's direct payment form"),
@@ -436,26 +442,26 @@ f = A.facts_handback(rows, board, team, aar, NOW, logins)
 back = {i["id"]: i["note"] for i in f["items"]}
 print(json.dumps({"cards": f["cards"], "back": f["back"], "items": back,
                   "agents": [[a["name"], a["cards"], a["back"], a["score"]] for a in f["byAgent"]]}))`);
-    expect(out.cards).toBe(14);          // rOLD is outside the window, rFORM a form card, rPERSON a person's
-    expect(out.back).toBe(8);
-    expect(Object.keys(out.items).sort()).toEqual(['rBEFORE', 'rPROFILEAGAIN', 'rSIGNAGAIN', 'rSIGNATURE', 'rSTILLOPEN', 'rTOKEN', 'rWALLONLY', 'rWWW']);
+    expect(out.cards).toBe(15);          // rREPLACED's wall ended before the window          // rOLD is outside the window, rFORM a form card, rPERSON a person's
+    expect(out.back).toBe(9);
+    expect(Object.keys(out.items).sort()).toEqual(['rBEFORE', 'rPROFILEAGAIN', 'rREPLACEDINSIDE', 'rSIGNAGAIN', 'rSIGNATURE', 'rSTILLOPEN', 'rTOKEN', 'rWALLONLY', 'rWWW']);
     expect(out.items.rBEFORE).toBe('AI Inbox: you did a sign-in or settings step');   // opened before the window, held inside it
     expect(out.items.rWWW).toBe('AI Inbox: you signed the robot in again (access not kept)');
     expect(out.items.rTOKEN).toBe('AI Builder: you did a sign-in or settings step, you could not do the step it gave you');
     expect(out.items.rSIGNAGAIN).toBe('AI Inbox: you signed the robot in again (access not kept)');
     expect(out.items.rSIGNATURE).toBe('AI Inbox: you did a signature');
     expect(out.items.rWALLONLY).toBe('AI Inbox: you did an in-person step');      // a wall with no verdict yet still counts
-    expect(out.agents).toEqual([['AI Builder', 1, 1, 0], ['AI Inbox', 13, 7, 46]]);   // worst first
+    expect(out.agents).toEqual([['AI Builder', 1, 1, 0], ['AI Inbox', 14, 8, 43]]);   // worst first
   });
 
   it("the line carries each agent's score for the AI Agents page, and its reasons", () => {
     const out = py(`${HANDBACK}
 l = A.judge_handback(A.facts_handback(rows, board, team, aar, NOW, logins))
 print(json.dumps({"colour": l["colour"], "number": l["number"], "answer": l["answer"], "byAgent": l["byAgent"], "extra": l["extra"]}))`);
-    expect(out).toMatchObject({ colour: 'red', number: 43, answer: '8 of 14 cards came back to you' });
-    expect(out.byAgent[1]).toEqual({ id: 'recAGENTxxxxxxx01', name: 'AI Inbox', cards: 13, back: 7, score: 46, colour: 'red',
+    expect(out).toMatchObject({ colour: 'red', number: 40, answer: '9 of 15 cards came back to you' });
+    expect(out.byAgent[1]).toEqual({ id: 'recAGENTxxxxxxx01', name: 'AI Inbox', cards: 14, back: 8, score: 43, colour: 'red',
       reasons: { 'you signed the robot in again (access not kept)': 3, 'you did a signature': 1, 'you did an in-person step': 2,
-                 'you did a sign-in or settings step': 1 } });
+                 'you did a sign-in or settings step': 2 } });
     expect(out.extra).toContainEqual(['Robot sign-ins you did', '9, 3 of them again for a site the robot already had']);
   });
 

@@ -1803,56 +1803,54 @@ def card_handbacks(f, logins, cut):
     """(in the population, [why it came back]) for one task. In the population: a verdict in the
     window, or a wall Kevin's side holds (KEVIN, SIGN-IN, SITE) open at any moment inside it.
 
-    A KEVIN wall counts when it was open inside the window, wherever it opened: a KEVIN ONLY step
-    opens its wall at submit, before the approval, so judging only walls opened in the window let an
-    approved card's step escape (review of PR #798: 5 live cards, 86% read for 84%). "Could not do"
+    A task has one wall at a time, the way agent-dispatch.py reads its Notes (task_blocker: the
+    newest marker wins): a new OPEN line of any kind, TOOL included, ends the wall before it, and a
+    CLEARED line ends the current one (review 2 of PR #798: a KEVIN wall replaced by a SIGN-IN wall
+    never gets its own CLEARED line, and was being charged for ever).
+    A KEVIN wall counts when it was open at any moment inside the window, wherever it opened: a
+    KEVIN ONLY step opens its wall at submit, before the approval (review of PR #798). "Could not do"
     and a repeat sign-in are events, counted when they happen inside the window. A SIGN-IN clear is
     Kevin's sign-in only when the robot browser logged a window for that site and profile just
     before it, whatever the clear's own words (the sweep clears a profile wall in other words)."""
     whys = []
     touched = False
-    open_walls = {}                     # (kind, subject) -> opened at
-    opened_profile = {}
+    current = None                      # {kind, subject, at, step, profile}
+
+    def end_current(at):
+        """The current wall ends at `at` (None: still open now, or an unreadable stamp)."""
+        nonlocal touched
+        w = current
+        if not w or w["kind"] not in ("KEVIN", "SIGN-IN", "SITE"):
+            return
+        held = at is None or at > cut
+        if held and (w["kind"] == "KEVIN" or (w["at"] and w["at"] > cut) or at is not None):
+            touched = True
+        if held and w["kind"] == "KEVIN" and w["step"] not in KEVIN_STEPS_ALLOWED:
+            whys.append("you did " + KEVIN_STEP_WORDS.get(w["step"], "a step yourself"))
 
     for w in wall_lines(f.get("Notes")):
-        key = (w["kind"], w["subject"].lower())
         inside = bool(w["at"]) and w["at"] > cut
-        if w["kind"] not in ("KEVIN", "SIGN-IN", "SITE"):
-            continue
         if w["mark"] == "BLOCKER OPEN":
-            open_walls[key] = w["at"]
-            if w["kind"] == "SIGN-IN":
-                opened_profile[key[1]] = w["profile"]
-            if w["kind"] == "KEVIN":
-                step = (w["subject"].split() or [""])[0].lower()
-                open_walls[key] = (w["at"], step)
-            if inside:
+            end_current(w["at"])
+            current = dict(w, subject=w["subject"].lower(), step=(w["subject"].split() or [""])[0].lower())
+            if inside and w["kind"] in ("KEVIN", "SIGN-IN", "SITE"):
                 touched = True
             continue
-        # BLOCKER CLEARED
-        opened = open_walls.get(key)
-        if w["kind"] == "KEVIN" and opened is not None and (inside or w["at"] is None):
-            touched = True
-            if opened[1] not in KEVIN_STEPS_ALLOWED:
-                whys.append("you did " + KEVIN_STEP_WORDS.get(opened[1], "a step yourself"))
-        open_walls.pop(key, None)
-        if not inside:
+        was = current
+        end_current(w["at"])
+        current = None
+        if not inside or w["kind"] not in ("KEVIN", "SIGN-IN", "SITE"):
             continue
         touched = True
         if w["rest"].startswith(KEVIN_CANT_NOTE):
             whys.append("you could not do the step it gave you")
         elif w["kind"] == "SIGN-IN":
-            s = kevin_signin(logins, key[1], opened_profile.get(key[1], ""), w["at"])
+            host = w["subject"].lower()
+            profile = was["profile"] if was and was["kind"] == "SIGN-IN" and was["subject"] == host else ""
+            s = kevin_signin(logins, host, profile, w["at"])
             if s and access_not_kept(logins, s):
                 whys.append("you signed the robot in again (access not kept)")
-    # A KEVIN wall still open now was open inside the window.
-    for (kind, _subject), opened in open_walls.items():
-        if kind == "KEVIN":
-            touched = True
-            if opened[1] not in KEVIN_STEPS_ALLOWED:
-                whys.append("you did " + KEVIN_STEP_WORDS.get(opened[1], "a step yourself"))
-        elif opened and opened > cut:
-            touched = True
+    end_current(None)                   # the wall still standing now was open inside the window
     at = _aware(f.get("Approved At"))
     decided = bool(f.get("Approval Outcome")) and bool(at) and at > cut
     seen = []
