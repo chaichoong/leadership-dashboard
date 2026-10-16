@@ -362,8 +362,28 @@ rc, so, se = run_main(["replace", "proxy_service_token2", "--generate"])
 print(json.dumps({"mapped": mapped, "rc": rc, "err": se.strip(), "file": open(os.path.expanduser("~/.config/od/proxy_service_token2")).read().strip()}))`);
     expect(out.mapped).toEqual(['agent-runner:PROXY_TOKEN', 'claude-proxy:PROXY_SERVICE_TOKEN_2']);
     expect(out.rc).toBe(2);
-    expect(out.err).toBe('REFUSED: another Worker holds PROXY_TOKEN and is not known to be a copy of proxy_service_token2. Map it first.');
+    expect(out.err).toMatch(/^REFUSED: another Worker holds PROXY_TOKEN and is not known to be a copy of proxy_service_token2\./);
     expect(out.file).toBe('proxy-0123456789abcdef');        // nothing changed
+  });
+
+  it('3d the same guard stops a pasted key (review 3); a secret marked notCopyOf no longer blocks, and the mark survives seeding', () => {
+    const env = home();
+    writeFileSync(join(env.h, 'list-claude-proxy.json'), '[{"name":"PROXY_SERVICE_TOKEN_2"}]');
+    writeFileSync(join(env.h, 'list-w2.json'), '[{"name":"PROXY_SERVICE_TOKEN_2"}]');
+    const out = py(env, `
+open(os.path.expanduser("~/.config/od/proxy_service_token2"), "w").write("proxy-0123456789abcdef\\n")
+WORKERS[:] = ["claude-proxy", "w2"]
+kr.COPY_OF_AT = {("claude-proxy", "PROXY_SERVICE_TOKEN_2"): "proxy_service_token2"}
+kr.seed(kr.discover(), with_readers=False)
+pasted = run_main(["replace", "proxy_service_token2", "--stdin"], stdin="new-proxy-0123456789abcdef")[0]
+reg = json.load(open(kr.REGISTER))
+reg["keys"]["worker:w2:PROXY_SERVICE_TOKEN_2"]["notCopyOf"] = ["proxy_service_token2"]
+open(kr.REGISTER, "w").write(json.dumps(reg))
+kr.seed(kr.discover(), with_readers=False)
+marked = json.load(open(kr.REGISTER))["keys"]["worker:w2:PROXY_SERVICE_TOKEN_2"].get("notCopyOf")
+generated = run_main(["replace", "proxy_service_token2", "--generate"])[0]
+print(json.dumps([pasted, marked, generated]))`);
+    expect(out).toEqual([2, ['proxy_service_token2'], 0]);
   });
 
   it('3b a Worker row the listing no longer produces goes, unless it was written by hand or its place was not listed', () => {

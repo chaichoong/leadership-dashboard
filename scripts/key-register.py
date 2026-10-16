@@ -445,6 +445,8 @@ def seed(found=None, config_dir=CONFIG_DIR, reg_path=REGISTER, with_readers=True
             if key not in keys:
                 added.append(key)
             old = keys.get(key, {})
+            if old.get("notCopyOf"):
+                row["notCopyOf"] = old["notCopyOf"]
             if old.get("manual"):
                 old["copies"] = row["copies"] + kept(old.get("copies"))
                 continue
@@ -890,11 +892,15 @@ def _replace(name, args, reg_path, config_dir, log_path, print):
         print("REFUSED: only a key we made ourselves (shared with a Worker) may be generated here.")
         return 2
     clash = sorted({c["secret"] for c in row.get("copies") or []} &
-                   {c["secret"] for r in reg["keys"].values() if r.get("kind") == "worker-pair" for c in r.get("copies") or []})
-    if args.get("generate") and clash:
+                   {c["secret"] for r in reg["keys"].values()
+                    if r.get("kind") == "worker-pair" and name not in (r.get("notCopyOf") or [])
+                    for c in r.get("copies") or []})
+    if clash:
         # Another Worker holds a secret of the same name that this register cannot tie to this key:
-        # it may be one more copy, and a new value would break it (review 2 of PR #799).
-        print("REFUSED: another Worker holds %s and is not known to be a copy of %s. Map it first." % (", ".join(clash), name))
+        # it may be one more copy, and a new value, generated or pasted, would break it (reviews 2
+        # and 3 of PR #799). A secret that is NOT a copy is marked "notCopyOf": [this key] on its row.
+        print("REFUSED: another Worker holds %s and is not known to be a copy of %s. Add it to COPY_OF_AT if it is "
+              "one, or mark its row \"notCopyOf\": [\"%s\"] in the register if it is not." % (", ".join(clash), name, name))
         return 2
     if args.get("generate") and not row.get("copies"):
         # The Worker that checks it would keep the old value and every call between them would fail.
