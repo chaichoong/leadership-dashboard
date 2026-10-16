@@ -46,11 +46,11 @@
         // client tenant's shell; the adminOnly flag is the contract the Supabase
         // migration must honour. Replaced the Plan Builder entry 1 Aug 2026 on
         // Kevin's direction (os/business-plan-builder/ files remain on disk).
-        { id: 'kpi-library', name: 'KPI Library', icon: '📚', pageVer: '1.20', sopFile: '', sopVer: '1.0', standalone: 'index.html#kpi-library', adminOnly: true },
+        { id: 'kpi-library', name: 'KPI Library', icon: '📚', pageVer: '1.21', sopFile: '', sopVer: '1.0', standalone: 'index.html#kpi-library', adminOnly: true },
         // AI Agents (Leadership) — ADMIN ONLY, like KPI Library. Approvals,
         // checks and the workforce register in one place (Kevin's ruling,
         // 24 Aug 2026; moved out of the Systemisation page).
-        { id: 'agents', name: 'AI Agents', icon: '🤖', pageVer: '1.214', sopFile: 'sop-ai-agents.html', sopVer: '1.170', standalone: 'os/agents/index.html', adminOnly: true },
+        { id: 'agents', name: 'AI Agents', icon: '🤖', pageVer: '1.215', sopFile: 'sop-ai-agents.html', sopVer: '1.170', standalone: 'os/agents/index.html', adminOnly: true },
         { id: 'fintable',  name: 'Accounts',                       icon: '🏦', pageVer: '1.19', sopFile: '',                            sopVer: '1.0', standalone: 'index.html#fintable' },
         { id: 'systemisation', name: 'Systemisation',              icon: '⚙️', pageVer: '1.27', sopFile: 'guides/systemisation.html',    sopVer: '1.11', standalone: 'os/systemisation/index.html' },
         { id: 'os-team',    name: 'Team Members',                  icon: '👥', pageVer: '1.55', sopFile: '',                            sopVer: '1.1', standalone: 'os/team/index.html' },
