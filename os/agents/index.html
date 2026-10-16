@@ -62,6 +62,7 @@ a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}
 .sc-val{text-align:right;font-weight:var(--fw-medium);word-break:break-word}
 .sc-val.warn{color:var(--warning)}
 .sc-val.good{color:var(--success)}
+.sc-val.bad{color:var(--danger)}
 .sc-wait-link{color:var(--warning);font-weight:var(--fw-semibold);cursor:pointer}
 .sc-wait-link:hover{text-decoration:underline}
 
@@ -5556,9 +5557,47 @@ function lastLogDate(agentId){
     return row ? String(gf(row,ALOG.date)||'').slice(0,10) : null;
 }
 
+// THE HAND-BACK SCORE (Kevin, 16 Oct 2026): he does four things only, approve,
+// correct wrong work, pay and give access. Each agent's share of cards that
+// asked him for anything else is worked out on the Mac by
+// scripts/ai_team_health.py into the ai-team-verdict row (the "You only
+// approve, pay or give access" line, `byAgent`), the same row the dashboard's
+// AI team panel draws, so the two can never disagree. This page only draws it.
+// A row that cannot be read, or is over 2 hours old, says so: never a number.
+const HANDBACK_STALE_MIN = 120;   // the dashboard panel's own AI_TEAM_STALE_MIN
+const HANDBACK_COLOUR_CLASS = { green: 'good', amber: 'warn', red: 'bad' };
+function handbackLine(){
+    const row = _estateRows.find(r => (r.fields || {})[ES.key] === 'ai-team-verdict');
+    if(!row) return { why: 'the AI team row has not been written yet' };
+    let p;
+    try { p = JSON.parse((row.fields || {})[ES.payload] || 'null'); }
+    catch(e){ console.warn('AI team payload unreadable:', e); return { why: 'the AI team row could not be read' }; }
+    const t = Date.parse((p && p.computedAt) || '');
+    if(!Number.isFinite(t)) return { why: 'the AI team row has no time on it' };
+    if((Date.now() - t) / 60000 > HANDBACK_STALE_MIN) return { why: 'last worked out ' + new Date(t).toLocaleString('en-GB', { timeZone: 'Europe/London', weekday: 'short', hour: '2-digit', minute: '2-digit' }) + ', over 2 hours ago' };
+    const line = (p.lines || []).find(l => l && l.key === 'handback');
+    if(!line) return { why: 'the hand-back score has not been worked out yet' };
+    if(line.colour === 'grey') return { why: String(line.why || 'the Mac could not read its sources') };
+    return { line };
+}
+function agentHandbackCell(tmId){
+    if(String(_estateState).indexOf('error') === 0)
+        return '<span class="sc-val warn" title="The Estate Status table could not be read, so the score is unknown, not zero.">unavailable</span>';
+    if(_estateState !== 'ready') return '<span style="color:var(--text-muted)">loading…</span>';
+    const h = handbackLine();
+    if(!h.line) return `<span class="sc-val warn" title="${esc(h.why)}">can't tell</span>`;
+    const a = (h.line.byAgent || []).find(x => x && x.id === tmId);
+    if(!a) return '<span style="color:var(--text-muted)" title="This agent brought you no cards in the last 14 days.">no cards in 14 days</span>';
+    const why = Object.entries(a.reasons || {}).map(([k, n]) => `${Number(n) || 0} × ${k}`).join('\n');
+    const title = `In the last 14 days, ${Number(a.back) || 0} of ${Number(a.cards) || 0} cards asked you for more than approving, correcting, paying or giving access.` + (why ? '\n' + why : '')
+        + (h.line.partial ? "\nThe robot's sign-in log could not be read, so repeat sign-ins are not counted and the score is at best amber." : '');
+    return `<span class="sc-val ${HANDBACK_COLOUR_CLASS[a.colour] || 'warn'}" title="${esc(title)}">${Number(a.back) || 0} of ${Number(a.cards) || 0} (score ${Number(a.score) || 0})</span>`;
+}
+
 // One scorecard per role agent: status, guardrails, accuracy per kind of
 // work (worst first — a blended number hides a weak type), workload, what
-// is waiting on Kevin, and when it last wrote its daily log.
+// is waiting on Kevin, how much it hands back to him, and when it last wrote
+// its daily log.
 function agentScorecardHtml(a){
     const sel = a.id===selectedAgentId;
     const status = selName(gf(a,AG.status))||'Planned';
@@ -5608,6 +5647,7 @@ function agentScorecardHtml(a){
         <div class="sc-row"><span class="sc-label">Workload</span><span class="sc-val">${agentWorkloadCell(tmIds)}</span></div>
         <div class="sc-row"><span class="sc-label">Metric</span><span class="sc-val">${metric?`<span title="${esc(String(metric))}">${esc(String(metric).split('\n')[0])}</span>`:`<span style="color:var(--text-muted)" title="Target: ${esc(String(gf(a,AG.scoreMetric)||'not set'))}. The agent's own runtime fills this in once built.">&mdash;</span>`}</span></div>
         <div class="sc-row"><span class="sc-label">Waiting on you</span><span class="sc-val">${waitingHtml}</span></div>
+        <div class="sc-row"><span class="sc-label">Came back to you</span><span class="sc-val">${tmId ? agentHandbackCell(tmId) : '<span style="color:var(--text-muted)">&mdash;</span>'}</span></div>
         <div class="sc-row"><span class="sc-label">Last fired</span><span class="sc-val">${firedHtml}</span></div>
     </div>`;
 }

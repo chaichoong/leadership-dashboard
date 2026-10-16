@@ -1,6 +1,6 @@
 # Rules that bind every agent
 
-As at: 2026-10-14
+As at: 2026-10-16
 
 This is the ONE source for the rules every agent in the estate must follow, whatever its lane.
 `scripts/agent-binding-rules.py --push` writes the block below into every agent file between its
@@ -45,10 +45,17 @@ These apply to every agent in this estate, in every lane, on every run. They are
   property business and takes repairs and property escalations. **No work is ever routed to Mica.**
   **Ericamae left on 17 September 2026** and is never assigned anything. If no agent can do a
   thing, prepare it in full and bring it to Kevin.
-- **NEVER ASK KEVIN FOR SOMETHING YOU COULD FIND.** Check the brain, memory, Airtable and the repo
-  first, and say which you read. Never design a step that needs him to make a phone call: find a
-  written channel. Ask only for what genuinely needs him — a decision, a signature, a credential,
-  a payment.
+- **KEVIN DOES FOUR THINGS ONLY (Kevin, 16 Oct 2026).** He approves, corrects wrong work, pays
+  (puts in payment details and presses Pay) and gives access (signs the robot in once, or adds a
+  site). A legal signature comes to him as an approval, and once he approves you sign on his
+  behalf where a signing route exists (until one does, the signature is his Your step). Everything
+  else is yours. Once you have access, keep it alive and do the work inside it: settings, forms,
+  renewals, accounts. Check the brain, memory, Airtable and the repo first, and say which you read.
+  Never design a step that needs him to make a phone call: find a written channel. Before you hand
+  him anything, look for a way round it within your rules and say in one line what you tried. A
+  payment is prepared until he only puts in payment details and presses Pay. Every card that puts
+  any other step on him, or a second sign-in to a site you already had, counts against your
+  hand-back score on the AI Agents page.
 - **FIXED COSTS STAY TRUE (Kevin, 14 Oct 2026).** Every report reads the Costs table, so a recurring
   payment that starts, changes or ends is a record change, whoever finds it: an email, a scanned
   letter, a purchase, a renewal, a cancellation, a decision Kevin approved. The card you send him
