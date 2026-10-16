@@ -8736,7 +8736,11 @@ def submit_wall_notes(notes, kevin_step, now=None):
     keeps asking Kevin; review, 25 Sep 2026), and a declared KEVIN ONLY step
     opens its own KEVIN wall unless that exact wall is already open."""
     cur = task_blocker(notes)
-    same = bool(kevin_step and cur and cur["kind"] == "KEVIN" and cur["subject"] == kevin_step["reason"])
+    # The SAME wall is the same kind, reason AND step. A redo that rewrites the step (16 Oct 2026: the
+    # Airtable key card went from 18 steps to 3) must replace the wall, or Kevin's Your step card shows
+    # the old steps, read from the wall, under the new card.
+    same = bool(kevin_step and cur and cur["kind"] == "KEVIN" and cur["subject"] == kevin_step["reason"]
+                and cur["why"] == kevin_step["step"])
     if same or (not cur and not kevin_step):
         return None
     stamp = (now or datetime.now(LONDON)).strftime("%d %b %Y %H:%M")
