@@ -248,6 +248,33 @@ const BUILTIN_SITES = {
   // link. The show page lists them all, but only once a browser has run its script. Read-only, no login:
   // the content engine reads it with `read --links /episode/`.
   'open.spotify.com':           { label: 'Spotify (public show pages)', login: false },
+  // Short sessions (16 Oct 2026, Kevin: he gives the robot access once, and the estate keeps it).
+  // `idleMinutes` is how long the site lets a session sit unused before it signs the robot out on
+  // its own servers. The daily 06:40 keep-alive cannot hold a session that short, so the 30-minute
+  // hand-back poll visits these while they are in use (session-keepalive.py warm). Xero: 60 minutes,
+  // Xero's staff on its product ideas forum; seen 14 Oct 2026, the last read at 10:18, signed out at
+  // 11:20, Kevin signed in again at 11:26, while reads 55 and 57 minutes apart on 13 Oct held.
+  'login.xero.com':             { label: 'Xero', login: true,
+                                  loginUrl: 'https://login.xero.com/identity/user/login', idleMinutes: 60 },
+  // The two Acturis insurance portals. AXA showed "Sorry, your session has timed out" an hour after
+  // Kevin's sign-in on 7 Oct 2026; Acturis publishes no limit, so 60 is the longest it can be.
+  // Swinton's door is the Login step itself, which shows its password box whether or not the robot is
+  // signed in: every check after a sign-in read "signed out" (7 Oct 10:52 sign-in, 10:53 "out";
+  // 8 Oct 11:59 and 11:59), and the wall went straight back to Kevin. The check opens My account
+  // instead, which shows the account to a live session and sends a dead one to the Login step.
+  'swintonbusiness.acturis.com': { label: 'Swinton Business (Acturis)', login: true,
+                                  loginUrl: 'https://swintonbusiness.acturis.com/AWE/Container.aspx?CurrentStep=Login&CurrentWorkflow=StandardB2C&RefererWorkflow=StandardB2C&RefererStep=MyAccount',
+                                  checkUrl: 'https://swintonbusiness.acturis.com/AWE/Container.aspx?CurrentWorkflow=StandardB2C&CurrentStep=MyAccount',
+                                  idleMinutes: 60 },
+  'www.landlordaxainsurance.com': { label: 'AXA landlord insurance', login: true,
+                                  loginUrl: 'https://www.landlordaxainsurance.com/',
+                                  checkUrl: 'https://www.landlordaxainsurance.com/AWE/Container.aspx?CurrentStep=MyAXA&CurrentWorkflow=Direct',
+                                  idleMinutes: 60 },
+  // The same portal without "www": its door is AXA's marketing front page, which has no password box,
+  // so its check read "signed in" every morning while the www check read "timed out". It checks My AXA.
+  'landlordaxainsurance.com':   { label: 'AXA landlord insurance', login: true,
+                                  loginUrl: 'https://landlordaxainsurance.com/',
+                                  checkUrl: 'https://www.landlordaxainsurance.com/AWE/Container.aspx?CurrentStep=MyAXA&CurrentWorkflow=Direct' },
 };
 
 function loadSites() {
@@ -2580,11 +2607,13 @@ async function main() {
       if (!shot) die('--shot is required: the screenshot goes on the card');
       const res = await withPage(profile, false, async (page) => {
         const r = await runHandover(page, plan, { quiet: true, skipKevin: true });
-        return Object.assign(r, { screenshot: await shoot(page, shot).catch(() => null) });
+        // The address it reached: a plan's `site` is the agent's own words ("axa-via-topcashback"), and the
+        // keep-warm reads a line's address to know which site was used (16 Oct 2026).
+        return Object.assign(r, { screenshot: await shoot(page, shot).catch(() => null), url: page.url() });
       });
       // A plan that carries on reaches the price headless when no step is his: the agent's card then
       // carries the price, and his window only re-runs the quote for him to buy (9 Oct 2026).
-      ledger({ cmd: 'handover-dry-run', task, profile, site: plan.site || null, steps: res.done, stuck: res.stuck, end: res.end || null, screenshot: res.screenshot });
+      ledger({ cmd: 'handover-dry-run', task, profile, site: plan.site || null, url: res.url || null, steps: res.done, stuck: res.stuck, end: res.end || null, screenshot: res.screenshot });
       console.log(JSON.stringify({ mode: 'handover-dry-run', task, stuck: res.stuck, end: res.end || null, screenshot: res.screenshot, steps: res.done.length }));
       if (res.stuck) process.exitCode = 3;
       return;
@@ -2618,6 +2647,7 @@ async function main() {
         await turnBanner(page, FILLING);
         const r = await runHandover(page, plan, { onTick: tick, kevinMs: Number(process.env.AGENT_HANDOVER_KEVIN_MS) || undefined });
         const png = await shoot(page, path.join(HANDOVER_DIR, 'shots', `${task}-${Date.now()}.png`)).catch(() => null);
+        r.url = page.url();                                         // before his window closes the page
         await turnBanner(page, r.stuck
           ? stuckBanner(r.stuck, plan.why)
           : `Your turn: ${plan.why}.${edit ? ` Your edit: ${edit}.` : ''} Close this window when you have finished: the other robots wait while it is open.`);
@@ -2628,7 +2658,7 @@ async function main() {
     } finally {
       releaseSigninHold(dir);
     }
-    ledger({ cmd: 'handover', task, profile, site: plan.site || null, steps: res.done, stuck: res.stuck, end: res.end || null, screenshot: res.screenshot });
+    ledger({ cmd: 'handover', task, profile, site: plan.site || null, url: res.url || null, steps: res.done, stuck: res.stuck, end: res.end || null, screenshot: res.screenshot });
     console.log(JSON.stringify({ mode: 'handover', task, handedOver: !res.stuck, stuck: res.stuck, end: res.end || null, screenshot: res.screenshot, steps: res.done.length }));
     if (res.stuck) process.exitCode = 3;
     return;

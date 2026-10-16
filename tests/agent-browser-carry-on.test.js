@@ -320,6 +320,8 @@ describe('the Your turn window carries on, page by page, to the price', () => {
     // Nothing on the declarations page was touched by the robot: its only press was page 1's Next.
     expect(handover.steps.filter(s => s.carryOn === 2 && s.do !== 'kevin')).toEqual([]);
     expect(handover.steps.filter(s => s.next).length).toBe(1);
+    // The address it reached is on the line (16 Oct 2026): the keep-warm reads it to know the site was used.
+    expect(handover.url).toMatch(new RegExp('^' + base.replace(/\./g, '\\.') + '/'));
   }, 120000);
 
   it('a dry run stops at the declarations page and names its questions, so the agent puts them on his card', async () => {
@@ -341,6 +343,7 @@ describe('the Your turn window carries on, page by page, to the price', () => {
     expect(last.stuck.unknown[0]).toMatch(/this page asks your declarations \("cancelled"\)/);
     const steps = ledgerOf(x).find(l => l.cmd === 'handover-dry-run').steps.filter(s => s.carryOn);
     expect(steps.map(s => s.selector)).toEqual(['#ly']);      // the letting answer, then nothing
+    expect(ledgerOf(x).find(l => l.cmd === 'handover-dry-run').url).toMatch(/^http:\/\/127\.0\.0\.1:\d+\/q-insert/);
   }, 120000);
 
   it('review round 3: a legend over a long list of claims, CCJs and convictions makes the page his, however long the list', async () => {

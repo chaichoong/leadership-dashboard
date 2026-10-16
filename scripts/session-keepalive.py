@@ -42,7 +42,15 @@ which has no account yet, one every morning. The site is still visited, so the
 first sign-in that holds puts it back on the daily list, and a job that needs
 it asks for the sign-in when it needs it.
 
-Usage:  session-keepalive.py run [--dry-run]     |  session-keepalive.py selftest
+Kept warm (16 Oct 2026, Kevin: he gives the robot access once, and the estate
+keeps it). A daily visit cannot hold a site that signs the robot out after an
+hour without use: Xero did that to four of his sign-ins in a week. A site whose
+entry carries `idleMinutes` is visited by the 30-minute hand-back poll (`warm`)
+while it is in use: a sign-in or a robot step on it in the last WARM_FOR_HOURS,
+and no signed-out verdict since the last sign-in. A site nobody has used for a
+day is left to lapse, so the robot never visits a portal round the clock.
+
+Usage:  session-keepalive.py run [--dry-run]  |  warm [--dry-run]  |  selftest
 State:  ~/knowledge-os/logs/session-keepalive/status.json (latest verdict per site)
 """
 import glob
@@ -53,7 +61,7 @@ import shutil
 import subprocess
 import sys
 import urllib.parse
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import signin_hold  # noqa: E402
@@ -120,11 +128,11 @@ def session_state(result):
     return "signed-in" if result.get("signedIn") else "signed-out"
 
 
-def read_site(host, entry):
+def read_site(host, entry, timeout=300):
     cmd = [node_bin(), os.path.join(REPO, "scripts", "agent-browser.js"), "session", "--site", host]
     try:
         # 300: a site the robot signs itself back in to (Amazon) walks twice around a 20-second window.
-        r = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
+        r = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
     except subprocess.TimeoutExpired:
         return {"error": "timeout"}
     if r.returncode != 0:
@@ -302,6 +310,178 @@ def cmd_run(dry_run=False):
     return 0
 
 
+# ── Kept warm (16 Oct 2026) ──────────────────────────────────────────────────
+WARM_FOR_HOURS = 24          # a site unused this long is left to lapse: never a visit round the clock
+WARM_POLL_MINUTES = 30       # the hand-back poll's clock (com.kevinbrittain.handback-poll, :00 and :30)
+WARM_MARGIN_MINUTES = 10     # a late poll (the job queue held it) still lands inside the site's limit
+WARM_VISIT_TIMEOUT = 240     # seconds: one visit's worst case; a busy profile is skipped before it starts
+PROFILE_DIR = os.path.join(os.environ.get("AGENT_BROWSER_PROFILE_ROOT") or os.path.expanduser("~/.config/od/agent-browser"), "default")
+HOLD_MAX_SECONDS = 20 * 60   # agent-browser.js HOLD_MAX_MS: an older sign-in hold is debris
+# Robot steps that use a site. A `session` check is not use: the warm visit is one, and counting
+# it would keep a site warm for ever.
+USE_CMDS = ("login", "read", "prepare", "commit", "handover", "handover-open", "handover-dry-run")
+# One platform domain hosts unrelated sign-ins, so a step on a sibling there is not use of this
+# site: agent-browser.js SIGNIN_SHARED_DOMAINS, plus Acturis, which runs many brokers' portals.
+SHARED_DOMAINS = {"google.com", "google.co.uk", "microsoft.com", "live.com", "office.com", "apple.com",
+                  "amazon.com", "amazon.co.uk", "facebook.com", "meta.com", "acturis.com"}
+
+
+def signin_domain(host):
+    """The registrable domain, by agent-browser.js signinDomain's rule: go.xero.com -> xero.com."""
+    parts = [p for p in str(host or "").lower().split(".") if p]
+    if len(parts) >= 3 and len(parts[-1]) == 2 and parts[-2] in ("co", "gov", "org", "ac", "net", "ltd", "plc", "me", "sch", "nhs"):
+        return ".".join(parts[-3:])
+    return ".".join(parts[-2:])
+
+
+def event_host(e):
+    """The host a ledger line acted on: a sign-in window's host, a check's site, else the step's address.
+
+    A step's `site` is the agent's own words on prepare, commit and handover lines ("axa-via-
+    topcashback", "www.topcashback.co.uk" on a Swinton page), so their address comes first (review,
+    16 Oct 2026). Free text that is no host at all is no site, never a crash."""
+    cmd = e.get("cmd")
+    keys = ("host", "forWall") if cmd == "login" else ("site", "url") if cmd in ("session", "refresh") else ("url", "site")
+    for k in keys:
+        v = str(e.get(k) or "").strip()
+        if not v:
+            continue
+        try:
+            h = (urllib.parse.urlsplit(v if "://" in v else "https://" + v).hostname or "").lower()
+        except ValueError:
+            continue
+        if "." in h:
+            return h
+    return ""
+
+
+def same_site(host, other):
+    """True when a line on OTHER is this site: the host itself, or its registrable domain unless shared."""
+    if not other:
+        return False
+    if other == host:
+        return True
+    dom = signin_domain(host)
+    return dom not in SHARED_DOMAINS and signin_domain(other) == dom
+
+
+def load_ledger(now, path=None):
+    """The browser ledger's lines from the last WARM_FOR_HOURS (and two more), each with `_at`."""
+    floor = now - timedelta(hours=WARM_FOR_HOURS + 2)
+    out = []
+    try:
+        with open(path or signin_hold.LEDGER, encoding="utf-8", errors="replace") as fh:
+            for line in fh:
+                try:
+                    rec = json.loads(line)
+                except ValueError:
+                    continue
+                at = signin_hold._at(rec.get("at")) if isinstance(rec, dict) else None
+                if at and at >= floor:
+                    rec["_at"] = at
+                    out.append(rec)
+    except FileNotFoundError:
+        print("NOTE: no browser ledger yet, so no site is in use", file=sys.stderr)
+        return []
+    return out
+
+
+def profile_busy(profile_dir=PROFILE_DIR, now=None):
+    """Why the robot profile cannot be visited now ('' when it is free): agent-browser.js's own
+    tests, a Chrome holding the profile (waitForProfile) or a live sign-in hold (signinHoldActive).
+    Checked before a visit, so a visit never waits on Kevin's window and is never killed part-way."""
+    flag = "--user-data-dir=" + profile_dir
+    ps = subprocess.run(["ps", "-axww", "-o", "command="], capture_output=True, text=True)
+    if any(flag in line.split() for line in (ps.stdout or "").splitlines()):
+        return "a robot browser has the profile open"
+    try:
+        with open(profile_dir + ".signin-hold", encoding="utf-8") as fh:
+            hold = json.load(fh)
+    except (OSError, ValueError):
+        return ""
+    at = (hold.get("at") or 0) / 1000 if isinstance(hold, dict) else 0
+    if (now or datetime.now().timestamp()) - at > HOLD_MAX_SECONDS:
+        return ""
+    if hold.get("pid"):                             # a hold with no pid is live, as signinHoldActive reads it
+        try:
+            os.kill(int(hold["pid"]), 0)
+        except (TypeError, ValueError, ProcessLookupError):
+            return ""
+        except PermissionError:
+            pass
+    return "a sign-in window holds the profile"
+
+
+def warm_due(sites, events, now):
+    """([hosts to visit now], {host: why not}) for every login site whose entry carries `idleMinutes`.
+
+    Visited when it was used (USE_CMDS) in the last WARM_FOR_HOURS, its newest verdict since the
+    last sign-in is not "signed out" (there is nothing to hold), and it has sat unused long enough
+    that the NEXT poll could land past its limit. Pure: `events` carry `_at` (load_ledger)."""
+    due, why_not = [], {}
+    for host, entry in sorted(sites.items()):
+        try:
+            limit = float(entry.get("idleMinutes") or 0)
+        except (TypeError, ValueError):
+            limit = 0
+        if limit <= 0 or not entry.get("login") or entry.get("shortSession") \
+                or not (entry.get("checkUrl") or entry.get("loginUrl")):
+            continue
+        # A line stamped after `now` (a clock set wrong) is never this site's newest use.
+        mine = sorted((e for e in events if e["_at"] <= now and str(e.get("profile") or "default") == "default"
+                       and same_site(host, event_host(e))), key=lambda e: e["_at"])
+        used = [e["_at"] for e in mine if e.get("cmd") in USE_CMDS]
+        if not used or now - used[-1] > timedelta(hours=WARM_FOR_HOURS):
+            why_not[host] = "not used in the last %d hours" % WARM_FOR_HOURS
+            continue
+        signins = [e["_at"] for e in mine if e.get("cmd") == "login"]
+        reads = [signin_hold._read(e) for e in mine
+                 if e.get("cmd") == "session" and (not signins or e["_at"] > signins[-1])]
+        reads = [r for r in reads if r]
+        if reads and reads[-1] == "out":
+            why_not[host] = "signed out since the last sign-in: nothing to hold"
+            continue
+        idle = (now - mine[-1]["_at"]).total_seconds() / 60
+        if idle < limit - WARM_POLL_MINUTES - WARM_MARGIN_MINUTES:
+            why_not[host] = "touched %d minutes ago" % idle
+            continue
+        due.append(host)
+    return due, why_not
+
+
+def cmd_warm(dry_run=False):
+    """Visit every short-session site in use, so its session never sits idle past its limit.
+    The `session` check is the visit: it loads the site and writes its verdict to the ledger."""
+    now = datetime.now(timezone.utc)
+    sites = load_sites()
+    due, why_not = warm_due(sites, load_ledger(now), now)
+    report = {"at": now.isoformat(), "visited": {}, "notVisited": why_not}
+    failed = 0
+    for host in due:
+        if dry_run:
+            report["visited"][host] = "dry run: not opened"
+            continue
+        busy = profile_busy()
+        if busy:
+            # A pause, not a fault: the next poll tries again.
+            report["stopped"] = busy + "; the next poll tries again"
+            break
+        try:
+            res = read_site(host, sites[host], timeout=WARM_VISIT_TIMEOUT)
+        except Exception as e:                              # noqa: BLE001
+            res = {"error": str(e)[:300]}
+        state = session_state(res)
+        report["visited"][host] = state if state != "unknown" else "unknown: " + str(res.get("error") or "no verdict")[:160]
+        failed += state == "unknown"
+    print(json.dumps(report, indent=1))
+    if failed and failed == len(report["visited"]):
+        # WARNING, not ERROR: the hand-back poll prints it, and an ERROR line would mark the whole
+        # poll failed (run-job.sh) for a visit that only keeps a session warm (review, 16 Oct 2026).
+        print("WARNING: no keep-warm visit reached a verdict, so nothing was held this round", file=sys.stderr)
+        return 1
+    return 0
+
+
 def selftest():
     cases = [
         # The real `session` results of 15 Sep 2026: Spotify's door after its
@@ -369,6 +549,8 @@ def selftest():
 
 if __name__ == "__main__":
     a = sys.argv[1:]
-    if not a or a[0] not in ("run", "selftest"):
-        sys.exit("usage: session-keepalive.py run [--dry-run] | selftest")
-    sys.exit(selftest() if a[0] == "selftest" else cmd_run(dry_run="--dry-run" in a))
+    if not a or a[0] not in ("run", "warm", "selftest"):
+        sys.exit("usage: session-keepalive.py run [--dry-run] | warm [--dry-run] | selftest")
+    if a[0] == "selftest":
+        sys.exit(selftest())
+    sys.exit((cmd_warm if a[0] == "warm" else cmd_run)(dry_run="--dry-run" in a))
