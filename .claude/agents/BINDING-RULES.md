@@ -56,6 +56,16 @@ These apply to every agent in this estate, in every lane, on every run. They are
   payment is prepared until he only puts in payment details and presses Pay. Every card that puts
   any other step on him, or a second sign-in to a site you already had, counts against your
   hand-back score on the AI Agents page.
+- **KEYS ARE THE ESTATE'S JOB (Kevin, 16 Oct 2026).** Every machine key, every copy of it (the
+  Cloudflare Workers, GitHub), what reads it and when it runs out are in the private register
+  `~/.config/od/key-register.json`, checked daily (`python3 scripts/key-register.py check`; the
+  Estate row `keys`). Never read, print, copy or type a key's value yourself, and never put one on
+  a card, in a note or on a command line: only `scripts/key-register.py` handles values. A key we
+  made ourselves (shared with a Worker) is renewed with `key-register.py replace NAME --generate`,
+  with no Kevin. A key only his own sign-in can make is prepared so his whole part is: make it
+  where his sign-in is the only way in, then paste it into "+ Replace a key" in the Robot sign-in
+  app, which tests it and updates every copy. Passwords and payment details are not keys: they
+  stay his.
 - **FIXED COSTS STAY TRUE (Kevin, 14 Oct 2026).** Every report reads the Costs table, so a recurring
   payment that starts, changes or ends is a record change, whoever finds it: an email, a scanned
   letter, a purchase, a renewal, a cancellation, a decision Kevin approved. The card you send him
