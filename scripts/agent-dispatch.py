@@ -6004,6 +6004,10 @@ def cmd_outcome(args):
         "feedback": t["feedback"],
         "signAsKevin": sign_card,
         "signProblem": sign_problem,
+        # The newest SIGN AS KEVIN stamp in Notes, so `sign --check` still finds the agreement after a Your
+        # step block or a report has replaced the card's text (third review, 16 Oct 2026).
+        "signStamp": next(({"agreementId": aid, "agreement": name, "signer": "info@agilelets.co.uk"}
+                           for aid, name, _sha in reversed(SIGN_COPY_RE.findall(str(t["notes"] or "")))), None),
     }))
 
 
@@ -6171,7 +6175,7 @@ SIGN_FOR_KEVIN_LEDGER = os.environ.get(
     os.path.expanduser("~/knowledge-os/logs/sign-for-kevin/signed.jsonl"))
 SIGN_CARD_MARK = "SIGN AS KEVIN CARD:"
 SIGN_CARD_RE = re.compile(r"SIGN AS KEVIN CARD: (\S+)")
-SIGN_COPY_RE = re.compile(r"SIGN AS KEVIN CARD: (\S+) \(.*?\) copy sha256:([0-9a-f]{64})")
+SIGN_COPY_RE = re.compile(r"SIGN AS KEVIN CARD: (\S+) \((.*)\) copy sha256:([0-9a-f]{64})\. Kevin's Approve")
 SIGNED_FOR_KEVIN_MARK = "SIGNED FOR KEVIN:"
 NOT_SIGNED_MARK = "NOT SIGNED BY THE ROBOT:"
 
@@ -6274,7 +6278,7 @@ def sign_as_kevin_state(rec):
     url = next((a["url"] for a in t["attachments"] if a["filename"] == doc and a["url"]), "")
     if not url:
         return card, f"the document the card names ({doc}) is not attached to the task, so Kevin could not have read it"
-    shas = [sha for aid, sha in SIGN_COPY_RE.findall(str(t["notes"] or "")) if aid == card["agreementId"]]
+    shas = [sha for aid, _name, sha in SIGN_COPY_RE.findall(str(t["notes"] or "")) if aid == card["agreementId"]]
     if not shas:
         return card, "the task has no record of the copy Kevin was shown at submit, so it cannot be checked"
     card = dict(card, documentUrl=url, documentSha256=shas[-1])
@@ -7832,7 +7836,10 @@ def cmd_complete(args):
     sign_id = (sign_card or {}).get("agreementId") or latest_sign_card(t["notes"])
     not_signed = " ".join(str(getattr(args, "not_signed", "") or "").split())
     sign_note = ""
-    if sign_id and robot_sign_unconfirmed(args.task, sign_id):
+    locked = [i for i in dict.fromkeys(SIGN_CARD_RE.findall(str(t["notes"] or "")) + ([sign_id] if sign_id else []))
+              if robot_sign_unconfirmed(args.task, i)]
+    if locked:
+        sign_id = locked[0]
         sys.exit(f"ERROR: refusing to complete {args.task} — the robot pressed Submit on {sign_id} and it was "
                  "never proved. Read Adobe first:\n"
                  f"         node scripts/agent-browser.js sign --task {args.task} --check --shot <png>")

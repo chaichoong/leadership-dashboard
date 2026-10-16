@@ -308,7 +308,7 @@
         if (up.indexOf('ROY DONE:') === 0) return 'roy work logged';
         if (/^CONTENT/i.test(nm)) return 'content card';
         if (up.indexOf('CALENDAR:') === 0) return 'calendar entry';
-        if (up.indexOf('SIGN AS KEVIN:') === 0) return 'sign for Kevin';
+        if (/^SIGN\s+AS\s+KEVIN\s*:/.test(up)) return 'sign for Kevin';
         if (up.indexOf('DOCUMENT:') === 0) return 'sign document';
         if (up.indexOf('POST:') === 0) return 'post letter';
         if (/^(TO|FROM|CC|SUBJECT):/i.test(out)) {

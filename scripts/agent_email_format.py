@@ -702,7 +702,7 @@ def form_card(name="", notes="", holders=None):
 # a bold, quoted, bulleted or numbered heading cannot slip through.
 TRIAL_ACTING_SHAPE_RE = re.compile(
     r"^[ \t>*_#\-•]*(?:\d+[.)][ \t]*)?[*_]*"
-    r"(PASS TO ROY:|CALENDAR:|MARK FOR PAYMENT|DOCUMENT:|POST:|SIGNERS:|SIGN AS KEVIN:)", re.I | re.M)
+    r"(PASS TO ROY:|CALENDAR:|MARK FOR PAYMENT|DOCUMENT:|POST:|SIGNERS:|SIGN\s+AS\s+KEVIN\s*:)", re.I | re.M)
 
 
 def strip_trial_marks(text):

@@ -2340,7 +2340,11 @@ const WAITING_RE = /Waiting For Me to Sign/i;
 const SIGNED_STATUS_RE = /^(?:signed|completed?|waiting for others?(?: to sign)?|waiting for (?!me\b|you\b)[\w .,'&-]+ to sign|out for signature|in progress)\b/i;
 // "In progress" and "Out for signature" are broad, so anything that still names this account waiting refuses.
 const NOT_SIGNED_STATUS_RE = /cancel|expire|declin|recall|reject|abort|waiting for (?:me|you)\b|your signature/i;
-const signedStatus = (st) => SIGNED_STATUS_RE.test(normName(st)) && !NOT_SIGNED_STATUS_RE.test(st);
+const OWN_SIGNER_NAMES = Object.values(SIGN_DOORS).map((d) => d.savedSignature.toLowerCase());
+const signedStatus = (st) => SIGNED_STATUS_RE.test(normName(st)) && !NOT_SIGNED_STATUS_RE.test(st)
+  && !OWN_SIGNER_NAMES.some((n) => normName(st).toLowerCase().includes(n));
+// A status that ends the agreement without this signature: the lock on an unproved Submit can clear.
+const FINAL_STATUS_RE = /cancel|expire|declin|recall|reject|abort/i;
 const AGREEMENT_ID_RE = /^[A-Za-z0-9_\-:.]{12,200}$/;
 // Adobe's screens, measured 16 Oct 2026: the list paints about 20 s after its nav; the agreement and
 // signing pages within 30 s. Overridable so a test against fixture pages does not wait for Adobe.
@@ -2637,9 +2641,10 @@ async function runSign(page, ctx, task, card, approvedCopy, shot, recheck) {
     r = await runSignFlow(page, ctx, { mode: 'sign', task, name: card.agreement, id: card.agreementId, door: card.door,
                                        shot, approvedCopy, recheck });
   } catch (e) {
+    // The lock first: if the run log cannot be written, the agreement must still be locked.
+    if (e.unconfirmed) signLedger({ cmd: 'unconfirmed', task, agreementId: card.agreementId, agreement: card.agreement });
     ledger({ cmd: 'sign', task, agreementId: card.agreementId, agreement: card.agreement,
              refused: !!e.refusal, unconfirmed: !!e.unconfirmed, error: String(e.message || e).slice(0, 400) });
-    if (e.unconfirmed) signLedger({ cmd: 'unconfirmed', task, agreementId: card.agreementId, agreement: card.agreement });
     throw e;
   }
   signLedger({ cmd: 'signed', task, agreementId: r.agreementId, agreement: r.agreement,
@@ -2660,7 +2665,9 @@ async function runSignCheck(page, task, card, shot) {
               signed: signedStatus(now.status), screenshot: shot ? await shoot(page, shot).catch(() => null) : null };
   if (r.signed) {
     signLedger({ cmd: 'signed', task, agreementId: r.agreementId, agreement: r.agreement, statusAfter: r.statusAfter, confirmedLater: true });
-  } else if (WAITING_RE.test(r.statusAfter)) {
+  } else if (WAITING_RE.test(r.statusAfter) || FINAL_STATUS_RE.test(r.statusAfter)) {
+    // Still waiting: the Submit never landed. Cancelled, expired or declined: it never will. Either way the
+    // lock clears; a new sign is refused anyway unless Adobe still waits for this account (third review).
     signLedger({ cmd: 'cleared', task, agreementId: r.agreementId, agreement: r.agreement, statusAfter: r.statusAfter });
   }
   ledger({ cmd: 'sign-check', task, agreementId: r.agreementId, statusAfter: r.statusAfter, signed: r.signed });
@@ -3135,13 +3142,14 @@ async function main() {
         state = JSON.parse(execFileSync('python3', [process.env.AGENT_OUTCOME_SCRIPT || path.join(REPO, 'scripts', 'agent-dispatch.py'),
           'outcome', task], { encoding: 'utf8', timeout: 60000 }));
       } catch (e) { die(`could not read ${task}: ${(e.stderr || e.message || '').toString().trim().slice(0, 200)}`); }
-      const card = state.signAsKevin || {};
+      const card = state.signAsKevin || state.signStamp || {};
       const door = SIGN_DOORS[String(card.signer || '').toLowerCase()] || SIGN_DOORS['info@agilelets.co.uk'];
       const r = await withPage(door.profile, false, (page) => runSignCheck(page, task, card, shot));
       const problems = r.signed ? signFollowUps(task, r) : [];
       console.log(JSON.stringify(Object.assign({ mode: 'sign-check' }, r, { problems,
         next: r.signed ? `SIGNED (proved now). Complete the task: python3 scripts/agent-dispatch.py complete ${task}.`
           : WAITING_RE.test(r.statusAfter) ? 'NOT SIGNED: the Submit never landed. The approval stands; run sign again.'
+          : FINAL_STATUS_RE.test(r.statusAfter) ? `NOT SIGNED: Adobe ended it ("${r.statusAfter}"). Close it with complete --not-signed quoting that.`
           : `NOT PROVED (Adobe: "${r.statusAfter}"). Do not sign again and do not close it as not signed: tell Kevin on the card what Adobe shows.` }), null, 2));
       if (!r.signed || problems.length) process.exit(1);
       return;
@@ -3150,6 +3158,7 @@ async function main() {
     // The copy Kevin could open on his card, fetched from the task itself and checked against the fingerprint
     // stamped when he was shown it: the words the robot signs must be its words.
     const approvedCopy = path.join(compareDir(), `${task}_approved.pdf`);
+    process.on('exit', () => { try { fs.rmSync(approvedCopy, { force: true }); } catch { /* best effort on the way out */ } });
     try {
       const res = await fetch(card.documentUrl);
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
@@ -3164,7 +3173,7 @@ async function main() {
       const again = signBinding(task);
       if (again.agreementId !== card.agreementId || normName(again.agreement) !== normName(card.agreement)
           || again.documentSha256 !== card.documentSha256) {
-        die(`the card changed while the robot worked (${card.agreementId} became ${again.agreementId}). Nothing was signed.`);
+        die('the card changed while the robot worked (its agreement or the copy Kevin was shown is different now). Nothing was signed.');
       }
     };
     let r;

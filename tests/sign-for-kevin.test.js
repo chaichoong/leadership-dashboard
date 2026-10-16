@@ -279,6 +279,9 @@ print(json.dumps(out))`, { notes, output, notSigned });
     writeFileSync(LEDGER, JSON.stringify({ cmd: 'unconfirmed', task: 'recTESTTESTTEST01', agreementId: ID }) + '\n');
     try {
       expect(complete('', { notSigned: 'gave up' }).error).toMatch(/pressed Submit .* never proved/);
+      // A lock on an EARLIER agreement on the same task still blocks the close after a resubmission.
+      const older = `[16 Oct 2026 10:00 — agent-dispatch] SIGN AS KEVIN CARD: ${ID} (${NAME}) copy sha256:${'a'.repeat(64)}. Kevin's Approve lets the robot sign this one agreement.`;
+      expect(complete(older, { output: CARD.replace(ID, OTHER_ID), notSigned: 'gave up' }).error).toMatch(new RegExp(`pressed Submit on ${ID}`));
     } finally { rmSync(LEDGER, { force: true }); }
     const out = complete('', { notSigned: 'Kevin signed it himself from his phone on 16 Oct.' });
     expect(out).toMatchObject({ refused: false, status: 'Completed' });
@@ -515,8 +518,8 @@ describe('the robot signs the approved agreement, and only it', () => {
     }
     expect(['Completed', 'Signed', 'Waiting for Others', 'Out for signature', 'Waiting for Jane Smith to sign'].map(ab.signedStatus))
       .toEqual([true, true, true, true, true]);
-    expect(['Cancelled', 'Expired', 'Waiting For Me to Sign', '', 'Declined', 'In progress - Waiting for you', 'Out for signature (your signature needed)']
-      .map(ab.signedStatus)).toEqual([false, false, false, false, false, false, false]);
+    expect(['Cancelled', 'Expired', 'Waiting For Me to Sign', '', 'Declined', 'In progress - Waiting for you', 'Out for signature (your signature needed)',
+      'Waiting for Agile Lets to sign'].map(ab.signedStatus)).toEqual([false, false, false, false, false, false, false, false]);
   });
 
   it('a failure after Submit is "not confirmed", never "nothing was signed"', async () => {
@@ -561,7 +564,9 @@ describe('the robot signs the approved agreement, and only it', () => {
       lock(); expect((await check('Waiting For Me to Sign')).signed).toBe(false);
       expect(rows().map((r) => r.cmd)).toEqual(['unconfirmed', 'cleared']);
       lock(); expect((await check('Cancelled')).signed).toBe(false);
-      expect(rows().map((r) => r.cmd)).toEqual(['unconfirmed']);   // still locked
+      expect(rows().map((r) => r.cmd)).toEqual(['unconfirmed', 'cleared']);   // ended by Adobe: it can close as not signed
+      lock(); expect((await check('Something Adobe never said before')).signed).toBe(false);
+      expect(rows().map((r) => r.cmd)).toEqual(['unconfirmed']);   // unknown: still locked
       rmSync(LEDGER, { force: true });
       await expect(check('Completed')).rejects.toThrow(/no unproved Submit is on record/);
     } finally { rmSync(LEDGER, { force: true }); }
@@ -636,7 +641,7 @@ m.cmd_outcome(types.SimpleNamespace(task=sys.argv[2]))
 `);
     const record = (outcome) => ({ id: 'recTESTTESTTEST01', createdTime: '2026-10-16T10:00:00.000Z', fields: {
       [AF.agentOutput]: CARD, [AF.status]: 'Today', [AF.name]: 'A tenancy agreement to sign',
-      [AF.notes]: `[16 Oct 2026 11:00 — agent-dispatch] SIGN AS KEVIN CARD: ${ID} (${NAME}) copy sha256:${'c'.repeat(64)}.`,
+      [AF.notes]: `[16 Oct 2026 11:00 — agent-dispatch] SIGN AS KEVIN CARD: ${ID} (${NAME}) copy sha256:${'c'.repeat(64)}. Kevin's Approve lets the robot sign this one agreement.`,
       [AF.approvalOutcome]: outcome, [AF.approvedAt]: '2026-10-16T12:00:00.000Z', [AF.sentForApprovalBy]: ['recQkO6BA4w5zqwZ4'],
       [AF.attachments]: [{ filename: 'unsigned_recTESTTESTTEST01_AST.pdf', url: 'https://v5.airtableusercontent.com/x/a.pdf' }] } });
     const was = process.env.AGENT_OUTCOME_SCRIPT;
@@ -645,6 +650,12 @@ m.cmd_outcome(types.SimpleNamespace(task=sys.argv[2]))
       process.env.REC_JSON = JSON.stringify(record('Approved as-is'));
       expect(ab.signBinding('recTESTTESTTEST01')).toMatchObject({ agreementId: ID, documentUrl: 'https://v5.airtableusercontent.com/x/a.pdf',
         documentSha256: 'c'.repeat(64) });
+      // After a Your step block replaces the card's text, --check still finds the agreement from the stamp.
+      const yourStep = record('Approved as-is');
+      yourStep.fields[AF.agentOutput] = 'YOUR STEP: sign it yourself\n\nThe robot could not prove its Submit.';
+      process.env.REC_JSON = JSON.stringify(yourStep);
+      const st = JSON.parse(execFileSync('python3', [stub, 'outcome', 'recTESTTESTTEST01'], { encoding: 'utf8' }));
+      expect([st.signAsKevin, st.signStamp]).toEqual([null, { agreementId: ID, agreement: NAME, signer: 'info@agilelets.co.uk' }]);
       process.env.REC_JSON = JSON.stringify(record('Approved with minor edits'));
       expect(() => ab.signBinding('recTESTTESTTEST01')).toThrow(/may not be signed: the approval came WITH EDITS/);
       process.env.REC_JSON = JSON.stringify(record(null));

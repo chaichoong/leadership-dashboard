@@ -143,10 +143,14 @@ test.describe('a signature for Kevin is never decided in bulk', () => {
         + 'The tenancy agreement for a test flat.\n\n**Carrying this out will involve:** the robot signs this one agreement with your saved signature.',
       [TF.sentForApprovalBy]: [AGENT_B], [TF.teamMember]: [AGENT_B], [TF.lmt]: now, [TF.taskType]: 'Correspondence',
     } });
+    // Written loosely, it is still a signature card (the dispatcher reads the header the same way).
+    fx.approvals.push({ id: 'recSignLoose', createdTime: now, fields: Object.assign({}, fx.approvals[fx.approvals.length - 1].fields, {
+      [TF.agentOutput]: fx.approvals[fx.approvals.length - 1].fields[TF.agentOutput].replace('SIGN AS KEVIN:', 'Sign as  Kevin :') }) });
     await mockAgentsPage(page, fx);
     await loadAgentsPage(page);
     await openApprovals(page);
     await expect(page.locator('[data-apv-card="recSignKevin"]')).toHaveCount(1);
+    await expect(page.locator('[data-apv-card="recSignLoose"] [data-apv-pick]')).toHaveCount(0);
     await expect(page.locator('[data-apv-card="recSignKevin"] [data-apv-pick]')).toHaveCount(0);
     await expect(page.locator('[data-apv-pick]')).toHaveCount(6);
     await page.locator('[data-apv-select-all]').click();
