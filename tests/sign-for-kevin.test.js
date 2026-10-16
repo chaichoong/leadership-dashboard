@@ -42,10 +42,11 @@ spec = importlib.util.spec_from_file_location("ad", ${JSON.stringify(DISPATCH)})
 m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m)
 import agent_email_format as F
 arg = json.loads(sys.argv[1]) if len(sys.argv) > 1 else None
+STAMP = "[16 Oct 2026 11:00 — agent-dispatch] SIGN AS KEVIN CARD: %s (%s) copy sha256:%s. Kevin's Approve lets the robot sign this one agreement." % (${JSON.stringify(ID)}, ${JSON.stringify(NAME)}, "a" * 64)
 def rec(output, outcome="Approved as-is", approved_at="2026-10-16T12:00:00.000Z", created="2026-10-16T10:00:00.000Z",
-        sent_by=True, approver="", status="Approval", name="A tenancy agreement to sign", notes="",
+        sent_by=True, approver="", status="Approval", name="A tenancy agreement to sign", notes=None,
         attach="unsigned_recTESTTESTTEST01_AST.pdf"):
-    f = {m.AF["agentOutput"]: output, m.AF["status"]: status, m.AF["name"]: name, m.AF["notes"]: notes}
+    f = {m.AF["agentOutput"]: output, m.AF["status"]: status, m.AF["name"]: name, m.AF["notes"]: STAMP if notes is None else notes}
     if outcome: f[m.AF["approvalOutcome"]] = outcome
     if approved_at: f[m.AF["approvedAt"]] = approved_at
     if sent_by: f[m.AF["sentForApprovalBy"]] = ["recQkO6BA4w5zqwZ4"]
@@ -124,8 +125,13 @@ print(json.dumps([bool(c), p]))`, CARD);
   it('a clean approval signs, and hands the robot the link to the copy Kevin could open', () => {
     expect(state('rec(arg)')).toEqual([true, '']);
     const card = py(`c, p = m.sign_as_kevin_state(rec(arg))
-print(json.dumps(c["documentUrl"]))`, CARD);
-    expect(card).toBe('https://v5.airtableusercontent.com/x/unsigned_recTESTTESTTEST01_AST.pdf');
+print(json.dumps([c["documentUrl"], c["documentSha256"]]))`, CARD);
+    expect(card).toEqual(['https://v5.airtableusercontent.com/x/unsigned_recTESTTESTTEST01_AST.pdf', 'a'.repeat(64)]);
+  });
+
+  it('refuses a task with no fingerprint of the copy he was shown at submit', () => {
+    expect(state('rec(arg, notes="")')[1]).toMatch(/no record of the copy Kevin was shown/);
+    expect(state('rec(arg, notes=STAMP.replace("' + ID + '", "CBJCHBCAABAAzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz"))')[1]).toMatch(/no record of the copy/);
   });
 
   it('refuses a card whose document is not on the task, so Kevin could not have read it', () => {
@@ -189,7 +195,9 @@ print(json.dumps([res, calls[-2:]]))`);
 });
 
 describe('submit: the card goes to Kevin alone, with the document, never on his legal matter', () => {
-  const submit = (output, { attach = ['/tmp/unsigned_recTESTTESTTEST01_AST.pdf'], type = 'Correspondence', name = 'A tenancy agreement to sign' } = {}) => py(`
+  const COPY = join(DIR, 'unsigned_recTESTTESTTEST01_AST.pdf');
+  writeFileSync(COPY, '%PDF-1.7 the copy Kevin is shown');
+  const submit = (output, { attach = [COPY], type = 'Correspondence', name = 'A tenancy agreement to sign' } = {}) => py(`
 import tempfile
 captured = {}
 m.patch_task = lambda task, fields: captured.setdefault("writes", []).append(fields) or {"id": task}
@@ -223,13 +231,17 @@ print(json.dumps(out))`, { output, attach, type, name });
     expect(out.error).toBeUndefined();
     expect(out).toMatchObject({ refused: false, status: 'Approval', assignee: 'kevin@runpreneur.org.uk',
       approver: 'kevin@runpreneur.org.uk' });       // his queue, whoever the task was set to go to
-    expect(out.notes).toContain(`SIGN AS KEVIN CARD: ${ID} (${NAME})`);
+    const sha = require_('crypto').createHash('sha256').update(readFileSync(COPY)).digest('hex');
+    expect(out.notes).toContain(`SIGN AS KEVIN CARD: ${ID} (${NAME}) copy sha256:${sha}`);
   });
 
   it('refuses a card without its document, on his legal matter, or typed as anything but Correspondence', () => {
     expect(submit(CARD + TRACK, { attach: [] }).error).toMatch(/attach the document Kevin is asked to sign/);
     expect(submit(CARD + TRACK, { attach: ['/tmp/some_other_file.pdf'] }).error).toMatch(/attach the document/);
     expect(submit(CARD + TRACK, { type: 'Admin' }).error).toMatch(/--type Correspondence/);
+    // The same card written loosely ("Sign as  Kevin :") is still the card: the rules are not skipped.
+    const loose = CARD.replace('SIGN AS KEVIN:', 'Sign as  Kevin :');
+    expect(submit(loose + TRACK, { attach: [] }).error).toMatch(/attach the document Kevin is asked to sign/);
     expect(submit(CARD + TRACK, { name: 'TIER 1 MATTER: a document to sign' }).error).toMatch(/private legal matter/);
     const banner = py('print(json.dumps(F.TIER1_BANNER))');
     expect(submit(banner + '\n\n' + CARD + TRACK).error).toMatch(/private legal matter/);
@@ -263,6 +275,10 @@ print(json.dumps(out))`, { notes, output, notSigned });
     appendFileSync(LEDGER, JSON.stringify({ cmd: 'signed', task: 'recTESTTESTTEST01', agreementId: ID }) + '\n');
     try {
       expect(complete('')).toMatchObject({ refused: false, status: 'Completed' });
+    } finally { rmSync(LEDGER, { force: true }); }
+    writeFileSync(LEDGER, JSON.stringify({ cmd: 'unconfirmed', task: 'recTESTTESTTEST01', agreementId: ID }) + '\n');
+    try {
+      expect(complete('', { notSigned: 'gave up' }).error).toMatch(/pressed Submit .* never proved/);
     } finally { rmSync(LEDGER, { force: true }); }
     const out = complete('', { notSigned: 'Kevin signed it himself from his phone on 16 Oct.' });
     expect(out).toMatchObject({ refused: false, status: 'Completed' });
@@ -497,8 +513,10 @@ describe('the robot signs the approved agreement, and only it', () => {
       await expect(runFlow(s, { mode: 'sign' })).rejects.toThrow(/SIGN NOT CONFIRMED/);
       expect(s.submits).toBe(1);
     }
-    expect(['Completed', 'Signed', 'Waiting for Others', 'Out for signature'].map(ab.signedStatus)).toEqual([true, true, true, true]);
-    expect(['Cancelled', 'Expired', 'Waiting For Me to Sign', '', 'Declined'].map(ab.signedStatus)).toEqual([false, false, false, false, false]);
+    expect(['Completed', 'Signed', 'Waiting for Others', 'Out for signature', 'Waiting for Jane Smith to sign'].map(ab.signedStatus))
+      .toEqual([true, true, true, true, true]);
+    expect(['Cancelled', 'Expired', 'Waiting For Me to Sign', '', 'Declined', 'In progress - Waiting for you', 'Out for signature (your signature needed)']
+      .map(ab.signedStatus)).toEqual([false, false, false, false, false, false, false]);
   });
 
   it('a failure after Submit is "not confirmed", never "nothing was signed"', async () => {
@@ -507,6 +525,52 @@ describe('the robot signs the approved agreement, and only it', () => {
     expect(err.unconfirmed).toBe(true);
     expect(err.message).toMatch(/^SIGN NOT CONFIRMED: Submit was pressed/);
     expect(err.message).not.toMatch(/Nothing was signed/);
+  });
+
+  const CARD_JS = { agreement: NAME, agreementId: ID, door: { profile: 'default', savedSignature: 'Agile Lets' } };
+  const rows = () => (existsSync(LEDGER) ? readFileSync(LEDGER, 'utf8').trim().split('\n').filter(Boolean).map((l) => JSON.parse(l)) : []);
+  async function withFake(s, fn) {
+    const ctx = await fakeAdobe(s);
+    const page = await ctx.newPage();
+    try { return await fn(page, ctx); } finally { await ctx.close(); }
+  }
+
+  it('the run writes "signed" only on Adobe\'s proof, and "unconfirmed" (the lock) on a failure after Submit', async () => {
+    rmSync(LEDGER, { force: true });
+    try {
+      await withFake(adobe(), (page, ctx) => ab.runSign(page, ctx, 'recTESTTESTTEST01', CARD_JS, APPROVED, null, null));
+      expect(rows().map((r) => r.cmd)).toEqual(['signed']);
+      rmSync(LEDGER, { force: true });
+      await expect(withFake(adobe({ statusAfterSubmit: 'Cancelled' }),
+        (page, ctx) => ab.runSign(page, ctx, 'recTESTTESTTEST01', CARD_JS, APPROVED, null, null))).rejects.toThrow(/SIGN NOT CONFIRMED/);
+      expect(rows().map((r) => r.cmd)).toEqual(['unconfirmed']);
+      rmSync(LEDGER, { force: true });
+      await expect(withFake(adobe({ extraRequired: 1 }),
+        (page, ctx) => ab.runSign(page, ctx, 'recTESTTESTTEST01', CARD_JS, APPROVED, null, null))).rejects.toThrow(/asks for more/);
+      expect(rows()).toEqual([]);                              // refused before Submit: nothing to lock
+    } finally { rmSync(LEDGER, { force: true }); }
+  });
+
+  it('--check: signed on Adobe = recorded; still waiting = the lock clears; anything else stays locked', async () => {
+    const lock = () => writeFileSync(LEDGER, JSON.stringify({ cmd: 'unconfirmed', task: 'recTESTTESTTEST01', agreementId: ID }) + '\n');
+    const check = (status) => withFake(adobe({ agreements: { [ID]: { name: NAME, status } } }),
+      (page) => ab.runSignCheck(page, 'recTESTTESTTEST01', CARD_JS, null));
+    try {
+      lock(); expect((await check('Completed')).signed).toBe(true);
+      expect(rows().map((r) => r.cmd)).toEqual(['unconfirmed', 'signed']);
+      lock(); expect((await check('Waiting For Me to Sign')).signed).toBe(false);
+      expect(rows().map((r) => r.cmd)).toEqual(['unconfirmed', 'cleared']);
+      lock(); expect((await check('Cancelled')).signed).toBe(false);
+      expect(rows().map((r) => r.cmd)).toEqual(['unconfirmed']);   // still locked
+      rmSync(LEDGER, { force: true });
+      await expect(check('Completed')).rejects.toThrow(/no unproved Submit is on record/);
+    } finally { rmSync(LEDGER, { force: true }); }
+  });
+
+  it('the copy fetched from the task must be the one fingerprinted when Kevin was shown it', () => {
+    const sha = require_('crypto').createHash('sha256').update(PDF_A).digest('hex');
+    expect(() => ab.verifyApprovedCopy(PDF_A, sha)).not.toThrow();
+    expect(() => ab.verifyApprovedCopy(PDF_B, sha)).toThrow(/it was replaced/);
   });
 
   it('does not believe a Submit that Adobe\'s own page does not show', async () => {
@@ -538,7 +602,7 @@ describe('the dry run finds one agreement, reads its id, downloads it, and signs
 describe('signBinding: the robot reads Kevin\'s approval through agent-dispatch.py, and believes nothing else', () => {
   const ok = { outcome: 'Approved as-is', approved: true, formCard: false, trial: '', signProblem: '',
     signAsKevin: { agreement: NAME, agreementId: ID, signer: 'info@agilelets.co.uk', document: '/x.pdf',
-                   documentUrl: 'https://v5.airtableusercontent.com/x/x.pdf' } };
+                   documentUrl: 'https://v5.airtableusercontent.com/x/x.pdf', documentSha256: 'b'.repeat(64) } };
   const bind = (state) => { process.env.OUTCOME_JSON = JSON.stringify(state); return ab.signBinding('recTESTTESTTEST01'); };
   it('returns the approved card with its door', () => {
     expect(bind(ok)).toMatchObject({ agreementId: ID, agreement: NAME, door: { savedSignature: 'Agile Lets' } });
@@ -553,6 +617,7 @@ describe('signBinding: the robot reads Kevin\'s approval through agent-dispatch.
   });
   it('refuses a card with no link to the copy Kevin read, and a Submit never proved', () => {
     expect(() => bind({ ...ok, signAsKevin: { ...ok.signAsKevin, documentUrl: '' } })).toThrow(/no link to the copy Kevin read/);
+    expect(() => bind({ ...ok, signAsKevin: { ...ok.signAsKevin, documentSha256: '' } })).toThrow(/no fingerprint of the copy/);
     appendFileSync(LEDGER, JSON.stringify({ cmd: 'unconfirmed', task: 'recTESTTESTTEST01', agreementId: ID }) + '\n');
     try { expect(() => bind(ok)).toThrow(/pressed .* never proved/); } finally { rmSync(LEDGER, { force: true }); }
   });
@@ -570,14 +635,16 @@ m.approved_text_changed = lambda t: False
 m.cmd_outcome(types.SimpleNamespace(task=sys.argv[2]))
 `);
     const record = (outcome) => ({ id: 'recTESTTESTTEST01', createdTime: '2026-10-16T10:00:00.000Z', fields: {
-      [AF.agentOutput]: CARD, [AF.status]: 'Today', [AF.name]: 'A tenancy agreement to sign', [AF.notes]: '',
+      [AF.agentOutput]: CARD, [AF.status]: 'Today', [AF.name]: 'A tenancy agreement to sign',
+      [AF.notes]: `[16 Oct 2026 11:00 — agent-dispatch] SIGN AS KEVIN CARD: ${ID} (${NAME}) copy sha256:${'c'.repeat(64)}.`,
       [AF.approvalOutcome]: outcome, [AF.approvedAt]: '2026-10-16T12:00:00.000Z', [AF.sentForApprovalBy]: ['recQkO6BA4w5zqwZ4'],
       [AF.attachments]: [{ filename: 'unsigned_recTESTTESTTEST01_AST.pdf', url: 'https://v5.airtableusercontent.com/x/a.pdf' }] } });
     const was = process.env.AGENT_OUTCOME_SCRIPT;
     process.env.AGENT_OUTCOME_SCRIPT = stub;
     try {
       process.env.REC_JSON = JSON.stringify(record('Approved as-is'));
-      expect(ab.signBinding('recTESTTESTTEST01')).toMatchObject({ agreementId: ID, documentUrl: 'https://v5.airtableusercontent.com/x/a.pdf' });
+      expect(ab.signBinding('recTESTTESTTEST01')).toMatchObject({ agreementId: ID, documentUrl: 'https://v5.airtableusercontent.com/x/a.pdf',
+        documentSha256: 'c'.repeat(64) });
       process.env.REC_JSON = JSON.stringify(record('Approved with minor edits'));
       expect(() => ab.signBinding('recTESTTESTTEST01')).toThrow(/may not be signed: the approval came WITH EDITS/);
       process.env.REC_JSON = JSON.stringify(record(null));

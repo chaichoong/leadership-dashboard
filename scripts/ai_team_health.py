@@ -2086,11 +2086,12 @@ def read_decided(es, aar, now):
 
 
 def read_handback(es, aar, now):
-    """Every task with a verdict in the window, or a wall line written in it (its last change is
-    then in the window too), with its Notes: the walls live there."""
+    """Every task with a verdict in the window, or a wall line or a not-signed close written in it (its
+    last change is then in the window too), with its Notes: the walls live there."""
     since = (now - timedelta(days=DECIDED_DAYS + 1)).strftime("%Y-%m-%d")
     formula = ("AND(OR(AND(LEN({Approval Outcome}&'')>0, IS_AFTER({Approved At}, DATETIME_PARSE('%s'))), "
-               "AND(FIND('BLOCKER ', {Notes}&''), IS_AFTER(LAST_MODIFIED_TIME(), DATETIME_PARSE('%s'))))%s)"
+               "AND(OR(FIND('BLOCKER ', {Notes}&''), FIND('NOT SIGNED BY THE ROBOT', {Notes}&'')), "
+               "IS_AFTER(LAST_MODIFIED_TIME(), DATETIME_PARSE('%s'))))%s)"
                % (since, since, aar.FORM_KEY_CLAUSE))
     fields = ["Task Name", "Approval Outcome", "Approved At", "Sent For Approval By", "Team Member", "Notes"]
     return _get_all(es, es.TASKS_TABLE, [("filterByFormula", formula)] + [("fields[]", f) for f in fields])

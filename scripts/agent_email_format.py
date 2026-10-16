@@ -1056,7 +1056,7 @@ def detect_kind(output):
     except EmailFormatError:
         return "email"          # let the email parser produce the real message
     lines = [ln.strip() for ln in head.splitlines() if ln.strip()]
-    if lines and lines[0].partition(":")[0].strip().upper() == SIGN_AS_KEVIN:
+    if lines and " ".join(lines[0].partition(":")[0].split()).upper() == SIGN_AS_KEVIN:
         return "signkevin"
     if lines and lines[0].rstrip().upper().rstrip(":") == "POST":
         return "post"
@@ -1235,13 +1235,15 @@ AGREEMENT_ID_RE = re.compile(r"^[A-Za-z0-9_\-:.]{12,200}$")
 
 
 def _first_header(output):
+    """The first header's key, upper case with its spacing squashed, so "Sign as  Kevin :" is the
+    same card as "SIGN AS KEVIN:" everywhere it is checked (second review, 16 Oct 2026)."""
     try:
         head, _ = _head_and_body(output)
     except EmailFormatError:
         return ""
     for ln in head.splitlines():
         if ln.strip():
-            return ln.strip().partition(":")[0].strip().upper()
+            return " ".join(ln.strip().partition(":")[0].split()).upper()
     return ""
 
 
@@ -1256,7 +1258,7 @@ def parse_sign_as_kevin_output(output):
         key, sep, val = line.partition(":")
         if not sep:
             raise EmailFormatError(f"header line is not `KEY: value`: {line!r}")
-        key = key.strip().upper()
+        key = " ".join(key.split()).upper()
         if key in headers:
             raise EmailFormatError(f"{key} appears twice: one card signs one document")
         headers[key] = val.strip()

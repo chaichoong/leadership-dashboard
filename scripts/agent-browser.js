@@ -2337,8 +2337,9 @@ const SIGN_LIST_URL = 'https://acrobat.adobe.com/link/documents/agreements/#agre
 const WAITING_RE = /Waiting For Me to Sign/i;
 // What Adobe's agreement page reads once this account has signed: done, or out to the next signer. Anything
 // else after a Submit (cancelled, expired, declined, a reworded wait) is NOT proof (review, 16 Oct 2026).
-const SIGNED_STATUS_RE = /^(?:signed|completed?|waiting for others?(?: to sign)?|out for signature|in progress)\b/i;
-const NOT_SIGNED_STATUS_RE = /cancel|expire|declin|recall|reject|abort|waiting for me/i;
+const SIGNED_STATUS_RE = /^(?:signed|completed?|waiting for others?(?: to sign)?|waiting for (?!me\b|you\b)[\w .,'&-]+ to sign|out for signature|in progress)\b/i;
+// "In progress" and "Out for signature" are broad, so anything that still names this account waiting refuses.
+const NOT_SIGNED_STATUS_RE = /cancel|expire|declin|recall|reject|abort|waiting for (?:me|you)\b|your signature/i;
 const signedStatus = (st) => SIGNED_STATUS_RE.test(normName(st)) && !NOT_SIGNED_STATUS_RE.test(st);
 const AGREEMENT_ID_RE = /^[A-Za-z0-9_\-:.]{12,200}$/;
 // Adobe's screens, measured 16 Oct 2026: the list paints about 20 s after its nav; the agreement and
@@ -2416,6 +2417,7 @@ function signBinding(taskId) {
       + `node scripts/agent-browser.js sign --task ${taskId} --check --shot <png>`);
   }
   if (!/^https:\/\//.test(card.documentUrl || '')) die(`task ${taskId}'s card carries no link to the copy Kevin read.`);
+  if (!/^[0-9a-f]{64}$/.test(card.documentSha256 || '')) die(`task ${taskId} has no fingerprint of the copy Kevin was shown.`);
   return Object.assign({}, card, { door });
 }
 
@@ -2537,6 +2539,22 @@ function pdfWords(file) {
   return JSON.parse(r.stdout);
 }
 
+// Where the two copies are compared: private to this Mac's user (a tenancy agreement carries personal
+// details), and emptied after each comparison.
+function compareDir() {
+  const d = path.join(path.dirname(SIGN_LEDGER), 'compare');
+  fs.mkdirSync(d, { recursive: true, mode: 0o700 });
+  fs.chmodSync(d, 0o700);
+  return d;
+}
+
+// The copy fetched from the task must be byte for byte the one stamped at submit: a file re-attached
+// under the same name after his approval is not what he approved (second review, 16 Oct 2026).
+function verifyApprovedCopy(bytes, sha256) {
+  const got = require('crypto').createHash('sha256').update(bytes).digest('hex');
+  if (got !== sha256) die('the copy on the task is not the one Kevin was shown when he approved (it was replaced). Nothing was signed.');
+}
+
 function assertSameDocument(approved, now) {
   const a = pdfWords(approved);
   const b = pdfWords(now);
@@ -2568,8 +2586,8 @@ async function runSignFlow(page, ctx, o) {
     unsigned = await downloadAgreementPdf(page, id, path.join(UPLOAD_DIR, `unsigned_${o.task}_${safeFileName(o.name)}.pdf`));
   } else {
     if (!o.approvedCopy || !fs.existsSync(o.approvedCopy)) die('the copy Kevin approved could not be fetched, so it cannot be compared.');
-    const now = await downloadAgreementPdf(page, id, path.join(path.dirname(SIGN_LEDGER), 'compare', `${o.task}_adobe_now.pdf`));
-    assertSameDocument(o.approvedCopy, now);
+    const now = await downloadAgreementPdf(page, id, path.join(compareDir(), `${o.task}_adobe_now.pdf`));
+    try { assertSameDocument(o.approvedCopy, now); } finally { fs.rmSync(now, { force: true }); }
   }
   const p = await openSigningPage(page, ctx, id, o.name);
   const asks = await signingAsks(p);
@@ -2582,19 +2600,24 @@ async function runSignFlow(page, ctx, o) {
   // His approval, read again at the last moment: an Undo, a knock-back or a resubmission since the
   // run began stops it here (review, 16 Oct 2026).
   if (o.recheck) await o.recheck();
-  await applied.footer.click();
-  // From here Submit has been pressed. Every failure is "not confirmed", never "nothing was signed".
+  // From the press on, every failure is "not confirmed", never "nothing was signed": a click that
+  // throws may still have landed (second review, 16 Oct 2026).
   try {
+    await applied.footer.click();
     // Adobe moves off the form when it takes the signature. Believed only from its record, below.
     await applied.footer.waitFor({ state: 'detached', timeout: 90000 }).catch(() => {});
     await p.waitForTimeout(SIGN_WAIT.settle);
     const screenshot = o.shot ? await shoot(p, o.shot).catch(() => null) : null;
     let after = { status: '' };
+    let lastRead = '';
     for (let i = 0; i < SIGN_WAIT.confirmTries; i++) {
-      after = await readAgreement(page, id, o.name);
-      if (signedStatus(after.status)) break;
+      try {
+        after = await readAgreement(page, id, o.name);
+        if (signedStatus(after.status)) break;
+      } catch (e) { lastRead = String(e.message || e).slice(0, 160); }
       await page.waitForTimeout(SIGN_WAIT.confirmGap);
     }
+    if (!after.status && lastRead) throw new Error(lastRead);
     if (!signedStatus(after.status)) throw new Error(`Adobe's agreement page reads "${after.status || 'nothing'}"`);
     return { agreement: o.name, agreementId: id, statusBefore: before.status, statusAfter: after.status,
              boxes: applied.boxes, screenshot };
@@ -2606,10 +2629,42 @@ async function runSignFlow(page, ctx, o) {
   }
 }
 
-// After an unproved Submit: read Adobe's agreement page and record the signature only if Adobe shows it.
-async function checkSigned(page, id, name) {
-  const now = await readAgreement(page, id, name);
-  return { agreement: name, agreementId: id, statusAfter: now.status, signed: signedStatus(now.status) };
+// The signature run on an open page, with its ledger rows: 'signed' only on Adobe's proof, 'unconfirmed'
+// on any failure after the press (that row locks the agreement until `--check`). Exported for the tests.
+async function runSign(page, ctx, task, card, approvedCopy, shot, recheck) {
+  let r;
+  try {
+    r = await runSignFlow(page, ctx, { mode: 'sign', task, name: card.agreement, id: card.agreementId, door: card.door,
+                                       shot, approvedCopy, recheck });
+  } catch (e) {
+    ledger({ cmd: 'sign', task, agreementId: card.agreementId, agreement: card.agreement,
+             refused: !!e.refusal, unconfirmed: !!e.unconfirmed, error: String(e.message || e).slice(0, 400) });
+    if (e.unconfirmed) signLedger({ cmd: 'unconfirmed', task, agreementId: card.agreementId, agreement: card.agreement });
+    throw e;
+  }
+  signLedger({ cmd: 'signed', task, agreementId: r.agreementId, agreement: r.agreement,
+               statusBefore: r.statusBefore, statusAfter: r.statusAfter, boxes: r.boxes, screenshot: r.screenshot });
+  ledger({ cmd: 'sign', task, agreementId: r.agreementId, agreement: r.agreement, statusAfter: r.statusAfter,
+           screenshot: r.screenshot, signed: true });
+  return r;
+}
+
+// After an unproved Submit: Adobe's agreement page decides. A signed status is recorded as the robot's
+// signature; "Waiting For Me to Sign" clears the lock (the Submit never landed); anything else stays locked.
+async function runSignCheck(page, task, card, shot) {
+  if (!AGREEMENT_ID_RE.test(card.agreementId || '') || !signUnconfirmed(task, card.agreementId)) {
+    die(`no unproved Submit is on record for ${task}, so there is nothing to check.`);
+  }
+  const now = await readAgreement(page, card.agreementId, card.agreement);
+  const r = { agreement: card.agreement, agreementId: card.agreementId, statusAfter: now.status,
+              signed: signedStatus(now.status), screenshot: shot ? await shoot(page, shot).catch(() => null) : null };
+  if (r.signed) {
+    signLedger({ cmd: 'signed', task, agreementId: r.agreementId, agreement: r.agreement, statusAfter: r.statusAfter, confirmedLater: true });
+  } else if (WAITING_RE.test(r.statusAfter)) {
+    signLedger({ cmd: 'cleared', task, agreementId: r.agreementId, agreement: r.agreement, statusAfter: r.statusAfter });
+  }
+  ledger({ cmd: 'sign-check', task, agreementId: r.agreementId, statusAfter: r.statusAfter, signed: r.signed });
+  return r;
 }
 
 // The two steps after a proved signature: the dated line on the task, and the watch that files the copy
@@ -3081,57 +3136,41 @@ async function main() {
           'outcome', task], { encoding: 'utf8', timeout: 60000 }));
       } catch (e) { die(`could not read ${task}: ${(e.stderr || e.message || '').toString().trim().slice(0, 200)}`); }
       const card = state.signAsKevin || {};
-      if (!AGREEMENT_ID_RE.test(card.agreementId || '') || !signUnconfirmed(task, card.agreementId)) {
-        die(`no unproved Submit is on record for ${task}, so there is nothing to check.`);
-      }
       const door = SIGN_DOORS[String(card.signer || '').toLowerCase()] || SIGN_DOORS['info@agilelets.co.uk'];
-      const r = await withPage(door.profile, false, (page) => checkSigned(page, card.agreementId, card.agreement));
-      if (r.signed) {
-        signLedger({ cmd: 'signed', task, agreementId: r.agreementId, agreement: r.agreement, statusAfter: r.statusAfter, confirmedLater: true });
-      } else if (WAITING_RE.test(r.statusAfter)) {
-        signLedger({ cmd: 'cleared', task, agreementId: r.agreementId, agreement: r.agreement, statusAfter: r.statusAfter });
-      }
-      ledger({ cmd: 'sign-check', task, agreementId: r.agreementId, statusAfter: r.statusAfter, signed: r.signed });
+      const r = await withPage(door.profile, false, (page) => runSignCheck(page, task, card, shot));
       const problems = r.signed ? signFollowUps(task, r) : [];
       console.log(JSON.stringify(Object.assign({ mode: 'sign-check' }, r, { problems,
         next: r.signed ? `SIGNED (proved now). Complete the task: python3 scripts/agent-dispatch.py complete ${task}.`
           : WAITING_RE.test(r.statusAfter) ? 'NOT SIGNED: the Submit never landed. The approval stands; run sign again.'
-          : `NOT SIGNED and not waiting (Adobe: "${r.statusAfter}"). Do not sign: tell Kevin on the card what Adobe shows.` }), null, 2));
+          : `NOT PROVED (Adobe: "${r.statusAfter}"). Do not sign again and do not close it as not signed: tell Kevin on the card what Adobe shows.` }), null, 2));
       if (!r.signed || problems.length) process.exit(1);
       return;
     }
     const card = signBinding(task);
-    // The copy Kevin could open on his card, fetched from the task itself: the words the robot signs must be its words.
-    const approvedCopy = path.join(path.dirname(SIGN_LEDGER), 'compare', `${task}_approved.pdf`);
+    // The copy Kevin could open on his card, fetched from the task itself and checked against the fingerprint
+    // stamped when he was shown it: the words the robot signs must be its words.
+    const approvedCopy = path.join(compareDir(), `${task}_approved.pdf`);
     try {
       const res = await fetch(card.documentUrl);
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      fs.mkdirSync(path.dirname(approvedCopy), { recursive: true });
-      fs.writeFileSync(approvedCopy, Buffer.from(await res.arrayBuffer()));
+      const bytes = Buffer.from(await res.arrayBuffer());
+      verifyApprovedCopy(bytes, card.documentSha256);
+      fs.writeFileSync(approvedCopy, bytes, { mode: 0o600 });
     } catch (e) {
+      if (e.refusal) throw e;
       die(`could not fetch the copy Kevin approved from the task (${String(e.message || e).slice(0, 120)}).`);
     }
     const recheck = async () => {
       const again = signBinding(task);
-      if (again.agreementId !== card.agreementId || normName(again.agreement) !== normName(card.agreement)) {
+      if (again.agreementId !== card.agreementId || normName(again.agreement) !== normName(card.agreement)
+          || again.documentSha256 !== card.documentSha256) {
         die(`the card changed while the robot worked (${card.agreementId} became ${again.agreementId}). Nothing was signed.`);
       }
     };
     let r;
     try {
-      r = await withPage(card.door.profile, false, (page, ctx) =>
-        runSignFlow(page, ctx, { mode: 'sign', task, name: card.agreement, id: card.agreementId, door: card.door, shot,
-                                 approvedCopy, recheck }));
-    } catch (e) {
-      ledger({ cmd: 'sign', task, agreementId: card.agreementId, agreement: card.agreement,
-               refused: !!e.refusal, unconfirmed: !!e.unconfirmed, error: String(e.message || e).slice(0, 400) });
-      if (e.unconfirmed) signLedger({ cmd: 'unconfirmed', task, agreementId: card.agreementId, agreement: card.agreement });
-      throw e;
-    }
-    signLedger({ cmd: 'signed', task, agreementId: r.agreementId, agreement: r.agreement,
-                 statusBefore: r.statusBefore, statusAfter: r.statusAfter, boxes: r.boxes, screenshot: r.screenshot });
-    ledger({ cmd: 'sign', task, agreementId: r.agreementId, agreement: r.agreement, statusAfter: r.statusAfter,
-             screenshot: r.screenshot, signed: true });
+      r = await withPage(card.door.profile, false, (page, ctx) => runSign(page, ctx, task, card, approvedCopy, shot, recheck));
+    } finally { fs.rmSync(approvedCopy, { force: true }); }
     const problems = signFollowUps(task, r);
     console.log(JSON.stringify(Object.assign({ mode: 'sign', signed: true }, r, {
       problems,
@@ -3219,4 +3258,5 @@ module.exports = { namedAnswer, hostAllowed, pickLinks, runSteps, assertNotCrede
                    loadStandingFacts, declarationWords, snapshotForm, checkPlannerSteps, carryOn, valueInFacts, valueInLine, pickInLine,
                    movedOn, assertNotFinalAction, PLANNER_SCHEMA, CARRY_PAST_RE, NEVER_PAST_RE, MOVE_ON_RE,
                    adobeSignRefusal, SIGN_WORDS_RE, isAdobeSigningPage, signBinding, runSignFlow, SIGN_DOORS,
-                   agreementIdFromUrl, agreementPageUrl, AGREEMENT_ID_RE, SIGN_LIST_URL, signedStatus };
+                   agreementIdFromUrl, agreementPageUrl, AGREEMENT_ID_RE, SIGN_LIST_URL, signedStatus,
+                   runSign, runSignCheck, verifyApprovedCopy };

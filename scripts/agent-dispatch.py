@@ -56,6 +56,7 @@ Auth:   ~/.config/od/airtable_pat (never printed).
 
 import argparse
 import base64
+import hashlib
 import json
 import mimetypes
 import os
@@ -110,6 +111,7 @@ from agent_email_format import (  # noqa: E402
     TRIAL_ACTING_SHAPE_RE,
     SIGN_AS_KEVIN,
     sign_as_kevin,
+    detect_kind,
     TRIAL_STAMP,
     TRIAL_AGENTS,
     TRIAL_ENDED,
@@ -5182,7 +5184,7 @@ def cmd_submit(args):
     # legal matter. The agreement id is stamped in Notes so `complete` can ask for the robot's proof
     # even after the card's text is replaced by a report.
     sign_card = None
-    if f"{SIGN_AS_KEVIN}:" in output.upper():
+    if detect_kind(output) == "signkevin":
         try:
             sign_card = sign_as_kevin(output)
         except EmailFormatError as exc:
@@ -5200,11 +5202,16 @@ def cmd_submit(args):
                      f"sign with the same submit: --attach {sign_card['document']}. Approving a name "
                      "is not consent to a document he could not open.")
         approver_email = KEVIN_AIRTABLE_EMAIL
+        # The fingerprint of the copy he is shown, so a file re-attached under the same name after his
+        # approval is never the one the robot checks Adobe against (second review, 16 Oct 2026).
+        copy_path = next(p for p in args.attach if os.path.basename(p) == os.path.basename(sign_card["document"]))
+        with open(copy_path, "rb") as fh:
+            copy_sha = hashlib.sha256(fh.read()).hexdigest()
         stamp = datetime.now(LONDON).strftime("%d %b %Y %H:%M")
         tf[AF["notes"]] = append_notes(
             tf.get(AF["notes"]),
             f"[{stamp} — agent-dispatch] {SIGN_CARD_MARK} {sign_card['agreementId']} "
-            f"({sign_card['agreement']}). Kevin's Approve lets the robot sign this one agreement.")
+            f"({sign_card['agreement']}) copy sha256:{copy_sha}. Kevin's Approve lets the robot sign this one agreement.")
         tf["_receiptAdded"] = True
 
     # The gate: prepared, proposed, and NOTHING sent, filed or executed.
@@ -5972,7 +5979,7 @@ def cmd_outcome(args):
     # A SIGN AS KEVIN card (16 Oct 2026): the robot's `sign` command signs only when signProblem
     # is empty. Read only for that shape, so every other form's gate costs no extra read.
     sign_card, sign_problem = (sign_as_kevin_state(rec)
-                               if f"{SIGN_AS_KEVIN}:" in str(t["agentOutput"] or "").upper()
+                               if detect_kind(t["agentOutput"]) == "signkevin"
                                else (None, f"its card is not a {SIGN_AS_KEVIN} card"))
     # A trial task is never "approved" as far as the browser's submit gate goes (2 Oct 2026).
     # Nor is a robot form card, on trial or not (3 Oct 2026): `commit` presses submit, and the
@@ -6164,6 +6171,7 @@ SIGN_FOR_KEVIN_LEDGER = os.environ.get(
     os.path.expanduser("~/knowledge-os/logs/sign-for-kevin/signed.jsonl"))
 SIGN_CARD_MARK = "SIGN AS KEVIN CARD:"
 SIGN_CARD_RE = re.compile(r"SIGN AS KEVIN CARD: (\S+)")
+SIGN_COPY_RE = re.compile(r"SIGN AS KEVIN CARD: (\S+) \(.*?\) copy sha256:([0-9a-f]{64})")
 SIGNED_FOR_KEVIN_MARK = "SIGNED FOR KEVIN:"
 NOT_SIGNED_MARK = "NOT SIGNED BY THE ROBOT:"
 
@@ -6266,7 +6274,10 @@ def sign_as_kevin_state(rec):
     url = next((a["url"] for a in t["attachments"] if a["filename"] == doc and a["url"]), "")
     if not url:
         return card, f"the document the card names ({doc}) is not attached to the task, so Kevin could not have read it"
-    card = dict(card, documentUrl=url)
+    shas = [sha for aid, sha in SIGN_COPY_RE.findall(str(t["notes"] or "")) if aid == card["agreementId"]]
+    if not shas:
+        return card, "the task has no record of the copy Kevin was shown at submit, so it cannot be checked"
+    card = dict(card, documentUrl=url, documentSha256=shas[-1])
     try:
         if approved_text_changed(t["id"]):
             return card, ("the card's text changed after his approval, so what it says now is "
@@ -7821,6 +7832,10 @@ def cmd_complete(args):
     sign_id = (sign_card or {}).get("agreementId") or latest_sign_card(t["notes"])
     not_signed = " ".join(str(getattr(args, "not_signed", "") or "").split())
     sign_note = ""
+    if sign_id and robot_sign_unconfirmed(args.task, sign_id):
+        sys.exit(f"ERROR: refusing to complete {args.task} — the robot pressed Submit on {sign_id} and it was "
+                 "never proved. Read Adobe first:\n"
+                 f"         node scripts/agent-browser.js sign --task {args.task} --check --shot <png>")
     if sign_id and not robot_signed(args.task, sign_id):
         if not not_signed:
             sys.exit(
