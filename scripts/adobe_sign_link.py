@@ -23,7 +23,9 @@ import sys
 from datetime import datetime, timezone
 from urllib.parse import urlsplit, parse_qs
 
-ACCOUNT = "kevinbrittain@gmail.com"
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+# Kevin's own address, from the one module that defines the sending identities (tests/approval-gate-defaults).
+from agent_email_format import PERSONAL_SENDER as ACCOUNT  # noqa: E402
 SENDER = "adobesign@adobesign.com"
 SIGN_HOST_RE = re.compile(r"(?:^|\.)(?:documents\.adobe\.com|adobesign\.com|echosign\.com)$", re.I)
 SIGN_PATH_RE = re.compile(r"^/public/esign$", re.I)

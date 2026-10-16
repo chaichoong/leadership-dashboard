@@ -1006,6 +1006,7 @@ describe('the people and pages around the card', () => {
     };
     const code = [grab('function b64urlDecodeUtf8('), grab('const INLINE_PHOTO_MIN_BYTES'),
       grab('function extractAttachments('), grab('function extractPlainText('),
+      grab('function extractLinks('), grab('function extractLinksOrThrow('),
       grab('async function gmailList(')].join('\n');
     const fetch = async (url) => ({
       ok: true,

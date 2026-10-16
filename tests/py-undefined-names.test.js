@@ -28,6 +28,7 @@ const ESTATE_SCRIPTS = [
   'scripts/session_handbacks.py',
   'scripts/key-register.py',
   'scripts/approval_evidence.py',
+  'scripts/adobe_sign_link.py',
   'scripts/calendar-write.py',
   'scripts/send-email.py',
   'scripts/rent_plans.py',
