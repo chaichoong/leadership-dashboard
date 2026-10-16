@@ -50,7 +50,7 @@ from zoneinfo import ZoneInfo
 LONDON = ZoneInfo("Europe/London")
 PROJECTS = os.path.expanduser("~/.claude/projects")
 CACHE = os.path.expanduser("~/knowledge-os/logs/session-handbacks/cache.json")
-CACHE_VERSION = 3                   # bump when what is taken from a file changes
+CACHE_VERSION = 4                   # bump when what is taken from a file changes
 WINDOW_DAYS = 14
 TAIL_LINES = 6                      # the closing lines of a reply
 
@@ -91,7 +91,8 @@ def extract(path):
     title = ai_title = ""
     raw = []
     prompts = turns = 0
-    last_text = (None, None, None)      # (message id, at, text): a reply's blocks arrive as separate lines
+    last_text = (None, None, None)      # (message key, at, text): a reply's blocks arrive as separate lines
+    n = 0
     with open(path, encoding="utf-8", errors="replace") as fh:
         for ln in fh:
             prompt = '"type":"user"' in ln and '"tool_result"' not in ln
@@ -125,11 +126,18 @@ def extract(path):
                 if first is None:
                     first = text[:40]
             elif t == "assistant":
+                # Claude Code writes each block of a reply on its own line, every one carrying the
+                # reply's final stop_reason (review 2: a text line before a box reads "tool_use").
+                # Text is held per reply; a line with no id is a reply of its own.
+                n += 1
+                key = m.get("id") or "line-%d" % n
+                if last_text[0] != key:
+                    last_text = (None, None, None)
                 blocks = m.get("content") if isinstance(m.get("content"), list) else []
                 for b in blocks:
                     b = _dict(b)
                     if b.get("type") == "text" and str(b.get("text") or "").strip():
-                        last_text = (m.get("id"), d.get("timestamp"), str(b["text"]))
+                        last_text = (key, d.get("timestamp"), str(b["text"]))
                     elif b.get("type") == "tool_use":
                         name = str(b.get("name") or "")
                         inp = _dict(b.get("input"))
@@ -141,18 +149,16 @@ def extract(path):
                         elif name.endswith("__wrap_up"):
                             # The reply that carries the next-step box is the turn's message: the
                             # box ends the turn with no text after it.
-                            if last_text[0] == m.get("id") and last_text[2]:
+                            if last_text[0] == key and last_text[2]:
                                 raw.append({"at": last_text[1], "source": "closing", "text": tail(last_text[2])})
                                 last_text = (None, None, None)
                             if inp.get("ask"):
                                 raw.append({"at": d.get("timestamp"), "source": "box", "text": str(inp["ask"])})
                 if m.get("stop_reason") == "end_turn":
                     turns += 1
-                    if last_text[0] == m.get("id") and last_text[2]:
+                    if last_text[0] == key and last_text[2]:
                         raw.append({"at": last_text[1], "source": "closing", "text": tail(last_text[2])})
-                    last_text = (None, None, None)
-                elif m.get("stop_reason"):
-                    last_text = (None, None, None)   # a tool call ended this message: its text was mid-turn
+                        last_text = (None, None, None)
     return {"desktop": bool(desktop), "scheduled": str(first or "").startswith("<scheduled-task"),
             "title": title or ai_title, "prompts": prompts, "turns": turns, "raw": raw}
 
@@ -179,7 +185,8 @@ OWN = re.compile(
 # A question the session asks about its own next move is an approval ask.
 OFFER = re.compile(r"(?i)^(?:want me to|do you want me to|would you like me to|shall i|should i)\b")
 # A lead-in alone on its line ("Next:", "What you need to do:") hands him the list that follows.
-LEAD_ONLY = re.compile(r"(?i)^(?:next(?: steps?)?(?: for you)?|your (?:next )?steps?|what you need to do|for you)\s*:?$")
+LEAD_ONLY = re.compile(r"(?i)^(?:next(?: steps?)? for you|(?:the )?steps? for you|your (?:next )?(?:steps?|turn)|"
+                       r"what you need to do|for you)\s*:?$")
 IMPERATIVE = re.compile(
     r"(?i)^(?:say|reply|tell|pick|choose|decide|approve|confirm|answer|review|read|go through|look|check|test|"
     r"open|click|tap|press|paste|run|type|send|forward|upload|download|install|plug|switch|sign|log|"
@@ -219,6 +226,9 @@ HANDBACK = (
     ("a step in an app", re.compile(r"(?i)\b(?:do its \w+ steps|click|tap|press|drag|select|open (?:the|your)? ?\w+ app|"
                                     r"open (?!the queue|your approval)|enable|turn on|turn off|toggle|settings|close)\b")),
 )
+BUTTON = re.compile(r"(?i)\b(?:click|press|tap|select|hit)\s+(?:on\s+)?(?:the\s+)?[\"“']?"
+                    r"(approve|pay|buy|sign in|log in)\b")
+QUEUE_STEP = re.compile(r"(?i)\bopen (?:your |the )?(?:approval queue|queue|ai agents page|dashboard)\b[^.]{0,40}\bapprove\b")
 TELL_WHEN = re.compile(r"(?i)\btell me (?:when|once|after)\b|\b(?:after|once) [^.]{0,40}, tell me\b")
 MODEL = re.compile(r"(?i)\bmodel picker\b|(?<!\w)/(?:model|effort)\b|\bswitch (?:to )?(?:opus|fable)\b|\beffort (?:to )?max\b")
 
@@ -226,6 +236,7 @@ MODEL = re.compile(r"(?i)\bmodel picker\b|(?<!\w)/(?:model|effort)\b|\bswitch (?
 def kevins_part(t):
     """The words that ask something of Kevin: quoted reply words become QUOTE, and the session's
     own half ("... and I will send it") is cut off."""
+    t = re.sub(r"\([^)]{0,60}\)", " ", t)          # asides: "(one click)", "(about 2 minutes)"
     t = re.sub(r"[\"“][^\"”]{0,120}[\"”]", " QUOTE ", t)
     return re.split(r"(?i),? (?:and|so|then) (?:i|i'll|i will|the|they|it|all|both|we)\b|,? so (?:that|it|they)\b|"
                     r"\. then the only", t)[0]
@@ -249,12 +260,14 @@ def classify(t):
     # when its label is quoted ('click "Sign in as Kevin"').
     still = [why for why, rx in HANDBACK if rx.search(rest)]
     if still == ["a step in an app"]:
-        # Pressing the button is the act itself: "click Approve", "press Pay", "open the AI Agents
-        # page and approve the card", 'click "Sign in as Kevin"'.
-        for kind, rx in FOUR:
-            if rx.search(raw):
-                return kind, ""
-        if APPROVE.search(raw):
+        # Pressing the button is the act itself: "click Approve", "press Pay", 'click "Sign in as
+        # Kevin"', "open the AI Agents page and approve the card". Only the button word itself: "open
+        # Settings, toggle the filter, then review the inbox" stays a hand-back (review 2).
+        b = BUTTON.search(raw)
+        if b:
+            w = b.group(1).lower()
+            return ("approve" if w.startswith("approve") else "pay" if w in ("pay", "buy") else "access"), ""
+        if QUEUE_STEP.search(raw):
             return "approve", ""
     if still:
         return "handback", still[0]
@@ -273,6 +286,7 @@ def _sentences(text):
     for raw in str(text or "").split("\n"):
         if not raw.strip() or re.match(r"\s*(?:>|#|\||```)", raw):
             continue                    # quotes, headings, tables and code are not asks
+        raw = re.sub(r"^(\s*\d+)\.\s", r"\1) ", raw)   # "1. Download" stays one item
         for s in re.split(r"(?<=[.!?])\s+(?=[A-Z*\"“])", raw):
             s = re.sub(r"[*_`]+", "", s).strip()
             if s:
@@ -284,8 +298,8 @@ def _sentences(text):
 # ("```node scripts/agent-browser.js login ...``` While you do that, I ..."), and a menu path to
 # click through ("File → Download → PDF").
 GIVEN_COMMAND = re.compile(r"(?i)\b(?:while you do that|once you(?:'ve| have) (?:run|done) (?:that|it|this)|"
-                           r"run (?:this|it) in (?:your )?terminal|paste (?:this|it) into)\b")
-SELF_START = re.compile(r"(?i)^(?:i\b|i'(?:ll|ve|m)\b|we\b)")
+                           r"run (?:this|it|the command)|in (?:your )?terminal|paste (?:this|it) into)\b")
+SELF_START = re.compile(r"(?i)^(?:i\b|i'(?:ll|ve|m)\b|we\b|the\b)")
 SELF = re.compile(r"(?i)^(?:i\b|i'(?:ll|ve|m)\b|we\b)|\b(?:i did|i'll|i will|i have|i've|myself)\b")
 MENU_PATH = re.compile(r"(?i)\b\w+ → [^.]{0,60}\b(?:download|export|save)\b|\b(?:download|export|save)\b[^.]{0,40} → ")
 
@@ -318,8 +332,8 @@ def closing_asks(text):
             continue
         led = False
         m = LEAD.match(s)
-        if m and re.search(r"(?i)\b(?:once|when|after) (?:it|the|this)\b", m.group(0)):
-            continue                    # "Next, once it merges: ..." is the session's own plan
+        if m and re.search(r"(?i)\b(?:once|when|after) (?:it|the|this)\b|\b(?:for me|mine|my side|my end)\b", m.group(0)):
+            continue                    # "Next, once it merges:", "Next up for me:" are the session's own plan
         body = s[m.end():] if m else s
         lead = bool(m) or bool(BARE.match(s))
         you = bool(ASKS_YOU.search(s))

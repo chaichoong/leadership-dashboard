@@ -47,7 +47,7 @@ def fixture(root):
     write(root, "aaaa", [
         row(type="custom-title", customTitle="Tax pack"),
         prompt("Build the pack", at(days=1, hours=2)),
-        say("Next: press send.", at(days=1, hours=2), id="msg_mid", stop=None),
+        say("Next: press send.", at(days=1, hours=2), id="msg_mid", stop="tool_use"),
         tool("Bash", {"command": "ls"}, at(days=1, hours=2), id="msg_mid"),
         meta("[Image: a screenshot]", at(days=1, hours=2)),
         say("Pack is 90 files.\\n**Next: open Evernote, search 1234, save those four PDFs to Downloads.**", at(days=1, hours=1)),
@@ -60,7 +60,7 @@ def fixture(root):
         prompt("Fix the card", at(hours=10)),
         say("MODEL CHECK\\nSwitch in the model picker (terminal: /model claude-fable-5-1), then reply go.", at(hours=10)),
         prompt("go", at(hours=9)),
-        say("Built and tested. Next: check the live page.", at(hours=8), id="msg_box", stop=None),
+        say("Built and tested. Next: check the live page.", at(hours=8), id="msg_box", stop="tool_use"),
         tool("mcp__ccd_turn__wrap_up", {"recap": "Built.", "ask": "Merge it?", "actions": [{"label": "Merge"}]}, at(hours=8), id="msg_box"),
     ])
     # C: a scheduled run, D: a robot run, E: an ask older than the window, F: a helper's own thread.
@@ -116,9 +116,13 @@ describe('which asks count (the three worked examples Kevin approved)', () => {
         "I'll run this next:\\n\`\`\`\\nnpm test\\n\`\`\`", "Export path: Settings → Data → Export (I did it myself).",
         "Next: click Approve on the card.", "Your one thing: sign the robot in to SpareRoom (one click).",
         "Next: run /model claude-opus-5-5, then reply go.", "Shall I set the check for 22 Oct?",
-        "Next:\\n- Restart the Claude app.")]))`);
+        "Next steps for you:\\n- Restart the Claude app.", "Next steps:\\n- Run merge-pr.py in the background\\n- Check the deploy is live",
+        "Next steps for you:\\n1. Download the statement from the bank.\\n2. Drop it in the folder.",
+        "Run this:\\n\`\`\`\\nnpm run test:sync\\n\`\`\`", "Next up for me: check the deploy is live.",
+        "Next: open Settings, toggle the filter on, then review the inbox.", "Next: open the Barclays app and turn off payment notifications.")]))`);
     expect(out).toEqual([[], [], [], [], [['approve', '']], [['access', '']], [['model', '']], [['approve', '']],
-      [['handback', 'a physical step']]]);
+      [['handback', 'a physical step']], [], [['handback', 'fetch a document'], ['handback', 'fetch a document']],
+      [['handback', 'run a command']], [], [['handback', 'a step in an app']], [['handback', 'a step in an app']]]);
   });
 });
 

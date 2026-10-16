@@ -185,8 +185,10 @@ Can it keep going?
     the 21 hand-backs it counted were right (the miss: a card's "do its 3 steps", which was a key
     paste, i.e. giving access); in the first 80 closings where it found no ask, 2 hand-backs hid
     (a command block given to run, a menu path to click), so rules were added for both and a fresh
-    40 showed none. Free text stays the weak half: read the number as a floor. First live read:
-    7 of 50 sessions came back (86%, amber), 25 of 400 asks, 11 of them fetching a document.
+    40 showed none. After two independent reviews (closings only from replies that ended their
+    turn or carry the box; a format control that turns the line grey): 150 of 154 agree. Free text
+    stays the weak half: read the number as a floor. First live read: 6 of 50 sessions came back
+    (88%, amber), 22 of 400 asks, 10 of them fetching a document.
     Green 95% or more, amber 85% to 95%, red under 85%; a chat that cannot be read is never green.
 39. **Robot hours paused for the allowance** — T5: hours stopped in 7 days, the allowance guard's
     pauses joined with every limit line in any job's own `runs.log` (allowance.py's own `LIMIT_RE`
