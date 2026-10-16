@@ -382,19 +382,40 @@ rows = [
     card("rCHECKONLY", wall(D1 - timedelta(hours=1), "OPEN", "SIGN-IN", "www.bank-three.example", "signed out") + "\\n" +
          wall(D1, "CLEARED", "SIGN-IN", "www.bank-three.example", "Kevin signed in to Bank Three (www.bank-three.example). The session is live now", by="Robot sign-in")),
     card("rSIGNATURE", wall(D1, "OPEN", "KEVIN", "signature", "sign the court form")),
-    card("rOLD", wall(NOW - timedelta(days=20), "OPEN", "KEVIN", "credential", "old step"), at=NOW - timedelta(days=20)),
+    card("rOLD", wall(NOW - timedelta(days=20), "OPEN", "KEVIN", "credential", "old step") + "\\n" +
+         wall(NOW - timedelta(days=18), "CLEARED", "KEVIN", "credential", "Kevin says the step is done: done", by="Kevin"),
+         at=NOW - timedelta(days=20)),
+    # Still open from before the window: he is still being asked, so it counts.
+    card("rSTILLOPEN", wall(NOW - timedelta(days=20), "OPEN", "KEVIN", "physical", "collect the parcel"), outcome=None),
     card("rFORM", wall(D1, "OPEN", "KEVIN", "credential", "x"), name="RENT FORM: a tenant's direct payment form"),
     card("rPERSON", wall(D1, "OPEN", "KEVIN", "credential", "x"), who=ROY),
     card("rWALLONLY", wall(NOW - timedelta(days=3), "OPEN", "KEVIN", "physical", "swap the camera's plug"), outcome=None),
+    # The sweep clears a profile wall in its own words, never "Kevin signed in to" (review of PR #798).
     card("rPROFILE", wall(D1 - timedelta(hours=1), "OPEN", "SIGN-IN", "my.energy.example", "signed out [profile flat-2]") + "\\n" +
-         wall(D1, "CLEARED", "SIGN-IN", "my.energy.example", "Kevin signed in to Energy (my.energy.example). The session is live now", by="Robot sign-in")),
+         wall(D1, "CLEARED", "SIGN-IN", "my.energy.example", "the robot's session on my.energy.example (flat-2) is live now")),
+    card("rPROFILEAGAIN", wall(D1 - timedelta(hours=1), "OPEN", "SIGN-IN", "my.water.example", "signed out [profile flat-3]") + "\\n" +
+         wall(D1, "CLEARED", "SIGN-IN", "my.water.example", "the robot's session on my.water.example (flat-3) is live now")),
+    # A KEVIN ONLY step opens its wall at submit, before the approval: open inside the window counts.
+    card("rBEFORE", wall(NOW - timedelta(days=15), "OPEN", "KEVIN", "credential", "1. Sign in. 2. Change the setting.") + "\\n" +
+         wall(NOW - timedelta(days=12), "CLEARED", "KEVIN", "credential", "Kevin says the step is done: done", by="Kevin"),
+         at=NOW - timedelta(days=13)),
+    card("rCLEAREDBEFORE", wall(NOW - timedelta(days=20), "OPEN", "KEVIN", "credential", "x") + "\\n" +
+         wall(NOW - timedelta(days=16), "CLEARED", "KEVIN", "credential", "Kevin says the step is done: done", by="Kevin"),
+         at=NOW - timedelta(days=13)),
+    # The wall is stored under the sign-in door; the window opened another address of the site.
+    card("rWWW", wall(D1 - timedelta(hours=1), "OPEN", "SIGN-IN", "tax.example.gov.uk", "signed out") + "\\n" +
+         wall(D1, "CLEARED", "SIGN-IN", "tax.example.gov.uk", "Kevin signed in to Tax (tax.example.gov.uk). The session is live now", by="Robot sign-in")),
 ]
-win = lambda dt, host, profile="default": {"at": dt, "host": host, "profile": profile}
+win = lambda dt, host, profile="default", for_wall="": {"at": dt, "hosts": {A.site(host), A.site(for_wall)} - {""}, "profile": profile}
 logins = [win(NOW - timedelta(days=10), "www.insurer-one.example"),
           win(D1 - timedelta(minutes=6), "www.insurer-one.example"),
           win(D1 - timedelta(minutes=6), "www.insurer-two.example"),
           win(NOW - timedelta(days=5), "my.energy.example", "flat-1"),
-          win(D1 - timedelta(minutes=6), "my.energy.example", "flat-2")]
+          win(D1 - timedelta(minutes=6), "my.energy.example", "flat-2"),
+          win(NOW - timedelta(days=9), "www.tax.example.gov.uk", for_wall="tax.example.gov.uk"),
+          win(D1 - timedelta(minutes=6), "www.tax.example.gov.uk"),
+          win(NOW - timedelta(days=7), "my.water.example", "flat-3"),
+          win(D1 - timedelta(minutes=6), "my.water.example", "flat-3")]
 board = [r for r in rows if r["id"] not in ("rOLD",)]
 `;
 
@@ -403,8 +424,10 @@ describe('the hand-back line (Kevin, 16 Oct 2026): approve, correct, pay or give
     const j = (cards, back, err = 'None') => `A.judge_handback({"cards": ${cards}, "back": ${back}, "loginsError": ${err}})`;
     expect(colours(`[${j(100, 5)}, ${j(100, 6)}, ${j(100, 15)}, ${j(100, 16)}, ${j(0, 0)}, A.judge_handback({"error": "x"}), ${j(10, 0, '"gone"')}]`))
       .toEqual(['green', 'amber', 'amber', 'red', 'grey', 'grey', 'amber']);
-    const out = py(`l = ${j(10, 0, '"gone"')}\nprint(json.dumps([l["answer"], l.get("partial")]))`);
-    expect(out).toEqual(['0 of 10 cards came back to you (sign-in log not read)', true]);
+    const out = py(`l = A.judge_handback({"cards": 10, "back": 0, "loginsError": "gone", "byAgent": [{"id": "a", "name": "A", "cards": 10, "back": 0, "score": 100, "reasons": {}}]})
+print(json.dumps([l["answer"], l.get("partial"), l["short"], l["byAgent"][0]["colour"]]))`);
+    // An unread log caps every agent at amber too, and the light never says "0 cards came back" (review of PR #798).
+    expect(out).toEqual(['0 of 10 cards came back to you (sign-in log not read)', true, 'the sign-in log was not read', 'amber']);
   });
 
   it('counts the steps outside the four, never paying, a first sign-in or a session the check found live', () => {
@@ -413,24 +436,27 @@ f = A.facts_handback(rows, board, team, aar, NOW, logins)
 back = {i["id"]: i["note"] for i in f["items"]}
 print(json.dumps({"cards": f["cards"], "back": f["back"], "items": back,
                   "agents": [[a["name"], a["cards"], a["back"], a["score"]] for a in f["byAgent"]]}))`);
-    expect(out.cards).toBe(9);           // rOLD is outside the window, rFORM a form card, rPERSON a person's
-    expect(out.back).toBe(4);
-    expect(Object.keys(out.items).sort()).toEqual(['rSIGNAGAIN', 'rSIGNATURE', 'rTOKEN', 'rWALLONLY']);
+    expect(out.cards).toBe(14);          // rOLD is outside the window, rFORM a form card, rPERSON a person's
+    expect(out.back).toBe(8);
+    expect(Object.keys(out.items).sort()).toEqual(['rBEFORE', 'rPROFILEAGAIN', 'rSIGNAGAIN', 'rSIGNATURE', 'rSTILLOPEN', 'rTOKEN', 'rWALLONLY', 'rWWW']);
+    expect(out.items.rBEFORE).toBe('AI Inbox: you did a sign-in or settings step');   // opened before the window, held inside it
+    expect(out.items.rWWW).toBe('AI Inbox: you signed the robot in again (access not kept)');
     expect(out.items.rTOKEN).toBe('AI Builder: you did a sign-in or settings step, you could not do the step it gave you');
     expect(out.items.rSIGNAGAIN).toBe('AI Inbox: you signed the robot in again (access not kept)');
     expect(out.items.rSIGNATURE).toBe('AI Inbox: you did a signature');
     expect(out.items.rWALLONLY).toBe('AI Inbox: you did an in-person step');      // a wall with no verdict yet still counts
-    expect(out.agents).toEqual([['AI Builder', 1, 1, 0], ['AI Inbox', 8, 3, 62]]);   // worst first
+    expect(out.agents).toEqual([['AI Builder', 1, 1, 0], ['AI Inbox', 13, 7, 46]]);   // worst first
   });
 
   it("the line carries each agent's score for the AI Agents page, and its reasons", () => {
     const out = py(`${HANDBACK}
 l = A.judge_handback(A.facts_handback(rows, board, team, aar, NOW, logins))
 print(json.dumps({"colour": l["colour"], "number": l["number"], "answer": l["answer"], "byAgent": l["byAgent"], "extra": l["extra"]}))`);
-    expect(out).toMatchObject({ colour: 'red', number: 56, answer: '4 of 9 cards came back to you' });
-    expect(out.byAgent[1]).toEqual({ id: 'recAGENTxxxxxxx01', name: 'AI Inbox', cards: 8, back: 3, score: 62, colour: 'red',
-      reasons: { 'you signed the robot in again (access not kept)': 1, 'you did a signature': 1, 'you did an in-person step': 1 } });
-    expect(out.extra).toContainEqual(['Robot sign-ins you did', '5, 1 of them again for a site the robot already had']);
+    expect(out).toMatchObject({ colour: 'red', number: 43, answer: '8 of 14 cards came back to you' });
+    expect(out.byAgent[1]).toEqual({ id: 'recAGENTxxxxxxx01', name: 'AI Inbox', cards: 13, back: 7, score: 46, colour: 'red',
+      reasons: { 'you signed the robot in again (access not kept)': 3, 'you did a signature': 1, 'you did an in-person step': 2,
+                 'you did a sign-in or settings step': 1 } });
+    expect(out.extra).toContainEqual(['Robot sign-ins you did', '9, 3 of them again for a site the robot already had']);
   });
 
   it('a decided agent card the board shows but the read missed makes the line grey, never a better score', () => {
@@ -441,7 +467,7 @@ print(json.dumps(A.facts_handback([r for r in rows if r["id"] != "rTOKEN"], boar
 
   it('two windows within two hours are one sign-in; the second sign-in to a site within 30 days is a repeat', () => {
     const out = py(`
-w = lambda d, h: {"at": NOW - timedelta(days=d, hours=h), "host": "a.example", "profile": "default"}
+w = lambda d, h: {"at": NOW - timedelta(days=d, hours=h), "hosts": {"a.example"}, "profile": "default"}
 print(json.dumps([A.signin_summary([w(3, 1), w(3, 0)], NOW), A.signin_summary([w(25, 0), w(3, 1), w(3, 0)], NOW),
                   A.signin_summary([w(40, 0), w(3, 0)], NOW)]))`);
     expect(out).toEqual([{ total: 1, repeats: 0 }, { total: 1, repeats: 1 }, { total: 1, repeats: 0 }]);

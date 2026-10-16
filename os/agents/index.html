@@ -5589,7 +5589,8 @@ function agentHandbackCell(tmId){
     const a = (h.line.byAgent || []).find(x => x && x.id === tmId);
     if(!a) return '<span style="color:var(--text-muted)" title="This agent brought you no cards in the last 14 days.">no cards in 14 days</span>';
     const why = Object.entries(a.reasons || {}).map(([k, n]) => `${Number(n) || 0} × ${k}`).join('\n');
-    const title = `In the last 14 days, ${Number(a.back) || 0} of ${Number(a.cards) || 0} cards asked you for more than approving, correcting, paying or giving access.` + (why ? '\n' + why : '');
+    const title = `In the last 14 days, ${Number(a.back) || 0} of ${Number(a.cards) || 0} cards asked you for more than approving, correcting, paying or giving access.` + (why ? '\n' + why : '')
+        + (h.line.partial ? "\nThe robot's sign-in log could not be read, so repeat sign-ins are not counted and the score is at best amber." : '');
     return `<span class="sc-val ${HANDBACK_COLOUR_CLASS[a.colour] || 'warn'}" title="${esc(title)}">${Number(a.back) || 0} of ${Number(a.cards) || 0} (score ${Number(a.score) || 0})</span>`;
 }
 

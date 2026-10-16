@@ -623,12 +623,19 @@ def judge_handback(f):
                       % (s["total"], s["repeats"])])
     if partial:
         extra.append(["Sign-in log", "not read: %s" % f["loginsError"]])
-    out = line("handback", colour, answer, score, f.get("items") or (), extra, src, partial=partial,
-               short=("%s came back to you" % plural(back, "card")) if colour != "green" else None)
+    short = None
+    if colour != "green":
+        short = ("%s came back to you" % plural(back, "card")) if back else "the sign-in log was not read"
+    out = line("handback", colour, answer, score, f.get("items") or (), extra, src, partial=partial, short=short)
+
+    def agent_colour(score):
+        # The same rule as the line, so the page never keeps its own copy: an unread sign-in log
+        # caps every agent at amber too (review of PR #798).
+        c = handback_colour(score)
+        return "amber" if partial and c == "green" else c
     # The AI Agents page reads each agent's score from here, so the two surfaces never disagree.
-    # Each agent's colour is worked out here, by the same rule, so the page never keeps its own copy.
     out["byAgent"] = [dict({k: a[k] for k in ("id", "name", "cards", "back", "score", "reasons")},
-                           colour=handback_colour(a["score"])) for a in f.get("byAgent") or []]
+                           colour=agent_colour(a["score"])) for a in f.get("byAgent") or []]
     return out
 
 
@@ -1701,7 +1708,6 @@ WALL_LINE_RE = re.compile(
     r"\s*(?P<rest>[^\n]*)$", re.M)
 WALL_PROFILE_RE = re.compile(r"\[profile ([a-z0-9][a-z0-9-]*)\]", re.I)
 KEVIN_CANT_NOTE = "Kevin cannot take this step"        # agent-dispatch.py KEVIN_CANT_NOTE
-SIGNED_IN_NOTE = "Kevin signed in to"                    # agent-dispatch.py signin_done
 
 
 def wall_lines(notes):
@@ -1723,7 +1729,9 @@ def wall_lines(notes):
 
 def read_logins(now, path=SIGNIN_LOG):
     """(sign-in windows Kevin opened, None) from the robot browser's own log, or ([], why not).
-    Each is {at, host, profile}; `host` is the wall the window was opened for when the log says."""
+    Each is {at, hosts, profile}: both the address the window opened and the wall it was opened for,
+    because a wall is stored under the site's sign-in door (tax.service.gov.uk) while the window may
+    open another of its addresses (www.tax.service.gov.uk), review of PR #798."""
     floor = now - timedelta(days=DECIDED_DAYS + ACCESS_KEPT_DAYS + 1)
     out = []
     try:
@@ -1738,15 +1746,21 @@ def read_logins(now, path=SIGNIN_LOG):
                 at = _aware(d.get("at"))
                 if d.get("cmd") != "login" or not at or at < floor:
                     continue
-                out.append({"at": at, "host": str(d.get("forWall") or d.get("host") or "").lower(),
+                out.append({"at": at, "hosts": {site(d.get("host")), site(d.get("forWall"))} - {""},
                             "profile": str(d.get("profile") or "default").lower()})
     except OSError as exc:
         return [], "the robot browser's sign-in log could not be read (%s)" % str(exc)[:80]
     return sorted(out, key=lambda e: e["at"]), None
 
 
+def site(host):
+    """A host compared as a site: lower case, no leading "www."."""
+    h = str(host or "").strip().lower()
+    return h[4:] if h.startswith("www.") else h
+
+
 def _same_site(e, host, profile):
-    return e["host"] == host and e["profile"] == (profile or "default")
+    return site(host) in e["hosts"] and e["profile"] == (profile or "default")
 
 
 def kevin_signin(logins, host, profile, when):
@@ -1761,7 +1775,8 @@ def access_not_kept(logins, signin):
     """True when Kevin had already signed the robot in to the same site in the 30 days before."""
     lo = signin["at"] - timedelta(days=ACCESS_KEPT_DAYS)
     hi = signin["at"] - timedelta(hours=SIGNIN_SAME_HOURS)
-    return any(_same_site(e, signin["host"], signin["profile"]) and lo <= e["at"] <= hi for e in logins)
+    return any(e["profile"] == signin["profile"] and e["hosts"] & signin["hosts"] and lo <= e["at"] <= hi
+               for e in logins)
 
 
 def signin_summary(logins, now):
@@ -1771,7 +1786,7 @@ def signin_summary(logins, now):
     total = repeats = 0
     last = {}
     for e in logins:
-        k = (e["host"], e["profile"])
+        k = (min(e["hosts"]) if e["hosts"] else "", e["profile"])
         prev = last.get(k)
         last[k] = e["at"]
         if prev and e["at"] - prev < timedelta(hours=SIGNIN_SAME_HOURS):
@@ -1786,29 +1801,58 @@ def signin_summary(logins, now):
 
 def card_handbacks(f, logins, cut):
     """(in the population, [why it came back]) for one task. In the population: a verdict in the
-    window, or a wall line Kevin's side touched (KEVIN, SIGN-IN, SITE) in the window."""
+    window, or a wall Kevin's side holds (KEVIN, SIGN-IN, SITE) open at any moment inside it.
+
+    A KEVIN wall counts when it was open inside the window, wherever it opened: a KEVIN ONLY step
+    opens its wall at submit, before the approval, so judging only walls opened in the window let an
+    approved card's step escape (review of PR #798: 5 live cards, 86% read for 84%). "Could not do"
+    and a repeat sign-in are events, counted when they happen inside the window. A SIGN-IN clear is
+    Kevin's sign-in only when the robot browser logged a window for that site and profile just
+    before it, whatever the clear's own words (the sweep clears a profile wall in other words)."""
     whys = []
     touched = False
-    lines = wall_lines(f.get("Notes"))
+    open_walls = {}                     # (kind, subject) -> opened at
     opened_profile = {}
-    for w in lines:
-        if w["mark"] == "BLOCKER OPEN" and w["kind"] == "SIGN-IN":
-            opened_profile[w["subject"].lower()] = w["profile"]
-        if not w["at"] or w["at"] <= cut:
+
+    for w in wall_lines(f.get("Notes")):
+        key = (w["kind"], w["subject"].lower())
+        inside = bool(w["at"]) and w["at"] > cut
+        if w["kind"] not in ("KEVIN", "SIGN-IN", "SITE"):
             continue
-        if w["kind"] in ("KEVIN", "SIGN-IN", "SITE"):
+        if w["mark"] == "BLOCKER OPEN":
+            open_walls[key] = w["at"]
+            if w["kind"] == "SIGN-IN":
+                opened_profile[key[1]] = w["profile"]
+            if w["kind"] == "KEVIN":
+                step = (w["subject"].split() or [""])[0].lower()
+                open_walls[key] = (w["at"], step)
+            if inside:
+                touched = True
+            continue
+        # BLOCKER CLEARED
+        opened = open_walls.get(key)
+        if w["kind"] == "KEVIN" and opened is not None and (inside or w["at"] is None):
             touched = True
-        if w["mark"] == "BLOCKER OPEN" and w["kind"] == "KEVIN":
-            step = (w["subject"].split() or [""])[0].lower()
-            if step not in KEVIN_STEPS_ALLOWED:
-                whys.append("you did " + KEVIN_STEP_WORDS.get(step, "a step yourself"))
-        elif w["mark"] == "BLOCKER CLEARED" and w["rest"].startswith(KEVIN_CANT_NOTE):
+            if opened[1] not in KEVIN_STEPS_ALLOWED:
+                whys.append("you did " + KEVIN_STEP_WORDS.get(opened[1], "a step yourself"))
+        open_walls.pop(key, None)
+        if not inside:
+            continue
+        touched = True
+        if w["rest"].startswith(KEVIN_CANT_NOTE):
             whys.append("you could not do the step it gave you")
-        elif w["mark"] == "BLOCKER CLEARED" and w["kind"] == "SIGN-IN" and SIGNED_IN_NOTE in w["rest"]:
-            host = w["subject"].lower()
-            s = kevin_signin(logins, host, opened_profile.get(host, ""), w["at"])
+        elif w["kind"] == "SIGN-IN":
+            s = kevin_signin(logins, key[1], opened_profile.get(key[1], ""), w["at"])
             if s and access_not_kept(logins, s):
                 whys.append("you signed the robot in again (access not kept)")
+    # A KEVIN wall still open now was open inside the window.
+    for (kind, _subject), opened in open_walls.items():
+        if kind == "KEVIN":
+            touched = True
+            if opened[1] not in KEVIN_STEPS_ALLOWED:
+                whys.append("you did " + KEVIN_STEP_WORDS.get(opened[1], "a step yourself"))
+        elif opened and opened > cut:
+            touched = True
     at = _aware(f.get("Approved At"))
     decided = bool(f.get("Approval Outcome")) and bool(at) and at > cut
     seen = []
