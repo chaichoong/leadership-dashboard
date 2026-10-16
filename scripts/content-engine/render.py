@@ -345,7 +345,16 @@ LFMD_START_RE = re.compile(r"(?:\w+\s+)?(?P<prep>from|for|of|through|in|to)\s+(?
                            # + today, because "hour" is an ordinary word. Measured 7 Oct 2026 over the 49 stored episode
                            # transcripts: one match, episode 2087, and "hour(s)/our(s) today" appears nowhere else in the
                            # set at all. The clip start moves on one episode, 2087.
-                           r"|learn\w*\s+(?:from|for)\s+(?:a|an|my|the|our)\s+(?:hour|our)s?\s+(?:today|the\s+day)", re.I)
+                           r"|learn\w*\s+(?:from|for)\s+(?:a|an|my|the|our)\s+(?:hour|our)s?\s+(?:today|the\s+day)"
+                           # 1799 (16 Oct 2026, finding 20261016-phase-3-936): "the learnings from my diary today"
+                           # came out as "learning from a day today". "day" shares only the d with diary, so no
+                           # d(ia|ie|ai|iv) route reaches it, and the episode was blocked for the fixer lane with no
+                           # section found at all. Same tightest context as the "hour" route above: learn.. + from/for
+                           # + a determiner + day(s) + today/the day, because "day" is the commonest word in this show.
+                           # Measured 16 Oct 2026 over the 152 stored Runpreneur transcripts: 8 matches, every one a
+                           # real Learnings line, and all 8 are episodes where the finder finds NO window today, so no
+                           # stored clip moves. Episodes 1799, 1970, 1993, 1996, 2005, 2022, 2025, 2034.
+                           r"|learn\w*\s+(?:from|for)\s+(?:a|an|my|the|our)\s+days?\s+(?:today|the\s+day)", re.I)
 # The show's own name is "day 2072 of the diary of a Runpreneur". Whisper garbles the tail ("of the diary cover on
 # printer", 2072, 27 Sep 2026), so the "of a" guard above cannot be relied on. "of the diary" straight after a day
 # number (2072, 2,072, 2072th, then any commas, full stops, ellipses or dashes) is what marks it. "of MY diary" or
@@ -1382,13 +1391,43 @@ def _when(iso):
 RESUBMIT_DIR = os.path.expanduser("~/.config/od/content_engine_resubmit")   # <day>.md: the receipt for a card Kevin sent back
 
 
+def redo_queue_place(day, ledger):
+    """(place, total) for `day` in the night's sent-back redo queue, or (None, total) when it is not in it.
+
+    The night renders ONE redo, whatever the slots (Kevin, 7 Oct 2026), oldest first, and a day whose pull was
+    refused goes behind the rest. So a day sitting second or later in this queue is not rendering tonight and is
+    not stalled either: it is waiting its turn. Ordered exactly as watch.plan orders it, because two readers of
+    one queue giving two answers is how 'waiting' got read as 'broken' (finding 20261016-phase-3-935)."""
+    failed_at = lambda d: max((v.get("pull_failed") or "") for v in ledger.values()
+                              if v.get("day") == d and v.get("status") == "new")
+    redo = sorted({v["day"] for v in ledger.values() if v.get("status") == "new" and v.get("reset")},
+                  key=lambda d: (failed_at(d), d))
+    mine = {v.get("day") for v in ledger.values()
+            if (v.get("episode") == day or (v.get("day") == day and not v.get("episode")))
+            and v.get("status") == "new" and v.get("reset")}
+    for i, d in enumerate(redo):
+        if d == day or d in mine:
+            return i + 1, len(redo)
+    return None, len(redo)
+
+
 def resubmit_due(day, ledger, receipt_mtime, card, full_fields):
     """'' when a sent-back card may go back to Kevin with its receipt, else why not yet. The receipt is written when the
     fix is set in motion; the card waits until the night has re-rendered the episode AFTER that, nothing of the day is
     still waiting, and the copy has been written again (24 Sep 2026, 2071: re-rendered overnight, copy rewritten after)."""
     if (card or {}).get("verdict") != "changes": return "the card is not sent back"
     mine = [v for v in ledger.values() if v.get("episode") == day or (v.get("day") == day and not v.get("episode"))]
-    if any(v.get("status") in ("new", "pulled", "pulling", "rendering") for v in mine): return "a clip of the day is still waiting to render"
+    if any(v.get("status") in ("new", "pulled", "pulling", "rendering") for v in mine):
+        # "A clip is still waiting to render" is true of a queue wait and of a stalled render, and it reads as the
+        # second. Day 2106 waited six nights behind the one-redo-a-night cap while every report said this, so nobody
+        # could tell a jam from a queue (finding 20261016-phase-3-935). Name the place and the nights.
+        place, total = redo_queue_place(day, ledger)
+        if place is not None and place > 1:
+            return ("it is %d of %d sent-back days in the night's redo queue, so about %d more night(s): "
+                    "one redo a night, oldest first" % (place, total, place - 1))
+        if place == 1:
+            return "a clip of the day is still waiting to render; it is first in the night's redo queue, so tonight"
+        return "a clip of the day is still waiting to render"
     if any(v.get("status") == "failed" for v in mine): return "a clip of the day failed to render; it goes back once that is put right"   # never part 1 alone (review, 24 Sep 2026)
     ep = [v for v in mine if v.get("role") == "episode" and v.get("status") == "rendered"]
     if not ep: return "the episode has not rendered"

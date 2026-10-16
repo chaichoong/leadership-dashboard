@@ -15,6 +15,7 @@ import sys
 script_dir = os.path.dirname(os.path.realpath(__file__))
 shared_script = os.path.join(script_dir, 'pre-commit-action.py')
 guard_script = os.path.join(script_dir, 'private-name-guard.py')
+drift_script = os.path.join(script_dir, 'scheduled-task-drift-guard.py')
 
 # The commit-message half of the name guard lives in its own hook
 # (scripts/commit-msg, 29 Sep 2026). Say so when it is not installed, because a
@@ -38,6 +39,19 @@ if os.path.exists(guard_script):
 else:
     print(f"⚠️  pre-commit hook: {guard_script} not found — private names NOT checked.",
           file=sys.stderr)
+
+# An unmirrored live SKILL.md turns every open pull request's gate red on a file
+# it never touched, and the gate's short tail does not name it, so it reads as a
+# flake (finding 20261014-queue-fixer-868; proven 14 and 16 Oct 2026). Refuse it
+# in the session that made it, where one command cures it. The guard exits 0 when
+# it cannot check, so a missing live directory never blocks a commit.
+if os.path.exists(drift_script):
+    drift = subprocess.run([sys.executable, drift_script], cwd=os.getcwd())
+    if drift.returncode != 0:
+        sys.exit(drift.returncode)
+else:
+    print(f"⚠️  pre-commit hook: {drift_script} not found — routine instructions "
+          "NOT checked for drift.", file=sys.stderr)
 
 if not os.path.exists(shared_script):
     # Do not exit 0 quietly. A missing sibling means a broken install, and a

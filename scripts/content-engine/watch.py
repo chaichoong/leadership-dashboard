@@ -152,7 +152,11 @@ def plan(ledger, slots, gaps=None, free=None, start=None):
         room = n_redo + (new_slots - len(days))
         front = redo[:room]
         for d in front: notes.append("redo: day %d (sent back) renders first, before the night's new episodes" % d)
-        for d in redo[room:]: notes.append("redo: day %d (sent back) waits for another night: one redo a night" % d)
+        # Say WHICH night, not just "another one". Day 2106 waited six nights behind this cap and every note read the
+        # same, so nobody could tell a draining queue from a jammed one (finding 20261016-phase-3-935).
+        for i, d in enumerate(redo[room:]):
+            notes.append("redo: day %d (sent back) waits for another night: %d of %d in the redo queue, about %d night(s) "
+                         "away, one redo a night" % (d, room + i + 1, len(redo), i + 1))
         days = front + days
     return days, notes
 
