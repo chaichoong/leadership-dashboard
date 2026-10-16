@@ -74,7 +74,7 @@ print(json.dumps([F.detect_kind(arg), c["kind"], c["agreement"], c["agreementId"
   it('refuses a card that would let the robot guess', () => {
     const bad = {
       noId: CARD.replace(/AGREEMENT ID: .*\n/, ''),
-      gmail: CARD.replace('SIGNER: info@agilelets.co.uk', 'SIGNER: kevinbrittain@gmail.com'),
+      stranger: CARD.replace('SIGNER: info@agilelets.co.uk', 'SIGNER: someone@example.com'),
       roy: CARD.replace('SIGNER: info@agilelets.co.uk', 'SIGNER: roy.lavin1978@gmail.com'),
       twoSigners: CARD.replace('SIGNER: info@agilelets.co.uk', 'SIGNER: info@agilelets.co.uk, kevinbrittain@gmail.com'),
       notPdf: CARD.replace('_AST.pdf', '_AST.docx'),
@@ -92,7 +92,11 @@ for k, v in arg.items():
 print(json.dumps(out))`, bad);
     for (const [k, why] of Object.entries(out)) expect(why, k).not.toBe('accepted');
     expect(out.noId).toMatch(/AGREEMENT ID/);
-    expect(out.gmail).toMatch(/cannot sign for kevinbrittain@gmail.com.*KEVIN ONLY: signature/);
+    expect(out.stranger).toMatch(/cannot sign for someone@example.com.*KEVIN ONLY: signature/);
+    // Kevin's Gmail is a door since 16 Oct 2026 (a link Adobe emailed him), named by its link's fingerprint.
+    const gmail = py(`print(json.dumps(F.validate_submission_any(arg)["signer"]))`,
+      CARD.replace('SIGNER: info@agilelets.co.uk', 'SIGNER: kevinbrittain@gmail.com').replace(ID, 'tsid-' + 'a'.repeat(40)));
+    expect(gmail).toBe('kevinbrittain@gmail.com');
     expect(out.notPdf).toMatch(/\.pdf/);
     expect(out.twice).toMatch(/appears twice/);
   });
@@ -505,7 +509,7 @@ describe('the robot signs the approved agreement, and only it', () => {
   it('refuses when Adobe asks for more than his signature', () =>
     refused({ extraRequired: 1 }, {}, /asks for more than Kevin's signature/));
   it('refuses when Adobe puts anything but the saved signature in a box', () =>
-    refused({ savedLabel: 'Roy Lavin' }, {}, /other than the saved signature "Agile Lets"/));
+    refused({ savedLabel: 'Roy Lavin' }, {}, /other than "Agile Lets"/));
 
   it('refuses when Adobe holds different words from the copy Kevin approved', async () => {
     const s = adobe();
@@ -632,7 +636,7 @@ describe('signBinding: the robot reads Kevin\'s approval through agent-dispatch.
     expect(() => bind({ ...ok, outcome: 'Approved with minor edits' })).toThrow(/not approved as it stands/);
     expect(() => bind({ ...ok, approved: false })).toThrow(/not approved as it stands/);
     expect(() => bind({ ...ok, formCard: true })).toThrow(/not approved as it stands/);
-    expect(() => bind({ ...ok, signAsKevin: { ...ok.signAsKevin, signer: 'kevinbrittain@gmail.com' } })).toThrow(/door the robot holds/);
+    expect(() => bind({ ...ok, signAsKevin: { ...ok.signAsKevin, signer: 'someone@example.com' } })).toThrow(/door the robot holds/);
     expect(() => bind({ ...ok, signAsKevin: null })).toThrow(/door the robot holds/);
   });
   it('refuses a card with no link to the copy Kevin read, and a Submit never proved', () => {

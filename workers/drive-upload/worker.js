@@ -62,7 +62,9 @@
 //                        labelIds (preferred for label lookups — no query
 //                        syntax to silently mis-parse), each with headers,
 //                        snippet, labelIds, internalDate, a plain-text body
-//                        excerpt, and `attachments` (non-inline only:
+//                        excerpt, `links` (each <a href> of the HTML part
+//                        with its words, up to 40: Adobe's "Review and sign"
+//                        lives only there, 16 Oct 2026), and `attachments` (non-inline only:
 //                        attachmentId, filename, mimeType, size — the bytes
 //                        come from /gmail/attachment, never from here).
 //                        Read-only. Max 25 per call (each message is
@@ -637,6 +639,7 @@ async function gmailList(token, { q, labelIds, maxResults, pageToken }) {
             snippet: msg.snippet || '',
             headers,
             body: extractPlainText(msg.payload).slice(0, 4000),
+            links: extractLinks(msg.payload),
             attachments: extractAttachments(msg.payload),
         });
     }
@@ -769,6 +772,36 @@ function extractPlainText(payload) {
             .trim();
     }
     return '';
+}
+
+// Every link in the HTML part as { href, text }, up to 40, in page order. The plain-text
+// body drops them with the tags, and an Adobe Sign request carries its "Review and sign"
+// address nowhere else (16 Oct 2026: 0 links in the body of both Adobe requests in
+// kevinbrittain@gmail.com). Read-only: nothing here follows a link.
+function extractLinks(payload) {
+    // Never the reason /gmail/list fails: the triage robot reads every message through it.
+    try { return extractLinksOrThrow(payload); } catch { return []; }
+}
+function extractLinksOrThrow(payload) {
+    if (!payload) return [];
+    const queue = [payload];
+    let html = null;
+    while (queue.length && html === null) {
+        const p = queue.shift();
+        if (p.mimeType === 'text/html' && p.body?.data) html = b64urlDecodeUtf8(p.body.data);
+        if (p.parts) queue.push(...p.parts);
+    }
+    if (!html) return [];
+    const out = [];
+    const re = /<a\b[^>]*?\bhref\s*=\s*(?:"([^"]*)"|'([^']*)')[^>]*>([\s\S]*?)<\/a>/gi;
+    let m;
+    while ((m = re.exec(html)) && out.length < 40) {
+        const href = (m[1] ?? m[2] ?? '').replace(/&amp;/gi, '&').trim();
+        if (!/^https?:\/\//i.test(href)) continue;
+        const text = m[3].replace(/<[^>]+>/g, ' ').replace(/&nbsp;/gi, ' ').replace(/&amp;/gi, '&').replace(/\s+/g, ' ').trim();
+        out.push({ href, text: text.slice(0, 120) });
+    }
+    return out;
 }
 
 async function getAccessToken(env) {
