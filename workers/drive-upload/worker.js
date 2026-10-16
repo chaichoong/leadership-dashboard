@@ -779,6 +779,10 @@ function extractPlainText(payload) {
 // address nowhere else (16 Oct 2026: 0 links in the body of both Adobe requests in
 // kevinbrittain@gmail.com). Read-only: nothing here follows a link.
 function extractLinks(payload) {
+    // Never the reason /gmail/list fails: the triage robot reads every message through it.
+    try { return extractLinksOrThrow(payload); } catch { return []; }
+}
+function extractLinksOrThrow(payload) {
     if (!payload) return [];
     const queue = [payload];
     let html = null;

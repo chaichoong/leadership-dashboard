@@ -55,6 +55,10 @@ cases = {
   "plainHttp": msg("h", 1, links=[{"text": "Review and sign", "href": "http://na1.documents.adobe.com/public/esign?tsid=Th"}]),
   "twoLinks": msg("i", 1, links=[{"text": "Review and sign", "href": "https://na1.documents.adobe.com/public/esign?tsid=T1"},
                                  {"text": "Review and sign", "href": "https://na1.documents.adobe.com/public/esign?tsid=T2"}]),
+  "suffixHost": msg("j", 1, links=[{"text": "Review and sign", "href": "https://documents.adobe.com.evil.example/public/esign?tsid=Tj"}]),
+  "prefixHost": msg("k", 1, links=[{"text": "Review and sign", "href": "https://evil-documents.adobe.com/public/esign?tsid=Tk"}]),
+  "nameSpoof": msg("l", 1, frm="adobesign@adobesign.com <attacker@evil.example>"),
+  "ccOnly": msg("m", 1, to="someone@example.com"),
 }
 print(json.dumps({k: L.request_link(v, NAME)[1] for k, v in cases.items()}))`);
     expect(out.good).toBe('');
@@ -66,15 +70,37 @@ print(json.dumps({k: L.request_link(v, NAME)[1] for k, v in cases.items()}))`);
     expect(out.delegateOnly).toMatch(/no Review and sign link/);
     expect(out.plainHttp).toMatch(/no Review and sign link/);
     expect(out.twoLinks).toMatch(/two different signing links/);
+    expect(out.suffixHost).toMatch(/Adobe's own signing host/);
+    expect(out.prefixHost).toMatch(/Adobe's own signing host/);
+    expect(out.nameSpoof).toMatch(/not sent by adobesign@adobesign.com/);
+    expect(out.ccOnly).toMatch(/not addressed to kevinbrittain@gmail.com/);
   });
 
-  it('picks the newest real request, names it by a fingerprint, and never by its token', () => {
+  it('names the request by a fingerprint and who asked, and hands the token only to the robot', () => {
     const out = finder(`
-lister = lambda **kw: ([msg("old", 1000), msg("new", 2000), msg("fake", 3000, frm="x <adobesign@evil.example>")], False)
-print(json.dumps(L.find(NAME, lister=lister)))`);
-    expect(out.messageId).toBe('new');
-    expect(out.linkId).toMatch(/^tsid-[0-9a-f]{40}$/);
-    expect(out.linkId).not.toMatch(/Tnew/);
+import os
+lister = lambda **kw: ([msg("one", 1000), msg("fake", 3000, frm="x <adobesign@evil.example>")], False)
+plain = L.find(NAME, lister=lister)
+os.environ["ADOBE_SIGN_LINK_REVEAL"] = "1"
+robot = L.find(NAME, lister=lister)
+print(json.dumps([plain, robot]))`);
+    expect(out[0]).toMatchObject({ messageId: 'one', requester: 'Agile Lets' });
+    expect(out[0].linkId).toMatch(/^tsid-[0-9a-f]{40}$/);
+    expect(out[0].link).toBeUndefined();                      // an agent running it by hand never sees the token
+    expect(out[1].link).toBe('https://na1.documents.adobe.com/public/esign?tsid=Tone');
+  });
+
+  it('two different genuine requests under one name is a question for Kevin, never a pick', () => {
+    let out = '';
+    try { execFileSync('python3', ['-c', `
+import importlib.util, json
+spec = importlib.util.spec_from_file_location("asl", ${JSON.stringify(join(SCRIPTS, 'adobe_sign_link.py'))})
+L = importlib.util.module_from_spec(spec); spec.loader.exec_module(L)
+m = lambda i, t: {"id": i, "internalDate": t, "headers": {"from": "Someone via Adobe Acrobat Sign <adobesign@adobesign.com>",
+    "to": "kevinbrittain@gmail.com", "subject": 'Signature requested on "${NAME}"'},
+    "links": [{"text": "Review and sign", "href": "https://na1.documents.adobe.com/public/esign?tsid=T" + i}]}
+L.find("${NAME}", lister=lambda **kw: ([m("a", 1), m("b", 2)], False))`], { encoding: 'utf8' }); } catch (e) { out = String(e.stdout); }
+    expect(JSON.parse(out).error).toMatch(/2 different Adobe requests .* none is signed/);
   });
 
   it('finds Adobe\'s "You signed" email only after the press', () => {
@@ -91,7 +117,8 @@ describe('the Gmail worker hands back each email\'s links (the real worker sourc
     const src = readFileSync(join(ROOT, 'workers/drive-upload/worker.js'), 'utf8');
     const grab = (n) => { const i = src.indexOf('function ' + n + '('); let d = 0; const j = src.indexOf('{', i);
       for (let k = j; k < src.length; k++) { if (src[k] === '{') d++; if (src[k] === '}') { d--; if (!d) return src.slice(i, k + 1); } } };
-    const extractLinks = new Function(grab('b64urlDecodeUtf8') + grab('extractLinks') + 'return extractLinks;')();
+    const extractLinks = new Function(grab('b64urlDecodeUtf8') + grab('extractLinks') + grab('extractLinksOrThrow') + 'return extractLinks;')();
+    expect(extractLinks({ mimeType: 'text/html', body: { data: '%%%not base64%%%' } })).toEqual([]);   // never breaks /gmail/list
     const b64 = (t) => Buffer.from(t).toString('base64').replace(/\+/g, '-').replace(/\//g, '_');
     const html = '<a href="https://na1.documents.adobe.com/public/esign?tsid=X&amp;y=1" style="c"><span>Review</span> and sign</a>'
       + '<a href="mailto:a@b.c">mail</a><a href=\'https://www.adobe.com/go/terms_uk\'>Terms</a>';
@@ -131,12 +158,14 @@ beforeAll(async () => {
 afterAll(async () => { if (browser) await browser.close(); });
 
 function linkPage(over = {}) {
-  return Object.assign({ title: NAME, waiting: true, extraRequired: 0, pdf: null, submits: 0, continues: 0, declines: 0, delegates: 0 }, over);
+  return Object.assign({ title: NAME, waiting: true, extraRequired: 0, pdf: null, submits: 0, continues: 0, declines: 0, delegates: 0,
+    boxes: 1, abort: false }, over);
 }
 async function fakeLink(s) {
   const ctx = await browser.newContext({ acceptDownloads: true });
   await ctx.route((u) => u.hostname.endsWith('documents.adobe.com'), async (route) => {
     const u = new URL(route.request().url());
+    if (s.abort && u.pathname === '/public/esign') return route.abort('connectionrefused');
     if (u.pathname === '/download') return route.fulfill({ status: 200, contentType: 'application/pdf', headers: { 'content-disposition': 'attachment; filename="a.pdf"' }, body: s.pdf || PDF_A });
     if (u.pathname === '/press') { s[u.searchParams.get('what')]++; return route.fulfill({ status: 204 }); }
     if (u.pathname !== '/public/esign') return route.fulfill({ status: 404, body: '' });
@@ -154,15 +183,16 @@ async function fakeLink(s) {
 <button data-testid="lhp-continue-btn" aria-label="By selecting Continue, I agree to the Terms of Use, Consumer Disclosure and to use electronic signatures." style="position:relative;z-index:6">Continue</button>
 <div id="gate" data-testid="test-esign-gate"></div>
 <div id="left"></div>
-<div data-testid="signature-form-field" aria-label="Click to Sign (required)" style="width:120px;height:30px;border:1px solid"></div>
+${Array.from({ length: s.boxes }, () => '<div data-testid="signature-form-field" aria-label="Click to Sign (required)" style="width:120px;height:30px;border:1px solid"></div>').join('')}
 <button data-testid="footer-submit-button" style="position:fixed;bottom:10px;right:20px">Submit</button>
 <div id="dlg"></div><script>
 const press = (what) => fetch('/press?what=' + what, { method: 'POST' });
 const EXTRA = ${s.extraRequired};
 const footer = document.querySelector('[data-testid=footer-submit-button]');
-const box = document.querySelector('[data-testid=signature-form-field]');
+const boxes = [...document.querySelectorAll('[data-testid=signature-form-field]')];
+let given = '';
 function refresh() {
-  const empty = (/Click to Sign/.test(box.getAttribute('aria-label')) ? 1 : 0) + EXTRA;
+  const empty = boxes.filter((b) => /Click to Sign/.test(b.getAttribute('aria-label'))).length + EXTRA;
   footer.setAttribute('aria-label', empty ? empty + ' required fields remaining' : 'All required fields complete. Click submit to sign.');
   footer.classList.toggle('go', !empty);
 }
@@ -170,13 +200,15 @@ document.querySelector('[data-testid=lhp-options-btn]').onclick = () => { docume
 document.querySelector('[data-testid=actions-menu-item-decline]').onclick = () => press('declines');
 document.querySelector('[data-testid=actions-menu-item-delegate]').onclick = () => press('delegates');
 document.querySelector('[data-testid=lhp-continue-btn]').onclick = () => { press('continues'); document.getElementById('gate').remove(); };
-box.onclick = () => {
+// Like Adobe: the first box asks for the name in a dialog; later boxes take the name already given, on a click.
+boxes.forEach((box) => box.onclick = () => {
+  if (given) { box.setAttribute('aria-label', given + ' Click to change (required)'); refresh(); return; }
   document.getElementById('dlg').innerHTML = '<div role="dialog"><div role="tab" data-testid="sign-canvas-type-tab">Type</div>'
     + '<input aria-label="Type your signature above"><button id="close">Close</button><button id="apply">Apply</button></div>';
   document.getElementById('apply').onclick = () => {
-    const name = document.querySelector('[role=dialog] input').value;
-    box.setAttribute('aria-label', name + ' Click to change (required)'); document.getElementById('dlg').innerHTML = ''; refresh(); };
-};
+    given = document.querySelector('[role=dialog] input').value;
+    box.setAttribute('aria-label', given + ' Click to change (required)'); document.getElementById('dlg').innerHTML = ''; refresh(); };
+});
 footer.onclick = () => press('submits').then(() => { document.body.innerHTML = "<h1>You\\u2019re all set!</h1><p>You finished signing \\u201c${s.title}\\u201d.</p>"; });
 refresh();
 </script>` });
@@ -198,6 +230,25 @@ describe('the robot signs the approved Gmail request with Kevin\'s typed name, a
     const r = await runLink(s, { mode: 'sign' });
     expect(r).toMatchObject({ agreementId: ID, statusAfter: 'Signed (Adobe page and Adobe email)', boxes: 1 });
     expect([s.continues, s.submits, s.declines, s.delegates]).toEqual([1, 1, 0, 0]);
+  });
+
+  it('signs every box: the first through the dialog, the rest as Adobe fills them', async () => {
+    const s = linkPage({ boxes: 3 });
+    expect((await runLink(s, { mode: 'sign' })).boxes).toBe(3);
+    expect(s.submits).toBe(1);
+  });
+
+  it('reads his approval again BEFORE agreeing to Adobe\'s terms, and stops if it changed', async () => {
+    const s = linkPage();
+    await expect(runLink(s, { mode: 'sign', recheck: async () => { throw new Error('BROWSER REFUSED: not approved any more'); } }))
+      .rejects.toThrow(/not approved any more/);
+    expect([s.continues, s.submits]).toEqual([0, 0]);
+  });
+
+  it('a link that will not load is refused without its token in the words', async () => {
+    const err = await runLink(linkPage({ abort: true }), { mode: 'sign' }).catch((e) => e);
+    expect(err.message).toMatch(/did not load/);
+    expect(err.message).not.toMatch(/SECRETTOKEN1/);
   });
 
   const refused = async (over, o, re) => {
@@ -224,8 +275,20 @@ describe('the robot signs the approved Gmail request with Kevin\'s typed name, a
       const err = await runLink(s, { mode: 'sign' }).catch((e) => e);
       expect(err.unconfirmed).toBe(true);
       expect(err.message).toMatch(/SIGN NOT CONFIRMED.*"You signed" email/);
+      expect(err.message).not.toMatch(/SECRETTOKEN1/);
+      expect(Date.parse(err.pressedAt)).toBeGreaterThan(Date.now() - 10 * 60000);   // the lock carries the press time
       expect(s.submits).toBe(1);
     } finally { process.env.LINK_SIGNED = JSON.stringify({ signed: true }); }
+  });
+});
+
+describe('a signing token never reaches a log, an error or a card', () => {
+  it('hides tsid and pid wherever they sit, and leaves the rest of the address', () => {
+    const t = 'goto https://na1.documents.adobe.com/public/esign?tsid=SECRETTOKEN1&x=1 failed; "…/esign?pid=P2" and aid=AGREEMENTID';
+    const h = ab.hideSignToken(t);
+    expect(h).not.toMatch(/SECRETTOKEN1|P2"/);
+    expect(h).toMatch(/esign\?tsid=<hidden>&x=1/);
+    expect(h).toMatch(/aid=AGREEMENTID/);
   });
 });
 

@@ -1291,8 +1291,8 @@ def parse_sign_as_kevin_output(output):
     signer = signers[0].lower()
     if signer not in SIGN_AS_KEVIN_SIGNERS:
         raise EmailFormatError(
-            f"the robot cannot sign for {signer}: its only signing door is "
-            f"{', '.join(SIGN_AS_KEVIN_SIGNERS)} (Adobe, Waiting for you). Anything else stays "
+            f"the robot cannot sign for {signer}: its signing doors are "
+            f"{', '.join(SIGN_AS_KEVIN_SIGNERS)} (Adobe only). Anything else stays "
             "Kevin's own step: `KEVIN ONLY: signature: <the step>`.")
     document = _one_file(headers.get("DOCUMENT"), "DOCUMENT")
     if not document.lower().endswith(".pdf"):

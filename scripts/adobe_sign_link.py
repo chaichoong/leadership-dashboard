@@ -82,15 +82,30 @@ def request_link(msg, name):
 def find(name, lister=None):
     lister = lister or _triage().worker_list
     msgs, _ = lister(q=f'from:{SENDER} subject:"{name}" newer_than:90d', max_pages=1, account=ACCOUNT)
-    seen = []
+    seen, good = [], []
     for msg in sorted(msgs, key=lambda m: int(m.get("internalDate") or 0), reverse=True):
         link, why = request_link(msg, name)
         if link:
-            when = datetime.fromtimestamp(int(msg.get("internalDate") or 0) / 1000, timezone.utc).isoformat()
-            return {"messageId": msg.get("id"), "when": when, "linkId": link_id(link), "link": link}
-        seen.append(f"{msg.get('id')}: {why}")
-    fail(f'no Adobe signature request for "{name}" addressed to {ACCOUNT} in the last 90 days'
-         + (f" ({'; '.join(seen[:4])})" if seen else ""))
+            good.append((msg, link))
+        else:
+            seen.append(f"{msg.get('id')}: {why}")
+    if not good:
+        fail(f'no Adobe signature request for "{name}" addressed to {ACCOUNT} in the last 90 days'
+             + (f" ({'; '.join(seen[:4])})" if seen else ""))
+    # Anyone can make Adobe send a genuine request under a copied name, so two different requests for one
+    # name is a question for Kevin, never a pick (review of the Gmail door, 16 Oct 2026).
+    if len({link_id(l) for _m, l in good}) > 1:
+        fail(f'{len({link_id(l) for _m, l in good})} different Adobe requests for "{name}" reached {ACCOUNT}: '
+             "which one is genuine is Kevin's call, so none is signed")
+    msg, link = good[0]
+    when = datetime.fromtimestamp(int(msg.get("internalDate") or 0) / 1000, timezone.utc).isoformat()
+    sender = str((msg.get("headers") or {}).get("from") or "")
+    requester = re.sub(r"\s*<[^>]*>\s*$", "", sender).replace(" via Adobe Acrobat Sign", "").strip(' "')
+    out = {"messageId": msg.get("id"), "when": when, "linkId": link_id(link), "requester": requester}
+    # The token is a credential: only the robot's own call (agent-browser.js sets this) receives it.
+    if os.environ.get("ADOBE_SIGN_LINK_REVEAL") == "1":
+        out["link"] = link
+    return out
 
 
 def signed(name, since_iso, lister=None):

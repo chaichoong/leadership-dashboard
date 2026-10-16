@@ -473,6 +473,7 @@ let openPages = 0;
 // How many session cookies the last withPage run kept (the fallback `login` logs it).
 let lastKept = 0;
 function die(msg, code = 1) {
+  msg = hideSignToken(msg);
   if (require.main !== module || openPages > 0) {
     const e = new Error('BROWSER REFUSED: ' + msg);
     e.refusal = true;
@@ -483,10 +484,14 @@ function die(msg, code = 1) {
   process.exit(code);
 }
 
+// An Adobe signing link's token is a credential (anyone holding it can sign as Kevin): it never reaches a
+// log, an error, a card or a screen (review of the Gmail door, 16 Oct 2026).
+const hideSignToken = (t) => String(t).replace(/([?&](?:tsid|pid)=)[^&\s"'<>)]+/gi, '$1<hidden>');
+
 function ledger(entry) {
   try {
     fs.mkdirSync(path.dirname(LEDGER), { recursive: true });
-    fs.appendFileSync(LEDGER, JSON.stringify(Object.assign({ at: new Date().toISOString() }, entry)) + '\n');
+    fs.appendFileSync(LEDGER, hideSignToken(JSON.stringify(Object.assign({ at: new Date().toISOString() }, entry))) + '\n');
     return true;
   } catch (e) {
     // A ledger that cannot be written is a real problem, not a nicety: it is
@@ -2402,7 +2407,7 @@ function signLocks(task) {
     const s = seen.get(r.agreementId) || { agreementId: r.agreementId, agreement: '', signer: '', at: '' };
     s.agreement = r.agreement || s.agreement;
     s.signer = r.signer || s.signer;
-    if (r.cmd === 'unconfirmed') s.at = r.at || s.at;
+    if (r.cmd === 'unconfirmed') s.at = r.pressedAt || r.at || s.at;
     seen.set(r.agreementId, s);
   }
   return [...seen.values()].filter((l) => signUnconfirmed(task, l.agreementId));
@@ -2541,12 +2546,22 @@ async function applySignature(p, door) {
     if (!/click to sign/i.test(await boxes.nth(i).getAttribute('aria-label') || '')) continue;
     await boxes.nth(i).click();
     if (door.kind === 'link') {
+      // The first box opens Adobe's dialog; a later one may take the name already given, with no dialog.
       const box = p.locator('[role=dialog] input[aria-label="Type your signature above"]').first();
-      try { await box.waitFor({ state: 'visible', timeout: 20000 }); } catch { die('Adobe opened no signature dialog to type the name into.'); }
-      const tab = p.locator('[data-testid="sign-canvas-type-tab"]').first();
-      if (await tab.count()) await tab.click();
-      await box.fill(door.typedName);
-      await p.locator('[role=dialog] button', { hasText: /^\s*Apply\s*$/ }).first().click();
+      const filled = async () => (await boxes.nth(i).getAttribute('aria-label') || '').includes(door.typedName);
+      let dialog = false;
+      for (let t = 0; t < 40 && !dialog && !(await filled()); t++) {
+        dialog = await box.isVisible().catch(() => false);
+        if (!dialog) await p.waitForTimeout(500);
+      }
+      if (dialog) {
+        const tab = p.locator('[data-testid="sign-canvas-type-tab"]').first();
+        if (await tab.count()) await tab.click();
+        await box.fill(door.typedName);
+        await p.locator('[role=dialog] button', { hasText: /^\s*Apply\s*$/ }).first().click();
+      } else if (!(await filled())) {
+        die('Adobe opened no signature dialog and put no name in the box.');
+      }
     }
     await p.waitForTimeout(2500);
   }
@@ -2625,7 +2640,8 @@ function signLinkScript() { return process.env.AGENT_SIGN_LINK_SCRIPT || path.jo
 function signLinkFor(name) {
   let out;
   try {
-    out = execFileSync('python3', [signLinkScript(), 'find', '--agreement', name], { encoding: 'utf8', timeout: 90000 });
+    out = execFileSync('python3', [signLinkScript(), 'find', '--agreement', name],
+                       { encoding: 'utf8', timeout: 90000, env: Object.assign({}, process.env, { ADOBE_SIGN_LINK_REVEAL: '1' }) });
   } catch (e) {
     let why = String(e.stdout || e.message || '').trim();
     try { why = JSON.parse(why).error || why; } catch { /* plain text */ }
@@ -2646,7 +2662,9 @@ function signedEmail(name, sinceIso) {
 }
 // The signing page a link opens: the document must be the approved one, and say it waits for Kevin.
 async function openLinkPage(page, link, name) {
-  await page.goto(link, { waitUntil: 'domcontentloaded', timeout: 60000 });
+  try { await page.goto(link, { waitUntil: 'domcontentloaded', timeout: 60000 }); } catch (e) {
+    die(`Adobe's signing link did not load (${hideSignToken(String(e.message || e).split('\n')[0]).slice(0, 120)}).`);
+  }
   try { await page.locator('input[aria-label="Document Title"]').first().waitFor({ state: 'attached', timeout: SIGN_WAIT.page }); } catch {
     const said = (await page.locator('body').innerText().catch(() => '')).replace(/\s+/g, ' ').slice(0, 160);
     die(`Adobe's signing link opened no document ("${said}").`);
@@ -2654,7 +2672,10 @@ async function openLinkPage(page, link, name) {
   await page.waitForTimeout(SIGN_WAIT.settle);
   const title = await page.locator('input[aria-label="Document Title"]').first().inputValue().catch(() => '');
   if (normName(title) !== normName(name)) die(`the link's document is "${title}", not "${name}", the document Kevin approved.`);
-  return { waiting: /your turn to sign/i.test(await page.locator('body').innerText()) };
+  const text = await page.locator('body').innerText();
+  // This door's profile must hold no Adobe session: in one, Adobe signs as that account or refuses (16 Oct 2026).
+  if (/currently logged in as/i.test(text)) die("the link door's browser profile is signed in to Adobe, and it must not be. Nothing was signed.");
+  return { waiting: /your turn to sign/i.test(text) };
 }
 // The PDF behind the link, from Adobe's Options menu: no terms are agreed to read or download it.
 async function downloadFromLink(page, out) {
@@ -2681,14 +2702,15 @@ async function runLinkFlow(page, o, door) {
     const unsigned = await downloadFromLink(page, path.join(UPLOAD_DIR, `unsigned_${o.task}_${safeFileName(o.name)}.pdf`));
     const asks = await signingAsks(page);
     const screenshot = o.shot ? await shoot(page, o.shot) : null;
-    return { agreement: o.name, agreementId: found.linkId, status: 'Your turn to sign', unsigned, asks, screenshot,
+    return { agreement: o.name, agreementId: found.linkId, requester: found.requester || '', status: 'Your turn to sign', unsigned, asks, screenshot,
              onlySignature: asks.empty > 0 && (asks.remaining === null || asks.remaining === asks.empty) };
   }
   if (!o.approvedCopy || !fs.existsSync(o.approvedCopy)) die('the copy Kevin approved could not be fetched, so it cannot be compared.');
   const now = await downloadFromLink(page, path.join(compareDir(), `${o.task}_adobe_now.pdf`));
   try { assertSameDocument(o.approvedCopy, now); } finally { fs.rmSync(now, { force: true }); }
   // Continue is Adobe's "I agree to the Terms of Use, Consumer Disclosure and to use electronic signatures":
-  // pressed only here, for this one document, on Kevin's approval of the card that names it.
+  // pressed only here, for this one document, on Kevin's approval of the card that names it, read again first.
+  if (o.recheck) await o.recheck();
   await page.locator('[data-testid="lhp-continue-btn"]').first().click();
   await page.locator('[data-testid="test-esign-gate"]').first().waitFor({ state: 'detached', timeout: 20000 }).catch(() => {});
   await page.waitForTimeout(SIGN_WAIT.settle);
@@ -2713,6 +2735,7 @@ async function runLinkFlow(page, o, door) {
     const e = new Error(`SIGN NOT CONFIRMED: Submit was pressed on ${found.linkId}, then ${String(err.message || err).replace(/^BROWSER REFUSED: /, '').slice(0, 240)}. `
       + `Treat it as NOT proved: read Adobe with \`sign --task ${o.task} --check\` before anything else.`);
     e.unconfirmed = true;
+    e.pressedAt = pressedAt;
     throw e;
   }
 }
@@ -2789,7 +2812,8 @@ async function runSign(page, ctx, task, card, approvedCopy, shot, recheck) {
                                        shot, approvedCopy, recheck });
   } catch (e) {
     // The lock first: if the run log cannot be written, the agreement must still be locked.
-    if (e.unconfirmed) signLedger({ cmd: 'unconfirmed', task, agreementId: card.agreementId, agreement: card.agreement, signer: card.signer || '' });
+    if (e.unconfirmed) signLedger({ cmd: 'unconfirmed', task, agreementId: card.agreementId, agreement: card.agreement, signer: card.signer || '',
+                                    pressedAt: e.pressedAt || new Date(Date.now() - 120000).toISOString() });
     ledger({ cmd: 'sign', task, agreementId: card.agreementId, agreement: card.agreement,
              refused: !!e.refusal, unconfirmed: !!e.unconfirmed, error: String(e.message || e).slice(0, 400) });
     throw e;
@@ -2811,7 +2835,9 @@ async function runSignCheck(page, task, card, shot) {
   let r;
   if (door.kind === 'link') {
     // Adobe's own "You signed" email decides; failing that, a link still waiting means the Submit never landed.
-    const since = new Date(Date.parse(card.at || 0) - 120000).toISOString();
+    // From the press itself (the run's lock row carries it); a lock with no readable time cannot be judged by mail.
+    if (!Date.parse(card.at || '')) die(`the lock on ${card.agreementId} carries no time, so Adobe's email cannot be matched to it. Look at Gmail by hand.`);
+    const since = new Date(Date.parse(card.at)).toISOString();
     let statusAfter = '';
     let signed = signedEmail(card.agreement, since);
     if (signed) statusAfter = 'Signed (Adobe email)';
@@ -3420,8 +3446,8 @@ async function main() {
 // and a guard proved by a single lucky page is proved by nothing.
 if (require.main === module) {
   main().catch(e => {
-    if (e && e.refusal) { console.error(e.message); process.exit(e.exitCode || 1); }
-    console.error('BROWSER ERROR: ' + (e && e.stack || e)); process.exit(1);
+    if (e && e.refusal) { console.error(hideSignToken(e.message)); process.exit(e.exitCode || 1); }
+    console.error('BROWSER ERROR: ' + hideSignToken(e && e.stack || e)); process.exit(1);
   });
 }
 
@@ -3437,4 +3463,4 @@ module.exports = { namedAnswer, hostAllowed, pickLinks, runSteps, assertNotCrede
                    movedOn, assertNotFinalAction, PLANNER_SCHEMA, CARRY_PAST_RE, NEVER_PAST_RE, MOVE_ON_RE,
                    adobeSignRefusal, SIGN_WORDS_RE, isAdobeSigningPage, signBinding, runSignFlow, SIGN_DOORS,
                    agreementIdFromUrl, agreementPageUrl, AGREEMENT_ID_RE, SIGN_LIST_URL, signedStatus,
-                   runSign, runSignCheck, verifyApprovedCopy };
+                   runSign, runSignCheck, verifyApprovedCopy, hideSignToken };
