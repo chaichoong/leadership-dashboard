@@ -1823,7 +1823,9 @@ def card_handbacks(f, logins, cut):
         if not w or w["kind"] not in ("KEVIN", "SIGN-IN", "SITE"):
             return
         held = at is None or at > cut
-        if held and (w["kind"] == "KEVIN" or (w["at"] and w["at"] > cut) or at is not None):
+        # A SIGN-IN or SITE wall is giving access: it brings a card into the count only through its
+        # own lines inside the window (review 3 of PR #798), never by being ended there.
+        if held and (w["kind"] == "KEVIN" or (w["at"] and w["at"] > cut)):
             touched = True
         if held and w["kind"] == "KEVIN" and w["step"] not in KEVIN_STEPS_ALLOWED:
             whys.append("you did " + KEVIN_STEP_WORDS.get(w["step"], "a step yourself"))
