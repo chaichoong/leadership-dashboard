@@ -190,6 +190,14 @@ end splitSiteList
 
 -- The first line of the full list: give the robot a site it has never had.
 property addNewItem : "+ Add a new site…"
+-- Replace a key (Kevin, 16 Oct 2026): "If you log them all in a central place that's not publicly
+-- available and police that, then you can manage that side of things for me." His whole part is
+-- one paste. scripts/key-register.py tests the new value BEFORE anything changes, writes it to the
+-- robots' key file and pushes it to every Worker and GitHub copy. The value goes from a hidden box
+-- into a 0600 file in a 0700 folder, never onto a command line (any process can read those), and
+-- the script deletes that file the moment it reads it. robotsignin://key opens the list;
+-- robotsignin://key/<name> goes straight to one key.
+property replaceKeyItem : "+ Replace a key (paste a new one)…"
 
 on fieldCount(theLine)
 	set AppleScript's text item delimiters to " | "
@@ -615,9 +623,13 @@ on run
 		return
 	end if
 	-- Several at once (Cmd-click): the watcher's message can ask for both Utilita flats.
-	set choice to choose from list ({addNewItem} & allSites()) with title "Robot sign-in" with prompt "Which sites should the robot be signed into? Cmd-click to pick several. Pick the first line to give it a new one." OK button name "Open" cancel button name "Cancel" with multiple selections allowed
+	set choice to choose from list ({addNewItem, replaceKeyItem} & allSites()) with title "Robot sign-in" with prompt "Which sites should the robot be signed into? Cmd-click to pick several. Pick the first line to give it a new one, or the second to replace a key." OK button name "Open" cancel button name "Cancel" with multiple selections allowed
 	if choice is false then
 		if liveN > 0 then runChain({}, liveN)
+		return
+	end if
+	if (choice as list) contains replaceKeyItem then
+		runReplaceKey("")
 		return
 	end if
 	set theLines to {}
@@ -631,6 +643,76 @@ on run
 	if (count of theLines) is 0 and liveN is 0 then return
 	runChain(theLines, liveN)
 end run
+
+-- The key register's own list: "name<TAB>what it is", one per line.
+on keyLines()
+	set out to {}
+	repeat with ln in paragraphs of sh("/usr/bin/python3 scripts/key-register.py names")
+		if (ln as text) is not "" then set end of out to (ln as text)
+	end repeat
+	return out
+end keyLines
+
+on keyField(theLine, n)
+	set AppleScript's text item delimiters to tab
+	set parts to text items of theLine
+	set AppleScript's text item delimiters to ""
+	if (count of parts) < n then return ""
+	return item n of parts
+end keyField
+
+on runReplaceKey(keyName)
+	set theKeys to keyLines()
+	if keyName is "" then
+		set labels to {}
+		repeat with ln in theKeys
+			set end of labels to keyField(ln as text, 1) & "  (" & keyField(ln as text, 2) & ")"
+		end repeat
+		set pick to choose from list labels with title "Replace a key" with prompt "Which key are you replacing? The new one is tested before anything changes." OK button name "Next" cancel button name "Cancel"
+		if pick is false then return
+		set AppleScript's text item delimiters to "  ("
+		set keyName to text item 1 of (item 1 of pick as text)
+		set AppleScript's text item delimiters to ""
+	end if
+	set known to false
+	repeat with ln in theKeys
+		if keyField(ln as text, 1) is keyName then set known to true
+	end repeat
+	-- Only a name from the register's own list ever reaches a shell command.
+	set nameOk to do shell script "printf %s " & quoted form of keyName & " | grep -Eq '^[A-Za-z0-9_.:-]+$' && echo yes || echo no"
+	if not known or nameOk is not "yes" then
+		display alert "Replace a key" message keyName & " is not in the robots' key register."
+		return
+	end if
+	try
+		set newValue to text returned of (display dialog "Paste the new key for " & keyName & "." & return & return & "It is tested before anything changes, then it reaches every copy. Nothing shows it." default answer "" with hidden answer with title "Replace a key" buttons {"Cancel", "Replace"} default button "Replace" cancel button "Cancel")
+	on error number -128
+		return
+	end try
+	set inFile to do shell script "umask 077; d=\"$HOME/.config/od/.incoming\"; mkdir -p \"$d\" && chmod 700 \"$d\" && f=$(mktemp \"$d/key.XXXXXX\") && chmod 600 \"$f\" && printf %s \"$f\""
+	try
+		set fh to open for access (POSIX file inFile) with write permission
+		set eof fh to 0
+		write newValue to fh as «class utf8»
+		close access fh
+	on error errMsg
+		try
+			close access (POSIX file inFile)
+		end try
+		do shell script "rm -f " & quoted form of inFile
+		display alert "Replace a key" message "The pasted key could not be handed over, so nothing changed: " & errMsg
+		return
+	end try
+	set newValue to ""
+	try
+		set out to shWait("/usr/bin/python3 scripts/key-register.py replace " & quoted form of keyName & " --from-file " & quoted form of inFile, "Testing the new key and updating every copy…")
+		display dialog out with title "Replace a key: done" buttons {"OK"} default button "OK"
+	on error errMsg number errNum
+		do shell script "rm -f " & quoted form of inFile
+		if errNum is -128 then return
+		display alert "Replace a key" message errMsg
+	end try
+end runReplaceKey
 
 -- A link: robotsignin://all opens every waiting site in turn; robotsignin://site/<host> opens one;
 -- robotsignin://profile/<name> opens the sign-ins held in that profile (a Utilita flat) and
@@ -717,6 +799,14 @@ on open location theURL
 		return
 	end if
 	set body to bodyOf(theURL)
+	if body is "key" or body starts with "key/" then
+		if body is "key" then
+			runReplaceKey("")
+		else
+			runReplaceKey(text 5 thru -1 of body)
+		end if
+		return
+	end if
 	if body starts with "turn/" then
 		runTurn(turnTaskId(body))
 		return
