@@ -175,6 +175,18 @@ print(json.dumps(S.facts(NOW, S.read_sessions(NOW, root=d, cache_path=None))["it
     expect(JSON.stringify(out)).not.toContain('Evernote');
   });
 
+  it('a reply line written twice is one ask, and an aside holding his own step still counts (review 3)', () => {
+    const out = py(`d = tempfile.mkdtemp()
+twice = row(type="assistant", entrypoint="claude-desktop", isSidechain=False, timestamp=at(hours=1), uuid="u-1",
+            message={"id": "m-1", "role": "assistant", "stop_reason": "end_turn", "content": [{"type": "text", "text": "Reply go."}]})
+write(d, "iiii", [prompt("Go", at(hours=2)), twice, twice])
+f = S.facts(NOW, S.read_sessions(NOW, root=d, cache_path=None))
+print(json.dumps([f["asks"], [[(k, w) for _, k, w in S.closing_asks(t)] for t in (
+    "Reply go (after you download the statement from the bank).",
+    "These run in your terminal session automatically:\\n\`\`\`\\nnpm test\\n\`\`\`")]]))`);
+    expect(out).toEqual([1, [[['handback', 'fetch a document']], []]]);
+  });
+
   it('text before a tool call is mid-turn even when the lines carry no message id', () => {
     const out = py(`d = tempfile.mkdtemp()
 noid = lambda stop, content: row(type="assistant", entrypoint="claude-desktop", isSidechain=False, timestamp=at(hours=1),

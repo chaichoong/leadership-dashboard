@@ -50,7 +50,7 @@ from zoneinfo import ZoneInfo
 LONDON = ZoneInfo("Europe/London")
 PROJECTS = os.path.expanduser("~/.claude/projects")
 CACHE = os.path.expanduser("~/knowledge-os/logs/session-handbacks/cache.json")
-CACHE_VERSION = 4                   # bump when what is taken from a file changes
+CACHE_VERSION = 5                   # bump when what is taken from a file changes
 WINDOW_DAYS = 14
 TAIL_LINES = 6                      # the closing lines of a reply
 
@@ -93,6 +93,7 @@ def extract(path):
     prompts = turns = 0
     last_text = (None, None, None)      # (message key, at, text): a reply's blocks arrive as separate lines
     n = 0
+    seen = set()                        # Claude Code sometimes writes a line twice (same uuid)
     with open(path, encoding="utf-8", errors="replace") as fh:
         for ln in fh:
             prompt = '"type":"user"' in ln and '"tool_result"' not in ln
@@ -126,6 +127,10 @@ def extract(path):
                 if first is None:
                     first = text[:40]
             elif t == "assistant":
+                if d.get("uuid"):
+                    if d["uuid"] in seen:
+                        continue
+                    seen.add(d["uuid"])
                 # Claude Code writes each block of a reply on its own line, every one carrying the
                 # reply's final stop_reason (review 2: a text line before a box reads "tool_use").
                 # Text is held per reply; a line with no id is a reply of its own.
@@ -226,6 +231,7 @@ HANDBACK = (
     ("a step in an app", re.compile(r"(?i)\b(?:do its \w+ steps|click|tap|press|drag|select|open (?:the|your)? ?\w+ app|"
                                     r"open (?!the queue|your approval)|enable|turn on|turn off|toggle|settings|close)\b")),
 )
+ASIDE_STEP = re.compile(r"(?i)\byou\b|^\(\s*(?:and|then|after|before|first|once)\b")
 BUTTON = re.compile(r"(?i)\b(?:click|press|tap|select|hit)\s+(?:on\s+)?(?:the\s+)?[\"“']?"
                     r"(approve|pay|buy|sign in|log in)\b")
 QUEUE_STEP = re.compile(r"(?i)\bopen (?:your |the )?(?:approval queue|queue|ai agents page|dashboard)\b[^.]{0,40}\bapprove\b")
@@ -236,7 +242,9 @@ MODEL = re.compile(r"(?i)\bmodel picker\b|(?<!\w)/(?:model|effort)\b|\bswitch (?
 def kevins_part(t):
     """The words that ask something of Kevin: quoted reply words become QUOTE, and the session's
     own half ("... and I will send it") is cut off."""
-    t = re.sub(r"\([^)]{0,60}\)", " ", t)          # asides: "(one click)", "(about 2 minutes)"
+    # Asides go ("(one click)", "(about 2 minutes)"), unless the aside is a step of his own:
+    # "Reply go (after you download the statement)" (review 3).
+    t = re.sub(r"\([^)]{0,60}\)", lambda a: a.group(0) if ASIDE_STEP.search(a.group(0)) else " ", t)
     t = re.sub(r"[\"“][^\"”]{0,120}[\"”]", " QUOTE ", t)
     return re.split(r"(?i),? (?:and|so|then) (?:i|i'll|i will|the|they|it|all|both|we)\b|,? so (?:that|it|they)\b|"
                     r"\. then the only", t)[0]
@@ -299,7 +307,7 @@ def _sentences(text):
 # click through ("File → Download → PDF").
 GIVEN_COMMAND = re.compile(r"(?i)\b(?:while you do that|once you(?:'ve| have) (?:run|done) (?:that|it|this)|"
                            r"run (?:this|it|the command)|in (?:your )?terminal|paste (?:this|it) into)\b")
-SELF_START = re.compile(r"(?i)^(?:i\b|i'(?:ll|ve|m)\b|we\b|the\b)")
+SELF_START = re.compile(r"(?i)^(?:i\b|i'(?:ll|ve|m)\b|we\b|the\b|this\b|these\b)")
 SELF = re.compile(r"(?i)^(?:i\b|i'(?:ll|ve|m)\b|we\b)|\b(?:i did|i'll|i will|i have|i've|myself)\b")
 MENU_PATH = re.compile(r"(?i)\b\w+ → [^.]{0,60}\b(?:download|export|save)\b|\b(?:download|export|save)\b[^.]{0,40} → ")
 
