@@ -46,6 +46,7 @@ Usage:
   python3 scripts/key-register.py report               the register and the last check, in plain words
   python3 scripts/key-register.py names                the keys Replace a key offers: name<TAB>label
   python3 scripts/key-register.py replace NAME (--from-file PATH | --stdin | --generate)
+  python3 scripts/key-register.py clear-failed NAME --reason "how the missed copy was fixed"
   python3 scripts/key-register.py selftest
 """
 import glob
@@ -193,6 +194,7 @@ COPY_OF_AT = {
     ("money-confidence-daily", "TRIGGER_KEY"): "money_trigger_key",       # its manual test endpoints
     ("claude-proxy", "PROXY_SERVICE_TOKEN_2"): "proxy_service_token2",    # od_compose.py's bearer
     ("money-confidence-daily", "PROXY_TOKEN"): "proxy_service_token2",    # its wrangler toml: = PROXY_SERVICE_TOKEN_2
+    ("agent-runner", "PROXY_TOKEN"): "proxy_service_token2",              # its wrangler toml and anthropic-proxy.js
 }
 # A Worker-only secret that is a key to an OUTSIDE service: any valid key from that service works, so
 # one paste may go to every Worker holding one. Any other Worker-only secret is a key we made that
@@ -450,7 +452,8 @@ def seed(found=None, config_dir=CONFIG_DIR, reg_path=REGISTER, with_readers=True
             keys[key]["copies"] = row["copies"] + kept(old.get("copies"))
         # A Worker or GitHub row this listing no longer produces (the secret was removed, or it is now
         # filed under another name) goes, unless written by hand or held in a place not listed today.
-        for key in [k for k, r in keys.items() if r.get("file") is None and k not in own and not r.get("manual")]:
+        for key in [k for k, r in keys.items() if r.get("file") is None and k not in own
+                    and not r.get("manual") and not r.get("note")]:
             if not kept(keys[key].get("copies")):
                 del keys[key]
         reg["discoveredAt"] = iso(now_utc())
@@ -712,7 +715,11 @@ def judge_row(name, row, now, config_dir=CONFIG_DIR):
 def sweep_incoming(now, incoming=INCOMING):
     """A pasted key the replace step never collected: deleted, and named (never its value)."""
     left = []
-    for p in glob.glob(os.path.join(incoming, "*")):
+    try:
+        names = sorted(os.listdir(incoming))          # dot files too: the .kr- signing temp file
+    except OSError:
+        names = []
+    for p in (os.path.join(incoming, n) for n in names):
         try:
             age = (now.timestamp() - os.stat(p).st_mtime) / 60
         except OSError:
@@ -773,6 +780,9 @@ def needs_check(now, last=LAST_CHECK, config_dir=CONFIG_DIR, reg_path=REGISTER):
         return True, None
     if not t or now - t > timedelta(hours=CHECK_EVERY_HOURS):
         return True, saved
+    judged = [r for r in saved.get("rows") or [] if r.get("test") in ("ok", "rejected")]
+    if not judged and any(r.get("test") for r in saved.get("rows") or []) and now - t > timedelta(hours=1):
+        return True, saved                        # nothing could be reached last time: try again within the hour
     keys = load_register(reg_path)["keys"]
     watched = [n for n in key_files(config_dir) if (keys.get(n) or {}).get("kind", "unknown") not in ("id", "setting")]
     newest = max([os.stat(os.path.join(config_dir, n)).st_mtime for n in watched] + [0])
@@ -802,7 +812,7 @@ def status_row(now):
     judged = [r for r in tested if r["test"] in ("ok", "rejected")]
     if tested and not judged and not red:
         # Every test ran and none could reach its service: that is not a working register.
-        return dict(row, status="Blocked", detail="No key could be tested: %s" % summary_detail(res),
+        return dict(row, status="Failed", detail="No key could be tested: %s" % summary_detail(res),
                     payload=json.dumps({"checkedAt": res["checkedAt"], "counts": res["counts"],
                                         "rows": [r for r in res["rows"] if r["status"] != "none"]}))
     return dict(row, status="Failed" if red else "Worked", detail=summary_detail(res),
@@ -879,6 +889,13 @@ def _replace(name, args, reg_path, config_dir, log_path, print):
     if args.get("generate") and row.get("kind") != "shared":
         print("REFUSED: only a key we made ourselves (shared with a Worker) may be generated here.")
         return 2
+    clash = sorted({c["secret"] for c in row.get("copies") or []} &
+                   {c["secret"] for r in reg["keys"].values() if r.get("kind") == "worker-pair" for c in r.get("copies") or []})
+    if args.get("generate") and clash:
+        # Another Worker holds a secret of the same name that this register cannot tie to this key:
+        # it may be one more copy, and a new value would break it (review 2 of PR #799).
+        print("REFUSED: another Worker holds %s and is not known to be a copy of %s. Map it first." % (", ".join(clash), name))
+        return 2
     if args.get("generate") and not row.get("copies"):
         # The Worker that checks it would keep the old value and every call between them would fail.
         print("REFUSED: no copy of %s is known, so a new value would break whatever checks it. Run seed first." % name)
@@ -928,6 +945,23 @@ def _replace(name, args, reg_path, config_dir, log_path, print):
 
 
 # ─── report, names ────────────────────────────────────────────────────
+def clear_failed(name, reason, reg_path=REGISTER):
+    """A copy the last replace missed, fixed another way: the reason is kept on the row."""
+    if not (reason or "").strip():
+        print("REFUSED: say how the copy was fixed: --reason \"...\"")
+        return 2
+    reg = load_register(reg_path)
+    row = reg["keys"].get(name)
+    if not row or not (row.get("lastReplace") or {}).get("failed"):
+        print("Nothing to clear: %s has no copy the last replace missed." % name)
+        return 2
+    row["lastReplace"]["cleared"] = {"at": iso(now_utc()), "reason": reason.strip()[:300], "was": row["lastReplace"]["failed"]}
+    row["lastReplace"]["failed"] = []
+    save_register(reg, reg_path)
+    print("%s: cleared (%s)." % (name, reason.strip()[:120]))
+    return 0
+
+
 def report():
     reg = load_register()
     try:
@@ -998,6 +1032,10 @@ def main(argv=None):
         rc, said = replace(argv[1], a)
         sys.stdout.write("\n".join(said) + "\n") if rc == 0 else sys.stderr.write("\n".join(said) + "\n")
         return rc
+    if cmd == "clear-failed":
+        if len(argv) < 2:
+            raise SystemExit('usage: key-register.py clear-failed NAME --reason "how the copy was fixed"')
+        return clear_failed(argv[1], argv[argv.index("--reason") + 1] if "--reason" in argv[:-1] else "")
     if cmd == "selftest":
         out = selftest()
         print(json.dumps(out))

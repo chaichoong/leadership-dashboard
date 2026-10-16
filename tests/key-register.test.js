@@ -169,14 +169,16 @@ print(json.dumps({"air": [by["airtable_pat"]["status"], by["airtable_pat"]["said
     const env = home();
     mkdirSync(join(env.od, '.incoming'), { mode: 0o700 });
     writeFileSync(join(env.od, '.incoming', 'key.ABC123'), NEW);
+    writeFileSync(join(env.od, '.incoming', '.kr-signing'), 'a private key');
     const out = py(env, `
 p = os.path.join(kr.INCOMING, "key.ABC123")
 os.utime(p, (NOW.timestamp() - 7200, NOW.timestamp() - 7200))
+os.utime(os.path.join(kr.INCOMING, ".kr-signing"), (NOW.timestamp() - 7200, NOW.timestamp() - 7200))
 kr.seed(None, with_readers=False)
 res = kr.check(NOW, None)
 row = [r for r in res["rows"] if r["name"] == "pasted key"][0]
-print(json.dumps({"exists": os.path.exists(p), "status": row["status"], "said": row["said"], "leak": ${JSON.stringify(NEW)} in tree_text()}))`);
-    expect(out).toEqual({ exists: false, status: 'red', said: 'a pasted key was left behind and has been deleted (key.ABC123): paste it again', leak: false });
+print(json.dumps({"exists": os.path.exists(p) or os.path.exists(os.path.join(kr.INCOMING, ".kr-signing")), "status": row["status"], "said": row["said"], "leak": ${JSON.stringify(NEW)} in tree_text()}))`);
+    expect(out).toEqual({ exists: false, status: 'red', said: 'a pasted key was left behind and has been deleted (.kr-signing, key.ABC123): paste it again', leak: false });
   });
 
   it('the Estate row is Failed on any red key, says why in one sentence, and carries no value', () => {
@@ -343,6 +345,27 @@ print(json.dumps(first))`);
     expect(out.airtableAfterFailedListing).toEqual(['github:AIRTABLE_PAT', 'money-confidence-daily:AIRTABLE_PAT', 'w2:AIRTABLE_PAT']);
   });
 
+  it('3c a new value is never generated while another Worker holds a same-named secret it cannot tie to the key (review 2)', () => {
+    const env = home();
+    writeFileSync(join(env.h, 'list-claude-proxy.json'), '[{"name":"PROXY_SERVICE_TOKEN_2"}]');
+    writeFileSync(join(env.h, 'list-agent-runner.json'), '[{"name":"PROXY_TOKEN"}]');
+    writeFileSync(join(env.h, 'list-w2.json'), '[{"name":"PROXY_TOKEN"}]');
+    const out = py(env, `
+open(os.path.expanduser("~/.config/od/proxy_service_token2"), "w").write("proxy-0123456789abcdef\\n")
+WORKERS[:] = ["claude-proxy", "agent-runner"]
+kr.seed(kr.discover(), with_readers=False)
+k = json.load(open(kr.REGISTER))["keys"]
+mapped = sorted("%s:%s" % (c["worker"], c["secret"]) for c in k["proxy_service_token2"]["copies"])
+WORKERS[:] = ["claude-proxy", "agent-runner", "w2"]
+kr.seed(kr.discover(), with_readers=False)
+rc, so, se = run_main(["replace", "proxy_service_token2", "--generate"])
+print(json.dumps({"mapped": mapped, "rc": rc, "err": se.strip(), "file": open(os.path.expanduser("~/.config/od/proxy_service_token2")).read().strip()}))`);
+    expect(out.mapped).toEqual(['agent-runner:PROXY_TOKEN', 'claude-proxy:PROXY_SERVICE_TOKEN_2']);
+    expect(out.rc).toBe(2);
+    expect(out.err).toBe('REFUSED: another Worker holds PROXY_TOKEN and is not known to be a copy of proxy_service_token2. Map it first.');
+    expect(out.file).toBe('proxy-0123456789abcdef');        // nothing changed
+  });
+
   it('3b a Worker row the listing no longer produces goes, unless it was written by hand or its place was not listed', () => {
     const env = home();
     const out = py(env, `
@@ -392,7 +415,7 @@ open(kr.REGISTER, "w").write('{"keys": []}')
 os.remove(kr.LAST_CHECK)
 broken = kr.status_row(NOW)
 print(json.dumps([blocked["status"], blocked["detail"][:28], broken["status"], broken["detail"]]))`);
-    expect(out[0]).toBe('Blocked');
+    expect(out[0]).toBe('Failed');                      // Failed, so the red pass gives it to the Builder
     expect(out[1]).toBe('No key could be tested: 5 ke');   // "5 keys: 0 tested and working"
     expect(out[2]).toBe('Failed');
     expect(out[3]).toMatch(/^The key check could not run: ValueError: .* is not a register/);
