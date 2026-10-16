@@ -5398,7 +5398,9 @@ def cmd_submit(args):
     # the one still saying Mica. Write the decision into the field the router
     # reads. Never the reverse: a non-tier-1 submit leaves Approver alone,
     # because Inbound Comms set it at creation and this is not that decision.
-    if is_tier1:
+    # A signature for Kevin is his alone (16 Oct 2026): the card goes to his queue whoever was set to approve
+    # the task, because the robot refuses any other approver.
+    if is_tier1 or sign_card:
         fields[AF["approver"]] = {"email": KEVIN_AIRTABLE_EMAIL}
     patch_task(args.task, fields)
 
@@ -6183,6 +6185,25 @@ def robot_signed(task_id, agreement_id):
     return None
 
 
+def robot_sign_unconfirmed(task_id, agreement_id):
+    """True when the robot pressed Submit on this agreement and never proved it (its last
+    unconfirmed/cleared row says unconfirmed): nothing signs it again until Adobe has been read."""
+    rows = []
+    try:
+        with open(SIGN_FOR_KEVIN_LEDGER) as fh:
+            for line in fh:
+                try:
+                    row = json.loads(line)
+                except ValueError:
+                    continue
+                if row.get("task") == task_id and row.get("agreementId") == agreement_id \
+                        and row.get("cmd") in ("unconfirmed", "cleared"):
+                    rows.append(row["cmd"])
+    except OSError:
+        pass
+    return bool(rows) and rows[-1] == "unconfirmed" and not robot_signed(task_id, agreement_id)
+
+
 def approved_text_changed(task_id):
     """True when the Agent Output was written after Approved At: the card the robot would read is
     not the card Kevin approved. Two reads, each the other's control: exactly one must match, so a
@@ -6219,7 +6240,7 @@ def sign_as_kevin_state(rec):
     if t["status"] in ("Completed", "Cancelled"):
         return card, f"the task is {t['status']}"
     if t["outcome"] == "Approved with minor edits":
-        return card, ("Kevin approved it WITH EDITS, and a document cannot be edited by signing it. "
+        return card, ("the approval came WITH EDITS, and a document cannot be edited by signing it. "
                       "Read his note: it goes back to him as a new card or as his own step")
     if t["outcome"] != "Approved as-is":
         return card, f"it is not approved (Approval Outcome: {t['outcome'] or 'not set'})"
@@ -6237,6 +6258,15 @@ def sign_as_kevin_state(rec):
         return card, f"it is a trial card ({trial})"
     if robot_signed(t["id"], card["agreementId"]):
         return card, "the robot has already signed this agreement for this task"
+    if robot_sign_unconfirmed(t["id"], card["agreementId"]):
+        return card, ("a Submit on this agreement was pressed and never proved: read Adobe first "
+                      f"(node scripts/agent-browser.js sign --task {t['id']} --check --shot <png>)")
+    # The copy he could open on the card is the one the robot compares with Adobe's before it signs.
+    doc = os.path.basename(card["document"])
+    url = next((a["url"] for a in t["attachments"] if a["filename"] == doc and a["url"]), "")
+    if not url:
+        return card, f"the document the card names ({doc}) is not attached to the task, so Kevin could not have read it"
+    card = dict(card, documentUrl=url)
     try:
         if approved_text_changed(t["id"]):
             return card, ("the card's text changed after Kevin approved it, so what it says now is "

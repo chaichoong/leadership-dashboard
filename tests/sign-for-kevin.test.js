@@ -43,12 +43,14 @@ m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m)
 import agent_email_format as F
 arg = json.loads(sys.argv[1]) if len(sys.argv) > 1 else None
 def rec(output, outcome="Approved as-is", approved_at="2026-10-16T12:00:00.000Z", created="2026-10-16T10:00:00.000Z",
-        sent_by=True, approver="", status="Approval", name="A tenancy agreement to sign", notes=""):
+        sent_by=True, approver="", status="Approval", name="A tenancy agreement to sign", notes="",
+        attach="unsigned_recTESTTESTTEST01_AST.pdf"):
     f = {m.AF["agentOutput"]: output, m.AF["status"]: status, m.AF["name"]: name, m.AF["notes"]: notes}
     if outcome: f[m.AF["approvalOutcome"]] = outcome
     if approved_at: f[m.AF["approvedAt"]] = approved_at
     if sent_by: f[m.AF["sentForApprovalBy"]] = ["recQkO6BA4w5zqwZ4"]
     if approver: f[m.AF["approver"]] = {"email": approver}
+    if attach: f[m.AF["attachments"]] = [{"filename": attach, "url": "https://v5.airtableusercontent.com/x/" + attach}]
     return {"id": "recTESTTESTTEST01", "createdTime": created, "fields": f}
 m.approved_text_changed = lambda tid: False
 ${code}
@@ -119,14 +121,31 @@ describe('the approval the robot reads: Kevin approved THIS card, as it stands, 
 c, p = m.sign_as_kevin_state(${recExpr})
 print(json.dumps([bool(c), p]))`, CARD);
 
-  it('a clean approval signs', () => {
+  it('a clean approval signs, and hands the robot the link to the copy Kevin could open', () => {
     expect(state('rec(arg)')).toEqual([true, '']);
+    const card = py(`c, p = m.sign_as_kevin_state(rec(arg))
+print(json.dumps(c["documentUrl"]))`, CARD);
+    expect(card).toBe('https://v5.airtableusercontent.com/x/unsigned_recTESTTESTTEST01_AST.pdf');
+  });
+
+  it('refuses a card whose document is not on the task, so Kevin could not have read it', () => {
+    expect(state('rec(arg, attach="some_other.pdf")')[1]).toMatch(/is not attached to the task/);
+    expect(state('rec(arg, attach=None)')[1]).toMatch(/is not attached to the task/);
+  });
+
+  it('an unproved Submit blocks a second one until Adobe has been read', () => {
+    writeFileSync(LEDGER, JSON.stringify({ cmd: 'unconfirmed', task: 'recTESTTESTTEST01', agreementId: ID }) + '\n');
+    try {
+      expect(state('rec(arg)')[1]).toMatch(/pressed and never proved/);
+      appendFileSync(LEDGER, JSON.stringify({ cmd: 'cleared', task: 'recTESTTESTTEST01', agreementId: ID }) + '\n');
+      expect(state('rec(arg)')).toEqual([true, '']);              // Adobe said the Submit never landed
+    } finally { rmSync(LEDGER, { force: true }); }
   });
 
   it('refuses every way the approval could be wrong', () => {
     expect(state('rec(arg, outcome=None, approved_at=None)')[1]).toMatch(/not approved/);
     expect(state('rec(arg, outcome="Changes requested")')[1]).toMatch(/not approved/);
-    expect(state('rec(arg, outcome="Approved with minor edits")')[1]).toMatch(/WITH EDITS/);
+    expect(state('rec(arg, outcome="Approved with minor edits")')[1]).toMatch(/approval came WITH EDITS/);
     expect(state('rec(arg, sent_by=False)')[1]).toMatch(/never went through the approval gate/);
     expect(state('rec(arg, approved_at="2026-10-16T09:00:00.000Z")')[1]).toMatch(/copied, not given/);
     expect(state('rec(arg, approver="someone@example.com")')[1]).toMatch(/only Kevin approves his signature/);
@@ -193,6 +212,7 @@ except SystemExit as e:
     out["refused"] = True; out["error"] = str(e)
 w = (captured.get("writes") or [{}])[-1]
 out["assignee"] = (w.get(m.AF["assignee"]) or {}).get("email")
+out["approver"] = (w.get(m.AF["approver"]) or {}).get("email")
 out["notes"] = w.get(m.AF["notes"], "")
 out["status"] = w.get(m.AF["status"])
 print(json.dumps(out))`, { output, attach, type, name });
@@ -201,7 +221,8 @@ print(json.dumps(out))`, { output, attach, type, name });
   it('a good card reaches Kevin, stamped with the agreement id for the close gate', () => {
     const out = submit(CARD + TRACK);
     expect(out.error).toBeUndefined();
-    expect(out).toMatchObject({ refused: false, status: 'Approval', assignee: 'kevin@runpreneur.org.uk' });
+    expect(out).toMatchObject({ refused: false, status: 'Approval', assignee: 'kevin@runpreneur.org.uk',
+      approver: 'kevin@runpreneur.org.uk' });       // his queue, whoever the task was set to go to
     expect(out.notes).toContain(`SIGN AS KEVIN CARD: ${ID} (${NAME})`);
   });
 
@@ -209,7 +230,7 @@ print(json.dumps(out))`, { output, attach, type, name });
     expect(submit(CARD + TRACK, { attach: [] }).error).toMatch(/attach the document Kevin is asked to sign/);
     expect(submit(CARD + TRACK, { attach: ['/tmp/some_other_file.pdf'] }).error).toMatch(/attach the document/);
     expect(submit(CARD + TRACK, { type: 'Admin' }).error).toMatch(/--type Correspondence/);
-    expect(submit('TIER-1\n' + CARD + TRACK, { name: 'CREDITOR: restraint order statement' }).refused).toBe(true);
+    expect(submit(CARD + TRACK, { name: 'TIER 1 MATTER: a document to sign' }).error).toMatch(/private legal matter/);
     const banner = py('print(json.dumps(F.TIER1_BANNER))');
     expect(submit(banner + '\n\n' + CARD + TRACK).error).toMatch(/private legal matter/);
   });
@@ -274,7 +295,7 @@ print(json.dumps({"codes": [r1, r2], "keys": sorted({k for w in writes for k in 
 });
 
 describe('the hand-back score never counts a signature that took this route', () => {
-  it('a SIGN AS KEVIN card is one of his cards and not a hand-back; the old Your step still is', () => {
+  it('a SIGN AS KEVIN card is one of his cards and not a hand-back; the old Your step, a fallback and a not-signed close still are', () => {
     const out = execFileSync('python3', ['-c', `
 import importlib.util, json, os, sys
 from datetime import datetime, timedelta, timezone
@@ -297,19 +318,20 @@ route = ("[%s — agent-dispatch] SIGN AS KEVIN CARD: ${ID} (${NAME}). Kevin's A
          "[%s — robot] SIGNED FOR KEVIN: ${NAME} (${ID}) on Kevin's approval. Adobe now reads: Completed") % (st(D2 - timedelta(hours=1)), st(D1))
 old = "[%s — agent-dispatch] BLOCKER OPEN (KEVIN signature): sign the Agile Lets box in Adobe" % st(D1)
 fallback = route.split("\\n")[0] + "\\n[%s — agent-dispatch] BLOCKER OPEN (KEVIN signature): Adobe asked for initials too" % st(D1)
-rows = [card("rROUTE", route), card("rOLD", old), card("rFALLBACK", fallback)]
+notsigned = route.split("\\n")[0] + "\\n[%s — agent] NOT SIGNED BY THE ROBOT: Kevin signed it himself from his phone" % D1.astimezone(L).strftime("%d %b %Y")
+rows = [card("rROUTE", route), card("rOLD", old), card("rFALLBACK", fallback), card("rNOTSIGNED", notsigned)]
 f = A.facts_handback(rows, rows, team, aar, NOW, [])
 print(json.dumps({"cards": f["cards"], "back": f["back"], "items": sorted(i["id"] for i in f["items"])}))
 `], { encoding: 'utf8' });
     const f = JSON.parse(out.trim().split('\n').pop());
-    expect(f).toEqual({ cards: 3, back: 2, items: ['rFALLBACK', 'rOLD'] });
+    expect(f).toEqual({ cards: 4, back: 3, items: ['rFALLBACK', 'rNOTSIGNED', 'rOLD'] });
   });
 });
 
 // ── The robot, in real Chrome, against Adobe's addresses served from fixtures ─────────────────────
 let chromium;
 try { ({ chromium } = require_('playwright-core')); } catch { /* reported by the tests */ }
-let ab, browser;
+let ab, browser, PDF_A, PDF_B, APPROVED;
 const OUTCOME = join(DIR, 'outcome.py');
 
 beforeAll(async () => {
@@ -323,6 +345,17 @@ beforeAll(async () => {
   delete require_.cache[require_.resolve(join(SCRIPTS, 'agent-browser.js'))];
   ab = require_(join(SCRIPTS, 'agent-browser.js'));
   browser = await chromium.launch();
+  const pdfOf = async (words) => {
+    const pg = await browser.newPage();
+    await pg.setContent(`<h1>Tenancy agreement</h1><p>${words}</p><p>Signed: ________</p>`);
+    const b = await pg.pdf({ format: 'A4' });
+    await pg.close();
+    return b;
+  };
+  PDF_A = await pdfOf('The landlord is Agile Lets. The rent is 500 pounds a month.');
+  PDF_B = await pdfOf('The landlord is Agile Lets. The rent is 900 pounds a month.');
+  APPROVED = join(DIR, 'approved.pdf');
+  writeFileSync(APPROVED, PDF_A);
 });
 afterAll(async () => { if (browser) await browser.close(); });
 
@@ -332,7 +365,7 @@ function adobe(over = {}) {
     rows: [{ id: ID, name: NAME }],
     agreements: { [ID]: { name: NAME, status: 'Waiting For Me to Sign' }, [OTHER_ID]: { name: 'Some_Other_Document', status: 'Waiting For Me to Sign' } },
     boxes: 1, extraRequired: 0, savedLabel: 'Agile Lets', signingAid: null, signingTitle: null,
-    statusAfterSubmit: 'Completed', submits: 0, rowSignPressed: 0,
+    statusAfterSubmit: 'Completed', submits: 0, rowSignPressed: 0, pdf: null, renameAfterSubmit: null,
   }, over);
 }
 async function fakeAdobe(s) {
@@ -362,7 +395,7 @@ ${/Waiting For Me/.test(a.status) || s.alwaysView ? `<button id="view">View &amp
 <script>const v = document.getElementById('view'); if (v) v.onclick = () => window.open('https://na1.documents.adobe.com/public/esign?aid=${s.signingAid || id}&pid=p1&app=dc');</script>`));
     }
     if (u.pathname.startsWith('/download/')) {
-      return route.fulfill({ status: 200, contentType: 'application/pdf', headers: { 'content-disposition': 'attachment; filename="a.pdf"' }, body: '%PDF-1.7 unsigned' });
+      return route.fulfill({ status: 200, contentType: 'application/pdf', headers: { 'content-disposition': 'attachment; filename="a.pdf"' }, body: s.pdf || PDF_A });
     }
     return route.fulfill(html('<p>acrobat</p>'));
   });
@@ -372,6 +405,7 @@ ${/Waiting For Me/.test(a.status) || s.alwaysView ? `<button id="view">View &amp
     if (u.pathname === '/submit') {
       s.submits++;
       if (s.agreements[aid] && s.statusAfterSubmit) s.agreements[aid].status = s.statusAfterSubmit;
+      if (s.agreements[aid] && s.renameAfterSubmit) s.agreements[aid].name = s.renameAfterSubmit;
       return route.fulfill({ status: 204 });
     }
     const a = s.agreements[aid] || { name: '?' };
@@ -398,7 +432,8 @@ async function runFlow(s, o) {
   const ctx = await fakeAdobe(s);
   const page = await ctx.newPage();
   try {
-    return await ab.runSignFlow(page, ctx, Object.assign({ task: 'recTESTTESTTEST01', name: NAME, id: ID, door: ab.SIGN_DOORS['info@agilelets.co.uk'] }, o));
+    return await ab.runSignFlow(page, ctx, Object.assign({ task: 'recTESTTESTTEST01', name: NAME, id: ID, door: ab.SIGN_DOORS['info@agilelets.co.uk'],
+      approvedCopy: APPROVED }, o));
   } finally { await ctx.close(); }
 }
 
@@ -438,6 +473,42 @@ describe('the robot signs the approved agreement, and only it', () => {
   it('refuses when Adobe puts anything but the saved signature in a box', () =>
     refused({ savedLabel: 'Roy Lavin' }, {}, /other than the saved signature "Agile Lets"/));
 
+  it('refuses when Adobe holds different words from the copy Kevin approved', async () => {
+    const s = adobe();
+    s.pdf = PDF_B;
+    await expect(runFlow(s, { mode: 'sign' })).rejects.toThrow(/not the document Kevin approved/);
+    expect(s.submits).toBe(0);
+  });
+
+  it('reads his approval again just before Submit, and stops if it changed', async () => {
+    const s = adobe();
+    let reads = 0;
+    await runFlow(s, { mode: 'sign', recheck: async () => { reads++; } });
+    expect([reads, s.submits]).toEqual([1, 1]);
+    const t = adobe();
+    await expect(runFlow(t, { mode: 'sign', recheck: async () => { throw new Error('BROWSER REFUSED: task is not approved'); } }))
+      .rejects.toThrow(/not approved/);
+    expect(t.submits).toBe(0);
+  });
+
+  it('a Submit Adobe answers with anything but signed is never counted as signed', async () => {
+    for (const st of ['Cancelled', 'Expired', 'Waiting for Me to Sign (reminder sent)']) {
+      const s = adobe({ statusAfterSubmit: st });
+      await expect(runFlow(s, { mode: 'sign' })).rejects.toThrow(/SIGN NOT CONFIRMED/);
+      expect(s.submits).toBe(1);
+    }
+    expect(['Completed', 'Signed', 'Waiting for Others', 'Out for signature'].map(ab.signedStatus)).toEqual([true, true, true, true]);
+    expect(['Cancelled', 'Expired', 'Waiting For Me to Sign', '', 'Declined'].map(ab.signedStatus)).toEqual([false, false, false, false, false]);
+  });
+
+  it('a failure after Submit is "not confirmed", never "nothing was signed"', async () => {
+    const s = adobe({ renameAfterSubmit: 'Something_Else' });
+    const err = await runFlow(s, { mode: 'sign' }).catch((e) => e);
+    expect(err.unconfirmed).toBe(true);
+    expect(err.message).toMatch(/^SIGN NOT CONFIRMED: Submit was pressed/);
+    expect(err.message).not.toMatch(/Nothing was signed/);
+  });
+
   it('does not believe a Submit that Adobe\'s own page does not show', async () => {
     const s = adobe({ statusAfterSubmit: null });
     await expect(runFlow(s, { mode: 'sign' })).rejects.toThrow(/SIGN NOT CONFIRMED/);
@@ -450,7 +521,7 @@ describe('the dry run finds one agreement, reads its id, downloads it, and signs
     const s = adobe();
     const r = await runFlow(s, { mode: 'dry', id: undefined, shot: join(DIR, 'dry.png') });
     expect(r).toMatchObject({ agreementId: ID, status: 'Waiting For Me to Sign', onlySignature: true, asks: { boxes: 1, empty: 1, remaining: 1 } });
-    expect(readFileSync(r.unsigned, 'utf8')).toBe('%PDF-1.7 unsigned');
+    expect(readFileSync(r.unsigned).equals(PDF_A)).toBe(true);
     expect(s.submits).toBe(0);
   });
   it('says when Adobe asks for more than a signature', async () => {
@@ -466,7 +537,8 @@ describe('the dry run finds one agreement, reads its id, downloads it, and signs
 
 describe('signBinding: the robot reads Kevin\'s approval through agent-dispatch.py, and believes nothing else', () => {
   const ok = { outcome: 'Approved as-is', approved: true, formCard: false, trial: '', signProblem: '',
-    signAsKevin: { agreement: NAME, agreementId: ID, signer: 'info@agilelets.co.uk', document: '/x.pdf' } };
+    signAsKevin: { agreement: NAME, agreementId: ID, signer: 'info@agilelets.co.uk', document: '/x.pdf',
+                   documentUrl: 'https://v5.airtableusercontent.com/x/x.pdf' } };
   const bind = (state) => { process.env.OUTCOME_JSON = JSON.stringify(state); return ab.signBinding('recTESTTESTTEST01'); };
   it('returns the approved card with its door', () => {
     expect(bind(ok)).toMatchObject({ agreementId: ID, agreement: NAME, door: { savedSignature: 'Agile Lets' } });
@@ -479,6 +551,40 @@ describe('signBinding: the robot reads Kevin\'s approval through agent-dispatch.
     expect(() => bind({ ...ok, signAsKevin: { ...ok.signAsKevin, signer: 'kevinbrittain@gmail.com' } })).toThrow(/door the robot holds/);
     expect(() => bind({ ...ok, signAsKevin: null })).toThrow(/door the robot holds/);
   });
+  it('refuses a card with no link to the copy Kevin read, and a Submit never proved', () => {
+    expect(() => bind({ ...ok, signAsKevin: { ...ok.signAsKevin, documentUrl: '' } })).toThrow(/no link to the copy Kevin read/);
+    appendFileSync(LEDGER, JSON.stringify({ cmd: 'unconfirmed', task: 'recTESTTESTTEST01', agreementId: ID }) + '\n');
+    try { expect(() => bind(ok)).toThrow(/pressed .* never proved/); } finally { rmSync(LEDGER, { force: true }); }
+  });
+
+  it('reads the REAL outcome command: what the Python check says is what the robot gets', () => {
+    const AF = py('print(json.dumps(m.AF))');
+    const stub = join(DIR, 'real-outcome.py');
+    writeFileSync(stub, `import importlib.util, json, os, sys, types
+sys.path.insert(0, ${JSON.stringify(SCRIPTS)})
+spec = importlib.util.spec_from_file_location("ad", ${JSON.stringify(DISPATCH)})
+m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m)
+rec = json.loads(os.environ["REC_JSON"])
+m.get_task = lambda t: rec
+m.approved_text_changed = lambda t: False
+m.cmd_outcome(types.SimpleNamespace(task=sys.argv[2]))
+`);
+    const record = (outcome) => ({ id: 'recTESTTESTTEST01', createdTime: '2026-10-16T10:00:00.000Z', fields: {
+      [AF.agentOutput]: CARD, [AF.status]: 'Today', [AF.name]: 'A tenancy agreement to sign', [AF.notes]: '',
+      [AF.approvalOutcome]: outcome, [AF.approvedAt]: '2026-10-16T12:00:00.000Z', [AF.sentForApprovalBy]: ['recQkO6BA4w5zqwZ4'],
+      [AF.attachments]: [{ filename: 'unsigned_recTESTTESTTEST01_AST.pdf', url: 'https://v5.airtableusercontent.com/x/a.pdf' }] } });
+    const was = process.env.AGENT_OUTCOME_SCRIPT;
+    process.env.AGENT_OUTCOME_SCRIPT = stub;
+    try {
+      process.env.REC_JSON = JSON.stringify(record('Approved as-is'));
+      expect(ab.signBinding('recTESTTESTTEST01')).toMatchObject({ agreementId: ID, documentUrl: 'https://v5.airtableusercontent.com/x/a.pdf' });
+      process.env.REC_JSON = JSON.stringify(record('Approved with minor edits'));
+      expect(() => ab.signBinding('recTESTTESTTEST01')).toThrow(/may not be signed: the approval came WITH EDITS/);
+      process.env.REC_JSON = JSON.stringify(record(null));
+      expect(() => ab.signBinding('recTESTTESTTEST01')).toThrow(/may not be signed: it is not approved/);
+    } finally { process.env.AGENT_OUTCOME_SCRIPT = was; }
+  });
+
   it('refuses an agreement the robot already signed for that task', () => {
     appendFileSync(LEDGER, JSON.stringify({ cmd: 'signed', task: 'recTESTTESTTEST01', agreementId: ID }) + '\n');
     try { expect(() => bind(ok)).toThrow(/already signed/); } finally { rmSync(LEDGER, { force: true }); }
@@ -497,6 +603,29 @@ describe('no plan signs on Adobe: prepare and commit refuse every signing press'
     await expect(plan(adobe(), [{ do: 'goto', url: ab.SIGN_LIST_URL }, { do: 'click', selector: '.rowsign' }])).rejects.toThrow(/signing control/);
     await expect(plan(adobe(), [{ do: 'goto', url: `https://na1.documents.adobe.com/public/esign?aid=${ID}` }])).rejects.toThrow(/is an Adobe signing page/);
   });
+  it('refuses every kind of Adobe signing page, web forms included', async () => {
+    await expect(plan(adobe(), [{ do: 'goto', url: 'https://secure.eu1.adobesign.com/public/esignWidget?wid=x' }]))
+      .rejects.toThrow(/is an Adobe signing page/);
+    await expect(plan(adobe(), [{ do: 'goto', url: 'https://na1.documents.adobe.com/public/apiesign?pid=x' }]))
+      .rejects.toThrow(/is an Adobe signing page/);
+  });
+
+  it('never blocks the real send-for-signature plan (adobe-plan.js), step by step on a page shaped like Adobe\'s', async () => {
+    const { buildPlan } = require_(join(SCRIPTS, 'adobe-plan.js'));
+    const steps = buildPlan({ document: '/x/letter.pdf', signers: ['kevinbrittain@gmail.com'] }).steps
+      .filter((x) => ['click', 'submit', 'press', 'upload'].includes(x.do));
+    const ctx = await browser.newContext();
+    await ctx.route((u) => u.hostname === 'acrobat.adobe.com', (route) => route.fulfill({ status: 200, contentType: 'text/html',
+      body: `<!doctype html><article><h2>Request e-signatures</h2><a href="#">select a file</a></article>
+<button>Continue</button><input placeholder="Enter email\u2026"><button>Auto-place fields</button><button>Send</button>` }));
+    const page = await ctx.newPage();
+    try {
+      await page.goto('https://acrobat.adobe.com/link/tools/?group=group-sign');
+      for (const st of steps) expect(await ab.adobeSignRefusal(page, st), JSON.stringify(st)).toBe('');
+      expect(steps.map((x) => x.do)).toEqual(['upload', 'click', 'press', 'click', 'submit']);
+    } finally { await ctx.close(); }
+  });
+
   it('still lets a plan press Download PDF on Adobe, and words like Sign in', async () => {
     const page = 'https://acrobat.adobe.com/link/signatures/?signUri=' + encodeURIComponent(`/public/agreements/view/${ID}?type=esign&app=dc`);
     const r = await plan(adobe(), [{ do: 'goto', url: page }, { do: 'click', selector: '[role=button]:has-text("Download PDF")' },

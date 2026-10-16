@@ -1832,7 +1832,10 @@ let _apvBulkReason = '';
 let _apvBulkBusy = false;
 
 // A sign-in wait is not a decision, so it cannot be ticked. Nor is Your step: it is approved already.
-function apvSelectable(t){ return !apvSignInNeeded(t.agentOutput) && !apvYourStep(t); }
+// Nor is a signature for Kevin (16 Oct 2026): his Approve lets the robot sign that document in his name,
+// so it is given on its own card, with the document in front of him, never in a batch.
+function apvSignForKevin(t){ return /^\s*SIGN AS KEVIN:/im.test(String(t.agentOutput||'')); }
+function apvSelectable(t){ return !apvSignInNeeded(t.agentOutput) && !apvYourStep(t) && !apvSignForKevin(t); }
 
 // Queue order, so the loop decides in the order Kevin read the cards.
 function apvBulkIds(){
@@ -2653,7 +2656,7 @@ function apvCardHtml(t){
             </div>`;
         })()}
         <div class="apv-meta">
-            ${signIn ? '' : `<label class="apv-pick" title="Tick to decide this together with other cards"><input type="checkbox" data-apv-pick${_apvSelected.has(t.id)?' checked':''} onchange="apvPick('${t.id}', this.checked)" aria-label="Select this card"></label>`}
+            ${signIn || apvSignForKevin(t) ? '' : `<label class="apv-pick" title="Tick to decide this together with other cards"><input type="checkbox" data-apv-pick${_apvSelected.has(t.id)?' checked':''} onchange="apvPick('${t.id}', this.checked)" aria-label="Select this card"></label>`}
             ${t.priority==='Urgent' ? '<span class="apv-chip" style="background:var(--danger-bg);color:var(--danger)">Urgent</span>' : ''}
             <span class="apv-chip">${esc(agent)}</span>
             <span class="apv-kind" id="apvKind-${t.id}">Kind of work: <strong>${kindText}</strong><a onclick="const k=document.getElementById('apvKind-${t.id}');k.querySelector('select').style.display='';this.style.display='none'">change</a>

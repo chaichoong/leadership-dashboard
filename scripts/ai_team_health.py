@@ -1708,6 +1708,11 @@ WALL_LINE_RE = re.compile(
     r"\s*(?P<rest>[^\n]*)$", re.M)
 WALL_PROFILE_RE = re.compile(r"\[profile ([a-z0-9][a-z0-9-]*)\]", re.I)
 KEVIN_CANT_NOTE = "Kevin cannot take this step"        # agent-dispatch.py KEVIN_CANT_NOTE
+# A SIGN AS KEVIN card the robot did not sign (16 Oct 2026): `complete --not-signed` closes it with this
+# line (agent-dispatch.py NOT_SIGNED_MARK) and opens no wall, so it is counted here or it would escape the
+# score. A signature that took the route leaves no such line and is never a hand-back.
+NOT_SIGNED_LINE_RE = re.compile(
+    r"^\[(?P<day>\d{1,2} \w{3} \d{4})(?: (?P<clock>\d{2}:\d{2}))?[^\]\n]*\]\s*NOT SIGNED BY THE ROBOT:", re.M)
 
 
 def wall_lines(notes):
@@ -1853,6 +1858,15 @@ def card_handbacks(f, logins, cut):
             if s and access_not_kept(logins, s):
                 whys.append("you signed the robot in again (access not kept)")
     end_current(None)                   # the wall still standing now was open inside the window
+    for m in NOT_SIGNED_LINE_RE.finditer(str(f.get("Notes") or "")):
+        try:
+            when = datetime.strptime(m.group("day") + " " + (m.group("clock") or "12:00"),
+                                     "%d %b %Y %H:%M").replace(tzinfo=LONDON).astimezone(timezone.utc)
+        except ValueError:
+            continue
+        if when > cut:
+            touched = True
+            whys.append("you did " + KEVIN_STEP_WORDS["signature"])
     at = _aware(f.get("Approved At"))
     decided = bool(f.get("Approval Outcome")) and bool(at) and at > cut
     seen = []
