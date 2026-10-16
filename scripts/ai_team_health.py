@@ -13,7 +13,7 @@ work; every agent is working; no one is broken; no bugs or errors.
 
 WHAT IT IS
 ----------
-Fifteen lines (the hand-back line joined on 16 Oct 2026), each a question in his words with a colour, a short answer, a number, a
+Sixteen lines (the hand-back and sessions lines joined on 16 Oct 2026), each a question in his words with a colour, a short answer, a number, a
 one-sentence rule and a trend against last week, in three groups, with one overall verdict.
 scripts/estate-status.py calls verdict_row() on its ten-minute pass and writes it as the
 Estate Status row `ai-team-verdict`. The page (js/dashboard.js) only draws it.
@@ -161,6 +161,16 @@ LINES = (
              "approving, correcting, paying or giving access; amber is 85% to 95%; red is under 85%. A card "
              "came back to you when you did any other step, could not do the step it gave you, or signed "
              "the robot in again to a site it already had in the 30 days before."},
+    # Kevin, 16 Oct 2026: the same four, for the Claude Code chats he works in. Read from the chats
+    # themselves by scripts/session_handbacks.py; robot runs ask through cards, counted above.
+    {"key": "sessions", "noun": "session hand-backs", "group": "keep", "question": "Sessions only ask for your four",
+     "better": "higher", "unit": "%",
+     "rule": "Green means 95% or more of the Claude Code sessions that asked you anything in the last 14 days "
+             "asked only for approving, correcting, paying or giving access; amber is 85% to 95%; red is under "
+             "85%. A session came back to you when it asked you to do anything else: run a command, check or "
+             "test something, fetch a document, find a value, send a message, or do a step in an app. Read "
+             "from each chat's option questions, next-step boxes and closing lines; robot and scheduled runs "
+             "are left out, and a model switch is not counted (only you can switch a session's model)."},
     {"key": "allowance", "noun": "the allowance", "group": "keep", "question": "Enough allowance to finish the week", "better": "lower",
      "unit": "h",
      "rule": "Green means the robots were not paused for the Claude limit this week; amber means they "
@@ -637,6 +647,41 @@ def judge_handback(f):
     out["byAgent"] = [dict({k: a[k] for k in ("id", "name", "cards", "back", "score", "reasons")},
                            colour=agent_colour(a["score"])) for a in f.get("byAgent") or []]
     return out
+
+
+def judge_sessions(f):
+    """Kevin's four, for the Claude Code chats (16 Oct 2026). The score is the share of the
+    sessions that asked him anything in 14 days where every ask was one of his four. A chat file
+    that cannot be read leaves its asks uncounted, so the line is shown as read in part."""
+    src = ("Every Claude Code chat on the Mac, last 14 days: its option questions, next-step boxes and "
+           "closing lines (robot and scheduled runs left out)")
+    if f.get("error"):
+        return grey("sessions", f["error"], src)
+    n = int(f.get("sessions") or 0)
+    if not n:
+        return grey("sessions", "no session asked you anything in the last 14 days", src)
+    back = int(f.get("back") or 0)
+    score = round(100.0 * (n - back) / n)
+    colour = handback_colour(score)
+    unread = list(f.get("unread") or ())
+    partial = bool(unread)
+    if partial and colour == "green":
+        colour = "amber"
+    answer = "%d of %d sessions came back to you" % (back, n)
+    if partial:
+        answer += " (%s not read)" % plural(len(unread), "chat")
+    extra = [[why, k] for why, k in f.get("reasons") or []]
+    extra.append(["Asks to you", "%d, %d of them not one of your four" % (int(f.get("asks") or 0), int(f.get("backAsks") or 0))])
+    if f.get("model"):
+        extra.append(["Not counted", "%s (only you can switch a session's model)" % plural(int(f["model"]), "model switch", "model switches")])
+    if partial:
+        extra.append(["Chats not read", "; ".join(unread[:3])])
+    if f.get("cacheError"):
+        extra.append(["Cache", "not written, so every pass reads every chat (%s)" % f["cacheError"]])
+    short = None
+    if colour != "green":
+        short = ("%s came back to you" % plural(back, "session")) if back else "some chats were not read"
+    return line("sessions", colour, answer, score, f.get("items") or (), extra, src, partial=partial, short=short)
 
 
 def judge_allowance(f, now):
@@ -2182,6 +2227,11 @@ def gather(now, es, rows, lh_res, lh_err, measures, readers=None):
             f["handback"] = facts_handback(hb_rows, tasks, team, aar, now, logins, logins_err)
         except Exception as exc:  # noqa: BLE001
             f["handback"] = {"error": "the agents' cards and walls could not be read (%s)" % str(exc)[:100]}
+    try:
+        f["sessions"] = rd["sessions"]() if "sessions" in rd else \
+            _load("session_handbacks_for_verdict", "session_handbacks.py").facts(now)
+    except Exception as exc:  # noqa: BLE001
+        f["sessions"] = {"error": "the session chats could not be read (%s)" % str(exc)[:100]}
     hits, unreadable = rd["limitHits"]() if "limitHits" in rd else read_limit_hits(now, al)
     f["allowance"] = facts_allowance(al, rows, now, hits, unreadable)
     return f
@@ -2193,7 +2243,7 @@ def judge_all(f, now):
         judge_bottlenecks(f["bottlenecks"], now), judge_carried(f["carried"]), judge_agents(f["agents"]),
         judge_jobs(f["jobs"]), judge_bugs(f["bugs"]), judge_data(f["data"], now), judge_missed(f["missed"]),
         judge_ontop(f["ontop"]), judge_queue(f["queue"]), judge_firsttime(f["firsttime"]),
-        judge_handback(f["handback"]), judge_allowance(f["allowance"], now),
+        judge_handback(f["handback"]), judge_sessions(f["sessions"]), judge_allowance(f["allowance"], now),
     ]
     # No bugs or errors can show a real week's trend from its first day: the queue's own log
     # says what was open 7 days ago, so that seeds the trend until the history holds a week.
