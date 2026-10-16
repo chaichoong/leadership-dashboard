@@ -676,6 +676,8 @@ def judge_sessions(f):
         extra.append(["Not counted", "%s (only you can switch a session's model)" % plural(int(f["model"]), "model switch", "model switches")])
     if partial:
         extra.append(["Chats not read", "; ".join(unread[:3])])
+    if f.get("cacheError"):
+        extra.append(["Cache", "not written, so every pass reads every chat (%s)" % f["cacheError"]])
     short = None
     if colour != "green":
         short = ("%s came back to you" % plural(back, "session")) if back else "some chats were not read"

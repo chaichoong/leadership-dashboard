@@ -603,6 +603,12 @@ describe('the row', () => {
     expect(out.bugs).toMatchObject({ vsDate: '2026-10-08', before: 6, after: 5, direction: 'better' });
   });
 
+  it('a sessions reader that throws greys only its own line; the row still works', () => {
+    const out = py(stubs('readers["sessions"] = lambda: 1 / 0'));
+    expect(out.status).toBe('Worked');
+    expect(out.lines.filter(l => l[1] === 'grey').map(l => l[0])).toEqual(['sessions']);
+  });
+
   it('a source that throws turns only its own line grey, and the verdict names it', () => {
     const out = py(stubs(`readers["board"] = lambda: (_ for _ in ()).throw(RuntimeError("HTTP 503"))
 readers["decided"] = lambda: (_ for _ in ()).throw(RuntimeError("HTTP 429"))`));

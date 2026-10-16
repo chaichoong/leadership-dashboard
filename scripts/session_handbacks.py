@@ -50,7 +50,7 @@ from zoneinfo import ZoneInfo
 LONDON = ZoneInfo("Europe/London")
 PROJECTS = os.path.expanduser("~/.claude/projects")
 CACHE = os.path.expanduser("~/knowledge-os/logs/session-handbacks/cache.json")
-CACHE_VERSION = 1                   # bump when what is taken from a file changes
+CACHE_VERSION = 3                   # bump when what is taken from a file changes
 WINDOW_DAYS = 14
 TAIL_LINES = 6                      # the closing lines of a reply
 
@@ -66,21 +66,32 @@ WANTED = ('"type":"assistant"', '"type":"custom-title"', '"type":"ai-title"')
 def _prompt_text(content):
     if isinstance(content, str):
         return content
-    return " ".join(b.get("text", "") for b in content or () if isinstance(b, dict) and b.get("type") == "text")
+    if not isinstance(content, list):
+        return ""
+    return " ".join(str(b.get("text") or "") for b in content if isinstance(b, dict) and b.get("type") == "text")
 
 
 def tail(text, n=TAIL_LINES):
     return "\n".join([ln for ln in str(text or "").split("\n") if ln.strip()][-n:])
 
 
+def _dict(v):
+    return v if isinstance(v, dict) else {}
+
+
 def extract(path):
-    """What one transcript holds for this measure: {desktop, scheduled, title, raw: [{at, source,
-    text}]}. `raw` is every ask place in the file, unjudged, so the cache never holds a verdict."""
+    """What one transcript holds for this measure: {desktop, scheduled, title, prompts, turns, raw:
+    [{at, source, text}]}. `raw` is every ask place in the file, unjudged, so the cache never holds
+    a verdict. A closing is the text of a reply that ended its turn (stop_reason end_turn): text
+    written mid-turn, before a tool call or a system note, was never handed to Kevin as an ending
+    (review of the first build). `prompts` and `turns` are the control: a desktop chat with neither
+    means the transcript format moved, and the line must say so rather than read clean."""
     desktop = None
     first = None
     title = ai_title = ""
     raw = []
-    closing = None                      # (at, text) of the newest reply text since the last prompt
+    prompts = turns = 0
+    last_text = (None, None, None)      # (message id, at, text): a reply's blocks arrive as separate lines
     with open(path, encoding="utf-8", errors="replace") as fh:
         for ln in fh:
             prompt = '"type":"user"' in ln and '"tool_result"' not in ln
@@ -90,46 +101,60 @@ def extract(path):
                 d = json.loads(ln)
             except ValueError:
                 continue
+            if not isinstance(d, dict):
+                continue
             if desktop is None and d.get("entrypoint"):
                 desktop = d["entrypoint"] == "claude-desktop"
             t = d.get("type")
             if t == "custom-title":
-                title = d.get("customTitle") or title
+                title = str(d.get("customTitle") or "") or title
                 continue
             if t == "ai-title":
-                ai_title = d.get("aiTitle") or ai_title
+                ai_title = str(d.get("aiTitle") or "") or ai_title
                 continue
             if d.get("isSidechain"):
                 continue
-            m = d.get("message") or {}
+            m = _dict(d.get("message"))
             if t == "user":
+                if d.get("isMeta"):
+                    continue            # a skill load, an image note, a hook's words: not Kevin
                 text = _prompt_text(m.get("content"))
                 if not text.strip():
                     continue
+                prompts += 1
                 if first is None:
                     first = text[:40]
-                if closing:
-                    raw.append({"at": closing[0], "source": "closing", "text": tail(closing[1])})
-                closing = None
             elif t == "assistant":
-                for b in m.get("content") or ():
-                    if not isinstance(b, dict):
-                        continue
-                    if b.get("type") == "text" and str(b.get("text", "")).strip():
-                        closing = (d.get("timestamp"), b["text"])
+                blocks = m.get("content") if isinstance(m.get("content"), list) else []
+                for b in blocks:
+                    b = _dict(b)
+                    if b.get("type") == "text" and str(b.get("text") or "").strip():
+                        last_text = (m.get("id"), d.get("timestamp"), str(b["text"]))
                     elif b.get("type") == "tool_use":
                         name = str(b.get("name") or "")
-                        inp = b.get("input") or {}
+                        inp = _dict(b.get("input"))
                         if name == "AskUserQuestion":
-                            for q in inp.get("questions") or ():
+                            qs = inp.get("questions") if isinstance(inp.get("questions"), list) else []
+                            for q in qs:
                                 raw.append({"at": d.get("timestamp"), "source": "question",
-                                            "text": str((q or {}).get("question") or "")})
-                        elif name.endswith("__wrap_up") and inp.get("ask"):
-                            raw.append({"at": d.get("timestamp"), "source": "box", "text": str(inp["ask"])})
-    if closing:
-        raw.append({"at": closing[0], "source": "closing", "text": tail(closing[1])})
+                                            "text": str(_dict(q).get("question") or "")})
+                        elif name.endswith("__wrap_up"):
+                            # The reply that carries the next-step box is the turn's message: the
+                            # box ends the turn with no text after it.
+                            if last_text[0] == m.get("id") and last_text[2]:
+                                raw.append({"at": last_text[1], "source": "closing", "text": tail(last_text[2])})
+                                last_text = (None, None, None)
+                            if inp.get("ask"):
+                                raw.append({"at": d.get("timestamp"), "source": "box", "text": str(inp["ask"])})
+                if m.get("stop_reason") == "end_turn":
+                    turns += 1
+                    if last_text[0] == m.get("id") and last_text[2]:
+                        raw.append({"at": last_text[1], "source": "closing", "text": tail(last_text[2])})
+                    last_text = (None, None, None)
+                elif m.get("stop_reason"):
+                    last_text = (None, None, None)   # a tool call ended this message: its text was mid-turn
     return {"desktop": bool(desktop), "scheduled": str(first or "").startswith("<scheduled-task"),
-            "title": title or ai_title, "raw": raw}
+            "title": title or ai_title, "prompts": prompts, "turns": turns, "raw": raw}
 
 
 # ─── judging an ask ───────────────────────────────────────────────────
@@ -148,7 +173,13 @@ ASKS_A_STEP = re.compile(r"(?i)\b(?:can you|could you|have you|did you|will you|
 OWN = re.compile(
     r"(?i)^(?:i\b|i'll|i will|we\b|the (?:reviewer|review|build|robot|agent|job|sweep|merge|deploy|pr)\b|once\b|"
     r"when the\b|after the\b|nothing\b|none\b|no action\b|from me\b|on my side\b|merge\b|open the pr\b|fix\b|"
-    r"commit\b|push\b|wait\b|review findings\b|act on\b|wave\b|phase\b)")
+    r"commit\b|push\b|wait\b|review findings\b|act on\b|wave\b|phase\b|deploy\b|"
+    r"(?:re-?)?run (?:the |a )?(?:full |whole |live )?(?:test|tests|suite|suites|sweep|gate|merge gate|dry[- ]run|back-?test)\b|"
+    r"test it\b|open a (?:pr|pull request)\b|.*\bvia (?:send-email|scripts?/)|.*\bmyself\b)")
+# A question the session asks about its own next move is an approval ask.
+OFFER = re.compile(r"(?i)^(?:want me to|do you want me to|would you like me to|shall i|should i)\b")
+# A lead-in alone on its line ("Next:", "What you need to do:") hands him the list that follows.
+LEAD_ONLY = re.compile(r"(?i)^(?:next(?: steps?)?(?: for you)?|your (?:next )?steps?|what you need to do|for you)\s*:?$")
 IMPERATIVE = re.compile(
     r"(?i)^(?:say|reply|tell|pick|choose|decide|approve|confirm|answer|review|read|go through|look|check|test|"
     r"open|click|tap|press|paste|run|type|send|forward|upload|download|install|plug|switch|sign|log|"
@@ -159,7 +190,7 @@ IMPERATIVE = re.compile(
 FOUR = (
     ("pay", re.compile(r"(?i)\b(?:pay|payment|buy it now|checkout|check out|top[- ]?up|card details|press pay|"
                        r"purchase|tap (?:the )?(?:\w+ )?card)\b")),
-    ("access", re.compile(r"(?i)\b(?:sign (?:back )?in|log ?in|log back in|re-?authenticat\w*|verification code|"
+    ("access", re.compile(r"(?i)\b(?:sign (?:\w+ ){0,3}in\b|log ?in|log (?:\w+ ){0,3}in\b|re-?authenticat\w*|verification code|"
                           r"one-time code|2fa|two-factor|passcode|password|authori[sz]e|"
                           r"(?:grant|give) (?:me |the robot )?access|allow access|add another account|"
                           r"connect (?:your|the) \w+ account)\b")),
@@ -189,7 +220,7 @@ HANDBACK = (
                                     r"open (?!the queue|your approval)|enable|turn on|turn off|toggle|settings|close)\b")),
 )
 TELL_WHEN = re.compile(r"(?i)\btell me (?:when|once|after)\b|\b(?:after|once) [^.]{0,40}, tell me\b")
-MODEL = re.compile(r"(?i)\b(?:model picker|/model\b|switch (?:to )?(?:opus|fable)|effort (?:to )?max|/effort)\b")
+MODEL = re.compile(r"(?i)\bmodel picker\b|(?<!\w)/(?:model|effort)\b|\bswitch (?:to )?(?:opus|fable)\b|\beffort (?:to )?max\b")
 
 
 def kevins_part(t):
@@ -217,8 +248,14 @@ def classify(t):
     # statements" is still a hand-back. Clicking the sign-in button is the sign-in itself, even
     # when its label is quoted ('click "Sign in as Kevin"').
     still = [why for why, rx in HANDBACK if rx.search(rest)]
-    if still == ["a step in an app"] and FOUR[1][1].search(raw):
-        return "access", ""
+    if still == ["a step in an app"]:
+        # Pressing the button is the act itself: "click Approve", "press Pay", "open the AI Agents
+        # page and approve the card", 'click "Sign in as Kevin"'.
+        for kind, rx in FOUR:
+            if rx.search(raw):
+                return kind, ""
+        if APPROVE.search(raw):
+            return "approve", ""
     if still:
         return "handback", still[0]
     for kind, rx in FOUR:
@@ -247,7 +284,9 @@ def _sentences(text):
 # ("```node scripts/agent-browser.js login ...``` While you do that, I ..."), and a menu path to
 # click through ("File → Download → PDF").
 GIVEN_COMMAND = re.compile(r"(?i)\b(?:while you do that|once you(?:'ve| have) (?:run|done) (?:that|it|this)|"
-                           r"run (?:this|it|the command)|in (?:your )?terminal|paste (?:this|it) into)\b")
+                           r"run (?:this|it) in (?:your )?terminal|paste (?:this|it) into)\b")
+SELF_START = re.compile(r"(?i)^(?:i\b|i'(?:ll|ve|m)\b|we\b)")
+SELF = re.compile(r"(?i)^(?:i\b|i'(?:ll|ve|m)\b|we\b)|\b(?:i did|i'll|i will|i have|i've|myself)\b")
 MENU_PATH = re.compile(r"(?i)\b\w+ → [^.]{0,60}\b(?:download|export|save)\b|\b(?:download|export|save)\b[^.]{0,40} → ")
 
 
@@ -255,13 +294,29 @@ def closing_asks(text):
     """[(sentence, kind, why)] for each ask in a reply's closing lines."""
     out = []
     t = tail(text)
-    if "```" in t and GIVEN_COMMAND.search(t):
-        out.append((next((s for s in _sentences(t) if GIVEN_COMMAND.search(s)), "a command block"),
-                    "handback", "run a command"))
+    if "```" in t:
+        given = next((s for s in _sentences(t) if GIVEN_COMMAND.search(s) and not SELF_START.search(s)), None)
+        if given:
+            out.append((given, "handback", "run a command"))
+    led = False                         # the line before was a lead-in on its own
     for s in _sentences(t):
-        if MENU_PATH.search(s):
+        if MENU_PATH.search(s) and not SELF.search(s):
             out.append((s, "handback", "fetch a document"))
             continue
+        if LEAD_ONLY.match(s):
+            led = True
+            continue
+        if OFFER.match(s):
+            out.append((s, "approve", ""))
+            continue
+        if led and re.match(r"^(?:[-•]|\d+[.)])\s", s) or led and IMPERATIVE.match(s):
+            body = re.sub(r"^(?:[-•]|\d+[.)])\s*", "", s)
+            if not OWN.match(body):
+                kind, why = classify(body)
+                if kind != "unclear":
+                    out.append((s, kind, why))
+            continue
+        led = False
         m = LEAD.match(s)
         if m and re.search(r"(?i)\b(?:once|when|after) (?:it|the|this)\b", m.group(0)):
             continue                    # "Next, once it merges: ..." is the session's own plan
@@ -311,14 +366,23 @@ def _load_cache(path):
     try:
         with open(path, encoding="utf-8") as fh:
             c = json.load(fh)
-        return c if c.get("v") == CACHE_VERSION else {"v": CACHE_VERSION, "files": {}}
     except (OSError, ValueError):
-        return {"v": CACHE_VERSION, "files": {}}
+        c = None
+    if isinstance(c, dict) and c.get("v") == CACHE_VERSION and isinstance(c.get("files"), dict):
+        return c
+    return {"v": CACHE_VERSION, "files": {}}        # missing, old or the wrong shape: read afresh
 
 
 def _save_cache(path, cache):
-    """Written to a temp file and renamed over the real one, so a reader never sees half a file."""
+    """Written to a temp file and renamed over the real one, so a reader never sees half a file.
+    A temp file left by a killed run is swept once it is an hour old."""
     os.makedirs(os.path.dirname(path), exist_ok=True)
+    for old in glob.glob(os.path.join(os.path.dirname(path), ".cache-*")):
+        try:
+            if os.stat(old).st_mtime < datetime.now().timestamp() - 3600:
+                os.unlink(old)
+        except OSError:
+            pass
     fd, tmp = tempfile.mkstemp(dir=os.path.dirname(path), prefix=".cache-")
     try:
         with os.fdopen(fd, "w", encoding="utf-8") as fh:
@@ -333,13 +397,17 @@ def _save_cache(path, cache):
 
 
 def read_sessions(now, days=WINDOW_DAYS, root=PROJECTS, cache_path=CACHE):
-    """{sessions: [{id, title, asks}], files, parsed, unread: [why], cacheError} for the desktop
-    chats with an ask in the window. Raises OSError only when the projects folder is missing."""
+    """{sessions: [{id, title, asks}], files, parsed, unread: [why], cacheError, error} for the
+    desktop chats with an ask in the window. Raises OSError only when the projects folder is
+    missing. `error` is the control: chat files in the window but no desktop chat, or desktop chats
+    with no prompt or no finished reply read, means the transcript format moved, and nothing read
+    can be trusted as clean (review of the first build: a renamed field read green, 0 of 20)."""
     cut = now - timedelta(days=days)
     if not os.path.isdir(root):
         raise OSError("no transcripts folder at %s" % root)
     cache = _load_cache(cache_path) if cache_path else {"v": CACHE_VERSION, "files": {}}
     kept, sessions, unread, parsed = {}, [], [], 0
+    desk = prompts = turns = texts = 0
     files = [p for p in glob.glob(os.path.join(root, "*", "*.jsonl"))]
     for path in sorted(files):
         try:
@@ -350,23 +418,31 @@ def read_sessions(now, days=WINDOW_DAYS, root=PROJECTS, cache_path=CACHE):
             continue                    # nothing in it can be inside the window
         key = "%d:%d" % (st.st_size, int(st.st_mtime))
         hit = cache["files"].get(path)
-        if hit and hit.get("key") == key:
+        if isinstance(hit, dict) and hit.get("key") == key and isinstance(hit.get("got"), dict):
             got = hit["got"]
         else:
             try:
                 got = extract(path)
-            except OSError as exc:
+            except Exception as exc:  # noqa: BLE001 — one odd file is named, never the whole line lost
                 unread.append("%s (%s)" % (os.path.basename(path), str(exc)[:60]))
                 continue
             parsed += 1
         kept[path] = {"key": key, "got": got}
-        if not got["desktop"] or got["scheduled"]:
+        if not got.get("desktop") or got.get("scheduled"):
             continue
+        desk += 1
+        prompts += int(got.get("prompts") or 0)
+        turns += int(got.get("turns") or 0)
+        texts += sum(1 for r in got.get("raw") or () if isinstance(r, dict) and r.get("source") == "closing")
         asks = []
-        for raw in got["raw"]:
-            at = _aware(raw.get("at"))
-            if at and at >= cut:
-                asks.extend(judge(dict(raw, at=at.isoformat())))
+        try:
+            for raw in got.get("raw") or ():
+                at = _aware(raw.get("at"))
+                if at and at >= cut:
+                    asks.extend(judge(dict(raw, at=at.isoformat(), text=str(raw.get("text") or ""))))
+        except Exception as exc:  # noqa: BLE001
+            unread.append("%s (%s)" % (os.path.basename(path), str(exc)[:60]))
+            continue
         asks = [a for a in asks if a["kind"] not in NOT_COUNTED] + [a for a in asks if a["kind"] in NOT_COUNTED]
         if asks:
             sessions.append({"id": os.path.splitext(os.path.basename(path))[0], "title": got["title"], "asks": asks})
@@ -376,7 +452,17 @@ def read_sessions(now, days=WINDOW_DAYS, root=PROJECTS, cache_path=CACHE):
             _save_cache(cache_path, {"v": CACHE_VERSION, "files": kept})
         except OSError as exc:
             cache_err = str(exc)[:80]
-    return {"sessions": sessions, "files": len(kept), "parsed": parsed, "unread": unread, "cacheError": cache_err}
+    error = None
+    if kept and not desk:
+        error = "none of the %d chat files is a desktop chat (has the transcript format changed?)" % len(kept)
+    elif desk and not prompts:
+        error = "%d desktop chats but no prompt read in any (has the transcript format changed?)" % desk
+    elif desk and not turns:
+        error = "%d desktop chats but no finished reply read in any (has the transcript format changed?)" % desk
+    elif desk and not texts:
+        error = "%d desktop chats but no reply text read in any (has the transcript format changed?)" % desk
+    return {"sessions": sessions, "files": len(kept), "desktop": desk, "parsed": parsed, "unread": unread,
+            "cacheError": cache_err, "error": error}
 
 
 def day_text(at):
@@ -387,6 +473,8 @@ def day_text(at):
 def facts(now, read=None):
     """The AI team line's facts. `read` is read_sessions' result (tests hand one in)."""
     r = read if read is not None else read_sessions(now)
+    if r.get("error"):
+        return {"error": r["error"]}
     asked = back = asks = back_asks = model = 0
     reasons, items = {}, []
     for s in r["sessions"]:
@@ -403,19 +491,24 @@ def facts(now, read=None):
         back_asks += len(hb)
         for a in hb:
             reasons[a["why"]] = reasons.get(a["why"], 0) + 1
+            # The chat's title, the day and the reason leave the Mac; the ask's own words stay in
+            # the dry run (they can quote a private matter).
             items.append((a["at"], {"name": (s["title"] or "Untitled session")[:120],
-                                    "note": ("%s, %s: %s" % (day_text(a["at"]), a["why"], a["text"]))[:120]}))
+                                    "note": "%s, %s" % (day_text(a["at"]), a["why"])}))
     items = [it for _, it in sorted(items, key=lambda x: x[0], reverse=True)]   # newest first
     return {"sessions": asked, "back": back, "asks": asks, "backAsks": back_asks, "model": model,
             "reasons": sorted(reasons.items(), key=lambda kv: (-kv[1], kv[0])), "items": items,
-            "unread": r["unread"], "files": r["files"]}
+            "unread": r["unread"], "files": r["files"], "cacheError": r.get("cacheError")}
 
 
 # ─── commands ─────────────────────────────────────────────────────────
 def cmd_dry_run(days=WINDOW_DAYS):
     now = datetime.now(timezone.utc)
     t0 = datetime.now()
-    r = read_sessions(now, days=days)
+    r = read_sessions(now, days=days, cache_path=CACHE if days == WINDOW_DAYS else None)
+    if r.get("error"):
+        print("CAN'T TELL: %s" % r["error"])
+        return 1
     secs = (datetime.now() - t0).total_seconds()
     f = facts(now, r)
     print("SESSIONS (last %d days): %d asked you something, %d came back to you%s" % (
