@@ -1223,12 +1223,17 @@ def parse_sign_output(output):
 #   info@agilelets.co.uk  the robot's own Adobe session, "Waiting for you". The
 #                         account's saved signature is Kevin's (Kevin, 28 Sep
 #                         2026); a box signed as Roy Lavin is never this shape.
-# Links emailed to kevinbrittain@gmail.com and other companies' signing sites
-# have no door yet, so they stay Kevin's Your step (KEVIN ONLY: signature).
+#   kevinbrittain@gmail.com  a link Adobe emailed him (adobe_sign_link.py finds
+#                         it), opened with no Adobe session, signed with his
+#                         typed name. AGREEMENT ID is then "tsid-<fingerprint>".
+# Other companies' signing sites and paper have no door, so they stay Kevin's
+# Your step (KEVIN ONLY: signature).
 
 SIGN_AS_KEVIN = "SIGN AS KEVIN"
 SIGN_AS_KEVIN_HEADERS = {SIGN_AS_KEVIN, "AGREEMENT ID", "SIGNER", "DOCUMENT"}
-SIGN_AS_KEVIN_SIGNERS = ("info@agilelets.co.uk",)
+# kevinbrittain@gmail.com: a link Adobe emails him (16 Oct 2026), signed with his typed name after his approval
+# (scripts/adobe_sign_link.py finds it: Adobe's own sender, to him, on Adobe's signing host).
+SIGN_AS_KEVIN_SIGNERS = ("info@agilelets.co.uk", "kevinbrittain@gmail.com")
 # Adobe's agreement id as the robot reads it: letters, digits and the URL-safe
 # punctuation Adobe uses, never a space or a line break.
 AGREEMENT_ID_RE = re.compile(r"^[A-Za-z0-9_\-:.]{12,200}$")
