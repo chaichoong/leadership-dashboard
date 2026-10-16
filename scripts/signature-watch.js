@@ -39,7 +39,7 @@
  * If it cannot see the nav, it FAILS rather than reporting nothing to do.
  *
  * USAGE
- *   node scripts/signature-watch.js register --task recXXX --agreement "NAME" --then post
+ *   node scripts/signature-watch.js register --task recXXX --agreement "NAME" --then post|email|file
  *   node scripts/signature-watch.js poll
  *   node scripts/signature-watch.js status
  */
@@ -110,7 +110,9 @@ async function cmdRegister(args) {
   const task = args.task, agreement = args.agreement, then = (args.then || 'post').toLowerCase();
   if (!/^rec[A-Za-z0-9]{14}$/.test(task || '')) die(`--task must be an Airtable record id, got "${task}"`);
   if (!agreement) die('--agreement is required — the Adobe agreement NAME, exactly as sent');
-  if (!['post', 'email'].includes(then)) die('--then must be post or email');
+  // file: a SIGN AS KEVIN agreement (16 Oct 2026). The robot signed it on Kevin's approval; the copy everyone
+  // signed is attached to its task, and nothing is reopened (agent-dispatch.py signed --then file).
+  if (!['post', 'email', 'file'].includes(then)) die('--then must be post, email or file');
   append({ cmd: 'register', task, agreement, then });
   console.log(JSON.stringify({ registered: task, agreement, then,
     note: 'poll will watch Adobe Completed for this name' }, null, 2));
@@ -281,7 +283,7 @@ async function main() {
   if (cmd === 'poll') return cmdPoll();
   if (cmd === 'status') return cmdStatus();
   if (cmd === 'handoff') { const r = handOffAll(); console.log(JSON.stringify(r, null, 2)); if (r.failed) process.exit(1); return; }
-  die('usage: register --task recXXX --agreement "NAME" --then post|email | poll | status | handoff');
+  die('usage: register --task recXXX --agreement "NAME" --then post|email|file | poll | status | handoff');
 }
 
 if (require.main === module) main().catch((e) => { console.error('ERROR', e.message); process.exit(1); });

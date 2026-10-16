@@ -130,6 +130,34 @@ test.describe('the groupings are gone; the tick is what groups', () => {
   });
 });
 
+// SIGN AS KEVIN (16 Oct 2026): his Approve lets the robot sign that document in his name, so it is given on
+// its own card with the document in front of him, never ticked into a batch.
+test.describe('a signature for Kevin is never decided in bulk', () => {
+  test('the card has no tick, and Select all shown skips it', async ({ page }) => {
+    const fx = withAlikeAndSignIn();
+    const now = new Date().toISOString();
+    fx.approvals.push({ id: 'recSignKevin', createdTime: now, fields: {
+      [TF.name]: 'A tenancy agreement to sign', [TF.status]: 'Approval', [TF.priority]: 'Medium',
+      [TF.agentOutput]: 'SIGN AS KEVIN: AST_Test_Tenant_1_Example_Street\nAGREEMENT ID: CBJCHBCAABAAv-itJ-OopqgnZeh0r-YrhKg53Y8-Vglm\n'
+        + 'SIGNER: info@agilelets.co.uk\nDOCUMENT: ~/knowledge-os/attachments/unsigned_recSignKevin_AST.pdf\n---\n'
+        + 'The tenancy agreement for a test flat.\n\n**Carrying this out will involve:** the robot signs this one agreement with your saved signature.',
+      [TF.sentForApprovalBy]: [AGENT_B], [TF.teamMember]: [AGENT_B], [TF.lmt]: now, [TF.taskType]: 'Correspondence',
+    } });
+    // Written loosely, it is still a signature card (the dispatcher reads the header the same way).
+    fx.approvals.push({ id: 'recSignLoose', createdTime: now, fields: Object.assign({}, fx.approvals[fx.approvals.length - 1].fields, {
+      [TF.agentOutput]: fx.approvals[fx.approvals.length - 1].fields[TF.agentOutput].replace('SIGN AS KEVIN:', 'Sign as  Kevin :') }) });
+    await mockAgentsPage(page, fx);
+    await loadAgentsPage(page);
+    await openApprovals(page);
+    await expect(page.locator('[data-apv-card="recSignKevin"]')).toHaveCount(1);
+    await expect(page.locator('[data-apv-card="recSignLoose"] [data-apv-pick]')).toHaveCount(0);
+    await expect(page.locator('[data-apv-card="recSignKevin"] [data-apv-pick]')).toHaveCount(0);
+    await expect(page.locator('[data-apv-pick]')).toHaveCount(6);
+    await page.locator('[data-apv-select-all]').click();
+    await expect(page.locator('#apvBulk .apv-bulk-count')).toContainText('6 selected');
+  });
+});
+
 test.describe('every bulk verdict is N single verdicts', () => {
   test('Approve: one PATCH per ticked id, the same fields as the single path', async ({ page }) => {
     const patches = await mockAgentsPage(page);

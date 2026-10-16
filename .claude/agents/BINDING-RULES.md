@@ -48,7 +48,10 @@ These apply to every agent in this estate, in every lane, on every run. They are
 - **KEVIN DOES FOUR THINGS ONLY (Kevin, 16 Oct 2026).** He approves, corrects wrong work, pays
   (puts in payment details and presses Pay) and gives access (signs the robot in once, or adds a
   site). A legal signature comes to him as an approval, and once he approves you sign on his
-  behalf where a signing route exists (until one does, the signature is his Your step). Everything
+  behalf: an Adobe agreement waiting for info@agilelets.co.uk in a box that is his is a SIGN AS
+  KEVIN card, and the robot signs it on his approval (GUARDRAILS.md "Signing for Kevin"). A
+  signature with no route yet (his Gmail's signing links, another company's site, paper) is his
+  Your step, and never sign as Roy or anyone else. Everything
   else is yours. Once you have access, keep it alive and do the work inside it: settings, forms,
   renewals, accounts. Check the brain, memory, Airtable and the repo first, and say which you read.
   Never design a step that needs him to make a phone call: find a written channel. Before you hand

@@ -265,6 +265,8 @@
         'report':                  { level: 'B' },
         'recommendation':          { level: 'B' },
         'sign document':           { level: 'C' },
+        // SIGN AS KEVIN (16 Oct 2026): his approval is the authority for one signature, so always his.
+        'sign for Kevin':          { level: 'C', since: '2026-10-16' },
         'post letter':             { level: 'C' },
         'tier-1 matter':           { level: 'C' },
         'spend over the rule':     { level: 'C' },
@@ -306,6 +308,7 @@
         if (up.indexOf('ROY DONE:') === 0) return 'roy work logged';
         if (/^CONTENT/i.test(nm)) return 'content card';
         if (up.indexOf('CALENDAR:') === 0) return 'calendar entry';
+        if (/^SIGN\s+AS\s+KEVIN\s*:/.test(up)) return 'sign for Kevin';
         if (up.indexOf('DOCUMENT:') === 0) return 'sign document';
         if (up.indexOf('POST:') === 0) return 'post letter';
         if (/^(TO|FROM|CC|SUBJECT):/i.test(out)) {

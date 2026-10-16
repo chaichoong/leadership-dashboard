@@ -56,6 +56,7 @@ Auth:   ~/.config/od/airtable_pat (never printed).
 
 import argparse
 import base64
+import hashlib
 import json
 import mimetypes
 import os
@@ -89,6 +90,8 @@ import merge_card  # noqa: E402
 # The CLI's own usage-limit line (no silent parking reads a capacity failure as a pause, 14 Oct 2026).
 import allowance  # noqa: E402
 from secret_redact import redact_secrets  # noqa: E402
+# The one check of a real approval (send-email.py, calendar-write.py); the robot's signature uses it too.
+from approval_evidence import approval_evidence_problem  # noqa: E402
 from agent_email_format import (  # noqa: E402
     CARRY_OUT_MARKER,
     CARRY_OUT_RE,
@@ -106,6 +109,9 @@ from agent_email_format import (  # noqa: E402
     RULE_STAMP,
     rule_send_problem,
     TRIAL_ACTING_SHAPE_RE,
+    SIGN_AS_KEVIN,
+    sign_as_kevin,
+    detect_kind,
     TRIAL_STAMP,
     TRIAL_AGENTS,
     TRIAL_ENDED,
@@ -5173,6 +5179,41 @@ def cmd_submit(args):
     if is_tier1 and TIER1_BANNER not in output:
         output = TIER1_BANNER + "\n\n" + output
 
+    # SIGN AS KEVIN (Kevin, 16 Oct 2026): his Approve is the authority for ONE document, so the card
+    # goes to him and nobody else, carries the document he reads, and never touches his private
+    # legal matter. The agreement id is stamped in Notes so `complete` can ask for the robot's proof
+    # even after the card's text is replaced by a report.
+    sign_card = None
+    if detect_kind(output) == "signkevin":
+        try:
+            sign_card = sign_as_kevin(output)
+        except EmailFormatError as exc:
+            sys.exit(f"ERROR: refusing to submit {args.task} — {exc}")
+    if sign_card:
+        if args.type != "Correspondence":
+            sys.exit(f"ERROR: refusing to submit {args.task} — a {SIGN_AS_KEVIN} card is submitted "
+                     "with --type Correspondence, where its shape is checked.")
+        if is_tier1:
+            sys.exit(f"ERROR: refusing to submit {args.task} — it touches Kevin's private legal matter, "
+                     "and a robot never signs anything there. Escalate it instead.")
+        attached = {os.path.basename(p) for p in (getattr(args, "attach", None) or [])}
+        if os.path.basename(sign_card["document"]) not in attached:
+            sys.exit(f"ERROR: refusing to submit {args.task} — attach the document Kevin is asked to "
+                     f"sign with the same submit: --attach {sign_card['document']}. Approving a name "
+                     "is not consent to a document he could not open.")
+        approver_email = KEVIN_AIRTABLE_EMAIL
+        # The fingerprint of the copy he is shown, so a file re-attached under the same name after his
+        # approval is never the one the robot checks Adobe against (second review, 16 Oct 2026).
+        copy_path = next(p for p in args.attach if os.path.basename(p) == os.path.basename(sign_card["document"]))
+        with open(copy_path, "rb") as fh:
+            copy_sha = hashlib.sha256(fh.read()).hexdigest()
+        stamp = datetime.now(LONDON).strftime("%d %b %Y %H:%M")
+        tf[AF["notes"]] = append_notes(
+            tf.get(AF["notes"]),
+            f"[{stamp} — agent-dispatch] {SIGN_CARD_MARK} {sign_card['agreementId']} "
+            f"({sign_card['agreement']}) copy sha256:{copy_sha}. Kevin's Approve lets the robot sign this one agreement.")
+        tf["_receiptAdded"] = True
+
     # The gate: prepared, proposed, and NOTHING sent, filed or executed.
     #
     # Clearing the approval fields is part of the gate, not tidiness. Before
@@ -5364,7 +5405,9 @@ def cmd_submit(args):
     # the one still saying Mica. Write the decision into the field the router
     # reads. Never the reverse: a non-tier-1 submit leaves Approver alone,
     # because Inbound Comms set it at creation and this is not that decision.
-    if is_tier1:
+    # A signature for Kevin is his alone (16 Oct 2026): the card goes to his queue whoever was set to approve
+    # the task, because the robot refuses any other approver.
+    if is_tier1 or sign_card:
         fields[AF["approver"]] = {"email": KEVIN_AIRTABLE_EMAIL}
     patch_task(args.task, fields)
 
@@ -5931,7 +5974,13 @@ def cmd_outcome(args):
     unreadable task raises, because a failed read must never be mistaken for
     "not approved yet" and quietly stall a form Kevin already approved.
     """
-    t = task_view(get_task(args.task))
+    rec = get_task(args.task)
+    t = task_view(rec)
+    # A SIGN AS KEVIN card (16 Oct 2026): the robot's `sign` command signs only when signProblem
+    # is empty. Read only for that shape, so every other form's gate costs no extra read.
+    sign_card, sign_problem = (sign_as_kevin_state(rec)
+                               if detect_kind(t["agentOutput"]) == "signkevin"
+                               else (None, f"its card is not a {SIGN_AS_KEVIN} card"))
     # A trial task is never "approved" as far as the browser's submit gate goes (2 Oct 2026).
     # Nor is a robot form card, on trial or not (3 Oct 2026): `commit` presses submit, and the
     # form is Kevin's to send. Its one door is `window`, which only `handover` reads: the robot
@@ -5953,6 +6002,12 @@ def cmd_outcome(args):
         "turn": bool((task_blocker(t["notes"]) or {}).get("kind") == "KEVIN")
                 and not form_turn_unanswered(t["id"], t["name"], t["notes"]),
         "feedback": t["feedback"],
+        "signAsKevin": sign_card,
+        "signProblem": sign_problem,
+        # The newest SIGN AS KEVIN stamp in Notes, so `sign --check` still finds the agreement after a Your
+        # step block or a report has replaced the card's text (third review, 16 Oct 2026).
+        "signStamp": next(({"agreementId": aid, "agreement": name, "signer": "info@agilelets.co.uk"}
+                           for aid, name, _sha in reversed(SIGN_COPY_RE.findall(str(t["notes"] or "")))), None),
     }))
 
 
@@ -6110,7 +6165,152 @@ def signature_watch_registered(task_id):
     return False
 
 
+# ─── SIGN AS KEVIN: the robot signs once Kevin approves (Kevin, 16 Oct 2026) ───
+# "with signing things, the initial request is to come to me, but if I say so, I can give you
+# approval to sign on my behalf." A SIGN AS KEVIN card (agent_email_format.py) names one Adobe
+# agreement by its own id; `agent-browser.js sign` reads `outcome` and signs only when
+# `signProblem` is empty, and writes its own ledger row, which `complete` then asks for.
+SIGN_FOR_KEVIN_LEDGER = os.environ.get(
+    "SIGN_FOR_KEVIN_LEDGER",
+    os.path.expanduser("~/knowledge-os/logs/sign-for-kevin/signed.jsonl"))
+SIGN_CARD_MARK = "SIGN AS KEVIN CARD:"
+SIGN_CARD_RE = re.compile(r"SIGN AS KEVIN CARD: (\S+)")
+SIGN_COPY_RE = re.compile(r"SIGN AS KEVIN CARD: (\S+) \((.*)\) copy sha256:([0-9a-f]{64})\. Kevin's Approve")
+SIGNED_FOR_KEVIN_MARK = "SIGNED FOR KEVIN:"
+NOT_SIGNED_MARK = "NOT SIGNED BY THE ROBOT:"
+
+
+def robot_signed(task_id, agreement_id):
+    """The robot's own ledger row for this task and agreement, or None. Never the run's claims."""
+    try:
+        with open(SIGN_FOR_KEVIN_LEDGER) as fh:
+            for line in fh:
+                try:
+                    row = json.loads(line)
+                except ValueError:
+                    continue
+                if row.get("cmd") == "signed" and row.get("task") == task_id \
+                        and row.get("agreementId") == agreement_id:
+                    return row
+    except OSError:
+        pass
+    return None
+
+
+def robot_sign_unconfirmed(task_id, agreement_id):
+    """True when the robot pressed Submit on this agreement and never proved it (its last
+    unconfirmed/cleared row says unconfirmed): nothing signs it again until Adobe has been read."""
+    rows = []
+    try:
+        with open(SIGN_FOR_KEVIN_LEDGER) as fh:
+            for line in fh:
+                try:
+                    row = json.loads(line)
+                except ValueError:
+                    continue
+                if row.get("task") == task_id and row.get("agreementId") == agreement_id \
+                        and row.get("cmd") in ("unconfirmed", "cleared"):
+                    rows.append(row["cmd"])
+    except OSError:
+        pass
+    return bool(rows) and rows[-1] == "unconfirmed" and not robot_signed(task_id, agreement_id)
+
+
+def robot_sign_locks(task_id):
+    """Every agreement on this task the robot pressed Submit on and never proved, read from its own
+    ledger (Notes are trimmed, and a card is replaced; the ledger is neither)."""
+    ids = []
+    try:
+        with open(SIGN_FOR_KEVIN_LEDGER) as fh:
+            for line in fh:
+                try:
+                    row = json.loads(line)
+                except ValueError:
+                    continue
+                if row.get("task") == task_id and row.get("agreementId") and row["agreementId"] not in ids:
+                    ids.append(row["agreementId"])
+    except OSError:
+        pass
+    return [i for i in ids if robot_sign_unconfirmed(task_id, i)]
+
+
+def approved_text_changed(task_id):
+    """True when the Agent Output was written after Approved At: the card the robot would read is
+    not the card Kevin approved. Two reads, each the other's control: exactly one must match, so a
+    formula Airtable cannot evaluate raises instead of reading as "unchanged"."""
+    if not re.fullmatch(r"rec[A-Za-z0-9]{14}", task_id or ""):
+        raise ValueError(f"not a record id: {task_id!r}")
+    test = "IS_AFTER(LAST_MODIFIED_TIME({Agent Output}), {Approved At})"
+    after = query_records(TASKS, f"AND(RECORD_ID()='{task_id}', {test})", [AF["name"]])
+    before = query_records(TASKS, f"AND(RECORD_ID()='{task_id}', NOT({test}))", [AF["name"]])
+    if len(after) + len(before) != 1:
+        raise RuntimeError(f"could not tell when {task_id}'s card text last changed "
+                           f"({len(after)} + {len(before)} matches, expected exactly 1)")
+    return bool(after)
+
+
+def latest_sign_card(notes):
+    """The agreement id the newest SIGN AS KEVIN submit stamped on this task, or ''."""
+    ids = SIGN_CARD_RE.findall(str(notes or ""))
+    return ids[-1] if ids else ""
+
+
+def sign_as_kevin_state(rec):
+    """(card, problem) for the robot's `sign` command. `problem` is '' only when Kevin approved
+    THIS card, as it stands, in his own queue, it has not changed since, and it is not his private
+    legal matter."""
+    t = task_view(rec)
+    try:
+        card = sign_as_kevin(t["agentOutput"])
+    except EmailFormatError as exc:
+        return None, f"its card claims the {SIGN_AS_KEVIN} shape but breaks it: {exc}"
+    if card is None:
+        return None, (f"its card is not a {SIGN_AS_KEVIN} card, so nothing Kevin approved names "
+                      "a document to sign")
+    if t["status"] in ("Completed", "Cancelled"):
+        return card, f"the task is {t['status']}"
+    if t["outcome"] == "Approved with minor edits":
+        return card, ("the approval came WITH EDITS, and a document cannot be edited by signing it. "
+                      "Read his note: it goes back to him as a new card or as his own step")
+    if t["outcome"] != "Approved as-is":
+        return card, f"it is not approved (Approval Outcome: {t['outcome'] or 'not set'})"
+    evidence = approval_evidence_problem(rec.get("fields") or {}, rec.get("createdTime") or "")
+    if evidence:
+        return card, evidence
+    if t["approverEmail"] and t["approverEmail"].lower() != KEVIN_AIRTABLE_EMAIL:
+        return card, f"it was put in {t['approverEmail']}'s queue: only Kevin approves his signature"
+    if TIER1_BANNER in str(t["agentOutput"] or "") or \
+            tier_match(TIER1_PATTERNS, t["name"], t["description"], t["notes"]):
+        return card, "it touches Kevin's private legal matter, which a robot never signs"
+    holders = [t["agentId"]] + t["teamMemberIds"]
+    trial = trial_problem(t["sentForApprovalByIds"] + holders, t["name"], t["notes"], t["approvedAt"])
+    if trial:
+        return card, f"it is a trial card ({trial})"
+    if robot_signed(t["id"], card["agreementId"]):
+        return card, "the robot has already signed this agreement for this task"
+    if robot_sign_unconfirmed(t["id"], card["agreementId"]):
+        return card, ("a Submit on this agreement was pressed and never proved: read Adobe first "
+                      f"(node scripts/agent-browser.js sign --task {t['id']} --check --shot <png>)")
+    # The copy he could open on the card is the one the robot compares with Adobe's before it signs.
+    doc = os.path.basename(card["document"])
+    url = next((a["url"] for a in t["attachments"] if a["filename"] == doc and a["url"]), "")
+    if not url:
+        return card, f"the document the card names ({doc}) is not attached to the task, so Kevin could not have read it"
+    shas = [sha for aid, _name, sha in SIGN_COPY_RE.findall(str(t["notes"] or "")) if aid == card["agreementId"]]
+    if not shas:
+        return card, "the task has no record of the copy Kevin was shown at submit, so it cannot be checked"
+    card = dict(card, documentUrl=url, documentSha256=shas[-1])
+    try:
+        if approved_text_changed(t["id"]):
+            return card, ("the card's text changed after his approval, so what it says now is "
+                          "not what he approved")
+    except Exception as exc:              # noqa: BLE001 — an unreadable check is a refusal
+        return card, f"it could not be shown that the card is unchanged since approval: {str(exc)[:160]}"
+    return card, ""
+
+
 SIGNED_MARK = "SIGNED COPY BACK:"
+SIGNED_FILED_MARK = "SIGNED COPY FILED:"
 
 
 def signed_handoff_note(stamp, agreement, pdf, then):
@@ -6200,6 +6400,22 @@ def cmd_signed(args):
         tick["authorityTicked"], tick["authorityNote"] = tick_authority(tf, args.agreement)
     except Exception as exc:                          # noqa: BLE001 — said in the JSON and the exit code
         tick["authorityError"] = f"Authority Signed could not be ticked: {str(exc)[:200]}"
+    # A SIGN AS KEVIN agreement (16 Oct 2026) needs no gate 2: the robot signed it on Kevin's
+    # approval and the task may already be closed. The copy everyone signed is filed on the task,
+    # dated, and nothing is reopened.
+    if args.then == "file":
+        if SIGNED_FILED_MARK in notes and args.agreement in notes:
+            print(json.dumps({"task": args.task, "filed": False, **tick, "reason": "already filed"}))
+            return 1 if tick["authorityError"] else 0
+        if not os.path.exists(args.pdf):
+            sys.exit(f"ERROR: signed PDF not found at {args.pdf}; refusing to file a document that is not on disk.")
+        name = upload_attachment(args.task, args.pdf)
+        patch_task(args.task, {AF["notes"]: append_notes(
+            notes, attached_stamp(name, "the signed copy, filed", who="signature-watch"),
+            note_line("signature-watch", f"{SIGNED_FILED_MARK} {args.agreement} is signed by everyone. "
+                                         f"Signed PDF: {args.pdf}"))})
+        print(json.dumps({"task": args.task, "filed": True, "attached": name, **tick}))
+        return 1 if tick["authorityError"] else 0
     if SIGNED_MARK in notes and args.agreement in notes:
         print(json.dumps({"task": args.task, "reopened": False, **tick,
                           "reason": "already handed off"}))
@@ -6231,6 +6447,25 @@ def cmd_signed(args):
                       "agent": ALL_AGENTS.get(team[0], {}).get("agent", team[0]),
                       "then": args.then, "pdf": args.pdf}))
     return 1 if tick["authorityError"] else 0
+
+
+def cmd_signed_for_kevin(args):
+    """The robot signed a SIGN AS KEVIN agreement (16 Oct 2026): one dated line on the task's trail,
+    so the card shows what happened. Called by `agent-browser.js sign` after Adobe's own page stopped
+    reading "Waiting For Me to Sign"; the robot's ledger row is the proof `complete` reads."""
+    if not robot_signed(args.task, args.agreement_id):
+        sys.exit(f"ERROR: refusing to stamp {args.task} — the robot's ledger has no signature for "
+                 f"{args.agreement_id}, so nothing says it was signed.")
+    rec = get_task(args.task)
+    notes = str((rec.get("fields") or {}).get(AF["notes"]) or "")
+    line = note_line("robot", f"{SIGNED_FOR_KEVIN_MARK} {args.agreement} ({args.agreement_id}) on Kevin's "
+                              f"approval. Adobe now reads: {args.status[:120]}")
+    if f"{SIGNED_FOR_KEVIN_MARK} {args.agreement} ({args.agreement_id})" in notes:
+        print(json.dumps({"task": args.task, "stamped": False, "reason": "already stamped"}))
+        return 0
+    patch_task(args.task, {AF["notes"]: append_notes(notes, line)})
+    print(json.dumps({"task": args.task, "stamped": True}))
+    return 0
 
 
 # ── The dated trail (Kevin, 8 Sep 2026) ─────────────────────────────────────
@@ -7608,6 +7843,36 @@ def cmd_complete(args):
                           "status": t["status"]}))
         return
 
+    # THE ROBOT'S SIGNATURE GATE (Kevin, 16 Oct 2026). A SIGN AS KEVIN task closes on the robot's
+    # own ledger row for the agreement Kevin approved, never on a run's claim. If the robot did not
+    # sign it (Kevin signed it himself, Adobe asked for more than his signature), the agent says why
+    # on the record with --not-signed, exactly as --no-certificate does.
+    try:
+        sign_card = sign_as_kevin(t["agentOutput"])
+    except EmailFormatError:
+        sign_card = None
+    sign_id = (sign_card or {}).get("agreementId") or latest_sign_card(t["notes"])
+    not_signed = " ".join(str(getattr(args, "not_signed", "") or "").split())
+    sign_note = ""
+    locked = robot_sign_locks(args.task)
+    if locked:
+        sign_id = locked[0]
+        sys.exit(f"ERROR: refusing to complete {args.task} — the robot pressed Submit on {sign_id} and it was "
+                 "never proved. Read Adobe first:\n"
+                 f"         node scripts/agent-browser.js sign --task {args.task} --check --shot <png>")
+    if sign_id and not robot_signed(args.task, sign_id):
+        if not not_signed:
+            sys.exit(
+                f"ERROR: refusing to complete {args.task} — it is a {SIGN_AS_KEVIN} card for agreement "
+                f"{sign_id} and the robot's ledger has no signature for it.\n"
+                "       Sign it first (it is approved):\n"
+                f"         node scripts/agent-browser.js sign --task {args.task} --shot <png>\n"
+                "       or, if the robot did not sign it, say why on the record:\n"
+                f"         python3 scripts/agent-dispatch.py complete {args.task} "
+                "--not-signed \"<what happened instead>\"")
+        sign_note = (f"[{datetime.now(LONDON).strftime('%d %b %Y')} — agent] {NOT_SIGNED_MARK} "
+                     f"{not_signed[:600]}")
+
     # THE CERTIFICATE-OWED GATE (Kevin, 2 Oct 2026). A gas safety record came
     # in on 16 Sep on a task named for its INVOICE. The agent checked the
     # payment three times, wrote "no certificate filed" in its own output, and
@@ -7664,7 +7929,9 @@ def cmd_complete(args):
         stamp = datetime.now(LONDON).strftime("%d %b %Y")
         no_cert_note = (no_cert_note + "\n\n" if no_cert_note else "") + \
             f"[{stamp} — agent] DONE, evidence: {evidence[:600]}"
-    declared = ({AF["notes"]: ((t["notes"] or "") + "\n\n" + no_cert_note).strip()[-90000:]}
+    if sign_note:
+        no_cert_note = (no_cert_note + "\n\n" if no_cert_note else "") + sign_note
+    declared =({AF["notes"]: ((t["notes"] or "") + "\n\n" + no_cert_note).strip()[-90000:]}
                 if no_cert_note else {})
 
     patch_task(args.task, {
@@ -12627,6 +12894,9 @@ def main():
     c.add_argument("--evidence", default="",
                    help="what proves the job is done (a merge commit, a receipt); written to Notes "
                         "with the close")
+    c.add_argument("--not-signed", default="", metavar="REASON",
+                   help="a SIGN AS KEVIN task the robot did not sign: say what happened instead; "
+                        "recorded in Notes")
 
     v = sub.add_parser("verify")
     v.add_argument("--report", required=True)
@@ -12741,7 +13011,15 @@ def main():
     sg.add_argument("task")
     sg.add_argument("--agreement", required=True)
     sg.add_argument("--pdf", required=True, help="the signed PDF on disk")
-    sg.add_argument("--then", required=True, help="post | email")
+    sg.add_argument("--then", required=True,
+                    help="post | email (reopen for gate 2) | file (a SIGN AS KEVIN copy: attach, no reopen)")
+    sf = sub.add_parser("signed-for-kevin",
+                        help="the robot's `sign` command stamps the task once Adobe shows the "
+                             "agreement signed (SIGN AS KEVIN, 16 Oct 2026)")
+    sf.add_argument("task")
+    sf.add_argument("--agreement", required=True)
+    sf.add_argument("--agreement-id", required=True)
+    sf.add_argument("--status", required=True, help="what Adobe's agreement page reads now")
 
     cg = sub.add_parser("certificate-gaps",
                         help="read-only: compliance payments with no certificate "
@@ -12784,7 +13062,7 @@ def main():
             "block": cmd_block, "unblock": cmd_unblock, "blockers": cmd_blockers,
             "attach": cmd_attach, "outcome": cmd_outcome,
             "reassign": cmd_reassign, "ledger": cmd_ledger,
-            "signed": cmd_signed, "signin-waiting": cmd_signin_waiting, "signin-done": cmd_signin_done, "signin-site": cmd_signin_site, "history": cmd_history, "certificate": cmd_certificate, "certificate-gaps": cmd_certificate_gaps,
+            "signed": cmd_signed, "signed-for-kevin": cmd_signed_for_kevin, "signin-waiting": cmd_signin_waiting, "signin-done": cmd_signin_done, "signin-site": cmd_signin_site, "history": cmd_history, "certificate": cmd_certificate, "certificate-gaps": cmd_certificate_gaps,
             "handover-property": cmd_handover_property,
             "clear-alerts": cmd_clear_alerts}[args.cmd](args) or 0
 

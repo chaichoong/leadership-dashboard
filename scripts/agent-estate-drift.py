@@ -162,6 +162,14 @@ RETIRED = [
      "four workers: builder, auditor, analyst, researcher; the Writer is parked to January"),
     (r"dept-marketing, dept-sales", "2026-10-09",
      "the default huddle is dept-strategy and dept-operations; Marketing and Sales are parked to January"),
+    # The signing route exists (Kevin's 16 Oct 2026 ruling, built the same day): an Adobe agreement waiting
+    # for info@agilelets.co.uk in Kevin's box is a SIGN AS KEVIN card the robot signs on his approval.
+    (r"until one does, the signature is his Your step", "2026-10-16",
+     "a SIGN AS KEVIN card is signed by the robot on his approval; only a signature with no route is his Your step"),
+    (r"until one exists it stays his Your", "2026-10-16",
+     "a SIGN AS KEVIN card is signed by the robot on his approval (GUARDRAILS.md \"Signing for Kevin\")"),
+    (r"Until a signing route exists", "2026-10-16",
+     "the route exists: SIGN AS KEVIN cards (agent-browser.js sign)"),
 ]
 
 # A line that is describing the old rule, not stating it.

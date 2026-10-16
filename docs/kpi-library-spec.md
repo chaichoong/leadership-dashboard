@@ -164,7 +164,10 @@ Can it keep going?
     came from a sign-in window (the robot browser's own `runs.jsonl` login line, within 6 hours
     before) for a site and profile Kevin had already signed the robot in to in the 30 days before.
     A clear the check found live by itself has no window and asks nothing of him. Verdicts are not
-    hand-backs: wrong work is line 38. Rationale: of the 36 cards that came back in the 14 days to
+    hand-backs: wrong work is line 38. A SIGN AS KEVIN card the robot signed on his approval opens no
+    wall and is never a hand-back; one closed with `complete --not-signed` (the robot did not sign it,
+    so he did or it went elsewhere) counts as "you did a signature" (16 Oct 2026, the signing route).
+    Rationale: of the 36 cards that came back in the 14 days to
     16 Oct, 20 were key or settings steps inside accounts the robot could have been given; the live
     dry run read 40 of 288 (86%) with 32 of his 58 sign-ins again for a site the robot already had.
     Green 95% or more, amber 85% to 95%, red under 85%; a sign-in log that cannot be read is never

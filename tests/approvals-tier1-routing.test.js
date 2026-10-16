@@ -129,7 +129,9 @@ describe('the two halves of the tier-1 decision agree', () => {
     it('submit writes Approver = Kevin when the engine decides tier 1', () => {
         // Without this, the engine says tier 1 while the field the router reads
         // still says Mica — two halves of one decision disagreeing.
-        expect(DISPATCH).toMatch(/if is_tier1:\s*\n\s*fields\[AF\["approver"\]\] = \{"email": KEVIN_AIRTABLE_EMAIL\}/);
+        // A SIGN AS KEVIN card (16 Oct 2026) goes to Kevin the same way: his approval is the authority
+        // for his signature, so the branch also takes it (tests/sign-for-kevin.test.js drives it).
+        expect(DISPATCH).toMatch(/if is_tier1(?: or sign_card)?:\s*\n\s*fields\[AF\["approver"\]\] = \{"email": KEVIN_AIRTABLE_EMAIL\}/);
     });
 
     it('a non-tier-1 submit leaves Approver alone', () => {

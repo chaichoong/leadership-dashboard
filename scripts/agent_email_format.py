@@ -702,7 +702,7 @@ def form_card(name="", notes="", holders=None):
 # a bold, quoted, bulleted or numbered heading cannot slip through.
 TRIAL_ACTING_SHAPE_RE = re.compile(
     r"^[ \t>*_#\-•]*(?:\d+[.)][ \t]*)?[*_]*"
-    r"(PASS TO ROY:|CALENDAR:|MARK FOR PAYMENT|DOCUMENT:|POST:|SIGNERS:)", re.I | re.M)
+    r"(PASS TO ROY:|CALENDAR:|MARK FOR PAYMENT|DOCUMENT:|POST:|SIGNERS:|SIGN\s+AS\s+KEVIN\s*:)", re.I | re.M)
 
 
 def strip_trial_marks(text):
@@ -1056,6 +1056,8 @@ def detect_kind(output):
     except EmailFormatError:
         return "email"          # let the email parser produce the real message
     lines = [ln.strip() for ln in head.splitlines() if ln.strip()]
+    if lines and " ".join(lines[0].partition(":")[0].split()).upper() == SIGN_AS_KEVIN:
+        return "signkevin"
     if lines and lines[0].rstrip().upper().rstrip(":") == "POST":
         return "post"
     keys = {ln.partition(":")[0].strip().upper() for ln in lines if ":" in ln}
@@ -1197,9 +1199,120 @@ def parse_sign_output(output):
             "subject": headers.get("SUBJECT", "").strip(), "body": body}
 
 
+# ─── THE FOURTH SHAPE: SIGN AS KEVIN (Kevin, 16 Oct 2026) ────────────
+#
+#   "with signing things, the initial request is to come to me, but if I say
+#    so, I can give you approval to sign on my behalf ... a legal signature:
+#    if I'm happy, I'm going to approve you to do it, then you can do that as
+#    well."
+#
+#   SIGN AS KEVIN   "someone has asked you to sign this; may the robot sign it
+#                    for you?"  Approve = the authority for this ONE document.
+#
+#       SIGN AS KEVIN: AST_Riel_Jackson_18_Northfield_Park
+#       AGREEMENT ID: CBJCHBCAABAA...
+#       SIGNER: info@agilelets.co.uk
+#       DOCUMENT: ~/knowledge-os/attachments/unsigned_recXXX_AST_Riel.pdf
+#       ---
+#       Plain English: what it is, who sent it, what signing commits you to.
+#
+# `agent-browser.js sign --dry-run` reads the name and Adobe's own id off the
+# agreement and downloads the unsigned copy, so nothing here is typed from
+# memory. `agent-browser.js sign` signs only the agreement whose id the
+# APPROVED card names, and only through a door it holds:
+#   info@agilelets.co.uk  the robot's own Adobe session, "Waiting for you". The
+#                         account's saved signature is Kevin's (Kevin, 28 Sep
+#                         2026); a box signed as Roy Lavin is never this shape.
+# Links emailed to kevinbrittain@gmail.com and other companies' signing sites
+# have no door yet, so they stay Kevin's Your step (KEVIN ONLY: signature).
+
+SIGN_AS_KEVIN = "SIGN AS KEVIN"
+SIGN_AS_KEVIN_HEADERS = {SIGN_AS_KEVIN, "AGREEMENT ID", "SIGNER", "DOCUMENT"}
+SIGN_AS_KEVIN_SIGNERS = ("info@agilelets.co.uk",)
+# Adobe's agreement id as the robot reads it: letters, digits and the URL-safe
+# punctuation Adobe uses, never a space or a line break.
+AGREEMENT_ID_RE = re.compile(r"^[A-Za-z0-9_\-:.]{12,200}$")
+
+
+def _first_header(output):
+    """The first header's key, upper case with its spacing squashed, so "Sign as  Kevin :" is the
+    same card as "SIGN AS KEVIN:" everywhere it is checked (second review, 16 Oct 2026)."""
+    try:
+        head, _ = _head_and_body(output)
+    except EmailFormatError:
+        return ""
+    for ln in head.splitlines():
+        if ln.strip():
+            return " ".join(ln.strip().partition(":")[0].split()).upper()
+    return ""
+
+
+def parse_sign_as_kevin_output(output):
+    """Kevin's signature, to be applied by the robot once he approves this card."""
+    head, body = _head_and_body(output)
+    headers, order = {}, []
+    for raw in head.splitlines():
+        line = raw.strip()
+        if not line:
+            continue
+        key, sep, val = line.partition(":")
+        if not sep:
+            raise EmailFormatError(f"header line is not `KEY: value`: {line!r}")
+        key = " ".join(key.split()).upper()
+        if key in headers:
+            raise EmailFormatError(f"{key} appears twice: one card signs one document")
+        headers[key] = val.strip()
+        order.append(key)
+    if not order or order[0] != SIGN_AS_KEVIN:
+        raise EmailFormatError(f"a signature for Kevin starts with a `{SIGN_AS_KEVIN}:` line")
+    unknown = set(headers) - SIGN_AS_KEVIN_HEADERS
+    if unknown:
+        raise EmailFormatError(
+            f"unsupported header(s) for a signature for Kevin: {', '.join(sorted(unknown))}. "
+            f"Only {SIGN_AS_KEVIN}, AGREEMENT ID, SIGNER and DOCUMENT.")
+    agreement = headers[SIGN_AS_KEVIN]
+    if not agreement or len(agreement) > 200:
+        raise EmailFormatError(
+            f"{SIGN_AS_KEVIN} must name the agreement exactly as Adobe shows it (1 to 200 characters)")
+    agreement_id = headers.get("AGREEMENT ID", "")
+    if not AGREEMENT_ID_RE.match(agreement_id):
+        raise EmailFormatError(
+            "no readable AGREEMENT ID. Run `node scripts/agent-browser.js sign --task <id> "
+            "--agreement \"<name>\" --dry-run` and copy the block it prints: the robot signs only "
+            "the agreement whose id Kevin approved.")
+    signers = parse_addresses(headers.get("SIGNER", ""), "SIGNER")
+    if len(signers) != 1:
+        raise EmailFormatError("SIGNER names exactly one address: the Adobe account whose box this is")
+    signer = signers[0].lower()
+    if signer not in SIGN_AS_KEVIN_SIGNERS:
+        raise EmailFormatError(
+            f"the robot cannot sign for {signer}: its only signing door is "
+            f"{', '.join(SIGN_AS_KEVIN_SIGNERS)} (Adobe, Waiting for you). Anything else stays "
+            "Kevin's own step: `KEVIN ONLY: signature: <the step>`.")
+    document = _one_file(headers.get("DOCUMENT"), "DOCUMENT")
+    if not document.lower().endswith(".pdf"):
+        raise EmailFormatError("DOCUMENT is the unsigned copy Kevin reads, a .pdf")
+    if not body:
+        raise EmailFormatError(
+            "no explanation below the `---`. Approving a filename is not consent to a "
+            "document's contents; say what it is, who sent it and what signing commits Kevin to.")
+    return {"kind": "signkevin", "agreement": agreement, "agreementId": agreement_id,
+            "signer": signer, "document": document, "body": body}
+
+
+def sign_as_kevin(output):
+    """The parsed card when this output is the SIGN AS KEVIN shape, else None. Raises on a card
+    that claims the shape but breaks it."""
+    if _first_header(output) != SIGN_AS_KEVIN:
+        return None
+    return parse_sign_as_kevin_output(output)
+
+
 def parse_any(output):
-    """Parse whichever of the three shapes this is. Always carries `kind`."""
+    """Parse whichever of the four shapes this is. Always carries `kind`."""
     kind = detect_kind(output)
+    if kind == "signkevin":
+        return parse_sign_as_kevin_output(output)
     if kind == "post":
         return parse_post_output(output)
     if kind == "sign":
@@ -1218,6 +1331,8 @@ def validate_submission_any(output):
     identity to get wrong, so their strict layer IS their parser.
     """
     kind = detect_kind(output)
+    if kind == "signkevin":
+        return parse_sign_as_kevin_output(output)
     if kind == "post":
         return parse_post_output(output)
     if kind == "sign":
