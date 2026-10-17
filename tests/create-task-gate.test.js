@@ -598,3 +598,84 @@ describe('a shared number is never enough to fold one task into another', () => 
       .toBe(true);
   });
 });
+
+// A CARD KEVIN HAS DECIDED IS NEVER FOLDED INTO.
+//
+// Finding 20261016-inbound-email-triage-952, seen twice, and the second
+// instance of the family: on 16 Oct 2026 the key pass folded three unrelated
+// requests from one sender into an APPROVED task on the key `inbound|asks
+// roy`, and the day before it folded two unrelated matters from one
+// counterparty, one of them into an approved card. The 14 Oct incident at 1406
+// Oldham Road was the same ending reached through a shared number.
+//
+// Kevin has already READ a card he decided, so a paragraph appended to it
+// afterwards is invisible by construction: never approved, never carried out,
+// and the gate exits 0 with {"action": "updated"} so the work looks done. The
+// guard asks nothing about the words — the other two fold guards exist for
+// that, and this family keeps arriving through a different one of them.
+//
+// Back-tested by deleting the fold_into_a_decided_card calls in decide(): the
+// first three cases flip to action "update" and this block fails.
+describe('a fold never lands on a card Kevin has already decided', () => {
+  const F = runPy('mod.F');
+  const row = (name, extra = {}) => ({
+    id: 'recDecided',
+    createdTime: '2026-10-13T00:00:00.000Z',
+    fields: { [F.name]: name, [F.status]: { name: 'Approval' }, ...extra },
+  });
+  const one = (incoming, existing, extra) => runPy(`mod.decide(arg[0], arg[1])`,
+    [{ [F.name]: incoming }, [row(existing, extra)]]);
+
+  const ASKS = 'INBOUND: Roy asks for the Devon Street keys';
+  const SAME = 'INBOUND: Roy asks for the Devon Street keys back';
+
+  it('an approval alone refuses the fold, on a pair that otherwise folds', () => {
+    // The control: with no verdict on the card, this pair IS one matter.
+    expect(one(SAME, ASKS).action).toBe('update');
+    expect(one(SAME, ASKS, { [F.approvalOutcome]: { name: 'Approved as-is' } }).action)
+      .toBe('create');
+    expect(one(SAME, ASKS, { [F.approvedAt]: '2026-10-16T09:00:00.000Z' }).action)
+      .toBe('create');
+  });
+
+  it('a card Kevin SENT BACK is refused too: he has read that one as well', () => {
+    expect(one(SAME, ASKS, { [F.approvalOutcome]: { name: 'Request changes' } }).action)
+      .toBe('create');
+  });
+
+  it('names the record and says why, so the refusal can be audited', () => {
+    const v = one(SAME, ASKS, { [F.approvalOutcome]: { name: 'Approved as-is' } });
+    expect(v.note).toContain('recDecided');
+    expect(v.note).toMatch(/already decided it \(Approved as-is\)/);
+  });
+
+  it('refuses through the key pass as well, not only the word pass', () => {
+    // Identical names: the exact-key bucket, which is the pass that folded the
+    // three requests into the approved card on `inbound|asks roy`.
+    const v = one(ASKS, ASKS, { [F.approvalOutcome]: { name: 'Approved as-is' } });
+    expect(v.action).toBe('create');
+    expect(v.note).toContain('same subject key');
+  });
+
+  it('an undecided card elsewhere on the board is never listed as refused', () => {
+    // The note is for pairs that LOOKED alike. A board full of approved cards
+    // about other things must not fill it.
+    const v = runPy(`mod.decide(arg[0], arg[1])`, [{ [F.name]: SAME }, [
+      { id: 'recOther', createdTime: '2026-10-01T00:00:00.000Z',
+        fields: { [F.name]: 'COMPLIANCE: Gas safety record for 82 Devon Street',
+          [F.status]: { name: 'Approval' },
+          [F.approvalOutcome]: { name: 'Approved as-is' } } },
+    ]]);
+    expect(v.action).toBe('create');
+    expect(v.note).toBeUndefined();
+  });
+
+  it('the fold path can SEE an approval: the open-task read asks for both fields', () => {
+    // The gate could not refuse what it never read — fetch_open_tasks listed
+    // eleven field ids and neither approval field was among them.
+    const src = readFileSync(GATE, 'utf8');
+    const fn = src.slice(src.indexOf('def fetch_open_tasks'), src.indexOf('def post_comment'));
+    expect(fn).toContain('F["approvalOutcome"]');
+    expect(fn).toContain('F["approvedAt"]');
+  });
+});
