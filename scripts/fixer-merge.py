@@ -89,11 +89,17 @@ PROTECTED = (
 )
 
 
-def sh(args, cwd=None, timeout=1800):
+def sh(args, cwd=None, timeout=1800, env=None):
     # REPO is read at CALL time, not bound as a default at import time, so a
     # test can point the module at a scratch repo and actually exercise this.
+    # env is MERGED over the inherited environment, never a replacement: a bare
+    # dict would strip PATH and npx would not resolve.
+    full = None
+    if env:
+        full = dict(os.environ)
+        full.update(env)
     return subprocess.run(args, cwd=cwd or REPO, capture_output=True, text=True,
-                          timeout=timeout)
+                          timeout=timeout, env=full)
 
 
 def changed_files(pr):
@@ -258,20 +264,93 @@ def destroy_merge_result(path):
     _git(["worktree", "prune"])
 
 
+def _read_json(path):
+    """A reporter's JSON file, or None. A gate must never die because a reporter
+    wrote nothing: the tail is still there and the run still has a verdict."""
+    try:
+        with open(path) as fh:
+            return json.load(fh)
+    except Exception:
+        return None
+
+
+def failed_vitest(path):
+    """[{file, test}] out of vitest's JSON report; [] when it cannot be read.
+
+    WHY (finding 20261014-queue-fixer-867, seen 3 times): run_gate kept only a
+    400-character tail per half, and vitest's tail is the summary counts, not
+    the failing file. On 13 Oct 2026 the gate went RED twice on PR #762 and the
+    only way to learn WHICH test failed was to rebuild the merge result by hand
+    and run both suites again (12 minutes). A refusal nobody can diagnose is
+    what teaches people to reach for SKIP_SYNC_TESTS=1."""
+    d = _read_json(path)
+    if not isinstance(d, dict):
+        return []
+    out = []
+    for res in d.get("testResults") or []:
+        if not isinstance(res, dict):
+            continue
+        name = res.get("name") or ""
+        for a in res.get("assertionResults") or []:
+            if isinstance(a, dict) and a.get("status") == "failed":
+                out.append({"file": name, "test": a.get("fullName") or a.get("title") or ""})
+        if not out and res.get("status") == "failed" and res.get("message"):
+            # A file that fails to COLLECT has no assertions at all, and that is
+            # the failure mode the tail hid worst: an import error reads as a
+            # bare non-zero exit.
+            out.append({"file": name, "test": "(file failed to run)"})
+    return out
+
+
+def failed_playwright(path):
+    """[{file, test}] out of playwright's JSON report; [] when it cannot be read."""
+    d = _read_json(path)
+    if not isinstance(d, dict):
+        return []
+    out = []
+
+    def walk(suite, path_parts):
+        f = suite.get("file") or (path_parts[0] if path_parts else "")
+        for spec in suite.get("specs") or []:
+            if isinstance(spec, dict) and spec.get("ok") is False:
+                out.append({"file": spec.get("file") or f, "test": spec.get("title") or ""})
+        for inner in suite.get("suites") or []:
+            if isinstance(inner, dict):
+                walk(inner, [f])
+
+    for suite in d.get("suites") or []:
+        if isinstance(suite, dict):
+            walk(suite, [])
+    return out
+
+
 def run_gate(cwd):
     """Both halves, against the MERGE RESULT. A green vitest with a red browser
-    suite is not green, and neither is a green run of the wrong tree."""
+    suite is not green, and neither is a green run of the wrong tree.
+
+    Each half records the failing FILES and TEST NAMES as well as the tail, so a
+    red gate names what broke instead of only that something did."""
     out = {"testedTree": cwd}
-    v = sh(["npx", "vitest", "run"], cwd=cwd)
-    out["vitest"] = {"ok": v.returncode == 0,
-                     "tail": (v.stdout or v.stderr or "").strip()[-400:]}
-    if not out["vitest"]["ok"]:
-        return False, out
-    b = sh(["npx", "playwright", "test", "tests/sync-invariants/",
-            "--reporter=dot"], cwd=cwd)
-    out["browser"] = {"ok": b.returncode == 0,
-                      "tail": (b.stdout or b.stderr or "").strip()[-400:]}
-    return out["vitest"]["ok"] and out["browser"]["ok"], out
+    reports = tempfile.mkdtemp(prefix="fixer-gate-reports-")
+    try:
+        vjson = os.path.join(reports, "vitest.json")
+        v = sh(["npx", "vitest", "run", "--reporter=dot",
+                "--reporter=json", "--outputFile.json=" + vjson], cwd=cwd)
+        out["vitest"] = {"ok": v.returncode == 0,
+                         "tail": (v.stdout or v.stderr or "").strip()[-400:],
+                         "failed": failed_vitest(vjson)}
+        if not out["vitest"]["ok"]:
+            return False, out
+        bjson = os.path.join(reports, "playwright.json")
+        b = sh(["npx", "playwright", "test", "tests/sync-invariants/",
+                "--reporter=dot,json"], cwd=cwd,
+               env={"PLAYWRIGHT_JSON_OUTPUT_NAME": bjson})
+        out["browser"] = {"ok": b.returncode == 0,
+                          "tail": (b.stdout or b.stderr or "").strip()[-400:],
+                          "failed": failed_playwright(bjson)}
+        return out["vitest"]["ok"] and out["browser"]["ok"], out
+    finally:
+        shutil.rmtree(reports, ignore_errors=True)
 
 
 def decide(pr):
