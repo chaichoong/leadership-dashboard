@@ -1200,6 +1200,36 @@ def _phone_shaped_ids(name):
 DUPE_SHARED_WORD_RE = re.compile(r"^(?=[a-z0-9]*[a-z])[a-z0-9]+$")
 
 
+def fold_into_a_decided_card(fields):
+    """Why this open task must never absorb new work, or ''.
+
+    A FOLD IS DESTRUCTIVE AND A DECIDED CARD IS THE ONE PLACE IT MUST NEVER
+    LAND (17 Oct 2026, finding 20261016-inbound-email-triage-952, the second
+    recorded instance; the first was finding 20261014 at 1406 Oldham Road).
+    Kevin has already READ a card he decided, so a paragraph appended to it
+    afterwards is invisible by construction: it is never approved, never
+    carried out, and the gate exits 0 saying `{"action": "updated"}`, so the
+    work looks done. Three unrelated requests from one sender went into one
+    APPROVED task on the key `inbound|asks roy`, and on 16 Oct two unrelated
+    matters from one counterparty went the same way.
+
+    Any verdict counts, not only an approval. A card Kevin sent back carries
+    `Request changes` and he has read that one too; the agent is working to
+    his note on it, and new work arriving underneath is work nobody asked
+    about. The cheap direction is two cards he can merge, which is his own
+    ruling on the number guard.
+
+    Read off the RECORD, like the lane check, because a name says nothing
+    about whether Kevin has seen it.
+    """
+    outcome = _sel_name(fields.get(F["approvalOutcome"])).strip()
+    if outcome:
+        return "Kevin has already decided it (%s)" % outcome
+    if str(fields.get(F["approvedAt"]) or "").strip():
+        return "Kevin has already approved it"
+    return ""
+
+
 def fold_on_a_number_only(name_a, name_b, shared):
     """True when the only thing these two task names agree on is a number and
     their words do not agree, so the fold must not go ahead.
@@ -1611,6 +1641,10 @@ def decide(incoming_fields, open_rows):
                 not_folded.append("%s: same subject key, but the names agree on "
                                   "nothing but the address" % row["id"])
                 continue
+            decided = fold_into_a_decided_card(f)
+            if decided:
+                not_folded.append("%s: same subject key, but %s" % (row["id"], decided))
+                continue
             why_matched[row["id"]] = "same subject"
             matches.append(row)
             continue
@@ -1626,6 +1660,11 @@ def decide(incoming_fields, open_rows):
             if fold_on_a_number_only(incoming_name, other, verdict["shared"]):
                 not_folded.append("%s: the names share a number and no subject"
                                   % row["id"])
+                continue
+            decided = fold_into_a_decided_card(f)
+            if decided:
+                not_folded.append("%s: the names look like one matter, but %s"
+                                  % (row["id"], decided))
                 continue
             why_matched[row["id"]] = verdict["why"]
             matches.append(row)
@@ -1783,7 +1822,11 @@ def fetch_open_tasks():
                   ("filterByFormula", "AND({Status}!='Completed', {Status}!='Cancelled')")]
         for fid in (F["name"], F["status"], F["due"], F["priority"],
                     F["team"], F["inboundSender"], F["maintenance"],
-                    F["tenancies"], F["tenants"], F["properties"], F["units"]):
+                    F["tenancies"], F["tenants"], F["properties"], F["units"],
+                    # A CARD KEVIN HAS DECIDED IS NEVER FOLDED INTO (17 Oct
+                    # 2026, finding 952, second recorded instance). The gate
+                    # could not refuse what it never read.
+                    F["approvalOutcome"], F["approvedAt"]):
             params.append(("fields[]", fid))
         if offset:
             params.append(("offset", offset))
