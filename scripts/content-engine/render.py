@@ -1394,14 +1394,13 @@ RESUBMIT_DIR = os.path.expanduser("~/.config/od/content_engine_resubmit")   # <d
 def redo_queue_place(day, ledger):
     """(place, total) for `day` in the night's sent-back redo queue, or (None, total) when it is not in it.
 
-    The night renders ONE redo, whatever the slots (Kevin, 7 Oct 2026), oldest first, and a day whose pull was
-    refused goes behind the rest. So a day sitting second or later in this queue is not rendering tonight and is
-    not stalled either: it is waiting its turn. Ordered exactly as watch.plan orders it, because two readers of
-    one queue giving two answers is how 'waiting' got read as 'broken' (finding 20261016-phase-3-935)."""
-    failed_at = lambda d: max((v.get("pull_failed") or "") for v in ledger.values()
-                              if v.get("day") == d and v.get("status") == "new")
-    redo = sorted({v["day"] for v in ledger.values() if v.get("status") == "new" and v.get("reset")},
-                  key=lambda d: (failed_at(d), d))
+    The night renders ONE redo, whatever the slots (Kevin, 7 Oct 2026), longest-waiting first, and a day whose pull
+    was refused goes behind the rest. So a day sitting second or later in this queue is not rendering tonight and is
+    not stalled either: it is waiting its turn. It calls watch.redo_order, the SAME list plan() takes the night's
+    redo from, with the same gap-day and takeover-day filters — two readers of one queue giving two answers is how
+    'waiting' got read as 'broken' (finding 20261016-phase-3-935), and a place computed off a different sort is
+    exactly that bug again."""
+    redo = watch.redo_order(ledger, exclude=watch.gap_days(), start=watch.start_day())
     mine = {v.get("day") for v in ledger.values()
             if (v.get("episode") == day or (v.get("day") == day and not v.get("episode")))
             and v.get("status") == "new" and v.get("reset")}
@@ -1409,6 +1408,15 @@ def redo_queue_place(day, ledger):
         if d == day or d in mine:
             return i + 1, len(redo)
     return None, len(redo)
+
+
+def nights_parked(receipt_mtime, now=None):
+    """Nights the resubmit receipt has sat parked. 0 means it was parked today, so the day has not yet had a night.
+
+    Whole days, not hours: a receipt parked at 14:16 and read at 09:00 the next morning has had ONE night, and
+    rounding that to zero is what let a day read as "rendering tonight" eight mornings running."""
+    now = now or dt.datetime.now()
+    return max(0, (now.date() - dt.datetime.fromtimestamp(receipt_mtime).date()).days)
 
 
 def resubmit_due(day, ledger, receipt_mtime, card, full_fields):
@@ -1422,10 +1430,21 @@ def resubmit_due(day, ledger, receipt_mtime, card, full_fields):
         # second. Day 2106 waited six nights behind the one-redo-a-night cap while every report said this, so nobody
         # could tell a jam from a queue (finding 20261016-phase-3-935). Name the place and the nights.
         place, total = redo_queue_place(day, ledger)
+        waited = nights_parked(receipt_mtime)
         if place is not None and place > 1:
-            return ("it is %d of %d sent-back days in the night's redo queue, so about %d more night(s): "
-                    "one redo a night, oldest first" % (place, total, place - 1))
+            why = ("it is %d of %d sent-back days in the night's redo queue, so about %d more night(s): "
+                   "one redo a night, longest-waiting first" % (place, total, place - 1))
+            # The estimate is queue POSITION. When the day has already waited longer than the position says is left,
+            # the queue is not draining at one a night and the estimate has been wrong every night it was printed
+            # (finding 20261018-phase-3-975: 2106 read "about 1 night away" for 8 nights running).
+            if waited > place - 1:
+                why += ("; BUT its receipt has been parked %d night(s) already, so the queue is NOT draining at one "
+                        "a night and this estimate cannot be trusted" % waited)
+            return why
         if place == 1:
+            if waited >= 1:
+                return ("it is first in the night's redo queue and STILL has not rendered after %d night(s) with its "
+                        "receipt parked: the night run is not reaching it, so this is stuck, not waiting" % waited)
             return "a clip of the day is still waiting to render; it is first in the night's redo queue, so tonight"
         return "a clip of the day is still waiting to render"
     if any(v.get("status") == "failed" for v in mine): return "a clip of the day failed to render; it goes back once that is put right"   # never part 1 alone (review, 24 Sep 2026)

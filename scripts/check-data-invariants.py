@@ -54,6 +54,7 @@ Exit:   0 = all invariants hold, 1 = violation or control failure.
 Auth:   ~/.config/od/airtable_pat (never printed).
 """
 
+import datetime
 import json
 import os
 import re
@@ -1347,6 +1348,84 @@ def query(pat, table, formula, fields=None, page_size=100, limit=None):
             return records[:limit] if limit is not None else records
 
 
+REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+
+def write_full_violations(results, repo=None, today=None):
+    """Write every violation of every failed invariant to a dated JSON file.
+
+    The printed report caps each failure at 5 samples to stay readable, which on
+    18 Oct 2026 meant a run that found 30 duplicate transaction ids named 5 of
+    them and said nothing about the other 25 (finding 20261018-phase-2-974). The
+    routine that works the failure reads the report, so the full list needs a
+    home it can open. Same shape and naming as drift-scan's
+    monitoring/drift-exceptions-{date}.json. Returns the repo-relative path, or
+    None when nothing failed.
+    """
+    fails = [r for r in results if r.get("status") == "FAIL"]
+    if not fails:
+        return None
+    repo = repo or REPO
+    today = today or datetime.date.today().isoformat()
+    out_dir = os.path.join(repo, "monitoring")
+    os.makedirs(out_dir, exist_ok=True)
+    path = os.path.join(out_dir, "data-invariants-%s.json" % today)
+    payload = {
+        "date": today,
+        "failed_invariants": [
+            {
+                "name": r["name"],
+                "count": r["count"],
+                "incident": r.get("incident"),
+                "violations": r.get("all_violations", r.get("samples", [])),
+            }
+            for r in fails
+        ],
+    }
+    with open(path, "w") as f:
+        json.dump(payload, f, indent=2)
+    return os.path.relpath(path, repo)
+
+
+def render_report(results, full_path, failed):
+    """The printed report, as lines.
+
+    A function rather than inline prints so a test can drive the real thing: the
+    18 Oct 2026 report said "30 VIOLATION(S)" and then listed 5 with nothing
+    saying the list was cut (finding 20261018-phase-2-974).
+    """
+    out = ["Live Airtable data invariants", "=" * 60]
+    for r in results:
+        mark = {"PASS": "PASS  ", "FAIL": "FAIL  ", "ERROR": "ERROR ",
+                "CONTROL_FAILED": "BROKEN", "SKIP": "WAITING"}[r["status"]]
+        out.append(f"{mark} {r['name']}")
+        out.append(f"       asserts: {r['asserts']}")
+        if r["status"] == "PASS":
+            out.append(f"       checked against {r['control_population']}+ live records — no violations")
+        elif r["status"] == "FAIL":
+            shown = len(r["samples"])
+            if shown < r["count"]:
+                out.append(f"       {r['count']} VIOLATION(S) — showing {shown} of {r['count']}")
+            else:
+                out.append(f"       {r['count']} VIOLATION(S)")
+            out.append(f"       regression of: {r['incident']}")
+            for sample in r["samples"]:
+                out.append(f"         {sample}")
+            if shown < r["count"]:
+                where = full_path or "(not written: see --json output)"
+                out.append(f"       full list of all {r['count']}: {where}")
+        else:
+            out.append(f"       {r['detail']}")
+        out.append("")
+    out.append("=" * 60)
+    waiting = sum(1 for r in results if r["status"] == "SKIP")
+    summary = "all invariants hold" if not failed else "INVARIANT BROKEN — do not deploy"
+    if waiting and not failed:
+        summary += f" ({waiting} waiting for their first live record)"
+    out.append("RESULT: " + summary)
+    return out
+
+
 def main():
     as_json = "--json" in sys.argv
     pat = load_pat()
@@ -1414,6 +1493,12 @@ def main():
                     count=len(violations),
                     incident=inv["incident"],
                     samples=[{"id": r["id"], **r["fields"]} for r in violations[:5]],
+                    # The printed report keeps 5 samples so the log stays readable.
+                    # The FULL list goes to the dated JSON below: on 18 Oct 2026 a
+                    # report showed 5 of 30 duplicate transaction ids with nothing
+                    # saying it was cut, so the routine that works the failure could
+                    # only ever name 5 (finding 20261018-phase-2-974).
+                    all_violations=[{"id": r["id"], **r["fields"]} for r in violations],
                 )
                 failed = True
             else:
@@ -1441,6 +1526,7 @@ def main():
                     count=len(violations),
                     incident=scan["incident"],
                     samples=violations[:5],
+                    all_violations=list(violations),
                 )
                 failed = True
             else:
@@ -1450,32 +1536,15 @@ def main():
             failed = True
         results.append(entry)
 
+    full_path = write_full_violations(results)
+
     if as_json:
-        print(json.dumps({"ok": not failed, "invariants": results}, indent=2))
+        payload = {"ok": not failed, "invariants": results}
+        if full_path:
+            payload["violations_file"] = full_path
+        print(json.dumps(payload, indent=2))
     else:
-        print("Live Airtable data invariants")
-        print("=" * 60)
-        for r in results:
-            mark = {"PASS": "PASS  ", "FAIL": "FAIL  ", "ERROR": "ERROR ",
-                    "CONTROL_FAILED": "BROKEN", "SKIP": "WAITING"}[r["status"]]
-            print(f"{mark} {r['name']}")
-            print(f"       asserts: {r['asserts']}")
-            if r["status"] == "PASS":
-                print(f"       checked against {r['control_population']}+ live records — no violations")
-            elif r["status"] == "FAIL":
-                print(f"       {r['count']} VIOLATION(S)")
-                print(f"       regression of: {r['incident']}")
-                for s in r["samples"]:
-                    print(f"         {s}")
-            else:
-                print(f"       {r['detail']}")
-            print()
-        print("=" * 60)
-        waiting = sum(1 for r in results if r["status"] == "SKIP")
-        summary = "all invariants hold" if not failed else "INVARIANT BROKEN — do not deploy"
-        if waiting and not failed:
-            summary += f" ({waiting} waiting for their first live record)"
-        print("RESULT:", summary)
+        print("\n".join(render_report(results, full_path, failed)))
 
     return 1 if failed else 0
 

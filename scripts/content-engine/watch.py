@@ -105,6 +105,40 @@ def day_fits(ledger, day, free):
 MIN_NEW = 2   # new days a night that a redo never displaces (Kevin, 2 Oct 2026: "at least two episodes every single day")
 
 
+RESUBMIT_DIR = os.path.expanduser("~/.config/od/content_engine_resubmit")   # <day>.md: the receipt parked the moment Kevin sends a card back
+
+
+def receipt_parked(day, root=None):
+    """When the day's resubmit receipt was parked, as a timestamp. `inf` when none is parked, so a redo day with no
+    receipt waiting on it never jumps one that has been waiting."""
+    try:
+        return os.path.getmtime(os.path.join(root or RESUBMIT_DIR, "%d.md" % day))
+    except OSError:
+        return float("inf")
+
+
+def redo_order(ledger, exclude=(), start=None, root=None):
+    """The sent-back days the night may redo, in the order the night takes them.
+
+    ONE list, read by plan() here and by render.redo_queue_place() for the report, because two readers of one queue
+    giving two answers is how "waiting" got read as "broken" (finding 20261016-phase-3-935).
+
+    OLDEST WAITING first, not lowest day number (Kevin, 7 Oct 2026; finding 20261018-phase-3-975). The queue used to
+    sort on the day number, and with one redo a night that starves everything behind a low-numbered day Kevin keeps
+    sending back: 2100 was sent back again on 14, 15, 16 and 17 Oct and, being the lower number, re-took the single
+    redo slot every one of those nights while 2106 — receipt parked since 10 Oct — never rendered. The receipt is
+    parked the moment he sends a card back, so its age is how long that day has actually waited.
+
+    A day whose footage would not come down still goes behind the rest, least recently failed first (Kevin, 2 Oct
+    2026): otherwise an older day whose pull is refused every night keeps a younger redo waiting for ever.
+    """
+    failed_at = lambda d: max((v.get("pull_failed") or "") for v in ledger.values()
+                              if v.get("day") == d and v.get("status") == "new")
+    days = {v["day"] for v in ledger.values() if v.get("status") == "new" and v.get("reset")} - set(exclude)
+    return sorted((d for d in days if not start or d >= start),
+                  key=lambda d: (failed_at(d), receipt_parked(d, root), d))
+
+
 def plan(ledger, slots, gaps=None, free=None, start=None):
     """The night's order (Kevin, 8 Sep 2026): "the first one is the one that continues the continuity, and then
     the second two are the two oldest ones that are missing". Slot 1 is the oldest waiting day from the takeover
@@ -124,9 +158,7 @@ def plan(ledger, slots, gaps=None, free=None, start=None):
     # Oldest first, but a day whose footage would not come down goes behind the others, least recently failed first
     # (Kevin, 2 Oct 2026): with one redo a night, an older day whose pull was refused every night would keep a younger
     # redo waiting for ever. `pull_failed` is stamped by pull() on every refusal and cleared when the clip arrives.
-    failed_at = lambda d: max((v.get("pull_failed") or "") for v in ledger.values() if v.get("day") == d and v.get("status") == "new")
-    redo = sorted((d for d in {v["day"] for v in ledger.values() if v.get("status") == "new" and v.get("reset")} - gap_list if not start or d >= start),
-                  key=lambda d: (failed_at(d), d))
+    redo = redo_order(ledger, exclude=gap_list, start=start)
     cont = [d for d in waiting if d not in gaps and d not in redo and (not start or d >= start)]
     gap_ok, notes = [], []
     for d in sorted(d for d in waiting if d in gaps):
@@ -156,7 +188,7 @@ def plan(ledger, slots, gaps=None, free=None, start=None):
         # same, so nobody could tell a draining queue from a jammed one (finding 20261016-phase-3-935).
         for i, d in enumerate(redo[room:]):
             notes.append("redo: day %d (sent back) waits for another night: %d of %d in the redo queue, about %d night(s) "
-                         "away, one redo a night" % (d, room + i + 1, len(redo), i + 1))
+                         "away, one redo a night, longest-waiting receipt first" % (d, room + i + 1, len(redo), i + 1))
         days = front + days
     return days, notes
 
