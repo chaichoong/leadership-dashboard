@@ -117,7 +117,7 @@ that copy was NOT CHECKED this run, so say so in your report).
 
 ## Step 2 — Triage each new inbox message (the judgement)
 
-Decide ONE outcome per message. Read the sender, subject, body excerpt, and
+Decide ONE outcome per message (rule 1c's diary task is the one addition). Read the sender, subject, body excerpt, and
 the `list-unsubscribe` header (its presence = machine mail).
 
 0a. **An auto-reply never becomes a task (Kevin's ruling, 2 Sep 2026):** the
@@ -210,18 +210,22 @@ the `list-unsubscribe` header (its presence = machine mail).
 1c. **A date for Kevin's diary is always a diary card (Kevin, 18 Oct 2026).** His words:
    "anything that comes into my inbox with something that should be added to my calendar: create
    an approval card for whether it needs to go in my calendar or not." When a message gives a
-   date (and usually a time) that Kevin or one of his children is booked into, invited to or
-   expected at, raise a diary task through Step 4d: a medical, dental or optician appointment, a
-   meeting or call with Kevin, a class, session or event he or a child is booked on, a school
-   event or fixture, a hearing, a viewing or visit Kevin himself attends. The diary task comes ON
-   TOP of the message's own outcome: a reply still gets its reply task, family news still goes on
-   his INBOX card. A message that is ONLY the date (an appointment reminder, a booking
-   confirmation, a fixture change) gets the diary task and nothing else: `act --do label12`, never
-   `leave`. NOT a diary task: event marketing he has not booked (rules 4 and 5), a deadline (a
-   pay-by or reply-by date stays a task with its Due Date), a property visit Roy or a contractor
-   attends (Roy's lane), and a train, flight, hotel or event-ticket booking, because Gmail puts
-   those in his diary itself (checked 18 Oct 2026: the 23 Oct Eurostar entry was Gmail's own).
-   When unsure whether it belongs in his diary, raise it: he answers the card with one tap.
+   date (and usually a time) that Kevin or one of his children is booked into, invited to by
+   someone he deals with, or expected at, raise a diary task through Step 4d: a medical, dental
+   or optician appointment, a meeting or call with Kevin, a class, session or event he or a child
+   is booked on, a school or club event, fixture or parents' evening, a hearing, a viewing or
+   visit Kevin himself attends. The diary task is the ONE exception to "one outcome per message":
+   it comes ON TOP of the message's own outcome, so a reply still gets its reply task and family
+   news that is more than a date still goes on his INBOX card. A message whose point is the date
+   (an appointment reminder, a booking confirmation, a fixture or session notice) gets the diary
+   task and nothing else: `act --do label12` (or the archive rule 0a gives a flagged message),
+   never `leave` and never a bare archive. NOT a diary task: a mass mailing inviting anyone to
+   an event or webinar ("join us", "register now", "still time to book") unless it confirms a
+   place he booked (rules 4 and 5); a deadline (a pay-by or reply-by date stays a task with its
+   Due Date); a visit, inspection or repair at one of his rental properties (Roy's and the
+   compliance lanes); and a train, flight, hotel or event-ticket booking, because Gmail puts those
+   in his diary itself (checked 18 Oct 2026: the 23 Oct Eurostar entry was Gmail's own). When
+   unsure whether a date belongs in his diary, raise it: he answers the card with one tap.
 2. **Label 13 — maintenance:** repair reports, contractor quotes, trade
    scheduling for a property job. Label 13 AND a task for Roy (Step 4b) —
    Kevin's standing approval covers the pass, so no per-task ask.
@@ -239,7 +243,9 @@ the `list-unsubscribe` header (its presence = machine mail).
 5. **Archive — machine noise with no taxonomy home:** marketing, promotions,
    automated notifications, receipts and order confirmations with no ask
    (transactions reach the books through the bank feeds, not the inbox). Never
-   a recurring payment that starts, changes or ends: that is rule 1b.
+   a recurring payment that starts, changes or ends: that is rule 1b. Never a
+   date for his diary (an appointment reminder, a booking confirmation): that
+   is rule 1c, even when a machine sent it.
    Machine-generated AND no ask = archive. NEVER archive an email written by
    a human being without creating a task for it — this is the hard guardrail
    (for mail he only needs to read, the INBOX card in rule 6 is that task; a
@@ -605,9 +611,14 @@ here depends on anyone remembering.
 
 ### Step 4d — Diary tasks for Inbox Response (rule 1c; Kevin's ruling, 18 Oct 2026)
 
-Every diary date that survives the Step 3 dedupe (one diary task per EVENT, so
-a reminder and a confirmation for the same appointment fold into one) gets one
-task for the Inbox Response agent. It drafts the diary entry and submits it;
+Every diary date that survives the Step 3 dedupe gets one task for the Inbox
+Response agent. One diary task per EVENT: before creating, look in
+`$SCRATCH/open-matters.json` for an open task named `CALENDAR:` for the same
+thing on the same date (a reminder after a confirmation, often on a new
+thread). If there is one, append a dated `NEW MESSAGE <date>: <summary>` line
+to its Description instead (a changed time goes in that line) and log `note
+--do updated --reason "joined open matter: <its name>"`. Name every diary task
+the same way so the gate's own duplicate key also matches it. It drafts the diary entry and submits it;
 `submit` makes it an "add to your diary?" card, and only Kevin's approval
 writes it (scripts/calendar-write.py). Fields:
 
@@ -620,7 +631,7 @@ writes it (scripts/calendar-write.py). Fields:
 - `fldLLAG5HQPEFEfE5` Approver: `{"id": "usrKkopUJSGsBhWMD"}` (Kevin)
 - `fldS21RwmwOqt71LI` Priority: `High`
 - `fldZ2moDV2041Sobc` Task Type: `Admin` (a diary entry submits as Admin)
-- `fld10VzzbiNNgRmIi` Time Estimate: `5 min`
+- `fld10VzzbiNNgRmIi` Time Estimate: `15 min`
 - `fldRGhBQViKZKtkQ6` Description: first line `DIARY CARD: Kevin decides
   whether this goes in his diary (Kevin, 18 Oct 2026).` Then what it is, the
   date, the start and end time as the email gives them (say plainly when it
