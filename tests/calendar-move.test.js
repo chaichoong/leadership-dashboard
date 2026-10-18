@@ -207,6 +207,13 @@ except SystemExit as e:
     expect(r.calls).toEqual([]);
   });
 
+  it('an entry whose created row is missing is refused before any intent is written', () => {
+    const r = create(MOVE, [{ task: OLD, event: 'moved', id: 'evtDENTIST1', from: 'recGoneAaaaaaaaaa' }]);
+    expect(r.exit).toMatch(/cannot prove it made it/);
+    expect(r.calls).toEqual([]);
+    expect(r.ledger.filter((x) => x.task === NEW)).toEqual([]);
+  });
+
   it('a move to a time already past is refused', () => {
     const r = create(block(`REPLACES: ${OLD}\nTITLE: Dentist\nSTART: 2020-01-05 10:00\nEND: 2020-01-05 10:30`), WROTE_OLD);
     expect(r.exit).toMatch(/in the past/);
@@ -269,6 +276,8 @@ describe('the worker moves and removes only an entry the robot created (the real
     expect((await call('/calendar/update', MOVE_BODY, { existing: { stamp: OLD, status: 'cancelled' } })).status).toBe(409);
     expect((await call('/calendar/update', MOVE_BODY, { existing: { http: 404 } })).status).toBe(409);
     expect((await call('/calendar/delete', { eventId: 'evtDENTIST1', createdBy: OLD }, { existing: { stamp: OLD, status: 'cancelled' } })).json.status).toBe('gone');
+    // Google may drop the stamp on an entry in the bin: a removal still reads as gone.
+    expect((await call('/calendar/delete', { eventId: 'evtDENTIST1', createdBy: OLD }, { existing: { status: 'cancelled' } })).json.status).toBe('gone');
     expect(writes()).toEqual([]);
   });
 

@@ -368,14 +368,15 @@ export default {
                     }
                     if (!getRes.ok) throw new Error('Calendar read failed: ' + (await getRes.text()).slice(0, 300));
                     const current = await getRes.json();
+                    // Deleted by hand first: both answers write nothing, and Google may not return
+                    // the stamp on an entry in the bin. A move must not report success on it.
+                    if (current.status === 'cancelled') {
+                        return isDelete ? jsonResponse({ status: 'gone', id: eventId })
+                                        : jsonResponse({ error: 'the entry was deleted from the diary by hand' }, 409);
+                    }
                     const stamp = ((current.extendedProperties || {}).private || {}).odTask || '';
                     if (stamp !== createdBy) {
                         return jsonResponse({ error: `refused: this entry was not created by the robot for ${createdBy}` }, 403);
-                    }
-                    if (current.status === 'cancelled') {
-                        // Deleted by hand: a move must not report success on an entry in the bin.
-                        return isDelete ? jsonResponse({ status: 'gone', id: eventId })
-                                        : jsonResponse({ error: 'the entry was deleted from the diary by hand' }, 409);
                     }
                 }
                 if (isDelete) {

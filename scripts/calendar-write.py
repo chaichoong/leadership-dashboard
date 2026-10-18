@@ -237,6 +237,10 @@ def cmd_create(args):
         event_id, problem = written_entry(ref, LEDGER)
         if problem:
             sys.exit(f"REFUSED: task {task_id} — {problem}.")
+        created_by = entry_creator(event_id, LEDGER)
+        if not created_by:
+            sys.exit(f"REFUSED: task {task_id} — the ledger has no created row for entry {event_id}, "
+                     "so the robot cannot prove it made it.")
 
     if not event.get("cancels"):
         stale = past_problem(event)
@@ -258,7 +262,7 @@ def cmd_create(args):
         ledger_append({"task": task_id, "ts": now_iso(), "event": "intent",
                        "action": "delete", "id": event_id, "from": ref})
         result = worker_call(DELETE_URL, {"account": CALENDAR_ACCOUNT, "eventId": event_id,
-                                          "createdBy": entry_creator(event_id, LEDGER)})
+                                          "createdBy": created_by})
         ledger_append({"task": task_id, "ts": now_iso(), "event": "deleted",
                        "id": event_id, "from": ref})
         print(json.dumps({"task": task_id, "taskName": name, "removed": event_id,
@@ -271,7 +275,7 @@ def cmd_create(args):
         result = worker_call(UPDATE_URL, {
             "account": CALENDAR_ACCOUNT,
             "eventId": event_id,
-            "createdBy": entry_creator(event_id, LEDGER),
+            "createdBy": created_by,
             "title": event["title"],
             "start": event["start"],
             "end": event["end"],
