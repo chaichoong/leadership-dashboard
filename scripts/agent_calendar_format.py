@@ -24,6 +24,24 @@ AGENT OUTPUT FORMAT (a calendar task must use exactly this, Task Type Admin)
     Plain-English summary of what this entry is and why it exists.
     **Carrying this out will involve:** ...
 
+MOVING OR REMOVING AN ENTRY THE ROBOT WROTE (Kevin, 18 Oct 2026). When an
+appointment whose entry is already in the diary moves or is cancelled, the
+card names the earlier diary task, and only an entry calendar-write.py's own
+ledger shows it wrote can be touched:
+
+    CALENDAR:
+    REPLACES: recXXXXXXXXXXXXXX      <- the earlier diary task; its entry moves
+    TITLE: ...                          to this title and time (one entry, never two)
+    START: ...
+    END: ...
+    ---
+    summary
+
+    CALENDAR:
+    CANCELS: recXXXXXXXXXXXXXX       <- the earlier diary task; its entry is removed
+    ---                                 (no TITLE, START, END, LOCATION or NOTES)
+    summary
+
 Times are London wall-clock (Europe/London is stamped at create time, so BST
 and GMT need no thought here). The parser checks shape only; the past-date
 check lives in calendar-write.py, at create time, because a draft can sit in
@@ -47,7 +65,10 @@ TIME_FORMAT = "%Y-%m-%d %H:%M"
 TIMEZONE = "Europe/London"
 
 REQUIRED_HEADERS = ("TITLE", "START", "END")
-OPTIONAL_HEADERS = ("LOCATION", "NOTES")
+OPTIONAL_HEADERS = ("LOCATION", "NOTES", "REPLACES")
+# A cancellation carries the earlier task and the summary, nothing else.
+CANCEL_HEADER = "CANCELS"
+REC_ID_RE = re.compile(r"^rec[A-Za-z0-9]{14}$")
 
 # Anything that would make the entry email a third party. Refused by NAME so
 # the error explains itself; an unknown header is refused too, but these get
@@ -113,13 +134,33 @@ def parse_calendar(output):
                 f"{key} is not allowed: a calendar entry never emails a third "
                 "party. Anything inviting someone is Correspondence and goes "
                 "through the email gate")
-        if key not in REQUIRED_HEADERS + OPTIONAL_HEADERS:
+        if key not in REQUIRED_HEADERS + OPTIONAL_HEADERS + (CANCEL_HEADER,):
             raise CalendarFormatError(f"unknown header {key}")
         if key in fields:
             raise CalendarFormatError(f"duplicate header {key}")
         if not value:
             raise CalendarFormatError(f"{key} is empty")
         fields[key] = value
+
+    for key in ("REPLACES", CANCEL_HEADER):
+        if key in fields and not REC_ID_RE.match(fields[key]):
+            raise CalendarFormatError(
+                f"{key} must be the earlier diary task's record id (rec + 14 "
+                f"characters), got {fields[key]!r}")
+
+    summary = strip_carry_out_line("\n".join(lines[body_at + 1:])).strip()
+    if not summary:
+        raise CalendarFormatError(
+            "the summary below `---` is required: approving a title is not "
+            "consent to the entry, the same rule as SIGN and POST")
+
+    if CANCEL_HEADER in fields:
+        extra = sorted(k for k in fields if k != CANCEL_HEADER)
+        if extra:
+            raise CalendarFormatError(
+                f"a CANCELS block removes an entry and carries nothing else, got "
+                f"{', '.join(extra)}")
+        return {"cancels": fields[CANCEL_HEADER], "summary": summary}
 
     for key in REQUIRED_HEADERS:
         if key not in fields:
@@ -131,12 +172,6 @@ def parse_calendar(output):
         raise CalendarFormatError(
             f"END ({fields['END']}) must be after START ({fields['START']})")
 
-    summary = strip_carry_out_line("\n".join(lines[body_at + 1:])).strip()
-    if not summary:
-        raise CalendarFormatError(
-            "the summary below `---` is required: approving a title is not "
-            "consent to the entry, the same rule as SIGN and POST")
-
     return {
         "title": fields["TITLE"],
         "start": start.strftime("%Y-%m-%dT%H:%M:00"),
@@ -145,6 +180,7 @@ def parse_calendar(output):
         "location": fields.get("LOCATION", ""),
         "notes": fields.get("NOTES", ""),
         "summary": summary,
+        "replaces": fields.get("REPLACES", ""),
     }
 
 
@@ -168,11 +204,13 @@ def calendar_submit_problem(output, task_type):
     return ""
 
 
-def diary_written(task_id, ledger=None):
-    """True when calendar-write.py's ledger shows this task's entry was created."""
+def ledger_rows(ledger=None):
+    """Every readable row of calendar-write.py's ledger. A damaged line is skipped:
+    it proves nothing was written, so it never counts as a write."""
     path = ledger or CALENDAR_LEDGER
+    rows = []
     if not os.path.exists(path):
-        return False
+        return rows
     with open(path) as fh:
         for line in fh:
             line = line.strip()
@@ -181,10 +219,64 @@ def diary_written(task_id, ledger=None):
             try:
                 row = json.loads(line)
             except ValueError:
-                # A damaged line proves nothing was written, so it never counts as a write;
-                # `complete` then refuses with its message rather than crashing.
                 continue
-            if isinstance(row, dict) and row.get("task") == task_id \
-                    and row.get("event") == "created":
-                return True
-    return False
+            if isinstance(row, dict):
+                rows.append(row)
+    return rows
+
+
+# The ledger events that mean the diary was changed for that task.
+WRITTEN_EVENTS = ("created", "moved", "deleted")
+
+
+def diary_written(task_id, ledger=None):
+    """True when calendar-write.py's ledger shows it wrote this task's change to the
+    diary: an entry created, an entry moved, or an entry removed."""
+    return any(r.get("task") == task_id and r.get("event") in WRITTEN_EVENTS
+               for r in ledger_rows(ledger))
+
+
+def written_entry(task_id, ledger=None):
+    """(event id, problem): the diary entry the robot wrote for this task, followed
+    through any later move, or ("", why not). Only the robot's own ledger counts: an
+    entry Kevin or Gmail made is never touched."""
+    rows = ledger_rows(ledger)
+    ids = [r.get("id") for r in rows
+           if r.get("task") == task_id and r.get("event") in ("created", "moved") and r.get("id")]
+    if not ids:
+        return "", (f"the ledger has no diary entry written for {task_id}, so there is "
+                    "nothing of the robot's to move or remove")
+    event_id = ids[-1]
+    if any(r.get("event") == "deleted" and r.get("id") == event_id for r in rows):
+        return "", f"the entry written for {task_id} has already been removed"
+    # AN OUT-OF-DATE CARD (18 Oct 2026, review): once a later card has moved this entry,
+    # naming the earlier task again would overwrite the newer time. Name the newest.
+    later = [r.get("task") for r in rows
+             if r.get("from") == task_id and r.get("event") in ("moved", "deleted")]
+    if later:
+        return "", (f"the entry written for {task_id} was changed since by {later[-1]}; "
+                    f"name {later[-1]} instead")
+    return event_id, ""
+
+
+def entry_creator(event_id, ledger=None):
+    """The diary task whose card created this entry: the worker's odTask stamp on it."""
+    for r in ledger_rows(ledger):
+        if r.get("event") == "created" and r.get("id") == event_id:
+            return r.get("task", "")
+    return ""
+
+
+def calendar_ref_problem(output, ledger=None):
+    """Why a REPLACES or CANCELS block may not be submitted, or "". Quiet on any other
+    output. Loud BEFORE Kevin approves, so the refusal never lands after his yes."""
+    if not is_calendar(output):
+        return ""
+    try:
+        event = parse_calendar(output)
+    except CalendarFormatError:
+        return ""          # calendar_submit_problem reports the shape
+    ref = event.get("cancels") or event.get("replaces")
+    if not ref:
+        return ""
+    return written_entry(ref, ledger)[1]

@@ -47,6 +47,16 @@
 //                             description?, account? } → { id, htmlLink }.
 //                             start/end are RFC3339 local times paired with
 //                             timeZone (Europe/London from the script).
+//                             create also takes { task } and stamps the entry with
+//                             it (extendedProperties.private.odTask).
+//   POST /calendar/update — { eventId, createdBy, title, start, end, timeZone,
+//                             location?, account? } → { id, htmlLink }. Moves an
+//                             entry the robot created (a REPLACES card).
+//   POST /calendar/delete — { eventId, createdBy, account? } → { status: 'deleted'
+//                             | 'gone' }. Removes one (a CANCELS card). Both added
+//                             18 Oct 2026; both read the entry first and refuse it
+//                             unless its odTask stamp is createdBy, so the key alone
+//                             can never touch an entry Kevin or Gmail made.
 //   GET  /calendar/test   — token health + whether calendar scope is granted.
 //
 // GMAIL TRIAGE (added 24 Aug 2026, Inbound Comms Triage agent): script-only
@@ -293,7 +303,8 @@ export default {
         // is a send-class consequence, and the approval gate lives in
         // scripts/calendar-write.py, not here.
         // ------------------------------------------------------------------
-        if (url.pathname === '/calendar/create' || url.pathname === '/calendar/test') {
+        if (url.pathname === '/calendar/create' || url.pathname === '/calendar/test'
+            || url.pathname === '/calendar/update' || url.pathname === '/calendar/delete') {
             const auth = request.headers.get('Authorization') || '';
             if (!env.GMAIL_SEND_KEY || auth !== `Bearer ${env.GMAIL_SEND_KEY}`) {
                 return jsonResponse({ error: 'Forbidden' }, 403);
@@ -327,8 +338,13 @@ export default {
                 if (body.attendees !== undefined) {
                     return jsonResponse({ error: 'attendees are not supported: a diary entry never emails a third party. Anything inviting someone is Correspondence and goes through the email gate.' }, 400);
                 }
-                const { title, start, end, timeZone, location, description, account } = body;
-                if (!title || !start || !end || !timeZone) {
+                const { title, start, end, timeZone, location, description, account, eventId, task, createdBy } = body;
+                const isDelete = url.pathname === '/calendar/delete';
+                const isUpdate = url.pathname === '/calendar/update';
+                if ((isDelete || isUpdate) && !/^[A-Za-z0-9_-]{5,1024}$/.test(String(eventId || ''))) {
+                    return jsonResponse({ error: 'eventId is required: the entry calendar-write.py wrote' }, 400);
+                }
+                if (!isDelete && (!title || !start || !end || !timeZone)) {
                     return jsonResponse({ error: 'title, start, end and timeZone are required' }, 400);
                 }
                 const acct = (account || DEFAULT_SENDER).toLowerCase().trim();
@@ -337,6 +353,56 @@ export default {
                     return jsonResponse({ error: `Google not connected for ${acct}. Grant once at /auth/gmail?account=${acct}` }, 409);
                 }
                 const accessToken = await getGmailAccessToken(env, refreshToken);
+                const eventUrl = `https://www.googleapis.com/calendar/v3/calendars/primary/events/${encodeURIComponent(eventId || '')}`;
+                if (isDelete || isUpdate) {
+                    // ONLY AN ENTRY THE ROBOT CREATED (18 Oct 2026). Every robot entry carries a
+                    // private odTask stamp naming the task that created it; the key alone must never
+                    // be enough to rewrite or delete an entry Kevin or Gmail made.
+                    if (!/^rec[A-Za-z0-9]{14}$/.test(String(createdBy || ''))) {
+                        return jsonResponse({ error: 'createdBy is required: the diary task whose card created this entry' }, 400);
+                    }
+                    const getRes = await fetch(eventUrl, { headers: { Authorization: `Bearer ${accessToken}` } });
+                    if (getRes.status === 404 || getRes.status === 410) {
+                        return isDelete ? jsonResponse({ status: 'gone', id: eventId })
+                                        : jsonResponse({ error: 'the entry no longer exists in the diary' }, 409);
+                    }
+                    if (!getRes.ok) throw new Error('Calendar read failed: ' + (await getRes.text()).slice(0, 300));
+                    const current = await getRes.json();
+                    // Deleted by hand first: both answers write nothing, and Google may not return
+                    // the stamp on an entry in the bin. A move must not report success on it.
+                    if (current.status === 'cancelled') {
+                        return isDelete ? jsonResponse({ status: 'gone', id: eventId })
+                                        : jsonResponse({ error: 'the entry was deleted from the diary by hand' }, 409);
+                    }
+                    const stamp = ((current.extendedProperties || {}).private || {}).odTask || '';
+                    if (stamp !== createdBy) {
+                        return jsonResponse({ error: `refused: this entry was not created by the robot for ${createdBy}` }, 403);
+                    }
+                }
+                if (isDelete) {
+                    const delRes = await fetch(eventUrl + '?sendUpdates=none', { method: 'DELETE', headers: { Authorization: `Bearer ${accessToken}` } });
+                    // 410 Gone: already removed (Kevin deleted it by hand). The ask is met.
+                    if (delRes.status === 410) return jsonResponse({ status: 'gone', id: eventId });
+                    if (!delRes.ok) throw new Error('Calendar delete failed: ' + (await delRes.text()).slice(0, 300));
+                    return jsonResponse({ status: 'deleted', id: eventId });
+                }
+                if (isUpdate) {
+                    // Title and time only, plus the place when the card names one: notes Kevin
+                    // typed on the entry are kept, and nobody on it is emailed.
+                    const patch = { summary: title, start: { dateTime: start, timeZone }, end: { dateTime: end, timeZone } };
+                    if (location) patch.location = location;
+                    const updRes = await fetch(eventUrl + '?sendUpdates=none', {
+                        method: 'PATCH',
+                        headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
+                        body: JSON.stringify(patch),
+                    });
+                    if (!updRes.ok) throw new Error('Calendar update failed: ' + (await updRes.text()).slice(0, 300));
+                    const moved = await updRes.json();
+                    if (moved.status === 'cancelled') {
+                        return jsonResponse({ error: 'the entry was deleted from the diary by hand' }, 409);
+                    }
+                    return jsonResponse({ status: 'moved', id: moved.id, htmlLink: moved.htmlLink });
+                }
                 const createRes = await fetch('https://www.googleapis.com/calendar/v3/calendars/primary/events', {
                     method: 'POST',
                     headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
@@ -346,6 +412,10 @@ export default {
                         end: { dateTime: end, timeZone },
                         location: location || undefined,
                         description: description || undefined,
+                        // The robot's stamp (18 Oct 2026): only an entry carrying it can later be
+                        // moved or removed, and only by a card naming the task that created it.
+                        extendedProperties: /^rec[A-Za-z0-9]{14}$/.test(String(task || ''))
+                            ? { private: { odTask: task } } : undefined,
                     }),
                 });
                 if (!createRes.ok) {

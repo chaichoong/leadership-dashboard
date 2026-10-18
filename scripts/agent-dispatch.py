@@ -123,7 +123,8 @@ from agent_email_format import (  # noqa: E402
 )
 # The CALENDAR contract lives in one place too, shared with
 # scripts/calendar-write.py — same one-parser rule, same reason.
-from agent_calendar_format import calendar_submit_problem, diary_written, is_calendar  # noqa: E402
+from agent_calendar_format import (calendar_ref_problem, calendar_submit_problem,  # noqa: E402
+                                   diary_written, is_calendar)
 
 BASE_ID = "appnqjDpqDniH3IRl"
 TASKS = "tblqB8b22hKBL4PF1"
@@ -5154,6 +5155,17 @@ def cmd_submit(args):
             "       An approved entry that cannot be created is worse than a\n"
             "       refused draft: the refusal arrives after the decision."
         )
+    # A MOVE OR A REMOVAL names the earlier diary task (Kevin, 18 Oct 2026). Only an entry
+    # calendar-write.py's ledger shows the robot wrote can be changed, so a card naming any
+    # other task is refused here, before Kevin is asked, never after his yes.
+    cal_ref = calendar_ref_problem(output)
+    if cal_ref:
+        sys.exit(
+            f"ERROR: refusing to submit {args.task} — {cal_ref}.\n"
+            "       REPLACES: and CANCELS: name an earlier diary task whose entry the robot\n"
+            "       wrote (an approved diary card, closed once written). For an entry the\n"
+            "       robot did not write, submit a plain diary block and say in the summary\n"
+            "       which entry Kevin should remove himself.")
 
     # WHO approves. The task's Approver field decides (set by Inbound Comms at
     # creation: label 8 = Mica, label 12 = Kevin); empty means Kevin. Tier 1
