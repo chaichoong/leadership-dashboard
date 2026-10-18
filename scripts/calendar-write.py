@@ -54,6 +54,7 @@ from agent_calendar_format import (  # noqa: E402
     CALENDAR_LEDGER,
     TIMEZONE,
     CalendarFormatError,
+    entry_creator,
     ledger_rows as _ledger_rows,
     parse_calendar,
     written_entry,
@@ -242,18 +243,22 @@ def cmd_create(args):
         if stale:
             sys.exit(f"REFUSED: task {task_id} — {stale}")
 
-    for row in ledger_rows():
-        if row.get("task") == task_id:
+    # Read RAW, never through the lenient reader (18 Oct 2026, review): a half-written or
+    # run-together line naming this task must still refuse, or a crashed write runs twice.
+    if os.path.exists(LEDGER):
+        with open(LEDGER) as fh:
+            seen = [ln.strip() for ln in fh if task_id in ln]
+        if seen:
             sys.exit(
-                f"REFUSED: task {task_id} is already in the ledger "
-                f"({row.get('event', 'intent')} at {row.get('ts')}). A second "
-                "create would duplicate the entry; if the first attempt "
-                "crashed, check the calendar and the ledger by hand.")
+                f"REFUSED: task {task_id} is already in the ledger ({seen[-1][:160]}). "
+                "A second write would duplicate or repeat the change; if the first "
+                "attempt crashed, check the calendar and the ledger by hand.")
 
     if event.get("cancels"):
         ledger_append({"task": task_id, "ts": now_iso(), "event": "intent",
                        "action": "delete", "id": event_id, "from": ref})
-        result = worker_call(DELETE_URL, {"account": CALENDAR_ACCOUNT, "eventId": event_id})
+        result = worker_call(DELETE_URL, {"account": CALENDAR_ACCOUNT, "eventId": event_id,
+                                          "createdBy": entry_creator(event_id, LEDGER)})
         ledger_append({"task": task_id, "ts": now_iso(), "event": "deleted",
                        "id": event_id, "from": ref})
         print(json.dumps({"task": task_id, "taskName": name, "removed": event_id,
@@ -266,12 +271,12 @@ def cmd_create(args):
         result = worker_call(UPDATE_URL, {
             "account": CALENDAR_ACCOUNT,
             "eventId": event_id,
+            "createdBy": entry_creator(event_id, LEDGER),
             "title": event["title"],
             "start": event["start"],
             "end": event["end"],
             "timeZone": event["timeZone"],
             "location": event["location"] or None,
-            "description": event["notes"] or event["summary"],
         })
         ledger_append({"task": task_id, "ts": now_iso(), "event": "moved", "id": event_id,
                        "from": ref, "htmlLink": result.get("htmlLink", "")})
@@ -284,6 +289,7 @@ def cmd_create(args):
 
     result = worker_call(CREATE_URL, {
         "account": CALENDAR_ACCOUNT,
+        "task": task_id,          # the worker stamps the entry with it (odTask)
         "title": event["title"],
         "start": event["start"],
         "end": event["end"],

@@ -249,7 +249,22 @@ def written_entry(task_id, ledger=None):
     event_id = ids[-1]
     if any(r.get("event") == "deleted" and r.get("id") == event_id for r in rows):
         return "", f"the entry written for {task_id} has already been removed"
+    # AN OUT-OF-DATE CARD (18 Oct 2026, review): once a later card has moved this entry,
+    # naming the earlier task again would overwrite the newer time. Name the newest.
+    later = [r.get("task") for r in rows
+             if r.get("from") == task_id and r.get("event") in ("moved", "deleted")]
+    if later:
+        return "", (f"the entry written for {task_id} was changed since by {later[-1]}; "
+                    f"name {later[-1]} instead")
     return event_id, ""
+
+
+def entry_creator(event_id, ledger=None):
+    """The diary task whose card created this entry: the worker's odTask stamp on it."""
+    for r in ledger_rows(ledger):
+        if r.get("event") == "created" and r.get("id") == event_id:
+            return r.get("task", "")
+    return ""
 
 
 def calendar_ref_problem(output, ledger=None):
