@@ -15,6 +15,12 @@ way to pass a title or a time on the command line. So:
     is what lands, because the field is read at create time;
   * a bug or a bad prompt cannot invent an appointment.
 
+MOVING AND REMOVING (Kevin, 18 Oct 2026): a block with `REPLACES: <earlier diary
+task>` moves the entry this script wrote for that task to the new time; a block with
+`CANCELS: <earlier diary task>` removes it. The entry is found in this script's own
+ledger, never by searching the diary, so only an entry the robot wrote, on Kevin's
+approval, can ever be moved or removed, and again only on his approval.
+
 The output shape (CALENDAR:/TITLE:/START:/END:, `---`, summary) is defined
 once, in scripts/agent_calendar_format.py, shared with the submit gate in
 agent-dispatch.py — the same one-parser rule as the email contract. Events
@@ -48,7 +54,9 @@ from agent_calendar_format import (  # noqa: E402
     CALENDAR_LEDGER,
     TIMEZONE,
     CalendarFormatError,
+    ledger_rows as _ledger_rows,
     parse_calendar,
+    written_entry,
 )
 
 BASE_ID = "appnqjDpqDniH3IRl"
@@ -80,6 +88,9 @@ CALENDAR_ACCOUNT = "kevin@runpreneur.org.uk"
 
 WORKER = "https://drive-upload.kevinbrittain.workers.dev"
 CREATE_URL = f"{WORKER}/calendar/create"
+# Move or remove an entry this script wrote (Kevin, 18 Oct 2026): REPLACES / CANCELS blocks.
+UPDATE_URL = f"{WORKER}/calendar/update"
+DELETE_URL = f"{WORKER}/calendar/delete"
 HEALTH_URL = f"{WORKER}/calendar/test?account={CALENDAR_ACCOUNT}"
 CONSENT_URL = f"{WORKER}/auth/gmail?account={CALENDAR_ACCOUNT}"
 
@@ -150,15 +161,7 @@ def worker_call(url, payload=None):
 
 
 def ledger_rows():
-    if not os.path.exists(LEDGER):
-        return []
-    rows = []
-    with open(LEDGER) as fh:
-        for line in fh:
-            line = line.strip()
-            if line:
-                rows.append(json.loads(line))
-    return rows
+    return _ledger_rows(LEDGER)
 
 
 def ledger_append(row):
@@ -222,9 +225,22 @@ def cmd_create(args):
         sys.exit(f"ERROR: task {task_id} {exc}. "
                  "See the format in scripts/agent_calendar_format.py.")
 
-    stale = past_problem(event)
-    if stale:
-        sys.exit(f"REFUSED: task {task_id} — {stale}")
+    # REPLACES / CANCELS (Kevin, 18 Oct 2026): the entry to move or remove is found in this
+    # script's own ledger, never by searching the diary, so an entry Kevin or Gmail made is
+    # never touched. Checked before anything is written.
+    ref = event.get("cancels") or event.get("replaces") or ""
+    event_id = ""
+    if ref:
+        if ref == task_id:
+            sys.exit(f"REFUSED: task {task_id} names itself as the entry to change.")
+        event_id, problem = written_entry(ref, LEDGER)
+        if problem:
+            sys.exit(f"REFUSED: task {task_id} — {problem}.")
+
+    if not event.get("cancels"):
+        stale = past_problem(event)
+        if stale:
+            sys.exit(f"REFUSED: task {task_id} — {stale}")
 
     for row in ledger_rows():
         if row.get("task") == task_id:
@@ -233,6 +249,35 @@ def cmd_create(args):
                 f"({row.get('event', 'intent')} at {row.get('ts')}). A second "
                 "create would duplicate the entry; if the first attempt "
                 "crashed, check the calendar and the ledger by hand.")
+
+    if event.get("cancels"):
+        ledger_append({"task": task_id, "ts": now_iso(), "event": "intent",
+                       "action": "delete", "id": event_id, "from": ref})
+        result = worker_call(DELETE_URL, {"account": CALENDAR_ACCOUNT, "eventId": event_id})
+        ledger_append({"task": task_id, "ts": now_iso(), "event": "deleted",
+                       "id": event_id, "from": ref})
+        print(json.dumps({"task": task_id, "taskName": name, "removed": event_id,
+                          "from": ref, **result}, indent=2))
+        return
+    if event_id:
+        ledger_append({"task": task_id, "ts": now_iso(), "event": "intent", "action": "move",
+                       "id": event_id, "from": ref, "title": event["title"],
+                       "start": event["start"]})
+        result = worker_call(UPDATE_URL, {
+            "account": CALENDAR_ACCOUNT,
+            "eventId": event_id,
+            "title": event["title"],
+            "start": event["start"],
+            "end": event["end"],
+            "timeZone": event["timeZone"],
+            "location": event["location"] or None,
+            "description": event["notes"] or event["summary"],
+        })
+        ledger_append({"task": task_id, "ts": now_iso(), "event": "moved", "id": event_id,
+                       "from": ref, "htmlLink": result.get("htmlLink", "")})
+        print(json.dumps({"task": task_id, "taskName": name, "moved": event_id,
+                          "from": ref, **result}, indent=2))
+        return
 
     ledger_append({"task": task_id, "ts": now_iso(), "event": "intent",
                    "title": event["title"], "start": event["start"]})

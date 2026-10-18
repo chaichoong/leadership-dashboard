@@ -47,6 +47,12 @@
 //                             description?, account? } → { id, htmlLink }.
 //                             start/end are RFC3339 local times paired with
 //                             timeZone (Europe/London from the script).
+//   POST /calendar/update — { eventId, title, start, end, timeZone, location?,
+//                             description?, account? } → { id, htmlLink }. Moves
+//                             an entry calendar-write.py wrote (a REPLACES card).
+//   POST /calendar/delete — { eventId, account? } → { status: 'deleted' | 'gone' }.
+//                             Removes one (a CANCELS card). Both added 18 Oct 2026;
+//                             calendar-write.py names the event from its own ledger.
 //   GET  /calendar/test   — token health + whether calendar scope is granted.
 //
 // GMAIL TRIAGE (added 24 Aug 2026, Inbound Comms Triage agent): script-only
@@ -293,7 +299,8 @@ export default {
         // is a send-class consequence, and the approval gate lives in
         // scripts/calendar-write.py, not here.
         // ------------------------------------------------------------------
-        if (url.pathname === '/calendar/create' || url.pathname === '/calendar/test') {
+        if (url.pathname === '/calendar/create' || url.pathname === '/calendar/test'
+            || url.pathname === '/calendar/update' || url.pathname === '/calendar/delete') {
             const auth = request.headers.get('Authorization') || '';
             if (!env.GMAIL_SEND_KEY || auth !== `Bearer ${env.GMAIL_SEND_KEY}`) {
                 return jsonResponse({ error: 'Forbidden' }, 403);
@@ -327,8 +334,13 @@ export default {
                 if (body.attendees !== undefined) {
                     return jsonResponse({ error: 'attendees are not supported: a diary entry never emails a third party. Anything inviting someone is Correspondence and goes through the email gate.' }, 400);
                 }
-                const { title, start, end, timeZone, location, description, account } = body;
-                if (!title || !start || !end || !timeZone) {
+                const { title, start, end, timeZone, location, description, account, eventId } = body;
+                const isDelete = url.pathname === '/calendar/delete';
+                const isUpdate = url.pathname === '/calendar/update';
+                if ((isDelete || isUpdate) && !/^[A-Za-z0-9_-]{5,1024}$/.test(String(eventId || ''))) {
+                    return jsonResponse({ error: 'eventId is required: the entry calendar-write.py wrote' }, 400);
+                }
+                if (!isDelete && (!title || !start || !end || !timeZone)) {
                     return jsonResponse({ error: 'title, start, end and timeZone are required' }, 400);
                 }
                 const acct = (account || DEFAULT_SENDER).toLowerCase().trim();
@@ -337,6 +349,30 @@ export default {
                     return jsonResponse({ error: `Google not connected for ${acct}. Grant once at /auth/gmail?account=${acct}` }, 409);
                 }
                 const accessToken = await getGmailAccessToken(env, refreshToken);
+                const eventUrl = `https://www.googleapis.com/calendar/v3/calendars/primary/events/${encodeURIComponent(eventId || '')}`;
+                if (isDelete) {
+                    const delRes = await fetch(eventUrl, { method: 'DELETE', headers: { Authorization: `Bearer ${accessToken}` } });
+                    // 410 Gone: already removed (Kevin deleted it by hand). The ask is met.
+                    if (delRes.status === 410) return jsonResponse({ status: 'gone', id: eventId });
+                    if (!delRes.ok) throw new Error('Calendar delete failed: ' + (await delRes.text()).slice(0, 300));
+                    return jsonResponse({ status: 'deleted', id: eventId });
+                }
+                if (isUpdate) {
+                    const updRes = await fetch(eventUrl, {
+                        method: 'PATCH',
+                        headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            summary: title,
+                            start: { dateTime: start, timeZone },
+                            end: { dateTime: end, timeZone },
+                            location: location || null,
+                            description: description || null,
+                        }),
+                    });
+                    if (!updRes.ok) throw new Error('Calendar update failed: ' + (await updRes.text()).slice(0, 300));
+                    const moved = await updRes.json();
+                    return jsonResponse({ status: 'moved', id: moved.id, htmlLink: moved.htmlLink });
+                }
                 const createRes = await fetch('https://www.googleapis.com/calendar/v3/calendars/primary/events', {
                     method: 'POST',
                     headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
