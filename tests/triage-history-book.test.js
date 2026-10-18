@@ -135,8 +135,12 @@ describe('the runner and skill carry the pre-reads and their fallbacks', () => {
   it('the runner produces both files and gates the weekly rebuild', () => {
     expect(runner).toMatch(/history-stale/);
     expect(runner).toMatch(/history-build/);
-    expect(runner).toMatch(/history-dump[\s\S]{0,80}history-book\.json/);
-    expect(runner).toMatch(/matters[\s\S]{0,80}open-matters\.json/);
+    // pre_read names the file FIRST since 18 Oct 2026 and keeps stderr out of it, so a
+    // pacer progress line can no longer make a complete answer unparseable (findings
+    // 20261015-agent-dispatch-914 and -919, 20261016-agent-dispatch-943,
+    // 20261016-inbound-email-triage-948 and -953).
+    expect(runner).toMatch(/pre_read "\$SCRATCH\/history-book\.json"[\s\S]{0,120}history-dump/);
+    expect(runner).toMatch(/pre_read "\$SCRATCH\/open-matters\.json"[\s\S]{0,120}matters/);
   });
 
   // 29 Sep 2026: run BEFORE the agent, the weekly rebuild spent the slot's
