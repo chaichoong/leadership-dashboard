@@ -112,6 +112,23 @@ function validate(spec) {
     die('`to` contains a bare "To:" line. That exact defect put six HMRC letters ' +
         'in the returned pile — the address block must hold ONLY the address.');
   }
+  // The postcode sits ALONE on the last line (or the line above "United Kingdom"). Pingen reads the
+  // recipient through the envelope window and rejected the approved TMW letter of 15 Oct 2026 with
+  // address_zip_invalid on a last line of "Northampton NN3 6NW", while "LS78 1LB" alone passed the
+  // same run (finding 20261015-agent-dispatch-906). Mirrors postcode_line_problem in
+  // scripts/agent_email_format.py, which gates the same block BEFORE Kevin approves it.
+  const POSTCODE = /\b[A-Z]{1,2}\d[A-Z\d]?\s*\d[A-Z]{2}\b/i;
+  const COUNTRIES = ['united kingdom', 'uk', 'great britain', 'england', 'scotland', 'wales', 'northern ireland'];
+  let lines = to.map((l) => String(l || '').trim()).filter(Boolean);
+  if (COUNTRIES.includes(lines[lines.length - 1].toLowerCase().replace(/\.+$/, ''))) lines = lines.slice(0, -1);
+  if (lines.length && lines.some((l) => POSTCODE.test(l))) {
+    const last = lines[lines.length - 1];
+    if (!new RegExp(`^${POSTCODE.source}$`, 'i').test(last)) {
+      die(`the postcode must sit alone on the last line of \`to\` (or the line above "United Kingdom"), ` +
+          `and "${last}" does not. Pingen rejected exactly this with address_zip_invalid on 15 Oct 2026: ` +
+          'write the town and the postcode on two lines.');
+    }
+  }
   const body = spec.body;
   if (!Array.isArray(body) || !body.filter((p) => String(p || '').trim()).length) {
     die('`body` must be a non-empty array of paragraphs');

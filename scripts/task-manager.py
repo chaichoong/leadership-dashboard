@@ -193,7 +193,12 @@ def answers_missing(f):
 # The clock's own nudge to Roy (cmd_clock) counts as a touch, so the model's weekly chase is not
 # due again the same week.
 CLOCK_ROY_MARK = "CLOCK ROY:"
-ROY_TOUCH_MARKS = ("Handed over to Roy Lavin", "Chase to Roy:", CLOCK_ROY_MARK)
+# "Chase to Roy (16 Oct 2026):" is the form annotate writes, and the bare "Chase to Roy:" was the only
+# text matched until 18 Oct 2026: the 09:00 slot chased 12 Roy tasks and at 13:00 the board still showed
+# 9 of them with chaseDue true, so a foreman trusting chaseDue would chase Roy twice in one day against
+# the one-per-seven-days rule (finding 20261016-task-manager-950). Both forms count, and nothing wider:
+# "chase to Roy is overdue" in a note is not a chase.
+ROY_TOUCH_MARKS = ("Handed over to Roy Lavin", "Chase to Roy:", "Chase to Roy (", CLOCK_ROY_MARK)
 ROY_CHASE_DAYS = 7
 
 DECISION_GROUPS = [
