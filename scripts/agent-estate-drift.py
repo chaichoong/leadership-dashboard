@@ -170,6 +170,16 @@ RETIRED = [
      "a SIGN AS KEVIN card is signed by the robot on his approval (GUARDRAILS.md \"Signing for Kevin\")"),
     (r"Until a signing route exists", "2026-10-16",
      "the route exists: SIGN AS KEVIN cards (agent-browser.js sign)"),
+    # A diary entry is a card again (Kevin, 18 Oct 2026; Decisions/2026-10-18 A date in the inbox
+    # becomes an add-to-your-diary card, written only on Kevin's yes). Level A from 7 Sep to 18 Oct.
+    (r"written the moment you submit", "2026-10-18",
+     "a diary entry is an add-to-your-diary card; calendar-write.py writes it only on Kevin's approval"),
+    (r"written to the diary at submit", "2026-10-18",
+     "a CALENDAR output is a card (GUARDRAILS.md \"Creating a diary entry\")"),
+    (r"report, diary entry, PASS TO ROY", "2026-10-18",
+     "Level A is the two closes, the information-only report and PASS TO ROY; a diary entry is a card"),
+    (r"a valid CALENDAR output typed Admin, and a", "2026-10-18",
+     "a valid CALENDAR output typed Admin is a card, carried out by calendar-write.py on approval"),
 ]
 
 # A line that is describing the old rule, not stating it.

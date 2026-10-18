@@ -276,9 +276,49 @@ def auto_reply_signal(headers, subject, body):
 # Task-name prefixes the skills add before the subject; the subject test
 # must see past them.
 TASK_NAME_PREFIX_RE = re.compile(
-    r"^\s*(?:inbound(?:\s*\(follow-up\))?|maintenance|post)\s*:\s*", re.I)
+    r"^\s*(?:inbound(?:\s*\(follow-up\))?|maintenance|post|calendar)\s*:\s*", re.I)
 
 THREAD_URL_RE = re.compile(r"#(?:all|inbox)/([0-9a-f]{8,})")
+
+# The diary lane's task name (inbound-email-triage Step 4d, Kevin 18 Oct 2026).
+CALENDAR_TASK_PREFIX = "CALENDAR:"
+
+
+def calendar_task(name):
+    """True for a diary task: its name opens with the CALENDAR: lane prefix."""
+    return str(name or "").lstrip().upper().startswith(CALENDAR_TASK_PREFIX)
+
+
+# The date a diary task's name ends with ("CALENDAR: Dentist, Example Dental - Tue 27 Oct").
+DIARY_DATE_RE = re.compile(
+    r"\b(\d{1,2})(?:st|nd|rd|th)?\s+(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\b", re.I)
+
+
+def diary_date(name):
+    """(day, month) of a diary task's date, or None. The date is the FIRST one in the
+    name's last " - " part ("... - Sat 31 Oct (was 24 Oct)" is 31 Oct), so a street
+    or a note earlier in the name is never read as the date."""
+    tail = str(name or "").rsplit(" - ", 1)[-1]
+    found = DIARY_DATE_RE.findall(tail) or DIARY_DATE_RE.findall(str(name or ""))[-1:]
+    return (int(found[0][0]), found[0][1].lower()) if found else None
+
+
+def fold_on_another_date(name_a, name_b):
+    """Why two diary tasks may not fold into one, or "" (Kevin, 18 Oct 2026).
+
+    Fold-only and Python-only, like fold_on_a_number_only. The word pass drops
+    weekday and month words and bare numbers, so "Hygienist - Thu 12 Nov" and
+    "Dentist check-up - Tue 27 Oct" from one surgery read as one matter; folded,
+    the second appointment never reaches Kevin's diary. Two diary tasks fold
+    only when both names carry the same date. Quiet on any other pair."""
+    if not (calendar_task(name_a) and calendar_task(name_b)):
+        return ""
+    a, b = diary_date(name_a), diary_date(name_b)
+    if not a or not b:
+        return "a diary task whose name carries no date is never folded"
+    if a != b:
+        return "two diary tasks on different dates are two diary entries"
+    return ""
 
 
 def scan_cache_path():
@@ -548,6 +588,11 @@ def auto_reply_refusal(fields, cache):
         name = TASK_NAME_PREFIX_RE.sub("", name, count=1)
     if AUTO_REPLY_SUBJECT_RE.search(name):
         return "task name is an auto-reply subject (%s)" % name.strip()[:60]
+    # A DIARY CARD comes from the date, not the reply (Kevin, 18 Oct 2026): a booking
+    # confirmation is machine-sent ("we have received your booking for 22 Oct"), and
+    # that date is exactly what the CALENDAR: task is for. The name test above holds.
+    if calendar_task(fields.get(F["name"])):
+        return None
     threads = THREAD_URL_RE.findall(str(fields.get(F["inboundUrl"], "")))
     for tid in threads:
         on_thread = [v for v in cache.values()
@@ -828,6 +873,13 @@ def dupe_task_key(name):
 # Prefix words that put a task in the maintenance lane. Mirrored verbatim by
 # DUPE_MAINTENANCE_LANE_WORDS in os/agents/index.html; drift-tested.
 DUPE_MAINTENANCE_LANE_WORDS = {"maintenance", "repair", "repairs"}
+
+# THE DIARY LANE (Kevin, 18 Oct 2026). A CALENDAR: task is a date for Kevin's
+# diary that becomes an "add to your diary?" card. Folded into the reply task on
+# the same email it never becomes a card, so it is a third fold lane, never
+# merged with a reply or a repair. Mirrored verbatim by DUPE_CALENDAR_LANE_WORDS
+# in os/agents/index.html; drift-tested.
+DUPE_CALENDAR_LANE_WORDS = {"calendar"}
 
 # Words that say what to DO about a matter rather than WHICH matter it is.
 # "pay Sefton" and "Sefton Council" are one thing; the verb is not identity.
@@ -1401,10 +1453,10 @@ def links_disagree(fields_a, fields_b):
 
 def dupe_signals(name):
     """(lane, strong_ids, distinctive_words, place_words): what identifies
-    this matter. `lane` is "maintenance" or "reply", never the raw prefix:
-    the prefix is split off so it cannot eat a subject word, but the only
-    lane difference that may block a fold is repair-vs-reply (Kevin, 15 Sep
-    2026).
+    this matter. `lane` is "maintenance", "calendar" or "reply", never the raw
+    prefix: the prefix is split off so it cannot eat a subject word, and the
+    only lane differences that may block a fold are repair-vs-reply (Kevin,
+    15 Sep 2026) and a diary task (Kevin, 18 Oct 2026).
 
     Mirrored verbatim by dupeSignals in os/agents/index.html; drift-tested in
     tests/agents-dupe-task-key.test.js.
@@ -1417,6 +1469,8 @@ def dupe_signals(name):
         raw = raw[m.end():]
         if any(w in DUPE_MAINTENANCE_LANE_WORDS for w in prefix.split()):
             lane = "maintenance"
+        elif any(w in DUPE_CALENDAR_LANE_WORDS for w in prefix.split()):
+            lane = "calendar"
     strong = set()
     for digits in DUPE_PHONE_RE.findall(raw):
         strong.add("tel:" + digits[-9:])
@@ -1451,7 +1505,7 @@ def dupe_signals(name):
 
 
 def fold_lane(name, team=None, maintenance_ticket=False):
-    """"maintenance" | "reply" for a task RECORD, for the fold callers that
+    """"maintenance" | "calendar" | "reply" for a task RECORD, for the fold callers that
     hold one (the creation gate, the Task Manager board, the dispatch close).
 
     The name lane alone is not enough: on the live board of 15 Sep 2026 all
@@ -1625,6 +1679,19 @@ def decide(incoming_fields, open_rows):
         # both passes: the key pass is the one that folded one tenant's UC47
         # chase into another's. Links first, because a record id is certain.
         if links_disagree(incoming_fields, f) or identity_conflict(incoming_name, other):
+            continue
+        another_date = fold_on_another_date(incoming_name, other)
+        if another_date:
+            not_folded.append("%s: %s" % (row["id"], another_date))
+            continue
+        # A DIARY CARD WAITING ON KEVIN IS NEVER CHANGED UNDER HIM (18 Oct 2026). A fold appends
+        # to the Description and leaves the card's diary block as it was, so a moved time would be
+        # written at the old time on his yes. The new message becomes its own diary task, drafted
+        # as its own card that says what it replaces.
+        if calendar_task(incoming_name) and calendar_task(other) \
+                and _sel_name(f.get(F["status"])) == "Approval":
+            not_folded.append("%s: a diary card waiting on Kevin is never changed under him"
+                              % row["id"])
             continue
         # TWO PASSES, and a match is either. The key is the fast exact bucket
         # and keeps every catch it already had; the verdict is the second pass
@@ -2801,6 +2868,10 @@ def selftest():
     unknown = dict(fylde_task, **{F["inboundUrl"]: "https://mail.google.com/mail/u/0/#inbox/deadbeef00"})
     check("an unscanned thread is not assumed to be an auto-reply", auto_reply_refusal(unknown, cache) is None)
     check("a normal task name passes", auto_reply_refusal({F["name"]: "INBOUND: reply to Swinton"}, cache) is None)
+    diary = dict(fylde_task, **{F["name"]: "CALENDAR: Dentist, Example Dental - Tue 5 Jan"})
+    check("a diary task on a machine-sent thread still creates", auto_reply_refusal(diary, cache) is None)
+    check("a diary task named for an auto-reply is still refused",
+          auto_reply_refusal({F["name"]: "CALENDAR: Out of office: Jo Bloggs"}, {}) is not None)
     # Never a card (Kevin, 17 Sep 2026): real task names off the rejection log.
     nac = lambda name, desc="": never_a_card_refusal({F["name"]: name, F["desc"]: desc})
     check("a Stripe notice for liquidated Two Chefs is refused",

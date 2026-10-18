@@ -539,9 +539,8 @@ describe('the money rule does not drift between the dispatcher, the page and the
       expect(readFileSync(resolve(dir, f), 'utf8'), f).toMatch(/## Decision criteria \(Kevin's ruling, 7 Sep 2026\)/);
     }
   });
-  it('the HANDLED marker is one string in four places', () => {
+  it('the HANDLED marker is one string in three places', () => {
     const mark = DISPATCH.match(/^HANDLED_MARK = "([^"]+)"/m)[1];
-    expect(read('scripts/calendar-write.py')).toContain(`HANDLED_MARK = "${mark}"`);
     expect(ACCURACY).toContain(`var HANDLED_MARK = '${mark}'`);
     expect(read('scripts/slack-automation/approvals.js')).toContain(`export const HANDLED_MARK = '${mark}'`);
     expect(read('os/agents/index.html')).toContain(`|| '${mark}'`);

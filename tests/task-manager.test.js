@@ -279,7 +279,8 @@ describe('one open task per thread and lane (Kevin, 25 Aug 2026)', () => {
         // Approval twins are untouchable; maintenance and reply lanes never
         // merge; parked and in-flight tasks are never grouped.
         expect(script).toContain('untouchable');
-        expect(script).toMatch(/lane = \("maintenance"/);
+        // 18 Oct 2026: the lane is the gate's fold_lane value itself (maintenance, calendar or reply).
+        expect(script).toMatch(/lane = _load_gate\(\)\.fold_lane\(/);
         expect(script).toMatch(/buckets\["stuck"\] \+ buckets\["moving"\] \+ buckets\["waitingOnKevin"\]/);
     });
 
@@ -295,7 +296,7 @@ describe('one open task per thread and lane (Kevin, 25 Aug 2026)', () => {
     // dupe_verdict, fold mode) reads it as one matter with the keeper; the
     // carry-out puts its Agent Output on the keeper's Notes first.
     it('an Approval twin folds only on the fold verdict, with its reason, and the skill quotes it', () => {
-        expect(script).toMatch(/_load_gate\(\)\.dupe_verdict\(a, b, mode="fold"\)/);
+        expect(script).toMatch(/return gate\.dupe_verdict\(name_a, name_b, mode="fold"\)/);
         expect(script).toMatch(/"folds": folds/);
         expect(skill).toMatch(/its reason is in `folds`/);
         expect(skill).toMatch(/carry-out puts its waiting Agent Output on\s+the keeper's Notes/);

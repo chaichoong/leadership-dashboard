@@ -530,6 +530,15 @@ def child_of(description):
     return m.group(1) if m else None
 
 
+def _fold_verdict(name_a, name_b):
+    """The gate's fold verdict, plus its diary-date guard: two diary tasks on
+    different dates are two entries (Kevin, 18 Oct 2026)."""
+    gate = _load_gate()
+    if gate.fold_on_another_date(name_a, name_b):
+        return {"match": False, "why": "", "shared": []}
+    return gate.dupe_verdict(name_a, name_b, mode="fold")
+
+
 def duplicate_groups(views, verdict=None):
     """Open tasks sharing one thread AND one lane:
     [{thread, lane, keeper, closable, untouchable, folds, names}].
@@ -558,15 +567,14 @@ def duplicate_groups(views, verdict=None):
     legitimately TWO tasks, so the lane is part of the key. A folded task can
     appear in more than one group. Callers pass only actionable views
     (never parked or dispatch-in-flight)."""
-    verdict = verdict or (lambda a, b: _load_gate().dupe_verdict(a, b, mode="fold"))
+    verdict = verdict or _fold_verdict
     by = {}
     for v in views:
         # One lane read for every fold caller (the gate's fold_lane): the
-        # Maintenance Ticket tick, Roy as holder, or a repair-style prefix.
-        lane = ("maintenance"
-                if _load_gate().fold_lane(v.get("name", ""), v.get("teamMember"),
-                                          v.get("maintenanceTicket")) == "maintenance"
-                else "reply")
+        # Maintenance Ticket tick, Roy as holder, or a repair-style prefix;
+        # a CALENDAR: diary task is its own lane (Kevin, 18 Oct 2026).
+        lane = _load_gate().fold_lane(v.get("name", ""), v.get("teamMember"),
+                                      v.get("maintenanceTicket"))
         for k in thread_keys(v.get("inboundUrl")):
             by.setdefault((k, lane), []).append(v)
     out = []
@@ -594,6 +602,15 @@ def duplicate_groups(views, verdict=None):
                 # One email thread can carry two unrelated matters, and a shared
                 # thread alone was enough to list the wrong task as closable.
                 vd = verdict(v.get("name", ""), keeper.get("name", "")) or {}
+                # A DIARY CARD WAITING ON KEVIN, OR ONE HE HAS DECIDED, IS NEVER A KEEPER (18 Oct
+                # 2026), the gate's own rule: a newer diary task about the same event (a moved
+                # time, a cancellation) is its own card. Folded into an approved card waiting to be
+                # written, its new time would sit in the Notes while the old time is written.
+                if vd.get("match") and (keeper.get("status") == "Approval" or keeper.get("outcome")) \
+                        and _load_gate().calendar_task(v.get("name", "")) \
+                        and _load_gate().calendar_task(keeper.get("name", "")):
+                    vd = {"match": False, "why": "a diary card for this event waits on Kevin; "
+                                                 "a newer message about it is its own card"}
                 if not vd.get("match"):
                     if v.get("status") == "Approval":
                         untouchable.append(v["id"])
@@ -897,6 +914,10 @@ def auto_reply_flag(f, cache=None, gate=None):
         cache)
     if why:
         return why
+    if gate.calendar_task(name):
+        # A diary task is there for its date, and a booking confirmation is machine-sent
+        # (Kevin, 18 Oct 2026): never prompt a close for it on the receipt wording.
+        return None
     subject = name
     while gate.TASK_NAME_PREFIX_RE.search(subject):
         subject = gate.TASK_NAME_PREFIX_RE.sub("", subject, count=1)

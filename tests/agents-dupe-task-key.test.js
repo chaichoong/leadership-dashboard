@@ -392,6 +392,8 @@ ${code}`, arg], { encoding: 'utf8' }));
     expect(words(pySrc, 'DUPE_STREET_TYPES')).toEqual(words(jsSrc, 'DUPE_STREET_TYPES'));
     expect(words(pySrc, 'DUPE_MAINTENANCE_LANE_WORDS').length).toBeGreaterThan(1);
     expect(words(pySrc, 'DUPE_MAINTENANCE_LANE_WORDS')).toEqual(words(jsSrc, 'DUPE_MAINTENANCE_LANE_WORDS'));
+    expect(words(pySrc, 'DUPE_CALENDAR_LANE_WORDS')).toEqual(['calendar']);
+    expect(words(pySrc, 'DUPE_CALENDAR_LANE_WORDS')).toEqual(words(jsSrc, 'DUPE_CALENDAR_LANE_WORDS'));
     expect(words(pySrc, 'DUPE_DATE_WORDS').length).toBeGreaterThan(30);
     expect(words(pySrc, 'DUPE_DATE_WORDS')).toEqual(words(jsSrc, 'DUPE_DATE_WORDS'));
     expect(words(pySrc, 'DUPE_GENERIC').length).toBeGreaterThan(10);
@@ -420,6 +422,7 @@ ${code}`, arg], { encoding: 'utf8' }));
       grab(/const DUPE_MIN_SHARED = [\d.]+;/, 'DUPE_MIN_SHARED'),
       grab(/const DUPE_MIN_RATIO = [\d.]+;/, 'DUPE_MIN_RATIO'),
       grab(/const DUPE_MAINTENANCE_LANE_WORDS = \[[\s\S]*?\];/, 'DUPE_MAINTENANCE_LANE_WORDS'),
+      grab(/const DUPE_CALENDAR_LANE_WORDS = \[[\s\S]*?\];/, 'DUPE_CALENDAR_LANE_WORDS'),
       grab(/const DUPE_ADDRESS_RE = [^\n]*;/, 'DUPE_ADDRESS_RE'),
       grab(/const DUPE_PERSON_RE = [^\n]*;/, 'DUPE_PERSON_RE'),
       grab(/const DUPE_SPACES = [^\n]*;/, 'DUPE_SPACES'),
@@ -467,6 +470,11 @@ ${code}`, arg], { encoding: 'utf8' }));
       "Chase DWP on Aaron Mitchell's UC47 decision - 55 Elmdon Place",
       'COMPLIANCE: Fire Alarm Cert renewal due 2026-10-21 - 42 Elmdon Place',
       'COMPLIANCE: Fire Alarm Cert renewal due 2026-10-21 - 32 Elmdon Place',
+      // A diary task is its own fold lane (Kevin, 18 Oct 2026): never folded into the reply
+      // task on the same email, in either language.
+      'INBOUND: Example Dental appointment - please confirm attendance',
+      'CALENDAR: Dentist appointment, Example Dental - Tue 27 Oct',
+      'CALENDAR: Hygienist appointment, Example Dental - Thu 12 Nov',
       '',
     ];
     const pairs = [];
@@ -549,6 +557,7 @@ print(json.dumps(c.dupe_verdict(sys.argv[1], sys.argv[2], sys.argv[3])))
     grab(/const DUPE_MIN_SHARED = [\d.]+;/, 'DUPE_MIN_SHARED'),
     grab(/const DUPE_MIN_RATIO = [\d.]+;/, 'DUPE_MIN_RATIO'),
     grab(/const DUPE_MAINTENANCE_LANE_WORDS = \[[\s\S]*?\];/, 'DUPE_MAINTENANCE_LANE_WORDS'),
+    grab(/const DUPE_CALENDAR_LANE_WORDS = \[[\s\S]*?\];/, 'DUPE_CALENDAR_LANE_WORDS'),
     grab(/const DUPE_ADDRESS_RE = [^\n]*;/, 'DUPE_ADDRESS_RE'),
     grab(/const DUPE_PERSON_RE = [^\n]*;/, 'DUPE_PERSON_RE'),
     grab(/const DUPE_SPACES = [^\n]*;/, 'DUPE_SPACES'),
