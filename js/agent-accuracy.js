@@ -251,7 +251,8 @@
         'close: duplicate':        { level: 'A', since: '2026-09-07' },
         'close: already handled':  { level: 'A', since: '2026-09-07' },
         'information only':        { level: 'A', since: '2026-09-04' },
-        'calendar entry':          { level: 'A', since: '2026-09-07' },
+        // A diary entry is a card again (Kevin, 18 Oct 2026): it goes in on his yes.
+        'calendar entry':          { level: 'B', since: '2026-10-18' },
         'pass to Roy':             { level: 'A', since: '2026-09-07' },
         // Roy's assistant (24 Sep 2026): an answer to Roy's own request, or a
         // record of work logged for it, goes to info@ only, so nobody outside sees it.

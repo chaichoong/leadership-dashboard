@@ -134,9 +134,9 @@ print(json.dumps(json.loads(buf.getvalue())))
 // Extended to the diary, 24 Sep 2026 (Kevin: "do it now"): calendar-write.py trusted the string too.
 // Drives the real cmd_create with get_task() faked. A task that passes the evidence check goes on
 // to parse its (deliberately empty) diary block, so it stops with an ERROR, never a network call.
-describe('calendar-write refuses an approval nobody gave, and keeps its Level A path', () => {
+describe('calendar-write refuses an approval nobody gave, and has no path round Kevin', () => {
   const CAL = JSON.stringify(path.join(root, 'scripts/calendar-write.py'));
-  function create(fields, handled = false) {
+  function create(fields) {
     const out = execFileSync('python3', ['-c', `
 import importlib.util, json, sys, argparse
 sys.argv = ["calendar-write.py"]
@@ -148,11 +148,11 @@ F = {IDS[k]: v for k, v in a["fields"].items()}
 m.get_task = lambda task_id: {"id": task_id, "createdTime": "2026-09-22T12:00:00.000Z", "fields": F}
 m.worker_call = lambda *x, **y: (_ for _ in ()).throw(RuntimeError("no network in tests"))
 try:
-    m.cmd_create(argparse.Namespace(task="recTEST", handled=a["handled"]))
+    m.cmd_create(argparse.Namespace(task="recTEST"))
     print(json.dumps({"exit": ""}))
 except SystemExit as e:
     print(json.dumps({"exit": str(e)}))
-`], { input: JSON.stringify({ fields, handled }), encoding: 'utf8' });
+`], { input: JSON.stringify({ fields }), encoding: 'utf8' });
     return JSON.parse(out.trim().split('\n').pop()).exit;
   }
   const entry = { name: 'Diary: meeting', approvalOutcome: { name: 'Approved as-is' }, taskType: { name: 'Admin' }, agentOutput: 'not a diary block' };
@@ -166,14 +166,21 @@ except SystemExit as e:
     expect(msg).not.toMatch(/REFUSED/);
   });
 
-  it('the Level A diary path is judged by its HANDLED marker, not by a card it never had', () => {
-    const msg = create({ ...entry, approvalOutcome: null, notes: 'HANDLED WITHOUT YOU (calendar entry): diary' }, true);
-    expect(msg).not.toMatch(/REFUSED/);
+  // Kevin, 18 Oct 2026: a diary entry goes in on his yes only. The 7 Sep Level A path (--handled,
+  // judged by the HANDLED marker in Notes) is gone, so the marker alone writes nothing.
+  it('a task carrying the old HANDLED marker and no approval is refused', () => {
+    const msg = create({ ...entry, approvalOutcome: null, notes: 'HANDLED WITHOUT YOU (calendar entry): diary' });
+    expect(msg).toMatch(/REFUSED: task recTEST .*is not approved/);
   });
 
-  it('--handled on a rejected fallback card that kept the marker is refused', () => {
+  it('a rejected card that kept the marker is refused', () => {
     const msg = create({ ...entry, approvalOutcome: { name: 'Rejected' }, sentForApprovalBy: ['recAGENT000000001'],
-      notes: 'HANDLED WITHOUT YOU (calendar entry): diary. The diary write FAILED, so this went to the queue' }, true);
+      notes: 'HANDLED WITHOUT YOU (calendar entry): diary. The diary write FAILED, so this went to the queue' });
     expect(msg).toMatch(/REFUSED: task recTEST .*is not approved/);
+  });
+
+  it('the command line has no flag that stands in for an approval', () => {
+    const help = execFileSync('python3', [path.join(root, 'scripts/calendar-write.py'), 'create', '--help'], { encoding: 'utf8' });
+    expect(help).not.toMatch(/--handled/);
   });
 });

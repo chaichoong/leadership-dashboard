@@ -317,6 +317,39 @@ describe('an auto-reply never becomes a task (Kevin, 2 Sep 2026)', () => {
         expect(JSON.parse(out.trim().split('\n').pop()).action).toBe('refused');
     });
 
+    // Kevin, 18 Oct 2026: a date for his diary becomes a CALENDAR: task. A booking confirmation is
+    // machine-sent, so its thread reads as all auto-replies; the diary task must still be created.
+    it('a diary task on an all-auto-reply thread is created; a reply task on it is still refused', () => {
+        const r = JSON.parse(execFileSync('python3', ['-c', `
+import importlib.util, json
+spec = importlib.util.spec_from_file_location("g", ${JSON.stringify(path.join(root, 'scripts/create-agent-task.py'))})
+g = importlib.util.module_from_spec(spec); spec.loader.exec_module(g)
+cache = {"m1": {"threadId": "1a0496b9df667238", "auto_reply": "body: we have received your"}}
+url = "https://mail.google.com/mail/u/0/#all/1a0496b9df667238"
+print(json.dumps([
+  g.auto_reply_refusal({g.F["name"]: "CALENDAR: Dentist, Example Dental - Tue 5 Jan", g.F["inboundUrl"]: url}, cache),
+  g.auto_reply_refusal({g.F["name"]: "INBOUND: booking received", g.F["inboundUrl"]: url}, cache),
+  g.auto_reply_refusal({g.F["name"]: "CALENDAR: Automatic reply: Jo Bloggs"}, cache) is not None,
+]))`], { encoding: 'utf8' }).trim());
+        expect(r[0]).toBeNull();
+        expect(r[1]).toMatch(/every scanned message on thread/);
+        expect(r[2]).toBe(true);
+    });
+
+    it('the Task Manager never flags a diary task for a close on its receipt wording', () => {
+        const r = JSON.parse(execFileSync('python3', ['-c', `
+import importlib.util, json, sys
+sys.path.insert(0, ${JSON.stringify(path.join(root, 'scripts'))})
+spec = importlib.util.spec_from_file_location("tm", ${JSON.stringify(path.join(root, 'scripts/task-manager.py'))})
+tm = importlib.util.module_from_spec(spec); spec.loader.exec_module(tm)
+body = "We have received your booking. Your appointment is on Tuesday 5 January at 10:00."
+f = lambda name: {"Task Name": name, "Inbound Sender": "bookings@example.com", "Inbound Message Content": body}
+print(json.dumps([tm.auto_reply_flag(f("CALENDAR: Dentist, Example Dental - Tue 5 Jan"), {}),
+                  tm.auto_reply_flag(f("INBOUND: booking received"), {})]))`], { encoding: 'utf8' }).trim().split('\n').pop());
+        expect(r[0]).toBeNull();
+        expect(r[1]).toMatch(/we have received your/);
+    });
+
     it('the scan stamps auto_reply, keeps flagged mail out of every stranded list, and caches the reason', () => {
         const scan = script.slice(script.indexOf('def cmd_scan('), script.indexOf('def cmd_act('));
         expect(scan).toMatch(/annotate_auto_replies\(lst, signal_fn\)/);

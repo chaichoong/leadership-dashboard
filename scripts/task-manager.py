@@ -897,6 +897,10 @@ def auto_reply_flag(f, cache=None, gate=None):
         cache)
     if why:
         return why
+    if gate.calendar_task(name):
+        # A diary task is there for its date, and a booking confirmation is machine-sent
+        # (Kevin, 18 Oct 2026): never prompt a close for it on the receipt wording.
+        return None
     subject = name
     while gate.TASK_NAME_PREFIX_RE.search(subject):
         subject = gate.TASK_NAME_PREFIX_RE.sub("", subject, count=1)

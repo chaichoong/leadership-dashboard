@@ -362,10 +362,51 @@ describe('the money rule — £25 log, £100 inform, above a card, recurring alw
 });
 
 describe('calendar entries and everything else', () => {
-  it('a valid CALENDAR output submitted as Admin acts', () => {
-    const d = py(`print(json.dumps(lvl('CALENDAR:\\nTITLE: Dentist\\nSTART: 2027-01-05 10:00\\nEND: 2027-01-05 10:30\\n---\\nDentist appointment', 'Admin', 'INBOUND: dentist')))`);
-    expect(d.level).toBe('A');
-    expect(d.carry).toBe('calendar');
+  // Kevin, 18 Oct 2026: "create an approval card for whether it needs to go in my calendar or not".
+  // From 7 Sep a valid diary block was written at submit with no card (Level A).
+  it('a valid CALENDAR output submitted as Admin is a card, never a diary write', () => {
+    const d = py(`print(json.dumps(lvl('CALENDAR:\\nTITLE: Dentist\\nSTART: 2027-01-05 10:00\\nEND: 2027-01-05 10:30\\n---\\nDentist appointment', 'Admin', 'CALENDAR: Dentist - 5 Jan')))`);
+    expect(d.level).toBe('B');
+    expect(d.category).toBe('calendar entry');
+    expect(d.carry).toBe('');
+    expect(d.text).toMatch(/Kevin's yes/);
+  });
+  // Drives the REAL cmd_submit end to end with Airtable and every subprocess faked. Back-tested on
+  // the code before 18 Oct 2026: that submit called calendar-write.py --handled and closed the task.
+  it('submit puts a diary block in Kevin\'s queue and never calls the diary writer', () => {
+    const script = `
+import importlib.util, json, sys, types, tempfile, os, io, contextlib
+spec = importlib.util.spec_from_file_location("ad", ${JSON.stringify(DISPATCH)})
+ad = importlib.util.module_from_spec(spec)
+sys.path.insert(0, ${JSON.stringify(resolve(ROOT, 'scripts'))})
+spec.loader.exec_module(ad)
+state = {ad.AF['name']: 'CALENDAR: Dentist, Example Dental - 5 Jan', ad.AF['notes']: '', ad.AF['status']: 'Today'}
+runs = []
+def fake_patch(t, f):
+    state.update(f)
+    return {'id': t}
+ad.patch_task = fake_patch
+ad.get_task = lambda t: {'id': t, 'createdTime': '2026-10-18T10:00:00.000Z', 'fields': dict(state)}
+ad.supersede_attachments = lambda *a, **k: []
+ad.upload_attachment = lambda *a, **k: 'x'
+ad.load_login_sites = lambda: {}
+def fake_run(cmd, *a, **k):
+    runs.append([str(c) for c in cmd])
+    return types.SimpleNamespace(returncode=0, stdout='{}', stderr='')
+ad.subprocess.run = fake_run
+fh = tempfile.NamedTemporaryFile('w', suffix='.md', delete=False)
+fh.write("CALENDAR:\\nTITLE: Dentist, Example Dental\\nSTART: 2099-01-05 10:00\\nEND: 2099-01-05 10:30\\n---\\nA check-up, from the surgery's reminder email.\\n**Carrying this out will involve:** adding the appointment to your diary.")
+fh.close()
+with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
+    ad.cmd_submit(types.SimpleNamespace(task='recTESTCAL0000001', agent=ad.RESPONSE_REC_ID, type='Admin',
+                                        output_file=fh.name, tier1=False, receipt=None))
+os.unlink(fh.name)
+print(json.dumps({'status': state.get(ad.AF['status']), 'runs': runs, 'notes': state.get(ad.AF['notes'])}))
+`;
+    const r = JSON.parse(execFileSync('/usr/bin/python3', ['-c', script], { encoding: 'utf8' }).trim().split('\n').pop());
+    expect(r.status).toBe('Approval');
+    expect(r.runs.filter(c => c.some(a => a.endsWith('calendar-write.py')))).toEqual([]);
+    expect(r.notes || '').not.toMatch(/HANDLED WITHOUT YOU/);
   });
   it('a CALENDAR output under the wrong type is a card (calendar-write refuses it anyway)', () => {
     const d = py(`print(json.dumps(lvl('CALENDAR:\\nTITLE: Dentist\\nSTART: 2027-01-05 10:00\\nEND: 2027-01-05 10:30\\n---\\nx', 'Research', 'x')))`);
@@ -390,16 +431,11 @@ describe('submit wires the level in, and the carry-out leaves its marker', () =>
   it('a carry-out that leaves no marker is refused, not assumed', () => {
     expect(SRC).toMatch(/if HANDLED_MARK not in str\(check\.get\(AF\["notes"\]\) or ""\):\n\s+sys\.exit\(/);
   });
-  it('the calendar carry-out falls back to a card when the diary write fails', () => {
-    expect(SRC).toMatch(/if proc\.returncode != 0:[\s\S]*?AF\["status"\]: "Approval"/);
-  });
-  it('the marker string is shared with calendar-write.py and the page', () => {
-    const cal = readFileSync(resolve(ROOT, 'scripts/calendar-write.py'), 'utf8');
+  it('the marker string is shared with the page', () => {
     const acc = readFileSync(resolve(ROOT, 'js/agent-accuracy.js'), 'utf8');
     const apv = readFileSync(resolve(ROOT, 'scripts/slack-automation/approvals.js'), 'utf8');
     const m = SRC.match(/^HANDLED_MARK = "([^"]+)"/m);
     expect(m).not.toBeNull();
-    expect(cal).toContain(`HANDLED_MARK = "${m[1]}"`);
     expect(acc).toContain(`var HANDLED_MARK = '${m[1]}'`);
     expect(apv).toContain(`export const HANDLED_MARK = '${m[1]}'`);
   });

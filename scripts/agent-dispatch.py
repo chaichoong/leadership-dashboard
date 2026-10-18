@@ -2270,8 +2270,8 @@ def decision_level(output, task_type, task_rec, fetch=None, agent_banner=None,
                    plans_fetch=None):
     """Which level this submission sits at, with the evidence VERIFIED.
 
-    Returns a dict: level (A/B/C), category, carry ('close' | 'calendar' |
-    'roy' | ''), evidence (what was checked, for the Notes stamp), why (for
+    Returns a dict: level (A/B/C), category, carry ('close' | 'roy' |
+    'send-rule' | ''), evidence (what was checked, for the Notes stamp), why (for
     a card), money ('log' | 'inform' | 'card' | 'kevin'), amount, recurring.
     A duplicate fold also returns keeper (the record id verified) and
     tierChecked=True, which tells submit this category ran its own tier check.
@@ -2532,10 +2532,14 @@ def decision_level(output, task_type, task_rec, fetch=None, agent_banner=None,
         return act("pass to Roy", "roy", f"name matched {why!r}, nothing vetoed; "
                                         "Roy's standing approval")
 
+    # A DIARY ENTRY GOES IN ON KEVIN'S YES (Kevin, 18 Oct 2026). From 7 Sep it
+    # was written at submit with no card; now every date the inbox robots find
+    # comes to him as an "add to your diary?" card, and only his approval
+    # reaches calendar-write.py. Replaces the 7 Sep Level A ruling.
     if task_type == "Admin" and out.upper().startswith("CALENDAR:") \
             and not calendar_submit_problem(out, task_type):
-        return act("calendar entry", "calendar",
-                   "a diary entry, no attendees; calendar-write.py refuses a past time")
+        return card("calendar entry",
+                    "a diary entry goes in only on Kevin's yes (Kevin, 18 Oct 2026)")
 
     return card("other", "a card by default")
 
@@ -2619,32 +2623,6 @@ def handle_without_kevin(args, output, task_rec, level, attached):
             task=args.task, to=ROY_EMAIL,
             reason=f"PASS TO ROY at Level A: {level['evidence']}"))
         status = sel((get_task(args.task).get("fields", {}) or {}).get(AF["status"]))
-    elif carry == "calendar":
-        patch_task(args.task, fields)       # the marker first: calendar-write checks it
-        proc = subprocess.run(
-            [sys.executable, os.path.join(os.path.dirname(os.path.abspath(__file__)),
-                                          "calendar-write.py"),
-             "create", args.task, "--handled"],
-            capture_output=True, text=True)
-        if proc.returncode != 0:
-            # The diary write failed, so there IS a decision now: fall back to
-            # the card rather than pretend. Kevin sees why on the task.
-            err = (proc.stderr or proc.stdout or "").strip()[-300:]
-            patch_task(args.task, {
-                AF["status"]: "Approval",
-                AF["sentForApprovalBy"]: [args.agent],
-                AF["assignee"]: {"email": KEVIN_AIRTABLE_EMAIL},
-                AF["dueDate"]: today_london(),
-                AF["notes"]: (existing + "\n\n" + note + "\n\n"
-                              f"[{stamp} — agent-dispatch] The diary write FAILED, so this "
-                              f"went to the queue instead: {err}").strip()[-90000:],
-            })
-            print(json.dumps({"submitted": args.task, "handled": False,
-                              "fellBackToCard": True, "level": AUTONOMY_APPROVE,
-                              "error": err}))
-            return 0
-        patch_task(args.task, {AF["status"]: "Completed", AF["completion"]: now_iso()})
-        status = "Completed"
     elif carry == "send-rule":
         # A sent email cannot be reversed: the named exception to Level A's
         # 24-hour reverse (Kevin, 17 Sep 2026). send-email.py re-checks the

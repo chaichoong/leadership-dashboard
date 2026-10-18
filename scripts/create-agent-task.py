@@ -276,9 +276,17 @@ def auto_reply_signal(headers, subject, body):
 # Task-name prefixes the skills add before the subject; the subject test
 # must see past them.
 TASK_NAME_PREFIX_RE = re.compile(
-    r"^\s*(?:inbound(?:\s*\(follow-up\))?|maintenance|post)\s*:\s*", re.I)
+    r"^\s*(?:inbound(?:\s*\(follow-up\))?|maintenance|post|calendar)\s*:\s*", re.I)
 
 THREAD_URL_RE = re.compile(r"#(?:all|inbox)/([0-9a-f]{8,})")
+
+# The diary lane's task name (inbound-email-triage Step 4d, Kevin 18 Oct 2026).
+CALENDAR_TASK_PREFIX = "CALENDAR:"
+
+
+def calendar_task(name):
+    """True for a diary task: its name opens with the CALENDAR: lane prefix."""
+    return str(name or "").lstrip().upper().startswith(CALENDAR_TASK_PREFIX)
 
 
 def scan_cache_path():
@@ -548,6 +556,11 @@ def auto_reply_refusal(fields, cache):
         name = TASK_NAME_PREFIX_RE.sub("", name, count=1)
     if AUTO_REPLY_SUBJECT_RE.search(name):
         return "task name is an auto-reply subject (%s)" % name.strip()[:60]
+    # A DIARY CARD comes from the date, not the reply (Kevin, 18 Oct 2026): a booking
+    # confirmation is machine-sent ("we have received your booking for 22 Oct"), and
+    # that date is exactly what the CALENDAR: task is for. The name test above holds.
+    if calendar_task(fields.get(F["name"])):
+        return None
     threads = THREAD_URL_RE.findall(str(fields.get(F["inboundUrl"], "")))
     for tid in threads:
         on_thread = [v for v in cache.values()
@@ -2801,6 +2814,10 @@ def selftest():
     unknown = dict(fylde_task, **{F["inboundUrl"]: "https://mail.google.com/mail/u/0/#inbox/deadbeef00"})
     check("an unscanned thread is not assumed to be an auto-reply", auto_reply_refusal(unknown, cache) is None)
     check("a normal task name passes", auto_reply_refusal({F["name"]: "INBOUND: reply to Swinton"}, cache) is None)
+    diary = dict(fylde_task, **{F["name"]: "CALENDAR: Dentist, Example Dental - Tue 5 Jan"})
+    check("a diary task on a machine-sent thread still creates", auto_reply_refusal(diary, cache) is None)
+    check("a diary task named for an auto-reply is still refused",
+          auto_reply_refusal({F["name"]: "CALENDAR: Out of office: Jo Bloggs"}, {}) is not None)
     # Never a card (Kevin, 17 Sep 2026): real task names off the rejection log.
     nac = lambda name, desc="": never_a_card_refusal({F["name"]: name, F["desc"]: desc})
     check("a Stripe notice for liquidated Two Chefs is refused",

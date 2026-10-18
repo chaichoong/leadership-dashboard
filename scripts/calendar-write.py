@@ -61,9 +61,6 @@ AF = {
     "taskType":        "fldZ2moDV2041Sobc",
     "notes":           "fldR7apBzSp3oxFxz",
 }
-# Mirrors HANDLED_MARK in scripts/agent-dispatch.py (tests/constant-drift keeps them equal).
-HANDLED_MARK = "HANDLED WITHOUT YOU"
-
 APPROVED = ("Approved as-is", "Approved with minor edits")
 TEAM_MEMBER = "flduCtmQGpOA4eWaj"      # Tasks: Team Member (read by the trial refusal)
 
@@ -195,27 +192,18 @@ def cmd_create(args):
     ttype = sel(f.get(AF["taskType"]))
     output = f.get(AF["agentOutput"], "") or ""
 
-    # Level A (Kevin's ruling, 7 Sep 2026): a diary entry is carried out at
-    # submit without a card. The gate is still a gate — agent-dispatch.py
-    # leaves its HANDLED marker naming the calendar category on the task
-    # BEFORE calling this with --handled, and nothing else writes that marker.
-    # The Level A step clears Approval Outcome and Sent For Approval By before it calls this
-    # (agent-dispatch.py handle_without_kevin), so a task carrying either is not a Level A entry:
-    # a fallback card Kevin rejected keeps the marker in its Notes (review, 24 Sep 2026).
-    handled = bool(getattr(args, "handled", False)) and \
-        HANDLED_MARK in str(f.get(AF["notes"]) or "") and \
-        "(calendar entry)" in str(f.get(AF["notes"]) or "") and \
-        not outcome and not f.get(SENT_FOR_APPROVAL_BY)
-    if outcome not in APPROVED and not handled:
+    # Kevin's yes is the only way in (Kevin, 18 Oct 2026). From 7 Sep to 18 Oct a
+    # diary entry was written at submit with no card (Level A, the --handled flag);
+    # that path is gone, so a task carrying the old HANDLED marker is refused here
+    # like any other unapproved task.
+    if outcome not in APPROVED:
         sys.exit(
             f"REFUSED: task {task_id} ({name}) is not approved.\n"
             f"         Approval Outcome = {outcome or '(empty)'}.\n"
-            "         Nothing reaches the diary until Kevin approves it, or "
-            "agent-dispatch.py marks it handled at Level A (--handled).")
+            "         Nothing reaches the diary until Kevin approves the card.")
     # The approval string alone is not an approval (finding 20260922-agent-dispatch-572, extended
-    # here 24 Sep 2026): a Kevin-approved entry must carry the marks a real approval leaves. The
-    # Level A path above is judged by its HANDLED marker instead, as before.
-    evidence = "" if handled else approval_evidence_problem(f, rec.get("createdTime", ""))
+    # here 24 Sep 2026): a Kevin-approved entry must carry the marks a real approval leaves.
+    evidence = approval_evidence_problem(f, rec.get("createdTime", ""))
     if evidence:
         sys.exit(
             f"REFUSED: task {task_id} ({name}) reads {outcome!r}, but {evidence}.\n"
@@ -330,9 +318,6 @@ def main(argv):
     sub = p.add_subparsers(dest="cmd", required=True)
     c = sub.add_parser("create", help="create the approved entry for a task")
     c.add_argument("task")
-    c.add_argument("--handled", action="store_true",
-                   help="Level A: accept the HANDLED marker agent-dispatch left "
-                        "in Notes in place of an approval")
     c.set_defaults(fn=cmd_create)
     t = sub.add_parser("test", help="worker + consent health")
     t.set_defaults(fn=cmd_test)
