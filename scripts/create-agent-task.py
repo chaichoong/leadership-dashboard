@@ -295,9 +295,12 @@ DIARY_DATE_RE = re.compile(
 
 
 def diary_date(name):
-    """(day, month) from the LAST date in a diary task's name, or None."""
-    found = DIARY_DATE_RE.findall(str(name or ""))
-    return (int(found[-1][0]), found[-1][1].lower()) if found else None
+    """(day, month) of a diary task's date, or None. The date is the FIRST one in the
+    name's last " - " part ("... - Sat 31 Oct (was 24 Oct)" is 31 Oct), so a street
+    or a note earlier in the name is never read as the date."""
+    tail = str(name or "").rsplit(" - ", 1)[-1]
+    found = DIARY_DATE_RE.findall(tail) or DIARY_DATE_RE.findall(str(name or ""))[-1:]
+    return (int(found[0][0]), found[0][1].lower()) if found else None
 
 
 def fold_on_another_date(name_a, name_b):
@@ -1680,6 +1683,15 @@ def decide(incoming_fields, open_rows):
         another_date = fold_on_another_date(incoming_name, other)
         if another_date:
             not_folded.append("%s: %s" % (row["id"], another_date))
+            continue
+        # A DIARY CARD WAITING ON KEVIN IS NEVER CHANGED UNDER HIM (18 Oct 2026). A fold appends
+        # to the Description and leaves the card's diary block as it was, so a moved time would be
+        # written at the old time on his yes. The new message becomes its own diary task, drafted
+        # as its own card that says what it replaces.
+        if calendar_task(incoming_name) and calendar_task(other) \
+                and _sel_name(f.get(F["status"])) == "Approval":
+            not_folded.append("%s: a diary card waiting on Kevin is never changed under him"
+                              % row["id"])
             continue
         # TWO PASSES, and a match is either. The key is the fast exact bucket
         # and keeps every catch it already had; the verdict is the second pass

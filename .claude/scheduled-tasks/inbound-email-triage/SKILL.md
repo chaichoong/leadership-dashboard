@@ -368,9 +368,11 @@ counts if the existing task's name starts "CALENDAR:". A reply task or a
 compliance task on the same thread does NOT suppress it, and never append a
 diary date to another task's Description in its place: a date folded into a
 reply task never becomes a card. And the reverse: a new message on a thread
-whose open task is a `CALENDAR:` task is appended there only when it moves or
-cancels that event; anything else it asks of Kevin gets its own task by the
-normal rules, never a line on a diary card.
+whose open task is a `CALENDAR:` task is never appended to it by hand. If it
+moves, cancels or repeats that event, raise a diary task for it through Step
+4d (the gate folds it in while that task is still being drafted, and keeps it
+apart once its card waits on Kevin, so his card never changes under him);
+anything else it asks of Kevin gets its own task by the normal rules.
 
 For each thread heading for a task (and each stranded message in Step 5),
 query Tasks `tblqB8b22hKBL4PF1` with filterByFormula
@@ -615,13 +617,13 @@ here depends on anyone remembering.
 ### Step 4d — Diary tasks for Inbox Response (rule 1c; Kevin's ruling, 18 Oct 2026)
 
 Every diary date that survives the Step 3 dedupe gets one task for the Inbox
-Response agent. One diary task per EVENT: before creating, look in
-`$SCRATCH/open-matters.json` for an open task named `CALENDAR:` for the same
-thing on the same date (a reminder after a confirmation, often on a new
-thread). If there is one, append a dated `NEW MESSAGE <date>: <summary>` line
-to its Description instead (a changed time goes in that line) and log `note
---do updated --reason "joined open matter: <its name>"`. Name every diary task
-the same way so the gate's own duplicate key also matches it. It drafts the diary entry and submits it;
+Response agent. Always create it through the gate below, never by appending to
+an open diary task yourself: the gate folds a reminder into the diary task for
+the same event and date while that task is still being drafted, and keeps a
+new message apart once its card waits on Kevin. Name every diary task the same
+way (what, who or where, then the date last) so the gate recognises it. When
+the message moves or cancels an event already raised, start the Description
+with `CHANGES: <the earlier diary task's name>`. It drafts the diary entry and submits it;
 `submit` makes it an "add to your diary?" card, and only Kevin's approval
 writes it (scripts/calendar-write.py). Fields:
 

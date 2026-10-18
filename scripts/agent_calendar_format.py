@@ -178,7 +178,13 @@ def diary_written(task_id, ledger=None):
             line = line.strip()
             if not line:
                 continue
-            row = json.loads(line)
-            if row.get("task") == task_id and row.get("event") == "created":
+            try:
+                row = json.loads(line)
+            except ValueError:
+                # A damaged line proves nothing was written, so it never counts as a write;
+                # `complete` then refuses with its message rather than crashing.
+                continue
+            if isinstance(row, dict) and row.get("task") == task_id \
+                    and row.get("event") == "created":
                 return True
     return False

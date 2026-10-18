@@ -198,3 +198,74 @@ os.unlink(fh.name)`);
     expect(r).toEqual([false, true, false]);
   });
 });
+
+describe('second review (18 Oct 2026): what else could lose or change a diary card', () => {
+  it('a new message never folds into a diary card already waiting on Kevin; it folds while the task is drafted', () => {
+    const at = (status) => py(GATE, `
+F = m.F
+rows = [{"id": "recCardWaitingAaa", "createdTime": "2026-10-18T09:00:00.000Z", "fields": {
+    F["name"]: "CALENDAR: Dentist appointment, Example Dental - Tue 27 Oct", F["status"]: {"name": "${status}"},
+    F["inboundSender"]: "bookings@example-dental.co.uk"}}]
+print(json.dumps(m.decide({F["name"]: "CALENDAR: Dentist appointment, Example Dental - Tue 27 Oct",
+                          F["inboundSender"]: "bookings@example-dental.co.uk"}, rows)))`);
+    expect(at('Today').action).toBe('update');
+    const waiting = at('Approval');
+    expect(waiting.action).toBe('create');
+    expect(waiting.note).toMatch(/waiting on Kevin is never changed under him/);
+  });
+
+  const level = (out, name, keeper) => py(DISPATCH, `
+AF = m.AF
+k = ${keeper ? `{"id": "recKeeperAaaaaaaa", "createdTime": "2026-10-18T08:00:00.000Z", "fields": {AF["name"]: ${JSON.stringify(keeper.name)}, AF["status"]: ${JSON.stringify(keeper.status)}, AF["teamMember"]: ["${RESPONSE}"]}}` : 'None'}
+me = {"id": "recDiaryAaaaaaaaa", "createdTime": "2026-10-18T09:00:00.000Z",
+      "fields": {AF["name"]: ${JSON.stringify(name)}, AF["status"]: "Today", AF["teamMember"]: ["${RESPONSE}"]}}
+d = m.decision_level(${JSON.stringify(out)}, "Admin", me, fetch=lambda i: json.loads(json.dumps(k)))
+print(json.dumps({"level": d["level"], "why": d.get("why") or d.get("evidence")}))`);
+
+  it("an agent cannot fold a newer diary task into a card waiting on Kevin; a drafted keeper still folds", () => {
+    const name = 'CALENDAR: Dentist appointment, Example Dental - Tue 27 Oct';
+    const waiting = level('CLOSE PROPOSAL: duplicate of recKeeperAaaaaaaa', name, { name, status: 'Approval' });
+    expect(waiting.level).toBe('B');
+    expect(waiting.why).toMatch(/diary card waiting on Kevin/);
+    expect(level('CLOSE PROPOSAL: duplicate of recKeeperAaaaaaaa', name, { name, status: 'Today' }).level).toBe('A');
+  });
+
+  it('a diary task is never closed as already handled by another task; a reply task still is', () => {
+    const done = { name: 'INBOUND: Example Dental dentist appointment - please confirm attendance', status: 'Completed' };
+    const diary = level('CLOSE PROPOSAL: already handled — see recKeeperAaaaaaaa', 'CALENDAR: Dentist appointment, Example Dental - Tue 27 Oct', done);
+    expect(diary.level).toBe('B');
+    expect(diary.why).toMatch(/decided on its own card/);
+    expect(level('CLOSE PROPOSAL: already handled — see recKeeperAaaaaaaa', 'INBOUND: Example Dental reminder', done).level).toBe('A');  // CONTROL
+  });
+
+  it('a creditor word does not move a diary task to the creditor agent', () => {
+    const lane = (name) => py(DISPATCH, `
+AF = m.AF
+CRED = "recjh6mmaF8KJW8t3"
+roster = {"${RESPONSE}": {"name": "Inbox Response", "status": "Live", "dispatchable": True},
+          CRED: {"name": "Creditor Management", "status": "Live", "dispatchable": True}}
+ctx = m.lane_context([], roster, "", [], {})
+T = {"id": "recDiaryCredAaaaa", "createdTime": "2026-10-18T10:00:00.000Z",
+     "fields": {AF["name"]: ${JSON.stringify(name)}, AF["status"]: "Today", AF["teamMember"]: ["${RESPONSE}"],
+                AF["taskType"]: "Admin", AF["description"]: "CREDITOR MATTER"}}
+t = m.task_view(T)
+l, extra = m.task_lane(t, ctx)
+print(json.dumps({"lane": l, "target": t.get("autoTarget") or ""}))`);
+    expect(lane('INBOUND: Call with Barclaycard about the payment plan').target).toBe('recjh6mmaF8KJW8t3');  // CONTROL
+    const r = lane('CALENDAR: Call with Barclaycard about the payment plan - Wed 28 Oct');
+    expect(r.target).toBe('');
+    expect(r.lane).not.toBe('routingNeeded');
+  });
+
+  it('the date is the first one in the last part of the name, and a damaged ledger line is never a write', () => {
+    expect(py(GATE, `print(json.dumps(m.diary_date("CALENDAR: Dentist, Example Dental - Sat 31 Oct (was 24 Oct)")))`)).toEqual([31, 'oct']);
+    const r = py(resolve(SCRIPTS, 'agent_calendar_format.py'), `
+import tempfile, os
+fh = tempfile.NamedTemporaryFile('w', suffix='.jsonl', delete=False)
+fh.write('{"task": "recA", "event": "creat\\n' + json.dumps({"task": "recB", "event": "created"}) + "\\n")
+fh.close()
+print(json.dumps([m.diary_written("recA", fh.name), m.diary_written("recB", fh.name)]))
+os.unlink(fh.name)`);
+    expect(r).toEqual([false, true]);
+  });
+});

@@ -2385,6 +2385,11 @@ def decision_level(output, task_type, task_rec, fetch=None, agent_banner=None,
         another_date = _gate().fold_on_another_date(name, kname_full)
         if another_date:
             return card("close: duplicate", f"keeper {keeper_id}: {another_date}")
+        if _gate().calendar_task(name) and kstatus == "Approval":
+            return card("close: duplicate",
+                        f"keeper {keeper_id} is a diary card waiting on Kevin: a newer message "
+                        "about it is never folded into a card he has not decided, because its "
+                        "diary block would stay as it was")
         # A DIFFERENT TENANT, HOUSE OR LINKED RECORD (28 Sep 2026), whichever
         # is older: the create gate refuses this fold (#621), so an agent's
         # close may not make it either. Same checks, imported from the gate.
@@ -2427,6 +2432,13 @@ def decision_level(output, task_type, task_rec, fetch=None, agent_banner=None,
     if handled:
         if tier_signal:
             return kevin_only(f"tier-1 matter ({tier_signal}): Kevin only")
+        # A DIARY TASK IS NEVER "ALREADY HANDLED" BY ANOTHER TASK (Kevin, 18 Oct 2026). The reply
+        # task on the same email closes when Kevin answers it ("see you then"), and that close
+        # says nothing about his diary: whether the date goes in is his decision on the card.
+        if _gate().calendar_task(name):
+            return card("close: already handled",
+                        "a diary task is decided on its own card: a closed reply task on the "
+                        "same email says nothing about Kevin's diary")
         cited = handled.group(1)
         if cited == task_id:
             return card("close: already handled", "the task cited is this very task")
@@ -3387,7 +3399,10 @@ def task_lane(t, ctx):
             # specialist — the deliberately narrow steal predicates in
             # AUTO_ROUTES decide, so the CEO's explicit routing choices
             # are not silently overridden.
-            target = auto_route_steal(t, tm, ctx["role_roster"])
+            # A diary task stays with Inbox Response (Kevin, 18 Oct 2026): "CALENDAR: Call with
+            # Barclaycard - Wed 28 Oct" names a creditor, but it is a date for Kevin's diary.
+            target = (None if _gate().calendar_task(t["name"])
+                      else auto_route_steal(t, tm, ctx["role_roster"]))
             if target:
                 t["autoTarget"] = target
                 return "routingNeeded", {}
