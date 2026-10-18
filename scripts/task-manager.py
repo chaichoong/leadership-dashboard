@@ -602,10 +602,11 @@ def duplicate_groups(views, verdict=None):
                 # One email thread can carry two unrelated matters, and a shared
                 # thread alone was enough to list the wrong task as closable.
                 vd = verdict(v.get("name", ""), keeper.get("name", "")) or {}
-                # A DIARY CARD WAITING ON KEVIN IS NEVER A KEEPER (18 Oct 2026), the gate's own
-                # rule: a newer diary task about the same event (a moved time, a cancellation)
-                # is its own card, and a close would swap its diary block for a proposal.
-                if vd.get("match") and keeper.get("status") == "Approval" \
+                # A DIARY CARD WAITING ON KEVIN, OR ONE HE HAS DECIDED, IS NEVER A KEEPER (18 Oct
+                # 2026), the gate's own rule: a newer diary task about the same event (a moved
+                # time, a cancellation) is its own card. Folded into an approved card waiting to be
+                # written, its new time would sit in the Notes while the old time is written.
+                if vd.get("match") and (keeper.get("status") == "Approval" or keeper.get("outcome")) \
                         and _load_gate().calendar_task(v.get("name", "")) \
                         and _load_gate().calendar_task(keeper.get("name", "")):
                     vd = {"match": False, "why": "a diary card for this event waits on Kevin; "

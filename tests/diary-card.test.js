@@ -294,3 +294,29 @@ print(json.dumps([{k: g[k] for k in ("keeper", "closable", "folds", "untouchable
   });
 });
 
+describe('fourth review (18 Oct 2026): a diary card Kevin has decided is never a keeper either', () => {
+  const NAME = 'CALENDAR: Dentist appointment, Example Dental - Tue 27 Oct';
+  it('the board: an approved card back at Today waiting to be written', () => {
+    const g = py(TM, `
+views = [{"id": "recViewKeeperAaa", "name": ${JSON.stringify(NAME)}, "status": "Today", "outcome": "Approved as-is",
+          "createdTime": "2026-10-18T01:00:00.000Z", "inboundUrl": ${JSON.stringify(THREAD)}, "teamMember": ["${RESPONSE}"],
+          "maintenanceTicket": False, "description": ""},
+         {"id": "recViewNewerAaaa", "name": ${JSON.stringify(NAME)}, "status": "Today", "outcome": "",
+          "createdTime": "2026-10-18T02:00:00.000Z", "inboundUrl": ${JSON.stringify(THREAD)}, "teamMember": ["${RESPONSE}"],
+          "maintenanceTicket": False, "description": ""}]
+print(json.dumps([g["closable"] for g in m.duplicate_groups(views)]))`);
+    expect(g).toEqual([[]]);
+  });
+  it("an agent's duplicate close into it is a card", () => {
+    const r = py(DISPATCH, `
+AF = m.AF
+k = {"id": "recKeeperAaaaaaaa", "createdTime": "2026-10-18T08:00:00.000Z", "fields": {AF["name"]: ${JSON.stringify(NAME)},
+     AF["status"]: "Today", AF["approvalOutcome"]: "Approved as-is", AF["teamMember"]: ["${RESPONSE}"]}}
+me = {"id": "recDiaryAaaaaaaaa", "createdTime": "2026-10-18T09:00:00.000Z",
+      "fields": {AF["name"]: ${JSON.stringify(NAME)}, AF["status"]: "Today", AF["teamMember"]: ["${RESPONSE}"]}}
+d = m.decision_level("CLOSE PROPOSAL: duplicate of recKeeperAaaaaaaa", "Admin", me, fetch=lambda i: json.loads(json.dumps(k)))
+print(json.dumps({"level": d["level"]}))`);
+    expect(r.level).toBe('B');
+  });
+});
+
