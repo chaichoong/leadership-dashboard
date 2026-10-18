@@ -289,6 +289,35 @@ def calendar_task(name):
     return str(name or "").lstrip().upper().startswith(CALENDAR_TASK_PREFIX)
 
 
+# The date a diary task's name ends with ("CALENDAR: Dentist, Example Dental - Tue 27 Oct").
+DIARY_DATE_RE = re.compile(
+    r"\b(\d{1,2})(?:st|nd|rd|th)?\s+(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\b", re.I)
+
+
+def diary_date(name):
+    """(day, month) from the LAST date in a diary task's name, or None."""
+    found = DIARY_DATE_RE.findall(str(name or ""))
+    return (int(found[-1][0]), found[-1][1].lower()) if found else None
+
+
+def fold_on_another_date(name_a, name_b):
+    """Why two diary tasks may not fold into one, or "" (Kevin, 18 Oct 2026).
+
+    Fold-only and Python-only, like fold_on_a_number_only. The word pass drops
+    weekday and month words and bare numbers, so "Hygienist - Thu 12 Nov" and
+    "Dentist check-up - Tue 27 Oct" from one surgery read as one matter; folded,
+    the second appointment never reaches Kevin's diary. Two diary tasks fold
+    only when both names carry the same date. Quiet on any other pair."""
+    if not (calendar_task(name_a) and calendar_task(name_b)):
+        return ""
+    a, b = diary_date(name_a), diary_date(name_b)
+    if not a or not b:
+        return "a diary task whose name carries no date is never folded"
+    if a != b:
+        return "two diary tasks on different dates are two diary entries"
+    return ""
+
+
 def scan_cache_path():
     """The triage scan cache (message id -> sender, subject, threadId,
     auto_reply), written by inbound-triage.py scan. Same env override so a
@@ -841,6 +870,13 @@ def dupe_task_key(name):
 # Prefix words that put a task in the maintenance lane. Mirrored verbatim by
 # DUPE_MAINTENANCE_LANE_WORDS in os/agents/index.html; drift-tested.
 DUPE_MAINTENANCE_LANE_WORDS = {"maintenance", "repair", "repairs"}
+
+# THE DIARY LANE (Kevin, 18 Oct 2026). A CALENDAR: task is a date for Kevin's
+# diary that becomes an "add to your diary?" card. Folded into the reply task on
+# the same email it never becomes a card, so it is a third fold lane, never
+# merged with a reply or a repair. Mirrored verbatim by DUPE_CALENDAR_LANE_WORDS
+# in os/agents/index.html; drift-tested.
+DUPE_CALENDAR_LANE_WORDS = {"calendar"}
 
 # Words that say what to DO about a matter rather than WHICH matter it is.
 # "pay Sefton" and "Sefton Council" are one thing; the verb is not identity.
@@ -1414,10 +1450,10 @@ def links_disagree(fields_a, fields_b):
 
 def dupe_signals(name):
     """(lane, strong_ids, distinctive_words, place_words): what identifies
-    this matter. `lane` is "maintenance" or "reply", never the raw prefix:
-    the prefix is split off so it cannot eat a subject word, but the only
-    lane difference that may block a fold is repair-vs-reply (Kevin, 15 Sep
-    2026).
+    this matter. `lane` is "maintenance", "calendar" or "reply", never the raw
+    prefix: the prefix is split off so it cannot eat a subject word, and the
+    only lane differences that may block a fold are repair-vs-reply (Kevin,
+    15 Sep 2026) and a diary task (Kevin, 18 Oct 2026).
 
     Mirrored verbatim by dupeSignals in os/agents/index.html; drift-tested in
     tests/agents-dupe-task-key.test.js.
@@ -1430,6 +1466,8 @@ def dupe_signals(name):
         raw = raw[m.end():]
         if any(w in DUPE_MAINTENANCE_LANE_WORDS for w in prefix.split()):
             lane = "maintenance"
+        elif any(w in DUPE_CALENDAR_LANE_WORDS for w in prefix.split()):
+            lane = "calendar"
     strong = set()
     for digits in DUPE_PHONE_RE.findall(raw):
         strong.add("tel:" + digits[-9:])
@@ -1464,7 +1502,7 @@ def dupe_signals(name):
 
 
 def fold_lane(name, team=None, maintenance_ticket=False):
-    """"maintenance" | "reply" for a task RECORD, for the fold callers that
+    """"maintenance" | "calendar" | "reply" for a task RECORD, for the fold callers that
     hold one (the creation gate, the Task Manager board, the dispatch close).
 
     The name lane alone is not enough: on the live board of 15 Sep 2026 all
@@ -1638,6 +1676,10 @@ def decide(incoming_fields, open_rows):
         # both passes: the key pass is the one that folded one tenant's UC47
         # chase into another's. Links first, because a record id is certain.
         if links_disagree(incoming_fields, f) or identity_conflict(incoming_name, other):
+            continue
+        another_date = fold_on_another_date(incoming_name, other)
+        if another_date:
+            not_folded.append("%s: %s" % (row["id"], another_date))
             continue
         # TWO PASSES, and a match is either. The key is the fast exact bucket
         # and keeps every catch it already had; the verdict is the second pass

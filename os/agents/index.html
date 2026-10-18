@@ -5136,6 +5136,8 @@ const DUPE_MIN_RATIO = 0.5;  // of the SHORTER task's distinctive words
 // which agent wrote the task up, not what kind of obligation it is; only a
 // repair ticket folding into a reply task, or the reverse, loses real work.
 const DUPE_MAINTENANCE_LANE_WORDS = ['maintenance','repair','repairs'];
+// A CALENDAR: diary task is its own fold lane (Kevin, 18 Oct 2026). Mirrors the gate.
+const DUPE_CALENDAR_LANE_WORDS = ['calendar'];
 
 /** Tokens naming WHERE: the street type, the name before it, the town after.
  *  `23 Viola Street Bootle` -> viola, street, bootle. */
@@ -5242,9 +5244,9 @@ function dupeIdentityConflict(nameA, nameB){
 }
 
 /** {lane, strong, words, places}: what identifies this matter. `lane` is
- *  'maintenance' or 'reply', never the raw prefix: the prefix is split off so
- *  it cannot eat a subject word, but the only lane difference that may block
- *  a fold is repair-vs-reply. */
+ *  'maintenance', 'calendar' or 'reply', never the raw prefix: the prefix is
+ *  split off so it cannot eat a subject word, and the only lane differences
+ *  that may block a fold are repair-vs-reply and a diary task. */
 function dupeSignals(name){
     let raw = String(name||''), lane = 'reply';
     const m = raw.match(/^([A-Za-z][A-Za-z ]*(?:\([^)]*\))?)\s*:\s*/);
@@ -5252,6 +5254,7 @@ function dupeSignals(name){
         const prefix = m[1].toLowerCase().replace(/[^a-z0-9]+/g,' ').trim();
         raw = raw.slice(m[0].length);
         if(prefix.split(' ').some(function(w){ return DUPE_MAINTENANCE_LANE_WORDS.indexOf(w) !== -1; })) lane = 'maintenance';
+        else if(prefix.split(' ').some(function(w){ return DUPE_CALENDAR_LANE_WORDS.indexOf(w) !== -1; })) lane = 'calendar';
     }
     const strong = [];
     // A UK number in any shape these tasks carry: +447700900747, 447700900747,

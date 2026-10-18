@@ -30,6 +30,8 @@ check lives in calendar-write.py, at create time, because a draft can sit in
 the approval queue across midnight without becoming malformed.
 """
 
+import json
+import os
 import re
 from datetime import datetime
 
@@ -54,6 +56,12 @@ FORBIDDEN_HEADERS = ("ATTENDEES", "ATTENDEE", "GUESTS", "GUEST", "INVITE",
                      "INVITEES", "TO", "CC", "EMAIL")
 
 HEADER_RE = re.compile(r"^([A-Z]+):\s*(.*)$")
+
+# Where calendar-write.py records each diary write, one row per task: "intent"
+# before the worker call, "created" after it. Read by agent-dispatch.py
+# `complete` too, so an approved diary card never closes with nothing written.
+CALENDAR_LEDGER = os.path.expanduser(
+    "~/knowledge-os/logs/agent-dispatch/calendar-created.jsonl")
 
 
 def is_calendar(output):
@@ -158,3 +166,19 @@ def calendar_submit_problem(output, task_type):
     except CalendarFormatError as exc:
         return f"its CALENDAR block is malformed: {exc}"
     return ""
+
+
+def diary_written(task_id, ledger=None):
+    """True when calendar-write.py's ledger shows this task's entry was created."""
+    path = ledger or CALENDAR_LEDGER
+    if not os.path.exists(path):
+        return False
+    with open(path) as fh:
+        for line in fh:
+            line = line.strip()
+            if not line:
+                continue
+            row = json.loads(line)
+            if row.get("task") == task_id and row.get("event") == "created":
+                return True
+    return False

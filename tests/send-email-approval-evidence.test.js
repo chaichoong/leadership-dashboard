@@ -148,7 +148,7 @@ F = {IDS[k]: v for k, v in a["fields"].items()}
 m.get_task = lambda task_id: {"id": task_id, "createdTime": "2026-09-22T12:00:00.000Z", "fields": F}
 m.worker_call = lambda *x, **y: (_ for _ in ()).throw(RuntimeError("no network in tests"))
 try:
-    m.cmd_create(argparse.Namespace(task="recTEST"))
+    m.cmd_create(argparse.Namespace(task="recTEST", handled=True))
     print(json.dumps({"exit": ""}))
 except SystemExit as e:
     print(json.dumps({"exit": str(e)}))

@@ -45,6 +45,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from approval_evidence import SENT_FOR_APPROVAL_BY, approval_evidence_problem  # noqa: E402
 from agent_email_format import trial_problem  # noqa: E402
 from agent_calendar_format import (  # noqa: E402
+    CALENDAR_LEDGER,
     TIMEZONE,
     CalendarFormatError,
     parse_calendar,
@@ -64,8 +65,8 @@ AF = {
 APPROVED = ("Approved as-is", "Approved with minor edits")
 TEAM_MEMBER = "flduCtmQGpOA4eWaj"      # Tasks: Team Member (read by the trial refusal)
 
-STATE_DIR = os.path.expanduser("~/knowledge-os/logs/agent-dispatch")
-LEDGER = os.path.join(STATE_DIR, "calendar-created.jsonl")
+LEDGER = CALENDAR_LEDGER
+STATE_DIR = os.path.dirname(LEDGER)
 
 PAT_PATH = os.path.expanduser("~/.config/od/airtable_pat")
 SEND_KEY_PATH = os.path.expanduser("~/.config/od/gmail_send_key")

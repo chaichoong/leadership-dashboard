@@ -123,7 +123,7 @@ from agent_email_format import (  # noqa: E402
 )
 # The CALENDAR contract lives in one place too, shared with
 # scripts/calendar-write.py — same one-parser rule, same reason.
-from agent_calendar_format import calendar_submit_problem  # noqa: E402
+from agent_calendar_format import calendar_submit_problem, diary_written, is_calendar  # noqa: E402
 
 BASE_ID = "appnqjDpqDniH3IRl"
 TASKS = "tblqB8b22hKBL4PF1"
@@ -2256,7 +2256,7 @@ def dupe_fold_verdict(name_a, name_b):
 
 
 def dupe_fold_lane(fields):
-    """'maintenance' | 'reply' for a task record: the gate's fold_lane over
+    """'maintenance' | 'calendar' | 'reply' for a task record: the gate's fold_lane over
     the name, the Team Member links and the Maintenance Ticket tick."""
     return _gate().fold_lane(str(fields.get(AF["name"]) or ""),
                              links(fields.get(AF["teamMember"])),
@@ -2382,6 +2382,9 @@ def decision_level(output, task_type, task_rec, fetch=None, agent_banner=None,
                         f"this is a {this_lane} task and keeper {keeper_id} is a "
                         f"{keeper_lane} task: a repair ticket and a reply task are two "
                         "obligations, never one, so folding may not cross that lane")
+        another_date = _gate().fold_on_another_date(name, kname_full)
+        if another_date:
+            return card("close: duplicate", f"keeper {keeper_id}: {another_date}")
         # A DIFFERENT TENANT, HOUSE OR LINKED RECORD (28 Sep 2026), whichever
         # is older: the create gate refuses this fold (#621), so an agent's
         # close may not make it either. Same checks, imported from the gate.
@@ -3308,9 +3311,13 @@ def task_lane(t, ctx):
     # him; the property steal would move it to an agent that has no
     # answer-to-Roy shapes. Tier 1 and the creditor lane still win.
     roy_request = is_roy_request(t["name"], t["notes"])
+    # A DIARY TASK stays with Inbox Response (Kevin, 18 Oct 2026). "CALENDAR: Boiler service,
+    # British Gas" carries a repair word and "CALENDAR: Gas safety check" a compliance word, but
+    # each is a date for Kevin's diary, never a job for Roy or the compliance book.
+    diary = _gate().calendar_task(t["name"])
     t["property"] = ("" if (t["tier1"] or t["creditor"] or not ctx["property_ok"]) else
                      property_match(t["name"], t["description"], t["notes"]))
-    if roy_request:
+    if roy_request or diary:
         t["property"] = ""
     # A CEO-lane task the fresh lane cannot place (neither inbound nor
     # COMPLIANCE-named) keeps its old home — the Roy lane — rather than
@@ -3322,7 +3329,7 @@ def task_lane(t, ctx):
     hit_roy = ("" if (t["tier1"] or t["creditor"] or t["outcome"] in APPROVED
                       or t["property"])
                else roy_match(t["name"], t["description"], t["notes"]))
-    if roy_request:
+    if roy_request or diary:
         hit_roy = ""
     if hit_roy:
         return "royLane", {"royReason": hit_roy}
@@ -7850,6 +7857,25 @@ def cmd_complete(args):
                 "--not-signed \"<what happened instead>\"")
         sign_note = (f"[{datetime.now(LONDON).strftime('%d %b %Y')} — agent] {NOT_SIGNED_MARK} "
                      f"{not_signed[:600]}")
+
+    # THE DIARY GATE (Kevin, 18 Oct 2026). His yes on an "add to your diary?" card is the only way
+    # an entry reaches his diary, so the card closes only on calendar-write.py's own ledger row for
+    # this task, never on a run's claim. If it was not written (the date passed before he approved,
+    # it was already in the diary), the agent says why on the record with --diary-not-written.
+    not_written = " ".join(str(getattr(args, "diary_not_written", "") or "").split())
+    if is_calendar(t["agentOutput"]) and not diary_written(args.task):
+        if not not_written:
+            sys.exit(
+                f"ERROR: refusing to complete {args.task} — it is an approved diary card and "
+                "calendar-write.py has no record of writing it.\n"
+                "       Write it first (it is approved):\n"
+                f"         python3 scripts/calendar-write.py create {args.task}\n"
+                "       or, if it must not be written, say why on the record:\n"
+                f"         python3 scripts/agent-dispatch.py complete {args.task} "
+                "--diary-not-written \"<why>\"")
+        sign_note = ((sign_note + "\n\n") if sign_note else "") + (
+            f"[{datetime.now(LONDON).strftime('%d %b %Y')} — agent] DIARY NOT WRITTEN: "
+            f"{not_written[:600]}")
 
     # THE CERTIFICATE-OWED GATE (Kevin, 2 Oct 2026). A gas safety record came
     # in on 16 Sep on a task named for its INVOICE. The agent checked the
@@ -12874,6 +12900,9 @@ def main():
                         "with the close")
     c.add_argument("--not-signed", default="", metavar="REASON",
                    help="a SIGN AS KEVIN task the robot did not sign: say what happened instead; "
+                        "recorded in Notes")
+    c.add_argument("--diary-not-written", default="", metavar="REASON",
+                   help="an approved diary card calendar-write.py did not write: say why; "
                         "recorded in Notes")
 
     v = sub.add_parser("verify")

@@ -367,7 +367,10 @@ The same holds for a DIARY task (rule 1c, Step 4d): the dedupe match only
 counts if the existing task's name starts "CALENDAR:". A reply task or a
 compliance task on the same thread does NOT suppress it, and never append a
 diary date to another task's Description in its place: a date folded into a
-reply task never becomes a card.
+reply task never becomes a card. And the reverse: a new message on a thread
+whose open task is a `CALENDAR:` task is appended there only when it moves or
+cancels that event; anything else it asks of Kevin gets its own task by the
+normal rules, never a line on a diary card.
 
 For each thread heading for a task (and each stranded message in Step 5),
 query Tasks `tblqB8b22hKBL4PF1` with filterByFormula
@@ -652,7 +655,8 @@ Create through the SAME gate:
 Log it with `note --id <id> --do task-created` (or `--do updated --reason
 "joined open matter: <matchedName>"` when the gate folded it into an open
 diary task for the same event). The message's own label move is decided by
-the other rules as normal (`act --do label12` for a date-only message).
+the other rules as normal (`act --do label12` for a date-only message, or
+the archive rule 0a gives one the scan flags as a machine receipt).
 
 ## Step 5 — The stranded check (the safety net)
 

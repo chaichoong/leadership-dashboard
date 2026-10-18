@@ -530,6 +530,15 @@ def child_of(description):
     return m.group(1) if m else None
 
 
+def _fold_verdict(name_a, name_b):
+    """The gate's fold verdict, plus its diary-date guard: two diary tasks on
+    different dates are two entries (Kevin, 18 Oct 2026)."""
+    gate = _load_gate()
+    if gate.fold_on_another_date(name_a, name_b):
+        return {"match": False, "why": "", "shared": []}
+    return gate.dupe_verdict(name_a, name_b, mode="fold")
+
+
 def duplicate_groups(views, verdict=None):
     """Open tasks sharing one thread AND one lane:
     [{thread, lane, keeper, closable, untouchable, folds, names}].
@@ -558,15 +567,14 @@ def duplicate_groups(views, verdict=None):
     legitimately TWO tasks, so the lane is part of the key. A folded task can
     appear in more than one group. Callers pass only actionable views
     (never parked or dispatch-in-flight)."""
-    verdict = verdict or (lambda a, b: _load_gate().dupe_verdict(a, b, mode="fold"))
+    verdict = verdict or _fold_verdict
     by = {}
     for v in views:
         # One lane read for every fold caller (the gate's fold_lane): the
-        # Maintenance Ticket tick, Roy as holder, or a repair-style prefix.
-        lane = ("maintenance"
-                if _load_gate().fold_lane(v.get("name", ""), v.get("teamMember"),
-                                          v.get("maintenanceTicket")) == "maintenance"
-                else "reply")
+        # Maintenance Ticket tick, Roy as holder, or a repair-style prefix;
+        # a CALENDAR: diary task is its own lane (Kevin, 18 Oct 2026).
+        lane = _load_gate().fold_lane(v.get("name", ""), v.get("teamMember"),
+                                      v.get("maintenanceTicket"))
         for k in thread_keys(v.get("inboundUrl")):
             by.setdefault((k, lane), []).append(v)
     out = []
