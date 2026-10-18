@@ -269,3 +269,28 @@ os.unlink(fh.name)`);
     expect(r).toEqual([false, true]);
   });
 });
+
+describe('third review (18 Oct 2026): the board never proposes closing a diary card into one waiting on Kevin', () => {
+  const groups = (rows) => py(TM, `
+rows = json.loads(${JSON.stringify(JSON.stringify(rows))})
+views = [{"id": "recView%010d" % i, "name": r[0], "status": r[1], "createdTime": "2026-10-18T0%d:00:00.000Z" % (i + 1),
+          "inboundUrl": ${JSON.stringify(THREAD)}, "teamMember": ["${RESPONSE}"], "maintenanceTicket": False,
+          "description": ""} for i, r in enumerate(rows)]
+print(json.dumps([{k: g[k] for k in ("keeper", "closable", "folds", "untouchable", "sameThreadDifferentMatter")}
+                  for g in m.duplicate_groups(views)]))`);
+  const NAME = 'CALENDAR: Dentist appointment, Example Dental - Tue 27 Oct';
+
+  it('a newer diary task beside a waiting card is report-only, drafted or not', () => {
+    for (const status of ['Today', 'Approval']) {
+      const g = groups([[NAME, 'Approval'], [NAME, status]]);
+      expect(g).toHaveLength(1);
+      expect(g[0].closable, status).toEqual([]);
+      expect(g[0].folds, status).toEqual([]);
+    }
+  });
+
+  it('CONTROL: while the first diary task is still being drafted, a twin is closable as before', () => {
+    expect(groups([[NAME, 'Today'], [NAME, 'Today']])[0].closable).toEqual(['recView0000000001']);
+  });
+});
+
