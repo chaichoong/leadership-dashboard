@@ -131,6 +131,10 @@ the `list-unsubscribe` header (its presence = machine mail).
    - NEVER a task, never lane 12 or 13. The script refuses `act --do
      label12|label13` on a flagged message; the task gate refuses a create
      whose thread is all auto-replies (exit 3, `"action": "refused"`).
+     ONE EXCEPTION (Kevin, 18 Oct 2026): a flagged message that states a date
+     for Kevin's diary (a booking confirmation, an appointment reminder) still
+     gets its diary task under rule 1c. The gate accepts a `CALENDAR:` task on
+     such a thread; the message itself is still archived as below.
    - If an OPEN task exists on the matter (Step 3 thread dedupe or the Step
      3b matter file), append ONE dated line to its Description — `ACK <date>:
      <sender> acknowledged, ref <reference if any>` — so the reference is on
@@ -203,6 +207,21 @@ the `list-unsubscribe` header (its presence = machine mail).
    line `FIXED COST RECORD: update the Costs table through scripts/cost-record.py (End Date = the
    last payment)`. A receipt for a payment already in the Costs table at the same amount ("your
    payment was received", a monthly statement) is not this: archive it as before.
+1c. **A date for Kevin's diary is always a diary card (Kevin, 18 Oct 2026).** His words:
+   "anything that comes into my inbox with something that should be added to my calendar: create
+   an approval card for whether it needs to go in my calendar or not." When a message gives a
+   date (and usually a time) that Kevin or one of his children is booked into, invited to or
+   expected at, raise a diary task through Step 4d: a medical, dental or optician appointment, a
+   meeting or call with Kevin, a class, session or event he or a child is booked on, a school
+   event or fixture, a hearing, a viewing or visit Kevin himself attends. The diary task comes ON
+   TOP of the message's own outcome: a reply still gets its reply task, family news still goes on
+   his INBOX card. A message that is ONLY the date (an appointment reminder, a booking
+   confirmation, a fixture change) gets the diary task and nothing else: `act --do label12`, never
+   `leave`. NOT a diary task: event marketing he has not booked (rules 4 and 5), a deadline (a
+   pay-by or reply-by date stays a task with its Due Date), a property visit Roy or a contractor
+   attends (Roy's lane), and a train, flight, hotel or event-ticket booking, because Gmail puts
+   those in his diary itself (checked 18 Oct 2026: the 23 Oct Eurostar entry was Gmail's own).
+   When unsure whether it belongs in his diary, raise it: he answers the card with one tap.
 2. **Label 13 — maintenance:** repair reports, contractor quotes, trade
    scheduling for a property job. Label 13 AND a task for Roy (Step 4b) —
    Kevin's standing approval covers the pass, so no per-task ask.
@@ -233,6 +252,9 @@ the `list-unsubscribe` header (its presence = machine mail).
    read). YOUR JUDGEMENT IS THE FIRST GUARD: read the email, and if it might
    ask anything of Kevin (a reply, a form, a signature, keys, a payment, a
    date, a choice), it is rule 1, a task. Anything ambiguous goes to rule 1.
+   A date for his diary is rule 1c: its diary task, not this card (an
+   appointment reminder sat on a 95-email reading card on 15 Oct 2026 and
+   never reached his diary).
    The script is only the BACKSTOP behind you: `note --do leave` refuses a
    message whose subject or own words carry money due (pay, invoice, overdue,
    arrears, a £ sum due), a deadline (by or before a date, "deadline",
@@ -335,6 +357,12 @@ does NOT suppress the Roy task: a tenant email can need both an answer and a
 repair, and folding the repair into the reply task is how a job never reaches
 Roy.
 
+The same holds for a DIARY task (rule 1c, Step 4d): the dedupe match only
+counts if the existing task's name starts "CALENDAR:". A reply task or a
+compliance task on the same thread does NOT suppress it, and never append a
+diary date to another task's Description in its place: a date folded into a
+reply task never becomes a card.
+
 For each thread heading for a task (and each stranded message in Step 5),
 query Tasks `tblqB8b22hKBL4PF1` with filterByFormula
 `OR(FIND("#all/{threadId}", {Inbound Note URL Link}), FIND("#inbox/{threadId}", {Inbound Note URL Link}))`
@@ -419,7 +447,9 @@ Every message of a multi-message thread gets the act; the thread gets one
 task.
 
 Then one Airtable task per lane-12 THREAD (archive gets no task; lane-13
-threads get a Roy task instead — Step 4b). **Create through the duplicate
+threads get a Roy task instead — Step 4b; a thread whose only content is a
+date for Kevin's diary gets its Step 4d diary task instead, never a second
+INBOUND task as well). **Create through the duplicate
 gate, never a bare curl POST** (Kevin's rule, 25 Aug 2026: one subject = one
 open task — a creditor's NEW chaser arrives on a NEW thread, so the Step 3
 thread dedupe cannot catch it; the gate matches the SUBJECT and folds the
@@ -572,6 +602,46 @@ A `CERTIFICATE ATTACHED` task cannot be completed until the certificate is in
 the compliance book with its document, or the agent has said on the record what
 the file really is (`agent-dispatch.py complete` refuses otherwise), so nothing
 here depends on anyone remembering.
+
+### Step 4d — Diary tasks for Inbox Response (rule 1c; Kevin's ruling, 18 Oct 2026)
+
+Every diary date that survives the Step 3 dedupe (one diary task per EVENT, so
+a reminder and a confirmation for the same appointment fold into one) gets one
+task for the Inbox Response agent. It drafts the diary entry and submits it;
+`submit` makes it an "add to your diary?" card, and only Kevin's approval
+writes it (scripts/calendar-write.py). Fields:
+
+- `fldgFjGBw6bTKJFCD` Task Name: "CALENDAR: <what>, <who or where> - <Day D Mon>"
+  ("CALENDAR: Dentist, Histon Dental Surgery - Tue 27 Oct"). Under 100 chars.
+- `fldx4qCw17UfrKpaN` Status: `Today`
+- `fld7XP8w8kbxfETV4` Due Date: today (YYYY-MM-DD)
+- Team Member: set by the gate's `--owner inbound-comms-response` (never type
+  an id). Assignee: leave BLANK.
+- `fldLLAG5HQPEFEfE5` Approver: `{"id": "usrKkopUJSGsBhWMD"}` (Kevin)
+- `fldS21RwmwOqt71LI` Priority: `High`
+- `fldZ2moDV2041Sobc` Task Type: `Admin` (a diary entry submits as Admin)
+- `fld10VzzbiNNgRmIi` Time Estimate: `5 min`
+- `fldRGhBQViKZKtkQ6` Description: first line `DIARY CARD: Kevin decides
+  whether this goes in his diary (Kevin, 18 Oct 2026).` Then what it is, the
+  date, the start and end time as the email gives them (say plainly when it
+  gives no end time or no time at all), the place, who sent it and any
+  booking reference.
+- `fldiSNijdCy5GXuzL` Inbound Message Content: the email body from the scan
+- `fldzf4xlbrQuktx0i` Inbound Sender: the BARE email address
+- `fldR4peEZRXo7tjoI` Inbound Date Received: the email's date (YYYY-MM-DD)
+- `fldXf1p0vtHqOZcKl` Inbound Note URL Link: the `#all/{threadId}` URL
+- Do NOT set Inbound Communication Task: that flag puts it in the reply lane,
+  where Step 2c would close it the moment Kevin answers the thread, and the
+  diary date would be lost with it.
+
+Create through the SAME gate:
+
+    python3 scripts/create-agent-task.py create --owner inbound-comms-response --fields-json '<fields>'
+
+Log it with `note --id <id> --do task-created` (or `--do updated --reason
+"joined open matter: <matchedName>"` when the gate folded it into an open
+diary task for the same event). The message's own label move is decided by
+the other rules as normal (`act --do label12` for a date-only message).
 
 ## Step 5 — The stranded check (the safety net)
 
