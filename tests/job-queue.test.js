@@ -2413,8 +2413,18 @@ python3 "$STEP" "$NAME-after" "$AFTER" "$TL"
       const done = await h;
       expect(g.code, g.stdout + g.stderr).toBe(0);
       expect(done.code).toBe(0);
-      const t = timeline();
-      expect(t.guest.end, 'the old ticket held the lane shut').toBeLessThan(t.render.end);
+      // Read the ordering off the lane's OWN recorded sequence, never two wall-clock stamps
+      // (finding 20261017-phase-4-961). Comparing t.guest.end with t.render.end lost under
+      // parallel suite load: on 17 Oct it went red on PR 808, which touched nothing in the
+      // queue, and passed 157 of 157 in isolation on the same tree. The claim is that the
+      // guest got INTO the guest lane while the render was still yielded; if the old ticket
+      // had held the lane shut it would have waited and acquired only after the host resumed.
+      const seq = events();
+      const got = seq.findIndex((e) => e.job === 'light-guest' && e.state === 'acquired' && e.lane === 'guest');
+      const hostBack = seq.findIndex((e) => e.job === 'render-host' && e.state === 'resumed');
+      expect(got, 'the guest never entered the guest lane').toBeGreaterThanOrEqual(0);
+      expect(hostBack, 'control: the render host resumed').toBeGreaterThanOrEqual(0);
+      expect(got, 'the old ticket held the lane shut').toBeLessThan(hostBack);
     } finally {
       rmSync(old, { force: true });
     }

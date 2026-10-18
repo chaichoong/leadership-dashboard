@@ -66,6 +66,7 @@ malformed block is a refusal, never a guess, because guessing here means
 guessing a recipient.
 """
 
+import html
 import re
 from datetime import datetime, timezone
 
@@ -450,7 +451,12 @@ def parse_output(output):
     if len(senders) > 1:
         raise EmailFormatError("more than one FROM address")
     sender = senders[0] if senders else None
-    subject = headers.get("SUBJECT", "").strip()
+    # The inbound subject is read HTML-escaped and copied straight into the SUBJECT line, so a reply
+    # to "Apartment 7 & 8 Duckworth Building" went out as "Re: Apartment 7 &amp; 8 Duckworth Building"
+    # (16 Oct 2026, finding 20261016-agent-dispatch-931). A subject is plain text: unescape it here,
+    # once, where every sending path passes. An entity the agent genuinely meant to type is vanishingly
+    # rare in a subject line, and an escaped one reaching the recipient is not rare at all.
+    subject = html.unescape(headers.get("SUBJECT", "")).strip()
     attach = headers.get("ATTACH", "").strip() or None
     if attach and ("," in attach or ";" in attach):
         # One file per email, deliberately: every extra attachment is another
@@ -1079,6 +1085,42 @@ def _one_file(value, header):
     return path
 
 
+def postcode_line_problem(address):
+    """Reason string when the UK postcode does not sit alone on its own line, else "".
+
+    Pingen reads the recipient off the PAGE, through the envelope window, and rejects a block whose
+    postcode shares a line with the town: the approved TMW letter of 15 Oct 2026 failed inspection
+    with address_zip_invalid on a last line of "Northampton NN3 6NW", while the same run's
+    "LS78 1LB" on its own line passed (finding 20261015-agent-dispatch-906). The check belongs here,
+    before Kevin approves: found after approval, the fix costs a second approval.
+
+    Only UK blocks are judged. A block whose last line is a country other than the United Kingdom is
+    left alone, because no other country's postcode rule is encoded here.
+    """
+    lines = [ln.strip() for ln in address if ln.strip()]
+    if not lines:
+        return ""
+    last = lines[-1]
+    if last.lower().strip(".") in ("united kingdom", "uk", "great britain", "england",
+                                   "scotland", "wales", "northern ireland"):
+        lines = lines[:-1]
+        if not lines:
+            return ""
+        last = lines[-1]
+    elif not any(UK_POSTCODE_RE.search(ln) for ln in lines):
+        return ""      # not a UK address as far as this file can tell
+    hits = [ln for ln in lines if UK_POSTCODE_RE.search(ln)]
+    if not hits:
+        return ("the address block has no UK postcode. Pingen reads the recipient off the page and "
+                "refuses a block it cannot read a postcode from.")
+    if not UK_POSTCODE_RE.fullmatch(last.strip()):
+        return ("the postcode must sit ALONE on the last line of the address (or the line above "
+                "\"United Kingdom\"), and %r does not. Pingen rejected exactly this with "
+                "address_zip_invalid on 15 Oct 2026: write the town and the postcode on two lines."
+                % last)
+    return ""
+
+
 def parse_post_output(output):
     """A postal letter: an address block, the PDF to post, and a summary.
 
@@ -1148,6 +1190,9 @@ def parse_post_output(output):
         raise EmailFormatError(
             f"only {len(address)} address line(s) under POST:. A postal address "
             "needs at least a name, a street or office, and a postcode.")
+    bad = postcode_line_problem(address)
+    if bad:
+        raise EmailFormatError(bad)
 
     document = _one_file(headers.get("DOCUMENT"), "DOCUMENT")
     delivery = (headers.get("DELIVERY") or "cheap").strip().lower()

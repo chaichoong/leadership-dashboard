@@ -75,3 +75,10 @@ monitoring/hmrc-*
 # Session scratch under a root logs/ folder (a dispatch quote-check script on 21 Sep 2026).
 # Robots keep their working files in ~/knowledge-os/logs, and no tracked file lives here.
 /logs/
+
+# Full data-invariant violation lists (18 Oct 2026, finding 20261018-phase-2-974).
+# THIS REPO IS PUBLIC. The printed report caps each failure at 5 samples; the full
+# list is written here so the routine working the failure can name every id, and it
+# carries live Airtable field values (tenant names, rent figures, task titles).
+# Local only, never committed.
+monitoring/data-invariants-*.json
