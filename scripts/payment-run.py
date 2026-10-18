@@ -957,7 +957,15 @@ def payee_tokens(name):
     if not name or "@" in str(name):
         return set()
     words = re.findall(r"[a-z]{4,}", str(name).lower())
-    return {w for w in words if w not in PAYEE_STOP}
+    kept = {w for w in words if w not in PAYEE_STOP}
+    # A payee whose every real word is on the stop list used to return NOTHING, so plan_settle
+    # could never corroborate it and the probable pass skipped it: "LD Energy Solutions Ltd" was
+    # paid £72 on 9 Oct 2026 and its row still read Unpaid on 15 Oct, which is a double-pay risk
+    # (finding 20261015-agent-dispatch-927). Generic words are weak evidence, but ALL of them
+    # appearing as words on the bank line is far better evidence than none, and "none" is what
+    # made the row unmatchable. Only when the filter empties the set — a name with one telling
+    # word is still matched on that word alone.
+    return kept or set(words)
 
 
 def memo_text(tx):
@@ -2434,6 +2442,14 @@ def cmd_selftest(_args):
           len(plan_settle([bill("recGl", "2026-09-01", 60, "Brightwells Glazing")],
                           index_by_amount([txn("txGl", "2026-09-02", -60, "BRIGHTWELL GLAZ")]))[0]), 1)
     check("generic words never corroborate", payee_tokens("Oakfield Properties Limited"), {"oakfield"})
+    # finding 20261015-agent-dispatch-927: a payee whose every word is generic returned NOTHING,
+    # so the £72 LD Energy row stayed Unpaid beside its own bank line. All of them must appear.
+    check("a payee with only generic words keeps them rather than matching nothing",
+          payee_tokens("LD Energy Solutions Ltd"), {"energy", "solutions"})
+    check("one telling word is still matched on that word alone",
+          payee_tokens("LD Oakfield Energy Ltd"), {"oakfield"})
+    check("a name with no word of four letters still corroborates nothing",
+          payee_tokens("A B Ltd"), set())
     check("a short shared start is not the payee",
           len(plan_settle([bill("recBw", "2026-09-01", 60, "Brightwater Gas Ltd")],
                           index_by_amount([txn("txBs", "2026-09-02", -60, "BRIGHT SPARK ELEC")]))[0]), 0)
