@@ -100,6 +100,53 @@ def _textfile(textdir, name, value):
 
 PILL_ROW_Y, BANNER_H, BANNER_H_SUB, SUB_ROW_Y = 170, 250, 300, 248   # rows: titles (25, 95), DAY pill (170), subtitle (248)
 
+# ---- measured text fitting (finding 20261019-phase-3-985) ----
+# Kevin sent 2114 back: "The title card on the learnings for my diary clips doesn't fit." The size came off a
+# CHARACTER COUNT (54 at 15 characters or fewer, else 46), which is not a width: "LOYALTY IS BUSINESS'S MOST" is
+# 26 characters of wide capitals and runs past the orange box, while 26 narrow ones would not. A count cannot tell
+# those apart, so the text is MEASURED in the font it is drawn in and the size steps down until it fits.
+TEXT_PAD = 20            # breathing room inside the box, each side
+MIN_TITLE_FS = 30        # below this a title is unreadable on a phone; it wraps rather than shrinking further
+MIN_SUB_FS = 20
+
+
+def text_width(text, font_path, size):
+    """The drawn width of `text` in pixels, measured in the real font. None when it cannot be measured (no
+    Pillow, or the font file is missing) — the caller then keeps the size it has rather than guessing."""
+    if not text: return 0.0
+    try:
+        from PIL import ImageFont
+        return float(ImageFont.truetype(font_path, int(size)).getlength(text))
+    except Exception:
+        return None
+
+
+def fit_size(text, font_path, size, max_w, floor):
+    """The largest size from `size` down to `floor` at which `text` fits `max_w`. Unmeasurable text keeps `size`:
+    a card drawn slightly wide is better than a render that stops, and the caller says so."""
+    for fs in range(int(size), int(floor) - 1, -2):
+        w = text_width(text, font_path, fs)
+        if w is None: return int(size)
+        if w <= max_w: return fs
+    return int(floor)
+
+
+def wrap_to_width(text, font_path, size, max_w, lines=2):
+    """`text` broken on spaces into at most `lines` lines that each fit `max_w`, longest-first greedy. Returns the
+    lines; a single word too wide for the box comes back as it is, for fit_size to shrink."""
+    words, out, cur = text.split(), [], ""
+    for word in words:
+        trial = (cur + " " + word).strip()
+        w = text_width(trial, font_path, size)
+        if w is None: return [text]
+        if cur and w > max_w and len(out) < lines - 1:
+            out.append(cur); cur = word
+        else:
+            cur = trial
+    if cur: out.append(cur)
+    return out[:lines] or [text]
+
+
 
 def _banner_filter(line1, line2, day, textdir, full_width=False, y=BANNER_Y, sub=""):
     """Orange two-line banner with the dark DAY pill, 'Learnings from my Diary' style. `sub` adds a
@@ -108,10 +155,26 @@ def _banner_filter(line1, line2, day, textdir, full_width=False, y=BANNER_Y, sub
     # then the DAY pill on its OWN row, then the subtitle. Nothing shares a row, so no width can collide.
     x0, w = (0, 1080) if full_width else (60, 960)
     tx = x0 + 50
+    # The text box: from tx to the right edge of the orange box, less the same padding on the right.
+    max_w = (x0 + w) - tx - TEXT_PAD
+    # The old rule (54 at <= 15 characters, else 46) is kept as the STARTING size, so a title that already fits is
+    # drawn exactly as it was and no stored card moves. Measuring only ever steps it down (985).
     fs = 54 if max(len(line1), len(line2)) <= 15 else 46
+    fs = min(fit_size(line1, FONT_BLACK, fs, max_w, MIN_TITLE_FS),
+             fit_size(line2, FONT_BLACK, fs, max_w, MIN_TITLE_FS))
     pill_w = 300; pill_x = tx; pill_y = y + PILL_ROW_Y
     h = BANNER_H_SUB if sub else BANNER_H
-    sub_line = ["drawtext=fontfile='%s':%s:fontsize=30:fontcolor=white:x=%d:y=%d" % (FONT_BOLD, _textfile(textdir, "sub", sub[:44].upper()), tx, y + SUB_ROW_Y)] if sub else []
+    sub_line = []
+    if sub:
+        # The subtitle used to be hard-cut at 44 characters and drawn at 30 whatever its width. It is now measured
+        # and, when a smaller size would still not fit, wrapped onto the row below (the box grows for it).
+        sub_text = sub[:88].upper()
+        sub_fs = fit_size(sub_text, FONT_BOLD, 30, max_w, MIN_SUB_FS)
+        rows = [sub_text] if (text_width(sub_text, FONT_BOLD, sub_fs) or 0) <= max_w else wrap_to_width(sub_text, FONT_BOLD, sub_fs, max_w)
+        for i, row in enumerate(rows):
+            sub_line.append("drawtext=fontfile='%s':%s:fontsize=%d:fontcolor=white:x=%d:y=%d"
+                            % (FONT_BOLD, _textfile(textdir, "sub%d" % i if i else "sub", row), sub_fs, tx, y + SUB_ROW_Y + i * (sub_fs + 6)))
+        if len(rows) > 1: h += (len(rows) - 1) * (sub_fs + 6)
     return ",".join([
         "drawbox=x=%d:y=%d:w=%d:h=%d:color=%s@1:t=fill" % (x0, y, w, h, ORANGE_HEX),
         "drawtext=fontfile='%s':%s:fontsize=%d:fontcolor=white:x=%d:y=%d" % (FONT_BLACK, _textfile(textdir, "line1", line1), fs, tx, y + 25),
@@ -158,6 +221,42 @@ def _textdir(out):
     return os.path.join(d, "drawtext_" + os.path.splitext(os.path.basename(out))[0])
 
 
+def _selftest_fit(_td):
+    """Finding 20261019-phase-3-985: Kevin sent 2114 back because the Learnings title card's wording did not fit.
+    The subtitle was hard-cut at 44 characters and drawn at 30 whatever its width, so a real title lost its last
+    words mid-word ("...STRESS COPING " for 2080's "RUNNING MAKES BAD DAYS BETTER STRESS COPING MECHANISM", the
+    longest in the ledger). The text is now measured in the font it is drawn in and the size steps down until it
+    fits. Back-test by putting the 44-character cut back: the first assertion then fails.
+    Measuring needs Pillow and the Arial files; where neither is there, text_width returns None, fit_size keeps the
+    size it was given, and these checks are skipped rather than passing on nothing."""
+    import re as _re
+    if text_width("TEST", FONT_BOLD, 30) is None:
+        print("overlays selftest: text measuring not available here (no Pillow or no Arial), fit checks SKIPPED")
+        return
+    longest = "RUNNING MAKES BAD DAYS BETTER STRESS COPING MECHANISM"      # 2080, the longest title in the ledger
+    f = _banner_filter("LEARNINGS FROM", "MY DIARY", "2114", _td, sub=longest)
+    drawn = open(os.path.join(_td, "drawtext_sub.txt")).read()
+    assert drawn == longest.upper(), "the whole wording is drawn, not a 44-character cut: %r" % drawn
+    box = 60 + 960 - 110 - TEXT_PAD
+    sub_fs = int(_re.search(r"drawtext=[^,]*drawtext_sub\.txt':fontsize=(\d+)", f).group(1))
+    assert text_width(drawn, FONT_BOLD, sub_fs) <= box, "and it fits the orange box: %.0f px at %d in a %d px box" % (text_width(drawn, FONT_BOLD, sub_fs), sub_fs, box)
+    assert MIN_SUB_FS <= sub_fs <= 30, "never larger than it was, never below the readable floor: %d" % sub_fs
+    # a short subtitle is untouched: it still draws at 30, so no stored card moves
+    _banner_filter("LEARNINGS FROM", "MY DIARY", "2115", _td, sub="OFF-ROAD RUNNING")
+    f2 = _banner_filter("LEARNINGS FROM", "MY DIARY", "2115", _td, sub="OFF-ROAD RUNNING")
+    assert int(_re.search(r"drawtext=[^,]*drawtext_sub\.txt':fontsize=(\d+)", f2).group(1)) == 30, "a subtitle that already fits is drawn exactly as before"
+    # the title lines are measured too, and the Learnings card's own words still draw at 54
+    f3 = _banner_filter("LEARNINGS FROM", "MY DIARY", "2114", _td)
+    assert ":fontsize=54:" in f3, "LEARNINGS FROM / MY DIARY measure 546 and 300 px in a 950 px box, so they keep 54"
+    # a title far too wide for the box steps down instead of running off it
+    wide = "A VERY LONG TITLE LINE THAT CANNOT POSSIBLY FIT THE ORANGE BOX AT ALL"
+    f4 = _banner_filter(wide, "SHORT", "2114", _td)
+    fs4 = int(_re.search(r"drawtext_line1\.txt':fontsize=(\d+)", f4).group(1))
+    assert fs4 < 46 and fs4 >= MIN_TITLE_FS, "a too-wide title shrinks to the floor, never past it: %d" % fs4
+    assert wrap_to_width("ONE TWO THREE FOUR FIVE SIX SEVEN EIGHT", FONT_BOLD, 30, 200) == ["ONE TWO", "THREE FOUR FIVE SIX SEVEN EIGHT"], \
+        "wrapping fills the first row then puts the rest on the second: %s" % (wrap_to_width("ONE TWO THREE FOUR FIVE SIX SEVEN EIGHT", FONT_BOLD, 30, 200),)
+
+
 def selftest():
     assert chunk_words("a b c d e f".split()) == [["a", "b", "c"], ["d", "e", "f"]], "even split"
     assert chunk_words("a b c d e f g h i j k".split()) == [["a", "b", "c", "d"], ["e", "f", "g", "h"], ["i", "j", "k"]]
@@ -184,6 +283,7 @@ def selftest():
     assert ys[0] < ys[1] < pill_y < ys[3] and pill_y >= ys[1] + 60, (ys, pill_y)
     import inspect as _i
     src = _i.getsource(build_lfmd); assert "if captions:" in src and "_subs_filter" in src, "the YouTube Short renders without burnt-in captions"
+    _selftest_fit(_td)
     _selftest_apostrophe(_td)
     import shutil as _sh; _sh.rmtree(_td, ignore_errors=True)
     print("overlays selftest ok")

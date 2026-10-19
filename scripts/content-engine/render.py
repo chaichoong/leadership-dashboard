@@ -433,6 +433,17 @@ def watch_ts(s):
     return int(h) * 3600 + int(m) * 60 + int(sec) + int(ms) / 1000
 
 
+# The spoken phrase the LAST lfmd_window() call matched the clip's start on. A one-entry box rather than a changed
+# return value, because lfmd_window's (start, end) tuple is read in about fifty places and in its own selftests.
+# Read it with lfmd_phrase() straight after the lfmd_window() call whose window you are storing.
+_LFMD_PHRASE = {}
+
+
+def lfmd_phrase():
+    """The phrase the last lfmd_window() matched the start on, or None when it found no diary line."""
+    return _LFMD_PHRASE.get("phrase")
+
+
 def lfmd_window(segments, min_len=20.0, max_len=180.0):
     """(start, end) of the 'Learnings from my diary' section: from the sentence that names it (the
     LAST such mention, since he may trail it earlier) to the sign-off that follows, or None."""
@@ -451,15 +462,23 @@ def lfmd_window(segments, min_len=20.0, max_len=180.0):
     for g in GAP_RE.finditer(raw):
         text += raw[last:g.start()] + " "; own += owner[last:g.start()] + [owner[g.start()]]; last = g.end()
     text += raw[last:]; own += owner[last:]
-    starts = []
+    starts, phrases = [], []
     def starts_at(p):
         m = LFMD_START_RE.match(text, p)
         return bool(m) and is_diary_line(m, text)
     for m in lfmd_matches(text):
         words = [m.start() + w.start() for w in re.finditer(r"\b\w", m.group(0))]
         starts.append(own[max(p for p in words if p == m.start() or starts_at(p))])
-    if not starts: return None
+        phrases.append(" ".join(m.group(0).split()))
+    if not starts:
+        _LFMD_PHRASE.clear(); return None
     i = starts[-1]
+    # The phrase the clip's start was matched ON, kept for the output gate. The gate used to judge the start by its
+    # share of the episode (qa.LFMD_EARLIEST_START, 40%), which blocked a correct clip whenever Kevin reached his
+    # diary early: 1808's clip starts at 4:30 of an 11:30 episode (39%) and sat behind the gate with no card, and
+    # 2112 came back with "I think you might have a rule where you..." (finding 20261019-phase-3-983). A start the
+    # finder matched on the spoken phrase needs no share rule: the phrase IS the evidence.
+    _LFMD_PHRASE.clear(); _LFMD_PHRASE["phrase"] = phrases[-1]
     start = segments[i][0]
     end = segments[-1][1]
     for a, b, t in segments[i + 1:]:
@@ -974,6 +993,9 @@ def process(key, ledger, keep=False):
     e.pop("lfmd_early_ok", None)      # a clip cut again is watched again before an early start is accepted (qa.py accept-early)
     e["lfmd_window"] = window; e["lfmd_closes_talk"] = lfmd_closes_talk(segs, window); e["role"] = role; e["duration"] = round(duration, 1)
     e["lfmd_window_by"] = "operator" if by_hand else "detector"
+    # The spoken phrase the start was matched on, so the output gate judges the clip by the phrase and not by its
+    # share of the episode (finding 20261019-phase-3-983). A window read off the captions by hand has no phrase.
+    e["lfmd_phrase"] = None if by_hand else lfmd_phrase()
     watch.save_ledger(ledger)
     base = None
     if role == "episode":
@@ -981,6 +1003,7 @@ def process(key, ledger, keep=False):
         if not earlier and (part_number(key) or 0) >= 2:
             # never render a later part alone: it would become the episode (the 2071 fault itself)
             e["status"] = "failed"; e["error"] = "part %d of episode %d, but no earlier part has rendered to join it to" % (part_number(key), day)
+            e["render_failed"] = dt.datetime.now().isoformat(timespec="seconds")   # steps the day aside in the redo queue (982)
             if not keep: os.remove(clip); shutil.rmtree(workdir, ignore_errors=True)
             watch.save_ledger(ledger); print("%s: NOT rendered: %s" % (key, e["error"]), file=sys.stderr); return
         if earlier:
@@ -994,6 +1017,7 @@ def process(key, ledger, keep=False):
                 why = None; base = earlier[0]
             if why:
                 e["status"] = "failed"; e["error"] = why; e["requeued"] = "not requeued: it needs a person"   # the page names it; a retry would do the same
+                e["render_failed"] = dt.datetime.now().isoformat(timespec="seconds")   # steps the day aside in the redo queue (982)
                 if not keep: os.remove(clip); shutil.rmtree(workdir, ignore_errors=True)
                 watch.save_ledger(ledger); print("%s: NOT rendered: %s" % (key, why), file=sys.stderr); return
     if role == "teaser":
@@ -1001,6 +1025,7 @@ def process(key, ledger, keep=False):
         if what == "refuse":
             e["status"] = "failed"; e["error"] = why
             e["requeued"] = "not requeued: it needs a person"       # a retry would do the same
+            e["render_failed"] = dt.datetime.now().isoformat(timespec="seconds")   # steps the day aside in the redo queue (982)
             if not keep: os.remove(clip); shutil.rmtree(workdir, ignore_errors=True)
             watch.save_ledger(ledger); print("%s: NOT rendered: %s" % (key, why), file=sys.stderr); return
         if what == "replace":
@@ -1020,7 +1045,8 @@ def process(key, ledger, keep=False):
         open(os.path.join(workdir, "transcript.txt"), "w").write(text)
         segs = srt_segments(joined); window = lfmd_window(segs); duration = media_seconds(masters["16:9"])
         e.update({"joined_from": base, "join": {"part1_end": p1_end, "part1_why": why1, "part2_start": p2_start, "part2_why": why2},
-                  "lfmd_window": window, "lfmd_closes_talk": lfmd_closes_talk(segs, window), "duration": round(duration, 1), "pans": [], "horizon_part1": b.get("horizon")})
+                  "lfmd_window": window, "lfmd_closes_talk": lfmd_closes_talk(segs, window), "lfmd_phrase": lfmd_phrase(),
+                  "duration": round(duration, 1), "pans": [], "horizon_part1": b.get("horizon")})
         watch.save_ledger(ledger)
         print("join: %s 0-%.1f s (%s) + %s from %.1f s (%s) -> %.0f s" % (base, p1_end, why1, key, p2_start, why2, duration))
     elif role == "episode":
@@ -1054,6 +1080,7 @@ def process(key, ledger, keep=False):
     watch._airtable("PATCH", watch.API + "/" + rid, {"fields": upd})
     e.update({"status": "rendered", "record_id": rid, "outputs": links, "edited_folder": folder, "title": title,
               "render_seconds": round(time.time() - t0), "rendered": dt.datetime.now().isoformat(timespec="seconds")})
+    e.pop("render_failed", None)      # it rendered, so it no longer steps aside in the redo queue (982)
     if base:
         # the joined episode is the day's episode from now on; part 1 is kept on the ledger as a part (qa, the publisher
         # and the Learnings redo all read the day's "episode" entry)
@@ -1114,6 +1141,7 @@ def redo_lfmd(day, window=None):
     if links.get("lfmd"): watch._airtable("PATCH", watch.API + "/" + rid, {"fields": {"Reframed Video URL": links["lfmd"]}})
     e["lfmd_window"] = window; e["lfmd_closes_talk"] = lfmd_closes_talk(segs, window)
     e["lfmd_window_by"] = "operator" if by_hand else "detector"
+    e["lfmd_phrase"] = None if by_hand else lfmd_phrase()      # the gate judges the start by the phrase (983)
     e["lfmd_redone"] = dt.datetime.now().isoformat(timespec="seconds"); e["status"] = "rendered"; e["local"] = clip
     e.setdefault("outputs", {}).update({k: v for k, v in links.items() if v})      # the publisher fetches by these links
     watch.save_ledger(ledger)
@@ -1499,7 +1527,9 @@ def resubmit_ready(root=None):
 
 # A failed clip's verdicts, recomputed by the night. Its episode number stays: popping it moved a teaser recorded the
 # next morning onto the day it was recorded, and its card went back without it (review, 27 Sep 2026).
-RESET_STALE = ("error", "requeued", "role", "episode_reason", "lfmd_window")
+# render_failed joins them (19 Oct 2026, finding 20261019-phase-3-982): a fresh send-back starts level in the redo
+# queue, and an old render failure must not push it behind days Kevin sent back later.
+RESET_STALE = ("error", "requeued", "role", "episode_reason", "lfmd_window", "render_failed")
 
 
 def receipt_lines(text):
@@ -1871,6 +1901,7 @@ def run(limit=1, keep=False):
             ledger = watch.load_ledger()
             if k in ledger:
                 ledger[k]["status"] = "failed"; ledger[k]["error"] = str(exc)[:500]
+                ledger[k]["render_failed"] = dt.datetime.now().isoformat(timespec="seconds")
                 watch.save_ledger(ledger)
             print("render FAILED for %s: %s" % (k, exc), file=sys.stderr)
     print("render: %d of %d clips done, %d failed%s" % (len(keys) - len(failed), len(keys), len(failed),
@@ -1880,7 +1911,8 @@ def run(limit=1, keep=False):
         if k in ledger and ledger[k].get("status") == "pulled" and not teaser_waits(k, ledger):
             try: process(k, ledger, keep); print("render: %s rendered after its episode" % k)
             except Exception as exc:
-                ledger = watch.load_ledger(); ledger[k]["status"] = "failed"; ledger[k]["error"] = str(exc)[:500]; watch.save_ledger(ledger)
+                ledger = watch.load_ledger(); ledger[k]["status"] = "failed"; ledger[k]["error"] = str(exc)[:500]
+                ledger[k]["render_failed"] = dt.datetime.now().isoformat(timespec="seconds"); watch.save_ledger(ledger)
                 print("render FAILED for %s: %s" % (k, exc), file=sys.stderr)
 
 
