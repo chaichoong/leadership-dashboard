@@ -131,9 +131,20 @@ def redo_order(ledger, exclude=(), start=None, root=None):
 
     A day whose footage would not come down still goes behind the rest, least recently failed first (Kevin, 2 Oct
     2026): otherwise an older day whose pull is refused every night keeps a younger redo waiting for ever.
+
+    A day whose RENDER failed steps aside the same way (finding 20261019-phase-3-982). Until 19 Oct 2026 only a
+    refused pull moved a day back, so a day that pulled fine and then failed to render kept re-taking the single
+    redo slot every night: day 2106 held the head from 10 Oct, and 2112, 2113, 2114 and 2100 waited 4 to 9 nights
+    behind it with nothing draining. `render_failed` is stamped by render.py on every failure and cleared when the
+    clip renders, so one bad day costs itself its place rather than the whole queue.
     """
-    failed_at = lambda d: max((v.get("pull_failed") or "") for v in ledger.values()
-                              if v.get("day") == d and v.get("status") == "new")
+    def failed_at(d):
+        # The LATEST refusal of either kind, across the day's waiting clips: a flat max over both stamps, never a
+        # tuple of the two (a tuple would sort on the pull stamp first and read a render failure as no failure).
+        stamps = [v.get(f) or "" for v in ledger.values()
+                  if v.get("day") == d and v.get("status") == "new"
+                  for f in ("pull_failed", "render_failed")]
+        return max(stamps) if stamps else ""
     days = {v["day"] for v in ledger.values() if v.get("status") == "new" and v.get("reset")} - set(exclude)
     return sorted((d for d in days if not start or d >= start),
                   key=lambda d: (failed_at(d), receipt_parked(d, root), d))
@@ -996,6 +1007,19 @@ def _selftest_gap_order():
     both = dict(stuck, x2077=dict(five["x2077"], pull_failed="2026-10-02T23:10:00"), x2079=dict(five["x2079"], pull_failed="2026-09-30T23:10:00"),
                 x2080=dict(five["x2080"], pull_failed="2026-10-02T23:20:00"), r1=dict(rd["r1"], pull_failed="2026-10-02T23:30:00"))
     assert plan(both, 2, gaps=set(), free=100 * gb, start=2054)[0] == [2079, 2084, 2085], "all failed: the least recently failed goes first"
+    # A day whose RENDER failed steps aside too (finding 20261019-phase-3-982). Until 19 Oct 2026 only a refused PULL
+    # moved a day back, so a day that pulled fine and then failed to render re-took the single redo slot every night:
+    # 2106 held the head from 10 Oct and 2112, 2113, 2114 and 2100 waited 4 to 9 nights behind it. Back-test by taking
+    # "render_failed" out of failed_at(): the first assertion then reads [2075, ...] and fails.
+    rfail = dict(five, x2075=dict(five["x2075"], render_failed="2026-10-01T02:10:00"))
+    assert plan(rfail, 2, gaps=set(), free=100 * gb, start=2054)[0] == [2077, 2084, 2085], \
+        "the younger redo passes the one whose render failed: %s" % plan(rfail, 2, gaps=set(), free=100 * gb, start=2054)[0]
+    # Both kinds of failure are weighed on ONE clock, least recently failed first. A flat max, never a tuple of the
+    # two stamps: a tuple sorts on pull_failed first and reads a render failure as no failure at all.
+    mixed = dict(five, x2075=dict(five["x2075"], render_failed="2026-10-03T02:10:00"),
+                 x2077=dict(five["x2077"], pull_failed="2026-10-01T23:10:00"))
+    assert plan(mixed, 2, gaps=set(), free=100 * gb, start=2054)[0] == [2079, 2084, 2085], \
+        "a render failure and a pull failure step aside alike: %s" % plan(mixed, 2, gaps=set(), free=100 * gb, start=2054)[0]
     import tempfile as _tf
     wk = _tf.mkdtemp(); lp = {"c": {"day": 2081, "size": 10 ** 15, "status": "new", "reset": "x"}}
     # save_ledger and clear_leftovers are faked: unfaked, a short disk makes pull() run the REAL clean-up, which empties

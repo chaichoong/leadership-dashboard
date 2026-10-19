@@ -58,7 +58,11 @@ print(json.dumps(render.summary_rival(${JSON.stringify(key)}, ${day}, ${JSON.str
     const src = readFileSync(RENDER, 'utf8');
     // the refusal path mirrors the episode branch's: failed, named, clip and workdir cleaned up
     expect(src).toContain('what, why = summary_rival(key, day, reason, ledger)');
-    expect(src).toMatch(/if what == "refuse":[\s\S]{0,400}return/);
+    // 500, not 400 (19 Oct 2026): the refusal now also stamps render_failed, which steps the day aside in the redo
+    // queue (finding 20261019-phase-3-982). A window this test can outgrow is why the assertion below exists too.
+    expect(src).toMatch(/if what == "refuse":[\s\S]{0,500}return/);
+    // the stamp itself, so a refusal cannot go back to holding the head of the redo queue in silence
+    expect(src).toMatch(/if what == "refuse":[\s\S]{0,500}render_failed/);
   });
 
   // 5 Sep 2026 (finding 20260905-exceptions-462): the nightly run died inside overlays.py 'full'

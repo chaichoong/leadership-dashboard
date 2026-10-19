@@ -978,6 +978,37 @@ def reels_already_shared(state, day, clip):
     return used
 
 
+def retry_share(day=0):
+    """Clear a FAILED Facebook profile share so the next publish run presses Share once more. The only door back:
+    a failed share is never retried on its own, because the robot must not press Share a third time by accident
+    (review, 15 Sep 2026). `day` 0 clears every failed share. A share already 'shared' or 'reviewed' is untouched,
+    and so is its post_url, so the finder does not go looking for the page post again."""
+    state = load_state()
+    done = []
+    for d, e in state.items():
+        if not str(d).isdigit() or not isinstance(e, dict): continue
+        if day and str(d) != str(day): continue
+        for clip, spec in FB_SHARES.items():
+            fb = e.get(spec["key"]) or {}
+            if fb.get("status") != "failed": continue
+            fb["was"] = {"status": "failed", "error": fb.get("error"), "at": now_utc()}
+            fb["status"] = "page-post-not-found"; fb.pop("error", None); fb.pop("reshared_at", None)
+            done.append("%s %s" % (d, clip))
+    if not done:
+        print("retry-share: no failed Facebook share to retry%s" % (" for day %d" % day if day else "")); return
+    save_state(state)
+    print("retry-share: %d share(s) set to try again on the next publish run: %s" % (len(done), ", ".join(done)))
+
+
+def share_error_text(ex, limit=300):
+    """A readable reason from a share failure. The FIRST line carries it (node and Python both put the message
+    first and the stack after), so that line is kept whole and the rest only fills what is left."""
+    text = " ".join(str(ex).split("\n")[0].split())
+    rest = " ".join(str(ex).split())[len(text):].strip()
+    out = text if len(text) >= limit else (text + (" | " + rest if rest else ""))
+    return out[:limit].strip() or "no reason recorded"
+
+
 def share_to_facebook_profile(day, entry, state, clip="summary"):
     """Kevin's own profile gets the PAGE's post, shared (Kevin, 10 Sep 2026: "it should just be shared from the
     Facebook page to the Facebook profile"), once that page post is live. The page post URL is read off the page
@@ -985,7 +1016,16 @@ def share_to_facebook_profile(day, entry, state, clip="summary"):
     import facebook_share
     spec = FB_SHARES[clip]
     fb = entry.setdefault(spec["key"], {})
-    if fb.get("status") in ("shared", "reviewed", "failed"): return False      # failed is final: pressed twice, never a third time (review, 15 Sep 2026)
+    if fb.get("status") in ("shared", "reviewed"): return False
+    if fb.get("status") == "failed":
+        # failed is still final for SHARING: pressed twice, never a third time (review, 15 Sep 2026). It is no longer
+        # final for SAYING SO. Until 19 Oct 2026 this returned False without a word, so nine episodes read
+        # "Facebook share missing" on the report with no post and no error anywhere: 1799, 2097, 2099 and 2115 to
+        # 2120, every one of them a browser failure nobody could see (finding 20261019-phase-3-986). A retry is a
+        # decision, so it has its own door: publish.py retry-share --day N.
+        print("episode %s: the %s Facebook share FAILED and will not be pressed again: %s. Retry it with "
+              "publish.py retry-share --day %s" % (day, clip, fb.get("error") or "no reason recorded", day), file=sys.stderr)
+        return False
     if fb.get("status") == "unconfirmed" and fb.get("post_url"):
         # 15 Sep 2026: 'unconfirmed' was final, so a share the checker missed stayed missing for ever. Look again;
         # a share that is truly absent is pressed once more, and only once.
@@ -1056,8 +1096,11 @@ def share_to_facebook_profile(day, entry, state, clip="summary"):
     # unreachable Share control on episode 2099 killed the whole 03:54 content run, and the same
     # control killed both publish runs on 14 Oct, leaving only exit 1 and node's stack trace.
     except (Exception, SystemExit) as ex:
-        fb["status"] = "failed"; fb["error"] = str(ex)[-300:]
-        print("episode %s: Facebook %s profile share FAILED: %s" % (day, clip, str(ex)[-200:]), file=sys.stderr)
+        # The HEAD of the message, not the tail (19 Oct 2026). str(ex)[-300:] kept the last 300 characters, which on a
+        # node failure is the stack trace and never the reason: all nine stuck episodes recorded
+        # "403:13\n at async withPage (agent-browser.js:1024:12)" and the actual message was cut off the front.
+        fb["status"] = "failed"; fb["error"] = share_error_text(ex)
+        print("episode %s: Facebook %s profile share FAILED: %s" % (day, clip, fb["error"]), file=sys.stderr)
         return True
     fb.update({"status": "reviewed" if test else "shared", "shot": shot,
                "shared_at": dt.datetime.now(dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")})
@@ -2103,7 +2146,26 @@ def selftest():
     assert "extras_done(entry)" in rsrc and "STATUS_PUBLISHED" in rsrc, "a Published record with its podcast missing still gets the retry"
     ssrc = inspect.getsource(share_to_facebook_profile)
     assert '"unconfirmed" and fb.get("post_url")' in ssrc and 'reshared_at' in ssrc, "an unconfirmed share is re-checked and re-pressed once"
-    assert '("shared", "reviewed", "failed"): return False' in ssrc, "a failed share is final, or it is pressed every other hour"
+    # A failed share is final for PRESSING and loud for SAYING (finding 20261019-phase-3-986). Driven, not grepped:
+    # a source grep is what let the silent return survive, and it would have passed on the broken behaviour too.
+    import io as _io, contextlib as _cl
+    _ent = {"facebook_share": {"status": "failed", "error": "403:13 at async withPage"},
+            "posts": {"facebook|summary|f": {"platform": "facebook", "clip": "summary", "status": "published"}}}
+    _err = _io.StringIO()
+    with _cl.redirect_stderr(_err):
+        _acted = share_to_facebook_profile(2119, _ent, {}, clip="summary")
+    assert _acted is False, "a failed share is never pressed a third time"
+    assert "FAILED" in _err.getvalue() and "403:13" in _err.getvalue() and "retry-share --day 2119" in _err.getvalue(), \
+        "and it says so every run, with the reason and the way to retry it: %r" % _err.getvalue()
+    _done = {"facebook_share": {"status": "shared"}}
+    _err2 = _io.StringIO()
+    with _cl.redirect_stderr(_err2): share_to_facebook_profile(2119, _done, {}, clip="summary")
+    assert _err2.getvalue() == "", "a share that worked says nothing: %r" % _err2.getvalue()
+    # the reason is kept from the FRONT of the message, where it lives, not the tail of the stack trace
+    _long = "Share control not found on the reel page\n    at async withPage (agent-browser.js:1024:12)\n    at async main (agent-browser.js:3400:17)"
+    assert share_error_text(Exception(_long)).startswith("Share control not found on the reel page"), share_error_text(Exception(_long))
+    assert share_error_text(Exception("")) == "no reason recorded"
+    assert len(share_error_text(Exception("x" * 900))) <= 300
     assert 'dest + ".part"' in inspect.getsource(full_from_drive), "a stopped Drive copy must never be uploaded as the episode"
     # 16-17 Sep 2026: what YouTube says decides, not the record an interrupted upload left behind
     now = dt.datetime(2026, 9, 17, 8, 0, tzinfo=dt.timezone.utc)
@@ -2356,4 +2418,5 @@ if __name__ == "__main__":
     elif a.mode == "close-cards": close_cards(dry_run=a.dry_run)
     elif a.mode == "report": report()
     elif a.mode == "youtube-link": youtube_link()
+    elif a.mode == "retry-share": retry_share(a.day)
     else: raise SystemExit("usage: publish.py run [--dry-run] [--limit N] | plan --day N | sync | close-cards [--dry-run] | report | youtube-link | selftest")

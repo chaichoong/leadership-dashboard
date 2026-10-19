@@ -118,9 +118,28 @@ def lfmd_position(ep, podcast_seconds, day):
     if ep.get("lfmd_closes_talk") is True and start < end < length: length, noun = end, "talk"
     share = start / length
     where = "starts at %s of the %s %s (%d%%)" % (mmss(start), mmss(length), noun, int(share * 100 + 1e-9))
+    # THE SPOKEN PHRASE DECIDES, NOT THE SHARE (finding 20261019-phase-3-983). The share rule below is a proxy for
+    # "the diary section closes the episode", and it blocks a correct clip whenever Kevin reaches his diary early:
+    # 1808's clip starts at 4:30 of an 11:30 episode (39%, just under the 40% rule) and sat blocked with no card,
+    # and 2112 came back with "I think you might have a rule where you...". When render.py matched the start ON the
+    # spoken phrase (render.lfmd_phrase, stored as lfmd_phrase), that match IS the evidence the clip is the diary
+    # section, and a percentage cannot overrule it. The share rule still judges a window with no phrase recorded:
+    # one read off the captions by hand, and every episode rendered before 19 Oct 2026.
+    phrase = ep.get("lfmd_phrase")
+    if isinstance(phrase, str) and phrase.strip():
+        return True, True, where + ', matched on what he says: "%s"' % " ".join(phrase.split())[:80]
+    # A window the DETECTOR placed is a phrase match too, even on a clip cut before lfmd_phrase was recorded:
+    # render.lfmd_window only ever returns a window it found by matching LFMD_START_RE and passing is_diary_line.
+    # This is what lets episode 1808 — blocked since 17 Oct at 39%, detector-placed — reach its card without a
+    # re-render. An episode with no lfmd_window_by at all (rendered before that field) keeps the share rule.
+    if ep.get("lfmd_window_by") == "detector":
+        return True, True, where + ", placed by the clip finder on the spoken phrase"
     if share >= LFMD_EARLIEST_START: return True, True, where
     if isinstance(by_hand, (list, tuple)) and list(by_hand) == list(window): return True, True, where + ", accepted by hand as the diary section"
-    return False, True, "%s. The diary section closes the episode, so this is probably the wrong part (2081, 1 Oct 2026). Rebuild it: render.py redo --day %d --only lfmd. If the clip is right: qa.py accept-early --day %d" % (where, day, day)
+    return False, True, ("%s, and no spoken phrase was matched for it (lfmd_phrase is empty, so this clip was cut before "
+                         "19 Oct 2026 or its window was placed by hand). The diary section closes the episode, so this is "
+                         "probably the wrong part (2081, 1 Oct 2026). Rebuild it: render.py redo --day %d --only lfmd. "
+                         "If the clip is right: qa.py accept-early --day %d") % (where, day, day)
 
 
 def checks(day, ledger=None, files=None):
@@ -298,6 +317,24 @@ def selftest():
     led6 = {"a full.insv": dict(led["a full.insv"], lfmd_window=[5, 25])}; ok, fails, _ = gate(9, led6, files)
     assert not ok and [n for n, _ in fails] == ["Learnings clip position"] and "(12%)" in fails[0][1], fails
     led6["a full.insv"]["lfmd_early_ok"] = [5, 25]; ok, fails, _ = gate(9, led6, files); assert ok, fails
+    # 1808 / 2112 (finding 20261019-phase-3-983): an early clip the FINDER matched on the spoken phrase passes on the
+    # phrase, not on its share of the episode. 1808's real numbers were 4:30 of 11:30 (39%), one point under the 40%
+    # rule, and its card never appeared. Back-test by deleting the lfmd_phrase branch in lfmd_position(): this first
+    # assertion then fails with "Learnings clip position".
+    led7 = {"a full.insv": dict(led["a full.insv"], lfmd_window=[5, 25], lfmd_phrase="the learnings from my diary today")}
+    ok, fails, _ = gate(9, led7, files)
+    assert ok, "a phrase-matched early clip passes: %s" % (fails,)
+    assert any(n == "Learnings clip position" and "matched on what he says" in d for n, d in gate(9, led7, files)[2]), gate(9, led7, files)[2]
+    # an empty or blank phrase is NOT a match, so the share rule still refuses the clip
+    for blank in (None, "", "   "):
+        led8 = {"a full.insv": dict(led["a full.insv"], lfmd_window=[5, 25], lfmd_phrase=blank)}
+        assert not gate(9, led8, files)[0], "a blank phrase must not pass an early clip: %r" % blank
+    # 1808 itself: cut before lfmd_phrase existed, but lfmd_window_by says the clip finder placed it, and the finder
+    # only returns a window it matched on the phrase. That is what unblocks it with no re-render.
+    led9 = {"a full.insv": dict(led["a full.insv"], lfmd_window=[5, 25], lfmd_window_by="detector")}
+    assert gate(9, led9, files)[0], "a detector-placed early clip passes: %s" % (gate(9, led9, files)[1],)
+    led10 = {"a full.insv": dict(led["a full.insv"], lfmd_window=[5, 25], lfmd_window_by="operator")}
+    assert not gate(9, led10, files)[0], "a hand-placed early window is still judged on its share until someone accepts it"
     assert card_lines([("a", "b")], [("c", "d")])[1:] == ["- a: b", "- FAILED c: d"]
     shutil.rmtree(tmp); print(json.dumps({"checks": 11, "failed": []}))
 
