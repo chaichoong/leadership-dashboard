@@ -1,7 +1,8 @@
 // Invariant: Home (Kevin, 29 Sep 2026; rebuilt 14 Oct 2026 to the plan he approved on 9 Oct, task
 // recwJcP4xIgAeR723) is ONE scroll of the real pages, nothing copied: the approval queue, then the CEO
 // brief (the AI Agents page itself in its Home mode, os/agents/index.html?home=1), then the Leadership
-// Dashboard and Wealth panels (shown by body.home-mode, Wealth drawn only when scrolled to). The app
+// Dashboard, Cash Flow Voids (Kevin, 19 Oct 2026) and Wealth panels (shown by body.home-mode; Cash Flow
+// Voids drawn once the approvals are in, Wealth only when scrolled to). The app
 // opens on Home; a link that names a page still opens that page; leaving Home puts the shell back.
 // The queue runs twice (Home and the AI Agents tab), so a task write in either copy makes the other
 // re-read it (Kevin, 9 Oct: "all of the information on the Home page synced"). The review of
@@ -9,7 +10,7 @@
 // shrink, a Home copy loading behind the sign-in screen and a deep link it swallowed: each is a test.
 
 const { test, expect } = require('@playwright/test');
-const { MOCK_PAT, setupMockAirtable } = require('./helpers');
+const { MOCK_PAT, FIELDS, makeFixtures, setupMockAirtable } = require('./helpers');
 
 async function open(page, hash, opts = {}) {
   const errors = [];
@@ -28,7 +29,7 @@ async function open(page, hash, opts = {}) {
         .observe(w, { childList: true });
     });
   }, opts.signedOut ? '' : MOCK_PAT);
-  await setupMockAirtable(page);
+  await setupMockAirtable(page, opts.fixtures ? { ...makeFixtures(), ...opts.fixtures } : null);
   await page.goto('/' + (hash ? '#' + hash : ''));
   await page.waitForFunction(() => {
     const dash = document.getElementById('dashboard');
@@ -50,13 +51,13 @@ async function waitForHomeFrame(page) {
 }
 
 test.describe('Home: one scroll of the real pages', () => {
-  test('the app opens on Home, with the dashboard and Wealth underneath', async ({ page }) => {
+  test('the app opens on Home, with the dashboard, the cash flow voids and Wealth underneath', async ({ page }) => {
     const errors = await open(page, '');
     await page.waitForFunction(() => location.hash === '#home', { timeout: 15000 });
     expect(await page.evaluate(() => document.getElementById('tab-home').classList.contains('active'))).toBe(true);
     expect(await page.evaluate(() => document.body.classList.contains('home-mode'))).toBe(true);
-    for (const id of ['tab-home', 'tab-overview', 'tab-wealth', 'homeWealthDivider']) expect(await shown(page, id), id).toBe(true);
-    const order = await page.evaluate(() => ['tab-home', 'tab-overview', 'homeWealthDivider', 'tab-wealth']
+    for (const id of ['tab-home', 'tab-overview', 'homeCfvDivider', 'tab-cfv', 'tab-wealth', 'homeWealthDivider']) expect(await shown(page, id), id).toBe(true);
+    const order = await page.evaluate(() => ['tab-home', 'tab-overview', 'homeCfvDivider', 'tab-cfv', 'homeWealthDivider', 'tab-wealth']
       .map(id => document.getElementById(id).getBoundingClientRect().top + window.scrollY));
     expect(order).toEqual([...order].sort((a, b) => a - b));
     expect(await page.locator('#homeList').count(), 'the old task list is gone').toBe(0);
@@ -148,16 +149,19 @@ test.describe('Home: one scroll of the real pages', () => {
     }
     await expect(f.locator('#approvalsBody')).toBeHidden();
     await page.waitForFunction(t => document.getElementById('homeAgentsFrame').getBoundingClientRect().height < t, tall, { timeout: 5000 });
-    // On Home itself: the dashboard and Wealth fold by theirs.
+    // On Home itself: the dashboard, the cash flow voids and Wealth fold by theirs.
     await page.locator('[data-home-fold="dashboard"]').click();
+    await page.locator('[data-home-fold="cfv"]').click();
     await page.locator('[data-home-fold="wealth"]').click();
     expect(await shown(page, 'tab-overview')).toBe(false);
+    expect(await shown(page, 'tab-cfv')).toBe(false);
     expect(await shown(page, 'tab-wealth')).toBe(false);
     // Reload: everything comes back folded.
     await page.reload();
     await waitForHomeFrame(page);
     for (const zone of ['zoneSignins', 'zoneApprovals', 'zoneCeoBrief']) await expect(homeFrame(page).locator(`#${zone}`)).toHaveClass(/home-collapsed/);
     expect(await shown(page, 'tab-overview')).toBe(false);
+    expect(await shown(page, 'tab-cfv')).toBe(false);
     expect(await shown(page, 'tab-wealth')).toBe(false);
     // And unfolds again.
     await homeFrame(page).locator('#zoneApprovals > .zone-header.home-fold').click();
@@ -207,7 +211,8 @@ test.describe('Home: one scroll of the real pages', () => {
 
   test('Wealth scrolled to while the approvals load says why it is empty, then draws', async ({ page }) => {
     await page.addInitScript(() => {
-      try { localStorage.setItem('od_home_folded', JSON.stringify({ dashboard: true })); } catch (e) {}
+      // Both sections above Wealth folded, so its heading stays on screen once the approvals are in.
+      try { localStorage.setItem('od_home_folded', JSON.stringify({ dashboard: true, cfv: true })); } catch (e) {}
       // A slow Home copy: every read it makes waits 3 seconds.
       if (window !== window.top) { const real = window.fetch; window.fetch = (...a) => new Promise(r => setTimeout(r, 3000)).then(() => real(...a)); }
     });
@@ -372,13 +377,20 @@ test.describe('Home: one scroll of the real pages', () => {
     await page.waitForTimeout(500);
     expect(await page.evaluate(() => document.body.classList.contains('home-mode'))).toBe(false);
     expect(await shown(page, 'tab-home')).toBe(false);
+    expect(await shown(page, 'tab-cfv')).toBe(false);
     expect(await shown(page, 'tab-wealth')).toBe(false);
     await page.evaluate(() => switchTab('home'));
     await page.waitForTimeout(200);
+    expect(await shown(page, 'tab-cfv')).toBe(true);
     expect(await shown(page, 'tab-wealth')).toBe(true);
     await page.evaluate(() => switchTab('invoices'));
     await page.waitForTimeout(200);
-    for (const id of ['tab-home', 'tab-overview', 'tab-wealth', 'homeWealthDivider']) expect(await shown(page, id), id).toBe(false);
+    for (const id of ['tab-home', 'tab-overview', 'tab-cfv', 'homeCfvDivider', 'tab-wealth', 'homeWealthDivider']) expect(await shown(page, id), id).toBe(false);
+    // The Cash Flow Voids page on its own carries no Home heading.
+    await page.evaluate(() => switchTab('cfv'));
+    await page.waitForTimeout(200);
+    expect(await shown(page, 'tab-cfv')).toBe(true);
+    for (const id of ['homeCfvDivider', 'tab-overview', 'tab-wealth']) expect(await shown(page, id), id).toBe(false);
   });
 
   test('a task written in either copy of the queue makes the other copy re-read it', async ({ page }) => {
@@ -427,10 +439,12 @@ test.describe('Home: one scroll of the real pages', () => {
         brief: inner(d.querySelector('#zoneCeoBrief > .zone-header')),
         dashboard: own(document.querySelector('#tab-home .home-dash-divider')),
         dashboardPanel: own(document.getElementById('tab-overview')),
+        cfv: own(document.getElementById('homeCfvDivider')),
+        cfvPanel: own(document.getElementById('tab-cfv')),
         wealth: own(document.getElementById('homeWealthDivider')),
       };
     });
-    for (const k of ['signins', 'approvals', 'brief', 'dashboardPanel', 'wealth']) expect(edges[k], k).toEqual(edges.dashboard);
+    for (const k of ['signins', 'approvals', 'brief', 'dashboardPanel', 'cfv', 'cfvPanel', 'wealth']) expect(edges[k], k).toEqual(edges.dashboard);
   });
 
   async function settled(page) {
@@ -472,15 +486,16 @@ test.describe('Home: one scroll of the real pages', () => {
     const f = document.getElementById('homeAgentsFrame'), d = f.contentDocument;
     const inFrame = { signins: '#zoneSignins', approvals: '#zoneApprovals', brief: '#zoneCeoBrief' }[k];
     const top = inFrame ? f.getBoundingClientRect().top + d.querySelector(`${inFrame} > .zone-header`).getBoundingClientRect().top
-      : (k === 'dashboard' ? document.querySelector('#tab-home .home-dash-divider') : document.getElementById('homeWealthDivider')).getBoundingClientRect().top;
+      : (k === 'dashboard' ? document.querySelector('#tab-home .home-dash-divider')
+        : document.getElementById(k === 'cfv' ? 'homeCfvDivider' : 'homeWealthDivider')).getBoundingClientRect().top;
     return { top: Math.round(top), barBottom: Math.round(document.getElementById('homeJump').getBoundingClientRect().bottom) };
   }, key);
 
   test('the jump row replaces the three page links, and each button lands its section just below the row', async ({ page }) => {
     await tallHome(page);
     await expect(page.locator('[data-home-tab]')).toHaveCount(0);
-    await expect(page.locator('#homeJump button')).toHaveText(['Sign-ins', 'Approvals', 'CEO brief', 'Dashboard', 'Wealth']);
-    for (const key of ['wealth', 'brief', 'dashboard', 'signins', 'approvals', 'wealth']) {
+    await expect(page.locator('#homeJump button')).toHaveText(['Sign-ins', 'Approvals', 'CEO brief', 'Dashboard', 'Cash flow voids', 'Wealth']);
+    for (const key of ['wealth', 'brief', 'cfv', 'dashboard', 'signins', 'approvals', 'cfv', 'wealth']) {
       await page.locator(`[data-home-jump="${key}"]`).click();
       await settled(page);
       const at = await headingTop(page, key);
@@ -569,7 +584,7 @@ test.describe('Home: one scroll of the real pages', () => {
   });
 
   test('a jump to a folded section opens it first', async ({ page }) => {
-    await tallHome(page, { signins: true, approvals: true, brief: true, dashboard: true, wealth: true });
+    await tallHome(page, { signins: true, approvals: true, brief: true, dashboard: true, cfv: true, wealth: true });
     const f = homeFrame(page);
     await page.locator('[data-home-jump="approvals"]').click();
     await expect(f.locator('#zoneApprovals')).not.toHaveClass(/home-collapsed/);
@@ -578,12 +593,15 @@ test.describe('Home: one scroll of the real pages', () => {
     await expect(f.locator('#zoneCeoBrief')).not.toHaveClass(/home-collapsed/);
     await page.locator('[data-home-jump="dashboard"]').click();
     expect(await shown(page, 'tab-overview')).toBe(true);
+    await page.locator('[data-home-jump="cfv"]').click();
+    expect(await shown(page, 'tab-cfv')).toBe(true);
+    await page.waitForFunction(() => document.querySelector('#cfvSummaryCards .kpi-card-value'), null, { timeout: 10000 });
     await page.locator('[data-home-jump="wealth"]').click();
     expect(await shown(page, 'tab-wealth')).toBe(true);
     await page.waitForFunction(() => window.__wealthDrawnAt > 0, { timeout: 10000 });
     // Opened by a jump is remembered, as opened by its arrow is.
     expect(await page.evaluate(() => JSON.parse(localStorage.getItem('od_home_folded'))))
-      .toEqual({ signins: true, approvals: false, brief: false, dashboard: false, wealth: false });
+      .toEqual({ signins: true, approvals: false, brief: false, dashboard: false, cfv: false, wealth: false });
   });
 
   test('the row stays pinned while Home scrolls, and the queue\'s own pinned bars sit below it', async ({ page }) => {
@@ -639,5 +657,88 @@ test.describe('Home: one scroll of the real pages', () => {
     await page.waitForTimeout(400);
     const span = await page.evaluate(() => { const b = document.getElementById('homeJump').getBoundingClientRect(); return [Math.round(b.left), Math.round(b.width), document.documentElement.clientWidth]; });
     expect([span[0], span[1]]).toEqual([0, span[2]]);
+  });
+
+  // Kevin, 19 Oct 2026: "underneath the leadership dashboard but above wealth, can I have the cash flow
+  // voids interface included? I'll need a button at the top to navigate as well." The real CFV page, drawn
+  // once the approvals are in so its reads never land on top of theirs. The ref and amount are invented.
+  const CFV_FIXTURES = { tenancies: [...makeFixtures().tenancies, { id: 'recHomeCfvSpec1', fields: {
+    [FIELDS.tenRef]: 'TEN-HCFV-1', [FIELDS.tenRent]: 640, [FIELDS.tenDueDay]: 3, [FIELDS.tenPayStatus]: 'CFV',
+    [FIELDS.tenStatus]: 'Active', [FIELDS.tenStartDate]: '2025-01-01', [FIELDS.tenantPayType]: 'UC' } }] };
+  const cfvRowDrawn = page => page.waitForFunction(
+    () => [...document.querySelectorAll('#cfvTableBody tr')].some(tr => tr.textContent.includes('TEN-HCFV-1')), null, { timeout: 15000 });
+  const cfvDrawnCount = page => page.evaluate(() => document.getElementById('cfvSummaryCards').childElementCount);
+
+  test('the cash flow voids are the real CFV page, drawn once the approvals are in', async ({ page }) => {
+    await page.addInitScript(() => {
+      // A slow Home copy: every read it makes waits 3 seconds.
+      if (window !== window.top) { const real = window.fetch; window.fetch = (...a) => new Promise(r => setTimeout(r, 3000)).then(() => real(...a)); }
+    });
+    const errors = await open(page, 'home', { fixtures: CFV_FIXTURES });
+    await page.waitForFunction(() => typeof window.dashDataAsOf === 'number', null, { timeout: 20000 });
+    await page.waitForTimeout(500);
+    expect(await cfvDrawnCount(page), 'drawn before the approvals').toBe(0);
+    await page.waitForFunction(() => window.__shellMessages.includes('agentsHomeReady'), null, { timeout: 30000 });
+    await cfvRowDrawn(page);
+    expect(await page.locator('#cfvTable').count(), 'one table: the page itself, not a copy').toBe(1);
+    expect(errors.filter(e => !/net::ERR|Failed to fetch|NetworkError/.test(e))).toEqual([]);
+  });
+
+  test('a folded cash flow voids section is never drawn, and is drawn when unfolded', async ({ page }) => {
+    await page.addInitScript(() => { try { localStorage.setItem('od_home_folded', JSON.stringify({ cfv: true })); } catch (e) {} });
+    await open(page, 'home', { fixtures: CFV_FIXTURES });
+    await waitForHomeFrame(page);
+    await page.waitForTimeout(1500);
+    expect(await shown(page, 'tab-cfv')).toBe(false);
+    expect(await cfvDrawnCount(page), 'drawn while folded').toBe(0);
+    await page.locator('[data-home-fold="cfv"]').click();
+    expect(await shown(page, 'tab-cfv')).toBe(true);
+    await cfvRowDrawn(page);
+  });
+
+  test('Refresh on Home draws the cash flow voids again', async ({ page }) => {
+    await open(page, 'home', { fixtures: CFV_FIXTURES });
+    await waitForHomeFrame(page);
+    await cfvRowDrawn(page);
+    await page.evaluate(() => { document.getElementById('cfvTableBody').innerHTML = '<tr id="specOldRow"><td>old</td></tr>'; });
+    await page.evaluate(() => triggerSyncBarRefresh('home'));
+    await page.waitForFunction(() => !document.getElementById('specOldRow'), null, { timeout: 15000 });
+    await cfvRowDrawn(page);
+  });
+
+  // Review, 19 Oct 2026: the CFV page moves a paid tenancy back to In Payment in Airtable as it draws. The app
+  // opens on Home, so on Home the same panel must be read-only, or every app open (off a cache up to a day
+  // old) would write. The CFV page itself keeps doing it: that is the control.
+  test('Home draws the cash flow voids without writing, and the CFV page still moves a paid tenancy back', async ({ page }) => {
+    const writes = [];
+    page.on('request', r => {
+      if (r.method() !== 'GET' && /api\.airtable\.com\/v0\/[^/]+\/tblN51a88qTDB6iMH/.test(r.url())) writes.push(`${r.method()} ${r.url()}`);
+    });
+    // The tenancy has paid this month, so it is the one shape the auto-return takes.
+    await page.addInitScript(() => document.addEventListener('DOMContentLoaded', () => { window.hasLinkedPaymentThisMonth = () => true; }));
+    await open(page, 'home', { fixtures: CFV_FIXTURES });
+    await waitForHomeFrame(page);
+    await page.waitForFunction(() => document.querySelector('#cfvSummaryCards .kpi-card-value'), null, { timeout: 15000 });
+    await page.waitForTimeout(2000);
+    expect(writes, 'writes from Home').toEqual([]);
+    await page.evaluate(() => switchTab('cfv'));
+    await page.waitForFunction(() => document.querySelector('#cfvSummaryCards .kpi-card-value'), null, { timeout: 15000 });
+    await expect.poll(() => writes.some(w => w.startsWith('PATCH') && w.includes('recHomeCfvSpec1')), { timeout: 10000 }).toBe(true);
+  });
+
+  test('new dashboard data draws the cash flow voids again, but never under Kevin\'s cursor', async ({ page }) => {
+    await open(page, 'home', { fixtures: CFV_FIXTURES });
+    await waitForHomeFrame(page);
+    await cfvRowDrawn(page);
+    const stale = () => page.evaluate(() => { document.getElementById('cfvTableBody').innerHTML = '<tr id="specOldRow"><td>old</td></tr>'; });
+    // His cursor is in the panel: new data waits.
+    await stale();
+    await page.evaluate(() => { const b = document.createElement('button'); b.id = 'specInPanel'; document.getElementById('tab-cfv').appendChild(b); b.focus(); window.dashDataAsOf = Date.now(); });
+    await page.waitForTimeout(6500);
+    expect(await page.locator('#specOldRow').count(), 'redrawn under his cursor').toBe(1);
+    // He moves on: drawn again within the next check.
+    await page.evaluate(() => document.getElementById('specInPanel').blur());
+    await page.waitForFunction(() => !document.getElementById('specOldRow'), null, { timeout: 8000 });
+    await cfvRowDrawn(page);
   });
 });

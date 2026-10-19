@@ -506,7 +506,10 @@
             await nextFrame();
         }
 
-        const cfvList = detectCFVs();
+        // Auto-return writes to Airtable, so it runs only while this page itself is open. Home shows the
+        // same panel read-only (Kevin, 19 Oct 2026): the app opens on Home, and opening a page writes nothing.
+        const onCfvPage = !!document.getElementById('tab-cfv')?.classList.contains('active');
+        const cfvList = detectCFVs(onCfvPage ? undefined : { autoReturn: false });
         const today = new Date();
 
         // DO NOT auto-update Airtable — show potential CFVs for user approval

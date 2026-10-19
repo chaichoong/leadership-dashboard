@@ -5,8 +5,9 @@
 //      (os/agents/index.html?home=1), in a frame that grows to its full height. That page tells
 //      every other open copy of the queue when it changes a task, so a card answered here is gone
 //      from the AI Agents tab too.
-//   3. The Leadership Dashboard and 4. Wealth: the real #tab-overview and #tab-wealth panels, shown
-//      under Home by body.home-mode (css/home.css). Wealth is drawn the first time it scrolls into view.
+//   3. The Leadership Dashboard, 4. Cash Flow Voids (Kevin, 19 Oct 2026) and 5. Wealth: the real
+//      #tab-overview, #tab-cfv and #tab-wealth panels, shown under Home by body.home-mode (css/home.css).
+//      Cash Flow Voids is drawn once the approvals are in; Wealth the first time it scrolls into view.
 // The old "what needs you today" task list is gone (Kevin, 14 Oct 2026: "Anything that needs me
 // should come to me as an approval card"). The app opens on Home. Nothing in shared.js, dashboard.js
 // or wealth.js changes: a MutationObserver watches #tab-home's active class.
@@ -16,7 +17,8 @@
     const REREAD_AFTER_MS = 60 * 1000;        // reopening Home re-reads the queue and the brief
     const READY_TIMEOUT_MS = 60 * 1000;       // a copy that never says it is ready is reported, not waited on for ever
     const KEEP_FRESH_MS = 5 * 60 * 1000;      // a Home left open re-reads every five minutes
-    const state = { agents: { phase: 'idle' }, wealth: 'waiting', loadedAt: 0, rereadAt: 0, dataReady: false };
+    const state = { agents: { phase: 'idle' }, cfv: 'waiting', cfvAsOf: null, wealth: 'waiting', loadedAt: 0, rereadAt: 0, dataReady: false };
+    const PAGE_FOLDS = ['dashboard', 'cfv', 'wealth'];   // the real panels under Home, each with its own header
 
     function frame() { return document.getElementById('homeAgentsFrame'); }
     function homeOpen() { const p = document.getElementById('tab-home'); return !!(p && p.classList.contains('active')); }
@@ -54,6 +56,7 @@
             state.agents = { phase: 'error', error: 'it did not finish loading within a minute' };
             setStatus('Your approvals and the CEO brief are taking too long to load. Press Refresh in the bar above, or open the AI Agents page.', true);
             if (typeof markTabSynced === 'function') markTabSynced(TAB);
+            maybeCfv();
             maybeWealth();
         }, READY_TIMEOUT_MS);
     }
@@ -111,6 +114,7 @@
                 : { phase: 'error', error: String(d.error || 'unknown') };
             setStatus(d.ok ? '' : `Your approvals and the CEO brief could not be read (${state.agents.error}). Press Refresh in the bar above, or open the AI Agents page.`, !d.ok);
             queueBand();
+            maybeCfv();      // before Wealth, which waits for it
             maybeWealth();   // the frame has its real height now, so "near the screen" means something
             if (pendingJump) redoJump();   // a jump made while it loaded is aimed again at its real place
             if (typeof markTabSynced === 'function') markTabSynced(TAB);
@@ -145,6 +149,7 @@
             try { const st = foldState(); st[key] = fold; localStorage.setItem(FOLD_KEY, JSON.stringify(st)); }
             catch (err) { console.warn('[home] fold state not saved', err); }
         }
+        if (key === 'cfv' && !fold && save) maybeCfv();         // opened by hand: drawn once the approvals are in
         if (key === 'wealth' && !fold && save) maybeWealth();   // opened by hand: drawn if in view, once the approvals are in
         queueBand();
     }
@@ -160,12 +165,42 @@
     }
     function maybeWealth() {
         if (!homeOpen()) return;
-        const waiting = state.agents.phase === 'idle' || state.agents.phase === 'loading';
+        // Cash Flow Voids sits above Wealth, so Wealth also waits for it to have its real height.
+        const waiting = state.agents.phase === 'idle' || state.agents.phase === 'loading' || state.cfv === 'loading';
         const near = wealthNear();
         // Say why the heading has nothing under it yet, rather than leave it blank.
         const note = document.getElementById('homeWealthWait');
         if (note) note.hidden = !(waiting && near && state.wealth === 'waiting' && wealthOutcome() === 'waiting');   // the Wealth page may have drawn it already
         if (!waiting && near) loadWealth();
+    }
+
+    // Cash Flow Voids (Kevin, 19 Oct 2026: "underneath the leadership dashboard but above wealth"). The real
+    // panel, drawn by its own renderCFVTab (read-only off its own page) once the approvals are in, so its
+    // Airtable reads never land on top of theirs. It is worked out from the dashboard's tenancies and
+    // payments, so it is drawn again whenever those change: the cache at app open is replaced by a fresh
+    // read, then the 15-minute refresh and Refresh. window.dashDataAsOf says which data it was drawn from.
+    function maybeCfv() {
+        if (!homeOpen() || folded('cfv') || state.cfv === 'loading') return;   // a folded section is never drawn
+        if (state.agents.phase === 'idle' || state.agents.phase === 'loading') return;
+        const asOf = window.dashDataAsOf;
+        if (typeof asOf !== 'number' || typeof allTenancies === 'undefined' || !allTenancies.length) return;   // not read yet
+        if (asOf === state.cfvAsOf) return;   // already drawn from this data
+        // Never redrawn under Kevin's cursor (a button he is on, a comment he is typing): it waits for the next check.
+        const panel = document.getElementById('tab-cfv');
+        if (state.cfvAsOf != null && panel && panel.contains(document.activeElement)) return;
+        loadCfv(asOf);
+    }
+    async function loadCfv(asOf) {
+        if (typeof renderCFVTab !== 'function') { state.cfv = 'failed'; return; }
+        state.cfv = 'loading';
+        state.cfvAsOf = asOf;
+        try { await renderCFVTab(); state.cfv = 'loaded'; }
+        catch (err) { state.cfv = 'failed'; console.error('[home] Cash flow voids could not be drawn:', err); }
+        layoutMovedAt = Date.now();
+        if (pendingJump && pendingJump.settled != null) watchSettle();
+        if (pendingJump && pendingJump.key === 'wealth') redoJump();   // drawing it moved Wealth down
+        maybeWealth();   // Wealth waited for this section's real height
+        if (typeof markTabSynced === 'function') markTabSynced(TAB);
     }
 
     async function loadWealth() {
@@ -195,7 +230,9 @@
             refreshFn: () => {
                 setDate();
                 keepFresh(true);
-                if (typeof loadDashboard === 'function') loadDashboard();
+                // The cash flow voids follow the fresh read on their own (maybeCfv), once the approvals are in.
+                if (typeof loadDashboard === 'function') Promise.resolve(loadDashboard()).then(maybeCfv)
+                    .catch(err => console.error('[home] Dashboard refresh failed, so the cash flow voids were not redrawn:', err));
                 if (state.wealth !== 'waiting') { state.wealth = 'waiting'; loadWealth(); }
             },
             checks: [
@@ -208,6 +245,10 @@
                 { name: 'Leadership Dashboard data in', kind: 'sync', run: () => (typeof window.dashDataAsOf === 'number'
                     ? { status: 'pass', detail: `Read ${Math.max(0, Math.round((Date.now() - window.dashDataAsOf) / 60000))} min ago` }
                     : { status: 'warn', detail: 'The dashboard has not finished reading yet' }) },
+                { name: 'Cash flow voids', kind: 'sync', run: () => (state.cfv === 'failed' ? { status: 'fail', detail: 'The cash flow voids could not be drawn. Open the Cash Flow Voids page.' }
+                    : state.cfv === 'loaded' ? { status: 'pass', detail: 'Drawn' }
+                    : folded('cfv') ? { status: 'pass', detail: 'Folded: drawn when you open it' }
+                    : { status: 'warn', detail: 'Not drawn yet: it draws once your approvals and the dashboard have loaded' }) },
                 { name: 'Wealth', kind: 'sync', run: () => (state.wealth === 'failed' ? { status: 'fail', detail: 'Wealth could not be drawn. Open the Wealth page.' }
                     : state.wealth === 'loaded' ? { status: 'pass', detail: 'Drawn' }
                     : { status: 'pass', detail: 'Drawn when you scroll down to it' }) },
@@ -281,7 +322,7 @@
     function jumpTo(key, again, focus) {
         if (!again) pendingJump = { key, at: Date.now(), settled: null };
         const moveFocus = !again && !!focus;
-        if (key === 'dashboard' || key === 'wealth') {
+        if (PAGE_FOLDS.includes(key)) {
             if (folded(key)) setFold(key, false, true);
             const b = document.querySelector(`[data-home-fold="${key}"]`);
             if (b) { scrollToY(b.getBoundingClientRect().top + window.pageYOffset); if (moveFocus) b.focus({ preventScroll: true }); }
@@ -307,11 +348,11 @@
             if (b) { const key = b.getAttribute('data-home-fold'); setFold(key, !folded(key), true); }
         });
         const st = foldState();
-        ['dashboard', 'wealth'].forEach(key => setFold(key, !!st[key], false));
+        PAGE_FOLDS.forEach(key => setFold(key, !!st[key], false));
         const sync = () => {
             const open = panel.classList.contains('active');
             document.body.classList.toggle('home-mode', open);
-            if (open) { setDate(); keepFresh(); queueBand(); }
+            if (open) { setDate(); keepFresh(); queueBand(); maybeCfv(); }
             else pendingJump = null;   // a jump belongs to Home: never aimed again on another page
             syncPin();
         };
@@ -335,6 +376,7 @@
         if (typeof ResizeObserver === 'function') new ResizeObserver(() => { syncPin(); queueBand(); }).observe(document.body);
         document.addEventListener('visibilitychange', () => keepFresh());   // never pass the event in as "force"
         setInterval(() => { if (Date.now() - state.rereadAt > KEEP_FRESH_MS) keepFresh(true); }, 30 * 1000);
+        setInterval(maybeCfv, 5 * 1000);   // new dashboard data redraws the cash flow voids within five seconds
         const divider = document.getElementById('homeWealthDivider');
         if (divider && typeof IntersectionObserver === 'function') {
             new IntersectionObserver((entries) => {

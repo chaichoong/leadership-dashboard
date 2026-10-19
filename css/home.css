@@ -1,8 +1,12 @@
 /* Home tab (Kevin, 29 Sep 2026; rebuilt 14 Oct 2026): one scroll of the real pages. js/home.js sets
-   body.home-mode while Home is open; the rules below show the real Leadership Dashboard (#tab-overview)
-   and Wealth (#tab-wealth) panels after #tab-home without touching switchTab. Tokens only. */
+   body.home-mode while Home is open; the rules below show the real Leadership Dashboard (#tab-overview),
+   Cash Flow Voids (#tab-cfv, 19 Oct 2026) and Wealth (#tab-wealth) panels after #tab-home without touching
+   switchTab. Tokens only. */
 body.home-mode #tab-overview { display: block; }
+body.home-mode #tab-cfv { display: block; }
 body.home-mode #tab-wealth { display: block; }
+#homeCfvDivider { display: none; }
+body.home-mode #homeCfvDivider { display: block; }
 #homeWealthDivider { display: none; }
 body.home-mode #homeWealthDivider { display: block; }
 .home-wealth-wait { display: none; }
@@ -40,6 +44,7 @@ body.home-mode.home-folded-wealth .home-wealth-wait { display: none; }
 .home-chev { display: inline-block; width: 16px; font-size: var(--fs-lg); line-height: 1; transition: transform .15s; }
 .home-fold-btn[aria-expanded="false"] .home-chev { transform: rotate(-90deg); }
 body.home-mode.home-folded-dashboard #tab-overview { display: none; }
+body.home-mode.home-folded-cfv #tab-cfv { display: none; }
 body.home-mode.home-folded-wealth #tab-wealth { display: none; }
 /* Until Wealth is drawn it holds a screen of room, so a jump to it can bring its heading to the top. */
 body.home-mode:not(.home-wealth-drawn):not(.home-folded-wealth) #tab-wealth { min-height: 100vh; }
