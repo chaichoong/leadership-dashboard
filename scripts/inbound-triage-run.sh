@@ -123,6 +123,43 @@ trap 'exit 129' HUP
 trap 'exit 130' INT
 cd "$REPO" || { echo "ERROR: repo not found at $REPO" >&2; exit 1; }
 
+# EVERY PRE-READ FILE HOLDS JSON ALONE (18 Oct 2026; findings 20261015-agent-dispatch-914 and
+# -919, 20261016-agent-dispatch-943, 20261016-inbound-email-triage-948 and -953).
+#
+# These captures carried `2>&1` for the failure contract below: a crash lands IN the file so the
+# skill reports it loudly instead of reading "no sends found" as "nothing answered". But it also
+# swept the Gmail pacer's progress line — "GMAIL PACER: holding /gmail/list for 52.1s ..." — into
+# the file ahead of a complete, correct answer. That happened on five slots across 15, 16 and 17
+# Oct: json.load failed every time, the agent parsed past the line by hand, and a reader following
+# the skill would have read the whole sent check as UNCHECKED.
+#
+# pre_read keeps the contract and drops the noise. stderr goes to <file>.err. The file is then
+# CHECKED: when it does not parse, the error object the skill already understands is written in its
+# place, carrying the stderr tail and what stdout did say. A pre-read never fails the slot.
+pre_read() {   # $1 = output file; the rest is the command
+  _pr_out="$1"; shift
+  "$@" > "$_pr_out" 2> "$_pr_out.err" || true
+  /usr/bin/python3 - "$_pr_out" <<'PRE_READ_CHECK' || true
+import json, sys
+path = sys.argv[1]
+try:
+    with open(path) as fh:
+        json.load(fh)
+except Exception as ex:                                   # noqa: BLE001 — any unparseable file
+    def tail(p):
+        try:
+            with open(p) as fh:
+                return fh.read()[-1000:]
+        except OSError:
+            return ""
+    out, err = tail(path), tail(path + ".err")
+    with open(path, "w") as fh:
+        json.dump({"error": "this pre-read did not produce JSON: %s" % ex,
+                   "stderr": err, "stdout": out}, fh)
+    print("pre-read %s did not parse (%s); written as an error object" % (path, ex), file=sys.stderr)
+PRE_READ_CHECK
+}
+
 # PRE-READ the Messages database HERE, before claude starts. macOS attributes
 # the Full Disk Access permission to this job's ROOT process (python3, which
 # Kevin granted on 24 Aug 2026 — proven by a launchd probe), NOT to the claude
@@ -130,8 +167,8 @@ cd "$REPO" || { echo "ERROR: repo not found at $REPO" >&2; exit 1; }
 # binary's path changes on every update so granting it would break silently.
 # The skill consumes these dumps instead of reading chat.db itself. Failures
 # land IN the dump files as error JSON, so the skill still reports them loudly.
-/usr/bin/python3 "$REPO/scripts/imessage-sweep.py" scan > "$SCRATCH/imessage-scan.json" 2>&1 || true
-/usr/bin/python3 "$REPO/scripts/imessage-sweep.py" sentdump --since-hours 200 > "$SCRATCH/imessage-sent.json" 2>&1 || true
+pre_read "$SCRATCH/imessage-scan.json" /usr/bin/python3 "$REPO/scripts/imessage-sweep.py" scan
+pre_read "$SCRATCH/imessage-sent.json" /usr/bin/python3 "$REPO/scripts/imessage-sweep.py" sentdump --since-hours 200
 
 # THE GMAIL SENT-CHECK (27 Aug 2026). 41% of everything Kevin rejects is
 # "already dealt with elsewhere" — he or Roy answered the thread and the agent
@@ -142,7 +179,7 @@ cd "$REPO" || { echo "ERROR: repo not found at $REPO" >&2; exit 1; }
 # skipped. `|| true` deliberately: a failure lands IN the file as an error
 # object with the control message, and the skill reports it loudly instead of
 # treating "no sends found" as "nothing answered".
-/usr/bin/python3 "$REPO/scripts/inbound-triage.py" sentcheck --days 7 > "$SCRATCH/gmail-sent.json" 2>&1 || true
+pre_read "$SCRATCH/gmail-sent.json" /usr/bin/python3 "$REPO/scripts/inbound-triage.py" sentcheck --days 7
 
 # ROY'S LANE (28 Aug 2026). "Roy is dealing with this directly" was typed SEVEN
 # times across Kevin's 58 rejections — 12%, on work that was never his. Roy has
@@ -152,8 +189,8 @@ cd "$REPO" || { echo "ERROR: repo not found at $REPO" >&2; exit 1; }
 # the dispatch skill so a property task is passed on rather than drafted for
 # Kevin first. `|| true`: a refusal is reported in its JSON, and one refused
 # handover must not stop the rest of the slot.
-/usr/bin/python3 "$REPO/scripts/agent-dispatch.py" handover-property \
-  > "$SCRATCH/roy-handovers.json" 2>&1 || true
+pre_read "$SCRATCH/roy-handovers.json" \
+  /usr/bin/python3 "$REPO/scripts/agent-dispatch.py" handover-property
 
 # CLEAR THE ALERT BACKLOG (29 Aug 2026). The alert lane classifies in
 # build_queue, which reads Today/Overdue — so it stopped NEW breakage tasks
@@ -162,8 +199,8 @@ cd "$REPO" || { echo "ERROR: repo not found at $REPO" >&2; exit 1; }
 # every one predating the fix. Runs every slot rather than once, because a task
 # can still arrive at Approval by a path the queue never classified, and a
 # one-off cleanup would leave the same gap open behind it. Closes nothing.
-/usr/bin/python3 "$REPO/scripts/agent-dispatch.py" clear-alerts \
-  > "$SCRATCH/cleared-alerts.json" 2>&1 || true
+pre_read "$SCRATCH/cleared-alerts.json" \
+  /usr/bin/python3 "$REPO/scripts/agent-dispatch.py" clear-alerts
 
 # GMAIL HEALTH PROBE (6 Sep 2026, finding 20260906-daily-ops-477). The three
 # slots share ONE daily Gmail quota. On 3 and 5 Sep the quota ran out, the
@@ -234,10 +271,10 @@ fi
 # headless session exited before it returned. Slots on 26, 27, 28 and 29 Sep
 # decided no mail at all. The dump below reads the book as it stands; a stale
 # book is advisory, a missed scan is lost mail.
-/usr/bin/python3 "$REPO/scripts/inbound-triage.py" history-dump \
-  > "$SCRATCH/history-book.json" 2>&1 || true
-/usr/bin/python3 "$REPO/scripts/inbound-triage.py" matters \
-  > "$SCRATCH/open-matters.json" 2>&1 || true
+pre_read "$SCRATCH/history-book.json" \
+  /usr/bin/python3 "$REPO/scripts/inbound-triage.py" history-dump
+pre_read "$SCRATCH/open-matters.json" \
+  /usr/bin/python3 "$REPO/scripts/inbound-triage.py" matters
 
 # KEVIN'S NOTES ON INBOX CARDS REACH THE TRIAGE (Kevin, 14 Oct 2026). Mail he
 # should read comes to him as an INBOX card, and "I don't need to see this" on
@@ -246,8 +283,8 @@ fi
 # remembered note on an INBOX card into the triage agent's own file, BEFORE
 # claude starts and reads that file at step 0. `|| true`: a failure lands in
 # the JSON as NOT CHECKED, and the slot still triages on the lessons it has.
-/usr/bin/python3 "$REPO/scripts/inbound-triage.py" inbox-lessons \
-  > "$SCRATCH/inbox-lessons.json" 2>&1 || true
+pre_read "$SCRATCH/inbox-lessons.json" \
+  /usr/bin/python3 "$REPO/scripts/inbound-triage.py" inbox-lessons
 
 # THE LESSONS FILE IS READ FIRST, AND THAT IS LOAD-BEARING (27 Aug 2026).
 #

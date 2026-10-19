@@ -215,8 +215,11 @@ describe("the Go Signal is the agent's own 9/1/5 schedule (Kevin, 24 Aug 2026)",
         // Proven by launchd probe, 24 Aug 2026: python3-rooted jobs hold the
         // Messages permission; the claude binary does not (and its path
         // changes every update). The dumps are the sweep's data in the slots.
-        expect(runner).toMatch(/imessage-sweep\.py" scan > "\$SCRATCH\/imessage-scan\.json/);
-        expect(runner).toMatch(/sentdump --since-hours \d+ > "\$SCRATCH\/imessage-sent\.json/);
+        // Both dumps go through pre_read since 18 Oct 2026, which names the file FIRST
+        // and keeps stderr out of it (findings 20261015-agent-dispatch-914 and -919,
+        // 20261016-agent-dispatch-943, 20261016-inbound-email-triage-948 and -953).
+        expect(runner).toMatch(/pre_read "\$SCRATCH\/imessage-scan\.json"[\s\S]{0,120}imessage-sweep\.py" scan/);
+        expect(runner).toMatch(/pre_read "\$SCRATCH\/imessage-sent\.json"[\s\S]{0,120}sentdump --since-hours \d+/);
         const sweepSkill = readFileSync(path.join(root, '.claude/scheduled-tasks/inbound-messages-sweep/SKILL.md'), 'utf8');
         expect(sweepSkill).toContain('imessage-scan.json');
         expect(sweepSkill).toContain('imessage-sent.json');
