@@ -20,11 +20,11 @@
     // ── Page & SOP Version Registry ──
     const PAGE_REGISTRY = [
         // Home tab (Kevin, 29 Sep 2026): one list of what needs Kevin today, the real Leadership Dashboard underneath. On trial beside the old screens.
-        { id: 'home',        name: 'Home',                           icon: '📌', pageVer: '1.13', sopFile: '',                           sopVer: '1.0', standalone: 'index.html#home' },
+        { id: 'home',        name: 'Home',                           icon: '📌', pageVer: '1.14', sopFile: '',                           sopVer: '1.0', standalone: 'index.html#home' },
         { id: 'overview',    name: 'Leadership Dashboard',           icon: '📊', pageVer: '2.153', sopFile: 'sop.html',                   sopVer: '2.151', standalone: 'index.html#overview' },
         { id: 'os-strategy', name: 'Objective & Strategy',           icon: '🎯', pageVer: '1.81', sopFile: 'os/strategy/sop.html',       sopVer: '1.1', standalone: 'os/strategy/index.html' },
         { id: 'tasks',       name: 'Tasks & Projects',   icon: '✅', pageVer: '1.197', sopFile: 'os/tasks/sop.html',             sopVer: '1.4', standalone: 'os/tasks/index.html' },
-        { id: 'cfv',        name: 'CFVs',                          icon: '🚨', pageVer: '1.44', sopFile: 'sop-cfvs.html',               sopVer: '1.44', standalone: 'index.html#cfv' },
+        { id: 'cfv',        name: 'CFVs',                          icon: '🚨', pageVer: '1.45', sopFile: 'sop-cfvs.html',               sopVer: '1.44', standalone: 'index.html#cfv' },
         { id: 'money',      name: 'Money Confidence',              icon: '🧭', pageVer: '1.1', sopFile: '',                            sopVer: '1.0', standalone: 'index.html#money' },
         { id: 'wealth',     name: 'Wealth',                        icon: '📈', pageVer: '1.24', sopFile: '',                            sopVer: '1.0', standalone: 'index.html#wealth' },
         { id: 'income',     name: 'Accounts Receivable Fixed',     icon: '💷', pageVer: '1.5', sopFile: '',                            sopVer: '1.0', standalone: 'index.html#income' },
