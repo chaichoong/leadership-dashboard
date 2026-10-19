@@ -450,6 +450,41 @@ describe('the Robot sign-in app and its link', () => {
     }
     expect(src).toMatch(/property estateMarker : "\/Users\/kevinbrittain\/knowledge-os\/logs\/queue"/);
   }, 30000);
+  // 19 Oct 2026: on the Air, "Open the Mac mini's screen" opened vnc://Mac-mini.local. A .local
+  // name resolves only through Bonjour on the home network and the router does not know it, so
+  // over Teleport the button went nowhere. It now opens the mini's fixed address when its Screen
+  // Sharing port answers, and the name otherwise. Driven through osascript at real listeners.
+  it('the screen button opens the fixed address when it answers, and the name when it does not', async () => {
+    const { rmSync } = require('node:fs');
+    const net = require('node:net');
+    const dir = mkdtempSync(join(tmpdir(), 'od-robot-screen-'));
+    const listening = net.createServer();
+    await new Promise((ok) => listening.listen(0, '127.0.0.1', ok));
+    const answers = listening.address().port;
+    const silent = await new Promise((ok) => {
+      const s = net.createServer();
+      s.listen(0, '127.0.0.1', () => { const p = s.address().port; s.close(() => ok(p)); });
+    });
+    try {
+      execFileSync('osacompile', ['-o', join(dir, 'r.scpt'), join(ROOT, 'scripts', 'robot-signin.applescript')]);
+      const run = (address, port, handler) => execFileSync('osascript', ['-e',
+        `set s to (load script POSIX file "${join(dir, 'r.scpt')}")\nset s's robotsMacAddress to "${address}"\nset s's screenSharingPort to ${port}\nreturn s's ${handler}()`],
+        { encoding: 'utf8' }).trim();
+      expect(run('127.0.0.1', answers, 'robotsMacScreen')).toBe('vnc://127.0.0.1');
+      expect(run('127.0.0.1', silent, 'robotsMacScreen')).toBe('vnc://Mac-mini.local');
+      // What the button runs (review, 19 Oct 2026: a dropped "()" would quote the handler itself).
+      expect(run('127.0.0.1', answers, 'robotsMacScreenCommand')).toBe("open 'vnc://127.0.0.1'");
+      // An address that never answers (the mini off, or Teleport down) gives up within the 2 s
+      // limit, not the ~75 s a plain connect waits (review, 19 Oct 2026). 192.0.2.1 is a
+      // documentation address no network routes; a refusal is faster still, never slower.
+      const started = Date.now();
+      expect(run('192.0.2.1', 5900, 'robotsMacScreen')).toBe('vnc://Mac-mini.local');
+      expect(Date.now() - started).toBeLessThan(8000);
+    } finally {
+      listening.close();
+      rmSync(dir, { recursive: true, force: true });
+    }
+  }, 30000);
   it('the build registers the URL scheme in the app bundle', () => {
     expect(build).toMatch(/CFBundleURLSchemes:0 string robotsignin/);
     expect(build).toMatch(/lsregister/);
