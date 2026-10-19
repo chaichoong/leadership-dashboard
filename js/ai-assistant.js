@@ -317,7 +317,7 @@
         const page = (typeof PAGE_REGISTRY !== 'undefined') ? PAGE_REGISTRY.find(p => p.id === tab) : null;
         const pageName = page ? page.name : tab;
         const purpose = tab === 'home'
-            ? 'Home — the approval queue and the CEO brief, then the Leadership Dashboard and Wealth, in one scroll. ' + (PAGE_PURPOSES.overview || '')
+            ? 'My Dashboard (the Home tab) — the approval queue and the CEO brief, then the Leadership Dashboard, the cash flow voids and Wealth, in one scroll. ' + (PAGE_PURPOSES.overview || '')
             : (PAGE_PURPOSES[tab] || '');
         const sopText = await loadSOPForTab(tab);
 

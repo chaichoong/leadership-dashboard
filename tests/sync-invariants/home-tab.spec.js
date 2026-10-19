@@ -741,4 +741,37 @@ test.describe('Home: one scroll of the real pages', () => {
     await page.waitForFunction(() => !document.getElementById('specOldRow'), null, { timeout: 8000 });
     await cfvRowDrawn(page);
   });
+
+  // Kevin, 19 Oct 2026: "remove the Leadership Dashboard altogether and from the side menu because Home covers the whole
+  // lot now ... get the cash flow voids numeric alerts in the side menu next to My Dashboard". Home is renamed My Dashboard
+  // and carries the old item's CFV badges and the dashboard's health dot. The old views still open by link and light it up.
+  // Refs and amounts are invented.
+  const ten = (id, ref, status) => ({ id, fields: {
+    [FIELDS.tenRef]: ref, [FIELDS.tenRent]: 610, [FIELDS.tenDueDay]: 4, [FIELDS.tenPayStatus]: status,
+    [FIELDS.tenStatus]: 'Active', [FIELDS.tenStartDate]: '2025-01-01', [FIELDS.tenantPayType]: 'UC' } });
+  test('the sidebar has My Dashboard with the CFV badges and the dashboard dot, and no Leadership Dashboard item', async ({ page }) => {
+    await open(page, '', { fixtures: { tenancies: [ten('recMyDashCfv1', 'TEN-MD-1', 'CFV'), ten('recMyDashAct1', 'TEN-MD-2', 'CFV Actioned')] } });
+    const item = page.locator('#sidebarNav .sidebar-item', { hasText: 'My Dashboard' });
+    await expect(item).toHaveCount(1);
+    await expect(item).toHaveAttribute('onclick', "switchTab('home')");
+    await expect(item).toHaveClass(/active/);
+    await expect(item.locator('[data-sidebar-health="overview"]')).toHaveCount(1);
+    await expect(item.locator('#cfvSidebarBadges .cfv-sidebar-badge.cfv-red')).toHaveText('1', { timeout: 20000 });
+    await expect(item.locator('#cfvSidebarBadges .cfv-sidebar-badge.cfv-orange')).toHaveText('1');
+    await expect(page.locator('#sidebarNav .sidebar-item', { hasText: 'Leadership Dashboard' })).toHaveCount(0);
+    await expect(page.locator(`#sidebarNav .sidebar-item[onclick="switchTab('overview')"]`)).toHaveCount(0);
+    await expect(page.locator('#sidebarNav .sidebar-label').filter({ hasText: /^Home$/ })).toHaveCount(0);
+    await expect(page.locator('#tab-home .home-header h1')).toHaveText('My Dashboard');
+    // The old views still open by link, and light up My Dashboard.
+    for (const tab of ['overview', 'cfv']) {
+      await page.evaluate(t => switchTab(t), tab);
+      expect(await shown(page, 'tab-' + tab), tab).toBe(true);
+      await expect(item).toHaveClass(/active/);
+    }
+    await page.evaluate(() => switchTab('invoices'));
+    await expect(item).not.toHaveClass(/active/);
+    await item.click();
+    expect(await page.evaluate(() => document.getElementById('tab-home').classList.contains('active'))).toBe(true);
+    await expect(item).toHaveClass(/active/);
+  });
 });
