@@ -45,11 +45,31 @@ property waitingFile : "/Users/kevinbrittain/knowledge-os/logs/signin-pickup/wai
 -- a double-click there would have run the robots' sign-in check from the wrong Mac. Every
 -- entry point asks onRobotsMac() first and does nothing else when the answer is no.
 property estateMarker : "/Users/kevinbrittain/knowledge-os/logs/queue"
-property robotsMacScreen : "vnc://Mac-mini.local"
+-- Two ways to the mini's screen (19 Oct 2026). The name only works at home: a .local name is
+-- answered by Bonjour on the home network alone, and the router (192.168.1.1, the only DNS
+-- server) does not know it, so over Teleport it never resolves. The fixed address is the
+-- mini's Wi-Fi booking in UniFi and answers at home and over Teleport alike.
+property robotsMacAddress : "192.168.1.205"
+property robotsMacName : "Mac-mini.local"
+property screenSharingPort : 5900
 
 on onRobotsMac()
 	return (do shell script "test -d " & quoted form of estateMarker & " && echo yes || echo no") is "yes"
 end onRobotsMac
+
+-- The fixed address when its Screen Sharing port answers within 2 seconds, else the name, which
+-- still finds the mini at home if the fixed address ever moves.
+on robotsMacScreen()
+	set answers to do shell script "/usr/bin/nc -z -G 2 " & quoted form of robotsMacAddress & " " & screenSharingPort & " >/dev/null 2>&1 && echo yes || echo no"
+	if answers is "yes" then return "vnc://" & robotsMacAddress
+	return "vnc://" & robotsMacName
+end robotsMacScreen
+
+-- The shell's `open`, never `open location`: this script has its own open location handler,
+-- which would catch the command and show the not-on-the-mini box again.
+on robotsMacScreenCommand()
+	return "open " & quoted form of robotsMacScreen()
+end robotsMacScreenCommand
 
 -- Said on any other Mac: where the robots are, and one button to their screen. Nothing else runs.
 on notOnRobotsMac()
@@ -59,12 +79,10 @@ on notOnRobotsMac()
 	on error number -128
 		return
 	end try
-	-- The shell's `open`, never `open location`: this script has its own open location handler,
-	-- which would catch the command and show this same box again.
 	try
-		do shell script "open " & quoted form of robotsMacScreen
+		do shell script robotsMacScreenCommand()
 	on error errMsg
-		display alert "Robot sign-in" message "The mini's screen could not be opened from here: " & errMsg & return & return & "Open Screen Sharing yourself and connect to Mac-mini.local."
+		display alert "Robot sign-in" message "The mini's screen could not be opened from here: " & errMsg & return & return & "Open Screen Sharing yourself and connect to " & robotsMacAddress & "."
 	end try
 end notOnRobotsMac
 
