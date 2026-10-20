@@ -268,7 +268,7 @@ test.describe('nothing is hidden without being reported', () => {
     await expect(page.locator('#approvalsBody')).toContainText('Nothing is waiting for your approval right now');
   });
 
-  test('bringing one back clears the date and nothing else', async ({ page }) => {
+  test('bringing one back ends the knock-back today and changes nothing else', async ({ page }) => {
     const patches = await mockAgentsPage(page, withDeferred());
     await loadAgentsPage(page);
     await openApprovals(page);
@@ -276,10 +276,16 @@ test.describe('nothing is hidden without being reported', () => {
     await page.locator('.apv-later button', { hasText: 'Bring back now' }).click();
     await expect.poll(() => patches.some((p) => p.id === 'recDef1')).toBe(true);
     const patch = patches.find((p) => p.id === 'recDef1');
-    // Clearing the date is the WHOLE undo. Anything else here — a status, an
+    // The date is the WHOLE undo. Anything else here — a status, an
     // outcome, a due date — would be a second, unasked-for change.
     expect(Object.keys(patch.fields)).toEqual([TF.deferredUntil]);
-    expect(patch.fields[TF.deferredUntil]).toBeNull();
+    // Today, not blank (20 Oct 2026): today shows in every queue reader, and it
+    // tells the waiting clock the card came back today. A blank sent the clock
+    // back to the card's first SUBMITTED stamp. The earlier of the London and
+    // UTC days, so it is never after Airtable's TODAY().
+    const utc = new Date().toISOString().slice(0, 10);
+    const london = new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/London' }).format(new Date());
+    expect(patch.fields[TF.deferredUntil]).toBe(utc < london ? utc : london);
   });
 
   test('a task returning from a knock-back is not marked as long-overdue', async ({ page }) => {

@@ -73,6 +73,7 @@ a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}
 .apv-filter.active{background:var(--accent);border-color:var(--accent);color:var(--accent-on)}
 .apv-filter-tier1.active{background:var(--danger);border-color:var(--danger);color:var(--accent-on)}
 .apv-filter-clear{border-style:dashed;color:var(--text-muted)}
+.apv-sort{margin-left:auto}
 .apv-email{font-size:var(--fs-xs);font-weight:var(--fw-semibold);color:var(--accent);text-decoration:none;white-space:nowrap}
 .apv-email:hover{text-decoration:underline}
 
@@ -530,7 +531,7 @@ html.home-embed .main{max-width:none;margin:0;padding:0}
             <div class="zone-header">
                 <span class="zone-title">Waiting for your approval</span>
                 <span class="zone-count" id="approvalsCount">0</span>
-                <span class="zone-sub">Most important first: tier 1, then priority, then longest waiting.</span>
+                <span class="zone-sub" id="approvalsOrder">Most important first: tier 1, then priority, then longest waiting.</span>
             </div>
             <div id="approvalsBody"><div class="zone-loading"><div class="sop-spinner"></div><span>Loading the approval queue…</span></div></div>
         </div>
@@ -850,6 +851,14 @@ let allDeferred = [];           // knocked back to a date — same queue, hidden
 let _deferredState = 'idle';    // idle | loading | ready | 'error: <message>'
 let _apvAgentFilter = '';       // Team Member id, or '' = every agent
 let _apvTier1Only = false;      // tier-1 toggle, AND-ed with the agent filter
+// FIND WHAT JUST ARRIVED (Kevin, 20 Oct 2026): "When the number keeps going up, I can never find the new
+// thing without having to scroll through the whole lot." The importance order puts a new card at the END
+// of its priority band, mid-list. Two ways to it, neither changing the default order (his 25 Aug ruling):
+// a "Today" chip, AND-ed with the other two, and a "Newest first" view he can leave on. Today, not a
+// three-hour window: he decides in the evening, when a short window would show nothing.
+let _apvTodayOnly = false;
+const APV_NEWEST_KEY = 'apv_newest_first';   // a per-browser view choice, not data
+let _apvNewestFirst = apvReadNewestFirst();
 let ceoBriefRecords = null;     // CEO Briefs rows, newest first
 let _ceoBriefState = 'idle';
 let allOpenTasks = [];          // all non-Completed/non-Cancelled tasks (Check zone feeds)
@@ -960,6 +969,7 @@ window.switchAgentsView = switchAgentsView;
 // Jump to the Approvals tab already filtered to one agent (scorecard link).
 function filterApprovalsFor(tmId){
     _apvTier1Only = false;   // the count on the card was of ALL its approvals
+    _apvTodayOnly = false;   // and of every day, not just today's (review, 20 Oct 2026)
     setApvAgentFilter(tmId || '');
     switchAgentsView('approvals');
 }
@@ -1202,7 +1212,9 @@ const APV_QUEUE_FIELDS = () => [
     TF.approver, TF.priority, TF.inboundUrl, TF.attachments, TF.deferredUntil,
     TF.feedbackHistory, TF.inboundSender, TF.plainSummary,
     // Your step (7 Oct 2026): an approved card back in his lane, and the proof he gave.
-    TF.approvalOutcome, TF.approvalFeedback];
+    TF.approvalOutcome, TF.approvalFeedback,
+    // When a Your step card came back to him (apvArrivedFromNotes).
+    TF.approvedAt];
 
 // Bumped by an answer or an Undo on this page: a read that started before it carries the record as it
 // was, so it is dropped rather than put back over the answer (review, 9 Oct 2026).
@@ -1256,18 +1268,22 @@ async function loadApprovals(){
             raiserId: linkIds(gf(r,TF.sentForApprovalBy))[0] || linkIds(gf(r,TF.teamMember))[0] || '',
             raiserLinked: linkIds(gf(r,TF.sentForApprovalBy)).length > 0,
             lmt: gf(r,TF.lmt)||'',
-            // Submission-age proxy: the Slack baseline is stamped within a
-            // minute of the agent submitting; LMT is the fallback for a task
-            // the Slack sweep has not posted yet. Known wrinkle: any field
-            // write (e.g. the board's Step 3b priority correction) bumps LMT,
-            // so an un-posted task's waiting clock can reset — the window is
-            // the minute before the sweep stamps the baseline, accepted.
+            // When it reached him. The Slack baseline was stamped within a
+            // minute of the agent submitting, but nothing has stamped it since
+            // the per-card Slack posts stopped (0 of the 37 cards at Approval on
+            // 20 Oct 2026), so every card fell through to LMT and any field
+            // write (the board's Step 3b priority correction, a sweep) made an
+            // old card look new. The dispatcher's own dated Notes lines come
+            // next (apvArrivedFromNotes); LMT only for a card with none.
             // Carried so the sync bar can assert the date filter held. Same
             // reason raiserLinked is carried: a formula that quietly stops
             // excluding must fail loudly, not widen the queue in silence.
             deferredUntil: String(gf(r,TF.deferredUntil)||'').slice(0,10),
             submittedAt: apvWaitingSince(
-                gf(r,TF.slackBaseline) || gf(r,TF.lmt) || r.createdTime,
+                gf(r,TF.slackBaseline)
+                    || apvArrivedFromNotes(gf(r,TF.notes), String(gf(r,TF.agentOutput)||'').trimStart().startsWith(APV_STEP_MARK),
+                        gf(r,TF.approvedAt))
+                    || gf(r,TF.lmt) || r.createdTime,
                 gf(r,TF.deferredUntil)),
         });
         // An answered Your step card is not waiting on him (Kevin, 9 Oct 2026: "It needs to disappear
@@ -1276,24 +1292,75 @@ async function loadApprovals(){
         // share the formula), and it is said in one line instead.
         allApprovals = mine.map(toRow);
         allAnswered = answeredRecs.filter(inLane).map(toRow);
-        // Most important first (Kevin's ruling, 25 Aug 2026): tier 1 leads,
-        // then the Priority field (which the Task Manager's 9am/1pm/5pm
-        // board pass reviews and corrects), then longest waiting. The
-        // board's judgement reaches this page through that field.
-        // The LIVE Priority options: Urgent / High / Project / Not Urgent.
-        // Project is a workstream marker, not urgency — it sits between High
-        // and an explicit Not Urgent; a blank priority ranks last.
-        const prioRank = p => ({ Urgent:4, High:3, Project:2, 'Not Urgent':1 })[p] || 0;
-        allApprovals.sort((a,b)=>
-            (b.tier1?1:0) - (a.tier1?1:0)
-            || prioRank(b.priority) - prioRank(a.priority)
-            || String(a.submittedAt).localeCompare(String(b.submittedAt)));
+        allApprovals.sort(apvQueueOrder);
         _approvalsState = 'ready';
     } catch(e){
         if(e.message==='auth') throw e;
         _approvalsState = 'error: ' + (e.message||'load failed');
     }
     postApprovalBadge();
+}
+
+// Most important first (Kevin's ruling, 25 Aug 2026): tier 1 leads, then the
+// Priority field (which the Task Manager's 9am/1pm/5pm board pass reviews and
+// corrects), then longest waiting. The board's judgement reaches this page
+// through that field.
+// The LIVE Priority options (read 20 Oct 2026): Urgent / High / Medium /
+// Project / Not Urgent / Low. Medium and Project sit between High and Not
+// Urgent (Project is a workstream marker, not urgency), Low ranks with Not
+// Urgent, and a blank priority ranks last. Until 20 Oct this knew four of the
+// six, so the five Medium cards in his queue that day sank below Not Urgent.
+// ONE order for the load and for every card put back (an Undo, an answered
+// card taken back), so a returning card lands where a reload would put it.
+function apvPrioRank(p){ return ({ Urgent:4, High:3, Medium:2, Project:2, 'Not Urgent':1, Low:1 })[p] || 0; }
+function apvQueueOrder(a, b){
+    return (b.tier1?1:0) - (a.tier1?1:0)
+        || apvPrioRank(b.priority) - apvPrioRank(a.priority)
+        || String(a.submittedAt).localeCompare(String(b.submittedAt));
+}
+// When a card reached him: the same clock as its "waiting" tag (posted for
+// approval, or back from a knock-back). Unknown reads as oldest.
+function apvArrivedMs(t){ const ms = Date.parse(t.submittedAt || ''); return isNaN(ms) ? 0 : ms; }
+function apvNewestOrder(a, b){ return apvArrivedMs(b) - apvArrivedMs(a) || apvQueueOrder(a, b); }
+// Midnight is fixed when the list is drawn, not worked out on every call: cards ticked under Today at
+// 23:58 and approved at 00:01 must still be the cards on screen (review, 20 Oct 2026).
+let _apvDayStart = 0;
+function apvMidnightMs(){ const d = new Date(); d.setHours(0, 0, 0, 0); return d.getTime(); }
+function apvArrivedToday(t){ return apvArrivedMs(t) >= (_apvDayStart || apvMidnightMs()); }
+function apvReadNewestFirst(){
+    try { return localStorage.getItem(APV_NEWEST_KEY) === '1'; }
+    catch(e){ console.warn('could not read the remembered queue order', e); return false; }
+}
+
+// WHEN A CARD REACHED HIM, from the dispatcher's own Notes lines (London time, written at line start by
+// note_line in scripts/agent-dispatch.py). The same rule as facts_queue in scripts/ai_team_health.py, so
+// the queue and the AI team panel give one answer: SUBMITTED when an agent sends him a card, "Escalated
+// to Kevin" for a decision card (a day with no time reads as the start of that London day), and a KEVIN
+// wall. A Your step card adds what puts it back in his lane: his approval (Approved At) and a wall of any
+// kind (a robot sign-in step). The newest moment wins. '' when the card carries none, and the caller
+// keeps the last edit. Anchored to the line start, so a track record quoting another task's lines
+// ("- " first) never moves this card's clock.
+const APV_ARRIVAL_RE = /^\[(\d{1,2}) (\w{3,4}) (\d{4})(?: (\d{2}):(\d{2}))?\s*[—–-]\s*[^\]\n]+\]\s*(SUBMITTED|Escalated to Kevin|BLOCKER OPEN \(([A-Z-]+))/gm;
+function apvLondonMs(y, mo, d, hh, mm){
+    // London runs on UTC or UTC+1: read London's clock at the UTC guess and shift by the difference.
+    const guess = Date.UTC(y, mo - 1, d, hh, mm);
+    const p = {};
+    new Intl.DateTimeFormat('en-GB', { timeZone: 'Europe/London', year: 'numeric', month: '2-digit', day: '2-digit',
+        hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).formatToParts(new Date(guess)).forEach(x => { p[x.type] = x.value; });
+    return guess - (Date.UTC(+p.year, +p.month - 1, +p.day, +p.hour, +p.minute) - guess);
+}
+function apvArrivedFromNotes(notes, yourStep, approvedAt){
+    let best = NaN;
+    const take = ms => { if(!isNaN(ms) && (isNaN(best) || ms > best)) best = ms; };
+    for(const m of String(notes || '').matchAll(APV_ARRIVAL_RE)){
+        // Any other wall is the agent's business, not an arrival.
+        if(m[7] && m[7] !== 'KEVIN' && !yourStep) continue;
+        const mo = APV_MONTHS[m[2].toLowerCase()];
+        if(!mo) continue;
+        take(apvLondonMs(+m[3], +mo, +m[1], m[4] ? +m[4] : 0, m[5] ? +m[5] : 0));
+    }
+    if(yourStep) take(Date.parse(approvedAt || ''));
+    return isNaN(best) ? '' : new Date(best).toISOString();
 }
 
 // A task coming back from a knock-back has NOT been waiting on Kevin all week.
@@ -1707,13 +1774,18 @@ function renderApprovals(){
     countEl.textContent = allApprovals.length;
     countEl.className = 'zone-count' + (allApprovals.length ? ' hot' : '');
     updateApprovalsTabBadge();
+    _apvDayStart = apvMidnightMs();
+    const orderEl = document.getElementById('approvalsOrder');
+    if(orderEl) orderEl.textContent = _apvNewestFirst
+        ? 'Newest first: the card that reached you last is at the top.'
+        : 'Most important first: tier 1, then priority, then longest waiting.';
     // Rendered FIRST and in BOTH branches. An empty queue whose items are all
     // knocked back must never read as "nothing is waiting" with no sign of
     // where they went.
     const laterHtml = apvDeferredLaneHtml() + apvAnsweredLineHtml();
     apvRenderAnsweredBar();
     if(!allApprovals.length){
-        _apvAgentFilter = ''; _apvTier1Only = false;
+        _apvAgentFilter = ''; _apvTier1Only = false; _apvTodayOnly = false;
         body.innerHTML = laterHtml + `<div class="empty-state"><p>Nothing is waiting for your approval${allDeferred.length?' right now':''}.</p></div>`;
         return;
     }
@@ -1739,17 +1811,21 @@ function renderApprovals(){
 
     const inTier = apvInTier;
     const inAgent = apvInAgent;
-    const tier1Count = allApprovals.filter(t=>t.tier1 && inAgent(t)).length;
-    const anyFilter = _apvAgentFilter || _apvTier1Only;
+    const inToday = apvInToday;
+    const tier1Count = allApprovals.filter(t=>t.tier1 && inAgent(t) && inToday(t)).length;
+    const anyFilter = _apvAgentFilter || _apvTier1Only || _apvTodayOnly;
 
     let html = laterHtml + `<div id="apvCrossNotice">${apvCrossNoticeHtml()}</div>` + `<div class="apv-filters">
         <button class="apv-filter${anyFilter?'':' active'}" onclick="clearApvFilters()">All (${allApprovals.length})</button>
         ${chips.map(g=>{
-            const n = g.rows.filter(inTier).length;
+            const n = g.rows.filter(t=>inTier(t) && inToday(t)).length;
             return `<button class="apv-filter${_apvAgentFilter===g.key?' active':''}" onclick="setApvAgentFilter('${esc(g.key)}')">${esc(g.label)} (${n})</button>`;
         }).join('')}
         <button class="apv-filter apv-filter-tier1${_apvTier1Only?' active':''}" onclick="toggleApvTier1()" title="Only the work touching your private legal and financial matter">Tier 1 (${tier1Count})</button>
+        <button class="apv-filter${_apvTodayOnly?' active':''}" data-apv-today onclick="toggleApvToday()" title="Only the cards that reached you since midnight">Today (<span data-apv-today-n>${apvTodayCount()}</span>)</button>
         ${anyFilter ? `<button class="apv-filter apv-filter-clear" onclick="clearApvFilters()">&times; Clear filters</button>` : ''}
+        <button class="apv-filter apv-sort${_apvNewestFirst?' active':''}" data-apv-newest aria-pressed="${_apvNewestFirst}" onclick="toggleApvNewestFirst()"
+                title="${_apvNewestFirst ? 'Back to most important first' : 'Put the card that reached you last at the top'}">&#8645; Newest first</button>
     </div>`;
 
     const shown = apvVisibleRows();
@@ -1772,7 +1848,15 @@ function renderApprovals(){
 // can never disagree about what is on screen.
 function apvInTier(t){ return !_apvTier1Only || t.tier1; }
 function apvInAgent(t){ return !_apvAgentFilter || (t.raiserId||'none') === _apvAgentFilter; }
-function apvVisibleRows(){ return allApprovals.filter(t=>apvInAgent(t) && apvInTier(t)); }
+function apvInToday(t){ return !_apvTodayOnly || apvArrivedToday(t); }
+// In the order they are drawn: the filter makes a new array, so the newest-first
+// sort never reorders allApprovals, which stays in importance order.
+function apvVisibleRows(){
+    const rows = allApprovals.filter(t=>apvInAgent(t) && apvInTier(t) && apvInToday(t));
+    return _apvNewestFirst ? rows.sort(apvNewestOrder) : rows;
+}
+// Counted with the other two filters, like every other chip.
+function apvTodayCount(){ return allApprovals.filter(t=>apvArrivedToday(t) && apvInAgent(t) && apvInTier(t)).length; }
 
 function setApvAgentFilter(key){
     _apvAgentFilter = key;
@@ -1786,9 +1870,25 @@ function toggleApvTier1(){
 }
 window.toggleApvTier1 = toggleApvTier1;
 
+function toggleApvToday(){
+    _apvTodayOnly = !_apvTodayOnly;
+    renderApprovals();
+}
+window.toggleApvToday = toggleApvToday;
+
+// A view, not a filter: Clear filters leaves it as he set it.
+function toggleApvNewestFirst(){
+    _apvNewestFirst = !_apvNewestFirst;
+    try { localStorage.setItem(APV_NEWEST_KEY, _apvNewestFirst ? '1' : '0'); }
+    catch(e){ console.warn('could not remember the queue order', e); }
+    renderApprovals();
+}
+window.toggleApvNewestFirst = toggleApvNewestFirst;
+
 function clearApvFilters(){
     _apvAgentFilter = '';
     _apvTier1Only = false;
+    _apvTodayOnly = false;
     renderApprovals();
 }
 window.clearApvFilters = clearApvFilters;
@@ -1837,9 +1937,10 @@ let _apvBulkBusy = false;
 function apvSignForKevin(t){ return /^\s*sign\s+as\s+kevin\s*:/im.test(String(t.agentOutput||'')); }
 function apvSelectable(t){ return !apvSignInNeeded(t.agentOutput) && !apvYourStep(t) && !apvSignForKevin(t); }
 
-// Queue order, so the loop decides in the order Kevin read the cards.
+// Drawn order (newest first included), so the loop decides in the order Kevin read the cards. An Undo
+// can leave a card that ties on every sort key out of step with the page: see the landing note in agBulkDecide.
 function apvBulkIds(){
-    return allApprovals.filter(t=>_apvSelected.has(t.id) && apvSelectable(t)).map(t=>t.id);
+    return apvVisibleRows().filter(t=>_apvSelected.has(t.id) && apvSelectable(t)).map(t=>t.id);
 }
 
 function apvPick(taskId, on){
@@ -2184,7 +2285,8 @@ async function apvBulkDeferTo(until){
 let _apvSignInClickedAt = 0, _apvLastQueueLoad = 0;
 const APV_SIGNIN_WATCH_MS = 20 * 60 * 1000;
 function apvQueueSignature(){
-    return allApprovals.map(t => t.id + ':' + (apvSignInWait(t) ? 'w' : 'd')).join(',');
+    // The arrival time too: it decides the Today chip and the Newest first order (20 Oct 2026).
+    return allApprovals.map(t => t.id + ':' + (apvSignInWait(t) ? 'w' : 'd') + ':' + t.submittedAt).join(',');
 }
 function apvSignInsWaiting(){ return allApprovals.some(t => apvSignInWait(t)); }
 // An answered card waits for the sweep: re-read on the same clock, so its line goes when it does.
@@ -2764,7 +2866,7 @@ function apvStepTurnReady(t, ys){
     const row = _estateRows.find(r => (r.fields || {})[ES.key] === 'agent-blockers');
     const p = row ? signinPayload(row) : null;
     const swept = p ? Date.parse(p.sweptAt || '') : NaN;
-    const changed = Date.parse(t.submittedAt || '');
+    const changed = Date.parse(t.lmt || t.submittedAt || '');   // last changed, not when it reached him
     if(!isNaN(swept) && !isNaN(changed) && swept > changed) return signinTurns().some(w => w.task === t.id);
     // A plan the sweep has refused stays refused until its agent rewrites it: never a button for it.
     const open = p && Array.isArray(p.open) ? p.open : [];
@@ -3018,7 +3120,7 @@ async function apvStepUndo(taskId){
         if(TF.feedbackHistory in payload) t.feedbackHistory = payload[TF.feedbackHistory];
         allAnswered = allAnswered.filter(x => x.id !== taskId);
         allApprovals = allApprovals.filter(x => x.id !== taskId).concat([t]);
-        allApprovals.sort((a,b)=>apvRank(b)-apvRank(a));
+        allApprovals.sort(apvQueueOrder);
         _apvFocusId = taskId;
         renderApprovals();
         const box = document.getElementById('apvNote-' + taskId);
@@ -4088,7 +4190,7 @@ async function apvUndo(taskId){
             apvRefreshDeferredLane();
         }
         allApprovals.push(u.t);
-        allApprovals.sort((a,b)=>apvRank(b)-apvRank(a));
+        allApprovals.sort(apvQueueOrder);
         // The note was taken back, so nothing it suggested elsewhere stands.
         apvCrossForgetSource(taskId);
         if(card){
@@ -4105,7 +4207,6 @@ async function apvUndo(taskId){
     }
 }
 window.apvUndo = apvUndo;
-function apvRank(t){ return (t.tier1?1000:0) + (t.priority==='Urgent'?100:t.priority==='High'?10:0); }
 // Counts and headers refreshed without touching the cards (finding 12: a
 // group header stays after one of its tasks is decided, and says so).
 function apvSyncCountsInPlace(decidedId){
@@ -4114,6 +4215,7 @@ function apvSyncCountsInPlace(decidedId){
     updateApprovalsTabBadge();
     const all = document.querySelector('.apv-filter');
     if(all && /^All \(/.test(all.textContent)) all.textContent = `All (${allApprovals.length})`;
+    document.querySelectorAll('[data-apv-today-n]').forEach(el=>{ el.textContent = String(apvTodayCount()); });
     // The sign-in banner counts the queue too (23 Sep 2026): closing or
     // knocking back a sign-in card left it one higher until a full redraw.
     // It sits in the Robot sign-ins panel now, which redraws on its own.
@@ -4314,11 +4416,21 @@ function apvRefreshDeferredLane(){
 // Bring one back now — the way out of a knock-back that was wrong, or that
 // resolved early. Clearing the date is all it takes; the queue formula picks
 // it up again and the Slack worker posts a fresh card within the minute.
+// "Bring back now" ends the knock-back TODAY rather than blanking it (20 Oct 2026). Every reader takes a
+// date of today or earlier as not knocked back (the queue formula, kevin_park, loop-health, the AI team
+// panel), and the date is what tells the waiting clock it came back today: a blank sent it back to the
+// card's original SUBMITTED stamp, so a card brought back read as 8 days late. The earlier of the London
+// and UTC days, so the date is never after Airtable's TODAY() in either and the card never hides.
+function apvBackTodayIso(){
+    const utc = new Date().toISOString().slice(0, 10);
+    const london = new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/London' }).format(new Date());
+    return utc < london ? utc : london;
+}
 async function agUndefer(taskId){
     const t = allDeferred.find(x=>x.id===taskId);
     if(!t) return;
     try {
-        await atUpdate(TASKS_TBL, taskId, { [TF.deferredUntil]: null });
+        await atUpdate(TASKS_TBL, taskId, { [TF.deferredUntil]: apvBackTodayIso() });
         await postTaskComment(taskId, 'Brought back to the approval queue by Kevin, ahead of ' + t.until + '.');
         _apvFocusId = '';
         await refreshApprovalZone(true);
