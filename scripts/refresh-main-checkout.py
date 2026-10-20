@@ -13,7 +13,11 @@ What it does, in order, and it never loses work:
   2. if HEAD is already at or ahead of origin/main with nothing behind: CURRENT
   3. if the branch is `main`, or holds commits that are not on origin/main
      (git cherry lines starting "+"): REFUSED, nothing touched
-  4. git reset --keep origin/main. --keep refuses rather than overwrite a
+  4. clear any untracked file that origin/main is about to add and whose
+     contents already hash identically to the version being added (finding
+     20261019-phase-4-994). Nothing can be lost: the bytes are on origin/main.
+     One byte of difference and the file is left, and step 5 refuses.
+  5. git reset --keep origin/main. --keep refuses rather than overwrite a
      modified file, so another session's uncommitted edits survive; a refusal
      is reported, never forced.
 
@@ -36,6 +40,29 @@ REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 def git(repo, *args):
     return subprocess.run(["git", *args], cwd=repo, capture_output=True, text=True, timeout=300)
+
+
+def duplicate_untracked(repo, ref="origin/main"):
+    """Untracked files that `ref` is about to add and whose contents are ALREADY byte-identical to what it adds.
+
+    Why (finding 20261019-phase-4-994): the fix phase copies a monitoring report into its worktree and commits it,
+    and the original stays untracked here. The moment that path lands on origin/main, `reset --keep` refuses — and it
+    is right to, because it cannot know the two files are the same. On 19 Oct 2026 both were sha 963457ba and this
+    checkout sat 3 behind with no route out of it: a bare reset and a plain rm both want a person, and this script
+    refuses by design, so the 14 Sep incident (33 behind, every guard a day old) was forming again.
+
+    An EXACT duplicate is the one case where clearing it can lose nothing, because the bytes are already on
+    origin/main. One byte of difference and the file is left alone and the refusal stands."""
+    untracked = {l for l in git(repo, "ls-files", "--others", "--exclude-standard").stdout.splitlines() if l}
+    adding = {l for l in git(repo, "diff", "--name-only", "--diff-filter=A", "HEAD", ref).stdout.splitlines() if l}
+    same = []
+    for path in sorted(untracked & adding):
+        theirs = git(repo, "rev-parse", "%s:%s" % (ref, path))
+        mine = git(repo, "hash-object", "--", os.path.join(repo, path))
+        if theirs.returncode or mine.returncode: continue
+        if theirs.stdout.strip() and theirs.stdout.strip() == mine.stdout.strip():
+            same.append(path)
+    return same
 
 
 def main(argv=None):
@@ -74,8 +101,18 @@ def main(argv=None):
         return 1
 
     if a.check:
-        print(f"STALE: {branch or 'detached HEAD'} is {behind} commits behind origin/main (--check, not moved)")
+        dupes = duplicate_untracked(a.repo)
+        extra = (f"; {len(dupes)} untracked file(s) are byte-identical to origin/main and would be cleared: "
+                 + ", ".join(dupes)) if dupes else ""
+        print(f"STALE: {branch or 'detached HEAD'} is {behind} commits behind origin/main (--check, not moved){extra}")
         return 1
+
+    dupes = duplicate_untracked(a.repo)
+    if dupes:
+        for path in dupes:
+            os.remove(os.path.join(a.repo, path))
+        print("CLEARED %d untracked file(s) already byte-identical to origin/main: %s"
+              % (len(dupes), ", ".join(dupes)))
 
     r = git(a.repo, "reset", "--keep", "origin/main")
     if r.returncode != 0:

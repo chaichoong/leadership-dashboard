@@ -124,7 +124,10 @@ describe('content-engine watch: nightly wiring', () => {
   it("night order: slot 1 continues the run, the other slots take the oldest missing days that fit the disk; gap days publish outside the cursor (Kevin, 8 Sep 2026)", () => {
     const w = readFileSync(path.join(ROOT, 'scripts', 'content-engine', 'watch.py'), 'utf8');
     expect(w).toContain('GAP_DAYS_FILE = os.path.expanduser("~/.config/od/content_engine_gap_days")');
-    expect(w).toContain('def plan(ledger, slots, gaps=None, free=None, start=None)');
+    // `record` added 20 Oct 2026 (finding 20261020-phase-3-1004): the night's plan writes down the
+    // redo order it used, so the morning report reads that instead of recomputing it after the
+    // night's redo has drained. It defaults off, so every other caller is unchanged.
+    expect(w).toContain('def plan(ledger, slots, gaps=None, free=None, start=None, record=False)');
     expect(w).toContain('if since and date < since and streak_day(date) not in gaps: continue');
     expect(w).toContain('def day_fits(ledger, day, free)');
     expect(w).toContain('def pull_window_minutes(size)'); // 40 min per 4 GB: an 18 GB gap clip is not abandoned at 40 min every night

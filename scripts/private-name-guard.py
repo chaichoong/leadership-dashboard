@@ -101,6 +101,30 @@ def find_hits(diff_text, pattern):
             if pattern.search(text)]
 
 
+# Private REFERENCE shapes, refused whatever the roster holds. The live values are NOT written here — this repo is
+# PUBLIC, and a guard that carries the secret it guards has published it. Each is matched by SHAPE, with an obviously
+# invented placeholder (all zeros) allowed through so a redacted line can be committed.
+#
+# Finding 20261019-agent-dispatch-996: PR #501 took the live HMRC compliance check reference out of the public repo on
+# 21 Sep 2026, and by 19 Oct it was back on origin/main in six files — comments, test fixtures and a rule line —
+# because nothing refused it. A history rewrite is pointless while main still carries it.
+PRIVATE_REFS = (
+    (re.compile(r"\bCFS[-\s]?(?!0{7}\b)\d{7}\b", re.I),
+     "an HMRC compliance check reference (use CFS-0000000 in examples and fixtures)"),
+)
+
+
+def ref_hits(diff_text):
+    """[(path, line_no, why)] for every ADDED line carrying a private reference shape."""
+    out = []
+    for path, line_no, text in added_lines(diff_text):
+        for pattern, why in PRIVATE_REFS:
+            if pattern.search(text):
+                out.append((path, line_no, why))
+                break
+    return out
+
+
 def roster_pattern():
     """(compiled pattern, None), or (None, why) when there is no roster to check against."""
     names = load_roster()
@@ -171,12 +195,26 @@ def main(argv=None):
     args = parser.parse_args(argv)
     if args.message_file:
         return check_message_file(args.message_file)
+    diff = staged_diff()
+    # The reference check runs whatever the roster does, because it needs no roster: the shape is the whole test.
+    refs = ref_hits(diff)
+    if refs:
+        print("🛑 Commit refused: this repo is PUBLIC and the staged changes carry a private "
+              "reference number.", file=sys.stderr)
+        for path, line_no, why in refs[:MAX_REPORTED]:
+            print(f"   {path}:{line_no} — {why}", file=sys.stderr)
+        if len(refs) > MAX_REPORTED:
+            print(f"   ...and {len(refs) - MAX_REPORTED} more", file=sys.stderr)
+        print("Replace it with the invented placeholder named above, or move the file to "
+              "~/Projects/kevin-hq, then stage it again.", file=sys.stderr)
+        return 1
+
     pattern, missing = roster_pattern()
     if missing:
         print(f"⚠️  private-name guard: {missing}, so private names were "
               "NOT checked. Restore the file to turn the guard back on.", file=sys.stderr)
         return 0
-    hits = find_hits(staged_diff(), pattern)
+    hits = find_hits(diff, pattern)
     if not hits:
         return 0
     print("🛑 Commit refused: this repo is PUBLIC and the staged changes name a person on "

@@ -1212,7 +1212,7 @@ def _phone_numbers(name):
 
 
 # A REFERENCE'S OWN PREFIX IS PART OF THE REFERENCE, not a subject word.
-# "HMRC CFS-2427425 - provide bank statements" and "HMRC CFS-2427425
+# "HMRC CFS-0000000 - provide bank statements" and "HMRC CFS-0000000
 # response - rental income schedule" are two obligations under the live
 # compliance check, and they cleared the word bar on `hmrc` (the
 # counterparty) and `cfs` (the case reference's prefix), at exactly the
@@ -1225,7 +1225,7 @@ DUPE_REFERENCE_PREFIX_RE = re.compile(r"\b([a-z]{2,6})[-/]?\d{3,}\b", re.I)
 
 
 def _reference_prefixes(name):
-    """The alphabetic head of every reference in `name`: "CFS-2427425" -> cfs."""
+    """The alphabetic head of every reference in `name`: "CFS-0000000" -> cfs."""
     return {m.group(1).lower() for m in DUPE_REFERENCE_PREFIX_RE.finditer(str(name or ""))}
 
 
@@ -2654,8 +2654,8 @@ def selftest():
                              ("missed instalment", "missed inspection"),
                              ("ring main circuit", "call-out charge disputed"))))
     check("a reference prefix is part of the reference, not the subject",
-          decide({F["name"]: "INBOUND: HMRC CFS-2427425 - provide bank statements by 16 Oct"},
-                 [row("recC", "COMPLIANCE: HMRC CFS-2427425 response - rental income "
+          decide({F["name"]: "INBOUND: HMRC CFS-0000000 - provide bank statements by 16 Oct"},
+                 [row("recC", "COMPLIANCE: HMRC CFS-0000000 response - rental income "
                               "schedule", status="Approval")])["action"] == "create")
     check("a mobile and a landline agreeing on nine digits are two numbers",
           decide({F["name"]: "INBOUND: SMS reply from 07398 536055"},
@@ -2666,7 +2666,7 @@ def selftest():
     # response on `hmrc` + `utr`, at exactly the bar.
     check("a reference label is not a subject word",
           decide({F["name"]: "INBOUND: HMRC self assessment filing due - UTR 0123456789"},
-                 [row("recH", "COMPLIANCE: HMRC check CFS-2427425 response - UTR 0123456789",
+                 [row("recH", "COMPLIANCE: HMRC check CFS-0000000 response - UTR 0123456789",
                       status="Approval")])["action"] == "create")
     check("a separator the text uses instead of a space keeps one thread",
           all(decide({F["name"]: "INBOUND: SMS reply from 07398%s536055" % sep},

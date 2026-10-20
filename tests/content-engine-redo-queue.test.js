@@ -168,4 +168,163 @@ print(json.dumps({str(d): render.redo_queue_place(d, led) for d in (2100, 2106)}
     expect(place['2106']).toEqual([1, 3]);
     expect(place['2100']).toEqual([3, 3]);
   });
+  // ---- finding 20261020-phase-3-1004: one function was not one ANSWER ----
+  //
+  // plan() reads the queue at 02:00; the resubmit report reads it again hours later,
+  // after the night's redo has rendered and LEFT the queue. On 20 Oct 2026 day 2113
+  // was "2 of 6" in the plan's own note and "1 of 5 ... stuck, not waiting" in the
+  // resubmit report of the same run. It was neither stuck nor first: it had waited
+  // its turn and the queue HAD drained one that night. The night now records the
+  // order it used and the report reads that record.
+
+  // The plan's record, written as the night wrote it, in a scratch file.
+  const PLAN_RECORD = `
+import os, tempfile, watch
+watch.REDO_PLAN_FILE = os.path.join(tempfile.mkdtemp(prefix="ce-redo-plan-"), "redo_plan.json")
+watch.save_redo_plan([2100, 2106, 2112])
+watch.gap_days = lambda *a, **k: set(); watch.start_day = lambda *a, **k: 2000
+`;
+
+  // 2100 took tonight's single slot and drained: it is rendered, so a live sort no
+  // longer sees it in the queue at all.
+  const DRAINED = `
+led["a.insv"]["status"] = "rendered"; led["a.insv"].pop("reset", None)
+`;
+
+  it("keeps the night's own places after tonight's redo has drained", () => {
+    const out = py(`
+import json, render, watch
+${RECEIPTS}
+${PLAN_RECORD}
+led = json.loads('''${LEDGER}''')
+${DRAINED}
+print(json.dumps({str(d): render.redo_queue_place(d, led) for d in (2106, 2112)}))
+`);
+    const place = JSON.parse(out);
+    expect(place['2106']).toEqual([2, 3]);
+    expect(place['2112']).toEqual([3, 3]);
+  });
+
+  it('the day behind tonight’s drained redo is waiting, not stuck', () => {
+    const out = py(`
+import json, time, render, watch
+${RECEIPTS}
+${PLAN_RECORD}
+led = json.loads('''${LEDGER}''')
+${DRAINED}
+print(render.resubmit_due(2106, led, time.time() - 5 * 86400, {"verdict": "changes"}, {}))
+`);
+    expect(out).toMatch(/2 of 3 sent-back days/);
+    expect(out).not.toMatch(/stuck, not waiting/);
+  });
+
+  it('BACK-TEST: with no recorded plan the same night reads it as stuck', () => {
+    // The bug itself, reproduced by removing the only thing that fixes it. If this
+    // ever stops saying "stuck", the two tests above have stopped proving anything.
+    const out = py(`
+import json, time, render, watch
+${RECEIPTS}
+watch.REDO_PLAN_FILE = "/nonexistent/redo_plan.json"
+watch.gap_days = lambda *a, **k: set(); watch.start_day = lambda *a, **k: 2000
+led = json.loads('''${LEDGER}''')
+${DRAINED}
+print(json.dumps({
+  "place": render.redo_queue_place(2106, led),
+  "why": render.resubmit_due(2106, led, time.time() - 5 * 86400, {"verdict": "changes"}, {}),
+}))
+`);
+    const { place, why } = JSON.parse(out);
+    expect(place).toEqual([1, 2]);
+    expect(why).toMatch(/stuck, not waiting/);
+  });
+
+  it('a day sent back AFTER the plan ran goes to the back of the queue', () => {
+    // It is not in the record, so it must still get a place rather than falling out
+    // of the report altogether.
+    const out = py(`
+import json, os, render, watch
+${RECEIPTS}
+${PLAN_RECORD}
+open(os.path.join(watch.RESUBMIT_DIR, "2150.md"), "w").write("receipt")
+led = json.loads('''${LEDGER}''')
+led["d.insv"]["reset"] = "sent back after the plan"
+print(json.dumps(render.redo_queue_place(2150, led)))
+`);
+    expect(JSON.parse(out)).toEqual([4, 4]);
+  });
+
+  it('a stale record from a previous night is ignored', () => {
+    const out = py(`
+import datetime as dt, json, os, tempfile, render, watch
+${RECEIPTS}
+watch.REDO_PLAN_FILE = os.path.join(tempfile.mkdtemp(prefix="ce-redo-plan-"), "redo_plan.json")
+watch.save_redo_plan([2112, 2106, 2100], now=dt.datetime.now() - dt.timedelta(days=4))
+watch.gap_days = lambda *a, **k: set(); watch.start_day = lambda *a, **k: 2000
+led = json.loads('''${LEDGER}''')
+print(json.dumps({str(d): render.redo_queue_place(d, led) for d in (2100, 2112)}))
+`);
+    const place = JSON.parse(out);
+    // Back to the live sort: oldest receipt first, so 2100 leads.
+    expect(place['2100']).toEqual([1, 3]);
+    expect(place['2112']).toEqual([3, 3]);
+  });
+});
+
+// A clip the engine has refused and will not retry must say so, and say how long.
+//
+// Regression origin: finding 20261020-phase-3-1005, 20 Oct 2026. Day 2106 has two
+// long recordings. The second is refused by the episode role as a duplicate and
+// marked "not requeued: it needs a person" — and no person was told. The card sat
+// 233 hours while every morning read "a clip of the day failed to render; it goes
+// back once that is put right", which is a sentence about a render that is coming.
+//
+// The RULE for two long recordings on one day is Kevin's to make and is NOT decided
+// here. What is fixed is that the stall is legible and dated instead of timeless.
+describe('a refused clip that needs a person says so, and says for how long', () => {
+  const LED_2106 = `{
+    "ep.insv":    {"day": 2106, "episode": 2106, "role": "episode", "status": "rendered", "rendered": "2026-10-18T23:26:24"},
+    "teaser.insv":{"day": 2106, "episode": 2106, "role": "teaser",  "status": "rendered", "rendered": "2026-10-18T23:39:18"},
+    "dup.insv":   {"day": 2106, "episode": 2106, "role": "episode", "status": "failed",
+                   "error": "a second long recording for episode 2106 (ep.insv is already its episode) and not a part of it: not rendered, so it cannot replace that episode",
+                   "requeued": "not requeued: it needs a person"}
+  }`;
+
+  it('names the clip, the reason, the ruling it needs and the nights parked', () => {
+    const out = py(`
+import json, time, render
+led = json.loads('''${LED_2106}''')
+print(render.resubmit_due(2106, led, time.time() - 10 * 86400, {"verdict": "changes"}, {}))
+`);
+    expect(out).toMatch(/dup\.insv failed to render/);
+    expect(out).toMatch(/second long recording for episode 2106/);
+    expect(out).toMatch(/will NOT retry it/);
+    expect(out).toMatch(/needs a ruling from Kevin/);
+    expect(out).toMatch(/parked 10 night\(s\)/);
+    // The timeless sentence is the bug.
+    expect(out).not.toMatch(/it goes back once that is put right/);
+  });
+
+  it('a clip that WILL be retried keeps the plain wording', () => {
+    // Control. If every failure read as "needs a ruling", the line would be noise
+    // and an ordinary retry would be escalated to Kevin for nothing.
+    const out = py(`
+import json, time, render
+led = json.loads('''${LED_2106}''')
+del led["dup.insv"]["requeued"]
+print(render.resubmit_due(2106, led, time.time() - 10 * 86400, {"verdict": "changes"}, {}))
+`);
+    expect(out).toMatch(/the card goes back once that is put right/);
+    expect(out).not.toMatch(/needs a ruling from Kevin/);
+  });
+
+  it('with no failed clip at all the day moves on to the copy checks', () => {
+    const out = py(`
+import json, time, render
+led = json.loads('''${LED_2106}''')
+del led["dup.insv"]
+print(render.resubmit_due(2106, led, 1760000000, {"verdict": "changes"}, {}))
+`);
+    expect(out).toMatch(/copy/);
+    expect(out).not.toMatch(/failed to render/);
+  });
 });

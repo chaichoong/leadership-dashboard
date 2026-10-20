@@ -479,4 +479,18 @@ Rules for the summary block:
 - **A slot that did not run is named on the "Everything else ran" line.** This is the half that cannot be seen from an arrivals list, and it is the reason phase 2 reads absence rather than successes.
 - Never present a partial run as a complete one.
 
-Finally, delete `~/knowledge-os/logs/daily-ops-progress.json` so tomorrow starts fresh.
+**Stamp the END mark the moment the report is written, BEFORE anything else in this step.**
+
+```
+python3 scripts/job-queue.py mark daily-ops --end --note "<one line: what ran, what needs Kevin>"
+```
+
+Without it `estate-status` reads a finished run as "Started at 07:04 and never wrote its end mark" and raises a task
+for it: START marks on 15, 17 and 18 Oct 2026 with no END, every one of those runs having written its report
+(finding 20261018-agent-dispatch-978, a regression of 20260905-daily-ops-467). It goes FIRST in this step, not last,
+because on 16, 17 and 18 Oct the late Bash calls in an unattended run were refused for want of a person's approval —
+so a mark stamped at the end of the step is a mark that does not get stamped. Everything after this line can be
+refused without costing the day its proof.
+
+Then delete `~/knowledge-os/logs/daily-ops-progress.json` so tomorrow starts fresh. If that is refused, say so on the
+report rather than retrying: tomorrow's run ignores a progress file from an earlier date anyway.

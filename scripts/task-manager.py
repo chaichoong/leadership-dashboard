@@ -2600,9 +2600,9 @@ def cmd_selftest():
     assert gs[0]["closable"] == ["s2"] and gs[0]["sameThreadDifferentMatter"] == [], gs
     # A CHILD-OF follow-up is never its own parent's closable twin (finding 20261003-task-manager-733).
     gs = duplicate_groups([
-        {"id": "recParent", "name": "INBOUND: HMRC check CFS-2427425 deposit facts",
+        {"id": "recParent", "name": "INBOUND: HMRC check CFS-0000000 deposit facts",
          "inboundUrl": "https://mail.google.com/mail/u/0/#all/TH9", "createdTime": "2026-08-01T10:00:00.000Z", "status": "Today"},
-        {"id": "recKid", "name": "INBOUND: HMRC check CFS-2427425 deposit facts follow-up",
+        {"id": "recKid", "name": "INBOUND: HMRC check CFS-0000000 deposit facts follow-up",
          "description": "CHILD OF recParent (an approved task whose job is to raise this one)",
          "inboundUrl": "https://mail.google.com/mail/u/0/#all/TH9", "createdTime": "2026-08-03T10:00:00.000Z", "status": "Today"},
     ])
