@@ -117,6 +117,45 @@ def receipt_parked(day, root=None):
         return float("inf")
 
 
+REDO_PLAN_FILE = os.path.join(os.path.dirname(LEDGER), "redo_plan.json")   # the order TONIGHT'S plan used
+
+
+def save_redo_plan(order, path=None, now=None):
+    """Record the redo order the night's plan actually used, so the morning report reads the same one."""
+    path = path or REDO_PLAN_FILE
+    now = now or dt.datetime.now()
+    tmp = path + ".tmp"
+    json.dump({"at": now.isoformat(timespec="seconds"), "order": [int(d) for d in order]}, open(tmp, "w"), indent=1)
+    os.replace(tmp, path)   # atomic: a half-written plan would read as no plan at all
+
+
+def planned_redo_order(path=None, now=None, max_age_h=24):
+    """The redo order TONIGHT'S plan used, or None when nothing was recorded inside the last `max_age_h` hours.
+
+    Why a record and not a recompute (finding 20261020-phase-3-1004). redo_order() is one function, but plan() calls
+    it at 02:00 and the resubmit report calls it again hours later, by which time the night's redo has rendered and
+    LEFT the queue — so the two readings disagree even though the code agrees. On 20 Oct 2026 the plan took day 2112
+    first and day 2113 was 2 of 6; by the resubmit stage 2112 had drained and 2113 read 1 of 5, which made the report
+    call it "stuck, not waiting" when it had in fact waited its turn correctly and the queue had drained one that
+    night. The place a day holds is a fact about the night's plan, so the plan records it and the report reads it."""
+    try:
+        rec = json.load(open(path or REDO_PLAN_FILE))
+    except (OSError, ValueError):
+        return None
+    try:
+        when = dt.datetime.fromisoformat(rec.get("at") or "")
+    except (TypeError, ValueError):
+        return None
+    now = now or dt.datetime.now()
+    if abs((now - when).total_seconds()) > max_age_h * 3600: return None   # a previous night's plan; recompute instead
+    order = rec.get("order")
+    if not isinstance(order, list): return None
+    try:
+        return [int(d) for d in order]
+    except (TypeError, ValueError):
+        return None
+
+
 def redo_order(ledger, exclude=(), start=None, root=None):
     """The sent-back days the night may redo, in the order the night takes them.
 
@@ -150,7 +189,7 @@ def redo_order(ledger, exclude=(), start=None, root=None):
                   key=lambda d: (failed_at(d), receipt_parked(d, root), d))
 
 
-def plan(ledger, slots, gaps=None, free=None, start=None):
+def plan(ledger, slots, gaps=None, free=None, start=None, record=False):
     """The night's order (Kevin, 8 Sep 2026): "the first one is the one that continues the continuity, and then
     the second two are the two oldest ones that are missing". Slot 1 is the oldest waiting day from the takeover
     day on; every other slot is the oldest gap day whose clips all fit on the disk. When the gap list is used up
@@ -170,6 +209,11 @@ def plan(ledger, slots, gaps=None, free=None, start=None):
     # (Kevin, 2 Oct 2026): with one redo a night, an older day whose pull was refused every night would keep a younger
     # redo waiting for ever. `pull_failed` is stamped by pull() on every refusal and cleared when the clip arrives.
     redo = redo_order(ledger, exclude=gap_list, start=start)
+    # `record=True` only from the night's own CLI call, so the morning report reads the order the night USED rather
+    # than recomputing it after tonight's redo has drained out of the queue (finding 20261020-phase-3-1004).
+    if record:
+        try: save_redo_plan(redo)
+        except OSError as ex: print("plan: could not record the redo order (%s)" % ex, file=sys.stderr)
     cont = [d for d in waiting if d not in gaps and d not in redo and (not start or d >= start)]
     gap_ok, notes = [], []
     for d in sorted(d for d in waiting if d in gaps):
@@ -1087,7 +1131,7 @@ if __name__ == "__main__":
     if a.mode == "selftest": selftest()
     elif a.mode == "scan": scan(a.create, a.batch, dt.date.fromisoformat(a.since) if a.since else None)
     elif a.mode == "plan":
-        days, notes = plan(load_ledger(), a.slots)
+        days, notes = plan(load_ledger(), a.slots, record=True)
         for n in notes: print("plan: " + n, file=sys.stderr)
         print(" ".join(str(d) for d in days))
     elif a.mode == "next":

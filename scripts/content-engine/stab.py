@@ -56,6 +56,30 @@ STICK_CAM = np.array([0.0, 1.0, 0.0], np.float32)   # sphere "down" = along the 
 UP_WORLD = np.array([0.0, -1.0, 0.0], np.float32)   # y is down in the sphere frame
 
 
+IMU_DROP_LIMIT = 0.02   # beyond this share of unusable samples the record is not trusted at all
+
+
+def finite_imu(t, gyro, acc, limit=IMU_DROP_LIMIT, name="the clip"):
+    """t, gyro, acc with every non-finite sample dropped; raises when too many are to trust what is left.
+
+    Finding 20261019-queue-fixer-992. The 2106 render of 18 Oct 2026 printed divide-by-zero, overflow AND
+    invalid-value RuntimeWarnings from `gyro @ M.T` over and over, which means inf or NaN reached the filter: the
+    rotations come out non-finite, every view is built from them, and the render still reports success. An episode
+    that silently is not stabilised is worse than one that fails, because nothing asks for it to be looked at.
+
+    A handful of bad samples is dropped and said; a record that is mostly bad raises, and render.py fails that clip
+    alone (it catches per clip, so the night carries on)."""
+    keep = np.isfinite(t) & np.isfinite(gyro).all(axis=1) & np.isfinite(acc).all(axis=1)
+    bad = int((~keep).sum())
+    if bad:
+        allowed = max(1, int(len(t) * limit))
+        if bad > allowed or int(keep.sum()) < 100:
+            raise RuntimeError("IMU telemetry for %s is not usable: %d of %d samples are not finite (at most %d may be "
+                               "dropped). The clip is NOT stabilised, so it is not rendered." % (name, bad, len(t), allowed))
+        print("stab: dropped %d of %d non-finite IMU samples from %s" % (bad, len(t), name), file=sys.stderr)
+    return t[keep], gyro[keep], acc[keep]
+
+
 def load_imu(path):
     """IMU via telemetry_parser.normalized_imu(): gyro deg/s, accel in g-ish units (normalised here)."""
     p = tp.Parser(path)
@@ -63,6 +87,9 @@ def load_imu(path):
     t = np.array([s["timestamp_ms"] for s in n], np.float64) / 1000.0
     gyro = np.deg2rad(np.array([s["gyro"] for s in n], np.float64))
     acc = np.array([s["accl"] for s in n], np.float64)
+    # Cleaned BEFORE the normalisation: an inf row divided by its own inf norm is NaN, which is finite arithmetic
+    # producing a non-finite sample, and from there nothing in the chain complains again.
+    t, gyro, acc = finite_imu(t, gyro, acc, name=os.path.basename(path))
     acc = acc / np.linalg.norm(acc, axis=1, keepdims=True).clip(1e-6)
     return t, gyro, acc
 
@@ -102,9 +129,13 @@ def integrate(t, gyro, acc, M, gain=0.003, R0=None):
     gs = gyro @ M.T; acs = acc @ M.T
     if R0 is None:
         # initial orientation: align measured up with UP_WORLD
-        up0 = acs[:3000].mean(0); up0 /= np.linalg.norm(up0)
-        v = np.cross(up0, UP_WORLD); s = np.linalg.norm(v); c = float(np.dot(up0, UP_WORLD))
-        R0 = skew_exp(v / s * math.atan2(s, c)) if s > 1e-9 else np.eye(3)
+        up0 = acs[:3000].mean(0); n0 = float(np.linalg.norm(up0))
+        if not math.isfinite(n0) or n0 < 1e-9:
+            R0 = np.eye(3)          # no usable 'up' in the opening samples: start level rather than from a NaN
+        else:
+            up0 = up0 / n0
+            v = np.cross(up0, UP_WORLD); s = np.linalg.norm(v); c = float(np.dot(up0, UP_WORLD))
+            R0 = skew_exp(v / s * math.atan2(s, c)) if s > 1e-9 else np.eye(3)
     R = R0
     Rs = np.empty((len(t), 3, 3))
     for i in range(len(t)):
@@ -118,6 +149,12 @@ def integrate(t, gyro, acc, M, gain=0.003, R0=None):
                 corr = np.cross(upw, UP_WORLD)
                 R = skew_exp(corr * gain) @ R
         Rs[i] = R
+    # The control on all of the above. A non-finite rotation cannot be stabilised with, and every view, every master
+    # and the horizon report are built from these: let it through and the episode renders unstabilised and passes
+    # (finding 20261019-queue-fixer-992).
+    if not np.isfinite(Rs).all():
+        raise RuntimeError("the orientation filter produced %d non-finite rotations of %d: the clip is NOT stabilised, "
+                           "so it is not rendered" % (int((~np.isfinite(Rs).all(axis=(1, 2))).sum()), len(Rs)))
     return Rs
 
 
@@ -131,7 +168,9 @@ def warm_start(t, gyro, acc, M, gain, lead_s=WARM_LEAD_S):
     R = Rs[-1]; gs = gyro[:n] @ M.T; dts = np.diff(t[:n], prepend=t[0])
     for i in range(n - 1, -1, -1):
         R = R @ skew_exp(-gs[i] * dts[i])
-    return R
+    # A non-finite warm start would be handed back as R0 and poison every sample. None falls back to the cold start,
+    # which is the behaviour for too short a lead already.
+    return R if np.isfinite(R).all() else None
 
 
 def integrate_warm(t, gyro, acc, M, gain=0.003):
@@ -529,6 +568,28 @@ def selftest():
     assert err(warm, 0) < 5.0 and err(warm, 6000) < 5.0, (err(warm, 0), err(warm, 6000))
     assert err(cold, 0) > 15.0, "the cold start must be fooled by the swing for this test to mean anything (%.1f)" % err(cold, 0)
     assert warm_start(t[:50], gyro[:50], acc[:50], M, 0.0003) is None, "too short a lead: fall back to the cold start"
+
+    # Non-finite IMU samples (finding 20261019-queue-fixer-992): a few are dropped, many raise, and a rotation set
+    # that comes out non-finite stops the clip instead of rendering it unstabilised.
+    with np.errstate(all="ignore"):     # the inf and NaN below are the fixture; numpy's own warnings about them
+        g2 = gyro.copy(); a2 = acc.copy(); g2[10] = np.inf; a2[20, 1] = np.nan
+        t3, g3, a3 = finite_imu(t, g2, a2, name="selftest")
+        assert len(t3) == n - 2 and np.isfinite(g3).all() and np.isfinite(a3).all(), len(t3)
+        g4 = gyro.copy(); g4[: n // 2] = np.nan
+        try:
+            finite_imu(t, g4, acc, name="selftest"); raise AssertionError("a mostly non-finite record must raise")
+        except RuntimeError as ex:
+            assert "not usable" in str(ex), str(ex)
+        try:
+            integrate(t, gyro, acc, M, gain=0.001, R0=np.full((3, 3), np.nan))
+            raise AssertionError("a non-finite R0 must raise rather than render unstabilised")
+        except RuntimeError as ex:
+            assert "non-finite rotations" in str(ex), str(ex)
+        try:
+            integrate(t, np.full((n, 3), np.inf), acc, M, gain=0.001)
+            raise AssertionError("a non-finite gyro must raise, not stabilise with NaN")
+        except RuntimeError as ex:
+            assert "non-finite rotations" in str(ex), str(ex)
     hr = horizon_report(t, warm, acc, M, secs=(1, 5)); assert set(hr) == {"1", "5"} and hr["5"] < 5.0, hr
     _selftest_pans()
     maps = mapping_matrices(); assert len(maps) == 24 and "z-yx" in maps

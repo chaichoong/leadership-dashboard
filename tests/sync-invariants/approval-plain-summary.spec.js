@@ -13,7 +13,7 @@ function withPlain() {
   fx.approvals[1].fields[TF.agentOutput] = 'The plan was checked against the budget line by line. '.repeat(8)
     + '\n\n**Carrying this out will involve:** sending the payment plan proposal to the water company.';
   fx.approvals[2].fields[TF.name] = 'INBOUND: POST [MEDIUM]: Reply to tenant email';
-  fx.approvals[0].fields[TF.name] = 'HMRC CFS-2427425: send tranche 1';
+  fx.approvals[0].fields[TF.name] = 'HMRC CFS-0000000: send tranche 1';
   return fx;
 }
 
@@ -63,6 +63,6 @@ test.describe('the card opens with the plain summary', () => {
     await mockAgentsPage(page, withPlain());
     await loadAgentsPage(page);
     await page.click('#ptab-approvals');
-    await expect(page.locator('[data-apv-card="recApvA1"] [data-apv-plain-task]')).toHaveText('HMRC CFS-2427425: send tranche 1');
+    await expect(page.locator('[data-apv-card="recApvA1"] [data-apv-plain-task]')).toHaveText('HMRC CFS-0000000: send tranche 1');
   });
 });

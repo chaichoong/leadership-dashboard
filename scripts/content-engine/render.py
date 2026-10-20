@@ -1427,8 +1427,20 @@ def redo_queue_place(day, ledger):
     not stalled either: it is waiting its turn. It calls watch.redo_order, the SAME list plan() takes the night's
     redo from, with the same gap-day and takeover-day filters — two readers of one queue giving two answers is how
     'waiting' got read as 'broken' (finding 20261016-phase-3-935), and a place computed off a different sort is
-    exactly that bug again."""
-    redo = watch.redo_order(ledger, exclude=watch.gap_days(), start=watch.start_day())
+    exactly that bug again.
+
+    One function was still not one ANSWER (finding 20261020-phase-3-1004). plan() reads the queue at 02:00 and this
+    reads it again hours later, after the night's redo has rendered and left it, so every day behind it moves up one.
+    On 20 Oct 2026 day 2113 was 2 of 6 when the night planned, 2112 drained, and this read 2113 as 1 of 5 and called
+    it stuck — a day that had in fact waited its turn in a queue that was draining. So the night's plan RECORDS its
+    order and this reads that record, falling back to a live sort when there is none (a report run before the first
+    recorded night, or a stale record). A day sent back AFTER the plan ran is not in the record, so it is appended in
+    live order rather than dropped: it really is at the back of tonight's queue."""
+    live = watch.redo_order(ledger, exclude=watch.gap_days(), start=watch.start_day())
+    planned = watch.planned_redo_order()
+    # Not filtered to days still in `live`: the day that drained tonight is exactly the one whose place must stay
+    # counted, or the day behind it moves to the front and reads as stuck.
+    redo = (planned + [d for d in live if d not in planned]) if planned else live
     mine = {v.get("day") for v in ledger.values()
             if (v.get("episode") == day or (v.get("day") == day and not v.get("episode")))
             and v.get("status") == "new" and v.get("reset")}
@@ -1475,7 +1487,23 @@ def resubmit_due(day, ledger, receipt_mtime, card, full_fields):
                         "receipt parked: the night run is not reaching it, so this is stuck, not waiting" % waited)
             return "a clip of the day is still waiting to render; it is first in the night's redo queue, so tonight"
         return "a clip of the day is still waiting to render"
-    if any(v.get("status") == "failed" for v in mine): return "a clip of the day failed to render; it goes back once that is put right"   # never part 1 alone (review, 24 Sep 2026)
+    bad = [v for v in mine if v.get("status") == "failed"]
+    if bad:
+        # "a clip of the day failed to render" was the whole answer until 20 Oct 2026, and it read the same on every
+        # one of the ten mornings day 2106's card sat on it (finding 20261020-phase-3-1005): a second long recording
+        # that the episode role refuses as a duplicate, marked "it needs a person", with no person told. A clip the
+        # engine has already said it will not retry is not a render that is about to happen, so say WHICH clip, WHY,
+        # that it needs a person, and how many nights it has been like that — the morning report lifts this line, so
+        # a timeless sentence is a stall nobody can see.
+        v = sorted(bad, key=lambda x: bool(x.get("requeued")), reverse=True)[0]
+        name = next((k for k, vv in ledger.items() if vv is v), "a clip")
+        why = "%s failed to render: %s" % (name, (v.get("error") or "no reason recorded")[:300])
+        if v.get("requeued"):
+            why += ("; the engine will NOT retry it (%s), so this needs a ruling from Kevin, not another night. "
+                    "Its receipt has been parked %d night(s)" % (v["requeued"], nights_parked(receipt_mtime)))
+        else:
+            why += "; the card goes back once that is put right"
+        return why   # never part 1 alone (review, 24 Sep 2026)
     ep = [v for v in mine if v.get("role") == "episode" and v.get("status") == "rendered"]
     if not ep: return "the episode has not rendered"
     if max((v.get("rendered") or "") for v in ep) < dt.datetime.fromtimestamp(receipt_mtime).isoformat(timespec="seconds"):

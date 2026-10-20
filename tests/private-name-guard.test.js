@@ -121,4 +121,45 @@ describe('private-name guard, through the real pre-commit hook', () => {
     expect(r.status).toBe(0);
     expect(r.stderr).toContain('NOT checked');
   });
+  // finding 20261019-agent-dispatch-996. PR #501 took the live HMRC compliance check
+  // reference out of this PUBLIC repo on 21 Sep 2026. By 19 Oct it was back on
+  // origin/main in six files, because nothing refused it. The guard now refuses the
+  // SHAPE, so the real value never has to be written down to be caught — including
+  // here, in a file that is itself public. CFS-1234567 below is invented.
+  it('refuses an added line carrying a reference of the private shape', () => {
+    writeFileSync(join(repo, 'a.txt'), 'first\nHMRC CFS-1234567 response due\n');
+    git('add', 'a.txt');
+    const r = commit('reference');
+    expect(r.status).not.toBe(0);
+    expect(r.stderr).toContain('private reference number');
+    expect(r.stderr).toContain('a.txt:2');
+    expect(() => git('rev-parse', 'HEAD')).toThrow();
+  });
+
+  it('lets the invented all-zero placeholder through', () => {
+    // Control. If the placeholder were refused too, every example and fixture
+    // would have to drop the shape altogether and the tests would lose their point.
+    writeFileSync(join(repo, 'a.txt'), 'HMRC CFS-0000000 response due\n');
+    git('add', 'a.txt');
+    expect(commit('placeholder').status).toBe(0);
+  });
+
+  it('refuses the shape even with no roster to check names against', () => {
+    // The name guard passes with a warning when the roster is gone. This one needs
+    // no roster, so it must still bite.
+    env.OD_REDACT_NAMES = join(dir, 'no-such-roster.txt');
+    writeFileSync(join(repo, 'a.txt'), 'CFS 7654321 chased\n');
+    git('add', 'a.txt');
+    const r = commit('no roster, real shape');
+    expect(r.status).not.toBe(0);
+    expect(r.stderr).toContain('private reference number');
+  });
+
+  it('does not fire on other reference shapes that are not private', () => {
+    // Control. A guard that refuses every letters-then-digits reference would be
+    // turned off within a week.
+    writeFileSync(join(repo, 'a.txt'), 'UC47 form, v12 1234567, UTR 0123456789\n');
+    git('add', 'a.txt');
+    expect(commit('other refs').status).toBe(0);
+  });
 });

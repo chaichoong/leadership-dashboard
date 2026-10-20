@@ -496,9 +496,9 @@ describe('a shared number is never enough to fold one task into another', () => 
     // prefix), at exactly the ratio, and the keeper was at Approval. Read
     // structurally, because no list can hold the prefix of a case nobody has
     // opened yet.
-    expect(one('INBOUND: HMRC CFS-2427425 - provide bank statements by 16 Oct',
-      'COMPLIANCE: HMRC CFS-2427425 response - rental income schedule').action).toBe('create');
-    expect(runPy('sorted(mod._reference_prefixes(arg))', 'HMRC CFS-2427425 response'))
+    expect(one('INBOUND: HMRC CFS-0000000 - provide bank statements by 16 Oct',
+      'COMPLIANCE: HMRC CFS-0000000 response - rental income schedule').action).toBe('create');
+    expect(runPy('sorted(mod._reference_prefixes(arg))', 'HMRC CFS-0000000 response'))
       .toEqual(['cfs']);
     // Two digits are a name, not a reference: UC47 is a form, v12 a version.
     expect(runPy('sorted(mod._reference_prefixes(arg))', 'UC47 form for 5 Dalham Place'))
@@ -514,7 +514,7 @@ describe('a shared number is never enough to fold one task into another', () => 
     // `hmrc` + `utr`, at exactly the bar. Same family as the address words
     // and the postcode halves.
     expect(one('INBOUND: HMRC self assessment filing due - UTR 0123456789',
-      'COMPLIANCE: HMRC check CFS-2427425 response - UTR 0123456789').action).toBe('create');
+      'COMPLIANCE: HMRC check CFS-0000000 response - UTR 0123456789').action).toBe('create');
     // CONTROL: a reference whose words DO agree still folds.
     expect(one('INBOUND: chase Vectis Water on account 44556677',
       'INBOUND: Vectis Water account 44556677 - final demand').action).toBe('update');

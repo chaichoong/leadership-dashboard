@@ -89,4 +89,45 @@ describe('refresh-main-checkout', () => {
     expect(r.stdout).toMatch(/REFUSED/);
     expect(readFileSync(join(dir, 'a.txt'), 'utf8')).toBe('uncommitted\n');
   });
+  // finding 20261019-phase-4-994: the fix phase commits a monitoring report from a
+  // worktree and the original stays untracked here. Once the path is on origin/main,
+  // reset --keep refuses — correctly, since it cannot know the bytes match — and no
+  // scheduled run has a way out of it. An exact duplicate is cleared; a changed one
+  // is not.
+  it('clears an untracked file byte-identical to the one origin/main adds, then refreshes', () => {
+    const dir = setup();
+    advanceOrigin(dir, 'e2e-sweep.md');                     // origin/main gains the path, with 'new\n'
+    writeFileSync(join(dir, 'e2e-sweep.md'), 'new\n');       // the untracked twin, same bytes
+    const r = run(dir);
+    expect(r.status).toBe(0);
+    expect(r.stdout).toMatch(/CLEARED 1 untracked file\(s\).*e2e-sweep\.md/);
+    expect(r.stdout).toMatch(/REFRESHED/);
+    expect(git(dir, 'rev-parse', 'HEAD')).toBe(git(dir, 'rev-parse', 'origin/main'));
+    // The committed version is what is on disk, so nothing was lost.
+    expect(readFileSync(join(dir, 'e2e-sweep.md'), 'utf8')).toBe('new\n');
+  });
+
+  it('BACK-TEST: an untracked file that DIFFERS is left alone and the refresh still refuses', () => {
+    // The control. If this ever passes, the clearing step has stopped checking the
+    // contents and is deleting work.
+    const dir = setup();
+    advanceOrigin(dir, 'e2e-sweep.md');
+    writeFileSync(join(dir, 'e2e-sweep.md'), 'MINE, not yet committed\n');
+    const r = run(dir);
+    expect(r.status).toBe(1);
+    expect(r.stdout).toMatch(/REFUSED/);
+    expect(r.stdout).not.toMatch(/CLEARED/);
+    expect(readFileSync(join(dir, 'e2e-sweep.md'), 'utf8')).toBe('MINE, not yet committed\n');
+    expect(git(dir, 'rev-parse', 'HEAD')).not.toBe(git(dir, 'rev-parse', 'origin/main'));
+  });
+
+  it('--check names the duplicates and deletes nothing', () => {
+    const dir = setup();
+    advanceOrigin(dir, 'e2e-sweep.md');
+    writeFileSync(join(dir, 'e2e-sweep.md'), 'new\n');
+    const r = run(dir, '--check');
+    expect(r.status).toBe(1);
+    expect(r.stdout).toMatch(/byte-identical to origin\/main and would be cleared: e2e-sweep\.md/);
+    expect(readFileSync(join(dir, 'e2e-sweep.md'), 'utf8')).toBe('new\n');
+  });
 });
