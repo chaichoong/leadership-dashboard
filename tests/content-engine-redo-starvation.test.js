@@ -24,8 +24,14 @@ import { join, resolve } from 'node:path';
 
 const CE = resolve(__dirname, '../scripts/content-engine');
 
+// Every snippet starts with the night's redo-plan record pointed at an empty scratch path. render.resubmit_due
+// reads watch.planned_redo_order(), which reads the LIVE record the night writes (~/.config/od), so once a real
+// record inside 24 hours existed (20 Oct 2026) these tests read "7 of 7" off the live queue and failed on main.
+const NO_LIVE_PLAN = `import os as _os, tempfile as _tf, watch as _watch
+_watch.REDO_PLAN_FILE = _os.path.join(_tf.mkdtemp(prefix="ce-redo-plan-"), "none.json")`;
+
 function py(code) {
-  return execFileSync('python3', ['-c', `import sys; sys.path.insert(0, ${JSON.stringify(CE)})\n${code}`],
+  return execFileSync('python3', ['-c', `import sys; sys.path.insert(0, ${JSON.stringify(CE)})\n${NO_LIVE_PLAN}\n${code}`],
     { encoding: 'utf8', timeout: 30000 }).trim();
 }
 
