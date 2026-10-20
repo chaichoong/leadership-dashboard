@@ -1370,7 +1370,10 @@ function apvArrivedFromNotes(notes, yourStep, approvedAt){
 function apvWaitingSince(stamped, deferredUntil){
     const back = String(deferredUntil||'').slice(0,10);
     if(!back) return stamped;
-    const backIso = back + 'T00:00:00.000Z';
+    // The day it came back starts at London midnight, as facts_queue in scripts/ai_team_health.py reads it
+    // (20 Oct 2026: UTC midnight before, an hour late all summer and a disagreement with the AI team panel).
+    const ymd = /^(\d{4})-(\d{2})-(\d{2})$/.exec(back);
+    const backIso = ymd ? new Date(apvLondonMs(+ymd[1], +ymd[2], +ymd[3], 0, 0)).toISOString() : back + 'T00:00:00.000Z';
     // Only ever moves the clock FORWARD. A future date cannot be reached (the
     // queue formula excludes those), and an older one must not undo a fresh
     // Slack baseline stamped when the card was re-posted.
