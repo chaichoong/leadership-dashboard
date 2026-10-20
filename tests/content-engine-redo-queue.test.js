@@ -29,8 +29,15 @@ import { resolve } from 'node:path';
 const CE = resolve(__dirname, '../scripts/content-engine');
 
 // Run a snippet inside the content-engine package so the real modules import.
+// Every snippet starts with the night's redo-plan record pointed at an empty scratch path, so a test reads the
+// record only when it writes one (PLAN_RECORD below). Without it render read the LIVE record in ~/.config/od, and
+// once a real one inside 24 hours existed (20 Oct 2026) five of these tests failed on main.
+const NO_LIVE_PLAN = `import os as _os, tempfile as _tf, watch as _watch
+_watch.REDO_PLAN_FILE = _os.path.join(_tf.mkdtemp(prefix="ce-redo-plan-"), "none.json")
+`;
+
 function py(code) {
-  return execFileSync('python3', ['-c', code], {
+  return execFileSync('python3', ['-c', NO_LIVE_PLAN + code], {
     encoding: 'utf8',
     cwd: CE,
     env: { ...process.env, PYTHONPATH: CE },
