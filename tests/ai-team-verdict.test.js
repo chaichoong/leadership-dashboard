@@ -299,11 +299,19 @@ def t(i, notes="", **f):
     base = {"Task Name": i, "Status": "Approval", "Notes": notes, "Created Time": ago(days=20)}
     base.update(f); return {"id": i, "fields": base}
 sub = lambda d, h: "[%s — agent-dispatch] SUBMITTED (round 1) as Admin with no new file" % (NOW - timedelta(days=d, hours=h)).astimezone(L).strftime("%d %b %Y %H:%M")
+wall = lambda d, kind: "[%s — agent] BLOCKER OPEN (%s): x" % ((NOW - timedelta(days=d)).astimezone(L).strftime("%d %b %Y %H:%M"), kind)
 tasks = [t("recSUBMITTED", sub(9, 0) + "\\n" + sub(1, 12)),                       # the newest send counts
          t("recESCALATED", "[%s — agent-dispatch] Escalated to Kevin as a decision card (holder x): ask" % (NOW - timedelta(days=4)).astimezone(L).strftime("%d %b %Y")),
          t("recBACKFROMDEFER", sub(9, 0), **{"Deferred Until": "2026-10-14"}),     # back in the queue since the 14th
          t("recSTILLDEFERRED", sub(9, 0), **{"Deferred Until": "2026-10-20"}),
-         t("recNOSTAMP"), t("recNOTQUEUE", sub(1, 0), Status="Today")]
+         t("recNOSTAMP"), t("recNOTQUEUE", sub(1, 0), Status="Today"),
+         # Your step: back in his lane on his approval, after a robot sign-in wall opened.
+         t("recYOURSTEP", sub(9, 0) + "\\n" + wall(3, "SIGN-IN example.com"),
+           **{"Agent Output": "YOUR STEP: sign in.\\n\\n----- The agent's work, as you approved it -----\\n\\nDraft.",
+              "Approved At": (NOW - timedelta(days=1, hours=12)).isoformat()}),
+         # The same wall on an ordinary card is the agent's business; a KEVIN wall counts on any card.
+         t("recSIGNINWALL", sub(5, 0) + "\\n" + wall(1, "SIGN-IN example.com")),
+         t("recKEVINWALL", sub(5, 0) + "\\n" + wall(2, "KEVIN payment"))]
 f = A.facts_queue(tasks, NOW)
 print(json.dumps({c["id"]: [round(c["days"], 1), c["dated"]] for c in f["cards"]} | {"undated": f["undated"]}))`);
     expect(out.recSUBMITTED).toEqual([1.5, true]);
@@ -313,6 +321,9 @@ print(json.dumps({c["id"]: [round(c["days"], 1), c["dated"]] for c in f["cards"]
     expect(out.recNOSTAMP).toEqual([20, false]);                 // from creation, and it says so
     expect(out.recSTILLDEFERRED).toBeUndefined();
     expect(out.recNOTQUEUE).toBeUndefined();
+    expect(out.recYOURSTEP).toEqual([1.5, true]);               // his approval, not the older wall or send
+    expect(out.recSIGNINWALL).toEqual([5, true]);              // a sign-in wall is no arrival on an ordinary card
+    expect(out.recKEVINWALL).toEqual([2, true]);
     expect(out.undated).toBe(1);
   });
 

@@ -60,8 +60,10 @@ function extract(src, name, where) {
   return src.slice(start, end);
 }
 
+// apvWaitingSince starts the return day at London midnight through apvLondonMs, so both come out.
 const apvWaitingSince = new Function(
-  `${extract(agentsPage, 'apvWaitingSince', 'os/agents/index.html')}; return apvWaitingSince;`)();
+  `${extract(agentsPage, 'apvLondonMs', 'os/agents/index.html')}
+   ${extract(agentsPage, 'apvWaitingSince', 'os/agents/index.html')}; return apvWaitingSince;`)();
 const apvDeferReasonFrom = new Function(
   `${extract(agentsPage, 'apvDeferReasonFrom', 'os/agents/index.html')}
    ; return apvDeferReasonFrom;`)();
@@ -251,7 +253,9 @@ describe('apvWaitingSince — a returning task has not been waiting all week', (
     // Otherwise it returns already stamped "waiting 8 days", trips the
     // over-24-hours check on its first morning back, and rings an alarm about
     // the one thing Kevin handled correctly.
-    expect(apvWaitingSince(WEEK_AGO, '2026-08-28')).toBe('2026-08-28T00:00:00.000Z');
+    // At London midnight, as the AI team panel counts it: 23:00 UTC the night before in summer.
+    expect(apvWaitingSince(WEEK_AGO, '2026-08-28')).toBe('2026-08-27T23:00:00.000Z');
+    expect(apvWaitingSince(WEEK_AGO, '2026-11-03')).toBe('2026-11-03T00:00:00.000Z');
   });
 
   it('never moves the clock backwards over a fresh Slack baseline', () => {
@@ -262,7 +266,7 @@ describe('apvWaitingSince — a returning task has not been waiting all week', (
   });
 
   it('survives a task with no timestamp of any kind', () => {
-    expect(apvWaitingSince('', '2026-08-28')).toBe('2026-08-28T00:00:00.000Z');
+    expect(apvWaitingSince('', '2026-08-28')).toBe('2026-08-27T23:00:00.000Z');
   });
 });
 

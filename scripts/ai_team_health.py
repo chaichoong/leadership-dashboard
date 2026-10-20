@@ -1675,9 +1675,11 @@ def facts_emails(t):
 def facts_queue(tasks, now):
     """Cards in Kevin's queue: Status Approval, not put off past today (APV_QUEUE_FORMULA's
     population). Age runs from when the card last reached him: the newest send stamp in its Notes
-    (a submit, an escalation, or the KEVIN wall a Your step card waits on), or the day a put-off
-    ended, whichever is later. A card with neither is aged from when it was made, and says so.
-    Last Updated is not used: any edit moves it."""
+    (a submit, an escalation, or a KEVIN wall), or the day a put-off ended, whichever is later. A
+    Your step card also counts what put it back in his lane: his approval (Approved At) and a wall
+    of any kind (a robot sign-in step). A card with none of these is aged from when it was made, and
+    says so. Last Updated is not used: any edit moves it. The approval queue page reads the same rule
+    (apvArrivedFromNotes in os/agents/index.html, 20 Oct 2026), so the two give one answer."""
     today = now.astimezone(LONDON).date()
     cards, undated = [], 0
     for r in tasks:
@@ -1687,14 +1689,19 @@ def facts_queue(tasks, now):
         deferred = str(f.get("Deferred Until") or "")[:10]
         if deferred and deferred > today.isoformat():
             continue
+        your_step = str(f.get("Agent Output") or "").lstrip().startswith("YOUR STEP:")
         arrived = None
         for m in NOTE_STAMP_RE.finditer(str(f.get("Notes") or "")):
             text = m.group("text")
             if text.startswith("SUBMITTED") or text.startswith("Escalated to Kevin") \
-                    or text.startswith("BLOCKER OPEN (KEVIN"):
+                    or text.startswith("BLOCKER OPEN (KEVIN") or (your_step and text.startswith("BLOCKER OPEN (")):
                 t = _stamp_time(m.group("day"), m.group("time"))
                 if t and (arrived is None or t > arrived):
                     arrived = t
+        if your_step:
+            approved = _aware(f.get("Approved At"))
+            if approved and (arrived is None or approved > arrived):
+                arrived = approved
         if deferred:
             try:
                 back = datetime.strptime(deferred, "%Y-%m-%d").replace(tzinfo=LONDON)
