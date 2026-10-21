@@ -152,9 +152,18 @@ fi
 #    than by code, so there is no call site to fix and nothing was LOOKING:
 #    the live Airtable token sat world-readable in two different agent scratch
 #    directories for weeks (findings 20260924-report-597, 20261010-phase-5-822).
-#    The guard reads nothing aloud, takes the world-readable bit off what it
-#    finds, and deletes nothing — a copy something still reads is a working
-#    dependency, and rule 1 of this script is that it never costs work.
+#    The guard reads nothing aloud and takes the world-readable bit off what it
+#    finds. A real run also passes --delete-unread, which removes ONLY a file
+#    whose whole content is the secret, that no durable code references, and
+#    that never had a route off this Mac; anything else is reported and kept,
+#    because rule 1 of this script is that it never costs work.
+#    Why that is not the old caution: a PAT copy sat in a scratch folder from
+#    29 Sep to 21 Oct 2026 and this job exited 1 on every hourly run for three
+#    weeks, so its red light meant nothing and would have buried a real one
+#    (findings 20261019-phase-2-990, 20261020-phase-2-1007). No unattended run
+#    could clear it either, because a bare rm is refused by the permission
+#    settings the robots are started with (20261015-agent-dispatch-902,
+#    20261020-agent-dispatch-1013). The delete belongs where the proof is.
 # ---------------------------------------------------------------------------
 #    A dry run LOOKS and nothing more: --dry-run means this script changes
 #    nothing, so it must not tighten a mode either, and it must still exit 0.
@@ -163,7 +172,7 @@ fi
 HERE_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 SECRET_COPIES=0
 if [ -f "$HERE_DIR/secret-copy-guard.py" ]; then
-  GUARD_ARGS=()
+  GUARD_ARGS=(--delete-unread)
   [ "$DRY_RUN" -eq 1 ] && GUARD_ARGS=(--no-chmod)
   GUARD_OUT=$(python3 "$HERE_DIR/secret-copy-guard.py" "${GUARD_ARGS[@]+"${GUARD_ARGS[@]}"}" 2>&1); GUARD_RC=$?
   while IFS= read -r line; do [ -n "$line" ] && say "  $line"; done <<< "$GUARD_OUT"

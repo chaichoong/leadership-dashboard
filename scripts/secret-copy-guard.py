@@ -14,11 +14,23 @@ A hit is reported with the secret it matches (never the value), and its mode is 
 the world-readable exposure stops immediately. It deletes nothing: a copy some script still reads is
 a working dependency, and this must never cost work.
 
+It deletes nothing by default, for the reason above. With --delete-unread it removes the one shape
+of copy that cannot cost work: a file whose whole content is the secret and nothing else, that no
+durable code anywhere references, and that has had no route off this Mac. That mode exists because
+the caution above turned into its own fault. Findings 20261019-phase-2-990 and 20261020-phase-2-1007:
+a live Airtable PAT copy sat at ~/knowledge-os/logs/task-manager/scratch/.airtable_pat from 29 Sep
+2026, mac-guard exited 1 on every hourly run for three weeks, and its red light therefore meant
+nothing. Nothing could clear it either — findings 20261015-agent-dispatch-902 and
+20261020-agent-dispatch-1013: an ad-hoc `rm` is refused by the permission settings every unattended
+run is started with, so three robots and daily-ops each reported the same wall and none could pass
+it. The deletion belongs in this script, which already proves the facts that make it safe.
+
 Exit 0 when clean, 1 when a copy was found, 2 when it could not look (no canonical secrets readable).
 
 Usage:
   python3 scripts/secret-copy-guard.py
-  python3 scripts/secret-copy-guard.py --no-chmod   # report only, change no modes
+  python3 scripts/secret-copy-guard.py --no-chmod        # report only, change no modes
+  python3 scripts/secret-copy-guard.py --delete-unread   # also delete a bare copy nothing reads
   python3 scripts/secret-copy-guard.py --selftest
 """
 import os
@@ -108,7 +120,12 @@ def walk_files(roots=SEARCH_ROOTS, config_dir=CONFIG_DIR):
 
 
 def find_copies(secrets, files):
-    """[(path, secret name, mode)] for every file whose text contains a canonical secret value."""
+    """[(path, secret name, mode, value)] for every file whose text contains a canonical secret.
+
+    The matched VALUE rides along (4th element, appended so every existing caller is unaffected)
+    because deciding whether a file is a bare copy of one secret needs the value, and re-reading
+    ~/.config/od per hit to find it again would be a second chance to get the wrong one.
+    """
     hits = []
     for path in files:
         try:
@@ -123,7 +140,7 @@ def find_copies(secrets, files):
                     mode = os.stat(path).st_mode & 0o777
                 except OSError:
                     mode = None
-                hits.append((path, name, mode))
+                hits.append((path, name, mode, value))
                 break
     return hits
 
@@ -157,6 +174,108 @@ def left_the_mac(path):
     return ""
 
 
+# ─── DELETING A COPY THAT CANNOT COST WORK ───────────────────────────
+#
+# Three facts have to hold before a delete is safe, and this script already establishes two of
+# them. The third is "nothing reads it", and the only honest place to look is DURABLE code: the
+# repo, Kevin's tools, and the agent rule/skill/task files. Deliberately NOT the log and scratch
+# tree itself — finding 20261020-phase-2-1007 found the stray copy referenced only by throwaway
+# scratch scripts sitting beside it, and treating those as a dependency is what kept a live
+# credential on disk for three weeks. If such a script runs again it writes the copy again, and
+# this guard catches it again on the next hour.
+READER_ROOTS = ("~/tools", "~/.claude/agents", "~/.claude/skills", "~/.claude/scheduled-tasks")
+
+# A credential copy is a file holding a credential and nothing else. A log, report or transcript
+# that happens to QUOTE a token is debris too, but deleting one destroys the evidence of how the
+# token got there, so those keep reporting and go to a person. 4096 is far above any real token
+# and far below any log worth keeping.
+BARE_COPY_MAX_BYTES = 4096
+
+
+def is_bare_copy(path, value):
+    """True when the file's entire content is the secret value and nothing else."""
+    try:
+        if os.path.getsize(path) > BARE_COPY_MAX_BYTES:
+            return False
+        text = open(path, encoding="utf-8", errors="replace").read()
+    except OSError:
+        return False
+    lines = [l.strip() for l in text.splitlines() if l.strip()]
+    return lines == [value]
+
+
+def readers_of(path, reader_roots=READER_ROOTS, repo=None):
+    """Files in durable code that mention this path. Empty means nothing reads it.
+
+    Matched three ways, because code refers to one file in three spellings: the absolute path, the
+    ~ form, and the last two components ("scratch/.airtable_pat"), which is how a script that
+    builds the path from a directory variable spells it.
+    """
+    real = os.path.realpath(path)
+    home = os.path.expanduser("~")
+    needles = {real}
+    if real.startswith(home + os.sep):
+        needles.add("~" + real[len(home):])
+    parent, base = os.path.split(real)
+    if parent and base:
+        needles.add(os.path.join(os.path.basename(parent), base))
+
+    if repo is None:
+        repo = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    roots = [repo] + [os.path.expanduser(r) for r in reader_roots]
+    roots = [r for r in roots if os.path.isdir(r)]
+    if not roots:
+        return []
+
+    # This file names the stray path in its own docstring and comments, and must never read as a
+    # reader of it. Resolved, so the worktree copy and the main checkout copy both match.
+    myself = os.path.realpath(__file__)
+
+    args = ["grep", "-r", "-l", "-I", "-F"]
+    for d in SKIP_DIRS:
+        args += ["--exclude-dir", d]
+    for n in sorted(needles):
+        args += ["-e", n]
+    args += roots
+    try:
+        r = subprocess.run(args, capture_output=True, text=True, timeout=120)
+    except (OSError, subprocess.SubprocessError):
+        # Could not look. "No readers" must never be ASSUMED: an unreadable answer keeps the file.
+        return ["<could not search for readers>"]
+    if r.returncode not in (0, 1):
+        return ["<could not search for readers>"]
+    hits = []
+    for line in (r.stdout or "").splitlines():
+        line = line.strip()
+        if line and os.path.realpath(line) != myself:
+            hits.append(line)
+    return hits
+
+
+def delete_unread(path, name, value):
+    """Delete a bare copy nothing reads. Returns (deleted, why_not)."""
+    return delete_unread_in(path, name, value)
+
+
+def delete_unread_in(path, name, value, repo=None):
+    """delete_unread, with the code tree to search for readers injectable for the selftest."""
+    if os.path.islink(path):
+        return False, "it is a symlink, so deleting it would not remove the copy"
+    if not is_bare_copy(path, value):
+        return False, "the file holds more than the secret, so deleting it would destroy a record"
+    why = left_the_mac(path)
+    if why:
+        return False, "it had a route off this Mac (%s), so it needs a rotation, not a delete" % why
+    readers = readers_of(path, repo=repo)
+    if readers:
+        return False, "code still refers to it (%s)" % ", ".join(readers[:3])
+    try:
+        os.unlink(path)
+    except OSError as exc:
+        return False, "the delete failed (%s)" % exc
+    return True, ""
+
+
 def tighten(path):
     """0600 the file, so the world-readable exposure stops. Returns True when the mode changed."""
     try:
@@ -173,6 +292,7 @@ def main(argv):
     if "--selftest" in argv:
         return selftest()
     do_chmod = "--no-chmod" not in argv
+    do_delete = "--delete-unread" in argv
     secrets = canonical_secrets()
     if not secrets:
         print("secret-copy-guard: CANNOT CHECK — no single-line secrets readable in %s" % CONFIG_DIR)
@@ -183,7 +303,19 @@ def main(argv):
               % (len(secrets), CONFIG_DIR))
         return 0
     escaped = []
-    for path, name, mode in hits:
+    deleted = []
+    remaining = []
+    for path, name, mode, value in hits:
+        if do_delete:
+            gone, why_not = delete_unread(path, name, value)
+            if gone:
+                deleted.append((path, name))
+                print("secret-copy-guard: DELETED the copy of '%s' at %s — nothing reads it and it "
+                      "never left this Mac; the stored copy at %s/%s keeps every job working"
+                      % (name, path, CONFIG_DIR, name))
+                continue
+            print("secret-copy-guard: KEPT the copy of '%s' at %s — %s" % (name, path, why_not))
+        remaining.append((path, name, mode))
         changed = tighten(path) if do_chmod else False
         print("secret-copy-guard: COPY OF '%s' at %s (mode %s)%s"
               % (name, path, oct(mode) if mode is not None else "unknown",
@@ -191,9 +323,15 @@ def main(argv):
         why = left_the_mac(path)
         if why:
             escaped.append((path, name, why))
-    print("secret-copy-guard: %d copy/copies found. Delete the file(s) listed above and the "
+    if deleted and not remaining:
+        # Green, and it means something again. A guard that stays red while nothing can clear it
+        # buries the next real alert, which is what findings 990 and 1007 measured over 3 weeks.
+        print("secret-copy-guard: clean — %d copy/copies deleted, none left outside %s"
+              % (len(deleted), CONFIG_DIR))
+        return 0
+    print("secret-copy-guard: %d copy/copies found%s. Delete the file(s) listed above and the "
           "exposure this guard measures is gone; the one stored copy at %s/<name> keeps working."
-          % (len(hits), CONFIG_DIR))
+          % (len(hits), (", %d deleted" % len(deleted)) if deleted else "", CONFIG_DIR))
     for path, name, why in escaped:
         print("secret-copy-guard: ROTATE the secret held in %s/%s as well — %s (%s)"
               % (CONFIG_DIR, name, why, path))
@@ -244,6 +382,34 @@ def selftest():
         # ~/.config/od itself is never reported as a copy of itself
         reported = list(walk_files(roots=[tmp], config_dir=cfg))
         assert all("/od/" not in p for p in reported), reported
+
+        # --delete-unread, back-tested by planting each fault it must refuse.
+        code = os.path.join(tmp, "code")
+        os.makedirs(code)
+        assert is_bare_copy(leak, token)                 # the copy itself: nothing but the token
+        assert not is_bare_copy(clean, token)            # prose mentioning the path is not a copy
+        noisy = os.path.join(scratch, "run.log")
+        open(noisy, "w").write("step 1 ok\nPAT=%s\nstep 2 ok\n" % token)
+        assert not is_bare_copy(noisy, token)            # a log that quotes it keeps its record
+        assert readers_of(leak, reader_roots=[], repo=code) == []
+        open(os.path.join(code, "reader.py"), "w").write(
+            "PAT = open(%r).read()\n" % leak)
+        assert readers_of(leak, reader_roots=[], repo=code) == [
+            os.path.join(code, "reader.py")], readers_of(leak, reader_roots=[], repo=code)
+
+        # A file something reads is never deleted, whatever else is true of it.
+        gone, why = delete_unread_in(leak, "airtable_pat", token, repo=code)
+        assert gone is False and "still refers to it" in why, (gone, why)
+        # A file holding more than the secret is never deleted.
+        gone, why = delete_unread_in(noisy, "airtable_pat", token, repo=tmp)
+        assert gone is False and "destroy a record" in why, (gone, why)
+        assert os.path.exists(noisy)
+        # Nothing reads it and it never left the Mac: it goes.
+        os.unlink(os.path.join(code, "reader.py"))
+        gone, why = delete_unread_in(leak, "airtable_pat", token, repo=code)
+        assert gone is True and why == "", (gone, why)
+        assert not os.path.exists(leak)
+        assert os.path.exists(os.path.join(cfg, "airtable_pat"))   # the one stored copy survives
     print("secret-copy-guard selftest: ok")
     return 0
 

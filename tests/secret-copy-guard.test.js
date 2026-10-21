@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { mkdtempSync, mkdirSync, writeFileSync, copyFileSync, statSync, chmodSync } from 'fs';
+import { mkdtempSync, mkdirSync, writeFileSync, copyFileSync, statSync, chmodSync, existsSync } from 'fs';
 import { execFileSync } from 'child_process';
 import { tmpdir } from 'os';
 import { resolve, dirname, join } from 'path';
@@ -105,6 +105,88 @@ describe('secret-copy-guard: driven against a planted credential copy', () => {
     execFileSync('rm', ['-rf', repo]);
   });
 
+  // 21 Oct 2026, findings 20261019-phase-2-990 / 20261020-phase-2-1007 (the copy sat for three
+  // weeks and this guard was red on every hourly run, so its light meant nothing) and
+  // 20261015-agent-dispatch-902 / 20261020-agent-dispatch-1013 (no unattended run could clear it,
+  // because a bare rm is refused by the robots' permission settings). Each assertion below drives
+  // --delete-unread against a planted fault; the back-test is at the bottom of this block.
+  describe('--delete-unread', () => {
+    const plant = () => {
+      const h = mkdtempSync(join(tmpdir(), 'scg-del-'));
+      const c = join(h, '.config', 'od');
+      const l = join(h, 'knowledge-os', 'logs', 'a', 'scratch');
+      mkdirSync(c, { recursive: true });
+      mkdirSync(l, { recursive: true });
+      writeFileSync(join(c, 'airtable_pat'), token + '\n');
+      const copy = join(l, '.airtable_pat');
+      writeFileSync(copy, token + '\n');
+      return { home: h, cfg: c, logs: l, copy, env: { ...process.env, HOME: h } };
+    };
+
+    it('deletes a bare copy nothing reads, goes green, and leaves the stored copy working', () => {
+      const p = plant();
+      const r = run(['--delete-unread'], { env: p.env });
+      expect(r.stdout).toContain('DELETED the copy');
+      expect(r.stdout).toContain('clean');
+      expect(r.stdout).not.toContain(token);
+      expect(r.code).toBe(0);
+      expect(existsSync(p.copy)).toBe(false);
+      expect(existsSync(join(p.cfg, 'airtable_pat'))).toBe(true);
+    });
+
+    it('deletes nothing without the flag, so the default stays report-only', () => {
+      const p = plant();
+      const r = run([], { env: p.env });
+      expect(r.code).toBe(1);
+      expect(existsSync(p.copy)).toBe(true);
+      expect(r.stdout).not.toContain('DELETED');
+    });
+
+    it('KEEPS a file that holds more than the secret, because that destroys a record', () => {
+      const p = plant();
+      const log = join(p.logs, 'run.log');
+      writeFileSync(log, `step 1 ok\nPAT=${token}\nstep 2 ok\n`);
+      const r = run(['--delete-unread'], { env: p.env });
+      expect(existsSync(log)).toBe(true);
+      expect(r.stdout).toContain('destroy a record');
+      expect(r.code).toBe(1);          // a copy it cannot clear still reads red
+    });
+
+    it('KEEPS a copy that durable code still refers to', () => {
+      const p = plant();
+      const tools = join(p.home, 'tools');
+      mkdirSync(tools, { recursive: true });
+      writeFileSync(join(tools, 'reader.sh'), `PAT=$(cat ${p.copy})\n`);
+      const r = run(['--delete-unread'], { env: p.env });
+      expect(existsSync(p.copy)).toBe(true);
+      expect(r.stdout).toContain('still refers to it');
+      expect(r.code).toBe(1);
+    });
+
+    it('KEEPS a copy git tracks, because a delete does not un-publish it', () => {
+      const p = plant();
+      const repo = join(p.home, 'knowledge-os', 'logs', 'tracked');
+      mkdirSync(repo, { recursive: true });
+      const tracked = join(repo, '.airtable_pat');
+      writeFileSync(tracked, token + '\n');
+      const g = (...a) => execFileSync('git', a, { cwd: repo, encoding: 'utf8',
+        env: { ...process.env, GIT_AUTHOR_NAME: 't', GIT_AUTHOR_EMAIL: 't@t', GIT_COMMITTER_NAME: 't', GIT_COMMITTER_EMAIL: 't@t' } });
+      g('init', '-q'); g('add', '.airtable_pat'); g('commit', '-qm', 'plant');
+      const r = run(['--delete-unread'], { env: p.env });
+      expect(existsSync(tracked)).toBe(true);
+      expect(r.stdout).toContain('needs a rotation, not a delete');
+      expect(r.stdout).toContain('ROTATE the secret held in');
+    });
+
+    it('never deletes the stored secret itself', () => {
+      const p = plant();
+      execFileSync('rm', [p.copy]);
+      const r = run(['--delete-unread'], { env: p.env });
+      expect(r.code).toBe(0);
+      expect(existsSync(join(p.cfg, 'airtable_pat'))).toBe(true);
+    });
+  });
+
   it('goes quiet and green once the copy is gone', () => {
     execFileSync('rm', [leak]);
     const r = run([], { env });
@@ -169,7 +251,21 @@ describe('mac-guard: a credential copy makes the hourly run red', () => {
       'import sys\nprint("ARGS:[" + " ".join(sys.argv[1:]) + "]")\nsys.exit(0)\n'
     );
     const r = runGuard(dir);
-    expect(r.out).toContain('ARGS:[]');
+    expect(r.out).not.toContain('--no-chmod');
+    expect(r.code).toBe(0);
+  });
+
+  // The guard can only clear the copy if the hourly job actually asks it to. Without this the
+  // fix is written and never runs, which is the shape of finding 20261019-phase-2-990.
+  it('passes --delete-unread on a real run, so the hourly job can clear what it proves is debris', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'mg-del-'));
+    copyFileSync(resolve(ROOT, 'scripts/mac-guard.sh'), join(dir, 'mac-guard.sh'));
+    writeFileSync(
+      join(dir, 'secret-copy-guard.py'),
+      'import sys\nprint("ARGS:[" + " ".join(sys.argv[1:]) + "]")\nsys.exit(0)\n'
+    );
+    const r = runGuard(dir);
+    expect(r.out).toContain('ARGS:[--delete-unread]');
     expect(r.code).toBe(0);
   });
 
