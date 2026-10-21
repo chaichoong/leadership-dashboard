@@ -651,6 +651,66 @@ res = {"points": render.file_code_points(2106, ${J(NOTE)}, run=lambda c, **k: cm
     expect(r.res.receipt).not.toContain('NOT answered by this rebuild');
   });
 
+  // 21 Oct 2026, finding 20261021-phase-3-1021. The words above cover a picture that SHAKES and
+  // nothing else, so Kevin's timing and text-fit points still got "nothing else is changed for this
+  // point". Measured on the receipts actually parked in content_engine_resubmit, his own words:
+  //   2100 (18 Oct) "Still not timed correctly. Try again." — his SECOND timing complaint on that day
+  //   2114 (15 Oct) "The wording doesn't fit on the title card"
+  // Both reproduce on a re-render, so each redo sent the same output back and the card returned.
+  describe("his real words from the parked receipts, not an invented note", () => {
+    const cases = [
+      ['a timing point', 'Still not timed correctly. Try again.'],
+      ['a text-fit point, apostrophe', "The wording doesn't fit on the title card, so it just needs to be adjusted."],
+      ['a text-fit point, written out', 'The title card on the learnings for my diary clips does not fit.'],
+      ['a stabilisation point', 'The stabilisation has just got less and less accurate, and it is more jolty than it should be.'],
+    ];
+    for (const [what, note] of cases) {
+      it(`${what} is told plainly that the rebuild does not change it`, () => {
+        const r = py(`res = render.needs_code_change(${J(note)})`);
+        expect(r.res).toBe(true);
+      });
+    }
+
+    // The cost of getting this wrong the other way is worse: a footage point sent down the code lane
+    // files a finding for nothing AND stops telling him the re-render answers it.
+    const footage = [
+      'The summary video is for the wrong episode compared to the other links in this approval card.',
+      'Learnings from my diary is wrong.',
+      'The learnings from my diary are about 4 minutes and 39 seconds.',
+      'The title should say the day number.',
+      'Use the long climb footage instead.',
+    ];
+    for (const note of footage) {
+      it(`a footage point is NOT sent down the code lane: ${note.slice(0, 40)}`, () => {
+        const r = py(`res = render.needs_code_change(${J(note)})`);
+        expect(r.res).toBe(false);
+      });
+    }
+
+    it('the whole 2114 receipt now says the title card is not answered by the rebuild', () => {
+      const note = "The title card on the learnings for my diary clips doesn't fit. "
+        + "The wording doesn't fit on the title card, so it just needs to be adjusted so that it reads correctly.";
+      const r = py(`res = render.sent_back_receipt(${J(note)})`);
+      expect(r.res).toContain('NOT answered by this rebuild');
+      // the line that made it dishonest must not be the answer to a text-fit point
+      const fitLine = r.res.trim().split('\n').find((l) => /wording/.test(l));
+      expect(fitLine).toContain('NOT answered by this rebuild');
+      expect(fitLine).not.toContain('nothing else is changed for this point');
+    });
+
+    it('and files a finding for the timing point, so the promise is true', () => {
+      const r = py(`
+cmds = []
+class R: returncode = 0; stderr = ""
+res = {"points": render.file_code_points(2100, ${J('Still not timed correctly. Try again.')},
+                                         run=lambda c, **k: (cmds.append(c), R())[1]),
+       "cmd": cmds}`);
+      expect(r.res.cmd.length).toBe(1);
+      expect(r.res.points.length).toBe(1);
+      expect(r.res.cmd[0].join(' ')).toContain('which a re-render cannot fix');
+    });
+  });
+
   it('a failure to file is reported and never stops the redo', () => {
     const r = py(`
 def boom(c, **k): raise OSError("findings.py missing")

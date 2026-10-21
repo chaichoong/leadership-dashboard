@@ -1230,12 +1230,32 @@ def about_learnings(point):
 NEEDS_CODE_RE = re.compile(
     r"\b(stabilis\w*|stabiliz\w*|jolty|judder\w*|jerky|jerk|stutter\w*|shaky|shake|wobbl\w*"
     r"|frame ?rate|fps|dropped frames|blurr\w*|out of focus|pixelat\w*"
-    r"|out of sync|lip ?sync|audio level\w*|volume)\b", re.I)
+    r"|out of sync|lip ?sync|audio level\w*|volume"
+    # TIMING and TEXT FIT, added 21 Oct 2026 (finding 20261021-phase-3-1021). The words above cover a
+    # picture that shakes and nothing else, so two whole classes of "how it is made" still got the
+    # dishonest line, measured on the receipts parked in content_engine_resubmit:
+    #   2100, 18 Oct: "Still not timed correctly. Try again." — his SECOND timing complaint on that day,
+    #     and the receipt told him the day was re-rendered and nothing else changed, both times.
+    #   2114, 15 Oct: "The wording doesn't fit on the title card" — answered the same way, while the
+    #     actual fix (measured text fitting, overlays.py) was written five days later by another route.
+    # Each of those is a layout or an edit decision in the code: re-rendering reproduces it exactly.
+    r"|mistimed|timing|timed)\b", re.I)
+
+# Phrases, because the single words that carry these points mean nothing on their own: "fit", "long"
+# and "over" appear in ordinary notes about footage ("the long climb", "the bit over the bridge"), so a
+# bare word here would send footage points down the code lane and stop filing the ones that matter.
+NEEDS_CODE_PHRASE_RE = re.compile(
+    r"(does ?n.?t fit|do ?n.?t fit|does not fit|do not fit|did ?n.?t fit|did not fit|won.?t fit|will not fit"
+    r"|not fit(?:ting)?\b|fit on the|fits? in the (?:card|box|frame|banner)|overflow\w*|overlap\w*"
+    r"|cut ?off|cuts? off|runs? (?:past|over|off)|off ?screen|off the (?:screen|card|edge)"
+    r"|too (?:long|wide|big|small) (?:for|to fit)|wrong size|not timed|never times|times? (?:it )?wrong"
+    r"|too (?:early|late)|out of time)", re.I)
 
 
 def needs_code_change(point):
     """Whether this point of Kevin's note is about how the video is MADE, which only a code change reaches."""
-    return bool(NEEDS_CODE_RE.search(point or ""))
+    text = point or ""
+    return bool(NEEDS_CODE_RE.search(text) or NEEDS_CODE_PHRASE_RE.search(text))
 
 
 def receipt_points(feedback):
