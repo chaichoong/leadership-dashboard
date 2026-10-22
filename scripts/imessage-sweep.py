@@ -36,9 +36,11 @@ Subcommands:
   selftest        run built-in unit checks (no database needed)
 
 Control (a running job is not a working job): scan FAILS loudly (exit 2) if the
-database cannot be opened or contains zero messages overall. A genuinely quiet
-24h window exits 0 with candidates=[] and db_total_messages in the JSON, so a
-broken read can never be mistaken for a quiet day.
+database cannot be opened, contains zero messages overall, or has had NO message
+in either direction for STALE_DB_HOURS. A genuinely quiet 24h window exits 0
+with candidates=[] and db_total_messages in the JSON, so a broken read can never
+be mistaken for a quiet day — but a database nothing has written to for a day is
+not a quiet day, it is a dead feed (finding 20261015-agent-dispatch-910).
 """
 
 import json
@@ -61,6 +63,17 @@ MAX_WINDOW_HOURS = 7 * 24  # never sweep further back than a week, even after do
 # watermark every run; the routine's Airtable dedupe key stops double-tasking.
 OVERLAP_HOURS = 12
 CONTEXT_MESSAGES = 10
+
+# ─── A SILENT DATABASE IS A BROKEN FEED, NOT A QUIET DAY ─────────────
+#
+# Finding 20261015-agent-dispatch-910. On 15 Oct 2026 scan reported 60,643 rows
+# and passed, while the newest INCOMING message was from 11 Oct and nothing had
+# gone OUT for 200 hours. db_total_messages is a count of history, so it proves
+# the file opened and proves nothing about whether it is still being written to.
+# Kevin uses iMessage every day: nothing in either direction for a whole day
+# means the sync or the read is broken, and the lane must say so rather than
+# report a quiet inbox and advance its watermark.
+STALE_DB_HOURS = 24
 
 # Kevin's own name for the group-mention rule. iMessage confirmed @mentions are
 # stored in attributedBody attributes; a plain-name match covers both that and
@@ -249,11 +262,42 @@ def chat_context(conn, chat_rowid, upto_ns):
     return out
 
 
+def db_stale_problem(newest_any_ns, now_ns, hours=None):
+    """Why this database reads as a dead feed, or None when it is live.
+
+    Pure, so it is tested without a chat.db. A NULL MAX(date) with rows present
+    is itself a broken read, never a quiet day.
+    """
+    limit = STALE_DB_HOURS if hours is None else hours
+    if newest_any_ns is None:
+        return ("chat.db holds messages but MAX(date) is empty — the read is broken, not quiet")
+    age_h = (now_ns - int(newest_any_ns)) / 3600e9
+    if age_h > limit:
+        return ("no message in either direction for %.1f hours (limit %g) — the message feed is "
+                "stale, so a zero here is NOT a quiet inbox" % (age_h, limit))
+    return None
+
+
 def scan():
     conn = open_db()
     db_total = conn.execute("SELECT COUNT(*) FROM message").fetchone()[0]
     if db_total == 0:
         print(json.dumps({"error": "chat.db opened but holds zero messages — read is broken, not quiet"}))
+        return 2
+
+    # The freshness control (finding 20261015-agent-dispatch-910). Read BOTH
+    # directions: an outgoing-only day still proves the database is live.
+    newest_any = conn.execute("SELECT MAX(date) FROM message").fetchone()[0]
+    newest_in = conn.execute("SELECT MAX(date) FROM message WHERE is_from_me = 0").fetchone()[0]
+    newest_out = conn.execute("SELECT MAX(date) FROM message WHERE is_from_me = 1").fetchone()[0]
+    stale = db_stale_problem(newest_any, now_apple_ns())
+    if stale:
+        conn.close()
+        print(json.dumps({"error": stale, "db_total_messages": db_total,
+                          "newest_message_ns": newest_any,
+                          "newest_message_at": apple_ns_to_iso(newest_any) if newest_any else None,
+                          "newest_incoming_at": apple_ns_to_iso(newest_in) if newest_in else None,
+                          "newest_outgoing_at": apple_ns_to_iso(newest_out) if newest_out else None}))
         return 2
 
     state = read_state()
@@ -346,6 +390,12 @@ def scan():
     conn.close()
     print(json.dumps({
         "db_total_messages": db_total,
+        # Freshness, printed on every pass so a quiet window can be read as
+        # quiet rather than guessed at (finding 20261015-agent-dispatch-910).
+        "newest_message_ns": newest_any,
+        "newest_message_at": apple_ns_to_iso(newest_any),
+        "newest_incoming_at": apple_ns_to_iso(newest_in) if newest_in else None,
+        "newest_outgoing_at": apple_ns_to_iso(newest_out) if newest_out else None,
         "window_start": apple_ns_to_iso(since_ns),
         "scanned_incoming": scanned,
         "message_blocks": len(blocks),

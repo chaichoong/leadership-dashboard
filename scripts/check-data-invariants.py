@@ -1056,6 +1056,42 @@ def check_kpi_library_coverage(pat, library_entries=None):
     return violations, len(live)
 
 
+# ─── A BRIEF DAY THAT CANNOT BE REBUILT ──────────────────────────────
+#
+# Finding 20261013-worker-auditor-855. 5 Oct 2026's row holds the fallback stub
+# ("Slack post failed: invalid_blocks") and the written brief was never stored,
+# so the row cannot be rebuilt. The check is right; the day is gone. Left alone
+# it failed every morning until 26 Oct, when the 21-day window drops the date,
+# and every agent slot re-read and re-annotated the same closed day.
+#
+# An entry here is NOT a silence. The violation stops being counted and is
+# printed as an ACKNOWLEDGED line instead, so it stays visible every run.
+# Keyed on date AND record id together, so a NEW row on that same date (the
+# duplicate-row bug) still fails. Never add a start date instead: that would
+# blind the check to everything before it, and it keeps mattering after the
+# window has rolled past.
+ACKNOWLEDGED_BRIEF_GAPS = {
+    "2026-10-05": {
+        "record": "recwxCjRvfEaluUtX",
+        "reason": "fallback stub only (Slack post failed: invalid_blocks); the written brief "
+                  "was never stored, so the row cannot be rebuilt. Rewriting it to pass would "
+                  "hide the evidence. Task rec4ccYAcaf0AIfxG.",
+        "acknowledged": "2026-10-22",
+    },
+}
+
+
+def _brief_gap_acknowledged(date, ids):
+    """The acknowledgement for this violation, or None. Matches on date AND the
+    single record id, so a second row on that date is never covered."""
+    entry = ACKNOWLEDGED_BRIEF_GAPS.get(date)
+    if not entry:
+        return None
+    if list(ids) != [entry["record"]]:
+        return None
+    return entry
+
+
 def check_ceo_brief_complete(pat):
     """Every past weekday CEO brief is finished, and each date appears exactly once.
 
@@ -1131,6 +1167,17 @@ def check_ceo_brief_complete(pat):
             problem = _brief_not_written(body)
             if problem:
                 violations.append({"date": date, "problem": problem, "ids": [r["id"]]})
+    # Acknowledged days are printed, never counted (finding 20261013-worker-auditor-855).
+    kept = []
+    for v in violations:
+        entry = _brief_gap_acknowledged(v.get("date"), v.get("ids") or [])
+        if entry:
+            print(f"    ACKNOWLEDGED {v['date']} {entry['record']}: {v['problem']}"
+                  f" — acknowledged {entry['acknowledged']}: {entry['reason']}")
+            continue
+        kept.append(v)
+    violations = kept
+
     if not shape_seen:
         # The Full Brief JSON shape has gone. Report nothing as clean.
         return violations, 0

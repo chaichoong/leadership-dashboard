@@ -1328,6 +1328,99 @@ def fold_on_a_number_only(name_a, name_b, shared):
     return len(telling) < DUPE_MIN_SHARED or ratio < DUPE_MIN_RATIO
 
 
+# ─── TWO WEAK WORDS ARE NOT A SUBJECT ────────────────────────────────
+#
+# Finding 20261017-phase-4-962, the half of 20261016-inbound-email-triage-952
+# that PR 808 left open and that the number guard's own notes list as "known
+# and NOT fixed". On 16-17 Oct 2026 a hard-deadline brief folded into an
+# unrelated open task on four shared words: `date`, `past`, `still`, `their`.
+# Not one of them is a subject word. They ride on every task name of that
+# shape, so DUPE_MIN_SHARED of 2 is met before anything about the matter has
+# been compared. The fold appended the brief to a task nobody had read it
+# into, and an undecided task absorbs it invisibly (PR 808's guard only stops
+# such a fold landing on a card Kevin has already decided).
+#
+# Same family as the address words (28 Aug), the postcode halves (finding
+# 605), the year 2026 (1 Sep), the house number (14 Oct): a token that appears
+# on everything cannot identify anything.
+#
+# Fold-only and Python-only, like fold_on_address_only and
+# fold_on_a_number_only, and for the same reason: grouping SHOWS and folding
+# DESTROYS. dupe_verdict stays byte-identical to its mirror in
+# os/agents/index.html, so the page still groups the pair in the Duplicates
+# lane and Kevin sees them together. Raising the bar inside dupe_verdict would
+# have needed the protected page changed in the same commit, and would also
+# have stopped the page showing him the pair at all.
+#
+# The cost, which is the cheap direction and Kevin's own ruling: two tasks
+# whose only agreement is function words now make two cards. A duplicate he
+# can merge beats an approved card quietly rewritten.
+DUPE_WEAK_WORDS = {
+    # pronouns and possessives
+    "their", "theirs", "them", "they", "his", "her", "hers", "our", "ours",
+    "your", "yours", "mine", "ours", "who", "whom", "whose",
+    # determiners and quantifiers
+    "all", "any", "another", "both", "each", "either", "few", "many", "more",
+    "most", "much", "neither", "one", "only", "other", "others", "same",
+    "some", "such", "very",
+    # prepositions and bare adverbs
+    "about", "above", "after", "against", "along", "before", "below",
+    "beyond", "during", "into", "onto", "over", "per", "then", "there",
+    "than", "under", "until", "upon", "via", "within", "without",
+    # auxiliaries and modals
+    "being", "can", "cannot", "could", "did", "does", "done", "had", "has",
+    "have", "having", "may", "might", "must", "shall", "should", "will",
+    "would",
+    # interrogatives and connectives
+    "how", "what", "when", "where", "which", "why",
+    # bare temporal and status words: these say WHEN or HOW FAR ALONG, never
+    # WHAT. "past due date still outstanding" is the shape of a chaser, not a
+    # subject. Named weekdays and months are already struck in DUPE_DATE_WORDS.
+    "date", "dated", "dates", "deadline", "deadlines", "due", "last",
+    "later", "latest", "now", "old", "older", "ongoing", "outstanding",
+    "overdue", "past", "pending", "previous", "previously", "shortly",
+    "since", "soon", "still", "today", "tomorrow", "yesterday", "yet",
+    "current", "currently", "next", "upcoming", "awaiting", "awaited",
+}
+# NOT on that list on purpose: a word that can BE the matter. "new" and
+# "this" are already in DUPE_GENERIC; "renewal", "reminder", "notice",
+# "arrears" and the like name real subjects and stay countable.
+
+
+def fold_on_weak_words_only(name_a, name_b, shared):
+    """True when the word pass's evidence is function words and nothing else,
+    so the fold must not go ahead.
+
+    `shared` is the verdict's own evidence. A STRONG id (`num:` / `tel:`) is
+    identity, not a word, so it passes straight through: a reference number or
+    a phone thread is exactly what the strong pass exists for. Evidence in any
+    other shape REFUSES the fold, the same direction fold_on_a_number_only
+    settled on after three drafts failed open.
+
+    The bar is the word pass's OWN bar, never a softer one: DUPE_MIN_SHARED
+    telling words AND DUPE_MIN_RATIO, counted after the weak words come out.
+    """
+    ids = [str(s) for s in (shared or [])]
+    if not ids:
+        return True
+    if all(i.startswith(("num:", "tel:")) for i in ids):
+        return False
+    if not all(DUPE_SHARED_WORD_RE.match(i) for i in ids):
+        return True
+    _, _, words_a, places_a = dupe_signals(name_a)
+    _, _, words_b, places_b = dupe_signals(name_b)
+    if not words_a or not words_b:
+        return True
+    agreed = words_a & words_b
+    noise = (places_a | places_b | DUPE_WEAK_WORDS | DUPE_REFERENCE_LABELS
+             | _postcode_tokens(name_a) | _postcode_tokens(name_b)
+             | _reference_prefixes(name_a) | _reference_prefixes(name_b))
+    # A single letter is never a subject either ("a/c 01406" leaves a and c).
+    telling = [w for w in agreed if w not in noise and len(w) > 1]
+    ratio = len(agreed) / min(len(words_a), len(words_b))
+    return len(telling) < DUPE_MIN_SHARED or ratio < DUPE_MIN_RATIO
+
+
 # ─── A DIFFERENT TENANT OR A DIFFERENT HOUSE IS A DIFFERENT MATTER ───
 #
 # 28 Sep 2026. Creating "Check DWP decision on <tenant A>'s UC47 (55 Elmdon
@@ -1727,6 +1820,13 @@ def decide(incoming_fields, open_rows):
             if fold_on_a_number_only(incoming_name, other, verdict["shared"]):
                 not_folded.append("%s: the names share a number and no subject"
                                   % row["id"])
+                continue
+            # TWO WEAK WORDS ARE NOT A SUBJECT (finding 20261017-phase-4-962):
+            # `date`, `past`, `still`, `their` carried a hard-deadline brief
+            # into an unrelated task on 16-17 Oct 2026.
+            if fold_on_weak_words_only(incoming_name, other, verdict["shared"]):
+                not_folded.append("%s: the names agree on nothing but function "
+                                  "words, not on the subject" % row["id"])
                 continue
             decided = fold_into_a_decided_card(f)
             if decided:

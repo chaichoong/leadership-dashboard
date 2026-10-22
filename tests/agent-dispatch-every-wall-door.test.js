@@ -799,7 +799,9 @@ s = {"openTasksRead": 1, "woken": [], "closedWhileBlocked": [], "sitesError": ""
 st, detail, payload = e.blockers_summary(s)
 print(json.dumps({"detail": detail, "open": payload["open"], "counts": [payload["noFixer"], payload["mergeCard"], payload["dailyFix"]]}))`;
     const r = JSON.parse(execFileSync('python3', ['-c', script], { encoding: 'utf8' }));
-    expect(r.detail).toBe('Robots blocked on 4 tasks. For you: 1 step only you can do (signature); 1 step ready for Your turn on the AI Agents page (your Mac); 1 step in your approval queue as Your step; 1 fix waiting on a merge card in your approval queue (PR #812). 1 task: no fixer can reach it (protected file: scripts/agent-dispatch.py). 1 task waiting on the daily robot fix.');
+    // The owner clause after the em dash arrived 22 Oct 2026 (finding 20261008-auditor-797):
+    // "no fixer can reach it" named the file and never named who does reach it.
+    expect(r.detail).toBe('Robots blocked on 4 tasks. For you: 1 step only you can do (signature); 1 step ready for Your turn on the AI Agents page (your Mac); 1 step in your approval queue as Your step; 1 fix waiting on a merge card in your approval queue (PR #812). 1 task: no fixer can reach it (protected file: scripts/agent-dispatch.py) — the daily robot fix writes it anyway and opens a PR, which brings you a merge card. 1 task waiting on the daily robot fix.');
     expect(r.counts).toEqual([1, 1, 1]);
     const d = r.open.find((w) => w.task === 'd');
     expect(d).toMatchObject({ step: '1. Sign page 3.', turn: true, yourStep: true });
@@ -925,7 +927,8 @@ unk = e.blockers_summary(dict(s, open=[{"task": "c", "name": "n", "kind": "TOOL"
                                          "toolState": "merge-approved", "tool": "you approved the merge card for PR #9; the robot is merging it"}]))
 print(json.dumps({"ok": ok[:2], "bad": bad[:2], "counts": [ok[2]["unclaimed"], ok[2]["openPr"], ok[2]["dailyFix"]], "unk": unk[:2]}))`;
     const r = JSON.parse(execFileSync('python3', ['-c', script], { encoding: 'utf8' }));
-    expect(r.ok).toEqual(['Worked', 'Robots blocked on 2 tasks. 1 task: no fixer has taken the fix in 3 days or more. 1 task waiting on an open fix PR to merge.']);
+    // The owner clause arrived 22 Oct 2026 (finding 20261008-auditor-797).
+    expect(r.ok).toEqual(['Worked', 'Robots blocked on 2 tasks. 1 task: no fixer has taken the fix in 3 days or more. The daily robot fix owns it; nothing is needed from you. 1 task waiting on an open fix PR to merge.']);
     expect(r.counts).toEqual([1, 1, 0]);
     expect(r.bad[0]).toBe('Failed');
     expect(r.bad[1]).toMatch(/The sweep could not read: cards: HTTP 503\.$/);
