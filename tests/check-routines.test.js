@@ -607,3 +607,41 @@ describe('a slot that died is not a slot that ran', () => {
     expect(v.causes).toEqual({ 'exit 1 (runs.log unreadable)': 1 });
   });
 });
+
+// ---------------------------------------------------------------------------
+// A CLOCK WRITTEN IN A LABEL MUST BE THE CLOCK THE JOB ACTUALLY FIRES ON
+// (findings 20261015-phase-1-895 and 20261019-phase-2-989, 23 Oct 2026).
+// APPROVED_SLOTS described prod-sweep-weekly as "Sundays 07:30" while its cron
+// had read "0 11 * * *" since 26 Aug 2026, and the slot table said 11:00: three
+// statements of one clock, none of them checked against the cron. Run against
+// production, so this is what fails the pre-push gate next time one drifts.
+// Back-tested by putting 07:30 back, which fails.
+describe('the clock in an allowlist label agrees with the job\'s own cron', () => {
+  it('every APPROVED_SLOTS label that names a time matches its cron', () => {
+    const src = `
+import importlib.util, json
+spec = importlib.util.spec_from_file_location('cr', ${JSON.stringify(GUARD)})
+m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m)
+print(json.dumps({"slots": m.APPROVED_SLOTS, "sched": m.read_schedule()
+                  if hasattr(m, "read_schedule") else {}}))
+`;
+    const { slots } = JSON.parse(execFileSync('python3', ['-c', src], { encoding: 'utf8' }).trim());
+    const sched = JSON.parse(readFileSync(resolve(__dirname, '../scripts/job-schedule.json'), 'utf8'));
+    const jobs = sched.jobs || sched;
+    const checked = [];
+    for (const [name, label] of Object.entries(slots)) {
+      const said = /\b(\d{1,2}):(\d{2})\b/.exec(label);
+      const cron = (jobs[name] || {}).cron;
+      if (!said || !cron) continue;              // no clock claimed, or no cron to check it against
+      const [min, hour] = cron.split(/\s+/);
+      if (!/^\d+$/.test(min) || !/^\d+$/.test(hour)) continue;   // a list or step: not one clock
+      checked.push(name);
+      expect(`${name} label says ${said[0]}, cron fires ${hour}:${min.padStart(2, '0')}`)
+        .toBe(`${name} label says ${said[0]}, cron fires ${Number(said[1])}:${said[2]}`);
+    }
+    // The control: a label with no clock in it, or a cron this test cannot read,
+    // would make the loop above vacuous and read as a pass for ever.
+    expect(checked.length).toBeGreaterThanOrEqual(3);   // 3 on 23 Oct 2026
+    expect(checked).toContain('prod-sweep-weekly');
+  });
+});

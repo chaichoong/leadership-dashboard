@@ -1155,3 +1155,77 @@ describe('the sandbox held', () => {
     expect(existsSync(join(ROOT, 'backlog-preview.txt'))).toBe(false);
   });
 });
+
+// MAIL TO info@ NEVER REACHED THE INBOX, SO TRIAGE NEVER READ IT
+// (finding 20260825-ceo-huddle-350, fixed 23 Oct 2026). Clause B3 of the live
+// terms tells a client to email info@operationsdirector.co.uk to claim the
+// refund; in the 14 days to 25 Aug 2026 only 1 of 39 threads to that address
+// was in the INBOX, and every query in the scan reads `in:inbox`. Drives the
+// real cmd_scan with Gmail stubbed. Back-tested by deleting the off-inbox
+// read, which fails all three.
+describe('the scan reads mail by the address it was sent to, not by where Gmail filed it', () => {
+  const REFUND = `{"id": "mOff", "threadId": "tOff", "labelIds": ["UNREAD"],
+     "internalDate": 1791800000000,
+     "headers": {"from": "Client <client@example.com>", "to": "info@operationsdirector.co.uk",
+                 "subject": "Claiming the refund under clause B3"},
+     "body": "We are claiming the refund. Please confirm within 14 days."}`;
+
+  it('an archived, unread refund request to info@ is decided like new inbox mail', () => {
+    const box = sandbox();
+    const r = runPy(box, `
+LISTS["to:info@operationsdirector.co.uk"] = [${REFUND}]
+LISTS["in:inbox"] = []
+m.lookup_thread_tasks = lambda ids, fetch=None: {}
+buf = io.StringIO()
+with contextlib.redirect_stdout(buf):
+    m.cmd_scan(12)
+res = json.loads(buf.getvalue().strip().splitlines()[-1])
+out({"ids": [x["id"] for x in res["new_inbox"]], "off": res["counts"]["off_inbox"],
+     "newCount": res["counts"]["new_inbox"], "cached": "mOff" in m.read_scan_cache()})
+`);
+    expect(r.ids).toEqual(['mOff']);
+    expect(r.off).toBe(1);
+    expect(r.newCount).toBe(1);
+    expect(r.cached).toBe(true);   // stamped and cached like any new message
+  });
+
+  it('a message already in the inbox is read once, never twice', () => {
+    const box = sandbox();
+    const r = runPy(box, `
+INBOX = [${REFUND}]
+LISTS["to:info@operationsdirector.co.uk"] = INBOX
+LISTS["in:inbox -in:chats after:"] = INBOX
+m.lookup_thread_tasks = lambda ids, fetch=None: {}
+buf = io.StringIO()
+with contextlib.redirect_stdout(buf):
+    m.cmd_scan(12)
+res = json.loads(buf.getvalue().strip().splitlines()[-1])
+out({"ids": [x["id"] for x in res["new_inbox"]], "off": res["counts"]["off_inbox"]})
+`);
+    expect(r.ids).toEqual(['mOff']);
+    expect(r.off).toBe(0);
+  });
+
+  it('a truncated off-inbox read freezes the watermark, as a truncated inbox read does', () => {
+    const box = sandbox();
+    const r = runPy(box, `
+real_list = m.worker_list
+def trunc(*a, **kw):
+    msgs, cut = real_list(*a, **kw)
+    return msgs, (cut or "to:info@" in (kw.get("q") or ""))
+m.worker_list = trunc
+LISTS["to:info@operationsdirector.co.uk"] = [${REFUND}]
+LISTS["in:inbox"] = []
+m.lookup_thread_tasks = lambda ids, fetch=None: {}
+buf = io.StringIO()
+with contextlib.redirect_stdout(buf):
+    m.cmd_scan(12)
+res = json.loads(buf.getvalue().strip().splitlines()[-1])
+out({"frozen": m.read_state()["last_scan_truncated"],
+     "said": res["truncated"]["off_inbox"], "newInbox": res["truncated"]["new_inbox"]})
+`);
+    expect(r.frozen).toBe(true);    // the watermark governs these messages too
+    expect(r.said).toBe(true);      // and the report says which read was cut
+    expect(r.newInbox).toBe(true);
+  });
+});

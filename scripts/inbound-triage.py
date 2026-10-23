@@ -253,6 +253,17 @@ STALE_SNAPSHOT_MAX_HOURS = 3
 # up to 200 sent ones to check each "answered" really went to the sender.
 BACKLOG_MAX_PAGES = 12
 BACKLOG_SENT_MAX_PAGES = 8
+# ADDRESSES WHOSE MAIL NEVER REACHES THE INBOX (finding 20260825-ceo-huddle-350,
+# 23 Oct 2026). Clause B3 of the live terms tells a client to email
+# info@operationsdirector.co.uk to claim the refund. Mail to that address does
+# arrive, but in the 14 days to 25 Aug 2026 only 1 of 39 threads to it was in the
+# INBOX: the other 38 were filtered on arrival and sat unread, where every
+# `in:inbox` query in this file is blind to them, so a refund request would have
+# missed its 14-day promise with nobody knowing. The scan reads these by the
+# address mail was sent TO, not by where Gmail filed it. Adding an address here
+# is a deliberate act: everything it has ever received becomes triage's to
+# decide, so a list that catches a marketing address buys a task a day.
+OFF_INBOX_ADDRESSES = ("info@operationsdirector.co.uk",)
 # The job-queue lock the slot runs under (inbound-triage-run.sh is wrapped by
 # `job-queue.py run inbound-triage`), and the job the backlog must run as.
 TRIAGE_JOB = "inbound-triage"
@@ -910,6 +921,20 @@ def cmd_scan(back_hours, sleep=time.sleep):
 
     new_inbox, new_trunc = worker_list(q="in:inbox -in:chats after:%d" % after_s)
     stale, stale_trunc = worker_list(q="in:inbox -in:chats older_than:2d")
+    # MAIL THAT NEVER REACHED THE INBOX (finding 20260825-ceo-huddle-350). Read
+    # by the address it was sent TO, so a filter that archives it on arrival
+    # cannot hide it from triage. Decided like new mail: it joins new_inbox
+    # BEFORE every stamp below (Roy's copies, the auto-reply signal, the reply
+    # state, the scan cache), so none of them has to know this lane exists. A
+    # truncated read here freezes the watermark exactly as new_inbox's does,
+    # because the watermark now governs these messages too.
+    off_inbox, off_trunc = worker_list(
+        q="(%s) -in:inbox -in:chats -in:sent -in:draft -in:trash -in:spam after:%d"
+          % (" OR ".join("to:%s" % a for a in OFF_INBOX_ADDRESSES), after_s))
+    already_seen = {m.get("id") for m in new_inbox + stale}
+    off_inbox = [m for m in off_inbox if m.get("id") not in already_seen]
+    new_inbox = new_inbox + off_inbox
+    new_trunc = bool(new_trunc or off_trunc)
     roy_copies = sum(1 for m in new_inbox + stale if roy_assistant_copy(m))
     new_inbox = [m for m in new_inbox if not roy_assistant_copy(m)]
     stale = [m for m in stale if not roy_assistant_copy(m)]
@@ -1016,6 +1041,8 @@ def cmd_scan(back_hours, sleep=time.sleep):
                    "label12": {"id": l12["id"], "name": l12["name"]},
                    "label13": {"id": l13["id"], "name": l13["name"]} if l13 else None},
         "counts": {"new_inbox": len(new_inbox), "stale": len(stale),
+                   # Of new_inbox, the ones that never reached the inbox.
+                   "off_inbox": len(off_inbox),
                    "stranded_8": len(stranded_8), "stranded_12": len(stranded_12),
                    "stranded_13": len(stranded_13), "sent": len(sent_msgs),
                    "inbox_auto_replies": inbox_auto_replies,
@@ -1027,7 +1054,8 @@ def cmd_scan(back_hours, sleep=time.sleep):
         # "checked", or "UNCHECKED: <why>" — then the stranded lists still
         # hold threads that may already have a task; say so in the report.
         "stranded_lookup": stranded_lookup,
-        "truncated": {"new_inbox": new_trunc, "stale": stale_trunc,
+        "truncated": {"new_inbox": new_trunc, "off_inbox": off_trunc,
+                      "stale": stale_trunc,
                       "stranded_8": s8_trunc, "stranded_12": s12_trunc,
                       "stranded_13": s13_trunc, "sent": sent_trunc},
         "new_inbox": new_inbox,
