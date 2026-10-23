@@ -114,7 +114,15 @@ APPROVED_SLOTS = {
     # uc-check REMOVED 27 Aug 2026 (Kevin, estate audit): the Universal Credit
     # slot is switched off, so an allowlist entry for it would wave through a
     # job that must no longer run. Its register row is "UC Verification", Paused.
-    "prod-sweep-weekly": "Full browser walk, Sundays 07:30 (Kevin, 26 Aug 2026)",
+    # 11:00, not 07:30 (findings 20261015-phase-1-895 and 20261019-phase-2-989, fixed
+    # 23 Oct 2026). The cron has read "0 11 * * *" since 26 Aug 2026 and this label was the
+    # only place that said 07:30, so three descriptions of one clock disagreed. The daily
+    # cron with a Sunday gate in the SKILL is deliberate and stays: this codebase forbids a
+    # weekday in a cron, `runsOnDays: [7]` tells attendance, and the non-Sunday run exits in
+    # 8 seconds with a plain skip line (runs.log, 21 and 22 Oct 2026), so no extra walk is
+    # paid for. The clock in a label here is guarded against the real cron by
+    # tests/check-routines.test.js.
+    "prod-sweep-weekly": "Full browser walk, Sundays 11:00 (Kevin, 26 Aug 2026)",
     # payment-run added 19 Sep 2026 (finding 20260919-daily-ops-551). It is a
     # real approved weekly job — Kevin's Friday payment list, PRs #483/#484,
     # launchd com.kevinbrittain.payment-run, Friday 21:00 local — but it has a

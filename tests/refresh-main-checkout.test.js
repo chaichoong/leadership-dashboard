@@ -131,3 +131,65 @@ describe('refresh-main-checkout', () => {
     expect(readFileSync(join(dir, 'e2e-sweep.md'), 'utf8')).toBe('new\n');
   });
 });
+
+// A TRACKED FILE MIRRORED TO ORIGIN/MAIN'S EXACT BYTES (finding
+// 20261020-queue-fixer-1009, fixed 23 Oct 2026). The scheduled-task drift guard
+// needs a repo-side SKILL.md change mirrored into the main checkout, so on
+// 20 Oct 2026 `reset --keep` refused with "not uptodate" and the checkout sat 3
+// behind until a person cleared it by hand. Back-tested by deleting the
+// duplicate_tracked call, which fails the first and last case here.
+describe('a tracked file edited to exactly what origin/main holds', () => {
+  /** Advance origin by MODIFYING a file that already exists here. */
+  function advanceOriginEditing(dir, file, body) {
+    const other = `${dir}-other-${file}`;
+    execFileSync('git', ['clone', '-q', `${dir}-origin.git`, other]);
+    for (const [k, v] of [['user.email', 't@t'], ['user.name', 't'], ['commit.gpgsign', 'false']]) git(other, 'config', k, v);
+    writeFileSync(join(other, file), body);
+    git(other, 'add', '.'); git(other, 'commit', '-qm', 'upstream edit'); git(other, 'push', '-q', 'origin', 'HEAD:main');
+  }
+
+  it('is restored, and the checkout moves forward instead of refusing', () => {
+    const dir = setup();
+    advanceOriginEditing(dir, 'a.txt', 'mirrored\n');
+    writeFileSync(join(dir, 'a.txt'), 'mirrored\n');   // the same bytes, by hand, before the commit
+    const r = run(dir);
+    expect(r.status).toBe(0);
+    expect(r.stdout).toMatch(/RESTORED 1 tracked file\(s\).*a\.txt/);
+    expect(r.stdout).toMatch(/REFRESHED/);
+    expect(git(dir, 'rev-parse', 'HEAD')).toBe(git(dir, 'rev-parse', 'origin/main'));
+    expect(readFileSync(join(dir, 'a.txt'), 'utf8')).toBe('mirrored\n');
+  });
+
+  it('one byte of difference is left alone and the refusal stands', () => {
+    const dir = setup();
+    advanceOriginEditing(dir, 'a.txt', 'mirrored\n');
+    writeFileSync(join(dir, 'a.txt'), 'mirrored but not quite\n');
+    const r = run(dir);
+    expect(r.status).toBe(1);
+    expect(r.stdout).toMatch(/REFUSED/);
+    expect(r.stdout).not.toMatch(/RESTORED/);
+    expect(readFileSync(join(dir, 'a.txt'), 'utf8')).toBe('mirrored but not quite\n');
+  });
+
+  it('a STAGED change is never discarded, even when the working tree matches', () => {
+    const dir = setup();
+    advanceOriginEditing(dir, 'a.txt', 'mirrored\n');
+    writeFileSync(join(dir, 'a.txt'), 'someone staged this\n');
+    git(dir, 'add', 'a.txt');
+    writeFileSync(join(dir, 'a.txt'), 'mirrored\n');
+    const r = run(dir);
+    expect(r.status).toBe(1);
+    expect(r.stdout).not.toMatch(/RESTORED/);
+    expect(git(dir, 'show', ':a.txt')).toBe('someone staged this');
+  });
+
+  it('--check names it and restores nothing', () => {
+    const dir = setup();
+    advanceOriginEditing(dir, 'a.txt', 'mirrored\n');
+    writeFileSync(join(dir, 'a.txt'), 'mirrored\n');
+    const r = run(dir, '--check');
+    expect(r.status).toBe(1);
+    expect(r.stdout).toMatch(/edited to origin\/main's exact bytes and would be restored: a\.txt/);
+    expect(git(dir, 'rev-parse', 'HEAD')).not.toBe(git(dir, 'rev-parse', 'origin/main'));
+  });
+});

@@ -284,7 +284,11 @@ describe('one task, one answer: the dispatcher and the task board on every lane 
     // Full views only (the stuck, decided, Roy and Kevin lists, and every ownerless one, moving
     // included); the slim held list carries `lane`, checked above.
     const full = Object.entries({ ...view, ...ownerless }).filter(([, v]) => 'dispatchLane' in v);
-    expect(full.length).toBe(17);   // the full views this fixture set yields: a broken read is not a pass
+    // The full views this fixture set yields: a broken read is not a pass.
+    // 23 Oct 2026: was 17. The fixture set grew and the stale number turned main RED for a day,
+    // so no fixer PR could merge (finding 20261022-queue-fixer-1040). The lane invariant in the
+    // loop below was re-proved unchanged; only the count moved.
+    expect(full.length).toBe(20);
     for (const [id, v] of full) {
       const dsp = (dispatchOf[id] || [])[0];
       if (!dsp) { expect(v.dispatchLane ?? '', id).toBe(''); continue; }

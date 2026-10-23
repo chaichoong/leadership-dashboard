@@ -65,6 +65,33 @@ def duplicate_untracked(repo, ref="origin/main"):
     return same
 
 
+def duplicate_tracked(repo, ref="origin/main"):
+    """TRACKED files edited here whose working-tree bytes are ALREADY exactly what `ref` holds.
+
+    Why (finding 20261020-queue-fixer-1009): the scheduled-task drift guard makes this routine,
+    not rare. A repo-side change to a routine SKILL.md needs the same mirror edit in the main
+    checkout to satisfy the guard before a commit, so on 20 Oct 2026
+    `.claude/scheduled-tasks/daily-ops/SKILL.md` was edited here to exactly the bytes landing on
+    origin/main. `reset --keep` then refused with "Entry ... not uptodate. Cannot merge." and the
+    checkout sat 3 behind; it was cleared by hand, which no scheduled run would do.
+
+    Restoring such a file loses nothing: the bytes the edit produced are the bytes `ref` is about
+    to install. One byte of difference and the file is left alone and the refusal stands.
+
+    A path with a STAGED change is never touched, whatever its working tree holds: the index may
+    hold a third version, and discarding that is a loss this routine must not take."""
+    changed = {l for l in git(repo, "diff", "--name-only", "HEAD").stdout.splitlines() if l}
+    staged = {l for l in git(repo, "diff", "--name-only", "--cached", "HEAD").stdout.splitlines() if l}
+    same = []
+    for path in sorted(changed - staged):
+        theirs = git(repo, "rev-parse", "%s:%s" % (ref, path))
+        mine = git(repo, "hash-object", "--", os.path.join(repo, path))
+        if theirs.returncode or mine.returncode: continue
+        if theirs.stdout.strip() and theirs.stdout.strip() == mine.stdout.strip():
+            same.append(path)
+    return same
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser()
     ap.add_argument("--check", action="store_true")
@@ -104,6 +131,9 @@ def main(argv=None):
         dupes = duplicate_untracked(a.repo)
         extra = (f"; {len(dupes)} untracked file(s) are byte-identical to origin/main and would be cleared: "
                  + ", ".join(dupes)) if dupes else ""
+        mirrored = duplicate_tracked(a.repo)
+        extra += (f"; {len(mirrored)} tracked file(s) are edited to origin/main's exact bytes and would be "
+                  "restored: " + ", ".join(mirrored)) if mirrored else ""
         print(f"STALE: {branch or 'detached HEAD'} is {behind} commits behind origin/main (--check, not moved){extra}")
         return 1
 
@@ -113,6 +143,16 @@ def main(argv=None):
             os.remove(os.path.join(a.repo, path))
         print("CLEARED %d untracked file(s) already byte-identical to origin/main: %s"
               % (len(dupes), ", ".join(dupes)))
+
+    mirrored = duplicate_tracked(a.repo)
+    if mirrored:
+        c = git(a.repo, "checkout", "--", *mirrored)
+        if c.returncode != 0:
+            print(f"REFUSED: {behind} behind, and the mirrored edit could not be restored: "
+                  f"{c.stderr.strip()[:300]}")
+            return 1
+        print("RESTORED %d tracked file(s) already edited to origin/main's exact bytes: %s"
+              % (len(mirrored), ", ".join(mirrored)))
 
     r = git(a.repo, "reset", "--keep", "origin/main")
     if r.returncode != 0:
