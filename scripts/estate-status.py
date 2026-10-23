@@ -713,6 +713,19 @@ def _plural(n, word):
 # protected file and no MERGE card exists yet, no finding was filed, or Kevin rejected the card.
 WALLS_CAP = 80
 NO_FIXER_STATES = ("no-fixer", "no-finding", "deferred", "merge-rejected", "merge-closed")
+# WHO clears each of those states, in plain words (finding 20261008-auditor-797). Until
+# 22 Oct 2026 the no-fixer and unclaimed sentences named nobody at all, while
+# OWNER_NAMED_RE matched "Kevin" elsewhere in the same Detail, so the row counted as
+# owner-named and 15 walls sat with no owner and no RED task from 7 Oct.
+NO_FIXER_OWNER = {
+    # Kevin's ruling, 7 Oct 2026: a protected file is never a reason to leave a fix.
+    "no-fixer": "the daily robot fix writes it anyway and opens a PR, which brings you a merge card",
+    "deferred": "the daily robot fix writes it anyway and opens a PR, which brings you a merge card",
+    "no-finding": "nothing was filed for it, so the daily robot fix must file it before it can be worked",
+    "merge-rejected": "you turned the merge card down, so it needs a different fix from the daily robot fix",
+    "merge-closed": "its merge card was closed without a decision, so the daily robot fix must re-open it",
+}
+NO_FIXER_OWNER_FALLBACK = "no owner yet: name one on the AI Agents page before this can move"
 # Not in that list on purpose (#784): "tasked" (a task carries it and its completion wakes the
 # wall) and "deferred-dated" (it comes back open by itself on its date).
 PROTECTED_RE = re.compile(r"protected file: ([^)]+)\)")
@@ -776,11 +789,26 @@ def blockers_summary(r):
     detail = ("Robots blocked on %s. For you: %s." % (_plural(len(walls), "task"), "; ".join(parts))
               if parts else ("Robots blocked on %s." % _plural(len(walls), "task") if walls else "No robot is blocked."))
     if build:
-        paths = sorted({m.group(1) for w in build for m in [PROTECTED_RE.search(str(w.get("tool") or ""))] if m})
-        detail += " %s: no fixer can reach it%s." % (
-            _plural(len(build), "task"), (" (protected file: %s)" % ", ".join(paths)) if paths else "")
+        # ONE SENTENCE PER CLASS, AND EACH NAMES ITS OWNER (finding
+        # 20261008-auditor-797). Grouped by the state the sweep gave, because
+        # "no fixer can reach it" has five causes and they are not one person's.
+        by_state = {}
+        for w in build:
+            by_state.setdefault(tool_state(w), []).append(w)
+        for state in sorted(by_state):
+            group = by_state[state]
+            paths = sorted({m.group(1) for w in group
+                            for m in [PROTECTED_RE.search(str(w.get("tool") or ""))] if m})
+            detail += " %s: no fixer can reach it%s — %s." % (
+                _plural(len(group), "task"),
+                (" (protected file: %s)" % ", ".join(paths)) if paths else "",
+                NO_FIXER_OWNER.get(state, NO_FIXER_OWNER_FALLBACK))
     if unclaimed:
-        detail += " %s: no fixer has taken the fix in 3 days or more." % _plural(len(unclaimed), "task")
+        ids = sorted({w.get("finding") for w in unclaimed if w.get("finding")})
+        named = (" (%s%s)" % (", ".join(ids[:6]),
+                              " and %d more" % (len(ids) - 6) if len(ids) > 6 else "")) if ids else ""
+        detail += (" %s: no fixer has taken the fix in 3 days or more%s. The daily robot fix owns "
+                   "it; nothing is needed from you." % (_plural(len(unclaimed), "task"), named))
     if open_pr:
         detail += " %s waiting on an open fix PR to merge." % _plural(len(open_pr), "task")
     if merging:

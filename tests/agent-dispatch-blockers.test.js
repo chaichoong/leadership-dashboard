@@ -503,7 +503,10 @@ print(json.dumps([e.blockers_summary(fine)[:2], e.blockers_summary(red)[:2], e.b
     expect(r[0][0]).toBe('Worked');
     // A report written before 7 Oct 2026 has no toolState: a deferred finding still reads as
     // one no fixer can reach, never as "a Claude Code session" (retired that day).
-    expect(r[0][1]).toBe("Robots blocked on 4 tasks. For you: sign the robot in to www.topcashback.co.uk; 1 step only you can do (purchase). 1 task: no fixer can reach it. 1 task waiting on the daily robot fix.");
+    // Since 22 Oct 2026 (finding 20261008-auditor-797) every wall class names WHO clears it.
+    // Before that these sentences named nobody, and the row still counted as owner-named
+    // because "you" appears earlier in the same Detail, so 15 walls sat with no owner.
+    expect(r[0][1]).toBe("Robots blocked on 4 tasks. For you: sign the robot in to www.topcashback.co.uk; 1 step only you can do (purchase). 1 task: no fixer can reach it — the daily robot fix writes it anyway and opens a PR, which brings you a merge card. 1 task waiting on the daily robot fix.");
     expect(r[1][0]).toBe('Failed');
     expect(r[1][1]).toMatch(/add namecheap\.com to the robot's list \(Add a new site\).*1 task blocked 3 days or more\./);
     expect(r[2]).toEqual(['Worked', 'No robot is blocked.']);
