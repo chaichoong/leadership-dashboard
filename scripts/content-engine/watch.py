@@ -117,6 +117,33 @@ def receipt_parked(day, root=None):
         return float("inf")
 
 
+APPROVALS = os.path.join(os.path.dirname(LEDGER), "approvals.json")   # approval.py's state; read here, never written
+
+
+def blocked_days(path=None):
+    """{recording day: when it was walled} for every episode whose card the engine blocked for the fixer lane.
+
+    Read straight off approval.py's state file instead of importing it: approval.py imports THIS module, so the
+    redo queue must not depend on it. An unreadable or half-written file means "nothing is blocked", never a
+    crash in the night's plan.
+    """
+    try:
+        with open(path or APPROVALS) as fh:
+            state = json.load(fh)
+    except (OSError, ValueError):
+        return {}
+    out = {}
+    if isinstance(state, dict):
+        for day, e in state.items():
+            blocked = (e or {}).get("redo_blocked") if isinstance(e, dict) else None
+            if isinstance(blocked, dict) and blocked.get("at"):
+                try:
+                    out[int(day)] = blocked["at"]
+                except (TypeError, ValueError):
+                    continue
+    return out
+
+
 REDO_PLAN_FILE = os.path.join(os.path.dirname(LEDGER), "redo_plan.json")   # the order TONIGHT'S plan used
 
 
@@ -156,7 +183,7 @@ def planned_redo_order(path=None, now=None, max_age_h=24):
         return None
 
 
-def redo_order(ledger, exclude=(), start=None, root=None):
+def redo_order(ledger, exclude=(), start=None, root=None, blocked=None):
     """The sent-back days the night may redo, in the order the night takes them.
 
     ONE list, read by plan() here and by render.redo_queue_place() for the report, because two readers of one queue
@@ -176,13 +203,23 @@ def redo_order(ledger, exclude=(), start=None, root=None):
     redo slot every night: day 2106 held the head from 10 Oct, and 2112, 2113, 2114 and 2100 waited 4 to 9 nights
     behind it with nothing draining. `render_failed` is stamped by render.py on every failure and cleared when the
     clip renders, so one bad day costs itself its place rather than the whole queue.
+
+    A day WALLED FOR THE FIXER LANE steps aside for the same reason (finding 20261024-phase-3-1059). A block is
+    the one failure that cannot clear itself: render.block_sent_back writes the TOOL wall and the day keeps its
+    clips at `new` with its receipt still parked, so with neither failure stamp set it held the head of the queue,
+    re-took the single redo slot every night, failed the same way and re-blocked. On 24 Oct 2026 day 2121 did
+    exactly that, and 2122 (117 h), 2112 (94 h) and 2113 (69 h) could not drain behind it until the clip finder's
+    code changed. The block stamp sends it behind the days that can still render; it keeps its place in the queue
+    and comes forward the moment the wall is lifted (render.clear_block clears `redo_blocked`).
     """
+    blocked = blocked_days() if blocked is None else blocked
     def failed_at(d):
-        # The LATEST refusal of either kind, across the day's waiting clips: a flat max over both stamps, never a
-        # tuple of the two (a tuple would sort on the pull stamp first and read a render failure as no failure).
+        # The LATEST refusal of any kind, across the day's waiting clips: a flat max over the stamps, never a
+        # tuple of them (a tuple would sort on the pull stamp first and read a render failure as no failure).
         stamps = [v.get(f) or "" for v in ledger.values()
                   if v.get("day") == d and v.get("status") == "new"
                   for f in ("pull_failed", "render_failed")]
+        stamps.append(blocked.get(d) or "")      # a day the engine walled for the fixer lane cannot clear itself
         return max(stamps) if stamps else ""
     days = {v["day"] for v in ledger.values() if v.get("status") == "new" and v.get("reset")} - set(exclude)
     return sorted((d for d in days if not start or d >= start),
