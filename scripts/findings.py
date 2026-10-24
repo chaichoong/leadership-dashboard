@@ -518,6 +518,12 @@ def _fold_duplicates(state):
             rr["recurrences"].append(dict(rc, **{"from": fid}))
 
 
+def norm_field(v):
+    """One field of a dedupe key: lowercase, alphanumerics and spaces only, whitespace collapsed."""
+    keep = [c if (c.isalnum() or c.isspace()) else " " for c in (v or "").lower()]
+    return " ".join("".join(keep).split())
+
+
 def dedupe_key(routine, title, where):
     """What makes two findings THE SAME finding.
 
@@ -530,15 +536,11 @@ def dedupe_key(routine, title, where):
     Normalise hard: lowercase, collapse whitespace, drop punctuation. A title
     reworded slightly between runs is still the same defect.
     """
-    def norm(v):
-        # Each field is normalised on its OWN, then joined. Normalising the
-        # joined string instead lets the separator glue to a neighbouring token
-        # ("writer!|js" collapses differently from "writer|js"), so two
-        # identical findings get different keys and both are filed.
-        keep = [c if (c.isalnum() or c.isspace()) else " " for c in (v or "").lower()]
-        return " ".join("".join(keep).split())
-
-    return "|".join(norm(v) for v in (routine, title, where))
+    # Each field is normalised on its OWN, then joined. Normalising the
+    # joined string instead lets the separator glue to a neighbouring token
+    # ("writer!|js" collapses differently from "writer|js"), so two
+    # identical findings get different keys and both are filed.
+    return "|".join(norm_field(v) for v in (routine, title, where))
 
 
 # ─── WHEN ONE DEFECT IS FILED SIX TIMES (finding 639, 27 Sep 2026) ───
@@ -689,6 +691,22 @@ def known_match(state, routine, title, where):
         tid = live_target(state, r)
         if tid and dedupe_key(r.get("routine"), r.get("title"), r.get("where")) == key:
             return tid, ""
+    # 1a. Same routine, same TITLE, however the place is worded (finding 20261024-phase-3-1066,
+    #     24 Oct 2026). Rule 1 keys on routine + title + where, so one routine filing one defect
+    #     twice with the place described differently still opened a second finding:
+    #     20261024-phase-3-1064 carried the title of the open 20261023-phase-3-1053
+    #     character-for-character and got a new id anyway. A routine is told it may file freely
+    #     because repeats fold in as recurrences, so a missed fold inflates the backlog, spends
+    #     the filer's cap on copies, and loses the recurrence count that says which defect keeps
+    #     biting. A title is a whole sentence here, so an exact match inside one routine is the
+    #     same defect; an empty title matches nothing.
+    mine = norm_field(title)
+    if mine:
+        for r in state.values():
+            tid = live_target(state, r)
+            if (tid and norm_field(r.get("routine")) == norm_field(routine)
+                    and norm_field(r.get("title")) == mine):
+                return tid, "the same routine already has this exact title open"
     # 1b. Same FILE and same SYMBOL, whatever the routine or the wording. See
     #     the block above code_paths for why this is narrower than "same file"
     #     and why it has to be.

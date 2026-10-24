@@ -268,8 +268,15 @@ def check_km(t, cum, transcript=""):
             own = _nearest(head)
             if own: head = head[own[1]:]
         hit = ("done",) if KM_IN_RE.match(tail) else (_nearest(tail) or _nearest(head, from_end=True))   # nearest word wins (review, 24 Sep 2026)
-        want = left if hit and hit[-1] == "left" else cum
-        issues.append("distance %skm is not the day's Strava figure; corrected to %s" % (raw, fmt_km(want, raw)))
+        to_go = bool(hit and hit[-1] == "left")
+        want = left if to_go else cum
+        # Say WHICH of the two figures was corrected (finding 20261024-phase-3-1060, 24 Oct 2026). Both corrections
+        # shared one wording, so every episode reported two "corrected" distances that cannot both be one distance:
+        # 2132 got 16,383km and 23,692km (they are the covered/remaining pair, and sum to 40,075). The km-remaining
+        # one read as a verified day distance about 5,800km past the whole lifetime total, in philanthropy copy
+        # waiting on Kevin's approval, where the standing rule is accuracy over hype.
+        issues.append("distance %skm is not the episode's %s; corrected to %s"
+                      % (raw, "km left of the 40,075km lap" if to_go else "km covered so far", fmt_km(want, raw)))
         return fmt_km(want, raw)
     return KM_RE.sub(fix, t), issues
 
