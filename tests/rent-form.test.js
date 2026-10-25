@@ -85,7 +85,10 @@ print(json.dumps({"answers": built["answers"], "missing": built["missing"], "pla
     expect(a['Sort code and account number'][0]).toMatch(/^YOURS/);
     // The plan never presses send, never types a secret, and waits for Kevin at his two steps.
     const steps = r.plan.steps;
-    expect(() => b.assertHandoverPlan(r.plan)).not.toThrow();
+    // The clock is PINNED to the fixture's own last good day (25 Oct 2026). It used to read the real clock against a
+    // fixture whose next rent is fixed at 2026-10-25, so the case passed until 24 Oct and failed every day after it,
+    // taking main red and every PR gate with it. The moving-clock behaviour has its own case below, with real dates.
+    expect(() => b.assertHandoverPlan(r.plan, new Date('2026-10-24T09:00:00Z'))).not.toThrow();
     expect(steps.filter(s => s.do === 'kevin').map(s => s.untilSelector)).toEqual(['#f-rentAmount', '[id="f-accountHolder"]']);
     expect(JSON.stringify(steps)).not.toMatch(/sortCode|accountNumber|Accept and send|submit/i);
     expect(steps[steps.length - 1]).toEqual({ do: 'fill', selector: '[id="f-paymentReference"]', value: 'Sample' });
@@ -865,6 +868,9 @@ ad.require_role_agent_live = lambda *a, **k: None
 ad.supersede_attachments = lambda *a, **k: []
 ad.upload_attachment = lambda *a, **k: None
 ad.task_fields_owe_certificate = lambda *a, **k: False
+# Pinned to the fixture's own last good day (25 Oct 2026): handover_ready asks today_london() whether the plan's
+# validUntil has passed, and the fixture's next rent never moves, so the real clock failed this case from 25 Oct on.
+ad.today_london = lambda: "2026-10-24"
 def nope(*a, **k): raise RuntimeError("a test reached a real query")
 ad.query_tasks = nope
 tid = lb.raise_one(rc._Here(), dict(ITEM, arrears=LOW), DAY)
