@@ -23,7 +23,22 @@ PROFILE = "default"                       # the profile the Robot sign-in app si
 PAGE_ID = "61594022462166"                # the Runpreneur page (facebook.com/people/Runpreneur/<id>)
 PAGE_URL = "https://www.facebook.com/%s" % PAGE_ID
 POSTS_URL = PAGE_URL + "/reels"           # where the page's own posts are listed (they publish as reels)
-SHARE_BUTTON = "div[role='button'][aria-label='Share'], span[role='button'][aria-label='Share']"
+# The Share control, as the reels viewer labels it TODAY (measured live on the real page post,
+# 25 Oct 2026, finding 20261025-phase-3-1074). Facebook now writes the share count into the label:
+# "Share, 0 shares". The old exact-match selector `aria-label='Share'` stopped matching anything, so
+# every share since died waiting for it — 19 episodes, and the older "403:13" entries are the SAME
+# failure recorded before the error text was fixed to keep the head of the message (19 Oct 2026).
+#   * `aria-label='Share'` stays for the feed layout, which still uses the bare label.
+#   * `aria-label^='Share, '` catches the counted label. The comma is what keeps it off "Shared with
+#     Public", the other control on the page whose label starts with "Share".
+#   * `>> nth=0` is a SAFETY rule, not a convenience. The reels viewer preloads the NEXT reel below
+#     the fold, so two Share buttons exist and a bare click is a strict-mode error — and the second
+#     one belongs to somebody else's reel (measured: "Share, 0 shares" in view at y=863, ours, and
+#     "Share, 35K shares" off-screen at y=1807, not ours). The reel the URL asked for is always the
+#     first in the DOM, so nth=0 is the one post we may share.
+SHARE_BUTTON = ("div[role='button'][aria-label='Share'], span[role='button'][aria-label='Share'], "
+                "div[role='button'][aria-label^='Share, '], span[role='button'][aria-label^='Share, ']"
+                " >> nth=0")
 SHARE_BOX = "[role='dialog'] [contenteditable='true'], [role='dialog'] [role='textbox']"
 SHARE_NOW = "[role='dialog'] [aria-label='Share now'], [role='dialog'] div[role='button']:has-text('Share now')"
 SHARE_MAX = 400
@@ -256,6 +271,10 @@ def selftest():
     assert [s["do"] for s in live["steps"]][:4] == ["goto", "wait", "click", "wait"], "open the post, wait for Share, click it, wait for the dialog"
     assert post_id("https://www.facebook.com/reel/2551081102055515") == "2551081102055515" and post_id("https://x/") == ""
     assert PAGE_ID in PAGE_URL and POSTS_URL.endswith("/reels") and "aria-label='Share now'" in SHARE_NOW
+    # 25 Oct 2026: the counted label, the bare label, exactly one element, and never "Shared with Public".
+    assert "aria-label^='Share, '" in SHARE_BUTTON and "aria-label='Share']" in SHARE_BUTTON, SHARE_BUTTON
+    assert SHARE_BUTTON.rstrip().endswith(">> nth=0"), "the reels viewer holds two Share buttons; only the first is our reel"
+    assert "[aria-label^='Share']" not in SHARE_BUTTON, "a prefix match without the comma also hits 'Shared with Public'"
     assert "for (const u of urls)" in FIND_JS and "const s = score(txt)" in FIND_JS, "each recent post is opened and matched on its caption"
     js14 = FIND_JS % {"pw": "", "profile": "", "list_url": '""', "words": '[""]', "need": 1, "enough": 12, "scan": SCAN_POSTS, "skip": "[]"}
     assert SCAN_POSTS >= 14 and "slice(0, 14)" in js14, "a week of two-posts-a-day is in reach"

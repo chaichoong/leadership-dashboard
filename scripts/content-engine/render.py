@@ -379,9 +379,47 @@ def is_diary_line(m, text, before=""):
     return not (aside and not LEARN_LEAD_RE.search(lead))
 
 
+# THE LAST RESORT, used only when every route above finds nothing (25 Oct 2026, finding 20261011-phase-3-827).
+#
+# Six literal routes have been added one mis-hearing at a time and the misses keep coming: 11 of the 82 stored
+# Runpreneur transcripts on this Mac produce no window at all, and the days behind them do not just lose their own
+# clip — a day blocked for the fixer lane keeps its receipt parked, so it re-takes the night's single redo slot and
+# starves the queue behind it (2121 on 24 Oct, 2122 on 25 Oct; findings 20261024-phase-3-1059, 20261025-phase-3-1076).
+#
+# What the 11 misses have in common is NOT the word "diary", which whisper destroys in a different way every time
+# ("from my wife", "from a guy", "on my diet", "is for my diocese", "to my day", "experience"). It is the SHAPE of
+# the line: a learnings word, a few words of wreckage, then today. So this route matches the shape and ignores the
+# wreckage:  learn../lesson../latest  +  up to four words  +  today | the day | this day | day to day.
+#
+# Two things keep it safe:
+#   * It is a FALLBACK. lfmd_matches returns it only when the strict routes yield nothing, so it can never move a
+#     clip on a day that already has one. Measured 25 Oct 2026 over all 82 stored transcripts: the 71 days with a
+#     window keep exactly the window they have, and 7 of the 11 with none gain one — 2096 ("learning from my wife
+#     today"), 2097 ("learning from a guy today"), 2121 ("latest on my diet for this day"), 2129 ("learning
+#     experience today"), 2130 ("learnings from a day to day"), 2131 ("learning is for my diocese today") and 2132
+#     ("learning to my day today"). Every one is his real Learnings line, read against the transcript by hand, and
+#     each day offers exactly ONE candidate, so there is nothing to choose wrongly between.
+#   * It only looks in the back of the talk. He says the line at the end, and "what I learned today" said in passing
+#     early on is not it. All seven real lines sit between 68% and 88% of the way through.
+#
+# Still missed, and NOT guessed at here: 2082, 2086, 2095 and 2122, where the line carries no learnings word at all
+# ("So the latest word I say"). Those need the positional guess the finding also asks for, which is a separate change
+# because it needs a way to mark a window as a guess for the output gate.
+LFMD_LOOSE_RE = re.compile(r"(?:learn\w*|lesson\w*|latest)\b(?:[\s,]+\w+){0,4}[\s,]+(?:today|the\s+day|this\s+day|day\s+to\s+day)\b", re.I)
+LFMD_LOOSE_FROM = 0.55                    # how far into the talk the fallback starts looking
+
+
+def lfmd_loose_matches(text):
+    """The shape-only candidates in the back of the talk, in order. Never consulted while a real phrase is found."""
+    return [m for m in LFMD_LOOSE_RE.finditer(text) if text and m.start() >= LFMD_LOOSE_FROM * len(text)]
+
+
 def lfmd_matches(text, before=""):
-    """Every 'Learnings from my diary' phrase in text, in order."""
-    return (m for m in LFMD_START_RE.finditer(text) if is_diary_line(m, text, before))
+    """Every 'Learnings from my diary' phrase in text, in order, and the shape-only fallback when there are none.
+    One reader, so the cutter (lfmd_window) and the output gate (lfmd_said) can never disagree about whether the
+    section is in the episode — two readers of one question is how a correct clip got refused before (2 Oct 2026)."""
+    said = [m for m in LFMD_START_RE.finditer(text) if is_diary_line(m, text, before)]
+    return iter(said or lfmd_loose_matches(text))
 
 
 def lfmd_start(text, before=""):
