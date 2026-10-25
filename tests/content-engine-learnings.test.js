@@ -376,3 +376,61 @@ res = {"window": list(led["c.insv"]["lfmd_window"]), "accepted": led["c.insv"].g
     expect(r.on_disk_when_filed).toEqual([false]);      // the saved ledger had already lost the acceptance
   });
 });
+
+// 25 Oct 2026, finding 20261011-phase-3-827. Whisper destroys the word "diary" a different way every episode, six
+// literal routes had been added one at a time, and 11 of the 82 stored transcripts still produced no window at all.
+// A day with no window is BLOCKED for the fixer lane, keeps its receipt parked, and so re-takes the night's single
+// redo slot every night and starves the queue behind it (2121 on 24 Oct, 2122 on 25 Oct). The fallback matches the
+// SHAPE of the line instead of the wrecked word, and only in the back of the talk, and only when the strict routes
+// find nothing — so no day that already has a clip can move.
+describe('the Learnings cutter falls back to the shape of the line when the word is wrecked', () => {
+  // long enough that the line sits in the back of the talk, where he actually says it
+  const LONG_LEAD = [
+    'Welcome back to consecutive day 2121 of the diary of a Runpreneur',
+    'and today I am talking all about the unexpected dangers of running near waterways',
+    'before we get into that this vlog is part of a fundraiser for saving the lives of children',
+    'so back to the topic at hand the unexpected dangers of running by waterways',
+    'whenever I am travelling I will always try and run near waterways because they are beautiful',
+    'but there are things nobody warns you about and the birds are the first of them',
+    'a lot of people would not realise how dangerous these birds can be at this time of year',
+  ];
+  const LONG_TAIL = ['give the birds plenty of room', 'and plan your route around them', 'thank you as always'];
+  const late = (middle) => py(`res = render.lfmd_window(segs(${J([...LONG_LEAD, ...middle, ...LONG_TAIL])}))`).res;
+  const strictOnly = (lines) => py(`
+t = render.spoken(" ".join(${J(lines)}))
+res = [m.group(0) for m in render.LFMD_START_RE.finditer(t) if render.is_diary_line(m, t)]`).res;
+
+  // Every one of these is a real episode: the line Kevin said, as whisper wrote it down.
+  const WRECKED = [
+    ['2121', 'So ultimately the latest on my diet for this day are that if you run near water'],
+    ['2096', 'And ultimately learning from my wife today is if you struggle to get back into routine'],
+    ['2097', 'So I suppose the learning from a guy today that sometimes you make difficult decisions'],
+    ['2129', 'But the learning experience today is that if you are not familiar with core code'],
+    ['2130', 'So yeah ultimately the learnings from a day to day are there are simple rules of etiquette'],
+    ['2131', 'So ultimately the learning is for my diocese today that if you are an entrepreneur'],
+    ['2132', 'So ultimately the learning to my day today is if you are not already playing with tools'],
+  ];
+  for (const [day, line] of WRECKED) {
+    it(`BACK-TEST: episode ${day}'s wrecked line is cut, and no literal route reaches it`, () => {
+      expect(strictOnly([...LONG_LEAD, line, ...LONG_TAIL])).toEqual([]);   // the bug: nothing matched, so no clip
+      const w = late([line]);
+      expect(w).not.toBe(null);
+      expect(w[0]).toBe(LONG_LEAD.length * 10);                            // and it starts on the line, not earlier
+    });
+  }
+
+  it('CONTROL: a real diary line still wins, so no stored clip moves', () => {
+    // the strict route matches, so the fallback is never consulted even though the later line has its shape
+    const w = late(['So the learnings from my diary today are simple', 'and the learning experience today was an interesting one']);
+    expect(w[0]).toBe(LONG_LEAD.length * 10);
+  });
+
+  it('CONTROL: the shape said in passing early in the talk is not the section', () => {
+    const early = [...LONG_LEAD.slice(0, 2), 'and the learning experience today was to look up', ...LONG_LEAD.slice(2), ...LONG_TAIL];
+    expect(py(`res = render.lfmd_window(segs(${J(early)}))`).res).toBe(null);
+  });
+
+  it('CONTROL: no learnings word at all is still no window, never a guess', () => {
+    expect(late(['So the latest word I say if you are someone who feels overwhelmed'])).toBe(null);
+  });
+});
