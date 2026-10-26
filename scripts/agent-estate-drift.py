@@ -81,6 +81,16 @@ MIN_FILES = 20
 # it cannot match a sentence describing the rule as history. Add a line here in
 # the same change that retires the rule; that is the whole protocol.
 RETIRED = [
+    # The certificate price cap (Decisions/2026-10-19 Delete the certificate booking price cap;
+    # findings 20261020-phase-2-1006 and 20261018-phase-5-976). Every certificate booking is a
+    # card whatever the quote. The four figures survive only as a warning line ON the card, so a
+    # surface that still reads them as a no-card threshold is stale.
+    (r"no card up to gas £100", "2026-10-19",
+     "every certificate booking is a card whatever the quote; the figures are a warning line only"),
+    (r"certificate caps gas £100", "2026-10-19",
+     "they are warning figures, not caps: every certificate booking is a card"),
+    (r"through Roy up to £100, a card above", "2026-10-19",
+     "cheapest of three through Roy, and a card EVERY time whatever the quote"),
     (r"09:15 prospecting", "2026-09-27",
      "the prospecting slot is parked with Operations Director until January 2027"),
     (r"then Mica or Ericamae", "2026-08-25",

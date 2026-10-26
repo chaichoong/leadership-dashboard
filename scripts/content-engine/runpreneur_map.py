@@ -253,14 +253,60 @@ def publish(progress):
     return json.loads(r.stdout)["commit"]["sha"][:7]
 
 
+def feed_stale(latest_run, today):
+    """Why this run must NOT publish, or None when it may. Finding 20261024-phase-2-1063.
+
+    On 24 Oct 2026 the map had not moved for 24 hours, the job's last line read like a success,
+    and nobody could say whether the streak was intact or the feed was dead. A running job is not
+    a working job.
+
+    The signal is the newest run in the data, NOT the change in the published total. A nightly
+    02:00 run normally sees yesterday's run already counted and today's not yet run, so a zero
+    delta is the ordinary case and failing on it would cry wolf every night (25 and 26 Oct 2026
+    both published 17894.04 km, correctly). No run recorded for YESTERDAY or today is the real
+    fault: either Strava stopped feeding us or the streak is broken, and both need a person.
+    """
+    if latest_run is None:
+        return ("no streak run has been recorded at all. Nothing can be said about the streak "
+                "until Strava is read directly.")
+    gap = (today - latest_run).days
+    if gap <= 1:
+        return None
+    return ("the newest run on record is %s, %d days ago. NOT publishing, because a commit that "
+            "repeats yesterday's figure reads as a working run. Read Strava directly: if the runs "
+            "are there, this feed is broken; if they are not, only Kevin can answer the streak "
+            "question." % (latest_run.isoformat(), gap))
+
+
+def latest_run_date(runs):
+    """The newest streak run's date, or None. Dates are ISO strings in the activities file."""
+    best = None
+    for r in runs:
+        d = r.get("date")
+        if not d:
+            continue
+        try:
+            when = dt.date.fromisoformat(str(d)[:10])
+        except ValueError:
+            continue
+        if best is None or when > best:
+            best = when
+    return best
+
+
 def run(publish_it=True):
     added = fetch_new_runs() if publish_it else 0
     features = matching_outlines()
     total_km, raised, days = site_counters()
-    progress = compute(load_runs(), total_km, raised, days, features, page_features=json.load(open(COUNTRIES))["features"])
+    runs = load_runs()
+    progress = compute(runs, total_km, raised, days, features, page_features=json.load(open(COUNTRIES))["features"])
     local = os.path.join(REPO_ROOT, PROGRESS_PATH)
+    newest = latest_run_date(runs)
+    stale = feed_stale(newest, dt.date.today())
     os.makedirs(os.path.dirname(local), exist_ok=True); json.dump(progress, open(local, "w"), indent=1)
-    line = "runpreneur map: day %d, %.2f km (%.1f%% of the lap), %d countries, %d new runs" % (days, total_km, progress["lap_pct"], progress["countries_count"], added)
+    line = "runpreneur map: day %d, %.2f km (%.1f%% of the lap), %d countries, %d new runs, newest run %s" % (days, total_km, progress["lap_pct"], progress["countries_count"], added, newest.isoformat() if newest else "none")
+    if stale and publish_it:
+        raise SystemExit("runpreneur map: STREAK UNCONFIRMED — " + stale + "\n" + line)
     if publish_it:
         sha = publish(progress); line += ", published %s" % sha
     print(line)
@@ -289,7 +335,18 @@ def selftest():
     assert p["runs_counted"] == 2 and p["countries"] == [{"name": "Squareland", "runs": 1}] and p["longest_run"]["km"] == 12.1, "pre-streak runs never count"
     assert p["lap_pct"] == 43.77 and p["equivalent"] == "Cambridge to Tasmania" and p["next_km_milestone"] == 18000 and p["date_of_next_day_milestone"] == "2026-09-18"
     assert p["marker"]["leg"] and len(p["route"]) == len(ROUTE) and p["avg_km_per_day"] == 7.66
-    print(json.dumps({"checks": 12, "failed": []}))
+    # A dead feed or a broken streak fails loudly, and the ordinary nightly zero delta does not
+    # (finding 20261024-phase-2-1063). Back-test: make feed_stale return None and the first two
+    # asserts fail.
+    t = dt.date(2026, 10, 26)
+    assert feed_stale(dt.date(2026, 10, 23), t), "no run for two days is not a success"
+    assert feed_stale(None, t), "no run on record at all is not a success"
+    assert feed_stale(dt.date(2026, 10, 25), t) is None, "yesterday's run is the normal 02:00 case"
+    assert feed_stale(dt.date(2026, 10, 26), t) is None, "a run already in today never blocks"
+    assert latest_run_date([{"date": "2026-10-20"}, {"date": "2026-10-25"}, {}]) == \
+        dt.date(2026, 10, 25), "the newest run wins and a dateless row is skipped"
+    assert latest_run_date([]) is None and latest_run_date([{"date": "not a date"}]) is None
+    print(json.dumps({"checks": 17, "failed": []}))
 
 
 if __name__ == "__main__":

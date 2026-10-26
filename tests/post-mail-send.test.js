@@ -147,8 +147,24 @@ describe('the skill uses the script and gates the archive on it', () => {
     expect(skill).not.toMatch(/osascript -e 'tell application "Mail"/);
   });
 
-  it('refuses to archive the source PDF while any send failed', () => {
-    expect(skill).toMatch(/ONLY once every send returned 0/);
-    expect(skill).toMatch(/do not move the source PDF and do not/);
+  // 26 Oct 2026, finding 20261023-phase-3-1053: the archive rule used to be PROSE in step 6,
+  // pinned here by grepping for its wording, and the step's own shell `mv`/`rm` was refused in
+  // every unattended run — so the rule read as enforced while the step failed weekly. The rule
+  // now lives in scripts/post-archive.py, where tests/post-archive.test.js DRIVES it against a
+  // planted post tree. All this file still has to prove is that the skill routes the archive
+  // through that script instead of moving files itself.
+  it('routes the archive through post-archive.py and never moves the files itself', () => {
+    expect(skill).toMatch(/post-archive\.py archive/);
+    expect(skill).toMatch(/post-archive\.py check/);
+    expect(skill).toMatch(/--result/);
+    // A destructive shell command in step 6 is what an unattended run refuses.
+    expect(skill).not.toMatch(/\bmv\s+"?\/Users\/kevinbrittain\/Library\/CloudStorage/);
+    expect(skill).not.toMatch(/\brm\s+-rf?\b/);
+  });
+
+  it('the archive rule itself is carried by the script, driven by its own test', () => {
+    const archive = readFileSync(join(root, 'scripts/post-archive.py'), 'utf8');
+    expect(archive).toMatch(/REFUSED/);
+    expect(existsSync(join(root, 'tests/post-archive.test.js'))).toBe(true);
   });
 });

@@ -106,6 +106,18 @@ If PDFs are found, process each one through this pipeline:
 2. Ensure subfolders exist: `mkdir -p "/Users/kevinbrittain/Library/CloudStorage/GoogleDrive-kevin@runpreneur.org.uk/My Drive/Post Inbox/Processed" "/Users/kevinbrittain/Library/CloudStorage/GoogleDrive-kevin@runpreneur.org.uk/My Drive/Post Inbox/Split"`
 
 3. For each PDF in the Post Inbox folder ("/Users/kevinbrittain/Library/CloudStorage/GoogleDrive-kevin@runpreneur.org.uk/My Drive/Post Inbox", ignore the Processed/ and Split/ subfolders):
+
+   **First, for each PDF, ask whether it has already been emailed** — a source
+   left behind by a failed archive must never go out twice:
+
+   ```bash
+   python3 /Users/kevinbrittain/Projects/leadership-dashboard/scripts/post-archive.py check --source "<the PDF>"
+   ```
+
+   Exit 3 means it was emailed on an earlier run: do NOT split or email it, and
+   archive it with step 6 (pass the `--result` lines from that earlier run's
+   report, or move it by hand in the next attended session and say so in step 7).
+   Exit 0 means it is new; carry on.
    a. **First try the Read tool** with the `pages` parameter (max 20 pages per request) — this gives you visual access to letterheads, logos, and layout. If the Read tool fails with a `pdftoppm`/poppler error, that's expected on this Mac.
    b. **If the Read tool fails OR the PDF is text-empty (scanned)**, fall back to the bundled Swift OCR helper. It uses the macOS Vision framework so no `brew install` is required:
       ```
@@ -164,14 +176,28 @@ If PDFs are found, process each one through this pipeline:
    booted. Nothing checked the exit code and step 6 archived the PDF anyway,
    so the document read as handled with no email anywhere.
 
-6. Archive — ONLY once every send returned 0. Move the original PDF to
-   "/Users/kevinbrittain/Library/CloudStorage/GoogleDrive-kevin@runpreneur.org.uk/My Drive/Post Inbox/Processed/"
-   and delete the contents of "/Users/kevinbrittain/Library/CloudStorage/GoogleDrive-kevin@runpreneur.org.uk/My Drive/Post Inbox/Split/"
+6. Archive — ONE python3 call, never shell. `scripts/post-archive.py` holds the
+   rule that used to live in this step, and it is the only way to archive:
 
-   **If ANY document's send failed, do not move the source PDF and do not
-   clear Split/.** Leave both where they are so the next run can retry, and
-   name every failed group at the top of the report in step 7. An archived
-   source with no email is the one outcome this step must never produce.
+   ```bash
+   python3 /Users/kevinbrittain/Projects/leadership-dashboard/scripts/post-archive.py archive \
+     --source "<the source PDF>" \
+     --result "<split-1>.pdf=<its exit code>" --result "<split-2>.pdf=<its exit code>"
+   ```
+
+   Pass ONE `--result` per document you emailed in step 5, carrying the exit code
+   `post-mail-send.sh` returned for it. The script moves the source to Processed/
+   and clears Split/ only when every code is 0 and every file in Split/ has a
+   result. It REFUSES (exit 2) and changes nothing otherwise, naming what failed:
+   put that at the top of the report in step 7. It records the source as emailed
+   BEFORE the move, so a source still sitting in the Post Inbox after a failed
+   move is never emailed a second time.
+
+   Why a script (finding 20261023-phase-3-1053, seen 23 and 24 Oct 2026): a
+   destructive `mv`/`rm` is refused in an unattended run, so this step failed
+   every Monday — the post went out and the same post went out again the next
+   week. An archived source with no email, and an emailed source archived twice,
+   are both outcomes this step must never produce.
 
 7. Report a summary: source filename, number of documents found, number of emails sent, and a list of each document (sender, summary, urgency, deadline).
    Write it to `~/knowledge-os/logs/daily-ops/post-passes/post-manager-<date>.md`, never to `monitoring/` (Rule 2).

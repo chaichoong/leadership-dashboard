@@ -35,6 +35,7 @@ Usage:
 """
 import os
 import re
+import shutil
 import subprocess
 import sys
 
@@ -231,6 +232,13 @@ def readers_of(path, reader_roots=READER_ROOTS, repo=None):
     # reader of it. Resolved, so the worktree copy and the main checkout copy both match.
     myself = os.path.realpath(__file__)
 
+    # A stale git worktree is a CHECKOUT, not durable code (finding 20261025-queue-fixer-1080).
+    # Fourteen of them had piled up in the main checkout, each holding its own copy of THIS file,
+    # and every one of those copies quotes the stray path in a comment. So the guard read itself,
+    # fourteen times over, as code that still refers to the copy and refused every delete — which
+    # turned tests/secret-copy-guard.test.js red on main while the guard itself was working.
+    worktrees = os.path.realpath(os.path.join(repo, ".claude", "worktrees"))
+
     args = ["grep", "-r", "-l", "-I", "-F"]
     for d in SKIP_DIRS:
         args += ["--exclude-dir", d]
@@ -247,8 +255,14 @@ def readers_of(path, reader_roots=READER_ROOTS, repo=None):
     hits = []
     for line in (r.stdout or "").splitlines():
         line = line.strip()
-        if line and os.path.realpath(line) != myself:
-            hits.append(line)
+        if not line:
+            continue
+        real_hit = os.path.realpath(line)
+        if real_hit == myself:
+            continue
+        if real_hit.startswith(worktrees + os.sep):
+            continue
+        hits.append(line)
     return hits
 
 
@@ -392,6 +406,22 @@ def selftest():
         open(noisy, "w").write("step 1 ok\nPAT=%s\nstep 2 ok\n" % token)
         assert not is_bare_copy(noisy, token)            # a log that quotes it keeps its record
         assert readers_of(leak, reader_roots=[], repo=code) == []
+
+        # A STALE WORKTREE is not a reader (finding 20261025-queue-fixer-1080). Plant a checkout
+        # under .claude/worktrees holding a copy of THIS file, which quotes the stray path in its
+        # own comments exactly as the real copies do, and the guard must still see nothing reading
+        # the file. Back-test: drop the worktrees filter in readers_of and this assertion fails.
+        stale = os.path.join(code, ".claude", "worktrees", "queue-fixes-2026-10-03", "scripts")
+        os.makedirs(stale)
+        shutil.copyfile(os.path.realpath(__file__),
+                        os.path.join(stale, "secret-copy-guard.py"))
+        open(os.path.join(stale, "note.txt"), "w").write(
+            "quotes %s and %s\n" % (os.path.realpath(leak), os.path.join(
+                os.path.basename(os.path.dirname(os.path.realpath(leak))),
+                os.path.basename(leak))))
+        assert readers_of(leak, reader_roots=[], repo=code) == [], \
+            readers_of(leak, reader_roots=[], repo=code)
+
         open(os.path.join(code, "reader.py"), "w").write(
             "PAT = open(%r).read()\n" % leak)
         assert readers_of(leak, reader_roots=[], repo=code) == [
