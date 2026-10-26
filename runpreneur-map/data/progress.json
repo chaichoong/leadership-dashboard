@@ -7,8 +7,8 @@
   "Bulgaria": "Bulgaria",
   "Andorra": "Andorra",
   "Northern Cyprus": "Turkish Republic of Northern Cyprus",
-  "Malta": "Malta",
   "Netherlands": "Netherlands",
+  "Malta": "Malta",
   "Italy": "Italy",
   "Austria": "Austria",
   "Montenegro": "Montenegro",
@@ -21,15 +21,15 @@
   "United States": "United States of America",
   "Singapore": "Singapore"
  },
- "days": 2338,
- "total_km": 17894.04,
+ "days": 2339,
+ "total_km": 17902.36,
  "lap_km": 40075.0,
- "lap_pct": 44.65,
- "km_left": 22180.96,
+ "lap_pct": 44.67,
+ "km_left": 22172.64,
  "raised": 76840.0,
  "raise_target": 1000000,
  "avg_km_per_day": 7.65,
- "runs_counted": 2436,
+ "runs_counted": 2437,
  "countries_count": 19,
  "countries": [
   {
@@ -57,11 +57,11 @@
    "runs": 13
   },
   {
-   "name": "Malta",
-   "runs": 11
+   "name": "Netherlands",
+   "runs": 12
   },
   {
-   "name": "Netherlands",
+   "name": "Malta",
    "runs": 11
   },
   {
@@ -115,13 +115,13 @@
  },
  "equivalent": "Cambridge to Tasmania",
  "next_km_milestone": 18000,
- "days_to_next_km_milestone": 14,
+ "days_to_next_km_milestone": 13,
  "next_day_milestone": 2400,
- "date_of_next_day_milestone": "2026-12-27",
- "lap_finish_estimate": "2034-10-03",
+ "date_of_next_day_milestone": "2026-12-26",
+ "lap_finish_estimate": "2034-10-01",
  "marker": {
-  "lat": -40.669,
-  "lon": 157.3906,
+  "lat": -40.646,
+  "lon": 157.4951,
   "leg": "Hobart, Tasmania to Auckland"
  },
  "route": [
