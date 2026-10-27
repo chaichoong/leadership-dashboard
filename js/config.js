@@ -550,7 +550,8 @@
         layerRole: 'fld7VonuseNOhkCcw', buyIn: 'fldEvjSCyCQ1NLdWj', cap: 'fldqyRbEeDxDKUupb', reason: 'fldIrdIdrYXKvhktk',
         lastWorn: 'fldc0Wa3pND9EbAI2', notes: 'fldZZULHcZYAFLEEl' };
     const OF = { name: 'fldLpZormElc2HJ3s', planId: 'fldFgSJztt3TCKoEp', option: 'fld6mmKM5Nw7jz3lC', items: 'fldyXeckfm9O39d7o',
-        season: 'fldz3FqdChXD0ZRK5', why: 'fldKVSBHfcHN0U7mW', lastWorn: 'fldyl27uPPhXH7LkL', prevWorn: 'fld4iO9GEkFP0nR4z' };
+        season: 'fldz3FqdChXD0ZRK5', why: 'fldKVSBHfcHN0U7mW', lastWorn: 'fldyl27uPPhXH7LkL', prevWorn: 'fld4iO9GEkFP0nR4z',
+        order: 'fldKIzCbsNESKdwd0' };
     // Weather for the What to wear card when the browser has no location permission: central Cambridge.
     const WEATHER_FALLBACK = { lat: 52.205, lon: 0.119, place: 'Cambridge' };
 

@@ -11,7 +11,7 @@ const WR = { name: 'fldG9hxGddp8ijUwW', type: 'fldnUA7o3eR62r1FW', colour: 'fldb
   usedFor: 'fldqINoZ665Tdmb0V', status: 'fld8Z9QI5pP97cymY', action: 'fldoYeCu7oAqgPZd8', layerRole: 'fld7VonuseNOhkCcw',
   buyIn: 'fldEvjSCyCQ1NLdWj', cap: 'fldqyRbEeDxDKUupb', reason: 'fldIrdIdrYXKvhktk', lastWorn: 'fldc0Wa3pND9EbAI2' };
 const OF = { name: 'fldLpZormElc2HJ3s', option: 'fld6mmKM5Nw7jz3lC', items: 'fldyXeckfm9O39d7o', season: 'fldz3FqdChXD0ZRK5',
-  why: 'fldKVSBHfcHN0U7mW', lastWorn: 'fldyl27uPPhXH7LkL', prevWorn: 'fld4iO9GEkFP0nR4z' };
+  why: 'fldKVSBHfcHN0U7mW', lastWorn: 'fldyl27uPPhXH7LkL', prevWorn: 'fld4iO9GEkFP0nR4z', order: 'fldKIzCbsNESKdwd0' };
 const T_WR = 'tblxcSDis9Tl1dFge', T_OF = 'tblqGdFI6VUH1wUdq';
 
 const piece = (id, name, type, extra = {}) => ({ id, fields: { [WR.name]: name, [WR.type]: type, [WR.status]: 'Own', [WR.swatch]: '#1F2A44', [WR.colour]: 'navy', [WR.usedFor]: ['Work'], ...extra } });
@@ -73,10 +73,10 @@ test.describe('What to wear today', () => {
     expect(realErrors(errors)).toEqual([]);
   });
 
-  test('list order is the order the outfits were added, whatever order the API returns them in', async ({ page }) => {
+  test('list order is the Order field, whatever order the API returns them in', async ({ page }) => {
     const ordered = [...outfits(), outfit('recO5', 'Tee and boots', 'Out casual', ['recTee', 'recJeans', 'recBoots'])]
-      .map((o, i) => ({ id: o.id, createdTime: `2026-10-27T11:2${i}:00.000Z`, fields: { ...o.fields, [OF.lastWorn]: undefined } }));
-    // None worn yet. Added last, returned first: without the sort it would be picked.
+      .map((o, i) => ({ id: o.id, createdTime: '2026-10-27T11:35:16.000Z', fields: { ...o.fields, [OF.lastWorn]: undefined, [OF.order]: i + 1 } }));
+    // None worn yet, all created in the same second (as live). Last in Order, returned first: without the sort it would be picked.
     await open(page, 'home', { fixtures: { outfits: [ordered[4], ordered[2], ordered[1], ordered[3], ordered[0]] } });
     await expect(page.locator('#homeWear .wear-opt', { hasText: 'Out casual' }).locator('.wear-outfit')).toHaveText('Knit and denim', { timeout: 20000 });
   });
